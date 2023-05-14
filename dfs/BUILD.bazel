@@ -1,0 +1,74 @@
+#cc_binary(
+#    name = "status",
+#    hdrs = ["status.h"],
+#    srcs = ["status.cc"],
+#    deps = [
+#      "@absl//absl/status",
+#      "@absl//absl/strings:str_cat",
+#      "@absl//absl/cord",
+#    ],
+#)
+
+cc_library(
+    name = "syscalls",
+    hdrs = [
+      "syscalls.h",
+      "fd.h",
+      "mount.h",
+    ],
+    srcs = [
+      "syscalls.cc",
+      "fd.cc",
+      "mount.cc",
+    ],
+    deps = [
+      "@absl//absl/log",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "fuse",
+    hdrs = ["fuse.h"],
+    srcs = ["fuse.cc"],
+    deps = [
+      ":syscalls",
+      "@absl//absl/status:statusor",
+      "@absl//absl/status",
+      "@absl//absl/log:check",
+      "@absl//absl/log",
+      "@absl//absl/container:flat_hash_set",
+      "@absl//absl/strings:str_format",
+      "@fuse//:fuse_kernel",
+    ],
+)
+
+cc_library(
+    name = "io_uring",
+    hdrs = ["io_uring.h"],
+    srcs = ["io_uring.cc"],
+    deps = [
+      "@absl//absl/status:statusor",
+      "@absl//absl/status",
+      "@uring//:uring",
+    ],
+)
+
+cc_binary(
+    name = "main",
+    srcs = ["main.cc"],
+    deps = [
+      ":io_uring",
+      ":syscalls",
+      ":fuse",
+      "@absl//absl/flags:flag",
+      "@absl//absl/status",
+      "@absl//absl/log",
+      "@absl//absl/log:initialize",
+      "@absl//absl/log:flags",
+      "@absl//absl/flags:parse",
+      "@absl//absl/flags:usage",
+    ],
+)

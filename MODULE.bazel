@@ -1,0 +1,25 @@
+module(name = "diskyphus", version = "0.1")
+
+bazel_dep(name = "abseil-cpp", version = "20230125.1", repo_name="absl")
+
+bazel_dep(name = "libfuse", version="3.14.1", repo_name="fuse")
+local_path_override(
+    module_name = "libfuse",
+    path = "./third_party/libfuse",
+)
+
+bazel_dep(name = "liburing", version="2.3", repo_name="uring")
+local_path_override(
+    module_name = "liburing",
+    path = "./third_party/liburing",
+)
+
+local_path_override(
+    module_name = "linux",
+    path = "./third_party/linux",
+)
+
+local_path_override(
+    module_name = "linux-headers",
+    path = "./third_party/linux-headers",
+)

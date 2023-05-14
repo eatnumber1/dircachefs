@@ -1,0 +1,7 @@
+module(
+  name = "liburing",
+  version = "2.3",
+)
+
+bazel_dep(name = "linux-headers", version="6.3")
+bazel_dep(name = "platforms", version = "0.0.6")

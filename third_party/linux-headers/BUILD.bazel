@@ -1,0 +1,17 @@
+cc_library(
+    name = "asm_headers",
+    hdrs = select({
+        "@platforms//cpu:x86_64": glob(["arch/x86/include/**/*.h"]),
+    }),
+    strip_include_prefix = select({
+        "@platforms//cpu:x86_64": "arch/x86/include",
+    }),
+)
+
+cc_library(
+    name = "headers",
+    hdrs = glob(["include/linux/**/*.h"]),
+    strip_include_prefix = "include",
+    deps = [":asm_headers"],
+    visibility = ["//visibility:public"],
+)
