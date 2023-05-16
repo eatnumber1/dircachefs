@@ -1,3 +1,6 @@
+// TODO remove?
+#define FUSE_USE_VERSION 312
+
 #include "dfs/fuse.h"
 
 #include <cstdlib>
@@ -7,7 +10,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include "fuse/fuse_kernel.h"
 #include "dfs/syscalls.h"
 #include "absl/status/status.h"
 #include "absl/log/check.h"
@@ -18,6 +20,7 @@
 
 namespace dfs {
 
+#if 0
 FuseMount::FuseMount(Mount mount, FileDescriptor fuse_fd)
     : mount_(std::move(mount)), fuse_fd_(std::move(fuse_fd)) {}
 
@@ -78,6 +81,7 @@ absl::Status FuseMount::Handshake() {
   LOG(INFO) << "init_in.flags = " << init_in.flags;
   return absl::OkStatus();
 }
+#endif
 
 #if 0
   absl::StatusOr<fuse_in_header> ReadHeader(int fd) {

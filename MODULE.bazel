@@ -8,6 +8,7 @@ local_path_override(
     path = "./third_party/libfuse",
 )
 
+# TODO replace with https://github.com/envoyproxy/envoy/blob/main/bazel/repositories.bzl#L368
 bazel_dep(name = "liburing", version="2.3", repo_name="uring")
 local_path_override(
     module_name = "liburing",

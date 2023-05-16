@@ -1,0 +1,8 @@
+cc_library(
+  name = "sqlite3",
+  srcs = glob(["sqlite3.c"]),
+  hdrs = glob(["sqlite3.h"]),
+  copts = ["-Wno-unused-function"],
+  include_prefix = "sqlite",
+  visibility = ["//visibility:public"],
+)

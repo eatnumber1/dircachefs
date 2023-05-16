@@ -1,3 +1,5 @@
+#define FUSE_USE_VERSION 312
+
 #include <cstdlib>
 #include <iostream>
 #include <utility>
@@ -5,7 +7,9 @@
 #include <unistd.h>
 
 #include "absl/log/initialize.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
+#include "absl/cleanup/cleanup.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
@@ -13,6 +17,9 @@
 #include "dfs/io_uring.h"
 #include "dfs/syscalls.h"
 #include "dfs/fuse.h"
+#include "dfs/sqlite.h"
+#include "fuse/fuse_lowlevel.h"
+#include "sqlite/sqlite3.h"
 
 ABSL_FLAG(
     uint32_t, io_uring_submission_queue_entries, 128,
@@ -21,6 +28,10 @@ ABSL_FLAG(
     uint32_t, io_uring_completion_queue_entries, 0,
     "The minimum number of entries to fit in the io_uring completion queue. "
     "Automatically determined if 0.");
+ABSL_FLAG(std::string, database, "", "Path to the database file.");
+ABSL_FLAG(bool, db_readonly, false, "Open the database as read-only.");
+// TODO turn into a mkfs command
+ABSL_FLAG(bool, db_create, false, "Create the database if it doesn't already exist.");
 
 namespace dfs {
 
@@ -30,10 +41,37 @@ class Diskyphus {
     IoUring::Options io_uring_opts;
   };
 
-  Diskyphus(Options opts) : opts_(std::move(opts)) {}
+  Diskyphus(Sqlite3 db, Options opts) : db_(std::move(db)), opts_(std::move(opts)) {}
 
+  absl::Status Init(struct fuse_conn_info &conn) {
+    LOG(INFO)
+      << "Fuse connection using kernel protocol version " << conn.proto_major
+      << "." << conn.proto_minor;
+    LOG(INFO) << "Maximum write buffer size is " << conn.max_write;
+    // TODO allow setting this  when `-o max_read=<n>` is used.
+    LOG(INFO) << "Maximum read buffer size is " << conn.max_read;
+    LOG(INFO) << "Maximum readahead is " << conn.max_readahead;
+    LOG(INFO) << "Maximum background requests is " << conn.max_background;
+    LOG(INFO) << "Congestion threshold is " << conn.congestion_threshold;
+    // TODO set FUSE_CAP_EXPORT_SUPPORT
+    return absl::OkStatus();
+  }
+  static_assert(FuseInitOp<Diskyphus>);
+
+  absl::Status Destroy() {
+    LOG(INFO) << "Destroy()";
+    return absl::OkStatus();
+  }
+  static_assert(FuseDestroyOp<Diskyphus>);
+
+  absl::Status Getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *) {
+    LOG(INFO) << "Getattr()";
+    return absl::OkStatus();
+  }
+  static_assert(FuseGetattrOp<Diskyphus>);
+
+#if 0
   absl::Status DoStuff(std::string mountpoint) {
-
     // prctl(PR_SET_IO_FLUSHER, 1, 0, 0, 0);
     //
     // struct rlimit rlimit;
@@ -45,6 +83,7 @@ class Diskyphus {
     absl::StatusOr<IoUring> uring = IoUring::Create(opts_.io_uring_opts);
     if (!uring.ok()) return std::move(uring).status();
 
+#if 0
     LOG(INFO) << "Mounting to " << mountpoint;
     absl::StatusOr<FuseMount> mount = FuseMount::Create(
         std::move(mountpoint),
@@ -54,44 +93,139 @@ class Diskyphus {
             .mount_options = {"default_permissions"},
         });
     if (!mount.ok()) return std::move(mount).status();
+#endif
 
     LOG(INFO) << "Success";
 
     return absl::OkStatus();
   }
+#endif
 
  private:
-
+  Sqlite3 db_;
   const Options opts_;
 };
 
-}  // namespace dfs
-
-int main(int argc, char *argv[]) {
-  absl::SetProgramUsageMessage("[flags] mountpoint");
+absl::StatusOr<int> Main(int argc, char *argv[]) {
+  absl::SetProgramUsageMessage("[flags] -- [fuse_flags [--]] mountpoint");
   std::vector<char*> args = absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
 
-  if (args.size() != 2) {
+  //argc = args.size();
+  //args.push_back(nullptr);
+  //argv = args.data();
+
+  // TODO safe cast args.size()
+  struct fuse_args fuse_args = FUSE_ARGS_INIT(static_cast<int>(args.size()), args.data());
+  absl::Cleanup cleanup_fuse_args = [&fuse_args]() {
+    fuse_opt_free_args(&fuse_args);
+  };
+
+  struct fuse_cmdline_opts fuse_opts;
+  if (fuse_parse_cmdline(&fuse_args, &fuse_opts) != 0) return EXIT_FAILURE;
+  absl::Cleanup cleanup_fuse_opts = [&fuse_opts]() {
+    free(fuse_opts.mountpoint);
+  };
+
+  if (fuse_opts.show_help) {
+    fuse_cmdline_help();
+    fuse_lowlevel_help();
+    return EXIT_SUCCESS;
+  }
+
+  if (fuse_opts.show_version) {
+    std::cerr << "FUSE library version " << fuse_pkgversion() << std::endl;
+    fuse_lowlevel_version();
+    return EXIT_SUCCESS;
+  }
+
+  if (fuse_opts.mountpoint == nullptr) {
     std::cerr << "TODO usage here" << std::endl;
     return EXIT_FAILURE;
   }
 
-  std::string mountpoint(args[1]);
+  std::string database_uri = absl::GetFlag(FLAGS_database);
+  if (database_uri.empty()) {
+    std::cerr << "TODO specify the db path" << std::endl;
+    return EXIT_FAILURE;
+  }
 
-  dfs::Diskyphus dfs({
-    .io_uring_opts {
-      .submission_queue_entries =
-          absl::GetFlag(FLAGS_io_uring_submission_queue_entries),
-      .completion_queue_entries =
-          absl::GetFlag(FLAGS_io_uring_completion_queue_entries),
-    },
-  });
-  absl::Status st = dfs.DoStuff(std::move(mountpoint));
+  int db_open_flags = SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI;
+  if (absl::GetFlag(FLAGS_db_readonly)) {
+    db_open_flags |= SQLITE_OPEN_READONLY;
+  } else {
+    db_open_flags |= SQLITE_OPEN_READWRITE;
+  }
+  if (absl::GetFlag(FLAGS_db_create)) {
+    db_open_flags |= SQLITE_OPEN_CREATE;
+  }
+
+  ASSIGN_OR_RETURN(
+      Sqlite3 db, Sqlite3::Open(database_uri.c_str(), db_open_flags));
+
+  dfs::Diskyphus dfs(
+      std::move(db),
+      {
+        .io_uring_opts {
+          .submission_queue_entries =
+              absl::GetFlag(FLAGS_io_uring_submission_queue_entries),
+          .completion_queue_entries =
+              absl::GetFlag(FLAGS_io_uring_completion_queue_entries),
+        },
+      });
+
+  struct fuse_lowlevel_ops dfs_ops = dfs::AsFuseLowLevelOps<dfs::Diskyphus>();
+  struct fuse_session *fuse_session =
+      fuse_session_new(&fuse_args, &dfs_ops, sizeof(dfs_ops), &dfs);
+  if (fuse_session == nullptr) return EXIT_FAILURE;
+  absl::Cleanup cleanup_fuse_session = [fuse_session]() {
+    fuse_session_destroy(fuse_session);
+  };
+
+  if (fuse_set_signal_handlers(fuse_session) != 0) return EXIT_FAILURE;
+  absl::Cleanup cleanup_fuse_signal_handlers = [fuse_session]() {
+    fuse_remove_signal_handlers(fuse_session);
+  };
+
+  if (fuse_session_mount(fuse_session, fuse_opts.mountpoint) != 0) {
+    return EXIT_FAILURE;
+  }
+  absl::Cleanup cleanup_fuse_mount = [fuse_session]() {
+    fuse_session_unmount(fuse_session);
+  };
+
+  fuse_daemonize(fuse_opts.foreground);
+
+  if (fuse_opts.singlethread) {
+    return fuse_session_loop(fuse_session);
+  }
+
+  struct fuse_loop_config *loop_config = fuse_loop_cfg_create();
+  CHECK_NE(loop_config, nullptr);
+  absl::Cleanup cleanup_loop_config = [loop_config]() {
+    fuse_loop_cfg_destroy(loop_config);
+  };
+  fuse_loop_cfg_set_clone_fd(loop_config, fuse_opts.clone_fd);
+  fuse_loop_cfg_set_idle_threads(loop_config, fuse_opts.max_idle_threads);
+  fuse_loop_cfg_set_max_threads(loop_config, fuse_opts.max_threads);
+  return fuse_session_loop_mt(fuse_session, loop_config);
+
+#if 0
+  absl::Status st = dfs.DoStuff(fuse_opts.mountpoint);
   if (!st.ok()) {
     std::cerr << st << std::endl;
     return EXIT_FAILURE;
   }
+#endif
+}
 
-  return EXIT_SUCCESS;
+}  // namespace dfs
+
+int main(int argc, char *argv[]) {
+  absl::StatusOr<int> ret = dfs::Main(argc, argv);
+  if (!ret.ok()) {
+    std::cerr << ret.status() << std::endl;
+    return EXIT_FAILURE;
+  }
+  return *ret;
 }

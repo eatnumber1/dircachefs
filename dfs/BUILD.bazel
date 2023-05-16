@@ -1,13 +1,14 @@
-#cc_binary(
-#    name = "status",
-#    hdrs = ["status.h"],
-#    srcs = ["status.cc"],
-#    deps = [
-#      "@absl//absl/status",
-#      "@absl//absl/strings:str_cat",
-#      "@absl//absl/cord",
-#    ],
-#)
+cc_library(
+    name = "status",
+    hdrs = ["status.h"],
+    srcs = ["status.cc"],
+    deps = [
+      "@absl//absl/log",
+      "@absl//absl/status",
+      "@absl//absl/strings",
+      "@absl//absl/strings:cord",
+    ],
+)
 
 cc_library(
     name = "syscalls",
@@ -35,13 +36,14 @@ cc_library(
     srcs = ["fuse.cc"],
     deps = [
       ":syscalls",
+      ":status",
       "@absl//absl/status:statusor",
       "@absl//absl/status",
       "@absl//absl/log:check",
       "@absl//absl/log",
       "@absl//absl/container:flat_hash_set",
       "@absl//absl/strings:str_format",
-      "@fuse//:fuse_kernel",
+      "@fuse//:fuse",
     ],
 )
 
@@ -56,6 +58,20 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "sqlite",
+    srcs = ["sqlite.cc"],
+    hdrs = ["sqlite.h"],
+    deps = [
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/log",
+      "@absl//absl/log:check",
+      "@sqlite//:sqlite3",
+    ],
+)
+
 cc_binary(
     name = "main",
     srcs = ["main.cc"],
@@ -63,6 +79,8 @@ cc_binary(
       ":io_uring",
       ":syscalls",
       ":fuse",
+      ":status",
+      ":sqlite",
       "@absl//absl/flags:flag",
       "@absl//absl/status",
       "@absl//absl/log",
@@ -70,5 +88,23 @@ cc_binary(
       "@absl//absl/log:flags",
       "@absl//absl/flags:parse",
       "@absl//absl/flags:usage",
+      "@sqlite//:sqlite3",
+    ],
+)
+
+cc_binary(
+    name = "mkfs",
+    srcs = ["mkfs.cc"],
+    deps = [
+      ":status",
+      ":sqlite",
+      "@absl//absl/flags:flag",
+      "@absl//absl/status",
+      "@absl//absl/log",
+      "@absl//absl/log:initialize",
+      "@absl//absl/log:flags",
+      "@absl//absl/flags:parse",
+      "@absl//absl/flags:usage",
+      "@sqlite//:sqlite3",
     ],
 )
