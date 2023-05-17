@@ -1,1 +1,1 @@
-build --enable_bzlmod --cxxopt='-std=c++20'
+build --enable_bzlmod --cxxopt='-std=c++20' --cxxopt='-Wno-sign-compare' --cxxopt='-Werror' --cxxopt='-Wimplicit-fallthrough'

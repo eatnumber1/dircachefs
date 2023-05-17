@@ -101,6 +101,7 @@ cc_binary(
       "@absl//absl/flags:flag",
       "@absl//absl/status",
       "@absl//absl/log",
+      "@absl//absl/time",
       "@absl//absl/log:initialize",
       "@absl//absl/log:flags",
       "@absl//absl/flags:parse",

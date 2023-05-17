@@ -4,12 +4,14 @@
 #include "dfs/fuse.h"
 
 #include <cstdlib>
+#include <algorithm>
 #include <iostream>
 #include <utility>
 #include <cstdint>
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "absl/base/macros.h"
 #include "dfs/syscalls.h"
 #include "absl/status/status.h"
 #include "absl/log/check.h"
@@ -19,95 +21,148 @@
 #include "absl/strings/str_cat.h"
 
 namespace dfs {
+namespace {
 
-#if 0
-FuseMount::FuseMount(Mount mount, FileDescriptor fuse_fd)
-    : mount_(std::move(mount)), fuse_fd_(std::move(fuse_fd)) {}
-
-absl::StatusOr<FuseMount> FuseMount::Create(
-      std::string mountpoint, Options options) {
-  absl::StatusOr<FileDescriptor> fuse_fd =
-    syscalls::open("/dev/fuse", O_CLOEXEC | O_RDWR);
-  if (!fuse_fd.ok()) return std::move(fuse_fd).status();
-
-  absl::StatusOr<struct stat> dirstat = syscalls::stat(mountpoint.c_str());
-  if (!dirstat.ok()) return std::move(dirstat).status();
-
-  absl::flat_hash_set<std::string> mount_options =
-    std::move(options.mount_options);
-  mount_options.merge(absl::flat_hash_set<std::string>{
-      absl::StrCat("fd=", *(*fuse_fd)),
-      absl::StrFormat("rootmode=%o", (S_IFMT & dirstat->st_mode)),
-      absl::StrCat("user_id=", getuid()),
-      absl::StrCat("group_id=", getgid()),
-  });
-  if (!options.fsname.empty()) {
-    mount_options.insert(absl::StrCat("subtype=", options.fsname));
+int StatusCodeToErrno(absl::StatusCode sc) {
+  switch (sc) {
+    case absl::StatusCode::kOk:
+      return 0;
+    case absl::StatusCode::kInvalidArgument:
+      return EINVAL;
+    case absl::StatusCode::kDeadlineExceeded:
+      return ETIMEDOUT;
+    case absl::StatusCode::kNotFound:
+      return ENOENT;
+    case absl::StatusCode::kAlreadyExists:
+      return EEXIST;
+    case absl::StatusCode::kPermissionDenied:
+      ABSL_FALLTHROUGH_INTENDED;
+    case absl::StatusCode::kUnauthenticated:
+      return EPERM;
+    case absl::StatusCode::kOutOfRange:
+      return ERANGE;
+    case absl::StatusCode::kFailedPrecondition:
+      return EBUSY;
+    case absl::StatusCode::kResourceExhausted:
+      return ENOSPC;
+    case absl::StatusCode::kCancelled:
+      return ECANCELED;
+    case absl::StatusCode::kAborted:
+      return EDEADLK;
+    case absl::StatusCode::kUnimplemented:
+      return ENOSYS;
+    case absl::StatusCode::kUnavailable:
+      return EAGAIN;
+    case absl::StatusCode::kDataLoss:
+      return ENOTRECOVERABLE;
+    case absl::StatusCode::kInternal:
+      return ELIBBAD;
+    case absl::StatusCode::kUnknown:
+      ABSL_FALLTHROUGH_INTENDED;
+    default:
+      return EPROTO;
   }
-
-  std::string opts = absl::StrJoin(mount_options, ",");
-  LOG(INFO) << "Options are " << opts;
-  absl::StatusOr<Mount> mount = syscalls::mount(
-        options.mount_source.c_str(), /*target=*/std::move(mountpoint),
-        /*filesystemtype=*/"fuse",
-        /*flags=*/0, opts.c_str());
-  if (!mount.ok()) return std::move(mount).status();
-
-  FuseMount fuse_mount(*std::move(mount), *std::move(fuse_fd));
-
-  if (absl::Status st = fuse_mount.Handshake(); !st.ok()) return st;
-
-  return fuse_mount;
 }
 
-absl::Status FuseMount::Handshake() {
-  char buf[FUSE_MIN_READ_BUFFER];
-  absl::StatusOr<size_t> nb = syscalls::read(*fuse_fd_, buf, sizeof(buf));
-  if (!nb.ok()) return std::move(nb).status();
-  CHECK_NE(*nb, 0ul);
+}  // namespace
 
-  auto &header = *reinterpret_cast<fuse_in_header*>(buf);
+std::vector<char> FuseDirEntry::GetDirEntryBuffer(fuse_req_t req, std::span<FuseDirEntry> entries) {
+  size_t bufsiz = 0;
+  for (const FuseDirEntry &entry : entries) {
+    // TODO rewrite this to have an initial buffer size
+    bufsiz += fuse_add_direntry(req, /*buf=*/nullptr, /*bufsize=*/0, entry.name.c_str(), &entry.stbuf, entry.off);
+  }
 
-  CHECK_EQ(header.opcode, FUSE_INIT);
-  //CHECK_GE(header.len, sizeof(fuse_in_header) + sizeof(fuse_init_in));
-  LOG(INFO) << "Got header";
-
-  auto &init_in = *reinterpret_cast<fuse_init_in*>(buf + sizeof(fuse_in_header));
-  CHECK_EQ(init_in.major, 7u);
-  CHECK_EQ(init_in.minor, 34u);
-  //absl::StatusOr<fuse_init_in> init_in = ReadInit(fd);
-  //if (!init_in.ok()) return std::move(init_in).status();
-  LOG(INFO) << "init_in.max_readahead = " << init_in.max_readahead;
-  LOG(INFO) << "init_in.flags = " << init_in.flags;
-  return absl::OkStatus();
+  std::vector<char> bufvec;
+  bufvec.resize(bufsiz);
+  char *buf = bufvec.data();
+  for (const FuseDirEntry &entry : entries) {
+    size_t adv = fuse_add_direntry(req, buf, bufsiz, entry.name.c_str(), &entry.stbuf, entry.off);
+    CHECK_LE(adv, bufsiz);
+    buf += adv;
+    bufsiz -= adv;
+  }
+  return bufvec;
 }
-#endif
 
-#if 0
-  absl::StatusOr<fuse_in_header> ReadHeader(int fd) {
-    // FUSE_MIN_READ_BUFFER
-    // TODO allow configuring buffer size up to
-    // https://github.com/libfuse/libfuse/blob/36c2250d1098253f74e670be09f35c2dde642b2a/lib/fuse_lowlevel.c#L2010
-    fuse_in_header header;
-    absl::StatusOr<size_t> nb = syscalls::read(fd, &header, sizeof(header));
-    if (!nb.ok()) return std::move(nb).status();
-    CHECK_EQ(*nb, sizeof(header)) << "Didn't read a full fuse_in_header";
-    return header;
-  }
+FuseRequest::FuseRequest(fuse_req_t req) : req_(std::move(req)) {}
 
-  absl::StatusOr<fuse_init_in> ReadInit(int fd) {
-    absl::StatusOr<fuse_in_header> header = ReadHeader(fd);
-    if (!header.ok()) return std::move(header).status();
-    CHECK_EQ(header->len, sizeof(fuse_in_header) + sizeof(fuse_init_in));
-    CHECK_EQ(header->opcode, FUSE_INIT);
-    LOG(INFO) << "Got header";
+fuse_req_t &FuseRequest::operator*() { return *req_; }
+fuse_req_t &FuseRequest::Get() { return *req_; }
 
-    fuse_init_in init;
-    absl::StatusOr<size_t> nb = syscalls::read(fd, &init, sizeof(init));
-    if (!nb.ok()) return std::move(nb).status();
-    CHECK_EQ(*nb, sizeof(init)) << "Didn't read a full fuse_init_in";
-    return init;
-  }
-#endif
+FuseRequest::FuseRequest(FuseRequest &&o)
+    : FuseRequest() {
+  *this = std::move(o);
+}
+
+FuseRequest &FuseRequest::operator=(FuseRequest &&o) {
+  using std::swap;
+  swap(req_, o.req_);
+  return *this;
+}
+
+FuseRequest::~FuseRequest() {
+  if (!req_) return;
+  // TODO imporve this warning
+  LOG(WARNING) << "Replying to FuseRequest in destructor";
+  absl::Status st = ReplyErrno(ECOMM);
+  LOG_IF(ERROR, !st.ok()) << "Failed to send reply: " << st;
+}
+
+absl::Status FuseRequest::ReplyAttr(
+    const struct stat &attr, absl::Duration attr_timeout) {
+  if (!req_) return absl::OkStatus();
+  absl::Status st = absl::ErrnoToStatus(
+      -fuse_reply_attr(*req_, &attr, absl::ToDoubleSeconds(attr_timeout)),
+      "fuse_reply_attr");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyOpen(const fuse_file_info &fi) {
+  if (!req_) return absl::OkStatus();
+  absl::Status st =
+    absl::ErrnoToStatus(-fuse_reply_open(*req_, &fi), "fuse_reply_open");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyErrno(int errnum) {
+  if (!req_) return absl::OkStatus();
+  absl::Status st =
+    absl::ErrnoToStatus(-fuse_reply_err(*req_, errnum), "fuse_reply_err");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyFailure(const absl::Status &status) {
+  CHECK(!status.ok()) << status;
+  if (!req_) return absl::OkStatus();
+  absl::Status st = ReplyErrno(StatusCodeToErrno(status.code()));
+  req_ = std::nullopt;
+  return st;
+}
+
+void FuseRequest::ReplyFailureAndLogIfNotOk(const absl::Status &status) {
+  if (status.ok()) return;
+  LOG(ERROR) << status;
+  absl::Status reply_s = ReplyFailure(status);
+  LOG_IF(WARNING, !reply_s.ok()) << "Failed to reply with failure: " << reply_s;
+}
+
+absl::Status FuseRequest::ReplyBuf(std::string_view buf) {
+  if (!req_) return absl::OkStatus();
+  absl::Status st =
+    absl::ErrnoToStatus(
+        -fuse_reply_buf(*req_, buf.data(), buf.size()),
+        "fuse_reply_buf");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyDirs(std::span<FuseDirEntry> entries, size_t maxsize) {
+  std::vector<char> buf = FuseDirEntry::GetDirEntryBuffer(*req_, entries);
+  return ReplyBuf({buf.data(), std::min(buf.size(), maxsize)});
+}
 
 }  // namespace dfs

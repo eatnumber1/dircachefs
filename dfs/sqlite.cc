@@ -108,15 +108,14 @@ absl::Status Sqlite3::Exec(
     std::optional<
       absl::FunctionRef<
         absl::Status(
-          int ncols,
           const std::vector<std::string_view> &colnames,
           std::vector<std::string_view> colvals)>>
       callback,
     unsigned int flags) {
   if (!callback) {
     callback.emplace(
-        [](int ncols, const std::vector<std::string_view> &colnames,
-           std::vector<std::string_view> colvals) -> absl::Status {
+        [](const std::vector<std::string_view> &,
+           std::vector<std::string_view>) -> absl::Status {
           return absl::OkStatus();
         });
   }
@@ -153,7 +152,7 @@ absl::Status Sqlite3::Exec(
       colvals.emplace_back(reinterpret_cast<const char *>(colval), colval_len);
     }
 
-    RETURN_IF_ERROR((*callback)(ncols, colnames, std::move(colvals)));
+    RETURN_IF_ERROR((*callback)(colnames, std::move(colvals)));
   }
 
   return absl::OkStatus();

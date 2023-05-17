@@ -31,7 +31,6 @@ class Sqlite3 {
       std::optional<
         absl::FunctionRef<
           absl::Status(
-            int ncols,
             const std::vector<std::string_view> &colnames,
             std::vector<std::string_view> colvals)>>
         callback = std::nullopt,

@@ -1,11 +1,13 @@
 #define FUSE_USE_VERSION 312
 
+#include <sys/stat.h>
 #include <cstdlib>
 #include <iostream>
 #include <utility>
 #include <cstdint>
 #include <unistd.h>
 
+#include "absl/time/time.h"
 #include "absl/log/initialize.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
@@ -32,6 +34,7 @@ ABSL_FLAG(std::string, database, "", "Path to the database file.");
 ABSL_FLAG(bool, db_readonly, false, "Open the database as read-only.");
 // TODO turn into a mkfs command
 ABSL_FLAG(bool, db_create, false, "Create the database if it doesn't already exist.");
+ABSL_FLAG(absl::Duration, kernel_entry_timeout, absl::ZeroDuration(), "How long the kernel can cache fs entries (files and directories).");
 
 namespace dfs {
 
@@ -39,6 +42,7 @@ class Diskyphus {
  public:
   struct Options {
     IoUring::Options io_uring_opts;
+    absl::Duration kernel_entry_timeout = absl::ZeroDuration();
   };
 
   Diskyphus(Sqlite3 db, Options opts) : db_(std::move(db)), opts_(std::move(opts)) {}
@@ -64,11 +68,73 @@ class Diskyphus {
   }
   static_assert(FuseDestroyOp<Diskyphus>);
 
-  absl::Status Getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *) {
-    LOG(INFO) << "Getattr()";
-    return absl::OkStatus();
+  absl::Status Getattr(FuseRequest &req, fuse_ino_t ino) {
+    LOG(INFO) << "Getattr() ino:" << ino;
+    struct stat attrs = {
+      .st_ino = ino,
+    };
+    RETURN_IF_ERROR(db_.Exec(
+        R"(
+          SELECT inode
+          FROM dfs_entries
+          WHERE inode = 0
+        )",
+        [&attrs](const std::vector<std::string_view> &,
+                 std::vector<std::string_view> colvals) {
+          CHECK_EQ(colvals.size(), 1);
+          LOG(INFO) << "got inode " << colvals[0];
+          return absl::OkStatus();
+        }));
+    attrs.st_mode = S_IFDIR | 0755;
+    attrs.st_nlink = 2;
+    return req.ReplyAttr(attrs, opts_.kernel_entry_timeout);
   }
   static_assert(FuseGetattrOp<Diskyphus>);
+
+  absl::Status Opendir(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+    LOG(INFO) << "Opendir() ino:" << ino;
+    return req.ReplyOpen(fi);
+  }
+  static_assert(FuseGetattrOp<Diskyphus>);
+
+  absl::Status Readdir(FuseRequest &req, fuse_ino_t ino, size_t size, off_t off, fuse_file_info &fi) {
+    LOG(INFO) << "Readdir() ino:" << ino << ", off:" << off << ", size:" << size;
+    // TODO change to use fuse_reply_data
+
+    if (off == 5) {
+      return req.ReplyBuf({nullptr, 0});
+    }
+
+    std::vector<FuseDirEntry> dirs {
+      {
+        .name = ".",
+        .stbuf = {
+          .st_ino = ino,
+          .st_mode = S_IFDIR,
+        },
+        .off = 3,  // TODO
+      },
+      {
+        .name = "..",
+        .stbuf = {
+          .st_ino = 4,
+          .st_mode = S_IFDIR,
+        },
+        .off = 4,  // TODO
+      },
+      {
+        .name = "hello",
+        .stbuf = {
+          .st_ino = 5,
+          .st_mode = S_IFMT,
+        },
+        .off = 5,  // TODO
+      },
+    };
+
+    return req.ReplyDirs(dirs, /*maxsize=*/size);
+  }
+  static_assert(FuseReaddirOp<Diskyphus>);
 
 #if 0
   absl::Status DoStuff(std::string mountpoint) {
@@ -172,6 +238,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
           .completion_queue_entries =
               absl::GetFlag(FLAGS_io_uring_completion_queue_entries),
         },
+        .kernel_entry_timeout = absl::GetFlag(FLAGS_kernel_entry_timeout),
       });
 
   struct fuse_lowlevel_ops dfs_ops = dfs::AsFuseLowLevelOps<dfs::Diskyphus>();

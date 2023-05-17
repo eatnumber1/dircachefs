@@ -3,6 +3,7 @@
 #include <utility>
 #include <cstdint>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include "absl/log/initialize.h"
 #include "absl/log/check.h"
@@ -40,9 +41,15 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // TODO move to separate file and syntax check+lint?
   RETURN_IF_ERROR(db.Exec(R"(
     CREATE TABLE dfs_entries (
-      inode INTEGER PRIMARY KEY,
+      inode INTEGER PRIMARY KEY NOT NULL,
       name TEXT NOT NULL
     )
+  )"));
+  // Create the root of the filesystem
+  // TODO replace mode with S_IFDIR|0755
+  RETURN_IF_ERROR(db.Exec(R"(
+    INSERT INTO dfs_entries (inode, name)
+    VALUES (1, "")
   )"));
 
   return EXIT_SUCCESS;
