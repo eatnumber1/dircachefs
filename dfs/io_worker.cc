@@ -18,10 +18,10 @@ UserIoWorkerThread::~UserIoWorkerThread() {
 UserIoWorkerThread::UserIoWorkerThread(
     const UblkDevice &device, int queue_id,
     std::promise<absl::Status> result_promise)
-    : device_(device), queue_id_(queue_id),
+    : device_(device),
       result_(result_promise.get_future()),
       // TODO thread creation can throw an exception. Convert to Status
-      thread_(&UserIoWorkerThread::ThreadMain, this, std::move(result_promise))
+      thread_(&UserIoWorkerThread::ThreadMain, this, queue_id, std::move(result_promise))
 {
   // TODO make this configurable
   absl::Status st = syscalls::pthread_setschedparam(
@@ -41,35 +41,35 @@ absl::Status UserIoWorkerThread::Join() {
   return result_.get();
 }
 
-void UserIoWorkerThread::ThreadMain(std::promise<absl::Status> result) {
-  result.set_value(Run());
+void UserIoWorkerThread::ThreadMain(int queue_id, std::promise<absl::Status> result) {
+  result.set_value(Run(queue_id));
 }
 
-absl::Status UserIoWorkerThread::Run() {
-  const struct ublksrv_dev *dev = device_.Get();
-  const struct ublksrv_ctrl_dev_info *dinfo = &device_.GetInfo();
-  unsigned dev_id = dinfo->dev_id;
-  unsigned short q_id = queue_id_;
-  const struct ublksrv_queue *q;
+absl::Status UserIoWorkerThread::Run(int queue_id) {
+  ASSIGN_OR_RETURN(auto queue, UblkQueue::Create(*device_, queue_id));
 
-  q = ublksrv_queue_init(dev, q_id, NULL);
-  if (!q) {
-    fprintf(stderr, "ublk dev %d queue %d init queue failed\n",
-        dinfo->dev_id, q_id);
-    // TODO
-    return absl::UnknownError("ublksrv_queue_init");
+  LOG(INFO)
+    << "Queue " << queue->q_id << " for device "
+    << device_.GetInfo().dev_id << " started on thread " << gettid();
+
+  int num_events = 0;
+  while (true) {
+    absl::StatusOr<int> processed = queue.ProcessIo();
+    if (!processed.ok()) {
+      if (absl::StatusOr<int> eno = GetErrnoFromStatus(processed.status());
+          eno.ok() && *eno == ENODEV) {
+        // We're shutting down gracefully.
+        break;
+      }
+      return std::move(processed).status();
+    }
+    num_events += *processed;
   }
 
-  fprintf(stdout, "tid %d: ublk dev %d queue %d started\n",
-      ublksrv_gettid(),
-      dev_id, q->q_id);
-  do {
-    if (ublksrv_process_io(q) < 0)
-      break;
-  } while (1);
-
-  fprintf(stdout, "ublk dev %d queue %d exited\n", dev_id, q->q_id);
-  ublksrv_queue_deinit(q);
+  LOG(INFO)
+    << "Queue " << queue->q_id << " for device "
+    << device_.GetInfo().dev_id << " on thread " << gettid()
+    << " processed " << num_events << " events and is shutting down.";
   return absl::OkStatus();
 }
 

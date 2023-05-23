@@ -31,13 +31,12 @@ class UserIoWorkerThread {
       const UblkDevice &device, int queue_id,
       std::promise<absl::Status> result_promise);
 
-  void ThreadMain(std::promise<absl::Status> result);
-  absl::Status Run();
+  void ThreadMain(int queue_id, std::promise<absl::Status> result);
+  absl::Status Run(int queue_id);
 
   pthread_t GetThreadHandle();
 
   const UblkDevice &device_;
-  int queue_id_;
   std::future<absl::Status> result_;
   std::thread thread_;
 };

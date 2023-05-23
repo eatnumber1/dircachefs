@@ -71,6 +71,7 @@ UblkDevice &UblkDevice::operator=(UblkDevice &&o) {
 
 const ublksrv_dev *UblkDevice::Get() const { return dev_; }
 const ublksrv_dev &UblkDevice::operator*() const { return *dev_; }
+const ublksrv_dev *UblkDevice::operator->() const { return dev_; }
 UblkDevice::operator bool() const { return dev_ != nullptr; }
 
 UblkDevice::~UblkDevice() {
@@ -99,5 +100,43 @@ const ublksrv_ctrl_dev_info &UblkDevice::GetInfo() const {
 }
 
 ublksrv_ctrl_dev &UblkDevice::GetControlDevice() { return *ctrl_; }
+
+UblkQueue::~UblkQueue() {
+  if (queue_ == nullptr) return;
+  ublksrv_queue_deinit(queue_);
+}
+
+absl::StatusOr<UblkQueue> UblkQueue::Create(
+    const ublksrv_dev &dev, unsigned short queue_id) {
+  // TODO what do I do with queue_data?
+  const ublksrv_queue *queue = ublksrv_queue_init(
+      &dev, queue_id, /*queue_data=*/nullptr);
+  if (queue == nullptr) return absl::UnknownError("ublksrv_queue_init");
+  return UblkQueue(*queue);
+}
+
+UblkQueue::UblkQueue(const ublksrv_queue &queue) : queue_(&queue) {}
+
+UblkQueue::UblkQueue(UblkQueue &&o)
+    : UblkQueue() {
+  *this = std::move(o);
+}
+
+UblkQueue &UblkQueue::operator=(UblkQueue &&o) {
+  using std::swap;
+  swap(queue_, o.queue_);
+  return *this;
+}
+
+const ublksrv_queue *UblkQueue::Get() const { return queue_; }
+const ublksrv_queue &UblkQueue::operator*() const { return *queue_; }
+const ublksrv_queue *UblkQueue::operator->() const { return queue_; }
+UblkQueue::operator bool() const { return queue_ != nullptr; }
+
+absl::StatusOr<int> UblkQueue::ProcessIo() {
+  int processed = ublksrv_process_io(queue_);
+  if (processed < 0) return ErrnoToStatus(-processed, "ublksrv_process_io");
+  return processed;
+}
 
 }  // dfs

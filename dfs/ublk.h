@@ -19,12 +19,8 @@ class UblkDevice {
   // TODO remove from API
   ublksrv_ctrl_dev &GetControlDevice();
 
-  // ctrl is retained but not owned. Must outlive this object.
   static absl::StatusOr<UblkDevice> Create(Options opts);
   absl::Status Delete();
-
-  absl::Status Start();
-  absl::Status Stop();
 
   UblkDevice(UblkDevice &&);
   UblkDevice(const UblkDevice &) = delete;
@@ -33,6 +29,7 @@ class UblkDevice {
 
   const ublksrv_dev *Get() const;
   const ublksrv_dev &operator*() const;
+  const ublksrv_dev *operator->() const;
   operator bool() const;
 
  private:
@@ -44,6 +41,33 @@ class UblkDevice {
 
   ublksrv_ctrl_dev *ctrl_ = nullptr;
   const ublksrv_dev *dev_ = nullptr;
+};
+
+class UblkQueue {
+ public:
+  UblkQueue() = default;
+  ~UblkQueue();
+
+  // dev is retained but not owned. Must outlive this object.
+  static absl::StatusOr<UblkQueue> Create(
+      const ublksrv_dev &dev, unsigned short queue_id);
+
+  absl::StatusOr<int> ProcessIo();
+
+  UblkQueue(UblkQueue &&);
+  UblkQueue(const UblkQueue &) = delete;
+  UblkQueue &operator=(UblkQueue &&);
+  UblkQueue &operator=(const UblkQueue &) = delete;
+
+  const ublksrv_queue *Get() const;
+  const ublksrv_queue &operator*() const;
+  const ublksrv_queue *operator->() const;
+  operator bool() const;
+
+ private:
+  UblkQueue(const ublksrv_queue &queue);
+
+  const ublksrv_queue *queue_ = nullptr;
 };
 
 }  // namespace dfs

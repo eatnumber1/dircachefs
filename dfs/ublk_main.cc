@@ -189,7 +189,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   {
     signalfd_siginfo fdsi;
     RETURN_IF_ERROR(syscalls::read(*sigfd, &fdsi, sizeof(fdsi)));
-    std::cerr << "got signal " << fdsi.ssi_signo << std::endl;
+    LOG(INFO) << "got signal " << fdsi.ssi_signo;
     ublksrv_ctrl_stop_dev(&dev.GetControlDevice());
   }
 
