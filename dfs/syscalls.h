@@ -4,6 +4,8 @@
 #include <string>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/signalfd.h>
+#include <signal.h>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -28,7 +30,42 @@ absl::Status umount(dfs::Mount mount, int flags = 0);
 
 absl::StatusOr<struct stat> stat(const char *pathname);
 
+absl::Status sigaction(
+    int signum,
+    const struct sigaction *act = nullptr,
+    struct sigaction *oldact = nullptr);
+
+absl::StatusOr<dfs::FileDescriptor> signalfd(
+    const sigset_t &mask, int flags = 0);
+absl::Status signalfd(int fd, const sigset_t &mask, int flags = 0);
+
+absl::Status sigprocmask(
+    int how, const sigset_t *set, sigset_t *oldset = nullptr);
+
+absl::Status pthread_sigmask(
+    int how, const sigset_t *set, sigset_t *oldset = nullptr);
+
 }  // namespace syscalls
+
+// Mask a set of signals (ala pthread_sigmask) and unmask them at destruction.
+class ScopedSignalMask {
+ public:
+  ScopedSignalMask() = default;
+  static absl::StatusOr<ScopedSignalMask> Create(int how, const sigset_t &set);
+
+  ScopedSignalMask(ScopedSignalMask &&);
+  ScopedSignalMask(const ScopedSignalMask &) = delete;
+  ScopedSignalMask &operator=(ScopedSignalMask &&);
+  ScopedSignalMask &operator=(const ScopedSignalMask &) = delete;
+
+  ~ScopedSignalMask();
+
+ private:
+  ScopedSignalMask(sigset_t oldset);
+
+  bool valid_ = false;
+  sigset_t oldset_;
+};
 }  // namespace dfs
 
 #endif  // DFS_SYSCALLS_H_

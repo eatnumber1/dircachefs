@@ -112,23 +112,23 @@ class Diskyphus {
           .st_ino = ino,
           .st_mode = S_IFDIR,
         },
-        .off = 3,  // TODO
+        .off = 1,  // TODO
       },
       {
         .name = "..",
         .stbuf = {
-          .st_ino = 4,
+          .st_ino = 2,
           .st_mode = S_IFDIR,
         },
-        .off = 4,  // TODO
+        .off = 2,  // TODO
       },
       {
-        .name = "hello",
+        .name = "file",
         .stbuf = {
-          .st_ino = 5,
-          .st_mode = S_IFMT,
+          .st_ino = 3,
+          .st_mode = S_IFBLK,
         },
-        .off = 5,  // TODO
+        .off = 3,  // TODO
       },
     };
 

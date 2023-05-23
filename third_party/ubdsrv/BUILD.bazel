@@ -1,0 +1,46 @@
+cc_library(
+  name = "libublksrv",
+  visibility = ["//visibility:public"],
+  hdrs = [
+    "include/ublksrv.h",
+    "include/ublk_cmd.h",
+    "include/ublksrv_aio.h",
+    "include/ublksrv_utils.h",
+  ],
+  copts = [
+    # for config.h
+    "-isystem", "third_party/ubdsrv",
+    "-DUBLKSRV_INTERNAL_H_",
+  ],
+  deps = [
+      "@uring//:uring",
+  ],
+  srcs = [
+    "@diskyphus//third_party/ubdsrv:config.h",
+    "include/ublksrv_priv.h",
+    "include/nlohmann/json.hpp",
+    "lib/ublksrv_cmd.c",
+    "lib/ublksrv_json.cpp",
+    "lib/ublksrv.c",
+    "lib/utils.c",
+    "lib/ublksrv_aio.c",
+  ],
+  strip_include_prefix = "include",
+  include_prefix = "ublksrv",
+  includes = ["include"],
+)
+
+cc_binary(
+  name = "demo_null",
+  srcs = [
+    "demo_null.c",
+  ],
+  # for config.h
+  copts = ["-isystem", "third_party/ubdsrv"],
+  deps = [":libublksrv"],
+)
+
+exports_files(
+  ["config.h"],
+  visibility = ["@ubdsrv//:__subpackages__"],
+)

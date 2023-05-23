@@ -3,7 +3,11 @@
 #include <unistd.h>
 #include <cerrno>
 #include <fcntl.h>
+#include <signal.h>
 #include <sys/mount.h>
+
+#include "dfs/status.h"
+#include "absl/log/log.h"
 
 namespace dfs {
 namespace syscalls {
@@ -59,5 +63,64 @@ absl::Status umount(dfs::Mount mount, int flags) {
   return absl::OkStatus();
 }
 
+absl::Status sigaction(
+    int signum, const struct sigaction *act, struct sigaction *oldact) {
+  if (int rc = ::sigaction(signum, act, oldact); rc != 0) {
+    return absl::ErrnoToStatus(errno, "sigaction");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<dfs::FileDescriptor> signalfd(const sigset_t &mask, int flags) {
+  int fd = ::signalfd(/*fd=*/-1, &mask, flags);
+  if (fd == -1) return absl::ErrnoToStatus(errno, "signalfd");
+  return dfs::FileDescriptor(fd);
+}
+
+absl::Status signalfd(int fd, const sigset_t &mask, int flags) {
+  errno = 0;
+  ::signalfd(fd, &mask, flags);
+  return absl::ErrnoToStatus(errno, "signalfd");
+}
+
+absl::Status sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
+  errno = 0;
+  ::sigprocmask(how, set, oldset);
+  return absl::ErrnoToStatus(errno, "sigprocmask");
+}
+
+absl::Status pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
+  return absl::ErrnoToStatus(
+      ::pthread_sigmask(how, set, oldset), "pthread_sigmask");
+}
+
 }  // namespace syscalls
+
+absl::StatusOr<ScopedSignalMask> ScopedSignalMask::Create(int how, const sigset_t &set) {
+  sigset_t oldset;
+  RETURN_IF_ERROR(syscalls::pthread_sigmask(how, &set, &oldset));
+  return ScopedSignalMask(std::move(oldset));
+}
+
+ScopedSignalMask::ScopedSignalMask(ScopedSignalMask &&o)
+    : ScopedSignalMask() {
+  *this = std::move(o);
+}
+
+ScopedSignalMask &ScopedSignalMask::operator=(ScopedSignalMask &&o) {
+  using std::swap;
+  swap(valid_, o.valid_);
+  swap(oldset_, o.oldset_);
+  return *this;
+}
+
+ScopedSignalMask::ScopedSignalMask(sigset_t oldset)
+    : valid_(true), oldset_(std::move(oldset)) {}
+
+ScopedSignalMask::~ScopedSignalMask() {
+  if (!valid_) return;
+  absl::Status st = syscalls::pthread_sigmask(SIG_SETMASK, &oldset_);
+  LOG_IF(WARNING, !st.ok()) << "Failed to restore signal disposition " << st;
+}
+
 }  // namespace dfs

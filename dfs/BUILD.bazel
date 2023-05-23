@@ -1,12 +1,16 @@
 cc_library(
     name = "status",
     hdrs = ["status.h"],
-    srcs = ["status.cc"],
+    srcs = [
+      "status.cc",
+      "errno.cc",
+    ],
     deps = [
-      "@absl//absl/log",
       "@absl//absl/status",
+      "@absl//absl/status:statusor",
       "@absl//absl/strings",
       "@absl//absl/strings:cord",
+      "@absl//absl/container:flat_hash_map",
     ],
 )
 
@@ -23,6 +27,7 @@ cc_library(
       "mount.cc",
     ],
     deps = [
+      ":status",
       "@absl//absl/log",
       "@absl//absl/status",
       "@absl//absl/status:statusor",
@@ -107,5 +112,57 @@ cc_binary(
       "@absl//absl/flags:parse",
       "@absl//absl/flags:usage",
       "@sqlite//:sqlite3",
+    ],
+)
+
+cc_library(
+    name = "ublk",
+    srcs = ["ublk.cc"],
+    hdrs = ["ublk.h"],
+    deps = [
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/log",
+      "@absl//absl/log:check",
+      "@absl//absl/cleanup",
+      "@absl//absl/status:statusor",
+      "@ubdsrv//:libublksrv",
+    ],
+)
+
+cc_library(
+    name = "io_worker",
+    srcs = ["io_worker.cc"],
+    hdrs = ["io_worker.h"],
+    deps = [
+      ":status",
+      ":ublk",
+      "@absl//absl/status",
+      "@absl//absl/log",
+      "@absl//absl/log:check",
+      "@absl//absl/cleanup",
+      "@absl//absl/status:statusor",
+      "@ubdsrv//:libublksrv",
+    ],
+)
+
+cc_binary(
+    name = "ublk_main",
+    srcs = ["ublk_main.cc"],
+    deps = [
+      ":io_worker",
+      ":ublk",
+      ":status",
+      ":syscalls",
+      "@absl//absl/status:statusor",
+      "@absl//absl/status",
+      "@absl//absl/log:check",
+      "@absl//absl/log",
+      "@absl//absl/log:initialize",
+      "@absl//absl/log:flags",
+      "@absl//absl/flags:parse",
+      "@absl//absl/flags:usage",
+      "@absl//absl/container:fixed_array",
+      "@ubdsrv//:libublksrv",
     ],
 )

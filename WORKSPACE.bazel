@@ -4,6 +4,20 @@ http_archive(
   name = "sqlite",
   strip_prefix = "sqlite-amalgamation-3410200",
   urls = ["https://www.sqlite.org/2023/sqlite-amalgamation-3410200.zip"],
-  build_file = "@diskyphus//third_party/sqlite:BUILD.bazel",
+  build_file = "//third_party/sqlite:BUILD.bazel",
   sha256 = "01df06a84803c1ab4d62c64e995b151b2dbcf5dbc93bbc5eee213cb18225d987",
+)
+
+
+ubdsrv_commit = "40a02cb64c023154997a3f1f15c9c8c3be93ab11"
+http_archive(
+  name = "ubdsrv",
+  urls = ["https://github.com/ming1/ubdsrv/archive/{}.zip".format(ubdsrv_commit)],
+  build_file = "//third_party/ubdsrv:BUILD.bazel",
+  strip_prefix = "ubdsrv-{}".format(ubdsrv_commit),
+  sha256 = "a4ec1f3d4b620b0f37838e46edb7b8077cd8974ca9b2eee5c8ca08a2308b586b",
+  patches = [
+    "//third_party/ubdsrv:add_config_h.patch",
+    "//third_party/ubdsrv:remove_gnu_source_define.patch",
+  ],
 )
