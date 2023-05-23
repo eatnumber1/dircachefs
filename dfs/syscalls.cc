@@ -94,9 +94,16 @@ absl::Status pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
       ::pthread_sigmask(how, set, oldset), "pthread_sigmask");
 }
 
+absl::Status pthread_setschedparam(
+    pthread_t thread, int policy, const struct sched_param &param) {
+  return absl::ErrnoToStatus(
+      ::pthread_setschedparam(thread, policy, &param), "pthread_setschedparam");
+}
+
 }  // namespace syscalls
 
-absl::StatusOr<ScopedSignalMask> ScopedSignalMask::Create(int how, const sigset_t &set) {
+absl::StatusOr<ScopedSignalMask> ScopedSignalMask::Create(
+    int how, const sigset_t &set) {
   sigset_t oldset;
   RETURN_IF_ERROR(syscalls::pthread_sigmask(how, &set, &oldset));
   return ScopedSignalMask(std::move(oldset));

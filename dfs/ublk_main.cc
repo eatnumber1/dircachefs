@@ -34,12 +34,6 @@
 #include "dfs/io_worker.h"
 #include "absl/container/fixed_array.h"
 
-// We need the implementation of std::thread to use pthreads. libstdc++ does.
-// https://gcc.gnu.org/onlinedocs/libstdc++/manual/status.html#iso.2011.specific
-#ifndef __GLIBCXX__
-#error Must use libstdc++
-#endif
-
 #define UBLKSRV_TGT_TYPE_DEMO  0
 
 namespace dfs {
@@ -176,7 +170,8 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   std::vector<std::unique_ptr<UserIoWorkerThread>> workers;
   workers.reserve(nr_hw_queues);
   for (int i = 0; i < nr_hw_queues; i++) {
-    workers.emplace_back(std::make_unique<UserIoWorkerThread>(dev, /*queue_id=*/i));
+    workers.emplace_back(
+        std::make_unique<UserIoWorkerThread>(dev, /*queue_id=*/i));
   }
 
   demo_null_set_parameters(&dev.GetControlDevice(), dev.Get());
@@ -190,6 +185,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   ublksrv_ctrl_get_info(&dev.GetControlDevice());
   PrintUblkDevice(dev);
 
+  /* wait until we are terminated */
   {
     signalfd_siginfo fdsi;
     RETURN_IF_ERROR(syscalls::read(*sigfd, &fdsi, sizeof(fdsi)));
@@ -197,7 +193,6 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     ublksrv_ctrl_stop_dev(&dev.GetControlDevice());
   }
 
-  /* wait until we are terminated */
   for (std::unique_ptr<UserIoWorkerThread> &worker : workers) {
     RETURN_IF_ERROR(worker->Join());
   }

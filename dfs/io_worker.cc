@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include "dfs/syscalls.h"
 #include "absl/log/check.h"
 #include "ublksrv/ublksrv.h"
 #include "ublksrv/ublksrv_utils.h"
@@ -21,7 +22,15 @@ UserIoWorkerThread::UserIoWorkerThread(
       result_(result_promise.get_future()),
       // TODO thread creation can throw an exception. Convert to Status
       thread_(&UserIoWorkerThread::ThreadMain, this, std::move(result_promise))
-{}
+{
+  // TODO make this configurable
+  absl::Status st = syscalls::pthread_setschedparam(
+      GetThreadHandle(), SCHED_RR, /*param=*/{
+        .sched_priority = sched_get_priority_min(SCHED_RR),
+      });
+  LOG_IF(WARNING, !st.ok())
+      << "Failed to set UserIoWorkerThread to SCHED_RR: " << st;
+}
 
 UserIoWorkerThread::UserIoWorkerThread(const UblkDevice &device, int queue_id)
     : UserIoWorkerThread(device, queue_id, /*result_promise=*/{}) {}
@@ -43,8 +52,6 @@ absl::Status UserIoWorkerThread::Run() {
   unsigned short q_id = queue_id_;
   const struct ublksrv_queue *q;
 
-  sched_setscheduler(getpid(), SCHED_RR, NULL);
-
   q = ublksrv_queue_init(dev, q_id, NULL);
   if (!q) {
     fprintf(stderr, "ublk dev %d queue %d init queue failed\n",
@@ -64,6 +71,13 @@ absl::Status UserIoWorkerThread::Run() {
   fprintf(stdout, "ublk dev %d queue %d exited\n", dev_id, q->q_id);
   ublksrv_queue_deinit(q);
   return absl::OkStatus();
+}
+
+pthread_t UserIoWorkerThread::GetThreadHandle() {
+  // libstdc++ uses pthreads for std::thread.
+  // https://gcc.gnu.org/onlinedocs/libstdc++/manual/status.html#iso.2011.specific
+  static_assert(std::is_same_v<std::thread::native_handle_type, pthread_t>);
+  return thread_.native_handle();
 }
 
 }  // namespace dfs

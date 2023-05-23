@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <sys/signalfd.h>
 #include <signal.h>
+#include <sched.h>
+#include <pthread.h>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -44,6 +46,9 @@ absl::Status sigprocmask(
 
 absl::Status pthread_sigmask(
     int how, const sigset_t *set, sigset_t *oldset = nullptr);
+
+absl::Status pthread_setschedparam(
+    pthread_t thread, int policy, const struct sched_param &param);
 
 }  // namespace syscalls
 

@@ -25,8 +25,6 @@ class UserIoWorkerThread {
   UserIoWorkerThread &operator=(const UserIoWorkerThread &) = delete;
 
   absl::Status Join();
-  absl::Status Shutdown();
-  absl::Status Cancel();
 
  private:
   UserIoWorkerThread(
@@ -35,6 +33,8 @@ class UserIoWorkerThread {
 
   void ThreadMain(std::promise<absl::Status> result);
   absl::Status Run();
+
+  pthread_t GetThreadHandle();
 
   const UblkDevice &device_;
   int queue_id_;

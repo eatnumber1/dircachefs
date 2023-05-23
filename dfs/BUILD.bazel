@@ -136,6 +136,7 @@ cc_library(
     hdrs = ["io_worker.h"],
     deps = [
       ":status",
+      ":syscalls",
       ":ublk",
       "@absl//absl/status",
       "@absl//absl/log",
