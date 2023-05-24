@@ -34,56 +34,17 @@
 #include "dfs/io_worker.h"
 #include "absl/container/fixed_array.h"
 
-#define TGT_DEV_SIZE (250UL * 1024 * 1024 * 1024)
-
 namespace dfs {
-
-int demo_init_tgt(struct ublksrv_dev *dev, int, int, char **data) {
-  const struct ublksrv_ctrl_dev_info &info =
-    *ublksrv_ctrl_get_dev_info(ublksrv_get_ctrl_dev(dev));
-  struct ublksrv_tgt_info &tgt = dev->tgt;
-  tgt.dev_size = TGT_DEV_SIZE;
-  tgt.tgt_ring_depth = info.queue_depth;
-  tgt.nr_fds = 0;
-  return 0;
-}
-
-static int demo_handle_io_async(const struct ublksrv_queue *q,
-    const struct ublk_io_data *data)
-{
+namespace {
+int DfsHandleIoAsync(const ublksrv_queue *q, const ublk_io_data *data) {
   const struct ublksrv_io_desc *iod = data->iod;
 
   ublksrv_complete_io(q, data->tag, iod->nr_sectors << 9);
 
+  // Return negative errno on errors, 0 on success.
   return 0;
 }
-
-// TODO delete this
-void PrintUblkDevice(UblkDevice &dev) {
-  const struct ublksrv_ctrl_dev_info *info = &dev.GetInfo();
-  LOG(INFO) << "Device is available at " << dev;
-  struct ublk_params p = {};
-  p.devt.char_major = 42;
-
-  if (int ret = ublksrv_ctrl_get_params(&dev.GetControlDevice(), &p);
-      ret < 0) {
-    fprintf(stderr, "failed to get params %m\n");
-    return;
-  }
-
-  printf("dev id %d: nr_hw_queues %d queue_depth %d block size %d dev_capacity %lld\n",
-      info->dev_id,
-                        info->nr_hw_queues, info->queue_depth,
-                        1 << p.basic.logical_bs_shift, p.basic.dev_sectors);
-  printf("\tmax rq size %d daemon pid %d flags 0x%llx\n",
-                        info->max_io_buf_bytes,
-      info->ublksrv_pid, info->flags);
-  // TODO devt is incorrect (uninitialized?)
-  printf("\tublkc: %u:%d ublkb: %u:%u owner: %u:%u\n",
-      p.devt.char_major, p.devt.char_minor,
-      p.devt.disk_major, p.devt.disk_minor,
-      info->owner_uid, info->owner_gid);
-}
+}  // namespace
 
 absl::StatusOr<int> Main(int argc, char *argv[]) {
   absl::InitializeLog();
@@ -105,8 +66,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   unsigned short nr_hw_queues = DEF_NR_HW_QUEUES;
 
   struct ublksrv_tgt_type target_type = {
-    .handle_io_async = demo_handle_io_async,
-    .init_tgt = demo_init_tgt,
+    .handle_io_async = &DfsHandleIoAsync,
     .name = "dfs",
   };
 
@@ -138,7 +98,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
         // of 512 bytes
         .max_sectors = (/*data.max_io_buf_bytes=*/DEF_BUF_SIZE) >> 9,
         // Number of sectors in the device, in multiples of 512 bytes
-        .dev_sectors = TGT_DEV_SIZE >> 9,
+        .dev_sectors = (250UL * 1024 * 1024 * 1024) >> 9,
       }
     },
   }));
@@ -153,8 +113,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   {
     ASSIGN_OR_RETURN(UblkDevice::Stopper device_stopper, dev.Start());
 
-    ublksrv_ctrl_get_info(&dev.GetControlDevice());
-    PrintUblkDevice(dev);
+    LOG(INFO) << "Device is available at " << dev;
 
     /* wait until we are terminated */
     {

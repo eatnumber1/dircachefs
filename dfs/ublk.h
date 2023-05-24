@@ -10,8 +10,6 @@ namespace dfs {
 class UblkDevice {
  public:
   struct Options {
-    std::string control_device_path = "/dev/ublk-control";
-
     // Options for ublksrv_ctrl_init
     ublksrv_dev_data data;
     // Params for ublksrv_ctrl_set_params
@@ -45,6 +43,7 @@ class UblkDevice {
   absl::StatusOr<Stopper> Start();
 
   const ublksrv_ctrl_dev_info &GetInfo() const;
+  absl::StatusOr<ublk_params> GetParams();
 
   // TODO remove from API
   ublksrv_ctrl_dev &GetControlDevice();
@@ -71,6 +70,9 @@ class UblkDevice {
 
   absl::Status KernelStart();
   absl::Status KernelStop();
+
+  // Updates inmemory cache of device info.
+  absl::Status KernelGetInfo();
 
   static absl::Status UpdateAffinity(ublksrv_ctrl_dev &ctrl);
   static absl::Status KernelDelete(ublksrv_ctrl_dev &ctrl);

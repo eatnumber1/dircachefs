@@ -22,7 +22,43 @@ absl::Status UblkDevice::KernelAdd(ublksrv_ctrl_dev &ctrl) {
   return ErrnoToStatus(-ublksrv_ctrl_add_dev(&ctrl), "ublksrv_ctrl_add_dev");
 }
 
+absl::Status UblkDevice::KernelGetInfo() {
+  return ErrnoToStatus(-ublksrv_ctrl_get_info(ctrl_), "ublksrv_ctrl_get_info");
+}
+
 absl::StatusOr<UblkDevice> UblkDevice::Create(Options opts) {
+  // Unfortunately init_tgt does't have a private data argument, so we abuse
+  // argv to pass in the Options. We have to make sure that the fields we're
+  // going to modify aren't already present.
+  if (opts.data.tgt_argv != nullptr) {
+    return absl::InvalidArgumentError("opts.data.tgt_argv must be nullptr");
+  }
+  if (!(opts.params.types & UBLK_PARAM_TYPE_BASIC)) {
+    return absl::InvalidArgumentError("Must include UBLK_PARAM_TYPE_BASIC params");
+  }
+  auto *tgt_ops = const_cast<ublksrv_tgt_type *>(opts.data.tgt_ops);
+  if (tgt_ops == nullptr) {
+    return absl::InvalidArgumentError("opts.data.tgt_ops must not be nullptr");
+  }
+  if (tgt_ops->init_tgt != nullptr) {
+    return absl::InvalidArgumentError("opts.data.tgt_ops.init_tgt must be nullptr");
+  }
+  tgt_ops->init_tgt = [](ublksrv_dev *dev, int, int, char **data) -> int {
+    auto &opts = *reinterpret_cast<Options*>(data);
+    const struct ublksrv_ctrl_dev_info &info =
+      *ublksrv_ctrl_get_dev_info(ublksrv_get_ctrl_dev(dev));
+    struct ublksrv_tgt_info &tgt = dev->tgt;
+
+    // TODO is dev_sectors always in 512-byte sectors?
+    tgt.dev_size = opts.params.basic.dev_sectors << 9;
+    tgt.tgt_ring_depth = info.queue_depth;
+    tgt.nr_fds = 0;
+
+    // Return negative errno on errors, 0 on success.
+    return 0;
+  };
+  opts.data.tgt_argv = reinterpret_cast<char**>(&opts);
+
   // Create the control device.
   // TODO if this fails it may crash the program. Fix that.
   // https://github.com/ming1/ubdsrv/blob/075ba3922882f7537e0198360648eaeb0979b0a7/lib/ublksrv_cmd.c#L141
@@ -55,6 +91,7 @@ absl::StatusOr<UblkDevice> UblkDevice::Create(Options opts) {
   UblkDevice ret(*ctrl, *dev);
 
   RETURN_IF_ERROR(ret.KernelSetParams(opts.params));
+  RETURN_IF_ERROR(ret.KernelGetInfo());
 
   return ret;
 }
@@ -102,6 +139,14 @@ const ublksrv_ctrl_dev_info &UblkDevice::GetInfo() const {
   auto *info = ublksrv_ctrl_get_dev_info(ctrl_);
   CHECK_NE(info, nullptr);
   return *info;
+}
+
+absl::StatusOr<ublk_params> UblkDevice::GetParams() {
+  ublk_params p = {};
+  RETURN_IF_ERROR(
+      ErrnoToStatus(
+        -ublksrv_ctrl_get_params(ctrl_, &p), "ublksrv_ctrl_get_params"));
+  return p;
 }
 
 ublksrv_ctrl_dev &UblkDevice::GetControlDevice() { return *ctrl_; }
