@@ -49,8 +49,8 @@ absl::Status UserIoWorkerThread::Run(int queue_id) {
   ASSIGN_OR_RETURN(auto queue, UblkQueue::Create(*device_, queue_id));
 
   LOG(INFO)
-    << "Queue " << queue->q_id << " for device "
-    << device_.GetInfo().dev_id << " started on thread " << gettid();
+    << "Queue " << queue->q_id << " for " << device_ << " started on thread "
+    << gettid();
 
   int num_events = 0;
   while (true) {

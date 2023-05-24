@@ -9,10 +9,40 @@ namespace dfs {
 
 class UblkDevice {
  public:
-  using Options = ublksrv_dev_data;
+  struct Options {
+    std::string control_device_path = "/dev/ublk-control";
+
+    // Options for ublksrv_ctrl_init
+    ublksrv_dev_data data;
+    // Params for ublksrv_ctrl_set_params
+    ublk_params params;
+  };
+
+  class Stopper {
+   public:
+    Stopper() = default;
+    ~Stopper();
+
+    absl::Status Stop() &&;
+
+    Stopper(Stopper &&);
+    Stopper(const Stopper &) = delete;
+    Stopper &operator=(Stopper &&);
+    Stopper &operator=(const Stopper &) = delete;
+
+   private:
+    friend class ::dfs::UblkDevice;
+
+    Stopper(UblkDevice &dev);
+
+    UblkDevice *dev_ = nullptr;
+  };
 
   UblkDevice() = default;
   ~UblkDevice();
+
+  // Stopper captures *this, so must be destroyed before this UblkDevice.
+  absl::StatusOr<Stopper> Start();
 
   const ublksrv_ctrl_dev_info &GetInfo() const;
 
@@ -32,8 +62,15 @@ class UblkDevice {
   const ublksrv_dev *operator->() const;
   operator bool() const;
 
+  friend std::ostream &operator<<(std::ostream &os, const UblkDevice &dev);
+
  private:
   UblkDevice(ublksrv_ctrl_dev &ctrl, const ublksrv_dev &dev);
+
+  absl::Status KernelSetParams(ublk_params &params);
+
+  absl::Status KernelStart();
+  absl::Status KernelStop();
 
   static absl::Status UpdateAffinity(ublksrv_ctrl_dev &ctrl);
   static absl::Status KernelDelete(ublksrv_ctrl_dev &ctrl);

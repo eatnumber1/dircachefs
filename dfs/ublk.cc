@@ -1,6 +1,7 @@
 #include "dfs/ublk.h"
 
 #include <utility>
+#include <unistd.h>
 
 #include "absl/log/log.h"
 #include "absl/log/check.h"
@@ -25,7 +26,7 @@ absl::StatusOr<UblkDevice> UblkDevice::Create(Options opts) {
   // Create the control device.
   // TODO if this fails it may crash the program. Fix that.
   // https://github.com/ming1/ubdsrv/blob/075ba3922882f7537e0198360648eaeb0979b0a7/lib/ublksrv_cmd.c#L141
-  ublksrv_ctrl_dev *ctrl = ublksrv_ctrl_init(&opts);
+  ublksrv_ctrl_dev *ctrl = ublksrv_ctrl_init(&opts.data);
   if (ctrl == nullptr) {
     // Failures get printed to the screen by ublksrv_ctrl_init.
     return absl::UnknownError("ublksrv_ctrl_init");
@@ -51,7 +52,11 @@ absl::StatusOr<UblkDevice> UblkDevice::Create(Options opts) {
 
   std::move(delete_dev).Cancel();
   std::move(deinit_ctrl).Cancel();
-  return UblkDevice(*ctrl, *dev);
+  UblkDevice ret(*ctrl, *dev);
+
+  RETURN_IF_ERROR(ret.KernelSetParams(opts.params));
+
+  return ret;
 }
 
 UblkDevice::UblkDevice(ublksrv_ctrl_dev &ctrl, const ublksrv_dev &dev)
@@ -100,6 +105,55 @@ const ublksrv_ctrl_dev_info &UblkDevice::GetInfo() const {
 }
 
 ublksrv_ctrl_dev &UblkDevice::GetControlDevice() { return *ctrl_; }
+
+absl::Status UblkDevice::KernelStart() {
+  return ErrnoToStatus(
+      -ublksrv_ctrl_start_dev(ctrl_, getpid()), "ublksrv_ctrl_start_dev");
+}
+
+absl::Status UblkDevice::KernelStop() {
+  return ErrnoToStatus(-ublksrv_ctrl_stop_dev(ctrl_), "ublksrv_ctrl_stop_dev");
+}
+
+absl::Status UblkDevice::KernelSetParams(ublk_params &params) {
+  return ErrnoToStatus(
+      -ublksrv_ctrl_set_params(ctrl_, &params), "ublksrv_ctrl_set_params");
+}
+
+absl::StatusOr<UblkDevice::Stopper> UblkDevice::Start() {
+  RETURN_IF_ERROR(KernelStart());
+  return Stopper(*this);
+}
+
+std::ostream &operator<<(std::ostream &os, const UblkDevice &dev) {
+  return os << "/dev/ublkb" << dev.GetInfo().dev_id;
+}
+
+UblkDevice::Stopper::~Stopper() {
+  if (dev_ == nullptr) return;
+  absl::Status st = std::move(*this).Stop();
+  LOG_IF(WARNING, !st.ok()) << "Failed to stop " << dev_ << ": " << st;
+}
+
+UblkDevice::Stopper::Stopper(Stopper &&o)
+    : Stopper() {
+  *this = std::move(o);
+}
+
+UblkDevice::Stopper &UblkDevice::Stopper::operator=(Stopper &&o) {
+  using std::swap;
+  swap(dev_, o.dev_);
+  return *this;
+}
+
+UblkDevice::Stopper::Stopper(UblkDevice &dev) : dev_(&dev) {}
+
+absl::Status UblkDevice::Stopper::Stop() && {
+  absl::Status ret = dev_->KernelStop();
+  dev_ = nullptr;
+  return ret;
+}
+
 
 UblkQueue::~UblkQueue() {
   if (queue_ == nullptr) return;
