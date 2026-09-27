@@ -96,6 +96,32 @@ cc_library(
     ],
 )
 
+cc_test(
+    name = "fd_test",
+    size = "small",
+    srcs = ["fd_test.cc"],
+    deps = [
+      ":syscalls",
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "syscalls_test",
+    size = "small",
+    srcs = ["syscalls_test.cc"],
+    deps = [
+      ":syscalls",
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "fuse",
     hdrs = ["fuse.h"],

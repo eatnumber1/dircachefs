@@ -3,20 +3,20 @@
 
 #include <cerrno>
 #include <array>
+#include <cstddef>
 #include <fcntl.h>
 #include <linux/openat2.h>
-#include <pthread.h>
-#include <sched.h>
-#include <signal.h>
+#include <span>
 #include <string>
 #include <string_view>
 #include <sys/ioctl.h>
-#include <sys/signalfd.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <sys/statvfs.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 #include <utility>
-#include <dirent.h>
+#include <vector>
 
 #include "absl/base/nullability.h"
 #include "absl/status/status.h"
@@ -32,14 +32,9 @@ namespace syscalls {
 absl::Status close(FileDescriptor fd);
 
 // O_CLOEXEC is unconditionally added.
-absl::StatusOr<FileDescriptor> open(
-    std::string_view pathname, int flags = 0, mode_t mode = 0);
-
-// O_CLOEXEC is unconditionally added.
 absl::StatusOr<FileDescriptor> openat(
     int dirfd, std::string_view pathname, int flags = 0,
     mode_t mode = 0);
-
 
 // O_CLOEXEC is unconditionally added to how.flags.
 absl::StatusOr<FileDescriptor> openat2(
@@ -47,37 +42,6 @@ absl::StatusOr<FileDescriptor> openat2(
     size_t size);
 
 absl::StatusOr<size_t> read(int fd, void *buf, size_t count);
-
-// Use MountedFS::PerformMount instead.
-absl::Status mount(
-    std::string_view source, std::string_view target,
-    std::string_view filesystemtype, unsigned long mountflags = 0,
-    const void *data = nullptr);
-
-absl::Status umount(std::string_view target, int flags = 0);
-
-absl::StatusOr<struct stat> stat(const char *pathname);
-
-absl::Status sigaction(
-    int signum,
-    const struct sigaction *act = nullptr,
-    struct sigaction *oldact = nullptr);
-
-// SFD_CLOEXEC is unconditionally added to flags
-absl::StatusOr<FileDescriptor> signalfd(
-    const sigset_t &mask, int flags = 0);
-
-// SFD_CLOEXEC is unconditionally added to flags
-absl::Status signalfd(int fd, const sigset_t &mask, int flags = 0);
-
-absl::Status sigprocmask(
-    int how, const sigset_t *set, sigset_t *oldset = nullptr);
-
-absl::Status pthread_sigmask(
-    int how, const sigset_t *set, sigset_t *oldset = nullptr);
-
-absl::Status pthread_setschedparam(
-    pthread_t thread, int policy, const sched_param &param);
 
 absl::StatusOr<struct statvfs> fstatvfs(int fd);
 absl::StatusOr<struct stat> fstat(int fd);
@@ -94,14 +58,6 @@ absl::StatusOr<FileDescriptor> open_by_handle_at(
 
 absl::StatusOr<int> ioctl(int fd, int op, auto &&... args);
 
-absl::StatusOr<std::reference_wrapper<DIR>> fdopendir(FileDescriptor fd);
-absl::StatusOr<std::reference_wrapper<DIR>> opendir(std::string_view dirname);
-absl::Status closedir(DIR &dir);
-// Returns nullptr at EOF.
-absl::StatusOr<dirent *absl_nullable> readdir(DIR &dir);
-absl::StatusOr<long> telldir(DIR &dir);
-absl::StatusOr<int> dirfd(DIR &dir);
-
 // Definition from https://man7.org/linux/man-pages/man2/getdents.2.html
 struct linux_dirent64 {
   ino64_t d_ino;  // 64-bit inode number
@@ -115,27 +71,40 @@ absl::StatusOr<ssize_t> getdents64(int fd, void *dirp, size_t count);
 
 absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence);
 
+// New fd-based wrappers for file operations
+absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
+                                    unsigned int mask);
+absl::StatusOr<struct statfs> fstatfs(int fd);
+absl::StatusOr<std::string> readlinkat(int dirfd, std::string_view path);
+absl::StatusOr<std::string> fgetxattr(int fd, std::string_view name);
+absl::StatusOr<std::vector<std::string>> flistxattr(int fd);
+absl::Status fsetxattr(int fd, std::string_view name,
+                       std::span<const uint8_t> value, int flags);
+absl::Status fremovexattr(int fd, std::string_view name);
+absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags);
+absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,
+                    std::string_view newpath, int flags);
+absl::Status unlinkat(int dirfd, std::string_view path, int flags);
+absl::Status renameat2(int olddirfd, std::string_view oldpath, int newdirfd,
+                       std::string_view newpath, unsigned int flags);
+absl::Status mkdirat(int dirfd, std::string_view path, mode_t mode);
+absl::Status mknodat(int dirfd, std::string_view path, mode_t mode, dev_t dev);
+absl::Status symlinkat(std::string_view target, int newdirfd,
+                       std::string_view linkpath);
+absl::Status fchmod(int fd, mode_t mode);
+absl::Status fchownat(int dirfd, std::string_view path, uid_t owner,
+                      gid_t group, int flags);
+absl::Status futimens(int fd, const struct timespec times[2]);
+absl::Status ftruncate(int fd, off_t length);
+absl::Status fsync(int fd);
+absl::Status fdatasync(int fd);
+absl::Status fallocate(int fd, int mode, off_t offset, off_t len);
+absl::StatusOr<size_t> pread(int fd, void *buf, size_t count, off_t offset);
+absl::StatusOr<size_t> pwrite(int fd, const void *buf, size_t count,
+                              off_t offset);
+absl::StatusOr<size_t> write(int fd, const void *buf, size_t count);
+
 }  // namespace syscalls
-
-// Mask a set of signals (ala pthread_sigmask) and unmask them at destruction.
-class ScopedSignalMask {
- public:
-  ScopedSignalMask() = default;
-  static absl::StatusOr<ScopedSignalMask> Create(int how, const sigset_t &set);
-
-  ScopedSignalMask(ScopedSignalMask &&);
-  ScopedSignalMask(const ScopedSignalMask &) = delete;
-  ScopedSignalMask &operator=(ScopedSignalMask &&);
-  ScopedSignalMask &operator=(const ScopedSignalMask &) = delete;
-
-  ~ScopedSignalMask();
-
- private:
-  ScopedSignalMask(sigset_t oldset);
-
-  bool valid_ = false;
-  sigset_t oldset_;
-};
 
 absl::StatusOr<uint32_t> GetInodeGeneration(int fd);
 
@@ -149,14 +118,6 @@ struct LogOpenFlags {
  private:
   int flags_ = 0;
 };
-
-struct ClosedirAndLog {
-  void operator()(DIR *d);
-};
-
-using DIR_unique_ptr = std::unique_ptr<DIR, ClosedirAndLog>;
-
-absl::StatusOr<DIR_unique_ptr> WrapDirfd(FileDescriptor dirfd);
 
 // Implementation below here
 

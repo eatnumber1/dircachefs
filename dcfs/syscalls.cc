@@ -1,13 +1,12 @@
 #include "dcfs/syscalls.h"
 
 #include <cerrno>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
 #include <linux/openat2.h>
-#include <signal.h>
 #include <string_view>
-#include <sys/mount.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <linux/fs.h>
@@ -30,15 +29,6 @@ absl::Status close(FileDescriptor fd) {
   return ErrnoToStatus(errno, absl::StrCat("close(", fd_i, ")"));
 }
 
-absl::StatusOr<FileDescriptor> open(
-    std::string_view pathname, int flags, mode_t mode) {
-  int fd = ::open(std::string(pathname).c_str(), flags | O_CLOEXEC, mode);
-  if (fd == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("open(", pathname, ")"));
-  }
-  return FileDescriptor(fd);
-}
-
 absl::StatusOr<FileDescriptor> openat(
     int dirfd, std::string_view pathname, int flags, mode_t mode) {
   int fd = ::openat(
@@ -55,70 +45,6 @@ absl::StatusOr<size_t> read(int fd, void *buf, size_t count) {
     return ErrnoToStatus(errno, absl::StrCat("read(", fd, ")"));
   }
   return nb;
-}
-
-absl::Status mount(
-    std::string_view source, std::string_view target,
-    std::string_view filesystemtype, unsigned long mountflags,
-    const void *data) {
-  if (::mount(
-        std::string(source).c_str(), std::string(target).c_str(),
-        std::string(filesystemtype).c_str(), mountflags, data) == -1) {
-    return ErrnoToStatus(errno, "mount");
-  }
-  return absl::OkStatus();
-}
-
-absl::StatusOr<struct stat> stat(const char *pathname) {
-  struct stat statbuf;
-  if (::stat(pathname, &statbuf) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("stat(", pathname, ")"));
-  }
-  return statbuf;
-}
-
-absl::Status umount(std::string_view target, int flags) {
-  if (::umount2(std::string(target).c_str(), flags) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("umount2(", target, ")"));
-  }
-  return absl::OkStatus();
-}
-
-absl::Status sigaction(
-    int signum, const struct sigaction *act, struct sigaction *oldact) {
-  if (int rc = ::sigaction(signum, act, oldact); rc != 0) {
-    return ErrnoToStatus(errno, "sigaction");
-  }
-  return absl::OkStatus();
-}
-
-absl::StatusOr<FileDescriptor> signalfd(const sigset_t &mask, int flags) {
-  int fd = ::signalfd(/*fd=*/-1, &mask, flags | SFD_CLOEXEC);
-  if (fd == -1) return ErrnoToStatus(errno, "signalfd");
-  return FileDescriptor(fd);
-}
-
-absl::Status signalfd(int fd, const sigset_t &mask, int flags) {
-  errno = 0;
-  ::signalfd(fd, &mask, flags | SFD_CLOEXEC);
-  return ErrnoToStatus(errno, "signalfd");
-}
-
-absl::Status sigprocmask(int how, const sigset_t *set, sigset_t *oldset) {
-  errno = 0;
-  ::sigprocmask(how, set, oldset);
-  return ErrnoToStatus(errno, "sigprocmask");
-}
-
-absl::Status pthread_sigmask(int how, const sigset_t *set, sigset_t *oldset) {
-  return ErrnoToStatus(
-      ::pthread_sigmask(how, set, oldset), "pthread_sigmask");
-}
-
-absl::Status pthread_setschedparam(
-    pthread_t thread, int policy, const sched_param &param) {
-  return ErrnoToStatus(
-      ::pthread_setschedparam(thread, policy, &param), "pthread_setschedparam");
 }
 
 absl::StatusOr<struct statvfs> fstatvfs(int fd) {
@@ -172,46 +98,9 @@ absl::StatusOr<FileDescriptor> open_by_handle_at(
   return FileDescriptor(fd);
 }
 
-absl::StatusOr<std::reference_wrapper<DIR>> fdopendir(FileDescriptor fd) {
-  DIR *dir = ::fdopendir(*fd);
-  if (dir == nullptr) return ErrnoToStatus(errno, "fdopendir");
-  std::move(fd).Release();
-  return *dir;
-}
-
-absl::StatusOr<std::reference_wrapper<DIR>> opendir(std::string_view dirname) {
-  DIR *dir = ::opendir(std::string(dirname).c_str());
-  if (dir == nullptr) return ErrnoToStatus(errno, "opendir");
-  return *dir;
-}
-
-absl::Status closedir(DIR &dir) {
-  int rc = ::closedir(&dir);
-  if (rc != 0) return ErrnoToStatus(errno, "closedir");
-  return absl::OkStatus();
-}
-
-absl::StatusOr<dirent *absl_nullable> readdir(DIR &dir) {
-  errno = 0;
-  dirent *dent = ::readdir(&dir);
-  if (dent == nullptr && errno != 0) return ErrnoToStatus(errno, "readdir");
-  return dent;
-}
-
-absl::StatusOr<long> telldir(DIR &dir) {
-  long rc = ::telldir(&dir);
-  if (rc == -1) return ErrnoToStatus(errno, "telldir");
-  return rc;
-}
-
-absl::StatusOr<int> dirfd(DIR &dir) {
-  int fd = ::dirfd(&dir);
-  if (fd == -1) return ErrnoToStatus(errno, "dirfd");
-  return fd;
-}
 
 absl::StatusOr<ssize_t> getdents64(int fd, void *dirp, size_t count) {
-  ssize_t nb = ::getdents64(fd, dirp, count);
+  ssize_t nb = ::syscall(SYS_getdents64, fd, dirp, count);
   if (nb < 0) return ErrnoToStatus(errno, "getdents64");
   return nb;
 }
@@ -220,6 +109,251 @@ absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence) {
   off_t rc = ::lseek(fd, offset, whence);
   if (rc == static_cast<off_t>(-1)) return ErrnoToStatus(errno, "lseek");
   return rc;
+}
+
+absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
+                                    unsigned int mask) {
+  struct statx buf;
+  int ret = ::statx(dirfd, std::string(path).c_str(), flags, mask, &buf);
+  if (ret == -1) return ErrnoToStatus(errno, "statx");
+  return buf;
+}
+
+absl::StatusOr<struct statfs> fstatfs(int fd) {
+  struct statfs buf;
+  int ret = ::fstatfs(fd, &buf);
+  if (ret == -1) return ErrnoToStatus(errno, "fstatfs");
+  return buf;
+}
+
+absl::StatusOr<std::string> readlinkat(int dirfd, std::string_view path) {
+  std::string result;
+  size_t bufsize = 256;
+  while (true) {
+    result.resize(bufsize);
+    ssize_t nbytes = ::readlinkat(dirfd, std::string(path).c_str(),
+                                   result.data(), result.size());
+    if (nbytes == -1) {
+      return ErrnoToStatus(errno, "readlinkat");
+    }
+    if (static_cast<size_t>(nbytes) < bufsize) {
+      result.resize(nbytes);
+      return result;
+    }
+    // Buffer too small, double it (cap at PATH_MAX*4)
+    if (bufsize >= PATH_MAX * 4) {
+      result.resize(nbytes);
+      return result;
+    }
+    bufsize *= 2;
+  }
+}
+
+absl::StatusOr<std::string> fgetxattr(int fd, std::string_view name) {
+  // Query size with a null buffer first
+  ssize_t size = ::fgetxattr(fd, std::string(name).c_str(), nullptr, 0);
+  if (size == -1) {
+    int err = errno;
+    if (err == ERANGE) {
+      // Size changed, retry once with a larger buffer
+      size = ::fgetxattr(fd, std::string(name).c_str(), nullptr, 0);
+      if (size == -1) {
+        return ErrnoToStatus(errno, "fgetxattr");
+      }
+    } else {
+      return ErrnoToStatus(err, "fgetxattr");
+    }
+  }
+  if (size == 0) {
+    return std::string();
+  }
+  // Now read the actual value
+  std::string result(size, '\0');
+  ssize_t nbytes = ::fgetxattr(fd, std::string(name).c_str(), result.data(),
+                               result.size());
+  if (nbytes == -1) {
+    return ErrnoToStatus(errno, "fgetxattr");
+  }
+  result.resize(nbytes);
+  return result;
+}
+
+absl::StatusOr<std::vector<std::string>> flistxattr(int fd) {
+  // Query size with a null buffer first
+  ssize_t size = ::flistxattr(fd, nullptr, 0);
+  if (size == -1) {
+    return ErrnoToStatus(errno, "flistxattr");
+  }
+  if (size == 0) {
+    return std::vector<std::string>();
+  }
+  // Now read the actual list
+  std::string buf(size, '\0');
+  ssize_t nbytes = ::flistxattr(fd, buf.data(), buf.size());
+  if (nbytes == -1) {
+    return ErrnoToStatus(errno, "flistxattr");
+  }
+  // Parse the NUL-separated list
+  std::vector<std::string> result;
+  size_t pos = 0;
+  while (pos < static_cast<size_t>(nbytes)) {
+    const char *str = buf.data() + pos;
+    size_t len = std::strlen(str);
+    result.emplace_back(str, len);
+    pos += len + 1;
+  }
+  return result;
+}
+
+absl::Status fsetxattr(int fd, std::string_view name,
+                       std::span<const uint8_t> value, int flags) {
+  if (::fsetxattr(fd, std::string(name).c_str(),
+                  reinterpret_cast<const void *>(value.data()), value.size(),
+                  flags) == -1) {
+    return ErrnoToStatus(errno, "fsetxattr");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status fremovexattr(int fd, std::string_view name) {
+  if (::fremovexattr(fd, std::string(name).c_str()) == -1) {
+    return ErrnoToStatus(errno, "fremovexattr");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags) {
+  // Opens /proc/self/fd/<fd> with the given flags (| O_CLOEXEC).
+  // This is needed because xattr/ioctl syscalls reject O_PATH fds.
+  std::string path = absl::StrFormat("/proc/self/fd/%d", fd);
+  int new_fd = ::open(path.c_str(), flags | O_CLOEXEC);
+  if (new_fd == -1) {
+    return ErrnoToStatus(errno, absl::StrFormat("open(%s)", path));
+  }
+  return FileDescriptor(new_fd);
+}
+
+absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,
+                    std::string_view newpath, int flags) {
+  if (::linkat(olddirfd, std::string(oldpath).c_str(), newdirfd,
+               std::string(newpath).c_str(), flags) == -1) {
+    return ErrnoToStatus(errno, "linkat");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status unlinkat(int dirfd, std::string_view path, int flags) {
+  if (::unlinkat(dirfd, std::string(path).c_str(), flags) == -1) {
+    return ErrnoToStatus(errno, "unlinkat");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status renameat2(int olddirfd, std::string_view oldpath, int newdirfd,
+                       std::string_view newpath, unsigned int flags) {
+  if (::renameat2(olddirfd, std::string(oldpath).c_str(), newdirfd,
+                  std::string(newpath).c_str(), flags) == -1) {
+    return ErrnoToStatus(errno, "renameat2");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status mkdirat(int dirfd, std::string_view path, mode_t mode) {
+  if (::mkdirat(dirfd, std::string(path).c_str(), mode) == -1) {
+    return ErrnoToStatus(errno, "mkdirat");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status mknodat(int dirfd, std::string_view path, mode_t mode, dev_t dev) {
+  if (::mknodat(dirfd, std::string(path).c_str(), mode, dev) == -1) {
+    return ErrnoToStatus(errno, "mknodat");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status symlinkat(std::string_view target, int newdirfd,
+                       std::string_view linkpath) {
+  if (::symlinkat(std::string(target).c_str(), newdirfd,
+                  std::string(linkpath).c_str()) == -1) {
+    return ErrnoToStatus(errno, "symlinkat");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status fchmod(int fd, mode_t mode) {
+  if (::fchmod(fd, mode) == -1) {
+    return ErrnoToStatus(errno, "fchmod");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status fchownat(int dirfd, std::string_view path, uid_t owner,
+                      gid_t group, int flags) {
+  if (::fchownat(dirfd, std::string(path).c_str(), owner, group, flags) == -1) {
+    return ErrnoToStatus(errno, "fchownat");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status futimens(int fd, const struct timespec times[2]) {
+  if (::futimens(fd, times) == -1) {
+    return ErrnoToStatus(errno, "futimens");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status ftruncate(int fd, off_t length) {
+  if (::ftruncate(fd, length) == -1) {
+    return ErrnoToStatus(errno, "ftruncate");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status fsync(int fd) {
+  if (::fsync(fd) == -1) {
+    return ErrnoToStatus(errno, "fsync");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status fdatasync(int fd) {
+  if (::fdatasync(fd) == -1) {
+    return ErrnoToStatus(errno, "fdatasync");
+  }
+  return absl::OkStatus();
+}
+
+absl::Status fallocate(int fd, int mode, off_t offset, off_t len) {
+  if (::fallocate(fd, mode, offset, len) == -1) {
+    return ErrnoToStatus(errno, "fallocate");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<size_t> pread(int fd, void *buf, size_t count, off_t offset) {
+  ssize_t nbytes = ::pread(fd, buf, count, offset);
+  if (nbytes == -1) {
+    return ErrnoToStatus(errno, "pread");
+  }
+  return nbytes;
+}
+
+absl::StatusOr<size_t> pwrite(int fd, const void *buf, size_t count,
+                              off_t offset) {
+  ssize_t nbytes = ::pwrite(fd, buf, count, offset);
+  if (nbytes == -1) {
+    return ErrnoToStatus(errno, "pwrite");
+  }
+  return nbytes;
+}
+
+absl::StatusOr<size_t> write(int fd, const void *buf, size_t count) {
+  ssize_t nbytes = ::write(fd, buf, count);
+  if (nbytes == -1) {
+    return ErrnoToStatus(errno, "write");
+  }
+  return nbytes;
 }
 
 }  // namespace syscalls
@@ -231,46 +365,6 @@ absl::StatusOr<uint32_t> GetInodeGeneration(int fd) {
   return generation;
 }
 
-absl::StatusOr<ScopedSignalMask> ScopedSignalMask::Create(
-    int how, const sigset_t &set) {
-  sigset_t oldset;
-  ABSL_RETURN_IF_ERROR(syscalls::pthread_sigmask(how, &set, &oldset));
-  return ScopedSignalMask(std::move(oldset));
-}
-
-ScopedSignalMask::ScopedSignalMask(ScopedSignalMask &&o)
-    : ScopedSignalMask() {
-  *this = std::move(o);
-}
-
-ScopedSignalMask &ScopedSignalMask::operator=(ScopedSignalMask &&o) {
-  using std::swap;
-  swap(valid_, o.valid_);
-  swap(oldset_, o.oldset_);
-  return *this;
-}
-
-ScopedSignalMask::ScopedSignalMask(sigset_t oldset)
-    : valid_(true), oldset_(std::move(oldset)) {}
-
-ScopedSignalMask::~ScopedSignalMask() {
-  if (!valid_) return;
-  absl::Status st = syscalls::pthread_sigmask(SIG_SETMASK, &oldset_);
-  LOG_IF(WARNING, !st.ok()) << "Failed to restore signal disposition " << st;
-}
-
 LogOpenFlags::LogOpenFlags(int flags) : flags_(flags) {}
-
-void ClosedirAndLog::operator()(DIR *d) {
-  if (d == nullptr) return;
-  absl::Status st = syscalls::closedir(*d);
-  LOG_IF(WARNING, !st.ok()) << st;
-}
-
-absl::StatusOr<DIR_unique_ptr> WrapDirfd(FileDescriptor dirfd) {
-  ABSL_ASSIGN_OR_RETURN(DIR &d, syscalls::fdopendir(*dirfd));
-  std::move(dirfd).Release();
-  return DIR_unique_ptr(&d);
-}
 
 }  // namespace dcfs
