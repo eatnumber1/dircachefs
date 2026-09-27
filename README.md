@@ -148,19 +148,27 @@ mechanical:
 
 ## Building and testing
 
+dcfs requires root (real `open_by_handle_at`, `FS_IOC_GETFSUUID`, and so
+on), so there is no host-side test execution: every test, unit tests
+included, boots the project's own minimal Linux kernel under QEMU and runs
+as root inside it. `bazel build //...` needs nothing beyond Bazel, but
+`bazel test //...` additionally needs:
+
+- KVM (`/dev/kvm`, and your user in the `kvm` group -- see
+  `test/qemu/README.md` if you're not; QEMU falls back to software
+  emulation otherwise, which is far slower);
+- the test kernel built once with `test/qemu/scripts/build-kernel.sh` (see
+  `test/qemu/README.md` for what it needs and how long it takes).
+
 ```
 bazel build //...
-bazel test //...
-bazel test --config=asan //...
+bazel test //...                       # everything: unit + e2e, all in QEMU
+bazel test --config=asan //dcfs:...
 ```
 
-End-to-end tests run under QEMU:
-
-```
-bazel test --config=qemu //test/qemu/...
-```
-
-The QEMU tests are not yet present in this tree.
+Unit-test VMs boot in well under a second (see `test/qemu/README.md`);
+e2e tests (tagged `e2e`) are bigger and slower but run the same way, with
+no separate `--config` needed.
 
 Use `tools/format.sh` to format the source before sending a change.
 
