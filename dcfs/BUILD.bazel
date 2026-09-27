@@ -4,7 +4,6 @@ cc_binary(
     name = "main",
     srcs = ["main.cc"],
     deps = [
-      ":mount_table",
       ":attributes",
       ":sqlite",
       ":syscalls",
@@ -20,7 +19,6 @@ cc_binary(
       "@absl//absl/status",
       "@absl//absl/strings",
       "@sqlite//:sqlite3",
-      "@util_linux//:libmount",
     ],
 )
 
@@ -115,8 +113,58 @@ cc_library(
 )
 
 cc_library(
-    name = "device_uuid",
-    hdrs = ["device_uuid.h"],
+    name = "device_id",
+    srcs = ["device_id.cc"],
+    hdrs = ["device_id.h"],
+    deps = [
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@absl//absl/strings:str_format",
+    ],
+)
+
+cc_test(
+    name = "device_id_test",
+    srcs = ["device_id_test.cc"],
+    deps = [
+      ":device_id",
+      ":status",
+      "@absl//absl/hash",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
+    name = "mount_fds",
+    srcs = ["mount_fds.cc"],
+    hdrs = ["mount_fds.h"],
+    deps = [
+      ":device_id",
+      ":syscalls",
+      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "mount_fds_test",
+    srcs = ["mount_fds_test.cc"],
+    deps = [
+      ":device_id",
+      ":mount_fds",
+      ":syscalls",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@googletest//:gtest_main",
+    ],
 )
 
 cc_library(
@@ -147,8 +195,6 @@ cc_library(
     hdrs = ["file_handle.h"],
     deps = [
       ":memory",
-      ":device_uuid",
-      ":mount_fd_cache",
       ":ret_check",
       ":status",
       ":syscalls",
@@ -158,7 +204,6 @@ cc_library(
       "@absl//absl/status",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
-      "@util_linux//:libmount",
     ],
 )
 
@@ -178,36 +223,6 @@ cc_library(
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
       "@absl//absl/strings:str_format",
-    ],
-)
-
-cc_library(
-    name = "mount_fd_cache",
-    srcs = ["mount_fd_cache.cc"],
-    hdrs = ["mount_fd_cache.h"],
-    deps = [
-      ":device_uuid",
-      ":syscalls",
-      ":attributes",
-      "@absl//absl/base:core_headers",
-      "@absl//absl/container:flat_hash_map",
-      "@absl//absl/status:statusor",
-      "@absl//absl/synchronization",
-    ],
-)
-
-cc_library(
-    name = "mount_table",
-    srcs = ["mount_table.cc"],
-    hdrs = ["mount_table.h"],
-    deps = [
-      ":status",
-      "@absl//absl/cleanup",
-      "@absl//absl/functional:function_ref",
-      "@absl//absl/status",
-      "@absl//absl/status:statusor",
-      "@absl//absl/strings",
-      "@util_linux//:libmount",
     ],
 )
 

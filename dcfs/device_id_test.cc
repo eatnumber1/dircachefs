@@ -1,0 +1,150 @@
+#include "dcfs/device_id.h"
+
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <array>
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
+
+#include "absl/hash/hash.h"
+#include "absl/status/status.h"
+#include "absl/status/status_matchers.h"
+#include "absl/status/statusor.h"
+#include "dcfs/status.h"
+#include "gmock/gmock.h"
+#include "gtest/gtest.h"
+
+namespace dcfs {
+namespace {
+
+using ::absl_testing::IsOk;
+using ::absl_testing::StatusIs;
+using ::testing::HasSubstr;
+
+constexpr std::array<uint8_t, 16> kZeroUuid{};
+
+TEST(DeviceIdTest, SerializeParseRoundTrip) {
+  DeviceId id;
+  id.uuid = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+             0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10};
+  id.subvol_id = 0x1122334455667788ULL;
+
+  std::string serialized = id.Serialize();
+  ASSERT_EQ(serialized.size(), 24u);
+
+  absl::StatusOr<DeviceId> parsed = DeviceId::Parse(serialized);
+  ASSERT_THAT(parsed, IsOk());
+  EXPECT_EQ(*parsed, id);
+}
+
+TEST(DeviceIdTest, SerializeParseRoundTripZeroSubvol) {
+  DeviceId id;
+  id.uuid = {0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88,
+             0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00};
+  id.subvol_id = 0;
+
+  absl::StatusOr<DeviceId> parsed = DeviceId::Parse(id.Serialize());
+  ASSERT_THAT(parsed, IsOk());
+  EXPECT_EQ(*parsed, id);
+}
+
+TEST(DeviceIdTest, ParseRejectsWrongLength) {
+  EXPECT_THAT(DeviceId::Parse(""),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+  EXPECT_THAT(DeviceId::Parse("short"),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+  EXPECT_THAT(DeviceId::Parse(std::string(25, 'x')),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(DeviceIdTest, EqualityAndHashing) {
+  DeviceId a;
+  a.uuid.fill(0x42);
+  a.subvol_id = 7;
+
+  DeviceId b = a;
+  EXPECT_EQ(a, b);
+  EXPECT_EQ(absl::HashOf(a), absl::HashOf(b));
+
+  DeviceId different_subvol = a;
+  different_subvol.subvol_id = 8;
+  EXPECT_NE(a, different_subvol);
+
+  DeviceId different_uuid = a;
+  different_uuid.uuid[0] ^= 0xFF;
+  EXPECT_NE(a, different_uuid);
+}
+
+TEST(DeviceIdTest, FstypeNameKnown) {
+  EXPECT_EQ(FstypeName(0xEF53), "ext2/3/4");
+  EXPECT_EQ(FstypeName(0x58465342), "xfs");
+  EXPECT_EQ(FstypeName(0x9123683E), "btrfs");
+  EXPECT_EQ(FstypeName(0x01021994), "tmpfs");
+  EXPECT_EQ(FstypeName(0x2FC12FC1), "zfs");
+  EXPECT_EQ(FstypeName(0x6969), "nfs");
+  EXPECT_EQ(FstypeName(0x65735546), "fuse");
+  EXPECT_EQ(FstypeName(0x794C7630), "overlayfs");
+  EXPECT_EQ(FstypeName(0xF2F52010), "f2fs");
+  EXPECT_EQ(FstypeName(0xCA451A4E), "bcachefs");
+}
+
+TEST(DeviceIdTest, FstypeNameUnknown) {
+  EXPECT_THAT(FstypeName(0x12345678), HasSubstr("0x12345678"));
+}
+
+// Opens `path` O_PATH and returns the DeviceId GetDeviceId() computes for
+// it, or the failing status (including from open() itself).
+absl::StatusOr<DeviceId> GetDeviceIdForPath(const char *path) {
+  int fd = open(path, O_PATH | O_CLOEXEC);
+  if (fd < 0) return ErrnoToStatus(errno, path);
+  absl::StatusOr<DeviceId> id = GetDeviceId(fd);
+  close(fd);
+  return id;
+}
+
+TEST(DeviceIdTest, GetDeviceIdRoot) {
+  absl::StatusOr<DeviceId> id = GetDeviceIdForPath("/");
+  if (!id.ok() && absl::IsUnimplemented(id.status())) {
+    // Expected on this host: kernel 6.8 predates FS_IOC_GETFSUUID (6.9+).
+    GTEST_SKIP() << id.status();
+  }
+  ASSERT_THAT(id, IsOk());
+  EXPECT_NE(id->uuid, kZeroUuid);
+
+  // A second O_PATH fd on the same directory must yield an equal id.
+  absl::StatusOr<DeviceId> id2 = GetDeviceIdForPath("/");
+  ASSERT_THAT(id2, IsOk());
+  EXPECT_EQ(*id, *id2);
+}
+
+TEST(DeviceIdTest, GetDeviceIdTestTmpDir) {
+  const char *tmpdir = std::getenv("TEST_TMPDIR");
+  ASSERT_NE(tmpdir, nullptr)
+      << "TEST_TMPDIR must be set when running under bazel test";
+
+  absl::StatusOr<DeviceId> id = GetDeviceIdForPath(tmpdir);
+  if (!id.ok() && absl::IsUnimplemented(id.status())) {
+    // Expected on this host: kernel 6.8 predates FS_IOC_GETFSUUID (6.9+).
+    GTEST_SKIP() << id.status();
+  }
+  ASSERT_THAT(id, IsOk());
+  EXPECT_NE(id->uuid, kZeroUuid);
+}
+
+// Asserts the *current* pre-FS_IOC_GETFSUUID-support OpenZFS behavior.
+// Flip this to a success assertion once OpenZFS ships FS_IOC_GETFSUUID.
+TEST(DeviceIdTest, GetDeviceIdZfsIsUnimplemented) {
+  const char *zfs_path = std::getenv("DCFS_TEST_ZFS_PATH");
+  if (zfs_path == nullptr) {
+    GTEST_SKIP() << "DCFS_TEST_ZFS_PATH not set";
+  }
+
+  absl::StatusOr<DeviceId> id = GetDeviceIdForPath(zfs_path);
+  EXPECT_THAT(id, StatusIs(absl::StatusCode::kUnimplemented, HasSubstr("zfs")));
+}
+
+}  // namespace
+}  // namespace dcfs
