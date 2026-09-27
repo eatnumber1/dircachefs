@@ -3,15 +3,13 @@
 
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
-#include <concepts>
 #include <span>
 #include <string>
 #include <sys/stat.h>
-#include <type_traits>
+#include <sys/statvfs.h>
 #include <utility>
 #include <string_view>
 
-#include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/time/time.h"
 #include "absl/log/log.h"
@@ -72,84 +70,24 @@ class FuseRequest {
       fuse_ino_t ino, uint64_t generation, struct stat attr,
       absl::Duration attr_timeout, absl::Duration entry_timeout);
 
-  // Implemnetation details -- helpers for the OpFns below
+  absl::Status ReplyStatfs(const struct statvfs &stbuf);
+
+  // A reply that carries no result, used by ops (e.g. forget) that must not
+  // send a normal reply at all.
+  void ReplyNone();
+
+  // Implementation details -- helpers for the ops table in dir_cache_fs.cc.
+  //
+  // ReplyFailureAndLogIfNotOk is for ops (e.g. getattr, lookup) whose method
+  // implementation replies on its own on success, and only needs the
+  // trampoline to reply with an error if the method returned a non-ok status
+  // without having replied itself.
   void ReplyFailureAndLogIfNotOk(const absl::Status &status);
+  // ReplyAlwaysAndLogIfNotOk is for ops (e.g. releasedir) that always need an
+  // errno reply, whether or not the method's status was ok.
   void ReplyAlwaysAndLogIfNotOk(const absl::Status &status);
  private:
   std::optional<fuse_req_t> req_;
-};
-
-template <typename T>
-const fuse_lowlevel_ops AsFuseLowLevelOps();
-
-template <typename T>
-concept FuseInitOp = requires(T t) {
-  {
-    t.Init(
-        std::declval<std::add_lvalue_reference_t<fuse_conn_info>>())
-  } -> std::same_as<absl::Status>;
-};
-template <typename T>
-concept FuseDestroyOp = requires(T t) {
-  { t.Destroy() } -> std::same_as<absl::Status>;
-};
-template <typename T>
-concept FuseGetattrOp = requires(T t) {
-  {
-    t.Getattr(
-        std::declval<std::add_lvalue_reference_t<FuseRequest>>(),
-        fuse_ino_t{},
-        std::declval<fuse_file_info*>())
-  } -> std::same_as<absl::Status>;
-};
-template <typename T>
-concept FuseOpendirOp = requires(T t) {
-  {
-    t.Opendir(
-        std::declval<std::add_lvalue_reference_t<FuseRequest>>(),
-        fuse_ino_t{},
-        std::declval<std::add_lvalue_reference_t<fuse_file_info>>())
-  } -> std::same_as<absl::Status>;
-};
-template <typename T>
-concept FuseReleasedirOp = requires(T t) {
-  {
-    t.Releasedir(
-        std::declval<std::add_lvalue_reference_t<FuseRequest>>(),
-        fuse_ino_t{},
-        std::declval<std::add_lvalue_reference_t<fuse_file_info>>())
-  } -> std::same_as<absl::Status>;
-};
-template <typename T>
-concept FuseReaddirOp = requires(T t) {
-  {
-    t.Readdir(
-        std::declval<std::add_lvalue_reference_t<FuseRequest>>(),
-        fuse_ino_t{},
-        size_t{},
-        off_t{},
-        std::declval<std::add_lvalue_reference_t<fuse_file_info>>())
-  } -> std::same_as<absl::Status>;
-};
-template <typename T>
-concept FuseReaddirplusOp = requires(T t) {
-  {
-    t.Readdirplus(
-        std::declval<std::add_lvalue_reference_t<FuseRequest>>(),
-        fuse_ino_t{},
-        size_t{},
-        off_t{},
-        std::declval<std::add_lvalue_reference_t<fuse_file_info>>())
-  } -> std::same_as<absl::Status>;
-};
-template <typename T>
-concept FuseLookupOp = requires(T t) {
-  {
-    t.Lookup(
-        std::declval<std::add_lvalue_reference_t<FuseRequest>>(),
-        fuse_ino_t{},
-        std::string_view{})
-  } -> std::same_as<absl::Status>;
 };
 
 struct LogFuseFileInfo {
@@ -165,122 +103,6 @@ struct LogFuseFileInfo {
 };
 
 // implementation details below
-
-template <FuseInitOp T>
-auto GetFuseInitOp() {
-  return [](void *userdata, fuse_conn_info *conn) {
-    CHECK_NE(userdata, nullptr);
-    CHECK_NE(conn, nullptr);
-    absl::Status s = static_cast<T*>(userdata)->Init(*conn);
-    LOG_IF(ERROR, !s.ok()) << s;
-  };
-}
-template <typename Others>
-auto GetFuseInitOp() { return nullptr; }
-
-template <FuseDestroyOp T>
-auto GetFuseDestroyOp() {
-  return [](void *userdata) {
-    CHECK_NE(userdata, nullptr);
-    absl::Status s = static_cast<T*>(userdata)->Destroy();
-    LOG_IF(ERROR, !s.ok()) << s;
-  };
-}
-template <typename>
-auto GetFuseDestroyOp() { return nullptr; }
-
-template <FuseGetattrOp T>
-auto GetFuseGetattrOp() {
-  return [](fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-    auto *t = static_cast<T*>(fuse_req_userdata(req));
-    CHECK_NE(t, nullptr);
-    FuseRequest fr(req);
-    fr.ReplyFailureAndLogIfNotOk(t->Getattr(fr, ino, fi));
-  };
-}
-template <typename>
-auto GetFuseGetattrOp() { return nullptr; }
-
-template <FuseOpendirOp T>
-auto GetFuseOpendirOp() {
-  return [](fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-    CHECK_NE(fi, nullptr);
-    auto *t = static_cast<T*>(fuse_req_userdata(req));
-    CHECK_NE(t, nullptr);
-    FuseRequest fr(req);
-    fr.ReplyFailureAndLogIfNotOk(t->Opendir(fr, ino, *fi));
-  };
-}
-template <typename>
-auto GetFuseOpendirOp() { return nullptr; }
-
-template <FuseReaddirOp T>
-auto GetFuseReaddirOp() {
-  return [](fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
-            fuse_file_info *fi) {
-    CHECK_NE(fi, nullptr);
-    auto *t = static_cast<T*>(fuse_req_userdata(req));
-    CHECK_NE(t, nullptr);
-    FuseRequest fr(req);
-    fr.ReplyFailureAndLogIfNotOk(t->Readdir(fr, ino, size, off, *fi));
-  };
-}
-template <typename>
-auto GetFuseReaddirOp() { return nullptr; }
-
-template <FuseReaddirplusOp T>
-auto GetFuseReaddirplusOp() {
-  return [](fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
-            fuse_file_info *fi) {
-    CHECK_NE(fi, nullptr);
-    auto *t = static_cast<T*>(fuse_req_userdata(req));
-    CHECK_NE(t, nullptr);
-    FuseRequest fr(req);
-    fr.ReplyFailureAndLogIfNotOk(t->Readdirplus(fr, ino, size, off, *fi));
-  };
-}
-template <typename>
-auto GetFuseReaddirplusOp() { return nullptr; }
-
-template <FuseReleasedirOp T>
-auto GetFuseReleasedirOp() {
-  return [](fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-    CHECK_NE(fi, nullptr);
-    auto *t = static_cast<T*>(fuse_req_userdata(req));
-    CHECK_NE(t, nullptr);
-    FuseRequest fr(req);
-    fr.ReplyAlwaysAndLogIfNotOk(t->Releasedir(fr, ino, *fi));
-  };
-}
-template <typename>
-auto GetFuseReleasedirOp() { return nullptr; }
-
-template <FuseLookupOp T>
-auto GetFuseLookupOp() {
-  return [](fuse_req_t req, fuse_ino_t parent, const char *name) {
-    auto *t = static_cast<T*>(fuse_req_userdata(req));
-    CHECK_NE(t, nullptr);
-    FuseRequest fr(req);
-    fr.ReplyFailureAndLogIfNotOk(t->Lookup(fr, parent, name));
-  };
-}
-template <typename>
-auto GetFuseLookupOp() { return nullptr; }
-
-template <typename T>
-const fuse_lowlevel_ops AsFuseLowLevelOps() {
-  fuse_lowlevel_ops ops = {
-    .init = GetFuseInitOp<T>(),
-    .destroy = GetFuseDestroyOp<T>(),
-    .lookup = GetFuseLookupOp<T>(),
-    .getattr = GetFuseGetattrOp<T>(),
-    .opendir = GetFuseOpendirOp<T>(),
-    .readdir = GetFuseReaddirOp<T>(),
-    .releasedir = GetFuseReleasedirOp<T>(),
-    .readdirplus = GetFuseReaddirplusOp<T>(),
-  };
-  return ops;
-}
 
 template <typename Sink>
 void AbslStringify(Sink &sink, const LogFuseFileInfo &lfi) {

@@ -5,11 +5,10 @@ cc_binary(
     srcs = ["main.cc"],
     deps = [
       ":attributes",
-      ":sqlite",
       ":syscalls",
       ":fuse",
       ":dir_cache_fs",
-      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/cleanup",
       "@absl//absl/flags:flag",
       "@absl//absl/flags:parse",
       "@absl//absl/flags:usage",
@@ -17,8 +16,9 @@ cc_binary(
       "@absl//absl/log:flags",
       "@absl//absl/log:initialize",
       "@absl//absl/status",
+      "@absl//absl/status:statusor",
       "@absl//absl/strings",
-      "@sqlite//:sqlite3",
+      "@libfuse//:libfuse",
     ],
 )
 
@@ -53,16 +53,6 @@ cc_library(
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
       "@absl//absl/strings:cord",
-    ],
-)
-
-cc_library(
-    name = "mount",
-    srcs = ["mount.cc"],
-    hdrs = ["mount.h"],
-    deps = [
-      ":syscalls",
-      "@absl//absl/log",
     ],
 )
 
@@ -127,6 +117,7 @@ cc_library(
 
 cc_test(
     name = "device_id_test",
+    size = "small",
     srcs = ["device_id_test.cc"],
     deps = [
       ":device_id",
@@ -155,6 +146,7 @@ cc_library(
 
 cc_test(
     name = "mount_fds_test",
+    size = "small",
     srcs = ["mount_fds_test.cc"],
     deps = [
       ":device_id",
@@ -173,56 +165,14 @@ cc_library(
     hdrs = ["dir_cache_fs.h"],
     deps = [
       ":attributes",
-      ":file_handle",
-      ":fs_db",
       ":fuse",
-      ":ret_check",
       ":status",
       ":syscalls",
-      "@absl//absl/cleanup",
       "@absl//absl/log",
-      "@absl//absl/log:die_if_null",
+      "@absl//absl/log:check",
       "@absl//absl/status",
-      "@absl//absl/strings",
-      "@absl//absl/time",
+      "@absl//absl/status:statusor",
       "@libfuse//:libfuse",
-    ],
-)
-
-cc_library(
-    name = "file_handle",
-    srcs = ["file_handle.cc"],
-    hdrs = ["file_handle.h"],
-    deps = [
-      ":memory",
-      ":ret_check",
-      ":status",
-      ":syscalls",
-      "@absl//absl/cleanup",
-      "@absl//absl/functional:function_ref",
-      "@absl//absl/log:die_if_null",
-      "@absl//absl/status",
-      "@absl//absl/status:statusor",
-      "@absl//absl/strings",
-    ],
-)
-
-cc_library(
-    name = "fs_db",
-    srcs = ["fs_db.cc"],
-    hdrs = ["fs_db.h"],
-    deps = [
-      ":attributes",
-      ":file_handle",
-      ":ret_check",
-      ":sqlite",
-      ":status",
-      "@absl//absl/cleanup",
-      "@absl//absl/container:flat_hash_map",
-      "@absl//absl/log:die_if_null",
-      "@absl//absl/status:statusor",
-      "@absl//absl/strings",
-      "@absl//absl/strings:str_format",
     ],
 )
 
@@ -241,12 +191,14 @@ cc_library(
 
 cc_test(
     name = "smoke_test",
+    size = "small",
     srcs = ["smoke_test.cc"],
     deps = ["@googletest//:gtest_main"],
 )
 
 cc_test(
     name = "libfuse_version_test",
+    size = "small",
     srcs = ["libfuse_version_test.cc"],
     deps = [
       "@googletest//:gtest_main",

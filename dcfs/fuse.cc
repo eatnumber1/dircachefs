@@ -192,6 +192,22 @@ absl::Status FuseRequest::ReplyEntry(
   return st;
 }
 
+absl::Status FuseRequest::ReplyStatfs(const struct statvfs &stbuf) {
+  if (!req_) return absl::OkStatus();
+  absl::Status st =
+    absl::ErrnoToStatus(
+        -fuse_reply_statfs(*req_, &stbuf),
+        "fuse_reply_statfs");
+  req_ = std::nullopt;
+  return st;
+}
+
+void FuseRequest::ReplyNone() {
+  if (!req_) return;
+  fuse_reply_none(*req_);
+  req_ = std::nullopt;
+}
+
 LogFuseFileInfo::LogFuseFileInfo(fuse_file_info *fi) : fi_(fi) {}
 LogFuseFileInfo::LogFuseFileInfo(fuse_file_info &fi) : LogFuseFileInfo(&fi) {}
 

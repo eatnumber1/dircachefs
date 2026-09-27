@@ -1,74 +1,61 @@
 #ifndef DCFS_DIR_CACHE_FS_H_
 #define DCFS_DIR_CACHE_FS_H_
 
-#include <stddef.h>
+#include <cstdint>
+#include <string_view>
 #include <sys/types.h>
 
 #include "absl/status/status.h"
-#include "absl/time/time.h"
 #include "dcfs/attributes.h"
-#include "dcfs/file_handle.h"
-#include "dcfs/fs_db.h"
+#include "dcfs/fd.h"
 #include "dcfs/fuse.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
 
+// DirCacheFS is a minimal, mechanical placeholder low-level FUSE filesystem.
+// It serves a single, empty root directory backed directly by `source_fd_`;
+// no metadata cache or database is wired up yet (that lands in later steps --
+// see README.md for the overall design). Anything not implemented here is
+// answered ENOSYS by libfuse.
 class DirCacheFS {
  public:
-  struct Options {
-    absl::Duration kernel_inode_attribute_timeout = absl::ZeroDuration();
-    absl::Duration kernel_directory_entry_timeout = absl::ZeroDuration();
-  };
-
-  using InodeID = ::dcfs::FileSystemDatabase::InodeID;
-
-  DirCacheFS(
-      FileHandle::Builder *absl_nonnull handle_builder,
-      FileSystemDatabase *absl_nonnull fs_db,
-      InodeID root_inode,
-      Options opts);
+  // `source_fd` must be open O_PATH | O_DIRECTORY on the directory this
+  // filesystem is caching.
+  explicit DirCacheFS(FileDescriptor source_fd);
 
   absl::Status Init(struct fuse_conn_info &conn);
-  static_assert(FuseInitOp<DirCacheFS>);
-
   absl::Status Destroy();
-  static_assert(FuseDestroyOp<DirCacheFS>);
 
+  // Only fuse_ino_t{FUSE_ROOT_ID} exists; anything else is ENOENT.
   absl::Status Getattr(FuseRequest &req, fuse_ino_t ino, fuse_file_info *fi);
-  static_assert(FuseGetattrOp<DirCacheFS>);
+
+  // There are no entries under the root yet, so every lookup is a negative
+  // (ENOENT) reply.
+  absl::Status Lookup(
+      FuseRequest &req, fuse_ino_t parent_ino, std::string_view name);
 
   absl::Status Opendir(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi);
-  static_assert(FuseGetattrOp<DirCacheFS>);
-
-  absl::Status Releasedir(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi);
-  static_assert(FuseReleasedirOp<DirCacheFS>);
-
   absl::Status Readdir(
       FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
       fuse_file_info &fi);
-  static_assert(FuseReaddirOp<DirCacheFS>);
+  absl::Status Releasedir(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi);
 
-#if 0
-  absl::Status Readdirplus(
-      FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
-      fuse_file_info &fi);
-  static_assert(FuseReaddirplusOp<DirCacheFS>);
-#endif
+  absl::Status Statfs(FuseRequest &req, fuse_ino_t ino);
 
-  absl::Status Lookup(
-      FuseRequest &req, fuse_ino_t parent_ino, std::string_view name);
-  static_assert(FuseLookupOp<DirCacheFS>);
+  // Access checks are not implemented yet; everything is allowed.
+  absl::Status Access(FuseRequest &req, fuse_ino_t ino, int mask);
+
+  // No inode table exists yet, so there is nothing to do on forget.
+  void Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup);
 
  private:
-  absl::StatusOr<InodeID> FuseToInode(fuse_ino_t ino) const;
-  fuse_ino_t InodeToFuse(InodeID inode) const;
-
-  FileSystemDatabase &fs_db_;
-  FileHandle::Builder &handle_builder_;
-  InodeID root_inode_;
-  const Options opts_;
+  FileDescriptor source_fd_;
 };
+
+// Builds the fuse_lowlevel_ops table dispatching to a DirCacheFS instance
+// passed as the `userdata`/`fuse_req_userdata` pointer.
+fuse_lowlevel_ops MakeDirCacheFsOps();
 
 }  // namespace dcfs
 

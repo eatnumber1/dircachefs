@@ -13,9 +13,16 @@
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "sqlite3.h"
 #include "dcfs/attributes.h"
+#include "dcfs/status.h"
 
+// The C sqlite3 API declares a type named `sqlite3` (see <sqlite3.h>) at
+// global scope, so this namespace cannot also be named `sqlite3` at global
+// scope. Nest it under `dcfs` instead.
+namespace dcfs {
 namespace sqlite3 {
 
 class Connection;
@@ -28,9 +35,6 @@ class Statement {
 
   static absl::StatusOr<Statement> Prepare(
       Connection &db, std::string_view sql, unsigned int flags = 0);
-  // Prepares a new statement with the same sql as `stmt`.
-  static absl::StatusOr<Statement> Prepare(
-      const Statement &stmt, unsigned int flags = 0);
 
   // The return status from Reset indicates whether or not the previous
   // evaluation of this prepared statement completed successfully.
@@ -172,8 +176,8 @@ class Statement {
   template <typename T>
   absl::StatusOr<T> StepOneCellThenDone(int column_index);
 
-  absl::StatusOr<std::string> GetExpandedSql() const;
-  absl::StatusOr<std::string_view> GetSql() const;
+  std::string GetExpandedSql() const;
+  std::string_view GetSql() const;
 
   template <typename Sink>
   friend void AbslStringify(Sink &sink, const Statement &stmt);
@@ -213,12 +217,13 @@ class Statement {
 };
 
 class WithSavepoint {
+ public:
   static absl::StatusOr<WithSavepoint> Create(
-      Sqlite3 *absl_nonnull db,
+      Connection *absl_nonnull db,
       std::source_location loc = std::source_location::current());
 
   static absl::StatusOr<WithSavepoint> Create(
-      Sqlite3 *absl_nonnull db, std::string name);
+      Connection *absl_nonnull db, std::string name);
 
   WithSavepoint() = default;
 
@@ -270,8 +275,8 @@ class Connection {
       std::string_view filename, int flags = 0,
       std::optional<std::string_view> vfs = std::nullopt);
 
-  sqlite3 &operator*();
-  sqlite3 *Get();
+  ::sqlite3 &operator*();
+  ::sqlite3 *Get();
 
   absl::Status LastError();
 
@@ -293,9 +298,9 @@ class Connection {
   Connection &operator=(const Connection &) = delete;
 
  private:
-  Connection(sqlite3 &db);
+  Connection(::sqlite3 &db);
 
-  sqlite3 *db_ = nullptr;
+  ::sqlite3 *db_ = nullptr;
 };
 
 absl::Status Sqlite3ErrorCodeToStatus(int err);
@@ -371,8 +376,8 @@ constexpr inline absl::StatusOr<T> Statement::Column(std::string_view name) {
 
 template <typename T>
 absl::StatusOr<T> Statement::StepOneCellThenDone(int column_index) {
-  ASSIGN_OR_RETURN(StepResult res, stmt.Step());
-  WithStatementReset reset(&stmt);
+  ASSIGN_OR_RETURN(StepResult res, Step());
+  WithStatementReset reset(this);
 
   if (res != StepResult::kRow) {
     return absl::InternalError(
@@ -388,7 +393,7 @@ absl::StatusOr<T> Statement::StepOneCellThenDone(int column_index) {
 template <typename T>
 absl::StatusOr<T> Statement::StepOneCellThenDone(std::string_view column_name) {
   ASSIGN_OR_RETURN(int index, GetColumnIndex(column_name));
-  return StepOneCellThenDone(index);
+  return StepOneCellThenDone<T>(index);
 }
 
 template <typename Sink>
@@ -412,5 +417,6 @@ void AbslStringify(Sink &sink, const Statement &stmt) {
 }
 
 }  // namespace sqlite3
+}  // namespace dcfs
 
 #endif  // DCFS_SQLITE_H_

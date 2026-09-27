@@ -206,6 +206,7 @@ absl::StatusOr<long> telldir(DIR &dir) {
 absl::StatusOr<int> dirfd(DIR &dir) {
   int fd = ::dirfd(&dir);
   if (fd == -1) return ErrnoToStatus(errno, "dirfd");
+  return fd;
 }
 
 absl::StatusOr<ssize_t> getdents64(int fd, void *dirp, size_t count) {

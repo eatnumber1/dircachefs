@@ -1,188 +1,106 @@
-#include <cstdint>
 #include <cstdlib>
+#include <fcntl.h>
 #include <iostream>
-#include <string_view>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "absl/cleanup/cleanup.h"
-#include "absl/container/flat_hash_map.h"
-#include "absl/strings/str_cat.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
-#include "absl/log/check.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
-#include "absl/time/time.h"
-#include "dcfs/fd.h"
-#include "dcfs/fuse.h"
-#include "dcfs/sqlite.h"
-#include "dcfs/syscalls.h"
-#include "dcfs/mount_table.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "dcfs/attributes.h"
 #include "dcfs/dir_cache_fs.h"
+#include "dcfs/fd.h"
+#include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
-#include "sqlite3.h"
-#include "libmount.h"
 
-ABSL_FLAG(std::string, database, ":memory:", "Path to the database file.");
-ABSL_FLAG(absl::Duration, kernel_inode_attribute_timeout, absl::ZeroDuration(), "How long the kernel can cache inode attributes.");
-ABSL_FLAG(absl::Duration, kernel_directory_entry_timeout, absl::ZeroDuration(), "How long the kernel can cache inode attributes.");
-ABSL_FLAG(std::string, cache_of, "", "Path that this dircachefs will cache. Defaults to caching the directory being mounted over.");
+// This is a mechanical, minimal skeleton (see the step 0.5 plan): no
+// database, no metadata cache, and no `-o` mount-option passthrough yet. It
+// only needs to mount, answer stat()/ls on an empty root, and unmount
+// cleanly.
+ABSL_FLAG(
+    std::string, source, "",
+    "Directory this filesystem caches. Required.");
+ABSL_FLAG(
+    bool, foreground, true,
+    "Stay in the foreground instead of daemonizing.");
 
 namespace dcfs {
 namespace {
 
-using InodeID = ::dcfs::FileSystemDatabase::InodeID;
-
-absl::StatusOr<
-    std::unique_ptr<libmnt_cache, decltype(&mnt_unref_cache)> absl_nonnull>
-    NewMountCache() {
-  libmnt_cache *mc = mnt_new_cache();
-  if (mc == nullptr) return absl::UnknownError("mnt_new_cache");
-  return std::unique_ptr<libmnt_cache, decltype(&mnt_unref_cache)>(
-      mc, mnt_unref_cache);
-}
-
 absl::StatusOr<int> Main(int argc, char *argv[]) {
-  absl::SetProgramUsageMessage("[flags] -- [fuse_flags] mountpoint");
-  std::vector<char*> args = absl::ParseCommandLine(argc, argv);
+  absl::SetProgramUsageMessage("--source=<dir> [flags] mountpoint");
+  std::vector<char *> args = absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
 
-  for (int i = 0; i < args.size(); i++) {
-    LOG(INFO) << "argv[" << i << "]=\"" << args[i] << "\"";
+  std::string source = absl::GetFlag(FLAGS_source);
+  if (source.empty()) {
+    return absl::InvalidArgumentError("--source is required");
   }
 
-  //argc = args.size();
-  //args.push_back(nullptr);
-  //argv = args.data();
+  // args[0] is the program name; exactly one positional argument (the
+  // mountpoint) should remain after flag parsing.
+  if (args.size() != 2) {
+    return absl::InvalidArgumentError(
+        absl::StrCat(
+          "expected exactly one mountpoint argument, got ", args.size() - 1));
+  }
+  const char *mountpoint = args[1];
 
-  // TODO safe cast args.size()
-  struct fuse_args fuse_args = FUSE_ARGS_INIT(static_cast<int>(args.size()), args.data());
+  ASSIGN_OR_RETURN(
+      FileDescriptor source_fd,
+      syscalls::openat(AT_FDCWD, source, O_PATH | O_DIRECTORY));
+
+  DirCacheFS fs(std::move(source_fd));
+
+  // fuse_session_new() requires a non-empty argv (it wants a program name);
+  // we don't support any FUSE `-o` style options yet, so pass only argv[0].
+  struct fuse_args fuse_args = FUSE_ARGS_INIT(1, args.data());
   absl::Cleanup cleanup_fuse_args = [&fuse_args]() {
     fuse_opt_free_args(&fuse_args);
   };
 
-  struct fuse_cmdline_opts fuse_opts;
-  if (fuse_parse_cmdline(&fuse_args, &fuse_opts) != 0) return EXIT_FAILURE;
-  absl::Cleanup cleanup_fuse_opts = [&fuse_opts]() {
-    free(fuse_opts.mountpoint);
+  struct fuse_lowlevel_ops ops = MakeDirCacheFsOps();
+  struct fuse_session *session =
+      fuse_session_new(&fuse_args, &ops, sizeof(ops), &fs);
+  if (session == nullptr) {
+    return absl::InternalError("fuse_session_new failed");
+  }
+  absl::Cleanup cleanup_session = [session]() {
+    fuse_session_destroy(session);
   };
 
-  if (fuse_opts.show_help) {
-    fuse_cmdline_help();
-    fuse_lowlevel_help();
-    return EXIT_SUCCESS;
+  if (fuse_set_signal_handlers(session) != 0) {
+    return absl::InternalError("fuse_set_signal_handlers failed");
   }
-
-  if (fuse_opts.show_version) {
-    std::cerr << "FUSE library version " << fuse_pkgversion() << std::endl;
-    fuse_lowlevel_version();
-    return EXIT_SUCCESS;
-  }
-
-  if (fuse_opts.mountpoint == nullptr) {
-    std::cerr << "TODO usage here" << std::endl;
-    return EXIT_FAILURE;
-  }
-
-  std::string database_uri = absl::GetFlag(FLAGS_database);
-  if (database_uri.empty()) {
-    std::cerr << "TODO specify the db path" << std::endl;
-    return EXIT_FAILURE;
-  }
-
-  int db_open_flags =
-    SQLITE_OPEN_FULLMUTEX | SQLITE_OPEN_URI | SQLITE_OPEN_CREATE |
-    SQLITE_OPEN_READWRITE;
-
-  ASSIGN_OR_RETURN(
-      sqlite3::Connection db, sqlite3::Connection::Open(database_uri, db_open_flags));
-
-  ASSIGN_OR_RETURN(auto mt, CreateMountTableFromMtab());
-  std::unique_ptr<libmnt_table, decltype(&mnt_unref_table)> mtab =
-    std::move(mt);
-
-  ASSIGN_OR_RETURN(auto mc, NewMountCache());
-  std::unique_ptr<libmnt_cache, decltype(&mnt_unref_cache)> mnt_cache =
-    std::move(mc);
-
-  MountFDCache mnt_fd_cache;
-
-  FileHandle::Builder handle_builder(
-      mtab.get(), mnt_cache.get(), &mnt_fd_cache);
-
-  ASSIGN_OR_RETURN(
-      auto cacheof_path,
-      [&]() -> absl::StatusOr<std::string> {
-        std::string cacheof_path = absl::GetFlag(FLAGS_cache_of);
-        if (cacheof_path.empty()) cacheof_path = fuse_opts.mountpoint;
-        return cacheof_path;
-      }());
-  ASSIGN_OR_RETURN(
-      FileHandle root_handle,
-      handle_builder.MakeHandle(AT_FDCWD, cacheof_path));
-  ASSIGN_OR_RETURN(
-      auto fs_db,
-      FileSystemDatabase::Create(&db, &handle_builder, root_handle));
-  ASSIGN_OR_RETURN(
-      InodeID root_inode, fs_db.InsertRootDirectory(root_handle));
-
-  DirCacheFS dcfs(
-      &handle_builder, &fs_db, root_inode,
-      {
-        .kernel_inode_attribute_timeout =
-            absl::GetFlag(FLAGS_kernel_inode_attribute_timeout),
-        .kernel_directory_entry_timeout =
-            absl::GetFlag(FLAGS_kernel_directory_entry_timeout),
-      });
-
-  struct fuse_lowlevel_ops dcfs_ops = AsFuseLowLevelOps<DirCacheFS>();
-  struct fuse_session *fuse_session =
-      fuse_session_new(&fuse_args, &dcfs_ops, sizeof(dcfs_ops), &dcfs);
-  if (fuse_session == nullptr) return EXIT_FAILURE;
-  absl::Cleanup cleanup_fuse_session = [fuse_session]() {
-    fuse_session_destroy(fuse_session);
+  absl::Cleanup cleanup_signal_handlers = [session]() {
+    fuse_remove_signal_handlers(session);
   };
 
-  if (fuse_set_signal_handlers(fuse_session) != 0) return EXIT_FAILURE;
-  absl::Cleanup cleanup_fuse_signal_handlers = [fuse_session]() {
-    fuse_remove_signal_handlers(fuse_session);
+  if (fuse_session_mount(session, mountpoint) != 0) {
+    return absl::InternalError(
+        absl::StrCat("fuse_session_mount(", mountpoint, ") failed"));
+  }
+  absl::Cleanup cleanup_mount = [session]() {
+    fuse_session_unmount(session);
   };
 
-  if (fuse_session_mount(fuse_session, fuse_opts.mountpoint) != 0) {
-    return EXIT_FAILURE;
+  // Non-zero (the default) keeps this process in the foreground; zero would
+  // fork to the background.
+  fuse_daemonize(absl::GetFlag(FLAGS_foreground) ? 1 : 0);
+
+  int rc = fuse_session_loop(session);
+  if (rc != 0) {
+    return absl::InternalError(absl::StrCat("fuse_session_loop: ", rc));
   }
-  absl::Cleanup cleanup_fuse_mount = [fuse_session]() {
-    fuse_session_unmount(fuse_session);
-  };
-
-  fuse_daemonize(fuse_opts.foreground);
-
-  if (fuse_opts.singlethread) {
-    return fuse_session_loop(fuse_session);
-  }
-
-  struct fuse_loop_config *loop_config = fuse_loop_cfg_create();
-  CHECK_NE(loop_config, nullptr);
-  absl::Cleanup cleanup_loop_config = [loop_config]() {
-    fuse_loop_cfg_destroy(loop_config);
-  };
-  fuse_loop_cfg_set_clone_fd(loop_config, fuse_opts.clone_fd);
-  fuse_loop_cfg_set_idle_threads(loop_config, fuse_opts.max_idle_threads);
-  fuse_loop_cfg_set_max_threads(loop_config, fuse_opts.max_threads);
-  return fuse_session_loop_mt(fuse_session, loop_config);
-
-#if 0
-  absl::Status st = dcfs.DoStuff(fuse_opts.mountpoint);
-  if (!st.ok()) {
-    std::cerr << st << std::endl;
-    return EXIT_FAILURE;
-  }
-#endif
+  return EXIT_SUCCESS;
 }
 
 }  // namespace

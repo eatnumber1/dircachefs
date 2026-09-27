@@ -10,6 +10,7 @@
 #include "dcfs/status.h"
 #include "dcfs/ret_check.h"
 
+namespace dcfs {
 namespace sqlite3 {
 
 absl::StatusCode Sqlite3ErrorCodeToCanonical(int err) {
@@ -119,7 +120,7 @@ Connection::~Connection() {
 
 absl::StatusOr<Connection> Connection::Open(
     std::string_view filename, int flags, std::optional<std::string_view> vfs) {
-  sqlite3 *db = nullptr;
+  ::sqlite3 *db = nullptr;
   // TODO use SQLITE_OPEN_EXRESCODE
   // TODO use SQLITE_OPEN_NOMUTEX
   absl::Status st =
@@ -145,7 +146,7 @@ absl::StatusOr<Connection> Connection::Open(
   return sdb;
 }
 
-Connection::Connection(sqlite3 &db)
+Connection::Connection(::sqlite3 &db)
   : db_(&db) {}
 
 Connection::Connection(Connection &&o)
@@ -159,8 +160,8 @@ Connection &Connection::operator=(Connection &&o) {
   return *this;
 }
 
-sqlite3 &Connection::operator*() { return *db_; }
-sqlite3 *Connection::Get() { return db_; }
+::sqlite3 &Connection::operator*() { return *db_; }
+::sqlite3 *Connection::Get() { return db_; }
 
 absl::Status Connection::LastError() {
   // Db operations can stomp on the error code and message, so grab them before
@@ -233,19 +234,19 @@ int64_t Connection::LastInsertRowID() {
 }
 
 absl::StatusOr<WithSavepoint> WithSavepoint::Create(
-    Sqlite3 *absl_nonnull db, std::string name) {
+    Connection *absl_nonnull db, std::string name) {
   WithSavepoint ws(std::move(name));
   auto &s = ws.statements_;
 
-  ASSIGN_OR_RETURN(s.savepoint, Statement::Prepare(sdb, "SAVEPOINT @name"));
+  ASSIGN_OR_RETURN(s.savepoint, Statement::Prepare(*db, "SAVEPOINT @name"));
   RETURN_IF_ERROR(s.savepoint.BindBlobUnowned("@name", ws.name_));
 
   ASSIGN_OR_RETURN(
-      s.release, Statement::Prepare(sdb, "RELEASE SAVEPOINT @name"));
+      s.release, Statement::Prepare(*db, "RELEASE SAVEPOINT @name"));
   RETURN_IF_ERROR(s.release.BindBlobUnowned("@name", ws.name_));
 
   ASSIGN_OR_RETURN(
-      s.rollback, Statement::Prepare(sdb, "ROLLBACK TO SAVEPOINT @name"));
+      s.rollback, Statement::Prepare(*db, "ROLLBACK TO SAVEPOINT @name"));
   RETURN_IF_ERROR(s.rollback.BindBlobUnowned("@name", ws.name_));
 
   RETURN_IF_ERROR(ws.Savepoint());
@@ -254,7 +255,7 @@ absl::StatusOr<WithSavepoint> WithSavepoint::Create(
 }
 
 absl::StatusOr<WithSavepoint> WithSavepoint::Create(
-    Sqlite3 *absl_nonnull db,
+    Connection *absl_nonnull db,
     std::source_location loc) {
   // Used to generate unique ids for WithSavepoint so that otherwise identically
   // named instances don't get mixed up ordering when running RELEASE.
@@ -359,12 +360,6 @@ absl::StatusOr<Statement> Statement::Prepare(
   return Statement(*stmt);
 }
 
-absl::StatusOr<Statement> Statement::Prepare(
-    const Statement &stmt, unsigned int flags = 0);
-  ASSIGN_OR_RETURN(std::string_view sql, stmt.GetSql());
-  return Prepare(stmt.db_, sql, flags);
-}
-
 absl::StatusOr<Statement::StepResult> Statement::Step() {
   LOG(INFO) << "Statement::Step() count=" << step_count_++ << " " << *this;
   int ret = sqlite3_step(stmt_);
@@ -375,7 +370,7 @@ absl::StatusOr<Statement::StepResult> Statement::Step() {
       return StepResult::kRow;
     case SQLITE_OK:
       // Docs seem to imply this can never happen.
-      [[fallthrough]]
+      [[fallthrough]];
     default:
       return Append(
           Prepend(Sqlite3ErrorCodeToStatus(ret), "sqlite3_step"),
@@ -384,7 +379,7 @@ absl::StatusOr<Statement::StepResult> Statement::Step() {
 }
 
 absl::Status Statement::StepThenDone() {
-  ASSIGN_OR_RETURN(StepResult res, stmt.Step());
+  ASSIGN_OR_RETURN(StepResult res, Step());
   if (res != StepResult::kDone) {
     LOG_IF_ERROR(WARNING, Reset());
     return absl::InternalError(
@@ -627,3 +622,4 @@ absl::Status WithStatementReset::Reset() && {
 }
 
 }  // namespace sqlite3
+}  // namespace dcfs
