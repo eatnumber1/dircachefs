@@ -108,7 +108,9 @@ absl::StatusOr<DeviceId> GetDeviceIdForPath(const char *path) {
 TEST(DeviceIdTest, GetDeviceIdRoot) {
   absl::StatusOr<DeviceId> id = GetDeviceIdForPath("/");
   if (!id.ok() && absl::IsUnimplemented(id.status())) {
-    // Expected on this host: kernel 6.8 predates FS_IOC_GETFSUUID (6.9+).
+    // Genuine filesystem-feature absence, not a bug: "/" in the test guest
+    // is the initramfs rootfs, which (like tmpfs) has no UUID and so does
+    // not support FS_IOC_GETFSUUID.
     GTEST_SKIP() << id.status();
   }
   ASSERT_THAT(id, IsOk());
@@ -125,11 +127,10 @@ TEST(DeviceIdTest, GetDeviceIdTestTmpDir) {
   ASSERT_NE(tmpdir, nullptr)
       << "TEST_TMPDIR must be set when running under bazel test";
 
+  // TEST_TMPDIR is backed by a real ext4 disk (see the qemu_cc_test disks=
+  // attribute on this target), which always supports FS_IOC_GETFSUUID on
+  // the project's kernel; no skip needed.
   absl::StatusOr<DeviceId> id = GetDeviceIdForPath(tmpdir);
-  if (!id.ok() && absl::IsUnimplemented(id.status())) {
-    // Expected on this host: kernel 6.8 predates FS_IOC_GETFSUUID (6.9+).
-    GTEST_SKIP() << id.status();
-  }
   ASSERT_THAT(id, IsOk());
   EXPECT_NE(id->uuid, kZeroUuid);
 }

@@ -181,7 +181,7 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
 
   DeviceId device = dir_device;
   if (IsBoundary(dir_stx, record.stx)) {
-    ABSL_ASSIGN_OR_RETURN(device, ctx.device_id_fn(**child));
+    ABSL_ASSIGN_OR_RETURN(device, GetDeviceId(**child));
     if (absl::IsNotFound(ctx.mounts.Get(device).status())) {
       // The mount fd must be a real (non-O_PATH) descriptor because
       // open_by_handle_at resolves it with the non-raw fd class
@@ -238,7 +238,7 @@ absl::StatusOr<std::optional<std::string>> CheckFilesystem(
   if (!IsBoundary(parent_stx, child_stx)) {
     return std::string("nothing is mounted on its mount point any more");
   }
-  absl::StatusOr<DeviceId> device = ctx.device_id_fn(**child);
+  absl::StatusOr<DeviceId> device = GetDeviceId(**child);
   if (!device.ok()) {
     return absl::StrCat("cannot identify what is mounted there now: ",
                         device.status().ToString());
@@ -258,7 +258,7 @@ struct RootProbe {
 
 absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
   RootProbe probe;
-  ABSL_ASSIGN_OR_RETURN(probe.identity.device_id, ctx.device_id_fn(source_fd));
+  ABSL_ASSIGN_OR_RETURN(probe.identity.device_id, GetDeviceId(source_fd));
   ABSL_ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(source_fd));
   probe.identity.fstype = static_cast<int64_t>(sfs.f_type);
   ABSL_ASSIGN_OR_RETURN(probe.stx,

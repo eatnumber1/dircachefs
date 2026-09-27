@@ -2,15 +2,10 @@
 #define DCFS_CONTEXT_H_
 
 #include "absl/status/statusor.h"
-#include "dcfs/device_id.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/sqlite.h"
 
 namespace dcfs {
-
-// How the backing layer identifies the filesystem an fd is on; see
-// Context::device_id_fn.
-using DeviceIdFn = absl::StatusOr<DeviceId> (*)(int fd);
 
 // Everything a dcfs operation may touch, passed explicitly as the first
 // argument of every cache/backing-layer call instead of living in globals.
@@ -22,10 +17,6 @@ using DeviceIdFn = absl::StatusOr<DeviceId> (*)(int fd);
 struct Context {
   sqlite3::Connection &db;
   MountFds &mounts;
-  // Production never changes this: filesystem identity is always
-  // FS_IOC_GETFSUUID (GetDeviceId). It is a member only so that tests on
-  // kernels without that ioctl (it arrived in Linux 6.9) can inject a fake.
-  DeviceIdFn device_id_fn = &GetDeviceId;
 };
 
 }  // namespace dcfs

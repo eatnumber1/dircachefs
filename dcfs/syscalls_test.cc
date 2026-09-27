@@ -383,17 +383,31 @@ TEST_F(SyscallsTest, ErrorPathOpenatMissing) {
 }
 
 TEST_F(SyscallsTest, NameToHandleAtRoundTrip) {
-  if (geteuid() != 0) {
-    GTEST_SKIP() << "needs CAP_DAC_READ_SEARCH (run as root)";
-  }
-
-  file_handle handle;
+  // struct file_handle is variable-length (a handle_bytes-sized flexible
+  // array member beyond the fixed header); a bare stack `file_handle`
+  // provides storage for the header only, and its handle_bytes starts
+  // uninitialized. Both bugs together used to make this call fail with
+  // EINVAL (handle_bytes read as garbage > MAX_HANDLE_SZ) or, worse,
+  // overflow the stack variable when it didn't -- undetected until this
+  // test actually ran (it used to be skipped unconditionally on an
+  // unprivileged host). Allocate real storage and set handle_bytes first,
+  // as dcfs/file_handle.cc itself does.
+  std::vector<uint8_t> handle_buf(sizeof(file_handle) + MAX_HANDLE_SZ);
+  auto *handle = reinterpret_cast<file_handle *>(handle_buf.data());
+  handle->handle_bytes = MAX_HANDLE_SZ;
   int mount_id;
-  ASSERT_THAT(syscalls::name_to_handle_at(tmpdir_fd_, "test_file", handle,
+  ASSERT_THAT(syscalls::name_to_handle_at(tmpdir_fd_, "test_file", *handle,
                                           mount_id, 0),
               IsOk());
 
-  auto reopened_fd = syscalls::open_by_handle_at(tmpdir_fd_, handle, O_RDONLY);
+  // open_by_handle_at's mount_fd argument is resolved through the
+  // kernel's non-raw fd class (fs/fhandle.c get_path_from_fd()), which
+  // rejects O_PATH descriptors with EBADF -- tmpdir_fd_ is O_PATH (see
+  // SetUp), so a separate real fd is needed here.
+  auto real_tmpdir_fd = syscalls::ReopenPathFd(tmpdir_fd_, O_RDONLY | O_DIRECTORY);
+  ASSERT_THAT(real_tmpdir_fd, IsOk());
+  auto reopened_fd =
+      syscalls::open_by_handle_at(**real_tmpdir_fd, *handle, O_RDONLY);
   ASSERT_THAT(reopened_fd, IsOk());
 
   auto st_original = syscalls::fstat(file_fd_);

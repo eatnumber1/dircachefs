@@ -29,11 +29,11 @@ using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 
-// True if `status` reflects this host or filesystem lacking support this
+// True if `status` reflects the backing filesystem lacking support this
 // test needs, rather than a real bug: GetDeviceId() returns Unimplemented
-// on kernels older than 6.9 (this host runs 6.8, see device_id_test.cc),
-// and name_to_handle_at(2) can fail EOPNOTSUPP/ENOTSUP on filesystems that
-// don't export file handles.
+// on filesystems without FS_IOC_GETFSUUID support (e.g. no UUID, like
+// tmpfs or procfs; see device_id_test.cc), and name_to_handle_at(2) can
+// fail EOPNOTSUPP/ENOTSUP on filesystems that don't export file handles.
 bool IsUnsupported(const absl::Status &status) {
   if (absl::IsUnimplemented(status)) return true;
   absl::StatusOr<int> eno = GetErrnoFromStatus(status);
@@ -192,13 +192,13 @@ TEST_F(FileHandleTest, FromDirEntryMissingNameFails) {
 }
 
 // Exercises FromDirEntry's mount-id-differs branch (opening the entry
-// itself to call GetDeviceId on it), without needing root: /proc is always
-// its own filesystem, so "/proc"'s mount id must differ from "/"'s. This
-// doesn't assert success -- GetDeviceId is expected to be Unimplemented on
-// this host regardless of which fd it's called on -- just that the mount
-// boundary is detected and the code path runs without crashing, and that
-// if GetDeviceId ever does succeed here, procfs's device really does
-// differ from the root filesystem's.
+// itself to call GetDeviceId on it): /proc is always its own filesystem,
+// so "/proc"'s mount id must differ from "/"'s. This doesn't assert
+// success -- GetDeviceId is expected to be Unimplemented for procfs (no
+// FS_IOC_GETFSUUID support) regardless of which fd it's called on -- just
+// that the mount boundary is detected and the code path runs without
+// crashing, and that if GetDeviceId ever does succeed here, procfs's
+// device really does differ from the root filesystem's.
 TEST(FileHandleValueTest, FromDirEntryAcrossMountBoundaryDoesNotCrash) {
   int root_fd = ::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC);
   ASSERT_GE(root_fd, 0);
@@ -260,10 +260,6 @@ TEST_F(FileHandleTest, DifferentFileYieldsDifferentHandle) {
 }
 
 TEST_F(FileHandleTest, OpenReopensFileViaMountFds) {
-  if (geteuid() != 0) {
-    GTEST_SKIP() << "needs CAP_DAC_READ_SEARCH (run as root)";
-  }
-
   absl::StatusOr<FileHandle> fh = FileHandle::FromFd(file_fd_);
   if (!fh.ok()) {
     ASSERT_TRUE(IsUnsupported(fh.status())) << fh.status();
@@ -289,10 +285,6 @@ TEST_F(FileHandleTest, OpenReopensFileViaMountFds) {
 }
 
 TEST_F(FileHandleTest, OpenWithUnknownDeviceReturnsNotFound) {
-  if (geteuid() != 0) {
-    GTEST_SKIP() << "needs CAP_DAC_READ_SEARCH (run as root)";
-  }
-
   absl::StatusOr<FileHandle> fh = FileHandle::FromFd(file_fd_);
   if (!fh.ok()) {
     ASSERT_TRUE(IsUnsupported(fh.status())) << fh.status();
@@ -305,10 +297,6 @@ TEST_F(FileHandleTest, OpenWithUnknownDeviceReturnsNotFound) {
 }
 
 TEST_F(FileHandleTest, OpenWithCorruptedHandleFails) {
-  if (geteuid() != 0) {
-    GTEST_SKIP() << "needs CAP_DAC_READ_SEARCH (run as root)";
-  }
-
   absl::StatusOr<FileHandle> fh = FileHandle::FromFd(file_fd_);
   if (!fh.ok()) {
     ASSERT_TRUE(IsUnsupported(fh.status())) << fh.status();

@@ -28,7 +28,8 @@
 // After startup no paths are used: objects are reopened from their cached
 // file handles (FileHandle::Open) and children are reached with openat()
 // relative to an fd on their directory. Filesystem identity always comes
-// from ctx.device_id_fn.
+// from GetDeviceId (dcfs requires a kernel with FS_IOC_GETFSUUID and runs
+// as root; see the project's root/kernel design decision).
 namespace dcfs::backing {
 
 using cache::InodeId;

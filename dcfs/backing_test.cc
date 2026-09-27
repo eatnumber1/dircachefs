@@ -66,24 +66,6 @@ using cache::LookupResult;
 
 MATCHER_P(IsLookup, kind, "") { return arg.kind == kind; }
 
-// A stand-in for GetDeviceId on kernels without FS_IOC_GETFSUUID: stable
-// per filesystem (and per Btrfs subvolume, via st_dev), which is all the
-// backing layer needs from a DeviceId.
-absl::StatusOr<DeviceId> FakeDeviceId(int fd) {
-  struct statfs sfs {};
-  if (::fstatfs(fd, &sfs) != 0) return ErrnoToStatus(errno, "fstatfs");
-  struct statx stx {};
-  if (::statx(fd, "", AT_EMPTY_PATH, 0, &stx) != 0) {
-    return ErrnoToStatus(errno, "statx");
-  }
-  DeviceId id;
-  static_assert(sizeof(sfs.f_fsid) == 8);
-  std::memcpy(id.uuid.data(), &sfs.f_fsid, 8);
-  std::memcpy(id.uuid.data() + 8, &stx.stx_dev_major, 4);
-  std::memcpy(id.uuid.data() + 12, &stx.stx_dev_minor, 4);
-  return id;
-}
-
 DeviceId OtherDevice() {
   DeviceId id;
   id.uuid.fill(0x5A);
@@ -185,16 +167,6 @@ class BackingTest : public ::testing::Test {
     locked_.clear();
   }
 
-  // Whether open_by_handle_at works here: it needs CAP_DAC_READ_SEARCH,
-  // which an unprivileged test run lacks.
-  bool HandlesWork() {
-    absl::StatusOr<DeviceId> device = FakeDeviceId(source_fd_);
-    if (!device.ok()) return false;
-    absl::StatusOr<FileHandle> handle = FileHandle::FromFd(source_fd_, *device);
-    if (!handle.ok()) return false;
-    return handle->Open(mounts_, O_PATH).ok();
-  }
-
   absl::StatusOr<InodeId> Id(std::string_view name, InodeId dir = kRootInode) {
     absl::StatusOr<LookupResult> result = LookupOrPopulate(ctx_, dir, name);
     if (!result.ok()) return result.status();
@@ -220,7 +192,7 @@ class BackingTest : public ::testing::Test {
   std::vector<std::pair<std::string, mode_t>> locked_;
   sqlite3::Connection db_;
   MountFds mounts_;
-  Context ctx_{db_, mounts_, &FakeDeviceId};
+  Context ctx_{db_, mounts_};
 };
 
 std::vector<std::string> ListNames(Context &ctx, InodeId dir) {
@@ -243,11 +215,13 @@ TEST_F(BackingTest, PopulatedDirectoryIsServedFromTheCache) {
   std::vector<struct statx> expected;
   for (const std::string &name : names) expected.push_back(StatPath(Path(name)));
 
+  // Lock() (chmod 0) no longer proves the backing filesystem is
+  // unreachable: dcfs always runs as root now, and root's CAP_DAC_OVERRIDE
+  // bypasses file permission checks entirely. It is still exercised below
+  // as a smoke check that cache reads need no permission on the backing
+  // tree, but it can no longer serve as the "really would have failed"
+  // control that it was when tests ran unprivileged.
   Lock();
-  if (::geteuid() != 0) {
-    // The control: the backing filesystem really is unreachable now.
-    EXPECT_EQ(ErrnoOf(StatNode(ctx_, kRootInode).status()), EACCES);
-  }
 
   for (size_t i = 0; i < names.size(); ++i) {
     SCOPED_TRACE(names[i]);
@@ -269,7 +243,7 @@ TEST_F(BackingTest, PopulatedDirectoryIsServedFromTheCache) {
       EXPECT_EQ(attr.btime.tv_sec, stx.stx_btime.tv_sec);
       EXPECT_EQ(attr.btime.tv_nsec, stx.stx_btime.tv_nsec);
     }
-    EXPECT_EQ(attr.device, *FakeDeviceId(source_fd_));
+    EXPECT_EQ(attr.device, *GetDeviceId(source_fd_));
     EXPECT_THAT(cache::ListXattrs(ctx_, id), IsOkAndHolds(Optional(testing::_)));
   }
 
@@ -349,7 +323,6 @@ TEST_F(BackingTest, RecycledInodeNumberGetsANewRow) {
 }
 
 TEST_F(BackingTest, OpenNodeRejectsARecycledInode) {
-  if (!HandlesWork()) GTEST_SKIP() << "needs CAP_DAC_READ_SEARCH";
   ASSERT_OK_AND_ASSIGN(InodeId old_id, Id("file"));
   ASSERT_THAT(OpenNode(ctx_, old_id, O_RDONLY), IsOk());
   if (!Recreate("file")) GTEST_SKIP() << "the inode number was not reused";
@@ -370,7 +343,6 @@ TEST_F(BackingTest, BackingReadsByInode) {
   EXPECT_EQ(root_stx.stx_ino, StatPath(source_).stx_ino);
   EXPECT_THAT(ReadXattrs(ctx_, kRootInode), IsOk());
 
-  if (!HandlesWork()) GTEST_SKIP() << "needs CAP_DAC_READ_SEARCH";
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   ASSERT_OK_AND_ASSIGN(InodeId link, Id("link"));
   ASSERT_OK_AND_ASSIGN(InodeId fifo, Id("fifo"));
@@ -500,22 +472,11 @@ TEST_F(BackingTest, InitRootRejectsACacheForAnotherFilesystem) {
                                              .backing_gen = 0}),
               IsOk());
   MountFds other_mounts;
-  Context other{other_db, other_mounts, &FakeDeviceId};
+  Context other{other_db, other_mounts};
   ASSERT_OK_AND_ASSIGN(FileDescriptor fd, syscalls::dup(source_fd_));
   EXPECT_THAT(InitRoot(other, std::move(fd)),
               StatusIs(absl::StatusCode::kFailedPrecondition));
   EXPECT_EQ(other_mounts.size(), 0u);
-}
-
-TEST_F(BackingTest, RealDeviceIdFunctionIsTheDefault) {
-  MountFds mounts;
-  Context real{db_, mounts};
-  EXPECT_EQ(real.device_id_fn, &GetDeviceId);
-  absl::StatusOr<DeviceId> direct = GetDeviceId(source_fd_);
-  if (direct.ok()) GTEST_SKIP() << "this kernel supports FS_IOC_GETFSUUID";
-  // Linux 6.8 (this host) predates FS_IOC_GETFSUUID.
-  EXPECT_THAT(ProbeRoot(real, source_fd_),
-              StatusIs(absl::StatusCode::kUnimplemented));
 }
 
 }  // namespace
