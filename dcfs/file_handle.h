@@ -1,96 +1,71 @@
 #ifndef DCFS_FILE_HANDLE_H_
 #define DCFS_FILE_HANDLE_H_
 
-#include <fcntl.h>
-#include <functional>
-#include <memory>
+#include <cstdint>
 #include <string>
 #include <string_view>
-#include <utility>
+#include <vector>
 
-#include "absl/functional/function_ref.h"
 #include "absl/status/statusor.h"
-#include "dcfs/device_uuid.h"
+#include "dcfs/device_id.h"
 #include "dcfs/fd.h"
-#include "dcfs/memory.h"
-#include "dcfs/mount_fd_cache.h"
-#include "libmount.h"
+#include "dcfs/mount_fds.h"
 
 namespace dcfs {
 
-std::unique_ptr<file_handle, RawMemoryDeleter> CopyFileHandle(const file_handle &fh);
-
-// A FileHandle is a durable reference to a single inode (file, directory, etc.)
-// on a filesystem. It refers to the object in the filesystem, *not* the path,
-// so if the file is renamed, or even in some cases deleted, FileHandle can
-// still open the file.
+// A FileHandle is a durable, path-independent reference to a single inode
+// (file, directory, symlink, ...) on some filesystem: a kernel file handle
+// (struct file_handle, as produced by name_to_handle_at(2)) plus the
+// DeviceId of the filesystem that issued it.
 //
-// Note: In order to open a file handle (producing an fd), FileHandle needs a
-// pre-existing fd pointing to the mounted filesystem that the
-// file-object-to-be-opened resides on. This "mount fd" is lazily created
-// automatically on the first Open call, then retained for the lifetime of the
-// FileHandle instance.
-class FileHandle {
- public:
-  class Builder {
-   public:
-    // `fd_cache` is retained by both Builder and any FileHandles built by this
-    // Builder. `mtab` and `cache` is retained only by the Builder class.
-    Builder(
-      // TODO mtab and cache needs to be made thread-safe.
-      libmnt_table *absl_nonnull mtab,
-      libmnt_cache *absl_nonnull cache,
-      MountFDCache *absl_nonnull fd_cache);
+// dcfs never keeps paths around after startup, so a FileHandle -- together
+// with a live O_PATH fd on its filesystem, looked up by DeviceId in a
+// MountFds -- is the only durable reference the daemon has to a backing
+// object; Open() reopens it via open_by_handle_at(2).
+struct FileHandle {
+  DeviceId device;
+  int handle_type = 0;          // struct file_handle::handle_type
+  std::vector<uint8_t> bytes;   // struct file_handle::f_handle, handle_bytes long
 
-    absl::StatusOr<FileHandle> MakeHandle(
-        int dirfd, std::string_view path, int flags = 0);
-    absl::StatusOr<FileHandle> MakeHandle(int fd, int flags = 0);
+  friend bool operator==(const FileHandle &, const FileHandle &) = default;
 
-    absl::StatusOr<FileHandle> MakeHandle(
-        std::unique_ptr<file_handle, RawMemoryDeleter> handle,
-        DeviceUUID uuid);
+  template <typename H>
+  friend H AbslHashValue(H h, const FileHandle &fh) {
+    return H::combine(std::move(h), fh.device, fh.handle_type, fh.bytes);
+  }
 
-   private:
-    absl::StatusOr<std::reference_wrapper<libmnt_fs>> FindMount(
-        int mount_id);
-    absl::StatusOr<std::reference_wrapper<libmnt_fs>> FindMount(
-        const DeviceUUID &uuid);
+  // Wire format: device.Serialize() (24 bytes) followed by handle_type as a
+  // 4-byte little-endian int32, followed by bytes (the remainder). Intended
+  // as a stable, compact on-disk cache key -- not human-readable.
+  std::string Serialize() const;
 
-    absl::StatusOr<absl::AnyInvocable<absl::StatusOr<int>()>> CreateMountOpener(
-        const libmnt_fs &fs, const DeviceUUID &uuid);
+  // Parses the format produced by Serialize(). Returns InvalidArgument if
+  // `data` is shorter than 28 bytes (24-byte DeviceId + 4-byte handle_type).
+  static absl::StatusOr<FileHandle> Parse(std::string_view data);
 
-    absl::StatusOr<DeviceUUID> GetMountUUID(const libmnt_fs &fs);
+  // Renders as "<device>/<handle_type>:<hex bytes>". For log and error
+  // messages only; not parseable by Parse().
+  std::string ToString() const;
 
-    // Callback should return false when you want to stop iterating.
-    absl::Status ForEachMount(
-        absl::FunctionRef<absl::StatusOr<bool>(libmnt_fs &)> cb);
+  // Builds a FileHandle for the object `fd` itself names. `fd` may be an
+  // O_PATH descriptor, including one opened on a symlink (name_to_handle_at
+  // with AT_EMPTY_PATH operates on whatever `fd` refers to, without
+  // following it further).
+  static absl::StatusOr<FileHandle> FromFd(int fd);
 
-    libmnt_table &mtab_;
-    libmnt_cache &cache_;
-    MountFDCache &fd_cache_;
-  };
+  // Builds a FileHandle for the directory entry `name` inside `dirfd`. If
+  // `name` names a symlink, the handle refers to the symlink itself, not
+  // its target.
+  static absl::StatusOr<FileHandle> FromDirEntry(int dirfd,
+                                                  std::string_view name);
 
-  FileHandle() = default;
-
-  FileHandle(FileHandle &&) = default;
-  FileHandle(const FileHandle &);
-  FileHandle &operator=(FileHandle &&) = default;
-  FileHandle &operator=(const FileHandle &);
-
-  const file_handle &GetHandle() const;
-  const DeviceUUID &GetUUID() const;
-
-  absl::StatusOr<FileDescriptor> Open(int flags = 0);
-
- private:
-  FileHandle(
-    std::unique_ptr<file_handle, RawMemoryDeleter> handle,
-    DeviceUUID uuid,
-    absl::AnyInvocable<absl::StatusOr<int>()> mount_opener);
-
-  std::unique_ptr<file_handle, RawMemoryDeleter> handle_;
-  DeviceUUID uuid_;
-  absl::AnyInvocable<absl::StatusOr<int>()> mount_opener_;
+  // Reopens the object this handle refers to: looks up an O_PATH fd for
+  // `device` in `mounts` and calls open_by_handle_at(2) with `flags`.
+  // Returns NotFound (propagated from MountFds::Get) if `device` is not
+  // registered in `mounts`. An ESTALE status from the kernel -- meaning the
+  // object is gone or the handle has expired -- is passed through
+  // unchanged.
+  absl::StatusOr<FileDescriptor> Open(const MountFds &mounts, int flags) const;
 };
 
 }  // namespace dcfs

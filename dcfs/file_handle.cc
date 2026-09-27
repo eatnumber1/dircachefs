@@ -1,297 +1,142 @@
 #include "dcfs/file_handle.h"
 
-#include <cerrno>
 #include <fcntl.h>
-#include <functional>
-#include <memory>
-#include <stdint.h>
+
+#include <algorithm>
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
-#include "absl/cleanup/cleanup.h"
-#include "absl/functional/function_ref.h"
-#include "absl/log/die_if_null.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
-#include "dcfs/device_uuid.h"
+#include "absl/strings/str_format.h"
+#include "dcfs/device_id.h"
 #include "dcfs/fd.h"
-#include "dcfs/mount_fd_cache.h"
-#include "dcfs/ret_check.h"
-#include "dcfs/status.h"
+#include "dcfs/mount_fds.h"
 #include "dcfs/syscalls.h"
-#include "dcfs/memory.h"
-#include "libmount.h"
 
 namespace dcfs {
 namespace {
 
-absl::StatusOr<unsigned int> GetHandleSize(
-    int dirfd, std::string_view path, int flags) {
-  int unused = 0;
-  file_handle handle { .handle_bytes = 0 };
-  absl::Status status = syscalls::name_to_handle_at(
-      dirfd, path, handle, unused, flags);
-  if (status.ok()) {
-    return absl::UnknownError(
-        "name_to_handle_at failed to error when handle_bytes = 0");
-  }
-  ASSIGN_OR_RETURN(int eno, GetErrnoFromStatus(status));
-  // Some care is needed here as EOVERFLOW can also indicate that no file
-  // handle is available for this particular name in a filesystem which does
-  // normally support file-handle lookup. This case can be detected when the
-  // EOVERFLOW error is returned without handle_bytes being increased.
-  if (eno != EOVERFLOW || handle.handle_bytes == 0) return status;
-  return handle.handle_bytes;
-}
+// The handle_type and f_handle bytes portion of a kernel file handle, once
+// unpacked out of a `struct file_handle`.
+struct RawHandle {
+  int handle_type = 0;
+  std::vector<uint8_t> bytes;
+};
 
-std::unique_ptr<file_handle, RawMemoryDeleter> NewFileHandle(
-    unsigned int handle_bytes) {
-  return std::unique_ptr<file_handle, RawMemoryDeleter>(
-        static_cast<file_handle *>(
-          ::operator new (sizeof(file_handle) + handle_bytes)),
-        RawMemoryDeleter());
-}
-
-absl::StatusOr<
-  std::pair</*mount_id=*/int, std::unique_ptr<file_handle, RawMemoryDeleter>>>
-  NameToHandleAndMountID(
-    int dirfd, std::string_view path, int flags) {
-  ASSIGN_OR_RETURN(
-      unsigned int handle_bytes, GetHandleSize(dirfd, path, flags));
-
-  std::unique_ptr<file_handle, RawMemoryDeleter> handle =
-    NewFileHandle(handle_bytes);
-  handle->handle_bytes = handle_bytes;
+// Calls name_to_handle_at(dirfd, pathname, flags), providing MAX_HANDLE_SZ
+// of room for the returned handle (the maximum any Linux filesystem can
+// currently produce) and unpacking the result. The `mount_id` output is
+// discarded: name_to_handle_at's mount ids can be reused across mounts, so
+// device identity is established via GetDeviceId instead, never via a
+// mount id.
+absl::StatusOr<RawHandle> NameToHandle(int dirfd, std::string_view pathname,
+                                       int flags) {
+  std::vector<uint8_t> buf(sizeof(struct file_handle) + MAX_HANDLE_SZ);
+  auto *handle = reinterpret_cast<struct file_handle *>(buf.data());
+  handle->handle_bytes = MAX_HANDLE_SZ;
 
   int mount_id = 0;
-  RETURN_IF_ERROR(
-      syscalls::name_to_handle_at(dirfd, path, *handle, mount_id, flags));
+  ABSL_RETURN_IF_ERROR(
+      syscalls::name_to_handle_at(dirfd, pathname, *handle, mount_id, flags));
 
-  return std::make_pair(mount_id, std::move(handle));
+  RawHandle raw;
+  raw.handle_type = handle->handle_type;
+  raw.bytes.assign(handle->f_handle, handle->f_handle + handle->handle_bytes);
+  return raw;
 }
-
-class MountOpener {
- public:
-  MountOpener(
-      std::string mount_target,
-      MountFDCache *absl_nonnull fd_cache,
-      DeviceUUID uuid)
-    : variant_(
-        std::move(mount_target), std::move(uuid),
-        *ABSL_DIE_IF_NULL(fd_cache))
-  {}
-
-  absl::StatusOr<int> operator() {
-    return std::visit(
-      [this](std::shared_ptr<const FileDescriptor> &fd) -> absl::StatusOr<int> {
-        return **fd
-      },
-      [this](std::tuple<std::string, DeviceUUID, std::reference_wrapper<MountFDCache>>> &t) -> absl::StatusOr<int> {
-        std::string_view mount_target = std::get<0>(t);
-        const DeviceUUID &uuid = std::get<1>(t);
-        MountFDCache &cache = std::get<2>(t);
-        ASSIGN_OR_RETURN(
-            std::shared_ptr<const FileDescriptor> fd,
-            fd_cache.Get(uuid, mount_target));
-        int ret = **fd;
-        variant_ = std::move(fd);
-      }
-    );
-  }
-
- private:
-  std::variant<
-    absl_nonnull std::shared_ptr<const FileDescriptor>,
-    std::tuple<
-      std::string, DeviceUUID, std::reference_wrapper<MountFDCache>>> variant_;
-};
 
 }  // namespace
 
-std::unique_ptr<file_handle, RawMemoryDeleter> CopyFileHandle(
-    const file_handle &fh) {
-  std::unique_ptr<file_handle, RawMemoryDeleter> handle =
-    NewFileHandle(fh.handle_bytes);
-  std::memcpy(handle.get(), &fh, sizeof(file_handle) + fh.handle_bytes);
-  return handle;
+std::string FileHandle::Serialize() const {
+  std::string out = device.Serialize();
+  out.reserve(out.size() + 4 + bytes.size());
+  uint32_t type = static_cast<uint32_t>(handle_type);
+  for (int i = 0; i < 4; ++i) {
+    out.push_back(static_cast<char>((type >> (8 * i)) & 0xFF));
+  }
+  out.append(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+  return out;
 }
 
-FileHandle::Builder::Builder(
-  libmnt_table *mtab,
-  libmnt_cache *cache,
-  MountFDCache *fd_cache)
-  : mtab_(*ABSL_DIE_IF_NULL(mtab)),
-    cache_(*ABSL_DIE_IF_NULL(cache)),
-    fd_cache_(*ABSL_DIE_IF_NULL(fd_cache))
-{}
-
-absl::Status FileHandle::Builder::ForEachMount(
-    absl::FunctionRef<absl::StatusOr<bool>(libmnt_fs &)> cb) {
-  libmnt_iter *iter = mnt_new_iter(MNT_ITER_FORWARD);
-  if (iter == nullptr) return absl::UnknownError("mnt_new_iter");
-  absl::Cleanup dealloc_iter([&]() { mnt_free_iter(iter); });
-
-  libmnt_fs *fs = nullptr;
-  while (mnt_table_next_fs(&mtab_, iter, &fs) == 0) {
-    RET_CHECK_NE(fs, nullptr);
-    ASSIGN_OR_RETURN(bool cont, cb(*fs));
-    if (!cont) break;
+absl::StatusOr<FileHandle> FileHandle::Parse(std::string_view data) {
+  if (data.size() < 28) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "FileHandle::Parse: expected at least 28 bytes, got ", data.size(),
+        " bytes"));
   }
 
-  return absl::OkStatus();
-}
+  ABSL_ASSIGN_OR_RETURN(DeviceId device, DeviceId::Parse(data.substr(0, 24)));
 
-absl::StatusOr<std::reference_wrapper<libmnt_fs>>
-FileHandle::Builder::FindMount(int mount_id) {
-  libmnt_fs *ret = nullptr;
-  RETURN_IF_ERROR(
-      ForEachMount([&](libmnt_fs &fs) -> absl::StatusOr<bool> {
-        if (mnt_fs_get_id(&fs) != mount_id) return true;
-        ret = &fs;
-        return false;
-      }));
-  if (ret == nullptr) {
-    return absl::NotFoundError(
-        absl::StrCat("Could not find mount with id ", mount_id));
-  }
-  return *ret;
-}
-
-absl::StatusOr<std::reference_wrapper<libmnt_fs>>
-FileHandle::Builder::FindMount(const DeviceUUID &uuid) {
-  libmnt_fs *ret = nullptr;
-  RETURN_IF_ERROR(
-      ForEachMount([&](libmnt_fs &fs) -> absl::StatusOr<bool> {
-        if (!mnt_fs_match_source(
-              &fs, absl::StrCat("UUID=", uuid.value).c_str(), &cache_)) {
-          return true;
-        }
-        ret = &fs;
-        return false;
-      }));
-  if (ret == nullptr) {
-    return absl::NotFoundError(
-        absl::StrCat(
-          "Could not find mount for device with UUID ", uuid.value));
-  }
-  return *ret;
-}
-
-absl::StatusOr<absl::AnyInvocable<absl::StatusOr<int>()>>
-FileHandle::Builder::CreateMountOpener(const libmnt_fs &fs, DeviceUUID uuid) {
-  const char *target = mnt_fs_get_target(const_cast<libmnt_fs *>(&fs));
-  if (target == nullptr) {
-    return absl::UnknownError(
-        absl::StrCat(
-          "Unknown mount target for mount with device uuid ", uuid));
+  uint32_t type = 0;
+  for (int i = 0; i < 4; ++i) {
+    type |= static_cast<uint32_t>(static_cast<uint8_t>(data[24 + i]))
+            << (8 * i);
   }
 
-  return MountOpener(std::string(target), std::move(uuid), &fd_cache_);
+  FileHandle fh;
+  fh.device = std::move(device);
+  fh.handle_type = static_cast<int32_t>(type);
+  std::string_view rest = data.substr(28);
+  fh.bytes.assign(rest.begin(), rest.end());
+  return fh;
 }
 
-absl::StatusOr<DeviceUUID> FileHandle::Builder::GetMountUUID(
-    const libmnt_fs &fs) {
-  const char *tag;
-  const char *val;
-  auto *mfs = const_cast<libmnt_fs *>(&fs);
-  if (mnt_fs_get_tag(mfs, &tag, &val) == 0 &&
-      std::string_view(tag) == "UUID") {
-    return DeviceUUID(val);
+std::string FileHandle::ToString() const {
+  std::string hex;
+  hex.reserve(bytes.size() * 2);
+  for (uint8_t b : bytes) {
+    absl::StrAppendFormat(&hex, "%02x", b);
   }
-
-  const char *src = mnt_fs_get_source(mfs);
-  if (src == nullptr) {
-    return absl::UnknownError(
-        absl::StrCat("Unknown mount source for mount"));
-  }
-
-  char *canon_src = mnt_resolve_spec(src, &cache_);
-  if (canon_src == nullptr) {
-    return absl::UnknownError(
-        absl::StrCat(
-          "Could not resolve spec for mount with source ", src));
-  }
-  if (mnt_cache_read_tags(&cache_, canon_src) < 0) {
-    return absl::UnknownError(
-        absl::StrCat(
-          "Could not read tags for mount with source ", canon_src));
-  }
-  char *uuid = mnt_cache_find_tag_value(&cache_, canon_src, "UUID");
-  if (uuid == nullptr) {
-    return absl::UnknownError(
-        absl::StrCat(
-          "Could not read UUID tag for mount with source ", canon_src));
-  }
-  return DeviceUUID{uuid};
+  return absl::StrCat(device.ToString(), "/", handle_type, ":", hex);
 }
 
-absl::StatusOr<FileHandle> FileHandle::Builder::MakeHandle(
-    int dirfd, std::string_view path, int flags) {
-  ASSIGN_OR_RETURN(
-      auto mhp, NameToHandleAndMountID(dirfd, path, flags));
-  int mount_id = mhp.first;
-  std::unique_ptr<file_handle, RawMemoryDeleter> handle = std::move(mhp.second);
+absl::StatusOr<FileHandle> FileHandle::FromFd(int fd) {
+  ABSL_ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(fd, "", AT_EMPTY_PATH));
+  ABSL_ASSIGN_OR_RETURN(DeviceId device, GetDeviceId(fd));
 
-  // There's a race here in that the mount_id can be reused before we figure out
-  // the UUID and open the mountpoint. This isn't fixable without changing
-  // name_to_handle_at to return an mount_id that's not reused (statx supports
-  // this, but name_to_handle_at does not).
-  ASSIGN_OR_RETURN(libmnt_fs &fs, FindMount(mount_id));
-  ASSIGN_OR_RETURN(DeviceUUID uuid, GetMountUUID(fs));
-  ASSIGN_OR_RETURN(
-      absl::AnyInvocable<absl::StatusOr<int>()> mount_opener, CreateMountOpener(fs, uuid));
-
-  return FileHandle(std::move(handle), std::move(uuid), std::move(mount_opener));
+  FileHandle fh;
+  fh.device = std::move(device);
+  fh.handle_type = raw.handle_type;
+  fh.bytes = std::move(raw.bytes);
+  return fh;
 }
 
-absl::StatusOr<FileHandle> FileHandle::Builder::MakeHandle(int fd, int flags) {
-  return MakeHandle(fd, /*path=*/"", flags | AT_EMPTY_PATH);
+absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
+                                                     std::string_view name) {
+  ABSL_ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(dirfd, name, 0));
+
+  // GetDeviceId needs an fd on the entry itself; open it O_PATH so this
+  // works for any file type, and O_NOFOLLOW so a symlink entry yields a
+  // handle (and device) for the symlink, not its target.
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor entry_fd,
+      syscalls::openat(dirfd, name, O_PATH | O_NOFOLLOW));
+  ABSL_ASSIGN_OR_RETURN(DeviceId device, GetDeviceId(*entry_fd));
+
+  FileHandle fh;
+  fh.device = std::move(device);
+  fh.handle_type = raw.handle_type;
+  fh.bytes = std::move(raw.bytes);
+  return fh;
 }
 
-absl::StatusOr<FileHandle> FileHandle::Builder::MakeHandle(
-    std::unique_ptr<file_handle, RawMemoryDeleter> handle,
-    DeviceUUID uuid) {
-  ASSIGN_OR_RETURN(libmnt_fs &fs, FindMount(uuid));
-  ASSIGN_OR_RETURN(
-      absl::AnyInvocable<absl::StatusOr<int>()> mount_opener, CreateMountOpener(fs, uuid));
-  return FileHandle(
-      std::move(handle), std::move(uuid), std::move(mount_opener));
-}
+absl::StatusOr<FileDescriptor> FileHandle::Open(const MountFds &mounts,
+                                                 int flags) const {
+  ABSL_ASSIGN_OR_RETURN(int mount_fd, mounts.Get(device));
 
-FileHandle::FileHandle(
-  std::unique_ptr<file_handle, RawMemoryDeleter> handle,
-  DeviceUUID uuid,
-  absl::AnyInvocable<absl::StatusOr<int>()> mount_opener)
-  : handle_(std::move(handle)),
-    uuid_(std::move(uuid)),
-    mount_opener_(std::move(mount_opener))
-{}
+  std::vector<uint8_t> buf(sizeof(struct file_handle) + bytes.size());
+  auto *handle = reinterpret_cast<struct file_handle *>(buf.data());
+  handle->handle_bytes = static_cast<unsigned int>(bytes.size());
+  handle->handle_type = handle_type;
+  std::copy(bytes.begin(), bytes.end(), handle->f_handle);
 
-const file_handle &FileHandle::GetHandle() const {
-  return *handle_;
-}
-
-const DeviceUUID &FileHandle::GetUUID() const {
-  return uuid_;
-}
-
-absl::StatusOr<FileDescriptor> FileHandle::Open(int flags) {
-  return syscalls::open_by_handle_at(**mount_fd_, *handle_, flags);
-}
-
-FileHandle::FileHandle(const FileHandle &o) : FileHandle() {
-  *this = std::move(o);
-}
-
-FileHandle &FileHandle::operator=(const FileHandle &o) {
-  if (o.handle_ != nullptr) {
-    handle_ = CopyFileHandle(*o.handle_);
-  }
-  mount_fd_ = o.mount_fd_;
-  uuid_ = o.uuid_;
-  return *this;
+  return syscalls::open_by_handle_at(mount_fd, *handle, flags);
 }
 
 }  // namespace dcfs

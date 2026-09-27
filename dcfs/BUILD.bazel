@@ -245,6 +245,41 @@ cc_test(
 )
 
 cc_library(
+    name = "file_handle",
+    srcs = ["file_handle.cc"],
+    hdrs = ["file_handle.h"],
+    deps = [
+      ":device_id",
+      ":mount_fds",
+      ":syscalls",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@absl//absl/strings:str_format",
+    ],
+)
+
+cc_test(
+    name = "file_handle_test",
+    size = "small",
+    srcs = ["file_handle_test.cc"],
+    deps = [
+      ":device_id",
+      ":file_handle",
+      ":mount_fds",
+      ":status",
+      ":syscalls",
+      "@absl//absl/hash",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "dir_cache_fs",
     srcs = ["dir_cache_fs.cc"],
     hdrs = ["dir_cache_fs.h"],
