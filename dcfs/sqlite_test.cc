@@ -1,5 +1,7 @@
 #include "dcfs/sqlite.h"
 
+#include <sys/stat.h>
+
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
@@ -76,6 +78,38 @@ TEST(ConnectionTest, FileBackedReportsWalAndForeignKeys) {
   ASSERT_THAT(fk_stmt->Step(), IsOkAndHolds(true));
   EXPECT_EQ(fk_stmt->Column<int>(0), 1);
   ASSERT_THAT(fk_stmt->Step(), IsOkAndHolds(false));
+}
+
+// Regression test for main.cc's shutdown path, which relies on Checkpoint()
+// to leave nothing in the WAL for the next startup to replay.
+TEST(ConnectionTest, CheckpointTruncatesWal) {
+  std::string path = TestTmpFile("checkpoint.sqlite");
+  ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
+  ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
+  ASSERT_THAT(conn.Exec("INSERT INTO t (id) VALUES (1)"), IsOk());
+
+  std::string wal_path = absl::StrCat(path, "-wal");
+  struct stat before_stat;
+  ASSERT_EQ(::stat(wal_path.c_str(), &before_stat), 0);
+  EXPECT_GT(before_stat.st_size, 0)
+      << "expected a nonempty -wal file before checkpointing";
+
+  ASSERT_THAT(conn.Checkpoint(), IsOk());
+
+  struct stat after_stat;
+  ASSERT_EQ(::stat(wal_path.c_str(), &after_stat), 0);
+  EXPECT_EQ(after_stat.st_size, 0);
+
+  // The data committed before the checkpoint must still be there.
+  ASSERT_OK_AND_ASSIGN(Statement * select, conn.Prepared("SELECT id FROM t"));
+  ASSERT_THAT(select->Step(), IsOkAndHolds(true));
+  EXPECT_EQ(select->Column<int64_t>(0), 1);
+}
+
+TEST(ConnectionTest, CheckpointOnInMemoryDatabaseIsANoOp) {
+  ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
+  ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
+  EXPECT_THAT(conn.Checkpoint(), IsOk());
 }
 
 // Fixture with a single table with one column per Bind/Column overload this

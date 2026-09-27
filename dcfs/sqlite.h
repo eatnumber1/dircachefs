@@ -225,6 +225,14 @@ class Connection {
   // True iff a transaction (started by us, or otherwise) is active.
   bool InTransaction() const;
 
+  // Runs a WAL checkpoint that writes every committed frame back into the
+  // main database file and then truncates the WAL file to zero bytes
+  // (SQLITE_CHECKPOINT_TRUNCATE), so nothing is left in it for the next
+  // startup (or another process) to replay. A no-op (returns OkStatus)
+  // when the database isn't in WAL mode (e.g. ":memory:"). See
+  // https://www.sqlite.org/c3ref/wal_checkpoint_v2.html
+  absl::Status Checkpoint();
+
   ::sqlite3 *Get() const;
 
   // Finalizes cached statements and closes the underlying database. Safe to

@@ -280,6 +280,14 @@ absl::Status Connection::Close() {
   return absl::OkStatus();
 }
 
+absl::Status Connection::Checkpoint() {
+  int rc = sqlite3_wal_checkpoint_v2(
+      db_, /*zDb=*/nullptr, SQLITE_CHECKPOINT_TRUNCATE, /*pnLog=*/nullptr,
+      /*pnCkpt=*/nullptr);
+  if (rc != SQLITE_OK) return LastErrorStatus();
+  return absl::OkStatus();
+}
+
 absl::Status Connection::Exec(std::string_view sql) {
   ABSL_ASSIGN_OR_RETURN(Statement * stmt, Prepared(sql));
   return stmt->ForEachRow([](Statement &) { return absl::OkStatus(); });
