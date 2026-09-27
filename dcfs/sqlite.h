@@ -313,8 +313,10 @@ absl::Status Statement::Bind(int index, const T &value) {
 template <typename... Args>
 absl::Status Statement::BindAll(Args &&...args) {
   absl::Status status;
-  int index = 0;
-  auto bind_one = [&](auto &&value) {
+  // [[maybe_unused]]: with zero arguments the fold below expands to nothing
+  // and -Wunused-but-set-variable would otherwise fire under -Werror.
+  [[maybe_unused]] int index = 0;
+  [[maybe_unused]] auto bind_one = [&](auto &&value) {
     if (!status.ok()) return;
     ++index;
     status = Bind(index, std::forward<decltype(value)>(value));

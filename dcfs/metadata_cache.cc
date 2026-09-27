@@ -49,10 +49,7 @@ template <typename... Args>
 absl::StatusOr<Statement *> Query(Context &ctx, std::string_view sql,
                                   Args &&...args) {
   ABSL_ASSIGN_OR_RETURN(Statement * stmt, ctx.db.Prepared(sql));
-  // BindAll() with no arguments trips -Wunused-but-set-variable.
-  if constexpr (sizeof...(Args) > 0) {
-    ABSL_RETURN_IF_ERROR(stmt->BindAll(std::forward<Args>(args)...));
-  }
+  ABSL_RETURN_IF_ERROR(stmt->BindAll(std::forward<Args>(args)...));
   return stmt;
 }
 
