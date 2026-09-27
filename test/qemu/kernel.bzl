@@ -65,8 +65,18 @@ def _kernel_image_impl(repository_ctx):
 
 kernel_image = repository_rule(
     implementation = _kernel_image_impl,
+    # The whole point of this repo is to reflect a big out-of-tree kernel
+    # build (test/qemu/scripts/build-kernel.sh) that Bazel doesn't build
+    # and can't see changing. repository_ctx.getenv tracks $DCFS_KERNEL_BUILD
+    # and $DCFS_BUSYBOX themselves as dependencies, but not the mtime/
+    # existence of the files those env vars point to, so without `local =
+    # True` a bzImage that appears (kernel build finishes) or moves after
+    # the first fetch would go unnoticed until something else invalidated
+    # the repo. `local = True` makes Bazel re-run this (cheap: a couple of
+    # stats and a symlink) on every build instead, which is what lets
+    # `bazel build //test/qemu:boot_test` pick up a freshly built kernel
+    # without `bazel clean` or `bazel sync`.
+    local = True,
     doc = """Exposes the out-of-tree dcfs QEMU kernel build and host
-busybox as `bzImage` and `busybox`. Reruns whenever $DCFS_KERNEL_BUILD or
-$DCFS_BUSYBOX change (repository_ctx.getenv registers that dependency
-automatically).""",
+busybox as `bzImage` and `busybox`.""",
 )
