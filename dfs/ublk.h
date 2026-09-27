@@ -45,9 +45,6 @@ class UblkDevice {
   const ublksrv_ctrl_dev_info &GetInfo() const;
   absl::StatusOr<ublk_params> GetParams();
 
-  // TODO remove from API
-  ublksrv_ctrl_dev &GetControlDevice();
-
   static absl::StatusOr<UblkDevice> Create(Options opts);
   absl::Status Delete();
 

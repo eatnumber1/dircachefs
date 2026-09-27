@@ -149,8 +149,6 @@ absl::StatusOr<ublk_params> UblkDevice::GetParams() {
   return p;
 }
 
-ublksrv_ctrl_dev &UblkDevice::GetControlDevice() { return *ctrl_; }
-
 absl::Status UblkDevice::KernelStart() {
   return ErrnoToStatus(
       -ublksrv_ctrl_start_dev(ctrl_, getpid()), "ublksrv_ctrl_start_dev");

@@ -51,13 +51,12 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   absl::SetProgramUsageMessage("TODO");
   std::vector<char*> args = absl::ParseCommandLine(argc, argv);
 
+  // Block signals so that they aren't handled ccording to their default
+  // dispositions.
   sigset_t sigmask;
   sigemptyset(&sigmask);
   sigaddset(&sigmask, SIGTERM);
   sigaddset(&sigmask, SIGINT);
-
-  // Block signals so that they aren't handled ccording to their default
-  // dispositions.
   ASSIGN_OR_RETURN(auto block, ScopedSignalMask::Create(SIG_BLOCK, sigmask));
   ASSIGN_OR_RETURN(
       dfs::FileDescriptor sigfd,
