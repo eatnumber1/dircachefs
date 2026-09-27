@@ -425,25 +425,6 @@ cc_library(
       ":ret_check",
       ":sqlite",
       "@absl//absl/functional:function_ref",
-# A fully statically linked copy of :main (same sources/deps), for the QEMU
-# initramfs (test/qemu), which has no dynamic loader or shared libc.
-cc_binary(
-    name = "main_static",
-    srcs = ["main.cc"],
-    features = ["fully_static_link"],
-    linkstatic = True,
-    visibility = ["//test/qemu:__pkg__"],
-    deps = [
-      ":syscalls",
-      ":fuse_ops",
-      ":dir_cache_fs",
-      "@absl//absl/cleanup",
-      "@absl//absl/flags:flag",
-      "@absl//absl/flags:parse",
-      "@absl//absl/flags:usage",
-      "@absl//absl/log",
-      "@absl//absl/log:flags",
-      "@absl//absl/log:initialize",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
@@ -470,6 +451,32 @@ cc_test(
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
       "@googletest//:gtest_main",
+    ],
+)
+
+# A fully statically linked copy of :main (same sources/deps), for the QEMU
+# initramfs (test/qemu), which has no dynamic loader or shared libc.
+cc_binary(
+    name = "main_static",
+    srcs = ["main.cc"],
+    features = ["fully_static_link"],
+    linkstatic = True,
+    visibility = ["//test/qemu:__pkg__"],
+    deps = [
+      ":syscalls",
+      ":fuse_ops",
+      ":dir_cache_fs",
+      "@absl//absl/cleanup",
+      "@absl//absl/flags:flag",
+      "@absl//absl/flags:parse",
+      "@absl//absl/flags:usage",
+      "@absl//absl/log",
+      "@absl//absl/log:flags",
+      "@absl//absl/log:initialize",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
       "@libfuse//:libfuse",
     ],
 )
