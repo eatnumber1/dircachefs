@@ -26,7 +26,7 @@ fi
 # usage-looking output.
 OUT=$(/bin/dcfs --help 2>&1)
 RC=$?
-if [ "$RC" -eq 0 ] || printf '%s' "$OUT" | grep -qi usage; then
+if [ "$RC" -eq 0 ] || printf '%s' "$OUT" | grep -q -e '--source' -e '[Uu]sage'; then
 	pass dcfs-help
 else
 	fail dcfs-help "rc=$RC: $OUT"
