@@ -63,8 +63,9 @@ absl::StatusOr<struct stat> fstat(int fd) {
 
 absl::StatusOr<struct stat> fstatat(
     int dirfd, std::string_view pathname, int flags) {
+  std::string pathname_str(pathname);
   struct stat buf;
-  int ret = ::fstatat(dirfd, std::string(pathname).c_str(), &buf, flags);
+  int ret = ::fstatat(dirfd, pathname_str.c_str(), &buf, flags);
   if (ret == -1) return ErrnoToStatus(errno, "fstatat");
   return buf;
 }
@@ -113,8 +114,9 @@ absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence) {
 
 absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
                                     unsigned int mask) {
+  std::string path_str(path);
   struct statx buf;
-  int ret = ::statx(dirfd, std::string(path).c_str(), flags, mask, &buf);
+  int ret = ::statx(dirfd, path_str.c_str(), flags, mask, &buf);
   if (ret == -1) return ErrnoToStatus(errno, "statx");
   return buf;
 }
@@ -127,11 +129,12 @@ absl::StatusOr<struct statfs> fstatfs(int fd) {
 }
 
 absl::StatusOr<std::string> readlinkat(int dirfd, std::string_view path) {
+  std::string path_str(path);
   std::string result;
   size_t bufsize = 256;
   while (true) {
     result.resize(bufsize);
-    ssize_t nbytes = ::readlinkat(dirfd, std::string(path).c_str(),
+    ssize_t nbytes = ::readlinkat(dirfd, path_str.c_str(),
                                    result.data(), result.size());
     if (nbytes == -1) {
       return ErrnoToStatus(errno, "readlinkat");
@@ -142,72 +145,89 @@ absl::StatusOr<std::string> readlinkat(int dirfd, std::string_view path) {
     }
     // Buffer too small, double it (cap at PATH_MAX*4)
     if (bufsize >= PATH_MAX * 4) {
-      result.resize(nbytes);
-      return result;
+      return ErrnoToStatus(ENAMETOOLONG, "readlinkat: target longer than PATH_MAX*4");
     }
     bufsize *= 2;
   }
 }
 
 absl::StatusOr<std::string> fgetxattr(int fd, std::string_view name) {
+  std::string name_str(name);
   // Query size with a null buffer first
-  ssize_t size = ::fgetxattr(fd, std::string(name).c_str(), nullptr, 0);
+  ssize_t size = ::fgetxattr(fd, name_str.c_str(), nullptr, 0);
   if (size == -1) {
-    int err = errno;
-    if (err == ERANGE) {
-      // Size changed, retry once with a larger buffer
-      size = ::fgetxattr(fd, std::string(name).c_str(), nullptr, 0);
-      if (size == -1) {
-        return ErrnoToStatus(errno, "fgetxattr");
-      }
-    } else {
-      return ErrnoToStatus(err, "fgetxattr");
-    }
+    return ErrnoToStatus(errno, "fgetxattr");
   }
   if (size == 0) {
     return std::string();
   }
-  // Now read the actual value
-  std::string result(size, '\0');
-  ssize_t nbytes = ::fgetxattr(fd, std::string(name).c_str(), result.data(),
-                               result.size());
-  if (nbytes == -1) {
-    return ErrnoToStatus(errno, "fgetxattr");
+  // Now read the actual value; retry once if size grows (ERANGE on second call)
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    std::string result(size, '\0');
+    ssize_t nbytes = ::fgetxattr(fd, name_str.c_str(), result.data(),
+                                 result.size());
+    if (nbytes == -1) {
+      int err = errno;
+      if (err == ERANGE && attempt == 0) {
+        // Value grew between query and read; retry by re-querying
+        size = ::fgetxattr(fd, name_str.c_str(), nullptr, 0);
+        if (size == -1) {
+          return ErrnoToStatus(errno, "fgetxattr");
+        }
+        if (size == 0) {
+          return std::string();
+        }
+        continue;
+      }
+      return ErrnoToStatus(err, "fgetxattr");
+    }
+    result.resize(nbytes);
+    return result;
   }
-  result.resize(nbytes);
-  return result;
+  // Should not reach here
+  return ErrnoToStatus(ERANGE, "fgetxattr: retry loop exhausted");
 }
 
 absl::StatusOr<std::vector<std::string>> flistxattr(int fd) {
-  // Query size with a null buffer first
-  ssize_t size = ::flistxattr(fd, nullptr, 0);
-  if (size == -1) {
-    return ErrnoToStatus(errno, "flistxattr");
+  // Query size with a null buffer first; retry once if list grows (ERANGE on second call)
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    ssize_t size = ::flistxattr(fd, nullptr, 0);
+    if (size == -1) {
+      return ErrnoToStatus(errno, "flistxattr");
+    }
+    if (size == 0) {
+      return std::vector<std::string>();
+    }
+    // Now read the actual list
+    std::string buf(size, '\0');
+    ssize_t nbytes = ::flistxattr(fd, buf.data(), buf.size());
+    if (nbytes == -1) {
+      int err = errno;
+      if (err == ERANGE && attempt == 0) {
+        // List grew between query and read; retry from the start
+        continue;
+      }
+      return ErrnoToStatus(err, "flistxattr");
+    }
+    // Parse the NUL-separated list
+    std::vector<std::string> result;
+    size_t pos = 0;
+    while (pos < static_cast<size_t>(nbytes)) {
+      const char *str = buf.data() + pos;
+      size_t len = std::strlen(str);
+      result.emplace_back(str, len);
+      pos += len + 1;
+    }
+    return result;
   }
-  if (size == 0) {
-    return std::vector<std::string>();
-  }
-  // Now read the actual list
-  std::string buf(size, '\0');
-  ssize_t nbytes = ::flistxattr(fd, buf.data(), buf.size());
-  if (nbytes == -1) {
-    return ErrnoToStatus(errno, "flistxattr");
-  }
-  // Parse the NUL-separated list
-  std::vector<std::string> result;
-  size_t pos = 0;
-  while (pos < static_cast<size_t>(nbytes)) {
-    const char *str = buf.data() + pos;
-    size_t len = std::strlen(str);
-    result.emplace_back(str, len);
-    pos += len + 1;
-  }
-  return result;
+  // Should not reach here
+  return ErrnoToStatus(ERANGE, "flistxattr: retry loop exhausted");
 }
 
 absl::Status fsetxattr(int fd, std::string_view name,
                        std::span<const uint8_t> value, int flags) {
-  if (::fsetxattr(fd, std::string(name).c_str(),
+  std::string name_str(name);
+  if (::fsetxattr(fd, name_str.c_str(),
                   reinterpret_cast<const void *>(value.data()), value.size(),
                   flags) == -1) {
     return ErrnoToStatus(errno, "fsetxattr");
@@ -216,7 +236,8 @@ absl::Status fsetxattr(int fd, std::string_view name,
 }
 
 absl::Status fremovexattr(int fd, std::string_view name) {
-  if (::fremovexattr(fd, std::string(name).c_str()) == -1) {
+  std::string name_str(name);
+  if (::fremovexattr(fd, name_str.c_str()) == -1) {
     return ErrnoToStatus(errno, "fremovexattr");
   }
   return absl::OkStatus();
@@ -235,15 +256,18 @@ absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags) {
 
 absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,
                     std::string_view newpath, int flags) {
-  if (::linkat(olddirfd, std::string(oldpath).c_str(), newdirfd,
-               std::string(newpath).c_str(), flags) == -1) {
+  std::string oldpath_str(oldpath);
+  std::string newpath_str(newpath);
+  if (::linkat(olddirfd, oldpath_str.c_str(), newdirfd,
+               newpath_str.c_str(), flags) == -1) {
     return ErrnoToStatus(errno, "linkat");
   }
   return absl::OkStatus();
 }
 
 absl::Status unlinkat(int dirfd, std::string_view path, int flags) {
-  if (::unlinkat(dirfd, std::string(path).c_str(), flags) == -1) {
+  std::string path_str(path);
+  if (::unlinkat(dirfd, path_str.c_str(), flags) == -1) {
     return ErrnoToStatus(errno, "unlinkat");
   }
   return absl::OkStatus();
@@ -251,22 +275,26 @@ absl::Status unlinkat(int dirfd, std::string_view path, int flags) {
 
 absl::Status renameat2(int olddirfd, std::string_view oldpath, int newdirfd,
                        std::string_view newpath, unsigned int flags) {
-  if (::renameat2(olddirfd, std::string(oldpath).c_str(), newdirfd,
-                  std::string(newpath).c_str(), flags) == -1) {
+  std::string oldpath_str(oldpath);
+  std::string newpath_str(newpath);
+  if (::renameat2(olddirfd, oldpath_str.c_str(), newdirfd,
+                  newpath_str.c_str(), flags) == -1) {
     return ErrnoToStatus(errno, "renameat2");
   }
   return absl::OkStatus();
 }
 
 absl::Status mkdirat(int dirfd, std::string_view path, mode_t mode) {
-  if (::mkdirat(dirfd, std::string(path).c_str(), mode) == -1) {
+  std::string path_str(path);
+  if (::mkdirat(dirfd, path_str.c_str(), mode) == -1) {
     return ErrnoToStatus(errno, "mkdirat");
   }
   return absl::OkStatus();
 }
 
 absl::Status mknodat(int dirfd, std::string_view path, mode_t mode, dev_t dev) {
-  if (::mknodat(dirfd, std::string(path).c_str(), mode, dev) == -1) {
+  std::string path_str(path);
+  if (::mknodat(dirfd, path_str.c_str(), mode, dev) == -1) {
     return ErrnoToStatus(errno, "mknodat");
   }
   return absl::OkStatus();
@@ -274,8 +302,10 @@ absl::Status mknodat(int dirfd, std::string_view path, mode_t mode, dev_t dev) {
 
 absl::Status symlinkat(std::string_view target, int newdirfd,
                        std::string_view linkpath) {
-  if (::symlinkat(std::string(target).c_str(), newdirfd,
-                  std::string(linkpath).c_str()) == -1) {
+  std::string target_str(target);
+  std::string linkpath_str(linkpath);
+  if (::symlinkat(target_str.c_str(), newdirfd,
+                  linkpath_str.c_str()) == -1) {
     return ErrnoToStatus(errno, "symlinkat");
   }
   return absl::OkStatus();
@@ -290,7 +320,8 @@ absl::Status fchmod(int fd, mode_t mode) {
 
 absl::Status fchownat(int dirfd, std::string_view path, uid_t owner,
                       gid_t group, int flags) {
-  if (::fchownat(dirfd, std::string(path).c_str(), owner, group, flags) == -1) {
+  std::string path_str(path);
+  if (::fchownat(dirfd, path_str.c_str(), owner, group, flags) == -1) {
     return ErrnoToStatus(errno, "fchownat");
   }
   return absl::OkStatus();

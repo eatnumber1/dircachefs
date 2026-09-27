@@ -13,7 +13,7 @@ class FileDescriptor {
   int operator*() const;
   int Release() &&;
   bool valid() const;
-  absl::Status Close() &&;
+  absl::Status Close();
 
   // Moveable, but not copyable. Copying would require dup2
   FileDescriptor(FileDescriptor &&);

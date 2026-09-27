@@ -88,8 +88,12 @@ TEST(FileDescriptorTest, CloseIsIdempotent) {
   ASSERT_GE(tmp_fd, 0);
 
   FileDescriptor fd(tmp_fd);
-  EXPECT_THAT(std::move(fd).Close(), IsOk());
-  // After Close(), the fd should be invalid (-1)
+  // First Close() should succeed
+  EXPECT_THAT(fd.Close(), IsOk());
+  EXPECT_FALSE(fd.valid());
+  // Second Close() should also succeed (idempotent)
+  EXPECT_THAT(fd.Close(), IsOk());
+  EXPECT_FALSE(fd.valid());
 }
 
 TEST(FileDescriptorTest, DestructorClosesValidFd) {

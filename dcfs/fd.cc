@@ -28,8 +28,13 @@ int FileDescriptor::Release() && {
 
 bool FileDescriptor::valid() const { return fd_ != -1; }
 
-absl::Status FileDescriptor::Close() && {
-  return syscalls::close(std::move(*this));
+absl::Status FileDescriptor::Close() {
+  if (fd_ == -1) {
+    return absl::OkStatus();  // Already closed
+  }
+  // Move the fd to a temporary to avoid using fd_ after close
+  FileDescriptor tmp(std::move(*this));
+  return syscalls::close(std::move(tmp));
 }
 
 FileDescriptor::FileDescriptor(FileDescriptor &&o) : FileDescriptor() {

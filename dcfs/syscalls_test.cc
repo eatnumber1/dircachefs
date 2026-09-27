@@ -381,5 +381,28 @@ TEST_F(SyscallsTest, ErrorPathOpenatMissing) {
   EXPECT_EQ(*errno_val, ENOENT);
 }
 
+TEST_F(SyscallsTest, NameToHandleAtRoundTrip) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "needs CAP_DAC_READ_SEARCH (run as root)";
+  }
+
+  file_handle handle;
+  int mount_id;
+  ASSERT_THAT(syscalls::name_to_handle_at(tmpdir_fd_, "test_file", handle,
+                                          mount_id, 0),
+              IsOk());
+
+  auto reopened_fd = syscalls::open_by_handle_at(tmpdir_fd_, handle, O_RDONLY);
+  ASSERT_THAT(reopened_fd, IsOk());
+
+  auto st_original = syscalls::fstat(file_fd_);
+  ASSERT_THAT(st_original, IsOk());
+
+  auto st_reopened = syscalls::fstat(**reopened_fd);
+  ASSERT_THAT(st_reopened, IsOk());
+
+  EXPECT_EQ(st_original->st_ino, st_reopened->st_ino);
+}
+
 }  // namespace
 }  // namespace dcfs
