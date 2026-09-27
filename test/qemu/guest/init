@@ -37,7 +37,10 @@ if [ ! -f "$SCRIPT" ]; then
 	exit 1
 fi
 
-sh -e "$SCRIPT"
+# No -e: the test scripts report every check with their own PASS/FAIL lines
+# and exit status; -e would abort them silently on the first nonzero command
+# (e.g. a $(...) capture of a tool that exits 1 after printing usage).
+sh "$SCRIPT"
 rc=$?
 
 sync
