@@ -86,8 +86,10 @@ done
 
 # --- boot ------------------------------------------------------------
 # shellcheck disable=SC2086 # drive_args is a deliberately unquoted list of flags
+# KVM only when /dev/kvm is usable by this user; otherwise plain TCG (slow).
+if [ -w /dev/kvm ]; then ACCEL=kvm; else ACCEL=tcg; fi
 timeout "$TIMEOUT_SECS" qemu-system-x86_64 \
-	-accel kvm:tcg \
+	-accel "$ACCEL" \
 	-m 1024 -smp 2 \
 	-nographic -no-reboot \
 	-kernel "$KERNEL" \
