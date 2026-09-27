@@ -306,3 +306,64 @@ cc_test(
       "@libfuse//:libfuse",
     ],
 )
+
+exports_files(["schema.sql"])
+
+genrule(
+    name = "schema_sql_cc",
+    srcs = ["schema.sql"],
+    outs = ["schema_sql.cc"],
+    cmd = """
+set -e
+printf '%s' 'namespace dcfs {
+extern const char kSchemaSql[];
+const char kSchemaSql[] = R"dcfs_sql(
+' > $@
+cat $(location schema.sql) >> $@
+printf '%s' '
+)dcfs_sql";
+}
+' >> $@
+""",
+)
+
+cc_library(
+    name = "schema",
+    srcs = [":schema_sql_cc"],
+    hdrs = ["schema.h"],
+)
+
+cc_library(
+    name = "migrate",
+    srcs = ["migrate.cc"],
+    hdrs = ["migrate.h"],
+    deps = [
+      ":device_id",
+      ":ret_check",
+      ":schema",
+      ":sqlite",
+      "@absl//absl/random",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "migrate_test",
+    size = "small",
+    srcs = ["migrate_test.cc"],
+    deps = [
+      ":device_id",
+      ":migrate",
+      ":ret_check",
+      ":sqlite",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
+    ],
+)
