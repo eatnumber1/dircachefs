@@ -1,0 +1,19 @@
+[Unit]
+Description=dcfs write-through FUSE metadata cache
+After=local-fs.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/dcfs/dcfs.env
+ExecStart=/usr/local/bin/dcfs --source=${SOURCE} --cache_db=${CACHE_DB} --foreground=true ${MOUNTPOINT}
+Restart=on-failure
+KillSignal=SIGTERM
+TimeoutStopSec=30
+# dcfs needs CAP_DAC_READ_SEARCH (open_by_handle_at, used to reopen cached
+# inodes by handle) and CAP_SYS_ADMIN (mounting the FUSE filesystem, and
+# FUSE passthrough on the backing files); running as root is the simplest
+# way to hold both rather than assembling an equivalent capability set.
+User=root
+
+[Install]
+WantedBy=multi-user.target

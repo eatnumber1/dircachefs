@@ -41,4 +41,8 @@ qemu_test(
     name = "passthrough_test",
     disks = [("vdb", "ext4", "256M")],
     guest_script = "guest/passthrough.sh",
+
+    name = "lifecycle_test",
+    disks = [("vdb", "ext4", "128M")],
+    guest_script = "guest/lifecycle.sh",
 )

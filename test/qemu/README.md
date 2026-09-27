@@ -57,6 +57,12 @@ If you rebuild the kernel into a different directory, export
   directly, any non-read-only open is refused with EROFS, 200 open/release
   cycles leak no fds, and all of this still works after killing and
   restarting the daemon against the same cache database.
+- `lifecycle_test` (`guest/lifecycle.sh`): step 3.5's daemon lifecycle and
+  CLI -- usage/flag validation, a missing or non-directory `--source`, a
+  cache database refused because it belongs to a different filesystem,
+  `--fuse_opt` (good and bad options), a clean SIGTERM shutdown (exit 0,
+  unmounted, WAL checkpointed), mounting dcfs back over its own `--source`,
+  and restarting against a previously-used cache database.
 
 ## Running
 
@@ -64,6 +70,7 @@ If you rebuild the kernel into a different directory, export
 bazel test --config=qemu //test/qemu:boot_test
 bazel test --config=qemu //test/qemu:readonly_test
 bazel test --config=qemu //test/qemu:passthrough_test
+bazel test --config=qemu //test/qemu:lifecycle_test
 ```
 
 (`--config=qemu` sets `--test_tag_filters=qemu`, overriding the default
