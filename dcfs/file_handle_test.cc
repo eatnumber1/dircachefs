@@ -270,7 +270,10 @@ TEST_F(FileHandleTest, OpenReopensFileViaMountFds) {
     GTEST_SKIP() << fh.status();
   }
 
-  int mount_fd = ::open(dir_path_.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
+  // Open() requires a real (non-O_PATH) mount fd -- open_by_handle_at
+  // rejects O_PATH (fs/fhandle.c get_path_from_fd() uses the non-raw fd
+  // class).
+  int mount_fd = ::open(dir_path_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   ASSERT_GE(mount_fd, 0);
   MountFds mounts;
   ASSERT_THAT(mounts.Insert(fh->device, FileDescriptor(mount_fd)), IsOk());
@@ -314,7 +317,7 @@ TEST_F(FileHandleTest, OpenWithCorruptedHandleFails) {
   ASSERT_FALSE(fh->bytes.empty());
   fh->bytes[0] ^= 0xFF;
 
-  int mount_fd = ::open(dir_path_.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
+  int mount_fd = ::open(dir_path_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   ASSERT_GE(mount_fd, 0);
   MountFds mounts;
   ASSERT_THAT(mounts.Insert(fh->device, FileDescriptor(mount_fd)), IsOk());

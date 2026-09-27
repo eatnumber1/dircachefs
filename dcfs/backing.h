@@ -39,7 +39,10 @@ absl::StatusOr<RootIdentity> ProbeRoot(Context &ctx, int source_fd);
 // Binds an already-migrated cache to the source root: checks that the
 // database was built for this filesystem (FailedPrecondition otherwise),
 // refreshes the root row's handle and attributes, and registers
-// `source_fd` (ideally O_PATH) as the source filesystem's mount fd.
+// `source_fd` as the source filesystem's mount fd. `source_fd` must be a
+// real (non-O_PATH) fd on the source directory: open_by_handle_at's mount
+// fd argument is resolved via the kernel's non-raw fd class (fs/fhandle.c
+// get_path_from_fd()), which rejects O_PATH descriptors with EBADF.
 absl::Status InitRoot(Context &ctx, FileDescriptor source_fd);
 
 // The inode generation (FS_IOC_GETVERSION) of the object `opath_fd` refers

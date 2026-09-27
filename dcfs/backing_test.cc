@@ -133,7 +133,11 @@ class BackingTest : public ::testing::Test {
 
     ASSERT_OK_AND_ASSIGN(
         db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
-    int source_fd = ::open(source_.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
+    // A real (non-O_PATH) fd: InitRoot registers it as the source
+    // filesystem's mount fd, and open_by_handle_at's mount fd argument
+    // rejects O_PATH (fs/fhandle.c get_path_from_fd()).
+    int source_fd =
+        ::open(source_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     ASSERT_GE(source_fd, 0);
     FileDescriptor owned(source_fd);
     ASSERT_OK_AND_ASSIGN(RootIdentity root, ProbeRoot(ctx_, source_fd));

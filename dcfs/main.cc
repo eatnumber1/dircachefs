@@ -77,9 +77,14 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   }
   const char *mountpoint = args[1];
 
+  // A real (non-O_PATH) fd: this ends up registered as the source
+  // filesystem's mount fd (see backing::InitRoot), and open_by_handle_at's
+  // mount fd argument is resolved via the kernel's non-raw fd class
+  // (fs/fhandle.c get_path_from_fd()), which rejects O_PATH descriptors
+  // with EBADF.
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor source_fd,
-      syscalls::openat(AT_FDCWD, source, O_PATH | O_DIRECTORY));
+      syscalls::openat(AT_FDCWD, source, O_RDONLY | O_DIRECTORY));
 
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Connection db, sqlite3::ConnectionFactory{.path = cache_db}.Open());

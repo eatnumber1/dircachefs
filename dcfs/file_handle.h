@@ -19,9 +19,9 @@ namespace dcfs {
 // DeviceId of the filesystem that issued it.
 //
 // dcfs never keeps paths around after startup, so a FileHandle -- together
-// with a live O_PATH fd on its filesystem, looked up by DeviceId in a
-// MountFds -- is the only durable reference the daemon has to a backing
-// object; Open() reopens it via open_by_handle_at(2).
+// with a live real (non-O_PATH) fd on its filesystem, looked up by DeviceId
+// in a MountFds -- is the only durable reference the daemon has to a
+// backing object; Open() reopens it via open_by_handle_at(2).
 struct FileHandle {
   DeviceId device;
   int handle_type = 0;          // struct file_handle::handle_type
@@ -82,12 +82,12 @@ struct FileHandle {
   static absl::StatusOr<FileHandle> FromDirEntry(int dirfd,
                                                   std::string_view name);
 
-  // Reopens the object this handle refers to: looks up an O_PATH fd for
-  // `device` in `mounts` and calls open_by_handle_at(2) with `flags`.
-  // Returns NotFound (propagated from MountFds::Get) if `device` is not
-  // registered in `mounts`. An ESTALE status from the kernel -- meaning the
-  // object is gone or the handle has expired -- is passed through
-  // unchanged.
+  // Reopens the object this handle refers to: looks up a real (non-O_PATH)
+  // fd for `device` in `mounts` and calls open_by_handle_at(2) with
+  // `flags`. Returns NotFound (propagated from MountFds::Get) if `device`
+  // is not registered in `mounts`. An ESTALE status from the kernel --
+  // meaning the object is gone or the handle has expired -- is passed
+  // through unchanged.
   absl::StatusOr<FileDescriptor> Open(const MountFds &mounts, int flags) const;
 };
 

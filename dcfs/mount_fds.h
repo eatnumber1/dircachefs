@@ -11,9 +11,12 @@
 
 namespace dcfs {
 
-// MountFds holds one O_PATH fd per underlying filesystem (DeviceId),
-// letting callers reach a file by handle without re-resolving a path
-// through a mount point that may have moved or gone away.
+// MountFds holds one real (non-O_PATH) directory fd per underlying
+// filesystem (DeviceId), letting callers reach a file by handle without
+// re-resolving a path through a mount point that may have moved or gone
+// away. It must be a real fd, not O_PATH: open_by_handle_at's mount fd
+// argument is resolved via the kernel's non-raw fd class (fs/fhandle.c
+// get_path_from_fd()), which rejects O_PATH descriptors with EBADF.
 //
 // Not thread-safe; callers needing concurrent access must synchronize
 // externally.

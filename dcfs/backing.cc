@@ -184,8 +184,18 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
     ABSL_ASSIGN_OR_RETURN(device, ctx.device_id_fn(**child));
     if (absl::IsNotFound(ctx.mounts.Get(device).status())) {
       // The child is that filesystem's root as seen from here, so an fd on
-      // it is what its handles are decoded against.
-      ABSL_ASSIGN_OR_RETURN(FileDescriptor mount_fd, syscalls::dup(**child));
+      // it is what its handles are decoded against. A real (non-O_PATH) fd
+      // is required -- open_by_handle_at's mount fd argument is resolved
+      // via the kernel's non-raw fd class (fs/fhandle.c
+      // get_path_from_fd()), which rejects O_PATH -- so this reopens `name`
+      // by path rather than reusing/dup'ing the O_PATH `child` fd above;
+      // like the first open of `name` in this function, it accepts the
+      // narrow race of `name` having been replaced in between (the same
+      // exposure ProbeChild already has relative to ReadDirNames's
+      // directory-listing snapshot).
+      ABSL_ASSIGN_OR_RETURN(
+          FileDescriptor mount_fd,
+          syscalls::openat(dir_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW));
       ABSL_RETURN_IF_ERROR(ctx.mounts.Insert(device, std::move(mount_fd)));
     }
     ABSL_ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(**child));
@@ -215,8 +225,11 @@ absl::StatusOr<std::optional<std::string>> CheckFilesystem(
     return absl::StrCat("cannot open its mount point's directory: ",
                         parent.status().ToString());
   }
+  // A real (non-O_PATH) fd: `child` is inserted below as the mount fd for
+  // `fs.device`, and open_by_handle_at's mount fd argument rejects O_PATH
+  // (see ProbeChild's comment on the same restriction).
   absl::StatusOr<FileDescriptor> child = syscalls::openat(
-      **parent, *fs.boundary_name, O_PATH | O_DIRECTORY | O_NOFOLLOW);
+      **parent, *fs.boundary_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
   if (!child.ok()) {
     return absl::StrCat("cannot open its mount point: ",
                         child.status().ToString());

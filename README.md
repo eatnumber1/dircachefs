@@ -59,8 +59,11 @@ mounting dcfs over the directory it caches a supported configuration.
 1. At startup, before mounting, the source directory and the cache
    database are opened by path once; after that, paths are never used
    again.
-2. Backing filesystems are reached through one `O_PATH` mount fd per
-   device id, never by opening a mount point by path.
+2. Backing filesystems are reached through one mount fd per device id,
+   never by opening a mount point by path. This must be a real
+   (non-`O_PATH`) directory fd: `open_by_handle_at`'s mount fd argument is
+   resolved via the kernel's non-raw fd class (`fs/fhandle.c
+   get_path_from_fd()`), which rejects `O_PATH` descriptors with `EBADF`.
 3. All backing operations use `*at` syscalls relative to fds derived from
    stored handles (`openat`, `fstatat` with `AT_EMPTY_PATH`, `readlinkat`,
    `linkat`, `renameat2`, and so on). Children are reached with
