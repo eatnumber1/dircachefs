@@ -27,3 +27,12 @@ qemu_test(
     disks = [("vdb", "ext4", "64M")],
     guest_script = "guest/boot.sh",
 )
+
+qemu_test(
+    name = "readonly_test",
+    disks = [
+        ("vdb", "ext4", "128M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/readonly.sh",
+)

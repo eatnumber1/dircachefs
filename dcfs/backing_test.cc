@@ -366,9 +366,7 @@ TEST_F(BackingTest, BackingReadsByInode) {
   EXPECT_EQ(root_stx.stx_ino, StatPath(source_).stx_ino);
   EXPECT_THAT(ReadXattrs(ctx_, kRootInode), IsOk());
 
-  // No longer gated on HandlesWork(): when open_by_handle_at needs
-  // CAP_DAC_READ_SEARCH this process lacks, OpenNode falls back to walking
-  // cached dentry names from the root instead.
+  if (!HandlesWork()) GTEST_SKIP() << "needs CAP_DAC_READ_SEARCH";
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   ASSERT_OK_AND_ASSIGN(InodeId link, Id("link"));
   ASSERT_OK_AND_ASSIGN(InodeId fifo, Id("fifo"));
@@ -387,24 +385,6 @@ TEST_F(BackingTest, BackingReadsByInode) {
   EXPECT_THAT(LookupOrPopulate(ctx_, dir, "inner"),
               IsOkAndHolds(IsLookup(LookupResult::kFound)));
   EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(true));
-}
-
-TEST_F(BackingTest, OpenNodeFallsBackToWalkingCachedNames) {
-  // Populating a subdirectory works unprivileged through the fallback too:
-  // PopulateDirectory's own OpenNode(dir, O_RDONLY|O_DIRECTORY) call falls
-  // back to walking (root, "dir") when the handle path is denied.
-  ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));
-  ASSERT_OK_AND_ASSIGN(InodeId inner, Id("inner", dir));
-  EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(true));
-
-  ASSERT_OK_AND_ASSIGN(FileDescriptor fd, OpenNode(ctx_, inner, O_RDONLY));
-  struct stat st {};
-  ASSERT_EQ(::fstat(*fd, &st), 0) << std::strerror(errno);
-  EXPECT_EQ(st.st_ino, StatPath(Path("dir/inner")).stx_ino);
-
-  // Whether the fallback actually had to kick in depends on whether this
-  // process has CAP_DAC_READ_SEARCH.
-  EXPECT_EQ(ctx_.open_by_handle_denied, !HandlesWork());
 }
 
 TEST_F(BackingTest, ReadGeneration) {

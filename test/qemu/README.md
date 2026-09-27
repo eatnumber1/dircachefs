@@ -38,10 +38,23 @@ If you rebuild the kernel into a different directory, export
 `DCFS_KERNEL_BUILD` before invoking Bazel (or pass
 `--repo_env=DCFS_KERNEL_BUILD=...`) so `@kernel_image` picks it up.
 
+## Tests
+
+- `boot_test` (`guest/boot.sh`): dcfs and fhtest are present and runnable,
+  and the scratch disk mounts.
+- `readonly_test` (`guest/readonly.sh`): step 3.2's read-only ops
+  (Lookup/Getattr/Readdir(plus)/Readlink/Getxattr/Listxattr/Statfs) served
+  from the cache -- across a real submount, inode numbers matching the
+  backing filesystems, and (checked via `/sys/block/<dev>/stat`) that a
+  warm cache causes *zero* reads from either backing block device,
+  including after killing and restarting the daemon against the same
+  cache database.
+
 ## Running
 
 ```
 bazel test --config=qemu //test/qemu:boot_test
+bazel test --config=qemu //test/qemu:readonly_test
 ```
 
 (`--config=qemu` sets `--test_tag_filters=qemu`, overriding the default

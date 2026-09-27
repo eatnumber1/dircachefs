@@ -26,14 +26,6 @@ struct Context {
   // FS_IOC_GETFSUUID (GetDeviceId). It is a member only so that tests on
   // kernels without that ioctl (it arrived in Linux 6.9) can inject a fake.
   DeviceIdFn device_id_fn = &GetDeviceId;
-
-  // Set by backing::OpenNode the first time open_by_handle_at fails EPERM
-  // (this process lacks CAP_DAC_READ_SEARCH): remembers that so every later
-  // OpenNode call goes straight to walking cached dentry names instead of
-  // retrying a call already known to fail. Process-local runtime state, not
-  // configuration -- it is never read from or written to the database, and
-  // starts fresh (false) every time the daemon restarts.
-  bool open_by_handle_denied = false;
 };
 
 }  // namespace dcfs

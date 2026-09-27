@@ -259,6 +259,28 @@ int64_t CursorFromOffset(off_t off) {
   return off >= 2 ? off - 2 : 0;
 }
 
+// The buffer space a readdir entry named `name` would need, per
+// fuse_add_direntry(): passing a null buffer (and so bufsize 0, which is
+// otherwise meaningless) makes it just return that size without writing
+// anything or dereferencing `stbuf` -- see AppendDirEntries, which relies on
+// the same trick to trim entries that don't fit. Used to stop asking the
+// cache (ListDir/GetAttr) for more entries than a reply can possibly hold,
+// rather than collecting the whole directory and letting ReplyDirs() alone
+// discard what doesn't fit -- that would cost one cache read per entry of
+// the directory on every single readdir call, quadratic in directory size.
+size_t DirEntrySize(std::string_view name) {
+  struct stat dummy = {};
+  return fuse_add_direntry(
+      nullptr, nullptr, 0, std::string(name).c_str(), &dummy, 0);
+}
+
+// As DirEntrySize, for a readdirplus entry via fuse_add_direntry_plus().
+size_t DirEntryPlusSize(std::string_view name) {
+  fuse_entry_param dummy{};
+  return fuse_add_direntry_plus(
+      nullptr, nullptr, 0, std::string(name).c_str(), &dummy, 0);
+}
+
 }  // namespace
 
 absl::Status DirCacheFS::Readdir(
@@ -271,22 +293,33 @@ absl::Status DirCacheFS::Readdir(
   }
 
   std::vector<FuseDirEntry> entries;
-  if (off < 1) entries.push_back({.name = ".", .stbuf = DotStat(dir), .off = 1});
+  size_t used = 0;
+  if (off < 1) {
+    entries.push_back({.name = ".", .stbuf = DotStat(dir), .off = 1});
+    used += DirEntrySize(entries.back().name);
+  }
   if (off < 2) {
     ABSL_ASSIGN_OR_RETURN(InodeId parent, cache::ParentOf(ctx_, dir));
     entries.push_back({.name = "..", .stbuf = DotStat(parent), .off = 2});
+    used += DirEntrySize(entries.back().name);
   }
 
   ABSL_RETURN_IF_ERROR(cache::ListDir(
       ctx_, dir, CursorFromOffset(off),
       [&](std::string_view name, InodeId child,
           int64_t next_cursor) -> absl::StatusOr<bool> {
+        size_t entry_size = DirEntrySize(name);
+        // Stop once this reply is full -- the kernel will call again with
+        // the resume cursor `next_cursor` already encodes as this entry's
+        // offset.
+        if (used + entry_size > size) return false;
         ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx_, child));
         struct stat st = {};
         st.st_ino = attr.backing_ino;
         st.st_mode = attr.st.st_mode;
         entries.push_back(
             {.name = std::string(name), .stbuf = st, .off = next_cursor + 2});
+        used += entry_size;
         return true;
       }));
   return req.ReplyDirs(entries, size);
@@ -302,14 +335,17 @@ absl::Status DirCacheFS::Readdirplus(
   }
 
   std::vector<FuseDirEntryPlus> entries;
+  size_t used = 0;
   if (off < 1) {
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(dir));
     entries.push_back({.name = ".", .entry = entry, .off = 1});
+    used += DirEntryPlusSize(entries.back().name);
   }
   if (off < 2) {
     ABSL_ASSIGN_OR_RETURN(InodeId parent, cache::ParentOf(ctx_, dir));
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(parent));
     entries.push_back({.name = "..", .entry = entry, .off = 2});
+    used += DirEntryPlusSize(entries.back().name);
   }
 
   // The kernel bumps the lookup count for every entry here with ino != 0;
@@ -318,10 +354,16 @@ absl::Status DirCacheFS::Readdirplus(
       ctx_, dir, CursorFromOffset(off),
       [&](std::string_view name, InodeId child,
           int64_t next_cursor) -> absl::StatusOr<bool> {
+        size_t entry_size = DirEntryPlusSize(name);
+        // Checked (and, on failure, EntryFor -- which can itself write to
+        // the cache -- skipped) before touching the cache at all, same as
+        // Readdir above.
+        if (used + entry_size > size) return false;
         ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child));
         entries.push_back(
             {.name = std::string(name), .entry = entry,
              .off = next_cursor + 2});
+        used += entry_size;
         return true;
       }));
   return req.ReplyDirsPlus(entries, size);

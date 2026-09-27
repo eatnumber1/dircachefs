@@ -144,15 +144,6 @@ absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id);
 // for `dir` is cached.
 absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir);
 
-// An arbitrary cached (parent, name) dentry that points at `id`, using the
-// dentries(inode) index; nullopt if none is cached. `id` may have more than
-// one (a hard-linked file can), in which case which one comes back is
-// unspecified -- callers that use this to reconstruct *a* path to `id` (see
-// backing::OpenNode's unprivileged fallback) don't need a canonical one,
-// just a valid one.
-absl::StatusOr<std::optional<std::pair<InodeId, std::string>>> DentryOf(
-    Context &ctx, InodeId id);
-
 // All filesystems, in the order they were added.
 absl::StatusOr<std::vector<FilesystemRow>> ListFilesystems(Context &ctx);
 
