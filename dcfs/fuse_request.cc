@@ -1,0 +1,234 @@
+#include "dcfs/fuse_request.h"
+
+#include <cerrno>
+#include <cstdint>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "absl/log/check.h"
+#include "absl/log/log.h"
+#include "absl/status/status.h"
+#include "absl/time/time.h"
+#include "dcfs/ret_check.h"
+#include "dcfs/status.h"
+
+namespace dcfs {
+
+size_t AppendDirEntries(
+    fuse_req_t req, char *buf, size_t bufsize,
+    std::span<const FuseDirEntry> entries) {
+  size_t used = 0;
+  for (const FuseDirEntry &entry : entries) {
+    size_t remaining = bufsize - used;
+    // fuse_add_direntry() returns the space this entry needs without
+    // writing it if that exceeds `remaining` (it checks buf == nullptr ||
+    // needed > bufsize internally), so a single call both measures and
+    // writes each entry.
+    size_t needed = fuse_add_direntry(
+        req, buf == nullptr ? nullptr : buf + used, remaining,
+        entry.name.c_str(), &entry.stbuf, entry.off);
+    if (needed > remaining) break;
+    used += needed;
+  }
+  return used;
+}
+
+size_t AppendDirEntriesPlus(
+    fuse_req_t req, char *buf, size_t bufsize,
+    std::span<const FuseDirEntryPlus> entries) {
+  size_t used = 0;
+  for (const FuseDirEntryPlus &entry : entries) {
+    size_t remaining = bufsize - used;
+    size_t needed = fuse_add_direntry_plus(
+        req, buf == nullptr ? nullptr : buf + used, remaining,
+        entry.name.c_str(), &entry.entry, entry.off);
+    if (needed > remaining) break;
+    used += needed;
+  }
+  return used;
+}
+
+FuseRequest::FuseRequest(fuse_req_t req) : req_(std::move(req)) {}
+
+FuseRequest::FuseRequest(FuseRequest &&o)
+    : FuseRequest() {
+  *this = std::move(o);
+}
+
+FuseRequest &FuseRequest::operator=(FuseRequest &&o) {
+  using std::swap;
+  swap(req_, o.req_);
+  return *this;
+}
+
+FuseRequest::~FuseRequest() {
+  if (!req_) return;
+  // TODO imporve this warning
+  LOG(WARNING) << "Replying to FuseRequest in destructor";
+  absl::Status st = ReplyErrno(ECOMM);
+  LOG_IF(ERROR, !st.ok()) << "Failed to send reply: " << st;
+}
+
+absl::Status FuseRequest::ReplyEntryParam(const fuse_entry_param &param) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st = absl::ErrnoToStatus(
+      -fuse_reply_entry(*req_, &param), "fuse_reply_entry");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyEntry(
+    fuse_ino_t nodeid, uint64_t generation, const struct stat &attr,
+    absl::Duration attr_timeout, absl::Duration entry_timeout) {
+  fuse_entry_param param{
+      .ino = nodeid,
+      .generation = generation,
+      .attr = attr,
+      .attr_timeout = absl::ToDoubleSeconds(attr_timeout),
+      .entry_timeout = absl::ToDoubleSeconds(entry_timeout),
+  };
+  return ReplyEntryParam(param);
+}
+
+absl::Status FuseRequest::ReplyNegativeEntry(absl::Duration entry_timeout) {
+  fuse_entry_param param = {};
+  param.ino = 0;
+  param.entry_timeout = absl::ToDoubleSeconds(entry_timeout);
+  return ReplyEntryParam(param);
+}
+
+absl::Status FuseRequest::ReplyAttr(
+    const struct stat &attr, absl::Duration attr_timeout) {
+  return ReplyAttr(attr, attr_timeout, /*generation=*/0);
+}
+
+absl::Status FuseRequest::ReplyAttr(
+    const struct stat &attr, absl::Duration attr_timeout,
+    uint64_t generation) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st = absl::ErrnoToStatus(
+      -fuse_reply_attr_with_generation(
+          *req_, &attr, absl::ToDoubleSeconds(attr_timeout), generation),
+      "fuse_reply_attr_with_generation");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyReadlink(std::string_view target) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  // fuse_reply_readlink() wants a NUL-terminated C string; `target` is not
+  // guaranteed to be one.
+  std::string target_str(target);
+  absl::Status st = absl::ErrnoToStatus(
+      -fuse_reply_readlink(*req_, target_str.c_str()), "fuse_reply_readlink");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyOpen(const fuse_file_info &fi) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st =
+    absl::ErrnoToStatus(-fuse_reply_open(*req_, &fi), "fuse_reply_open");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyCreate(
+    const fuse_entry_param &entry, const fuse_file_info &fi) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st = absl::ErrnoToStatus(
+      -fuse_reply_create(*req_, &entry, &fi), "fuse_reply_create");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyWrite(size_t count) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st =
+    absl::ErrnoToStatus(-fuse_reply_write(*req_, count), "fuse_reply_write");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyErrno(int errnum) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st =
+    absl::ErrnoToStatus(-fuse_reply_err(*req_, errnum), "fuse_reply_err");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyFailure(const absl::Status &status) {
+  RET_CHECK(!status.ok()) << "ReplyFailure called with an ok status";
+  int errnum = StatusToErrno(status);
+  // A non-ok status must never turn into a "success" (0) errno reply.
+  if (errnum == 0) errnum = EIO;
+  return ReplyErrno(errnum);
+}
+
+void FuseRequest::ReplyFailureAndLogIfNotOk(const absl::Status &status) {
+  if (status.ok()) return;
+  LOG(ERROR) << status;
+  absl::Status reply_s = ReplyFailure(status);
+  LOG_IF(WARNING, !reply_s.ok()) << "Failed to reply with failure: " << reply_s;
+}
+
+absl::Status FuseRequest::ReplyBuf(std::string_view buf) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st =
+    absl::ErrnoToStatus(
+        -fuse_reply_buf(*req_, buf.data(), buf.size()),
+        "fuse_reply_buf");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyXattrSize(size_t size) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st =
+    absl::ErrnoToStatus(-fuse_reply_xattr(*req_, size), "fuse_reply_xattr");
+  req_ = std::nullopt;
+  return st;
+}
+
+absl::Status FuseRequest::ReplyDirs(
+    std::span<FuseDirEntry> entries, size_t maxsize) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  std::vector<char> buf(maxsize);
+  size_t used = AppendDirEntries(*req_, buf.data(), buf.size(), entries);
+  return ReplyBuf(std::string_view(buf.data(), used));
+}
+
+absl::Status FuseRequest::ReplyDirsPlus(
+    std::span<FuseDirEntryPlus> entries, size_t maxsize) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  std::vector<char> buf(maxsize);
+  size_t used = AppendDirEntriesPlus(*req_, buf.data(), buf.size(), entries);
+  return ReplyBuf(std::string_view(buf.data(), used));
+}
+
+absl::Status FuseRequest::ReplyStatfs(const struct statvfs &stbuf) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st =
+    absl::ErrnoToStatus(
+        -fuse_reply_statfs(*req_, &stbuf),
+        "fuse_reply_statfs");
+  req_ = std::nullopt;
+  return st;
+}
+
+void FuseRequest::ReplyNone() {
+  // ReplyNone() returns void (there is nothing to report to the caller, and
+  // no reply function call that could itself fail), so unlike the other
+  // Reply* methods this uses CHECK rather than RET_CHECK to enforce the
+  // single-reply invariant.
+  CHECK(req_.has_value()) << "FuseRequest already replied";
+  fuse_reply_none(*req_);
+  req_ = std::nullopt;
+}
+
+LogFuseFileInfo::LogFuseFileInfo(fuse_file_info *fi) : fi_(fi) {}
+LogFuseFileInfo::LogFuseFileInfo(fuse_file_info &fi) : LogFuseFileInfo(&fi) {}
+
+}  // namespace dcfs

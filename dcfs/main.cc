@@ -17,6 +17,7 @@
 #include "absl/strings/str_cat.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fd.h"
+#include "dcfs/fuse_ops.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
@@ -67,7 +68,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     fuse_opt_free_args(&fuse_args);
   };
 
-  struct fuse_lowlevel_ops ops = MakeDirCacheFsOps();
+  struct fuse_lowlevel_ops ops = MakeFuseOps();
   struct fuse_session *session =
       fuse_session_new(&fuse_args, &ops, sizeof(ops), &fs);
   if (session == nullptr) {

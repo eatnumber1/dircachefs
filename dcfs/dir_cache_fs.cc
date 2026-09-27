@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <fcntl.h>
+#include <span>
 #include <string_view>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
@@ -14,79 +15,12 @@
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "dcfs/fd.h"
-#include "dcfs/fuse.h"
+#include "dcfs/fuse_request.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
-namespace {
-
-DirCacheFS &GetFS(fuse_req_t req) {
-  auto *fs = static_cast<DirCacheFS *>(fuse_req_userdata(req));
-  CHECK_NE(fs, nullptr);
-  return *fs;
-}
-
-void Init(void *userdata, fuse_conn_info *conn) {
-  CHECK_NE(userdata, nullptr);
-  CHECK_NE(conn, nullptr);
-  absl::Status s = static_cast<DirCacheFS *>(userdata)->Init(*conn);
-  LOG_IF(ERROR, !s.ok()) << s;
-}
-
-void Destroy(void *userdata) {
-  CHECK_NE(userdata, nullptr);
-  absl::Status s = static_cast<DirCacheFS *>(userdata)->Destroy();
-  LOG_IF(ERROR, !s.ok()) << s;
-}
-
-void Lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Lookup(fr, parent, name));
-}
-
-void Forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
-  FuseRequest fr(req);
-  GetFS(req).Forget(fr, ino, nlookup);
-}
-
-void Getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Getattr(fr, ino, fi));
-}
-
-void Opendir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-  CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Opendir(fr, ino, *fi));
-}
-
-void Readdir(
-    fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
-    fuse_file_info *fi) {
-  CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Readdir(fr, ino, size, off, *fi));
-}
-
-void Releasedir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-  CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyAlwaysAndLogIfNotOk(GetFS(req).Releasedir(fr, ino, *fi));
-}
-
-void Statfs(fuse_req_t req, fuse_ino_t ino) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Statfs(fr, ino));
-}
-
-void Access(fuse_req_t req, fuse_ino_t ino, int mask) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Access(fr, ino, mask));
-}
-
-}  // namespace
 
 DirCacheFS::DirCacheFS(FileDescriptor source_fd)
     : source_fd_(std::move(source_fd)) {}
@@ -95,6 +29,16 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   VLOG(1)
     << "Fuse connection using kernel protocol version " << conn.proto_major
     << "." << conn.proto_minor;
+  // Readdirplus is wired into the ops table (see fuse_ops.h) but only
+  // ENOSYS-stubbed so far (DirCacheFS::Readdirplus). Registering the
+  // callback grants the kernel FUSE_CAP_READDIRPLUS by default, and with
+  // FUSE_CAP_READDIRPLUS_AUTO also granted, the kernel decides per-call
+  // (e.g. for `ls -l`, which stats every entry) to use readdirplus instead
+  // of readdir -- which would then hit ENOSYS and fail the listing outright,
+  // instead of the graceful per-op ENOSYS a real caller would see. Withhold
+  // both capabilities until Readdirplus is actually implemented.
+  fuse_unset_feature_flag(&conn, FUSE_CAP_READDIRPLUS_AUTO);
+  fuse_unset_feature_flag(&conn, FUSE_CAP_READDIRPLUS);
   return absl::OkStatus();
 }
 
@@ -113,10 +57,106 @@ absl::Status DirCacheFS::Getattr(
   return req.ReplyAttr(st, /*attr_timeout=*/absl::ZeroDuration());
 }
 
+absl::Status DirCacheFS::Setattr(
+    FuseRequest &req, fuse_ino_t ino, struct stat *attr, int to_set,
+    fuse_file_info *fi) {
+  return req.ReplyErrno(ENOSYS);
+}
+
 absl::Status DirCacheFS::Lookup(
     FuseRequest &req, fuse_ino_t parent_ino, std::string_view name) {
   // Nothing is known to exist under the root yet.
   return req.ReplyErrno(ENOENT);
+}
+
+void DirCacheFS::Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup) {
+  // No inode table exists yet, so there is nothing to forget.
+  req.ReplyNone();
+}
+
+void DirCacheFS::ForgetMulti(
+    FuseRequest &req, std::span<const fuse_forget_data> forgets) {
+  // No inode table exists yet, so there is nothing to forget. Note that,
+  // unlike the other not-yet-implemented ops below, forget/forget_multi have
+  // no error reply -- fuse_reply_none is the only valid reply -- so this
+  // cannot be a req.ReplyErrno(ENOSYS) stub.
+  req.ReplyNone();
+}
+
+absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Mknod(
+    FuseRequest &req, fuse_ino_t parent, std::string_view name, mode_t mode,
+    dev_t rdev) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Mkdir(
+    FuseRequest &req, fuse_ino_t parent, std::string_view name,
+    mode_t mode) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Unlink(
+    FuseRequest &req, fuse_ino_t parent, std::string_view name) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Rmdir(
+    FuseRequest &req, fuse_ino_t parent, std::string_view name) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Symlink(
+    FuseRequest &req, std::string_view link, fuse_ino_t parent,
+    std::string_view name) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Rename(
+    FuseRequest &req, fuse_ino_t parent, std::string_view name,
+    fuse_ino_t newparent, std::string_view newname, unsigned int flags) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Link(
+    FuseRequest &req, fuse_ino_t ino, fuse_ino_t newparent,
+    std::string_view newname) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Open(
+    FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Read(
+    FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
+    fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Write(
+    FuseRequest &req, fuse_ino_t ino, std::span<const char> buf, off_t off,
+    fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Flush(
+    FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Release(
+    FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Fsync(
+    FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
 }
 
 absl::Status DirCacheFS::Opendir(
@@ -140,9 +180,20 @@ absl::Status DirCacheFS::Readdir(
   return req.ReplyDirs(entries, size);
 }
 
+absl::Status DirCacheFS::Readdirplus(
+    FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
+    fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
+}
+
 absl::Status DirCacheFS::Releasedir(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   return req.ReplyErrno(0);
+}
+
+absl::Status DirCacheFS::Fsyncdir(
+    FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
 }
 
 absl::Status DirCacheFS::Statfs(FuseRequest &req, fuse_ino_t ino) {
@@ -151,29 +202,42 @@ absl::Status DirCacheFS::Statfs(FuseRequest &req, fuse_ino_t ino) {
   return req.ReplyStatfs(st);
 }
 
+absl::Status DirCacheFS::Setxattr(
+    FuseRequest &req, fuse_ino_t ino, std::string_view name,
+    std::string_view value, int flags) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Getxattr(
+    FuseRequest &req, fuse_ino_t ino, std::string_view name, size_t size) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Listxattr(
+    FuseRequest &req, fuse_ino_t ino, size_t size) {
+  return req.ReplyErrno(ENOSYS);
+}
+
+absl::Status DirCacheFS::Removexattr(
+    FuseRequest &req, fuse_ino_t ino, std::string_view name) {
+  return req.ReplyErrno(ENOSYS);
+}
+
 absl::Status DirCacheFS::Access(FuseRequest &req, fuse_ino_t ino, int mask) {
   // No permission model exists yet; allow everything.
   return req.ReplyErrno(0);
 }
 
-void DirCacheFS::Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup) {
-  // No inode table exists yet, so there is nothing to forget.
-  req.ReplyNone();
+absl::Status DirCacheFS::Create(
+    FuseRequest &req, fuse_ino_t parent, std::string_view name, mode_t mode,
+    fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
 }
 
-fuse_lowlevel_ops MakeDirCacheFsOps() {
-  fuse_lowlevel_ops ops = {};
-  ops.init = Init;
-  ops.destroy = Destroy;
-  ops.lookup = Lookup;
-  ops.forget = Forget;
-  ops.getattr = Getattr;
-  ops.opendir = Opendir;
-  ops.readdir = Readdir;
-  ops.releasedir = Releasedir;
-  ops.statfs = Statfs;
-  ops.access = Access;
-  return ops;
+absl::Status DirCacheFS::Fallocate(
+    FuseRequest &req, fuse_ino_t ino, int mode, off_t offset, off_t length,
+    fuse_file_info &fi) {
+  return req.ReplyErrno(ENOSYS);
 }
 
 }  // namespace dcfs
