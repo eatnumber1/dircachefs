@@ -92,6 +92,24 @@ absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags);
 absl::StatusOr<std::vector<std::string>> listxattr_opath(int fd);
 absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name);
 
+// fchmodat(AT_FDCWD, "/proc/self/fd/<fd>", mode, 0) -- as listxattr_opath,
+// for fchmod(2), which (like flistxattr/fgetxattr) rejects O_PATH fds.
+// Intended for FIFOs, sockets and devices, which reopening for a real fd
+// (to use plain fchmod) could block on or have side effects on. Not
+// called for a symlink in practice: Linux has no way to chmod a
+// symlink's own mode (there is no lchmod syscall) and this path
+// correctly surfaces that as EOPNOTSUPP (verified experimentally) rather
+// than silently chmoding the target, but callers reject that case
+// explicitly before ever reaching this function.
+absl::Status fchmod_opath(int fd, mode_t mode);
+
+// utimensat(AT_FDCWD, "/proc/self/fd/<fd>", times, 0) -- as fchmod_opath,
+// for futimens(2) on the same set of file types, plus symlinks: verified
+// experimentally that this sets a symlink's own timestamp (not its
+// target's), matching the magic link's usual "resolves to exactly the
+// object the fd refers to, without following further" behavior.
+absl::Status futimens_opath(int fd, const struct timespec times[2]);
+
 // fcntl(fd, F_DUPFD_CLOEXEC, 0).
 absl::StatusOr<FileDescriptor> dup(int fd);
 absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,

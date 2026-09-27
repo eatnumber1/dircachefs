@@ -116,6 +116,43 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
 // and registers a mount fd for each one that still is.
 absl::Status StartupPurge(Context &ctx);
 
+// Applies `attr`'s `to_set` fields (the FUSE_SET_ATTR_* bitmask from a
+// setattr request) to `id` on the backing filesystem, via an O_PATH fd
+// from OpenNode (so `id`'s identity is verified first, as everywhere
+// else here). Does not touch the cache -- the caller runs this between
+// its own MarkAttrsUnknown and RefreshAttrs (see the write-through rule
+// in this file's top comment), and no cache write may happen in here
+// since a transaction may never span a syscall.
+//
+// Applied in the order size, owner (uid/gid), mode, times: a failing
+// truncate must not leave mode/owner already changed, and chown (which on
+// some filesystems silently clears the setuid/setgid bits) is done before
+// mode so an explicit FUSE_SET_ATTR_MODE always wins. Returns the first
+// failing status (with its errno payload intact); anything already
+// applied before that point stays applied on the backing filesystem -- the
+// cache is left "unknown" by the caller's phase 1 regardless, so the next
+// access re-reads the true (possibly partial) result rather than ever
+// reporting stale data.
+//
+// FUSE_SET_ATTR_CTIME is ignored: ctime cannot be set directly, and the
+// kernel only ever sends it alongside another flag. FUSE_SET_ATTR_MODE
+// dispatches on the node's current type: regular files and directories
+// are chmod'd through a reopened non-O_PATH fd (fchmod rejects O_PATH);
+// FIFOs, sockets and devices go through fchmod_opath (reopening one of
+// those for a real fd could block or have a side effect); a symlink's
+// mode cannot be changed at all on Linux (there is no lchmod) and this
+// fails with EOPNOTSUPP. FUSE_SET_ATTR_KILL_SUID/KILL_SGID without
+// FUSE_SET_ATTR_MODE clears S_ISUID/S_ISGID from the node's *current*
+// mode instead (the kernel already cleared them in attr.st_mode whenever
+// it also sent MODE, so that combination needs no extra handling here);
+// it is a no-op on a symlink, which has no meaningful mode bits to clear.
+// Owner and times use the same regular/dir-vs-other-types split as mode,
+// except that both are unremarkable on a symlink (unlike mode); size is
+// only ever valid for a regular file -- EISDIR/EINVAL otherwise, as the
+// kernel itself would report.
+absl::Status SetAttr(
+    Context &ctx, InodeId id, const struct stat &attr, int to_set);
+
 }  // namespace dcfs::backing
 
 #endif  // DCFS_BACKING_H_

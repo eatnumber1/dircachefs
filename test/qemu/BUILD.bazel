@@ -74,6 +74,12 @@ qemu_test(
 )
 
 qemu_test(
+    name = "setattr_test",
+    disks = [("vdb", "ext4", "128M")],
+    guest_script = "guest/setattr.sh",
+)
+
+qemu_test(
     name = "handles_test",
     disks = [
         ("vdb", "ext4", "128M"),

@@ -264,6 +264,7 @@ bazel test //test/qemu:readonly_test
 bazel test //test/qemu:passthrough_test
 bazel test //test/qemu:lifecycle_test
 bazel test //test/qemu:handles_test
+bazel test //test/qemu:setattr_test
 ```
 
 - `boot_test` (`guest/boot.sh`): dcfs and fhtest are present and runnable,
@@ -302,6 +303,19 @@ bazel test //test/qemu:handles_test
   reseeded generation counter. Two consequences of the exclusive-access
   model (no write-through invalidation until Phase 4) that this test
   cannot demonstrate are reported as `SKIP`, not a faked pass.
+- `setattr_test` (`guest/setattr.sh`): step 4.1's `Setattr` write-through --
+  chmod on a regular file, a directory, and a fifo (the three dispatch
+  paths in `backing::SetAttr`); chown; truncate (shrink, grow, and EISDIR
+  on a directory); and utimes (an explicit timestamp and "now"). Every
+  change is checked against `/src` (it actually landed on the backing
+  filesystem) and again via `/mnt` after dropping every cache with vdb's
+  sectors-read counter unchanged (served from dcfs's own cache, not a
+  fresh read), including a final whole-tree pass and a repeat of the whole
+  thing after killing and restarting the daemon against the same cache
+  database. Confirming that chmod on a symlink itself (as opposed to the
+  file it points to) fails with `EOPNOTSUPP` would need a
+  `chmod -h`/`--no-dereference`, which busybox's `chmod` does not have; that
+  one check is `SKIP`, not faked.
 
 The serial console log lands at
 `bazel-testlogs/test/qemu/boot_test/test.outputs/serial.log` (Bazel's

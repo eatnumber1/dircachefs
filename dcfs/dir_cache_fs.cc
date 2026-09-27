@@ -120,7 +120,44 @@ absl::Status DirCacheFS::Getattr(
 absl::Status DirCacheFS::Setattr(
     FuseRequest &req, fuse_ino_t ino, struct stat *attr, int to_set,
     fuse_file_info *fi) {
-  return req.ReplyErrno(ENOSYS);
+  InodeId id = static_cast<InodeId>(ino);
+
+  // Confirm this nodeid still has a row before changing anything -- the
+  // same ESTALE mapping EntryFor uses: a Setattr on a nodeid the cache no
+  // longer has a row for is a stale nodeid, not ENOENT. `fi` is not
+  // consulted anywhere in this method: our open fds are always read-only
+  // (Phase 4 owns writes to file contents, not attributes) and identity
+  // here is by inode, not by whichever handle the kernel happened to pass.
+  absl::StatusOr<cache::CachedAttr> existing = cache::GetAttr(ctx_, id);
+  if (!existing.ok()) {
+    if (absl::IsNotFound(existing.status()) && id != cache::kRootInode) {
+      return dcfs::ErrnoToStatus(
+          ESTALE, absl::StrCat("no cached row for nodeid ", id));
+    }
+    return existing.status();
+  }
+
+  // Phase 1 of the write-through rule (see backing.cc's file comment):
+  // mark the cached attributes unknown before the syscall(s) below, so a
+  // crash before phase 3 leaves "unknown" -- repopulated on the next
+  // access -- rather than ever reporting stale data as current.
+  ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, id));
+
+  // Phase 2: the syscall(s) themselves.
+  absl::Status set_status = backing::SetAttr(ctx_, id, *attr, to_set);
+  if (!set_status.ok()) {
+    // Best effort: refresh right away rather than leaving the row
+    // "unknown" until whatever the next access happens to be, but a
+    // failure here must never shadow `set_status`, which is what actually
+    // gets reported below.
+    backing::RefreshAttrs(ctx_, id).IgnoreError();
+    return set_status;
+  }
+
+  // Phase 3: write the new state, then reply with it.
+  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(id));
+  return req.ReplyAttr(entry.attr, opts_.attr_timeout, entry.generation);
 }
 
 absl::Status DirCacheFS::Lookup(

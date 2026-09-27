@@ -1,5 +1,9 @@
 #include "dcfs/backing.h"
 
+// Needed only for the FUSE_SET_ATTR_* constants SetAttr() dispatches on;
+// nothing here otherwise touches libfuse.
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
+
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
@@ -28,6 +32,7 @@
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
+#include "fuse_lowlevel.h"
 
 namespace dcfs::backing {
 namespace {
@@ -536,6 +541,117 @@ absl::Status StartupPurge(Context &ctx) {
       break;
     }
   }
+  return absl::OkStatus();
+}
+
+namespace {
+
+// Bits SetAttr's mode-related branches (an explicit FUSE_SET_ATTR_MODE, or
+// a KILL_SUID/KILL_SGID-only clear) share: reopening `opath_fd` as a real
+// fd when the node is a regular file or directory (fchmod rejects O_PATH),
+// else fchmod_opath -- except a symlink, which cannot be chmod'd at all on
+// Linux (no lchmod).
+absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
+  if (S_ISLNK(type)) {
+    return dcfs::ErrnoToStatus(EOPNOTSUPP, "chmod on a symlink");
+  }
+  if (S_ISREG(type) || S_ISDIR(type)) {
+    ABSL_ASSIGN_OR_RETURN(
+        FileDescriptor fd,
+        syscalls::ReopenPathFd(
+            opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
+    return syscalls::fchmod(*fd, mode);
+  }
+  return syscalls::fchmod_opath(opath_fd, mode);
+}
+
+// FUSE_SET_ATTR_SIZE: only ever valid for a regular file, same as the
+// kernel's own VFS-level check (notify_change() rejects ATTR_SIZE on
+// anything else before a filesystem ever sees it).
+absl::Status ApplySize(int opath_fd, mode_t type, off_t size) {
+  if (S_ISDIR(type)) {
+    return dcfs::ErrnoToStatus(EISDIR, "truncate on a directory");
+  }
+  if (!S_ISREG(type)) {
+    return dcfs::ErrnoToStatus(
+        EINVAL, "truncate on a non-regular, non-directory file");
+  }
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor fd, syscalls::ReopenPathFd(opath_fd, O_WRONLY | O_CLOEXEC));
+  return syscalls::ftruncate(*fd, size);
+}
+
+// FUSE_SET_ATTR_ATIME/MTIME(_NOW): the regular/dir-vs-other-types split as
+// ApplyMode, but with no symlink exception -- futimens_opath is verified
+// safe there (see syscalls.h).
+absl::Status ApplyTimes(int opath_fd, mode_t type, const struct timespec times[2]) {
+  if (S_ISREG(type) || S_ISDIR(type)) {
+    ABSL_ASSIGN_OR_RETURN(
+        FileDescriptor fd,
+        syscalls::ReopenPathFd(
+            opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
+    return syscalls::futimens(*fd, times);
+  }
+  return syscalls::futimens_opath(opath_fd, times);
+}
+
+}  // namespace
+
+absl::Status SetAttr(
+    Context &ctx, InodeId id, const struct stat &attr, int to_set) {
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  ABSL_ASSIGN_OR_RETURN(
+      struct statx stx, syscalls::statx(*fd, "", AT_EMPTY_PATH, STATX_MODE));
+  mode_t type = stx.stx_mode & S_IFMT;
+
+  if (to_set & FUSE_SET_ATTR_SIZE) {
+    ABSL_RETURN_IF_ERROR(ApplySize(*fd, type, attr.st_size));
+  }
+
+  if (to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID)) {
+    uid_t uid = (to_set & FUSE_SET_ATTR_UID) ? attr.st_uid
+                                             : static_cast<uid_t>(-1);
+    gid_t gid = (to_set & FUSE_SET_ATTR_GID) ? attr.st_gid
+                                             : static_cast<gid_t>(-1);
+    // fchownat works on an O_PATH fd via AT_EMPTY_PATH with an empty path.
+    ABSL_RETURN_IF_ERROR(syscalls::fchownat(*fd, "", uid, gid, AT_EMPTY_PATH));
+  }
+
+  if (to_set & FUSE_SET_ATTR_MODE) {
+    ABSL_RETURN_IF_ERROR(ApplyMode(*fd, type, attr.st_mode));
+  } else if ((to_set & (FUSE_SET_ATTR_KILL_SUID | FUSE_SET_ATTR_KILL_SGID)) &&
+             !S_ISLNK(type)) {
+    // KILL_SUID/KILL_SGID sent without MODE: the kernel wants the
+    // setuid/setgid bits cleared from whatever the node's mode already
+    // is (e.g. after a write), not set to any particular new mode.
+    // Nothing to do for a symlink, which has no meaningful mode bits.
+    mode_t current_mode = stx.stx_mode & 07777;
+    if (to_set & FUSE_SET_ATTR_KILL_SUID) current_mode &= ~S_ISUID;
+    if (to_set & FUSE_SET_ATTR_KILL_SGID) current_mode &= ~S_ISGID;
+    ABSL_RETURN_IF_ERROR(ApplyMode(*fd, type, current_mode));
+  }
+
+  if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME |
+                FUSE_SET_ATTR_ATIME_NOW | FUSE_SET_ATTR_MTIME_NOW)) {
+    struct timespec times[2] = {
+        {.tv_sec = 0, .tv_nsec = UTIME_OMIT},
+        {.tv_sec = 0, .tv_nsec = UTIME_OMIT},
+    };
+    if (to_set & FUSE_SET_ATTR_ATIME_NOW) {
+      times[0].tv_nsec = UTIME_NOW;
+    } else if (to_set & FUSE_SET_ATTR_ATIME) {
+      times[0] = attr.st_atim;
+    }
+    if (to_set & FUSE_SET_ATTR_MTIME_NOW) {
+      times[1].tv_nsec = UTIME_NOW;
+    } else if (to_set & FUSE_SET_ATTR_MTIME) {
+      times[1] = attr.st_mtim;
+    }
+    ABSL_RETURN_IF_ERROR(ApplyTimes(*fd, type, times));
+  }
+
+  // FUSE_SET_ATTR_CTIME is intentionally never consulted: ctime cannot be
+  // set directly (see SetAttr's declaration comment).
   return absl::OkStatus();
 }
 

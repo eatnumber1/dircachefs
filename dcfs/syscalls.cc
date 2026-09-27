@@ -318,6 +318,22 @@ absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name) {
                                             "): kept growing"));
 }
 
+absl::Status fchmod_opath(int fd, mode_t mode) {
+  const std::string path = ProcFdPath(fd);
+  if (::fchmodat(AT_FDCWD, path.c_str(), mode, 0) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("fchmodat(", path, ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status futimens_opath(int fd, const struct timespec times[2]) {
+  const std::string path = ProcFdPath(fd);
+  if (::utimensat(AT_FDCWD, path.c_str(), times, 0) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("utimensat(", path, ")"));
+  }
+  return absl::OkStatus();
+}
+
 absl::StatusOr<FileDescriptor> dup(int fd) {
   int new_fd = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
   if (new_fd == -1) return ErrnoToStatus(errno, absl::StrCat("dup(", fd, ")"));
