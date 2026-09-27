@@ -183,19 +183,14 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
   if (IsBoundary(dir_stx, record.stx)) {
     ABSL_ASSIGN_OR_RETURN(device, ctx.device_id_fn(**child));
     if (absl::IsNotFound(ctx.mounts.Get(device).status())) {
-      // The child is that filesystem's root as seen from here, so an fd on
-      // it is what its handles are decoded against. A real (non-O_PATH) fd
-      // is required -- open_by_handle_at's mount fd argument is resolved
-      // via the kernel's non-raw fd class (fs/fhandle.c
-      // get_path_from_fd()), which rejects O_PATH -- so this reopens `name`
-      // by path rather than reusing/dup'ing the O_PATH `child` fd above;
-      // like the first open of `name` in this function, it accepts the
-      // narrow race of `name` having been replaced in between (the same
-      // exposure ProbeChild already has relative to ReadDirNames's
-      // directory-listing snapshot).
+      // The mount fd must be a real (non-O_PATH) descriptor because
+      // open_by_handle_at resolves it with the non-raw fd class
+      // (fs/fhandle.c get_path_from_fd). Reopen the very object we just
+      // probed through /proc/self/fd rather than looking `name` up again,
+      // so a rename racing with us cannot swap in a different directory.
       ABSL_ASSIGN_OR_RETURN(
           FileDescriptor mount_fd,
-          syscalls::openat(dir_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW));
+          syscalls::ReopenPathFd(**child, O_RDONLY | O_DIRECTORY));
       ABSL_RETURN_IF_ERROR(ctx.mounts.Insert(device, std::move(mount_fd)));
     }
     ABSL_ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(**child));
