@@ -403,3 +403,53 @@ cc_test(
       "@googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "context",
+    hdrs = ["context.h"],
+    deps = [
+      ":mount_fds",
+      ":sqlite",
+    ],
+)
+
+cc_library(
+    name = "metadata_cache",
+    srcs = ["metadata_cache.cc"],
+    hdrs = ["metadata_cache.h"],
+    deps = [
+      ":context",
+      ":device_id",
+      ":file_handle",
+      ":migrate",
+      ":ret_check",
+      ":sqlite",
+      "@absl//absl/functional:function_ref",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "metadata_cache_test",
+    size = "small",
+    srcs = ["metadata_cache_test.cc"],
+    deps = [
+      ":context",
+      ":device_id",
+      ":file_handle",
+      ":metadata_cache",
+      ":migrate",
+      ":mount_fds",
+      ":ret_check",
+      ":sqlite",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
+    ],
+)
