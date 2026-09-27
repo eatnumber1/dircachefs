@@ -18,9 +18,8 @@
 #   - a handle with a doctored generation word is rejected with ESTALE,
 #     never resolved to the (now different) object;
 #   - when the backing filesystem recycles an inode number behind dcfs's
-#     back, the old row is invalidated and the old handle -- kept open
-#     across a daemon restart -- comes back ESTALE, whether or not the
-#     inode number actually got reused;
+#     back, the old row is invalidated and the old handle comes back
+#     ESTALE, whether or not the inode number actually got reused;
 #   - wiping the cache database (the one case the design doc says does NOT
 #     survive) yields ESTALE for a pre-wipe handle, from a fresh,
 #     randomly-reseeded generation counter that is astronomically unlikely
@@ -65,12 +64,9 @@ MOUNTED=0
 
 # See readonly.sh for why every command here is `|| true`-guarded: this
 # must run to completion (and dump every daemon log on any failure)
-# regardless of how the script is exiting. Also closes fd 3 (the
-# handle-survives-a-restart fd from the recycled-inode check below) in
-# case a failure short-circuited the test before it closed it itself.
+# regardless of how the script is exiting.
 cleanup() {
 	rc=$?
-	exec 3<&- 2>/dev/null || true
 	if [ "$rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
 		echo "--- dcfs stderr (run 1) ---"
 		cat "$LOG1" 2>/dev/null
@@ -344,6 +340,19 @@ fi
 # VerifyBackingIdentity) regardless of directory listings or attribute
 # caching -- so the ESTALE check below does not depend on the repopulate
 # actually happening, and is expected to hold either way.
+#
+# Importantly, nothing here keeps an fd open on c.txt (an earlier version
+# of this test did, via `exec 3</mnt/c.txt`, to also probe the still-open-fd
+# case the fstat-eio-needs-phase4 SKIP below talks about). That backfired:
+# a FUSE open granted kernel passthrough holds its own reference to the
+# backing file for as long as it stays open, and the shell keeping fd 3
+# open across the SIGTERM+restart below (the old mount is only lazily
+# detached, so the open file itself survives) kept the backing inode from
+# ever being freed -- so `rm /src/c.txt` could never actually recycle it,
+# and the "old handle" trivially kept resolving to the same still-live
+# inode (a false PASS, not a real one). The fstat->EIO scenario that fd was
+# meant to help demonstrate is already out of scope here regardless (see
+# that SKIP) so there is nothing lost by not holding an fd open.
 
 orig_ino=$(stat -c %i /src/c.txt)
 
@@ -365,12 +374,6 @@ if [ "$content" = "$C_CONTENT" ]; then
 else
 	fail recycled-inode-visible "cat /mnt/c.txt -> '$content' (want '$C_CONTENT')"
 fi
-
-# Keep an fd open on c.txt across the restart below, per the design doc's
-# "a recycled backing inode yields a new row and the old nodeid becomes
-# stale" -- see the fstat-eio-needs-phase4 SKIP for what this fd is (and
-# isn't) able to demonstrate.
-exec 3</mnt/c.txt || true
 
 rm -f /src/c.txt
 REUSED=no
@@ -417,9 +420,7 @@ fi
 skip recycled-name-visible-needs-phase4 \
 	"root is already marked complete from the initial populate; without Phase 4 write-through invalidation dcfs has no way to discover a name created on the backing store afterwards (a lookup answers from the cached negative entry), so fhtest gen on whichever c<N>.txt reused the inode cannot be exercised"
 skip fstat-eio-needs-phase4 \
-	"fd 3 was kept open across the restart above, but the restart drops/reopens the mount, so the same fd cannot be re-fstat'd against the new session; demonstrating fstat->EIO on a still-open fd whose row got invalidated needs a write-through unlink (Phase 4), not a daemon restart"
-
-exec 3<&- 2>/dev/null || true
+	"demonstrating fstat->EIO on a still-open fd whose row got invalidated needs the row to be invalidated while the fd stays open on the *same* mount session; a daemon restart only lazily detaches the old mount (the fd's FUSE passthrough reference then keeps the backing inode itself alive, which is exactly what previously made this test wrongly PASS -- see the recycled-inode comment above), so this needs a write-through unlink (Phase 4), not a daemon restart, and is not attempted here"
 
 # --- db-wipe-estale: the one case that does NOT survive --------------------
 #
