@@ -1,0 +1,9 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+# File-handle test client (name_to_handle_at / open_by_handle_at /
+# FS_IOC_GETVERSION). Used by tools/handle_tests.sh and the QEMU suite.
+cc_binary(
+    name = "fhtest",
+    srcs = ["fhtest.c"],
+    visibility = ["//visibility:public"],
+)
