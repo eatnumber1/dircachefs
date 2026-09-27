@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <string>
@@ -402,6 +403,52 @@ TEST_F(SyscallsTest, NameToHandleAtRoundTrip) {
   ASSERT_THAT(st_reopened, IsOk());
 
   EXPECT_EQ(st_original->st_ino, st_reopened->st_ino);
+}
+
+TEST_F(SyscallsTest, XattrOpathReadsTheObjectNotTheSymlinkTarget) {
+  const std::string value = "opath";
+  if (::fsetxattr(file_fd_, "user.dcfs_opath", value.data(), value.size(),
+                  0) != 0) {
+    GTEST_SKIP() << "user xattrs unsupported here: " << std::strerror(errno);
+  }
+  int file_path_fd = ::openat(tmpdir_fd_, "test_file", O_PATH);
+  ASSERT_GE(file_path_fd, 0);
+  auto names = syscalls::listxattr_opath(file_path_fd);
+  ASSERT_THAT(names, IsOk());
+  EXPECT_NE(std::find(names->begin(), names->end(), "user.dcfs_opath"),
+            names->end());
+  auto got = syscalls::getxattr_opath(file_path_fd, "user.dcfs_opath");
+  ASSERT_THAT(got, IsOk());
+  EXPECT_EQ(*got, value);
+  auto absent = syscalls::getxattr_opath(file_path_fd, "user.dcfs_absent");
+  ASSERT_FALSE(absent.ok());
+  EXPECT_EQ(GetErrnoFromStatus(absent.status()).value_or(0), ENODATA);
+
+  // Through an O_PATH fd on a symlink to that file, the magic link resolves
+  // to the symlink itself, so the target's xattr is not visible.
+  ::unlinkat(tmpdir_fd_, "opath_link", 0);
+  ASSERT_EQ(::symlinkat("test_file", tmpdir_fd_, "opath_link"), 0);
+  int link_fd = ::openat(tmpdir_fd_, "opath_link", O_PATH | O_NOFOLLOW);
+  ASSERT_GE(link_fd, 0);
+  auto link_names = syscalls::listxattr_opath(link_fd);
+  ASSERT_THAT(link_names, IsOk());
+  EXPECT_EQ(std::find(link_names->begin(), link_names->end(),
+                      "user.dcfs_opath"),
+            link_names->end());
+  ::close(link_fd);
+  ::close(file_path_fd);
+}
+
+TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {
+  auto duped = syscalls::dup(file_fd_);
+  ASSERT_THAT(duped, IsOk());
+  EXPECT_NE(**duped, file_fd_);
+  EXPECT_NE(::fcntl(**duped, F_GETFD) & FD_CLOEXEC, 0);
+  auto a = syscalls::fstat(file_fd_);
+  auto b = syscalls::fstat(**duped);
+  ASSERT_THAT(a, IsOk());
+  ASSERT_THAT(b, IsOk());
+  EXPECT_EQ(a->st_ino, b->st_ino);
 }
 
 }  // namespace

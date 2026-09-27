@@ -82,6 +82,18 @@ absl::Status fsetxattr(int fd, std::string_view name,
                        std::span<const uint8_t> value, int flags);
 absl::Status fremovexattr(int fd, std::string_view name);
 absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags);
+
+// listxattr(2)/getxattr(2) on "/proc/self/fd/<fd>" -- the path-following
+// variants. The magic link resolves to exactly the object `fd` refers to,
+// even when that object is itself a symlink (it is not followed further),
+// so these work on an O_PATH fd for any file type: unlike flistxattr and
+// fgetxattr they need neither a non-O_PATH fd nor an open() of the object,
+// which for a FIFO or device could block or have side effects.
+absl::StatusOr<std::vector<std::string>> listxattr_opath(int fd);
+absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name);
+
+// fcntl(fd, F_DUPFD_CLOEXEC, 0).
+absl::StatusOr<FileDescriptor> dup(int fd);
 absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,
                     std::string_view newpath, int flags);
 absl::Status unlinkat(int dirfd, std::string_view path, int flags);

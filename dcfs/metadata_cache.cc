@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -631,6 +632,43 @@ absl::Status MarkDirComplete(Context &ctx, InodeId dir, bool complete) {
                    "children_complete = excluded.children_complete",
                    dir, complete)
         .status();
+  });
+}
+
+absl::Status EnsureDirectory(Context &ctx, InodeId dir) {
+  return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(RequireInode(ctx, dir));
+    return Execute(ctx,
+                   "INSERT INTO directories (inode, children_complete) "
+                   "VALUES (?, 0) ON CONFLICT (inode) DO NOTHING",
+                   dir)
+        .status();
+  });
+}
+
+absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
+                                std::span<const std::string> names) {
+  // The set difference is computed here rather than with NOT IN (...):
+  // a directory can have more names than SQLite allows bound parameters,
+  // and splitting a NOT IN into batches would not be a set difference.
+  const absl::flat_hash_set<std::string_view> keep(names.begin(), names.end());
+  return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(
+        Statement * stmt,
+        Query(ctx, "SELECT name FROM dentries WHERE parent = ?", dir));
+    std::vector<std::string> doomed;
+    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
+      std::string name = row.Column<std::string>(0);
+      if (!keep.contains(name)) doomed.push_back(std::move(name));
+      return absl::OkStatus();
+    }));
+    for (const std::string &name : doomed) {
+      ABSL_RETURN_IF_ERROR(
+          Execute(ctx, "DELETE FROM dentries WHERE parent = ? AND name = ?",
+                  dir, Blob(name))
+              .status());
+    }
+    return absl::OkStatus();
   });
 }
 

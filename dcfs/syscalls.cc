@@ -254,6 +254,76 @@ absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags) {
   return FileDescriptor(new_fd);
 }
 
+namespace {
+
+std::string ProcFdPath(int fd) {
+  return absl::StrFormat("/proc/self/fd/%d", fd);
+}
+
+// Splits a listxattr(2) result: NUL-terminated names, back to back.
+std::vector<std::string> SplitXattrList(std::string_view buf) {
+  std::vector<std::string> result;
+  size_t pos = 0;
+  while (pos < buf.size()) {
+    size_t end = buf.find('\0', pos);
+    if (end == std::string_view::npos) end = buf.size();
+    result.emplace_back(buf.substr(pos, end - pos));
+    pos = end + 1;
+  }
+  return result;
+}
+
+}  // namespace
+
+absl::StatusOr<std::vector<std::string>> listxattr_opath(int fd) {
+  const std::string path = ProcFdPath(fd);
+  // The list can grow between sizing and reading it; ERANGE then means
+  // "size again", which a few retries make overwhelmingly likely to settle.
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    ssize_t size = ::listxattr(path.c_str(), nullptr, 0);
+    if (size == -1) return ErrnoToStatus(errno, absl::StrCat("listxattr(", path, ")"));
+    if (size == 0) return std::vector<std::string>();
+    std::string buf(size, '\0');
+    ssize_t nbytes = ::listxattr(path.c_str(), buf.data(), buf.size());
+    if (nbytes == -1) {
+      if (errno == ERANGE) continue;
+      return ErrnoToStatus(errno, absl::StrCat("listxattr(", path, ")"));
+    }
+    buf.resize(nbytes);
+    return SplitXattrList(buf);
+  }
+  return ErrnoToStatus(ERANGE, absl::StrCat("listxattr(", path, "): kept growing"));
+}
+
+absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name) {
+  const std::string path = ProcFdPath(fd);
+  const std::string name_str(name);
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    ssize_t size = ::getxattr(path.c_str(), name_str.c_str(), nullptr, 0);
+    if (size == -1) {
+      return ErrnoToStatus(errno, absl::StrCat("getxattr(", path, ", ", name, ")"));
+    }
+    if (size == 0) return std::string();
+    std::string value(size, '\0');
+    ssize_t nbytes =
+        ::getxattr(path.c_str(), name_str.c_str(), value.data(), value.size());
+    if (nbytes == -1) {
+      if (errno == ERANGE) continue;
+      return ErrnoToStatus(errno, absl::StrCat("getxattr(", path, ", ", name, ")"));
+    }
+    value.resize(nbytes);
+    return value;
+  }
+  return ErrnoToStatus(ERANGE, absl::StrCat("getxattr(", path, ", ", name,
+                                            "): kept growing"));
+}
+
+absl::StatusOr<FileDescriptor> dup(int fd) {
+  int new_fd = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
+  if (new_fd == -1) return ErrnoToStatus(errno, absl::StrCat("dup(", fd, ")"));
+  return FileDescriptor(new_fd);
+}
+
 absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,
                     std::string_view newpath, int flags) {
   std::string oldpath_str(oldpath);

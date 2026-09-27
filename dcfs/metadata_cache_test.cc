@@ -711,5 +711,52 @@ TEST_F(MetadataCacheTest, WriteRollsBackWithCallersTransaction) {
               IsOkAndHolds(IsLookup(LookupResult::kNegative)));
 }
 
+TEST_F(MetadataCacheTest, EnsureDirectoryKeepsExistingCompleteness) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult dir, Make(20, S_IFDIR | 0755));
+  EXPECT_THAT(CountRows(db_, absl::StrCat("directories WHERE inode = ", dir.id)),
+              IsOkAndHolds(0));
+  ASSERT_THAT(EnsureDirectory(ctx_, dir.id), IsOk());
+  EXPECT_THAT(IsDirComplete(ctx_, dir.id), IsOkAndHolds(false));
+  EXPECT_THAT(CountRows(db_, absl::StrCat("directories WHERE inode = ", dir.id)),
+              IsOkAndHolds(1));
+
+  ASSERT_THAT(MarkDirComplete(ctx_, dir.id, true), IsOk());
+  ASSERT_THAT(EnsureDirectory(ctx_, dir.id), IsOk());
+  EXPECT_THAT(IsDirComplete(ctx_, dir.id), IsOkAndHolds(true));
+
+  EXPECT_THAT(EnsureDirectory(ctx_, 999),
+              StatusIs(absl::StatusCode::kNotFound));
+}
+
+TEST_F(MetadataCacheTest, PruneDentriesNotIn) {
+  ASSERT_OK_AND_ASSIGN(InodeId a, MakeDir(kRootInode, "a", 20));
+  ASSERT_OK_AND_ASSIGN(InodeId b, MakeDir(kRootInode, "b", 21));
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_THAT(LinkDentry(ctx_, a, "keep", f.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, a, "drop", f.id), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, a, "neg_keep"), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, a, "neg_drop"), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, b, "drop", f.id), IsOk());
+
+  const std::vector<std::string> names = {"keep", "neg_keep", "not_cached"};
+  ASSERT_THAT(PruneDentriesNotIn(ctx_, a, names), IsOk());
+  EXPECT_THAT(Lookup(ctx_, a, "keep"), IsOkAndHolds(IsFoundAs(f.id)));
+  EXPECT_THAT(Lookup(ctx_, a, "neg_keep"),
+              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+  EXPECT_THAT(Lookup(ctx_, a, "drop"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_THAT(Lookup(ctx_, a, "neg_drop"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  // Other directories and the inode row are untouched.
+  EXPECT_THAT(Lookup(ctx_, b, "drop"), IsOkAndHolds(IsFoundAs(f.id)));
+  EXPECT_THAT(GetAttr(ctx_, f.id), IsOk());
+
+  // An empty listing forgets everything.
+  ASSERT_THAT(PruneDentriesNotIn(ctx_, a, {}), IsOk());
+  EXPECT_THAT(ListNames(ctx_, a), ::testing::IsEmpty());
+  EXPECT_THAT(CountRows(db_, absl::StrCat("dentries WHERE parent = ", a)),
+              IsOkAndHolds(0));
+}
+
 }  // namespace
 }  // namespace dcfs::cache

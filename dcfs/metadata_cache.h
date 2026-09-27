@@ -192,6 +192,18 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
 // Records whether every entry of `dir` is cached.
 absl::Status MarkDirComplete(Context &ctx, InodeId dir, bool complete);
 
+// Gives directory `dir` a directories row (children_complete 0) if it has
+// none; an existing row, and so its completeness, is left alone. Used when
+// a directory is discovered, so that re-discovering an already-populated
+// one does not throw its listing away. NotFound if no row for `dir`.
+absl::Status EnsureDirectory(Context &ctx, InodeId dir);
+
+// Forgets every dentry of `dir`, positive or negative, whose name is not in
+// `names`: after a full listing of the backing directory, those names are
+// known not to exist any more. Inode rows are left alone (see UnlinkDentry).
+absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
+                                std::span<const std::string> names);
+
 // Forgets `names` in `parent` and marks `parent` incomplete. Phase 1 of a
 // two-phase mutation: done before the backing operation, so that a crash
 // between the two leaves "unknown" rather than stale state.
