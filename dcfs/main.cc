@@ -12,9 +12,11 @@
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/status/status_builder.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
 #include "dcfs/context.h"
@@ -27,9 +29,6 @@
 #include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
 
-// Step 3.5 finishes the CLI/lifecycle (signal handling nuances, richer `-o`
-// passthrough, ...); this is just enough startup wiring to open the cache
-// database, bind it to the source filesystem, and mount read-only ops.
 ABSL_FLAG(
     std::string, source, "",
     "Directory this filesystem caches. Required.");
@@ -50,41 +49,76 @@ ABSL_FLAG(
     bool, allow_other, false,
     "Pass -o allow_other to the FUSE mount, letting users other than the "
     "one running dcfs access the mountpoint.");
+ABSL_FLAG(
+    std::vector<std::string>, fuse_opt, {},
+    "Comma-separated FUSE/kernel mount options, passed through to libfuse "
+    "as \"-o <opts>\" (e.g. --fuse_opt=max_read=65536). Abseil has no "
+    "single-dash flag syntax, so -o is spelled --fuse_opt here; repeating "
+    "the flag replaces the previous value rather than accumulating "
+    "(ordinary Abseil vector<string> flag semantics), so combine several "
+    "options in one --fuse_opt=a,b instead of repeating the flag. Our own "
+    "default_permissions (and allow_other, when --allow_other is set) are "
+    "always added on top of these.");
 
 namespace dcfs {
 namespace {
 
+// Prints the usage message set by absl::SetProgramUsageMessage() and
+// returns an InvalidArgument status for `message`. Used for command-line
+// mistakes (a missing required flag, the wrong number of positional
+// arguments) -- as opposed to a valid-looking command line that fails once
+// we try to act on it (a bad --source, a foreign cache database, ...),
+// where printing the usage banner again would just be noise.
+absl::Status UsageError(absl::string_view message) {
+  std::cerr << absl::ProgramUsageMessage() << "\n";
+  return absl::InvalidArgumentError(message);
+}
+
 absl::StatusOr<int> Main(int argc, char *argv[]) {
-  absl::SetProgramUsageMessage("--source=<dir> --cache_db=<path> [flags] mountpoint");
+  absl::SetProgramUsageMessage(
+      "--source=<dir> --cache_db=<path> [flags] mountpoint");
   std::vector<char *> args = absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
 
-  std::string source = absl::GetFlag(FLAGS_source);
-  if (source.empty()) {
-    return absl::InvalidArgumentError("--source is required");
+  if (absl::GetFlag(FLAGS_source).empty()) {
+    return UsageError("--source is required");
   }
   std::string cache_db = absl::GetFlag(FLAGS_cache_db);
   if (cache_db.empty()) {
-    return absl::InvalidArgumentError("--cache_db is required");
+    return UsageError("--cache_db is required");
   }
 
   // args[0] is the program name; exactly one positional argument (the
   // mountpoint) should remain after flag parsing.
   if (args.size() != 2) {
-    return absl::InvalidArgumentError(
+    return UsageError(
         absl::StrCat(
           "expected exactly one mountpoint argument, got ", args.size() - 1));
   }
   const char *mountpoint = args[1];
 
-  // A real (non-O_PATH) fd: this ends up registered as the source
-  // filesystem's mount fd (see backing::InitRoot), and open_by_handle_at's
-  // mount fd argument is resolved via the kernel's non-raw fd class
-  // (fs/fhandle.c get_path_from_fd()), which rejects O_PATH descriptors
-  // with EBADF.
-  ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor source_fd,
-      syscalls::openat(AT_FDCWD, source, O_RDONLY | O_DIRECTORY));
+  // `source` (the --source path string) is scoped to this block alone: once
+  // source_fd is open, every later use of the source filesystem goes
+  // through that fd (or objects reopened from cached file handles), never
+  // through the path again -- that's what makes mounting dcfs back over
+  // --source itself (a supported configuration) safe.
+  FileDescriptor source_fd;
+  {
+    std::string source = absl::GetFlag(FLAGS_source);
+    // A real (non-O_PATH) fd: this ends up registered as the source
+    // filesystem's mount fd (see backing::InitRoot), and open_by_handle_at's
+    // mount fd argument is resolved via the kernel's non-raw fd class
+    // (fs/fhandle.c get_path_from_fd()), which rejects O_PATH descriptors
+    // with EBADF. O_DIRECTORY also gives a clear ENOTDIR up front if
+    // --source isn't a directory.
+    absl::StatusOr<FileDescriptor> opened =
+        syscalls::openat(AT_FDCWD, source, O_RDONLY | O_DIRECTORY);
+    if (!opened.ok()) {
+      return absl::StatusBuilder(opened.status())
+          << " (--source=" << source << ")";
+    }
+    source_fd = *std::move(opened);
+  }
 
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Connection db, sqlite3::ConnectionFactory{.path = cache_db}.Open());
@@ -93,8 +127,18 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
 
   ABSL_ASSIGN_OR_RETURN(RootIdentity root, backing::ProbeRoot(ctx, *source_fd));
   ABSL_RETURN_IF_ERROR(Migrate(db, root));
-  // Refuses (FailedPrecondition) a cache database that belongs to a
-  // different filesystem than --source.
+  // backing::InitRoot() also refuses a cache database built for a different
+  // filesystem, but can't be given a --cache_db path or an actionable
+  // suggestion to put in its error (it only sees fds, not flags); do that
+  // check here instead, before InitRoot, so the message names both.
+  ABSL_ASSIGN_OR_RETURN(DeviceId stored_device, GetSourceDeviceId(db));
+  if (stored_device != root.device_id) {
+    return absl::FailedPreconditionError(absl::StrCat(
+        "cache database ", cache_db, " was created for filesystem ",
+        stored_device.ToString(), ", but --source is on ",
+        root.device_id.ToString(),
+        "; delete the database to start a cold cache"));
+  }
   ABSL_RETURN_IF_ERROR(backing::InitRoot(ctx, std::move(source_fd)));
   ABSL_RETURN_IF_ERROR(backing::StartupPurge(ctx));
 
@@ -104,11 +148,17 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   };
   DirCacheFS fs(ctx, opts);
 
-  std::vector<std::string> fuse_arg_strings = {args[0], "-o", "default_permissions"};
+  // default_permissions (and allow_other, if requested) are always added,
+  // ahead of whatever the caller passed via --fuse_opt.
+  std::vector<std::string> mount_opts = {"default_permissions"};
   if (absl::GetFlag(FLAGS_allow_other)) {
-    fuse_arg_strings.push_back("-o");
-    fuse_arg_strings.push_back("allow_other");
+    mount_opts.push_back("allow_other");
   }
+  for (const std::string &opt : absl::GetFlag(FLAGS_fuse_opt)) {
+    mount_opts.push_back(opt);
+  }
+  std::vector<std::string> fuse_arg_strings = {
+      args[0], "-o", absl::StrJoin(mount_opts, ",")};
   std::vector<char *> fuse_arg_ptrs;
   fuse_arg_ptrs.reserve(fuse_arg_strings.size());
   for (std::string &arg : fuse_arg_strings) fuse_arg_ptrs.push_back(arg.data());
@@ -125,31 +175,49 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   if (session == nullptr) {
     return absl::InternalError("fuse_session_new failed");
   }
-  absl::Cleanup cleanup_session = [session]() {
-    fuse_session_destroy(session);
-  };
 
   if (fuse_set_signal_handlers(session) != 0) {
+    fuse_session_destroy(session);
     return absl::InternalError("fuse_set_signal_handlers failed");
   }
-  absl::Cleanup cleanup_signal_handlers = [session]() {
-    fuse_remove_signal_handlers(session);
-  };
 
   if (fuse_session_mount(session, mountpoint) != 0) {
+    fuse_remove_signal_handlers(session);
+    fuse_session_destroy(session);
     return absl::InternalError(
         absl::StrCat("fuse_session_mount(", mountpoint, ") failed"));
   }
-  absl::Cleanup cleanup_mount = [session]() {
-    fuse_session_unmount(session);
-  };
 
-  // Non-zero (the default) keeps this process in the foreground; zero would
-  // fork to the background.
+  // Non-zero (the default) keeps this process in the foreground; zero
+  // forks to the background. Mounting has already happened by this point,
+  // so this is purely about who owns the controlling terminal from here on.
   fuse_daemonize(absl::GetFlag(FLAGS_foreground) ? 1 : 0);
 
   int rc = fuse_session_loop(session);
-  if (rc != 0) {
+
+  // Shutdown order matters: unmount first, so the kernel stops sending new
+  // requests and fusermount's mount table entry is gone, then tear down the
+  // session, and only after that checkpoint and close the cache database --
+  // nothing should still be able to write to it once we start closing it.
+  fuse_session_unmount(session);
+  fuse_remove_signal_handlers(session);
+  fuse_session_destroy(session);
+
+  absl::Status checkpoint_status = db.Checkpoint();
+  if (!checkpoint_status.ok()) {
+    LOG(WARNING) << "WAL checkpoint failed: " << checkpoint_status;
+  }
+  absl::Status close_status = db.Close();
+  if (!close_status.ok()) {
+    LOG(WARNING) << "closing cache database: " << close_status;
+  }
+
+  // fuse_session_loop() returns 0 when the kernel connection was closed
+  // (e.g. the mount was unmounted externally), a positive signal number
+  // when fuse_set_signal_handlers()'s handler stopped the loop, or a
+  // negative -errno on an actual error -- only the last of those is a
+  // failure.
+  if (rc < 0) {
     return absl::InternalError(absl::StrCat("fuse_session_loop: ", rc));
   }
   return EXIT_SUCCESS;
