@@ -47,15 +47,38 @@ struct FileHandle {
   // messages only; not parseable by Parse().
   std::string ToString() const;
 
-  // Builds a FileHandle for the object `fd` itself names. `fd` may be an
-  // O_PATH descriptor, including one opened on a symlink (name_to_handle_at
-  // with AT_EMPTY_PATH operates on whatever `fd` refers to, without
-  // following it further).
+  // Builds a FileHandle for the object `fd` itself names, using `device` as
+  // its already-known device identity instead of calling GetDeviceId(fd).
+  // For callers that already know it -- e.g. the root fd, whose device is
+  // established once at startup.
+  static absl::StatusOr<FileHandle> FromFd(int fd, DeviceId device);
+
+  // Builds a FileHandle for the object `fd` itself names, calling
+  // GetDeviceId(fd) to establish its device. `fd` may be an O_PATH
+  // descriptor (name_to_handle_at with AT_EMPTY_PATH operates on whatever
+  // `fd` refers to, without following it further) -- except a symlink:
+  // GetDeviceId()'s ioctl-based implementation cannot handle an O_PATH fd
+  // for a symlink. ioctl() rejects O_PATH descriptors outright with EBADF,
+  // so GetDeviceId falls back to reopening via /proc/self/fd/<fd>; when
+  // <fd> is itself an O_PATH descriptor for a symlink, that reopen fails
+  // ELOOP (the kernel refuses to transparently dereference a magic symlink
+  // that itself names a symlink opened O_NOFOLLOW). Use FromDirEntry() for
+  // a symlink instead -- it gets the device from the containing directory,
+  // which never has this problem.
   static absl::StatusOr<FileHandle> FromFd(int fd);
 
   // Builds a FileHandle for the directory entry `name` inside `dirfd`. If
   // `name` names a symlink, the handle refers to the symlink itself, not
-  // its target.
+  // its target (name_to_handle_at is called without AT_SYMLINK_FOLLOW).
+  //
+  // Device identity is established without needing an fd on `name` itself
+  // unless it turns out to be a mount point: only a directory can be a
+  // mount point or (for Btrfs) a sub-volume boundary, so any non-directory
+  // entry necessarily lives on the same filesystem as `dirfd`. This checks
+  // that cheaply by comparing `dirfd`'s and the entry's statx mount ids,
+  // and only opens the entry itself (O_PATH|O_DIRECTORY|O_NOFOLLOW, so it
+  // must be a directory) to call GetDeviceId on it when the mount ids
+  // actually differ.
   static absl::StatusOr<FileHandle> FromDirEntry(int dirfd,
                                                   std::string_view name);
 

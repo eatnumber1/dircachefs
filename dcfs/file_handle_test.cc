@@ -14,9 +14,7 @@
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/cord.h"
 #include "absl/strings/str_cat.h"
-#include "absl/types/optional.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
 #include "dcfs/mount_fds.h"
@@ -28,29 +26,18 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
+using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 
 // True if `status` reflects this host or filesystem lacking support this
 // test needs, rather than a real bug: GetDeviceId() returns Unimplemented
-// on kernels older than 6.9 (this host runs 6.8, see device_id_test.cc);
-// name_to_handle_at(2) can fail EOPNOTSUPP/ENOTSUP on filesystems that
-// don't export file handles; and GetDeviceId(fd), when `fd` is an O_PATH
-// descriptor for a symlink, fails ELOOP on every kernel version -- its
-// ioctl-on-O_PATH fallback reopens via /proc/self/fd/<fd>, and the kernel
-// deliberately returns ELOOP rather than open()ing through a magic symlink
-// that itself names a symlink opened O_NOFOLLOW. This is a real limitation
-// of today's GetDeviceId() for symlinks, not something worked around
-// incorrectly here; see the report for this step.
+// on kernels older than 6.9 (this host runs 6.8, see device_id_test.cc),
+// and name_to_handle_at(2) can fail EOPNOTSUPP/ENOTSUP on filesystems that
+// don't export file handles.
 bool IsUnsupported(const absl::Status &status) {
   if (absl::IsUnimplemented(status)) return true;
   absl::StatusOr<int> eno = GetErrnoFromStatus(status);
-  if (eno.ok() && (*eno == EOPNOTSUPP || *eno == ENOTSUP)) return true;
-
-  // dcfs/status.h's errno-name round trip (GetErrnoFromStatus) has no
-  // table entry for ELOOP, so it can't be checked via *eno above; read the
-  // errno payload directly instead of going through that lookup.
-  absl::optional<absl::Cord> payload = status.GetPayload(kErrnoTypeUrl);
-  return payload.has_value() && *payload == "ELOOP";
+  return eno.ok() && (*eno == EOPNOTSUPP || *eno == ENOTSUP);
 }
 
 FileHandle MakeArbitraryHandle() {
@@ -183,25 +170,63 @@ TEST_F(FileHandleTest, FromFdAndFromDirEntryAgreeOnDirectory) {
   ::close(subdir_fd);
 }
 
-TEST_F(FileHandleTest, FromFdAndFromDirEntryAgreeOnSymlink) {
-  int link_fd =
-      ::openat(dir_fd_, "a_symlink", O_PATH | O_NOFOLLOW | O_CLOEXEC);
-  ASSERT_GE(link_fd, 0);
-
-  absl::StatusOr<FileHandle> from_fd = FileHandle::FromFd(link_fd);
-  if (!from_fd.ok()) {
-    ASSERT_TRUE(IsUnsupported(from_fd.status())) << from_fd.status();
-    ::close(link_fd);
-    GTEST_SKIP() << from_fd.status();
-  }
-  EXPECT_FALSE(from_fd->bytes.empty());
-
+// FileHandle::FromFd(int) cannot be used on a symlink fd at all (see its
+// header comment), so this only exercises FromDirEntry -- which sidesteps
+// that limitation by getting the device from the containing directory,
+// since a symlink can never itself be a mount point.
+TEST_F(FileHandleTest, FromDirEntryOnSymlink) {
   absl::StatusOr<FileHandle> from_entry =
       FileHandle::FromDirEntry(dir_fd_, "a_symlink");
-  ASSERT_THAT(from_entry, IsOk());
-  EXPECT_EQ(*from_fd, *from_entry);
+  if (!from_entry.ok()) {
+    ASSERT_TRUE(IsUnsupported(from_entry.status())) << from_entry.status();
+    GTEST_SKIP() << from_entry.status();
+  }
+  EXPECT_FALSE(from_entry->bytes.empty());
+}
 
-  ::close(link_fd);
+TEST_F(FileHandleTest, FromDirEntryMissingNameFails) {
+  absl::StatusOr<FileHandle> fh =
+      FileHandle::FromDirEntry(dir_fd_, "does_not_exist");
+  ASSERT_FALSE(fh.ok());
+  EXPECT_THAT(GetErrnoFromStatus(fh.status()), IsOkAndHolds(ENOENT));
+}
+
+// Exercises FromDirEntry's mount-id-differs branch (opening the entry
+// itself to call GetDeviceId on it), without needing root: /proc is always
+// its own filesystem, so "/proc"'s mount id must differ from "/"'s. This
+// doesn't assert success -- GetDeviceId is expected to be Unimplemented on
+// this host regardless of which fd it's called on -- just that the mount
+// boundary is detected and the code path runs without crashing, and that
+// if GetDeviceId ever does succeed here, procfs's device really does
+// differ from the root filesystem's.
+TEST(FileHandleValueTest, FromDirEntryAcrossMountBoundaryDoesNotCrash) {
+  int root_fd = ::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC);
+  ASSERT_GE(root_fd, 0);
+
+  absl::StatusOr<FileHandle> fh = FileHandle::FromDirEntry(root_fd, "proc");
+  if (!fh.ok()) {
+    EXPECT_TRUE(absl::IsUnimplemented(fh.status())) << fh.status();
+  } else {
+    absl::StatusOr<DeviceId> root_device = GetDeviceId(root_fd);
+    ASSERT_THAT(root_device, IsOk());
+    EXPECT_NE(fh->device, *root_device);
+  }
+
+  ::close(root_fd);
+}
+
+TEST_F(FileHandleTest, FromFdWithKnownDeviceSkipsGetDeviceId) {
+  DeviceId device;
+  device.uuid.fill(0x99);
+  device.subvol_id = 42;
+
+  absl::StatusOr<FileHandle> fh = FileHandle::FromFd(file_fd_, device);
+  if (!fh.ok()) {
+    ASSERT_TRUE(IsUnsupported(fh.status())) << fh.status();
+    GTEST_SKIP() << fh.status();
+  }
+  EXPECT_EQ(fh->device, device);
+  EXPECT_FALSE(fh->bytes.empty());
 }
 
 TEST_F(FileHandleTest, HardLinkYieldsEqualHandle) {

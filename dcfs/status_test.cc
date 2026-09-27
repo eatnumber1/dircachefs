@@ -1,5 +1,7 @@
 #include "dcfs/status.h"
 
+#include <string.h>
+
 #include <cerrno>
 #include <string>
 
@@ -32,6 +34,27 @@ TEST(ErrnoNameRoundTripTest, EveryTableEntryRoundTrips) {
     EXPECT_THAT(ErrorNameToErrno(canonical_name), IsOkAndHolds(value))
         << "errno " << value << " (table entry " << name
         << ", canonical name " << canonical_name << ")";
+  }
+}
+
+TEST(ErrnoNameRoundTripTest, ExhaustiveOverAllErrnoValues) {
+  // Every errno value the C library knows a canonical name for (via
+  // strerrorname_np) must round-trip both ways through our own table:
+  // name -> errno must recover the original number, and the canonical name
+  // ErrnoToErrorName() produces for that number must itself map back to it.
+  // Numeric aliases (e.g. ENOTSUP/EOPNOTSUPP, EAGAIN/EWOULDBLOCK,
+  // EDEADLK/EDEADLOCK share one value on Linux) satisfy this trivially,
+  // since both names are table entries for the very same numeric constant.
+  for (int e = 1; e <= 134; ++e) {
+    const char *name = strerrorname_np(e);
+    if (name == nullptr) continue;
+
+    EXPECT_THAT(ErrorNameToErrno(name), IsOkAndHolds(e))
+        << "errno " << e << " (" << name << ")";
+
+    std::string canonical_name = ErrnoToErrorName(e);
+    EXPECT_THAT(ErrorNameToErrno(canonical_name), IsOkAndHolds(e))
+        << "errno " << e << " (canonical name " << canonical_name << ")";
   }
 }
 

@@ -1,6 +1,7 @@
 #include "dcfs/file_handle.h"
 
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -14,6 +15,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "absl/types/optional.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
 #include "dcfs/mount_fds.h"
@@ -49,6 +51,18 @@ absl::StatusOr<RawHandle> NameToHandle(int dirfd, std::string_view pathname,
   raw.handle_type = handle->handle_type;
   raw.bytes.assign(handle->f_handle, handle->f_handle + handle->handle_bytes);
   return raw;
+}
+
+// Both STATX_MNT_ID and STATX_MNT_ID_UNIQUE report the mount id in the same
+// stx_mnt_id field; STATX_MNT_ID_UNIQUE additionally promises the kernel
+// won't reuse the value later, which STATX_MNT_ID alone does not. Prefer
+// the unique id when the kernel set that bit, otherwise fall back to the
+// plain one; return nullopt if the kernel set neither (statx didn't
+// understand either request bit at all).
+absl::optional<uint64_t> MountIdFromStatx(const struct statx &stx) {
+  if ((stx.stx_mask & STATX_MNT_ID_UNIQUE) != 0) return stx.stx_mnt_id;
+  if ((stx.stx_mask & STATX_MNT_ID) != 0) return stx.stx_mnt_id;
+  return absl::nullopt;
 }
 
 }  // namespace
@@ -96,9 +110,8 @@ std::string FileHandle::ToString() const {
   return absl::StrCat(device.ToString(), "/", handle_type, ":", hex);
 }
 
-absl::StatusOr<FileHandle> FileHandle::FromFd(int fd) {
+absl::StatusOr<FileHandle> FileHandle::FromFd(int fd, DeviceId device) {
   ABSL_ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(fd, "", AT_EMPTY_PATH));
-  ABSL_ASSIGN_OR_RETURN(DeviceId device, GetDeviceId(fd));
 
   FileHandle fh;
   fh.device = std::move(device);
@@ -107,17 +120,48 @@ absl::StatusOr<FileHandle> FileHandle::FromFd(int fd) {
   return fh;
 }
 
+absl::StatusOr<FileHandle> FileHandle::FromFd(int fd) {
+  ABSL_ASSIGN_OR_RETURN(DeviceId device, GetDeviceId(fd));
+  return FromFd(fd, std::move(device));
+}
+
 absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
                                                      std::string_view name) {
   ABSL_ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(dirfd, name, 0));
 
-  // GetDeviceId needs an fd on the entry itself; open it O_PATH so this
-  // works for any file type, and O_NOFOLLOW so a symlink entry yields a
-  // handle (and device) for the symlink, not its target.
+  // Only a directory can be a mount point (or, for Btrfs, a sub-volume
+  // boundary), so if `name` isn't one, it necessarily shares dirfd's
+  // filesystem. Check cheaply via statx's mount id before ever opening
+  // `name` itself.
+  unsigned int want_mnt_id = STATX_MNT_ID_UNIQUE | STATX_MNT_ID;
   ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor entry_fd,
-      syscalls::openat(dirfd, name, O_PATH | O_NOFOLLOW));
-  ABSL_ASSIGN_OR_RETURN(DeviceId device, GetDeviceId(*entry_fd));
+      struct statx entry_stx,
+      syscalls::statx(dirfd, name, AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC,
+                       STATX_TYPE | want_mnt_id));
+  ABSL_ASSIGN_OR_RETURN(
+      struct statx dir_stx,
+      syscalls::statx(dirfd, "", AT_EMPTY_PATH, want_mnt_id));
+
+  absl::optional<uint64_t> entry_mnt_id = MountIdFromStatx(entry_stx);
+  absl::optional<uint64_t> dir_mnt_id = MountIdFromStatx(dir_stx);
+
+  DeviceId device;
+  if (entry_mnt_id.has_value() && dir_mnt_id.has_value() &&
+      *entry_mnt_id != *dir_mnt_id) {
+    // A mount boundary -- `name` must be a directory to be one, so this is
+    // safe to require via O_DIRECTORY. O_NOFOLLOW keeps a symlink named
+    // `name` (which could never reach this branch, but just in case) from
+    // being followed.
+    ABSL_ASSIGN_OR_RETURN(
+        FileDescriptor entry_fd,
+        syscalls::openat(dirfd, name, O_PATH | O_DIRECTORY | O_NOFOLLOW));
+    ABSL_ASSIGN_OR_RETURN(device, GetDeviceId(*entry_fd));
+  } else {
+    // Same filesystem as dirfd (or the kernel didn't report a mount id at
+    // all, in which case assuming "same filesystem" is the best available
+    // answer).
+    ABSL_ASSIGN_OR_RETURN(device, GetDeviceId(dirfd));
+  }
 
   FileHandle fh;
   fh.device = std::move(device);

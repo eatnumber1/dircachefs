@@ -42,6 +42,7 @@ const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {
       E(ETIME),
       E(ENODEV),
       E(ENOENT),
+      E(ELOOP),
 #ifdef ENOMEDIUM
       E(ENOMEDIUM),
 #endif
@@ -148,6 +149,122 @@ const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {
       E(ESTALE),
 #endif
       E(ECANCELED),
+      // The entries below were found missing by dcfs/status_test.cc's
+      // exhaustive round trip over every errno value the C library names
+      // (1..134): every one of these is a name strerrorname_np() produces
+      // as the canonical name for some errno on this platform, so
+      // ErrorNameToErrno() must be able to parse it back.
+      E(EIO),
+      E(ENOEXEC),
+      E(EIDRM),
+      E(EMSGSIZE),
+      E(EPROTO),
+      E(EMULTIHOP),
+      E(EBADMSG),
+      E(ENOMSG),
+      E(EINPROGRESS),
+      E(EREMOTE),
+      E(ERESTART),
+      E(ESTRPIPE),
+      E(ETOOMANYREFS),
+      E(EOWNERDEAD),
+      E(ENOTRECOVERABLE),
+#ifdef EADV
+      E(EADV),
+#endif
+#ifdef EBADE
+      E(EBADE),
+#endif
+#ifdef EBADR
+      E(EBADR),
+#endif
+#ifdef EBADRQC
+      E(EBADRQC),
+#endif
+#ifdef EBADSLT
+      E(EBADSLT),
+#endif
+#ifdef EBFONT
+      E(EBFONT),
+#endif
+#ifdef EDOTDOT
+      E(EDOTDOT),
+#endif
+#ifdef EHWPOISON
+      E(EHWPOISON),
+#endif
+#ifdef EKEYEXPIRED
+      E(EKEYEXPIRED),
+#endif
+#ifdef EKEYREJECTED
+      E(EKEYREJECTED),
+#endif
+#ifdef EKEYREVOKED
+      E(EKEYREVOKED),
+#endif
+#ifdef EL2HLT
+      E(EL2HLT),
+#endif
+#ifdef EL2NSYNC
+      E(EL2NSYNC),
+#endif
+#ifdef EL3HLT
+      E(EL3HLT),
+#endif
+#ifdef EL3RST
+      E(EL3RST),
+#endif
+#ifdef ELIBACC
+      E(ELIBACC),
+#endif
+#ifdef ELIBBAD
+      E(ELIBBAD),
+#endif
+#ifdef ELIBEXEC
+      E(ELIBEXEC),
+#endif
+#ifdef ELIBMAX
+      E(ELIBMAX),
+#endif
+#ifdef ELIBSCN
+      E(ELIBSCN),
+#endif
+#ifdef ELNRNG
+      E(ELNRNG),
+#endif
+#ifdef EMEDIUMTYPE
+      E(EMEDIUMTYPE),
+#endif
+#ifdef ENAVAIL
+      E(ENAVAIL),
+#endif
+#ifdef ENOANO
+      E(ENOANO),
+#endif
+#ifdef ENOCSI
+      E(ENOCSI),
+#endif
+#ifdef ENOTNAM
+      E(ENOTNAM),
+#endif
+#ifdef EREMCHG
+      E(EREMCHG),
+#endif
+#ifdef EREMOTEIO
+      E(EREMOTEIO),
+#endif
+#ifdef ERFKILL
+      E(ERFKILL),
+#endif
+#ifdef ESRMNT
+      E(ESRMNT),
+#endif
+#ifdef EUCLEAN
+      E(EUCLEAN),
+#endif
+#ifdef EXFULL
+      E(EXFULL),
+#endif
 #undef E
   };
   return *kNamesToErrors;
