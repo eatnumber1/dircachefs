@@ -1,0 +1,223 @@
+cc_binary(
+    name = "main",
+    srcs = ["main.cc"],
+    deps = [
+      ":mount_table",
+      ":attributes",
+      ":sqlite",
+      ":syscalls",
+      ":fuse",
+      ":dir_cache_fs",
+      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/flags:flag",
+      "@absl//absl/flags:parse",
+      "@absl//absl/flags:usage",
+      "@absl//absl/log",
+      "@absl//absl/log:flags",
+      "@absl//absl/log:initialize",
+      "@absl//absl/status",
+      "@absl//absl/strings",
+      "@sqlite//:sqlite3",
+      "@util_linux//:libmount",
+    ],
+)
+
+cc_library(
+    name = "sqlite",
+    srcs = ["sqlite.cc"],
+    hdrs = ["sqlite.h"],
+    deps = [
+      ":attributes",
+      ":ret_check",
+      ":status",
+      "@absl//absl/cleanup",
+      "@absl//absl/log",
+      "@absl//absl/log:check",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@sqlite//:sqlite3",
+    ],
+)
+
+cc_library(
+    name = "status",
+    hdrs = ["status.h"],
+    srcs = [
+      "status.cc",
+      "errno.cc",
+    ],
+    deps = [
+      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/log",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@absl//absl/strings:cord",
+    ],
+)
+
+cc_library(
+    name = "mount",
+    srcs = ["mount.cc"],
+    hdrs = ["mount.h"],
+    deps = [
+      ":syscalls",
+      "@absl//absl/log",
+    ],
+)
+
+cc_library(
+    name = "syscalls",
+    hdrs = [
+      "syscalls.h",
+      "fd.h",
+    ],
+    srcs = [
+      "syscalls.cc",
+      "fd.cc",
+    ],
+    deps = [
+      ":attributes",
+      ":ret_check",
+      ":status",
+      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/log",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "fuse",
+    hdrs = ["fuse.h"],
+    srcs = ["fuse.cc"],
+    deps = [
+      ":attributes",
+      ":syscalls",
+      ":status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/status",
+      "@absl//absl/log",
+      "@absl//absl/time",
+      "@absl//absl/log:check",
+      "@absl//absl/container:flat_hash_set",
+      "@absl//absl/strings:str_format",
+      "@libfuse//:libfuse",
+    ],
+)
+
+cc_library(
+    name = "attributes",
+    hdrs = ["attributes.h"],
+)
+
+cc_library(
+    name = "device_uuid",
+    hdrs = ["device_uuid.h"],
+)
+
+cc_library(
+    name = "dir_cache_fs",
+    srcs = ["dir_cache_fs.cc"],
+    hdrs = ["dir_cache_fs.h"],
+    deps = [
+      ":attributes",
+      ":file_handle",
+      ":fs_db",
+      ":fuse",
+      ":ret_check",
+      ":status",
+      ":syscalls",
+      "@absl//absl/cleanup",
+      "@absl//absl/log",
+      "@absl//absl/log:die_if_null",
+      "@absl//absl/status",
+      "@absl//absl/strings",
+      "@absl//absl/time",
+      "@libfuse//:libfuse",
+    ],
+)
+
+cc_library(
+    name = "file_handle",
+    srcs = ["file_handle.cc"],
+    hdrs = ["file_handle.h"],
+    deps = [
+      ":memory",
+      ":device_uuid",
+      ":mount_fd_cache",
+      ":ret_check",
+      ":status",
+      ":syscalls",
+      "@absl//absl/cleanup",
+      "@absl//absl/functional:function_ref",
+      "@absl//absl/log:die_if_null",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@util_linux//:libmount",
+    ],
+)
+
+cc_library(
+    name = "fs_db",
+    srcs = ["fs_db.cc"],
+    hdrs = ["fs_db.h"],
+    deps = [
+      ":attributes",
+      ":file_handle",
+      ":ret_check",
+      ":sqlite",
+      ":status",
+      "@absl//absl/cleanup",
+      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/log:die_if_null",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@absl//absl/strings:str_format",
+    ],
+)
+
+cc_library(
+    name = "mount_fd_cache",
+    srcs = ["mount_fd_cache.cc"],
+    hdrs = ["mount_fd_cache.h"],
+    deps = [
+      ":device_uuid",
+      ":syscalls",
+      ":attributes",
+      "@absl//absl/base:core_headers",
+      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/status:statusor",
+      "@absl//absl/synchronization",
+    ],
+)
+
+cc_library(
+    name = "mount_table",
+    srcs = ["mount_table.cc"],
+    hdrs = ["mount_table.h"],
+    deps = [
+      ":status",
+      "@absl//absl/cleanup",
+      "@absl//absl/functional:function_ref",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@util_linux//:libmount",
+    ],
+)
+
+cc_library(
+    name = "ret_check",
+    hdrs = ["ret_check.h"],
+    deps = [
+      "@absl//absl/status",
+    ],
+)
+
+cc_library(
+    name = "memory",
+    hdrs = ["memory.h"],
+)

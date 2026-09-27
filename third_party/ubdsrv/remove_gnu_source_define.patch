@@ -1,9 +1,0 @@
---- lib/ublksrv_aio.c
-+++ lib/ublksrv_aio.c
-@@ -1,6 +1,5 @@
- // SPDX-License-Identifier: MIT or LGPL-2.1-only
-
--#define _GNU_SOURCE
- #include "ublksrv_priv.h"
-
- #define aio_log ublk_log

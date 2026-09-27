@@ -1,0 +1,14 @@
+cc_import(
+    name = "libmount_import",
+    hdrs = ["include/libmount/libmount.h"],
+    interface_library = "lib/x86_64-linux-gnu/libmount.so",
+    system_provided = True,
+)
+
+# https://github.com/bazelbuild/bazel/issues/19182#issuecomment-1968856368
+cc_library(
+    name = "libmount",
+    includes = ["include/libmount"],
+    visibility = ["//visibility:public"],
+    deps = [":libmount_import"],
+)

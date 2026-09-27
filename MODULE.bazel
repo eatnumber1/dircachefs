@@ -1,26 +1,13 @@
-module(name = "diskyphus", version = "0.1")
+module(name = "dircachefs", version = "0.1")
 
-bazel_dep(name = "abseil-cpp", version = "20230125.1", repo_name="absl")
+bazel_dep(name = "abseil-cpp", version = "20250127.1", repo_name="absl")
+bazel_dep(name = "sqlite3", version = "3.49.1", repo_name="sqlite")
+bazel_dep(name = "libfuse", version="3.16.2")
+bazel_dep(name = "rules_cc", version = "0.1.1")
 
-bazel_dep(name = "libfuse", version="3.14.1", repo_name="fuse")
-local_path_override(
-    module_name = "libfuse",
-    path = "./third_party/libfuse",
-)
-
-# TODO replace with https://github.com/envoyproxy/envoy/blob/main/bazel/repositories.bzl#L368
-bazel_dep(name = "liburing", version="2.3", repo_name="uring")
-local_path_override(
-    module_name = "liburing",
-    path = "./third_party/liburing",
-)
-
-local_path_override(
-    module_name = "linux",
-    path = "./third_party/linux",
-)
-
-local_path_override(
-    module_name = "linux-headers",
-    path = "./third_party/linux-headers",
+new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
+new_local_repository(
+    name = "util_linux",
+    build_file = "//third_party:BUILD.util_linux",
+    path = "/usr",
 )
