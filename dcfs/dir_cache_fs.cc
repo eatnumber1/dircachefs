@@ -33,6 +33,14 @@ DirCacheFS::DirCacheFS(Context &ctx, Options opts)
     : ctx_(ctx), opts_(opts) {}
 
 absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
+  // conn.max_read is not one of the fields fuse_apply_conn_info_opts() sets
+  // and fuse_session_new() leaves it zero-initialized, so a "-o
+  // max_read=N" mount option (see Options::max_read) must be copied here
+  // explicitly: do_init() (fuse_lowlevel.c) rejects the mount otherwise,
+  // since it requires this to equal the max_read it parsed from the mount
+  // options independently.
+  if (opts_.max_read.has_value()) conn.max_read = *opts_.max_read;
+
   // fuse_set_feature_flag() only actually sets the flag (and returns true)
   // when the kernel's capable_ext says it supports it, so every one of
   // these is a no-op rather than a hard failure on an older kernel --

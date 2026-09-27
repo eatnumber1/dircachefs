@@ -2,6 +2,7 @@
 #define DCFS_DIR_CACHE_FS_H_
 
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <sys/types.h>
@@ -36,6 +37,17 @@ class DirCacheFS {
   struct Options {
     absl::Duration attr_timeout = absl::Hours(1);
     absl::Duration entry_timeout = absl::Hours(1);
+
+    // The value of a "-o max_read=N" mount option, if the caller passed
+    // one via --fuse_opt. libfuse's fuse_apply_conn_info_opts() does not
+    // cover max_read (unlike max_write/max_readahead/etc.), and
+    // fuse_session_new() never populates conn.max_read itself -- it stays
+    // zero-initialized until Init() sets it. do_init() then requires it to
+    // equal the max_read mount option it parsed independently, so Init()
+    // must set conn.max_read to this same value or the mount fails with
+    // "init() and fuse_session_new() requested different maximum read
+    // size".
+    std::optional<unsigned int> max_read;
   };
 
   // `ctx` must outlive this DirCacheFS.

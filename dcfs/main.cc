@@ -15,6 +15,8 @@
 #include "absl/status/status_builder.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/time/time.h"
@@ -146,7 +148,6 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
       .attr_timeout = absl::Seconds(absl::GetFlag(FLAGS_attr_timeout_sec)),
       .entry_timeout = absl::Seconds(absl::GetFlag(FLAGS_entry_timeout_sec)),
   };
-  DirCacheFS fs(ctx, opts);
 
   // default_permissions (and allow_other, if requested) are always added,
   // ahead of whatever the caller passed via --fuse_opt.
@@ -156,7 +157,16 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   }
   for (const std::string &opt : absl::GetFlag(FLAGS_fuse_opt)) {
     mount_opts.push_back(opt);
+    // See DirCacheFS::Options::max_read: DirCacheFS::Init() needs this
+    // value too, to satisfy libfuse's do_init() consistency check.
+    if (unsigned int max_read;
+        absl::StartsWith(opt, "max_read=") &&
+        absl::SimpleAtoi(absl::string_view(opt).substr(9), &max_read)) {
+      opts.max_read = max_read;
+    }
   }
+
+  DirCacheFS fs(ctx, opts);
   std::vector<std::string> fuse_arg_strings = {
       args[0], "-o", absl::StrJoin(mount_opts, ",")};
   std::vector<char *> fuse_arg_ptrs;
