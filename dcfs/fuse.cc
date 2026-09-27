@@ -8,7 +8,6 @@
 #include <unistd.h>
 #include <utility>
 
-#include "absl/base/macros.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/time/time.h"
@@ -19,50 +18,6 @@
 #include "dcfs/syscalls.h"
 
 namespace dcfs {
-namespace {
-
-int StatusCodeToErrno(absl::StatusCode sc) {
-  switch (sc) {
-    case absl::StatusCode::kOk:
-      return 0;
-    case absl::StatusCode::kInvalidArgument:
-      return EINVAL;
-    case absl::StatusCode::kDeadlineExceeded:
-      return ETIMEDOUT;
-    case absl::StatusCode::kNotFound:
-      return ENOENT;
-    case absl::StatusCode::kAlreadyExists:
-      return EEXIST;
-    case absl::StatusCode::kPermissionDenied:
-      ABSL_FALLTHROUGH_INTENDED;
-    case absl::StatusCode::kUnauthenticated:
-      return EPERM;
-    case absl::StatusCode::kOutOfRange:
-      return ERANGE;
-    case absl::StatusCode::kFailedPrecondition:
-      return EBUSY;
-    case absl::StatusCode::kResourceExhausted:
-      return ENOSPC;
-    case absl::StatusCode::kCancelled:
-      return ECANCELED;
-    case absl::StatusCode::kAborted:
-      return EDEADLK;
-    case absl::StatusCode::kUnimplemented:
-      return ENOSYS;
-    case absl::StatusCode::kUnavailable:
-      return EAGAIN;
-    case absl::StatusCode::kDataLoss:
-      return ENOTRECOVERABLE;
-    case absl::StatusCode::kInternal:
-      return ELIBBAD;
-    case absl::StatusCode::kUnknown:
-      ABSL_FALLTHROUGH_INTENDED;
-    default:
-      return EPROTO;
-  }
-}
-
-}  // namespace
 
 std::vector<char> FuseDirEntry::GetDirEntryBuffer(
     fuse_req_t req, std::span<FuseDirEntry> entries) {
@@ -140,7 +95,7 @@ absl::Status FuseRequest::ReplyErrno(int errnum) {
 absl::Status FuseRequest::ReplyFailure(const absl::Status &status) {
   CHECK(!status.ok()) << status;
   if (!req_) return absl::OkStatus();
-  absl::Status st = ReplyErrno(StatusCodeToErrno(status.code()));
+  absl::Status st = ReplyErrno(StatusToErrno(status));
   req_ = std::nullopt;
   return st;
 }
@@ -154,7 +109,7 @@ void FuseRequest::ReplyFailureAndLogIfNotOk(const absl::Status &status) {
 
 void FuseRequest::ReplyAlwaysAndLogIfNotOk(const absl::Status &status) {
   LOG_IF(ERROR, !status.ok()) << status;
-  absl::Status reply_s = ReplyErrno(StatusCodeToErrno(status.code()));
+  absl::Status reply_s = ReplyErrno(StatusToErrno(status));
   LOG_IF(WARNING, !reply_s.ok()) << "Failed to reply with failure: " << reply_s;
 }
 

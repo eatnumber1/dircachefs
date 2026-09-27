@@ -16,7 +16,12 @@ std::string ErrnoToErrorName(int error_number) {
   return absl::StrFormat("UNKNOWN (%d)", error_number);
 }
 
-absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name) {
+namespace {
+
+// The reverse (name -> errno) side of the errno<->name mapping. Exposed via
+// ErrnoNameTable() so tests can exercise the round trip for every entry
+// without duplicating the list.
+const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {
   const static auto *kNamesToErrors = new absl::flat_hash_map<std::string, int>{
       {"OK", 0},
 #define E(n) {#n, n}
@@ -105,6 +110,10 @@ absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name) {
 #endif
       E(ENOSYS),
       E(ENOTSUP),
+      // On Linux, ENOTSUP and EOPNOTSUPP are the same numeric value, and
+      // strerrorname_np() picks EOPNOTSUPP as the canonical name for it, so
+      // both names must round-trip back to that value.
+      E(EOPNOTSUPP),
       E(EAFNOSUPPORT),
 #ifdef EPFNOSUPPORT
       E(EPFNOSUPPORT),
@@ -141,15 +150,26 @@ absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name) {
       E(ECANCELED),
 #undef E
   };
+  return *kNamesToErrors;
+}
 
+}  // namespace
+
+const absl::flat_hash_map<std::string, int> &ErrnoNameTable() {
+  return NameToErrnoTable();
+}
+
+absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name) {
   if (std::string_view en = error_name;
       absl::ConsumePrefix(&en, "UNKNOWN (") && absl::ConsumeSuffix(&en, ")")) {
     int err;
     if (absl::SimpleAtoi(en, &err)) return err;
   }
 
-  auto it = kNamesToErrors->find(error_name);
-  if (it == kNamesToErrors->end()) {
+  const absl::flat_hash_map<std::string, int> &names_to_errors =
+      NameToErrnoTable();
+  auto it = names_to_errors.find(error_name);
+  if (it == names_to_errors.end()) {
     // TODO statusbuilder
     return absl::NotFoundError(absl::StrCat("No such errno for ", error_name));
   }

@@ -5,6 +5,8 @@
 #include "absl/cleanup/cleanup.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/status/status_builder.h"
+#include "absl/status/status_macros.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "dcfs/status.h"
@@ -114,7 +116,9 @@ absl::Status Sqlite3ErrorCodeToStatus(int err) {
 Connection::~Connection() {
   if (db_ == nullptr) return;
   absl::Status st =
-    Prepend(Sqlite3ErrorCodeToStatus(sqlite3_close(db_)), "sqlite3_close");
+    absl::StatusBuilder(Sqlite3ErrorCodeToStatus(sqlite3_close(db_)))
+        .SetPrepend()
+      << "sqlite3_close: ";
   LOG_IF(WARNING, !st.ok()) << st;
 }
 
@@ -124,13 +128,14 @@ absl::StatusOr<Connection> Connection::Open(
   // TODO use SQLITE_OPEN_EXRESCODE
   // TODO use SQLITE_OPEN_NOMUTEX
   absl::Status st =
-    Prepend(
+    absl::StatusBuilder(
         Sqlite3ErrorCodeToStatus(
           sqlite3_open_v2(
             std::string(filename).c_str(), &db,
             flags | SQLITE_OPEN_EXRESCODE | SQLITE_OPEN_NOMUTEX,
-            vfs ? std::string(*vfs).c_str() : nullptr)),
-        "sqlite3_open_v2");
+            vfs ? std::string(*vfs).c_str() : nullptr)))
+        .SetPrepend()
+      << "sqlite3_open_v2: ";
   if (db == nullptr) {
     RET_CHECK(!st.ok());
     return st;
@@ -141,7 +146,7 @@ absl::StatusOr<Connection> Connection::Open(
   if (!st.ok()) return st;
 
   // TODO move to separate file and syntax check+lint?
-  RETURN_IF_ERROR(sdb.Exec("PRAGMA foreign_keys = ON"));
+  ABSL_RETURN_IF_ERROR(sdb.Exec("PRAGMA foreign_keys = ON"));
 
   return sdb;
 }
@@ -171,7 +176,8 @@ absl::Status Connection::LastError() {
   if (int offset = sqlite3_error_offset(db_); offset != -1) {
     errmsg = absl::StrCat(errmsg, " (at offset ", offset, ")");
   }
-  return Append(Sqlite3ErrorCodeToStatus(err), errmsg, /*joiner=*/": ");
+  return absl::StatusBuilder(Sqlite3ErrorCodeToStatus(err)).SetAppend()
+      << ": " << errmsg;
 }
 
 absl::Status Connection::Exec(
@@ -191,7 +197,7 @@ absl::Status Connection::Exec(
         });
   }
 
-  ASSIGN_OR_RETURN(Statement stmt, Statement::Prepare(*this, sql, flags));
+  ABSL_ASSIGN_OR_RETURN(Statement stmt, Statement::Prepare(*this, sql, flags));
 
   int ncols = sqlite3_column_count(stmt.Get());
 
@@ -206,7 +212,7 @@ absl::Status Connection::Exec(
   }
 
   while (true) {
-    ASSIGN_OR_RETURN(Statement::StepResult res, stmt.Step());
+    ABSL_ASSIGN_OR_RETURN(Statement::StepResult res, stmt.Step());
     if (res == Statement::StepResult::kDone) break;
     RET_CHECK_EQ(res, Statement::StepResult::kRow);
 
@@ -217,13 +223,13 @@ absl::Status Connection::Exec(
       const unsigned char *colval = sqlite3_column_text(stmt.Get(), i);
       if (colval == nullptr) {
         // Either NULL in db, or OOM. LastError will tell us.
-        RETURN_IF_ERROR(LastError());
+        ABSL_RETURN_IF_ERROR(LastError());
       }
       int colval_len = sqlite3_column_bytes(stmt.Get(), i);
       colvals.emplace_back(reinterpret_cast<const char *>(colval), colval_len);
     }
 
-    RETURN_IF_ERROR((*callback)(colnames, std::move(colvals)));
+    ABSL_RETURN_IF_ERROR((*callback)(colnames, std::move(colvals)));
   }
 
   return absl::OkStatus();
@@ -238,18 +244,19 @@ absl::StatusOr<WithSavepoint> WithSavepoint::Create(
   WithSavepoint ws(std::move(name));
   auto &s = ws.statements_;
 
-  ASSIGN_OR_RETURN(s.savepoint, Statement::Prepare(*db, "SAVEPOINT @name"));
-  RETURN_IF_ERROR(s.savepoint.BindBlobUnowned("@name", ws.name_));
+  ABSL_ASSIGN_OR_RETURN(
+      s.savepoint, Statement::Prepare(*db, "SAVEPOINT @name"));
+  ABSL_RETURN_IF_ERROR(s.savepoint.BindBlobUnowned("@name", ws.name_));
 
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       s.release, Statement::Prepare(*db, "RELEASE SAVEPOINT @name"));
-  RETURN_IF_ERROR(s.release.BindBlobUnowned("@name", ws.name_));
+  ABSL_RETURN_IF_ERROR(s.release.BindBlobUnowned("@name", ws.name_));
 
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       s.rollback, Statement::Prepare(*db, "ROLLBACK TO SAVEPOINT @name"));
-  RETURN_IF_ERROR(s.rollback.BindBlobUnowned("@name", ws.name_));
+  ABSL_RETURN_IF_ERROR(s.rollback.BindBlobUnowned("@name", ws.name_));
 
-  RETURN_IF_ERROR(ws.Savepoint());
+  ABSL_RETURN_IF_ERROR(ws.Savepoint());
 
   return ws;
 }
@@ -275,7 +282,8 @@ WithSavepoint::~WithSavepoint() {
   LOG(WARNING)
     << "WithSavepoint destructor called on savepoint named " << name_
     << " with the savepoint still active. Reverting...";
-  LOG_IF_ERROR(ERROR, std::move(*this).Revert());
+  absl::Status revert_status = std::move(*this).Revert();
+  LOG_IF(ERROR, !revert_status.ok()) << revert_status;
 }
 
 WithSavepoint::WithSavepoint(WithSavepoint &&o)
@@ -300,7 +308,7 @@ absl::Status WithSavepoint::Rollback() {
 }
 
 absl::Status WithSavepoint::Revert() && {
-  RETURN_IF_ERROR(Rollback());
+  ABSL_RETURN_IF_ERROR(Rollback());
   return std::move(*this).Release();
 }
 
@@ -311,7 +319,7 @@ absl::Status WithSavepoint::Release() && {
 }
 
 absl::Status WithSavepoint::Savepoint() {
-  RETURN_IF_ERROR(statements_.savepoint.StepThenDone());
+  ABSL_RETURN_IF_ERROR(statements_.savepoint.StepThenDone());
   active_ = true;
   return absl::OkStatus();
 }
@@ -348,10 +356,13 @@ absl::StatusOr<Statement> Statement::Prepare(
   sqlite3_stmt *stmt = nullptr;
   const char *tail = nullptr;
   sqlite3_prepare_v3(db.Get(), sql.data(), sql.size(), flags, &stmt, &tail);
-  RETURN_IF_ERROR(
-      Append(
-        Prepend(db.LastError(), "sqlite3_prepare_v3"),
-        absl::StrCat("with SQL ", sql)));
+  absl::Status prepare_status =
+      absl::StatusBuilder(db.LastError()).SetPrepend() << "sqlite3_prepare_v3; ";
+  if (!prepare_status.ok()) {
+    absl::Status full_status =
+        absl::StatusBuilder(std::move(prepare_status)) << "with SQL " << sql;
+    return full_status;
+  }
   if (tail != sql.data() + sql.size()) {
     return absl::InvalidArgumentError(
         absl::StrCat("Extra data at end of sql: ", tail));
@@ -371,17 +382,22 @@ absl::StatusOr<Statement::StepResult> Statement::Step() {
     case SQLITE_OK:
       // Docs seem to imply this can never happen.
       [[fallthrough]];
-    default:
-      return Append(
-          Prepend(Sqlite3ErrorCodeToStatus(ret), "sqlite3_step"),
-          absl::StrCat("for SQL: ", *this));
+    default: {
+      absl::Status step_status =
+          absl::StatusBuilder(Sqlite3ErrorCodeToStatus(ret)).SetPrepend()
+              << "sqlite3_step; ";
+      absl::Status full_status =
+          absl::StatusBuilder(std::move(step_status)) << "for SQL: " << *this;
+      return full_status;
+    }
   }
 }
 
 absl::Status Statement::StepThenDone() {
-  ASSIGN_OR_RETURN(StepResult res, Step());
+  ABSL_ASSIGN_OR_RETURN(StepResult res, Step());
   if (res != StepResult::kDone) {
-    LOG_IF_ERROR(WARNING, Reset());
+    absl::Status reset_status = Reset();
+    LOG_IF(WARNING, !reset_status.ok()) << reset_status;
     return absl::InternalError(
         absl::StrCat(
           "StepThenDone called, but Step did not return kDone. Instead, "
@@ -461,37 +477,37 @@ absl::Status Statement::BindBlob(int index, std::string_view data) {
 }
 
 absl::Status Statement::Bind(std::string_view name, int64_t value) {
-  ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
   return Bind(idx, value);
 }
 
 absl::Status Statement::BindDouble(std::string_view name, double value) {
-  ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
   return Bind(idx, value);
 }
 
 absl::Status Statement::Bind(std::string_view name, nullptr_t) {
-  ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
   return Bind(idx, nullptr);
 }
 
 absl::Status Statement::BindTextUnowned(std::string_view name, std::string_view data) {
-  ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
   return BindTextUnowned(idx, data);
 }
 
 absl::Status Statement::BindBlobUnowned(std::string_view name, std::string_view data) {
-  ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
   return BindBlobUnowned(idx, data);
 }
 
 absl::Status Statement::BindText(std::string_view name, std::string_view data) {
-  ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
   return BindText(idx, data);
 }
 
 absl::Status Statement::BindBlob(std::string_view name, std::string_view data) {
-  ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int idx, GetParameterIndex(name));
   return BindBlob(idx, data);
 }
 
@@ -522,7 +538,7 @@ Statement::GetColumnIndices() {
 
   absl::flat_hash_map<std::string, int> column_indices;
   for (int i = 0; i < GetColumnCount(); i++) {
-    ASSIGN_OR_RETURN(std::string_view column_name, GetColumnName(i));
+    ABSL_ASSIGN_OR_RETURN(std::string_view column_name, GetColumnName(i));
     column_indices.emplace(std::string(column_name), i);
   }
 
@@ -531,7 +547,7 @@ Statement::GetColumnIndices() {
 }
 
 absl::StatusOr<int> Statement::GetColumnIndex(std::string_view name) const {
-  ASSIGN_OR_RETURN(const auto &ices, GetColumnIndices());
+  ABSL_ASSIGN_OR_RETURN(const auto &ices, GetColumnIndices());
   const absl::flat_hash_map<std::string, int> &indices = ices;
   auto it = indices.find(name);
   if (it == indices.end()) {
@@ -542,7 +558,7 @@ absl::StatusOr<int> Statement::GetColumnIndex(std::string_view name) const {
 }
 
 absl::StatusOr<std::string_view> Statement::ColumnBlob(std::string_view name) {
-  ASSIGN_OR_RETURN(int index, GetColumnIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int index, GetColumnIndex(name));
   return ColumnBlob(index);
 }
 
@@ -558,7 +574,7 @@ absl::StatusOr<std::string_view> Statement::ColumnBlob(int index) {
 }
 
 absl::StatusOr<double> Statement::ColumnDouble(std::string_view name) {
-  ASSIGN_OR_RETURN(int index, GetColumnIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int index, GetColumnIndex(name));
   return ColumnDouble(index);
 }
 
@@ -567,7 +583,7 @@ double Statement::ColumnDouble(int index) {
 }
 
 absl::StatusOr<int64_t> Statement::ColumnInt64(std::string_view name) {
-  ASSIGN_OR_RETURN(int index, GetColumnIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int index, GetColumnIndex(name));
   return ColumnInt64(index);
 }
 
@@ -576,7 +592,7 @@ int64_t Statement::ColumnInt64(int index) {
 }
 
 absl::StatusOr<int> Statement::ColumnInt(std::string_view name) {
-  ASSIGN_OR_RETURN(int index, GetColumnIndex(name));
+  ABSL_ASSIGN_OR_RETURN(int index, GetColumnIndex(name));
   return ColumnInt(index);
 }
 
@@ -613,7 +629,8 @@ WithStatementReset::WithStatementReset(Statement *stmt)
 
 WithStatementReset::~WithStatementReset() {
   if (stmt_ == nullptr) return;
-  LOG_IF_ERROR(ERROR, std::move(*this).Reset());
+  absl::Status reset_status = std::move(*this).Reset();
+  LOG_IF(ERROR, !reset_status.ok()) << reset_status;
 }
 
 absl::Status WithStatementReset::Reset() && {

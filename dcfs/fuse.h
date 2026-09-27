@@ -10,6 +10,7 @@
 #include <utility>
 #include <string_view>
 
+#include "absl/base/nullability.h"
 #include "absl/log/check.h"
 #include "absl/time/time.h"
 #include "absl/log/log.h"
@@ -17,7 +18,6 @@
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
-#include "dcfs/attributes.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {

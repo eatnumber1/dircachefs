@@ -18,13 +18,13 @@
 #include <utility>
 #include <dirent.h>
 
+#include "absl/base/nullability.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_join.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
-#include "dcfs/attributes.h"
 
 namespace dcfs {
 namespace syscalls {

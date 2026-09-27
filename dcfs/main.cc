@@ -12,9 +12,9 @@
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
-#include "dcfs/attributes.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
@@ -54,7 +54,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   }
   const char *mountpoint = args[1];
 
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       FileDescriptor source_fd,
       syscalls::openat(AT_FDCWD, source, O_PATH | O_DIRECTORY));
 

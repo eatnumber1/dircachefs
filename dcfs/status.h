@@ -3,27 +3,11 @@
 
 #include <string_view>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/log/log.h"
-
-#define RETURN_IF_ERROR(expr) \
-  ({ if (auto _st = (expr); !_st.ok()) return _st; })
-
-#define ASSIGN_OR_RETURN(var, expr) \
-  var = ({ \
-    auto v = (expr); \
-    if (!v.ok()) return std::move(v).status(); \
-    *std::move(v); \
-  })
-
-#define LOG_IF_ERROR(level, expr) \
-  ({ if (absl::Status _st = (expr); !_st.ok()) LOG(level) << _st; })
 
 namespace dcfs {
-
-absl::Status Prepend(absl::Status st, std::string_view message, std::string_view joiner = "; ");
-absl::Status Append(absl::Status st, std::string_view message, std::string_view joiner = "; ");
 
 constexpr inline std::string_view kErrnoTypeUrl = "rus.har.mn/dcfs/status/errno";
 absl::Status ErrnoToStatus(int error_number, absl::string_view message);
@@ -31,6 +15,15 @@ absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status);
 
 absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name);
 std::string ErrnoToErrorName(int error_number);
+
+// The full name -> errno table used by ErrorNameToErrno(), exposed for
+// tests that need to exercise the round trip for every known entry.
+const absl::flat_hash_map<std::string, int> &ErrnoNameTable();
+
+// Returns the errno corresponding to `status`: the errno payload
+// (kErrnoTypeUrl, as set by ErrnoToStatus) if present, otherwise a fixed
+// StatusCode->errno mapping. Returns 0 for absl::OkStatus().
+int StatusToErrno(const absl::Status &status);
 
 }  // namespace dcfs
 

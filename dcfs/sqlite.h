@@ -9,14 +9,15 @@
 #include <ostream>
 #include <source_location>
 
+#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "sqlite3.h"
-#include "dcfs/attributes.h"
 #include "dcfs/status.h"
 
 // The C sqlite3 API declares a type named `sqlite3` (see <sqlite3.h>) at
@@ -376,7 +377,7 @@ constexpr inline absl::StatusOr<T> Statement::Column(std::string_view name) {
 
 template <typename T>
 absl::StatusOr<T> Statement::StepOneCellThenDone(int column_index) {
-  ASSIGN_OR_RETURN(StepResult res, Step());
+  ABSL_ASSIGN_OR_RETURN(StepResult res, Step());
   WithStatementReset reset(this);
 
   if (res != StepResult::kRow) {
@@ -386,13 +387,13 @@ absl::StatusOr<T> Statement::StepOneCellThenDone(int column_index) {
 
   auto ret = Column<T>(column_index);
 
-  RETURN_IF_ERROR(StepThenDone());
+  ABSL_RETURN_IF_ERROR(StepThenDone());
   return ret;
 }
 
 template <typename T>
 absl::StatusOr<T> Statement::StepOneCellThenDone(std::string_view column_name) {
-  ASSIGN_OR_RETURN(int index, GetColumnIndex(column_name));
+  ABSL_ASSIGN_OR_RETURN(int index, GetColumnIndex(column_name));
   return StepOneCellThenDone<T>(index);
 }
 

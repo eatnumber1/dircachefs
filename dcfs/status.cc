@@ -1,5 +1,6 @@
 #include "dcfs/status.h"
 
+#include <cerrno>
 #include <string.h>
 
 #include "absl/container/flat_hash_map.h"
@@ -7,28 +8,6 @@
 #include "absl/strings/str_cat.h"
 
 namespace dcfs {
-namespace {
-
-void CopyPayload(const absl::Status &from, absl::Status to) {
-  from.ForEachPayload(
-      [&to](std::string_view type_url, const absl::Cord &payload) {
-          to.SetPayload(type_url, payload);
-      });
-}
-
-}  // namespace
-
-absl::Status Prepend(absl::Status st, std::string_view message, std::string_view joiner) {
-  absl::Status new_status(st.code(), absl::StrCat(message, joiner, st.message()));
-  CopyPayload(st, new_status);
-  return new_status;
-}
-
-absl::Status Append(absl::Status st, std::string_view message, std::string_view joiner) {
-  absl::Status new_status(st.code(), absl::StrCat(st.message(), joiner, message));
-  CopyPayload(st, new_status);
-  return new_status;
-}
 
 absl::Status ErrnoToStatus(int error_number, absl::string_view message) {
   absl::Status status = absl::ErrnoToStatus(error_number, message);
@@ -47,6 +26,62 @@ absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status) {
   }
 
   return ErrorNameToErrno(std::string(*payload));
+}
+
+namespace {
+
+// StatusCode -> errno fallback used by StatusToErrno when a status carries
+// no errno payload. Moved here from dcfs/fuse.cc (step 1.1) so that all
+// status<->errno logic lives in one place.
+int StatusCodeToErrno(absl::StatusCode code) {
+  switch (code) {
+    case absl::StatusCode::kOk:
+      return 0;
+    case absl::StatusCode::kInvalidArgument:
+      return EINVAL;
+    case absl::StatusCode::kDeadlineExceeded:
+      return ETIMEDOUT;
+    case absl::StatusCode::kNotFound:
+      return ENOENT;
+    case absl::StatusCode::kAlreadyExists:
+      return EEXIST;
+    case absl::StatusCode::kPermissionDenied:
+      [[fallthrough]];
+    case absl::StatusCode::kUnauthenticated:
+      return EPERM;
+    case absl::StatusCode::kOutOfRange:
+      return ERANGE;
+    case absl::StatusCode::kFailedPrecondition:
+      return EBUSY;
+    case absl::StatusCode::kResourceExhausted:
+      return ENOSPC;
+    case absl::StatusCode::kCancelled:
+      return ECANCELED;
+    case absl::StatusCode::kAborted:
+      return EDEADLK;
+    case absl::StatusCode::kUnimplemented:
+      return ENOSYS;
+    case absl::StatusCode::kUnavailable:
+      return EAGAIN;
+    case absl::StatusCode::kDataLoss:
+      return ENOTRECOVERABLE;
+    case absl::StatusCode::kInternal:
+      return ELIBBAD;
+    case absl::StatusCode::kUnknown:
+      [[fallthrough]];
+    default:
+      return EPROTO;
+  }
+}
+
+}  // namespace
+
+int StatusToErrno(const absl::Status &status) {
+  if (status.ok()) return 0;
+  if (absl::StatusOr<int> eno = GetErrnoFromStatus(status); eno.ok()) {
+    return *eno;
+  }
+  return StatusCodeToErrno(status.code());
 }
 
 }  // namespace dcfs

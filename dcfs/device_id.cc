@@ -20,6 +20,7 @@
 #include <linux/types.h>
 
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
@@ -162,7 +163,7 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
     if (saved_errno == ENOTTY || saved_errno == EOPNOTSUPP ||
         saved_errno == ENOSYS) {
       int64_t f_type;
-      ASSIGN_OR_RETURN(f_type, GetFsType(fd));
+      ABSL_ASSIGN_OR_RETURN(f_type, GetFsType(fd));
       return absl::UnimplementedError(absl::StrCat(
           FstypeName(f_type), " does not support FS_IOC_GETFSUUID"));
     }
@@ -179,7 +180,7 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
   std::copy(std::begin(fsuuid.uuid), std::end(fsuuid.uuid), id.uuid.begin());
 
   int64_t f_type;
-  ASSIGN_OR_RETURN(f_type, GetFsType(fd));
+  ABSL_ASSIGN_OR_RETURN(f_type, GetFsType(fd));
   if (f_type == BTRFS_SUPER_MAGIC) {
     struct btrfs_ioctl_get_subvol_info_args args;
     std::memset(&args, 0, sizeof(args));

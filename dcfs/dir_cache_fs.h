@@ -6,7 +6,6 @@
 #include <sys/types.h>
 
 #include "absl/status/status.h"
-#include "dcfs/attributes.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse.h"
 #include "fuse_lowlevel.h"

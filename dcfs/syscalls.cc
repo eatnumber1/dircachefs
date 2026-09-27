@@ -13,6 +13,7 @@
 #include <linux/fs.h>
 
 #include "absl/log/log.h"
+#include "absl/status/status_macros.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "dcfs/status.h"
@@ -225,14 +226,15 @@ absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence) {
 
 absl::StatusOr<uint32_t> GetInodeGeneration(int fd) {
   uint32_t generation = 0;
-  RETURN_IF_ERROR(syscalls::ioctl(fd, FS_IOC_GETVERSION, &generation).status());
+  ABSL_RETURN_IF_ERROR(
+      syscalls::ioctl(fd, FS_IOC_GETVERSION, &generation).status());
   return generation;
 }
 
 absl::StatusOr<ScopedSignalMask> ScopedSignalMask::Create(
     int how, const sigset_t &set) {
   sigset_t oldset;
-  RETURN_IF_ERROR(syscalls::pthread_sigmask(how, &set, &oldset));
+  ABSL_RETURN_IF_ERROR(syscalls::pthread_sigmask(how, &set, &oldset));
   return ScopedSignalMask(std::move(oldset));
 }
 
@@ -261,11 +263,12 @@ LogOpenFlags::LogOpenFlags(int flags) : flags_(flags) {}
 
 void ClosedirAndLog::operator()(DIR *d) {
   if (d == nullptr) return;
-  LOG_IF_ERROR(WARNING, syscalls::closedir(*d));
+  absl::Status st = syscalls::closedir(*d);
+  LOG_IF(WARNING, !st.ok()) << st;
 }
 
 absl::StatusOr<DIR_unique_ptr> WrapDirfd(FileDescriptor dirfd) {
-  ASSIGN_OR_RETURN(DIR &d, syscalls::fdopendir(*dirfd));
+  ABSL_ASSIGN_OR_RETURN(DIR &d, syscalls::fdopendir(*dirfd));
   std::move(dirfd).Release();
   return DIR_unique_ptr(&d);
 }

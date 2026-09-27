@@ -12,6 +12,7 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse.h"
 #include "dcfs/status.h"
@@ -105,7 +106,7 @@ absl::Status DirCacheFS::Getattr(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info *fi) {
   if (ino != FUSE_ROOT_ID) return req.ReplyErrno(ENOENT);
 
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       struct stat st, syscalls::fstatat(*source_fd_, "", AT_EMPTY_PATH));
   st.st_ino = FUSE_ROOT_ID;
   // No cache of our own exists yet, so tell the kernel not to cache either.
@@ -146,7 +147,7 @@ absl::Status DirCacheFS::Releasedir(
 
 absl::Status DirCacheFS::Statfs(FuseRequest &req, fuse_ino_t ino) {
   if (ino != FUSE_ROOT_ID) return req.ReplyErrno(ENOENT);
-  ASSIGN_OR_RETURN(struct statvfs st, syscalls::fstatvfs(*source_fd_));
+  ABSL_ASSIGN_OR_RETURN(struct statvfs st, syscalls::fstatvfs(*source_fd_));
   return req.ReplyStatfs(st);
 }
 
