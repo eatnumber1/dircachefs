@@ -3,12 +3,17 @@
 #
 # Builds a small tree spanning two backing filesystems (vdb, with vdc
 # mounted as a real submount below it), mounts dcfs over it, and checks:
-# metadata matches the backing filesystems (inode numbers, `find -ls`,
-# ENOENT on a missing name); a second listing pass -- with the page/dentry/
-# inode caches dropped in between -- causes *zero* additional block reads on
-# either backing device (dcfs's own sqlite cache answers it, per step 3.2's
-# design); and that this stays true after killing and restarting the daemon
-# against the same cache database (i.e. the cache persisted).
+# metadata matches the backing filesystems (inode numbers, a stat-based
+# directory listing, ENOENT on a missing name); a second listing pass -- with
+# the page/dentry/inode caches dropped in between -- causes *zero* additional
+# block reads on either backing device (dcfs's own sqlite cache answers it,
+# per step 3.2's design); and that this stays true after killing and
+# restarting the daemon against the same cache database (i.e. the cache
+# persisted).
+#
+# Uses only busybox applets/options (verified against the exact busybox
+# baked into the initramfs: `busybox --list`, `busybox <applet> --help`) --
+# no GNU find/stat/coreutils extensions.
 #
 # Run as /tests/readonly.sh by guest/init when booted with
 # dcfs_test=readonly.sh; prints one "TEST ... PASS/FAIL" line per check and
@@ -112,35 +117,47 @@ populate_tree() {
 	ln "$root/hardlink1" "$root/hardlink2"
 }
 
-# A `find -ls` listing (read from file $1) with the leading inode column
-# dropped and the path prefix $2 rewritten, so two trees' listings can be
-# compared structurally regardless of their own inode numbers (checked
-# separately) or which of /src / /mnt they were taken from. A symlink's
-# trailing "-> target" is dropped along with it (on both sides equally),
-# rather than special-cased -- readlink is checked separately.
-normalize_ls() {
+# A stat listing (read from file $1; see run_pass -- one line per entry,
+# "inode perms nlink owner group size name", where a symlink's name is
+# 'name' -> 'target' per busybox stat's %N) with the path prefix $2 rewritten
+# out of the name, so two trees' listings compare equal regardless of which
+# of /src / /mnt they were taken from. The inode number is deliberately kept
+# (not dropped): dcfs reports the *backing* inode as st_ino, so it must
+# already agree between the two sides. A relative symlink's target half
+# never starts with the prefix, so it passes through untouched.
+normalize_stat() {
 	file=$1
 	prefix=$2
 	while IFS= read -r line; do
 		set -- $line
-		if [ "$#" -lt 11 ]; then
+		if [ "$#" -lt 7 ]; then
 			echo "$line"
 			continue
 		fi
-		path=${11}
-		rest=${path#$prefix}
-		echo "$2 $3 $4 $5 $6 $7 $8 $9 ${10} $rest"
+		inode=$1
+		perms=$2
+		links=$3
+		owner=$4
+		group=$5
+		size=$6
+		shift 6
+		rest="$*"
+		rest=${rest#\'$prefix} # symlink name half, quoted by %N
+		rest=${rest#$prefix}   # regular file/dir name, unquoted
+		echo "$inode $perms $links $owner $group $size $rest"
 	done <"$file"
 }
 
 # One listing pass: everything read-only that step 3.2 implements. No
-# content reads -- Open/Read are still ENOSYS stubs as of this step.
+# content reads -- Open/Read are still ENOSYS stubs as of this step. busybox
+# find has no -ls, so this uses -exec stat -c ... {} + instead (also
+# replacing the old separate "stat every file" pass: this stats every entry,
+# not just regular files).
 run_pass() {
 	dir=$1
-	find "$dir" -ls >/tmp/pass_ls.txt
+	find "$dir" -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/pass_stat.txt
 	readlink "$dir/link_to_file" >/dev/null
 	readlink "$dir/sub/link_to_file" >/dev/null
-	find "$dir" -type f -exec stat {} \; >/dev/null
 }
 
 # --- build the backing tree, across a real submount ---------------------
@@ -216,18 +233,18 @@ else
 	fail st-ino-submount "src=$sub_src_ino mnt=$sub_mnt_ino"
 fi
 
-find /src -ls >/tmp/src_ls.txt
-find /mnt -ls >/tmp/mnt_ls.txt
-normalize_ls /tmp/src_ls.txt "$SRC" >/tmp/src_ls_norm.txt
-normalize_ls /tmp/mnt_ls.txt "$MNT" >/tmp/mnt_ls_norm.txt
-set -- $(md5sum /tmp/src_ls_norm.txt)
+find /src -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
+find /mnt -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
+normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
+set -- $(md5sum /tmp/src_stat_norm.txt)
 src_sum=$1
-set -- $(md5sum /tmp/mnt_ls_norm.txt)
+set -- $(md5sum /tmp/mnt_stat_norm.txt)
 mnt_sum=$1
 if [ "$src_sum" = "$mnt_sum" ]; then
 	pass listing-matches
 else
-	fail listing-matches "normalized find -ls differs (src=$src_sum mnt=$mnt_sum)"
+	fail listing-matches "normalized stat listing differs (src=$src_sum mnt=$mnt_sum)"
 fi
 
 if ls /mnt/nope >/dev/null 2>&1; then
