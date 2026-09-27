@@ -19,6 +19,9 @@ pass() { echo "TEST $1 PASS"; }
 fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
 
 DCFS=/bin/dcfs
+
+# busybox on Ubuntu lacks the mountpoint applet; ask the kernel directly.
+is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -74,7 +77,7 @@ start_daemon() {
 	MOUNTED=0
 	i=0
 	while [ "$i" -lt 10 ]; do
-		if mountpoint -q "$MNT"; then
+		if is_mounted "$MNT"; then
 			MOUNTED=1
 			return 0
 		fi
@@ -238,13 +241,13 @@ fi
 kill -TERM "$DAEMON_PID" 2>/dev/null || true
 wait "$DAEMON_PID" 2>/dev/null || true
 DAEMON_PID=""
-if mountpoint -q "$MNT"; then
+if is_mounted "$MNT"; then
 	# libfuse's signal handler should have unmounted on its own; fall back
 	# to forcing it so the restart below isn't blocked by a stale mount.
 	echo "readonly.sh: /mnt still mounted after SIGTERM; forcing umount"
 	umount "$MNT" 2>/dev/null || true
 fi
-if mountpoint -q "$MNT"; then
+if is_mounted "$MNT"; then
 	fail restart-unmount "mountpoint still mounted after kill+umount"
 	MOUNTED=1
 else
