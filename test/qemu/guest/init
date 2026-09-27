@@ -2,11 +2,27 @@
 # Adapted from fuse-generation-qemu; that repo stays the LKML patch's test
 # suite.
 #
-# PID 1 inside the dcfs QEMU guest. Mounts the pseudo filesystems, picks
-# the guest test script to run from the dcfs_test= kernel command-line
-# parameter (see test/qemu/qemu_test.bzl), runs it, then prints the
-# verdict and powers off. All interesting output goes to the serial
-# console; run-qemu.sh greps it for the final verdict.
+# PID 1 inside the dcfs QEMU guest, for both kinds of dcfs QEMU test:
+#
+#   - Unit tests (test/qemu/qemu_cc_test.bzl): the initramfs has /test/run
+#     (the test binary), /test/args (its arguments, space-joined), an
+#     optional /test/data/ (TEST_SRCDIR) and an optional /test/disk0 (the
+#     device name of the first `disks=` entry, if any). Runs the test with
+#     TEST_TMPDIR on that disk if given, tmpfs otherwise, then prints
+#     DCFS-TEST-EXIT=<rc>.
+#
+#   - e2e tests (test/qemu/qemu_test.bzl): picks the guest/<name>.sh script
+#     to run from the dcfs_test= kernel command-line parameter, then prints
+#     ALL-TESTS-PASSED or TEST-FAILED.
+#
+# All interesting output goes to the serial console; run-qemu.sh greps it
+# for the final verdict. reboot=t on the kernel command line (see
+# run-qemu.sh) plus -no-reboot makes the final `reboot -f` below a clean
+# way to end the VM: the kernel forces a reboot via triple fault, and
+# -no-reboot makes QEMU quit instead of actually rebooting. This is used
+# instead of poweroff because the minimal test kernel has no ACPI
+# (CONFIG_ACPI=n, see build-kernel.sh): the poweroff syscall needs a
+# platform shutdown mechanism this kernel does not have.
 
 /bin/busybox mkdir -p /proc /sys /dev /tmp /src /cache /mnt
 /bin/busybox mount -t proc proc /proc
@@ -21,11 +37,53 @@ mdev -s
 
 echo "boot: kernel $(uname -r)"
 
+finish() {
+	sync
+	reboot -f
+}
+
+if [ -f /test/run ]; then
+	# --- unit-test mode -------------------------------------------------
+	mkdir -p /tmp/test_tmpdir
+
+	if [ -s /test/disk0 ]; then
+		disk_dev="/dev/$(cat /test/disk0)"
+		if ! mount -t ext4 "$disk_dev" /tmp/test_tmpdir; then
+			echo "init: failed to mount $disk_dev on /tmp/test_tmpdir"
+			echo "DCFS-TEST-EXIT=1"
+			finish
+			exit 1
+		fi
+	fi
+
+	export TEST_TMPDIR=/tmp/test_tmpdir
+	export TEST_SRCDIR=/test/data
+	export HOME=/tmp
+	mkdir -p /tmp/test_undeclared_outputs
+	export TEST_UNDECLARED_OUTPUTS_DIR=/tmp/test_undeclared_outputs
+	# ASan needs ptrace (CAP_SYS_PTRACE / a non-restrictive
+	# yama.ptrace_scope) to unwind and symbolize leak reports; the guest
+	# has neither configured, so leak detection is disabled rather than
+	# have every ASan build fail on an unrelated guest limitation.
+	export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+
+	[ -d /test/data ] && cd /test/data
+
+	# No -e here or below: the test binary reports failures itself via its
+	# exit status, and word-splitting $(cat /test/args) is deliberate.
+	/test/run $(cat /test/args 2>/dev/null)
+	rc=$?
+	echo "DCFS-TEST-EXIT=$rc"
+	finish
+	exit 0
+fi
+
+# --- e2e mode -----------------------------------------------------------
 TEST=$(sed -n 's/.*\bdcfs_test=\([^ ]*\).*/\1/p' /proc/cmdline)
 if [ -z "$TEST" ]; then
 	echo "init: no dcfs_test= on the kernel command line"
 	echo "TEST-FAILED"
-	poweroff -f
+	finish
 	exit 1
 fi
 
@@ -33,7 +91,7 @@ SCRIPT="/tests/$TEST"
 if [ ! -f "$SCRIPT" ]; then
 	echo "init: $SCRIPT not found"
 	echo "TEST-FAILED"
-	poweroff -f
+	finish
 	exit 1
 fi
 
@@ -43,10 +101,9 @@ fi
 sh "$SCRIPT"
 rc=$?
 
-sync
 if [ "$rc" -eq 0 ]; then
 	echo "ALL-TESTS-PASSED"
 else
 	echo "TEST-FAILED"
 fi
-poweroff -f
+finish

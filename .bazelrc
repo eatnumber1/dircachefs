@@ -21,8 +21,13 @@ build --per_file_copt=external/.*@-Wno-error
 # initramfs.
 build --dynamic_mode=off
 
+# PROJECT DECISION: dcfs requires root, so there is no host-side test
+# execution -- every test (unit tests included) boots the project's own
+# kernel under QEMU as root (see test/qemu/qemu_cc_test.bzl and
+# test/qemu/README.md). `bazel test //...` therefore runs everything with
+# no tag filter; the e2e tests (tagged "e2e") are just bigger/slower, not
+# excluded by default.
 test --test_output=errors
-test --test_tag_filters=-qemu
 
 build:asan --strip=never
 build:asan --copt -fsanitize=address
@@ -31,6 +36,11 @@ build:asan --copt -O1
 build:asan --copt -g
 build:asan --copt -fno-omit-frame-pointer
 build:asan --linkopt -fsanitize=address
+# Read by test/qemu:asan_build (see test/qemu/qemu_cc_test.bzl): glibc
+# cannot be fully statically linked with ASan, so qemu_cc_test links
+# dynamically under this config instead and ships the ldd(1) closure in
+# the initramfs.
+build:asan --define=dcfs_sanitizer=asan
 
 build:ubsan --strip=never
 build:ubsan --copt -fsanitize=undefined
@@ -40,5 +50,6 @@ build:ubsan --copt -g
 build:ubsan --copt -fno-omit-frame-pointer
 build:ubsan --linkopt -fsanitize=undefined
 build:ubsan --linkopt -fno-sanitize-recover=all
-
-test:qemu --test_tag_filters=qemu
+# See test:asan's --define above; UBSan's runtime has the same problem in
+# practice.
+build:ubsan --define=dcfs_sanitizer=ubsan

@@ -1,4 +1,5 @@
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 
 # Shared by :main and :main_static (the QEMU-initramfs copy, see below) so
 # their dependency lists can't drift apart.
@@ -52,7 +53,7 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "sqlite_test",
     size = "small",
     srcs = ["sqlite_test.cc"],
@@ -85,7 +86,7 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "status_test",
     size = "small",
     srcs = ["status_test.cc"],
@@ -124,7 +125,7 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "fd_test",
     size = "small",
     srcs = ["fd_test.cc"],
@@ -137,10 +138,11 @@ cc_test(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "syscalls_test",
     size = "small",
     srcs = ["syscalls_test.cc"],
+    disks = [("vdb", "ext4", "32M")],  # name_to_handle_at/FS_IOC_GETVERSION/xattrs need a real filesystem
     deps = [
       ":syscalls",
       ":status",
@@ -170,7 +172,7 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "fuse_request_test",
     size = "small",
     srcs = ["fuse_request_test.cc"],
@@ -211,10 +213,11 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "device_id_test",
     size = "small",
     srcs = ["device_id_test.cc"],
+    disks = [("vdb", "ext4", "32M")],  # FS_IOC_GETFSUUID needs a filesystem with a UUID; tmpfs has none
     deps = [
       ":device_id",
       ":status",
@@ -240,7 +243,7 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "mount_fds_test",
     size = "small",
     srcs = ["mount_fds_test.cc"],
@@ -272,10 +275,11 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "file_handle_test",
     size = "small",
     srcs = ["file_handle_test.cc"],
+    disks = [("vdb", "ext4", "32M")],  # FromFd/FromDirEntry need name_to_handle_at export support
     deps = [
       ":device_id",
       ":file_handle",
@@ -326,7 +330,7 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "ret_check_test",
     size = "small",
     srcs = ["ret_check_test.cc"],
@@ -344,14 +348,14 @@ cc_library(
     hdrs = ["memory.h"],
 )
 
-cc_test(
+qemu_cc_test(
     name = "smoke_test",
     size = "small",
     srcs = ["smoke_test.cc"],
     deps = ["@googletest//:gtest_main"],
 )
 
-cc_test(
+qemu_cc_test(
     name = "libfuse_version_test",
     size = "small",
     srcs = ["libfuse_version_test.cc"],
@@ -404,7 +408,7 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "migrate_test",
     size = "small",
     srcs = ["migrate_test.cc"],
@@ -453,7 +457,7 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "metadata_cache_test",
     size = "small",
     srcs = ["metadata_cache_test.cc"],
@@ -497,10 +501,11 @@ cc_library(
     ],
 )
 
-cc_test(
+qemu_cc_test(
     name = "backing_test",
     size = "small",
     srcs = ["backing_test.cc"],
+    disks = [("vdb", "ext4", "32M")],  # ProbeRoot/InitRoot need GetDeviceId (FS_IOC_GETFSUUID), which tmpfs doesn't support
     deps = [
       ":backing",
       ":context",

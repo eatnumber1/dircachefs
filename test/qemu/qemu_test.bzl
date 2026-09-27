@@ -39,9 +39,10 @@ def qemu_test(name, guest_script, disks = []):
             guest_script_basename,
         ] + disk_args,
         tags = [
-            "qemu",
+            "e2e",
             "exclusive",
             "no-sandbox",
+            "requires-kvm",
         ],
         size = "large",
         timeout = "long",

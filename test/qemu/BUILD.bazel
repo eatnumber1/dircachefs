@@ -1,5 +1,29 @@
 load(":qemu_test.bzl", "qemu_test")
 
+# Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
+# and any other package with unit tests) to build each test's own initramfs.
+exports_files([
+    "guest/init",
+    "scripts/mkinitramfs.sh",
+    "scripts/run-qemu.sh",
+])
+
+# Set by --define=dcfs_sanitizer=asan/ubsan (see .bazelrc's build:asan /
+# build:ubsan). qemu_cc_test uses these to skip the fully_static_link
+# feature under a sanitizer: glibc cannot be fully statically linked with
+# ASan (and in practice UBSan's runtime has the same problem), so those
+# builds link dynamically and mkinitramfs.sh copies the ldd(1) closure
+# into the initramfs instead.
+config_setting(
+    name = "asan_build",
+    values = {"define": "dcfs_sanitizer=asan"},
+)
+
+config_setting(
+    name = "ubsan_build",
+    values = {"define": "dcfs_sanitizer=ubsan"},
+)
+
 # Guest initramfs shared by every qemu_test in this package: busybox,
 # dcfs (statically linked, see //dcfs:main_static), fhtest, guest/init,
 # and every guest/*.sh test script (installed as /tests/<basename>; see
