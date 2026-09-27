@@ -1,3 +1,5 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+
 cc_binary(
     name = "main",
     srcs = ["main.cc"],
@@ -220,4 +222,10 @@ cc_library(
 cc_library(
     name = "memory",
     hdrs = ["memory.h"],
+)
+
+cc_test(
+    name = "smoke_test",
+    srcs = ["smoke_test.cc"],
+    deps = ["@googletest//:gtest_main"],
 )

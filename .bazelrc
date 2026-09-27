@@ -5,6 +5,10 @@ build --copt -Wno-sign-compare
 build --copt -Werror
 build --copt -Wimplicit-fallthrough
 build --copt -D_FILE_OFFSET_BITS=64
+build --disk_cache=~/.cache/bazel-disk-cache
+
+test --test_output=errors
+test --test_tag_filters=-qemu
 
 build:asan --strip=never
 build:asan --copt -fsanitize=address
@@ -13,3 +17,14 @@ build:asan --copt -O1
 build:asan --copt -g
 build:asan --copt -fno-omit-frame-pointer
 build:asan --linkopt -fsanitize=address
+
+build:ubsan --strip=never
+build:ubsan --copt -fsanitize=undefined
+build:ubsan --copt -fno-sanitize-recover=all
+build:ubsan --copt -O1
+build:ubsan --copt -g
+build:ubsan --copt -fno-omit-frame-pointer
+build:ubsan --linkopt -fsanitize=undefined
+build:ubsan --linkopt -fno-sanitize-recover=all
+
+test:qemu --test_tag_filters=qemu
