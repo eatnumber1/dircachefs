@@ -146,12 +146,20 @@ class DirCacheFS {
   bool HasOpenFiles(InodeId id) const;
 
  private:
+  // cache::GetAttr(ctx_, id), except that NotFound from a non-root id is
+  // reported as ESTALE, not NotFound: that is what a nodeid the kernel is
+  // still holding, but this cache no longer has a row for (e.g. its
+  // backing inode number was recycled and invalidated the row, or the
+  // kernel's automatic LOOKUP_REVAL retry of an open that already failed
+  // ESTALE once), means to the kernel -- not ENOENT. Every op that starts
+  // from an inode id should go through this rather than cache::GetAttr()
+  // directly.
+  absl::StatusOr<cache::CachedAttr> RequireAttr(InodeId id);
+
   // The fuse_entry_param for `id`: current cached attributes (refreshed
   // first if not valid), nodeid = id, generation = the row's fuse_gen, and
-  // timeouts from opts_. NotFound from a non-root id means the kernel is
-  // holding a nodeid this cache no longer has a row for (e.g. the backing
-  // inode number was recycled and invalidated it) -- reported as ESTALE,
-  // not NotFound, since that is what the kernel does with a stale nodeid.
+  // timeouts from opts_. See RequireAttr() for the NotFound -> ESTALE
+  // conversion.
   absl::StatusOr<fuse_entry_param> EntryFor(InodeId id);
 
   // An open file handle: the fd Open() reopened `ino` with, and the

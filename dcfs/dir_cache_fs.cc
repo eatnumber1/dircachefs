@@ -79,27 +79,33 @@ absl::Status DirCacheFS::Destroy() {
   return absl::OkStatus();
 }
 
-absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
+absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
   absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
-  if (!attr.ok()) {
-    if (absl::IsNotFound(attr.status()) && id != cache::kRootInode) {
-      // The kernel is still holding a nodeid we no longer have a row for
-      // (e.g. its backing inode number was recycled and the old row
-      // invalidated): that is what ESTALE means to the kernel, not ENOENT.
-      return dcfs::ErrnoToStatus(
-          ESTALE, absl::StrCat("no cached row for nodeid ", id));
-    }
-    return attr.status();
+  if (!attr.ok() && absl::IsNotFound(attr.status()) &&
+      id != cache::kRootInode) {
+    // The kernel is still holding a nodeid we no longer have a row for
+    // (e.g. its backing inode number was recycled and the old row
+    // invalidated, or -- as with DirCacheFS::Open's second, LOOKUP_REVAL
+    // retry after the first FUSE OPEN on a stale nodeid already replied
+    // ESTALE and dropped the row -- a stale nodeid the kernel is about to
+    // forget anyway): that is what ESTALE means to the kernel, not ENOENT.
+    return dcfs::ErrnoToStatus(
+        ESTALE, absl::StrCat("no cached row for nodeid ", id));
   }
-  if (!attr->valid) {
+  return attr;
+}
+
+absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
+  if (!attr.valid) {
     ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
-    ABSL_ASSIGN_OR_RETURN(attr, cache::GetAttr(ctx_, id));
+    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
   }
 
   fuse_entry_param entry{};
   entry.ino = static_cast<fuse_ino_t>(id);
-  entry.generation = attr->fuse_gen;
-  entry.attr = attr->st;
+  entry.generation = attr.fuse_gen;
+  entry.attr = attr.st;
   entry.attr_timeout = absl::ToDoubleSeconds(opts_.attr_timeout);
   entry.entry_timeout = absl::ToDoubleSeconds(opts_.entry_timeout);
   return entry;
@@ -169,10 +175,10 @@ absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
 
   // Not cached yet. Confirm this really is a symlink (rather than, say, a
   // caller racing a stale nodeid) before reading the backing filesystem.
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx_, id));
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
   if (!attr.valid) {
     ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
-    ABSL_ASSIGN_OR_RETURN(attr, cache::GetAttr(ctx_, id));
+    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
   }
   RET_CHECK(S_ISLNK(attr.st.st_mode))
       << "Readlink on non-symlink inode " << id;
@@ -232,10 +238,15 @@ absl::Status DirCacheFS::Open(
     return req.ReplyErrno(EROFS);
   }
 
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx_, id));
+  // RequireAttr(), not cache::GetAttr(): the kernel's generic open path
+  // (do_file_open_root, fs/namei.c) automatically retries a failed open
+  // once with LOOKUP_REVAL after -ESTALE, and that second FUSE OPEN hits
+  // this same call against the now-invalidated row -- which must come
+  // back ESTALE again, not ENOENT.
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
   if (!attr.valid) {
     ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
-    ABSL_ASSIGN_OR_RETURN(attr, cache::GetAttr(ctx_, id));
+    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
   }
   // The kernel calls opendir(), not open(), on a directory, so this would
   // only trip on a row that changed type out from under a stale nodeid.
@@ -322,10 +333,10 @@ absl::Status DirCacheFS::Fsync(
 absl::Status DirCacheFS::Opendir(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx_, id));
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
   if (!attr.valid) {
     ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
-    ABSL_ASSIGN_OR_RETURN(attr, cache::GetAttr(ctx_, id));
+    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
   }
   if (!S_ISDIR(attr.st.st_mode)) return req.ReplyErrno(ENOTDIR);
   return req.ReplyOpen(fi);
@@ -402,7 +413,7 @@ absl::Status DirCacheFS::Readdir(
         // the resume cursor `next_cursor` already encodes as this entry's
         // offset.
         if (used + entry_size > size) return false;
-        ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx_, child));
+        ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(child));
         struct stat st = {};
         st.st_ino = attr.backing_ino;
         st.st_mode = attr.st.st_mode;
@@ -469,8 +480,13 @@ absl::Status DirCacheFS::Fsyncdir(
 }
 
 absl::Status DirCacheFS::Statfs(FuseRequest &req, fuse_ino_t ino) {
-  ABSL_ASSIGN_OR_RETURN(
-      struct statvfs st, backing::StatFilesystem(ctx_, static_cast<InodeId>(ino)));
+  InodeId id = static_cast<InodeId>(ino);
+  // backing::StatFilesystem() calls cache::GetAttr() itself (it isn't a
+  // DirCacheFS method and so can't use RequireAttr()); check here first so
+  // a stale nodeid comes back ESTALE rather than whatever plain NotFound
+  // maps to.
+  ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
+  ABSL_ASSIGN_OR_RETURN(struct statvfs st, backing::StatFilesystem(ctx_, id));
   return req.ReplyStatfs(st);
 }
 
@@ -483,6 +499,11 @@ absl::Status DirCacheFS::Setxattr(
 absl::Status DirCacheFS::Getxattr(
     FuseRequest &req, fuse_ino_t ino, std::string_view name, size_t size) {
   InodeId id = static_cast<InodeId>(ino);
+  // Establishes the row exists (ESTALE via RequireAttr() if not) before
+  // treating a NotFound from cache::GetXattr() below as "no such xattr"
+  // (ENODATA): that call's own NotFound doesn't distinguish a missing row
+  // from a present row with no such xattr.
+  ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
   absl::StatusOr<std::optional<std::string>> value =
       cache::GetXattr(ctx_, id, name);
   if (!value.ok()) {
@@ -508,6 +529,11 @@ absl::Status DirCacheFS::Getxattr(
 absl::Status DirCacheFS::Listxattr(
     FuseRequest &req, fuse_ino_t ino, size_t size) {
   InodeId id = static_cast<InodeId>(ino);
+  // See Getxattr(): establishes the row exists (ESTALE via RequireAttr()
+  // if not) before relying on cache::ListXattrs()'s own NotFound, which
+  // only ever means a missing row here (unlike GetXattr(), it has no
+  // "not found" outcome of its own to conflate it with).
+  ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
   ABSL_ASSIGN_OR_RETURN(
       std::optional<std::vector<std::string>> names,
       cache::ListXattrs(ctx_, id));
