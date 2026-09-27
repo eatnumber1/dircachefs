@@ -15,6 +15,9 @@
 # unformatted filler drive, so the guest kernel enumerates the requested
 # disk at exactly /dev/vd<letter>.
 set -eu
+# Bazel runs tests with a minimal PATH that lacks the sbin directories
+# where mkfs.* live.
+export PATH="$PATH:/usr/sbin:/sbin"
 
 KERNEL=$1
 INITRD=$2
