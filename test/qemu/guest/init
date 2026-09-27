@@ -1,0 +1,49 @@
+#!/bin/sh
+# Adapted from fuse-generation-qemu; that repo stays the LKML patch's test
+# suite.
+#
+# PID 1 inside the dcfs QEMU guest. Mounts the pseudo filesystems, picks
+# the guest test script to run from the dcfs_test= kernel command-line
+# parameter (see test/qemu/qemu_test.bzl), runs it, then prints the
+# verdict and powers off. All interesting output goes to the serial
+# console; run-qemu.sh greps it for the final verdict.
+
+/bin/busybox mkdir -p /proc /sys /dev /tmp /src /cache /mnt
+/bin/busybox mount -t proc proc /proc
+/bin/busybox mount -t sysfs sysfs /sys
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
+/bin/busybox mount -t tmpfs tmpfs /tmp
+
+/bin/busybox --install -s /bin
+
+# Populate any device nodes devtmpfs didn't create on its own.
+mdev -s
+
+echo "boot: kernel $(uname -r)"
+
+TEST=$(sed -n 's/.*\bdcfs_test=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -z "$TEST" ]; then
+	echo "init: no dcfs_test= on the kernel command line"
+	echo "TEST-FAILED"
+	poweroff -f
+	exit 1
+fi
+
+SCRIPT="/tests/$TEST"
+if [ ! -f "$SCRIPT" ]; then
+	echo "init: $SCRIPT not found"
+	echo "TEST-FAILED"
+	poweroff -f
+	exit 1
+fi
+
+sh -e "$SCRIPT"
+rc=$?
+
+sync
+if [ "$rc" -eq 0 ]; then
+	echo "ALL-TESTS-PASSED"
+else
+	echo "TEST-FAILED"
+fi
+poweroff -f

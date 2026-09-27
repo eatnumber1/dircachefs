@@ -17,3 +17,9 @@ bazel_dep(name = "rules_cc", version = "0.2.25")
 bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 
+# Exposes the out-of-tree QEMU test kernel (test/qemu/scripts/build-kernel.sh)
+# and host busybox to the test/qemu:boot_test-style targets. See
+# test/qemu/kernel.bzl.
+kernel_image = use_repo_rule("//test/qemu:kernel.bzl", "kernel_image")
+
+kernel_image(name = "kernel_image")

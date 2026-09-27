@@ -1,0 +1,29 @@
+load(":qemu_test.bzl", "qemu_test")
+
+# Guest initramfs shared by every qemu_test in this package: busybox,
+# dcfs (statically linked, see //dcfs:main_static), fhtest, guest/init,
+# and every guest/*.sh test script (installed as /tests/<basename>; see
+# guest/init and scripts/mkinitramfs.sh).
+genrule(
+    name = "initramfs",
+    srcs = [
+        "//dcfs:main_static",
+        "//tools:fhtest",
+        "@kernel_image//:busybox",
+        "guest/init",
+    ] + glob(["guest/*.sh"]),
+    outs = ["initramfs.cpio.gz"],
+    cmd = "$(location scripts/mkinitramfs.sh) $@ " +
+          "$(location @kernel_image//:busybox) " +
+          "$(location //dcfs:main_static) " +
+          "$(location //tools:fhtest) " +
+          "$(location guest/init) " +
+          "$(SRCS)",
+    tools = ["scripts/mkinitramfs.sh"],
+)
+
+qemu_test(
+    name = "boot_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/boot.sh",
+)
