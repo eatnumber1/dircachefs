@@ -48,3 +48,12 @@ qemu_test(
     disks = [("vdb", "ext4", "128M")],
     guest_script = "guest/lifecycle.sh",
 )
+
+qemu_test(
+    name = "handles_test",
+    disks = [
+        ("vdb", "ext4", "128M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/handles.sh",
+)

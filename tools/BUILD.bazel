@@ -2,7 +2,11 @@ load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 # File-handle test client (name_to_handle_at / open_by_handle_at /
-# FS_IOC_GETVERSION). Used by tools/handle_tests.sh and the QEMU suite.
+# FS_IOC_GETVERSION). Used by the QEMU suite (see
+# //test/qemu:handles_test / test/qemu/guest/handles.sh), which is where the
+# NFS handle tests live -- there never ended up being a separate host-run
+# tools/handle_tests.sh; it needs a real dcfs mount, same as smoke_readonly.sh
+# below.
 cc_binary(
     name = "fhtest",
     srcs = ["fhtest.c"],

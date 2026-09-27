@@ -63,6 +63,19 @@ If you rebuild the kernel into a different directory, export
   `--fuse_opt` (good and bad options), a clean SIGTERM shutdown (exit 0,
   unmounted, WAL checkpointed), mounting dcfs back over its own `--source`,
   and restarting against a previously-used cache database.
+- `handles_test` (`guest/handles.sh`): step 3.4b's NFS export handles
+  (`FUSE_CAP_EXPORT_SUPPORT`/`FUSE_CAP_ATTR_GENERATION`, exercised with
+  `//tools:fhtest`) -- a handle for a file on the source device and one for
+  a file on the submount both open and read back the right content; the
+  reported generation is 0 for the root and nonzero (and stable across a
+  restart) for everything else; a handle survives a daemon restart against
+  the same cache database; a doctored generation is rejected with ESTALE;
+  an inode number recycled behind dcfs's back invalidates the old row so
+  its handle comes back ESTALE; and wiping the cache database -- the one
+  case that does *not* survive -- also yields ESTALE, from a freshly
+  reseeded generation counter. Two consequences of the exclusive-access
+  model (no write-through invalidation until Phase 4) that this test
+  cannot demonstrate are reported as `SKIP`, not a faked pass.
 
 ## Running
 
@@ -71,6 +84,7 @@ bazel test --config=qemu //test/qemu:boot_test
 bazel test --config=qemu //test/qemu:readonly_test
 bazel test --config=qemu //test/qemu:passthrough_test
 bazel test --config=qemu //test/qemu:lifecycle_test
+bazel test --config=qemu //test/qemu:handles_test
 ```
 
 (`--config=qemu` sets `--test_tag_filters=qemu`, overriding the default
