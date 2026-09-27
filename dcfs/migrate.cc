@@ -5,7 +5,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 #include "absl/random/random.h"
 #include "absl/status/status.h"
@@ -13,7 +12,6 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
-#include "absl/strings/strip.h"
 #include "dcfs/device_id.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/schema.h"
@@ -39,50 +37,6 @@ constexpr uint32_t kRootFuseGeneration = 0;
 std::span<const uint8_t> AsBlob(const std::string &s) {
   return std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(s.data()), s.size());
-}
-
-// Splits `script` into individual statements on ';', trimming surrounding
-// whitespace from each. Connection::Exec (like Statement::Prepare) only
-// accepts a single SQL statement at a time and rejects any leftover
-// trailing text, but schema.sql is a script of several -- so Migrate()
-// feeds it to Exec() one statement at a time via this. Trimming ensures
-// each fragment handed to Exec() ends exactly where the statement it
-// contains ends, which is what Statement::Prepare requires.
-//
-// A ';' inside a "-- " line comment (schema.sql's header comments discuss
-// SQLite versions and use semicolon-separated clauses in prose) does not
-// end a statement, so those are skipped over rather than split on. This is
-// still not a general SQL tokenizer -- it doesn't understand string or
-// blob literals -- but that's fine for schema.sql specifically, which is a
-// fixed file this build controls and which contains no ';' inside one.
-std::vector<std::string_view> SplitStatements(std::string_view script) {
-  std::vector<std::string_view> statements;
-  size_t start = 0;
-  while (start <= script.size()) {
-    size_t pos = start;
-    size_t semi = std::string_view::npos;
-    while (pos < script.size()) {
-      if (script[pos] == ';') {
-        semi = pos;
-        break;
-      }
-      if (script.compare(pos, 2, "--") == 0) {
-        size_t newline = script.find('\n', pos);
-        pos = newline == std::string_view::npos ? script.size()
-                                                  : newline + 1;
-        continue;
-      }
-      ++pos;
-    }
-    std::string_view piece = semi == std::string_view::npos
-                                  ? script.substr(start)
-                                  : script.substr(start, semi - start);
-    piece = absl::StripAsciiWhitespace(piece);
-    if (!piece.empty()) statements.push_back(piece);
-    if (semi == std::string_view::npos) break;
-    start = semi + 1;
-  }
-  return statements;
 }
 
 absl::StatusOr<bool> MetaTableExists(sqlite3::Connection &db) {
@@ -114,9 +68,7 @@ absl::StatusOr<uint32_t> ParseU32Meta(std::string_view key,
 }
 
 absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
-  for (std::string_view statement : SplitStatements(kSchemaSql)) {
-    ABSL_RETURN_IF_ERROR(db.Exec(statement));
-  }
+  ABSL_RETURN_IF_ERROR(db.ExecScript(kSchemaSql));
 
   ABSL_RETURN_IF_ERROR(
       SetMeta(db, kKeySchemaVersion, absl::StrCat(kSchemaVersion)));

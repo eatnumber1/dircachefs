@@ -242,6 +242,27 @@ TEST_F(StatementTest, UniqueViolationMapsToAlreadyExists) {
   EXPECT_EQ(code, SQLITE_CONSTRAINT_PRIMARYKEY);
 }
 
+TEST(ExecScriptTest, RunsMultipleStatementsAndSkipsCommentSemicolons) {
+  ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
+
+  ASSERT_THAT(
+      conn.ExecScript(
+        "-- comment; with semicolon\n"
+        "CREATE TABLE a(x); INSERT INTO a VALUES(1);"),
+      IsOk());
+
+  ASSERT_OK_AND_ASSIGN(Statement * select, conn.Prepared("SELECT x FROM a"));
+  ASSERT_THAT(select->Step(), IsOkAndHolds(true));
+  EXPECT_EQ(select->Column<int64_t>(0), 1);
+  ASSERT_THAT(select->Step(), IsOkAndHolds(false));
+}
+
+TEST(ExecScriptTest, SyntaxErrorReturnsNonOk) {
+  ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
+
+  EXPECT_FALSE(conn.ExecScript("CREATE TABLE ;").ok());
+}
+
 class TransactionTest : public ::testing::Test {
  protected:
   void SetUp() override {

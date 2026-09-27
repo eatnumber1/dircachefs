@@ -198,6 +198,13 @@ class Connection {
   // takes parameters or returns rows you care about, use Prepared() instead.
   absl::Status Exec(std::string_view sql);
 
+  // Runs `sql` as a script of any number of `;`-separated statements (via
+  // sqlite3_exec), discarding any rows they produce. Unlike Exec(), none of
+  // the statements can take bound parameters -- this is meant for running
+  // schema DDL (e.g. applying schema.sql) in one call, not for anything
+  // parameterized.
+  absl::Status ExecScript(std::string_view sql);
+
   // Returns a RESET, unbound (all bindings cleared) prepared statement for
   // `sql`, from this connection's statement cache. Preparing the same SQL
   // text twice returns the *same* underlying Statement -- do not hold the

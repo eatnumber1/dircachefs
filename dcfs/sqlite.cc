@@ -285,6 +285,23 @@ absl::Status Connection::Exec(std::string_view sql) {
   return stmt->ForEachRow([](Statement &) { return absl::OkStatus(); });
 }
 
+absl::Status Connection::ExecScript(std::string_view sql) {
+  char *errmsg = nullptr;
+  int rc = sqlite3_exec(
+      db_, std::string(sql).c_str(), /*callback=*/nullptr, /*arg=*/nullptr,
+      &errmsg);
+  absl::Cleanup free_errmsg = [&errmsg] {
+    if (errmsg != nullptr) sqlite3_free(errmsg);
+  };
+  if (rc == SQLITE_OK) return absl::OkStatus();
+  // sqlite3_exec's own errmsg out-param is a separately-allocated copy of
+  // essentially the same text sqlite3_errmsg(db_) would give (used by
+  // LastErrorStatus() below) -- included too since it sometimes has more
+  // context (e.g. which statement in the script failed).
+  return absl::StatusBuilder(LastErrorStatus())
+      << "; sqlite3_exec: " << (errmsg != nullptr ? errmsg : "(no message)");
+}
+
 absl::StatusOr<Statement *> Connection::Prepared(std::string_view sql) {
   if (auto it = statement_cache_.find(sql); it != statement_cache_.end()) {
     Statement &stmt = *it->second;
