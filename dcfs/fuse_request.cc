@@ -151,6 +151,25 @@ absl::Status FuseRequest::ReplyWrite(size_t count) {
   return st;
 }
 
+absl::StatusOr<int> FuseRequest::PassthroughOpen(int fd) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  // fuse_passthrough_open() itself never returns negative -- it clamps any
+  // ioctl failure to 0 (logging the errno itself) -- so 0 vs. positive is
+  // the whole contract; this does not consume req_.
+  return fuse_passthrough_open(*req_, fd);
+}
+
+absl::Status FuseRequest::PassthroughClose(int backing_id) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  // Unlike fuse_passthrough_open(), fuse_passthrough_close() passes the
+  // underlying ioctl()'s return straight through, so a negative result
+  // here means -1 with errno set, not -errno.
+  if (fuse_passthrough_close(*req_, backing_id) < 0) {
+    return absl::ErrnoToStatus(errno, "fuse_passthrough_close");
+  }
+  return absl::OkStatus();
+}
+
 absl::Status FuseRequest::ReplyErrno(int errnum) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st =

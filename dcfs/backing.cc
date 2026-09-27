@@ -385,6 +385,20 @@ absl::Status RefreshAttrs(Context &ctx, InodeId id) {
   return cache::UpdateAttr(ctx, id, stx);
 }
 
+absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
+  std::string buf(size, '\0');
+  size_t total = 0;
+  while (total < size) {
+    ABSL_ASSIGN_OR_RETURN(
+        size_t n,
+        syscalls::pread(fd, buf.data() + total, size - total, offset + total));
+    if (n == 0) break;  // EOF short of `size`.
+    total += n;
+  }
+  buf.resize(total);
+  return buf;
+}
+
 absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));

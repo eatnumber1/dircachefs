@@ -5,6 +5,7 @@
 #include <sys/statvfs.h>
 #include <sys/types.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -67,6 +68,15 @@ absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id);
 // Refreshes `id`'s cached attributes from the backing filesystem (StatNode
 // followed by cache::UpdateAttr). Called when CachedAttr.valid is false.
 absl::Status RefreshAttrs(Context &ctx, InodeId id);
+
+// Reads up to `size` bytes at `offset` from `fd` (a real, non-O_PATH fd
+// already open on the node -- see DirCacheFS::Open's OpenNode call),
+// looping over short reads until `size` bytes have been read or EOF. The
+// fallback DirCacheFS::Read uses when the kernel did not grant
+// FUSE_CAP_PASSTHROUGH for this open, so `fd` is not reopened here: unlike
+// every other backing:: function this one takes an fd instead of an
+// InodeId, because the caller already has one open and identity-verified.
+absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset);
 
 // The target of symlink `id`, read from the backing filesystem.
 absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id);

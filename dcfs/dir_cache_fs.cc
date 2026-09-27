@@ -43,11 +43,27 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   bool attr_generation = fuse_set_feature_flag(&conn, FUSE_CAP_ATTR_GENERATION);
   fuse_set_feature_flag(&conn, FUSE_CAP_READDIRPLUS);
   fuse_set_feature_flag(&conn, FUSE_CAP_CACHE_SYMLINKS);
-  fuse_set_feature_flag(&conn, FUSE_CAP_PASSTHROUGH);
+  // fuse_set_feature_flag() only sets want_ext (and returns true) when the
+  // kernel's capable_ext -- populated from the FUSE_INIT request the
+  // kernel sent before calling us -- already has the flag, so this return
+  // value is the definitive "did the kernel grant passthrough" answer,
+  // known here at startup rather than only per-open.
+  bool passthrough = fuse_set_feature_flag(&conn, FUSE_CAP_PASSTHROUGH);
+  // FUSE_BACKING_STACKED_OVER (1), not the default FUSE_BACKING_STACKED_UNDER
+  // (0): dcfs's source directory is arbitrary and may itself be on a
+  // stacked filesystem (e.g. overlayfs), which the default forbids
+  // passthrough to (see the max_backing_stack_depth comment in
+  // fuse_common.h). Note this is *not* what makes the kernel grant
+  // passthrough at all -- fs/fuse/inode.c only requires the resulting
+  // max_stack_depth (max_backing_stack_depth + 1, sent to the kernel) to
+  // be > 0, which the default 0 already satisfies -- it only widens what
+  // a backing file is allowed to be.
+  conn.max_backing_stack_depth = FUSE_BACKING_STACKED_OVER;
 
   LOG(INFO) << "FUSE kernel protocol " << conn.proto_major << "."
             << conn.proto_minor << "; FUSE_CAP_ATTR_GENERATION "
-            << (attr_generation ? "granted" : "NOT granted");
+            << (attr_generation ? "granted" : "NOT granted")
+            << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted");
   return absl::OkStatus();
 }
 
@@ -200,13 +216,66 @@ absl::Status DirCacheFS::Link(
 
 absl::Status DirCacheFS::Open(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
-  return req.ReplyErrno(ENOSYS);
+  InodeId id = static_cast<InodeId>(ino);
+
+  // Phase 4 owns writes; only a read-only, non-truncating open is served
+  // for now.
+  if ((fi.flags & O_ACCMODE) != O_RDONLY || (fi.flags & O_TRUNC)) {
+    return req.ReplyErrno(EROFS);
+  }
+
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx_, id));
+  if (!attr.valid) {
+    ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
+    ABSL_ASSIGN_OR_RETURN(attr, cache::GetAttr(ctx_, id));
+  }
+  // The kernel calls opendir(), not open(), on a directory, so this would
+  // only trip on a row that changed type out from under a stale nodeid.
+  RET_CHECK(!S_ISDIR(attr.st.st_mode)) << "Open on directory inode " << id;
+
+  // A real read fd, stripped of the create/truncate flags Open() never
+  // needs (this is reopening an existing node, not creating one).
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor fd,
+      backing::OpenNode(
+          ctx_, id,
+          (fi.flags & ~(O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC)) | O_CLOEXEC));
+
+  // Ask the kernel to serve reads directly against `fd`. A 0 backing_id
+  // means either the kernel never granted FUSE_CAP_PASSTHROUGH (logged
+  // once at Init) or this particular open failed for some other reason;
+  // either way it is not a dcfs-level error -- Read() below falls back to
+  // serving the data itself.
+  ABSL_ASSIGN_OR_RETURN(int backing_id, req.PassthroughOpen(*fd));
+  if (backing_id > 0) fi.backing_id = backing_id;
+
+  // A passthrough open must drop any stale page cache for this file
+  // (fi.keep_cache = 0 is also correct, if redundant, on the fallback
+  // path: nothing has cached this file's contents on a fresh open). Leave
+  // fi.direct_io at its default 0 -- passthrough requires the default
+  // cache mode, and the fallback path benefits from the normal page cache
+  // like any other read-only file.
+  fi.keep_cache = 0;
+
+  uint64_t handle = next_handle_++;
+  open_files_.emplace(
+      handle, OpenFile{.ino = id, .fd = std::move(fd), .backing_id = backing_id});
+  fi.fh = handle;
+
+  return req.ReplyOpen(fi);
 }
 
 absl::Status DirCacheFS::Read(
     FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info &fi) {
-  return req.ReplyErrno(ENOSYS);
+  // The fallback path: only reached when Open() did not get passthrough
+  // for this handle (or, per fuse_passthrough_open()'s contract, in the
+  // unlikely case the kernel sends READ anyway despite passthrough).
+  auto it = open_files_.find(fi.fh);
+  RET_CHECK(it != open_files_.end()) << "Read on unknown handle " << fi.fh;
+  ABSL_ASSIGN_OR_RETURN(
+      std::string buf, backing::ReadFile(*it->second.fd, size, off));
+  return req.ReplyBuf(buf);
 }
 
 absl::Status DirCacheFS::Write(
@@ -217,17 +286,29 @@ absl::Status DirCacheFS::Write(
 
 absl::Status DirCacheFS::Flush(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
-  return req.ReplyErrno(ENOSYS);
+  // Nothing is buffered on a read-only open; writes (and so anything a
+  // flush would need to push out) are Phase 4.
+  return req.ReplyErrno(0);
 }
 
 absl::Status DirCacheFS::Release(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
-  return req.ReplyErrno(ENOSYS);
+  auto it = open_files_.find(fi.fh);
+  RET_CHECK(it != open_files_.end()) << "Release on unknown handle " << fi.fh;
+  if (it->second.backing_id > 0) {
+    ABSL_RETURN_IF_ERROR(req.PassthroughClose(it->second.backing_id));
+  }
+  // Erasing drops the OpenFile, whose FileDescriptor closes our own fd
+  // (the kernel took its own reference to the backing file back in
+  // PassthroughOpen, independent of this one).
+  open_files_.erase(it);
+  return req.ReplyErrno(0);
 }
 
 absl::Status DirCacheFS::Fsync(
     FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi) {
-  return req.ReplyErrno(ENOSYS);
+  // Only read-only opens exist until Phase 4; nothing to sync.
+  return req.ReplyErrno(0);
 }
 
 absl::Status DirCacheFS::Opendir(
@@ -458,6 +539,15 @@ absl::Status DirCacheFS::Fallocate(
     FuseRequest &req, fuse_ino_t ino, int mode, off_t offset, off_t length,
     fuse_file_info &fi) {
   return req.ReplyErrno(ENOSYS);
+}
+
+bool DirCacheFS::HasOpenFiles(InodeId id) const {
+  // A linear scan is fine while nothing calls this; 4.3 should index
+  // open_files_ by inode if it becomes a hot path.
+  for (const auto &[handle, file] : open_files_) {
+    if (file.ino == id) return true;
+  }
+  return false;
 }
 
 }  // namespace dcfs

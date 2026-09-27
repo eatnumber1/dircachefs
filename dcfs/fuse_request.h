@@ -100,6 +100,21 @@ class FuseRequest {
       const fuse_entry_param &entry, const fuse_file_info &fi);
   absl::Status ReplyWrite(size_t count);
 
+  // Wraps fuse_passthrough_open(): tells the kernel to serve reads (and,
+  // once Phase 4 lands, writes) on this open directly against `fd`
+  // instead of routing them through us. The returned int is the backing
+  // id to report in fi.backing_id when positive; 0 means the kernel did
+  // not grant FUSE_CAP_PASSTHROUGH or this open otherwise failed to set
+  // it up -- that is a normal outcome for the caller to fall back on, not
+  // a C++-level error (only a dead request, a bug, produces a non-ok
+  // status). Unlike the Reply* methods this does not consume the
+  // request -- a Reply* call must still follow.
+  absl::StatusOr<int> PassthroughOpen(int fd);
+
+  // Wraps fuse_passthrough_close(), undoing a PassthroughOpen() that
+  // returned a positive backing id. Also does not consume the request.
+  absl::Status PassthroughClose(int backing_id);
+
   absl::Status ReplyBuf(std::string_view buf);
   // Used when the caller (getxattr/listxattr) passed size 0: replies with
   // just the size the value/list would need.

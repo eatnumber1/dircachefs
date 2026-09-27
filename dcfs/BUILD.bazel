@@ -297,6 +297,8 @@ cc_library(
       ":metadata_cache",
       ":ret_check",
       ":status",
+      ":syscalls",
+      "@absl//absl/container:flat_hash_map",
       "@absl//absl/log",
       "@absl//absl/log:check",
       "@absl//absl/status",

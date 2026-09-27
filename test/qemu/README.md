@@ -49,12 +49,21 @@ If you rebuild the kernel into a different directory, export
   warm cache causes *zero* reads from either backing block device,
   including after killing and restarting the daemon against the same
   cache database.
+- `passthrough_test` (`guest/passthrough.sh`): step 3.3's file contents via
+  FUSE passthrough -- a small file and a 64 MiB file read through dcfs
+  match the backing files, a content read (unlike metadata) does move the
+  backing device's block-read counter, dcfs's own CPU time during a 64 MiB
+  read stays low enough that the kernel must be reading the backing file
+  directly, any non-read-only open is refused with EROFS, 200 open/release
+  cycles leak no fds, and all of this still works after killing and
+  restarting the daemon against the same cache database.
 
 ## Running
 
 ```
 bazel test --config=qemu //test/qemu:boot_test
 bazel test --config=qemu //test/qemu:readonly_test
+bazel test --config=qemu //test/qemu:passthrough_test
 ```
 
 (`--config=qemu` sets `--test_tag_filters=qemu`, overriding the default

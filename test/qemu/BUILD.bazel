@@ -36,3 +36,9 @@ qemu_test(
     ],
     guest_script = "guest/readonly.sh",
 )
+
+qemu_test(
+    name = "passthrough_test",
+    disks = [("vdb", "ext4", "256M")],
+    guest_script = "guest/passthrough.sh",
+)

@@ -6,10 +6,12 @@
 #include <string_view>
 #include <sys/types.h>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
 #include "dcfs/context.h"
+#include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/metadata_cache.h"
 #include "fuse_lowlevel.h"
@@ -124,6 +126,13 @@ class DirCacheFS {
       FuseRequest &req, fuse_ino_t ino, int mode, off_t offset, off_t length,
       fuse_file_info &fi);
 
+  // Whether any Open() handle for `id` is still outstanding (has not gone
+  // through Release()). Nothing calls this yet -- it exists for
+  // TODO(4.3): row deletion needs to know an inode has no open handles
+  // before it can safely drop the row (and, for the last link, the
+  // backing file).
+  bool HasOpenFiles(InodeId id) const;
+
  private:
   // The fuse_entry_param for `id`: current cached attributes (refreshed
   // first if not valid), nodeid = id, generation = the row's fuse_gen, and
@@ -133,8 +142,24 @@ class DirCacheFS {
   // not NotFound, since that is what the kernel does with a stale nodeid.
   absl::StatusOr<fuse_entry_param> EntryFor(InodeId id);
 
+  // An open file handle: the fd Open() reopened `ino` with, and the
+  // passthrough backing id the kernel assigned it (0 if the kernel did
+  // not grant FUSE_CAP_PASSTHROUGH, or fuse_passthrough_open() otherwise
+  // failed for this open -- Read() then serves the fallback path itself).
+  struct OpenFile {
+    InodeId ino;
+    FileDescriptor fd;
+    int backing_id = 0;
+  };
+
   Context &ctx_;
   Options opts_;
+
+  // fi.fh handles: never a raw pointer (fi.fh crosses the kernel boundary
+  // and outlives nothing we control), just a small monotonically
+  // increasing counter indexing open_files_.
+  uint64_t next_handle_ = 1;
+  absl::flat_hash_map<uint64_t, OpenFile> open_files_;
 };
 
 }  // namespace dcfs
