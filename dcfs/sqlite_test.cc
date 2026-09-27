@@ -326,6 +326,53 @@ TEST_F(TransactionTest, NestedInnerSucceedsOuterFails) {
   EXPECT_THAT(RowCount(), IsOkAndHolds(0));
 }
 
+// Regression test for a failing COMMIT (as opposed to a failing body())
+// leaving the transaction open. Two connections to the same file: B holds a
+// read cursor open (a SHARED lock, in rollback-journal mode) while A runs a
+// Transaction() that writes a row; A's BEGIN IMMEDIATE succeeds (RESERVED is
+// compatible with B's SHARED), but its COMMIT needs an EXCLUSIVE lock, which
+// B's SHARED lock blocks -- with busy_timeout=0 on A, that COMMIT fails with
+// SQLITE_BUSY immediately. WAL mode's readers don't block a writer's commit,
+// so this needs the older rollback-journal mode instead.
+TEST(TransactionUnwindTest, FailedCommitUnwindsAndConnectionStaysUsable) {
+  std::string path = TestTmpFile("commit_busy.sqlite");
+
+  ASSERT_OK_AND_ASSIGN(Connection a, ConnectionFactory{.path = path}.Open());
+  ASSERT_THAT(a.Exec("PRAGMA journal_mode=DELETE"), IsOk());
+  ASSERT_THAT(a.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
+  ASSERT_THAT(a.Exec("INSERT INTO t (id) VALUES (1)"), IsOk());
+  // Fail fast instead of waiting out the (5s default) busy timeout.
+  ASSERT_THAT(a.Exec("PRAGMA busy_timeout=0"), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(Connection b, ConnectionFactory{.path = path}.Open());
+  ASSERT_THAT(b.Exec("PRAGMA journal_mode=DELETE"), IsOk());
+
+  // Leave a read cursor open on B, holding a SHARED lock on the file.
+  ASSERT_OK_AND_ASSIGN(Statement * b_select, b.Prepared("SELECT id FROM t"));
+  ASSERT_THAT(b_select->Step(), IsOkAndHolds(true));
+
+  absl::Status txn_status = a.Transaction([&]() -> absl::Status {
+    return a.Exec("INSERT INTO t (id) VALUES (2)");
+  });
+  EXPECT_THAT(txn_status, StatusIs(absl::StatusCode::kUnavailable));
+  EXPECT_FALSE(a.InTransaction());
+
+  // The failed COMMIT must have rolled back id=2 along with everything else.
+  ASSERT_OK_AND_ASSIGN(
+      Statement * count_stmt, a.Prepared("SELECT COUNT(*) FROM t"));
+  ASSERT_THAT(count_stmt->Step(), IsOkAndHolds(true));
+  EXPECT_EQ(count_stmt->Column<int64_t>(0), 1);
+  ASSERT_THAT(count_stmt->Reset(), IsOk());
+
+  // Once B releases its lock, A must be fully usable again.
+  ASSERT_THAT(b_select->Reset(), IsOk());
+  absl::Status second_txn = a.Transaction([&]() -> absl::Status {
+    return a.Exec("INSERT INTO t (id) VALUES (3)");
+  });
+  EXPECT_THAT(second_txn, IsOk());
+  EXPECT_FALSE(a.InTransaction());
+}
+
 }  // namespace
 }  // namespace sqlite3
 }  // namespace dcfs

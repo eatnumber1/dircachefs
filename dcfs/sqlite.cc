@@ -313,17 +313,38 @@ absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body) {
 
   absl::Status body_status = body();
 
-  RET_CHECK_EQ(savepoint_depth_, depth + 1)
-      << "Connection::Transaction: savepoint depth changed unexpectedly "
-         "while running body";
+  if (savepoint_depth_ != depth + 1) {
+    // Invariant violation: body() should only ever change savepoint_depth_
+    // via its own correctly-nested Transaction() calls, which always
+    // restore it themselves before returning. Restore our own bookkeeping
+    // to a known state and unwind rather than risk leaking an open
+    // transaction/savepoint because of it.
+    absl::Status invariant_status =
+        absl::StatusBuilder(absl::StatusCode::kInternal)
+        << "Connection::Transaction: savepoint depth changed unexpectedly "
+           "while running body (expected "
+        << (depth + 1) << ", got " << savepoint_depth_ << ")";
+    savepoint_depth_ = depth;
+    return UnwindFailedTransaction(depth, std::move(invariant_status));
+  }
   --savepoint_depth_;
 
   if (body_status.ok()) {
-    return Exec(
+    absl::Status commit_status = Exec(
         depth == 0 ? std::string("COMMIT")
                    : absl::StrCat("RELEASE SAVEPOINT sp_", depth));
+    if (commit_status.ok()) return absl::OkStatus();
+    // A failing COMMIT/RELEASE (e.g. SQLITE_BUSY racing a reader) leaves the
+    // transaction/savepoint open; unwind it so this connection doesn't stay
+    // stuck "in a transaction" for every later Transaction() call.
+    return UnwindFailedTransaction(depth, std::move(commit_status));
   }
 
+  return UnwindFailedTransaction(depth, std::move(body_status));
+}
+
+absl::Status Connection::UnwindFailedTransaction(
+    int depth, absl::Status status) {
   absl::Status rollback_status = Exec(
       depth == 0 ? std::string("ROLLBACK")
                  : absl::StrCat("ROLLBACK TO SAVEPOINT sp_", depth));
@@ -334,11 +355,11 @@ absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body) {
     rollback_status = Exec(absl::StrCat("RELEASE SAVEPOINT sp_", depth));
   }
   if (!rollback_status.ok()) {
-    return absl::StatusBuilder(body_status)
+    return absl::StatusBuilder(status)
         << "; additionally, rolling back the transaction failed: "
         << rollback_status;
   }
-  return body_status;
+  return status;
 }
 
 int64_t Connection::LastInsertRowId() const {

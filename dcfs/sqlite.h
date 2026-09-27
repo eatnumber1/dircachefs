@@ -242,6 +242,13 @@ class Connection {
   // connection's handle (sqlite3_extended_errcode + sqlite3_errmsg).
   absl::Status LastErrorStatus() const;
 
+  // Rolls back the transaction/savepoint at nesting level `depth` (see
+  // Transaction()) and returns `status`, annotated with the rollback's own
+  // error too if that also fails. Used by Transaction() both when body()
+  // fails and when a successful body()'s COMMIT/RELEASE itself fails --
+  // either way, the transaction/savepoint must not be left open.
+  absl::Status UnwindFailedTransaction(int depth, absl::Status status);
+
   ::sqlite3 *db_ = nullptr;
   // Owns every Statement handed out by Prepared(). unique_ptr so that
   // pointers returned by Prepared() stay valid across map rehashes.
