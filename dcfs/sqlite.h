@@ -1,24 +1,24 @@
 #ifndef DCFS_SQLITE_H_
 #define DCFS_SQLITE_H_
 
-#include <functional>
-#include <string>
+#include <bit>
 #include <concepts>
-#include <string_view>
+#include <cstdint>
+#include <memory>
 #include <optional>
-#include <ostream>
-#include <source_location>
+#include <span>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
-#include "absl/base/nullability.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
-#include "absl/strings/str_format.h"
 #include "sqlite3.h"
-#include "dcfs/status.h"
 
 // The C sqlite3 API declares a type named `sqlite3` (see <sqlite3.h>) at
 // global scope, so this namespace cannot also be named `sqlite3` at global
@@ -27,13 +27,41 @@ namespace dcfs {
 namespace sqlite3 {
 
 class Connection;
+class Statement;
+struct ConnectionFactory;
 
+namespace internal {
+
+// Trait used to give Bind()/Column() a single overload that handles
+// std::optional<T> generically (bind NULL / report nullopt for an empty
+// optional, delegate to the T overload otherwise), instead of writing out
+// every T x optional<T> combination by hand.
+template <typename T>
+struct IsOptional : std::false_type {};
+template <typename T>
+struct IsOptional<std::optional<T>> : std::true_type {
+  using value_type = T;
+};
+
+}  // namespace internal
+
+// A single prepared SQL statement. Owns a `sqlite3_stmt*`.
+//
+// Statements are move-only and are meant to live exactly one place: inside
+// the StatementCache owned by a Connection (see Connection::Prepared()). No
+// other class should hold a Statement member -- ask the owning Connection
+// for one instead.
+//
 // See https://www.sqlite.org/c3ref/stmt.html
 class Statement {
  public:
   Statement() = default;
   ~Statement();
 
+  // Prepares `sql` against `db`. Only a single SQL statement may appear in
+  // `sql`; trailing text after it is an error. Most callers should go
+  // through Connection::Prepared() instead, which caches and resets
+  // statements for reuse rather than preparing a fresh one every time.
   static absl::StatusOr<Statement> Prepare(
       Connection &db, std::string_view sql, unsigned int flags = 0);
 
@@ -41,150 +69,102 @@ class Statement {
   // evaluation of this prepared statement completed successfully.
   //
   // Any SQL statement variables that had values bound to them retain their
-  // values.
+  // values -- see ClearBindings to also remove those.
   absl::Status Reset();
 
-  // Use this routine to reset all host parameters to NULL.
+  // Resets all host parameters to NULL. Does not affect Step()'s position;
+  // call Reset() (or Step() to completion) for that.
   absl::Status ClearBindings();
 
-  // Name of a host parameter
-  //
-  // https://www.sqlite.org/c3ref/bind_parameter_name.html
-  //
-  // The first host parameter has an index of 1, not 0.
-  // Returns nullopt of no parameter with the given index is found, or is
-  // nameless.
-  absl::StatusOr<std::string_view> GetParameterName(int index) const;
-
-  // Index of a parameter with a given name
-  //
-  // https://www.sqlite.org/c3ref/bind_parameter_index.html
-  //
-  // The first host parameter has an index of 1, not 0.
-  // Returns nullopt if no parameter with the given name is found.
-  absl::StatusOr<int> GetParameterIndex(std::string_view name) const;
-
-  // Number of SQL parameters
-  //
-  // https://www.sqlite.org/c3ref/bind_parameter_count.html
-  //
-  // This routine actually returns the index of the largest (rightmost)
-  // parameter. For all forms except ?NNN, this will correspond to the number of
-  // unique parameters. If parameters of the ?NNN form are used, there may be
-  // gaps in the list.
-  int GetParameterCount() const;
-
+  // Bind() overloads. The leftmost SQL parameter has an index of 1, not 0.
   absl::Status Bind(int index, int64_t value);
-  absl::Status Bind(int index, std::floating_point auto value);
-  absl::Status Bind(int index, nullptr_t);
-
-  // Text must be a UTF-8 encoded string.
-  //
-  // The data argument must remain valid until either the prepared statement is
-  // finalized or the same SQL parameter is bound to something else, whichever
-  // occurs sooner
-  absl::Status BindTextUnowned(int index, std::string_view data);
-
-  // The data argument must remain valid until either the prepared statement is
-  // finalized or the same SQL parameter is bound to something else, whichever
-  // occurs sooner
-  absl::Status BindBlobUnowned(int index, std::string_view data);
-
-  // Text must be a UTF-8 encoded string.
-  absl::Status BindText(int index, std::string_view data);
-
-  absl::Status BindBlob(int index, std::string_view data);
-
-  // Same as the index-based Bind calls above, but they take the name of a
-  // parameter instead of its index.
-  absl::Status Bind(std::string_view name, int64_t value);
-  absl::Status Bind(std::string_view name, std::floating_point auto value);
-  absl::Status Bind(std::string_view name, nullptr_t);
-  absl::Status BindTextUnowned(std::string_view name, std::string_view data);
-  absl::Status BindBlobUnowned(std::string_view name, std::string_view data);
-  absl::Status BindText(std::string_view name, std::string_view data);
-  absl::Status BindBlob(std::string_view name, std::string_view data);
-
-  // Number of columns in a result set
-  //
-  // https://www.sqlite.org/c3ref/column_count.html
-  //
-  // A SELECT statement will always have a positive column count but depending
-  // on the WHERE clause constraints and the table content, it might return no
-  // rows.
-  int GetColumnCount() const;
-
-  // Number of columns in a result set
-  //
-  // Returns the number of columns in the current row of the result set.
-  int GetDataCount() const;
-
-  // Name of the column in the result of a SELECT statement at a given index.
-  //
-  // https://sqlite.org/c3ref/column_name.html
-  //
-  // The returned string_view is valid until either the prepared statement is
-  // destroyed by Finalize or until the statement is automatically re-prepared
-  // by the first call to Step for a particular run or until the next call to
-  // GetColumnName on the same column.
-  absl::StatusOr<std::string_view> GetColumnName(int index) const;
-
-  // Index of the column in the result of a SELECT statement with a given name.
-  absl::StatusOr<int> GetColumnIndex(std::string_view name) const;
-
-  // If the SQL statement does not currently point to a valid row, or if the
-  // column index is out of range, the result is undefined.
-  //
-  // The leftmost column of the result set has the index 0.
-  template <std::same_as<double> T>
-  constexpr inline T Column(int index);
-  template <std::same_as<int> T>
-  constexpr inline T Column(int index);
-  template <std::same_as<int64_t> T>
-  constexpr inline T Column(int index);
-  // No support for text, only blob right now.
-  //
-  // The returned string_view is valid until a type conversion, or until Step,
-  // Reset, or Finalize is called.
-  template <std::same_as<std::string_view> T>
-  constexpr inline absl::StatusOr<T> Column(int index);
-
-  // The leftmost column of the result set has the index 0.
-  template <std::same_as<double> T>
-  constexpr inline absl::StatusOr<T> Column(std::string_view name);
-  template <std::same_as<int> T>
-  constexpr inline absl::StatusOr<T> Column(std::string_view name);
-  template <std::same_as<int64_t> T>
-  constexpr inline absl::StatusOr<T> Column(std::string_view name);
-  // No support for text, only blob right now.
-  //
-  // The returned string_view is valid until a type conversion, or unti Step,
-  // Reset, or Finalize is called.
-  template <std::same_as<std::string_view> T>
-  constexpr inline absl::StatusOr<T> Column(std::string_view name);
-
-  absl::Status Finalize() &&;
-
-  enum class StepResult {
-    kDone, // SQLITE_DONE
-    kRow,  // SQLITE_ROW
-  };
-  absl::StatusOr<StepResult> Step();
-  absl::Status StepThenDone();
-
+  absl::Status Bind(int index, int value);
+  // Stored as the int64 bit pattern of `value` (i.e. via std::bit_cast);
+  // SQLite has no native unsigned integer type. Column<uint64_t> reverses
+  // this, so values round-trip exactly, but the value stored in the
+  // database is a signed 64-bit integer whose bit pattern happens to equal
+  // `value` -- other tools reading the column directly will see it as
+  // (possibly negative) int64.
+  absl::Status Bind(int index, uint64_t value);
+  absl::Status Bind(int index, double value);
+  // Bound as the integer 0 or 1.
+  absl::Status Bind(int index, bool value);
+  // Text must be UTF-8. The bytes are copied (SQLITE_TRANSIENT), so `value`
+  // need not outlive this call.
+  absl::Status Bind(int index, std::string_view value);
+  // Binds a BLOB. The bytes are copied (SQLITE_TRANSIENT). An empty span
+  // binds a zero-length BLOB, not SQL NULL -- use Null()/nullopt for NULL.
+  absl::Status Bind(int index, std::span<const uint8_t> value);
+  // Binds SQL NULL. Same effect as Null(index).
+  absl::Status Bind(int index, std::nullopt_t);
+  absl::Status Null(int index);
+  // Binds NULL for an empty optional, or delegates to the Bind() overload
+  // for T otherwise.
   template <typename T>
-  absl::StatusOr<T> StepOneCellThenDone(std::string_view column_name);
+    requires internal::IsOptional<T>::value
+  absl::Status Bind(int index, const T &value);
+
+  // Binds args... to parameters 1..sizeof...(args), in order. Stops (without
+  // binding the rest) at the first failing Bind() and returns its status.
+  template <typename... Args>
+  absl::Status BindAll(Args &&...args);
+
+  // Column() overloads for reading the current row. The leftmost column of
+  // the result set has index 0. Undefined if there is no current row (i.e.
+  // Step() has not been called, or last returned false) or if `index` is out
+  // of range.
+  template <std::same_as<int64_t> T>
+  T Column(int index);
+  template <std::same_as<int> T>
+  T Column(int index);
+  // Reverses Bind(index, uint64_t) -- see its comment.
+  template <std::same_as<uint64_t> T>
+  T Column(int index);
+  template <std::same_as<double> T>
+  T Column(int index);
+  // True iff the column's integer value is nonzero.
+  template <std::same_as<bool> T>
+  T Column(int index);
+  template <std::same_as<std::string> T>
+  T Column(int index);
+  // Valid until the next call to Step(), Reset(), or a type conversion of
+  // this same column (e.g. calling Column<std::string>() on it).
+  template <std::same_as<std::string_view> T>
+  T Column(int index);
+  template <std::same_as<std::vector<uint8_t>> T>
+  T Column(int index);
+  // nullopt iff the column is SQL NULL (checked via ColumnIsNull(), not by
+  // inferring NULL from an empty/zero value -- this is what correctly tells
+  // apart NULL from e.g. a zero-length blob). Otherwise delegates to
+  // Column<T>().
   template <typename T>
-  absl::StatusOr<T> StepOneCellThenDone(int column_index);
+    requires internal::IsOptional<T>::value
+  T Column(int index);
 
-  std::string GetExpandedSql() const;
-  std::string_view GetSql() const;
+  bool ColumnIsNull(int index);
 
-  template <typename Sink>
-  friend void AbslStringify(Sink &sink, const Statement &stmt);
+  // Advances to the next row. Returns true if a row is now available (and
+  // its columns may be read via Column()), false if the statement has
+  // finished (SQLITE_DONE).
+  absl::StatusOr<bool> Step();
 
-  sqlite3_stmt &operator*();
-  sqlite3_stmt *Get();
+  // Steps until done, calling fn(*this) once per row in order. Stops and
+  // returns the first error encountered, from either Step() or fn(). Resets
+  // the statement (but does not clear bindings) before returning, whether or
+  // not that happened successfully.
+  absl::Status ForEachRow(absl::FunctionRef<absl::Status(Statement &)> fn);
+
+  // For statements that produce no rows (e.g. INSERT/UPDATE/DELETE without a
+  // RETURNING clause): steps once, expecting SQLITE_DONE, then resets.
+  absl::Status ExecuteOnce();
+
+  // https://www.sqlite.org/c3ref/expanded_sql.html
+  std::string_view Sql() const;
+  // For logging only (VLOG(2)) -- expands bound parameter values into the
+  // SQL text, which is not cheap.
+  std::string ExpandedSql() const;
+
+  sqlite3_stmt *Get() const;
 
   Statement(Statement &&);
   Statement(const Statement &) = delete;
@@ -192,106 +172,60 @@ class Statement {
   Statement &operator=(const Statement &) = delete;
 
  private:
-  Statement(sqlite3_stmt &stmt);
+  explicit Statement(sqlite3_stmt &stmt);
 
-  absl::Status BindDouble(int index, double value);
-  absl::Status BindDouble(std::string_view name, double value);
+  // Builds the absl::Status for a failing sqlite3_* return code `rc`
+  // produced against this statement, pulling the detailed message from the
+  // owning connection (via sqlite3_db_handle). Returns OkStatus() for
+  // SQLITE_OK.
+  absl::Status StatusFromRc(int rc) const;
 
-  double ColumnDouble(int index);
-  absl::StatusOr<double> ColumnDouble(std::string_view name);
-  int64_t ColumnInt64(int index);
-  absl::StatusOr<int64_t> ColumnInt64(std::string_view name);
-  int ColumnInt(int index);
-  absl::StatusOr<int> ColumnInt(std::string_view name);
-  absl::StatusOr<std::string_view> ColumnBlob(int index);
-  absl::StatusOr<std::string_view> ColumnBlob(std::string_view name);
-
-  absl::StatusOr<std::reference_wrapper<absl::flat_hash_map<std::string, int>>>
-    GetColumnIndices();
-  absl::StatusOr<
-    std::reference_wrapper<const absl::flat_hash_map<std::string, int>>>
-    GetColumnIndices() const;
-
-  int step_count_ = 0;
   sqlite3_stmt *stmt_ = nullptr;
-  mutable std::optional<absl::flat_hash_map<std::string, int>> column_indices_;
 };
 
-class WithSavepoint {
- public:
-  static absl::StatusOr<WithSavepoint> Create(
-      Connection *absl_nonnull db,
-      std::source_location loc = std::source_location::current());
-
-  static absl::StatusOr<WithSavepoint> Create(
-      Connection *absl_nonnull db, std::string name);
-
-  WithSavepoint() = default;
-
-  // Runs RELEASE on the savepoint, saving the results to the database (unless
-  // this is a nested savepoint, then it's deferred until the final RELEASE is
-  // run).
-  absl::Status Commit() &&;
-
-  // Runs ROLLBACK TO SAVEPOINT @name on the savepoint, bringing the transaction
-  // back to the state when the savepoint was created.
-  absl::Status Rollback();
-
-  // Runs ROLLBACK TO SAVEPOINT @name on the savepoint, followed by RELEASE,
-  // effectively cancelling the savepoint.
-  absl::Status Revert() &&;
-
-  // If the Commit method has not been called, the savepoint will be rolled
-  // back.
-  ~WithSavepoint();
-
-  WithSavepoint(WithSavepoint &&);
-  WithSavepoint(const WithSavepoint &) = delete;
-  WithSavepoint &operator=(WithSavepoint &&);
-  WithSavepoint &operator=(const WithSavepoint &) = delete;
-
- private:
-  explicit WithSavepoint(std::string name);
-
-  absl::Status Savepoint();
-  absl::Status Release() &&;
-
-  struct {
-    Statement savepoint;
-    Statement release;
-    Statement rollback;
-  } statements_;
-
-  // Active means that SAVEPOINT has been run without a corresponding RELEASE.
-  bool active_ = false;
-  std::string name_;
-};
-
+// A single SQLite connection. Move-only: exactly one Connection should own a
+// given `sqlite3*` handle at a time. Not thread-safe -- today dcfs is
+// single-threaded, and later each thread/coroutine-runner is expected to
+// have its own Connection (hence SQLITE_OPEN_NOMUTEX and no assumption
+// anywhere in this file about the default VFS).
 class Connection {
  public:
   Connection() = default;
   ~Connection();
 
-  static absl::StatusOr<Connection> Open(
-      std::string_view filename, int flags = 0,
-      std::optional<std::string_view> vfs = std::nullopt);
+  // Runs `sql` (which must be a single statement) to completion, discarding
+  // any rows it produces. For statement-less DDL/pragmas; for anything that
+  // takes parameters or returns rows you care about, use Prepared() instead.
+  absl::Status Exec(std::string_view sql);
 
-  ::sqlite3 &operator*();
-  ::sqlite3 *Get();
+  // Returns a RESET, unbound (all bindings cleared) prepared statement for
+  // `sql`, from this connection's statement cache. Preparing the same SQL
+  // text twice returns the *same* underlying Statement -- do not hold the
+  // returned pointer across another Prepared() call for the same SQL, since
+  // that call will reset and clear the bindings out from under you.
+  absl::StatusOr<Statement *> Prepared(std::string_view sql);
 
-  absl::Status LastError();
+  // Runs `body` inside a transaction: BEGIN IMMEDIATE, then COMMIT if body()
+  // returns OK, else ROLLBACK and return body's status (annotated with the
+  // ROLLBACK's own error too, if that also fails). A Transaction() called
+  // from within another Transaction()'s body nests via SAVEPOINT/RELEASE/
+  // ROLLBACK TO instead of BEGIN/COMMIT/ROLLBACK. `body` must not itself
+  // suspend (e.g. no coroutine suspension points inside it).
+  absl::Status Transaction(absl::FunctionRef<absl::Status()> body);
 
-  absl::Status Exec(
-      std::string_view sql,
-      std::optional<
-        absl::FunctionRef<
-          absl::Status(
-            const std::vector<std::string_view> &colnames,
-            std::vector<std::string_view> colvals)>>
-        callback = std::nullopt,
-      unsigned int flags = 0);
+  int64_t LastInsertRowId() const;
+  int64_t Changes() const;
+  // True iff a transaction (started by us, or otherwise) is active.
+  bool InTransaction() const;
 
-  int64_t LastInsertRowID();
+  ::sqlite3 *Get() const;
+
+  // Finalizes cached statements and closes the underlying database. Safe to
+  // call more than once. The destructor calls this and discards any error,
+  // since there is nowhere useful to report it -- call Close() explicitly if
+  // you need to observe failures (e.g. SQLITE_BUSY from a statement this
+  // connection didn't itself cache).
+  absl::Status Close();
 
   Connection(Connection &&);
   Connection(const Connection &) = delete;
@@ -299,122 +233,137 @@ class Connection {
   Connection &operator=(const Connection &) = delete;
 
  private:
-  Connection(::sqlite3 &db);
+  friend class Statement;
+  friend struct ConnectionFactory;
+
+  explicit Connection(::sqlite3 &db);
+
+  // Builds the absl::Status for the most recent failing call on this
+  // connection's handle (sqlite3_extended_errcode + sqlite3_errmsg).
+  absl::Status LastErrorStatus() const;
 
   ::sqlite3 *db_ = nullptr;
+  // Owns every Statement handed out by Prepared(). unique_ptr so that
+  // pointers returned by Prepared() stay valid across map rehashes.
+  absl::flat_hash_map<std::string, std::unique_ptr<Statement>>
+      statement_cache_;
+  // Number of Transaction() calls currently nested (0 = no transaction
+  // open). Only Transaction() touches this.
+  int savepoint_depth_ = 0;
 };
 
-absl::Status Sqlite3ErrorCodeToStatus(int err);
+// Opens a Connection. Nothing in Connection may assume the default VFS, so
+// this is the only way to create one -- construct a ConnectionFactory naming
+// the VFS (or leave vfs_name empty for the default) and call Open().
+struct ConnectionFactory {
+  std::string path;
+  int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+  // Empty means the default VFS.
+  std::string vfs_name;
+
+  // Opens `path` via sqlite3_open_v2 (always OR'd with SQLITE_OPEN_NOMUTEX
+  // and SQLITE_OPEN_EXRESCODE) and applies dcfs's standard pragmas:
+  // journal_mode=WAL (best-effort; not applicable to e.g. ":memory:",
+  // where it's skipped by simply ignoring its result), synchronous=NORMAL,
+  // foreign_keys=ON, busy_timeout=5000, temp_store=MEMORY.
+  absl::StatusOr<Connection> Open() const;
+};
+
+inline constexpr std::string_view kSqliteTypeUrl =
+    "rus.har.mn/dcfs/status/sqlite";
+
+// Maps a raw sqlite3 (extended) result code to the absl::StatusCode dcfs
+// uses to represent it.
 absl::StatusCode Sqlite3ErrorCodeToCanonical(int err);
-std::string Sqlite3ErrorCodeToString(int err);
 
-std::ostream &operator<<(std::ostream &os, Statement::StepResult res);
-std::ostream &operator<<(std::ostream &os, Statement stmt);
+// Builds a Status from a raw sqlite3 (extended) result code alone (i.e. with
+// no live connection/statement to pull sqlite3_errmsg's more detailed text
+// from -- callers with one should prefer building the Status from
+// sqlite3_errmsg instead). The extended code is attached as a payload under
+// kSqliteTypeUrl; see GetSqliteCodeFromStatus.
+absl::Status Sqlite3ErrorCodeToStatus(int err);
 
-class WithStatementReset {
- public:
-  WithStatementReset() = default;
-  WithStatementReset(Statement *absl_nullable stmt);
+// Recovers the sqlite3 extended result code from a Status produced by this
+// file (i.e. one with a kSqliteTypeUrl payload).
+absl::StatusOr<int> GetSqliteCodeFromStatus(const absl::Status &status);
 
-  ~WithStatementReset();
+// Implementation details below.
 
-  absl::Status Reset() &&;
-
- private:
-  Statement *stmt_ = nullptr;
-};
-
-// Implementation details below
-
-absl::Status Statement::Bind(int index, std::floating_point auto value) {
-  return BindDouble(index, value);
+template <typename T>
+  requires internal::IsOptional<T>::value
+absl::Status Statement::Bind(int index, const T &value) {
+  if (!value.has_value()) return Null(index);
+  return Bind(index, *value);
 }
 
-absl::Status Statement::Bind(
-    std::string_view name, std::floating_point auto value) {
-  return BindDouble(name, value);
-}
-
-template <std::same_as<std::string_view> T>
-constexpr inline absl::StatusOr<T> Statement::Column(int index) {
-  return ColumnBlob(index);
-}
-
-template <std::same_as<std::string_view> T>
-constexpr inline absl::StatusOr<T> Statement::Column(std::string_view name) {
-  return ColumnBlob(name);
-}
-
-template <std::same_as<double> T>
-constexpr inline T Statement::Column(int index) {
-  return ColumnDouble(index);
-}
-
-template <std::same_as<double> T>
-constexpr inline absl::StatusOr<T> Statement::Column(std::string_view name) {
-  return ColumnDouble(name);
-}
-
-template <std::same_as<int> T>
-constexpr inline T Statement::Column(int index) {
-  return ColumnInt(index);
-}
-
-template <std::same_as<int> T>
-constexpr inline absl::StatusOr<T> Statement::Column(std::string_view name) {
-  return ColumnInt(name);
+template <typename... Args>
+absl::Status Statement::BindAll(Args &&...args) {
+  absl::Status status;
+  int index = 0;
+  auto bind_one = [&](auto &&value) {
+    if (!status.ok()) return;
+    ++index;
+    status = Bind(index, std::forward<decltype(value)>(value));
+  };
+  (bind_one(std::forward<Args>(args)), ...);
+  return status;
 }
 
 template <std::same_as<int64_t> T>
-constexpr inline T Statement::Column(int index) {
-  return ColumnInt64(index);
+T Statement::Column(int index) {
+  return sqlite3_column_int64(stmt_, index);
 }
 
-template <std::same_as<int64_t> T>
-constexpr inline absl::StatusOr<T> Statement::Column(std::string_view name) {
-  return ColumnInt64(name);
+template <std::same_as<int> T>
+T Statement::Column(int index) {
+  return sqlite3_column_int(stmt_, index);
+}
+
+template <std::same_as<uint64_t> T>
+T Statement::Column(int index) {
+  return std::bit_cast<uint64_t>(sqlite3_column_int64(stmt_, index));
+}
+
+template <std::same_as<double> T>
+T Statement::Column(int index) {
+  return sqlite3_column_double(stmt_, index);
+}
+
+template <std::same_as<bool> T>
+T Statement::Column(int index) {
+  return sqlite3_column_int(stmt_, index) != 0;
+}
+
+template <std::same_as<std::string> T>
+T Statement::Column(int index) {
+  const unsigned char *text = sqlite3_column_text(stmt_, index);
+  int len = sqlite3_column_bytes(stmt_, index);
+  if (text == nullptr) return std::string();
+  return std::string(reinterpret_cast<const char *>(text), len);
+}
+
+template <std::same_as<std::string_view> T>
+T Statement::Column(int index) {
+  const unsigned char *text = sqlite3_column_text(stmt_, index);
+  int len = sqlite3_column_bytes(stmt_, index);
+  if (text == nullptr) return std::string_view();
+  return std::string_view(reinterpret_cast<const char *>(text), len);
+}
+
+template <std::same_as<std::vector<uint8_t>> T>
+T Statement::Column(int index) {
+  const void *blob = sqlite3_column_blob(stmt_, index);
+  int len = sqlite3_column_bytes(stmt_, index);
+  if (blob == nullptr || len == 0) return std::vector<uint8_t>();
+  const uint8_t *bytes = static_cast<const uint8_t *>(blob);
+  return std::vector<uint8_t>(bytes, bytes + len);
 }
 
 template <typename T>
-absl::StatusOr<T> Statement::StepOneCellThenDone(int column_index) {
-  ABSL_ASSIGN_OR_RETURN(StepResult res, Step());
-  WithStatementReset reset(this);
-
-  if (res != StepResult::kRow) {
-    return absl::InternalError(
-        absl::StrCat("Expected StepResult::kRow, got ", res));
-  }
-
-  auto ret = Column<T>(column_index);
-
-  ABSL_RETURN_IF_ERROR(StepThenDone());
-  return ret;
-}
-
-template <typename T>
-absl::StatusOr<T> Statement::StepOneCellThenDone(std::string_view column_name) {
-  ABSL_ASSIGN_OR_RETURN(int index, GetColumnIndex(column_name));
-  return StepOneCellThenDone<T>(index);
-}
-
-template <typename Sink>
-void AbslStringify(Sink &sink, Statement::StepResult res) {
-  using StepResult = Statement::StepResult;
-  switch (res) {
-    case StepResult::kDone:
-      absl::Format(&sink, "StepResult::kDone");
-      break;
-    case StepResult::kRow:
-      absl::Format(&sink, "StepResult::kRow");
-      break;
-    default:
-      absl::Format(&sink, "StepResult::kUnknown (%d)", static_cast<int>(res));
-  }
-}
-
-template <typename Sink>
-void AbslStringify(Sink &sink, const Statement &stmt) {
-  absl::Format(&sink, "%s", stmt.GetExpandedSql());
+  requires internal::IsOptional<T>::value
+T Statement::Column(int index) {
+  if (ColumnIsNull(index)) return std::nullopt;
+  return Column<typename internal::IsOptional<T>::value_type>(index);
 }
 
 }  // namespace sqlite3
