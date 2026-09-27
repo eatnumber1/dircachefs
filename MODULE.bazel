@@ -2,7 +2,17 @@ module(name = "dircachefs", version = "0.1")
 
 bazel_dep(name = "abseil-cpp", version = "20260817.0", repo_name="absl")
 bazel_dep(name = "sqlite3", version = "3.53.4", repo_name="sqlite")
-bazel_dep(name = "libfuse", version="3.16.2")
+bazel_dep(name = "libfuse", version = "3.18.2")
+
+# TODO: drop this patch (and the override below) once a released libfuse
+# includes FUSE_CAP_ATTR_GENERATION / fuse_reply_attr_with_generation
+# (upstream commit 0aa1acc6, "Add FUSE_CAP_ATTR_GENERATION for reliable NFS
+# export").
+single_version_override(
+    module_name = "libfuse",
+    patches = ["//third_party/libfuse:0001-attr-generation.patch"],
+    patch_strip = 1,
+)
 bazel_dep(name = "rules_cc", version = "0.2.25")
 bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 bazel_dep(name = "rules_shell", version = "0.8.0")

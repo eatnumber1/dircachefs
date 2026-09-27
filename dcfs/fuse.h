@@ -1,7 +1,7 @@
 #ifndef DCFS_FUSE_H_
 #define DCFS_FUSE_H_
 
-#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 12)
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include <concepts>
 #include <span>

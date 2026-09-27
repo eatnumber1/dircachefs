@@ -7,6 +7,13 @@ build --copt -Wimplicit-fallthrough
 build --copt -D_FILE_OFFSET_BITS=64
 build --disk_cache=~/.cache/bazel-disk-cache
 
+# --copt -Werror above also applies to external repositories' own compiles.
+# The libfuse module (BCR overlay) pulls in liburing, which has -Wunused-
+# parameter warnings that are not errors upstream; without this, building
+# anything that depends on @libfuse//:libfuse fails. Scope -Werror back off
+# for code under external/ only; our own sources are unaffected.
+build --per_file_copt=external/.*\.c$@-Wno-error
+
 test --test_output=errors
 test --test_tag_filters=-qemu
 
