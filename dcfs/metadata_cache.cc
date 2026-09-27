@@ -402,6 +402,23 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
   return parents.front();
 }
 
+absl::StatusOr<std::optional<std::pair<InodeId, std::string>>> DentryOf(
+    Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx, "SELECT parent, name FROM dentries WHERE inode = ? LIMIT 1",
+            id));
+  std::optional<std::pair<InodeId, std::string>> result;
+  ABSL_RETURN_IF_ERROR(
+      ReadOne(*stmt,
+              [&](Statement &row) -> absl::Status {
+                result = {row.Column<int64_t>(0), row.Column<std::string>(1)};
+                return absl::OkStatus();
+              })
+          .status());
+  return result;
+}
+
 absl::StatusOr<std::vector<FilesystemRow>> ListFilesystems(Context &ctx) {
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,

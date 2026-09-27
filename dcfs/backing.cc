@@ -316,26 +316,21 @@ absl::StatusOr<uint64_t> ReadGeneration(int opath_fd, mode_t mode) {
   }
 }
 
-absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
-  if (id == cache::kRootInode) return OpenRoot(ctx, flags);
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
-  ABSL_ASSIGN_OR_RETURN(FileHandle handle, cache::GetHandle(ctx, id));
-  absl::StatusOr<FileDescriptor> fd = handle.Open(ctx.mounts, flags);
-  if (!fd.ok()) {
-    if (ErrnoOf(fd.status()) == ESTALE) {
-      ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
-    }
-    return fd.status();
-  }
-
-  // Some filesystems' handles do not encode the generation, so a handle
-  // can decode to whatever object now has the inode number.
+// Verifies that `fd` (opened for `id`, whose cache row is `attr`) still
+// refers to the same backing object the row describes, and forgets it
+// (ESTALE) otherwise. Shared by the open_by_handle_at path and the
+// unprivileged path-walk fallback -- either one can decode/reach a
+// different object than intended if the backing filesystem reused the
+// inode number since the row was cached.
+absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
+    Context &ctx, InodeId id, const cache::CachedAttr &attr,
+    FileDescriptor fd) {
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx,
-      syscalls::statx(**fd, "", AT_EMPTY_PATH, STATX_INO | STATX_TYPE));
+      syscalls::statx(*fd, "", AT_EMPTY_PATH, STATX_INO | STATX_TYPE));
   bool same = stx.stx_ino == attr.backing_ino;
   if (same && attr.backing_gen != 0) {
-    ABSL_ASSIGN_OR_RETURN(uint64_t gen, ReadGeneration(**fd, stx.stx_mode));
+    ABSL_ASSIGN_OR_RETURN(uint64_t gen, ReadGeneration(*fd, stx.stx_mode));
     // 0 means the generation cannot be read right now, not that it changed.
     same = gen == 0 || gen == attr.backing_gen;
   }
@@ -348,10 +343,90 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
   return fd;
 }
 
+// Reaches `id` by walking cached dentry names from the root with openat(),
+// for hosts (this process included, most of the time) where open_by_handle_
+// at needs CAP_DAC_READ_SEARCH the daemon doesn't have. Every intermediate
+// component is opened O_PATH|O_NOFOLLOW, so this never blocks on or has a
+// side effect on any file type (a FIFO, say) along the way; the final
+// component is reopened with the caller's `flags` unless those already are
+// O_PATH. Returns nullopt (not an error) if no cached dentry chain reaches
+// `id`, so the caller can fall back to a different signal (its own EPERM).
+absl::StatusOr<std::optional<FileDescriptor>> OpenByWalkingNames(
+    Context &ctx, InodeId id, int flags) {
+  std::vector<std::string> names;  // filled leaf-to-root, walked in reverse
+  InodeId cur = id;
+  int depth = 0;
+  while (cur != cache::kRootInode) {
+    RET_CHECK(depth < 4096)
+        << "cached dentry chain for inode " << id
+        << " is implausibly deep (or cyclic)";
+    ++depth;
+    ABSL_ASSIGN_OR_RETURN(
+        (std::optional<std::pair<InodeId, std::string>> dentry),
+        cache::DentryOf(ctx, cur));
+    if (!dentry.has_value()) return std::nullopt;
+    names.push_back(std::move(dentry->second));
+    cur = dentry->first;
+  }
+
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor cur_fd,
+                        OpenRoot(ctx, O_PATH | O_DIRECTORY));
+  for (auto it = names.rbegin(); it != names.rend(); ++it) {
+    ABSL_ASSIGN_OR_RETURN(
+        FileDescriptor next, syscalls::openat(*cur_fd, *it, O_PATH | O_NOFOLLOW));
+    cur_fd = std::move(next);
+  }
+
+  if ((flags & O_PATH) != 0) return std::move(cur_fd);
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor reopened,
+                        syscalls::ReopenPathFd(*cur_fd, flags));
+  return reopened;
+}
+
+absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
+  if (id == cache::kRootInode) return OpenRoot(ctx, flags);
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
+  ABSL_ASSIGN_OR_RETURN(FileHandle handle, cache::GetHandle(ctx, id));
+
+  absl::StatusOr<FileDescriptor> handle_fd =
+      dcfs::ErrnoToStatus(EPERM, "open_by_handle_at skipped: known denied");
+  if (!ctx.open_by_handle_denied) {
+    handle_fd = handle.Open(ctx.mounts, flags);
+    if (handle_fd.ok()) {
+      return VerifyBackingIdentity(ctx, id, attr, *std::move(handle_fd));
+    }
+    int err = ErrnoOf(handle_fd.status());
+    if (err == ESTALE) {
+      ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
+      return handle_fd.status();
+    }
+    if (err != EPERM) return handle_fd.status();
+    // Needs CAP_DAC_READ_SEARCH, which this process lacks: remember that so
+    // every later OpenNode call skips straight to the walk below.
+    ctx.open_by_handle_denied = true;
+    LOG(INFO) << "open_by_handle_at denied (EPERM); falling back to walking "
+                 "cached dentry names for this and future opens";
+  }
+
+  ABSL_ASSIGN_OR_RETURN(std::optional<FileDescriptor> walked,
+                        OpenByWalkingNames(ctx, id, flags));
+  if (walked.has_value()) {
+    return VerifyBackingIdentity(ctx, id, attr, *std::move(walked));
+  }
+  // No cached dentry chain reaches `id`: nothing better to report than the
+  // original open_by_handle_at failure.
+  return handle_fd.status();
+}
+
 absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   return syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask);
+}
+
+absl::Status RefreshAttrs(Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, id));
+  return cache::UpdateAttr(ctx, id, stx);
 }
 
 absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id) {
@@ -366,6 +441,19 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   return XattrsOf(*fd);
+}
+
+absl::Status RefreshXattrs(Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(
+      (std::vector<std::pair<std::string, std::string>> xattrs),
+      ReadXattrs(ctx, id));
+  return cache::ReplaceXattrs(ctx, id, xattrs);
+}
+
+absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
+  ABSL_ASSIGN_OR_RETURN(int mount_fd, ctx.mounts.Get(attr.device));
+  return syscalls::fstatvfs(mount_fd);
 }
 
 absl::Status PopulateDirectory(Context &ctx, InodeId dir) {

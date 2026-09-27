@@ -7,41 +7,51 @@
 #include <sys/types.h>
 
 #include "absl/status/status.h"
-#include "dcfs/fd.h"
+#include "absl/status/statusor.h"
+#include "absl/time/time.h"
+#include "dcfs/context.h"
 #include "dcfs/fuse_request.h"
+#include "dcfs/metadata_cache.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
 
-// DirCacheFS is a minimal, mechanical placeholder low-level FUSE filesystem.
-// It serves a single, empty root directory backed directly by `source_fd_`;
-// no metadata cache or database is wired up yet (that lands in later steps --
-// see README.md for the overall design). Ops below that are not yet
-// implemented reply ENOSYS themselves (rather than relying on libfuse's
-// default of ENOSYS for an absent callback) so that every op has a
-// DirCacheFS method and an entry in the ops table (see fuse_ops.h).
+using cache::InodeId;
+
+// DirCacheFS is the low-level FUSE filesystem: every op below reads (and, in
+// later steps, writes) through cache::/backing:: against `ctx_`, never
+// touching the backing filesystem or ctx_.mounts directly itself -- that is
+// backing.cc's job. Ops not yet implemented (writes; Open/Read land in step
+// 3.3) reply ENOSYS themselves (rather than relying on libfuse's default of
+// ENOSYS for an absent callback) so that every op has a DirCacheFS method
+// and an entry in the ops table (see fuse_ops.h).
 class DirCacheFS {
  public:
-  // `source_fd` must be open O_PATH | O_DIRECTORY on the directory this
-  // filesystem is caching.
-  explicit DirCacheFS(FileDescriptor source_fd);
+  // dcfs has exclusive access to the backing tree (nothing else is supposed
+  // to modify it out from under the cache), so these default to long: the
+  // cache is only invalidated by our own mutations (from Phase 4 on), not by
+  // a timeout racing a change dcfs doesn't know about.
+  struct Options {
+    absl::Duration attr_timeout = absl::Hours(1);
+    absl::Duration entry_timeout = absl::Hours(1);
+  };
+
+  // `ctx` must outlive this DirCacheFS.
+  DirCacheFS(Context &ctx, Options opts);
 
   absl::Status Init(struct fuse_conn_info &conn);
   absl::Status Destroy();
 
-  // Only fuse_ino_t{FUSE_ROOT_ID} exists; anything else is ENOENT.
   absl::Status Getattr(FuseRequest &req, fuse_ino_t ino, fuse_file_info *fi);
   absl::Status Setattr(
       FuseRequest &req, fuse_ino_t ino, struct stat *attr, int to_set,
       fuse_file_info *fi);
 
-  // There are no entries under the root yet, so every lookup is a negative
-  // (ENOENT) reply.
   absl::Status Lookup(
       FuseRequest &req, fuse_ino_t parent_ino, std::string_view name);
-  // No inode table exists yet, so there is nothing to do on forget.
+  // Inode rows persist across restarts (that is what keeps NFS handles
+  // valid), so there is nothing to do when the kernel drops its reference.
   void Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup);
-  // Likewise for a batch of forgets.
   void ForgetMulti(
       FuseRequest &req, std::span<const fuse_forget_data> forgets);
 
@@ -100,7 +110,10 @@ class DirCacheFS {
   absl::Status Removexattr(
       FuseRequest &req, fuse_ino_t ino, std::string_view name);
 
-  // Access checks are not implemented yet; everything is allowed.
+  // The mount is started with -o default_permissions, so the kernel checks
+  // permissions itself against the cached attributes Getattr/Lookup report;
+  // by the time Access() is called the kernel has already decided to allow
+  // the operation, so there is nothing left for the filesystem to check.
   absl::Status Access(FuseRequest &req, fuse_ino_t ino, int mask);
 
   absl::Status Create(
@@ -112,7 +125,16 @@ class DirCacheFS {
       fuse_file_info &fi);
 
  private:
-  FileDescriptor source_fd_;
+  // The fuse_entry_param for `id`: current cached attributes (refreshed
+  // first if not valid), nodeid = id, generation = the row's fuse_gen, and
+  // timeouts from opts_. NotFound from a non-root id means the kernel is
+  // holding a nodeid this cache no longer has a row for (e.g. the backing
+  // inode number was recycled and invalidated it) -- reported as ESTALE,
+  // not NotFound, since that is what the kernel does with a stale nodeid.
+  absl::StatusOr<fuse_entry_param> EntryFor(InodeId id);
+
+  Context &ctx_;
+  Options opts_;
 };
 
 }  // namespace dcfs

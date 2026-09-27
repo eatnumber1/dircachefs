@@ -2,6 +2,7 @@
 #define DCFS_BACKING_H_
 
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/types.h>
 
 #include <cstdint>
@@ -60,6 +61,10 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags);
 // and STATX_BTIME). Does not update the cache.
 absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id);
 
+// Refreshes `id`'s cached attributes from the backing filesystem (StatNode
+// followed by cache::UpdateAttr). Called when CachedAttr.valid is false.
+absl::Status RefreshAttrs(Context &ctx, InodeId id);
+
 // The target of symlink `id`, read from the backing filesystem.
 absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id);
 
@@ -67,6 +72,15 @@ absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id);
 // filesystem; empty if the filesystem does not support xattrs.
 absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
     Context &ctx, InodeId id);
+
+// Refreshes `id`'s cached xattr set from the backing filesystem (ReadXattrs
+// followed by cache::ReplaceXattrs). Called when the cached set is unknown
+// (ListXattrs/GetXattr returned nullopt).
+absl::Status RefreshXattrs(Context &ctx, InodeId id);
+
+// The statvfs of the filesystem `id` lives on, from that filesystem's mount
+// fd -- no handle open of `id` itself is needed.
+absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id);
 
 // Lists directory `dir` on the backing filesystem and caches all of it:
 // every child's inode row (attributes, handle, generation, symlink target,

@@ -1,4 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 # File-handle test client (name_to_handle_at / open_by_handle_at /
 # FS_IOC_GETVERSION). Used by tools/handle_tests.sh and the QEMU suite.
@@ -6,4 +7,15 @@ cc_binary(
     name = "fhtest",
     srcs = ["fhtest.c"],
     visibility = ["//visibility:public"],
+)
+
+# Manual, host-run smoke test for the read-only ops added in step 3.2: mounts
+# a small tree twice and checks that the second pass is served entirely from
+# the cache (verified via strace, when available). Not wired into `bazel
+# test` -- it mounts FUSE and needs /dev/fuse, which the sandbox doesn't
+# give it; run directly (`bazel run //tools:smoke_readonly -- ...`) or via
+# the script path in the worktree instead.
+sh_binary(
+    name = "smoke_readonly",
+    srcs = ["smoke_readonly.sh"],
 )
