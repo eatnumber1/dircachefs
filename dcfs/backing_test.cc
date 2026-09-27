@@ -385,6 +385,26 @@ TEST_F(BackingTest, ReadGeneration) {
   EXPECT_THAT(ReadGeneration(*file, S_IFREG), IsOkAndHolds(gen));
 }
 
+// Regression test: tmpfs doesn't implement FS_IOC_GETVERSION (ENOTTY), and
+// ReadGeneration() must recognize that via the errno payload
+// dcfs::ErrnoToStatus() attaches and report "generation unknown" (0) rather
+// than propagating an error. TEST_TMPDIR may be a real disk (see
+// test/qemu/guest/init), so this creates the file directly under /tmp,
+// which is always tmpfs in the QEMU guest.
+TEST_F(BackingTest, ReadGenerationOnTmpfsFileIsZero) {
+  char path[] = "/tmp/dcfs_backing_test_tmpfs_XXXXXX";
+  int fd = ::mkstemp(path);
+  ASSERT_GE(fd, 0) << std::strerror(errno);
+  FileDescriptor file(fd);
+
+  struct statfs sfs {};
+  ASSERT_EQ(::fstatfs(*file, &sfs), 0);
+  ASSERT_EQ(sfs.f_type, TMPFS_MAGIC) << "/tmp is not tmpfs in this guest";
+
+  EXPECT_THAT(ReadGeneration(*file, S_IFREG), IsOkAndHolds(0u));
+  ::unlink(path);
+}
+
 // Registers a fake filesystem "mounted" at root/`name`, with its root inode
 // linked there and one child inside it, as PopulateDirectory would have
 // recorded a real mount.

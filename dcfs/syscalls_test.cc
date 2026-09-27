@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -372,6 +373,29 @@ TEST_F(SyscallsTest, GetInodeGeneration) {
       GTEST_SKIP() << "FS_IOC_GETVERSION not supported";
     }
   }
+}
+
+// Regression test for the bug where syscalls::ioctl() built its failure via
+// absl::ErrnoToStatus() (no errno payload) instead of dcfs::ErrnoToStatus():
+// without the payload, GetErrnoFromStatus() cannot recover ENOTTY here, and
+// callers like backing::ReadGeneration() that switch on the errno cannot
+// tell "unsupported" apart from a real error. TEST_TMPDIR may be backed by
+// a real disk (see test/qemu/guest/init), so this uses /tmp directly, which
+// is always tmpfs in the QEMU guest and does not implement
+// FS_IOC_GETVERSION.
+TEST(SyscallsTmpfsTest, GetInodeGenerationOnTmpfsIsEnotty) {
+  char path[] = "/tmp/dcfs_syscalls_test_tmpfs_XXXXXX";
+  int fd = ::mkstemp(path);
+  ASSERT_GE(fd, 0) << std::strerror(errno);
+  ::unlink(path);
+
+  auto gen = GetInodeGeneration(fd);
+  ASSERT_FALSE(gen.ok());
+  auto errno_val = GetErrnoFromStatus(gen.status());
+  ASSERT_THAT(errno_val, IsOk());
+  EXPECT_EQ(*errno_val, ENOTTY);
+
+  ::close(fd);
 }
 
 TEST_F(SyscallsTest, ErrorPathOpenatMissing) {

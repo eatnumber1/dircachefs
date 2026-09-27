@@ -10,6 +10,12 @@
 namespace dcfs {
 
 constexpr inline std::string_view kErrnoTypeUrl = "rus.har.mn/dcfs/status/errno";
+
+// All syscall/libc failures in dcfs/ must be turned into a Status via this
+// function (dcfs::ErrnoToStatus), never via absl::ErrnoToStatus directly:
+// only this wrapper attaches the kErrnoTypeUrl payload that
+// GetErrnoFromStatus()/StatusToErrno() and callers such as
+// backing::ReadGeneration() rely on to recover the original errno.
 absl::Status ErrnoToStatus(int error_number, absl::string_view message);
 absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status);
 

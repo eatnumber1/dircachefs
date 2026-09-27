@@ -137,7 +137,7 @@ namespace syscalls {
 
 absl::StatusOr<int> ioctl(int fd, int op, auto &&... args) {
   int rc = ::ioctl(fd, op, std::forward<decltype(args)>(args)...);
-  if (rc == -1) return absl::ErrnoToStatus(errno, "ioctl");
+  if (rc == -1) return dcfs::ErrnoToStatus(errno, "ioctl");
   return rc;
 }
 
