@@ -2,7 +2,7 @@ From 0aa1acc6f6cb7c8ff2f8f28297b40d4bac4039af Mon Sep 17 00:00:00 2001
 From: Russell Harmon <russ@har.mn>
 Date: Tue, 11 Aug 2026 22:52:12 -0700
 Subject: [PATCH] Add FUSE_CAP_ATTR_GENERATION for reliable NFS export
- (protocol 7.46)
+ (protocol 7.47)
 
 Sync fuse_kernel.h with protocol 7.46: the unused dummy field of
 struct fuse_attr_out becomes generation, and the FUSE_ATTR_GENERATION
@@ -29,14 +29,17 @@ recycled backing inode fail with ESTALE; a generation change reported
 via GETATTR makes fstat() on the stale inode fail with EIO while a
 fresh lookup recovers.
 
+Rebased for dircachefs onto libfuse 3.18.2 and the kernel patch at
+protocol 7.47, where FUSE_ATTR_GENERATION is bit 44.
+
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
 ---
  include/fuse_common.h   | 17 +++++++++++++++++
- include/fuse_kernel.h   | 12 ++++++++++--
+ include/fuse_kernel.h   | 20 ++++++++++++++++++--
  include/fuse_lowlevel.h | 26 ++++++++++++++++++++++++++
  lib/fuse_lowlevel.c     | 26 ++++++++++++++++++++++++--
  lib/fuse_versionscript  |  2 ++
- 5 files changed, 79 insertions(+), 4 deletions(-)
+ 5 files changed, 87 insertions(+), 4 deletions(-)
 
 diff --git a/include/fuse_common.h b/include/fuse_common.h
 index 041188e..58764ff 100644
@@ -67,22 +70,30 @@ index 041188e..58764ff 100644
   * Ioctl flags
   *
 diff --git a/include/fuse_kernel.h b/include/fuse_kernel.h
-index 94621f6..21046d8 100644
+index 94621f6..2b606e0 100644
 --- a/include/fuse_kernel.h
 +++ b/include/fuse_kernel.h
-@@ -239,6 +239,11 @@
+@@ -239,6 +239,19 @@
   *  7.45
   *  - add FUSE_COPY_FILE_RANGE_64
   *  - add struct fuse_copy_file_range_out
 + *  - add FUSE_NOTIFY_PRUNE
 + *
 + *  7.46
++ *  - add FUSE_IO_URING_CMD_ADD_QUEUE
++ *  - add FUSE_HAS_IO_URING_BUFPOOL
++ *  - add fuse_uring_cmd_req bufpool struct
++ *  - add bufpool offset field to fuse_uring_ent_in_out struct
++ *  - add FUSE_URING_ZERO_COPY, FUSE_URING_ENT_ZERO_COPY, and
++ *    FOPEN_IO_URING_ZERO_COPY flag
++ *
++ *  7.47
 + *  - add generation to fuse_attr_out
 + *  - add FUSE_ATTR_GENERATION
   */
  
  #ifndef _LINUX_FUSE_H
-@@ -274,7 +279,7 @@
+@@ -274,7 +287,7 @@
  #define FUSE_KERNEL_VERSION 7
  
  /** Minor version number of this interface */
@@ -91,7 +102,7 @@ index 94621f6..21046d8 100644
  
  /** The node ID of the root inode */
  #define FUSE_ROOT_ID 1
-@@ -447,6 +452,8 @@ struct fuse_file_lock {
+@@ -447,6 +460,8 @@ struct fuse_file_lock {
   * FUSE_OVER_IO_URING: Indicate that client supports io-uring
   * FUSE_REQUEST_TIMEOUT: kernel supports timing out requests.
   *			 init_out.request_timeout contains the timeout (in secs)
@@ -100,15 +111,15 @@ index 94621f6..21046d8 100644
   */
  #define FUSE_ASYNC_READ		(1 << 0)
  #define FUSE_POSIX_LOCKS	(1 << 1)
-@@ -494,6 +501,7 @@ struct fuse_file_lock {
+@@ -494,6 +509,7 @@ struct fuse_file_lock {
  #define FUSE_ALLOW_IDMAP	(1ULL << 40)
  #define FUSE_OVER_IO_URING	(1ULL << 41)
  #define FUSE_REQUEST_TIMEOUT	(1ULL << 42)
-+#define FUSE_ATTR_GENERATION	(1ULL << 43)
++#define FUSE_ATTR_GENERATION	(1ULL << 44)
  
  /**
   * CUSE INIT request/reply flags
-@@ -724,7 +732,7 @@ struct fuse_getattr_in {
+@@ -724,7 +740,7 @@ struct fuse_getattr_in {
  struct fuse_attr_out {
  	uint64_t	attr_valid;	/* Cache timeout for the attributes */
  	uint32_t	attr_valid_nsec;

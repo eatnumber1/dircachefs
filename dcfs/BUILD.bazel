@@ -248,12 +248,6 @@ cc_test(
 cc_test(
     name = "libfuse_version_test",
     srcs = ["libfuse_version_test.cc"],
-    # Force static linking: the BCR libfuse overlay's shared-library output
-    # fails to link on this toolchain (ld.gold cannot resolve the
-    # .symver-based version nodes in lib/fuse_versionscript without an
-    # explicit --version-script, which the overlay's BUILD.bazel does not
-    # pass), so avoid building it at all -- we only need the archive.
-    linkstatic = True,
     deps = [
       "@googletest//:gtest_main",
       "@libfuse//:libfuse",

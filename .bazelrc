@@ -12,7 +12,14 @@ build --disk_cache=~/.cache/bazel-disk-cache
 # parameter warnings that are not errors upstream; without this, building
 # anything that depends on @libfuse//:libfuse fails. Scope -Werror back off
 # for code under external/ only; our own sources are unaffected.
-build --per_file_copt=external/.*\.c$@-Wno-error
+build --per_file_copt=external/.*@-Wno-error
+
+# The BCR libfuse overlay's shared-library output doesn't link with ld.gold
+# (the overlay omits -Wl,--version-script, so the .symver-tagged symbols in
+# lib/fuse_versionscript have no version nodes to bind to); link statically
+# everywhere, which we want anyway since the daemon ships fully static in an
+# initramfs.
+build --dynamic_mode=off
 
 test --test_output=errors
 test --test_tag_filters=-qemu
