@@ -1,4 +1,6 @@
-# Ignore all bazel-* symlinks.
+# Bazel output symlinks.
 /bazel-*
-# Ignore Vim files
-*.swp
+# Vim swap files.
+*.sw[po]
+# Per-machine Claude Code settings.
+/.claude/settings.local.json
