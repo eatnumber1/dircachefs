@@ -556,6 +556,22 @@ TEST_F(BackingTest, AttrsOfAFileOpenForWriteStayUnknown) {
   ctx_.open_for_write = nullptr;
 }
 
+// Audit F8: an unlinked file dcfs still holds open has nlink 0, and its row
+// only lives until the last close deletes it; a crash in between must not
+// leave nlink 0 cached as current.
+TEST_F(BackingTest, AttrsWithNoLinksLeftStayUnknown) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  int fd = ::open(Path("file").c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  FileDescriptor owned(fd);
+  ASSERT_EQ(::unlink(Path("file").c_str()), 0);
+
+  ASSERT_THAT(RefreshAttrsFromFd(ctx_, file, fd), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
+  EXPECT_FALSE(attr.valid);
+  EXPECT_EQ(attr.st.st_nlink, 0u);
+}
+
 // --- Out-of-band change detection (step 4.6) ---------------------------------
 
 // Coarse kernel timestamps can make a change made right after the previous

@@ -107,10 +107,16 @@ bool OpenForWrite(const Context &ctx, InodeId id) {
 // the kernel may write through the passthrough fd at any moment, so the
 // values are stale as soon as they are read; see the README's "Crash
 // robustness").
+//
+// Also kept unknown when the link count is 0 (an unlinked file dcfs still
+// holds open): such a row only lives until the last close deletes it
+// (DirCacheFS::Release), and a crash in between must leave it unknown --
+// re-read by handle, so ESTALE -- rather than serve nlink 0 as current
+// (audit F8).
 absl::Status RecordAttrs(Context &ctx, InodeId id, const struct statx &stx) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(cache::UpdateAttr(ctx, id, stx));
-    if (OpenForWrite(ctx, id)) {
+    if (OpenForWrite(ctx, id) || stx.stx_nlink == 0) {
       ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
     }
     return absl::OkStatus();
@@ -459,6 +465,17 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
     // 0 means the generation cannot be read right now, not that it changed.
     same = gen == 0 || gen == attr.backing_gen;
   }
+  // The birth time, when both sides know it, tells apart objects that share
+  // a handle: btrfs can reissue an identical (ino, generation, handle)
+  // after its own power loss (audit F6). Free: the statx above asked for it.
+  const bool btime_known =
+      (stx.stx_mask & STATX_BTIME) != 0 &&
+      (stx.stx_btime.tv_sec != 0 || stx.stx_btime.tv_nsec != 0) &&
+      (attr.btime.tv_sec != 0 || attr.btime.tv_nsec != 0);
+  if (same && btime_known) {
+    same = attr.btime.tv_sec == stx.stx_btime.tv_sec &&
+           attr.btime.tv_nsec == static_cast<long>(stx.stx_btime.tv_nsec);
+  }
   if (!same) {
     LOG(WARNING) << "inode " << id
                  << ": out-of-band change on the backing filesystem "
@@ -466,6 +483,9 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
                     "object (inode number "
                  << attr.backing_ino << " -> " << stx.stx_ino
                  << ", generation " << attr.backing_gen << " -> " << gen
+                 << ", birth time "
+                 << FormatTime(attr.btime.tv_sec, attr.btime.tv_nsec) << " -> "
+                 << FormatTime(stx.stx_btime.tv_sec, stx.stx_btime.tv_nsec)
                  << "); forgetting it (ESTALE)";
     ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
     return dcfs::ErrnoToStatus(
@@ -679,7 +699,10 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
                               cache::GetAttr(ctx, cached_dentry.id));
         if (cached.device == child.handle.device &&
             cached.backing_ino == child.stx.stx_ino &&
-            cached.backing_gen == child.backing_gen) {
+            cached.backing_gen == child.backing_gen &&
+            (cached.btime.tv_sec == child.stx.stx_btime.tv_sec &&
+             cached.btime.tv_nsec ==
+                 static_cast<long>(child.stx.stx_btime.tv_nsec))) {
           ABSL_RETURN_IF_ERROR(
               ReconcileAttrs(ctx, cached_dentry.id, cached, child.stx));
         }

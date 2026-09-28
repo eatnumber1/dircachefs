@@ -858,22 +858,29 @@ absl::Status DirCacheFS::Release(
   if (backing_file.refs > 0) return req.ReplyErrno(0);
 
   // Row lifetime (see SettleUnlinkedFile): the last dcfs open of a file
-  // whose last link is gone takes the row with it. Checked after the
-  // writable refresh above, so it sees the final nlink; an unknown cached
-  // nlink is refreshed from the still-open fd first rather than trusted,
-  // and if it stays unknown the row is kept (a later access re-stats it;
-  // a leftover row for a vanished file is harmless, deleting a live one
-  // is not). A row that is already gone (invalidated meanwhile) has
-  // nothing left to delete.
+  // whose last link is gone takes the row with it. A row whose attributes
+  // are current has nlink > 0 (backing::RecordAttrs never marks nlink 0
+  // current), so only an unknown one needs a look: its attributes are
+  // refreshed from the still-open fd, and the row deleted if that fresh
+  // statx says nlink 0. If the refresh fails the row is kept (a later
+  // access re-stats it; a leftover row for a vanished file is harmless,
+  // deleting a live one is not). A row that is already gone (invalidated
+  // meanwhile) has nothing left to delete.
   bool delete_row = false;
   absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
   if (attr.ok() && !attr->valid) {
-    RecordWrittenAttrs(id, *backing_file.fd, "Release");
-    attr = cache::GetAttr(ctx_, id);
+    absl::Status refreshed =
+        backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd);
+    if (refreshed.ok()) {
+      attr = cache::GetAttr(ctx_, id);
+      delete_row = attr.ok() && attr->st.st_nlink == 0;
+    } else {
+      LOG(WARNING) << "Release: could not refresh the attributes of inode "
+                   << id << " from its open fd, keeping its row: "
+                   << refreshed;
+    }
   }
-  if (attr.ok()) {
-    delete_row = attr->valid && attr->st.st_nlink == 0;
-  } else if (!absl::IsNotFound(attr.status())) {
+  if (!attr.ok() && !absl::IsNotFound(attr.status())) {
     LOG(WARNING) << "Release: could not read the cached attributes of inode "
                  << id << ", keeping its row: " << attr.status();
   }

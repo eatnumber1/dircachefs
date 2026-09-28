@@ -90,7 +90,10 @@ struct statx Stx(uint64_t ino, mode_t mode, int64_t seed = 0) {
   stx.stx_atime = {.tv_sec = 1'700'000'001 + seed, .tv_nsec = 111};
   stx.stx_mtime = {.tv_sec = 1'700'000'002 + seed, .tv_nsec = 222};
   stx.stx_ctime = {.tv_sec = 1'700'000'003 + seed, .tv_nsec = 333};
-  stx.stx_btime = {.tv_sec = -5 - seed, .tv_nsec = 999'999'999};
+  // Not derived from `seed`: an object's birth time never changes, and
+  // UpsertInode treats a different one as a different object.
+  stx.stx_btime = {.tv_sec = -5 - static_cast<int64_t>(ino),
+                   .tv_nsec = 999'999'999};
   return stx;
 }
 
@@ -165,11 +168,11 @@ TEST_F(MetadataCacheTest, UpsertCreatesThenUpdatesSameIdentity) {
   EXPECT_NE(first.id, kRootInode);
   EXPECT_NE(first.fuse_gen, 0u);
 
-  // Same identity, new attributes and handle: same row, updated in place.
+  // Same identity and handle, new attributes: same row, updated in place.
   ASSERT_THAT(MarkAttrsUnknown(ctx_, first.id), IsOk());
   ASSERT_OK_AND_ASSIGN(
       UpsertResult second,
-      UpsertInode(ctx_, Handle(kSource, "new", 7), Stx(10, S_IFREG, 5), 0));
+      UpsertInode(ctx_, Handle(kSource, "h10"), Stx(10, S_IFREG, 5), 0));
   EXPECT_FALSE(second.created);
   EXPECT_EQ(second.id, first.id);
   EXPECT_EQ(second.fuse_gen, first.fuse_gen);
@@ -177,9 +180,66 @@ TEST_F(MetadataCacheTest, UpsertCreatesThenUpdatesSameIdentity) {
   ASSERT_OK_AND_ASSIGN(CachedAttr attr, GetAttr(ctx_, first.id));
   EXPECT_TRUE(attr.valid);
   EXPECT_EQ(attr.st.st_uid, 1005u);
-  EXPECT_THAT(GetHandle(ctx_, first.id),
-              IsOkAndHolds(Handle(kSource, "new", 7)));
   EXPECT_THAT(GetGeneration(ctx_, first.id), IsOkAndHolds(first.fuse_gen));
+}
+
+// Audit F5/F6: (device, ino, generation) alone does not identify an object.
+// The generation is 0 for symlinks and special files (and everything on a
+// filesystem without FS_IOC_GETVERSION), and btrfs can reissue an identical
+// handle after its own power loss; the stored handle bytes and the birth
+// time tell those apart.
+TEST_F(MetadataCacheTest, DifferentHandleOrBirthTimeIsANewObject) {
+  ASSERT_OK_AND_ASSIGN(InodeId dir, MakeDir(kRootInode, "dir", 20));
+  ASSERT_OK_AND_ASSIGN(UpsertResult old, Make(30, S_IFLNK | 0777));
+  ASSERT_THAT(LinkDentry(ctx_, dir, "s", old.id), IsOk());
+  ASSERT_THAT(SetSymlink(ctx_, old.id, "old-target"), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, dir, true), IsOk());
+
+  // Same (device, ino, gen 0), different handle bytes (the backing
+  // filesystem encodes its own generation there).
+  ASSERT_OK_AND_ASSIGN(
+      UpsertResult by_handle,
+      UpsertInode(ctx_, Handle(kSource, "h30-reborn"), Stx(30, S_IFLNK | 0777),
+                  0));
+  EXPECT_TRUE(by_handle.created);
+  EXPECT_NE(by_handle.id, old.id);
+  EXPECT_NE(by_handle.fuse_gen, old.fuse_gen);
+  EXPECT_THAT(GetAttr(ctx_, old.id), StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(Readlink(ctx_, by_handle.id),
+              StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(Lookup(ctx_, dir, "s"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_THAT(IsDirComplete(ctx_, dir), IsOkAndHolds(false));
+  EXPECT_THAT(GetHandle(ctx_, by_handle.id),
+              IsOkAndHolds(Handle(kSource, "h30-reborn")));
+
+  // Same (device, ino, gen) and identical handle bytes, different birth
+  // time.
+  struct statx reborn = Stx(30, S_IFLNK | 0777);
+  reborn.stx_btime.tv_sec += 1000;
+  ASSERT_OK_AND_ASSIGN(
+      UpsertResult by_btime,
+      UpsertInode(ctx_, Handle(kSource, "h30-reborn"), reborn, 0));
+  EXPECT_TRUE(by_btime.created);
+  EXPECT_NE(by_btime.id, by_handle.id);
+  EXPECT_THAT(GetAttr(ctx_, by_handle.id),
+              StatusIs(absl::StatusCode::kNotFound));
+
+  // A birth time unknown on either side (0: the filesystem reports none)
+  // matches anything.
+  struct statx no_btime = reborn;
+  no_btime.stx_mask &= ~STATX_BTIME;
+  no_btime.stx_btime = {};
+  ASSERT_OK_AND_ASSIGN(
+      UpsertResult same,
+      UpsertInode(ctx_, Handle(kSource, "h30-reborn"), no_btime, 0));
+  EXPECT_FALSE(same.created);
+  EXPECT_EQ(same.id, by_btime.id);
+  ASSERT_OK_AND_ASSIGN(
+      UpsertResult again,
+      UpsertInode(ctx_, Handle(kSource, "h30-reborn"), reborn, 0));
+  EXPECT_FALSE(again.created);
+  EXPECT_EQ(again.id, by_btime.id);
 }
 
 TEST_F(MetadataCacheTest, UpsertOnUnregisteredFilesystemFails) {
@@ -622,7 +682,7 @@ TEST_F(MetadataCacheTest, GetAttrRoundTripsEveryField) {
   EXPECT_EQ(attr.st.st_mtim.tv_nsec, 222);
   EXPECT_EQ(attr.st.st_ctim.tv_sec, stx.stx_ctime.tv_sec);
   EXPECT_EQ(attr.st.st_ctim.tv_nsec, 333);
-  EXPECT_EQ(attr.btime.tv_sec, -14);
+  EXPECT_EQ(attr.btime.tv_sec, -5 - 77);
   EXPECT_EQ(attr.btime.tv_nsec, 999'999'999);
 
   ASSERT_THAT(MarkAttrsUnknown(ctx_, r.id), IsOk());
