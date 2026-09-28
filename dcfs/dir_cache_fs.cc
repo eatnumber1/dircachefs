@@ -122,20 +122,12 @@ absl::Status DirCacheFS::Setattr(
     fuse_file_info *fi) {
   InodeId id = static_cast<InodeId>(ino);
 
-  // Confirm this nodeid still has a row before changing anything -- the
-  // same ESTALE mapping EntryFor uses: a Setattr on a nodeid the cache no
-  // longer has a row for is a stale nodeid, not ENOENT. `fi` is not
+  // Confirm this nodeid still has a row before changing anything (a
+  // missing row is a stale nodeid: ESTALE, see RequireAttr). `fi` is not
   // consulted anywhere in this method: our open fds are always read-only
   // (Phase 4 owns writes to file contents, not attributes) and identity
   // here is by inode, not by whichever handle the kernel happened to pass.
-  absl::StatusOr<cache::CachedAttr> existing = cache::GetAttr(ctx_, id);
-  if (!existing.ok()) {
-    if (absl::IsNotFound(existing.status()) && id != cache::kRootInode) {
-      return dcfs::ErrnoToStatus(
-          ESTALE, absl::StrCat("no cached row for nodeid ", id));
-    }
-    return existing.status();
-  }
+  ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
 
   // Phase 1 of the write-through rule (see backing.cc's file comment):
   // mark the cached attributes unknown before the syscall(s) below, so a
