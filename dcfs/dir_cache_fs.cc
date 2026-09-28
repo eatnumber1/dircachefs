@@ -778,6 +778,23 @@ absl::Status DirCacheFS::Write(
   return req.ReplyWrite(n);
 }
 
+void DirCacheFS::RecordWrittenAttrs(InodeId id, int fd, std::string_view op) {
+  absl::Status status = backing::RefreshAttrsFromFd(ctx_, id, fd);
+  if (status.ok()) return;
+  // Never fatal to the op (see this method's declaration): the data is on
+  // the backing filesystem regardless, and "unknown" attributes simply
+  // repopulate on the next access. BeginWriting already marked them
+  // unknown; marking again only matters if the failure came after a
+  // partial write of the row, and is itself best effort.
+  LOG(WARNING) << op << ": could not refresh the attributes of inode " << id
+               << " from its open fd, leaving them unknown: " << status;
+  absl::Status marked = cache::MarkAttrsUnknown(ctx_, id);
+  if (!marked.ok() && !absl::IsNotFound(marked)) {
+    LOG(WARNING) << op << ": could not mark the attributes of inode " << id
+                 << " unknown either: " << marked;
+  }
+}
+
 absl::Status DirCacheFS::Flush(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   auto it = open_files_.find(fi.fh);
@@ -790,18 +807,26 @@ absl::Status DirCacheFS::Flush(
     // writable open -- this open's own Release() is still to come -- and
     // meanwhile every attribute read is served by a statx of the shared fd
     // (RefreshAttrsOf), so a stat() right after close() sees the writes.
+    // A failure is logged, not replied: Flush has no bookkeeping to skip,
+    // and failing close(2) over a cache refresh would be wrong.
     InodeId id = it->second.ino;
     auto backing_it = backing_files_.find(id);
     RET_CHECK(backing_it != backing_files_.end())
         << "Flush on inode " << id << " with no BackingFile";
-    ABSL_RETURN_IF_ERROR(
-        backing::RefreshAttrsFromFd(ctx_, id, *backing_it->second.fd));
+    RecordWrittenAttrs(id, *backing_it->second.fd, "Flush");
   }
   return req.ReplyErrno(0);
 }
 
 absl::Status DirCacheFS::Release(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+  // The kernel ignores RELEASE errors, so nothing below may skip any of
+  // this open's bookkeeping: the open-file entry is always dropped, the
+  // refcounts always decremented, and on the last reference the
+  // passthrough registration and our fd are always closed. Cache
+  // failures along the way are logged at WARNING and leave the
+  // attributes unknown (to repopulate on the next access); the reply is
+  // always 0. Only a broken internal invariant (RET_CHECK) returns early.
   auto it = open_files_.find(fi.fh);
   RET_CHECK(it != open_files_.end()) << "Release on unknown handle " << fi.fh;
   InodeId id = it->second.ino;
@@ -814,39 +839,47 @@ absl::Status DirCacheFS::Release(
   BackingFile &backing_file = backing_it->second;
   RET_CHECK_GT(backing_file.refs, 0)
       << "Release: refs underflow for inode " << id;
-  if (writable) {
-    RET_CHECK_GT(backing_file.writable_refs, 0)
-        << "Release: writable_refs underflow for inode " << id;
-    if (--backing_file.writable_refs == 0) {
-      // Phase 3 of the passthrough writes (see BeginWriting): the last
-      // writable open of this inode is gone, so the kernel can no longer
-      // write to it behind our back and the attributes can be recorded as
-      // current -- from the still-open shared fd, not a reopen.
-      open_for_write_.erase(id);
-      ABSL_RETURN_IF_ERROR(
-          backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd));
-    }
+  RET_CHECK(!writable || backing_file.writable_refs > 0)
+      << "Release: writable_refs underflow for inode " << id;
+  --backing_file.refs;
+  if (writable && --backing_file.writable_refs == 0) {
+    // Phase 3 of the passthrough writes (see BeginWriting): the last
+    // writable open of this inode is gone, so the kernel can no longer
+    // write to it behind our back and the attributes can be recorded as
+    // current -- from the still-open shared fd, not a reopen.
+    open_for_write_.erase(id);
+    RecordWrittenAttrs(id, *backing_file.fd, "Release");
   }
-  if (--backing_file.refs > 0) return req.ReplyErrno(0);
+  if (backing_file.refs > 0) return req.ReplyErrno(0);
 
   // Row lifetime (see SettleUnlinkedFile): the last dcfs open of a file
   // whose last link is gone takes the row with it. Checked after the
   // writable refresh above, so it sees the final nlink; an unknown cached
-  // nlink is refreshed from the still-open fd first rather than trusted.
-  // A row that is already gone (invalidated meanwhile) has nothing left
-  // to delete; the open itself must still be released below.
+  // nlink is refreshed from the still-open fd first rather than trusted,
+  // and if it stays unknown the row is kept (a later access re-stats it;
+  // a leftover row for a vanished file is harmless, deleting a live one
+  // is not). A row that is already gone (invalidated meanwhile) has
+  // nothing left to delete.
+  bool delete_row = false;
   absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
-  if (!attr.ok() && !absl::IsNotFound(attr.status())) return attr.status();
   if (attr.ok() && !attr->valid) {
-    ABSL_RETURN_IF_ERROR(
-        backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd));
+    RecordWrittenAttrs(id, *backing_file.fd, "Release");
     attr = cache::GetAttr(ctx_, id);
-    if (!attr.ok()) return attr.status();
   }
-  bool delete_row = attr.ok() && attr->st.st_nlink == 0;
+  if (attr.ok()) {
+    delete_row = attr->valid && attr->st.st_nlink == 0;
+  } else if (!absl::IsNotFound(attr.status())) {
+    LOG(WARNING) << "Release: could not read the cached attributes of inode "
+                 << id << ", keeping its row: " << attr.status();
+  }
 
   if (backing_file.backing_id > 0) {
-    ABSL_RETURN_IF_ERROR(req.PassthroughClose(backing_file.backing_id));
+    if (absl::Status closed = req.PassthroughClose(backing_file.backing_id);
+        !closed.ok()) {
+      LOG(WARNING) << "Release: closing passthrough backing id "
+                   << backing_file.backing_id << " of inode " << id
+                   << " failed: " << closed;
+    }
   }
   // Erasing drops the BackingFile, whose FileDescriptor closes our own fd
   // (the kernel took its own reference to the backing file back in
@@ -854,7 +887,10 @@ absl::Status DirCacheFS::Release(
   backing_files_.erase(backing_it);
   if (delete_row) {
     RET_CHECK(!HasOpenFiles(id));
-    ABSL_RETURN_IF_ERROR(ForgetRemoved(id));
+    if (absl::Status forgot = ForgetRemoved(id); !forgot.ok()) {
+      LOG(WARNING) << "Release: could not delete the row of unlinked inode "
+                   << id << ": " << forgot;
+    }
   }
   return req.ReplyErrno(0);
 }
@@ -869,8 +905,9 @@ absl::Status DirCacheFS::Fsync(
       << "Fsync on inode " << id << " with no BackingFile";
   int fd = *backing_it->second.fd;
   if (it->second.writable) {
-    // As Flush(): pick up this open's writes before syncing them out.
-    ABSL_RETURN_IF_ERROR(backing::RefreshAttrsFromFd(ctx_, id, fd));
+    // As Flush(): pick up this open's writes before syncing them out. A
+    // failure is only logged, so it can never skip the sync itself.
+    RecordWrittenAttrs(id, fd, "Fsync");
   }
   // Backing durability is the backing filesystem's own job; passing the
   // sync through is still correct (and cheap) regardless of `writable`.

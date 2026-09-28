@@ -171,6 +171,14 @@ class DirCacheFS {
   // since its attributes stay unknown for as long as that open lasts.
   absl::Status RefreshAttrsOf(InodeId id);
 
+  // Phase 3 for writes made through the shared backing fd `fd` of `id`
+  // (Flush/Fsync/Release): backing::RefreshAttrsFromFd. A failure is logged
+  // at WARNING and the attributes are left (re-marked) unknown, never
+  // returned: none of those ops may skip its bookkeeping, or fail the
+  // caller's close(2)/fsync(2), over a cache refresh. `op` names the caller
+  // in the log line.
+  void RecordWrittenAttrs(InodeId id, int fd, std::string_view op);
+
   // Registers a writable open of `id` (phase 1 of the write-through rule
   // for writes the kernel makes through the passthrough fd, which dcfs
   // never sees): adds it to open_for_write_ and marks its cached attributes
