@@ -1,12 +1,13 @@
 # dcfs — directory cache filesystem
 
-dcfs is a FUSE daemon that mirrors a backing directory tree, including any
-filesystems mounted and btrfs subvolumes below it, and serves every read
-operation except file *contents* from a persistent SQLite cache on an SSD:
-lookup, getattr, readdir, readlink, xattrs, access, statfs. Backing disks
-spin up only for file-content I/O and for writes. It is safely
+dcfs is a FUSE daemon that mirrors a backing directory tree and serves every
+read operation except file *contents* from a persistent SQLite cache on an
+SSD: lookup, getattr, readdir, readlink, xattrs, access, statfs. Backing
+disks spin up only for file-content I/O and for writes. It is safely
 NFS-exportable: handles stay valid across daemon restarts, and handles that
 cannot be honored fail with ESTALE, never by serving the wrong file.
+Filesystems mounted below the source tree, and btrfs subvolumes, are not
+supported (see Limitations).
 
 ## Write-through cache and nothing more
 
@@ -68,7 +69,10 @@ mounting dcfs over the directory it caches a supported configuration.
 
 1. At startup, before mounting, the source directory and the cache
    database are opened by path once; after that, paths are never used
-   again.
+   again. (The submount policy check -- see Limitations -- also reads
+   `--source`'s path and `/proc/self/mountinfo` once in this same window:
+   it is a startup-only policy decision, not part of identity, and keeps
+   no path afterwards either.)
 2. Backing filesystems are reached through one mount fd per device id,
    never by opening a mount point by path. This must be a real
    (non-`O_PATH`) directory fd: `open_by_handle_at`'s mount fd argument is
@@ -91,20 +95,27 @@ to `f_fsid`. Btrfs subvolumes of one filesystem share a UUID but have
 separate inode-number spaces, so filesystem identity there also carries the
 subvolume id.
 
-There is no `f_fsid` fallback and no `/proc/self/mountinfo` or libmount
-dependency; everything is derived from fds. A `filesystems` table records
-each backing filesystem below the source and the dentry through which it
-was entered.
+There is no `f_fsid` fallback and no libmount dependency; identity itself is
+derived entirely from fds. (Startup does use `/proc/self/mountinfo` once,
+by path, for the submount policy check below -- that check is deliberately
+independent of the identity machinery, and never influences it.)
+
+A `filesystems` table exists to record a backing filesystem below the
+source and the dentry through which it was entered, for a future where
+kernel-supported FUSE submounts (see Limitations) can be cached like the
+source itself. Nothing populates it today: since submounts are refused
+outright (below), the source is the only backing filesystem dcfs ever has.
+The table, `MountFds`, and `StartupPurge` all stay in place for that future
+rather than being deleted now.
 
 At startup, the daemon compares the source filesystem's device id against
 the one recorded when the cache was created and refuses to start on a
-mismatch. It then walks the recorded filesystems from the source down,
-reopens each boundary through its parent's mount fd, and purges all cached
-state, dentries, inodes, xattrs, symlinks, and descendants, for any
-filesystem that is not currently mounted where it was recorded. Mount
-boundaries are rediscovered the next time their parent directory is
-populated, so unmounting a sub-filesystem is equivalent to a cold cache for
-that subtree, never wrong data.
+mismatch. It then purges all cached state -- dentries, inodes, xattrs,
+symlinks, and descendants -- for every non-source row left in the
+`filesystems` table. Today that only ever matters for a cache database
+built before submounts were refused, when such a row could still be
+created and its subtree cached; a fresh database's table holds only the
+source.
 
 ## Crash robustness
 
@@ -204,6 +215,40 @@ The kernel's own attribute and dentry caches are not invalidated; they
 pick up the change once they expire or are evicted. Anything served
 purely from the cache (every lookup, getattr, readdir or xattr read that
 needs no backing I/O) detects nothing.
+
+## Limitations
+
+- **No out-of-band access to the backing trees** (see Coherence above):
+  dcfs requires exclusive access, detects what it stumbles onto for free,
+  and never invalidates the kernel's own caches.
+- **Filesystems mounted below the source, and btrfs subvolumes, are not
+  supported.** One superblock means one `st_dev`, and `st_ino` (shown to
+  users unchanged, so hardlink-aware tools such as `tar`/`rsync`/`cp -a`
+  behave as they would on the backing filesystem) is only unambiguous
+  within one `st_dev`; several backing filesystems under one source would
+  let two different objects collide on the same `(st_dev, st_ino)` pair.
+  So:
+  - At startup, before mounting, dcfs looks for any mount whose mount
+    point lies strictly below `--source` (`dcfs/mounts_below.h`, reading
+    `/proc/self/mountinfo`) and refuses to start if it finds one, naming
+    it in the error. A mount *on* `--source` itself is fine (that is what
+    `--source` always is).
+  - A boundary that only appears at runtime -- a filesystem mounted after
+    dcfs started, or a btrfs subvolume, which the startup check cannot see
+    since it is not a separate mount -- is refused when dcfs next lists
+    the directory it sits in: the ERROR is logged once, the name is left
+    out of the cached listing and out of readdir, and looking it up
+    (`stat`, `open`, ...) fails with EXDEV instead of being served from a
+    cache that would mix two filesystems' inode numbers. Unmounting it
+    makes it visible again the next time its parent directory is
+    repopulated.
+  - The device id still lives in dcfs's identity model, the `filesystems`
+    table, `MountFds`, and the boundary-detection code (`IsBoundary`); none
+    of it is used to *serve* a boundary today, but it is what a future
+    kernel-supported FUSE submount (`FUSE_ATTR_SUBMOUNT`, today
+    virtiofs-only, and would need an INIT-time opt-in for `/dev/fuse`)
+    would plug into, so that the kernel -- not dcfs's own `st_dev` -- keeps
+    two filesystems' inode numbers apart.
 
 ## Design direction
 

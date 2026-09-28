@@ -4,19 +4,26 @@
 # the inode-row lifetime rule (a row goes away once its backing nlink is 0
 # and dcfs holds no open file on it).
 #
-# Builds a small tree spanning two backing filesystems (vdb on /src, vdc
-# mounted on /src/sub), mounts dcfs over it, warms the whole cache once,
-# and then drives every op *through* /mnt. Each check is verified twice:
-# against /src (the change really landed on the backing filesystem), and
-# via /mnt after dropping the page/dentry/inode caches with *zero* sectors
-# read from either backing device -- i.e. dcfs's phase 3 recorded the new
-# state (including negative entries and restored directory completeness)
-# without anything having to be re-read. For the ops that are expected to
-# FAIL, phase 1 marks the names involved "unknown" (the write-through rule)
-# and dcfs re-resolves them from the backing filesystem before replying, so
-# those are held to the same zero-read standard. Finally, the daemon is
-# killed and restarted against the same cache database and the results
-# (and the warm cache) must persist.
+# Builds a small tree on vdb, mounts dcfs over it, warms the whole cache
+# once, and then drives every op *through* /mnt. Each check is verified
+# twice: against /src (the change really landed on the backing filesystem),
+# and via /mnt after dropping the page/dentry/inode caches with *zero*
+# sectors read from the backing device -- i.e. dcfs's phase 3 recorded the
+# new state (including negative entries and restored directory
+# completeness) without anything having to be re-read. For the ops that are
+# expected to FAIL, phase 1 marks the names involved "unknown" (the
+# write-through rule) and dcfs re-resolves them from the backing filesystem
+# before replying, so those are held to the same zero-read standard.
+# Finally, the daemon is killed and restarted against the same cache
+# database and the results (and the warm cache) must persist.
+#
+# Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
+# second filesystem mounted below the source after dcfs starts: a rename
+# targeting a name behind a refused boundary fails with EXDEV, exactly as a
+# real cross-device rename would (rename-boundary-refused, rename-exdev
+# below) -- see README's Limitations and dcfs/backing.cc's
+# ProbeChild/PopulateDirectory. (The startup-refusal half of amendment 12 is
+# exercised once, in readonly.sh.)
 #
 # Uses only busybox applets plus //tools:testutil (renameat2 with explicit
 # flags: busybox has no way to ask for RENAME_NOREPLACE/RENAME_EXCHANGE,
@@ -196,8 +203,10 @@ run_pass() {
 # --- build the backing tree (before dcfs ever sees it) ---------------------
 
 mount /dev/vdb /src
-mkdir -p /src/sub
-mount /dev/vdc /src/sub
+# "d" is for rename-boundary-refused/rename-exdev below: it must never be
+# listed through dcfs before vdc is mounted under it at runtime, and in
+# particular must not be touched by the warm-up run_pass below.
+mkdir -p /src/d
 
 cd /src || exit 1
 for f in f1 f2 f3 f5; do echo "content-$f" >"$f"; done
@@ -216,7 +225,6 @@ echo b >d1/b
 echo c >d1/sub1/c
 ln -s a d1/la
 echo s >dsrc/child
-echo s1 >sub/s1
 cd /
 sync
 
@@ -227,6 +235,26 @@ else
 	fail mount "daemon did not mount within 10s"
 	exit "$FAILED"
 fi
+
+# --- rename-boundary-refused: a filesystem mounted below the source at ----
+# --- runtime is refused before the general warm-up below ever lists "d" --
+# (amendment 12; see readonly.sh's boundary-* checks for the full
+# explanation of why "d" must be listed through dcfs for the first time
+# only after vdc is mounted under it.)
+mkdir /src/d/mp
+mount /dev/vdc /src/d/mp
+listing=$(ls -1 "$MNT/d" 2>&1)
+case "$listing" in
+*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
+*) pass boundary-not-listed ;;
+esac
+errors=$(grep -c "refusing to cache mp" "$LOG1")
+if [ "$errors" -eq 1 ]; then
+	pass boundary-error-logged-once
+else
+	fail boundary-error-logged-once "want 1 ERROR line, got $errors"
+fi
+umount /src/d/mp
 
 # Warm the whole cache once: every directory listed (so complete) and every
 # entry's attributes cached. Everything below then starts from cached state.
@@ -428,19 +456,28 @@ else
 	fail rename-dir-over-empty-dir "testutil rename2 -> '$out'"
 fi
 
-out=$("$TESTUTIL" rename2 "$MNT/f5" "$MNT/sub/f5" 0)
+# Renaming into a refused boundary fails with EXDEV, exactly as a real
+# cross-device rename would (the kernel must resolve "mp" as an
+# intermediate path component before calling renameat2 at all, and that
+# LOOKUP is what actually fails -- see create.sh's mkdir-boundary-refused
+# for the same reasoning); this reuses the refusal boundary-* above already
+# established ("d" is already cached complete without "mp"), so it needs no
+# fresh mount and logs nothing new.
+out=$("$TESTUTIL" rename2 "$MNT/f5" "$MNT/d/mp/f5" 0)
 if [ "$out" = "ERR EXDEV" ]; then
 	pass rename-exdev
 else
-	fail rename-exdev "testutil rename2 across vdb/vdc -> '$out'"
+	fail rename-exdev "testutil rename2 across a refused boundary -> '$out'"
 fi
-check_src rename-exdev '[ -f /src/f5 ] && absent /src/sub/f5'
-check_cold rename-exdev '[ -f /mnt/f5 ] && absent /mnt/sub/f5 && listed /mnt/sub s1'
+check_src rename-exdev '[ -f /src/f5 ] && absent /src/d/mp/f5'
+check_cold rename-exdev '[ -f /mnt/f5 ] && absent /mnt/d/mp/f5'
 
-# --- listing-matches ---------------------------------------------------
+# --- listing-matches: "d" is excluded -- see readonly.sh's identity-checks
+# comment on why /src/d and the cached /mnt/d deliberately diverge after the
+# boundary-* checks above. -------------------------------------------------
 
-find /src -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
-find /mnt -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+find /src -path /src/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
+find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
 normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
 normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
 if cmp -s /tmp/src_stat_norm.txt /tmp/mnt_stat_norm.txt; then
@@ -458,19 +495,12 @@ fi
 sync
 echo 3 >/proc/sys/vm/drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 run_pass "$MNT"
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if [ "$after_vdb" = "$before_vdb" ]; then
 	pass warm-after-all-vdb
 else
 	fail warm-after-all-vdb "sectors_read(vdb) $before_vdb -> $after_vdb"
-fi
-if [ "$after_vdc" = "$before_vdc" ]; then
-	pass warm-after-all-vdc
-else
-	fail warm-after-all-vdc "sectors_read(vdc) $before_vdc -> $after_vdc"
 fi
 cp /tmp/pass_stat.txt /tmp/pass_before_restart.txt
 
@@ -501,10 +531,8 @@ fi
 sync
 echo 3 >/proc/sys/vm/drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 run_pass "$MNT"
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if cmp -s /tmp/pass_before_restart.txt /tmp/pass_stat.txt &&
 	absent /mnt/f1 && absent /mnt/f3 && absent /mnt/e1 && absent /mnt/d1 &&
 	[ "$(ino /mnt/r4)" = "$R3_INO" ] && [ "$(ino /mnt/ex_a)" = "$EXB_INO" ]; then
@@ -512,10 +540,10 @@ if cmp -s /tmp/pass_before_restart.txt /tmp/pass_stat.txt &&
 else
 	fail restart-persists "tree differs after restart"
 fi
-if [ "$after_vdb" = "$before_vdb" ] && [ "$after_vdc" = "$before_vdc" ]; then
+if [ "$after_vdb" = "$before_vdb" ]; then
 	pass restart-warm
 else
-	fail restart-warm "vdb $before_vdb -> $after_vdb, vdc $before_vdc -> $after_vdc"
+	fail restart-warm "vdb $before_vdb -> $after_vdb"
 fi
 
 exit "$FAILED"

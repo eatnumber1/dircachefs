@@ -31,6 +31,13 @@
 # renameat2 flags, fallocate(2), and the xattr syscalls, none of which
 # busybox has any applet for at all.
 #
+# Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
+# second filesystem mounted below the source after dcfs starts: a write
+# targeting a name behind a refused boundary fails with EXDEV
+# (write-boundary-refused below) -- see README's Limitations and
+# dcfs/backing.cc's ProbeChild/PopulateDirectory. (The startup-refusal half
+# of amendment 12 is exercised once, in readonly.sh.)
+#
 # Run as /tests/write.sh by guest/init when booted with dcfs_test=write.sh;
 # prints one "TEST ... PASS/FAIL" line per check and exits nonzero if any
 # check failed. init turns that into the final ALL-TESTS-PASSED /
@@ -176,8 +183,9 @@ normalize_stat() {
 # --- build the backing tree (before dcfs ever sees it) ---------------------
 
 mount /dev/vdb /src
-mkdir -p /src/sub
-mount /dev/vdc /src/sub
+# "d" is for write-boundary-refused below: it must never be listed through
+# dcfs before vdc is mounted under it at runtime.
+mkdir -p /src/d
 sync
 
 mkdir -p /cache /mnt
@@ -187,6 +195,38 @@ else
 	fail mount "daemon did not mount within 10s"
 	exit "$FAILED"
 fi
+
+# --- write-boundary-refused: a filesystem mounted below the source at -----
+# --- runtime is refused (amendment 12), so writing into it fails with -----
+# --- EXDEV, exactly as it would across a real device boundary -------------
+
+mkdir /src/d/mp
+mount /dev/vdc /src/d/mp
+# 2>&1 must precede the target redirect: see create.sh's create-excl for why
+# (a failed ">" target is reported by the shell itself, using whatever fd 2
+# points to *at the moment that redirect is attempted*).
+out=$(echo subcontent 2>&1 >"$MNT/d/mp/subfile")
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	case "$out" in
+	*cross-device*) pass write-boundary-refused ;;
+	*) fail write-boundary-refused "want cross-device in error, got: $out" ;;
+	esac
+else
+	fail write-boundary-refused "echo redirect unexpectedly succeeded"
+fi
+listing=$(ls -1 "$MNT/d" 2>&1)
+case "$listing" in
+*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
+*) pass boundary-not-listed ;;
+esac
+errors=$(grep -c "refusing to cache mp" "$LOG1")
+if [ "$errors" -eq 1 ]; then
+	pass boundary-error-logged-once
+else
+	fail boundary-error-logged-once "want 1 ERROR line, got $errors"
+fi
+umount /src/d/mp
 
 # --- write-create: a fresh file via a shell redirect ------------------------
 
@@ -263,21 +303,6 @@ if [ "$mnt_md5" = "$src_want_md5" ]; then
 	pass write-large-mnt-matches
 else
 	fail write-large-mnt-matches "src=$src_want_md5 mnt=$mnt_md5"
-fi
-
-# --- write-in-submount: write-through across the vdc mount boundary --------
-
-if echo subcontent >"$MNT/sub/subfile"; then
-	pass write-in-submount-echo
-else
-	fail write-in-submount-echo "echo failed"
-fi
-check_src write-in-submount '[ "$(cat /src/sub/subfile)" = subcontent ]'
-check_cold write-in-submount '[ "$(stat -c %s /mnt/sub/subfile)" = 11 ]'
-if [ "$(cat "$MNT/sub/subfile")" = subcontent ]; then
-	pass write-in-submount-content
-else
-	fail write-in-submount-content "got '$(cat "$MNT/sub/subfile")'"
 fi
 
 # --- concurrent-opens: two readers of one file, both must succeed ----------
@@ -514,10 +539,12 @@ else
 		"ok1=$ok1 ok2=$ok2 vdb $b_vdb->$a_vdb vdc $b_vdc->$a_vdc"
 fi
 
-# --- listing-matches ---------------------------------------------------
+# --- listing-matches: "d" is excluded -- see readonly.sh's identity-checks
+# comment on why /src/d and the cached /mnt/d deliberately diverge after the
+# write-boundary-refused check above. -----------------------------------
 
-find /src -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
-find /mnt -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+find /src -path /src/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
+find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
 normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
 normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
 if cmp -s /tmp/src_stat_norm.txt /tmp/mnt_stat_norm.txt; then
@@ -535,19 +562,12 @@ fi
 sync
 echo 3 >/proc/sys/vm/drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 run_pass "$MNT"
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if [ "$after_vdb" = "$before_vdb" ]; then
 	pass warm-after-all-vdb
 else
 	fail warm-after-all-vdb "sectors_read(vdb) $before_vdb -> $after_vdb"
-fi
-if [ "$after_vdc" = "$before_vdc" ]; then
-	pass warm-after-all-vdc
-else
-	fail warm-after-all-vdc "sectors_read(vdc) $before_vdc -> $after_vdc"
 fi
 cp /tmp/pass_stat.txt /tmp/pass_before_restart.txt
 
@@ -578,19 +598,17 @@ fi
 sync
 echo 3 >/proc/sys/vm/drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 run_pass "$MNT"
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if cmp -s /tmp/pass_before_restart.txt /tmp/pass_stat.txt; then
 	pass restart-persists
 else
 	fail restart-persists "tree differs after restart"
 fi
-if [ "$after_vdb" = "$before_vdb" ] && [ "$after_vdc" = "$before_vdc" ]; then
+if [ "$after_vdb" = "$before_vdb" ]; then
 	pass restart-warm
 else
-	fail restart-warm "vdb $before_vdb -> $after_vdb, vdc $before_vdc -> $after_vdc"
+	fail restart-warm "vdb $before_vdb -> $after_vdb"
 fi
 
 check_cold restart-content-persists '[ "$(stat -c %s /mnt/f)" = 10 ] &&

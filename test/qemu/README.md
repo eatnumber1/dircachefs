@@ -280,11 +280,15 @@ bazel test //test/qemu:nfs_test
   and the scratch disk mounts.
 - `readonly_test` (`guest/readonly.sh`): step 3.2's read-only ops
   (Lookup/Getattr/Readdir(plus)/Readlink/Getxattr/Listxattr/Statfs) served
-  from the cache -- across a real submount, inode numbers matching the
-  backing filesystems, and (checked via `/sys/block/<dev>/stat`) that a
-  warm cache causes *zero* reads from either backing block device,
-  including after killing and restarting the daemon against the same
-  cache database.
+  from the cache -- inode numbers matching the backing filesystem, and
+  (checked via `/sys/block/<dev>/stat`) that a warm cache causes *zero*
+  reads from the backing block device, including after killing and
+  restarting the daemon against the same cache database. Also step 4.8's
+  submount-refusal policy (amendment 12), using vdc as a second
+  filesystem: dcfs refuses to start at all with vdc already mounted below
+  `--source` (`startup-refuses-submount`), and refuses a boundary that
+  appears at runtime instead of caching it (`boundary-*`) -- see the
+  README's Limitations.
 - `passthrough_test` (`guest/passthrough.sh`): step 3.3's file contents via
   FUSE passthrough -- a small file and a 64 MiB file read through dcfs
   match the backing files, a content read (unlike metadata) does move the
@@ -302,17 +306,19 @@ bazel test //test/qemu:nfs_test
   and restarting against a previously-used cache database.
 - `handles_test` (`guest/handles.sh`): step 3.4b's NFS export handles
   (`FUSE_CAP_EXPORT_SUPPORT`/`FUSE_CAP_ATTR_GENERATION`, exercised with
-  `//tools:fhtest`) -- a handle for a file on the source device and one for
-  a file on the submount both open and read back the right content; the
-  reported generation is 0 for the root and nonzero (and stable across a
-  restart) for everything else; a handle survives a daemon restart against
-  the same cache database; a doctored generation is rejected with ESTALE;
-  an inode number recycled behind dcfs's back invalidates the old row so
-  its handle comes back ESTALE; and wiping the cache database -- the one
-  case that does *not* survive -- also yields ESTALE, from a freshly
-  reseeded generation counter. Two consequences of the exclusive-access
-  model (no write-through invalidation until Phase 4) that this test
-  cannot demonstrate are reported as `SKIP`, not a faked pass.
+  `//tools:fhtest`) -- a handle for a file on the source device opens and
+  reads back the right content; the reported generation is 0 for the root
+  and nonzero (and stable across a restart) for everything else; a handle
+  survives a daemon restart against the same cache database; a doctored
+  generation is rejected with ESTALE; an inode number recycled behind
+  dcfs's back invalidates the old row so its handle comes back ESTALE; and
+  wiping the cache database -- the one case that does *not* survive --
+  also yields ESTALE, from a freshly reseeded generation counter. Two
+  consequences of the exclusive-access model (no write-through
+  invalidation until Phase 4) that this test cannot demonstrate are
+  reported as `SKIP`, not a faked pass. Also step 4.8's runtime submount
+  refusal (amendment 12): no `fhtest handle` can be minted for a name
+  behind a boundary vdc is mounted onto at runtime (`handle-boundary-*`).
 - `setattr_test` (`guest/setattr.sh`): step 4.1's `Setattr` write-through --
   chmod on a regular file, a directory, and a fifo (the three dispatch
   paths in `backing::SetAttr`), plus `EOPNOTSUPP` chmod-ing a symlink
@@ -335,14 +341,16 @@ bazel test //test/qemu:nfs_test
   via a shell redirect (content, size immediately after close, and
   O_EXCL/noclobber -> EEXIST without touching the existing file), mknod (a
   FIFO), symlink (resolving and dangling), link (nlink/inode agreement
-  between the two names and both sides, and EXDEV across the vdb/vdc
-  boundary), and a create inside the vdc submount -- each checked against
-  both `/src` and `/mnt`; a normalized `find`+`stat` listing of the whole
-  tree agreeing between the two sides; and (checked via
-  `/sys/block/<dev>/stat`, as in `readonly_test`) that a full metadata pass
-  over everything just created causes *zero* reads from either backing
-  block device, including after killing and restarting the daemon against
-  the same cache database.
+  between the two names and both sides) -- each checked against both `/src`
+  and `/mnt`; a normalized `find`+`stat` listing of the whole tree agreeing
+  between the two sides; and (checked via `/sys/block/<dev>/stat`, as in
+  `readonly_test`) that a full metadata pass over everything just created
+  causes *zero* reads from the backing block device, including after
+  killing and restarting the daemon against the same cache database. Also
+  step 4.8's runtime submount refusal (amendment 12): mkdir/link against a
+  boundary vdc is mounted onto at runtime fail with EXDEV, exactly as they
+  would across a real device boundary (`mkdir-boundary-refused`,
+  `link-exdev`).
 - `rename_test` (`guest/rename.sh`): step 4.3's remove/rename write-through
   ops -- unlink (plain, of one hard link, and of a file still open, whose
   content stays readable and whose row, and so its handle, lives until the
@@ -350,18 +358,20 @@ bazel test //test/qemu:nfs_test
   rename (same dir, across dirs, over an existing file whose old row is
   deleted, `RENAME_NOREPLACE` -> EEXIST, `RENAME_EXCHANGE`, a directory with
   children whose whole cached subtree moves with it, a directory over an
-  empty directory, and the raw EXDEV across the vdb/vdc boundary, via
-  `//tools:testutil rename2` since busybox `mv` falls back to copy+delete).
-  Every result is checked on `/src` and via `/mnt` after dropping every
-  cache with zero sectors read on both disks (negative entries and
-  directory completeness are recorded, not re-read), then as a whole tree,
-  and again after a daemon restart.
+  empty directory, and EXDEV renaming into a boundary vdc is mounted onto
+  at runtime -- step 4.8's amendment 12 -- via `//tools:testutil rename2`
+  since busybox `mv` falls back to copy+delete). Every result is checked on
+  `/src` and via `/mnt` after dropping every cache with zero sectors read
+  (negative entries and directory completeness are recorded, not re-read),
+  then as a whole tree, and again after a daemon restart.
 - `write_test` (`guest/write.sh`): step 4.4's write-through file I/O and the
   "one backing file per inode" fix -- plain writes (create, append,
   in-place overwrite, `O_TRUNC` on an existing file via the kernel's own
   `SETATTR(size=0)`, a 64 MiB passthrough write low enough in daemon CPU
-  time to prove the kernel moved the bytes, and a write across the vdc
-  mount boundary); two concurrent opens of one file (both readers, and a
+  time to prove the kernel moved the bytes, and -- step 4.8's amendment
+  12 -- a write into a boundary vdc is mounted onto at runtime failing
+  with EXDEV, `write-boundary-refused`); two concurrent opens of one file
+  (both readers, and a
   reader held open across a writer's open/write/close) all succeeding,
   which used to EBUSY/EIO before this step because every open got its own
   passthrough backing file; a writer's close making its effect on size
@@ -381,20 +391,25 @@ bazel test //test/qemu:nfs_test
 - `nfs_test` (`guest/nfs.sh`): step 5.3's real NFS export -- dcfs mounted
   and then re-exported over loopback NFSv4 (`rpc.nfsd`/`rpc.mountd`/
   `exportfs`, from a small Debian chroot; see "NFS test and the Debian
-  rootfs" below) checks a normalized listing matching `/src` across the
-  vdc submount; a metadata pass over NFS causing zero backing-device
-  reads (the NFS client's own attribute/dentry cache is defeated by
-  `drop_caches`, same mechanism as everywhere else in this repo, so this
-  is a real round trip through nfsd and dcfs, not served from the
-  client); a content read matching `/src` and moving the backing
-  counter; a file held open over NFS surviving a `dcfs` restart with no
-  ESTALE/EIO (`nfsd`'s own export-path cache needs an explicit
-  `exportfs -f` after the restart to pick up the new mount -- ordinary
-  NFS administration, not a dcfs workaround); a write through NFS
+  rootfs" below) checks a normalized listing matching `/src`; a metadata
+  pass over NFS causing zero backing-device reads (the NFS client's own
+  attribute/dentry cache is defeated by `drop_caches`, same mechanism as
+  everywhere else in this repo, so this is a real round trip through nfsd
+  and dcfs, not served from the client); a content read matching `/src`
+  and moving the backing counter; a file held open over NFS surviving a
+  `dcfs` restart with no ESTALE/EIO (`nfsd`'s own export-path cache needs
+  an explicit `exportfs -f` after the restart to pick up the new mount --
+  ordinary NFS administration, not a dcfs workaround); a write through NFS
   landing on the backing file and reading back correctly (step 4.4); and
   wiping the cache database yielding ESTALE for the pre-wipe handle
   (with zero backing I/O, i.e. caught before ever reaching the backing
-  file) followed by a working fresh mount.
+  file) followed by a working fresh mount. Also step 4.8's runtime
+  submount refusal (amendment 12), using vdc as a second filesystem
+  mounted below the source: the boundary is refused locally before it is
+  ever exported (`boundary-*`), and `exportfs`'s `crossmnt` option --
+  deliberately left on -- reveals nothing for it either
+  (`nfs-boundary-*`), since dcfs itself never crosses the boundary in the
+  first place.
 
 The serial console log lands at
 `bazel-testlogs/test/qemu/boot_test/test.outputs/serial.log` (Bazel's
@@ -533,16 +548,20 @@ way any admin would:
   failure, in a codepath every export apparently hits. Fixed by shipping
   `/etc/mtab` in the image, not by working around `rpc.mountd`.
 - **GNU find's cycle-detection heuristic** (busybox's `find`, used by every
-  other `guest/*.sh` script, has no such check) false-positives walking
-  this export: dcfs exposes backing inode numbers verbatim (this doc's
-  "Identity model"), and every ext4 backing filesystem's root directory is
-  inode 2 by convention, so the export root and the vdc submount's root
-  collide on `(dev, ino)` once NFS presents the whole tree under one device
-  number -- GNU find sees a directory sharing `(dev, ino)` with its own
-  ancestor and refuses to descend ("File system loop detected"). Worked
-  around in `guest/nfs.sh` by never letting one `find(1)` invocation
-  recurse across that specific boundary (prune at `sub`, `find` it
-  separately).
+  other `guest/*.sh` script, has no such check) false-positived walking
+  this export back when `guest/nfs.sh` still joined a second backing
+  filesystem under the source as a real submount: dcfs exposes backing
+  inode numbers verbatim (this doc's "Identity model"), and every ext4
+  backing filesystem's root directory is inode 2 by convention, so the
+  export root and the submount's root collided on `(dev, ino)` once NFS
+  presented the whole tree under one device number -- GNU find sees a
+  directory sharing `(dev, ino)` with its own ancestor and refuses to
+  descend ("File system loop detected"). Moot since step 4.8 (amendment
+  12): submounts are refused outright rather than cached, so no such
+  collision can arise any more; `guest/nfs.sh`'s `find_stat_tree` still
+  prunes one directory (`d`), but only to exclude that step's own
+  boundary-refusal test fixture from the general listing comparison, not
+  to work around this.
 - **`nfsd`'s export-path cache** needs an explicit `exportfs -f` after
   restarting dcfs, or every request comes back EIO: it can hold a reference
   tied to the *old* vfsmount/dentry, independent of anything dcfs does.

@@ -9,23 +9,21 @@
 # mount.nfs4) are available -- none of which fit in the busybox-only
 # initramfs every other test runs from.
 #
-# Builds a tree spanning two backing filesystems (vdb, with vdc mounted as
-# a real submount below it, as in readonly.sh/handles.sh), mounts dcfs over
-# it, exports the dcfs mount itself over loopback NFSv4 (fsid=0, so it's
-# the v4 pseudo-root -- no extra path segment to strip on the client side),
-# and loopback-mounts it back in. Checks:
+# Builds a tree on vdb, mounts dcfs over it, exports the dcfs mount itself
+# over loopback NFSv4 (fsid=0, so it's the v4 pseudo-root -- no extra path
+# segment to strip on the client side), and loopback-mounts it back in.
+# Checks:
 #
 #   - nfs-mount / nfs-listing-matches: the NFS mount succeeds and a
-#     normalized find+stat listing through it -- including across the
-#     vdc submount, which crossmnt makes visible without a second export --
-#     matches the same listing taken directly on /src.
+#     normalized find+stat listing through it matches the same listing
+#     taken directly on /src.
 #   - nfs-warm-metadata-zero: after dropping every cache (page cache,
 #     dentries, inodes -- the NFS client's own attribute/dentry cache
 #     included, since it's ordinary VFS state on this same kernel), a
 #     second metadata pass through NFS causes zero additional block reads
-#     on vdb or vdc: dcfs answered every GETATTR/LOOKUP/READDIR nfsd
-#     forwarded to it from its own cache, exactly as readonly.sh already
-#     proved for local FUSE access.
+#     on vdb: dcfs answered every GETATTR/LOOKUP/READDIR nfsd forwarded to
+#     it from its own cache, exactly as readonly.sh already proved for
+#     local FUSE access.
 #   - nfs-content-read: `cat` through NFS matches /src and -- unlike
 #     metadata -- does move vdb's block-read counter.
 #   - nfs-handle-survives-restart: the core of this step. Opens a file over
@@ -35,8 +33,8 @@
 #     bounces), and keeps reading from the same fd: the kernel's FUSE
 #     export_operations reconnect the stale nodeid with a LOOKUP(nodeid,
 #     ".") against the new daemon (see README.md's "Identity model"), so
-#     this must succeed with no ESTALE/EIO. A fresh `cat` of a file on the
-#     vdc submount and a fresh listing must also still work.
+#     this must succeed with no ESTALE/EIO. A fresh listing must also still
+#     work.
 #   - nfs-write: write-through (step 4.4, merged into main since this
 #     script was first drafted against a pre-4.4 dcfs that refused every
 #     non-read-only open with EROFS) works through NFS too: a write
@@ -48,6 +46,16 @@
 #     from the pre-wipe fd -- this must fail, and specifically with ESTALE
 #     ("Stale file handle"), not merely "some error". A brand new mount and
 #     `cat` afterwards must still work fine against the cold cache.
+#
+# Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
+# second filesystem mounted below the source after dcfs starts: this is the
+# one script that can show the refusal is transparent through a real NFS
+# re-export, not just local FUSE access. `exportfs`'s crossmnt option is
+# left on (it is what would make a submount visible to an NFS client
+# without a second export) specifically to demonstrate that it is now
+# inert: dcfs itself never crosses the boundary, so there is nothing left
+# for crossmnt to reveal (nfs-boundary-* below). (The startup-refusal half
+# of amendment 12 is exercised once, in readonly.sh.)
 #
 # Run as /tests/nfs.sh (chrooted; see guest/init) when booted with
 # dcfs_test=nfs.sh; prints one "TEST ... PASS/FAIL" line per check and
@@ -68,7 +76,6 @@ LOG2=/tmp/dcfs-2.log
 LOG3=/tmp/dcfs-3.log
 
 A_CONTENT="dcfs_nfs_handle_survives_restart_0123456789"
-B_CONTENT="dcfs_nfs_submount_b"
 
 DAEMON_PID=""
 MOUNTED=0
@@ -223,28 +230,14 @@ normalize_stat() {
 	done <"$file"
 }
 
-# GNU find's cycle-detection heuristic (not present in BusyBox's find,
-# which is what every other guest/*.sh script here uses instead) false-
-# positives on this tree: dcfs exposes backing inode numbers verbatim
-# (README's "Identity model"), and every one of these ext4 backing
-# filesystems' *root* directory is inode 2 by convention -- so $root
-# (inode 2, from vdb's root) and $root/sub (inode 2, from vdc's root)
-# collide, and since the whole tree is presented under one device number
-# (one FUSE superblock locally, one NFS export over NFS), find sees a
-# directory sharing (dev, ino) with one of its own ancestors and refuses
-# to descend ("File system loop detected: ... is part of the same file
-# system loop"). Real, structural dcfs behavior, not a bug -- worked
-# around here by never letting a single find(1) invocation recurse across
-# that specific boundary: prune at $root/sub and stat it in a second,
-# independent invocation (whose own ancestor stack starts fresh at
-# $root/sub) instead.
+# "d" is excluded: it exists only to host the nfs-boundary-* checks below,
+# and by design diverges between /src (real, once vdc is unmounted) and the
+# view through dcfs (permanently missing "mp": see the boundary-* checks) --
+# see readonly.sh's identity-checks comment for the full explanation.
 find_stat_tree() {
 	root=$1
 	fmt=$2
-	find "$root" -path "$root/sub" -prune -o -exec stat -c "$fmt" {} + 2>/dev/null
-	if [ -d "$root/sub" ]; then
-		find "$root/sub" -exec stat -c "$fmt" {} + 2>/dev/null
-	fi
+	find "$root" -path "$root/d" -prune -o -exec stat -c "$fmt" {} + 2>/dev/null
 }
 
 listing_matches() {
@@ -280,19 +273,18 @@ populate_tree() {
 	done
 }
 
-# --- build the backing tree, across a real submount -----------------------
+# --- build the backing tree -------------------------------------------------
 # (unlike the busybox-only initramfs, guest/init does not pre-create these
 # inside the Debian chroot)
 
 mkdir -p /src /cache /mnt /nfs
 mount /dev/vdb /src
-mkdir -p /src/sub
-mount /dev/vdc /src/sub
 populate_tree /src
-populate_tree /src/sub
 printf '%s' "$A_CONTENT" >/src/a.txt
-printf '%s' "$B_CONTENT" >/src/sub/b.txt
 dd if=/dev/urandom of=/src/content.bin bs=1M count=4 2>/dev/null
+# "d" is for nfs-boundary-* below: it must never be listed through dcfs
+# before vdc is mounted under it at runtime.
+mkdir -p /src/d
 sync
 set -- $(md5sum /src/content.bin)
 src_content_md5=$1
@@ -305,6 +297,23 @@ if start_daemon "$LOG1"; then
 else
 	fail mount "daemon did not mount within 10s"
 	exit "$FAILED"
+fi
+
+# --- nfs-boundary-*: a filesystem mounted below the source at runtime -----
+# --- is refused locally (amendment 12) before it is ever exported --------
+
+mkdir /src/d/mp
+mount /dev/vdc /src/d/mp
+listing=$(ls -1 "$MNT/d" 2>&1)
+case "$listing" in
+*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
+*) pass boundary-not-listed ;;
+esac
+errors=$(grep -c "refusing to cache mp" "$LOG1")
+if [ "$errors" -eq 1 ]; then
+	pass boundary-error-logged-once
+else
+	fail boundary-error-logged-once "want 1 ERROR line, got $errors"
 fi
 
 # --- export dcfs over NFSv4, loopback --------------------------------------
@@ -402,7 +411,26 @@ else
 	exit "$FAILED"
 fi
 
-# --- nfs-listing-matches: /src vs /nfs, including the submount ------------
+# --- nfs-boundary-crossmnt: crossmnt (enabled in the exportfs call above)
+# reveals nothing for "mp", since dcfs itself already refused to cross into
+# it (see boundary-* above) -- the whole point of amendment 12: identity
+# stays local to dcfs's own st_dev regardless of what an NFS export option
+# asks for. Only "not listed" and "not statable" are asserted; the specific
+# error an NFS client sees for a server-side EXDEV is nfsd's own errno ->
+# NFS status mapping (nfserrno()), not something amendment 12 specifies.
+nfs_listing=$(ls -1 "$NFS/d" 2>&1)
+case "$nfs_listing" in
+*mp*) fail nfs-boundary-not-listed "mp appeared in $NFS/d: $nfs_listing" ;;
+*) pass nfs-boundary-not-listed ;;
+esac
+if stat "$NFS/d/mp" >/dev/null 2>&1; then
+	fail nfs-boundary-stat-fails "unexpectedly succeeded"
+else
+	pass nfs-boundary-stat-fails
+fi
+umount /src/d/mp
+
+# --- nfs-listing-matches: /src vs /nfs -------------------------------------
 
 listing_matches nfs-listing-matches /src "$SRC" "$NFS" "$NFS"
 
@@ -414,19 +442,12 @@ listing_matches nfs-listing-matches /src "$SRC" "$NFS" "$NFS"
 
 drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 find_stat_tree "$NFS" '%i %s %n' >/tmp/nfs_warm1.txt
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if [ "$after_vdb" = "$before_vdb" ]; then
 	pass nfs-warm-metadata-zero-vdb
 else
 	fail nfs-warm-metadata-zero-vdb "sectors_read(vdb) $before_vdb -> $after_vdb"
-fi
-if [ "$after_vdc" = "$before_vdc" ]; then
-	pass nfs-warm-metadata-zero-vdc
-else
-	fail nfs-warm-metadata-zero-vdc "sectors_read(vdc) $before_vdc -> $after_vdc"
 fi
 
 # --- nfs-content-read: content differs from metadata -- it must hit vdb --
@@ -467,18 +488,9 @@ if restart_daemon nfs-handle-survives-restart "$LOG2"; then
 		cat /tmp/part2.err
 	fi
 
-	sub_content=$(cat "$NFS/sub/b.txt" 2>/tmp/sub_read.err)
-	if [ "$sub_content" = "$B_CONTENT" ]; then
-		pass nfs-handle-submount-read-after-restart
-	else
-		fail nfs-handle-submount-read-after-restart "got '$sub_content'"
-		cat /tmp/sub_read.err
-	fi
-
 	listing_matches nfs-listing-matches-after-restart /src "$SRC" "$NFS" "$NFS"
 else
 	fail nfs-handle-read-after-restart "daemon did not come back up"
-	fail nfs-handle-submount-read-after-restart "daemon did not come back up"
 	fail nfs-listing-matches-after-restart "daemon did not come back up"
 fi
 exec 3<&-

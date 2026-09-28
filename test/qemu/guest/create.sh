@@ -2,22 +2,30 @@
 # dcfs step 4.2 acceptance test: the create-family write-through ops
 # (mkdir/mknod/symlink/link/create).
 #
-# Builds a small tree spanning two backing filesystems (vdb, with vdc
-# mounted as a real submount below it, as in readonly.sh/handles.sh), mounts
-# dcfs over it, and exercises every create-family op *through* dcfs (never
-# directly against /src, except to confirm the backing side agrees):
-# mkdir (plain, nested, EEXIST, ENOENT-missing-parent), create via a shell
-# redirect (content, size right after close, O_EXCL/noclobber -> EEXIST),
-# mknod (a FIFO; a regular file is Create, not mknod -- busybox mknod cannot
-# make one), symlink (resolving and dangling), link (nlink/inode agreement,
-# and EXDEV across the vdb/vdc boundary), and a create inside the vdc
-# submount. Each check compares /src and /mnt directly. Finally, a full
-# metadata pass over the whole tree -- with the page/dentry/inode caches
-# dropped first -- causes *zero* additional block reads on either backing
-# device (RecordNewChild/RecordNewLink already wrote everything the create
-# needed into the cache; a subsequent stat should never touch the backing
-# filesystem again), and this stays true after killing and restarting the
-# daemon against the same cache database.
+# Builds a tree on vdb, mounts dcfs over it, and exercises every
+# create-family op *through* dcfs (never directly against /src, except to
+# confirm the backing side agrees): mkdir (plain, nested, EEXIST,
+# ENOENT-missing-parent, and refused by a mount/subvolume boundary -- see
+# below), create via a shell redirect (content, size right after close,
+# O_EXCL/noclobber -> EEXIST), mknod (a FIFO; a regular file is Create, not
+# mknod -- busybox mknod cannot make one), symlink (resolving and dangling),
+# link (nlink/inode agreement, and EXDEV against a boundary). Each check
+# compares /src and /mnt directly. Finally, a full metadata pass over the
+# whole tree -- with the page/dentry/inode caches dropped first -- causes
+# *zero* additional block reads on the backing device (RecordNewChild/
+# RecordNewLink already wrote everything the create needed into the cache; a
+# subsequent stat should never touch the backing filesystem again), and this
+# stays true after killing and restarting the daemon against the same cache
+# database.
+#
+# Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
+# second filesystem mounted below the source after dcfs starts: every
+# create-family op against a refused boundary fails with EXDEV, exactly as
+# it would fail if attempted directly on the backing filesystem across a
+# real device boundary (see mkdir-boundary-refused/link-exdev below) -- see
+# README's Limitations and dcfs/backing.cc's ProbeChild/PopulateDirectory.
+# (The startup-refusal half of amendment 12 is exercised once, in
+# readonly.sh.)
 #
 # Uses only busybox applets/options (verified against the exact busybox
 # baked into the initramfs: `busybox --list`, `busybox <applet> --help`) --
@@ -158,11 +166,12 @@ run_pass() {
 	readlink "$dir/l2" >/dev/null
 }
 
-# --- build the backing tree, across a real submount -----------------------
+# --- build the backing tree -------------------------------------------------
 
 mount /dev/vdb /src
-mkdir -p /src/sub
-mount /dev/vdc /src/sub
+# "d" is for mkdir-boundary-refused/link-exdev below: it must never be
+# listed through dcfs before vdc is mounted under it at runtime.
+mkdir -p /src/d
 sync
 
 mkdir -p /cache /mnt
@@ -311,37 +320,42 @@ else
 	fail link "ln failed"
 fi
 
-expect_fail link-exdev "cross-device" ln "$MNT/f1" "$MNT/sub/x"
-
-# --- create in the submount --------------------------------------------
-
-if echo sub >"$MNT/sub/s1"; then
-	content_src=$(cat /src/sub/s1)
-	if [ "$content_src" = "sub" ]; then
-		pass create-in-submount
-	else
-		fail create-in-submount "content_src='$content_src'"
-	fi
+# --- mkdir-boundary-refused / link-exdev: create-family ops refused by a --
+# --- mount/subvolume boundary discovered at runtime (amendment 12) --------
+#
+# vdc is mounted below the source (under "d", never listed through dcfs
+# before this point -- see readonly.sh's boundary-* checks for why that
+# ordering matters) after dcfs is already running. The kernel's own VFS
+# always looks a create-family op's target name up first (to confirm it
+# does not already exist) before issuing the create itself, so a name the
+# LOOKUP path refuses with EXDEV (see backing::LookupOrPopulate) makes the
+# create-family syscall itself fail with EXDEV too, without dcfs's Mkdir/
+# Link ops ever running -- exactly as it would if mkdir/ln were attempted
+# straight across a real device boundary on the backing filesystem.
+mkdir /src/d/mp
+mount /dev/vdc /src/d/mp
+expect_fail mkdir-boundary-refused "cross-device" mkdir "$MNT/d/mp"
+expect_fail link-exdev "cross-device" ln "$MNT/f1" "$MNT/d/mp"
+listing=$(ls -1 "$MNT/d" 2>&1)
+case "$listing" in
+*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
+*) pass boundary-not-listed ;;
+esac
+errors=$(grep -c "refusing to cache mp" "$LOG1")
+if [ "$errors" -eq 1 ]; then
+	pass boundary-error-logged-once
 else
-	fail create-in-submount "echo redirect failed"
+	fail boundary-error-logged-once "want 1 ERROR line, got $errors"
 fi
-
-sync
-echo 3 >/proc/sys/vm/drop_caches
-before_vdc=$(sectors_read vdc)
-stat "$MNT/sub/s1" >/dev/null
-after_vdc=$(sectors_read vdc)
-if [ "$after_vdc" = "$before_vdc" ]; then
-	pass create-in-submount-cached
-else
-	fail create-in-submount-cached "sectors_read(vdc) $before_vdc -> $after_vdc"
-fi
+umount /src/d/mp
 
 # --- listing-matches: everything created above agrees between /src/ and
-# /mnt -----------------------------------------------------------------
+# /mnt -- "d" is excluded: see readonly.sh's identity-checks comment on why
+# /src/d and the cached /mnt/d deliberately diverge after the checks above.
+# -----------------------------------------------------------------------
 
-find /src -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
-find /mnt -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+find /src -path /src/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
+find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
 normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
 normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
 set -- $(md5sum /tmp/src_stat_norm.txt)
@@ -365,21 +379,14 @@ fi
 sync
 echo 3 >/proc/sys/vm/drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 
 run_pass "$MNT"
 
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if [ "$after_vdb" = "$before_vdb" ]; then
 	pass warm-after-all-vdb
 else
 	fail warm-after-all-vdb "sectors_read(vdb) $before_vdb -> $after_vdb"
-fi
-if [ "$after_vdc" = "$before_vdc" ]; then
-	pass warm-after-all-vdc
-else
-	fail warm-after-all-vdc "sectors_read(vdc) $before_vdc -> $after_vdc"
 fi
 
 # --- restart-persists: kill+restart against the same cache db, everything
@@ -417,7 +424,6 @@ persisted=1
 [ "$(readlink /mnt/l2)" = "nowhere" ] || persisted=0
 [ -p /mnt/p1 ] || persisted=0
 [ -d /mnt/d1/d2 ] || persisted=0
-[ "$(cat /mnt/sub/s1)" = "sub" ] || persisted=0
 if [ "$persisted" -eq 1 ]; then
 	pass restart-persists
 else
@@ -427,21 +433,14 @@ fi
 sync
 echo 3 >/proc/sys/vm/drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 
 run_pass "$MNT" # metadata only -- no content reads.
 
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if [ "$after_vdb" = "$before_vdb" ]; then
 	pass restart-warm-vdb
 else
 	fail restart-warm-vdb "sectors_read(vdb) $before_vdb -> $after_vdb"
-fi
-if [ "$after_vdc" = "$before_vdc" ]; then
-	pass restart-warm-vdc
-else
-	fail restart-warm-vdc "sectors_read(vdc) $before_vdc -> $after_vdc"
 fi
 
 exit "$FAILED"

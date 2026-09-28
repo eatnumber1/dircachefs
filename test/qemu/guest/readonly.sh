@@ -1,15 +1,20 @@
 #!/bin/sh
 # dcfs step 3.2 acceptance test: read-only ops served from the cache.
 #
-# Builds a small tree spanning two backing filesystems (vdb, with vdc
-# mounted as a real submount below it), mounts dcfs over it, and checks:
-# metadata matches the backing filesystems (inode numbers, a stat-based
-# directory listing, ENOENT on a missing name); a second listing pass -- with
-# the page/dentry/inode caches dropped in between -- causes *zero* additional
-# block reads on either backing device (dcfs's own sqlite cache answers it,
-# per step 3.2's design); and that this stays true after killing and
-# restarting the daemon against the same cache database (i.e. the cache
-# persisted).
+# Builds a tree on vdb, mounts dcfs over it, and checks: metadata matches the
+# backing filesystem (inode numbers, a stat-based directory listing, ENOENT
+# on a missing name); a second listing pass -- with the page/dentry/inode
+# caches dropped in between -- causes *zero* additional block reads on the
+# backing device (dcfs's own sqlite cache answers it, per step 3.2's design);
+# and that this stays true after killing and restarting the daemon against
+# the same cache database (i.e. the cache persisted).
+#
+# Also step 4.8's submount-refusal policy (amendment 12), using vdc as the
+# second filesystem: dcfs refuses to start at all with vdc already mounted
+# below --source (startup-refuses-submount), and refuses a boundary that
+# appears at runtime -- vdc mounted below --source after dcfs is already
+# running -- without caching it (boundary-*): see README's Limitations and
+# dcfs/backing.cc's ProbeChild/PopulateDirectory.
 #
 # Uses only busybox applets/options (verified against the exact busybox
 # baked into the initramfs: `busybox --list`, `busybox <applet> --help`) --
@@ -157,27 +162,77 @@ run_pass() {
 	dir=$1
 	find "$dir" -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/pass_stat.txt
 	readlink "$dir/link_to_file" >/dev/null
-	readlink "$dir/sub/link_to_file" >/dev/null
 }
 
-# --- build the backing tree, across a real submount ---------------------
+# --- build the backing tree ------------------------------------------------
 
+mkdir -p /cache /mnt
 mount /dev/vdb /src
-mkdir -p /src/sub
+mkdir -p /src/sub /src/d
+
+# --- startup-refuses-submount: dcfs must refuse to start at all with a ----
+# --- filesystem already mounted below --source (amendment 12) ------------
+
 mount /dev/vdc /src/sub
+out=$("$DCFS" --source="$SRC" --cache_db="$DB" "$MNT" 2>&1)
+rc=$?
+if [ "$rc" -eq 0 ]; then
+	fail startup-refuses-submount "dcfs unexpectedly started"
+	umount "$MNT" 2>/dev/null || true
+else
+	case "$out" in
+	*"mounted below"*"unmount them"*) pass startup-refuses-submount ;;
+	*) fail startup-refuses-submount "want the submount-refusal message, got: $out" ;;
+	esac
+fi
+umount /src/sub
+
 populate_tree /src
-populate_tree /src/sub
 sync
 
 # --- mount dcfs and run the cold pass ------------------------------------
 
-mkdir -p /cache /mnt
 if start_daemon "$LOG1"; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"
 	exit "$FAILED"
 fi
+
+# --- boundary-*: a filesystem mounted below the source at runtime (rather
+# than already there at startup, checked above) is refused the moment dcfs
+# first lists the directory it appears in, not cached, and never listed --
+# see README's Limitations / dcfs/backing.cc's
+# ProbeChild/PopulateDirectory. "d" is deliberately never listed through
+# dcfs before "mp" is mounted under it: a directory dcfs already cached
+# complete (e.g. "sub" above, a plain empty directory once vdc is
+# unmounted) keeps serving that cached listing under the exclusive-access
+# assumption instead of ever re-probing it (see the README's Coherence
+# section), so this checks the boundary the one way it is actually
+# reachable: a never-before-listed directory.
+mkdir /src/d/mp
+mount /dev/vdc /src/d/mp
+listing=$(ls -1 "$MNT/d" 2>&1)
+case "$listing" in
+*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
+*) pass boundary-not-listed ;;
+esac
+out=$(stat "$MNT/d/mp" 2>&1)
+if [ $? -eq 0 ]; then
+	fail boundary-stat-exdev "unexpectedly succeeded"
+else
+	case "$out" in
+	*"cross-device"*) pass boundary-stat-exdev ;;
+	*) fail boundary-stat-exdev "want EXDEV (cross-device), got: $out" ;;
+	esac
+fi
+errors=$(grep -c "refusing to cache mp" "$LOG1")
+if [ "$errors" -eq 1 ]; then
+	pass boundary-error-logged-once
+else
+	fail boundary-error-logged-once "want 1 ERROR line, got $errors"
+fi
+umount /src/d/mp
 
 run_pass "$MNT" # pass 1 (cold): populates the cache from the backing tree.
 
@@ -186,21 +241,14 @@ run_pass "$MNT" # pass 1 (cold): populates the cache from the backing tree.
 sync
 echo 3 >/proc/sys/vm/drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 
 run_pass "$MNT" # pass 2: everything above should already be cached.
 
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if [ "$after_vdb" = "$before_vdb" ]; then
 	pass warm-metadata-vdb
 else
 	fail warm-metadata-vdb "sectors_read(vdb) $before_vdb -> $after_vdb"
-fi
-if [ "$after_vdc" = "$before_vdc" ]; then
-	pass warm-metadata-vdc
-else
-	fail warm-metadata-vdc "sectors_read(vdc) $before_vdc -> $after_vdc"
 fi
 
 # Prove sectors_read actually notices real I/O: reading a file's data
@@ -225,16 +273,14 @@ else
 	fail st-ino-backing "src=$src_ino mnt=$mnt_ino"
 fi
 
-sub_src_ino=$(stat -c %i /src/sub/file_0.txt)
-sub_mnt_ino=$(stat -c %i /mnt/sub/file_0.txt)
-if [ "$sub_src_ino" = "$sub_mnt_ino" ]; then
-	pass st-ino-submount
-else
-	fail st-ino-submount "src=$sub_src_ino mnt=$sub_mnt_ino"
-fi
-
-find /src -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
-find /mnt -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+# "d" is excluded: it exists only to host the boundary-* checks above, and
+# by this point /src/d/mp (real, on vdb, once vdc was unmounted) and the
+# cached /mnt/d (permanently missing "mp": see boundary-not-listed above)
+# have deliberately diverged, which is the whole point of those checks --
+# see the README's Coherence section on why dcfs never revisits a directory
+# it has already cached complete.
+find /src -path /src/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
+find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
 normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
 normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
 set -- $(md5sum /tmp/src_stat_norm.txt)
@@ -282,21 +328,14 @@ fi
 sync
 echo 3 >/proc/sys/vm/drop_caches
 before_vdb=$(sectors_read vdb)
-before_vdc=$(sectors_read vdc)
 
 run_pass "$MNT" # pass 3: same cache db, fresh process -- still cached.
 
 after_vdb=$(sectors_read vdb)
-after_vdc=$(sectors_read vdc)
 if [ "$after_vdb" = "$before_vdb" ]; then
 	pass warm-after-restart-vdb
 else
 	fail warm-after-restart-vdb "sectors_read(vdb) $before_vdb -> $after_vdb"
-fi
-if [ "$after_vdc" = "$before_vdc" ]; then
-	pass warm-after-restart-vdc
-else
-	fail warm-after-restart-vdc "sectors_read(vdc) $before_vdc -> $after_vdc"
 fi
 
 exit "$FAILED"

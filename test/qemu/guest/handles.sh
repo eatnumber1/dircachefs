@@ -2,15 +2,12 @@
 # dcfs step 3.4b acceptance test: NFS export handles (FUSE_CAP_EXPORT_SUPPORT
 # + FUSE_CAP_ATTR_GENERATION).
 #
-# Builds a small tree spanning two backing filesystems (vdb, with vdc
-# mounted as a real submount below it, as in readonly.sh), mounts dcfs over
-# it, and uses fhtest (name_to_handle_at/open_by_handle_at/FS_IOC_GETVERSION)
-# to check the identity model documented in README.md's "Identity model"
-# section:
+# Builds a small tree on vdb, mounts dcfs over it, and uses fhtest
+# (name_to_handle_at/open_by_handle_at/FS_IOC_GETVERSION) to check the
+# identity model documented in README.md's "Identity model" section:
 #
 #   - a file handle obtained through dcfs opens and reads back the right
-#     content, both for a file on the source device and for one on the
-#     submount;
+#     content;
 #   - the generation dcfs reports is 0 for the root and nonzero for
 #     everything else, and is stable across a daemon restart against the
 #     same cache database (handles survive restarts: NFS servers restart
@@ -24,6 +21,14 @@
 #     survive) yields ESTALE for a pre-wipe handle, from a fresh,
 #     randomly-reseeded generation counter that is astronomically unlikely
 #     to reissue the old (nodeid, generation) pair.
+#
+# Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
+# second filesystem mounted below the source after dcfs starts: no NFS
+# handle can ever be minted for a name dcfs refuses to cross into (see
+# handle-boundary-* below) -- see README's Limitations and
+# dcfs/backing.cc's ProbeChild/PopulateDirectory. (The startup-refusal half
+# of amendment 12 -- dcfs refusing to start at all with a filesystem already
+# mounted below --source -- is exercised once, in readonly.sh.)
 #
 # Two checks the design implies but this script cannot exercise without
 # Phase 4 (write-through) are reported as SKIP, not FAIL or a faked PASS;
@@ -56,7 +61,6 @@ LOG3=/tmp/dcfs-3.log
 LOG4=/tmp/dcfs-4.log
 
 A_CONTENT="dcfs_handle_a"
-B_CONTENT="dcfs_handle_b_sub"
 C_CONTENT="dcfs_handle_c_recycled"
 
 DAEMON_PID=""
@@ -164,13 +168,13 @@ open_of() {
 	"$FHTEST" open "$1" "$2" "$3" || true
 }
 
-# --- build the backing tree, across a real submount -----------------------
+# --- build the backing tree -------------------------------------------------
 
 mount /dev/vdb /src
-mkdir -p /src/sub
-mount /dev/vdc /src/sub
 printf '%s' "$A_CONTENT" >/src/a.txt
-printf '%s' "$B_CONTENT" >/src/sub/b.txt
+# "d" is for handle-boundary-* below: it must never be listed through dcfs
+# before vdc is mounted under it at runtime (see that section).
+mkdir -p /src/d
 # c.txt is created now, before dcfs ever mounts, specifically so it is part
 # of the root directory's very first (and, in this phase, only) listing --
 # see the "recycled-inode" comment below for why a file created directly on
@@ -231,31 +235,32 @@ else
 	fail handle-basic-open "no handle for a.txt"
 fi
 
-# --- handle-submount: same, for a file on the vdc submount -----------------
+# --- handle-boundary-*: no NFS handle can be minted for a name dcfs refuses
+# to cross into (amendment 12) -- vdc mounted below the source at runtime,
+# under a directory ("d") never listed through dcfs before the mount
+# appears (see readonly.sh's boundary-* checks for why that ordering
+# matters: a directory dcfs already cached complete keeps serving that
+# cached listing regardless of what gets mounted under it afterwards).
 
-res=$(handle_of /mnt/sub/b.txt)
-if [ "$res" = "ERR" ]; then
-	fail handle-submount-handle "fhtest handle /mnt/sub/b.txt failed"
-	TYPE_B=""
-	HEX_B=""
+mkdir /src/d/mp
+mount /dev/vdc /src/d/mp
+listing=$(ls -1 "$MNT/d" 2>&1)
+case "$listing" in
+*mp*) fail handle-boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
+*) pass handle-boundary-not-listed ;;
+esac
+raw=$("$FHTEST" handle "$MNT/d/mp" 2>&1) || true
+case "$raw" in
+*cross-device*) pass handle-boundary-refused ;;
+*) fail handle-boundary-refused "fhtest handle -> '$raw' (want EXDEV/cross-device)" ;;
+esac
+errors=$(grep -c "refusing to cache mp" "$LOG1")
+if [ "$errors" -eq 1 ]; then
+	pass handle-boundary-error-logged-once
 else
-	pass handle-submount-handle
-	set -- $res
-	TYPE_B=$1
-	HEX_B=$2
+	fail handle-boundary-error-logged-once "want 1 ERROR line, got $errors"
 fi
-
-if [ -n "$TYPE_B" ]; then
-	res=$(open_of "$MNT" "$TYPE_B" "$HEX_B")
-	set -- $res
-	if [ "$1" = "OK" ] && [ "$3" = "$B_CONTENT" ]; then
-		pass handle-submount-open
-	else
-		fail handle-submount-open "fhtest open -> '$res' (want content '$B_CONTENT')"
-	fi
-else
-	fail handle-submount-open "no handle for sub/b.txt"
-fi
+umount /src/d/mp
 
 # --- handle-survives-restart / handle-stable-gen ---------------------------
 # The core NFS-server-restart property: a client holding a handle minted
@@ -275,18 +280,6 @@ if restart_daemon handle-survives-restart "$LOG2"; then
 		fail handle-survives-restart-a "no handle for a.txt"
 	fi
 
-	if [ -n "$TYPE_B" ]; then
-		res=$(open_of "$MNT" "$TYPE_B" "$HEX_B")
-		set -- $res
-		if [ "$1" = "OK" ] && [ "$3" = "$B_CONTENT" ]; then
-			pass handle-survives-restart-b
-		else
-			fail handle-survives-restart-b "fhtest open -> '$res'"
-		fi
-	else
-		fail handle-survives-restart-b "no handle for sub/b.txt"
-	fi
-
 	GEN_A_AFTER=$(gen_of /mnt/a.txt)
 	if [ "$GEN_A_AFTER" = "$GEN_A" ]; then
 		pass handle-stable-gen
@@ -295,7 +288,6 @@ if restart_daemon handle-survives-restart "$LOG2"; then
 	fi
 else
 	fail handle-survives-restart-a "daemon did not come back up"
-	fail handle-survives-restart-b "daemon did not come back up"
 	fail handle-stable-gen "daemon did not come back up"
 fi
 
