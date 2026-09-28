@@ -36,13 +36,23 @@ row.
   play, backing inode numbers are not even unique.
 - `st_ino` shown to users is the backing inode number, so hardlink-aware
   tools behave as they would on the backing filesystem.
-- The FUSE generation returned on LOOKUP/GETATTR/SETATTR is our own
-  32-bit counter, seeded from a random value at cache-creation time, so a
-  rebuilt cache cannot reissue an old `(nodeid, generation)` pair.
-- When the backing filesystem recycles an inode number (a new
-  `backing_gen`), a new row is created with a new id and generation, and
-  the old row is marked bad, so a patched kernel rejects stale handles
-  against it instead of resolving them to the wrong file.
+- The FUSE generation returned on LOOKUP/GETATTR/SETATTR is a uniformly
+  random, nonzero 32-bit value drawn for each new row (the root's is 0).
+  Neither a rebuilt cache nor a power loss that rolls back recent inserts
+  (letting `AUTOINCREMENT` hand an id out again) reissues an old
+  `(nodeid, generation)` pair, except with probability 2^-32 per reissued
+  id: the old handle gets ESTALE instead of the new object.
+- A row is the same backing object only if, beyond `(device_id,
+  backing_ino, backing_gen)`, its stored file handle bytes and its birth
+  time (when both are known) match too. `backing_gen` is 0 for symlinks
+  and special files and on filesystems without `FS_IOC_GETVERSION`, but
+  the handle bytes still encode the real generation; and btrfs can reissue
+  an identical handle after its own power loss, which only the birth time
+  tells apart. Both are already in hand, so this costs no syscall.
+- When the backing filesystem recycles an inode number, a new row is
+  created with a new id and generation, and the old row is invalidated, so
+  a patched kernel rejects stale handles against it instead of resolving
+  them to the wrong file.
 - Handles survive daemon restarts, since the rows persist. They do not
   survive a cache wipe: reconnection sends the kernel only the nodeid, and
   with multiple backing filesystems there is no way to encode
@@ -109,6 +119,48 @@ cache update can only cost a repopulation, never wrong data:
 
 Unknown state is repopulated from the backing filesystem on next access.
 
+That alone covers a daemon crash, after which the database is exactly its
+last committed state. A power loss (or kernel crash) is harder: SQLite's
+WAL runs at `synchronous=NORMAL` (commits reach the WAL but are not
+fsynced), the backing filesystem commits its journal on its own schedule,
+and each comes back as some prefix of what was written, independently. So
+the cache could come back *behind* the backing filesystem (phase 1 lost,
+the syscall kept) or *ahead* of it (phase 3 kept, the syscall lost). dcfs
+closes both with a durable dirty set, at the cost of one WAL fsync per
+mutation and no backing flush per mutation:
+
+- Phase 1 also records every inode the mutation changes (both parents and
+  the object for a rename, the parent and the child for an unlink, the
+  file for a setattr or writable open, ...) in a `dirty` table, and that
+  transaction is committed with `synchronous=FULL` (a WAL fsync) before the
+  backing syscall. Phase 3 commits normally and never removes dirty
+  entries; a row phase 3 creates is dirty too. A phase 1 whose inodes are
+  all already durably dirty skips the fsync, since recovery forgets their
+  state anyway: a burst of creates in one directory costs one fsync, not
+  one per file.
+- A sync point `syncfs()`es the backing filesystems and then empties the
+  dirty set (except files still open for writing). It runs when the kernel
+  sends FSYNC or FSYNCDIR (after the fsync itself), at a clean shutdown,
+  and at the start of the first request `--sync_interval_sec` (default 5)
+  after the previous one while the set is non-empty. dcfs is
+  single-threaded in libfuse's blocking loop and has no timer, so an idle
+  daemon keeps a non-empty set until its next request, fsync or shutdown:
+  that is safe, it only makes the re-read after a crash larger. (libfuse
+  3.18.2 has no SYNCFS handler, and the kernel sends SYNCFS only to
+  fuseblk servers anyway.)
+- `meta.clean_shutdown` records whether the last run ended cleanly (after
+  its final sync point and WAL checkpoint), and `meta.boot_id` which boot
+  it ran in. At startup after an unclean shutdown, dcfs marks everything
+  in the dirty set unknown: attributes, xattrs, symlink target, a
+  directory's whole listing, and the dentries pointing at each entry. Rows
+  are kept, so NFS handles still resolve (and are verified when next
+  opened). It logs a WARNING with the count and whether the machine
+  rebooted (a crash or power loss) or only the daemon died.
+
+What a power loss costs is therefore re-reading the entries mutated in the
+last few seconds before it (up to `--sync_interval_sec`, or since the last
+fsync), never serving state the backing filesystem did not keep.
+
 Writes to file contents go from the kernel straight to the backing file
 (FUSE passthrough), so dcfs never sees them. A writable open or create is
 therefore phase 1 of a mutation: it marks the file's cached attributes
@@ -118,7 +170,10 @@ read or refreshed meanwhile. While the file is open, attribute reads are
 served by a `statx` of dcfs's already-open backing fd, so this costs no
 extra open and no disk access. A crash while a file is open for writing
 leaves its attributes unknown, never the pre-write size and mtime marked
-current.
+current. Such a file stays in the dirty set until that last release, sync
+points notwithstanding. Likewise, the attributes of an unlinked file dcfs
+still holds open (link count 0) are never recorded as current: its row
+only lives until the last close deletes it.
 
 ## Coherence
 

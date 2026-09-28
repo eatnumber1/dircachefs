@@ -129,6 +129,15 @@ qemu_test(
     guest_script = "guest/crash.sh",
 )
 
+# Step 4.10: the durable dirty set -- recovery after an unclean shutdown in
+# which the backing filesystem lost the last mutations, sync points, and
+# clean-shutdown detection.
+qemu_test(
+    name = "power_test",
+    disks = [("vdb", "ext4", "128M")],
+    guest_script = "guest/power.sh",
+)
+
 # Step 5.3: dcfs exported over real NFSv4 (rpc.nfsd/rpc.mountd/exportfs from
 # a small Debian chroot -- see test/qemu/scripts/mkrootfs-debian.sh and
 # guest/init's dcfs_rootfs= branch, since none of that fits in the
