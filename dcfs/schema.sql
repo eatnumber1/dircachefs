@@ -13,8 +13,13 @@
 -- cache nor a power loss that rolls back recent inserts (and so lets
 -- AUTOINCREMENT hand an id out again) reissues an old (id, gen) pair,
 -- except with probability 2^-32 per reissued id. The root row has id 1
--- (= FUSE_ROOT_ID) and reports generation 0 by convention. dentries.inode IS NULL means a
--- cached negative entry.
+-- (= FUSE_ROOT_ID) and reports generation 0 by convention. dentries.inode
+-- IS NULL means the name is cached absent, EXCEPT when dentries.refused is
+-- 1: that means the opposite -- the name exists on the backing filesystem
+-- but dcfs refuses to cache it (a mount point or subvolume boundary below
+-- --source; see amendment 12 and README.md's Limitations) -- so it must
+-- never be reported as absent (ENOENT); backing::LookupOrPopulate reports
+-- EXDEV for it instead.
 --
 -- All tables are STRICT (SQLite 3.37+ -- this build uses 3.53).
 
@@ -95,14 +100,18 @@ CREATE TABLE inodes (
   UNIQUE (device_id, backing_ino, backing_gen)
 ) STRICT;
 
--- Cached directory entries. inode IS NULL means a cached negative entry.
--- Deliberately an ordinary rowid table, not WITHOUT ROWID: the readdir
--- cursor is defined as a dentry's rowid, so the implicit rowid column (and
--- an index to look entries up by inode) is exactly what's needed.
+-- Cached directory entries. inode IS NULL means either a cached negative
+-- entry (refused = 0: the name is absent) or a refused mount/subvolume
+-- boundary (refused = 1: the name exists but is not cached -- see the file
+-- comment above and backing::LookupOrPopulate). Deliberately an ordinary
+-- rowid table, not WITHOUT ROWID: the readdir cursor is defined as a
+-- dentry's rowid, so the implicit rowid column (and an index to look
+-- entries up by inode) is exactly what's needed.
 CREATE TABLE dentries (
   parent INTEGER NOT NULL REFERENCES inodes (id) ON DELETE CASCADE,
   name BLOB NOT NULL,
   inode INTEGER NULL REFERENCES inodes (id) ON DELETE SET NULL,
+  refused INTEGER NOT NULL DEFAULT 0,  -- bool; see the file comment above
   PRIMARY KEY (parent, name)
 ) STRICT;
 

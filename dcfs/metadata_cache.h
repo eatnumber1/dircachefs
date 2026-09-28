@@ -40,7 +40,12 @@
 //    marks each such dentry's parent incomplete. Its dentries are deleted
 //    rather than made negative because what we know about those names
 //    afterwards is "unknown", not "absent".
-//  - A dentry whose inode is NULL is a cached negative entry.
+//  - A dentry whose inode is NULL is a cached negative entry, UNLESS its
+//    `refused` bit is set: that means the opposite -- the name exists but
+//    dcfs refuses to cache it (a mount point or subvolume boundary below
+//    --source, see amendment 12 and README.md's Limitations) -- so it must
+//    never be reported as absent. See LookupResult::kRefused and
+//    SetRefused().
 //  - The number of cached dentries for an inode is not its link count (only
 //    some of its links may be cached), so removing a dentry never deletes
 //    the inode row by itself; see DeleteInode().
@@ -69,6 +74,9 @@ struct LookupResult {
   enum Kind {
     kFound,     // A positive dentry; `id` is its inode.
     kNegative,  // A cached negative dentry: the name is known to be absent.
+    kRefused,   // The name exists but is a refused mount/subvolume boundary
+                // (amendment 12): it must never be reported absent.
+                // backing::LookupOrPopulate turns this into EXDEV.
     kUnknown,   // Nothing cached for this name.
   };
   Kind kind = kUnknown;
@@ -183,6 +191,14 @@ absl::Status LinkDentry(Context &ctx, InodeId parent, std::string_view name,
 // Caches (parent, name) as known-absent. NotFound if `parent` is missing.
 absl::Status SetNegative(Context &ctx, InodeId parent, std::string_view name);
 
+// Caches (parent, name) as a refused mount/subvolume boundary (amendment
+// 12): the name exists on the backing filesystem but dcfs will not cache
+// across it. Unlike SetNegative, this must never be read back as "absent" --
+// see LookupResult::kRefused and backing::LookupOrPopulate, which turns it
+// into EXDEV. Replaces whatever was cached for that name, same as
+// LinkDentry/SetNegative. NotFound if `parent` is missing.
+absl::Status SetRefused(Context &ctx, InodeId parent, std::string_view name);
+
 // Forgets (parent, name) if cached. Never deletes the inode row it pointed
 // at, since other (possibly uncached) links may remain.
 absl::Status UnlinkDentry(Context &ctx, InodeId parent, std::string_view name);
@@ -202,9 +218,12 @@ absl::Status MarkDirComplete(Context &ctx, InodeId dir, bool complete);
 // one does not throw its listing away. NotFound if no row for `dir`.
 absl::Status EnsureDirectory(Context &ctx, InodeId dir);
 
-// Forgets every dentry of `dir`, positive or negative, whose name is not in
-// `names`: after a full listing of the backing directory, those names are
-// known not to exist any more. Inode rows are left alone (see UnlinkDentry).
+// Forgets every dentry of `dir`, positive, negative or refused, whose name
+// is not in `names`: after a full listing of the backing directory, those
+// names are known not to exist any more. The caller is responsible for
+// including a still-refused boundary's name in `names` (it still exists,
+// just uncached), so that only a genuinely vanished name is pruned. Inode
+// rows are left alone (see UnlinkDentry).
 absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
                                 std::span<const std::string> names);
 
@@ -214,14 +233,19 @@ absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
 absl::Status MarkUnknown(Context &ctx, InodeId parent,
                          std::span<const std::string> names);
 
-// Forgets every cached negative dentry of `dir` and marks `dir` incomplete,
-// leaving its positive dentries alone. For a directory found to have
-// changed on the backing filesystem behind dcfs's back (see
-// backing::ReconcileAttrs): a new name may have appeared that a negative
-// entry would otherwise keep hiding, but the names already cached still
-// point at their objects (a repopulation corrects any that do not), and
-// keeping them keeps a subdirectory's ".." resolvable meanwhile. NotFound
-// if no row for `dir`.
+// Forgets every cached negative or refused dentry of `dir` (see
+// LookupResult::kRefused) and marks `dir` incomplete, leaving its positive
+// dentries alone. For a directory found to have changed on the backing
+// filesystem behind dcfs's back (see backing::ReconcileAttrs): a new name
+// may have appeared that a negative entry would otherwise keep hiding, a
+// refused boundary may no longer be one (or a new one may have appeared),
+// but the names already cached positive still point at their objects (a
+// repopulation corrects any that do not), and keeping them keeps a
+// subdirectory's ".." resolvable meanwhile. Dropping a refused dentry here
+// never causes a false "absent" reading (see the identity-model note
+// above): `dir` is marked incomplete in the same transaction, so the next
+// lookup or readdir repopulates it rather than ever answering from the
+// gap. NotFound if no row for `dir`.
 absl::Status ForgetNegativeDentries(Context &ctx, InodeId dir);
 
 // Marks `id`'s cached attributes as not current. NotFound if no row.

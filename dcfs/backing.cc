@@ -207,26 +207,21 @@ absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
   return record;
 }
 
-// Logs (once per (dir, name) per daemon run, via ctx.refused_boundaries)
-// that `name` under `dir` is refused because it is a mount point or
+// Logs that `name` under `dir` is refused because it is a mount point or
 // subvolume boundary -- see amendment 12 in the plan and the README's
 // Limitations: dcfs requires one backing filesystem below --source, since
 // one st_dev is what makes backing inode numbers (st_ino, shown to users
-// unchanged) unambiguous. Returns whether this was the first time this
-// daemon run saw this particular (dir, name) refused, purely so a caller
-// that wants to log something itself can also dedupe (none currently do).
-bool RecordRefusedBoundary(Context &ctx, InodeId dir, std::string_view name) {
-  bool first = true;
-  if (ctx.refused_boundaries != nullptr) {
-    first =
-        ctx.refused_boundaries->insert(RefusedBoundary{dir, std::string(name)})
-            .second;
-  }
-  if (first) {
-    LOG(ERROR) << "refusing to cache " << name << " under inode " << dir
-               << ": it is a mount point or subvolume boundary; dcfs does "
-                  "not support submounts (see README)";
-  }
+// unchanged) unambiguous. No de-duplication: once `dir` is fully populated
+// and the refusal is persisted (see PopulateDirectory/cache::SetRefused),
+// a later lookup answers straight from the cache without ever calling this
+// again, so in practice this logs at most once per (dir, name) per
+// populate of `dir` -- which itself only happens again if something marks
+// `dir` incomplete (e.g. an out-of-band change; see ReconcileAttrs), a rare
+// enough event that re-logging then is fine.
+void LogRefusedBoundary(InodeId dir, std::string_view name) {
+  LOG(ERROR) << "refusing to cache " << name << " under inode " << dir
+             << ": it is a mount point or subvolume boundary; dcfs does "
+                "not support submounts (see README)";
   // Kernel-supported FUSE submounts would plug in here: given
   // FUSE_ATTR_SUBMOUNT on this entry's fuse_entry_out and a distinct
   // st_dev the kernel assigns it, the kernel treats the entry as the root
@@ -234,22 +229,22 @@ bool RecordRefusedBoundary(Context &ctx, InodeId dir, std::string_view name) {
   // numbers being unique across filesystems. That needs an INIT-time
   // opt-in on /dev/fuse (virtiofs has it today; see amendment 12) and is
   // left for later.
-  return first;
 }
 
 // Reads everything the cache stores about child `name` of `dir_fd`
 // (InodeId `dir`). nullopt if the child vanished before it could be opened
-// (ENOENT racing the listing), or if it is a mount point or subvolume
+// (ENOENT racing the listing) or if it is a mount point or subvolume
 // boundary (IsBoundary): amendment 12 refuses to cache across a boundary,
-// so it is neither registered as a filesystem nor cached at all, and this
-// returns nullopt for it too -- exactly as for a vanished child, since
-// either way PopulateDirectory must leave `name` out of the listing. The
-// two cases are told apart by RecordRefusedBoundary's caller checking
-// ctx.refused_boundaries, not by this function's return value: see
-// PopulateDirectory.
+// so it is neither registered as a filesystem nor cached as a normal child,
+// and this returns nullopt for it too -- exactly as for a vanished child.
+// `refused` tells the two apart (false for a vanished child) so the caller
+// (PopulateDirectory) can persist the refusal instead of just dropping the
+// name: see cache::SetRefused and this file's top comment on why it must
+// never be cached as a plain negative entry.
 absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
-    Context &ctx, InodeId dir, int dir_fd, const struct statx &dir_stx,
-    const DeviceId &dir_device, std::string_view name) {
+    int dir_fd, const struct statx &dir_stx, const DeviceId &dir_device,
+    InodeId dir, std::string_view name, bool &refused) {
+  refused = false;
   // Everything below reads through this one fd, so all of it describes the
   // same object even if `name` is replaced meanwhile.
   absl::StatusOr<FileDescriptor> child =
@@ -266,7 +261,8 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
                                         kAttrMask | kMountIdMask));
 
   if (IsBoundary(dir_stx, stx)) {
-    RecordRefusedBoundary(ctx, dir, name);
+    refused = true;
+    LogRefusedBoundary(dir, name);
     return std::nullopt;
   }
 
@@ -634,26 +630,32 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
   ABSL_ASSIGN_OR_RETURN(std::vector<std::string> names, ReadDirNames(*dir_fd));
 
   // A child left out of `children` below is either a vanished dirent
-  // (raced ENOENT) or a refused mount/subvolume boundary (see ProbeChild);
-  // either way it is not linked, and not added to `seen` below, so
-  // PruneDentriesNotIn (also below) drops any stale dentry that was cached
-  // under that name before -- e.g. a plain directory that a filesystem got
-  // mounted onto since the last populate.
+  // (raced ENOENT), dropped entirely, or a refused mount/subvolume boundary
+  // (see ProbeChild), collected into `refused_names` instead so phase B can
+  // persist the refusal (cache::SetRefused) rather than just dropping the
+  // name -- see this file's top comment on why a refused name must never be
+  // cached as a plain negative entry.
   std::vector<ChildRecord> children;
+  std::vector<std::string> refused_names;
   children.reserve(names.size());
   for (const std::string &name : names) {
+    bool refused = false;
     ABSL_ASSIGN_OR_RETURN(
         std::optional<ChildRecord> child,
-        ProbeChild(ctx, dir, *dir_fd, dir_stx, dir_attr.device, name));
-    if (child.has_value()) children.push_back(*std::move(child));
+        ProbeChild(*dir_fd, dir_stx, dir_attr.device, dir, name, refused));
+    if (child.has_value()) {
+      children.push_back(*std::move(child));
+    } else if (refused) {
+      refused_names.push_back(name);
+    }
   }
   VLOG(1) << "populating directory " << dir << ": " << children.size()
-          << " entries";
+          << " entries, " << refused_names.size() << " refused";
 
   // Phase B: one transaction, no syscalls.
   return ctx.db.Transaction([&]() -> absl::Status {
     std::vector<std::string> seen;
-    seen.reserve(children.size());
+    seen.reserve(children.size() + refused_names.size());
     for (const ChildRecord &child : children) {
       // The probe's statx is free out-of-band detection for a child whose
       // row is already cached (under this name, and still the same object):
@@ -693,10 +695,26 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
       ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, child.xattrs));
       seen.push_back(child.name);
     }
+    for (const std::string &name : refused_names) {
+      ABSL_RETURN_IF_ERROR(cache::SetRefused(ctx, dir, name));
+      seen.push_back(name);
+    }
     ABSL_RETURN_IF_ERROR(cache::PruneDentriesNotIn(ctx, dir, seen));
     return cache::MarkDirComplete(ctx, dir, true);
   });
 }
+
+namespace {
+
+// The status LookupOrPopulate reports for a name cached as a refused
+// mount/subvolume boundary (see cache::LookupResult::kRefused).
+absl::Status ExdevBoundary() {
+  return dcfs::ErrnoToStatus(
+      EXDEV, "mount point or subvolume boundary (submounts are not "
+             "supported; see README)");
+}
+
+}  // namespace
 
 absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                                                      InodeId parent,
@@ -718,27 +736,20 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   }
   ABSL_ASSIGN_OR_RETURN(cache::LookupResult result,
                         cache::Lookup(ctx, parent, name));
+  // `name` is a persisted refusal (see ProbeChild/cache::SetRefused): it
+  // exists on the backing filesystem but dcfs will not cache across it, so
+  // this must never be reported as absent -- answer EXDEV, straight from
+  // the cache, every time. Checked before the kUnknown fast-out below since
+  // kRefused is never kUnknown, but also never worth re-populating for.
+  if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
   if (result.kind != cache::LookupResult::kUnknown) return result;
 
   ABSL_ASSIGN_OR_RETURN(bool complete, cache::IsDirComplete(ctx, parent));
   if (!complete) {
     ABSL_RETURN_IF_ERROR(PopulateDirectory(ctx, parent));
     ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
+    if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
     if (result.kind != cache::LookupResult::kUnknown) return result;
-  }
-  // `name` was refused this daemon run as a mount point or subvolume
-  // boundary (see ProbeChild/RecordRefusedBoundary): it is deliberately
-  // absent from the cache, but it is not "known absent" the way a genuine
-  // ENOENT is, so it must not be cached negative -- that would keep
-  // answering ENOENT even after the offending mount goes away and the
-  // directory is repopulated with `name` unmarked. Answer EXDEV instead,
-  // every time, straight from this in-memory set.
-  if (ctx.refused_boundaries != nullptr &&
-      ctx.refused_boundaries->contains(
-          RefusedBoundary{.parent = parent, .name = std::string(name)})) {
-    return dcfs::ErrnoToStatus(
-        EXDEV, "mount point or subvolume boundary (submounts are not "
-               "supported; see README)");
   }
   // The listing is complete and does not have `name`: remember that.
   ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
@@ -882,9 +893,10 @@ absl::Status StartupPurge(Context &ctx) {
   // Every non-source row left in the filesystems table is purged
   // unconditionally. Since amendment 12, ProbeChild/PopulateDirectory never
   // add one (a mount point or subvolume boundary is refused, not cached --
-  // see RecordRefusedBoundary), so any row found here can only be left over
-  // from a database built before that change, back when such a boundary
-  // was cached like any other filesystem. Nothing recorded there is ever
+  // see LogRefusedBoundary/cache::SetRefused), so any row found here can
+  // only be left over from a database built before that change, back when
+  // such a boundary was cached like any other filesystem. Nothing recorded
+  // there is ever
   // legitimate to keep any more, regardless of whether it happens to still
   // be mounted where it was found -- amendment 12 forbids serving cached
   // content across a filesystem boundary at all -- so this no longer

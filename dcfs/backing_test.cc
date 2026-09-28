@@ -902,7 +902,7 @@ TEST_F(BoundaryTest, LookupOfABoundaryReturnsExdevWithoutCachingNegative) {
   }
   EXPECT_FALSE(first.ok());
   EXPECT_EQ(ErrnoOf(first), EXDEV);
-  // A second lookup answers straight from the in-memory refused set: no
+  // A second lookup answers straight from the persisted refusal: no
   // repopulation (the directory is already complete), no second log line,
   // and still EXDEV rather than ENOENT.
   absl::Status second;
@@ -911,10 +911,29 @@ TEST_F(BoundaryTest, LookupOfABoundaryReturnsExdevWithoutCachingNegative) {
     second = LookupOrPopulate(ctx_, kRootInode, "boundary").status();
   }
   EXPECT_EQ(ErrnoOf(second), EXDEV);
-  // Never cached negative: cache::Lookup on its own (no populate) still
-  // sees "unknown", not a cached negative dentry.
+  // Never cached negative: cache::Lookup on its own (no populate) reports
+  // kRefused -- the object exists, so this must never come back kNegative
+  // (which would mean dcfs claims it is absent) or kUnknown (which would
+  // let some other caller fall through to caching it negative).
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "boundary"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::kRefused)));
+}
+
+TEST_F(BoundaryTest, BoundaryRefusalPersistsAcrossRestart) {
+  {
+    RefusalLog log(1);
+    ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  }
+  // Simulate a daemon restart: a fresh Context, carrying no in-memory state
+  // of its own, over the same database and mounts. The refusal must be
+  // readable from the cache alone -- never from process memory, since a
+  // dentry cached negative in a complete directory would otherwise report
+  // ENOENT for something that still exists on the backing filesystem.
+  Context restarted{db_, mounts_, bitgen_};
+  absl::Status status =
+      LookupOrPopulate(restarted, kRootInode, "boundary").status();
+  EXPECT_FALSE(status.ok());
+  EXPECT_EQ(ErrnoOf(status), EXDEV);
 }
 
 TEST_F(BoundaryTest, BoundaryDoesNotRegisterAFilesystem) {

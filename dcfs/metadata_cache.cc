@@ -171,14 +171,18 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
                                     std::string_view name) {
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
-      Query(ctx, "SELECT inode FROM dentries WHERE parent = ? AND name = ?",
+      Query(ctx,
+            "SELECT inode, refused FROM dentries WHERE parent = ? AND name = ?",
             parent, Blob(name)));
   LookupResult result;
   ABSL_ASSIGN_OR_RETURN(
       bool found, ReadOne(*stmt, [&](Statement &row) {
         std::optional<int64_t> inode = row.Column<std::optional<int64_t>>(0);
+        bool refused = row.Column<bool>(1);
         if (inode.has_value()) {
           result = {LookupResult::kFound, *inode};
+        } else if (refused) {
+          result = {LookupResult::kRefused, 0};
         } else {
           result = {LookupResult::kNegative, 0};
         }
@@ -602,13 +606,18 @@ namespace {
 // upsert rather than INSERT OR REPLACE: REPLACE deletes and reinserts,
 // giving the entry a new rowid, which would make an in-progress ListDir
 // (whose cursor is a rowid) see a renamed-over name twice.
+// `refused` is written unconditionally on every call (including the
+// ON CONFLICT branch): a name transitioning between positive/negative and
+// refused -- e.g. a boundary that stops being one, or vice versa -- must
+// never leave the previous call's `refused` bit stuck.
 absl::Status PutDentry(Context &ctx, InodeId parent, std::string_view name,
-                       std::optional<InodeId> child) {
+                       std::optional<InodeId> child, bool refused) {
   return Execute(ctx,
-                 "INSERT INTO dentries (parent, name, inode) VALUES (?, ?, ?) "
-                 "ON CONFLICT (parent, name) DO UPDATE SET inode = "
-                 "excluded.inode",
-                 parent, Blob(name), child)
+                 "INSERT INTO dentries (parent, name, inode, refused) "
+                 "VALUES (?, ?, ?, ?) "
+                 "ON CONFLICT (parent, name) DO UPDATE SET "
+                 "inode = excluded.inode, refused = excluded.refused",
+                 parent, Blob(name), child, refused)
       .status();
 }
 
@@ -619,14 +628,21 @@ absl::Status LinkDentry(Context &ctx, InodeId parent, std::string_view name,
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, child));
-    return PutDentry(ctx, parent, name, child);
+    return PutDentry(ctx, parent, name, child, /*refused=*/false);
   });
 }
 
 absl::Status SetNegative(Context &ctx, InodeId parent, std::string_view name) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
-    return PutDentry(ctx, parent, name, std::nullopt);
+    return PutDentry(ctx, parent, name, std::nullopt, /*refused=*/false);
+  });
+}
+
+absl::Status SetRefused(Context &ctx, InodeId parent, std::string_view name) {
+  return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
+    return PutDentry(ctx, parent, name, std::nullopt, /*refused=*/true);
   });
 }
 
@@ -652,7 +668,7 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
         Execute(ctx, "DELETE FROM dentries WHERE parent = ? AND name = ?",
                 parent, Blob(name))
             .status());
-    return PutDentry(ctx, newparent, newname, source.id);
+    return PutDentry(ctx, newparent, newname, source.id, /*refused=*/false);
   });
 }
 

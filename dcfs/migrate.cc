@@ -138,6 +138,12 @@ absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
 //  - FUSE generations become random per row (cache::UpsertInode); existing
 //    rows keep the generations they were given.
 //  - The durable dirty set appears, empty.
+//  - dentries gains `refused` (amendment 12, step 4.8): a v1 database
+//    predates submount refusal entirely, so no existing row can already be
+//    one; the column just needs to exist, defaulting every row to 0 (a
+//    plain negative or positive dentry, exactly as before). Folded
+//    directly into this one-time upgrade rather than a separate idempotent
+//    ALTER TABLE guard, since schema v2 has not shipped yet.
 absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
   // As in schema.sql.
   ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
@@ -154,6 +160,7 @@ absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
       FROM meta WHERE key = 'source_device_id';
     DROP TABLE meta;
     CREATE TABLE dirty (inode INTEGER PRIMARY KEY) STRICT;
+    ALTER TABLE dentries ADD COLUMN refused INTEGER NOT NULL DEFAULT 0;
   )sql"));
   ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
   RET_CHECK_EQ(version, 2) << "v1 meta.source_device_id is missing";
@@ -187,6 +194,7 @@ absl::Status ValidateExistingSchema(sqlite3::Connection &db) {
     return absl::FailedPreconditionError(
         "corrupt cache: root inode (id 1) is missing");
   }
+
   return absl::OkStatus();
 }
 
