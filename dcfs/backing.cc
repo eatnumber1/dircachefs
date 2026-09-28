@@ -32,7 +32,6 @@
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
-#include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
@@ -186,21 +185,13 @@ struct ChildRecord {
   std::vector<std::pair<std::string, std::string>> xattrs;
 };
 
-// A filesystem found mounted on a child, to register if it is new.
-struct FoundFilesystem {
-  DeviceId device;
-  int64_t fstype = 0;
-  std::string boundary_name;
-};
-
 // Reads everything the cache stores about the object `fd` names -- already
 // open, and already statx'd into `stx` -- beyond what the caller already
-// knows: its file handle (identified by `device`, which for a mount-boundary
-// child is the *child's* own device, not the containing directory's; the
-// caller resolves that before calling this), inode generation, symlink
-// target if it is one, and its xattrs. Shared by ProbeChild (an existing
-// directory entry, which might also be a mount boundary) and RecordNewChild
-// (a freshly created object, which cannot be one).
+// knows: its file handle (identified by `device`, the containing
+// directory's device -- a mount-boundary child never reaches here, see
+// ProbeChild), inode generation, symlink target if it is one, and its
+// xattrs. Shared by ProbeChild (an existing directory entry) and
+// RecordNewChild (a freshly created object, which cannot be a boundary).
 absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
                                         const DeviceId &device,
                                         const struct statx &stx) {
@@ -216,14 +207,49 @@ absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
   return record;
 }
 
-// Reads everything the cache stores about child `name` of `dir_fd`.
-// nullopt if the child vanished before it could be opened. A child that is
-// the root of another filesystem gets that filesystem's mount fd
-// registered and is appended to `filesystems`.
+// Logs (once per (dir, name) per daemon run, via ctx.refused_boundaries)
+// that `name` under `dir` is refused because it is a mount point or
+// subvolume boundary -- see amendment 12 in the plan and the README's
+// Limitations: dcfs requires one backing filesystem below --source, since
+// one st_dev is what makes backing inode numbers (st_ino, shown to users
+// unchanged) unambiguous. Returns whether this was the first time this
+// daemon run saw this particular (dir, name) refused, purely so a caller
+// that wants to log something itself can also dedupe (none currently do).
+bool RecordRefusedBoundary(Context &ctx, InodeId dir, std::string_view name) {
+  bool first = true;
+  if (ctx.refused_boundaries != nullptr) {
+    first =
+        ctx.refused_boundaries->insert(RefusedBoundary{dir, std::string(name)})
+            .second;
+  }
+  if (first) {
+    LOG(ERROR) << "refusing to cache " << name << " under inode " << dir
+               << ": it is a mount point or subvolume boundary; dcfs does "
+                  "not support submounts (see README)";
+  }
+  // Kernel-supported FUSE submounts would plug in here: given
+  // FUSE_ATTR_SUBMOUNT on this entry's fuse_entry_out and a distinct
+  // st_dev the kernel assigns it, the kernel treats the entry as the root
+  // of a separate super_block instead of relying on dcfs's own inode
+  // numbers being unique across filesystems. That needs an INIT-time
+  // opt-in on /dev/fuse (virtiofs has it today; see amendment 12) and is
+  // left for later.
+  return first;
+}
+
+// Reads everything the cache stores about child `name` of `dir_fd`
+// (InodeId `dir`). nullopt if the child vanished before it could be opened
+// (ENOENT racing the listing), or if it is a mount point or subvolume
+// boundary (IsBoundary): amendment 12 refuses to cache across a boundary,
+// so it is neither registered as a filesystem nor cached at all, and this
+// returns nullopt for it too -- exactly as for a vanished child, since
+// either way PopulateDirectory must leave `name` out of the listing. The
+// two cases are told apart by RecordRefusedBoundary's caller checking
+// ctx.refused_boundaries, not by this function's return value: see
+// PopulateDirectory.
 absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
-    Context &ctx, int dir_fd, const struct statx &dir_stx,
-    const DeviceId &dir_device, std::string_view name,
-    std::vector<FoundFilesystem> &filesystems) {
+    Context &ctx, InodeId dir, int dir_fd, const struct statx &dir_stx,
+    const DeviceId &dir_device, std::string_view name) {
   // Everything below reads through this one fd, so all of it describes the
   // same object even if `name` is replaced meanwhile.
   absl::StatusOr<FileDescriptor> child =
@@ -239,68 +265,12 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
                         syscalls::statx(**child, "", AT_EMPTY_PATH,
                                         kAttrMask | kMountIdMask));
 
-  DeviceId device = dir_device;
   if (IsBoundary(dir_stx, stx)) {
-    ABSL_ASSIGN_OR_RETURN(device, GetDeviceId(**child));
-    if (absl::IsNotFound(ctx.mounts.Get(device).status())) {
-      // The mount fd must be a real (non-O_PATH) descriptor because
-      // open_by_handle_at resolves it with the non-raw fd class
-      // (fs/fhandle.c get_path_from_fd). Reopen the very object we just
-      // probed through /proc/self/fd rather than looking `name` up again,
-      // so a rename racing with us cannot swap in a different directory.
-      ABSL_ASSIGN_OR_RETURN(
-          FileDescriptor mount_fd,
-          syscalls::ReopenPathFd(**child, O_RDONLY | O_DIRECTORY));
-      ABSL_RETURN_IF_ERROR(ctx.mounts.Insert(device, std::move(mount_fd)));
-    }
-    ABSL_ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(**child));
-    filesystems.push_back({.device = device,
-                           .fstype = static_cast<int64_t>(sfs.f_type),
-                           .boundary_name = std::string(name)});
+    RecordRefusedBoundary(ctx, dir, name);
+    return std::nullopt;
   }
 
-  return ProbeObject(**child, name, device, stx);
-}
-
-// Why filesystem `fs` should be forgotten, or nullopt if it is still
-// mounted where it was found (in which case its mount fd is registered).
-absl::StatusOr<std::optional<std::string>> CheckFilesystem(
-    Context &ctx, const cache::FilesystemRow &fs) {
-  absl::StatusOr<FileDescriptor> parent =
-      OpenNode(ctx, *fs.parent_inode, O_PATH | O_DIRECTORY);
-  if (!parent.ok()) {
-    return absl::StrCat("cannot open its mount point's directory: ",
-                        parent.status().ToString());
-  }
-  // A real (non-O_PATH) fd: `child` is inserted below as the mount fd for
-  // `fs.device`, and open_by_handle_at's mount fd argument rejects O_PATH
-  // (see ProbeChild's comment on the same restriction).
-  absl::StatusOr<FileDescriptor> child = syscalls::openat(
-      **parent, *fs.boundary_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-  if (!child.ok()) {
-    return absl::StrCat("cannot open its mount point: ",
-                        child.status().ToString());
-  }
-  ABSL_ASSIGN_OR_RETURN(struct statx parent_stx,
-                        syscalls::statx(**parent, "", AT_EMPTY_PATH,
-                                        kMountIdMask));
-  ABSL_ASSIGN_OR_RETURN(struct statx child_stx,
-                        syscalls::statx(**child, "", AT_EMPTY_PATH,
-                                        STATX_TYPE | kMountIdMask));
-  if (!IsBoundary(parent_stx, child_stx)) {
-    return std::string("nothing is mounted on its mount point any more");
-  }
-  absl::StatusOr<DeviceId> device = GetDeviceId(**child);
-  if (!device.ok()) {
-    return absl::StrCat("cannot identify what is mounted there now: ",
-                        device.status().ToString());
-  }
-  if (*device != fs.device) {
-    return absl::StrCat("its mount point now holds ", device->ToString());
-  }
-  absl::Status inserted = ctx.mounts.Insert(fs.device, *std::move(child));
-  if (!inserted.ok() && !absl::IsAlreadyExists(inserted)) return inserted;
-  return std::nullopt;
+  return ProbeObject(**child, name, dir_device, stx);
 }
 
 struct RootProbe {
@@ -663,13 +633,18 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
   ABSL_ASSIGN_OR_RETURN(std::vector<std::string> names, ReadDirNames(*dir_fd));
 
+  // A child left out of `children` below is either a vanished dirent
+  // (raced ENOENT) or a refused mount/subvolume boundary (see ProbeChild);
+  // either way it is not linked, and not added to `seen` below, so
+  // PruneDentriesNotIn (also below) drops any stale dentry that was cached
+  // under that name before -- e.g. a plain directory that a filesystem got
+  // mounted onto since the last populate.
   std::vector<ChildRecord> children;
-  std::vector<FoundFilesystem> filesystems;
   children.reserve(names.size());
   for (const std::string &name : names) {
-    ABSL_ASSIGN_OR_RETURN(std::optional<ChildRecord> child,
-                          ProbeChild(ctx, *dir_fd, dir_stx, dir_attr.device,
-                                     name, filesystems));
+    ABSL_ASSIGN_OR_RETURN(
+        std::optional<ChildRecord> child,
+        ProbeChild(ctx, dir, *dir_fd, dir_stx, dir_attr.device, name));
     if (child.has_value()) children.push_back(*std::move(child));
   }
   VLOG(1) << "populating directory " << dir << ": " << children.size()
@@ -677,14 +652,6 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
 
   // Phase B: one transaction, no syscalls.
   return ctx.db.Transaction([&]() -> absl::Status {
-    for (const FoundFilesystem &fs : filesystems) {
-      absl::StatusOr<cache::FilesystemRow> known =
-          cache::GetFilesystem(ctx, fs.device);
-      if (known.ok()) continue;
-      if (!absl::IsNotFound(known.status())) return known.status();
-      ABSL_RETURN_IF_ERROR(cache::AddFilesystem(ctx, fs.device, fs.fstype, dir,
-                                                fs.boundary_name));
-    }
     std::vector<std::string> seen;
     seen.reserve(children.size());
     for (const ChildRecord &child : children) {
@@ -758,6 +725,20 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
     ABSL_RETURN_IF_ERROR(PopulateDirectory(ctx, parent));
     ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
     if (result.kind != cache::LookupResult::kUnknown) return result;
+  }
+  // `name` was refused this daemon run as a mount point or subvolume
+  // boundary (see ProbeChild/RecordRefusedBoundary): it is deliberately
+  // absent from the cache, but it is not "known absent" the way a genuine
+  // ENOENT is, so it must not be cached negative -- that would keep
+  // answering ENOENT even after the offending mount goes away and the
+  // directory is repopulated with `name` unmarked. Answer EXDEV instead,
+  // every time, straight from this in-memory set.
+  if (ctx.refused_boundaries != nullptr &&
+      ctx.refused_boundaries->contains(
+          RefusedBoundary{.parent = parent, .name = std::string(name)})) {
+    return dcfs::ErrnoToStatus(
+        EXDEV, "mount point or subvolume boundary (submounts are not "
+               "supported; see README)");
   }
   // The listing is complete and does not have `name`: remember that.
   ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
@@ -898,13 +879,23 @@ absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
 }
 
 absl::Status StartupPurge(Context &ctx) {
-  // Filesystems already checked and kept, so later passes skip them.
-  absl::flat_hash_set<DeviceId> kept;
-  // Each purge can cascade to filesystems mounted beneath the purged one,
-  // so the list is re-read after every purge. ListFilesystems returns rows
-  // in insertion order, and a filesystem is always found (and inserted)
-  // through its parent, so parents are checked before their children and a
-  // kept parent's mount fd is registered before its children need it.
+  // Every non-source row left in the filesystems table is purged
+  // unconditionally. Since amendment 12, ProbeChild/PopulateDirectory never
+  // add one (a mount point or subvolume boundary is refused, not cached --
+  // see RecordRefusedBoundary), so any row found here can only be left over
+  // from a database built before that change, back when such a boundary
+  // was cached like any other filesystem. Nothing recorded there is ever
+  // legitimate to keep any more, regardless of whether it happens to still
+  // be mounted where it was found -- amendment 12 forbids serving cached
+  // content across a filesystem boundary at all -- so this no longer
+  // re-probes each one (CheckFilesystem, which used to do that, is gone);
+  // it just forgets it, the same way an unmounted or replaced filesystem
+  // used to be forgotten. (In the common case there is nothing to do here:
+  // the startup check in main.cc already refuses to start at all if a real
+  // mount lies below --source, so a fresh database's filesystems table
+  // holds only the source row.) Each purge can cascade to filesystems that
+  // were mounted beneath the one just purged, so the list is re-read after
+  // every purge.
   bool purged = true;
   while (purged) {
     purged = false;
@@ -912,20 +903,11 @@ absl::Status StartupPurge(Context &ctx) {
                           cache::ListFilesystems(ctx));
     for (const cache::FilesystemRow &fs : filesystems) {
       if (!fs.parent_inode.has_value()) continue;  // The source.
-      if (kept.contains(fs.device)) continue;
-      RET_CHECK(fs.boundary_name.has_value())
-          << "filesystem " << fs.device.ToString()
-          << " has a parent inode but no boundary name";
-      ABSL_ASSIGN_OR_RETURN(std::optional<std::string> reason,
-                            CheckFilesystem(ctx, fs));
-      if (!reason.has_value()) {
-        kept.insert(fs.device);
-        continue;
-      }
       LOG(INFO) << "forgetting filesystem " << fs.device.ToString() << " ("
                 << FstypeName(fs.fstype) << ") mounted on inode "
-                << *fs.parent_inode << " name " << *fs.boundary_name << ": "
-                << *reason;
+                << *fs.parent_inode << " name "
+                << fs.boundary_name.value_or("<unknown>")
+                << ": submounts are no longer supported (see README)";
       absl::Status status = cache::PurgeFilesystem(ctx, fs.device);
       // Opening the parent may itself have invalidated it (ESTALE), which
       // already cascaded to this filesystem.

@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <linux/magic.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/xattr.h>
@@ -68,6 +69,7 @@ using ::testing::AnyNumber;
 using ::testing::Contains;
 using ::testing::HasSubstr;
 using ::testing::ElementsAre;
+using ::testing::Not;
 using ::testing::Optional;
 using cache::InodeId;
 using cache::kRootInode;
@@ -838,6 +840,89 @@ TEST_F(BackingTest, FinishRunMarksACleanShutdown) {
     log.StartCapturingLogs();
     ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
   }
+}
+
+// --- Runtime boundary refusal (amendment 12) --------------------------------
+//
+// The source tree here (BackingTest::SetUp) lives on the ext4 disk backing
+// this test (see the qemu_cc_test's `disks`), so mounting a real tmpfs
+// below it produces a genuine mount-id/st_dev boundary for IsBoundary to
+// detect, exactly as a real submount would in production.
+
+class BoundaryTest : public BackingTest {
+ protected:
+  void SetUp() override {
+    BackingTest::SetUp();
+    ASSERT_EQ(::mkdir(Path("boundary").c_str(), 0755), 0);
+    ASSERT_EQ(::mount("tmpfs", Path("boundary").c_str(), "tmpfs", 0, nullptr),
+              0)
+        << std::strerror(errno);
+    mounted_ = true;
+  }
+
+  void TearDown() override {
+    if (mounted_) ::umount2(Path("boundary").c_str(), MNT_DETACH);
+    BackingTest::TearDown();
+  }
+
+  bool mounted_ = false;
+};
+
+// Expects exactly `times` "refusing to cache" ERROR log lines while it is
+// alive, and allows any other log line (see OutOfBandLog above, same
+// pattern).
+class RefusalLog {
+ public:
+  explicit RefusalLog(int times) : log_(absl::MockLogDefault::kIgnoreUnexpected) {
+    EXPECT_CALL(log_, Log(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(log_, Log(absl::LogSeverity::kError, _,
+                          HasSubstr("refusing to cache")))
+        .Times(times);
+    log_.StartCapturingLogs();
+  }
+
+ private:
+  absl::ScopedMockLog log_;
+};
+
+TEST_F(BoundaryTest, BoundaryIsExcludedFromTheListing) {
+  {
+    RefusalLog log(1);
+    ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  }
+  EXPECT_THAT(ListNames(ctx_, kRootInode), Not(Contains("boundary")));
+  EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(true));
+}
+
+TEST_F(BoundaryTest, LookupOfABoundaryReturnsExdevWithoutCachingNegative) {
+  absl::Status first;
+  {
+    RefusalLog log(1);
+    first = LookupOrPopulate(ctx_, kRootInode, "boundary").status();
+  }
+  EXPECT_FALSE(first.ok());
+  EXPECT_EQ(ErrnoOf(first), EXDEV);
+  // A second lookup answers straight from the in-memory refused set: no
+  // repopulation (the directory is already complete), no second log line,
+  // and still EXDEV rather than ENOENT.
+  absl::Status second;
+  {
+    RefusalLog log(0);
+    second = LookupOrPopulate(ctx_, kRootInode, "boundary").status();
+  }
+  EXPECT_EQ(ErrnoOf(second), EXDEV);
+  // Never cached negative: cache::Lookup on its own (no populate) still
+  // sees "unknown", not a cached negative dentry.
+  EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "boundary"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+}
+
+TEST_F(BoundaryTest, BoundaryDoesNotRegisterAFilesystem) {
+  ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  ASSERT_OK_AND_ASSIGN(std::vector<cache::FilesystemRow> filesystems,
+                       cache::ListFilesystems(ctx_));
+  ASSERT_EQ(filesystems.size(), 1u);  // The source only.
+  EXPECT_FALSE(filesystems[0].parent_inode.has_value());
 }
 
 }  // namespace

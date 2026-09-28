@@ -32,6 +32,7 @@
 #include "dcfs/fuse_ops.h"
 #include "dcfs/migrate.h"
 #include "dcfs/mount_fds.h"
+#include "dcfs/mounts_below.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
@@ -162,6 +163,23 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
           << " (--source=" << source << ")";
     }
     source_fd = *std::move(opened);
+
+    // Amendment 12: dcfs requires exactly one backing filesystem below
+    // --source (backing inode numbers, shown to users as st_ino, are only
+    // unambiguous within one st_dev), so refuse to start if anything is
+    // already mounted below it. This is a policy check only -- identity
+    // never depends on it -- so it uses the path string, not source_fd; a
+    // boundary that appears later (a mount after startup, or a btrfs
+    // subvolume, which this check cannot see) is instead refused at
+    // runtime (see backing::ProbeChild/PopulateDirectory).
+    ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below, MountsBelow(source));
+    if (!below.empty()) {
+      return absl::FailedPreconditionError(absl::StrCat(
+          "dcfs does not yet support filesystems mounted below --source: "
+          "their inode numbers would collide under one st_dev; unmount "
+          "them or point --source elsewhere. Mounted below ",
+          source, ": ", absl::StrJoin(below, ", ")));
+    }
   }
 
   ABSL_ASSIGN_OR_RETURN(

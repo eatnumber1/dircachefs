@@ -2,6 +2,7 @@
 #define DCFS_CONTEXT_H_
 
 #include <cstdint>
+#include <string>
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/random/bit_gen_ref.h"
