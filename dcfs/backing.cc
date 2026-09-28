@@ -5,6 +5,7 @@
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include <fcntl.h>
+#include <linux/limits.h>  // NAME_MAX (255, the generic Linux VFS cap)
 #include <sys/stat.h>
 #include <sys/statfs.h>
 
@@ -710,6 +711,21 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
 absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                                                      InodeId parent,
                                                      std::string_view name) {
+  // A name this long can never be a real directory entry on any local
+  // filesystem this daemon backs onto (ext4/btrfs/xfs all cap a single
+  // path component at NAME_MAX, the generic Linux VFS limit): reject it
+  // outright rather than falling through to the "directory listing is
+  // complete and doesn't have it" negative-entry path below, which would
+  // otherwise misreport ENOENT (found via pjdfstest's chmod/02.t: a name
+  // one byte past NAME_MAX got ENOENT once the parent directory's listing
+  // was already cached, instead of ENAMETOOLONG). A name that reaches an
+  // actual backing syscall (create, mkdir, ...) already gets ENAMETOOLONG
+  // for free from the real filesystem; this only covers the pure-lookup
+  // fast path, which never touches the backing filesystem at all once a
+  // directory is known complete.
+  if (name.size() > NAME_MAX) {
+    return dcfs::ErrnoToStatus(ENAMETOOLONG, "path component too long");
+  }
   ABSL_ASSIGN_OR_RETURN(cache::LookupResult result,
                         cache::Lookup(ctx, parent, name));
   if (result.kind != cache::LookupResult::kUnknown) return result;
