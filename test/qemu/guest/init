@@ -39,6 +39,17 @@ echo "boot: kernel $(uname -r)"
 
 finish() {
 	sync
+	# `sync` flushes the block devices, not the serial console: the line
+	# just echoed (DCFS-TEST-EXIT=.../ALL-TESTS-PASSED/TEST-FAILED, or even
+	# the TEST ...PASS/FAIL line right before it) is still working its way
+	# from the tty layer through QEMU's emulated UART to the host-side
+	# chardev when reboot -f below forces an immediate triple fault --
+	# observed in practice as run-qemu.sh's grep missing the verdict, or a
+	# PASS line arriving with a kernel "reboot: Restarting system" message
+	# spliced into the middle of it. A short sleep gives that last bit of
+	# output time to actually drain before the reboot yanks the console
+	# out from under it.
+	sleep 0.2
 	reboot -f
 }
 
