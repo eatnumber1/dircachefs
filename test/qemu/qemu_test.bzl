@@ -10,7 +10,7 @@ test/qemu/guest/init for the guest side.
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
-def qemu_test(name, guest_script, disks = [], rootfs = None):
+def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", timeout = "long"):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -30,6 +30,13 @@ def qemu_test(name, guest_script, disks = [], rootfs = None):
             /tests in, and chroots into it to run guest_script with GNU
             userspace and nfs-utils available. See guest/init's
             dcfs_rootfs= branch and test/qemu/scripts/mkrootfs-debian.sh.
+        size: sh_test size, e.g. "enormous" for a much longer-running guest
+            script than the default e2e tests here (most run in a few
+            seconds); defaults to "large", the size every test in this
+            package used before this parameter existed.
+        timeout: sh_test timeout, e.g. "eternal" (3600s) to pair with
+            size = "enormous"; defaults to "long" (900s), unchanged from
+            before this parameter existed.
     """
     disk_args = [d[0] + ":" + d[1] + ":" + d[2] for d in disks]
     guest_script_basename = guest_script.split("/")[-1]
@@ -56,6 +63,6 @@ def qemu_test(name, guest_script, disks = [], rootfs = None):
             "no-sandbox",
             "requires-kvm",
         ],
-        size = "large",
-        timeout = "long",
+        size = size,
+        timeout = timeout,
     )
