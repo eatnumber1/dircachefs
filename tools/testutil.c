@@ -28,6 +28,11 @@
  *       EOPNOTSUPP when <path> is itself a symlink (there is no lchmod
  *       syscall) -- verified even on a plain tmpfs symlink, so this is
  *       generic kernel behavior, not something specific to dcfs.
+ *   testutil rename2 <old> <new> <0|noreplace|exchange>
+ *       renameat2(2) (via syscall(SYS_renameat2), both paths relative to
+ *       AT_FDCWD) with flags 0, RENAME_NOREPLACE or RENAME_EXCHANGE.
+ *       busybox has no way to ask for either flag, and busybox mv falls
+ *       back to copy+delete on EXDEV, hiding the raw error.
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing and exits 0. All
@@ -40,6 +45,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -88,6 +94,29 @@ static int cmd_lchmod(const char *path, const char *mode_str)
 	return 0;
 }
 
+static int cmd_rename2(
+	const char *oldpath, const char *newpath, const char *flags_str)
+{
+	unsigned int flags;
+
+	if (strcmp(flags_str, "0") == 0) {
+		flags = 0;
+	} else if (strcmp(flags_str, "noreplace") == 0) {
+		flags = RENAME_NOREPLACE;
+	} else if (strcmp(flags_str, "exchange") == 0) {
+		flags = RENAME_EXCHANGE;
+	} else {
+		fprintf(stderr, "testutil rename2: bad flags '%s'\n", flags_str);
+		return 2;
+	}
+	if (syscall(SYS_renameat2, AT_FDCWD, oldpath, AT_FDCWD, newpath,
+		    flags) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -96,10 +125,13 @@ int main(int argc, char *argv[])
 		return cmd_utimens(argv[2], argv[3], argv[4]);
 	if (argc == 4 && strcmp(argv[1], "lchmod") == 0)
 		return cmd_lchmod(argv[2], argv[3]);
+	if (argc == 5 && strcmp(argv[1], "rename2") == 0)
+		return cmd_rename2(argv[2], argv[3], argv[4]);
 
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
 		"       testutil utimens <path> <sec> <nsec>\n"
-		"       testutil lchmod <path> <octal-mode>\n");
+		"       testutil lchmod <path> <octal-mode>\n"
+		"       testutil rename2 <old> <new> <0|noreplace|exchange>\n");
 	return 2;
 }

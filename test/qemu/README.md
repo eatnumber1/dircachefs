@@ -266,6 +266,7 @@ bazel test //test/qemu:lifecycle_test
 bazel test //test/qemu:handles_test
 bazel test //test/qemu:setattr_test
 bazel test //test/qemu:create_test
+bazel test //test/qemu:rename_test
 ```
 
 - `boot_test` (`guest/boot.sh`): dcfs and fhtest are present and runnable,
@@ -334,6 +335,19 @@ bazel test //test/qemu:create_test
   over everything just created causes *zero* reads from either backing
   block device, including after killing and restarting the daemon against
   the same cache database.
+- `rename_test` (`guest/rename.sh`): step 4.3's remove/rename write-through
+  ops -- unlink (plain, of one hard link, and of a file still open, whose
+  content stays readable and whose row, and so its handle, lives until the
+  last close and is then ESTALE), rmdir (empty, ENOTEMPTY, ENOENT), and
+  rename (same dir, across dirs, over an existing file whose old row is
+  deleted, `RENAME_NOREPLACE` -> EEXIST, `RENAME_EXCHANGE`, a directory with
+  children whose whole cached subtree moves with it, a directory over an
+  empty directory, and the raw EXDEV across the vdb/vdc boundary, via
+  `//tools:testutil rename2` since busybox `mv` falls back to copy+delete).
+  Every result is checked on `/src` and via `/mnt` after dropping every
+  cache with zero sectors read on both disks (negative entries and
+  directory completeness are recorded, not re-read), then as a whole tree,
+  and again after a daemon restart.
 
 The serial console log lands at
 `bazel-testlogs/test/qemu/boot_test/test.outputs/serial.log` (Bazel's

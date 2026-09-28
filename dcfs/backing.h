@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -187,6 +188,36 @@ absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
 absl::StatusOr<struct statx> RecordNewLink(Context &ctx, InodeId src,
                                            InodeId newparent,
                                            std::string_view newname);
+
+// --- Remove/rename ops (step 4.3) -------------------------------------------
+//
+// Phase 2 of DirCacheFS::Unlink/Rmdir/Rename. None of these touches the
+// cache (beyond OpenNode's own stale-row invalidation); the caller brackets
+// each with its phase-1 MarkUnknown and phase-3 record transactions.
+
+// unlinkat(2) of `name` inside `parent` (opened O_RDONLY|O_DIRECTORY via
+// OpenNode). `flags` is 0 or AT_REMOVEDIR. Whatever unlinkat(2) returns is
+// returned unchanged (ENOTEMPTY, EBUSY for a mount point, ...).
+absl::Status UnlinkAt(Context &ctx, InodeId parent, std::string_view name,
+                      int flags);
+
+// renameat2(2) of `parent`/`name` to `newparent`/`newname`, with both
+// parents opened O_RDONLY|O_DIRECTORY via OpenNode. `flags` is passed
+// through unchanged (0, RENAME_NOREPLACE or RENAME_EXCHANGE -- the caller
+// validates it). Whatever renameat2(2) returns is returned unchanged,
+// including EXDEV when the two parents are on different filesystems.
+absl::Status RenameAt(Context &ctx, InodeId parent, std::string_view name,
+                      InodeId newparent, std::string_view newname,
+                      unsigned flags);
+
+// The backing link count of `id` (OpenNode O_PATH|O_NOFOLLOW + statx), or
+// nullopt if the object no longer exists at all: its handle no longer
+// decodes (ESTALE/ENOENT), i.e. its last link was removed and nothing holds
+// it open. In that case the row has ALREADY been invalidated (by OpenNode
+// for ESTALE, here for ENOENT), so the caller must not touch it again.
+// Does not update the cache otherwise.
+absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
+                                                     InodeId id);
 
 // Run at startup, after InitRoot: forgets every non-source filesystem that
 // is no longer mounted where it was found (or whose mount point is gone),

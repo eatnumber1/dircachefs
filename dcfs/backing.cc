@@ -607,6 +607,43 @@ absl::StatusOr<struct statx> RecordNewLink(Context &ctx, InodeId src,
   return stx;
 }
 
+absl::Status UnlinkAt(Context &ctx, InodeId parent, std::string_view name,
+                      int flags) {
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor parent_fd,
+                        OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
+  return syscalls::unlinkat(*parent_fd, name, flags);
+}
+
+absl::Status RenameAt(Context &ctx, InodeId parent, std::string_view name,
+                      InodeId newparent, std::string_view newname,
+                      unsigned flags) {
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor parent_fd,
+                        OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor newparent_fd,
+                        OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
+  return syscalls::renameat2(*parent_fd, name, *newparent_fd, newname, flags);
+}
+
+absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
+                                                     InodeId id) {
+  absl::StatusOr<FileDescriptor> fd = OpenNode(ctx, id, O_PATH | O_NOFOLLOW);
+  if (!fd.ok()) {
+    int err = ErrnoOf(fd.status());
+    // ESTALE: OpenNode has already invalidated the row. ENOENT is not one
+    // OpenNode handles itself, so the row is forgotten here to give the
+    // caller the same "already gone" contract either way.
+    if (err == ESTALE) return std::nullopt;
+    if (err == ENOENT) {
+      ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
+      return std::nullopt;
+    }
+    return fd.status();
+  }
+  ABSL_ASSIGN_OR_RETURN(struct statx stx,
+                        syscalls::statx(**fd, "", AT_EMPTY_PATH, STATX_NLINK));
+  return static_cast<uint64_t>(stx.stx_nlink);
+}
+
 absl::Status StartupPurge(Context &ctx) {
   // Filesystems already checked and kept, so later passes skip them.
   absl::flat_hash_set<DeviceId> kept;

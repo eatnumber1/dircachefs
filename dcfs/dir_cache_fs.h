@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <sys/types.h>
 
@@ -140,11 +141,9 @@ class DirCacheFS {
       FuseRequest &req, fuse_ino_t ino, int mode, off_t offset, off_t length,
       fuse_file_info &fi);
 
-  // Whether any Open() handle for `id` is still outstanding (has not gone
-  // through Release()). Nothing calls this yet -- it exists for
-  // TODO(4.3): row deletion needs to know an inode has no open handles
-  // before it can safely drop the row (and, for the last link, the
-  // backing file).
+  // Whether any Open()/Create() handle for `id` is still outstanding (has
+  // not gone through Release()). A file whose last link is removed keeps
+  // its row while this is true (see SettleUnlinkedFile).
   bool HasOpenFiles(InodeId id) const;
 
  private:
@@ -179,6 +178,31 @@ class DirCacheFS {
   absl::StatusOr<backing::NewChild> CreateChild(
       InodeId parent, std::string_view name,
       absl::FunctionRef<absl::Status(int parent_fd)> do_create);
+
+  // Unlink (is_dir false) / Rmdir (true) of (parent, name): the shared
+  // phase-1/2/3 wiring, including the removed child's row lifetime.
+  absl::Status RemoveChild(
+      FuseRequest &req, InodeId parent, std::string_view name, bool is_dir);
+
+  // After a failed phase 2 (the backing syscall) of Unlink/Rmdir/Rename:
+  // re-resolves `names` in `parent` (LookupOrPopulate) so that the state
+  // phase 1 made unknown is known again. Errors are ignored.
+  void ReresolveAfterFailure(
+      InodeId parent, std::span<const std::string> names);
+
+  // cache::DeleteInode(id), treating an already-missing row as success.
+  // For an object known to be gone from the backing filesystem.
+  absl::Status ForgetRemoved(InodeId id);
+
+  // After a backing unlink or rename-over removed one link to non-directory
+  // `id`: applies the row-lifetime rule. With a dcfs open on it, refreshes
+  // its attributes from that fd and keeps the row (Release deletes it once
+  // the last open closes with nlink 0); otherwise deletes the row if the
+  // backing object is gone or has nlink 0, and refreshes it if links remain.
+  absl::Status SettleUnlinkedFile(InodeId id);
+
+  // The fd of some outstanding open of `id`, if any.
+  std::optional<int> OpenFdOf(InodeId id) const;
 
   // An open file handle: the fd Open()/Create() opened `ino` with, and the
   // passthrough backing id the kernel assigned it (0 if the kernel did

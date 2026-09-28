@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstdio>  // RENAME_NOREPLACE, RENAME_EXCHANGE
 #include <fcntl.h>
 #include <optional>
 #include <span>
@@ -288,14 +289,85 @@ absl::Status DirCacheFS::Mkdir(
       opts_.entry_timeout);
 }
 
+// Unlink, Rmdir and Rename never call fuse_lowlevel_notify_inval_entry():
+// the kernel itself drops its dentries for every name these ops touch
+// (d_delete/d_move on success), and picks up the changed nlink/ctime of the
+// inodes involved from the attributes our subsequent LOOKUP/GETATTR replies
+// carry. Under the exclusive-access model nothing else can have changed
+// those names behind the kernel's back, so there is nothing left for dcfs
+// to invalidate in the kernel.
+
 absl::Status DirCacheFS::Unlink(
-    FuseRequest &req, fuse_ino_t parent, std::string_view name) {
-  return req.ReplyErrno(ENOSYS);
+    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name) {
+  return RemoveChild(req, static_cast<InodeId>(parent_ino), name,
+                     /*is_dir=*/false);
 }
 
 absl::Status DirCacheFS::Rmdir(
-    FuseRequest &req, fuse_ino_t parent, std::string_view name) {
-  return req.ReplyErrno(ENOSYS);
+    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name) {
+  return RemoveChild(req, static_cast<InodeId>(parent_ino), name,
+                     /*is_dir=*/true);
+}
+
+absl::Status DirCacheFS::RemoveChild(
+    FuseRequest &req, InodeId parent, std::string_view name, bool is_dir) {
+  // Missing row -> ESTALE; see RequireAttr().
+  ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
+
+  // The child's id is needed for phase 3 (its row's fate depends on its
+  // remaining link count), so an uncached name is resolved first.
+  ABSL_ASSIGN_OR_RETURN(cache::LookupResult child,
+                        backing::LookupOrPopulate(ctx_, parent, name));
+  if (child.kind == cache::LookupResult::kNegative) {
+    return req.ReplyErrno(ENOENT);
+  }
+  RET_CHECK_EQ(child.kind, cache::LookupResult::kFound);
+
+  // See CreateChild for why this is captured before phase 1 clears it.
+  ABSL_ASSIGN_OR_RETURN(bool parent_was_complete,
+                        cache::IsDirComplete(ctx_, parent));
+
+  // Phase 1: forget (parent, name) and mark the attributes that are about
+  // to change (the parent's mtime/ctime/nlink, the child's nlink/ctime)
+  // unknown, in one transaction.
+  std::vector<std::string> names = {std::string(name)};
+  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, parent, names));
+    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, parent));
+    return cache::MarkAttrsUnknown(ctx_, child.id);
+  }));
+
+  // Phase 2: the backing unlinkat. On failure (ENOTEMPTY, EBUSY, ...) the
+  // error is returned as is, after a best-effort re-resolve (see
+  // ReresolveAfterFailure).
+  if (absl::Status status =
+          backing::UnlinkAt(ctx_, parent, name, is_dir ? AT_REMOVEDIR : 0);
+      !status.ok()) {
+    ReresolveAfterFailure(parent, names);
+    return status;
+  }
+
+  // Phase 3: the name is now known absent. Only that one dentry changed, so
+  // a listing that was complete before is complete again.
+  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
+    if (parent_was_complete) {
+      ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, parent, true));
+    }
+    return absl::OkStatus();
+  }));
+  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, parent));
+  if (is_dir) {
+    // A directory has exactly one link that matters here and no open-file
+    // state in dcfs (Opendir keeps nothing), so the backing rmdir removed
+    // it for good. The dentry is already negative, so DeleteInode's
+    // "mark the parents of dentries pointing at it incomplete" finds none;
+    // its (necessarily empty) children cascade away with it.
+    ABSL_RETURN_IF_ERROR(ForgetRemoved(child.id));
+  } else {
+    ABSL_RETURN_IF_ERROR(SettleUnlinkedFile(child.id));
+  }
+  return req.ReplyErrno(0);
 }
 
 absl::Status DirCacheFS::Symlink(
@@ -314,9 +386,159 @@ absl::Status DirCacheFS::Symlink(
 }
 
 absl::Status DirCacheFS::Rename(
-    FuseRequest &req, fuse_ino_t parent, std::string_view name,
-    fuse_ino_t newparent, std::string_view newname, unsigned int flags) {
-  return req.ReplyErrno(ENOSYS);
+    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
+    fuse_ino_t newparent_ino, std::string_view newname, unsigned int flags) {
+  InodeId parent = static_cast<InodeId>(parent_ino);
+  InodeId newparent = static_cast<InodeId>(newparent_ino);
+  // RENAME_WHITEOUT (overlayfs's) and anything unknown are not supported.
+  if (flags != 0 && flags != RENAME_NOREPLACE && flags != RENAME_EXCHANGE) {
+    return req.ReplyErrno(EINVAL);
+  }
+  const bool exchange = flags == RENAME_EXCHANGE;
+
+  // Missing row -> ESTALE for both parents; see RequireAttr().
+  ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
+  ABSL_RETURN_IF_ERROR(RequireAttr(newparent).status());
+
+  ABSL_ASSIGN_OR_RETURN(cache::LookupResult src,
+                        backing::LookupOrPopulate(ctx_, parent, name));
+  if (src.kind == cache::LookupResult::kNegative) {
+    return req.ReplyErrno(ENOENT);
+  }
+  RET_CHECK_EQ(src.kind, cache::LookupResult::kFound);
+  // The destination is resolved (populating newparent if need be) rather
+  // than merely looked up: if the rename replaces an existing object, its
+  // row -- which may be cached through another hard link, or an NFS
+  // handle, even when this name is not -- must learn its new link count
+  // (or be deleted) in phase 3, and that needs its id.
+  ABSL_ASSIGN_OR_RETURN(cache::LookupResult dst,
+                        backing::LookupOrPopulate(ctx_, newparent, newname));
+  RET_CHECK_NE(dst.kind, cache::LookupResult::kUnknown);
+  const bool dst_exists = dst.kind == cache::LookupResult::kFound;
+  if (exchange && !dst_exists) return req.ReplyErrno(ENOENT);
+  // Two links to one inode: the kernel's vfs_rename() treats this as a
+  // successful no-op and never sends it, but dcfs handles it the same way
+  // should one arrive (e.g. through a stale kernel dentry).
+  const bool same_inode = dst_exists && dst.id == src.id;
+
+  // See CreateChild for why these are captured before phase 1 clears them.
+  ABSL_ASSIGN_OR_RETURN(bool parent_was_complete,
+                        cache::IsDirComplete(ctx_, parent));
+  ABSL_ASSIGN_OR_RETURN(bool newparent_was_complete,
+                        cache::IsDirComplete(ctx_, newparent));
+
+  // Phase 1, one transaction: forget both names and mark every attribute
+  // set the rename changes unknown.
+  std::vector<std::string> names = {std::string(name)};
+  std::vector<std::string> newnames = {std::string(newname)};
+  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, parent, names));
+    ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, newparent, newnames));
+    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, parent));
+    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, newparent));
+    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, src.id));
+    if (dst_exists && !same_inode) {
+      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, dst.id));
+    }
+    return absl::OkStatus();
+  }));
+
+  // Phase 2: the backing renameat2. On failure (EXDEV, ENOTEMPTY, EEXIST
+  // for RENAME_NOREPLACE, ...) the error is returned unchanged, after a
+  // best-effort re-resolve (see ReresolveAfterFailure).
+  if (absl::Status status =
+          backing::RenameAt(ctx_, parent, name, newparent, newname, flags);
+      !status.ok()) {
+    ReresolveAfterFailure(parent, names);
+    ReresolveAfterFailure(newparent, newnames);
+    return status;
+  }
+
+  // Phase 3, one transaction: the dentries as they now are. Moving a
+  // directory moves only its own dentry; its cached subtree hangs off its
+  // (unchanged) id and so stays valid as is.
+  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx_, newparent, newname, src.id));
+    if (exchange || same_inode) {
+      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx_, parent, name, dst.id));
+    } else {
+      ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
+    }
+    // Each parent lost or gained exactly the names handled above, so a
+    // listing that was complete before is complete again.
+    if (parent_was_complete) {
+      ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, parent, true));
+    }
+    if (newparent_was_complete) {
+      ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, newparent, true));
+    }
+    return absl::OkStatus();
+  }));
+
+  // Outside that transaction (these need syscalls): both parents' mtime
+  // (and nlink, when a directory moved between them), and the ctime of
+  // every inode the rename touched.
+  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, parent));
+  if (newparent != parent) {
+    ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, newparent));
+  }
+  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, src.id));
+  if (dst_exists && !same_inode) {
+    if (exchange) {
+      ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, dst.id));
+    } else {
+      // Replaced. A directory can only have been replaced if it was empty,
+      // and is gone for good; a file follows Unlink's row-lifetime rule.
+      ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dst_attr, RequireAttr(dst.id));
+      if (S_ISDIR(dst_attr.st.st_mode)) {
+        ABSL_RETURN_IF_ERROR(ForgetRemoved(dst.id));
+      } else {
+        ABSL_RETURN_IF_ERROR(SettleUnlinkedFile(dst.id));
+      }
+    }
+  }
+  return req.ReplyErrno(0);
+}
+
+void DirCacheFS::ReresolveAfterFailure(
+    InodeId parent, std::span<const std::string> names) {
+  // Phase 1 left `names` unknown, which is safe but not free: a directory
+  // whose own dentry is unknown has no cached parent (cache::ParentOf), so
+  // the kernel -- which still holds its dentry, since the op failed --
+  // could not even list it ("..") until something repopulated `parent`.
+  // Re-reading the names from the backing filesystem now (not assuming the
+  // failed syscall changed nothing) restores that. Best effort: the op's
+  // own error is what gets replied, whatever happens here.
+  for (const std::string &name : names) {
+    backing::LookupOrPopulate(ctx_, parent, name).IgnoreError();
+  }
+}
+
+absl::Status DirCacheFS::ForgetRemoved(InodeId id) {
+  absl::Status status = cache::DeleteInode(ctx_, id);
+  // Already gone is fine: nothing else can be relying on the row.
+  if (absl::IsNotFound(status)) return absl::OkStatus();
+  return status;
+}
+
+absl::Status DirCacheFS::SettleUnlinkedFile(InodeId id) {
+  // Row lifetime: a row is deleted once its backing nlink reaches 0 AND
+  // dcfs holds no open file on it. While dcfs has one open, its fd is the
+  // reliable way to stat the object (the kernel and NFS clients may keep
+  // using the nodeid, and passthrough keeps the backing file alive); Release
+  // deletes the row when the last open closes with nlink 0.
+  if (std::optional<int> fd = OpenFdOf(id); fd.has_value()) {
+    return backing::RefreshAttrsFromFd(ctx_, id, *fd);
+  }
+  ABSL_ASSIGN_OR_RETURN(std::optional<uint64_t> nlink,
+                        backing::BackingNlink(ctx_, id));
+  // nullopt: the last link went and nothing held it open, so the handle no
+  // longer decodes and BackingNlink has already invalidated the row.
+  if (!nlink.has_value()) return absl::OkStatus();
+  // 0 with no dcfs open: something outside dcfs still pins the backing
+  // inode, but nothing can reach it through dcfs any more.
+  if (*nlink == 0) return ForgetRemoved(id);
+  return backing::RefreshAttrs(ctx_, id);
 }
 
 absl::Status DirCacheFS::Link(
@@ -455,6 +677,32 @@ absl::Status DirCacheFS::Release(
     ABSL_RETURN_IF_ERROR(
         backing::RefreshAttrsFromFd(ctx_, it->second.ino, *it->second.fd));
   }
+  InodeId id = it->second.ino;
+  bool last_open = true;
+  for (const auto &[handle, file] : open_files_) {
+    if (file.ino == id && handle != it->first) {
+      last_open = false;
+      break;
+    }
+  }
+  bool delete_row = false;
+  if (last_open) {
+    // Row lifetime (see SettleUnlinkedFile): the last dcfs open of a file
+    // whose last link is gone takes the row with it. Checked after the
+    // writable refresh above, so it sees the final nlink; an unknown cached
+    // nlink is refreshed from the still-open fd first rather than trusted.
+    // A row that is already gone (invalidated meanwhile) has nothing left
+    // to delete; the open itself must still be released below.
+    absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
+    if (!attr.ok() && !absl::IsNotFound(attr.status())) return attr.status();
+    if (attr.ok() && !attr->valid) {
+      ABSL_RETURN_IF_ERROR(
+          backing::RefreshAttrsFromFd(ctx_, id, *it->second.fd));
+      attr = cache::GetAttr(ctx_, id);
+      if (!attr.ok()) return attr.status();
+    }
+    delete_row = attr.ok() && attr->st.st_nlink == 0;
+  }
   if (it->second.backing_id > 0) {
     ABSL_RETURN_IF_ERROR(req.PassthroughClose(it->second.backing_id));
   }
@@ -462,6 +710,10 @@ absl::Status DirCacheFS::Release(
   // (the kernel took its own reference to the backing file back in
   // PassthroughOpen, independent of this one).
   open_files_.erase(it);
+  if (delete_row) {
+    RET_CHECK(!HasOpenFiles(id));
+    ABSL_RETURN_IF_ERROR(ForgetRemoved(id));
+  }
   return req.ReplyErrno(0);
 }
 
@@ -748,12 +1000,17 @@ absl::Status DirCacheFS::Fallocate(
 }
 
 bool DirCacheFS::HasOpenFiles(InodeId id) const {
-  // A linear scan is fine while nothing calls this; 4.3 should index
-  // open_files_ by inode if it becomes a hot path.
+  return OpenFdOf(id).has_value();
+}
+
+std::optional<int> DirCacheFS::OpenFdOf(InodeId id) const {
+  // A linear scan: only unlink/rename-over/release of a file consult this,
+  // and open_files_ holds only currently open files. Index it by inode if
+  // that ever becomes a hot path.
   for (const auto &[handle, file] : open_files_) {
-    if (file.ino == id) return true;
+    if (file.ino == id) return *file.fd;
   }
-  return false;
+  return std::nullopt;
 }
 
 }  // namespace dcfs

@@ -98,3 +98,12 @@ qemu_test(
     ],
     guest_script = "guest/create.sh",
 )
+
+qemu_test(
+    name = "rename_test",
+    disks = [
+        ("vdb", "ext4", "128M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/rename.sh",
+)
