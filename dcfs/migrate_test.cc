@@ -179,10 +179,13 @@ TEST_F(MigrateTest, MissingCacheStateRowIsCorrupt) {
 // Turns a freshly created current-version database back into what schema
 // v1 looked like, as far as any later migration step can tell: v1 kept
 // cache-wide state in a key/value `meta` table, binding every value --
-// including the device id's raw bytes -- as TEXT.
+// including the device id's raw bytes -- as TEXT, and dentries had no
+// `refused` column (amendment 12, step 4.8) -- dropped here since this
+// starts from a fresh (current-schema) database, which already has it.
 absl::Status DowngradeToV1(sqlite3::Connection &db, const DeviceId &device) {
   ABSL_RETURN_IF_ERROR(db.ExecScript(
       "DROP TABLE dirty; DROP TABLE cache_state; "
+      "ALTER TABLE dentries DROP COLUMN refused; "
       "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
       "INSERT INTO meta VALUES ('schema_version', '1'), "
       "('gen_counter', '12345');"));
@@ -419,11 +422,15 @@ TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
   EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'meta'"),
               IsOkAndHolds(0));
 
-  // A v1 database, as v1 wrote it: every meta value bound as TEXT.
+  // A v1 database, as v1 wrote it: every meta value bound as TEXT, and no
+  // dentries.refused column (amendment 12, step 4.8; dropped here since
+  // this starts from a fresh, current-schema database, which already has
+  // it).
   ASSERT_THAT(db_.ExecScript(
                   "DROP TABLE IF EXISTS dirty; "
                   "DROP TABLE IF EXISTS cache_state; "
                   "DROP TABLE IF EXISTS meta; "
+                  "ALTER TABLE dentries DROP COLUMN refused; "
                   "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
                   "INSERT INTO meta VALUES ('schema_version', '1'), "
                   "('gen_counter', '12345');"),
