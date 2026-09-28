@@ -10,4 +10,56 @@
 # One "<relative .t path>:<TAP test number within that file>" per line,
 # sorted; blank lines and "#"-comment lines are ignored.
 #
-# Populated by the first real run under QEMU; see docs/conformance.md.
+# Observed on this project's minimal QEMU test kernel (CONFIG_ACL off is
+# NOT the cause here -- these are plain chown/utimensat POSIX-permission
+# edge cases; see docs/conformance.md for the two groups):
+#   - chown/00.t: a run of failures around lines 650-690 and 1054-1144,
+#     all "chown clears setuid/setgid" checks by a non-root, non-owning
+#     user with appropriate group membership.
+#   - unlink/08.t:2: sticky-directory unlink permission edge case.
+#   - utimensat/06.t, utimensat/07.t: UTIME_NOW/explicit-timestamp
+#     permission checks for a non-owner with write access via group
+#     permissions.
+chown/00.t:1054
+chown/00.t:1058
+chown/00.t:1064
+chown/00.t:1069
+chown/00.t:1073
+chown/00.t:1079
+chown/00.t:1084
+chown/00.t:1088
+chown/00.t:1094
+chown/00.t:1099
+chown/00.t:1103
+chown/00.t:1109
+chown/00.t:1114
+chown/00.t:1118
+chown/00.t:1124
+chown/00.t:1129
+chown/00.t:1133
+chown/00.t:1139
+chown/00.t:1144
+chown/00.t:650
+chown/00.t:654
+chown/00.t:665
+chown/00.t:666
+chown/00.t:671
+chown/00.t:672
+chown/00.t:686
+chown/00.t:690
+unlink/08.t:2
+utimensat/06.t:11
+utimensat/06.t:4
+utimensat/06.t:5
+utimensat/06.t:7
+utimensat/06.t:8
+utimensat/06.t:9
+utimensat/07.t:10
+utimensat/07.t:11
+utimensat/07.t:13
+utimensat/07.t:14
+utimensat/07.t:4
+utimensat/07.t:5
+utimensat/07.t:6
+utimensat/07.t:8
+utimensat/07.t:9
