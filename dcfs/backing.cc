@@ -423,6 +423,33 @@ absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
   return buf;
 }
 
+absl::StatusOr<size_t> WriteFile(int fd, std::span<const char> buf,
+                                 off_t offset) {
+  size_t total = 0;
+  while (total < buf.size()) {
+    ABSL_ASSIGN_OR_RETURN(
+        size_t n, syscalls::pwrite(fd, buf.data() + total, buf.size() - total,
+                                   offset + total));
+    if (n == 0) break;  // Should not happen for a regular file.
+    total += n;
+  }
+  return total;
+}
+
+absl::Status FallocateFd(int fd, int mode, off_t offset, off_t length) {
+  return syscalls::fallocate(fd, mode, offset, length);
+}
+
+absl::Status FsyncFd(int fd, bool datasync) {
+  return datasync ? syscalls::fdatasync(fd) : syscalls::fsync(fd);
+}
+
+absl::Status FsyncDir(Context &ctx, InodeId id, bool datasync) {
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
+                        OpenNode(ctx, id, O_RDONLY | O_DIRECTORY));
+  return FsyncFd(*fd, datasync);
+}
+
 absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
@@ -442,6 +469,54 @@ absl::Status RefreshXattrs(Context &ctx, InodeId id) {
       (std::vector<std::pair<std::string, std::string>> xattrs),
       ReadXattrs(ctx, id));
   return cache::ReplaceXattrs(ctx, id, xattrs);
+}
+
+namespace {
+
+// Shared by SetXattr/RemoveXattr: an O_PATH fd on `id`, its type, and
+// whichever real fd `apply` should use -- `open_fd` if given, else a fresh
+// /proc reopen for a regular file/directory (freed automatically at the end
+// of the calling statement). Special files use `opath_fd` itself via the
+// *_opath syscalls instead of ever calling `apply`.
+template <typename ApplyReal, typename ApplyOpath>
+absl::Status ApplyXattrOp(Context &ctx, InodeId id, std::optional<int> open_fd,
+                          ApplyReal apply_real, ApplyOpath apply_opath) {
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor opath_fd,
+                        OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  ABSL_ASSIGN_OR_RETURN(
+      struct statx stx, syscalls::statx(*opath_fd, "", AT_EMPTY_PATH, STATX_MODE));
+  mode_t type = stx.stx_mode & S_IFMT;
+  if (S_ISREG(type) || S_ISDIR(type)) {
+    if (open_fd.has_value()) return apply_real(*open_fd);
+    ABSL_ASSIGN_OR_RETURN(
+        FileDescriptor fd,
+        syscalls::ReopenPathFd(*opath_fd, O_RDONLY | O_CLOEXEC));
+    return apply_real(*fd);
+  }
+  return apply_opath(*opath_fd);
+}
+
+}  // namespace
+
+absl::Status SetXattr(Context &ctx, InodeId id, std::string_view name,
+                      std::string_view value, int flags,
+                      std::optional<int> open_fd) {
+  std::span<const uint8_t> value_bytes(
+      reinterpret_cast<const uint8_t *>(value.data()), value.size());
+  return ApplyXattrOp(
+      ctx, id, open_fd,
+      [&](int fd) { return syscalls::fsetxattr(fd, name, value_bytes, flags); },
+      [&](int fd) {
+        return syscalls::setxattr_opath(fd, name, value_bytes, flags);
+      });
+}
+
+absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name,
+                         std::optional<int> open_fd) {
+  return ApplyXattrOp(
+      ctx, id, open_fd,
+      [&](int fd) { return syscalls::fremovexattr(fd, name); },
+      [&](int fd) { return syscalls::removexattr_opath(fd, name); });
 }
 
 absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id) {

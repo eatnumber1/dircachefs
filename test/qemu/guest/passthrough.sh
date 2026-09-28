@@ -11,10 +11,13 @@
 # reads; the CPU time dcfs's own process consumes while a 64 MiB read
 # happens stays under 20 clock ticks (200ms), which is only possible if
 # the kernel is reading the backing file directly rather than routing the
-# data through us; any non-read-only open (Phase 4's job) is rejected with
-# EROFS and never touches the backing file; 200 open/read/release cycles
-# leave no fd leak in the daemon; and all of this still works after
-# killing and restarting the daemon against the same cache database.
+# data through us; a non-read-only open succeeds and its write lands on the
+# backing filesystem (step 4.4 -- see write_test / guest/write.sh for the
+# full write-through test; this file only keeps a minimal smoke check so
+# passthrough opens of every access mode stay exercised here too); 200
+# open/read/release cycles leave no fd leak in the daemon; and all of this
+# still works after killing and restarting the daemon against the same
+# cache database.
 #
 # Uses only busybox applets/options (verified against the exact busybox
 # baked into the initramfs: `busybox --list`, `busybox <applet> --help`) --
@@ -204,16 +207,23 @@ else
 	fail passthrough-active "cpu ticks delta=$tick_delta"
 fi
 
-# --- Phase 4 owns writes: any non-read-only open must be refused ---------
+# --- step 4.4: writes are now allowed -- a non-read-only open must SUCCEED
+# and land on the backing filesystem (this replaces the EROFS check step
+# 3.3-4.3 had here, back when Open() refused anything but a read-only open;
+# see write_test / guest/write.sh for the full write-through test) ----------
 
 write_ok=0
 if echo x >"$MNT/small.txt" 2>/dev/null; then write_ok=1; fi
 after_write=$(cat "$SRC/small.txt")
-if [ "$write_ok" -eq 0 ] && [ "$after_write" = "$SMALL_CONTENT" ]; then
-	pass write-open-erofs
+if [ "$write_ok" -eq 1 ] && [ "$after_write" = x ]; then
+	pass write-open-succeeds
 else
-	fail write-open-erofs "write_ok=$write_ok content='$after_write'"
+	fail write-open-succeeds "write_ok=$write_ok content='$after_write'"
 fi
+# Restore small.txt (through /mnt, like the write that changed it -- dcfs
+# has exclusive access to the backing tree, so this must not touch /src
+# directly) so every check below it still sees the original content.
+printf '%s' "$SMALL_CONTENT" >"$MNT/small.txt"
 
 # --- 200 open/read/release cycles must not leak fds -----------------------
 

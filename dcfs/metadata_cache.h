@@ -235,6 +235,18 @@ absl::Status SetXattr(Context &ctx, InodeId id, std::string_view name,
 // remains complete, now without `name`.
 absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name);
 
+// Forgets one xattr and marks the whole set incomplete: phase 1 of
+// Setxattr/Removexattr's write-through rule, done before the backing
+// syscall. Unlike RemoveXattr (their phase 3, once the backing change is
+// known to have happened), this always clears xattrs_complete -- a crash,
+// or a failed phase 2, between here and phase 3 must not leave `name`'s old
+// value (or its absence) looking authoritative. Narrower than
+// MarkXattrsUnknown: every other already-cached name's row is left alone,
+// so GetXattr on those still needs no refresh; only a full ListXattrs pays
+// for one lazy backing::RefreshXattrs the next time it's asked, until then.
+// A no-op if `name` was not cached. NotFound if there is no row for `id`.
+absl::Status ForgetXattr(Context &ctx, InodeId id, std::string_view name);
+
 // Forgets all of `id`'s xattrs and marks the set incomplete.
 absl::Status MarkXattrsUnknown(Context &ctx, InodeId id);
 

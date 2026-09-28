@@ -92,6 +92,15 @@ absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags);
 absl::StatusOr<std::vector<std::string>> listxattr_opath(int fd);
 absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name);
 
+// setxattr(2)/removexattr(2) on "/proc/self/fd/<fd>" -- the same
+// path-following trick as listxattr_opath/getxattr_opath, for the write
+// side. Used for symlinks and other special files, which fsetxattr(2)/
+// fremovexattr(2) cannot reach directly (they need a non-O_PATH fd) and
+// which reopening for one could block on or have a side effect on.
+absl::Status setxattr_opath(int fd, std::string_view name,
+                            std::span<const uint8_t> value, int flags);
+absl::Status removexattr_opath(int fd, std::string_view name);
+
 // fchmodat(AT_FDCWD, "/proc/self/fd/<fd>", mode, 0) -- as listxattr_opath,
 // for fchmod(2), which (like flistxattr/fgetxattr) rejects O_PATH fds.
 // Intended for FIFOs, sockets and devices, which reopening for a real fd

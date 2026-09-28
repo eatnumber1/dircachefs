@@ -267,6 +267,7 @@ bazel test //test/qemu:handles_test
 bazel test //test/qemu:setattr_test
 bazel test //test/qemu:create_test
 bazel test //test/qemu:rename_test
+bazel test //test/qemu:write_test
 ```
 
 - `boot_test` (`guest/boot.sh`): dcfs and fhtest are present and runnable,
@@ -283,9 +284,10 @@ bazel test //test/qemu:rename_test
   match the backing files, a content read (unlike metadata) does move the
   backing device's block-read counter, dcfs's own CPU time during a 64 MiB
   read stays low enough that the kernel must be reading the backing file
-  directly, any non-read-only open is refused with EROFS, 200 open/release
-  cycles leak no fds, and all of this still works after killing and
-  restarting the daemon against the same cache database.
+  directly, a non-read-only open succeeds and its write lands on the
+  backing filesystem (step 4.4; `write_test` has the full write-through
+  test), 200 open/release cycles leak no fds, and all of this still works
+  after killing and restarting the daemon against the same cache database.
 - `lifecycle_test` (`guest/lifecycle.sh`): step 3.5's daemon lifecycle and
   CLI -- usage/flag validation, a missing or non-directory `--source`, a
   cache database refused because it belongs to a different filesystem,
@@ -348,6 +350,27 @@ bazel test //test/qemu:rename_test
   cache with zero sectors read on both disks (negative entries and
   directory completeness are recorded, not re-read), then as a whole tree,
   and again after a daemon restart.
+- `write_test` (`guest/write.sh`): step 4.4's write-through file I/O and the
+  "one backing file per inode" fix -- plain writes (create, append,
+  in-place overwrite, `O_TRUNC` on an existing file via the kernel's own
+  `SETATTR(size=0)`, a 64 MiB passthrough write low enough in daemon CPU
+  time to prove the kernel moved the bytes, and a write across the vdc
+  mount boundary); two concurrent opens of one file (both readers, and a
+  reader held open across a writer's open/write/close) all succeeding,
+  which used to EBUSY/EIO before this step because every open got its own
+  passthrough backing file; a writer's close making its effect on size
+  visible immediately even while another open of the same file remains
+  outstanding; fsync; fallocate (plain, `KEEP_SIZE`, `PUNCH_HOLE`, checked
+  against `/src`'s block count); setxattr/getxattr/listxattr/removexattr on
+  a file, a directory, and (`EPERM` for the `user.` namespace) a symlink,
+  with getxattr of an unchanged value served from cache with zero sectors
+  read; a second `mkdir` of an already-existing directory (4.2's
+  create-family failure paths now re-resolve the name instead of leaving it
+  unknown) followed by listing that directory's own `..` with zero sectors
+  read; a normalized `find`+`stat` listing of the whole tree agreeing
+  between `/src` and `/mnt`; and all of it -- including the xattr still
+  being served from cache -- surviving a daemon restart against the same
+  cache database.
 
 The serial console log lands at
 `bazel-testlogs/test/qemu/boot_test/test.outputs/serial.log` (Bazel's

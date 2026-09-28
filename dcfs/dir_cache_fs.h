@@ -24,13 +24,11 @@ namespace dcfs {
 
 using cache::InodeId;
 
-// DirCacheFS is the low-level FUSE filesystem: every op below reads (and, in
-// later steps, writes) through cache::/backing:: against `ctx_`, never
-// touching the backing filesystem or ctx_.mounts directly itself -- that is
-// backing.cc's job. Ops not yet implemented (writes; Open/Read land in step
-// 3.3) reply ENOSYS themselves (rather than relying on libfuse's default of
-// ENOSYS for an absent callback) so that every op has a DirCacheFS method
-// and an entry in the ops table (see fuse_ops.h).
+// DirCacheFS is the low-level FUSE filesystem: every op below reads and
+// writes through cache::/backing:: against `ctx_`, never touching the
+// backing filesystem or ctx_.mounts directly itself -- that is backing.cc's
+// job. Every op has its own DirCacheFS method and an entry in the ops table
+// (see fuse_ops.h); none reply ENOSYS any more as of step 4.4.
 class DirCacheFS {
  public:
   // dcfs has exclusive access to the backing tree (nothing else is supposed
@@ -204,21 +202,64 @@ class DirCacheFS {
   // The fd of some outstanding open of `id`, if any.
   std::optional<int> OpenFdOf(InodeId id) const;
 
-  // An open file handle: the fd Open()/Create() opened `ino` with, and the
-  // passthrough backing id the kernel assigned it (0 if the kernel did
-  // not grant FUSE_CAP_PASSTHROUGH, or fuse_passthrough_open() otherwise
-  // failed for this open -- Read() then serves the fallback path itself).
+  // One shared backing descriptor per inode with at least one dcfs open on
+  // it. The kernel refuses a second, different backing file for one inode
+  // (fs/fuse/iomode.c fuse_inode_uncached_io_start: EBUSY if the fuse_backing
+  // registered for a FUSE OPEN's fi.backing_id differs from the one already
+  // associated with the inode), and fuse_passthrough_open() -- the ioctl
+  // that registers a backing fd and hands back a fresh backing_id --
+  // allocates a brand new kernel-side fuse_backing every time it is called,
+  // even for the very same fd number (fs/fuse/backing.c fuse_backing_open).
+  // So passthrough only works for two concurrent opens of one inode if both
+  // report the *same* backing_id, which means fuse_passthrough_open() may be
+  // called at most once per inode: this struct is that one registration,
+  // shared by every OpenFile of the inode regardless of each open's own
+  // access mode.
+  struct BackingFile {
+    FileDescriptor fd;
+    // The passthrough backing id fuse_passthrough_open() returned when this
+    // BackingFile was created (0 if the kernel did not grant
+    // FUSE_CAP_PASSTHROUGH, or the open otherwise failed to register one --
+    // every open of this inode then falls back to Read()/Write() serving
+    // the data through `fd` themselves).
+    int backing_id = 0;
+    // Whether `fd` was opened O_RDWR (true) or MakeBackingFile had to fall
+    // back to O_RDONLY (false: an immutable/append-only file, or a
+    // read-only backing filesystem -- see MakeBackingFile). A write through
+    // a read-only `fd` (fallback Write(), or Fallocate()) then fails with
+    // whatever the real syscall reports (typically EBADF), exactly as it
+    // would against the backing filesystem directly.
+    bool writable = false;
+    // Whether any OpenFile of this inode has ever been writable (i.e.
+    // `writable` on some past or current OpenFile referencing this
+    // BackingFile was true). Flush/Fsync/Release use this (well, its
+    // per-open twin, OpenFile::writable) to decide when the cached
+    // attributes need a post-write refresh from `fd` before it closes.
+    bool ever_writable = false;
+    // Number of OpenFile handles currently referencing this inode's shared
+    // fd. Reaches 0 exactly when the Release() of the last of them runs,
+    // which is when this BackingFile itself is torn down.
+    int refs = 0;
+  };
+
+  // One fi.fh handle: which inode's BackingFile it uses, and whether this
+  // particular open asked for write access (Open() computes it from the
+  // kernel's requested flags; Create() likewise). Flush/Fsync consult this
+  // (not BackingFile::ever_writable) because they act at a specific open's
+  // close/sync time, not the shared fd's whole lifetime.
   struct OpenFile {
     InodeId ino;
-    FileDescriptor fd;
-    int backing_id = 0;
-    // Whether this open can write to `fd` (always false for Open(), which
-    // refuses anything but a read-only open until step 4.4; Create() sets
-    // it from the kernel's requested flags). Release() uses this to decide
-    // whether the cached attributes need a post-write refresh before the fd
-    // closes.
     bool writable = false;
   };
+
+  // Opens a fresh shared backing descriptor for `id` (not yet in
+  // backing_files_) and registers it for passthrough: O_RDWR if possible,
+  // falling back to O_RDONLY only for a failure that specifically means
+  // "this object cannot be opened for writing" (EACCES/EROFS/EPERM) --
+  // anything else (e.g. ESTALE) is returned unchanged, exactly as a single
+  // OpenNode call would report it. The returned BackingFile has refs == 0
+  // and ever_writable == false; the caller (Open()/Create()) sets those.
+  absl::StatusOr<BackingFile> MakeBackingFile(InodeId id, FuseRequest &req);
 
   Context &ctx_;
   Options opts_;
@@ -228,6 +269,8 @@ class DirCacheFS {
   // increasing counter indexing open_files_.
   uint64_t next_handle_ = 1;
   absl::flat_hash_map<uint64_t, OpenFile> open_files_;
+  // Keyed by inode, not by fi.fh: see BackingFile's comment.
+  absl::flat_hash_map<InodeId, BackingFile> backing_files_;
 };
 
 }  // namespace dcfs

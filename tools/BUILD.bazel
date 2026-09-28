@@ -13,14 +13,17 @@ cc_binary(
     visibility = ["//visibility:public"],
 )
 
-# Small guest-only helpers for the QEMU setattr test (see
-# //test/qemu:setattr_test / test/qemu/guest/setattr.sh): syscalls busybox's
-# own applets can't drive precisely enough (truncate(2) without an
-# intervening open(), which dcfs's Open() still refuses for anything but a
-# read-only open until step 4.4; nanosecond-precision utimensat(2); and
+# Small guest-only helpers for the QEMU setattr/rename/write tests (see
+# //test/qemu:setattr_test / test/qemu/guest/setattr.sh,
+# //test/qemu:rename_test / test/qemu/guest/rename.sh, and
+# //test/qemu:write_test / test/qemu/guest/write.sh): syscalls busybox's own
+# applets can't drive precisely enough or don't expose at all (truncate(2)
+# without an intervening open(); nanosecond-precision utimensat(2);
 # fchmodat(2) with AT_SYMLINK_NOFOLLOW, which busybox's chmod has no
-# equivalent for). Statically linked like //dcfs:main_static, for the same
-# reason: the QEMU initramfs has no dynamic loader or shared libc.
+# equivalent for; renameat2(2) with RENAME_NOREPLACE/RENAME_EXCHANGE; and
+# xattr syscalls/fallocate(2), which busybox has no applets for at all).
+# Statically linked like //dcfs:main_static, for the same reason: the QEMU
+# initramfs has no dynamic loader or shared libc.
 cc_binary(
     name = "testutil",
     srcs = ["testutil.c"],

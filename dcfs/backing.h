@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -97,6 +98,29 @@ absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd);
 // InodeId, because the caller already has one open and identity-verified.
 absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset);
 
+// As ReadFile, for the write side: writes all of `buf` to `fd` at `offset`,
+// looping over short writes. The fallback DirCacheFS::Write uses; with
+// FUSE_CAP_PASSTHROUGH granted the kernel writes directly against `fd` and
+// this is never called. Returns the number of bytes written (always
+// `buf.size()` on success; a short write only happens on an error, which is
+// then returned instead).
+absl::StatusOr<size_t> WriteFile(int fd, std::span<const char> buf,
+                                 off_t offset);
+
+// fallocate(2) on `fd` (as ReadFile/WriteFile, an already-open, identity
+// verified real fd -- DirCacheFS::Fallocate's shared per-inode backing fd).
+absl::Status FallocateFd(int fd, int mode, off_t offset, off_t length);
+
+// fsync(2) (datasync false) or fdatasync(2) (true) on `fd`. Backing
+// durability is the backing filesystem's own job; this simply passes the
+// request through.
+absl::Status FsyncFd(int fd, bool datasync);
+
+// As FsyncFd, for a directory: opens `id` O_RDONLY|O_DIRECTORY via OpenNode
+// (a plain read is enough; fsync needs no write access) and syncs it. dcfs
+// tracks no separate directory state that would need flushing first.
+absl::Status FsyncDir(Context &ctx, InodeId id, bool datasync);
+
 // The target of symlink `id`, read from the backing filesystem.
 absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id);
 
@@ -109,6 +133,27 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
 // followed by cache::ReplaceXattrs). Called when the cached set is unknown
 // (ListXattrs/GetXattr returned nullopt).
 absl::Status RefreshXattrs(Context &ctx, InodeId id);
+
+// Applies setxattr(2)/removexattr(2) for `id` -- phase 2 of
+// DirCacheFS::Setxattr/Removexattr's write-through rule, run between their
+// own cache::ForgetXattr (phase 1) and cache::SetXattr/RemoveXattr (phase
+// 3); does not touch the cache. If `open_fd` is given (an already-open,
+// identity-verified fd on `id`, e.g. DirCacheFS's shared per-inode backing
+// fd), it is used directly -- any access mode works, fsetxattr/fremovexattr
+// need no particular open mode on the fd. Otherwise: a regular file or
+// directory is reopened via /proc (syscalls::ReopenPathFd); a symlink or
+// other special file -- which cannot be safely reopened for a real fd, and
+// which fsetxattr/fremovexattr reject as an O_PATH fd regardless -- goes
+// through setxattr_opath/removexattr_opath instead, following the magic
+// link the same way ReadXattrs's XattrsOf already does for reads. The
+// kernel itself rejects a "user." xattr on a symlink or special file with
+// EPERM; that happens inside the real syscall here and needs no special
+// casing.
+absl::Status SetXattr(Context &ctx, InodeId id, std::string_view name,
+                      std::string_view value, int flags,
+                      std::optional<int> open_fd);
+absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name,
+                         std::optional<int> open_fd);
 
 // The statvfs of the filesystem `id` lives on, from that filesystem's mount
 // fd -- no handle open of `id` itself is needed.

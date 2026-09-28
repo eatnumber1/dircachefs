@@ -100,9 +100,9 @@ class FuseRequest {
       const fuse_entry_param &entry, const fuse_file_info &fi);
   absl::Status ReplyWrite(size_t count);
 
-  // Wraps fuse_passthrough_open(): tells the kernel to serve reads (and,
-  // once Phase 4 lands, writes) on this open directly against `fd`
-  // instead of routing them through us. The returned int is the backing
+  // Wraps fuse_passthrough_open(): tells the kernel to serve reads and
+  // writes on this open directly against `fd` instead of routing them
+  // through us. The returned int is the backing
   // id to report in fi.backing_id when positive; 0 means the kernel did
   // not grant FUSE_CAP_PASSTHROUGH or this open otherwise failed to set
   // it up -- that is a normal outcome for the caller to fall back on, not

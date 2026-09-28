@@ -14,6 +14,7 @@
  *     symlink itself (chmod(2) always follows symlinks); confirming that
  *     Linux has no way to chmod a symlink's own mode (EOPNOTSUPP) needs
  *     fchmodat(2) with AT_SYMLINK_NOFOLLOW.
+ *   - busybox has no setfattr/getfattr/fallocate applets at all.
  *
  * Subcommands:
  *   testutil truncate <path> <size>
@@ -33,10 +34,28 @@
  *       AT_FDCWD) with flags 0, RENAME_NOREPLACE or RENAME_EXCHANGE.
  *       busybox has no way to ask for either flag, and busybox mv falls
  *       back to copy+delete on EXDEV, hiding the raw error.
+ *   testutil setxattr <path> <name> <value>
+ *       lsetxattr(2): sets extended attribute <name> to <value>, without
+ *       following a symlink.
+ *   testutil getxattr <path> <name>
+ *       lgetxattr(2): prints <name>'s value (no trailing newline) without
+ *       following a symlink.
+ *   testutil listxattr <path>
+ *       llistxattr(2): prints every xattr name, one per line, without
+ *       following a symlink.
+ *   testutil removexattr <path> <name>
+ *       lremovexattr(2): removes xattr <name>, without following a
+ *       symlink.
+ *   testutil fallocate <path> <mode> <offset> <len>
+ *       fallocate(2), where <mode> is "0", "keep_size" (FALLOC_FL_KEEP_SIZE)
+ *       or "punch_hole" (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE --
+ *       punching a hole always requires KEEP_SIZE).
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
- * and exits 1 on failure; on success it prints nothing and exits 0. All
- * output is single-line so the guest test scripts can capture it.
+ * and exits 1 on failure; on success it prints nothing (except
+ * getxattr/listxattr, which print their result) and exits 0. All output is
+ * single-line (or, for listxattr, one name per line) so the guest test
+ * scripts can capture it.
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -46,6 +65,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/xattr.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -117,6 +137,89 @@ static int cmd_rename2(
 	return 0;
 }
 
+static int cmd_setxattr(const char *path, const char *name, const char *value)
+{
+	if (lsetxattr(path, name, value, strlen(value), 0) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	return 0;
+}
+
+static int cmd_getxattr(const char *path, const char *name)
+{
+	char buf[4096];
+	ssize_t n;
+
+	n = lgetxattr(path, name, buf, sizeof(buf) - 1);
+	if (n == -1) {
+		print_err(errno);
+		return 1;
+	}
+	buf[n] = '\0';
+	printf("%s", buf);
+	return 0;
+}
+
+static int cmd_listxattr(const char *path)
+{
+	char buf[4096];
+	ssize_t n, i;
+
+	n = llistxattr(path, buf, sizeof(buf));
+	if (n == -1) {
+		print_err(errno);
+		return 1;
+	}
+	for (i = 0; i < n; i += (ssize_t) strlen(buf + i) + 1)
+		printf("%s\n", buf + i);
+	return 0;
+}
+
+static int cmd_removexattr(const char *path, const char *name)
+{
+	if (lremovexattr(path, name) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	return 0;
+}
+
+static int cmd_fallocate(
+	const char *path, const char *mode_str, const char *offset_str,
+	const char *len_str)
+{
+	int fd;
+	int mode;
+	off_t offset = (off_t) strtoll(offset_str, NULL, 10);
+	off_t len = (off_t) strtoll(len_str, NULL, 10);
+
+	if (strcmp(mode_str, "0") == 0) {
+		mode = 0;
+	} else if (strcmp(mode_str, "keep_size") == 0) {
+		mode = FALLOC_FL_KEEP_SIZE;
+	} else if (strcmp(mode_str, "punch_hole") == 0) {
+		/* Punching a hole is only valid together with KEEP_SIZE. */
+		mode = FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE;
+	} else {
+		fprintf(stderr, "testutil fallocate: bad mode '%s'\n", mode_str);
+		return 2;
+	}
+
+	fd = open(path, O_WRONLY);
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	if (fallocate(fd, mode, offset, len) == -1) {
+		print_err(errno);
+		close(fd);
+		return 1;
+	}
+	close(fd);
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -127,11 +230,26 @@ int main(int argc, char *argv[])
 		return cmd_lchmod(argv[2], argv[3]);
 	if (argc == 5 && strcmp(argv[1], "rename2") == 0)
 		return cmd_rename2(argv[2], argv[3], argv[4]);
+	if (argc == 5 && strcmp(argv[1], "setxattr") == 0)
+		return cmd_setxattr(argv[2], argv[3], argv[4]);
+	if (argc == 4 && strcmp(argv[1], "getxattr") == 0)
+		return cmd_getxattr(argv[2], argv[3]);
+	if (argc == 3 && strcmp(argv[1], "listxattr") == 0)
+		return cmd_listxattr(argv[2]);
+	if (argc == 4 && strcmp(argv[1], "removexattr") == 0)
+		return cmd_removexattr(argv[2], argv[3]);
+	if (argc == 6 && strcmp(argv[1], "fallocate") == 0)
+		return cmd_fallocate(argv[2], argv[3], argv[4], argv[5]);
 
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
 		"       testutil utimens <path> <sec> <nsec>\n"
 		"       testutil lchmod <path> <octal-mode>\n"
-		"       testutil rename2 <old> <new> <0|noreplace|exchange>\n");
+		"       testutil rename2 <old> <new> <0|noreplace|exchange>\n"
+		"       testutil setxattr <path> <name> <value>\n"
+		"       testutil getxattr <path> <name>\n"
+		"       testutil listxattr <path>\n"
+		"       testutil removexattr <path> <name>\n"
+		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n");
 	return 2;
 }

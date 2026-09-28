@@ -318,6 +318,27 @@ absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name) {
                                             "): kept growing"));
 }
 
+absl::Status setxattr_opath(int fd, std::string_view name,
+                            std::span<const uint8_t> value, int flags) {
+  const std::string path = ProcFdPath(fd);
+  const std::string name_str(name);
+  if (::setxattr(path.c_str(), name_str.c_str(),
+                 reinterpret_cast<const void *>(value.data()), value.size(),
+                 flags) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("setxattr(", path, ", ", name, ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status removexattr_opath(int fd, std::string_view name) {
+  const std::string path = ProcFdPath(fd);
+  const std::string name_str(name);
+  if (::removexattr(path.c_str(), name_str.c_str()) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("removexattr(", path, ", ", name, ")"));
+  }
+  return absl::OkStatus();
+}
+
 absl::Status fchmod_opath(int fd, mode_t mode) {
   const std::string path = ProcFdPath(fd);
   if (::fchmodat(AT_FDCWD, path.c_str(), mode, 0) == -1) {

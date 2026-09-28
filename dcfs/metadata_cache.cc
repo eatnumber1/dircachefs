@@ -770,6 +770,17 @@ absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name) {
   });
 }
 
+absl::Status ForgetXattr(Context &ctx, InodeId id, std::string_view name) {
+  return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx, "DELETE FROM xattrs WHERE inode = ? AND name = ?", id,
+               Blob(name))
+            .status());
+    return SetXattrsComplete(ctx, id, false);
+  });
+}
+
 absl::Status MarkXattrsUnknown(Context &ctx, InodeId id) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
