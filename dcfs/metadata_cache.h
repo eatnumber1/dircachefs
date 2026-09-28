@@ -349,8 +349,11 @@ absl::Status BeginRename(Context &ctx, InodeId parent, std::string_view name,
 absl::Status BeginLink(Context &ctx, InodeId src, InodeId newparent,
                        std::string_view newname);
 // Setattr, a writable open (DirCacheFS::BeginWriting), fallback Write and
-// Fallocate of `id`: marks its attributes unknown. Dirty: id.
-absl::Status BeginAttrChange(Context &ctx, InodeId id);
+// Fallocate of `id`: marks its attributes unknown, and ForgetXattr()s each
+// of `xattrs` (the ones the backing filesystem may change as a side effect:
+// see DirCacheFS's side-effect xattrs). Dirty: id.
+absl::Status BeginAttrChange(Context &ctx, InodeId id,
+                             std::span<const std::string_view> xattrs = {});
 // Setxattr/Removexattr of `name` on `id`: ForgetXattr(name) (only that
 // name unknown) and marks the attributes unknown (the syscall bumps
 // ctime). Dirty: id.

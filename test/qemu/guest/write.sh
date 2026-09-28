@@ -507,7 +507,8 @@ else
 	fail xattr-on-symlink-eperm "rc=$rc out='$out' (want nonzero rc, 'ERR EPERM')"
 fi
 
-# --- xattrs the backing filesystem stores differently (step 4.11) ----------
+# --- xattrs the backing filesystem stores differently, or changes as a -----
+# --- side effect of another operation (step 4.11) --------------------------
 
 # xattr_matches NAME PATH XATTR: getxattr through /mnt must answer exactly
 # what the backing filesystem does (hex value, or the same ERR errno).
@@ -527,6 +528,11 @@ xattr_matches() {
 # u::rw- g::r-- o::r--: exactly equivalent to mode 0644, so ext4 stores no
 # xattr at all (posix_acl_update_mode) and only sets the mode.
 ACL_MINIMAL_644=0200000001000600ffffffff04000400ffffffff20000400ffffffff
+# u::rw- u:1000:rwx g::r-- m::rwx o::r--: a real ACL, which a chmod
+# rewrites (posix_acl_chmod: the mask takes the new group bits).
+ACL_EXTENDED=0200000001000600ffffffff02000700e803000004000400ffffffff10000700ffffffff20000400ffffffff
+# struct vfs_cap_data, VFS_CAP_REVISION_2, permitted = CAP_NET_RAW (13).
+CAP_NET_RAW_V2=0000000200200000000000000000000000000000
 
 # setxattr of an ACL equivalent to the mode: what is cached must be what the
 # backing filesystem stored (nothing), not what the client sent.
@@ -541,6 +547,46 @@ else
 	fail acl-minimal-set "rc=$rc out='$out' src='$out_src' (want the backing to store no ACL)"
 fi
 xattr_matches acl-minimal-getxattr-matches-src acl_min system.posix_acl_access
+
+# chmod of a file with an ACL rewrites the ACL on the backing filesystem.
+: >"$MNT/acl_chmod"
+chmod 644 "$MNT/acl_chmod"
+out=$("$TESTUTIL" setxattrhex "$MNT/acl_chmod" system.posix_acl_access "$ACL_EXTENDED")
+rc=$?
+if [ "$rc" -eq 0 ]; then
+	pass acl-extended-set
+else
+	fail acl-extended-set "rc=$rc out='$out'"
+fi
+xattr_matches acl-extended-getxattr-matches-src acl_chmod system.posix_acl_access
+chmod 640 "$MNT/acl_chmod"
+xattr_matches acl-chmod-getxattr-matches-src acl_chmod system.posix_acl_access
+
+# chown, truncate and a write each remove security.capability on the
+# backing filesystem (ATTR_KILL_PRIV / file_remove_privs).
+for how in chown truncate write; do
+	: >"$MNT/cap_$how"
+	out=$("$TESTUTIL" setxattrhex "$MNT/cap_$how" security.capability "$CAP_NET_RAW_V2")
+	rc=$?
+	out_src=$("$TESTUTIL" getxattrhex "$SRC/cap_$how" security.capability)
+	if [ "$rc" -eq 0 ] && [ "$out_src" = "$CAP_NET_RAW_V2" ]; then
+		pass "cap-$how-set"
+	else
+		fail "cap-$how-set" "rc=$rc out='$out' src='$out_src'"
+	fi
+	case $how in
+	chown) chown 1000 "$MNT/cap_$how" ;;
+	truncate) "$TESTUTIL" truncate "$MNT/cap_$how" 5 ;;
+	write) echo data >>"$MNT/cap_$how" ;;
+	esac
+	out_src=$("$TESTUTIL" getxattrhex "$SRC/cap_$how" security.capability)
+	if [ "$out_src" = "ERR ENODATA" ]; then
+		pass "cap-$how-removed-src"
+	else
+		fail "cap-$how-removed-src" "src='$out_src'"
+	fi
+	xattr_matches "cap-$how-getxattr-matches-src" "cap_$how" security.capability
+done
 
 # --- mkdir-eexist-parent-still-resolves (step 4.2 failure-path fix) --------
 

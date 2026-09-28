@@ -380,7 +380,11 @@ bazel test //test/qemu:nfs_test
   against `/src`'s block count); setxattr/getxattr/listxattr/removexattr on
   a file, a directory, and (`EPERM` for the `user.` namespace) a symlink,
   with getxattr of an unchanged value served from cache with zero sectors
-  read; a second `mkdir` of an already-existing directory (4.2's
+  read; getxattr through the mount answering exactly what the backing
+  filesystem does after a setxattr of an ACL equivalent to the mode (ext4
+  stores none), a chmod of a file with an ACL (ext4 rewrites it), and a
+  chown, truncate or write of a file with `security.capability` (removed)
+  -- step 4.11; a second `mkdir` of an already-existing directory (4.2's
   create-family failure paths now re-resolve the name instead of leaving it
   unknown) followed by listing that directory's own `..` with zero sectors
   read; a normalized `find`+`stat` listing of the whole tree agreeing

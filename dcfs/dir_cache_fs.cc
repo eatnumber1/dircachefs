@@ -30,6 +30,49 @@
 
 namespace dcfs {
 
+namespace {
+
+// --- Side-effect xattrs ------------------------------------------------------
+//
+// The one place that lists the xattrs a backing filesystem changes as a
+// side effect of an operation other than setxattr/removexattr. Phase 1 of
+// each such operation marks them unknown (cache::BeginAttrChange), and its
+// phase 3 reads them back (ResolveSideEffectXattrs), exactly as it does the
+// attributes the operation changes.
+//
+//  - system.posix_acl_access: any chmod of a file with an access ACL
+//    rewrites the ACL to match the new mode (posix_acl_chmod: ext4, xfs,
+//    btrfs). dcfs chmods for FUSE_SET_ATTR_MODE and also for
+//    KILL_SUID/KILL_SGID (backing::SetAttr). system.posix_acl_default is
+//    never touched by a chmod.
+//  - security.capability: removed by chown/chgrp and truncate
+//    (ATTR_KILL_PRIV, fs/open.c, fs/attr.c) and by any write or fallocate
+//    (file_remove_privs). Note the kernel, since dcfs does not ask for
+//    FUSE_CAP_HANDLE_KILLPRIV(_V2), also removes it itself through the
+//    mount (a FUSE REMOVEXATTR ahead of the SETATTR or write), so this is
+//    the backstop for what the backing filesystem does on its own.
+//
+// Not covered (not verified, and not something dcfs changes itself): LSM
+// relabeling, security.evm/security.ima rewrites.
+constexpr std::string_view kAclAccessXattr = "system.posix_acl_access";
+constexpr std::string_view kCapabilityXattr = "security.capability";
+constexpr std::string_view kXattrsChangedByWrite[] = {kCapabilityXattr};
+
+// The side-effect xattrs of a Setattr with `to_set`.
+std::vector<std::string_view> XattrsChangedBySetattr(int to_set) {
+  std::vector<std::string_view> names;
+  if (to_set & (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_KILL_SUID |
+                FUSE_SET_ATTR_KILL_SGID)) {
+    names.push_back(kAclAccessXattr);
+  }
+  if (to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID | FUSE_SET_ATTR_SIZE)) {
+    names.push_back(kCapabilityXattr);
+  }
+  return names;
+}
+
+}  // namespace
+
 DirCacheFS::DirCacheFS(Context &ctx, Options opts)
     : ctx_(ctx), opts_(opts), last_sync_(absl::Now()) {
   ctx_.open_for_write = &open_for_write_;
@@ -142,7 +185,20 @@ absl::Status DirCacheFS::RefreshAttrsOf(InodeId id) {
 
 absl::Status DirCacheFS::BeginWriting(InodeId id) {
   open_for_write_.insert(id);
-  return cache::BeginAttrChange(ctx_, id);
+  return cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite);
+}
+
+void DirCacheFS::ResolveSideEffectXattrs(
+    InodeId id, std::span<const std::string_view> names,
+    std::optional<int> fd, std::string_view op) {
+  for (std::string_view name : names) {
+    absl::Status status = backing::RefreshXattr(ctx_, id, name, fd).status();
+    // NotFound: the row is gone (invalidated meanwhile); nothing to record.
+    if (!status.ok() && !absl::IsNotFound(status)) {
+      LOG(WARNING) << op << ": could not read xattr " << name << " of inode "
+                   << id << " back, leaving it unknown: " << status;
+    }
+  }
 }
 
 void DirCacheFS::MaybeSyncBacking() {
@@ -231,10 +287,13 @@ absl::Status DirCacheFS::Setattr(
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
 
   // Phase 1 of the write-through rule (see backing.cc's file comment):
-  // mark the cached attributes unknown before the syscall(s) below, so a
+  // mark the cached attributes, and the xattrs the backing filesystem
+  // changes as a side effect, unknown before the syscall(s) below, so a
   // crash before phase 3 leaves "unknown" -- repopulated on the next
   // access -- rather than ever reporting stale data as current.
-  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id));
+  const std::vector<std::string_view> side_effects =
+      XattrsChangedBySetattr(to_set);
+  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id, side_effects));
 
   // Phase 2: the syscall(s) themselves.
   absl::Status set_status = backing::SetAttr(ctx_, id, *attr, to_set);
@@ -243,12 +302,14 @@ absl::Status DirCacheFS::Setattr(
     // "unknown" until whatever the next access happens to be, but a
     // failure here must never shadow `set_status`, which is what actually
     // gets reported below.
+    // (A side-effect xattr stays unknown, for its next reader.)
     backing::RefreshAttrs(ctx_, id).IgnoreError();
     return set_status;
   }
 
   // Phase 3: write the new state, then reply with it.
   ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
+  ResolveSideEffectXattrs(id, side_effects, OpenFdOf(id), "Setattr");
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(id));
   return req.ReplyAttr(entry.attr, opts_.attr_timeout, entry.generation);
 }
@@ -767,10 +828,11 @@ absl::Status DirCacheFS::Write(
   RET_CHECK(backing_it != backing_files_.end())
       << "Write on inode " << id << " with no BackingFile";
 
-  // Phase 1: the size/mtime/ctime this write is about to change. (A
-  // writable open already made `id` durably dirty, so this commits without
-  // a WAL fsync unless a sync point has cleared that meanwhile.)
-  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id));
+  // Phase 1: the size/mtime/ctime (and side-effect xattrs) this write is
+  // about to change. (A writable open already made `id` durably dirty, so
+  // this commits without a WAL fsync unless a sync point has cleared that
+  // meanwhile.) Phase 3 of the xattrs is the last writable Release().
+  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
 
   // Phase 2: the write itself, against the shared fd (EBADF if it is
   // O_RDONLY -- see MakeBackingFile -- exactly as the kernel would report
@@ -854,6 +916,8 @@ absl::Status DirCacheFS::Release(
     // current -- from the still-open shared fd, not a reopen.
     open_for_write_.erase(id);
     RecordWrittenAttrs(id, *backing_file.fd, "Release");
+    ResolveSideEffectXattrs(id, kXattrsChangedByWrite, *backing_file.fd,
+                            "Release");
   }
   if (backing_file.refs > 0) return req.ReplyErrno(0);
 
@@ -1155,15 +1219,12 @@ absl::Status DirCacheFS::Getxattr(
     return value.status();
   }
   if (!value->has_value()) {
-    ABSL_RETURN_IF_ERROR(backing::RefreshXattrs(ctx_, id));
-    value = cache::GetXattr(ctx_, id, name);
-    if (!value.ok()) {
-      if (absl::IsNotFound(value.status())) return req.ReplyErrno(ENODATA);
-      return value.status();
-    }
-    RET_CHECK(value->has_value())
-        << "xattr " << name << " on inode " << id
-        << " still unknown after a complete refresh";
+    // Unknown: resolve just this name (one getxattr), and answer from what
+    // was read rather than from a re-read of the cache.
+    ABSL_ASSIGN_OR_RETURN(std::optional<std::string> fresh,
+                          backing::RefreshXattr(ctx_, id, name, OpenFdOf(id)));
+    if (!fresh.has_value()) return req.ReplyErrno(ENODATA);
+    value = std::move(fresh);
   }
   if (size == 0) return req.ReplyXattrSize((*value)->size());
   if (size < (*value)->size()) return req.ReplyErrno(ERANGE);
@@ -1295,7 +1356,7 @@ absl::Status DirCacheFS::Fallocate(
   int fd = *backing_it->second.fd;
 
   // Phase 1.
-  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id));
+  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
 
   // Phase 2. The shared fd is O_RDONLY only when this inode could not be
   // opened O_RDWR (see MakeBackingFile); fallocate on it then fails EBADF,
@@ -1309,6 +1370,7 @@ absl::Status DirCacheFS::Fallocate(
 
   // Phase 3.
   ABSL_RETURN_IF_ERROR(backing::RefreshAttrsFromFd(ctx_, id, fd));
+  ResolveSideEffectXattrs(id, kXattrsChangedByWrite, fd, "Fallocate");
   return req.ReplyErrno(0);
 }
 

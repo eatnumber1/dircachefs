@@ -1042,9 +1042,15 @@ absl::Status BeginLink(Context &ctx, InodeId src, InodeId newparent,
   });
 }
 
-absl::Status BeginAttrChange(Context &ctx, InodeId id) {
+absl::Status BeginAttrChange(Context &ctx, InodeId id,
+                             std::span<const std::string_view> xattrs) {
   const InodeId ids[] = {id};
-  return BeginMutation(ctx, ids, [&] { return MarkAttrsUnknown(ctx, id); });
+  return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    for (std::string_view name : xattrs) {
+      ABSL_RETURN_IF_ERROR(ForgetXattr(ctx, id, name));
+    }
+    return MarkAttrsUnknown(ctx, id);
+  });
 }
 
 absl::Status BeginXattrChange(Context &ctx, InodeId id,

@@ -193,9 +193,19 @@ class DirCacheFS {
   // in the log line.
   void RecordWrittenAttrs(InodeId id, int fd, std::string_view op);
 
+  // Phase 3 for the side-effect xattrs `names` of a mutation of `id` (see
+  // XattrsChangedBySetattr in dir_cache_fs.cc): backing::RefreshXattr of
+  // each, through `fd` if given. A failure is logged at WARNING and leaves
+  // that name unknown (phase 1's state), never failing the op, whose
+  // backing change already happened. `op` names the caller in the log line.
+  void ResolveSideEffectXattrs(InodeId id,
+                               std::span<const std::string_view> names,
+                               std::optional<int> fd, std::string_view op);
+
   // Registers a writable open of `id` (phase 1 of the write-through rule
   // for writes the kernel makes through the passthrough fd, which dcfs
   // never sees): adds it to open_for_write_ and marks its cached attributes
+  // and the xattrs a write changes as a side effect (kXattrsChangedByWrite)
   // unknown, before the open is replied to. Phase 3 is Release() of the
   // last writable open.
   absl::Status BeginWriting(InodeId id);

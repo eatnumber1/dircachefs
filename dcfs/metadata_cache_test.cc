@@ -1075,6 +1075,25 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(g.id)));
   EXPECT_FALSE(valid(g.id));
   EXPECT_THAT(IsDirComplete(ctx_, b), IsOkAndHolds(true));
+  // With side-effect xattrs: each becomes unknown, even one with no row in
+  // a complete set; the others keep their state.
+  ASSERT_THAT(reset(), IsOk());
+  const std::vector<std::pair<std::string, std::string>> g_xattrs = {
+      {"user.keep", "1"}, {"security.capability", "cap"}};
+  ASSERT_THAT(ReplaceXattrs(ctx_, g.id, g_xattrs), IsOk());
+  const std::string_view side_effects[] = {"security.capability",
+                                           "system.posix_acl_access"};
+  ASSERT_THAT(BeginAttrChange(ctx_, g.id, side_effects), IsOk());
+  EXPECT_FALSE(valid(g.id));
+  EXPECT_THAT(GetXattr(ctx_, g.id, "security.capability"),
+              IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(GetXattr(ctx_, g.id, "system.posix_acl_access"),
+              IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(GetXattr(ctx_, g.id, "user.keep"),
+              IsOkAndHolds(Optional(std::string("1"))));
+  EXPECT_THAT(GetXattr(ctx_, g.id, "user.never"),
+              StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(ListXattrs(ctx_, g.id), IsOkAndHolds(std::nullopt));
 
   // Setxattr / removexattr of user.k on f.
   ASSERT_THAT(reset(), IsOk());
