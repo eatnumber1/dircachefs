@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <string>
+#include <sys/stat.h>
 #include <utility>
 #include <vector>
 
@@ -79,6 +80,19 @@ absl::Status UsageError(absl::string_view message) {
 }
 
 absl::StatusOr<int> Main(int argc, char *argv[]) {
+  // backing.h's MkdirAt/MknodAt/SymlinkAt/Open(O_CREAT) all document that
+  // "the kernel applies umask to `mode` before it reaches us, so it is
+  // passed straight through" -- true of the FUSE request this process
+  // receives, but every one of those backing calls is a real create(2)
+  // family syscall this process issues on the real backing filesystem,
+  // and the kernel applies *this process's own* umask there too, a second
+  // time. Left at whatever this daemon inherited from its launching shell
+  // (typically 022), that silently clears bits from an already-final mode
+  // -- found via pjdfstest (e.g. open/02.t, open/03.t: `open(..., 0642)`
+  // landing as 0640 on the backing file). umask(0) makes this process's
+  // own umask a no-op, so a mode already finalized upstream survives
+  // verbatim.
+  umask(0);
   absl::SetProgramUsageMessage(
       "--source=<dir> --cache_db=<path> [flags] mountpoint");
   // WARNING and above go to stderr by default (Abseil's own default is
