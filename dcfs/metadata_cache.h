@@ -133,14 +133,21 @@ absl::StatusOr<bool> IsDirComplete(Context &ctx, InodeId dir);
 // NotFound if no target is cached for `id`.
 absl::StatusOr<std::string> Readlink(Context &ctx, InodeId id);
 
-// The names of all of `id`'s xattrs, sorted; nullopt if the set is not
-// completely cached. NotFound if there is no row for `id`.
+// Xattrs: each name is present (with a value), absent, or unknown. A name
+// with an xattrs row has the row's state; a name without one is absent if
+// the set is complete (xattrs_complete: the name set is known) and unknown
+// otherwise. Only a full listing (ReplaceXattrs) makes the set complete,
+// and only MarkXattrsUnknown/RecoverDirty make it incomplete; single-name
+// writes (ForgetXattr/SetXattr/RemoveXattr) leave it alone.
+
+// The names of all of `id`'s present xattrs, sorted; nullopt if the set is
+// not complete or any name in it is unknown (a listing must not omit a
+// name that may exist). NotFound if there is no row for `id`.
 absl::StatusOr<std::optional<std::vector<std::string>>> ListXattrs(
     Context &ctx, InodeId id);
 
-// The cached value of xattr `name`. If it is not cached: NotFound when the
-// xattr set is complete (so it is known not to exist), nullopt when it is
-// incomplete (unknown). Also NotFound if there is no row for `id`.
+// The value of xattr `name` if present; NotFound if absent; nullopt if
+// unknown (see above). Also NotFound if there is no row for `id`.
 absl::StatusOr<std::optional<std::string>> GetXattr(Context &ctx, InodeId id,
                                                     std::string_view name);
 
@@ -264,25 +271,24 @@ absl::Status ReplaceXattrs(
     Context &ctx, InodeId id,
     std::span<const std::pair<std::string, std::string>> xattrs);
 
-// Caches one xattr. Does not change whether the set is complete. NotFound
-// if no row.
+// Records xattr `name` as present with `value`: phase 3 of Setxattr, with
+// the value read back from the backing filesystem. Does not change whether
+// the set is complete. NotFound if no row.
 absl::Status SetXattr(Context &ctx, InodeId id, std::string_view name,
                       std::string_view value);
 
-// Forgets one xattr (a no-op if not cached). If the set was complete, it
-// remains complete, now without `name`.
+// Records xattr `name` as absent: phase 3 of Removexattr (or of a
+// Setxattr whose read-back found nothing stored). Does not change whether
+// the set is complete. NotFound if no row.
 absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name);
 
-// Forgets one xattr and marks the whole set incomplete: phase 1 of
-// Setxattr/Removexattr's write-through rule, done before the backing
-// syscall. Unlike RemoveXattr (their phase 3, once the backing change is
-// known to have happened), this always clears xattrs_complete -- a crash,
-// or a failed phase 2, between here and phase 3 must not leave `name`'s old
-// value (or its absence) looking authoritative. Narrower than
-// MarkXattrsUnknown: every other already-cached name's row is left alone,
-// so GetXattr on those still needs no refresh; only a full ListXattrs pays
-// for one lazy backing::RefreshXattrs the next time it's asked, until then.
-// A no-op if `name` was not cached. NotFound if there is no row for `id`.
+// Records xattr `name` as unknown (inserting a row if it has none, so this
+// holds even while the set is complete): phase 1 of a mutation that is
+// about to change it, done before the backing syscall, so that a reader
+// meanwhile, a crash, or a failed phase 2 never sees `name`'s old value
+// (or its absence) as authoritative. Every other name keeps its state;
+// ListXattrs returns nullopt until the name is resolved (by phase 3 or a
+// refresh). NotFound if there is no row for `id`.
 absl::Status ForgetXattr(Context &ctx, InodeId id, std::string_view name);
 
 // Forgets all of `id`'s xattrs and marks the set incomplete.
@@ -345,8 +351,9 @@ absl::Status BeginLink(Context &ctx, InodeId src, InodeId newparent,
 // Setattr, a writable open (DirCacheFS::BeginWriting), fallback Write and
 // Fallocate of `id`: marks its attributes unknown. Dirty: id.
 absl::Status BeginAttrChange(Context &ctx, InodeId id);
-// Setxattr/Removexattr of `name` on `id`: ForgetXattr(name) and marks the
-// attributes unknown (the syscall bumps ctime). Dirty: id.
+// Setxattr/Removexattr of `name` on `id`: ForgetXattr(name) (only that
+// name unknown) and marks the attributes unknown (the syscall bumps
+// ctime). Dirty: id.
 absl::Status BeginXattrChange(Context &ctx, InodeId id, std::string_view name);
 
 // Adds `ids` to the dirty set at the default durability, inside the

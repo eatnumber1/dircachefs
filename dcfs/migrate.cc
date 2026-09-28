@@ -144,6 +144,8 @@ absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
 //    plain negative or positive dentry, exactly as before). Folded
 //    directly into this one-time upgrade rather than a separate idempotent
 //    ALTER TABLE guard, since schema v2 has not shipped yet.
+//  - xattrs rows gain their state; every v1 row held a value, so is
+//    'present'. (SQLite cannot add a table CHECK in place: rebuild.)
 absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
   // As in schema.sql.
   ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
@@ -161,6 +163,18 @@ absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
     DROP TABLE meta;
     CREATE TABLE dirty (inode INTEGER PRIMARY KEY) STRICT;
     ALTER TABLE dentries ADD COLUMN refused INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE xattrs_v2 (
+      inode INTEGER NOT NULL REFERENCES inodes (id) ON DELETE CASCADE,
+      name BLOB NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('present', 'absent', 'unknown')),
+      value BLOB NULL,
+      CHECK ((state = 'present') = (value IS NOT NULL)),
+      PRIMARY KEY (inode, name)
+    ) STRICT;
+    INSERT INTO xattrs_v2 (inode, name, state, value)
+      SELECT inode, name, 'present', value FROM xattrs;
+    DROP TABLE xattrs;
+    ALTER TABLE xattrs_v2 RENAME TO xattrs;
   )sql"));
   ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
   RET_CHECK_EQ(version, 2) << "v1 meta.source_device_id is missing";

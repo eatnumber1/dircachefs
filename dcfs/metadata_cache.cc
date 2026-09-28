@@ -328,9 +328,23 @@ absl::StatusOr<std::optional<std::vector<std::string>>> ListXattrs(
   ABSL_ASSIGN_OR_RETURN(std::optional<bool> complete, XattrsComplete(ctx, id));
   if (!complete.has_value()) return NoInode(id);
   if (!*complete) return std::nullopt;
+  // A listing must not leave out a name whose presence is unknown.
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * unknown_stmt,
+      Query(ctx,
+            "SELECT 1 FROM xattrs WHERE inode = ? AND state = 'unknown' "
+            "LIMIT 1",
+            id));
+  ABSL_ASSIGN_OR_RETURN(
+      bool any_unknown,
+      ReadOne(*unknown_stmt, [](Statement &) { return absl::OkStatus(); }));
+  if (any_unknown) return std::nullopt;
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
-      Query(ctx, "SELECT name FROM xattrs WHERE inode = ? ORDER BY name", id));
+      Query(ctx,
+            "SELECT name FROM xattrs WHERE inode = ? AND state = 'present' "
+            "ORDER BY name",
+            id));
   std::vector<std::string> names;
   ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
     names.push_back(row.Column<std::string>(0));
@@ -343,21 +357,34 @@ absl::StatusOr<std::optional<std::string>> GetXattr(Context &ctx, InodeId id,
                                                     std::string_view name) {
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
-      Query(ctx, "SELECT value FROM xattrs WHERE inode = ? AND name = ?", id,
+      Query(ctx,
+            "SELECT state, value FROM xattrs WHERE inode = ? AND name = ?", id,
             Blob(name)));
+  std::optional<std::string> state;
   std::optional<std::string> value;
   ABSL_RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
-                         value = row.Column<std::string>(0);
+                         state = row.Column<std::string>(0);
+                         value = row.Column<std::optional<std::string>>(1);
                          return absl::OkStatus();
                        }).status());
-  if (value.has_value()) return value;
-
-  ABSL_ASSIGN_OR_RETURN(std::optional<bool> complete, XattrsComplete(ctx, id));
-  if (!complete.has_value()) return NoInode(id);
-  if (*complete) {
+  auto absent = [&] {
     return absl::NotFoundError(
         absl::StrCat("inode ", id, " has no xattr ", name));
+  };
+  if (state.has_value()) {
+    if (*state == "present") {
+      RET_CHECK(value.has_value()) << "present xattr row without a value";
+      return value;
+    }
+    if (*state == "absent") return absent();
+    RET_CHECK_EQ(*state, "unknown") << "bad xattrs.state";
+    return std::nullopt;
   }
+
+  // No row: the set's completeness decides.
+  ABSL_ASSIGN_OR_RETURN(std::optional<bool> complete, XattrsComplete(ctx, id));
+  if (!complete.has_value()) return NoInode(id);
+  if (*complete) return absent();
   return std::nullopt;
 }
 
@@ -782,14 +809,25 @@ absl::Status SetSymlink(Context &ctx, InodeId id, std::string_view target) {
 
 namespace {
 
+// Sets the state of `id`'s xattr `name`: present with `value`, or (value
+// nullopt) `state` 'absent' or 'unknown'.
 absl::Status PutXattr(Context &ctx, InodeId id, std::string_view name,
-                      std::string_view value) {
-  return Execute(ctx,
-                 "INSERT INTO xattrs (inode, name, value) VALUES (?, ?, ?) "
-                 "ON CONFLICT (inode, name) DO UPDATE SET value = "
-                 "excluded.value",
-                 id, Blob(name), Blob(value))
-      .status();
+                      std::string_view state,
+                      std::optional<std::string_view> value) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx,
+            "INSERT INTO xattrs (inode, name, state, value) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT (inode, name) DO UPDATE SET "
+            "state = excluded.state, value = excluded.value",
+            id, Blob(name), state));
+  if (value.has_value()) {
+    ABSL_RETURN_IF_ERROR(stmt->Bind(4, Blob(*value)));
+  } else {
+    ABSL_RETURN_IF_ERROR(stmt->Bind(4, std::nullopt));
+  }
+  return stmt->ExecuteOnce();
 }
 
 absl::Status SetXattrsComplete(Context &ctx, InodeId id, bool complete) {
@@ -803,12 +841,19 @@ absl::Status SetXattrsComplete(Context &ctx, InodeId id, bool complete) {
 absl::Status ReplaceXattrs(
     Context &ctx, InodeId id,
     std::span<const std::pair<std::string, std::string>> xattrs) {
+  // TODO(4.12): a population's I/O may predate a concurrent mutation's
+  // phase 3 (audit-tristate F1), so this can overwrite a newer 'present'/
+  // 'absent' with an older value, or a phase-1 'unknown' with the value
+  // from before the mutation. Skipping 'unknown' rows here is not enough
+  // (the snapshot can also predate phase 1, and a row left 'unknown' by a
+  // failed or crashed mutation must be resolved by exactly this refresh);
+  // it needs the per-record epochs of 4.12.
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
     ABSL_RETURN_IF_ERROR(
         Execute(ctx, "DELETE FROM xattrs WHERE inode = ?", id).status());
     for (const auto &[name, value] : xattrs) {
-      ABSL_RETURN_IF_ERROR(PutXattr(ctx, id, name, value));
+      ABSL_RETURN_IF_ERROR(PutXattr(ctx, id, name, "present", value));
     }
     return SetXattrsComplete(ctx, id, true);
   });
@@ -818,26 +863,21 @@ absl::Status SetXattr(Context &ctx, InodeId id, std::string_view name,
                       std::string_view value) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
-    return PutXattr(ctx, id, name, value);
+    return PutXattr(ctx, id, name, "present", value);
   });
 }
 
 absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name) {
   return ctx.db.Transaction([&]() -> absl::Status {
-    return Execute(ctx, "DELETE FROM xattrs WHERE inode = ? AND name = ?", id,
-                   Blob(name))
-        .status();
+    ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
+    return PutXattr(ctx, id, name, "absent", std::nullopt);
   });
 }
 
 absl::Status ForgetXattr(Context &ctx, InodeId id, std::string_view name) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
-    ABSL_RETURN_IF_ERROR(
-        Execute(ctx, "DELETE FROM xattrs WHERE inode = ? AND name = ?", id,
-               Blob(name))
-            .status());
-    return SetXattrsComplete(ctx, id, false);
+    return PutXattr(ctx, id, name, "unknown", std::nullopt);
   });
 }
 
@@ -1078,8 +1118,8 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
                 "UPDATE inodes SET attrs_valid = 0, xattrs_complete = 0 "
                 "WHERE id IN (SELECT inode FROM dirty)")
             .status());
-    // GetXattr serves a cached row even when the set is incomplete, so the
-    // rows must go, not just the completeness flag.
+    // GetXattr serves a present or absent row even when the set is
+    // incomplete, so the rows must go, not just the completeness flag.
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
                 "DELETE FROM xattrs WHERE inode IN (SELECT inode FROM dirty)")

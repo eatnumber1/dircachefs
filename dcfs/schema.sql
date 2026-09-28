@@ -96,6 +96,9 @@ CREATE TABLE inodes (
   ctime_ns INTEGER,
   btime_s INTEGER,
   btime_ns INTEGER,
+  -- 1: every xattr name with no row in `xattrs` is known absent (the name
+  -- set is known). 0: such a name is unknown. Only a full listing
+  -- (cache::ReplaceXattrs) sets it; no single-name operation clears it.
   xattrs_complete INTEGER NOT NULL DEFAULT 0,  -- bool
   UNIQUE (device_id, backing_ino, backing_gen)
 ) STRICT;
@@ -127,10 +130,17 @@ CREATE TABLE symlinks (
   target BLOB NOT NULL
 ) STRICT;
 
+-- One row per xattr name whose state is known to differ from what
+-- inodes.xattrs_complete says about names with no row: 'present' (with
+-- its value), 'absent' (known not to exist, even while the set is
+-- incomplete), or 'unknown' (e.g. phase 1 of a mutation that is about to
+-- change it, even while the set is complete).
 CREATE TABLE xattrs (
   inode INTEGER NOT NULL REFERENCES inodes (id) ON DELETE CASCADE,
   name BLOB NOT NULL,
-  value BLOB NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('present', 'absent', 'unknown')),
+  value BLOB NULL,
+  CHECK ((state = 'present') = (value IS NOT NULL)),
   PRIMARY KEY (inode, name)
 ) STRICT;
 

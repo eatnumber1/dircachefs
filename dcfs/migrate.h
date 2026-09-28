@@ -21,7 +21,8 @@ namespace dcfs {
 //     FUSE generations from its gen_counter.
 // v2: the typed single-row `cache_state` table replaces `meta`; random FUSE
 //     generations (gen_counter gone); the durable dirty set (table `dirty`,
-//     cache_state.clean_shutdown and boot_id).
+//     cache_state.clean_shutdown and boot_id); an explicit per-name
+//     present/absent/unknown state on xattrs rows.
 inline constexpr int kSchemaVersion = 2;
 
 // Identifies the root of the cache: the backing filesystem being cached,

@@ -782,6 +782,72 @@ TEST_F(MetadataCacheTest, Xattrs) {
               StatusIs(absl::StatusCode::kNotFound));
 }
 
+// Each xattr name has its own present / absent / unknown state, and the
+// set's completeness only means "a name with no row is absent": phase 1 of
+// a Setxattr/Removexattr makes just that one name unknown, and phase 3
+// makes it present or absent, without ever clearing completeness.
+TEST_F(MetadataCacheTest, XattrStatesArePerName) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(71));
+  const std::vector<std::pair<std::string, std::string>> all = {
+      {"user.a", "1"}, {"user.b", "2"}};
+  ASSERT_THAT(ReplaceXattrs(ctx_, r.id, all), IsOk());
+
+  // Phase 1 of setxattr(user.new), a name with no row in a complete set.
+  // A reader that runs now (while phase 2 is under way) must see user.new
+  // as unknown, not absent, and must not get a listing that omits it; but
+  // every other name keeps its known state, absent ones included.
+  ASSERT_THAT(BeginXattrChange(ctx_, r.id, "user.new"), IsOk());
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.new"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(ListXattrs(ctx_, r.id), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.a"),
+              IsOkAndHolds(Optional(std::string("1"))));
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.never"),
+              StatusIs(absl::StatusCode::kNotFound));
+  // Phase 3: present. The set is complete again with no refresh.
+  ASSERT_THAT(SetXattr(ctx_, r.id, "user.new", "3"), IsOk());
+  EXPECT_THAT(ListXattrs(ctx_, r.id),
+              IsOkAndHolds(Optional(ElementsAre("user.a", "user.b",
+                                                "user.new"))));
+
+  // Phase 1 of removexattr(user.a), a present name: unknown, then absent.
+  ASSERT_THAT(BeginXattrChange(ctx_, r.id, "user.a"), IsOk());
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.a"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(ListXattrs(ctx_, r.id), IsOkAndHolds(std::nullopt));
+  ASSERT_THAT(RemoveXattr(ctx_, r.id, "user.a"), IsOk());
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.a"),
+              StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(ListXattrs(ctx_, r.id),
+              IsOkAndHolds(Optional(ElementsAre("user.b", "user.new"))));
+
+  // ForgetXattr alone (no dirty-set bookkeeping) is the same phase-1 state.
+  ASSERT_THAT(ForgetXattr(ctx_, r.id, "user.b"), IsOk());
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.b"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.never"),
+              StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(ListXattrs(ctx_, r.id), IsOkAndHolds(std::nullopt));
+}
+
+// With the set incomplete, an explicit absent row is still known absent (a
+// removexattr's phase 3 needs no refresh to answer a later getxattr), and a
+// name with no row is unknown.
+TEST_F(MetadataCacheTest, XattrAbsentIsKnownWhileTheSetIsIncomplete) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(72));
+  ASSERT_THAT(BeginXattrChange(ctx_, r.id, "user.a"), IsOk());
+  ASSERT_THAT(RemoveXattr(ctx_, r.id, "user.a"), IsOk());
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.a"),
+              StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.other"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(ListXattrs(ctx_, r.id), IsOkAndHolds(std::nullopt));
+  // A refresh replaces every row, absent ones included.
+  const std::vector<std::pair<std::string, std::string>> all = {
+      {"user.a", "back"}};
+  ASSERT_THAT(ReplaceXattrs(ctx_, r.id, all), IsOk());
+  EXPECT_THAT(GetXattr(ctx_, r.id, "user.a"),
+              IsOkAndHolds(Optional(std::string("back"))));
+  EXPECT_THAT(ListXattrs(ctx_, r.id),
+              IsOkAndHolds(Optional(ElementsAre("user.a"))));
+}
+
 TEST_F(MetadataCacheTest, WriteRollsBackWithCallersTransaction) {
   absl::Status status = db_.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(Make(80).status());

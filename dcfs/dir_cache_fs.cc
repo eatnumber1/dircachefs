@@ -1104,9 +1104,8 @@ absl::Status DirCacheFS::Setxattr(
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
 
-  // Phase 1: forget this one cached xattr, not the whole set -- see
-  // cache::ForgetXattr's comment for why that's still safe -- and mark the
-  // attributes unknown (setxattr(2) bumps ctime).
+  // Phase 1: mark this one xattr unknown, not the whole set (see
+  // cache::ForgetXattr), and the attributes (setxattr(2) bumps ctime).
   ABSL_RETURN_IF_ERROR(cache::BeginXattrChange(ctx_, id, name));
 
   // Phase 2: the backing syscall, reusing this inode's shared backing fd
@@ -1116,10 +1115,9 @@ absl::Status DirCacheFS::Setxattr(
   absl::Status set_status =
       backing::SetXattr(ctx_, id, name, value, flags, OpenFdOf(id));
   if (!set_status.ok()) {
-    // Best effort, as Setattr does on its own phase-2 failure: repopulate
-    // the whole set right away rather than leaving it to whatever the next
-    // access happens to be.
-    backing::RefreshXattrs(ctx_, id).IgnoreError();
+    // `name` stays unknown (the syscall may or may not have changed it),
+    // for the next reader to resolve; the attributes are refreshed as a
+    // best effort, as Setattr does on its own phase-2 failure.
     RefreshAttrsOf(id).IgnoreError();
     return set_status;
   }
@@ -1203,7 +1201,7 @@ absl::Status DirCacheFS::Removexattr(
   absl::Status remove_status =
       backing::RemoveXattr(ctx_, id, name, OpenFdOf(id));
   if (!remove_status.ok()) {
-    backing::RefreshXattrs(ctx_, id).IgnoreError();
+    // As Setxattr: `name` stays unknown.
     RefreshAttrsOf(id).IgnoreError();
     return remove_status;
   }

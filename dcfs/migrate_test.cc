@@ -184,8 +184,11 @@ TEST_F(MigrateTest, MissingCacheStateRowIsCorrupt) {
 // starts from a fresh (current-schema) database, which already has it.
 absl::Status DowngradeToV1(sqlite3::Connection &db, const DeviceId &device) {
   ABSL_RETURN_IF_ERROR(db.ExecScript(
-      "DROP TABLE dirty; DROP TABLE cache_state; "
       "ALTER TABLE dentries DROP COLUMN refused; "
+      "DROP TABLE dirty; DROP TABLE cache_state; DROP TABLE xattrs; "
+      "CREATE TABLE xattrs (inode INTEGER NOT NULL REFERENCES inodes (id) "
+      "ON DELETE CASCADE, name BLOB NOT NULL, value BLOB NOT NULL, "
+      "PRIMARY KEY (inode, name)) STRICT; "
       "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
       "INSERT INTO meta VALUES ('schema_version', '1'), "
       "('gen_counter', '12345');"));
@@ -209,6 +212,12 @@ TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
                     "VALUES (7, ?, 70, 0, 12345)"));
   ASSERT_THAT(insert->Bind(1, Blob(device_bytes)), IsOk());
   ASSERT_THAT(insert->ExecuteOnce(), IsOk());
+  ASSERT_OK_AND_ASSIGN(
+      sqlite3::Statement * xattr,
+      db_.Prepared("INSERT INTO xattrs (inode, name, value) VALUES (7, ?, ?)"));
+  ASSERT_THAT(xattr->Bind(1, Blob("user.k")), IsOk());
+  ASSERT_THAT(xattr->Bind(2, Blob("v")), IsOk());
+  ASSERT_THAT(xattr->ExecuteOnce(), IsOk());
 
   ASSERT_THAT(Migrate(db_, root), IsOk());
 
@@ -223,6 +232,10 @@ TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
               IsOkAndHolds(1));
   EXPECT_THAT(GetSourceDeviceId(db_), IsOkAndHolds(root.device_id));
   EXPECT_THAT(CountRows(db_, "dirty"), IsOkAndHolds(0));
+  // A v1 xattr row is a present one.
+  EXPECT_THAT(CountRows(db_, "xattrs WHERE inode = 7 AND state = 'present' "
+                             "AND value = CAST('v' AS BLOB)"),
+              IsOkAndHolds(1));
 
   // And the upgraded database is now current: migrating again is a no-op.
   ASSERT_THAT(Migrate(db_, root), IsOk());
@@ -341,7 +354,8 @@ TEST_F(MigrateTest, DeletingFilesystemCascadesButRootSurvives) {
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * xattr_stmt,
       db_.Prepared(
-          "INSERT INTO xattrs (inode, name, value) VALUES (2, ?, ?)"));
+          "INSERT INTO xattrs (inode, name, state, value) "
+          "VALUES (2, ?, 'present', ?)"));
   ASSERT_THAT(xattr_stmt->Bind(1, Blob("user.foo")), IsOk());
   ASSERT_THAT(xattr_stmt->Bind(2, Blob("bar")), IsOk());
   ASSERT_THAT(xattr_stmt->ExecuteOnce(), IsOk());
