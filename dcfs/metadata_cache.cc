@@ -685,6 +685,17 @@ absl::Status MarkUnknown(Context &ctx, InodeId parent,
   });
 }
 
+absl::Status ForgetNegativeDentries(Context &ctx, InodeId dir) {
+  return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(RequireInode(ctx, dir));
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "DELETE FROM dentries WHERE parent = ? AND inode IS NULL", dir)
+            .status());
+    return MarkIncomplete(ctx, dir);
+  });
+}
+
 absl::Status MarkAttrsUnknown(Context &ctx, InodeId id) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_ASSIGN_OR_RETURN(

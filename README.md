@@ -109,11 +109,45 @@ cache update can only cost a repopulation, never wrong data:
 
 Unknown state is repopulated from the backing filesystem on next access.
 
+Writes to file contents go from the kernel straight to the backing file
+(FUSE passthrough), so dcfs never sees them. A writable open or create is
+therefore phase 1 of a mutation: it marks the file's cached attributes
+unknown before the open is replied to, and they stay unknown until the last
+writable open of that file is released (phase 3), however often they are
+read or refreshed meanwhile. While the file is open, attribute reads are
+served by a `statx` of dcfs's already-open backing fd, so this costs no
+extra open and no disk access. A crash while a file is open for writing
+leaves its attributes unknown, never the pre-write size and mtime marked
+current.
+
 ## Coherence
 
-dcfs assumes exclusive access to the backing trees: all access to them
-goes through dcfs. There is no fanotify integration and no TTL-based
-revalidation.
+dcfs requires exclusive access to the backing trees: all access to them
+must go through dcfs. There is no fanotify integration and no TTL-based
+revalidation, and changes made to the backing trees behind dcfs's back
+are unsupported.
+
+They are, however, detected and logged when a syscall dcfs makes anyway
+reveals them; dcfs never adds a syscall just to look. Whenever dcfs opens
+an object by handle it already `statx`es it to verify its identity, and
+when it lists a directory it already `statx`es every child. If the object
+is no longer the one the cache describes (a recycled inode number or
+generation), dcfs logs a WARNING and forgets the row (ESTALE). If its
+cached attributes are marked current but disagree with the fresh `statx`
+in mode, owner, group, link count, size, mtime or ctime, dcfs logs one
+WARNING ("out-of-band change on the backing filesystem (unsupported)")
+naming the fields that changed, then:
+
+- adopts the fresh attributes;
+- for a directory whose mtime or ctime changed, forgets its negative
+  entries and marks its listing incomplete, so the next lookup or readdir
+  lists it again;
+- for any object whose ctime changed, marks its cached xattrs unknown.
+
+The kernel's own attribute and dentry caches are not invalidated; they
+pick up the change once they expire or are evicted. Anything served
+purely from the cache (every lookup, getattr, readdir or xattr read that
+needs no backing I/O) detects nothing.
 
 ## Design direction
 

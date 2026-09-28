@@ -31,7 +31,13 @@
 namespace dcfs {
 
 DirCacheFS::DirCacheFS(Context &ctx, Options opts)
-    : ctx_(ctx), opts_(opts) {}
+    : ctx_(ctx), opts_(opts) {
+  ctx_.open_for_write = &open_for_write_;
+}
+
+DirCacheFS::~DirCacheFS() {
+  if (ctx_.open_for_write == &open_for_write_) ctx_.open_for_write = nullptr;
+}
 
 absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // conn.max_read is not one of the fields fuse_apply_conn_info_opts() sets
@@ -111,7 +117,7 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
   if (!attr.valid) {
-    ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
+    ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id));
     ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
   }
 
@@ -124,9 +130,25 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
   return entry;
 }
 
+absl::Status DirCacheFS::RefreshAttrsOf(InodeId id) {
+  // Always the case for an inode open for writing (its attributes stay
+  // unknown while the kernel may be writing to it): the fd is already open,
+  // so this is one statx that touches no disk, not a reopen by handle.
+  if (std::optional<int> fd = OpenFdOf(id); fd.has_value()) {
+    return backing::RefreshAttrsFromFd(ctx_, id, *fd);
+  }
+  return backing::RefreshAttrs(ctx_, id);
+}
+
+absl::Status DirCacheFS::BeginWriting(InodeId id) {
+  open_for_write_.insert(id);
+  return cache::MarkAttrsUnknown(ctx_, id);
+}
+
 absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
     InodeId parent, std::string_view name,
-    absl::FunctionRef<absl::Status(int parent_fd)> do_create) {
+    absl::FunctionRef<absl::Status(int parent_fd)> do_create,
+    bool open_for_write) {
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
 
@@ -160,7 +182,7 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // Phase 3: probe and record the new child.
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
-      backing::RecordNewChild(ctx_, parent, *parent_fd, name));
+      backing::RecordNewChild(ctx_, parent, *parent_fd, name, open_for_write));
   if (parent_was_complete) {
     ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, parent, true));
   }
@@ -574,9 +596,14 @@ absl::Status DirCacheFS::Link(
   ABSL_ASSIGN_OR_RETURN(
       bool newparent_was_complete, cache::IsDirComplete(ctx_, newparent));
 
-  // Phase 1: mark (newparent, newname) unknown.
+  // Phase 1: mark (newparent, newname) unknown, and the attributes the
+  // link changes (src's nlink/ctime, newparent's mtime/ctime/size).
   std::vector<std::string> names = {std::string(newname)};
-  ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, newparent, names));
+  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, newparent, names));
+    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, newparent));
+    return cache::MarkAttrsUnknown(ctx_, src);
+  }));
 
   // Phase 2: the backing linkat. On failure (EEXIST, EXDEV, ...)
   // (newparent, newname) is re-resolved from the backing filesystem (see
@@ -585,6 +612,9 @@ absl::Status DirCacheFS::Link(
   if (absl::Status status = backing::LinkAt(ctx_, src, newparent, newname);
       !status.ok()) {
     ReresolveAfterFailure(newparent, names);
+    // Best effort, as Setattr: the op's own error is what gets replied.
+    RefreshAttrsOf(src).IgnoreError();
+    backing::RefreshAttrs(ctx_, newparent).IgnoreError();
     return status;
   }
 
@@ -647,7 +677,7 @@ absl::Status DirCacheFS::Open(
   // back ESTALE again, not ENOENT.
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
   if (!attr.valid) {
-    ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
+    ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id));
     ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
   }
   // The kernel calls opendir(), not open(), on a directory, so this would
@@ -671,9 +701,24 @@ absl::Status DirCacheFS::Open(
   } else {
     backing_id = backing_it->second.backing_id;
   }
-  bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
-  if (writable) backing_it->second.ever_writable = true;
   backing_it->second.refs++;
+  bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
+  if (writable) {
+    backing_it->second.writable_refs++;
+    // Phase 1 for every write the kernel will make through the passthrough
+    // fd, before the open is replied to: a crash while it is open leaves
+    // "unknown", never the pre-write size/mtime marked current.
+    if (absl::Status status = BeginWriting(id); !status.ok()) {
+      // Undo the registration above (the open is failing, so no Release
+      // will ever come for it).
+      if (--backing_it->second.writable_refs == 0) open_for_write_.erase(id);
+      if (--backing_it->second.refs == 0) {
+        if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
+        backing_files_.erase(backing_it);
+      }
+      return status;
+    }
+  }
 
   if (backing_id > 0) fi.backing_id = backing_id;
   // A passthrough open must drop any stale page cache for this file
@@ -739,10 +784,12 @@ absl::Status DirCacheFS::Flush(
   RET_CHECK(it != open_files_.end()) << "Flush on unknown handle " << fi.fh;
   if (it->second.writable) {
     // The passthrough (or fallback Write()) writes this open may have made
-    // are invisible to the cache until now; pick up their effect on
-    // size/mtime/ctime/etc. right away, so a stat() right after this open's
-    // close() sees them even while other opens of the same inode remain --
-    // Release() only runs once the *last* of them closes.
+    // are invisible to the cache until now; record their effect on
+    // size/mtime/ctime/etc. right away. The attributes nevertheless stay
+    // marked unknown (see BeginWriting) until the Release() of the last
+    // writable open -- this open's own Release() is still to come -- and
+    // meanwhile every attribute read is served by a statx of the shared fd
+    // (RefreshAttrsOf), so a stat() right after close() sees the writes.
     InodeId id = it->second.ino;
     auto backing_it = backing_files_.find(id);
     RET_CHECK(backing_it != backing_files_.end())
@@ -758,6 +805,7 @@ absl::Status DirCacheFS::Release(
   auto it = open_files_.find(fi.fh);
   RET_CHECK(it != open_files_.end()) << "Release on unknown handle " << fi.fh;
   InodeId id = it->second.ino;
+  bool writable = it->second.writable;
   open_files_.erase(it);
 
   auto backing_it = backing_files_.find(id);
@@ -766,16 +814,20 @@ absl::Status DirCacheFS::Release(
   BackingFile &backing_file = backing_it->second;
   RET_CHECK_GT(backing_file.refs, 0)
       << "Release: refs underflow for inode " << id;
-  if (--backing_file.refs > 0) return req.ReplyErrno(0);
-
-  // The last of this inode's opens is closing: pick up any write's effect
-  // on size/mtime/ctime/etc. one final time (redundant with Flush() above
-  // in the common case, but this is the last point the shared fd -- and so
-  // the kernel's own passthrough reference to it -- is still open at all).
-  if (backing_file.ever_writable) {
-    ABSL_RETURN_IF_ERROR(
-        backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd));
+  if (writable) {
+    RET_CHECK_GT(backing_file.writable_refs, 0)
+        << "Release: writable_refs underflow for inode " << id;
+    if (--backing_file.writable_refs == 0) {
+      // Phase 3 of the passthrough writes (see BeginWriting): the last
+      // writable open of this inode is gone, so the kernel can no longer
+      // write to it behind our back and the attributes can be recorded as
+      // current -- from the still-open shared fd, not a reopen.
+      open_for_write_.erase(id);
+      ABSL_RETURN_IF_ERROR(
+          backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd));
+    }
   }
+  if (--backing_file.refs > 0) return req.ReplyErrno(0);
 
   // Row lifetime (see SettleUnlinkedFile): the last dcfs open of a file
   // whose last link is gone takes the row with it. Checked after the
@@ -1000,8 +1052,12 @@ absl::Status DirCacheFS::Setxattr(
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
 
   // Phase 1: forget this one cached xattr, not the whole set -- see
-  // cache::ForgetXattr's comment for why that's still safe.
-  ABSL_RETURN_IF_ERROR(cache::ForgetXattr(ctx_, id, name));
+  // cache::ForgetXattr's comment for why that's still safe -- and mark the
+  // attributes unknown (setxattr(2) bumps ctime).
+  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::ForgetXattr(ctx_, id, name));
+    return cache::MarkAttrsUnknown(ctx_, id);
+  }));
 
   // Phase 2: the backing syscall, reusing this inode's shared backing fd
   // (see the BackingFile map) if one is already open. XATTR_CREATE/
@@ -1014,10 +1070,12 @@ absl::Status DirCacheFS::Setxattr(
     // the whole set right away rather than leaving it to whatever the next
     // access happens to be.
     backing::RefreshXattrs(ctx_, id).IgnoreError();
+    RefreshAttrsOf(id).IgnoreError();
     return set_status;
   }
 
-  // Phase 3: the new value, and the ctime bump setxattr(2) causes.
+  // Phase 3: the new value, and the ctime bump setxattr(2) causes (phase 1
+  // marked the attributes unknown for it, above).
   ABSL_RETURN_IF_ERROR(cache::SetXattr(ctx_, id, name, value));
   ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
   return req.ReplyErrno(0);
@@ -1088,7 +1146,10 @@ absl::Status DirCacheFS::Removexattr(
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
 
   // Phase 1, as Setxattr.
-  ABSL_RETURN_IF_ERROR(cache::ForgetXattr(ctx_, id, name));
+  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::ForgetXattr(ctx_, id, name));
+    return cache::MarkAttrsUnknown(ctx_, id);
+  }));
 
   // Phase 2: ENODATA (already removed, or never existed) passes straight
   // through from the real syscall.
@@ -1096,6 +1157,7 @@ absl::Status DirCacheFS::Removexattr(
       backing::RemoveXattr(ctx_, id, name, OpenFdOf(id));
   if (!remove_status.ok()) {
     backing::RefreshXattrs(ctx_, id).IgnoreError();
+    RefreshAttrsOf(id).IgnoreError();
     return remove_status;
   }
 
@@ -1123,20 +1185,39 @@ absl::Status DirCacheFS::Create(
   // is opened via MakeBackingFile, exactly like Open()'s, so a concurrent
   // Open()/Create() of the same inode later reuses it regardless of what
   // access mode this call asked for.
+  //
+  // A writable create is phase 1 of the passthrough writes that follow, as
+  // in Open(): RecordNewChild records the new row with its attributes
+  // already marked unknown, in the same transaction, and the inode joins
+  // open_for_write_ before the reply.
+  bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
-      CreateChild(parent, name, [&](int parent_fd) -> absl::Status {
-        return backing::CreateAt(ctx_, parent_fd, name, fi.flags, mode)
-            .status();
-      }));
-  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
-
+      CreateChild(
+          parent, name,
+          [&](int parent_fd) -> absl::Status {
+            return backing::CreateAt(ctx_, parent_fd, name, fi.flags, mode)
+                .status();
+          },
+          writable));
   ABSL_ASSIGN_OR_RETURN(BackingFile backing_file, MakeBackingFile(child.id, req));
-  bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
-  if (writable) backing_file.ever_writable = true;
   backing_file.refs = 1;
+  if (writable) {
+    backing_file.writable_refs = 1;
+    open_for_write_.insert(child.id);
+  }
   int backing_id = backing_file.backing_id;
   backing_files_.emplace(child.id, std::move(backing_file));
+  // After the BackingFile exists, so a writable create's still-unknown
+  // attributes are served from its fd (RefreshAttrsOf), not a reopen.
+  absl::StatusOr<fuse_entry_param> entry = EntryFor(child.id);
+  if (!entry.ok()) {
+    // The create is failing, so no Release will ever come for this open.
+    open_for_write_.erase(child.id);
+    if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
+    backing_files_.erase(child.id);
+    return entry.status();
+  }
 
   if (backing_id > 0) fi.backing_id = backing_id;
   fi.keep_cache = 0;
@@ -1145,7 +1226,7 @@ absl::Status DirCacheFS::Create(
   open_files_.emplace(handle, OpenFile{.ino = child.id, .writable = writable});
   fi.fh = handle;
 
-  return req.ReplyCreate(entry, fi);
+  return req.ReplyCreate(*entry, fi);
 }
 
 absl::Status DirCacheFS::Fallocate(

@@ -116,3 +116,9 @@ qemu_test(
     ],
     guest_script = "guest/write.sh",
 )
+
+qemu_test(
+    name = "crash_test",
+    disks = [("vdb", "ext4", "128M")],
+    guest_script = "guest/crash.sh",
+)

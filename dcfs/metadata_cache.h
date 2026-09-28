@@ -210,6 +210,16 @@ absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
 absl::Status MarkUnknown(Context &ctx, InodeId parent,
                          std::span<const std::string> names);
 
+// Forgets every cached negative dentry of `dir` and marks `dir` incomplete,
+// leaving its positive dentries alone. For a directory found to have
+// changed on the backing filesystem behind dcfs's back (see
+// backing::ReconcileAttrs): a new name may have appeared that a negative
+// entry would otherwise keep hiding, but the names already cached still
+// point at their objects (a repopulation corrects any that do not), and
+// keeping them keeps a subdirectory's ".." resolvable meanwhile. NotFound
+// if no row for `dir`.
+absl::Status ForgetNegativeDentries(Context &ctx, InodeId dir);
+
 // Marks `id`'s cached attributes as not current. NotFound if no row.
 absl::Status MarkAttrsUnknown(Context &ctx, InodeId id);
 

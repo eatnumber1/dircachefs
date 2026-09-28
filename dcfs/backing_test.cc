@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -19,6 +20,9 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/log_severity.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/log/scoped_mock_log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
@@ -57,7 +61,10 @@ namespace fs = std::filesystem;
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
+using ::testing::_;
+using ::testing::AnyNumber;
 using ::testing::Contains;
+using ::testing::HasSubstr;
 using ::testing::ElementsAre;
 using ::testing::Optional;
 using cache::InodeId;
@@ -497,6 +504,207 @@ TEST_F(BackingTest, InitRootRejectsACacheForAnotherFilesystem) {
   EXPECT_THAT(InitRoot(other, std::move(fd)),
               StatusIs(absl::StatusCode::kFailedPrecondition));
   EXPECT_EQ(other_mounts.size(), 0u);
+}
+
+// --- Crash safety of writable opens (step 4.6) -------------------------------
+
+TEST_F(BackingTest, RefreshAttrsFromFdMarksValid) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, file), IsOk());
+  WriteFile(Path("file"), "longer contents");
+  int fd = ::open(Path("file").c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  FileDescriptor owned(fd);
+
+  ASSERT_THAT(RefreshAttrsFromFd(ctx_, file, fd), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_size, 15);
+}
+
+TEST_F(BackingTest, AttrsOfAFileOpenForWriteStayUnknown) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  absl::flat_hash_set<int64_t> open_for_write = {file};
+  ctx_.open_for_write = &open_for_write;
+  int fd = ::open(Path("file").c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  FileDescriptor owned(fd);
+  WriteFile(Path("file"), "longer contents");
+
+  // Every way of recording fresh attributes stores them (so they can be
+  // served) but leaves them unknown while the file is open for writing.
+  ASSERT_THAT(RefreshAttrsFromFd(ctx_, file, fd), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
+  EXPECT_FALSE(attr.valid);
+  EXPECT_EQ(attr.st.st_size, 15);
+  ASSERT_THAT(RefreshAttrs(ctx_, file), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, file),
+              IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, false)));
+  ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, file),
+              IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, false)));
+
+  // Once the last writable open is gone, they are recorded as current.
+  open_for_write.clear();
+  ASSERT_THAT(RefreshAttrsFromFd(ctx_, file, fd), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, file),
+              IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, true)));
+  ctx_.open_for_write = nullptr;
+}
+
+// --- Out-of-band change detection (step 4.6) ---------------------------------
+
+// Coarse kernel timestamps can make a change made right after the previous
+// one leave mtime/ctime unchanged; waiting a few ticks makes the out-of-band
+// changes below observable through the timestamps too.
+void WaitForNextTimestamp() {
+  struct timespec ts = {.tv_sec = 0, .tv_nsec = 30'000'000};
+  ::nanosleep(&ts, nullptr);
+}
+
+// Expects exactly `times` "out-of-band" warnings while it is alive, and
+// allows any other log line.
+class OutOfBandLog {
+ public:
+  explicit OutOfBandLog(int times)
+      : log_(absl::MockLogDefault::kIgnoreUnexpected) {
+    EXPECT_CALL(log_, Log(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(log_, Log(absl::LogSeverity::kWarning, _,
+                          HasSubstr("out-of-band")))
+        .Times(times);
+    log_.StartCapturingLogs();
+  }
+
+ private:
+  absl::ScopedMockLog log_;
+};
+
+TEST_F(BackingTest, OpenNodeDetectsOutOfBandChmod) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  WaitForNextTimestamp();
+  ASSERT_EQ(::chmod(Path("file").c_str(), 0600), 0);
+  {
+    OutOfBandLog log(1);
+    ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
+    // Adopted, so a second open has nothing left to report.
+    ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
+  }
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_mode, S_IFREG | 0600);
+}
+
+TEST_F(BackingTest, OpenNodeDetectsOutOfBandAppend) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  WaitForNextTimestamp();
+  int fd = ::open(Path("file").c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(::write(fd, " world", 6), 6);
+  ::close(fd);
+  {
+    OutOfBandLog log(1);
+    ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
+  }
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
+  EXPECT_EQ(attr.st.st_size, 11);
+  struct statx stx = StatPath(Path("file"));
+  EXPECT_EQ(attr.st.st_mtim.tv_sec, stx.stx_mtime.tv_sec);
+  EXPECT_EQ(attr.st.st_mtim.tv_nsec, stx.stx_mtime.tv_nsec);
+}
+
+TEST_F(BackingTest, OpenNodeDetectsOutOfBandTouch) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  // touch -d 2001-09-09T01:46:40Z
+  struct timespec times[2] = {{.tv_sec = 1'000'000'000, .tv_nsec = 0},
+                              {.tv_sec = 1'000'000'000, .tv_nsec = 0}};
+  ASSERT_EQ(::utimensat(AT_FDCWD, Path("file").c_str(), times, 0), 0);
+  {
+    OutOfBandLog log(1);
+    ASSERT_THAT(OpenNode(ctx_, file, O_PATH), IsOk());
+  }
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
+  EXPECT_EQ(attr.st.st_mtim.tv_sec, 1'000'000'000);
+}
+
+TEST_F(BackingTest, OpenNodeDetectsANewFileInADirectory) {
+  ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));
+  // Populates `dir` and caches "newfile" as known absent.
+  ASSERT_THAT(LookupOrPopulate(ctx_, dir, "newfile"),
+              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+  ASSERT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(true));
+  WaitForNextTimestamp();
+  WriteFile(Path("dir/newfile"), "new");
+  {
+    OutOfBandLog log(1);
+    ASSERT_THAT(OpenNode(ctx_, dir, O_RDONLY | O_DIRECTORY), IsOk());
+    EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(false));
+    // Relisting finds it, without reporting `dir` (already adopted) or
+    // its unchanged children again.
+    ASSERT_OK_AND_ASSIGN(LookupResult found,
+                         LookupOrPopulate(ctx_, dir, "newfile"));
+    EXPECT_EQ(found.kind, LookupResult::kFound);
+  }
+  EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(true));
+  EXPECT_THAT(Id("inner", dir), IsOk());
+}
+
+TEST_F(BackingTest, OpenNodeDetectsAnOutOfBandXattr) {
+  if (!xattrs_supported_) GTEST_SKIP() << "no user xattrs here";
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  ASSERT_THAT(cache::ListXattrs(ctx_, file),
+              IsOkAndHolds(Optional(ElementsAre("user.test"))));
+  WaitForNextTimestamp();
+  ASSERT_EQ(::setxattr(Path("file").c_str(), "user.added", "x", 1, 0), 0);
+  {
+    OutOfBandLog log(1);
+    ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
+  }
+  EXPECT_THAT(cache::ListXattrs(ctx_, file), IsOkAndHolds(std::nullopt));
+  ASSERT_THAT(RefreshXattrs(ctx_, file), IsOk());
+  ASSERT_OK_AND_ASSIGN(std::optional<std::vector<std::string>> names,
+                       cache::ListXattrs(ctx_, file));
+  ASSERT_TRUE(names.has_value());
+  EXPECT_THAT(*names, Contains("user.added"));
+  EXPECT_THAT(cache::GetXattr(ctx_, file, "user.added"),
+              IsOkAndHolds(Optional(std::string("x"))));
+}
+
+TEST_F(BackingTest, RepopulationDetectsAnOutOfBandChangeOnce) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  WaitForNextTimestamp();
+  ASSERT_EQ(::chmod(Path("file").c_str(), 0600), 0);
+  ASSERT_THAT(cache::MarkDirComplete(ctx_, kRootInode, false), IsOk());
+  {
+    OutOfBandLog log(1);
+    ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+    ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
+  }
+  EXPECT_THAT(cache::GetAttr(ctx_, file),
+              IsOkAndHolds(testing::Field(&cache::CachedAttr::st,
+                                          testing::Field(&stat::st_mode,
+                                                         S_IFREG | 0600))));
+}
+
+TEST_F(BackingTest, UnchangedNodesReportNothing) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));
+  ASSERT_OK_AND_ASSIGN(InodeId link, Id("link"));
+  ASSERT_THAT(Id("inner", dir), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr before, cache::GetAttr(ctx_, file));
+  WaitForNextTimestamp();
+  {
+    OutOfBandLog log(0);
+    ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
+    ASSERT_THAT(OpenNode(ctx_, dir, O_RDONLY | O_DIRECTORY), IsOk());
+    ASSERT_THAT(OpenNode(ctx_, link, O_PATH | O_NOFOLLOW), IsOk());
+    ASSERT_THAT(cache::MarkDirComplete(ctx_, kRootInode, false), IsOk());
+    ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  }
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr after, cache::GetAttr(ctx_, file));
+  EXPECT_TRUE(after.valid);
+  EXPECT_EQ(after.st.st_ctim.tv_nsec, before.st.st_ctim.tv_nsec);
+  EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(true));
+  EXPECT_THAT(cache::ListXattrs(ctx_, file), IsOkAndHolds(Optional(_)));
 }
 
 }  // namespace

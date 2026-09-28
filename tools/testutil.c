@@ -50,6 +50,15 @@
  *       fallocate(2), where <mode> is "0", "keep_size" (FALLOC_FL_KEEP_SIZE)
  *       or "punch_hole" (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE --
  *       punching a hole always requires KEEP_SIZE).
+ *   testutil writehold <path> <append|create> <nbytes>
+ *       open(2)s <path> O_WRONLY|O_APPEND ("append") or
+ *       O_WRONLY|O_CREAT|O_TRUNC, 0644 ("create"), writes <nbytes> bytes of
+ *       'x' to it, prints "READY", and then sleeps forever WITHOUT closing
+ *       the fd, until killed. A shell cannot do this: every way of writing
+ *       to a file from the shell closes some descriptor for it afterwards
+ *       (a child's exit, a builtin's redirection being undone), and on FUSE
+ *       every such close sends a FLUSH -- this is how crash.sh gets writes
+ *       the daemon has not been told about by any flush or release.
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing (except
@@ -220,6 +229,45 @@ static int cmd_fallocate(
 	return 0;
 }
 
+static int cmd_writehold(
+	const char *path, const char *how, const char *nbytes_str)
+{
+	int flags;
+	long long remaining = strtoll(nbytes_str, NULL, 10);
+	char buf[4096];
+	int fd;
+
+	if (strcmp(how, "append") == 0) {
+		flags = O_WRONLY | O_APPEND;
+	} else if (strcmp(how, "create") == 0) {
+		flags = O_WRONLY | O_CREAT | O_TRUNC;
+	} else {
+		fprintf(stderr, "testutil writehold: bad mode '%s'\n", how);
+		return 2;
+	}
+	fd = open(path, flags, 0644);
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	memset(buf, 'x', sizeof(buf));
+	while (remaining > 0) {
+		size_t chunk = remaining < (long long) sizeof(buf)
+			? (size_t) remaining : sizeof(buf);
+		ssize_t n = write(fd, buf, chunk);
+
+		if (n <= 0) {
+			print_err(n == 0 ? EIO : errno);
+			return 1;
+		}
+		remaining -= n;
+	}
+	printf("READY\n");
+	fflush(stdout);
+	for (;;)
+		pause();
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -240,6 +288,8 @@ int main(int argc, char *argv[])
 		return cmd_removexattr(argv[2], argv[3]);
 	if (argc == 6 && strcmp(argv[1], "fallocate") == 0)
 		return cmd_fallocate(argv[2], argv[3], argv[4], argv[5]);
+	if (argc == 5 && strcmp(argv[1], "writehold") == 0)
+		return cmd_writehold(argv[2], argv[3], argv[4]);
 
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
@@ -250,6 +300,7 @@ int main(int argc, char *argv[])
 		"       testutil getxattr <path> <name>\n"
 		"       testutil listxattr <path>\n"
 		"       testutil removexattr <path> <name>\n"
-		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n");
+		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
+		"       testutil writehold <path> <append|create> <nbytes>\n");
 	return 2;
 }

@@ -68,10 +68,27 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd);
 // them.
 absl::StatusOr<uint64_t> ReadGeneration(int opath_fd, mode_t mode);
 
+// Out-of-band change detection (see the README's "Coherence"): if `cached`
+// (id's cache row, as read before `fresh` was taken) is valid and disagrees
+// with `fresh` -- a statx of the same backing object the caller already
+// had in hand -- in mode, uid, gid, nlink, size, mtime or ctime, logs one
+// WARNING naming the differing fields and adopts `fresh` (as RefreshAttrs
+// would record it). A directory whose mtime or ctime changed additionally
+// loses its negative dentries and is marked incomplete, so the next lookup
+// or readdir relists it; any object whose ctime changed has its cached
+// xattrs marked unknown. Issues no syscall of its own; a no-op when
+// `cached` is not valid.
+absl::Status ReconcileAttrs(Context &ctx, InodeId id,
+                            const cache::CachedAttr &cached,
+                            const struct statx &fresh);
+
 // Reopens inode `id` with open(2) `flags`, after checking that the object
 // reached is still the one the row describes (same inode number, and same
 // generation when both are known). If it is not, or the kernel reports the
 // handle stale, the row is invalidated and the result is an ESTALE status.
+// The identity check's statx fetches every cached attribute (same single
+// syscall), so a still-matching object is also passed through
+// ReconcileAttrs.
 absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags);
 
 // Fresh attributes of `id` from the backing filesystem (STATX_BASIC_STATS
@@ -80,6 +97,9 @@ absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id);
 
 // Refreshes `id`'s cached attributes from the backing filesystem (StatNode
 // followed by cache::UpdateAttr). Called when CachedAttr.valid is false.
+// If `id` is in ctx.open_for_write (a writable open is outstanding), the
+// fresh values are stored but stay marked unknown, in the same transaction
+// (true of RefreshAttrsFromFd, RecordNewLink and PopulateDirectory too).
 absl::Status RefreshAttrs(Context &ctx, InodeId id);
 
 // As RefreshAttrs, but statx's an fd the caller already has open on `id`
@@ -193,8 +213,13 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
 // `parent` (O_RDONLY|O_DIRECTORY is enough); reusing it here, rather than
 // reopening `parent`, is why every MkdirAt/MknodAt/SymlinkAt/CreateAt below
 // takes a `parent_fd` instead of resolving `parent` itself.
+//
+// `open_for_write` (Create with a writable access mode): the new row's
+// attributes are marked unknown again in that same transaction, since the
+// caller is about to hand the kernel a writable passthrough fd on it.
 absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
-                                        int parent_fd, std::string_view name);
+                                        int parent_fd, std::string_view name,
+                                        bool open_for_write = false);
 
 // mkdirat(2)/mknodat(2)/symlinkat(2) of `name` inside the already-open
 // `parent_fd`. The kernel applies umask to `mode` before it reaches us, so

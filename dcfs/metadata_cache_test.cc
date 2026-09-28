@@ -328,6 +328,22 @@ TEST_F(MetadataCacheTest, DeleteInodeRemovesEverything) {
   EXPECT_THAT(GetAttr(ctx_, kRootInode), IsOk());
 }
 
+TEST_F(MetadataCacheTest, ForgetNegativeDentriesKeepsPositiveOnes) {
+  ASSERT_OK_AND_ASSIGN(InodeId dir, MakeDir(kRootInode, "dir", 20));
+  ASSERT_OK_AND_ASSIGN(UpsertResult file, Make(30));
+  ASSERT_THAT(LinkDentry(ctx_, dir, "f", file.id), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, dir, "ghost"), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, dir, true), IsOk());
+
+  ASSERT_THAT(ForgetNegativeDentries(ctx_, dir), IsOk());
+  EXPECT_THAT(Lookup(ctx_, dir, "ghost"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_THAT(Lookup(ctx_, dir, "f"), IsOkAndHolds(IsFoundAs(file.id)));
+  EXPECT_THAT(IsDirComplete(ctx_, dir), IsOkAndHolds(false));
+  EXPECT_THAT(ForgetNegativeDentries(ctx_, 999),
+              StatusIs(absl::StatusCode::kNotFound));
+}
+
 TEST_F(MetadataCacheTest, RecycledBackingInodeGetsNewRow) {
   ASSERT_OK_AND_ASSIGN(InodeId dir, MakeDir(kRootInode, "dir", 20));
   ASSERT_OK_AND_ASSIGN(UpsertResult old, Make(30, S_IFREG, kSource, 1));

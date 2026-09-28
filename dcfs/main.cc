@@ -5,10 +5,12 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/log_severity.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/usage.h"
+#include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -79,6 +81,11 @@ absl::Status UsageError(absl::string_view message) {
 absl::StatusOr<int> Main(int argc, char *argv[]) {
   absl::SetProgramUsageMessage(
       "--source=<dir> --cache_db=<path> [flags] mountpoint");
+  // WARNING and above go to stderr by default (Abseil's own default is
+  // ERROR), so that e.g. out-of-band changes to the backing filesystem
+  // (backing::ReconcileAttrs) are visible in the daemon's log. Set before
+  // parsing, so an explicit --stderrthreshold still wins.
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kWarning);
   std::vector<char *> args = absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
 

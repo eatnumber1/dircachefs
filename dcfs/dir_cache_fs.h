@@ -9,6 +9,7 @@
 #include <sys/types.h>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -51,8 +52,10 @@ class DirCacheFS {
     std::optional<unsigned int> max_read;
   };
 
-  // `ctx` must outlive this DirCacheFS.
+  // `ctx` must outlive this DirCacheFS, which points ctx.open_for_write at
+  // its own set of inodes with a writable open outstanding.
   DirCacheFS(Context &ctx, Options opts);
+  ~DirCacheFS();
 
   absl::Status Init(struct fuse_conn_info &conn);
   absl::Status Destroy();
@@ -161,6 +164,20 @@ class DirCacheFS {
   // conversion.
   absl::StatusOr<fuse_entry_param> EntryFor(InodeId id);
 
+  // Refreshes `id`'s cached attributes when they are not valid: from the
+  // shared backing fd if `id` is open (a statx on an fd already open -- no
+  // reopen by handle, no disk access), else via backing::RefreshAttrs. An
+  // inode with a writable open outstanding always takes the first path,
+  // since its attributes stay unknown for as long as that open lasts.
+  absl::Status RefreshAttrsOf(InodeId id);
+
+  // Registers a writable open of `id` (phase 1 of the write-through rule
+  // for writes the kernel makes through the passthrough fd, which dcfs
+  // never sees): adds it to open_for_write_ and marks its cached attributes
+  // unknown, before the open is replied to. Phase 3 is Release() of the
+  // last writable open.
+  absl::Status BeginWriting(InodeId id);
+
   // Shared phase-1/2/3 wiring for Create/Mkdir/Mknod/Symlink (see
   // dir_cache_fs.cc's "write-through op" rule for what those phases are):
   // checks the parent row exists (NotFound -> ESTALE, the same pattern
@@ -173,9 +190,12 @@ class DirCacheFS {
   // lookup, and the failing status (with its errno payload intact) is
   // returned unchanged. Link does not go through this: it links an
   // *existing* inode, so there is no new child to probe.
+  // `open_for_write` is passed through to RecordNewChild (Create() with a
+  // writable access mode).
   absl::StatusOr<backing::NewChild> CreateChild(
       InodeId parent, std::string_view name,
-      absl::FunctionRef<absl::Status(int parent_fd)> do_create);
+      absl::FunctionRef<absl::Status(int parent_fd)> do_create,
+      bool open_for_write = false);
 
   // Unlink (is_dir false) / Rmdir (true) of (parent, name): the shared
   // phase-1/2/3 wiring, including the removed child's row lifetime.
@@ -230,12 +250,11 @@ class DirCacheFS {
     // whatever the real syscall reports (typically EBADF), exactly as it
     // would against the backing filesystem directly.
     bool writable = false;
-    // Whether any OpenFile of this inode has ever been writable (i.e.
-    // `writable` on some past or current OpenFile referencing this
-    // BackingFile was true). Flush/Fsync/Release use this (well, its
-    // per-open twin, OpenFile::writable) to decide when the cached
-    // attributes need a post-write refresh from `fd` before it closes.
-    bool ever_writable = false;
+    // Number of writable OpenFile handles currently referencing this
+    // BackingFile (a subset of `refs`). While it is nonzero the inode is in
+    // open_for_write_ and its cached attributes stay unknown (see
+    // BeginWriting); the Release() that takes it to 0 records them for real.
+    int writable_refs = 0;
     // Number of OpenFile handles currently referencing this inode's shared
     // fd. Reaches 0 exactly when the Release() of the last of them runs,
     // which is when this BackingFile itself is torn down.
@@ -245,8 +264,8 @@ class DirCacheFS {
   // One fi.fh handle: which inode's BackingFile it uses, and whether this
   // particular open asked for write access (Open() computes it from the
   // kernel's requested flags; Create() likewise). Flush/Fsync consult this
-  // (not BackingFile::ever_writable) because they act at a specific open's
-  // close/sync time, not the shared fd's whole lifetime.
+  // because they act at a specific open's close/sync time, and Release()
+  // uses it to maintain BackingFile::writable_refs.
   struct OpenFile {
     InodeId ino;
     bool writable = false;
@@ -258,7 +277,7 @@ class DirCacheFS {
   // "this object cannot be opened for writing" (EACCES/EROFS/EPERM) --
   // anything else (e.g. ESTALE) is returned unchanged, exactly as a single
   // OpenNode call would report it. The returned BackingFile has refs == 0
-  // and ever_writable == false; the caller (Open()/Create()) sets those.
+  // and writable_refs == 0; the caller (Open()/Create()) sets those.
   absl::StatusOr<BackingFile> MakeBackingFile(InodeId id, FuseRequest &req);
 
   Context &ctx_;
@@ -271,6 +290,9 @@ class DirCacheFS {
   absl::flat_hash_map<uint64_t, OpenFile> open_files_;
   // Keyed by inode, not by fi.fh: see BackingFile's comment.
   absl::flat_hash_map<InodeId, BackingFile> backing_files_;
+  // The inodes whose BackingFile has writable_refs > 0; ctx_.open_for_write
+  // points here (see Context::open_for_write).
+  absl::flat_hash_set<int64_t> open_for_write_;
 };
 
 }  // namespace dcfs

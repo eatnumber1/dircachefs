@@ -23,6 +23,8 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
+#include "absl/strings/str_join.h"
 #include "dcfs/context.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
@@ -91,6 +93,31 @@ absl::Status ForgetStale(Context &ctx, InodeId id) {
   absl::Status status = cache::InvalidateInode(ctx, id);
   if (absl::IsNotFound(status)) return absl::OkStatus();
   return status;
+}
+
+// Whether `id` has a writable dcfs open outstanding (see
+// Context::open_for_write).
+bool OpenForWrite(const Context &ctx, InodeId id) {
+  return ctx.open_for_write != nullptr && ctx.open_for_write->contains(id);
+}
+
+// Records `stx` as `id`'s attributes -- current, unless `id` is open for
+// writing (then stored but still marked unknown, in the same transaction:
+// the kernel may write through the passthrough fd at any moment, so the
+// values are stale as soon as they are read; see the README's "Crash
+// robustness").
+absl::Status RecordAttrs(Context &ctx, InodeId id, const struct statx &stx) {
+  return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::UpdateAttr(ctx, id, stx));
+    if (OpenForWrite(ctx, id)) {
+      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
+    }
+    return absl::OkStatus();
+  });
+}
+
+std::string FormatTime(int64_t sec, uint32_t nsec) {
+  return absl::StrFormat("%d.%09u", sec, nsec);
 }
 
 // All xattrs of the object `fd` (any fd, including O_PATH on a symlink or
@@ -342,29 +369,109 @@ absl::StatusOr<uint64_t> ReadGeneration(int opath_fd, mode_t mode) {
   }
 }
 
+absl::Status ReconcileAttrs(Context &ctx, InodeId id,
+                            const cache::CachedAttr &cached,
+                            const struct statx &fresh) {
+  // Out-of-band change detection, only where it is free. dcfs requires
+  // exclusive access to the backing trees and does not look for changes
+  // made behind its back (no fanotify, no revalidation). But whenever it
+  // already holds a fresh statx of an object anyway -- VerifyBackingIdentity
+  // on every handle open (OpenNode), and PopulateDirectory probing each
+  // child -- it compares that against the cached attributes and, if they
+  // disagree, logs it and adopts the fresh ones. No syscall is ever added
+  // for this: a code path without a statx already in hand (OpenRoot, cache
+  // hits, ...) detects nothing, and atime/blocks are deliberately not
+  // compared (reads and delayed allocation change those legitimately).
+  if (!cached.valid) return absl::OkStatus();
+  std::vector<std::string> diffs;
+  auto check = [&](unsigned int mask, std::string_view field, bool differs,
+                   std::string from, std::string to) {
+    if ((fresh.stx_mask & mask) != mask || !differs) return;
+    diffs.push_back(absl::StrCat(field, " ", from, " -> ", to));
+  };
+  const struct stat &st = cached.st;
+  check(STATX_TYPE | STATX_MODE, "mode", st.st_mode != fresh.stx_mode,
+        absl::StrFormat("0%o", st.st_mode), absl::StrFormat("0%o", fresh.stx_mode));
+  check(STATX_UID, "uid", st.st_uid != fresh.stx_uid, absl::StrCat(st.st_uid),
+        absl::StrCat(fresh.stx_uid));
+  check(STATX_GID, "gid", st.st_gid != fresh.stx_gid, absl::StrCat(st.st_gid),
+        absl::StrCat(fresh.stx_gid));
+  check(STATX_NLINK, "nlink", st.st_nlink != fresh.stx_nlink,
+        absl::StrCat(st.st_nlink), absl::StrCat(fresh.stx_nlink));
+  check(STATX_SIZE, "size",
+        static_cast<uint64_t>(st.st_size) != fresh.stx_size,
+        absl::StrCat(st.st_size), absl::StrCat(fresh.stx_size));
+  const bool mtime_differs =
+      (fresh.stx_mask & STATX_MTIME) != 0 &&
+      (st.st_mtim.tv_sec != fresh.stx_mtime.tv_sec ||
+       st.st_mtim.tv_nsec != static_cast<long>(fresh.stx_mtime.tv_nsec));
+  const bool ctime_differs =
+      (fresh.stx_mask & STATX_CTIME) != 0 &&
+      (st.st_ctim.tv_sec != fresh.stx_ctime.tv_sec ||
+       st.st_ctim.tv_nsec != static_cast<long>(fresh.stx_ctime.tv_nsec));
+  check(STATX_MTIME, "mtime", mtime_differs,
+        FormatTime(st.st_mtim.tv_sec, st.st_mtim.tv_nsec),
+        FormatTime(fresh.stx_mtime.tv_sec, fresh.stx_mtime.tv_nsec));
+  check(STATX_CTIME, "ctime", ctime_differs,
+        FormatTime(st.st_ctim.tv_sec, st.st_ctim.tv_nsec),
+        FormatTime(fresh.stx_ctime.tv_sec, fresh.stx_ctime.tv_nsec));
+  if (diffs.empty()) return absl::OkStatus();
+
+  const bool is_dir = S_ISDIR(fresh.stx_mode);
+  const bool relist = is_dir && (mtime_differs || ctime_differs);
+  LOG(WARNING) << "inode " << id
+               << ": out-of-band change on the backing filesystem "
+                  "(unsupported): "
+               << absl::StrJoin(diffs, ", ") << "; adopting the new attributes"
+               << (relist ? ", relisting the directory" : "")
+               << (ctime_differs ? ", rereading its xattrs" : "");
+  // The fresh statx is already in hand, so reacting costs no I/O: adopt it,
+  // and mark unknown whatever else the change may have touched unseen.
+  return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(RecordAttrs(ctx, id, fresh));
+    if (relist) {
+      ABSL_RETURN_IF_ERROR(cache::ForgetNegativeDentries(ctx, id));
+    }
+    if (ctime_differs) {
+      ABSL_RETURN_IF_ERROR(cache::MarkXattrsUnknown(ctx, id));
+    }
+    return absl::OkStatus();
+  });
+}
+
 // Verifies that `fd` (opened for `id`, whose cache row is `attr`) still
 // refers to the same backing object the row describes, and forgets it
 // (ESTALE) otherwise: the handle can decode to a different object than
 // intended if the backing filesystem reused the inode number since the row
-// was cached.
+// was cached. The statx asks for every attribute the cache stores (the same
+// single syscall either way), so that a still-matching object's attributes
+// are also checked against the cache for free (ReconcileAttrs).
 absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
     Context &ctx, InodeId id, const cache::CachedAttr &attr,
     FileDescriptor fd) {
-  ABSL_ASSIGN_OR_RETURN(
-      struct statx stx,
-      syscalls::statx(*fd, "", AT_EMPTY_PATH, STATX_INO | STATX_TYPE));
+  ABSL_ASSIGN_OR_RETURN(struct statx stx,
+                        syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask));
   bool same = stx.stx_ino == attr.backing_ino;
+  uint64_t gen = 0;
   if (same && attr.backing_gen != 0) {
-    ABSL_ASSIGN_OR_RETURN(uint64_t gen, ReadGeneration(*fd, stx.stx_mode));
+    ABSL_ASSIGN_OR_RETURN(gen, ReadGeneration(*fd, stx.stx_mode));
     // 0 means the generation cannot be read right now, not that it changed.
     same = gen == 0 || gen == attr.backing_gen;
   }
   if (!same) {
+    LOG(WARNING) << "inode " << id
+                 << ": out-of-band change on the backing filesystem "
+                    "(unsupported): its handle now reaches a different "
+                    "object (inode number "
+                 << attr.backing_ino << " -> " << stx.stx_ino
+                 << ", generation " << attr.backing_gen << " -> " << gen
+                 << "); forgetting it (ESTALE)";
     ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
     return dcfs::ErrnoToStatus(
         ESTALE, absl::StrCat("inode ", id,
                              " was replaced on the backing filesystem"));
   }
+  ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, id, attr, stx));
   return fd;
 }
 
@@ -400,13 +507,13 @@ absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {
 
 absl::Status RefreshAttrs(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, id));
-  return cache::UpdateAttr(ctx, id, stx);
+  return RecordAttrs(ctx, id, stx);
 }
 
 absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd) {
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
-  return cache::UpdateAttr(ctx, id, stx);
+  return RecordAttrs(ctx, id, stx);
 }
 
 absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
@@ -560,9 +667,30 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
     std::vector<std::string> seen;
     seen.reserve(children.size());
     for (const ChildRecord &child : children) {
+      // The probe's statx is free out-of-band detection for a child whose
+      // row is already cached (under this name, and still the same object):
+      // see ReconcileAttrs. A row adopted fresh by OpenNode just before
+      // (e.g. `dir` itself) already matches, so nothing is logged twice.
+      ABSL_ASSIGN_OR_RETURN(cache::LookupResult cached_dentry,
+                            cache::Lookup(ctx, dir, child.name));
+      if (cached_dentry.kind == cache::LookupResult::kFound) {
+        ABSL_ASSIGN_OR_RETURN(cache::CachedAttr cached,
+                              cache::GetAttr(ctx, cached_dentry.id));
+        if (cached.device == child.handle.device &&
+            cached.backing_ino == child.stx.stx_ino &&
+            cached.backing_gen == child.backing_gen) {
+          ABSL_RETURN_IF_ERROR(
+              ReconcileAttrs(ctx, cached_dentry.id, cached, child.stx));
+        }
+      }
       ABSL_ASSIGN_OR_RETURN(
           cache::UpsertResult row,
           cache::UpsertInode(ctx, child.handle, child.stx, child.backing_gen));
+      // UpsertInode marks the attributes current; a child that is open for
+      // writing keeps them unknown (see RecordAttrs).
+      if (OpenForWrite(ctx, row.id)) {
+        ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+      }
       if (S_ISDIR(child.stx.stx_mode)) {
         ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
       }
@@ -598,7 +726,8 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
 }
 
 absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
-                                        int parent_fd, std::string_view name) {
+                                        int parent_fd, std::string_view name,
+                                        bool open_for_write) {
   // Phase A: I/O -- probe the object just created, exactly like ProbeChild
   // does for an existing directory entry, minus the mount-boundary check
   // (nothing can already be mounted on an object that did not exist a
@@ -634,6 +763,9 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
           cache::SetSymlink(ctx, row.id, *record.symlink_target));
     }
     ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
+    if (open_for_write || OpenForWrite(ctx, row.id)) {
+      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+    }
     result = NewChild{.id = row.id, .fuse_gen = row.fuse_gen, .stx = record.stx};
     return absl::OkStatus();
   }));
@@ -677,7 +809,7 @@ absl::StatusOr<struct statx> RecordNewLink(Context &ctx, InodeId src,
   ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, src));
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, src));
-    return cache::UpdateAttr(ctx, src, stx);
+    return RecordAttrs(ctx, src, stx);
   }));
   return stx;
 }
