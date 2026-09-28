@@ -154,6 +154,7 @@ TEST_F(MigrateTest, FreshDatabaseHasNoGenerationCounter) {
 // Turns a freshly created current-version database back into what schema
 // v1 looked like, as far as any later migration step can tell.
 absl::Status DowngradeToV1(sqlite3::Connection &db) {
+  ABSL_RETURN_IF_ERROR(db.Exec("DROP TABLE dirty"));
   ABSL_RETURN_IF_ERROR(SetMeta(db, "schema_version", "1"));
   return SetMeta(db, "gen_counter", "12345");
 }
@@ -180,6 +181,7 @@ TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
   EXPECT_THAT(CountRows(db_, "inodes WHERE id = 1 AND fuse_gen = 0"),
               IsOkAndHolds(1));
   EXPECT_THAT(GetSourceDeviceId(db_), IsOkAndHolds(root.device_id));
+  EXPECT_THAT(CountRows(db_, "dirty"), IsOkAndHolds(0));
 
   // And the upgraded database is now current: migrating again is a no-op.
   ASSERT_THAT(Migrate(db_, root), IsOk());

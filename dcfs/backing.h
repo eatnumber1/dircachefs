@@ -294,6 +294,36 @@ absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
 // and registers a mount fd for each one that still is.
 absl::Status StartupPurge(Context &ctx);
 
+// --- Durability: sync points and unclean-shutdown recovery (step 4.10) -----
+//
+// See the README's "Crash robustness" and schema.sql's `dirty` table.
+
+// A sync point: syncfs(2) on every backing filesystem (every fd in
+// ctx.mounts), then, once all of them succeeded, empties the dirty set in
+// one transaction -- except for inodes in ctx.open_for_write, which the
+// kernel may still be writing to through a passthrough fd, so a later
+// crash could still leave the backing file ahead of the attributes the
+// last Release records. On a syncfs failure nothing is cleared (the dirty
+// entries only cost a larger re-read after a crash) and the error is
+// returned.
+absl::Status SyncBacking(Context &ctx);
+
+// Startup, after Migrate() and before InitRoot()/StartupPurge(): if the
+// last run did not shut down cleanly (meta.clean_shutdown is not "1"), or
+// the dirty set is not empty for any other reason, runs
+// cache::RecoverDirty and logs at WARNING how many entries it recovered
+// and whether the machine rebooted meanwhile (meta.boot_id differs from
+// `boot_id`, the current /proc/sys/kernel/random/boot_id). Then records
+// clean_shutdown "0" and `boot_id`, durably (sqlite3::Durability::kSync),
+// so a crash from here on is detected at the next start.
+absl::Status StartRun(Context &ctx, std::string_view boot_id);
+
+// Clean shutdown, once no more requests can arrive: SyncBacking, a WAL
+// checkpoint, and, if the dirty set is then empty, records clean_shutdown
+// "1" durably. Any failure is returned, and leaves clean_shutdown "0", so
+// the next start recovers.
+absl::Status FinishRun(Context &ctx);
+
 // Applies `attr`'s `to_set` fields (the FUSE_SET_ATTR_* bitmask from a
 // setattr request) to `id` on the backing filesystem, via an O_PATH fd
 // from OpenNode (so `id`'s identity is verified first, as everywhere

@@ -779,6 +779,13 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
           cache::SetSymlink(ctx, row.id, *record.symlink_target));
     }
     ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
+    // The new row is dirty too: if a power loss keeps this transaction but
+    // the backing filesystem loses the create, recovery must not serve its
+    // attributes. (Its parent was made durably dirty by the caller's phase
+    // 1; this insert cannot outlive the row, being in the same
+    // transaction.)
+    const InodeId new_id[] = {row.id};
+    ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, new_id));
     if (open_for_write || OpenForWrite(ctx, row.id)) {
       ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
     }
@@ -906,6 +913,57 @@ absl::Status StartupPurge(Context &ctx) {
     }
   }
   return absl::OkStatus();
+}
+
+absl::Status SyncBacking(Context &ctx) {
+  for (int fd : ctx.mounts.Fds()) {
+    ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
+  }
+  std::vector<InodeId> keep;
+  if (ctx.open_for_write != nullptr) {
+    keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
+  }
+  return cache::ClearDirty(ctx, keep);
+}
+
+absl::Status StartRun(Context &ctx, std::string_view boot_id) {
+  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> clean,
+                        GetMeta(ctx.db, kMetaCleanShutdown));
+  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> last_boot_id,
+                        GetMeta(ctx.db, kMetaBootId));
+  // A fresh cache has neither key and nothing dirty: nothing to report.
+  const bool unclean = clean.has_value() && *clean != "1";
+  ABSL_ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
+  if (unclean || recovered > 0) {
+    const bool rebooted =
+        last_boot_id.has_value() && *last_boot_id != boot_id;
+    LOG(WARNING) << "the last run did not shut down cleanly ("
+                 << (rebooted ? "the machine rebooted meanwhile: a crash or "
+                                "power loss"
+                              : "the daemon died; same boot")
+                 << "); recovered " << recovered
+                 << " dirty cache entries (their cached state will be "
+                    "re-read from the backing filesystem)";
+  }
+  return ctx.db.Transaction(
+      [&]() -> absl::Status {
+        ABSL_RETURN_IF_ERROR(SetMeta(ctx.db, kMetaCleanShutdown, "0"));
+        return SetMeta(ctx.db, kMetaBootId, boot_id);
+      },
+      sqlite3::Durability::kSync);
+}
+
+absl::Status FinishRun(Context &ctx) {
+  ABSL_RETURN_IF_ERROR(SyncBacking(ctx));
+  ABSL_RETURN_IF_ERROR(ctx.db.Checkpoint());
+  if (ctx.dirty.any) {
+    return absl::FailedPreconditionError(
+        "dirty cache entries remain (a writable open is still "
+        "outstanding); leaving the clean-shutdown flag unset");
+  }
+  return ctx.db.Transaction(
+      [&] { return SetMeta(ctx.db, kMetaCleanShutdown, "1"); },
+      sqlite3::Durability::kSync);
 }
 
 namespace {

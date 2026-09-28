@@ -2,6 +2,7 @@
 #define DCFS_MOUNT_FDS_H_
 
 #include <cstddef>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
@@ -40,6 +41,9 @@ class MountFds {
 
   // Removes the fd for `id`, if any. A no-op if `id` is not present.
   void Erase(const DeviceId &id);
+
+  // Every registered fd (still owned by *this), in no particular order.
+  std::vector<int> Fds() const;
 
   size_t size() const { return fds_.size(); }
 

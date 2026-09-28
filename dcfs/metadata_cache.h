@@ -273,6 +273,80 @@ absl::Status InvalidateInode(Context &ctx, InodeId id);
 // FUSE layer's call sites say which situation they are handling.
 absl::Status DeleteInode(Context &ctx, InodeId id);
 
+// --- The durable dirty set (see schema.sql's `dirty` table) --------------
+
+// Phase 1 of a mutation: runs `body` (the "mark unknown" writes) and records
+// `ids` -- every inode whose cached attributes, dentries (as a parent),
+// symlink target or xattrs the mutation is about to change -- in the dirty
+// set, in ONE transaction that is durable (sqlite3::Durability::kSync, a WAL
+// fsync) before this returns, so before the caller's backing syscall. After
+// a power loss, whatever the backing filesystems kept of the syscall, the
+// database then either has these ids dirty (startup recovery forgets their
+// cached state) or the syscall had not been issued yet.
+//
+// If every id is already in ctx.dirty.durable (already durably dirty since
+// the last sync point), the transaction commits at the default durability
+// instead: recovery would forget all of those ids' state anyway, so nothing
+// `body` writes needs to survive a power loss. Must not be called inside a
+// transaction (a kSync commit cannot nest).
+absl::Status BeginMutation(Context &ctx, std::span<const InodeId> ids,
+                           absl::FunctionRef<absl::Status()> body);
+
+// The phase 1 of each mutation kind, as DirCacheFS runs it: each is one
+// BeginMutation() naming exactly the inodes the mutation changes.
+//
+// Create/Mknod/Mkdir/Symlink of (parent, name): forgets `name`, marks
+// `parent` incomplete. Dirty: parent. (The new child's row is created, and
+// made dirty, by phase 3: backing::RecordNewChild.)
+absl::Status BeginCreate(Context &ctx, InodeId parent, std::string_view name);
+// Unlink/Rmdir of (parent, name) -> child: forgets `name`, marks `parent`
+// incomplete, and both attribute sets unknown. Dirty: parent, child.
+absl::Status BeginRemove(Context &ctx, InodeId parent, std::string_view name,
+                         InodeId child);
+// Rename (parent, name) -> src over (newparent, newname) -> dst (nullopt if
+// absent, or if it is src itself): forgets both names, marks both parents
+// incomplete, and the attributes of both parents, src and dst unknown.
+// Dirty: parent, newparent, src, dst.
+absl::Status BeginRename(Context &ctx, InodeId parent, std::string_view name,
+                         InodeId newparent, std::string_view newname,
+                         InodeId src, std::optional<InodeId> dst);
+// Link of src as (newparent, newname): forgets `newname`, marks newparent
+// incomplete, and the attributes of newparent and src unknown. Dirty:
+// newparent, src.
+absl::Status BeginLink(Context &ctx, InodeId src, InodeId newparent,
+                       std::string_view newname);
+// Setattr, a writable open (DirCacheFS::BeginWriting), fallback Write and
+// Fallocate of `id`: marks its attributes unknown. Dirty: id.
+absl::Status BeginAttrChange(Context &ctx, InodeId id);
+// Setxattr/Removexattr of `name` on `id`: ForgetXattr(name) and marks the
+// attributes unknown (the syscall bumps ctime). Dirty: id.
+absl::Status BeginXattrChange(Context &ctx, InodeId id, std::string_view name);
+
+// Adds `ids` to the dirty set at the default durability, inside the
+// caller's transaction if any. For phase 3 of a mutation that creates a row
+// (the new row is dirty too, and cannot exist in any state of the database
+// where this insert does not). Does not add to ctx.dirty.durable.
+absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids);
+
+// The dirty set, sorted.
+absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx);
+
+// Empties the dirty set except for `keep` (inodes with a writable open
+// outstanding, which the kernel may still be changing: see
+// backing::SyncBacking), in one transaction. Only after the backing
+// filesystems have been synced.
+absl::Status ClearDirty(Context &ctx, std::span<const InodeId> keep);
+
+// Startup recovery after an unclean shutdown, in one transaction: for every
+// inode in the dirty set, marks its attributes unknown, forgets its xattrs
+// (rows deleted, set incomplete) and symlink target, forgets every dentry
+// in it (positive and negative) and marks it incomplete if it is a
+// directory, and forgets every dentry pointing at it, marking those
+// dentries' parents incomplete (its name may have changed). Inode rows are
+// kept, so NFS handles still resolve (and are verified when next opened).
+// Then empties the dirty set. Returns how many dirty entries there were.
+absl::StatusOr<int64_t> RecoverDirty(Context &ctx);
+
 // Registers a filesystem. AlreadyExists if `device` is already registered;
 // NotFound if `parent` is given but has no row.
 absl::Status AddFilesystem(Context &ctx, const DeviceId &device,

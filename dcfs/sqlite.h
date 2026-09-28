@@ -30,6 +30,25 @@ class Connection;
 class Statement;
 struct ConnectionFactory;
 
+// How durable a Connection::Transaction()'s COMMIT must be.
+enum class Durability {
+  // The connection's default, synchronous=NORMAL (see ConnectionFactory):
+  // in WAL mode a commit reaches the WAL with write(2) but is not fsynced,
+  // so a power loss (not a process crash) can roll back a suffix of
+  // recently committed transactions. Every surviving state is still a
+  // consistent prefix of the committed ones (the WAL's chained frame
+  // checksums guarantee that).
+  kNormal,
+  // synchronous=FULL for this one transaction: in WAL mode the WAL is
+  // fsynced as part of the COMMIT (sqlite3.c sqlite3WalFrames: `isCommit &&
+  // WAL_SYNC_FLAGS(sync_flags)` -> sqlite3OsSync, with the commit sync flags
+  // set only when the pager's fullSync is, i.e. synchronous >= FULL), so
+  // once Transaction() returns OK the transaction -- and, WAL frames being
+  // appended in order, every transaction committed before it -- survives a
+  // power loss. Costs one fdatasync of the WAL (plus a device cache flush).
+  kSync,
+};
+
 namespace internal {
 
 // Trait used to give Bind()/Column() a single overload that handles
@@ -218,7 +237,18 @@ class Connection {
   // from within another Transaction()'s body nests via SAVEPOINT/RELEASE/
   // ROLLBACK TO instead of BEGIN/COMMIT/ROLLBACK. `body` must not itself
   // suspend (e.g. no coroutine suspension points inside it).
-  absl::Status Transaction(absl::FunctionRef<absl::Status()> body);
+  //
+  // `durability` (see Durability) applies to the outermost transaction's
+  // COMMIT. SQLite refuses to change the safety level inside a transaction
+  // ("Safety level may not be changed inside a transaction"), so kSync
+  // issues `PRAGMA synchronous=FULL` just before BEGIN and restores
+  // `PRAGMA synchronous=NORMAL` (the connection default) after the
+  // COMMIT/ROLLBACK, whatever the outcome; neither pragma does I/O. A
+  // nested Transaction() asking for kSync inside an outer kNormal one is a
+  // FailedPrecondition error (its commit is the outer one's, which would
+  // not be synced); inside an outer kSync one it simply nests.
+  absl::Status Transaction(absl::FunctionRef<absl::Status()> body,
+                           Durability durability = Durability::kNormal);
 
   int64_t LastInsertRowId() const;
   int64_t Changes() const;
@@ -264,6 +294,9 @@ class Connection {
   // either way, the transaction/savepoint must not be left open.
   absl::Status UnwindFailedTransaction(int depth, absl::Status status);
 
+  // Transaction() without the durability handling.
+  absl::Status RunTransaction(absl::FunctionRef<absl::Status()> body);
+
   ::sqlite3 *db_ = nullptr;
   // Owns every Statement handed out by Prepared(). unique_ptr so that
   // pointers returned by Prepared() stay valid across map rehashes.
@@ -272,6 +305,9 @@ class Connection {
   // Number of Transaction() calls currently nested (0 = no transaction
   // open). Only Transaction() touches this.
   int savepoint_depth_ = 0;
+  // Whether the outermost open Transaction() was started with
+  // Durability::kSync.
+  bool sync_transaction_ = false;
 };
 
 // Opens a Connection. Nothing in Connection may assume the default VFS, so

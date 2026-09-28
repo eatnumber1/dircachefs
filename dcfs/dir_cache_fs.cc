@@ -31,7 +31,7 @@
 namespace dcfs {
 
 DirCacheFS::DirCacheFS(Context &ctx, Options opts)
-    : ctx_(ctx), opts_(opts) {
+    : ctx_(ctx), opts_(opts), last_sync_(absl::Now()) {
   ctx_.open_for_write = &open_for_write_;
 }
 
@@ -142,7 +142,25 @@ absl::Status DirCacheFS::RefreshAttrsOf(InodeId id) {
 
 absl::Status DirCacheFS::BeginWriting(InodeId id) {
   open_for_write_.insert(id);
-  return cache::MarkAttrsUnknown(ctx_, id);
+  return cache::BeginAttrChange(ctx_, id);
+}
+
+void DirCacheFS::MaybeSyncBacking() {
+  if (!ctx_.dirty.any) return;
+  absl::Time now = absl::Now();
+  if (now - last_sync_ < opts_.sync_interval) return;
+  SyncBackingNow("periodic");
+}
+
+void DirCacheFS::SyncBackingNow(std::string_view why) {
+  if (!ctx_.dirty.any) return;
+  last_sync_ = absl::Now();
+  if (absl::Status status = backing::SyncBacking(ctx_); !status.ok()) {
+    // Safe to carry on: the dirty entries stay, and only cost a larger
+    // re-read after a crash. The next request past the interval retries.
+    LOG(WARNING) << why << " sync of the backing filesystems failed, "
+                 << "keeping the dirty set: " << status;
+  }
 }
 
 absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
@@ -163,7 +181,7 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // (repopulated on the next lookup) rather than stale. This also clears
   // children_complete on `parent` -- restored below on success.
   std::vector<std::string> names = {std::string(name)};
-  ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, parent, names));
+  ABSL_RETURN_IF_ERROR(cache::BeginCreate(ctx_, parent, name));
 
   // Phase 2: the op-specific backing syscall, against a parent fd opened
   // once and shared with phase 3 below. On failure (EEXIST, ENOENT, ...)
@@ -216,7 +234,7 @@ absl::Status DirCacheFS::Setattr(
   // mark the cached attributes unknown before the syscall(s) below, so a
   // crash before phase 3 leaves "unknown" -- repopulated on the next
   // access -- rather than ever reporting stale data as current.
-  ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, id));
+  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id));
 
   // Phase 2: the syscall(s) themselves.
   absl::Status set_status = backing::SetAttr(ctx_, id, *attr, to_set);
@@ -372,11 +390,7 @@ absl::Status DirCacheFS::RemoveChild(
   // to change (the parent's mtime/ctime/nlink, the child's nlink/ctime)
   // unknown, in one transaction.
   std::vector<std::string> names = {std::string(name)};
-  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, parent, names));
-    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, parent));
-    return cache::MarkAttrsUnknown(ctx_, child.id);
-  }));
+  ABSL_RETURN_IF_ERROR(cache::BeginRemove(ctx_, parent, name, child.id));
 
   // Phase 2: the backing unlinkat. On failure (ENOTEMPTY, EBUSY, ...) the
   // error is returned as is, after a best-effort re-resolve (see
@@ -472,17 +486,10 @@ absl::Status DirCacheFS::Rename(
   // set the rename changes unknown.
   std::vector<std::string> names = {std::string(name)};
   std::vector<std::string> newnames = {std::string(newname)};
-  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, parent, names));
-    ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, newparent, newnames));
-    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, parent));
-    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, newparent));
-    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, src.id));
-    if (dst_exists && !same_inode) {
-      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, dst.id));
-    }
-    return absl::OkStatus();
-  }));
+  ABSL_RETURN_IF_ERROR(cache::BeginRename(
+      ctx_, parent, name, newparent, newname, src.id,
+      dst_exists && !same_inode ? std::optional<InodeId>(dst.id)
+                                : std::nullopt));
 
   // Phase 2: the backing renameat2. On failure (EXDEV, ENOTEMPTY, EEXIST
   // for RENAME_NOREPLACE, ...) the error is returned unchanged, after a
@@ -599,11 +606,7 @@ absl::Status DirCacheFS::Link(
   // Phase 1: mark (newparent, newname) unknown, and the attributes the
   // link changes (src's nlink/ctime, newparent's mtime/ctime/size).
   std::vector<std::string> names = {std::string(newname)};
-  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, newparent, names));
-    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, newparent));
-    return cache::MarkAttrsUnknown(ctx_, src);
-  }));
+  ABSL_RETURN_IF_ERROR(cache::BeginLink(ctx_, src, newparent, newname));
 
   // Phase 2: the backing linkat. On failure (EEXIST, EXDEV, ...)
   // (newparent, newname) is re-resolved from the backing filesystem (see
@@ -764,8 +767,10 @@ absl::Status DirCacheFS::Write(
   RET_CHECK(backing_it != backing_files_.end())
       << "Write on inode " << id << " with no BackingFile";
 
-  // Phase 1: the size/mtime/ctime this write is about to change.
-  ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, id));
+  // Phase 1: the size/mtime/ctime this write is about to change. (A
+  // writable open already made `id` durably dirty, so this commits without
+  // a WAL fsync unless a sync point has cleared that meanwhile.)
+  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id));
 
   // Phase 2: the write itself, against the shared fd (EBADF if it is
   // O_RDONLY -- see MakeBackingFile -- exactly as the kernel would report
@@ -912,6 +917,10 @@ absl::Status DirCacheFS::Fsync(
   // Backing durability is the backing filesystem's own job; passing the
   // sync through is still correct (and cheap) regardless of `writable`.
   ABSL_RETURN_IF_ERROR(backing::FsyncFd(fd, datasync != 0));
+  // The caller wants what it did durable, and that includes what dcfs
+  // cached about it: a sync point makes the backing filesystems durable
+  // and then empties the dirty set (a no-op if it is already empty).
+  SyncBackingNow("fsync");
   return req.ReplyErrno(0);
 }
 
@@ -1062,11 +1071,11 @@ absl::Status DirCacheFS::Releasedir(
 absl::Status DirCacheFS::Fsyncdir(
     FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
-  // Missing row -> ESTALE; see RequireAttr(). dcfs tracks no directory
-  // state of its own that would need flushing before the sync, so there is
-  // no phase 1/3 here -- just the syscall.
+  // Missing row -> ESTALE; see RequireAttr(). There is no phase 1/3 here:
+  // the syscall, then a sync point, as in Fsync().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
   ABSL_RETURN_IF_ERROR(backing::FsyncDir(ctx_, id, datasync != 0));
+  SyncBackingNow("fsyncdir");
   return req.ReplyErrno(0);
 }
 
@@ -1091,10 +1100,7 @@ absl::Status DirCacheFS::Setxattr(
   // Phase 1: forget this one cached xattr, not the whole set -- see
   // cache::ForgetXattr's comment for why that's still safe -- and mark the
   // attributes unknown (setxattr(2) bumps ctime).
-  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::ForgetXattr(ctx_, id, name));
-    return cache::MarkAttrsUnknown(ctx_, id);
-  }));
+  ABSL_RETURN_IF_ERROR(cache::BeginXattrChange(ctx_, id, name));
 
   // Phase 2: the backing syscall, reusing this inode's shared backing fd
   // (see the BackingFile map) if one is already open. XATTR_CREATE/
@@ -1183,10 +1189,7 @@ absl::Status DirCacheFS::Removexattr(
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
 
   // Phase 1, as Setxattr.
-  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::ForgetXattr(ctx_, id, name));
-    return cache::MarkAttrsUnknown(ctx_, id);
-  }));
+  ABSL_RETURN_IF_ERROR(cache::BeginXattrChange(ctx_, id, name));
 
   // Phase 2: ENODATA (already removed, or never existed) passes straight
   // through from the real syscall.
@@ -1276,7 +1279,7 @@ absl::Status DirCacheFS::Fallocate(
   int fd = *backing_it->second.fd;
 
   // Phase 1.
-  ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx_, id));
+  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id));
 
   // Phase 2. The shared fd is O_RDONLY only when this inode could not be
   // opened O_RDWR (see MakeBackingFile); fallocate on it then fails EBADF,

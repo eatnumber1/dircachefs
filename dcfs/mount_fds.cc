@@ -1,6 +1,7 @@
 #include "dcfs/mount_fds.h"
 
 #include <utility>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -28,5 +29,12 @@ absl::StatusOr<int> MountFds::Get(const DeviceId &id) const {
 }
 
 void MountFds::Erase(const DeviceId &id) { fds_.erase(id); }
+
+std::vector<int> MountFds::Fds() const {
+  std::vector<int> fds;
+  fds.reserve(fds_.size());
+  for (const auto &[id, fd] : fds_) fds.push_back(*fd);
+  return fds;
+}
 
 }  // namespace dcfs

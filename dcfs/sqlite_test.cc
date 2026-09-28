@@ -381,6 +381,78 @@ TEST_F(TransactionTest, NestedInnerSucceedsOuterFails) {
   EXPECT_THAT(RowCount(), IsOkAndHolds(0));
 }
 
+absl::StatusOr<int> Synchronous(Connection &conn) {
+  ABSL_ASSIGN_OR_RETURN(Statement * stmt, conn.Prepared("PRAGMA synchronous"));
+  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  RET_CHECK(has_row);
+  int level = stmt->Column<int>(0);
+  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  return level;
+}
+
+// PRAGMA synchronous reports 1 for NORMAL and 2 for FULL. A file-backed
+// database, so journal_mode really is WAL (the combination kSync exists
+// for).
+TEST(DurabilityTest, SyncTransactionRunsWithSynchronousFull) {
+  std::string path = TestTmpFile("durability.sqlite");
+  ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
+  ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
+  EXPECT_THAT(Synchronous(conn), IsOkAndHolds(1));
+
+  absl::StatusOr<int> inside;
+  absl::StatusOr<int> nested;
+  ASSERT_THAT(conn.Transaction(
+                  [&]() -> absl::Status {
+                    inside = Synchronous(conn);
+                    ABSL_RETURN_IF_ERROR(
+                        conn.Exec("INSERT INTO t (id) VALUES (1)"));
+                    // A nested kSync inside a kSync transaction just nests.
+                    return conn.Transaction(
+                        [&]() -> absl::Status {
+                          nested = Synchronous(conn);
+                          return absl::OkStatus();
+                        },
+                        Durability::kSync);
+                  },
+                  Durability::kSync),
+              IsOk());
+  EXPECT_THAT(inside, IsOkAndHolds(2));
+  EXPECT_THAT(nested, IsOkAndHolds(2));
+  EXPECT_THAT(Synchronous(conn), IsOkAndHolds(1));
+
+  // A plain transaction runs at the default, NORMAL.
+  absl::StatusOr<int> plain;
+  ASSERT_THAT(conn.Transaction([&]() -> absl::Status {
+    plain = Synchronous(conn);
+    return absl::OkStatus();
+  }),
+              IsOk());
+  EXPECT_THAT(plain, IsOkAndHolds(1));
+
+  // NORMAL is restored after a failed kSync transaction too.
+  EXPECT_THAT(conn.Transaction(
+                  [&]() -> absl::Status {
+                    return absl::InternalError("body failed");
+                  },
+                  Durability::kSync),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_FALSE(conn.InTransaction());
+  EXPECT_THAT(Synchronous(conn), IsOkAndHolds(1));
+}
+
+TEST(DurabilityTest, SyncInsideNormalTransactionIsRejected) {
+  ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
+  absl::Status inner;
+  ASSERT_THAT(conn.Transaction([&]() -> absl::Status {
+    inner = conn.Transaction([] { return absl::OkStatus(); },
+                             Durability::kSync);
+    return absl::OkStatus();
+  }),
+              IsOk());
+  EXPECT_THAT(inner, StatusIs(absl::StatusCode::kFailedPrecondition));
+  EXPECT_FALSE(conn.InTransaction());
+}
+
 // Regression test for a failing COMMIT (as opposed to a failing body())
 // leaving the transaction open. Two connections to the same file: B holds a
 // read cursor open (a SHARED lock, in rollback-journal mode) while A runs a

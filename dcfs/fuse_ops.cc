@@ -17,9 +17,13 @@
 namespace dcfs {
 namespace {
 
+// Every request handler goes through this, so it is also where the
+// periodic sync point runs: at the start of a request, never in the middle
+// of one (see DirCacheFS::MaybeSyncBacking).
 DirCacheFS &GetFS(fuse_req_t req) {
   auto *fs = static_cast<DirCacheFS *>(fuse_req_userdata(req));
   CHECK_NE(fs, nullptr);
+  fs->MaybeSyncBacking();
   return *fs;
 }
 

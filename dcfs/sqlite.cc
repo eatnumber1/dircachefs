@@ -251,6 +251,7 @@ Connection &Connection::operator=(Connection &&o) {
   swap(db_, o.db_);
   swap(statement_cache_, o.statement_cache_);
   swap(savepoint_depth_, o.savepoint_depth_);
+  swap(sync_transaction_, o.sync_transaction_);
   return *this;
 }
 
@@ -327,7 +328,34 @@ absl::StatusOr<Statement *> Connection::Prepared(std::string_view sql) {
   return raw;
 }
 
-absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body) {
+absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body,
+                                     Durability durability) {
+  if (durability == Durability::kNormal || savepoint_depth_ > 0) {
+    if (durability == Durability::kSync && !sync_transaction_) {
+      return absl::FailedPreconditionError(
+          "Connection::Transaction: a Durability::kSync transaction cannot "
+          "nest inside a kNormal one (only the outermost COMMIT is synced)");
+    }
+    return RunTransaction(body);
+  }
+  // The safety level can only change outside a transaction (sqlite3.c:
+  // "Safety level may not be changed inside a transaction").
+  ABSL_RETURN_IF_ERROR(Exec("PRAGMA synchronous=FULL"));
+  sync_transaction_ = true;
+  absl::Status status = RunTransaction(body);
+  sync_transaction_ = false;
+  absl::Status restored = Exec("PRAGMA synchronous=NORMAL");
+  if (!restored.ok()) {
+    if (status.ok()) return restored;
+    return absl::StatusBuilder(status)
+           << "; additionally, restoring synchronous=NORMAL failed: "
+           << restored;
+  }
+  return status;
+}
+
+absl::Status Connection::RunTransaction(
+    absl::FunctionRef<absl::Status()> body) {
   int depth = savepoint_depth_;
   if (depth == 0) {
     ABSL_RETURN_IF_ERROR(Exec("BEGIN IMMEDIATE"));

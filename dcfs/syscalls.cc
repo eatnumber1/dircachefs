@@ -462,6 +462,13 @@ absl::Status fdatasync(int fd) {
   return absl::OkStatus();
 }
 
+absl::Status syncfs(int fd) {
+  if (::syncfs(fd) == -1) {
+    return ErrnoToStatus(errno, "syncfs");
+  }
+  return absl::OkStatus();
+}
+
 absl::Status fallocate(int fd, int mode, off_t offset, off_t len) {
   if (::fallocate(fd, mode, offset, len) == -1) {
     return ErrnoToStatus(errno, "fallocate");

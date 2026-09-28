@@ -18,7 +18,8 @@ namespace dcfs {
 // the previous version to Migrate() (migrate.cc UpgradeSchema).
 //
 // v1: the original schema (FUSE generations from meta.gen_counter).
-// v2: random FUSE generations (meta.gen_counter dropped).
+// v2: random FUSE generations (meta.gen_counter dropped); the durable dirty
+//     set (table `dirty`, meta.clean_shutdown, meta.boot_id).
 inline constexpr int kSchemaVersion = 2;
 
 // Identifies the root of the cache: the backing filesystem being cached,
@@ -62,6 +63,14 @@ absl::Status Migrate(sqlite3::Connection &db, const RootIdentity &root);
 // anywhere else (see schema.sql). These are generic accessors; the
 // specific keys used are schema_version and source_device_id, exposed
 // below via typed wrappers.
+
+// meta keys of the durable dirty set's unclean-shutdown detection (see
+// backing::StartRun/FinishRun): "1" once a run has shut down cleanly
+// (backing filesystems synced, dirty set empty), "0" while one is running;
+// and /proc/sys/kernel/random/boot_id as of the last start, so a machine
+// crash can be told from a daemon crash in the log.
+inline constexpr std::string_view kMetaCleanShutdown = "clean_shutdown";
+inline constexpr std::string_view kMetaBootId = "boot_id";
 
 // Returns the value stored for `key`, or nullopt if there is no such row.
 absl::StatusOr<std::optional<std::string>> GetMeta(sqlite3::Connection &db,

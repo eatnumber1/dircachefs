@@ -137,6 +137,8 @@ absl::Status futimens(int fd, const struct timespec times[2]);
 absl::Status ftruncate(int fd, off_t length);
 absl::Status fsync(int fd);
 absl::Status fdatasync(int fd);
+// syncfs(2): writes back and flushes the whole filesystem `fd` is on.
+absl::Status syncfs(int fd);
 absl::Status fallocate(int fd, int mode, off_t offset, off_t len);
 absl::StatusOr<size_t> pread(int fd, void *buf, size_t count, off_t offset);
 absl::StatusOr<size_t> pwrite(int fd, const void *buf, size_t count,

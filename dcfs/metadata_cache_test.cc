@@ -796,5 +796,269 @@ TEST_F(MetadataCacheTest, PruneDentriesNotIn) {
               IsOkAndHolds(0));
 }
 
+// --- The durable dirty set ----------------------------------------------------
+
+absl::StatusOr<int> Synchronous(sqlite3::Connection &db) {
+  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                        db.Prepared("PRAGMA synchronous"));
+  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  RET_CHECK(has_row);
+  int level = stmt->Column<int>(0);
+  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  return level;
+}
+
+constexpr int kSynchronousNormal = 1;
+constexpr int kSynchronousFull = 2;
+
+TEST_F(MetadataCacheTest, BeginMutationIsDurableUntilIdsAreKnownDirty) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult g, Make(31));
+  ctx_.dirty = {};
+  ctx_.dirty.any = false;
+
+  const InodeId both[] = {f.id, g.id};
+  absl::StatusOr<int> level;
+  ASSERT_THAT(BeginMutation(ctx_, both, [&] {
+                level = Synchronous(db_);
+                return MarkAttrsUnknown(ctx_, f.id);
+              }),
+              IsOk());
+  // Committed with synchronous=FULL (a WAL fsync), in the same transaction
+  // as the body.
+  EXPECT_THAT(level, IsOkAndHolds(kSynchronousFull));
+  EXPECT_THAT(Synchronous(db_), IsOkAndHolds(kSynchronousNormal));
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id, g.id)));
+  EXPECT_TRUE(ctx_.dirty.any);
+  EXPECT_TRUE(ctx_.dirty.durable.contains(f.id));
+  EXPECT_TRUE(ctx_.dirty.durable.contains(g.id));
+
+  // Everything already durably dirty: no fsync needed.
+  const InodeId just_g[] = {g.id};
+  ASSERT_THAT(BeginMutation(ctx_, just_g, [&] {
+                level = Synchronous(db_);
+                return absl::OkStatus();
+              }),
+              IsOk());
+  EXPECT_THAT(level, IsOkAndHolds(kSynchronousNormal));
+
+  // One new id is enough to need it again.
+  ASSERT_OK_AND_ASSIGN(UpsertResult h, Make(32));
+  const InodeId g_and_h[] = {g.id, h.id};
+  ASSERT_THAT(BeginMutation(ctx_, g_and_h, [&] {
+                level = Synchronous(db_);
+                return absl::OkStatus();
+              }),
+              IsOk());
+  EXPECT_THAT(level, IsOkAndHolds(kSynchronousFull));
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id, g.id, h.id)));
+
+  // A failing body records nothing.
+  ASSERT_OK_AND_ASSIGN(UpsertResult i, Make(33));
+  const InodeId just_i[] = {i.id};
+  EXPECT_THAT(BeginMutation(ctx_, just_i,
+                            [] { return absl::InternalError("no"); }),
+              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id, g.id, h.id)));
+  EXPECT_FALSE(ctx_.dirty.durable.contains(i.id));
+
+  // A durable commit cannot nest inside a caller's transaction.
+  EXPECT_THAT(db_.Transaction([&] {
+    return BeginMutation(ctx_, just_i, [] { return absl::OkStatus(); });
+  }),
+              StatusIs(absl::StatusCode::kFailedPrecondition));
+}
+
+// Phase 1 of every mutation kind names exactly the inodes it changes, and
+// marks their state unknown, durably.
+TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
+  ASSERT_OK_AND_ASSIGN(InodeId a, MakeDir(kRootInode, "a", 20));
+  ASSERT_OK_AND_ASSIGN(InodeId b, MakeDir(kRootInode, "b", 21));
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult g, Make(31));
+  ASSERT_THAT(LinkDentry(ctx_, a, "f", f.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, b, "g", g.id), IsOk());
+  ASSERT_THAT(SetXattr(ctx_, f.id, "user.k", "v"), IsOk());
+  ASSERT_THAT(SetXattr(ctx_, f.id, "user.other", "w"), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, a, true), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, b, true), IsOk());
+
+  auto reset = [&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(ClearDirty(ctx_, {}));
+    for (auto [id, ino] : {std::pair{a, 20}, std::pair{b, 21},
+                           std::pair{f.id, 30}, std::pair{g.id, 31}}) {
+      ABSL_RETURN_IF_ERROR(UpdateAttr(ctx_, id, Stx(ino, S_IFREG)));
+    }
+    ABSL_RETURN_IF_ERROR(MarkDirComplete(ctx_, a, true));
+    return MarkDirComplete(ctx_, b, true);
+  };
+  auto valid = [&](InodeId id) {
+    absl::StatusOr<CachedAttr> attr = GetAttr(ctx_, id);
+    return attr.ok() && attr->valid;
+  };
+
+  // Create of "new" in a.
+  ASSERT_THAT(reset(), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, a, "new"), IsOk());
+  ASSERT_THAT(BeginCreate(ctx_, a, "new"), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a)));
+  EXPECT_TRUE(ctx_.dirty.durable.contains(a));
+  EXPECT_THAT(Lookup(ctx_, a, "new"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_THAT(IsDirComplete(ctx_, a), IsOkAndHolds(false));
+
+  // Unlink of a/f.
+  ASSERT_THAT(reset(), IsOk());
+  ASSERT_THAT(BeginRemove(ctx_, a, "f", f.id), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, f.id)));
+  EXPECT_THAT(Lookup(ctx_, a, "f"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_FALSE(valid(a));
+  EXPECT_FALSE(valid(f.id));
+  EXPECT_TRUE(valid(b));
+  ASSERT_THAT(LinkDentry(ctx_, a, "f", f.id), IsOk());
+
+  // Rename of a/f over b/g.
+  ASSERT_THAT(reset(), IsOk());
+  ASSERT_THAT(BeginRename(ctx_, a, "f", b, "g", f.id, g.id), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, b, f.id, g.id)));
+  EXPECT_THAT(Lookup(ctx_, a, "f"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_THAT(Lookup(ctx_, b, "g"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  for (InodeId id : {a, b, f.id, g.id}) EXPECT_FALSE(valid(id)) << id;
+  // And without a destination.
+  ASSERT_THAT(reset(), IsOk());
+  ASSERT_THAT(BeginRename(ctx_, a, "x", a, "y", f.id, std::nullopt), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, f.id)));
+  ASSERT_THAT(LinkDentry(ctx_, a, "f", f.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, b, "g", g.id), IsOk());
+
+  // Link of f as b/h.
+  ASSERT_THAT(reset(), IsOk());
+  ASSERT_THAT(BeginLink(ctx_, f.id, b, "h"), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(b, f.id)));
+  EXPECT_FALSE(valid(b));
+  EXPECT_FALSE(valid(f.id));
+  EXPECT_TRUE(valid(a));
+  EXPECT_THAT(IsDirComplete(ctx_, b), IsOkAndHolds(false));
+
+  // Setattr / writable open / write / fallocate of g.
+  ASSERT_THAT(reset(), IsOk());
+  ASSERT_THAT(BeginAttrChange(ctx_, g.id), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(g.id)));
+  EXPECT_FALSE(valid(g.id));
+  EXPECT_THAT(IsDirComplete(ctx_, b), IsOkAndHolds(true));
+
+  // Setxattr / removexattr of user.k on f.
+  ASSERT_THAT(reset(), IsOk());
+  ASSERT_THAT(BeginXattrChange(ctx_, f.id, "user.k"), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id)));
+  EXPECT_FALSE(valid(f.id));
+  EXPECT_THAT(GetXattr(ctx_, f.id, "user.k"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(GetXattr(ctx_, f.id, "user.other"),
+              IsOkAndHolds(Optional(std::string("w"))));
+}
+
+TEST_F(MetadataCacheTest, MarkDirtyIsNotDurableAndClearDirtyKeeps) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult g, Make(31));
+  ASSERT_THAT(ClearDirty(ctx_, {}), IsOk());
+  EXPECT_FALSE(ctx_.dirty.any);
+
+  const InodeId ids[] = {f.id, g.id};
+  ASSERT_THAT(MarkDirty(ctx_, ids), IsOk());
+  EXPECT_TRUE(ctx_.dirty.any);
+  EXPECT_FALSE(ctx_.dirty.durable.contains(f.id));
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id, g.id)));
+
+  const InodeId keep[] = {g.id};
+  ASSERT_THAT(ClearDirty(ctx_, keep), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(g.id)));
+  EXPECT_TRUE(ctx_.dirty.any);
+  EXPECT_TRUE(ctx_.dirty.durable.empty());
+  ASSERT_THAT(ClearDirty(ctx_, {}), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+  EXPECT_FALSE(ctx_.dirty.any);
+}
+
+TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
+  // Dirty: directory d (with a child and a negative entry), file f (with
+  // xattrs, linked from the root and from d), symlink s. Clean: directory
+  // c (with a child), file k.
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
+  ASSERT_OK_AND_ASSIGN(InodeId c, MakeDir(kRootInode, "c", 21));
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult s, Make(31, S_IFLNK | 0777));
+  ASSERT_OK_AND_ASSIGN(UpsertResult k, Make(32));
+  ASSERT_OK_AND_ASSIGN(UpsertResult dchild, Make(33));
+  ASSERT_OK_AND_ASSIGN(UpsertResult cchild, Make(34));
+  ASSERT_THAT(LinkDentry(ctx_, kRootInode, "f", f.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, d, "f2", f.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, kRootInode, "s", s.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, kRootInode, "k", k.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, d, "x", dchild.id), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, d, "neg"), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, c, "y", cchild.id), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, c, "neg"), IsOk());
+  const std::vector<std::pair<std::string, std::string>> f_xattrs = {
+      {"user.a", "1"}};
+  const std::vector<std::pair<std::string, std::string>> k_xattrs = {
+      {"user.b", "2"}};
+  ASSERT_THAT(ReplaceXattrs(ctx_, f.id, f_xattrs), IsOk());
+  ASSERT_THAT(ReplaceXattrs(ctx_, k.id, k_xattrs), IsOk());
+  ASSERT_THAT(SetSymlink(ctx_, s.id, "target"), IsOk());
+  for (InodeId dir : {kRootInode, d, c}) {
+    ASSERT_THAT(MarkDirComplete(ctx_, dir, true), IsOk());
+  }
+  ASSERT_THAT(ClearDirty(ctx_, {}), IsOk());
+  const InodeId dirty[] = {d, f.id, s.id, 999 /* no row any more */};
+  ASSERT_THAT(MarkDirty(ctx_, dirty), IsOk());
+
+  EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(4));
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+  EXPECT_FALSE(ctx_.dirty.any);
+
+  // d: attributes unknown, listing forgotten (positive and negative) and
+  // incomplete, and its own dentry forgotten, so the root is incomplete.
+  ASSERT_OK_AND_ASSIGN(CachedAttr d_attr, GetAttr(ctx_, d));
+  EXPECT_FALSE(d_attr.valid);
+  EXPECT_THAT(CountRows(db_, absl::StrCat("dentries WHERE parent = ", d)),
+              IsOkAndHolds(0));
+  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
+  EXPECT_THAT(Lookup(ctx_, kRootInode, "d"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_THAT(IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
+  // f: attributes and xattrs unknown (rows gone), every dentry to it gone.
+  ASSERT_OK_AND_ASSIGN(CachedAttr f_attr, GetAttr(ctx_, f.id));
+  EXPECT_FALSE(f_attr.valid);
+  EXPECT_THAT(ListXattrs(ctx_, f.id), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(GetXattr(ctx_, f.id, "user.a"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(CountRows(db_, absl::StrCat("dentries WHERE inode = ", f.id)),
+              IsOkAndHolds(0));
+  // s: target forgotten.
+  EXPECT_THAT(Readlink(ctx_, s.id), StatusIs(absl::StatusCode::kNotFound));
+  // The rows themselves (and their generations) are kept.
+  EXPECT_THAT(GetGeneration(ctx_, f.id), IsOkAndHolds(f.fuse_gen));
+  EXPECT_THAT(GetAttr(ctx_, dchild.id), IsOk());
+
+  // Everything clean is untouched.
+  for (InodeId id : {c, k.id, cchild.id, dchild.id}) {
+    ASSERT_OK_AND_ASSIGN(CachedAttr attr, GetAttr(ctx_, id));
+    EXPECT_TRUE(attr.valid) << id;
+  }
+  EXPECT_THAT(IsDirComplete(ctx_, c), IsOkAndHolds(true));
+  EXPECT_THAT(Lookup(ctx_, c, "y"), IsOkAndHolds(IsFoundAs(cchild.id)));
+  EXPECT_THAT(Lookup(ctx_, c, "neg"),
+              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+  EXPECT_THAT(Lookup(ctx_, kRootInode, "c"), IsOkAndHolds(IsFoundAs(c)));
+  EXPECT_THAT(Lookup(ctx_, kRootInode, "k"), IsOkAndHolds(IsFoundAs(k.id)));
+  EXPECT_THAT(ListXattrs(ctx_, k.id),
+              IsOkAndHolds(Optional(ElementsAre("user.b"))));
+
+  // Nothing dirty: nothing to do.
+  EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(0));
+}
+
 }  // namespace
 }  // namespace dcfs::cache

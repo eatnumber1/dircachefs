@@ -93,13 +93,17 @@ absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
 }
 
 // v1 -> v2: FUSE generations become random per row (cache::UpsertInode),
-// so the v1 counter goes. Existing rows keep the generations they were
-// given.
+// so the v1 counter goes (existing rows keep the generations they were
+// given), and the durable dirty set appears (empty: a v1 daemon tracked
+// nothing, so there is nothing to recover from its last run).
 absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
   ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
                         db.Prepared("DELETE FROM meta WHERE key = ?"));
   ABSL_RETURN_IF_ERROR(stmt->Bind(1, kKeyGenCounterV1));
   ABSL_RETURN_IF_ERROR(stmt->ExecuteOnce());
+  // As in schema.sql.
+  ABSL_RETURN_IF_ERROR(
+      db.Exec("CREATE TABLE dirty (inode INTEGER PRIMARY KEY) STRICT"));
   return SetMeta(db, kKeySchemaVersion, "2");
 }
 

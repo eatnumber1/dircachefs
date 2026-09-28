@@ -18,7 +18,7 @@
 --
 -- All tables are STRICT (SQLite 3.37+ -- this build uses 3.53). meta.value is
 -- typed ANY rather than BLOB because it stores a mix of text-encoded
--- integers (schema_version) and raw bytes
+-- integers (schema_version, clean_shutdown), text (boot_id) and raw bytes
 -- (source_device_id) -- a STRICT BLOB column rejects TEXT values outright,
 -- with no coercion, so ANY (which preserves whatever storage class was
 -- bound, unmodified) is the type that actually fits a heterogeneous
@@ -106,4 +106,18 @@ CREATE TABLE xattrs (
   name BLOB NOT NULL,
   value BLOB NOT NULL,
   PRIMARY KEY (inode, name)
+) STRICT;
+
+-- The durable dirty set: every inode whose cached attributes, dentries (as
+-- a parent), symlink target or xattrs a mutation has changed since the
+-- backing filesystems were last synced (backing::SyncBacking: syncfs, then
+-- DELETE FROM dirty). Phase 1 of every mutation inserts the inodes it is
+-- about to change, in a transaction committed with synchronous=FULL, before
+-- the backing syscall; phase 3 never removes rows. After an unclean
+-- shutdown, startup recovery (cache::RecoverDirty) treats everything cached
+-- about these inodes as unknown, which is exactly what a power loss may
+-- have made disagree with the backing filesystems. No foreign key: a row
+-- may outlive its inode (recovery skips it), and must not vanish with it.
+CREATE TABLE dirty (
+  inode INTEGER PRIMARY KEY
 ) STRICT;

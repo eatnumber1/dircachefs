@@ -23,6 +23,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/ascii.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
 #include "dcfs/context.h"
@@ -48,6 +49,12 @@ ABSL_FLAG(
 ABSL_FLAG(
     double, entry_timeout_sec, 3600,
     "How long the kernel may cache a directory entry (lookup result).");
+ABSL_FLAG(
+    double, sync_interval_sec, 5,
+    "While mutations have left cache entries dirty (see README \"Crash "
+    "robustness\"), the first request after this many seconds since the "
+    "last sync point syncfs()es the backing filesystems and marks them "
+    "clean. Bounds how much is re-read after a power loss or crash.");
 ABSL_FLAG(
     bool, foreground, true,
     "Stay in the foreground instead of daemonizing.");
@@ -78,6 +85,19 @@ namespace {
 absl::Status UsageError(absl::string_view message) {
   std::cerr << absl::ProgramUsageMessage() << "\n";
   return absl::InvalidArgumentError(message);
+}
+
+// The kernel's random per-boot UUID, so StartRun can tell a machine crash
+// (a new boot id) from a daemon crash in its log. Read by path: startup is
+// the one time dcfs uses paths.
+absl::StatusOr<std::string> ReadBootId() {
+  constexpr char kPath[] = "/proc/sys/kernel/random/boot_id";
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
+                        syscalls::openat(AT_FDCWD, kPath, O_RDONLY));
+  std::string buf(64, '\0');
+  ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::pread(*fd, buf.data(), buf.size(), 0));
+  buf.resize(n);
+  return std::string(absl::StripAsciiWhitespace(buf));
 }
 
 absl::StatusOr<int> Main(int argc, char *argv[]) {
@@ -164,12 +184,17 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
         root.device_id.ToString(),
         "; delete the database to start a cold cache"));
   }
+  // Before anything reads the cache: after an unclean shutdown, forget
+  // whatever the dirty set says a power loss may have made wrong.
+  ABSL_ASSIGN_OR_RETURN(std::string boot_id, ReadBootId());
+  ABSL_RETURN_IF_ERROR(backing::StartRun(ctx, boot_id));
   ABSL_RETURN_IF_ERROR(backing::InitRoot(ctx, std::move(source_fd)));
   ABSL_RETURN_IF_ERROR(backing::StartupPurge(ctx));
 
   DirCacheFS::Options opts{
       .attr_timeout = absl::Seconds(absl::GetFlag(FLAGS_attr_timeout_sec)),
       .entry_timeout = absl::Seconds(absl::GetFlag(FLAGS_entry_timeout_sec)),
+      .sync_interval = absl::Seconds(absl::GetFlag(FLAGS_sync_interval_sec)),
   };
 
   // default_permissions (and allow_other, if requested) are always added,
@@ -230,15 +255,18 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
 
   // Shutdown order matters: unmount first, so the kernel stops sending new
   // requests and fusermount's mount table entry is gone, then tear down the
-  // session, and only after that checkpoint and close the cache database --
-  // nothing should still be able to write to it once we start closing it.
+  // session, and only after that sync the backing filesystems, checkpoint,
+  // mark the shutdown clean, and close the cache database -- nothing should
+  // still be able to write to it once we start closing it.
   fuse_session_unmount(session);
   fuse_remove_signal_handlers(session);
   fuse_session_destroy(session);
 
-  absl::Status checkpoint_status = db.Checkpoint();
-  if (!checkpoint_status.ok()) {
-    LOG(WARNING) << "WAL checkpoint failed: " << checkpoint_status;
+  absl::Status finish_status = backing::FinishRun(ctx);
+  if (!finish_status.ok()) {
+    LOG(WARNING) << "clean shutdown incomplete, the next start will recover "
+                    "the dirty set: "
+                 << finish_status;
   }
   absl::Status close_status = db.Close();
   if (!close_status.ok()) {

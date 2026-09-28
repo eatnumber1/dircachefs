@@ -879,6 +879,177 @@ absl::Status PurgeFilesystem(Context &ctx, const DeviceId &device) {
   });
 }
 
+// --- The durable dirty set --------------------------------------------------
+
+namespace {
+
+absl::Status InsertDirty(Context &ctx, std::span<const InodeId> ids) {
+  for (InodeId id : ids) {
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "INSERT INTO dirty (inode) VALUES (?) "
+                "ON CONFLICT (inode) DO NOTHING",
+                id)
+            .status());
+  }
+  return absl::OkStatus();
+}
+
+}  // namespace
+
+absl::Status BeginMutation(Context &ctx, std::span<const InodeId> ids,
+                           absl::FunctionRef<absl::Status()> body) {
+  bool known = true;
+  for (InodeId id : ids) known = known && ctx.dirty.durable.contains(id);
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
+      [&]() -> absl::Status {
+        ABSL_RETURN_IF_ERROR(body());
+        if (known) return absl::OkStatus();
+        return InsertDirty(ctx, ids);
+      },
+      known ? sqlite3::Durability::kNormal : sqlite3::Durability::kSync));
+  ctx.dirty.any = true;
+  if (!known) ctx.dirty.durable.insert(ids.begin(), ids.end());
+  return absl::OkStatus();
+}
+
+absl::Status BeginCreate(Context &ctx, InodeId parent, std::string_view name) {
+  const std::string names[] = {std::string(name)};
+  const InodeId ids[] = {parent};
+  return BeginMutation(ctx, ids,
+                       [&] { return MarkUnknown(ctx, parent, names); });
+}
+
+absl::Status BeginRemove(Context &ctx, InodeId parent, std::string_view name,
+                         InodeId child) {
+  const std::string names[] = {std::string(name)};
+  const InodeId ids[] = {parent, child};
+  return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, parent, names));
+    ABSL_RETURN_IF_ERROR(MarkAttrsUnknown(ctx, parent));
+    return MarkAttrsUnknown(ctx, child);
+  });
+}
+
+absl::Status BeginRename(Context &ctx, InodeId parent, std::string_view name,
+                         InodeId newparent, std::string_view newname,
+                         InodeId src, std::optional<InodeId> dst) {
+  const std::string names[] = {std::string(name)};
+  const std::string newnames[] = {std::string(newname)};
+  std::vector<InodeId> ids = {parent, newparent, src};
+  if (dst.has_value()) ids.push_back(*dst);
+  return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, parent, names));
+    ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, newparent, newnames));
+    for (InodeId id : ids) ABSL_RETURN_IF_ERROR(MarkAttrsUnknown(ctx, id));
+    return absl::OkStatus();
+  });
+}
+
+absl::Status BeginLink(Context &ctx, InodeId src, InodeId newparent,
+                       std::string_view newname) {
+  const std::string names[] = {std::string(newname)};
+  const InodeId ids[] = {newparent, src};
+  return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, newparent, names));
+    ABSL_RETURN_IF_ERROR(MarkAttrsUnknown(ctx, newparent));
+    return MarkAttrsUnknown(ctx, src);
+  });
+}
+
+absl::Status BeginAttrChange(Context &ctx, InodeId id) {
+  const InodeId ids[] = {id};
+  return BeginMutation(ctx, ids, [&] { return MarkAttrsUnknown(ctx, id); });
+}
+
+absl::Status BeginXattrChange(Context &ctx, InodeId id,
+                              std::string_view name) {
+  const InodeId ids[] = {id};
+  return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(ForgetXattr(ctx, id, name));
+    return MarkAttrsUnknown(ctx, id);
+  });
+}
+
+absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids) {
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&] { return InsertDirty(ctx, ids); }));
+  ctx.dirty.any = true;
+  return absl::OkStatus();
+}
+
+absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx, "SELECT inode FROM dirty ORDER BY inode"));
+  std::vector<InodeId> ids;
+  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
+    ids.push_back(row.Column<int64_t>(0));
+    return absl::OkStatus();
+  }));
+  return ids;
+}
+
+absl::Status ClearDirty(Context &ctx, std::span<const InodeId> keep) {
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(Execute(ctx, "DELETE FROM dirty").status());
+    return InsertDirty(ctx, keep);
+  }));
+  // The kept rows were durable before (a writable open's are inserted by
+  // its durable phase 1, or by the phase 3 that created its row) and this
+  // transaction only deleted others, but whether they are in
+  // ctx.dirty.durable is not tracked across the clear: start over.
+  ctx.dirty.durable.clear();
+  ctx.dirty.any = !keep.empty();
+  return absl::OkStatus();
+}
+
+absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
+  int64_t count = 0;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(Statement * stmt,
+                          Query(ctx, "SELECT COUNT(*) FROM dirty"));
+    ABSL_RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
+                           count = row.Column<int64_t>(0);
+                           return absl::OkStatus();
+                         }).status());
+    if (count == 0) return absl::OkStatus();
+    // Parents first: once the dentries pointing at dirty inodes are gone we
+    // can no longer find them (as InvalidateInode).
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "UPDATE directories SET children_complete = 0 "
+                "WHERE inode IN (SELECT inode FROM dirty) "
+                "OR inode IN (SELECT parent FROM dentries "
+                "WHERE inode IN (SELECT inode FROM dirty))")
+            .status());
+    // Only a directory has dentries of its own.
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "DELETE FROM dentries WHERE parent IN (SELECT inode FROM dirty) "
+                "OR inode IN (SELECT inode FROM dirty)")
+            .status());
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "UPDATE inodes SET attrs_valid = 0, xattrs_complete = 0 "
+                "WHERE id IN (SELECT inode FROM dirty)")
+            .status());
+    // GetXattr serves a cached row even when the set is incomplete, so the
+    // rows must go, not just the completeness flag.
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "DELETE FROM xattrs WHERE inode IN (SELECT inode FROM dirty)")
+            .status());
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "DELETE FROM symlinks WHERE inode IN (SELECT inode FROM dirty)")
+            .status());
+    return Execute(ctx, "DELETE FROM dirty").status();
+  }));
+  ctx.dirty.durable.clear();
+  ctx.dirty.any = false;
+  return count;
+}
+
 #undef DCFS_ATTR_ASSIGNMENTS
 #undef DCFS_ATTR_COLUMNS
 #undef DCFS_ATTR_PLACEHOLDERS

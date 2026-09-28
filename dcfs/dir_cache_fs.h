@@ -50,6 +50,11 @@ class DirCacheFS {
     // "init() and fuse_session_new() requested different maximum read
     // size".
     std::optional<unsigned int> max_read;
+
+    // How often, at most, a request finding the dirty set non-empty first
+    // runs a sync point (backing::SyncBacking: syncfs of the backing
+    // filesystems, then the dirty set is emptied). See MaybeSyncBacking().
+    absl::Duration sync_interval = absl::Seconds(5);
   };
 
   // `ctx` must outlive this DirCacheFS, which points ctx.open_for_write at
@@ -142,6 +147,15 @@ class DirCacheFS {
       FuseRequest &req, fuse_ino_t ino, int mode, off_t offset, off_t length,
       fuse_file_info &fi);
 
+  // Called at the start of every request (see fuse_ops.cc): runs a sync
+  // point if the dirty set may be non-empty and opts_.sync_interval has
+  // passed since the last one. dcfs is single-threaded inside libfuse's
+  // blocking session loop, which offers no idle hook, so there is no timer:
+  // an idle daemon keeps a non-empty dirty set until its next request, its
+  // next fsync, or a clean shutdown. That is safe; it only makes the
+  // re-read after a crash larger.
+  void MaybeSyncBacking();
+
   // Whether any Open()/Create() handle for `id` is still outstanding (has
   // not gone through Release()). A file whose last link is removed keeps
   // its row while this is true (see SettleUnlinkedFile).
@@ -185,6 +199,11 @@ class DirCacheFS {
   // unknown, before the open is replied to. Phase 3 is Release() of the
   // last writable open.
   absl::Status BeginWriting(InodeId id);
+
+  // A sync point now (if the dirty set may be non-empty), logging a failure
+  // at WARNING: nothing that calls this may fail over it. `why` names the
+  // caller in the log line.
+  void SyncBackingNow(std::string_view why);
 
   // Shared phase-1/2/3 wiring for Create/Mkdir/Mknod/Symlink (see
   // dir_cache_fs.cc's "write-through op" rule for what those phases are):
@@ -301,6 +320,8 @@ class DirCacheFS {
   // The inodes whose BackingFile has writable_refs > 0; ctx_.open_for_write
   // points here (see Context::open_for_write).
   absl::flat_hash_set<int64_t> open_for_write_;
+  // When the last sync point ran (or was attempted); see MaybeSyncBacking.
+  absl::Time last_sync_;
 };
 
 }  // namespace dcfs

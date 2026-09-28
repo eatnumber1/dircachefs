@@ -711,5 +711,118 @@ TEST_F(BackingTest, UnchangedNodesReportNothing) {
   EXPECT_THAT(cache::ListXattrs(ctx_, file), IsOkAndHolds(Optional(_)));
 }
 
+// --- Durability: sync points and recovery (step 4.10) -----------------------
+
+TEST_F(BackingTest, SyncBackingClearsTheDirtySetExceptOpenWriters) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  ASSERT_OK_AND_ASSIGN(InodeId hl1, Id("hl1"));
+  ASSERT_THAT(cache::BeginAttrChange(ctx_, file), IsOk());
+  ASSERT_THAT(cache::BeginCreate(ctx_, kRootInode, "new"), IsOk());
+  ASSERT_THAT(cache::BeginAttrChange(ctx_, hl1), IsOk());
+  ASSERT_THAT(cache::ListDirty(ctx_),
+              IsOkAndHolds(testing::UnorderedElementsAre(file, kRootInode, hl1)));
+
+  // hl1 still has a writable open: the kernel may keep writing to it after
+  // the sync, so it stays dirty.
+  absl::flat_hash_set<int64_t> open_for_write = {hl1};
+  ctx_.open_for_write = &open_for_write;
+  ASSERT_THAT(SyncBacking(ctx_), IsOk());
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::ElementsAre(hl1)));
+  EXPECT_TRUE(ctx_.dirty.any);
+  EXPECT_TRUE(ctx_.dirty.durable.empty());
+
+  open_for_write.clear();
+  ASSERT_THAT(SyncBacking(ctx_), IsOk());
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
+  EXPECT_FALSE(ctx_.dirty.any);
+  ctx_.open_for_write = nullptr;
+}
+
+TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));
+  ASSERT_OK_AND_ASSIGN(InodeId inner, Id("inner", dir));
+  ASSERT_OK_AND_ASSIGN(InodeId hl1, Id("hl1"));
+  auto valid = [&](InodeId id) {
+    absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
+    return attr.ok() && attr->valid;
+  };
+
+  // A fresh cache: nothing to recover, and the run is now marked running.
+  ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
+  EXPECT_THAT(GetMeta(db_, kMetaCleanShutdown), IsOkAndHolds(Optional(std::string("0"))));
+  EXPECT_THAT(GetMeta(db_, kMetaBootId), IsOkAndHolds(Optional(std::string("boot-1"))));
+  EXPECT_FALSE(ctx_.dirty.any);
+  EXPECT_TRUE(valid(file));
+
+  // A mutation's phase 1 and phase 3 both committed, then the daemon (or
+  // the machine) died before any sync point.
+  ASSERT_THAT(cache::BeginRemove(ctx_, dir, "inner", inner), IsOk());
+  ASSERT_THAT(RefreshAttrs(ctx_, dir), IsOk());
+  ASSERT_THAT(RefreshAttrs(ctx_, inner), IsOk());
+  ASSERT_THAT(cache::SetNegative(ctx_, dir, "inner"), IsOk());
+  ASSERT_THAT(cache::MarkDirComplete(ctx_, dir, true), IsOk());
+  ASSERT_TRUE(valid(dir));
+  ASSERT_TRUE(valid(inner));
+
+  {
+    absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+    EXPECT_CALL(log, Log(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(log, Log(absl::LogSeverity::kWarning, _,
+                         testing::AllOf(HasSubstr("recovered 2 dirty"),
+                               HasSubstr("machine rebooted"))));
+    log.StartCapturingLogs();
+    ASSERT_THAT(StartRun(ctx_, "boot-2"), IsOk());
+  }
+  // Exactly the dirty entries are unknown; everything else stays warm.
+  EXPECT_FALSE(valid(dir));
+  EXPECT_FALSE(valid(inner));
+  EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(false));
+  EXPECT_THAT(cache::Lookup(ctx_, dir, "inner"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_TRUE(valid(file));
+  EXPECT_TRUE(valid(hl1));
+  EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
+  EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "file"),
+              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
+  EXPECT_THAT(GetMeta(db_, kMetaBootId), IsOkAndHolds(Optional(std::string("boot-2"))));
+
+  // And the truth is re-read from the backing filesystem: inner still
+  // exists there (the phase 2 unlink never ran in this test).
+  EXPECT_THAT(LookupOrPopulate(ctx_, dir, "inner"),
+              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+}
+
+TEST_F(BackingTest, FinishRunMarksACleanShutdown) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
+  ASSERT_THAT(cache::BeginAttrChange(ctx_, file), IsOk());
+
+  // A writable open still outstanding: its entry stays dirty, so the
+  // shutdown is not clean.
+  absl::flat_hash_set<int64_t> open_for_write = {file};
+  ctx_.open_for_write = &open_for_write;
+  EXPECT_THAT(FinishRun(ctx_), StatusIs(absl::StatusCode::kFailedPrecondition));
+  EXPECT_THAT(GetMeta(db_, kMetaCleanShutdown), IsOkAndHolds(Optional(std::string("0"))));
+
+  open_for_write.clear();
+  ASSERT_THAT(FinishRun(ctx_), IsOk());
+  EXPECT_THAT(GetMeta(db_, kMetaCleanShutdown), IsOkAndHolds(Optional(std::string("1"))));
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
+  ctx_.open_for_write = nullptr;
+
+  // The next start finds nothing to recover and logs nothing about it.
+  {
+    absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+    EXPECT_CALL(log, Log(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(log, Log(absl::LogSeverity::kWarning, _,
+                         HasSubstr("did not shut down cleanly")))
+        .Times(0);
+    log.StartCapturingLogs();
+    ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
+  }
+}
+
 }  // namespace
 }  // namespace dcfs::backing
