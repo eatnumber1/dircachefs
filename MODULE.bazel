@@ -23,3 +23,21 @@ bazel_dep(name = "rules_shell", version = "0.8.0")
 kernel_image = use_repo_rule("//test/qemu:kernel.bzl", "kernel_image")
 
 kernel_image(name = "kernel_image")
+
+# pjdfstest (step 4.5): github.com/pjd/pjdfstest, pinned to the current
+# master commit as of 2026-09-27. See third_party/pjdfstest/BUILD.pjdfstest
+# for how it's built (no autoconf; config.h is hand-written for Linux/
+# glibc) and 0001-linux-portability.patch for the two guest-shell fixes
+# (tests/conf's filesystem-type detection, tests/misc.sh's use of
+# `openssl md5` where this project's busybox-only guest has no openssl).
+http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "pjdfstest",
+    build_file = "//third_party/pjdfstest:BUILD.pjdfstest",
+    integrity = "sha256-IAXN2Dt2IEF3zxNnkrHyBYp0GLT8WyA/USdKaYVH11Q=",
+    patch_args = ["-p1"],
+    patches = ["//third_party/pjdfstest:0001-linux-portability.patch"],
+    strip_prefix = "pjdfstest-85a8aea9e685999ef0540392fd80535f873d7ff7",
+    url = "https://github.com/pjd/pjdfstest/archive/85a8aea9e685999ef0540392fd80535f873d7ff7.tar.gz",
+)

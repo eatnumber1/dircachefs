@@ -1,0 +1,13 @@
+# pjdfstest failures observed running directly against the backing ext4
+# filesystem (no dcfs involved at all) -- see guest/pjdfstest.sh. This is
+# purely a record for docs/conformance.md (upstream ext4/Linux/pjdfstest
+# quirks, not something dcfs can or should "fix"); guest/pjdfstest.sh does
+# NOT read this file back at runtime -- it recomputes the live ext4 failure
+# set on every run and uses that (not this snapshot) to decide which dcfs
+# failures are dcfs-specific, so a kernel/ext4 version drift here can never
+# go stale enough to hide a real dcfs regression.
+#
+# One "<relative .t path>:<TAP test number within that file>" per line,
+# sorted; blank lines and "#"-comment lines are ignored.
+#
+# Populated by the first real run under QEMU; see docs/conformance.md.

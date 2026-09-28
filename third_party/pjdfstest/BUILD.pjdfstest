@@ -1,0 +1,94 @@
+# BUILD file for @pjdfstest (see MODULE.bazel's http_archive and
+# //docs:conformance.md). pjdfstest is normally autoconf-configured
+# (configure.ac generates config.h from AC_CHECK_FUNC/AC_CHECK_MEMBERS
+# probes); we don't run autoconf, so this genrule writes the equivalent
+# config.h by hand for a stock Linux/glibc host -- the only target this
+# project ever builds for. Values below were derived by reading
+# configure.ac and pjdfstest.c directly (see step 4.5's report), not by
+# actually probing a system:
+#
+#   - every *at() function pjdfstest optionally uses (openat, unlinkat,
+#     mkdirat, linkat, symlinkat, renameat, mkfifoat, mknodat, fchmodat,
+#     fchownat, fstatat) is POSIX.1-2008 and present in glibc.
+#   - posix_fallocate(3) and utimensat(2) are both present in glibc.
+#   - <sys/sysmacros.h> (not the BSD <sys/mkdev.h>) is glibc's home for
+#     major()/minor().
+#   - struct stat has POSIX st_atim/st_ctim/st_mtim (not the BSD
+#     *_timespec / st_birthtim* names) on Linux.
+#   - BSD-only facilities pjdfstest also knows about --  lchmod(2),
+#     chflags(2) and friends, bindat/connectat, lpathconf, NFSv4 ACLs --
+#     have no Linux equivalent and are deliberately left undefined; every
+#     .t file that needs one of these calls tests/misc.sh's require(),
+#     which quick-exits with a trivial single-check pass on any OS other
+#     than the one it's gated to (see misc.sh's supported()), so leaving
+#     them undefined here does not lose any real Linux/dcfs coverage.
+#
+# See 0001-linux-portability.patch (applied by the http_archive) for the
+# two shell-level portability fixes that config.h can't cover: tests/conf's
+# fs= detection (hard-coded to "EXT4" so a run against the dcfs mount and a
+# run against the raw ext4 backing store make identical
+# supported()/todo() decisions -- dcfs over ext4 should behave like ext4,
+# not like a filesystem literally named "FUSE.DCFS") and tests/misc.sh's
+# namegen()/namegen_len(), which upstream pipes through `openssl md5`
+# (not present in this project's busybox-only guest image) rather than
+# busybox's own `md5sum` applet.
+
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+genrule(
+    name = "config_h",
+    outs = ["config.h"],
+    cmd = """cat > $@ <<'EOF'
+#ifndef PJDFSTEST_CONFIG_H
+#define PJDFSTEST_CONFIG_H
+#define HAVE_FACCESSAT 1
+#define HAVE_FCHMODAT 1
+#define HAVE_FCHOWNAT 1
+#define HAVE_FSTATAT 1
+#define HAVE_LINKAT 1
+#define HAVE_MKDIRAT 1
+#define HAVE_MKFIFOAT 1
+#define HAVE_MKNODAT 1
+#define HAVE_OPENAT 1
+#define HAVE_READLINKAT 1
+#define HAVE_RENAMEAT 1
+#define HAVE_SYMLINKAT 1
+#define HAVE_UNLINKAT 1
+#define HAVE_POSIX_FALLOCATE 1
+#define HAVE_UTIMENSAT 1
+#define HAVE_SYS_SYSMACROS_H 1
+#define HAVE_STRUCT_STAT_ST_ATIM 1
+#define HAVE_STRUCT_STAT_ST_CTIM 1
+#define HAVE_STRUCT_STAT_ST_MTIM 1
+#endif
+EOF
+""",
+)
+
+# fully_static_link (like //dcfs:main_static and //tools:testutil): the
+# QEMU initramfs has no dynamic loader or shared libc.
+cc_binary(
+    name = "pjdfstest",
+    srcs = [
+        "pjdfstest.c",
+        ":config_h",
+    ],
+    copts = [
+        "-D_GNU_SOURCE",
+        # Third-party upstream code: don't hold it to this project's
+        # -Werror (already scoped off for external/ by the top-level
+        # .bazelrc's per_file_copt, but -w also silences the warnings
+        # outright so a build log isn't full of noise from code we don't
+        # maintain).
+        "-w",
+    ],
+    features = ["fully_static_link"],
+    linkstatic = True,
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "tests",
+    srcs = glob(["tests/**"]),
+    visibility = ["//visibility:public"],
+)

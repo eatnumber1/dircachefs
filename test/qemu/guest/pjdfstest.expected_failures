@@ -1,0 +1,13 @@
+# dcfs-specific pjdfstest failures (step 4.5): checks that fail against the
+# dcfs mount but pass when the identical check is run directly against the
+# backing ext4 filesystem (see guest/pjdfstest.sh, which computes this set
+# fresh on every run and diffs it against this file). One
+# "<relative .t path>:<TAP test number within that file>" per line, sorted;
+# blank lines and "#"-comment lines are ignored.
+#
+# guest/pjdfstest.sh FAILS if any freshly observed dcfs-specific failure is
+# NOT listed here (a regression), and prints an "info:" line for any entry
+# below that no longer fails (so this file can be tightened). See
+# docs/conformance.md for the triage behind each group below.
+#
+# Populated by the first real run under QEMU; see docs/conformance.md.

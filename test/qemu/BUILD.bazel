@@ -26,14 +26,20 @@ config_setting(
 
 # Guest initramfs shared by every qemu_test in this package: busybox,
 # dcfs (statically linked, see //dcfs:main_static), fhtest, testutil,
-# guest/init, and every guest/*.sh test script (installed as
-# /tests/<basename>; see guest/init and scripts/mkinitramfs.sh).
+# guest/init, every guest/*.sh test script (installed as /tests/<basename>;
+# see guest/init and scripts/mkinitramfs.sh), and (step 4.5) the pjdfstest
+# binary plus its tests/ tree, installed under /pjdfstest/ (see
+# //third_party/pjdfstest:BUILD.pjdfstest and guest/pjdfstest.sh).
 genrule(
     name = "initramfs",
     srcs = [
         "//dcfs:main_static",
         "//tools:fhtest",
         "//tools:testutil",
+        "@pjdfstest//:pjdfstest",
+        "@pjdfstest//:tests",
+        "guest/pjdfstest.expected_failures",
+        "guest/pjdfstest.ext4_failures",
         "@kernel_image//:busybox",
         "guest/init",
     ] + glob(["guest/*.sh"]),
@@ -135,4 +141,19 @@ qemu_test(
     ],
     guest_script = "guest/nfs.sh",
     rootfs = "@kernel_image//:rootfs_debian.ext4",
+)
+
+# pjdfstest_test (step 4.5): POSIX conformance, ~8800 checks
+# (github.com/pjd/pjdfstest) run twice -- through the dcfs mount and
+# directly against the backing ext4 filesystem -- and diffed; see
+# guest/pjdfstest.sh and docs/conformance.md. Two ~8800-check suites
+# serially, each check a full FUSE round trip, comfortably exceeds
+# qemu_test's default size/timeout (large/long, 900s), hence the
+# larger explicit size/timeout below.
+qemu_test(
+    name = "pjdfstest_test",
+    disks = [("vdb", "ext4", "512M")],
+    guest_script = "guest/pjdfstest.sh",
+    size = "enormous",
+    timeout = "eternal",
 )

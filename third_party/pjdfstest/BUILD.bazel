@@ -1,0 +1,4 @@
+exports_files([
+    "BUILD.pjdfstest",
+    "0001-linux-portability.patch",
+])

@@ -1,0 +1,33 @@
+diff -ru orig/tests/conf patched/tests/conf
+--- orig/tests/conf	2026-09-27 18:19:48.422835439 -0700
++++ patched/tests/conf	2026-09-27 18:19:48.451835795 -0700
+@@ -43,7 +43,7 @@
+ 	;;
+ Linux)
+ 	GREP=grep
+-	fs=`df -PT . | tail -1 | awk '{print toupper($2)}'`
++	fs="EXT4"
+ 	;;
+ *)
+ 	unsupported_os
+diff -ru orig/tests/misc.sh patched/tests/misc.sh
+--- orig/tests/misc.sh	2026-09-27 18:19:48.422835439 -0700
++++ patched/tests/misc.sh	2026-09-27 18:19:48.457835868 -0700
+@@ -112,7 +112,7 @@
+ 
+ namegen()
+ {
+-	echo "pjdfstest_`dd if=/dev/urandom bs=1k count=1 2>/dev/null | openssl md5 | awk '{print $NF}'`"
++	echo "pjdfstest_`dd if=/dev/urandom bs=1k count=1 2>/dev/null | md5sum | awk '{print $1}'`"
+ }
+ 
+ namegen_len()
+@@ -121,7 +121,7 @@
+ 
+ 	name=""
+ 	while :; do
+-		namepart="`dd if=/dev/urandom bs=64 count=1 2>/dev/null | openssl md5 | awk '{print $NF}'`"
++		namepart="`dd if=/dev/urandom bs=64 count=1 2>/dev/null | md5sum | awk '{print $1}'`"
+ 		name="${name}${namepart}"
+ 		curlen=`printf "%s" "${name}" | wc -c`
+ 		[ ${curlen} -lt ${len} ] || break

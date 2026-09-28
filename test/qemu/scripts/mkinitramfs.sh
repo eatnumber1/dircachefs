@@ -10,9 +10,12 @@
 #       <testutil-binary> <init> [src...]
 #       e2e initramfs (test/qemu/BUILD.bazel's :initramfs): busybox, dcfs,
 #       fhtest, testutil, guest/init, and every guest/*.sh test script
-#       (installed as /tests/<basename>; every [src] that isn't a .sh file
-#       is ignored -- the genrule passes $(SRCS), which includes the five
-#       named files above again).
+#       (installed as /tests/<basename>); step 4.5 additionally recognizes
+#       any [src] path shaped like the pjdfstest cc_binary or a file from
+#       its ":tests" filegroup (see the case statement below) and installs
+#       those under /pjdfstest/; every other [src] is ignored -- the
+#       genrule passes $(SRCS), which includes the named files above
+#       again.
 #
 #   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <test-binary> \
 #       <disk0-device-or-'-'> <args> [name:path...]
@@ -113,7 +116,8 @@ if [ "$MODE" = "unit" ]; then
 	chmod +x "$ROOT/init" "$ROOT/bin/"*
 else
 	mkdir -p "$ROOT/bin" "$ROOT/tests" "$ROOT/proc" "$ROOT/sys" "$ROOT/dev" \
-		"$ROOT/tmp" "$ROOT/src" "$ROOT/cache" "$ROOT/mnt"
+		"$ROOT/tmp" "$ROOT/src" "$ROOT/cache" "$ROOT/mnt" \
+		"$ROOT/pjdfstest/tests"
 
 	cp "$BUSYBOX" "$ROOT/bin/busybox"
 	cp "$DCFS" "$ROOT/bin/dcfs"
@@ -125,8 +129,38 @@ else
 	copy_deps "$ROOT/bin/fhtest"
 	copy_deps "$ROOT/bin/testutil"
 
+	# step 4.5: pjdfstest, matched by path shape rather than a dedicated
+	# argument so this stays additive -- $(SRCS) in the :initramfs genrule
+	# just needs "@pjdfstest//:pjdfstest" and "@pjdfstest//:tests" added to
+	# srcs (see test/qemu/BUILD.bazel) and every existing caller/argument
+	# is untouched. The pjdfstest binary's source path ends in
+	# ".../pjdfstest" (its own basename); every file from the ":tests"
+	# filegroup has "/tests/" somewhere in its path (pjdfstest's own
+	# tests/ directory) -- neither pattern collides with any other src
+	# this genrule passes (busybox/dcfs/fhtest/testutil/init/guest/*.sh
+	# all live under this repo's singular "test/qemu" directory).
+	# */tests/* (pjdfstest's own tests/ tree, which includes misc.sh) is
+	# checked before the generic *.sh guest-test-script pattern below, since
+	# tests/misc.sh would otherwise match *.sh first and land in the wrong
+	# place (/tests/misc.sh instead of /pjdfstest/tests/misc.sh).
+	# pjdfstest.expected_failures / pjdfstest.ext4_failures (the checked-in
+	# failure baselines guest/pjdfstest.sh reads) are also matched by path
+	# shape here, ahead of the generic *.sh pattern for the same reason.
 	for f in "$@"; do
 		case "$f" in
+		*/tests/*)
+			rel=${f#*/tests/}
+			dest="$ROOT/pjdfstest/tests/$rel"
+			mkdir -p "$(dirname "$dest")"
+			cp "$f" "$dest"
+			;;
+		*/pjdfstest) cp "$f" "$ROOT/pjdfstest/pjdfstest" ;;
+		*/pjdfstest.expected_failures)
+			cp "$f" "$ROOT/pjdfstest/pjdfstest.expected_failures"
+			;;
+		*/pjdfstest.ext4_failures)
+			cp "$f" "$ROOT/pjdfstest/pjdfstest.ext4_failures"
+			;;
 		*.sh) cp "$f" "$ROOT/tests/$(basename "$f")" ;;
 		esac
 	done
@@ -135,6 +169,7 @@ else
 	if [ -n "$(find "$ROOT/tests" -mindepth 1 -print -quit)" ]; then
 		chmod +x "$ROOT/tests/"*
 	fi
+	[ -f "$ROOT/pjdfstest/pjdfstest" ] && chmod +x "$ROOT/pjdfstest/pjdfstest"
 fi
 
 (cd "$ROOT" && find . | cpio -o -H newc --quiet | gzip -1) >"$OUT_ABS"
