@@ -265,6 +265,7 @@ bazel test //test/qemu:passthrough_test
 bazel test //test/qemu:lifecycle_test
 bazel test //test/qemu:handles_test
 bazel test //test/qemu:setattr_test
+bazel test //test/qemu:create_test
 ```
 
 - `boot_test` (`guest/boot.sh`): dcfs and fhtest are present and runnable,
@@ -320,6 +321,19 @@ bazel test //test/qemu:setattr_test
   with EROFS until step 4.4, so it would never reach `Setattr` at all) and
   `fchmodat(2)` with `AT_SYMLINK_NOFOLLOW` (busybox's `chmod` has no
   `-h`/`--no-dereference`, so it can never target a symlink itself).
+- `create_test` (`guest/create.sh`): step 4.2's create-family write-through
+  ops -- mkdir (plain, nested, EEXIST, ENOENT on a missing parent), create
+  via a shell redirect (content, size immediately after close, and
+  O_EXCL/noclobber -> EEXIST without touching the existing file), mknod (a
+  FIFO), symlink (resolving and dangling), link (nlink/inode agreement
+  between the two names and both sides, and EXDEV across the vdb/vdc
+  boundary), and a create inside the vdc submount -- each checked against
+  both `/src` and `/mnt`; a normalized `find`+`stat` listing of the whole
+  tree agreeing between the two sides; and (checked via
+  `/sys/block/<dev>/stat`, as in `readonly_test`) that a full metadata pass
+  over everything just created causes *zero* reads from either backing
+  block device, including after killing and restarting the daemon against
+  the same cache database.
 
 The serial console log lands at
 `bazel-testlogs/test/qemu/boot_test/test.outputs/serial.log` (Bazel's

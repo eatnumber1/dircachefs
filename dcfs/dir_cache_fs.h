@@ -8,9 +8,11 @@
 #include <sys/types.h>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "dcfs/backing.h"
 #include "dcfs/context.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
@@ -162,7 +164,23 @@ class DirCacheFS {
   // conversion.
   absl::StatusOr<fuse_entry_param> EntryFor(InodeId id);
 
-  // An open file handle: the fd Open() reopened `ino` with, and the
+  // Shared phase-1/2/3 wiring for Create/Mkdir/Mknod/Symlink (see
+  // dir_cache_fs.cc's "write-through op" rule for what those phases are):
+  // checks the parent row exists (NotFound -> ESTALE, the same pattern
+  // EntryFor uses), runs cache::MarkUnknown(parent, {name}) (phase 1), opens
+  // the parent directory once and hands its fd to `do_create` -- the
+  // op-specific backing syscall (mkdirat/mknodat/symlinkat/openat), phase 2
+  // -- and, if that succeeds, probes and records the newly created child in
+  // one transaction via backing::RecordNewChild (phase 3). On any failure
+  // the (parent, name) state is left unknown, to repopulate on the next
+  // lookup, and the failing status (with its errno payload intact) is
+  // returned unchanged. Link does not go through this: it links an
+  // *existing* inode, so there is no new child to probe.
+  absl::StatusOr<backing::NewChild> CreateChild(
+      InodeId parent, std::string_view name,
+      absl::FunctionRef<absl::Status(int parent_fd)> do_create);
+
+  // An open file handle: the fd Open()/Create() opened `ino` with, and the
   // passthrough backing id the kernel assigned it (0 if the kernel did
   // not grant FUSE_CAP_PASSTHROUGH, or fuse_passthrough_open() otherwise
   // failed for this open -- Read() then serves the fallback path itself).
@@ -170,6 +188,12 @@ class DirCacheFS {
     InodeId ino;
     FileDescriptor fd;
     int backing_id = 0;
+    // Whether this open can write to `fd` (always false for Open(), which
+    // refuses anything but a read-only open until step 4.4; Create() sets
+    // it from the kernel's requested flags). Release() uses this to decide
+    // whether the cached attributes need a post-write refresh before the fd
+    // closes.
+    bool writable = false;
   };
 
   Context &ctx_;

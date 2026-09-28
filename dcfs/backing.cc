@@ -159,6 +159,29 @@ struct FoundFilesystem {
   std::string boundary_name;
 };
 
+// Reads everything the cache stores about the object `fd` names -- already
+// open, and already statx'd into `stx` -- beyond what the caller already
+// knows: its file handle (identified by `device`, which for a mount-boundary
+// child is the *child's* own device, not the containing directory's; the
+// caller resolves that before calling this), inode generation, symlink
+// target if it is one, and its xattrs. Shared by ProbeChild (an existing
+// directory entry, which might also be a mount boundary) and RecordNewChild
+// (a freshly created object, which cannot be one).
+absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
+                                        const DeviceId &device,
+                                        const struct statx &stx) {
+  ChildRecord record;
+  record.name = std::string(name);
+  record.stx = stx;
+  ABSL_ASSIGN_OR_RETURN(record.handle, FileHandle::FromFd(fd, device));
+  ABSL_ASSIGN_OR_RETURN(record.backing_gen, ReadGeneration(fd, stx.stx_mode));
+  if (S_ISLNK(stx.stx_mode)) {
+    ABSL_ASSIGN_OR_RETURN(record.symlink_target, syscalls::readlinkat(fd, ""));
+  }
+  ABSL_ASSIGN_OR_RETURN(record.xattrs, XattrsOf(fd));
+  return record;
+}
+
 // Reads everything the cache stores about child `name` of `dir_fd`.
 // nullopt if the child vanished before it could be opened. A child that is
 // the root of another filesystem gets that filesystem's mount fd
@@ -178,14 +201,12 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
     }
     return child.status();
   }
-  ChildRecord record;
-  record.name = std::string(name);
-  ABSL_ASSIGN_OR_RETURN(record.stx,
+  ABSL_ASSIGN_OR_RETURN(struct statx stx,
                         syscalls::statx(**child, "", AT_EMPTY_PATH,
                                         kAttrMask | kMountIdMask));
 
   DeviceId device = dir_device;
-  if (IsBoundary(dir_stx, record.stx)) {
+  if (IsBoundary(dir_stx, stx)) {
     ABSL_ASSIGN_OR_RETURN(device, GetDeviceId(**child));
     if (absl::IsNotFound(ctx.mounts.Get(device).status())) {
       // The mount fd must be a real (non-O_PATH) descriptor because
@@ -201,18 +222,10 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
     ABSL_ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(**child));
     filesystems.push_back({.device = device,
                            .fstype = static_cast<int64_t>(sfs.f_type),
-                           .boundary_name = record.name});
+                           .boundary_name = std::string(name)});
   }
 
-  ABSL_ASSIGN_OR_RETURN(record.handle, FileHandle::FromFd(**child, device));
-  ABSL_ASSIGN_OR_RETURN(record.backing_gen,
-                        ReadGeneration(**child, record.stx.stx_mode));
-  if (S_ISLNK(record.stx.stx_mode)) {
-    ABSL_ASSIGN_OR_RETURN(record.symlink_target,
-                          syscalls::readlinkat(**child, ""));
-  }
-  ABSL_ASSIGN_OR_RETURN(record.xattrs, XattrsOf(**child));
-  return record;
+  return ProbeObject(**child, name, device, stx);
 }
 
 // Why filesystem `fs` should be forgotten, or nullopt if it is still
@@ -390,6 +403,12 @@ absl::Status RefreshAttrs(Context &ctx, InodeId id) {
   return cache::UpdateAttr(ctx, id, stx);
 }
 
+absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd) {
+  ABSL_ASSIGN_OR_RETURN(
+      struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
+  return cache::UpdateAttr(ctx, id, stx);
+}
+
 absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
   std::string buf(size, '\0');
   size_t total = 0;
@@ -501,6 +520,91 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   // The listing is complete and does not have `name`: remember that.
   ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
   return cache::LookupResult{.kind = cache::LookupResult::kNegative, .id = 0};
+}
+
+absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
+                                        int parent_fd, std::string_view name) {
+  // Phase A: I/O -- probe the object just created, exactly like ProbeChild
+  // does for an existing directory entry, minus the mount-boundary check
+  // (nothing can already be mounted on an object that did not exist a
+  // moment ago).
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor child_fd,
+                        syscalls::openat(parent_fd, name, O_PATH | O_NOFOLLOW));
+  ABSL_ASSIGN_OR_RETURN(
+      struct statx stx,
+      syscalls::statx(*child_fd, "", AT_EMPTY_PATH, kAttrMask | kMountIdMask));
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr, cache::GetAttr(ctx, parent));
+  ABSL_ASSIGN_OR_RETURN(
+      ChildRecord record, ProbeObject(*child_fd, name, parent_attr.device, stx));
+
+  // Phase B: one transaction, no syscalls.
+  NewChild result;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(
+        cache::UpsertResult row,
+        cache::UpsertInode(ctx, record.handle, record.stx, record.backing_gen));
+    if (S_ISDIR(record.stx.stx_mode)) {
+      ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
+      // Unlike EnsureDirectory's usual caller (PopulateDirectory,
+      // discovering a pre-existing, not-yet-listed subdirectory), a
+      // directory RecordNewChild is recording was *just* created by this
+      // same op: nothing has had a chance to put anything in it yet, so it
+      // is already known to have zero children -- no separate populate is
+      // needed before a listing of it can be served from the cache.
+      ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx, row.id, true));
+    }
+    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, parent, name, row.id));
+    if (record.symlink_target.has_value()) {
+      ABSL_RETURN_IF_ERROR(
+          cache::SetSymlink(ctx, row.id, *record.symlink_target));
+    }
+    ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
+    result = NewChild{.id = row.id, .fuse_gen = row.fuse_gen, .stx = record.stx};
+    return absl::OkStatus();
+  }));
+  return result;
+}
+
+absl::Status MkdirAt(Context &ctx, int parent_fd, std::string_view name,
+                     mode_t mode) {
+  return syscalls::mkdirat(parent_fd, name, mode);
+}
+
+absl::Status MknodAt(Context &ctx, int parent_fd, std::string_view name,
+                     mode_t mode, dev_t rdev) {
+  return syscalls::mknodat(parent_fd, name, mode, rdev);
+}
+
+absl::Status SymlinkAt(Context &ctx, int parent_fd, std::string_view name,
+                       std::string_view target) {
+  return syscalls::symlinkat(target, parent_fd, name);
+}
+
+absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, int parent_fd,
+                                        std::string_view name, int flags,
+                                        mode_t mode) {
+  return syscalls::openat(parent_fd, name, flags | O_CREAT, mode);
+}
+
+absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
+                    std::string_view newname) {
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor src_fd,
+                        OpenNode(ctx, src, O_PATH | O_NOFOLLOW));
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor newparent_fd,
+      OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
+  return syscalls::linkat(*src_fd, "", *newparent_fd, newname, AT_EMPTY_PATH);
+}
+
+absl::StatusOr<struct statx> RecordNewLink(Context &ctx, InodeId src,
+                                           InodeId newparent,
+                                           std::string_view newname) {
+  ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, src));
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, src));
+    return cache::UpdateAttr(ctx, src, stx);
+  }));
+  return stx;
 }
 
 absl::Status StartupPurge(Context &ctx) {

@@ -34,6 +34,16 @@ namespace dcfs::backing {
 
 using cache::InodeId;
 
+// What RecordNewChild learns about (and records for) a freshly created
+// child: its nodeid, the fuse_gen of the row it now has (0 if it already
+// existed -- see UpsertInode -- which a truly fresh child never does, but
+// RecordNewChild does not assume that), and its fresh attributes.
+struct NewChild {
+  InodeId id = 0;
+  uint32_t fuse_gen = 0;
+  struct statx stx {};
+};
+
 // Probes the source root `source_fd` (any fd on the source directory,
 // including O_PATH) for the identity Migrate() seeds a fresh cache with.
 absl::StatusOr<RootIdentity> ProbeRoot(Context &ctx, int source_fd);
@@ -69,6 +79,13 @@ absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id);
 // Refreshes `id`'s cached attributes from the backing filesystem (StatNode
 // followed by cache::UpdateAttr). Called when CachedAttr.valid is false.
 absl::Status RefreshAttrs(Context &ctx, InodeId id);
+
+// As RefreshAttrs, but statx's an fd the caller already has open on `id`
+// (a real, non-O_PATH fd is not required -- AT_EMPTY_PATH works on O_PATH
+// too) instead of reopening it via OpenNode. Used by DirCacheFS::Release
+// when the open being released was writable, to pick up the passthrough
+// writes' effect on size/mtime/etc. before the fd closes.
+absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd);
 
 // Reads up to `size` bytes at `offset` from `fd` (a real, non-O_PATH fd
 // already open on the node -- see DirCacheFS::Open's OpenNode call),
@@ -110,6 +127,66 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir);
 absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                                                      InodeId parent,
                                                      std::string_view name);
+
+// --- Create-family ops (step 4.2) ------------------------------------------
+//
+// Each pairs with a DirCacheFS write-through op: the op's phase 2 (the
+// backing syscall(s), below) followed by its phase 3 (RecordNewChild /
+// RecordNewLink). Every one of these does its own I/O directly -- callers
+// never issue a syscall inside a cache transaction (see backing.cc's file
+// comment).
+
+// Probes the child `parent_fd`/`name` names -- which the caller has just
+// created via MkdirAt/MknodAt/SymlinkAt/CreateAt -- exactly like ProbeChild
+// probes an existing directory entry (open O_PATH|O_NOFOLLOW, statx
+// including mount id, handle, inode generation, symlink target, xattrs),
+// skipping only the mount-boundary check (a freshly created object cannot
+// already have something mounted on it), and then, in ONE transaction:
+// UpsertInode, EnsureDirectory (if a directory), LinkDentry, SetSymlink (if
+// a symlink), and ReplaceXattrs. `parent_fd` must already be open on
+// `parent` (O_RDONLY|O_DIRECTORY is enough); reusing it here, rather than
+// reopening `parent`, is why every MkdirAt/MknodAt/SymlinkAt/CreateAt below
+// takes a `parent_fd` instead of resolving `parent` itself.
+absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
+                                        int parent_fd, std::string_view name);
+
+// mkdirat(2)/mknodat(2)/symlinkat(2) of `name` inside the already-open
+// `parent_fd`. The kernel applies umask to `mode` before it reaches us, so
+// it is passed straight through.
+absl::Status MkdirAt(Context &ctx, int parent_fd, std::string_view name,
+                     mode_t mode);
+absl::Status MknodAt(Context &ctx, int parent_fd, std::string_view name,
+                     mode_t mode, dev_t rdev);
+absl::Status SymlinkAt(Context &ctx, int parent_fd, std::string_view name,
+                       std::string_view target);
+
+// openat(2) of `name` inside the already-open `parent_fd`, with O_CREAT
+// added to whatever the kernel sent in `flags` (which already carries
+// O_EXCL when the caller asked for it); the returned fd is the new file,
+// open exactly as the caller requested, ready for DirCacheFS::Create to
+// hand to PassthroughOpen.
+absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, int parent_fd,
+                                        std::string_view name, int flags,
+                                        mode_t mode);
+
+// linkat(2) of `src` as `newname` inside `newparent`: opens `src` O_PATH and
+// `newparent` real/O_RDONLY|O_DIRECTORY internally (both via OpenNode) and
+// calls linkat(src_fd, "", newparent_fd, newname, AT_EMPTY_PATH) -- dcfs
+// runs as root (CAP_DAC_READ_SEARCH), which is what permits the
+// AT_EMPTY_PATH/oldpath="" form on an O_PATH fd. Whatever linkat(2) itself
+// returns is returned unchanged, including EXDEV for a cross-filesystem
+// link.
+absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
+                    std::string_view newname);
+
+// After LinkAt(src, newparent, newname) has succeeded: re-statx's `src`
+// (I/O, no transaction -- its nlink just changed) and then, in one
+// transaction, LinkDentry(newparent, newname, src) followed by
+// UpdateAttr(src, <the fresh statx>), so the new dentry and the bumped
+// nlink land together. Returns the fresh attributes.
+absl::StatusOr<struct statx> RecordNewLink(Context &ctx, InodeId src,
+                                           InodeId newparent,
+                                           std::string_view newname);
 
 // Run at startup, after InitRoot: forgets every non-source filesystem that
 // is no longer mounted where it was found (or whose mount point is gone),

@@ -111,6 +111,47 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
   return entry;
 }
 
+absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
+    InodeId parent, std::string_view name,
+    absl::FunctionRef<absl::Status(int parent_fd)> do_create) {
+  // Missing row -> ESTALE; see RequireAttr().
+  ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
+
+  // Remembered so that, on success, a parent whose listing was already
+  // complete can be restored to complete afterwards: this op only ever
+  // changes the single dentry `name`, so nothing else an already-complete
+  // listing knew about becomes stale.
+  ABSL_ASSIGN_OR_RETURN(bool parent_was_complete, cache::IsDirComplete(ctx_, parent));
+
+  // Phase 1: mark (parent, name) unknown before touching the backing
+  // filesystem, so a crash between here and phase 3 leaves "unknown"
+  // (repopulated on the next lookup) rather than stale. This also clears
+  // children_complete on `parent` -- restored below on success.
+  std::vector<std::string> names = {std::string(name)};
+  ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, parent, names));
+
+  // Phase 2: the op-specific backing syscall, against a parent fd opened
+  // once and shared with phase 3 below.
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor parent_fd,
+      backing::OpenNode(ctx_, parent, O_RDONLY | O_DIRECTORY));
+  ABSL_RETURN_IF_ERROR(do_create(*parent_fd));
+
+  // Phase 3: probe and record the new child.
+  ABSL_ASSIGN_OR_RETURN(
+      backing::NewChild child,
+      backing::RecordNewChild(ctx_, parent, *parent_fd, name));
+  if (parent_was_complete) {
+    ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, parent, true));
+  }
+  // Creating `name` changed `parent` itself too (mtime/ctime always; nlink
+  // as well, if `name` is a new subdirectory -- its own ".." bumps
+  // parent's link count), so its cached attributes are now stale. `fd` is
+  // already open on it, so this is a free-standing statx, not a reopen.
+  ABSL_RETURN_IF_ERROR(backing::RefreshAttrsFromFd(ctx_, parent, *parent_fd));
+  return child;
+}
+
 absl::Status DirCacheFS::Getattr(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info *fi) {
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(static_cast<InodeId>(ino)));
@@ -218,15 +259,33 @@ absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
 }
 
 absl::Status DirCacheFS::Mknod(
-    FuseRequest &req, fuse_ino_t parent, std::string_view name, mode_t mode,
-    dev_t rdev) {
-  return req.ReplyErrno(ENOSYS);
+    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
+    mode_t mode, dev_t rdev) {
+  InodeId parent = static_cast<InodeId>(parent_ino);
+  ABSL_ASSIGN_OR_RETURN(
+      backing::NewChild child,
+      CreateChild(parent, name, [&](int parent_fd) {
+        return backing::MknodAt(ctx_, parent_fd, name, mode, rdev);
+      }));
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
+  return req.ReplyEntry(
+      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      opts_.entry_timeout);
 }
 
 absl::Status DirCacheFS::Mkdir(
-    FuseRequest &req, fuse_ino_t parent, std::string_view name,
+    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
     mode_t mode) {
-  return req.ReplyErrno(ENOSYS);
+  InodeId parent = static_cast<InodeId>(parent_ino);
+  ABSL_ASSIGN_OR_RETURN(
+      backing::NewChild child,
+      CreateChild(parent, name, [&](int parent_fd) {
+        return backing::MkdirAt(ctx_, parent_fd, name, mode);
+      }));
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
+  return req.ReplyEntry(
+      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      opts_.entry_timeout);
 }
 
 absl::Status DirCacheFS::Unlink(
@@ -240,9 +299,18 @@ absl::Status DirCacheFS::Rmdir(
 }
 
 absl::Status DirCacheFS::Symlink(
-    FuseRequest &req, std::string_view link, fuse_ino_t parent,
+    FuseRequest &req, std::string_view link, fuse_ino_t parent_ino,
     std::string_view name) {
-  return req.ReplyErrno(ENOSYS);
+  InodeId parent = static_cast<InodeId>(parent_ino);
+  ABSL_ASSIGN_OR_RETURN(
+      backing::NewChild child,
+      CreateChild(parent, name, [&](int parent_fd) {
+        return backing::SymlinkAt(ctx_, parent_fd, name, link);
+      }));
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
+  return req.ReplyEntry(
+      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      opts_.entry_timeout);
 }
 
 absl::Status DirCacheFS::Rename(
@@ -252,9 +320,44 @@ absl::Status DirCacheFS::Rename(
 }
 
 absl::Status DirCacheFS::Link(
-    FuseRequest &req, fuse_ino_t ino, fuse_ino_t newparent,
+    FuseRequest &req, fuse_ino_t ino, fuse_ino_t newparent_ino,
     std::string_view newname) {
-  return req.ReplyErrno(ENOSYS);
+  InodeId src = static_cast<InodeId>(ino);
+  InodeId newparent = static_cast<InodeId>(newparent_ino);
+
+  // Missing row -> ESTALE for both ends; see RequireAttr().
+  ABSL_RETURN_IF_ERROR(RequireAttr(src).status());
+  ABSL_RETURN_IF_ERROR(RequireAttr(newparent).status());
+
+  // See CreateChild for why this is captured before phase 1 clears it.
+  ABSL_ASSIGN_OR_RETURN(
+      bool newparent_was_complete, cache::IsDirComplete(ctx_, newparent));
+
+  // Phase 1: mark (newparent, newname) unknown.
+  std::vector<std::string> names = {std::string(newname)};
+  ABSL_RETURN_IF_ERROR(cache::MarkUnknown(ctx_, newparent, names));
+
+  // Phase 2: the backing linkat. On failure (EEXIST, EXDEV, ...) the state
+  // above stays unknown and the error (errno payload intact) is returned as
+  // is.
+  ABSL_RETURN_IF_ERROR(backing::LinkAt(ctx_, src, newparent, newname));
+
+  // Phase 3: record the new dentry and the bumped nlink together.
+  ABSL_RETURN_IF_ERROR(
+      backing::RecordNewLink(ctx_, src, newparent, newname).status());
+  if (newparent_was_complete) {
+    ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, newparent, true));
+  }
+  // Adding a dentry changed newparent's own mtime/ctime (and, on some
+  // filesystems, its on-disk size); no fd on it is already open here (only
+  // LinkAt, inside backing.cc, opened one, and briefly), so this is a full
+  // reopen+statx rather than the fd-based refresh CreateChild uses.
+  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, newparent));
+
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(src));
+  return req.ReplyEntry(
+      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      opts_.entry_timeout);
 }
 
 absl::Status DirCacheFS::Open(
@@ -343,6 +446,15 @@ absl::Status DirCacheFS::Release(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   auto it = open_files_.find(fi.fh);
   RET_CHECK(it != open_files_.end()) << "Release on unknown handle " << fi.fh;
+  if (it->second.writable) {
+    // The passthrough writes this open may have made are invisible to the
+    // cache until now; pick up their effect on size/mtime/ctime/etc. before
+    // the fd (and so the kernel's own passthrough reference) goes away.
+    // Step 4.4 generalises this to Flush/Fsync; for now Release is the only
+    // point a writable open ever closes.
+    ABSL_RETURN_IF_ERROR(
+        backing::RefreshAttrsFromFd(ctx_, it->second.ino, *it->second.fd));
+  }
   if (it->second.backing_id > 0) {
     ABSL_RETURN_IF_ERROR(req.PassthroughClose(it->second.backing_id));
   }
@@ -593,9 +705,40 @@ absl::Status DirCacheFS::Access(FuseRequest &req, fuse_ino_t ino, int mask) {
 }
 
 absl::Status DirCacheFS::Create(
-    FuseRequest &req, fuse_ino_t parent, std::string_view name, mode_t mode,
-    fuse_file_info &fi) {
-  return req.ReplyErrno(ENOSYS);
+    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
+    mode_t mode, fuse_file_info &fi) {
+  InodeId parent = static_cast<InodeId>(parent_ino);
+
+  // Unlike Mkdir/Mknod/Symlink, phase 2 here also opens the new file (for
+  // whatever access the kernel asked for -- unlike Open(), a write open is
+  // legitimate: this is how e.g. `echo x > newfile` works), so `do_create`
+  // stashes the fd via the capture instead of CreateChild returning it.
+  FileDescriptor fd;
+  ABSL_ASSIGN_OR_RETURN(
+      backing::NewChild child,
+      CreateChild(parent, name, [&](int parent_fd) -> absl::Status {
+        ABSL_ASSIGN_OR_RETURN(
+            fd, backing::CreateAt(ctx_, parent_fd, name, fi.flags, mode));
+        return absl::OkStatus();
+      }));
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
+
+  // Same passthrough wiring as Open(), plus tracking whether this open can
+  // write (Release() needs to know, to refresh cached attrs before the fd
+  // closes -- see the OpenFile comment).
+  ABSL_ASSIGN_OR_RETURN(int backing_id, req.PassthroughOpen(*fd));
+  if (backing_id > 0) fi.backing_id = backing_id;
+  fi.keep_cache = 0;
+
+  uint64_t handle = next_handle_++;
+  bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
+  open_files_.emplace(
+      handle,
+      OpenFile{.ino = child.id, .fd = std::move(fd), .backing_id = backing_id,
+               .writable = writable});
+  fi.fh = handle;
+
+  return req.ReplyCreate(entry, fi);
 }
 
 absl::Status DirCacheFS::Fallocate(

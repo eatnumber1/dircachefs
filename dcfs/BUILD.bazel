@@ -308,6 +308,7 @@ cc_library(
       ":status",
       ":syscalls",
       "@absl//absl/container:flat_hash_map",
+      "@absl//absl/functional:function_ref",
       "@absl//absl/log",
       "@absl//absl/log:check",
       "@absl//absl/status",
