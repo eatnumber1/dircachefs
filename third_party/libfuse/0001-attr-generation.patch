@@ -4,7 +4,7 @@ Date: Tue, 11 Aug 2026 22:52:12 -0700
 Subject: [PATCH] Add FUSE_CAP_ATTR_GENERATION for reliable NFS export
  (protocol 7.47)
 
-Sync fuse_kernel.h with protocol 7.46: the unused dummy field of
+Sync fuse_kernel.h with protocol 7.47: the unused dummy field of
 struct fuse_attr_out becomes generation, and the FUSE_ATTR_GENERATION
 INIT flag lets a filesystem announce that it fills it in GETATTR and
 SETATTR replies. With the flag negotiated, the kernel keeps
@@ -98,7 +98,7 @@ index 94621f6..2b606e0 100644
  
  /** Minor version number of this interface */
 -#define FUSE_KERNEL_MINOR_VERSION 45
-+#define FUSE_KERNEL_MINOR_VERSION 46
++#define FUSE_KERNEL_MINOR_VERSION 47
  
  /** The node ID of the root inode */
  #define FUSE_ROOT_ID 1
