@@ -5,6 +5,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -20,12 +21,6 @@ namespace dcfs {
 
 namespace {
 
-constexpr std::string_view kKeySchemaVersion = "schema_version";
-// Schema v1 only: the FUSE generation counter, replaced in v2 by a random
-// generation per row (see cache::UpsertInode).
-constexpr std::string_view kKeyGenCounterV1 = "gen_counter";
-constexpr std::string_view kKeySourceDeviceId = "source_device_id";
-
 // Views the bytes of `s` as a blob for Statement::Bind(). Several schema
 // columns that hold raw bytes (e.g. filesystems.device_id) are declared
 // BLOB in a STRICT table, which -- unlike an ordinary table -- rejects a
@@ -36,14 +31,52 @@ std::span<const uint8_t> AsBlob(const std::string &s) {
       reinterpret_cast<const uint8_t *>(s.data()), s.size());
 }
 
-absl::StatusOr<bool> MetaTableExists(sqlite3::Connection &db) {
+absl::StatusOr<bool> TableExists(sqlite3::Connection &db,
+                                 std::string_view name) {
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       db.Prepared("SELECT 1 FROM sqlite_master "
-                   "WHERE type = 'table' AND name = 'meta'"));
+                  "WHERE type = 'table' AND name = ?"));
+  ABSL_RETURN_IF_ERROR(stmt->Bind(1, name));
   ABSL_ASSIGN_OR_RETURN(bool exists, stmt->Step());
   ABSL_RETURN_IF_ERROR(stmt->Reset());
   return exists;
+}
+
+// Runs `sql`, a SELECT of the one cache_state row, and returns read(row).
+template <typename T, typename Read>
+absl::StatusOr<T> ReadCacheState(sqlite3::Connection &db, std::string_view sql,
+                                 Read read) {
+  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(sql));
+  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  if (!has_row) {
+    ABSL_RETURN_IF_ERROR(stmt->Reset());
+    return absl::FailedPreconditionError(
+        "corrupt cache: the cache_state row is missing");
+  }
+  T value = read(*stmt);
+  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  return value;
+}
+
+// The schema version of an existing database: cache_state's, or 1 for a
+// v1 database (which kept it in its key/value `meta` table instead).
+absl::StatusOr<int> ExistingSchemaVersion(sqlite3::Connection &db) {
+  ABSL_ASSIGN_OR_RETURN(bool has_state, TableExists(db, "cache_state"));
+  if (has_state) return GetSchemaVersion(db);
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      db.Prepared("SELECT value FROM meta WHERE key = 'schema_version'"));
+  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  std::string value = has_row ? stmt->Column<std::string>(0) : "";
+  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  int version = 0;
+  if (!absl::SimpleAtoi(value, &version)) {
+    return absl::FailedPreconditionError(absl::StrCat(
+        "corrupt cache: meta.schema_version is not an integer: '", value,
+        "'"));
+  }
+  return version;
 }
 
 absl::StatusOr<bool> RootInodeExists(sqlite3::Connection &db) {
@@ -57,11 +90,15 @@ absl::StatusOr<bool> RootInodeExists(sqlite3::Connection &db) {
 absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
   ABSL_RETURN_IF_ERROR(db.ExecScript(kSchemaSql));
 
-  ABSL_RETURN_IF_ERROR(
-      SetMeta(db, kKeySchemaVersion, absl::StrCat(kSchemaVersion)));
-
   std::string device_id_bytes = root.device_id.Serialize();
-  ABSL_RETURN_IF_ERROR(SetMeta(db, kKeySourceDeviceId, device_id_bytes));
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * state_stmt,
+      db.Prepared("INSERT INTO cache_state "
+                  "(id, schema_version, source_device_id, clean_shutdown, "
+                  " boot_id) VALUES (1, ?, ?, 1, NULL)"));
+  ABSL_RETURN_IF_ERROR(state_stmt->Bind(1, kSchemaVersion));
+  ABSL_RETURN_IF_ERROR(state_stmt->Bind(2, AsBlob(device_id_bytes)));
+  ABSL_RETURN_IF_ERROR(state_stmt->ExecuteOnce());
 
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Statement * fs_stmt,
@@ -92,26 +129,42 @@ absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
   return dir_stmt->ExecuteOnce();
 }
 
-// v1 -> v2: FUSE generations become random per row (cache::UpsertInode),
-// so the v1 counter goes (existing rows keep the generations they were
-// given), and the durable dirty set appears (empty: a v1 daemon tracked
-// nothing, so there is nothing to recover from its last run).
+// v1 -> v2:
+//  - The untyped key/value `meta` table becomes the typed single-row
+//    cache_state: schema_version and source_device_id are copied over (v1
+//    stored the device id's bytes as TEXT; CAST keeps them byte for byte),
+//    clean_shutdown starts at 1 and boot_id NULL (a v1 daemon tracked
+//    neither, and nothing is dirty), and v1's gen_counter is dropped:
+//  - FUSE generations become random per row (cache::UpsertInode); existing
+//    rows keep the generations they were given.
+//  - The durable dirty set appears, empty.
 absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                        db.Prepared("DELETE FROM meta WHERE key = ?"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, kKeyGenCounterV1));
-  ABSL_RETURN_IF_ERROR(stmt->ExecuteOnce());
   // As in schema.sql.
-  ABSL_RETURN_IF_ERROR(
-      db.Exec("CREATE TABLE dirty (inode INTEGER PRIMARY KEY) STRICT"));
-  return SetMeta(db, kKeySchemaVersion, "2");
+  ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
+    CREATE TABLE cache_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      schema_version INTEGER NOT NULL,
+      source_device_id BLOB NOT NULL,
+      clean_shutdown INTEGER NOT NULL,
+      boot_id TEXT NULL
+    ) STRICT;
+    INSERT INTO cache_state
+      (id, schema_version, source_device_id, clean_shutdown, boot_id)
+      SELECT 1, 2, CAST(value AS BLOB), 1, NULL
+      FROM meta WHERE key = 'source_device_id';
+    DROP TABLE meta;
+    CREATE TABLE dirty (inode INTEGER PRIMARY KEY) STRICT;
+  )sql"));
+  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  RET_CHECK_EQ(version, 2) << "v1 meta.source_device_id is missing";
+  return absl::OkStatus();
 }
 
 // Upgrades an existing database, one version at a time, to kSchemaVersion,
 // in one transaction. A version newer than this build's is refused.
 absl::Status UpgradeSchema(sqlite3::Connection &db) {
   return db.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+    ABSL_ASSIGN_OR_RETURN(int version, ExistingSchemaVersion(db));
     if (version < 1 || version > kSchemaVersion) {
       return absl::FailedPreconditionError(absl::StrCat(
           "dcfs cache schema version mismatch: found ", version,
@@ -140,51 +193,65 @@ absl::Status ValidateExistingSchema(sqlite3::Connection &db) {
 }  // namespace
 
 absl::Status Migrate(sqlite3::Connection &db, const RootIdentity &root) {
-  ABSL_ASSIGN_OR_RETURN(bool has_meta, MetaTableExists(db));
-  if (!has_meta) {
+  ABSL_ASSIGN_OR_RETURN(bool has_state, TableExists(db, "cache_state"));
+  ABSL_ASSIGN_OR_RETURN(bool has_v1_meta, TableExists(db, "meta"));
+  if (!has_state && !has_v1_meta) {
     return db.Transaction(
         [&]() -> absl::Status { return CreateSchema(db, root); });
   }
   return ValidateExistingSchema(db);
 }
 
-absl::StatusOr<std::optional<std::string>> GetMeta(sqlite3::Connection &db,
-                                                     std::string_view key) {
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                         db.Prepared("SELECT value FROM meta WHERE key = ?"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, key));
-  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
-  std::optional<std::string> result;
-  if (has_row) result = stmt->Column<std::string>(0);
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
-  return result;
-}
-
-absl::Status SetMeta(sqlite3::Connection &db, std::string_view key,
-                      std::string_view value) {
-  ABSL_ASSIGN_OR_RETURN(
-      sqlite3::Statement * stmt,
-      db.Prepared("INSERT INTO meta (key, value) VALUES (?, ?) "
-                   "ON CONFLICT (key) DO UPDATE SET value = excluded.value"));
-  ABSL_RETURN_IF_ERROR(stmt->BindAll(key, value));
-  return stmt->ExecuteOnce();
+absl::StatusOr<int> GetSchemaVersion(sqlite3::Connection &db) {
+  return ReadCacheState<int>(
+      db, "SELECT schema_version FROM cache_state WHERE id = 1",
+      [](sqlite3::Statement &row) { return row.Column<int>(0); });
 }
 
 absl::StatusOr<DeviceId> GetSourceDeviceId(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> value,
-                         GetMeta(db, kKeySourceDeviceId));
-  RET_CHECK(value.has_value()) << "meta.source_device_id is missing";
-  return DeviceId::Parse(*value);
+  ABSL_ASSIGN_OR_RETURN(
+      std::string bytes,
+      ReadCacheState<std::string>(
+          db, "SELECT source_device_id FROM cache_state WHERE id = 1",
+          [](sqlite3::Statement &row) {
+            std::vector<uint8_t> blob = row.Column<std::vector<uint8_t>>(0);
+            return std::string(blob.begin(), blob.end());
+          }));
+  return DeviceId::Parse(bytes);
 }
 
-absl::StatusOr<int> GetSchemaVersion(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> value,
-                         GetMeta(db, kKeySchemaVersion));
-  RET_CHECK(value.has_value()) << "meta.schema_version is missing";
-  int version = 0;
-  RET_CHECK(absl::SimpleAtoi(*value, &version))
-      << "meta.schema_version is not a valid integer: " << *value;
-  return version;
+absl::StatusOr<bool> GetCleanShutdown(sqlite3::Connection &db) {
+  return ReadCacheState<bool>(
+      db, "SELECT clean_shutdown FROM cache_state WHERE id = 1",
+      [](sqlite3::Statement &row) { return row.Column<bool>(0); });
+}
+
+absl::Status SetCleanShutdown(sqlite3::Connection &db, bool clean) {
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      db.Prepared("UPDATE cache_state SET clean_shutdown = ? WHERE id = 1"));
+  ABSL_RETURN_IF_ERROR(stmt->Bind(1, clean));
+  ABSL_RETURN_IF_ERROR(stmt->ExecuteOnce());
+  RET_CHECK_EQ(db.Changes(), 1) << "the cache_state row is missing";
+  return absl::OkStatus();
+}
+
+absl::StatusOr<std::optional<std::string>> GetBootId(sqlite3::Connection &db) {
+  return ReadCacheState<std::optional<std::string>>(
+      db, "SELECT boot_id FROM cache_state WHERE id = 1",
+      [](sqlite3::Statement &row) {
+        return row.Column<std::optional<std::string>>(0);
+      });
+}
+
+absl::Status SetBootId(sqlite3::Connection &db, std::string_view boot_id) {
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      db.Prepared("UPDATE cache_state SET boot_id = ? WHERE id = 1"));
+  ABSL_RETURN_IF_ERROR(stmt->Bind(1, boot_id));
+  ABSL_RETURN_IF_ERROR(stmt->ExecuteOnce());
+  RET_CHECK_EQ(db.Changes(), 1) << "the cache_state row is missing";
+  return absl::OkStatus();
 }
 
 }  // namespace dcfs

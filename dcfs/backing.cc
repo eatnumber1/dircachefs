@@ -950,12 +950,10 @@ absl::Status SyncBacking(Context &ctx) {
 }
 
 absl::Status StartRun(Context &ctx, std::string_view boot_id) {
-  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> clean,
-                        GetMeta(ctx.db, kMetaCleanShutdown));
+  ABSL_ASSIGN_OR_RETURN(bool clean, GetCleanShutdown(ctx.db));
   ABSL_ASSIGN_OR_RETURN(std::optional<std::string> last_boot_id,
-                        GetMeta(ctx.db, kMetaBootId));
-  // A fresh cache has neither key and nothing dirty: nothing to report.
-  const bool unclean = clean.has_value() && *clean != "1";
+                        GetBootId(ctx.db));
+  const bool unclean = !clean;
   ABSL_ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
   if (unclean || recovered > 0) {
     const bool rebooted =
@@ -970,8 +968,8 @@ absl::Status StartRun(Context &ctx, std::string_view boot_id) {
   }
   return ctx.db.Transaction(
       [&]() -> absl::Status {
-        ABSL_RETURN_IF_ERROR(SetMeta(ctx.db, kMetaCleanShutdown, "0"));
-        return SetMeta(ctx.db, kMetaBootId, boot_id);
+        ABSL_RETURN_IF_ERROR(SetCleanShutdown(ctx.db, false));
+        return SetBootId(ctx.db, boot_id);
       },
       sqlite3::Durability::kSync);
 }
@@ -985,7 +983,7 @@ absl::Status FinishRun(Context &ctx) {
         "outstanding); leaving the clean-shutdown flag unset");
   }
   return ctx.db.Transaction(
-      [&] { return SetMeta(ctx.db, kMetaCleanShutdown, "1"); },
+      [&] { return SetCleanShutdown(ctx.db, true); },
       sqlite3::Durability::kSync);
 }
 

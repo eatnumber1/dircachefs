@@ -309,18 +309,18 @@ absl::Status StartupPurge(Context &ctx);
 absl::Status SyncBacking(Context &ctx);
 
 // Startup, after Migrate() and before InitRoot()/StartupPurge(): if the
-// last run did not shut down cleanly (meta.clean_shutdown is not "1"), or
+// last run did not shut down cleanly (cache_state.clean_shutdown is 0), or
 // the dirty set is not empty for any other reason, runs
 // cache::RecoverDirty and logs at WARNING how many entries it recovered
-// and whether the machine rebooted meanwhile (meta.boot_id differs from
-// `boot_id`, the current /proc/sys/kernel/random/boot_id). Then records
-// clean_shutdown "0" and `boot_id`, durably (sqlite3::Durability::kSync),
+// and whether the machine rebooted meanwhile (cache_state.boot_id differs
+// from `boot_id`, the current /proc/sys/kernel/random/boot_id). Then
+// records clean_shutdown 0 and `boot_id`, durably (Durability::kSync),
 // so a crash from here on is detected at the next start.
 absl::Status StartRun(Context &ctx, std::string_view boot_id);
 
 // Clean shutdown, once no more requests can arrive: SyncBacking, a WAL
 // checkpoint, and, if the dirty set is then empty, records clean_shutdown
-// "1" durably. Any failure is returned, and leaves clean_shutdown "0", so
+// 1 durably. Any failure is returned, and leaves clean_shutdown 0, so
 // the next start recovers.
 absl::Status FinishRun(Context &ctx);
 

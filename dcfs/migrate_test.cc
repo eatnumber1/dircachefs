@@ -113,16 +113,14 @@ TEST_F(MigrateTest, MigratingAgainIsANoOp) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
 
-  ASSERT_OK_AND_ASSIGN(std::optional<std::string> device_before,
-                        GetMeta(db_, "source_device_id"));
-  ASSERT_TRUE(device_before.has_value());
+  ASSERT_OK_AND_ASSIGN(DeviceId device_before, GetSourceDeviceId(db_));
   ASSERT_OK_AND_ASSIGN(int64_t inodes_before, CountRows(db_, "inodes"));
   ASSERT_OK_AND_ASSIGN(int64_t fs_before, CountRows(db_, "filesystems"));
   ASSERT_OK_AND_ASSIGN(int64_t dirs_before, CountRows(db_, "directories"));
 
   ASSERT_THAT(Migrate(db_, root), IsOk());
 
-  EXPECT_THAT(GetMeta(db_, "source_device_id"), IsOkAndHolds(device_before));
+  EXPECT_THAT(GetSourceDeviceId(db_), IsOkAndHolds(device_before));
   EXPECT_THAT(CountRows(db_, "inodes"), IsOkAndHolds(inodes_before));
   EXPECT_THAT(CountRows(db_, "filesystems"), IsOkAndHolds(fs_before));
   EXPECT_THAT(CountRows(db_, "directories"), IsOkAndHolds(dirs_before));
@@ -131,7 +129,7 @@ TEST_F(MigrateTest, MigratingAgainIsANoOp) {
 TEST_F(MigrateTest, WrongSchemaVersionFailsPrecondition) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
-  ASSERT_THAT(SetMeta(db_, "schema_version", "99"), IsOk());
+  ASSERT_THAT(db_.Exec("UPDATE cache_state SET schema_version = 99"), IsOk());
 
   EXPECT_THAT(Migrate(db_, root),
               StatusIs(absl::StatusCode::kFailedPrecondition));
@@ -146,23 +144,60 @@ TEST_F(MigrateTest, MissingRootInodeFailsPreconditionAsCorrupt) {
               StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
-TEST_F(MigrateTest, FreshDatabaseHasNoGenerationCounter) {
+TEST_F(MigrateTest, FreshDatabaseHasTypedCacheState) {
+  RootIdentity root = TestRoot();
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(CountRows(db_, "cache_state"), IsOkAndHolds(1));
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'meta'"),
+              IsOkAndHolds(0));
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(true));
+  EXPECT_THAT(GetBootId(db_), IsOkAndHolds(std::nullopt));
+
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  ASSERT_THAT(SetBootId(db_, "abc"), IsOk());
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(false));
+  EXPECT_THAT(GetBootId(db_), IsOkAndHolds(std::optional<std::string>("abc")));
+
+  // Exactly one row, by construction.
+  EXPECT_FALSE(db_.Exec("INSERT INTO cache_state (id, schema_version, "
+                        "source_device_id, clean_shutdown) "
+                        "VALUES (2, 2, x'00', 1)")
+                   .ok());
+  // And typed: STRICT rejects a TEXT device id.
+  EXPECT_FALSE(
+      db_.Exec("UPDATE cache_state SET source_device_id = 'text'").ok());
+}
+
+TEST_F(MigrateTest, MissingCacheStateRowIsCorrupt) {
   ASSERT_THAT(Migrate(db_, TestRoot()), IsOk());
-  EXPECT_THAT(GetMeta(db_, "gen_counter"), IsOkAndHolds(std::nullopt));
+  ASSERT_THAT(db_.Exec("DELETE FROM cache_state"), IsOk());
+  EXPECT_THAT(GetSourceDeviceId(db_),
+              StatusIs(absl::StatusCode::kFailedPrecondition));
+  EXPECT_THAT(SetCleanShutdown(db_, true), testing::Not(IsOk()));
 }
 
 // Turns a freshly created current-version database back into what schema
-// v1 looked like, as far as any later migration step can tell.
-absl::Status DowngradeToV1(sqlite3::Connection &db) {
-  ABSL_RETURN_IF_ERROR(db.Exec("DROP TABLE dirty"));
-  ABSL_RETURN_IF_ERROR(SetMeta(db, "schema_version", "1"));
-  return SetMeta(db, "gen_counter", "12345");
+// v1 looked like, as far as any later migration step can tell: v1 kept
+// cache-wide state in a key/value `meta` table, binding every value --
+// including the device id's raw bytes -- as TEXT.
+absl::Status DowngradeToV1(sqlite3::Connection &db, const DeviceId &device) {
+  ABSL_RETURN_IF_ERROR(db.ExecScript(
+      "DROP TABLE dirty; DROP TABLE cache_state; "
+      "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
+      "INSERT INTO meta VALUES ('schema_version', '1'), "
+      "('gen_counter', '12345');"));
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      db.Prepared("INSERT INTO meta VALUES ('source_device_id', ?)"));
+  std::string bytes = device.Serialize();
+  ABSL_RETURN_IF_ERROR(stmt->Bind(1, std::string_view(bytes)));
+  return stmt->ExecuteOnce();
 }
 
 TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
-  ASSERT_THAT(DowngradeToV1(db_), IsOk());
+  ASSERT_THAT(DowngradeToV1(db_, root.device_id), IsOk());
   std::string device_bytes = root.device_id.Serialize();
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * insert,
@@ -175,7 +210,10 @@ TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
   ASSERT_THAT(Migrate(db_, root), IsOk());
 
   EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
-  EXPECT_THAT(GetMeta(db_, "gen_counter"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'meta'"),
+              IsOkAndHolds(0));
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(true));
+  EXPECT_THAT(GetBootId(db_), IsOkAndHolds(std::nullopt));
   EXPECT_THAT(CountRows(db_, "inodes WHERE id = 7 AND fuse_gen = 12345"),
               IsOkAndHolds(1));
   EXPECT_THAT(CountRows(db_, "inodes WHERE id = 1 AND fuse_gen = 0"),
@@ -191,11 +229,18 @@ TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
 TEST_F(MigrateTest, OlderThanV1FailsPrecondition) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
-  ASSERT_THAT(SetMeta(db_, "schema_version", "0"), IsOk());
+  ASSERT_THAT(DowngradeToV1(db_, root.device_id), IsOk());
+  ASSERT_THAT(
+      db_.Exec("UPDATE meta SET value = '0' WHERE key = 'schema_version'"),
+      IsOk());
   EXPECT_THAT(Migrate(db_, root),
               StatusIs(absl::StatusCode::kFailedPrecondition));
   // The failed upgrade rolled back: nothing changed.
-  EXPECT_THAT(GetMeta(db_, "schema_version"), IsOkAndHolds("0"));
+  EXPECT_THAT(CountRows(db_, "meta WHERE key = 'schema_version' AND "
+                             "value = '0'"),
+              IsOkAndHolds(1));
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'cache_state'"),
+              IsOkAndHolds(0));
 }
 
 TEST_F(MigrateTest, DuplicateBackingIdentityViolatesUniqueConstraint) {
@@ -358,6 +403,52 @@ TEST_F(MigrateTest, DentriesHaveAUsableRowid) {
               IsOk());
   ASSERT_EQ(rowids.size(), 2u);
   EXPECT_LT(rowids[0], rowids[1]);
+}
+
+
+// Regression test for the typed cache_state table replacing the untyped
+// key/value meta table, both in a fresh cache and after the v1 -> v2
+// upgrade. Raw SQL only (no accessors), so it runs unchanged against the
+// code from before the change, where it fails.
+TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
+  RootIdentity root = TestRoot();
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'table' AND "
+                             "name = 'cache_state'"),
+              IsOkAndHolds(1));
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'meta'"),
+              IsOkAndHolds(0));
+
+  // A v1 database, as v1 wrote it: every meta value bound as TEXT.
+  ASSERT_THAT(db_.ExecScript(
+                  "DROP TABLE IF EXISTS dirty; "
+                  "DROP TABLE IF EXISTS cache_state; "
+                  "DROP TABLE IF EXISTS meta; "
+                  "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
+                  "INSERT INTO meta VALUES ('schema_version', '1'), "
+                  "('gen_counter', '12345');"),
+              IsOk());
+  std::string device_bytes = root.device_id.Serialize();
+  ASSERT_OK_AND_ASSIGN(
+      sqlite3::Statement * insert,
+      db_.Prepared("INSERT INTO meta VALUES ('source_device_id', ?)"));
+  ASSERT_THAT(insert->Bind(1, std::string_view(device_bytes)), IsOk());
+  ASSERT_THAT(insert->ExecuteOnce(), IsOk());
+
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'meta'"),
+              IsOkAndHolds(0));
+  ASSERT_OK_AND_ASSIGN(
+      sqlite3::Statement * state,
+      db_.Prepared("SELECT schema_version, typeof(source_device_id), "
+                   "source_device_id, clean_shutdown FROM cache_state"));
+  ASSERT_THAT(state->Step(), IsOkAndHolds(true));
+  EXPECT_EQ(state->Column<int>(0), 2);
+  EXPECT_EQ(state->Column<std::string>(1), "blob");
+  std::vector<uint8_t> stored = state->Column<std::vector<uint8_t>>(2);
+  EXPECT_EQ(std::string(stored.begin(), stored.end()), device_bytes);
+  EXPECT_EQ(state->Column<int>(3), 1);
+  ASSERT_THAT(state->Step(), IsOkAndHolds(false));
 }
 
 }  // namespace

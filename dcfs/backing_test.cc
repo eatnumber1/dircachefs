@@ -766,8 +766,8 @@ TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
 
   // A fresh cache: nothing to recover, and the run is now marked running.
   ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
-  EXPECT_THAT(GetMeta(db_, kMetaCleanShutdown), IsOkAndHolds(Optional(std::string("0"))));
-  EXPECT_THAT(GetMeta(db_, kMetaBootId), IsOkAndHolds(Optional(std::string("boot-1"))));
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(false));
+  EXPECT_THAT(GetBootId(db_), IsOkAndHolds(Optional(std::string("boot-1"))));
   EXPECT_FALSE(ctx_.dirty.any);
   EXPECT_TRUE(valid(file));
 
@@ -802,7 +802,7 @@ TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "file"),
               IsOkAndHolds(IsLookup(LookupResult::kFound)));
   EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
-  EXPECT_THAT(GetMeta(db_, kMetaBootId), IsOkAndHolds(Optional(std::string("boot-2"))));
+  EXPECT_THAT(GetBootId(db_), IsOkAndHolds(Optional(std::string("boot-2"))));
 
   // And the truth is re-read from the backing filesystem: inner still
   // exists there (the phase 2 unlink never ran in this test).
@@ -820,11 +820,11 @@ TEST_F(BackingTest, FinishRunMarksACleanShutdown) {
   absl::flat_hash_set<int64_t> open_for_write = {file};
   ctx_.open_for_write = &open_for_write;
   EXPECT_THAT(FinishRun(ctx_), StatusIs(absl::StatusCode::kFailedPrecondition));
-  EXPECT_THAT(GetMeta(db_, kMetaCleanShutdown), IsOkAndHolds(Optional(std::string("0"))));
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(false));
 
   open_for_write.clear();
   ASSERT_THAT(FinishRun(ctx_), IsOk());
-  EXPECT_THAT(GetMeta(db_, kMetaCleanShutdown), IsOkAndHolds(Optional(std::string("1"))));
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(true));
   EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
   ctx_.open_for_write = nullptr;
 

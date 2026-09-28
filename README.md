@@ -148,9 +148,10 @@ mutation and no backing flush per mutation:
   that is safe, it only makes the re-read after a crash larger. (libfuse
   3.18.2 has no SYNCFS handler, and the kernel sends SYNCFS only to
   fuseblk servers anyway.)
-- `meta.clean_shutdown` records whether the last run ended cleanly (after
-  its final sync point and WAL checkpoint), and `meta.boot_id` which boot
-  it ran in. At startup after an unclean shutdown, dcfs marks everything
+- The single-row `cache_state` table (see `dcfs/schema.sql`) records,
+  besides the schema version and the source filesystem's identity,
+  whether the last run ended cleanly (`clean_shutdown`, set after its final
+  sync point and WAL checkpoint) and which boot it ran in (`boot_id`). At startup after an unclean shutdown, dcfs marks everything
   in the dirty set unknown: attributes, xattrs, symlink target, a
   directory's whole listing, and the dentries pointing at each entry. Rows
   are kept, so NFS handles still resolve (and are verified when next

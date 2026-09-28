@@ -16,18 +16,35 @@
 -- (= FUSE_ROOT_ID) and reports generation 0 by convention. dentries.inode IS NULL means a
 -- cached negative entry.
 --
--- All tables are STRICT (SQLite 3.37+ -- this build uses 3.53). meta.value is
--- typed ANY rather than BLOB because it stores a mix of text-encoded
--- integers (schema_version, clean_shutdown), text (boot_id) and raw bytes
--- (source_device_id) -- a STRICT BLOB column rejects TEXT values outright,
--- with no coercion, so ANY (which preserves whatever storage class was
--- bound, unmodified) is the type that actually fits a heterogeneous
--- key/value table. Every other BLOB column below holds only raw bytes and
--- keeps the stricter BLOB type.
+-- All tables are STRICT (SQLite 3.37+ -- this build uses 3.53).
 
-CREATE TABLE meta (
-  key TEXT PRIMARY KEY,
-  value ANY
+-- Cache-wide state: exactly one row (id 1), written by Migrate() when the
+-- cache is created and afterwards only through the typed accessors in
+-- dcfs/migrate.h.
+--
+--   schema_version    The schema version of this database (kSchemaVersion
+--                     in dcfs/migrate.h). Written at creation and by each
+--                     upgrade step Migrate() runs.
+--   source_device_id  DeviceId::Serialize() of the source filesystem the
+--                     cache was built for. Written once, at creation;
+--                     startup refuses a --source on another filesystem.
+--   clean_shutdown    1 once a run has shut down cleanly (backing
+--                     filesystems synced, dirty set empty, WAL
+--                     checkpointed: backing::FinishRun), 0 while a run is
+--                     going (set durably by backing::StartRun at every
+--                     start). 0 at the next start means the last run
+--                     crashed, or the machine lost power, and the dirty
+--                     set must be recovered. 1 at creation.
+--   boot_id           /proc/sys/kernel/random/boot_id as of the last
+--                     start (backing::StartRun), so the next start can
+--                     tell a machine crash from a daemon crash in its log.
+--                     NULL until the first start.
+CREATE TABLE cache_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  schema_version INTEGER NOT NULL,
+  source_device_id BLOB NOT NULL,
+  clean_shutdown INTEGER NOT NULL,  -- bool
+  boot_id TEXT NULL
 ) STRICT;
 
 -- Every backing filesystem under the source, plus the dentry through which
