@@ -141,29 +141,38 @@ total_ext4=$(wc -l </tmp/ext4_results.txt)
 awk -F: '$3 == "notok" { print $1 ":" $2 }' /tmp/dcfs_results.txt | sort -u >/tmp/fail_dcfs.txt
 awk -F: '$3 == "notok" { print $1 ":" $2 }' /tmp/ext4_results.txt | sort -u >/tmp/fail_ext4.txt
 
+# set_diff A B OUT: lines present in B but not in A (set difference),
+# written to OUT.
+#
+# NOT implemented as the obvious single `awk 'NR==FNR{a[$0]=1;next}
+# !($0 in a)' A B`: that classic idiom silently produces NO output at all
+# when A is completely empty (0 lines) -- NR and FNR then stay in lockstep
+# for the entirety of B too, so every line of B is wrongly treated as
+# still "belonging to A" and skipped -- which is exactly the case an empty
+# pjdfstest.expected_failures baseline hits on a clean run. `grep
+# -vFxf A B` has the identical problem in busybox grep (1.36.1): an empty
+# -f pattern file is treated as one empty-string pattern that matches
+# every line, so -v excludes everything instead of nothing. Both were
+# caught by testing with a genuinely empty A, not just by checking that
+# the command didn't crash.
+set_diff() {
+	if [ -s "$1" ]; then
+		grep -vFxf "$1" "$2" >"$3" || true
+	else
+		cp "$2" "$3"
+	fi
+}
+
 # dcfs-specific = fails against dcfs, but the identical check does NOT fail
 # directly against ext4 -- i.e. dcfs, not upstream ext4/Linux/pjdfstest
 # quirks, is responsible.
-#
-# NOTE: don't name the lookup array "exp" -- busybox awk (1.36.1) reserves
-# that identifier for the exp() math builtin and fails the whole program
-# with a bare "Unexpected token" (no line/token detail) the moment "exp["
-# appears anywhere, which silently emptied /tmp/new_regressions.txt on an
-# earlier version of this script (verified by writing the program to a
-# file with `awk -f` and bisecting it token by token, to rule out a
-# shell-quoting artifact) and made this test wrongly pass while every
-# dcfs-specific failure went unreported. "ext4"/"baseline"/"cur" are not
-# reserved and are fine.
-awk 'NR == FNR { ext4[$0] = 1; next } ($0 in ext4) { next } { print }' \
-	/tmp/fail_ext4.txt /tmp/fail_dcfs.txt >/tmp/dcfs_specific.txt
+set_diff /tmp/fail_ext4.txt /tmp/fail_dcfs.txt /tmp/dcfs_specific.txt
 
 grep -v '^#' "$PJD_ROOT/pjdfstest.expected_failures" 2>/dev/null |
 	grep -v '^$' | sort -u >/tmp/expected_clean.txt
 
-awk 'NR == FNR { baseline[$0] = 1; next } ($0 in baseline) { next } { print }' \
-	/tmp/expected_clean.txt /tmp/dcfs_specific.txt >/tmp/new_regressions.txt
-awk 'NR == FNR { cur[$0] = 1; next } ($0 in cur) { next } { print }' \
-	/tmp/dcfs_specific.txt /tmp/expected_clean.txt >/tmp/now_passing.txt
+set_diff /tmp/expected_clean.txt /tmp/dcfs_specific.txt /tmp/new_regressions.txt
+set_diff /tmp/dcfs_specific.txt /tmp/expected_clean.txt /tmp/now_passing.txt
 
 dcfs_failed=$(wc -l </tmp/fail_dcfs.txt)
 ext4_failed=$(wc -l </tmp/fail_ext4.txt)
@@ -186,6 +195,26 @@ if [ -s /tmp/new_regressions.txt ]; then
 	fail pjdfstest-no-regressions "$(wc -l </tmp/new_regressions.txt) new failure(s), see above"
 else
 	pass pjdfstest-no-regressions
+fi
+
+# dcfs (see backing.cc's ReconcileAttrs/VerifyBackingIdentity, step 4.6) logs
+# a WARNING for any change on the backing filesystem it didn't make itself
+# (an "out-of-band change"). pjdfstest's dcfs suite only ever goes through
+# $MNT/dcfs-work -- it never touches /src directly, and /src/ext4-work (the
+# ext4-direct suite's own work directory) is a name dcfs has no cached row
+# for at all -- so dcfs should see zero such warnings for the entire
+# duration of this test. Any that show up are a real dcfs bug (a false
+# positive in its own out-of-band detection, most likely), not something
+# pjdfstest itself provoked on purpose.
+oob_count=$(grep -c "out-of-band" "$LOG" 2>/dev/null || true)
+oob_count=${oob_count:-0}
+echo "pjdfstest.sh: dcfs stderr out-of-band warning count: $oob_count"
+if [ "$oob_count" -gt 0 ]; then
+	echo "pjdfstest.sh: unexpected out-of-band warning(s) in dcfs stderr (a dcfs bug -- pjdfstest never touches the backing filesystem outside the mount):"
+	grep "out-of-band" "$LOG"
+	fail pjdfstest-no-out-of-band "$oob_count warning(s), see dcfs stderr above"
+else
+	pass pjdfstest-no-out-of-band
 fi
 
 exit "$FAILED"
