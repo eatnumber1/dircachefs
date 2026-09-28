@@ -5,11 +5,12 @@
 # Builds a small backing tree on vdb (a regular file f1, a directory d1, a
 # symlink l1 -> f1, and a fifo p1), mounts dcfs over it, and exercises every
 # FUSE_SET_ATTR_* combination Setattr handles: mode (on a regular file, a
-# directory, and a fifo -- the three dispatch paths in backing::SetAttr),
-# uid/gid, size (shrink, grow, and EISDIR on a directory), and
-# atime/mtime (an explicit timestamp and "now"). Every change is checked
-# three ways: immediately via /mnt, against /src (the write actually
-# landed on the backing filesystem), and again via /mnt after
+# directory, and a fifo -- the three dispatch paths in backing::SetAttr --
+# plus EOPNOTSUPP on a symlink), uid/gid, size (shrink, grow, and EISDIR on
+# a directory), and atime/mtime (an explicit timestamp, "now", and a
+# nanosecond-precision timestamp). Every change is checked three ways:
+# immediately via /mnt, against /src (the write actually landed on the
+# backing filesystem), and again via /mnt after
 # `sync; echo 3 >/proc/sys/vm/drop_caches` with vdb's sectors-read counter
 # unchanged (the re-read came from dcfs's own cache, not the disk). A
 # final whole-tree pass repeats that warm check across every path at once,
@@ -19,22 +20,27 @@
 #
 # Uses only busybox applets/options (verified against the exact busybox
 # baked into the initramfs: `busybox --list`, `busybox <applet> --help`) --
-# no GNU find/stat/coreutils extensions. busybox chmod has no -h
-# (--no-dereference) option, so the one check that would need it
-# (confirming chmod on a symlink itself, rather than the file it points
-# to, fails with EOPNOTSUPP) is reported as SKIP rather than faked or
-# silently dropped -- see symlink-chmod-eopnotsupp below.
+# no GNU find/stat/coreutils extensions -- plus /bin/testutil (see
+# //tools:testutil) for the handful of things busybox's applets cannot do
+# precisely enough: busybox `truncate -s N FILE` goes through
+# open(O_WRONLY)+ftruncate, and DirCacheFS::Open refuses any non-read-only
+# open with EROFS until step 4.4, so it never reaches
+# Setattr(FUSE_SET_ATTR_SIZE) at all -- `testutil truncate` calls
+# truncate(2) directly, with no open() in between; and busybox chmod has
+# no -h/--no-dereference, so it can never target a symlink itself (chmod(2)
+# always follows symlinks) -- `testutil lchmod` uses fchmodat(2) with
+# AT_SYMLINK_NOFOLLOW instead.
 #
 # Run as /tests/setattr.sh by guest/init when booted with
-# dcfs_test=setattr.sh; prints one "TEST ... PASS/FAIL/SKIP" line per check
-# and exits nonzero if any check failed. init turns that into the final
+# dcfs_test=setattr.sh; prints one "TEST ... PASS/FAIL" line per check and
+# exits nonzero if any check failed. init turns that into the final
 # ALL-TESTS-PASSED / TEST-FAILED verdict.
 FAILED=0
 pass() { echo "TEST $1 PASS"; }
 fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
-skip() { echo "TEST $1 SKIP ($2)"; }
 
 DCFS=/bin/dcfs
+TESTUTIL=/bin/testutil
 
 # busybox on Ubuntu lacks the mountpoint applet; ask the kernel directly.
 is_mounted() { grep -q " $1 " /proc/mounts; }
@@ -210,7 +216,17 @@ verify_cached chown-cached "$MNT/f1" '%u:%g' 1000:1000
 
 # --- truncate-shrink: size down, content check too -----------------------
 
-truncate -s 3 "$MNT/f1"
+# busybox's own `truncate -s N FILE` goes through open(O_WRONLY) first,
+# which Open() refuses (EROFS) until step 4.4 -- it would never actually
+# exercise Setattr, and its exit status would need checking to notice
+# that. testutil calls truncate(2) directly, with no open() at all.
+out=$("$TESTUTIL" truncate "$MNT/f1" 3)
+rc=$?
+if [ "$rc" -eq 0 ]; then
+	pass truncate-shrink-tool
+else
+	fail truncate-shrink-tool "rc=$rc out='$out'"
+fi
 verify_immediate truncate-shrink-matches-src "$MNT/f1" "$SRC/f1" '%s'
 verify_cached truncate-shrink-cached "$MNT/f1" '%s' 3
 
@@ -230,16 +246,24 @@ fi
 
 # --- truncate-grow: size up -----------------------------------------------
 
-truncate -s 100 "$MNT/f1"
+out=$("$TESTUTIL" truncate "$MNT/f1" 100)
+rc=$?
+if [ "$rc" -eq 0 ]; then
+	pass truncate-grow-tool
+else
+	fail truncate-grow-tool "rc=$rc out='$out'"
+fi
 verify_immediate truncate-grow-matches-src "$MNT/f1" "$SRC/f1" '%s'
 verify_cached truncate-grow-cached "$MNT/f1" '%s' 100
 
 # --- truncate-dir-eisdir: truncating a directory must fail ---------------
 
-if truncate -s 0 "$MNT/d1" 2>/tmp/setattr-trunc-dir.err; then
-	fail truncate-dir-eisdir "truncate on a directory unexpectedly succeeded"
-else
+out=$("$TESTUTIL" truncate "$MNT/d1" 0)
+rc=$?
+if [ "$rc" -ne 0 ] && [ "$out" = "ERR EISDIR" ]; then
 	pass truncate-dir-eisdir
+else
+	fail truncate-dir-eisdir "rc=$rc out='$out' (want nonzero rc, 'ERR EISDIR')"
 fi
 
 # --- utimes: an explicit atime/mtime --------------------------------------
@@ -270,22 +294,59 @@ else
 fi
 verify_immediate touch-now-matches-src "$MNT/f1" "$SRC/f1" '%Y'
 
+# --- utimens-nsec: nanosecond-precision timestamp via testutil utimens ---
+
+# busybox touch -d has only second precision. This also becomes f1's final
+# mtime, checked again below (warm-after-all, restart-mtime-persists).
+NSEC_SEC=1000000000
+NSEC_NSEC=123456789
+out=$("$TESTUTIL" utimens "$MNT/f1" "$NSEC_SEC" "$NSEC_NSEC")
+rc=$?
+if [ "$rc" -eq 0 ]; then
+	pass utimens-nsec-tool
+else
+	fail utimens-nsec-tool "rc=$rc out='$out'"
+fi
+mnt_y=$(stat -c '%y' "$MNT/f1")
+src_y=$(stat -c '%y' "$SRC/f1")
+if [ "$mnt_y" = "$src_y" ]; then
+	pass utimens-nsec-matches-src
+else
+	fail utimens-nsec-matches-src "mnt='$mnt_y' src='$src_y'"
+fi
+case "$mnt_y" in
+*.123456789*)
+	pass utimens-nsec-precision
+	;;
+*)
+	fail utimens-nsec-precision "got '$mnt_y', want nanoseconds .123456789"
+	;;
+esac
+verify_cached utimens-nsec-cached "$MNT/f1" '%Y' "$NSEC_SEC"
+final_mtime_epoch=$NSEC_SEC
+
 # --- symlink-chmod-eopnotsupp: chmod on a symlink itself -----------------
 
 # chmod(2) has no way to change a symlink's own mode on Linux (there is no
-# lchmod syscall), so backing::SetAttr rejects FUSE_SET_ATTR_MODE on a
-# symlink with EOPNOTSUPP. Exercising that from the shell needs a chmod
-# that does *not* follow the symlink (as chmod(2) itself always does) --
-# GNU coreutils' chmod has -h/--no-dereference for exactly this, but
-# busybox's chmod has no such option (verified: `busybox chmod --help`
-# lists only -Rcvf), so there is no way from this script to make the
-# kernel send a SETATTR MODE for l1's own inode rather than resolving the
-# symlink first and sending it for f1. Skipped rather than faked.
+# lchmod syscall: fchmodat(2) with AT_SYMLINK_NOFOLLOW always fails with
+# EOPNOTSUPP for a symlink target, verified even on a plain tmpfs symlink
+# -- this is generic kernel behavior, not something specific to dcfs), so
+# backing::SetAttr rejects FUSE_SET_ATTR_MODE on a symlink the same way.
+# busybox's chmod has no -h/--no-dereference (verified: `busybox chmod
+# --help` lists only -Rcvf) so it can never even ask the kernel to target
+# the symlink itself rather than following it -- testutil lchmod uses
+# fchmodat(2) with AT_SYMLINK_NOFOLLOW directly.
 before_f1_mode=$(stat -c '%a' "$SRC/f1")
-skip symlink-chmod-eopnotsupp "busybox chmod has no -h/--no-dereference; cannot target the symlink itself"
+out=$("$TESTUTIL" lchmod "$MNT/l1" 600)
+rc=$?
+if [ "$rc" -ne 0 ] && [ "$out" = "ERR EOPNOTSUPP" ]; then
+	pass symlink-chmod-eopnotsupp
+else
+	fail symlink-chmod-eopnotsupp "rc=$rc out='$out' (want nonzero rc, 'ERR EOPNOTSUPP')"
+fi
 after_f1_mode=$(stat -c '%a' "$SRC/f1")
 if [ "$before_f1_mode" != "$after_f1_mode" ]; then
-	fail symlink-chmod-no-side-effect "f1's mode changed from $before_f1_mode to $after_f1_mode even without running the chmod"
+	fail symlink-chmod-no-side-effect "f1's mode changed from $before_f1_mode to $after_f1_mode even though the chmod failed"
 else
 	pass symlink-chmod-no-side-effect
 fi
@@ -315,7 +376,7 @@ fi
 verify_cached restart-mode-persists "$MNT/f1" '%a' 640
 verify_cached restart-owner-persists "$MNT/f1" '%u:%g' 1000:1000
 verify_cached restart-size-persists "$MNT/f1" '%s' 100
-verify_cached restart-mtime-persists "$MNT/f1" '%Y' "$new_epoch"
+verify_cached restart-mtime-persists "$MNT/f1" '%Y' "$final_mtime_epoch"
 verify_cached restart-dir-mode-persists "$MNT/d1" '%a' 750
 verify_cached restart-fifo-mode-persists "$MNT/p1" '%a' 600
 verify_tree_cached restart-tree-cached

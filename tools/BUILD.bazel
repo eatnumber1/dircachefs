@@ -13,6 +13,22 @@ cc_binary(
     visibility = ["//visibility:public"],
 )
 
+# Small guest-only helpers for the QEMU setattr test (see
+# //test/qemu:setattr_test / test/qemu/guest/setattr.sh): syscalls busybox's
+# own applets can't drive precisely enough (truncate(2) without an
+# intervening open(), which dcfs's Open() still refuses for anything but a
+# read-only open until step 4.4; nanosecond-precision utimensat(2); and
+# fchmodat(2) with AT_SYMLINK_NOFOLLOW, which busybox's chmod has no
+# equivalent for). Statically linked like //dcfs:main_static, for the same
+# reason: the QEMU initramfs has no dynamic loader or shared libc.
+cc_binary(
+    name = "testutil",
+    srcs = ["testutil.c"],
+    features = ["fully_static_link"],
+    linkstatic = True,
+    visibility = ["//test/qemu:__pkg__"],
+)
+
 # Manual, host-run smoke test for the read-only ops added in step 3.2: mounts
 # a small tree twice and checks that the second pass is served entirely from
 # the cache (verified via strace, when available). Not wired into `bazel

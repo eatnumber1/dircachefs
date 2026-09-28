@@ -25,14 +25,15 @@ config_setting(
 )
 
 # Guest initramfs shared by every qemu_test in this package: busybox,
-# dcfs (statically linked, see //dcfs:main_static), fhtest, guest/init,
-# and every guest/*.sh test script (installed as /tests/<basename>; see
-# guest/init and scripts/mkinitramfs.sh).
+# dcfs (statically linked, see //dcfs:main_static), fhtest, testutil,
+# guest/init, and every guest/*.sh test script (installed as
+# /tests/<basename>; see guest/init and scripts/mkinitramfs.sh).
 genrule(
     name = "initramfs",
     srcs = [
         "//dcfs:main_static",
         "//tools:fhtest",
+        "//tools:testutil",
         "@kernel_image//:busybox",
         "guest/init",
     ] + glob(["guest/*.sh"]),
@@ -41,6 +42,7 @@ genrule(
           "$(location @kernel_image//:busybox) " +
           "$(location //dcfs:main_static) " +
           "$(location //tools:fhtest) " +
+          "$(location //tools:testutil) " +
           "$(location guest/init) " +
           "$(SRCS)",
     tools = ["scripts/mkinitramfs.sh"],

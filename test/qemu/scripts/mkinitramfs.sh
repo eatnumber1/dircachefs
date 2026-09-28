@@ -7,12 +7,12 @@
 # out are genrule locations, not repo-relative paths. Two modes:
 #
 #   mkinitramfs.sh <out.cpio.gz> <busybox> <dcfs-binary> <fhtest-binary> \
-#       <init> [src...]
+#       <testutil-binary> <init> [src...]
 #       e2e initramfs (test/qemu/BUILD.bazel's :initramfs): busybox, dcfs,
-#       fhtest, guest/init, and every guest/*.sh test script (installed as
-#       /tests/<basename>; every [src] that isn't a .sh file is ignored --
-#       the genrule passes $(SRCS), which includes the four named files
-#       above again).
+#       fhtest, testutil, guest/init, and every guest/*.sh test script
+#       (installed as /tests/<basename>; every [src] that isn't a .sh file
+#       is ignored -- the genrule passes $(SRCS), which includes the five
+#       named files above again).
 #
 #   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <test-binary> \
 #       <disk0-device-or-'-'> <args> [name:path...]
@@ -22,8 +22,8 @@
 #       word-splits it), and each `name:path` data file copied to
 #       /test/data/<name>.
 #
-# In both modes, any dynamically linked binary (dcfs/fhtest/the test
-# binary; normal builds are fully static -- see qemu_cc_test.bzl -- but
+# In both modes, any dynamically linked binary (dcfs/fhtest/testutil/the
+# test binary; normal builds are fully static -- see qemu_cc_test.bzl -- but
 # ASan/UBSan builds cannot be) has its ldd(1) closure and ELF interpreter
 # copied into the initramfs at the same absolute paths, so the dynamic
 # loader finds them with no rpath surgery. This is a no-op for a static
@@ -69,8 +69,9 @@ else
 	BUSYBOX=$2
 	DCFS=$3
 	FHTEST=$4
-	INIT=$5
-	shift 5
+	TESTUTIL=$5
+	INIT=$6
+	shift 6
 fi
 
 case "$OUT" in
@@ -117,10 +118,12 @@ else
 	cp "$BUSYBOX" "$ROOT/bin/busybox"
 	cp "$DCFS" "$ROOT/bin/dcfs"
 	cp "$FHTEST" "$ROOT/bin/fhtest"
+	cp "$TESTUTIL" "$ROOT/bin/testutil"
 	ln -sf busybox "$ROOT/bin/sh"
 	cp "$INIT" "$ROOT/init"
 	copy_deps "$ROOT/bin/dcfs"
 	copy_deps "$ROOT/bin/fhtest"
+	copy_deps "$ROOT/bin/testutil"
 
 	for f in "$@"; do
 		case "$f" in

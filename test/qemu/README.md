@@ -305,17 +305,21 @@ bazel test //test/qemu:setattr_test
   cannot demonstrate are reported as `SKIP`, not a faked pass.
 - `setattr_test` (`guest/setattr.sh`): step 4.1's `Setattr` write-through --
   chmod on a regular file, a directory, and a fifo (the three dispatch
-  paths in `backing::SetAttr`); chown; truncate (shrink, grow, and EISDIR
-  on a directory); and utimes (an explicit timestamp and "now"). Every
-  change is checked against `/src` (it actually landed on the backing
-  filesystem) and again via `/mnt` after dropping every cache with vdb's
-  sectors-read counter unchanged (served from dcfs's own cache, not a
-  fresh read), including a final whole-tree pass and a repeat of the whole
-  thing after killing and restarting the daemon against the same cache
-  database. Confirming that chmod on a symlink itself (as opposed to the
-  file it points to) fails with `EOPNOTSUPP` would need a
-  `chmod -h`/`--no-dereference`, which busybox's `chmod` does not have; that
-  one check is `SKIP`, not faked.
+  paths in `backing::SetAttr`), plus `EOPNOTSUPP` chmod-ing a symlink
+  itself; chown; truncate (shrink, grow, and EISDIR on a directory); and
+  utimes (an explicit timestamp, "now", and a nanosecond-precision
+  timestamp). Every change is checked against `/src` (it actually landed
+  on the backing filesystem) and again via `/mnt` after dropping every
+  cache with vdb's sectors-read counter unchanged (served from dcfs's own
+  cache, not a fresh read), including a final whole-tree pass and a repeat
+  of the whole thing after killing and restarting the daemon against the
+  same cache database. Uses `//tools:testutil` (a tiny static helper, also
+  baked into the initramfs) for the handful of things busybox's applets
+  cannot do precisely enough: `truncate(2)` with no intervening `open()`
+  (busybox's `truncate -s` opens O_WRONLY first, which `Open()` refuses
+  with EROFS until step 4.4, so it would never reach `Setattr` at all) and
+  `fchmodat(2)` with `AT_SYMLINK_NOFOLLOW` (busybox's `chmod` has no
+  `-h`/`--no-dereference`, so it can never target a symlink itself).
 
 The serial console log lands at
 `bazel-testlogs/test/qemu/boot_test/test.outputs/serial.log` (Bazel's
