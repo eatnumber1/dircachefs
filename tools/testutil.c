@@ -46,6 +46,11 @@
  *   testutil removexattr <path> <name>
  *       lremovexattr(2): removes xattr <name>, without following a
  *       symlink.
+ *   testutil setxattrhex <path> <name> <hex>
+ *   testutil getxattrhex <path> <name>
+ *       As setxattr/getxattr, but the value is lowercase hex: for binary
+ *       values such as a system.posix_acl_access ACL or a
+ *       security.capability blob, which contain NUL bytes.
  *   testutil fallocate <path> <mode> <offset> <len>
  *       fallocate(2), where <mode> is "0", "keep_size" (FALLOC_FL_KEEP_SIZE)
  *       or "punch_hole" (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE --
@@ -62,7 +67,7 @@
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing (except
- * getxattr/listxattr, which print their result) and exits 0. All output is
+ * getxattr/getxattrhex/listxattr, which print their result) and exits 0. All output is
  * single-line (or, for listxattr, one name per line) so the guest test
  * scripts can capture it.
  */
@@ -167,6 +172,46 @@ static int cmd_getxattr(const char *path, const char *name)
 	}
 	buf[n] = '\0';
 	printf("%s", buf);
+	return 0;
+}
+
+static int cmd_setxattrhex(const char *path, const char *name, const char *hex)
+{
+	unsigned char buf[4096];
+	size_t len = strlen(hex) / 2, i;
+
+	if (strlen(hex) % 2 != 0 || len > sizeof(buf)) {
+		fprintf(stderr, "testutil setxattrhex: bad hex value\n");
+		return 2;
+	}
+	for (i = 0; i < len; i++) {
+		unsigned int byte;
+
+		if (sscanf(hex + 2 * i, "%2x", &byte) != 1) {
+			fprintf(stderr, "testutil setxattrhex: bad hex value\n");
+			return 2;
+		}
+		buf[i] = (unsigned char) byte;
+	}
+	if (lsetxattr(path, name, buf, len, 0) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	return 0;
+}
+
+static int cmd_getxattrhex(const char *path, const char *name)
+{
+	unsigned char buf[4096];
+	ssize_t n, i;
+
+	n = lgetxattr(path, name, buf, sizeof(buf));
+	if (n == -1) {
+		print_err(errno);
+		return 1;
+	}
+	for (i = 0; i < n; i++)
+		printf("%02x", buf[i]);
 	return 0;
 }
 
@@ -286,6 +331,10 @@ int main(int argc, char *argv[])
 		return cmd_listxattr(argv[2]);
 	if (argc == 4 && strcmp(argv[1], "removexattr") == 0)
 		return cmd_removexattr(argv[2], argv[3]);
+	if (argc == 5 && strcmp(argv[1], "setxattrhex") == 0)
+		return cmd_setxattrhex(argv[2], argv[3], argv[4]);
+	if (argc == 4 && strcmp(argv[1], "getxattrhex") == 0)
+		return cmd_getxattrhex(argv[2], argv[3]);
 	if (argc == 6 && strcmp(argv[1], "fallocate") == 0)
 		return cmd_fallocate(argv[2], argv[3], argv[4], argv[5]);
 	if (argc == 5 && strcmp(argv[1], "writehold") == 0)
@@ -300,6 +349,8 @@ int main(int argc, char *argv[])
 		"       testutil getxattr <path> <name>\n"
 		"       testutil listxattr <path>\n"
 		"       testutil removexattr <path> <name>\n"
+		"       testutil setxattrhex <path> <name> <hex>\n"
+		"       testutil getxattrhex <path> <name>\n"
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
 		"       testutil writehold <path> <append|create> <nbytes>\n");
 	return 2;

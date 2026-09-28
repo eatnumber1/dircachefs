@@ -567,48 +567,102 @@ absl::Status RefreshXattrs(Context &ctx, InodeId id) {
 
 namespace {
 
+// Xattr `name` of the object `fd` (any fd, including O_PATH) refers to:
+// its value, or nullopt if it does not exist (ENODATA; or ENOTSUP/
+// EOPNOTSUPP, a filesystem without xattrs, as XattrsOf).
+absl::StatusOr<std::optional<std::string>> XattrOf(int fd,
+                                                   std::string_view name) {
+  absl::StatusOr<std::string> value = syscalls::getxattr_opath(fd, name);
+  if (!value.ok()) {
+    int err = ErrnoOf(value.status());
+    if (err == ENODATA || err == ENOTSUP || err == EOPNOTSUPP) {
+      return std::nullopt;
+    }
+    return value.status();
+  }
+  return *std::move(value);
+}
+
+}  // namespace
+
+absl::StatusOr<std::optional<std::string>> RefreshXattr(
+    Context &ctx, InodeId id, std::string_view name,
+    std::optional<int> open_fd) {
+  std::optional<FileDescriptor> opened;
+  if (!open_fd.has_value()) {
+    ABSL_ASSIGN_OR_RETURN(opened, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+    open_fd = **opened;
+  }
+  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> value,
+                        XattrOf(*open_fd, name));
+  if (value.has_value()) {
+    ABSL_RETURN_IF_ERROR(cache::SetXattr(ctx, id, name, *value));
+  } else {
+    ABSL_RETURN_IF_ERROR(cache::RemoveXattr(ctx, id, name));
+  }
+  return value;
+}
+
+namespace {
+
 // Shared by SetXattr/RemoveXattr: an O_PATH fd on `id`, its type, and
 // whichever real fd `apply` should use -- `open_fd` if given, else a fresh
 // /proc reopen for a regular file/directory (freed automatically at the end
 // of the calling statement). Special files use `opath_fd` itself via the
 // *_opath syscalls instead of ever calling `apply`.
+//
+// If `read_back` is given, it is set, once the op has succeeded, to what
+// the object now stores under `name` (XattrOf, through `opath_fd`, the fd
+// the op itself used or one on the same object).
 template <typename ApplyReal, typename ApplyOpath>
 absl::Status ApplyXattrOp(Context &ctx, InodeId id, std::optional<int> open_fd,
-                          ApplyReal apply_real, ApplyOpath apply_opath) {
+                          std::string_view name, ApplyReal apply_real,
+                          ApplyOpath apply_opath,
+                          XattrReadBack *read_back = nullptr) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor opath_fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx, syscalls::statx(*opath_fd, "", AT_EMPTY_PATH, STATX_MODE));
   mode_t type = stx.stx_mode & S_IFMT;
   if (S_ISREG(type) || S_ISDIR(type)) {
-    if (open_fd.has_value()) return apply_real(*open_fd);
-    ABSL_ASSIGN_OR_RETURN(
-        FileDescriptor fd,
-        syscalls::ReopenPathFd(*opath_fd, O_RDONLY | O_CLOEXEC));
-    return apply_real(*fd);
+    if (open_fd.has_value()) {
+      ABSL_RETURN_IF_ERROR(apply_real(*open_fd));
+    } else {
+      ABSL_ASSIGN_OR_RETURN(
+          FileDescriptor fd,
+          syscalls::ReopenPathFd(*opath_fd, O_RDONLY | O_CLOEXEC));
+      ABSL_RETURN_IF_ERROR(apply_real(*fd));
+    }
+  } else {
+    ABSL_RETURN_IF_ERROR(apply_opath(*opath_fd));
   }
-  return apply_opath(*opath_fd);
+  if (read_back != nullptr) *read_back = XattrOf(*opath_fd, name);
+  return absl::OkStatus();
 }
 
 }  // namespace
 
-absl::Status SetXattr(Context &ctx, InodeId id, std::string_view name,
-                      std::string_view value, int flags,
-                      std::optional<int> open_fd) {
+absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, InodeId id,
+                                       std::string_view name,
+                                       std::string_view value, int flags,
+                                       std::optional<int> open_fd) {
   std::span<const uint8_t> value_bytes(
       reinterpret_cast<const uint8_t *>(value.data()), value.size());
-  return ApplyXattrOp(
-      ctx, id, open_fd,
+  XattrReadBack read_back = std::nullopt;
+  ABSL_RETURN_IF_ERROR(ApplyXattrOp(
+      ctx, id, open_fd, name,
       [&](int fd) { return syscalls::fsetxattr(fd, name, value_bytes, flags); },
       [&](int fd) {
         return syscalls::setxattr_opath(fd, name, value_bytes, flags);
-      });
+      },
+      &read_back));
+  return read_back;
 }
 
 absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name,
                          std::optional<int> open_fd) {
   return ApplyXattrOp(
-      ctx, id, open_fd,
+      ctx, id, open_fd, name,
       [&](int fd) { return syscalls::fremovexattr(fd, name); },
       [&](int fd) { return syscalls::removexattr_opath(fd, name); });
 }

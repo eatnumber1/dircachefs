@@ -507,6 +507,41 @@ else
 	fail xattr-on-symlink-eperm "rc=$rc out='$out' (want nonzero rc, 'ERR EPERM')"
 fi
 
+# --- xattrs the backing filesystem stores differently (step 4.11) ----------
+
+# xattr_matches NAME PATH XATTR: getxattr through /mnt must answer exactly
+# what the backing filesystem does (hex value, or the same ERR errno).
+xattr_matches() {
+	x_src=$("$TESTUTIL" getxattrhex "$SRC/$2" "$3")
+	x_mnt=$("$TESTUTIL" getxattrhex "$MNT/$2" "$3")
+	if [ "$x_src" = "$x_mnt" ]; then
+		pass "$1"
+	else
+		fail "$1" "src='$x_src' mnt='$x_mnt'"
+	fi
+}
+
+# Binary POSIX ACL xattrs (struct posix_acl_xattr_header, version 2, then
+# 8-byte entries: le16 tag, le16 perm, le32 id; ids ffffffff for the
+# owner/group/other/mask entries), since busybox has no setfacl.
+# u::rw- g::r-- o::r--: exactly equivalent to mode 0644, so ext4 stores no
+# xattr at all (posix_acl_update_mode) and only sets the mode.
+ACL_MINIMAL_644=0200000001000600ffffffff04000400ffffffff20000400ffffffff
+
+# setxattr of an ACL equivalent to the mode: what is cached must be what the
+# backing filesystem stored (nothing), not what the client sent.
+: >"$MNT/acl_min"
+chmod 644 "$MNT/acl_min"
+out=$("$TESTUTIL" setxattrhex "$MNT/acl_min" system.posix_acl_access "$ACL_MINIMAL_644")
+rc=$?
+out_src=$("$TESTUTIL" getxattrhex "$SRC/acl_min" system.posix_acl_access)
+if [ "$rc" -eq 0 ] && [ "$out_src" = "ERR ENODATA" ]; then
+	pass acl-minimal-set
+else
+	fail acl-minimal-set "rc=$rc out='$out' src='$out_src' (want the backing to store no ACL)"
+fi
+xattr_matches acl-minimal-getxattr-matches-src acl_min system.posix_acl_access
+
 # --- mkdir-eexist-parent-still-resolves (step 4.2 failure-path fix) --------
 
 # A failed mkdir/mknod/symlink/create must re-resolve the name it marked

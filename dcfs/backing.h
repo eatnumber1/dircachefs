@@ -154,6 +154,25 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
 // (ListXattrs/GetXattr returned nullopt).
 absl::Status RefreshXattrs(Context &ctx, InodeId id);
 
+// Reads xattr `name` of `id` from the backing filesystem and records it in
+// the cache as present or absent (cache::SetXattr/RemoveXattr), resolving
+// just that one name; returns what it read (nullopt: absent, including on
+// a filesystem without xattrs). Reads through `open_fd` if given (any fd
+// on `id`, O_PATH included), else through an O_PATH OpenNode. Used when
+// the cached state of `name` is unknown, and by phase 3 of the mutations
+// that change `name` as a side effect (DirCacheFS's side-effect xattrs).
+absl::StatusOr<std::optional<std::string>> RefreshXattr(
+    Context &ctx, InodeId id, std::string_view name,
+    std::optional<int> open_fd = std::nullopt);
+
+// What the backing filesystem stores under an xattr's name right after a
+// successful setxattr, read back through the same object: its value,
+// nullopt if it stored nothing, or the read-back's own error. The two can
+// differ: e.g. ext4 (like xfs and btrfs) stores a system.posix_acl_access
+// ACL that is exactly equivalent to the file mode as no xattr at all, and
+// only updates the mode (posix_acl_update_mode).
+using XattrReadBack = absl::StatusOr<std::optional<std::string>>;
+
 // Applies setxattr(2)/removexattr(2) for `id` -- phase 2 of
 // DirCacheFS::Setxattr/Removexattr's write-through rule, run between their
 // own cache::ForgetXattr (phase 1) and cache::SetXattr/RemoveXattr (phase
@@ -169,9 +188,13 @@ absl::Status RefreshXattrs(Context &ctx, InodeId id);
 // kernel itself rejects a "user." xattr on a symlink or special file with
 // EPERM; that happens inside the real syscall here and needs no special
 // casing.
-absl::Status SetXattr(Context &ctx, InodeId id, std::string_view name,
-                      std::string_view value, int flags,
-                      std::optional<int> open_fd);
+//
+// SetXattr's error is the setxattr's; on success it returns the read-back
+// (see XattrReadBack), which phase 3 records instead of `value`.
+absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, InodeId id,
+                                       std::string_view name,
+                                       std::string_view value, int flags,
+                                       std::optional<int> open_fd);
 absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name,
                          std::optional<int> open_fd);
 

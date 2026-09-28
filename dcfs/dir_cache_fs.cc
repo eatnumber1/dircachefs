@@ -1112,19 +1112,30 @@ absl::Status DirCacheFS::Setxattr(
   // (see the BackingFile map) if one is already open. XATTR_CREATE/
   // XATTR_REPLACE in `flags`, and EPERM for "user." on a symlink or
   // special file, pass straight through from the real syscall.
-  absl::Status set_status =
+  absl::StatusOr<backing::XattrReadBack> stored =
       backing::SetXattr(ctx_, id, name, value, flags, OpenFdOf(id));
-  if (!set_status.ok()) {
+  if (!stored.ok()) {
     // `name` stays unknown (the syscall may or may not have changed it),
     // for the next reader to resolve; the attributes are refreshed as a
     // best effort, as Setattr does on its own phase-2 failure.
     RefreshAttrsOf(id).IgnoreError();
-    return set_status;
+    return stored.status();
   }
 
-  // Phase 3: the new value, and the ctime bump setxattr(2) causes (phase 1
-  // marked the attributes unknown for it, above).
-  ABSL_RETURN_IF_ERROR(cache::SetXattr(ctx_, id, name, value));
+  // Phase 3: what the backing filesystem actually stored, read back right
+  // after the set -- not `value`, which it may have stored differently or
+  // not at all (see backing::XattrReadBack) -- and the ctime (and, for an
+  // ACL, mode) change setxattr(2) causes (phase 1 marked the attributes
+  // unknown for it, above). If the read-back failed, `name` stays unknown.
+  if (!stored->ok()) {
+    LOG(WARNING) << "Setxattr: could not read xattr " << name
+                 << " of inode " << id << " back, leaving it unknown: "
+                 << stored->status();
+  } else if ((*stored)->has_value()) {
+    ABSL_RETURN_IF_ERROR(cache::SetXattr(ctx_, id, name, ***stored));
+  } else {
+    ABSL_RETURN_IF_ERROR(cache::RemoveXattr(ctx_, id, name));
+  }
   ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
   return req.ReplyErrno(0);
 }
