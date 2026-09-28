@@ -4,12 +4,15 @@
 #include <sys/sysmacros.h>
 
 #include <cstdint>
+#include <random>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
+#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
@@ -151,7 +154,9 @@ class MetadataCacheTest : public ::testing::Test {
 
   sqlite3::Connection db_;
   MountFds mounts_;
-  Context ctx_{db_, mounts_};
+  // Fixed seed: generations are random, but tests should be reproducible.
+  absl::BitGen bitgen_{std::seed_seq{4, 10}};
+  Context ctx_{db_, mounts_, bitgen_};
 };
 
 TEST_F(MetadataCacheTest, UpsertCreatesThenUpdatesSameIdentity) {
@@ -536,15 +541,32 @@ TEST_F(MetadataCacheTest, ListDirSpansBatchesAndAllowsWritesInCallback) {
 
 TEST_F(MetadataCacheTest, FuseGenerations) {
   EXPECT_THAT(GetGeneration(ctx_, kRootInode), IsOkAndHolds(0u));
-  std::vector<uint32_t> gens;
-  for (uint64_t ino = 100; ino < 120; ++ino) {
+  // Random, so 100 draws of 32 bits collide with probability ~1e-6.
+  absl::flat_hash_set<uint32_t> gens;
+  for (uint64_t ino = 100; ino < 200; ++ino) {
     ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(ino));
     EXPECT_NE(r.fuse_gen, 0u);
     EXPECT_THAT(GetGeneration(ctx_, r.id), IsOkAndHolds(r.fuse_gen));
-    for (uint32_t g : gens) EXPECT_NE(g, r.fuse_gen);
-    gens.push_back(r.fuse_gen);
+    EXPECT_TRUE(gens.insert(r.fuse_gen).second)
+        << "generation " << r.fuse_gen << " drawn twice";
   }
   EXPECT_THAT(GetGeneration(ctx_, 999), StatusIs(absl::StatusCode::kNotFound));
+}
+
+// The point of random generations: a power loss can roll back recent
+// inserts and let AUTOINCREMENT hand the same id out again, but the reused
+// id gets a fresh generation, so an old (id, generation) handle is stale
+// instead of resolving to the new object.
+TEST_F(MetadataCacheTest, ReusedIdAfterRollbackGetsNewGeneration) {
+  UpsertResult before;
+  absl::Status rolled_back = db_.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(before, Make(100));
+    return absl::AbortedError("simulated loss of the tail of the WAL");
+  });
+  ASSERT_THAT(rolled_back, StatusIs(absl::StatusCode::kAborted));
+  ASSERT_OK_AND_ASSIGN(UpsertResult after, Make(101));
+  EXPECT_EQ(after.id, before.id);
+  EXPECT_NE(after.fuse_gen, before.fuse_gen);
 }
 
 TEST_F(MetadataCacheTest, UpsertRootUpdatesInPlace) {

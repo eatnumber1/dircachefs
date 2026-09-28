@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/random/bit_gen_ref.h"
 #include "absl/status/statusor.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/sqlite.h"
@@ -16,10 +17,16 @@ namespace dcfs {
 // per coroutine runner) that owns this state, and tests can build one
 // around an in-memory database without any setup beyond constructing it.
 //
-// Non-owning: the Connection and MountFds must outlive the Context.
+// Non-owning: the Connection, MountFds and random generator must outlive
+// the Context.
 struct Context {
   sqlite3::Connection &db;
   MountFds &mounts;
+  // The source of every new row's FUSE generation (cache::UpsertInode): a
+  // uniformly random 32-bit value, never 0 (the root's). Owned by whoever
+  // builds the Context (main() owns an absl::BitGen; tests may pass a
+  // seeded one).
+  absl::BitGenRef rng;
   // The inode ids (cache::InodeId) that currently have at least one
   // writable open outstanding, owned by DirCacheFS (which points this at
   // its own set in its constructor); null means none (e.g. in unit tests).

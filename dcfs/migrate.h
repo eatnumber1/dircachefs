@@ -13,10 +13,13 @@
 
 namespace dcfs {
 
-// The schema version this build of dcfs understands. Bump when schema.sql
-// changes in a way that requires a migration -- future upgrade steps go in
-// Migrate() below, gated on the stored value being less than this.
-inline constexpr int kSchemaVersion = 1;
+// The schema version this build of dcfs creates. Bump when schema.sql
+// changes in a way that requires a migration, and add the upgrade step from
+// the previous version to Migrate() (migrate.cc UpgradeSchema).
+//
+// v1: the original schema (FUSE generations from meta.gen_counter).
+// v2: random FUSE generations (meta.gen_counter dropped).
+inline constexpr int kSchemaVersion = 2;
 
 // Identifies the root of the cache: the backing filesystem being cached,
 // and the backing (ino, generation) of its root directory. Only consulted
@@ -32,17 +35,17 @@ struct RootIdentity {
 //
 // If `db` is a fresh database (no `meta` table), this runs schema.sql and
 // seeds it, all inside a single transaction:
-//   - meta rows: schema_version = kSchemaVersion, gen_counter (randomly
-//     seeded), source_device_id = root.device_id.Serialize().
+//   - meta rows: schema_version = kSchemaVersion, source_device_id =
+//     root.device_id.Serialize().
 //   - the source filesystems row (parent_inode/boundary_name NULL).
 //   - the root inodes row: id = 1 (FUSE_ROOT_ID), fuse_gen = 0,
 //     backing_ino/backing_gen from `root`, attrs_valid 0.
 //   - the root directories row (children_complete 0).
 //
-// If `db` already has a schema, this instead validates it: the stored
-// schema_version must equal kSchemaVersion (there is no upgrade path yet;
-// returns absl::FailedPreconditionError naming both versions if it
-// doesn't), and the root inode row (id 1) must exist (else
+// If `db` already has a schema, this instead upgrades it to kSchemaVersion
+// (one transaction, one version step at a time; a version newer than this
+// build's, or garbage, is absl::FailedPreconditionError naming both) and
+// validates it: the root inode row (id 1) must exist (else
 // absl::FailedPreconditionError: corrupt cache). Calling Migrate() again on
 // an already-migrated, uncorrupted database is a no-op.
 //
@@ -57,8 +60,8 @@ absl::Status Migrate(sqlite3::Connection &db, const RootIdentity &root);
 //
 // `meta` is a small key/value store for cache-wide state that doesn't fit
 // anywhere else (see schema.sql). These are generic accessors; the
-// specific keys used are schema_version, gen_counter and
-// source_device_id, exposed above/below via typed wrappers.
+// specific keys used are schema_version and source_device_id, exposed
+// below via typed wrappers.
 
 // Returns the value stored for `key`, or nullopt if there is no such row.
 absl::StatusOr<std::optional<std::string>> GetMeta(sqlite3::Connection &db,
@@ -74,18 +77,6 @@ absl::StatusOr<DeviceId> GetSourceDeviceId(sqlite3::Connection &db);
 
 // Returns meta.schema_version. The schema must already exist.
 absl::StatusOr<int> GetSchemaVersion(sqlite3::Connection &db);
-
-// Mints the next FUSE generation number: reads meta.gen_counter, increments
-// it modulo 2^32 skipping the value 0 (0 is reserved for the root inode),
-// writes the new value back, and returns it. Successive calls (without an
-// intervening rollback) return strictly increasing values, except across
-// the 2^32 wraparound.
-//
-// The caller must already be inside a transaction (see
-// Connection::Transaction): minting a generation is only meaningful
-// together with whatever row update uses it, and both must commit or roll
-// back together.
-absl::StatusOr<uint32_t> MintFuseGeneration(sqlite3::Connection &db);
 
 }  // namespace dcfs
 

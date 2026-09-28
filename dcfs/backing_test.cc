@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
+#include <random>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -23,6 +24,7 @@
 #include "absl/base/log_severity.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/scoped_mock_log.h"
+#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
@@ -199,7 +201,9 @@ class BackingTest : public ::testing::Test {
   std::vector<std::pair<std::string, mode_t>> locked_;
   sqlite3::Connection db_;
   MountFds mounts_;
-  Context ctx_{db_, mounts_};
+  // Fixed seed: generations are random, but tests should be reproducible.
+  absl::BitGen bitgen_{std::seed_seq{4, 10}};
+  Context ctx_{db_, mounts_, bitgen_};
 };
 
 std::vector<std::string> ListNames(Context &ctx, InodeId dir) {
@@ -499,7 +503,7 @@ TEST_F(BackingTest, InitRootRejectsACacheForAnotherFilesystem) {
                                              .backing_gen = 0}),
               IsOk());
   MountFds other_mounts;
-  Context other{other_db, other_mounts};
+  Context other{other_db, other_mounts, bitgen_};
   ASSERT_OK_AND_ASSIGN(FileDescriptor fd, syscalls::dup(source_fd_));
   EXPECT_THAT(InitRoot(other, std::move(fd)),
               StatusIs(absl::StatusCode::kFailedPrecondition));

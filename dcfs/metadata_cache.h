@@ -158,7 +158,8 @@ absl::StatusOr<FilesystemRow> GetFilesystem(Context &ctx,
 // If that identity already has a row, it is updated. Otherwise any row for
 // the same (device, ino) with a different generation -- i.e. the backing
 // filesystem recycled the inode number -- is invalidated, and a new row is
-// created with a freshly minted fuse_gen. handle.device must already be
+// created with a fresh fuse_gen drawn from ctx.rng (uniformly random, never
+// 0). handle.device must already be
 // registered via AddFilesystem(). Not for the root; see UpsertRoot().
 absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
                                          const FileHandle &handle,

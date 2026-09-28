@@ -74,18 +74,6 @@ absl::StatusOr<int64_t> CountRows(sqlite3::Connection &db,
   return count;
 }
 
-// Runs MintFuseGeneration inside a transaction, as its contract requires,
-// and surfaces its result.
-absl::StatusOr<uint32_t> MintInTransaction(sqlite3::Connection &db) {
-  absl::StatusOr<uint32_t> minted;
-  absl::Status txn = db.Transaction([&]() -> absl::Status {
-    minted = MintFuseGeneration(db);
-    return minted.status();
-  });
-  if (!txn.ok()) return txn;
-  return minted;
-}
-
 class MigrateTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -125,16 +113,16 @@ TEST_F(MigrateTest, MigratingAgainIsANoOp) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
 
-  ASSERT_OK_AND_ASSIGN(std::optional<std::string> gen_before,
-                        GetMeta(db_, "gen_counter"));
-  ASSERT_TRUE(gen_before.has_value());
+  ASSERT_OK_AND_ASSIGN(std::optional<std::string> device_before,
+                        GetMeta(db_, "source_device_id"));
+  ASSERT_TRUE(device_before.has_value());
   ASSERT_OK_AND_ASSIGN(int64_t inodes_before, CountRows(db_, "inodes"));
   ASSERT_OK_AND_ASSIGN(int64_t fs_before, CountRows(db_, "filesystems"));
   ASSERT_OK_AND_ASSIGN(int64_t dirs_before, CountRows(db_, "directories"));
 
   ASSERT_THAT(Migrate(db_, root), IsOk());
 
-  EXPECT_THAT(GetMeta(db_, "gen_counter"), IsOkAndHolds(gen_before));
+  EXPECT_THAT(GetMeta(db_, "source_device_id"), IsOkAndHolds(device_before));
   EXPECT_THAT(CountRows(db_, "inodes"), IsOkAndHolds(inodes_before));
   EXPECT_THAT(CountRows(db_, "filesystems"), IsOkAndHolds(fs_before));
   EXPECT_THAT(CountRows(db_, "directories"), IsOkAndHolds(dirs_before));
@@ -158,37 +146,54 @@ TEST_F(MigrateTest, MissingRootInodeFailsPreconditionAsCorrupt) {
               StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
-TEST_F(MigrateTest, MintFuseGenerationFailsOutsideTransaction) {
-  RootIdentity root = TestRoot();
-  ASSERT_THAT(Migrate(db_, root), IsOk());
-
-  EXPECT_FALSE(MintFuseGeneration(db_).ok());
-  EXPECT_FALSE(db_.InTransaction());
+TEST_F(MigrateTest, FreshDatabaseHasNoGenerationCounter) {
+  ASSERT_THAT(Migrate(db_, TestRoot()), IsOk());
+  EXPECT_THAT(GetMeta(db_, "gen_counter"), IsOkAndHolds(std::nullopt));
 }
 
-TEST_F(MigrateTest, MintFuseGenerationIsStrictlyIncreasing) {
-  RootIdentity root = TestRoot();
-  ASSERT_THAT(Migrate(db_, root), IsOk());
-  // Pin the starting point away from the 2^32 wraparound edge so this test
-  // isn't flaky depending on the randomly-seeded starting counter.
-  ASSERT_THAT(SetMeta(db_, "gen_counter", "100"), IsOk());
-
-  ASSERT_OK_AND_ASSIGN(uint32_t first, MintInTransaction(db_));
-  ASSERT_OK_AND_ASSIGN(uint32_t second, MintInTransaction(db_));
-  ASSERT_OK_AND_ASSIGN(uint32_t third, MintInTransaction(db_));
-
-  EXPECT_EQ(first, 101u);
-  EXPECT_EQ(second, 102u);
-  EXPECT_EQ(third, 103u);
+// Turns a freshly created current-version database back into what schema
+// v1 looked like, as far as any later migration step can tell.
+absl::Status DowngradeToV1(sqlite3::Connection &db) {
+  ABSL_RETURN_IF_ERROR(SetMeta(db, "schema_version", "1"));
+  return SetMeta(db, "gen_counter", "12345");
 }
 
-TEST_F(MigrateTest, MintFuseGenerationWrapsSkippingZero) {
+TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
-  ASSERT_THAT(SetMeta(db_, "gen_counter", "4294967295"), IsOk());  // 0xFFFFFFFF
+  ASSERT_THAT(DowngradeToV1(db_), IsOk());
+  std::string device_bytes = root.device_id.Serialize();
+  ASSERT_OK_AND_ASSIGN(
+      sqlite3::Statement * insert,
+      db_.Prepared("INSERT INTO inodes "
+                    "(id, device_id, backing_ino, backing_gen, fuse_gen) "
+                    "VALUES (7, ?, 70, 0, 12345)"));
+  ASSERT_THAT(insert->Bind(1, Blob(device_bytes)), IsOk());
+  ASSERT_THAT(insert->ExecuteOnce(), IsOk());
 
-  ASSERT_OK_AND_ASSIGN(uint32_t wrapped, MintInTransaction(db_));
-  EXPECT_EQ(wrapped, 1u);
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
+  EXPECT_THAT(GetMeta(db_, "gen_counter"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(CountRows(db_, "inodes WHERE id = 7 AND fuse_gen = 12345"),
+              IsOkAndHolds(1));
+  EXPECT_THAT(CountRows(db_, "inodes WHERE id = 1 AND fuse_gen = 0"),
+              IsOkAndHolds(1));
+  EXPECT_THAT(GetSourceDeviceId(db_), IsOkAndHolds(root.device_id));
+
+  // And the upgraded database is now current: migrating again is a no-op.
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
+}
+
+TEST_F(MigrateTest, OlderThanV1FailsPrecondition) {
+  RootIdentity root = TestRoot();
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  ASSERT_THAT(SetMeta(db_, "schema_version", "0"), IsOk());
+  EXPECT_THAT(Migrate(db_, root),
+              StatusIs(absl::StatusCode::kFailedPrecondition));
+  // The failed upgrade rolled back: nothing changed.
+  EXPECT_THAT(GetMeta(db_, "schema_version"), IsOkAndHolds("0"));
 }
 
 TEST_F(MigrateTest, DuplicateBackingIdentityViolatesUniqueConstraint) {

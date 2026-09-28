@@ -15,6 +15,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
+#include "absl/random/distributions.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
@@ -501,7 +502,10 @@ absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
       ABSL_RETURN_IF_ERROR(InvalidateInode(ctx, id));
     }
 
-    ABSL_ASSIGN_OR_RETURN(uint32_t fuse_gen, MintFuseGeneration(ctx.db));
+    // Random, never 0 (the root's): see schema.sql's identity model.
+    const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed,
+                                            ctx.rng, uint32_t{1},
+                                            UINT32_MAX);
     ABSL_ASSIGN_OR_RETURN(
         Statement * insert,
         ctx.db.Prepared("INSERT INTO inodes (device_id, backing_ino, "

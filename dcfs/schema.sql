@@ -1,4 +1,5 @@
--- dcfs schema v1.
+-- dcfs schema v2 (see kSchemaVersion in dcfs/migrate.h for the history;
+-- Migrate() upgrades older databases in place).
 --
 -- Executed as a script against a fresh database by Migrate() (see
 -- dcfs/migrate.h). PRAGMA foreign_keys is already ON, set by the connection
@@ -7,15 +8,17 @@
 -- Identity model: the 64-bit inodes.id is the FUSE nodeid and is never
 -- reused. The backing identity is (device_id, backing_ino, backing_gen),
 -- unique per row -- hard links to the same backing file share a row. The
--- FUSE generation reported to the kernel is inodes.fuse_gen, minted from
--- meta.gen_counter (randomly seeded at creation, so a rebuilt cache never
--- reissues an old (id, gen) pair). The root row has id 1 (= FUSE_ROOT_ID)
--- and reports generation 0 by convention. dentries.inode IS NULL means a
+-- FUSE generation reported to the kernel is inodes.fuse_gen, a uniformly
+-- random nonzero 32-bit value drawn for each new row, so neither a rebuilt
+-- cache nor a power loss that rolls back recent inserts (and so lets
+-- AUTOINCREMENT hand an id out again) reissues an old (id, gen) pair,
+-- except with probability 2^-32 per reissued id. The root row has id 1
+-- (= FUSE_ROOT_ID) and reports generation 0 by convention. dentries.inode IS NULL means a
 -- cached negative entry.
 --
 -- All tables are STRICT (SQLite 3.37+ -- this build uses 3.53). meta.value is
 -- typed ANY rather than BLOB because it stores a mix of text-encoded
--- integers (schema_version, gen_counter) and raw bytes
+-- integers (schema_version) and raw bytes
 -- (source_device_id) -- a STRICT BLOB column rejects TEXT values outright,
 -- with no coercion, so ANY (which preserves whatever storage class was
 -- bound, unmodified) is the type that actually fits a heterogeneous

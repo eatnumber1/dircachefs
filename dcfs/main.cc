@@ -14,6 +14,7 @@
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
+#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/status_builder.h"
 #include "absl/status/status_macros.h"
@@ -146,7 +147,8 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Connection db, sqlite3::ConnectionFactory{.path = cache_db}.Open());
   MountFds mounts;
-  Context ctx{db, mounts};
+  absl::BitGen bitgen;
+  Context ctx{db, mounts, bitgen};
 
   ABSL_ASSIGN_OR_RETURN(RootIdentity root, backing::ProbeRoot(ctx, *source_fd));
   ABSL_RETURN_IF_ERROR(Migrate(db, root));

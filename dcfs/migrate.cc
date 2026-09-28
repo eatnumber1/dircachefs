@@ -6,7 +6,6 @@
 #include <string>
 #include <string_view>
 
-#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
@@ -22,12 +21,10 @@ namespace dcfs {
 namespace {
 
 constexpr std::string_view kKeySchemaVersion = "schema_version";
-constexpr std::string_view kKeyGenCounter = "gen_counter";
+// Schema v1 only: the FUSE generation counter, replaced in v2 by a random
+// generation per row (see cache::UpsertInode).
+constexpr std::string_view kKeyGenCounterV1 = "gen_counter";
 constexpr std::string_view kKeySourceDeviceId = "source_device_id";
-
-// The reserved FUSE generation for the root inode (see schema.sql); minting
-// skips this value.
-constexpr uint32_t kRootFuseGeneration = 0;
 
 // Views the bytes of `s` as a blob for Statement::Bind(). Several schema
 // columns that hold raw bytes (e.g. filesystems.device_id) are declared
@@ -57,26 +54,11 @@ absl::StatusOr<bool> RootInodeExists(sqlite3::Connection &db) {
   return exists;
 }
 
-// Parses a meta value previously written as an unsigned 32-bit decimal
-// string (gen_counter).
-absl::StatusOr<uint32_t> ParseU32Meta(std::string_view key,
-                                       const std::string &value) {
-  uint32_t parsed = 0;
-  RET_CHECK(absl::SimpleAtoi(value, &parsed))
-      << "meta." << key << " is not a valid uint32: " << value;
-  return parsed;
-}
-
 absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
   ABSL_RETURN_IF_ERROR(db.ExecScript(kSchemaSql));
 
   ABSL_RETURN_IF_ERROR(
       SetMeta(db, kKeySchemaVersion, absl::StrCat(kSchemaVersion)));
-
-  absl::BitGen bitgen;
-  uint32_t gen_counter = absl::Uniform<uint32_t>(bitgen);
-  ABSL_RETURN_IF_ERROR(
-      SetMeta(db, kKeyGenCounter, absl::StrCat(gen_counter)));
 
   std::string device_id_bytes = root.device_id.Serialize();
   ABSL_RETURN_IF_ERROR(SetMeta(db, kKeySourceDeviceId, device_id_bytes));
@@ -110,14 +92,38 @@ absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
   return dir_stmt->ExecuteOnce();
 }
 
+// v1 -> v2: FUSE generations become random per row (cache::UpsertInode),
+// so the v1 counter goes. Existing rows keep the generations they were
+// given.
+absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
+  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                        db.Prepared("DELETE FROM meta WHERE key = ?"));
+  ABSL_RETURN_IF_ERROR(stmt->Bind(1, kKeyGenCounterV1));
+  ABSL_RETURN_IF_ERROR(stmt->ExecuteOnce());
+  return SetMeta(db, kKeySchemaVersion, "2");
+}
+
+// Upgrades an existing database, one version at a time, to kSchemaVersion,
+// in one transaction. A version newer than this build's is refused.
+absl::Status UpgradeSchema(sqlite3::Connection &db) {
+  return db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+    if (version < 1 || version > kSchemaVersion) {
+      return absl::FailedPreconditionError(absl::StrCat(
+          "dcfs cache schema version mismatch: found ", version,
+          ", this build understands 1 through ", kSchemaVersion));
+    }
+    if (version == 1) {
+      ABSL_RETURN_IF_ERROR(MigrateV1ToV2(db));
+      version = 2;
+    }
+    RET_CHECK_EQ(version, kSchemaVersion);
+    return absl::OkStatus();
+  });
+}
+
 absl::Status ValidateExistingSchema(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
-  if (version != kSchemaVersion) {
-    return absl::FailedPreconditionError(absl::StrCat(
-        "dcfs cache schema version mismatch: found ", version,
-        ", this build expects ", kSchemaVersion,
-        " (no upgrade path yet)"));
-  }
+  ABSL_RETURN_IF_ERROR(UpgradeSchema(db));
 
   ABSL_ASSIGN_OR_RETURN(bool root_exists, RootInodeExists(db));
   if (!root_exists) {
@@ -175,23 +181,6 @@ absl::StatusOr<int> GetSchemaVersion(sqlite3::Connection &db) {
   RET_CHECK(absl::SimpleAtoi(*value, &version))
       << "meta.schema_version is not a valid integer: " << *value;
   return version;
-}
-
-absl::StatusOr<uint32_t> MintFuseGeneration(sqlite3::Connection &db) {
-  RET_CHECK(db.InTransaction())
-      << "MintFuseGeneration must be called inside a transaction";
-
-  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> value,
-                         GetMeta(db, kKeyGenCounter));
-  RET_CHECK(value.has_value()) << "meta.gen_counter is missing";
-  ABSL_ASSIGN_OR_RETURN(uint32_t current,
-                         ParseU32Meta(kKeyGenCounter, *value));
-
-  uint32_t next = current + 1;  // wraps mod 2^32 on overflow.
-  if (next == kRootFuseGeneration) next = kRootFuseGeneration + 1;
-
-  ABSL_RETURN_IF_ERROR(SetMeta(db, kKeyGenCounter, absl::StrCat(next)));
-  return next;
 }
 
 }  // namespace dcfs
