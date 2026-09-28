@@ -27,6 +27,11 @@ booting.
   `run-qemu.sh` invocation in `sg kvm -c '...'`. Without a writable
   `/dev/kvm`, QEMU falls back to TCG (software emulation), which still
   works but is ten-plus times slower -- see `TIMEOUT` below.
+- For `nfs_test` only: `mmdebstrap`, `unshare`/`newuidmap`/`newgidmap`
+  (util-linux), and an `/etc/subuid`/`/etc/subgid` delegation for your user
+  -- see "NFS test and the Debian rootfs" below. Network access (plain
+  HTTPS to `deb.debian.org`) is needed once, to build the rootfs image; the
+  test itself is fully offline (loopback only).
 
 ## Building the test kernel
 
@@ -268,6 +273,7 @@ bazel test //test/qemu:setattr_test
 bazel test //test/qemu:create_test
 bazel test //test/qemu:rename_test
 bazel test //test/qemu:write_test
+bazel test //test/qemu:nfs_test
 ```
 
 - `boot_test` (`guest/boot.sh`): dcfs and fhtest are present and runnable,
@@ -372,6 +378,24 @@ bazel test //test/qemu:write_test
   being served from cache -- surviving a daemon restart against the same
   cache database.
 
+- `nfs_test` (`guest/nfs.sh`): step 5.3's real NFS export -- dcfs mounted
+  and then re-exported over loopback NFSv4 (`rpc.nfsd`/`rpc.mountd`/
+  `exportfs`, from a small Debian chroot; see "NFS test and the Debian
+  rootfs" below) checks a normalized listing matching `/src` across the
+  vdc submount; a metadata pass over NFS causing zero backing-device
+  reads (the NFS client's own attribute/dentry cache is defeated by
+  `drop_caches`, same mechanism as everywhere else in this repo, so this
+  is a real round trip through nfsd and dcfs, not served from the
+  client); a content read matching `/src` and moving the backing
+  counter; a file held open over NFS surviving a `dcfs` restart with no
+  ESTALE/EIO (`nfsd`'s own export-path cache needs an explicit
+  `exportfs -f` after the restart to pick up the new mount -- ordinary
+  NFS administration, not a dcfs workaround); a write through NFS
+  landing on the backing file and reading back correctly (step 4.4); and
+  wiping the cache database yielding ESTALE for the pre-wipe handle
+  (with zero backing I/O, i.e. caught before ever reaching the backing
+  file) followed by a working fresh mount.
+
 The serial console log lands at
 `bazel-testlogs/test/qemu/boot_test/test.outputs/serial.log` (Bazel's
 `TEST_UNDECLARED_OUTPUTS_DIR`), or in the test's `TEST_TMPDIR` if that
@@ -395,6 +419,143 @@ qemu_test(
 parameter (the macro fills this in from `guest_script`'s basename) via
 `sh`, then reports `ALL-TESTS-PASSED` or `TEST-FAILED` based on its exit
 status.
+
+## NFS test and the Debian rootfs
+
+`nfs_test` (above) needs `rpc.nfsd`/`rpc.mountd`/`exportfs`/`mount.nfs4`,
+none of which fit in the busybox-only initramfs every other test runs
+from. It gets them by chrooting into a small Debian tree instead:
+
+### Building the image
+
+```
+test/qemu/scripts/mkrootfs-debian.sh
+```
+
+Builds `bookworm` (override with `DCFS_ROOTFS_SUITE=trixie` etc.) via
+`mmdebstrap --mode=unshare` into `~/.cache/dcfs/rootfs-debian.ext4` (default;
+override with `DCFS_ROOTFS_IMAGE`), the same out-of-tree-artifact pattern as
+`build-kernel.sh`/`@kernel_image`: not a Bazel target (it downloads ~200 MB
+and doesn't belong in the action graph), but exposed to Bazel the same way,
+by `test/qemu/kernel.bzl`'s `kernel_image` repo rule symlinking it in as
+`@kernel_image//:rootfs_debian.ext4` if present, or a `DCFS-ROOTFS-MISSING`
+placeholder otherwise (`run-qemu.sh` fails fast and clearly on the
+placeholder, same as for a missing kernel).
+
+Measured on this host: ~35-45s wall time (mmdebstrap ~35-40s of that,
+downloading ~200 MB; the tar-to-ext4 conversion is ~1-2s), producing a
+1024 MiB nominal image (`DCFS_ROOTFS_SIZE` to change) of which ~265 MiB is
+actually used -- most of the headroom is for `/cache/dcfs.db` and whatever
+the test writes during a run, since the image is copied (not the same
+image reused read-only) into each test's own `$TEST_TMPDIR` so the guest
+can write to it freely without disturbing the cached original.
+
+No `//test/qemu:rootfs_debian` Bazel genrule exists, deliberately: the
+image has to live outside `bazel-out` for exactly the reason the kernel
+does (so it survives `bazel clean` and is shared across worktrees/branches
+instead of being rebuilt, and re-downloaded, by every one of them), so a
+genrule wrapping the same script would add a layer without adding value.
+
+### The unprivileged mmdebstrap-to-ext4 recipe
+
+This took real trial and error; the working recipe (and why) is documented
+inline in `mkrootfs-debian.sh`'s header comment, briefly:
+
+1. **Keyring**: this host's/Ubuntu's `debian-archive-keyring` was too old
+   (missing a since-added co-signing key on bookworm's InRelease), producing
+   `NO_PUBKEY` errors that look like a mirror problem. Fetch the current
+   package directly from `deb.debian.org`'s pool (plain HTTPS, no apt
+   circularity) and cache it.
+2. **mmdebstrap's own sandbox can't read `$HOME/.cache`**: its internal
+   `--mode=unshare` sandbox doesn't map your uid to itself, so anything it
+   reads (like `--keyring`) needs to live under a world-traversable
+   directory -- `$HOME/.cache` is mode 0700 by convention, so the cached
+   keyring gets staged to a `chmod 644` copy under `/tmp` just for the
+   mmdebstrap invocation.
+3. **Tar-to-ext4 as your own uid loses ownership**: `mkfs.ext4 -d <dir>`
+   needs a real directory and preserves whatever ownership it has, but a
+   plain `tar -x` as yourself can't restore Debian's real ownership
+   (`/etc/shadow`'s group, etc). `unshare --user --map-root-user` only maps
+   one id (yours to 0); every other uid/gid in the tarball gets `EINVAL` on
+   chown. The fix: `--map-user=0` (your uid to inner 0) *combined with*
+   `--map-users=1:<subuid-start>:<subuid-count>` (inner 1..N to your
+   `/etc/subuid` delegation) -- these two compose, unlike two `--map-users`
+   (whose last occurrence simply wins, per `unshare(1)`).
+4. **mknod is unfixable, and doesn't matter**: even with that full mapping,
+   creating real device nodes (`/dev/null`, etc.) fails with EPERM --
+   `mknod(2)` for a character/block device checks `CAP_MKNOD` against the
+   **init** user namespace unconditionally, so no amount of unprivileged
+   nesting grants it. `mkrootfs-debian.sh` excludes `./dev/*` from the tar
+   extraction and creates an empty `/dev` instead: harmless, since
+   `guest/init` bind-mounts the real `/dev` over the chroot before using it
+   (see below).
+5. **The image needs a couple of things a "complete" Debian install gets
+   for free** that a bare `--variant=apt` bootstrap doesn't run the
+   postinst scripts for: `/etc/mtab` (normally a symlink to
+   `/proc/self/mounts`, set up by the `mount` package's postinst) and a
+   clean `/etc/resolv.conf` (mmdebstrap's unshare mode bind-mounts the
+   *host's* resolv.conf into its build chroot for apt's own DNS, and that
+   host-specific content was ending up baked into the image). Both are
+   fixed up directly in the script after extraction, before `mke2fs`.
+
+### Boot mode: chrooting instead of switching root
+
+The initramfs boot stays the fast path for every other test. `qemu_test`
+takes an optional `rootfs = "@kernel_image//:rootfs_debian.ext4"` attribute
+(`test/qemu/qemu_test.bzl`): when given, `run-qemu.sh` copies the cached
+image into the test's own tmpdir, attaches it as an extra virtio-blk disk
+at the next free `/dev/vd<letter>`, and passes `dcfs_rootfs=/dev/vd<letter>`
+on the kernel command line. `guest/init` mounts it on `/newroot`,
+bind-mounts `/proc`, `/sys`, and `/dev` into it, copies `dcfs`/`fhtest`/
+`testutil` and `/tests` in, brings up loopback (in the initramfs's own
+network namespace -- `chroot(2)` doesn't touch that), and `chroot`s into it
+to run the guest script with GNU coreutils/findutils and nfs-utils
+available, instead of running it straight from the busybox initramfs.
+
+### Findings from getting `nfs_test` green
+
+None of these are dcfs bugs; all are either genuine environment gaps this
+step filled in, or real NFS-server administration this test now does the
+way any admin would:
+
+- **Kernel**: `NFSD_LEGACY_CLIENT_TRACKING` needed enabling in
+  `build-kernel.sh`. Without it, nfsd upcalls to a userland client-tracking
+  daemon on a client's first `SETCLIENTID` (`NFSD: Unable to initialize
+  client recovery tracking! (-110)`); on this guest, whichever daemon
+  serviced that upcall (`nfsdcld`, or `rpc.mountd`'s own legacy handler)
+  crashed reproducibly. With it, nfsd manages `/var/lib/nfs/v4recovery`
+  itself, in-kernel, with no upcall at all.
+- **`rpc.mountd` segfault, root cause**: straceing it found the real
+  culprit was unrelated to client tracking: `openat("/etc/mtab", ...)`
+  returning `ENOENT` (see the rootfs section above) right after it
+  resolves the export path, followed immediately by a `SIGSEGV`
+  (`SEGV_MAPERR`, address `NULL`) -- a NULL check missing on that open's
+  failure, in a codepath every export apparently hits. Fixed by shipping
+  `/etc/mtab` in the image, not by working around `rpc.mountd`.
+- **GNU find's cycle-detection heuristic** (busybox's `find`, used by every
+  other `guest/*.sh` script, has no such check) false-positives walking
+  this export: dcfs exposes backing inode numbers verbatim (this doc's
+  "Identity model"), and every ext4 backing filesystem's root directory is
+  inode 2 by convention, so the export root and the vdc submount's root
+  collide on `(dev, ino)` once NFS presents the whole tree under one device
+  number -- GNU find sees a directory sharing `(dev, ino)` with its own
+  ancestor and refuses to descend ("File system loop detected"). Worked
+  around in `guest/nfs.sh` by never letting one `find(1)` invocation
+  recurse across that specific boundary (prune at `sub`, `find` it
+  separately).
+- **`nfsd`'s export-path cache** needs an explicit `exportfs -f` after
+  restarting dcfs, or every request comes back EIO: it can hold a reference
+  tied to the *old* vfsmount/dentry, independent of anything dcfs does.
+  Restarting `nfsd` itself (`rpc.nfsd 0` then re-enabling it) additionally
+  drops its own server-side open-file cache, which otherwise can keep
+  serving an already-open file without ever re-resolving its handle
+  against a cold daemon.
+- **The NFS client's own attribute/dentry cache** can just as easily hide
+  what a check is trying to prove -- both the "warm metadata" pass and the
+  db-wipe-ESTALE check need an explicit `drop_caches` (same mechanism used
+  everywhere else in this repo) immediately before the check, or they can
+  pass for the wrong reason (served from the client's cache, never reaching
+  the server at all).
 
 ## `run-qemu.sh` internals
 

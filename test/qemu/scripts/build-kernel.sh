@@ -53,6 +53,22 @@ fi
 	# every bulky subsystem the guest never touches, so boot -- now on
 	# the critical path of every `bazel test` -- has as little to probe
 	# as possible.
+	#
+	# NFSD_LEGACY_CLIENT_TRACKING (step 5.3): without this, nfsd has no
+	# way to persist NFSv4 client-recovery state itself and upcalls to a
+	# userland tracking daemon instead (nfsdcld, or a legacy usermode-
+	# helper/rpc.mountd upcall). On this guest -- diagnosed while
+	# building test/qemu:nfs_test -- that upcall path is what's actually
+	# used regardless of whether nfsdcld is running (see "NFSD: Unable
+	# to initialize client recovery tracking! (-110)" in dmesg), and
+	# rpc.mountd's own handling of that specific legacy upcall segfaults
+	# reproducibly on the very first client's SETCLIENTID (observed as
+	# "rpc.mountd[N]: segfault at 0 ... in libc.so.6", right after it
+	# logs "vX.Y client attached"), hanging the client's mount(2) call
+	# forever waiting for a reply that will now never come.
+	# LEGACY_CLIENT_TRACKING makes nfsd manage /var/lib/nfs/v4recovery
+	# itself, entirely in-kernel, with no upcall and thus nothing for
+	# rpc.mountd to crash handling.
 	"$LINUX/scripts/config" --file "$OUT/.config" \
 		-e 64BIT \
 		-e SMP \
@@ -90,6 +106,7 @@ fi
 		-e IO_URING \
 		-e NFSD \
 		-e NFSD_V4 \
+		-e NFSD_LEGACY_CLIENT_TRACKING \
 		-e NFS_FS \
 		-e NFS_V4 \
 		-e SUNRPC \

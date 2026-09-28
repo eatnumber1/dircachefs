@@ -106,11 +106,43 @@ if [ ! -f "$SCRIPT" ]; then
 	exit 1
 fi
 
-# No -e: the test scripts report every check with their own PASS/FAIL lines
-# and exit status; -e would abort them silently on the first nonzero command
-# (e.g. a $(...) capture of a tool that exits 1 after printing usage).
-sh "$SCRIPT"
-rc=$?
+# qemu_test's optional rootfs= attribute (test/qemu/qemu_test.bzl) attaches
+# a Debian rootfs image (test/qemu/scripts/mkrootfs-debian.sh) as an extra
+# virtio-blk disk and names it here. When present, run guest_script chrooted
+# into that Debian tree instead of directly from the initramfs, so it has
+# GNU userspace and nfs-utils (rpc.nfsd/rpc.mountd/exportfs/mount.nfs4)
+# available -- none of which fit in the busybox-only initramfs. Networking
+# (loopback) is brought up in the initramfs's own network namespace before
+# the chroot, since it's process/namespace, not filesystem, state, and
+# chroot(2) doesn't touch it.
+ROOTFS=$(sed -n 's/.*\bdcfs_rootfs=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$ROOTFS" ]; then
+	mkdir -p /newroot
+	if ! mount -t ext4 "$ROOTFS" /newroot; then
+		echo "init: failed to mount $ROOTFS on /newroot"
+		echo "TEST-FAILED"
+		finish
+		exit 1
+	fi
+	mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/tests
+	mount -o bind /proc /newroot/proc
+	mount -o bind /sys /newroot/sys
+	mount -o bind /dev /newroot/dev
+	cp /bin/dcfs /bin/fhtest /bin/testutil /newroot/usr/local/bin/
+	cp -a /tests/. /newroot/tests/
+
+	ip link set lo up
+
+	chroot /newroot /bin/sh "/tests/$TEST"
+	rc=$?
+else
+	# No -e: the test scripts report every check with their own PASS/FAIL
+	# lines and exit status; -e would abort them silently on the first
+	# nonzero command (e.g. a $(...) capture of a tool that exits 1 after
+	# printing usage).
+	sh "$SCRIPT"
+	rc=$?
+fi
 
 if [ "$rc" -eq 0 ]; then
 	echo "ALL-TESTS-PASSED"

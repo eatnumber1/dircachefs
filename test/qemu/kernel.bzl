@@ -1,25 +1,29 @@
-"""Repository rule exposing the out-of-tree dcfs QEMU test kernel and the
-host busybox binary to Bazel.
+"""Repository rule exposing the out-of-tree dcfs QEMU test kernel, the
+Debian NFS-test rootfs image, and the host busybox binary to Bazel.
 
-Neither of these is built by Bazel: the kernel is built by
+None of these is built by Bazel: the kernel is built by
 test/qemu/scripts/build-kernel.sh (a 30-90 minute out-of-tree kernel build
-that doesn't belong in the Bazel action graph), and busybox is a host tool.
-This rule just symlinks them into a repo so other targets can depend on
-them normally.
+that doesn't belong in the Bazel action graph), the rootfs image is built
+by test/qemu/scripts/mkrootfs-debian.sh (a ~30-60s mmdebstrap run that
+downloads ~200 MB over the network -- also not something that belongs in
+the Bazel action graph, and it needs to be cached across `bazel clean`s
+the way the kernel already is), and busybox is a host tool. This rule just
+symlinks them into a repo so other targets can depend on them normally.
 
 If the kernel hasn't been built yet, `bzImage` is a placeholder text file
 (first line "DCFS-KERNEL-MISSING") instead of a hard failure, so that
 `bazel build //...` / `bazel test //...` keep analyzing and building fine
 with no kernel present; test/qemu/scripts/run-qemu.sh detects the
 placeholder and fails with a clear message when the qemu test actually
-runs.
+runs. `rootfs_debian.ext4` works the same way (placeholder first line
+"DCFS-ROOTFS-MISSING") for the same reason.
 """
 
 _DEFAULT_BUSYBOX = "/usr/bin/busybox"
 _FALLBACK_BUSYBOX = "/bin/busybox-static"
 
 _BUILD_FILE_CONTENT = """\
-exports_files(["bzImage", "busybox"])
+exports_files(["bzImage", "busybox", "rootfs_debian.ext4"])
 """
 
 def _kernel_build_dir(repository_ctx):
@@ -28,6 +32,13 @@ def _kernel_build_dir(repository_ctx):
         return build_dir
     home = repository_ctx.getenv("HOME", "/root")
     return home + "/.cache/dcfs/kernel-build"
+
+def _rootfs_image_path(repository_ctx):
+    image = repository_ctx.getenv("DCFS_ROOTFS_IMAGE")
+    if image:
+        return image
+    home = repository_ctx.getenv("HOME", "/root")
+    return home + "/.cache/dcfs/rootfs-debian.ext4"
 
 def _kernel_image_impl(repository_ctx):
     build_dir = _kernel_build_dir(repository_ctx)
@@ -43,6 +54,18 @@ def _kernel_image_impl(repository_ctx):
                       "(reads $LINUX, default $HOME/Sources/linux; " +
                       "writes to $DCFS_KERNEL_BUILD, default " +
                       build_dir + ")\n",
+        )
+
+    rootfs_path = _rootfs_image_path(repository_ctx)
+    if repository_ctx.path(rootfs_path).exists:
+        repository_ctx.symlink(rootfs_path, "rootfs_debian.ext4")
+    else:
+        repository_ctx.file(
+            "rootfs_debian.ext4",
+            content = "DCFS-ROOTFS-MISSING\n" +
+                      "Build it with: test/qemu/scripts/mkrootfs-debian.sh\n" +
+                      "(writes to $DCFS_ROOTFS_IMAGE, default " +
+                      rootfs_path + ")\n",
         )
 
     busybox_path = repository_ctx.getenv("DCFS_BUSYBOX", _DEFAULT_BUSYBOX)
@@ -77,6 +100,7 @@ kernel_image = repository_rule(
     # `bazel build //test/qemu:boot_test` pick up a freshly built kernel
     # without `bazel clean` or `bazel sync`.
     local = True,
-    doc = """Exposes the out-of-tree dcfs QEMU kernel build and host
-busybox as `bzImage` and `busybox`.""",
+    doc = """Exposes the out-of-tree dcfs QEMU kernel build, the Debian
+NFS-test rootfs image, and host busybox as `bzImage`, `rootfs_debian.ext4`,
+and `busybox`.""",
 )

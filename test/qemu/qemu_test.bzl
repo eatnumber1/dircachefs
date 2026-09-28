@@ -10,7 +10,7 @@ test/qemu/guest/init for the guest side.
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
-def qemu_test(name, guest_script, disks = []):
+def qemu_test(name, guest_script, disks = [], rootfs = None):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -21,9 +21,21 @@ def qemu_test(name, guest_script, disks = []):
         disks: list of (device, fstype, size) tuples, e.g.
             ("vdb", "ext4", "256M"). device is a /dev/vd<letter> name;
             see run-qemu.sh for how the letter maps to QEMU drive order.
+        rootfs: optional label of a Debian rootfs ext4 image (normally
+            "@kernel_image//:rootfs_debian.ext4"). When given, run-qemu.sh
+            attaches it as an extra virtio-blk disk (the next /dev/vd<letter>
+            after `disks`) and passes dcfs_rootfs=/dev/vd<letter> on the
+            kernel command line; guest/init then mounts it, bind-mounts
+            /proc, /sys and /dev over it, copies dcfs/fhtest/testutil and
+            /tests in, and chroots into it to run guest_script with GNU
+            userspace and nfs-utils available. See guest/init's
+            dcfs_rootfs= branch and test/qemu/scripts/mkrootfs-debian.sh.
     """
     disk_args = [d[0] + ":" + d[1] + ":" + d[2] for d in disks]
     guest_script_basename = guest_script.split("/")[-1]
+
+    rootfs_data = [rootfs] if rootfs else []
+    rootfs_args = ["--rootfs", "$(location " + rootfs + ")"] if rootfs else []
 
     sh_test(
         name = name,
@@ -32,8 +44,8 @@ def qemu_test(name, guest_script, disks = []):
             ":initramfs",
             "@kernel_image//:bzImage",
             guest_script,
-        ],
-        args = [
+        ] + rootfs_data,
+        args = rootfs_args + [
             "$(location @kernel_image//:bzImage)",
             "$(location :initramfs)",
             guest_script_basename,

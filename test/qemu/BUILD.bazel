@@ -122,3 +122,17 @@ qemu_test(
     disks = [("vdb", "ext4", "128M")],
     guest_script = "guest/crash.sh",
 )
+
+# Step 5.3: dcfs exported over real NFSv4 (rpc.nfsd/rpc.mountd/exportfs from
+# a small Debian chroot -- see test/qemu/scripts/mkrootfs-debian.sh and
+# guest/init's dcfs_rootfs= branch, since none of that fits in the
+# busybox-only initramfs every other test here runs from).
+qemu_test(
+    name = "nfs_test",
+    disks = [
+        ("vdb", "ext4", "256M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/nfs.sh",
+    rootfs = "@kernel_image//:rootfs_debian.ext4",
+)

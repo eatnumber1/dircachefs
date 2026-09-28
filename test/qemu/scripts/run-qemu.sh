@@ -66,10 +66,22 @@ export PATH="$PATH:/usr/sbin:/sbin"
 QBOOT="${DCFS_QBOOT:-/usr/share/qemu/qboot.rom}"
 
 UNIT=0
-if [ "${1:-}" = "--unit" ]; then
-	UNIT=1
-	shift
-fi
+ROOTFS=""
+while :; do
+	case "${1:-}" in
+	--unit)
+		UNIT=1
+		shift
+		;;
+	--rootfs)
+		ROOTFS=$2
+		shift 2
+		;;
+	*)
+		break
+		;;
+	esac
+done
 
 KERNEL=$1
 INITRD=$2
@@ -89,6 +101,20 @@ DCFS-KERNEL-MISSING*)
 	exit 1
 	;;
 esac
+
+# kernel_image similarly writes a placeholder for the Debian NFS-test
+# rootfs image (test/qemu/scripts/mkrootfs-debian.sh) when it hasn't been
+# built yet.
+if [ -n "$ROOTFS" ]; then
+	ROOTFS_MAGIC=$(dd if="$ROOTFS" bs=1 count=20 2>/dev/null)
+	case "$ROOTFS_MAGIC" in
+	DCFS-ROOTFS-MISSING*)
+		echo "dcfs Debian NFS-test rootfs image is not built:"
+		cat "$ROOTFS"
+		exit 1
+		;;
+	esac
+fi
 
 WORKDIR="${TEST_TMPDIR:-$(mktemp -d)}"
 LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/serial.log"
@@ -144,6 +170,23 @@ while [ "$idx" -le "$max_index" ]; do
 	idx=$((idx + 1))
 done
 
+# --- optional Debian rootfs disk, always the next letter after the last
+# requested disk-spec (so e.g. disks vdb,vdc + a rootfs gives vdd) --------
+rootfs_append=""
+if [ -n "$ROOTFS" ]; then
+	rootfs_index=$((max_index + 1))
+	rootfs_letter=$(awk -v i="$rootfs_index" 'BEGIN{printf "%c", 97+i}')
+	rootfs_dev="vd$rootfs_letter"
+	rootfs_img="$WORKDIR/rootfs.img"
+	# Copy rather than attach the cached image directly: the guest chroots
+	# into and writes through this filesystem, and the cached image at
+	# @kernel_image//:rootfs_debian.ext4 must stay pristine for the next
+	# test run. A ~1 GiB copy is cheap next to the rest of this test.
+	cp "$ROOTFS" "$rootfs_img"
+	drive_args="$drive_args -drive id=$rootfs_dev,file=$rootfs_img,format=raw,if=none -device virtio-blk-device,drive=$rootfs_dev"
+	rootfs_append=" dcfs_rootfs=/dev/$rootfs_dev"
+fi
+
 # --- boot ------------------------------------------------------------
 # KVM only when /dev/kvm is usable by this user; otherwise plain TCG
 # (slow -- see TIMEOUT_SECS above).
@@ -168,6 +211,7 @@ append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init"
 if [ "$UNIT" -eq 0 ]; then
 	append="$append dcfs_test=$DCFS_TEST"
 fi
+append="$append$rootfs_append"
 
 start=$(date +%s.%N)
 echo "run-qemu.sh: qemu start $start" >>"$LOG"
