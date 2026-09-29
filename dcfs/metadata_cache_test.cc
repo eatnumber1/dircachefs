@@ -324,7 +324,7 @@ TEST_F(MetadataCacheTest, RenameAcrossParents) {
 
   // A directory's parent follows its dentry.
   ASSERT_THAT(RenameDentry(ctx_, kRootInode, "b", a, "b"), IsOk());
-  EXPECT_THAT(ParentOf(ctx_, b), IsOkAndHolds(a));
+  EXPECT_THAT(ParentOf(ctx_, b), IsOkAndHolds(Optional(a)));
 
   EXPECT_THAT(RenameDentry(ctx_, a, "missing", b, "x"),
               StatusIs(absl::StatusCode::kNotFound));
@@ -727,13 +727,13 @@ TEST_F(MetadataCacheTest, Handles) {
 }
 
 TEST_F(MetadataCacheTest, ParentOf) {
-  EXPECT_THAT(ParentOf(ctx_, kRootInode), IsOkAndHolds(kRootInode));
+  EXPECT_THAT(ParentOf(ctx_, kRootInode), IsOkAndHolds(Optional(kRootInode)));
   ASSERT_OK_AND_ASSIGN(InodeId a, MakeDir(kRootInode, "a", 20));
   ASSERT_OK_AND_ASSIGN(InodeId b, MakeDir(a, "b", 21));
-  EXPECT_THAT(ParentOf(ctx_, a), IsOkAndHolds(kRootInode));
-  EXPECT_THAT(ParentOf(ctx_, b), IsOkAndHolds(a));
+  EXPECT_THAT(ParentOf(ctx_, a), IsOkAndHolds(Optional(kRootInode)));
+  EXPECT_THAT(ParentOf(ctx_, b), IsOkAndHolds(Optional(a)));
   ASSERT_THAT(UnlinkDentry(ctx_, a, "b"), IsOk());
-  EXPECT_THAT(ParentOf(ctx_, b), StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(ParentOf(ctx_, b), IsOkAndHolds(std::nullopt));
 }
 
 TEST_F(MetadataCacheTest, Xattrs) {

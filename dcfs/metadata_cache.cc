@@ -452,8 +452,9 @@ absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id) {
   return *std::move(handle);
 }
 
-absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
+absl::StatusOr<std::optional<InodeId>> ParentOf(Context &ctx, InodeId dir) {
   if (dir == kRootInode) return kRootInode;
+  ABSL_RETURN_IF_ERROR(RequireInode(ctx, dir));
   // LIMIT 2 is enough to tell "one" from "more than one".
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
@@ -466,10 +467,7 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
     parents.push_back(row.Column<int64_t>(0));
     return absl::OkStatus();
   }));
-  if (parents.empty()) {
-    return absl::NotFoundError(
-        absl::StrCat("no cached dentry for directory ", dir));
-  }
+  if (parents.empty()) return std::nullopt;
   // Directories cannot be hard linked, so two cached dentries for one
   // directory means the cache is inconsistent.
   RET_CHECK_EQ(parents.size(), 1u)

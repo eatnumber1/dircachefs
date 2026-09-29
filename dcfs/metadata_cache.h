@@ -172,10 +172,11 @@ absl::StatusOr<std::optional<std::string>> GetXattr(Context &ctx, InodeId id,
 // NotFound if there is no row for `id` or the row has no handle.
 absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id);
 
-// The directory containing directory `dir`: the parent of the one positive
-// dentry pointing at it. The root is its own parent. NotFound if no dentry
-// for `dir` is cached.
-absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir);
+// The directory containing directory `dir`: the parent of the one present
+// dentry pointing at it. The root is its own parent. nullopt (unknown) if
+// no present dentry for `dir` is cached (see backing::ParentOf, which then
+// asks the backing filesystem); NotFound if there is no row for `dir`.
+absl::StatusOr<std::optional<InodeId>> ParentOf(Context &ctx, InodeId dir);
 
 // All filesystems, in the order they were added.
 absl::StatusOr<std::vector<FilesystemRow>> ListFilesystems(Context &ctx);

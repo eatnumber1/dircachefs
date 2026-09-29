@@ -37,6 +37,7 @@ fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
 
 DCFS=/bin/dcfs
 TESTUTIL=/bin/testutil
+FHTEST=/bin/fhtest
 
 is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
@@ -160,6 +161,7 @@ mount /dev/vdb /src
 head -c 1000 /dev/zero >/src/f
 echo hello >/src/h
 mkdir /src/d
+mkdir /src/e
 echo one >/src/d/u1
 echo two >/src/d/u2
 echo three >/src/u3
@@ -193,6 +195,12 @@ else
 	fail crash-writes-landed-src "src sizes f=$(stat -c %s "$SRC/f") g=$(stat -c %s "$SRC/g")"
 fi
 
+# Audit F6: an NFS-style handle of directory e, and a create in e just
+# before the crash, so that recovery forgets e's own dentry (e is dirty):
+# reconnecting the handle afterwards needs e's ".." from dcfs.
+E_HANDLE=$("$FHTEST" handle "$MNT/e") || E_HANDLE=""
+: >"$MNT/e/x"
+
 kill -KILL "$DAEMON_PID" 2>/dev/null || true
 wait "$DAEMON_PID" 2>/dev/null || true
 DAEMON_PID=""
@@ -218,6 +226,20 @@ if start_daemon "$LOG2"; then
 else
 	fail crash-restart "daemon did not remount within 10s"
 	exit "$FAILED"
+fi
+
+# Opening e by handle: the kernel reconnects the disconnected directory
+# through LOOKUP(e, ".."), which must resolve although e's own dentry is
+# unknown after recovery (then read() of a directory fails EISDIR: it was
+# opened).
+# Before 4.13 this was ENOENT from dcfs, ESTALE to the caller.
+set -- $E_HANDLE
+res=$("$FHTEST" open "$MNT" "$1" "$3" 2>&1) || true
+# (fhtest names only some errnos; others print strerror.)
+if [ "$res" = "ERR EISDIR" ] || [ "$res" = "ERR Is a directory" ]; then
+	pass crash-dir-handle-reconnects
+else
+	fail crash-dir-handle-reconnects "handle '$E_HANDLE' -> '$res' (want ERR EISDIR)"
 fi
 
 # The attributes cached before the crash must not be served as current.

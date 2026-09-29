@@ -924,6 +924,49 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   return result;
 }
 
+absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
+  ABSL_ASSIGN_OR_RETURN(std::optional<InodeId> cached,
+                        cache::ParentOf(ctx, dir));
+  if (cached.has_value()) return *cached;
+
+  // `dir`'s own dentry is unknown (audit F6): ask the backing filesystem.
+  // A fill of the parent's row, as PopulateDirectory records a child.
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
+                        OpenNode(ctx, dir, O_PATH | O_DIRECTORY));
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor up_fd,
+                        syscalls::openat(*dir_fd, "..", O_PATH | O_DIRECTORY));
+  ABSL_ASSIGN_OR_RETURN(struct statx stx,
+                        syscalls::statx(*up_fd, "", AT_EMPTY_PATH, kAttrMask));
+  // Submounts are refused, so ".." is on `dir`'s filesystem; `dir` is not
+  // the root, so ".." is at most the root.
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr root_attr,
+                        cache::GetAttr(ctx, cache::kRootInode));
+  if (root_attr.device == dir_attr.device &&
+      root_attr.backing_ino == stx.stx_ino) {
+    return cache::kRootInode;
+  }
+  ABSL_ASSIGN_OR_RETURN(FileHandle handle,
+                        FileHandle::FromFd(*up_fd, dir_attr.device));
+  ABSL_ASSIGN_OR_RETURN(uint64_t gen, ReadGeneration(*up_fd, stx.stx_mode));
+  VLOG(1) << "directory " << dir
+          << ": dentry unknown, resolved its parent from the backing "
+             "filesystem";
+  InodeId parent = 0;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(cache::UpsertResult row,
+                          cache::UpsertInode(ctx, handle, stx, gen));
+    if (!cache::CanFill(ctx, snapshot, row.id) || OpenForWrite(ctx, row.id)) {
+      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+    }
+    ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
+    parent = row.id;
+    return absl::OkStatus();
+  }));
+  return parent;
+}
+
 absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
                                                 std::string_view name) {
   // As PopulateDirectory, for one name: open the parent, probe `name` in

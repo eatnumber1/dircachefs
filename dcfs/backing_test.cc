@@ -969,5 +969,35 @@ TEST_F(BackingTest, ReresolvingOneUnknownNameProbesOnlyThatName) {
   EXPECT_FALSE(file_attr.valid) << "the sibling was re-probed";
 }
 
+// Audit F6: a directory whose own dentry is unknown (a rename's phase 1,
+// an invalidation of its parent, crash recovery) still has a parent: it is
+// resolved from the backing filesystem ("..") instead of reported missing
+// (the FUSE layer used to answer ENOENT for "..", breaking readdir and NFS
+// reconnection of that directory).
+TEST_F(BackingTest, ParentOfAnUnknownDentryIsResolvedFromTheBacking) {
+  ASSERT_EQ(::mkdir(Path("dir/sub").c_str(), 0755), 0);
+  ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));
+  ASSERT_OK_AND_ASSIGN(InodeId sub, Id("sub", dir));
+  EXPECT_THAT(ParentOf(ctx_, sub), IsOkAndHolds(dir));
+
+  // The dentries unknown: resolved to the same rows.
+  const std::string dir_name[] = {"dir"};
+  const std::string sub_name[] = {"sub"};
+  ASSERT_THAT(cache::MarkUnknown(ctx_, kRootInode, dir_name), IsOk());
+  ASSERT_THAT(cache::MarkUnknown(ctx_, dir, sub_name), IsOk());
+  EXPECT_THAT(ParentOf(ctx_, dir), IsOkAndHolds(kRootInode));
+  EXPECT_THAT(ParentOf(ctx_, sub), IsOkAndHolds(dir));
+
+  // The parent's row itself gone (its children's dentries with it): a new
+  // row for the same backing directory.
+  ASSERT_THAT(cache::InvalidateInode(ctx_, dir), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId parent, ParentOf(ctx_, sub));
+  EXPECT_NE(parent, dir);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, parent));
+  EXPECT_TRUE(S_ISDIR(attr.st.st_mode));
+  EXPECT_EQ(attr.backing_ino, StatPath(Path("dir")).stx_ino);
+  EXPECT_THAT(ParentOf(ctx_, sub), IsOkAndHolds(parent));
+}
+
 }  // namespace
 }  // namespace dcfs::backing

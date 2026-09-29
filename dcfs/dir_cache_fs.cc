@@ -339,7 +339,7 @@ absl::Status DirCacheFS::Lookup(
         opts_.entry_timeout);
   }
   if (name == "..") {
-    ABSL_ASSIGN_OR_RETURN(InodeId up, cache::ParentOf(ctx_, parent));
+    ABSL_ASSIGN_OR_RETURN(InodeId up, backing::ParentOf(ctx_, parent));
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(up));
     return req.ReplyEntry(
         entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
@@ -618,11 +618,11 @@ absl::Status DirCacheFS::Rename(
 
 void DirCacheFS::ReresolveAfterFailure(
     InodeId parent, std::span<const std::string> names) {
-  // Phase 1 left `names` unknown, which is safe but not free: a directory
-  // whose own dentry is unknown has no cached parent (cache::ParentOf), so
-  // the kernel -- which still holds its dentry, since the op failed --
-  // could not even list it ("..") until something repopulated `parent`.
-  // Re-reading the names from the backing filesystem now (not assuming the
+  // Phase 1 left `names` unknown, which is safe but not free: e.g. a
+  // directory whose own dentry is unknown has no cached parent, so its ".."
+  // costs a trip to the backing filesystem (backing::ParentOf) until the
+  // name is resolved. Re-reading just these names from the backing
+  // filesystem now (one probe each, backing::ResolveName; not assuming the
   // failed syscall changed nothing) restores that. Best effort: the op's
   // own error is what gets replied, whatever happens here.
   for (const std::string &name : names) {
@@ -1081,7 +1081,7 @@ absl::Status DirCacheFS::Readdir(
     used += DirEntrySize(entries.back().name);
   }
   if (off < 2) {
-    ABSL_ASSIGN_OR_RETURN(InodeId parent, cache::ParentOf(ctx_, dir));
+    ABSL_ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
     entries.push_back({.name = "..", .stbuf = DotStat(parent), .off = 2});
     used += DirEntrySize(entries.back().name);
   }
@@ -1121,7 +1121,7 @@ absl::Status DirCacheFS::Readdirplus(
     used += DirEntryPlusSize(entries.back().name);
   }
   if (off < 2) {
-    ABSL_ASSIGN_OR_RETURN(InodeId parent, cache::ParentOf(ctx_, dir));
+    ABSL_ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(parent));
     entries.push_back({.name = "..", .entry = entry, .off = 2});
     used += DirEntryPlusSize(entries.back().name);
