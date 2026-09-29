@@ -190,8 +190,10 @@ absl::StatusOr<FilesystemRow> GetFilesystem(Context &ctx,
 // Records the backing object identified by (handle.device, stx.stx_ino,
 // backing_gen), with attributes from `stx` (now valid) and handle `handle`.
 // If that identity already has a row describing the same object -- its
-// stored handle (handle_type and bytes) equals `handle`, and its birth time
-// equals stx's when both are known (nonzero) -- that row is updated.
+// generation equals backing_gen when both are known (nonzero: 0 means the
+// generation could not be read), its stored handle (handle_type and bytes)
+// equals `handle`, and its birth time equals stx's when both are known
+// (nonzero) -- that row is updated.
 // Otherwise every row for the same (device, ino) -- the backing filesystem
 // recycled the inode number, possibly with the same or no generation -- is
 // invalidated, and a new row is

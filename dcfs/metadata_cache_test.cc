@@ -1440,5 +1440,26 @@ TEST_F(MetadataCacheTest, ListDirCursorSurvivesRenameOverAndFailedRemove) {
   EXPECT_THAT(list_after(cursor), ElementsAre("e", "c"));
 }
 
+// Audit-races "not a race": an inode generation of 0 means "could not be
+// read" (backing::ReadGeneration: no FS_IOC_GETVERSION, EACCES, ...), and
+// VerifyBackingIdentity already treats it as "unknown, same object". So
+// must UpsertInode: a transient failure to read the generation of an
+// object cached with its real one must not split it into a new row (and
+// ESTALE the old nodeid). The handle bytes still tell objects apart.
+TEST_F(MetadataCacheTest, UnknownGenerationDoesNotSplitAnInode) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult first, Make(40, S_IFREG | 0644, kSource, 7));
+  ASSERT_OK_AND_ASSIGN(UpsertResult again, Make(40, S_IFREG | 0644, kSource, 0));
+  EXPECT_FALSE(again.created);
+  EXPECT_EQ(again.id, first.id);
+  EXPECT_THAT(GetAttr(ctx_, first.id), IsOk());
+  // A different handle for the same inode number is still a different
+  // (recycled) object, generation known or not.
+  ASSERT_OK_AND_ASSIGN(
+      UpsertResult other,
+      UpsertInode(ctx_, Handle(kSource, "h40-recycled"), Stx(40, S_IFREG), 0));
+  EXPECT_TRUE(other.created);
+  EXPECT_NE(other.id, first.id);
+}
+
 }  // namespace
 }  // namespace dcfs::cache

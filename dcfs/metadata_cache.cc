@@ -535,8 +535,9 @@ absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
     // generation, plus any left over from before the number was recycled.
     // Collected up front so the cursor is closed before we write.
     //
-    // A row is the same object only if its generation, its stored handle
-    // bytes and (when both are known) its birth time all match too. The
+    // A row is the same object only if its generation (when both are
+    // known: nonzero), its stored handle bytes and (when both are known)
+    // its birth time all match too. The
     // generation alone is not enough: it is 0 ("unknown") for symlinks and
     // special files and on filesystems without FS_IOC_GETVERSION, yet the
     // backing handle still encodes the real generation (audit F5); and
@@ -558,7 +559,12 @@ absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
     std::vector<InodeId> stale;
     ABSL_RETURN_IF_ERROR(find->ForEachRow([&](Statement &row) {
       InodeId id = row.Column<int64_t>(0);
-      bool same = row.Column<uint64_t>(2) == backing_gen;
+      // A generation of 0 is "unknown" (backing::ReadGeneration could not
+      // read it), not a value, on either side: as VerifyBackingIdentity,
+      // it does not tell objects apart by itself -- the handle below does.
+      const uint64_t stored_gen = row.Column<uint64_t>(2);
+      bool same = stored_gen == backing_gen || stored_gen == 0 ||
+                  backing_gen == 0;
       if (same && !row.ColumnIsNull(4)) {
         same = row.Column<int>(3) == handle.handle_type &&
                row.Column<std::vector<uint8_t>>(4) == handle.bytes;

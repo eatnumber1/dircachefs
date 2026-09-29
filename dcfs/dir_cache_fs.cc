@@ -113,9 +113,10 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // offered it (LL_SET_DEFAULT(1, FUSE_CAP_ATOMIC_O_TRUNC)). With it on, the
   // kernel folds an O_TRUNC open into the OPEN request itself (O_TRUNC
   // arrives in fi.flags, with no separate SETATTR), which would need
-  // Open() to apply the truncate itself before reopening. Turning it off
-  // instead makes the kernel always send a plain SETATTR(size=0) ahead of
-  // the OPEN, which Setattr's existing write-through handling of
+  // Open() to apply the truncate itself. Turning it off instead makes the
+  // kernel strip O_TRUNC from the OPEN (fuse_file_open) and truncate with a
+  // plain SETATTR(size=0) right after it (do_open: vfs_open, then
+  // handle_truncate), which Setattr's existing write-through handling of
   // FUSE_SET_ATTR_SIZE already does exactly right -- simpler than teaching
   // Open() a second, atomic-truncate code path for the same effect.
   fuse_unset_feature_flag(&conn, FUSE_CAP_ATOMIC_O_TRUNC);
@@ -359,9 +360,10 @@ absl::Status DirCacheFS::Setattr(
 
   // Confirm this nodeid still has a row before changing anything (a
   // missing row is a stale nodeid: ESTALE, see RequireAttr). `fi` is not
-  // consulted anywhere in this method: our open fds are always read-only
-  // (Phase 4 owns writes to file contents, not attributes) and identity
-  // here is by inode, not by whichever handle the kernel happened to pass.
+  // consulted: identity here is by inode, not by whichever handle the
+  // kernel happened to pass, and backing::SetAttr reopens the inode by
+  // handle for whatever access each change needs (even when this inode has
+  // a shared, possibly O_RDWR, backing fd open).
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
 
   // Phase 1 of the write-through rule (see backing.cc's file comment):
@@ -832,8 +834,9 @@ absl::Status DirCacheFS::Open(
   // only trip on a row that changed type out from under a stale nodeid.
   RET_CHECK(!S_ISDIR(attr.st.st_mode)) << "Open on directory inode " << id;
   // See Init()'s comment: FUSE_CAP_ATOMIC_O_TRUNC is deliberately not
-  // granted, so the kernel always precedes an O_TRUNC open with its own
-  // SETATTR(size=0) instead of folding the truncate into this call.
+  // granted, so the kernel strips O_TRUNC from the OPEN and truncates with
+  // its own SETATTR(size=0) right after it, instead of folding the
+  // truncate into this call.
   RET_CHECK(!(fi.flags & O_TRUNC))
       << "O_TRUNC open reached DirCacheFS::Open for inode " << id;
 
