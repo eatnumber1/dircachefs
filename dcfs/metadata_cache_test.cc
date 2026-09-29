@@ -1393,5 +1393,52 @@ TEST_F(MetadataCacheTest, PhaseOneMarksOnlyItsOwnNameUnknown) {
               IsOkAndHolds(IsLookup(LookupResult::kNegative)));
 }
 
+// Audit-races F8: a readdir resumed from a cursor (a dentry rowid) must
+// not see an unchanged name again because a mutation re-inserted its row
+// with a new rowid: a rename over an existing name, or a failed rmdir
+// (phase 1 marks the name unknown, the failure path resolves it again).
+TEST_F(MetadataCacheTest, ListDirCursorSurvivesRenameOverAndFailedRemove) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
+  ASSERT_OK_AND_ASSIGN(UpsertResult a, Make(21));
+  ASSERT_OK_AND_ASSIGN(UpsertResult b, Make(22));
+  ASSERT_OK_AND_ASSIGN(UpsertResult c, Make(24));
+  ASSERT_THAT(LinkDentry(ctx_, d, "a", a.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, d, "b", b.id), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId e, MakeDir(d, "e", 23));
+  ASSERT_THAT(LinkDentry(ctx_, d, "c", c.id), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
+
+  // A reader has listed up to and including "b".
+  auto list_after = [&](int64_t cursor) {
+    std::vector<std::string> names;
+    EXPECT_THAT(ListDir(ctx_, d, cursor,
+                        [&](std::string_view name, InodeId, int64_t) {
+                          names.emplace_back(name);
+                          return true;
+                        }),
+                IsOk());
+    return names;
+  };
+  int64_t cursor = 0;
+  ASSERT_THAT(ListDir(ctx_, d, 0,
+                      [&](std::string_view name, InodeId, int64_t next) {
+                        cursor = next;
+                        return name != "b";
+                      }),
+              IsOk());
+  ASSERT_THAT(list_after(cursor), ElementsAre("e", "c"));
+
+  // rename(d/a, d/b) over the existing b: phase 1, then phase 3.
+  ASSERT_THAT(BeginRename(ctx_, d, "a", d, "b", a.id, b.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, d, "b", a.id), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, d, "a"), IsOk());
+  EXPECT_THAT(list_after(cursor), ElementsAre("e", "c"));
+
+  // rmdir(d/e) failing (ENOTEMPTY): phase 1, then the name re-resolved.
+  ASSERT_THAT(BeginRemove(ctx_, d, "e", e), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, d, "e", e), IsOk());
+  EXPECT_THAT(list_after(cursor), ElementsAre("e", "c"));
+}
+
 }  // namespace
 }  // namespace dcfs::cache
