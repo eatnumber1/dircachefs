@@ -29,6 +29,8 @@
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fd.h"
+#include "dcfs/file_handle.h"
+#include "dcfs/metadata_cache.h"
 #include "dcfs/fuse_ops.h"
 #include "dcfs/migrate.h"
 #include "dcfs/mount_fds.h"
@@ -201,6 +203,36 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
         stored_device.ToString(), ", but --source is on ",
         root.device_id.ToString(),
         "; delete the database to start a cold cache"));
+  }
+  // Nor one built for another directory on the same filesystem (audit-crash
+  // F4): --source pointed elsewhere, or the source directory replaced while
+  // dcfs was down. The root row keeps the backing identity it was created
+  // with (Migrate seeds it from ProbeRoot; InitRoot adds the handle), and
+  // reusing it would serve the old directory's cached tree -- whose handles
+  // still decode on this filesystem -- under the new one.
+  {
+    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr stored_root,
+                          cache::GetAttr(ctx, cache::kRootInode));
+    absl::StatusOr<FileHandle> stored_handle =
+        cache::GetHandle(ctx, cache::kRootInode);
+    if (!stored_handle.ok() && !absl::IsNotFound(stored_handle.status())) {
+      return stored_handle.status();
+    }
+    ABSL_ASSIGN_OR_RETURN(FileHandle handle,
+                          FileHandle::FromFd(*source_fd, root.device_id));
+    const bool same =
+        stored_root.backing_ino == root.backing_ino &&
+        (stored_root.backing_gen == 0 || root.backing_gen == 0 ||
+         stored_root.backing_gen == root.backing_gen) &&
+        (!stored_handle.ok() || *stored_handle == handle);
+    if (!same) {
+      return absl::FailedPreconditionError(absl::StrCat(
+          "cache database ", cache_db,
+          " was created for a different source directory (inode ",
+          stored_root.backing_ino, ", generation ", stored_root.backing_gen,
+          ") than --source (inode ", root.backing_ino, ", generation ",
+          root.backing_gen, "); delete the database to start a cold cache"));
+    }
   }
   // Before anything reads the cache: after an unclean shutdown, forget
   // whatever the dirty set says a power loss may have made wrong.

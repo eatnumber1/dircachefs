@@ -360,4 +360,32 @@ else
 	skip io-uring-single-threaded "kernel has no fuse enable_uring parameter"
 fi
 
+# --- other-source-dir-refused: same filesystem, different --source dir ----
+#
+# The cache database belongs to one source directory, not just one
+# filesystem (audit-crash F4): restarting it with --source pointing at
+# another directory on the same filesystem must be refused, not serve the
+# first directory's cached tree under the second's name.
+mkdir -p "$SRC/root_a" "$SRC/root_b"
+echo a >"$SRC/root_a/only_in_a"
+echo b >"$SRC/root_b/only_in_b"
+DB_ROOTS=/cache/roots.db
+if start_daemon /tmp/roots1.log "$MNT" --source="$SRC/root_a" --cache_db="$DB_ROOTS" "$MNT"; then
+	ls "$MNT" >/dev/null
+	stop_daemon
+	if start_daemon /tmp/roots2.log "$MNT" --source="$SRC/root_b" --cache_db="$DB_ROOTS" "$MNT"; then
+		fail other-source-dir-refused "mounted; listing: $(ls "$MNT" 2>&1)"
+		stop_daemon
+	else
+		pass other-source-dir-refused
+		if grep -q 'different source directory' /tmp/roots2.log; then
+			pass other-source-dir-message
+		else
+			fail other-source-dir-message "log: $(cat /tmp/roots2.log)"
+		fi
+	fi
+else
+	fail other-source-dir-first-mount "daemon did not mount within 10s"
+fi
+
 exit "$FAILED"
