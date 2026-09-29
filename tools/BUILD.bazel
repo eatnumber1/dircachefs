@@ -21,7 +21,10 @@ cc_binary(
 # without an intervening open(); nanosecond-precision utimensat(2);
 # fchmodat(2) with AT_SYMLINK_NOFOLLOW, which busybox's chmod has no
 # equivalent for; renameat2(2) with RENAME_NOREPLACE/RENAME_EXCHANGE; and
-# xattr syscalls/fallocate(2), which busybox has no applets for at all).
+# xattr syscalls/fallocate(2), which busybox has no applets for at all;
+# forcing a real SQLITE_BUSY out of dcfs's own cache database, which no
+# busybox applet can even see the shape of -- see testutil.c's
+# "sqlite-lock" subcommand, used by //test/qemu:release_leak_test).
 # Statically linked like //dcfs:main_static, for the same reason: the QEMU
 # initramfs has no dynamic loader or shared libc.
 cc_binary(
@@ -30,6 +33,7 @@ cc_binary(
     features = ["fully_static_link"],
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
+    deps = ["@sqlite//:sqlite3"],
 )
 
 # Manual, host-run smoke test for the read-only ops added in step 3.2: mounts

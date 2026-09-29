@@ -64,6 +64,19 @@
  *       (a child's exit, a builtin's redirection being undone), and on FUSE
  *       every such close sends a FLUSH -- this is how crash.sh gets writes
  *       the daemon has not been told about by any flush or release.
+ *   testutil sqlite-lock <db-path> <hold-seconds>
+ *       Opens <db-path> (dcfs's own cache database, e.g. /cache/dcfs.db)
+ *       directly via libsqlite3, runs "BEGIN IMMEDIATE" to take the single
+ *       writer lock (dcfs always turns on WAL mode -- see sqlite.cc's
+ *       ConnectionFactory -- where this blocks any other connection's
+ *       write transaction, including dcfs's own, with no write statement
+ *       of its own needed), prints "READY", sleeps <hold-seconds>, then
+ *       COMMITs (a no-op transaction) and exits. Used by release_leak.sh
+ *       to force a real SQLITE_BUSY out of dcfs's own attribute-refresh
+ *       write transaction (busy_timeout=5000 in sqlite.cc, so holding the
+ *       lock longer than that guarantees dcfs's own retries are
+ *       exhausted) -- fault injection no shell builtin or busybox applet
+ *       can do, exactly like writehold above.
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing (except
@@ -74,6 +87,7 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -313,6 +327,37 @@ static int cmd_writehold(
 		pause();
 }
 
+static int cmd_sqlite_lock(const char *db_path, const char *seconds_str)
+{
+	sqlite3 *db;
+	char *errmsg = NULL;
+	int hold_seconds = atoi(seconds_str);
+	int rc = sqlite3_open(db_path, &db);
+
+	if (rc != SQLITE_OK) {
+		fprintf(stderr, "testutil sqlite-lock: open %s: %s\n", db_path,
+			sqlite3_errmsg(db));
+		sqlite3_close(db);
+		return 1;
+	}
+	/* BEGIN IMMEDIATE takes the single WAL writer lock right away,
+	 * without needing an actual write statement to provoke it. */
+	rc = sqlite3_exec(db, "BEGIN IMMEDIATE", NULL, NULL, &errmsg);
+	if (rc != SQLITE_OK) {
+		fprintf(stderr, "testutil sqlite-lock: BEGIN IMMEDIATE: %s\n",
+			errmsg ? errmsg : sqlite3_errmsg(db));
+		sqlite3_free(errmsg);
+		sqlite3_close(db);
+		return 1;
+	}
+	printf("READY\n");
+	fflush(stdout);
+	sleep((unsigned int) hold_seconds);
+	sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+	sqlite3_close(db);
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -339,6 +384,8 @@ int main(int argc, char *argv[])
 		return cmd_fallocate(argv[2], argv[3], argv[4], argv[5]);
 	if (argc == 5 && strcmp(argv[1], "writehold") == 0)
 		return cmd_writehold(argv[2], argv[3], argv[4]);
+	if (argc == 4 && strcmp(argv[1], "sqlite-lock") == 0)
+		return cmd_sqlite_lock(argv[2], argv[3]);
 
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
@@ -352,6 +399,7 @@ int main(int argc, char *argv[])
 		"       testutil setxattrhex <path> <name> <hex>\n"
 		"       testutil getxattrhex <path> <name>\n"
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
-		"       testutil writehold <path> <append|create> <nbytes>\n");
+		"       testutil writehold <path> <append|create> <nbytes>\n"
+		"       testutil sqlite-lock <db-path> <hold-seconds>\n");
 	return 2;
 }

@@ -1,0 +1,207 @@
+#!/bin/sh
+# dcfs step 4.14 regression test for 2a4f672: Release() must never leak the
+# backing file (fd + passthrough registration) when the attribute refresh
+# it does on the last writable close fails.
+#
+# Before 2a4f672, Release() propagated a failed backing::RefreshAttrsFromFd
+# via ABSL_RETURN_IF_ERROR *before* decrementing BackingFile::refs -- so on
+# a refresh failure, refs never reached 0, and the fd/passthrough
+# registration for that inode were never torn down: a real, permanent
+# resource leak inside the daemon (see dir_cache_fs.cc's Release()).
+#
+# RefreshAttrsFromFd's only two failure modes are a bad fd (unreachable
+# here: it is dcfs's own still-open backing fd) and a failed cache-database
+# write, so this test forces the latter: a plain shell/busybox cannot see
+# dcfs's cache database, let alone lock it, so //tools:testutil grows a
+# "sqlite-lock" subcommand that opens dcfs's own cache_db file directly via
+# libsqlite3 and holds the single WAL writer lock (BEGIN IMMEDIATE) for
+# longer than dcfs's own busy_timeout (5000ms, see sqlite.cc) -- forcing
+# dcfs's own attribute-refresh write transaction to fail with a genuine
+# SQLITE_BUSY.
+#
+# The observable proof of no leak: the number of open fds in the daemon's
+# own /proc/<pid>/fd returns to its pre-open baseline after the forced
+# failure. Before the fix this stays elevated forever (once leaked, that
+# BackingFile entry -- and its fd -- outlives the process).
+#
+# Run as /tests/release_leak.sh by guest/init when booted with
+# dcfs_test=release_leak.sh; prints one "TEST ... PASS/FAIL" line per check
+# and exits nonzero if any check failed. init turns that into the final
+# ALL-TESTS-PASSED / TEST-FAILED verdict.
+FAILED=0
+pass() { echo "TEST $1 PASS"; }
+fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+
+DCFS=/bin/dcfs
+TESTUTIL=/bin/testutil
+
+is_mounted() { grep -q " $1 " /proc/mounts; }
+SRC=/src
+MNT=/mnt
+DB=/cache/dcfs.db
+LOG=/tmp/dcfs.log
+
+DAEMON_PID=""
+MOUNTED=0
+HOLD_PID=""
+LOCK_PID=""
+
+# See readonly.sh for why every cleanup command here is `|| true`-guarded.
+cleanup() {
+	rc=$?
+	[ -n "$HOLD_PID" ] && kill -KILL "$HOLD_PID" 2>/dev/null || true
+	[ -n "$HOLD_PID" ] && wait "$HOLD_PID" 2>/dev/null || true
+	[ -n "$LOCK_PID" ] && kill -KILL "$LOCK_PID" 2>/dev/null || true
+	[ -n "$LOCK_PID" ] && wait "$LOCK_PID" 2>/dev/null || true
+	if [ "$rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
+		echo "--- dcfs stderr ---"
+		cat "$LOG" 2>/dev/null
+	fi
+	if [ "$MOUNTED" -eq 1 ]; then
+		umount "$MNT" 2>/dev/null || umount -l "$MNT" 2>/dev/null || true
+	fi
+	if [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
+		kill "$DAEMON_PID" 2>/dev/null || true
+		wait "$DAEMON_PID" 2>/dev/null || true
+	fi
+}
+trap cleanup EXIT
+
+echo "release_leak.sh: kernel $(uname -r)"
+
+start_daemon() {
+	# sync_interval_sec is pushed way out so DirCacheFS::MaybeSyncBacking's
+	# own periodic sync point (called at the start of every request, once
+	# 5s have passed since the last one) never fires during the sqlite lock
+	# window below and competes for it -- this test wants only Flush's and
+	# Release's own attribute-refresh writes contending for that lock, so
+	# the timing math for how long to hold it stays simple.
+	"$DCFS" --source="$SRC" --cache_db="$DB" --sync_interval_sec=3600 \
+		"$MNT" >"$1" 2>&1 &
+	DAEMON_PID=$!
+	MOUNTED=0
+	i=0
+	while [ "$i" -lt 10 ]; do
+		if is_mounted "$MNT"; then
+			MOUNTED=1
+			return 0
+		fi
+		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+			return 1
+		fi
+		i=$((i + 1))
+		sleep 1
+	done
+	return 1
+}
+
+# The daemon's own open-fd count right now.
+daemon_fd_count() {
+	ls "/proc/$DAEMON_PID/fd" 2>/dev/null | wc -l
+}
+
+mount /dev/vdb /src
+sync
+
+mkdir -p /cache /mnt
+if start_daemon "$LOG"; then
+	pass mount
+else
+	fail mount "daemon did not mount within 10s"
+	exit "$FAILED"
+fi
+
+before_open=$(daemon_fd_count)
+
+# Open leak-test for writing and hold it open (no close, so no FLUSH/RELEASE
+# yet): this allocates the BackingFile (fd + passthrough registration) this
+# test is about, via a real writable Open().
+"$TESTUTIL" writehold "$MNT/leak-test" create 16 >/tmp/writehold.out 2>&1 &
+HOLD_PID=$!
+i=0
+while [ "$i" -lt 10 ]; do
+	grep -q READY /tmp/writehold.out 2>/dev/null && break
+	kill -0 "$HOLD_PID" 2>/dev/null || break
+	i=$((i + 1))
+	sleep 1
+done
+if ! grep -q READY /tmp/writehold.out 2>/dev/null; then
+	fail writehold-ready "writehold did not get ready: $(cat /tmp/writehold.out)"
+	exit "$FAILED"
+fi
+pass writehold-ready
+
+after_open=$(daemon_fd_count)
+if [ "$after_open" -gt "$before_open" ]; then
+	pass open-allocates-fd
+else
+	fail open-allocates-fd "fd count $before_open -> $after_open (expected an increase)"
+fi
+
+# Take dcfs's own cache database's single WAL writer lock from outside the
+# daemon, for longer than its busy_timeout (5000ms): dcfs's own subsequent
+# write transactions each retry for up to 5s before giving up, and
+# RecordWrittenAttrs makes up to two of them back to back on a failure (the
+# attribute refresh, then -- since that failed -- MarkAttrsUnknown), so one
+# RecordWrittenAttrs call can itself take up to 10s to fail completely.
+# Flush's own RecordWrittenAttrs runs first (up to 10s), then Release's own
+# (up to 10s) -- for Release's refresh, the one 2a4f672 fixed, to be the
+# one that actually fails (not just Flush's), the lock must outlive both
+# back-to-back windows, ~20s worst case; 30s leaves ample margin.
+"$TESTUTIL" sqlite-lock "$DB" 30 >/tmp/sqlite-lock.out 2>&1 &
+LOCK_PID=$!
+i=0
+while [ "$i" -lt 10 ]; do
+	grep -q READY /tmp/sqlite-lock.out 2>/dev/null && break
+	kill -0 "$LOCK_PID" 2>/dev/null || break
+	i=$((i + 1))
+	sleep 1
+done
+if ! grep -q READY /tmp/sqlite-lock.out 2>/dev/null; then
+	fail sqlite-lock-ready "sqlite-lock did not get ready: $(cat /tmp/sqlite-lock.out)"
+	exit "$FAILED"
+fi
+pass sqlite-lock-ready
+
+# Close the held-open file (kernel sends FLUSH then RELEASE for the last
+# writable open) while the cache database is locked out from under dcfs.
+kill -KILL "$HOLD_PID" 2>/dev/null || true
+wait "$HOLD_PID" 2>/dev/null || true
+HOLD_PID=""
+
+# Wait for sqlite-lock to actually release the lock (its 30s sleep) and
+# exit, then give the daemon a moment to finish processing FLUSH/RELEASE.
+wait "$LOCK_PID" 2>/dev/null || true
+LOCK_PID=""
+sleep 2
+
+if grep -q "Release: could not refresh the attributes" "$LOG"; then
+	pass release-refresh-failed-as-forced
+else
+	fail release-refresh-failed-as-forced \
+		"no 'Release: could not refresh the attributes' warning in $LOG -- the fault injection did not land"
+fi
+
+after_release=$(daemon_fd_count)
+if [ "$after_release" -eq "$before_open" ]; then
+	pass no-fd-leak
+else
+	fail no-fd-leak "fd count before-open=$before_open after-release=$after_release (leaked $((after_release - before_open)) fd(s))"
+fi
+
+# The daemon must still be alive and functional: the attributes are left
+# unknown by the forced failure, not the process.
+if kill -0 "$DAEMON_PID" 2>/dev/null; then
+	pass daemon-still-alive
+else
+	fail daemon-still-alive "daemon exited after the forced refresh failure"
+fi
+
+size_mnt=$(stat -c %s "$MNT/leak-test" 2>/dev/null)
+if [ "$size_mnt" = 16 ]; then
+	pass attrs-repopulate-after-forced-failure
+else
+	fail attrs-repopulate-after-forced-failure "stat size=$size_mnt, want 16"
+fi
+
+exit "$FAILED"
