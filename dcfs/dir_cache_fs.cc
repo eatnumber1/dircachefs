@@ -119,6 +119,16 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // FUSE_SET_ATTR_SIZE already does exactly right -- simpler than teaching
   // Open() a second, atomic-truncate code path for the same effect.
   fuse_unset_feature_flag(&conn, FUSE_CAP_ATOMIC_O_TRUNC);
+  // Unset for the same reason (do_init() turns it on by default whenever
+  // the kernel offers it: LL_SET_DEFAULT(1, FUSE_CAP_OVER_IO_URING)), and
+  // this one is not optional: with FUSE_URING_ENABLE=1 in the environment
+  // or -o io_uring (which --fuse_opt would pass through), libfuse would
+  // then serve requests from one io_uring queue thread per CPU, calling
+  // these handlers concurrently. dcfs is single-threaded by design: its
+  // state (the open-file maps, open_for_write_, the SQLite connection, the
+  // fill guards) has no locking (audit-races F4). libfuse checks this after
+  // Init() returns, so unsetting it here is enough.
+  fuse_unset_feature_flag(&conn, FUSE_CAP_OVER_IO_URING);
   // FUSE_BACKING_STACKED_OVER (1), not the default FUSE_BACKING_STACKED_UNDER
   // (0): dcfs's source directory is arbitrary and may itself be on a
   // stacked filesystem (e.g. overlayfs), which the default forbids
@@ -134,7 +144,8 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
             << conn.proto_minor << "; FUSE_CAP_ATTR_GENERATION "
             << (attr_generation ? "granted" : "NOT granted")
             << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted")
-            << "; FUSE_CAP_ATOMIC_O_TRUNC intentionally not requested";
+            << "; FUSE_CAP_ATOMIC_O_TRUNC and FUSE_CAP_OVER_IO_URING "
+               "intentionally not requested";
   return absl::OkStatus();
 }
 

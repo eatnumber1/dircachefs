@@ -330,4 +330,34 @@ else
 	fail restart-same-db-mount "daemon did not mount within 10s"
 fi
 
+# --- io-uring-refused: FUSE-over-io_uring must not make dcfs multi-threaded
+#
+# libfuse turns on FUSE-over-io_uring by itself when FUSE_URING_ENABLE=1 is
+# in the daemon's environment (or -o io_uring is passed) and the kernel
+# offers it, and then runs the handlers on one thread per CPU. dcfs is
+# single-threaded by design (audit-races F4), so it must refuse.
+
+URING_PARAM=/sys/module/fuse/parameters/enable_uring
+if [ -w "$URING_PARAM" ] && echo Y >"$URING_PARAM" 2>/dev/null; then
+	export FUSE_URING_ENABLE=1
+	if start_daemon /tmp/uring.log "$MNT" --source="$SRC" --cache_db=/cache/uring.db "$MNT"; then
+		unset FUSE_URING_ENABLE
+		ls -l "$MNT" >/dev/null 2>&1
+		stat "$MNT/file_0.txt" >/dev/null 2>&1
+		threads=$(ls "/proc/$DAEMON_PID/task" | wc -l)
+		if [ "$threads" -eq 1 ]; then
+			pass io-uring-single-threaded
+		else
+			fail io-uring-single-threaded "dcfs has $threads threads"
+		fi
+		stop_daemon
+	else
+		unset FUSE_URING_ENABLE
+		fail io-uring-mount "daemon did not mount within 10s"
+	fi
+	echo N >"$URING_PARAM" 2>/dev/null || true
+else
+	skip io-uring-single-threaded "kernel has no fuse enable_uring parameter"
+fi
+
 exit "$FAILED"
