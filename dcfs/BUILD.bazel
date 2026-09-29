@@ -14,6 +14,7 @@ MAIN_DEPS = [
     ":mount_fds",
     ":mounts_below",
     ":sqlite",
+    ":status",
     ":syscalls",
     "@absl//absl/cleanup",
     "@absl//absl/flags:flag",

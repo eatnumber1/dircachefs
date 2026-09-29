@@ -1,7 +1,9 @@
+#include <cerrno>
 #include <cstdlib>
 #include <fcntl.h>
 #include <iostream>
 #include <string>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <utility>
 #include <vector>
@@ -36,6 +38,7 @@
 #include "dcfs/mount_fds.h"
 #include "dcfs/mounts_below.h"
 #include "dcfs/sqlite.h"
+#include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
 
@@ -181,6 +184,34 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
           "their inode numbers would collide under one st_dev; unmount "
           "them or point --source elsewhere. Mounted below ",
           source, ": ", absl::StrJoin(below, ", ")));
+    }
+  }
+
+  // One daemon per cache database (audit-crash F7): every write-through
+  // mutation's three phases, and the in-memory state that goes with them
+  // (writable opens, fill guards), assume this process is the only writer;
+  // SQLite would serialize two daemons' transactions but not their
+  // protocols. An exclusive flock(2) on the database file itself, held for
+  // the life of the process (the kernel drops it when the process dies,
+  // however it dies), makes a second daemon refuse to start. It does not
+  // interfere with SQLite's own locking, which uses fcntl(2) locks.
+  FileDescriptor db_lock;
+  {
+    int fd = ::open(cache_db.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd == -1) {
+      return dcfs::ErrnoToStatus(errno,
+                                 absl::StrCat("open --cache_db=", cache_db));
+    }
+    db_lock = FileDescriptor(fd);
+    if (::flock(fd, LOCK_EX | LOCK_NB) == -1) {
+      if (errno == EWOULDBLOCK) {
+        return absl::FailedPreconditionError(absl::StrCat(
+            "cache database ", cache_db,
+            " is in use by another dcfs process; two daemons cannot share "
+            "one cache database"));
+      }
+      return dcfs::ErrnoToStatus(errno,
+                                 absl::StrCat("flock --cache_db=", cache_db));
     }
   }
 

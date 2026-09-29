@@ -388,4 +388,37 @@ else
 	fail other-source-dir-first-mount "daemon did not mount within 10s"
 fi
 
+# --- db-in-use-refused: two daemons must not share one cache database ----
+#
+# Each daemon's three-phase mutations and in-memory state (writable opens,
+# fill guards) assume it is the only writer (audit-crash F7), so a second
+# daemon started on a database another one is using must refuse to start.
+DB_SHARED=/cache/shared.db
+mkdir -p /tmp/mnt2
+if start_daemon /tmp/shared1.log "$MNT" --source="$SRC" --cache_db="$DB_SHARED" "$MNT"; then
+	FIRST_PID=$DAEMON_PID
+	if start_daemon /tmp/shared2.log /tmp/mnt2 --source="$SRC" --cache_db="$DB_SHARED" /tmp/mnt2; then
+		fail db-in-use-refused "a second daemon mounted /tmp/mnt2 on the same database"
+		stop_daemon
+	else
+		pass db-in-use-refused
+		if grep -q 'in use' /tmp/shared2.log; then
+			pass db-in-use-message
+		else
+			fail db-in-use-message "log: $(cat /tmp/shared2.log)"
+		fi
+	fi
+	DAEMON_PID=$FIRST_PID
+	stop_daemon
+	# Once the first daemon is gone, the database is free again.
+	if start_daemon /tmp/shared3.log "$MNT" --source="$SRC" --cache_db="$DB_SHARED" "$MNT"; then
+		pass db-free-after-exit
+		stop_daemon
+	else
+		fail db-free-after-exit "log: $(cat /tmp/shared3.log)"
+	fi
+else
+	fail db-in-use-first-mount "daemon did not mount within 10s"
+fi
+
 exit "$FAILED"
