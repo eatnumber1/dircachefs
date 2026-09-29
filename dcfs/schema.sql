@@ -120,9 +120,13 @@ CREATE TABLE dentries (
 
 CREATE INDEX dentries_inode ON dentries (inode);
 
+-- epoch: bumped by every write that clears children_complete, so that a
+-- mutation's phase 3 can restore the completeness its own phase 1 cleared
+-- only if nothing else cleared it meanwhile (cache::RestoreDirComplete).
 CREATE TABLE directories (
   inode INTEGER PRIMARY KEY REFERENCES inodes (id) ON DELETE CASCADE,
-  children_complete INTEGER NOT NULL DEFAULT 0  -- bool
+  children_complete INTEGER NOT NULL DEFAULT 0,  -- bool
+  epoch INTEGER NOT NULL DEFAULT 0
 ) STRICT;
 
 CREATE TABLE symlinks (

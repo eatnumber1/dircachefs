@@ -239,6 +239,7 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // marks `parent`'s attributes unknown (refreshed below).
   std::vector<std::string> names = {std::string(name)};
   ABSL_RETURN_IF_ERROR(cache::BeginCreate(ctx_, parent, name));
+  ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
 
   // Phase 2: the op-specific backing syscall, against a parent fd opened
   // once and shared with phase 3 below. On failure (EEXIST, ENOENT, ...)
@@ -259,7 +260,8 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
       backing::NewChild child,
       backing::RecordNewChild(ctx_, parent, *parent_fd, name, open_for_write));
   if (parent_was_complete) {
-    ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, parent, true));
+    ABSL_RETURN_IF_ERROR(
+        cache::RestoreDirComplete(ctx_, parent, parent_epoch).status());
   }
   // Creating `name` changed `parent` itself too (mtime/ctime always; nlink
   // as well, if `name` is a new subdirectory -- its own ".." bumps
@@ -453,6 +455,7 @@ absl::Status DirCacheFS::RemoveChild(
   // unknown, in one transaction.
   std::vector<std::string> names = {std::string(name)};
   ABSL_RETURN_IF_ERROR(cache::BeginRemove(ctx_, parent, name, child.id));
+  ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
 
   // Phase 2: the backing unlinkat. On failure (ENOTEMPTY, EBUSY, ...) the
   // error is returned as is, after a best-effort re-resolve (see
@@ -469,7 +472,8 @@ absl::Status DirCacheFS::RemoveChild(
   ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
     if (parent_was_complete) {
-      ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, parent, true));
+      ABSL_RETURN_IF_ERROR(
+          cache::RestoreDirComplete(ctx_, parent, parent_epoch).status());
     }
     return absl::OkStatus();
   }));
@@ -552,6 +556,9 @@ absl::Status DirCacheFS::Rename(
       ctx_, parent, name, newparent, newname, src.id,
       dst_exists && !same_inode ? std::optional<InodeId>(dst.id)
                                 : std::nullopt));
+  ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
+  ABSL_ASSIGN_OR_RETURN(int64_t newparent_epoch,
+                        cache::DirEpoch(ctx_, newparent));
 
   // Phase 2: the backing renameat2. On failure (EXDEV, ENOTEMPTY, EEXIST
   // for RENAME_NOREPLACE, ...) the error is returned unchanged, after a
@@ -577,10 +584,13 @@ absl::Status DirCacheFS::Rename(
     // Each parent lost or gained exactly the names handled above, so a
     // listing that was complete before is complete again.
     if (parent_was_complete) {
-      ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, parent, true));
+      ABSL_RETURN_IF_ERROR(
+          cache::RestoreDirComplete(ctx_, parent, parent_epoch).status());
     }
     if (newparent_was_complete) {
-      ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, newparent, true));
+      ABSL_RETURN_IF_ERROR(
+          cache::RestoreDirComplete(ctx_, newparent, newparent_epoch)
+              .status());
     }
     return absl::OkStatus();
   }));
@@ -669,6 +679,8 @@ absl::Status DirCacheFS::Link(
   // link changes (src's nlink/ctime, newparent's mtime/ctime/size).
   std::vector<std::string> names = {std::string(newname)};
   ABSL_RETURN_IF_ERROR(cache::BeginLink(ctx_, src, newparent, newname));
+  ABSL_ASSIGN_OR_RETURN(int64_t newparent_epoch,
+                        cache::DirEpoch(ctx_, newparent));
 
   // Phase 2: the backing linkat. On failure (EEXIST, EXDEV, ...)
   // (newparent, newname) is re-resolved from the backing filesystem (see
@@ -687,7 +699,8 @@ absl::Status DirCacheFS::Link(
   ABSL_RETURN_IF_ERROR(
       backing::RecordNewLink(ctx_, src, newparent, newname).status());
   if (newparent_was_complete) {
-    ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, newparent, true));
+    ABSL_RETURN_IF_ERROR(
+        cache::RestoreDirComplete(ctx_, newparent, newparent_epoch).status());
   }
   // Adding a dentry changed newparent's own mtime/ctime (and, on some
   // filesystems, its on-disk size); no fd on it is already open here (only

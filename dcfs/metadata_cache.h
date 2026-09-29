@@ -219,6 +219,21 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
 // Records whether every entry of `dir` is cached.
 absl::Status MarkDirComplete(Context &ctx, InodeId dir, bool complete);
 
+// `dir`'s completeness epoch (directories.epoch): bumped by every write
+// that clears its children_complete. 0 if it has no directories row.
+absl::StatusOr<int64_t> DirEpoch(Context &ctx, InodeId dir);
+
+// Phase 3 of a mutation that changed only names it handles itself (and
+// whose phase 1 cleared `dir`'s completeness): marks `dir` complete again,
+// but only if nothing else has cleared its completeness since -- i.e. its
+// completeness epoch is still `epoch`, read right after phase 1 (see
+// DirEpoch). Otherwise leaves it incomplete: whatever cleared it meanwhile
+// (an invalidation, an out-of-band change) made some other name unknown,
+// and restoring completeness would turn that name into "absent" (audit
+// F4). Returns whether it restored.
+absl::StatusOr<bool> RestoreDirComplete(Context &ctx, InodeId dir,
+                                        int64_t epoch);
+
 // Gives directory `dir` a directories row (children_complete 0) if it has
 // none; an existing row, and so its completeness, is left alone. Used when
 // a directory is discovered, so that re-discovering an already-populated

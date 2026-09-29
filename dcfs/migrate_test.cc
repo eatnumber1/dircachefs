@@ -185,6 +185,7 @@ TEST_F(MigrateTest, MissingCacheStateRowIsCorrupt) {
 absl::Status DowngradeToV1(sqlite3::Connection &db, const DeviceId &device) {
   ABSL_RETURN_IF_ERROR(db.ExecScript(
       "ALTER TABLE dentries DROP COLUMN refused; "
+      "ALTER TABLE directories DROP COLUMN epoch; "
       "DROP TABLE dirty; DROP TABLE cache_state; DROP TABLE xattrs; "
       "CREATE TABLE xattrs (inode INTEGER NOT NULL REFERENCES inodes (id) "
       "ON DELETE CASCADE, name BLOB NOT NULL, value BLOB NOT NULL, "
@@ -445,6 +446,7 @@ TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
                   "DROP TABLE IF EXISTS cache_state; "
                   "DROP TABLE IF EXISTS meta; "
                   "ALTER TABLE dentries DROP COLUMN refused; "
+                  "ALTER TABLE directories DROP COLUMN epoch; "
                   "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
                   "INSERT INTO meta VALUES ('schema_version', '1'), "
                   "('gen_counter', '12345');"),

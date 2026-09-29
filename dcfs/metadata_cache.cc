@@ -15,6 +15,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
+#include "absl/log/log.h"
 #include "absl/random/distributions.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -98,8 +99,8 @@ absl::Status RequireInode(Context &ctx, InodeId id) {
 
 absl::Status MarkIncomplete(Context &ctx, InodeId dir) {
   return Execute(ctx,
-                 "UPDATE directories SET children_complete = 0 "
-                 "WHERE inode = ?",
+                 "UPDATE directories SET children_complete = 0, "
+                 "epoch = epoch + 1 WHERE inode = ?",
                  dir)
       .status();
 }
@@ -705,10 +706,42 @@ absl::Status MarkDirComplete(Context &ctx, InodeId dir, bool complete) {
     return Execute(ctx,
                    "INSERT INTO directories (inode, children_complete) "
                    "VALUES (?, ?) ON CONFLICT (inode) DO UPDATE SET "
-                   "children_complete = excluded.children_complete",
+                   "children_complete = excluded.children_complete, "
+                   "epoch = epoch + (excluded.children_complete = 0)",
                    dir, complete)
         .status();
   });
+}
+
+absl::StatusOr<int64_t> DirEpoch(Context &ctx, InodeId dir) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx, "SELECT epoch FROM directories WHERE inode = ?", dir));
+  int64_t epoch = 0;
+  ABSL_RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
+                         epoch = row.Column<int64_t>(0);
+                         return absl::OkStatus();
+                       }).status());
+  return epoch;
+}
+
+absl::StatusOr<bool> RestoreDirComplete(Context &ctx, InodeId dir,
+                                        int64_t epoch) {
+  int64_t changed = 0;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(
+        changed, Execute(ctx,
+                         "UPDATE directories SET children_complete = 1 "
+                         "WHERE inode = ? AND epoch = ?",
+                         dir, epoch));
+    return absl::OkStatus();
+  }));
+  if (changed == 0) {
+    VLOG(1) << "directory " << dir
+            << ": not restoring completeness, something else cleared it "
+               "since this mutation's phase 1";
+  }
+  return changed != 0;
 }
 
 absl::Status EnsureDirectory(Context &ctx, InodeId dir) {
@@ -897,7 +930,8 @@ absl::Status InvalidateInode(Context &ctx, InodeId id) {
     // Parents first: once the dentries are gone we can no longer find them.
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "UPDATE directories SET children_complete = 0 "
+                "UPDATE directories SET children_complete = 0, "
+                "epoch = epoch + 1 "
                 "WHERE inode IN (SELECT parent FROM dentries WHERE inode = ?)",
                 id)
             .status());
@@ -1110,7 +1144,8 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
     // can no longer find them (as InvalidateInode).
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "UPDATE directories SET children_complete = 0 "
+                "UPDATE directories SET children_complete = 0, "
+                "epoch = epoch + 1 "
                 "WHERE inode IN (SELECT inode FROM dirty) "
                 "OR inode IN (SELECT parent FROM dentries "
                 "WHERE inode IN (SELECT inode FROM dirty))")

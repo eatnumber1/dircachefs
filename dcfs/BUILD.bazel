@@ -485,6 +485,7 @@ cc_library(
       ":sqlite",
       "@absl//absl/container:flat_hash_set",
       "@absl//absl/functional:function_ref",
+      "@absl//absl/log",
       "@absl//absl/random:distributions",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",

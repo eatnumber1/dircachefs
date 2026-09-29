@@ -1219,5 +1219,44 @@ TEST_F(MetadataCacheTest, BeginCreateMarksTheParentsAttributesUnknown) {
   EXPECT_FALSE(after.valid);
 }
 
+// Audit F4: phase 3 of a create/remove/rename/link restores the
+// completeness its phase 1 cleared, but must not undo a clearing that
+// something else did in between. Simulates the coroutine interleaving:
+// phase 1 of a create in d, then a concurrent request that invalidates
+// sibling s (so (d, "s") becomes unknown and d incomplete), then phase 3's
+// restore. d must stay incomplete, or "s" -- which exists -- would be
+// served as absent.
+TEST_F(MetadataCacheTest, RestoreDirCompleteDoesNotUndoAnotherClearing) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
+  ASSERT_OK_AND_ASSIGN(UpsertResult s, Make(21));
+  ASSERT_THAT(LinkDentry(ctx_, d, "s", s.id), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
+
+  ASSERT_THAT(BeginCreate(ctx_, d, "new"), IsOk());
+  ASSERT_OK_AND_ASSIGN(int64_t epoch, DirEpoch(ctx_, d));
+  ASSERT_THAT(InvalidateInode(ctx_, s.id), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, d, "new"), IsOk());  // phase 3's own write
+  EXPECT_THAT(RestoreDirComplete(ctx_, d, epoch), IsOkAndHolds(false));
+  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
+  EXPECT_THAT(Lookup(ctx_, d, "s"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+
+  // The same with an out-of-band change detected meanwhile.
+  ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
+  ASSERT_THAT(BeginCreate(ctx_, d, "new2"), IsOk());
+  ASSERT_OK_AND_ASSIGN(epoch, DirEpoch(ctx_, d));
+  ASSERT_THAT(ForgetNegativeDentries(ctx_, d), IsOk());
+  EXPECT_THAT(RestoreDirComplete(ctx_, d, epoch), IsOkAndHolds(false));
+  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
+
+  // With nothing in between, completeness is restored.
+  ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
+  ASSERT_THAT(BeginCreate(ctx_, d, "new3"), IsOk());
+  ASSERT_OK_AND_ASSIGN(epoch, DirEpoch(ctx_, d));
+  ASSERT_THAT(SetNegative(ctx_, d, "new3"), IsOk());
+  EXPECT_THAT(RestoreDirComplete(ctx_, d, epoch), IsOkAndHolds(true));
+  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(true));
+}
+
 }  // namespace
 }  // namespace dcfs::cache
