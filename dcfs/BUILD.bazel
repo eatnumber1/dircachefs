@@ -214,6 +214,25 @@ qemu_cc_test(
     ],
 )
 
+# Drives a real libfuse session against forged FUSE-protocol requests (via
+# fuse_session_custom_io(), not a real /dev/fuse or mountpoint) to get a
+# genuine fuse_req_t whose reply-send can be made to fail with a chosen
+# errno -- see fuse_request_channel_test.cc for why this is the only way
+# to exercise FuseRequest::Reply*()'s failure path at all.
+qemu_cc_test(
+    name = "fuse_request_channel_test",
+    size = "small",
+    srcs = ["fuse_request_channel_test.cc"],
+    deps = [
+      ":fuse_request",
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+      "@libfuse//:libfuse",
+    ],
+)
+
 cc_library(
     name = "fuse_ops",
     hdrs = ["fuse_ops.h"],
