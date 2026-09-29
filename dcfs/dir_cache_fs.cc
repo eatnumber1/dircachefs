@@ -239,21 +239,14 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
 
-  // Remembered so that, on success, a parent whose listing was already
-  // complete can be restored to complete afterwards: this op only ever
-  // changes the single dentry `name`, so nothing else an already-complete
-  // listing knew about becomes stale.
-  ABSL_ASSIGN_OR_RETURN(bool parent_was_complete, cache::IsDirComplete(ctx_, parent));
-
   // Phase 1: mark (parent, name) unknown before touching the backing
   // filesystem, so a crash between here and phase 3 leaves "unknown"
-  // (repopulated on the next lookup) rather than stale. This also clears
-  // children_complete on `parent` -- restored below on success -- and
-  // marks `parent`'s attributes unknown (refreshed below).
+  // (resolved on the next lookup) rather than stale; every other name of
+  // `parent` keeps its state. Also marks `parent`'s attributes unknown
+  // (refreshed below).
   std::vector<std::string> names = {std::string(name)};
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginCreate(ctx_, parent, name));
-  ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
 
   // Phase 2: the op-specific backing syscall, against a parent fd opened
   // once and shared with phase 3 below. On failure (EEXIST, ENOENT, ...)
@@ -270,17 +263,13 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
     return status;
   }
 
-  // Phase 3: probe and record the new child. Its dentry, and the restored
-  // completeness, only if no other mutation of `parent` overlapped this one
-  // (cache::Mutation::Owns); otherwise `name` stays unknown.
+  // Phase 3: probe and record the new child. Its dentry only if no other
+  // mutation of `parent` overlapped this one (cache::Mutation::Owns);
+  // otherwise `name` stays unknown.
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
       backing::RecordNewChild(ctx_, mutation, parent, *parent_fd, name,
                               open_for_write));
-  if (parent_was_complete && mutation.Owns(parent)) {
-    ABSL_RETURN_IF_ERROR(
-        cache::RestoreDirComplete(ctx_, parent, parent_epoch).status());
-  }
   mutation.End();
   // Creating `name` changed `parent` itself too (mtime/ctime always; nlink
   // as well, if `name` is a new subdirectory -- its own ".." bumps
@@ -467,17 +456,12 @@ absl::Status DirCacheFS::RemoveChild(
   }
   RET_CHECK_EQ(child.kind, cache::LookupResult::kFound);
 
-  // See CreateChild for why this is captured before phase 1 clears it.
-  ABSL_ASSIGN_OR_RETURN(bool parent_was_complete,
-                        cache::IsDirComplete(ctx_, parent));
-
-  // Phase 1: forget (parent, name) and mark the attributes that are about
+  // Phase 1: mark (parent, name) unknown and mark the attributes that are about
   // to change (the parent's mtime/ctime/nlink, the child's nlink/ctime)
   // unknown, in one transaction.
   std::vector<std::string> names = {std::string(name)};
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginRemove(ctx_, parent, name, child.id));
-  ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
 
   // Phase 2: the backing unlinkat. On failure (ENOTEMPTY, EBUSY, ...) the
   // error is returned as is, after a best-effort re-resolve (see
@@ -490,18 +474,11 @@ absl::Status DirCacheFS::RemoveChild(
     return status;
   }
 
-  // Phase 3: the name is now known absent. Only that one dentry changed, so
-  // a listing that was complete before is complete again -- unless another
-  // mutation of `parent` overlapped this one (then `name` stays unknown).
-  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
-    if (!mutation.Owns(parent)) return absl::OkStatus();
+  // Phase 3: the name is now known absent -- unless another mutation of
+  // `parent` overlapped this one (then `name` stays unknown).
+  if (mutation.Owns(parent)) {
     ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
-    if (parent_was_complete) {
-      ABSL_RETURN_IF_ERROR(
-          cache::RestoreDirComplete(ctx_, parent, parent_epoch).status());
-    }
-    return absl::OkStatus();
-  }));
+  }
   mutation.End();
   ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, parent));
   if (is_dir) {
@@ -568,13 +545,7 @@ absl::Status DirCacheFS::Rename(
   // should one arrive (e.g. through a stale kernel dentry).
   const bool same_inode = dst_exists && dst.id == src.id;
 
-  // See CreateChild for why these are captured before phase 1 clears them.
-  ABSL_ASSIGN_OR_RETURN(bool parent_was_complete,
-                        cache::IsDirComplete(ctx_, parent));
-  ABSL_ASSIGN_OR_RETURN(bool newparent_was_complete,
-                        cache::IsDirComplete(ctx_, newparent));
-
-  // Phase 1, one transaction: forget both names and mark every attribute
+  // Phase 1, one transaction: mark both names unknown, and every attribute
   // set the rename changes unknown.
   std::vector<std::string> names = {std::string(name)};
   std::vector<std::string> newnames = {std::string(newname)};
@@ -584,9 +555,6 @@ absl::Status DirCacheFS::Rename(
                          dst_exists && !same_inode
                              ? std::optional<InodeId>(dst.id)
                              : std::nullopt));
-  ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
-  ABSL_ASSIGN_OR_RETURN(int64_t newparent_epoch,
-                        cache::DirEpoch(ctx_, newparent));
 
   // Phase 2: the backing renameat2. On failure (EXDEV, ENOTEMPTY, EEXIST
   // for RENAME_NOREPLACE, ...) the error is returned unchanged, after a
@@ -618,17 +586,6 @@ absl::Status DirCacheFS::Rename(
       } else {
         ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
       }
-    }
-    // Each parent lost or gained exactly the names handled above, so a
-    // listing that was complete before is complete again.
-    if (parent_was_complete && own_parent) {
-      ABSL_RETURN_IF_ERROR(
-          cache::RestoreDirComplete(ctx_, parent, parent_epoch).status());
-    }
-    if (newparent_was_complete && own_newparent) {
-      ABSL_RETURN_IF_ERROR(
-          cache::RestoreDirComplete(ctx_, newparent, newparent_epoch)
-              .status());
     }
     return absl::OkStatus();
   }));
@@ -710,17 +667,11 @@ absl::Status DirCacheFS::Link(
   ABSL_RETURN_IF_ERROR(RequireAttr(src).status());
   ABSL_RETURN_IF_ERROR(RequireAttr(newparent).status());
 
-  // See CreateChild for why this is captured before phase 1 clears it.
-  ABSL_ASSIGN_OR_RETURN(
-      bool newparent_was_complete, cache::IsDirComplete(ctx_, newparent));
-
   // Phase 1: mark (newparent, newname) unknown, and the attributes the
   // link changes (src's nlink/ctime, newparent's mtime/ctime/size).
   std::vector<std::string> names = {std::string(newname)};
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginLink(ctx_, src, newparent, newname));
-  ABSL_ASSIGN_OR_RETURN(int64_t newparent_epoch,
-                        cache::DirEpoch(ctx_, newparent));
 
   // Phase 2: the backing linkat. On failure (EEXIST, EXDEV, ...)
   // (newparent, newname) is re-resolved from the backing filesystem (see
@@ -740,10 +691,6 @@ absl::Status DirCacheFS::Link(
   ABSL_RETURN_IF_ERROR(
       backing::RecordNewLink(ctx_, mutation, src, newparent, newname)
           .status());
-  if (newparent_was_complete && mutation.Owns(newparent)) {
-    ABSL_RETURN_IF_ERROR(
-        cache::RestoreDirComplete(ctx_, newparent, newparent_epoch).status());
-  }
   mutation.End();
   // Adding a dentry changed newparent's own mtime/ctime (and, on some
   // filesystems, its on-disk size); no fd on it is already open here (only

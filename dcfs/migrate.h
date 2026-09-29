@@ -23,7 +23,8 @@ namespace dcfs {
 //     generations (gen_counter gone); the durable dirty set (table `dirty`,
 //     cache_state.clean_shutdown and boot_id); an explicit per-name
 //     present/absent/unknown state on xattrs rows; the directories
-//     completeness epoch.
+//     completeness epoch; explicit present/absent/unknown/refused states
+//     on dentries rows, and the inodes_delete_unknowns trigger.
 inline constexpr int kSchemaVersion = 2;
 
 // Identifies the root of the cache: the backing filesystem being cached,

@@ -138,12 +138,12 @@ absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
 //  - FUSE generations become random per row (cache::UpsertInode); existing
 //    rows keep the generations they were given.
 //  - The durable dirty set appears, empty.
-//  - dentries gains `refused` (amendment 12, step 4.8): a v1 database
-//    predates submount refusal entirely, so no existing row can already be
-//    one; the column just needs to exist, defaulting every row to 0 (a
-//    plain negative or positive dentry, exactly as before). Folded
-//    directly into this one-time upgrade rather than a separate idempotent
-//    ALTER TABLE guard, since schema v2 has not shipped yet.
+//  - dentries rows gain an explicit state (step 4.13): a v1 row with an
+//    inode is 'present', one without is 'absent' (v1 predates refused
+//    boundaries, amendment 12, and unknown rows); rebuilt (keeping rowids,
+//    the readdir cursors) since the CHECKs and the inode column's
+//    ON DELETE SET NULL cannot be changed in place, which the
+//    inodes_delete_unknowns trigger replaces (audit F8).
 //  - directories gains `epoch` (step 4.12), starting at 0.
 //  - xattrs rows gain their state; every v1 row held a value, so is
 //    'present'. (SQLite cannot add a table CHECK in place: rebuild.)
@@ -163,7 +163,26 @@ absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
       FROM meta WHERE key = 'source_device_id';
     DROP TABLE meta;
     CREATE TABLE dirty (inode INTEGER PRIMARY KEY) STRICT;
-    ALTER TABLE dentries ADD COLUMN refused INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE dentries_v2 (
+      parent INTEGER NOT NULL REFERENCES inodes (id) ON DELETE CASCADE,
+      name BLOB NOT NULL,
+      state TEXT NOT NULL
+          CHECK (state IN ('present', 'absent', 'unknown', 'refused')),
+      inode INTEGER NULL REFERENCES inodes (id),
+      CHECK ((state = 'present') = (inode IS NOT NULL)),
+      PRIMARY KEY (parent, name)
+    ) STRICT;
+    INSERT INTO dentries_v2 (rowid, parent, name, state, inode)
+      SELECT rowid, parent, name,
+             CASE WHEN inode IS NULL THEN 'absent' ELSE 'present' END, inode
+      FROM dentries;
+    DROP TABLE dentries;
+    ALTER TABLE dentries_v2 RENAME TO dentries;
+    CREATE INDEX dentries_inode ON dentries (inode);
+    CREATE TRIGGER inodes_delete_unknowns BEFORE DELETE ON inodes BEGIN
+      UPDATE dentries SET state = 'unknown', inode = NULL
+      WHERE inode = OLD.id;
+    END;
     ALTER TABLE directories ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
     CREATE TABLE xattrs_v2 (
       inode INTEGER NOT NULL REFERENCES inodes (id) ON DELETE CASCADE,

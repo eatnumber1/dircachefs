@@ -13,13 +13,8 @@
 -- cache nor a power loss that rolls back recent inserts (and so lets
 -- AUTOINCREMENT hand an id out again) reissues an old (id, gen) pair,
 -- except with probability 2^-32 per reissued id. The root row has id 1
--- (= FUSE_ROOT_ID) and reports generation 0 by convention. dentries.inode
--- IS NULL means the name is cached absent, EXCEPT when dentries.refused is
--- 1: that means the opposite -- the name exists on the backing filesystem
--- but dcfs refuses to cache it (a mount point or subvolume boundary below
--- --source; see amendment 12 and README.md's Limitations) -- so it must
--- never be reported as absent (ENOENT); backing::LookupOrPopulate reports
--- EXDEV for it instead.
+-- (= FUSE_ROOT_ID) and reports generation 0 by convention. Directory
+-- entries have explicit states; see the dentries table.
 --
 -- All tables are STRICT (SQLite 3.37+ -- this build uses 3.53).
 
@@ -103,22 +98,40 @@ CREATE TABLE inodes (
   UNIQUE (device_id, backing_ino, backing_gen)
 ) STRICT;
 
--- Cached directory entries. inode IS NULL means either a cached negative
--- entry (refused = 0: the name is absent) or a refused mount/subvolume
--- boundary (refused = 1: the name exists but is not cached -- see the file
--- comment above and backing::LookupOrPopulate). Deliberately an ordinary
--- rowid table, not WITHOUT ROWID: the readdir cursor is defined as a
--- dentry's rowid, so the implicit rowid column (and an index to look
--- entries up by inode) is exactly what's needed.
+-- Cached directory entries, each in an explicit state:
+--   present  the name exists and is `inode`;
+--   absent   the name is known not to exist (a negative entry);
+--   unknown  nothing is known about the name (e.g. phase 1 of a mutation
+--            that is about to change it; its inode row was deleted);
+--   refused  the name exists on the backing filesystem but dcfs refuses to
+--            cache it (a mount point or subvolume boundary below --source;
+--            see amendment 12 and README.md's Limitations): it must never
+--            be reported absent (ENOENT); backing::LookupOrPopulate reports
+--            EXDEV for it instead.
+-- A name with no row is absent if its directory's children_complete is set,
+-- unknown otherwise. Deliberately an ordinary rowid table, not WITHOUT
+-- ROWID: the readdir cursor is defined as a dentry's rowid, so the implicit
+-- rowid column (and an index to look entries up by inode) is exactly what's
+-- needed.
 CREATE TABLE dentries (
   parent INTEGER NOT NULL REFERENCES inodes (id) ON DELETE CASCADE,
   name BLOB NOT NULL,
-  inode INTEGER NULL REFERENCES inodes (id) ON DELETE SET NULL,
-  refused INTEGER NOT NULL DEFAULT 0,  -- bool; see the file comment above
+  state TEXT NOT NULL
+      CHECK (state IN ('present', 'absent', 'unknown', 'refused')),
+  -- No ON DELETE action: the trigger below makes these rows unknown first.
+  inode INTEGER NULL REFERENCES inodes (id),
+  CHECK ((state = 'present') = (inode IS NOT NULL)),
   PRIMARY KEY (parent, name)
 ) STRICT;
 
 CREATE INDEX dentries_inode ON dentries (inode);
+
+-- Deleting an inode row (an invalidation, or a cascade from its
+-- filesystem's row) forgets what it was, not the names that led to it:
+-- those become unknown, never absent (audit F8).
+CREATE TRIGGER inodes_delete_unknowns BEFORE DELETE ON inodes BEGIN
+  UPDATE dentries SET state = 'unknown', inode = NULL WHERE inode = OLD.id;
+END;
 
 -- epoch: bumped by every write that clears children_complete, so that a
 -- mutation's phase 3 can restore the completeness its own phase 1 cleared

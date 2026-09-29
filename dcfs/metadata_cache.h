@@ -36,16 +36,17 @@
 //  - An InodeId is the FUSE nodeid, never reused.
 //  - A row's backing identity is (device, backing_ino, backing_gen); hard
 //    links to one backing file share one row.
-//  - "Invalidating" a row deletes it and every dentry pointing at it, and
-//    marks each such dentry's parent incomplete. Its dentries are deleted
-//    rather than made negative because what we know about those names
-//    afterwards is "unknown", not "absent".
-//  - A dentry whose inode is NULL is a cached negative entry, UNLESS its
-//    `refused` bit is set: that means the opposite -- the name exists but
-//    dcfs refuses to cache it (a mount point or subvolume boundary below
-//    --source, see amendment 12 and README.md's Limitations) -- so it must
-//    never be reported as absent. See LookupResult::kRefused and
-//    SetRefused().
+//  - Each dentry is present (-> an inode), absent, unknown, or refused
+//    (the name exists but dcfs refuses to cache it: a mount point or
+//    subvolume boundary below --source, see amendment 12 and README.md's
+//    Limitations; it must never be reported as absent). A name with no row
+//    is absent if its directory's listing is complete (children_complete)
+//    and unknown otherwise. Only a full listing (PopulateDirectory) sets
+//    children_complete; no single-name operation clears it: phase 1 of a
+//    mutation marks just its own names unknown.
+//  - "Invalidating" a row deletes it; every dentry pointing at it becomes
+//    unknown (schema.sql's inodes_delete_unknowns trigger), never absent,
+//    whatever deleted it.
 //  - The number of cached dentries for an inode is not its link count (only
 //    some of its links may be cached), so removing a dentry never deletes
 //    the inode row by itself; see DeleteInode().
@@ -83,7 +84,8 @@ struct LookupResult {
     kRefused,   // The name exists but is a refused mount/subvolume boundary
                 // (amendment 12): it must never be reported absent.
                 // backing::LookupOrPopulate turns this into EXDEV.
-    kUnknown,   // Nothing cached for this name.
+    kUnknown,   // Nothing is known about this name: an unknown row, or no
+                // row while the listing is incomplete.
   };
   Kind kind = kUnknown;
   // Meaningful only for kFound; 0 otherwise.
@@ -108,6 +110,9 @@ struct FilesystemRow {
 
 // --- Reads ----------------------------------------------------------------
 
+// What is cached about (parent, name); see the identity model above. A
+// name with no row reads kNegative in a complete listing, kUnknown
+// otherwise.
 absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
                                     std::string_view name);
 
@@ -123,17 +128,24 @@ absl::StatusOr<uint32_t> GetGeneration(Context &ctx, InodeId id);
 using ListDirCallback = absl::FunctionRef<absl::StatusOr<bool>(
     std::string_view name, InodeId child, int64_t next_cursor)>;
 
-// Calls `cb` for each positive dentry of `dir` after `cursor` (0 starts
+// Calls `cb` for each present dentry of `dir` after `cursor` (0 starts
 // from the beginning), in a stable order: cursors are dentry rowids, and
 // updating an existing dentry in place (LinkDentry/RenameDentry onto an
-// existing name) keeps its rowid. Negative entries are skipped. `cb` may
+// existing name) keeps its rowid. Other states are skipped: the caller
+// must make sure the listing is complete first (IsDirComplete). `cb` may
 // call other cache functions, including writes: no statement is held open
 // across a callback.
 absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
                      ListDirCallback cb);
 
-// Whether every entry of `dir` is cached (a missing directories row counts
-// as incomplete).
+// Whether `dir`'s listing is complete: every name without a row is absent
+// (children_complete; a missing directories row counts as incomplete).
+absl::StatusOr<bool> ChildrenComplete(Context &ctx, InodeId dir);
+
+// Whether every entry of `dir` is known, so that a listing (ListDir) can be
+// served from the cache: its listing is complete (ChildrenComplete) and no
+// row is unknown -- a listing must neither list nor silently omit a name
+// whose state is unknown.
 absl::StatusOr<bool> IsDirComplete(Context &ctx, InodeId dir);
 
 // NotFound if no target is cached for `id`.
@@ -212,13 +224,14 @@ absl::Status SetNegative(Context &ctx, InodeId parent, std::string_view name);
 // LinkDentry/SetNegative. NotFound if `parent` is missing.
 absl::Status SetRefused(Context &ctx, InodeId parent, std::string_view name);
 
-// Forgets (parent, name) if cached. Never deletes the inode row it pointed
-// at, since other (possibly uncached) links may remain.
+// Marks (parent, name) unknown. Never deletes the inode row it pointed at,
+// since other (possibly uncached) links may remain. NotFound if `parent`
+// is missing.
 absl::Status UnlinkDentry(Context &ctx, InodeId parent, std::string_view name);
 
 // Moves the positive entry (parent, name) to (newparent, newname),
-// replacing any entry cached there. The source name is forgotten (not made
-// negative). NotFound if no positive entry is cached for the source.
+// replacing any entry cached there. The source name becomes unknown (not
+// absent). NotFound if no positive entry is cached for the source.
 absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
                           InodeId newparent, std::string_view newname);
 
@@ -229,16 +242,6 @@ absl::Status MarkDirComplete(Context &ctx, InodeId dir, bool complete);
 // that clears its children_complete. 0 if it has no directories row.
 absl::StatusOr<int64_t> DirEpoch(Context &ctx, InodeId dir);
 
-// Phase 3 of a mutation that changed only names it handles itself (and
-// whose phase 1 cleared `dir`'s completeness): marks `dir` complete again,
-// but only if nothing else has cleared its completeness since -- i.e. its
-// completeness epoch is still `epoch`, read right after phase 1 (see
-// DirEpoch). Otherwise leaves it incomplete: whatever cleared it meanwhile
-// (an invalidation, an out-of-band change) made some other name unknown,
-// and restoring completeness would turn that name into "absent" (audit
-// F4). Returns whether it restored.
-absl::StatusOr<bool> RestoreDirComplete(Context &ctx, InodeId dir,
-                                        int64_t epoch);
 
 // Gives directory `dir` a directories row (children_complete 0) if it has
 // none; an existing row, and so its completeness, is left alone. Used when
@@ -255,9 +258,10 @@ absl::Status EnsureDirectory(Context &ctx, InodeId dir);
 absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
                                 std::span<const std::string> names);
 
-// Forgets `names` in `parent` and marks `parent` incomplete. Phase 1 of a
-// two-phase mutation: done before the backing operation, so that a crash
-// between the two leaves "unknown" rather than stale state.
+// Marks `names` in `parent` unknown, leaving every other name (and the
+// listing's completeness) alone. Phase 1 of a two-phase mutation: done
+// before the backing operation, so that a crash between the two leaves
+// "unknown" rather than stale state. NotFound if `parent` is missing.
 absl::Status MarkUnknown(Context &ctx, InodeId parent,
                          std::span<const std::string> names);
 
@@ -315,9 +319,8 @@ absl::Status ForgetXattr(Context &ctx, InodeId id, std::string_view name);
 // Forgets all of `id`'s xattrs and marks the set incomplete.
 absl::Status MarkXattrsUnknown(Context &ctx, InodeId id);
 
-// Invalidates `id` (see the identity model above): deletes the row and every
-// dentry pointing at it, and marks those dentries' parents incomplete.
-// Cascades remove its directories/symlinks/xattrs rows, its child dentries,
+// Invalidates `id` (see the identity model above): deletes the row; every
+// dentry pointing at it becomes unknown. Cascades remove its directories/symlinks/xattrs rows, its child dentries,
 // and any filesystem mounted inside it. `id` must not be the root.
 // NotFound if no row.
 absl::Status InvalidateInode(Context &ctx, InodeId id);
@@ -488,9 +491,9 @@ absl::Status ClearDirty(Context &ctx, std::span<const InodeId> keep);
 // Startup recovery after an unclean shutdown, in one transaction: for every
 // inode in the dirty set, marks its attributes unknown, forgets its xattrs
 // (rows deleted, set incomplete) and symlink target, forgets every dentry
-// in it (positive and negative) and marks it incomplete if it is a
-// directory, and forgets every dentry pointing at it, marking those
-// dentries' parents incomplete (its name may have changed). Inode rows are
+// in it and marks its listing incomplete if it is a directory (a lost
+// backing change may have added names nothing cached), and marks every
+// dentry pointing at it unknown (its name may have changed). Inode rows are
 // kept, so NFS handles still resolve (and are verified when next opened).
 // Then empties the dirty set. Returns how many dirty entries there were.
 absl::StatusOr<int64_t> RecoverDirty(Context &ctx);
@@ -503,9 +506,9 @@ absl::Status AddFilesystem(Context &ctx, const DeviceId &device,
 
 // Forgets everything cached about filesystem `device`: its row, and by
 // cascade its inodes (with their dentries, xattrs, symlinks, directories)
-// and any filesystems mounted beneath it. Its boundary dentry is forgotten
-// (not left negative) and the boundary's parent marked incomplete, so the
-// mount point is rediscovered on the next lookup. Must not be the source
+// and any filesystems mounted beneath it. Its boundary dentry becomes
+// unknown (not absent), so the mount point is rediscovered on the next
+// lookup. Must not be the source
 // device. NotFound if `device` is not registered.
 absl::Status PurgeFilesystem(Context &ctx, const DeviceId &device);
 

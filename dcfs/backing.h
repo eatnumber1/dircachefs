@@ -235,12 +235,22 @@ struct Populated {
 };
 absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir);
 
-// Looks `name` up in `parent`, populating `parent` first if the cache
-// cannot answer. Never returns kUnknown: a name absent after a complete
-// listing is cached as negative.
+// Looks `name` up in `parent`, resolving it from the backing filesystem if
+// the cache cannot answer: by ResolveName if `parent`'s listing is
+// complete (only `name` is unknown), else by populating `parent`. Never
+// returns kUnknown.
 absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                                                      InodeId parent,
                                                      std::string_view name);
+
+// Probes just `name` in `parent` on the backing filesystem (as
+// PopulateDirectory probes each child) and records it as present, absent
+// or refused -- a fill (see cache::CanFill): nothing is recorded about
+// `parent`'s dentry if a mutation of `parent` ran concurrently. Returns
+// kFound or kNegative, or EXDEV for a refused boundary. Used for an
+// unknown name in an otherwise complete listing (audit F7).
+absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
+                                                std::string_view name);
 
 // --- Create-family ops (step 4.2) ------------------------------------------
 //

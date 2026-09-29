@@ -529,6 +529,7 @@ cc_library(
       ":file_handle",
       ":metadata_cache",
       ":migrate",
+      ":ret_check",
       ":status",
       ":syscalls",
       "@absl//absl/container:flat_hash_map",

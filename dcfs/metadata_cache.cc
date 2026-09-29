@@ -173,24 +173,30 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
       Query(ctx,
-            "SELECT inode, refused FROM dentries WHERE parent = ? AND name = ?",
+            "SELECT state, inode FROM dentries WHERE parent = ? AND name = ?",
             parent, Blob(name)));
   LookupResult result;
   ABSL_ASSIGN_OR_RETURN(
-      bool found, ReadOne(*stmt, [&](Statement &row) {
-        std::optional<int64_t> inode = row.Column<std::optional<int64_t>>(0);
-        bool refused = row.Column<bool>(1);
-        if (inode.has_value()) {
-          result = {LookupResult::kFound, *inode};
-        } else if (refused) {
+      bool found, ReadOne(*stmt, [&](Statement &row) -> absl::Status {
+        const std::string state = row.Column<std::string>(0);
+        if (state == "present") {
+          result = {LookupResult::kFound, row.Column<int64_t>(1)};
+        } else if (state == "absent") {
+          result = {LookupResult::kNegative, 0};
+        } else if (state == "refused") {
           result = {LookupResult::kRefused, 0};
         } else {
-          result = {LookupResult::kNegative, 0};
+          RET_CHECK_EQ(state, "unknown") << "bad dentries.state";
+          result = {LookupResult::kUnknown, 0};
         }
         return absl::OkStatus();
       }));
-  if (!found) result = {LookupResult::kUnknown, 0};
-  return result;
+  if (found) return result;
+  // No row: the listing's completeness decides.
+  ABSL_ASSIGN_OR_RETURN(bool complete, ChildrenComplete(ctx, parent));
+  return LookupResult{complete ? LookupResult::kNegative
+                               : LookupResult::kUnknown,
+                      0};
 }
 
 absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id) {
@@ -276,7 +282,7 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
         Statement * stmt,
         Query(ctx,
               "SELECT rowid, name, inode FROM dentries "
-              "WHERE parent = ? AND rowid > ? AND inode IS NOT NULL "
+              "WHERE parent = ? AND rowid > ? AND state = 'present' "
               "ORDER BY rowid LIMIT ?",
               dir, cursor, kListDirBatch));
     ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
@@ -296,7 +302,7 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
   }
 }
 
-absl::StatusOr<bool> IsDirComplete(Context &ctx, InodeId dir) {
+absl::StatusOr<bool> ChildrenComplete(Context &ctx, InodeId dir) {
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
       Query(ctx, "SELECT children_complete FROM directories WHERE inode = ?",
@@ -307,6 +313,22 @@ absl::StatusOr<bool> IsDirComplete(Context &ctx, InodeId dir) {
                          return absl::OkStatus();
                        }).status());
   return complete;
+}
+
+absl::StatusOr<bool> IsDirComplete(Context &ctx, InodeId dir) {
+  ABSL_ASSIGN_OR_RETURN(bool complete, ChildrenComplete(ctx, dir));
+  if (!complete) return false;
+  // A listing must not leave out (or list) a name whose state is unknown.
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx,
+            "SELECT 1 FROM dentries WHERE parent = ? AND state = 'unknown' "
+            "LIMIT 1",
+            dir));
+  ABSL_ASSIGN_OR_RETURN(
+      bool any_unknown,
+      ReadOne(*stmt, [](Statement &) { return absl::OkStatus(); }));
+  return !any_unknown;
 }
 
 absl::StatusOr<std::string> Readlink(Context &ctx, InodeId id) {
@@ -435,7 +457,10 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
   // LIMIT 2 is enough to tell "one" from "more than one".
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
-      Query(ctx, "SELECT parent FROM dentries WHERE inode = ? LIMIT 2", dir));
+      Query(ctx,
+            "SELECT parent FROM dentries "
+            "WHERE inode = ? AND state = 'present' LIMIT 2",
+            dir));
   std::vector<InodeId> parents;
   ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
     parents.push_back(row.Column<int64_t>(0));
@@ -647,22 +672,18 @@ absl::Status UpsertRoot(Context &ctx, const FileHandle &handle,
 
 namespace {
 
-// Points (parent, name) at `child` (nullopt for a negative entry). An
+// Sets (parent, name) to `state` (pointing at `child` iff 'present'). An
 // upsert rather than INSERT OR REPLACE: REPLACE deletes and reinserts,
 // giving the entry a new rowid, which would make an in-progress ListDir
 // (whose cursor is a rowid) see a renamed-over name twice.
-// `refused` is written unconditionally on every call (including the
-// ON CONFLICT branch): a name transitioning between positive/negative and
-// refused -- e.g. a boundary that stops being one, or vice versa -- must
-// never leave the previous call's `refused` bit stuck.
 absl::Status PutDentry(Context &ctx, InodeId parent, std::string_view name,
-                       std::optional<InodeId> child, bool refused) {
+                       std::string_view state, std::optional<InodeId> child) {
   return Execute(ctx,
-                 "INSERT INTO dentries (parent, name, inode, refused) "
+                 "INSERT INTO dentries (parent, name, state, inode) "
                  "VALUES (?, ?, ?, ?) "
                  "ON CONFLICT (parent, name) DO UPDATE SET "
-                 "inode = excluded.inode, refused = excluded.refused",
-                 parent, Blob(name), child, refused)
+                 "state = excluded.state, inode = excluded.inode",
+                 parent, Blob(name), state, child)
       .status();
 }
 
@@ -673,29 +694,28 @@ absl::Status LinkDentry(Context &ctx, InodeId parent, std::string_view name,
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, child));
-    return PutDentry(ctx, parent, name, child, /*refused=*/false);
+    return PutDentry(ctx, parent, name, "present", child);
   });
 }
 
 absl::Status SetNegative(Context &ctx, InodeId parent, std::string_view name) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
-    return PutDentry(ctx, parent, name, std::nullopt, /*refused=*/false);
+    return PutDentry(ctx, parent, name, "absent", std::nullopt);
   });
 }
 
 absl::Status SetRefused(Context &ctx, InodeId parent, std::string_view name) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
-    return PutDentry(ctx, parent, name, std::nullopt, /*refused=*/true);
+    return PutDentry(ctx, parent, name, "refused", std::nullopt);
   });
 }
 
 absl::Status UnlinkDentry(Context &ctx, InodeId parent, std::string_view name) {
   return ctx.db.Transaction([&]() -> absl::Status {
-    return Execute(ctx, "DELETE FROM dentries WHERE parent = ? AND name = ?",
-                   parent, Blob(name))
-        .status();
+    ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
+    return PutDentry(ctx, parent, name, "unknown", std::nullopt);
   });
 }
 
@@ -710,10 +730,8 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
     if (parent == newparent && name == newname) return absl::OkStatus();
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, newparent));
     ABSL_RETURN_IF_ERROR(
-        Execute(ctx, "DELETE FROM dentries WHERE parent = ? AND name = ?",
-                parent, Blob(name))
-            .status());
-    return PutDentry(ctx, newparent, newname, source.id, /*refused=*/false);
+        PutDentry(ctx, parent, name, "unknown", std::nullopt));
+    return PutDentry(ctx, newparent, newname, "present", source.id);
   });
 }
 
@@ -740,25 +758,6 @@ absl::StatusOr<int64_t> DirEpoch(Context &ctx, InodeId dir) {
                          return absl::OkStatus();
                        }).status());
   return epoch;
-}
-
-absl::StatusOr<bool> RestoreDirComplete(Context &ctx, InodeId dir,
-                                        int64_t epoch) {
-  int64_t changed = 0;
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(
-        changed, Execute(ctx,
-                         "UPDATE directories SET children_complete = 1 "
-                         "WHERE inode = ? AND epoch = ?",
-                         dir, epoch));
-    return absl::OkStatus();
-  }));
-  if (changed == 0) {
-    VLOG(1) << "directory " << dir
-            << ": not restoring completeness, something else cleared it "
-               "since this mutation's phase 1";
-  }
-  return changed != 0;
 }
 
 absl::Status EnsureDirectory(Context &ctx, InodeId dir) {
@@ -801,13 +800,12 @@ absl::Status PruneDentriesNotIn(Context &ctx, InodeId dir,
 absl::Status MarkUnknown(Context &ctx, InodeId parent,
                          std::span<const std::string> names) {
   return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
     for (const std::string &name : names) {
       ABSL_RETURN_IF_ERROR(
-          Execute(ctx, "DELETE FROM dentries WHERE parent = ? AND name = ?",
-                  parent, Blob(name))
-              .status());
+          PutDentry(ctx, parent, name, "unknown", std::nullopt));
     }
-    return MarkIncomplete(ctx, parent);
+    return absl::OkStatus();
   });
 }
 
@@ -816,7 +814,9 @@ absl::Status ForgetNegativeDentries(Context &ctx, InodeId dir) {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, dir));
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "DELETE FROM dentries WHERE parent = ? AND inode IS NULL", dir)
+                "DELETE FROM dentries "
+                "WHERE parent = ? AND state IN ('absent', 'refused')",
+                dir)
             .status());
     return MarkIncomplete(ctx, dir);
   });
@@ -940,19 +940,8 @@ absl::Status InvalidateInode(Context &ctx, InodeId id) {
   RET_CHECK_NE(id, kRootInode) << "the root inode cannot be invalidated";
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
-    // Parents first: once the dentries are gone we can no longer find them.
-    ABSL_RETURN_IF_ERROR(
-        Execute(ctx,
-                "UPDATE directories SET children_complete = 0, "
-                "epoch = epoch + 1 "
-                "WHERE inode IN (SELECT parent FROM dentries WHERE inode = ?)",
-                id)
-            .status());
-    // Deleted explicitly, before the row: the schema's ON DELETE SET NULL
-    // would otherwise turn them into negative entries, claiming those names
-    // are absent when in fact we no longer know.
-    ABSL_RETURN_IF_ERROR(
-        Execute(ctx, "DELETE FROM dentries WHERE inode = ?", id).status());
+    // The schema's inodes_delete_unknowns trigger makes every dentry that
+    // pointed at it unknown; its own dentries (if a directory) cascade.
     return Execute(ctx, "DELETE FROM inodes WHERE id = ?", id).status();
   });
 }
@@ -994,20 +983,11 @@ absl::Status PurgeFilesystem(Context &ctx, const DeviceId &device) {
         Execute(ctx, "DELETE FROM filesystems WHERE device_id = ?",
                 Blob(device.Serialize()))
             .status());
-    if (!fs.parent_inode.has_value() || !fs.boundary_name.has_value()) {
-      return absl::OkStatus();
-    }
-    // The cascade above deleted the filesystem's root inode, and the
-    // schema's ON DELETE SET NULL turned the boundary dentry pointing at it
-    // into a negative entry. The mount point is not absent, merely
-    // forgotten, so drop that entry and make the parent rediscover it.
-    ABSL_RETURN_IF_ERROR(
-        Execute(ctx,
-                "DELETE FROM dentries "
-                "WHERE parent = ? AND name = ? AND inode IS NULL",
-                *fs.parent_inode, Blob(*fs.boundary_name))
-            .status());
-    return MarkIncomplete(ctx, *fs.parent_inode);
+    // The cascade above deleted the filesystem's inodes, and the schema's
+    // inodes_delete_unknowns trigger made the boundary dentry pointing at
+    // its root unknown (the mount point is not absent, merely forgotten), so
+    // the parent rediscovers it.
+    return absl::OkStatus();
   });
 }
 
@@ -1283,21 +1263,24 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
                            return absl::OkStatus();
                          }).status());
     if (count == 0) return absl::OkStatus();
-    // Parents first: once the dentries pointing at dirty inodes are gone we
-    // can no longer find them (as InvalidateInode).
+    // A dirty directory's listing: any name may have changed, including
+    // ones nothing cached (only a directory has dentries of its own).
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
                 "UPDATE directories SET children_complete = 0, "
                 "epoch = epoch + 1 "
-                "WHERE inode IN (SELECT inode FROM dirty) "
-                "OR inode IN (SELECT parent FROM dentries "
-                "WHERE inode IN (SELECT inode FROM dirty))")
+                "WHERE inode IN (SELECT inode FROM dirty)")
             .status());
-    // Only a directory has dentries of its own.
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "DELETE FROM dentries WHERE parent IN (SELECT inode FROM dirty) "
-                "OR inode IN (SELECT inode FROM dirty)")
+                "DELETE FROM dentries WHERE parent IN (SELECT inode FROM dirty)")
+            .status());
+    // A dirty inode's own names elsewhere (it may have been renamed or
+    // unlinked): unknown.
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "UPDATE dentries SET state = 'unknown', inode = NULL "
+                "WHERE inode IN (SELECT inode FROM dirty)")
             .status());
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,

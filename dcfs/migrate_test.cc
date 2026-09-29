@@ -184,7 +184,15 @@ TEST_F(MigrateTest, MissingCacheStateRowIsCorrupt) {
 // starts from a fresh (current-schema) database, which already has it.
 absl::Status DowngradeToV1(sqlite3::Connection &db, const DeviceId &device) {
   ABSL_RETURN_IF_ERROR(db.ExecScript(
-      "ALTER TABLE dentries DROP COLUMN refused; "
+      "DROP TRIGGER inodes_delete_unknowns; "
+      "CREATE TABLE dentries_v1 (parent INTEGER NOT NULL REFERENCES "
+      "inodes (id) ON DELETE CASCADE, name BLOB NOT NULL, inode INTEGER "
+      "NULL REFERENCES inodes (id) ON DELETE SET NULL, "
+      "PRIMARY KEY (parent, name)) STRICT; "
+      "INSERT INTO dentries_v1 SELECT parent, name, inode FROM dentries; "
+      "DROP TABLE dentries; "
+      "ALTER TABLE dentries_v1 RENAME TO dentries; "
+      "CREATE INDEX dentries_inode ON dentries (inode); "
       "ALTER TABLE directories DROP COLUMN epoch; "
       "DROP TABLE dirty; DROP TABLE cache_state; DROP TABLE xattrs; "
       "CREATE TABLE xattrs (inode INTEGER NOT NULL REFERENCES inodes (id) "
@@ -280,7 +288,9 @@ TEST_F(MigrateTest, DuplicateBackingIdentityViolatesUniqueConstraint) {
   EXPECT_EQ(result.status().code(), absl::StatusCode::kAlreadyExists);
 }
 
-TEST_F(MigrateTest, DeletingInodeLeavesDentryAsNegativeEntry) {
+// Audit F8: deleting an inode row leaves the dentries that pointed at it
+// unknown, never a negative ("absent") entry.
+TEST_F(MigrateTest, DeletingInodeLeavesDentryUnknown) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
   std::string device_bytes = root.device_id.Serialize();
@@ -296,8 +306,8 @@ TEST_F(MigrateTest, DeletingInodeLeavesDentryAsNegativeEntry) {
 
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * dentry_stmt,
-      db_.Prepared("INSERT INTO dentries (parent, name, inode) "
-                    "VALUES (1, ?, 2)"));
+      db_.Prepared("INSERT INTO dentries (parent, name, state, inode) "
+                    "VALUES (1, ?, 'present', 2)"));
   ASSERT_THAT(dentry_stmt->Bind(1, Blob("child")), IsOk());
   ASSERT_THAT(dentry_stmt->ExecuteOnce(), IsOk());
 
@@ -306,10 +316,11 @@ TEST_F(MigrateTest, DeletingInodeLeavesDentryAsNegativeEntry) {
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * check,
       db_.Prepared(
-          "SELECT inode FROM dentries WHERE parent = 1 AND name = ?"));
+          "SELECT inode, state FROM dentries WHERE parent = 1 AND name = ?"));
   ASSERT_THAT(check->Bind(1, Blob("child")), IsOk());
   ASSERT_THAT(check->Step(), IsOkAndHolds(true));
   EXPECT_TRUE(check->ColumnIsNull(0));
+  EXPECT_EQ(check->Column<std::string>(1), "unknown");
   ASSERT_THAT(check->Step(), IsOkAndHolds(false));
 }
 
@@ -348,7 +359,8 @@ TEST_F(MigrateTest, DeletingFilesystemCascadesButRootSurvives) {
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * dentry_stmt,
       db_.Prepared(
-          "INSERT INTO dentries (parent, name, inode) VALUES (1, ?, 2)"));
+          "INSERT INTO dentries (parent, name, state, inode) "
+          "VALUES (1, ?, 'present', 2)"));
   ASSERT_THAT(dentry_stmt->Bind(1, Blob("mnt")), IsOk());
   ASSERT_THAT(dentry_stmt->ExecuteOnce(), IsOk());
 
@@ -379,14 +391,15 @@ TEST_F(MigrateTest, DeletingFilesystemCascadesButRootSurvives) {
   EXPECT_THAT(CountRows(db_, "symlinks WHERE inode = 2"), IsOkAndHolds(0));
 
   // The dentry through which the deleted filesystem was mounted survives as
-  // a negative entry rather than being deleted.
+  // an unknown entry (the mount point still exists), never a negative one.
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * check,
       db_.Prepared(
-          "SELECT inode FROM dentries WHERE parent = 1 AND name = ?"));
+          "SELECT inode, state FROM dentries WHERE parent = 1 AND name = ?"));
   ASSERT_THAT(check->Bind(1, Blob("mnt")), IsOk());
   ASSERT_THAT(check->Step(), IsOkAndHolds(true));
   EXPECT_TRUE(check->ColumnIsNull(0));
+  EXPECT_EQ(check->Column<std::string>(1), "unknown");
 
   EXPECT_THAT(CountRows(db_, "inodes WHERE id = 1"), IsOkAndHolds(1));
   EXPECT_THAT(CountRows(db_, "directories WHERE inode = 1"), IsOkAndHolds(1));
@@ -399,14 +412,16 @@ TEST_F(MigrateTest, DentriesHaveAUsableRowid) {
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * insert_a,
       db_.Prepared(
-          "INSERT INTO dentries (parent, name, inode) VALUES (1, ?, NULL)"));
+          "INSERT INTO dentries (parent, name, state, inode) "
+          "VALUES (1, ?, 'absent', NULL)"));
   ASSERT_THAT(insert_a->Bind(1, Blob("a")), IsOk());
   ASSERT_THAT(insert_a->ExecuteOnce(), IsOk());
 
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * insert_b,
       db_.Prepared(
-          "INSERT INTO dentries (parent, name, inode) VALUES (1, ?, NULL)"));
+          "INSERT INTO dentries (parent, name, state, inode) "
+          "VALUES (1, ?, 'absent', NULL)"));
   ASSERT_THAT(insert_b->Bind(1, Blob("b")), IsOk());
   ASSERT_THAT(insert_b->ExecuteOnce(), IsOk());
 
@@ -445,7 +460,15 @@ TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
                   "DROP TABLE IF EXISTS dirty; "
                   "DROP TABLE IF EXISTS cache_state; "
                   "DROP TABLE IF EXISTS meta; "
-                  "ALTER TABLE dentries DROP COLUMN refused; "
+                  "DROP TRIGGER inodes_delete_unknowns; "
+                  "CREATE TABLE dentries_v1 (parent INTEGER NOT NULL REFERENCES "
+                  "inodes (id) ON DELETE CASCADE, name BLOB NOT NULL, inode INTEGER "
+                  "NULL REFERENCES inodes (id) ON DELETE SET NULL, "
+                  "PRIMARY KEY (parent, name)) STRICT; "
+                  "INSERT INTO dentries_v1 SELECT parent, name, inode FROM dentries; "
+                  "DROP TABLE dentries; "
+                  "ALTER TABLE dentries_v1 RENAME TO dentries; "
+                  "CREATE INDEX dentries_inode ON dentries (inode); "
                   "ALTER TABLE directories DROP COLUMN epoch; "
                   "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
                   "INSERT INTO meta VALUES ('schema_version', '1'), "

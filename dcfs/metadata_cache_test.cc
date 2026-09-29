@@ -385,7 +385,8 @@ TEST_F(MetadataCacheTest, DeleteInodeRemovesEverything) {
               IsOkAndHolds(0));
   EXPECT_THAT(GetAttr(ctx_, child.id), IsOk());
   // Nothing was ever turned into a negative entry.
-  EXPECT_THAT(CountRows(db_, "dentries WHERE inode IS NULL"), IsOkAndHolds(0));
+  EXPECT_THAT(CountRows(db_, "dentries WHERE state = 'absent'"),
+              IsOkAndHolds(0));
 
   EXPECT_THAT(DeleteInode(ctx_, d), StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(InvalidateInode(ctx_, kRootInode),
@@ -467,9 +468,9 @@ TEST_F(MetadataCacheTest, PurgeFilesystem) {
               StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(GetFilesystem(ctx_, kThird),
               StatusIs(absl::StatusCode::kNotFound));
-  // Only the root's rows remain.
+  // Only the root's rows remain, plus the now-unknown "mnt".
   EXPECT_THAT(CountRows(db_, "inodes"), IsOkAndHolds(2));
-  EXPECT_THAT(CountRows(db_, "dentries"), IsOkAndHolds(1));
+  EXPECT_THAT(CountRows(db_, "dentries"), IsOkAndHolds(2));
   EXPECT_THAT(CountRows(db_, "xattrs"), IsOkAndHolds(1));
   EXPECT_THAT(CountRows(db_, "directories"), IsOkAndHolds(1));
   EXPECT_THAT(Lookup(ctx_, kRootInode, "keep"),
@@ -1069,6 +1070,7 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   EXPECT_FALSE(valid(f.id));
   EXPECT_TRUE(valid(a));
   EXPECT_THAT(IsDirComplete(ctx_, b), IsOkAndHolds(false));
+  ASSERT_THAT(SetNegative(ctx_, b, "h"), IsOk());
 
   // Setattr / writable open / write / fallocate of g.
   ASSERT_THAT(reset(), IsOk());
@@ -1220,43 +1222,33 @@ TEST_F(MetadataCacheTest, BeginCreateMarksTheParentsAttributesUnknown) {
   EXPECT_FALSE(after.valid);
 }
 
-// Audit F4: phase 3 of a create/remove/rename/link restores the
-// completeness its phase 1 cleared, but must not undo a clearing that
-// something else did in between. Simulates the coroutine interleaving:
+// Audit F4: a mutation's phase 3 must not undo something another request
+// made unknown in between. With per-name dentry states there is no
+// completeness to restore any more; this simulates the same interleaving:
 // phase 1 of a create in d, then a concurrent request that invalidates
-// sibling s (so (d, "s") becomes unknown and d incomplete), then phase 3's
-// restore. d must stay incomplete, or "s" -- which exists -- would be
-// served as absent.
-TEST_F(MetadataCacheTest, RestoreDirCompleteDoesNotUndoAnotherClearing) {
+// sibling s, then phase 3. "s" -- which exists -- must stay unknown, not
+// become absent.
+TEST_F(MetadataCacheTest, PhaseThreeDoesNotUndoAnotherInvalidation) {
   ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
   ASSERT_OK_AND_ASSIGN(UpsertResult s, Make(21));
   ASSERT_THAT(LinkDentry(ctx_, d, "s", s.id), IsOk());
   ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
 
   ASSERT_THAT(BeginCreate(ctx_, d, "new"), IsOk());
-  ASSERT_OK_AND_ASSIGN(int64_t epoch, DirEpoch(ctx_, d));
   ASSERT_THAT(InvalidateInode(ctx_, s.id), IsOk());
-  ASSERT_THAT(SetNegative(ctx_, d, "new"), IsOk());  // phase 3's own write
-  EXPECT_THAT(RestoreDirComplete(ctx_, d, epoch), IsOkAndHolds(false));
-  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
+  ASSERT_THAT(SetNegative(ctx_, d, "new"), IsOk());  // phase 3
   EXPECT_THAT(Lookup(ctx_, d, "s"),
               IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
-
-  // The same with an out-of-band change detected meanwhile.
-  ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
-  ASSERT_THAT(BeginCreate(ctx_, d, "new2"), IsOk());
-  ASSERT_OK_AND_ASSIGN(epoch, DirEpoch(ctx_, d));
-  ASSERT_THAT(ForgetNegativeDentries(ctx_, d), IsOk());
-  EXPECT_THAT(RestoreDirComplete(ctx_, d, epoch), IsOkAndHolds(false));
   EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
 
-  // With nothing in between, completeness is restored.
-  ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
-  ASSERT_THAT(BeginCreate(ctx_, d, "new3"), IsOk());
-  ASSERT_OK_AND_ASSIGN(epoch, DirEpoch(ctx_, d));
-  ASSERT_THAT(SetNegative(ctx_, d, "new3"), IsOk());
-  EXPECT_THAT(RestoreDirComplete(ctx_, d, epoch), IsOkAndHolds(true));
-  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(true));
+  // The same with an out-of-band change detected meanwhile: new names may
+  // have appeared, so the listing is incomplete.
+  ASSERT_THAT(BeginCreate(ctx_, d, "new2"), IsOk());
+  ASSERT_THAT(ForgetNegativeDentries(ctx_, d), IsOk());
+  ASSERT_THAT(SetNegative(ctx_, d, "new2"), IsOk());
+  EXPECT_THAT(ChildrenComplete(ctx_, d), IsOkAndHolds(false));
+  EXPECT_THAT(Lookup(ctx_, d, "other"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
 }
 
 // Audit F1: a fill (read the backing filesystem, then record what it read)
@@ -1351,6 +1343,54 @@ TEST_F(MetadataCacheTest, FillWithNoConcurrentMutationCaches) {
   EXPECT_THAT(FillXattr(ctx_, fill, f.id, "user.b", std::nullopt),
               IsOkAndHolds(true));
   EXPECT_THAT(FillSymlink(ctx_, fill, f.id, "t"), IsOkAndHolds(true));
+}
+
+// Audit F8: deleting an inode row must never turn a dentry that pointed at
+// it into a negative ("absent") entry: the name still exists as far as
+// anyone knows, it is just no longer cached. Deleted directly, bypassing
+// InvalidateInode's own bookkeeping, as a cascade (e.g. PurgeFilesystem)
+// would.
+TEST_F(MetadataCacheTest, DeletingAnInodeRowLeavesItsDentriesUnknown) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
+  ASSERT_OK_AND_ASSIGN(UpsertResult x, Make(21));
+  ASSERT_THAT(LinkDentry(ctx_, d, "x", x.id), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
+  ASSERT_THAT(db_.Exec(absl::StrCat("DELETE FROM inodes WHERE id = ", x.id)),
+              IsOk());
+  EXPECT_THAT(Lookup(ctx_, d, "x"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  // A listing with an unknown name in it is not complete.
+  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
+}
+
+// Dentries have explicit per-name states: phase 1 of a create marks just
+// that name unknown, leaving the directory's other names -- including the
+// ones known absent because the listing is complete -- as they were.
+TEST_F(MetadataCacheTest, PhaseOneMarksOnlyItsOwnNameUnknown) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
+  ASSERT_OK_AND_ASSIGN(UpsertResult x, Make(21));
+  ASSERT_THAT(LinkDentry(ctx_, d, "x", x.id), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, d, true), IsOk());
+
+  ASSERT_THAT(BeginCreate(ctx_, d, "new"), IsOk());
+  EXPECT_THAT(Lookup(ctx_, d, "new"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_THAT(Lookup(ctx_, d, "other"),
+              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+  EXPECT_THAT(Lookup(ctx_, d, "x"), IsOkAndHolds(IsFoundAs(x.id)));
+  // Not listable while "new" is unknown...
+  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
+  // ...and complete again once phase 3 resolves it, with nothing to
+  // restore.
+  ASSERT_THAT(SetNegative(ctx_, d, "new"), IsOk());
+  EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(true));
+
+  // Invalidating a child makes just its name unknown, too.
+  ASSERT_THAT(InvalidateInode(ctx_, x.id), IsOk());
+  EXPECT_THAT(Lookup(ctx_, d, "x"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+  EXPECT_THAT(Lookup(ctx_, d, "other"),
+              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
 }
 
 }  // namespace

@@ -32,6 +32,7 @@
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
+#include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
@@ -715,6 +716,63 @@ absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id) {
   return syscalls::fstatvfs(mount_fd);
 }
 
+namespace {
+
+// Phase B of PopulateDirectory (and ResolveName) for one probed child of
+// `dir`, inside the caller's transaction: upserts its row, recording its
+// attributes, symlink target and xattrs only if it may be filled (see
+// cache::CanFill; otherwise its attributes are left unknown), and links it
+// into `dir` if `dir_ok`. Returns the child's row.
+absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
+                                    InodeId dir, const ChildRecord &child,
+                                    bool dir_ok) {
+  // The probe's statx is free out-of-band detection for a child whose
+  // row is already cached (under this name, and still the same object):
+  // see ReconcileAttrs. A row adopted fresh by OpenNode just before
+  // (e.g. `dir` itself) already matches, so nothing is logged twice.
+  ABSL_ASSIGN_OR_RETURN(cache::LookupResult cached_dentry,
+                        cache::Lookup(ctx, dir, child.name));
+  if (cached_dentry.kind == cache::LookupResult::kFound) {
+    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr cached,
+                          cache::GetAttr(ctx, cached_dentry.id));
+    if (cached.device == child.handle.device &&
+        cached.backing_ino == child.stx.stx_ino &&
+        cached.backing_gen == child.backing_gen &&
+        (cached.btime.tv_sec == child.stx.stx_btime.tv_sec &&
+         cached.btime.tv_nsec ==
+             static_cast<long>(child.stx.stx_btime.tv_nsec))) {
+      ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, cached_dentry.id,
+                                          cached, child.stx));
+    }
+  }
+  ABSL_ASSIGN_OR_RETURN(
+      cache::UpsertResult row,
+      cache::UpsertInode(ctx, child.handle, child.stx, child.backing_gen));
+  const bool child_ok = cache::CanFill(ctx, snapshot, row.id);
+  // UpsertInode marks the attributes current; a child that is open for
+  // writing keeps them unknown (see WriteAttrs), as does one a mutation
+  // may have changed since the probe.
+  if (!child_ok || OpenForWrite(ctx, row.id)) {
+    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+  }
+  if (S_ISDIR(child.stx.stx_mode)) {
+    ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
+  }
+  if (dir_ok) {
+    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, dir, child.name, row.id));
+  }
+  if (child_ok) {
+    if (child.symlink_target.has_value()) {
+      ABSL_RETURN_IF_ERROR(
+          cache::SetSymlink(ctx, row.id, *child.symlink_target));
+    }
+    ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, child.xattrs));
+  }
+  return row.id;
+}
+
+}  // namespace
+
 absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // Phase A: all the I/O, no transaction.
   ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
@@ -768,50 +826,10 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     std::vector<std::string> seen;
     seen.reserve(children.size() + refused_names.size());
     for (const ChildRecord &child : children) {
-      // The probe's statx is free out-of-band detection for a child whose
-      // row is already cached (under this name, and still the same object):
-      // see ReconcileAttrs. A row adopted fresh by OpenNode just before
-      // (e.g. `dir` itself) already matches, so nothing is logged twice.
-      ABSL_ASSIGN_OR_RETURN(cache::LookupResult cached_dentry,
-                            cache::Lookup(ctx, dir, child.name));
-      if (cached_dentry.kind == cache::LookupResult::kFound) {
-        ABSL_ASSIGN_OR_RETURN(cache::CachedAttr cached,
-                              cache::GetAttr(ctx, cached_dentry.id));
-        if (cached.device == child.handle.device &&
-            cached.backing_ino == child.stx.stx_ino &&
-            cached.backing_gen == child.backing_gen &&
-            (cached.btime.tv_sec == child.stx.stx_btime.tv_sec &&
-             cached.btime.tv_nsec ==
-                 static_cast<long>(child.stx.stx_btime.tv_nsec))) {
-          ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, cached_dentry.id,
-                                              cached, child.stx));
-        }
-      }
-      ABSL_ASSIGN_OR_RETURN(
-          cache::UpsertResult row,
-          cache::UpsertInode(ctx, child.handle, child.stx, child.backing_gen));
-      const bool child_ok = cache::CanFill(ctx, snapshot, row.id);
-      // UpsertInode marks the attributes current; a child that is open for
-      // writing keeps them unknown (see WriteAttrs), as does one a mutation
-      // may have changed since the probe.
-      if (!child_ok || OpenForWrite(ctx, row.id)) {
-        ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
-      }
-      if (S_ISDIR(child.stx.stx_mode)) {
-        ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
-      }
-      if (dir_ok) {
-        ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, dir, child.name, row.id));
-      }
-      if (child_ok) {
-        if (child.symlink_target.has_value()) {
-          ABSL_RETURN_IF_ERROR(
-              cache::SetSymlink(ctx, row.id, *child.symlink_target));
-        }
-        ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, child.xattrs));
-      }
-      result.entries[child.name] = cache::LookupResult{
-          .kind = cache::LookupResult::kFound, .id = row.id};
+      ABSL_ASSIGN_OR_RETURN(InodeId id,
+                            RecordChild(ctx, snapshot, dir, child, dir_ok));
+      result.entries[child.name] =
+          cache::LookupResult{.kind = cache::LookupResult::kFound, .id = id};
       seen.push_back(child.name);
     }
     for (const std::string &name : refused_names) {
@@ -876,29 +894,82 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
   if (result.kind != cache::LookupResult::kUnknown) return result;
 
-  ABSL_ASSIGN_OR_RETURN(bool complete, cache::IsDirComplete(ctx, parent));
-  if (!complete) {
-    ABSL_ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
-    if (!populated.cached) {
-      // Not recorded (a concurrent mutation of `parent`): answer from the
-      // listing itself, caching nothing about `name`.
-      auto it = populated.entries.find(name);
-      if (it == populated.entries.end()) {
-        return cache::LookupResult{.kind = cache::LookupResult::kNegative,
-                                   .id = 0};
-      }
-      if (it->second.kind == cache::LookupResult::kRefused) {
-        return ExdevBoundary();
-      }
-      return it->second;
+  // An unknown name in a complete listing (e.g. left by a mutation's phase
+  // 1, or an invalidation): everything else is known, so resolve just it
+  // (audit F7) rather than relisting the directory.
+  ABSL_ASSIGN_OR_RETURN(bool listed, cache::ChildrenComplete(ctx, parent));
+  if (listed) return ResolveName(ctx, parent, name);
+
+  ABSL_ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
+  if (!populated.cached) {
+    // Not recorded (a concurrent mutation of `parent`): answer from the
+    // listing itself, caching nothing about `name`.
+    auto it = populated.entries.find(name);
+    if (it == populated.entries.end()) {
+      return cache::LookupResult{.kind = cache::LookupResult::kNegative,
+                                 .id = 0};
     }
-    ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
-    if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
-    if (result.kind != cache::LookupResult::kUnknown) return result;
+    if (it->second.kind == cache::LookupResult::kRefused) {
+      return ExdevBoundary();
+    }
+    return it->second;
   }
-  // The listing is complete and does not have `name`: remember that.
-  ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
-  return cache::LookupResult{.kind = cache::LookupResult::kNegative, .id = 0};
+  ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
+  if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
+  // A recorded listing names every child, and makes every other name
+  // absent.
+  RET_CHECK_NE(result.kind, cache::LookupResult::kUnknown)
+      << "name " << name << " of directory " << parent
+      << " still unknown after its listing was recorded";
+  return result;
+}
+
+absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
+                                                std::string_view name) {
+  // As PopulateDirectory, for one name: open the parent, probe `name` in
+  // it (openat O_PATH, statx, handle, generation, symlink target, xattrs),
+  // and record it as present, absent (ENOENT) or refused (a boundary), as
+  // a fill (cache::CanFill).
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
+                        OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+  ABSL_ASSIGN_OR_RETURN(
+      struct statx dir_stx,
+      syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr,
+                        cache::GetAttr(ctx, parent));
+  bool refused = false;
+  ABSL_ASSIGN_OR_RETURN(
+      std::optional<ChildRecord> child,
+      ProbeChild(*dir_fd, dir_stx, dir_attr.device, parent, name, refused));
+  VLOG(1) << "resolving " << name << " in directory " << parent;
+
+  cache::LookupResult result;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    const bool dir_ok = cache::CanFill(ctx, snapshot, parent);
+    if (child.has_value()) {
+      ABSL_ASSIGN_OR_RETURN(InodeId id,
+                            RecordChild(ctx, snapshot, parent, *child, dir_ok));
+      result = {cache::LookupResult::kFound, id};
+    } else if (refused) {
+      if (dir_ok) {
+        ABSL_RETURN_IF_ERROR(cache::SetRefused(ctx, parent, name));
+      }
+      result = {cache::LookupResult::kRefused, 0};
+    } else {
+      if (dir_ok) {
+        ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
+      }
+      result = {cache::LookupResult::kNegative, 0};
+    }
+    if (!dir_ok) {
+      VLOG(1) << "directory " << parent << ": not caching " << name
+              << ", read concurrently with a mutation of it";
+    }
+    return absl::OkStatus();
+  }));
+  if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
+  return result;
 }
 
 absl::StatusOr<NewChild> RecordNewChild(Context &ctx,

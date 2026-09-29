@@ -311,10 +311,11 @@ TEST_F(BackingTest, RepopulationTracksChangesOnDisk) {
   WriteFile(Path("new"), "new");
   ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
 
+  // Gone from the listing, which is complete: absent.
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "fifo"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "ghost"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "new"),
               IsOkAndHolds(IsLookup(LookupResult::kFound)));
   EXPECT_THAT(Id("file"), IsOkAndHolds(file));
@@ -942,6 +943,30 @@ TEST_F(BoundaryTest, BoundaryDoesNotRegisterAFilesystem) {
                        cache::ListFilesystems(ctx_));
   ASSERT_EQ(filesystems.size(), 1u);  // The source only.
   EXPECT_FALSE(filesystems[0].parent_inode.has_value());
+}
+
+// Audit F7: after a failed create-family op, re-resolving its one name
+// (DirCacheFS::ReresolveAfterFailure: LookupOrPopulate) must probe just
+// that name, not relist the whole directory. A sibling whose attributes
+// are unknown shows whether it was re-probed.
+TEST_F(BackingTest, ReresolvingOneUnknownNameProbesOnlyThatName) {
+  ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, file), IsOk());
+  // Phase 1 of `mkdir dir` (which will fail: EEXIST).
+  ASSERT_THAT(cache::BeginCreate(ctx_, kRootInode, "dir"), IsOk());
+  EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, "dir"),
+              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+  EXPECT_THAT(Id("dir"), IsOkAndHolds(dir));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr file_attr, cache::GetAttr(ctx_, file));
+  EXPECT_FALSE(file_attr.valid) << "the sibling was re-probed";
+  // And a name that turns out not to exist is resolved absent.
+  ASSERT_THAT(cache::BeginCreate(ctx_, kRootInode, "nothere"), IsOk());
+  EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, "nothere"),
+              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+  ASSERT_OK_AND_ASSIGN(file_attr, cache::GetAttr(ctx_, file));
+  EXPECT_FALSE(file_attr.valid) << "the sibling was re-probed";
 }
 
 }  // namespace
