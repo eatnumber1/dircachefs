@@ -177,9 +177,19 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
   entry.ino = static_cast<fuse_ino_t>(id);
   entry.generation = attr.fuse_gen;
   entry.attr = attr.st;
-  entry.attr_timeout = absl::ToDoubleSeconds(opts_.attr_timeout);
+  entry.attr_timeout = absl::ToDoubleSeconds(AttrTimeoutFor(id));
   entry.entry_timeout = absl::ToDoubleSeconds(opts_.entry_timeout);
   return entry;
+}
+
+absl::Duration DirCacheFS::AttrTimeoutFor(InodeId id) const {
+  // While a writable open is outstanding the kernel may change the file
+  // behind dcfs's back in a way that does not invalidate its own attribute
+  // cache either: a store through a MAP_SHARED mapping (a passthrough
+  // write(2) does invalidate it). A zero timeout makes the kernel ask
+  // again, and dcfs answers from a statx of the open fd (audit-races F1b).
+  if (open_for_write_.contains(id)) return absl::ZeroDuration();
+  return opts_.attr_timeout;
 }
 
 absl::Status DirCacheFS::RefreshAttrsOf(InodeId id, struct statx *fetched) {
@@ -209,7 +219,7 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryAfterPhase2(
     entry.ino = static_cast<fuse_ino_t>(id);
     entry.generation = attr.fuse_gen;
     entry.attr = attr.st;
-    entry.attr_timeout = absl::ToDoubleSeconds(opts_.attr_timeout);
+    entry.attr_timeout = absl::ToDoubleSeconds(AttrTimeoutFor(id));
     entry.entry_timeout = absl::ToDoubleSeconds(opts_.entry_timeout);
     return entry;
   }
@@ -338,7 +348,8 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
 absl::Status DirCacheFS::Getattr(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info *fi) {
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(static_cast<InodeId>(ino)));
-  return req.ReplyAttr(entry.attr, opts_.attr_timeout, entry.generation);
+  return req.ReplyAttr(entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)), entry.generation);
 }
 
 absl::Status DirCacheFS::Setattr(
@@ -384,7 +395,8 @@ absl::Status DirCacheFS::Setattr(
   LogPhase3Failure("Setattr", backing::RefreshAttrs(ctx_, id, &stx));
   ResolveSideEffectXattrs(id, side_effects, OpenFdOf(id), "Setattr");
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(id, stx));
-  return req.ReplyAttr(entry.attr, opts_.attr_timeout, entry.generation);
+  return req.ReplyAttr(entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)), entry.generation);
 }
 
 absl::Status DirCacheFS::Lookup(
@@ -394,14 +406,16 @@ absl::Status DirCacheFS::Lookup(
   if (name == ".") {
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(parent));
     return req.ReplyEntry(
-        entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+        entry.ino, entry.generation, entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)),
         opts_.entry_timeout);
   }
   if (name == "..") {
     ABSL_ASSIGN_OR_RETURN(InodeId up, backing::ParentOf(ctx_, parent));
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(up));
     return req.ReplyEntry(
-        entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+        entry.ino, entry.generation, entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)),
         opts_.entry_timeout);
   }
 
@@ -415,7 +429,8 @@ absl::Status DirCacheFS::Lookup(
   RET_CHECK_EQ(result.kind, cache::LookupResult::kFound);
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(result.id));
   return req.ReplyEntry(
-      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      entry.ino, entry.generation, entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)),
       opts_.entry_timeout);
 }
 
@@ -462,7 +477,8 @@ absl::Status DirCacheFS::Mknod(
       }));
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
   return req.ReplyEntry(
-      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      entry.ino, entry.generation, entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)),
       opts_.entry_timeout);
 }
 
@@ -477,7 +493,8 @@ absl::Status DirCacheFS::Mkdir(
       }));
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
   return req.ReplyEntry(
-      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      entry.ino, entry.generation, entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)),
       opts_.entry_timeout);
 }
 
@@ -564,7 +581,8 @@ absl::Status DirCacheFS::Symlink(
       }));
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
   return req.ReplyEntry(
-      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      entry.ino, entry.generation, entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)),
       opts_.entry_timeout);
 }
 
@@ -764,7 +782,8 @@ absl::Status DirCacheFS::Link(
 
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(src));
   return req.ReplyEntry(
-      entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
+      entry.ino, entry.generation, entry.attr,
+      AttrTimeoutFor(static_cast<InodeId>(entry.ino)),
       opts_.entry_timeout);
 }
 

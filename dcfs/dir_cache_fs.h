@@ -199,6 +199,10 @@ class DirCacheFS {
   absl::StatusOr<fuse_entry_param> EntryAfterPhase2(
       InodeId id, const struct statx &fetched = {});
 
+  // The attribute timeout to reply for `id`: 0 while a writable open of it
+  // is outstanding, else opts_.attr_timeout.
+  absl::Duration AttrTimeoutFor(InodeId id) const;
+
   // Makes sure `dir`'s listing is cached (complete), populating it if not.
   absl::Status EnsureListed(InodeId dir);
 

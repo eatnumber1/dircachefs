@@ -51,6 +51,12 @@
  *       As setxattr/getxattr, but the value is lowercase hex: for binary
  *       values such as a system.posix_acl_access ACL or a
  *       security.capability blob, which contain NUL bytes.
+ *   testutil mmapwrite <path> <delay-seconds>
+ *       open(2)s <path> O_RDWR, maps its first page MAP_SHARED, prints
+ *       "MAPPED", sleeps <delay-seconds>, stores one byte through the
+ *       mapping, msync(2)s it, prints "STORED", and then sleeps forever
+ *       WITHOUT closing the fd or unmapping, until killed: a store the
+ *       kernel never tells dcfs about (no write(2), no FLUSH).
  *   testutil fsfreeze <path> <freeze|thaw>
  *       FIFREEZE/FITHAW on the filesystem <path> is on: while frozen, every
  *       write to it (a rename, say) blocks until it is thawed -- a way to
@@ -98,6 +104,7 @@
 #include <string.h>
 #include <linux/fs.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/xattr.h>
@@ -260,6 +267,34 @@ static int cmd_removexattr(const char *path, const char *name)
 	return 0;
 }
 
+static int cmd_mmapwrite(const char *path, const char *delay_str)
+{
+	int fd = open(path, O_RDWR);
+	char *p;
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	p = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (p == MAP_FAILED) {
+		print_err(errno);
+		return 1;
+	}
+	printf("MAPPED\n");
+	fflush(stdout);
+	sleep((unsigned int) atoi(delay_str));
+	p[0] = (char) (p[0] + 1);
+	if (msync(p, 4096, MS_SYNC) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("STORED\n");
+	fflush(stdout);
+	for (;;)
+		pause();
+}
+
 static int cmd_fsfreeze(const char *path, const char *how)
 {
 	unsigned long request;
@@ -414,6 +449,8 @@ int main(int argc, char *argv[])
 		return cmd_setxattrhex(argv[2], argv[3], argv[4]);
 	if (argc == 4 && strcmp(argv[1], "getxattrhex") == 0)
 		return cmd_getxattrhex(argv[2], argv[3]);
+	if (argc == 4 && strcmp(argv[1], "mmapwrite") == 0)
+		return cmd_mmapwrite(argv[2], argv[3]);
 	if (argc == 4 && strcmp(argv[1], "fsfreeze") == 0)
 		return cmd_fsfreeze(argv[2], argv[3]);
 	if (argc == 6 && strcmp(argv[1], "fallocate") == 0)
@@ -434,6 +471,7 @@ int main(int argc, char *argv[])
 		"       testutil removexattr <path> <name>\n"
 		"       testutil setxattrhex <path> <name> <hex>\n"
 		"       testutil getxattrhex <path> <name>\n"
+		"       testutil mmapwrite <path> <delay-seconds>\n"
 		"       testutil fsfreeze <path> <freeze|thaw>\n"
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
 		"       testutil writehold <path> <append|create> <nbytes>\n"

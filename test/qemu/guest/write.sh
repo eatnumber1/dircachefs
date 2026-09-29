@@ -620,6 +620,40 @@ else
 		"ok1=$ok1 ok2=$ok2 vdb $b_vdb->$a_vdb vdc $b_vdc->$a_vdc"
 fi
 
+# --- mmap-store-visible-while-open (audit-races F1b) --------------------
+#
+# A store through a MAP_SHARED mapping changes the backing file's mtime
+# without the kernel telling dcfs, or invalidating its own attribute cache
+# (a passthrough write(2) does both). So while a writable open is
+# outstanding dcfs must reply attributes with a zero timeout: the kernel
+# then asks again (served by a statx of the open fd) instead of serving
+# the pre-store mtime for the whole attribute timeout.
+head -c 4096 /dev/zero >"$MNT/mm"
+touch -d "2001-09-09 01:46:40" "$MNT/mm"
+"$TESTUTIL" mmapwrite "$MNT/mm" 3 >/tmp/mm.out 2>&1 &
+MM_PID=$!
+i=0
+while [ "$i" -lt 10 ] && ! grep -q MAPPED /tmp/mm.out; do
+	i=$((i + 1))
+	sleep 1
+done
+stat -c %Y "$MNT/mm" >/dev/null  # the kernel caches the attributes now
+i=0
+while [ "$i" -lt 10 ] && ! grep -q STORED /tmp/mm.out; do
+	i=$((i + 1))
+	sleep 1
+done
+mm_src=$(stat -c %Y "$SRC/mm")
+mm_mnt=$(stat -c %Y "$MNT/mm")
+if [ "$mm_src" != 1000000000 ] && [ "$mm_mnt" = "$mm_src" ]; then
+	pass mmap-store-visible-while-open
+else
+	fail mmap-store-visible-while-open "mtime src=$mm_src mnt=$mm_mnt ($(cat /tmp/mm.out))"
+fi
+kill "$MM_PID" 2>/dev/null || true
+wait "$MM_PID" 2>/dev/null || true
+rm -f "$MNT/mm"
+
 # --- listing-matches: "d" is excluded -- see readonly.sh's identity-checks
 # comment on why /src/d and the cached /mnt/d deliberately diverge after the
 # write-boundary-refused check above. -----------------------------------
