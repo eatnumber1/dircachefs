@@ -112,13 +112,31 @@ bool OpenForWrite(const Context &ctx, InodeId id) {
 // (DirCacheFS::Release), and a crash in between must leave it unknown --
 // re-read by handle, so ESTALE -- rather than serve nlink 0 as current
 // (audit F8).
-absl::Status RecordAttrs(Context &ctx, InodeId id, const struct statx &stx) {
+//
+// The caller must already have established it may write (a fill's
+// cache::CanFill, a mutation's Owns), in the same transaction.
+absl::Status WriteAttrs(Context &ctx, InodeId id, const struct statx &stx) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(cache::UpdateAttr(ctx, id, stx));
     if (OpenForWrite(ctx, id) || stx.stx_nlink == 0) {
       ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
     }
     return absl::OkStatus();
+  });
+}
+
+// WriteAttrs as a fill that took `snapshot` (see cache::CanFill): records
+// nothing if a mutation of `id` began, ended or is in flight since.
+absl::Status FillAttrs(Context &ctx, cache::FillSnapshot snapshot, InodeId id,
+                       const struct statx &stx) {
+  return ctx.db.Transaction([&]() -> absl::Status {
+    if (!cache::CanFill(ctx, snapshot, id)) {
+      VLOG(1) << "inode " << id
+              << ": not caching attributes read concurrently with a "
+                 "mutation of it";
+      return absl::OkStatus();
+    }
+    return WriteAttrs(ctx, id, stx);
   });
 }
 
@@ -342,8 +360,8 @@ absl::StatusOr<uint64_t> ReadGeneration(int opath_fd, mode_t mode) {
   }
 }
 
-absl::Status ReconcileAttrs(Context &ctx, InodeId id,
-                            const cache::CachedAttr &cached,
+absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,
+                            InodeId id, const cache::CachedAttr &cached,
                             const struct statx &fresh) {
   // Out-of-band change detection, only where it is free. dcfs requires
   // exclusive access to the backing trees and does not look for changes
@@ -356,6 +374,9 @@ absl::Status ReconcileAttrs(Context &ctx, InodeId id,
   // hits, ...) detects nothing, and atime/blocks are deliberately not
   // compared (reads and delayed allocation change those legitimately).
   if (!cached.valid) return absl::OkStatus();
+  // A mutation of `id` since `cached` was read (or still in flight) is not
+  // an out-of-band change, and `fresh` may predate it: nothing to learn.
+  if (!cache::CanFill(ctx, snapshot, id)) return absl::OkStatus();
   std::vector<std::string> diffs;
   auto check = [&](unsigned int mask, std::string_view field, bool differs,
                    std::string from, std::string to) {
@@ -401,7 +422,7 @@ absl::Status ReconcileAttrs(Context &ctx, InodeId id,
   // The fresh statx is already in hand, so reacting costs no I/O: adopt it,
   // and mark unknown whatever else the change may have touched unseen.
   return ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(RecordAttrs(ctx, id, fresh));
+    ABSL_RETURN_IF_ERROR(WriteAttrs(ctx, id, fresh));
     if (relist) {
       ABSL_RETURN_IF_ERROR(cache::ForgetNegativeDentries(ctx, id));
     }
@@ -420,8 +441,8 @@ absl::Status ReconcileAttrs(Context &ctx, InodeId id,
 // single syscall either way), so that a still-matching object's attributes
 // are also checked against the cache for free (ReconcileAttrs).
 absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
-    Context &ctx, InodeId id, const cache::CachedAttr &attr,
-    FileDescriptor fd) {
+    Context &ctx, cache::FillSnapshot snapshot, InodeId id,
+    const cache::CachedAttr &attr, FileDescriptor fd) {
   ABSL_ASSIGN_OR_RETURN(struct statx stx,
                         syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask));
   bool same = stx.stx_ino == attr.backing_ino;
@@ -458,12 +479,14 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
         ESTALE, absl::StrCat("inode ", id,
                              " was replaced on the backing filesystem"));
   }
-  ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, id, attr, stx));
+  ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, id, attr, stx));
   return fd;
 }
 
 absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
   if (id == cache::kRootInode) return OpenRoot(ctx, flags);
+  // ReconcileAttrs compares `attr` with a statx taken after the open's I/O.
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
   ABSL_ASSIGN_OR_RETURN(FileHandle handle, cache::GetHandle(ctx, id));
 
@@ -483,7 +506,7 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
     }
     return fd.status();
   }
-  return VerifyBackingIdentity(ctx, id, attr, *std::move(fd));
+  return VerifyBackingIdentity(ctx, snapshot, id, attr, *std::move(fd));
 }
 
 absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {
@@ -492,15 +515,20 @@ absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {
   return syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask);
 }
 
-absl::Status RefreshAttrs(Context &ctx, InodeId id) {
+absl::Status RefreshAttrs(Context &ctx, InodeId id, struct statx *fetched) {
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, id));
-  return RecordAttrs(ctx, id, stx);
+  if (fetched != nullptr) *fetched = stx;
+  return FillAttrs(ctx, snapshot, id, stx);
 }
 
-absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd) {
+absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd,
+                                struct statx *fetched) {
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
-  return RecordAttrs(ctx, id, stx);
+  if (fetched != nullptr) *fetched = stx;
+  return FillAttrs(ctx, snapshot, id, stx);
 }
 
 absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
@@ -558,11 +586,19 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
   return XattrsOf(*fd);
 }
 
-absl::Status RefreshXattrs(Context &ctx, InodeId id) {
+absl::StatusOr<std::vector<std::pair<std::string, std::string>>>
+RefreshXattrs(Context &ctx, InodeId id) {
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ABSL_ASSIGN_OR_RETURN(
       (std::vector<std::pair<std::string, std::string>> xattrs),
       ReadXattrs(ctx, id));
-  return cache::ReplaceXattrs(ctx, id, xattrs);
+  ABSL_ASSIGN_OR_RETURN(bool filled,
+                        cache::FillXattrs(ctx, snapshot, id, xattrs));
+  if (!filled) {
+    VLOG(1) << "inode " << id
+            << ": not caching xattrs read concurrently with a mutation of it";
+  }
+  return xattrs;
 }
 
 namespace {
@@ -588,6 +624,7 @@ absl::StatusOr<std::optional<std::string>> XattrOf(int fd,
 absl::StatusOr<std::optional<std::string>> RefreshXattr(
     Context &ctx, InodeId id, std::string_view name,
     std::optional<int> open_fd) {
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   std::optional<FileDescriptor> opened;
   if (!open_fd.has_value()) {
     ABSL_ASSIGN_OR_RETURN(opened, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
@@ -595,10 +632,15 @@ absl::StatusOr<std::optional<std::string>> RefreshXattr(
   }
   ABSL_ASSIGN_OR_RETURN(std::optional<std::string> value,
                         XattrOf(*open_fd, name));
-  if (value.has_value()) {
-    ABSL_RETURN_IF_ERROR(cache::SetXattr(ctx, id, name, *value));
-  } else {
-    ABSL_RETURN_IF_ERROR(cache::RemoveXattr(ctx, id, name));
+  ABSL_ASSIGN_OR_RETURN(
+      bool filled,
+      cache::FillXattr(ctx, snapshot, id, name,
+                       value.has_value()
+                           ? std::optional<std::string_view>(*value)
+                           : std::nullopt));
+  if (!filled) {
+    VLOG(1) << "inode " << id << ": not caching xattr " << name
+            << " read concurrently with a mutation of it";
   }
   return value;
 }
@@ -673,10 +715,14 @@ absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id) {
   return syscalls::fstatvfs(mount_fd);
 }
 
-absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
+absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // Phase A: all the I/O, no transaction.
   ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
                         OpenNode(ctx, dir, O_RDONLY | O_DIRECTORY));
+  // Taken after OpenNode, whose own ReconcileAttrs may legitimately clear
+  // `dir`'s completeness first, and before the listing's I/O.
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+  ABSL_ASSIGN_OR_RETURN(int64_t dir_epoch, cache::DirEpoch(ctx, dir));
   ABSL_ASSIGN_OR_RETURN(
       struct statx dir_stx,
       syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
@@ -706,8 +752,19 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
   VLOG(1) << "populating directory " << dir << ": " << children.size()
           << " entries, " << refused_names.size() << " refused";
 
-  // Phase B: one transaction, no syscalls.
-  return ctx.db.Transaction([&]() -> absl::Status {
+  // Phase B: one transaction, no syscalls. What it may record is decided
+  // per inode (see cache::CanFill): `dir`'s dentries and completeness only
+  // if no mutation of `dir` began, ended or is in flight since the snapshot
+  // and nothing cleared its completeness since (its epoch), and each
+  // child's attributes, symlink target and xattrs only if the same holds
+  // for that child. Child rows are upserted regardless (their identity is
+  // what the caller's reply needs; attributes that may be stale are left
+  // unknown).
+  Populated result;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(int64_t epoch_now, cache::DirEpoch(ctx, dir));
+    const bool dir_ok =
+        cache::CanFill(ctx, snapshot, dir) && epoch_now == dir_epoch;
     std::vector<std::string> seen;
     seen.reserve(children.size() + refused_names.size());
     for (const ChildRecord &child : children) {
@@ -726,36 +783,57 @@ absl::Status PopulateDirectory(Context &ctx, InodeId dir) {
             (cached.btime.tv_sec == child.stx.stx_btime.tv_sec &&
              cached.btime.tv_nsec ==
                  static_cast<long>(child.stx.stx_btime.tv_nsec))) {
-          ABSL_RETURN_IF_ERROR(
-              ReconcileAttrs(ctx, cached_dentry.id, cached, child.stx));
+          ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, cached_dentry.id,
+                                              cached, child.stx));
         }
       }
       ABSL_ASSIGN_OR_RETURN(
           cache::UpsertResult row,
           cache::UpsertInode(ctx, child.handle, child.stx, child.backing_gen));
+      const bool child_ok = cache::CanFill(ctx, snapshot, row.id);
       // UpsertInode marks the attributes current; a child that is open for
-      // writing keeps them unknown (see RecordAttrs).
-      if (OpenForWrite(ctx, row.id)) {
+      // writing keeps them unknown (see WriteAttrs), as does one a mutation
+      // may have changed since the probe.
+      if (!child_ok || OpenForWrite(ctx, row.id)) {
         ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
       }
       if (S_ISDIR(child.stx.stx_mode)) {
         ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
       }
-      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, dir, child.name, row.id));
-      if (child.symlink_target.has_value()) {
-        ABSL_RETURN_IF_ERROR(
-            cache::SetSymlink(ctx, row.id, *child.symlink_target));
+      if (dir_ok) {
+        ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, dir, child.name, row.id));
       }
-      ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, child.xattrs));
+      if (child_ok) {
+        if (child.symlink_target.has_value()) {
+          ABSL_RETURN_IF_ERROR(
+              cache::SetSymlink(ctx, row.id, *child.symlink_target));
+        }
+        ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, child.xattrs));
+      }
+      result.entries[child.name] = cache::LookupResult{
+          .kind = cache::LookupResult::kFound, .id = row.id};
       seen.push_back(child.name);
     }
     for (const std::string &name : refused_names) {
-      ABSL_RETURN_IF_ERROR(cache::SetRefused(ctx, dir, name));
+      if (dir_ok) {
+        ABSL_RETURN_IF_ERROR(cache::SetRefused(ctx, dir, name));
+      }
+      result.entries[name] =
+          cache::LookupResult{.kind = cache::LookupResult::kRefused, .id = 0};
       seen.push_back(name);
     }
+    if (!dir_ok) {
+      VLOG(1) << "directory " << dir
+              << ": not caching a listing read concurrently with a mutation "
+                 "of it";
+      return absl::OkStatus();
+    }
     ABSL_RETURN_IF_ERROR(cache::PruneDentriesNotIn(ctx, dir, seen));
-    return cache::MarkDirComplete(ctx, dir, true);
-  });
+    ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx, dir, true));
+    result.cached = true;
+    return absl::OkStatus();
+  }));
+  return result;
 }
 
 namespace {
@@ -800,7 +878,20 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
 
   ABSL_ASSIGN_OR_RETURN(bool complete, cache::IsDirComplete(ctx, parent));
   if (!complete) {
-    ABSL_RETURN_IF_ERROR(PopulateDirectory(ctx, parent));
+    ABSL_ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
+    if (!populated.cached) {
+      // Not recorded (a concurrent mutation of `parent`): answer from the
+      // listing itself, caching nothing about `name`.
+      auto it = populated.entries.find(name);
+      if (it == populated.entries.end()) {
+        return cache::LookupResult{.kind = cache::LookupResult::kNegative,
+                                   .id = 0};
+      }
+      if (it->second.kind == cache::LookupResult::kRefused) {
+        return ExdevBoundary();
+      }
+      return it->second;
+    }
     ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
     if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
     if (result.kind != cache::LookupResult::kUnknown) return result;
@@ -810,9 +901,12 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   return cache::LookupResult{.kind = cache::LookupResult::kNegative, .id = 0};
 }
 
-absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
-                                        int parent_fd, std::string_view name,
+absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
+                                        const cache::Mutation &mutation,
+                                        InodeId parent, int parent_fd,
+                                        std::string_view name,
                                         bool open_for_write) {
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   // Phase A: I/O -- probe the object just created, exactly like ProbeChild
   // does for an existing directory entry, minus the mount-boundary check
   // (nothing can already be mounted on an object that did not exist a
@@ -832,8 +926,14 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
     ABSL_ASSIGN_OR_RETURN(
         cache::UpsertResult row,
         cache::UpsertInode(ctx, record.handle, record.stx, record.backing_gen));
+    // The new object is a fill (another request may already have reached
+    // it, e.g. by listing `parent`); its dentry in `parent` is this
+    // mutation's own phase-3 write.
+    const bool child_ok = cache::CanFill(ctx, snapshot, row.id);
     if (S_ISDIR(record.stx.stx_mode)) {
       ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
+    }
+    if (S_ISDIR(record.stx.stx_mode) && child_ok) {
       // Unlike EnsureDirectory's usual caller (PopulateDirectory,
       // discovering a pre-existing, not-yet-listed subdirectory), a
       // directory RecordNewChild is recording was *just* created by this
@@ -842,12 +942,16 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
       // needed before a listing of it can be served from the cache.
       ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx, row.id, true));
     }
-    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, parent, name, row.id));
-    if (record.symlink_target.has_value()) {
-      ABSL_RETURN_IF_ERROR(
-          cache::SetSymlink(ctx, row.id, *record.symlink_target));
+    if (mutation.Owns(parent)) {
+      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, parent, name, row.id));
     }
-    ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
+    if (child_ok) {
+      if (record.symlink_target.has_value()) {
+        ABSL_RETURN_IF_ERROR(
+            cache::SetSymlink(ctx, row.id, *record.symlink_target));
+      }
+      ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
+    }
     // The new row is dirty too: if a power loss keeps this transaction but
     // the backing filesystem loses the create, recovery must not serve its
     // attributes. (Its parent was made durably dirty by the caller's phase
@@ -855,7 +959,7 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
     // transaction.)
     const InodeId new_id[] = {row.id};
     ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, new_id));
-    if (open_for_write || OpenForWrite(ctx, row.id)) {
+    if (open_for_write || OpenForWrite(ctx, row.id) || !child_ok) {
       ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
     }
     result = NewChild{.id = row.id, .fuse_gen = row.fuse_gen, .stx = record.stx};
@@ -895,13 +999,17 @@ absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
   return syscalls::linkat(*src_fd, "", *newparent_fd, newname, AT_EMPTY_PATH);
 }
 
-absl::StatusOr<struct statx> RecordNewLink(Context &ctx, InodeId src,
-                                           InodeId newparent,
+absl::StatusOr<struct statx> RecordNewLink(Context &ctx,
+                                           const cache::Mutation &mutation,
+                                           InodeId src, InodeId newparent,
                                            std::string_view newname) {
   ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, src));
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, src));
-    return RecordAttrs(ctx, src, stx);
+    if (mutation.Owns(newparent)) {
+      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, src));
+    }
+    if (mutation.Owns(src)) return WriteAttrs(ctx, src, stx);
+    return absl::OkStatus();
   }));
   return stx;
 }

@@ -464,6 +464,7 @@ cc_library(
     hdrs = ["context.h"],
     deps = [
       ":device_id",
+      "@absl//absl/container:flat_hash_map",
       "@absl//absl/container:flat_hash_set",
       ":mount_fds",
       "@absl//absl/random:bit_gen_ref",
@@ -530,6 +531,7 @@ cc_library(
       ":migrate",
       ":status",
       ":syscalls",
+      "@absl//absl/container:flat_hash_map",
       "@absl//absl/container:flat_hash_set",
       "@absl//absl/log",
       "@absl//absl/status",

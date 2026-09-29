@@ -183,7 +183,16 @@ class DirCacheFS {
   // reopen by handle, no disk access), else via backing::RefreshAttrs. An
   // inode with a writable open outstanding always takes the first path,
   // since its attributes stay unknown for as long as that open lasts.
-  absl::Status RefreshAttrsOf(InodeId id);
+  absl::Status RefreshAttrsOf(InodeId id, struct statx *fetched = nullptr);
+
+  // Makes sure `dir`'s listing is cached (complete), populating it if not.
+  absl::Status EnsureListed(InodeId dir);
+
+  // `attr` (id's row) if valid, else refreshed (RefreshAttrsOf) and answered
+  // from the fresh statx itself, whether or not the cache recorded it (see
+  // cache::CanFill).
+  absl::StatusOr<cache::CachedAttr> FreshAttr(InodeId id,
+                                              cache::CachedAttr attr);
 
   // Phase 3 for writes made through the shared backing fd `fd` of `id`
   // (Flush/Fsync/Release): backing::RefreshAttrsFromFd. A failure is logged

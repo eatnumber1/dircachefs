@@ -232,6 +232,23 @@ absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id) {
   return attr;
 }
 
+CachedAttr WithStatx(CachedAttr attr, const struct statx &stx) {
+  struct stat &st = attr.st;
+  st.st_mode = stx.stx_mode;
+  st.st_nlink = stx.stx_nlink;
+  st.st_uid = stx.stx_uid;
+  st.st_gid = stx.stx_gid;
+  st.st_rdev = makedev(stx.stx_rdev_major, stx.stx_rdev_minor);
+  st.st_size = static_cast<off_t>(stx.stx_size);
+  st.st_blocks = static_cast<blkcnt_t>(stx.stx_blocks);
+  st.st_blksize = static_cast<blksize_t>(stx.stx_blksize);
+  st.st_atim = {stx.stx_atime.tv_sec, stx.stx_atime.tv_nsec};
+  st.st_mtim = {stx.stx_mtime.tv_sec, stx.stx_mtime.tv_nsec};
+  st.st_ctim = {stx.stx_ctime.tv_sec, stx.stx_ctime.tv_nsec};
+  attr.btime = {stx.stx_btime.tv_sec, stx.stx_btime.tv_nsec};
+  return attr;
+}
+
 absl::StatusOr<uint32_t> GetGeneration(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
@@ -874,13 +891,9 @@ absl::Status SetXattrsComplete(Context &ctx, InodeId id, bool complete) {
 absl::Status ReplaceXattrs(
     Context &ctx, InodeId id,
     std::span<const std::pair<std::string, std::string>> xattrs) {
-  // TODO(4.12): a population's I/O may predate a concurrent mutation's
-  // phase 3 (audit-tristate F1), so this can overwrite a newer 'present'/
-  // 'absent' with an older value, or a phase-1 'unknown' with the value
-  // from before the mutation. Skipping 'unknown' rows here is not enough
-  // (the snapshot can also predate phase 1, and a row left 'unknown' by a
-  // failed or crashed mutation must be resolved by exactly this refresh);
-  // it needs the per-record epochs of 4.12.
+  // Unguarded: a population must have checked CanFill in the same
+  // transaction (FillXattrs does), so that it cannot overwrite a newer
+  // mutation's result.
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
     ABSL_RETURN_IF_ERROR(
@@ -998,6 +1011,133 @@ absl::Status PurgeFilesystem(Context &ctx, const DeviceId &device) {
   });
 }
 
+// --- Fills vs. concurrent mutations ----------------------------------------
+
+namespace {
+
+// Past this many entries, FillGuards::touched is cleared (raising the
+// floor, which only makes fills that are running right now skip caching).
+constexpr size_t kMaxTouched = 1 << 16;
+
+void Touch(FillGuards &fills, InodeId id) {
+  if (fills.touched.size() >= kMaxTouched && !fills.touched.contains(id)) {
+    fills.touched.clear();
+    fills.floor = ++fills.seq;
+  }
+  fills.touched[id] = ++fills.seq;
+}
+
+// Phase 1 of a mutation of `ids` has committed: it is in flight on each.
+void RegisterMutation(Context &ctx, std::span<const InodeId> ids,
+                      std::vector<std::pair<InodeId, uint64_t>> &out) {
+  FillGuards &fills = ctx.fills;
+  for (InodeId id : ids) {
+    bool seen = false;
+    for (const auto &entry : out) seen = seen || entry.first == id;
+    if (seen) continue;
+    Touch(fills, id);
+    ++fills.inflight[id];
+    out.emplace_back(id, fills.seq);
+  }
+}
+
+}  // namespace
+
+FillSnapshot BeginFill(const Context &ctx) { return {.seq = ctx.fills.seq}; }
+
+bool CanFill(const Context &ctx, FillSnapshot snapshot, InodeId id) {
+  const FillGuards &fills = ctx.fills;
+  if (snapshot.seq < fills.floor) return false;
+  if (fills.inflight.contains(id)) return false;
+  auto it = fills.touched.find(id);
+  return it == fills.touched.end() || it->second <= snapshot.seq;
+}
+
+Mutation::Mutation(Mutation &&other) noexcept
+    : ctx_(other.ctx_), ids_(std::move(other.ids_)) {
+  other.ids_.clear();
+}
+
+Mutation::~Mutation() { End(); }
+
+bool Mutation::Owns(InodeId id) const {
+  const FillGuards &fills = ctx_->fills;
+  for (const auto &[mine, seq] : ids_) {
+    if (mine != id) continue;
+    auto inflight = fills.inflight.find(id);
+    auto touched = fills.touched.find(id);
+    return inflight != fills.inflight.end() && inflight->second == 1 &&
+           touched != fills.touched.end() && touched->second == seq;
+  }
+  return false;
+}
+
+void Mutation::End() {
+  FillGuards &fills = ctx_->fills;
+  for (const auto &[id, seq] : ids_) {
+    auto it = fills.inflight.find(id);
+    if (it != fills.inflight.end() && --it->second <= 0) {
+      fills.inflight.erase(it);
+    }
+    Touch(fills, id);
+  }
+  ids_.clear();
+}
+
+absl::StatusOr<bool> FillAttr(Context &ctx, FillSnapshot snapshot, InodeId id,
+                              const struct statx &stx) {
+  bool filled = false;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    if (!CanFill(ctx, snapshot, id)) return absl::OkStatus();
+    ABSL_RETURN_IF_ERROR(UpdateAttr(ctx, id, stx));
+    filled = true;
+    return absl::OkStatus();
+  }));
+  return filled;
+}
+
+absl::StatusOr<bool> FillXattrs(
+    Context &ctx, FillSnapshot snapshot, InodeId id,
+    std::span<const std::pair<std::string, std::string>> xattrs) {
+  bool filled = false;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    if (!CanFill(ctx, snapshot, id)) return absl::OkStatus();
+    ABSL_RETURN_IF_ERROR(ReplaceXattrs(ctx, id, xattrs));
+    filled = true;
+    return absl::OkStatus();
+  }));
+  return filled;
+}
+
+absl::StatusOr<bool> FillXattr(Context &ctx, FillSnapshot snapshot, InodeId id,
+                               std::string_view name,
+                               std::optional<std::string_view> value) {
+  bool filled = false;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    if (!CanFill(ctx, snapshot, id)) return absl::OkStatus();
+    if (value.has_value()) {
+      ABSL_RETURN_IF_ERROR(SetXattr(ctx, id, name, *value));
+    } else {
+      ABSL_RETURN_IF_ERROR(RemoveXattr(ctx, id, name));
+    }
+    filled = true;
+    return absl::OkStatus();
+  }));
+  return filled;
+}
+
+absl::StatusOr<bool> FillSymlink(Context &ctx, FillSnapshot snapshot,
+                                 InodeId id, std::string_view target) {
+  bool filled = false;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    if (!CanFill(ctx, snapshot, id)) return absl::OkStatus();
+    ABSL_RETURN_IF_ERROR(SetSymlink(ctx, id, target));
+    filled = true;
+    return absl::OkStatus();
+  }));
+  return filled;
+}
+
 // --- The durable dirty set --------------------------------------------------
 
 namespace {
@@ -1016,8 +1156,9 @@ absl::Status InsertDirty(Context &ctx, std::span<const InodeId> ids) {
 
 }  // namespace
 
-absl::Status BeginMutation(Context &ctx, std::span<const InodeId> ids,
-                           absl::FunctionRef<absl::Status()> body) {
+absl::StatusOr<Mutation> BeginMutation(
+    Context &ctx, std::span<const InodeId> ids,
+    absl::FunctionRef<absl::Status()> body) {
   bool known = true;
   for (InodeId id : ids) known = known && ctx.dirty.durable.contains(id);
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
@@ -1029,10 +1170,12 @@ absl::Status BeginMutation(Context &ctx, std::span<const InodeId> ids,
       known ? sqlite3::Durability::kNormal : sqlite3::Durability::kSync));
   ctx.dirty.any = true;
   if (!known) ctx.dirty.durable.insert(ids.begin(), ids.end());
-  return absl::OkStatus();
+  Mutation mutation(&ctx);
+  RegisterMutation(ctx, ids, mutation.ids_);
+  return mutation;
 }
 
-absl::Status BeginCreate(Context &ctx, InodeId parent, std::string_view name) {
+absl::StatusOr<Mutation> BeginCreate(Context &ctx, InodeId parent, std::string_view name) {
   const std::string names[] = {std::string(name)};
   const InodeId ids[] = {parent};
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
@@ -1041,7 +1184,7 @@ absl::Status BeginCreate(Context &ctx, InodeId parent, std::string_view name) {
   });
 }
 
-absl::Status BeginRemove(Context &ctx, InodeId parent, std::string_view name,
+absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent, std::string_view name,
                          InodeId child) {
   const std::string names[] = {std::string(name)};
   const InodeId ids[] = {parent, child};
@@ -1052,7 +1195,7 @@ absl::Status BeginRemove(Context &ctx, InodeId parent, std::string_view name,
   });
 }
 
-absl::Status BeginRename(Context &ctx, InodeId parent, std::string_view name,
+absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent, std::string_view name,
                          InodeId newparent, std::string_view newname,
                          InodeId src, std::optional<InodeId> dst) {
   const std::string names[] = {std::string(name)};
@@ -1067,7 +1210,7 @@ absl::Status BeginRename(Context &ctx, InodeId parent, std::string_view name,
   });
 }
 
-absl::Status BeginLink(Context &ctx, InodeId src, InodeId newparent,
+absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src, InodeId newparent,
                        std::string_view newname) {
   const std::string names[] = {std::string(newname)};
   const InodeId ids[] = {newparent, src};
@@ -1078,7 +1221,7 @@ absl::Status BeginLink(Context &ctx, InodeId src, InodeId newparent,
   });
 }
 
-absl::Status BeginAttrChange(Context &ctx, InodeId id,
+absl::StatusOr<Mutation> BeginAttrChange(Context &ctx, InodeId id,
                              std::span<const std::string_view> xattrs) {
   const InodeId ids[] = {id};
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
@@ -1089,7 +1232,7 @@ absl::Status BeginAttrChange(Context &ctx, InodeId id,
   });
 }
 
-absl::Status BeginXattrChange(Context &ctx, InodeId id,
+absl::StatusOr<Mutation> BeginXattrChange(Context &ctx, InodeId id,
                               std::string_view name) {
   const InodeId ids[] = {id};
   return BeginMutation(ctx, ids, [&]() -> absl::Status {

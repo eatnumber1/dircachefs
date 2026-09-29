@@ -70,6 +70,12 @@ struct CachedAttr {
   uint64_t backing_gen = 0;
 };
 
+// `attr` with its attributes (st and btime) replaced by `stx`'s, converted
+// exactly as a row written from `stx` (UpdateAttr) would read back
+// (GetAttr); `valid` is left alone. For a fill's caller to answer from what
+// it read even when the cache did not record it.
+CachedAttr WithStatx(CachedAttr attr, const struct statx &stx);
+
 struct LookupResult {
   enum Kind {
     kFound,     // A positive dentry; `id` is its inode.
@@ -321,6 +327,87 @@ absl::Status InvalidateInode(Context &ctx, InodeId id);
 // FUSE layer's call sites say which situation they are handling.
 absl::Status DeleteInode(Context &ctx, InodeId id);
 
+// --- Fills vs. concurrent mutations (audit-tristate F1) --------------------
+//
+// A fill reads the backing filesystem and then records what it read as
+// present (backing::RefreshAttrs, RefreshXattrs, PopulateDirectory, ...).
+// Under the planned coroutine model other requests run while it waits on
+// its I/O, so by the time it commits, a mutation may have changed (or be
+// changing) the very records it read. The rule: a fill takes a
+// FillSnapshot before its first backing syscall, and may record something
+// about inode `id` only if CanFill(ctx, snapshot, id) at commit time, in
+// the commit's transaction -- i.e. no mutation of `id` began or ended since
+// the snapshot, and none is in flight. Otherwise it caches nothing about
+// `id` (the record stays as the mutation left it: unknown while in flight,
+// its fresh result once done) and answers its own caller from what it read.
+//
+// A mutation is a cache::Mutation, from phase 1 (BeginMutation) to End().
+// Its phase-3 writes that are not fills themselves (its own dentry
+// changes, a read-back value) are made only if Owns(id): no other mutation
+// of `id` began since its phase 1, and none other is in flight. Phase-3
+// refreshes (RefreshAttrs etc.) run after End(), as ordinary fills.
+//
+// "Mutation of `id`": `id` is among the ids its phase 1 names (see the
+// Begin* functions below), i.e. its attributes, dentries (as a parent),
+// symlink target or xattrs change. The granularity is the inode, not the
+// record: e.g. a Setxattr in flight also blocks a concurrent attribute fill
+// of the same inode, which only costs that fill its caching.
+
+struct FillSnapshot {
+  uint64_t seq = 0;
+};
+
+// Snapshot for a fill, taken before its first backing syscall.
+FillSnapshot BeginFill(const Context &ctx);
+
+// Whether a fill that took `snapshot` may record something about `id` now.
+bool CanFill(const Context &ctx, FillSnapshot snapshot, InodeId id);
+
+// A mutation between its phase 1 and its end (see above). Move-only; the
+// destructor calls End() if it has not been called.
+class Mutation {
+ public:
+  Mutation(Mutation &&other) noexcept;
+  Mutation &operator=(Mutation &&other) = delete;
+  Mutation(const Mutation &) = delete;
+  ~Mutation();
+
+  // Whether this mutation's phase 3 may write `id`'s records itself (see
+  // above). False after End(), and for an id it does not name.
+  bool Owns(InodeId id) const;
+
+  // The end of the mutation (after its phase-3 writes, before its phase-3
+  // refreshes): it is no longer in flight. Idempotent.
+  void End();
+
+ private:
+  friend absl::StatusOr<Mutation> BeginMutation(
+      Context &ctx, std::span<const InodeId> ids,
+      absl::FunctionRef<absl::Status()> body);
+  explicit Mutation(Context *ctx) : ctx_(ctx) {}
+
+  Context *ctx_;
+  // Each (distinct) id with FillGuards::seq at this mutation's phase 1.
+  std::vector<std::pair<InodeId, uint64_t>> ids_;
+};
+
+// Guarded fills: each writes (in one transaction) only if
+// CanFill(ctx, snapshot, id), and returns whether it did.
+// UpdateAttr:
+absl::StatusOr<bool> FillAttr(Context &ctx, FillSnapshot snapshot, InodeId id,
+                              const struct statx &stx);
+// ReplaceXattrs:
+absl::StatusOr<bool> FillXattrs(
+    Context &ctx, FillSnapshot snapshot, InodeId id,
+    std::span<const std::pair<std::string, std::string>> xattrs);
+// SetXattr (a value) or RemoveXattr (nullopt):
+absl::StatusOr<bool> FillXattr(Context &ctx, FillSnapshot snapshot, InodeId id,
+                               std::string_view name,
+                               std::optional<std::string_view> value);
+// SetSymlink:
+absl::StatusOr<bool> FillSymlink(Context &ctx, FillSnapshot snapshot,
+                                 InodeId id, std::string_view target);
+
 // --- The durable dirty set (see schema.sql's `dirty` table) --------------
 
 // Phase 1 of a mutation: runs `body` (the "mark unknown" writes) and records
@@ -337,8 +424,12 @@ absl::Status DeleteInode(Context &ctx, InodeId id);
 // instead: recovery would forget all of those ids' state anyway, so nothing
 // `body` writes needs to survive a power loss. Must not be called inside a
 // transaction (a kSync commit cannot nest).
-absl::Status BeginMutation(Context &ctx, std::span<const InodeId> ids,
-                           absl::FunctionRef<absl::Status()> body);
+//
+// On success the mutation is in flight on `ids` (see Mutation) until the
+// returned Mutation ends.
+absl::StatusOr<Mutation> BeginMutation(Context &ctx,
+                                       std::span<const InodeId> ids,
+                                       absl::FunctionRef<absl::Status()> body);
 
 // The phase 1 of each mutation kind, as DirCacheFS runs it: each is one
 // BeginMutation() naming exactly the inodes the mutation changes.
@@ -347,33 +438,37 @@ absl::Status BeginMutation(Context &ctx, std::span<const InodeId> ids,
 // `parent` incomplete and its attributes unknown (its mtime/ctime, and for
 // a mkdir its nlink, are about to change). Dirty: parent. (The new child's row is created, and
 // made dirty, by phase 3: backing::RecordNewChild.)
-absl::Status BeginCreate(Context &ctx, InodeId parent, std::string_view name);
+absl::StatusOr<Mutation> BeginCreate(Context &ctx, InodeId parent,
+                                     std::string_view name);
 // Unlink/Rmdir of (parent, name) -> child: forgets `name`, marks `parent`
 // incomplete, and both attribute sets unknown. Dirty: parent, child.
-absl::Status BeginRemove(Context &ctx, InodeId parent, std::string_view name,
-                         InodeId child);
+absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent,
+                                     std::string_view name, InodeId child);
 // Rename (parent, name) -> src over (newparent, newname) -> dst (nullopt if
 // absent, or if it is src itself): forgets both names, marks both parents
 // incomplete, and the attributes of both parents, src and dst unknown.
 // Dirty: parent, newparent, src, dst.
-absl::Status BeginRename(Context &ctx, InodeId parent, std::string_view name,
-                         InodeId newparent, std::string_view newname,
-                         InodeId src, std::optional<InodeId> dst);
+absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent,
+                                     std::string_view name, InodeId newparent,
+                                     std::string_view newname, InodeId src,
+                                     std::optional<InodeId> dst);
 // Link of src as (newparent, newname): forgets `newname`, marks newparent
 // incomplete, and the attributes of newparent and src unknown. Dirty:
 // newparent, src.
-absl::Status BeginLink(Context &ctx, InodeId src, InodeId newparent,
-                       std::string_view newname);
+absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src,
+                                   InodeId newparent,
+                                   std::string_view newname);
 // Setattr, a writable open (DirCacheFS::BeginWriting), fallback Write and
 // Fallocate of `id`: marks its attributes unknown, and ForgetXattr()s each
 // of `xattrs` (the ones the backing filesystem may change as a side effect:
 // see DirCacheFS's side-effect xattrs). Dirty: id.
-absl::Status BeginAttrChange(Context &ctx, InodeId id,
-                             std::span<const std::string_view> xattrs = {});
+absl::StatusOr<Mutation> BeginAttrChange(
+    Context &ctx, InodeId id, std::span<const std::string_view> xattrs = {});
 // Setxattr/Removexattr of `name` on `id`: ForgetXattr(name) (only that
 // name unknown) and marks the attributes unknown (the syscall bumps
 // ctime). Dirty: id.
-absl::Status BeginXattrChange(Context &ctx, InodeId id, std::string_view name);
+absl::StatusOr<Mutation> BeginXattrChange(Context &ctx, InodeId id,
+                                          std::string_view name);
 
 // Adds `ids` to the dirty set at the default durability, inside the
 // caller's transaction if any. For phase 3 of a mutation that creates a row

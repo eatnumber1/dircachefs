@@ -990,7 +990,8 @@ TEST_F(MetadataCacheTest, BeginMutationIsDurableUntilIdsAreKnownDirty) {
 
   // A durable commit cannot nest inside a caller's transaction.
   EXPECT_THAT(db_.Transaction([&] {
-    return BeginMutation(ctx_, just_i, [] { return absl::OkStatus(); });
+    return BeginMutation(ctx_, just_i, [] { return absl::OkStatus(); })
+        .status();
   }),
               StatusIs(absl::StatusCode::kFailedPrecondition));
 }
@@ -1256,6 +1257,100 @@ TEST_F(MetadataCacheTest, RestoreDirCompleteDoesNotUndoAnotherClearing) {
   ASSERT_THAT(SetNegative(ctx_, d, "new3"), IsOk());
   EXPECT_THAT(RestoreDirComplete(ctx_, d, epoch), IsOkAndHolds(true));
   EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(true));
+}
+
+// Audit F1: a fill (read the backing filesystem, then record what it read)
+// must not overwrite a newer mutation's result, nor cache data read while a
+// mutation was changing it. These simulate the coroutine interleavings by
+// running a fill's snapshot, a mutation's phases and the fill's commit in
+// the problematic order; they prove the commit-time check, not that every
+// caller uses it (the backing layer's fills all take the snapshot before
+// their first syscall).
+TEST_F(MetadataCacheTest, FillAfterACompletedMutationDoesNotOverwrite) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  // The fill snapshots, then (suspended in its statx) reads the old mode.
+  FillSnapshot fill = BeginFill(ctx_);
+  // Meanwhile a chmod runs start to finish: phase 1, the syscall, phase 3.
+  {
+    ASSERT_OK_AND_ASSIGN(Mutation chmod, BeginAttrChange(ctx_, f.id));
+    chmod.End();
+    FillSnapshot phase3 = BeginFill(ctx_);
+    ASSERT_THAT(FillAttr(ctx_, phase3, f.id, Stx(30, S_IFREG | 0600, 2)),
+                IsOkAndHolds(true));
+  }
+  // The stale fill commits: it must not overwrite the chmod's result.
+  EXPECT_THAT(FillAttr(ctx_, fill, f.id, Stx(30, S_IFREG | 0644, 1)),
+              IsOkAndHolds(false));
+  ASSERT_OK_AND_ASSIGN(CachedAttr attr, GetAttr(ctx_, f.id));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_mode, S_IFREG | 0600);
+  // Nor the xattrs, symlink target, or a single xattr.
+  const std::vector<std::pair<std::string, std::string>> old = {{"user.a", "1"}};
+  EXPECT_THAT(FillXattrs(ctx_, fill, f.id, old), IsOkAndHolds(false));
+  EXPECT_THAT(FillXattr(ctx_, fill, f.id, "user.a", "1"), IsOkAndHolds(false));
+  EXPECT_THAT(FillSymlink(ctx_, fill, f.id, "t"), IsOkAndHolds(false));
+  EXPECT_THAT(GetXattr(ctx_, f.id, "user.a"), IsOkAndHolds(std::nullopt));
+}
+
+TEST_F(MetadataCacheTest, FillDuringAMutationDoesNotCache) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(31));
+  ASSERT_OK_AND_ASSIGN(Mutation setxattr, BeginXattrChange(ctx_, f.id, "user.k"));
+  // A fill that starts and commits while the mutation is in flight.
+  FillSnapshot during = BeginFill(ctx_);
+  EXPECT_THAT(FillXattr(ctx_, during, f.id, "user.k", "old"),
+              IsOkAndHolds(false));
+  EXPECT_THAT(GetXattr(ctx_, f.id, "user.k"), IsOkAndHolds(std::nullopt));
+  EXPECT_THAT(FillAttr(ctx_, during, f.id, Stx(31, S_IFREG)),
+              IsOkAndHolds(false));
+  ASSERT_OK_AND_ASSIGN(CachedAttr attr, GetAttr(ctx_, f.id));
+  EXPECT_FALSE(attr.valid);
+  // Its phase 3 may write, since nothing else touched f.
+  EXPECT_TRUE(setxattr.Owns(f.id));
+  setxattr.End();
+  EXPECT_FALSE(setxattr.Owns(f.id));
+  // A fill that started during the mutation and commits after it ended
+  // read possibly pre-syscall data: still not cached.
+  EXPECT_THAT(FillAttr(ctx_, during, f.id, Stx(31, S_IFREG)),
+              IsOkAndHolds(false));
+  // Other inodes are unaffected.
+  ASSERT_OK_AND_ASSIGN(UpsertResult g, Make(32));
+  EXPECT_THAT(FillAttr(ctx_, during, g.id, Stx(32, S_IFREG)),
+              IsOkAndHolds(true));
+}
+
+TEST_F(MetadataCacheTest, OverlappingMutationsDoNotOwnTheirPhase3) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(33));
+  ASSERT_OK_AND_ASSIGN(Mutation first, BeginXattrChange(ctx_, f.id, "user.k"));
+  ASSERT_OK_AND_ASSIGN(Mutation second, BeginAttrChange(ctx_, f.id));
+  // `first`'s read-back predates `second`'s syscall; `second`'s phase 3
+  // runs while `first` may still change f.
+  EXPECT_FALSE(first.Owns(f.id));
+  EXPECT_FALSE(second.Owns(f.id));
+  first.End();
+  EXPECT_FALSE(second.Owns(f.id)) << "first began before second's phase 1 "
+                                     "and was in flight during it";
+}
+
+TEST_F(MetadataCacheTest, FillWithNoConcurrentMutationCaches) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(34));
+  {
+    // A mutation that ended before the fill's snapshot does not matter.
+    ASSERT_OK_AND_ASSIGN(Mutation done, BeginAttrChange(ctx_, f.id));
+  }
+  FillSnapshot fill = BeginFill(ctx_);
+  EXPECT_THAT(FillAttr(ctx_, fill, f.id, Stx(34, S_IFREG | 0640)),
+              IsOkAndHolds(true));
+  ASSERT_OK_AND_ASSIGN(CachedAttr attr, GetAttr(ctx_, f.id));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_mode, S_IFREG | 0640);
+  const std::vector<std::pair<std::string, std::string>> xattrs = {
+      {"user.a", "1"}};
+  EXPECT_THAT(FillXattrs(ctx_, fill, f.id, xattrs), IsOkAndHolds(true));
+  EXPECT_THAT(ListXattrs(ctx_, f.id),
+              IsOkAndHolds(Optional(ElementsAre("user.a"))));
+  EXPECT_THAT(FillXattr(ctx_, fill, f.id, "user.b", std::nullopt),
+              IsOkAndHolds(true));
+  EXPECT_THAT(FillSymlink(ctx_, fill, f.id, "t"), IsOkAndHolds(true));
 }
 
 }  // namespace

@@ -3,6 +3,7 @@
 
 #include <cstdint>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/random/bit_gen_ref.h"
 #include "absl/status/statusor.h"
@@ -26,6 +27,30 @@ struct DirtyState {
   // recovery will treat all of their cached state as unknown anyway (see
   // cache::BeginMutation).
   absl::flat_hash_set<int64_t> durable;
+};
+
+// In-memory bookkeeping that keeps a cache fill (a population: reading the
+// backing filesystem, then recording what it read as present) from
+// overwriting a newer mutation's result, or caching data read while a
+// mutation was changing it (audit-tristate F1). Only cache::BeginMutation,
+// cache::Mutation and cache::BeginFill/CanFill use it; see them.
+//
+// Deliberately not in the database: it guards only in-process concurrency
+// (a crash makes everything a mutation touched unknown through the dirty
+// set anyway), and a fill must be able to check a row it did not know about
+// when it started (PopulateDirectory's children).
+struct FillGuards {
+  // A logical clock, advanced by every mutation's phase 1 and end.
+  uint64_t seq = 0;
+  // Snapshots older than this are invalid for every inode (set when
+  // `touched` is pruned).
+  uint64_t floor = 0;
+  // Inode id -> number of mutations between their phase 1 and their end.
+  // Entries are erased when they reach 0.
+  absl::flat_hash_map<int64_t, int> inflight;
+  // Inode id -> `seq` at the latest phase 1 or end of a mutation of it.
+  // Pruned (cleared, raising `floor`) when it grows past a bound.
+  absl::flat_hash_map<int64_t, uint64_t> touched;
 };
 
 // Everything a dcfs operation may touch, passed explicitly as the first
@@ -55,6 +80,7 @@ struct Context {
   // Owned here (unlike the members above): per-connection state that must
   // stay in step with ctx.db's dirty table.
   DirtyState dirty;
+  FillGuards fills;
 };
 
 }  // namespace dcfs

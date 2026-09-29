@@ -1,5 +1,6 @@
 #include "dcfs/dir_cache_fs.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>  // RENAME_NOREPLACE, RENAME_EXCHANGE
@@ -159,10 +160,7 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
 
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
-  if (!attr.valid) {
-    ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id));
-    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
-  }
+  ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
 
   fuse_entry_param entry{};
   entry.ino = static_cast<fuse_ino_t>(id);
@@ -173,19 +171,34 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
   return entry;
 }
 
-absl::Status DirCacheFS::RefreshAttrsOf(InodeId id) {
+absl::Status DirCacheFS::RefreshAttrsOf(InodeId id, struct statx *fetched) {
   // Always the case for an inode open for writing (its attributes stay
   // unknown while the kernel may be writing to it): the fd is already open,
   // so this is one statx that touches no disk, not a reopen by handle.
   if (std::optional<int> fd = OpenFdOf(id); fd.has_value()) {
-    return backing::RefreshAttrsFromFd(ctx_, id, *fd);
+    return backing::RefreshAttrsFromFd(ctx_, id, *fd, fetched);
   }
-  return backing::RefreshAttrs(ctx_, id);
+  return backing::RefreshAttrs(ctx_, id, fetched);
+}
+
+absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
+    InodeId id, cache::CachedAttr attr) {
+  if (attr.valid) return attr;
+  struct statx stx {};
+  ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id, &stx));
+  // The row itself (fuse_gen, identity) may have changed meanwhile, e.g.
+  // an invalidation by the open's identity check: re-read it.
+  ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
+  return cache::WithStatx(attr, stx);
 }
 
 absl::Status DirCacheFS::BeginWriting(InodeId id) {
   open_for_write_.insert(id);
-  return cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite);
+  // Ends right away: for as long as the open lasts, open_for_write_ (not an
+  // in-flight mutation) is what keeps the attributes unknown (see
+  // backing::RefreshAttrs), and the kernel itself removes
+  // security.capability through the mount before any write.
+  return cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite).status();
 }
 
 void DirCacheFS::ResolveSideEffectXattrs(
@@ -238,7 +251,8 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // children_complete on `parent` -- restored below on success -- and
   // marks `parent`'s attributes unknown (refreshed below).
   std::vector<std::string> names = {std::string(name)};
-  ABSL_RETURN_IF_ERROR(cache::BeginCreate(ctx_, parent, name));
+  ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
+                        cache::BeginCreate(ctx_, parent, name));
   ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
 
   // Phase 2: the op-specific backing syscall, against a parent fd opened
@@ -251,18 +265,23 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
       FileDescriptor parent_fd,
       backing::OpenNode(ctx_, parent, O_RDONLY | O_DIRECTORY));
   if (absl::Status status = do_create(*parent_fd); !status.ok()) {
+    mutation.End();
     ReresolveAfterFailure(parent, names);
     return status;
   }
 
-  // Phase 3: probe and record the new child.
+  // Phase 3: probe and record the new child. Its dentry, and the restored
+  // completeness, only if no other mutation of `parent` overlapped this one
+  // (cache::Mutation::Owns); otherwise `name` stays unknown.
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
-      backing::RecordNewChild(ctx_, parent, *parent_fd, name, open_for_write));
-  if (parent_was_complete) {
+      backing::RecordNewChild(ctx_, mutation, parent, *parent_fd, name,
+                              open_for_write));
+  if (parent_was_complete && mutation.Owns(parent)) {
     ABSL_RETURN_IF_ERROR(
         cache::RestoreDirComplete(ctx_, parent, parent_epoch).status());
   }
+  mutation.End();
   // Creating `name` changed `parent` itself too (mtime/ctime always; nlink
   // as well, if `name` is a new subdirectory -- its own ".." bumps
   // parent's link count), so its cached attributes are now stale. `fd` is
@@ -296,10 +315,13 @@ absl::Status DirCacheFS::Setattr(
   // access -- rather than ever reporting stale data as current.
   const std::vector<std::string_view> side_effects =
       XattrsChangedBySetattr(to_set);
-  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id, side_effects));
+  ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
+                        cache::BeginAttrChange(ctx_, id, side_effects));
 
   // Phase 2: the syscall(s) themselves.
   absl::Status set_status = backing::SetAttr(ctx_, id, *attr, to_set);
+  // Phase 3 is refreshes only, which run as ordinary fills.
+  mutation.End();
   if (!set_status.ok()) {
     // Best effort: refresh right away rather than leaving the row
     // "unknown" until whatever the next access happens to be, but a
@@ -370,15 +392,14 @@ absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
   // Not cached yet. Confirm this really is a symlink (rather than, say, a
   // caller racing a stale nodeid) before reading the backing filesystem.
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
-  if (!attr.valid) {
-    ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
-    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
-  }
+  ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
   RET_CHECK(S_ISLNK(attr.st.st_mode))
       << "Readlink on non-symlink inode " << id;
 
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
   ABSL_ASSIGN_OR_RETURN(std::string real_target, backing::ReadSymlink(ctx_, id));
-  ABSL_RETURN_IF_ERROR(cache::SetSymlink(ctx_, id, real_target));
+  ABSL_RETURN_IF_ERROR(
+      cache::FillSymlink(ctx_, snapshot, id, real_target).status());
   return req.ReplyReadlink(real_target);
 }
 
@@ -454,7 +475,8 @@ absl::Status DirCacheFS::RemoveChild(
   // to change (the parent's mtime/ctime/nlink, the child's nlink/ctime)
   // unknown, in one transaction.
   std::vector<std::string> names = {std::string(name)};
-  ABSL_RETURN_IF_ERROR(cache::BeginRemove(ctx_, parent, name, child.id));
+  ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
+                        cache::BeginRemove(ctx_, parent, name, child.id));
   ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
 
   // Phase 2: the backing unlinkat. On failure (ENOTEMPTY, EBUSY, ...) the
@@ -463,13 +485,16 @@ absl::Status DirCacheFS::RemoveChild(
   if (absl::Status status =
           backing::UnlinkAt(ctx_, parent, name, is_dir ? AT_REMOVEDIR : 0);
       !status.ok()) {
+    mutation.End();
     ReresolveAfterFailure(parent, names);
     return status;
   }
 
   // Phase 3: the name is now known absent. Only that one dentry changed, so
-  // a listing that was complete before is complete again.
+  // a listing that was complete before is complete again -- unless another
+  // mutation of `parent` overlapped this one (then `name` stays unknown).
   ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+    if (!mutation.Owns(parent)) return absl::OkStatus();
     ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
     if (parent_was_complete) {
       ABSL_RETURN_IF_ERROR(
@@ -477,6 +502,7 @@ absl::Status DirCacheFS::RemoveChild(
     }
     return absl::OkStatus();
   }));
+  mutation.End();
   ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, parent));
   if (is_dir) {
     // A directory has exactly one link that matters here and no open-file
@@ -552,10 +578,12 @@ absl::Status DirCacheFS::Rename(
   // set the rename changes unknown.
   std::vector<std::string> names = {std::string(name)};
   std::vector<std::string> newnames = {std::string(newname)};
-  ABSL_RETURN_IF_ERROR(cache::BeginRename(
-      ctx_, parent, name, newparent, newname, src.id,
-      dst_exists && !same_inode ? std::optional<InodeId>(dst.id)
-                                : std::nullopt));
+  ABSL_ASSIGN_OR_RETURN(
+      cache::Mutation mutation,
+      cache::BeginRename(ctx_, parent, name, newparent, newname, src.id,
+                         dst_exists && !same_inode
+                             ? std::optional<InodeId>(dst.id)
+                             : std::nullopt));
   ABSL_ASSIGN_OR_RETURN(int64_t parent_epoch, cache::DirEpoch(ctx_, parent));
   ABSL_ASSIGN_OR_RETURN(int64_t newparent_epoch,
                         cache::DirEpoch(ctx_, newparent));
@@ -566,6 +594,7 @@ absl::Status DirCacheFS::Rename(
   if (absl::Status status =
           backing::RenameAt(ctx_, parent, name, newparent, newname, flags);
       !status.ok()) {
+    mutation.End();
     ReresolveAfterFailure(parent, names);
     ReresolveAfterFailure(newparent, newnames);
     return status;
@@ -574,26 +603,36 @@ absl::Status DirCacheFS::Rename(
   // Phase 3, one transaction: the dentries as they now are. Moving a
   // directory moves only its own dentry; its cached subtree hangs off its
   // (unchanged) id and so stays valid as is.
+  // Each parent's dentry only if no other mutation of it overlapped this
+  // one (cache::Mutation::Owns); otherwise that name stays unknown.
   ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx_, newparent, newname, src.id));
-    if (exchange || same_inode) {
-      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx_, parent, name, dst.id));
-    } else {
-      ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
+    const bool own_parent = mutation.Owns(parent);
+    const bool own_newparent = mutation.Owns(newparent);
+    if (own_newparent) {
+      ABSL_RETURN_IF_ERROR(
+          cache::LinkDentry(ctx_, newparent, newname, src.id));
+    }
+    if (own_parent) {
+      if (exchange || same_inode) {
+        ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx_, parent, name, dst.id));
+      } else {
+        ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
+      }
     }
     // Each parent lost or gained exactly the names handled above, so a
     // listing that was complete before is complete again.
-    if (parent_was_complete) {
+    if (parent_was_complete && own_parent) {
       ABSL_RETURN_IF_ERROR(
           cache::RestoreDirComplete(ctx_, parent, parent_epoch).status());
     }
-    if (newparent_was_complete) {
+    if (newparent_was_complete && own_newparent) {
       ABSL_RETURN_IF_ERROR(
           cache::RestoreDirComplete(ctx_, newparent, newparent_epoch)
               .status());
     }
     return absl::OkStatus();
   }));
+  mutation.End();
 
   // Outside that transaction (these need syscalls): both parents' mtime
   // (and nlink, when a directory moved between them), and the ctime of
@@ -678,7 +717,8 @@ absl::Status DirCacheFS::Link(
   // Phase 1: mark (newparent, newname) unknown, and the attributes the
   // link changes (src's nlink/ctime, newparent's mtime/ctime/size).
   std::vector<std::string> names = {std::string(newname)};
-  ABSL_RETURN_IF_ERROR(cache::BeginLink(ctx_, src, newparent, newname));
+  ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
+                        cache::BeginLink(ctx_, src, newparent, newname));
   ABSL_ASSIGN_OR_RETURN(int64_t newparent_epoch,
                         cache::DirEpoch(ctx_, newparent));
 
@@ -688,6 +728,7 @@ absl::Status DirCacheFS::Link(
   // intact) is returned.
   if (absl::Status status = backing::LinkAt(ctx_, src, newparent, newname);
       !status.ok()) {
+    mutation.End();
     ReresolveAfterFailure(newparent, names);
     // Best effort, as Setattr: the op's own error is what gets replied.
     RefreshAttrsOf(src).IgnoreError();
@@ -697,11 +738,13 @@ absl::Status DirCacheFS::Link(
 
   // Phase 3: record the new dentry and the bumped nlink together.
   ABSL_RETURN_IF_ERROR(
-      backing::RecordNewLink(ctx_, src, newparent, newname).status());
-  if (newparent_was_complete) {
+      backing::RecordNewLink(ctx_, mutation, src, newparent, newname)
+          .status());
+  if (newparent_was_complete && mutation.Owns(newparent)) {
     ABSL_RETURN_IF_ERROR(
         cache::RestoreDirComplete(ctx_, newparent, newparent_epoch).status());
   }
+  mutation.End();
   // Adding a dentry changed newparent's own mtime/ctime (and, on some
   // filesystems, its on-disk size); no fd on it is already open here (only
   // LinkAt, inside backing.cc, opened one, and briefly), so this is a full
@@ -754,10 +797,7 @@ absl::Status DirCacheFS::Open(
   // this same call against the now-invalidated row -- which must come
   // back ESTALE again, not ENOENT.
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
-  if (!attr.valid) {
-    ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id));
-    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
-  }
+  ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
   // The kernel calls opendir(), not open(), on a directory, so this would
   // only trip on a row that changed type out from under a stale nodeid.
   RET_CHECK(!S_ISDIR(attr.st.st_mode)) << "Open on directory inode " << id;
@@ -846,7 +886,9 @@ absl::Status DirCacheFS::Write(
   // about to change. (A writable open already made `id` durably dirty, so
   // this commits without a WAL fsync unless a sync point has cleared that
   // meanwhile.) Phase 3 of the xattrs is the last writable Release().
-  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
+  ABSL_ASSIGN_OR_RETURN(
+      cache::Mutation mutation,
+      cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
 
   // Phase 2: the write itself, against the shared fd (EBADF if it is
   // O_RDONLY -- see MakeBackingFile -- exactly as the kernel would report
@@ -947,11 +989,11 @@ absl::Status DirCacheFS::Release(
   bool delete_row = false;
   absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
   if (attr.ok() && !attr->valid) {
+    struct statx stx {};
     absl::Status refreshed =
-        backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd);
+        backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd, &stx);
     if (refreshed.ok()) {
-      attr = cache::GetAttr(ctx_, id);
-      delete_row = attr.ok() && attr->st.st_nlink == 0;
+      delete_row = stx.stx_nlink == 0;
     } else {
       LOG(WARNING) << "Release: could not refresh the attributes of inode "
                    << id << " from its open fd, keeping its row: "
@@ -1013,10 +1055,7 @@ absl::Status DirCacheFS::Opendir(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
-  if (!attr.valid) {
-    ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
-    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
-  }
+  ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
   if (!S_ISDIR(attr.st.st_mode)) return req.ReplyErrno(ENOTDIR);
   return req.ReplyOpen(fi);
 }
@@ -1062,14 +1101,31 @@ size_t DirEntryPlusSize(std::string_view name) {
 
 }  // namespace
 
+absl::Status DirCacheFS::EnsureListed(InodeId dir) {
+  // A readdir reply is built from the cached dentries (its offsets are
+  // their rowids), so it needs the listing recorded, not just read. A
+  // PopulateDirectory that could not record it (a mutation of `dir` ran
+  // concurrently: see cache::CanFill) is retried; one still in flight
+  // blocks every attempt.
+  // TODO(coroutines): wait for the in-flight mutation instead.
+  constexpr int kAttempts = 3;
+  for (int attempt = 0; attempt < kAttempts; ++attempt) {
+    ABSL_ASSIGN_OR_RETURN(bool complete, cache::IsDirComplete(ctx_, dir));
+    if (complete) return absl::OkStatus();
+    ABSL_ASSIGN_OR_RETURN(backing::Populated populated,
+                          backing::PopulateDirectory(ctx_, dir));
+    if (populated.cached) return absl::OkStatus();
+  }
+  return dcfs::ErrnoToStatus(
+      EAGAIN, absl::StrCat("directory ", dir,
+                           " kept changing while being listed"));
+}
+
 absl::Status DirCacheFS::Readdir(
     FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info &fi) {
   InodeId dir = static_cast<InodeId>(ino);
-  ABSL_ASSIGN_OR_RETURN(bool complete, cache::IsDirComplete(ctx_, dir));
-  if (!complete) {
-    ABSL_RETURN_IF_ERROR(backing::PopulateDirectory(ctx_, dir));
-  }
+  ABSL_RETURN_IF_ERROR(EnsureListed(dir));
 
   std::vector<FuseDirEntry> entries;
   size_t used = 0;
@@ -1108,10 +1164,7 @@ absl::Status DirCacheFS::Readdirplus(
     FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info &fi) {
   InodeId dir = static_cast<InodeId>(ino);
-  ABSL_ASSIGN_OR_RETURN(bool complete, cache::IsDirComplete(ctx_, dir));
-  if (!complete) {
-    ABSL_RETURN_IF_ERROR(backing::PopulateDirectory(ctx_, dir));
-  }
+  ABSL_RETURN_IF_ERROR(EnsureListed(dir));
 
   std::vector<FuseDirEntryPlus> entries;
   size_t used = 0;
@@ -1184,7 +1237,8 @@ absl::Status DirCacheFS::Setxattr(
 
   // Phase 1: mark this one xattr unknown, not the whole set (see
   // cache::ForgetXattr), and the attributes (setxattr(2) bumps ctime).
-  ABSL_RETURN_IF_ERROR(cache::BeginXattrChange(ctx_, id, name));
+  ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
+                        cache::BeginXattrChange(ctx_, id, name));
 
   // Phase 2: the backing syscall, reusing this inode's shared backing fd
   // (see the BackingFile map) if one is already open. XATTR_CREATE/
@@ -1193,6 +1247,7 @@ absl::Status DirCacheFS::Setxattr(
   absl::StatusOr<backing::XattrReadBack> stored =
       backing::SetXattr(ctx_, id, name, value, flags, OpenFdOf(id));
   if (!stored.ok()) {
+    mutation.End();
     // `name` stays unknown (the syscall may or may not have changed it),
     // for the next reader to resolve; the attributes are refreshed as a
     // best effort, as Setattr does on its own phase-2 failure.
@@ -1205,15 +1260,20 @@ absl::Status DirCacheFS::Setxattr(
   // not at all (see backing::XattrReadBack) -- and the ctime (and, for an
   // ACL, mode) change setxattr(2) causes (phase 1 marked the attributes
   // unknown for it, above). If the read-back failed, `name` stays unknown.
+  // Also left unknown if another mutation of `id` overlapped this one.
   if (!stored->ok()) {
     LOG(WARNING) << "Setxattr: could not read xattr " << name
                  << " of inode " << id << " back, leaving it unknown: "
                  << stored->status();
+  } else if (!mutation.Owns(id)) {
+    VLOG(1) << "Setxattr: inode " << id << " changed concurrently, leaving "
+            << name << " unknown";
   } else if ((*stored)->has_value()) {
     ABSL_RETURN_IF_ERROR(cache::SetXattr(ctx_, id, name, ***stored));
   } else {
     ABSL_RETURN_IF_ERROR(cache::RemoveXattr(ctx_, id, name));
   }
+  mutation.End();
   ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
   return req.ReplyErrno(0);
 }
@@ -1257,11 +1317,14 @@ absl::Status DirCacheFS::Listxattr(
       std::optional<std::vector<std::string>> names,
       cache::ListXattrs(ctx_, id));
   if (!names.has_value()) {
-    ABSL_RETURN_IF_ERROR(backing::RefreshXattrs(ctx_, id));
-    ABSL_ASSIGN_OR_RETURN(names, cache::ListXattrs(ctx_, id));
-    RET_CHECK(names.has_value())
-        << "xattr set of inode " << id << " still unknown after a complete "
-        << "refresh";
+    // Answered from what the refresh read, whether or not the cache could
+    // record it (see cache::CanFill), in ListXattrs' (sorted) order.
+    ABSL_ASSIGN_OR_RETURN(
+        (std::vector<std::pair<std::string, std::string>> xattrs),
+        backing::RefreshXattrs(ctx_, id));
+    names.emplace();
+    for (auto &[name, value] : xattrs) names->push_back(std::move(name));
+    std::sort(names->begin(), names->end());
   }
   std::string buf;
   for (const std::string &name : *names) {
@@ -1280,20 +1343,26 @@ absl::Status DirCacheFS::Removexattr(
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
 
   // Phase 1, as Setxattr.
-  ABSL_RETURN_IF_ERROR(cache::BeginXattrChange(ctx_, id, name));
+  ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
+                        cache::BeginXattrChange(ctx_, id, name));
 
   // Phase 2: ENODATA (already removed, or never existed) passes straight
   // through from the real syscall.
   absl::Status remove_status =
       backing::RemoveXattr(ctx_, id, name, OpenFdOf(id));
   if (!remove_status.ok()) {
+    mutation.End();
     // As Setxattr: `name` stays unknown.
     RefreshAttrsOf(id).IgnoreError();
     return remove_status;
   }
 
-  // Phase 3.
-  ABSL_RETURN_IF_ERROR(cache::RemoveXattr(ctx_, id, name));
+  // Phase 3 (unless another mutation of `id` overlapped this one: then
+  // `name` stays unknown).
+  if (mutation.Owns(id)) {
+    ABSL_RETURN_IF_ERROR(cache::RemoveXattr(ctx_, id, name));
+  }
+  mutation.End();
   ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
   return req.ReplyErrno(0);
 }
@@ -1370,14 +1439,18 @@ absl::Status DirCacheFS::Fallocate(
   int fd = *backing_it->second.fd;
 
   // Phase 1.
-  ABSL_RETURN_IF_ERROR(cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
+  ABSL_ASSIGN_OR_RETURN(
+      cache::Mutation mutation,
+      cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
 
   // Phase 2. The shared fd is O_RDONLY only when this inode could not be
   // opened O_RDWR (see MakeBackingFile); fallocate on it then fails EBADF,
   // exactly as the kernel would report for any write-family syscall on a
   // read-only fd -- no special-casing needed here.
-  if (absl::Status status = backing::FallocateFd(fd, mode, offset, length);
-      !status.ok()) {
+  absl::Status status = backing::FallocateFd(fd, mode, offset, length);
+  // Phase 3 is refreshes only, which run as ordinary fills.
+  mutation.End();
+  if (!status.ok()) {
     backing::RefreshAttrsFromFd(ctx_, id, fd).IgnoreError();
     return status;
   }

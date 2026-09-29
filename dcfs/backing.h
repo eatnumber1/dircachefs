@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "dcfs/context.h"
@@ -77,9 +78,11 @@ absl::StatusOr<uint64_t> ReadGeneration(int opath_fd, mode_t mode);
 // loses its negative dentries and is marked incomplete, so the next lookup
 // or readdir relists it; any object whose ctime changed has its cached
 // xattrs marked unknown. Issues no syscall of its own; a no-op when
-// `cached` is not valid.
-absl::Status ReconcileAttrs(Context &ctx, InodeId id,
-                            const cache::CachedAttr &cached,
+// `cached` is not valid, or when a mutation of `id` may explain the
+// difference (!cache::CanFill(ctx, snapshot, id), `snapshot` taken before
+// `cached` was read).
+absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,
+                            InodeId id, const cache::CachedAttr &cached,
                             const struct statx &fresh);
 
 // Reopens inode `id` with open(2) `flags`, after checking that the object
@@ -100,14 +103,21 @@ absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id);
 // If `id` is in ctx.open_for_write (a writable open is outstanding), the
 // fresh values are stored but stay marked unknown, in the same transaction
 // (true of RefreshAttrsFromFd, RecordNewLink and PopulateDirectory too).
-absl::Status RefreshAttrs(Context &ctx, InodeId id);
+//
+// A fill (see cache::CanFill): if a mutation of `id` began, ended or is in
+// flight while the statx was under way, nothing is recorded. Either way,
+// if `fetched` is given it receives the statx, for the caller to answer
+// from (so it never depends on the cache having recorded it).
+absl::Status RefreshAttrs(Context &ctx, InodeId id,
+                          struct statx *fetched = nullptr);
 
 // As RefreshAttrs, but statx's an fd the caller already has open on `id`
 // (a real, non-O_PATH fd is not required -- AT_EMPTY_PATH works on O_PATH
 // too) instead of reopening it via OpenNode. Used by DirCacheFS::Release
 // when the open being released was writable, to pick up the passthrough
 // writes' effect on size/mtime/etc. before the fd closes.
-absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd);
+absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd,
+                                struct statx *fetched = nullptr);
 
 // Reads up to `size` bytes at `offset` from `fd` (a real, non-O_PATH fd
 // already open on the node -- see DirCacheFS::Open's OpenNode call),
@@ -150,9 +160,11 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
     Context &ctx, InodeId id);
 
 // Refreshes `id`'s cached xattr set from the backing filesystem (ReadXattrs
-// followed by cache::ReplaceXattrs). Called when the cached set is unknown
-// (ListXattrs/GetXattr returned nullopt).
-absl::Status RefreshXattrs(Context &ctx, InodeId id);
+// followed by cache::ReplaceXattrs, as a fill: see cache::CanFill). Called
+// when the cached set is unknown (ListXattrs returned nullopt). Returns
+// what it read, for the caller to answer from.
+absl::StatusOr<std::vector<std::pair<std::string, std::string>>>
+RefreshXattrs(Context &ctx, InodeId id);
 
 // Reads xattr `name` of `id` from the backing filesystem and records it in
 // the cache as present or absent (cache::SetXattr/RemoveXattr), resolving
@@ -208,7 +220,20 @@ absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id);
 // cached names that no longer exist; and marks `dir` complete. This is the
 // one point where a directory's disk is read, once, so later lookups and
 // listings are answered from the cache.
-absl::Status PopulateDirectory(Context &ctx, InodeId dir);
+//
+// A fill (see cache::CanFill): the listing (dentries, completeness) is
+// recorded only if no mutation of `dir` began, ended or is in flight during
+// the I/O and nothing cleared `dir`'s completeness meanwhile; each child's
+// attributes, symlink target and xattrs only if the same holds for that
+// child (its row is upserted regardless, attributes unknown). The result
+// says whether the listing was recorded, and what it found.
+struct Populated {
+  // Whether `dir`'s listing was recorded (and `dir` is now complete).
+  bool cached = false;
+  // Every name listed: kFound with the child's row, or kRefused.
+  absl::flat_hash_map<std::string, cache::LookupResult> entries;
+};
+absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir);
 
 // Looks `name` up in `parent`, populating `parent` first if the cache
 // cannot answer. Never returns kUnknown: a name absent after a complete
@@ -240,8 +265,14 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
 // `open_for_write` (Create with a writable access mode): the new row's
 // attributes are marked unknown again in that same transaction, since the
 // caller is about to hand the kernel a writable passthrough fd on it.
-absl::StatusOr<NewChild> RecordNewChild(Context &ctx, InodeId parent,
-                                        int parent_fd, std::string_view name,
+//
+// `mutation` is the create's (from cache::BeginCreate): the dentry is
+// linked only if it Owns(parent); the new row's own state is a fill (see
+// cache::CanFill).
+absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
+                                        const cache::Mutation &mutation,
+                                        InodeId parent, int parent_fd,
+                                        std::string_view name,
                                         bool open_for_write = false);
 
 // mkdirat(2)/mknodat(2)/symlinkat(2) of `name` inside the already-open
@@ -277,9 +308,11 @@ absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
 // (I/O, no transaction -- its nlink just changed) and then, in one
 // transaction, LinkDentry(newparent, newname, src) followed by
 // UpdateAttr(src, <the fresh statx>), so the new dentry and the bumped
-// nlink land together. Returns the fresh attributes.
-absl::StatusOr<struct statx> RecordNewLink(Context &ctx, InodeId src,
-                                           InodeId newparent,
+// nlink land together -- each only if `mutation` (the link's, from
+// cache::BeginLink) Owns the inode it writes. Returns the fresh attributes.
+absl::StatusOr<struct statx> RecordNewLink(Context &ctx,
+                                           const cache::Mutation &mutation,
+                                           InodeId src, InodeId newparent,
                                            std::string_view newname);
 
 // --- Remove/rename ops (step 4.3) -------------------------------------------
