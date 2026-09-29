@@ -156,6 +156,30 @@ qemu_cc_test(
     ],
 )
 
+# Fault-injection tests for syscalls.cc races/limits that no real syscall
+# can be made to hit deterministically (see syscalls_fault_test.cc):
+# link-time --wrap fakes for fgetxattr/flistxattr, kept in a target of its
+# own (not folded into syscalls_test) so the wrapping -- which rewrites
+# every reference to these symbols in the whole binary -- cannot affect
+# any other test.
+qemu_cc_test(
+    name = "syscalls_fault_test",
+    size = "small",
+    srcs = ["syscalls_fault_test.cc"],
+    disks = [("vdb", "ext4", "32M")],  # xattrs need a real filesystem
+    linkopts = [
+      "-Wl,--wrap=fgetxattr",
+      "-Wl,--wrap=flistxattr",
+    ],
+    deps = [
+      ":syscalls",
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "fuse_request",
     hdrs = ["fuse_request.h"],
