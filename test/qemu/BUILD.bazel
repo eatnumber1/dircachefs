@@ -148,6 +148,15 @@ qemu_test(
     guest_script = "guest/release_leak.sh",
 )
 
+# Step 4.14: regression test for 49a9b9c (Readdir/Readdirplus bounded to
+# the reply buffer instead of pulling every remaining directory entry from
+# the cache on every call) -- see guest/readdir_boundary.sh.
+qemu_test(
+    name = "readdir_boundary_test",
+    disks = [("vdb", "ext4", "128M")],
+    guest_script = "guest/readdir_boundary.sh",
+)
+
 # Step 5.3: dcfs exported over real NFSv4 (rpc.nfsd/rpc.mountd/exportfs from
 # a small Debian chroot -- see test/qemu/scripts/mkrootfs-debian.sh and
 # guest/init's dcfs_rootfs= branch, since none of that fits in the
