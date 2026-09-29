@@ -235,7 +235,8 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // Phase 1: mark (parent, name) unknown before touching the backing
   // filesystem, so a crash between here and phase 3 leaves "unknown"
   // (repopulated on the next lookup) rather than stale. This also clears
-  // children_complete on `parent` -- restored below on success.
+  // children_complete on `parent` -- restored below on success -- and
+  // marks `parent`'s attributes unknown (refreshed below).
   std::vector<std::string> names = {std::string(name)};
   ABSL_RETURN_IF_ERROR(cache::BeginCreate(ctx_, parent, name));
 

@@ -1205,5 +1205,19 @@ TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
   EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(0));
 }
 
+// Audit F5: a create-family op changes the parent's mtime/ctime (and nlink,
+// for mkdir), so its phase 1 must mark the parent's attributes unknown,
+// like BeginRemove/BeginRename/BeginLink do. Simulates a crash (or any
+// reader) between phase 1 and phase 3 of a mkdir: the parent's pre-create
+// attributes must not be served as current.
+TEST_F(MetadataCacheTest, BeginCreateMarksTheParentsAttributesUnknown) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
+  ASSERT_OK_AND_ASSIGN(CachedAttr before, GetAttr(ctx_, d));
+  ASSERT_TRUE(before.valid);
+  ASSERT_THAT(BeginCreate(ctx_, d, "new"), IsOk());
+  ASSERT_OK_AND_ASSIGN(CachedAttr after, GetAttr(ctx_, d));
+  EXPECT_FALSE(after.valid);
+}
+
 }  // namespace
 }  // namespace dcfs::cache

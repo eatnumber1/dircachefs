@@ -1001,8 +1001,10 @@ absl::Status BeginMutation(Context &ctx, std::span<const InodeId> ids,
 absl::Status BeginCreate(Context &ctx, InodeId parent, std::string_view name) {
   const std::string names[] = {std::string(name)};
   const InodeId ids[] = {parent};
-  return BeginMutation(ctx, ids,
-                       [&] { return MarkUnknown(ctx, parent, names); });
+  return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, parent, names));
+    return MarkAttrsUnknown(ctx, parent);
+  });
 }
 
 absl::Status BeginRemove(Context &ctx, InodeId parent, std::string_view name,

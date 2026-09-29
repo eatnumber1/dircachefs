@@ -329,7 +329,8 @@ absl::Status BeginMutation(Context &ctx, std::span<const InodeId> ids,
 // BeginMutation() naming exactly the inodes the mutation changes.
 //
 // Create/Mknod/Mkdir/Symlink of (parent, name): forgets `name`, marks
-// `parent` incomplete. Dirty: parent. (The new child's row is created, and
+// `parent` incomplete and its attributes unknown (its mtime/ctime, and for
+// a mkdir its nlink, are about to change). Dirty: parent. (The new child's row is created, and
 // made dirty, by phase 3: backing::RecordNewChild.)
 absl::Status BeginCreate(Context &ctx, InodeId parent, std::string_view name);
 // Unlink/Rmdir of (parent, name) -> child: forgets `name`, marks `parent`
