@@ -52,6 +52,14 @@ struct FaultState {
   // list between the query and the read that immediately follows.
   int flistxattr_fd = -1;
   std::string grow_new_name;
+
+  // readlinkat: for this exact (dirfd, path) pair, always report "buffer
+  // completely full" (never delegating to the real syscall) -- simulating
+  // a symlink target longer than any real Linux filesystem can actually
+  // be made to hold (every one caps a target at or below PATH_MAX at
+  // symlink(2) time), so the doubling loop's PATH_MAX*4 cap is reached.
+  int fake_readlinkat_dirfd = -1;
+  std::string fake_readlinkat_path;
 };
 
 FaultState &GetFaultState() {
@@ -98,6 +106,22 @@ ssize_t __wrap_flistxattr(int fd, void *list, size_t size) {
     }
   }
   return rc;
+}
+
+ssize_t __real_readlinkat(int dirfd, const char *pathname, char *buf,
+                          size_t bufsize);
+
+ssize_t __wrap_readlinkat(int dirfd, const char *pathname, char *buf,
+                          size_t bufsize) {
+  dcfs::FaultState &st = dcfs::GetFaultState();
+  if (dirfd == st.fake_readlinkat_dirfd && pathname != nullptr &&
+      st.fake_readlinkat_path == pathname) {
+    // Simulated backing readlinkat(2) that never fits, whatever the
+    // buffer size: fill it and report it as fully used.
+    std::memset(buf, 'a', bufsize);
+    return static_cast<ssize_t>(bufsize);
+  }
+  return __real_readlinkat(dirfd, pathname, buf, bufsize);
 }
 
 }  // extern "C"
@@ -168,6 +192,24 @@ TEST_F(SyscallsFaultTest, FlistxattrRetriesOnErangeFromReadNotQuery) {
             names->end());
   EXPECT_NE(std::find(names->begin(), names->end(), "user.dcfs_list_b"),
             names->end());
+}
+
+// Regression test for bdfd61c: readlinkat() must report ENAMETOOLONG, not
+// silently truncate, once its doubling loop's buffer reaches the
+// PATH_MAX*4 cap and the target still doesn't fit. No real Linux
+// filesystem lets a test create a symlink whose target is actually that
+// long, so __wrap_readlinkat (above) simulates a backing readlinkat(2)
+// that always reports "buffer too small", whatever the buffer size.
+TEST_F(SyscallsFaultTest, ReadlinkatReturnsEnametoolongAtPathMaxTimesFourCap) {
+  FaultState &st = GetFaultState();
+  st.fake_readlinkat_dirfd = tmpdir_fd_;
+  st.fake_readlinkat_path = "irrelevant";
+
+  auto target = syscalls::readlinkat(tmpdir_fd_, "irrelevant");
+  ASSERT_FALSE(target.ok());
+  auto errno_val = GetErrnoFromStatus(target.status());
+  ASSERT_THAT(errno_val, IsOk());
+  EXPECT_EQ(*errno_val, ENAMETOOLONG);
 }
 
 }  // namespace
