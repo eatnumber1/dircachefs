@@ -221,6 +221,18 @@ needs no backing I/O) detects nothing.
 - **No out-of-band access to the backing trees** (see Coherence above):
   dcfs requires exclusive access, detects what it stumbles onto for free,
   and never invalidates the kernel's own caches.
+- **The kernel is not told about out-of-band changes.** Even when dcfs
+  detects one and updates its own cache, the kernel keeps serving the
+  attributes and dentries it already has until their timeouts expire or
+  it evicts them; dcfs sends no invalidation notifications.
+- **Writes through a shared writable mapping after the last `close()`
+  are not reflected in metadata.** With passthrough the mapping keeps
+  only the backing file, so the kernel releases the dcfs file on
+  `close()` and later stores reach the backing file without dcfs (or the
+  kernel's attribute cache) hearing of them: mtime, ctime and size stay as
+  cached (and NFS clients, which derive change attributes from ctime, may
+  keep stale data). While the file is still open for writing, attributes
+  are served with a zero timeout from the open file, so they are current.
 - **Filesystems mounted below the source, and btrfs subvolumes, are not
   supported.** One superblock means one `st_dev`, and `st_ino` (shown to
   users unchanged, so hardlink-aware tools such as `tar`/`rsync`/`cp -a`
