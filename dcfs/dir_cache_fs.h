@@ -185,6 +185,20 @@ class DirCacheFS {
   // since its attributes stay unknown for as long as that open lasts.
   absl::Status RefreshAttrsOf(InodeId id, struct statx *fetched = nullptr);
 
+  // Once a mutation's backing change has happened (phase 2 succeeded), a
+  // failure of its bookkeeping must not be replied as the operation
+  // failing (audit-races F7): the caller would believe nothing happened,
+  // and the kernel would keep its old dentries. Logs `status` at WARNING
+  // if it is an error; what was not recorded stays unknown (phase 1).
+  void LogPhase3Failure(std::string_view op, const absl::Status &status);
+
+  // The entry to reply for `id` after its mutation: from `fetched` (phase
+  // 3's statx, if it got one: stx_mask nonzero) whether or not the cache
+  // recorded it, else EntryFor, else the row's last known attributes with
+  // attr_timeout 0. Fails only if `id` has no row at all.
+  absl::StatusOr<fuse_entry_param> EntryAfterPhase2(
+      InodeId id, const struct statx &fetched = {});
+
   // Makes sure `dir`'s listing is cached (complete), populating it if not.
   absl::Status EnsureListed(InodeId dir);
 

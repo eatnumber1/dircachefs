@@ -192,6 +192,42 @@ absl::Status DirCacheFS::RefreshAttrsOf(InodeId id, struct statx *fetched) {
   return backing::RefreshAttrs(ctx_, id, fetched);
 }
 
+void DirCacheFS::LogPhase3Failure(std::string_view op,
+                                  const absl::Status &status) {
+  if (status.ok()) return;
+  LOG(WARNING) << op << ": the backing change happened, but recording it "
+               << "in the cache failed; leaving it unknown: " << status;
+}
+
+absl::StatusOr<fuse_entry_param> DirCacheFS::EntryAfterPhase2(
+    InodeId id, const struct statx &fetched) {
+  if (fetched.stx_mask != 0) {
+    // What phase 3 read, whether or not it could record it.
+    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
+    attr = cache::WithStatx(attr, fetched);
+    fuse_entry_param entry{};
+    entry.ino = static_cast<fuse_ino_t>(id);
+    entry.generation = attr.fuse_gen;
+    entry.attr = attr.st;
+    entry.attr_timeout = absl::ToDoubleSeconds(opts_.attr_timeout);
+    entry.entry_timeout = absl::ToDoubleSeconds(opts_.entry_timeout);
+    return entry;
+  }
+  absl::StatusOr<fuse_entry_param> entry = EntryFor(id);
+  if (entry.ok()) return entry;
+  LogPhase3Failure("reply", entry.status());
+  // Last resort: the row's last known attributes, marked unknown already
+  // (phase 1), rather than failing an operation that happened.
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
+  fuse_entry_param fallback{};
+  fallback.ino = static_cast<fuse_ino_t>(id);
+  fallback.generation = attr.fuse_gen;
+  fallback.attr = attr.st;
+  fallback.attr_timeout = 0;
+  fallback.entry_timeout = absl::ToDoubleSeconds(opts_.entry_timeout);
+  return fallback;
+}
+
 absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
     InodeId id, cache::CachedAttr attr) {
   if (attr.valid) return attr;
@@ -277,16 +313,25 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // Phase 3: probe and record the new child. Its dentry only if no other
   // mutation of `parent` overlapped this one (cache::Mutation::Owns);
   // otherwise `name` stays unknown.
-  ABSL_ASSIGN_OR_RETURN(
-      backing::NewChild child,
-      backing::RecordNewChild(ctx_, mutation, parent, *parent_fd, name,
-                              open_for_write));
+  //
+  // The object now exists, but the reply must name it by a row, so a
+  // failure to record it is the one phase-3 failure still replied (the
+  // name stays unknown; the next lookup finds the object).
+  absl::StatusOr<backing::NewChild> child = backing::RecordNewChild(
+      ctx_, mutation, parent, *parent_fd, name, open_for_write);
   mutation.End();
+  if (!child.ok()) {
+    LOG(WARNING) << "created " << name << " in directory " << parent
+                 << " but could not record it: " << child.status();
+    return child.status();
+  }
   // Creating `name` changed `parent` itself too (mtime/ctime always; nlink
   // as well, if `name` is a new subdirectory -- its own ".." bumps
   // parent's link count), so its cached attributes are now stale. `fd` is
   // already open on it, so this is a free-standing statx, not a reopen.
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrsFromFd(ctx_, parent, *parent_fd));
+  // From here on, failures are logged, not replied (audit-races F7).
+  LogPhase3Failure("create",
+                   backing::RefreshAttrsFromFd(ctx_, parent, *parent_fd));
   return child;
 }
 
@@ -332,10 +377,13 @@ absl::Status DirCacheFS::Setattr(
     return set_status;
   }
 
-  // Phase 3: write the new state, then reply with it.
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
+  // Phase 3: write the new state, then reply with it. The change has
+  // happened: a failure from here on is logged, never replied
+  // (audit-races F7).
+  struct statx stx {};
+  LogPhase3Failure("Setattr", backing::RefreshAttrs(ctx_, id, &stx));
   ResolveSideEffectXattrs(id, side_effects, OpenFdOf(id), "Setattr");
-  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(id));
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(id, stx));
   return req.ReplyAttr(entry.attr, opts_.attr_timeout, entry.generation);
 }
 
@@ -485,22 +533,22 @@ absl::Status DirCacheFS::RemoveChild(
     return status;
   }
 
-  // Phase 3: the name is now known absent -- unless another mutation of
-  // `parent` overlapped this one (then `name` stays unknown).
+  // Phase 3. The unlink has happened: from here on each failure is logged
+  // and leaves what it did not record unknown, never replied
+  // (audit-races F7). The name is now known absent -- unless another
+  // mutation of `parent` overlapped this one (then it stays unknown).
   if (mutation.Owns(parent)) {
-    ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx_, parent, name));
+    LogPhase3Failure("Unlink/Rmdir", cache::SetNegative(ctx_, parent, name));
   }
   mutation.End();
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, parent));
+  LogPhase3Failure("Unlink/Rmdir", backing::RefreshAttrs(ctx_, parent));
   if (is_dir) {
     // A directory has exactly one link that matters here and no open-file
     // state in dcfs (Opendir keeps nothing), so the backing rmdir removed
-    // it for good. The dentry is already negative, so DeleteInode's
-    // "mark the parents of dentries pointing at it incomplete" finds none;
-    // its (necessarily empty) children cascade away with it.
-    ABSL_RETURN_IF_ERROR(ForgetRemoved(child.id));
+    // it for good; its (necessarily empty) children cascade away with it.
+    LogPhase3Failure("Rmdir", ForgetRemoved(child.id));
   } else {
-    ABSL_RETURN_IF_ERROR(SettleUnlinkedFile(child.id));
+    LogPhase3Failure("Unlink", SettleUnlinkedFile(child.id));
   }
   return req.ReplyErrno(0);
 }
@@ -579,12 +627,15 @@ absl::Status DirCacheFS::Rename(
     return status;
   }
 
+  // The rename has happened: from here on each failure is logged and
+  // leaves what it did not record unknown, never replied (audit-races F7).
+  //
   // Phase 3, one transaction: the dentries as they now are. Moving a
   // directory moves only its own dentry; its cached subtree hangs off its
-  // (unchanged) id and so stays valid as is.
-  // Each parent's dentry only if no other mutation of it overlapped this
-  // one (cache::Mutation::Owns); otherwise that name stays unknown.
-  ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&]() -> absl::Status {
+  // (unchanged) id and so stays valid as is. Each parent's dentry only if
+  // no other mutation of it overlapped this one (cache::Mutation::Owns);
+  // otherwise that name stays unknown.
+  LogPhase3Failure("Rename", ctx_.db.Transaction([&]() -> absl::Status {
     const bool own_parent = mutation.Owns(parent);
     const bool own_newparent = mutation.Owns(newparent);
     if (own_newparent) {
@@ -605,23 +656,23 @@ absl::Status DirCacheFS::Rename(
   // Outside that transaction (these need syscalls): both parents' mtime
   // (and nlink, when a directory moved between them), and the ctime of
   // every inode the rename touched.
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, parent));
+  LogPhase3Failure("Rename", backing::RefreshAttrs(ctx_, parent));
   if (newparent != parent) {
-    ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, newparent));
+    LogPhase3Failure("Rename", backing::RefreshAttrs(ctx_, newparent));
   }
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, src.id));
+  LogPhase3Failure("Rename", backing::RefreshAttrs(ctx_, src.id));
   if (dst_exists && !same_inode) {
     if (exchange) {
-      ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, dst.id));
-    } else {
+      LogPhase3Failure("Rename", backing::RefreshAttrs(ctx_, dst.id));
+    } else if (absl::StatusOr<cache::CachedAttr> dst_attr = RequireAttr(dst.id);
+               !dst_attr.ok()) {
+      LogPhase3Failure("Rename", dst_attr.status());
+    } else if (S_ISDIR(dst_attr->st.st_mode)) {
       // Replaced. A directory can only have been replaced if it was empty,
       // and is gone for good; a file follows Unlink's row-lifetime rule.
-      ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dst_attr, RequireAttr(dst.id));
-      if (S_ISDIR(dst_attr.st.st_mode)) {
-        ABSL_RETURN_IF_ERROR(ForgetRemoved(dst.id));
-      } else {
-        ABSL_RETURN_IF_ERROR(SettleUnlinkedFile(dst.id));
-      }
+      LogPhase3Failure("Rename", ForgetRemoved(dst.id));
+    } else {
+      LogPhase3Failure("Rename", SettleUnlinkedFile(dst.id));
     }
   }
   return req.ReplyErrno(0);
@@ -698,18 +749,20 @@ absl::Status DirCacheFS::Link(
     return status;
   }
 
-  // Phase 3: record the new dentry and the bumped nlink together.
-  ABSL_RETURN_IF_ERROR(
-      backing::RecordNewLink(ctx_, mutation, src, newparent, newname)
-          .status());
+  // Phase 3: record the new dentry and the bumped nlink together. The link
+  // exists: failures from here on are logged, never replied
+  // (audit-races F7).
+  LogPhase3Failure(
+      "Link", backing::RecordNewLink(ctx_, mutation, src, newparent, newname)
+                  .status());
   mutation.End();
   // Adding a dentry changed newparent's own mtime/ctime (and, on some
   // filesystems, its on-disk size); no fd on it is already open here (only
   // LinkAt, inside backing.cc, opened one, and briefly), so this is a full
   // reopen+statx rather than the fd-based refresh CreateChild uses.
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, newparent));
+  LogPhase3Failure("Link", backing::RefreshAttrs(ctx_, newparent));
 
-  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(src));
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(src));
   return req.ReplyEntry(
       entry.ino, entry.generation, entry.attr, opts_.attr_timeout,
       opts_.entry_timeout);
@@ -1227,12 +1280,12 @@ absl::Status DirCacheFS::Setxattr(
     VLOG(1) << "Setxattr: inode " << id << " changed concurrently, leaving "
             << name << " unknown";
   } else if ((*stored)->has_value()) {
-    ABSL_RETURN_IF_ERROR(cache::SetXattr(ctx_, id, name, ***stored));
+    LogPhase3Failure("Setxattr", cache::SetXattr(ctx_, id, name, ***stored));
   } else {
-    ABSL_RETURN_IF_ERROR(cache::RemoveXattr(ctx_, id, name));
+    LogPhase3Failure("Setxattr", cache::RemoveXattr(ctx_, id, name));
   }
   mutation.End();
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
+  LogPhase3Failure("Setxattr", backing::RefreshAttrs(ctx_, id));
   return req.ReplyErrno(0);
 }
 
@@ -1316,12 +1369,13 @@ absl::Status DirCacheFS::Removexattr(
   }
 
   // Phase 3 (unless another mutation of `id` overlapped this one: then
-  // `name` stays unknown).
+  // `name` stays unknown). Failures are logged, never replied
+  // (audit-races F7).
   if (mutation.Owns(id)) {
-    ABSL_RETURN_IF_ERROR(cache::RemoveXattr(ctx_, id, name));
+    LogPhase3Failure("Removexattr", cache::RemoveXattr(ctx_, id, name));
   }
   mutation.End();
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrs(ctx_, id));
+  LogPhase3Failure("Removexattr", backing::RefreshAttrs(ctx_, id));
   return req.ReplyErrno(0);
 }
 
@@ -1413,8 +1467,8 @@ absl::Status DirCacheFS::Fallocate(
     return status;
   }
 
-  // Phase 3.
-  ABSL_RETURN_IF_ERROR(backing::RefreshAttrsFromFd(ctx_, id, fd));
+  // Phase 3. Failures are logged, never replied (audit-races F7).
+  LogPhase3Failure("Fallocate", backing::RefreshAttrsFromFd(ctx_, id, fd));
   ResolveSideEffectXattrs(id, kXattrsChangedByWrite, fd, "Fallocate");
   return req.ReplyErrno(0);
 }

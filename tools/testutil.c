@@ -51,6 +51,11 @@
  *       As setxattr/getxattr, but the value is lowercase hex: for binary
  *       values such as a system.posix_acl_access ACL or a
  *       security.capability blob, which contain NUL bytes.
+ *   testutil fsfreeze <path> <freeze|thaw>
+ *       FIFREEZE/FITHAW on the filesystem <path> is on: while frozen, every
+ *       write to it (a rename, say) blocks until it is thawed -- a way to
+ *       hold a dcfs mutation inside its backing syscall (busybox has no
+ *       fsfreeze applet).
  *   testutil fallocate <path> <mode> <offset> <len>
  *       fallocate(2), where <mode> is "0", "keep_size" (FALLOC_FL_KEEP_SIZE)
  *       or "punch_hole" (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE --
@@ -91,6 +96,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/fs.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/xattr.h>
@@ -253,6 +260,33 @@ static int cmd_removexattr(const char *path, const char *name)
 	return 0;
 }
 
+static int cmd_fsfreeze(const char *path, const char *how)
+{
+	unsigned long request;
+	int fd;
+
+	if (strcmp(how, "freeze") == 0) {
+		request = FIFREEZE;
+	} else if (strcmp(how, "thaw") == 0) {
+		request = FITHAW;
+	} else {
+		fprintf(stderr, "testutil fsfreeze: bad mode '%s'\n", how);
+		return 2;
+	}
+	fd = open(path, O_RDONLY | O_DIRECTORY);
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	if (ioctl(fd, request, 0) == -1) {
+		print_err(errno);
+		close(fd);
+		return 1;
+	}
+	close(fd);
+	return 0;
+}
+
 static int cmd_fallocate(
 	const char *path, const char *mode_str, const char *offset_str,
 	const char *len_str)
@@ -380,6 +414,8 @@ int main(int argc, char *argv[])
 		return cmd_setxattrhex(argv[2], argv[3], argv[4]);
 	if (argc == 4 && strcmp(argv[1], "getxattrhex") == 0)
 		return cmd_getxattrhex(argv[2], argv[3]);
+	if (argc == 4 && strcmp(argv[1], "fsfreeze") == 0)
+		return cmd_fsfreeze(argv[2], argv[3]);
 	if (argc == 6 && strcmp(argv[1], "fallocate") == 0)
 		return cmd_fallocate(argv[2], argv[3], argv[4], argv[5]);
 	if (argc == 5 && strcmp(argv[1], "writehold") == 0)
@@ -398,6 +434,7 @@ int main(int argc, char *argv[])
 		"       testutil removexattr <path> <name>\n"
 		"       testutil setxattrhex <path> <name> <hex>\n"
 		"       testutil getxattrhex <path> <name>\n"
+		"       testutil fsfreeze <path> <freeze|thaw>\n"
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
 		"       testutil writehold <path> <append|create> <nbytes>\n"
 		"       testutil sqlite-lock <db-path> <hold-seconds>\n");

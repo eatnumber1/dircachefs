@@ -546,4 +546,42 @@ else
 	fail restart-warm "vdb $before_vdb -> $after_vdb"
 fi
 
+# --- phase3-failure-still-succeeds (audit-races F7) --------------------------
+#
+# Once the backing rename has happened, a failure of dcfs's own bookkeeping
+# afterwards (here: its cache database is locked by someone else for longer
+# than its busy timeout) must not be reported as the rename failing: the
+# caller would believe nothing happened, and the kernel would keep the old
+# names. /src is frozen so that the rename sits inside its backing syscall
+# (phase 1 already committed) while the database lock is taken.
+echo p3 >"$MNT/p3_a"
+if "$TESTUTIL" fsfreeze "$SRC" freeze; then
+	mv "$MNT/p3_a" "$MNT/p3_b" 2>/tmp/p3_mv.err &
+	MV_PID=$!
+	sleep 1
+	"$TESTUTIL" sqlite-lock "$DB" 8 >/tmp/p3_lock.out 2>&1 &
+	LOCK_PID=$!
+	i=0
+	while [ "$i" -lt 10 ] && ! grep -q READY /tmp/p3_lock.out 2>/dev/null; do
+		i=$((i + 1))
+		sleep 1
+	done
+	"$TESTUTIL" fsfreeze "$SRC" thaw
+	wait "$MV_PID"
+	mv_rc=$?
+	wait "$LOCK_PID" 2>/dev/null || true
+	if [ -e "$SRC/p3_b" ] && [ ! -e "$SRC/p3_a" ]; then
+		pass phase3-failure-renamed-src
+	else
+		fail phase3-failure-renamed-src "the backing rename did not happen"
+	fi
+	if [ "$mv_rc" -eq 0 ] && [ -e "$MNT/p3_b" ] && [ ! -e "$MNT/p3_a" ]; then
+		pass phase3-failure-still-succeeds
+	else
+		fail phase3-failure-still-succeeds "mv rc=$mv_rc ($(cat /tmp/p3_mv.err)); mnt: $(ls "$MNT" | grep p3_)"
+	fi
+else
+	skip phase3-failure-still-succeeds "cannot freeze $SRC"
+fi
+
 exit "$FAILED"
