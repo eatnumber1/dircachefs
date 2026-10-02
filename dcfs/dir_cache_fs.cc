@@ -23,6 +23,7 @@
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
 #include "dcfs/context.h"
+#include "dcfs/credentials.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/ret_check.h"
@@ -365,6 +366,7 @@ absl::Status DirCacheFS::Setattr(
   // handle for whatever access each change needs (even when this inode has
   // a shared, possibly O_RDWR, backing fd open).
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
   // Phase 1 of the write-through rule (see backing.cc's file comment):
   // mark the cached attributes, and the xattrs the backing filesystem
@@ -377,7 +379,8 @@ absl::Status DirCacheFS::Setattr(
                         cache::BeginAttrChange(ctx_, id, side_effects));
 
   // Phase 2: the syscall(s) themselves.
-  absl::Status set_status = backing::SetAttr(ctx_, id, *attr, to_set);
+  absl::Status set_status =
+      backing::SetAttr(ctx_, caller, id, *attr, to_set);
   // Phase 3 is refreshes only, which run as ordinary fills.
   mutation.End();
   if (!set_status.ok()) {
@@ -472,10 +475,11 @@ absl::Status DirCacheFS::Mknod(
     FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
     mode_t mode, dev_t rdev) {
   InodeId parent = static_cast<InodeId>(parent_ino);
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
       CreateChild(parent, name, [&](int parent_fd) {
-        return backing::MknodAt(ctx_, parent_fd, name, mode, rdev);
+        return backing::MknodAt(ctx_, caller, parent_fd, name, mode, rdev);
       }));
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
   return req.ReplyEntry(
@@ -488,10 +492,11 @@ absl::Status DirCacheFS::Mkdir(
     FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
     mode_t mode) {
   InodeId parent = static_cast<InodeId>(parent_ino);
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
       CreateChild(parent, name, [&](int parent_fd) {
-        return backing::MkdirAt(ctx_, parent_fd, name, mode);
+        return backing::MkdirAt(ctx_, caller, parent_fd, name, mode);
       }));
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
   return req.ReplyEntry(
@@ -524,6 +529,7 @@ absl::Status DirCacheFS::RemoveChild(
     FuseRequest &req, InodeId parent, std::string_view name, bool is_dir) {
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
   // The child's id is needed for phase 3 (its row's fate depends on its
   // remaining link count), so an uncached name is resolved first.
@@ -545,7 +551,8 @@ absl::Status DirCacheFS::RemoveChild(
   // error is returned as is, after a best-effort re-resolve (see
   // ReresolveAfterFailure).
   if (absl::Status status =
-          backing::UnlinkAt(ctx_, parent, name, is_dir ? AT_REMOVEDIR : 0);
+          backing::UnlinkAt(ctx_, caller, parent, name,
+                            is_dir ? AT_REMOVEDIR : 0);
       !status.ok()) {
     mutation.End();
     ReresolveAfterFailure(parent, names);
@@ -576,10 +583,11 @@ absl::Status DirCacheFS::Symlink(
     FuseRequest &req, std::string_view link, fuse_ino_t parent_ino,
     std::string_view name) {
   InodeId parent = static_cast<InodeId>(parent_ino);
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
       CreateChild(parent, name, [&](int parent_fd) {
-        return backing::SymlinkAt(ctx_, parent_fd, name, link);
+        return backing::SymlinkAt(ctx_, caller, parent_fd, name, link);
       }));
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
   return req.ReplyEntry(
@@ -602,6 +610,7 @@ absl::Status DirCacheFS::Rename(
   // Missing row -> ESTALE for both parents; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
   ABSL_RETURN_IF_ERROR(RequireAttr(newparent).status());
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
   ABSL_ASSIGN_OR_RETURN(cache::LookupResult src,
                         backing::LookupOrPopulate(ctx_, parent, name));
@@ -639,7 +648,8 @@ absl::Status DirCacheFS::Rename(
   // for RENAME_NOREPLACE, ...) the error is returned unchanged, after a
   // best-effort re-resolve (see ReresolveAfterFailure).
   if (absl::Status status =
-          backing::RenameAt(ctx_, parent, name, newparent, newname, flags);
+          backing::RenameAt(ctx_, caller, parent, name, newparent, newname,
+                            flags);
       !status.ok()) {
     mutation.End();
     ReresolveAfterFailure(parent, names);
@@ -1267,6 +1277,7 @@ absl::Status DirCacheFS::Setxattr(
   InodeId id = static_cast<InodeId>(ino);
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
   // Phase 1: mark this one xattr unknown, not the whole set (see
   // cache::ForgetXattr), and the attributes (setxattr(2) bumps ctime).
@@ -1278,7 +1289,7 @@ absl::Status DirCacheFS::Setxattr(
   // XATTR_REPLACE in `flags`, and EPERM for "user." on a symlink or
   // special file, pass straight through from the real syscall.
   absl::StatusOr<backing::XattrReadBack> stored =
-      backing::SetXattr(ctx_, id, name, value, flags, OpenFdOf(id));
+      backing::SetXattr(ctx_, caller, id, name, value, flags, OpenFdOf(id));
   if (!stored.ok()) {
     mutation.End();
     // `name` stays unknown (the syscall may or may not have changed it),
@@ -1374,6 +1385,7 @@ absl::Status DirCacheFS::Removexattr(
   InodeId id = static_cast<InodeId>(ino);
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
   // Phase 1, as Setxattr.
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
@@ -1382,7 +1394,7 @@ absl::Status DirCacheFS::Removexattr(
   // Phase 2: ENODATA (already removed, or never existed) passes straight
   // through from the real syscall.
   absl::Status remove_status =
-      backing::RemoveXattr(ctx_, id, name, OpenFdOf(id));
+      backing::RemoveXattr(ctx_, caller, id, name, OpenFdOf(id));
   if (!remove_status.ok()) {
     mutation.End();
     // As Setxattr: `name` stays unknown.
@@ -1425,12 +1437,14 @@ absl::Status DirCacheFS::Create(
   // already marked unknown, in the same transaction, and the inode joins
   // open_for_write_ before the reply.
   bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
       CreateChild(
           parent, name,
           [&](int parent_fd) -> absl::Status {
-            return backing::CreateAt(ctx_, parent_fd, name, fi.flags, mode)
+            return backing::CreateAt(ctx_, caller, parent_fd, name, fi.flags,
+                                     mode)
                 .status();
           },
           writable));

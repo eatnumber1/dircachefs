@@ -31,6 +31,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/context.h"
+#include "dcfs/credentials.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
 #include "dcfs/file_handle.h"
@@ -997,6 +998,113 @@ TEST_F(BackingTest, ParentOfAnUnknownDentryIsResolvedFromTheBacking) {
   EXPECT_TRUE(S_ISDIR(attr.st.st_mode));
   EXPECT_EQ(attr.backing_ino, StatPath(Path("dir")).stx_ino);
   EXPECT_THAT(ParentOf(ctx_, sub), IsOkAndHolds(parent));
+}
+
+
+// --- Taking on the caller's identity (step 4.7) ------------------------------
+
+// A parent directory for the credential tests: `mode`, owned by root and
+// group `gid`, opened as the create-family functions expect.
+FileDescriptor MakeParent(const std::string &path, mode_t mode, gid_t gid) {
+  EXPECT_EQ(::mkdir(path.c_str(), 0), 0) << std::strerror(errno);
+  EXPECT_EQ(::chown(path.c_str(), 0, gid), 0) << std::strerror(errno);
+  EXPECT_EQ(::chmod(path.c_str(), mode), 0) << std::strerror(errno);
+  int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  EXPECT_GE(fd, 0) << std::strerror(errno);
+  return FileDescriptor(fd);
+}
+
+// The thread is root again after every switch: fsuid/fsgid 0 and the
+// supplementary groups it started with.
+void ExpectRootAgain(const std::vector<gid_t> &groups) {
+  EXPECT_EQ(syscalls::fsuid(), 0u);
+  EXPECT_EQ(syscalls::fsgid(), 0u);
+  EXPECT_THAT(syscalls::getgroups(), IsOkAndHolds(groups));
+}
+
+TEST_F(BackingTest, CreateFamilyRunsAsTheCaller) {
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  FileDescriptor parent = MakeParent(Path("pub"), 0777, 0);
+  const Credentials alice{.uid = 1000, .gid = 1000, .groups = {1000}};
+
+  ASSERT_THAT(MkdirAt(ctx_, alice, *parent, "d", 0755), IsOk());
+  ASSERT_THAT(MknodAt(ctx_, alice, *parent, "p", S_IFIFO | 0644, 0), IsOk());
+  ASSERT_THAT(SymlinkAt(ctx_, alice, *parent, "l", "d"), IsOk());
+  ASSERT_THAT(CreateAt(ctx_, alice, *parent, "f", O_WRONLY, 0644), IsOk());
+  for (const char *name : {"d", "p", "l", "f"}) {
+    struct statx stx = StatPath(Path(absl::StrCat("pub/", name)));
+    EXPECT_EQ(stx.stx_uid, 1000u) << name;
+    EXPECT_EQ(stx.stx_gid, 1000u) << name;
+  }
+  ExpectRootAgain(groups);
+}
+
+TEST_F(BackingTest, CallerGetsNoFilesystemCapabilities) {
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  // Root's 0755 directory: root may create in it, the caller may not (no
+  // CAP_DAC_OVERRIDE while fsuid is not 0).
+  FileDescriptor parent = MakeParent(Path("rootonly"), 0755, 0);
+  const Credentials alice{.uid = 1000, .gid = 1000, .groups = {}};
+  EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, alice, *parent, "d", 0755)), EACCES);
+  EXPECT_EQ(ErrnoOf(CreateAt(ctx_, alice, *parent, "f", O_WRONLY, 0644)
+                        .status()),
+            EACCES);
+  ExpectRootAgain(groups);
+  // ... and root is root again: the same mkdir now succeeds.
+  const Credentials root{.uid = 0, .gid = 0, .groups = {}};
+  EXPECT_THAT(MkdirAt(ctx_, root, *parent, "d", 0755), IsOk());
+}
+
+TEST_F(BackingTest, CallerSupplementaryGroupsApply) {
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  FileDescriptor parent = MakeParent(Path("grp"), 0770, 2000);
+  const Credentials member{.uid = 1000, .gid = 1000, .groups = {1000, 2000}};
+  const Credentials outsider{.uid = 1000, .gid = 1000, .groups = {1000}};
+  EXPECT_THAT(MkdirAt(ctx_, member, *parent, "in", 0755), IsOk());
+  EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, outsider, *parent, "out", 0755)), EACCES);
+  ExpectRootAgain(groups);
+}
+
+TEST_F(BackingTest, SetgidParentGroupIsInherited) {
+  FileDescriptor parent = MakeParent(Path("sgid"), 02777, 2000);
+  const Credentials alice{.uid = 1000, .gid = 1000, .groups = {1000}};
+  ASSERT_THAT(MkdirAt(ctx_, alice, *parent, "d", 0755), IsOk());
+  struct statx stx = StatPath(Path("sgid/d"));
+  EXPECT_EQ(stx.stx_uid, 1000u);
+  EXPECT_EQ(stx.stx_gid, 2000u);
+  EXPECT_EQ(stx.stx_mode & 07777, 02755);
+}
+
+TEST_F(BackingTest, CallerIdentityThatDoesNotTakeIsRefused) {
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  FileDescriptor parent = MakeParent(Path("pub"), 0777, 0);
+  // -1 is what the kernel would send for an id with no mapping; setfsuid
+  // and setfsgid silently ignore it, so only reading back catches it.
+  const Credentials bad_uid{
+      .uid = static_cast<uid_t>(-1), .gid = 1000, .groups = {}};
+  const Credentials bad_gid{
+      .uid = 1000, .gid = static_cast<gid_t>(-1), .groups = {}};
+  EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, bad_uid, *parent, "d", 0755)), EPERM);
+  ExpectRootAgain(groups);
+  EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, bad_gid, *parent, "d", 0755)), EPERM);
+  ExpectRootAgain(groups);
+  EXPECT_EQ(::access(Path("pub/d").c_str(), F_OK), -1);
+}
+
+TEST_F(BackingTest, UnlinkAndRenameHonorTheStickyBit) {
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  FileDescriptor sticky = MakeParent(Path("sticky"), 01777, 0);
+  const Credentials alice{.uid = 1000, .gid = 1000, .groups = {}};
+  const Credentials bob{.uid = 1001, .gid = 1001, .groups = {}};
+  ASSERT_THAT(CreateAt(ctx_, bob, *sticky, "bf", O_WRONLY, 0644), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId dir, Id("sticky"));
+
+  EXPECT_EQ(ErrnoOf(UnlinkAt(ctx_, alice, dir, "bf", 0)), EPERM);
+  EXPECT_EQ(ErrnoOf(RenameAt(ctx_, alice, dir, "bf", dir, "stolen", 0)),
+            EPERM);
+  EXPECT_THAT(RenameAt(ctx_, bob, dir, "bf", dir, "bf2", 0), IsOk());
+  EXPECT_THAT(UnlinkAt(ctx_, bob, dir, "bf2", 0), IsOk());
+  ExpectRootAgain(groups);
 }
 
 }  // namespace

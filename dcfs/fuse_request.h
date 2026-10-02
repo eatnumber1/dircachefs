@@ -18,6 +18,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "dcfs/credentials.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
@@ -74,6 +75,17 @@ class FuseRequest {
   FuseRequest(const FuseRequest &) = delete;
   FuseRequest &operator=(FuseRequest &&);
   FuseRequest &operator=(const FuseRequest &) = delete;
+
+  // The caller's filesystem identity: the uid/gid the kernel sent with the
+  // request (fuse_req_ctx) and the calling thread's supplementary groups
+  // (fuse_req_getgroups, which reads them from /proc/<tid>/task/<tid>/status
+  // -- the kernel does not send them). If the groups cannot be read (the
+  // caller already exited, or lives in a pid namespace the daemon cannot
+  // see, where the kernel sends pid 0), the result has NO supplementary
+  // groups: never more than the caller has, at worst a spurious EACCES for
+  // access granted only through one of them. Does not consume the request;
+  // must be called before a Reply*.
+  absl::StatusOr<Credentials> Caller() const;
 
   // Fills in a fuse_entry_param from `attr` and replies with it.
   absl::Status ReplyEntry(

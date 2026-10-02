@@ -18,6 +18,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "dcfs/context.h"
+#include "dcfs/credentials.h"
 #include "dcfs/fd.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
@@ -27,6 +28,13 @@
 // population policy lives. Everything above it reads the metadata cache;
 // everything here does its I/O first and then records the result in ONE
 // short cache transaction, never issuing a syscall inside a transaction.
+//
+// Backing syscalls whose outcome depends on who makes them -- creating an
+// object (its owner and group), removing or renaming an entry (sticky
+// directories), chown, utimes, truncate, setxattr/removexattr -- are made
+// with the thread's filesystem credentials switched to the FUSE caller's
+// (the `caller` argument; see backing.cc's AsCaller); everything else,
+// including reaching the object by handle, runs as root.
 //
 // After startup no paths are used: objects are reopened from their cached
 // file handles (FileHandle::Open) and children are reached with openat()
@@ -201,14 +209,19 @@ using XattrReadBack = absl::StatusOr<std::optional<std::string>>;
 // EPERM; that happens inside the real syscall here and needs no special
 // casing.
 //
+// The setxattr/removexattr itself runs as `caller` (AsCaller): the kernel
+// checks the user.* write permission and, for an ACL, clears setgid from
+// the mode for a caller outside the file's group, by the caller's
+// credentials. Reaching the object and the read-back run as root.
+//
 // SetXattr's error is the setxattr's; on success it returns the read-back
 // (see XattrReadBack), which phase 3 records instead of `value`.
-absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, InodeId id,
-                                       std::string_view name,
+absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, const Credentials &caller,
+                                       InodeId id, std::string_view name,
                                        std::string_view value, int flags,
                                        std::optional<int> open_fd);
-absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name,
-                         std::optional<int> open_fd);
+absl::Status RemoveXattr(Context &ctx, const Credentials &caller, InodeId id,
+                         std::string_view name, std::optional<int> open_fd);
 
 // The statvfs of the filesystem `id` lives on, from that filesystem's mount
 // fd -- no handle open of `id` itself is needed.
@@ -294,23 +307,27 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
                                         bool open_for_write = false);
 
 // mkdirat(2)/mknodat(2)/symlinkat(2) of `name` inside the already-open
-// `parent_fd`. The kernel applies umask to `mode` before it reaches us, so
-// it is passed straight through.
-absl::Status MkdirAt(Context &ctx, int parent_fd, std::string_view name,
-                     mode_t mode);
-absl::Status MknodAt(Context &ctx, int parent_fd, std::string_view name,
-                     mode_t mode, dev_t rdev);
-absl::Status SymlinkAt(Context &ctx, int parent_fd, std::string_view name,
-                       std::string_view target);
+// `parent_fd`, as `caller` (AsCaller): the new object is the caller's, with
+// the caller's fsgid as its group unless the parent is setgid, and the
+// caller needs write and search permission on the parent. The kernel
+// applies umask to `mode` before it reaches us, so it is passed straight
+// through.
+absl::Status MkdirAt(Context &ctx, const Credentials &caller, int parent_fd,
+                     std::string_view name, mode_t mode);
+absl::Status MknodAt(Context &ctx, const Credentials &caller, int parent_fd,
+                     std::string_view name, mode_t mode, dev_t rdev);
+absl::Status SymlinkAt(Context &ctx, const Credentials &caller, int parent_fd,
+                       std::string_view name, std::string_view target);
 
 // openat(2) of `name` inside the already-open `parent_fd`, with O_CREAT
 // added to whatever the kernel sent in `flags` (which already carries
 // O_EXCL when the caller asked for it); the returned fd is the new file,
 // open exactly as the caller requested, ready for DirCacheFS::Create to
-// hand to PassthroughOpen.
-absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, int parent_fd,
-                                        std::string_view name, int flags,
-                                        mode_t mode);
+// hand to PassthroughOpen. As `caller`, like MkdirAt (and, if `name`
+// already exists without O_EXCL, opened with the caller's permissions).
+absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, const Credentials &caller,
+                                        int parent_fd, std::string_view name,
+                                        int flags, mode_t mode);
 
 // linkat(2) of `src` as `newname` inside `newparent`: opens `src` O_PATH and
 // `newparent` real/O_RDONLY|O_DIRECTORY internally (both via OpenNode) and
@@ -319,6 +336,13 @@ absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, int parent_fd,
 // AT_EMPTY_PATH/oldpath="" form on an O_PATH fd. Whatever linkat(2) itself
 // returns is returned unchanged, including EXDEV for a cross-filesystem
 // link.
+//
+// Runs as root, not as the caller: the AT_EMPTY_PATH form needs
+// CAP_DAC_READ_SEARCH, which a caller's fsuid would drop. Nothing about a
+// new link depends on who made it (no new inode, owner or group), and the
+// permission rules (write/search on `newparent`, protected_hardlinks) have
+// already been applied to the real caller by the kernel on the FUSE side
+// (default_permissions; may_linkat) before the request was sent.
 absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
                     std::string_view newname);
 
@@ -340,19 +364,22 @@ absl::StatusOr<struct statx> RecordNewLink(Context &ctx,
 // each with its phase-1 MarkUnknown and phase-3 record transactions.
 
 // unlinkat(2) of `name` inside `parent` (opened O_RDONLY|O_DIRECTORY via
-// OpenNode). `flags` is 0 or AT_REMOVEDIR. Whatever unlinkat(2) returns is
-// returned unchanged (ENOTEMPTY, EBUSY for a mount point, ...).
-absl::Status UnlinkAt(Context &ctx, InodeId parent, std::string_view name,
-                      int flags);
+// OpenNode), as `caller` (AsCaller: write permission on `parent`, and the
+// sticky-directory rule, are the caller's). `flags` is 0 or AT_REMOVEDIR.
+// Whatever unlinkat(2) returns is returned unchanged (ENOTEMPTY, EBUSY for
+// a mount point, ...).
+absl::Status UnlinkAt(Context &ctx, const Credentials &caller, InodeId parent,
+                      std::string_view name, int flags);
 
 // renameat2(2) of `parent`/`name` to `newparent`/`newname`, with both
-// parents opened O_RDONLY|O_DIRECTORY via OpenNode. `flags` is passed
+// parents opened O_RDONLY|O_DIRECTORY via OpenNode, as `caller` (as
+// UnlinkAt, for both directories). `flags` is passed
 // through unchanged (0, RENAME_NOREPLACE or RENAME_EXCHANGE -- the caller
 // validates it). Whatever renameat2(2) returns is returned unchanged,
 // including EXDEV when the two parents are on different filesystems.
-absl::Status RenameAt(Context &ctx, InodeId parent, std::string_view name,
-                      InodeId newparent, std::string_view newname,
-                      unsigned flags);
+absl::Status RenameAt(Context &ctx, const Credentials &caller, InodeId parent,
+                      std::string_view name, InodeId newparent,
+                      std::string_view newname, unsigned flags);
 
 // The backing link count of `id` (OpenNode O_PATH|O_NOFOLLOW + statx), or
 // nullopt if the object no longer exists at all: its handle no longer
@@ -432,8 +459,21 @@ absl::Status FinishRun(Context &ctx);
 // except that both are unremarkable on a symlink (unlike mode); size is
 // only ever valid for a regular file -- EISDIR/EINVAL otherwise, as the
 // kernel itself would report.
-absl::Status SetAttr(
-    Context &ctx, InodeId id, const struct stat &attr, int to_set);
+//
+// Credentials: the chown, the utimes and the ftruncate run as `caller`
+// (AsCaller) -- chown's and utimes's rules, and whether a truncate or chown
+// clears setuid/setgid, are decided for the caller. The ftruncate's fd is
+// still reopened as root (a truncate needs no permission beyond the one the
+// kernel checked on the FUSE side, and ftruncate of an fd the caller opened
+// for writing must work even if the file's mode no longer grants it). The
+// chmod runs as root: the kernel itself sends a mode change to clear
+// setuid/setgid after a truncate or chown by a non-owner (fuse_setattr's
+// killpriv, on the caller's behalf), which the caller's own chmod would be
+// refused; a chmod the caller asked for has already been checked by the
+// kernel (setattr_prepare, including clearing setgid for a caller outside
+// the file's group) before it is sent.
+absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
+                     const struct stat &attr, int to_set);
 
 }  // namespace dcfs::backing
 

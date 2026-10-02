@@ -185,10 +185,16 @@ qemu_cc_test(
 )
 
 cc_library(
+    name = "credentials",
+    hdrs = ["credentials.h"],
+)
+
+cc_library(
     name = "fuse_request",
     hdrs = ["fuse_request.h"],
     srcs = ["fuse_request.cc"],
     deps = [
+      ":credentials",
       ":ret_check",
       ":syscalls",
       ":status",
@@ -352,6 +358,7 @@ cc_library(
     hdrs = ["dir_cache_fs.h"],
     deps = [
       ":backing",
+      ":credentials",
       ":context",
       ":fuse_request",
       ":metadata_cache",
@@ -572,6 +579,7 @@ cc_library(
     hdrs = ["backing.h"],
     deps = [
       ":context",
+      ":credentials",
       ":device_id",
       ":file_handle",
       ":metadata_cache",
@@ -579,9 +587,11 @@ cc_library(
       ":ret_check",
       ":status",
       ":syscalls",
+      "@absl//absl/cleanup",
       "@absl//absl/container:flat_hash_map",
       "@absl//absl/container:flat_hash_set",
       "@absl//absl/log",
+      "@absl//absl/log:check",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",

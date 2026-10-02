@@ -85,6 +85,25 @@ mounting dcfs over the directory it caches a supported configuration.
 4. Handles are stored serialized, together with their device id, and are
    the only durable reference to a backing object.
 
+## Caller identity
+
+dcfs runs as root, but every backing syscall whose result depends on who
+makes it is made as the FUSE caller: the thread's filesystem uid/gid are
+switched (`setfsuid`/`setfsgid`, plus the caller's supplementary groups
+via the per-thread raw `setgroups` system call) around just that syscall
+and switched back to root after it (`AsCaller` in `dcfs/backing.cc`).
+That covers creating objects (`mkdirat`, `mknodat`, `symlinkat`,
+`openat(O_CREAT)`: the caller owns them, and setgid directories pass their
+group on), `unlinkat` and `renameat2` (sticky directories), and chown,
+utimes, truncate, setxattr and removexattr. While fsuid is not 0 the
+kernel drops the filesystem capabilities, so reaching objects by handle
+(`open_by_handle_at`, which needs `CAP_DAC_READ_SEARCH`), `linkat` with
+`AT_EMPTY_PATH`, chmod (which the kernel also sends on a caller's behalf
+to clear setuid/setgid) and every probe stay root. The mount always uses
+`default_permissions`, so the kernel has already checked the caller's
+permissions against the cached attributes before a request arrives; see
+the comments at `AsCaller` and `backing::SetAttr` for the full reasoning.
+
 ## Filesystem identity and the startup purge
 
 Filesystem identity is the filesystem UUID from `ioctl(fd,

@@ -13,12 +13,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
+#include <type_traits>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -27,6 +31,7 @@
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "dcfs/context.h"
+#include "dcfs/credentials.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
 #include "dcfs/file_handle.h"
@@ -52,6 +57,99 @@ constexpr size_t kDirentBufferBytes = 64 * 1024;
 
 int ErrnoOf(const absl::Status &status) {
   return GetErrnoFromStatus(status).value_or(0);
+}
+
+// --- Taking on the caller's identity -----------------------------------------
+//
+// dcfs runs as root, but a backing syscall made on behalf of a FUSE request
+// must behave as if the caller had made it: a new object must be owned by
+// the caller (and get its group from the caller's fsgid, or from a setgid
+// parent), chown/utimes/truncate/xattr rules must be decided for the
+// caller, and a sticky directory must protect other users' entries from
+// it. So the syscalls whose outcome depends on who asks run inside
+// AsCaller, which switches the thread's filesystem credentials to the
+// caller's for just that syscall -- the approach virtiofsd and nfsd take.
+//
+// Only the one syscall: never the open_by_handle_at (OpenNode) or /proc
+// reopen (ReopenPathFd) that reaches the object first, nor the phase-3
+// probes after it. open_by_handle_at needs CAP_DAC_READ_SEARCH, which the
+// kernel removes from the effective set while fsuid is not 0 (together
+// with every other filesystem capability: CAP_CHOWN, CAP_DAC_OVERRIDE,
+// CAP_FOWNER, CAP_FSETID, CAP_LINUX_IMMUTABLE, CAP_MAC_OVERRIDE, CAP_MKNOD;
+// cap_task_fix_setuid), and restores when it returns to 0. Reaching the
+// object is dcfs's own business (identity-checked by OpenNode); what the
+// caller may do to it is the kernel's, and default_permissions has the
+// kernel check that on the FUSE side too before the request is even sent.
+// Capabilities outside that set (CAP_SYS_ADMIN, CAP_SETFCAP, ...) stay:
+// the kernel has already checked the real caller for those on the FUSE
+// side (trusted.*/security.* xattrs), and the kernel's own killpriv
+// removal of security.capability, sent as the caller, needs CAP_SETFCAP.
+//
+// The switch is per thread: setfsuid/setfsgid are, and so is the raw
+// setgroups system call (glibc's setgroups() is not: it signals every
+// thread to apply it process-wide). dcfs serves requests on one thread
+// today; with one thread per io_uring queue later, each thread switches
+// only itself, so this stays correct as long as a switch never spans a
+// suspension point (a co_await) -- AsCaller wraps one synchronous syscall.
+
+// The thread's supplementary groups before a switch, to restore after it.
+using SavedGroups = std::vector<gid_t>;
+
+// Puts the thread's credentials back after a switch. Cannot fail for a
+// process whose effective uid is root; if it somehow did, carrying on
+// would perform every later backing operation as the wrong user, so that
+// is fatal.
+void RestoreRoot(const SavedGroups &groups) {
+  syscalls::setfsuid(0);
+  absl::Status status = syscalls::setgroups_thread(groups);
+  syscalls::setfsgid(0);
+  CHECK(status.ok() && syscalls::fsuid() == 0 && syscalls::fsgid() == 0)
+      << "cannot restore root filesystem credentials: " << status
+      << " (fsuid " << syscalls::fsuid() << ", fsgid " << syscalls::fsgid()
+      << ")";
+}
+
+// Switches to `caller`: fsgid and groups first (setgroups needs
+// CAP_SETGID, which a nonzero fsuid would not remove, but the order keeps
+// the thread from ever being "the caller" with root's groups), fsuid last.
+// setfsuid/setfsgid report no errors (an id the kernel will not accept --
+// e.g. -1, sent for a caller whose id has no mapping -- is silently
+// ignored), so each is read back; a switch that did not take is EPERM,
+// with the thread restored. Refuses to nest: a thread not at fsuid/fsgid 0
+// on entry means an earlier switch leaked.
+absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
+  RET_CHECK_EQ(syscalls::fsuid(), 0u) << "credential switch already active";
+  RET_CHECK_EQ(syscalls::fsgid(), 0u) << "credential switch already active";
+  ABSL_ASSIGN_OR_RETURN(SavedGroups saved, syscalls::getgroups());
+  absl::Status status;
+  syscalls::setfsgid(caller.gid);
+  if (syscalls::fsgid() != caller.gid) {
+    status = dcfs::ErrnoToStatus(
+        EPERM, absl::StrCat("setfsgid(", caller.gid, ") did not take"));
+  }
+  if (status.ok()) status = syscalls::setgroups_thread(caller.groups);
+  if (status.ok()) {
+    syscalls::setfsuid(caller.uid);
+    if (syscalls::fsuid() != caller.uid) {
+      status = dcfs::ErrnoToStatus(
+          EPERM, absl::StrCat("setfsuid(", caller.uid, ") did not take"));
+    }
+  }
+  if (!status.ok()) {
+    RestoreRoot(saved);
+    return status;
+  }
+  return saved;
+}
+
+// Runs `op` (one backing syscall, returning absl::Status or
+// absl::StatusOr<T>) with the thread's filesystem credentials switched to
+// `caller`, and switches back to root afterwards, whatever `op` returned.
+template <typename Op>
+std::invoke_result_t<Op> AsCaller(const Credentials &caller, Op &&op) {
+  ABSL_ASSIGN_OR_RETURN(SavedGroups saved, SwitchTo(caller));
+  absl::Cleanup restore = [&saved] { RestoreRoot(saved); };
+  return std::forward<Op>(op)();
 }
 
 // The mount id statx reported, or nullopt if it reported none. The unique
@@ -685,8 +783,8 @@ absl::Status ApplyXattrOp(Context &ctx, InodeId id, std::optional<int> open_fd,
 
 }  // namespace
 
-absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, InodeId id,
-                                       std::string_view name,
+absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, const Credentials &caller,
+                                       InodeId id, std::string_view name,
                                        std::string_view value, int flags,
                                        std::optional<int> open_fd) {
   std::span<const uint8_t> value_bytes(
@@ -694,20 +792,32 @@ absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, InodeId id,
   XattrReadBack read_back = std::nullopt;
   ABSL_RETURN_IF_ERROR(ApplyXattrOp(
       ctx, id, open_fd, name,
-      [&](int fd) { return syscalls::fsetxattr(fd, name, value_bytes, flags); },
       [&](int fd) {
-        return syscalls::setxattr_opath(fd, name, value_bytes, flags);
+        return AsCaller(caller, [&] {
+          return syscalls::fsetxattr(fd, name, value_bytes, flags);
+        });
+      },
+      [&](int fd) {
+        return AsCaller(caller, [&] {
+          return syscalls::setxattr_opath(fd, name, value_bytes, flags);
+        });
       },
       &read_back));
   return read_back;
 }
 
-absl::Status RemoveXattr(Context &ctx, InodeId id, std::string_view name,
-                         std::optional<int> open_fd) {
+absl::Status RemoveXattr(Context &ctx, const Credentials &caller, InodeId id,
+                         std::string_view name, std::optional<int> open_fd) {
   return ApplyXattrOp(
       ctx, id, open_fd, name,
-      [&](int fd) { return syscalls::fremovexattr(fd, name); },
-      [&](int fd) { return syscalls::removexattr_opath(fd, name); });
+      [&](int fd) {
+        return AsCaller(caller,
+                        [&] { return syscalls::fremovexattr(fd, name); });
+      },
+      [&](int fd) {
+        return AsCaller(caller,
+                        [&] { return syscalls::removexattr_opath(fd, name); });
+      });
 }
 
 absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id) {
@@ -1082,25 +1192,31 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
   return result;
 }
 
-absl::Status MkdirAt(Context &ctx, int parent_fd, std::string_view name,
-                     mode_t mode) {
-  return syscalls::mkdirat(parent_fd, name, mode);
+absl::Status MkdirAt(Context &ctx, const Credentials &caller, int parent_fd,
+                     std::string_view name, mode_t mode) {
+  return AsCaller(caller,
+                  [&] { return syscalls::mkdirat(parent_fd, name, mode); });
 }
 
-absl::Status MknodAt(Context &ctx, int parent_fd, std::string_view name,
-                     mode_t mode, dev_t rdev) {
-  return syscalls::mknodat(parent_fd, name, mode, rdev);
+absl::Status MknodAt(Context &ctx, const Credentials &caller, int parent_fd,
+                     std::string_view name, mode_t mode, dev_t rdev) {
+  return AsCaller(caller, [&] {
+    return syscalls::mknodat(parent_fd, name, mode, rdev);
+  });
 }
 
-absl::Status SymlinkAt(Context &ctx, int parent_fd, std::string_view name,
-                       std::string_view target) {
-  return syscalls::symlinkat(target, parent_fd, name);
+absl::Status SymlinkAt(Context &ctx, const Credentials &caller, int parent_fd,
+                       std::string_view name, std::string_view target) {
+  return AsCaller(caller,
+                  [&] { return syscalls::symlinkat(target, parent_fd, name); });
 }
 
-absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, int parent_fd,
-                                        std::string_view name, int flags,
-                                        mode_t mode) {
-  return syscalls::openat(parent_fd, name, flags | O_CREAT, mode);
+absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, const Credentials &caller,
+                                        int parent_fd, std::string_view name,
+                                        int flags, mode_t mode) {
+  return AsCaller(caller, [&] {
+    return syscalls::openat(parent_fd, name, flags | O_CREAT, mode);
+  });
 }
 
 absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
@@ -1128,21 +1244,24 @@ absl::StatusOr<struct statx> RecordNewLink(Context &ctx,
   return stx;
 }
 
-absl::Status UnlinkAt(Context &ctx, InodeId parent, std::string_view name,
-                      int flags) {
+absl::Status UnlinkAt(Context &ctx, const Credentials &caller, InodeId parent,
+                      std::string_view name, int flags) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor parent_fd,
                         OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
-  return syscalls::unlinkat(*parent_fd, name, flags);
+  return AsCaller(caller,
+                  [&] { return syscalls::unlinkat(*parent_fd, name, flags); });
 }
 
-absl::Status RenameAt(Context &ctx, InodeId parent, std::string_view name,
-                      InodeId newparent, std::string_view newname,
-                      unsigned flags) {
+absl::Status RenameAt(Context &ctx, const Credentials &caller, InodeId parent,
+                      std::string_view name, InodeId newparent,
+                      std::string_view newname, unsigned flags) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor parent_fd,
                         OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
   ABSL_ASSIGN_OR_RETURN(FileDescriptor newparent_fd,
                         OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
-  return syscalls::renameat2(*parent_fd, name, *newparent_fd, newname, flags);
+  return AsCaller(caller, [&] {
+    return syscalls::renameat2(*parent_fd, name, *newparent_fd, newname, flags);
+  });
 }
 
 absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
@@ -1264,6 +1383,10 @@ namespace {
 // fd when the node is a regular file or directory (fchmod rejects O_PATH),
 // else fchmod_opath -- except a symlink, which cannot be chmod'd at all on
 // Linux (no lchmod).
+//
+// Runs as root, not AsCaller (see SetAttr's declaration comment): the
+// kernel itself sends a mode change to kill setuid/setgid after a truncate
+// or chown by a non-owner (fuse_setattr), which the caller could not make.
 absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   if (S_ISLNK(type)) {
     return dcfs::ErrnoToStatus(EOPNOTSUPP, "chmod on a symlink");
@@ -1281,7 +1404,8 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
 // FUSE_SET_ATTR_SIZE: only ever valid for a regular file, same as the
 // kernel's own VFS-level check (notify_change() rejects ATTR_SIZE on
 // anything else before a filesystem ever sees it).
-absl::Status ApplySize(int opath_fd, mode_t type, off_t size) {
+absl::Status ApplySize(const Credentials &caller, int opath_fd, mode_t type,
+                       off_t size) {
   if (S_ISDIR(type)) {
     return dcfs::ErrnoToStatus(EISDIR, "truncate on a directory");
   }
@@ -1291,34 +1415,36 @@ absl::Status ApplySize(int opath_fd, mode_t type, off_t size) {
   }
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor fd, syscalls::ReopenPathFd(opath_fd, O_WRONLY | O_CLOEXEC));
-  return syscalls::ftruncate(*fd, size);
+  return AsCaller(caller, [&] { return syscalls::ftruncate(*fd, size); });
 }
 
 // FUSE_SET_ATTR_ATIME/MTIME(_NOW): the regular/dir-vs-other-types split as
 // ApplyMode, but with no symlink exception -- futimens_opath is verified
 // safe there (see syscalls.h).
-absl::Status ApplyTimes(int opath_fd, mode_t type, const struct timespec times[2]) {
+absl::Status ApplyTimes(const Credentials &caller, int opath_fd, mode_t type,
+                        const struct timespec times[2]) {
   if (S_ISREG(type) || S_ISDIR(type)) {
     ABSL_ASSIGN_OR_RETURN(
         FileDescriptor fd,
         syscalls::ReopenPathFd(
             opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
-    return syscalls::futimens(*fd, times);
+    return AsCaller(caller, [&] { return syscalls::futimens(*fd, times); });
   }
-  return syscalls::futimens_opath(opath_fd, times);
+  return AsCaller(caller,
+                  [&] { return syscalls::futimens_opath(opath_fd, times); });
 }
 
 }  // namespace
 
-absl::Status SetAttr(
-    Context &ctx, InodeId id, const struct stat &attr, int to_set) {
+absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
+                     const struct stat &attr, int to_set) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx, syscalls::statx(*fd, "", AT_EMPTY_PATH, STATX_MODE));
   mode_t type = stx.stx_mode & S_IFMT;
 
   if (to_set & FUSE_SET_ATTR_SIZE) {
-    ABSL_RETURN_IF_ERROR(ApplySize(*fd, type, attr.st_size));
+    ABSL_RETURN_IF_ERROR(ApplySize(caller, *fd, type, attr.st_size));
   }
 
   if (to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID)) {
@@ -1327,7 +1453,9 @@ absl::Status SetAttr(
     gid_t gid = (to_set & FUSE_SET_ATTR_GID) ? attr.st_gid
                                              : static_cast<gid_t>(-1);
     // fchownat works on an O_PATH fd via AT_EMPTY_PATH with an empty path.
-    ABSL_RETURN_IF_ERROR(syscalls::fchownat(*fd, "", uid, gid, AT_EMPTY_PATH));
+    ABSL_RETURN_IF_ERROR(AsCaller(caller, [&] {
+      return syscalls::fchownat(*fd, "", uid, gid, AT_EMPTY_PATH);
+    }));
   }
 
   if (to_set & FUSE_SET_ATTR_MODE) {
@@ -1360,7 +1488,7 @@ absl::Status SetAttr(
     } else if (to_set & FUSE_SET_ATTR_MTIME) {
       times[1] = attr.st_mtim;
     }
-    ABSL_RETURN_IF_ERROR(ApplyTimes(*fd, type, times));
+    ABSL_RETURN_IF_ERROR(ApplyTimes(caller, *fd, type, times));
   }
 
   // FUSE_SET_ATTR_CTIME is intentionally never consulted: ctime cannot be

@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -168,6 +169,29 @@ absl::Status FuseRequest::PassthroughClose(int backing_id) {
     return dcfs::ErrnoToStatus(errno, "fuse_passthrough_close");
   }
   return absl::OkStatus();
+}
+
+absl::StatusOr<Credentials> FuseRequest::Caller() const {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  const fuse_ctx *ctx = fuse_req_ctx(*req_);
+  Credentials caller{.uid = ctx->uid, .gid = ctx->gid, .groups = {}};
+  // Usually a handful of groups; fuse_req_getgroups returns the full count
+  // even when it exceeds the buffer, so one retry at the right size
+  // suffices (NGROUPS_MAX is 65536).
+  std::vector<gid_t> groups(32);
+  int n = fuse_req_getgroups(*req_, groups.size(), groups.data());
+  if (n > static_cast<int>(groups.size())) {
+    groups.resize(n);
+    n = fuse_req_getgroups(*req_, groups.size(), groups.data());
+  }
+  if (n < 0 || n > static_cast<int>(groups.size())) {
+    VLOG(1) << "pid " << ctx->pid << ": supplementary groups unreadable ("
+            << (n < 0 ? std::strerror(-n) : "list grew") << "); using none";
+    return caller;
+  }
+  groups.resize(n);
+  caller.groups = std::move(groups);
+  return caller;
 }
 
 absl::Status FuseRequest::ReplyErrno(int errnum) {

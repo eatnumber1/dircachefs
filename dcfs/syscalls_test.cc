@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -487,6 +488,60 @@ TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {
   ASSERT_THAT(a, IsOk());
   ASSERT_THAT(b, IsOk());
   EXPECT_EQ(a->st_ino, b->st_ino);
+}
+
+// The raw setgroups system call changes only the calling thread's groups
+// (glibc's setgroups() would change every thread's), and setfsuid/setfsgid
+// report the previous value, with -1 reading the current one back.
+TEST(SyscallsCredentialsTest, SetgroupsThreadIsPerThread) {
+  absl::StatusOr<std::vector<gid_t>> original = syscalls::getgroups();
+  ASSERT_THAT(original, IsOk());
+  std::vector<gid_t> in_thread;
+  std::vector<gid_t> in_main_meanwhile;
+  std::thread([&] {
+    const gid_t groups[] = {4242, 4243};
+    ASSERT_THAT(syscalls::setgroups_thread(groups), IsOk());
+    absl::StatusOr<std::vector<gid_t>> mine = syscalls::getgroups();
+    ASSERT_THAT(mine, IsOk());
+    in_thread = *mine;
+    // Read the main thread's groups from here, while this thread still
+    // has its own: /proc/self/task/<main tid>/status is not this thread's.
+    std::string status_path =
+        "/proc/self/task/" + std::to_string(::getpid()) + "/status";
+    FILE *f = std::fopen(status_path.c_str(), "r");
+    ASSERT_NE(f, nullptr);
+    char line[512];
+    while (std::fgets(line, sizeof(line), f) != nullptr) {
+      if (std::strncmp(line, "Groups:", 7) != 0) continue;
+      char *p = line + 7;
+      char *end;
+      for (unsigned long g = std::strtoul(p, &end, 10); end != p;
+           g = std::strtoul(p, &end, 10)) {
+        in_main_meanwhile.push_back(static_cast<gid_t>(g));
+        p = end;
+      }
+    }
+    std::fclose(f);
+  }).join();
+  EXPECT_EQ(in_thread, (std::vector<gid_t>{4242, 4243}));
+  std::vector<gid_t> sorted_original = *original;
+  std::sort(sorted_original.begin(), sorted_original.end());
+  std::sort(in_main_meanwhile.begin(), in_main_meanwhile.end());
+  EXPECT_EQ(in_main_meanwhile, sorted_original);
+  EXPECT_THAT(syscalls::getgroups(), absl_testing::IsOkAndHolds(*original));
+}
+
+TEST(SyscallsCredentialsTest, SetfsuidReturnsPreviousAndReadsBack) {
+  ASSERT_EQ(syscalls::fsuid(), 0u);
+  EXPECT_EQ(syscalls::setfsuid(1000), 0u);
+  EXPECT_EQ(syscalls::fsuid(), 1000u);
+  EXPECT_EQ(syscalls::setfsuid(0), 1000u);
+  EXPECT_EQ(syscalls::fsuid(), 0u);
+  ASSERT_EQ(syscalls::fsgid(), 0u);
+  EXPECT_EQ(syscalls::setfsgid(1000), 0u);
+  EXPECT_EQ(syscalls::fsgid(), 1000u);
+  EXPECT_EQ(syscalls::setfsgid(0), 1000u);
+  EXPECT_EQ(syscalls::fsgid(), 0u);
 }
 
 }  // namespace

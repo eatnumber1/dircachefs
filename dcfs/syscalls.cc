@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <linux/openat2.h>
 #include <string_view>
+#include <sys/fsuid.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <linux/fs.h>
@@ -499,6 +500,38 @@ absl::StatusOr<size_t> write(int fd, const void *buf, size_t count) {
     return ErrnoToStatus(errno, "write");
   }
   return nbytes;
+}
+
+uid_t setfsuid(uid_t uid) { return static_cast<uid_t>(::setfsuid(uid)); }
+
+gid_t setfsgid(gid_t gid) { return static_cast<gid_t>(::setfsgid(gid)); }
+
+uid_t fsuid() { return setfsuid(static_cast<uid_t>(-1)); }
+
+gid_t fsgid() { return setfsgid(static_cast<gid_t>(-1)); }
+
+absl::Status setgroups_thread(std::span<const gid_t> groups) {
+  if (::syscall(SYS_setgroups, groups.size(), groups.data()) == -1) {
+    return ErrnoToStatus(errno, "setgroups");
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<std::vector<gid_t>> getgroups() {
+  while (true) {
+    int n = ::getgroups(0, nullptr);
+    if (n == -1) return ErrnoToStatus(errno, "getgroups");
+    std::vector<gid_t> groups(n);
+    int got = ::getgroups(n, groups.data());
+    if (got == -1) {
+      // The list grew in between (another thread cannot change ours, but
+      // be exact anyway): ask again.
+      if (errno == EINVAL) continue;
+      return ErrnoToStatus(errno, "getgroups");
+    }
+    groups.resize(got);
+    return groups;
+  }
 }
 
 }  // namespace syscalls
