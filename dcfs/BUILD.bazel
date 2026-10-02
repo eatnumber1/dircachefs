@@ -198,14 +198,12 @@ cc_library(
       ":ret_check",
       ":syscalls",
       ":status",
-      "@absl//absl/base:nullability",
       "@absl//absl/status:statusor",
       "@absl//absl/status",
       "@absl//absl/log",
       "@absl//absl/time",
       "@absl//absl/log:check",
       "@absl//absl/container:flat_hash_set",
-      "@absl//absl/strings:str_format",
       "@libfuse//:libfuse",
     ],
 )
@@ -429,11 +427,6 @@ qemu_cc_test(
       "@absl//absl/status:statusor",
       "@googletest//:gtest_main",
     ],
-)
-
-cc_library(
-    name = "memory",
-    hdrs = ["memory.h"],
 )
 
 qemu_cc_test(

@@ -271,7 +271,4 @@ void FuseRequest::ReplyNone() {
   req_ = std::nullopt;
 }
 
-LogFuseFileInfo::LogFuseFileInfo(fuse_file_info *fi) : fi_(fi) {}
-LogFuseFileInfo::LogFuseFileInfo(fuse_file_info &fi) : LogFuseFileInfo(&fi) {}
-
 }  // namespace dcfs

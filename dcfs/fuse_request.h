@@ -12,7 +12,6 @@
 #include <string_view>
 #include <utility>
 
-#include "absl/base/nullability.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -166,78 +165,6 @@ class FuseRequest {
 
   std::optional<fuse_req_t> req_;
 };
-
-struct LogFuseFileInfo {
- public:
-  explicit LogFuseFileInfo(fuse_file_info *fi);
-  explicit LogFuseFileInfo(fuse_file_info &fi);
-
-  template <typename Sink>
-  friend void AbslStringify(Sink &sink, const LogFuseFileInfo &lfi);
-
- private:
-  fuse_file_info *absl_nullable fi_ = nullptr;
-};
-
-// implementation details below
-
-template <typename Sink>
-void AbslStringify(Sink &sink, const LogFuseFileInfo &lfi) {
-  if (lfi.fi_ == nullptr) {
-    absl::Format(&sink, "nullptr");
-    return;
-  }
-  fuse_file_info &fi = *lfi.fi_;
-  absl::Format(&sink, "fuse_file_info {\n");
-  if (fi.flags) {
-    absl::Format(&sink, "\t.flags = %v\n", LogOpenFlags(fi.flags));
-  }
-  if (fi.writepage) {
-    absl::Format(
-        &sink, "\t.writepage = %v\n", static_cast<bool>(fi.writepage));
-  }
-  if (fi.direct_io) {
-    absl::Format(
-        &sink, "\t.direct_io = %v\n", static_cast<bool>(fi.direct_io));
-  }
-  if (fi.keep_cache) {
-    absl::Format(
-        &sink, "\t.keep_cache = %v\n", static_cast<bool>(fi.keep_cache));
-  }
-  if (fi.flush) {
-    absl::Format(&sink, "\t.flush = %v\n", static_cast<bool>(fi.flush));
-  }
-  if (fi.nonseekable) {
-    absl::Format(
-        &sink, "\t.nonseekable = %v\n", static_cast<bool>(fi.nonseekable));
-  }
-  if (fi.flock_release) {
-    absl::Format(
-        &sink, "\t.flock_release = %v\n", static_cast<bool>(fi.flock_release));
-  }
-  if (fi.cache_readdir) {
-    absl::Format(
-        &sink, "\t.cache_readdir = %v\n", static_cast<bool>(fi.cache_readdir));
-  }
-  if (fi.noflush) {
-    absl::Format(&sink, "\t.noflush = %v\n", static_cast<bool>(fi.noflush));
-  }
-  if (fi.parallel_direct_writes) {
-    absl::Format(
-        &sink, "\t.parallel_direct_writes = %v\n",
-        static_cast<bool>(fi.parallel_direct_writes));
-  }
-  if (fi.fh) {
-    absl::Format(&sink, "\t.fh = %p\n", reinterpret_cast<void *>(fi.fh));
-  }
-  if (fi.lock_owner) {
-    absl::Format(&sink, "\t.lock_owner = %d\n", fi.lock_owner);
-  }
-  if (fi.poll_events) {
-    absl::Format(&sink, "\t.poll_events = %d\n", fi.poll_events);
-  }
-  absl::Format(&sink, "}");
-}
 
 }  // namespace dcfs
 
