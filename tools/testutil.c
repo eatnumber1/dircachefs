@@ -88,6 +88,14 @@
  *       lock longer than that guarantees dcfs's own retries are
  *       exhausted) -- fault injection no shell builtin or busybox applet
  *       can do, exactly like writehold above.
+ *   testutil runas <uid> <gid> <groups> -- <cmd> [args...]
+ *       Drops to <uid>/<gid> with supplementary groups <groups> (a
+ *       comma-separated list of numeric gids, or "-" for none) --
+ *       setgroups(2), setgid(2), setuid(2), in that order -- and execvp(3)s
+ *       <cmd>. The guest has no /etc/passwd users and busybox su needs one;
+ *       this needs none, and sets the exact group list a test wants. Used
+ *       by credentials.sh to act on the dcfs mount as an unprivileged user.
+ *       On failure prints "ERR <errno-name>" and exits 127 (execvp) or 1.
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing (except
@@ -97,6 +105,7 @@
  */
 #define _GNU_SOURCE
 #include <errno.h>
+#include <grp.h>
 #include <fcntl.h>
 #include <sqlite3.h>
 #include <stdio.h>
@@ -427,6 +436,46 @@ static int cmd_sqlite_lock(const char *db_path, const char *seconds_str)
 	return 0;
 }
 
+static int cmd_runas(char *argv[])
+{
+	uid_t uid = (uid_t) strtoul(argv[2], NULL, 10);
+	gid_t gid = (gid_t) strtoul(argv[3], NULL, 10);
+	gid_t groups[64];
+	size_t ngroups = 0;
+
+	if (strcmp(argv[4], "-") != 0) {
+		const char *p = argv[4];
+
+		while (*p != '\0') {
+			char *end;
+
+			if (ngroups == sizeof(groups) / sizeof(groups[0])) {
+				fprintf(stderr, "testutil runas: too many groups\n");
+				return 1;
+			}
+			groups[ngroups++] = (gid_t) strtoul(p, &end, 10);
+			if (end == p || (*end != ',' && *end != '\0')) {
+				fprintf(stderr, "testutil runas: bad group list %s\n",
+					argv[4]);
+				return 1;
+			}
+			p = *end == ',' ? end + 1 : end;
+		}
+	}
+	if (strcmp(argv[5], "--") != 0) {
+		fprintf(stderr, "testutil runas: expected -- before the command\n");
+		return 1;
+	}
+	if (setgroups(ngroups, groups) == -1 || setgid(gid) == -1 ||
+	    setuid(uid) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	execvp(argv[6], &argv[6]);
+	print_err(errno);
+	return 127;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -459,6 +508,8 @@ int main(int argc, char *argv[])
 		return cmd_writehold(argv[2], argv[3], argv[4]);
 	if (argc == 4 && strcmp(argv[1], "sqlite-lock") == 0)
 		return cmd_sqlite_lock(argv[2], argv[3]);
+	if (argc >= 7 && strcmp(argv[1], "runas") == 0)
+		return cmd_runas(argv);
 
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
@@ -475,6 +526,7 @@ int main(int argc, char *argv[])
 		"       testutil fsfreeze <path> <freeze|thaw>\n"
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
 		"       testutil writehold <path> <append|create> <nbytes>\n"
-		"       testutil sqlite-lock <db-path> <hold-seconds>\n");
+		"       testutil sqlite-lock <db-path> <hold-seconds>\n"
+		"       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n");
 	return 2;
 }
