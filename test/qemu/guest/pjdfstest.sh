@@ -113,6 +113,21 @@ run_suite() {
 		done >"$outfile"
 }
 
+# The backing filesystem under test: ext4 on vdb, as the header says.
+# (Before step 4.7 nothing mounted it, so both runs went to the initramfs's
+# own tmpfs root -- see docs/conformance.md.)
+mount /dev/vdb "$SRC"
+echo "pjdfstest.sh: $SRC is $(stat -f -c %T "$SRC")"
+
+# Several .t files look users up by name (`id -u nobody`, `id -g root`,
+# e.g. utimensat/06.t and 07.t); the busybox initramfs has no passwd or
+# group database, so those lookups come back empty and the checks that use
+# them run with a missing argument and fail on both runs for nothing.
+mkdir -p /etc
+[ -s /etc/passwd ] || printf '%s\n' 'root:x:0:0:root:/:/bin/sh' \
+	'nobody:x:65534:65534:nobody:/:/bin/false' >/etc/passwd
+[ -s /etc/group ] || printf '%s\n' 'root:x:0:' 'nobody:x:65534:' >/etc/group
+
 mkdir -p /cache /mnt
 if start_daemon; then
 	pass mount
@@ -182,6 +197,21 @@ baseline_n=$(wc -l </tmp/expected_clean.txt)
 echo "pjdfstest.sh: SUMMARY dcfs_checks=$total_dcfs dcfs_failed=$dcfs_failed" \
 	"ext4_checks=$total_ext4 ext4_failed=$ext4_failed" \
 	"dcfs_specific=$dcfs_specific baseline=$baseline_n"
+
+# The reverse direction, for docs/conformance.md: checks that fail directly
+# on the backing filesystem but pass through dcfs. Not a failure either
+# way (dcfs's kernel side -- the FUSE VFS path with default_permissions --
+# may apply a generic rule the backing filesystem's own path does not),
+# but printed so the difference stays visible and explained.
+set_diff /tmp/fail_dcfs.txt /tmp/fail_ext4.txt /tmp/backing_only.txt
+echo "pjdfstest.sh: backing_only=$(wc -l </tmp/backing_only.txt)" \
+	"(fail directly on $SRC, pass through dcfs)"
+while IFS= read -r line; do
+	echo "note: $line fails directly on $SRC but passes through dcfs"
+done </tmp/backing_only.txt
+while IFS= read -r line; do
+	echo "dcfs-fail: $line"
+done </tmp/fail_dcfs.txt
 
 if [ -s /tmp/now_passing.txt ]; then
 	while IFS= read -r line; do

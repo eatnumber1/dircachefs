@@ -10,16 +10,16 @@
 # One "<relative .t path>:<TAP test number within that file>" per line,
 # sorted; blank lines and "#"-comment lines are ignored.
 #
-# Observed on this project's minimal QEMU test kernel (CONFIG_ACL off is
-# NOT the cause here -- these are plain chown/utimensat POSIX-permission
-# edge cases; see docs/conformance.md for the two groups):
-#   - chown/00.t: a run of failures around lines 650-690 and 1054-1144,
-#     all "chown clears setuid/setgid" checks by a non-root, non-owning
-#     user with appropriate group membership.
-#   - unlink/08.t:2: sticky-directory unlink permission edge case.
-#   - utimensat/06.t, utimensat/07.t: UTIME_NOW/explicit-timestamp
-#     permission checks for a non-owner with write access via group
-#     permissions.
+# Re-recorded in step 4.7, on real ext4 (vdb) -- the step 4.5 snapshot was
+# accidentally taken on the initramfs's tmpfs root -- and with a passwd/
+# group database in the guest. All 28 are pjdfstest TODO checks for
+# documented Linux behavior; dcfs fails exactly the same set:
+#   - chown/00.t 650-690: Linux does not clear setuid/setgid on a
+#     directory when an unprivileged owner chowns it.
+#   - chown/00.t 1054-1144: chown(path, -1, -1) still updates ctime on
+#     Linux (POSIX permits either).
+#   - unlink/08.t:2: unlink(2) of a directory is EISDIR on Linux, not the
+#     EPERM pjdfstest's POSIX reading expects.
 chown/00.t:1054
 chown/00.t:1058
 chown/00.t:1064
@@ -48,18 +48,3 @@ chown/00.t:672
 chown/00.t:686
 chown/00.t:690
 unlink/08.t:2
-utimensat/06.t:11
-utimensat/06.t:4
-utimensat/06.t:5
-utimensat/06.t:7
-utimensat/06.t:8
-utimensat/06.t:9
-utimensat/07.t:10
-utimensat/07.t:11
-utimensat/07.t:13
-utimensat/07.t:14
-utimensat/07.t:4
-utimensat/07.t:5
-utimensat/07.t:6
-utimensat/07.t:8
-utimensat/07.t:9

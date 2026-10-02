@@ -9,7 +9,8 @@ FUSE filesystems), run against a dcfs mount over ext4.
 - Suite pinned at commit `85a8aea9e685999ef0540392fd80535f873d7ff7`
   (github.com/pjd/pjdfstest, the tip of `master` on 2026-09-27).
 - Measured against dircachefs commit `2a4f672` (step 4.6) plus this step's
-  own commits, on 2026-09-27/28.
+  own commits, on 2026-09-27/28; re-measured in step 4.7 (caller
+  credentials, see "Step 4.7" below) on 2026-10-02.
 
 ## How to run
 
@@ -24,13 +25,17 @@ is built. Serial log:
 
 ### How it decides pass/fail
 
-The full suite (238 `.t` files, 8826 individual TAP checks) is run twice
+The full suite (238 `.t` files, 8827 individual TAP checks) is run twice
 against two directories on the *same* backing ext4 filesystem (`/dev/vdb`
 in the test VM):
 
 - `/mnt/dcfs-work`, through the dcfs mount -- the thing under test.
 - `/src/ext4-work`, directly on the backing ext4 filesystem, bypassing
   dcfs entirely.
+
+(Until step 4.7 the guest script never actually mounted `/dev/vdb` on
+`/src`, so both runs went to the initramfs's tmpfs root instead of ext4;
+see "Step 4.7" below.)
 
 `tests/conf` is patched (see
 `third_party/pjdfstest/0001-linux-portability.patch`) to hard-code
@@ -64,20 +69,31 @@ warnings (step 4.6): pjdfstest's dcfs run only ever goes through the
 mount, so any such warning would itself be a dcfs bug (a false positive in
 `ReconcileAttrs`/`VerifyBackingIdentity`). None were observed.
 
-## Counts (this run)
+## Counts (step 4.7)
 
 | | checks | failed |
 |---|---:|---:|
-| dcfs mount | 8826 | 178 |
-| raw ext4 (no dcfs) | 8826 | 43 |
-| dcfs-specific (dcfs-only failures) | -- | **154** |
+| dcfs mount | 8827 | 28 |
+| raw ext4 (no dcfs) | 8827 | 28 |
+| dcfs-specific (dcfs-only failures) | -- | **0** |
+| backing-only (fail on ext4, pass through dcfs) | -- | 0 |
 
-Timings (KVM, this host, `-smp 2 -m 1024`): dcfs run ~216s, ext4-direct run
-~204s, ~420s total wall time for the whole `pjdfstest_test` target --
+dcfs fails exactly the checks raw ext4 fails, all of them pjdfstest TODOs
+for documented Linux behavior (see "The 28 ext4 failures" below), and
+`pjdfstest.expected_failures` is empty. The guest script also lists the
+reverse set -- checks that fail directly on the backing filesystem but
+pass through dcfs (`note:` lines) -- since passing *more* than the backing
+filesystem is a divergence from it too, not better conformance.
+
+Timings (KVM, this host, `-smp 2 -m 1024`): dcfs run ~199s, ext4-direct run
+~188s, ~400s total wall time for the whole `pjdfstest_test` target --
 comfortably under the `enormous`/`eternal` size/timeout (see "Judgment
 calls" below), so no parallelization across `.t` directories was needed.
 
-## Fixes made in this step
+Step 4.5's numbers, for the record (then measured on tmpfs, see below):
+dcfs 178 failed, backing 43, dcfs-specific 154.
+
+## Fixes made in step 4.5
 
 Two dcfs bugs were found and fixed (each a small, targeted change, tested
 in isolation before folding back into the full run):
@@ -112,10 +128,11 @@ from the original 175 to 154 (21 checks fixed net of the two groups above
 in the same `.t` file that only run once an earlier one in the same
 sequence passes, were fixed incidentally).
 
-## The remaining 154: one known, unfixed limitation
+## The 154 of step 4.5: one limitation (fixed in step 4.7)
 
-Every one of the 154 remaining dcfs-specific failures is a symptom of the
-**same** underlying, unfixed limitation, not 154 separate bugs:
+(As written in step 4.5, describing the code before step 4.7.) Every one
+of the 154 remaining dcfs-specific failures is a symptom of the
+**same** underlying limitation, not 154 separate bugs:
 
 > **dcfs runs as root and performs every backing-filesystem write as
 > root, with no per-request uid/gid (or supplementary-group)
@@ -145,29 +162,67 @@ This explains the failure groups pjdfstest turned up (see
 | rename as the (nominal) owner, sticky-style checks | `rename/09.t`, `rename/10.t` | `rename/10.t` in particular cascades: an EACCES/EPERM on the rename itself leaves later `lstat`/inode-number assertions checking a rename that never happened. |
 | rmdir permission | `rmdir/11.t:6` | Same root cause, rmdir side. |
 
-Fixing this properly needs per-request credential impersonation around
-every backing write (`setfsuid(2)`/`setfsgid(2)`, thread-local on Linux,
-matching how e.g. `nfsd` does it) plus `setgroups(2)` for the
-multi-group `-g g1,g2` test cases -- a real feature with real
-thread-safety and threading-model questions of its own, not a
-"two-attempt" bug fix. It is left as a known limitation, tracked by the
-baseline file, for a future step.
+Step 4.7 fixed it; see below.
 
-## The 43 ext4-only failures
+## Step 4.7: caller credentials, and two harness fixes
+
+**The fix.** Every backing syscall whose outcome depends on who makes it
+now runs with the thread's filesystem credentials switched to the FUSE
+caller's (`setfsgid`, the caller's supplementary groups via the raw
+per-thread `SYS_setgroups`, then `setfsuid`; root restored right after;
+`AsCaller` in `dcfs/backing.cc`, credentials from
+`FuseRequest::Caller()`): `mkdirat`, `mknodat`, `symlinkat`,
+`openat(O_CREAT)`, `unlinkat`, `renameat2`, `fchownat`, `futimens`,
+`ftruncate`, `fsetxattr`/`fremovexattr` (and their `/proc` path forms).
+Reaching objects by handle, `linkat(AT_EMPTY_PATH)`, chmod and all probes
+stay root; the reasons are at `AsCaller` and in `backing.h` (`LinkAt`,
+`SetAttr`). All 154 entries pass; `test/qemu/guest/credentials.sh` checks
+the same rules directly with two unprivileged users.
+
+**chown(path, -1, -1).** With the 154 gone, the tmpfs-based measurement
+showed dcfs failing *fewer* checks than the backing filesystem (24 vs
+43). 19 of the difference were chown/00.t's "If both owner and group are
+-1, the times need not be updated" TODO checks: Linux updates ctime, and
+the backing filesystem did, but dcfs silently did nothing -- the kernel
+forwards that chown as an otherwise empty SETATTR (`FATTR_CTIME` is only
+sent with writeback caching), which `backing::SetAttr` ignored. That was a
+real divergence from the backing filesystem, hidden only because POSIX
+also allows it; dcfs now applies such a request as the same
+`fchownat(-1, -1)`, as the caller (setattr.sh `chown-noop-ctime`), and
+fails those 19 checks exactly like ext4.
+
+**Harness: tmpfs, not ext4.** `guest/pjdfstest.sh` never mounted
+`/dev/vdb` on `/src`, so both runs of step 4.5 (and dcfs's backing
+filesystem) were the initramfs's tmpfs root, despite this document. It
+now mounts vdb and prints the filesystem type (`ext2/ext3` = ext4's magic).
+The same 28 checks fail on both.
+
+**Harness: no passwd database.** utimensat/06.t and 07.t look up
+`nobody` and `root` with `id -u`; the busybox guest had no `/etc/passwd`,
+so those checks ran with an empty uid and failed on both runs (the
+"expected EACCES, got" lines with nothing after "got"). The script now
+writes minimal `/etc/passwd`/`/etc/group` entries; those 15 checks now
+run for real and pass on both -- and, being UTIME_NOW/explicit-time
+permission checks for a non-owner, exercise the caller-credential path
+too.
+
+## The 28 ext4 failures
 
 Recorded in `test/qemu/guest/pjdfstest.ext4_failures` for reference; not
 dcfs's concern (they reproduce identically with dcfs entirely out of the
-picture). Two groups, both permission-check edge cases for a non-root,
-non-owning-but-group-related user, observed on this project's minimal
-QEMU test kernel:
+picture, and dcfs fails the identical set). All are pjdfstest `todo Linux`
+checks:
 
-- `chown/00.t` (27 checks, lines 650-690 and 1054-1144): setuid/setgid-bit
-  clearing behavior on `chown` by a non-root user with specific group
-  membership combinations.
-- `unlink/08.t:2`: a sticky-directory unlink permission edge case.
-- `utimensat/06.t`, `utimensat/07.t` (14 checks): `UTIME_NOW`/explicit-
-  timestamp permission checks for a non-owner with write access granted
-  only via group permissions.
+- `chown/00.t` 650-690 (8 checks): Linux does not clear setuid/setgid on
+  a directory when an unprivileged owner chowns it.
+- `chown/00.t` 1054-1144 (19 checks): `chown(path, -1, -1)` updates
+  ctime on Linux (POSIX permits not updating it).
+- `unlink/08.t:2`: `unlink(2)` on a directory is EISDIR on Linux rather
+  than EPERM.
+
+Step 4.5 recorded 43 here: these 28 (measured on tmpfs, see above) plus
+15 utimensat/06.t and 07.t checks that only failed for lack of a
+`nobody` user in the guest.
 
 ## Judgment calls
 
