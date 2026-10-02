@@ -736,7 +736,7 @@ TEST_F(MetadataCacheTest, ParentOf) {
   EXPECT_THAT(ParentOf(ctx_, b), IsOkAndHolds(std::nullopt));
 }
 
-TEST_F(MetadataCacheTest, Xattrs) {
+TEST_F(MetadataCacheTest, XattrGetSetIndividualValue) {
   ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(70));
   EXPECT_THAT(ListXattrs(ctx_, r.id), IsOkAndHolds(std::nullopt));
   EXPECT_THAT(GetXattr(ctx_, r.id, "user.a"), IsOkAndHolds(std::nullopt));
@@ -746,7 +746,10 @@ TEST_F(MetadataCacheTest, Xattrs) {
   EXPECT_THAT(GetXattr(ctx_, r.id, "user.a"),
               IsOkAndHolds(Optional(std::string("1"))));
   EXPECT_THAT(ListXattrs(ctx_, r.id), IsOkAndHolds(std::nullopt));
+}
 
+TEST_F(MetadataCacheTest, XattrReplaceMakesSetComplete) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(70));
   std::string binary("\x00\xff", 2);
   std::vector<std::pair<std::string, std::string>> all = {
       {"user.b", "2"}, {"user.c", binary}};
@@ -757,6 +760,14 @@ TEST_F(MetadataCacheTest, Xattrs) {
   // Complete, so an absent name is known not to exist.
   EXPECT_THAT(GetXattr(ctx_, r.id, "user.a"),
               StatusIs(absl::StatusCode::kNotFound));
+}
+
+TEST_F(MetadataCacheTest, XattrSetAndRemoveKeepSetComplete) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(70));
+  std::string binary("\x00\xff", 2);
+  std::vector<std::pair<std::string, std::string>> all = {
+      {"user.b", "2"}, {"user.c", binary}};
+  ASSERT_THAT(ReplaceXattrs(ctx_, r.id, all), IsOk());
 
   ASSERT_THAT(SetXattr(ctx_, r.id, "user.b", "22"), IsOk());
   ASSERT_THAT(SetXattr(ctx_, r.id, "user.d", "4"), IsOk());
@@ -768,16 +779,26 @@ TEST_F(MetadataCacheTest, Xattrs) {
               IsOkAndHolds(Optional(ElementsAre("user.b", "user.d"))));
   EXPECT_THAT(GetXattr(ctx_, r.id, "user.c"),
               StatusIs(absl::StatusCode::kNotFound));
+}
+
+TEST_F(MetadataCacheTest, XattrMarkUnknownClearsCache) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(70));
+  std::vector<std::pair<std::string, std::string>> all = {{"user.b", "2"}};
+  ASSERT_THAT(ReplaceXattrs(ctx_, r.id, all), IsOk());
 
   ASSERT_THAT(MarkXattrsUnknown(ctx_, r.id), IsOk());
   EXPECT_THAT(ListXattrs(ctx_, r.id), IsOkAndHolds(std::nullopt));
   EXPECT_THAT(GetXattr(ctx_, r.id, "user.b"), IsOkAndHolds(std::nullopt));
+}
 
-  // An empty set is complete too.
+TEST_F(MetadataCacheTest, XattrEmptySetIsComplete) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(70));
   ASSERT_THAT(ReplaceXattrs(ctx_, r.id, {}), IsOk());
   EXPECT_THAT(ListXattrs(ctx_, r.id),
               IsOkAndHolds(Optional(::testing::IsEmpty())));
+}
 
+TEST_F(MetadataCacheTest, XattrOpsOnMissingInode) {
   EXPECT_THAT(ListXattrs(ctx_, 999), StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(SetXattr(ctx_, 999, "a", "b"),
               StatusIs(absl::StatusCode::kNotFound));
