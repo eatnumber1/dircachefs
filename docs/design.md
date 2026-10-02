@@ -203,7 +203,9 @@ ids restart from 2.
 
 `st_ino` is the backing inode number, so hard-link-aware tools (`tar`,
 `rsync`, `cp -a`, `find`) behave as they would on the backing filesystem.
-The kernel does not require `st_ino` to equal the node id. `st_dev` is the
+The kernel does not require `st_ino` to equal the node id. Directory
+listings report the same numbers as `d_ino`, `.` and `..` included (`..`
+of the root is the root itself, as for a mount's root). `st_dev` is the
 FUSE mount's.
 
 ### Matching a row to a backing object

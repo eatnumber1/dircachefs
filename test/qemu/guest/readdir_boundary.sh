@@ -39,6 +39,7 @@ FAILED=0
 . "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
+TESTUTIL=/bin/testutil
 
 SRC=/src
 MNT=/mnt
@@ -158,5 +159,23 @@ if [ "$elapsed_cs" -lt 250 ]; then
 else
 	fail warm-listing-is-not-quadratic "took ${elapsed_cs}cs (>= 250cs / 2.5s) for $N already-cached entries -- looks quadratic, not buffer-bounded"
 fi
+
+# --- "." and ".." inode numbers ---------------------------------------------
+#
+# Every entry's d_ino must be the backing inode number, "." and ".."
+# included (".." of the root is the root itself). testutil readdir-ino
+# reads "." alone first, so that ".." and the rest come from plain READDIR
+# requests (with readdirplus "auto" the kernel sends READDIRPLUS only at
+# offset 0) as well as from READDIRPLUS.
+mkdir -p "$MNT/d1/d2"
+for dir in "" /many /d1 /d1/d2; do
+	src_dots=$("$TESTUTIL" readdir-ino "$SRC$dir" | grep -E '^\.\.? ')
+	mnt_dots=$("$TESTUTIL" readdir-ino "$MNT$dir" | grep -E '^\.\.? ')
+	if [ "$src_dots" = "$mnt_dots" ]; then
+		pass "dot-inodes${dir:-/}"
+	else
+		fail "dot-inodes${dir:-/}" "src: $(echo $src_dots); mnt: $(echo $mnt_dots)"
+	fi
+done
 
 exit "$FAILED"

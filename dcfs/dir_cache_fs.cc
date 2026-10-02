@@ -1253,11 +1253,12 @@ absl::Status DirCacheFS::Opendir(
 
 namespace {
 
-// Builds the "." entry (ino == dir's own) or the ".." entry (ino == the
-// parent's), shared by Readdir and Readdirplus.
-struct stat DotStat(InodeId id) {
+// The "." or ".." entry of a plain READDIR reply: the directory's (or its
+// parent's) backing inode number, as every other entry reports, never its
+// nodeid.
+struct stat DotStat(const cache::CachedAttr &attr) {
   struct stat st = {};
-  st.st_ino = static_cast<ino_t>(id);
+  st.st_ino = static_cast<ino_t>(attr.backing_ino);
   st.st_mode = S_IFDIR;
   return st;
 }
@@ -1321,12 +1322,16 @@ absl::Status DirCacheFS::Readdir(
   std::vector<FuseDirEntry> entries;
   size_t used = 0;
   if (off < 1) {
-    entries.push_back({.name = ".", .stbuf = DotStat(dir), .off = 1});
+    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(dir));
+    entries.push_back({.name = ".", .stbuf = DotStat(attr), .off = 1});
     used += DirEntrySize(entries.back().name);
   }
   if (off < 2) {
+    // The root is its own parent (ParentOf), as a mount's root is: what is
+    // above --source is not part of the tree dcfs serves.
     ABSL_ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
-    entries.push_back({.name = "..", .stbuf = DotStat(parent), .off = 2});
+    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(parent));
+    entries.push_back({.name = "..", .stbuf = DotStat(attr), .off = 2});
     used += DirEntrySize(entries.back().name);
   }
 

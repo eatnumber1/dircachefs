@@ -108,6 +108,12 @@
  *       stat(".") ("stat=nlink:<n>"), open(".") and one getdents64 on it,
  *       one field each, "ERR <errno-name>" for a failure: a process whose
  *       working directory was removed.
+ *   testutil readdir-ino <dir>
+ *       Lists <dir> with getdents64, printing "<name> <d_ino>" per entry.
+ *       The first call's buffer fits exactly one entry ("."), so on a FUSE
+ *       mount with readdirplus "auto" the rest (".." included) comes from
+ *       plain READDIR requests (the kernel uses READDIRPLUS only at offset
+ *       0), whose inode numbers busybox ls -i never shows separately.
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing (except
@@ -549,6 +555,47 @@ static int cmd_rmcwd(const char *dir)
 	return 0;
 }
 
+struct linux_dirent64 {
+	ino64_t d_ino;
+	off64_t d_off;
+	unsigned short d_reclen;
+	unsigned char d_type;
+	char d_name[];
+};
+
+static int cmd_readdir_ino(const char *dir)
+{
+	char buf[4096];
+	size_t want = 24; /* exactly one "." record */
+	int fd = open(dir, O_RDONLY | O_DIRECTORY);
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	for (;;) {
+		long n = syscall(SYS_getdents64, fd, buf, want);
+		long pos;
+
+		if (n == -1) {
+			print_err(errno);
+			return 1;
+		}
+		if (n == 0)
+			break;
+		for (pos = 0; pos < n;) {
+			struct linux_dirent64 *d = (void *) (buf + pos);
+
+			printf("%s %llu\n", d->d_name,
+			       (unsigned long long) d->d_ino);
+			pos += d->d_reclen;
+		}
+		want = sizeof(buf);
+	}
+	close(fd);
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -589,6 +636,8 @@ int main(int argc, char *argv[])
 		return cmd_opath_unlink_stat(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "rmcwd") == 0)
 		return cmd_rmcwd(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "readdir-ino") == 0)
+		return cmd_readdir_ino(argv[2]);
 
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
@@ -609,6 +658,7 @@ int main(int argc, char *argv[])
 		"       testutil sqlite-lock <db-path> <hold-seconds>\n"
 		"       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n"
 		"       testutil opath-unlink-stat <path>\n"
-		"       testutil rmcwd <dir>\n");
+		"       testutil rmcwd <dir>\n"
+		"       testutil readdir-ino <dir>\n");
 	return 2;
 }
