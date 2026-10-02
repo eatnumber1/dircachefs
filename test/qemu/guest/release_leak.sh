@@ -29,13 +29,11 @@
 # and exits nonzero if any check failed. init turns that into the final
 # ALL-TESTS-PASSED / TEST-FAILED verdict.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 TESTUTIL=/bin/testutil
 
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -69,32 +67,6 @@ trap cleanup EXIT
 
 echo "release_leak.sh: kernel $(uname -r)"
 
-start_daemon() {
-	# sync_interval_sec is pushed way out so DirCacheFS::MaybeSyncBacking's
-	# own periodic sync point (called at the start of every request, once
-	# 5s have passed since the last one) never fires during the sqlite lock
-	# window below and competes for it -- this test wants only Flush's and
-	# Release's own attribute-refresh writes contending for that lock, so
-	# the timing math for how long to hold it stays simple.
-	"$DCFS" --source="$SRC" --cache_db="$DB" --sync_interval_sec=3600 \
-		"$MNT" >"$1" 2>&1 &
-	DAEMON_PID=$!
-	MOUNTED=0
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
-}
-
 # The daemon's own open-fd count right now.
 daemon_fd_count() {
 	ls "/proc/$DAEMON_PID/fd" 2>/dev/null | wc -l
@@ -104,7 +76,13 @@ mount /dev/vdb /src
 sync
 
 mkdir -p /cache /mnt
-if start_daemon "$LOG"; then
+# sync_interval_sec is pushed way out so DirCacheFS::MaybeSyncBacking's own
+# periodic sync point (called at the start of every request, once 5s have
+# passed since the last one) never fires during the sqlite lock window
+# below and competes for it -- this test wants only Flush's and Release's
+# own attribute-refresh writes contending for that lock, so the timing math
+# for how long to hold it stays simple.
+if start_daemon "$LOG" --sync_interval_sec=3600; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"

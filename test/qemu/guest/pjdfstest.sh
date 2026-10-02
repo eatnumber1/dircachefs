@@ -36,14 +36,12 @@
 # Run as /tests/pjdfstest.sh by guest/init when booted with
 # dcfs_test=pjdfstest.sh.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 PJD_ROOT=/pjdfstest
 TESTS_DIR="$PJD_ROOT/tests"
 
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -70,24 +68,6 @@ cleanup() {
 trap cleanup EXIT
 
 echo "pjdfstest.sh: kernel $(uname -r)"
-
-start_daemon() {
-	"$DCFS" --source="$SRC" --cache_db="$DB" --allow_other "$MNT" >"$LOG" 2>&1 &
-	DAEMON_PID=$!
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
-}
 
 # run_suite ROOT OUTFILE: runs every tests/**/*.t under $TESTS_DIR with cwd
 # set to ROOT (a fresh, empty directory on the filesystem under test --
@@ -129,7 +109,7 @@ mkdir -p /etc
 [ -s /etc/group ] || printf '%s\n' 'root:x:0:' 'nobody:x:65534:' >/etc/group
 
 mkdir -p /cache /mnt
-if start_daemon; then
+if start_daemon "$LOG" --allow_other; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"

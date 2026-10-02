@@ -36,13 +36,10 @@
 # check failed. init turns that into the final ALL-TESTS-PASSED / TEST-FAILED
 # verdict.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 
-# busybox on Ubuntu lacks the mountpoint applet; ask the kernel directly.
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -76,36 +73,6 @@ trap cleanup EXIT
 echo "create.sh: kernel $(uname -r)"
 
 # --- helpers -------------------------------------------------------------
-
-# Field 3 of /sys/block/<dev>/stat is the cumulative count of sectors read
-# from that block device since boot -- see Documentation/ABI/stable/
-# sysfs-block. Unchanged across a pass means dcfs made no backing I/O.
-sectors_read() {
-	read -r line <"/sys/block/$1/stat"
-	set -- $line
-	echo "$3"
-}
-
-# Starts the daemon, logging its stderr to $1, and waits up to 10s for the
-# mount to appear. Returns nonzero (and leaves MOUNTED=0) if it doesn't.
-start_daemon() {
-	"$DCFS" --source="$SRC" --cache_db="$DB" "$MNT" >"$1" 2>&1 &
-	DAEMON_PID=$!
-	MOUNTED=0
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
-}
 
 # Runs "$@", expecting it to fail with a message containing $2 (a fragment
 # of the errno's strerror() text -- e.g. "File exists" for EEXIST, "No such
@@ -376,8 +343,7 @@ fi
 # touch either backing device -- RecordNewChild/RecordNewLink already wrote
 # it all into the cache -------------------------------------------------
 
-sync
-echo 3 >/proc/sys/vm/drop_caches
+drop_caches
 before_vdb=$(sectors_read vdb)
 
 run_pass "$MNT"
@@ -430,8 +396,7 @@ else
 	fail restart-persists "one or more created objects did not survive the restart"
 fi
 
-sync
-echo 3 >/proc/sys/vm/drop_caches
+drop_caches
 before_vdb=$(sectors_read vdb)
 
 run_pass "$MNT" # metadata only -- no content reads.

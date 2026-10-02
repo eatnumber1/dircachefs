@@ -32,14 +32,12 @@
 # check failed. init turns that into the final ALL-TESTS-PASSED /
 # TEST-FAILED verdict.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 TESTUTIL=/bin/testutil
 FHTEST=/bin/fhtest
 
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -74,37 +72,6 @@ cleanup() {
 trap cleanup EXIT
 
 echo "crash.sh: kernel $(uname -r)"
-
-# Field 3 of /sys/block/<dev>/stat: cumulative sectors read since boot.
-sectors_read() {
-	read -r line <"/sys/block/$1/stat"
-	set -- $line
-	echo "$3"
-}
-
-drop_caches() {
-	sync
-	echo 3 >/proc/sys/vm/drop_caches
-}
-
-start_daemon() {
-	"$DCFS" --source="$SRC" --cache_db="$DB" "$MNT" >"$1" 2>&1 &
-	DAEMON_PID=$!
-	MOUNTED=0
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
-}
 
 # hold PATH append|create NBYTES: starts `testutil writehold` in the
 # background (its pid in HOLDER_PID) and waits until it has written.

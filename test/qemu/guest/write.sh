@@ -43,13 +43,11 @@
 # check failed. init turns that into the final ALL-TESTS-PASSED /
 # TEST-FAILED verdict.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 TESTUTIL=/bin/testutil
 
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -86,41 +84,10 @@ echo "write.sh: kernel $(uname -r)"
 
 # --- helpers -------------------------------------------------------------
 
-# Field 3 of /sys/block/<dev>/stat: cumulative sectors read since boot.
-sectors_read() {
-	read -r line <"/sys/block/$1/stat"
-	set -- $line
-	echo "$3"
-}
-
 # utime (field 14) + stime (field 15) of pid $1, in clock ticks -- see
 # proc(5).
 cpu_ticks() {
 	awk '{print $14 + $15}' "/proc/$1/stat"
-}
-
-drop_caches() {
-	sync
-	echo 3 >/proc/sys/vm/drop_caches
-}
-
-start_daemon() {
-	"$DCFS" --source="$SRC" --cache_db="$DB" "$MNT" >"$1" 2>&1 &
-	DAEMON_PID=$!
-	MOUNTED=0
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
 }
 
 # check_src NAME COND: evaluates the shell condition COND (which should only

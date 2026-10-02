@@ -35,12 +35,10 @@
 # prints one "TEST ... PASS/FAIL" line per check and exits nonzero if any
 # check failed.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -70,19 +68,9 @@ trap cleanup EXIT
 
 echo "power.sh: kernel $(uname -r)"
 
-# Field 3 of /sys/block/<dev>/stat: cumulative sectors read since boot.
-sectors_read() {
-	read -r line <"/sys/block/$1/stat"
-	set -- $line
-	echo "$3"
-}
-
-drop_caches() {
-	sync
-	echo 3 >/proc/sys/vm/drop_caches
-}
-
-# start_daemon LOG [extra dcfs flags...]
+# start_daemon LOG [extra dcfs flags...]: overrides lib.sh's generic
+# start_daemon only to also track LOG in $LOGS, for cleanup's dump-all-logs
+# loop above.
 start_daemon() {
 	log=$1
 	shift

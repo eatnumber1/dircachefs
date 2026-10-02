@@ -61,12 +61,10 @@
 # dcfs_test=nfs.sh; prints one "TEST ... PASS/FAIL" line per check and
 # exits nonzero if any check failed.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/usr/local/bin/dcfs
 
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 NFS=/nfs
@@ -130,48 +128,17 @@ trap cleanup EXIT
 echo "nfs.sh: kernel $(uname -r)"
 
 # --- helpers ---------------------------------------------------------------
-
-# Field 3 of /sys/block/<dev>/stat is the cumulative count of sectors read
-# from that block device since boot -- see Documentation/ABI/stable/
-# sysfs-block.
-sectors_read() {
-	read -r line <"/sys/block/$1/stat"
-	set -- $line
-	echo "$3"
-}
-
-drop_caches() {
-	sync
-	echo 3 >/proc/sys/vm/drop_caches
-}
-
-# Starts the daemon, logging its stderr to $1, and waits up to 10s for the
-# mount to appear. Returns nonzero (and leaves MOUNTED=0) if it doesn't.
-start_daemon() {
-	"$DCFS" --source="$SRC" --cache_db="$DB" --allow_other "$MNT" >"$1" 2>&1 &
-	DAEMON_PID=$!
-	MOUNTED=0
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
-}
+#
+# nfs.sh always mounts dcfs with --allow_other (nfsd needs it), so every
+# start_daemon call below passes it explicitly.
 
 # SIGTERM's the running daemon, waits for it, force-umounts if libfuse's own
 # signal handler didn't already unmount, then starts a fresh daemon against
 # the same cache database, logging to $2. Emits "$1-unmount" / "$1-mount"
 # PASS/FAIL lines. Returns nonzero if the daemon did not come back up.
 # Deliberately does NOT touch $NFS, rpc.nfsd or rpc.mountd: the whole point
-# is that only the FUSE backend under the export bounces.
+# is that only the FUSE backend under the export bounces. Overrides lib.sh's
+# generic restart_daemon only to add the exportfs step below.
 restart_daemon() {
 	kill -TERM "$DAEMON_PID" 2>/dev/null || true
 	wait "$DAEMON_PID" 2>/dev/null || true
@@ -187,7 +154,7 @@ restart_daemon() {
 		pass "$1-unmount"
 		MOUNTED=0
 	fi
-	if start_daemon "$2"; then
+	if start_daemon "$2" --allow_other; then
 		pass "$1-mount"
 		# nfsd's own export cache (distinct from anything dcfs does) can
 		# hold a reference tied to the *old* /mnt vfsmount/dentry; without
@@ -292,7 +259,7 @@ src_content_md5=$1
 # --- mount dcfs -------------------------------------------------------------
 
 mkdir -p /cache /mnt
-if start_daemon "$LOG1"; then
+if start_daemon "$LOG1" --allow_other; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"
@@ -544,7 +511,7 @@ fi
 
 rm -f "$DB" "$DB-wal" "$DB-shm" "$DB-journal"
 
-if start_daemon "$LOG3"; then
+if start_daemon "$LOG3" --allow_other; then
 	pass db-wipe-mount
 	# exportfs -f (see restart_daemon's comment) plus a full nfsd bounce:
 	# nfsd keeps its own server-side cache of recently-opened files

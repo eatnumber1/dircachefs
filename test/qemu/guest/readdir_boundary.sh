@@ -36,12 +36,10 @@
 # check and exits nonzero if any check failed. init turns that into the
 # final ALL-TESTS-PASSED / TEST-FAILED verdict.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -68,25 +66,6 @@ cleanup() {
 trap cleanup EXIT
 
 echo "readdir_boundary.sh: kernel $(uname -r)"
-
-start_daemon() {
-	"$DCFS" --source="$SRC" --cache_db="$DB" "$MNT" >"$1" 2>&1 &
-	DAEMON_PID=$!
-	MOUNTED=0
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
-}
 
 # Hundredths of a second since boot (field 1 of /proc/uptime, which busybox
 # reports with 2 decimal places), as an integer -- good enough resolution

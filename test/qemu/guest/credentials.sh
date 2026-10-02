@@ -28,13 +28,11 @@
 # dcfs_test=credentials.sh; prints one "TEST ... PASS/FAIL" line per check
 # and exits nonzero if any check failed.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 TESTUTIL=/bin/testutil
 
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -61,25 +59,6 @@ cleanup() {
 trap cleanup EXIT
 
 echo "credentials.sh: kernel $(uname -r)"
-
-start_daemon() {
-	"$DCFS" --source="$SRC" --cache_db="$DB" --allow_other "$MNT" >"$LOG" 2>&1 &
-	DAEMON_PID=$!
-	MOUNTED=0
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
-}
 
 alice() { "$TESTUTIL" runas 1000 1000 1000,2000 -- "$@"; }
 bob() { "$TESTUTIL" runas 1001 1001 1001 -- "$@"; }
@@ -147,7 +126,7 @@ chmod 0666 /src/pub/root666
 sync
 
 mkdir -p /cache /mnt
-if start_daemon; then
+if start_daemon "$LOG" --allow_other; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"

@@ -43,15 +43,11 @@
 # and exits nonzero if any check failed. init turns that into the final
 # ALL-TESTS-PASSED / TEST-FAILED verdict.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
-skip() { echo "TEST $1 SKIP ($2)"; }
+. "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
 FHTEST=/bin/fhtest
 
-# busybox on Ubuntu lacks the mountpoint applet; ask the kernel directly.
-is_mounted() { grep -q " $1 " /proc/mounts; }
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -94,54 +90,6 @@ trap cleanup EXIT
 echo "handles.sh: kernel $(uname -r)"
 
 # --- helpers -------------------------------------------------------------
-
-# Starts the daemon, logging its stderr to $1, and waits up to 10s for the
-# mount to appear. Returns nonzero (and leaves MOUNTED=0) if it doesn't.
-start_daemon() {
-	"$DCFS" --source="$SRC" --cache_db="$DB" "$MNT" >"$1" 2>&1 &
-	DAEMON_PID=$!
-	MOUNTED=0
-	i=0
-	while [ "$i" -lt 10 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 1
-	done
-	return 1
-}
-
-# SIGTERM's the running daemon, waits for it, force-umounts if libfuse's own
-# signal handler didn't already unmount, then starts a fresh daemon against
-# the same cache database, logging to $2. Emits "$1-unmount" and "$1-mount"
-# PASS/FAIL lines. Returns nonzero if the daemon did not come back up.
-restart_daemon() {
-	kill -TERM "$DAEMON_PID" 2>/dev/null || true
-	wait "$DAEMON_PID" 2>/dev/null || true
-	DAEMON_PID=""
-	if is_mounted "$MNT"; then
-		echo "handles.sh: /mnt still mounted after SIGTERM; forcing umount"
-		umount "$MNT" 2>/dev/null || true
-	fi
-	if is_mounted "$MNT"; then
-		fail "$1-unmount" "mountpoint still mounted after kill+umount"
-		MOUNTED=1
-	else
-		pass "$1-unmount"
-		MOUNTED=0
-	fi
-	if start_daemon "$2"; then
-		pass "$1-mount"
-		return 0
-	fi
-	fail "$1-mount" "daemon did not remount within 10s"
-	return 1
-}
 
 # Prints "<type> <hex>" for $1's file handle, or "ERR" if fhtest failed.
 handle_of() {

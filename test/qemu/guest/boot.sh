@@ -9,8 +9,7 @@
 # PASS/FAIL" line per check and exits nonzero if any check failed. init
 # turns that into the final ALL-TESTS-PASSED / TEST-FAILED verdict.
 FAILED=0
-pass() { echo "TEST $1 PASS"; }
-fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
+. "$(dirname "$0")/lib.sh"
 
 echo "boot.sh: kernel $(uname -r)"
 
