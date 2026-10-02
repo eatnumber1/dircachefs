@@ -113,7 +113,7 @@ dcfs --source=<dir> --cache_db=<path> [flags] <mountpoint>
 | Flag | Default | Meaning |
 |---|---|---|
 | `--source` | (required) | The directory to cache. Opened once at startup; dcfs never uses the path again. |
-| `--cache_db` | (required) | The SQLite cache database. Created if missing. Put it on an SSD, not on the backing disks. |
+| `--cache_db` | (required) | The SQLite cache database. Created if missing. Put it on an SSD, not on the backing disks, on a local filesystem: dcfs refuses to start if SQLite cannot use WAL mode there. |
 | `<mountpoint>` | (required) | Where to mount dcfs. May be the same path as `--source`. |
 | `--allow_other` | `false` | Mount with `-o allow_other`, so users other than root can use the mount. Needed for almost any real deployment, and for NFS export. |
 | `--attr_timeout_sec` | `3600` | How long the kernel may cache an inode's attributes. Long by design, since dcfs has exclusive access. While a file is open for writing, its attributes are always returned with a timeout of 0. |

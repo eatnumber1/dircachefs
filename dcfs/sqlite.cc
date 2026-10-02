@@ -430,10 +430,32 @@ bool Connection::InTransaction() const {
 namespace {
 
 absl::Status ApplyOpenPragmas(Connection &conn) {
-  // journal_mode=WAL doesn't apply to in-memory/temp databases; sqlite just
-  // reports back a different mode ("memory") rather than failing, but
-  // tolerate an outright failure here too and ignore it either way.
-  conn.Exec("PRAGMA journal_mode=WAL").IgnoreError();
+  // SQLite answers journal_mode=WAL with the journal mode it ended up in,
+  // not an error, when it cannot switch: "memory" for an in-memory or
+  // temporary database (fine: nothing about it needs to be durable), and
+  // the old mode (e.g. "delete") for a file whose VFS cannot provide WAL's
+  // shared memory. A file-backed cache must not run like that: dcfs's
+  // durability rules (synchronous=NORMAL, the kSync commit of phase 1)
+  // assume WAL, and in rollback-journal mode a NORMAL commit is not
+  // durable (audit crash F9).
+  std::string journal_mode;
+  {
+    ABSL_ASSIGN_OR_RETURN(Statement mode,
+                          Statement::Prepare(conn, "PRAGMA journal_mode=WAL"));
+    ABSL_ASSIGN_OR_RETURN(bool has_row, mode.Step());
+    RET_CHECK(has_row) << "PRAGMA journal_mode=WAL returned no row";
+    journal_mode = mode.Column<std::string>(0);
+  }
+  // sqlite3_db_filename is "" for an in-memory or temporary database.
+  const char *filename = sqlite3_db_filename(conn.Get(), "main");
+  const bool file_backed = filename != nullptr && filename[0] != '\0';
+  if (file_backed && journal_mode != "wal") {
+    return absl::FailedPreconditionError(absl::StrCat(
+        "cannot put ", filename, " in WAL mode (PRAGMA journal_mode=WAL "
+        "left it in journal_mode=", journal_mode,
+        "); keep the cache database on a local filesystem that supports "
+        "shared memory"));
+  }
 
   ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA synchronous=NORMAL"));
   ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA foreign_keys=ON"));

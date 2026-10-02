@@ -321,9 +321,10 @@ struct ConnectionFactory {
 
   // Opens `path` via sqlite3_open_v2 (always OR'd with SQLITE_OPEN_NOMUTEX
   // and SQLITE_OPEN_EXRESCODE) and applies dcfs's standard pragmas:
-  // journal_mode=WAL (best-effort; not applicable to e.g. ":memory:",
-  // where it's skipped by simply ignoring its result), synchronous=NORMAL,
-  // foreign_keys=ON, busy_timeout=5000, temp_store=MEMORY.
+  // journal_mode=WAL (required for a file-backed database: FailedPrecondition
+  // if SQLite keeps it in another mode; an in-memory or temporary one stays
+  // in "memory" mode), synchronous=NORMAL, foreign_keys=ON,
+  // busy_timeout=5000, temp_store=MEMORY.
   absl::StatusOr<Connection> Open() const;
 };
 

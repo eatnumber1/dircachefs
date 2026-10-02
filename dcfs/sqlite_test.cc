@@ -80,6 +80,32 @@ TEST(ConnectionTest, FileBackedReportsWalAndForeignKeys) {
   ASSERT_THAT(fk_stmt->Step(), IsOkAndHolds(false));
 }
 
+// Audit crash F9: a file-backed database that cannot run in WAL mode must
+// not open. SQLite answers `PRAGMA journal_mode=WAL` with the mode it
+// actually kept, not an error, when the VFS cannot provide WAL's shared
+// memory -- here SQLite's own "unix-none" VFS (no locking, version-1 I/O
+// methods without xShmMap) -- and in rollback-journal mode
+// synchronous=NORMAL is not durable at commit.
+TEST(ConnectionTest, FileBackedWithoutWalFailsToOpen) {
+  std::string path = TestTmpFile("no_wal.sqlite");
+  absl::StatusOr<Connection> conn =
+      ConnectionFactory{.path = path, .vfs_name = "unix-none"}.Open();
+  ASSERT_FALSE(conn.ok()) << "opened in a journal mode other than WAL";
+  EXPECT_EQ(conn.status().code(), absl::StatusCode::kFailedPrecondition)
+      << conn.status();
+  EXPECT_THAT(conn.status().message(), testing::HasSubstr("journal_mode"));
+}
+
+// An in-memory database has no WAL ("memory") and still opens: the unit
+// tests use them.
+TEST(ConnectionTest, InMemoryDatabaseOpensWithoutWal) {
+  ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
+  ASSERT_OK_AND_ASSIGN(Statement * mode_stmt,
+                       conn.Prepared("PRAGMA journal_mode"));
+  ASSERT_THAT(mode_stmt->Step(), IsOkAndHolds(true));
+  EXPECT_EQ(mode_stmt->Column<std::string>(0), "memory");
+}
+
 // Regression test for main.cc's shutdown path, which relies on Checkpoint()
 // to leave nothing in the WAL for the next startup to replay.
 TEST(ConnectionTest, CheckpointTruncatesWal) {

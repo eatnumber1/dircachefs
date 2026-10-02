@@ -1032,7 +1032,10 @@ contents bypass the cache.
 4. Open `--cache_db` and take an exclusive, non-blocking `flock`; refuse to
    start if another process holds it.
 5. Open the SQLite connection: WAL, `synchronous=NORMAL`, foreign keys on,
-   `busy_timeout=5000`, `temp_store=MEMORY`.
+   `busy_timeout=5000`, `temp_store=MEMORY`. dcfs refuses to start if
+   SQLite cannot put the database in WAL mode (a filesystem without the
+   shared memory WAL needs): in rollback-journal mode a `NORMAL` commit
+   is not durable.
 6. Probe the root: its device id (`FS_IOC_GETFSUUID`), filesystem type,
    inode number and generation.
 7. `Migrate()`: create the schema and seed the `cache_state` row, the
@@ -1155,11 +1158,6 @@ lists the user-visible ones.
   unlinked inode).
 - **atime is not maintained** after passthrough reads, and `st_blocks`
   may lag behind delayed allocation until the next attribute refresh.
-- **The WAL mode is not verified.** `PRAGMA journal_mode=WAL` is issued
-  and its result ignored (it does not apply to in-memory test databases).
-  A cache database on a filesystem that cannot provide WAL's shared memory
-  would silently run in rollback-journal mode, where `synchronous=NORMAL`
-  is weaker. Keep the database on an ordinary local filesystem.
 - **A residual "ahead" window depends on the backing filesystem.** The
   dirty-set argument assumes `syncfs` really makes earlier changes durable
   on the backing device.
