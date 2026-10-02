@@ -319,9 +319,10 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
 // mkdirat(2)/mknodat(2)/symlinkat(2) of `name` inside the already-open
 // `parent_fd`, as `caller` (AsCaller): the new object is the caller's, with
 // the caller's fsgid as its group unless the parent is setgid, and the
-// caller needs write and search permission on the parent. The kernel
-// applies umask to `mode` before it reaches us, so it is passed straight
-// through.
+// caller needs write and search permission on the parent. `mode` arrives
+// unmasked (FUSE_CAP_DONT_MASK) and the syscall runs with caller.umask, so
+// the backing filesystem applies the umask, or a parent's default ACL
+// instead, as it would for a local create.
 absl::Status MkdirAt(Context &ctx, const Credentials &caller, int parent_fd,
                      std::string_view name, mode_t mode);
 absl::Status MknodAt(Context &ctx, const Credentials &caller, int parent_fd,

@@ -937,14 +937,33 @@ updates ctime), utimes, the truncate, `setxattr` and `removexattr`.
 
 The mount always uses `default_permissions`, so the kernel checks the
 caller's permissions against dcfs's cached attributes before a request is
-sent; `Access` has nothing left to check. Because dcfs does not enable
-FUSE's POSIX ACL support, those kernel checks use the mode bits only, and
-POSIX ACLs are not enforced for operations that run as root (opening an
-existing file). This is listed in the README's Limitations.
+sent; `Access` has nothing left to check.
 
-dcfs sets its own `umask` to 0 at startup: the kernel has already applied
-the caller's umask to the mode in a create request, and the backing
-syscall would otherwise apply dcfs's inherited umask a second time.
+**POSIX ACLs** are enforced by the kernel: dcfs requests
+`FUSE_CAP_POSIX_ACL`, and the kernel then fetches
+`system.posix_acl_access` and `system.posix_acl_default` through
+`GETXATTR` (answered from the cache like any xattr; see below) and uses
+them in its permission checks. Without it the kernel would check the mode
+bits alone, and on a file with an ACL the group bits are the ACL mask, so
+named-user and named-group entries would be ignored. The kernel leaves the
+rest to the filesystem, and dcfs leaves it to the backing filesystem:
+setting an ACL updates the mode (the backing setxattr runs as the caller,
+so the backing filesystem also clears setgid for a caller outside the
+file's group), a chmod rewrites the ACL (read back as a side effect), and
+a create inherits the parent's default ACL. dcfs refuses to mount if the
+kernel does not offer `FUSE_CAP_POSIX_ACL`.
+
+**The umask.** Default ACL inheritance means the caller's umask must not
+be applied where the parent has a default ACL, so it cannot be applied
+before the request reaches dcfs. dcfs requests `FUSE_CAP_DONT_MASK`: the
+kernel sends `CREATE`, `MKDIR` and `MKNOD` with the requested mode unmasked
+and the caller's umask alongside (`fuse_ctx::umask`), and `AsCaller` makes
+that the process umask around the backing syscall, so the backing
+filesystem applies it, or the default ACL instead, exactly as for a local
+create. The umask is per process, not per thread, which is fine while dcfs
+is single-threaded; worker threads will need `unshare(CLONE_FS)`, as
+virtiofsd does. Outside a switch dcfs's umask is 0 (set at startup), so the
+umask it inherited never alters a mode on the backing filesystem.
 
 ## Extended attributes
 
@@ -1008,8 +1027,10 @@ contents bypass the cache.
     plus `--fuse_opt`; install libfuse's signal handlers; daemonize if
     asked; run the session loop. `Init` requests export support,
     `FUSE_CAP_ATTR_GENERATION`, readdirplus, symlink caching and
-    passthrough; turns off atomic `O_TRUNC` and FUSE-over-io_uring; and
-    logs whether the kernel granted generations and passthrough.
+    passthrough; requires POSIX ACLs and `FUSE_CAP_DONT_MASK` (refusing
+    the mount without them); turns off atomic `O_TRUNC` and
+    FUSE-over-io_uring; and logs whether the kernel granted generations
+    and passthrough.
 
 ### Shutdown
 
@@ -1082,7 +1103,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `create_test` | mkdir, create, mknod, symlink and link, including error cases; the whole tree's listing agrees with the backing filesystem; zero sectors for a full metadata pass over everything created; `EXDEV` at a refused boundary. |
 | `rename_test` | unlink (including of an open file, whose row and handle live until the last close), rmdir, and every rename variant (across directories, over an existing file, `RENAME_NOREPLACE`, `RENAME_EXCHANGE`, a directory with its cached subtree); negative entries and completeness are recorded, not re-read. |
 | `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; served from the cache after a restart. |
-| `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; the daemon is back to root afterwards. |
+| `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
 | `release_leak_test` | A failed attribute refresh on the last writable close (forced by holding the SQLite write lock) does not leak the backing descriptor or passthrough registration. |
@@ -1107,7 +1128,6 @@ lists the user-visible ones.
   memory and keeping "dead" rows until the last `FORGET`.
 - **atime is not maintained** after passthrough reads, and `st_blocks`
   may lag behind delayed allocation until the next attribute refresh.
-- **POSIX ACLs are not enforced on the mount** (no `FUSE_POSIX_ACL`).
 - **The WAL mode is not verified.** `PRAGMA journal_mode=WAL` is issued
   and its result ignored (it does not apply to in-memory test databases).
   A cache database on a filesystem that cannot provide WAL's shared memory

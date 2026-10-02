@@ -178,7 +178,8 @@ absl::Status FuseRequest::PassthroughClose(int backing_id) {
 absl::StatusOr<Credentials> FuseRequest::Caller() const {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   const fuse_ctx *ctx = fuse_req_ctx(*req_);
-  Credentials caller{.uid = ctx->uid, .gid = ctx->gid, .groups = {}};
+  Credentials caller{
+      .uid = ctx->uid, .gid = ctx->gid, .groups = {}, .umask = ctx->umask};
   // Usually a handful of groups; fuse_req_getgroups returns the full count
   // even when it exceeds the buffer, so one retry at the right size
   // suffices (NGROUPS_MAX is 65536).

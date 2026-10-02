@@ -158,6 +158,11 @@ gid_t setfsgid(gid_t gid);
 uid_t fsuid();
 gid_t fsgid();
 
+// umask(2): sets the process's file mode creation mask and returns the
+// previous one. Cannot fail. Process-wide (the fs_struct is shared by every
+// thread not created with CLONE_FS unshared), unlike the credentials above.
+mode_t umask(mode_t mask);
+
 // setgroups(2) as the raw system call, which on Linux changes only the
 // CALLING THREAD's supplementary groups. Not glibc's setgroups(), which
 // broadcasts the change to every thread of the process (the POSIX

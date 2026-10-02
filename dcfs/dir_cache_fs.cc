@@ -146,10 +146,48 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // a backing file is allowed to be.
   conn.max_backing_stack_depth = FUSE_BACKING_STACKED_OVER;
 
+  // POSIX ACLs. Without FUSE_CAP_POSIX_ACL the kernel checks permissions
+  // on the mount (default_permissions) against the mode bits alone, and
+  // on a file with an ACL the group bits are the ACL mask: a named-user
+  // entry denying someone would be ignored, a named entry granting
+  // someone would not be honoured. With it, the kernel fetches
+  // system.posix_acl_access/default through GETXATTR (answered from the
+  // cache, like any xattr) and enforces them. The kernel leaves the rest
+  // to the filesystem: keeping the mode in sync with an ACL that is set,
+  // and an ACL in sync with a chmod (the backing filesystem does both, and
+  // dcfs reads the result back: see the side-effect xattrs above), and
+  // default ACL inheritance on create, which the backing filesystem does
+  // when the backing mkdirat/mknodat/openat runs.
+  //
+  // Inheritance is also why FUSE_CAP_DONT_MASK is needed with it: the
+  // umask must not be applied where the parent has a default ACL, so it
+  // must not be applied before the request reaches dcfs. With DONT_MASK
+  // the kernel sends the requested mode unmasked plus the caller's umask
+  // (fuse_ctx::umask), and the backing syscall runs with that umask (see
+  // backing.cc's AsCaller), so the backing filesystem applies it exactly
+  // where a local create would.
+  //
+  // Both are required, not optional: running without them would enforce
+  // permissions differently from the backing filesystem. Every kernel
+  // with FUSE_ATTR_GENERATION has both (protocol 7.26 and 7.12); should one
+  // ever be missing, the flag is wanted anyway, which makes libfuse refuse
+  // the INIT (want_flags_valid: EPROTO) and dcfs exit, rather than serve
+  // the mount with the wrong permission checks.
+  for (auto [flag, name] :
+       {std::pair{FUSE_CAP_POSIX_ACL, "FUSE_CAP_POSIX_ACL"},
+        std::pair{FUSE_CAP_DONT_MASK, "FUSE_CAP_DONT_MASK"}}) {
+    if (!fuse_set_feature_flag(&conn, flag)) {
+      LOG(ERROR) << "the kernel does not offer " << name
+                 << ", which dcfs requires; refusing to mount";
+      conn.want_ext |= flag;
+    }
+  }
+
   LOG(INFO) << "FUSE kernel protocol " << conn.proto_major << "."
             << conn.proto_minor << "; FUSE_CAP_ATTR_GENERATION "
             << (attr_generation ? "granted" : "NOT granted")
             << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted")
+            << "; FUSE_CAP_POSIX_ACL and FUSE_CAP_DONT_MASK requested"
             << "; FUSE_CAP_ATOMIC_O_TRUNC and FUSE_CAP_OVER_IO_URING "
                "intentionally not requested";
   return absl::OkStatus();

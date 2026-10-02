@@ -17,7 +17,9 @@
 # what the same operations do on a local filesystem: ownership of every
 # create-family op, setgid-directory group inheritance, supplementary
 # groups, chown/chgrp rules, sticky-directory rules, truncate, utimes,
-# chmod and user xattrs, allowed and denied. Finally it checks that the
+# chmod and user xattrs, allowed and denied, and POSIX ACLs (named entries
+# that deny or grant access against the mode bits, default ACL inheritance
+# and where the umask applies). Finally it checks that the
 # daemon itself is back to root afterwards (its own creates are owned by
 # root, and its /proc status shows fsuid/fsgid 0 and its original groups).
 #
@@ -245,6 +247,87 @@ expect_ok sticky-mkdir-alice alice mkdir "$MNT/sticky/ad"
 expect_fail sticky-rmdir-others "Operation not permitted" \
 	bob rmdir "$MNT/sticky/ad"
 expect_ok sticky-rmdir-own alice rmdir "$MNT/sticky/ad"
+
+# --- POSIX ACLs are enforced on the mount ---------------------------------
+#
+# The ACLs are written in their binary xattr form (testutil setxattrhex;
+# the guest has no setfacl): a 4-byte little-endian version (2), then one
+# 8-byte entry per tag (u16 tag, u16 perm, u32 id; USER_OBJ 01, USER 02,
+# GROUP_OBJ 04, MASK 10, OTHER 20; id ffffffff for the unnamed entries).
+# With an ACL, the mode's group bits are the mask, so a kernel that checks
+# the mode bits alone gets every named entry wrong.
+
+# acl_deny: alice's 0664 file whose ACL denies bob by name:
+# user::rw- user:bob:--- group::r-- mask::rw- other::r--. By the mode
+# bits bob is "other" and may read; by the ACL he may not.
+ACL_DENY_BOB=02000000\
+01000600ffffffff\
+02000000e9030000\
+04000400ffffffff\
+10000600ffffffff\
+20000400ffffffff
+# acl_grant: root's 0640 file whose ACL grants bob read by name:
+# user::rw- user:bob:r-- group::r-- mask::r-- other::---. By the mode bits
+# bob is "other" and may not read; by the ACL he may.
+ACL_GRANT_BOB=02000000\
+01000600ffffffff\
+02000400e9030000\
+04000400ffffffff\
+10000400ffffffff\
+20000000ffffffff
+# A minimal default ACL, user::rwx group::rwx other::rwx: new objects take
+# their permissions from it and from the requested mode, and the creating
+# process's umask is NOT applied (POSIX.1e; ext4's posix_acl_create).
+ACL_DEFAULT_RWX=02000000\
+01000700ffffffff\
+04000700ffffffff\
+20000700ffffffff
+
+# Set as their owners through the mount, so phase 3's read-back of the
+# stored ACL (and of the mode it implies) is exercised too.
+expect_ok acl-deny-create alice sh -c "echo secret >$MNT/pub/acl_deny"
+expect_ok acl-deny-chmod alice chmod 0664 "$MNT/pub/acl_deny"
+expect_ok acl-deny-set alice "$TESTUTIL" setxattrhex "$MNT/pub/acl_deny" \
+	system.posix_acl_access "$ACL_DENY_BOB"
+expect_stat acl-deny-mode '%a' pub/acl_deny 664
+echo secret >"$MNT/pub/acl_grant"
+chmod 0640 "$MNT/pub/acl_grant"
+expect_ok acl-grant-set "$TESTUTIL" setxattrhex "$MNT/pub/acl_grant" \
+	system.posix_acl_access "$ACL_GRANT_BOB"
+expect_stat acl-grant-mode '%a' pub/acl_grant 640
+
+# The backing filesystem enforces both ACLs; the mount must agree.
+expect_fail acl-deny-bob-src "Permission denied" bob cat "$SRC/pub/acl_deny"
+expect_fail acl-deny-bob-mnt "Permission denied" bob cat "$MNT/pub/acl_deny"
+expect_ok acl-deny-alice-mnt alice cat "$MNT/pub/acl_deny"
+expect_ok acl-deny-other-mnt "$TESTUTIL" runas 1002 1002 1002 -- \
+	cat "$MNT/pub/acl_deny"
+expect_ok acl-grant-bob-src bob cat "$SRC/pub/acl_grant"
+expect_ok acl-grant-bob-mnt bob cat "$MNT/pub/acl_grant"
+expect_fail acl-grant-other-mnt "Permission denied" \
+	"$TESTUTIL" runas 1002 1002 1002 -- cat "$MNT/pub/acl_grant"
+
+# Default ACL inheritance, with the caller's umask 022: a file created
+# 0666 and a directory created 0777 keep every bit, as on a local
+# filesystem (the umask applies only where the parent has no default ACL).
+expect_ok acl-default-mkdir alice mkdir "$MNT/pub/dacl"
+expect_ok acl-default-set alice "$TESTUTIL" setxattrhex "$MNT/pub/dacl" \
+	system.posix_acl_default "$ACL_DEFAULT_RWX"
+expect_ok acl-default-create alice sh -c \
+	"umask 022 && touch $MNT/pub/dacl/f && mkdir $MNT/pub/dacl/d"
+expect_stat acl-default-file-mode '%a' pub/dacl/f 666
+expect_stat acl-default-dir-mode '%a' pub/dacl/d 777
+got=$("$TESTUTIL" getxattrhex "$MNT/pub/dacl/d" system.posix_acl_default 2>&1)
+if [ "$got" = "$ACL_DEFAULT_RWX" ]; then
+	pass acl-default-dir-inherits
+else
+	fail acl-default-dir-inherits "got '$got'"
+fi
+# Without a default ACL the umask still applies.
+expect_ok acl-umask-create alice sh -c \
+	"umask 027 && touch $MNT/pub/umf && mkdir $MNT/pub/umd"
+expect_stat acl-umask-file-mode '%a' pub/umf 640
+expect_stat acl-umask-dir-mode '%a' pub/umd 750
 
 # --- the daemon is root again afterwards ----------------------------------
 

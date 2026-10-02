@@ -121,6 +121,10 @@ in isolation before folding back into the full run):
    clearing bits from a mode that was already final. `umask(0)` at the
    top of `main()` fixes it. Found via `open/02.t:2` and `open/03.t:2`
    (`open(path, 0642)` landing as 0640 on the backing file).
+   (Since step 6.3 the kernel no longer applies the umask itself: dcfs
+   requests `FUSE_CAP_DONT_MASK`, needed for POSIX ACL inheritance, and
+   switches to the caller's umask around the backing syscall; the daemon's
+   own umask stays 0 outside that.)
 
 Re-running the full suite after both fixes dropped the dcfs-specific count
 from the original 175 to 154 (21 checks fixed net of the two groups above

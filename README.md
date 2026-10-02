@@ -421,14 +421,6 @@ recovery protocol, concurrency, and the test strategy.
   and btrfs encode the generation in their handles, so this is covered
   there; on a filesystem whose handles carry no generation and which
   reports no birth time, a stale row could match a new object.
-- **POSIX ACLs are stored but not enforced on the mount.** dcfs caches and
-  serves `system.posix_acl_*` like any other xattr, but it does not enable
-  FUSE's ACL support, so the kernel checks permissions on the mount
-  against the mode bits alone. On a file with an ACL the group bits are
-  the ACL mask, so named-user and named-group entries are ignored and the
-  owning group gets the mask's permissions. Creates, removes, renames and
-  ownership changes run on the backing filesystem as the caller, where the
-  ACL does apply; opening an existing file does not.
 - **Removed objects that are still referenced fail with `ESTALE`.** dcfs
   deletes a row as soon as the backing object is gone and no dcfs open
   holds it. A shell whose working directory was removed, or an `O_PATH`

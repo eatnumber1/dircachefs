@@ -92,6 +92,14 @@ int ErrnoOf(const absl::Status &status) {
 // only itself, so this stays correct as long as a switch never spans a
 // suspension point (a co_await) -- AsCaller wraps one synchronous syscall.
 
+// The caller's umask (Credentials::umask) is switched to as well, and back
+// to 0 (main.cc's) afterwards: the kernel sends the mode of a create
+// unmasked (dcfs requests FUSE_CAP_DONT_MASK, which POSIX ACLs need), and
+// the backing filesystem applies the umask only where the parent has no
+// default ACL. Unlike the credentials, the umask is per process (the
+// fs_struct); worker threads will need unshare(CLONE_FS), as virtiofsd
+// does. Outside a switch it is whatever it was (0 in the daemon: main.cc).
+
 // The thread's supplementary groups before a switch, to restore after it.
 using SavedGroups = std::vector<gid_t>;
 
@@ -148,7 +156,11 @@ absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
 template <typename Op>
 std::invoke_result_t<Op> AsCaller(const Credentials &caller, Op &&op) {
   ABSL_ASSIGN_OR_RETURN(SavedGroups saved, SwitchTo(caller));
-  absl::Cleanup restore = [&saved] { RestoreRoot(saved); };
+  const mode_t saved_umask = syscalls::umask(caller.umask & 0777);
+  absl::Cleanup restore = [&saved, saved_umask] {
+    syscalls::umask(saved_umask);
+    RestoreRoot(saved);
+  };
   return std::forward<Op>(op)();
 }
 

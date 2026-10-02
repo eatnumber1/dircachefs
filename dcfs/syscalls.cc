@@ -510,6 +510,8 @@ uid_t fsuid() { return setfsuid(static_cast<uid_t>(-1)); }
 
 gid_t fsgid() { return setfsgid(static_cast<gid_t>(-1)); }
 
+mode_t umask(mode_t mask) { return ::umask(mask); }
+
 absl::Status setgroups_thread(std::span<const gid_t> groups) {
   if (::syscall(SYS_setgroups, groups.size(), groups.data()) == -1) {
     return ErrnoToStatus(errno, "setgroups");
