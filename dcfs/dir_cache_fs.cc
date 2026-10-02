@@ -687,9 +687,17 @@ absl::Status DirCacheFS::Rename(
   }));
   mutation.End();
 
-  // Outside that transaction (these need syscalls): both parents' mtime
-  // (and nlink, when a directory moved between them), and the ctime of
-  // every inode the rename touched.
+  RefreshAfterRename(parent, newparent, src, dst, dst_exists, same_inode,
+                     exchange);
+  return req.ReplyErrno(0);
+}
+
+void DirCacheFS::RefreshAfterRename(
+    InodeId parent, InodeId newparent, cache::LookupResult src,
+    cache::LookupResult dst, bool dst_exists, bool same_inode,
+    bool exchange) {
+  // These need syscalls: both parents' mtime (and nlink, when a directory
+  // moved between them), and the ctime of every inode the rename touched.
   LogPhase3Failure("Rename", backing::RefreshAttrs(ctx_, parent));
   if (newparent != parent) {
     LogPhase3Failure("Rename", backing::RefreshAttrs(ctx_, newparent));
@@ -709,7 +717,6 @@ absl::Status DirCacheFS::Rename(
       LogPhase3Failure("Rename", SettleUnlinkedFile(dst.id));
     }
   }
-  return req.ReplyErrno(0);
 }
 
 void DirCacheFS::ReresolveAfterFailure(

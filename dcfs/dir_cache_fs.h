@@ -284,6 +284,19 @@ class DirCacheFS {
   // backing object is gone or has nlink 0, and refreshes it if links remain.
   absl::Status SettleUnlinkedFile(InodeId id);
 
+  // Phase 3's post-syscall cleanup for Rename, once the backing renameat2
+  // has already succeeded: refreshes both parents' (and, if different,
+  // src's and a same-inode/exchange dst's) attributes, and applies the
+  // replaced object's row-lifetime rule when one was overwritten (not
+  // exchanged, not the same inode as src). Every failure here is logged
+  // and otherwise ignored -- see Rename's own comment on why (audit-races
+  // F7): the rename has already happened, so these are best-effort cache
+  // refreshes, not something the FUSE reply still depends on.
+  void RefreshAfterRename(
+      InodeId parent, InodeId newparent, cache::LookupResult src,
+      cache::LookupResult dst, bool dst_exists, bool same_inode,
+      bool exchange);
+
   // The fd of some outstanding open of `id`, if any.
   std::optional<int> OpenFdOf(InodeId id) const;
 
