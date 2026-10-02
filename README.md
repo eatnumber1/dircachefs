@@ -1,349 +1,460 @@
-# dcfs — directory cache filesystem
+# dcfs: directory cache filesystem
 
-dcfs is a FUSE daemon that mirrors a backing directory tree and serves every
-read operation except file *contents* from a persistent SQLite cache on an
-SSD: lookup, getattr, readdir, readlink, xattrs, access, statfs. Backing
-disks spin up only for file-content I/O and for writes. It is safely
-NFS-exportable: handles stay valid across daemon restarts, and handles that
-cannot be honored fail with ESTALE, never by serving the wrong file.
-Filesystems mounted below the source tree, and btrfs subvolumes, are not
-supported (see Limitations).
+dcfs is a FUSE filesystem that mirrors one backing directory tree and
+answers every metadata operation from a persistent SQLite cache, so that
+the disks holding the tree only have to spin up when someone reads or
+writes file contents.
 
-## Write-through cache and nothing more
+The intended setup is a large tree on spinning disks that are allowed to
+spin down, with the cache database on an SSD. Once a directory has been
+listed through dcfs, `lookup`, `getattr`, `readdir`, `readlink`,
+`getxattr`, `listxattr`, `access` and so on are served from the database
+without touching the backing disks. File contents are not cached: reads
+and writes go from the kernel straight to the backing file through FUSE
+passthrough, at native speed and without copying through the daemon.
 
-The backing filesystems are the only authority. Every mutation reaches the
-backing filesystem before the cache reflects it. Deleting the cache
-database, at any time, including mid-operation or after a crash, never
-loses or corrupts data. The only consequences are a cold cache and stale
-NFS handles.
+dcfs is a write-through cache and nothing more. The backing filesystem is
+the only authority: every change made through dcfs reaches the backing
+filesystem before the cache records it, and deleting the cache database at
+any time (even mid-operation or after a crash) never loses or corrupts
+data. The cost of losing the database is a cold cache and stale NFS
+handles.
+
+dcfs is designed to be exported over NFS. Its file handles stay valid
+across daemon restarts, and a handle that can no longer be honoured fails
+with `ESTALE` rather than resolving to the wrong file.
+
+Contents:
+
+- [Status](#status)
+- [Requirements](#requirements)
+- [Building](#building)
+- [Usage](#usage)
+- [Testing](#testing)
+- [Design overview](#design-overview)
+- [Limitations](#limitations)
+- [Further reading](#further-reading)
+- [License](#license)
 
 ## Status
 
-Early development, mid-rewrite, not usable yet (as of September 2026). The
-repo is descended from the 2023 "dfs" ublk block-device experiment, whose
-git history this repo carries forward; "dfs" is the old name, "dcfs" is the
-current one.
+Pre-release (October 2026). The single-threaded daemon is complete for its
+planned scope: read-only operations from the cache, write-through for every
+mutation, crash and power-loss recovery, caller credentials, and NFS
+export. The full test suite passes, including pjdfstest with zero
+dcfs-specific failures against ext4. It has not yet seen production use,
+and it depends on a kernel patch that is not yet upstream (see
+Requirements).
 
-## Identity model
-
-The FUSE nodeid is our own 64-bit row id, decoupled from backing identity.
-Backing identity of an object is `(device_id, backing_ino, backing_gen)`,
-where `device_id` identifies the filesystem and `backing_gen` comes from
-`FS_IOC_GETVERSION`. Rows are unique on that triple, so hard links share a
-row.
-
-- `inodes.id` (64-bit, never reused) is our identity and the FUSE nodeid.
-  Backing identifiers never serve as our keys; with several filesystems in
-  play, backing inode numbers are not even unique.
-- `st_ino` shown to users is the backing inode number, so hardlink-aware
-  tools behave as they would on the backing filesystem.
-- The FUSE generation returned on LOOKUP/GETATTR/SETATTR is a uniformly
-  random, nonzero 32-bit value drawn for each new row (the root's is 0).
-  Neither a rebuilt cache nor a power loss that rolls back recent inserts
-  (letting `AUTOINCREMENT` hand an id out again) reissues an old
-  `(nodeid, generation)` pair, except with probability 2^-32 per reissued
-  id: the old handle gets ESTALE instead of the new object.
-- A row is the same backing object only if, beyond `(device_id,
-  backing_ino, backing_gen)`, its stored file handle bytes and its birth
-  time (when both are known) match too. `backing_gen` is 0 for symlinks
-  and special files and on filesystems without `FS_IOC_GETVERSION`, but
-  the handle bytes still encode the real generation; and btrfs can reissue
-  an identical handle after its own power loss, which only the birth time
-  tells apart. Both are already in hand, so this costs no syscall.
-- When the backing filesystem recycles an inode number, a new row is
-  created with a new id and generation, and the old row is invalidated, so
-  a patched kernel rejects stale handles against it instead of resolving
-  them to the wrong file.
-- Handles survive daemon restarts, since the rows persist. They do not
-  survive a cache wipe: reconnection sends the kernel only the nodeid, and
-  with multiple backing filesystems there is no way to encode
-  `(device_id, ino, gen)` into a nodeid, and even for a single filesystem
-  some filesystems (xfs) require the exact original generation. Fixing
-  this would mean the daemon owning handle encoding in the kernel, which
-  is not needed, so a wipe simply yields ESTALE rather than a wrong file.
-
-## Fds and handles only, never paths
-
-After startup the daemon holds no path strings. This is what makes
-mounting dcfs over the directory it caches a supported configuration.
-
-1. At startup, before mounting, the source directory and the cache
-   database are opened by path once; after that, paths are never used
-   again. (The submount policy check -- see Limitations -- also reads
-   `--source`'s path and `/proc/self/mountinfo` once in this same window:
-   it is a startup-only policy decision, not part of identity, and keeps
-   no path afterwards either.)
-2. Backing filesystems are reached through one mount fd per device id,
-   never by opening a mount point by path. This must be a real
-   (non-`O_PATH`) directory fd: `open_by_handle_at`'s mount fd argument is
-   resolved via the kernel's non-raw fd class (`fs/fhandle.c
-   get_path_from_fd()`), which rejects `O_PATH` descriptors with `EBADF`.
-3. All backing operations use `*at` syscalls relative to fds derived from
-   stored handles (`openat`, `fstatat` with `AT_EMPTY_PATH`, `readlinkat`,
-   `linkat`, `renameat2`, and so on). Children are reached with
-   `openat(dir_fd, name)`, never a joined path.
-4. Handles are stored serialized, together with their device id, and are
-   the only durable reference to a backing object.
-
-## Caller identity
-
-dcfs runs as root, but every backing syscall whose result depends on who
-makes it is made as the FUSE caller: the thread's filesystem uid/gid are
-switched (`setfsuid`/`setfsgid`, plus the caller's supplementary groups
-via the per-thread raw `setgroups` system call) around just that syscall
-and switched back to root after it (`AsCaller` in `dcfs/backing.cc`).
-That covers creating objects (`mkdirat`, `mknodat`, `symlinkat`,
-`openat(O_CREAT)`: the caller owns them, and setgid directories pass their
-group on), `unlinkat` and `renameat2` (sticky directories), and chown,
-utimes, truncate, setxattr and removexattr. While fsuid is not 0 the
-kernel drops the filesystem capabilities, so reaching objects by handle
-(`open_by_handle_at`, which needs `CAP_DAC_READ_SEARCH`), `linkat` with
-`AT_EMPTY_PATH`, chmod (which the kernel also sends on a caller's behalf
-to clear setuid/setgid) and every probe stay root. The mount always uses
-`default_permissions`, so the kernel has already checked the caller's
-permissions against the cached attributes before a request arrives; see
-the comments at `AsCaller` and `backing::SetAttr` for the full reasoning.
-
-## Filesystem identity and the startup purge
-
-Filesystem identity is the filesystem UUID from `ioctl(fd,
-FS_IOC_GETFSUUID)`, always: reboot-stable on ext4, xfs, and btrfs. This
-ioctl has existed since Linux 6.9. ZFS returns ENOTTY until OpenZFS ships
-the ioctl; that case is treated as unimplemented rather than falling back
-to `f_fsid`. Btrfs subvolumes of one filesystem share a UUID but have
-separate inode-number spaces, so filesystem identity there also carries the
-subvolume id.
-
-There is no `f_fsid` fallback and no libmount dependency; identity itself is
-derived entirely from fds. (Startup does use `/proc/self/mountinfo` once,
-by path, for the submount policy check below -- that check is deliberately
-independent of the identity machinery, and never influences it.)
-
-A `filesystems` table exists to record a backing filesystem below the
-source and the dentry through which it was entered, for a future where
-kernel-supported FUSE submounts (see Limitations) can be cached like the
-source itself. Nothing populates it today: since submounts are refused
-outright (below), the source is the only backing filesystem dcfs ever has.
-The table, `MountFds`, and `StartupPurge` all stay in place for that future
-rather than being deleted now.
-
-At startup, the daemon compares the source filesystem's device id against
-the one recorded when the cache was created and refuses to start on a
-mismatch. It then purges all cached state -- dentries, inodes, xattrs,
-symlinks, and descendants -- for every non-source row left in the
-`filesystems` table. Today that only ever matters for a cache database
-built before submounts were refused, when such a row could still be
-created and its subtree cached; a fresh database's table holds only the
-source.
-
-## Crash robustness
-
-Mutations are two-phase, so a crash between the backing change and the
-cache update can only cost a repopulation, never wrong data:
-
-1. transaction: mark the affected state unknown (delete the dentry rows
-   involved, clear `children_complete` on the parent, clear `attrs_valid`
-   on attribute targets);
-2. perform the backing syscall;
-3. transaction: write the new state.
-
-Unknown state is repopulated from the backing filesystem on next access.
-
-That alone covers a daemon crash, after which the database is exactly its
-last committed state. A power loss (or kernel crash) is harder: SQLite's
-WAL runs at `synchronous=NORMAL` (commits reach the WAL but are not
-fsynced), the backing filesystem commits its journal on its own schedule,
-and each comes back as some prefix of what was written, independently. So
-the cache could come back *behind* the backing filesystem (phase 1 lost,
-the syscall kept) or *ahead* of it (phase 3 kept, the syscall lost). dcfs
-closes both with a durable dirty set, at the cost of one WAL fsync per
-mutation and no backing flush per mutation:
-
-- Phase 1 also records every inode the mutation changes (both parents and
-  the object for a rename, the parent and the child for an unlink, the
-  file for a setattr or writable open, ...) in a `dirty` table, and that
-  transaction is committed with `synchronous=FULL` (a WAL fsync) before the
-  backing syscall. Phase 3 commits normally and never removes dirty
-  entries; a row phase 3 creates is dirty too. A phase 1 whose inodes are
-  all already durably dirty skips the fsync, since recovery forgets their
-  state anyway: a burst of creates in one directory costs one fsync, not
-  one per file.
-- A sync point `syncfs()`es the backing filesystems and then empties the
-  dirty set (except files still open for writing). It runs when the kernel
-  sends FSYNC or FSYNCDIR (after the fsync itself), at a clean shutdown,
-  and at the start of the first request `--sync_interval_sec` (default 5)
-  after the previous one while the set is non-empty. dcfs is
-  single-threaded in libfuse's blocking loop and has no timer, so an idle
-  daemon keeps a non-empty set until its next request, fsync or shutdown:
-  that is safe, it only makes the re-read after a crash larger. (libfuse
-  3.18.2 has no SYNCFS handler, and the kernel sends SYNCFS only to
-  fuseblk servers anyway.)
-- The single-row `cache_state` table (see `dcfs/schema.sql`) records,
-  besides the schema version and the source filesystem's identity,
-  whether the last run ended cleanly (`clean_shutdown`, set after its final
-  sync point and WAL checkpoint) and which boot it ran in (`boot_id`). At startup after an unclean shutdown, dcfs marks everything
-  in the dirty set unknown: attributes, xattrs, symlink target, a
-  directory's whole listing, and the dentries pointing at each entry. Rows
-  are kept, so NFS handles still resolve (and are verified when next
-  opened). It logs a WARNING with the count and whether the machine
-  rebooted (a crash or power loss) or only the daemon died.
-
-What a power loss costs is therefore re-reading the entries mutated in the
-last few seconds before it (up to `--sync_interval_sec`, or since the last
-fsync), never serving state the backing filesystem did not keep.
-
-Writes to file contents go from the kernel straight to the backing file
-(FUSE passthrough), so dcfs never sees them. A writable open or create is
-therefore phase 1 of a mutation: it marks the file's cached attributes
-unknown before the open is replied to, and they stay unknown until the last
-writable open of that file is released (phase 3), however often they are
-read or refreshed meanwhile. While the file is open, attribute reads are
-served by a `statx` of dcfs's already-open backing fd, so this costs no
-extra open and no disk access. A crash while a file is open for writing
-leaves its attributes unknown, never the pre-write size and mtime marked
-current. Such a file stays in the dirty set until that last release, sync
-points notwithstanding. Likewise, the attributes of an unlinked file dcfs
-still holds open (link count 0) are never recorded as current: its row
-only lives until the last close deletes it.
-
-## Coherence
-
-dcfs requires exclusive access to the backing trees: all access to them
-must go through dcfs. There is no fanotify integration and no TTL-based
-revalidation, and changes made to the backing trees behind dcfs's back
-are unsupported.
-
-They are, however, detected and logged when a syscall dcfs makes anyway
-reveals them; dcfs never adds a syscall just to look. Whenever dcfs opens
-an object by handle it already `statx`es it to verify its identity, and
-when it lists a directory it already `statx`es every child. If the object
-is no longer the one the cache describes (a recycled inode number or
-generation), dcfs logs a WARNING and forgets the row (ESTALE). If its
-cached attributes are marked current but disagree with the fresh `statx`
-in mode, owner, group, link count, size, mtime or ctime, dcfs logs one
-WARNING ("out-of-band change on the backing filesystem (unsupported)")
-naming the fields that changed, then:
-
-- adopts the fresh attributes;
-- for a directory whose mtime or ctime changed, forgets its negative
-  entries and marks its listing incomplete, so the next lookup or readdir
-  lists it again;
-- for any object whose ctime changed, marks its cached xattrs unknown.
-
-The kernel's own attribute and dentry caches are not invalidated; they
-pick up the change once they expire or are evicted. Anything served
-purely from the cache (every lookup, getattr, readdir or xattr read that
-needs no backing I/O) detects nothing.
-
-## Limitations
-
-- **No out-of-band access to the backing trees** (see Coherence above):
-  dcfs requires exclusive access, detects what it stumbles onto for free,
-  and never invalidates the kernel's own caches.
-- **The kernel is not told about out-of-band changes.** Even when dcfs
-  detects one and updates its own cache, the kernel keeps serving the
-  attributes and dentries it already has until their timeouts expire or
-  it evicts them; dcfs sends no invalidation notifications.
-- **Writes through a shared writable mapping after the last `close()`
-  are not reflected in metadata.** With passthrough the mapping keeps
-  only the backing file, so the kernel releases the dcfs file on
-  `close()` and later stores reach the backing file without dcfs (or the
-  kernel's attribute cache) hearing of them: mtime, ctime and size stay as
-  cached (and NFS clients, which derive change attributes from ctime, may
-  keep stale data). While the file is still open for writing, attributes
-  are served with a zero timeout from the open file, so they are current.
-- **Filesystems mounted below the source, and btrfs subvolumes, are not
-  supported.** One superblock means one `st_dev`, and `st_ino` (shown to
-  users unchanged, so hardlink-aware tools such as `tar`/`rsync`/`cp -a`
-  behave as they would on the backing filesystem) is only unambiguous
-  within one `st_dev`; several backing filesystems under one source would
-  let two different objects collide on the same `(st_dev, st_ino)` pair.
-  So:
-  - At startup, before mounting, dcfs looks for any mount whose mount
-    point lies strictly below `--source` (`dcfs/mounts_below.h`, reading
-    `/proc/self/mountinfo`) and refuses to start if it finds one, naming
-    it in the error. A mount *on* `--source` itself is fine (that is what
-    `--source` always is).
-  - A boundary that only appears at runtime -- a filesystem mounted after
-    dcfs started, or a btrfs subvolume, which the startup check cannot see
-    since it is not a separate mount -- is refused when dcfs next lists
-    the directory it sits in: the ERROR is logged once, the name is left
-    out of the cached listing and out of readdir, and looking it up
-    (`stat`, `open`, ...) fails with EXDEV instead of being served from a
-    cache that would mix two filesystems' inode numbers. Unmounting it
-    makes it visible again the next time its parent directory is
-    repopulated.
-  - The device id still lives in dcfs's identity model, the `filesystems`
-    table, `MountFds`, and the boundary-detection code (`IsBoundary`); none
-    of it is used to *serve* a boundary today, but it is what a future
-    kernel-supported FUSE submount (`FUSE_ATTR_SUBMOUNT`, today
-    virtiofs-only, and would need an INIT-time opt-in for `/dev/fuse`)
-    would plug into, so that the kernel -- not dcfs's own `st_dev` -- keeps
-    two filesystems' inode numbers apart.
-
-## Design direction
-
-The code today is deliberately simple: plain functions and small classes,
-synchronous, single-threaded, no template trampolines, no threads, no async, so each
-step is a small reviewable diff.
-
-The eventual architecture is C++ coroutines over io_uring, including
-FUSE-over-io_uring for requests and io_uring for backing I/O and
-potentially SQLite's own I/O through a pluggable VFS. Today's code only
-has to not preclude that future. A few rules keep the eventual rewrite
-mechanical:
-
-- every cache and backing operation takes an explicit `Context&`; no
-  globals, no singletons, no `thread_local`;
-- a transaction never spans a point that could later suspend: backing I/O
-  happens first, then one short synchronous transaction;
-- only `dcfs/backing.{h,cc}` touches the backing filesystems through
-  syscalls; the cache and FUSE op layers never call the syscall wrapper
-  directly, so the io_uring rewrite replaces one module;
-- the SQLite wrapper opens connections through one factory that accepts a
-  VFS name, so an io_uring `sqlite3_vfs` can be dropped in later.
+The repository carries forward the history of a 2023 experiment called
+"dfs" (a ublk block device); "dcfs" is the current project.
 
 ## Requirements
 
-- A Linux kernel carrying the `FUSE_ATTR_GENERATION` patch:
-  https://lore.kernel.org/all/20260927141437.1432584-1-russ@har.mn/
-- libfuse 3.18.2 plus the patch carried in `third_party/libfuse/` (added in
-  a later step).
-- Bazel, via bazelisk.
-- FUSE passthrough requires Linux >= 6.9.
+- **Root.** dcfs reopens cached objects with `open_by_handle_at(2)`
+  (`CAP_DAC_READ_SEARCH`), mounts FUSE and registers passthrough files
+  (`CAP_SYS_ADMIN`), and switches to each caller's filesystem credentials.
+  There is no unprivileged mode.
+- **Linux with the `FUSE_ATTR_GENERATION` patch** (FUSE protocol 7.47).
+  It makes the kernel honour the generation numbers dcfs returns from
+  LOOKUP, GETATTR and SETATTR, which is what makes NFS export safe. The v1
+  posting is
+  https://lore.kernel.org/all/20260927141437.1432584-1-russ@har.mn/ and a
+  v2 followed. dcfs logs at startup whether the kernel granted the
+  capability; without it, dcfs still runs but should not be exported over
+  NFS.
+- **Linux 6.9 or later** for `FS_IOC_GETFSUUID` (filesystem identity) and
+  FUSE passthrough (`CONFIG_FUSE_PASSTHROUGH`).
+- **A backing filesystem that supports file handles
+  (`name_to_handle_at`) and `FS_IOC_GETFSUUID`.** ext4 is tested. xfs and
+  btrfs meet the requirements but are not yet covered by the test suite.
+  ZFS is not supported until OpenZFS implements `FS_IOC_GETFSUUID`; dcfs
+  refuses to start on it.
+- **To build:** Bazel through
+  [bazelisk](https://github.com/bazelbuild/bazelisk) (the repository pins
+  Bazel 9.2.0 in `.bazelversion`) and a C++20 compiler. Every library
+  dependency (Abseil, SQLite, libfuse 3.18.2 plus the generation patch in
+  `third_party/libfuse/`) is fetched and built by Bazel; no system libfuse
+  is needed.
+- **To test:** QEMU, KVM and a kernel built from a tree carrying the
+  patch. See [Testing](#testing).
 
-## Building and testing
-
-dcfs requires root (real `open_by_handle_at`, `FS_IOC_GETFSUUID`, and so
-on), so there is no host-side test execution: every test, unit tests
-included, boots the project's own minimal Linux kernel under QEMU and runs
-as root inside it. `bazel build //...` needs nothing beyond Bazel, but
-`bazel test //...` additionally needs:
-
-- KVM (`/dev/kvm`, and your user in the `kvm` group -- see
-  `test/qemu/README.md` if you're not; QEMU falls back to software
-  emulation otherwise, which is far slower);
-- the test kernel built once with `test/qemu/scripts/build-kernel.sh` (see
-  `test/qemu/README.md` for what it needs and how long it takes).
+## Building
 
 ```
-bazel build //...
-bazel test //...                       # everything: unit + e2e, all in QEMU
-bazel test --config=asan //dcfs:...
+bazel build //...                 # everything, including the test binaries
+bazel build //dcfs:main           # the daemon
+bazel build //dcfs:main_static    # the daemon, fully statically linked
 ```
 
-Unit-test VMs boot in well under a second (see `test/qemu/README.md`);
-e2e tests (tagged `e2e`) are bigger and slower but run the same way, with
-no separate `--config` needed.
+The daemon is `bazel-bin/dcfs/main` (or `bazel-bin/dcfs/main_static`).
+The static build is what the test initramfs uses and is the easiest one to
+install on another machine:
 
-Use `tools/format.sh` to format the source before sending a change.
+```
+sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs
+```
+
+`bazel build //...` works without the test kernel: until it is built, the
+kernel is a placeholder that makes any test fail fast with a pointer to
+the build script.
+
+Format changes with `tools/format.sh` (clang-format and buildifier, if
+installed) before sending them.
+
+## Usage
+
+```
+dcfs --source=<dir> --cache_db=<path> [flags] <mountpoint>
+```
+
+### Flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--source` | (required) | The directory to cache. Opened once at startup; dcfs never uses the path again. |
+| `--cache_db` | (required) | The SQLite cache database. Created if missing. Put it on an SSD, not on the backing disks. |
+| `<mountpoint>` | (required) | Where to mount dcfs. May be the same path as `--source`. |
+| `--allow_other` | `false` | Mount with `-o allow_other`, so users other than root can use the mount. Needed for almost any real deployment, and for NFS export. |
+| `--attr_timeout_sec` | `3600` | How long the kernel may cache an inode's attributes. Long by design, since dcfs has exclusive access. While a file is open for writing, its attributes are always returned with a timeout of 0. |
+| `--entry_timeout_sec` | `3600` | How long the kernel may cache a lookup result, including a negative one. |
+| `--sync_interval_sec` | `5` | While mutations have left dirty cache entries, the first request this many seconds after the last sync point runs a new one (`syncfs` of the backing filesystem, then the dirty set is cleared). Bounds how much is re-read after a power loss. |
+| `--foreground` | `true` | Stay in the foreground. With `false`, dcfs daemonizes after mounting and its standard error goes to `/dev/null`, so its log is lost. |
+| `--fuse_opt` | (empty) | Extra mount options passed to libfuse as `-o <opts>`, comma-separated, e.g. `--fuse_opt=max_read=65536`. Repeating the flag replaces the previous value, so combine options in one flag. `default_permissions` is always added. |
+
+dcfs uses Abseil logging, so Abseil's logging flags work too: `--v=1`
+enables per-request debug logging, and `--stderrthreshold` (default
+`WARNING` in dcfs) controls what reaches standard error. At the default
+level the daemon only logs warnings and errors, such as out-of-band
+changes it noticed or recovery after an unclean shutdown.
+
+libfuse mounts with `nosuid,nodev` by default. Pass `--fuse_opt=suid,dev`
+if setuid binaries or device nodes on the backing tree must work through
+the mount.
+
+### Example
+
+```
+sudo mkdir -p /var/lib/dcfs /mnt/media
+sudo dcfs --source=/srv/media --cache_db=/var/lib/dcfs/media.db \
+    --allow_other /mnt/media
+```
+
+The first listing of each directory reads it from the backing disk and
+records everything about its entries (attributes, file handle, symlink
+target, xattrs). After that, `find /mnt/media -ls` or `ls -lR` reads
+nothing from the backing disk, also after dcfs is restarted. Opening a
+file for reading or writing does spin the disk up.
+
+### Mounting over the source directory
+
+Mounting dcfs on the directory it caches is supported:
+
+```
+sudo dcfs --source=/srv/media --cache_db=/var/lib/dcfs/media.db \
+    --allow_other /srv/media
+```
+
+This works because dcfs opens `--source` before mounting and never uses a
+path again: every later access goes through that descriptor or through
+file handles stored in the cache. Everything that used `/srv/media` before
+now goes through dcfs and cannot bypass it by accident, which makes this
+the easiest way to honour the exclusive-access requirement (see
+[Limitations](#limitations)).
+
+### Running under systemd
+
+`packaging/dcfs.service` and `packaging/dcfs.env.example` are a unit and
+its environment file:
+
+```
+sudo install -m 0644 packaging/dcfs.service /etc/systemd/system/
+sudo install -D -m 0644 packaging/dcfs.env.example /etc/dcfs/dcfs.env
+sudoedit /etc/dcfs/dcfs.env    # set SOURCE, CACHE_DB, MOUNTPOINT
+sudo systemctl daemon-reload
+sudo systemctl enable --now dcfs
+```
+
+The unit runs dcfs as root in the foreground and restarts it if it exits
+with an error. Its command line has no `--allow_other`; add it (and any
+other flags) to `ExecStart=` with a drop-in (`systemctl edit dcfs`) if
+users other than root, or nfsd, need the mount.
+
+### Exporting over NFS
+
+nfsd needs `--allow_other`, and a FUSE filesystem needs an explicit `fsid=`
+in its export. An `/etc/exports` line:
+
+```
+/mnt/media  192.168.1.0/24(rw,fsid=1,no_subtree_check)
+```
+
+NFS clients keep their handles across dcfs restarts. After restarting
+dcfs, though, run
+
+```
+sudo exportfs -f
+```
+
+nfsd's export cache holds a reference to the old mount and answers `EIO`
+until it is flushed. This is ordinary NFS administration for any
+filesystem that is unmounted and remounted under an export.
+
+If the cache database is deleted, handles held by NFS clients become stale
+(`ESTALE`); they never resolve to a different file.
+
+### Shutdown, crashes and restarts
+
+`SIGTERM`, `SIGINT` or `SIGHUP` (and so `systemctl stop`) shut dcfs down
+cleanly: it unmounts, syncs the backing filesystem, empties the dirty set,
+checkpoints the SQLite WAL, records a clean shutdown and exits 0. If a
+file was still open for writing (possible after a lazy unmount), dcfs
+leaves the clean-shutdown flag unset so that the next start re-reads what
+that file's writes may have changed.
+
+If dcfs stops without a clean shutdown (a crash, `SIGKILL`, a kernel crash
+or a power loss), the next start notices, logs a warning with the number
+of affected entries, and forgets everything cached about the entries
+changed since the last sync point, so that they are re-read from the
+backing filesystem. Inode rows are kept, so NFS handles keep working.
+
+After a crash the dead FUSE mount stays in place, and accessing it fails
+with `ENOTCONN`. Unmount it (`umount -l <mountpoint>`) before starting dcfs
+again. When dcfs is mounted over its own source this is mandatory, since
+dcfs would otherwise try to open the dead mount as its source.
+
+Only one dcfs may use a cache database at a time: dcfs takes an exclusive
+lock on it at startup and refuses to start if another process holds it.
+dcfs also refuses a database that was built for a different filesystem or
+a different source directory; delete it to start with a cold cache.
+
+## Testing
+
+Every test, unit tests included, runs as root inside a QEMU guest booted
+from the project's own minimal kernel. There is no host-side test
+execution: dcfs needs root, `open_by_handle_at`, `FS_IOC_GETFSUUID` and the
+patched FUSE, none of which a development host can be assumed to have.
+Guests boot in about a second with KVM (QEMU `microvm`, direct kernel
+boot), so `bazel test //...` is dominated by compilation, not booting.
+`test/qemu/README.md` has the full details.
+
+### One-time setup
+
+1. Install `qemu-system-x86_64` (8.2 or later, with `qboot.rom`),
+   `mkfs.ext4`, `mkfs.btrfs`, `mkfs.xfs`, and a statically linked
+   `busybox`.
+2. Get write access to `/dev/kvm`: `sudo usermod -aG kvm "$USER"`, then log
+   in again. Without KVM, QEMU falls back to software emulation, which is
+   more than ten times slower and can make tests time out.
+3. Build the test kernel from a Linux tree that carries the
+   `FUSE_ATTR_GENERATION` patch:
+
+   ```
+   LINUX=~/Sources/linux test/qemu/scripts/build-kernel.sh
+   ```
+
+   It builds out of tree into `~/.cache/dcfs/kernel-build` (override with
+   `DCFS_KERNEL_BUILD`, and export the same variable to Bazel) and takes
+   tens of minutes the first time.
+4. For `nfs_test` only, build the small Debian root image it chroots into
+   (needs `mmdebstrap` and a subuid range; downloads about 200 MB once):
+
+   ```
+   test/qemu/scripts/mkrootfs-debian.sh
+   ```
+
+### The `kvm` group and the Bazel server
+
+Until you log in again after joining the `kvm` group, run tests under
+`sg kvm -c '...'`. Bazel keeps a long-lived server process, and the tests'
+QEMU processes inherit that server's groups, not your shell's. If the
+server was first started without the `kvm` group, `sg kvm -c 'bazel test
+...'` is not enough: run `bazel shutdown` first so that the next invocation
+starts a server that has the group.
+
+### Running tests
+
+```
+sg kvm -c 'bazel test //...'                         # everything
+sg kvm -c 'bazel test //dcfs:metadata_cache_test'    # one unit test
+sg kvm -c 'bazel test //test/qemu:write_test --test_output=streamed'
+sg kvm -c 'bazel test --config=asan //dcfs:all'      # under ASan
+```
+
+`--test_output=streamed` shows a guest's console as it runs. Afterwards,
+each test's output is in `bazel-testlogs/<package>/<target>/test.log`, and
+the guest's serial console (including dcfs's own log, for the end-to-end
+tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
+
+### What is tested
+
+- **Unit tests** (`dcfs/*_test.cc`, Bazel macro `qemu_cc_test`): the
+  SQLite wrapper, schema migration, the metadata cache, the backing layer,
+  file handles, filesystem identity, the submount check, the syscall
+  wrappers (including fault injection through link-time wrappers), and
+  status and errno handling. Tests that need real filesystem semantics get
+  a scratch ext4 disk.
+- **End-to-end tests** (`test/qemu/guest/*.sh`, macro `qemu_test`) run the
+  real daemon against a scratch ext4 disk and check every result both
+  through the mount and directly on the backing filesystem. Many of them
+  also read `/sys/block/<dev>/stat` to prove that a warm metadata pass
+  reads zero sectors from the backing disk, including after a restart:
+  `readonly_test`, `passthrough_test`, `lifecycle_test`, `handles_test`,
+  `setattr_test`, `create_test`, `rename_test`, `write_test`,
+  `credentials_test`, `crash_test`, `power_test`, `release_leak_test`,
+  `readdir_boundary_test`, `nfs_test` and `boot_test`.
+  [`docs/design.md`](docs/design.md#test-strategy) says what each one
+  proves.
+- **POSIX conformance**: `pjdfstest_test` runs all of pjdfstest (about 8800
+  checks, as root and as unprivileged users), once through dcfs and once
+  directly on the same ext4 filesystem, and fails on any dcfs-specific
+  failure. Today both runs fail the same 28 checks. See
+  `docs/conformance.md`. This test is slow (tens of minutes).
+
+Bugs get a regression test first: the test is shown to fail on the
+unfixed code, then the fix makes it pass.
+
+## Design overview
+
+dcfs is layered so that exactly one module touches the backing filesystem
+for request work:
+
+```
+kernel FUSE <-> fuse_ops.cc -> DirCacheFS (dir_cache_fs.cc)
+                                  |                    |
+                                  v                    v
+                        backing:: (backing.cc)   cache:: (metadata_cache.cc)
+                        syscalls on the          pure SQLite, no syscalls
+                        backing filesystem
+```
+
+**Identity.** Every backing object dcfs has seen has a row in the cache.
+The row id is the FUSE node id, is never reused, and carries a random
+32-bit generation; `st_ino` shown to users is the backing inode number.
+A row is tied to its backing object by the filesystem's UUID, the inode
+number and generation, the file handle bytes and the birth time. dcfs
+holds no paths after startup: it reaches objects by reopening stored file
+handles and reaches children with `openat` relative to a directory
+descriptor. That is what allows mounting dcfs over its own source.
+
+**Explicit states.** Every cached fact is present, absent or unknown, and
+a directory listing is either complete (a name without a row is absent) or
+not. A lookup the cache cannot answer probes just that name, or lists the
+whole directory once; after that, the directory is served from the cache.
+
+**Write-through in three phases.** Every mutation (1) marks what it is
+about to change as unknown and records the affected inodes in a durable
+dirty set, committed with an fsync of the WAL; (2) performs the backing
+syscall, as the calling user where that matters; (3) records the new
+state. A crash at any point leaves at worst unknown entries, which are
+re-read on demand. Sync points (`syncfs`, then clearing the dirty set) run
+on `fsync`, every few seconds while there is dirty state, and at shutdown;
+after an unclean shutdown, everything still in the dirty set is forgotten.
+This bounds what a power loss costs to re-reading the entries changed in
+the last few seconds.
+
+**File contents** go through FUSE passthrough on one shared backing file
+per inode. While a file is open for writing, its cached attributes stay
+unknown and are answered from a `statx` of the open file.
+
+**Future.** The code is deliberately synchronous and single-threaded
+today, but follows rules (an explicit context everywhere, no transaction
+spanning a backing syscall, guarded cache fills) so that it can move to
+C++ coroutines over io_uring.
+
+[`docs/design.md`](docs/design.md) covers all of this in depth: goals and
+assumptions, the identity model, the full schema, the write-through and
+recovery protocol, concurrency, and the test strategy.
+
+## Limitations
+
+- **Exclusive access to the backing tree is required.** Everything that
+  changes the backing tree must go through dcfs. There is no fanotify
+  watch and no time-based revalidation. Changes made behind dcfs's back
+  are unsupported: dcfs notices them only when a syscall it makes anyway
+  reveals them (when it reopens an object by handle, or lists a
+  directory), then logs a warning and adopts what it sees. Anything
+  answered purely from the cache notices nothing and stays stale.
+- **The kernel's caches are not invalidated** when dcfs does notice an
+  out-of-band change. The kernel keeps serving attributes and dentries it
+  already has until their timeouts (an hour by default) expire or it
+  evicts them. This is a deliberate decision: sending invalidations safely
+  needs a separate notifier thread, and out-of-band changes are
+  unsupported anyway.
+- **No filesystems mounted below the source, and no btrfs subvolumes.**
+  All objects in a FUSE mount share one `st_dev`, and dcfs shows backing
+  inode numbers as `st_ino`, so two filesystems could produce colliding
+  `(st_dev, st_ino)` pairs and confuse hard-link detection in `tar`,
+  `rsync` and `cp -a`. dcfs refuses to start if anything is mounted below
+  `--source`. A boundary that appears later (a new mount, or a btrfs
+  subvolume, which is not a separate mount) is logged as an error, left out
+  of directory listings, and fails with `EXDEV` when looked up. Kernel
+  support for FUSE submounts (`FUSE_ATTR_SUBMOUNT`, today used only by
+  virtiofs) would allow lifting this.
+- **Writes through a shared writable `mmap` after the last `close()` are
+  not tracked.** With passthrough, the mapping holds only the backing file,
+  so the kernel releases the dcfs file at `close()` and later stores reach
+  the backing file without dcfs hearing of them. The file's cached size,
+  mtime and ctime stay as they were at `close()`, and NFS clients, which
+  detect changes through ctime, may keep serving stale data. While the
+  file is still open for writing, attributes are current. Fixing this
+  needs a kernel change.
+- **NFS handles do not survive deleting the cache database.** They fail
+  with `ESTALE`, never by resolving to a different file. Handles do survive
+  restarts of dcfs.
+- **Single-threaded.** dcfs serves one request at a time, so a request that
+  has to wait for a disk to spin up delays every other request, including
+  ones the cache could answer. The coroutine and io_uring design that
+  lifts this is future work.
+- **Power loss re-reads recent changes.** After a power loss or kernel
+  crash, everything cached about entries changed in the last
+  `--sync_interval_sec` seconds (or since the last `fsync`) is forgotten
+  and re-read from the backing filesystem, which spins it up. An idle dcfs
+  has no timer, so a dirty set left by the last burst of activity is only
+  cleared by the next request, `fsync` or shutdown; that is safe but makes
+  the re-read larger.
+- **Generation 0 objects.** dcfs reads the backing inode generation
+  (`FS_IOC_GETVERSION`) only for regular files and directories; symlinks,
+  device nodes, FIFOs and sockets, and every object on a filesystem without
+  generations, have generation 0. For them, detecting a recycled inode
+  number relies on the stored file handle and the birth time. ext4, xfs
+  and btrfs encode the generation in their handles, so this is covered
+  there; on a filesystem whose handles carry no generation and which
+  reports no birth time, a stale row could match a new object.
+- **POSIX ACLs are stored but not enforced on the mount.** dcfs caches and
+  serves `system.posix_acl_*` like any other xattr, but it does not enable
+  FUSE's ACL support, so the kernel checks permissions on the mount
+  against the mode bits alone. On a file with an ACL the group bits are
+  the ACL mask, so named-user and named-group entries are ignored and the
+  owning group gets the mask's permissions. Creates, removes, renames and
+  ownership changes run on the backing filesystem as the caller, where the
+  ACL does apply; opening an existing file does not.
+- **Removed objects that are still referenced fail with `ESTALE`.** dcfs
+  deletes a row as soon as the backing object is gone and no dcfs open
+  holds it. A shell whose working directory was removed, or an `O_PATH`
+  descriptor on an unlinked file, then gets `ESTALE` where a local
+  filesystem would return an empty listing or `nlink` 0.
+- **atime is not maintained.** Reads through passthrough update the
+  backing file's access time, but dcfs keeps serving the one it last
+  recorded. `st_blocks` can also lag behind delayed allocation until the
+  file's attributes are next refreshed.
+- **Not implemented:** `O_TMPFILE`, `copy_file_range`, reflinks
+  (`FICLONE`) and other ioctls; tools fall back to plain reads and writes.
+  File locks are handled by the kernel, locally within the mount.
+- **Filesystem coverage.** Only ext4 is exercised by the test suite. xfs
+  and btrfs should work but are untested; ZFS is refused until it supports
+  `FS_IOC_GETFSUUID`.
 
 ## Further reading
 
-- The kernel patch:
+- [`docs/design.md`](docs/design.md): the detailed design.
+- [`docs/conformance.md`](docs/conformance.md): pjdfstest results.
+- [`test/qemu/README.md`](test/qemu/README.md): the QEMU test
+  infrastructure.
+- The kernel patch, v1:
   https://lore.kernel.org/all/20260927141437.1432584-1-russ@har.mn/
-- https://russ.har.mn/blog/2026-04-09/fuse-loopback-is-incomplete
+- Background: https://russ.har.mn/blog/2026-04-09/fuse-loopback-is-incomplete
 
 ## License
 
-TBD.
+To be decided.
