@@ -16,11 +16,11 @@ MAIN_DEPS = [
     ":sqlite",
     ":status",
     ":syscalls",
+    "@absl//absl/base:log_severity",
     "@absl//absl/cleanup",
     "@absl//absl/flags:flag",
     "@absl//absl/flags:parse",
     "@absl//absl/flags:usage",
-    "@absl//absl/base:log_severity",
     "@absl//absl/log",
     "@absl//absl/log:flags",
     "@absl//absl/log:globals",
@@ -139,8 +139,8 @@ qemu_cc_test(
     size = "small",
     srcs = ["fd_test.cc"],
     deps = [
-      ":syscalls",
       ":status",
+      ":syscalls",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -153,8 +153,8 @@ qemu_cc_test(
     srcs = ["syscalls_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # name_to_handle_at/FS_IOC_GETVERSION/xattrs need a real filesystem
     deps = [
-      ":syscalls",
       ":status",
+      ":syscalls",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -178,8 +178,8 @@ qemu_cc_test(
       "-Wl,--wrap=readlinkat",
     ],
     deps = [
-      ":syscalls",
       ":status",
+      ":syscalls",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -198,14 +198,14 @@ cc_library(
     deps = [
       ":credentials",
       ":ret_check",
-      ":syscalls",
       ":status",
-      "@absl//absl/status:statusor",
-      "@absl//absl/status",
-      "@absl//absl/log",
-      "@absl//absl/time",
-      "@absl//absl/log:check",
+      ":syscalls",
       "@absl//absl/container:flat_hash_set",
+      "@absl//absl/log",
+      "@absl//absl/log:check",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/time",
       "@libfuse//:libfuse",
     ],
 )
@@ -358,8 +358,8 @@ cc_library(
     hdrs = ["dir_cache_fs.h"],
     deps = [
       ":backing",
-      ":credentials",
       ":context",
+      ":credentials",
       ":fuse_request",
       ":metadata_cache",
       ":ret_check",
@@ -513,12 +513,12 @@ cc_library(
     hdrs = ["context.h"],
     deps = [
       ":device_id",
+      ":mount_fds",
+      ":sqlite",
       "@absl//absl/container:flat_hash_map",
       "@absl//absl/container:flat_hash_set",
-      ":mount_fds",
       "@absl//absl/random:bit_gen_ref",
       "@absl//absl/status:statusor",
-      ":sqlite",
     ],
 )
 
