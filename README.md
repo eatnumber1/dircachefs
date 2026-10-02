@@ -170,15 +170,17 @@ its environment file:
 ```
 sudo install -m 0644 packaging/dcfs.service /etc/systemd/system/
 sudo install -D -m 0644 packaging/dcfs.env.example /etc/dcfs/dcfs.env
-sudoedit /etc/dcfs/dcfs.env    # set SOURCE, CACHE_DB, MOUNTPOINT
+sudoedit /etc/dcfs/dcfs.env    # set SOURCE, CACHE_DB, MOUNTPOINT, EXTRA_ARGS
 sudo systemctl daemon-reload
 sudo systemctl enable --now dcfs
 ```
 
 The unit runs dcfs as root in the foreground and restarts it if it exits
-with an error. Its command line has no `--allow_other`; add it (and any
-other flags) to `ExecStart=` with a drop-in (`systemctl edit dcfs`) if
-users other than root, or nfsd, need the mount.
+with an error. `EXTRA_ARGS` in the environment file holds further flags,
+split at whitespace; the example sets `--allow_other`, which users other
+than root, and nfsd, need. Before each start the unit lazily unmounts a
+dead FUSE mount left on the mount point by a crash (see below), and
+leaves a mount point that can be accessed alone.
 
 ### Exporting over NFS
 
@@ -220,8 +222,9 @@ backing filesystem. Inode rows are kept, so NFS handles keep working.
 
 After a crash the dead FUSE mount stays in place, and accessing it fails
 with `ENOTCONN`. Unmount it (`umount -l <mountpoint>`) before starting dcfs
-again. When dcfs is mounted over its own source this is mandatory, since
-dcfs would otherwise try to open the dead mount as its source.
+again (the systemd unit does this itself). When dcfs is mounted over its
+own source this is mandatory, since dcfs would otherwise try to open the
+dead mount as its source.
 
 Only one dcfs may use a cache database at a time: dcfs takes an exclusive
 lock on it at startup and refuses to start if another process holds it.
