@@ -88,6 +88,7 @@ cc_library(
       "@absl//absl/base:no_destructor",
       "@absl//absl/container:flat_hash_map",
       "@absl//absl/status",
+      "@absl//absl/status:status_builder",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
       "@absl//absl/strings:cord",

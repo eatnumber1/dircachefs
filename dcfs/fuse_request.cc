@@ -65,7 +65,11 @@ FuseRequest &FuseRequest::operator=(FuseRequest &&o) {
 
 FuseRequest::~FuseRequest() {
   if (!req_) return;
-  // TODO imporve this warning
+  // Every op method is expected to reply before returning (see
+  // ReplyFailureAndLogIfNotOk); reaching here means one didn't. FuseRequest
+  // only wraps the raw req_, not which op or inode it was for, so that
+  // context can't be logged here -- replying ECOMM at least keeps the
+  // kernel from waiting on a request that will never get a normal reply.
   LOG(WARNING) << "Replying to FuseRequest in destructor";
   absl::Status st = ReplyErrno(ECOMM);
   LOG_IF(ERROR, !st.ok()) << "Failed to send reply: " << st;

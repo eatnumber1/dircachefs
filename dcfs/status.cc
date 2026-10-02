@@ -31,8 +31,7 @@ absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status) {
 namespace {
 
 // StatusCode -> errno fallback used by StatusToErrno when a status carries
-// no errno payload. Moved here from dcfs/fuse.cc (step 1.1) so that all
-// status<->errno logic lives in one place.
+// no errno payload, so that all status<->errno logic lives in one place.
 int StatusCodeToErrno(absl::StatusCode code) {
   switch (code) {
     case absl::StatusCode::kOk:

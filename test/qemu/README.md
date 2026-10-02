@@ -332,8 +332,8 @@ bazel test //test/qemu:nfs_test
   same cache database. Uses `//tools:testutil` (a tiny static helper, also
   baked into the initramfs) for the handful of things busybox's applets
   cannot do precisely enough: `truncate(2)` with no intervening `open()`
-  (busybox's `truncate -s` opens O_WRONLY first, which `Open()` refuses
-  with EROFS until step 4.4, so it would never reach `Setattr` at all) and
+  (busybox's `truncate -s` instead opens O_WRONLY and calls `ftruncate(2)`
+  on the resulting fd) and
   `fchmodat(2)` with `AT_SYMLINK_NOFOLLOW` (busybox's `chmod` has no
   `-h`/`--no-dereference`, so it can never target a symlink itself).
 - `create_test` (`guest/create.sh`): step 4.2's create-family write-through

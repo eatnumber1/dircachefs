@@ -2,13 +2,11 @@
  * testutil - small helpers for the dcfs QEMU guest tests, for syscalls
  * busybox's own applets can't drive precisely enough:
  *
- *   - busybox `truncate -s N FILE` does open(O_WRONLY)+ftruncate(2), which
- *     dcfs currently refuses at open() (Setattr's own ftruncate is a
- *     separate step-4.4-independent path, but Open() still rejects any
- *     non-read-only open until step 4.4) -- so it never reaches
- *     Setattr(FUSE_SET_ATTR_SIZE) at all. `testutil truncate` calls
- *     truncate(2) directly (no open()), which is exactly the path a real
- *     NFS client or `truncate(1)` on most systems takes.
+ *   - `testutil truncate` calls truncate(2) directly, with no open() in
+ *     between -- the same syscall a real NFS client or `truncate(1)` on
+ *     most systems issues, and distinct from busybox's own
+ *     `truncate -s N FILE`, which goes through open(O_WRONLY)+ftruncate(2)
+ *     instead.
  *   - busybox `touch -d` cannot set nanosecond-precision timestamps.
  *   - busybox `chmod` has no -h/--no-dereference, so it can never target a
  *     symlink itself (chmod(2) always follows symlinks); confirming that

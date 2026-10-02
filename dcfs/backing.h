@@ -23,11 +23,21 @@
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
 
-// The backing layer: the only code that talks to the backing filesystems
-// (dcfs::syscalls::) or uses ctx.mounts for I/O, and the place where the
-// population policy lives. Everything above it reads the metadata cache;
-// everything here does its I/O first and then records the result in ONE
-// short cache transaction, never issuing a syscall inside a transaction.
+// The backing layer: the layering rule is that the cache (metadata_cache.h)
+// and the FUSE-op layer (dir_cache_fs.cc) never touch the backing
+// filesystem directly -- they call backing:: and read the cache. This file
+// is where the population policy lives, and where ctx.mounts is used for
+// I/O; it does its I/O first and then records the result in ONE short
+// cache transaction, never issuing a syscall inside a transaction.
+//
+// backing.cc is not the only code that calls dcfs::syscalls:: directly:
+// file_handle.cc (resolving/opening backing objects by handle),
+// device_id.cc (identifying a filesystem by device) and fd.cc (the
+// FileDescriptor RAII type syscalls.h itself is built on) are lower-level
+// modules backing.cc is built on top of, not application logic, so they
+// are peers of backing.cc rather than violations of the rule above.
+// main.cc also opens --source directly, once, at startup, before any
+// Context exists for backing:: functions to take.
 //
 // Backing syscalls whose outcome depends on who makes them -- creating an
 // object (its owner and group), removing or renaming an entry (sticky

@@ -23,10 +23,9 @@
 # no GNU find/stat/coreutils extensions -- plus /bin/testutil (see
 # //tools:testutil) for the handful of things busybox's applets cannot do
 # precisely enough: busybox `truncate -s N FILE` goes through
-# open(O_WRONLY)+ftruncate, and DirCacheFS::Open refuses any non-read-only
-# open with EROFS until step 4.4, so it never reaches
-# Setattr(FUSE_SET_ATTR_SIZE) at all -- `testutil truncate` calls
-# truncate(2) directly, with no open() in between; and busybox chmod has
+# open(O_WRONLY)+ftruncate instead of calling truncate(2) directly, so
+# `testutil truncate` is used instead to exercise the same no-open-in-between
+# syscall a real NFS client takes; and busybox chmod has
 # no -h/--no-dereference, so it can never target a symlink itself (chmod(2)
 # always follows symlinks) -- `testutil lchmod` uses fchmodat(2) with
 # AT_SYMLINK_NOFOLLOW instead.
@@ -235,10 +234,9 @@ verify_immediate chown-noop-owner "$MNT/f1" "$SRC/f1" '%u:%g'
 
 # --- truncate-shrink: size down, content check too -----------------------
 
-# busybox's own `truncate -s N FILE` goes through open(O_WRONLY) first,
-# which Open() refuses (EROFS) until step 4.4 -- it would never actually
-# exercise Setattr, and its exit status would need checking to notice
-# that. testutil calls truncate(2) directly, with no open() at all.
+# busybox's own `truncate -s N FILE` goes through open(O_WRONLY)+ftruncate
+# instead of calling truncate(2) directly; testutil calls truncate(2)
+# directly, with no open() at all, matching what a real NFS client does.
 out=$("$TESTUTIL" truncate "$MNT/f1" 3)
 rc=$?
 if [ "$rc" -eq 0 ]; then

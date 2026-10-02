@@ -1,8 +1,8 @@
 #include "dcfs/status.h"
 
 #include "absl/base/no_destructor.h"
+#include "absl/status/status_builder.h"
 #include "absl/strings/str_format.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/strip.h"
 #include "absl/strings/numbers.h"
 #include "absl/container/flat_hash_map.h"
@@ -289,8 +289,8 @@ absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name) {
       NameToErrnoTable();
   auto it = names_to_errors.find(error_name);
   if (it == names_to_errors.end()) {
-    // TODO statusbuilder
-    return absl::NotFoundError(absl::StrCat("No such errno for ", error_name));
+    return absl::StatusBuilder(absl::StatusCode::kNotFound)
+           << "No such errno for " << error_name;
   }
   return it->second;
 }
