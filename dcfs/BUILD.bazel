@@ -85,6 +85,7 @@ cc_library(
       "errno.cc",
     ],
     deps = [
+      "@absl//absl/base:no_destructor",
       "@absl//absl/container:flat_hash_map",
       "@absl//absl/status",
       "@absl//absl/status:statusor",

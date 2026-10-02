@@ -1,5 +1,6 @@
 #include "dcfs/status.h"
 
+#include "absl/base/no_destructor.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/strip.h"
@@ -22,7 +23,8 @@ namespace {
 // ErrnoNameTable() so tests can exercise the round trip for every entry
 // without duplicating the list.
 const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {
-  const static auto *kNamesToErrors = new absl::flat_hash_map<std::string, int>{
+  static const absl::NoDestructor<absl::flat_hash_map<std::string, int>>
+      kNamesToErrors(absl::flat_hash_map<std::string, int>{
       {"OK", 0},
 #define E(n) {#n, n}
       E(EINVAL),
@@ -266,7 +268,7 @@ const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {
       E(EXFULL),
 #endif
 #undef E
-  };
+  });
   return *kNamesToErrors;
 }
 
