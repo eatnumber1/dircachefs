@@ -401,6 +401,24 @@ absl::Status RenameAt(Context &ctx, const Credentials &caller, InodeId parent,
 absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
                                                      InodeId id);
 
+// --- Removed objects the kernel still references --------------------------
+//
+// Reads through a descriptor dcfs holds on an object that no longer has a
+// cache row: it was removed from the backing filesystem while the kernel
+// still held its nodeid (see DirCacheFS::removed_). `fd` is any descriptor
+// on the object, O_PATH included. None of these touches the cache.
+
+// statx of `fd` (the attributes RefreshAttrs would record).
+absl::StatusOr<struct statx> StatFd(int fd);
+// Xattr `name` of `fd`'s object, nullopt if absent (as RefreshXattr reads
+// it), and all of its xattrs (as ReadXattrs).
+absl::StatusOr<std::optional<std::string>> ReadXattrFd(int fd,
+                                                       std::string_view name);
+absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrsFd(
+    int fd);
+// The target of the symlink `fd` refers to.
+absl::StatusOr<std::string> ReadSymlinkFd(int fd);
+
 // Run at startup, after InitRoot: forgets every non-source filesystem that
 // is no longer mounted where it was found (or whose mount point is gone),
 // and registers a mount fd for each one that still is.

@@ -302,7 +302,7 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
   `readonly_test`, `passthrough_test`, `lifecycle_test`, `handles_test`,
   `setattr_test`, `create_test`, `rename_test`, `write_test`,
   `credentials_test`, `crash_test`, `power_test`, `release_leak_test`,
-  `readdir_boundary_test`, `nfs_test` and `boot_test`.
+  `readdir_boundary_test`, `removed_test`, `nfs_test` and `boot_test`.
   [`docs/design.md`](docs/design.md#test-strategy) says what each one
   proves.
 - **POSIX conformance**: `pjdfstest_test` runs all of pjdfstest (about 8800
@@ -421,11 +421,14 @@ recovery protocol, concurrency, and the test strategy.
   and btrfs encode the generation in their handles, so this is covered
   there; on a filesystem whose handles carry no generation and which
   reports no birth time, a stale row could match a new object.
-- **Removed objects that are still referenced fail with `ESTALE`.** dcfs
-  deletes a row as soon as the backing object is gone and no dcfs open
-  holds it. A shell whose working directory was removed, or an `O_PATH`
-  descriptor on an unlinked file, then gets `ESTALE` where a local
-  filesystem would return an empty listing or `nlink` 0.
+- **Removed objects that are still referenced can be read, not changed.**
+  A process whose working directory was removed, or an `O_PATH`
+  descriptor on an unlinked file, sees what a local filesystem shows
+  (`stat` works and reports `nlink` 0, listing a removed directory finds
+  nothing). Changing such an object (`chmod` of a removed working
+  directory, say), or reopening an unlinked file through
+  `/proc/<pid>/fd/<n>` of an `O_PATH` descriptor, fails with `ESTALE`,
+  where a local filesystem would allow it.
 - **atime is not maintained.** Reads through passthrough update the
   backing file's access time, but dcfs keeps serving the one it last
   recorded. `st_blocks` can also lag behind delayed allocation until the

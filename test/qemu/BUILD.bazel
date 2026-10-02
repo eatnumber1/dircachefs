@@ -194,3 +194,13 @@ qemu_test(
     size = "enormous",
     timeout = "eternal",
 )
+
+# Step 6.3 (audit F10): objects removed while still referenced (a removed
+# working directory, an O_PATH descriptor on an unlinked file) behave as on
+# the backing filesystem instead of failing with ESTALE -- see
+# guest/removed.sh.
+qemu_test(
+    name = "removed_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/removed.sh",
+)

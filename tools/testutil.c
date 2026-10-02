@@ -98,6 +98,16 @@
  *       this needs none, and sets the exact group list a test wants. Used
  *       by credentials.sh to act on the dcfs mount as an unprivileged user.
  *       On failure prints "ERR <errno-name>" and exits 127 (execvp) or 1.
+ *   testutil opath-unlink-stat <path>
+ *       open(2)s <path> O_PATH|O_NOFOLLOW, unlink(2)s <path>, then
+ *       fstat(2)s the descriptor and prints "nlink=<n> size=<bytes>": an
+ *       object that is removed but still referenced, without any open
+ *       file the filesystem would see (busybox cannot open O_PATH).
+ *   testutil rmcwd <dir>
+ *       chdir(2)s into <dir>, rmdir(2)s <dir>, then prints the outcome of
+ *       stat(".") ("stat=nlink:<n>"), open(".") and one getdents64 on it,
+ *       one field each, "ERR <errno-name>" for a failure: a process whose
+ *       working directory was removed.
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing (except
@@ -491,6 +501,54 @@ static int cmd_runas(char *argv[])
 	return 127;
 }
 
+static int cmd_opath_unlink_stat(const char *path)
+{
+	struct stat st;
+	int fd = open(path, O_PATH | O_NOFOLLOW);
+
+	if (fd == -1 || unlink(path) == -1 || fstat(fd, &st) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("nlink=%lu size=%lld\n", (unsigned long) st.st_nlink,
+	       (long long) st.st_size);
+	close(fd);
+	return 0;
+}
+
+static int cmd_rmcwd(const char *dir)
+{
+	char buf[4096];
+	struct stat st;
+	const char *name;
+	int fd;
+
+	if (chdir(dir) == -1 || rmdir(dir) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	if (stat(".", &st) == -1) {
+		name = strerrorname_np(errno);
+		printf("stat=ERR %s", name ? name : "UNKNOWN");
+	} else {
+		printf("stat=nlink:%lu", (unsigned long) st.st_nlink);
+	}
+	fd = open(".", O_RDONLY | O_DIRECTORY);
+	if (fd == -1) {
+		name = strerrorname_np(errno);
+		printf(" open=ERR %s getdents=-\n", name ? name : "UNKNOWN");
+		return 0;
+	}
+	if (syscall(SYS_getdents64, fd, buf, sizeof(buf)) == -1) {
+		name = strerrorname_np(errno);
+		printf(" open=ok getdents=ERR %s\n", name ? name : "UNKNOWN");
+	} else {
+		printf(" open=ok getdents=ok\n");
+	}
+	close(fd);
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -527,6 +585,10 @@ int main(int argc, char *argv[])
 		return cmd_sqlite_lock(argv[2], argv[3]);
 	if (argc >= 7 && strcmp(argv[1], "runas") == 0)
 		return cmd_runas(argv);
+	if (argc == 3 && strcmp(argv[1], "opath-unlink-stat") == 0)
+		return cmd_opath_unlink_stat(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "rmcwd") == 0)
+		return cmd_rmcwd(argv[2]);
 
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
@@ -545,6 +607,8 @@ int main(int argc, char *argv[])
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
 		"       testutil writehold <path> <append|create> <nbytes>\n"
 		"       testutil sqlite-lock <db-path> <hold-seconds>\n"
-		"       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n");
+		"       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n"
+		"       testutil opath-unlink-stat <path>\n"
+		"       testutil rmcwd <dir>\n");
 	return 2;
 }

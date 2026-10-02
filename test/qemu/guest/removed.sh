@@ -1,0 +1,141 @@
+#!/bin/sh
+# dcfs step 6.3 (audit F10): an object that is removed while something
+# still refers to it -- a process whose working directory is removed, an
+# O_PATH descriptor on a file that is then unlinked -- must behave as it
+# does on the backing filesystem, not fail with ESTALE.
+#
+# The kernel keeps such an object's FUSE nodeid until its last reference
+# goes (then it sends FORGET), and keeps asking dcfs about it meanwhile
+# (GETATTR for a stat, OPENDIR for an open of "."). The reference results
+# are measured on the backing ext4 filesystem itself, before dcfs mounts
+# it, so that dcfs's exclusive access is never violated.
+#
+# Run as /tests/removed.sh by guest/init when booted with
+# dcfs_test=removed.sh; prints one "TEST ... PASS/FAIL" line per check and
+# exits nonzero if any check failed.
+FAILED=0
+. "$(dirname "$0")/lib.sh"
+
+DCFS=/bin/dcfs
+TESTUTIL=/bin/testutil
+
+SRC=/src
+MNT=/mnt
+DB=/cache/dcfs.db
+LOG=/tmp/dcfs.log
+
+DAEMON_PID=""
+MOUNTED=0
+
+cleanup() {
+	rc=$?
+	if [ "$rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
+		echo "--- dcfs stderr ---"
+		cat "$LOG" 2>/dev/null
+	fi
+	if [ "$MOUNTED" -eq 1 ]; then
+		umount "$MNT" 2>/dev/null || umount -l "$MNT" 2>/dev/null || true
+	fi
+	if [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
+		kill "$DAEMON_PID" 2>/dev/null || true
+		wait "$DAEMON_PID" 2>/dev/null || true
+	fi
+}
+trap cleanup EXIT
+
+echo "removed.sh: kernel $(uname -r)"
+
+# expect_same NAME WANT GOT
+expect_same() {
+	if [ "$2" = "$3" ]; then
+		pass "$1"
+	else
+		fail "$1" "backing filesystem: '$2'; dcfs: '$3'"
+	fi
+}
+
+mount /dev/vdb /src
+
+# --- what ext4 does ---------------------------------------------------------
+
+mkdir /src/ref_cwd
+ref_cwd=$("$TESTUTIL" rmcwd /src/ref_cwd 2>&1)
+echo "ext4 removed cwd: $ref_cwd"
+echo data >/src/ref_file
+ref_file=$("$TESTUTIL" opath-unlink-stat /src/ref_file 2>&1)
+echo "ext4 unlinked O_PATH file: $ref_file"
+mkdir /src/ref_ls
+ref_ls=$(cd /src/ref_ls && rmdir /src/ref_ls && ls -a . 2>&1; echo "rc=$?")
+sync
+
+# --- the same through dcfs --------------------------------------------------
+
+mkdir -p /cache /mnt
+if start_daemon "$LOG"; then
+	pass mount
+else
+	fail mount "daemon did not mount within 10s"
+	exit "$FAILED"
+fi
+
+mkdir "$MNT/cwd"
+expect_same removed-cwd "$ref_cwd" "$("$TESTUTIL" rmcwd "$MNT/cwd" 2>&1)"
+
+echo data >"$MNT/file"
+expect_same unlinked-opath-file "$ref_file" \
+	"$("$TESTUTIL" opath-unlink-stat "$MNT/file" 2>&1)"
+
+mkdir "$MNT/ls"
+expect_same removed-cwd-ls "$ref_ls" \
+	"$(cd "$MNT/ls" && rmdir "$MNT/ls" && ls -a . 2>&1; echo "rc=$?")"
+
+# A removed directory that was listed through dcfs first (its row and
+# listing are cached), and a file that was stat'ed (its attributes are
+# cached), so the cached state cannot answer by accident.
+mkdir "$MNT/listed"
+touch "$MNT/listed/x"
+ls -la "$MNT/listed" >/dev/null
+rm "$MNT/listed/x"
+expect_same removed-listed-cwd "$ref_cwd" \
+	"$("$TESTUTIL" rmcwd "$MNT/listed" 2>&1)"
+echo data >"$MNT/statted"
+stat "$MNT/statted" >/dev/null
+expect_same unlinked-statted-file "$ref_file" \
+	"$("$TESTUTIL" opath-unlink-stat "$MNT/statted" 2>&1)"
+
+# Once the references are gone the objects are gone for good: the names
+# stay absent, and dcfs keeps serving the rest of the tree.
+for name in cwd file ls listed statted; do
+	if [ -e "$MNT/$name" ] || [ -e "$SRC/$name" ]; then
+		fail "gone-$name" "$name still exists"
+	else
+		pass "gone-$name"
+	fi
+done
+mkdir "$MNT/after"
+if [ -d "$SRC/after" ]; then
+	pass still-serving
+else
+	fail still-serving "mkdir after the removals did not reach /src"
+fi
+
+# dcfs counts the kernel's lookups to know when the last reference to a
+# removed object is gone; a FORGET of more lookups than it counted is
+# logged as an error. Walk the tree (lookups and readdirplus), then make
+# the kernel forget everything it can.
+mkdir -p "$MNT/tree/a/b"
+touch "$MNT/tree/a/f1" "$MNT/tree/a/b/f2"
+ln "$MNT/tree/a/f1" "$MNT/tree/a/b/f1link"
+ln -s f1 "$MNT/tree/a/sym"
+ls -laR "$MNT" >/dev/null
+find "$MNT" -exec stat {} + >/dev/null
+echo 2 >/proc/sys/vm/drop_caches
+ls -laR "$MNT" >/dev/null
+echo 2 >/proc/sys/vm/drop_caches
+if grep -q 'lookups of nodeid' "$LOG"; then
+	fail lookup-counts "$(grep 'lookups of nodeid' "$LOG" | head -3)"
+else
+	pass lookup-counts
+fi
+
+exit "$FAILED"

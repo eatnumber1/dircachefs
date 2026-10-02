@@ -612,6 +612,31 @@ if the backing object is gone or has no links left. A removed directory's
 row is deleted at once. Attributes with `nlink` 0 are never recorded as
 current, so a crash cannot leave a row serving a deleted file as current.
 
+**Removed objects the kernel still references.** The kernel can keep a
+nodeid after its object is removed: a process's working directory, an
+`O_PATH` descriptor, a dentry still in use. It keeps sending requests for
+it (`GETATTR` for a `stat`, `OPENDIR` for an open of `.`, `GETXATTR` for
+its ACLs) until its last `FORGET`. dcfs counts the kernel's lookups in
+memory (`lookups_`: +1 for every entry reply that hands out a nodeid --
+lookup, mknod, mkdir, symlink, link, create, and readdirplus entries other
+than `.` and `..`, which the kernel does not count -- and -n for every
+`FORGET`). Before the backing syscall of an unlink, rmdir or rename-over,
+dcfs opens an `O_PATH` descriptor on the object if the kernel holds its
+nodeid. If the object turns out to be gone (or, for an open file, at its
+last release), its row is still deleted at once, but the descriptor and a
+copy of the row go into an in-memory record (`removed_`) that answers the
+kernel's reads (attributes with `nlink` 0, xattrs, a symlink's target,
+`statfs`) until the last `FORGET` closes it. The descriptor keeps the
+backing object alive exactly as the kernel's reference would on a local
+filesystem.
+
+Nothing about such an object is in the database, so nothing about it
+survives a crash or a restart (the kernel of a new mount holds no
+nodeids), and an NFS handle to it fails with `ESTALE` as it should: the
+`.` lookup that resolves a handle (and every mutation) uses the cache
+rows only. Changing a removed object, or reopening an unlinked file, also
+fails with `ESTALE` (listed in the README's Limitations).
+
 ## Crashes, power loss and recovery
 
 ### A daemon crash
@@ -1107,6 +1132,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
 | `release_leak_test` | A failed attribute refresh on the last writable close (forced by holding the SQLite write lock) does not leak the backing descriptor or passthrough registration. |
+| `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on ext4 instead of failing `ESTALE`, also when their rows and attributes were cached; no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
 | `readdir_boundary_test` | A directory too large for one READDIR or READDIRPLUS reply lists every entry exactly once across several replies, and in time linear in its size. |
 | `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; a refused boundary stays invisible even with `crossmnt`. |
 | `pjdfstest_test` | POSIX conformance, as above. |
@@ -1120,12 +1146,13 @@ concurrency (there is none to test until coroutines exist).
 These are known and accepted for now; the README's Limitations section
 lists the user-visible ones.
 
-- **Rows of removed objects are deleted without regard to the kernel's
-  lookup count.** `Forget` is a no-op, and rows persist until dcfs decides
-  the object is gone. A working directory that was removed, or an `O_PATH`
-  descriptor on an unlinked file, then gets `ESTALE` where a local
-  filesystem would succeed. Fixing it would mean tracking lookup counts in
-  memory and keeping "dead" rows until the last `FORGET`.
+- **Removed objects can be read but not changed.** A removed object the
+  kernel still references is answered from its `removed_` record (see
+  [Row lifetime](#row-lifetime)), but `SETATTR`, xattr changes, `OPEN`
+  and `LINK` of it fail with `ESTALE`, where a local filesystem allows
+  them. Supporting them would need the backing operations to run through
+  the held descriptor instead of a handle (`open_by_handle_at` refuses an
+  unlinked inode).
 - **atime is not maintained** after passthrough reads, and `st_blocks`
   may lag behind delayed allocation until the next attribute refresh.
 - **The WAL mode is not verified.** `PRAGMA journal_mode=WAL` is issued

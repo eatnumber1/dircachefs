@@ -73,8 +73,10 @@ class DirCacheFS {
 
   absl::Status Lookup(
       FuseRequest &req, fuse_ino_t parent_ino, std::string_view name);
-  // Inode rows persist across restarts (that is what keeps NFS handles
-  // valid), so there is nothing to do when the kernel drops its reference.
+  // Drop `nlookup` of the kernel's lookups of `ino` (see lookups_). Inode
+  // rows persist across restarts (that is what keeps NFS handles valid) and
+  // are not touched; only a removed object's in-memory record (removed_)
+  // goes with its last lookup.
   void Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup);
   void ForgetMulti(
       FuseRequest &req, std::span<const fuse_forget_data> forgets);
@@ -172,6 +174,33 @@ class DirCacheFS {
   // from an inode id should go through this rather than cache::GetAttr()
   // directly.
   absl::StatusOr<cache::CachedAttr> RequireAttr(InodeId id);
+
+  // As RequireAttr, but also answers for a removed object the kernel still
+  // references (removed_): its current attributes, read through the
+  // descriptor dcfs holds on it (valid, nlink 0). For the ops that read an
+  // object (Getattr, Opendir, xattrs, Readlink, Statfs); everything that
+  // would change one, and Lookup, keep using RequireAttr, so a removed
+  // object can be neither changed nor looked up again (ESTALE).
+  absl::StatusOr<cache::CachedAttr> RequireAttrOrRemoved(InodeId id);
+
+  // Replies the positive entry `entry` and, once the kernel has accepted
+  // it, counts the lookup it now holds (lookups_). Every reply that hands
+  // the kernel a nodeid goes through this (or counts readdirplus entries
+  // itself), or lookups_ undercounts.
+  absl::Status ReplyEntry(FuseRequest &req, const fuse_entry_param &entry);
+
+  // The row-lifetime rule's last step, for an object known to be gone from
+  // the backing filesystem (nlink 0, or its directory removed) with no dcfs
+  // open on it: deletes its row (ForgetRemoved). If the kernel still holds
+  // its nodeid and `held` is a descriptor on it, the object becomes a
+  // removed_ record, kept until the kernel's last FORGET.
+  absl::Status RetireRemoved(InodeId id, std::optional<FileDescriptor> held);
+
+  // An O_PATH descriptor on `id` to hold across its removal, if the kernel
+  // holds its nodeid (otherwise nothing will ask about it afterwards);
+  // nullopt if not, or if it cannot be opened (logged; the removal goes
+  // ahead without it, and the object is then gone at once).
+  std::optional<FileDescriptor> HoldForRemoval(InodeId id);
 
   // The fuse_entry_param for `id`: current cached attributes (refreshed
   // first if not valid), nodeid = id, generation = the row's fuse_gen, and
@@ -279,10 +308,13 @@ class DirCacheFS {
 
   // After a backing unlink or rename-over removed one link to non-directory
   // `id`: applies the row-lifetime rule. With a dcfs open on it, refreshes
-  // its attributes from that fd and keeps the row (Release deletes it once
-  // the last open closes with nlink 0); otherwise deletes the row if the
-  // backing object is gone or has nlink 0, and refreshes it if links remain.
-  absl::Status SettleUnlinkedFile(InodeId id);
+  // its attributes from that fd and keeps the row (Release retires it once
+  // the last open closes with nlink 0); otherwise retires it
+  // (RetireRemoved) if the backing object is gone or has nlink 0, and
+  // refreshes it if links remain. `held` is HoldForRemoval's descriptor,
+  // taken before the backing syscall.
+  absl::Status SettleUnlinkedFile(InodeId id,
+                                  std::optional<FileDescriptor> held);
 
   // Phase 3's post-syscall cleanup for Rename, once the backing renameat2
   // has already succeeded: refreshes both parents' (and, if different,
@@ -292,10 +324,11 @@ class DirCacheFS {
   // and otherwise ignored -- see Rename's own comment on why (audit-races
   // F7): the rename has already happened, so these are best-effort cache
   // refreshes, not something the FUSE reply still depends on.
+  // `held_dst` is HoldForRemoval's descriptor on a replaced dst.
   void RefreshAfterRename(
       InodeId parent, InodeId newparent, cache::LookupResult src,
       cache::LookupResult dst, bool dst_exists, bool same_inode,
-      bool exchange);
+      bool exchange, std::optional<FileDescriptor> held_dst);
 
   // The fd of some outstanding open of `id`, if any.
   std::optional<int> OpenFdOf(InodeId id) const;
@@ -373,6 +406,29 @@ class DirCacheFS {
   absl::flat_hash_set<int64_t> open_for_write_;
   // When the last sync point ran (or was attempted); see MaybeSyncBacking.
   absl::Time last_sync_;
+
+  // The kernel's lookup count (FUSE's nlookup) of every nodeid it holds:
+  // +1 for each entry reply carrying it (lookup, mknod, mkdir, symlink,
+  // link, create, and each readdirplus entry other than "." and "..",
+  // which the kernel does not count), -n for each FORGET of n. Rebuilt from
+  // nothing at every start: a new mount's kernel holds no nodeids.
+  absl::flat_hash_map<InodeId, uint64_t> lookups_;
+
+  // Objects removed from the backing filesystem (no link left, no dcfs
+  // open) whose nodeid the kernel still holds: a process's removed working
+  // directory, an O_PATH descriptor on an unlinked file. Their rows are
+  // already deleted, so nothing about them is in the cache, survives a
+  // restart or resolves an NFS handle (which must fail ESTALE: the object
+  // is gone); but until the kernel's last FORGET, the reads it still sends
+  // for them (GETATTR, OPENDIR, xattrs, READLINK) are answered through
+  // `fd`, which also keeps the backing object alive exactly as the
+  // kernel's reference would on a local filesystem. `row` is the deleted
+  // row, for its nodeid generation and identity.
+  struct Removed {
+    cache::CachedAttr row;
+    FileDescriptor fd;
+  };
+  absl::flat_hash_map<InodeId, Removed> removed_;
 };
 
 }  // namespace dcfs

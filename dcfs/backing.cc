@@ -1296,6 +1296,24 @@ absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
   return static_cast<uint64_t>(stx.stx_nlink);
 }
 
+absl::StatusOr<struct statx> StatFd(int fd) {
+  return syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask);
+}
+
+absl::StatusOr<std::optional<std::string>> ReadXattrFd(int fd,
+                                                       std::string_view name) {
+  return XattrOf(fd, name);
+}
+
+absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrsFd(
+    int fd) {
+  return XattrsOf(fd);
+}
+
+absl::StatusOr<std::string> ReadSymlinkFd(int fd) {
+  return syscalls::readlinkat(fd, "");
+}
+
 absl::Status StartupPurge(Context &ctx) {
   // Every non-source row left in the filesystems table is purged
   // unconditionally. Since amendment 12, ProbeChild/PopulateDirectory never
