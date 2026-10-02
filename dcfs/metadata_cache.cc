@@ -513,6 +513,119 @@ absl::StatusOr<FilesystemRow> GetFilesystem(Context &ctx,
 
 // --- Writes ---------------------------------------------------------------
 
+namespace {
+
+// Every row UpsertInode already has for this backing inode number, split
+// into at most one match (`existing`) and the rest (`stale`, left over from
+// before the number was recycled).
+//
+// A row is the same object only if its generation (when both are known:
+// nonzero), its stored handle bytes and (when both are known) its birth
+// time all match too. The generation alone is not enough: it is 0
+// ("unknown") for symlinks and special files and on filesystems without
+// FS_IOC_GETVERSION, yet the backing handle still encodes the real
+// generation (audit F5); and btrfs can reissue an identical (ino,
+// generation, handle) after its own power loss rolled back a transaction,
+// which only the birth time tells apart (audit F6). None of this costs a
+// syscall: the handle and statx (with STATX_BTIME) are already in hand.
+struct MatchingRows {
+  std::optional<UpsertResult> existing;
+  std::vector<InodeId> stale;
+};
+
+absl::StatusOr<MatchingRows> FindMatchingRows(Context &ctx,
+                                              const std::string &device,
+                                              uint64_t ino,
+                                              const FileHandle &handle,
+                                              uint64_t backing_gen,
+                                              const struct statx &stx) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * find,
+      Query(ctx,
+            "SELECT id, fuse_gen, backing_gen, handle_type, handle, "
+            "btime_s, btime_ns FROM inodes "
+            "WHERE device_id = ? AND backing_ino = ?",
+            Blob(device), ino));
+  const bool new_btime_known =
+      (stx.stx_mask & STATX_BTIME) != 0 &&
+      (stx.stx_btime.tv_sec != 0 || stx.stx_btime.tv_nsec != 0);
+  MatchingRows rows;
+  ABSL_RETURN_IF_ERROR(find->ForEachRow([&](Statement &row) {
+    InodeId id = row.Column<int64_t>(0);
+    // A generation of 0 is "unknown" (backing::ReadGeneration could not
+    // read it), not a value, on either side: as VerifyBackingIdentity,
+    // it does not tell objects apart by itself -- the handle below does.
+    const uint64_t stored_gen = row.Column<uint64_t>(2);
+    bool same = stored_gen == backing_gen || stored_gen == 0 ||
+                backing_gen == 0;
+    if (same && !row.ColumnIsNull(4)) {
+      same = row.Column<int>(3) == handle.handle_type &&
+             row.Column<std::vector<uint8_t>>(4) == handle.bytes;
+    }
+    if (same && new_btime_known && !row.ColumnIsNull(5)) {
+      const int64_t btime_s = row.Column<int64_t>(5);
+      const int64_t btime_ns = row.Column<int64_t>(6);
+      if (btime_s != 0 || btime_ns != 0) {
+        same = btime_s == static_cast<int64_t>(stx.stx_btime.tv_sec) &&
+               btime_ns == static_cast<int64_t>(stx.stx_btime.tv_nsec);
+      }
+    }
+    if (same) {
+      rows.existing = UpsertResult{
+          .id = id,
+          .fuse_gen = static_cast<uint32_t>(row.Column<int64_t>(1)),
+          .created = false};
+    } else {
+      rows.stale.push_back(id);
+    }
+    return absl::OkStatus();
+  }));
+  return rows;
+}
+
+// The handle already matches (or the row had none): update `id`'s row with
+// the freshly probed handle and attributes.
+absl::Status UpdateMatchingRow(Context &ctx, InodeId id,
+                               const FileHandle &handle,
+                               const struct statx &stx) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * update,
+      ctx.db.Prepared("UPDATE inodes SET handle_type = ?, handle = ?, "
+                      DCFS_ATTR_ASSIGNMENTS " WHERE id = ?"));
+  ABSL_RETURN_IF_ERROR(BindHandle(*update, 1, handle));
+  ABSL_RETURN_IF_ERROR(BindAttrs(*update, 3, stx));
+  ABSL_RETURN_IF_ERROR(update->Bind(3 + kNumAttrColumns, id));
+  return update->ExecuteOnce();
+}
+
+// No existing row matched: insert a fresh one with a new random fuse_gen.
+absl::StatusOr<UpsertResult> InsertNewRow(Context &ctx,
+                                          const std::string &device,
+                                          uint64_t ino, uint64_t backing_gen,
+                                          const FileHandle &handle,
+                                          const struct statx &stx) {
+  // Random, never 0 (the root's): see schema.sql's identity model.
+  const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed,
+                                          ctx.rng, uint32_t{1}, UINT32_MAX);
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * insert,
+      ctx.db.Prepared("INSERT INTO inodes (device_id, backing_ino, "
+                      "backing_gen, fuse_gen, handle_type, handle, "
+                      "attrs_valid, " DCFS_ATTR_COLUMNS
+                      ") VALUES (?, ?, ?, ?, ?, ?, 1, "
+                      DCFS_ATTR_PLACEHOLDERS ")"));
+  ABSL_RETURN_IF_ERROR(insert->BindAll(Blob(device), ino, backing_gen,
+                                       static_cast<int64_t>(fuse_gen)));
+  ABSL_RETURN_IF_ERROR(BindHandle(*insert, 5, handle));
+  ABSL_RETURN_IF_ERROR(BindAttrs(*insert, 7, stx));
+  ABSL_RETURN_IF_ERROR(insert->ExecuteOnce());
+  return UpsertResult{.id = ctx.db.LastInsertRowId(),
+                      .fuse_gen = fuse_gen,
+                      .created = true};
+}
+
+}  // namespace
+
 absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
                                          const FileHandle &handle,
                                          const struct statx &stx,
@@ -531,103 +644,26 @@ absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
     RET_CHECK(fs_known) << "UpsertInode on unregistered filesystem "
                         << handle.device.ToString();
 
-    // Every row for this backing inode number: at most one with the wanted
-    // generation, plus any left over from before the number was recycled.
     // Collected up front so the cursor is closed before we write.
-    //
-    // A row is the same object only if its generation (when both are
-    // known: nonzero), its stored handle bytes and (when both are known)
-    // its birth time all match too. The
-    // generation alone is not enough: it is 0 ("unknown") for symlinks and
-    // special files and on filesystems without FS_IOC_GETVERSION, yet the
-    // backing handle still encodes the real generation (audit F5); and
-    // btrfs can reissue an identical (ino, generation, handle) after its
-    // own power loss rolled back a transaction, which only the birth time
-    // tells apart (audit F6). None of this costs a syscall: the handle and
-    // statx (with STATX_BTIME) are already in hand.
     ABSL_ASSIGN_OR_RETURN(
-        Statement * find,
-        Query(ctx,
-              "SELECT id, fuse_gen, backing_gen, handle_type, handle, "
-              "btime_s, btime_ns FROM inodes "
-              "WHERE device_id = ? AND backing_ino = ?",
-              Blob(device), ino));
-    const bool new_btime_known =
-        (stx.stx_mask & STATX_BTIME) != 0 &&
-        (stx.stx_btime.tv_sec != 0 || stx.stx_btime.tv_nsec != 0);
-    std::optional<UpsertResult> existing;
-    std::vector<InodeId> stale;
-    ABSL_RETURN_IF_ERROR(find->ForEachRow([&](Statement &row) {
-      InodeId id = row.Column<int64_t>(0);
-      // A generation of 0 is "unknown" (backing::ReadGeneration could not
-      // read it), not a value, on either side: as VerifyBackingIdentity,
-      // it does not tell objects apart by itself -- the handle below does.
-      const uint64_t stored_gen = row.Column<uint64_t>(2);
-      bool same = stored_gen == backing_gen || stored_gen == 0 ||
-                  backing_gen == 0;
-      if (same && !row.ColumnIsNull(4)) {
-        same = row.Column<int>(3) == handle.handle_type &&
-               row.Column<std::vector<uint8_t>>(4) == handle.bytes;
-      }
-      if (same && new_btime_known && !row.ColumnIsNull(5)) {
-        const int64_t btime_s = row.Column<int64_t>(5);
-        const int64_t btime_ns = row.Column<int64_t>(6);
-        if (btime_s != 0 || btime_ns != 0) {
-          same = btime_s == static_cast<int64_t>(stx.stx_btime.tv_sec) &&
-                 btime_ns == static_cast<int64_t>(stx.stx_btime.tv_nsec);
-        }
-      }
-      if (same) {
-        existing = UpsertResult{
-            .id = id,
-            .fuse_gen = static_cast<uint32_t>(row.Column<int64_t>(1)),
-            .created = false};
-      } else {
-        stale.push_back(id);
-      }
-      return absl::OkStatus();
-    }));
+        MatchingRows rows,
+        FindMatchingRows(ctx, device, ino, handle, backing_gen, stx));
 
-    if (existing.has_value()) {
-      // The handle already matches (or the row had none).
-      ABSL_ASSIGN_OR_RETURN(
-          Statement * update,
-          ctx.db.Prepared("UPDATE inodes SET handle_type = ?, handle = ?, "
-                          DCFS_ATTR_ASSIGNMENTS " WHERE id = ?"));
-      ABSL_RETURN_IF_ERROR(BindHandle(*update, 1, handle));
-      ABSL_RETURN_IF_ERROR(BindAttrs(*update, 3, stx));
-      ABSL_RETURN_IF_ERROR(update->Bind(3 + kNumAttrColumns, existing->id));
-      ABSL_RETURN_IF_ERROR(update->ExecuteOnce());
-      result = *existing;
+    if (rows.existing.has_value()) {
+      ABSL_RETURN_IF_ERROR(
+          UpdateMatchingRow(ctx, rows.existing->id, handle, stx));
+      result = *rows.existing;
       return absl::OkStatus();
     }
 
     // The backing filesystem reused this inode number for a new object: the
     // old rows describe something that no longer exists. Invalidated before
     // the insert, which may reuse the old row's exact identity triple.
-    for (InodeId id : stale) {
+    for (InodeId id : rows.stale) {
       ABSL_RETURN_IF_ERROR(InvalidateInode(ctx, id));
     }
-
-    // Random, never 0 (the root's): see schema.sql's identity model.
-    const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed,
-                                            ctx.rng, uint32_t{1},
-                                            UINT32_MAX);
     ABSL_ASSIGN_OR_RETURN(
-        Statement * insert,
-        ctx.db.Prepared("INSERT INTO inodes (device_id, backing_ino, "
-                        "backing_gen, fuse_gen, handle_type, handle, "
-                        "attrs_valid, " DCFS_ATTR_COLUMNS
-                        ") VALUES (?, ?, ?, ?, ?, ?, 1, "
-                        DCFS_ATTR_PLACEHOLDERS ")"));
-    ABSL_RETURN_IF_ERROR(insert->BindAll(Blob(device), ino, backing_gen,
-                                         static_cast<int64_t>(fuse_gen)));
-    ABSL_RETURN_IF_ERROR(BindHandle(*insert, 5, handle));
-    ABSL_RETURN_IF_ERROR(BindAttrs(*insert, 7, stx));
-    ABSL_RETURN_IF_ERROR(insert->ExecuteOnce());
-    result = UpsertResult{.id = ctx.db.LastInsertRowId(),
-                          .fuse_gen = fuse_gen,
-                          .created = true};
+        result, InsertNewRow(ctx, device, ino, backing_gen, handle, stx));
     return absl::OkStatus();
   }));
   return result;
