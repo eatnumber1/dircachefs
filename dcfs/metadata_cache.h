@@ -455,27 +455,29 @@ absl::StatusOr<Mutation> BeginMutation(Context &ctx,
 // The phase 1 of each mutation kind, as DirCacheFS runs it: each is one
 // BeginMutation() naming exactly the inodes the mutation changes.
 //
-// Create/Mknod/Mkdir/Symlink of (parent, name): forgets `name`, marks
-// `parent` incomplete and its attributes unknown (its mtime/ctime, and for
-// a mkdir its nlink, are about to change). Dirty: parent. (The new child's row is created, and
-// made dirty, by phase 3: backing::RecordNewChild.)
+// Each marks only the names it changes unknown (MarkUnknown); every other
+// name keeps its state, and so does the directory's completeness.
+//
+// Create/Mknod/Mkdir/Symlink of (parent, name): marks `name` unknown and
+// `parent`'s attributes unknown (its mtime/ctime, and for a mkdir its
+// nlink, are about to change). Dirty: parent. (The new child's row is
+// created, and made dirty, by phase 3: backing::RecordNewChild.)
 absl::StatusOr<Mutation> BeginCreate(Context &ctx, InodeId parent,
                                      std::string_view name);
-// Unlink/Rmdir of (parent, name) -> child: forgets `name`, marks `parent`
-// incomplete, and both attribute sets unknown. Dirty: parent, child.
+// Unlink/Rmdir of (parent, name) -> child: marks `name` unknown, and both
+// attribute sets unknown. Dirty: parent, child.
 absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent,
                                      std::string_view name, InodeId child);
 // Rename (parent, name) -> src over (newparent, newname) -> dst (nullopt if
-// absent, or if it is src itself): forgets both names, marks both parents
-// incomplete, and the attributes of both parents, src and dst unknown.
-// Dirty: parent, newparent, src, dst.
+// absent, or if it is src itself): marks both names unknown, and the
+// attributes of both parents, src and dst unknown. Dirty: parent,
+// newparent, src, dst.
 absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent,
                                      std::string_view name, InodeId newparent,
                                      std::string_view newname, InodeId src,
                                      std::optional<InodeId> dst);
-// Link of src as (newparent, newname): forgets `newname`, marks newparent
-// incomplete, and the attributes of newparent and src unknown. Dirty:
-// newparent, src.
+// Link of src as (newparent, newname): marks `newname` unknown, and the
+// attributes of newparent and src unknown. Dirty: newparent, src.
 absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src,
                                    InodeId newparent,
                                    std::string_view newname);
