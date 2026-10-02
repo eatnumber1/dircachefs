@@ -47,8 +47,9 @@ namespace {
 //    btrfs). dcfs chmods for FUSE_SET_ATTR_MODE and also for
 //    KILL_SUID/KILL_SGID (backing::SetAttr). system.posix_acl_default is
 //    never touched by a chmod.
-//  - security.capability: removed by chown/chgrp and truncate
-//    (ATTR_KILL_PRIV, fs/open.c, fs/attr.c) and by any write or fallocate
+//  - security.capability: removed by chown/chgrp (even chown(-1, -1)) and
+//    truncate (ATTR_KILL_PRIV, fs/open.c, fs/attr.c) and by any write or
+//    fallocate
 //    (file_remove_privs). Note the kernel, since dcfs does not ask for
 //    FUSE_CAP_HANDLE_KILLPRIV(_V2), also removes it itself through the
 //    mount (a FUSE REMOVEXATTR ahead of the SETATTR or write), so this is
@@ -67,7 +68,10 @@ std::vector<std::string_view> XattrsChangedBySetattr(int to_set) {
                 FUSE_SET_ATTR_KILL_SGID)) {
     names.push_back(kAclAccessXattr);
   }
-  if (to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID | FUSE_SET_ATTR_SIZE)) {
+  // An otherwise empty setattr is a chown(path, -1, -1) (see
+  // backing::SetAttr).
+  if ((to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID | FUSE_SET_ATTR_SIZE)) ||
+      (to_set & ~FUSE_SET_ATTR_CTIME) == 0) {
     names.push_back(kCapabilityXattr);
   }
   return names;

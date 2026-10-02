@@ -443,8 +443,15 @@ absl::Status FinishRun(Context &ctx);
 // access re-reads the true (possibly partial) result rather than ever
 // reporting stale data.
 //
-// FUSE_SET_ATTR_CTIME is ignored: ctime cannot be set directly, and the
-// kernel only ever sends it alongside another flag. FUSE_SET_ATTR_MODE
+// FUSE_SET_ATTR_CTIME's value is ignored: ctime cannot be set directly.
+// A request with nothing else to set (`to_set` 0 or CTIME alone) is a
+// chown(path, -1, -1): on Linux that changes no owner but still updates
+// ctime (and, like any chown, may clear setuid/setgid or drop
+// security.capability), and the kernel forwards it as an otherwise empty
+// SETATTR (fuse_do_setattr sends FATTR_CTIME only with writeback caching,
+// which dcfs does not use). It is applied as that same fchownat(-1, -1),
+// as the caller, so dcfs and the backing filesystem agree.
+// FUSE_SET_ATTR_MODE
 // dispatches on the node's current type: regular files and directories
 // are chmod'd through a reopened non-O_PATH fd (fchmod rejects O_PATH);
 // FIFOs, sockets and devices go through fchmod_opath (reopening one of

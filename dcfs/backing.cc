@@ -1491,8 +1491,14 @@ absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
     ABSL_RETURN_IF_ERROR(ApplyTimes(caller, *fd, type, times));
   }
 
-  // FUSE_SET_ATTR_CTIME is intentionally never consulted: ctime cannot be
-  // set directly (see SetAttr's declaration comment).
+  // Nothing to set but (perhaps) ctime: a chown(path, -1, -1) (see
+  // SetAttr's declaration comment). The ctime value is never used.
+  if ((to_set & ~FUSE_SET_ATTR_CTIME) == 0) {
+    ABSL_RETURN_IF_ERROR(AsCaller(caller, [&] {
+      return syscalls::fchownat(*fd, "", static_cast<uid_t>(-1),
+                                static_cast<gid_t>(-1), AT_EMPTY_PATH);
+    }));
+  }
   return absl::OkStatus();
 }
 

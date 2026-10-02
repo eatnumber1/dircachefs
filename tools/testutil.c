@@ -29,6 +29,10 @@
  *       EOPNOTSUPP when <path> is itself a symlink (there is no lchmod
  *       syscall) -- verified even on a plain tmpfs symlink, so this is
  *       generic kernel behavior, not something specific to dcfs.
+ *   testutil lchown <path> <uid> <gid>
+ *       fchownat(AT_FDCWD, <path>, uid, gid, AT_SYMLINK_NOFOLLOW); -1 for
+ *       either leaves it unchanged (busybox chown cannot ask for -1/-1,
+ *       which on Linux still updates ctime).
  *   testutil rename2 <old> <new> <0|noreplace|exchange>
  *       renameat2(2) (via syscall(SYS_renameat2), both paths relative to
  *       AT_FDCWD) with flags 0, RENAME_NOREPLACE or RENAME_EXCHANGE.
@@ -159,6 +163,19 @@ static int cmd_lchmod(const char *path, const char *mode_str)
 	mode_t mode = (mode_t) strtol(mode_str, NULL, 8);
 
 	if (fchmodat(AT_FDCWD, path, mode, AT_SYMLINK_NOFOLLOW) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	return 0;
+}
+
+static int cmd_lchown(const char *path, const char *uid_str,
+		      const char *gid_str)
+{
+	uid_t uid = (uid_t) strtol(uid_str, NULL, 10);
+	gid_t gid = (gid_t) strtol(gid_str, NULL, 10);
+
+	if (fchownat(AT_FDCWD, path, uid, gid, AT_SYMLINK_NOFOLLOW) == -1) {
 		print_err(errno);
 		return 1;
 	}
@@ -484,6 +501,8 @@ int main(int argc, char *argv[])
 		return cmd_utimens(argv[2], argv[3], argv[4]);
 	if (argc == 4 && strcmp(argv[1], "lchmod") == 0)
 		return cmd_lchmod(argv[2], argv[3]);
+	if (argc == 5 && strcmp(argv[1], "lchown") == 0)
+		return cmd_lchown(argv[2], argv[3], argv[4]);
 	if (argc == 5 && strcmp(argv[1], "rename2") == 0)
 		return cmd_rename2(argv[2], argv[3], argv[4]);
 	if (argc == 5 && strcmp(argv[1], "setxattr") == 0)
@@ -515,6 +534,7 @@ int main(int argc, char *argv[])
 		"usage: testutil truncate <path> <size>\n"
 		"       testutil utimens <path> <sec> <nsec>\n"
 		"       testutil lchmod <path> <octal-mode>\n"
+		"       testutil lchown <path> <uid> <gid>\n"
 		"       testutil rename2 <old> <new> <0|noreplace|exchange>\n"
 		"       testutil setxattr <path> <name> <value>\n"
 		"       testutil getxattr <path> <name>\n"

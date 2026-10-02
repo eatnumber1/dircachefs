@@ -214,6 +214,25 @@ chown 1000:1000 "$MNT/f1"
 verify_immediate chown-matches-src "$MNT/f1" "$SRC/f1" '%u:%g'
 verify_cached chown-cached "$MNT/f1" '%u:%g' 1000:1000
 
+# --- chown-noop-ctime: chown(path, -1, -1) changes only ctime ------------
+# On Linux a chown that changes neither owner nor group still updates
+# ctime (chown_common always sets ATTR_CTIME); the kernel forwards it to
+# dcfs as an otherwise empty SETATTR, which dcfs must apply to the backing
+# file too, or dcfs and the backing filesystem disagree.
+
+ctime_before=$(stat -c %Z "$SRC/f1")
+sleep 1
+noop_out=$("$TESTUTIL" lchown "$MNT/f1" -1 -1 2>&1)
+ctime_src=$(stat -c %Z "$SRC/f1")
+ctime_mnt=$(stat -c %Z "$MNT/f1")
+if [ -z "$noop_out" ] && [ "$ctime_src" -gt "$ctime_before" ] &&
+	[ "$ctime_mnt" = "$ctime_src" ]; then
+	pass chown-noop-ctime
+else
+	fail chown-noop-ctime "out='$noop_out' ctime before=$ctime_before src=$ctime_src mnt=$ctime_mnt"
+fi
+verify_immediate chown-noop-owner "$MNT/f1" "$SRC/f1" '%u:%g'
+
 # --- truncate-shrink: size down, content check too -----------------------
 
 # busybox's own `truncate -s N FILE` goes through open(O_WRONLY) first,
