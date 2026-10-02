@@ -317,6 +317,10 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
 Bugs get a regression test first: the test is shown to fail on the
 unfixed code, then the fix makes it pass.
 
+The GitHub Actions workflow (`.github/workflows/ci.yml`) only builds
+(`bazel build //...`): hosted runners have neither KVM nor the patched
+kernel, so the tests need a KVM-capable machine set up as above.
+
 ## Design overview
 
 dcfs is layered so that exactly one module touches the backing filesystem

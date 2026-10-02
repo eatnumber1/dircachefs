@@ -1,6 +1,11 @@
-# QEMU end-to-end tests (--config=qemu, tag qemu) are excluded by the default
-# test_tag_filters in .bazelrc and will be enabled here once the kernel under
-# test is pinnable (see the plan's step 5.4).
+# Build only. Every dcfs test, unit tests included, runs as root inside a
+# QEMU guest booted with KVM from a kernel carrying the not-yet-upstream
+# FUSE_ATTR_GENERATION patch (see README.md's "Testing" and
+# test/qemu/README.md). GitHub's hosted runners have neither KVM nor that
+# kernel, so running `bazel test` here would only fail; tests need a
+# KVM-capable self-hosted runner with the patched kernel built by
+# test/qemu/scripts/build-kernel.sh. `bazel build //...` works without the
+# kernel (it is a placeholder until built) and builds every test binary.
 
 name: CI
 
@@ -10,7 +15,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  build:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -20,6 +25,4 @@ jobs:
           bazelisk-cache: true
           disk-cache: ${{ github.workflow }}
           repository-cache: true
-      - run: sudo apt-get update && sudo apt-get install -y fuse3 libfuse3-dev attr
-      - run: bazel test //...
-      - run: bazel test --config=asan //...
+      - run: bazel build //...
