@@ -120,7 +120,10 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
 // layer answers ESTALE).
 absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id);
 
-// NotFound if there is no row for `id`.
+// NotFound if there is no row for `id`. No production caller reads the
+// generation on its own today (GetAttr's CachedAttr::fuse_gen covers every
+// current need); kept as the single-field counterpart to GetAttr, exercised
+// by its own test (FuseGenerations).
 absl::StatusOr<uint32_t> GetGeneration(Context &ctx, InodeId id);
 
 // Callback for ListDir. `next_cursor` is the cursor to pass to ListDir to
@@ -230,11 +233,23 @@ absl::Status SetRefused(Context &ctx, InodeId parent, std::string_view name);
 // Marks (parent, name) unknown. Never deletes the inode row it pointed at,
 // since other (possibly uncached) links may remain. NotFound if `parent`
 // is missing.
+//
+// No production caller: DirCacheFS's own Unlink/Rmdir goes straight to
+// SetNegative (it already knows the name is gone, not merely unknown).
+// Kept as the general-purpose single-name primitive MarkUnknown's
+// multi-name loop is built from the same way, exercised by its own test
+// (UnlinkDentryLeavesInodeRow).
 absl::Status UnlinkDentry(Context &ctx, InodeId parent, std::string_view name);
 
 // Moves the positive entry (parent, name) to (newparent, newname),
 // replacing any entry cached there. The source name becomes unknown (not
 // absent). NotFound if no positive entry is cached for the source.
+//
+// No production caller: DirCacheFS's own Rename composes LinkDentry and
+// SetNegative/LinkDentry directly, since it already knows the exact
+// post-rename state of both names (see RefreshAfterRename) rather than
+// just "moved, with the old name now unknown". Kept as the cache-level
+// rename primitive, exercised by its own test (RenameAcrossParents).
 absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
                           InodeId newparent, std::string_view newname);
 
