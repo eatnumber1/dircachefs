@@ -2,4 +2,4 @@ BasedOnStyle: Google
 IndentWidth: 2
 ColumnLimit: 80
 DerivePointerAlignment: false
-PointerAlignment: Left
+PointerAlignment: Right
