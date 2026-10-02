@@ -1,5 +1,7 @@
 #include "dcfs/status.h"
 
+#include <cstring>
+
 #include "absl/base/no_destructor.h"
 #include "absl/status/status_builder.h"
 #include "absl/strings/str_format.h"

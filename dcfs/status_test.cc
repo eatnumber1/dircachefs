@@ -1,8 +1,7 @@
 #include "dcfs/status.h"
 
-#include <string.h>
-
 #include <cerrno>
+#include <cstring>
 #include <string>
 
 #include "absl/status/status.h"

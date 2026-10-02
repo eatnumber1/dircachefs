@@ -2,9 +2,9 @@
 #define DCFS_METADATA_CACHE_H_
 
 #include <sys/stat.h>
-#include <time.h>
 
 #include <cstdint>
+#include <ctime>
 #include <optional>
 #include <span>
 #include <string>

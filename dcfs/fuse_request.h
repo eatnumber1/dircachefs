@@ -3,12 +3,13 @@
 
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
-#include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <string_view>
 #include <utility>
 
