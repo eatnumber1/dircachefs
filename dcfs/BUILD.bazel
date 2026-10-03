@@ -274,7 +274,17 @@ qemu_cc_test(
     name = "device_id_test",
     size = "small",
     srcs = ["device_id_test.cc"],
-    disks = [("vdb", "ext4", "32M")],  # FS_IOC_GETFSUUID needs a filesystem with a UUID; tmpfs has none
+    # FS_IOC_GETFSUUID needs a filesystem with a UUID; tmpfs has none. vdc
+    # (step 5.2) is btrfs, mounted by the test itself (not guest/init's
+    # disk0, which only ever becomes TEST_TMPDIR): btrfs does not support
+    # FS_IOC_GETFSUUID (no fs/btrfs/*.c caller of super_set_uuid as of this
+    # writing -- see GetDeviceIdBtrfsUsesFsInfoFallback's comment), so
+    # GetDeviceId needs its own real btrfs filesystem to exercise the
+    # BTRFS_IOC_FS_INFO fallback this step added.
+    disks = [
+        ("vdb", "ext4", "32M"),
+        ("vdc", "btrfs", "320M"),
+    ],
     deps = [
       ":device_id",
       ":status",

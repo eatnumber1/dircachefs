@@ -1,12 +1,15 @@
 #include "dcfs/device_id.h"
 
 #include <fcntl.h>
+#include <sys/mount.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <array>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 #include "absl/hash/hash.h"
@@ -133,6 +136,44 @@ TEST(DeviceIdTest, GetDeviceIdTestTmpDir) {
   absl::StatusOr<DeviceId> id = GetDeviceIdForPath(tmpdir);
   ASSERT_THAT(id, IsOk());
   EXPECT_NE(id->uuid, kZeroUuid);
+}
+
+// Step 5.2: unlike ext4 and xfs (both call super_set_uuid(), verified in
+// fs/ext4/super.c and fs/xfs/xfs_mount.c as of this writing), btrfs does
+// not support FS_IOC_GETFSUUID at all -- no fs/btrfs/*.c file calls
+// super_set_uuid(), so the kernel's generic ioctl_getfsuuid() (fs/ioctl.c)
+// always returns ENOTTY for it, on every kernel version, not just this
+// project's. GetDeviceId() falls back to BTRFS_IOC_FS_INFO's fsid field in
+// that case (see device_id.cc) -- this is a dcfs fix (not a test-only
+// workaround), since BTRFS_IOC_FS_INFO's fsid is the same stable
+// filesystem UUID `btrfs filesystem show`/blkid report, just reached via a
+// btrfs-specific ioctl instead of the generic one. Mounts vdc (this
+// target's second disk, pre-formatted btrfs by run-qemu.sh) itself, since
+// guest/init's disk0 handling only ever turns the *first* disks= entry
+// into TEST_TMPDIR.
+TEST(DeviceIdTest, GetDeviceIdBtrfsUsesFsInfoFallback) {
+  const char *tmpdir = std::getenv("TEST_TMPDIR");
+  ASSERT_NE(tmpdir, nullptr)
+      << "TEST_TMPDIR must be set when running under bazel test";
+  std::string mnt = std::string(tmpdir) + "/btrfs_mnt";
+  ASSERT_EQ(mkdir(mnt.c_str(), 0755), 0) << strerror(errno);
+  ASSERT_EQ(mount("/dev/vdc", mnt.c_str(), "btrfs", 0, nullptr), 0)
+      << strerror(errno);
+
+  absl::StatusOr<DeviceId> id = GetDeviceIdForPath(mnt.c_str());
+  ASSERT_THAT(id, IsOk()) << id.status();
+  EXPECT_NE(id->uuid, kZeroUuid);
+  // The root subvolume's own tree id (BTRFS_FS_TREE_OBJECTID) is always 5,
+  // on every btrfs filesystem.
+  EXPECT_EQ(id->subvol_id, 5u);
+
+  // A second O_PATH fd on the same mount must yield an equal id (same
+  // consistency property GetDeviceIdRoot checks for a non-btrfs fs).
+  absl::StatusOr<DeviceId> id2 = GetDeviceIdForPath(mnt.c_str());
+  ASSERT_THAT(id2, IsOk());
+  EXPECT_EQ(*id, *id2);
+
+  umount(mnt.c_str());
 }
 
 // Asserts the *current* pre-FS_IOC_GETFSUUID-support OpenZFS behavior.

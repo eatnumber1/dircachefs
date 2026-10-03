@@ -155,6 +155,38 @@ int IoctlAllowingOPath(int fd, unsigned long request, void *arg) {
 }  // namespace
 
 absl::StatusOr<DeviceId> GetDeviceId(int fd) {
+  int64_t f_type;
+  ABSL_ASSIGN_OR_RETURN(f_type, GetFsType(fd));
+
+  // Step 5.2 finding: btrfs does not support FS_IOC_GETFSUUID at all, on
+  // any kernel version -- unlike ext4 and xfs (fs/ext4/super.c,
+  // fs/xfs/xfs_mount.c), no file under fs/btrfs/ calls super_set_uuid(),
+  // so the kernel's generic handler (ioctl_getfsuuid() in fs/ioctl.c)
+  // always returns ENOTTY for it: sb->s_uuid_len is simply never set.
+  // BTRFS_IOC_FS_INFO's fsid field is the same stable filesystem UUID
+  // (what `btrfs filesystem show`/blkid report), reached through a
+  // btrfs-specific ioctl instead of the generic one, so it stands in for
+  // FS_IOC_GETFSUUID here rather than this filesystem going unsupported.
+  DeviceId id;
+  if (f_type == BTRFS_SUPER_MAGIC) {
+    struct btrfs_ioctl_fs_info_args fs_info;
+    std::memset(&fs_info, 0, sizeof(fs_info));
+    if (IoctlAllowingOPath(fd, BTRFS_IOC_FS_INFO, &fs_info) != 0) {
+      return ErrnoToStatus(errno, "BTRFS_IOC_FS_INFO ioctl");
+    }
+    static_assert(sizeof(fs_info.fsid) == 16);
+    std::copy(std::begin(fs_info.fsid), std::end(fs_info.fsid),
+              id.uuid.begin());
+
+    struct btrfs_ioctl_get_subvol_info_args args;
+    std::memset(&args, 0, sizeof(args));
+    if (IoctlAllowingOPath(fd, BTRFS_IOC_GET_SUBVOL_INFO, &args) != 0) {
+      return ErrnoToStatus(errno, "BTRFS_IOC_GET_SUBVOL_INFO ioctl");
+    }
+    id.subvol_id = args.treeid;
+    return id;
+  }
+
   struct fsuuid2 fsuuid;
   std::memset(&fsuuid, 0, sizeof(fsuuid));
 
@@ -162,8 +194,6 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
     int saved_errno = errno;
     if (saved_errno == ENOTTY || saved_errno == EOPNOTSUPP ||
         saved_errno == ENOSYS) {
-      int64_t f_type;
-      ABSL_ASSIGN_OR_RETURN(f_type, GetFsType(fd));
       return absl::UnimplementedError(absl::StrCat(
           FstypeName(f_type), " does not support FS_IOC_GETFSUUID"));
     }
@@ -176,20 +206,7 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
         static_cast<int>(fsuuid.len)));
   }
 
-  DeviceId id;
   std::copy(std::begin(fsuuid.uuid), std::end(fsuuid.uuid), id.uuid.begin());
-
-  int64_t f_type;
-  ABSL_ASSIGN_OR_RETURN(f_type, GetFsType(fd));
-  if (f_type == BTRFS_SUPER_MAGIC) {
-    struct btrfs_ioctl_get_subvol_info_args args;
-    std::memset(&args, 0, sizeof(args));
-    if (IoctlAllowingOPath(fd, BTRFS_IOC_GET_SUBVOL_INFO, &args) != 0) {
-      return ErrnoToStatus(errno, "BTRFS_IOC_GET_SUBVOL_INFO ioctl");
-    }
-    id.subvol_id = args.treeid;
-  }
-
   return id;
 }
 

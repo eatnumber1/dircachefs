@@ -11,7 +11,9 @@
 namespace dcfs {
 
 // Identifies a filesystem instance: its on-disk UUID (as reported by
-// FS_IOC_GETFSUUID) plus, for filesystems with independently-snapshottable
+// FS_IOC_GETFSUUID on ext4/xfs, or BTRFS_IOC_FS_INFO's fsid field on
+// btrfs, which does not support FS_IOC_GETFSUUID at all -- see
+// GetDeviceId) plus, for filesystems with independently-snapshottable
 // sub-volumes (currently only Btrfs), the sub-volume's tree id. Two O_PATH
 // fds referring to the same mounted filesystem (and sub-volume, if any)
 // compare equal.
@@ -47,7 +49,9 @@ struct DeviceId {
 };
 
 // Returns the DeviceId of the filesystem containing `fd`, which may be an
-// O_PATH descriptor. Returns absl::UnimplementedError if the underlying
+// O_PATH descriptor. On btrfs this always goes through BTRFS_IOC_FS_INFO/
+// BTRFS_IOC_GET_SUBVOL_INFO instead of FS_IOC_GETFSUUID (see the .cc file
+// for why). Otherwise, returns absl::UnimplementedError if the underlying
 // filesystem does not support FS_IOC_GETFSUUID: that ioctl was only added
 // in Linux 6.9, and as of this writing OpenZFS does not implement it at
 // all.
