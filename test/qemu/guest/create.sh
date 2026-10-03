@@ -39,6 +39,7 @@ FAILED=0
 . "$(dirname "$0")/lib.sh"
 
 DCFS=/bin/dcfs
+TESTUTIL=/bin/testutil
 
 SRC=/src
 MNT=/mnt
@@ -136,9 +137,13 @@ run_pass() {
 # --- build the backing tree -------------------------------------------------
 
 mount /dev/vdb /src
+FSTYPE=$(backing_fstype "$SRC")
 # "d" is for mkdir-boundary-refused/link-exdev below: it must never be
 # listed through dcfs before vdc is mounted under it at runtime.
 mkdir -p /src/d
+# "d2" is for btrfs-subvol-boundary-refused below (btrfs only): same
+# never-listed-before-the-boundary-appears requirement as "d" above.
+[ "$FSTYPE" = btrfs ] && mkdir -p /src/d2
 sync
 
 mkdir -p /cache /mnt
@@ -316,13 +321,58 @@ else
 fi
 umount /src/d/mp
 
+# --- btrfs-subvol-boundary-refused: a btrfs subvolume created directly ----
+# --- under the source, at runtime, is refused exactly like a real mount ---
+# --- boundary (amendment 12) -----------------------------------------------
+#
+# btrfs subvolumes are not separate entries in /proc/self/mountinfo, so
+# dcfs's startup check (MountsBelow, which only sees real mounts) cannot
+# refuse a pre-existing subvolume under --source at startup -- see
+# README's Limitations, which documents this gap explicitly. What dcfs
+# *does* catch is the same runtime boundary check used for a real
+# mount (backing::IsBoundary): a btrfs subvolume's root directory reports a
+# different st_dev than its parent (a documented btrfs quirk -- each
+# subvolume gets its own pseudo-device number for POSIX compliance, even
+# though it is not a separate block device or mount), so ProbeChild refuses
+# it exactly as it would a real submount, with no dcfs code path specific
+# to btrfs at all. "d2" (btrfs only; see above) is never listed through
+# dcfs before the subvolume is created in it, same ordering requirement as
+# "d"/"mp" above.
+if [ "$FSTYPE" = btrfs ]; then
+	if "$TESTUTIL" btrfs-subvol-create /src/d2/subvol >/tmp/subvol_create.out 2>&1; then
+		expect_fail btrfs-subvol-boundary-refused "cross-device" mkdir "$MNT/d2/subvol/x"
+		listing=$(ls -1 "$MNT/d2" 2>&1)
+		case "$listing" in
+		*subvol*) fail btrfs-subvol-not-listed "subvol appeared in /mnt/d2: $listing" ;;
+		*) pass btrfs-subvol-not-listed ;;
+		esac
+		errors=$(grep -c "refusing to cache subvol" "$LOG1")
+		if [ "$errors" -eq 1 ]; then
+			pass btrfs-subvol-error-logged-once
+		else
+			fail btrfs-subvol-error-logged-once "want 1 ERROR line, got $errors"
+		fi
+	else
+		fail btrfs-subvol-create "testutil btrfs-subvol-create failed: $(cat /tmp/subvol_create.out)"
+		fail btrfs-subvol-boundary-refused "no subvolume to test against"
+		fail btrfs-subvol-not-listed "no subvolume to test against"
+		fail btrfs-subvol-error-logged-once "no subvolume to test against"
+	fi
+else
+	skip btrfs-subvol-boundary-refused "backing filesystem is $FSTYPE, not btrfs"
+	skip btrfs-subvol-not-listed "backing filesystem is $FSTYPE, not btrfs"
+	skip btrfs-subvol-error-logged-once "backing filesystem is $FSTYPE, not btrfs"
+fi
+
 # --- listing-matches: everything created above agrees between /src/ and
-# /mnt -- "d" is excluded: see readonly.sh's identity-checks comment on why
-# /src/d and the cached /mnt/d deliberately diverge after the checks above.
+# /mnt -- "d" (and, on btrfs, "d2") is excluded: see readonly.sh's
+# identity-checks comment on why /src/d and the cached /mnt/d deliberately
+# diverge after the checks above; "d2" diverges the same way, only on
+# btrfs.
 # -----------------------------------------------------------------------
 
-find /src -path /src/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
-find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+find /src \( -path /src/d -o -path /src/d2 \) -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
+find /mnt \( -path /mnt/d -o -path /mnt/d2 \) -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
 normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
 normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
 set -- $(md5sum /tmp/src_stat_norm.txt)

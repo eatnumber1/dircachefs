@@ -114,6 +114,15 @@
  *       mount with readdirplus "auto" the rest (".." included) comes from
  *       plain READDIR requests (the kernel uses READDIRPLUS only at offset
  *       0), whose inode numbers busybox ls -i never shows separately.
+ *   testutil btrfs-subvol-create <path>
+ *       BTRFS_IOC_SUBVOL_CREATE: creates a btrfs subvolume at <path> (whose
+ *       parent directory must already exist on a btrfs filesystem). Step
+ *       5.2's btrfs boundary-refusal check needs a subvolume boundary, and
+ *       this minimal busybox initramfs has neither a `btrfs`(8) binary nor
+ *       a busybox applet for it. The ioctl constants used are copied from
+ *       the kernel's <linux/btrfs.h> UAPI header rather than included from
+ *       it, since this toolchain's sysroot is not guaranteed to carry
+ *       btrfs-specific UAPI headers.
  *
  * Every subcommand prints "ERR <errno-name>" (via glibc's strerrorname_np)
  * and exits 1 on failure; on success it prints nothing (except
@@ -125,7 +134,9 @@
 #include <errno.h>
 #include <grp.h>
 #include <fcntl.h>
+#include <libgen.h>
 #include <sqlite3.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -137,6 +148,20 @@
 #include <sys/xattr.h>
 #include <time.h>
 #include <unistd.h>
+
+/* BTRFS_IOC_SUBVOL_CREATE, copied from the kernel's <linux/btrfs.h> UAPI
+ * header (not included from it -- see the btrfs-subvol-create doc comment
+ * above). BTRFS_PATH_NAME_MAX and the struct layout are stable UAPI, part
+ * of the on-disk-adjacent ioctl ABI every btrfs-progs release also depends
+ * on verbatim. */
+#define BTRFS_IOCTL_MAGIC 0x94
+#define BTRFS_PATH_NAME_MAX 4087
+struct btrfs_ioctl_vol_args {
+	int64_t fd;
+	char name[BTRFS_PATH_NAME_MAX + 1];
+};
+#define BTRFS_IOC_SUBVOL_CREATE \
+	_IOW(BTRFS_IOCTL_MAGIC, 14, struct btrfs_ioctl_vol_args)
 
 static void print_err(int err)
 {
@@ -596,6 +621,52 @@ static int cmd_readdir_ino(const char *dir)
 	return 0;
 }
 
+static int cmd_btrfs_subvol_create(const char *path)
+{
+	struct btrfs_ioctl_vol_args args;
+	char *path_copy_dir, *path_copy_base, *dir, *base;
+	int parent_fd;
+	int ret = 0;
+
+	path_copy_dir = strdup(path);
+	path_copy_base = strdup(path);
+	if (path_copy_dir == NULL || path_copy_base == NULL) {
+		print_err(ENOMEM);
+		free(path_copy_dir);
+		free(path_copy_base);
+		return 1;
+	}
+	dir = dirname(path_copy_dir);
+	base = basename(path_copy_base);
+
+	if (strlen(base) > BTRFS_PATH_NAME_MAX) {
+		fprintf(stderr,
+			"testutil btrfs-subvol-create: name too long\n");
+		free(path_copy_dir);
+		free(path_copy_base);
+		return 2;
+	}
+
+	parent_fd = open(dir, O_RDONLY | O_DIRECTORY);
+	if (parent_fd == -1) {
+		print_err(errno);
+		free(path_copy_dir);
+		free(path_copy_base);
+		return 1;
+	}
+
+	memset(&args, 0, sizeof(args));
+	strncpy(args.name, base, BTRFS_PATH_NAME_MAX);
+	if (ioctl(parent_fd, BTRFS_IOC_SUBVOL_CREATE, &args) == -1) {
+		print_err(errno);
+		ret = 1;
+	}
+	close(parent_fd);
+	free(path_copy_dir);
+	free(path_copy_base);
+	return ret;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -638,6 +709,8 @@ int main(int argc, char *argv[])
 		return cmd_rmcwd(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "readdir-ino") == 0)
 		return cmd_readdir_ino(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "btrfs-subvol-create") == 0)
+		return cmd_btrfs_subvol_create(argv[2]);
 
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
@@ -659,6 +732,7 @@ int main(int argc, char *argv[])
 		"       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n"
 		"       testutil opath-unlink-stat <path>\n"
 		"       testutil rmcwd <dir>\n"
-		"       testutil readdir-ino <dir>\n");
+		"       testutil readdir-ino <dir>\n"
+		"       testutil btrfs-subvol-create <path>\n");
 	return 2;
 }
