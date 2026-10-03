@@ -19,6 +19,25 @@ skip() { echo "TEST $1 SKIP ($2)"; }
 
 is_mounted() { grep -q " $1 " /proc/mounts; }
 
+# backing_fstype PATH: the filesystem type backing PATH -- "ext4", "xfs",
+# "btrfs", or the raw hex magic (unrecognized) -- for guest scripts that run
+# against all three backing filesystems (step 5.2: qemu_test_matrix) and
+# need to branch on genuine per-filesystem semantics (generation/ACL/xattr/
+# statx differences -- see README.md's "tested on" line and
+# docs/conformance.md). Keyed on the statfs(2) magic number (busybox `stat
+# -f -c %t`), not the type name `stat -f -c %T` prints: busybox/coreutils
+# both print "ext2/ext3" for ext4's magic (0xef53 is shared by ext2/ext3/
+# ext4; statfs(2) cannot tell them apart), which is useless for picking
+# "ext4" back out by name.
+backing_fstype() {
+	case "$(stat -f -c %t "$1")" in
+	ef53) echo ext4 ;;
+	58465342) echo xfs ;;
+	9123683e) echo btrfs ;;
+	*) stat -f -c %t "$1" ;;
+	esac
+}
+
 # sectors_read DEV: the "sectors read" counter from /sys/block/DEV/stat, to
 # confirm a re-read was served from dcfs's own cache rather than the disk.
 sectors_read() {

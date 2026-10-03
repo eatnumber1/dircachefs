@@ -143,9 +143,13 @@ else
 	# checked before the generic *.sh guest-test-script pattern below, since
 	# tests/misc.sh would otherwise match *.sh first and land in the wrong
 	# place (/tests/misc.sh instead of /pjdfstest/tests/misc.sh).
-	# pjdfstest.expected_failures / pjdfstest.ext4_failures (the checked-in
-	# failure baselines guest/pjdfstest.sh reads) are also matched by path
-	# shape here, ahead of the generic *.sh pattern for the same reason.
+	# pjdfstest.<fstype>.expected_failures / pjdfstest.<fstype>.backing_failures
+	# (step 5.2; the checked-in per-filesystem failure baselines
+	# guest/pjdfstest.sh reads -- one enforced dcfs-specific baseline and one
+	# purely documentary backing-filesystem-failure record per fstype) are
+	# also matched by path shape here, ahead of the generic *.sh pattern for
+	# the same reason: both names end in "_failures", so one glob catches
+	# every current and future fstype's pair without listing each by name.
 	for f in "$@"; do
 		case "$f" in
 		*/tests/*)
@@ -155,11 +159,8 @@ else
 			cp "$f" "$dest"
 			;;
 		*/pjdfstest) cp "$f" "$ROOT/pjdfstest/pjdfstest" ;;
-		*/pjdfstest.expected_failures)
-			cp "$f" "$ROOT/pjdfstest/pjdfstest.expected_failures"
-			;;
-		*/pjdfstest.ext4_failures)
-			cp "$f" "$ROOT/pjdfstest/pjdfstest.ext4_failures"
+		*/pjdfstest.*_failures)
+			cp "$f" "$ROOT/pjdfstest/$(basename "$f")"
 			;;
 		*.sh) cp "$f" "$ROOT/tests/$(basename "$f")" ;;
 		esac

@@ -1,4 +1,4 @@
-load(":qemu_test.bzl", "qemu_test")
+load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
 # and any other package with unit tests) to build each test's own initramfs.
@@ -38,11 +38,9 @@ genrule(
         "//tools:testutil",
         "@pjdfstest//:pjdfstest",
         "@pjdfstest//:tests",
-        "guest/pjdfstest.expected_failures",
-        "guest/pjdfstest.ext4_failures",
         "@kernel_image//:busybox",
         "guest/init",
-    ] + glob(["guest/*.sh"]),
+    ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]),
     outs = ["initramfs.cpio.gz"],
     cmd = "$(location scripts/mkinitramfs.sh) $@ " +
           "$(location @kernel_image//:busybox) " +
@@ -60,18 +58,27 @@ qemu_test(
     guest_script = "guest/boot.sh",
 )
 
-qemu_test(
+# Step 5.2: readonly_test runs on ext4, xfs and btrfs (qemu_test_matrix
+# below generates readonly_test_ext4/_xfs/_btrfs plus a plain
+# "readonly_test" alias to the ext4 variant) -- see guest/readonly.sh's own
+# fstype branches and README.md's "tested on" line. vdb is 320M (not the
+# smaller size pre-5.2 ext4-only test used): mkfs.xfs refuses to format
+# anything under 300MB ("Filesystem must be larger than 300MB"), and
+# qemu_test_matrix varies vdb's fstype across every generated variant, so
+# every matrix test's vdb needs to already clear that floor even for its
+# ext4/btrfs variants.
+qemu_test_matrix(
     name = "readonly_test",
     disks = [
-        ("vdb", "ext4", "128M"),
+        ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/readonly.sh",
 )
 
-qemu_test(
+qemu_test_matrix(
     name = "passthrough_test",
-    disks = [("vdb", "ext4", "256M")],
+    disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/passthrough.sh",
 )
 
@@ -81,60 +88,60 @@ qemu_test(
     guest_script = "guest/lifecycle.sh",
 )
 
-qemu_test(
+qemu_test_matrix(
     name = "setattr_test",
-    disks = [("vdb", "ext4", "128M")],
+    disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/setattr.sh",
 )
 
-qemu_test(
+qemu_test_matrix(
     name = "handles_test",
     disks = [
-        ("vdb", "ext4", "128M"),
+        ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/handles.sh",
 )
 
-qemu_test(
+qemu_test_matrix(
     name = "create_test",
     disks = [
-        ("vdb", "ext4", "128M"),
+        ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/create.sh",
 )
 
-qemu_test(
+qemu_test_matrix(
     name = "rename_test",
     disks = [
-        ("vdb", "ext4", "128M"),
+        ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/rename.sh",
 )
 
-qemu_test(
+qemu_test_matrix(
     name = "write_test",
     disks = [
-        ("vdb", "ext4", "256M"),
+        ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/write.sh",
 )
 
-qemu_test(
+qemu_test_matrix(
     name = "crash_test",
-    disks = [("vdb", "ext4", "128M")],
+    disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/crash.sh",
 )
 
 # Step 4.10: the durable dirty set -- recovery after an unclean shutdown in
 # which the backing filesystem lost the last mutations, sync points, and
 # clean-shutdown detection.
-qemu_test(
+qemu_test_matrix(
     name = "power_test",
-    disks = [("vdb", "ext4", "128M")],
+    disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/power.sh",
 )
 
@@ -160,9 +167,9 @@ qemu_test(
 # Step 4.7: backing operations run with the FUSE caller's filesystem
 # credentials (ownership of new objects, setgid inheritance, chown/sticky/
 # truncate/utimes/xattr rules) -- see guest/credentials.sh.
-qemu_test(
+qemu_test_matrix(
     name = "credentials_test",
-    disks = [("vdb", "ext4", "64M")],
+    disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/credentials.sh",
 )
 
@@ -182,12 +189,15 @@ qemu_test(
 
 # pjdfstest_test (step 4.5): POSIX conformance, ~8800 checks
 # (github.com/pjd/pjdfstest) run twice -- through the dcfs mount and
-# directly against the backing ext4 filesystem -- and diffed; see
-# guest/pjdfstest.sh and docs/conformance.md. Two ~8800-check suites
+# directly against the backing filesystem -- and diffed; see
+# guest/pjdfstest.sh and docs/conformance.md. Step 5.2: run against ext4,
+# xfs and btrfs (qemu_test_matrix below); guest/pjdfstest.sh picks the
+# right per-filesystem baseline (guest/pjdfstest.<fstype>.expected_failures)
+# at runtime from the detected backing filesystem. Two ~8800-check suites
 # serially, each check a full FUSE round trip, comfortably exceeds
-# qemu_test's default size/timeout (large/long, 900s), hence the
-# larger explicit size/timeout below.
-qemu_test(
+# qemu_test's default size/timeout (large/long, 900s), hence the larger
+# explicit size/timeout below.
+qemu_test_matrix(
     name = "pjdfstest_test",
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/pjdfstest.sh",
@@ -199,8 +209,8 @@ qemu_test(
 # working directory, an O_PATH descriptor on an unlinked file) behave as on
 # the backing filesystem instead of failing with ESTALE -- see
 # guest/removed.sh.
-qemu_test(
+qemu_test_matrix(
     name = "removed_test",
-    disks = [("vdb", "ext4", "64M")],
+    disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/removed.sh",
 )

@@ -66,3 +66,60 @@ def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", tim
         size = size,
         timeout = timeout,
     )
+
+# Step 5.2: dcfs's own README/plan promise ext4, xfs and btrfs, but every
+# e2e test used to hard-code "ext4" in its disks= tuple. qemu_test_matrix
+# generates one qemu_test per filesystem in `fstypes`, varying only the
+# first disk's (vdb, the backing source) filesystem type -- every other
+# disk (e.g. vdc, used by the submount/boundary-refusal checks) keeps
+# whatever fstype `disks` gave it, since those checks only care that vdc is
+# a *different* device, not what filesystem it carries. This generates the
+# guest_script's checks three times with no script duplication: the guest
+# script itself detects which filesystem it is running on (see
+# guest/lib.sh's backing_fstype) and branches internally wherever a
+# filesystem's own semantics genuinely differ (generation/ACL/xattr/statx
+# specifics -- see README.md's "tested on" line and docs/conformance.md).
+#
+# `name` becomes an alias to `name + "_" + fstypes[0]` (ext4 by default),
+# so every existing `bazel test //test/qemu:<name>_test` command and every
+# doc reference to it keeps working unchanged.
+def qemu_test_matrix(
+        name,
+        guest_script,
+        disks,
+        size = "large",
+        timeout = "long",
+        rootfs = None,
+        fstypes = ["ext4", "xfs", "btrfs"]):
+    """Declares one qemu_test per backing filesystem in `fstypes`.
+
+    Args:
+        name: the base name; generates "<name>_<fstype>" per fstypes entry
+            plus a plain "<name>" alias to the first (ext4) variant.
+        guest_script: same as qemu_test.
+        disks: same shape as qemu_test's `disks`, but the first entry's
+            fstype field is overridden per generated variant -- pass
+            whatever placeholder fstype reads best (by convention "ext4").
+        size: same as qemu_test.
+        timeout: same as qemu_test.
+        rootfs: same as qemu_test.
+        fstypes: filesystems to generate variants for, in order; the first
+            is what plain "<name>" aliases to.
+    """
+    if not disks:
+        fail("qemu_test_matrix(%s): disks must have at least one entry " % name +
+             "(the backing source disk, vdb, whose fstype is varied)")
+    for fstype in fstypes:
+        varied_disks = [(disks[0][0], fstype, disks[0][2])] + list(disks[1:])
+        qemu_test(
+            name = name + "_" + fstype,
+            guest_script = guest_script,
+            disks = varied_disks,
+            size = size,
+            timeout = timeout,
+            rootfs = rootfs,
+        )
+    native.alias(
+        name = name,
+        actual = ":" + name + "_" + fstypes[0],
+    )
