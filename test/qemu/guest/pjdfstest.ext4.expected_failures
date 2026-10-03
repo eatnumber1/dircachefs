@@ -1,7 +1,9 @@
-# dcfs-specific pjdfstest failures: checks that fail against the dcfs mount
-# but pass when the identical check is run directly against the backing
-# ext4 filesystem (see guest/pjdfstest.sh, which computes this set fresh on
-# every run and diffs it against this file). One
+# dcfs-specific pjdfstest failures on an ext4 backing filesystem: checks
+# that fail against the dcfs mount but pass when the identical check is run
+# directly against backing ext4 (see guest/pjdfstest.sh, which computes
+# this set fresh on every run and diffs it against this file -- one such
+# file per backing filesystem, step 5.2: pjdfstest.<fstype>.expected_failures,
+# picked by the fstype guest/pjdfstest.sh detects on vdb at runtime). One
 # "<relative .t path>:<TAP test number within that file>" per line, sorted;
 # blank lines and "#"-comment lines are ignored.
 #

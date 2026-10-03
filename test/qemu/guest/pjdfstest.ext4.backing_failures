@@ -2,10 +2,12 @@
 # filesystem (no dcfs involved at all) -- see guest/pjdfstest.sh. This is
 # purely a record for docs/conformance.md (upstream ext4/Linux/pjdfstest
 # quirks, not something dcfs can or should "fix"); guest/pjdfstest.sh does
-# NOT read this file back at runtime -- it recomputes the live ext4 failure
-# set on every run and uses that (not this snapshot) to decide which dcfs
-# failures are dcfs-specific, so a kernel/ext4 version drift here can never
-# go stale enough to hide a real dcfs regression.
+# NOT read this file back at runtime -- it recomputes the live backing
+# failure set on every run (for whichever filesystem vdb actually is) and
+# uses that (not this snapshot) to decide which dcfs failures are
+# dcfs-specific, so a kernel/filesystem version drift here can never go
+# stale enough to hide a real dcfs regression. One such file per backing
+# filesystem (step 5.2: pjdfstest.<fstype>.backing_failures).
 #
 # One "<relative .t path>:<TAP test number within that file>" per line,
 # sorted; blank lines and "#"-comment lines are ignored.

@@ -1,0 +1,57 @@
+# pjdfstest failures observed running directly against the backing xfs
+# filesystem (no dcfs involved at all) -- see guest/pjdfstest.sh. This is
+# purely a record for docs/conformance.md (upstream xfs/Linux/pjdfstest
+# quirks, not something dcfs can or should "fix"); guest/pjdfstest.sh does
+# NOT read this file back at runtime -- it recomputes the live backing
+# failure set on every run and uses that (not this snapshot) to decide
+# which dcfs failures are dcfs-specific, so a kernel/filesystem version
+# drift here can never go stale enough to hide a real dcfs regression.
+#
+# One "<relative .t path>:<TAP test number within that file>" per line,
+# sorted; blank lines and "#"-comment lines are ignored.
+#
+# Step 5.2: recorded from the first xfs run of pjdfstest_test_xfs. 30
+# checks fail, dcfs-specific = 0 (dcfs fails exactly this set, no more):
+#   - chown/00.t and unlink/08.t: the same 28 Linux-VFS-level quirks ext4
+#     fails (see pjdfstest.ext4.backing_failures) -- these are generic
+#     Linux behavior, not filesystem-specific, and reproduce identically
+#     on every local filesystem.
+#   - symlink/03.t:1-2 (new vs. ext4): `dirgen_max` builds a path exactly
+#     PATH_MAX (4096) bytes long via deeply nested directories, then
+#     expects a symlink whose target is a sibling of that length to
+#     succeed. On xfs this already fails at check 1 (`mkdir -p` of the
+#     nested path itself, or the first symlink call) rather than at the
+#     ENAMETOOLONG checks (5-6) the test is actually targeting -- i.e. xfs
+#     hits some other path-construction limit slightly before PATH_MAX is
+#     reached. Confirmed independent of dcfs (fails identically with dcfs
+#     entirely out of the picture, directly against backing xfs).
+chown/00.t:1054
+chown/00.t:1058
+chown/00.t:1064
+chown/00.t:1069
+chown/00.t:1073
+chown/00.t:1079
+chown/00.t:1084
+chown/00.t:1088
+chown/00.t:1094
+chown/00.t:1099
+chown/00.t:1103
+chown/00.t:1109
+chown/00.t:1114
+chown/00.t:1118
+chown/00.t:1124
+chown/00.t:1129
+chown/00.t:1133
+chown/00.t:1139
+chown/00.t:1144
+chown/00.t:650
+chown/00.t:654
+chown/00.t:665
+chown/00.t:666
+chown/00.t:671
+chown/00.t:672
+chown/00.t:686
+chown/00.t:690
+symlink/03.t:1
+symlink/03.t:2
+unlink/08.t:2

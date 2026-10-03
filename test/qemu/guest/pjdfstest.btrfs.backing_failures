@@ -1,0 +1,66 @@
+# pjdfstest failures observed running directly against the backing btrfs
+# filesystem (no dcfs involved at all) -- see guest/pjdfstest.sh. This is
+# purely a record for docs/conformance.md (upstream btrfs/Linux/pjdfstest
+# quirks, not something dcfs can or should "fix"); guest/pjdfstest.sh does
+# NOT read this file back at runtime -- it recomputes the live backing
+# failure set on every run and uses that (not this snapshot) to decide
+# which dcfs failures are dcfs-specific, so a kernel/filesystem version
+# drift here can never go stale enough to hide a real dcfs regression.
+#
+# One "<relative .t path>:<TAP test number within that file>" per line,
+# sorted; blank lines and "#"-comment lines are ignored.
+#
+# Step 5.2: recorded from the first btrfs run of pjdfstest_test_btrfs. 32
+# checks fail, dcfs-specific = 0 (dcfs fails exactly this set, no more):
+#   - chown/00.t and unlink/08.t: the same 28 Linux-VFS-level quirks ext4
+#     fails (see pjdfstest.ext4.backing_failures) -- generic Linux
+#     behavior, not filesystem-specific.
+#   - rename/24.t:4,5,8,9 (new vs. ext4): a directory's nlink after a
+#     rename that changes its parent. pjdfstest's own tests/rename/24.t
+#     already has a `case "$fs" in btrfs|BTRFS) todo Linux ...` branch for
+#     exactly this ("Btrfs uses CoW; link count semantics differ from
+#     POSIX."), acknowledging real btrfs has different directory-nlink
+#     semantics after a cross-directory rename than ext4/xfs/POSIX do --
+#     but this project's tests/conf patch
+#     (0001-linux-portability.patch) hard-codes fs="EXT4" for both runs
+#     (see guest/pjdfstest.sh's header comment for why: so dcfs and
+#     backing make identical supported()/todo() decisions and a diff is
+#     meaningful), which means rename/24.t's own btrfs branch never
+#     triggers here -- the test runs the non-btrfs assertions and they
+#     fail, exactly as they would on any harness that does not identify
+#     real btrfs to pjdfstest. Confirmed independent of dcfs (fails
+#     identically with dcfs entirely out of the picture, directly against
+#     backing btrfs): this is upstream btrfs CoW-vs-POSIX nlink behavior
+#     that pjdfstest itself already documents, not a dcfs bug.
+chown/00.t:1054
+chown/00.t:1058
+chown/00.t:1064
+chown/00.t:1069
+chown/00.t:1073
+chown/00.t:1079
+chown/00.t:1084
+chown/00.t:1088
+chown/00.t:1094
+chown/00.t:1099
+chown/00.t:1103
+chown/00.t:1109
+chown/00.t:1114
+chown/00.t:1118
+chown/00.t:1124
+chown/00.t:1129
+chown/00.t:1133
+chown/00.t:1139
+chown/00.t:1144
+chown/00.t:650
+chown/00.t:654
+chown/00.t:665
+chown/00.t:666
+chown/00.t:671
+chown/00.t:672
+chown/00.t:686
+chown/00.t:690
+rename/24.t:4
+rename/24.t:5
+rename/24.t:8
+rename/24.t:9
+unlink/08.t:2
