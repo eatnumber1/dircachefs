@@ -66,7 +66,13 @@ EOF
 )
 
 # fully_static_link (like //dcfs:main_static and //tools:testutil): the
-# QEMU initramfs has no dynamic loader or shared libc.
+# QEMU initramfs has no dynamic loader or shared libc. Same
+# --config=asan/--config=ubsan select() as those two (glibc cannot be
+# fully statically linked with a sanitizer runtime) -- pjdfstest is always
+# a src of test/qemu:initramfs (the e2e initramfs shared by every qemu_test
+# in that package, pjdfstest_test included), so without this `bazel test
+# --config=asan //...` fails to even build the initramfs genrule, not just
+# pjdfstest_test itself: "cannot specify -static with -fsanitize=address".
 cc_binary(
     name = "pjdfstest",
     srcs = [
@@ -82,7 +88,11 @@ cc_binary(
         # maintain).
         "-w",
     ],
-    features = ["fully_static_link"],
+    features = select({
+        "@dircachefs//test/qemu:asan_build": [],
+        "@dircachefs//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
     linkstatic = True,
     visibility = ["//visibility:public"],
 )

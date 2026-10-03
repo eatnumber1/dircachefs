@@ -635,11 +635,21 @@ qemu_cc_test(
 )
 
 # A fully statically linked copy of :main (same sources/deps), for the QEMU
-# initramfs (test/qemu), which has no dynamic loader or shared libc.
+# initramfs (test/qemu), which has no dynamic loader or shared libc. Under
+# --config=asan/--config=ubsan this is linked dynamically instead (see
+# qemu_cc_test.bzl's identical select(), whose own comment explains why:
+# glibc cannot be fully statically linked with ASan, and in practice
+# UBSan's runtime has the same problem); test/qemu/scripts/mkinitramfs.sh's
+# copy_deps() then copies its ldd(1) closure into the e2e initramfs, same
+# as it already does for any dynamically linked qemu_cc_test binary.
 cc_binary(
     name = "main_static",
     srcs = ["main.cc"],
-    features = ["fully_static_link"],
+    features = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
     deps = MAIN_DEPS,

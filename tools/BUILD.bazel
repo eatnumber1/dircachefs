@@ -26,11 +26,17 @@ cc_binary(
 # busybox applet can even see the shape of -- see testutil.c's
 # "sqlite-lock" subcommand, used by //test/qemu:release_leak_test).
 # Statically linked like //dcfs:main_static, for the same reason: the QEMU
-# initramfs has no dynamic loader or shared libc.
+# initramfs has no dynamic loader or shared libc. Same --config=asan/
+# --config=ubsan select() as //dcfs:main_static and qemu_cc_test.bzl, and
+# for the same reason (glibc cannot be fully statically linked with ASan).
 cc_binary(
     name = "testutil",
     srcs = ["testutil.c"],
-    features = ["fully_static_link"],
+    features = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
     deps = ["@sqlite//:sqlite3"],

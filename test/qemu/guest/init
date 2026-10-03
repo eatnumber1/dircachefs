@@ -106,6 +106,13 @@ if [ ! -f "$SCRIPT" ]; then
 	exit 1
 fi
 
+# Same as the unit-test branch above: under --config=asan/--config=ubsan,
+# //dcfs:main_static (started by guest/<name>.sh's start_daemon) is the
+# ASan/UBSan build too (see dcfs/BUILD.bazel's main_static select()), and
+# needs the same leak-detection workaround for the same reason (no ptrace
+# in this guest).
+export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+
 # qemu_test's optional rootfs= attribute (test/qemu/qemu_test.bzl) attaches
 # a Debian rootfs image (test/qemu/scripts/mkrootfs-debian.sh) as an extra
 # virtio-blk disk and names it here. When present, run guest_script chrooted
@@ -130,6 +137,59 @@ if [ -n "$ROOTFS" ]; then
 	mount -o bind /dev /newroot/dev
 	cp /bin/dcfs /bin/fhtest /bin/testutil /newroot/usr/local/bin/
 	cp -a /tests/. /newroot/tests/
+
+	# Under --config=asan/--config=ubsan, dcfs/fhtest/testutil above are
+	# dynamically linked (see dcfs/BUILD.bazel's main_static select()),
+	# and need their shared-library closure -- already copied into this
+	# initramfs's own /lib, /lib64 by mkinitramfs.sh's copy_deps() -- to
+	# run inside the chroot too. Two things that don't work, tried in
+	# this order, before landing on "run each binary through its own
+	# copied loader explicitly" below:
+	#
+	#   - Do nothing (just the plain binary copy above): the Debian
+	#     rootfs predates this build toolchain's glibc, so the dynamic
+	#     linker can't find what dcfs needs in the rootfs's own libc:
+	#       /usr/local/bin/dcfs: /lib/x86_64-linux-gnu/libc.so.6: version
+	#       `GLIBC_2.38' not found (required by /usr/local/bin/dcfs)
+	#   - Overwrite the rootfs's /lib, /lib64 with this build's copies
+	#     (relying on glibc's backward-compatibility guarantee -- a
+	#     newer glibc runs binaries built against an older one, the same
+	#     guarantee an in-place distro glibc upgrade depends on): this
+	#     breaks every *other* dynamically linked binary in the chroot
+	#     instead (/bin/sh itself, here), because the loader
+	#     (ld-linux-x86-64.so.2) and the libc.so.6 it loads share
+	#     GLIBC_PRIVATE-tagged symbols that carry no compatibility
+	#     guarantee at all, even across minor versions:
+	#       /bin/sh: symbol lookup error: /lib/x86_64-linux-gnu/libc.so.6:
+	#       undefined symbol: __tunable_is_initialized, version
+	#       GLIBC_PRIVATE
+	#
+	# Fix: leave the rootfs's own /lib, /lib64 (and so every other
+	# binary in it) completely untouched, and instead give
+	# dcfs/fhtest/testutil their own isolated copy of their loader and
+	# library closure under /opt/dcfs-libs, invoked explicitly (`ld.so
+	# --library-path`) instead of through the normal, rootfs-wide
+	# dynamic-linking resolution a bare exec would use. A no-op for a
+	# normal (non-sanitizer) build: mkinitramfs.sh creates no /lib or
+	# /lib64 at all when every binary is fully static, so $interp stays
+	# empty and this block never runs.
+	interp=$(find /lib64 /lib -name 'ld-linux*.so*' 2>/dev/null | head -1)
+	if [ -n "$interp" ]; then
+		mkdir -p /newroot/opt/dcfs-libs
+		for f in $(find /lib /lib64 -type f 2>/dev/null); do
+			cp "$f" "/newroot/opt/dcfs-libs/$(basename "$f")"
+		done
+		loader="/opt/dcfs-libs/$(basename "$interp")"
+		for bin in dcfs fhtest testutil; do
+			mv "/newroot/usr/local/bin/$bin" \
+				"/newroot/usr/local/bin/$bin.real"
+			cat >"/newroot/usr/local/bin/$bin" <<EOF
+#!/bin/sh
+exec $loader --library-path /opt/dcfs-libs /usr/local/bin/$bin.real "\$@"
+EOF
+			chmod +x "/newroot/usr/local/bin/$bin"
+		done
+	fi
 
 	ip link set lo up
 
