@@ -276,6 +276,29 @@ bazel test //test/qemu:write_test
 bazel test //test/qemu:nfs_test
 ```
 
+**Step 5.2: ext4, xfs and btrfs.** `readonly_test`, `passthrough_test`,
+`setattr_test`, `handles_test`, `create_test`, `rename_test`, `write_test`,
+`crash_test`, `power_test`, `credentials_test`, `removed_test` and
+`pjdfstest_test` are each generated three times -- `<name>_ext4`,
+`<name>_xfs`, `<name>_btrfs` -- by `qemu_test_matrix` (`qemu_test.bzl`),
+which varies only the first (`vdb`) disk's filesystem across the three
+calls to plain `qemu_test` it makes; every command above still works
+unchanged (`<name>` is a plain `alias` to `<name>_ext4`), and
+`bazel test //...` runs all three variants of each. No guest script is
+duplicated: `guest/lib.sh`'s `backing_fstype` detects which filesystem
+`vdb` actually is (from the `statfs(2)` magic number -- `stat -f -c %T`
+is useless for this, since it prints "ext2/ext3" for ext4's magic
+regardless of actual ext2/3/4 version), and the handful of scripts that
+have a genuine filesystem-specific branch (`guest/pjdfstest.sh`'s
+per-filesystem baseline, `guest/create.sh`'s btrfs-subvolume-boundary
+check) use it. See README.md's "tested on" line and docs/conformance.md
+for what step 5.2 found: one real dcfs bug (btrfs does not support
+`FS_IOC_GETFSUUID` at all; fixed with a `BTRFS_IOC_FS_INFO` fallback) and
+otherwise no behavioral differences across the three filesystems --
+generation handling, ACL-equivalent-to-mode suppression, and
+`security.capability` stripping are all generic VFS behavior, identical on
+ext4, xfs and btrfs.
+
 - `boot_test` (`guest/boot.sh`): dcfs and fhtest are present and runnable,
   and the scratch disk mounts.
 - `readonly_test` (`guest/readonly.sh`): step 3.2's read-only ops
@@ -424,7 +447,7 @@ variable isn't set (e.g. running `scripts/run-qemu.sh` by hand).
 
 Add a `guest/<name>.sh` script (picked up automatically by the
 `glob(["guest/*.sh"])` in the `:initramfs` genrule) and wire it up in
-`test/qemu/BUILD.bazel`:
+`test/qemu/BUILD.bazel`, either as a single-filesystem test:
 
 ```
 qemu_test(
@@ -433,6 +456,28 @@ qemu_test(
     disks = [("vdb", "ext4", "256M")],
 )
 ```
+
+or, if the test exercises backing-filesystem-dependent behavior worth
+checking on ext4, xfs and btrfs (step 5.2), as three:
+
+```
+qemu_test_matrix(
+    name = "<name>_test",
+    guest_script = "guest/<name>.sh",
+    disks = [("vdb", "ext4", "256M")],  # the fstype here is only a
+                                         # placeholder; qemu_test_matrix
+                                         # overrides it per generated
+                                         # variant. Use >=320M if any disk
+                                         # here might become xfs: mkfs.xfs
+                                         # refuses anything under 300MB.
+)
+```
+
+which generates `<name>_test_ext4`/`_xfs`/`_btrfs` plus a plain
+`<name>_test` alias to the ext4 variant -- see `guest/lib.sh`'s
+`backing_fstype` for how a script detects which filesystem it is actually
+running against, needed only if the test has a genuine filesystem-specific
+branch (most don't: see the "Step 5.2" paragraph above).
 
 `guest/init` runs the script named by the `dcfs_test=` kernel command-line
 parameter (the macro fills this in from `guest_script`'s basename) via

@@ -4,19 +4,26 @@ Step 4.5. Measures dcfs's POSIX filesystem-call conformance with
 [pjdfstest](https://github.com/pjd/pjdfstest) (Pawel Jakub Dawidek's
 filesystem test suite from FreeBSD -- ~8800 checks of chmod/chown/link/
 mkdir/open/rename/unlink/... semantics and errnos, used by ZFS, gVisor and
-FUSE filesystems), run against a dcfs mount over ext4.
+FUSE filesystems), run against a dcfs mount over ext4 (step 5.2: also xfs
+and btrfs -- see "Step 5.2: ext4, xfs and btrfs" near the end).
 
 - Suite pinned at commit `85a8aea9e685999ef0540392fd80535f873d7ff7`
   (github.com/pjd/pjdfstest, the tip of `master` on 2026-09-27).
 - Measured against dircachefs commit `2a4f672` (step 4.6) plus this step's
   own commits, on 2026-09-27/28; re-measured in step 4.7 (caller
-  credentials, see "Step 4.7" below) on 2026-10-02.
+  credentials, see "Step 4.7" below) on 2026-10-02; extended to xfs and
+  btrfs in step 5.2.
 
 ## How to run
 
 ```
-sg kvm -c 'bazel test //test/qemu:pjdfstest_test'
+sg kvm -c 'bazel test //test/qemu:pjdfstest_test_ext4'
+sg kvm -c 'bazel test //test/qemu:pjdfstest_test_xfs'
+sg kvm -c 'bazel test //test/qemu:pjdfstest_test_btrfs'
 ```
+
+(`pjdfstest_test`, with no suffix, is an alias for `pjdfstest_test_ext4`;
+see "Step 5.2" below.)
 
 See `test/qemu/guest/pjdfstest.sh` for the mechanics and
 `third_party/pjdfstest/BUILD.pjdfstest` for how the (autoconf-less) binary
@@ -54,13 +61,18 @@ semantics (or a pjdfstest quirk on an OS/fs combination it doesn't
 specifically know about), not dcfs's fault, and is filtered out
 automatically by diffing the two failure sets. What's left -- failing
 against dcfs but not against raw ext4 -- is the **dcfs-specific** set,
-checked against the baseline in `test/qemu/guest/pjdfstest.expected_failures`:
-any dcfs-specific failure not already in that baseline fails the test (a
-regression); any baseline entry that no longer fails is printed as an
-`info:` line so the baseline can be tightened. `test/qemu/guest/
-pjdfstest.ext4_failures` is a parallel record of the ext4-only failures,
-kept for this document; the guest script does not read it back (it always
-recomputes the live ext4 failure set for the regression diff, so a
+checked against the baseline in `test/qemu/guest/pjdfstest.expected_failures`
+(step 5.2: renamed `pjdfstest.ext4.expected_failures`, alongside new
+`pjdfstest.xfs.expected_failures`/`pjdfstest.btrfs.expected_failures` --
+every mention of either bare filename in this historical section is the
+step 4.5-7 name, still accurate for what was true then): any dcfs-specific
+failure not already in that baseline fails the test (a regression); any
+baseline entry that no longer fails is printed as an `info:` line so the
+baseline can be tightened. `test/qemu/guest/pjdfstest.ext4_failures`
+(step 5.2: renamed `pjdfstest.ext4.backing_failures`) is a parallel record
+of the ext4-only failures, kept for this document; the guest script does
+not read it back (it always recomputes the live ext4 failure set for the
+regression diff, so a
 kernel/ext4 version drift can never hide a real dcfs regression behind a
 stale snapshot).
 
@@ -68,6 +80,20 @@ The guest script also greps dcfs's own stderr for "out-of-band change"
 warnings (step 4.6): pjdfstest's dcfs run only ever goes through the
 mount, so any such warning would itself be a dcfs bug (a false positive in
 `ReconcileAttrs`/`VerifyBackingIdentity`). None were observed.
+
+(Step 5.2: the description above is written for ext4, the original and
+still the default backing filesystem; `guest/pjdfstest.sh` now detects
+the actual backing filesystem at runtime -- see `backing_fstype` in
+`guest/lib.sh` -- and the same mechanics apply verbatim to xfs and btrfs,
+substituting the detected name everywhere this section says "ext4": the
+work directory, the result files, and which checked-in baseline file
+(`pjdfstest.<fstype>.expected_failures`) gates pass/fail. `tests/conf`
+still hard-codes `fs="EXT4"` regardless of the real backing filesystem --
+see `0001-linux-portability.patch` -- which does not undermine the
+diffing logic: both the dcfs run and the direct-backing run make the
+*same* `fs="EXT4"`-driven `supported()`/`todo()` decisions either way, so
+a difference between their two failure sets is still a real behavioral
+difference and not a detection artifact.)
 
 ## Counts (step 4.7)
 
@@ -230,20 +256,24 @@ Step 4.5 recorded 43 here: these 28 (measured on tmpfs, see above) plus
 
 ## Judgment calls
 
-- **`pjdfstest_test` is a hand-written `sh_test`, not a `qemu_test(...)`
-  instance.** `qemu_test` (`test/qemu/qemu_test.bzl`) hard-codes
-  `size = "large"` / `timeout = "long"` (900s) with no way to override
-  either, and `qemu_test.bzl` was off limits for this step (a concurrent
-  agent was editing it, `test/qemu/run-qemu.sh`, `test/qemu/guest/init`
-  and `test/qemu/kernel.bzl` on another branch for an NFS test). Since two
-  ~8800-check suites plus a directory-complete FUSE round trip for every
-  check comfortably exceeds 900s in the worst case, `pjdfstest_test` is
-  instead a direct `sh_test` in `test/qemu/BUILD.bazel` that mirrors what
-  the macro generates (same `srcs`/`data`/`tags`/`args` shape, same
-  `scripts/run-qemu.sh` entry point) with `size = "enormous"` /
-  `timeout = "eternal"` (3600s) instead. In practice the run finishes in
-  ~420s, so no `.t`-directory parallelization (also contemplated by the
-  plan) was needed.
+- **`pjdfstest_test` was a hand-written `sh_test`, not a `qemu_test(...)`
+  instance, as of step 4.5.** `qemu_test` (`test/qemu/qemu_test.bzl`) then
+  hard-coded `size = "large"` / `timeout = "long"` (900s) with no way to
+  override either, and `qemu_test.bzl` was off limits for this step (a
+  concurrent agent was editing it, `test/qemu/run-qemu.sh`,
+  `test/qemu/guest/init` and `test/qemu/kernel.bzl` on another branch for
+  an NFS test). Since two ~8800-check suites plus a directory-complete FUSE
+  round trip for every check comfortably exceeds 900s in the worst case,
+  `pjdfstest_test` was instead a direct `sh_test` in
+  `test/qemu/BUILD.bazel` that mirrored what the macro generates (same
+  `srcs`/`data`/`tags`/`args` shape, same `scripts/run-qemu.sh` entry
+  point) with `size = "enormous"` / `timeout = "eternal"` (3600s) instead.
+  In practice the run finished in ~420s, so no `.t`-directory
+  parallelization (also contemplated by the plan) was needed. `qemu_test`
+  gained `size`/`timeout` parameters before step 5.2, so `pjdfstest_test`
+  is a normal `qemu_test_matrix(...)` instance (`size = "enormous"`,
+  `timeout = "eternal"`, same as before) like every other step 5.2 target;
+  see "Step 5.2" below.
 - **`config.h` is hand-written, not autoconf-generated.** pjdfstest is
   normally built via `./configure && make`; this project has no autoconf
   in its Bazel graph, so `third_party/pjdfstest/BUILD.pjdfstest` writes
@@ -269,3 +299,84 @@ Step 4.5 recorded 43 here: these 28 (measured on tmpfs, see above) plus
   inert, so a future kernel/ext4 version change can never cause a real
   dcfs regression to be silently absorbed into a stale "that's just an
   ext4 quirk" snapshot.
+
+## Step 5.2: ext4, xfs and btrfs
+
+`pjdfstest_test` is now `qemu_test_matrix(...)`-generated
+(`pjdfstest_test_ext4`/`_xfs`/`_btrfs`, plus a `pjdfstest_test` alias to
+the ext4 variant): the plan always called for all three backing
+filesystems, and until this step only ext4 was exercised.
+`guest/pjdfstest.sh` needed no change to its actual test logic -- only to
+stop hard-coding "ext4" in directory/file names and in which checked-in
+baseline file it reads (see `backing_fstype` in `guest/lib.sh`, and the
+per-filesystem `pjdfstest.<fstype>.expected_failures` /
+`pjdfstest.<fstype>.backing_failures` files, renamed from the old
+unqualified `pjdfstest.expected_failures`/`pjdfstest.ext4_failures`). The
+mechanics above (two runs on the same backing filesystem, diffed, checked
+against a baseline) are otherwise identical for all three.
+
+| | ext4 | xfs | btrfs |
+|---|---:|---:|---:|
+| checks | 8827 | 8827 | 8827 |
+| failed (dcfs mount) | 28 | 30 | 32 |
+| failed (raw backing, no dcfs) | 28 | 30 | 32 |
+| dcfs-specific (dcfs-only failures) | **0** | **0** | **0** |
+| backing-only (fail on backing, pass through dcfs) | 0 | 0 | 0 |
+| suite wall time (dcfs run + backing run) | ~390s | ~386s | ~393s |
+
+`dcfs-specific` is **0 on all three filesystems**: dcfs introduces no
+POSIX conformance regressions of its own on ext4, xfs or btrfs. Every
+failure dcfs exhibits is a failure the backing filesystem exhibits too,
+with nothing left over once the known backing-only noise (below) is
+subtracted.
+
+**xfs: 2 extra backing-only failures, not dcfs's fault.**
+`symlink/03.t:1-2` fail directly against raw xfs (confirmed independent of
+dcfs: dcfs fails the identical set, nothing more) -- see
+`pjdfstest.xfs.backing_failures` for the detailed note. In short: the test
+builds a path exactly `PATH_MAX` (4096) bytes long via deeply nested
+directories to check `ENAMETOOLONG` one byte past it, and xfs hits some
+other path-construction limit slightly before reaching `PATH_MAX`, failing
+checks 1-2 (which are not themselves the `ENAMETOOLONG` assertions -- those,
+checks 5-6, are never reached). This is upstream xfs/pjdfstest interaction
+having nothing to do with dcfs, exactly the same way the 28 ext4 failures
+(`chown/00.t`, `unlink/08.t`) are upstream Linux/ext4/pjdfstest
+interactions: both are filtered out of the dcfs-specific count by the
+diffing logic because they reproduce identically with dcfs entirely absent.
+
+**btrfs: 4 extra backing-only failures, also not dcfs's fault -- and a
+harness interaction worth calling out.** `rename/24.t:4,5,8,9` fail
+directly against raw btrfs. `tests/rename/24.t` checks a directory's
+`nlink` after a rename that moves it to a new parent, and pjdfstest
+*already* ships a `case "$fs" in btrfs|BTRFS) todo Linux "Btrfs uses CoW;
+link count semantics differ from POSIX." ...` branch for exactly this --
+real btrfs's CoW design gives directories different nlink semantics after
+a cross-directory rename than ext4/xfs/POSIX do, and pjdfstest's own
+authors already knew it. But this project's `tests/conf` patch
+(`third_party/pjdfstest/0001-linux-portability.patch`) hard-codes
+`fs="EXT4"` for both runs -- deliberately, so the dcfs run and the
+backing run make identical `supported()`/`todo()` decisions everywhere
+else and a difference between their failure sets stays meaningful (see
+"How it decides pass/fail" above) -- which means pjdfstest's own
+btrfs-aware branch in this one file never triggers on the btrfs variant:
+it runs the ext4/POSIX assertions instead, and real btrfs fails them.
+Confirmed independent of dcfs (fails identically with dcfs entirely out of
+the picture, directly against backing btrfs): this is upstream btrfs
+CoW-vs-POSIX nlink behavior pjdfstest itself already documents, surfaced
+by this harness's (correct, for its purpose) choice to pin `fs="EXT4"`
+rather than report the real backing filesystem to pjdfstest.
+
+**`dcfs-specific` is 0 on all three filesystems**, as the table above
+shows: dcfs introduces no POSIX conformance regressions of its own on
+ext4, xfs or btrfs.
+
+**Reproducing:**
+
+```
+sg kvm -c 'bazel test //test/qemu:pjdfstest_test_ext4'
+sg kvm -c 'bazel test //test/qemu:pjdfstest_test_xfs'
+sg kvm -c 'bazel test //test/qemu:pjdfstest_test_btrfs'
+```
+
+Serial logs:
+`bazel-testlogs/test/qemu/pjdfstest_test_<fstype>/test.outputs/serial.log`.

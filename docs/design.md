@@ -300,13 +300,19 @@ the mount covers the path, the path leads back into dcfs.
 
 ### Device ids
 
-A filesystem is identified by a `DeviceId` (`dcfs/device_id.h`): the
-16-byte UUID from `ioctl(fd, FS_IOC_GETFSUUID)`, plus, on btrfs, the
-subvolume id (all subvolumes of one btrfs filesystem share a UUID but have
-separate inode number spaces). The UUID is stable across reboots on ext4,
-xfs and btrfs. There is no fallback to `f_fsid` and no libmount: a
-filesystem without the ioctl (ZFS today) is refused at startup with
-`Unimplemented`.
+A filesystem is identified by a `DeviceId` (`dcfs/device_id.h`): a 16-byte
+UUID, plus, on btrfs, the subvolume id (all subvolumes of one btrfs
+filesystem share a UUID but have separate inode number spaces). On ext4
+and xfs the UUID comes from `ioctl(fd, FS_IOC_GETFSUUID)` directly. btrfs
+does not implement that ioctl at all -- step 5.2 found that no file under
+`fs/btrfs/` calls the kernel's `super_set_uuid()` (the call every other
+UUID-reporting filesystem, including ext4 and xfs, makes), on any kernel
+version, so the kernel's generic handler always returns `ENOTTY` for it;
+`GetDeviceId` falls back to `BTRFS_IOC_FS_INFO`'s `fsid` field there
+instead, the same UUID `btrfs filesystem show`/`blkid` report. The UUID is
+stable across reboots on ext4, xfs and btrfs. There is no fallback to
+`f_fsid` and no libmount: a filesystem without either ioctl (ZFS today) is
+refused at startup with `Unimplemented`.
 
 The database records the source filesystem's device id when it is created
 (`cache_state.source_device_id`), and startup refuses a `--source` on a
@@ -1038,7 +1044,8 @@ contents bypass the cache.
    SQLite cannot put the database in WAL mode (a filesystem without the
    shared memory WAL needs): in rollback-journal mode a `NORMAL` commit
    is not durable.
-6. Probe the root: its device id (`FS_IOC_GETFSUUID`), filesystem type,
+6. Probe the root: its device id (`FS_IOC_GETFSUUID`, or `BTRFS_IOC_FS_INFO`
+   on btrfs -- see "Device ids" above), filesystem type,
    inode number and generation.
 7. `Migrate()`: create the schema and seed the `cache_state` row, the
    source's `filesystems` row and the root row, or upgrade an older
@@ -1142,9 +1149,10 @@ database. "Zero sectors" below means the backing device's read counter in
 | `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; a refused boundary stays invisible even with `crossmnt`. |
 | `pjdfstest_test` | POSIX conformance, as above. |
 
-What is not covered: xfs and btrfs backing filesystems (the plan's
-per-filesystem suites were not built; only ext4 is exercised), and real
-concurrency (there is none to test until coroutines exist).
+What is not covered: real concurrency (there is none to test until
+coroutines exist). Step 5.2 built the per-filesystem suites the plan
+promised: every e2e test in the table above (and pjdfstest; see
+docs/conformance.md) now runs against ext4, xfs and btrfs, not just ext4.
 
 ## Known gaps
 

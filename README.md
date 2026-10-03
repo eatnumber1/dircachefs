@@ -66,10 +66,16 @@ The repository carries forward the history of a 2023 experiment called
 - **Linux 6.9 or later** for `FS_IOC_GETFSUUID` (filesystem identity) and
   FUSE passthrough (`CONFIG_FUSE_PASSTHROUGH`).
 - **A backing filesystem that supports file handles
-  (`name_to_handle_at`) and `FS_IOC_GETFSUUID`.** ext4 is tested. xfs and
-  btrfs meet the requirements but are not yet covered by the test suite.
-  ZFS is not supported until OpenZFS implements `FS_IOC_GETFSUUID`; dcfs
-  refuses to start on it.
+  (`name_to_handle_at`) and a stable filesystem identity.** ext4, xfs and
+  btrfs are all tested (step 5.2: every e2e test runs on all three). ext4
+  and xfs report that identity through `FS_IOC_GETFSUUID` directly; btrfs
+  does not implement `FS_IOC_GETFSUUID` at all (no `fs/btrfs/*.c` file
+  calls the kernel's `super_set_uuid()`, on any kernel version, so the
+  generic ioctl always returns `ENOTTY` for it), so dcfs falls back to
+  `BTRFS_IOC_FS_INFO`'s `fsid` field there instead -- the same UUID
+  `btrfs filesystem show`/`blkid` report, reached through a btrfs-specific
+  ioctl rather than the generic one. ZFS is not supported until OpenZFS
+  implements `FS_IOC_GETFSUUID`; dcfs refuses to start on it.
 - **To build:** Bazel through
   [bazelisk](https://github.com/bazelbuild/bazelisk) (the repository pins
   Bazel 9.2.0 in `.bazelversion`) and a C++20 compiler. Every library
@@ -393,11 +399,19 @@ recovery protocol, concurrency, and the test strategy.
   inode numbers as `st_ino`, so two filesystems could produce colliding
   `(st_dev, st_ino)` pairs and confuse hard-link detection in `tar`,
   `rsync` and `cp -a`. dcfs refuses to start if anything is mounted below
-  `--source`. A boundary that appears later (a new mount, or a btrfs
-  subvolume, which is not a separate mount) is logged as an error, left out
-  of directory listings, and fails with `EXDEV` when looked up. Kernel
-  support for FUSE submounts (`FUSE_ATTR_SUBMOUNT`, today used only by
-  virtiofs) would allow lifting this.
+  `--source`, checked against `/proc/self/mountinfo` -- which, because a
+  btrfs subvolume is not a separate mount, cannot catch a subvolume that
+  already exists under `--source` before dcfs starts: this is a real gap,
+  not an oversight, and there is no way to detect it at startup short of
+  walking the whole tree first (which dcfs deliberately never does; see
+  "Coherence" below). What dcfs *does* catch, for a subvolume exactly as
+  for a real mount, is the boundary appearing at runtime -- a new mount, or
+  a btrfs subvolume (pre-existing or freshly created), the first time dcfs
+  lists the directory it lives in: logged as an error, left out of
+  directory listings, and `EXDEV` when looked up (step 5.2's
+  `create_test_btrfs` covers this). Kernel support for FUSE submounts
+  (`FUSE_ATTR_SUBMOUNT`, today used only by virtiofs) would allow lifting
+  this.
 - **Writes through a shared writable `mmap` after the last `close()` are
   not tracked.** With passthrough, the mapping holds only the backing file,
   so the kernel releases the dcfs file at `close()` and later stores reach
@@ -443,8 +457,8 @@ recovery protocol, concurrency, and the test strategy.
 - **Not implemented:** `O_TMPFILE`, `copy_file_range`, reflinks
   (`FICLONE`) and other ioctls; tools fall back to plain reads and writes.
   File locks are handled by the kernel, locally within the mount.
-- **Filesystem coverage.** Only ext4 is exercised by the test suite. xfs
-  and btrfs should work but are untested; ZFS is refused until it supports
+- **Filesystem coverage.** ext4, xfs and btrfs are all exercised by the
+  test suite (step 5.2). ZFS is refused until it supports
   `FS_IOC_GETFSUUID`.
 
 ## Further reading
