@@ -163,18 +163,51 @@ fi
 # --- "." and ".." inode numbers ---------------------------------------------
 #
 # Every entry's d_ino must be the backing inode number, "." and ".."
-# included (".." of the root is the root itself). testutil readdir-ino
-# reads "." alone first, so that ".." and the rest come from plain READDIR
-# requests (with readdirplus "auto" the kernel sends READDIRPLUS only at
-# offset 0) as well as from READDIRPLUS.
+# included (".." of the root is the root itself). The $MNT side reads with
+# "small-first" (testutil's first call fits exactly one record), so that
+# on a FUSE mount with readdirplus "auto" the rest comes from plain
+# READDIR requests (the kernel uses READDIRPLUS only at offset 0) as well
+# as from READDIRPLUS -- exercising both of dcfs's own code paths.
+#
+# The $SRC side reads normally (no "small-first"): unlike dcfs, which
+# always places "." then ".." first in its very first reply (see
+# DirCacheFS::Readdir/Readdirplus), a plain backing directory makes no
+# such promise -- getdents64(2) is free to return "." and ".." (and every
+# other entry) in any order, e.g. hashed by name, not creation order. This
+# was learned the hard way: with "small-first" on *both* sides,
+# readdir_boundary_test flaked (5 of 10 runs failed on a repeated local
+# run, `bazel test //test/qemu:readdir_boundary_test --runs_per_test=10
+# --cache_test_results=no`), e.g.:
+#
+#   TEST dot-inodes/ FAIL (src: ; mnt: . 2 .. 2)
+#   TEST dot-inodes/d1 FAIL (src: .. 2 . 6013; mnt: . 6013 .. 2)
+#
+# -- not a dcfs bug: $MNT's order was always ". <ino> .. <ino>", exactly
+# as DirCacheFS::Readdir/Readdirplus always emit it; $SRC's order (and,
+# with "small-first" forcing a 24-byte first getdents64(2) on the raw
+# ext4 directory, even whether the call succeeded at all) varied run to
+# run instead -- confirmed by instrumenting testutil's call on $SRC to
+# print its raw, unfiltered output: across 15 repeats, $SRC returned "."
+# and ".." in either order (e.g. "d1 6013\n.. 2\n. 2\n..."), and twice
+# failed outright with EINVAL (small-first's 24-byte buffer doesn't fit
+# whichever entry the directory happens to return first, if that entry
+# isn't a dot entry -- e.g. "lost+found" needs 32 bytes). "src: ;" above
+# is that EINVAL case: testutil's "ERR EINVAL" line doesn't match the
+# grep pattern below, silently emptying $src_dots. Fix: only $MNT uses
+# "small-first" (the one side whose READDIR-vs-READDIRPLUS split it is
+# meant to force); $SRC reads with testutil's normal, full-buffer-sized
+# first call, which cannot EINVAL on any entry used here. The remaining,
+# entirely legitimate "." vs ".." ordering difference between the two
+# independent reads is handled by sorting both sides before comparing --
+# what must match is the *set* of (name, inode) pairs, not their order.
 mkdir -p "$MNT/d1/d2"
 for dir in "" /many /d1 /d1/d2; do
-	src_dots=$("$TESTUTIL" readdir-ino "$SRC$dir" | grep -E '^\.\.? ')
-	mnt_dots=$("$TESTUTIL" readdir-ino "$MNT$dir" | grep -E '^\.\.? ')
+	src_dots=$("$TESTUTIL" readdir-ino "$SRC$dir" | grep -E '^\.\.? ' | sort)
+	mnt_dots=$("$TESTUTIL" readdir-ino "$MNT$dir" small-first | grep -E '^\.\.? ' | sort)
 	if [ "$src_dots" = "$mnt_dots" ]; then
 		pass "dot-inodes${dir:-/}"
 	else
-		fail "dot-inodes${dir:-/}" "src: $(echo $src_dots); mnt: $(echo $mnt_dots)"
+		fail "dot-inodes${dir:-/}" "src: $(echo "$src_dots" | tr '\n' ,); mnt: $(echo "$mnt_dots" | tr '\n' ,)"
 	fi
 done
 

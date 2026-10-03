@@ -108,12 +108,23 @@
  *       stat(".") ("stat=nlink:<n>"), open(".") and one getdents64 on it,
  *       one field each, "ERR <errno-name>" for a failure: a process whose
  *       working directory was removed.
- *   testutil readdir-ino <dir>
- *       Lists <dir> with getdents64, printing "<name> <d_ino>" per entry.
- *       The first call's buffer fits exactly one entry ("."), so on a FUSE
- *       mount with readdirplus "auto" the rest (".." included) comes from
- *       plain READDIR requests (the kernel uses READDIRPLUS only at offset
- *       0), whose inode numbers busybox ls -i never shows separately.
+ *   testutil readdir-ino <dir> [small-first]
+ *       Lists <dir> with getdents64, printing "<name> <d_ino>" per entry,
+ *       in whatever order the directory itself returns them -- which,
+ *       off a plain (non-FUSE) directory, is not necessarily "." and ".."
+ *       first: a backing filesystem is free to return its entries (dot
+ *       entries included) in any order, e.g. hashed, and a caller
+ *       comparing two listings for the same *set* of entries must sort
+ *       before comparing (see guest/readdir_boundary.sh). With
+ *       "small-first", the first call's buffer fits exactly one entry, so
+ *       on a FUSE mount with readdirplus "auto" the rest comes from plain
+ *       READDIR requests (the kernel uses READDIRPLUS only at offset 0),
+ *       whose inode numbers busybox ls -i never shows separately -- this
+ *       is for exercising dcfs's own READDIR path specifically, and is
+ *       meaningless (and, since the first entry a plain filesystem
+ *       returns can be any entry in the directory, actively unsafe --
+ *       EINVAL if that entry's record does not fit the request) off a
+ *       plain directory.
  *   testutil btrfs-subvol-create <path>
  *       BTRFS_IOC_SUBVOL_CREATE: creates a btrfs subvolume at <path> (whose
  *       parent directory must already exist on a btrfs filesystem). Step
@@ -588,10 +599,10 @@ struct linux_dirent64 {
 	char d_name[];
 };
 
-static int cmd_readdir_ino(const char *dir)
+static int cmd_readdir_ino(const char *dir, int small_first)
 {
 	char buf[4096];
-	size_t want = 24; /* exactly one "." record */
+	size_t want = small_first ? 24 /* exactly one record */ : sizeof(buf);
 	int fd = open(dir, O_RDONLY | O_DIRECTORY);
 
 	if (fd == -1) {
@@ -708,7 +719,10 @@ int main(int argc, char *argv[])
 	if (argc == 3 && strcmp(argv[1], "rmcwd") == 0)
 		return cmd_rmcwd(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "readdir-ino") == 0)
-		return cmd_readdir_ino(argv[2]);
+		return cmd_readdir_ino(argv[2], 0);
+	if (argc == 4 && strcmp(argv[1], "readdir-ino") == 0 &&
+	    strcmp(argv[3], "small-first") == 0)
+		return cmd_readdir_ino(argv[2], 1);
 	if (argc == 3 && strcmp(argv[1], "btrfs-subvol-create") == 0)
 		return cmd_btrfs_subvol_create(argv[2]);
 
@@ -732,7 +746,7 @@ int main(int argc, char *argv[])
 		"       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n"
 		"       testutil opath-unlink-stat <path>\n"
 		"       testutil rmcwd <dir>\n"
-		"       testutil readdir-ino <dir>\n"
+		"       testutil readdir-ino <dir> [small-first]\n"
 		"       testutil btrfs-subvol-create <path>\n");
 	return 2;
 }
