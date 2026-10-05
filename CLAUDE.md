@@ -39,6 +39,15 @@ up one row (implementer to protocol, mechanical to implementer).
 - Never `pkill -f` / `pgrep -f` with a pattern that also appears in your
   own command line: it matches (and kills) your own shell. Prefer
   `pgrep -f '^bazel\(name\)'` anchored patterns or kill by PID.
+- **Docker on this machine is production** (russ, 2026-10-06). Never stop,
+  restart, remove, prune or modify containers, images, volumes or networks
+  you did not create; never run `docker system prune`, `docker container
+  prune`, `docker image prune`, `docker volume prune`, `docker network
+  prune`, `docker rm/rmi` on anything not ours, or change the daemon's
+  configuration. Containers we start (e.g. `act` jobs) carry a label
+  (`--label dcfs.owner=act`) and `--rm`; clean up only by that label. Run
+  Docker commands through `sg docker -c '...'` (the login session predates
+  joining the `docker` group).
 - The shell is zsh with `noclobber` (overwrite with `>|`); `make` and
   `diff` are broken shell functions on the command line (use `command
   make`, `command diff`).

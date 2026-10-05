@@ -260,3 +260,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Follow-up (Phase 6.2): other guest scripts with zero-backing-reads checks after unlinks on xfs
   may share the latent flake; move quiesce_backing() into lib.sh and use it in every such check.
 - Plan: Phase 5 develops the CI workflow locally with pinned nektos/act before publishing; a full suite under act doubles as a host-dependency detector (russ). Needs russ: Docker access (not in the docker group).
+- russ added russ to the docker group (use sg docker). Docker on this machine is production: never touch containers/images/volumes/networks we did not create, no prune (CLAUDE.md, Phase 5).
