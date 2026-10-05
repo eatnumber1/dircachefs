@@ -199,3 +199,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   plain and ASan 18/18 after. Accepted residual risks (both need an unsafe cache directory, which
   dcfs warns about): SQLite opens -wal/-shm by path after dcfs's check (swap window), and a hard
   link to a root-owned file passes the owner check (relies on fs.protected_hardlinks=1).
+- Wave 1 lane 1 freed: started Phase 4a (Bazel-built minimal QEMU + busybox, build and smoke tests only, no harness wiring until 3a merges) in lane-1 clone (Sonnet, general-purpose: agent types need a restart).
