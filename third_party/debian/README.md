@@ -137,119 +137,136 @@ real files directly under `/bin`, `/sbin`, `/lib`, not only under their
 `/usr` counterparts, confirmed by `tar -tvf` on `@debian//:flat`) into one
 tar, deduplicating directory entries. `mkrootfs.sh` then:
 
-1. Extracts that tar into a scratch directory (`tar --no-same-owner`; see
-   "Ownership" below for why `--no-same-owner`, not an unprivileged
-   namespace dance like the old script's).
-2. Recreates two things a complete Debian install's maintainer scripts
-   would normally set up, which never run here (neither `rules_distroless`
-   nor this project's assembly runs any package's postinst -- no `dpkg
-   --configure`, matching `mmdebstrap --variant=apt`'s own behavior):
+1. Derives the complete, top-down-ordered set of directory paths every
+   entry in `@debian//:flat` implies (every ancestor of every path, not
+   just the ones the tar happens to declare explicitly -- see "Ownership"
+   below, "The directory-completeness gap", for why this step exists at
+   all) and builds a real scratch directory tree from that list, so a
+   recursive `tar -c` over it naturally emits each parent before any of
+   its children.
+2. Tars that skeleton (`--owner=0 --group=0 --numeric-owner`) and
+   concatenates `@debian//:flat` onto it (`tar --concatenate`) -- the
+   combined tar is then strictly more complete than `@debian//:flat`
+   alone, and changes no path `@debian//:flat` already declares (mke2fs
+   treats a later duplicate directory entry as a no-op).
+3. Recreates, the same way, five things a complete Debian install's
+   maintainer scripts would normally set up, which never run here
+   (neither `rules_distroless` nor this project's assembly runs any
+   package's postinst -- no `dpkg --configure`, matching `mmdebstrap
+   --variant=apt`'s own behavior) -- each built as a real symlink/file/
+   directory in a second scratch tree, tarred the same `--owner=0
+   --group=0` way and concatenated onto the combined tar:
    - `/etc/mtab` -> `/proc/self/mounts` (also needed by
      `mkrootfs-debian.sh`; see "What this replaces") -- normally the
      `mount` package's postinst.
    - `/bin/sh` -> `/bin/bash` -- normally `dash`'s postinst via
      `update-alternatives` (this project installs `bash`, not `dash`; see
      the `bash` entry under "Packages").
-3. Creates `/usr/local/bin` (`guest/init`'s `dcfs_rootfs=` branch copies
-   `dcfs`/`fhtest`/`testutil` there; no package in this set creates it --
-   it is normally `base-files`' job, and nothing here depends on
-   `base-files` either directly or transitively).
-4. Runs `mke2fs -q -t ext4 -d <dir> -F` to build the ext4 image directly
-   from that directory, no mount or loop device involved.
+   - `/usr/bin/awk` -> `mawk` -- normally `mawk`'s own postinst via
+     `update-alternatives`.
+   - `/etc/exports` (empty) -- `exportfs(8)` refuses outright if it's
+     missing entirely; `guest/nfs.sh`'s own `exportfs -o ...` call adds
+     the one export it needs at runtime.
+   - `/usr/local/bin` -- `guest/init`'s `dcfs_rootfs=` branch copies
+     `dcfs`/`fhtest`/`testutil` there; no package in this set creates it
+     (normally `base-files`' job, and nothing here depends on
+     `base-files` either directly or transitively).
+4. Runs `mke2fs -q -t ext4 -d <combined tar> -F` (the Bazel-built, static
+   `//third_party/e2fsprogs:mke2fs` -- see that package's README.md) to
+   build the ext4 image directly from that tar's own per-entry
+   uid/gid/mode headers, no extraction, mount or loop device involved at
+   any point.
 
 ### Ownership
 
-Every file in the resulting image is owned by whatever uid/gid ran the
-Bazel action, not the `root:root` (or other system-user) ownership the
-`.deb` payloads themselves specify. This is a deliberate difference from
-`mkrootfs-debian.sh`, not a shortcut:
+Every file in the resulting image has **real** `root:root` (or whatever
+other owner/setuid/setgid bits the originating `.deb` payload set)
+ownership -- not the uid/gid that ran the Bazel action that assembled it.
+`//third_party/debian:ownership_test` checks this directly (`debugfs
+stat` on `/`, `/etc/os-release`, `/usr/sbin/rpc.nfsd` and `/bin/mount`,
+plus `/bin/mount`'s setuid bit).
 
-- A real `chown(2)` to an arbitrary uid/gid needs a privilege this action
-  does not have. The natural-looking fix -- wrap the extraction and
-  `mke2fs` in `fakeroot`, so a plain `tar -x`'s `chown()` calls appear to
-  succeed -- was tried and does not work inside a Bazel sandboxed action:
-  the sandbox already runs the action inside its own single-entry user
-  namespace (confirmed via that action's own `/proc/self/uid_map`:
-  `"<uid> <uid> 1"`, i.e. only the invoking uid itself has a mapping, not
-  even 0). `fakeroot` only fakes the *specific* failure a genuine
-  non-root process gets from `chown(2)` (`EPERM`); inside this
-  namespace the kernel instead returns `EINVAL` (the target uid/gid has
-  no mapping at all), which `fakeroot` does not recognize as the expected
-  case and passes straight through as a real, fatal `tar` error --
-  confirmed by instrumenting a throwaway debug genrule and comparing
-  `fakeroot`'s behavior with and without a pre-existing restrictive user
-  namespace around it.
-- It does not matter for `nfs_test` today. `guest/nfs.sh` chroots into
-  this image and runs entirely as root (the guest kernel's PID 1 is
-  already root; nothing here ever logs in or `su`s to another user), and
-  root's own DAC bypass makes a file's nominal owner irrelevant to
-  whether root can read, write or execute it. The one case where owner
-  identity usually matters on its own -- a setuid/setgid binary
-  escalating a non-root caller's privilege -- does not apply either,
-  since every caller here already is root.
+This was not always true. Earlier revisions of this file extracted
+`@debian//:flat` with `tar --no-same-owner` into a scratch directory
+before handing it to `mke2fs -d <dir>`, discarding every file's real
+owner (a real `chown(2)` to an arbitrary uid/gid needs a privilege a
+sandboxed Bazel action does not have, and `fakeroot`'s `LD_PRELOAD` trick
+does not work inside the sandbox's own single-entry user namespace --
+confirmed by instrumenting a throwaway debug genrule: the kernel rejects
+the `chown(2)` with `EINVAL`, not the `EPERM` `fakeroot` knows how to
+fake). That didn't matter for `nfs_test` at the time -- `guest/nfs.sh`
+chroots in and runs entirely as root, and root's own DAC bypass makes a
+file's nominal owner irrelevant -- but would have mattered for a later,
+systemd-booting guest (systemd/PAM/dbus do care about real ownership, not
+just an already-privileged caller's DAC bypass).
 
-**This will matter for a later phase.** A systemd-booting guest (and
-`dbus`, and any setuid binary systemd or PAM check the owner of) does care
-about real `root:root` ownership, not just DAC bypass by an
-already-privileged caller -- a future step landing that guest cannot reuse
-this image unmodified. `mke2fs` (e2fsprogs) **1.47.1** added exactly the
-fix for this: `-d <file.tar>` (a tarball, not a directory) builds the
-image straight from the tar's own per-entry uid/gid/mode headers, with no
-`chown(2)`, no namespace, no privilege of any kind needed -- the ownership
-problem `fakeroot` couldn't solve above disappears entirely, because
-nothing ever has to make a *real* directory tree with real inode
-ownership in the first place.
+`mke2fs` (e2fsprogs) **1.47.1** added the fix this step now uses: `-d
+<file.tar>` (a tarball, not a directory) builds the image straight from
+the tar's own per-entry uid/gid/mode headers, with no `chown(2)`, no
+namespace, no privilege of any kind needed, and no real directory tree
+with real inode ownership ever gets materialized in the first place. The
+host's `mke2fs` was one release too old for this (**1.47.0**, confirmed
+experimentally: `-d some.tar` unconditionally `chdir()`s into its
+argument and fails outright, `__populate_fs: Not a directory`), so this
+step also adds `third_party/e2fsprogs/` -- a pinned, static,
+Bazel-built `mke2fs`/`debugfs` -- see that package's README.md.
 
-Checked this host's version: `mke2fs -V` reports **1.47.0** (released
-2023-02-05) -- one release before `-d <tarball>` landed. Confirmed
-experimentally, not just by version number: `mke2fs -q -t ext4 -d
-some.tar -F out.ext4` on this host fails outright --
-`__populate_fs: Not a directory while changing working directory to
-"some.tar"` -- this version's `-d` unconditionally `chdir()`s into its
-argument, so it cannot take a tarball at all, with no separate flag to
-opt in or out. Per this step's instructions: not building e2fsprogs from
-source now (that is real, separate work -- a new `third_party/e2fsprogs/`,
-the same pattern as `third_party/qemu`/`third_party/busybox`); stopping
-here with this documented. When the systemd-booting guest phase lands:
+#### The directory-completeness gap
 
-1. Add `third_party/e2fsprogs/` (pinned source, built by Bazel,
-   `>= 1.47.1`) -- or confirm a newer host `mke2fs` is available and
-   update `test/qemu/README.md`'s prerequisites instead, if hermeticity
-   isn't required for this one host tool by then.
-2. Build the tar passed to `-d` with explicit root ownership in its
-   headers instead of whatever `@debian//:flat` naturally carries post-
-   `tar --no-same-owner` extraction -- e.g. `tar --owner=0 --group=0
-   --numeric-owner` when re-packing, or (simpler, avoids an extract/
-   repack round trip entirely) feed `mke2fs -d` the **original**
-   `@debian//:flat` tar directly: it already carries each package's own
-   `root:root`-or-whatever headers verbatim (see "Image assembly" above --
-   this was true all along; `mkrootfs.sh`'s `tar --no-same-owner`
-   extraction is what discards it, not `@debian//:flat` itself).
-3. Add a check that root ownership actually took -- e.g. `debugfs -R
-   'stat /usr/bin/mount' bazel-bin/third_party/debian/rootfs-debian.ext4`
-   and assert `User: 0 Group: 0` in the output -- alongside
-   `version_check_test`.
+Feeding `@debian//:flat` to `mke2fs -d` directly (no fixups) fails
+outright, reproducibly, with two distinct, unrelated errors found by
+hand before `mkrootfs.sh`'s directory-skeleton step (above) was added:
+
+```
+__populate_fs_from_tar: File not found by ext2_lookup cannot find directory "./var/lib/dpkg" to create "status"
+mke2fs: File not found by ext2_lookup while populating file system
+```
+
+and, after prepending just that one missing directory:
+
+```
+__populate_fs_from_tar: File not found by ext2_lookup cannot find directory "./etc" to create "ld.so.conf.d"
+```
+
+e2fsprogs's own tar-import code (`misc/create_inode_libarchive.c`'s
+`__populate_fs_from_tar`) is not a general-purpose tar extractor: it
+walks entries in stream order and does a plain `ext2fs_namei` lookup for
+each entry's parent directory, which must already exist in the
+filesystem being built by that point -- unlike a real `tar -x`
+extraction (what every earlier version of this script did), it never
+auto-creates a missing intermediate directory. `@debian//:flat` does not
+reliably provide one: `./var/lib/dpkg/status` (`rules_distroless`'s own
+synthesized dpkg status file) has no `./var/lib/dpkg` directory entry
+anywhere in the tar at all, and `./etc/ld.so.conf.d/<file>` appears
+before any `./etc/ld.so.conf.d` directory entry survives the `flatten`
+rule's own directory-entry deduplication (merging many packages'
+individual `data.tar`s can reorder which package's copy of a shared
+directory entry "wins"). `mkrootfs.sh`'s fix is general, not a
+case-by-case patch for these two: it derives *every* ancestor directory
+every entry in the tar implies and prepends the complete set, so it does
+not matter which specific paths a future snapshot/package-list update
+turns out to be missing.
 
 ### Host tools
 
-- **`mke2fs`** (e2fsprogs) is not yet built by Bazel; this step uses the
-  host's. `-d <dir>` is a plain userspace `libext2fs` operation (no mount,
-  no loop device, no root), so this does not violate the plan's "no root,
-  no network, no loop mounts" constraint -- it is simply a host tool this
-  step did not also hermeticize. A future step could fetch and build
-  `e2fsprogs` the same way `third_party/qemu`/`third_party/busybox` do;
-  out of scope here.
-- Nothing else: `tar` is also the host's, but it was already an
-  implicit host dependency of this project's Bazel actions before this
-  step (e.g. `test/qemu/scripts/mkinitramfs.sh`'s `cpio`/`gzip`).
+None. `mke2fs` (e2fsprogs) is now `//third_party/e2fsprogs:mke2fs`, a
+pinned, static, Bazel-built binary -- see that package's README.md for
+the version, configure flags and how its own `-d <tarball>` dependency on
+libarchive was hermeticized. `tar` remains the host's, but it was already
+an implicit host dependency of this project's Bazel actions before this
+step (e.g. `test/qemu/scripts/mkinitramfs.sh`'s `cpio`/`gzip`), and
+nothing here needs root, network access or a loop mount: `mke2fs -d`
+never `chown()`s, mounts or attaches anything, it just copies tar header
+fields into inodes it already has full access to create.
 
 Measured on this host: `bazel build //third_party/debian:rootfs` from a
-warm `@debian//:flat` is about 5s; the image is 768 MiB nominal
-(`mkrootfs.sh`'s hard-coded size, matching the old script's headroom
-ratio -- about 245 MiB of actual package content, leaving room for
-`/cache/dcfs.db` and whatever `nfs_test` writes during a run, since
-`run-qemu.sh` copies this cached image into each test's own `$TEST_TMPDIR`
-rather than attaching it directly).
+warm `@debian//:flat` (and a warm `//third_party/e2fsprogs:mke2fs`) is
+about 2s; the image is 768 MiB nominal (`mkrootfs.sh`'s hard-coded size,
+matching the old script's headroom ratio -- about 245 MiB of actual
+package content, leaving room for `/cache/dcfs.db` and whatever
+`nfs_test` writes during a run, since `run-qemu.sh` copies this cached
+image into each test's own `$TEST_TMPDIR` rather than attaching it
+directly).
 
 ## Test
 
@@ -261,6 +278,16 @@ packages) and fails with a diff the moment any of their resolved versions
 drifts from `packages.lock`. Before `third_party/debian/BUILD.bazel`
 existed, this failed outright (`no such package 'third_party/debian'`);
 see this step's commit log for the exact output.
+
+`//third_party/debian:ownership_test` (host-side, no root, no kernel --
+`debugfs stat`, same as `//third_party/e2fsprogs:smoke_test`'s own
+end-to-end check) is the real regression test for this step's "Ownership"
+section: before `mkrootfs.sh` switched to `mke2fs -d <tarball>`, this
+failed with `/etc/os-release` (and every other file) reporting `User:
+1000 Group: 120` -- the build uid/gid, not root (see this step's commit
+log for the exact failing output); it now confirms `/`, `/etc/os-release`
+and `/usr/sbin/rpc.nfsd` are `root:root` and `/bin/mount` is both
+`root:root` and setuid.
 
 `//test/qemu:nfs_test` (`test/qemu/BUILD.bazel`) is the real end-to-end
 check: it now takes its `rootfs` from `//third_party/debian:rootfs`
@@ -291,9 +318,13 @@ Two of its findings do not apply any more:
 
 - The unprivileged tar-extract-to-ext4 uid-mapping dance
   (`/etc/subuid`/`/etc/subgid`, `unshare --map-user=0 --map-users=...`):
-  not needed, since this step does not attempt to preserve non-build-user
-  ownership at all (see "Ownership" above) -- there is no id mapping
-  problem to solve when no `chown` is ever attempted.
+  not needed, even though this image now does end up with real
+  `root:root` ownership (see "Ownership" above) -- `mke2fs -d <tarball>`
+  reads each entry's uid/gid straight out of the tar header into the
+  inode it creates, with no `chown(2)` call and therefore no id-mapping
+  problem to solve in the first place; the old script's unshare/subuid
+  dance existed specifically to make an unprivileged `chown(2)` to an
+  arbitrary uid succeed, a step this approach never needs.
 - Excluding `./dev/*` from the tar extraction (real device nodes can't be
   created unprivileged): moot, since no package in this set ships any
   (`tar -tvf` on `@debian//:flat` has zero `b`/`c`-type entries --

@@ -11,12 +11,21 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 # rules_distroless's own `flatten` rule merging every resolved package's
 # data.tar (our 14 explicitly requested packages plus everything they pull
 # in transitively -- 136 packages total as of this pin) into one tar.
+#
+# mke2fs is //third_party/e2fsprogs:mke2fs (see that package's README.md)
+# -- a pinned, static mke2fs built by Bazel, fed @debian//:flat *directly*
+# via `mke2fs -d <tarball>` (mkrootfs.sh), not the host's mke2fs extracting
+# into a scratch directory first. See README.md's "Ownership" section.
 genrule(
     name = "rootfs",
     srcs = ["@debian//:flat"],
     outs = ["rootfs-debian.ext4"],
-    cmd = "$(location scripts/mkrootfs.sh) $@ $(location @debian//:flat) 768M",
-    tools = ["scripts/mkrootfs.sh"],
+    cmd = "$(location scripts/mkrootfs.sh) $@ $(location @debian//:flat) 768M " +
+          "$(location //third_party/e2fsprogs:mke2fs)",
+    tools = [
+        "scripts/mkrootfs.sh",
+        "//third_party/e2fsprogs:mke2fs",
+    ],
     visibility = ["//test/qemu:__pkg__"],
 )
 
@@ -37,5 +46,27 @@ sh_test(
     data = [
         "packages.lock",
         "@debian//:dpkg_status",
+    ],
+)
+
+# Test first: before this step, every file in :rootfs was owned by
+# whatever uid/gid ran the genrule that assembled it (tar --no-same-owner
+# extraction -- see README.md's "Ownership" section), not root -- this
+# test failed accordingly (see this step's commit log for the exact
+# failing output: /etc/os-release came back "User: 1000 Group: 120", the
+# build uid/gid, not 0/0). mkrootfs.sh switching to `mke2fs -d <tarball>`
+# (fed @debian//:flat's own root-owned tar headers directly) is what makes
+# it pass.
+sh_test(
+    name = "ownership_test",
+    size = "small",
+    srcs = ["scripts/ownership_test.sh"],
+    args = [
+        "$(location //third_party/e2fsprogs:debugfs)",
+        "$(location :rootfs)",
+    ],
+    data = [
+        ":rootfs",
+        "//third_party/e2fsprogs:debugfs",
     ],
 )
