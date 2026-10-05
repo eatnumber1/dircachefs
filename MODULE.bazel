@@ -18,6 +18,15 @@ bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 
+# Phase 4: pinned, Bazel-built QEMU (third_party/qemu/). rules_foreign_cc's
+# configure_make rule drives QEMU's own ./configure + the Makefile shim it
+# generates (which forwards to ninja); glib and zlib are QEMU's only two
+# hard dependencies with this configuration (see third_party/qemu/README.md
+# for how that was established -- not assumed).
+bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
+bazel_dep(name = "glib", version = "2.82.2.bcr.11")
+bazel_dep(name = "zlib", version = "1.3.2.bcr.2")
+
 # Exposes the out-of-tree QEMU test kernel (test/qemu/scripts/build-kernel.sh)
 # and host busybox to the test/qemu:boot_test-style targets. See
 # test/qemu/kernel.bzl.
@@ -61,6 +70,42 @@ http_archive(
     patches = ["//third_party/pjdfstest:0001-linux-portability.patch"],
     strip_prefix = "pjdfstest-85a8aea9e685999ef0540392fd80535f873d7ff7",
     url = "https://github.com/pjd/pjdfstest/archive/85a8aea9e685999ef0540392fd80535f873d7ff7.tar.gz",
+)
+
+# QEMU 11.1.2 (pinned latest stable release as of 2026-10-05; see
+# third_party/qemu/README.md for the update procedure and the full
+# configure/device/dependency rationale). build_file replaces QEMU's
+# (nonexistent) root BUILD file with the configure_make overlay;
+# 0001-add-dcfs-device-config.patch adds the checked-in minimal device
+# config (--with-devices-x86_64=dcfs needs it present in the source tree
+# at configure time; it cannot be passed as a bare flag value).
+#
+# A plain http_archive is not enough here: --enable-fdt=internal needs
+# the subprojects/dtc subproject, which the release tarball ships as a
+# real git checkout -- but Bazel's own repository-fetching tar extraction
+# drops that whole directory (confirmed empirically: unlike BUILD-file
+# glob(), which merely skips dotfiles/dotdirs and leaves a directory's
+# other files alone, extracting past a path containing a real ".git"
+# apparently drops the *entire* containing directory; every other
+# subprojects/* entry survives extraction fine). qemu_repo.bzl's
+# custom repository rule fetches dtc separately (from the exact commit
+# subprojects/dtc.wrap already names) directly into subprojects/dtc via
+# download_and_extract's own output= placement, which is a
+# repository-rule-level operation not subject to either kind of dotfile
+# dropping. See qemu_repo.bzl's docstring for the full story.
+qemu_repo = use_repo_rule("//third_party/qemu:qemu_repo.bzl", "qemu_repo")
+
+qemu_repo(
+    name = "qemu",
+    build_file = "//third_party/qemu:BUILD.qemu",
+    dtc_sha256 = "e115f987eec23a1ba25150a46ced1675de3716072d3b4905afb3a9cda0f007c7",
+    dtc_strip_prefix = "dtc-b6910bec11614980a21e46fbccc35934b671bd81",
+    dtc_url = "https://gitlab.com/qemu-project/dtc/-/archive/b6910bec11614980a21e46fbccc35934b671bd81/dtc-b6910bec11614980a21e46fbccc35934b671bd81.tar.gz",
+    patch_strip = 1,
+    patches = ["//third_party/qemu:0001-add-dcfs-device-config.patch"],
+    sha256 = "731b5681e4bb18be313231579b8efd0296c5b015fa36dc533874b639ba838016",
+    strip_prefix = "qemu-11.1.2",
+    url = "https://download.qemu.org/qemu-11.1.2.tar.xz",
 )
 
 # busybox 1.38.0 (pinned latest stable release as of 2026-10-05; see
