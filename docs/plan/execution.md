@@ -250,6 +250,13 @@ The soak test is run by hand, for hours, and its result recorded in
 runs the final hardware check (21.2) after upgrading the server's kernel
 to at least 6.9; only then is dcfs deployed on the server.
 
+## Side track: review fixes (review-fixes.md)
+
+R1 and R2 run in a third, capped building lane (`lane-3`: `--jobs=2`,
+one test at a time) alongside wave 3, since russ prefers more parallel
+agents and these touch files neither wave-3 lane owns; R3 follows Phase
+5.1 in lane-1. All three must be merged before sync point S3.
+
 ## Side track: ASan speed (Phase 6.3)
 
 Started 2026-10-06 in whichever lane is idle (investigation; Sonnet,

@@ -16,6 +16,8 @@ before the fix (see `process.md` and `/AGENTS.md`).
   rejected, and why.
 - `notes/`: background verified while planning (kernel facts, the LKML
   discussion and libfuse_passthrough).
+- `review-fixes.md`: fix steps R1-R3 from the 2026-10-06 review of waves
+  1-2 (in progress).
 - `audits/`: the race, crash, tri-state, style and test-coverage audits
   from the original plan.
 

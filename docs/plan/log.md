@@ -304,3 +304,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   R3 pinned mkfs (dcfs-investigator): L5 scratch filesystems still made by host mkfs.ext4/xfs/btrfs
      with host defaults: Bazel-built mke2fs with an explicit config, pinned xfsprogs and btrfs-progs;
      L9 Debian lock enforcement. Phase 4 reopened for this.
+- russ: M1 (hostile cache directory) not pursued; replaced by one startup check (database no more accessible than the backing root directory). Remaining review findings planned in review-fixes.md (R1-R3). lane-3 added (capped) for R1+R2.
