@@ -81,11 +81,38 @@ check_src() {
 	fi
 }
 
+# quiesce_backing: drains any backing-filesystem work the PREVIOUS mutation
+# left running in the background before check_cold takes its baseline.
+#
+# xfs defers the on-disk half of removing an inode (freeing its extents and
+# AG metadata -- "inode inactivation"/inodegc) to a background workqueue so
+# that unlink/rmdir/a replacing rename don't have to wait for it; under
+# heavy host load that workqueue can still be mid-run (reading AG metadata
+# from vdb) when check_cold's baseline sectors_read is taken moments later,
+# so the read lands inside the measured window and looks like a cache miss
+# it is not (confirmed by reading fs/xfs/xfs_icache.c: xfs_inodegc_stop(),
+# the only thing that drains it, runs nowhere except freeze and unmount).
+# FIFREEZE forces exactly that drain (xfs_fs_freeze -> xfs_fs_sync_fs's
+# SB_FREEZE_PAGEFAULT stage -> xfs_inodegc_stop) synchronously before it
+# returns; FITHAW re-enables it with nothing left queued, so it cannot
+# introduce a read of its own. Both ioctls are plain VFS freeze_super/
+# thaw_super, supported the same way on ext4 and btrfs, so this runs
+# unconditionally rather than branching on backing_fstype. Called before
+# the baseline, not between it and the check, so a backing read genuinely
+# caused by serving the check itself still falls inside the window and is
+# still caught -- see rename.sh's "injected read" proof in the commit this
+# function was added in.
+quiesce_backing() {
+	"$TESTUTIL" fsfreeze "$SRC" freeze >/dev/null 2>&1 || true
+	"$TESTUTIL" fsfreeze "$SRC" thaw >/dev/null 2>&1 || true
+}
+
 # check_cold NAME COND: drops every kernel cache, then evaluates COND (which
 # must only look at /mnt, metadata only -- no content reads) and requires
 # both that it holds and that neither backing device was read meanwhile.
 # Reports NAME-mnt.
 check_cold() {
+	quiesce_backing
 	drop_caches
 	b_vdb=$(sectors_read vdb)
 	b_vdc=$(sectors_read vdc)
