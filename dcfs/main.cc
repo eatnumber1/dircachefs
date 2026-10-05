@@ -107,6 +107,65 @@ absl::StatusOr<std::string> ReadBootId() {
   return std::string(absl::StripAsciiWhitespace(buf));
 }
 
+// Opens `path` -- the cache database itself, or one of its -wal/-shm
+// companions -- hardened against a hostile cache directory (one writable
+// by, or already containing files from, another local user): O_NOFOLLOW so
+// a symlink left in `path`'s place is never followed (ELOOP, turned into a
+// clear refusal below; the link's target is never touched, since it's
+// never opened), plus a check that whatever is actually there is a plain
+// file owned by root -- not one another user pre-created to read or tamper
+// with the cache, or to have dcfs write through as root.
+//
+// If `create`, a missing file is created mode 0600 (O_CREAT); otherwise a
+// missing file is not an error at all -- an invalid (unopened)
+// FileDescriptor is returned -- since this is also used to check an
+// existing -wal/-shm before SQLite gets a chance to open them, and most of
+// the time there won't be one yet (SQLite creates them itself, inheriting
+// the main file's mode, already fixed up by the time SQLite opens it).
+//
+// An existing file already owned by root but not mode 0600 -- a cache
+// database (or -wal/-shm) made before this check existed -- is fchmod'd to
+// 0600, with a WARNING; this is the only case that changes something
+// instead of refusing to start.
+absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
+    const std::string &path, bool create) {
+  int flags = O_RDWR | O_CLOEXEC | O_NOFOLLOW;
+  if (create) flags |= O_CREAT;
+  int fd = ::open(path.c_str(), flags, 0600);
+  if (fd == -1) {
+    if (!create && errno == ENOENT) {
+      return FileDescriptor();
+    }
+    if (errno == ELOOP) {
+      return absl::FailedPreconditionError(absl::StrCat(
+          path,
+          " is a symlink; refusing to open a cache file through a symlink "
+          "(another local user could have pointed it anywhere)"));
+    }
+    return dcfs::ErrnoToStatus(errno, absl::StrCat("open ", path));
+  }
+  FileDescriptor result(fd);
+  ABSL_ASSIGN_OR_RETURN(struct stat st, syscalls::fstat(*result));
+  if (!S_ISREG(st.st_mode)) {
+    return absl::FailedPreconditionError(
+        absl::StrCat(path, " is not a regular file"));
+  }
+  if (st.st_uid != 0) {
+    return absl::FailedPreconditionError(absl::StrCat(
+        path, " is owned by uid ", st.st_uid,
+        ", not root; refusing to use a cache file another user could have "
+        "tampered with"));
+  }
+  if ((st.st_mode & 07777) != 0600) {
+    ABSL_RETURN_IF_ERROR(syscalls::fchmod(*result, 0600));
+    LOG(WARNING) << path << " was mode "
+                 << absl::StrFormat("0%o", st.st_mode & 07777)
+                 << "; tightened to 0600 (it holds cache data as sensitive "
+                    "as --source)";
+  }
+  return result;
+}
+
 absl::StatusOr<int> Main(int argc, char *argv[]) {
   // The backing create(2)-family syscalls (backing.h's MkdirAt/MknodAt/
   // CreateAt) run with the caller's umask, switched to around each one
@@ -224,18 +283,15 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // the life of the process (the kernel drops it when the process dies,
   // however it dies), makes a second daemon refuse to start. It does not
   // interfere with SQLite's own locking, which uses fcntl(2) locks.
+  //
+  // OpenHardenedCacheFile (see its own comment) both creates it 0600 (not
+  // 0644: see the directory comment above) and refuses a hostile existing
+  // one (a symlink, or a file some other user owns).
   FileDescriptor db_lock;
   {
-    // 0600, not 0644: see the comment above. SQLite gives its -wal and -shm
-    // files the same mode as the main database file, so this one mode
-    // covers all three.
-    int fd = ::open(cache_db.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
-    if (fd == -1) {
-      return dcfs::ErrnoToStatus(errno,
-                                 absl::StrCat("open --cache_db=", cache_db));
-    }
-    db_lock = FileDescriptor(fd);
-    if (::flock(fd, LOCK_EX | LOCK_NB) == -1) {
+    ABSL_ASSIGN_OR_RETURN(db_lock,
+                          OpenHardenedCacheFile(cache_db, /*create=*/true));
+    if (::flock(*db_lock, LOCK_EX | LOCK_NB) == -1) {
       if (errno == EWOULDBLOCK) {
         return absl::FailedPreconditionError(absl::StrCat(
             "cache database ", cache_db,
@@ -245,6 +301,21 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
       return dcfs::ErrnoToStatus(errno,
                                  absl::StrCat("flock --cache_db=", cache_db));
     }
+  }
+
+  // SQLite gives a -wal/-shm file it creates itself the main database
+  // file's mode, but only when it creates them: one left over from a cache
+  // database made before this check existed (or, as above, pre-created by
+  // another user as a symlink or a file they own) needs the same hardening
+  // as the main file, checked here -- before ConnectionFactory::Open()
+  // below gives SQLite a chance to open it instead.
+  for (const char *suffix : {"-wal", "-shm"}) {
+    ABSL_ASSIGN_OR_RETURN(
+        FileDescriptor companion,
+        OpenHardenedCacheFile(absl::StrCat(cache_db, suffix),
+                               /*create=*/false));
+    // Nothing more to do with it than the check (and the possible fchmod)
+    // OpenHardenedCacheFile just did: SQLite opens the real thing itself.
   }
 
   ABSL_ASSIGN_OR_RETURN(

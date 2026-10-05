@@ -11,12 +11,24 @@
 #   - an unprivileged user (//tools:testutil's "runas") cannot open any of
 #     the three for reading;
 #   - a cache-database directory that does not exist yet is created mode
-#     0700, owned by root; and
+#     0700, owned by root;
 #   - an existing, group- or world-accessible one gets a WARNING logged
 #     (and dcfs still starts) -- exercised against /cache itself, created
 #     0755 by guest/init's plain `mkdir -p /cache` with no explicit mode,
 #     exactly the directory every other e2e test already points
-#     --cache_db at directly.
+#     --cache_db at directly;
+#   - a pre-existing database (and -wal) left mode 0644 by a build from
+#     before this check -- but still owned by root -- is tightened to 0600
+#     (with a WARNING), not refused (case 3);
+#   - a --cache_db path that is a symlink is refused outright, and the
+#     link's target is never opened at all, let alone modified (case 4);
+#     and
+#   - a --cache_db path that already exists as a regular file owned by
+#     some other (unprivileged) user is refused outright, and that file is
+#     never touched (case 5) -- both of these guard against another local
+#     user pre-creating the cache path in a directory dcfs can write to
+#     (e.g. a shared /tmp), to have root either follow a symlink
+#     elsewhere, or read/tamper with a file they already control.
 #
 # Uses only busybox applets/options (verified against the exact busybox
 # baked into the initramfs: `busybox --list`, `busybox <applet> --help`) --
@@ -37,6 +49,9 @@ SRC=/src
 MNT=/mnt
 LOG1=/tmp/dcfs-1.log
 LOG2=/tmp/dcfs-2.log
+LOG3=/tmp/dcfs-3.log
+LOG4=/tmp/dcfs-4.log
+LOG5=/tmp/dcfs-5.log
 
 DAEMON_PID=""
 MOUNTED=0
@@ -49,6 +64,12 @@ cleanup() {
 		cat "$LOG1" 2>/dev/null
 		echo "--- dcfs stderr (case 2) ---"
 		cat "$LOG2" 2>/dev/null
+		echo "--- dcfs stderr (case 3) ---"
+		cat "$LOG3" 2>/dev/null
+		echo "--- dcfs stderr (case 4) ---"
+		cat "$LOG4" 2>/dev/null
+		echo "--- dcfs stderr (case 5) ---"
+		cat "$LOG5" 2>/dev/null
 	fi
 	if [ "$MOUNTED" -eq 1 ]; then
 		umount "$MNT" 2>/dev/null || true
@@ -184,6 +205,135 @@ if start_daemon "$LOG2"; then
 	MOUNTED=0
 else
 	fail case2-mount "daemon did not mount within 10s"
+fi
+
+# --- case 3: pre-existing database (and -wal) left mode 0644 by root -----
+#
+# A cache database (or its -wal) made before this check existed, still
+# owned by root, must be tightened to 0600 -- not refused outright, since
+# nothing hostile is implied by a mode a previous dcfs build simply never
+# fixed.
+
+mkdir -m 700 /cache/case3
+: >/cache/case3/dcfs.db
+chmod 644 /cache/case3/dcfs.db
+: >/cache/case3/dcfs.db-wal
+chmod 644 /cache/case3/dcfs.db-wal
+
+DB3=/cache/case3/dcfs.db
+DB=$DB3
+if start_daemon "$LOG3"; then
+	pass case3-mount
+	MOUNTED=1
+
+	check_mode_owner case3-db-mode "$DB3" 600
+	check_mode_owner case3-wal-mode "$DB3-wal" 600
+	check_mode_owner case3-shm-mode "$DB3-shm" 600
+
+	if grep -q "tightened to 0600" "$LOG3"; then
+		pass case3-warning-logged
+	else
+		fail case3-warning-logged "no 'tightened to 0600' WARNING in $LOG3"
+	fi
+
+	kill -TERM "$DAEMON_PID" 2>/dev/null || true
+	wait "$DAEMON_PID" 2>/dev/null || true
+	DAEMON_PID=""
+	if is_mounted "$MNT"; then
+		umount "$MNT" 2>/dev/null || true
+	fi
+	MOUNTED=0
+else
+	fail case3-mount "daemon did not mount within 10s"
+fi
+
+# --- case 4: --cache_db path is a symlink ---------------------------------
+#
+# Another local user able to write the cache directory (or who got there
+# first, e.g. a shared /tmp) could leave a symlink at the --cache_db path
+# to have root open (and, via WAL, write through) some unrelated file.
+# dcfs must refuse outright, and must never have opened the link's target
+# at all -- checked by hashing it before and after.
+
+mkdir -m 700 /cache/case4
+echo "untouched content" >/cache/case4/target.db
+ln -s target.db /cache/case4/dcfs.db
+before_target=$(md5sum /cache/case4/target.db)
+
+DB4=/cache/case4/dcfs.db
+DB=$DB4
+if start_daemon "$LOG4"; then
+	fail case4-refused "dcfs mounted with --cache_db a symlink"
+	kill -TERM "$DAEMON_PID" 2>/dev/null || true
+	wait "$DAEMON_PID" 2>/dev/null || true
+	if is_mounted "$MNT"; then
+		umount "$MNT" 2>/dev/null || true
+	fi
+	MOUNTED=0
+else
+	pass case4-refused
+	wait "$DAEMON_PID" 2>/dev/null || true
+fi
+DAEMON_PID=""
+
+if grep -qi "symlink" "$LOG4"; then
+	pass case4-message
+else
+	fail case4-message "no symlink-refusal message in $LOG4"
+fi
+
+if [ -L /cache/case4/dcfs.db ]; then
+	pass case4-symlink-intact
+else
+	fail case4-symlink-intact "/cache/case4/dcfs.db is no longer a symlink"
+fi
+
+after_target=$(md5sum /cache/case4/target.db)
+if [ "$before_target" = "$after_target" ]; then
+	pass case4-target-untouched
+else
+	fail case4-target-untouched "target.db changed: before=$before_target after=$after_target"
+fi
+
+# --- case 5: --cache_db path already exists, owned by another user -------
+#
+# A file another local user already owns at the --cache_db path could be
+# one they can read or tamper with once dcfs starts writing the cache
+# through it, or one they crafted to feed dcfs/SQLite bad bytes. dcfs must
+# refuse outright, and must never have touched it (its ownership must stay
+# exactly as it was).
+
+mkdir -m 700 /cache/case5
+: >/cache/case5/dcfs.db
+chown 1000:1000 /cache/case5/dcfs.db
+
+DB5=/cache/case5/dcfs.db
+DB=$DB5
+if start_daemon "$LOG5"; then
+	fail case5-refused "dcfs mounted with --cache_db owned by uid 1000"
+	kill -TERM "$DAEMON_PID" 2>/dev/null || true
+	wait "$DAEMON_PID" 2>/dev/null || true
+	if is_mounted "$MNT"; then
+		umount "$MNT" 2>/dev/null || true
+	fi
+	MOUNTED=0
+else
+	pass case5-refused
+	wait "$DAEMON_PID" 2>/dev/null || true
+fi
+DAEMON_PID=""
+
+if grep -q "owned by uid 1000" "$LOG5"; then
+	pass case5-message
+else
+	fail case5-message "no ownership-refusal message in $LOG5"
+fi
+
+owner=$(stat -c %u /cache/case5/dcfs.db)
+if [ "$owner" = "1000" ]; then
+	pass case5-untouched
+else
+	fail case5-untouched "/cache/case5/dcfs.db is now owned by uid $owner, not 1000"
 fi
 
 exit "$FAILED"
