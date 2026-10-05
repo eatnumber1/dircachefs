@@ -33,6 +33,9 @@ JOBS=${6:-4}
 
 BUILD=$(mktemp -d)
 TOOLBIN=$(mktemp -d)
+# The out-of-tree build directory holds about 1 GB of objects: never leave
+# it behind, whether the build succeeds or fails.
+trap 'rm -rf "$BUILD" "$TOOLBIN"' EXIT
 
 # Hermetic bc ahead of whatever the host has on PATH (see the header
 # comment above and README.md's "Hermetic build tools" / "Remaining host

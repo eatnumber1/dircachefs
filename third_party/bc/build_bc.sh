@@ -10,6 +10,7 @@ SRC_ROOT=$(cd "$1" && pwd)
 OUT_BC=$(readlink -f "$(dirname "$2")")/$(basename "$2")
 
 BUILD=$(mktemp -d)
+trap 'rm -rf "$BUILD"' EXIT
 
 cd "$BUILD"
 # bc's release tarball ships pre-generated bc/bc.c and bc/scan.c (from
