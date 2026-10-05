@@ -252,3 +252,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   no longer used. Also: the repo's global -Werror broke autoconf probes inside rules_foreign_cc
   builds (fixed per build with CFLAGS=-Wno-error); revisit when the pinned toolchain lands (Phase 7).
 - lane-1: rename_test_xfs flake investigation dispatched (Sonnet; evidence first; fix the test only if the reads are xfs's own deferred work, and prove the check still catches a backing read).
+- rename_test_xfs flake fixed (ded4642; Sonnet): root cause is xfs's deferred inode inactivation
+  (inodegc), drained only by freeze/unmount (xfs_inodegc_stop), not by sync/syncfs; its AG metadata
+  reads landed in check_cold's measurement window under host load. Fix: check_cold freezes and
+  thaws the backing fs (FIFREEZE/FITHAW) before taking its baseline. Before: 8/10 failures under
+  load; after: 20/20 passes; an injected backing read inside the window is still caught.
+  Follow-up (Phase 6.2): other guest scripts with zero-backing-reads checks after unlinks on xfs
+  may share the latent flake; move quiesce_backing() into lib.sh and use it in every such check.
