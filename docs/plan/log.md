@@ -192,3 +192,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Bazel: removed 48 orphaned output bases (15 GB, from removed worktrees; russ OK); disk cache capped at 50 GB (--experimental_disk_cache_gc_max_size); try-import user.bazelrc; from wave 2 steps run in two long-lived lane clones (~/Sources/dircachefs-lanes/lane-{1,2}) instead of a checkout per step.
 - Agent types with model and effort (.claude/agents/dcfs-{mechanical,implementer,investigator,protocol,reviewer}) and CLAUDE.md (imports AGENTS.md; Claude-specific notes). They take effect after Claude Code restarts. Wave 1 agents run as general-purpose (default effort).
 - russ moved to Claude Max: lane limit is now the machine (4 CPUs, 11 GB): 2 building lanes + 2 non-building lanes, per-lane caps in user.bazelrc; applies after the restart.
+- Phase 2 merged (519b7dc, bf3d78d; Sonnet, two review rounds): database and -wal/-shm 0600,
+  missing cache directory created 0700, warning for a group/world-accessible directory, existing
+  wider-mode files tightened, symlinks (O_NOFOLLOW) and files not owned by root refused. Test first
+  each round. Agent ran full suite 71/71 and ASan before the second round; unit + cache_permissions
+  plain and ASan 18/18 after. Accepted residual risks (both need an unsafe cache directory, which
+  dcfs warns about): SQLite opens -wal/-shm by path after dcfs's check (swap window), and a hard
+  link to a root-owned file passes the owner check (relies on fs.protected_hardlinks=1).
