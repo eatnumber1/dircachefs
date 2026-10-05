@@ -58,6 +58,16 @@ qemu_test(
     guest_script = "guest/boot.sh",
 )
 
+# Step 2: the cache database (and its -wal/-shm files) is mode 0600, not
+# world-readable; a missing cache-database directory is created 0700, and
+# an existing group-/world-accessible one gets a WARNING -- see
+# guest/cache_permissions.sh.
+qemu_test(
+    name = "cache_permissions_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/cache_permissions.sh",
+)
+
 # Step 5.2: readonly_test runs on ext4, xfs and btrfs (qemu_test_matrix
 # below generates readonly_test_ext4/_xfs/_btrfs plus a plain
 # "readonly_test" alias to the ext4 variant) -- see guest/readonly.sh's own

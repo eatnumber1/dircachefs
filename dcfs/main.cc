@@ -24,6 +24,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/ascii.h"
 #include "absl/time/time.h"
@@ -183,6 +184,38 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     }
   }
 
+  // The cache database holds metadata as sensitive as the backing tree's --
+  // every cached name, attribute, xattr and symlink target, including those
+  // of directories a reader cannot list -- so its directory must not be
+  // readable by anyone but root. Create a missing one 0700; warn (but still
+  // start) about an existing one that is group- or world-accessible. Done
+  // with plain path-based calls, like the --cache_db open just below: this
+  // is the one place dcfs still deals in a path for something other than
+  // --source.
+  {
+    size_t slash = cache_db.find_last_of('/');
+    if (slash != std::string::npos) {
+      std::string parent = slash == 0 ? "/" : cache_db.substr(0, slash);
+      struct stat st;
+      if (::stat(parent.c_str(), &st) == -1) {
+        if (errno != ENOENT) {
+          return dcfs::ErrnoToStatus(errno, absl::StrCat("stat ", parent));
+        }
+        if (::mkdir(parent.c_str(), 0700) == -1) {
+          return dcfs::ErrnoToStatus(
+              errno, absl::StrCat("creating cache database directory ",
+                                   parent));
+        }
+      } else if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+        LOG(WARNING) << "cache database directory " << parent
+                     << " is group- or world-accessible (mode "
+                     << absl::StrFormat("0%o", st.st_mode & 07777)
+                     << "); it holds a cache as sensitive as --source and "
+                        "should be readable only by root (mode 0700)";
+      }
+    }
+  }
+
   // One daemon per cache database (audit-crash F7): every write-through
   // mutation's three phases, and the in-memory state that goes with them
   // (writable opens, fill guards), assume this process is the only writer;
@@ -193,7 +226,10 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // interfere with SQLite's own locking, which uses fcntl(2) locks.
   FileDescriptor db_lock;
   {
-    int fd = ::open(cache_db.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    // 0600, not 0644: see the comment above. SQLite gives its -wal and -shm
+    // files the same mode as the main database file, so this one mode
+    // covers all three.
+    int fd = ::open(cache_db.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (fd == -1) {
       return dcfs::ErrnoToStatus(errno,
                                  absl::StrCat("open --cache_db=", cache_db));

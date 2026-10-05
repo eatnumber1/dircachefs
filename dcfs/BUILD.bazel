@@ -31,6 +31,7 @@ MAIN_DEPS = [
     "@absl//absl/status:status_macros",
     "@absl//absl/status:statusor",
     "@absl//absl/strings",
+    "@absl//absl/strings:str_format",
     "@absl//absl/time",
     "@libfuse//:libfuse",
 ]

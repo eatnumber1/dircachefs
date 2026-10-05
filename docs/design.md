@@ -1037,30 +1037,36 @@ contents bypass the cache.
    path.
 3. Submount check: refuse to start if `/proc/self/mountinfo` shows any
    mount point strictly below `--source`.
-4. Open `--cache_db` and take an exclusive, non-blocking `flock`; refuse to
-   start if another process holds it.
-5. Open the SQLite connection: WAL, `synchronous=NORMAL`, foreign keys on,
+4. Cache database directory: create it mode 0700 if it does not exist; warn
+   (but still start) if an existing one is group- or world-accessible. The
+   cache holds metadata as sensitive as `--source`'s -- every cached name,
+   attribute, xattr and symlink target, including those of directories a
+   reader cannot list -- so it must not be readable by anyone but root.
+5. Open `--cache_db` mode 0600 (SQLite gives its `-wal`/`-shm` files the
+   same mode) and take an exclusive, non-blocking `flock`; refuse to start
+   if another process holds it.
+6. Open the SQLite connection: WAL, `synchronous=NORMAL`, foreign keys on,
    `busy_timeout=5000`, `temp_store=MEMORY`. dcfs refuses to start if
    SQLite cannot put the database in WAL mode (a filesystem without the
    shared memory WAL needs): in rollback-journal mode a `NORMAL` commit
    is not durable.
-6. Probe the root: its device id (`FS_IOC_GETFSUUID`, or `BTRFS_IOC_FS_INFO`
+7. Probe the root: its device id (`FS_IOC_GETFSUUID`, or `BTRFS_IOC_FS_INFO`
    on btrfs -- see "Device ids" above), filesystem type,
    inode number and generation.
-7. `Migrate()`: create the schema and seed the `cache_state` row, the
+8. `Migrate()`: create the schema and seed the `cache_state` row, the
    source's `filesystems` row and the root row, or upgrade an older
    schema, then check that the root row exists.
-8. Refuse a database built for a different filesystem
+9. Refuse a database built for a different filesystem
    (`source_device_id`), or for a different directory on the same one (the
    root row's inode number, generation and handle).
-9. Read the boot id; `backing::StartRun`: recover the dirty set if the last
-   run was not clean or anything is dirty, then durably record
-   `clean_shutdown = 0` and the boot id.
-10. `backing::InitRoot`: refresh the root row's handle and attributes and
+10. Read the boot id; `backing::StartRun`: recover the dirty set if the last
+    run was not clean or anything is dirty, then durably record
+    `clean_shutdown = 0` and the boot id.
+11. `backing::InitRoot`: refresh the root row's handle and attributes and
     register the source descriptor as the source filesystem's mount fd.
-11. `backing::StartupPurge`: forget any non-source `filesystems` row (left
+12. `backing::StartupPurge`: forget any non-source `filesystems` row (left
     by databases built before submounts were refused).
-12. Mount with `default_permissions`, plus `allow_other` if requested,
+13. Mount with `default_permissions`, plus `allow_other` if requested,
     plus `--fuse_opt`; install libfuse's signal handlers; daemonize if
     asked; run the session loop. `Init` requests export support,
     `FUSE_CAP_ATTR_GENERATION`, readdirplus, symlink caching and

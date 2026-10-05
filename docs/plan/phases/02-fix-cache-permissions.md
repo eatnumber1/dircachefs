@@ -13,3 +13,11 @@ cannot list.
   world-accessible). README notes the cache holds metadata as sensitive as
   the backing tree's.
 Owner: Sonnet. Order: first, before everything else (small, security).
+Status: done 2026-10-05: `test/qemu/guest/cache_permissions.sh`
+(`cache_permissions_test`) shown failing on the unmodified code (0644
+database/`-wal`/`-shm`, readable by an unprivileged `testutil runas` user,
+and no directory-creation/warning behavior at all); `main.cc` now creates
+the database mode 0600, creates a missing `--cache_db` directory mode
+0700, and logs a `WARNING` (without refusing to start) for an existing
+group- or world-accessible one. README.md and docs/design.md's startup
+sequence updated.
