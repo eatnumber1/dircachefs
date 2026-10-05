@@ -35,18 +35,22 @@ echo "PASS: $BB --help runs"
 # here is a bug in one file or the other, not a real requirements
 # difference.
 required_applets="
-ash awk basename cat chmod chown chroot cp cut date dd dirname dmesg
-echo fallocate false find free grep head id ip kill ln ls mdev mkdir
-mknod more mount mountpoint mv printf pwd readlink reboot rm sed sh
-sleep sort stat sync tail test timeout touch tr true truncate umount
-uname uniq wc which
+[ ash awk basename cat chgrp chmod chown chroot cmp cp cut date dd diff
+dirname dmesg echo fallocate false find free grep head id ip kill ln ls
+md5sum mdev mkdir mkfifo mknod more mount mountpoint mv printf pwd
+readlink reboot rm rmdir sed sh sleep sort stat sync tail test timeout
+touch tr true truncate umount uname uniq wc which
 "
 
 actual_applets=$("$BB" --list)
 
 missing=""
 for applet in $required_applets; do
-	if ! echo "$actual_applets" | grep -qx "$applet"; then
+	# -F/-x: fixed string, whole line -- "[" (the test-as-"[" applet) is
+	# not valid basic-regex syntax (an unterminated bracket expression),
+	# so a plain `grep -qx` on it fails with "Invalid regular expression"
+	# rather than just not matching.
+	if ! echo "$actual_applets" | grep -qFx "$applet"; then
 		missing="$missing $applet"
 	fi
 done

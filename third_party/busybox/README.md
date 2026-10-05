@@ -78,15 +78,76 @@ grep -ohE '\b(mount|umount|stat|...)\b' test/qemu/guest/*.sh test/qemu/guest/ini
 ```
 
 (see the fragment file's own header for the full, current command and
-reasoning). As of this pin, 55 applets are enabled:
+reasoning). As of this pin, 62 applets are enabled:
 
 ```
-ash awk basename cat chmod chown chroot cp cut date dd dirname dmesg
-echo fallocate false find free grep head id ip kill ln ls mdev mkdir
-mknod more mount mountpoint mv printf pwd readlink reboot rm sed sh
-sleep sort stat sync tail test timeout touch tr true truncate umount
-uname uniq wc which
+[ ash awk basename cat chgrp chmod chown chroot cmp cp cut date dd diff
+dirname dmesg echo fallocate false find free grep head id ip kill ln ls
+md5sum mdev mkdir mkfifo mknod more mount mountpoint mv printf pwd
+readlink reboot rm rmdir sed sh sleep sort stat sync tail test timeout
+touch tr true truncate umount uname uniq wc which
 ```
+
+`[` (`CONFIG_TEST1`) is a separate Kconfig symbol from `test`
+(`CONFIG_TEST`) in this busybox version (`coreutils/test.c`'s `config
+TEST1` / `bool "test as ["`) -- step 4.4 (wiring this build into
+`test/qemu/`) found this the hard way: every guest script's `if [ ... ];
+then` failed with `[: not found` until `CONFIG_TEST1=y` was added
+alongside `CONFIG_TEST=y`.
+
+Several other applets this pin enables have the same shape of gap --
+a "default y" sub-feature that is still off because its own `depends on`
+was unmet at the point `allnoconfig`'s baseline `.config` was generated
+(`busybox.config.fragment`'s sed-based fragment application can only flip
+a symbol that already has a commented-out line to replace; see that
+file's own header comment). All found the same way, by the guest test
+suite actually failing once this build was wired into `test/qemu/`:
+`CONFIG_FEATURE_SH_MATH`/`CONFIG_FEATURE_SH_MATH_64` (ash's own
+`$((...))`, used throughout `guest/lib.sh` and `guest/*.sh`; without it,
+"syntax error: support for $((arith)) is disabled"), `CONFIG_FEATURE_FANCY_SLEEP`
+plus the further, separate `CONFIG_FLOAT_DURATION` (`guest/init`'s
+`sleep 0.2`; without them, "sleep: invalid number"), and
+`CONFIG_FEATURE_STAT_FORMAT`/`CONFIG_FEATURE_STAT_FILESYSTEM` (`stat -c`/
+`stat -f`, used throughout for mode/owner checks and
+`guest/lib.sh`'s `backing_fstype`; without them, "stat: invalid option").
+`CONFIG_MD5SUM` is a different kind of gap -- not a sub-feature of
+something else, just an applet this fragment hadn't enabled yet -- and a
+more dangerous one: every `"$(md5sum a)" = "$(md5sum b)"` content check
+in `passthrough.sh`/`write.sh`/`nfs.sh`/`create.sh`/`readonly.sh`/
+`lifecycle.sh`/`cache_permissions.sh` compared two *empty* strings and
+silently passed regardless of actual content, instead of failing loudly
+the way a missing applet usually does.
+
+`CONFIG_CHGRP`/`CONFIG_RMDIR`/`CONFIG_CMP`/`CONFIG_DIFF`/`CONFIG_MKFIFO`
+are five more plain missing-applet gaps surfaced the same way (by
+running the full suite against this build): `chgrp` (`credentials.sh`),
+plain `rmdir` as opposed to `rm -r` (`removed.sh`, `rename.sh`,
+`crash.sh`), `cmp`/`diff` (byte-for-byte and tree-diff checks in
+`rename.sh`, `write.sh`, `readdir_boundary.sh`), and `mkfifo`
+(`credentials.sh`) -- all failed with "not found" rather than silently
+passing. Three further sub-feature gaps, same shape as the others above:
+`CONFIG_FEATURE_FIND_PATH`/`CONFIG_FEATURE_FIND_TYPE`/
+`CONFIG_FEATURE_FIND_MAXDEPTH`/`CONFIG_FEATURE_FIND_PAREN`/
+`CONFIG_FEATURE_FIND_PRUNE` (`find -path`/`-type`/`-mindepth`/`\( \)`/
+`-prune`, `create.sh`/`rename.sh`/`write.sh`/`readdir_boundary.sh`),
+`CONFIG_FEATURE_TOUCH_SUSV3` (`touch -d`, an explicit mtime in
+`crash.sh`/`write.sh`), `CONFIG_FEATURE_LS_RECURSIVE`/
+`CONFIG_FEATURE_FANCY_HEAD` (`ls -R` in `removed.sh`, `head -c` in
+`write.sh`), `CONFIG_FEATURE_DD_IBS_OBS` (`dd conv=notrunc`/`conv=fsync`
+in `write.sh`; without it, plain `dd` accepts only `if`/`of`/`bs`/`count`
+and any `conv=` makes it exit 1 with no message at all -- no "unrecognized
+option" text to grep for, just a bare failure), and `CONFIG_ASH_CMDCMD`
+(`setattr.sh`'s `verify_tree_cached()` runs `command diff ...`, the
+`command` builtin, to bypass any shell function of the same name; without
+it, "command: not found"). `CONFIG_FEATURE_LS_SORTFILES` is the sneakiest
+of these: its name suggests it only adds `-S`/`-X`/`-r`/`-v` sort-order
+*options*, but without it busybox's `ls.c` never calls `qsort()` on the
+directory listing at all (`sort_and_display_files()`/`dnsort()` compile
+to no-ops) -- so plain `ls` silently lists entries in raw directory
+order, not alphabetical, and every `"$(ls "$dir" | tr '\n' ' ')" =
+"a b c "` equality check across `guest/*.sh` (`power.sh`'s `warm_check`,
+among others) can fail nondeterministically depending on directory-entry
+order, with no error message at all.
 
 Nothing else: no init system (`guest/init` is dcfs's own `/init` script,
 not busybox's `init`/`linuxrc`), no network servers (`httpd`, `tftpd`,
