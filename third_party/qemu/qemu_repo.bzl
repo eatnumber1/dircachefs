@@ -44,9 +44,7 @@ def _qemu_repo_impl(repository_ctx):
     # checkout), leaving subprojects/dtc.wrap in place would just hit the
     # same "wrap-git wants to validate/fetch via git" problem this whole
     # rule exists to avoid.
-    result = repository_ctx.execute(["rm", "-f", "subprojects/dtc.wrap"])
-    if result.return_code != 0:
-        fail("qemu_repo: failed to remove subprojects/dtc.wrap: " + result.stderr)
+    repository_ctx.delete("subprojects/dtc.wrap")
 
     for patch in repository_ctx.attr.patches:
         repository_ctx.patch(patch, strip = repository_ctx.attr.patch_strip)

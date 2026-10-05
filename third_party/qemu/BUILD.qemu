@@ -142,8 +142,17 @@ QEMU_CONFIGURE_OPTIONS = [
     # LDFLAGS the same way --extra-cflags's own comment explains for
     # CFLAGS, and is what actually pulls libasan.so into the linked
     # qemu-system-x86_64.
-    "--extra-cflags=-fno-sanitize=address -fno-sanitize=undefined",
-    "--extra-ldflags=-fno-sanitize=address -fno-sanitize=undefined",
+    #
+    # ONE word per option (review M2): rules_foreign_cc joins
+    # configure_options with plain spaces, unquoted, so the two-word value
+    # this used to hold ("--extra-cflags=-fno-sanitize=address
+    # -fno-sanitize=undefined") reached configure as the option plus a bare
+    # "-fno-sanitize=undefined" word, which configure silently ignored:
+    # --config=ubsan still built an instrumented QEMU. A comma list is a
+    # single word. smoke_test.sh checks the built binary for sanitizer
+    # runtimes.
+    "--extra-cflags=-fno-sanitize=address,undefined",
+    "--extra-ldflags=-fno-sanitize=address,undefined",
 ]
 
 configure_make(

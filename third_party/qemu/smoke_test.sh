@@ -27,6 +27,17 @@ case "$out" in
 esac
 echo "PASS: --version: $(echo "$out" | head -1)"
 
+# The built binary must be the pinned release (review nit): README.md's
+# qemu-version marker must equal MODULE.bazel's pin, and `--version` the
+# marker.
+pinned=$(sed -n 's/.*<!-- qemu-version: \([0-9][0-9.]*\) -->.*/\1/p' "$README" | head -1)
+[ -n "$pinned" ] || fail "README.md has no '<!-- qemu-version: X.Y.Z -->' marker"
+case "$out" in
+*"QEMU emulator version $pinned"*) ;;
+*) fail "--version is not the pinned $pinned: $out" ;;
+esac
+echo "PASS: --version matches the pinned $pinned"
+
 # --- README.md's documented device/machine lists -----------------------
 # README.md brackets the authoritative lists with HTML comments so this
 # test and the prose can't drift apart silently; a device or machine
@@ -108,6 +119,17 @@ $bad_needed"
 fi
 echo "PASS: only libc.so.6/libm.so.6 in NEEDED:
 $needed"
+
+# Under --config=asan/ubsan QEMU must not be instrumented (review M2): the
+# NEEDED check above already rejects a shared libasan/libubsan; this also
+# names them explicitly and catches a statically linked runtime.
+if echo "$dynsection" | grep -qE 'lib(ubsan|asan)'; then
+	fail "qemu-system-x86_64 links a sanitizer runtime: $(echo "$dynsection" | grep -E 'lib(ubsan|asan)')"
+fi
+if readelf --syms "$QEMU" 2>/dev/null | grep -qE '__(ubsan|asan)_'; then
+	fail "qemu-system-x86_64 contains sanitizer runtime/instrumentation symbols (__ubsan_*/__asan_*)"
+fi
+echo "PASS: no sanitizer runtime or instrumentation"
 
 bad_path=$(echo "$dynsection" | grep -E 'RUNPATH|RPATH' || true)
 if [ -n "$bad_path" ]; then

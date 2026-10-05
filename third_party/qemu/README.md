@@ -12,6 +12,8 @@ help`/`-machine help` output ever lists something this file doesn't.
 - Version: **11.1.2** (released 2026-09-28; the latest stable release as
   of 2026-10-05, confirmed from <https://www.qemu.org/download/>).
 - URL: `https://download.qemu.org/qemu-11.1.2.tar.xz`
+- Version marker read by smoke_test.sh (keep equal to MODULE.bazel's pin):
+  <!-- qemu-version: 11.1.2 -->
 - sha256: `731b5681e4bb18be313231579b8efd0296c5b015fa36dc533874b639ba838016`
   (computed locally from the downloaded tarball; cross-checked that
   `qemu-11.1.2.tar.xz.sig` exists on the download server as a GPG
@@ -23,7 +25,8 @@ help`/`-machine help` output ever lists something this file doesn't.
 1. Pick the new release from <https://www.qemu.org/download/>.
 2. `curl -LO https://download.qemu.org/qemu-<version>.tar.xz && sha256sum qemu-<version>.tar.xz`
 3. Update `url`, `strip_prefix` and `sha256` in `MODULE.bazel`'s `qemu`
-   `http_archive`.
+   `http_archive`, and the `qemu-version` marker above (the smoke test
+   compares the built binary's `--version` with it).
 4. `bazel test //third_party/qemu/...` -- the smoke test will fail
    immediately if `-device help`/`-machine help` grew something new (a
    changed default, a Kconfig dependency the new release added); update
