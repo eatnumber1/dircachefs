@@ -270,3 +270,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Full suite 75/75; ASan on 3 representative targets. Remaining host tools: KVM, mkfs.ext4/btrfs/xfs
   for scratch disks (follow-up: Bazel-built xfsprogs/btrfs-progs; mke2fs exists), network once per pin.
   pjdfstest hit run-qemu.sh's 1200 s timeout under contention (passes alone in ~550-650 s): Phase 5.1.
+- S2 plain suite: 75/75 on main 3186e2e (cache hits: identical inputs to lane-2's verified run). S2 ASan suite pending the Phase 6.3 finding.
