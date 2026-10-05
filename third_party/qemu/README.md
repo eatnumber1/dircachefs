@@ -438,6 +438,32 @@ No other accelerator (`--enable-hvf`, `--enable-whpx`, `--enable-xen`,
 `--enable-nvmm`, `--enable-mshv`, `--enable-nitro`) applies to this
 Linux/KVM host and none is enabled.
 
+**Manual boot check, KVM: works.** Booting `test/qemu:boot_test`'s own
+kernel/initramfs by hand with this QEMU and qboot in place of the host
+ones (`-accel kvm -cpu host`, plus the one fixed finding below) printed
+`ALL-TESTS-PASSED` in ~2s wall time -- same ballpark as the host QEMU
+this project used before this step.
+
+**Manual boot check, TCG: inconclusive, not confirmed working.** The
+same guest under `-accel tcg -cpu max` (both `-smp 2`, matching
+`run-qemu.sh`'s e2e setting, and `-smp 1`) produced **no console output
+at all** -- not even the kernel's own first boot line -- within a 600s
+timeout, on both attempts. The QEMU process itself was not deadlocked
+(confirmed via `ps`: a steady ~99% CPU the whole time, consistent with
+real computation, not a blocked wait), and this was on a host under
+heavy, uncontrolled contention from other concurrent lanes' own full
+test suites and builds (load average 5.5-6.5 on 4 cores, several GB
+swapped) -- the same kind of contention `test/qemu/README.md`'s own KVM
+timing notes already call out as making numbers "worse than a quiet
+machine would show." Whether 600s of silence is "just" that contention
+taken to an extreme, or a real TCG-specific problem with this minimal
+build's configuration (an untested code path, given every other check in
+this step used KVM), was not resolved -- two attempts with no
+qualitatively different result is this step's stop-and-report line.
+**This needs a retest on a quiet host before TCG can be considered
+confirmed working with this build**, ideally before Phase 5.1 (which
+depends on the TCG fallback path) is scheduled.
+
 ## Block layer
 
 `--block-drv-ro-whitelist=raw --block-drv-rw-whitelist=raw`: raw disk
