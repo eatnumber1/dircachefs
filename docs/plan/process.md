@@ -99,12 +99,15 @@ process (its waves and file ownership table) is in `history.md`.
 - Phases run in order; the status table in `README.md` is the source of
   truth. Steps inside a phase may run in parallel only if they touch
   disjoint files.
-- At most two agents at a time (agent token budget is limited, and token
-  spend matters more than wall-clock). Prefer `SendMessage` follow-ups to
+- At most two building agents (Bazel builds or QEMU tests) plus two
+  non-building agents (reviews, docs, drafting) at a time: the dev
+  machine (4 CPUs, 11 GB of RAM) is the limit, not tokens (Claude Max
+  since 2026-10-05). Each lane's `user.bazelrc` caps its tests, e.g.
+  `test --local_test_jobs=2` and `build --local_resources=memory=4096`. Prefer `SendMessage` follow-ups to
   new agents. Shut down agents, background loops and Bazel servers that
   are no longer needed.
 - If a step needs more than about three agent runs to land, pause and tell
-  russ before spending more.
+  russ: something is probably wrong with the step.
 
 ## russ's machine
 

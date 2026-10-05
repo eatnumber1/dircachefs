@@ -7,9 +7,17 @@ merge); this file orders the steps.
 
 ## Ground rules
 
-- **Two lanes.** At most two subagents run at once (token budget,
-  `process.md`). Each wave below has at most two lanes. Where a third
-  lane would help, it is marked "(lane 3 if budget allows)".
+- **Lanes.** The limit is the machine, not tokens (russ moved to Claude
+  Max on 2026-10-05; the dev machine has 4 CPUs and 11 GB of RAM, and two
+  building lanes already reach swap). So: at most **two building lanes**
+  (anything that runs Bazel builds or QEMU tests) plus up to **two
+  non-building lanes** (reviews with `dcfs-reviewer`, docs, the TLA+
+  model's drafting, plan work). Each building lane caps its own test
+  parallelism and memory in its `user.bazelrc` (`process.md`). Waves
+  below list their building lanes; non-building work fills the extra
+  slots. Revisit when the machine grows or once CI (Phase 5) runs the
+  full suites. Where a third building lane would help, it is marked
+  "(lane 3 if the machine allows)".
 - **Lanes own files.** Two lanes in a wave never edit the same file. The
   "Owns" column lists what a lane may touch; anything else needed from
   another lane's files is a small separate commit the orchestrator lands
@@ -132,7 +140,7 @@ checkpoint:** review the coverage report together (which gaps matter).
 | 1 | Phase 8: the cache checker (run after every test) | Sonnet, Opus review | `testonly/` checker, teardown hook in `guest/lib.sh` |
 | 2 | Phase 8: the syscall failure-sweep harness (link-time fakes) | Sonnet, Opus review | `testonly/` sweep library, its BUILD rules |
 
-Then (lane 3 if budget allows: the SQLite failure VFS shim, otherwise it
+Then (lane 3 if the machine allows: the SQLite failure VFS shim, otherwise it
 follows lane 2):
 
 | Lane | Work | Model | Owns |
