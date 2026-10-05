@@ -28,7 +28,7 @@ phase's file; `log.md` says where things stand.
 |---|-------|--------|
 | 1 | [AGENTS.md](phases/01-agents-md.md) | done 2026-10-05 (reviewed by russ) |
 | 2 | [Fix: world-readable cache database](phases/02-fix-cache-permissions.md) | done 2026-10-05 |
-| 3 | [Drop the kernel patch; download and build the test kernel](phases/03-drop-kernel-patch-and-build-test-kernel.md) | in progress (wave 1, lane 2: Bazel-built stock kernel) |
+| 3 | [Drop the kernel patch; download and build the test kernel](phases/03-drop-kernel-patch-and-build-test-kernel.md) | in progress (3a done: Bazel-built stock kernel 7.2.9, selectable; 3b next: drop the patch) |
 | 4 | [Pinned host tools; `third_party/` convention](phases/04-pinned-host-tools.md) | in progress (4a: QEMU and busybox builds, lane-1) |
 | 5 | [CI runs the QEMU suite](phases/05-ci.md) | planned |
 | 6 | [Test tiers and test speed](phases/06-test-tiers-and-test-speed.md) | planned (6.1 with 5; 6.2 throughout) |

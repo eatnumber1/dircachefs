@@ -208,3 +208,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   premise was wrong). QEMU 11.1.2: deps glib + zlib only (no pixman); microvm needs FDT (internal
   dtc); `-device help` = virtio-blk-device, isa-serial, mc146818rtc, virtio-serial-device (upstream
   quirk). glib needed a pkg-config shim for rules_foreign_cc; build in progress.
+- S1 passed (2026-10-05): stock-kernel boot_test passes; full suite 71/71 with KVM (default patched
+  kernel). Phase 3a merged (d08136f, d497d24): linux 7.2.9 fetched and built by Bazel from tinyconfig +
+  third_party/linux/kernel.config (fragment covers later phases too), 3.3 MiB bzImage, ~9 min cold
+  build; GNU bc Bazel-built; flex/bison/host C toolchain still from the host (BCR flex/bison fail at
+  runtime under Bazel: runfiles/m4); selectable with --//test/qemu:kernel=stock. Orchestrator fix:
+  build scripts now delete their temp build directories.
