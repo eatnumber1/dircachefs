@@ -23,6 +23,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
+#include "dcfs/escape.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -61,7 +62,7 @@ absl::StatusOr<std::string> Canonicalize(std::string_view path) {
   errno = 0;
   char *resolved = ::realpath(std::string(path).c_str(), nullptr);
   if (resolved == nullptr) {
-    return dcfs::ErrnoToStatus(errno, absl::StrCat("realpath(", path, ")"));
+    return dcfs::ErrnoToStatus(errno, absl::StrCat("realpath(", EscapeBytes(path), ")"));
   }
   std::string result(resolved);
   ::free(resolved);

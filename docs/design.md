@@ -1024,6 +1024,34 @@ contents bypass the cache.
   backstop for what the backing filesystem does on its own. LSM relabeling
   and EVM/IMA rewrites are not covered.
 
+## File names are bytes
+
+A name (a directory entry, a symlink target, an xattr name) is a sequence
+of bytes: any byte but NUL, and but `/` in a name. dcfs never decodes,
+normalizes, folds or reorders one, because nothing about a Linux
+filesystem allows it to. WTF-8 and similar schemes were rejected: they
+round-trip ill-formed UTF-16, not arbitrary bytes (a lone `0xFF` has no
+WTF-8 form).
+
+- **Storage.** Names, targets and xattr names are `BLOB` columns, bound as
+  blobs and ordered by `memcmp`; in C++ they are `std::string` and
+  `std::string_view`, never `char *`. The only C strings made from them
+  are the arguments of the backing syscalls and of libfuse's reply
+  functions, where a NUL cannot occur anyway.
+- **Printing.** A name must never reach a log line, an error message or
+  any other text raw: a name can contain a newline (forging a log line),
+  terminal control characters, or invalid UTF-8. `EscapeBytes`
+  (`dcfs/escape.h`) is the one escaping for logs and error text: printable
+  ASCII stays, `\`, `"`, newline, carriage return and tab get a backslash
+  escape, and every other byte becomes `\xNN`. `UnescapeBytes` is its exact
+  inverse. Every call site that prints a name, a symlink target or an xattr
+  name goes through it. `mountinfo`, `fstab` and `exports(5)` use a
+  different, octal escaping (`\040`); the functions for it arrive with
+  plan phase 15, next to these.
+- **Tests.** `names_test` runs a corpus built from where a name can
+  break rather than from every byte value; see the table under
+  [Test strategy](#end-to-end-suites-and-what-each-proves).
+
 ## Startup and shutdown
 
 ### Startup (`main.cc`)
@@ -1147,6 +1175,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `release_leak_test` | A failed attribute refresh on the last writable close (forced by holding the SQLite write lock) does not leak the backing descriptor or passthrough registration. |
 | `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on ext4 instead of failing `ESTALE`, also when their rows and attributes were cached; no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
 | `readdir_boundary_test` | A directory too large for one READDIR or READDIRPLUS reply lists every entry exactly once across several replies, and in time linear in its size. |
+| `names_test`, `names_random_test` | File names are bytes: about 60 names, one per hazard class (format delimiters, control and high-bit bytes, invalid UTF-8, the overlong "fake slash", NFC/NFD and other look-alike sets in the spirit of xfstests generic/453 and generic/454, path-walk specials, ordering and prefixes, 255-byte names), go through create, mkdir, symlink (including a 4095-byte target; 1023 on xfs), link, xattrs with NUL-containing values, a rename chain, handles, listing and removal, both created directly on the backing filesystem (dcfs populates from it) and created through dcfs, and are compared with the backing filesystem byte for byte; after a restart the same checks pass, the handles taken before it still open and a metadata pass reads zero sectors. Errors for `.`, `..` and 256-byte names match the backing filesystem's, a directory chain deeper than `PATH_MAX` works by descriptors and handles, and a newline in a logged name cannot forge a log line. The random test makes 1,000 seeded names of random bytes (100,000 in the slow tier, `names_random_slow_test`), half through dcfs and half on the backing filesystem, and compares the trees. |
 | `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; a refused boundary stays invisible even with `crossmnt`. |
 | `pjdfstest_test` | POSIX conformance, as above. |
 

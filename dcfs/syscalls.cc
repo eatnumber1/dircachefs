@@ -16,6 +16,7 @@
 #include "absl/status/status_macros.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "dcfs/escape.h"
 #include "dcfs/status.h"
 #include "dcfs/ret_check.h"
 
@@ -35,7 +36,7 @@ absl::StatusOr<FileDescriptor> openat(
   int fd = ::openat(
       dirfd, std::string(pathname).c_str(), flags | O_CLOEXEC, mode);
   if (fd == -1) {
-    return ErrnoToStatus(errno, absl::StrFormat("openat(%d, %s)", dirfd, pathname));
+    return ErrnoToStatus(errno, absl::StrFormat("openat(%d, %s)", dirfd, EscapeBytes(pathname)));
   }
   return FileDescriptor(fd);
 }
@@ -87,7 +88,8 @@ absl::Status name_to_handle_at(
       dirfd, std::string(pathname).c_str(), &handle, &mount_id, flags);
   if (rc != 0) {
     return ErrnoToStatus(
-        errno, absl::StrFormat("name_to_handle_at(%d, %s)", dirfd, pathname));
+        errno, absl::StrFormat("name_to_handle_at(%d, %s)", dirfd,
+                        EscapeBytes(pathname)));
   }
   return absl::OkStatus();
 }
@@ -215,7 +217,9 @@ absl::StatusOr<std::vector<std::string>> flistxattr(int fd) {
     size_t pos = 0;
     while (pos < static_cast<size_t>(nbytes)) {
       const char *str = buf.data() + pos;
-      size_t len = std::strlen(str);
+      const void *nul = std::memchr(str, '\0', nbytes - pos);
+      size_t len = nul == nullptr ? nbytes - pos
+                                  : static_cast<const char *>(nul) - str;
       result.emplace_back(str, len);
       pos += len + 1;
     }
@@ -302,7 +306,7 @@ absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name) {
   for (int attempt = 0; attempt < 4; ++attempt) {
     ssize_t size = ::getxattr(path.c_str(), name_str.c_str(), nullptr, 0);
     if (size == -1) {
-      return ErrnoToStatus(errno, absl::StrCat("getxattr(", path, ", ", name, ")"));
+      return ErrnoToStatus(errno, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name), ")"));
     }
     if (size == 0) return std::string();
     std::string value(size, '\0');
@@ -310,12 +314,12 @@ absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name) {
         ::getxattr(path.c_str(), name_str.c_str(), value.data(), value.size());
     if (nbytes == -1) {
       if (errno == ERANGE) continue;
-      return ErrnoToStatus(errno, absl::StrCat("getxattr(", path, ", ", name, ")"));
+      return ErrnoToStatus(errno, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name), ")"));
     }
     value.resize(nbytes);
     return value;
   }
-  return ErrnoToStatus(ERANGE, absl::StrCat("getxattr(", path, ", ", name,
+  return ErrnoToStatus(ERANGE, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name),
                                             "): kept growing"));
 }
 
@@ -326,7 +330,7 @@ absl::Status setxattr_opath(int fd, std::string_view name,
   if (::setxattr(path.c_str(), name_str.c_str(),
                  reinterpret_cast<const void *>(value.data()), value.size(),
                  flags) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("setxattr(", path, ", ", name, ")"));
+    return ErrnoToStatus(errno, absl::StrCat("setxattr(", path, ", ", EscapeBytes(name), ")"));
   }
   return absl::OkStatus();
 }
@@ -335,7 +339,7 @@ absl::Status removexattr_opath(int fd, std::string_view name) {
   const std::string path = ProcFdPath(fd);
   const std::string name_str(name);
   if (::removexattr(path.c_str(), name_str.c_str()) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("removexattr(", path, ", ", name, ")"));
+    return ErrnoToStatus(errno, absl::StrCat("removexattr(", path, ", ", EscapeBytes(name), ")"));
   }
   return absl::OkStatus();
 }

@@ -34,6 +34,7 @@
 #include "dcfs/credentials.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
+#include "dcfs/escape.h"
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
@@ -348,7 +349,7 @@ absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
 // `dir` incomplete (e.g. an out-of-band change; see ReconcileAttrs), a rare
 // enough event that re-logging then is fine.
 void LogRefusedBoundary(InodeId dir, std::string_view name) {
-  LOG(ERROR) << "refusing to cache " << name << " under inode " << dir
+  LOG(ERROR) << "refusing to cache " << EscapeBytes(name) << " under inode " << dir
              << ": it is a mount point or subvolume boundary; dcfs does "
                 "not support submounts (see README)";
   // Kernel-supported FUSE submounts would plug in here: given
@@ -380,7 +381,7 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
       syscalls::openat(dir_fd, name, O_PATH | O_NOFOLLOW);
   if (!child.ok()) {
     if (ErrnoOf(child.status()) == ENOENT) {
-      VLOG(1) << "child " << name << " vanished while listing its directory";
+      VLOG(1) << "child " << EscapeBytes(name) << " vanished while listing its directory";
       return std::nullopt;
     }
     return child.status();
@@ -750,7 +751,7 @@ absl::StatusOr<std::optional<std::string>> RefreshXattr(
                            ? std::optional<std::string_view>(*value)
                            : std::nullopt));
   if (!filled) {
-    VLOG(1) << "inode " << id << ": not caching xattr " << name
+    VLOG(1) << "inode " << id << ": not caching xattr " << EscapeBytes(name)
             << " read concurrently with a mutation of it";
   }
   return value;
@@ -1041,7 +1042,7 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   // A recorded listing names every child, and makes every other name
   // absent.
   RET_CHECK_NE(result.kind, cache::LookupResult::kUnknown)
-      << "name " << name << " of directory " << parent
+      << "name " << EscapeBytes(name) << " of directory " << parent
       << " still unknown after its listing was recorded";
   return result;
 }
@@ -1107,7 +1108,7 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
   ABSL_ASSIGN_OR_RETURN(
       std::optional<ChildRecord> child,
       ProbeChild(*dir_fd, dir_stx, dir_attr.device, parent, name, refused));
-  VLOG(1) << "resolving " << name << " in directory " << parent;
+  VLOG(1) << "resolving " << EscapeBytes(name) << " in directory " << parent;
 
   cache::LookupResult result;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
@@ -1128,7 +1129,7 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
       result = {cache::LookupResult::kNegative, 0};
     }
     if (!dir_ok) {
-      VLOG(1) << "directory " << parent << ": not caching " << name
+      VLOG(1) << "directory " << parent << ": not caching " << EscapeBytes(name)
               << ", read concurrently with a mutation of it";
     }
     return absl::OkStatus();

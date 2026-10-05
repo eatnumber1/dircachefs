@@ -80,6 +80,29 @@ qemu_cc_test(
 )
 
 cc_library(
+    name = "escape",
+    hdrs = ["escape.h"],
+    srcs = ["escape.cc"],
+    # Optimized even in a fastbuild: the exhaustive test below calls it 33
+    # million times and the unit-test guest gives a test 60 seconds.
+    copts = ["-O2"],
+)
+
+qemu_cc_test(
+    name = "escape_test",
+    # Exhaustive over all byte strings up to length 3 (16.7 million), about
+    # 17 s even optimized: a presubmit test, not a constant one.
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["escape_test.cc"],
+    copts = ["-O2"],
+    deps = [
+      ":escape",
+      "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "status",
     hdrs = ["status.h"],
     srcs = [
@@ -125,6 +148,7 @@ cc_library(
       "fd.cc",
     ],
     deps = [
+      ":escape",
       ":ret_check",
       ":status",
       "@absl//absl/base:nullability",
@@ -378,6 +402,7 @@ cc_library(
     srcs = ["dir_cache_fs.cc"],
     hdrs = ["dir_cache_fs.h"],
     deps = [
+      ":escape",
       ":backing",
       ":context",
       ":credentials",
@@ -405,6 +430,7 @@ cc_library(
     srcs = ["mounts_below.cc"],
     hdrs = ["mounts_below.h"],
     deps = [
+      ":escape",
       ":status",
       ":syscalls",
       "@absl//absl/status",
@@ -542,6 +568,7 @@ cc_library(
     srcs = ["metadata_cache.cc"],
     hdrs = ["metadata_cache.h"],
     deps = [
+      ":escape",
       ":context",
       ":device_id",
       ":file_handle",
@@ -589,6 +616,7 @@ cc_library(
     srcs = ["backing.cc"],
     hdrs = ["backing.h"],
     deps = [
+      ":escape",
       ":context",
       ":credentials",
       ":device_id",

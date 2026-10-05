@@ -299,7 +299,8 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
   `readonly_test`, `passthrough_test`, `lifecycle_test`, `handles_test`,
   `setattr_test`, `create_test`, `rename_test`, `write_test`,
   `credentials_test`, `crash_test`, `power_test`, `release_leak_test`,
-  `readdir_boundary_test`, `removed_test`, `nfs_test` and `boot_test`.
+  `readdir_boundary_test`, `removed_test`, `names_test`, `nfs_test` and
+  `boot_test`.
   [`docs/design.md`](docs/design.md#test-strategy) says what each one
   proves.
 - **POSIX conformance**: `pjdfstest_test` runs all of pjdfstest (about 8800
@@ -369,6 +370,18 @@ recovery protocol, concurrency, and the test strategy.
 
 ## Limitations
 
+- **File names are bytes, but only the logs show them escaped.** dcfs
+  treats names, symlink targets and xattr names as unmodified bytes (any
+  byte but NUL, and `/` in a name; no normalization, no case folding, no
+  text decoding), and whatever the backing filesystem accepts or rejects
+  (255-byte names, 4095-byte symlink targets, 1023 on xfs) it accepts or
+  rejects the same way. Wherever dcfs prints one in a log line or error
+  message it escapes it (`\n`, `\xff`; see `dcfs/escape.h`), so a name
+  with a newline cannot forge a log line. The escaping of mount points and
+  sources in `mountinfo`, `/etc/fstab` and `exports(5)` text (octal
+  escapes) does not exist yet: it arrives with the NFS export tooling
+  (plan phase 15). The paths given on the command line (`--source`, the
+  mount point, `--cache_db`) are not escaped in startup messages yet.
 - **Exclusive access to the backing tree is required.** Everything that
   changes the backing tree must go through dcfs. There is no fanotify
   watch and no time-based revalidation. Changes made behind dcfs's back

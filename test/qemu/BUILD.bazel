@@ -273,3 +273,35 @@ qemu_test_matrix(
     other_size = "medium",
     timeout = "moderate",
 )
+
+# Step 9: file names are bytes. names_test runs the whole name corpus
+# (guest/names.sh, tools/testutil.c's names-* subcommands) on each backing
+# filesystem; names_random_test creates 1,000 seeded random names, half in
+# each direction (medium tier) and names_random_slow_test 100,000 (slow tier).
+qemu_test_matrix(
+    name = "names_test",
+    disks = [("vdb", "ext4", "320M")],
+    guest_script = "guest/names.sh",
+    size = "medium",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
+qemu_test_matrix(
+    name = "names_random_test",
+    disks = [("vdb", "ext4", "320M")],
+    guest_script = "guest/names_random.sh",
+    size = "medium",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
+qemu_test_matrix(
+    name = "names_random_slow_test",
+    # 4G (sparse): every name is an inode on the backing filesystem.
+    disks = [("vdb", "ext4", "4G")],
+    guest_script = "guest/names_random_slow.sh",
+    size = "enormous",
+    other_size = "enormous",
+    timeout = "eternal",
+)

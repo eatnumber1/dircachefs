@@ -23,6 +23,7 @@
 #include "absl/strings/str_cat.h"
 #include "dcfs/context.h"
 #include "dcfs/device_id.h"
+#include "dcfs/escape.h"
 #include "dcfs/file_handle.h"
 #include "dcfs/migrate.h"
 #include "dcfs/ret_check.h"
@@ -409,7 +410,7 @@ absl::StatusOr<std::optional<std::string>> GetXattr(Context &ctx, InodeId id,
                        }).status());
   auto absent = [&] {
     return absl::NotFoundError(
-        absl::StrCat("inode ", id, " has no xattr ", name));
+        absl::StrCat("inode ", id, " has no xattr ", EscapeBytes(name)));
   };
   if (state.has_value()) {
     if (*state == "present") {
@@ -765,7 +766,8 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
     ABSL_ASSIGN_OR_RETURN(LookupResult source, Lookup(ctx, parent, name));
     if (source.kind != LookupResult::kFound) {
       return absl::NotFoundError(absl::StrCat(
-          "no cached positive dentry ", name, " in ", parent, " to rename"));
+          "no cached positive dentry ", EscapeBytes(name), " in ", parent,
+          " to rename"));
     }
     if (parent == newparent && name == newname) return absl::OkStatus();
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, newparent));

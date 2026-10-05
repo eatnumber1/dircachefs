@@ -24,6 +24,7 @@
 #include "dcfs/backing.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
+#include "dcfs/escape.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/ret_check.h"
@@ -358,7 +359,8 @@ void DirCacheFS::ResolveSideEffectXattrs(
     absl::Status status = backing::RefreshXattr(ctx_, id, name, fd).status();
     // NotFound: the row is gone (invalidated meanwhile); nothing to record.
     if (!status.ok() && !absl::IsNotFound(status)) {
-      LOG(WARNING) << op << ": could not read xattr " << name << " of inode "
+      LOG(WARNING) << op << ": could not read xattr " << EscapeBytes(name)
+                   << " of inode "
                    << id << " back, leaving it unknown: " << status;
     }
   }
@@ -424,7 +426,7 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
       ctx_, mutation, parent, *parent_fd, name, open_for_write);
   mutation.End();
   if (!child.ok()) {
-    LOG(WARNING) << "created " << name << " in directory " << parent
+    LOG(WARNING) << "created " << EscapeBytes(name) << " in directory " << parent
                  << " but could not record it: " << child.status();
     return child.status();
   }
@@ -1467,12 +1469,12 @@ absl::Status DirCacheFS::Setxattr(
   // unknown for it, above). If the read-back failed, `name` stays unknown.
   // Also left unknown if another mutation of `id` overlapped this one.
   if (!stored->ok()) {
-    LOG(WARNING) << "Setxattr: could not read xattr " << name
+    LOG(WARNING) << "Setxattr: could not read xattr " << EscapeBytes(name)
                  << " of inode " << id << " back, leaving it unknown: "
                  << stored->status();
   } else if (!mutation.Owns(id)) {
     VLOG(1) << "Setxattr: inode " << id << " changed concurrently, leaving "
-            << name << " unknown";
+            << EscapeBytes(name) << " unknown";
   } else if ((*stored)->has_value()) {
     LogPhase3Failure("Setxattr", cache::SetXattr(ctx_, id, name, ***stored));
   } else {

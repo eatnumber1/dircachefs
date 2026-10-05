@@ -678,6 +678,1115 @@ static int cmd_btrfs_subvol_create(const char *path)
 	return ret;
 }
 
+/* ------------------------------------------------------------------------
+ * names-*: the Phase 9 "file names are bytes" corpus helpers (see
+ * guest/names.sh, guest/names_random.sh and docs/plan/phases/09-*.md).
+ *
+ *   testutil names-create <root>          build the corpus tree under <root>
+ *                                         (an existing empty directory)
+ *   testutil names-verify <root> [open]   check every object against the
+ *                                         corpus; with "open" also checks an
+ *                                         NFS-style handle round trip
+ *   testutil names-handles-save <root> <file>
+ *   testutil names-handles-open <root> <file>
+ *   testutil names-remove <root>          unlink/rmdir the whole corpus tree
+ *   testutil names-dump <root> [meta]     canonical hex dump of a tree: two
+ *                                         trees with the same bytes dump the
+ *                                         same; "meta" skips file contents
+ *   testutil names-errs <root>            the errno of operations on the
+ *                                         special names (".", "..", 256 bytes)
+ *   testutil names-chain-create <root>    a directory chain deeper than
+ *   testutil names-chain-check <root>     PATH_MAX in total, walked by fd
+ *   testutil names-random <root> <seed> <count>
+ *                                         <count> names of random bytes
+ *
+ * The corpus is described by the hazard classes of the phase file; the
+ * generic/453 and generic/454 sets were written independently for dcfs, in
+ * the spirit of those xfstests tests (Copyright (c) 2014 Oracle, GPL-2.0:
+ * names and xattr names that render alike but are different bytes), without
+ * copying any of their code.
+ *
+ * Every failure prints one "FAIL ..." line (names are printed in hex, never
+ * raw) and the command exits 1 after checking everything.
+ * ------------------------------------------------------------------------ */
+#include <dirent.h>
+#include <stdarg.h>
+
+struct bytes {
+	const char *p;
+	size_t n;
+};
+#define B(s) { s, sizeof(s) - 1 }
+
+static const struct bytes fixed_names[] = {
+	/* Delimiters of our formats. */
+	B("a\nb"), B("a\rb"), B("a\tb"), B("a b"), B(" lead"), B("trail "),
+	B(" both "), B("#hash"), B("a,b"), B("a=b"), B("a:b"), B("a\\b"),
+	B("a\"b"), B("it's"), B("\\040"), B("\\n"), B("%2F"), B("trail\\"),
+	B("\n"), B("line\n"),
+	/* Byte classes at their edges. */
+	B("\x01"), B("\x1f"), B("\x7f"), B("\x80"), B("\xff"), B("a\x01" "b"),
+	B("a\x1f" "b"), B("a\x7f" "b"), B("a\x80" "b"), B("a\xff" "b"),
+	/* Text-decoding hazards. */
+	B("\xbf"), B("trunc\xe2\x82"), B("\xc0\xaf"), B("a\xc0\xaf" "b"),
+	B("\xed\xa0\x80"), B("caf\xc3\xa9"), B("Case"), B("case"), B("CASE"),
+	/* Path-walk specials. */
+	B("..."), B(".x"), B("x."), B(". "), B(" ."),
+	/* Ordering and prefixes. */
+	B("a"), B("a\x80"), B("a\xff"), B("aa"),
+	/* Lengths: one byte (255 and 255-mid-character are added below). */
+	B("x"),
+	/* generic/453 style sets: NFC, NFD (and the compatibility forms) of one
+	 * character; full-width and half-width; a ligature and its expansion;
+	 * the fake slashes; emoji; box characters; bidi and invisible
+	 * characters. */
+	B("\xc3\x85"), B("A\xcc\x8a"), B("\xe2\x84\xab"), B("\xef\xbc\xa1"),
+	B("A"), B("\xef\xbd\xb6"), B("\xe3\x82\xab"), B("\xef\xac\x81"),
+	B("fi"), B("a\xe2\x88\x95" "b"), B("a\xe2\x81\x84" "b"),
+	B("\xf0\x9f\x98\x80"),
+	B("\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9"),
+	B("\xe2\x94\x8c\xe2\x94\x80\n\xe2\x94\x82x\n\xe2\x94\x94\xe2\x94\x80"),
+	B("evil\xe2\x80\xae" "gpj.exe"), B("a\xe2\x80\x8b" "b"), B("ab"),
+	B("a\xe2\x80\x8d" "b"), B("\xef\xbb\xbf" "bom"),
+};
+#define N_FIXED (sizeof(fixed_names) / sizeof(fixed_names[0]))
+
+static struct bytes corpus[N_FIXED + 2];
+static size_t ncorpus;
+static char long255[256], long255mid[256];
+#define LONGLINK "long-target" /* the 4095-byte symlink target */
+#define LONGLINK_LEN 4095
+#define LONGLINK_LEN_SHORT 1023 /* the most xfs allows */
+#define SHORT_XATTR_NAME 40
+
+static int nfail;
+
+static void failf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void failf(const char *fmt, ...)
+{
+	va_list ap;
+
+	if (++nfail > 60)
+		return;
+	printf("FAIL ");
+	va_start(ap, fmt);
+	vprintf(fmt, ap);
+	va_end(ap);
+	printf("\n");
+}
+
+/* Hex of a byte string, in one of four rotating buffers. */
+static const char *hexs(const void *p, size_t n)
+{
+	static char bufs[4][2 * 8200 + 1];
+	static int cur;
+	char *out = bufs[cur++ % 4];
+	size_t i;
+
+	if (n > 8200)
+		n = 8200;
+	for (i = 0; i < n; i++)
+		sprintf(out + 2 * i, "%02x", ((const unsigned char *) p)[i]);
+	out[2 * n] = '\0';
+	return out;
+}
+
+static void corpus_init(void)
+{
+	size_t i;
+
+	memset(long255, 'n', 255);
+	memset(long255mid, 'm', 253);
+	long255mid[253] = '\xe2';
+	long255mid[254] = '\x82';
+	for (i = 0; i < N_FIXED; i++)
+		corpus[ncorpus++] = fixed_names[i];
+	corpus[ncorpus].p = long255;
+	corpus[ncorpus++].n = 255;
+	corpus[ncorpus].p = long255mid;
+	corpus[ncorpus++].n = 255;
+}
+
+static void bpath(char *out, size_t cap, const char *root, const char *sub,
+		  struct bytes name)
+{
+	size_t n = (size_t) snprintf(out, cap, "%s/%s", root, sub);
+
+	if (name.p != NULL) {
+		out[n++] = '/';
+		memcpy(out + n, name.p, name.n);
+		n += name.n;
+	}
+	out[n] = '\0';
+}
+
+static int cmp_bytes(const void *a, const void *b)
+{
+	const struct bytes *x = a, *y = b;
+	size_t m = x->n < y->n ? x->n : y->n;
+	int c = memcmp(x->p, y->p, m);
+
+	if (c != 0)
+		return c;
+	return x->n < y->n ? -1 : x->n > y->n;
+}
+
+/* The entries of a directory (not "." / ".."), sorted by bytes. */
+struct dlist {
+	struct bytes *e;
+	size_t n;
+	int dot, dotdot;
+	int err;
+};
+
+static void dlist_free(struct dlist *l)
+{
+	size_t i;
+
+	for (i = 0; i < l->n; i++)
+		free((void *) l->e[i].p);
+	free(l->e);
+}
+
+static struct dlist dlist_read(const char *path)
+{
+	struct dlist l = { NULL, 0, 0, 0, 0 };
+	DIR *d = opendir(path);
+	struct dirent *de;
+	size_t cap = 0;
+
+	if (d == NULL) {
+		l.err = errno;
+		return l;
+	}
+	while ((de = readdir(d)) != NULL) {
+		size_t n = strlen(de->d_name);
+
+		if (strcmp(de->d_name, ".") == 0) {
+			l.dot++;
+			continue;
+		}
+		if (strcmp(de->d_name, "..") == 0) {
+			l.dotdot++;
+			continue;
+		}
+		if (l.n == cap) {
+			cap = cap ? 2 * cap : 64;
+			l.e = realloc(l.e, cap * sizeof(*l.e));
+		}
+		l.e[l.n].p = memcpy(malloc(n + 1), de->d_name, n + 1);
+		l.e[l.n++].n = n;
+	}
+	closedir(d);
+	qsort(l.e, l.n, sizeof(*l.e), cmp_bytes);
+	return l;
+}
+
+/* The directory at path lists exactly want[0..nwant) (any order). */
+static void check_listing(const char *path, const struct bytes *want,
+			  size_t nwant)
+{
+	struct bytes *w = malloc((nwant + 1) * sizeof(*w));
+	struct dlist l = dlist_read(path);
+	size_t i;
+
+	memcpy(w, want, nwant * sizeof(*w));
+	qsort(w, nwant, sizeof(*w), cmp_bytes);
+	if (l.err) {
+		failf("opendir %s: errno %d", path, l.err);
+	} else {
+		if (l.dot != 1 || l.dotdot != 1)
+			failf("listing of %s: . x%d .. x%d", path, l.dot,
+			      l.dotdot);
+		if (l.n != nwant)
+			failf("listing of %s: %zu entries, want %zu", path,
+			      l.n, nwant);
+		for (i = 0; i < l.n && i < nwant; i++)
+			if (cmp_bytes(&l.e[i], &w[i]) != 0) {
+				failf("listing of %s: entry %zu is %s, want "
+				      "%s",
+				      path, i, hexs(l.e[i].p, l.e[i].n),
+				      hexs(w[i].p, w[i].n));
+				break;
+			}
+	}
+	dlist_free(&l);
+	free(w);
+}
+
+static size_t content_f(size_t i, char *out, size_t cap)
+{
+	return (size_t) snprintf(out, cap, "f:%zu\n", i);
+}
+
+static size_t target_for(size_t i, char *out)
+{
+	static const char *const suffix[] = { "", "/", "//x", "/./", "/.." };
+	const char *s = suffix[i % 5];
+
+	memcpy(out, corpus[i].p, corpus[i].n);
+	memcpy(out + corpus[i].n, s, strlen(s));
+	return corpus[i].n + strlen(s);
+}
+
+static void long_target(char *out)
+{
+	size_t k;
+
+	for (k = 0; k < LONGLINK_LEN; k++)
+		out[k] = (char) ((k * 7 + 1) % 255 + 1);
+}
+
+/* "user." plus the name; 255-byte names are cut so the xattr name fits in
+ * XATTR_NAME_MAX (the two cut names still differ). */
+static size_t xattr_name(size_t i, char *out)
+{
+	size_t n = corpus[i].n > 250 ? 250 : corpus[i].n;
+
+	memcpy(out, "user.", 5);
+	memcpy(out + 5, corpus[i].p, n);
+	return 5 + n;
+}
+
+static const char *xattr_file(size_t i)
+{
+	return corpus[i].n > SHORT_XATTR_NAME ? "x2" : "x1";
+}
+
+static void xattr_value(size_t i, char *out)
+{
+	out[0] = '\0';
+	out[1] = (char) i;
+	out[2] = '\xff';
+	out[3] = '\0';
+	out[4] = 'v';
+}
+
+static int write_file(const char *path, const void *data, size_t n)
+{
+	int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, 0644);
+
+	if (fd == -1)
+		return -1;
+	if (write(fd, data, n) != (ssize_t) n) {
+		close(fd);
+		return -1;
+	}
+	return close(fd);
+}
+
+static int read_file(const char *path, char *buf, size_t cap)
+{
+	int fd = open(path, O_RDONLY);
+	ssize_t n;
+
+	if (fd == -1)
+		return -1;
+	n = read(fd, buf, cap);
+	close(fd);
+	return (int) n;
+}
+
+static const char *const corpus_dirs[] = { "f", "d", "l", "h", "r", "rd" };
+
+static int cmd_names_create(const char *root)
+{
+	char path[8192], path2[8192], buf[8192], val[5], xn[300];
+	size_t i, n;
+
+	corpus_init();
+	for (i = 0; i < sizeof(corpus_dirs) / sizeof(corpus_dirs[0]); i++) {
+		snprintf(path, sizeof(path), "%s/%s", root, corpus_dirs[i]);
+		if (mkdir(path, 0755) == -1)
+			failf("mkdir %s: errno %d", path, errno);
+	}
+	for (i = 0; i < ncorpus; i++) {
+		bpath(path, sizeof(path), root, "f", corpus[i]);
+		n = content_f(i, buf, sizeof(buf));
+		if (write_file(path, buf, n) == -1)
+			failf("create file %s: errno %d",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+
+		bpath(path, sizeof(path), root, "d", corpus[i]);
+		if (mkdir(path, 0755) == -1) {
+			failf("mkdir %s: errno %d",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+		} else {
+			strcat(path, "/in");
+			if (write_file(path, "in", 2) == -1)
+				failf("create in/ of %s: errno %d",
+				      hexs(corpus[i].p, corpus[i].n), errno);
+		}
+
+		bpath(path, sizeof(path), root, "l", corpus[i]);
+		n = target_for(i, buf);
+		buf[n] = '\0';
+		if (symlink(buf, path) == -1)
+			failf("symlink %s: errno %d",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+	}
+	/* The long symlink target (4095 bytes). */
+	long_target(buf);
+	buf[LONGLINK_LEN] = '\0';
+	snprintf(path, sizeof(path), "%s/l/" LONGLINK, root);
+	{
+		int r = symlink(buf, path);
+
+		if (r == -1 && errno == ENAMETOOLONG) {
+			/* xfs keeps symlink targets under 1024 bytes. */
+			buf[LONGLINK_LEN_SHORT] = '\0';
+			r = symlink(buf, path);
+		}
+		if (r == -1)
+			failf("symlink %s: errno %d", LONGLINK, errno);
+	}
+
+	/* Hard links: h/c[i+1] is f/c[i]. */
+	for (i = 0; i < ncorpus; i++) {
+		bpath(path, sizeof(path), root, "f", corpus[i]);
+		bpath(path2, sizeof(path2), root, "h",
+		      corpus[(i + 1) % ncorpus]);
+		if (link(path, path2) == -1)
+			failf("link %s: errno %d",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+	}
+
+	/* xattrs: x1 holds the short names, x2 the long ones. */
+	snprintf(path, sizeof(path), "%s/x1", root);
+	write_file(path, "x", 1);
+	snprintf(path, sizeof(path), "%s/x2", root);
+	write_file(path, "x", 1);
+	for (i = 0; i < ncorpus; i++) {
+		size_t xl = xattr_name(i, xn);
+
+		xn[xl] = '\0';
+		snprintf(path, sizeof(path), "%s/%s", root, xattr_file(i));
+		xattr_value(i, val);
+		if (lsetxattr(path, xn, val, sizeof(val), XATTR_CREATE) == -1)
+			failf("setxattr %s: errno %d", hexs(xn, xl), errno);
+	}
+
+	/* Renames chain each name into the next: n renames, not n^2. */
+	bpath(path, sizeof(path), root, "r", corpus[0]);
+	n = content_f(0, buf, sizeof(buf));
+	if (write_file(path, buf, n) == -1)
+		failf("create r/%s: errno %d", hexs(corpus[0].p, corpus[0].n),
+		      errno);
+	bpath(path, sizeof(path), root, "rd", corpus[0]);
+	if (mkdir(path, 0755) == -1)
+		failf("mkdir rd/%s: errno %d", hexs(corpus[0].p, corpus[0].n),
+		      errno);
+	strcat(path, "/in");
+	write_file(path, "in", 2);
+	for (i = 0; i + 1 < ncorpus; i++) {
+		bpath(path, sizeof(path), root, "r", corpus[i]);
+		bpath(path2, sizeof(path2), root, "r", corpus[i + 1]);
+		if (rename(path, path2) == -1)
+			failf("rename r %s: errno %d",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+		bpath(path, sizeof(path), root, "rd", corpus[i]);
+		bpath(path2, sizeof(path2), root, "rd", corpus[i + 1]);
+		if (rename(path, path2) == -1)
+			failf("rename rd %s: errno %d",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+	}
+	if (nfail)
+		printf("names-create: %d failures\n", nfail);
+	return nfail != 0;
+}
+
+/* ---- handles ---- */
+
+union fhbuf {
+	struct file_handle h;
+	unsigned char bytes[sizeof(struct file_handle) + 128];
+};
+
+static int get_handle(const char *path, union fhbuf *fh)
+{
+	int mount_id;
+
+	memset(fh, 0, sizeof(*fh));
+	fh->h.handle_bytes = 128;
+	return name_to_handle_at(AT_FDCWD, path, &fh->h, &mount_id, 0);
+}
+
+/* kind: 'f' file, 'd' directory, 'l' symlink; i indexes the corpus. */
+static void check_handle(int mfd, char kind, size_t i, union fhbuf *fh)
+{
+	char buf[8192], want[8192];
+	int fd;
+	ssize_t n;
+
+	if (kind == 'l') {
+		fd = open_by_handle_at(mfd, &fh->h, O_PATH | O_NOFOLLOW);
+		if (fd == -1) {
+			failf("open_by_handle_at l %zu: errno %d", i, errno);
+			return;
+		}
+		n = readlinkat(fd, "", buf, sizeof(buf));
+		close(fd);
+		if (n != (ssize_t) target_for(i, want) ||
+		    memcmp(buf, want, (size_t) n) != 0)
+			failf("handle readlink of %s differs",
+			      hexs(corpus[i].p, corpus[i].n));
+	} else if (kind == 'd') {
+		fd = open_by_handle_at(mfd, &fh->h, O_RDONLY | O_DIRECTORY);
+		if (fd == -1) {
+			failf("open_by_handle_at d %zu: errno %d", i, errno);
+			return;
+		}
+		n = openat(fd, "in", O_RDONLY);
+		close(fd);
+		if (n == -1)
+			failf("handle of dir %s: no in/ (errno %d)",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+		else
+			close((int) n);
+	} else {
+		fd = open_by_handle_at(mfd, &fh->h, O_RDONLY);
+		if (fd == -1) {
+			failf("open_by_handle_at f %zu: errno %d", i, errno);
+			return;
+		}
+		n = read(fd, buf, sizeof(buf));
+		close(fd);
+		if (n != (ssize_t) content_f(i, want, sizeof(want)) ||
+		    memcmp(buf, want, (size_t) n) != 0)
+			failf("handle content of %s differs",
+			      hexs(corpus[i].p, corpus[i].n));
+	}
+}
+
+static const char *kind_dir(char kind)
+{
+	return kind == 'f' ? "f" : kind == 'd' ? "d" : "l";
+}
+
+static int cmd_names_handles_save(const char *root, const char *file)
+{
+	static const char kinds[] = "fdl";
+	char path[8192];
+	union fhbuf fh;
+	FILE *out = fopen(file, "w");
+	size_t i, k;
+
+	corpus_init();
+	if (out == NULL) {
+		printf("ERR %s\n", strerrorname_np(errno));
+		return 1;
+	}
+	for (k = 0; k < 3; k++)
+		for (i = 0; i < ncorpus; i++) {
+			bpath(path, sizeof(path), root, kind_dir(kinds[k]),
+			      corpus[i]);
+			if (get_handle(path, &fh) == -1) {
+				failf("name_to_handle_at %c %zu: errno %d",
+				      kinds[k], i, errno);
+				continue;
+			}
+			fprintf(out, "%c %zu %d %s\n", kinds[k], i,
+				fh.h.handle_type,
+				hexs(fh.h.f_handle, fh.h.handle_bytes));
+		}
+	fclose(out);
+	return nfail != 0;
+}
+
+static int cmd_names_handles_open(const char *root, const char *file)
+{
+	char line[1024], hex[512];
+	FILE *in = fopen(file, "r");
+	int mfd = open(root, O_RDONLY | O_DIRECTORY);
+	char kind;
+	size_t i;
+	int type;
+
+	corpus_init();
+	if (in == NULL || mfd == -1) {
+		printf("ERR %s\n", strerrorname_np(errno));
+		return 1;
+	}
+	while (fgets(line, sizeof(line), in) != NULL) {
+		union fhbuf fh;
+		size_t j;
+
+		if (sscanf(line, "%c %zu %d %511s", &kind, &i, &type, hex) !=
+		    4) {
+			failf("bad handle line");
+			continue;
+		}
+		memset(&fh, 0, sizeof(fh));
+		fh.h.handle_type = type;
+		fh.h.handle_bytes = (unsigned) strlen(hex) / 2;
+		for (j = 0; j < fh.h.handle_bytes; j++) {
+			unsigned int v;
+
+			sscanf(hex + 2 * j, "%2x", &v);
+			fh.h.f_handle[j] = (unsigned char) v;
+		}
+		check_handle(mfd, kind, i, &fh);
+	}
+	fclose(in);
+	close(mfd);
+	return nfail != 0;
+}
+
+/* ---- verify ---- */
+
+static void sorted_xattr_names(const char *path, struct bytes **out,
+			       size_t *nout, char **mem)
+{
+	char *list = malloc(70000);
+	ssize_t n = llistxattr(path, list, 70000);
+	size_t cnt = 0, off;
+
+	*out = NULL;
+	*nout = 0;
+	*mem = list;
+	if (n < 0) {
+		failf("llistxattr %s: errno %d", path, errno);
+		return;
+	}
+	for (off = 0; off < (size_t) n; off += strlen(list + off) + 1)
+		cnt++;
+	*out = malloc((cnt + 1) * sizeof(**out));
+	for (off = 0; off < (size_t) n; off += strlen(list + off) + 1) {
+		(*out)[*nout].p = list + off;
+		(*out)[(*nout)++].n = strlen(list + off);
+	}
+	qsort(*out, *nout, sizeof(**out), cmp_bytes);
+}
+
+static void verify_xattrs(const char *root, const char *file, int longs)
+{
+	char path[8192], xn[300], val[5], got[16], *mem;
+	struct bytes *want = malloc(ncorpus * sizeof(*want)), *have;
+	char (*names)[300] = malloc(ncorpus * 300);
+	size_t i, nwant = 0, nhave;
+
+	snprintf(path, sizeof(path), "%s/%s", root, file);
+	for (i = 0; i < ncorpus; i++) {
+		size_t xl;
+		ssize_t n;
+
+		if ((corpus[i].n > SHORT_XATTR_NAME) != longs)
+			continue;
+		xl = xattr_name(i, xn);
+		xn[xl] = '\0';
+		memcpy(names[nwant], xn, xl + 1);
+		want[nwant].p = names[nwant];
+		want[nwant++].n = xl;
+		xattr_value(i, val);
+		n = lgetxattr(path, xn, got, sizeof(got));
+		if (n != (ssize_t) sizeof(val) || memcmp(got, val, 5) != 0)
+			failf("getxattr %s: %zd (errno %d)", hexs(xn, xl), n,
+			      errno);
+	}
+	qsort(want, nwant, sizeof(*want), cmp_bytes);
+	sorted_xattr_names(path, &have, &nhave, &mem);
+	if (nhave != nwant)
+		failf("listxattr %s: %zu names, want %zu", file, nhave, nwant);
+	for (i = 0; i < nhave && i < nwant; i++)
+		if (cmp_bytes(&have[i], &want[i]) != 0) {
+			failf("listxattr %s: name %zu is %s, want %s", file, i,
+			      hexs(have[i].p, have[i].n),
+			      hexs(want[i].p, want[i].n));
+			break;
+		}
+	free(have);
+	free(mem);
+	free(want);
+	free(names);
+}
+
+static int cmd_names_verify(const char *root, int with_handles)
+{
+	char path[8192], path2[8192], buf[8192], want[8192];
+	struct bytes *all = malloc((ncorpus + 2) * sizeof(*all));
+	struct stat st, st2;
+	size_t i, n;
+	int mfd;
+	union fhbuf fh;
+
+	corpus_init();
+	all = realloc(all, (ncorpus + 2) * sizeof(*all));
+	memcpy(all, corpus, ncorpus * sizeof(*all));
+	mfd = open(root, O_RDONLY | O_DIRECTORY);
+
+	snprintf(path, sizeof(path), "%s/f", root);
+	check_listing(path, all, ncorpus);
+	snprintf(path, sizeof(path), "%s/d", root);
+	check_listing(path, all, ncorpus);
+	snprintf(path, sizeof(path), "%s/h", root);
+	check_listing(path, all, ncorpus);
+	snprintf(path, sizeof(path), "%s/r", root);
+	check_listing(path, &corpus[ncorpus - 1], 1);
+	snprintf(path, sizeof(path), "%s/rd", root);
+	check_listing(path, &corpus[ncorpus - 1], 1);
+	all[ncorpus].p = LONGLINK;
+	all[ncorpus].n = strlen(LONGLINK);
+	snprintf(path, sizeof(path), "%s/l", root);
+	check_listing(path, all, ncorpus + 1);
+
+	for (i = 0; i < ncorpus; i++) {
+		const char *h = hexs(corpus[i].p, corpus[i].n);
+
+		/* regular file */
+		bpath(path, sizeof(path), root, "f", corpus[i]);
+		n = content_f(i, want, sizeof(want));
+		if (lstat(path, &st) == -1 || !S_ISREG(st.st_mode) ||
+		    st.st_size != (off_t) n || st.st_nlink != 2)
+			failf("lstat f/%s: errno %d mode %o size %lld nlink "
+			      "%lu",
+			      h, errno, st.st_mode, (long long) st.st_size,
+			      (unsigned long) st.st_nlink);
+		if (read_file(path, buf, sizeof(buf)) != (int) n ||
+		    memcmp(buf, want, n) != 0)
+			failf("content of f/%s differs", h);
+		if (with_handles) {
+			if (get_handle(path, &fh) == -1)
+				failf("name_to_handle_at f/%s: errno %d", h,
+				      errno);
+			else
+				check_handle(mfd, 'f', i, &fh);
+		}
+
+		/* directory */
+		bpath(path, sizeof(path), root, "d", corpus[i]);
+		if (lstat(path, &st) == -1 || !S_ISDIR(st.st_mode))
+			failf("lstat d/%s: errno %d", h, errno);
+		{
+			struct bytes in = B("in");
+
+			check_listing(path, &in, 1);
+		}
+		if (with_handles) {
+			if (get_handle(path, &fh) == -1)
+				failf("name_to_handle_at d/%s: errno %d", h,
+				      errno);
+			else
+				check_handle(mfd, 'd', i, &fh);
+		}
+
+		/* symlink */
+		bpath(path, sizeof(path), root, "l", corpus[i]);
+		n = target_for(i, want);
+		{
+			ssize_t r = readlink(path, buf, sizeof(buf));
+
+			if (r != (ssize_t) n || memcmp(buf, want, n) != 0)
+				failf("readlink l/%s: %zd (errno %d)", h, r,
+				      errno);
+		}
+		if (lstat(path, &st) == -1 || !S_ISLNK(st.st_mode) ||
+		    st.st_size != (off_t) n)
+			failf("lstat l/%s: errno %d size %lld", h, errno,
+			      (long long) st.st_size);
+		if (with_handles) {
+			if (get_handle(path, &fh) == -1)
+				failf("name_to_handle_at l/%s: errno %d", h,
+				      errno);
+			else
+				check_handle(mfd, 'l', i, &fh);
+		}
+
+		/* hard link: h/c[i+1] is f/c[i] */
+		bpath(path, sizeof(path), root, "f", corpus[i]);
+		bpath(path2, sizeof(path2), root, "h",
+		      corpus[(i + 1) % ncorpus]);
+		if (lstat(path, &st) == -1 || lstat(path2, &st2) == -1 ||
+		    st.st_ino != st2.st_ino || st.st_dev != st2.st_dev)
+			failf("hard link of f/%s is not the same object", h);
+	}
+	{
+		ssize_t r;
+
+		long_target(want);
+		snprintf(path, sizeof(path), "%s/l/" LONGLINK, root);
+		r = readlink(path, buf, sizeof(buf));
+		if ((r != LONGLINK_LEN && r != LONGLINK_LEN_SHORT) ||
+		    memcmp(buf, want, (size_t) r) != 0)
+			failf("readlink of the long target: %zd", r);
+	}
+	verify_xattrs(root, "x1", 0);
+	verify_xattrs(root, "x2", 1);
+
+	/* The rename chain ended on the last name, with its content. */
+	bpath(path, sizeof(path), root, "r", corpus[ncorpus - 1]);
+	n = content_f(0, want, sizeof(want));
+	if (read_file(path, buf, sizeof(buf)) != (int) n ||
+	    memcmp(buf, want, n) != 0)
+		failf("content after the rename chain differs");
+	bpath(path, sizeof(path), root, "rd", corpus[ncorpus - 1]);
+	strcat(path, "/in");
+	if (read_file(path, buf, sizeof(buf)) != 2)
+		failf("rd/<last>/in missing after the rename chain");
+
+	free(all);
+	close(mfd);
+	if (nfail)
+		printf("names-verify: %d failures\n", nfail);
+	return nfail != 0;
+}
+
+static int cmd_names_remove(const char *root)
+{
+	char path[8192];
+	size_t i, k;
+	static const char *const files[] = { "f", "h", "l" };
+
+	corpus_init();
+	for (k = 0; k < 3; k++)
+		for (i = 0; i < ncorpus; i++) {
+			bpath(path, sizeof(path), root, files[k], corpus[i]);
+			if (unlink(path) == -1)
+				failf("unlink %s/%s: errno %d", files[k],
+				      hexs(corpus[i].p, corpus[i].n), errno);
+		}
+	snprintf(path, sizeof(path), "%s/l/" LONGLINK, root);
+	if (unlink(path) == -1)
+		failf("unlink long link: errno %d", errno);
+	for (i = 0; i < ncorpus; i++) {
+		bpath(path, sizeof(path), root, "d", corpus[i]);
+		strcat(path, "/in");
+		if (unlink(path) == -1)
+			failf("unlink d/%s/in: errno %d",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+		path[strlen(path) - 3] = '\0';
+		if (rmdir(path) == -1)
+			failf("rmdir d/%s: errno %d",
+			      hexs(corpus[i].p, corpus[i].n), errno);
+	}
+	bpath(path, sizeof(path), root, "r", corpus[ncorpus - 1]);
+	if (unlink(path) == -1)
+		failf("unlink r/last: errno %d", errno);
+	bpath(path, sizeof(path), root, "rd", corpus[ncorpus - 1]);
+	strcat(path, "/in");
+	if (unlink(path) == -1)
+		failf("unlink rd/last/in: errno %d", errno);
+	path[strlen(path) - 3] = '\0';
+	if (rmdir(path) == -1)
+		failf("rmdir rd/last: errno %d", errno);
+	snprintf(path, sizeof(path), "%s/x1", root);
+	unlink(path);
+	snprintf(path, sizeof(path), "%s/x2", root);
+	unlink(path);
+	for (i = 0; i < sizeof(corpus_dirs) / sizeof(corpus_dirs[0]); i++) {
+		snprintf(path, sizeof(path), "%s/%s", root, corpus_dirs[i]);
+		if (rmdir(path) == -1)
+			failf("rmdir %s: errno %d", corpus_dirs[i], errno);
+	}
+	if (nfail)
+		printf("names-remove: %d failures\n", nfail);
+	return nfail != 0;
+}
+
+/* ---- dump ---- */
+
+static void dump_tree(const char *path, const char *hexpath, int meta)
+{
+	struct dlist l = dlist_read(path);
+	size_t i;
+
+	if (l.err) {
+		printf("%s ERR %d\n", hexpath, l.err);
+		return;
+	}
+	for (i = 0; i < l.n; i++) {
+		char child[8192], hexchild[16400], buf[70000];
+		struct stat st;
+		const char *type = "?";
+		size_t pl = strlen(path);
+
+		memcpy(child, path, pl);
+		child[pl] = '/';
+		memcpy(child + pl + 1, l.e[i].p, l.e[i].n + 1);
+		snprintf(hexchild, sizeof(hexchild), "%s/%s", hexpath,
+			 hexs(l.e[i].p, l.e[i].n));
+		if (lstat(child, &st) == -1) {
+			printf("%s LSTAT-ERR %d\n", hexchild, errno);
+			continue;
+		}
+		type = S_ISDIR(st.st_mode)   ? "dir"
+		       : S_ISREG(st.st_mode) ? "reg"
+		       : S_ISLNK(st.st_mode) ? "lnk"
+					     : "other";
+		printf("%s %s %o %lu %u %u %lld", hexchild, type,
+		       st.st_mode & 07777, (unsigned long) st.st_nlink,
+		       st.st_uid, st.st_gid,
+		       S_ISDIR(st.st_mode) ? 0LL : (long long) st.st_size);
+		if (S_ISLNK(st.st_mode)) {
+			ssize_t r = readlink(child, buf, sizeof(buf));
+
+			printf(" target=%s", r < 0 ? "ERR" : hexs(buf, (size_t) r));
+		}
+		{
+			struct bytes *xs;
+			char *mem;
+			size_t nx, k;
+
+			sorted_xattr_names(child, &xs, &nx, &mem);
+			for (k = 0; k < nx; k++) {
+				char name[300], val[70000];
+				ssize_t vn;
+
+				memcpy(name, xs[k].p, xs[k].n);
+				name[xs[k].n] = '\0';
+				vn = lgetxattr(child, name, val, sizeof(val));
+				printf(" x:%s=%s", hexs(name, xs[k].n),
+				       vn < 0 ? "ERR" : hexs(val, (size_t) vn));
+			}
+			free(xs);
+			free(mem);
+		}
+		if (S_ISREG(st.st_mode) && !meta) {
+			int n = read_file(child, buf, 1024);
+
+			printf(" data=%s", n < 0 ? "ERR" : hexs(buf, (size_t) n));
+		}
+		printf("\n");
+		if (S_ISDIR(st.st_mode))
+			dump_tree(child, hexchild, meta);
+	}
+	dlist_free(&l);
+}
+
+static int cmd_names_dump(const char *root, int meta)
+{
+	dump_tree(root, "", meta);
+	return 0;
+}
+
+/* ---- errors on special names ---- */
+
+static void errline(const char *op, int r)
+{
+	printf("%s %s\n", op, r == -1 ? strerrorname_np(errno) : "OK");
+}
+
+static int cmd_names_errs(const char *root)
+{
+	char p[8192], q[8192], n256[257], x256[300];
+	int fd, r;
+
+	if (chdir(root) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	memset(n256, 'z', 256);
+	n256[256] = '\0';
+	errline("mkdir .", mkdir(".", 0755));
+	errline("mkdir ..", mkdir("..", 0755));
+	errline("mkdir ...", mkdir("...", 0755));
+	errline("rmdir ...", rmdir("..."));
+	fd = open(".", O_WRONLY | O_CREAT, 0644);
+	errline("creat .", fd);
+	fd = open("..", O_WRONLY | O_CREAT, 0644);
+	errline("creat ..", fd);
+	errline("symlink .", symlink("t", "."));
+	errline("symlink ..", symlink("t", ".."));
+	errline("rmdir .", rmdir("."));
+	errline("rmdir ..", rmdir(".."));
+	errline("unlink .", unlink("."));
+	errline("unlink ..", unlink(".."));
+	write_file("s", "s", 1);
+	errline("rename s .", rename("s", "."));
+	errline("rename s ..", rename("s", ".."));
+	errline("link s .", link("s", "."));
+	errline("link s ..", link("s", ".."));
+	errline("mkdir 256", mkdir(n256, 0755));
+	fd = open(n256, O_WRONLY | O_CREAT, 0644);
+	errline("creat 256", fd);
+	{
+		struct stat st;
+
+		errline("lstat 256", lstat(n256, &st));
+	}
+	errline("symlink 256", symlink("t", n256));
+	errline("rename s 256", rename("s", n256));
+	errline("link s 256", link("s", n256));
+	memcpy(x256, "user.", 5);
+	memset(x256 + 5, 'y', 251);
+	x256[256] = '\0';
+	errline("setxattr 256", lsetxattr("s", x256, "v", 1, 0));
+	errline("setxattr empty", lsetxattr("s", "", "v", 1, 0));
+	errline("setxattr user.", lsetxattr("s", "user.", "v", 1, 0));
+	snprintf(p, sizeof(p), "s/x");
+	snprintf(q, sizeof(q), "s");
+	{
+		struct stat st;
+
+		errline("lstat s/x", lstat(p, &st));
+	}
+	r = unlink("s");
+	errline("unlink s", r);
+	return 0;
+}
+
+/* ---- directory chain deeper than PATH_MAX ---- */
+
+#define CHAIN_DEPTH 24
+#define CHAIN_NAME 200
+
+static void chain_name(int k, char *out)
+{
+	memset(out, 'c', CHAIN_NAME);
+	out[0] = (char) ('A' + k);
+	out[CHAIN_NAME] = '\0';
+}
+
+static int cmd_names_chain_create(const char *root)
+{
+	char name[CHAIN_NAME + 1];
+	int fd = open(root, O_RDONLY | O_DIRECTORY), k;
+
+	for (k = 0; k < CHAIN_DEPTH; k++) {
+		int nfd;
+
+		chain_name(k, name);
+		if (mkdirat(fd, name, 0755) == -1) {
+			failf("mkdirat depth %d: errno %d", k, errno);
+			return 1;
+		}
+		nfd = openat(fd, name, O_RDONLY | O_DIRECTORY);
+		close(fd);
+		if (nfd == -1) {
+			failf("openat depth %d: errno %d", k, errno);
+			return 1;
+		}
+		fd = nfd;
+	}
+	{
+		int lf = openat(fd, "leaf", O_WRONLY | O_CREAT | O_EXCL, 0644);
+
+		if (lf == -1 || write(lf, "deep\n", 5) != 5)
+			failf("create leaf: errno %d", errno);
+		if (lf != -1)
+			close(lf);
+	}
+	close(fd);
+	return nfail != 0;
+}
+
+static int cmd_names_chain_check(const char *root)
+{
+	char name[CHAIN_NAME + 1], buf[16];
+	int mfd = open(root, O_RDONLY | O_DIRECTORY);
+	int fd = open(root, O_RDONLY | O_DIRECTORY), k;
+	union fhbuf fh;
+	int mount_id, lf;
+	ssize_t n;
+
+	for (k = 0; k < CHAIN_DEPTH; k++) {
+		int nfd;
+
+		chain_name(k, name);
+		nfd = openat(fd, name, O_RDONLY | O_DIRECTORY);
+		close(fd);
+		if (nfd == -1) {
+			failf("lookup depth %d: errno %d", k, errno);
+			return 1;
+		}
+		fd = nfd;
+	}
+	lf = openat(fd, "leaf", O_RDONLY);
+	n = lf == -1 ? -1 : read(lf, buf, sizeof(buf));
+	if (n != 5 || memcmp(buf, "deep\n", 5) != 0)
+		failf("leaf read: %zd (errno %d)", n, errno);
+	if (lf != -1)
+		close(lf);
+	memset(&fh, 0, sizeof(fh));
+	fh.h.handle_bytes = 128;
+	if (name_to_handle_at(fd, "leaf", &fh.h, &mount_id, 0) == -1) {
+		failf("name_to_handle_at leaf: errno %d", errno);
+	} else {
+		lf = open_by_handle_at(mfd, &fh.h, O_RDONLY);
+		n = lf == -1 ? -1 : read(lf, buf, sizeof(buf));
+		if (n != 5 || memcmp(buf, "deep\n", 5) != 0)
+			failf("leaf by handle: %zd (errno %d)", n, errno);
+		if (lf != -1)
+			close(lf);
+	}
+	close(fd);
+	close(mfd);
+	return nfail != 0;
+}
+
+/* ---- seeded random names ---- */
+
+static uint64_t rng_state;
+
+static uint64_t rng(void)
+{
+	uint64_t z = (rng_state += 0x9e3779b97f4a7c15ULL);
+
+	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+	z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+	return z ^ (z >> 31);
+}
+
+static int cmd_names_random(const char *root, const char *seed_str,
+			    const char *count_str)
+{
+	uint64_t count = strtoull(count_str, NULL, 10), idx;
+
+	rng_state = strtoull(seed_str, NULL, 10);
+	if (chdir(root) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	for (idx = 0; idx < count; idx++) {
+		char name[256], xn[300];
+		size_t len, k;
+		int fd;
+
+		len = (rng() & 1) ? 1 + rng() % 255 : 1 + rng() % 12;
+		for (k = 0; k < len; k++) {
+			do
+				name[k] = (char) (rng() & 0xff);
+			while (name[k] == '\0' || name[k] == '/');
+		}
+		name[len] = '\0';
+		if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+			continue;
+		switch (idx % 8) {
+		case 0:
+			if (mkdir(name, 0755) == -1 && errno != EEXIST)
+				failf("mkdir %s: errno %d", hexs(name, len),
+				      errno);
+			break;
+		case 1:
+			if (symlink(name, name) == -1 && errno != EEXIST)
+				failf("symlink %s: errno %d", hexs(name, len),
+				      errno);
+			break;
+		default:
+			fd = open(name, O_WRONLY | O_CREAT | O_EXCL, 0644);
+			if (fd == -1) {
+				if (errno != EEXIST)
+					failf("create %s: errno %d",
+					      hexs(name, len), errno);
+				break;
+			}
+			if (write(fd, name, len) != (ssize_t) len)
+				failf("write %s", hexs(name, len));
+			close(fd);
+			if (idx % 5 == 0) {
+				size_t xl = len > 200 ? 200 : len;
+
+				memcpy(xn, "user.", 5);
+				memcpy(xn + 5, name, xl);
+				xn[5 + xl] = '\0';
+				if (lsetxattr(name, xn, name, len, 0) == -1)
+					failf("setxattr %s: errno %d",
+					      hexs(xn, 5 + xl), errno);
+			}
+		}
+	}
+	return nfail != 0;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc == 4 && strcmp(argv[1], "truncate") == 0)
@@ -726,6 +1835,27 @@ int main(int argc, char *argv[])
 	if (argc == 3 && strcmp(argv[1], "btrfs-subvol-create") == 0)
 		return cmd_btrfs_subvol_create(argv[2]);
 
+	if (argc == 3 && strcmp(argv[1], "names-create") == 0)
+		return cmd_names_create(argv[2]);
+	if (argc >= 3 && argc <= 4 && strcmp(argv[1], "names-verify") == 0)
+		return cmd_names_verify(argv[2], argc == 4);
+	if (argc == 4 && strcmp(argv[1], "names-handles-save") == 0)
+		return cmd_names_handles_save(argv[2], argv[3]);
+	if (argc == 4 && strcmp(argv[1], "names-handles-open") == 0)
+		return cmd_names_handles_open(argv[2], argv[3]);
+	if (argc == 3 && strcmp(argv[1], "names-remove") == 0)
+		return cmd_names_remove(argv[2]);
+	if (argc >= 3 && argc <= 4 && strcmp(argv[1], "names-dump") == 0)
+		return cmd_names_dump(argv[2], argc == 4);
+	if (argc == 3 && strcmp(argv[1], "names-errs") == 0)
+		return cmd_names_errs(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "names-chain-create") == 0)
+		return cmd_names_chain_create(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "names-chain-check") == 0)
+		return cmd_names_chain_check(argv[2]);
+	if (argc == 5 && strcmp(argv[1], "names-random") == 0)
+		return cmd_names_random(argv[2], argv[3], argv[4]);
+
 	fprintf(stderr,
 		"usage: testutil truncate <path> <size>\n"
 		"       testutil utimens <path> <sec> <nsec>\n"
@@ -747,6 +1877,9 @@ int main(int argc, char *argv[])
 		"       testutil opath-unlink-stat <path>\n"
 		"       testutil rmcwd <dir>\n"
 		"       testutil readdir-ino <dir> [small-first]\n"
-		"       testutil btrfs-subvol-create <path>\n");
+		"       testutil btrfs-subvol-create <path>\n"
+		"       testutil names-{create,verify,remove,dump,errs,chain-create,chain-check} <root>\n"
+		"       testutil names-handles-{save,open} <root> <file>\n"
+		"       testutil names-random <root> <seed> <count>\n");
 	return 2;
 }
