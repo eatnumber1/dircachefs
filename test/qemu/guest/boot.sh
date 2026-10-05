@@ -48,6 +48,17 @@ case "$KVER" in
 	;;
 esac
 
+# Step 4.4: busybox is now //third_party/busybox:busybox_build (pinned
+# 1.38.0, built by Bazel), not a host binary symlinked in by the removed
+# test/qemu/kernel.bzl repo rule. `busybox` with no arguments prints its
+# own version banner as its first line; a host-installed busybox (Debian's
+# is 1.36.1 as of this writing) would fail this check.
+BBVER=$(busybox | head -n 1)
+case "$BBVER" in
+*"v1.38.0"*) pass busybox-version ;;
+*) fail busybox-version "expected busybox v1.38.0, got: $BBVER" ;;
+esac
+
 if [ -x /bin/dcfs ]; then
 	pass dcfs-present
 else

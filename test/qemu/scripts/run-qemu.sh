@@ -2,15 +2,20 @@
 # Adapted from fuse-generation-qemu; that repo stays the LKML patch's test
 # suite.
 #
-# Boot the dcfs QEMU guest and report the verdict. Two modes:
+# Boot the dcfs QEMU guest and report the verdict. --qemu and --qboot are
+# mandatory in both modes (step 4.4): the Bazel-built
+# //third_party/qemu:qemu_system_x86_64 and @qemu//:pc-bios/qboot.rom
+# targets, passed as $(location ...) by qemu_test.bzl/qemu_cc_test.bzl --
+# never a host PATH lookup or a default path. Two modes:
 #
-#   run-qemu.sh --unit <bzImage> <initramfs.cpio.gz> [disk-spec...]
+#   run-qemu.sh --unit --qemu <qemu-system-x86_64> --qboot <qboot.rom> \
+#       <bzImage> <initramfs.cpio.gz> [disk-spec...]
 #       For qemu_cc_test (test/qemu/qemu_cc_test.bzl): boots the guest,
 #       which runs /test/run (guest/init's unit-test branch) and prints
 #       DCFS-TEST-EXIT=<rc>. Exit 0 iff that line says rc=0.
 #
-#   run-qemu.sh <bzImage> <initramfs.cpio.gz> <dcfs_test-basename> \
-#       [disk-spec...]
+#   run-qemu.sh --qemu <qemu-system-x86_64> --qboot <qboot.rom> \
+#       <bzImage> <initramfs.cpio.gz> <dcfs_test-basename> [disk-spec...]
 #       For qemu_test (test/qemu/qemu_test.bzl): boots the guest, which
 #       runs /tests/<dcfs_test-basename> (guest/init's e2e branch) and
 #       prints ALL-TESTS-PASSED or TEST-FAILED. Exit 0 iff the former.
@@ -63,7 +68,13 @@ set -eu
 # where mkfs.* live.
 export PATH="$PATH:/usr/sbin:/sbin"
 
-QBOOT="${DCFS_QBOOT:-/usr/share/qemu/qboot.rom}"
+# Step 4.4: the QEMU binary and qboot ROM are Bazel-built targets
+# (//third_party/qemu:qemu_system_x86_64, @qemu//:pc-bios/qboot.rom) passed
+# in explicitly as --qemu/--qboot by qemu_test.bzl/qemu_cc_test.bzl -- no
+# host PATH lookup, no DCFS_QBOOT-style override, no default. See
+# test/qemu/README.md.
+QEMU_BIN=""
+QBOOT=""
 
 UNIT=0
 ROOTFS=""
@@ -77,11 +88,25 @@ while :; do
 		ROOTFS=$2
 		shift 2
 		;;
+	--qemu)
+		QEMU_BIN=$2
+		shift 2
+		;;
+	--qboot)
+		QBOOT=$2
+		shift 2
+		;;
 	*)
 		break
 		;;
 	esac
 done
+
+if [ -z "$QEMU_BIN" ] || [ -z "$QBOOT" ]; then
+	echo "run-qemu.sh: --qemu <qemu-system-x86_64> and --qboot <qboot.rom> are required" >&2
+	echo "(they must be the Bazel-built //third_party/qemu targets, not a host lookup)" >&2
+	exit 1
+fi
 
 KERNEL=$1
 INITRD=$2
@@ -218,10 +243,31 @@ if [ "$UNIT" -eq 0 ]; then
 fi
 append="$append$rootfs_append"
 
+# Record exactly which binaries this run used, for anyone auditing a
+# serial log (and for the harness check below): a Bazel-built path looks
+# like ".../bazel-out/k8-fastbuild/bin/third_party/qemu/..." or an
+# external-repo path under ".../external/qemu+/...", never "/usr/...".
+echo "run-qemu.sh: qemu binary: $QEMU_BIN ($("$QEMU_BIN" --version 2>&1 | head -1))" >>"$LOG"
+echo "run-qemu.sh: qboot rom: $QBOOT" >>"$LOG"
+case "$QEMU_BIN" in
+/usr/*| /bin/*)
+	echo "run-qemu.sh: ERROR: qemu binary '$QEMU_BIN' looks like a host path," \
+		"not a Bazel-built target" >&2
+	exit 1
+	;;
+esac
+case "$QBOOT" in
+/usr/*| /bin/*)
+	echo "run-qemu.sh: ERROR: qboot rom '$QBOOT' looks like a host path," \
+		"not the Bazel-built @qemu//:pc-bios/qboot.rom target" >&2
+	exit 1
+	;;
+esac
+
 start=$(date +%s.%N)
 echo "run-qemu.sh: qemu start $start" >>"$LOG"
 # shellcheck disable=SC2086 # drive_args is a deliberately unquoted list of flags
-timeout "$TIMEOUT_SECS" qemu-system-x86_64 \
+timeout "$TIMEOUT_SECS" "$QEMU_BIN" \
 	-M microvm,x-option-roms=off,pit=off,pic=off,rtc=on,isa-serial=on,acpi=off \
 	-bios "$QBOOT" \
 	-nodefaults -no-user-config -nographic -no-reboot \

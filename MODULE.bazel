@@ -17,13 +17,6 @@ bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
 bazel_dep(name = "glib", version = "2.82.2.bcr.11")
 bazel_dep(name = "zlib", version = "1.3.2.bcr.2")
 
-# Exposes the out-of-tree QEMU test kernel (test/qemu/scripts/build-kernel.sh)
-# and host busybox to the test/qemu:boot_test-style targets. See
-# test/qemu/kernel.bzl.
-kernel_image = use_repo_rule("//test/qemu:kernel.bzl", "kernel_image")
-
-kernel_image(name = "kernel_image")
-
 # pjdfstest (step 4.5): github.com/pjd/pjdfstest, pinned to the current
 # master commit as of 2026-09-27. See third_party/pjdfstest/BUILD.pjdfstest
 # for how it's built (no autoconf; config.h is hand-written for Linux/

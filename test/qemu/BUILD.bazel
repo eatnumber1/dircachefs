@@ -1,4 +1,3 @@
-load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
@@ -8,33 +7,6 @@ exports_files([
     "scripts/mkinitramfs.sh",
     "scripts/run-qemu.sh",
 ])
-
-# Step 3.1a/3.2: which kernel qemu_test/qemu_test_matrix/qemu_cc_test boot.
-# "stock" (the default since Phase 3b dropped the kernel patch) is
-# //third_party/linux:bzImage, the pinned upstream kernel Bazel fetches and
-# builds (see third_party/linux/README.md). "patched" is
-# @kernel_image//:bzImage, the out-of-tree, not-Bazel-tracked build of
-# test/qemu/scripts/build-kernel.sh's patched kernel; it is deprecated
-# (Phase 4 removes it and build-kernel.sh) but still selectable with
-# `--//test/qemu:kernel=patched` for comparison until then.
-string_flag(
-    name = "kernel",
-    build_setting_default = "stock",
-    values = [
-        "patched",
-        "stock",
-    ],
-)
-
-config_setting(
-    name = "kernel_stock",
-    flag_values = {":kernel": "stock"},
-)
-
-config_setting(
-    name = "kernel_patched",
-    flag_values = {":kernel": "patched"},
-)
 
 # Set by --define=dcfs_sanitizer=asan/ubsan (see .bazelrc's build:asan /
 # build:ubsan). qemu_cc_test uses these to skip the fully_static_link
@@ -66,12 +38,12 @@ genrule(
         "//tools:testutil",
         "@pjdfstest//:pjdfstest",
         "@pjdfstest//:tests",
-        "@kernel_image//:busybox",
+        "//third_party/busybox:busybox_build",
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]),
     outs = ["initramfs.cpio.gz"],
     cmd = "$(location scripts/mkinitramfs.sh) $@ " +
-          "$(location @kernel_image//:busybox) " +
+          "$(location //third_party/busybox:busybox_build) " +
           "$(location //dcfs:main_static) " +
           "$(location //tools:fhtest) " +
           "$(location //tools:testutil) " +

@@ -3,11 +3,11 @@ QEMU guest, root, on the project's own kernel.
 
 PROJECT DECISION: dcfs requires root (real open_by_handle_at,
 FS_IOC_GETFSUUID, etc.), so there is no host-side test execution -- every
-test, including plain unit tests, boots a minimal kernel under QEMU (the
-pinned, Bazel-built //third_party/linux:bzImage by default; see
---//test/qemu:kernel and test/qemu/README.md for the boot-time budget this
-depends on) and runs as root inside it. This is the replacement for a
-plain cc_test.
+test, including plain unit tests, boots a minimal kernel
+(//third_party/linux:bzImage) under the pinned, Bazel-built QEMU
+(//third_party/qemu:qemu_system_x86_64, step 4.4; see test/qemu/README.md
+for the boot-time budget this depends on) and runs as root inside it. This
+is the replacement for a plain cc_test.
 
 Builds:
   - `<name>_bin`: a testonly cc_binary from `srcs`/`deps`, statically
@@ -104,7 +104,7 @@ def qemu_cc_test(
         name = name + "_initramfs",
         testonly = 1,
         srcs = [
-            "@kernel_image//:busybox",
+            "//third_party/busybox:busybox_build",
             "//test/qemu:guest/init",
             ":" + bin_name,
         ] + data,
@@ -113,7 +113,7 @@ def qemu_cc_test(
             "$(location //test/qemu:scripts/mkinitramfs.sh)",
             "--unit",
             "$@",
-            "$(location @kernel_image//:busybox)",
+            "$(location //third_party/busybox:busybox_build)",
             "$(location //test/qemu:guest/init)",
             "$(location :" + bin_name + ")",
             disk0,
@@ -124,27 +124,32 @@ def qemu_cc_test(
 
     disk_args = [d[0] + ":" + d[1] + ":" + d[2] for d in disks]
 
-    # Step 3.1a/3.2: --//test/qemu:kernel selects which kernel this test
-    # boots (see test/qemu/BUILD.bazel's :kernel string_flag/:kernel_stock/
-    # :kernel_patched config_settings); stock is the default.
-    kernel_data = select({
-        "//test/qemu:kernel_patched": ["@kernel_image//:bzImage"],
-        "//conditions:default": ["//third_party/linux:bzImage"],
-    })
-    kernel_args = select({
-        "//test/qemu:kernel_patched": ["$(location @kernel_image//:bzImage)"],
-        "//conditions:default": ["$(location //third_party/linux:bzImage)"],
-    })
+    # Step 3.2 dropped the FUSE_ATTR_GENERATION kernel patch; step 4.4
+    # removed the deprecated out-of-tree "patched" kernel entirely (and
+    # with it the //test/qemu:kernel string_flag) -- every test now boots
+    # the pinned, Bazel-built //third_party/linux:bzImage unconditionally.
+    kernel_data = ["//third_party/linux:bzImage"]
+    kernel_args = ["$(location //third_party/linux:bzImage)"]
+
+    # Step 4.4: the Bazel-built QEMU and qboot ROM, passed explicitly --
+    # run-qemu.sh does no host lookup of its own.
+    qemu_data = ["//third_party/qemu:qemu_system_x86_64", "@qemu//:pc-bios/qboot.rom"]
+    qemu_args = [
+        "--qemu",
+        "$(location //third_party/qemu:qemu_system_x86_64)",
+        "--qboot",
+        "$(location @qemu//:pc-bios/qboot.rom)",
+    ]
 
     sh_test(
         name = name,
         srcs = ["//test/qemu:scripts/run-qemu.sh"],
-        data = kernel_data + [
+        data = kernel_data + qemu_data + [
             ":" + initramfs_out,
         ],
         args = [
             "--unit",
-        ] + kernel_args + [
+        ] + qemu_args + kernel_args + [
             "$(location :" + initramfs_out + ")",
         ] + disk_args,
         tags = ["no-sandbox", "requires-kvm"] + tags,

@@ -1,9 +1,9 @@
 """qemu_test(name, guest_script, disks): a dcfs QEMU end-to-end test.
 
 Boots the shared dcfs QEMU initramfs (:initramfs) and test kernel
-(//third_party/linux:bzImage by default; see --//test/qemu:kernel) under
-QEMU, telling guest/init (via the dcfs_test= kernel command-line
-parameter) to run the given guest_script,
+(//third_party/linux:bzImage) under the pinned, Bazel-built
+//third_party/qemu:qemu_system_x86_64 (step 4.4), telling guest/init (via
+the dcfs_test= kernel command-line parameter) to run the given guest_script,
 found inside the initramfs at /tests/<basename of guest_script>. See
 test/qemu/scripts/run-qemu.sh for the boot/verdict mechanics and
 test/qemu/guest/init for the guest side.
@@ -45,26 +45,32 @@ def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", tim
     rootfs_data = [rootfs] if rootfs else []
     rootfs_args = ["--rootfs", "$(location " + rootfs + ")"] if rootfs else []
 
-    # Step 3.1a/3.2: --//test/qemu:kernel selects which kernel this test
-    # boots (see BUILD.bazel's :kernel string_flag/:kernel_stock/
-    # :kernel_patched config_settings); stock is the default.
-    kernel_data = select({
-        "//test/qemu:kernel_patched": ["@kernel_image//:bzImage"],
-        "//conditions:default": ["//third_party/linux:bzImage"],
-    })
-    kernel_args = select({
-        "//test/qemu:kernel_patched": ["$(location @kernel_image//:bzImage)"],
-        "//conditions:default": ["$(location //third_party/linux:bzImage)"],
-    })
+    # Step 3.2 dropped the FUSE_ATTR_GENERATION kernel patch; step 4.4
+    # removed the deprecated out-of-tree "patched" kernel entirely (and
+    # with it the //test/qemu:kernel string_flag) -- every test now boots
+    # the pinned, Bazel-built //third_party/linux:bzImage unconditionally.
+    kernel_data = ["//third_party/linux:bzImage"]
+    kernel_args = ["$(location //third_party/linux:bzImage)"]
+
+    # Step 4.4: the Bazel-built QEMU and qboot ROM, passed explicitly --
+    # run-qemu.sh does no host lookup of its own. See run-qemu.sh's usage
+    # comment and test/qemu/README.md.
+    qemu_data = ["//third_party/qemu:qemu_system_x86_64", "@qemu//:pc-bios/qboot.rom"]
+    qemu_args = [
+        "--qemu",
+        "$(location //third_party/qemu:qemu_system_x86_64)",
+        "--qboot",
+        "$(location @qemu//:pc-bios/qboot.rom)",
+    ]
 
     sh_test(
         name = name,
         srcs = ["scripts/run-qemu.sh"],
-        data = kernel_data + [
+        data = kernel_data + qemu_data + [
             ":initramfs",
             guest_script,
         ] + rootfs_data,
-        args = rootfs_args + kernel_args + [
+        args = qemu_args + rootfs_args + kernel_args + [
             "$(location :initramfs)",
             guest_script_basename,
         ] + disk_args,
