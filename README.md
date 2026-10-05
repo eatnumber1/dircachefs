@@ -265,12 +265,14 @@ boot), so `bazel test //...` is dominated by compilation, not booting.
    It builds out of tree into `~/.cache/dcfs/kernel-build` (override with
    `DCFS_KERNEL_BUILD`, and export the same variable to Bazel) and takes
    tens of minutes the first time.
-4. For `nfs_test` only, build the small Debian root image it chroots into
-   (needs `mmdebstrap` and a subuid range; downloads about 200 MB once):
+4. For `nfs_test` only, the small Debian root image it chroots into is
+   built by Bazel from a pinned package set (needs `mke2fs`, e2fsprogs):
 
    ```
-   test/qemu/scripts/mkrootfs-debian.sh
+   bazel build //third_party/debian:rootfs
    ```
+
+   See `third_party/debian/README.md` for the pin and package list.
 
 ### The `kvm` group and the Bazel server
 

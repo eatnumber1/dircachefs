@@ -3,9 +3,9 @@
 # not just a synthetic fhtest client.
 #
 # Unlike every other guest/*.sh script, this one runs chrooted into a small
-# Debian tree (test/qemu/scripts/mkrootfs-debian.sh, attached via
-# qemu_test's rootfs= attribute; see guest/init's dcfs_rootfs= branch), so
-# GNU coreutils/findutils and nfs-utils (rpc.nfsd, rpc.mountd, exportfs,
+# Debian tree (//third_party/debian:rootfs, attached via qemu_test's
+# rootfs= attribute; see guest/init's dcfs_rootfs= branch), so GNU
+# coreutils/findutils and nfs-utils (rpc.nfsd, rpc.mountd, exportfs,
 # mount.nfs4) are available -- none of which fit in the busybox-only
 # initramfs every other test runs from.
 #

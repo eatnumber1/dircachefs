@@ -22,14 +22,14 @@ def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", tim
             ("vdb", "ext4", "256M"). device is a /dev/vd<letter> name;
             see run-qemu.sh for how the letter maps to QEMU drive order.
         rootfs: optional label of a Debian rootfs ext4 image (normally
-            "@kernel_image//:rootfs_debian.ext4"). When given, run-qemu.sh
+            "//third_party/debian:rootfs"). When given, run-qemu.sh
             attaches it as an extra virtio-blk disk (the next /dev/vd<letter>
             after `disks`) and passes dcfs_rootfs=/dev/vd<letter> on the
             kernel command line; guest/init then mounts it, bind-mounts
             /proc, /sys and /dev over it, copies dcfs/fhtest/testutil and
             /tests in, and chroots into it to run guest_script with GNU
             userspace and nfs-utils available. See guest/init's
-            dcfs_rootfs= branch and test/qemu/scripts/mkrootfs-debian.sh.
+            dcfs_rootfs= branch and third_party/debian/README.md.
         size: sh_test size, e.g. "enormous" for a much longer-running guest
             script than the default e2e tests here (most run in a few
             seconds); defaults to "large", the size every test in this

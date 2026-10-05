@@ -179,14 +179,56 @@ Bazel action, not the `root:root` (or other system-user) ownership the
   confirmed by instrumenting a throwaway debug genrule and comparing
   `fakeroot`'s behavior with and without a pre-existing restrictive user
   namespace around it.
-- It does not matter for how this image is used. `guest/nfs.sh` chroots
-  into it and runs entirely as root (the guest kernel's PID 1 is already
-  root; nothing here ever logs in or `su`s to another user), and root's
-  own DAC bypass makes a file's nominal owner irrelevant to whether root
-  can read, write or execute it. The one case where owner identity
-  usually matters on its own -- a setuid/setgid binary escalating a
-  non-root caller's privilege -- does not apply either, since every
-  caller here already is root.
+- It does not matter for `nfs_test` today. `guest/nfs.sh` chroots into
+  this image and runs entirely as root (the guest kernel's PID 1 is
+  already root; nothing here ever logs in or `su`s to another user), and
+  root's own DAC bypass makes a file's nominal owner irrelevant to
+  whether root can read, write or execute it. The one case where owner
+  identity usually matters on its own -- a setuid/setgid binary
+  escalating a non-root caller's privilege -- does not apply either,
+  since every caller here already is root.
+
+**This will matter for a later phase.** A systemd-booting guest (and
+`dbus`, and any setuid binary systemd or PAM check the owner of) does care
+about real `root:root` ownership, not just DAC bypass by an
+already-privileged caller -- a future step landing that guest cannot reuse
+this image unmodified. `mke2fs` (e2fsprogs) **1.47.1** added exactly the
+fix for this: `-d <file.tar>` (a tarball, not a directory) builds the
+image straight from the tar's own per-entry uid/gid/mode headers, with no
+`chown(2)`, no namespace, no privilege of any kind needed -- the ownership
+problem `fakeroot` couldn't solve above disappears entirely, because
+nothing ever has to make a *real* directory tree with real inode
+ownership in the first place.
+
+Checked this host's version: `mke2fs -V` reports **1.47.0** (released
+2023-02-05) -- one release before `-d <tarball>` landed. Confirmed
+experimentally, not just by version number: `mke2fs -q -t ext4 -d
+some.tar -F out.ext4` on this host fails outright --
+`__populate_fs: Not a directory while changing working directory to
+"some.tar"` -- this version's `-d` unconditionally `chdir()`s into its
+argument, so it cannot take a tarball at all, with no separate flag to
+opt in or out. Per this step's instructions: not building e2fsprogs from
+source now (that is real, separate work -- a new `third_party/e2fsprogs/`,
+the same pattern as `third_party/qemu`/`third_party/busybox`); stopping
+here with this documented. When the systemd-booting guest phase lands:
+
+1. Add `third_party/e2fsprogs/` (pinned source, built by Bazel,
+   `>= 1.47.1`) -- or confirm a newer host `mke2fs` is available and
+   update `test/qemu/README.md`'s prerequisites instead, if hermeticity
+   isn't required for this one host tool by then.
+2. Build the tar passed to `-d` with explicit root ownership in its
+   headers instead of whatever `@debian//:flat` naturally carries post-
+   `tar --no-same-owner` extraction -- e.g. `tar --owner=0 --group=0
+   --numeric-owner` when re-packing, or (simpler, avoids an extract/
+   repack round trip entirely) feed `mke2fs -d` the **original**
+   `@debian//:flat` tar directly: it already carries each package's own
+   `root:root`-or-whatever headers verbatim (see "Image assembly" above --
+   this was true all along; `mkrootfs.sh`'s `tar --no-same-owner`
+   extraction is what discards it, not `@debian//:flat` itself).
+3. Add a check that root ownership actually took -- e.g. `debugfs -R
+   'stat /usr/bin/mount' bazel-bin/third_party/debian/rootfs-debian.ext4`
+   and assert `User: 0 Group: 0` in the output -- alongside
+   `version_check_test`.
 
 ### Host tools
 
