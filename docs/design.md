@@ -1165,9 +1165,20 @@ WTF-8 form).
    cache holds metadata as sensitive as `--source`'s -- every cached name,
    attribute, xattr and symlink target, including those of directories a
    reader cannot list -- so it must not be readable by anyone but root.
-5. Open `--cache_db` mode 0600 (SQLite gives its `-wal`/`-shm` files the
-   same mode) and take an exclusive, non-blocking `flock`; refuse to start
-   if another process holds it.
+5. Open `--cache_db` (and check any existing `-wal`/`-shm`) with
+   `O_NOFOLLOW`, creating the database mode 0600 (SQLite gives the
+   `-wal`/`-shm` files it creates the same mode). Refuse to start if the
+   path is a symlink or not a regular file. Refuse if the file grants
+   more access than `--source`'s root directory does: its owner must be
+   root or that directory's owner; group read/write only if its group is
+   the directory's group and the directory grants the group the same;
+   other read/write only if the directory grants others the same. The
+   error names both sets of owner, group and mode. A file that passes but
+   is not mode 0600 (made by an older build) is `fchmod`ed to 0600 with a
+   WARNING. This is a configuration check, not a defense against a
+   hostile cache directory: the directory is not treated as a trust
+   boundary (decision 2026-10-06). Then take an exclusive, non-blocking
+   `flock`; refuse to start if another process holds it.
 6. Open the SQLite connection: WAL, `synchronous=NORMAL`, foreign keys on,
    `busy_timeout=5000`, `temp_store=MEMORY`. dcfs refuses to start if
    SQLite cannot put the database in WAL mode (a filesystem without the

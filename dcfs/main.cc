@@ -107,6 +107,44 @@ absl::StatusOr<std::string> ReadBootId() {
   return std::string(absl::StripAsciiWhitespace(buf));
 }
 
+// The cache files must grant no access beyond what the backing root
+// directory (--source's root) grants: the owner must be root or the backing
+// root's owner; group read/write only if the group is the directory's group
+// and the directory grants its group read/write respectively; other
+// read/write only if the directory grants others the same. A violation is
+// an error naming both permission sets. (Creation is 0600, which always
+// passes.)
+absl::Status CheckNoMoreAccessThanRoot(const std::string &path,
+                                       const struct stat &st,
+                                       const struct stat &root) {
+  std::string reason;
+  const mode_t m = st.st_mode;
+  const mode_t rm = root.st_mode;
+  if (st.st_uid != 0 && st.st_uid != root.st_uid) {
+    reason = absl::StrCat("owned by uid ", st.st_uid,
+                          ", which is neither root nor the backing root's "
+                          "owner");
+  } else if ((m & (S_IRGRP | S_IWGRP)) != 0 && st.st_gid != root.st_gid) {
+    reason = absl::StrCat("grants group access to gid ", st.st_gid,
+                          ", not the backing root's group");
+  } else if ((m & S_IRGRP) != 0 && (rm & S_IRGRP) == 0) {
+    reason = "grants group read the backing root does not";
+  } else if ((m & S_IWGRP) != 0 && (rm & S_IWGRP) == 0) {
+    reason = "grants group write the backing root does not";
+  } else if ((m & S_IROTH) != 0 && (rm & S_IROTH) == 0) {
+    reason = "grants others read the backing root does not";
+  } else if ((m & S_IWOTH) != 0 && (rm & S_IWOTH) == 0) {
+    reason = "grants others write the backing root does not";
+  }
+  if (reason.empty()) return absl::OkStatus();
+  return absl::FailedPreconditionError(absl::StrCat(
+      path, " grants more access than the backing root directory (", reason,
+      "): ", path, " is mode ", absl::StrFormat("0%o", m & 07777), " uid ",
+      st.st_uid, " gid ", st.st_gid, "; the backing root is mode ",
+      absl::StrFormat("0%o", rm & 07777), " uid ", root.st_uid, " gid ",
+      root.st_gid));
+}
+
 // Opens `path` -- the cache database itself, or one of its -wal/-shm
 // companions -- hardened against a hostile cache directory (one writable
 // by, or already containing files from, another local user): O_NOFOLLOW so
@@ -123,12 +161,16 @@ absl::StatusOr<std::string> ReadBootId() {
 // the time there won't be one yet (SQLite creates them itself, inheriting
 // the main file's mode, already fixed up by the time SQLite opens it).
 //
-// An existing file already owned by root but not mode 0600 -- a cache
+// Existing files must also pass CheckNoMoreAccessThanRoot against
+// `backing_root` (the --source root directory's stat), else startup is
+// refused.
+//
+// An existing file passing that but not mode 0600 -- a cache
 // database (or -wal/-shm) made before this check existed -- is fchmod'd to
 // 0600, with a WARNING; this is the only case that changes something
 // instead of refusing to start.
 absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
-    const std::string &path, bool create) {
+    const std::string &path, bool create, const struct stat &backing_root) {
   int flags = O_RDWR | O_CLOEXEC | O_NOFOLLOW;
   if (create) flags |= O_CREAT;
   int fd = ::open(path.c_str(), flags, 0600);
@@ -150,12 +192,7 @@ absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
     return absl::FailedPreconditionError(
         absl::StrCat(path, " is not a regular file"));
   }
-  if (st.st_uid != 0) {
-    return absl::FailedPreconditionError(absl::StrCat(
-        path, " is owned by uid ", st.st_uid,
-        ", not root; refusing to use a cache file another user could have "
-        "tampered with"));
-  }
+  ABSL_RETURN_IF_ERROR(CheckNoMoreAccessThanRoot(path, st, backing_root));
   if ((st.st_mode & 07777) != 0600) {
     ABSL_RETURN_IF_ERROR(syscalls::fchmod(*result, 0600));
     LOG(WARNING) << path << " was mode "
@@ -209,6 +246,8 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // through the path again -- that's what makes mounting dcfs back over
   // --source itself (a supported configuration) safe.
   FileDescriptor source_fd;
+  struct stat backing_root;  // the --source root directory, for the cache
+                             // files' permission check
   {
     std::string source = absl::GetFlag(FLAGS_source);
     // A real (non-O_PATH) fd: this ends up registered as the source
@@ -224,6 +263,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
           << " (--source=" << source << ")";
     }
     source_fd = *std::move(opened);
+    ABSL_ASSIGN_OR_RETURN(backing_root, syscalls::fstat(*source_fd));
 
     // Amendment 12: dcfs requires exactly one backing filesystem below
     // --source (backing inode numbers, shown to users as st_ino, are only
@@ -290,7 +330,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   FileDescriptor db_lock;
   {
     ABSL_ASSIGN_OR_RETURN(db_lock,
-                          OpenHardenedCacheFile(cache_db, /*create=*/true));
+                          OpenHardenedCacheFile(cache_db, /*create=*/true, backing_root));
     if (::flock(*db_lock, LOCK_EX | LOCK_NB) == -1) {
       if (errno == EWOULDBLOCK) {
         return absl::FailedPreconditionError(absl::StrCat(
@@ -313,7 +353,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     ABSL_ASSIGN_OR_RETURN(
         FileDescriptor companion,
         OpenHardenedCacheFile(absl::StrCat(cache_db, suffix),
-                               /*create=*/false));
+                               /*create=*/false, backing_root));
     // Nothing more to do with it than the check (and the possible fchmod)
     // OpenHardenedCacheFile just did: SQLite opens the real thing itself.
   }

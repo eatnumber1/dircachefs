@@ -70,6 +70,11 @@ cleanup() {
 		cat "$LOG4" 2>/dev/null
 		echo "--- dcfs stderr (case 5) ---"
 		cat "$LOG5" 2>/dev/null
+		for f in /tmp/dcfs-r1-*.log; do
+			[ -e "$f" ] || continue
+			echo "--- $f ---"
+			cat "$f"
+		done
 	fi
 	if [ "$MOUNTED" -eq 1 ]; then
 		umount "$MNT" 2>/dev/null || true
@@ -219,6 +224,8 @@ mkdir -m 700 /cache/case3
 chmod 644 /cache/case3/dcfs.db
 : >/cache/case3/dcfs.db-wal
 chmod 644 /cache/case3/dcfs.db-wal
+: >/cache/case3/dcfs.db-shm
+chmod 644 /cache/case3/dcfs.db-shm
 
 DB3=/cache/case3/dcfs.db
 DB=$DB3
@@ -257,6 +264,7 @@ fi
 
 mkdir -m 700 /cache/case4
 echo "untouched content" >/cache/case4/target.db
+chmod 644 /cache/case4/target.db
 ln -s target.db /cache/case4/dcfs.db
 before_target=$(md5sum /cache/case4/target.db)
 
@@ -293,6 +301,14 @@ if [ "$before_target" = "$after_target" ]; then
 	pass case4-target-untouched
 else
 	fail case4-target-untouched "target.db changed: before=$before_target after=$after_target"
+fi
+
+# Opened-but-not-modified: had dcfs opened the target, it would have
+# tightened its mode to 0600.
+if [ "$(stat -c %a /cache/case4/target.db)" = "644" ]; then
+	pass case4-target-mode-untouched
+else
+	fail case4-target-mode-untouched "target.db mode is now $(stat -c %a /cache/case4/target.db), not 644"
 fi
 
 # --- case 5: --cache_db path already exists, owned by another user -------
@@ -335,5 +351,122 @@ if [ "$owner" = "1000" ]; then
 else
 	fail case5-untouched "/cache/case5/dcfs.db is now owned by uid $owner, not 1000"
 fi
+
+# --- R1: the cache files must grant no access beyond the backing root ----
+#
+# The database, -wal and -shm owner must be root or the owner of --source's
+# root directory; group/other read or write only if that directory grants
+# the same to the group (which must be the directory's group) / others.
+# /src's root directory is root:root 0755 after mkfs.
+
+# refused NAME LOGSUFFIX PATTERN: dcfs must refuse to start (DB is set by
+# the caller) with a message matching PATTERN.
+refused() {
+	name=$1
+	log=/tmp/dcfs-r1-$2.log
+	pattern=$3
+	if start_daemon "$log"; then
+		fail "$name-refused" "dcfs mounted"
+		kill -TERM "$DAEMON_PID" 2>/dev/null || true
+		wait "$DAEMON_PID" 2>/dev/null || true
+		if is_mounted "$MNT"; then
+			umount "$MNT" 2>/dev/null || true
+		fi
+		MOUNTED=0
+	else
+		pass "$name-refused"
+		wait "$DAEMON_PID" 2>/dev/null || true
+	fi
+	DAEMON_PID=""
+	if grep -q "$pattern" "$log"; then
+		pass "$name-message"
+	else
+		fail "$name-message" "no '$pattern' in $log"
+	fi
+}
+
+# Both permission sets must be named in the error.
+BOTH="grants more access than the backing root"
+
+# 6: database 0644 but the backing root is 0700: group/other read.
+mkdir -m 700 /cache/case6
+: >/cache/case6/dcfs.db
+chmod 644 /cache/case6/dcfs.db
+chmod 700 /src
+DB=/cache/case6/dcfs.db
+refused case6 6 "$BOTH"
+if grep -q "mode 0644" /tmp/dcfs-r1-6.log && grep -q "mode 0700" /tmp/dcfs-r1-6.log; then
+	pass case6-both-modes-named
+else
+	fail case6-both-modes-named "log lacks both modes"
+fi
+chmod 755 /src
+
+# 7: -shm world-writable (the directory grants others only r-x); -wal and
+# -shm are checked like the database.
+mkdir -m 700 /cache/case7
+: >/cache/case7/dcfs.db-shm
+chmod 666 /cache/case7/dcfs.db-shm
+DB=/cache/case7/dcfs.db
+refused case7 7 "$BOTH"
+
+# 8: -wal group differs from the directory's group, mode grants group read.
+mkdir -m 700 /cache/case8
+: >/cache/case8/dcfs.db-wal
+chmod 640 /cache/case8/dcfs.db-wal
+chown 0:1000 /cache/case8/dcfs.db-wal
+DB=/cache/case8/dcfs.db
+refused case8 8 "$BOTH"
+
+# 9: symlinked -wal and -shm are refused.
+mkdir -m 700 /cache/case9w /cache/case9s
+echo x >/cache/case9w/target
+ln -s target /cache/case9w/dcfs.db-wal
+echo x >/cache/case9s/target
+ln -s target /cache/case9s/dcfs.db-shm
+DB=/cache/case9w/dcfs.db
+refused case9w 9w "symlink"
+DB=/cache/case9s/dcfs.db
+refused case9s 9s "symlink"
+
+# 10: foreign-owned -wal and -shm are refused.
+mkdir -m 700 /cache/case10w /cache/case10s
+: >/cache/case10w/dcfs.db-wal
+chown 1000:0 /cache/case10w/dcfs.db-wal
+: >/cache/case10s/dcfs.db-shm
+chown 1000:0 /cache/case10s/dcfs.db-shm
+DB=/cache/case10w/dcfs.db
+refused case10w 10w "owned by uid 1000"
+DB=/cache/case10s/dcfs.db
+refused case10s 10s "owned by uid 1000"
+
+# 11: a non-regular file (FIFO) at the database path is refused.
+mkdir -m 700 /cache/case11
+mkfifo /cache/case11/dcfs.db
+DB=/cache/case11/dcfs.db
+refused case11 11 "not a regular file"
+
+# 12: positive: the backing root is owned by uid 1000, so a database owned
+# by uid 1000 (mode 0600) is accepted.
+mkdir -m 700 /cache/case12
+: >/cache/case12/dcfs.db
+chmod 600 /cache/case12/dcfs.db
+chown 1000:1000 /cache/case12/dcfs.db
+chown 1000:1000 /src
+DB=/cache/case12/dcfs.db
+if start_daemon /tmp/dcfs-r1-12.log; then
+	pass case12-owner-of-backing-root-accepted
+	MOUNTED=1
+	kill -TERM "$DAEMON_PID" 2>/dev/null || true
+	wait "$DAEMON_PID" 2>/dev/null || true
+	DAEMON_PID=""
+	if is_mounted "$MNT"; then
+		umount "$MNT" 2>/dev/null || true
+	fi
+	MOUNTED=0
+else
+	fail case12-owner-of-backing-root-accepted "dcfs refused a database owned by the backing root's owner"
+fi
+chown 0:0 /src
 
 exit "$FAILED"
