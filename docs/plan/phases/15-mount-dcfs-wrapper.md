@@ -319,6 +319,11 @@ recorded mount points and reverting stale ones, non-directory boundaries.
 Owner: Opus.
 **15.5 `fsck.dcfs` and `dcfs exports`.** Owner: Sonnet.
 **15.6 systemd guest** (Debian rootfs booting systemd in the QEMU harness)
+(prerequisite found in Phase 4: the Bazel-built Debian image's files are
+owned by the build user, because the host's mke2fs 1.47.0 cannot build an
+image from a tarball; add a Bazel-built e2fsprogs >= 1.47.1 under
+`third_party/e2fsprogs/`, feed `mke2fs -d` the root-owned `@debian//:flat`
+tar, and check ownership with `debugfs`; see third_party/debian/README.md)
 and its tests. Owner: Sonnet.
 **15.7 Docs:** README (fstab with and without systemd, `dcfs.fstype`
 values, `_netdev`, fsck, trees, over-mounting, remount, NFS exports,

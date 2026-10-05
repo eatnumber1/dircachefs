@@ -223,3 +223,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   pcre2 path into a Bazel output base in round 2); custom repository rule re-adds subprojects/dtc
   that Bazel's tar extraction drops. Full suite 73/73. Not yet wired into the harness. TCG boot
   with it showed no console output in 600 s under heavy load (inconclusive; Phase 5.1).
+- Phase 4b merged (Sonnet, 2 rounds): Debian bookworm image built by rules_distroless from
+  snapshot 20261004T203145Z (20 explicit packages incl. systemd, util-linux mount, xfs/btrfs/quota
+  tools; 136 total; per-package sha256 in MODULE.bazel.lock), assembled with host mke2fs/tar;
+  mkrootfs-debian.sh deleted; nfs_test passes from it; full suite 74/74. Known gaps: files owned by
+  the build uid (host mke2fs 1.47.0 has no tarball input; needs Bazel-built e2fsprogs >= 1.47.1 for
+  the systemd guest, noted in Phase 15.6); mke2fs and tar still host tools.
