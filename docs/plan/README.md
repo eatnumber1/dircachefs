@@ -29,7 +29,7 @@ phase's file; `log.md` says where things stand.
 | 1 | [AGENTS.md](phases/01-agents-md.md) | done 2026-10-05 (reviewed by russ) |
 | 2 | [Fix: world-readable cache database](phases/02-fix-cache-permissions.md) | done 2026-10-05 |
 | 3 | [Drop the kernel patch; download and build the test kernel](phases/03-drop-kernel-patch-and-build-test-kernel.md) | done 2026-10-05 (deprecated patched-kernel path removed with Phase 4's wiring) |
-| 4 | [Pinned host tools; `third_party/` convention](phases/04-pinned-host-tools.md) | done 2026-10-06 |
+| 4 | [Pinned host tools; `third_party/` convention](phases/04-pinned-host-tools.md) | reopened: scratch filesystems still use host mkfs tools (review L5); rest done 2026-10-06 |
 | 5 | [CI runs the QEMU suite](phases/05-ci.md) | in progress (5.1 TCG speed, lane-1) |
 | 6 | [Test tiers and test speed](phases/06-test-tiers-and-test-speed.md) | in progress (6.1 tiers, lane-2; 6.3 first fix merged; 6.2 throughout) |
 | 7 | [Pinned toolchain, coverage, warnings, UBSan, clang-tidy](phases/07-toolchain-coverage-warnings-ubsan.md) | planned |

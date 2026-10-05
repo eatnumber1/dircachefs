@@ -290,3 +290,17 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   builds).
 - 2026-10-06: Claude Code restarted (agent types with effort available; russ now has kvm and docker groups directly). Wave 3 dispatched: lane-1 Phase 5.1 TCG speed (dcfs-investigator), lane-2 Phase 6.1 tiers (dcfs-implementer).
 - russ: orchestrator (Fable 5.1 this session) is overseer only: decide, dispatch cheaper subagents, review; Fable subagents only for the most complicated tasks, if ever (CLAUDE.md).
+- Review of waves 1-2 in (dcfs-reviewer; audits/review-2026-10-06-waves-1-2.md). No critical bugs.
+  Triage into three fix steps, each test first, queued for the next free building lane:
+  R1 cache hardening (dcfs-protocol): M1 trust the cache directory (open O_DIRECTORY, require
+     root-owned and not group/other-writable, else refuse), st_nlink==1, SQLITE_OPEN_NOFOLLOW,
+     check -journal; L7 test gaps; L6 docs.
+  R2 build/test infra (dcfs-implementer): M2 QEMU -fno-sanitize=address,undefined as one word (+
+     ubsan readelf check); M3 CONFIG_POSIX_TIMERS=y and audit of EXPERT-gated options tinyconfig drops
+     (KCMP, AIO, SYSVIPC, ...), L8 XFS_QUOTA; L1 build_kernel.sh set -e suspended in the logged block;
+     L2 busybox fragment survival check + smoke test that runs each feature; L3 `stat %U/%G` compare
+     nothing in the guest (use %u/%g); L4 boot.sh must fail on a kernel version mismatch; L12 fail on
+     a failed thaw; L10/L11 reproducibility and nits.
+  R3 pinned mkfs (dcfs-investigator): L5 scratch filesystems still made by host mkfs.ext4/xfs/btrfs
+     with host defaults: Bazel-built mke2fs with an explicit config, pinned xfsprogs and btrfs-progs;
+     L9 Debian lock enforcement. Phase 4 reopened for this.

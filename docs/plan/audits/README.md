@@ -10,3 +10,6 @@ finding was later fixed test-first, assigned to a step, or decided against;
 - `tristate.md`: present/absent/unknown state of every cached record.
 - `style.md`: style, readability, dead code.
 - `test-coverage.md`: whether every earlier fix got a test.
+- `review-2026-10-06-waves-1-2.md`: review of everything merged in waves
+  1-2 (cache hardening, pinned kernel/QEMU/busybox/Debian/e2fsprogs,
+  harness wiring, sanitizer scoping).
