@@ -229,3 +229,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   mkrootfs-debian.sh deleted; nfs_test passes from it; full suite 74/74. Known gaps: files owned by
   the build uid (host mke2fs 1.47.0 has no tarball input; needs Bazel-built e2fsprogs >= 1.47.1 for
   the systemd guest, noted in Phase 15.6); mke2fs and tar still host tools.
+- Phase 4c dispatched in lane-1: Bazel-built static e2fsprogs (>= 1.47.1); Debian image from the root-owned @debian//:flat tar, no host mke2fs.
