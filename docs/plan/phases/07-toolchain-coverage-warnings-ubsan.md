@@ -1,0 +1,48 @@
+# Phase 7 — Pinned toolchain, coverage, warnings, UBSan, clang-tidy
+
+**Decision (russ, 2026-10-05).** Every build uses a pinned, hermetic
+toolchain instead of the host's GCC: `toolchains_llvm` from the BCR
+(1.11.x) with a pinned LLVM release, registered in `MODULE.bazel`. Builds
+are then the same on every machine and in CI.
+- 7.1 Switch to the pinned clang for all targets (dcfs, tools, tests,
+  pjdfstest/fsstress/fsx builds). Fix what clang's warnings find (test
+  first where a warning is a bug). Re-check the libfuse overlay workaround
+  (`--dynamic_mode=off` because the BCR libfuse `.so` did not link under
+  ld.gold) with lld; keep it only if still needed. The guest initramfs
+  gets whatever runtime the new toolchain's binaries need (sanitizer
+  runtimes for 7.4). Done when the full suite passes, ASan included.
+- 7.2 Coverage: clang source-based coverage
+  (`-fprofile-instr-generate -fcoverage-mapping`). The guest writes its
+  `.profraw` files to a scratch virtio disk; `run-qemu.sh` copies them out,
+  merges them (`llvm-profdata`) and writes lcov (`llvm-cov export
+  -format=lcov`) to Bazel's coverage output, so `bazel coverage
+  --combined_report=lcov //...` covers unit and e2e tests alike. CI
+  publishes the report (no threshold gate at first); the first report is
+  reviewed with russ to pick untested paths worth tests.
+- 7.3 Warnings (russ: -Wall, -Wextra and every other warning we can
+  get): our code (dcfs, tools, tests) builds with clang's `-Weverything
+  -Werror` minus an explicit deny-list in `.bazelrc`, each exclusion with a
+  one-line reason (e.g. `-Wno-c++98-compat`, `-Wno-padded`, warnings that
+  conflict with Abseil idioms). Today's flags are only `-Werror
+  -Wimplicit-fallthrough` plus `-Wno-sign-compare`, which goes away.
+  `-Werror` stays on for our code: every warning is an error.
+  External repositories are not built with these warnings at all (not just
+  `-Wno-error` as today). Real bugs found get a test first; the rest are
+  fixed in batches by directory.
+- 7.4 UBSan (`--config=ubsan`, today blocked by GCC + Abseil constexpr):
+  enabled with clang, `-fno-sanitize-recover=all` so any report fails the
+  test, run over the whole QEMU suite like ASan. Each finding gets a test
+  first, then a fix.
+- 7.5 clang-tidy (russ, 2026-10-05): run the pinned LLVM's clang-tidy
+  over our code through a Bazel aspect (the `bazel_clang_tidy` aspect, or
+  a small one of our own if it does not fit the pinned toolchain), with a
+  checked-in `.clang-tidy`: `bugprone-*`, `cert-*`, `clang-analyzer-*`,
+  `concurrency-*`, `misc-*`, `modernize-*`, `performance-*`,
+  `portability-*`, `readability-*`, minus a commented deny-list, and
+  `WarningsAsErrors: '*'`. Our code only, not `third_party/` or external
+  repositories. CI runs it on every push; findings that are real bugs get
+  a test first. It runs on the host (no root or kernel needed).
+Owner: Sonnet (7.1, 7.2), Opus review; findings from 7.4 by owner of
+the affected area. Order: right after the CI phase, before the benchmarks
+(so every later phase runs under UBSan and has coverage); within it,
+7.1 then 7.2 (coverage) first, then 7.3, 7.4 and 7.5.
