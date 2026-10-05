@@ -200,3 +200,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   dcfs warns about): SQLite opens -wal/-shm by path after dcfs's check (swap window), and a hard
   link to a root-owned file passes the owner check (relies on fs.protected_hardlinks=1).
 - Wave 1 lane 1 freed: started Phase 4a (Bazel-built minimal QEMU + busybox, build and smoke tests only, no harness wiring until 3a merges) in lane-1 clone (Sonnet, general-purpose: agent types need a restart).
+- S1 attempt 1 invalid: the step-3a worktree's Bazel server had been started by an orchestrator
+  `bazel help` without the kvm group, so every test ran under TCG. Observed under TCG: the stock
+  kernel's boot_test timed out at 900 s and release_leak_test at 1200 s (data for Phase 5.1, which
+  must make TCG usable). Rerunning S1 with a KVM server. Rule added to CLAUDE.md.
+- Phase 4a progress: busybox 1.38.0 committed on step-4a (busybox `find` never had `-ls`; the plan's
+  premise was wrong). QEMU 11.1.2: deps glib + zlib only (no pixman); microvm needs FDT (internal
+  dtc); `-device help` = virtio-blk-device, isa-serial, mc146818rtc, virtio-serial-device (upstream
+  quirk). glib needed a pkg-config shim for rules_foreign_cc; build in progress.

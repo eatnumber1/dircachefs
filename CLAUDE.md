@@ -31,6 +31,14 @@ up one row (implementer to protocol, mechanical to implementer).
   (`docs/plan/process.md`). Do not use the agent tool's `isolation:
   "worktree"`: it resolved to the home-directory dotfiles repository on
   this machine and triggered ssh prompts.
+- Every Bazel command in a lane or worktree, including `bazel help`,
+  `info`, `query` and `cquery`, goes through `sg kvm -c '...'`: any of
+  them starts that checkout's server, and a server started without the
+  `kvm` group makes every later test fall back to slow emulation
+  (2026-10-05: a stray `bazel help` cost a full-suite run).
+- Never `pkill -f` / `pgrep -f` with a pattern that also appears in your
+  own command line: it matches (and kills) your own shell. Prefer
+  `pgrep -f '^bazel\(name\)'` anchored patterns or kill by PID.
 - The shell is zsh with `noclobber` (overwrite with `>|`); `make` and
   `diff` are broken shell functions on the command line (use `command
   make`, `command diff`).
