@@ -39,6 +39,9 @@ up one row (implementer to protocol, mechanical to implementer).
 - Never `pkill -f` / `pgrep -f` with a pattern that also appears in your
   own command line: it matches (and kills) your own shell. Prefer
   `pgrep -f '^bazel\(name\)'` anchored patterns or kill by PID.
+- Agents' shells start in the main checkout. An agent must `cd` into its
+  lane at the start of every command; a forgotten `cd` once left a
+  downloaded fakeroot source tree in the main checkout (2026-10-05).
 - **Docker on this machine is production** (russ, 2026-10-06). Never stop,
   restart, remove, prune or modify containers, images, volumes or networks
   you did not create; never run `docker system prune`, `docker container
