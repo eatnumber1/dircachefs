@@ -27,8 +27,8 @@ phase's file; `log.md` says where things stand.
 | # | Phase | Status |
 |---|-------|--------|
 | 1 | [AGENTS.md](phases/01-agents-md.md) | done 2026-10-05 (reviewed by russ) |
-| 2 | [Fix: world-readable cache database](phases/02-fix-cache-permissions.md) | planned |
-| 3 | [Drop the kernel patch; download and build the test kernel](phases/03-drop-kernel-patch-and-build-test-kernel.md) | planned |
+| 2 | [Fix: world-readable cache database](phases/02-fix-cache-permissions.md) | in progress (wave 1, lane 1) |
+| 3 | [Drop the kernel patch; download and build the test kernel](phases/03-drop-kernel-patch-and-build-test-kernel.md) | in progress (wave 1, lane 2: Bazel-built stock kernel) |
 | 4 | [Pinned host tools; `third_party/` convention](phases/04-pinned-host-tools.md) | planned (with 3) |
 | 5 | [CI runs the QEMU suite](phases/05-ci.md) | planned |
 | 6 | [Test tiers and test speed](phases/06-test-tiers-and-test-speed.md) | planned (6.1 with 5; 6.2 throughout) |
@@ -49,7 +49,7 @@ phase's file; `log.md` says where things stand.
 | 20 | [Statistics](phases/20-statistics.md) | design to be discussed first |
 | 21 | [Real-hardware checks](phases/21-real-hardware-checks.md) (russ, manual) | 21.1 after 11; 21.2 last |
 
-Nothing in phases 2-21 has started; work begins on russ's go-ahead.
+Execution started 2026-10-05 (wave 1).
 
 **Cut line.** The trial point after Phase 11 is the first time dcfs is
 worth trying on real hardware (a spare disk, nothing precious): by then
