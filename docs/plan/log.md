@@ -244,3 +244,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   i.e. a timing-sensitive test rather than a cache miss. Fix the test to quiesce xfs before
   measuring (e.g. syncfs + wait for inodegc) and confirm under load.
 - Phase 4d dispatched in lane-2: wire Bazel-built QEMU/qboot/busybox into the harness; remove the patched-kernel flag value, build-kernel.sh and the kernel.bzl repository rule.
+- Phase 4c merged (Sonnet): e2fsprogs 1.47.4 (static mke2fs/debugfs, with a minimal private static
+  libarchive 3.8.1 built inside third_party/e2fsprogs; upstream bug: debugfs.static omits
+  libarchive, patched), the Debian image built with `mke2fs -d <tarball>` from the root-owned
+  @debian//:flat tar (missing ancestor directories synthesized), ownership_test (root:root,
+  /bin/mount setuid) failed first then passes; nfs_test passes; full suite 70/70 (agent). Host mke2fs
+  no longer used. Also: the repo's global -Werror broke autoconf probes inside rules_foreign_cc
+  builds (fixed per build with CFLAGS=-Wno-error); revisit when the pinned toolchain lands (Phase 7).

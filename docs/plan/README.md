@@ -29,7 +29,7 @@ phase's file; `log.md` says where things stand.
 | 1 | [AGENTS.md](phases/01-agents-md.md) | done 2026-10-05 (reviewed by russ) |
 | 2 | [Fix: world-readable cache database](phases/02-fix-cache-permissions.md) | done 2026-10-05 |
 | 3 | [Drop the kernel patch; download and build the test kernel](phases/03-drop-kernel-patch-and-build-test-kernel.md) | done 2026-10-05 (deprecated patched-kernel path removed with Phase 4's wiring) |
-| 4 | [Pinned host tools; `third_party/` convention](phases/04-pinned-host-tools.md) | in progress (4a busybox+QEMU and 4b Debian image done; next: wire QEMU/busybox into the harness after 3b) |
+| 4 | [Pinned host tools; `third_party/` convention](phases/04-pinned-host-tools.md) | in progress (4a busybox+QEMU, 4b Debian image, 4c e2fsprogs done; 4d harness wiring in progress) |
 | 5 | [CI runs the QEMU suite](phases/05-ci.md) | planned |
 | 6 | [Test tiers and test speed](phases/06-test-tiers-and-test-speed.md) | planned (6.1 with 5; 6.2 throughout) |
 | 7 | [Pinned toolchain, coverage, warnings, UBSan, clang-tidy](phases/07-toolchain-coverage-warnings-ubsan.md) | planned |
