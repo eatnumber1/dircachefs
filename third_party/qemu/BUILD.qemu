@@ -124,6 +124,26 @@ QEMU_CONFIGURE_OPTIONS = [
     # project's own stricter warning policy being applied somewhere it
     # was never meant to reach.
     "--extra-cflags=-Wno-error",
+
+    # Phase 6.3: the same leak as -Werror above, for --config=asan/ubsan's
+    # global `build:asan --copt -fsanitize=address` / `build:ubsan --copt
+    # -fsanitize=undefined` (.bazelrc): confirmed by reading the generated
+    # build_script.sh, whose CFLAGS/CXXFLAGS/ASFLAGS end in
+    # "... -fsanitize=address -DADDRESS_SANITIZER -O1 -g" under
+    # --config=asan, and whose resulting qemu-system-x86_64 links
+    # libasan.so.8 (`readelf -d`) -- QEMU is not under test; sanitizing it
+    # only adds rebuild time and makes every guest's emulator run slower.
+    # -fno-sanitize=address/undefined (later flags, so overriding -- same
+    # left-to-right cumulative rule as -Wno-error above) cancel the
+    # instrumentation regardless of which sanitizer config (if any) is
+    # active; harmless, a no-op, when neither is. --extra-ldflags is the
+    # matching mechanism for the link-time `build:asan/ubsan --linkopt
+    # -fsanitize=...` (.bazelrc), which otherwise leaks into this build's
+    # LDFLAGS the same way --extra-cflags's own comment explains for
+    # CFLAGS, and is what actually pulls libasan.so into the linked
+    # qemu-system-x86_64.
+    "--extra-cflags=-fno-sanitize=address -fno-sanitize=undefined",
+    "--extra-ldflags=-fno-sanitize=address -fno-sanitize=undefined",
 ]
 
 configure_make(

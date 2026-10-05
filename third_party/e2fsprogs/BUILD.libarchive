@@ -114,7 +114,16 @@ configure_make(
         # non-Bazel build first); without it, rules_foreign_cc having set
         # CFLAGS at all suppresses autoconf's own `: ${CFLAGS=-g -O2}`
         # fallback, silently building at -O0.
-        "CFLAGS": "-Wno-error -g -O2",
+        "CFLAGS": "-Wno-error -g -O2 -fno-sanitize=address -fno-sanitize=undefined",
+        # Phase 6.3: see BUILD.e2fsprogs's identical LDFLAGS entry for the
+        # full explanation -- same leak, same fix, for the static
+        # libarchive.a this rule feeds into :e2fsprogs's mke2fs/debugfs
+        # link (confirmed: without this, re-running that link with
+        # --config=asan's leaked `--linkopt -fsanitize=address` is what
+        # pulls libasan.so.8 into mke2fs/debugfs, not this rule's own
+        # output, but this rule's *compile* still picks up the leaked
+        # -fsanitize=address via CFLAGS the same way :e2fsprogs's does).
+        "LDFLAGS": "-fno-sanitize=address -fno-sanitize=undefined",
     },
     visibility = ["//visibility:public"],
 )

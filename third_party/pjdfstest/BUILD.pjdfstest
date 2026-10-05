@@ -87,12 +87,51 @@ cc_binary(
         # outright so a build log isn't full of noise from code we don't
         # maintain).
         "-w",
-    ],
+    ] + select({
+        # Phase 6.3: cancels the project's global --config=asan/ubsan
+        # `--copt -fsanitize=...` (.bazelrc) for this one target, the same
+        # way the top-level .bazelrc's own `--per_file_copt=
+        # external/(glib|zlib|pcre2)\+.*@-fno-sanitize=...` does for
+        # glib/zlib -- see that rule's long comment for why it does NOT
+        # also list pjdfstest's external repo (or any other): unlike
+        # glib/zlib/qemu, pjdfstest is a cc_binary built one target at a
+        # time, so a target-local select() here is the more direct fix
+        # (and avoids stretching that already-narrow regex further). This
+        # pjdfstest binary is never linked into dcfs (it is its own
+        # separate guest process -- a POSIX conformance test exercising
+        # the dcfs mount and its backing filesystem from outside, see
+        # guest/pjdfstest.sh), so there is no ABI coupling risk in doing
+        # this (contrast the abseil-cpp case .bazelrc's comment
+        # documents: that *is* linked into dcfs and must stay sanitized
+        # with it).
+        "@dircachefs//test/qemu:asan_build": ["-fno-sanitize=address"],
+        "@dircachefs//test/qemu:ubsan_build": ["-fno-sanitize=undefined"],
+        "//conditions:default": [],
+    }),
     features = select({
         "@dircachefs//test/qemu:asan_build": [],
         "@dircachefs//test/qemu:ubsan_build": [],
         "//conditions:default": ["fully_static_link"],
     }),
+    # NOT fixed, and left undone deliberately (see below): the copts
+    # override above stops this binary's own object code from being
+    # instrumented (confirmed: the linked binary has zero "AddressSanitizer"
+    # strings), but it still links libasan.so.8 at the link step, because
+    # Bazel's cc_binary appends the global `build:asan --linkopt
+    # -fsanitize=address` (.bazelrc) *after* a target's own `linkopts`, not
+    # before -- confirmed with `bazel aquery --config=asan
+    # 'mnemonic("CppLink", @pjdfstest//:pjdfstest)'`: this rule's own
+    # "-fno-sanitize=address" appears on the link command line, but earlier
+    # than, not after, the global "-fsanitize=address", so the later flag
+    # wins (same left-to-right cumulative rule the other fixes in this
+    # phase rely on, just losing it here). There is no `--per_file_linkopt`
+    # in this Bazel version (confirmed: `bazel help build` lists
+    # `--per_file_copt`/`--per_file_ltobackendopt` but nothing for link
+    # flags) to scope the global --linkopt away from this one target
+    # instead. Accepted as harmless: with no instrumented object code, the
+    # extra libasan.so.8 dependency only adds an ASan-intercepted
+    # malloc/free to this one small, separate-process binary -- no
+    # rebuild cost, no slower emulator, nothing under test affected.
     linkstatic = True,
     visibility = ["//visibility:public"],
 )

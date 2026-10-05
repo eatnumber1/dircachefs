@@ -219,7 +219,23 @@ configure_make(
         # step's first attempt used just "-g -O2" here, which still built
         # with -Werror active and failed on util/symlinks.c's
         # -Wstringop-truncation; see README.md).
-        "CFLAGS": "-Wno-error -g -O2",
+        "CFLAGS": "-Wno-error -g -O2 -fno-sanitize=address -fno-sanitize=undefined",
+        # Phase 6.3: same leak as -Werror above, for --config=asan/ubsan's
+        # global `build:asan/ubsan --linkopt -fsanitize=...` (.bazelrc).
+        # Confirmed by reading the generated build_script.sh: under
+        # --config=asan this rule's toolchain-derived LDFLAGS end in
+        # "... -fsanitize=address", and the resulting mke2fs/debugfs link
+        # libasan.so.8 (`readelf -d`) -- these are host-side genrule tools
+        # (build an ext4 image, inspect it), not code under test; sanitizing
+        # them only adds rebuild time (a cold --config=asan build of this
+        # rule plus :archive took ~185s here, vs. instant once cached either
+        # way) for no coverage benefit. This key is new (CFLAGS's comment
+        # above is about a pre-existing key); rules_foreign_cc still
+        # appends it to its own toolchain-derived LDFLAGS the same way, so
+        # the later -fno-sanitize=... here cancels the earlier leaked
+        # -fsanitize=... (harmless, a no-op, when neither sanitizer config
+        # is active).
+        "LDFLAGS": "-fno-sanitize=address -fno-sanitize=undefined",
     },
     visibility = ["//visibility:public"],
 )
