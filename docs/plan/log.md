@@ -230,3 +230,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the build uid (host mke2fs 1.47.0 has no tarball input; needs Bazel-built e2fsprogs >= 1.47.1 for
   the systemd guest, noted in Phase 15.6); mke2fs and tar still host tools.
 - Phase 4c dispatched in lane-1: Bazel-built static e2fsprogs (>= 1.47.1); Debian image from the root-owned @debian//:flat tar, no host mke2fs.
+- Phase 3b merged (Sonnet): kernel patch and patched libfuse dropped; stock BCR libfuse 3.18.2;
+  stock kernel 7.2.9 is the default for e2e and unit tests (qemu_cc_test.bzl now honours the
+  flag); libfuse_version_test deleted (it only asserted the patch). Test-first note: the stock
+  kernel alone did not fail on unchanged code (the patched libfuse falls back to fuse_reply_attr
+  when the kernel lacks the capability); building against stock libfuse is the real check. Agent:
+  full suite 70/70 and ASan 70/70 (twice each) before rebase; orchestrator after rebase onto
+  4a/4b: build + 9 representative tests (incl. nfs_test, cache_permissions, smoke tests) pass.
+- Needs attention (Phase 6.2, first item): rename_test_xfs fails under heavy host memory pressure
+  (10/10 forced reruns, a different zero-backing-reads check each time: unlink, rmdir, rename
+  replace), never on ext4/btrfs and never on a quiet host. Likely xfs's deferred inode
+  inactivation (inodegc) reading AG metadata inside the measured window after an unlink/replace,
+  i.e. a timing-sensitive test rather than a cache miss. Fix the test to quiesce xfs before
+  measuring (e.g. syncfs + wait for inodegc) and confirm under load.
