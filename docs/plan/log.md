@@ -243,3 +243,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   inactivation (inodegc) reading AG metadata inside the measured window after an unlink/replace,
   i.e. a timing-sensitive test rather than a cache miss. Fix the test to quiesce xfs before
   measuring (e.g. syncfs + wait for inodegc) and confirm under load.
+- Phase 4d dispatched in lane-2: wire Bazel-built QEMU/qboot/busybox into the harness; remove the patched-kernel flag value, build-kernel.sh and the kernel.bzl repository rule.
