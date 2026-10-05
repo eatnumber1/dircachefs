@@ -271,3 +271,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   for scratch disks (follow-up: Bazel-built xfsprogs/btrfs-progs; mke2fs exists), network once per pin.
   pjdfstest hit run-qemu.sh's 1200 s timeout under contention (passes alone in ~550-650 s): Phase 5.1.
 - S2 plain suite: 75/75 on main 3186e2e (cache hits: identical inputs to lane-2's verified run). S2 ASan suite pending the Phase 6.3 finding.
+- Phase 6.3 findings (Sonnet): confirmed --config=asan instrumented third-party builds (QEMU and
+  mke2fs/debugfs linked libasan; glib recompiled with -fsanitize). Fix (pending merge): cancel the
+  sanitizer for third-party builds only (QEMU/e2fsprogs/libarchive configure flags, pjdfstest copts,
+  per_file_copt for glib|zlib|pcre2). A blanket external/.* cancel broke abseil (SwissTable layout
+  depends on ASan; a SEGV in metadata_cache_test), so abseil, libfuse, sqlite etc. stay sanitized.
+  Use-after-free still caught. Runtime: pjdfstest_test_ext4 406 s plain, 481 s before, 457 s after;
+  the rest of ASan's cost is dcfs itself (intended). Residual: pjdfstest still NEEDs libasan (Bazel
+  appends global linkopts after target linkopts; no per-file linkopt).
+- Follow-up (Phase 6.2/6.3): the big remaining cost is rebuilding glib+QEMU (~450-470 s) whenever a
+  configuration's disk cache is cold, because sanitizer configs change those actions' keys. Build
+  third-party tools in a configuration independent of --config=asan/ubsan (e.g. an exec or
+  flag-resetting transition on the tool targets), so plain and sanitized runs share one QEMU build.
