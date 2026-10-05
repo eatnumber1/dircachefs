@@ -206,9 +206,12 @@ qemu_test_matrix(
 )
 
 # Step 5.3: dcfs exported over real NFSv4 (rpc.nfsd/rpc.mountd/exportfs from
-# a small Debian chroot -- see test/qemu/scripts/mkrootfs-debian.sh and
+# a small Debian chroot -- see //third_party/debian:rootfs and
 # guest/init's dcfs_rootfs= branch, since none of that fits in the
-# busybox-only initramfs every other test here runs from).
+# busybox-only initramfs every other test here runs from). Phase 4, part c:
+# this image is now resolved, fetched and assembled by Bazel from a pinned
+# snapshot.debian.org timestamp (see third_party/debian/README.md) instead
+# of test/qemu/scripts/mkrootfs-debian.sh's mmdebstrap run.
 qemu_test(
     name = "nfs_test",
     disks = [
@@ -216,7 +219,7 @@ qemu_test(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/nfs.sh",
-    rootfs = "@kernel_image//:rootfs_debian.ext4",
+    rootfs = "//third_party/debian:rootfs",
 )
 
 # pjdfstest_test (step 4.5): POSIX conformance, ~8800 checks

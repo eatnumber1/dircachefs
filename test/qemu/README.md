@@ -27,11 +27,11 @@ booting.
   `run-qemu.sh` invocation in `sg kvm -c '...'`. Without a writable
   `/dev/kvm`, QEMU falls back to TCG (software emulation), which still
   works but is ten-plus times slower -- see `TIMEOUT` below.
-- For `nfs_test` only: `mmdebstrap`, `unshare`/`newuidmap`/`newgidmap`
-  (util-linux), and an `/etc/subuid`/`/etc/subgid` delegation for your user
-  -- see "NFS test and the Debian rootfs" below. Network access (plain
-  HTTPS to `deb.debian.org`) is needed once, to build the rootfs image; the
-  test itself is fully offline (loopback only).
+- For `nfs_test` only: `mke2fs` (e2fsprogs), to assemble
+  `//third_party/debian:rootfs` -- see "NFS test and the Debian rootfs"
+  below and `third_party/debian/README.md`. Network access (to
+  `snapshot.debian.org`) is needed once per pin, to fetch the pinned
+  packages; the test itself is fully offline (loopback only).
 
 ## Building the test kernel
 
@@ -514,85 +514,36 @@ status.
 
 `nfs_test` (above) needs `rpc.nfsd`/`rpc.mountd`/`exportfs`/`mount.nfs4`,
 none of which fit in the busybox-only initramfs every other test runs
-from. It gets them by chrooting into a small Debian tree instead:
+from. It gets them by chrooting into a small Debian tree instead.
 
 ### Building the image
 
+Phase 4, part c (`docs/plan/phases/04-pinned-host-tools.md`): the image is
+built by Bazel, from packages `rules_distroless` resolves and fetches from
+a pinned `snapshot.debian.org` timestamp -- not a live mirror, and no
+longer a step run once by hand into `~/.cache/dcfs`. See
+`third_party/debian/README.md` for the package list (with each package's
+reason), the pin and its update procedure, and exactly how the image is
+assembled (`mke2fs -d` against a flattened package tree, host `mke2fs`
+still used -- no root, no network, no loop mounts in the Bazel action
+itself).
+
 ```
-test/qemu/scripts/mkrootfs-debian.sh
+bazel build //third_party/debian:rootfs
 ```
 
-Builds `bookworm` (override with `DCFS_ROOTFS_SUITE=trixie` etc.) via
-`mmdebstrap --mode=unshare` into `~/.cache/dcfs/rootfs-debian.ext4` (default;
-override with `DCFS_ROOTFS_IMAGE`), the same out-of-tree-artifact pattern as
-`build-kernel.sh`/`@kernel_image`: not a Bazel target (it downloads ~200 MB
-and doesn't belong in the action graph), but exposed to Bazel the same way,
-by `test/qemu/kernel.bzl`'s `kernel_image` repo rule symlinking it in as
-`@kernel_image//:rootfs_debian.ext4` if present, or a `DCFS-ROOTFS-MISSING`
-placeholder otherwise (`run-qemu.sh` fails fast and clearly on the
-placeholder, same as for a missing kernel).
-
-Measured on this host: ~35-45s wall time (mmdebstrap ~35-40s of that,
-downloading ~200 MB; the tar-to-ext4 conversion is ~1-2s), producing a
-1024 MiB nominal image (`DCFS_ROOTFS_SIZE` to change) of which ~265 MiB is
-actually used -- most of the headroom is for `/cache/dcfs.db` and whatever
-the test writes during a run, since the image is copied (not the same
-image reused read-only) into each test's own `$TEST_TMPDIR` so the guest
-can write to it freely without disturbing the cached original.
-
-No `//test/qemu:rootfs_debian` Bazel genrule exists, deliberately: the
-image has to live outside `bazel-out` for exactly the reason the kernel
-does (so it survives `bazel clean` and is shared across worktrees/branches
-instead of being rebuilt, and re-downloaded, by every one of them), so a
-genrule wrapping the same script would add a layer without adding value.
-
-### The unprivileged mmdebstrap-to-ext4 recipe
-
-This took real trial and error; the working recipe (and why) is documented
-inline in `mkrootfs-debian.sh`'s header comment, briefly:
-
-1. **Keyring**: this host's/Ubuntu's `debian-archive-keyring` was too old
-   (missing a since-added co-signing key on bookworm's InRelease), producing
-   `NO_PUBKEY` errors that look like a mirror problem. Fetch the current
-   package directly from `deb.debian.org`'s pool (plain HTTPS, no apt
-   circularity) and cache it.
-2. **mmdebstrap's own sandbox can't read `$HOME/.cache`**: its internal
-   `--mode=unshare` sandbox doesn't map your uid to itself, so anything it
-   reads (like `--keyring`) needs to live under a world-traversable
-   directory -- `$HOME/.cache` is mode 0700 by convention, so the cached
-   keyring gets staged to a `chmod 644` copy under `/tmp` just for the
-   mmdebstrap invocation.
-3. **Tar-to-ext4 as your own uid loses ownership**: `mkfs.ext4 -d <dir>`
-   needs a real directory and preserves whatever ownership it has, but a
-   plain `tar -x` as yourself can't restore Debian's real ownership
-   (`/etc/shadow`'s group, etc). `unshare --user --map-root-user` only maps
-   one id (yours to 0); every other uid/gid in the tarball gets `EINVAL` on
-   chown. The fix: `--map-user=0` (your uid to inner 0) *combined with*
-   `--map-users=1:<subuid-start>:<subuid-count>` (inner 1..N to your
-   `/etc/subuid` delegation) -- these two compose, unlike two `--map-users`
-   (whose last occurrence simply wins, per `unshare(1)`).
-4. **mknod is unfixable, and doesn't matter**: even with that full mapping,
-   creating real device nodes (`/dev/null`, etc.) fails with EPERM --
-   `mknod(2)` for a character/block device checks `CAP_MKNOD` against the
-   **init** user namespace unconditionally, so no amount of unprivileged
-   nesting grants it. `mkrootfs-debian.sh` excludes `./dev/*` from the tar
-   extraction and creates an empty `/dev` instead: harmless, since
-   `guest/init` bind-mounts the real `/dev` over the chroot before using it
-   (see below).
-5. **The image needs a couple of things a "complete" Debian install gets
-   for free** that a bare `--variant=apt` bootstrap doesn't run the
-   postinst scripts for: `/etc/mtab` (normally a symlink to
-   `/proc/self/mounts`, set up by the `mount` package's postinst) and a
-   clean `/etc/resolv.conf` (mmdebstrap's unshare mode bind-mounts the
-   *host's* resolv.conf into its build chroot for apt's own DNS, and that
-   host-specific content was ending up baked into the image). Both are
-   fixed up directly in the script after extraction, before `mke2fs`.
+produces `bazel-bin/third_party/debian/rootfs-debian.ext4` (768 MiB
+nominal, ~245 MiB actual content -- `nfs_test`'s `rootfs =
+"//third_party/debian:rootfs"` attribute depends on this target directly;
+`run-qemu.sh` still copies it into each test's own `$TEST_TMPDIR`, same as
+before, so the guest can write to it freely without disturbing the cached
+original).
 
 ### Boot mode: chrooting instead of switching root
 
 The initramfs boot stays the fast path for every other test. `qemu_test`
-takes an optional `rootfs = "@kernel_image//:rootfs_debian.ext4"` attribute
-(`test/qemu/qemu_test.bzl`): when given, `run-qemu.sh` copies the cached
+takes an optional `rootfs = "//third_party/debian:rootfs"` attribute
+(`test/qemu/qemu_test.bzl`): when given, `run-qemu.sh` copies the built
 image into the test's own tmpdir, attaches it as an extra virtio-blk disk
 at the next free `/dev/vd<letter>`, and passes `dcfs_rootfs=/dev/vd<letter>`
 on the kernel command line. `guest/init` mounts it on `/newroot`,

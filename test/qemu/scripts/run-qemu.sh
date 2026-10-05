@@ -178,11 +178,16 @@ if [ -n "$ROOTFS" ]; then
 	rootfs_letter=$(awk -v i="$rootfs_index" 'BEGIN{printf "%c", 97+i}')
 	rootfs_dev="vd$rootfs_letter"
 	rootfs_img="$WORKDIR/rootfs.img"
-	# Copy rather than attach the cached image directly: the guest chroots
-	# into and writes through this filesystem, and the cached image at
-	# @kernel_image//:rootfs_debian.ext4 must stay pristine for the next
-	# test run. A ~1 GiB copy is cheap next to the rest of this test.
+	# Copy rather than attach the source image directly: the guest chroots
+	# into and writes through this filesystem, and the source (now a Bazel
+	# output, //third_party/debian:rootfs -- see test/qemu/BUILD.bazel's
+	# nfs_test) must stay pristine for the next test run. A ~1 GiB copy is
+	# cheap next to the rest of this test. Bazel marks its own outputs
+	# read-only (0555) on purpose; `cp` preserves that onto $rootfs_img, so
+	# it needs an explicit +w or QEMU's -drive (no readonly=on) fails with
+	# "Permission denied" opening it.
 	cp "$ROOTFS" "$rootfs_img"
+	chmod u+w "$rootfs_img"
 	drive_args="$drive_args -drive id=$rootfs_dev,file=$rootfs_img,format=raw,if=none -device virtio-blk-device,drive=$rootfs_dev"
 	rootfs_append=" dcfs_rootfs=/dev/$rootfs_dev"
 fi
