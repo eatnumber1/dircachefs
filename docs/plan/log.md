@@ -214,3 +214,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   build; GNU bc Bazel-built; flex/bison/host C toolchain still from the host (BCR flex/bison fail at
   runtime under Bazel: runfiles/m4); selectable with --//test/qemu:kernel=stock. Orchestrator fix:
   build scripts now delete their temp build directories.
+- Wave 2 lane 1: Phase 3b (drop the kernel patch, stock kernel default) dispatched in lane-2 (Sonnet, general-purpose). Phase 4a continues in lane-1.
