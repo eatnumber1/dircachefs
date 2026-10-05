@@ -1,0 +1,61 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Phase 4, part c follow-up (docs/plan/phases/04-pinned-host-tools.md): a
+# pinned, Bazel-built, static mke2fs and debugfs, replacing the host's
+# mke2fs third_party/debian/README.md's "Host tools" section flagged as
+# this project's one remaining non-hermetic build tool. See README.md for
+# the e2fsprogs/libarchive pins, the configure flag rationale and the
+# update procedure; BUILD.e2fsprogs and BUILD.libarchive (the overlays
+# placed into the two fetched source trees -- see MODULE.bazel) hold the
+# actual configure_make rules.
+
+exports_files([
+    "BUILD.e2fsprogs",
+    "BUILD.libarchive",
+    "0001-debugfs-static-link-libarchive.patch",
+])
+
+# configure_make's declared outputs aren't individually addressable by
+# on-disk path as a label (see third_party/qemu/BUILD.bazel's
+# :qemu_system_x86_64 comment) -- BUILD.e2fsprogs's out_binaries gives each
+# one a matching OutputGroupInfo group; these filegroups pull each out as a
+# plain, single-file target other rules (third_party/debian:rootfs,
+# third_party/debian:ownership_test) can depend on directly.
+filegroup(
+    name = "mke2fs",
+    srcs = ["@e2fsprogs_src//:e2fsprogs"],
+    output_group = "mke2fs",
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "debugfs",
+    srcs = ["@e2fsprogs_src//:e2fsprogs"],
+    output_group = "debugfs",
+    visibility = ["//visibility:public"],
+)
+
+# Host-side smoke test (AGENTS.md allows this: no root, no kernel control),
+# same spirit as third_party/qemu and third_party/busybox's own smoke
+# tests. Test first: before @e2fsprogs_src/@e2fsprogs_libarchive existed in
+# MODULE.bazel, both targets below failed with "no such package" (see this
+# step's commit history for the exact failing output). Checks:
+#   - both binaries are statically linked (no NEEDED entries at all);
+#   - both run and print their pinned version;
+#   - mke2fs actually builds a usable ext4 image from a plain tarball via
+#     -d (the feature this whole step exists for), and debugfs can stat an
+#     entry out of the result -- a real, if minimal, end-to-end exercise
+#     of the --with-libarchive=direct link, not just a --version probe.
+sh_test(
+    name = "smoke_test",
+    size = "small",
+    srcs = ["smoke_test.sh"],
+    args = [
+        "$(location :mke2fs)",
+        "$(location :debugfs)",
+    ],
+    data = [
+        ":debugfs",
+        ":mke2fs",
+    ],
+)

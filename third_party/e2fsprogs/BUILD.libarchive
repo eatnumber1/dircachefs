@@ -1,0 +1,120 @@
+# BUILD file for @e2fsprogs_libarchive (see MODULE.bazel's http_archive call
+# and third_party/e2fsprogs/README.md's "Bundled libarchive" section).
+# Placed at the root of the fetched libarchive source tree by http_archive's
+# build_file= attribute, same mechanism as third_party/pjdfstest/
+# BUILD.pjdfstest and third_party/qemu/BUILD.qemu elsewhere in this tree.
+#
+# This is a private, minimal static build of libarchive, built solely so
+# e2fsprogs's `mke2fs -d <tarball>` (third_party/e2fsprogs/BUILD.e2fsprogs)
+# has something to link against -- it is not a general-purpose libarchive
+# for the rest of this project to depend on (hence living under
+# third_party/e2fsprogs/, not its own third_party/libarchive/). Every
+# optional format/filter/crypto backend is disabled (see
+# LIBARCHIVE_CONFIGURE_OPTIONS below): the only thing dcfs ever feeds
+# mke2fs -d is @debian//:flat, a plain uncompressed POSIX tar
+# (third_party/debian/README.md's "Image assembly"), so compression
+# filters, ACL/xattr extras beyond what Linux's own headers give for free,
+# and alternate archive formats (cpio, zip, 7zip, ...) are all unneeded
+# weight -- confirmed by `nm` on the resulting libarchive.a: its only
+# undefined symbols are glibc's (see README.md).
+
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"], exclude = ["bazel-*"]),
+)
+
+# See README.md for why each flag is here. Confirmed by a manual
+# ./configure + make outside Bazel first (this step's commit log/README has
+# the transcript): the resulting libarchive.a's only undefined symbols
+# (`nm -u`) are glibc's (malloc/stat/open/... plus libarchive's own bundled
+# BLAKE2 reference implementation) -- no bz2/lz4/lzma/zstd/openssl/xml2/
+# iconv/pthread symbols at all, so none of those libraries need to be
+# fetched, built or linked.
+LIBARCHIVE_CONFIGURE_OPTIONS = [
+    # Static only -- nothing here ever needs a shared libarchive.so, and
+    # not building one halves the compile work.
+    "--disable-shared",
+    "--enable-static",
+
+    # Every optional format backend this build doesn't need: dcfs only
+    # ever reads a plain POSIX tar (see the file header above). Disabling
+    # each one removes that backend's external library dependency
+    # entirely -- libarchive's own tar/ustar/pax reader (archive_read_
+    # support_format_tar.c) has no external dependency of its own.
+    "--without-zlib", # gzip-compressed tar: @debian//:flat is never compressed
+    "--without-bz2lib", # bzip2
+    "--without-libb2", # external BLAKE2 (the bundled reference impl is used instead, and is unused anyway since we never write checksums)
+    "--without-lz4",
+    "--without-zstd",
+    "--without-lzma", # xz/lzma
+    "--without-openssl", # mtree/xar hash support
+    "--without-xml2", # xar format
+    "--without-expat", # xar format (alternate)
+    "--without-nettle", # alternate crypto backend
+    "--without-cng", # Windows crypto backend (n/a on Linux anyway)
+    "--without-iconv", # filename charset transcoding: @debian//:flat's paths are all plain ASCII
+
+    # Command-line tools (bsdtar/bsdcpio/bsdcat/bsdunzip): this build only
+    # wants the library, linked directly into e2fsprogs's mke2fs/debugfs.
+    "--disable-bsdtar",
+    "--disable-bsdcpio",
+    "--disable-bsdcat",
+    "--disable-bsdunzip",
+
+    # No rpath baked in -- this static .a never gets dlopen()'d or run on
+    # its own, and a baked-in sandbox path would be wrong the moment this
+    # output is reused in a different build.
+    "--disable-rpath",
+]
+
+configure_make(
+    name = "archive",
+    lib_source = ":all_srcs",
+    configure_command = "configure",
+    configure_options = LIBARCHIVE_CONFIGURE_OPTIONS,
+    # Default targets ("", "install") and out_include_dir ("include") are
+    # exactly right here -- plain `make && make install` only builds
+    # libarchive.la (the command-line tools are disabled above) and
+    # installs libarchive.a plus archive.h/archive_entry.h.
+    out_static_libs = ["libarchive.a"],
+    env = {
+        # Force PKG_CHECK_MODULES to fail cleanly for every optional
+        # dependency above instead of silently finding a *host* .pc file
+        # (e.g. a dev machine with libxml2-dev installed) -- the same
+        # host-leak bug third_party/qemu/pkgconfig_shim.bzl's "zlib *also*
+        # needs one of these" paragraph documents for zlib. Every
+        # dependency this build wants is already --without'd above, so
+        # this should never matter in practice; it is set anyway so a
+        # future flag addition fails loudly (a real configure error)
+        # instead of silently depending on whatever happens to be
+        # installed on the machine running this build.
+        "PKG_CONFIG_LIBDIR": "/nonexistent",
+        # Overrides (does not merge with) rules_foreign_cc's own
+        # toolchain-derived CFLAGS, which otherwise includes this
+        # project's global `build --copt -Werror` (.bazelrc) -- confirmed
+        # to actually matter here, not just in theory (see
+        # third_party/e2fsprogs/README.md's "autoconf's AC_CHECK_FUNCS
+        # and -Werror" section): autoconf's own generated feature-probe
+        # programs are *expected* to warn (that's how AC_CHECK_FUNCS'
+        # conflicting-prototype trick detects a function exists at all),
+        # and -Werror turns those expected warnings into hard failures,
+        # making configure wrongly conclude the function is absent.
+        # rules_foreign_cc *appends* this to its own toolchain-derived
+        # CFLAGS rather than replacing it (confirmed by reading the
+        # generated build_script.sh: the final `configure`/`make`
+        # invocations' CFLAGS value ends in "... -Werror ... <this
+        # value>"), so "-Wno-error" placed last is what actually cancels
+        # the leaked -Werror (gcc applies -W flags cumulatively,
+        # left-to-right) while keeping the toolchain's other copts
+        # (stack protector, fortify, etc.) intact. "-g -O2" matches plain
+        # autoconf's own default (what a bare ./configure with no CFLAGS
+        # override already uses -- confirmed by this step's manual,
+        # non-Bazel build first); without it, rules_foreign_cc having set
+        # CFLAGS at all suppresses autoconf's own `: ${CFLAGS=-g -O2}`
+        # fallback, silently building at -O0.
+        "CFLAGS": "-Wno-error -g -O2",
+    },
+    visibility = ["//visibility:public"],
+)

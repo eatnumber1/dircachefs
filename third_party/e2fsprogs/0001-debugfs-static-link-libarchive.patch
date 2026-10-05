@@ -1,0 +1,11 @@
+--- a/debugfs/Makefile.in	2026-10-05 07:43:37.678807148 -0700
++++ b/debugfs/Makefile.in	2026-10-05 07:43:37.682807196 -0700
+@@ -70,7 +70,7 @@
+ debugfs.static: $(DEBUG_OBJS) $(STATIC_DEPLIBS)
+ 	$(E) "	LD $@"
+ 	$(Q) $(CC) $(LDFLAGS_STATIC) -o debugfs.static $(DEBUG_OBJS) \
+-		$(STATIC_LIBS) $(READLINE_LIB)
++		$(STATIC_LIBS) $(READLINE_LIB) $(LIBARCHIVE)
+ 
+ debugfs.static-libs: $(DEBUG_OBJS) $(STATIC_DEPLIBS)
+ 	$(E) "	LD $@"

@@ -1,0 +1,225 @@
+# BUILD file for @e2fsprogs_src (see MODULE.bazel's http_archive call and
+# README.md). Placed at the root of the fetched e2fsprogs source tree by
+# http_archive's build_file= attribute, same mechanism as
+# third_party/pjdfstest/BUILD.pjdfstest and third_party/qemu/BUILD.qemu.
+#
+# e2fsprogs's own build system is autoconf (./configure) + a hand-written,
+# recursive-make Makefile.in tree (not libtool, not Meson) -- configure_make
+# fits directly, the same combination third_party/qemu/BUILD.qemu uses for
+# QEMU's own configure-then-make-via-generated-Makefile build.
+#
+# This step (docs/plan/phases/04-pinned-host-tools.md, part c's e2fsprogs
+# follow-up) only needs two binaries, both built *static* so the Debian
+# rootfs image build (third_party/debian/) and its own tests never depend
+# on a dynamic loader or any shared library at runtime:
+#   - mke2fs: builds the ext4 image directly from @debian//:flat's own tar
+#     (mke2fs -d <tarball>, added in 1.47.1 -- see third_party/debian/
+#     README.md's "Ownership" section for why this replaces the host's
+#     mke2fs and the old extract-then-chown-nothing approach).
+#   - debugfs: used only by third_party/debian:ownership_test to inspect
+#     the resulting image's inode ownership/mode (`stat`) -- it never
+#     writes to an image in this project.
+# See README.md for the full configure flag rationale and the minimal
+# feature set (no fuse2fs, no NLS, no e2scrub, ...).
+
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"], exclude = ["bazel-*"]),
+)
+
+# See README.md for why each flag is here (or, for things deliberately left
+# at their default, why that's fine). Kept in one place so the configure
+# line in README.md and the one actually run can be diffed by eye, same
+# convention as third_party/qemu/BUILD.qemu's QEMU_CONFIGURE_OPTIONS.
+E2FSPROGS_CONFIGURE_OPTIONS = [
+    # fuse2fs needs libfuse headers/-lfuse and is never used by this
+    # project (dcfs is its own FUSE filesystem, built from
+    # third_party/libfuse's bazel_dep, not e2fsprogs's fuse2fs).
+    "--disable-fuse2fs",
+
+    # No translated message catalogs needed for a build-time-only tool
+    # invoked exclusively from genrules/tests, always in the "C" locale.
+    "--disable-nls",
+
+    # uuidd (the UUID generation daemon): a long-running system service,
+    # irrelevant to a one-shot mke2fs/debugfs invocation from a genrule.
+    "--disable-uuidd",
+
+    # tdb (Samba's Trivial DataBase, used only by an optional e2fsck
+    # metadata-csum-seed cache this project never builds e2fsck to use):
+    # avoids a tdb detection/link dependency entirely.
+    "--disable-tdb",
+
+    # libbacktrace-based crash backtraces: diagnostic-only, not needed for
+    # a static binary invoked from a genrule/test (a crash there already
+    # fails the Bazel action loudly).
+    "--disable-backtrace",
+
+    # e2image/resize2fs/e4defrag: not among the two binaries this build
+    # produces (see the file header) -- these targets are never requested
+    # via the `targets` attribute below, so disabling their configure
+    # probes here is just keeping the configure line honest, not a
+    # functional requirement.
+    "--disable-imager",
+    "--disable-resizer",
+    "--disable-defrag",
+
+    # Private, bundled uuid/blkid libraries (e2fsprogs ships its own
+    # copies under lib/uuid, lib/blkid) instead of the system's
+    # libuuid/libblkid (util-linux) -- the same reasoning as this build
+    # using its own bundled libarchive (BUILD.libarchive): a hermetic
+    # Bazel build must not depend on what happens to be installed on the
+    # host. mke2fs always needs a uuid for the filesystem's superblock
+    # (UUID=... in blkid output, -U is just an override) and blkid for
+    # its own internal device/fs-type probing, so these are real
+    # functional requirements, not optional extras.
+    "--enable-libuuid",
+    "--enable-libblkid",
+
+    # Direct, static link against @e2fsprogs_libarchive's libarchive.a
+    # (see BUILD.libarchive and its README.md section) -- "direct" is
+    # required: without it, this host's dlopen()==yes means configure
+    # defaults to CONFIG_DLOPEN_LIBARCHIVE (resolving libarchive.so.13 at
+    # *runtime* via dlopen(), confirmed by reading misc/
+    # create_inode_libarchive.c), which would silently reintroduce a host
+    # dependency this whole phase exists to eliminate (see
+    # third_party/debian/README.md's "Host tools" section) -- a static
+    # mke2fs that only works when the invoking host happens to have
+    # libarchive.so.13 installed is not actually hermetic.
+    "--with-libarchive=direct",
+
+    # Install-path probes for udev/cron/systemd integration: this build
+    # never runs `make install` for real (see the configure_make rule's
+    # targets/postfix_script below -- the two .static binaries are copied
+    # out by hand), so these paths are never used, but leaving them to
+    # auto-detect would make configure's result depend on whether the
+    # sandboxed build environment happens to have udev/cron/systemd unit
+    # directories -- explicit --without makes this deterministic.
+    "--without-udev-rules-dir",
+    "--without-crond-dir",
+    "--without-systemd-unit-dir",
+
+    # No baked-in rpath -- same reasoning as BUILD.libarchive's
+    # --disable-rpath.
+    "--disable-rpath",
+]
+
+configure_make(
+    name = "e2fsprogs",
+    lib_source = ":all_srcs",
+    configure_command = "configure",
+    configure_options = E2FSPROGS_CONFIGURE_OPTIONS,
+    # Neither "all" (builds every program, plus docs) nor the project's
+    # own "all-static-progs-recursive" aggregate (which, read literally --
+    # see this step's commit log for the trace -- also tries to build
+    # po/, tests/, scrub/ and e2fsck/resize/'s *dynamic* `all` target, not
+    # just their *.static programs) is what's wanted here: just the two
+    # static binaries this build exists to produce, nothing else.
+    #
+    # "libs" (-> top Makefile's all-libs-recursive) builds every lib/*
+    # subdirectory's "all" target first -- both the .a each *.static
+    # target links against and (unused, harmless, not installed) each
+    # subdirectory's .so.
+    #
+    # A `targets` entry is substituted directly into "make <entry>
+    # PREFIX=...", run from the same directory as the main build (no
+    # separate out-of-tree build dir -- confirmed by reading
+    # rules_foreign_cc's make_script.bzl: the fetched sources are
+    # symlinked straight into $BUILD_TMPDIR before any configure/make
+    # command runs), so a target string containing make's own "-C <dir>"
+    # flag works exactly like a normal interactive `make -C misc
+    # mke2fs.static` -- confirmed working end-to-end by this step's own
+    # manual (non-Bazel) build first, including the one upstream gap this
+    # step had to patch around: debugfs/Makefile.in's debugfs.static
+    # recipe never linked $(LIBARCHIVE) at all (unlike misc/Makefile.in's
+    # mke2fs.static, which already does) -- a real link failure
+    # ("undefined reference to `archive_read_new'" etc., from
+    # create_inode_libarchive.o, which debugfs links in for its own
+    # tar-import commands) reproduced manually before
+    # 0001-debugfs-static-link-libarchive.patch (applied via this
+    # repository's http_archive call) added it.
+    targets = [
+        "libs",
+        "-C misc mke2fs.static",
+        "-C debugfs debugfs.static",
+    ],
+    # configure_make's declared outputs aren't individually addressable by
+    # on-disk path as a label (see third_party/qemu/BUILD.bazel's
+    # :qemu_system_x86_64 comment for the full explanation) -- out_binaries
+    # gives each one a matching OutputGroupInfo group instead, consumed by
+    # this package's BUILD.bazel filegroups.
+    out_binaries = [
+        "mke2fs",
+        "debugfs",
+    ],
+    # misc/mke2fs.static and debugfs/debugfs.static are themselves plain
+    # Makefile targets, not part of configure_make's own install graph
+    # (there is no e2fsprogs `make install` target that installs the
+    # *.static binaries anywhere) -- postfix_script places them under
+    # $INSTALLDIR/bin by hand, the same pattern third_party/qemu/
+    # BUILD.qemu's postfix_script uses for qemu-system-x86_64 (built but
+    # never "installed" by ninja's own install graph either). `strip`
+    # drops debug info rules_foreign_cc's generated CFLAGS include by
+    # default (-g) -- these binaries are invoked from genrules/tests, not
+    # debugged in place; third_party/e2fsprogs/README.md records the
+    # unstripped-vs-stripped sizes.
+    # $$BUILD_TMPDIR/$$INSTALLDIR (single escaped "$$", nothing after the
+    # name): the only spelling Bazel's attribute validator accepts *and*
+    # that expands correctly -- see third_party/qemu/BUILD.qemu's
+    # postfix_script comment for why a closing "$$" (e.g.
+    # "$$BUILD_TMPDIR$$/misc") is wrong (confirmed the hard way here too:
+    # this step's first attempt used that form and failed with `cp:
+    # cannot stat '.../e2fsprogs.build_tmpdir$/misc/mke2fs.static'` -- a
+    # literal stray "$" character survives right after the directory
+    # name).
+    postfix_script = "mkdir -p $$INSTALLDIR/bin && " +
+                      "cp $$BUILD_TMPDIR/misc/mke2fs.static $$INSTALLDIR/bin/mke2fs && " +
+                      "cp $$BUILD_TMPDIR/debugfs/debugfs.static $$INSTALLDIR/bin/debugfs && " +
+                      "strip $$INSTALLDIR/bin/mke2fs $$INSTALLDIR/bin/debugfs",
+    # Provides -I/-L for archive.h/libarchive.a (rules_foreign_cc derives
+    # CPPFLAGS/LDFLAGS from a dep's CcInfo the same way
+    # third_party/qemu/BUILD.qemu's `deps = ["@glib//glib", ...]` does for
+    # glib/zlib -- see that file's long "Dependencies" comment). It
+    # deliberately goes no further than that (no synthesized -larchive):
+    # --with-libarchive=direct's own AC_CHECK_LIB(archive,
+    # archive_read_new, ...) test supplies that flag itself once -L finds
+    # libarchive.a.
+    deps = ["@e2fsprogs_libarchive//:archive"],
+    env = {
+        # Same hermeticity reasoning as BUILD.libarchive's identical
+        # setting: force the --with-libarchive=direct PKG_CHECK_MODULES
+        # probe to fail cleanly and fall through to the plain
+        # AC_CHECK_LIB-based detection (which is what actually finds
+        # @e2fsprogs_libarchive via the -L/-I this rule's `deps` already
+        # provides) instead of silently finding a *host* libarchive.pc.
+        # Confirmed necessary by reading configure.ac directly: on the
+        # pkg-config-success branch, configure.ac never sets ARCHIVE_LIBS
+        # at all (an upstream oddity -- CFLAGS gets the pc file's cflags
+        # merged in, but the library itself is left undetected), which
+        # would silently build an e2fsprogs with tarball support disabled
+        # instead of failing loudly.
+        "PKG_CONFIG_LIBDIR": "/nonexistent",
+        # Same reasoning as BUILD.libarchive's identical override: this
+        # project's global `build --copt -Werror` (.bazelrc) leaking into
+        # autoconf's own AC_CHECK_FUNCS probes made configure wrongly
+        # conclude `strcasecmp` doesn't exist (a conflicting-prototype
+        # -Werror failure in autoconf's *test* program, not a real bug),
+        # which left misc/util.h's `#ifndef HAVE_STRCASECMP` fallback
+        # declaration active and then conflicting for real with
+        # <strings.h>'s actual prototype -- a real, reproduced build
+        # failure this step hit first (see README.md's "autoconf's
+        # AC_CHECK_FUNCS and -Werror" section for the exact error),
+        # before adding this override. "-Wno-error" must come last (and a
+        # plain "-g -O2" alone is not enough): rules_foreign_cc *appends*
+        # this value to its own toolchain-derived CFLAGS rather than
+        # replacing it, so only an explicit, later "-Wno-error" actually
+        # cancels the earlier "-Werror" (confirmed the hard way -- this
+        # step's first attempt used just "-g -O2" here, which still built
+        # with -Werror active and failed on util/symlinks.c's
+        # -Wstringop-truncation; see README.md).
+        "CFLAGS": "-Wno-error -g -O2",
+    },
+    visibility = ["//visibility:public"],
+)

@@ -98,6 +98,35 @@ qemu_repo(
     url = "https://download.qemu.org/qemu-11.1.2.tar.xz",
 )
 
+# Phase 4, part c follow-up (third_party/e2fsprogs/): a pinned, minimal,
+# static mke2fs/debugfs, replacing the host's mke2fs that
+# third_party/debian/scripts/mkrootfs.sh used to depend on (see
+# third_party/e2fsprogs/README.md's "Pin" section for why 1.47.4, and
+# "Bundled libarchive" for why e2fsprogs_libarchive also needs its own
+# pin: mke2fs -d <tarball> is implemented entirely via libarchive, with no
+# fallback, and the host has none installed).
+# 0001-debugfs-static-link-libarchive.patch works around an upstream gap:
+# debugfs/Makefile.in's debugfs.static recipe never links $(LIBARCHIVE),
+# unlike misc/Makefile.in's mke2fs.static (see that README's "The
+# debugfs.static gap" section for the reproduced-first link error).
+http_archive(
+    name = "e2fsprogs_src",
+    build_file = "//third_party/e2fsprogs:BUILD.e2fsprogs",
+    patch_args = ["-p1"],
+    patches = ["//third_party/e2fsprogs:0001-debugfs-static-link-libarchive.patch"],
+    sha256 = "fd5bf388cbdbe006a3d3b318d983b2948382440acc85a87f1e7d108653e8db0b",
+    strip_prefix = "e2fsprogs-1.47.4",
+    url = "https://www.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v1.47.4/e2fsprogs-1.47.4.tar.xz",
+)
+
+http_archive(
+    name = "e2fsprogs_libarchive",
+    build_file = "//third_party/e2fsprogs:BUILD.libarchive",
+    sha256 = "19f917d42d530f98815ac824d90c7eaf648e9d9a50e4f309c812457ffa5496b5",
+    strip_prefix = "libarchive-3.8.1",
+    url = "https://github.com/libarchive/libarchive/releases/download/v3.8.1/libarchive-3.8.1.tar.xz",
+)
+
 # Phase 4, part c (third_party/debian/): the Debian NFS-test rootfs image,
 # replacing test/qemu/scripts/mkrootfs-debian.sh's mmdebstrap run.
 # rules_distroless's apt extension resolves and fetches a pinned package
