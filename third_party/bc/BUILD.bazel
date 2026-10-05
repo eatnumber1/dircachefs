@@ -1,0 +1,38 @@
+exports_files(["BUILD.gnu_bc"])
+
+# GNU bc (step 3.1a): not in the Bazel Central Registry, so fetched by
+# http_archive (MODULE.bazel) and built here. The kernel build
+# (//third_party/linux:bzImage) needs a `bc` on PATH for
+# kernel/time/timeconst.bc (and a couple of other scripts/ uses); see
+# README.md for the pin.
+#
+# bc's release tarball ships a pre-generated `configure` (autoconf) and
+# Makefile.in, so this is a plain out-of-tree autoconf build (`configure`
+# supports building in a separate directory via VPATH, so the read-only
+# @gnu_bc source the sandbox hands us is never written to -- only $PWD,
+# which Bazel treats as this action's private scratch, is). No network
+# access and no writes outside the declared output.
+#
+# bc.y/scan.l's generated bc.c/scan.c are also shipped pre-generated, and
+# configure's "checking that generated files are newer than configure"
+# check confirms a plain tar extraction kept them that way, so make never
+# regenerates them and this build never actually invokes flex/bison (only
+# configure's AC_PROG_LEX/AC_PROG_YACC probe for their presence). Uses
+# whatever flex/bison the host has, same as the kernel build -- see
+# //third_party/linux:README.md's "Hermetic build tools" for why the BCR's
+# flex/bison were tried for the kernel build and reverted.
+genrule(
+    name = "bc_build",
+    srcs = [
+        "@gnu_bc//:all",
+        "@gnu_bc//:configure",
+    ],
+    outs = ["bc"],
+    cmd = """$(location build_bc.sh) \
+        "$$(dirname '$(location @gnu_bc//:configure)')" \
+        '$(location bc)'""",
+    tools = [
+        "build_bc.sh",
+    ],
+    visibility = ["//visibility:public"],
+)

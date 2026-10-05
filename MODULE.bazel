@@ -16,6 +16,7 @@ single_version_override(
 bazel_dep(name = "rules_cc", version = "0.2.25")
 bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 bazel_dep(name = "rules_shell", version = "0.8.0")
+bazel_dep(name = "bazel_skylib", version = "1.9.2")
 
 # Exposes the out-of-tree QEMU test kernel (test/qemu/scripts/build-kernel.sh)
 # and host busybox to the test/qemu:boot_test-style targets. See
@@ -31,6 +32,26 @@ kernel_image(name = "kernel_image")
 # (tests/conf's filesystem-type detection, tests/misc.sh's use of
 # `openssl md5` where this project's busybox-only guest has no openssl).
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+# Step 3.1a: the pinned, stock upstream test kernel (second kernel the QEMU
+# tests can select, see test/qemu:kernel flag) and GNU bc (needed by the
+# kernel build, not in the BCR). See third_party/linux/README.md and
+# third_party/bc/README.md for the pin and update procedure.
+http_archive(
+    name = "linux_source",
+    build_file = "//third_party/linux:BUILD.linux_source",
+    sha256 = "b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba",
+    strip_prefix = "linux-7.2.9",
+    url = "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz",
+)
+
+http_archive(
+    name = "gnu_bc",
+    build_file = "//third_party/bc:BUILD.gnu_bc",
+    sha256 = "ae470fec429775653e042015edc928d07c8c3b2fc59765172a330d3d87785f86",
+    strip_prefix = "bc-1.08.2",
+    url = "https://ftp.gnu.org/gnu/bc/bc-1.08.2.tar.gz",
+)
 
 http_archive(
     name = "pjdfstest",

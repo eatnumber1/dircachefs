@@ -86,6 +86,32 @@ Two consequences worth knowing:
 - **No PCI.** Disks are virtio-mmio (`-device virtio-blk-device`), not
   virtio-pci; the `microvm` machine type has no PCI bus at all.
 
+## The stock kernel (step 3.1a)
+
+A second kernel, fetched and built entirely by Bazel (no out-of-tree
+script, no `~/Sources/linux`): a pinned upstream release, configured from
+`make tinyconfig` plus a checked-in fragment
+(`third_party/linux/kernel.config`) instead of `x86_64_defconfig` +
+`kvm_guest.config` + a `scripts/config` edit list. See
+`third_party/linux/README.md` for the pin, the fragment's rationale, and
+which host tools the build still depends on.
+
+It is *not* the default yet -- dcfs still requests
+`FUSE_CAP_ATTR_GENERATION`/uses `fuse_reply_attr_with_generation` (Phase 3b
+removes this), which needs the patched libfuse and kernel patch, so only
+`boot_test` is expected to pass against the stock kernel today. Select it
+with the `//test/qemu:kernel` `string_flag`:
+
+```
+bazel test //test/qemu:boot_test --//test/qemu:kernel=stock
+```
+
+Omit the flag (or pass `--//test/qemu:kernel=patched`) to get the default,
+patched kernel described above. `@kernel_image//:bzImage` (this section's
+kernel) is unaffected either way -- the flag only changes which `bzImage`
+label `qemu_test`/`qemu_test_matrix` (`test/qemu/qemu_test.bzl`) put in a
+given test's `data`/`args`.
+
 ## Fast boot
 
 The runner (`scripts/run-qemu.sh`) boots QEMU's `microvm` machine type with

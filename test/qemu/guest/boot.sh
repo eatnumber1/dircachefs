@@ -11,7 +11,42 @@
 FAILED=0
 . "$(dirname "$0")/lib.sh"
 
-echo "boot.sh: kernel $(uname -r)"
+KVER=$(uname -r)
+echo "boot.sh: kernel $KVER"
+
+# Step 3.1a: when booted with --//test/qemu:kernel=stock, this is
+# //third_party/linux:bzImage, the pinned upstream kernel (see
+# third_party/linux/README.md for the pin); check its version and that a
+# couple of third_party/linux/kernel.config's fragment options actually
+# took effect, by behavior (no /proc/config.gz: CONFIG_IKCONFIG is off, see
+# the fragment's size-minimization goals). Skipped entirely against the
+# default patched kernel, which has its own, different version.
+case "$KVER" in
+7.2.9*)
+	pass stock-kernel-version
+
+	# CONFIG_NAMESPACES + CONFIG_NET_NS/CONFIG_USER_NS: procfs only
+	# exposes a namespace's /proc/self/ns/<type> entry when that
+	# namespace type is actually compiled in.
+	if [ -e /proc/self/ns/net ] && [ -e /proc/self/ns/user ]; then
+		pass stock-kernel-namespaces
+	else
+		fail stock-kernel-namespaces "missing /proc/self/ns/{net,user}"
+	fi
+
+	# CONFIG_CGROUPS: mounting cgroup2 fails outright without it.
+	mkdir -p /cgroup_test
+	if mount -t cgroup2 cgroup2 /cgroup_test; then
+		pass stock-kernel-cgroups
+		umount /cgroup_test
+	else
+		fail stock-kernel-cgroups "mount -t cgroup2 failed"
+	fi
+	;;
+*)
+	echo "boot.sh: not the stock kernel, skipping stock-kernel-* checks"
+	;;
+esac
 
 if [ -x /bin/dcfs ]; then
 	pass dcfs-present

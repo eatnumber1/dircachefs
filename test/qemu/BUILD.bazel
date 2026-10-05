@@ -1,3 +1,4 @@
+load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
@@ -7,6 +8,27 @@ exports_files([
     "scripts/mkinitramfs.sh",
     "scripts/run-qemu.sh",
 ])
+
+# Step 3.1a: which kernel qemu_test/qemu_test_matrix boot. "patched" (the
+# default) is @kernel_image//:bzImage, the out-of-tree, not-Bazel-tracked
+# build of test/qemu/scripts/build-kernel.sh's patched kernel (still needed
+# by everything except boot_test until Phase 3b drops the kernel patch).
+# "stock" is //third_party/linux:bzImage, the pinned upstream kernel Bazel
+# fetches and builds (see third_party/linux/README.md). Select with
+# `--//test/qemu:kernel=stock`.
+string_flag(
+    name = "kernel",
+    build_setting_default = "patched",
+    values = [
+        "patched",
+        "stock",
+    ],
+)
+
+config_setting(
+    name = "kernel_stock",
+    flag_values = {":kernel": "stock"},
+)
 
 # Set by --define=dcfs_sanitizer=asan/ubsan (see .bazelrc's build:asan /
 # build:ubsan). qemu_cc_test uses these to skip the fully_static_link

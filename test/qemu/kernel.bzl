@@ -17,6 +17,14 @@ with no kernel present; test/qemu/scripts/run-qemu.sh detects the
 placeholder and fails with a clear message when the qemu test actually
 runs. `rootfs_debian.ext4` works the same way (placeholder first line
 "DCFS-ROOTFS-MISSING") for the same reason.
+
+Step 3.1a: this repo rule's `bzImage` is the *patched* kernel and stays the
+default (`@kernel_image//:bzImage`). A second, stock upstream kernel is
+fetched and built entirely by Bazel instead -- see
+//third_party/linux:bzImage and third_party/linux/README.md -- and
+qemu_test/qemu_test_matrix (test/qemu/qemu_test.bzl) select between the two
+with the `//test/qemu:kernel` string_flag (`patched` default, or `stock`;
+see test/qemu/BUILD.bazel).
 """
 
 _DEFAULT_BUSYBOX = "/usr/bin/busybox"

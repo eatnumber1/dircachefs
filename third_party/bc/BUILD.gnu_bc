@@ -1,0 +1,12 @@
+# BUILD file for @gnu_bc (GNU bc's release tarball, not in the Bazel Central
+# Registry -- see MODULE.bazel's http_archive and third_party/bc/README.md).
+# Same pattern as third_party/linux/BUILD.linux_source: expose the whole
+# source tree plus one well-known file so //third_party/bc:bc
+# (BUILD.bazel) can find the extracted root inside the sandbox.
+exports_files(["configure"])
+
+filegroup(
+    name = "all",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)

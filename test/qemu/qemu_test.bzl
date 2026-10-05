@@ -44,16 +44,25 @@ def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", tim
     rootfs_data = [rootfs] if rootfs else []
     rootfs_args = ["--rootfs", "$(location " + rootfs + ")"] if rootfs else []
 
+    # Step 3.1a: --//test/qemu:kernel selects which kernel this test boots
+    # (see BUILD.bazel's :kernel string_flag/:kernel_stock config_setting).
+    kernel_data = select({
+        "//test/qemu:kernel_stock": ["//third_party/linux:bzImage"],
+        "//conditions:default": ["@kernel_image//:bzImage"],
+    })
+    kernel_args = select({
+        "//test/qemu:kernel_stock": ["$(location //third_party/linux:bzImage)"],
+        "//conditions:default": ["$(location @kernel_image//:bzImage)"],
+    })
+
     sh_test(
         name = name,
         srcs = ["scripts/run-qemu.sh"],
-        data = [
+        data = kernel_data + [
             ":initramfs",
-            "@kernel_image//:bzImage",
             guest_script,
         ] + rootfs_data,
-        args = rootfs_args + [
-            "$(location @kernel_image//:bzImage)",
+        args = rootfs_args + kernel_args + [
             "$(location :initramfs)",
             guest_script_basename,
         ] + disk_args,
