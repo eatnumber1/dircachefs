@@ -41,10 +41,9 @@ Contents:
 Pre-release (October 2026). The single-threaded daemon is complete for its
 planned scope: read-only operations from the cache, write-through for every
 mutation, crash and power-loss recovery, caller credentials, and NFS
-export. The full test suite passes, including pjdfstest with zero
-dcfs-specific failures against ext4. It has not yet seen production use,
-and it depends on a kernel patch that is not yet upstream (see
-Requirements).
+export. The full test suite passes against a stock kernel and stock
+libfuse, including pjdfstest with zero dcfs-specific failures against
+ext4. It has not yet seen production use.
 
 The repository carries forward the history of a 2023 experiment called
 "dfs" (a ublk block device); "dcfs" is the current project.
@@ -55,14 +54,6 @@ The repository carries forward the history of a 2023 experiment called
   (`CAP_DAC_READ_SEARCH`), mounts FUSE and registers passthrough files
   (`CAP_SYS_ADMIN`), and switches to each caller's filesystem credentials.
   There is no unprivileged mode.
-- **Linux with the `FUSE_ATTR_GENERATION` patch** (FUSE protocol 7.47).
-  It makes the kernel honour the generation numbers dcfs returns from
-  LOOKUP, GETATTR and SETATTR, which is what makes NFS export safe. The v1
-  posting is
-  https://lore.kernel.org/all/20260927141437.1432584-1-russ@har.mn/ and a
-  v2 followed. dcfs logs at startup whether the kernel granted the
-  capability; without it, dcfs still runs but should not be exported over
-  NFS.
 - **Linux 6.9 or later** for `FS_IOC_GETFSUUID` (filesystem identity) and
   FUSE passthrough (`CONFIG_FUSE_PASSTHROUGH`).
 - **A backing filesystem that supports file handles
@@ -79,11 +70,9 @@ The repository carries forward the history of a 2023 experiment called
 - **To build:** Bazel through
   [bazelisk](https://github.com/bazelbuild/bazelisk) (the repository pins
   Bazel 9.2.0 in `.bazelversion`) and a C++20 compiler. Every library
-  dependency (Abseil, SQLite, libfuse 3.18.2 plus the generation patch in
-  `third_party/libfuse/`) is fetched and built by Bazel; no system libfuse
-  is needed.
-- **To test:** QEMU, KVM and a kernel built from a tree carrying the
-  patch. See [Testing](#testing).
+  dependency (Abseil, SQLite, stock libfuse 3.18.2) is fetched and built
+  by Bazel; no system libfuse is needed.
+- **To test:** QEMU and KVM. See [Testing](#testing).
 
 ## Building
 
@@ -241,8 +230,8 @@ a different source directory; delete it to start with a cold cache.
 
 Every test, unit tests included, runs as root inside a QEMU guest booted
 from the project's own minimal kernel. There is no host-side test
-execution: dcfs needs root, `open_by_handle_at`, `FS_IOC_GETFSUUID` and the
-patched FUSE, none of which a development host can be assumed to have.
+execution: dcfs needs root, `open_by_handle_at`, `FS_IOC_GETFSUUID` and
+FUSE passthrough, none of which a development host can be assumed to have.
 Guests boot in about a second with KVM (QEMU `microvm`, direct kernel
 boot), so `bazel test //...` is dominated by compilation, not booting.
 `test/qemu/README.md` has the full details.
@@ -255,17 +244,14 @@ boot), so `bazel test //...` is dominated by compilation, not booting.
 2. Get write access to `/dev/kvm`: `sudo usermod -aG kvm "$USER"`, then log
    in again. Without KVM, QEMU falls back to software emulation, which is
    more than ten times slower and can make tests time out.
-3. Build the test kernel from a Linux tree that carries the
-   `FUSE_ATTR_GENERATION` patch:
 
-   ```
-   LINUX=~/Sources/linux test/qemu/scripts/build-kernel.sh
-   ```
-
-   It builds out of tree into `~/.cache/dcfs/kernel-build` (override with
-   `DCFS_KERNEL_BUILD`, and export the same variable to Bazel) and takes
-   tens of minutes the first time.
-4. For `nfs_test` only, the small Debian root image it chroots into is
+   The test kernel itself needs no manual build step: it is a pinned
+   upstream release fetched and built by Bazel (`//third_party/linux`),
+   the default for `--//test/qemu:kernel`. A second, deprecated kernel
+   (`--//test/qemu:kernel=patched`, built out of tree by
+   `test/qemu/scripts/build-kernel.sh`) is kept only until Phase 4; see
+   `test/qemu/README.md`.
+3. For `nfs_test` only, the small Debian root image it chroots into is
    built by Bazel from a pinned package set (needs `mke2fs`, e2fsprogs):
 
    ```
@@ -326,8 +312,8 @@ Bugs get a regression test first: the test is shown to fail on the
 unfixed code, then the fix makes it pass.
 
 The GitHub Actions workflow (`.github/workflows/ci.yml`) only builds
-(`bazel build //...`): hosted runners have neither KVM nor the patched
-kernel, so the tests need a KVM-capable machine set up as above.
+(`bazel build //...`): hosted runners have no KVM, so the tests need a
+KVM-capable machine set up as above.
 
 ## Design overview
 
@@ -469,8 +455,6 @@ recovery protocol, concurrency, and the test strategy.
 - [`docs/conformance.md`](docs/conformance.md): pjdfstest results.
 - [`test/qemu/README.md`](test/qemu/README.md): the QEMU test
   infrastructure.
-- The kernel patch, v1:
-  https://lore.kernel.org/all/20260927141437.1432584-1-russ@har.mn/
 - Background: https://russ.har.mn/blog/2026-04-09/fuse-loopback-is-incomplete
 
 ## License

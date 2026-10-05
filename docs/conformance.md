@@ -289,9 +289,7 @@ Step 4.5 recorded 43 here: these 28 (measured on tmpfs, see above) plus
   no real coverage.
 - **The `tests/conf`/`tests/misc.sh` patch is a repo patch on the
   `http_archive`, not a fork.** Kept as a single small unified diff
-  (`third_party/pjdfstest/0001-linux-portability.patch`), the same
-  pattern this repo already uses for the libfuse BCR overlay
-  (`third_party/libfuse/0001-attr-generation.patch`), rather than
+  (`third_party/pjdfstest/0001-linux-portability.patch`) rather than
   maintaining a full local copy of pjdfstest's `tests/` tree.
 - **The ext4-only baseline file is not read back at runtime.** Only
   `pjdfstest.expected_failures` gates pass/fail; `pjdfstest.ext4_failures`

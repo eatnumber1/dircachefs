@@ -1,11 +1,10 @@
 # Build only. Every dcfs test, unit tests included, runs as root inside a
-# QEMU guest booted with KVM from a kernel carrying the not-yet-upstream
-# FUSE_ATTR_GENERATION patch (see README.md's "Testing" and
-# test/qemu/README.md). GitHub's hosted runners have neither KVM nor that
-# kernel, so running `bazel test` here would only fail; tests need a
-# KVM-capable self-hosted runner with the patched kernel built by
-# test/qemu/scripts/build-kernel.sh. `bazel build //...` works without the
-# kernel (it is a placeholder until built) and builds every test binary.
+# QEMU guest booted with KVM from the project's own kernel (see README.md's
+# "Testing" and test/qemu/README.md). GitHub's hosted runners have no KVM,
+# so running `bazel test` here would only fail; tests need a KVM-capable
+# self-hosted runner (Phase 5 wires this up; the test kernel itself is now
+# stock and Bazel-built, so no out-of-tree kernel build is needed there).
+# `bazel build //...` builds every test binary without running any.
 
 name: CI
 

@@ -99,12 +99,8 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
 
   // fuse_set_feature_flag() only actually sets the flag (and returns true)
   // when the kernel's capable_ext says it supports it, so every one of
-  // these is a no-op rather than a hard failure on an older kernel --
-  // except FUSE_CAP_ATTR_GENERATION, which needs this build's libfuse patch
-  // (see fuse_reply_attr_with_generation) as well as kernel support, so its
-  // outcome is worth logging explicitly.
+  // these is a no-op rather than a hard failure on an older kernel.
   fuse_set_feature_flag(&conn, FUSE_CAP_EXPORT_SUPPORT);
-  bool attr_generation = fuse_set_feature_flag(&conn, FUSE_CAP_ATTR_GENERATION);
   fuse_set_feature_flag(&conn, FUSE_CAP_READDIRPLUS);
   fuse_set_feature_flag(&conn, FUSE_CAP_CACHE_SYMLINKS);
   // fuse_set_feature_flag() only sets want_ext (and returns true) when the
@@ -169,10 +165,11 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   //
   // Both are required, not optional: running without them would enforce
   // permissions differently from the backing filesystem. Every kernel
-  // with FUSE_ATTR_GENERATION has both (protocol 7.26 and 7.12); should one
-  // ever be missing, the flag is wanted anyway, which makes libfuse refuse
-  // the INIT (want_flags_valid: EPROTO) and dcfs exit, rather than serve
-  // the mount with the wrong permission checks.
+  // dcfs supports (Linux 6.9+, for FS_IOC_GETFSUUID and FUSE passthrough)
+  // already has both (protocol 7.26 and 7.12); should one ever be missing,
+  // the flag is wanted anyway, which makes libfuse refuse the INIT
+  // (want_flags_valid: EPROTO) and dcfs exit, rather than serve the mount
+  // with the wrong permission checks.
   for (auto [flag, name] :
        {std::pair{FUSE_CAP_POSIX_ACL, "FUSE_CAP_POSIX_ACL"},
         std::pair{FUSE_CAP_DONT_MASK, "FUSE_CAP_DONT_MASK"}}) {
@@ -184,8 +181,7 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   }
 
   LOG(INFO) << "FUSE kernel protocol " << conn.proto_major << "."
-            << conn.proto_minor << "; FUSE_CAP_ATTR_GENERATION "
-            << (attr_generation ? "granted" : "NOT granted")
+            << conn.proto_minor
             << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted")
             << "; FUSE_CAP_POSIX_ACL and FUSE_CAP_DONT_MASK requested"
             << "; FUSE_CAP_ATOMIC_O_TRUNC and FUSE_CAP_OVER_IO_URING "
@@ -446,11 +442,11 @@ absl::Status DirCacheFS::Getattr(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info *fi) {
   if (InodeId id = static_cast<InodeId>(ino); removed_.contains(id)) {
     ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttrOrRemoved(id));
-    return req.ReplyAttr(attr.st, AttrTimeoutFor(id), attr.fuse_gen);
+    return req.ReplyAttr(attr.st, AttrTimeoutFor(id));
   }
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(static_cast<InodeId>(ino)));
-  return req.ReplyAttr(entry.attr,
-      AttrTimeoutFor(static_cast<InodeId>(entry.ino)), entry.generation);
+  return req.ReplyAttr(
+      entry.attr, AttrTimeoutFor(static_cast<InodeId>(entry.ino)));
 }
 
 absl::Status DirCacheFS::Setattr(
@@ -499,8 +495,8 @@ absl::Status DirCacheFS::Setattr(
   LogPhase3Failure("Setattr", backing::RefreshAttrs(ctx_, id, &stx));
   ResolveSideEffectXattrs(id, side_effects, OpenFdOf(id), "Setattr");
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(id, stx));
-  return req.ReplyAttr(entry.attr,
-      AttrTimeoutFor(static_cast<InodeId>(entry.ino)), entry.generation);
+  return req.ReplyAttr(
+      entry.attr, AttrTimeoutFor(static_cast<InodeId>(entry.ino)));
 }
 
 absl::Status DirCacheFS::Lookup(

@@ -105,17 +105,10 @@ absl::Status FuseRequest::ReplyNegativeEntry(absl::Duration entry_timeout) {
 
 absl::Status FuseRequest::ReplyAttr(
     const struct stat &attr, absl::Duration attr_timeout) {
-  return ReplyAttr(attr, attr_timeout, /*generation=*/0);
-}
-
-absl::Status FuseRequest::ReplyAttr(
-    const struct stat &attr, absl::Duration attr_timeout,
-    uint64_t generation) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st = dcfs::ErrnoToStatus(
-      -fuse_reply_attr_with_generation(
-          *req_, &attr, absl::ToDoubleSeconds(attr_timeout), generation),
-      "fuse_reply_attr_with_generation");
+      -fuse_reply_attr(*req_, &attr, absl::ToDoubleSeconds(attr_timeout)),
+      "fuse_reply_attr");
   req_ = std::nullopt;
   return st;
 }

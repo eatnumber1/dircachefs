@@ -96,14 +96,8 @@ class FuseRequest {
   // the looked-up name does not exist for `entry_timeout`.
   absl::Status ReplyNegativeEntry(absl::Duration entry_timeout);
 
-  // Delegates to the 3-argument overload with generation 0, for callers
-  // (e.g. DirCacheFS::Getattr, which has no inode table yet) that don't
-  // have a generation number to report.
   absl::Status ReplyAttr(
       const struct stat &attr, absl::Duration attr_timeout);
-  absl::Status ReplyAttr(
-      const struct stat &attr, absl::Duration attr_timeout,
-      uint64_t generation);
 
   absl::Status ReplyReadlink(std::string_view target);
 

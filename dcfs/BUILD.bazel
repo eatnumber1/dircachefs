@@ -449,16 +449,6 @@ qemu_cc_test(
     deps = ["@googletest//:gtest_main"],
 )
 
-qemu_cc_test(
-    name = "libfuse_version_test",
-    size = "small",
-    srcs = ["libfuse_version_test.cc"],
-    deps = [
-      "@googletest//:gtest_main",
-      "@libfuse//:libfuse",
-    ],
-)
-
 exports_files(["schema.sql"])
 
 genrule(

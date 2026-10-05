@@ -91,12 +91,6 @@ Non-goals:
   There are no fallback paths for running without them (for example, no
   name-based walk when `open_by_handle_at` fails with `EPERM`).
 - **Kernel features.**
-  - The `FUSE_ATTR_GENERATION` patch (FUSE protocol 7.47): the kernel
-    honours the generation in LOOKUP, GETATTR and SETATTR replies and marks
-    an inode bad when it changes. Posted as
-    https://lore.kernel.org/all/20260927141437.1432584-1-russ@har.mn/ (v1;
-    a v2 followed). libfuse 3.18.2 carries a matching patch in
-    `third_party/libfuse/`.
   - `FS_IOC_GETFSUUID` (Linux 6.9) on the backing filesystem.
   - FUSE passthrough (Linux 6.9).
   - File handle support on the backing filesystem (`name_to_handle_at`,
@@ -232,9 +226,10 @@ syscall.
 When the backing filesystem recycles an inode number, the old row no
 longer matches. dcfs invalidates it (deletes it; see the trigger in
 [the schema](#the-schema)) and creates a new row with a new id and
-generation. A handle for the old row then gets `ESTALE` from dcfs, and the
-patched kernel marks an old in-core inode bad when it sees a different
-generation for it.
+generation. A handle for the old row then gets `ESTALE` from dcfs itself:
+the old node id never resolves to the new row, so `OpenNode`'s
+`VerifyBackingIdentity` rejects the mismatch whenever the kernel reaches
+dcfs for it.
 
 ### Why handles survive restarts but not a cache wipe
 
@@ -1069,11 +1064,10 @@ contents bypass the cache.
 13. Mount with `default_permissions`, plus `allow_other` if requested,
     plus `--fuse_opt`; install libfuse's signal handlers; daemonize if
     asked; run the session loop. `Init` requests export support,
-    `FUSE_CAP_ATTR_GENERATION`, readdirplus, symlink caching and
-    passthrough; requires POSIX ACLs and `FUSE_CAP_DONT_MASK` (refusing
-    the mount without them); turns off atomic `O_TRUNC` and
-    FUSE-over-io_uring; and logs whether the kernel granted generations
-    and passthrough.
+    readdirplus, symlink caching and passthrough; requires POSIX ACLs and
+    `FUSE_CAP_DONT_MASK` (refusing the mount without them); turns off
+    atomic `O_TRUNC` and FUSE-over-io_uring; and logs whether the kernel
+    granted passthrough.
 
 ### Shutdown
 
@@ -1095,8 +1089,8 @@ before dcfs can start again.
 
 ### Everything runs in QEMU
 
-dcfs requires root, real `open_by_handle_at`, `FS_IOC_GETFSUUID` and the
-patched FUSE, so there is no host-side test execution at all (amendment 3).
+dcfs requires root, real `open_by_handle_at`, `FS_IOC_GETFSUUID` and FUSE
+passthrough, so there is no host-side test execution at all (amendment 3).
 Every test target, unit tests included, boots the project's own minimal
 kernel in a QEMU guest and runs there as root. To make that cheap
 (amendment 4), the runner (`test/qemu/scripts/run-qemu.sh`) boots the
@@ -1204,6 +1198,3 @@ None of this is built.
   detection ever needs to reach the kernel.
 - **ZFS**, once OpenZFS ships `FS_IOC_GETFSUUID`. A test gated on
   `DCFS_TEST_ZFS_PATH` documents today's `ENOTTY` and is meant to flip.
-- **Upstream dependencies:** drop the carried libfuse patch once a libfuse
-  release includes `FUSE_CAP_ATTR_GENERATION`, and pin the test kernel to a
-  released kernel once the patch is merged.

@@ -1,6 +1,5 @@
 #!/bin/sh
-# dcfs step 3.4b acceptance test: NFS export handles (FUSE_CAP_EXPORT_SUPPORT
-# + FUSE_CAP_ATTR_GENERATION).
+# dcfs step 3.4b acceptance test: NFS export handles (FUSE_CAP_EXPORT_SUPPORT).
 #
 # Builds a small tree on vdb, mounts dcfs over it, and uses fhtest
 # (name_to_handle_at/open_by_handle_at/FS_IOC_GETVERSION) to check the

@@ -48,3 +48,25 @@ dcfs runs on a stock kernel and stock libfuse.
 - Done when: the full suite passes on the stock kernel with stock libfuse on
   ext4/xfs/btrfs.
 Order: third, with Phase 4 (both change how guests are built).
+
+Status: 3a done (stock kernel 7.2.9 fetched and built by Bazel,
+selectable with `--//test/qemu:kernel`). 3b done 2026-10-05: test-first run
+of readonly/setattr_ext4/handles/lifecycle against the stock kernel on
+unmodified code already passed (the patched libfuse degrades to stock
+behavior whenever the kernel doesn't grant `FUSE_CAP_ATTR_GENERATION`, so
+swapping only the kernel flag could never show the expected failure;
+removing the libfuse override is what actually exercises the dependency).
+Removed `third_party/libfuse/0001-attr-generation.patch` and its
+directory, the `single_version_override` in `MODULE.bazel`,
+`FUSE_CAP_ATTR_GENERATION` from `DirCacheFS::Init`, the generation-carrying
+`FuseRequest::ReplyAttr` overload (now plain `fuse_reply_attr`), and
+`dcfs/libfuse_version_test.cc` (it existed solely to assert the patch was
+applied; nothing meaningful remained to check). `test/qemu:kernel`'s
+default flipped from `patched` to `stock`; `qemu_cc_test.bzl` (unit tests)
+now also respects the flag, where before it always hardcoded the patched
+kernel. `patched` kept, deprecated, until Phase 4 removes
+`build-kernel.sh`/`@kernel_image` entirely. Full suite (`bazel test
+//...`) 70/70 on the stock kernel with no test rewrites needed;
+`--config=asan` 70/70 (one `rename_test_xfs` flake on the first ASan run,
+a pre-existing "zero backing reads" timing check unrelated to this
+change -- passed on retry, and on a clean full-suite ASan rerun).

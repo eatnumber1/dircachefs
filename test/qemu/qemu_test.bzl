@@ -1,8 +1,9 @@
 """qemu_test(name, guest_script, disks): a dcfs QEMU end-to-end test.
 
 Boots the shared dcfs QEMU initramfs (:initramfs) and test kernel
-(@kernel_image//:bzImage) under QEMU, telling guest/init (via the
-dcfs_test= kernel command-line parameter) to run the given guest_script,
+(//third_party/linux:bzImage by default; see --//test/qemu:kernel) under
+QEMU, telling guest/init (via the dcfs_test= kernel command-line
+parameter) to run the given guest_script,
 found inside the initramfs at /tests/<basename of guest_script>. See
 test/qemu/scripts/run-qemu.sh for the boot/verdict mechanics and
 test/qemu/guest/init for the guest side.
@@ -44,15 +45,16 @@ def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", tim
     rootfs_data = [rootfs] if rootfs else []
     rootfs_args = ["--rootfs", "$(location " + rootfs + ")"] if rootfs else []
 
-    # Step 3.1a: --//test/qemu:kernel selects which kernel this test boots
-    # (see BUILD.bazel's :kernel string_flag/:kernel_stock config_setting).
+    # Step 3.1a/3.2: --//test/qemu:kernel selects which kernel this test
+    # boots (see BUILD.bazel's :kernel string_flag/:kernel_stock/
+    # :kernel_patched config_settings); stock is the default.
     kernel_data = select({
-        "//test/qemu:kernel_stock": ["//third_party/linux:bzImage"],
-        "//conditions:default": ["@kernel_image//:bzImage"],
+        "//test/qemu:kernel_patched": ["@kernel_image//:bzImage"],
+        "//conditions:default": ["//third_party/linux:bzImage"],
     })
     kernel_args = select({
-        "//test/qemu:kernel_stock": ["$(location //third_party/linux:bzImage)"],
-        "//conditions:default": ["$(location @kernel_image//:bzImage)"],
+        "//test/qemu:kernel_patched": ["$(location @kernel_image//:bzImage)"],
+        "//conditions:default": ["$(location //third_party/linux:bzImage)"],
     })
 
     sh_test(

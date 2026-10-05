@@ -3,10 +3,11 @@ QEMU guest, root, on the project's own kernel.
 
 PROJECT DECISION: dcfs requires root (real open_by_handle_at,
 FS_IOC_GETFSUUID, etc.), so there is no host-side test execution -- every
-test, including plain unit tests, boots a purpose-built minimal kernel
-under QEMU (see test/qemu/scripts/build-kernel.sh and
-test/qemu/README.md for the boot-time budget this depends on) and runs as
-root inside it. This is the replacement for a plain cc_test.
+test, including plain unit tests, boots a minimal kernel under QEMU (the
+pinned, Bazel-built //third_party/linux:bzImage by default; see
+--//test/qemu:kernel and test/qemu/README.md for the boot-time budget this
+depends on) and runs as root inside it. This is the replacement for a
+plain cc_test.
 
 Builds:
   - `<name>_bin`: a testonly cc_binary from `srcs`/`deps`, statically
@@ -123,16 +124,27 @@ def qemu_cc_test(
 
     disk_args = [d[0] + ":" + d[1] + ":" + d[2] for d in disks]
 
+    # Step 3.1a/3.2: --//test/qemu:kernel selects which kernel this test
+    # boots (see test/qemu/BUILD.bazel's :kernel string_flag/:kernel_stock/
+    # :kernel_patched config_settings); stock is the default.
+    kernel_data = select({
+        "//test/qemu:kernel_patched": ["@kernel_image//:bzImage"],
+        "//conditions:default": ["//third_party/linux:bzImage"],
+    })
+    kernel_args = select({
+        "//test/qemu:kernel_patched": ["$(location @kernel_image//:bzImage)"],
+        "//conditions:default": ["$(location //third_party/linux:bzImage)"],
+    })
+
     sh_test(
         name = name,
         srcs = ["//test/qemu:scripts/run-qemu.sh"],
-        data = [
+        data = kernel_data + [
             ":" + initramfs_out,
-            "@kernel_image//:bzImage",
         ],
         args = [
             "--unit",
-            "$(location @kernel_image//:bzImage)",
+        ] + kernel_args + [
             "$(location :" + initramfs_out + ")",
         ] + disk_args,
         tags = ["no-sandbox", "requires-kvm"] + tags,

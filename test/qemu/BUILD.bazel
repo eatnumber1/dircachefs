@@ -9,16 +9,17 @@ exports_files([
     "scripts/run-qemu.sh",
 ])
 
-# Step 3.1a: which kernel qemu_test/qemu_test_matrix boot. "patched" (the
-# default) is @kernel_image//:bzImage, the out-of-tree, not-Bazel-tracked
-# build of test/qemu/scripts/build-kernel.sh's patched kernel (still needed
-# by everything except boot_test until Phase 3b drops the kernel patch).
-# "stock" is //third_party/linux:bzImage, the pinned upstream kernel Bazel
-# fetches and builds (see third_party/linux/README.md). Select with
-# `--//test/qemu:kernel=stock`.
+# Step 3.1a/3.2: which kernel qemu_test/qemu_test_matrix/qemu_cc_test boot.
+# "stock" (the default since Phase 3b dropped the kernel patch) is
+# //third_party/linux:bzImage, the pinned upstream kernel Bazel fetches and
+# builds (see third_party/linux/README.md). "patched" is
+# @kernel_image//:bzImage, the out-of-tree, not-Bazel-tracked build of
+# test/qemu/scripts/build-kernel.sh's patched kernel; it is deprecated
+# (Phase 4 removes it and build-kernel.sh) but still selectable with
+# `--//test/qemu:kernel=patched` for comparison until then.
 string_flag(
     name = "kernel",
-    build_setting_default = "patched",
+    build_setting_default = "stock",
     values = [
         "patched",
         "stock",
@@ -28,6 +29,11 @@ string_flag(
 config_setting(
     name = "kernel_stock",
     flag_values = {":kernel": "stock"},
+)
+
+config_setting(
+    name = "kernel_patched",
+    flag_values = {":kernel": "patched"},
 )
 
 # Set by --define=dcfs_sanitizer=asan/ubsan (see .bazelrc's build:asan /

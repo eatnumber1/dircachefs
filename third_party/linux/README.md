@@ -159,18 +159,17 @@ silently depended on:
 
 ## Selecting the kernel
 
-`test/qemu:kernel` is a `string_flag` (`patched` default, or `stock`; see
-`test/qemu/BUILD.bazel` and `test/qemu/kernel.bzl`). `patched` keeps using
-`@kernel_image//:bzImage` (the out-of-tree, not-Bazel-tracked build of
-`test/qemu/scripts/build-kernel.sh`'s patched kernel); `stock` switches
-`qemu_test`/`qemu_test_matrix` targets to this package's `:bzImage`. Select
-it with `--//test/qemu:kernel=stock`, e.g.:
+`test/qemu:kernel` is a `string_flag` (`stock` default, or `patched`; see
+`test/qemu/BUILD.bazel` and `test/qemu/kernel.bzl`). `stock` (the default
+since Phase 3b dropped the kernel patch) uses this package's `:bzImage`
+for every `qemu_test`/`qemu_test_matrix`/`qemu_cc_test` target. `patched`
+is deprecated: it selects `@kernel_image//:bzImage` (the out-of-tree,
+not-Bazel-tracked build of `test/qemu/scripts/build-kernel.sh`'s patched
+kernel), kept only until Phase 4 removes that build path entirely. Select
+it with `--//test/qemu:kernel=patched`, e.g.:
 
 ```
-bazel test //test/qemu:boot_test --//test/qemu:kernel=stock
+bazel test //test/qemu:boot_test --//test/qemu:kernel=patched
 ```
 
-The stock kernel does not yet run dcfs's full suite (dcfs still requests
-`FUSE_CAP_ATTR_GENERATION`/uses `fuse_reply_attr_with_generation`, which
-needs the patched libfuse and kernel patch that Phase 3b removes) -- only
-`boot_test` is expected to pass against it today.
+dcfs's full suite passes against the stock kernel (the default).

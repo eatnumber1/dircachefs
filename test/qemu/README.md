@@ -33,7 +33,14 @@ booting.
   `snapshot.debian.org`) is needed once per pin, to fetch the pinned
   packages; the test itself is fully offline (loopback only).
 
-## Building the test kernel
+## Building the test kernel (deprecated)
+
+**Deprecated.** This out-of-tree kernel (`@kernel_image//:bzImage`) is no
+longer the default for any test; see "The stock kernel" below, which is
+built entirely by Bazel and needs no manual step. This section, the
+script, and `--//test/qemu:kernel=patched` are kept only until Phase 4
+removes this build path entirely -- skip this section unless you are
+specifically comparing against the deprecated kernel.
 
 The kernel is *not* built by Bazel (it's an out-of-tree kernel build that
 doesn't belong in the Bazel action graph). Build it once with:
@@ -86,31 +93,32 @@ Two consequences worth knowing:
 - **No PCI.** Disks are virtio-mmio (`-device virtio-blk-device`), not
   virtio-pci; the `microvm` machine type has no PCI bus at all.
 
-## The stock kernel (step 3.1a)
+## The stock kernel (step 3.1a/3.2), the default
 
-A second kernel, fetched and built entirely by Bazel (no out-of-tree
-script, no `~/Sources/linux`): a pinned upstream release, configured from
-`make tinyconfig` plus a checked-in fragment
-(`third_party/linux/kernel.config`) instead of `x86_64_defconfig` +
-`kvm_guest.config` + a `scripts/config` edit list. See
-`third_party/linux/README.md` for the pin, the fragment's rationale, and
-which host tools the build still depends on.
+A kernel fetched and built entirely by Bazel (no out-of-tree script, no
+`~/Sources/linux`): a pinned upstream release, configured from `make
+tinyconfig` plus a checked-in fragment (`third_party/linux/kernel.config`)
+instead of `x86_64_defconfig` + `kvm_guest.config` + a `scripts/config`
+edit list. See `third_party/linux/README.md` for the pin, the fragment's
+rationale, and which host tools the build still depends on.
 
-It is *not* the default yet -- dcfs still requests
-`FUSE_CAP_ATTR_GENERATION`/uses `fuse_reply_attr_with_generation` (Phase 3b
-removes this), which needs the patched libfuse and kernel patch, so only
-`boot_test` is expected to pass against the stock kernel today. Select it
-with the `//test/qemu:kernel` `string_flag`:
+This is the default kernel for every test (`qemu_test`, `qemu_test_matrix`
+and `qemu_cc_test` alike): Phase 3b dropped dcfs's `FUSE_ATTR_GENERATION`
+kernel patch and its matching libfuse patch (it gave dcfs nothing -- dcfs
+never changes a nodeid's generation), so the full suite now passes against
+this stock kernel with stock libfuse. Select it explicitly (or any other
+value) with the `//test/qemu:kernel` `string_flag`:
 
 ```
 bazel test //test/qemu:boot_test --//test/qemu:kernel=stock
 ```
 
-Omit the flag (or pass `--//test/qemu:kernel=patched`) to get the default,
-patched kernel described above. `@kernel_image//:bzImage` (this section's
-kernel) is unaffected either way -- the flag only changes which `bzImage`
-label `qemu_test`/`qemu_test_matrix` (`test/qemu/qemu_test.bzl`) put in a
-given test's `data`/`args`.
+**`--//test/qemu:kernel=patched` is deprecated.** It selects
+`@kernel_image//:bzImage`, the out-of-tree, not-Bazel-tracked build from
+"Building the test kernel" above (`test/qemu/scripts/build-kernel.sh`,
+still needed if you pass this flag). It exists only so the two kernels can
+still be compared until Phase 4 removes the out-of-tree build path and
+this flag's non-default value entirely; don't build new tests against it.
 
 ## Fast boot
 
@@ -354,8 +362,8 @@ ext4, xfs and btrfs.
   unmounted, WAL checkpointed), mounting dcfs back over its own `--source`,
   and restarting against a previously-used cache database.
 - `handles_test` (`guest/handles.sh`): step 3.4b's NFS export handles
-  (`FUSE_CAP_EXPORT_SUPPORT`/`FUSE_CAP_ATTR_GENERATION`, exercised with
-  `//tools:fhtest`) -- a handle for a file on the source device opens and
+  (`FUSE_CAP_EXPORT_SUPPORT`, exercised with `//tools:fhtest`) -- a handle
+  for a file on the source device opens and
   reads back the right content; the reported generation is 0 for the root
   and nonzero (and stable across a restart) for everything else; a handle
   survives a daemon restart against the same cache database; a doctored
