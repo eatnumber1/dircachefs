@@ -4,3 +4,5 @@
 *.sw[po]
 # Per-machine Claude Code settings.
 /.claude/settings.local.json
+# Per-checkout Bazel settings (see .bazelrc).
+/user.bazelrc

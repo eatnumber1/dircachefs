@@ -6,6 +6,9 @@ build --copt -Werror
 build --copt -Wimplicit-fallthrough
 build --copt -D_FILE_OFFSET_BITS=64
 build --disk_cache=~/.cache/bazel-disk-cache
+# Keep the shared disk cache bounded: Bazel garbage-collects it down to
+# this size while the server is idle.
+build --experimental_disk_cache_gc_max_size=50G
 
 # --copt -Werror above also applies to external repositories' own compiles.
 # The libfuse module (BCR overlay) pulls in liburing, which has -Wunused-
@@ -53,3 +56,7 @@ build:ubsan --linkopt -fno-sanitize-recover=all
 # See test:asan's --define above; UBSan's runtime has the same problem in
 # practice.
 build:ubsan --define=dcfs_sanitizer=ubsan
+
+# Per-checkout settings that are not committed (e.g. the agent lane
+# clones' `startup --max_idle_secs=...`). See docs/plan/process.md.
+try-import %workspace%/user.bazelrc

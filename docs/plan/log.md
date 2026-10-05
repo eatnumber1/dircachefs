@@ -189,3 +189,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Phase 4: QEMU built as minimal as possible (no default features or devices; microvm, virtio-mmio/blk, serial, RTC only; raw images; qboot; dependency list justified in its README).
 - russ reviewed AGENTS.md (LGTM): Phase 1 done. Plan, AGENTS.md and LICENSE committed at russ's request.
 - 2026-10-05: russ said go. Wave 1 dispatched: lane 1 Phase 2 (Sonnet, worktree step-2), lane 2 Phase 3a Bazel-built stock kernel (Sonnet, worktree step-3a).
+- Bazel: removed 48 orphaned output bases (15 GB, from removed worktrees; russ OK); disk cache capped at 50 GB (--experimental_disk_cache_gc_max_size); try-import user.bazelrc; from wave 2 steps run in two long-lived lane clones (~/Sources/dircachefs-lanes/lane-{1,2}) instead of a checkout per step.
