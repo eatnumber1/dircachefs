@@ -190,3 +190,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ reviewed AGENTS.md (LGTM): Phase 1 done. Plan, AGENTS.md and LICENSE committed at russ's request.
 - 2026-10-05: russ said go. Wave 1 dispatched: lane 1 Phase 2 (Sonnet, worktree step-2), lane 2 Phase 3a Bazel-built stock kernel (Sonnet, worktree step-3a).
 - Bazel: removed 48 orphaned output bases (15 GB, from removed worktrees; russ OK); disk cache capped at 50 GB (--experimental_disk_cache_gc_max_size); try-import user.bazelrc; from wave 2 steps run in two long-lived lane clones (~/Sources/dircachefs-lanes/lane-{1,2}) instead of a checkout per step.
+- Agent types with model and effort (.claude/agents/dcfs-{mechanical,implementer,investigator,protocol,reviewer}) and CLAUDE.md (imports AGENTS.md; Claude-specific notes). They take effect after Claude Code restarts. Wave 1 agents run as general-purpose (default effort).

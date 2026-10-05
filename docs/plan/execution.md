@@ -20,12 +20,18 @@ merge); this file orders the steps.
   A lane that finishes early may start the next wave's lane only if that
   lane does not depend on the unfinished one; the orchestrator says so
   explicitly.
-- **Models** (escalate one tier after two failed reviews):
-  - **Haiku**: mechanical work with a precise spec and patterns to copy.
-  - **Sonnet**: the default.
-  - **Opus**: subtle invariants (the write-through protocol, identity,
-    crash and failure handling, namespaces and mounts, the TLA+ model),
-    and code review of Sonnet work in those areas.
+- **Agent types** (model and effort; definitions in `.claude/agents/`,
+  table in `/CLAUDE.md`; escalate one row after two failed reviews). The
+  "Model" column below names the model; the type follows from it:
+  - **Haiku** -> `dcfs-mechanical` (low effort): precise, pattern-following
+    batches.
+  - **Sonnet** -> `dcfs-implementer` (medium) by default, or
+    `dcfs-investigator` (high) for measurement and investigation: Phase
+    5.1 emulation speed, the Bazel-built kernel, QEMU and busybox, and
+    any puzzling failure.
+  - **Opus** -> `dcfs-protocol` (high): the write-through protocol,
+    identity, crash and failure handling, namespaces and mounts, the TLA+
+    model. "Opus review" means `dcfs-reviewer` (xhigh, read-only).
   - **Orchestrator**: the strongest available model; reviews, merges,
     runs suites, talks to russ.
 - **Kernel config once.** Phase 3's kernel config fragment includes every

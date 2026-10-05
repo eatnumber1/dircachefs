@@ -11,8 +11,9 @@ process (its waves and file ownership table) is in `history.md`.
   dispatches it to a subagent, reviews every diff, runs the tests, merges,
   keeps `README.md`'s status table and `log.md` current, and talks to
   russ.
-- **Subagents**: cheaper models, one step at a time, chosen by the
-  phase's "Owner" line:
+- **Subagents**: one step at a time, as one of the agent types in
+  `/CLAUDE.md` (each fixes a model and an effort level), chosen from the
+  phase's "Owner" line and `execution.md`:
   - Haiku for boilerplate with a precise spec and patterns to copy;
   - Sonnet by default;
   - Opus where subtle invariants live (the write-through protocol,
