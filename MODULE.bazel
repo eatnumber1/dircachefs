@@ -62,3 +62,25 @@ http_archive(
     strip_prefix = "pjdfstest-85a8aea9e685999ef0540392fd80535f873d7ff7",
     url = "https://github.com/pjd/pjdfstest/archive/85a8aea9e685999ef0540392fd80535f873d7ff7.tar.gz",
 )
+
+# busybox 1.38.0 (pinned latest stable release as of 2026-10-05; see
+# third_party/busybox/README.md). build_file_content just exposes the
+# pristine source tree -- the actual build (Kconfig fragment -> allnoconfig
+# -> silentoldconfig -> make) is a genrule in third_party/busybox/BUILD.bazel,
+# not a configure_make: busybox's own build system is a Kconfig/make tree,
+# not configure+make or meson.
+http_archive(
+    name = "busybox",
+    build_file_content = """\
+filegroup(
+    name = "srcs",
+    srcs = glob(["**"]),
+    visibility = ["//visibility:public"],
+)
+
+exports_files(["Makefile"])
+""",
+    sha256 = "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2",
+    strip_prefix = "busybox-1.38.0",
+    url = "https://busybox.net/downloads/busybox-1.38.0.tar.bz2",
+)

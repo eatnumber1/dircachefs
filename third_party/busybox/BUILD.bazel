@@ -1,0 +1,30 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+genrule(
+    name = "busybox_build",
+    srcs = [
+        "@busybox//:srcs",
+        "@busybox//:Makefile",
+        "busybox.config.fragment",
+    ],
+    outs = ["busybox"],
+    cmd = "$(location build_busybox.sh) $(location @busybox//:Makefile) " +
+          "$(location busybox.config.fragment) $@",
+    tools = ["build_busybox.sh"],
+    visibility = ["//visibility:public"],
+)
+
+# Host-side smoke test (AGENTS.md allows this: no root, no kernel
+# control). Test first: before @busybox existed in MODULE.bazel, this
+# target failed with "no such package '@busybox//'" (see this step's
+# commit history for the exact failing output). Checks that the built
+# busybox binary is static and that every applet the guest scripts use
+# (grep test/qemu/guest/*.sh, guest/init before adding or removing
+# anything from busybox.config.fragment) is present in `busybox --list`.
+sh_test(
+    name = "smoke_test",
+    size = "small",
+    srcs = ["smoke_test.sh"],
+    data = [":busybox_build"],
+    args = ["$(location :busybox_build)"],
+)
