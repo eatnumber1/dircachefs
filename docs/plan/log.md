@@ -215,3 +215,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   runtime under Bazel: runfiles/m4); selectable with --//test/qemu:kernel=stock. Orchestrator fix:
   build scripts now delete their temp build directories.
 - Wave 2 lane 1: Phase 3b (drop the kernel patch, stock kernel default) dispatched in lane-2 (Sonnet, general-purpose). Phase 4a continues in lane-1.
+- Phase 4a merged (24450f1..8a65668; Sonnet, 3 review rounds). busybox 1.38.0 static, 55 applets.
+  QEMU 11.1.2: --without-default-features/--without-default-devices, microvm + virtio-mmio/blk +
+  isa-serial + RTC (plus upstream's unconditional virtio-serial-device), raw/file block drivers
+  only, qboot from the tarball; glib/gmodule/pcre2/zlib linked statically through a pkg-config shim
+  (PKG_CONFIG_LIBDIR), so NEEDED is only libc/libm (orchestrator caught host libz and an absolute
+  pcre2 path into a Bazel output base in round 2); custom repository rule re-adds subprojects/dtc
+  that Bazel's tar extraction drops. Full suite 73/73. Not yet wired into the harness. TCG boot
+  with it showed no console output in 600 s under heavy load (inconclusive; Phase 5.1).
