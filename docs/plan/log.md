@@ -289,3 +289,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   speed, Phase 6.1 tiers) plus the 6.2 follow-ups (shared xfs quiesce helper, config-independent tool
   builds).
 - 2026-10-06: Claude Code restarted (agent types with effort available; russ now has kvm and docker groups directly). Wave 3 dispatched: lane-1 Phase 5.1 TCG speed (dcfs-investigator), lane-2 Phase 6.1 tiers (dcfs-implementer).
+- russ: orchestrator (Fable 5.1 this session) is overseer only: decide, dispatch cheaper subagents, review; Fable subagents only for the most complicated tasks, if ever (CLAUDE.md).

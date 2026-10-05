@@ -20,6 +20,15 @@ does not pass a `model` override, so the type's model and effort apply.
 | `dcfs-protocol` | Opus | high | the write-through protocol, dirty set and recovery, identity, crash and failure handling, mount namespaces, the TLA+ model |
 | `dcfs-reviewer` | Opus | xhigh | read-only review of hard steps and of the plan |
 
+**The orchestrator oversees; it does not do the work** (russ, 2026-10-06).
+It decides what to do, dispatches subagents, reviews their work, merges,
+keeps the plan current and assists russ. Hands-on work (investigation,
+fixes, long test runs, doc rewrites) goes to a subagent, even when small.
+When the orchestrator runs on Fable, Fable may be used for a subagent
+only in an extremely limited way, for the most complicated tasks (pass
+`model: fable` explicitly, and say why in `docs/plan/log.md`); never
+using it is fine.
+
 Definitions are in `.claude/agents/`. A step that fails review twice moves
 up one row (implementer to protocol, mechanical to implementer).
 
