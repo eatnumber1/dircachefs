@@ -21,20 +21,25 @@ genrule(
     srcs = ["@debian//:flat"],
     outs = ["rootfs-debian.ext4"],
     cmd = "$(location scripts/mkrootfs.sh) $@ $(location @debian//:flat) 768M " +
-          "$(location //third_party/e2fsprogs:mke2fs)",
+          "$(location //third_party/e2fsprogs:mke2fs) " +
+          "$(location //third_party/e2fsprogs:mke2fs.conf)",
     tools = [
         "scripts/mkrootfs.sh",
         "//third_party/e2fsprogs:mke2fs",
+        "//third_party/e2fsprogs:mke2fs.conf",
     ],
     visibility = ["//test/qemu:__pkg__"],
 )
 
 # Test first: fails the moment the resolved packages' versions drift from
 # packages.lock (a new snapshot pin, a package-list edit, or -- without
-# either -- rules_distroless resolving something unexpected). See
-# scripts/version_check.sh; @debian//:dpkg_status is rules_distroless's own
-# synthesized /var/lib/dpkg/status, scoped to just the packages named in
-# MODULE.bazel's apt.install (not their transitive dependencies).
+# either -- rules_distroless resolving something unexpected), or the fetched
+# .deb files (all of them, transitive packages included) drift from debs.lock.
+# See scripts/version_check.sh; @debian//:dpkg_status is rules_distroless's
+# own synthesized /var/lib/dpkg/status, scoped to just the packages named in
+# MODULE.bazel's apt.install (not their transitive dependencies), so the full
+# list comes from MODULE.bazel.lock via scripts/lock_debs.sh. The lock itself
+# is made authoritative by `common --lockfile_mode=error` (.bazelrc).
 sh_test(
     name = "version_check_test",
     size = "small",
@@ -42,9 +47,15 @@ sh_test(
     args = [
         "$(location @debian//:dpkg_status)",
         "$(location packages.lock)",
+        "$(location scripts/lock_debs.sh)",
+        "$(location //:MODULE.bazel.lock)",
+        "$(location debs.lock)",
     ],
     data = [
+        "debs.lock",
         "packages.lock",
+        "scripts/lock_debs.sh",
+        "//:MODULE.bazel.lock",
         "@debian//:dpkg_status",
     ],
 )

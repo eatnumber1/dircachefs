@@ -249,3 +249,46 @@ step's commit history for the exact failing output).
 step exists for: it runs the same `debugfs stat` idea against the actual
 Debian rootfs image (`//third_party/debian:rootfs`), built by `mke2fs -d`
 from `@debian//:flat` directly -- see `third_party/debian/README.md`.
+
+## mke2fs.conf (R3, L5/L10)
+
+`mke2fs.conf` is checked in and is e2fsprogs 1.47.4's own built-in
+default profile (`misc/mke2fs.conf.in`, byte for byte apart from a header
+comment). Without it an image depends on whichever file `mke2fs` finds:
+`$MKE2FS_CONFIG`, else `<sysconfdir>/mke2fs.conf` -- for the Bazel-built
+binary that is a path inside the sandbox of the build that produced it,
+which does not exist later, so it silently fell back to the built-in
+profile -- and, for the host's `mkfs.ext4`, `/etc/mke2fs.conf`, which
+differs between distributions and releases (this machine's lacks
+`metadata_csum_seed` and `orphan_file`, and uses 1 KiB blocks for
+`small`/`floppy` filesystems, which 1.47.4's built-in profile gives a 1 KiB
+block size and this machine's does not -- so a scratch disk under 512 MiB
+gets different block sizes on different hosts).
+
+Every consumer exports `MKE2FS_CONFIG=<this file>` (an environment
+variable, not a wrapper target: the genrule/script already controls its
+environment): `third_party/debian/scripts/mkrootfs.sh` takes the path as
+its fifth argument; `test/qemu/scripts/run-qemu.sh` must do the same for
+the scratch disks it formats. `$(location //third_party/e2fsprogs:mke2fs.conf)`
+is the label.
+
+`//third_party/e2fsprogs:mke2fs_conf_test` (host-side) makes a 256 MiB
+image with `mke2fs -t ext4` (what `mkfs.ext4` does) under that file and
+reads its superblock with the Bazel-built `debugfs -R 'show_super_stats
+-h'` (standing in for `dumpe2fs -h`, so the host's e2fsprogs is not
+needed): the feature set must be exactly `64bit dir_index dir_nlink
+ext_attr extent extra_isize filetype flex_bg has_journal huge_file
+large_file metadata_csum metadata_csum_seed orphan_file resize_inode
+sparse_super`. It also derives the expected set from the config itself
+(so editing one without the other fails) and checks that a different
+`MKE2FS_CONFIG` gives a different result (the variable, not a baked-in
+path, decides). Run against the host's `/etc/mke2fs.conf` it fails with
+`the checked-in config's ext4 features changed` plus the two missing
+features, which is the failure this test exists to catch.
+
+### Updating
+
+When the e2fsprogs pin moves, diff `misc/mke2fs.conf.in` of the new
+release against `mke2fs.conf` and decide deliberately (a new default
+feature changes every ext4 image the tests make); then update the test's
+expected list.

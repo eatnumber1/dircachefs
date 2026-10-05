@@ -1,0 +1,30 @@
+# BUILD file for @inih_src (see MODULE.bazel and third_party/xfsprogs/
+# README.md): inih is two files (ini.c, ini.h), so a plain cc_library --
+# upstream's own build is meson-only. xfsprogs's configure wants libinih.a
+# and ini.h (mkfs.xfs reads its -c config files with ini_parse).
+#
+# Built with upstream's meson.build defaults (multi-line entries, BOM,
+# inline comments allowed, stack buffer, 200-byte lines): this is not
+# distro_install mode, so none of those get overridden.
+
+load("@rules_cc//cc:cc_library.bzl", "cc_library")
+
+cc_library(
+    name = "inih",
+    srcs = ["ini.c"],
+    hdrs = ["ini.h"],
+    # -Wno-error / -fno-sanitize=address,undefined: the project-wide
+    # --copt flags (-Werror; -fsanitize=... under --config=asan/ubsan) apply
+    # to external cc_librarys too. An instrumented libinih.a leaves undefined
+    # __asan_* symbols that fail xfsprogs's `AC_CHECK_LIB(inih, ini_parse)`
+    # probe ("could not find a valid inih library"), and a host-side image
+    # tool must carry no sanitizer runtime anyway. Target copts come after
+    # --copt, so these cancel the earlier flags (one comma-separated word).
+    copts = [
+        "-Wno-error",
+        "-fno-sanitize=address,undefined",
+    ],
+    includes = ["."],
+    linkstatic = True,
+    visibility = ["//visibility:public"],
+)

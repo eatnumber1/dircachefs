@@ -17,7 +17,8 @@ into `~/.cache/dcfs` (see "What this replaces" below).
   `https://snapshot.debian.org/archive/debian/?year=2026&month=10`
   -- not an arbitrary/rounded timestamp, an actual published snapshot run).
 - Architecture: `amd64` only (the only architecture any dcfs test runs).
-- 136 packages resolved in total: the 14 named in MODULE.bazel's
+- 149 packages resolved in total (R3 recount; this README said 136 when
+  the list had 14 named packages): the 20 named in MODULE.bazel's
   `apt.install` below, plus everything they pull in transitively
   (`include_transitive` defaults to `True`).
 
@@ -28,10 +29,12 @@ into `~/.cache/dcfs` (see "What this replaces" below).
    (pick an entry from the listing, not a guessed/rounded timestamp --
    `snapshot.debian.org` only serves the exact runs it published).
 2. Update the `uris` value in MODULE.bazel's `apt.sources_list`.
-3. `bazel test //third_party/debian:version_check_test` -- this fails
-   immediately, with a diff, if any resolved package's version changed;
-   update `packages.lock` to match (see "Lockfile" below) once the new
-   versions are intentional.
+3. `bazel mod deps --lockfile_mode=update` (any other Bazel command now
+   fails with "MODULE.bazel.lock is no longer up-to-date": see "Lockfile"
+   below), then `bazel test //third_party/debian:version_check_test` --
+   this fails, with a diff, if any resolved package's version or any
+   .deb's checksum changed; update `packages.lock` and `debs.lock` to
+   match (see "Lockfile" below) once the new versions are intentional.
 4. `bazel build //third_party/debian:rootfs` and re-run
    `bazel test //test/qemu:nfs_test`.
 5. Re-run the full suite (`bazel test //...`).
@@ -40,7 +43,7 @@ into `~/.cache/dcfs` (see "What this replaces" below).
 
 The 15 packages named in MODULE.bazel's `apt.install(dependency_set =
 "debian", ...)`, with the reason each is there. (Their transitive
-dependencies -- the other 121 of the 136 total -- are not individually
+dependencies -- the other 129 of the 149 total -- are not individually
 justified here, same as this project does not list every library QEMU or
 busybox links against beyond what their own READMEs call out as a direct,
 deliberate choice.)
@@ -116,16 +119,33 @@ reading the extension source at the pinned version). Concretely:
   `pjdfstest`, ...) -- there is nothing extra to check in for this to be
   reproducible and auditable; `git diff MODULE.bazel.lock` shows exactly
   what changed on a pin update.
-- `third_party/debian/packages.lock` is this project's own, additional,
-  deliberately small checked-in lock: just the 14 explicitly requested
-  packages' resolved versions (not the other 122 transitive packages),
-  verified against the live resolution by
-  `//third_party/debian:version_check_test` on every `bazel test //...`.
-  This is the "a checked-in lock file (sha256 per package)" the plan asks
-  for in spirit -- human-reviewable at a glance -- while the actual
-  per-package sha256 enforcement (what Bazel will refuse to silently
-  change under you) lives in `MODULE.bazel.lock`, which already serves
-  exactly that role for every other pinned dependency in this project.
+- **`common --lockfile_mode=error`** (`.bazelrc`, R3/L9): Bazel never
+  rewrites `MODULE.bazel.lock` silently. Verified by changing the snapshot
+  timestamp, and separately by deleting `strace` from `apt.install`: each
+  fails the next Bazel command with `MODULE.bazel.lock is no longer
+  up-to-date because the usages of the extension
+  '@@rules_distroless+//apt:extensions.bzl%apt' have changed`. The facts
+  rules_distroless 0.9.4 keeps are part of the extension's recorded
+  result in `MODULE.bazel.lock` (`generatedRepoSpecs`: one `deb_import`
+  per package with its URL and **sha256**, verified when Bazel downloads
+  the .deb), so no separate explicit lock file is needed for enforcement.
+  To change a pin on purpose: edit `MODULE.bazel`, run
+  `bazel mod deps --lockfile_mode=update`, and refresh the two checked-in
+  lists below.
+- `third_party/debian/packages.lock`: the 20 explicitly requested
+  packages' resolved versions (name and full Debian version, epoch
+  included), checked against the live resolution
+  (`@debian//:dpkg_status`) by `//third_party/debian:version_check_test`.
+- `third_party/debian/debs.lock` (R3/L9): **every** fetched .deb, the
+  transitive ones too (149 lines of `<file name> <sha256>`), the human
+  reviewable form of what `MODULE.bazel.lock` records, so a pin change shows
+  up as a plain-text diff. `version_check_test` compares it with
+  `MODULE.bazel.lock` (through `scripts/lock_debs.sh`); regenerate with
+  `sh third_party/debian/scripts/lock_debs.sh MODULE.bazel.lock >
+  third_party/debian/debs.lock`. (The live resolution cannot be queried for
+  the transitive packages from Bazel: only the 20 named ones have targets
+  visible from the root module, so for those versions are checked live and
+  for the rest the lock file is what is compared.)
 
 ## Image assembly
 
@@ -175,7 +195,12 @@ tar, deduplicating directory entries. `mkrootfs.sh` then:
    `//third_party/e2fsprogs:mke2fs` -- see that package's README.md) to
    build the ext4 image directly from that tar's own per-entry
    uid/gid/mode headers, no extraction, mount or loop device involved at
-   any point.
+   any point. `MKE2FS_CONFIG` points at the checked-in
+   `//third_party/e2fsprogs:mke2fs.conf` (R3/L5), so the image's ext4
+   features never depend on the host's `/etc/mke2fs.conf`;
+   `ownership_test` also checks that `metadata_csum_seed` and
+   `orphan_file` (which this machine's `/etc/mke2fs.conf` lacks) are
+   present.
 
 ### Ownership
 
@@ -273,7 +298,7 @@ directly).
 `//third_party/debian:version_check_test` (host-side, no root, no kernel --
 same spirit as `third_party/qemu`/`third_party/busybox`'s own
 `smoke_test.sh`) extracts `@debian//:dpkg_status`'s synthesized
-`/var/lib/dpkg/status` (scoped to just the 14 explicitly requested
+`/var/lib/dpkg/status` (scoped to just the 20 explicitly requested
 packages) and fails with a diff the moment any of their resolved versions
 drifts from `packages.lock`. Before `third_party/debian/BUILD.bazel`
 existed, this failed outright (`no such package 'third_party/debian'`);

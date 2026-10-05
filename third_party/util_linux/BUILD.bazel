@@ -1,0 +1,28 @@
+load("//third_party/qemu:pkgconfig_shim.bzl", "pkgconfig_shim")
+
+exports_files(["BUILD.util_linux"])
+
+# btrfs-progs's configure finds blkid and uuid only through pkg-config
+# (PKG_CHECK_MODULES, and PKG_STATIC, which runs `pkg-config --libs
+# --static` and fails without a .pc file), and rules_foreign_cc does not
+# export the .pc files util-linux's own `make install` writes (their prefix
+# would be a sandbox path anyway). pkgconfig_shim (third_party/qemu/
+# pkgconfig_shim.bzl) writes a .pc file pointing at the Bazel-built static
+# archives instead. Each shim names both libraries (the dep is one
+# configure_make with both): harmless, a static archive named twice links
+# once.
+pkgconfig_shim(
+    name = "blkid_pc",
+    pkg_name = "blkid",
+    version = "2.42.4",
+    deps = ["@util_linux_src//:uuid_blkid"],
+    visibility = ["//visibility:public"],
+)
+
+pkgconfig_shim(
+    name = "uuid_pc",
+    pkg_name = "uuid",
+    version = "2.42.4",
+    deps = ["@util_linux_src//:uuid_blkid"],
+    visibility = ["//visibility:public"],
+)

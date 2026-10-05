@@ -1,4 +1,8 @@
 common --enable_bzlmod
+# MODULE.bazel.lock pins the Debian packages (rules_distroless's apt extension
+# records the resolved package list and sha256s there): never rewrite it
+# silently. Change a pin with `bazel mod deps --lockfile_mode=update`.
+common --lockfile_mode=error
 
 build --cxxopt -std=c++20
 build --copt -Wno-sign-compare

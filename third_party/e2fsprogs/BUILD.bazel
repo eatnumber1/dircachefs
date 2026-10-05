@@ -59,3 +59,25 @@ sh_test(
         ":mke2fs",
     ],
 )
+
+# R3 (docs/plan/review-fixes.md, L5/L10): the checked-in mke2fs profile every
+# image made with the pinned mke2fs uses (MKE2FS_CONFIG), so a filesystem
+# never depends on the host's /etc/mke2fs.conf or on the sandbox path
+# configure baked in. See README.md.
+exports_files(["mke2fs.conf"])
+
+sh_test(
+    name = "mke2fs_conf_test",
+    size = "small",
+    srcs = ["mke2fs_conf_test.sh"],
+    args = [
+        "$(location :mke2fs)",
+        "$(location :debugfs)",
+        "$(location mke2fs.conf)",
+    ],
+    data = [
+        "mke2fs.conf",
+        ":debugfs",
+        ":mke2fs",
+    ],
+)

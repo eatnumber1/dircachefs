@@ -1,0 +1,95 @@
+# BUILD file for @btrfs_progs_src (see MODULE.bazel, README.md). btrfs-progs
+# is autoconf + one flat Makefile with ready-made `*.static` targets, so
+# configure_make fits. Builds two static binaries: mkfs.btrfs (the
+# filesystems under test) and btrfs (later phases' tests drive subvolumes,
+# qgroups and `inspect-internal` with it).
+
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"], exclude = ["bazel-*"]),
+)
+
+BTRFS_PROGS_CONFIGURE_OPTIONS = [
+    # No man pages / asciidoc / sphinx, no Python bindings.
+    "--disable-documentation",
+    "--disable-python",
+
+    # btrfs-convert needs libext2fs (and reiserfs): not used.
+    "--disable-convert",
+
+    # Zoned (SMR) device support needs linux/blkzoned.h and is for devices
+    # the guests do not have: leave it out so the host's kernel headers
+    # cannot change the build.
+    "--disable-zoned",
+
+    # lzo and zstd only add compression to mkfs.btrfs --rootdir and to
+    # btrfs restore/receive: the test filesystems are created empty. The
+    # kernel decides what a mount can compress, not mkfs.
+    "--disable-zstd",
+    "--disable-lzo",
+
+    # libudev is only for multipath device resolution.
+    "--disable-libudev",
+
+    # Diagnostic-only backtrace printing (needs execinfo).
+    "--disable-backtrace",
+
+    # Static archives only; the *.static make targets are used.
+    "--disable-shared",
+]
+
+configure_make(
+    name = "btrfs_progs",
+    lib_source = ":all_srcs",
+    configure_command = "configure",
+    # The Makefile builds in the source tree: build in a copy.
+    configure_in_place = True,
+    configure_options = BTRFS_PROGS_CONFIGURE_OPTIONS,
+    # The Makefile's own fully-static targets (STATIC_LDFLAGS = ... -static
+    # -Wl,--gc-sections); checked by hand to link with only glibc's usual
+    # getpwnam/getgrnam static warnings.
+    targets = [
+        "mkfs.btrfs.static",
+        "btrfs.static",
+    ],
+    out_binaries = [
+        "mkfs.btrfs",
+        "btrfs",
+    ],
+    postfix_script = "mkdir -p $$INSTALLDIR/bin && " +
+                     "cp $$BUILD_TMPDIR/mkfs.btrfs.static $$INSTALLDIR/bin/mkfs.btrfs && " +
+                     "cp $$BUILD_TMPDIR/btrfs.static $$INSTALLDIR/bin/btrfs && " +
+                     "strip $$INSTALLDIR/bin/mkfs.btrfs $$INSTALLDIR/bin/btrfs",
+    # blkid, uuid and zlib are discovered only through pkg-config: the
+    # shims point at the Bazel-built static archives (see
+    # third_party/util_linux/BUILD.bazel, third_party/qemu/pkgconfig_shim.bzl).
+    # PKG_CONFIG_LIBDIR (not _PATH) replaces pkg-config's default search
+    # path, so the host's own blkid.pc/uuid.pc/zlib.pc can never be found.
+    #
+    # deps: the shims name the archives by path relative to the .pc file's
+    # *real* location (the directory is symlinked into the sandbox, and
+    # pkg-config resolves `..` physically), i.e. in the real execroot, so the
+    # archives must be built there: listing them as deps does that, exactly
+    # as third_party/qemu/BUILD.qemu does for glib and zlib.
+    deps = [
+        "@util_linux_src//:uuid_blkid",
+        "@zlib",
+    ],
+    data = [
+        "@dircachefs//third_party/qemu:zlib_pc",
+        "@dircachefs//third_party/util_linux:blkid_pc",
+        "@dircachefs//third_party/util_linux:uuid_pc",
+    ],
+    env = {
+        "PKG_CONFIG_LIBDIR": "$(execpath @dircachefs//third_party/util_linux:blkid_pc):" +
+                             "$(execpath @dircachefs//third_party/util_linux:uuid_pc):" +
+                             "$(execpath @dircachefs//third_party/qemu:zlib_pc)",
+        # -Wno-error / -fno-sanitize=address,undefined: see
+        # third_party/xfsprogs/BUILD.xfsprogs (one word, comma-separated).
+        "CFLAGS": "-Wno-error -g -O2 -fno-sanitize=address,undefined",
+        "LDFLAGS": "-fno-sanitize=address,undefined",
+    },
+    visibility = ["//visibility:public"],
+)

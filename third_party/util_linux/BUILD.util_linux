@@ -1,0 +1,71 @@
+# BUILD file for @util_linux_src (see MODULE.bazel and README.md): a private,
+# static libuuid + libblkid, used only to link third_party/xfsprogs and
+# third_party/btrfs-progs. Placed at the root of the fetched source tree by
+# http_archive's build_file=, the same way third_party/e2fsprogs/
+# BUILD.libarchive builds its private libarchive.
+#
+# Neither tool can use e2fsprogs's bundled libuuid/libblkid: btrfs-progs and
+# xfsprogs call libblkid's probe and topology API, which e2fsprogs's old
+# private copy does not have.
+
+load("@rules_foreign_cc//foreign_cc:defs.bzl", "configure_make")
+
+filegroup(
+    name = "all_srcs",
+    srcs = glob(["**"], exclude = ["bazel-*"]),
+)
+
+UTIL_LINUX_CONFIGURE_OPTIONS = [
+    # Only libuuid and libblkid: every program and every other library off.
+    "--disable-all-programs",
+    "--enable-libuuid",
+    "--enable-libblkid",
+    "--disable-libmount",
+    "--disable-libsmartcols",
+    "--disable-libfdisk",
+    "--disable-liblastlog2",
+
+    # Static only, no rpath.
+    "--disable-shared",
+    "--enable-static",
+    "--disable-rpath",
+
+    # Optional integrations configure would otherwise probe the host for.
+    "--disable-nls",
+    "--disable-asciidoc",
+    "--disable-poman",
+    "--disable-bash-completion",
+    "--without-python",
+    "--without-systemd",
+    "--without-udev",
+    "--without-ncursesw",
+    "--without-tinfo",
+    "--without-readline",
+    "--without-cryptsetup",
+    "--without-selinux",
+    "--without-audit",
+]
+
+configure_make(
+    name = "uuid_blkid",
+    lib_source = ":all_srcs",
+    configure_command = "configure",
+    configure_options = UTIL_LINUX_CONFIGURE_OPTIONS,
+    out_static_libs = [
+        "libblkid.a",
+        "libuuid.a",
+    ],
+    # PKG_CONFIG_LIBDIR: nothing found through the host's pkg-config.
+    # CFLAGS: this project's global `build --copt -Werror` and, under
+    # --config=asan/ubsan, -fsanitize=... leak into rules_foreign_cc's
+    # CFLAGS/LDFLAGS (see third_party/e2fsprogs/BUILD.e2fsprogs); the
+    # tools are host-side image builders, not code under test, and must
+    # carry no sanitizer runtime. One word, comma separated: it cancels
+    # both earlier flags.
+    env = {
+        "PKG_CONFIG_LIBDIR": "/nonexistent",
+        "CFLAGS": "-Wno-error -g -O2 -fno-sanitize=address,undefined",
+        "LDFLAGS": "-fno-sanitize=address,undefined",
+    },
+    visibility = ["//visibility:public"],
+)

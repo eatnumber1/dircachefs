@@ -7,7 +7,7 @@
 # MODULE.bazel) instead of a live mirror, and assembly is a Bazel action
 # instead of a step run once by hand into ~/.cache/dcfs.
 #
-# Invoked as: mkrootfs.sh <out.ext4> <flat.tar> <size> <mke2fs>
+# Invoked as: mkrootfs.sh <out.ext4> <flat.tar> <size> <mke2fs> <mke2fs.conf>
 #
 #   <flat.tar>: @debian//:flat -- every resolved package's files merged
 #   into one tar by rules_distroless's own `flatten` rule (bsdtar,
@@ -23,6 +23,11 @@
 #   PATH) since this is now the *only* tool this script needs that isn't
 #   already an implicit host dependency of this project's Bazel actions
 #   (tar, same as test/qemu/scripts/mkinitramfs.sh's cpio/gzip).
+#
+#   <mke2fs.conf>: //third_party/e2fsprogs:mke2fs.conf, the checked-in
+#   profile, exported as MKE2FS_CONFIG below so the image's feature set
+#   never depends on the host's /etc/mke2fs.conf (nor on the sandbox path
+#   the Bazel-built mke2fs has baked in as its default config location).
 #
 # Ownership: real root:root (and whatever setuid/setgid bits each .deb's
 # payload set), not the uid/gid that ran this Bazel action. This is new as
@@ -50,6 +55,12 @@ OUT=$1
 FLAT_TAR=$2
 SIZE=$3
 MKE2FS=$4
+MKE2FS_CONFIG=$5
+[ -r "$MKE2FS_CONFIG" ] || {
+	echo "mkrootfs.sh: cannot read mke2fs.conf '$MKE2FS_CONFIG'" >&2
+	exit 1
+}
+export MKE2FS_CONFIG
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT

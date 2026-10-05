@@ -71,3 +71,22 @@
 - Test first: a guest test that checks the QEMU, busybox and Debian
   versions the run used against the pins.
 Owner: Sonnet, Opus review of the QEMU build. Order: with Phase 3 (both change how guests are built).
+
+**R3 follow-up (2026-10-06 review, finding L5/L9; `review-fixes.md`).**
+The scratch filesystems the tests format are now pinned too, not only
+the Debian guest's own tools:
+- `third_party/xfsprogs/` (xfsprogs 7.2.0: static `mkfs.xfs`, `xfs_io`) and
+  `third_party/btrfs-progs/` (v7.1: static `mkfs.btrfs`, `btrfs`), with
+  private static `libuuid`/`libblkid` (`third_party/util_linux/`, util-linux
+  2.42.4), liburcu (`third_party/urcu/`) and libinih (`third_party/inih/`).
+  Smoke tests check static linking, no sanitizer runtime under
+  `--config=asan`, the pinned `--version` and a real mkfs.
+- `third_party/e2fsprogs/mke2fs.conf`: the checked-in profile
+  (`MKE2FS_CONFIG`), so no ext4 image depends on the host's
+  `/etc/mke2fs.conf`; `mkrootfs.sh` uses it; `mke2fs_conf_test` checks the
+  feature set.
+- L9: `common --lockfile_mode=error`, plus `debs.lock` (every fetched .deb
+  and its sha256, 149 lines) checked by `version_check_test`.
+- Remaining: `test/qemu/scripts/run-qemu.sh` still formats with host
+  `mkfs.*` until the lane that owns it merges (the switch is a ready-made
+  patch in the R3 hand-off).

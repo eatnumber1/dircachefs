@@ -1,0 +1,3 @@
+# The root package exists only to export the lock file to
+# //third_party/debian:version_check_test.
+exports_files(["MODULE.bazel.lock"])

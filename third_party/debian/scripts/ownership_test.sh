@@ -77,4 +77,18 @@ echo "$mount_stat" | grep -qE 'Mode:[[:space:]]*04[0-7][0-7][0-7]' ||
 $mount_stat"
 echo "PASS: /bin/mount is setuid root"
 
+# The image is made with the checked-in //third_party/e2fsprogs:mke2fs.conf
+# (mkrootfs.sh exports MKE2FS_CONFIG), not whatever profile the host or the
+# Bazel-built mke2fs's baked-in path would give: spot-check two features the
+# host's /etc/mke2fs.conf on this machine lacks (R3, L5/L10).
+features=$("$DEBUGFS" -R 'show_super_stats -h' "$IMAGE" 2>/dev/null |
+	sed -n 's/^Filesystem features:[[:space:]]*//p')
+for f in metadata_csum_seed orphan_file; do
+	case " $features " in
+	*" $f "*) ;;
+	*) fail "image lacks the ext4 feature $f; features: $features" ;;
+	esac
+done
+echo "PASS: image has metadata_csum_seed and orphan_file (checked-in mke2fs.conf)"
+
 echo "PASS: all checks passed"

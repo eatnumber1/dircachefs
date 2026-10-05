@@ -186,3 +186,49 @@ exports_files(["Makefile"])
     strip_prefix = "busybox-1.38.0",
     url = "https://busybox.net/downloads/busybox-1.38.0.tar.bz2",
 )
+
+# R3 (docs/plan/review-fixes.md, L5): pinned, Bazel-built static mkfs.xfs,
+# xfs_io, mkfs.btrfs and btrfs, so the scratch filesystems the tests make
+# are identical on every machine. See third_party/{xfsprogs,btrfs-progs,
+# util_linux}/README.md for the pins, flags and update procedures.
+http_archive(
+    name = "util_linux_src",
+    build_file = "//third_party/util_linux:BUILD.util_linux",
+    sha256 = "fbd62a100ab7bb8746ba0661255c3c48185b1e9021507c624da01fbc696330ec",
+    strip_prefix = "util-linux-2.42.4",
+    url = "https://mirrors.edge.kernel.org/pub/linux/utils/util-linux/v2.42/util-linux-2.42.4.tar.xz",
+)
+
+# xfsprogs's private dependencies (third_party/xfsprogs/README.md): liburcu
+# and libinih; libuuid/libblkid are util_linux_src above.
+http_archive(
+    name = "userspace_rcu_src",
+    build_file = "//third_party/urcu:BUILD.urcu",
+    sha256 = "2556b83adc0f9b3ac8024e613e17d014d04c4c49110604ce55fcb14eae32edd3",
+    strip_prefix = "userspace-rcu-0.15.7",
+    url = "https://lttng.org/files/urcu/userspace-rcu-0.15.7.tar.bz2",
+)
+
+http_archive(
+    name = "inih_src",
+    build_file = "//third_party/inih:BUILD.inih",
+    sha256 = "9c15fa751bb8093d042dae1b9f125eb45198c32c6704cd5481ccde460d4f8151",
+    strip_prefix = "inih-r62",
+    url = "https://github.com/benhoyt/inih/archive/refs/tags/r62.tar.gz",
+)
+
+http_archive(
+    name = "xfsprogs_src",
+    build_file = "//third_party/xfsprogs:BUILD.xfsprogs",
+    sha256 = "501dfa363cd8e19997a4a1a71f70ded88241b45e9db233e8875c23b80520cc83",
+    strip_prefix = "xfsprogs-7.2.0",
+    url = "https://mirrors.edge.kernel.org/pub/linux/utils/fs/xfs/xfsprogs/xfsprogs-7.2.0.tar.xz",
+)
+
+http_archive(
+    name = "btrfs_progs_src",
+    build_file = "//third_party/btrfs-progs:BUILD.btrfs_progs",
+    sha256 = "d1f55cc2971398c9142eaa79d203e63d586a3b4b867f956664a1d68322cd4e34",
+    strip_prefix = "btrfs-progs-v7.1",
+    url = "https://mirrors.edge.kernel.org/pub/linux/kernel/people/kdave/btrfs-progs/btrfs-progs-v7.1.tar.xz",
+)
