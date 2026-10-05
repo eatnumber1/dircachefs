@@ -283,3 +283,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   configuration's disk cache is cold, because sanitizer configs change those actions' keys. Build
   third-party tools in a configuration independent of --config=asan/ubsan (e.g. an exec or
   flag-resetting transition on the tool targets), so plain and sanitized runs share one QEMU build.
+- S2 PASSED (2026-10-06): main 318ad59; plain 75/75; full ASan 75/75 (73 executed, 42 min wall,
+  13:05-13:47, machine otherwise idle). Phases 2, 3 and 4 done; Phase 6.3's first fix merged. Wave 2
+  complete. Next: russ restarts Claude Code (agent types with effort), then wave 3 (Phase 5.1 TCG
+  speed, Phase 6.1 tiers) plus the 6.2 follow-ups (shared xfs quiesce helper, config-independent tool
+  builds).
