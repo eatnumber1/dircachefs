@@ -37,7 +37,7 @@ phase's file; `log.md` says where things stand.
 | 7 | [Pinned toolchain, coverage, warnings, UBSan, clang-tidy](phases/07-toolchain-coverage-warnings-ubsan.md) | planned |
 | 8 | [Coverage close to 100%](phases/08-coverage-to-100.md) | planned |
 | 9 | [File names are bytes](phases/09-file-names-are-bytes.md) | in progress (lane-2, started early) |
-| 10 | [Benchmarks](phases/10-benchmarks.md) | planned |
+| 10 | [Benchmarks](phases/10-benchmarks.md) | in progress (lane-4, started early) |
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
 | 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | planned |

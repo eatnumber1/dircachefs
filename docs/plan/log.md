@@ -321,3 +321,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the agent's report) and pin 4 KiB blocks for the small test images (the built-in profile would give
   64 MiB images 1 KiB blocks, unlike a real disk). Note: inih's hash is of a GitHub tag archive, not
   a release asset (not byte-stable by contract).
+- Phase 10 (benchmarks, idle and memory tests) started in lane-4 (dcfs-implementer).
