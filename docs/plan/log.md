@@ -262,3 +262,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Plan: Phase 5 develops the CI workflow locally with pinned nektos/act before publishing; a full suite under act doubles as a host-dependency detector (russ). Needs russ: Docker access (not in the docker group).
 - russ added russ to the docker group (use sg docker). Docker on this machine is production: never touch containers/images/volumes/networks we did not create, no prune (CLAUDE.md, Phase 5).
 - russ: sanitizer suites no longer block steps (run in the background after merge; required green at sync points; failures become the next step). New side track Phase 6.3: why ASan is so slow (hypothesis: --config=asan instruments the Bazel-built QEMU/glib/e2fsprogs/busybox via rules_foreign_cc), started in lane-1.
+- Phase 4d merged (67ac1c0..deecc69; Sonnet, ~4.6 h incl. long suite runs): every test boots the
+  Bazel-built QEMU 11.1.2 + qboot and the Bazel-built busybox (run-qemu.sh refuses host paths and logs
+  the binaries); the patched-kernel path, build-kernel.sh, test/qemu/kernel.bzl and the //test/qemu:kernel
+  flag are gone. Found and fixed 15 busybox config gaps the pinned busybox exposed; the worst: no
+  md5sum, so content checks compared two empty strings and passed silently, and `ls` never sorted.
+  Full suite 75/75; ASan on 3 representative targets. Remaining host tools: KVM, mkfs.ext4/btrfs/xfs
+  for scratch disks (follow-up: Bazel-built xfsprogs/btrfs-progs; mke2fs exists), network once per pin.
+  pjdfstest hit run-qemu.sh's 1200 s timeout under contention (passes alone in ~550-650 s): Phase 5.1.
