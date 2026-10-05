@@ -305,3 +305,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
      with host defaults: Bazel-built mke2fs with an explicit config, pinned xfsprogs and btrfs-progs;
      L9 Debian lock enforcement. Phase 4 reopened for this.
 - russ: M1 (hostile cache directory) not pursued; replaced by one startup check (database no more accessible than the backing root directory). Remaining review findings planned in review-fixes.md (R1-R3). lane-3 added (capped) for R1+R2.
+- russ: more parallelism, swapping accepted. lane-4: R3a (Bazel-built xfsprogs/btrfs-progs, mke2fs config, Debian lock; runner wiring waits for 5.1); lane-5: Phase 12.1 TLA+ model (dcfs-protocol), started early since it depends on nothing in flight.

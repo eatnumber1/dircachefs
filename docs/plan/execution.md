@@ -7,17 +7,16 @@ merge); this file orders the steps.
 
 ## Ground rules
 
-- **Lanes.** The limit is the machine, not tokens (russ moved to Claude
-  Max on 2026-10-05; the dev machine has 4 CPUs and 11 GB of RAM, and two
-  building lanes already reach swap). So: at most **two building lanes**
-  (anything that runs Bazel builds or QEMU tests) plus up to **two
-  non-building lanes** (reviews with `dcfs-reviewer`, docs, the TLA+
-  model's drafting, plan work). Each building lane caps its own test
-  parallelism and memory in its `user.bazelrc` (`process.md`). Waves
-  below list their building lanes; non-building work fills the extra
-  slots. Revisit when the machine grows or once CI (Phase 5) runs the
-  full suites. Where a third building lane would help, it is marked
-  "(lane 3 if the machine allows)".
+- **Lanes.** Tokens are not the limit (Claude Max). russ accepts swapping
+  on the dev machine (4 CPUs, 11 GB; 2026-10-06), so run as many lanes as
+  have non-conflicting work: today up to four building lanes with
+  per-lane caps in `user.bazelrc` (`--jobs=2`, one test at a time for
+  the extra lanes) plus non-building lanes (reviews, the TLA+ model,
+  docs). Watch for guest-test timeouts caused by contention; if they
+  appear, pause the newest lane rather than raise timeouts. Phases may
+  start out of the listed order when they depend on nothing in flight.
+  Where a third building lane would help, it is marked "(lane 3 if the
+  machine allows)".
 - **Lanes own files.** Two lanes in a wave never edit the same file. The
   "Owns" column lists what a lane may touch; anything else needed from
   another lane's files is a small separate commit the orchestrator lands
