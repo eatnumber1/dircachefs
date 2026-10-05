@@ -251,3 +251,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   /bin/mount setuid) failed first then passes; nfs_test passes; full suite 70/70 (agent). Host mke2fs
   no longer used. Also: the repo's global -Werror broke autoconf probes inside rules_foreign_cc
   builds (fixed per build with CFLAGS=-Wno-error); revisit when the pinned toolchain lands (Phase 7).
+- lane-1: rename_test_xfs flake investigation dispatched (Sonnet; evidence first; fix the test only if the reads are xfs's own deferred work, and prove the check still catches a backing read).
