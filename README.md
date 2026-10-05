@@ -72,7 +72,10 @@ The repository carries forward the history of a 2023 experiment called
   Bazel 9.2.0 in `.bazelversion`) and a C++20 compiler. Every library
   dependency (Abseil, SQLite, stock libfuse 3.18.2) is fetched and built
   by Bazel; no system libfuse is needed.
-- **To test:** QEMU and KVM. See [Testing](#testing).
+- **To test:** KVM and `mkfs.ext4`/`mkfs.btrfs`/`mkfs.xfs`. QEMU, its
+  qboot firmware, the guest's busybox and (for `nfs_test`) `mke2fs` are
+  all pinned and built by Bazel, not installed on the host. See
+  [Testing](#testing).
 
 ## Building
 
@@ -238,21 +241,18 @@ boot), so `bazel test //...` is dominated by compilation, not booting.
 
 ### One-time setup
 
-1. Install `qemu-system-x86_64` (8.2 or later, with `qboot.rom`),
-   `mkfs.ext4`, `mkfs.btrfs`, `mkfs.xfs`, and a statically linked
-   `busybox`.
+1. Install `mkfs.ext4`, `mkfs.btrfs`, `mkfs.xfs` (for tests with a scratch
+   disk). QEMU, its qboot firmware, busybox and the test kernel are all
+   pinned and fetched/built by Bazel (`//third_party/qemu`,
+   `//third_party/busybox`, `//third_party/linux`); there is no host QEMU,
+   qboot, busybox or manual kernel build step any more -- see
+   `test/qemu/README.md`.
 2. Get write access to `/dev/kvm`: `sudo usermod -aG kvm "$USER"`, then log
    in again. Without KVM, QEMU falls back to software emulation, which is
    more than ten times slower and can make tests time out.
-
-   The test kernel itself needs no manual build step: it is a pinned
-   upstream release fetched and built by Bazel (`//third_party/linux`),
-   the default for `--//test/qemu:kernel`. A second, deprecated kernel
-   (`--//test/qemu:kernel=patched`, built out of tree by
-   `test/qemu/scripts/build-kernel.sh`) is kept only until Phase 4; see
-   `test/qemu/README.md`.
 3. For `nfs_test` only, the small Debian root image it chroots into is
-   built by Bazel from a pinned package set (needs `mke2fs`, e2fsprogs):
+   built by Bazel from a pinned package set, using the pinned, Bazel-built
+   `//third_party/e2fsprogs:mke2fs` (Phase 4c; not a host tool):
 
    ```
    bazel build //third_party/debian:rootfs

@@ -159,17 +159,16 @@ silently depended on:
 
 ## Selecting the kernel
 
-`test/qemu:kernel` is a `string_flag` (`stock` default, or `patched`; see
-`test/qemu/BUILD.bazel` and `test/qemu/kernel.bzl`). `stock` (the default
-since Phase 3b dropped the kernel patch) uses this package's `:bzImage`
-for every `qemu_test`/`qemu_test_matrix`/`qemu_cc_test` target. `patched`
-is deprecated: it selects `@kernel_image//:bzImage` (the out-of-tree,
-not-Bazel-tracked build of `test/qemu/scripts/build-kernel.sh`'s patched
-kernel), kept only until Phase 4 removes that build path entirely. Select
-it with `--//test/qemu:kernel=patched`, e.g.:
+There is only one kernel: every `qemu_test`/`qemu_test_matrix`/
+`qemu_cc_test` target (`test/qemu/qemu_test.bzl`, `qemu_cc_test.bzl`)
+boots this package's `:bzImage` unconditionally. Step 3.2 dropped dcfs's
+`FUSE_ATTR_GENERATION` kernel patch and its matching libfuse patch, and
+step 4.4 removed the deprecated, out-of-tree "patched" kernel this file
+used to describe (`test/qemu/scripts/build-kernel.sh`, the
+`@kernel_image` repository rule in the now-deleted `test/qemu/kernel.bzl`,
+and the `--//test/qemu:kernel` flag that selected between the two) along
+with the host `qemu-system-x86_64`/`qboot.rom`/`busybox` that build path
+depended on indirectly -- see `test/qemu/README.md` and
+`third_party/qemu/README.md`/`third_party/busybox/README.md`.
 
-```
-bazel test //test/qemu:boot_test --//test/qemu:kernel=patched
-```
-
-dcfs's full suite passes against the stock kernel (the default).
+dcfs's full suite passes against this kernel.

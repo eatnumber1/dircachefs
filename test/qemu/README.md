@@ -13,74 +13,55 @@ booting.
 
 ## Prerequisites
 
-- `qemu-system-x86_64` (8.2+; needs the `microvm` machine type and
-  `virtio-blk-device`) and `qboot.rom` (Debian/Ubuntu: package `qemu-utils`
-  or `qemu-system-data`; it's normally already installed alongside
-  `qemu-system-x86`, at `/usr/share/qemu/qboot.rom`).
+Step 4.4 finished wiring QEMU, qboot and busybox into the Bazel build
+(`third_party/qemu/`, `third_party/busybox/`): none of the three is a host
+tool any more. What's left:
+
 - `mkfs.ext4`, `mkfs.btrfs`, `mkfs.xfs`, `truncate` (for tests with a
-  `disks =` attribute).
-- A statically linked `busybox` (checked at `/usr/bin/busybox`, falling
-  back to `/bin/busybox-static`; override with `DCFS_BUSYBOX`).
+  `disks =` attribute) -- these mkfs the small scratch-disk images
+  `run-qemu.sh` creates on the host before boot; there is no equivalent
+  Bazel target for them.
 - `/dev/kvm`, writable by you. Put yourself in the `kvm` group
   (`sudo usermod -aG kvm "$USER"`, then re-login), or on a shell that
   predates the group change taking effect, wrap the `bazel test` /
   `run-qemu.sh` invocation in `sg kvm -c '...'`. Without a writable
   `/dev/kvm`, QEMU falls back to TCG (software emulation), which still
   works but is ten-plus times slower -- see `TIMEOUT` below.
-- For `nfs_test` only: `mke2fs` (e2fsprogs), to assemble
+- For `nfs_test` only: network access (to `snapshot.debian.org`) is
+  needed once per pin, to fetch the pinned packages that assemble
   `//third_party/debian:rootfs` -- see "NFS test and the Debian rootfs"
-  below and `third_party/debian/README.md`. Network access (to
-  `snapshot.debian.org`) is needed once per pin, to fetch the pinned
-  packages; the test itself is fully offline (loopback only).
+  below and `third_party/debian/README.md`. `mke2fs` itself is now the
+  pinned, Bazel-built `//third_party/e2fsprogs:mke2fs` (Phase 4c), not a
+  host tool. The test itself is fully offline (loopback only).
 
-## Building the test kernel (deprecated)
+## The test kernel
 
-**Deprecated.** This out-of-tree kernel (`@kernel_image//:bzImage`) is no
-longer the default for any test; see "The stock kernel" below, which is
-built entirely by Bazel and needs no manual step. This section, the
-script, and `--//test/qemu:kernel=patched` are kept only until Phase 4
-removes this build path entirely -- skip this section unless you are
-specifically comparing against the deprecated kernel.
+`//third_party/linux:bzImage` -- a pinned upstream release, fetched and
+built entirely by Bazel (no out-of-tree script, no `~/Sources/linux`, no
+manual build step), configured from `make tinyconfig` plus a checked-in
+fragment (`third_party/linux/kernel.config`). See
+`third_party/linux/README.md` for the pin, the fragment's rationale, and
+which host tools the build still depends on.
 
-The kernel is *not* built by Bazel (it's an out-of-tree kernel build that
-doesn't belong in the Bazel action graph). Build it once with:
-
-```
-test/qemu/scripts/build-kernel.sh
-```
-
-This builds `${LINUX:-$HOME/Sources/linux}` out of tree into
-`${DCFS_KERNEL_BUILD:-$HOME/.cache/dcfs/kernel-build}` and logs to
-`$DCFS_KERNEL_BUILD/../kernel-build.log`, which ends with the enabled
-config-symbol count before/after and the resulting `bzImage` size. `$LINUX`
-must not have an in-tree `.config` (run `make mrproper` there first if it
-does). The script is idempotent: it always rebuilds `.config` from a fresh
-`x86_64_defconfig` + `kvm_guest.config` baseline rather than patching the
-previous one, so re-running it after editing the script's enable/disable
-list is safe. It builds in the foreground (`nice -n 19 make -jN bzImage`);
-run it with `run_in_background` yourself if you don't want to wait.
-
-Until the kernel is built, `@kernel_image//:bzImage` is a placeholder file
-(first line `DCFS-KERNEL-MISSING`); `bazel build //...` still works fine,
-but running any test fails fast with a clear message pointing back at this
-script.
-
-If you rebuild the kernel into a different directory, export
-`DCFS_KERNEL_BUILD` before invoking Bazel (or pass
-`--repo_env=DCFS_KERNEL_BUILD=...`) so `@kernel_image` picks it up.
+It is the kernel every test boots (`qemu_test`, `qemu_test_matrix` and
+`qemu_cc_test` alike; there is no other kernel to select -- step 3.2
+dropped dcfs's `FUSE_ATTR_GENERATION` kernel patch, and step 4.4 removed
+the deprecated out-of-tree "patched" kernel and the
+`--//test/qemu:kernel` flag that used to choose between them).
 
 ### Why this kernel is minimal
 
 Every unit test now pays this kernel's boot cost, so it is trimmed hard:
-`x86_64_defconfig` + `kvm_guest.config`, minus every bulky subsystem the
-guest never touches (DRM/FB/VGA console, sound, USB, input/HID, I2C,
-thermal, watchdog, Bluetooth/NFC/Wi-Fi, media, PCMCIA, ATA/SCSI, every wired
-Ethernet driver, netfilter, IPv6, HPET, ACPI, loadable modules, debug info,
-kexec, hibernation, cpufreq/cpuidle, Xen/Hyper-V/VMware guest drivers),
-plus everything it needs (PVH direct boot, virtio-mmio + virtio-blk +
-virtio-net, ext4/btrfs/xfs, FUSE + `FUSE_IO_URING`, NFSv4 client+server,
-`FHANDLE`/`EXPORTFS`, devtmpfs, tmpfs with POSIX ACLs). See
-`test/qemu/scripts/build-kernel.sh` for the exact list.
+`tinyconfig` (every optional symbol off) plus exactly what the guest
+needs on top (PVH direct boot, virtio-mmio + virtio-blk, ext4/btrfs/xfs,
+FUSE + `FUSE_IO_URING`, NFSv4 client+server, `FHANDLE`/`EXPORTFS`,
+devtmpfs, tmpfs with POSIX ACLs, cgroups, namespaces), with every bulky
+subsystem the guest never touches left off (DRM/FB/VGA console, sound,
+USB, input/HID, I2C, thermal, watchdog, Bluetooth/NFC/Wi-Fi, media,
+PCMCIA, ATA/SCSI, wired Ethernet, netfilter, IPv6, HPET, ACPI, loadable
+modules, debug info, kexec, hibernation, cpufreq/cpuidle, Xen/Hyper-V/
+VMware guest drivers). See `third_party/linux/kernel.config` for the exact
+list.
 
 Two consequences worth knowing:
 
@@ -93,41 +74,15 @@ Two consequences worth knowing:
 - **No PCI.** Disks are virtio-mmio (`-device virtio-blk-device`), not
   virtio-pci; the `microvm` machine type has no PCI bus at all.
 
-## The stock kernel (step 3.1a/3.2), the default
-
-A kernel fetched and built entirely by Bazel (no out-of-tree script, no
-`~/Sources/linux`): a pinned upstream release, configured from `make
-tinyconfig` plus a checked-in fragment (`third_party/linux/kernel.config`)
-instead of `x86_64_defconfig` + `kvm_guest.config` + a `scripts/config`
-edit list. See `third_party/linux/README.md` for the pin, the fragment's
-rationale, and which host tools the build still depends on.
-
-This is the default kernel for every test (`qemu_test`, `qemu_test_matrix`
-and `qemu_cc_test` alike): Phase 3b dropped dcfs's `FUSE_ATTR_GENERATION`
-kernel patch and its matching libfuse patch (it gave dcfs nothing -- dcfs
-never changes a nodeid's generation), so the full suite now passes against
-this stock kernel with stock libfuse. Select it explicitly (or any other
-value) with the `//test/qemu:kernel` `string_flag`:
-
-```
-bazel test //test/qemu:boot_test --//test/qemu:kernel=stock
-```
-
-**`--//test/qemu:kernel=patched` is deprecated.** It selects
-`@kernel_image//:bzImage`, the out-of-tree, not-Bazel-tracked build from
-"Building the test kernel" above (`test/qemu/scripts/build-kernel.sh`,
-still needed if you pass this flag). It exists only so the two kernels can
-still be compared until Phase 4 removes the out-of-tree build path and
-this flag's non-default value entirely; don't build new tests against it.
-
 ## Fast boot
 
-The runner (`scripts/run-qemu.sh`) boots QEMU's `microvm` machine type with
-direct kernel boot and no legacy PC devices this guest doesn't need:
+The runner (`scripts/run-qemu.sh`) boots the pinned, Bazel-built
+`//third_party/qemu:qemu_system_x86_64` with the `microvm` machine type,
+direct kernel boot, and no legacy PC devices this guest doesn't need:
 
 ```
 -M microvm,x-option-roms=off,pit=off,pic=off,rtc=on,isa-serial=on,acpi=off
--bios /usr/share/qemu/qboot.rom
+-bios <@qemu//:pc-bios/qboot.rom>
 -nodefaults -no-user-config -nographic -serial stdio
 -accel kvm -cpu host        # falls back to -accel tcg -cpu max, with a
                              # warning line in the log, if /dev/kvm isn't
@@ -157,19 +112,28 @@ where its disks are -- `info qtree` over the QEMU monitor confirms the
 either way, but `/dev/vd*` only appears with `acpi=off`.
 
 **Firmware: qboot, not `bios-microvm.bin`.** `microvm`'s other stock
-firmware option, `bios-microvm.bin` (a cut-down SeaBIOS build, also present
-on this host at `/usr/share/seabios/bios-microvm.bin`), turns out **not**
-to work with `x-option-roms=off`: its `-kernel`/`-initrd` hand-off is
-implemented as an option ROM, so with option ROMs disabled it falls
+firmware option, `bios-microvm.bin` (a cut-down SeaBIOS build), turns out
+**not** to work with `x-option-roms=off`: its `-kernel`/`-initrd` hand-off
+is implemented as an option ROM, so with option ROMs disabled it falls
 through to normal BIOS boot-device probing and fails with "No bootable
 device" (verified experimentally while building this). qboot has no such
 dependency, and has a second advantage: it detects the kernel's PVH entry
-point (`CONFIG_PVH=y`, set by `build-kernel.sh`) and uses it directly when
-present -- an even faster, effectively firmware-less boot -- falling back
-to the normal Linux/x86 real-mode boot protocol for a kernel that lacks
-it. So there's no PVH-vs-not branch in `run-qemu.sh`: one firmware choice
-(qboot) covers both, automatically. Override the qboot path with
-`DCFS_QBOOT` if it's not at `/usr/share/qemu/qboot.rom` on your system.
+point (`CONFIG_PVH=y`, set by `third_party/linux/kernel.config`) and uses
+it directly when present -- an even faster, effectively firmware-less boot
+-- falling back to the normal Linux/x86 real-mode boot protocol for a
+kernel that lacks it. So there's no PVH-vs-not branch in `run-qemu.sh`:
+one firmware choice (qboot) covers both, automatically.
+
+Step 4.4: `run-qemu.sh` takes the QEMU binary and the qboot ROM as
+mandatory `--qemu`/`--qboot` arguments -- `qemu_test`/`qemu_cc_test`
+(`qemu_test.bzl`/`qemu_cc_test.bzl`) pass
+`$(location //third_party/qemu:qemu_system_x86_64)` and
+`$(location @qemu//:pc-bios/qboot.rom)`. There is no host lookup, no
+`PATH` search and no default path any more: `run-qemu.sh` refuses to run
+(and refuses a path that merely *looks* like a host one, e.g. under
+`/usr` or `/bin`) if either is missing, and logs the resolved binary path
+and its `--version` output to the serial log for anyone auditing a test
+run.
 
 Disks are virtio-mmio, attached as a `-drive ... -device
 virtio-blk-device,drive=...` pair per disk (see "Giving a test a real
@@ -532,8 +496,9 @@ a pinned `snapshot.debian.org` timestamp -- not a live mirror, and no
 longer a step run once by hand into `~/.cache/dcfs`. See
 `third_party/debian/README.md` for the package list (with each package's
 reason), the pin and its update procedure, and exactly how the image is
-assembled (`mke2fs -d` against a flattened package tree, host `mke2fs`
-still used -- no root, no network, no loop mounts in the Bazel action
+assembled (`mke2fs -d` against a flattened package tree, using the
+pinned, Bazel-built `//third_party/e2fsprogs:mke2fs` since Phase 4c, not
+a host tool -- no root, no network, no loop mounts in the Bazel action
 itself).
 
 ```
@@ -613,10 +578,11 @@ way any admin would:
 ## `run-qemu.sh` internals
 
 One script serves both kinds of test (see the usage comment at the top of
-`scripts/run-qemu.sh`): `--unit <bzImage> <initramfs> [disk-spec...]` for
-`qemu_cc_test`, or the legacy `<bzImage> <initramfs> <dcfs_test-name>
-[disk-spec...]` (no leading flag) for `qemu_test`. Each `disk-spec` is
-`<device>:<fstype>:<size>`, e.g. `vdb:ext4:256M`; disks are attached in
-`<letter>` order, with a small unformatted filler drive for any skipped
-letter, so the guest kernel enumerates the requested disk at exactly
-`/dev/vd<letter>`.
+`scripts/run-qemu.sh`): `--qemu <...> --qboot <...> --unit <bzImage>
+<initramfs> [disk-spec...]` for `qemu_cc_test`, or `--qemu <...> --qboot
+<...> <bzImage> <initramfs> <dcfs_test-name> [disk-spec...]` for
+`qemu_test`. `--qemu`/`--qboot` are mandatory in both modes (step 4.4; see
+"Firmware: qboot" above). Each `disk-spec` is `<device>:<fstype>:<size>`,
+e.g. `vdb:ext4:256M`; disks are attached in `<letter>` order, with a small
+unformatted filler drive for any skipped letter, so the guest kernel
+enumerates the requested disk at exactly `/dev/vd<letter>`.
