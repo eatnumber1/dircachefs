@@ -101,7 +101,7 @@ told why not).
 
 | Lane | Work | Model | Owns |
 |---|---|---|---|
-| 1 | Phase 5: the CI workflow (kernel and image caching, full matrix, ASan, oldest and newest kernel, logs on failure) | Sonnet | `.github/workflows/` |
+| 1 | Phase 5: the CI workflow (kernel and image caching, full matrix, ASan, oldest and newest kernel, logs on failure), developed and run locally with pinned `act` before publishing; the full suite under `act` doubles as a check for host dependencies | Sonnet (investigator) | `.github/workflows/`, `third_party/act/` |
 | 2 | Phase 6.2, first pass: replace sleeps with event waits, shard long tests, build images once | Sonnet | `test/qemu/guest/*.sh`, `guest/lib.sh`, shard settings in test `BUILD.bazel` rules |
 
 If hosted runners lack KVM, lane 1 stops and reports (russ decides).
@@ -264,6 +264,7 @@ to at least 6.9; only then is dcfs deployed on the server.
 | When | What |
 |---|---|
 | Wave 4, if hosted runners lack KVM | TCG or a self-hosted runner |
+| Before wave 4 | Docker access for `act` (join the `docker` group or set up rootless Docker) |
 | S5 | Coverage report review |
 | S6 | Agree the remaining coverage gaps |
 | S8 (optional, any time after) | Spare-disk trial (21.1) |

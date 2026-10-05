@@ -259,3 +259,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   load; after: 20/20 passes; an injected backing read inside the window is still caught.
   Follow-up (Phase 6.2): other guest scripts with zero-backing-reads checks after unlinks on xfs
   may share the latent flake; move quiesce_backing() into lib.sh and use it in every such check.
+- Plan: Phase 5 develops the CI workflow locally with pinned nektos/act before publishing; a full suite under act doubles as a host-dependency detector (russ). Needs russ: Docker access (not in the docker group).
