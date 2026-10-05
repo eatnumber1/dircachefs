@@ -21,12 +21,47 @@ library name(s) Bazel already resolved for `dep`, so `dependency('glib-2.0',
 method: 'pkg-config')` succeeds the same way it would against a real
 system install.
 
-zlib does not need this: QEMU's meson.build calls
+zlib *also* needs one of these (a `:zlib_pc`, same as `:glib_pc`), despite
+first appearances to the contrary: QEMU's meson.build calls
 `dependency('zlib', required: true)` with no `method:` restriction, and
-meson has a built-in zlib-specific probe that also tries a plain
-compiler-based `-lz` search -- which the CPPFLAGS/LDFLAGS rules_foreign_cc
-already sets up satisfy directly, no .pc file required (confirmed: the
-build gets past the zlib dependency() call with no shim).
+meson's built-in zlib-specific probe tries several methods including a
+plain compiler-based `-lz` search -- which seemed, at first, to make a
+shim unnecessary (the build does get past the zlib `dependency()` call
+with none). What that actually meant: meson found the *host's* zlib via
+pkg-config (`PKG_CONFIG_PATH` only *adds* a search directory; it doesn't
+stop pkg-config from also finding a real system `zlib.pc` in its own
+default search path, which every dev/CI machine with `zlib1g-dev` or
+equivalent installed has) -- confirmed by the version it reported (the
+host's 1.3, not this project's pinned 1.3.2) and by the built binary
+depending on `/lib/x86_64-linux-gnu/libz.so.1`. The fix needs two parts,
+both in BUILD.qemu: a `:zlib_pc` shim exactly like `:glib_pc`, *and*
+`PKG_CONFIG_LIBDIR` (which replaces pkg-config's default search path
+instead of adding to it, unlike `PKG_CONFIG_PATH`) set to cover only this
+build's own shim directories -- otherwise pkg-config would still find the
+host's real zlib.pc (and, for that matter, a host glib-2.0.pc too, on any
+machine that has one) ahead of or alongside this project's.
+
+Fully static, on purpose: the `Libs:` field this rule writes is a list of
+literal paths to each dep's *static* archive, never a bare `-lfoo`
+search-by-name flag. Found the hard way, from the built
+`qemu-system-x86_64`'s own `readelf -d`: pcre2 and zlib (unlike glib
+itself) each have *both* a static (`.a`) and a shared (`.so`) artifact
+built by Bazel in the very same directory (confirmed via `bazel cquery
+... --output=starlark` on their CcInfo directly), and a bare `-lpcre2`/
+`-lz` lets the linker pick -- it prefers the shared one whenever both are
+present, regardless of which this rule "meant". That produced a binary
+whose `NEEDED` entries included the *host's* `/lib/x86_64-linux-gnu/
+libz.so.1` (QEMU's `dependency('zlib', ...)` has no `method:` restriction
+and meson's built-in zlib probe also resolves via a plain system library
+search when nothing more specific says otherwise) and an *absolute path
+straight into this one build's own Bazel output_base* baked into pcre2's
+`NEEDED` entry and `RUNPATH` -- which would break in any other checkout,
+in CI, from a shared cache hit, or the moment that output_base is
+cleaned. A literal archive path in `Libs:` can't have either problem: ld
+links exactly that file, full stop, and if a dep genuinely has no static
+artifact at all this rule fails loudly (`pkgconfig_shim ...: ... has no
+static library`) rather than silently falling back to whatever `-lfoo`
+would have found.
 
 This one shim actually merges two deps, @glib//glib and @glib//gmodule:
 QEMU's meson.build never calls `dependency('gmodule...')` at all in this
@@ -49,10 +84,8 @@ load("@rules_cc//cc/common:cc_info.bzl", "CcInfo")
 def _pkgconfig_shim_impl(ctx):
     includes = []
     seen_includes = {}
-    libdirs = []
-    seen_libdirs = {}
-    libnames = []
-    seen_libnames = {}
+    lib_files = []
+    seen_lib_files = {}
 
     for dep in ctx.attr.deps:
         cc_info = dep[CcInfo]
@@ -70,23 +103,26 @@ def _pkgconfig_shim_impl(ctx):
 
         for linker_input in linking_context.linker_inputs.to_list():
             for lib in linker_input.libraries:
-                f = lib.static_library or lib.pic_static_library or lib.dynamic_library
+                # Static only, deliberately -- see this file's docstring's
+                # "Fully static, on purpose" section. A bare "-lfoo" was
+                # tried first and is wrong whenever a dep has *both* a
+                # static and a shared artifact in the same directory
+                # (pcre2 and zlib both do, confirmed by inspecting their
+                # CcInfo directly): the linker prefers .so over .a given
+                # only a name, regardless of which one this rule "meant".
+                # A real path to the .a file is unambiguous.
+                f = lib.static_library or lib.pic_static_library
                 if not f:
-                    continue
-                d = f.dirname
-                if d not in seen_libdirs:
-                    seen_libdirs[d] = True
-                    libdirs.append(d)
-                name = f.basename
-                if name.startswith("lib"):
-                    name = name[len("lib"):]
-                for ext in (".pic.a", ".a", ".so", ".lo"):
-                    if name.endswith(ext):
-                        name = name[:-len(ext)]
-                        break
-                if name and name not in seen_libnames:
-                    seen_libnames[name] = True
-                    libnames.append(name)
+                    fail((
+                        "pkgconfig_shim {name}: {dep} has no static " +
+                        "library (only a shared one), so it can't be " +
+                        "linked hermetically into a pkg-config-discovered " +
+                        "dependency. Build it with linkstatic, or give " +
+                        "this rule a different target for it."
+                    ).format(name = ctx.label.name, dep = dep.label))
+                if f.path not in seen_lib_files:
+                    seen_lib_files[f.path] = True
+                    lib_files.append(f)
 
     # configure_make's `env` wants a *directory* for PKG_CONFIG_PATH (not a
     # single file), so the .pc file is written directly into its own
@@ -114,10 +150,13 @@ def _pkgconfig_shim_impl(ctx):
         return "${pcfiledir}/" + back_to_root + path
 
     cflags = " ".join(["-I" + pcfiledir_rel(d) for d in includes])
-    libs = " ".join(
-        ["-L" + pcfiledir_rel(d) for d in libdirs] +
-        ["-l" + n for n in libnames],
-    )
+
+    # Each entry is the literal path to a .a file, not "-lfoo": gcc/ld
+    # accept a path to a static archive as an ordinary positional link
+    # input, and unlike "-lfoo" (which needs a search dir and then picks
+    # *some* libfoo.{a,so} out of it), a path can't accidentally resolve
+    # to a different file than the one this rule actually means.
+    libs = " ".join([pcfiledir_rel(f.path) for f in lib_files])
 
     dep_labels = ", ".join([str(dep.label) for dep in ctx.attr.deps])
     pc_content = """\

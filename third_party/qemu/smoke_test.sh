@@ -83,4 +83,37 @@ fi
 echo "PASS: -machine help lists only documented machines:
 $actual_machines"
 
+# --- hermetic linking --------------------------------------------------
+# The whole point of building QEMU with Bazel is that the result doesn't
+# depend on what's installed on the host (or on this specific Bazel
+# invocation's own output_base staying around). Two ways that can go
+# wrong, both silent until something actually breaks: a NEEDED entry
+# resolves to the *host's* copy of a library instead of the Bazel-built
+# one (glib/zlib/pcre2 are all fetched and built hermetically -- see
+# README.md -- so none of their shared objects should be linked at all),
+# or a NEEDED/RUNPATH entry bakes in an absolute path into this
+# particular build's Bazel output_base, which breaks in any other
+# checkout, in CI, from a shared cache hit, or the moment this
+# output_base is cleaned. `readelf -d` reads the ELF dynamic section
+# directly (no need to run the binary, unlike `ldd`).
+dynsection=$(readelf -d "$QEMU" 2>&1) || fail "readelf -d failed: $dynsection"
+
+needed=$(echo "$dynsection" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p')
+[ -n "$needed" ] || fail "readelf -d found no NEEDED entries at all (something is badly wrong): $dynsection"
+
+bad_needed=$(echo "$needed" | grep -vE '^(libc\.so\.6|libm\.so\.6)$' || true)
+if [ -n "$bad_needed" ]; then
+	fail "qemu-system-x86_64 is not hermetically linked -- NEEDED entries beyond libc/libm:
+$bad_needed"
+fi
+echo "PASS: only libc.so.6/libm.so.6 in NEEDED:
+$needed"
+
+bad_path=$(echo "$dynsection" | grep -E 'RUNPATH|RPATH' || true)
+if [ -n "$bad_path" ]; then
+	fail "qemu-system-x86_64 has a RUNPATH/RPATH baked in (leaks a build-time path):
+$bad_path"
+fi
+echo "PASS: no RUNPATH/RPATH"
+
 echo "PASS: all checks passed"

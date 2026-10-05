@@ -170,21 +170,23 @@ configure_make(
     # ".../qemu.build_tmpdir$/build/qemu-system-x86_64".)
     postfix_script = "mkdir -p $$INSTALLDIR/bin && " +
                       "cp $$BUILD_TMPDIR/build/qemu-system-x86_64 $$INSTALLDIR/bin/qemu-system-x86_64",
-    # deps provide glib (QEMU's one hard dependency even in this
-    # configuration) and zlib (likewise always required; see
-    # README.md's "Dependencies"). rules_foreign_cc turns these into
-    # correct CPPFLAGS/-I and LDFLAGS/-L entries for ./configure
-    # automatically (confirmed in the build log), but deliberately goes
-    # no further than that -- it does not also guess a `-l<name>` or
-    # synthesize a .pc file, since picking the right one is exactly what
-    # the downstream project's own dependency discovery is supposed to
-    # do. zlib's meson.build probe (`dependency('zlib', required:
-    # true)`, no `method:` restriction) resolves via these flags alone
-    # (meson's built-in zlib check also tries a plain compiler-based
-    # `-lz` search). glib's probe does not: QEMU's meson.build hard-codes
-    # `dependency('glib-2.0', method: 'pkg-config', required: true)`, so
-    # it needs an actual glib-2.0.pc on PKG_CONFIG_PATH -- :glib_pc
-    # (pkgconfig_shim.bzl) generates one from @glib//glib's own CcInfo.
+    # deps provide glib and zlib (QEMU's only two hard dependencies even
+    # in this configuration; see README.md's "Dependencies") so
+    # rules_foreign_cc can turn them into correct CPPFLAGS/-I and
+    # LDFLAGS/-L entries for ./configure (confirmed in the build log) --
+    # but deliberately goes no further than that: it does not also guess
+    # a `-l<name>` or synthesize a .pc file, since picking the right one
+    # is exactly what the downstream project's own dependency discovery
+    # is supposed to do. Both glib and zlib need an actual .pc on
+    # PKG_CONFIG_LIBDIR as a result (:glib_pc/:zlib_pc, pkgconfig_shim.bzl)
+    # -- glib because QEMU's meson.build hard-codes `dependency('glib-2.0',
+    # method: 'pkg-config', required: true)`, no fallback; zlib for a
+    # subtler reason documented in pkgconfig_shim.bzl ("zlib *also* needs
+    # one of these"): with no shim, meson's `dependency('zlib', ...)`
+    # "worked" by finding the *host's* zlib.pc (version mismatch and a
+    # `NEEDED` entry on the host's libz.so.1 both confirmed it), since
+    # nothing was stopping pkg-config from also searching its own default
+    # paths.
     #
     # @glib//gmodule is here for a related but distinct reason: it is
     # *only* read by :glib_pc (merged into the same .pc -- see
@@ -206,21 +208,33 @@ configure_make(
         "@zlib",
     ],
     # `data` (not `build_data`): build_data transitions to the *exec*
-    # configuration, which would make :glib_pc embed paths to a second,
-    # separately-built exec-config copy of glib that nothing else in this
-    # build graph forces to actually exist on disk (glib_pc's own action
-    # only reads File.path strings out of @glib//glib's CcInfo to embed
-    # as text -- that doesn't create a dependency edge on the files
+    # configuration, which would make :glib_pc/:zlib_pc embed paths to a
+    # second, separately-built exec-config copy of glib/zlib that nothing
+    # else in this build graph forces to actually exist on disk (their
+    # own actions only read File.path strings out of CcInfo to embed as
+    # text -- that doesn't create a dependency edge on the files
     # themselves, so Bazel has no reason to build that copy). `data`
-    # keeps :glib_pc in the *target* configuration, i.e. the exact same
-    # one `deps` above already uses -- the files glib_pc.pc's embedded
-    # paths point to are therefore already guaranteed present in this
-    # same action's sandbox via `deps`, with no second glib build needed
+    # keeps them in the *target* configuration, i.e. the exact same one
+    # `deps` above already uses -- the files their embedded paths point
+    # to are therefore already guaranteed present in this same action's
+    # sandbox via `deps`, with no second glib/zlib build needed
     # (confirmed: the first attempt, with build_data, failed because
     # `bazel-out/k8-opt-exec/bin/external/glib+/...` never got built).
-    data = ["@dircachefs//third_party/qemu:glib_pc"],
+    data = [
+        "@dircachefs//third_party/qemu:glib_pc",
+        "@dircachefs//third_party/qemu:zlib_pc",
+    ],
     env = {
-        "PKG_CONFIG_PATH": "$(execpath @dircachefs//third_party/qemu:glib_pc)",
+        # PKG_CONFIG_LIBDIR, not PKG_CONFIG_PATH: *replaces* pkg-config's
+        # default search path instead of adding to it. PKG_CONFIG_PATH
+        # alone is exactly how the host's zlib got found in the first
+        # place (see :zlib_pc's comment above) -- pkg-config still checks
+        # its own compiled-in default directories (every system
+        # *-dev package's .pc files) regardless of what's prepended via
+        # PKG_CONFIG_PATH. With PKG_CONFIG_LIBDIR set, the *only* .pc
+        # files pkg-config can find at all are these two.
+        "PKG_CONFIG_LIBDIR": "$(execpath @dircachefs//third_party/qemu:glib_pc):" +
+                              "$(execpath @dircachefs//third_party/qemu:zlib_pc)",
     },
     out_binaries = ["qemu-system-x86_64"],
     visibility = ["//visibility:public"],

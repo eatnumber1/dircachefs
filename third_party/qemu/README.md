@@ -100,12 +100,13 @@ the built binary's `ldd` output.
   to the exact commit QEMU's own `subprojects/dtc.wrap` names, because
   the copy inside the QEMU tarball turned out to be unusable from inside
   a Bazel sandbox.
-- **Nothing else**. The built binary's `ldd` output is exactly: `libz`,
-  `libm`, `libglib-2.0`, `libc`, the ELF interpreter, and `libpcre2-8`
-  (glib's own transitive dependency, not something this project adds
-  directly). No pixman, no libusb, no libgnutls, no libcurl, no
-  libnuma, no capstone, none of the dozens of optional libraries
-  `./configure --help` lists.
+- **Nothing else**. glib, gmodule, pcre2 (glib's own transitive
+  dependency, not something this project adds directly) and zlib are all
+  linked in *statically* -- see "Hermetic linking" below -- so the built
+  binary's only `NEEDED` entries at all are `libc.so.6` and `libm.so.6`
+  (`readelf -d`; `smoke_test.sh` checks this directly). No pixman, no
+  libusb, no libgnutls, no libcurl, no libnuma, no capstone, none of the
+  dozens of optional libraries `./configure --help` lists.
 
 ### glib's pkg-config bridge
 
@@ -124,13 +125,15 @@ glib-2.0 not found at all, even though every file it needs is already on
 the search path.
 
 `pkgconfig_shim.bzl`'s `pkgconfig_shim` rule (`:glib_pc` in
-`BUILD.bazel`) closes that one gap: it reads `@glib//glib`'s (and, for a
-related but separate reason below, `@glib//gmodule`'s) `CcInfo` provider
-directly -- its `compilation_context`'s include directories and
-`linking_context`'s library files -- and writes a `glib-2.0.pc` whose
+`BUILD.bazel`, and `:zlib_pc` alongside it -- see below) closes that one
+gap: it reads `@glib//glib`'s (and, for a related but separate reason
+below, `@glib//gmodule`'s) `CcInfo` provider directly -- its
+`compilation_context`'s include directories and `linking_context`'s
+*static* library archives -- and writes a `glib-2.0.pc` whose
 `Cflags:`/`Libs:` point at them, wired in via `configure_make`'s `env`:
-`PKG_CONFIG_PATH = $(execpath :glib_pc)`. Three things about this needed
-to be exactly right, each found from a real build failure, not assumed:
+`PKG_CONFIG_LIBDIR = $(execpath :glib_pc):$(execpath :zlib_pc)`. Four
+things about this needed to be exactly right, each found from a real
+build failure, not assumed:
 
 - **Paths must use pkg-config's own `${pcfiledir}` variable, not an
   absolute path.** Each Bazel sandboxed action gets its own private
@@ -173,11 +176,26 @@ to be exactly right, each found from a real build failure, not assumed:
   `@glib//gmodule` to actually be compiled, so the embedded `-I
   .../gmodule/include_glib-2.0` pointed at a directory that, again,
   genuinely did not exist.
+- **The `Libs:` field must be a literal path to each dependency's
+  *static* archive, never a bare `-l<name>`.** glib itself has only a
+  static artifact, so this didn't show up until an orchestrator review
+  actually ran `ldd`/`readelf -d` on the finished binary: pcre2 (a
+  transitive dependency, reached through glib) has *both* a static and a
+  shared library built by Bazel in the same directory, and a plain
+  `-lpcre2` let the linker pick -- which turned out to be the shared one,
+  with an absolute path into this one build's own Bazel output_base
+  baked into both the `NEEDED` entry and the `RUNPATH`. See "Hermetic
+  linking" below and `pkgconfig_shim.bzl`'s "Fully static, on purpose"
+  section for the full story, including the same problem (plus a
+  different one) for zlib.
 
-zlib needs none of this: `dependency('zlib', required: true)` has no
-`method:` restriction, and meson has a built-in zlib-specific probe that
-also tries a plain compiler-based `-lz` search, which the CPPFLAGS/LDFLAGS
-`deps = ["@zlib"]` already produces satisfies directly.
+zlib *also* needs a `:zlib_pc` shim, for a reason that wasn't obvious
+until the finished binary was actually inspected: `dependency('zlib',
+required: true)` has no `method:` restriction, and meson's built-in
+zlib-specific probe did find *something* with no shim at all -- just the
+**host's** zlib (via pkg-config's own default search path, which
+`PKG_CONFIG_PATH` alone doesn't suppress), not `@zlib`. See "Hermetic
+linking" below for the full account and the `PKG_CONFIG_LIBDIR` fix.
 
 ### A dependency that is *not* linked, and why it briefly appeared
 
@@ -518,8 +536,10 @@ which `out_binaries = ["qemu-system-x86_64"]` (`BUILD.qemu`) gives a
 matching group for. `:qemu_system_x86_64` is a plain `filegroup` pulling
 that one output group out as an ordinary single-file target.
 
-Binary: 11 MB, dynamically linked (`ldd`: `libz`, `libm`, `libglib-2.0`,
-`libpcre2-8`, `libc`), not stripped. First build from a cold Bazel
+Binary: 11 MB, not stripped. `readelf -d`'s `NEEDED` entries: `libc.so.6`
+and `libm.so.6` only (glib/gmodule/pcre2/zlib are all linked in
+statically -- see "Hermetic linking" below); no `RUNPATH`/`RPATH`.
+`smoke_test.sh` checks this directly. First build from a cold Bazel
 disk-cache (including rules_foreign_cc's own one-time toolchain bootstrap
 -- hermetic `autoconf`/`automake`/`m4`/`make`/`meson`/`pkgconf`, all built
 from source the first time any target in this build graph needs them,
@@ -529,6 +549,41 @@ A no-op rebuild (nothing changed) is a few seconds; a change to
 `QEMU_CONFIGURE_OPTIONS` or the device config re-runs `./configure` and
 the affected subset of the ~1075-step ninja build, not the whole thing
 (ninja's own incremental tracking).
+
+### Hermetic linking
+
+The smoke test's `readelf -d` check exists because the first working
+build wasn't actually hermetic, in two ways an orchestrator review
+caught (`ldd` on the built binary):
+
+- `libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1` -- the **host's** zlib,
+  not `@zlib`. Cause: `PKG_CONFIG_PATH` only *adds* a search directory;
+  it does not stop pkg-config from also finding a real system `zlib.pc`
+  in its own compiled-in default path, which meson's unrestricted
+  `dependency('zlib', ...)` happily preferred (confirmed by the version
+  it reported: the host's 1.3, not this project's pinned 1.3.2). Fixed
+  with a `:zlib_pc` shim (same mechanism as `:glib_pc`) plus switching
+  `env`'s `PKG_CONFIG_PATH` to `PKG_CONFIG_LIBDIR`, which *replaces*
+  pkg-config's default search path instead of adding to it -- the only
+  `.pc` files visible to this build are now the two this project writes
+  itself.
+- An **absolute path straight into this one build's own Bazel
+  output_base**, baked into pcre2's `NEEDED` entry and `RUNPATH`
+  (`/home/.../89619d3d.../bazel-out/.../external/pcre2+/libpcre2.so`).
+  This would have broken in any other checkout, in CI, from a shared
+  cache hit, or the moment that output_base is cleaned. Cause:
+  `pkgconfig_shim.bzl`'s `Libs:` field used to emit a bare `-l<name>`
+  (e.g. `-lpcre2`) plus a `-L<dir>` search path -- but pcre2 (like zlib,
+  unlike glib itself) has *both* a static `.a` and a shared `.so` built
+  by Bazel in the very same directory, and a bare `-l` flag lets the
+  linker choose; it prefers the shared one whenever both are present,
+  regardless of which artifact the shim actually meant to point at.
+  Fixed by having the shim emit the literal path to each dependency's
+  *static* archive instead of a search-by-name flag -- ld links exactly
+  that file, full stop -- and by failing the Bazel build loudly if a
+  dependency turns out to have no static archive at all, rather than
+  silently falling back to a shared one. See `pkgconfig_shim.bzl`'s
+  "Fully static, on purpose" section for the full account.
 
 ## Deliberately not done here (out of scope for this step)
 
