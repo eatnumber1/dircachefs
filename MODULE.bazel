@@ -108,6 +108,51 @@ qemu_repo(
     url = "https://download.qemu.org/qemu-11.1.2.tar.xz",
 )
 
+# Phase 4, part c (third_party/debian/): the Debian NFS-test rootfs image,
+# replacing test/qemu/scripts/mkrootfs-debian.sh's mmdebstrap run.
+# rules_distroless's apt extension resolves and fetches a pinned package
+# list from a fixed snapshot.debian.org timestamp; third_party/debian/
+# assembles the result into an ext4 image. See third_party/debian/README.md
+# for the package list (with each package's reason), the snapshot pin and
+# its update procedure.
+bazel_dep(name = "rules_distroless", version = "0.9.4")
+
+apt = use_extension("@rules_distroless//apt:extensions.bzl", "apt")
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["bookworm"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20261004T203145Z"],
+)
+apt.install(
+    dependency_set = "debian",
+    packages = [
+        "attr",
+        "bash",
+        "btrfs-progs",
+        "coreutils",
+        "diffutils",
+        "e2fsprogs",
+        "findutils",
+        "grep",
+        "iproute2",
+        "mawk",
+        "mount",
+        "nfs-common",
+        "nfs-kernel-server",
+        "procps",
+        "quota",
+        "strace",
+        "systemd",
+        "systemd-sysv",
+        "util-linux",
+        "xfsprogs",
+    ],
+    suites = ["bookworm"],
+)
+use_repo(apt, "debian")
+
 # busybox 1.38.0 (pinned latest stable release as of 2026-10-05; see
 # third_party/busybox/README.md). build_file_content just exposes the
 # pristine source tree -- the actual build (Kconfig fragment -> allnoconfig

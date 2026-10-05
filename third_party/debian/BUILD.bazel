@@ -1,0 +1,41 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+# Phase 4, part c (docs/plan/phases/04-pinned-host-tools.md): the Debian
+# NFS-test rootfs image, built by Bazel from packages rules_distroless
+# resolved and fetched from a pinned snapshot.debian.org timestamp --
+# replacing test/qemu/scripts/mkrootfs-debian.sh's mmdebstrap run. See
+# README.md for the package list (with each package's reason), the pin,
+# and the update procedure.
+
+# @debian is the apt.install dependency_set (MODULE.bazel); :flat is
+# rules_distroless's own `flatten` rule merging every resolved package's
+# data.tar (our 14 explicitly requested packages plus everything they pull
+# in transitively -- 136 packages total as of this pin) into one tar.
+genrule(
+    name = "rootfs",
+    srcs = ["@debian//:flat"],
+    outs = ["rootfs-debian.ext4"],
+    cmd = "$(location scripts/mkrootfs.sh) $@ $(location @debian//:flat) 768M",
+    tools = ["scripts/mkrootfs.sh"],
+    visibility = ["//test/qemu:__pkg__"],
+)
+
+# Test first: fails the moment the resolved packages' versions drift from
+# packages.lock (a new snapshot pin, a package-list edit, or -- without
+# either -- rules_distroless resolving something unexpected). See
+# scripts/version_check.sh; @debian//:dpkg_status is rules_distroless's own
+# synthesized /var/lib/dpkg/status, scoped to just the packages named in
+# MODULE.bazel's apt.install (not their transitive dependencies).
+sh_test(
+    name = "version_check_test",
+    size = "small",
+    srcs = ["scripts/version_check.sh"],
+    args = [
+        "$(location @debian//:dpkg_status)",
+        "$(location packages.lock)",
+    ],
+    data = [
+        "packages.lock",
+        "@debian//:dpkg_status",
+    ],
+)
