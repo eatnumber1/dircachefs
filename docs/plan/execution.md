@@ -48,7 +48,8 @@ merge); this file orders the steps.
   edit it concurrently. A missing option found later is a one-line
   orchestrator commit.
 - **Tests per sync point.** Until Phase 6: the full `bazel test //...`
-  matrix and `--config=asan`. From Phase 6: `--config=presubmit` per merge
+  matrix and `--config=asan` (the ASan suite runs in the background after
+  merges, `process.md`, and must be green at the sync point). From Phase 6: `--config=presubmit` per merge
   and the full suite at every sync point. From Phase 5: CI green on the
   merged commit.
 
@@ -248,6 +249,13 @@ The soak test is run by hand, for hours, and its result recorded in
 **S13:** every phase done, every tier green, a soak run passed. russ
 runs the final hardware check (21.2) after upgrading the server's kernel
 to at least 6.9; only then is dcfs deployed on the server.
+
+## Side track: ASan speed (Phase 6.3)
+
+Started 2026-10-06 in whichever lane is idle (investigation; Sonnet,
+investigator type after the restart). The investigation and any fix to
+`.bazelrc` or `third_party/` BUILD files can run alongside Wave 2's harness
+wiring; changes to `test/qemu/*.bzl` wait until that merges.
 
 ## Continuous work
 

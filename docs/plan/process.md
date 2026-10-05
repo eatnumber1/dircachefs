@@ -94,6 +94,23 @@ process (its waves and file ownership table) is in `history.md`.
   before review, everything (CI) before a phase is marked done.
 - From Phase 5, CI must be green on the merged commit.
 
+## Sanitizer runs do not block steps (russ, 2026-10-06)
+
+ASan (and later UBSan) suites are slow, so they are not part of a step's
+"done" criteria:
+- A step's agent runs the step's own tests (plain and, if the step
+  touches C++, those targets under `--config=asan`) and the plain full
+  suite, then reports. It does not wait for a full ASan suite.
+- The orchestrator merges on a green plain suite and starts the full ASan
+  suite on the merged commit in the background (in a lane checked out at
+  `main`), while lanes move on to their next steps.
+- A sanitizer failure becomes the next step for that area, test first,
+  ahead of new work. Every sync point requires the full ASan suite green
+  on the commit being synced.
+- While a long Bazel command runs, an agent may do non-Bazel work (reading,
+  writing code or docs for the same step); one checkout runs one Bazel
+  command at a time.
+
 ## Parallelism and budget
 
 - Phases run in order; the status table in `README.md` is the source of

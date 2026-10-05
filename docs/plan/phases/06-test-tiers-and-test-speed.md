@@ -35,5 +35,27 @@ ten).
   copy them per test instead of rebuilding.
 - The minimal kernel (Phase 3 (Drop the kernel patch; download and build the test kernel)) and the TCG investigation (5.1) for boot
   time.
+**6.3 Why ASan is so slow, and fixing it** (russ, 2026-10-06; quality over
+speed applies: every test keeps running under ASan with the same
+assertions).
+- Measure first: wall time of the full suite plain vs. `--config=asan`,
+  split into build (cold and disk-cached) and test time; per-test guest
+  boot and run time under each; and which targets the ASan configuration
+  rebuilds.
+- Leading hypothesis (unverified): `--config=asan` adds `-fsanitize=address`
+  to every C/C++ compile, including third-party code, and since Phase 4
+  rules_foreign_cc passes those flags into the configure scripts of QEMU,
+  glib, e2fsprogs and busybox. An ASan run would then rebuild those tools
+  instrumented and run every guest on an ASan-instrumented emulator.
+  Likely fix: sanitize only our code (a Bazel feature or `per_file_copt`
+  scoped to `//dcfs` and `//tools`, or building the tools in a
+  configuration without the sanitizer flags), so the tools are identical
+  in plain and sanitized runs.
+- Other candidates to measure: ASan's runtime options in the guest
+  (leak detection at exit, symbolization cost, `malloc` behavior), the
+  dynamic ASan initramfs, guest memory size versus ASan's shadow memory.
+- Done when: the full ASan suite's time is measured before and after,
+  with each change's effect, and every test still runs under ASan.
+
 Order: 6.1 with the CI phase (CI needs the tiers); 6.2 continuously,
 first pass right after 6.1.

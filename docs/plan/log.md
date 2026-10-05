@@ -261,3 +261,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   may share the latent flake; move quiesce_backing() into lib.sh and use it in every such check.
 - Plan: Phase 5 develops the CI workflow locally with pinned nektos/act before publishing; a full suite under act doubles as a host-dependency detector (russ). Needs russ: Docker access (not in the docker group).
 - russ added russ to the docker group (use sg docker). Docker on this machine is production: never touch containers/images/volumes/networks we did not create, no prune (CLAUDE.md, Phase 5).
+- russ: sanitizer suites no longer block steps (run in the background after merge; required green at sync points; failures become the next step). New side track Phase 6.3: why ASan is so slow (hypothesis: --config=asan instruments the Bazel-built QEMU/glib/e2fsprogs/busybox via rules_foreign_cc), started in lane-1.
