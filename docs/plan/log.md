@@ -313,3 +313,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   write_test_btrfs's write-large-passthrough-cpu check (cpu ticks < 20) flaked once under load and
   may flake more with parallel guests: make that check robust test-first, never loosen it blindly.
   The agent hit a permission denial killing its own stray wait loop and used TaskStop instead.
+- R3a merged (2f2eda5; dcfs-investigator): Bazel-built static mkfs.xfs/xfs_io (xfsprogs 7.2.0),
+  mkfs.btrfs/btrfs (btrfs-progs 7.1, no lzo/zstd), with private static libuuid/libblkid (util-linux
+  2.42.4), liburcu, inih; checked-in mke2fs.conf (1.47.4's built-in profile) used for the Debian
+  image; --lockfile_mode=error verified to catch pin drift; debs.lock covers all 149 .debs. Smoke
+  tests plain and ASan. Pending R3b (after 5.1 merges): wire the tools into run-qemu.sh (patch in
+  the agent's report) and pin 4 KiB blocks for the small test images (the built-in profile would give
+  64 MiB images 1 KiB blocks, unlike a real disk). Note: inih's hash is of a GitHub tag archive, not
+  a release asset (not byte-stable by contract).
