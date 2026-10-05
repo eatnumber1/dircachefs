@@ -306,3 +306,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
      L9 Debian lock enforcement. Phase 4 reopened for this.
 - russ: M1 (hostile cache directory) not pursued; replaced by one startup check (database no more accessible than the backing root directory). Remaining review findings planned in review-fixes.md (R1-R3). lane-3 added (capped) for R1+R2.
 - russ: more parallelism, swapping accepted. lane-4: R3a (Bazel-built xfsprogs/btrfs-progs, mke2fs config, Debian lock; runner wiring waits for 5.1); lane-5: Phase 12.1 TLA+ model (dcfs-protocol), started early since it depends on nothing in flight.
+- Phase 6.1 merged (9887599; dcfs-implementer): size is the tier, macros fail without size/timeout,
+  real resource tags (cpu:N, resources:memory:N verified by observation), `exclusive` removed from
+  e2e. fast 46 tests 1m05s, presubmit 70 tests 2m15s, full 75 in 35m44s (baseline 39m35s), all green.
+  Notes for 6.2: pjdfstest ~570 s alone, ~1065 s when two run side by side (within eternal);
+  write_test_btrfs's write-large-passthrough-cpu check (cpu ticks < 20) flaked once under load and
+  may flake more with parallel guests: make that check robust test-first, never loosen it blindly.
+  The agent hit a permission denial killing its own stray wait loop and used TaskStop instead.

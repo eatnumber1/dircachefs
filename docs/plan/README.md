@@ -33,10 +33,10 @@ phase's file; `log.md` says where things stand.
 | 3 | [Drop the kernel patch; download and build the test kernel](phases/03-drop-kernel-patch-and-build-test-kernel.md) | done 2026-10-05 (deprecated patched-kernel path removed with Phase 4's wiring) |
 | 4 | [Pinned host tools; `third_party/` convention](phases/04-pinned-host-tools.md) | reopened: scratch filesystems still use host mkfs tools (review L5); rest done 2026-10-06 |
 | 5 | [CI runs the QEMU suite](phases/05-ci.md) | in progress (5.1 TCG speed, lane-1) |
-| 6 | [Test tiers and test speed](phases/06-test-tiers-and-test-speed.md) | in progress (6.1 tiers, lane-2; 6.3 first fix merged; 6.2 throughout) |
+| 6 | [Test tiers and test speed](phases/06-test-tiers-and-test-speed.md) | in progress (6.1 tiers done 2026-10-06; 6.3 first fix merged; 6.2 throughout) |
 | 7 | [Pinned toolchain, coverage, warnings, UBSan, clang-tidy](phases/07-toolchain-coverage-warnings-ubsan.md) | planned |
 | 8 | [Coverage close to 100%](phases/08-coverage-to-100.md) | planned |
-| 9 | [File names are bytes](phases/09-file-names-are-bytes.md) | planned |
+| 9 | [File names are bytes](phases/09-file-names-are-bytes.md) | in progress (lane-2, started early) |
 | 10 | [Benchmarks](phases/10-benchmarks.md) | planned |
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
