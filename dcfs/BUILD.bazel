@@ -64,6 +64,7 @@ cc_library(
 qemu_cc_test(
     name = "sqlite_test",
     size = "small",
+    timeout = "short",
     srcs = ["sqlite_test.cc"],
     deps = [
       ":ret_check",
@@ -99,6 +100,7 @@ cc_library(
 qemu_cc_test(
     name = "status_test",
     size = "small",
+    timeout = "short",
     srcs = ["status_test.cc"],
     deps = [
       ":ret_check",
@@ -138,6 +140,7 @@ cc_library(
 qemu_cc_test(
     name = "fd_test",
     size = "small",
+    timeout = "short",
     srcs = ["fd_test.cc"],
     deps = [
       ":status",
@@ -151,6 +154,7 @@ qemu_cc_test(
 qemu_cc_test(
     name = "syscalls_test",
     size = "small",
+    timeout = "short",
     srcs = ["syscalls_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # name_to_handle_at/FS_IOC_GETVERSION/xattrs need a real filesystem
     deps = [
@@ -171,6 +175,7 @@ qemu_cc_test(
 qemu_cc_test(
     name = "syscalls_fault_test",
     size = "small",
+    timeout = "short",
     srcs = ["syscalls_fault_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # xattrs need a real filesystem
     linkopts = [
@@ -214,6 +219,7 @@ cc_library(
 qemu_cc_test(
     name = "fuse_request_test",
     size = "small",
+    timeout = "short",
     srcs = ["fuse_request_test.cc"],
     deps = [
       ":fuse_request",
@@ -232,6 +238,7 @@ qemu_cc_test(
 qemu_cc_test(
     name = "fuse_request_channel_test",
     size = "small",
+    timeout = "short",
     srcs = ["fuse_request_channel_test.cc"],
     deps = [
       ":fuse_request",
@@ -274,6 +281,7 @@ cc_library(
 qemu_cc_test(
     name = "device_id_test",
     size = "small",
+    timeout = "short",
     srcs = ["device_id_test.cc"],
     # FS_IOC_GETFSUUID needs a filesystem with a UUID; tmpfs has none. vdc
     # (step 5.2) is btrfs, mounted by the test itself (not guest/init's
@@ -314,6 +322,7 @@ cc_library(
 qemu_cc_test(
     name = "mount_fds_test",
     size = "small",
+    timeout = "short",
     srcs = ["mount_fds_test.cc"],
     deps = [
       ":device_id",
@@ -346,6 +355,7 @@ cc_library(
 qemu_cc_test(
     name = "file_handle_test",
     size = "small",
+    timeout = "short",
     srcs = ["file_handle_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # FromFd/FromDirEntry need name_to_handle_at export support
     deps = [
@@ -407,6 +417,7 @@ cc_library(
 qemu_cc_test(
     name = "mounts_below_test",
     size = "small",
+    timeout = "short",
     srcs = ["mounts_below_test.cc"],
     deps = [
       ":mounts_below",
@@ -432,6 +443,7 @@ cc_library(
 qemu_cc_test(
     name = "ret_check_test",
     size = "small",
+    timeout = "short",
     srcs = ["ret_check_test.cc"],
     deps = [
       ":ret_check",
@@ -445,6 +457,7 @@ qemu_cc_test(
 qemu_cc_test(
     name = "smoke_test",
     size = "small",
+    timeout = "short",
     srcs = ["smoke_test.cc"],
     deps = ["@googletest//:gtest_main"],
 )
@@ -494,6 +507,7 @@ cc_library(
 qemu_cc_test(
     name = "migrate_test",
     size = "small",
+    timeout = "short",
     srcs = ["migrate_test.cc"],
     deps = [
       ":device_id",
@@ -548,6 +562,7 @@ cc_library(
 qemu_cc_test(
     name = "metadata_cache_test",
     size = "small",
+    timeout = "short",
     srcs = ["metadata_cache_test.cc"],
     deps = [
       ":context",
@@ -600,6 +615,7 @@ cc_library(
 qemu_cc_test(
     name = "backing_test",
     size = "small",
+    timeout = "short",
     srcs = ["backing_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # ProbeRoot/InitRoot need GetDeviceId (FS_IOC_GETFSUUID), which tmpfs doesn't support
     deps = [

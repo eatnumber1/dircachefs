@@ -11,7 +11,13 @@ test/qemu/guest/init for the guest side.
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
-def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", timeout = "long"):
+# Guest resources, declared to Bazel's scheduler: `size` also sets the
+# default resource estimate (small assumes ~20 MB), which is wrong for a
+# QEMU guest. run-qemu.sh gives an e2e guest 1024 MB and -smp 2; the QEMU
+# process itself needs a little more than the guest RAM.
+E2E_RESOURCE_TAGS = ["cpu:2", "resources:memory:1200"]
+
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -31,14 +37,17 @@ def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", tim
             /tests in, and chroots into it to run guest_script with GNU
             userspace and nfs-utils available. See guest/init's
             dcfs_rootfs= branch and third_party/debian/README.md.
-        size: sh_test size, e.g. "enormous" for a much longer-running guest
-            script than the default e2e tests here (most run in a few
-            seconds); defaults to "large", the size every test in this
-            package used before this parameter existed.
+        size: required sh_test size, the test's tier: "small" (run
+            constantly), "medium" (presubmit), "large"/"enormous" (CI).
+            See README.md's "Test tiers".
+        timeout: required sh_test timeout; explicit because the size's
+            default is not tuned to a guest.
         timeout: sh_test timeout, e.g. "eternal" (3600s) to pair with
             size = "enormous"; defaults to "long" (900s), unchanged from
             before this parameter existed.
     """
+    if size == None or timeout == None:
+        fail("qemu_test(%s): size and timeout are required (the test tier; see test/qemu/README.md)" % name)
     disk_args = [d[0] + ":" + d[1] + ":" + d[2] for d in disks]
     guest_script_basename = guest_script.split("/")[-1]
 
@@ -76,10 +85,9 @@ def qemu_test(name, guest_script, disks = [], rootfs = None, size = "large", tim
         ] + disk_args,
         tags = [
             "e2e",
-            "exclusive",
             "no-sandbox",
             "requires-kvm",
-        ],
+        ] + E2E_RESOURCE_TAGS,
         size = size,
         timeout = timeout,
     )
@@ -104,8 +112,9 @@ def qemu_test_matrix(
         name,
         guest_script,
         disks,
-        size = "large",
-        timeout = "long",
+        size = None,
+        other_size = None,
+        timeout = None,
         rootfs = None,
         fstypes = ["ext4", "xfs", "btrfs"]):
     """Declares one qemu_test per backing filesystem in `fstypes`.
@@ -117,8 +126,11 @@ def qemu_test_matrix(
         disks: same shape as qemu_test's `disks`, but the first entry's
             fstype field is overridden per generated variant -- pass
             whatever placeholder fstype reads best (by convention "ext4").
-        size: same as qemu_test.
-        timeout: same as qemu_test.
+        size: required; the tier of the first (ext4) variant, which
+            "<name>" aliases.
+        other_size: required; the tier of the remaining variants (xfs,
+            btrfs), normally one tier up from `size`.
+        timeout: required; same as qemu_test.
         rootfs: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
@@ -126,13 +138,15 @@ def qemu_test_matrix(
     if not disks:
         fail("qemu_test_matrix(%s): disks must have at least one entry " % name +
              "(the backing source disk, vdb, whose fstype is varied)")
+    if size == None or other_size == None or timeout == None:
+        fail("qemu_test_matrix(%s): size, other_size and timeout are required" % name)
     for fstype in fstypes:
         varied_disks = [(disks[0][0], fstype, disks[0][2])] + list(disks[1:])
         qemu_test(
             name = name + "_" + fstype,
             guest_script = guest_script,
             disks = varied_disks,
-            size = size,
+            size = size if fstype == fstypes[0] else other_size,
             timeout = timeout,
             rootfs = rootfs,
         )

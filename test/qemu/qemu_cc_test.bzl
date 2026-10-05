@@ -54,8 +54,8 @@ def qemu_cc_test(
         data = [],
         args = [],
         disks = [],
-        size = "small",
-        timeout = "short",
+        size = None,
+        timeout = None,
         tags = [],
         **kwargs):
     """Declares a dcfs unit test that boots the QEMU guest to run it.
@@ -74,12 +74,15 @@ def qemu_cc_test(
             /tmp/test_tmpdir (so TEST_TMPDIR is a real disk instead of
             tmpfs) by guest/init. See run-qemu.sh for the device-letter
             convention.
-        size: sh_test size.
-        timeout: sh_test timeout.
+        size: required sh_test size, the test's tier (small, medium,
+            large, enormous; see test/qemu/README.md "Test tiers").
+        timeout: required sh_test timeout.
         tags: extra tags, in addition to the ones this macro always sets.
         **kwargs: forwarded to the underlying cc_binary (e.g. extra
             copts).
     """
+    if size == None or timeout == None:
+        fail("qemu_cc_test(%s): size and timeout are required (the test tier; see test/qemu/README.md)" % name)
     bin_name = name + "_bin"
     initramfs_out = name + ".cpio.gz"
 
@@ -152,7 +155,8 @@ def qemu_cc_test(
         ] + qemu_args + kernel_args + [
             "$(location :" + initramfs_out + ")",
         ] + disk_args,
-        tags = ["no-sandbox", "requires-kvm"] + tags,
+        # run-qemu.sh --unit gives the guest 256 MB and -smp 1.
+        tags = ["no-sandbox", "requires-kvm", "cpu:1", "resources:memory:400"] + tags,
         size = size,
         timeout = timeout,
     )

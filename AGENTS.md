@@ -24,11 +24,13 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
 - **Coverage** (from phase 7/8): new code arrives fully covered by tests,
   error paths included. CI fails if total coverage drops. Gaps that
   cannot be covered are listed with a reason in `docs/coverage.md`.
-- **Test sizes are tiers** (from phase 6): Bazel `size` is the tier.
-  `small` tests run constantly during development
+- **Test sizes are tiers**: Bazel `size` is the tier, and every test
+  declares `size` and `timeout` explicitly (the QEMU test macros refuse a
+  missing one). `small` tests run constantly during development
   (`bazel test --config=fast //...`), `medium` before submitting
-  (`--config=presubmit`), `large`/`enormous` in CI. The soak test is
-  tagged `manual` and only runs when asked for by name.
+  (`--config=presubmit`), `large`/`enormous` in CI (plain `bazel test
+  //...`). The soak test is tagged `manual` and only runs when asked for
+  by name. See `test/qemu/README.md` "Test tiers".
 - Never weaken a test to make it faster or to make it pass.
 
 ## Running Bazel

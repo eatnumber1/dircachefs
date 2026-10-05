@@ -177,6 +177,28 @@ kernel timestamp) that scales with host CPU scheduling latency, which was
 poor while multiple sibling agents' builds were running. Re-measure on a
 quiet host if you need a clean number.
 
+## Test tiers
+
+A test's Bazel `size` is its tier; every `qemu_test`, `qemu_test_matrix`
+and `qemu_cc_test` requires an explicit `size` and `timeout` (the macros
+`fail()` without them, so a new test cannot silently default).
+
+| Tier | Command | Contents | Wall time (KVM) |
+|---|---|---|---|
+| small | `bazel test --config=fast //...` | unit tests, ext4 variant of each e2e matrix test, boot, cache_permissions, lifecycle | about 1 minute |
+| medium | `bazel test --config=presubmit //...` (small + medium) | xfs and btrfs variants, readdir_boundary, release_leak | a few minutes |
+| large / enormous | `bazel test //...` (everything; CI) | nfs_test (large), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes |
+
+`size` also sets Bazel's resource estimate (small assumes about 20 MB), so
+each QEMU test declares its real needs with tags: e2e guests `cpu:2` and
+`resources:memory:1200` (guest 1024 MB, `-smp 2`), unit guests `cpu:1` and
+`resources:memory:400` (guest 256 MB, `-smp 1`). Bazel then schedules
+only as many guests as fit in the machine. Timeouts are explicit
+(`short` unit, `moderate` e2e, `long` nfs, `eternal` pjdfstest).
+
+New tests: pick the tier from the measured duration (read it from
+`bazel-testlogs/**/test.xml`).
+
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 
 ```
@@ -257,9 +279,9 @@ slower, whole-daemon tests: they boot `//dcfs:main_static` and
 `//tools:fhtest` in a shared initramfs and drive them through a
 `guest/<name>.sh` script picked by the `dcfs_test=` kernel command-line
 parameter. They're tagged `e2e` (not `qemu` -- that distinction is gone now
-that everything is QEMU) plus `exclusive`, `no-sandbox`, and
-`requires-kvm`, and run as part of a plain `bazel test //...` like
-everything else; there's no separate `--config` to opt into them.
+that everything is QEMU) plus `no-sandbox`, `requires-kvm` and the
+resource tags in "Test tiers" (no longer `exclusive`), and run as part of
+a plain `bazel test //...`; `--config=fast`/`presubmit` select tiers.
 
 ```
 bazel test //test/qemu:boot_test

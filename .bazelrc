@@ -32,6 +32,11 @@ build --dynamic_mode=off
 # excluded by default.
 test --test_output=errors
 
+# Test tiers (phase 6.1): a test's Bazel `size` is its tier. Plain
+# `bazel test //...` runs every tier; these select the cheaper ones.
+test:fast --test_size_filters=small
+test:presubmit --test_size_filters=small,medium
+
 build:asan --strip=never
 build:asan --copt -fsanitize=address
 build:asan --copt -DADDRESS_SANITIZER
