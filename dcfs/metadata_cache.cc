@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -1330,19 +1331,57 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   // it after that (and released it since, which EndWrites also records in
   // the guards; this does not depend on it).
   kept.insert(synced.open_for_write.begin(), synced.open_for_write.end());
+  // The fast path: if the clock has not moved since BeginSync and no
+  // mutation is in flight, then the per-row loop below would delete exactly
+  // the rows of the table that are not kept, and one bulk delete does it.
+  // Why that is exact:
+  //  - The table holds no row that is not in `synced.dirty`. Rows are
+  //    added only by a phase 1 (BeginMutation, whose RegisterMutation then
+  //    advances the clock with nothing in between) and by MarkDirty in a
+  //    phase 3 (before its mutation's End, which advances it). Only
+  //    ClearDirty and RecoverDirty delete rows: RecoverDirty runs only at
+  //    startup, and another sync point's ClearDirty in between could only
+  //    have removed rows (then putting a kept one back below is merely
+  //    conservative).
+  //  - CanFill(synced.fills, id) holds for every id: nothing was touched
+  //    after the snapshot (every touch advances the clock), the floor is at
+  //    most the clock (a prune sets it to a value of the clock, and also
+  //    advances it), and nothing is in flight.
+  // So the rows to delete are those not in `kept`. Compared with the
+  // per-row loop: one statement instead of one per row (each also a
+  // lookup in `kept`), and the case of every sync point under today's
+  // single thread, since nothing can run during one.
+  const bool nothing_moved = ctx.fills.seq == synced.fills.seq &&
+                             ctx.fills.inflight.empty();
   bool any = false;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    for (InodeId id : synced.dirty) {
-      if (kept.contains(id)) continue;
-      // A mutation of `id` in flight now, or one that began or ended since
-      // the snapshot, may have issued its backing syscall after the syncfs
-      // started: the syncfs does not cover it, so its row stays until a
-      // later sync point's does. (CanFill is exactly "no mutation of `id`
-      // began or ended since the snapshot, and none is in flight"; a
-      // snapshot older than the guards' floor keeps every row.)
-      if (!CanFill(ctx, synced.fills, id)) continue;
-      ABSL_RETURN_IF_ERROR(
-          Execute(ctx, "DELETE FROM dirty WHERE inode = ?", id).status());
+    if (nothing_moved) {
+      ABSL_RETURN_IF_ERROR(Execute(ctx, "DELETE FROM dirty").status());
+      // Put back the kept rows that were there (and only those: a kept
+      // inode that was not dirty must not become dirty).
+      for (InodeId id : kept) {
+        if (!std::binary_search(synced.dirty.begin(), synced.dirty.end(),
+                                id)) {
+          continue;
+        }
+        const InodeId row[] = {id};
+        ABSL_RETURN_IF_ERROR(InsertDirty(ctx, row));
+      }
+    } else {
+      for (InodeId id : synced.dirty) {
+        if (kept.contains(id)) continue;
+        // A mutation of `id` in flight now, or one that began or ended
+        // since the snapshot, or the end of a writable open of it since,
+        // may have issued its backing syscall (or written) after the
+        // syncfs started: the syncfs does not cover it, so its row stays
+        // until a later sync point's does. (CanFill is exactly "no
+        // mutation of `id` began or ended since the snapshot, and none is
+        // in flight"; a snapshot older than the guards' floor keeps every
+        // row.)
+        if (!CanFill(ctx, synced.fills, id)) continue;
+        ABSL_RETURN_IF_ERROR(
+            Execute(ctx, "DELETE FROM dirty WHERE inode = ?", id).status());
+      }
     }
     ABSL_ASSIGN_OR_RETURN(Statement * stmt,
                           Query(ctx, "SELECT EXISTS (SELECT 1 FROM dirty)"));
@@ -1351,10 +1390,11 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
              return absl::OkStatus();
            }).status();
   }));
-  // This transaction only deleted rows, so a kept row that was durable
-  // still is; but ctx.dirty.durable is not tracked per row across a clear:
-  // start over, which at worst costs a phase 1 a kSync commit it did not
-  // need.
+  // This transaction only deleted rows (the fast path deletes and puts
+  // back kept rows in one transaction, which a crash keeps whole or not at
+  // all), so a kept row that was durable still is; but ctx.dirty.durable
+  // is not tracked per row across a clear: start over, which at worst
+  // costs a phase 1 a kSync commit it did not need.
   ctx.dirty.durable.clear();
   ctx.dirty.any = any;
   return absl::OkStatus();

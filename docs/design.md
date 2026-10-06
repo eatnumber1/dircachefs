@@ -741,6 +741,12 @@ the attributes the release recorded and lose the writes. The snapshot of
 the writable opens is a backstop: the guard event alone covers a release
 after the snapshot.
 
+When nothing moved during the sync point (the guards' clock is where the
+snapshot left it and no mutation is in flight, which is every sync point
+today), `ClearDirty` empties the table in one statement and puts back the
+kept rows: every row then is in the snapshot and passes the per-row test,
+so the result is the same, without a statement per row.
+
 Sync points run:
 
 - after the kernel's `FSYNC` or `FSYNCDIR` (after the fsync itself),

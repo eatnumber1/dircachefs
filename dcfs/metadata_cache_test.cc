@@ -1523,6 +1523,55 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsWhatWasOpenForWritingDuringTheSync) {
   ctx_.open_for_write = nullptr;
 }
 
+// A sync point during which nothing moved (no mutation began or ended, no
+// writable open ended, nothing in flight): ClearDirty takes a fast path
+// (one bulk delete), which must clear exactly what the per-row rule would.
+// Kept: `keep`, and what was open for writing at BeginSync; not added:
+// a `keep` inode that was not dirty.
+TEST_F(MetadataCacheTest, ClearDirtyWhenNothingMovedIsExact) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult g, Make(31));
+  ASSERT_OK_AND_ASSIGN(UpsertResult h, Make(32));
+  ASSERT_OK_AND_ASSIGN(UpsertResult k, Make(33));
+  ASSERT_THAT(SyncClear(), IsOk());
+  for (InodeId id : {f.id, g.id, h.id}) {
+    ASSERT_THAT(BeginAttrChange(ctx_, id), IsOk());  // Ends at once.
+  }
+  absl::flat_hash_set<int64_t> open_for_write = {h.id};
+  ctx_.open_for_write = &open_for_write;
+  ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
+  open_for_write.clear();
+  ctx_.open_for_write = nullptr;
+  ASSERT_EQ(ctx_.fills.seq, synced.fills.seq);
+  ASSERT_TRUE(ctx_.fills.inflight.empty());
+
+  const InodeId keep[] = {g.id, k.id};
+  ASSERT_THAT(ClearDirty(ctx_, synced, keep), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(g.id, h.id)));
+  EXPECT_TRUE(ctx_.dirty.any);
+  ASSERT_THAT(SyncClear(), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+  EXPECT_FALSE(ctx_.dirty.any);
+}
+
+// The clock alone does not tell: a mutation in flight since before
+// BeginSync moves nothing during the syncfs, but its syscall may come
+// after it, so its row stays.
+TEST_F(MetadataCacheTest, ClearDirtyKeepsAMutationInFlightWhenNothingMoved) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult m, Make(31));
+  ASSERT_THAT(SyncClear(), IsOk());
+  ASSERT_THAT(BeginAttrChange(ctx_, f.id), IsOk());
+  ASSERT_OK_AND_ASSIGN(Mutation in_flight, BeginAttrChange(ctx_, m.id));
+  ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
+  ASSERT_EQ(ctx_.fills.seq, synced.fills.seq);
+  ASSERT_THAT(ClearDirty(ctx_, synced, {}), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(m.id)));
+  in_flight.End();
+  ASSERT_THAT(SyncClear(), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+}
+
 // If the fill guards forgot which inodes were mutated since BeginSync
 // (FillGuards::touched was pruned, raising the floor past the snapshot),
 // a sync point cannot tell which rows its syncfs covers, and keeps them
