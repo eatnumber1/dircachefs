@@ -431,3 +431,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Watch (6.2): pjdfstest_test_ext4 took 1700 s under load in that lane, against run-qemu.sh's new
   1800 s KVM e2e limit; either the limit needs headroom for a loaded host or pjdfstest needs
   sharding by test directory.
+- Readdir fix merged (b829d0e, 3366525): schema v3 migration adds the two indexes to existing caches (v2 database test failed first on the version). The 5000-entry test fill now uses one SQL statement after an OOM in the 256 MB ASan guest.
