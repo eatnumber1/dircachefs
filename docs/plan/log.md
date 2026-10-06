@@ -334,3 +334,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   hard-link case escapes LinkDentry's rollback (CacheNeverWrong). Queued as step R4 (dcfs-protocol,
   test first, each fix moves its findings/ config into the real model), before Phase 13.
 - Needs russ: read formal/README.md (the newcomer guide) and say whether the model is legible.
+- Phase 9 merged (a8d2688; dcfs-implementer): EscapeBytes/UnescapeBytes with an exhaustive round-trip
+  test over all byte strings up to length 3; 14 log sites escaped; strlen walk over the xattr list
+  replaced; 61-name corpus (hazard classes + generic/453-454 sets) through both population and
+  mutation on ext4/xfs/btrfs, restart with zero backing reads, handles, PATH_MAX-deep chains; seeded
+  random names (1,000 medium; 100,000 enormous on a 4G disk). The only dcfs bug found: a newline in
+  a name forged a log line (fixed; failing-first quoted). Deferred: escaping of flag paths in
+  main.cc's startup messages (lane conflict); octal escaping for Phase 15's text formats.
+- Load flakes now recurring (3 building lanes + 4 slow guests): write_test's
+  write-large-passthrough-cpu (dcfs cpu ticks < 20) fails under load on all three filesystems, and
+  pjdfstest_test_{ext4,btrfs} hit run-qemu.sh's 1200 s guest limit (pass alone in ~890 s). Both
+  are 6.2 work, test first, no loosening without understanding; dispatched now to lane-2.

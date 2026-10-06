@@ -36,7 +36,7 @@ phase's file; `log.md` says where things stand.
 | 6 | [Test tiers and test speed](phases/06-test-tiers-and-test-speed.md) | in progress (6.1 tiers done 2026-10-06; 6.3 first fix merged; 6.2 throughout) |
 | 7 | [Pinned toolchain, coverage, warnings, UBSan, clang-tidy](phases/07-toolchain-coverage-warnings-ubsan.md) | planned |
 | 8 | [Coverage close to 100%](phases/08-coverage-to-100.md) | planned |
-| 9 | [File names are bytes](phases/09-file-names-are-bytes.md) | in progress (lane-2, started early) |
+| 9 | [File names are bytes](phases/09-file-names-are-bytes.md) | done 2026-10-06 (mountinfo/fstab/exports escaping in Phase 15; flag paths in main.cc deferred) |
 | 10 | [Benchmarks](phases/10-benchmarks.md) | paused 2026-10-06 (machine saturated; partial work in lane-4) |
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
