@@ -30,7 +30,9 @@ Every item is test first. Commit subjects are prefixed `R1:`, `R2:`, `R3:`.
 - M2: QEMU's `--extra-cflags`/`--extra-ldflags` cancel flags as one word
   (`-fno-sanitize=address,undefined`), plus a check (no libubsan/libasan
   in the QEMU binary under the sanitizer configs).
-- M3: `CONFIG_POSIX_TIMERS=y`; audit every EXPERT-gated option tinyconfig
+- M3: `CONFIG_POSIX_TIMERS=y` (and remove `bench/clock_shim.cc`, a workaround
+  Phase 10 added for the missing timers; russ: fix the kernel, do not work
+  around it); audit every EXPERT-gated option tinyconfig
   turns off that tests, the Debian chroot or systemd need (`KCMP`, `AIO`,
   `SYSVIPC`, `ADVISE_SYSCALLS`, `MEMBARRIER`, `RSEQ`,
   `CROSS_MEMORY_ATTACH`, ...); a guest check that timers work
