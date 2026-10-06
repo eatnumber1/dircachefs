@@ -1144,6 +1144,7 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
   // `dir`'s own dentry is unknown (audit F6): ask the backing filesystem.
   // A fill of the parent's row, as PopulateDirectory records a child.
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+  ctx.events->ParentLookupStarted(ctx, dir);
   ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
                         OpenNode(ctx, dir, O_PATH | O_DIRECTORY));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
@@ -1179,7 +1180,7 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
     return absl::OkStatus();
   }));
   // Model: a whole getattr fill of the parent (see formal/README.md).
-  ctx.events->ParentRecorded(ctx, parent, snapshot.seq, filled);
+  ctx.events->ParentRecorded(ctx, dir, parent, snapshot.seq, filled);
   return parent;
 }
 

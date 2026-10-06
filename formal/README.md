@@ -446,6 +446,7 @@ right after the code the model's step stands for, with no backing syscall
 | `ListChecked` | `DirCacheFS::ListCached`, after `IsDirComplete` | `list_check` | `ReaddirStep`, or the `Arrive` of a readdir (`RDFrom`) | Population policy (Readdir) |
 | `AttrsStatted` | `RefreshAttrs*`, after the statx | `stat` | `GetattrStat`, `ReaddirplusStat`, `CreateStat`, `UnlinkStat`, `RenameStat` | Phase 3 |
 | `AttrsFilled` | `backing::FillAttrs`, after its transaction | `fill` | `GetattrFill`, `ReaddirplusFill`, `CreateFill`, `UnlinkFill`, `RenameFill` | Concurrency (fill guards) |
+| `ParentLookupStarted` | `backing::ParentOf`, after its fill snapshot | | (where `T_GetattrWhole`'s snapshot is) | Population policy |
 | `ParentRecorded` | `backing::ParentOf`, after recording the parent row, with the code's decision `filled` | `child_fill`, or `unexplained` if it filled against the guard's rule | `T_GetattrWhole` | Population policy |
 | `RootRecorded` | `backing::InitRoot` | `child_fill` | `T_GetattrWhole` | Startup |
 | `MutationBegun` | `cache::BeginMutation`, after the commit and `RegisterMutation` | `phase1` (`begun`, `synced`) | the create's `Arrive` (`C1From`), `UnlinkPhase1`, `RenamePhase1` | Phase 1 |
@@ -515,7 +516,12 @@ interleaving:
   `GetattrFill`) taken at once, whose snapshot is therefore taken in the
   same step as its fill. The line carries the code's own decision
   (`filled`); the recorder makes one that filled against the guard's rule
-  (`CanFill` with the code's snapshot) an `unexplained` line instead. Valid
+  an `unexplained` line instead, judged from its own record: a phase 1 or
+  end line of D since the fill's snapshot event (`PopulateStarted`,
+  `LookupDecided` `resolve`, `ParentLookupStarted`), or a mutation of D in
+  flight, and not `cache::CanFill` with the snapshot the code reports (a
+  snapshot taken late would agree with itself). A fill whose snapshot
+  event was not seen is unexplained too. Valid
   attributes stay valid (the value is not compared, as for the silent
   refresh above); a fill that did not record leaves unknown ones unknown.
 

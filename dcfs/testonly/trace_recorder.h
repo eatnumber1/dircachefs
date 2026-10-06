@@ -98,8 +98,9 @@ class TraceRecorder final : public ProtocolEvents {
   void ListChecked(Context &ctx, events::Ino dir, bool complete) override;
   void AttrsStatted(Context &ctx, events::Ino id) override;
   void AttrsFilled(Context &ctx, events::Ino id, bool recorded) override;
-  void ParentRecorded(Context &ctx, events::Ino parent, uint64_t snapshot,
-                      bool filled) override;
+  void ParentLookupStarted(Context &ctx, events::Ino dir) override;
+  void ParentRecorded(Context &ctx, events::Ino dir, events::Ino parent,
+                      uint64_t snapshot, bool filled) override;
   void RootRecorded(Context &ctx) override;
 
   void MutationBegun(Context &ctx, events::IdsFn ids, bool synced) override;
@@ -219,6 +220,10 @@ class TraceRecorder final : public ProtocolEvents {
     // Its phase1 (begun) and end lines so far: the mutations of it the
     // trace has seen begin or end.
     int64_t mutation_lines = 0;
+    // mutation_seq_ at the last of them, and how many of its mutations have
+    // begun and not ended.
+    int64_t last_mutation = 0;
+    int open_mutations = 0;
   };
 
   static Mapping Map(const Frame &request, Ino dir);
@@ -301,12 +306,23 @@ class TraceRecorder final : public ProtocolEvents {
   std::map<Ino, std::vector<std::pair<Ino, bool>>> child_rows_;
   // The keys of the inodes in the dirty set before recovery (RunStarting).
   std::vector<std::string> dirty_keys_;
+  // Every phase1 (begun) and end line so far, of any directory.
+  int64_t mutation_seq_ = 0;
+  // mutation_seq_ at the snapshot event of the fill in progress: of a
+  // listing or resolve of a directory (PopulateStarted, LookupDecided
+  // kResolve), by that directory; of ParentOf(dir), by dir.
+  std::map<Ino, int64_t> listing_marks_;
+  std::map<Ino, int64_t> parent_marks_;
   // Writes the child_fill lines of `dir`'s listing or resolve that took
   // `snapshot`.
-  void ChildFills(Context &ctx, Ino dir, uint64_t snapshot);
+  void ChildFills(Context &ctx, Ino dir);
   // A child_fill line for `dir` (the code's decision `filled`), or an
-  // "unexplained" one if it filled against the guard's rule.
-  void Fill(Context &ctx, Ino dir, uint64_t snapshot, bool filled);
+  // "unexplained" one if it filled although the trace saw a mutation of
+  // `dir` begin or end since `mark` (mutation_seq_ at the fill's snapshot
+  // event), or one in flight; mark < 0: no snapshot event was seen.
+  void Fill(Context &ctx, Ino dir, int64_t mark, bool filled);
+  // Notes a phase1 (begun) or end line of `dir`.
+  void MutationLine(Ino dir, bool begun);
   int64_t changes_ = -1;    // sqlite3_total_changes at the last check
 };
 

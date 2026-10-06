@@ -250,6 +250,7 @@ TEST_F(TraceRecorderTest, ChildRowFilledAgainstTheGuardIsUnexplained) {
   StartTrace();
 
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
+  recorder_->PopulateStarted(ctx_, cache::kRootInode);  // The snapshot's event.
   {
     events::RequestScope request(
         *ctx_.events, ctx_, {.op = events::Op::kMkdir, .ino = d, .name = "x"});
@@ -265,6 +266,101 @@ TEST_F(TraceRecorderTest, ChildRowFilledAgainstTheGuardIsUnexplained) {
                                /*recorded=*/false);
   EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
                                        HasSubstr("since the fill's snapshot"))));
+}
+
+// The guard check uses the recorder's own record of d's mutations since
+// the fill's snapshot event, not cache::CanFill with the snapshot the code
+// reports: a snapshot taken too late (after the mutation) would make
+// CanFill agree with a fill that the model's whole getattr, snapshotted at
+// the event, does not allow.
+TEST_F(TraceRecorderTest, ChildRowFilledWithALateSnapshotIsUnexplained) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+
+  recorder_->PopulateStarted(ctx_, cache::kRootInode);  // The snapshot's event.
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kMkdir, .ino = d, .name = "x"});
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginCreate(ctx_, d, "x"));
+    ctx_.events->MutationSyscallStarting(ctx_);
+    ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
+    mutation.End();
+  }
+  // The code's snapshot, taken only now.
+  const cache::FillSnapshot late = cache::BeginFill(ctx_);
+  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true);
+  recorder_->PopulateCommitted(ctx_, cache::kRootInode, late.seq,
+                               /*recorded=*/false);
+  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                                       HasSubstr("since the fill's snapshot"))));
+}
+
+// A fill whose snapshot event the recorder never saw has nothing to be
+// checked against: recording is unexplained.
+TEST_F(TraceRecorderTest, ChildRowFilledWithoutItsSnapshotEventIsUnexplained) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
+  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true);
+  recorder_->PopulateCommitted(ctx_, cache::kRootInode, snapshot.seq,
+                               /*recorded=*/false);
+  EXPECT_THAT(Lines(d),
+              Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                             HasSubstr("snapshot event was not seen"))));
+}
+
+// ParentOf's fill of the parent row is checked from its own snapshot
+// event (ParentLookupStarted): with no mutation since, a child_fill line;
+// with one since, unexplained.
+TEST_F(TraceRecorderTest, ParentRowFilledIsCheckedFromParentLookupStarted) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  ASSERT_OK_AND_ASSIGN(InodeId e, MakeDir(d, "e", 11));
+  StartTrace();
+
+  uint64_t snapshot = cache::BeginFill(ctx_).seq;
+  recorder_->ParentLookupStarted(ctx_, e);
+  recorder_->ParentRecorded(ctx_, e, d, snapshot, /*filled=*/true);
+  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"child_fill\""),
+                                       HasSubstr("\"filled\":true"))));
+  EXPECT_THAT(Lines(d), Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
+
+  recorder_->ParentLookupStarted(ctx_, e);
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kMkdir, .ino = d, .name = "x"});
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginCreate(ctx_, d, "x"));
+    ctx_.events->MutationSyscallStarting(ctx_);
+    ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
+    mutation.End();
+  }
+  snapshot = cache::BeginFill(ctx_).seq;  // Late, as in the test above.
+  recorder_->ParentRecorded(ctx_, e, d, snapshot, /*filled=*/true);
+  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                                       HasSubstr("since the fill's snapshot"))));
+}
+
+// A mutation of the directory in flight at the fill (its phase 1 before the
+// snapshot event, its end after the fill) makes recording unexplained too.
+TEST_F(TraceRecorderTest, ParentRowFilledOverAMutationInFlightIsUnexplained) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  ASSERT_OK_AND_ASSIGN(InodeId e, MakeDir(d, "e", 11));
+  StartTrace();
+
+  events::RequestScope request(
+      *ctx_.events, ctx_, {.op = events::Op::kMkdir, .ino = d, .name = "x"});
+  ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                       cache::BeginCreate(ctx_, d, "x"));
+  const uint64_t snapshot = cache::BeginFill(ctx_).seq;
+  recorder_->ParentLookupStarted(ctx_, e);
+  recorder_->ParentRecorded(ctx_, e, d, snapshot, /*filled=*/true);
+  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                                       HasSubstr("since the fill's snapshot"))));
+  ctx_.events->MutationSyscallStarting(ctx_);
+  ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
+  mutation.End();
 }
 
 // --- A directory named as an object (re-review of 2026-10-07, finding 3) --

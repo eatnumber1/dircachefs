@@ -237,12 +237,16 @@ class ProtocolEvents {
   // UnlinkFill, RenameFill.
   virtual void AttrsFilled(Context &ctx, events::Ino id, bool recorded) {}
 
-  // backing::ParentOf recorded the parent row `parent` from the backing
+  // backing::ParentOf(dir) took the fill snapshot for the parent row it is
+  // about to record (no model step: where the whole getattr's snapshot is).
+  virtual void ParentLookupStarted(Context &ctx, events::Ino dir) {}
+  // backing::ParentOf(dir) recorded the parent row `parent` from the backing
   // filesystem, its attributes as current iff `filled` (the code's own
   // decision). `snapshot` is its fill snapshot. Model: a whole getattr
   // fill of that directory.
-  virtual void ParentRecorded(Context &ctx, events::Ino parent,
-                              uint64_t snapshot, bool filled) {}
+  virtual void ParentRecorded(Context &ctx, events::Ino dir,
+                              events::Ino parent, uint64_t snapshot,
+                              bool filled) {}
 
   // backing::InitRoot recorded the root's identity and attributes (fresh,
   // at startup). Model: a whole getattr fill of the root.

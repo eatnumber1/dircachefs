@@ -740,6 +740,11 @@ void TraceRecorder::LookupDecided(Context &ctx, Ino parent,
   if (outcome == events::LookupOutcome::kFound) {
     Resolved(ctx, parent, name, KeyOf(ctx, child));
   }
+  // ResolveName takes its fill snapshot after this (with nothing that
+  // emits a line between): marking here is the earlier, stricter point.
+  if (outcome == events::LookupOutcome::kResolve) {
+    listing_marks_[parent] = mutation_seq_;
+  }
   if (Traced(parent)) {
     CHECK(!frames_.empty() && frames_.back().kind == Frame::kLookup);
     Req *req = Find(parent);
@@ -835,7 +840,7 @@ void TraceRecorder::ResolveCommitted(Context &ctx, Ino parent,
       req->terminal = true;
     }
   }
-  ChildFills(ctx, parent, snapshot);
+  ChildFills(ctx, parent);
   After(ctx);
 }
 
@@ -846,24 +851,45 @@ void TraceRecorder::ChildRowRecorded(Context &ctx, Ino dir, Ino child,
   child_rows_[dir].emplace_back(child, filled);
 }
 
-void TraceRecorder::ChildFills(Context &ctx, Ino dir, uint64_t snapshot) {
+void TraceRecorder::ChildFills(Context &ctx, Ino dir) {
   auto it = child_rows_.find(dir);
   if (it == child_rows_.end()) return;
+  auto mark = listing_marks_.find(dir);
   for (const auto &[child, filled] : it->second) {
     if (child == dir || !Traced(child)) continue;
-    Fill(ctx, child, snapshot, filled);
+    Fill(ctx, child, mark == listing_marks_.end() ? -1 : mark->second, filled);
   }
   child_rows_.erase(it);
 }
 
-void TraceRecorder::Fill(Context &ctx, Ino dir, uint64_t snapshot,
-                         bool filled) {
-  // The code's own decision, checked against the guard's rule with the
-  // code's snapshot: recording although a mutation of the directory began
-  // or ended since, or is in flight, is unexplained (the model's whole
+void TraceRecorder::MutationLine(Ino dir, bool begun) {
+  Dir &state = dirs_[dir];
+  ++state.mutation_lines;
+  state.last_mutation = ++mutation_seq_;
+  // A trace that began with a mutation of the directory in flight sees
+  // its end without its phase 1: never below zero.
+  if (begun) {
+    ++state.open_mutations;
+  } else if (state.open_mutations > 0) {
+    --state.open_mutations;
+  }
+}
+
+void TraceRecorder::Fill(Context &ctx, Ino dir, int64_t mark, bool filled) {
+  // The code's own decision, checked against what the trace saw: recording
+  // although a mutation of the directory began or ended since the fill's
+  // snapshot event, or is in flight, is unexplained (the model's whole
   // getattr would not record, and over valid attributes it would not even
-  // run).
-  if (filled && !cache::CanFill(ctx, {.seq = snapshot}, dir)) {
+  // run). The recorder's own record, not cache::CanFill, so that a fault in
+  // the guard or a snapshot taken late is not judged by itself.
+  const Dir &state = dirs_[dir];
+  if (filled && mark < 0) {
+    Unexplained(ctx, dir,
+                "attributes recorded by a fill whose snapshot event was not "
+                "seen");
+    return;
+  }
+  if (filled && (state.last_mutation > mark || state.open_mutations > 0)) {
     Unexplained(ctx, dir,
                 "attributes recorded although a mutation of the directory "
                 "began or ended since the fill's snapshot");
@@ -875,6 +901,8 @@ void TraceRecorder::Fill(Context &ctx, Ino dir, uint64_t snapshot,
 
 void TraceRecorder::PopulateStarted(Context &ctx, Ino dir) {
   Enter("PopulateStarted");
+  // PopulateDirectory took its fill snapshot just before.
+  listing_marks_[dir] = mutation_seq_;
   if (Traced(dir)) {
     Req *req = Find(dir);
     Dir &state = dirs_[dir];
@@ -950,7 +978,7 @@ void TraceRecorder::PopulateCommitted(Context &ctx, Ino dir,
       req->terminal = true;
     }
   }
-  ChildFills(ctx, dir, snapshot);
+  ChildFills(ctx, dir);
   After(ctx);
 }
 
@@ -1014,10 +1042,21 @@ void TraceRecorder::AttrsFilled(Context &ctx, Ino id, bool recorded) {
   After(ctx);
 }
 
-void TraceRecorder::ParentRecorded(Context &ctx, Ino parent,
+void TraceRecorder::ParentLookupStarted(Context &ctx, Ino dir) {
+  Enter("ParentLookupStarted");
+  parent_marks_[dir] = mutation_seq_;
+  After(ctx);
+}
+
+void TraceRecorder::ParentRecorded(Context &ctx, Ino dir, Ino parent,
                                    uint64_t snapshot, bool filled) {
   Enter("ParentRecorded");
-  if (Traced(parent)) Fill(ctx, parent, snapshot, filled);
+  auto mark = parent_marks_.find(dir);
+  if (Traced(parent)) {
+    Fill(ctx, parent, mark == parent_marks_.end() ? -1 : mark->second,
+         filled);
+  }
+  if (mark != parent_marks_.end()) parent_marks_.erase(mark);
   After(ctx);
 }
 
@@ -1095,7 +1134,7 @@ void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
     req->begun = true;
     Emit(ctx, dir, req, "phase1",
          absl::StrCat(",\"outcome\":\"begun\",\"synced\":", Bool(synced)));
-    ++dirs_[dir].mutation_lines;
+    MutationLine(dir, /*begun=*/true);
   }
   After(ctx);
 }
@@ -1237,11 +1276,12 @@ void TraceRecorder::MutationEnded(Context &ctx, events::IdsFn ids) {
       // syscall (an OpenNode error, say), or a forbidden step. Which one,
       // its RequestEnd says (Defer).
       Defer(dir, req, "a mutation ended before its syscall");
+      MutationLine(dir, /*begun=*/false);
       continue;
     }
     Emit(ctx, dir, &req, "end",
          absl::StrCat(",\"owned\":", Bool(req.owned)));
-    ++dirs_[dir].mutation_lines;
+    MutationLine(dir, /*begun=*/false);
     if (req.syscall_ok && !req.probe_absent) req.expects_refresh = true;
   }
   After(ctx);
