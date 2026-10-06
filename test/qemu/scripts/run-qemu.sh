@@ -143,11 +143,6 @@ fi
 
 WORKDIR="${TEST_TMPDIR:-$(mktemp -d)}"
 LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/serial.log"
-if [ "$UNIT" -eq 1 ]; then
-	TIMEOUT_SECS="${TIMEOUT:-60}" # unit tests boot in well under a second.
-else
-	TIMEOUT_SECS="${TIMEOUT:-1200}" # 20 minutes: TCG (no KVM) is slow.
-fi
 
 # --- lay out the disks in letter order, one -drive/-device pair per index -
 specs_file="$WORKDIR/disk-specs"
@@ -219,14 +214,52 @@ fi
 
 # --- boot ------------------------------------------------------------
 # KVM only when /dev/kvm is usable by this user; otherwise plain TCG
-# (slow -- see TIMEOUT_SECS above).
-if [ -w /dev/kvm ]; then
+# (2-12x slower, see the timeouts below).
+# DCFS_FORCE_TCG=1 (e.g. bazel test --test_env=DCFS_FORCE_TCG=1) forces TCG
+# even where /dev/kvm is usable, to test the fallback.
+if [ -w /dev/kvm ] && [ -z "${DCFS_FORCE_TCG:-}" ]; then
 	ACCEL=kvm
 	CPU=host
+	# KVM guests get the TSC and LAPIC timer frequencies from kvmclock/CPUID
+	# and need no legacy timer hardware.
+	LEGACY_TIMERS=off
 else
-	echo "run-qemu.sh: /dev/kvm is not writable, falling back to tcg (slow)" | tee -a "$LOG"
+	echo "run-qemu.sh: using tcg (no usable /dev/kvm, or DCFS_FORCE_TCG set)" | tee -a "$LOG"
 	ACCEL=tcg
 	CPU=max
+	# Step 5.1: under TCG the guest has no kvmclock/CPUID frequency
+	# information, so with pit=off,pic=off (the KVM setting) it can find no
+	# reference to calibrate the TSC against ("tsc: Unable to calibrate
+	# against PIT / No reference (HPET/PMTIMER) available"), then waits
+	# forever for a timer tick that never comes while it calibrates the
+	# LAPIC timer: the console goes silent right after "Marking TSC
+	# unstable" and the VM spins at 100% CPU until the timeout (measured:
+	# boot_test never finishes in 900 s). pit=on AND pic=on gives it the
+	# 8254 and 8259 it expects; pit=on alone is not enough (the PIT's IRQ0
+	# is wired through the PIC), nor is pic=on alone (kernel panic, "IO-APIC
+	# + timer doesn't work"). Boot then takes about 5 s instead of never.
+	LEGACY_TIMERS=on
+fi
+
+# Default QEMU timeouts, from measurements (step 5.1; Bazel's own test
+# timeout, which these sit under, is the outer limit). Slowest of each kind,
+# KVM / TCG, in seconds:
+#   unit tests: 3.8 / 14 (backing_test)           -> 60 / 300
+#   e2e:        215 / 257 (nfs_test; pjdfstest 611 / 3502 on a host at load
+#               15-25 shared with other Bazel runs, qemu's own CPU time 2660)
+#                                                 -> 1800 / 7200
+# Both are 3-20x the measurement: the machines these run on are shared.
+if [ "$ACCEL" = kvm ]; then
+	UNIT_TIMEOUT=60
+	E2E_TIMEOUT=1800
+else
+	UNIT_TIMEOUT=300
+	E2E_TIMEOUT=7200
+fi
+if [ "$UNIT" -eq 1 ]; then
+	TIMEOUT_SECS="${TIMEOUT:-$UNIT_TIMEOUT}"
+else
+	TIMEOUT_SECS="${TIMEOUT:-$E2E_TIMEOUT}"
 fi
 
 if [ "$UNIT" -eq 1 ]; then
@@ -237,7 +270,7 @@ else
 	SMP=2
 fi
 
-append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init"
+append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init dcfs_accel=$ACCEL"
 if [ "$UNIT" -eq 0 ]; then
 	append="$append dcfs_test=$DCFS_TEST"
 fi
@@ -268,7 +301,7 @@ start=$(date +%s.%N)
 echo "run-qemu.sh: qemu start $start" >>"$LOG"
 # shellcheck disable=SC2086 # drive_args is a deliberately unquoted list of flags
 timeout "$TIMEOUT_SECS" "$QEMU_BIN" \
-	-M microvm,x-option-roms=off,pit=off,pic=off,rtc=on,isa-serial=on,acpi=off \
+	-M microvm,x-option-roms=off,pit=$LEGACY_TIMERS,pic=$LEGACY_TIMERS,rtc=on,isa-serial=on,acpi=off \
 	-bios "$QBOOT" \
 	-nodefaults -no-user-config -nographic -no-reboot \
 	-serial stdio \

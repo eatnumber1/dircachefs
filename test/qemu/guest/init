@@ -37,6 +37,12 @@ mdev -s
 
 echo "boot: kernel $(uname -r)"
 
+# run-qemu.sh's accelerator (kvm or tcg) as DCFS_ACCEL, for the rare check
+# whose wall-clock or CPU-time budget has to scale with emulation speed
+# (e.g. guest/write.sh's daemon CPU ticks under TCG).
+DCFS_ACCEL=$(sed -n 's/.*\bdcfs_accel=\([^ ]*\).*/\1/p' /proc/cmdline)
+export DCFS_ACCEL
+
 finish() {
 	sync
 	# `sync` flushes the block devices, not the serial console: the line
