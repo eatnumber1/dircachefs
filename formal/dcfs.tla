@@ -789,7 +789,8 @@ Restart ==
 
 \* cache::RecoverDirty, one transaction at normal durability: for a dirty
 \* D, forget every dentry of it and mark its listing incomplete (epoch
-\* bump), mark its attributes unknown; then empty the dirty set. (StartRun
+\* bump), mark its attributes unknown; then empty the dirty set. (Recover
+\* below adds what it does to dentries pointing at dirty children.) (StartRun
 \* calls it whatever clean_shutdown says; with an empty dirty set it
 \* changes nothing.)
 RecoverDirty(d) ==
@@ -799,9 +800,22 @@ RecoverDirty(d) ==
                    !.dirty = FALSE]
     ELSE d
 
+\* cache::RecoverDirty also makes unknown every dentry that points at a
+\* dirty inode, wherever it is (the inode may have been renamed or
+\* unlinked), even in a clean directory. Child objects are not in the
+\* model's dirty set (README: abstractions), so recovery may make unknown
+\* any of D's present dentries besides: those whose objects were dirty.
+\* (Unknown is always safe; CrashSafe checks the least recovery forgets.)
+PresentNames(d) == {x \in Names : d.dent[x] \in Objs}
+RecoverForgetting(d, forget) ==
+    [RecoverDirty(d) EXCEPT
+        !.dent = [x \in Names |-> IF x \in forget THEN Unknown
+                                 ELSE RecoverDirty(d).dent[x]]]
+
 Recover ==
     /\ mode = "recover"
-    /\ Commit(RecoverDirty(dbCur), FALSE)
+    /\ \E forget \in SUBSET PresentNames(RecoverDirty(dbCur)) :
+         Commit(RecoverForgetting(dbCur, forget), FALSE)
     /\ mode' = "start"
     /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
                    servedWrong, stamp, muts, crashes>>

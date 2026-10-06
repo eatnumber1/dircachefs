@@ -104,6 +104,11 @@ TRACE_TESTS = {
     # incomplete listing of its own (EnsureDirectory): one that says
     # complete is rejected.
     "origin_listing_complete": "\"ev\":\"begin\",\"origin\":\"listing\"",
+    # Recovery makes a clean directory's dentry unknown when the object it
+    # points at was dirty (a, whose key is among the dirty inodes'): valid.
+    "recover_forgets_dirty_child": None,
+    # ... but not when that object was clean (only b's key was dirty).
+    "recover_forgets_clean_child": "\"ev\":\"recover\"",
 }
 
 [

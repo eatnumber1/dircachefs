@@ -1385,8 +1385,9 @@ point's syncfs) and from guest runs of the crash, power-loss, rename and
 create tests; a build whose phase 1 skips marking a name unknown is
 rejected at that phase 1. A step the model does not have (a link, a rename
 across directories, an out-of-band change, a syscall error it does not
-know) ends that directory's trace where it happens, and validation found
-places where the code is more conservative than the model (recovery
-forgets more dentries than the model's, for one), listed with the event
+know) ends that directory's trace where it happens, and only such steps
+may: a step the model forbids fails validation. Validation found places
+where the code is more conservative than the model (recovery forgot more
+dentries than the model's, which the model now has), listed with the event
 table, the projection and the action coverage in `formal/README.md`
 ("Trace validation").

@@ -1,0 +1,4 @@
+DCFS-TRACE t 2 {"i":1,"c":"BeginAll","ev":"begin","origin":"existing","db":{"dent":[["a","k:11.1.1"],["b","k:12.1.1"]],"complete":true,"epoch":0,"valid":true,"dirty":false,"clean":false,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":2,"c":"RunStarting","ev":"crash","db":{"dent":[["a","k:11.1.1"],["b","k:12.1.1"]],"complete":true,"epoch":0,"valid":true,"dirty":false,"clean":false,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":3,"c":"RunStarting","ev":"restart","db":{"dent":[["a","k:11.1.1"],["b","k:12.1.1"]],"complete":true,"epoch":0,"valid":true,"dirty":false,"clean":false,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":4,"c":"Recovered","ev":"recover","dirty_keys":["k:12.1.1"],"db":{"dent":[["a","unknown"],["b","k:12.1.1"]],"complete":true,"epoch":0,"valid":true,"dirty":false,"clean":false,"durable":false,"inflight":0}}

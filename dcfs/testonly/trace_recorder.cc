@@ -1268,6 +1268,18 @@ void TraceRecorder::RunStarting(Context &ctx) {
   Enter("RunStarting");
   absl::StatusOr<bool> clean = GetCleanShutdown(ctx.db);
   CHECK_OK(clean.status());
+  dirty_keys_.clear();
+  {
+    absl::StatusOr<sqlite3::Statement *> stmt = ctx.db.Prepared(
+        "SELECT i.backing_ino, i.btime_s, i.btime_ns FROM dirty d "
+        "JOIN inodes i ON i.id = d.inode");
+    CHECK_OK(stmt.status());
+    CHECK_OK((*stmt)->ForEachRow([&](sqlite3::Statement &row) {
+      dirty_keys_.push_back(Key(row.Column<uint64_t>(0), row.Column<int64_t>(1),
+                                row.Column<int64_t>(2)));
+      return absl::OkStatus();
+    }));
+  }
   // A new process knows nothing of the traces of the last one: every
   // directory gets these lines, and the traces that have begun take them.
   for (Ino dir : AllDirs(ctx)) {
@@ -1283,11 +1295,19 @@ void TraceRecorder::RunStarting(Context &ctx) {
 
 void TraceRecorder::Recovered(Context &ctx) {
   Enter("Recovered");
+  // The keys of the inodes that were dirty (RunStarting read them): only a
+  // dentry pointing at one of them may recovery make unknown in a clean
+  // directory (Trace.tla's T_Recover).
+  std::string keys;
+  for (const std::string &key : dirty_keys_) {
+    absl::StrAppend(&keys, keys.empty() ? "" : ",", JsonStr(key));
+  }
   for (Ino dir : AllDirs(ctx)) {
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"recover\",\"db\":", Snapshot(ctx, dir),
-                            "}"));
+                            ",\"ev\":\"recover\",\"dirty_keys\":[", keys,
+                            "],\"db\":", Snapshot(ctx, dir), "}"));
   }
+  dirty_keys_.clear();
 }
 
 void TraceRecorder::RunStarted(Context &ctx) {

@@ -509,25 +509,19 @@ T_Crash == Ev("crash") /\ Crash /\ Matches(E, {})
 T_Restart ==
     /\ Ev("restart") /\ Restart
     /\ DbMatches(E.db) /\ Observe(<<>>, DbPairs(E.db)) /\ l' = l + 1
-\* RecoverDirty, as the model has it (a dirty directory forgets its
-\* dentries and attributes), and one thing the model leaves out: the code
-\* also makes unknown every dentry that points at a dirty inode, wherever
-\* it is ("its name may have changed"), and the model has no child objects
-\* in the dirty set. So a present name of this directory may become unknown
-\* too; the event says which. (Unknown is always safe; formal/README.md,
-\* "Findings of trace validation".)
+\* Recover (which may also forget present dentries: the model's children
+\* are not in its dirty set), restricted to what the code's recovery may
+\* forget: a present dentry becomes unknown only if the object it points at
+\* was dirty (the recover line lists the keys of every inode that was).
+DirtyKeys(e) == IF Has(e, "dirty_keys")
+                THEN {e.dirty_keys[i] : i \in DOMAIN e.dirty_keys} ELSE {}
 T_Recover ==
-    /\ Ev("recover") /\ mode = "recover"
-    /\ LET rd == RecoverDirty(dbCur)
-           new == [rd EXCEPT !.dent =
-                     [x \in Names |->
-                        IF /\ rd.dent[x] \notin {NoRow, Unknown, Absent}
-                           /\ ObsVal(E.db, x) = "unknown"
-                        THEN Unknown ELSE rd.dent[x]]]
-       IN Commit(new, FALSE)
-    /\ mode' = "start"
-    /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
-                   servedWrong, stamp, muts, crashes>>
+    /\ Ev("recover")
+    /\ Recover
+    /\ LET rd == RecoverDirty(dbCur) IN
+       \A x \in Names :
+         (rd.dent[x] \in Objs /\ dbCur'.dent[x] = Unknown) =>
+           (rd.dent[x] \in DOMAIN okey /\ okey[rd.dent[x]] \in DirtyKeys(E))
     /\ Matches(E, {})
 T_StartRun == Ev("start_run") /\ StartRun /\ Matches(E, {})
 

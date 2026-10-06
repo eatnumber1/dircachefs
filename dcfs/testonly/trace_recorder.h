@@ -280,6 +280,8 @@ class TraceRecorder final : public ProtocolEvents {
   // Directory -> the child rows (child, filled) its listing or resolve
   // recorded in the transaction not yet reported committed.
   std::map<Ino, std::vector<std::pair<Ino, bool>>> child_rows_;
+  // The keys of the inodes in the dirty set before recovery (RunStarting).
+  std::vector<std::string> dirty_keys_;
   // Writes the child_fill lines of `dir`'s listing or resolve that took
   // `snapshot`.
   void ChildFills(Context &ctx, Ino dir, uint64_t snapshot);

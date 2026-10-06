@@ -260,7 +260,7 @@ prints. A request's first step runs inside `Arrive`.
 | (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
 | `Crash` | Daemon crash, kernel crash or power loss: each disk keeps any of its possible states, memory is lost | Crashes, power loss and recovery | |
-| `Restart`, `Recover`, `StartRun` | Start again: `RecoverDirty` (one transaction), then `clean_shutdown = 0` with kSync | Recovery; Startup | `backing::StartRun`, `cache::RecoverDirty` |
+| `Restart`, `Recover`, `StartRun` | Start again: `RecoverDirty` (one transaction; it may also make unknown any present dentry, standing for those that point at dirty children, which the model does not track: `RecoverForgetting`), then `clean_shutdown = 0` with kSync | Recovery; Startup | `backing::StartRun`, `cache::RecoverDirty` |
 | `BeginShutdown`, `StopSync`, `StopClear`, `StopCkpt`, `StopFlag` | Unmount, sync point, TRUNCATE checkpoint, `clean_shutdown = 1` with kSync, exit | Shutdown; What the clean-shutdown flag adds | `backing::FinishRun` |
 
 ## Properties
@@ -281,15 +281,15 @@ prints. A request's first step runs inside `Arrive`.
 
 `MC.tla` is the root module every configuration checks: it extends `dcfs`
 and defines the request sets and the `View` the configurations use. Times
-are from russ's machine (4 cores); the state counts are what TLC reports
-as distinct states.
+are from russ's machine (4 cores, loaded); the state counts are what TLC
+reports as distinct states (since 12.2b's `RecoverForgetting`).
 
 | Configuration | Test (tier) | Bounds | States | Time |
 |---|---|---|---|---|
-| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 368,668 | ~1 min |
-| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 32,839 | ~15-30 s |
-| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 3,950,002 | ~8 min |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 3,633,518 | ~6-8 min |
+| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 687,731 | ~2-3 min |
+| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 72,604 | ~30 s |
+| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 6,343,605 | ~13 min |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 5,103,028 | ~7-8 min |
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
@@ -462,7 +462,7 @@ right after the code the model's step stands for, with no backing syscall
 | `SyncfsDone` | `SyncBacking`, after the syncfs calls | `syncfs` | nothing (the model's syncfs takes effect at S1) | Sync points |
 | `SyncCleared` | `SyncBacking`, after `cache::ClearDirty` | `sync_clear`, `stop_clear` | `SyncClearDirty`; `StopClear` | Sync points |
 | `RunStarting` | `backing::StartRun`, first | `crash` (if the clean-shutdown flag is 0), `restart` | `Crash`, `Restart` | Crashes, power loss and recovery |
-| `Recovered` | `StartRun`, after `cache::RecoverDirty` | `recover` | `Recover` (see the findings) | Recovery |
+| `Recovered` | `StartRun`, after `cache::RecoverDirty` | `recover`, with the keys of the inodes that were dirty (read at `RunStarting`) | `Recover`, a dentry made unknown in a clean D only if its object's key is among them | Recovery |
 | `RunStarted` | `StartRun`, after its kSync commit | `start_run` | `StartRun` | Startup |
 | `ShutdownBegin`, `Checkpointed`, `CleanShutdownRecorded` | `backing::FinishRun` | `shutdown`, `checkpoint`, `clean` | `BeginShutdown`, `StopCkpt`, `StopFlag` | Shutdown |
 | `OutOfBandChange` | `backing::ReconcileAttrs`, when it adopts a change | `cut` | none (no out-of-band changes in the model) | Out-of-band change detection |
@@ -718,15 +718,23 @@ the code takes a step the model does not have. None is a safety problem
 (each makes the cache know less, never more); each is a gap in the model,
 reported here rather than fitted silently.
 
-- **Recovery forgets more than the model's.** `cache::RecoverDirty` marks
-  unknown every dentry that points at a dirty inode, wherever it is (the
-  inode may have been renamed or unlinked); the model has no child objects
-  in the dirty set, so its `RecoverDirty` never touches a clean D's
-  dentries. `power.sh`'s root trace hit it (the root was clean; `a`, `b`
-  and `f` were dirty, so the root's dentries for them became unknown).
-  `Trace.tla`'s `T_Recover` allows exactly that on top of the model's
-  `Recover`; the model should get it (a dirty child makes its dentry in D
-  unknown at recovery).
+- **Recovery forgets more than the model's did** (now in the model).
+  `cache::RecoverDirty` marks unknown every dentry that points at a dirty
+  inode, wherever it is (the inode may have been renamed or unlinked); the
+  model had no child objects in the dirty set, so its recovery never
+  touched a clean D's dentries. `power.sh`'s root trace hit it (the root
+  was clean; `a`, `b` and `f` were dirty, so the root's dentries for them
+  became unknown). The model's `Recover` now may also make any of D's
+  present dentries unknown (`RecoverForgetting`: those whose objects were
+  dirty, which the model does not track), and `Trace.tla`'s `T_Recover` is
+  that action, restricted by the `recover` line's `dirty_keys` (the keys of
+  every inode that was dirty) to dentries pointing at one of them
+  (`formal:trace_recover_forgets_*_test`). No known-bug variant: in the
+  one-directory model a child is only ever dirty with D (every mutation of
+  a child names D, and a sync point clears them together), so the old
+  recovery and the new one leave the same states reachable for every
+  property; forgetting more is always safe, and `CrashSafe` checks the
+  least recovery forgets.
 - **Syscall failures.** The model's create fails only with `EEXIST` and
   its unlink and rename only with `ENOENT`, each when the name says so; the
   code handles any error the same way (End, re-resolve, reply the error),
