@@ -41,6 +41,7 @@
     "xfsprogs_src": {"purl": "pkg:generic/xfsprogs", "kind": "tool", "version": "strip_prefix"},
     "btrfs_progs_src": {"purl": "pkg:generic/btrfs-progs", "kind": "tool", "version": "strip_prefix"},
     "tla2tools": {"purl": "pkg:github/tlaplus/tlaplus", "kind": "tool", "version": "url:/download/v([^/]+)/"},
+    "tla_community_modules": {"purl": "pkg:github/tlaplus/CommunityModules", "kind": "tool", "version": "url:/download/([^/]+)/"},
     "act": {"purl": "pkg:github/nektos/act", "kind": "tool", "version": "url:/download/v([^/]+)/"}
   },
   "script": {
