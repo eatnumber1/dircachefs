@@ -115,8 +115,23 @@ while IFS= read -r d; do
 	mkdir -p "$SKEL/$d"
 done <"$DIRS_LIST"
 
+# Skeleton directory modes (review L11): the skeleton's directories come
+# first in the combined tar at 0755, but a later entry for the same
+# directory in FLAT_TAR still sets its mode and owner when mke2fs imports it
+# (verified with a synthetic tar: ./priv/ 0700 with children and a 01777
+# child come out 0700 and 01777), so no mode needs copying onto the skeleton.
+
+# Reproducible image (review L10): fixed timestamps everywhere. Entries from
+# FLAT_TAR keep the mtimes their packages shipped; the skeleton and fixups
+# built here get the epoch, and mke2fs gets a fixed clock, UUID and hash seed.
+EPOCH=0
+SOURCE_DATE_EPOCH=$EPOCH
+E2FSPROGS_FAKE_TIME=$EPOCH
+export SOURCE_DATE_EPOCH E2FSPROGS_FAKE_TIME
+TARFLAGS="--owner=0 --group=0 --numeric-owner --mtime=@$EPOCH --sort=name"
+
 COMBINED="$WORK/combined.tar"
-tar --owner=0 --group=0 --numeric-owner -cf "$COMBINED" -C "$SKEL" .
+tar $TARFLAGS -cf "$COMBINED" -C "$SKEL" .
 tar --concatenate --file="$COMBINED" "$FLAT_TAR"
 
 # The five fixups this image's assembly has always needed (none of them
@@ -177,7 +192,7 @@ touch "$FIXUPS_ROOT/etc/exports"
 # itself was already created above, alongside etc/ and usr/bin/; tar picks
 # it up as part of the `usr` subtree below.)
 FIXUPS_TAR="$WORK/fixups.tar"
-tar --owner=0 --group=0 --numeric-owner -cf "$FIXUPS_TAR" -C "$FIXUPS_ROOT" \
+tar $TARFLAGS -cf "$FIXUPS_TAR" -C "$FIXUPS_ROOT" \
 	etc usr bin
 
 tar --concatenate --file="$COMBINED" "$FIXUPS_TAR"
@@ -185,6 +200,65 @@ tar --concatenate --file="$COMBINED" "$FIXUPS_TAR"
 IMG_TMP="$WORK/rootfs.ext4"
 truncate -s "$SIZE" "$IMG_TMP"
 
-"$MKE2FS" -q -t ext4 -L dcfs-rootfs -d "$COMBINED" -F "$IMG_TMP"
+# An explicit mke2fs config (review L10): the Bazel-built mke2fs otherwise
+# looks for its config at an absolute sandbox path baked in at build time,
+# which does not exist and silently falls back to the built-in profile. This
+# is that built-in profile (e2fsprogs 1.47.x) written out, so the image no
+# longer depends on that accident.
+MKE2FS_CONFIG="$WORK/mke2fs.conf"
+cat >"$MKE2FS_CONFIG" <<'CONF'
+[defaults]
+	base_features = sparse_super,large_file,filetype,resize_inode,dir_index,ext_attr
+	default_mntopts = acl,user_xattr
+	enable_periodic_fsck = 0
+	blocksize = 4096
+	inode_size = 256
+	inode_ratio = 16384
+
+[fs_types]
+	ext3 = {
+		features = has_journal
+	}
+	ext4 = {
+		features = has_journal,extent,huge_file,flex_bg,metadata_csum,metadata_csum_seed,64bit,dir_nlink,extra_isize,orphan_file
+	}
+	small = {
+		blocksize = 1024
+		inode_ratio = 4096
+	}
+	floppy = {
+		blocksize = 1024
+		inode_ratio = 8192
+	}
+	big = {
+		inode_ratio = 32768
+	}
+	huge = {
+		inode_ratio = 65536
+	}
+	news = {
+		inode_ratio = 4096
+	}
+	largefile = {
+		inode_ratio = 1048576
+		blocksize = -1
+	}
+	largefile4 = {
+		inode_ratio = 4194304
+		blocksize = -1
+	}
+	hurd = {
+		blocksize = 4096
+		inode_size = 128
+		warn_y2038_dates = 0
+	}
+CONF
+export MKE2FS_CONFIG
+
+# Fixed UUID and directory hash seed instead of random ones.
+"$MKE2FS" -q -t ext4 -L dcfs-rootfs \
+	-U 6dcf5000-0000-4000-8000-000000000001 \
+	-E hash_seed=6dcf5000-0000-4000-8000-000000000002 \
+	-d "$COMBINED" -F "$IMG_TMP"
 
 cp "$IMG_TMP" "$OUT"
