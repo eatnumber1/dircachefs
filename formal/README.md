@@ -24,8 +24,9 @@ Contents:
 7. [Configurations](#configurations)
 8. [Known bugs: the model's own tests](#known-bugs-the-models-own-tests)
 9. [Findings](#findings)
-10. [Reading a counterexample](#reading-a-counterexample)
-11. [Changing the model](#changing-the-model)
+10. [Trace validation](#trace-validation)
+11. [Reading a counterexample](#reading-a-counterexample)
+12. [Changing the model](#changing-the-model)
 
 ## Running it
 
@@ -37,6 +38,10 @@ bazel test //formal:known_bug_crash_f1_phase1_not_durable_test
 
 (On russ's machine, wrap Bazel in `sg kvm -c '...'` as for every Bazel
 command; these tests don't need KVM, but the Bazel server does.)
+
+Trace validation, which checks recorded runs of the code against the model,
+has its own targets next to the guests that record the traces (they do
+need KVM): see [Trace validation](#trace-validation).
 
 TLC runs on the host on a pinned JDK (`third_party/tlaplus/`). The test log
 (`bazel-testlogs/formal/<test>/test.log`) holds TLC's full output, including
@@ -346,6 +351,354 @@ new finding goes the same way.
   `Rename` resolves again if one did (`R1` in the model). `MC_nolock.cfg`
   includes rename (the finding's configuration).
 
+## Trace validation
+
+Model checking shows that the model keeps its promises; it says nothing
+about whether the code does what the model says. Trace validation closes
+that gap: the code records its protocol steps while tests run, and TLC
+checks that each recorded run is a behavior of the model (the method of
+Cirstea, Kuppe and Merz, "Validating traces of distributed programs against
+TLA+ specifications", 2024). A trace the model cannot explain fails its
+test and names the first event it cannot explain.
+
+```sh
+bazel test //dcfs:dir_cache_fs_trace_test     # the forged-request harness (~3 min)
+bazel test //dcfs:trace_fault_injection_test  # test first: a broken build is caught
+bazel test //test/qemu:trace_crash_test //test/qemu:trace_power_test \
+           //test/qemu:trace_rename_test //test/qemu:trace_create_test
+```
+
+The pieces:
+
+- `dcfs/protocol_events.h`: one call (`ProtocolEvents`, reached through
+  `Context::events`) for each step of the protocol, plus request frames
+  that say which steps belong to one request. Production binaries call a
+  no-op (`NoProtocolEvents()`; `main.cc` gets it from
+  `MainProtocolEvents()`, defined in `dcfs/protocol_events_main.cc`). The
+  call sites are the only change to production code.
+- `dcfs/testonly/trace_recorder.cc`: the recorder. The daemon's recording
+  build, `//dcfs:main_static_traced` (testonly), links
+  `dcfs/testonly/main_recorder.cc` instead of `protocol_events_main.cc`
+  (link-time selection), and writes to the serial console
+  (`/dev/console`), which outlives a killed daemon; the harness installs a
+  recorder itself (`StartTrace()` in `dcfs/dir_cache_fs_test.cc`) and
+  writes to stdout, which in a unit-test guest is the serial console too.
+- `formal/Trace.tla` and `Trace.cfg`: the trace-validation spec. It extends
+  `dcfs.tla` and takes one step per event (`TraceNext`'s actions are named
+  `T_<model action>`), reading the trace with the CommunityModules `Json`
+  module (`ndJsonDeserialize`).
+- `formal/trace_validate.sh` and `formal/trace.bzl` (`tla_trace_test`):
+  boot the recording guest, split the serial log into traces, run TLC on
+  each, and summarize (valid, invalid, where each trace was cut, action
+  coverage).
+
+### What a trace is
+
+The model describes one directory. A run touches many, so the recorder
+projects it onto every directory at once: each directory has its own
+trace, and each trace is checked on its own. A line of the serial log is
+
+```
+DCFS-TRACE <trace> <dir> {"i":7,"c":"LookupDecided","ev":"lookup","p":"p1","req":{"k":"unlink","n":"a","m":""},"n":"a","out":"found","key":"k:15.1791271592.42903629","db":{...}}
+```
+
+`<trace>` names the run (a harness test, or `e2e` for a guest boot: every
+daemon process of the boot appends to one trace), `<dir>` the directory's
+inode id. `ev` is the event in the model's terms, `p` the request slot,
+`req` the request's kind and names on its first line, `c` the C++ call it
+came from (for people). `db` is the directory's cached state after the
+event: its dentries (each `unknown`, `absent`, or the object it points at,
+named by backing inode number and birth time), `complete`, `epoch`,
+`valid` (its attributes), `dirty`, the clean-shutdown flag, `durable` (in
+`Context::dirty.durable`) and `inflight` (`FillGuards::inflight`); a line
+whose state equals its trace's previous line's leaves `db` out (the serial
+console is slow) and `trace_validate.sh` puts it back. Every step compares
+the model's state with it: an action that matches the event
+but leaves the cache differently is no match. A trace starts with a
+`begin` line (the state the directory starts in) and ends at the end of
+the run, or at a `cut` line (below), or at `gone` (the directory's row was
+deleted, e.g. by an rmdir).
+
+Names are bytes: a trace spells each one as `EscapeBytes` does
+(`dcfs/escape.h`), as a JSON string.
+
+### Events
+
+Each event, the model action it stands for (in its directory's trace), and
+where `docs/design.md` describes the step. The call sites are commented
+with the model step they mark; the rule they follow is that a call comes
+right after the code the model's step stands for, with no backing syscall
+(under coroutines: no suspension point) in between.
+
+| Event (`ProtocolEvents::`) | Call site | Line | Model action (`Trace.tla`) | `docs/design.md` |
+|---|---|---|---|---|
+| `RequestBegin` / `RequestEnd` | `fuse_ops.cc` (`Serve`): dispatch, reply | `reply` | which steps are one request; `T_Reply`: the model's request has replied | Concurrency |
+| `GetattrBegin` / `GetattrEnd` | `DirCacheFS::FreshAttr` | `attr_check`, `rdp_attr_check` | `Arrive` of a getattr (`GAFrom`); for Readdirplus's ".", part of its `RDFrom` (`T_ReaddirplusAttrCheck`) | Population policy; Concurrency (fill guards) |
+| `LookupBegin` / `LookupEnd` | `backing::LookupOrPopulate` | | a LookupOrPopulate of a lookup, an unlink's or rename's resolve, or a failed mutation's re-resolve | Population policy |
+| `RefreshBegin` / `RefreshEnd` | `backing::RefreshAttrs`, `RefreshAttrsFromFd` | `attr_check` (a refresh of unknown attributes that no request of the directory expects) | the statx and fill that end a getattr, readdirplus or mutation; otherwise a getattr of its own | The write-through protocol: Phase 3 |
+| `SyncBegin` / `SyncEnd` | `backing::SyncBacking` | | a sync request (or, in `FinishRun`, `StopSync`/`StopClear`) | Sync points |
+| `LookupDecided` | `LookupOrPopulate`, after the cache read | `lookup` | `LookupStep`, or the `Arrive` of a lookup, unlink or rename (`LKFrom`): served, `RN_probe` next, or `PD_read` next | Population policy |
+| `ResolveProbed` | `ProbeChild` (for `ResolveName`), after its openat and statx | `probe` | `ResolveProbe` | Population policy; Concurrency |
+| `ResolveCommitted` | `ResolveName`, after its transaction | `resolve_commit`; `child_fill` for a child directory's row | `ResolveCommit`; `T_GetattrWhole` (below) | Population policy |
+| `PopulateStarted`, `PopulateRead` | `PopulateDirectory`: after its snapshot and epoch; after phase A | `populate_read` (placed at `PopulateStarted`) | `PopulateRead` | Population policy |
+| `PopulateCommitted` | `PopulateDirectory`, after phase B | `populate_commit`; `child_fill` for child directories | `PopulateCommit`; `T_GetattrWhole` | Population policy; Concurrency (completeness epoch) |
+| `ListChecked` | `DirCacheFS::ListCached`, after `IsDirComplete` | `list_check` | `ReaddirStep`, or the `Arrive` of a readdir (`RDFrom`) | Population policy (Readdir) |
+| `AttrsStatted` | `RefreshAttrs*`, after the statx | `stat` | `GetattrStat`, `ReaddirplusStat`, `CreateStat`, `UnlinkStat`, `RenameStat` | Phase 3 |
+| `AttrsFilled` | `backing::FillAttrs`, after its transaction | `fill` | `GetattrFill`, `ReaddirplusFill`, `CreateFill`, `UnlinkFill`, `RenameFill` | Concurrency (fill guards) |
+| `ParentRecorded` | `backing::ParentOf`, after recording the parent row | `child_fill` | `T_GetattrWhole` | Population policy |
+| `RootRecorded` | `backing::InitRoot` | `child_fill` | `T_GetattrWhole` | Startup |
+| `MutationBegun` | `cache::BeginMutation`, after the commit and `RegisterMutation` | `phase1` (`begun`, `synced`) | the create's `Arrive` (`C1From`), `UnlinkPhase1`, `RenamePhase1` | Phase 1 |
+| `MutationAborted` | `cache::BeginMutation`, when `BeginRemove`/`BeginRename`'s verification fails | `phase1` (`aborted`) | the retry or `EAGAIN` case of `UnlinkPhase1`, `RenamePhase1` | Rules that hold now (resolves) |
+| `NameResolved` | `RemoveChild`, `Rename`, after the (source) resolve | `resolved` | `UnlinkPhase1`'s ENOENT case; `RenameResolveDst` | Phase 1 |
+| `MutationSyscall` | `CreateChild`, `RemoveChild`, `Rename`, `Link`, after the syscall | `syscall` | `CreateSyscall`, `UnlinkSyscall`, `RenameSyscall` | Phase 2 |
+| `NewChildProbed` | `RecordNewChild`, after its openat and statx | `probe` | `CreateProbe` | Phase 3 |
+| `MutationEnding`, `MutationEnded` | `cache::Mutation::End`: before and after it changes the guards | `end` (`owned`: what `Owns` said) | `CreatePhase3`, `UnlinkPhase3`, `RenamePhase3`; `CreateFailed`, `UnlinkFailed`, `RenameFailed` | Phase 3; Concurrency (`Owns`) |
+| `Reresolve` | `ReresolveAfterFailure`, per name | `reresolve` | `RenameFailed2` for a rename's second name | Phase 2 |
+| `WritesEnded` | `cache::EndWrites` | | not modelled (a file's; the model has no writable opens) | Writable opens |
+| `SyncSnapshotTaken` | `SyncBacking`, after `cache::BeginSync` | `sync_begin`, `stop_sync` | a sync's `Arrive` (`S1From`); `StopSync` | Sync points |
+| `SyncfsDone` | `SyncBacking`, after the syncfs calls | `syncfs` | nothing (the model's syncfs takes effect at S1) | Sync points |
+| `SyncCleared` | `SyncBacking`, after `cache::ClearDirty` | `sync_clear`, `stop_clear` | `SyncClearDirty`; `StopClear` | Sync points |
+| `RunStarting` | `backing::StartRun`, first | `crash` (if the clean-shutdown flag is 0), `restart` | `Crash`, `Restart` | Crashes, power loss and recovery |
+| `Recovered` | `StartRun`, after `cache::RecoverDirty` | `recover` | `Recover` (see the findings) | Recovery |
+| `RunStarted` | `StartRun`, after its kSync commit | `start_run` | `StartRun` | Startup |
+| `ShutdownBegin`, `Checkpointed`, `CleanShutdownRecorded` | `backing::FinishRun` | `shutdown`, `checkpoint`, `clean` | `BeginShutdown`, `StopCkpt`, `StopFlag` | Shutdown |
+| `OutOfBandChange` | `backing::ReconcileAttrs`, when it adopts a change | `cut` | none (no out-of-band changes in the model) | Out-of-band change detection |
+| `InodeForgotten` | `cache::InvalidateInode` (and `DeleteInode`) | `gone`, `cut` | none | Identity model |
+
+### The projection, and why it is sound
+
+The model is one directory D; its `seq` is `FillGuards::touched[D]`, its
+`inflight` `FillGuards::inflight[D]` (`dcfs.tla`'s comment on `CanFill`).
+The code's clock is global, but a fill or sync snapshot's test of D,
+`touched[D] <= snapshot`, is the same as the model's `seq <= snapshot`
+measured in D's own touches: `touched[D]` only grows, and a touch of D
+after the snapshot is at a global seq above it. The guards' pruning
+(`floor`) is not modelled; no test comes near `FillGuards::max_touched`.
+
+Which requests are which model request, in D's trace:
+
+- LOOKUP(D, n) is a lookup of n; LOOKUP(D, ".") and GETATTR(D) and
+  OPENDIR(D) a getattr; READDIR(D) a readdir; READDIRPLUS(D) at offset 0
+  a readdirplus, at a later offset a readdir (a continuation has no "."
+  entry, so it never refreshes D's attributes); MKNOD/MKDIR/SYMLINK/CREATE
+  in D a create; UNLINK/RMDIR in D an unlink; RENAME within D with no flags
+  a rename.
+- A getattr of D inside another request (an `EntryFor(D)` replying D's
+  entry from its parent's lookup, readdirplus or ".." lookup) is a getattr
+  request of its own. A refresh of D's unknown attributes that no request
+  of D expects (e.g. a rename's refresh of a directory it moved) is a
+  getattr that found them unknown; one of valid attributes is no step at
+  all (the model would serve them, and refreshing a correct value changes
+  nothing it can see, nor can the fill record anything if a mutation of D
+  overlapped).
+- A sync point is a sync request in every directory's trace.
+- A LookupOrPopulate outside any request of D (a test resolving a name
+  directly) is a lookup request.
+- Each request holds the smallest slot `p1`, `p2`, ... no open request of
+  D holds, until the C++ request ends (at which point the model's request
+  must have replied: `T_Reply`). `p0` is never used by the code: it is the
+  free slot `T_GetattrWhole` needs.
+
+Steps that are more than one model action, each a sequence of model steps
+with nothing in between, which the model allows since it allows every
+interleaving:
+
+- `ArriveAs`: the case of `Arrive` an event names (the request's kind and
+  names), conjoined with `Arrive(p)` itself as a check.
+- `T_GetattrWhole` (`child_fill` lines): a fill of D's attributes that is
+  not one of D's own requests' (its parent's listing recording D's row,
+  `ParentOf`, `InitRoot`): a whole getattr (`GAFrom`, `GetattrStat`,
+  `GetattrFill`) taken at once, whose snapshot is therefore taken in the
+  same step as its fill. Valid attributes stay valid (as for the silent
+  refresh above); a fill the code may not record leaves unknown ones
+  unknown.
+
+Where the code's step is spread over syscalls and the model's is one:
+
+- `PopulateRead` reads the listing and probes every name in one step; the
+  code reads them over many syscalls, at which (in the harness, under
+  coroutines) other requests run. The recorder puts the `populate_read`
+  line where the population took its snapshot (`PopulateStarted`), before
+  the lines of whatever ran during its reads. If something that ran then
+  changed a name the reads saw, no behavior matches (the model's earlier
+  read returns the old value) and validation fails: the reordering can
+  only reject, never accept a run the model does not allow.
+- A resolve's snapshot (`ResolveName`'s `BeginFill`) and its probe are one
+  step in the model (`ResolveProbe`) and two places in the code with one
+  statx between them, at which no request runs today or in the harness.
+
+What a trace observes and what it leaves free:
+
+- Objects. The model names objects by identity (`o1`, `o2`, ...), the code
+  by backing inode number and birth time. `Trace.tla`'s `okey` maps model
+  objects to the code's keys as the trace reveals them, and every
+  observation must agree with it. It is a function from model objects to
+  keys, not a bijection: two names hard-linked to one file (which the
+  model does not have) are two model objects with one key. It starts over
+  at every restart, because a test may rearrange the backing filesystem
+  while dcfs is down (`power.sh` recreates an unlinked file to stand for a
+  power loss that lost the unlink; the model's power loss restores the
+  original object). Within a run it is checked.
+- The initial state is the model's `Init` except that the directory's
+  cached state is the one its trace begins with (a directory's trace
+  begins when the cache first has it, or when the harness starts
+  recording), which is assumed correct and durable; and that a name whose
+  backing state the trace observes (a probe, a listing) before any syscall
+  could have changed it starts in that state. Both only remove initial
+  states, so neither can make an invalid trace valid.
+- Attribute values (the model's stamp), the guards' absolute clock, and
+  which answer a listing served are not compared; their effects (the
+  attributes' validity, every guard decision, the dentries a listing was
+  built from) are.
+- Phase 1's durability: the code commits with a WAL fsync unless every
+  inode it names is durably dirty, the model unless D is. Where the model
+  takes the fast path the code may still fsync; that leaves fewer crash
+  outcomes than the model allows, so the trace accepts either there
+  (`SyncedOK`). Where the model fsyncs, the code must.
+
+Soundness. Each trace step is a model step (or a sequence of them), so a
+valid trace is a behavior of the model restricted to what the trace
+observes. Nothing outside a directory's events may change its cached
+state: after every event the recorder compares every other directory's
+state with its last line, and a change gets an `unexplained` line, which
+no action matches (an uninstrumented write fails validation where it
+happened). A step the model does not have ends the trace with a `cut`
+line; what came before is still checked, and the test log lists every
+cut. The cuts are:
+
+| Cut | Why the model cannot follow |
+|---|---|
+| rename across directories, rename with flags | the model's rename is within D, flags 0 |
+| link into the directory | the model's objects never get a second name |
+| setattr or xattr change of the directory, or any mutation that names it as an object (moved, removed) | the model has no mutation of D's own attributes |
+| a refused boundary | not modelled |
+| an out-of-band change; a forgotten inode's dentries became unknown | not modelled (`ReconcileAttrs`, `InvalidateInode` after `ESTALE`) |
+| a syscall error other than create's `EEXIST` and unlink's/rename's `ENOENT`; a request, getattr, lookup, refresh or sync point that failed half-way | the model's syscalls fail only that way, and its requests always finish |
+| a mutation, resolve or listing outside a request; a second phase 1 in one request; a listing during another listing's reads | the code's requests never do that; the harness's direct calls into the cache do |
+
+### The traces
+
+- `//dcfs:dir_cache_fs_trace_test` runs `dcfs/dir_cache_fs_test.cc` and
+  validates every test that records (`StartTrace()`): the rename and
+  unlink stale-resolve races (`RenameStaleSourceTest.*`,
+  `UnlinkMarksWhatItRemovesUnknown`), a release and a MKDIR during a sync
+  point's syncfs (`ReleaseDuringASyncPointKeepsTheDirtyRow`,
+  `MkdirDuringASyncPointKeepsItsDirtyRows`), a writable create with a sync
+  point inside it (`WritableCreateIsDirtyWhenReplied`), and scenarios
+  written for trace validation: a rename, an unlink and a readdir that a
+  mkdir in the same directory keeps invalidating until they give up
+  (`*GivesUpWhile*`: phase 1's retry and EAGAIN, readdir's), the common
+  requests in a row (`CommonRequestsMatchTheModel`), refreshes of unknown
+  attributes (`UnknownAttributesAreRefreshed`), and the fault-injection
+  scenario (`CreateMarksItsNameUnknown`). The harness runs requests inside
+  other requests' syscalls, so it is validated without the kernel's lock
+  (`KernelDirLock` FALSE).
+- `//test/qemu:trace_{crash,power,rename,create}_test` run those guest
+  scripts, unchanged, on the traced initramfs (`//test/qemu:initramfs_traced`),
+  with the kernel's lock (`KernelDirLock` TRUE). `crash.sh` and `power.sh`
+  cover crashes (a SIGKILLed daemon), recovery and clean shutdown.
+- Test first: `//dcfs:trace_fault_injection_test` runs
+  `CreateMarksItsNameUnknown` in a build whose phase 1 does not mark names
+  unknown (`dcfs/testonly/skip_mark_unknown.cc`, linked with
+  `-Wl,--wrap=sqlite3_step`), and passes only if validation rejects the
+  trace at that create's phase 1:
+
+  ```
+  trace_validate.sh: rejected: DirCacheFSTest.CreateMarksItsNameUnknown@1: the model explains 0 of 5 events; the first it cannot (event 1):
+    {"i":2,"c":"MutationBegun","ev":"phase1","p":"p1","req":{"k":"create","n":"new","m":""},"outcome":"begun","synced":true,"db":{"dent":[["a","k:14.1791271400.915708585"]],"complete":true,"epoch":0,"valid":false,"dirty":true,"clean":true,"durable":true,"inflight":1}}
+  ```
+
+  (the model's phase 1 leaves `new` unknown; the code's left no row, which
+  in a complete listing reads absent).
+
+### Action coverage
+
+Which model actions the valid traces took, and in which tests (the test
+logs print the counts: states that matched an event; this table is from
+the run of 2026-10-06). `Arrive` is split by request kind.
+
+| Model action | Traces that take it |
+|---|---|
+| `Arrive`: lookup, unlink, rename (`T_ArriveLookup`) | harness, crash, power, rename, create |
+| `Arrive`: readdir, readdirplus (`T_ArriveReaddir`) | harness, crash, power, rename, create |
+| `Arrive`: getattr (`T_ArriveGetattr`) | harness, crash, power, rename, create |
+| `Arrive`: create (`T_ArriveCreate`) | harness, crash, power, create |
+| `Arrive`: sync (`T_ArriveSync`) | harness, power, rename |
+| `LookupStep` | harness, power |
+| `ResolveProbe`, `ResolveCommit` | harness, power |
+| `PopulateRead`, `PopulateCommit` | harness, crash, power, rename, create |
+| `ReaddirStep` (including the EAGAIN case) | harness, crash, power, rename, create |
+| `ReaddirplusStat`, `ReaddirplusFill` | harness |
+| `GetattrStat`, `GetattrFill` | harness, crash |
+| `CreateSyscall`, `CreateProbe`, `CreatePhase3`, `CreateStat`, `CreateFill` | harness, crash, power, create |
+| `CreateFailed` | harness |
+| `UnlinkPhase1` (begin, retry, EAGAIN, ENOENT), `UnlinkSyscall`, `UnlinkPhase3`, `UnlinkStat`, `UnlinkFill` | harness, power, rename |
+| `RenameResolveDst`, `RenamePhase1` (begin, retry, EAGAIN), `RenameSyscall`, `RenamePhase3`, `RenameStat`, `RenameFill` | harness, power |
+| `SyncClearDirty` | harness, power, rename |
+| `Crash`, `Restart`, `Recover`, `StartRun` | crash, power (`Restart`, `Recover`, `StartRun` also rename, create) |
+| `BeginShutdown`, `StopSync` | crash, power, rename, create |
+| `StopClear`, `StopCkpt`, `StopFlag` | power, rename, create |
+| composite `T_GetattrWhole` | harness, crash, power, rename, create |
+
+Never taken: **`UnlinkFailed`, `RenameFailed`, `RenameFailed2`**. They need
+the name to vanish between the resolve and the syscall, which nothing in
+the model can do (see [Changing the model](#changing-the-model): they
+report 0 in every configuration too), and in the code only an out-of-band
+change can, which the model does not have either. The code's failure path
+for other errors (`ENOTEMPTY`, `EACCES`, ...) ends the trace with a cut
+instead (a finding below).
+
+### Findings of trace validation
+
+Instrumenting the code and validating its traces exposed these places where
+the code takes a step the model does not have. None is a safety problem
+(each makes the cache know less, never more); each is a gap in the model,
+reported here rather than fitted silently.
+
+- **Recovery forgets more than the model's.** `cache::RecoverDirty` marks
+  unknown every dentry that points at a dirty inode, wherever it is (the
+  inode may have been renamed or unlinked); the model has no child objects
+  in the dirty set, so its `RecoverDirty` never touches a clean D's
+  dentries. `power.sh`'s root trace hit it (the root was clean; `a`, `b`
+  and `f` were dirty, so the root's dentries for them became unknown).
+  `Trace.tla`'s `T_Recover` allows exactly that on top of the model's
+  `Recover`; the model should get it (a dirty child makes its dentry in D
+  unknown at recovery).
+- **Syscall failures.** The model's create fails only with `EEXIST` and
+  its unlink and rename only with `ENOENT`, each when the name says so; the
+  code handles any error the same way (End, re-resolve, reply the error),
+  e.g. an rmdir's `ENOTEMPTY` or a create's `EACCES`. Traces with such a
+  failure are cut there (none of the four guest scripts' validated
+  directories hit one in the run recorded above). A failure that changes
+  nothing, at any syscall, would cover them.
+- **Verification of other inodes.** `BeginRemove` and `BeginRename` verify
+  the child (and the rename's other parent, source and destination) as
+  well as D; the model verifies only D. A verification that failed only
+  because of another inode would be a step the model does not allow
+  (`UnlinkPhase1`/`RenamePhase1` would begin the mutation). No trace hit
+  it: it needs a mutation of that inode alone between the resolve and
+  phase 1.
+- **A child row recorded while a mutation of it overlaps.** A parent's
+  listing that records a directory's row (`RecordChild`) or `ParentOf`
+  marks that directory's attributes unknown when it may not fill them,
+  even if they were valid (a mutation of it ended since the listing's
+  snapshot and its refresh made them valid). The model's fill would leave
+  them valid. No trace hit it; `T_GetattrWhole` would reject it.
+- **Phase 1's fast path** is taken by the model whenever D is durably
+  dirty, by the code only when every inode it names is (see the
+  projection). The code is the more durable one; validation accepts it.
+
+### When trace validation fails
+
+The log names the first event no behavior of the model explains, with the
+line before it. Either the code took a step the model does not allow (a
+bug, or a gap in the model to fix in `dcfs.tla` as the model's own tests
+require), or a protocol change moved a step without moving its event, or
+added a step without one (an `unexplained` line: the write that caused it
+happened during the C++ call named in its `c` field). A change to the
+protocol keeps its events next to the steps they mark, and the event
+table above up to date.
+
 ## Reading a counterexample
 
 When an invariant fails, the test log has:
@@ -405,6 +758,12 @@ model in the same change (AGENTS.md). In practice:
 - A bug fixed in the code that the model can express: add a `Bug*`
   constant that puts it back, and a `known_bugs/` variant whose test
   expects the counterexample.
+- Trace validation checks the code against the model: a changed step
+  needs its protocol event (`dcfs/protocol_events.h`) at the place the
+  model's step now stands for, `Trace.tla`'s action for it, and the event
+  table in [Trace validation](#trace-validation) updated. Run
+  `bazel test //dcfs:dir_cache_fs_trace_test //dcfs:trace_fault_injection_test`
+  and the `//test/qemu:trace_*_test` targets.
 - Keep every action reachable: run TLC with `-coverage 1` and check that
   no action reports 0, except these, which report 0 in every
   configuration: `RenameFailed`, `RenameFailed2` and `UnlinkFailed`.

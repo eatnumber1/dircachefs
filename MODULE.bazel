@@ -280,8 +280,8 @@ http_file(
 http_file(
     name = "tla_community_modules",
     downloaded_file_path = "CommunityModules-deps.jar",
-    sha256 = "b8d29e80d6edfe18ca133e9e03550c500c85ebd7dc23965d2afc004970f6381d",
-    urls = ["https://github.com/tlaplus/CommunityModules/releases/download/202409181925/CommunityModules-deps-202409181925.jar"],
+    sha256 = "dddb19c3d7596913d92c43073b60d1408ac8f6d86716af4d19dd6861a95bfb7d",
+    urls = ["https://github.com/tlaplus/CommunityModules/releases/download/202610040242/CommunityModules-deps-202610040242.jar"],
 )
 
 java_toolchains = use_extension("@rules_java//java:extensions.bzl", "toolchains")

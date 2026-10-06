@@ -1367,3 +1367,26 @@ without checking completeness again (see Readdir under
 source resolved before its phase 1 (see the rule on resolves under
 [Rules that hold now](#rules-that-hold-now-so-that-coroutines-need-no-redesign)).
 The configurations that found them are now part of the real model.
+
+Trace validation checks the other direction: that the code does what the
+model says. Every step of the protocol the model has (a mutation's phase 1,
+its syscall and its phase 3, a fill's read and commit, an answer served
+from the cache, a sync point, a crash, recovery, shutdown) is reported
+through `Context::events` (`dcfs/protocol_events.h`), which production
+binaries implement as a no-op; testonly builds link a recorder instead
+(`dcfs/testonly/`), which writes each step as a line of the trace of every
+directory it concerns, with that directory's cached state after it.
+`formal/Trace.tla` takes one model step per event and requires the model's
+state to match the recorded one after each; TLC must find a behavior of the
+model that matches the whole trace. The traces come from the forged-request
+harness (`dcfs:dir_cache_fs_trace_test`: the interleavings coroutines will
+produce, such as the stale-resolve races and mutations during a sync
+point's syncfs) and from guest runs of the crash, power-loss, rename and
+create tests; a build whose phase 1 skips marking a name unknown is
+rejected at that phase 1. A step the model does not have (a link, a rename
+across directories, an out-of-band change, a syscall error it does not
+know) ends that directory's trace where it happens, and validation found
+places where the code is more conservative than the model (recovery
+forgets more dentries than the model's, for one), listed with the event
+table, the projection and the action coverage in `formal/README.md`
+("Trace validation").

@@ -369,9 +369,17 @@ void TraceRecorder::Emit(Context &ctx, Ino dir, Req *req, std::string_view ev,
     }
   }
   const std::string db = Snapshot(ctx, dir);
-  absl::StrAppend(&json, fields, ",\"db\":", db, "}");
+  Dir &state = dirs_[dir];
+  // An unchanged state is left out (the serial console is slow, and slows
+  // the guest): formal/trace_validate.sh puts the previous line's back.
+  // Not while a population's lines are held, which are reordered.
+  if (db == state.last && !state.reading) {
+    absl::StrAppend(&json, fields, "}");
+  } else {
+    absl::StrAppend(&json, fields, ",\"db\":", db, "}");
+  }
   Write(dir, json);
-  dirs_[dir].last = db;
+  state.last = db;
   covered_.insert(dir);
 }
 

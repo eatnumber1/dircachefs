@@ -13,10 +13,24 @@ What is here:
   that violation (exit status 12 or 13 and the given text). Any other
   outcome fails, a parse error (exit status 150 and up) included.
 - `tlc_test_runner.sh.tpl`: the test script `tlc_test` fills in.
+- `overrides/tlc2/overrides/TLCOverrides.java` and the `tlc_overrides_jar`
+  rule (in `tlc.bzl`; target `:tlc_overrides`): the registry of Java
+  operator overrides TLC loads, compiled with the pinned JDK. Trace
+  validation (`formal/Trace.tla`, `formal/trace.bzl`) puts it first on the
+  class path, ahead of the CommunityModules jar. Why: TLC loads the class
+  `tlc2.overrides.TLCOverrides` and every override it lists; the
+  CommunityModules jar's own registry lists all of its modules', and its
+  `FiniteSetsExt` override refers to `tlc2.value.impl.KSubsetValue`, which
+  exists only in TLC's 1.8.0 line, so TLC 1.7.4 stops with a
+  `NoClassDefFoundError` as soon as it loads it (every CommunityModules
+  release tried back to 2021 does this: the modules track TLC's main
+  branch). The registry here lists only what trace validation uses:
+  `IOUtils` (environment variables), `Json` (`ndJsonDeserialize`) and
+  `SequencesExt`.
 
 ## Pins
 
-Both are declared in `MODULE.bazel`.
+All are declared in `MODULE.bazel`.
 
 - **tla2tools.jar** v1.7.4, the latest stable release as of 2026-10-05
   (v1.8.0 is a rolling pre-release whose asset is replaced in place, so
@@ -32,8 +46,18 @@ Both are declared in `MODULE.bazel`.
   default runtime (`--java_runtime_version=local_jdk`) is the host's JDK.
   Linux x86_64 only, like the rest of the build.
 
-The TLA+ CommunityModules jar (for reading JSON traces) is not pinned yet:
-nothing uses it until trace validation (plan step 12.2).
+- **CommunityModules** (with dependencies) release 202610040242, the latest
+  as of 2026-10-06. It runs on TLC 1.7.4 through the trimmed override
+  registry above (checked by running trace validation; so does the
+  release of 2024-09-18, 202409181925). With the jar's own registry, every
+  release tried, back to 202110210339, stops TLC 1.7.4.
+  - URL: `https://github.com/tlaplus/CommunityModules/releases/download/202610040242/CommunityModules-deps-202610040242.jar`
+    (the dated asset; the undated `CommunityModules-deps.jar` name is
+    reused by every release).
+  - sha256: `dddb19c3d7596913d92c43073b60d1408ac8f6d86716af4d19dd6861a95bfb7d`
+    (downloaded twice and hashed).
+  - Repository: `@tla_community_modules` (`http_file`); the jar is
+    `@tla_community_modules//file`.
 
 ## Update procedure
 
@@ -50,6 +74,16 @@ nothing uses it until trace validation (plan step 12.2).
 5. `bazel test //formal/...`: every test must pass, the known-bug and
    finding tests included (they fail if TLC stops reporting their
    counterexample).
+
+For the CommunityModules jar: pick a release from
+`https://github.com/tlaplus/CommunityModules/releases`, hash its dated
+`CommunityModules-deps-<release>.jar` twice, update the `tla_community_modules`
+`http_file` and the version above, and run
+`bazel test //dcfs:trace_fault_injection_test //dcfs:dir_cache_fs_trace_test`
+(trace validation reads every trace through it). If TLC reports a
+`NoClassDefFoundError` or a missing operator, the release's overrides need
+a newer TLC than the one pinned; keep `overrides/.../TLCOverrides.java`
+listing only the modules `formal/Trace.tla` uses.
 
 For a newer JDK, change `remotejdk21_linux` (in `MODULE.bazel`'s
 `use_repo` and `tlc.bzl`'s `_jdk`) to another remote JDK that rules_java

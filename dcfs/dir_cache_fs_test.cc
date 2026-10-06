@@ -1050,6 +1050,32 @@ TEST_F(DirCacheFSTest, CommonRequestsMatchTheModel) {
   EXPECT_THAT(Dirty(), Not(Contains(d)));
 }
 
+// A getattr and a readdirplus of directories whose attributes are unknown
+// (left so by the setup): each refreshes them (its statx, then a fill).
+TEST_F(DirCacheFSTest, UnknownAttributesAreRefreshed) {
+  ASSERT_EQ(::mkdir(Path("d1").c_str(), 0755), 0);
+  ASSERT_EQ(::mkdir(Path("d2").c_str(), 0755), 0);
+  WriteFile(Path("d2/a"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d1, Id("d1"));
+  ASSERT_OK_AND_ASSIGN(InodeId d2, Id("d2"));
+  ASSERT_THAT(Id("a", d2), IsOk());  // Populates d2.
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, d1), IsOk());
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, d2), IsOk());
+
+  StartTrace();
+  struct fuse_getattr_in getattr = {};
+  std::string body;
+  AppendBytes(body, getattr);
+  EXPECT_EQ(Send(FUSE_GETATTR, static_cast<uint64_t>(d1), body).error, 0);
+  EXPECT_THAT(List(d2, true),
+              IsOkAndHolds(UnorderedElementsAre(".", "..", "a")));
+  for (InodeId id : {d1, d2}) {
+    ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, id));
+    EXPECT_TRUE(attr.valid);
+  }
+}
+
 // A mkdir in a directory whose listing is complete. Phase 1 marks the new
 // name unknown, and the trace shows it. Trace validation's fault-injection
 // test (//dcfs:trace_fault_injection_test) runs this test alone in a build

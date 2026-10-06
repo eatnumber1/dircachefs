@@ -16,7 +16,8 @@
 #
 # Each line the recorder writes is "DCFS-TRACE <trace> <dir> <json>"; the
 # lines of one (trace, dir) pair, from its first "begin" line to a "cut" or
-# "gone" line, are one trace file. TLC reports the depth of its search,
+# "gone" line, are one trace file; a line without a "db" (the recorder
+# leaves out a state equal to the previous line's) gets the previous one's. TLC reports the depth of its search,
 # which is one more than the number of events it could match: all of them
 # if the trace is valid, else the index of the first one it could not.
 set -euo pipefail
@@ -68,6 +69,9 @@ awk -v dir="$work/traces" '
       if (!(key in file)) {
         file[key] = dir "/" safe($2) "@" $3 ".jsonl"
         print json > file[key]
+        db[key] = json
+        sub(/^.*,"db":/, "", db[key])
+        sub(/\}$/, "", db[key])
       }
       next
     }
@@ -76,6 +80,15 @@ awk -v dir="$work/traces" '
       done[key] = 1
       print key "\t" json >> (dir "/ends.tsv")
       next
+    }
+    # The recorder leaves out a state that equals the previous line'"'"'s.
+    if (json ~ /,"db":\{/) {
+      db[key] = json
+      sub(/^.*,"db":/, "", db[key])
+      sub(/\}$/, "", db[key])
+    } else {
+      # (Concatenation, not sub(): "&" in a name would mean the match.)
+      json = substr(json, 1, length(json) - 1) ",\"db\":" db[key] "}"
     }
     print json > file[key]
   }' "$work/lines"
@@ -100,7 +113,7 @@ for f in "$work"/traces/*.jsonl; do
   tlc_status=0
   (
     cd "$work/tlc"
-    DCFS_TRACE="$f" DCFS_TRACE_LOCK="$lock" "$java" -XX:+UseParallelGC \
+    DCFS_TRACE="$f" DCFS_TRACE_LOCK="$lock" "$java" -XX:+UseParallelGC -XX:TieredStopAtLevel=1 -Xmx1g \
       -Xss16m -Djava.io.tmpdir="$work/tmp" -cp "$cp" tlc2.TLC \
       -deadlock -workers 1 -coverage 60 -cleanup \
       -metadir "$work/tlc/states-$name" -config Trace.cfg Trace

@@ -19,7 +19,9 @@
 // completeness and epoch, whether its attributes are valid, its dirty row,
 // the clean-shutdown flag, whether it is in Context::dirty.durable, and its
 // FillGuards::inflight count), so that the model's state is compared with
-// the code's after every step, not just its actions.
+// the code's after every step, not just its actions. A line whose state is
+// the same as its trace's previous line leaves it out, and the host puts
+// it back (formal/trace_validate.sh).
 //
 // How the projection works (formal/README.md explains why it is sound):
 //  - A request touching D (a FUSE request, or a sync point, getattr,
