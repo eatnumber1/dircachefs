@@ -172,3 +172,17 @@ depended on indirectly -- see `test/qemu/README.md` and
 `third_party/qemu/README.md`/`third_party/busybox/README.md`.
 
 dcfs's full suite passes against this kernel.
+
+## Build identity and reproducibility (review R2)
+
+- `kernel.config` sets `CONFIG_LOCALVERSION="-dcfs-stock"`, so `uname -r` is
+  `<pinned version>-dcfs-stock`; `guest/boot.sh` requires that suffix instead
+  of hard-coding the pinned version (a pin bump needs no test edit).
+- `build_kernel.sh` re-executes itself under `sh -eu` for the real build and
+  prints the log to stderr on failure (a `{ ...; } || ...` block ignores
+  `set -e`, which once made a failed fragment check silent). It sets
+  `KBUILD_BUILD_TIMESTAMP/USER/HOST/VERSION` to constants.
+- The EXPERT-gated symbols `tinyconfig` turns off (`POSIX_TIMERS`, `KCMP`,
+  `AIO`, `SYSVIPC`, `ADVISE_SYSCALLS`, `MEMBARRIER`, `RSEQ`, `BUG`) are
+  turned back on in one block at the end of `kernel.config`, with the
+  options considered and left off listed there.

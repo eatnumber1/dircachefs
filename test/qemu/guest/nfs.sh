@@ -127,6 +127,21 @@ trap cleanup EXIT
 
 echo "nfs.sh: kernel $(uname -r)"
 
+# Timers work (review M3). The `timeout 10 mount -t nfs4` guards below are
+# GNU timeout, which needs timer_create/alarm; with CONFIG_POSIX_TIMERS off
+# (an EXPERT-gated symbol tinyconfig turns off) it never fires and a hung
+# mount waits for the harness limit instead of failing after 10 s. GNU
+# timeout exits 124 when it kills its command.
+t0=$(date +%s)
+timeout 1 sleep 5
+rc=$?
+t1=$(date +%s)
+if [ "$rc" -eq 124 ] && [ $((t1 - t0)) -le 3 ]; then
+	pass timers-timeout-fires
+else
+	fail timers-timeout-fires "timeout 1 sleep 5: rc=$rc after $((t1 - t0))s (want 124 within 3s)"
+fi
+
 # --- helpers ---------------------------------------------------------------
 #
 # nfs.sh always mounts dcfs with --allow_other (nfsd needs it), so every
@@ -213,8 +228,8 @@ listing_matches() {
 	prefix_a=$3
 	dir_b=$4
 	prefix_b=$5
-	find_stat_tree "$dir_a" '%i %A %h %U %G %s %N' >/tmp/nfs_stat_a.txt
-	find_stat_tree "$dir_b" '%i %A %h %U %G %s %N' >/tmp/nfs_stat_b.txt
+	find_stat_tree "$dir_a" '%i %A %h %u %g %s %N' >/tmp/nfs_stat_a.txt
+	find_stat_tree "$dir_b" '%i %A %h %u %g %s %N' >/tmp/nfs_stat_b.txt
 	normalize_stat /tmp/nfs_stat_a.txt "$prefix_a" | sort >/tmp/nfs_stat_a_norm.txt
 	normalize_stat /tmp/nfs_stat_b.txt "$prefix_b" | sort >/tmp/nfs_stat_b_norm.txt
 	if diff -u /tmp/nfs_stat_a_norm.txt /tmp/nfs_stat_b_norm.txt >/tmp/nfs_stat_diff.txt; then

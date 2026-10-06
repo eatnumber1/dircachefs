@@ -14,39 +14,36 @@ FAILED=0
 KVER=$(uname -r)
 echo "boot.sh: kernel $KVER"
 
-# Step 3.1a: when booted with --//test/qemu:kernel=stock, this is
-# //third_party/linux:bzImage, the pinned upstream kernel (see
-# third_party/linux/README.md for the pin); check its version and that a
-# couple of third_party/linux/kernel.config's fragment options actually
-# took effect, by behavior (no /proc/config.gz: CONFIG_IKCONFIG is off, see
-# the fragment's size-minimization goals). Skipped entirely against the
-# default patched kernel, which has its own, different version.
+# The kernel is //third_party/linux:bzImage, the pinned upstream kernel
+# (see third_party/linux/README.md). Its kernel.config sets
+# CONFIG_LOCALVERSION="-dcfs-stock", so `uname -r` is "<pinned
+# version>-dcfs-stock": the build stamps its own identity and bumping the
+# pin needs no edit here, while any other kernel (a host kernel, a stale
+# build) fails. Options from kernel.config are checked by behavior (no
+# /proc/config.gz: CONFIG_IKCONFIG is off, see the fragment's
+# size-minimization goals).
 case "$KVER" in
-7.2.9*)
-	pass stock-kernel-version
-
-	# CONFIG_NAMESPACES + CONFIG_NET_NS/CONFIG_USER_NS: procfs only
-	# exposes a namespace's /proc/self/ns/<type> entry when that
-	# namespace type is actually compiled in.
-	if [ -e /proc/self/ns/net ] && [ -e /proc/self/ns/user ]; then
-		pass stock-kernel-namespaces
-	else
-		fail stock-kernel-namespaces "missing /proc/self/ns/{net,user}"
-	fi
-
-	# CONFIG_CGROUPS: mounting cgroup2 fails outright without it.
-	mkdir -p /cgroup_test
-	if mount -t cgroup2 cgroup2 /cgroup_test; then
-		pass stock-kernel-cgroups
-		umount /cgroup_test
-	else
-		fail stock-kernel-cgroups "mount -t cgroup2 failed"
-	fi
-	;;
-*)
-	echo "boot.sh: not the stock kernel, skipping stock-kernel-* checks"
-	;;
+[0-9]*.[0-9]*-dcfs-stock) pass stock-kernel-version ;;
+*) fail stock-kernel-version "uname -r is '$KVER', want <version>-dcfs-stock (the build in third_party/linux)" ;;
 esac
+
+# CONFIG_NAMESPACES + CONFIG_NET_NS/CONFIG_USER_NS: procfs only exposes a
+# namespace's /proc/self/ns/<type> entry when that namespace type is
+# actually compiled in.
+if [ -e /proc/self/ns/net ] && [ -e /proc/self/ns/user ]; then
+	pass stock-kernel-namespaces
+else
+	fail stock-kernel-namespaces "missing /proc/self/ns/{net,user}"
+fi
+
+# CONFIG_CGROUPS: mounting cgroup2 fails outright without it.
+mkdir -p /cgroup_test
+if mount -t cgroup2 cgroup2 /cgroup_test; then
+	pass stock-kernel-cgroups
+	umount /cgroup_test
+else
+	fail stock-kernel-cgroups "mount -t cgroup2 failed"
+fi
 
 # Step 4.4: busybox is now //third_party/busybox:busybox_build (pinned
 # 1.38.0, built by Bazel), not a host binary symlinked in by the removed
