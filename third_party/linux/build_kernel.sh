@@ -14,10 +14,10 @@
 #     fails the build if olddefconfig drops anything the fragment asked
 #     for (a symbol that silently stopped existing, or whose dependencies
 #     the fragment forgot);
-#   - uses flex and bison built by Bazel from the BCR (not whatever the
-#     host happens to have at /usr/bin/flex -- see README.md's "Hermetic
-#     build tools" for why conf's lexer.l/parser.y need them) and GNU bc
-#     built by Bazel from source (not in the BCR -- see third_party/bc/);
+#   - uses the host's flex and bison (conf's lexer.l/parser.y need them; the
+#     BCR builds of both were tried and reverted, see README.md's "Hermetic
+#     build tools" and "Remaining host tools") and GNU bc built by Bazel
+#     from source (not in the BCR -- see third_party/bc/);
 #   - still uses the host C compiler/binutils (gcc, ld, as, ar, ...) and
 #     host libelf/zlib headers: making those hermetic is left to Phase 7
 #     (the pinned LLVM toolchain) and a later pass -- see README.md's
@@ -31,11 +31,46 @@ OUT_BZIMAGE=$4
 OUT_LOG=$5
 JOBS=${6:-4}
 
-BUILD=$(mktemp -d)
+# Run the actual build in a child shell (re-executing this script), with
+# its output going to a log. This must NOT be written as
+# `{ ...; } >"$LOG" 2>&1 || { ...; }`: `set -e` is ignored inside any
+# command list followed by `||` (verified with a dash/bash repro, review
+# L1), which made every failure inside it silent and let the fragment
+# check "pass" after a failing olddefconfig. The child runs under a plain
+# `sh -eu`, so any failing command stops it, and the parent prints the log
+# to stderr on failure.
+if [ -z "${DCFS_KERNEL_BUILD_INNER:-}" ]; then
+	BUILD=$(mktemp -d)
+	# The out-of-tree build directory holds about 1 GB of objects: never
+	# leave it behind, whether the build succeeds or fails.
+	trap 'rm -rf "$BUILD"' EXIT
+	status=0
+	DCFS_KERNEL_BUILD_INNER=1 DCFS_KERNEL_BUILD_DIR=$BUILD \
+		sh -eu "$0" "$@" >"$BUILD/build.log" 2>&1 || status=$?
+	if [ "$status" -ne 0 ]; then
+		cat "$BUILD/build.log" >&2
+		echo "build_kernel.sh: FAILED (exit $status); log above" >&2
+		exit "$status"
+	fi
+	cp "$BUILD/arch/x86/boot/bzImage" "$OUT_BZIMAGE"
+	cp "$BUILD/build.log" "$OUT_LOG"
+	# The whole log is the :kernel_build target's kernel-build.log output;
+	# only its closing summary goes to Bazel's output.
+	tail -n 4 "$BUILD/build.log"
+	exit 0
+fi
+
+BUILD=$DCFS_KERNEL_BUILD_DIR
 TOOLBIN=$(mktemp -d)
-# The out-of-tree build directory holds about 1 GB of objects: never leave
-# it behind, whether the build succeeds or fails.
-trap 'rm -rf "$BUILD" "$TOOLBIN"' EXIT
+trap 'rm -rf "$TOOLBIN"' EXIT
+
+# Reproducible builds (review L10): no build time, user or host in the
+# kernel's version banner.
+KBUILD_BUILD_TIMESTAMP='Thu Jan  1 00:00:00 UTC 1970'
+KBUILD_BUILD_USER=dcfs
+KBUILD_BUILD_HOST=dcfs
+KBUILD_BUILD_VERSION=1
+export KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_USER KBUILD_BUILD_HOST KBUILD_BUILD_VERSION
 
 # Hermetic bc ahead of whatever the host has on PATH (see the header
 # comment above and README.md's "Hermetic build tools" / "Remaining host
@@ -45,7 +80,6 @@ ln -s "$(readlink -f "$BC")" "$TOOLBIN/bc"
 PATH="$TOOLBIN:$PATH"
 export PATH
 
-LOG="$BUILD/build.log"
 {
 	echo "dcfs stock test kernel build"
 	echo "source: $SRC_ROOT"
@@ -96,12 +130,4 @@ LOG="$BUILD/build.log"
 	size=$(stat -c '%s' "$BUILD/arch/x86/boot/bzImage")
 	echo "enabled config symbols: $after_yes (before olddefconfig's fill-in: $before_yes)"
 	echo "bzImage size: $size bytes"
-} >"$LOG" 2>&1 || {
-	status=$?
-	cat "$LOG" >&2
-	exit "$status"
-}
-
-cat "$LOG"
-cp "$BUILD/arch/x86/boot/bzImage" "$OUT_BZIMAGE"
-cp "$LOG" "$OUT_LOG"
+} 
