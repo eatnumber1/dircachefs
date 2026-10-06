@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>  // RENAME_NOREPLACE, RENAME_EXCHANGE
+#include <cstring>
 #include <fcntl.h>
 #include <linux/fs.h>  // FS_IOC_*
 #include <optional>
@@ -2243,6 +2244,24 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
     ABSL_ASSIGN_OR_RETURN(std::string out,
                           backing::IoctlFd(*fd, cmd, in, out_size));
     return req.ReplyIoctl(0, out);
+  }
+  // Step 23.7 (review M1): chattr +F (FS_CASEFOLD_FL) makes an empty
+  // directory case-insensitive on an ext4 with the casefold feature, and
+  // dcfs's cache, whose names are bytes, would then answer lookups the
+  // backing filesystem answers differently (Phase 16 refuses such
+  // directories). So a SETFLAGS that changes that flag is refused,
+  // EOPNOTSUPP (what a filesystem without casefold answers); the current
+  // flags come from the backing file. FSSETXATTR cannot change it: its
+  // xflags have no casefold bit, and the VFS keeps the other flags.
+  if (cmd == FS_IOC_SETFLAGS) {
+    int wanted = 0;
+    std::memcpy(&wanted, in.data(), std::min(in.size(), sizeof(wanted)));
+    ABSL_ASSIGN_OR_RETURN(std::string current,
+                          backing::IoctlFd(*fd, FS_IOC_GETFLAGS, "",
+                                           sizeof(int)));
+    int now = 0;
+    std::memcpy(&now, current.data(), sizeof(now));
+    if ((wanted ^ now) & FS_CASEFOLD_FL) return req.ReplyErrno(EOPNOTSUPP);
   }
   // A set changes the inode's flags and its ctime: a mutation of its
   // attributes (none for a removed object, which has no row: see Setattr).

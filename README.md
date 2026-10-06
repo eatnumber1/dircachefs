@@ -633,8 +633,9 @@ recovery protocol, concurrency, and the test strategy.
   `cp --reflink=auto` (coreutils' default) gets that. Of the other
   ioctls only `FS_IOC_GETFLAGS`/`FS_IOC_SETFLAGS` and
   `FS_IOC_FSGETXATTR`/`FS_IOC_FSSETXATTR` (`chattr`, `lsattr`) and
-  `FS_IOC_GETVERSION` reach the backing file; any other fails with
-  `ENOTTY`. `O_TMPFILE`, and linking such a file into a name, work. File
+  `FS_IOC_GETVERSION` reach the backing file (but `chattr +F`, which
+  would make a directory case-insensitive, fails with `EOPNOTSUPP`); any
+  other fails with `ENOTTY`. `O_TMPFILE`, and linking such a file into a name, work. File
   locks are handled by the kernel, locally within the mount.
 - **Filesystem coverage.** ext4, xfs and btrfs are all exercised by the
   test suite (step 5.2). ZFS is refused until it supports

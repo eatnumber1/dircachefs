@@ -93,6 +93,23 @@ echo "$FSTYPE FICLONE: $ref_clone"
 ref_flags=$("$TESTUTIL" getflags /src/ref/plain 2>&1)
 ref_fsx=$("$TESTUTIL" fsxattr /src/ref/plain 2>&1)
 ref_unknown=$("$TESTUTIL" ioctl-unknown /src/ref/plain 2>&1)
+# Step 23.7 (M1): on an ext4 with the casefold feature, chattr +F makes an
+# empty directory case-insensitive. The raw filesystem allows it; dcfs,
+# whose cache is case-sensitive, must refuse it.
+casefold=0
+if [ "$FSTYPE" = ext4 ]; then
+	if "$TESTUTIL" ext4-casefold /src >/tmp/casefold.out 2>&1; then
+		casefold=1
+		mkdir /src/ref/cf /src/cf
+		ref_cf=$("$TESTUTIL" getflags /src/ref/cf)
+		ref_cf_set=$("$TESTUTIL" setflags /src/ref/cf \
+			"$(printf '%x' $((0x$ref_cf | 0x40000000)))" 2>&1 &&
+			"$TESTUTIL" getflags /src/ref/cf)
+		echo "ext4 chattr +F on the raw filesystem: $ref_cf_set"
+	else
+		fail ext4-casefold "could not enable casefold: $(cat /tmp/casefold.out)"
+	fi
+fi
 echo "$FSTYPE flags: $ref_flags; fsxattr: $ref_fsx; $ref_unknown"
 for how in empty proc excl none; do
 	eval "ref_tmp_$how=\$(\"\$TESTUTIL\" tmpfile /src/ref t_$how $how 2>&1)"
@@ -192,6 +209,21 @@ kill "$HOLD_PID" 2>/dev/null || true
 wait "$HOLD_PID" 2>/dev/null || true
 "$TESTUTIL" setflags "$MNT/imm2" "$flags"
 expect_eq immutable-content-while-open "held" "$(cat /src/imm2)"
+
+# --- casefold (M1): chattr +F through dcfs is refused ---------------------------
+
+if [ "$casefold" -eq 1 ]; then
+	cf=$("$TESTUTIL" getflags "$MNT/cf")
+	expect_eq casefold-refused "ERR EOPNOTSUPP" \
+		"$("$TESTUTIL" setflags "$MNT/cf" "$(printf '%x' $((0x$cf | 0x40000000)))" 2>&1)"
+	expect_eq casefold-backing-unchanged "$cf" "$("$TESTUTIL" getflags /src/cf)"
+	# Other flags still go through.
+	expect_eq casefold-other-flags "" \
+		"$("$TESTUTIL" setflags "$MNT/cf" "$(printf '%x' $((0x$cf | 0x40)))" 2>&1)"
+	"$TESTUTIL" setflags "$MNT/cf" "$cf"
+else
+	skip casefold-refused "backing filesystem is $FSTYPE, not ext4"
+fi
 
 # --- O_TMPFILE ----------------------------------------------------------------
 

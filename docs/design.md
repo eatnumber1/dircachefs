@@ -1142,8 +1142,12 @@ Step 23.4.
   checking the caller's right to change the flags, and
   `FS_IOC_GETVERSION`. Their arguments are plain buffers. A set is a
   mutation of the object's attributes (its ctime changes): phase 1, the
-  ioctl, a refresh. Everything else, and anything from a 32-bit caller, is
-  `ENOTTY`. dcfs requests `FUSE_CAP_IOCTL_DIR` for directories.
+  ioctl, a refresh. A `SETFLAGS` that changes `FS_CASEFOLD_FL`
+  (`chattr +F`/`-F`) is refused with `EOPNOTSUPP` (review M1): on an ext4
+  with the casefold feature it would make a directory case-insensitive,
+  which dcfs's cache of byte names cannot follow (Phase 16 refuses such
+  directories); `FSSETXATTR` has no casefold bit. Everything else, and
+  anything from a 32-bit caller, is `ENOTTY`. dcfs requests `FUSE_CAP_IOCTL_DIR` for directories.
 - **Writable opens and the flags.** The backing filesystem decides at open
   time whether a file may be written (immutable, append-only, a read-only
   filesystem), and the kernel's check on the FUSE side does not see those

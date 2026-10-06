@@ -1547,6 +1547,12 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
   ASSERT_OK_AND_ASSIGN(attr, cache::GetAttr(ctx_, f));
   EXPECT_TRUE(attr.valid);
   EXPECT_EQ(Ioctl(12345, FS_IOC_GETFLAGS, "", sizeof(int)).error, -ESTALE);
+  // A change of the casefold flag is refused before the backing
+  // filesystem sees it (review M1), whatever it would say.
+  const int casefold = got | FS_CASEFOLD_FL;
+  std::string cf(reinterpret_cast<const char *>(&casefold), sizeof(casefold));
+  EXPECT_EQ(Ioctl(d, FS_IOC_SETFLAGS, cf, 0, FUSE_IOCTL_DIR).error,
+            -EOPNOTSUPP);
 }
 
 // --- relatime (step 23.3) ---------------------------------------------------
