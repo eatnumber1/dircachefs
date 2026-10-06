@@ -21,3 +21,4 @@ finding was later fixed test-first, assigned to a step, or decided against;
 - `review-2026-10-07-trace-validation-2.md`: re-review after 12.2b; one
   recorder bug (held lines dropped when a directory dies mid-listing) and
   two "failed" cuts that did not check the request's outcome.
+- `review-2026-10-07-phase23.md`: review of Phase 23 (stubs, removed objects, FORGET reconciliation, copy_file_range/ioctls/tmpfile, relatime).

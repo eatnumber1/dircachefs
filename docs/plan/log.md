@@ -613,3 +613,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   remote cache: dropped (hosting not worth it); prebuilt kernel: dropped for the same reason;
   Alpine linux-virt: no durable pin even per series (old apks vanish), equal KVM boot time, no
   DM_DUST: keep our kernel; chattr +i class -> a small second TLA+ module (12.3).
+- Phase 23 reviewed (audits/review-2026-10-07-phase23.md): no high findings; M1 SETFLAGS lets
+  chattr +F create a casefold dir under dcfs; M2 DESTROY reconciliation cost and the
+  live-mapping-after-unmount case; lows on shared-fd writability, stub errnos, stale stub ESTALE,
+  orphan tmpfile rows, atime docs. NOT yet merged: the lane's rebase onto main conflicts in two
+  plan files the agent also edited; the agent resolves it, then I merge. 23.6 + 23.7 follow.
+- Orchestrator error: a merge command chain continued past a failed rebase and ran its later steps
+  inside lane-1 (a stray detached commit; aborted, nothing lost). Merges are now one command per
+  step, never chained past a rebase.

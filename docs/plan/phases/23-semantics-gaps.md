@@ -118,3 +118,32 @@ written-then-forgotten file (drop_caches) showing zero backing reads at
 the FORGET (fails with 23.1's statx when the inode is cold: prove it with
 a cold backing, e.g. after dropping the backing fs's caches via a second
 drop or dm-delay timing).
+
+## 23.7 Review fixes (audits/review-2026-10-07-phase23.md)
+
+- M1: refuse SETFLAGS/FSSETXATTR that change FS_CASEFOLD_FL (EOPNOTSUPP;
+  compare with a GETFLAGS first); test with an ext4 made `-O casefold`.
+- M2: with 23.6's held fds the DESTROY reconciliation is fstatx per held
+  fd (no disk); measure it with 100k written files and bound it; document
+  the live-mapping-after-unmount case (libfuse aborts the connection and
+  unmounts lazily; stores after that reach the backing file; the next run
+  cannot know) in README and design.md, next to the held-fd rationale.
+- L1: when the writability check passes and the shared fd is not
+  writable, keep the reopened (or an O_RDWR) fd as the shared fd, so
+  copy_file_range and fallocate work; avoid the extra open/close side
+  effects where possible.
+- L2: stub errnos: RMDIR/UNLINK of a stub EBUSY (as a mount point), LINK of
+  a stub EXDEV as design.md says, RefuseStub's log names the errno it
+  returns; tests for every refused op on a stub.
+- L3: RefuseStub returns ESTALE when the stub row is gone.
+- L4/L6/L8 docs: stub attributes "as of the last probe"; atime exempt from
+  the mirror rule (+A ignored, private opens move it, not recovered after
+  power loss); 32-bit programs without large-file support get EOVERFLOW
+  listing a directory with a stub.
+- L5: a startup sweep deletes tmpfile rows left by a crash; the undo path
+  removes its RecordTmpfile row.
+- L7: StatWritten returns its first statx; RefreshAttrs reuses the fd;
+  TouchAtime reads before it writes.
+- Tests: fix the two over-claiming comments; `handle-boundary-stub-decodes`
+  must actually evict the dentry; `rename-stub-exdev` gets a check_cold;
+  the recorder maps a read-only GETFLAGS on D to no cut.
