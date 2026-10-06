@@ -167,3 +167,28 @@ hashes in the repo make a prebuilt exactly as trusted as the source pin,
 whereas a remote cache is trusted only if uploads are restricted to CI; (3)
 whether the source-build fallback must stay green in CI (cost: one cold job
 per pin change); (4) how many lanes the host may run at once.
+
+## Pending measurements added 2026-10-07 (russ's question: a minimal distro kernel?)
+
+Evaluate prebuilt, distribution-maintained guest kernels against our
+3.4 MB tinyconfig build, measured, no change until russ has seen the
+numbers:
+- Alpine `linux-virt` (the VM-specific kernel): version in the current
+  branch; which of our required options are built in, modules, or off
+  (FUSE_PASSTHROUGH, DM_LOG_WRITES/DELAY/FLAKEY/DUST, XFS, BTRFS, NFSD,
+  NFS client, UNICODE/casefold, FS_ENCRYPTION, POSIX_TIMERS, cgroups and
+  the rest of third_party/linux/kernel.config); initramfs size with the
+  needed modules; boot-to-init time under KVM and TCG; pin durability
+  (Alpine mirrors replace updated packages and have no snapshot service:
+  can a pinned .apk still be fetched after the package is updated, or do
+  we have to mirror it ourselves?).
+- Debian 13 `linux-image-amd64` from the snapshot service (durable,
+  already how the test image is pinned): the same checks; expected larger
+  and slower to boot.
+- Firecracker's published microvm kernel configs as a reference for a
+  minimal VM configuration (binaries are not a maintained distribution).
+- Tiny Core: noted and not recommended (small team, lagging versions,
+  mirror rot).
+Decision criteria: boot time per guest times about 100 guests per full
+run, versus 9-40 min of cold kernel build; the version matrix (minimum
+and latest stable) still needs at least one kernel we build.
