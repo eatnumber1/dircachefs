@@ -86,6 +86,17 @@ Phase 15.4's remaining items (the bind form's recorded mount points)
 there. Tests: the Phase 15.1 stub tests, written now, failing today
 (`ls` shows the subvolume, `ls sub/` gives ENOTSUP not EXDEV).
 
+**Done (2026-10-07, step-23 branch).** Schema v4 `stubs` table (nodeid
+from 2^63 up, random generation, the boundary root's attributes; triggers
+keep it exactly as long as its dentry is refused), `ListDir` merges stubs
+in rowid order, `DirCacheFS::RefuseStub` (ENOTSUP, EXDEV across, logged
+once per stub), `RefuseReservedIno` for backing inode numbers >= 2^63.
+Tests: `boundary_test` (ext4/xfs/btrfs, mount and subvolume, restart),
+`dir_cache_fs_test` Boundary*/BackingInodeNumbers*, cache and migration
+tests; readonly/create/handles/rename/nfs updated. Deviation from 15.1's
+text: a link or rename *into* a stub fails ENOTSUP, not EXDEV, because the
+kernel looks the target name up in the stub first (EXDEV is what renaming
+the stub itself, and a forged RENAME/LINK into it, get).
 ## 23.6 Held fd instead of a statx at FORGET (russ, 2026-10-07)
 
 Replace 23.1's statx-by-handle at the last FORGET with an fd dcfs keeps

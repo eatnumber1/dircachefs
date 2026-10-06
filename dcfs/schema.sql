@@ -1,4 +1,4 @@
--- dcfs schema v3 (see kSchemaVersion in dcfs/migrate.h for the history;
+-- dcfs schema v4 (see kSchemaVersion in dcfs/migrate.h for the history;
 -- Migrate() upgrades older databases in place).
 --
 -- Executed as a script against a fresh database by Migrate() (see
@@ -104,10 +104,10 @@ CREATE TABLE inodes (
 --   unknown  nothing is known about the name (e.g. phase 1 of a mutation
 --            that is about to change it; its inode row was deleted);
 --   refused  the name exists on the backing filesystem but dcfs refuses to
---            cache it (a mount point or subvolume boundary below --source;
---            see amendment 12 and README.md's Limitations): it must never
---            be reported absent (ENOENT); backing::LookupOrPopulate reports
---            EXDEV for it instead.
+--            cache what is behind it (a mount point or subvolume boundary
+--            below --source; see amendment 12 and README.md's
+--            Limitations): it is served as a stub directory (its `stubs`
+--            row) and must never be reported absent (ENOENT).
 -- A name with no row is absent if its directory's children_complete is set,
 -- unknown otherwise. Deliberately an ordinary rowid table, not WITHOUT
 -- ROWID: the readdir cursor is defined as a dentry's rowid, so the implicit
@@ -139,12 +139,64 @@ CREATE INDEX dentries_inode ON dentries (inode);
 -- are indexed by, or SQLite will not use the index.
 CREATE INDEX dentries_present ON dentries (parent) WHERE state = 'present';
 CREATE INDEX dentries_unknown ON dentries (parent) WHERE state = 'unknown';
+-- The stubs a listing shows next to the present names (cache::ListDir
+-- merges the two in rowid order); a directory rarely has any.
+CREATE INDEX dentries_refused ON dentries (parent) WHERE state = 'refused';
 
 -- Deleting an inode row (an invalidation, or a cascade from its
 -- filesystem's row) forgets what it was, not the names that led to it:
 -- those become unknown, never absent (audit F8).
 CREATE TRIGGER inodes_delete_unknowns BEFORE DELETE ON inodes BEGIN
   UPDATE dentries SET state = 'unknown', inode = NULL WHERE inode = OLD.id;
+END;
+
+-- The stub directory a refused dentry is served as (step 23.5; docs/
+-- design.md, "Boundaries"): a row here exists exactly while dentry
+-- (parent, name) is 'refused'. cache::SetRefused writes both in one
+-- transaction; the triggers below delete the stub whenever the dentry
+-- stops being refused or goes, and the foreign key with its parent.
+--   id        the stub's FUSE nodeid (and the inode number it reports),
+--             from the range at or above 2^63, which no backing inode
+--             number may use (backing.cc refuses one): as a signed 64-bit
+--             SQLite integer, always negative. Kept for as long as the
+--             dentry stays refused, across restarts.
+--   fuse_gen  its FUSE generation: random, nonzero, as inodes.fuse_gen.
+--   the attribute columns: the boundary root's statx when the name was
+--             last probed. Nothing dcfs does changes them (every operation
+--             on the stub but a read is refused), so they need no unknown
+--             state of their own: the dentry's state is the record.
+CREATE TABLE stubs (
+  id INTEGER PRIMARY KEY CHECK (id < 0),
+  parent INTEGER NOT NULL REFERENCES inodes (id) ON DELETE CASCADE,
+  name BLOB NOT NULL,
+  fuse_gen INTEGER NOT NULL,
+  mode INTEGER NOT NULL,
+  nlink INTEGER NOT NULL,
+  uid INTEGER NOT NULL,
+  gid INTEGER NOT NULL,
+  rdev INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  blocks INTEGER NOT NULL,
+  blksize INTEGER NOT NULL,
+  atime_s INTEGER NOT NULL,
+  atime_ns INTEGER NOT NULL,
+  mtime_s INTEGER NOT NULL,
+  mtime_ns INTEGER NOT NULL,
+  ctime_s INTEGER NOT NULL,
+  ctime_ns INTEGER NOT NULL,
+  btime_s INTEGER NOT NULL,
+  btime_ns INTEGER NOT NULL,
+  UNIQUE (parent, name)
+) STRICT;
+
+CREATE TRIGGER dentries_unrefused AFTER UPDATE OF state ON dentries
+    WHEN OLD.state = 'refused' AND NEW.state != 'refused' BEGIN
+  DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
+END;
+
+CREATE TRIGGER dentries_refused_deleted AFTER DELETE ON dentries
+    WHEN OLD.state = 'refused' BEGIN
+  DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
 END;
 
 -- epoch: bumped by every write that clears children_complete, so that a

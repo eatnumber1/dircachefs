@@ -13,8 +13,9 @@
 # second filesystem: dcfs refuses to start at all with vdc already mounted
 # below --source (startup-refuses-submount), and refuses a boundary that
 # appears at runtime -- vdc mounted below --source after dcfs is already
-# running -- without caching it (boundary-*): see README's Limitations and
-# dcfs/backing.cc's ProbeChild/PopulateDirectory.
+# running -- without caching what is behind it: it is a stub directory
+# (step 23.5; boundary-*, and boundary.sh for the rest): see README's
+# Limitations and dcfs/backing.cc's ProbeChild/PopulateDirectory.
 #
 # Uses only busybox applets/options (verified against the exact busybox
 # baked into the initramfs: `busybox --list`, `busybox <applet> --help`) --
@@ -168,8 +169,9 @@ fi
 
 # --- boundary-*: a filesystem mounted below the source at runtime (rather
 # than already there at startup, checked above) is refused the moment dcfs
-# first lists the directory it appears in, not cached, and never listed --
-# see README's Limitations / dcfs/backing.cc's
+# first lists the directory it appears in: nothing behind it is cached, and
+# it is listed as a stub directory, inside which everything is ENOTSUP
+# (step 23.5) -- see README's Limitations / dcfs/backing.cc's
 # ProbeChild/PopulateDirectory. "d" is deliberately never listed through
 # dcfs before "mp" is mounted under it: a directory dcfs already cached
 # complete (e.g. "sub" above, a plain empty directory once vdc is
@@ -181,16 +183,22 @@ mkdir /src/d/mp
 mount /dev/vdc /src/d/mp
 listing=$(ls -1 "$MNT/d" 2>&1)
 case "$listing" in
-*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
-*) pass boundary-not-listed ;;
+*mp*) pass boundary-listed-as-stub ;;
+*) fail boundary-listed-as-stub "mp missing from /mnt/d: $listing" ;;
 esac
-out=$(stat "$MNT/d/mp" 2>&1)
+out=$(stat -c %F "$MNT/d/mp" 2>&1)
+if [ "$out" = "directory" ]; then
+	pass boundary-stat-stub
+else
+	fail boundary-stat-stub "want a directory, got: $out"
+fi
+out=$(ls "$MNT/d/mp/" 2>&1)
 if [ $? -eq 0 ]; then
-	fail boundary-stat-exdev "unexpectedly succeeded"
+	fail boundary-inside-enotsup "unexpectedly succeeded: $out"
 else
 	case "$out" in
-	*"cross-device"*) pass boundary-stat-exdev ;;
-	*) fail boundary-stat-exdev "want EXDEV (cross-device), got: $out" ;;
+	*"not supported"*) pass boundary-inside-enotsup ;;
+	*) fail boundary-inside-enotsup "want ENOTSUP, got: $out" ;;
 	esac
 fi
 errors=$(grep -c "refusing to cache mp" "$LOG1")
@@ -241,8 +249,8 @@ fi
 
 # "d" is excluded: it exists only to host the boundary-* checks above, and
 # by this point /src/d/mp (real, on vdb, once vdc was unmounted) and the
-# cached /mnt/d (permanently missing "mp": see boundary-not-listed above)
-# have deliberately diverged, which is the whole point of those checks --
+# cached /mnt/d (where "mp" stays a stub: see boundary-* above) have
+# deliberately diverged, which is the whole point of those checks --
 # see the README's Coherence section on why dcfs never revisits a directory
 # it has already cached complete.
 find /src -path /src/d -prune -o -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/src_stat.txt

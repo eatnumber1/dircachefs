@@ -253,7 +253,8 @@ absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id);
 struct Populated {
   // Whether `dir`'s listing was recorded (and `dir` is now complete).
   bool cached = false;
-  // Every name listed: kFound with the child's row, or kRefused.
+  // Every name listed: kFound with the child's row, or kRefused with its
+  // stub (id 0 if the listing was not recorded: no stub was).
   absl::flat_hash_map<std::string, cache::LookupResult> entries;
 };
 absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir);
@@ -261,7 +262,13 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir);
 // Looks `name` up in `parent`, resolving it from the backing filesystem if
 // the cache cannot answer: by ResolveName if `parent`'s listing is
 // complete (only `name` is unknown), else by populating `parent`. Never
-// returns kUnknown.
+// returns kUnknown. A refused boundary is kRefused with its stub; if its
+// stub could not be recorded (a concurrent mutation of `parent` kept the
+// listing or probe from recording anything), EAGAIN.
+//
+// Every object it records is checked against the backing inode numbers
+// reserved for stubs (>= 2^63): one in that range fails the lookup (and
+// the listing that met it) with ENOTSUP, logged at ERROR.
 absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                                                      InodeId parent,
                                                      std::string_view name);
@@ -278,8 +285,9 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir);
 // PopulateDirectory probes each child) and records it as present, absent
 // or refused -- a fill (see cache::CanFill): nothing is recorded about
 // `parent`'s dentry if a mutation of `parent` ran concurrently. Returns
-// kFound or kNegative, or EXDEV for a refused boundary. Used for an
-// unknown name in an otherwise complete listing (audit F7).
+// kFound, kNegative or kRefused (with its stub, or 0 if nothing could be
+// recorded). Used for an unknown name in an otherwise complete listing
+// (audit F7).
 absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
                                                 std::string_view name);
 

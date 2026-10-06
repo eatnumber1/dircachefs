@@ -111,11 +111,12 @@ absl::Status MarkIncomplete(Context &ctx, InodeId dir) {
 // The attribute columns, in the order BindAttrs() binds them. A macro
 // (rather than a constant) so it can be spliced into SQL string literals,
 // which keeps each statement's text a compile-time constant.
-#define DCFS_ATTR_ASSIGNMENTS                                              \
-  "attrs_valid = 1, mode = ?, nlink = ?, uid = ?, gid = ?, rdev = ?, "     \
+#define DCFS_ATTR_VALUES                                                   \
+  "mode = ?, nlink = ?, uid = ?, gid = ?, rdev = ?, "                      \
   "size = ?, blocks = ?, blksize = ?, atime_s = ?, atime_ns = ?, "         \
   "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, "    \
   "btime_ns = ?"
+#define DCFS_ATTR_ASSIGNMENTS "attrs_valid = 1, " DCFS_ATTR_VALUES
 #define DCFS_ATTR_COLUMNS                                                  \
   "mode, nlink, uid, gid, rdev, size, blocks, blksize, atime_s, atime_ns, " \
   "mtime_s, mtime_ns, ctime_s, ctime_ns, btime_s, btime_ns"
@@ -176,7 +177,9 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
       Query(ctx,
-            "SELECT state, inode FROM dentries WHERE parent = ? AND name = ?",
+            "SELECT d.state, d.inode, s.id FROM dentries d "
+            "LEFT JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
+            "WHERE d.parent = ? AND d.name = ?",
             parent, Blob(name)));
   LookupResult result;
   ABSL_ASSIGN_OR_RETURN(
@@ -187,7 +190,12 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
         } else if (state == "absent") {
           result = {LookupResult::kNegative, 0};
         } else if (state == "refused") {
-          result = {LookupResult::kRefused, 0};
+          // schema.sql: a refused dentry always has its stub.
+          std::optional<int64_t> stub = row.Column<std::optional<int64_t>>(2);
+          RET_CHECK(stub.has_value())
+              << "refused dentry " << EscapeBytes(name) << " of " << parent
+              << " has no stub";
+          result = {LookupResult::kRefused, *stub};
         } else {
           RET_CHECK_EQ(state, "unknown") << "bad dentries.state";
           result = {LookupResult::kUnknown, 0};
@@ -241,6 +249,45 @@ absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id) {
   return attr;
 }
 
+absl::StatusOr<StubRow> GetStub(Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx,
+            "SELECT parent, name, fuse_gen, " DCFS_ATTR_COLUMNS
+            " FROM stubs WHERE id = ?",
+            id));
+  StubRow stub;
+  ABSL_ASSIGN_OR_RETURN(
+      bool found, ReadOne(*stmt, [&](Statement &row) -> absl::Status {
+        stub.id = id;
+        stub.parent = row.Column<int64_t>(0);
+        stub.name = row.Column<std::string>(1);
+        CachedAttr &attr = stub.attr;
+        attr.valid = true;
+        attr.fuse_gen = static_cast<uint32_t>(row.Column<int64_t>(2));
+        attr.backing_ino = static_cast<uint64_t>(id);
+        struct stat &st = attr.st;
+        st.st_ino = static_cast<ino_t>(static_cast<uint64_t>(id));
+        st.st_mode = row.Column<int64_t>(3);
+        st.st_nlink = row.Column<int64_t>(4);
+        st.st_uid = row.Column<int64_t>(5);
+        st.st_gid = row.Column<int64_t>(6);
+        st.st_rdev = row.Column<uint64_t>(7);
+        st.st_size = row.Column<int64_t>(8);
+        st.st_blocks = row.Column<int64_t>(9);
+        st.st_blksize = row.Column<int64_t>(10);
+        st.st_atim = {row.Column<int64_t>(11), row.Column<int64_t>(12)};
+        st.st_mtim = {row.Column<int64_t>(13), row.Column<int64_t>(14)};
+        st.st_ctim = {row.Column<int64_t>(15), row.Column<int64_t>(16)};
+        attr.btime = {row.Column<int64_t>(17), row.Column<int64_t>(18)};
+        return absl::OkStatus();
+      }));
+  if (!found) {
+    return absl::NotFoundError(absl::StrCat("no boundary stub ", id));
+  }
+  return stub;
+}
+
 CachedAttr WithStatx(CachedAttr attr, const struct statx &stx) {
   struct stat &st = attr.st;
   st.st_mode = stx.stx_mode;
@@ -281,12 +328,20 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
   std::vector<Entry> batch;
   while (true) {
     batch.clear();
+    // Present names and stubs, merged in rowid order. Each half keeps the
+    // literal state of its partial index (dentries_present,
+    // dentries_refused; see schema.sql), so each is a range scan with no
+    // sort, and the merge reads only as far as the LIMIT.
     ABSL_ASSIGN_OR_RETURN(
         Statement * stmt,
         Query(ctx,
               "SELECT rowid, name, inode FROM dentries "
-              "WHERE parent = ? AND rowid > ? AND state = 'present' "
-              "ORDER BY rowid LIMIT ?",
+              "WHERE parent = ?1 AND rowid > ?2 AND state = 'present' "
+              "UNION ALL "
+              "SELECT d.rowid, d.name, s.id FROM dentries d "
+              "JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
+              "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'refused' "
+              "ORDER BY 1 LIMIT ?3",
               dir, cursor, kListDirBatch));
     ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
       batch.push_back({row.Column<int64_t>(0), row.Column<std::string>(1),
@@ -748,11 +803,61 @@ absl::Status SetNegative(Context &ctx, InodeId parent, std::string_view name) {
   });
 }
 
-absl::Status SetRefused(Context &ctx, InodeId parent, std::string_view name) {
-  return ctx.db.Transaction([&]() -> absl::Status {
+absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
+                                   std::string_view name,
+                                   const struct statx &root) {
+  InodeId stub = 0;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
-    return PutDentry(ctx, parent, name, "refused", std::nullopt);
-  });
+    // Before the stub: a dentry that was not refused yet must not take an
+    // old stub of the same name with it (the triggers), and one that was
+    // keeps its stub (an upsert that leaves the state 'refused' fires
+    // neither trigger).
+    ABSL_RETURN_IF_ERROR(PutDentry(ctx, parent, name, "refused", std::nullopt));
+    ABSL_ASSIGN_OR_RETURN(
+        Statement * existing,
+        Query(ctx, "SELECT id FROM stubs WHERE parent = ? AND name = ?",
+              parent, Blob(name)));
+    ABSL_ASSIGN_OR_RETURN(bool found,
+                          ReadOne(*existing, [&](Statement &row) {
+                            stub = row.Column<int64_t>(0);
+                            return absl::OkStatus();
+                          }));
+    if (found) {
+      ABSL_ASSIGN_OR_RETURN(
+          Statement * update,
+          ctx.db.Prepared("UPDATE stubs SET " DCFS_ATTR_VALUES
+                          " WHERE id = ?"));
+      ABSL_RETURN_IF_ERROR(BindAttrs(*update, 1, root));
+      ABSL_RETURN_IF_ERROR(update->Bind(1 + kNumAttrColumns, stub));
+      return update->ExecuteOnce();
+    }
+    // The next nodeid up from kFirstStubId (2^63). Ids of stubs that went
+    // may come back; the random generation tells their holders apart.
+    ABSL_ASSIGN_OR_RETURN(Statement * next,
+                          Query(ctx, "SELECT MAX(id) FROM stubs"));
+    std::optional<int64_t> max;
+    ABSL_RETURN_IF_ERROR(ReadOne(*next, [&](Statement &row) {
+                           max = row.Column<std::optional<int64_t>>(0);
+                           return absl::OkStatus();
+                         }).status());
+    if (max.has_value() && *max == -1) {
+      return absl::ResourceExhaustedError("no boundary stub nodeid left");
+    }
+    stub = max.has_value() ? *max + 1 : kFirstStubId;
+    const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed,
+                                            ctx.rng, uint32_t{1}, UINT32_MAX);
+    ABSL_ASSIGN_OR_RETURN(
+        Statement * insert,
+        ctx.db.Prepared("INSERT INTO stubs (id, parent, name, fuse_gen, "
+                        DCFS_ATTR_COLUMNS ") VALUES (?, ?, ?, ?, "
+                        DCFS_ATTR_PLACEHOLDERS ")"));
+    ABSL_RETURN_IF_ERROR(insert->BindAll(stub, parent, Blob(name),
+                                         static_cast<int64_t>(fuse_gen)));
+    ABSL_RETURN_IF_ERROR(BindAttrs(*insert, 5, root));
+    return insert->ExecuteOnce();
+  }));
+  return stub;
 }
 
 absl::Status UnlinkDentry(Context &ctx, InodeId parent, std::string_view name) {
@@ -1483,6 +1588,7 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
 }
 
 #undef DCFS_ATTR_ASSIGNMENTS
+#undef DCFS_ATTR_VALUES
 #undef DCFS_ATTR_COLUMNS
 #undef DCFS_ATTR_PLACEHOLDERS
 

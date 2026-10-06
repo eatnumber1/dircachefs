@@ -145,14 +145,80 @@ TEST_F(MigrateTest, V2DatabaseGainsTheReaddirIndexes) {
               IsOk());
 
   ASSERT_THAT(Migrate(db_, root), IsOk());
-  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(3));
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
   EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'index' AND name IN "
                              "('dentries_present', 'dentries_unknown')"),
               IsOkAndHolds(2));
   EXPECT_THAT(CountRows(db_, "dentries"), IsOkAndHolds(1));
   // Opening it again is a no-op.
   EXPECT_THAT(Migrate(db_, root), IsOk());
-  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(3));
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
+}
+
+// Step 23.5: a v3 cache gains the stubs table, its triggers and index, and
+// its refused dentries (which had no stub) become unknown, never absent.
+TEST_F(MigrateTest, V3DatabaseGainsStubsAndForgetsItsRefusals) {
+  RootIdentity root = TestRoot();
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  ASSERT_THAT(db_.ExecScript("DROP TRIGGER dentries_unrefused; "
+                             "DROP TRIGGER dentries_refused_deleted; "
+                             "DROP TABLE stubs; "
+                             "DROP INDEX dentries_refused; "
+                             "UPDATE cache_state SET schema_version = 3;"),
+              IsOk());
+  ASSERT_THAT(db_.Exec("INSERT INTO dentries (parent, name, state, inode) "
+                       "VALUES (1, x'6d70', 'refused', NULL), "
+                       "(1, x'61', 'absent', NULL)"),
+              IsOk());
+
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(4));
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name IN ('stubs', "
+                             "'dentries_refused', 'dentries_unrefused', "
+                             "'dentries_refused_deleted')"),
+              IsOkAndHolds(4));
+  EXPECT_THAT(CountRows(db_, "dentries WHERE name = x'6d70' AND "
+                             "state = 'unknown'"),
+              IsOkAndHolds(1));
+  EXPECT_THAT(CountRows(db_, "dentries WHERE name = x'61' AND "
+                             "state = 'absent'"),
+              IsOkAndHolds(1));
+}
+
+// The stubs triggers: a stub goes when its dentry stops being refused,
+// when the dentry is deleted, and with its parent.
+TEST_F(MigrateTest, StubsGoWithTheirRefusals) {
+  ASSERT_THAT(Migrate(db_, TestRoot()), IsOk());
+  auto add = [&](std::string_view name_hex, int64_t id) {
+    ASSERT_THAT(db_.Exec(absl::StrCat(
+                    "INSERT INTO dentries (parent, name, state, inode) "
+                    "VALUES (1, x'", name_hex, "', 'refused', NULL)")),
+                IsOk());
+    ASSERT_THAT(db_.Exec(absl::StrCat(
+                    "INSERT INTO stubs VALUES (", id, ", 1, x'", name_hex,
+                    "', 7, 16877, 2, 0, 0, 0, 0, 0, 4096, "
+                    "0, 0, 0, 0, 0, 0, 0, 0)")),
+                IsOk());
+  };
+  add("61", -9223372036854775807 - 1);
+  add("62", -9223372036854775807);
+  ASSERT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(2));
+  ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'unknown' "
+                       "WHERE name = x'61'"),
+              IsOk());
+  EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(1));
+  ASSERT_THAT(db_.Exec("DELETE FROM dentries WHERE name = x'62'"), IsOk());
+  EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(0));
+  // A refused dentry staying refused keeps its stub.
+  add("63", -9223372036854775807 + 1);
+  ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'refused' "
+                       "WHERE name = x'63'"),
+              IsOk());
+  EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(1));
+  // Nodeids below 2^63 (non-negative) are not stubs'.
+  EXPECT_FALSE(db_.Exec("INSERT INTO stubs VALUES (5, 1, x'64', 7, 16877, "
+                        "2, 0, 0, 0, 0, 0, 4096, 0, 0, 0, 0, 0, 0, 0, 0)")
+                   .ok());
 }
 
 TEST_F(MigrateTest, WrongSchemaVersionFailsPrecondition) {

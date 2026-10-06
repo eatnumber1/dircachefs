@@ -200,6 +200,18 @@ absl::Status DirCacheFS::Destroy() {
 }
 
 absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
+  if (cache::IsStub(id)) {
+    // A stub's row (the reads that list it need its type and number);
+    // every op that would change it refuses it before getting here.
+    absl::StatusOr<cache::StubRow> stub = cache::GetStub(ctx_, id);
+    if (!stub.ok() && absl::IsNotFound(stub.status())) {
+      return dcfs::ErrnoToStatus(
+          ESTALE, absl::StrCat("no boundary stub for nodeid ",
+                               static_cast<uint64_t>(id)));
+    }
+    if (!stub.ok()) return stub.status();
+    return stub->attr;
+  }
   absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
   if (!attr.ok() && absl::IsNotFound(attr.status()) &&
       id != cache::kRootInode) {
@@ -264,7 +276,34 @@ absl::Status DirCacheFS::RetireRemoved(InodeId id,
   return absl::OkStatus();
 }
 
+absl::StatusOr<fuse_entry_param> DirCacheFS::StubEntry(InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
+  fuse_entry_param entry{};
+  entry.ino = static_cast<fuse_ino_t>(id);
+  entry.generation = attr.fuse_gen;
+  entry.attr = attr.st;
+  entry.attr_timeout = absl::ToDoubleSeconds(opts_.attr_timeout);
+  entry.entry_timeout = absl::ToDoubleSeconds(opts_.entry_timeout);
+  return entry;
+}
+
+absl::Status DirCacheFS::RefuseStub(FuseRequest &req, InodeId id,
+                                    std::string_view op, int err) {
+  if (stubs_logged_.insert(id).second) {
+    absl::StatusOr<cache::StubRow> stub = cache::GetStub(ctx_, id);
+    LOG(ERROR) << "refusing " << op << " on or inside the boundary stub "
+               << (stub.ok() ? EscapeBytes(stub->name) : "(gone)")
+               << " (nodeid " << static_cast<uint64_t>(id) << ", in directory "
+               << (stub.ok() ? stub->parent : 0) << ") with "
+               << (err == EXDEV ? "EXDEV" : "ENOTSUP")
+               << ": a mount point or subvolume boundary, which one dcfs "
+                  "does not cross (see README); logged once per stub";
+  }
+  return req.ReplyErrno(err);
+}
+
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
+  if (cache::IsStub(id)) return StubEntry(id);
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
   ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
 
@@ -472,6 +511,7 @@ absl::Status DirCacheFS::Setattr(
     FuseRequest &req, fuse_ino_t ino, struct stat *attr, int to_set,
     fuse_file_info *fi) {
   InodeId id = static_cast<InodeId>(ino);
+  if (cache::IsStub(id)) return RefuseStub(req, id, "setattr");
 
   // Confirm this nodeid still has a row before changing anything (a
   // missing row is a stale nodeid: ESTALE, see RequireAttr). `fi` is not
@@ -526,6 +566,13 @@ absl::Status DirCacheFS::Lookup(
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(parent));
     return ReplyEntry(req, entry);
   }
+  if (cache::IsStub(parent)) {
+    if (name != "..") return RefuseStub(req, parent, "lookup");
+    absl::StatusOr<cache::StubRow> stub = cache::GetStub(ctx_, parent);
+    if (!stub.ok()) return RequireAttr(parent).status();  // ESTALE
+    ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(stub->parent));
+    return ReplyEntry(req, entry);
+  }
   if (name == "..") {
     ABSL_ASSIGN_OR_RETURN(InodeId up, backing::ParentOf(ctx_, parent));
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(up));
@@ -537,9 +584,10 @@ absl::Status DirCacheFS::Lookup(
   if (result.kind == cache::LookupResult::kNegative) {
     return req.ReplyNegativeEntry(opts_.entry_timeout);
   }
-  // LookupOrPopulate never returns kUnknown -- it always resolves to either
-  // a positive or a (possibly freshly-cached) negative entry.
-  RET_CHECK_EQ(result.kind, cache::LookupResult::kFound);
+  // LookupOrPopulate never returns kUnknown -- it always resolves to a
+  // positive entry, a (possibly freshly-cached) negative one, or a refused
+  // boundary with its stub (EntryFor answers a stub from its row).
+  RET_CHECK_NE(result.kind, cache::LookupResult::kUnknown);
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(result.id));
   return ReplyEntry(req, entry);
 }
@@ -590,6 +638,7 @@ void DirCacheFS::ForgetMulti(
 
 absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
   InodeId id = static_cast<InodeId>(ino);
+  if (cache::IsStub(id)) return RefuseStub(req, id, "readlink");
   if (auto it = removed_.find(id); it != removed_.end()) {
     ABSL_ASSIGN_OR_RETURN(std::string target,
                           backing::ReadSymlinkFd(*it->second.fd));
@@ -617,6 +666,7 @@ absl::Status DirCacheFS::Mknod(
     FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
     mode_t mode, dev_t rdev) {
   InodeId parent = static_cast<InodeId>(parent_ino);
+  if (cache::IsStub(parent)) return RefuseStub(req, parent, "mknod");
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
@@ -631,6 +681,7 @@ absl::Status DirCacheFS::Mkdir(
     FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
     mode_t mode) {
   InodeId parent = static_cast<InodeId>(parent_ino);
+  if (cache::IsStub(parent)) return RefuseStub(req, parent, "mkdir");
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
@@ -663,6 +714,9 @@ absl::Status DirCacheFS::Rmdir(
 
 absl::Status DirCacheFS::RemoveChild(
     FuseRequest &req, InodeId parent, std::string_view name, bool is_dir) {
+  if (cache::IsStub(parent)) {
+    return RefuseStub(req, parent, is_dir ? "rmdir" : "unlink");
+  }
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
@@ -693,6 +747,10 @@ absl::Status DirCacheFS::RemoveChild(
                               child.kind != cache::LookupResult::kNegative);
     if (child.kind == cache::LookupResult::kNegative) {
       return req.ReplyErrno(ENOENT);
+    }
+    // A boundary stub: removing it would cross the boundary.
+    if (child.kind == cache::LookupResult::kRefused) {
+      return RefuseStub(req, child.id, is_dir ? "rmdir" : "unlink", EXDEV);
     }
     RET_CHECK_EQ(child.kind, cache::LookupResult::kFound);
 
@@ -749,6 +807,7 @@ absl::Status DirCacheFS::Symlink(
     FuseRequest &req, std::string_view link, fuse_ino_t parent_ino,
     std::string_view name) {
   InodeId parent = static_cast<InodeId>(parent_ino);
+  if (cache::IsStub(parent)) return RefuseStub(req, parent, "symlink");
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(
       backing::NewChild child,
@@ -769,6 +828,11 @@ absl::Status DirCacheFS::Rename(
     return req.ReplyErrno(EINVAL);
   }
   const bool exchange = flags == RENAME_EXCHANGE;
+  // Out of or into a stub: across the boundary.
+  if (cache::IsStub(parent)) return RefuseStub(req, parent, "rename", EXDEV);
+  if (cache::IsStub(newparent)) {
+    return RefuseStub(req, newparent, "rename", EXDEV);
+  }
 
   // Missing row -> ESTALE for both parents; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
@@ -805,6 +869,10 @@ absl::Status DirCacheFS::Rename(
     if (src.kind == cache::LookupResult::kNegative) {
       return req.ReplyErrno(ENOENT);
     }
+    // The stub itself, moved or replaced: across the boundary.
+    if (src.kind == cache::LookupResult::kRefused) {
+      return RefuseStub(req, src.id, "rename", EXDEV);
+    }
     RET_CHECK_EQ(src.kind, cache::LookupResult::kFound);
     // The destination is resolved (populating newparent if need be) rather
     // than merely looked up: if the rename replaces an existing object, its
@@ -814,6 +882,9 @@ absl::Status DirCacheFS::Rename(
     ABSL_ASSIGN_OR_RETURN(dst,
                           backing::LookupOrPopulate(ctx_, newparent, newname));
     RET_CHECK_NE(dst.kind, cache::LookupResult::kUnknown);
+    if (dst.kind == cache::LookupResult::kRefused) {
+      return RefuseStub(req, dst.id, "rename", EXDEV);
+    }
     dst_exists = dst.kind == cache::LookupResult::kFound;
     if (exchange && !dst_exists) return req.ReplyErrno(ENOENT);
     // Two links to one inode: the kernel's vfs_rename() treats this as a
@@ -975,6 +1046,12 @@ absl::Status DirCacheFS::Link(
     std::string_view newname) {
   InodeId src = static_cast<InodeId>(ino);
   InodeId newparent = static_cast<InodeId>(newparent_ino);
+  // A stub is a directory (the kernel links none); into one is across the
+  // boundary.
+  if (cache::IsStub(src)) return RefuseStub(req, src, "link", EPERM);
+  if (cache::IsStub(newparent)) {
+    return RefuseStub(req, newparent, "link", EXDEV);
+  }
 
   // Missing row -> ESTALE for both ends; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(src).status());
@@ -1052,6 +1129,7 @@ absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
 absl::Status DirCacheFS::Open(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
+  if (cache::IsStub(id)) return RefuseStub(req, id, "open");
 
   // RequireAttr(), not cache::GetAttr(): the kernel's generic open path
   // (do_file_open_root, fs/namei.c) automatically retries a failed open
@@ -1325,6 +1403,8 @@ absl::Status DirCacheFS::Fsync(
 absl::Status DirCacheFS::Opendir(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
+  // Listing a stub is looking inside the boundary.
+  if (cache::IsStub(id)) return RefuseStub(req, id, "opendir");
   // A removed directory can still be opened (by a process whose working
   // directory it was); the kernel itself then answers its reads with
   // ENOENT, as for any removed directory.
@@ -1435,6 +1515,7 @@ absl::Status DirCacheFS::Readdir(
     FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info &fi) {
   InodeId dir = static_cast<InodeId>(ino);
+  if (cache::IsStub(dir)) return RefuseStub(req, dir, "readdir");
   size_t used = 0;
   if (off < 1) used += DirEntrySize(".");
   if (off < 2) used += DirEntrySize("..");
@@ -1457,6 +1538,7 @@ absl::Status DirCacheFS::Readdir(
     entries.push_back({.name = "..", .stbuf = DotStat(attr), .off = 2});
   }
   for (const Listed &e : listed) {
+    // A stub's backing_ino is its nodeid (cache::StubRow).
     ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(e.child));
     struct stat st = {};
     st.st_ino = attr.backing_ino;
@@ -1470,6 +1552,7 @@ absl::Status DirCacheFS::Readdirplus(
     FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info &fi) {
   InodeId dir = static_cast<InodeId>(ino);
+  if (cache::IsStub(dir)) return RefuseStub(req, dir, "readdirplus");
   size_t used = 0;
   if (off < 1) used += DirEntryPlusSize(".");
   if (off < 2) used += DirEntryPlusSize("..");
@@ -1519,6 +1602,7 @@ absl::Status DirCacheFS::Releasedir(
 absl::Status DirCacheFS::Fsyncdir(
     FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
+  if (cache::IsStub(id)) return RefuseStub(req, id, "fsyncdir");
   // Missing row -> ESTALE; see RequireAttr(). There is no phase 1/3 here:
   // the syscall, then a sync point, as in Fsync().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
@@ -1535,8 +1619,9 @@ absl::Status DirCacheFS::Statfs(FuseRequest &req, fuse_ino_t ino) {
   // maps to.
   ABSL_RETURN_IF_ERROR(RequireAttrOrRemoved(id).status());
   // Every object dcfs serves is on the source filesystem (submounts are
-  // refused), so the root answers for a removed one.
-  if (removed_.contains(id)) id = cache::kRootInode;
+  // refused), so the root answers for a removed one, and for a stub (the
+  // directory a mount point covers is on the source filesystem).
+  if (removed_.contains(id) || cache::IsStub(id)) id = cache::kRootInode;
   ABSL_ASSIGN_OR_RETURN(struct statvfs st, backing::StatFilesystem(ctx_, id));
   return req.ReplyStatfs(st);
 }
@@ -1545,6 +1630,7 @@ absl::Status DirCacheFS::Setxattr(
     FuseRequest &req, fuse_ino_t ino, std::string_view name,
     std::string_view value, int flags) {
   InodeId id = static_cast<InodeId>(ino);
+  if (cache::IsStub(id)) return RefuseStub(req, id, "setxattr");
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
@@ -1600,6 +1686,9 @@ absl::Status DirCacheFS::Getxattr(
   // (ENODATA): that call's own NotFound doesn't distinguish a missing row
   // from a present row with no such xattr.
   ABSL_RETURN_IF_ERROR(RequireAttrOrRemoved(id).status());
+  // A stub has no xattrs (the kernel asks for its ACLs when checking
+  // permissions on it: none, so its mode decides).
+  if (cache::IsStub(id)) return req.ReplyErrno(ENODATA);
   absl::StatusOr<std::optional<std::string>> value;
   if (auto it = removed_.find(id); it != removed_.end()) {
     // Read through the held descriptor (the kernel asks for the ACLs of a
@@ -1637,7 +1726,9 @@ absl::Status DirCacheFS::Listxattr(
   // "not found" outcome of its own to conflate it with).
   ABSL_RETURN_IF_ERROR(RequireAttrOrRemoved(id).status());
   std::optional<std::vector<std::string>> names;
-  if (auto it = removed_.find(id); it != removed_.end()) {
+  if (cache::IsStub(id)) {
+    names.emplace();  // None (see Getxattr).
+  } else if (auto it = removed_.find(id); it != removed_.end()) {
     ABSL_ASSIGN_OR_RETURN(
         (std::vector<std::pair<std::string, std::string>> xattrs),
         backing::ReadXattrsFd(*it->second.fd));
@@ -1670,6 +1761,7 @@ absl::Status DirCacheFS::Listxattr(
 absl::Status DirCacheFS::Removexattr(
     FuseRequest &req, fuse_ino_t ino, std::string_view name) {
   InodeId id = static_cast<InodeId>(ino);
+  if (cache::IsStub(id)) return RefuseStub(req, id, "removexattr");
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
@@ -1708,6 +1800,7 @@ absl::Status DirCacheFS::Create(
     FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
     mode_t mode, fuse_file_info &fi) {
   InodeId parent = static_cast<InodeId>(parent_ino);
+  if (cache::IsStub(parent)) return RefuseStub(req, parent, "create");
 
   // Phase 2 here also creates the new file, with the caller's exact flags
   // (so O_TRUNC/O_EXCL/the requested access mode all apply as the caller

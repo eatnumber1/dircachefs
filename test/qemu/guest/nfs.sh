@@ -214,7 +214,7 @@ normalize_stat() {
 
 # "d" is excluded: it exists only to host the nfs-boundary-* checks below,
 # and by design diverges between /src (real, once vdc is unmounted) and the
-# view through dcfs (permanently missing "mp": see the boundary-* checks) --
+# view through dcfs (where "mp" stays a stub: see the boundary-* checks) --
 # see readonly.sh's identity-checks comment for the full explanation.
 find_stat_tree() {
 	root=$1
@@ -286,10 +286,11 @@ fi
 
 mkdir /src/d/mp
 mount /dev/vdc /src/d/mp
+echo inside >/src/d/mp/inside
 listing=$(ls -1 "$MNT/d" 2>&1)
 case "$listing" in
-*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
-*) pass boundary-not-listed ;;
+*mp*) pass boundary-listed-as-stub ;;
+*) fail boundary-listed-as-stub "mp missing from /mnt/d: $listing" ;;
 esac
 errors=$(grep -c "refusing to cache mp" "$LOG1")
 if [ "$errors" -eq 1 ]; then
@@ -394,21 +395,23 @@ else
 fi
 
 # --- nfs-boundary-crossmnt: crossmnt (enabled in the exportfs call above)
-# reveals nothing for "mp", since dcfs itself already refused to cross into
-# it (see boundary-* above) -- the whole point of amendment 12: identity
-# stays local to dcfs's own st_dev regardless of what an NFS export option
-# asks for. Only "not listed" and "not statable" are asserted; the specific
-# error an NFS client sees for a server-side EXDEV is nfsd's own errno ->
-# NFS status mapping (nfserrno()), not something amendment 12 specifies.
+# reveals nothing behind "mp", since dcfs itself refuses to cross into it
+# (see boundary-* above; it is a stub directory, step 23.5, in the same
+# FUSE mount, so there is no mount for crossmnt to cross) -- the whole
+# point of amendment 12: identity stays local to dcfs's own st_dev
+# regardless of what an NFS export option asks for. Only "listed" and
+# "nothing inside readable" are asserted; the specific error an NFS client
+# sees for a server-side ENOTSUP is nfsd's own errno -> NFS status mapping
+# (nfserrno()).
 nfs_listing=$(ls -1 "$NFS/d" 2>&1)
 case "$nfs_listing" in
-*mp*) fail nfs-boundary-not-listed "mp appeared in $NFS/d: $nfs_listing" ;;
-*) pass nfs-boundary-not-listed ;;
+*mp*) pass nfs-boundary-listed-as-stub ;;
+*) fail nfs-boundary-listed-as-stub "mp missing from $NFS/d: $nfs_listing" ;;
 esac
-if stat "$NFS/d/mp" >/dev/null 2>&1; then
-	fail nfs-boundary-stat-fails "unexpectedly succeeded"
+if cat "$NFS/d/mp/inside" >/dev/null 2>&1; then
+	fail nfs-boundary-inside-fails "reading $NFS/d/mp/inside succeeded"
 else
-	pass nfs-boundary-stat-fails
+	pass nfs-boundary-inside-fails
 fi
 umount /src/d/mp
 

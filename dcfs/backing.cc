@@ -330,6 +330,23 @@ struct ChildRecord {
   std::vector<std::pair<std::string, std::string>> xattrs;
 };
 
+// Backing inode numbers at or above 2^63 are reserved (step 23.5): the
+// boundary stubs' nodeids are there (cache::kFirstStubNodeid), and from
+// Phase 14 on a nodeid is the backing inode number, so an object with such
+// a number could be confused with a stub. No supported filesystem hands
+// one out (ext4's are 32-bit, xfs's below 2^56, btrfs's objectids count up
+// from 256), so the object is refused, loudly, rather than served:
+// ENOTSUP for whatever operation reached it. `what` names it for the log.
+absl::Status RefuseReservedIno(const struct statx &stx, std::string_view what) {
+  if (stx.stx_ino < cache::kFirstStubNodeid) return absl::OkStatus();
+  LOG(ERROR) << "refusing " << what << ": its backing inode number "
+             << stx.stx_ino << " is at or above 2^63, the range dcfs "
+                "reserves for boundary stubs";
+  return dcfs::ErrnoToStatus(
+      ENOTSUP, absl::StrCat("backing inode number ", stx.stx_ino,
+                            " is in the range reserved for boundary stubs"));
+}
+
 // Reads everything the cache stores about the object `fd` names -- already
 // open, and already statx'd into `stx` -- beyond what the caller already
 // knows: its file handle (identified by `device`, the containing
@@ -340,6 +357,8 @@ struct ChildRecord {
 absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
                                         const DeviceId &device,
                                         const struct statx &stx) {
+  ABSL_RETURN_IF_ERROR(RefuseReservedIno(
+      stx, absl::StrCat("the object named ", EscapeBytes(name))));
   ChildRecord record;
   record.name = std::string(name);
   record.stx = stx;
@@ -364,9 +383,12 @@ absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
 // `dir` incomplete (e.g. an out-of-band change; see ReconcileAttrs), a rare
 // enough event that re-logging then is fine.
 void LogRefusedBoundary(InodeId dir, std::string_view name) {
-  LOG(ERROR) << "refusing to cache " << EscapeBytes(name) << " under inode " << dir
-             << ": it is a mount point or subvolume boundary; dcfs does "
-                "not support submounts (see README)";
+  LOG(ERROR) << "refusing to cache " << EscapeBytes(name) << " under inode "
+             << dir
+             << ": it is a mount point or subvolume boundary; it is shown "
+                "as an empty stub directory, and anything inside it gets "
+                "ENOTSUP (one dcfs serves one filesystem: mount another "
+                "instance there; see README)";
   // Kernel-supported FUSE submounts would plug in here: given
   // FUSE_ATTR_SUBMOUNT on this entry's fuse_entry_out and a distinct
   // st_dev the kernel assigns it, the kernel treats the entry as the root
@@ -382,19 +404,20 @@ void LogRefusedBoundary(InodeId dir, std::string_view name) {
 // boundary (IsBoundary): amendment 12 refuses to cache across a boundary,
 // so it is neither registered as a filesystem nor cached as a normal child,
 // and this returns nullopt for it too -- exactly as for a vanished child.
-// `refused` tells the two apart (false for a vanished child) so the caller
-// (PopulateDirectory) can persist the refusal instead of just dropping the
-// name: see cache::SetRefused and this file's top comment on why it must
-// never be cached as a plain negative entry.
+// `refused` tells the two apart (set, to the boundary root's statx, only
+// for a boundary) so the caller (PopulateDirectory, ResolveName) can
+// persist the refusal and its stub instead of just dropping the name: see
+// cache::SetRefused and this file's top comment on why it must never be
+// cached as a plain negative entry.
 //
 // `on_read` is called with what the probe read as soon as it is known (after
 // the openat and statx, before anything else): the read point a protocol
 // event must mark (see ResolveName).
 absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
     int dir_fd, const struct statx &dir_stx, const DeviceId &dir_device,
-    InodeId dir, std::string_view name, bool &refused,
+    InodeId dir, std::string_view name, std::optional<struct statx> &refused,
     absl::FunctionRef<void(const events::Probe &)> on_read) {
-  refused = false;
+  refused.reset();
   // Everything below reads through this one fd, so all of it describes the
   // same object even if `name` is replaced meanwhile.
   absl::StatusOr<FileDescriptor> child =
@@ -412,7 +435,7 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
                                         kAttrMask | kMountIdMask));
 
   if (IsBoundary(dir_stx, stx)) {
-    refused = true;
+    refused = stx;
     LogRefusedBoundary(dir, name);
     on_read({.kind = events::Probe::kRefused});
     return std::nullopt;
@@ -437,6 +460,7 @@ absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
   if (!S_ISDIR(probe.stx.stx_mode)) {
     return dcfs::ErrnoToStatus(ENOTDIR, "the source is not a directory");
   }
+  ABSL_RETURN_IF_ERROR(RefuseReservedIno(probe.stx, "the source directory"));
   probe.identity.backing_ino = probe.stx.stx_ino;
   ABSL_ASSIGN_OR_RETURN(probe.identity.backing_gen,
                         ReadGeneration(source_fd, probe.stx.stx_mode));
@@ -966,18 +990,20 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // name -- see this file's top comment on why a refused name must never be
   // cached as a plain negative entry.
   std::vector<ChildRecord> children;
-  std::vector<std::string> refused_names;
+  // Each refused name with its boundary root's statx (the stub's
+  // attributes).
+  std::vector<std::pair<std::string, struct statx>> refused_names;
   children.reserve(names.size());
   for (const std::string &name : names) {
-    bool refused = false;
+    std::optional<struct statx> refused;
     ABSL_ASSIGN_OR_RETURN(
         std::optional<ChildRecord> child,
         ProbeChild(*dir_fd, dir_stx, dir_attr.device, dir, name, refused,
                    [](const events::Probe &) {}));
     if (child.has_value()) {
       children.push_back(*std::move(child));
-    } else if (refused) {
-      refused_names.push_back(name);
+    } else if (refused.has_value()) {
+      refused_names.emplace_back(name, *refused);
     }
   }
   VLOG(1) << "populating directory " << dir << ": " << children.size()
@@ -991,7 +1017,7 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
         for (const ChildRecord &child : children) {
           each(child.name, ProbeOf(child.stx));
         }
-        for (const std::string &name : refused_names) {
+        for (const auto &[name, root] : refused_names) {
           each(name, {.kind = events::Probe::kRefused});
         }
       });
@@ -1018,12 +1044,15 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
           cache::LookupResult{.kind = cache::LookupResult::kFound, .id = id};
       seen.push_back(child.name);
     }
-    for (const std::string &name : refused_names) {
+    for (const auto &[name, root] : refused_names) {
+      // The stub's nodeid is recorded with the refusal; one that could not
+      // be recorded has none (id 0: see LookupOrPopulate).
+      InodeId stub = 0;
       if (dir_ok) {
-        ABSL_RETURN_IF_ERROR(cache::SetRefused(ctx, dir, name));
+        ABSL_ASSIGN_OR_RETURN(stub, cache::SetRefused(ctx, dir, name, root));
       }
       result.entries[name] =
-          cache::LookupResult{.kind = cache::LookupResult::kRefused, .id = 0};
+          cache::LookupResult{.kind = cache::LookupResult::kRefused, .id = stub};
       seen.push_back(name);
     }
     if (!dir_ok) {
@@ -1044,12 +1073,20 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
 
 namespace {
 
-// The status LookupOrPopulate reports for a name cached as a refused
-// mount/subvolume boundary (see cache::LookupResult::kRefused).
-absl::Status ExdevBoundary() {
-  return dcfs::ErrnoToStatus(
-      EXDEV, "mount point or subvolume boundary (submounts are not "
-             "supported; see README)");
+// A refused boundary is served as its stub, which needs the stub's
+// recorded nodeid: a listing or probe that could not record its result (a
+// mutation of the directory overlapped it, which only coroutines make
+// possible) has none to give. EAGAIN then, as for a listing that keeps
+// being invalidated (TODO(coroutines): wait for the mutation instead).
+absl::StatusOr<cache::LookupResult> WithStub(cache::LookupResult result,
+                                             InodeId parent,
+                                             std::string_view name) {
+  if (result.kind == cache::LookupResult::kRefused && result.id == 0) {
+    return dcfs::ErrnoToStatus(
+        EAGAIN, absl::StrCat("boundary ", EscapeBytes(name), " in ", parent,
+                             ": its stub could not be recorded"));
+  }
+  return result;
 }
 
 }  // namespace
@@ -1080,13 +1117,13 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                           cache::Lookup(ctx, parent, name));
     // `name` is a persisted refusal (see ProbeChild/cache::SetRefused): it
     // exists on the backing filesystem but dcfs will not cache across it, so
-    // this must never be reported as absent -- answer EXDEV, straight from
+    // this must never be reported as absent -- it is its stub, straight from
     // the cache, every time. Checked before the kUnknown fast-out below since
     // kRefused is never kUnknown, but also never worth re-populating for.
     if (result.kind == cache::LookupResult::kRefused) {
       ctx.events->LookupDecided(ctx, parent, name,
                                 events::LookupOutcome::kRefused, 0);
-      return ExdevBoundary();
+      return result;
     }
     if (result.kind != cache::LookupResult::kUnknown) {
       // Model: LookupStep (or the request's Arrive) serving from the cache.
@@ -1109,7 +1146,10 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                               listed ? events::LookupOutcome::kResolve
                                      : events::LookupOutcome::kPopulate,
                               0);
-    if (listed) return ResolveName(ctx, parent, name);
+    if (listed) {
+      ABSL_ASSIGN_OR_RETURN(result, ResolveName(ctx, parent, name));
+      return WithStub(result, parent, name);
+    }
 
     ABSL_ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
     if (!populated.cached) {
@@ -1120,13 +1160,9 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
         return cache::LookupResult{.kind = cache::LookupResult::kNegative,
                                    .id = 0};
       }
-      if (it->second.kind == cache::LookupResult::kRefused) {
-        return ExdevBoundary();
-      }
-      return it->second;
+      return WithStub(it->second, parent, name);
     }
     ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
-    if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
     // A recorded listing names every child, and makes every other name
     // absent.
     RET_CHECK_NE(result.kind, cache::LookupResult::kUnknown)
@@ -1152,6 +1188,8 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
                         syscalls::openat(*dir_fd, "..", O_PATH | O_DIRECTORY));
   ABSL_ASSIGN_OR_RETURN(struct statx stx,
                         syscalls::statx(*up_fd, "", AT_EMPTY_PATH, kAttrMask));
+  ABSL_RETURN_IF_ERROR(RefuseReservedIno(
+      stx, absl::StrCat("the parent of directory ", dir)));
   // Submounts are refused, so ".." is on `dir`'s filesystem; `dir` is not
   // the root, so ".." is at most the root.
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr root_attr,
@@ -1198,7 +1236,7 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
       syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr,
                         cache::GetAttr(ctx, parent));
-  bool refused = false;
+  std::optional<struct statx> refused;
   ABSL_ASSIGN_OR_RETURN(
       std::optional<ChildRecord> child,
       ProbeChild(*dir_fd, dir_stx, dir_attr.device, parent, name, refused,
@@ -1217,11 +1255,13 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
       ABSL_ASSIGN_OR_RETURN(InodeId id,
                             RecordChild(ctx, snapshot, parent, *child, dir_ok));
       result = {cache::LookupResult::kFound, id};
-    } else if (refused) {
+    } else if (refused.has_value()) {
+      InodeId stub = 0;  // None unless recorded (see LookupOrPopulate).
       if (dir_ok) {
-        ABSL_RETURN_IF_ERROR(cache::SetRefused(ctx, parent, name));
+        ABSL_ASSIGN_OR_RETURN(stub,
+                              cache::SetRefused(ctx, parent, name, *refused));
       }
-      result = {cache::LookupResult::kRefused, 0};
+      result = {cache::LookupResult::kRefused, stub};
     } else {
       if (dir_ok) {
         ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
@@ -1236,7 +1276,6 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
   }));
   // Model: ResolveCommit.
   ctx.events->ResolveCommitted(ctx, parent, name, snapshot.seq, recorded);
-  if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
   return result;
 }
 

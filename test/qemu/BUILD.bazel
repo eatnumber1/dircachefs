@@ -297,6 +297,22 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 23.5: a mount point or btrfs subvolume below the source is a stub
+# directory: listed, a lookup succeeds (nodeid >= 2^63), anything inside
+# gets ENOTSUP, renaming it EXDEV; stable across a restart -- see
+# guest/boundary.sh.
+qemu_test_matrix(
+    name = "boundary_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/boundary.sh",
+    size = "small",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
 # Step 9: file names are bytes. names_test runs the whole name corpus
 # (guest/names.sh, tools/testutil.c's names-* subcommands) on each backing
 # filesystem; names_random_test creates 1,000 seeded random names, half in

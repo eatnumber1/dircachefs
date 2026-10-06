@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -188,6 +189,26 @@ class DirCacheFS {
   // would change one, and Lookup, keep using RequireAttr, so a removed
   // object can be neither changed nor looked up again (ESTALE).
   absl::StatusOr<cache::CachedAttr> RequireAttrOrRemoved(InodeId id);
+
+  // Boundary stubs (step 23.5; docs/design.md, "Boundaries"). A refused
+  // dentry is served as a stub directory (cache::StubRow) with a nodeid at
+  // or above 2^63 (cache::IsStub). Its own reads (GETATTR, LOOKUP of "."
+  // and "..", STATFS, GETXATTR, LISTXATTR, ACCESS, FORGET) are answered
+  // from its row, and everything else -- anything inside it, and any change
+  // to it -- is refused through RefuseStub: ENOTSUP, or EXDEV for a rename
+  // or link across it. Every op that takes a nodeid checks IsStub before
+  // anything that would reach the backing filesystem.
+
+  // The entry for stub `id`, from its row (ESTALE if it has none any more:
+  // its dentry stopped being refused).
+  absl::StatusOr<fuse_entry_param> StubEntry(InodeId id);
+
+  // Replies `err` to `op` on or inside stub `id`, logging it at ERROR the
+  // first time per stub in this run (stubs_logged_), naming the boundary.
+  // A refusal is an answer, not a failure of dcfs's: replied with
+  // ReplyErrno, which logs nothing more.
+  absl::Status RefuseStub(FuseRequest &req, InodeId id, std::string_view op,
+                          int err = ENOTSUP);
 
   // Replies the positive entry `entry` and, once the kernel has accepted
   // it, counts the lookup it now holds (lookups_). Every reply that hands
@@ -455,6 +476,9 @@ class DirCacheFS {
     FileDescriptor fd;
   };
   absl::flat_hash_map<InodeId, Removed> removed_;
+
+  // The stubs whose refusal RefuseStub has logged in this run.
+  absl::flat_hash_set<InodeId> stubs_logged_;
 };
 
 }  // namespace dcfs

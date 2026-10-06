@@ -9,7 +9,7 @@
 # below), create via a shell redirect (content, size right after close,
 # O_EXCL/noclobber -> EEXIST), mknod (a FIFO; a regular file is Create, not
 # mknod -- busybox mknod cannot make one), symlink (resolving and dangling),
-# link (nlink/inode agreement, and EXDEV against a boundary). Each check
+# link (nlink/inode agreement, and ENOTSUP into a boundary stub). Each check
 # compares /src and /mnt directly. Finally, a full metadata pass over the
 # whole tree -- with the page/dentry/inode caches dropped first -- causes
 # *zero* additional block reads on the backing device (RecordNewChild/
@@ -19,11 +19,11 @@
 # database.
 #
 # Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
-# second filesystem mounted below the source after dcfs starts: every
-# create-family op against a refused boundary fails with EXDEV, exactly as
-# it would fail if attempted directly on the backing filesystem across a
-# real device boundary (see mkdir-boundary-refused/link-exdev below) -- see
-# README's Limitations and dcfs/backing.cc's ProbeChild/PopulateDirectory.
+# second filesystem mounted below the source after dcfs starts: the
+# boundary is a stub directory (step 23.5), so creating its name fails
+# with EEXIST and creating anything inside it with ENOTSUP (see
+# mkdir-boundary-refused/link-into-boundary below) -- see README's
+# Limitations and dcfs/backing.cc's ProbeChild/PopulateDirectory.
 # (The startup-refusal half of amendment 12 is exercised once, in
 # readonly.sh.)
 #
@@ -298,20 +298,18 @@ fi
 # vdc is mounted below the source (under "d", never listed through dcfs
 # before this point -- see readonly.sh's boundary-* checks for why that
 # ordering matters) after dcfs is already running. The kernel's own VFS
-# always looks a create-family op's target name up first (to confirm it
-# does not already exist) before issuing the create itself, so a name the
-# LOOKUP path refuses with EXDEV (see backing::LookupOrPopulate) makes the
-# create-family syscall itself fail with EXDEV too, without dcfs's Mkdir/
-# Link ops ever running -- exactly as it would if mkdir/ln were attempted
-# straight across a real device boundary on the backing filesystem.
+# always looks a create-family op's target name up first, so: the stub's
+# own name exists (EEXIST, without dcfs's Mkdir running), and a name inside
+# it is looked up in the stub, which refuses it (ENOTSUP, without dcfs's
+# Link running; `ln f1 d/mp` links into the directory mp).
 mkdir /src/d/mp
 mount /dev/vdc /src/d/mp
-expect_fail mkdir-boundary-refused "cross-device" mkdir "$MNT/d/mp"
-expect_fail link-exdev "cross-device" ln "$MNT/f1" "$MNT/d/mp"
+expect_fail mkdir-boundary-refused "File exists" mkdir "$MNT/d/mp"
+expect_fail link-into-boundary "not supported" ln "$MNT/f1" "$MNT/d/mp"
 listing=$(ls -1 "$MNT/d" 2>&1)
 case "$listing" in
-*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
-*) pass boundary-not-listed ;;
+*mp*) pass boundary-listed-as-stub ;;
+*) fail boundary-listed-as-stub "mp missing from /mnt/d: $listing" ;;
 esac
 errors=$(grep -c "refusing to cache mp" "$LOG1")
 if [ "$errors" -eq 1 ]; then
@@ -340,11 +338,11 @@ umount /src/d/mp
 # "d"/"mp" above.
 if [ "$FSTYPE" = btrfs ]; then
 	if "$TESTUTIL" btrfs-subvol-create /src/d2/subvol >/tmp/subvol_create.out 2>&1; then
-		expect_fail btrfs-subvol-boundary-refused "cross-device" mkdir "$MNT/d2/subvol/x"
+		expect_fail btrfs-subvol-boundary-refused "not supported" mkdir "$MNT/d2/subvol/x"
 		listing=$(ls -1 "$MNT/d2" 2>&1)
 		case "$listing" in
-		*subvol*) fail btrfs-subvol-not-listed "subvol appeared in /mnt/d2: $listing" ;;
-		*) pass btrfs-subvol-not-listed ;;
+		*subvol*) pass btrfs-subvol-listed-as-stub ;;
+		*) fail btrfs-subvol-listed-as-stub "subvol missing from /mnt/d2: $listing" ;;
 		esac
 		errors=$(grep -c "refusing to cache subvol" "$LOG1")
 		if [ "$errors" -eq 1 ]; then
@@ -355,12 +353,12 @@ if [ "$FSTYPE" = btrfs ]; then
 	else
 		fail btrfs-subvol-create "testutil btrfs-subvol-create failed: $(cat /tmp/subvol_create.out)"
 		fail btrfs-subvol-boundary-refused "no subvolume to test against"
-		fail btrfs-subvol-not-listed "no subvolume to test against"
+		fail btrfs-subvol-listed-as-stub "no subvolume to test against"
 		fail btrfs-subvol-error-logged-once "no subvolume to test against"
 	fi
 else
 	skip btrfs-subvol-boundary-refused "backing filesystem is $FSTYPE, not btrfs"
-	skip btrfs-subvol-not-listed "backing filesystem is $FSTYPE, not btrfs"
+	skip btrfs-subvol-listed-as-stub "backing filesystem is $FSTYPE, not btrfs"
 	skip btrfs-subvol-error-logged-once "backing filesystem is $FSTYPE, not btrfs"
 fi
 

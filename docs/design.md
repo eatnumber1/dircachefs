@@ -341,8 +341,55 @@ So (amendment 12 of the plan):
   is detected when its parent is listed or the name is probed:
   `IsBoundary()` in `backing.cc` compares the child's device numbers and
   mount id (`STATX_MNT_ID_UNIQUE`) with its parent's. The name is
-  recorded as a `refused` dentry, logged at ERROR, left out of listings,
-  and answered with `EXDEV` on lookup. It is never reported as absent.
+  recorded as a `refused` dentry and logged at ERROR, and served as a
+  stub directory (below). It is never reported as absent.
+
+### Boundary stubs
+
+Step 23.5 (Phase 15's decision 3, pulled forward): a refused name is shown
+as a stub directory, so that it appears in listings and can serve as a
+mount point for another instance, while nothing behind it is cached or
+served.
+
+- **Identity.** A stub's nodeid is at or above 2^63 (`cache::IsStub`: a
+  negative `InodeId`), a range `inodes.id` never reaches. Its inode
+  number (`st_ino`, `d_ino`) is its nodeid. From Phase 14 on, nodeids are
+  backing inode numbers, so dcfs already refuses any backing object whose
+  inode number is in that range (`RefuseReservedIno` in `backing.cc`, at
+  every probe, `ParentOf` and the source root: ERROR and `ENOTSUP`; ext4's
+  inode numbers are 32-bit, xfs's below 2^56, btrfs's objectids count up
+  from 256, so none is ever met). A directory containing one cannot be
+  listed.
+- **Record.** `cache::SetRefused` writes the dentry and its `stubs` row in
+  one transaction: the next nodeid up from 2^63, a random nonzero
+  generation (as for inode rows: a nodeid handed out again after its stub
+  went never comes back with an old generation), and the boundary root's
+  attributes from the probe's `statx`. A name refused again keeps its stub
+  (nodeid and generation) and refreshes the attributes. Triggers delete
+  the stub whenever its dentry stops being refused (a mutation's phase 1,
+  an out-of-band relisting, recovery) or goes, and the foreign key with
+  its parent, so a `stubs` row exists exactly while its dentry is
+  `refused`. The attributes have no unknown state of their own: dcfs never
+  changes them (every change to a stub is refused), so the dentry's
+  present/absent/unknown/refused state is the record the tri-state rule
+  applies to. A listing or probe that could not record its result (a
+  concurrent mutation of the directory, possible only under coroutines)
+  has no stub to serve and answers `EAGAIN`.
+- **Serving.** `ListDir` merges present names and stubs in rowid order
+  (each half a range scan of its own partial index). `GETATTR`, `LOOKUP`
+  of the stub and of its `.` and `..`, `STATFS` (the source's), `GETXATTR`
+  (`ENODATA`: no ACLs, so its mode decides permission checks),
+  `LISTXATTR` (empty), `ACCESS` and `FORGET` are answered from the stub's
+  row. Everything else -- any lookup, listing, open or creation inside it,
+  and `SETATTR`, xattr changes or `UNLINK`/`RMDIR` of it -- is refused
+  with `ENOTSUP` (`DirCacheFS::RefuseStub`, logged at ERROR once per stub
+  per run), and a `RENAME` or `LINK` across it, or of the stub itself,
+  with `EXDEV`. The kernel looks a link's or rename's target name up
+  before sending the request, so a link or rename *into* a stub fails at
+  that lookup, with `ENOTSUP`.
+- **Not done here** (Phase 15.4): the bind form's recorded mount points,
+  reverting stubs that are no longer boundaries without a relisting, and
+  non-directory boundaries (file mount points).
 
 The machinery for several filesystems is kept rather than deleted: device
 ids in every row, the `filesystems` table, `MountFds` keyed by device id,
@@ -367,10 +414,12 @@ forget the ones that are not. The comment at `LogRefusedBoundary()` in
 
 ## The schema
 
-`dcfs/schema.sql` is the full definition, schema version 3. All tables are
+`dcfs/schema.sql` is the full definition, schema version 4. All tables are
 `STRICT`. `Migrate()` (`dcfs/migrate.cc`) creates a fresh database in one
 transaction, or upgrades an older one (one version step at a time) to
-version 3 in one transaction, and refuses versions it does not understand.
+version 4 in one transaction, and refuses versions it does not understand.
+The step to version 4 adds the `stubs` table; a version 3 cache's refused
+dentries, which have no stub, become unknown and are probed again.
 
 ### `cache_state`: one row of cache-wide state
 
@@ -425,7 +474,9 @@ Unique on `(device_id, backing_ino, backing_gen)`.
 - `unknown`: nothing is known (for example, phase 1 of a mutation that is
   about to change it, or the object it named was invalidated).
 - `refused`: the name exists but is a mount point or subvolume boundary
-  that dcfs will not cache. Never reported absent; lookups answer `EXDEV`.
+  that dcfs will not cache behind. Never reported absent; served as its
+  stub directory (its `stubs` row; see
+  [Boundary stubs](#boundary-stubs)).
 
 A name with **no** row is absent if its directory's `children_complete` is
 set, and unknown otherwise. The table is an ordinary rowid table on
@@ -475,6 +526,19 @@ have turned those names into negative entries, which read as absent.
 A listing can be served from the cache only if the directory is complete
 **and** none of its rows is `unknown` (`cache::IsDirComplete`): a listing
 must neither include nor silently omit a name whose state is unknown.
+
+### `stubs`
+
+| Column | Meaning |
+|---|---|
+| `id` | The stub's nodeid: at or above 2^63, so negative as a SQLite integer. |
+| `parent`, `name` | The `refused` dentry it stands for (unique). Deleting the parent cascades. |
+| `fuse_gen` | Random, nonzero. |
+| `mode`, ..., `btime_*` | The boundary root's attributes, from the last probe. |
+
+A row exists exactly while its dentry is `refused` (`cache::SetRefused`
+and the triggers `dentries_unrefused` and `dentries_refused_deleted`). See
+[Boundary stubs](#boundary-stubs).
 
 ### `symlinks`
 
@@ -1271,12 +1335,13 @@ database. "Zero sectors" below means the backing device's read counter in
 | Test | What it proves |
 |---|---|
 | `boot_test` | The guest environment works: dcfs and helpers are present, disks mount. |
-| `readonly_test` | Read-only operations are served from the cache with backing inode numbers; a warm metadata pass reads zero sectors, also after a restart; startup refuses a mount below `--source`, and a boundary that appears at runtime is refused rather than cached. |
+| `readonly_test` | Read-only operations are served from the cache with backing inode numbers; a warm metadata pass reads zero sectors, also after a restart; startup refuses a mount below `--source`, and a boundary that appears at runtime is refused rather than cached (a stub). |
+| `boundary_test` | A mount (every filesystem) and a btrfs subvolume appearing below the source are stub directories: listed, a directory with the boundary root's mode and owner and an inode number at or above 2^63 (`d_ino` agrees), `ENOTSUP` for everything inside (logged once per stub), `EXDEV` for renaming the stub, nothing reaching either side; the same inode numbers after a restart. |
 | `passthrough_test` | File contents go through passthrough: reads match, move the backing read counter, and cost the daemon almost no CPU for 64 MiB; opens do not leak descriptors; all of it survives a restart. |
 | `lifecycle_test` | Flag validation, a bad `--source`, a database for another filesystem refused, `--fuse_opt`, clean `SIGTERM` shutdown (exit 0, unmounted, WAL checkpointed), mounting over the source, restarting against a used database. |
-| `handles_test` | NFS-style handles via `name_to_handle_at`/`open_by_handle_at`: generation 0 for the root and nonzero and stable otherwise; handles survive a restart; a doctored generation, a recycled inode number and a wiped database each give `ESTALE`; no handle can be made behind a refused boundary. |
+| `handles_test` | NFS-style handles via `name_to_handle_at`/`open_by_handle_at`: generation 0 for the root and nonzero and stable otherwise; handles survive a restart; a doctored generation, a recycled inode number and a wiped database each give `ESTALE`; no handle can be made behind a boundary, and the stub's own handle decodes to the stub. |
 | `setattr_test` | chmod (file, directory, FIFO; `EOPNOTSUPP` on a symlink), chown, truncate and utimes land on the backing filesystem and are then served from the cache with zero sectors, also after a restart. |
-| `create_test` | mkdir, create, mknod, symlink and link, including error cases; the whole tree's listing agrees with the backing filesystem; zero sectors for a full metadata pass over everything created; `EXDEV` at a refused boundary. |
+| `create_test` | mkdir, create, mknod, symlink and link, including error cases; the whole tree's listing agrees with the backing filesystem; zero sectors for a full metadata pass over everything created; `EEXIST` for a boundary stub's name and `ENOTSUP` inside it. |
 | `rename_test` | unlink (including of an open file, whose row and handle live until the last close), rmdir, and every rename variant (across directories, over an existing file, `RENAME_NOREPLACE`, `RENAME_EXCHANGE`, a directory with its cached subtree); negative entries and completeness are recorded, not re-read. |
 | `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; served from the cache after a restart. |
 | `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
@@ -1286,7 +1351,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on ext4 instead of failing `ESTALE`, also when their rows and attributes were cached; no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
 | `readdir_boundary_test` | A directory too large for one READDIR or READDIRPLUS reply lists every entry exactly once across several replies, and in time linear in its size. |
 | `names_test`, `names_random_test` | File names are bytes: about 60 names, one per hazard class (format delimiters, control and high-bit bytes, invalid UTF-8, the overlong "fake slash", NFC/NFD and other look-alike sets in the spirit of xfstests generic/453 and generic/454, path-walk specials, ordering and prefixes, 255-byte names), go through create, mkdir, symlink (including a 4095-byte target; 1023 on xfs), link, xattrs with NUL-containing values, a rename chain, handles, listing and removal, both created directly on the backing filesystem (dcfs populates from it) and created through dcfs, and are compared with the backing filesystem byte for byte; after a restart the same checks pass, the handles taken before it still open and a metadata pass reads zero sectors. Errors for `.`, `..` and 256-byte names match the backing filesystem's, a directory chain deeper than `PATH_MAX` works by descriptors and handles, and a newline in a logged name cannot forge a log line. The random test makes 1,000 seeded names of random bytes (100,000 in the slow tier, `names_random_slow_test`), half through dcfs and half on the backing filesystem, and compares the trees. |
-| `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; a refused boundary stays invisible even with `crossmnt`. |
+| `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; nothing behind a boundary is reachable even with `crossmnt` (the stub is listed). |
 | `pjdfstest_test` | POSIX conformance, as above. |
 
 What is not covered: real concurrency (there is none to test until

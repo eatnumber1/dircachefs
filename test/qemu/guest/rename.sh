@@ -18,10 +18,11 @@
 # database and the results (and the warm cache) must persist.
 #
 # Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
-# second filesystem mounted below the source after dcfs starts: a rename
-# targeting a name behind a refused boundary fails with EXDEV, exactly as a
-# real cross-device rename would (rename-boundary-refused, rename-exdev
-# below) -- see README's Limitations and dcfs/backing.cc's
+# second filesystem mounted below the source after dcfs starts: the
+# boundary is a stub directory (step 23.5); a rename into it fails with
+# ENOTSUP (the kernel looks the target up in the stub first), and renaming
+# the stub itself with EXDEV (rename-boundary-refused, rename-into-boundary,
+# rename-stub-exdev below) -- see README's Limitations and dcfs/backing.cc's
 # ProbeChild/PopulateDirectory. (The startup-refusal half of amendment 12 is
 # exercised once, in readonly.sh.)
 #
@@ -217,8 +218,8 @@ mkdir /src/d/mp
 mount /dev/vdc /src/d/mp
 listing=$(ls -1 "$MNT/d" 2>&1)
 case "$listing" in
-*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
-*) pass boundary-not-listed ;;
+*mp*) pass boundary-listed-as-stub ;;
+*) fail boundary-listed-as-stub "mp missing from /mnt/d: $listing" ;;
 esac
 errors=$(grep -c "refusing to cache mp" "$LOG1")
 if [ "$errors" -eq 1 ]; then
@@ -428,21 +429,28 @@ else
 	fail rename-dir-over-empty-dir "testutil rename2 -> '$out'"
 fi
 
-# Renaming into a refused boundary fails with EXDEV, exactly as a real
-# cross-device rename would (the kernel must resolve "mp" as an
-# intermediate path component before calling renameat2 at all, and that
-# LOOKUP is what actually fails -- see create.sh's mkdir-boundary-refused
-# for the same reasoning); this reuses the refusal boundary-* above already
-# established ("d" is already cached complete without "mp"), so it needs no
-# fresh mount and logs nothing new.
+# Renaming into a boundary stub fails with ENOTSUP: the kernel looks the
+# target name up in the stub before sending the rename, and the stub
+# refuses every lookup inside it (see create.sh's mkdir-boundary-refused
+# for the same reasoning). Renaming the stub itself reaches dcfs, which
+# refuses it with EXDEV. Both reuse the refusal boundary-* above already
+# established ("d" is already cached complete with "mp" a stub), so they
+# need no fresh mount.
 out=$("$TESTUTIL" rename2 "$MNT/f5" "$MNT/d/mp/f5" 0)
-if [ "$out" = "ERR EXDEV" ]; then
-	pass rename-exdev
+if [ "$out" = "ERR EOPNOTSUPP" ]; then
+	pass rename-into-boundary
 else
-	fail rename-exdev "testutil rename2 across a refused boundary -> '$out'"
+	fail rename-into-boundary "testutil rename2 into a boundary stub -> '$out'"
 fi
-check_src rename-exdev '[ -f /src/f5 ] && absent /src/d/mp/f5'
-check_cold rename-exdev '[ -f /mnt/f5 ] && absent /mnt/d/mp/f5'
+check_src rename-into-boundary '[ -f /src/f5 ] && absent /src/d/mp/f5'
+check_cold rename-into-boundary '[ -f /mnt/f5 ] && absent /mnt/d/mp/f5'
+out=$("$TESTUTIL" rename2 "$MNT/d/mp" "$MNT/d/mp2" 0)
+if [ "$out" = "ERR EXDEV" ]; then
+	pass rename-stub-exdev
+else
+	fail rename-stub-exdev "testutil rename2 of a boundary stub -> '$out'"
+fi
+check_src rename-stub-exdev '[ -d /src/d/mp ] && absent /src/d/mp2'
 
 # --- listing-matches: "d" is excluded -- see readonly.sh's identity-checks
 # comment on why /src/d and the cached /mnt/d deliberately diverge after the

@@ -27,7 +27,10 @@ namespace dcfs {
 //     on dentries rows, and the inodes_delete_unknowns trigger.
 // v3: the partial indexes dentries_present and dentries_unknown (readdir
 //     costs a page of rows per query, not a whole directory).
-inline constexpr int kSchemaVersion = 3;
+// v4: boundary stubs (step 23.5): the `stubs` table, its triggers and the
+//     partial index dentries_refused; refused dentries of an older cache
+//     become unknown (they had no stub, and are probed again).
+inline constexpr int kSchemaVersion = 4;
 
 // Identifies the root of the cache: the backing filesystem being cached,
 // and the backing (ino, generation) of its root directory. Only consulted

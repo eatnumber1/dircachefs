@@ -35,6 +35,7 @@
 #include "dcfs/dir_cache_fs.h"
 
 #include <fcntl.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <unistd.h>
@@ -111,6 +112,14 @@ std::function<void()> &SyncfsHook() {
   return *hook;
 }
 
+// Inode numbers every statx reports differently while set: a backing inode
+// number (the key) is reported as another (the value). For backing inode
+// numbers no supported filesystem hands out (>= 2^63).
+std::map<uint64_t, uint64_t> &FakeInodeNumbers() {
+  static auto *fake = new std::map<uint64_t, uint64_t>();
+  return *fake;
+}
+
 }  // namespace
 }  // namespace dcfs
 
@@ -132,6 +141,17 @@ int __wrap_name_to_handle_at(int dirfd, const char *pathname,
   std::function<void()> hook = std::exchange(dcfs::NameToHandleHook(), {});
   if (hook) hook();
   return __real_name_to_handle_at(dirfd, pathname, handle, mount_id, flags);
+}
+int __real_statx(int dirfd, const char *path, int flags, unsigned int mask,
+                 struct statx *buf);
+int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
+                 struct statx *buf) {
+  int ret = __real_statx(dirfd, path, flags, mask, buf);
+  if (ret == 0) {
+    auto it = dcfs::FakeInodeNumbers().find(buf->stx_ino);
+    if (it != dcfs::FakeInodeNumbers().end()) buf->stx_ino = it->second;
+  }
+  return ret;
 }
 int __real_syncfs(int fd);
 int __wrap_syncfs(int fd) {
@@ -263,6 +283,10 @@ class DirCacheFSTest : public ::testing::Test {
     OpenByHandleHook() = {};
     NameToHandleHook() = {};
     SyncfsHook() = {};
+    FakeInodeNumbers().clear();
+    for (const std::string &mount : mounts_below_) {
+      ::umount2(mount.c_str(), MNT_DETACH);
+    }
     if (se_ != nullptr) fuse_session_destroy(se_);
     current_ = nullptr;
     fs_.reset();
@@ -438,6 +462,90 @@ class DirCacheFSTest : public ::testing::Test {
     return Send(FUSE_RELEASE, static_cast<uint64_t>(id), body);
   }
 
+  // A LOOKUP of `name` in `parent`, and the entry it returned (zeroed on
+  // error).
+  std::pair<Reply, struct fuse_entry_out> Lookup(InodeId parent,
+                                                 std::string_view name) {
+    std::string body(name);
+    body.push_back('\0');
+    Reply reply = Send(FUSE_LOOKUP, static_cast<uint64_t>(parent), body);
+    struct fuse_entry_out entry {};
+    if (reply.error == 0 && reply.payload.size() >= sizeof(entry)) {
+      std::memcpy(&entry, reply.payload.data(), sizeof(entry));
+    }
+    return {reply, entry};
+  }
+
+  // A GETATTR of `id`, and the attributes it returned (zeroed on error).
+  std::pair<Reply, struct fuse_attr> Getattr(InodeId id) {
+    struct fuse_getattr_in in = {};
+    std::string body;
+    AppendBytes(body, in);
+    Reply reply = Send(FUSE_GETATTR, static_cast<uint64_t>(id), body);
+    struct fuse_attr_out out {};
+    if (reply.error == 0 && reply.payload.size() >= sizeof(out)) {
+      std::memcpy(&out, reply.payload.data(), sizeof(out));
+    }
+    return {reply, out.attr};
+  }
+
+  Reply Opendir(InodeId id) {
+    struct fuse_open_in in = {};
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_OPENDIR, static_cast<uint64_t>(id), body);
+  }
+
+  Reply Link(InodeId id, InodeId newparent, std::string_view newname) {
+    struct fuse_link_in in = {};
+    in.oldnodeid = static_cast<uint64_t>(id);
+    std::string body;
+    AppendBytes(body, in);
+    body.append(newname);
+    body.push_back('\0');
+    return Send(FUSE_LINK, static_cast<uint64_t>(newparent), body);
+  }
+
+  Reply Setxattr(InodeId id, std::string_view name, std::string_view value) {
+    struct fuse_setxattr_in in = {};
+    in.size = static_cast<uint32_t>(value.size());
+    std::string body;
+    AppendBytes(body, in);
+    body.append(name);
+    body.push_back('\0');
+    body.append(value);
+    return Send(FUSE_SETXATTR, static_cast<uint64_t>(id), body);
+  }
+
+  // A GETXATTR of `name` asking for its size (size 0).
+  Reply Getxattr(InodeId id, std::string_view name) {
+    struct fuse_getxattr_in in = {};
+    std::string body;
+    AppendBytes(body, in);
+    body.append(name);
+    body.push_back('\0');
+    return Send(FUSE_GETXATTR, static_cast<uint64_t>(id), body);
+  }
+
+  // A SETATTR of `id`'s mode (as chmod(2) sends it).
+  Reply Chmod(InodeId id, mode_t mode) {
+    struct fuse_setattr_in in = {};
+    in.valid = FATTR_MODE;
+    in.mode = mode;
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_SETATTR, static_cast<uint64_t>(id), body);
+  }
+
+  // Mounts a tmpfs on `rel` (a directory of the source): a filesystem
+  // boundary below the source. Unmounted at TearDown.
+  void MountBelow(std::string_view rel) {
+    const std::string path = Path(rel);
+    ASSERT_EQ(::mount("tmpfs", path.c_str(), "tmpfs", 0, "mode=0751"), 0)
+        << path << ": " << std::strerror(errno);
+    mounts_below_.push_back(path);
+  }
+
   Reply Unlink(InodeId parent, std::string_view name) {
     std::string body(name);
     body.push_back('\0');
@@ -510,6 +618,7 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
   std::string source_;
+  std::vector<std::string> mounts_below_;
   sqlite3::Connection db_;
   MountFds mounts_;
   absl::BitGen bitgen_{std::seed_seq{4, 10}};
@@ -1134,6 +1243,141 @@ TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
   StartTrace();
   EXPECT_EQ(Mkdir(kRootInode, "new").first.error, 0);
   EXPECT_EQ(Cached(kRootInode, "new").first, LookupResult::kFound);
+}
+
+
+// --- Boundary stubs (step 23.5) -------------------------------------------
+//
+// A mount point or subvolume boundary below the source is served as a stub
+// directory: listed, looked up as a directory with a nodeid at or above
+// 2^63 (as its inode number too), and anything inside it ENOTSUP; renaming
+// it, or a rename or link into it, EXDEV.
+
+constexpr uint64_t kFirstStubNodeid = uint64_t{1} << 63;
+
+TEST_F(DirCacheFSTest, BoundaryIsAStubDirectory) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_EQ(::mkdir(Path("d/mp").c_str(), 0755), 0);
+  WriteFile(Path("d/f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  MountBelow("d/mp");  // After d's row, before its listing.
+  WriteFile(Path("d/mp/inside"));
+
+  EXPECT_THAT(List(d, false),
+              IsOkAndHolds(UnorderedElementsAre(".", "..", "f", "mp")));
+  EXPECT_THAT(List(d, true),
+              IsOkAndHolds(UnorderedElementsAre(".", "..", "f", "mp")));
+  auto [lookup, entry] = Lookup(d, "mp");
+  ASSERT_EQ(lookup.error, 0);
+  EXPECT_GE(entry.nodeid, kFirstStubNodeid);
+  EXPECT_EQ(entry.attr.ino, entry.nodeid);
+  EXPECT_NE(entry.generation, 0u);
+  EXPECT_TRUE(S_ISDIR(entry.attr.mode));
+  EXPECT_EQ(entry.attr.mode & 07777, 0751u);  // The tmpfs root's.
+  const InodeId stub = static_cast<InodeId>(entry.nodeid);
+
+  // The same stub every time.
+  auto [again, entry_again] = Lookup(d, "mp");
+  ASSERT_EQ(again.error, 0);
+  EXPECT_EQ(entry_again.nodeid, entry.nodeid);
+  EXPECT_EQ(entry_again.generation, entry.generation);
+  auto [getattr, attr] = Getattr(stub);
+  ASSERT_EQ(getattr.error, 0);
+  EXPECT_EQ(attr.ino, entry.nodeid);
+  EXPECT_TRUE(S_ISDIR(attr.mode));
+  auto [dot, dot_entry] = Lookup(stub, ".");
+  ASSERT_EQ(dot.error, 0);
+  EXPECT_EQ(dot_entry.nodeid, entry.nodeid);
+  auto [dotdot, dotdot_entry] = Lookup(stub, "..");
+  ASSERT_EQ(dotdot.error, 0);
+  EXPECT_EQ(dotdot_entry.nodeid, static_cast<uint64_t>(d));
+
+  // Anything inside: ENOTSUP.
+  EXPECT_EQ(Lookup(stub, "inside").first.error, -ENOTSUP);
+  EXPECT_EQ(Opendir(stub).error, -ENOTSUP);
+  EXPECT_EQ(Mkdir(stub, "x").first.error, -ENOTSUP);
+  EXPECT_EQ(Create(stub, "x", O_RDWR | O_CREAT).reply.error, -ENOTSUP);
+  EXPECT_EQ(Unlink(stub, "inside").error, -ENOTSUP);
+  EXPECT_EQ(Chmod(stub, S_IFDIR | 0700).error, -ENOTSUP);
+  EXPECT_EQ(Setxattr(stub, "user.x", "v").error, -ENOTSUP);
+  // No xattrs (the kernel asks for its ACLs in permission checks).
+  EXPECT_EQ(Getxattr(stub, "system.posix_acl_access").error, -ENODATA);
+  // Across it: EXDEV.
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f", d));
+  EXPECT_EQ(Rename(d, "f", stub, "f").error, -EXDEV);
+  EXPECT_EQ(Rename(stub, "inside", d, "g").error, -EXDEV);
+  EXPECT_EQ(Rename(d, "mp", d, "mp2").error, -EXDEV);
+  EXPECT_EQ(Link(f, stub, "f").error, -EXDEV);
+
+  // Nothing reached either side of the boundary.
+  EXPECT_EQ(::access(Path("d/mp/inside").c_str(), F_OK), 0);
+  EXPECT_NE(::access(Path("d/mp/x").c_str(), F_OK), 0);
+  EXPECT_NE(::access(Path("d/mp/f").c_str(), F_OK), 0);
+  EXPECT_EQ(::access(Path("d/f").c_str(), F_OK), 0);
+  EXPECT_NE(::access(Path("d/mp2").c_str(), F_OK), 0);
+}
+
+// The stub's nodeid is recorded with its dentry: a lookup resolved by a
+// single probe (an unknown name in a complete listing) gets the same stub
+// as the listing, and a FORGET of it is counted like any other.
+TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
+  ASSERT_EQ(::mkdir(Path("mp").c_str(), 0755), 0);
+  WriteFile(Path("a"));
+  Start();
+  MountBelow("mp");
+  ASSERT_THAT(Id("a"), IsOk());  // Populates the root.
+  auto [first, first_entry] = Lookup(kRootInode, "mp");
+  ASSERT_EQ(first.error, 0);
+  ASSERT_GE(first_entry.nodeid, kFirstStubNodeid);
+
+  // Forgotten and probed again: the same stub, refreshed in place.
+  ASSERT_THAT(cache::MarkUnknown(ctx_, kRootInode,
+                                 std::vector<std::string>{"mp"}),
+              IsOk());
+  ASSERT_EQ(Cached(kRootInode, "mp").first, LookupResult::kUnknown);
+  auto [second, second_entry] = Lookup(kRootInode, "mp");
+  ASSERT_EQ(second.error, 0);
+  EXPECT_GE(second_entry.nodeid, kFirstStubNodeid);
+  EXPECT_EQ(Cached(kRootInode, "mp").first, LookupResult::kRefused);
+
+  // Once the name is no longer a boundary, the stub goes with the refusal.
+  ASSERT_EQ(::umount2(Path("mp").c_str(), MNT_DETACH), 0);
+  mounts_below_.clear();
+  ASSERT_THAT(cache::MarkDirComplete(ctx_, kRootInode, false), IsOk());
+  ASSERT_THAT(cache::ForgetNegativeDentries(ctx_, kRootInode), IsOk());
+  auto [plain, plain_entry] = Lookup(kRootInode, "mp");
+  ASSERT_EQ(plain.error, 0);
+  EXPECT_LT(plain_entry.nodeid, kFirstStubNodeid);
+  EXPECT_EQ(plain_entry.attr.ino, InoOf(Path("mp")));
+  // The old stub's nodeid is stale now.
+  EXPECT_EQ(Getattr(static_cast<InodeId>(second_entry.nodeid)).first.error,
+            -ESTALE);
+}
+
+// Backing inode numbers at or above 2^63 are the stubs' (and, from Phase
+// 14, nodeids are backing inode numbers): an object with one is refused,
+// ENOTSUP, not served under a nodeid a stub may hold.
+TEST_F(DirCacheFSTest, BackingInodeNumbersInTheStubRangeAreRefused) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  WriteFile(Path("d/big"));
+  WriteFile(Path("d/small"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  FakeInodeNumbers()[InoOf(Path("d/big"))] = kFirstStubNodeid + 5;
+  // Listing d probes every name, so the whole listing is refused (and
+  // recorded as nothing: neither name is cached absent).
+  EXPECT_EQ(Lookup(d, "big").first.error, -ENOTSUP);
+  EXPECT_EQ(Lookup(d, "small").first.error, -ENOTSUP);
+  EXPECT_EQ(ErrnoOf(List(d, false).status()), ENOTSUP);
+  EXPECT_EQ(Cached(d, "big").first, LookupResult::kUnknown);
+  EXPECT_EQ(Cached(d, "small").first, LookupResult::kUnknown);
+
+  // A number below the range is served again.
+  FakeInodeNumbers().clear();
+  auto [lookup, entry] = Lookup(d, "big");
+  ASSERT_EQ(lookup.error, 0);
+  EXPECT_EQ(entry.attr.ino, InoOf(Path("d/big")));
 }
 
 }  // namespace

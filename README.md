@@ -317,8 +317,8 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
   `readonly_test`, `passthrough_test`, `lifecycle_test`, `handles_test`,
   `setattr_test`, `create_test`, `rename_test`, `write_test`,
   `credentials_test`, `crash_test`, `power_test`, `release_leak_test`,
-  `readdir_boundary_test`, `removed_test`, `names_test`, `nfs_test` and
-  `boot_test`.
+  `readdir_boundary_test`, `removed_test`, `boundary_test`, `names_test`,
+  `nfs_test` and `boot_test`.
   [`docs/design.md`](docs/design.md#test-strategy) says what each one
   proves.
 - **POSIX conformance**: `pjdfstest_test` runs all of pjdfstest (about 8800
@@ -539,9 +539,20 @@ recovery protocol, concurrency, and the test strategy.
   "Coherence" below). What dcfs *does* catch, for a subvolume exactly as
   for a real mount, is the boundary appearing at runtime -- a new mount, or
   a btrfs subvolume (pre-existing or freshly created), the first time dcfs
-  lists the directory it lives in: logged as an error, left out of
-  directory listings, and `EXDEV` when looked up (step 5.2's
-  `create_test_btrfs` covers this). Kernel support for FUSE submounts
+  lists the directory it lives in: logged as an error and shown as an
+  empty **stub directory** with the boundary root's mode, owner and times
+  and an inode number at or above 2^63 (a range no backing inode number
+  may use; dcfs refuses, with `ENOTSUP`, any object whose backing inode
+  number is in it). The stub can be looked up, `stat`ed and used as a
+  mount point; anything inside it (listing it, looking up, creating,
+  opening) fails with `ENOTSUP`, logged once per stub, and renaming it
+  with `EXDEV`. A link or rename *into* a stub fails with `ENOTSUP` rather
+  than `EXDEV`, because the kernel looks the target name up in the stub
+  first. The stub keeps its inode number across restarts (until its
+  directory is relisted). Its NFS handle stops working after a cache wipe.
+  Mount another dcfs (or the native filesystem) on the stub to reach what
+  is behind it (`boundary_test` covers mounts on all three filesystems and
+  btrfs subvolumes). Kernel support for FUSE submounts
   (`FUSE_ATTR_SUBMOUNT`, today used only by virtiofs) would allow lifting
   this.
 - **Writes through a shared writable `mmap` after the last `close()` are

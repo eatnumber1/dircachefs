@@ -933,32 +933,50 @@ class RefusalLog {
   absl::ScopedMockLog log_;
 };
 
-TEST_F(BoundaryTest, BoundaryIsExcludedFromTheListing) {
+// Step 23.5: the listing shows the boundary, as its stub.
+TEST_F(BoundaryTest, BoundaryIsListedAsItsStub) {
+  absl::StatusOr<Populated> populated;
   {
     RefusalLog log(1);
-    ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
+    populated = PopulateDirectory(ctx_, kRootInode);
   }
-  EXPECT_THAT(ListNames(ctx_, kRootInode), Not(Contains("boundary")));
+  ASSERT_THAT(populated, IsOk());
+  EXPECT_TRUE(populated->cached);
+  ASSERT_TRUE(populated->entries.contains("boundary"));
+  const LookupResult listed = populated->entries.at("boundary");
+  EXPECT_EQ(listed.kind, LookupResult::kRefused);
+  EXPECT_TRUE(cache::IsStub(listed.id));
+  EXPECT_THAT(ListNames(ctx_, kRootInode), Contains("boundary"));
   EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(true));
+  // The stub has the boundary root's attributes (a tmpfs root: 1777).
+  ASSERT_OK_AND_ASSIGN(cache::StubRow stub, cache::GetStub(ctx_, listed.id));
+  EXPECT_EQ(stub.name, "boundary");
+  EXPECT_EQ(stub.parent, kRootInode);
+  struct stat root {};
+  ASSERT_EQ(::stat(Path("boundary").c_str(), &root), 0);
+  EXPECT_EQ(stub.attr.st.st_mode, root.st_mode);
+  EXPECT_EQ(stub.attr.st.st_ino, static_cast<uint64_t>(listed.id));
 }
 
-TEST_F(BoundaryTest, LookupOfABoundaryReturnsExdevWithoutCachingNegative) {
-  absl::Status first;
+// Step 23.5: a boundary is its stub (a nodeid at or above 2^63).
+TEST_F(BoundaryTest, LookupOfABoundaryReturnsItsStubWithoutCachingNegative) {
+  absl::StatusOr<LookupResult> first;
   {
     RefusalLog log(1);
-    first = LookupOrPopulate(ctx_, kRootInode, "boundary").status();
+    first = LookupOrPopulate(ctx_, kRootInode, "boundary");
   }
-  EXPECT_FALSE(first.ok());
-  EXPECT_EQ(ErrnoOf(first), EXDEV);
+  ASSERT_THAT(first, IsOkAndHolds(IsLookup(LookupResult::kRefused)));
+  EXPECT_TRUE(cache::IsStub(first->id));
   // A second lookup answers straight from the persisted refusal: no
   // repopulation (the directory is already complete), no second log line,
-  // and still EXDEV rather than ENOENT.
-  absl::Status second;
+  // and the same stub rather than ENOENT.
+  absl::StatusOr<LookupResult> second;
   {
     RefusalLog log(0);
-    second = LookupOrPopulate(ctx_, kRootInode, "boundary").status();
+    second = LookupOrPopulate(ctx_, kRootInode, "boundary");
   }
-  EXPECT_EQ(ErrnoOf(second), EXDEV);
+  ASSERT_THAT(second, IsOkAndHolds(IsLookup(LookupResult::kRefused)));
+  EXPECT_EQ(second->id, first->id);
   // Never cached negative: cache::Lookup on its own (no populate) reports
   // kRefused -- the object exists, so this must never come back kNegative
   // (which would mean dcfs claims it is absent) or kUnknown (which would
@@ -977,11 +995,13 @@ TEST_F(BoundaryTest, BoundaryRefusalPersistsAcrossRestart) {
   // readable from the cache alone -- never from process memory, since a
   // dentry cached negative in a complete directory would otherwise report
   // ENOENT for something that still exists on the backing filesystem.
+  ASSERT_OK_AND_ASSIGN(LookupResult before, cache::Lookup(ctx_, kRootInode,
+                                                         "boundary"));
   Context restarted{db_, mounts_, bitgen_};
-  absl::Status status =
-      LookupOrPopulate(restarted, kRootInode, "boundary").status();
-  EXPECT_FALSE(status.ok());
-  EXPECT_EQ(ErrnoOf(status), EXDEV);
+  absl::StatusOr<LookupResult> after =
+      LookupOrPopulate(restarted, kRootInode, "boundary");
+  ASSERT_THAT(after, IsOkAndHolds(IsLookup(LookupResult::kRefused)));
+  EXPECT_EQ(after->id, before.id);
 }
 
 TEST_F(BoundaryTest, BoundaryDoesNotRegisterAFilesystem) {

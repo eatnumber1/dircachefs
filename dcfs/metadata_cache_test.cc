@@ -722,9 +722,10 @@ TEST_F(MetadataCacheTest, IsDirCompleteCostDoesNotGrowWithTheDirectory) {
   EXPECT_THAT(IsDirComplete(ctx_, big), IsOkAndHolds(true));
 }
 
-// A listing shows only present names, in first-linked order, and a name
-// that goes unknown and comes back keeps its position (its offset), so a
-// cursor taken before the change still resumes in the right place.
+// A listing shows present names and stubs (refused names, step 23.5), in
+// first-linked order, and a name that goes unknown and comes back keeps
+// its position (its offset), so a cursor taken before the change still
+// resumes in the right place.
 TEST_F(MetadataCacheTest, ListDirOrderSurvivesStateChanges) {
   ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
   for (std::string_view name : {"a", "b", "c", "d", "e"}) {
@@ -742,17 +743,23 @@ TEST_F(MetadataCacheTest, ListDirOrderSurvivesStateChanges) {
   ASSERT_THAT(MarkUnknown(ctx_, kRootInode, std::vector<std::string>{"c"}),
               IsOk());
   ASSERT_THAT(SetNegative(ctx_, kRootInode, "d"), IsOk());
-  ASSERT_THAT(SetRefused(ctx_, kRootInode, "e"), IsOk());
-  EXPECT_THAT(ListNames(ctx_, kRootInode), ElementsAre("a", "b"));
+  ASSERT_OK_AND_ASSIGN(InodeId stub,
+                       SetRefused(ctx_, kRootInode, "e",
+                                  Stx(31, S_IFDIR | 0755)));
+  EXPECT_TRUE(IsStub(stub));
+  EXPECT_THAT(ListNames(ctx_, kRootInode), ElementsAre("a", "b", "e"));
   std::vector<std::string> rest;
+  std::vector<InodeId> rest_ids;
   ASSERT_THAT(ListDir(ctx_, kRootInode, after_b,
-                      [&](std::string_view name, InodeId,
+                      [&](std::string_view name, InodeId child,
                           int64_t) -> absl::StatusOr<bool> {
                         rest.emplace_back(name);
+                        rest_ids.push_back(child);
                         return true;
                       }),
               IsOk());
-  EXPECT_THAT(rest, ::testing::IsEmpty());
+  EXPECT_THAT(rest, ElementsAre("e"));
+  EXPECT_THAT(rest_ids, ElementsAre(stub));
   ASSERT_THAT(LinkDentry(ctx_, kRootInode, "e", f.id), IsOk());
   ASSERT_THAT(LinkDentry(ctx_, kRootInode, "c", f.id), IsOk());
   EXPECT_THAT(ListNames(ctx_, kRootInode), ElementsAre("a", "b", "c", "e"));
@@ -765,6 +772,70 @@ TEST_F(MetadataCacheTest, ListDirOrderSurvivesStateChanges) {
                       }),
               IsOk());
   EXPECT_THAT(rest, ElementsAre("c", "e"));
+}
+
+// Step 23.5: a refused dentry's stub. SetRefused records it with the
+// refusal (nodeids from 2^63 up, a random nonzero generation, the boundary
+// root's attributes), keeps it while the name stays refused (refreshing the
+// attributes), and drops it with the refusal, however that goes.
+TEST_F(MetadataCacheTest, StubsLiveWithTheirRefusals) {
+  ASSERT_OK_AND_ASSIGN(InodeId dir, MakeDir(kRootInode, "dir", 40));
+  ASSERT_OK_AND_ASSIGN(InodeId mp, SetRefused(ctx_, dir, "mp",
+                                              Stx(2, S_IFDIR | 0751, 1)));
+  ASSERT_OK_AND_ASSIGN(InodeId sv, SetRefused(ctx_, dir, "sv",
+                                              Stx(256, S_IFDIR | 0700, 2)));
+  EXPECT_EQ(mp, kFirstStubId);
+  EXPECT_EQ(sv, kFirstStubId + 1);
+  EXPECT_EQ(static_cast<uint64_t>(mp), kFirstStubNodeid);
+
+  ASSERT_OK_AND_ASSIGN(StubRow row, GetStub(ctx_, mp));
+  EXPECT_EQ(row.parent, dir);
+  EXPECT_EQ(row.name, "mp");
+  EXPECT_TRUE(row.attr.valid);
+  EXPECT_NE(row.attr.fuse_gen, 0u);
+  EXPECT_EQ(row.attr.st.st_ino, kFirstStubNodeid);
+  EXPECT_EQ(row.attr.st.st_mode, S_IFDIR | 0751u);
+  EXPECT_EQ(row.attr.st.st_uid, 1001u);
+  EXPECT_THAT(Lookup(ctx_, dir, "mp"),
+              IsOkAndHolds(::testing::AllOf(IsLookup(LookupResult::kRefused),
+                                            ::testing::Field(
+                                                &LookupResult::id, mp))));
+
+  // Refused again: the same stub, attributes refreshed.
+  ASSERT_THAT(SetRefused(ctx_, dir, "mp", Stx(2, S_IFDIR | 0755, 3)),
+              IsOkAndHolds(mp));
+  ASSERT_OK_AND_ASSIGN(StubRow again, GetStub(ctx_, mp));
+  EXPECT_EQ(again.attr.fuse_gen, row.attr.fuse_gen);
+  EXPECT_EQ(again.attr.st.st_mode, S_IFDIR | 0755u);
+  EXPECT_EQ(again.attr.st.st_uid, 1003u);
+
+  // No longer refused (a mutation's phase 1, a relisting): no stub.
+  ASSERT_THAT(MarkUnknown(ctx_, dir, std::vector<std::string>{"mp"}), IsOk());
+  EXPECT_THAT(GetStub(ctx_, mp), StatusIs(absl::StatusCode::kNotFound));
+  ASSERT_THAT(PruneDentriesNotIn(ctx_, dir, {}), IsOk());
+  EXPECT_THAT(GetStub(ctx_, sv), StatusIs(absl::StatusCode::kNotFound));
+
+  // A stub's nodeid may be handed out again once its stub is gone; its
+  // generation is drawn again.
+  ASSERT_OK_AND_ASSIGN(InodeId again_id, SetRefused(ctx_, dir, "mp",
+                                                    Stx(2, S_IFDIR | 0751)));
+  EXPECT_EQ(again_id, kFirstStubId);
+  // And it goes with its directory.
+  ASSERT_THAT(InvalidateInode(ctx_, dir), IsOk());
+  EXPECT_THAT(GetStub(ctx_, again_id), StatusIs(absl::StatusCode::kNotFound));
+}
+
+// Recovery forgets a dirty directory's dentries, stubs included.
+TEST_F(MetadataCacheTest, RecoveryForgetsStubs) {
+  ASSERT_OK_AND_ASSIGN(InodeId dir, MakeDir(kRootInode, "dir", 40));
+  ASSERT_OK_AND_ASSIGN(InodeId mp, SetRefused(ctx_, dir, "mp",
+                                              Stx(2, S_IFDIR | 0751)));
+  const InodeId ids[] = {dir};
+  ASSERT_THAT(MarkDirty(ctx_, ids), IsOk());
+  ASSERT_THAT(RecoverDirty(ctx_), IsOkAndHolds(1));
+  EXPECT_THAT(GetStub(ctx_, mp), StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(Lookup(ctx_, dir, "mp"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
 }
 
 TEST_F(MetadataCacheTest, FuseGenerations) {

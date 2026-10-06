@@ -621,3 +621,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Orchestrator error: a merge command chain continued past a failed rebase and ran its later steps
   inside lane-1 (a stray detached commit; aborted, nothing lost). Merges are now one command per
   step, never chained past a rebase.
+- 23.5 (lane-1, step-23): boundary stubs. A refused dentry is a stub directory (schema v4 `stubs`:
+  nodeid >= 2^63, random generation, boundary root's attributes, triggers tie it to the refused dentry),
+  listed (ListDir merges present + refused in rowid order, cost test unchanged), ENOTSUP inside (logged
+  once per stub), EXDEV for renaming it; backing inode numbers >= 2^63 refused (ENOTSUP). Link/rename
+  into a stub give ENOTSUP, not 15.1's EXDEV: the kernel looks the target up in the stub first.

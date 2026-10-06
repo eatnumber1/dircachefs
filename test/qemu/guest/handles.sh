@@ -23,8 +23,9 @@
 #
 # Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
 # second filesystem mounted below the source after dcfs starts: no NFS
-# handle can ever be minted for a name dcfs refuses to cross into (see
-# handle-boundary-* below) -- see README's Limitations and
+# handle can ever be minted for anything behind a boundary, which dcfs
+# shows as a stub directory (step 23.5; see handle-boundary-* below) --
+# see README's Limitations and
 # dcfs/backing.cc's ProbeChild/PopulateDirectory. (The startup-refusal half
 # of amendment 12 -- dcfs refusing to start at all with a filesystem already
 # mounted below --source -- is exercised once, in readonly.sh.)
@@ -182,8 +183,10 @@ else
 	fail handle-basic-open "no handle for a.txt"
 fi
 
-# --- handle-boundary-*: no NFS handle can be minted for a name dcfs refuses
-# to cross into (amendment 12) -- vdc mounted below the source at runtime,
+# --- handle-boundary-*: no NFS handle can be minted for anything behind a
+# boundary (amendment 12; the boundary itself is a stub directory, step
+# 23.5, whose own handle decodes to the stub) -- vdc mounted below the
+# source at runtime,
 # under a directory ("d") never listed through dcfs before the mount
 # appears (see readonly.sh's boundary-* checks for why that ordering
 # matters: a directory dcfs already cached complete keeps serving that
@@ -191,16 +194,32 @@ fi
 
 mkdir /src/d/mp
 mount /dev/vdc /src/d/mp
+echo inside >/src/d/mp/inside
 listing=$(ls -1 "$MNT/d" 2>&1)
 case "$listing" in
-*mp*) fail handle-boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
-*) pass handle-boundary-not-listed ;;
+*mp*) pass handle-boundary-listed-as-stub ;;
+*) fail handle-boundary-listed-as-stub "mp missing from /mnt/d: $listing" ;;
 esac
-raw=$("$FHTEST" handle "$MNT/d/mp" 2>&1) || true
+raw=$("$FHTEST" handle "$MNT/d/mp/inside" 2>&1) || true
 case "$raw" in
-*cross-device*) pass handle-boundary-refused ;;
-*) fail handle-boundary-refused "fhtest handle -> '$raw' (want EXDEV/cross-device)" ;;
+*EOPNOTSUPP*) pass handle-boundary-refused ;;
+*) fail handle-boundary-refused "fhtest handle -> '$raw' (want EOPNOTSUPP)" ;;
 esac
+# The stub's own handle decodes (LOOKUP(stub, ".") once the kernel has
+# forgotten it) to the stub, which then refuses to be opened as a
+# directory: EOPNOTSUPP, not ESTALE.
+raw=$("$FHTEST" handle "$MNT/d/mp" 2>&1)
+set -- $raw
+if [ "$#" -eq 3 ]; then
+	echo 2 >/proc/sys/vm/drop_caches
+	out=$("$FHTEST" open "$MNT" "$1" "$3" 2>&1)
+	case "$out" in
+	*EOPNOTSUPP*) pass handle-boundary-stub-decodes ;;
+	*) fail handle-boundary-stub-decodes "fhtest open -> '$out' (want EOPNOTSUPP)" ;;
+	esac
+else
+	fail handle-boundary-stub-decodes "fhtest handle -> '$raw'"
+fi
 errors=$(grep -c "refusing to cache mp" "$LOG1")
 if [ "$errors" -eq 1 ]; then
 	pass handle-boundary-error-logged-once

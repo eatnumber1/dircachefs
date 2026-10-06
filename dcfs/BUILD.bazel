@@ -465,7 +465,8 @@ cc_library(
 # open_by_handle_at and syncfs that let a test run another request, or
 # begin a mutation, at a backing syscall of the request (or sync point)
 # under test: the interleavings coroutines will produce (see
-# dir_cache_fs_test.cc). A target of its own, so the wraps affect nothing
+# dir_cache_fs_test.cc); and of statx, to report inode numbers no tested
+# filesystem hands out. A target of its own, so the wraps affect nothing
 # else.
 DIR_CACHE_FS_TEST_DEPS = [
     ":backing",
@@ -493,6 +494,7 @@ DIR_CACHE_FS_TEST_DEPS = [
 DIR_CACHE_FS_TEST_WRAPS = [
     "-Wl,--wrap=name_to_handle_at",
     "-Wl,--wrap=open_by_handle_at",
+    "-Wl,--wrap=statx",
     "-Wl,--wrap=syncfs",
 ]
 

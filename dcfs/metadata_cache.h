@@ -3,6 +3,7 @@
 
 #include <sys/stat.h>
 
+#include <climits>
 #include <cstdint>
 #include <ctime>
 #include <optional>
@@ -55,6 +56,16 @@ namespace dcfs::cache {
 using InodeId = int64_t;
 inline constexpr InodeId kRootInode = 1;
 
+// Boundary stubs (step 23.5; schema.sql's `stubs`): a refused dentry is
+// served as a stub directory whose nodeid is at or above 2^63 as the
+// kernel sees it (an unsigned 64-bit fuse_ino_t), which is a negative
+// InodeId. inodes.id (AUTOINCREMENT) is always positive, so the two never
+// meet, and backing.cc refuses backing inode numbers in that range (from
+// Phase 14 on, nodeids are backing inode numbers).
+inline constexpr InodeId kFirstStubId = INT64_MIN;
+inline constexpr uint64_t kFirstStubNodeid = uint64_t{1} << 63;
+inline bool IsStub(InodeId id) { return id < 0; }
+
 struct CachedAttr {
   // False when the row's attributes are not known to be current
   // (inodes.attrs_valid = 0); `st` then holds the last cached values, if
@@ -82,14 +93,27 @@ struct LookupResult {
     kFound,     // A positive dentry; `id` is its inode.
     kNegative,  // A cached negative dentry: the name is known to be absent.
     kRefused,   // The name exists but is a refused mount/subvolume boundary
-                // (amendment 12): it must never be reported absent.
-                // backing::LookupOrPopulate turns this into EXDEV.
+                // (amendment 12): it must never be reported absent. It is
+                // served as a stub directory; `id` is the stub's (IsStub).
     kUnknown,   // Nothing is known about this name: an unknown row, or no
                 // row while the listing is incomplete.
   };
   Kind kind = kUnknown;
-  // Meaningful only for kFound; 0 otherwise.
+  // The inode for kFound, the stub for kRefused (0 if no stub was
+  // recorded: a listing that could not record its result); 0 otherwise.
   InodeId id = 0;
+};
+
+// A boundary stub (schema.sql's `stubs`): the refused dentry (parent, name)
+// it stands for, and its attributes, as GetAttr reads an inode's: valid,
+// st_ino the stub's nodeid, fuse_gen its generation, backing_ino the same
+// nodeid (a stub has no backing inode of its own; its inode number is its
+// nodeid).
+struct StubRow {
+  InodeId id = 0;
+  InodeId parent = 0;
+  std::string name;
+  CachedAttr attr;
 };
 
 struct UpsertResult {
@@ -120,6 +144,10 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
 // layer answers ESTALE).
 absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id);
 
+// The stub `id` (IsStub). NotFound if it has no row (its dentry is no
+// longer refused, or never was).
+absl::StatusOr<StubRow> GetStub(Context &ctx, InodeId id);
+
 // NotFound if there is no row for `id`. No production caller reads the
 // generation on its own today (GetAttr's CachedAttr::fuse_gen covers every
 // current need); kept as the single-field counterpart to GetAttr, exercised
@@ -132,12 +160,13 @@ using ListDirCallback = absl::FunctionRef<absl::StatusOr<bool>(
     std::string_view name, InodeId child, int64_t next_cursor)>;
 
 // Calls `cb` for each present dentry of `dir` after `cursor` (0 starts
-// from the beginning), in a stable order: cursors are dentry rowids, and
-// updating an existing dentry in place (LinkDentry/RenameDentry onto an
-// existing name) keeps its rowid. Other states are skipped: the caller
-// must make sure the listing is complete first (IsDirComplete). `cb` may
-// call other cache functions, including writes: no statement is held open
-// across a callback.
+// from the beginning), and each refused one (with its stub as `child`), in
+// a stable order: cursors are dentry rowids, and updating an existing
+// dentry in place (LinkDentry/RenameDentry onto an existing name) keeps its
+// rowid. Absent and unknown entries are skipped: the caller must make sure
+// the listing is complete first (IsDirComplete). `cb` may call other cache
+// functions, including writes: no statement is held open across a
+// callback.
 absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
                      ListDirCallback cb);
 
@@ -225,10 +254,18 @@ absl::Status SetNegative(Context &ctx, InodeId parent, std::string_view name);
 // Caches (parent, name) as a refused mount/subvolume boundary (amendment
 // 12): the name exists on the backing filesystem but dcfs will not cache
 // across it. Unlike SetNegative, this must never be read back as "absent" --
-// see LookupResult::kRefused and backing::LookupOrPopulate, which turns it
-// into EXDEV. Replaces whatever was cached for that name, same as
-// LinkDentry/SetNegative. NotFound if `parent` is missing.
-absl::Status SetRefused(Context &ctx, InodeId parent, std::string_view name);
+// see LookupResult::kRefused. Replaces whatever was cached for that name,
+// same as LinkDentry/SetNegative, and records the stub it is served as, in
+// the same transaction, with `root` (a statx of the boundary's root
+// directory) as its attributes: the stub it already had, if the name was
+// refused already (same nodeid and generation, attributes refreshed), else
+// a new one (the next unused nodeid from kFirstStubId up, and a random
+// nonzero generation from ctx.rng, so that a nodeid used again after its
+// stub went never comes back with the generation an NFS handle holds).
+// Returns the stub. NotFound if `parent` is missing.
+absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
+                                   std::string_view name,
+                                   const struct statx &root);
 
 // Marks (parent, name) unknown. Never deletes the inode row it pointed at,
 // since other (possibly uncached) links may remain. NotFound if `parent`

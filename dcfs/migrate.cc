@@ -216,6 +216,56 @@ absl::Status MigrateV2ToV3(sqlite3::Connection &db) {
   return absl::OkStatus();
 }
 
+// v3 -> v4 (step 23.5): boundary stubs. A refused dentry is now served as
+// a stub directory, whose nodeid and attributes live in `stubs`; an older
+// cache's refused dentries have none, so they become unknown (the
+// tri-state rule: never absent) and the next lookup or listing probes them
+// again and records their stubs. IF NOT EXISTS: a test that makes a v2 or v3
+// database from a fresh one undoes only what those steps add.
+absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
+  ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
+    CREATE INDEX IF NOT EXISTS dentries_refused ON dentries (parent)
+        WHERE state = 'refused';
+    CREATE TABLE IF NOT EXISTS stubs (
+      id INTEGER PRIMARY KEY CHECK (id < 0),
+      parent INTEGER NOT NULL REFERENCES inodes (id) ON DELETE CASCADE,
+      name BLOB NOT NULL,
+      fuse_gen INTEGER NOT NULL,
+      mode INTEGER NOT NULL,
+      nlink INTEGER NOT NULL,
+      uid INTEGER NOT NULL,
+      gid INTEGER NOT NULL,
+      rdev INTEGER NOT NULL,
+      size INTEGER NOT NULL,
+      blocks INTEGER NOT NULL,
+      blksize INTEGER NOT NULL,
+      atime_s INTEGER NOT NULL,
+      atime_ns INTEGER NOT NULL,
+      mtime_s INTEGER NOT NULL,
+      mtime_ns INTEGER NOT NULL,
+      ctime_s INTEGER NOT NULL,
+      ctime_ns INTEGER NOT NULL,
+      btime_s INTEGER NOT NULL,
+      btime_ns INTEGER NOT NULL,
+      UNIQUE (parent, name)
+    ) STRICT;
+    CREATE TRIGGER IF NOT EXISTS dentries_unrefused
+        AFTER UPDATE OF state ON dentries
+        WHEN OLD.state = 'refused' AND NEW.state != 'refused' BEGIN
+      DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
+    END;
+    CREATE TRIGGER IF NOT EXISTS dentries_refused_deleted
+        AFTER DELETE ON dentries WHEN OLD.state = 'refused' BEGIN
+      DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
+    END;
+    UPDATE dentries SET state = 'unknown' WHERE state = 'refused';
+    UPDATE cache_state SET schema_version = 4 WHERE id = 1;
+  )sql"));
+  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  RET_CHECK_EQ(version, 4);
+  return absl::OkStatus();
+}
+
 // Upgrades an existing database, one version at a time, to kSchemaVersion,
 // in one transaction. A version newer than this build's is refused.
 absl::Status UpgradeSchema(sqlite3::Connection &db) {
@@ -233,6 +283,10 @@ absl::Status UpgradeSchema(sqlite3::Connection &db) {
     if (version == 2) {
       ABSL_RETURN_IF_ERROR(MigrateV2ToV3(db));
       version = 3;
+    }
+    if (version == 3) {
+      ABSL_RETURN_IF_ERROR(MigrateV3ToV4(db));
+      version = 4;
     }
     RET_CHECK_EQ(version, kSchemaVersion);
     return absl::OkStatus();
