@@ -369,3 +369,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   privileges on the real inode during passthrough writes) should stop them; verify the kernel's
   behaviour for passthrough writes before enabling, test first (count GETXATTRs during a 4 KiB-write
   loop). Also check guest/passthrough.sh's own cpu_ticks check for the same flake.
+- Phase 10 resumed in lane-4 (load back to ~8) from the earlier agent's uncommitted work.
