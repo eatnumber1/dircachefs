@@ -576,3 +576,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   test with cpio hidden). Note: .github/ci/prepare.sh still installs cpio (kernel build may need it).
 - Session cut off by the usage limit while 12.2c (trace validation final round) was finishing its
   tests in lane-1; resume it first. Then S3 (full plain + ASan on main).
+- 12.2c merged: trace validation complete (two reviewer rounds; audits/review-2026-10-0{6,7}-trace-
+  validation*.md). Forbidden steps now reject or become `unexplained` (no hiding behind cuts: held
+  lines flushed, deferred "failed" cuts decided at the reply, dir-itself tied to the request's own
+  resolution, fills judged by the recorder's own mutation record, root traces must reach the run's
+  final event); 54 formal+dcfs tests, 126 presubmit, four guest trace tests green; faults rejected:
+  skip mark-unknown, syscall before phase 1 (unlink and create-inside-listing), phase 3 before
+  syscall, snapshot after syncfs, swallowed syscall error. Phase 12 done. S3 next.
