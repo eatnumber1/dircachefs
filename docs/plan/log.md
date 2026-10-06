@@ -594,3 +594,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Capped server (1.5 GB heap, memory=3500, one test at a time) ran without OOM at load 1-5.
   Wave 3 complete. Next: Phase 23 (semantics gaps) in lane-1; pending build-speed measurements in
   lane-4 (two building lanes).
+- Build-speed measurements complete (notes/build-speed-2026-10-07.md): cold total ~32 min of actions, kernel 690 s + QEMU 518 s = 62%; sanitizer configs rebuild the six foreign_cc tools (~890 s avoidable); exec-config actions (kernel, busybox, bc, Debian image, TLC) are config-independent already. Distro kernels: Alpine linux-virt and Debian 13 boot no faster than ours under KVM, both lack DM_DUST, Debian needs ACPI and modules, Alpine pins vanish from mirrors within weeks. Recommendation: make the tool builds config-independent now; remote cache for CI; do not replace our kernel.
