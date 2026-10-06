@@ -36,7 +36,7 @@ trap 'rm -rf "$BUILD"' EXIT
 make() {
 	# Bazel's genrule sandbox PATH already has /usr/bin:/bin (same as
 	# every other genrule in this repo that shells out to host tools,
-	# e.g. test/qemu/scripts/mkinitramfs.sh's use of cpio/gzip); no
+	# e.g. test/qemu/scripts/mkinitramfs.sh's use of gzip); no
 	# toolchain plumbing beyond that is needed here, consistent with
 	# the rest of the tree pre-Phase-7 (the pinned-clang phase).
 	command make "$@"

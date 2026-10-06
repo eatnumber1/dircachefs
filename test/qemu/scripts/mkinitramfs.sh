@@ -178,6 +178,18 @@ else
 	[ -f "$ROOT/pjdfstest/pjdfstest" ] && chmod +x "$ROOT/pjdfstest/pjdfstest"
 fi
 
-(cd "$ROOT" && find . | cpio -o -H newc --quiet | gzip -1) >"$OUT_ABS"
+# The archive is made by the pinned busybox's own cpio (no host cpio: Phase
+# 5.2's act run found a host without one printing "cpio: not found" and
+# leaving an empty initramfs behind), through a file rather than a pipe so
+# that cpio's exit status is the one that counts (`set -o pipefail` is not in
+# every /bin/sh), and the output is removed on any failure so that nothing
+# empty or partial can be cached.
+CPIO="$WORK/initramfs.cpio"
+if ! (cd "$ROOT" && find . | "$BUSYBOX" cpio -o -H newc >"$CPIO") ||
+	! gzip -1 <"$CPIO" >"$OUT_ABS"; then
+	rm -f "$OUT_ABS"
+	echo "mkinitramfs.sh: building the initramfs failed" >&2
+	exit 1
+fi
 
 echo "Initramfs: $OUT_ABS"

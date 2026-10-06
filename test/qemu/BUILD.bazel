@@ -386,6 +386,23 @@ qemu_test_matrix(
     timeout = "eternal",
 )
 
+# mkinitramfs.sh builds the archive with the pinned busybox's cpio (no host
+# cpio needed) and fails when cpio fails instead of leaving an empty
+# initramfs behind (host-side, fake tools).
+sh_test(
+    name = "mkinitramfs_test",
+    size = "small",
+    srcs = ["mkinitramfs_test.sh"],
+    args = [
+        "$(location scripts/mkinitramfs.sh)",
+        "$(location //third_party/busybox:busybox_build)",
+    ],
+    data = [
+        "scripts/mkinitramfs.sh",
+        "//third_party/busybox:busybox_build",
+    ],
+)
+
 # R3 (L5): run-qemu.sh formats the scratch disks with the pinned tools it is
 # given, logs them, and refuses host paths (fake qemu and mkfs; no guest).
 sh_test(

@@ -205,6 +205,12 @@ CONFIG_FEATURE_TOUCH_SUSV3=y
 CONFIG_TRUE=y
 CONFIG_FALSE=y
 
+# test/qemu/scripts/mkinitramfs.sh builds the initramfs archive with this
+# busybox's cpio (-o -H newc, creation mode) instead of a host cpio, which
+# a build host may not have.
+CONFIG_CPIO=y
+CONFIG_FEATURE_CPIO_O=y
+
 # ash's own interactive-shell "pwd" when a script calls it as a plain
 # command rather than relying on the builtin.
 CONFIG_PWD=y

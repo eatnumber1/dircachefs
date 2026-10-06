@@ -35,7 +35,7 @@ echo "PASS: $BB --help runs"
 # here is a bug in one file or the other, not a real requirements
 # difference.
 required_applets="
-[ ash awk basename cat chgrp chmod chown chroot cmp cp cut date dd diff
+[ ash awk basename cat chgrp chmod chown chroot cmp cp cpio cut date dd diff
 dirname dmesg echo fallocate false find free grep head id ip kill ln ls
 md5sum mdev mkdir mkfifo mknod more mount mountpoint mv printf pwd
 readlink reboot rm rmdir sed sh sleep sort stat sync tail test timeout

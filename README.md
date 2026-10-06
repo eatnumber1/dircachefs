@@ -90,7 +90,6 @@ these packages on a CI runner.
 |---|---|---|
 | `build-essential` (gcc, g++, binutils, make) | every C/C++ compile, the kernel, QEMU and the mkfs tools | Phase 7 pins an LLVM toolchain |
 | `flex`, `bison` | the kernel build (kconfig's lexer and parser) | the BCR builds fail on them, `third_party/linux/README.md` |
-| `cpio` | `test/qemu/scripts/mkinitramfs.sh` packs every test's initramfs | found by `act` (Phase 5.2); the pinned busybox's `cpio` applet is the hermetic candidate |
 | `ninja-build` | QEMU's build (`third_party/qemu`) | found by `act` (Phase 5.2); QEMU's configure fails with "Cannot find Ninja" |
 | `libelf-dev` | the kernel build: objtool includes `<gelf.h>` | found by `act` (Phase 5.2); the BCR's `elfutils` is the hermetic candidate, not pursued (`third_party/linux/README.md`) |
 | `python3`, `perl` | QEMU's configure and meson, the kernel's scripts | universal on build hosts |
