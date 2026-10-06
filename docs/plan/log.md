@@ -485,3 +485,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   ftp.gnu.org unreachable once: gnu_bc has a mirrors.kernel.org second URL. pjdfstest under TCG:
   ext4 only, 7200 s. Kernel matrix deferred (kernel.config asks for FUSE_IO_URING, 6.14+; the stated
   minimum of 6.9 is not buildable as pinned). Nothing published; russ pushes when ready.
+- 12.2b done on step-12.2 (dcfs-protocol, 7 commits): cuts restricted to unmodelled steps with
+  per-target allowlists (harness: none), forbidden steps become rejected lines or `unexplained`;
+  MutationSyscallStarting/SyncfsStarting events; InodeForgetting before the DELETE; fills report
+  the code's decision; begin lines carry an origin checked by TraceInit; RecoverForgetting added to
+  dcfs.tla with T_Recover restricted to the recorded dirty keys (state counts ~1.7x: small 688k,
+  large 6.3M, nolock 5.1M). Fault tests: syscall before phase 1, phase 3 before syscall, snapshot
+  after syncfs, skip mark-unknown (reason-checked), plus recorder unit tests and hand-written trace
+  tests; all reject. 44/44 formal+dcfs, presubmit 116/116. Limitation: guest root traces for
+  crash/rename/create stop at the first link or cross-directory rename (explicit root_cuts); only
+  power.sh's reaches the end; modelling links/cross-directory renames is future model scope. Second
+  reviewer pass dispatched before merge.
