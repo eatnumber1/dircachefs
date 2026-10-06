@@ -1,10 +1,26 @@
-# Build only. Every dcfs test, unit tests included, runs as root inside a
-# QEMU guest booted with KVM from the project's own kernel (see README.md's
-# "Testing" and test/qemu/README.md). GitHub's hosted runners have no KVM,
-# so running `bazel test` here would only fail; tests need a KVM-capable
-# self-hosted runner (Phase 5 wires this up; the test kernel itself is now
-# stock and Bazel-built, so no out-of-tree kernel build is needed there).
-# `bazel build //...` builds every test binary without running any.
+# CI: the whole test suite, in three jobs of increasing size (the tiers of
+# test/qemu/README.md). Every dcfs test, unit tests included, boots the
+# project's own kernel under QEMU as root; KVM is used when the runner has
+# it (public repositories' standard Linux runners do) and TCG otherwise
+# (.github/ci/prepare.sh, .github/ci/test.sh). Bazel builds everything the
+# tests need: the kernel, QEMU, busybox, the mkfs tools and the Debian image.
+#
+# Developed with nektos/act before publication: see "CI" in README.md and
+# third_party/act/README.md (`bazel run //third_party/act -- -j fast`).
+#
+# Kernel matrix: not yet. The tests boot the one pinned kernel
+# (//third_party/linux:bzImage, today the latest stable release); testing the
+# minimum supported kernel (6.9, README.md) as well needs a second pinned
+# kernel, a config fragment without the options newer than 6.9 (FUSE_IO_URING
+# is 6.14) and a Bazel flag selecting the kernel in the qemu_test macros. See
+# "Kernel matrix" in third_party/linux/README.md.
+#
+# Caches: the disk cache is content addressed, so a pin change invalidates
+# only the actions whose inputs changed; the cache keys therefore end in the
+# commit and restore the newest entry of the same job ("restore-keys"), and
+# the cache is saved even when tests fail (the kernel build takes half an
+# hour). A job with no cache of its own starts from the newest cache of any
+# job ("bazel-"), so presubmit and full start from what fast built.
 
 name: CI
 
@@ -12,16 +28,146 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  fast:
+    # Small tests: `bazel test --config=fast //...` (about a minute with KVM, once built).
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: bazel-contrib/setup-bazel@0.14.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore Bazel caches
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          bazelisk-cache: true
-          disk-cache: ${{ github.workflow }}
-          repository-cache: true
-      - run: bazel build //...
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repo-cache
+            ~/.cache/bazelisk
+          key: bazel-fast-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-fast-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-fast-
+            bazel-
+      - name: Test
+        run: ./.github/ci/test.sh --config=fast
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Upload test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-fast
+          path: ci-test-logs
+          if-no-files-found: ignore
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repo-cache
+            ~/.cache/bazelisk
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  presubmit:
+    # Small and medium tests.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    needs: fast
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore Bazel caches
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repo-cache
+            ~/.cache/bazelisk
+          key: bazel-presubmit-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-presubmit-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-presubmit-
+            bazel-
+      - name: Test
+        run: ./.github/ci/test.sh --config=presubmit
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Upload test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-presubmit
+          path: ci-test-logs
+          if-no-files-found: ignore
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repo-cache
+            ~/.cache/bazelisk
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  full:
+    # Every test, then every test again under AddressSanitizer.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    needs: presubmit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore Bazel caches
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repo-cache
+            ~/.cache/bazelisk
+          key: bazel-full-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-full-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-full-
+            bazel-
+      - name: Test (all tiers)
+        run: ./.github/ci/test.sh
+      - name: Test (AddressSanitizer)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/test.sh --config=asan
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Upload test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-full
+          path: ci-test-logs
+          if-no-files-found: ignore
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazel-repo-cache
+            ~/.cache/bazelisk
+          key: ${{ steps.cache.outputs.cache-primary-key }}

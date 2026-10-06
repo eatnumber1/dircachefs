@@ -153,9 +153,31 @@ silently depended on:
   (ordinary kbuild scripting dependencies; these are effectively universal
   on any Linux build host and were not considered worth pinning
   separately).
-- `libelf`/`zlib` *headers* are on the host's default include path in case
-  some future config change needs them (e.g. enabling `STACK_VALIDATION`),
-  but this build's current config does not actually use them.
+- `libelf` *headers* (`libelf-dev`): objtool (`tools/objtool`, built by
+  every x86 kernel build) includes `<gelf.h>`. An earlier version of this
+  file said the build did not use them: it only seemed so because every
+  development host had them. Found by running the build in a fresh
+  GitHub-runner-like container (`act`, Phase 5.2); the BCR's `elfutils`
+  would make it hermetic and has not been tried.
+
+## Kernel matrix (not yet)
+
+CI would run the suite on the minimum supported kernel (README.md says 6.9)
+as well as the pinned one. That is not cheap with today's tree, so it is a
+follow-up (Phase 5.2 checked):
+
+1. a second `http_archive` for the latest 6.9.x release and a second
+   `:kernel_build` target;
+2. a config fragment for it: `kernel.config` asks for `CONFIG_FUSE_IO_URING`
+   (6.14 and later), which `build_kernel.sh` rejects as "did not survive
+   olddefconfig" on 6.9, and possibly other symbols that changed names;
+3. a Bazel flag selecting the kernel in `qemu_test`, `qemu_test_matrix` and
+   `qemu_cc_test` (`test/qemu/*.bzl`): they all name `:bzImage` directly
+   since step 4.4 removed the old flag;
+4. dcfs itself must run without io_uring on a kernel that lacks it (the
+   guest scripts and tests that expect it need a skip).
+
+Then the workflow gets a `kernel` matrix dimension over the two targets.
 
 ## Selecting the kernel
 

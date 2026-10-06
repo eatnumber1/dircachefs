@@ -9,7 +9,9 @@ see `AGENTS.md`'s third-party-code convention.
 ## Pin
 
 - Version: 1.08.2 (latest release on ftp.gnu.org/gnu/bc as of 2026-10-05).
-- URL: `https://ftp.gnu.org/gnu/bc/bc-1.08.2.tar.gz`
+- URL: `https://ftp.gnu.org/gnu/bc/bc-1.08.2.tar.gz`, with
+  `https://mirrors.kernel.org/gnu/bc/bc-1.08.2.tar.gz` as a second URL for
+  the same sha256 (ftp.gnu.org was unreachable during step 5.2's CI run).
 - sha256: `ae470fec429775653e042015edc928d07c8c3b2fc59765172a330d3d87785f86`
   (matches the detached `.sig` published alongside the tarball; verified by
   downloading the tarball directly and hashing it).

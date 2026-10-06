@@ -1,0 +1,2 @@
+# Overlay for the act release tarball (act, LICENSE, README.md).
+exports_files(["act"])

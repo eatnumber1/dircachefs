@@ -203,6 +203,45 @@ only as many guests as fit in the machine. Timeouts are explicit
 New tests: pick the tier from the measured duration (read it from
 `bazel-testlogs/**/test.xml`).
 
+## CI
+
+`.github/workflows/ci.yml` runs the three tiers as three jobs (`fast`,
+`presubmit`, `full`; the top-level README's "Continuous integration"
+section has the whole story) with the same scripts and the same timeouts as
+a development machine:
+
+- `.github/ci/prepare.sh` makes `/dev/kvm` usable when the runner has it and
+  installs the host tools (README.md, "Host requirements"). Tests that run
+  under TCG are visible in the log: `run-qemu.sh` prints `using tcg` and
+  `.github/ci/accelerator.sh` counts them.
+- Without KVM `.github/ci/test.sh` raises Bazel's timeouts (short, moderate,
+  long, eternal: 300, 1800, 3600, 7200 s) and drops pjdfstest on xfs and
+  btrfs: Phase 5.1 measured pjdfstest on ext4 at 3502 s under TCG against the
+  3600 s `eternal` limit, and each filesystem costs that again.
+- `--cache_test_results=no`: every test runs on the runner even when the
+  restored Bazel disk cache holds a result for it.
+- A failed `bazel test` uploads each test's `test.log`, `test.xml` and
+  `test.outputs/` (the guest's `serial.log`).
+
+First `act` runs (Phase 5.2, KVM, 4-core 12 GB machine shared with other
+work; times are for that machine): `fast` 52/52 tests and `presubmit`
+100/100 pass (warm cache: about 3 and 8-16 minutes; cold, the kernel, QEMU
+and the mkfs tools build in about an hour). The `full` job's plain
+`bazel test //...` ran 117 tests in 67 minutes (pjdfstest 721-845 s per
+filesystem, `idle_long_test` 662 s) and failed only `idle_short_test_xfs`
+(60 s idle saw +4 backing writes; the same test passed in `presubmit`, so it
+is load-sensitive). Its `--config=asan` pass failed 9 of 117: `memory_test`
+x4 (ASan inflates RSS to 7862 bytes per entry against the 256 limit),
+`names_random_slow_test` x4 (the daemon disconnects, ENOTCONN, during the
+100,000-name run; it fails the same way under `--config=asan` on the host)
+and `idle_short_test_xfs` again. These are test findings,
+not host dependencies; the ASan tier of CI stays red until they are
+resolved or the tests are excluded from `--config=asan`.
+
+`bazel run //third_party/act -- -j full` runs a job locally in a container
+that has only what a fresh runner has (`third_party/act/README.md`): the way
+to find out that a test quietly uses a tool of your machine.
+
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 
 ```

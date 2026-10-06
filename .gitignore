@@ -6,3 +6,5 @@
 /.claude/settings.local.json
 # Per-checkout Bazel settings (see .bazelrc).
 /user.bazelrc
+# Local act state (third_party/act/README.md).
+/.act/

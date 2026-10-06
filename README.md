@@ -72,11 +72,29 @@ The repository carries forward the history of a 2023 experiment called
   Bazel 9.2.0 in `.bazelversion`) and a C++20 compiler. Every library
   dependency (Abseil, SQLite, stock libfuse 3.18.2) is fetched and built
   by Bazel; no system libfuse is needed.
-- **To test:** `truncate`, network access once per pin, and KVM (optional,
-  but tests are 2-9x slower under TCG). QEMU, its qboot firmware, the
-  guest's busybox and the mkfs tools (`mke2fs`, `mkfs.xfs`, `mkfs.btrfs`)
-  are all pinned and built by Bazel, not installed on the host. See
-  [Testing](#testing).
+- **To test:** KVM (optional, but tests are 2-9x slower under TCG), network
+  access once per pin, and the host tools below. QEMU, its qboot firmware,
+  the guest's busybox and the mkfs tools (`mke2fs`, `mkfs.xfs`,
+  `mkfs.btrfs`) are all pinned and built by Bazel, not installed on the
+  host. See [Testing](#testing).
+
+### Host requirements
+
+Bazel builds everything else, but a few build and test steps still use the
+host's tools. This is the complete list, kept honest by running the whole
+suite in a fresh GitHub-runner-like container (`act`, see
+[CI](#continuous-integration)); `.github/ci/prepare.sh` installs exactly
+these packages on a CI runner.
+
+| Package (Debian/Ubuntu) | Used by | Why it is not hermetic yet |
+|---|---|---|
+| `build-essential` (gcc, g++, binutils, make) | every C/C++ compile, the kernel, QEMU and the mkfs tools | Phase 7 pins an LLVM toolchain |
+| `flex`, `bison` | the kernel build (kconfig's lexer and parser) | the BCR builds fail on them, `third_party/linux/README.md` |
+| `cpio` | `test/qemu/scripts/mkinitramfs.sh` packs every test's initramfs | found by `act` (Phase 5.2); the pinned busybox's `cpio` applet is the hermetic candidate |
+| `ninja-build` | QEMU's build (`third_party/qemu`) | found by `act` (Phase 5.2); QEMU's configure fails with "Cannot find Ninja" |
+| `libelf-dev` | the kernel build: objtool includes `<gelf.h>` | found by `act` (Phase 5.2); the BCR's `elfutils` is the hermetic candidate, not pursued (`third_party/linux/README.md`) |
+| `python3`, `perl` | QEMU's configure and meson, the kernel's scripts | universal on build hosts |
+| `coreutils` (`truncate`), `curl`, `xz-utils`, `git` | scratch-disk images, fetching, archives | universal on build hosts |
 
 ## Building
 
@@ -313,9 +331,59 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
 Bugs get a regression test first: the test is shown to fail on the
 unfixed code, then the fix makes it pass.
 
-The GitHub Actions workflow (`.github/workflows/ci.yml`) only builds
-(`bazel build //...`): hosted runners have no KVM, so the tests need a
-KVM-capable machine set up as above.
+## Continuous integration
+
+`.github/workflows/ci.yml` runs the whole suite on GitHub Actions
+(`ubuntu-24.04` runners) in three jobs, the tiers of
+`test/qemu/README.md`:
+
+| Job | Runs | Needs |
+|---|---|---|
+| `fast` | `bazel test --config=fast //...` (small tests) | |
+| `presubmit` | `bazel test --config=presubmit //...` (small and medium) | `fast` |
+| `full` | `bazel test //...` (every tier, pjdfstest on all three filesystems), then `bazel test --config=asan //...` | `presubmit` |
+
+- **Caches.** Bazel's disk cache, repository cache and Bazelisk's download
+  are restored and saved with `actions/cache`, even when tests fail (the
+  kernel build takes half an hour). The disk cache is content addressed, so
+  a pin change invalidates only the actions whose inputs changed; the keys
+  end in the commit and fall back to the newest entry of the same job.
+- **KVM.** `.github/ci/prepare.sh` makes `/dev/kvm` usable if the runner has
+  one (public repositories' standard Linux runners do; private ones do
+  not) and the tests log which accelerator they used. Without KVM the tests
+  run under TCG: `bazel test` gets longer timeouts (`--test_timeout`: 300,
+  1800, 3600, 7200 s for short, moderate, long, eternal; Phase 5.1 measured
+  pjdfstest on ext4 at 3502 s of the default 3600 s) and pjdfstest runs on
+  ext4 only (about 3500 s per filesystem under TCG, and xfs and btrfs have
+  the other tests' variants); `.github/ci/test.sh` does both.
+- **Failures** upload every test's `test.log`, `test.xml` and `test.outputs/`
+  (the guest's serial console) as the `test-logs-<job>` artifact.
+- **Kernel matrix: not yet.** Every test boots the one pinned kernel
+  (`//third_party/linux:bzImage`, the latest stable release when pinned).
+  Testing the minimum supported kernel (6.9) too needs a second pinned
+  kernel, a config fragment without the options newer than 6.9
+  (`FUSE_IO_URING` is 6.14) and a Bazel flag choosing the kernel in the
+  `qemu_test` macros: `third_party/linux/README.md`, "Kernel matrix".
+- **Host tools.** `.github/ci/prepare.sh` installs the packages of
+  [Host requirements](#host-requirements) explicitly and the pinned
+  Bazelisk (sha256-checked).
+
+### Running CI locally with act
+
+The workflow is developed with [nektos/act](https://github.com/nektos/act),
+which runs its jobs in containers that resemble GitHub's runners, so it can
+be iterated on before anything is pushed. `act` and the runner image are
+pinned (`third_party/act/README.md`):
+
+```
+bazel run //third_party/act -- -j fast        # also presubmit, full
+```
+
+The job container gets `/dev/kvm`, so the QEMU tests run there as on a
+hosted runner. Because the container has only what a fresh runner has, a
+build or test that quietly depends on this machine's tools fails there:
+running the `full` job under `act` is how the host requirements above were
+found. Run it again after adding a tool or a test.
 
 ## Design overview
 
