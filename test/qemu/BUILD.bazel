@@ -37,12 +37,14 @@ genrule(
         "//dcfs:main_static",
         "//tools:fhtest",
         "//tools:testutil",
+        "//bench:dcfs_bench",
         "@pjdfstest//:pjdfstest",
         "@pjdfstest//:tests",
         "//third_party/busybox:busybox_build",
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]),
     outs = ["initramfs.cpio.gz"],
+    testonly = 1,
     cmd = "$(location scripts/mkinitramfs.sh) $@ " +
           "$(location //third_party/busybox:busybox_build) " +
           "$(location //dcfs:main_static) " +
@@ -288,6 +290,58 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Phase 10: the idle test (backing device I/O counters stay at zero while a
+# warm dcfs does only what a quiet server does) and the memory test (RSS
+# after find, and after drop_caches) -- see guest/idle.sh, guest/memory.sh.
+# idle_short is the medium tier, idle_long (ten minutes) large. The memory
+# disk is sparse and big enough for 100000 ext4 inodes (the host mkfs's
+# default one inode per 16 KiB).
+qemu_test_matrix(
+    name = "idle_short_test",
+    disks = [("vdb", "ext4", "320M")],
+    guest_script = "guest/idle_short.sh",
+    size = "medium",
+    other_size = "large",
+    timeout = "moderate",
+)
+
+qemu_test(
+    name = "idle_long_test",
+    disks = [("vdb", "ext4", "320M")],
+    guest_script = "guest/idle_long.sh",
+    size = "large",
+    timeout = "long",
+)
+
+qemu_test_matrix(
+    name = "memory_test",
+    disks = [("vdb", "ext4", "2G")],
+    guest_script = "guest/memory.sh",
+    size = "medium",
+    other_size = "large",
+    timeout = "long",
+)
+
+# Phase 10: the benchmarks (bench/dcfs_bench.cc, run by guest/bench.sh). The
+# smoke tests run every benchmark for one iteration on tiny trees so the
+# suite keeps building and running; the full run, on real trees and with
+# google/benchmark's own iteration counts, is the large tier and prints the
+# numbers recorded in docs/plan/log.md. vdc sits under a device-mapper delay
+# target. Sizes: 320M clears mkfs.xfs's 300 MB floor; the full run's vdb
+# holds 100000 entries (+10000 in the readdir directory) at the host mkfs's
+# default one inode per 16 KiB.
+qemu_test_matrix(
+    name = "bench_smoke_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "320M"),
+    ],
+    guest_script = "guest/bench_smoke.sh",
+    size = "small",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
 qemu_test_matrix(
     name = "names_random_test",
     disks = [("vdb", "ext4", "320M")],
@@ -315,4 +369,13 @@ sh_test(
     srcs = ["run_qemu_mkfs_test.sh"],
     args = ["$(location scripts/run-qemu.sh)"],
     data = ["scripts/run-qemu.sh"],
+qemu_test(
+    name = "bench_full_test",
+    disks = [
+        ("vdb", "ext4", "4G"),
+        ("vdc", "ext4", "320M"),
+    ],
+    guest_script = "guest/bench_full.sh",
+    size = "enormous",
+    timeout = "eternal",
 )

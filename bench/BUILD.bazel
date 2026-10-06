@@ -1,0 +1,42 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+# Phase 10: the benchmark suite. One statically linked binary, installed in
+# the QEMU guest initramfs as /bin/dcfs_bench (see //test/qemu:initramfs and
+# test/qemu/guest/bench_*.sh): google/benchmark cases for dcfs and the
+# backing filesystem, plus the `mktree` and `dm-delay` helper subcommands.
+# Same --config=asan/--config=ubsan select() as //tools:testutil.
+cc_library(
+    name = "bench_lib",
+    testonly = 1,
+    srcs = [
+        "dm_delay.cc",
+        "process.cc",
+        "tree.cc",
+    ],
+    hdrs = [
+        "dm_delay.h",
+        "process.h",
+        "tree.h",
+    ],
+)
+
+cc_binary(
+    name = "dcfs_bench",
+    testonly = 1,
+    srcs = [
+        "clock_shim.cc",
+        "dcfs_bench.cc",
+    ],
+    features = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
+    linkopts = ["-Wl,--wrap=clock_gettime"],
+    linkstatic = True,
+    visibility = ["//test/qemu:__pkg__"],
+    deps = [
+        ":bench_lib",
+        "@google_benchmark//:benchmark",
+    ],
+)

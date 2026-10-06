@@ -7,6 +7,7 @@ bazel_dep(name = "rules_cc", version = "0.2.25")
 bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
+bazel_dep(name = "google_benchmark", version = "1.9.5")
 
 # Phase 4: pinned, Bazel-built QEMU (third_party/qemu/). rules_foreign_cc's
 # configure_make rule drives QEMU's own ./configure + the Makefile shim it

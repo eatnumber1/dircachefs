@@ -601,6 +601,51 @@ way any admin would:
   pass for the wrong reason (served from the client's cache, never reaching
   the server at all).
 
+## Benchmarks
+
+Phase 10. `//bench:dcfs_bench` (google/benchmark, BCR `google_benchmark`)
+is installed in the e2e initramfs as `/bin/dcfs_bench` and run by
+`guest/bench.sh`; it starts dcfs itself. Its cases (names are
+`Case/target`):
+
+- `Stat`, `OpenClose`, `SmallRead` (a 100-byte read), `Lookup` (an
+  eight-component path walk), `Readdir` (10000 entries), each on `backing`
+  (the backing filesystem directly), `dcfs` (default one-hour kernel
+  timeouts) and `dcfs0` (`--attr_timeout_sec=0 --entry_timeout_sec=0`:
+  every operation reaches dcfs and its database); and the same three over
+  a **slow backing**: a filesystem on `vdc` seen through a device-mapper
+  `delay` target (`SLOW_MS`, 5 ms per read and write), as `slow_backing`,
+  `slow_dcfs`, `slow_dcfs0`. dcfs's database is warm for every `dcfs*`
+  target (a `find` before the run). `Stat`/`OpenClose`/`SmallRead` cycle
+  through the entries so that every operation touches a new inode block
+  and drop the kernel's caches (untimed) when they wrap; `Lookup` and
+  `Readdir` drop them before every iteration. The direct slow cases pay the
+  latency, the dcfs ones must not.
+- `Startup`: exec to first `stat` on a warm database (`--entries`).
+- `Recovery`: restart after SIGKILL with `--dirty` unsynced creations.
+- `Memory`: dcfs's RSS after `find`, after `drop_caches=2`, and bytes per
+  object.
+
+The helpers `dcfs_bench mktree ROOT N BIG` (makes the tree; used by the
+idle and memory tests) and `dcfs_bench dm-delay NAME DEV MS` (device-mapper
+ioctls; the guest has no dmsetup) are subcommands of the same binary.
+
+| Target | Tier | What |
+|---|---|---|
+| `bench_smoke_test` (matrix) | small (ext4), medium | every benchmark, one iteration, tiny trees |
+| `bench_full_test` | enormous | 100000-entry trees, real iteration counts; prints the numbers for `docs/plan/log.md` |
+| `idle_short_test` (matrix) | medium (ext4), large | pass/fail, 60 s: the backing device's `/proc/diskstats` read and write counts do not move while a warm dcfs serves `statfs`, `stat` and `ls` of cached paths (after the kernel's caches were dropped) |
+| `idle_long_test` | large | the same for 600 s |
+| `memory_test` (matrix) | medium (ext4), large | pass/fail: RSS after `find` is under 256 bytes per entry, and after a `drop_caches` of half the tree a find over the other half adds nothing; see the comment in `guest/memory.sh` for why "RSS shrinks back" cannot be asserted |
+
+Results are printed, not pass/fail (VM timing is noisy), except in the idle
+and memory tests. The benchmark binary links a `clock_gettime` wrapper
+(`bench/clock_shim.cc`) because the guest kernel has no POSIX timers, so
+google/benchmark's CPU time column is wall time. The 1M-entry tree the
+phase plan mentions does not fit the 1 GiB guest (the kernel's inode cache
+for it alone would not), so `--entries` defaults to 100000; the idle test
+has no NFS client (that needs the nfs_test Debian rootfs).
+
 ## `run-qemu.sh` internals
 
 One script serves both kinds of test (see the usage comment at the top of

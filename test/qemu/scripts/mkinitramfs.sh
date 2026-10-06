@@ -159,6 +159,11 @@ else
 			cp "$f" "$dest"
 			;;
 		*/pjdfstest) cp "$f" "$ROOT/pjdfstest/pjdfstest" ;;
+		*/bench/dcfs_bench)
+			# phase 10: the benchmark binary (//bench:dcfs_bench).
+			cp "$f" "$ROOT/bin/dcfs_bench"
+			copy_deps "$ROOT/bin/dcfs_bench"
+			;;
 		*/pjdfstest.*_failures)
 			cp "$f" "$ROOT/pjdfstest/$(basename "$f")"
 			;;
