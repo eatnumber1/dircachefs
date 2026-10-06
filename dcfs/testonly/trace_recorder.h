@@ -251,6 +251,8 @@ class TraceRecorder final : public ProtocolEvents {
   void Cut(Context &ctx, Ino dir, std::string_view why);
   // A line no model action matches: validation fails here.
   void Unexplained(Context &ctx, Ino dir, std::string_view why);
+  // Drops `dir`'s held lines (see Dir::reading) before its trace ends.
+  void EndHeld(Ino dir);
   // How a frame that ends with `status` ends its requests (see Close).
   static std::string FrameEnd(std::string_view what,
                               const absl::Status &status);

@@ -122,3 +122,15 @@ qemu_cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_library(
+    name = "create_syscall_before_phase1",
+    srcs = ["create_syscall_before_phase1.cc"],
+    alwayslink = True,
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:context",
+        "//dcfs:metadata_cache",
+        "@absl//absl/status:statusor",
+    ],
+)

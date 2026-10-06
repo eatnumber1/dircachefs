@@ -525,7 +525,10 @@ Where the code's step is spread over syscalls and the model's is one:
   code reads them over many syscalls, at which (in the harness, under
   coroutines) other requests run. The recorder puts the `populate_read`
   line where the population took its snapshot (`PopulateStarted`), before
-  the lines of whatever ran during its reads. If something that ran then
+  the lines of whatever ran during its reads (held until then). If the
+  trace ends while lines are held (a cut, an `unexplained` line, the
+  directory gone), the held lines are dropped and the end line is written
+  at once: the trace ends where the population began. If something that ran then
   changed a name the reads saw, no behavior matches (the model's earlier
   read returns the old value) and validation fails: the reordering can
   only reject, never accept a run the model does not allow.
@@ -660,6 +663,7 @@ renames with flags and syscall failures.
   | `syscall_before_phase1`: an unlink's unlinkat before its phase 1 | `TraceScenarioUnlink` | `unexplained` at `MutationSyscallStarting`, with nothing in flight and `a` still present (without that event: the `syscall` line, which the model rejects at `U1`) |
   | `phase3_before_syscall`: an unlink's phase 3 and End before its unlinkat | `TraceScenarioUnlink` | `unexplained` at the End: `a` absent with no syscall yet |
   | `snapshot_after_syncfs`: a sync point's snapshot taken after its syncfs calls | `TraceScenarioMkdirDuringSync` | `unexplained` at `SyncfsStarting`: no snapshot right before |
+  | `create_syscall_before_phase1`: a create's syscall started before its phase 1, inside a readdir's population of the same directory | `TraceScenarioMkdirDuringListing` | `unexplained` at `MutationSyscallStarting`, written although the directory's lines were held for the listing |
 
   For example:
 

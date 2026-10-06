@@ -1104,6 +1104,22 @@ TEST_F(DirCacheFSTest, TraceScenarioMkdirDuringSync) {
   Fsyncdir(kRootInode);
 }
 
+// A mkdir in d during a readdir's population of d (at its first probe,
+// after its fill snapshot): the recorder holds d's lines meanwhile.
+TEST_F(DirCacheFSTest, TraceScenarioMkdirDuringListing) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  WriteFile(Path("d/a"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_EQ(d, 2);  // The fault test names its trace by d's inode.
+  ASSERT_THAT(Id("a", d), IsOk());  // Populates d.
+  ASSERT_THAT(cache::MarkDirComplete(ctx_, d, false), IsOk());
+
+  StartTrace();
+  NameToHandleHook() = [&] { Mkdir(d, "m"); };
+  List(d, false).IgnoreError();
+}
+
 // A mkdir in a directory whose listing is complete. Phase 1 marks the new
 // name unknown, and the trace shows it. Trace validation's fault-injection
 // test (//dcfs:trace_fault_skip_mark_unknown_test) runs this test alone in a build

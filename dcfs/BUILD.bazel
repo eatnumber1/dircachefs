@@ -531,9 +531,13 @@ tla_trace_test(
 #       unlinkat.
 #   snapshot_after_syncfs: a sync point takes its snapshot after its
 #       syncfs calls.
+#   create_syscall_before_phase1: a create's syscall starts before its
+#       phase 1, inside a readdir's population of the same directory.
 BEGIN_REMOVE = "_ZN4dcfs5cache11BeginRemoveERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEElNS0_12FillSnapshotE"
 
 BEGIN_SYNC = "_ZN4dcfs5cache9BeginSyncERNS_7ContextE"
+
+BEGIN_CREATE = "_ZN4dcfs5cache11BeginCreateERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEE"
 
 UNLINK_AT = "_ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElSt17basic_string_viewIcSt11char_traitsIcEEi"
 
@@ -565,6 +569,14 @@ DIR_CACHE_FS_FAULTS = {
         # The syncfs calls' start, with no snapshot right before it.
         event = "\"c\":\"SyncfsStarting\",\"ev\":\"unexplained\"",
     ),
+    "create_syscall_before_phase1": dict(
+        wraps = [BEGIN_CREATE],
+        test = "TraceScenarioMkdirDuringListing",
+        dir = "2",  # d
+        # The mkdir's syscall start, written although d's lines were held
+        # for the listing's reads.
+        event = "\"c\":\"MutationSyscallStarting\",\"ev\":\"unexplained\",\"why\":\"a mutation's syscall started before its phase 1\"",
+    ),
 }
 
 [
@@ -587,7 +599,7 @@ DIR_CACHE_FS_FAULTS = {
         size = "medium",
         timeout = "long",
         disks = ["vdb:ext4:32M"],
-        expect_reject = "DirCacheFSTest.%s@1" % spec["test"],
+        expect_reject = "DirCacheFSTest.%s@%s" % (spec["test"], spec.get("dir", "1")),
         expect_reject_event = spec["event"],
         initramfs = ":dir_cache_fs_fault_%s_test.cpio.gz" % fault,
         lock = False,

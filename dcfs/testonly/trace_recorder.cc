@@ -413,8 +413,19 @@ std::string TraceRecorder::FrameEnd(std::string_view what,
   return absl::StrCat("failed: ", what, " failed: ", status.ToString());
 }
 
+void TraceRecorder::EndHeld(Ino dir) {
+  // A trace that ends while a listing's lines are held ends where the
+  // listing began: the held lines (after that point) are dropped, and the
+  // end line is written at once (the listing's own line would have come
+  // first, and never will).
+  Dir &state = dirs_[dir];
+  state.reading = false;
+  state.held.clear();
+}
+
 void TraceRecorder::Unexplained(Context &ctx, Ino dir, std::string_view why) {
   if (!Traced(dir)) return;
+  EndHeld(dir);
   Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                           ",\"ev\":\"unexplained\",\"why\":", JsonStr(why),
                           ",\"db\":", Snapshot(ctx, dir), "}"));
@@ -424,6 +435,7 @@ void TraceRecorder::Unexplained(Context &ctx, Ino dir, std::string_view why) {
 
 void TraceRecorder::Cut(Context &ctx, Ino dir, std::string_view why) {
   if (!Traced(dir)) return;
+  EndHeld(dir);
   Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                           ",\"ev\":\"cut\",\"why\":", JsonStr(why), "}"));
   dirs_[dir].dead = true;
@@ -457,6 +469,7 @@ void TraceRecorder::After(Context &ctx) {
   const std::set<Ino> present(all.begin(), all.end());
   for (auto &[dir, state] : dirs_) {
     if (!state.dead && !present.contains(dir)) {
+      EndHeld(dir);
       Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                               ",\"ev\":\"gone\"}"));
       state.dead = true;
@@ -505,6 +518,7 @@ void TraceRecorder::After(Context &ctx) {
     }
     // Changed by something that is not one of its events: no model action
     // matches this line, so validation stops here.
+    EndHeld(dir);
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"unexplained\",\"db\":", db, "}"));
     state.dead = true;
