@@ -80,3 +80,51 @@ tlc_test = rule(
         ),
     },
 )
+
+def _tlc_overrides_jar_impl(ctx):
+    runtime = ctx.attr._jdk[java_common.JavaRuntimeInfo]
+    out = ctx.actions.declare_file(ctx.label.name + ".jar")
+    classes = ctx.actions.declare_directory(ctx.label.name + "_classes")
+    ctx.actions.run_shell(
+        inputs = depset(
+            [ctx.file.src, ctx.file._jar, ctx.file._community_modules],
+            transitive = [runtime.files],
+        ),
+        outputs = [out, classes],
+        command = " && ".join([
+            "{javac} -nowarn -d {classes} -cp {cp} {src}",
+            "{jar} cf {out} -C {classes} .",
+        ]).format(
+            javac = runtime.java_home + "/bin/javac",
+            jar = runtime.java_home + "/bin/jar",
+            classes = classes.path,
+            cp = ctx.file._jar.path + ":" + ctx.file._community_modules.path,
+            src = ctx.file.src.path,
+            out = out.path,
+        ),
+        mnemonic = "TlcOverridesJar",
+        progress_message = "Compiling the TLC override registry %{label}",
+    )
+    return [DefaultInfo(files = depset([out]))]
+
+tlc_overrides_jar = rule(
+    implementation = _tlc_overrides_jar_impl,
+    doc = "Compiles a TLC override registry (tlc2.overrides.TLCOverrides) " +
+          "into a jar, with the pinned JDK, against the pinned TLC and " +
+          "CommunityModules jars.",
+    attrs = {
+        "src": attr.label(allow_single_file = [".java"], mandatory = True),
+        "_jar": attr.label(
+            default = "@tla2tools//file",
+            allow_single_file = True,
+        ),
+        "_community_modules": attr.label(
+            default = "@tla_community_modules//file",
+            allow_single_file = True,
+        ),
+        "_jdk": attr.label(
+            default = "@remotejdk21_linux//:jdk",
+            providers = [java_common.JavaRuntimeInfo],
+        ),
+    },
+)

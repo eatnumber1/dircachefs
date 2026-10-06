@@ -22,6 +22,7 @@
 
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/functional/function_ref.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -38,6 +39,7 @@
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -241,15 +243,28 @@ absl::Status WriteAttrs(Context &ctx, InodeId id, const struct statx &stx) {
 // nothing if a mutation of `id` began, ended or is in flight since.
 absl::Status FillAttrs(Context &ctx, cache::FillSnapshot snapshot, InodeId id,
                        const struct statx &stx) {
-  return ctx.db.Transaction([&]() -> absl::Status {
+  bool recorded = false;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     if (!cache::CanFill(ctx, snapshot, id)) {
       VLOG(1) << "inode " << id
               << ": not caching attributes read concurrently with a "
                  "mutation of it";
       return absl::OkStatus();
     }
+    recorded = true;
     return WriteAttrs(ctx, id, stx);
-  });
+  }));
+  // Model: the fill that ends a getattr, readdirplus or mutation.
+  ctx.events->AttrsFilled(ctx, id, recorded);
+  return absl::OkStatus();
+}
+
+// What a probe's statx says the name holds, for the protocol events.
+events::Probe ProbeOf(const struct statx &stx) {
+  return {.kind = events::Probe::kPresent,
+          .ino = stx.stx_ino,
+          .btime_sec = stx.stx_btime.tv_sec,
+          .btime_nsec = stx.stx_btime.tv_nsec};
 }
 
 std::string FormatTime(int64_t sec, uint32_t nsec) {
@@ -371,9 +386,14 @@ void LogRefusedBoundary(InodeId dir, std::string_view name) {
 // (PopulateDirectory) can persist the refusal instead of just dropping the
 // name: see cache::SetRefused and this file's top comment on why it must
 // never be cached as a plain negative entry.
+//
+// `on_read` is called with what the probe read as soon as it is known (after
+// the openat and statx, before anything else): the read point a protocol
+// event must mark (see ResolveName).
 absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
     int dir_fd, const struct statx &dir_stx, const DeviceId &dir_device,
-    InodeId dir, std::string_view name, bool &refused) {
+    InodeId dir, std::string_view name, bool &refused,
+    absl::FunctionRef<void(const events::Probe &)> on_read) {
   refused = false;
   // Everything below reads through this one fd, so all of it describes the
   // same object even if `name` is replaced meanwhile.
@@ -382,6 +402,7 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
   if (!child.ok()) {
     if (ErrnoOf(child.status()) == ENOENT) {
       VLOG(1) << "child " << EscapeBytes(name) << " vanished while listing its directory";
+      on_read({.kind = events::Probe::kAbsent});
       return std::nullopt;
     }
     return child.status();
@@ -393,8 +414,10 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
   if (IsBoundary(dir_stx, stx)) {
     refused = true;
     LogRefusedBoundary(dir, name);
+    on_read({.kind = events::Probe::kRefused});
     return std::nullopt;
   }
+  on_read(ProbeOf(stx));
 
   return ProbeObject(**child, name, dir_device, stx);
 }
@@ -443,6 +466,8 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
                                            probe.identity.backing_gen));
     return cache::EnsureDirectory(ctx, cache::kRootInode);
   }));
+  // Model: a whole getattr fill of the root (nothing is in flight yet).
+  ctx.events->RootRecorded(ctx);
   absl::Status inserted = ctx.mounts.Insert(device, std::move(source_fd));
   if (!inserted.ok() && !absl::IsAlreadyExists(inserted)) return inserted;
   return absl::OkStatus();
@@ -533,7 +558,7 @@ absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,
                << (ctime_differs ? ", rereading its xattrs" : "");
   // The fresh statx is already in hand, so reacting costs no I/O: adopt it,
   // and mark unknown whatever else the change may have touched unseen.
-  return ctx.db.Transaction([&]() -> absl::Status {
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(WriteAttrs(ctx, id, fresh));
     if (relist) {
       ABSL_RETURN_IF_ERROR(cache::ForgetNegativeDentries(ctx, id));
@@ -542,7 +567,10 @@ absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,
       ABSL_RETURN_IF_ERROR(cache::MarkXattrsUnknown(ctx, id));
     }
     return absl::OkStatus();
-  });
+  }));
+  // Not a step of the model (it has no out-of-band changes).
+  ctx.events->OutOfBandChange(ctx, id);
+  return absl::OkStatus();
 }
 
 // Verifies that `fd` (opened for `id`, whose cache row is `attr`) still
@@ -628,17 +656,25 @@ absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {
 }
 
 absl::Status RefreshAttrs(Context &ctx, InodeId id, struct statx *fetched) {
+  events::Scope scope(*ctx.events, ctx, &ProtocolEvents::RefreshBegin,
+                      &ProtocolEvents::RefreshEnd, id);
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, id));
+  // Model: the refresh's statx (GA_stat, ..., R_stat).
+  ctx.events->AttrsStatted(ctx, id);
   if (fetched != nullptr) *fetched = stx;
   return FillAttrs(ctx, snapshot, id, stx);
 }
 
 absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd,
                                 struct statx *fetched) {
+  events::Scope scope(*ctx.events, ctx, &ProtocolEvents::RefreshBegin,
+                      &ProtocolEvents::RefreshEnd, id);
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
+  // Model: as in RefreshAttrs.
+  ctx.events->AttrsStatted(ctx, id);
   if (fetched != nullptr) *fetched = stx;
   return FillAttrs(ctx, snapshot, id, stx);
 }
@@ -904,6 +940,9 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // `dir`'s completeness first, and before the listing's I/O.
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ABSL_ASSIGN_OR_RETURN(int64_t dir_epoch, cache::DirEpoch(ctx, dir));
+  // Model: PopulateRead takes place here (the snapshot and the epoch; the
+  // reads below return what the directory holds now: PopulateRead).
+  ctx.events->PopulateStarted(ctx, dir);
   ABSL_ASSIGN_OR_RETURN(
       struct statx dir_stx,
       syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
@@ -923,7 +962,8 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     bool refused = false;
     ABSL_ASSIGN_OR_RETURN(
         std::optional<ChildRecord> child,
-        ProbeChild(*dir_fd, dir_stx, dir_attr.device, dir, name, refused));
+        ProbeChild(*dir_fd, dir_stx, dir_attr.device, dir, name, refused,
+                   [](const events::Probe &) {}));
     if (child.has_value()) {
       children.push_back(*std::move(child));
     } else if (refused) {
@@ -932,6 +972,19 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   }
   VLOG(1) << "populating directory " << dir << ": " << children.size()
           << " entries, " << refused_names.size() << " refused";
+  // Model: PopulateRead (the snapshot, the epoch, getdents64 and every
+  // probe, as one step: see formal/README.md).
+  ctx.events->PopulateRead(
+      ctx, dir,
+      [&](absl::FunctionRef<void(std::string_view, const events::Probe &)>
+              each) {
+        for (const ChildRecord &child : children) {
+          each(child.name, ProbeOf(child.stx));
+        }
+        for (const std::string &name : refused_names) {
+          each(name, {.kind = events::Probe::kRefused});
+        }
+      });
 
   // Phase B: one transaction, no syscalls. What it may record is decided
   // per inode (see cache::CanFill): `dir`'s dentries and completeness only
@@ -974,6 +1027,14 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     result.cached = true;
     return absl::OkStatus();
   }));
+  // Model: PopulateCommit.
+  ctx.events->PopulateCommitted(
+      ctx, dir, snapshot.seq, result.cached,
+      [&](absl::FunctionRef<void(events::Ino)> each) {
+        for (const auto &[name, entry] : result.entries) {
+          if (entry.kind == cache::LookupResult::kFound) each(entry.id);
+        }
+      });
   return result;
 }
 
@@ -1007,6 +1068,8 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   if (name.size() > NAME_MAX) {
     return dcfs::ErrnoToStatus(ENAMETOOLONG, "path component too long");
   }
+  events::Scope scope(*ctx.events, ctx, &ProtocolEvents::LookupBegin,
+                      &ProtocolEvents::LookupEnd, parent, name);
   ABSL_ASSIGN_OR_RETURN(cache::LookupResult result,
                         cache::Lookup(ctx, parent, name));
   // `name` is a persisted refusal (see ProbeChild/cache::SetRefused): it
@@ -1014,13 +1077,32 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   // this must never be reported as absent -- answer EXDEV, straight from
   // the cache, every time. Checked before the kUnknown fast-out below since
   // kRefused is never kUnknown, but also never worth re-populating for.
-  if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
-  if (result.kind != cache::LookupResult::kUnknown) return result;
+  if (result.kind == cache::LookupResult::kRefused) {
+    ctx.events->LookupDecided(ctx, parent, name,
+                              events::LookupOutcome::kRefused, 0);
+    return ExdevBoundary();
+  }
+  if (result.kind != cache::LookupResult::kUnknown) {
+    // Model: LookupStep (or the request's Arrive) serving from the cache.
+    ctx.events->LookupDecided(
+        ctx, parent, name,
+        result.kind == cache::LookupResult::kFound
+            ? events::LookupOutcome::kFound
+            : events::LookupOutcome::kNegative,
+        result.id);
+    return result;
+  }
 
   // An unknown name in a complete listing (e.g. left by a mutation's phase
   // 1, or an invalidation): everything else is known, so resolve just it
   // (audit F7) rather than relisting the directory.
   ABSL_ASSIGN_OR_RETURN(bool listed, cache::ChildrenComplete(ctx, parent));
+  // Model: LookupStep (or the request's Arrive) going to the backing
+  // filesystem; no syscall since the cache read.
+  ctx.events->LookupDecided(ctx, parent, name,
+                            listed ? events::LookupOutcome::kResolve
+                                   : events::LookupOutcome::kPopulate,
+                            0);
   if (listed) return ResolveName(ctx, parent, name);
 
   ABSL_ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
@@ -1087,6 +1169,8 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
     parent = row.id;
     return absl::OkStatus();
   }));
+  // Model: a whole getattr fill of the parent (see formal/README.md).
+  ctx.events->ParentRecorded(ctx, parent, snapshot.seq);
   return parent;
 }
 
@@ -1107,12 +1191,18 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
   bool refused = false;
   ABSL_ASSIGN_OR_RETURN(
       std::optional<ChildRecord> child,
-      ProbeChild(*dir_fd, dir_stx, dir_attr.device, parent, name, refused));
+      ProbeChild(*dir_fd, dir_stx, dir_attr.device, parent, name, refused,
+                 [&](const events::Probe &probe) {
+                   // Model: ResolveProbe.
+                   ctx.events->ResolveProbed(ctx, parent, name, probe);
+                 }));
   VLOG(1) << "resolving " << EscapeBytes(name) << " in directory " << parent;
 
   cache::LookupResult result;
+  bool recorded = false;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     const bool dir_ok = cache::CanFill(ctx, snapshot, parent);
+    recorded = dir_ok;
     if (child.has_value()) {
       ABSL_ASSIGN_OR_RETURN(InodeId id,
                             RecordChild(ctx, snapshot, parent, *child, dir_ok));
@@ -1134,6 +1224,10 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
     }
     return absl::OkStatus();
   }));
+  // Model: ResolveCommit.
+  ctx.events->ResolveCommitted(
+      ctx, parent, name, snapshot.seq, recorded,
+      result.kind == cache::LookupResult::kFound ? result.id : 0);
   if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
   return result;
 }
@@ -1148,14 +1242,24 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
   // does for an existing directory entry, minus the mount-boundary check
   // (nothing can already be mounted on an object that did not exist a
   // moment ago).
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor child_fd,
-                        syscalls::openat(parent_fd, name, O_PATH | O_NOFOLLOW));
+  absl::StatusOr<FileDescriptor> child_fd =
+      syscalls::openat(parent_fd, name, O_PATH | O_NOFOLLOW);
+  if (!child_fd.ok()) {
+    if (ErrnoOf(child_fd.status()) == ENOENT) {
+      // Model: CreateProbe finding nothing.
+      ctx.events->NewChildProbed(ctx, parent, name,
+                                 {.kind = events::Probe::kAbsent});
+    }
+    return child_fd.status();
+  }
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx,
-      syscalls::statx(*child_fd, "", AT_EMPTY_PATH, kAttrMask | kMountIdMask));
+      syscalls::statx(**child_fd, "", AT_EMPTY_PATH, kAttrMask | kMountIdMask));
+  // Model: CreateProbe (the read; the identity cannot change after it).
+  ctx.events->NewChildProbed(ctx, parent, name, ProbeOf(stx));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr, cache::GetAttr(ctx, parent));
   ABSL_ASSIGN_OR_RETURN(
-      ChildRecord record, ProbeObject(*child_fd, name, parent_attr.device, stx));
+      ChildRecord record, ProbeObject(**child_fd, name, parent_attr.device, stx));
 
   // Phase B: one transaction, no syscalls.
   NewChild result;
@@ -1359,26 +1463,38 @@ absl::Status StartupPurge(Context &ctx) {
 }
 
 absl::Status SyncBacking(Context &ctx) {
+  events::Scope scope(*ctx.events, ctx, &ProtocolEvents::SyncBegin,
+                      &ProtocolEvents::SyncEnd);
   // Taken before the first syncfs: whatever is dirty now, is not mutated
   // again before ClearDirty and is not open for writing at either end is
   // covered by the syncfs calls below (see cache::BeginSync).
   ABSL_ASSIGN_OR_RETURN(cache::SyncSnapshot synced, cache::BeginSync(ctx));
+  // Model: the sync request's first step (S1From), or StopSync.
+  ctx.events->SyncSnapshotTaken(ctx);
   for (int fd : ctx.mounts.Fds()) {
     ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
   }
+  ctx.events->SyncfsDone(ctx);
   std::vector<InodeId> keep;
   if (ctx.open_for_write != nullptr) {
     keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
   }
-  return cache::ClearDirty(ctx, synced, keep);
+  ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep));
+  // Model: SyncClearDirty, or StopClear.
+  ctx.events->SyncCleared(ctx);
+  return absl::OkStatus();
 }
 
 absl::Status StartRun(Context &ctx, std::string_view boot_id) {
+  // Model: Crash (after an unclean shutdown) and Restart.
+  ctx.events->RunStarting(ctx);
   ABSL_ASSIGN_OR_RETURN(bool clean, GetCleanShutdown(ctx.db));
   ABSL_ASSIGN_OR_RETURN(std::optional<std::string> last_boot_id,
                         GetBootId(ctx.db));
   const bool unclean = !clean;
   ABSL_ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
+  // Model: Recover.
+  ctx.events->Recovered(ctx);
   if (unclean || recovered > 0) {
     const bool rebooted =
         last_boot_id.has_value() && *last_boot_id != boot_id;
@@ -1390,25 +1506,35 @@ absl::Status StartRun(Context &ctx, std::string_view boot_id) {
                  << " dirty cache entries (their cached state will be "
                     "re-read from the backing filesystem)";
   }
-  return ctx.db.Transaction(
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
       [&]() -> absl::Status {
         ABSL_RETURN_IF_ERROR(SetCleanShutdown(ctx.db, false));
         return SetBootId(ctx.db, boot_id);
       },
-      sqlite3::Durability::kSync);
+      sqlite3::Durability::kSync));
+  // Model: StartRun.
+  ctx.events->RunStarted(ctx);
+  return absl::OkStatus();
 }
 
 absl::Status FinishRun(Context &ctx) {
+  // Model: BeginShutdown; the sync point below is StopSync and StopClear.
+  ctx.events->ShutdownBegin(ctx);
   ABSL_RETURN_IF_ERROR(SyncBacking(ctx));
   ABSL_RETURN_IF_ERROR(ctx.db.Checkpoint());
+  // Model: StopCkpt.
+  ctx.events->Checkpointed(ctx);
   if (ctx.dirty.any) {
     return absl::FailedPreconditionError(
         "dirty cache entries remain (a writable open is still "
         "outstanding); leaving the clean-shutdown flag unset");
   }
-  return ctx.db.Transaction(
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
       [&] { return SetCleanShutdown(ctx.db, true); },
-      sqlite3::Durability::kSync);
+      sqlite3::Durability::kSync));
+  // Model: StopFlag.
+  ctx.events->CleanShutdownRecorded(ctx);
+  return absl::OkStatus();
 }
 
 namespace {

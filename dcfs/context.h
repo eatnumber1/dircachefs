@@ -9,6 +9,7 @@
 #include "absl/random/bit_gen_ref.h"
 #include "absl/status/statusor.h"
 #include "dcfs/mount_fds.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 
 namespace dcfs {
@@ -88,6 +89,10 @@ struct Context {
   // stay in step with ctx.db's dirty table.
   DirtyState dirty;
   FillGuards fills;
+  // The protocol events (dcfs/protocol_events.h): records nothing in
+  // production; trace validation's recorder in the testonly builds. Never
+  // null; not owned.
+  ProtocolEvents *events = &NoProtocolEvents();
 };
 
 }  // namespace dcfs

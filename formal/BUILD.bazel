@@ -75,3 +75,16 @@ KNOWN_BUGS = {
     )
     for bug, violation in KNOWN_BUGS.items()
 ]
+
+# Trace validation (README.md, "Trace validation"): the spec, its
+# configuration and the script the tla_trace_test targets run (in //dcfs and
+# //test/qemu, next to the guests that record the traces).
+exports_files(
+    [
+        "Trace.cfg",
+        "Trace.tla",
+        "dcfs.tla",
+        "trace_validate.sh",
+    ],
+    visibility = ["//visibility:public"],
+)

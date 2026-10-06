@@ -2,3 +2,18 @@
 # (MODULE.bazel); tlc.bzl defines tlc_test.
 
 exports_files(["tlc_test_runner.sh.tpl"])
+
+
+# Phase 12.2: trace validation (formal/Trace.tla) reads traces with the
+# CommunityModules' Json module (@tla_community_modules). TLC loads the
+# operator overrides that the registry built here lists
+# (tlc2.overrides.TLCOverrides, put first on the class path) instead of the
+# jar's own registry, which lists one that TLC 1.7.4 cannot load: see
+# README.md.
+load(":tlc.bzl", "tlc_overrides_jar")
+
+tlc_overrides_jar(
+    name = "tlc_overrides",
+    src = "overrides/tlc2/overrides/TLCOverrides.java",
+    visibility = ["//visibility:public"],
+)

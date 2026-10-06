@@ -10,8 +10,10 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fuse_request.h"
+#include "dcfs/protocol_events.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
@@ -25,6 +27,21 @@ DirCacheFS &GetFS(fuse_req_t req) {
   CHECK_NE(fs, nullptr);
   fs->MaybeSyncBacking();
   return *fs;
+}
+
+events::Ino Ino(fuse_ino_t ino) { return static_cast<events::Ino>(ino); }
+
+// Serves one request as one frame of the protocol events (see
+// dcfs/protocol_events.h): it begins after GetFS's periodic sync point,
+// which is a frame of its own, and ends after the reply. `handler(fs, fr)`
+// returns the status to reply.
+template <typename Handler>
+void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
+  FuseRequest fr(req);
+  DirCacheFS &fs = GetFS(req);
+  Context &ctx = fs.context();
+  events::RequestScope scope(*ctx.events, ctx, request);
+  fr.ReplyFailureAndLogIfNotOk(scope.Finish(handler(fs, fr)));
 }
 
 void Init(void *userdata, fuse_conn_info *conn) {
@@ -41,8 +58,10 @@ void Destroy(void *userdata) {
 }
 
 void Lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Lookup(fr, parent, name));
+  Serve(req, {.op = events::Op::kLookup, .ino = Ino(parent), .name = name},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Lookup(fr, parent, name);
+        });
 }
 
 void Forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
@@ -57,191 +76,246 @@ void ForgetMulti(fuse_req_t req, size_t count, fuse_forget_data *forgets) {
 }
 
 void Getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Getattr(fr, ino, fi));
+  Serve(req, {.op = events::Op::kGetattr, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Getattr(fr, ino, fi);
+        });
 }
 
 void Setattr(
     fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set,
     fuse_file_info *fi) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Setattr(fr, ino, attr, to_set, fi));
+  Serve(req, {.op = events::Op::kSetattr, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Setattr(fr, ino, attr, to_set, fi);
+        });
 }
 
 void Readlink(fuse_req_t req, fuse_ino_t ino) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Readlink(fr, ino));
+  Serve(req, {.op = events::Op::kReadlink, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Readlink(fr, ino); });
 }
 
 void Mknod(
     fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode,
     dev_t rdev) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Mknod(fr, parent, name, mode, rdev));
+  Serve(req, {.op = events::Op::kMknod, .ino = Ino(parent), .name = name},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Mknod(fr, parent, name, mode, rdev);
+        });
 }
 
 void Mkdir(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Mkdir(fr, parent, name, mode));
+  Serve(req, {.op = events::Op::kMkdir, .ino = Ino(parent), .name = name},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Mkdir(fr, parent, name, mode);
+        });
 }
 
 void Unlink(fuse_req_t req, fuse_ino_t parent, const char *name) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Unlink(fr, parent, name));
+  Serve(req, {.op = events::Op::kUnlink, .ino = Ino(parent), .name = name},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Unlink(fr, parent, name);
+        });
 }
 
 void Rmdir(fuse_req_t req, fuse_ino_t parent, const char *name) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Rmdir(fr, parent, name));
+  Serve(req, {.op = events::Op::kRmdir, .ino = Ino(parent), .name = name},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Rmdir(fr, parent, name);
+        });
 }
 
 void Symlink(
     fuse_req_t req, const char *link, fuse_ino_t parent, const char *name) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Symlink(fr, link, parent, name));
+  Serve(req, {.op = events::Op::kSymlink, .ino = Ino(parent), .name = name},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Symlink(fr, link, parent, name);
+        });
 }
 
 void Rename(
     fuse_req_t req, fuse_ino_t parent, const char *name,
     fuse_ino_t newparent, const char *newname, unsigned int flags) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(
-      GetFS(req).Rename(fr, parent, name, newparent, newname, flags));
+  Serve(req,
+        {.op = events::Op::kRename,
+         .ino = Ino(parent),
+         .name = name,
+         .newparent = Ino(newparent),
+         .newname = newname,
+         .flags = flags},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Rename(fr, parent, name, newparent, newname, flags);
+        });
 }
 
 void Link(
     fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent,
     const char *newname) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Link(fr, ino, newparent, newname));
+  Serve(req,
+        {.op = events::Op::kLink,
+         .ino = Ino(ino),
+         .newparent = Ino(newparent),
+         .newname = newname},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Link(fr, ino, newparent, newname);
+        });
 }
 
 void Open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Open(fr, ino, *fi));
+  Serve(req, {.op = events::Op::kOpen, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Open(fr, ino, *fi); });
 }
 
 void Read(
     fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Read(fr, ino, size, off, *fi));
+  Serve(req, {.op = events::Op::kRead, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Read(fr, ino, size, off, *fi);
+        });
 }
 
 void Write(
     fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off,
     fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(
-      GetFS(req).Write(fr, ino, std::span<const char>(buf, size), off, *fi));
+  Serve(req, {.op = events::Op::kWrite, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Write(fr, ino, std::span<const char>(buf, size), off, *fi);
+        });
 }
 
 void Flush(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Flush(fr, ino, *fi));
+  Serve(req, {.op = events::Op::kFlush, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Flush(fr, ino, *fi); });
 }
 
 void Release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Release(fr, ino, *fi));
+  Serve(req, {.op = events::Op::kRelease, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Release(fr, ino, *fi);
+        });
 }
 
 void Fsync(fuse_req_t req, fuse_ino_t ino, int datasync, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Fsync(fr, ino, datasync, *fi));
+  Serve(req, {.op = events::Op::kFsync, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Fsync(fr, ino, datasync, *fi);
+        });
 }
 
 void Opendir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Opendir(fr, ino, *fi));
+  Serve(req, {.op = events::Op::kOpendir, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Opendir(fr, ino, *fi);
+        });
 }
 
 void Readdir(
     fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Readdir(fr, ino, size, off, *fi));
+  Serve(req, {.op = events::Op::kReaddir, .ino = Ino(ino), .offset = off},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Readdir(fr, ino, size, off, *fi);
+        });
 }
 
 void Readdirplus(
     fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(
-      GetFS(req).Readdirplus(fr, ino, size, off, *fi));
+  Serve(req, {.op = events::Op::kReaddirplus, .ino = Ino(ino), .offset = off},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Readdirplus(fr, ino, size, off, *fi);
+        });
 }
 
 void Releasedir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Releasedir(fr, ino, *fi));
+  Serve(req, {.op = events::Op::kReleasedir, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Releasedir(fr, ino, *fi);
+        });
 }
 
 void Fsyncdir(
     fuse_req_t req, fuse_ino_t ino, int datasync, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Fsyncdir(fr, ino, datasync, *fi));
+  Serve(req, {.op = events::Op::kFsyncdir, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Fsyncdir(fr, ino, datasync, *fi);
+        });
 }
 
 void Statfs(fuse_req_t req, fuse_ino_t ino) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Statfs(fr, ino));
+  Serve(req, {.op = events::Op::kStatfs, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Statfs(fr, ino); });
 }
 
 void Setxattr(
     fuse_req_t req, fuse_ino_t ino, const char *name, const char *value,
     size_t size, int flags) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(
-      GetFS(req).Setxattr(
-          fr, ino, name, std::string_view(value, size), flags));
+  Serve(req, {.op = events::Op::kSetxattr, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Setxattr(fr, ino, name, std::string_view(value, size),
+                             flags);
+        });
 }
 
 void Getxattr(fuse_req_t req, fuse_ino_t ino, const char *name, size_t size) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Getxattr(fr, ino, name, size));
+  Serve(req, {.op = events::Op::kGetxattr, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Getxattr(fr, ino, name, size);
+        });
 }
 
 void Listxattr(fuse_req_t req, fuse_ino_t ino, size_t size) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Listxattr(fr, ino, size));
+  Serve(req, {.op = events::Op::kListxattr, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Listxattr(fr, ino, size);
+        });
 }
 
 void Removexattr(fuse_req_t req, fuse_ino_t ino, const char *name) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Removexattr(fr, ino, name));
+  Serve(req, {.op = events::Op::kRemovexattr, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Removexattr(fr, ino, name);
+        });
 }
 
 void Access(fuse_req_t req, fuse_ino_t ino, int mask) {
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Access(fr, ino, mask));
+  Serve(req, {.op = events::Op::kAccess, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Access(fr, ino, mask);
+        });
 }
 
 void Create(
     fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode,
     fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(GetFS(req).Create(fr, parent, name, mode, *fi));
+  Serve(req, {.op = events::Op::kCreate, .ino = Ino(parent), .name = name},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Create(fr, parent, name, mode, *fi);
+        });
 }
 
 void Fallocate(
     fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t length,
     fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  FuseRequest fr(req);
-  fr.ReplyFailureAndLogIfNotOk(
-      GetFS(req).Fallocate(fr, ino, mode, offset, length, *fi));
+  Serve(req, {.op = events::Op::kFallocate, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Fallocate(fr, ino, mode, offset, length, *fi);
+        });
 }
 
 }  // namespace

@@ -22,6 +22,13 @@
 // flight, while the request under test is "suspended" there. The rule that
 // transactions never span a syscall is what makes this safe: the hook never
 // runs inside one. No production code knows about any of this.
+//
+// Trace validation (formal/README.md): a test that calls StartTrace() has
+// its protocol events recorded (dcfs/testonly/trace_recorder.h) to stdout,
+// which is the guest's serial log; //dcfs:dir_cache_fs_trace_test runs this
+// binary and checks every trace against the model (formal/Trace.tla). The
+// interleavings the hooks make are the reason to: they are the ones the
+// model checks and today's single thread never produces.
 
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
@@ -36,6 +43,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -63,7 +71,9 @@
 #include "dcfs/migrate.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/sqlite.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/status.h"
+#include "dcfs/testonly/trace_recorder.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
 #include "gmock/gmock.h"
@@ -249,6 +259,7 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
   void TearDown() override {
+    ctx_.events = &NoProtocolEvents();
     OpenByHandleHook() = {};
     NameToHandleHook() = {};
     SyncfsHook() = {};
@@ -261,6 +272,59 @@ class DirCacheFSTest : public ::testing::Test {
 
   std::string Path(std::string_view rel) const {
     return absl::StrCat(source_, "/", rel);
+  }
+
+  // Records this test's protocol events from here on (see the top of this
+  // file), as the trace "<suite>.<test>". Call it once the test's setup is
+  // done: its writes to the cache are the state each directory's trace
+  // begins in.
+  void StartTrace() {
+    const ::testing::TestInfo *info =
+        ::testing::UnitTest::GetInstance()->current_test_info();
+    std::fflush(stdout);
+    recorder_ = std::make_unique<testonly::TraceRecorder>(
+        STDOUT_FILENO,
+        absl::StrCat(info->test_suite_name(), ".", info->name()));
+    ctx_.events = recorder_.get();
+    recorder_->BeginAll(ctx_);
+  }
+
+  // Runs `fn(i)` (i counting down from `times`) inside each of the next
+  // `times` fills that open a node and then probe a name (a resolve or a
+  // population: OpenNode, the fill snapshot, then each probe): at the first
+  // probe after each open, so after the fill's snapshot. Not inside `fn`
+  // itself, and not again until the next open.
+  void MutateDuringFills(int times, std::function<void(int)> fn) {
+    struct State {
+      int remaining;
+      bool opened = false;
+      bool busy = false;
+      std::function<void(int)> fn;
+    };
+    auto state = std::make_shared<State>(State{.remaining = times, .fn = fn});
+    auto arm_open = std::make_shared<std::function<void()>>();
+    auto arm_probe = std::make_shared<std::function<void()>>();
+    *arm_open = [state, arm_open] {
+      if (state->remaining == 0) return;
+      OpenByHandleHook() = [state, arm_open] {
+        if (!state->busy) state->opened = true;
+        (*arm_open)();
+      };
+    };
+    *arm_probe = [state, arm_probe] {
+      if (state->remaining == 0) return;
+      NameToHandleHook() = [state, arm_probe] {
+        if (state->opened && !state->busy) {
+          state->opened = false;
+          state->busy = true;
+          state->fn(state->remaining--);
+          state->busy = false;
+        }
+        (*arm_probe)();
+      };
+    };
+    (*arm_open)();
+    (*arm_probe)();
   }
 
   // Processes one request and returns its reply (requests processed by a
@@ -451,6 +515,7 @@ class DirCacheFSTest : public ::testing::Test {
   absl::BitGen bitgen_{std::seed_seq{4, 10}};
   Context ctx_{db_, mounts_, bitgen_};
   std::unique_ptr<DirCacheFS> fs_;
+  std::unique_ptr<testonly::TraceRecorder> recorder_;
   fuse_lowlevel_ops ops_{};
   struct fuse_session *se_ = nullptr;
 
@@ -593,6 +658,7 @@ class RenameStaleSourceTest : public DirCacheFSTest {
 
   // Runs the interleaving; both renames must succeed.
   void RunRenames() {
+    StartTrace();
     std::optional<Reply> concurrent;
     OpenByHandleHook() = [&] { concurrent = Rename(d_, "c", d_, "a"); };
     Reply reply = Rename(d_, "a", d_, "b");
@@ -675,6 +741,7 @@ TEST_F(DirCacheFSTest, ReleaseDuringASyncPointKeepsTheDirtyRow) {
   ASSERT_EQ(open.error, 0);
   ASSERT_THAT(Dirty(), Contains(f));
 
+  StartTrace();
   std::optional<Reply> release;
   SyncfsHook() = [&] {
     AppendToFile(Path("f"), "late");
@@ -725,6 +792,7 @@ TEST_F(DirCacheFSTest, ReleaseEndsTheWritesForAFillThatBeganBefore) {
 // The writes after the reply then had no dirty row.
 TEST_F(DirCacheFSTest, WritableCreateIsDirtyWhenReplied) {
   Start();
+  StartTrace();
   std::optional<Reply> fsync;
   OpenByHandleHook() = [&] { fsync = Fsyncdir(kRootInode); };
   Created created = Create(kRootInode, "new", O_RDWR | O_CREAT | O_EXCL);
@@ -804,6 +872,7 @@ TEST_F(DirCacheFSTest, UnlinkMarksWhatItRemovesUnknown) {
   ASSERT_THAT(cache::UnlinkDentry(ctx_, d, "a"), IsOk());
   ASSERT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(true));
 
+  StartTrace();
   std::optional<Reply> concurrent;
   NameToHandleHook() = [&] { concurrent = Rename(d, "b", d, "a"); };
   Reply reply = Unlink(d, "a");
@@ -857,6 +926,7 @@ TEST_F(DirCacheFSTest, UnlinkIsRefusedWhileItsParentKeepsChanging) {
 // untouched (the first directory) may go.
 TEST_F(DirCacheFSTest, MkdirDuringASyncPointKeepsItsDirtyRows) {
   Start();
+  StartTrace();
   auto [first, first_id] = Mkdir(kRootInode, "first");
   ASSERT_EQ(first.error, 0);
   ASSERT_THAT(Dirty(), UnorderedElementsAre(kRootInode, first_id));
@@ -871,6 +941,129 @@ TEST_F(DirCacheFSTest, MkdirDuringASyncPointKeepsItsDirtyRows) {
   // The next sync point began after the mkdirat: now both may go.
   EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
   EXPECT_THAT(Dirty(), ::testing::IsEmpty());
+}
+
+// --- Trace validation's own scenarios ------------------------------------
+//
+// Requests whose traces (StartTrace) reach model actions the scenarios above
+// do not: the retries and the EAGAIN of a phase 1 whose verification keeps
+// failing, and of a readdir whose listing keeps being invalidated, each
+// through real requests (a mutation of the directory inside every resolve or
+// listing); and the common requests one after another.
+
+// A rename resolves its source (unknown, in a complete listing: one probe)
+// three times, and a mkdir in the same directory runs during each resolve
+// (after its fill snapshot, so the resolve cannot record the name, which
+// stays unknown), so phase 1's verification fails every time: EAGAIN.
+TEST_F(DirCacheFSTest, RenameGivesUpWhileItsParentKeepsChanging) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  WriteFile(Path("d/a"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(Id("a", d), IsOk());  // Populates d.
+  ASSERT_THAT(cache::UnlinkDentry(ctx_, d, "a"), IsOk());
+
+  StartTrace();
+  int mkdirs = 0;
+  MutateDuringFills(3, [&](int i) {
+    EXPECT_EQ(Mkdir(d, absl::StrCat("m", i)).first.error, 0);
+    ++mkdirs;
+  });
+  EXPECT_EQ(Rename(d, "a", d, "b").error, -EAGAIN);
+  EXPECT_EQ(mkdirs, 3);
+  EXPECT_EQ(::access(Path("d/a").c_str(), F_OK), 0);
+}
+
+// The same for an unlink.
+TEST_F(DirCacheFSTest, UnlinkGivesUpWhileItsParentKeepsChanging) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  WriteFile(Path("d/a"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(Id("a", d), IsOk());  // Populates d.
+  ASSERT_THAT(cache::UnlinkDentry(ctx_, d, "a"), IsOk());
+
+  StartTrace();
+  int mkdirs = 0;
+  MutateDuringFills(3, [&](int i) {
+    EXPECT_EQ(Mkdir(d, absl::StrCat("m", i)).first.error, 0);
+    ++mkdirs;
+  });
+  EXPECT_EQ(Unlink(d, "a").error, -EAGAIN);
+  EXPECT_EQ(mkdirs, 3);
+  EXPECT_EQ(::access(Path("d/a").c_str(), F_OK), 0);
+}
+
+// A readdir of an incomplete directory populates it three times, and a
+// mkdir in it runs during each population (after its fill snapshot), so no
+// listing can be recorded: EAGAIN.
+TEST_F(DirCacheFSTest, ReaddirGivesUpWhileItsDirectoryKeepsChanging) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  WriteFile(Path("d/a"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(Id("a", d), IsOk());  // Populates d.
+  ASSERT_THAT(cache::MarkDirComplete(ctx_, d, false), IsOk());
+
+  StartTrace();
+  int mkdirs = 0;
+  MutateDuringFills(3, [&](int i) {
+    EXPECT_EQ(Mkdir(d, absl::StrCat("m", i)).first.error, 0);
+    ++mkdirs;
+  });
+  EXPECT_EQ(ErrnoOf(List(d, false).status()), EAGAIN);
+  EXPECT_EQ(mkdirs, 3);
+  // Nothing in flight any more: now it is listed.
+  EXPECT_THAT(List(d, true), IsOkAndHolds(UnorderedElementsAre(
+                                 ".", "..", "a", "m1", "m2", "m3")));
+}
+
+// The common requests in a directory, one at a time: lookups (served, and
+// resolved), readdir and readdirplus, getattr, a mkdir that fails (EEXIST)
+// and one that succeeds, a rename and an unlink (and both again, ENOENT),
+// and a sync point.
+TEST_F(DirCacheFSTest, CommonRequestsMatchTheModel) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  WriteFile(Path("d/a"));
+  WriteFile(Path("d/b"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+
+  StartTrace();
+  EXPECT_THAT(List(d, true),
+              IsOkAndHolds(UnorderedElementsAre(".", "..", "a", "b")));
+  EXPECT_THAT(List(d, false),
+              IsOkAndHolds(UnorderedElementsAre(".", "..", "a", "b")));
+  struct fuse_getattr_in getattr = {};
+  std::string body;
+  AppendBytes(body, getattr);
+  EXPECT_EQ(Send(FUSE_GETATTR, static_cast<uint64_t>(d), body).error, 0);
+  EXPECT_EQ(Mkdir(d, "a").first.error, -EEXIST);
+  EXPECT_EQ(Mkdir(d, "c").first.error, 0);
+  EXPECT_EQ(Rename(d, "a", d, "e").error, 0);
+  EXPECT_EQ(Unlink(d, "b").error, 0);
+  EXPECT_EQ(Unlink(d, "b").error, -ENOENT);
+  EXPECT_EQ(Rename(d, "b", d, "f").error, -ENOENT);
+  EXPECT_THAT(List(d, true),
+              IsOkAndHolds(UnorderedElementsAre(".", "..", "c", "e")));
+  EXPECT_EQ(Fsyncdir(d).error, 0);
+  EXPECT_THAT(Dirty(), Not(Contains(d)));
+}
+
+// A mkdir in a directory whose listing is complete. Phase 1 marks the new
+// name unknown, and the trace shows it. Trace validation's fault-injection
+// test (//dcfs:trace_fault_injection_test) runs this test alone in a build
+// whose phase 1 skips that write (testonly/skip_mark_unknown.cc), and
+// requires validation to reject its trace at that phase 1.
+TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
+  WriteFile(Path("a"));
+  Start();
+  ASSERT_THAT(Id("a"), IsOk());  // Populates the root.
+  ASSERT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(true));
+
+  StartTrace();
+  EXPECT_EQ(Mkdir(kRootInode, "new").first.error, 0);
+  EXPECT_EQ(Cached(kRootInode, "new").first, LookupResult::kFound);
 }
 
 }  // namespace

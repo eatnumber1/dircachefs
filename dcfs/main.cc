@@ -38,6 +38,7 @@
 #include "dcfs/migrate.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/mounts_below.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -363,6 +364,9 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   MountFds mounts;
   absl::BitGen bitgen;
   Context ctx{db, mounts, bitgen};
+  // Records nothing, except in the testonly recording build (see
+  // dcfs/protocol_events.h).
+  ctx.events = &MainProtocolEvents();
 
   ABSL_ASSIGN_OR_RETURN(RootIdentity root, backing::ProbeRoot(ctx, *source_fd));
   ABSL_RETURN_IF_ERROR(Migrate(db, root));

@@ -1,4 +1,5 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//formal:trace.bzl", "tla_trace_test")
 load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
@@ -437,3 +438,49 @@ qemu_test(
     size = "large",
     timeout = "long",
 )
+
+# --- Trace validation (formal/README.md, "Trace validation") ---------------
+#
+# The e2e initramfs with the testonly recording build of dcfs
+# (//dcfs:main_static_traced), which writes its protocol events to the
+# serial console, and the guest scripts whose runs are checked against the
+# model (formal/Trace.tla) by //formal:trace.bzl's tla_trace_test. The guest
+# scripts run unchanged: the traced binary records without being asked.
+genrule(
+    name = "initramfs_traced",
+    srcs = [
+        "//dcfs:main_static_traced",
+        "//tools:fhtest",
+        "//tools:testutil",
+        "//third_party/busybox:busybox_build",
+        "guest/init",
+    ] + glob(["guest/*.sh"]),
+    outs = ["initramfs_traced.cpio.gz"],
+    testonly = 1,
+    cmd = "$(location scripts/mkinitramfs.sh) $@ " +
+          "$(location //third_party/busybox:busybox_build) " +
+          "$(location //dcfs:main_static_traced) " +
+          "$(location //tools:fhtest) " +
+          "$(location //tools:testutil) " +
+          "$(location guest/init) " +
+          "$(SRCS)",
+    tools = ["scripts/mkinitramfs.sh"],
+)
+
+[
+    tla_trace_test(
+        name = "trace_%s_test" % script,
+        size = "large",
+        timeout = "long",
+        disks = disks,
+        guest_script = "%s.sh" % script,
+        initramfs = ":initramfs_traced",
+        lock = True,
+    )
+    for script, disks in [
+        ("crash", ["vdb:ext4:320M"]),
+        ("power", ["vdb:ext4:320M"]),
+        ("rename", ["vdb:ext4:320M", "vdc:ext4:64M"]),
+        ("create", ["vdb:ext4:320M", "vdc:ext4:64M"]),
+    ]
+]

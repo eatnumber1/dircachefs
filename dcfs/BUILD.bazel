@@ -1,10 +1,15 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 
-# Shared by :main and :main_static (the QEMU-initramfs copy, see below) so
-# their dependency lists can't drift apart.
+# Shared by :main, :main_static (the QEMU-initramfs copy, see below) and
+# :main_static_traced so their dependency lists can't drift apart. Every
+# binary adds exactly one definition of MainProtocolEvents() (see
+# protocol_events.h): :protocol_events_main in production, the recorder in
+# the testonly recording build.
 MAIN_DEPS = [
     ":backing",
+    ":protocol_events",
     ":context",
     ":dir_cache_fs",
     ":file_handle",
@@ -39,11 +44,31 @@ MAIN_DEPS = [
 cc_binary(
     name = "main",
     srcs = ["main.cc"],
-    deps = MAIN_DEPS,
+    deps = MAIN_DEPS + [":protocol_events_main"],
+)
+
+# The protocol events (protocol_events.h): the interface every layer calls
+# through Context::events, and the production MainProtocolEvents(), which
+# records nothing. Trace validation's recorder is //dcfs/testonly:recorder.
+cc_library(
+    name = "protocol_events",
+    visibility = ["//dcfs/testonly:__pkg__"],
+    hdrs = ["protocol_events.h"],
+    deps = [
+      "@absl//absl/functional:function_ref",
+      "@absl//absl/status",
+    ],
+)
+
+cc_library(
+    name = "protocol_events_main",
+    srcs = ["protocol_events_main.cc"],
+    deps = [":protocol_events"],
 )
 
 cc_library(
     name = "sqlite",
+    visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["sqlite.cc"],
     hdrs = ["sqlite.h"],
     deps = [
@@ -81,6 +106,7 @@ qemu_cc_test(
 
 cc_library(
     name = "escape",
+    visibility = ["//dcfs/testonly:__pkg__"],
     hdrs = ["escape.h"],
     srcs = ["escape.cc"],
     # Optimized even in a fastbuild: the exhaustive test below calls it 33
@@ -104,6 +130,7 @@ qemu_cc_test(
 
 cc_library(
     name = "status",
+    visibility = ["//dcfs/testonly:__pkg__"],
     hdrs = ["status.h"],
     srcs = [
       "status.cc",
@@ -279,6 +306,7 @@ cc_library(
     hdrs = ["fuse_ops.h"],
     srcs = ["fuse_ops.cc"],
     deps = [
+      ":protocol_events",
       ":dir_cache_fs",
       ":fuse_request",
       "@absl//absl/log",
@@ -402,6 +430,7 @@ cc_library(
     srcs = ["dir_cache_fs.cc"],
     hdrs = ["dir_cache_fs.h"],
     deps = [
+      ":protocol_events",
       ":escape",
       ":backing",
       ":context",
@@ -432,37 +461,84 @@ cc_library(
 # under test: the interleavings coroutines will produce (see
 # dir_cache_fs_test.cc). A target of its own, so the wraps affect nothing
 # else.
+DIR_CACHE_FS_TEST_DEPS = [
+    ":backing",
+    ":context",
+    ":dir_cache_fs",
+    ":fuse_ops",
+    ":metadata_cache",
+    ":migrate",
+    ":mount_fds",
+    ":protocol_events",
+    ":sqlite",
+    ":status",
+    ":syscalls",
+    "//dcfs/testonly:trace_recorder",
+    "@absl//absl/random",
+    "@absl//absl/status",
+    "@absl//absl/status:status_matchers",
+    "@absl//absl/status:statusor",
+    "@absl//absl/strings",
+    "@absl//absl/time",
+    "@googletest//:gtest_main",
+    "@libfuse//:libfuse",
+]
+
+DIR_CACHE_FS_TEST_WRAPS = [
+    "-Wl,--wrap=name_to_handle_at",
+    "-Wl,--wrap=open_by_handle_at",
+    "-Wl,--wrap=syncfs",
+]
+
 qemu_cc_test(
     name = "dir_cache_fs_test",
     size = "small",
     timeout = "short",
     srcs = ["dir_cache_fs_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
-    linkopts = [
-        "-Wl,--wrap=name_to_handle_at",
-        "-Wl,--wrap=open_by_handle_at",
-        "-Wl,--wrap=syncfs",
-    ],
-    deps = [
-      ":backing",
-      ":context",
-      ":dir_cache_fs",
-      ":fuse_ops",
-      ":metadata_cache",
-      ":migrate",
-      ":mount_fds",
-      ":sqlite",
-      ":status",
-      ":syscalls",
-      "@absl//absl/random",
-      "@absl//absl/status",
-      "@absl//absl/status:status_matchers",
-      "@absl//absl/status:statusor",
-      "@absl//absl/strings",
-      "@absl//absl/time",
-      "@googletest//:gtest_main",
-      "@libfuse//:libfuse",
-    ],
+    linkopts = DIR_CACHE_FS_TEST_WRAPS,
+    deps = DIR_CACHE_FS_TEST_DEPS,
+)
+
+# Trace validation (formal/README.md): runs :dir_cache_fs_test's guest and
+# checks the trace of every test that records one (StartTrace) against
+# formal/Trace.tla. The harness runs requests inside other requests'
+# syscalls, which the kernel's directory lock would forbid: lock = False.
+tla_trace_test(
+    name = "dir_cache_fs_trace_test",
+    size = "medium",
+    timeout = "long",
+    disks = ["vdb:ext4:32M"],
+    initramfs = ":dir_cache_fs_test.cpio.gz",
+    lock = False,
+    unit = True,
+)
+
+# Test first, for trace validation itself: the same harness with a fault
+# (dcfs/testonly/skip_mark_unknown.cc: phase 1 does not mark names unknown),
+# running only the scenario it breaks. Its trace must be rejected, at that
+# create's phase 1.
+qemu_cc_test(
+    name = "dir_cache_fs_fault_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["dir_cache_fs_test.cc"],
+    args = ["--gtest_filter=DirCacheFSTest.CreateMarksItsNameUnknown"],
+    disks = [("vdb", "ext4", "32M")],
+    linkopts = DIR_CACHE_FS_TEST_WRAPS + ["-Wl,--wrap=sqlite3_step"],
+    deps = DIR_CACHE_FS_TEST_DEPS + ["//dcfs/testonly:skip_mark_unknown"],
+)
+
+tla_trace_test(
+    name = "trace_fault_injection_test",
+    size = "medium",
+    timeout = "long",
+    disks = ["vdb:ext4:32M"],
+    expect_reject = "DirCacheFSTest.CreateMarksItsNameUnknown@1",
+    expect_reject_event = "\"ev\":\"phase1\".*\"req\":\\{\"k\":\"create\",\"n\":\"new\"",
+    initramfs = ":dir_cache_fs_fault_test.cpio.gz",
+    lock = False,
+    unit = True,
 )
 
 cc_library(
@@ -556,6 +632,7 @@ cc_library(
 
 cc_library(
     name = "migrate",
+    visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["migrate.cc"],
     hdrs = ["migrate.h"],
     deps = [
@@ -591,10 +668,12 @@ qemu_cc_test(
 
 cc_library(
     name = "context",
+    visibility = ["//dcfs/testonly:__pkg__"],
     hdrs = ["context.h"],
     deps = [
       ":device_id",
       ":mount_fds",
+      ":protocol_events",
       ":sqlite",
       "@absl//absl/container:flat_hash_map",
       "@absl//absl/container:flat_hash_set",
@@ -605,9 +684,11 @@ cc_library(
 
 cc_library(
     name = "metadata_cache",
+    visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["metadata_cache.cc"],
     hdrs = ["metadata_cache.h"],
     deps = [
+      ":protocol_events",
       ":escape",
       ":context",
       ":device_id",
@@ -657,6 +738,7 @@ cc_library(
     srcs = ["backing.cc"],
     hdrs = ["backing.h"],
     deps = [
+      ":protocol_events",
       ":escape",
       ":context",
       ":credentials",
@@ -728,7 +810,26 @@ cc_binary(
     }),
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
-    deps = MAIN_DEPS,
+    deps = MAIN_DEPS + [":protocol_events_main"],
+)
+
+# The testonly recording build of :main_static, for trace validation
+# (formal/README.md, "Trace validation"): the same code, linked with the
+# recorder's MainProtocolEvents() (dcfs/testonly/main_recorder.cc), which
+# writes every protocol event to the console. Only //test/qemu's traced
+# initramfs uses it.
+cc_binary(
+    name = "main_static_traced",
+    testonly = 1,
+    srcs = ["main.cc"],
+    features = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
+    linkstatic = True,
+    visibility = ["//test/qemu:__pkg__"],
+    deps = MAIN_DEPS + ["//dcfs/testonly:main_recorder"],
 )
 
 # Every target the shipped binaries (the dynamic :main and the static

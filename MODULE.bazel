@@ -273,6 +273,17 @@ http_file(
     urls = ["https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar"],
 )
 
+# Phase 12.2: the TLA+ CommunityModules (Json, IOUtils), which trace
+# validation (formal/Trace.tla) uses to read a recorded trace. The -deps jar
+# bundles the libraries its Java overrides need. A dated release asset, so
+# the hash stays valid; see third_party/tlaplus/README.md.
+http_file(
+    name = "tla_community_modules",
+    downloaded_file_path = "CommunityModules-deps.jar",
+    sha256 = "b8d29e80d6edfe18ca133e9e03550c500c85ebd7dc23965d2afc004970f6381d",
+    urls = ["https://github.com/tlaplus/CommunityModules/releases/download/202409181925/CommunityModules-deps-202409181925.jar"],
+)
+
 java_toolchains = use_extension("@rules_java//java:extensions.bzl", "toolchains")
 use_repo(java_toolchains, "remotejdk21_linux")
 

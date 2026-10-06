@@ -1,0 +1,53 @@
+# Test-only code for dcfs (AGENTS.md: test-only code lives in *_test.cc or
+# in a testonly/ directory whose targets set testonly = 1).
+
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_testonly = 1)
+
+# The recording ProtocolEvents for trace validation (formal/README.md,
+# "Trace validation").
+cc_library(
+    name = "trace_recorder",
+    srcs = ["trace_recorder.cc"],
+    hdrs = ["trace_recorder.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:context",
+        "//dcfs:escape",
+        "//dcfs:metadata_cache",
+        "//dcfs:migrate",
+        "//dcfs:protocol_events",
+        "//dcfs:sqlite",
+        "//dcfs:status",
+        "@absl//absl/functional:function_ref",
+        "@absl//absl/log:check",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@sqlite//:sqlite3",
+    ],
+)
+
+# MainProtocolEvents() for //dcfs:main_static_traced: the recorder, instead
+# of //dcfs:protocol_events_main's no-op (link-time selection).
+cc_library(
+    name = "main_recorder",
+    srcs = ["main_recorder.cc"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        ":trace_recorder",
+        "//dcfs:protocol_events",
+        "@absl//absl/log:check",
+    ],
+)
+
+# The fault-injected build's fault (see skip_mark_unknown.cc): wraps
+# sqlite3_step, so the binary must link with -Wl,--wrap=sqlite3_step.
+cc_library(
+    name = "skip_mark_unknown",
+    srcs = ["skip_mark_unknown.cc"],
+    alwayslink = True,
+    visibility = ["//dcfs:__pkg__"],
+    deps = ["@sqlite//:sqlite3"],
+)

@@ -27,6 +27,7 @@
 #include "dcfs/escape.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/metadata_cache.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 #include "fuse_lowlevel.h"
@@ -334,6 +335,10 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryAfterPhase2(
 
 absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
     InodeId id, cache::CachedAttr attr) {
+  // Model: a getattr's first step (GAFrom), served or refreshed. Every
+  // caller read `attr` from the cache with no syscall since.
+  events::Scope scope(*ctx_.events, ctx_, &ProtocolEvents::GetattrBegin,
+                      &ProtocolEvents::GetattrEnd, id, attr.valid);
   if (attr.valid) return attr;
   struct statx stx {};
   ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id, &stx));
@@ -414,10 +419,13 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor parent_fd,
       backing::OpenNode(ctx_, parent, O_RDONLY | O_DIRECTORY));
-  if (absl::Status status = do_create(*parent_fd); !status.ok()) {
+  absl::Status created = do_create(*parent_fd);
+  // Model: CreateSyscall.
+  ctx_.events->MutationSyscall(ctx_, created);
+  if (!created.ok()) {
     mutation.End();
     ReresolveAfterFailure(parent, names);
-    return status;
+    return created;
   }
 
   // Phase 3: probe and record the new child. Its dentry only if no other
@@ -676,6 +684,9 @@ absl::Status DirCacheFS::RemoveChild(
     }
     const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
     ABSL_ASSIGN_OR_RETURN(child, backing::LookupOrPopulate(ctx_, parent, name));
+    // Model: UnlinkPhase1's ENOENT branch, if not found.
+    ctx_.events->NameResolved(ctx_, parent, name,
+                              child.kind != cache::LookupResult::kNegative);
     if (child.kind == cache::LookupResult::kNegative) {
       return req.ReplyErrno(ENOENT);
     }
@@ -699,13 +710,14 @@ absl::Status DirCacheFS::RemoveChild(
   // Phase 2: the backing unlinkat. On failure (ENOTEMPTY, EBUSY, ...) the
   // error is returned as is, after a best-effort re-resolve (see
   // ReresolveAfterFailure).
-  if (absl::Status status =
-          backing::UnlinkAt(ctx_, caller, parent, name,
-                            is_dir ? AT_REMOVEDIR : 0);
-      !status.ok()) {
+  absl::Status unlinked = backing::UnlinkAt(ctx_, caller, parent, name,
+                                            is_dir ? AT_REMOVEDIR : 0);
+  // Model: UnlinkSyscall.
+  ctx_.events->MutationSyscall(ctx_, unlinked);
+  if (!unlinked.ok()) {
     mutation.End();
     ReresolveAfterFailure(parent, names);
-    return status;
+    return unlinked;
   }
 
   // Phase 3. The unlink has happened: from here on each failure is logged
@@ -782,6 +794,9 @@ absl::Status DirCacheFS::Rename(
     }
     const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
     ABSL_ASSIGN_OR_RETURN(src, backing::LookupOrPopulate(ctx_, parent, name));
+    // Model: RenameResolveDst.
+    ctx_.events->NameResolved(ctx_, parent, name,
+                              src.kind != cache::LookupResult::kNegative);
     if (src.kind == cache::LookupResult::kNegative) {
       return req.ReplyErrno(ENOENT);
     }
@@ -823,14 +838,15 @@ absl::Status DirCacheFS::Rename(
   // Phase 2: the backing renameat2. On failure (EXDEV, ENOTEMPTY, EEXIST
   // for RENAME_NOREPLACE, ...) the error is returned unchanged, after a
   // best-effort re-resolve (see ReresolveAfterFailure).
-  if (absl::Status status =
-          backing::RenameAt(ctx_, caller, parent, name, newparent, newname,
-                            flags);
-      !status.ok()) {
+  absl::Status renamed = backing::RenameAt(ctx_, caller, parent, name,
+                                           newparent, newname, flags);
+  // Model: RenameSyscall.
+  ctx_.events->MutationSyscall(ctx_, renamed);
+  if (!renamed.ok()) {
     mutation->End();
     ReresolveAfterFailure(parent, names);
     ReresolveAfterFailure(newparent, newnames);
-    return status;
+    return renamed;
   }
 
   // The rename has happened: from here on each failure is logged and
@@ -907,6 +923,8 @@ void DirCacheFS::ReresolveAfterFailure(
   // failed syscall changed nothing) restores that. Best effort: the op's
   // own error is what gets replied, whatever happens here.
   for (const std::string &name : names) {
+    // Model: RenameFailed2 before a rename's second re-resolve.
+    ctx_.events->Reresolve(ctx_, parent, name);
     backing::LookupOrPopulate(ctx_, parent, name).IgnoreError();
   }
 }
@@ -966,8 +984,9 @@ absl::Status DirCacheFS::Link(
   // (newparent, newname) is re-resolved from the backing filesystem (see
   // CreateChild's identical handling) before the error (errno payload
   // intact) is returned.
-  if (absl::Status status = backing::LinkAt(ctx_, src, newparent, newname);
-      !status.ok()) {
+  absl::Status linked = backing::LinkAt(ctx_, src, newparent, newname);
+  ctx_.events->MutationSyscall(ctx_, linked);
+  if (absl::Status status = linked; !status.ok()) {
     mutation.End();
     ReresolveAfterFailure(newparent, names);
     // Best effort, as Setattr: the op's own error is what gets replied.
@@ -1373,6 +1392,9 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
   constexpr int kAttempts = 3;
   for (int attempt = 0;; ++attempt) {
     ABSL_ASSIGN_OR_RETURN(bool complete, cache::IsDirComplete(ctx_, dir));
+    // Model: ReaddirStep (or the readdir's Arrive); a listing served is
+    // taken right below, with no syscall in between.
+    ctx_.events->ListChecked(ctx_, dir, complete);
     if (complete) {
       std::vector<Listed> listed;
       size_t used = 0;

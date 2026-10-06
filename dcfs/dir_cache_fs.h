@@ -65,6 +65,10 @@ class DirCacheFS {
   DirCacheFS(Context &ctx, Options opts);
   ~DirCacheFS();
 
+  // The Context it serves from (fuse_ops.cc reaches the protocol events,
+  // Context::events, through it).
+  Context &context() { return ctx_; }
+
   absl::Status Init(struct fuse_conn_info &conn);
   absl::Status Destroy();
 

@@ -27,6 +27,7 @@
 #include "dcfs/escape.h"
 #include "dcfs/file_handle.h"
 #include "dcfs/migrate.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/sqlite.h"
 
@@ -981,12 +982,15 @@ absl::Status MarkXattrsUnknown(Context &ctx, InodeId id) {
 
 absl::Status InvalidateInode(Context &ctx, InodeId id) {
   RET_CHECK_NE(id, kRootInode) << "the root inode cannot be invalidated";
-  return ctx.db.Transaction([&]() -> absl::Status {
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
     // The schema's inodes_delete_unknowns trigger makes every dentry that
     // pointed at it unknown; its own dentries (if a directory) cascade.
     return Execute(ctx, "DELETE FROM inodes WHERE id = ?", id).status();
-  });
+  }));
+  // Not a step of the protocol model: see ProtocolEvents::InodeForgotten.
+  ctx.events->InodeForgotten(ctx, id);
+  return absl::OkStatus();
 }
 
 absl::Status DeleteInode(Context &ctx, InodeId id) {
@@ -1068,7 +1072,12 @@ void RegisterMutation(Context &ctx, std::span<const InodeId> ids,
 
 FillSnapshot BeginFill(const Context &ctx) { return {.seq = ctx.fills.seq}; }
 
-void EndWrites(Context &ctx, InodeId id) { Touch(ctx.fills, id); }
+void EndWrites(Context &ctx, InodeId id) {
+  Touch(ctx.fills, id);
+  // The guard event is done (no suspension point between it and the
+  // caller's removal of `id` from ctx.open_for_write).
+  ctx.events->WritesEnded(ctx, id);
+}
 
 bool CanFill(const Context &ctx, FillSnapshot snapshot, InodeId id) {
   const FillGuards &fills = ctx.fills;
@@ -1098,6 +1107,13 @@ bool Mutation::Owns(InodeId id) const {
 }
 
 void Mutation::End() {
+  if (ids_.empty()) return;
+  auto each_id = [&](absl::FunctionRef<void(InodeId)> each) {
+    for (const auto &entry : ids_) each(entry.first);
+  };
+  // Owns as the phase 3 the caller has just committed (if any) used it.
+  ctx_->events->MutationEnding(*ctx_, each_id,
+                               [&](InodeId id) { return Owns(id); });
   FillGuards &fills = ctx_->fills;
   for (const auto &[id, seq] : ids_) {
     auto it = fills.inflight.find(id);
@@ -1106,6 +1122,9 @@ void Mutation::End() {
     }
     Touch(fills, id);
   }
+  // Model: the phase-3 action (commit, End, the refresh's snapshot) or a
+  // failure's End.
+  ctx_->events->MutationEnded(*ctx_, each_id);
   ids_.clear();
 }
 
@@ -1186,17 +1205,28 @@ absl::StatusOr<Mutation> BeginMutation(
     absl::FunctionRef<absl::Status()> body) {
   bool known = true;
   for (InodeId id : ids) known = known && ctx.dirty.durable.contains(id);
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
+  auto each_id = [&](absl::FunctionRef<void(InodeId)> each) {
+    for (InodeId id : ids) each(id);
+  };
+  absl::Status committed = ctx.db.Transaction(
       [&]() -> absl::Status {
         ABSL_RETURN_IF_ERROR(body());
         if (known) return absl::OkStatus();
         return InsertDirty(ctx, ids);
       },
-      known ? sqlite3::Durability::kNormal : sqlite3::Durability::kSync));
+      known ? sqlite3::Durability::kNormal : sqlite3::Durability::kSync);
+  // kAborted is BeginRemove's or BeginRename's verification (nothing was
+  // written; the caller resolves again): the model's retry/EAGAIN branch.
+  if (absl::IsAborted(committed)) ctx.events->MutationAborted(ctx, each_id);
+  ABSL_RETURN_IF_ERROR(committed);
   ctx.dirty.any = true;
   if (!known) ctx.dirty.durable.insert(ids.begin(), ids.end());
   Mutation mutation(&ctx);
   RegisterMutation(ctx, ids, mutation.ids_);
+  // Model: the BeginMutation branch of the mutation's first step (after
+  // RegisterMutation, as the model's BeginMutation moves the guards in the
+  // same step).
+  ctx.events->MutationBegun(ctx, each_id, !known);
   return mutation;
 }
 
