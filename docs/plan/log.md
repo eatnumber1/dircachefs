@@ -400,3 +400,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Orchestrator note: a rebase conflict in test/qemu/BUILD.bazel (R3b and Phase 10 both appended
   targets) was resolved by keeping both blocks; the readdir agent found the lane mid-rebase and
   correctly stopped until it was clean.
+- Phase 5.2 (CI workflow developed with pinned act; full job under act as the host-dependency detector, run only when load allows) started in lane-2 (dcfs-investigator). Nothing is published; russ pushes.
