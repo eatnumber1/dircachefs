@@ -56,13 +56,22 @@ want() { # <archive> <name>
 	listing "$1" | grep -qx "$2" || fail "$1 does not list $2: $(listing "$1" | tr '\n' ' ')"
 }
 
+# Bazel passes the busybox and the output as paths relative to the working
+# directory (and the script cds into its work tree): run from $WORK with a
+# relative busybox and output path.
 run_unit() { # <busybox> <out>
-	PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit "$2" "$1" "$WORK/init" "$WORK/testbin" - ""
+	rm -f "$WORK/busybox"
+	cp "$1" "$WORK/busybox" || return 1
+	(cd "$WORK" && rm -f rel.cpio.gz && PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit \
+		rel.cpio.gz ./busybox "$WORK/init" "$WORK/testbin" - "" && mv rel.cpio.gz "$2")
 }
 
 run_e2e() { # <busybox> <out>
-	PATH="$WORK/tools" "$SH" "$MKINITRAMFS" "$2" "$1" "$WORK/testbin" "$WORK/testbin" \
-		"$WORK/testbin" "$WORK/init" "$WORK/names.sh"
+	rm -f "$WORK/busybox"
+	cp "$1" "$WORK/busybox" || return 1
+	(cd "$WORK" && rm -f rel.cpio.gz && PATH="$WORK/tools" "$SH" "$MKINITRAMFS" \
+		rel.cpio.gz ./busybox "$WORK/testbin" "$WORK/testbin" \
+		"$WORK/testbin" "$WORK/init" "$WORK/names.sh" && mv rel.cpio.gz "$2")
 }
 
 # --- no host cpio needed ----------------------------------------------------

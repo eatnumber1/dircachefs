@@ -81,6 +81,11 @@ case "$OUT" in
 /*) OUT_ABS="$OUT" ;;
 *) OUT_ABS="$(pwd)/$OUT" ;;
 esac
+# Bazel passes the busybox as a relative path; cpio runs from inside $ROOT.
+case "$BUSYBOX" in
+/*) BUSYBOX_ABS="$BUSYBOX" ;;
+*) BUSYBOX_ABS="$(pwd)/$BUSYBOX" ;;
+esac
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -185,7 +190,7 @@ fi
 # every /bin/sh), and the output is removed on any failure so that nothing
 # empty or partial can be cached.
 CPIO="$WORK/initramfs.cpio"
-if ! (cd "$ROOT" && find . | "$BUSYBOX" cpio -o -H newc >"$CPIO") ||
+if ! (cd "$ROOT" && find . | "$BUSYBOX_ABS" cpio -o -H newc >"$CPIO") ||
 	! gzip -1 <"$CPIO" >"$OUT_ABS"; then
 	rm -f "$OUT_ABS"
 	echo "mkinitramfs.sh: building the initramfs failed" >&2
