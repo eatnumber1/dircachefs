@@ -64,6 +64,11 @@ drop_caches() {
 # read lands inside the measured window and looks like a cache miss it is
 # not (confirmed by reading fs/xfs/xfs_icache.c: xfs_inodegc_stop(), the
 # only thing that drains it, runs nowhere except freeze and unmount).
+# The same freeze also covers xfs's log synchronously: otherwise
+# xfs_log_worker (every fs.xfs.xfssyncd_centisecs, 30 s) writes two dummy
+# superblock transactions to the device, one per tick, the first 30-60 s
+# after the last write (idle.sh measured +2 writes at ~34 s and +2 at ~65 s
+# after boot, with and without dcfs running, and nothing after that).
 # FIFREEZE forces exactly that drain (xfs_fs_freeze -> xfs_fs_sync_fs's
 # SB_FREEZE_PAGEFAULT stage -> xfs_inodegc_stop) synchronously before it
 # returns; FITHAW re-enables it with nothing left queued, so it cannot

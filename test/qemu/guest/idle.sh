@@ -14,6 +14,17 @@
 # writeback is out of the picture because nothing is dirty: the tree is
 # synced before dcfs mounts, and the activity below never writes.
 #
+# The warm-up also quiesces the backing filesystem (drop_caches_quiesced,
+# lib.sh). `sync` alone leaves xfs two timer ticks of log covering to do:
+# xfs_log_worker runs every fs.xfs.xfssyncd_centisecs (30 s) and, when the
+# log is idle but not yet "covered", commits a dummy superblock
+# transaction (xfs_log_cover -> xfs_sync_sb) and forces the log; it takes
+# two such transactions to cover the log, so without the quiesce the window
+# sees +2 writes at about 30 s and +2 at about 60 s after the mount, then
+# nothing more (measured in the guest, 240 s window, with and without dcfs
+# running: Phase 6.2 log). That is xfs settling after the tree was written,
+# not dcfs I/O, and a freeze/thaw does the covering synchronously.
+#
 # idle_short.sh and idle_long.sh set IDLE_SECS (medium and large tiers).
 # Not covered: an NFS client idling on an export (needs the Debian rootfs
 # of nfs_test; see docs/plan/phases/10-benchmarks.md).
@@ -89,7 +100,7 @@ fi
 find "$MNT" >/dev/null
 pass warm-find
 
-drop_caches
+drop_caches_quiesced
 sleep 1
 set -- $(io_counts)
 r0=$1
