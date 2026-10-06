@@ -451,3 +451,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   thaw fails the test; reproducible kernel/busybox/rootfs stamps; clock shim removed. Full suite
   116/117: idle_short_test_xfs FAILS (writes +4 over 60 s idle), pre-existing (also fails on the
   base commit): investigate now (lane-4) since idle writes defeat spin-down.
+- 12.2 done on step-12.2 (dcfs-protocol; +4159/-137), under a dcfs-reviewer call-site pass before
+  merge: ProtocolEvents interface (no-op in production), testonly recorder (link-time selected
+  main_static_traced), formal/Trace.tla + tla_trace_test (TLC with CommunityModules, pinned, plus a
+  trimmed TLCOverrides jar the stock jar needs), traces from the harness (29 valid) and guest
+  crash/power/create/rename tests (6/5/5/10 valid); fault build (phase 1's mark-unknown skipped) is
+  rejected at that event. Finding: RecoverDirty marks dentries unknown in directories that are not
+  dirty themselves; Trace.tla's T_Recover allows it explicitly and the model should gain it. Never
+  taken: UnlinkFailed, RenameFailed, RenameFailed2 (unreachable without out-of-band changes). Note:
+  the traced rename run flaked on rename.sh's unlink-mnt zero-reads check when a sync point fell in
+  the window under tracing load (passes 4/4 after trimming output): rename.sh's windows are fragile
+  under load (6.2).
