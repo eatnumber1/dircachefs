@@ -1037,46 +1037,84 @@ reply: the new row is dirty from phase 3's `MarkDirty`, which no guard
 sees, so a sync point while the create waits on a later syscall could clear
 it, and the writes after the reply would have no dirty row.
 
-### The mmap caveat, and FORGET reconciliation
+### mmap after close (held-fd workaround)
 
-`mmap` of a passthrough file swaps the mapping's file to the backing file
-(`backing_file_mmap`, `vma_set_file`), so the mapping no longer holds the
-FUSE file. `close()` after `mmap(MAP_SHARED, PROT_WRITE)` therefore drops
-the last reference and the kernel sends RELEASE while the mapping is still
-writable. Stores through it reach the backing file with no FUSE request at
-all, and change its mtime, ctime and blocks after the release recorded
-them (amendment 16).
+This section is the reason for a workaround and the condition for removing
+it. The code marks each of its three parts with the comment
+`// See design.md "mmap after close" (held-fd workaround)`: the written-file
+set (`DirCacheFS::written_`), the descriptor held for each file in it
+(taken in `DirCacheFS::Release`), and the FORGET hook
+(`DirCacheFS::ReconcileWritten`, called from `Forget`, `ForgetMulti` and
+`Destroy`). The kernel change that makes it unnecessary is listed in
+`docs/plan/README.md` ("Future work").
 
-The mapping's backing file does hold the FUSE file's *path*, though
-(`backing_file_open` takes a reference on its `user_path`), so the kernel
-cannot forget the FUSE inode while the mapping exists: the last `FORGET`
-of the inode comes after the last store. Step 23.1 uses that
-(`DirCacheFS::ReconcileWritten`): every inode that had a writable open
-during this run is remembered (`written_`), and at its last `FORGET`
-(and at `DESTROY`, since the kernel sends no `FORGET`s at unmount) dcfs
-re-reads its attributes by handle (`backing::StatWritten`: one `statx`,
-identity verified, not reported as an out-of-band change). If they match
-the cache nothing happens. If they differ, or are unknown, they are
-recorded as a mutation records them: a phase 1 (`cache::BeginAttrChange`:
-unknown, durably dirty) and then a refresh as a fill, so that a power loss
-before the next sync point cannot keep the new attributes and lose the
-stores. The inode is forgotten from `written_` either way.
+**Why.** `mmap` of a passthrough file swaps the mapping's file to the
+backing file (`backing_file_mmap`, `vma_set_file`), so the mapping keeps
+only the backing file, not the dcfs (FUSE) file. `close()` after
+`mmap(MAP_SHARED, PROT_WRITE)` therefore drops the last reference to the
+dcfs file, and the kernel sends RELEASE before `munmap`, while the mapping
+can still store. The last writable release records the file's attributes
+as current; stores through the mapping after it reach the backing file
+with no FUSE request at all and change its mtime, ctime and blocks
+(amendment 16). The mapping's backing file does hold the dcfs file's
+*path* (`backing_file_open` takes a reference on its `user_path`), so the
+kernel cannot forget the dcfs inode while the mapping exists: its last
+`FORGET` comes after the last store, and it is the only later event dcfs
+sees. Hence the reconciliation there (steps 23.1 and 23.6): every inode
+that had a writable open during this run is in `written_`, and at its last
+`FORGET` (and at `DESTROY`, since the kernel sends no `FORGET`s at
+unmount) dcfs re-reads its attributes. If they match the cache nothing
+happens. If they differ, or are unknown, they are recorded as a mutation
+records them: a phase 1 (`cache::BeginAttrChange`: unknown, durably
+dirty), then a refresh as a fill, so that a power loss before the next
+sync point cannot keep the new attributes and lose the stores. If the
+backing object has no link left (removed behind dcfs's back since), the
+row goes.
 
-What is left:
+**Why a held descriptor.** At the file's last close (the release that
+tears down its shared backing descriptor), dcfs reopens it `O_PATH` and
+keeps that until the last `FORGET`. The reconciliation's `statx` goes
+through it, and the kernel answers from the pinned inode: no disk read,
+so a backing disk that has spun down stays asleep (`idle_short_test` checks it:
+the `FORGET` of a written file whose backing inode the caches had dropped;
+step 23.1's `statx` by handle read the inode back from the disk there).
+`O_PATH` is only a reference: no open file, no writer, no lease. Costs and
+limits:
 
-- Between the `munmap` and the last `FORGET` (the kernel keeps an inode it
-  is not short of memory for as long as it likes), dcfs serves the
-  attributes the release recorded, and NFS clients, which detect changes
-  from ctime, may serve stale data. A daemon crash or power loss in that
-  window leaves those attributes recorded as current.
-- The `statx` at `FORGET` may read the backing device, if its own inode
-  cache has dropped the file too: a spun-down disk can spin up for it.
-  Keeping a descriptor per written file until its `FORGET` would pin the
-  backing inode in memory instead, at the cost of a descriptor each and of
-  keeping unlinked files allocated until then; not done.
-- The proper fix is still in the kernel: keep the FUSE file referenced by
-  passthrough shared writable mappings until `munmap`, so that RELEASE
-  means no more writers. Its feasibility is unverified.
+- One descriptor per written file the kernel still caches, as many as its
+  inode cache keeps (the same bound as `lookups_`). `main.cc` raises
+  `RLIMIT_NOFILE` to `fs.nr_open` at startup. If a descriptor cannot be
+  opened (`EMFILE`), that file's reconciliation is the phase 1 alone (its
+  attributes unknown, no I/O), and the next access re-reads them.
+- A file whose last link dcfs removes leaves the set at once
+  (`RetireRemoved`), so its space is not held; one unlinked behind dcfs's
+  back stays allocated until its `FORGET`.
+- `DESTROY` reconciles every file left in the set: one `statx` through a
+  held descriptor each, no disk.
+
+**What is still not covered.**
+
+- Between `munmap` and the last `FORGET` (the kernel keeps an inode it is
+  not short of memory for as long as it likes), dcfs serves the attributes
+  the release recorded, and NFS clients, which detect changes from ctime,
+  may serve stale data. A daemon crash or power loss in that window leaves
+  those attributes recorded as current.
+- A mapping still live at unmount. As root, libfuse's
+  `fuse_kern_unmount` closes `/dev/fuse` (which aborts the connection) and
+  then unmounts lazily, so a process's passthrough mapping keeps storing to
+  the backing file after dcfs has stopped. `DESTROY` reconciles what was
+  stored by then, `FinishRun` records a clean shutdown, and the next run
+  serves the attributes as of `DESTROY` with nothing to tell it otherwise.
+  (`DESTROY` also cannot wait for the mapping: the kernel sends it only for
+  fuseblk mounts, and libfuse calls it at session teardown.)
+
+**When to remove it.** The fix belongs in the kernel: a passthrough
+mapping should keep the FUSE file referenced, so that RELEASE follows
+`munmap` and the last writable release means no more writers. Once that
+lands and dcfs's minimum kernel requires it, delete the written-file set,
+the held descriptors and the FORGET hook (the three marked places, and
+the `RLIMIT_NOFILE` raise in `main.cc`), and let the existing
+last-writable-release path cover mmap.
 
 ### copy_file_range, reflinks, ioctls and O_TMPFILE
 
@@ -1515,7 +1553,7 @@ None of this is built.
 - **A kernel fix for passthrough shared writable mappings,** so that
   RELEASE is not sent while a writable mapping still exists (FORGET
   reconciliation covers the stores, but only once the kernel lets go of
-  the inode; see [the mmap caveat](#the-mmap-caveat-and-forget-reconciliation)).
+  the inode; see [mmap after close](#mmap-after-close-held-fd-workaround)).
 - **A notifier thread** for kernel cache invalidation, if out-of-band
   detection ever needs to reach the kernel.
 - **ZFS**, once OpenZFS ships `FS_IOC_GETFSUUID`. A test gated on

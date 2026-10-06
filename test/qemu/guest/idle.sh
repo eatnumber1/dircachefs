@@ -25,6 +25,17 @@
 # running: Phase 6.2 log). That is xfs settling after the tree was written,
 # not dcfs I/O, and a freeze/thaw does the covering synchronously.
 #
+# Step 23.6: the window also contains the last FORGET of a file written
+# through dcfs, whose backing inode the kernel dropped from its caches
+# meanwhile. dcfs re-reads a written file's attributes at its last FORGET
+# (a shared writable mapping may have stored to it after the last close:
+# design.md, "mmap after close"); it does so through a descriptor it has
+# held since the last close, which keeps the backing inode in memory, so
+# that costs no backing read either. (A statx by handle there, step 23.1,
+# read the inode back from the disk.) A process holding an O_PATH
+# descriptor on the file keeps the kernel from forgetting it until the
+# window has begun.
+#
 # idle_short.sh and idle_long.sh set IDLE_SECS (medium and large tiers).
 # Not covered: an NFS client idling on an export (needs the Debian rootfs
 # of nfs_test; see docs/plan/phases/10-benchmarks.md).
@@ -33,6 +44,7 @@ FAILED=0
 
 DCFS=/bin/dcfs
 BENCH=/bin/dcfs_bench
+TESTUTIL=/bin/testutil
 SRC=/src
 MNT=/mnt
 DB=/cache/dcfs.db
@@ -100,12 +112,41 @@ fi
 find "$MNT" >/dev/null
 pass warm-find
 
+# Written through dcfs, then held (no FORGET) across the warm-up's drop of
+# every cache, which evicts its backing inode unless dcfs holds it.
+echo written >"$MNT/written"
+stat "$MNT/written" >/dev/null
+# The create made the dirty set non-empty: let a periodic sync point (the
+# first request --sync_interval_sec, 5 s, after the last one) empty it now,
+# so that its syncfs (on ext4, a cache flush the counters show as a write)
+# does not land in the window.
+sleep 6
+stat "$MNT" >/dev/null
+"$TESTUTIL" opath-hold "$MNT/written" >/tmp/hold.out 2>&1 &
+HOLD_PID=$!
+i=0
+while [ "$i" -lt 10 ] && ! grep -q READY /tmp/hold.out; do
+	i=$((i + 1))
+	sleep 1
+done
+sync
+
 drop_caches_quiesced
 sleep 1
 set -- $(io_counts)
 r0=$1
 w0=$2
 echo "idle.sh: counters after warm-up: reads=$r0 writes=$w0"
+
+# Inside the window: let go of the written file; the kernel forgets it.
+kill "$HOLD_PID" 2>/dev/null || true
+wait "$HOLD_PID" 2>/dev/null || true
+# Twice: an unused dentry that was recently referenced survives the first
+# pass (the LRU's second chance), and the FORGET comes only with the
+# inode's eviction.
+echo 2 >/proc/sys/vm/drop_caches
+echo 2 >/proc/sys/vm/drop_caches
+quiesce_daemon "$DAEMON_PID"
 
 elapsed=0
 while [ "$elapsed" -lt "$IDLE_SECS" ]; do

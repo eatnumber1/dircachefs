@@ -567,13 +567,15 @@ recovery protocol, concurrency, and the test strategy.
   the backing file without dcfs hearing of them. dcfs re-reads the
   attributes of every file that was open for writing when the kernel
   finally lets go of its inode (which cannot happen before the mapping is
-  gone) and at unmount; until then the file's cached mtime and ctime stay
+  gone) and at unmount, through a descriptor it keeps on each such file
+  until then, so that costs no disk access (dcfs raises its open-file limit
+  at startup for these). Until then the file's cached mtime and ctime stay
   as they were at `close()`, and NFS clients, which detect changes through
-  ctime, may serve stale data. That re-read is one `statx` of the backing
-  file, which can spin up a sleeping disk if the backing filesystem has
-  dropped the file from its own cache. While the file is still open for
-  writing, attributes are current. Fixing this fully needs a kernel
-  change.
+  ctime, may serve stale data. A mapping that is still writing when dcfs
+  is unmounted keeps writing to the backing file afterwards, and the next
+  run does not know. While the file is still open for writing, attributes
+  are current. Fixing this fully needs a kernel change (docs/design.md,
+  "mmap after close").
 - **NFS handles do not survive deleting the cache database.** They fail
   with `ESTALE`, never by resolving to a different file. Handles do survive
   restarts of dcfs.

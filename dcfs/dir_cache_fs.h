@@ -341,22 +341,28 @@ class DirCacheFS {
   // last writable open.
   absl::Status BeginWriting(InodeId id);
 
-  // FORGET reconciliation (step 23.1). With passthrough, a shared writable
-  // mapping holds only the backing file, so the last close sends RELEASE
-  // (which records the attributes) while the mapping can still store, and
-  // those stores change the backing size, mtime, ctime and blocks with no
-  // request at all. The only later request about the file is the kernel's
-  // last FORGET of it. So for an inode that had a writable open during this
-  // run (written_), the last FORGET -- and DESTROY, since the kernel sends
-  // no FORGETs at unmount -- re-reads its attributes by handle
-  // (backing::StatWritten: one statx). If they match the cache, nothing
-  // happens. If they differ, or are unknown, they are recorded as a
-  // mutation records: a phase 1 (attributes unknown, durably dirty), then
-  // a refresh as a fill; the dirty row keeps a power loss from keeping the
-  // new attributes while losing the stores, until a sync point's syncfs
-  // has covered them. A mapping that stores after the kernel has let go of
-  // the inode is still not seen (that needs the kernel to keep the FUSE
-  // file referenced until munmap). The inode leaves written_ either way.
+  // See design.md "mmap after close" (held-fd workaround).
+  //
+  // FORGET reconciliation (steps 23.1, 23.6). With passthrough, a shared
+  // writable mapping holds only the backing file, so the last close sends
+  // RELEASE (which records the attributes) while the mapping can still
+  // store, and those stores change the backing size, mtime, ctime and
+  // blocks with no request at all. The only later request about the file
+  // is the kernel's last FORGET of it, which cannot come before munmap
+  // (the mapping's backing file holds the dcfs file's path). So for an
+  // inode that had a writable open during this run (written_), the last
+  // FORGET -- and DESTROY, since the kernel sends no FORGETs at unmount --
+  // re-reads its attributes through the descriptor held since its last
+  // close (a statx the kernel answers from the pinned inode: no disk
+  // read, so a sleeping backing disk stays asleep). If they match the
+  // cache, nothing happens. If they differ, or are unknown, they are
+  // recorded as a mutation records: a phase 1 (attributes unknown,
+  // durably dirty), then a refresh as a fill through the same descriptor;
+  // the dirty row keeps a power loss from keeping the new attributes while
+  // losing the stores, until a sync point's syncfs has covered them.
+  // Without a held descriptor (none could be opened) it is the phase 1
+  // alone, no I/O: the next access re-reads them. The inode leaves
+  // written_, and its descriptor is closed, either way.
   void ReconcileWritten(InodeId id);
 
   // The other end: the last writable open of `id` is going away (Release,
@@ -537,9 +543,18 @@ class DirCacheFS {
   // IsUnnamedTmpfile).
   absl::flat_hash_set<InodeId> tmpfiles_;
 
+  // See design.md "mmap after close" (held-fd workaround).
+  //
   // The inodes that had a writable open during this run and whose last
-  // FORGET has not come since (see ReconcileWritten).
-  absl::flat_hash_set<InodeId> written_;
+  // FORGET has not come since (see ReconcileWritten), each with an O_PATH
+  // descriptor held from its last close (Release) until then: it pins the
+  // backing inode in memory so that the reconciliation reads no disk.
+  // nullopt while the file is still open, or if no descriptor could be
+  // opened (EMFILE: main.cc raises RLIMIT_NOFILE for these). Bounded by the
+  // kernel's inode cache, as lookups_ is. A file whose row is retired (its
+  // last link gone: RetireRemoved) leaves it, so that an unlinked file's
+  // space is not held.
+  absl::flat_hash_map<InodeId, std::optional<FileDescriptor>> written_;
 
   // The stubs whose refusal RefuseStub has logged in this run.
   absl::flat_hash_set<InodeId> stubs_logged_;

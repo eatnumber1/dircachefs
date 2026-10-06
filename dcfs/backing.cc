@@ -612,8 +612,7 @@ absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,
 // are also checked against the cache for free (ReconcileAttrs).
 absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
     Context &ctx, cache::FillSnapshot snapshot, InodeId id,
-    const cache::CachedAttr &attr, FileDescriptor fd,
-    bool detect_out_of_band = true) {
+    const cache::CachedAttr &attr, FileDescriptor fd) {
   ABSL_ASSIGN_OR_RETURN(struct statx stx,
                         syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask));
   bool same = stx.stx_ino == attr.backing_ino;
@@ -650,17 +649,11 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
         ESTALE, absl::StrCat("inode ", id,
                              " was replaced on the backing filesystem"));
   }
-  if (detect_out_of_band) {
-    ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, id, attr, stx));
-  }
+  ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, id, attr, stx));
   return fd;
 }
 
-// OpenNode, with or without its out-of-band change detection (see
-// StatWritten).
-absl::StatusOr<FileDescriptor> OpenNodeImpl(Context &ctx, InodeId id,
-                                            int flags,
-                                            bool detect_out_of_band) {
+absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
   if (id == cache::kRootInode) return OpenRoot(ctx, flags);
   // ReconcileAttrs compares `attr` with a statx taken after the open's I/O.
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
@@ -683,19 +676,7 @@ absl::StatusOr<FileDescriptor> OpenNodeImpl(Context &ctx, InodeId id,
     }
     return fd.status();
   }
-  return VerifyBackingIdentity(ctx, snapshot, id, attr, *std::move(fd),
-                               detect_out_of_band);
-}
-
-absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
-  return OpenNodeImpl(ctx, id, flags, /*detect_out_of_band=*/true);
-}
-
-absl::StatusOr<struct statx> StatWritten(Context &ctx, InodeId id) {
-  ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor fd,
-      OpenNodeImpl(ctx, id, O_PATH | O_NOFOLLOW, /*detect_out_of_band=*/false));
-  return syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask);
+  return VerifyBackingIdentity(ctx, snapshot, id, attr, *std::move(fd));
 }
 
 absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {

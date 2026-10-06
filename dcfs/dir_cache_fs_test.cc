@@ -38,6 +38,7 @@
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <sys/xattr.h>
@@ -1801,6 +1802,37 @@ TEST_F(DirCacheFSTest, LastForgetOfARemovedWrittenFileForgetsItsRow) {
   Forget(f, 1);
   EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
               ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+}
+
+// Without a held descriptor (none could be opened at its last close: here
+// the descriptor limit), the last FORGET still makes the attributes
+// unknown and the inode durably dirty, with no backing I/O; the next
+// access re-reads them.
+TEST_F(DirCacheFSTest, LastForgetWithoutAHeldDescriptorMarksUnknown) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  struct rlimit saved {};
+  ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &saved), 0);
+  const int lowest_free = ::dup(0);
+  ASSERT_GE(lowest_free, 0);
+  ::close(lowest_free);
+  struct rlimit tight = saved;
+  tight.rlim_cur = static_cast<rlim_t>(lowest_free);
+  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &tight), 0);
+  Reply release = Release(f, fh);  // Cannot hold a descriptor now.
+  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &saved), 0);
+  ASSERT_EQ(release.error, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: f is clean.
+  ASSERT_THAT(Dirty(), Not(Contains(f)));
+  Forget(f, 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(attr.valid);
+  EXPECT_THAT(Dirty(), Contains(f));
 }
 
 // At unmount the kernel sends no FORGETs: a written file the kernel still

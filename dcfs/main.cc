@@ -1,9 +1,12 @@
 #include <cerrno>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
 #include <iostream>
 #include <string>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <utility>
 #include <vector>
@@ -224,6 +227,37 @@ void InstallFlagsUsageConfig() {
   absl::SetFlagsUsageConfig(config);
 }
 
+// Raises RLIMIT_NOFILE as far as the kernel allows (fs.nr_open, which root
+// may also set as the hard limit). DirCacheFS holds one descriptor per file
+// written during the run until the kernel forgets the file -- design.md
+// "mmap after close" (held-fd workaround) -- as many as the kernel's inode
+// cache keeps, which the default soft limit of 1024 would cap. A failure
+// only means fewer held descriptors (those files' FORGET then marks their
+// attributes unknown instead), so it is logged, not fatal.
+void RaiseFileLimit() {
+  struct rlimit limit {};
+  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) {
+    LOG(WARNING) << "getrlimit(RLIMIT_NOFILE): " << std::strerror(errno);
+    return;
+  }
+  rlim_t want = limit.rlim_max;
+  if (FILE *f = std::fopen("/proc/sys/fs/nr_open", "re"); f != nullptr) {
+    unsigned long long nr_open = 0;
+    if (std::fscanf(f, "%llu", &nr_open) == 1 && nr_open > want) {
+      want = static_cast<rlim_t>(nr_open);
+    }
+    std::fclose(f);
+  }
+  struct rlimit raised = {.rlim_cur = want, .rlim_max = want};
+  if (setrlimit(RLIMIT_NOFILE, &raised) == 0) return;
+  raised = {.rlim_cur = limit.rlim_max, .rlim_max = limit.rlim_max};
+  if (setrlimit(RLIMIT_NOFILE, &raised) != 0) {
+    LOG(WARNING) << "could not raise RLIMIT_NOFILE (soft " << limit.rlim_cur
+                 << ", hard " << limit.rlim_max
+                 << "): " << std::strerror(errno);
+  }
+}
+
 absl::StatusOr<int> Main(int argc, char *argv[]) {
   // The backing create(2)-family syscalls (backing.h's MkdirAt/MknodAt/
   // CreateAt) run with the caller's umask, switched to around each one
@@ -244,6 +278,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kWarning);
   std::vector<char *> args = absl::ParseCommandLine(argc, argv);
   absl::InitializeLog();
+  RaiseFileLimit();
 
   if (absl::GetFlag(FLAGS_source).empty()) {
     return UsageError("--source is required");

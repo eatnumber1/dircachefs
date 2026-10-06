@@ -106,6 +106,10 @@
  *       this needs none, and sets the exact group list a test wants. Used
  *       by credentials.sh to act on the dcfs mount as an unprivileged user.
  *       On failure prints "ERR <errno-name>" and exits 127 (execvp) or 1.
+ *   testutil opath-hold <path>
+ *       open(2)s <path> O_PATH, prints "READY", and sleeps forever with it
+ *       open, until killed: on a dcfs mount the kernel then keeps the
+ *       file's inode (no FORGET) without any FUSE open (idle.sh).
  *   testutil opath-unlink-stat <path>
  *       open(2)s <path> O_PATH|O_NOFOLLOW, unlink(2)s <path>, then
  *       fstat(2)s the descriptor and prints "nlink=<n> size=<bytes>": an
@@ -611,6 +615,20 @@ static int cmd_runas(char *argv[])
 	execvp(argv[6], &argv[6]);
 	print_err(errno);
 	return 127;
+}
+
+static int cmd_opath_hold(const char *path)
+{
+	int fd = open(path, O_PATH);
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("READY\n");
+	fflush(stdout);
+	for (;;)
+		pause();
 }
 
 static int cmd_opath_unlink_stat(const char *path)
@@ -2228,6 +2246,8 @@ int main(int argc, char *argv[])
 		return cmd_sqlite_lock(argv[2], argv[3]);
 	if (argc >= 7 && strcmp(argv[1], "runas") == 0)
 		return cmd_runas(argv);
+	if (argc == 3 && strcmp(argv[1], "opath-hold") == 0)
+		return cmd_opath_hold(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "opath-unlink-stat") == 0)
 		return cmd_opath_unlink_stat(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "rmcwd") == 0)
