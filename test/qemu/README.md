@@ -649,9 +649,9 @@ ioctls; the guest has no dmsetup) are subcommands of the same binary.
 | `memory_test` (matrix) | medium (ext4), large | pass/fail: RSS after `find` is under 256 bytes per entry, and after a `drop_caches` of half the tree a find over the other half adds nothing; see the comment in `guest/memory.sh` for why "RSS shrinks back" cannot be asserted |
 
 Results are printed, not pass/fail (VM timing is noisy), except in the idle
-and memory tests. The benchmark binary links a `clock_gettime` wrapper
-(`bench/clock_shim.cc`) because the guest kernel has no POSIX timers, so
-google/benchmark's CPU time column is wall time. The 1M-entry tree the
+and memory tests. The guest kernel has POSIX timers
+(`CONFIG_POSIX_TIMERS`), so google/benchmark's CPU time column is real CPU
+time. The 1M-entry tree the
 phase plan mentions does not fit the 1 GiB guest (the kernel's inode cache
 for it alone would not), so `--entries` defaults to 100000; the idle test
 has no NFS client (that needs the nfs_test Debian rootfs).

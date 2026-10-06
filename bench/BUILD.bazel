@@ -24,7 +24,6 @@ cc_binary(
     name = "dcfs_bench",
     testonly = 1,
     srcs = [
-        "clock_shim.cc",
         "dcfs_bench.cc",
     ],
     features = select({
@@ -32,7 +31,6 @@ cc_binary(
         "//test/qemu:ubsan_build": [],
         "//conditions:default": ["fully_static_link"],
     }),
-    linkopts = ["-Wl,--wrap=clock_gettime"],
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
     deps = [
