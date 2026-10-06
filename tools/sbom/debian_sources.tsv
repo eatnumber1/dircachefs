@@ -40,8 +40,8 @@ libdevmapper1.02.1	lvm2	2:1.02.185-2	2.03.16-2
 libedit2	libedit	3.1-20221030-2	3.1-20221030-2
 libelf1	elfutils	0.188-2.1	0.188-2.1
 libelogind0	elogind	246.10-1debian1	246.10-1debian1
-libevent-core-2.1-7	libevent	2.1.12-stable-8	2.1.12-stable-8
-libexpat1	expat	2.5.0-1+deb12u2	2.5.0-1+deb12u2
+libevent-core-2.1-7	libevent	2.1.12-stable-8+deb12u1	2.1.12-stable-8+deb12u1
+libexpat1	expat	2.5.0-1+deb12u4	2.5.0-1+deb12u4
 libext2fs2	e2fsprogs	1.47.0-2+b2	1.47.0-2
 libfdisk1	util-linux	2.38.1-5+deb12u3	2.38.1-5+deb12u3
 libffi8	libffi	3.4.4-1	3.4.4-1
@@ -67,7 +67,7 @@ libkrb5-3	krb5	1.20.1-2+deb12u5	1.20.1-2+deb12u5
 libkrb5support0	krb5	1.20.1-2+deb12u5	1.20.1-2+deb12u5
 libldap-2.5-0	openldap	2.5.13+dfsg-5	2.5.13+dfsg-5
 liblz4-1	lz4	1.9.4-1	1.9.4-1
-liblzma5	xz-utils	5.4.1-1+deb12u1	5.4.1-1+deb12u1
+liblzma5	xz-utils	5.4.1-1+deb12u2	5.4.1-1+deb12u2
 liblzo2-2	lzo2	2.10-2	2.10-2
 libmd0	libmd	1.0.4-2	1.0.4-2
 libmnl0	libmnl	1.0.4-3	1.0.4-3
@@ -83,8 +83,8 @@ libp11-kit0	p11-kit	0.24.1-2	0.24.1-2
 libpam-modules-bin	pam	1.5.2-6+deb12u2	1.5.2-6+deb12u2
 libpam-modules	pam	1.5.2-6+deb12u2	1.5.2-6+deb12u2
 libpam0g	pam	1.5.2-6+deb12u2	1.5.2-6+deb12u2
-libpcre2-8-0	pcre2	10.42-1	10.42-1
-libperl5.36	perl	5.36.0-7+deb12u3	5.36.0-7+deb12u3
+libpcre2-8-0	pcre2	10.42-1+deb12u2	10.42-1+deb12u2
+libperl5.36	perl	5.36.0-7+deb12u4	5.36.0-7+deb12u4
 libproc2-0	procps	2:4.0.2-3	2:4.0.2-3
 libpython3-stdlib	python3-defaults	3.11.2-1+b1	3.11.2-1
 libpython3.11-minimal	python3.11	3.11.2-6+deb12u8	3.11.2-6+deb12u8
@@ -100,7 +100,7 @@ libsepol2	libsepol	3.4-2.1	3.4-2.1
 libsmartcols1	util-linux	2.38.1-5+deb12u3	2.38.1-5+deb12u3
 libsqlite3-0	sqlite3	3.40.1-2+deb12u2	3.40.1-2+deb12u2
 libss2	e2fsprogs	1.47.0-2+b2	1.47.0-2
-libssl3	openssl	3.0.20-1~deb12u2	3.0.20-1~deb12u2
+libssl3	openssl	3.0.22-1~deb12u1	3.0.22-1~deb12u1
 libstdc++6	gcc-12	12.2.0-14+deb12u1	12.2.0-14+deb12u1
 libsystemd-shared	systemd	252.39-1~deb12u2	252.39-1~deb12u2
 libsystemd0	systemd	252.39-1~deb12u2	252.39-1~deb12u2
@@ -125,9 +125,9 @@ netbase	netbase	6.4	6.4
 nfs-common	nfs-utils	1:2.6.2-4+deb12u1	1:2.6.2-4+deb12u1
 nfs-kernel-server	nfs-utils	1:2.6.2-4+deb12u1	1:2.6.2-4+deb12u1
 passwd	shadow	1:4.13+dfsg1-1+deb12u2	1:4.13+dfsg1-1+deb12u2
-perl-base	perl	5.36.0-7+deb12u3	5.36.0-7+deb12u3
-perl-modules-5.36	perl	5.36.0-7+deb12u3	5.36.0-7+deb12u3
-perl	perl	5.36.0-7+deb12u3	5.36.0-7+deb12u3
+perl-base	perl	5.36.0-7+deb12u4	5.36.0-7+deb12u4
+perl-modules-5.36	perl	5.36.0-7+deb12u4	5.36.0-7+deb12u4
+perl	perl	5.36.0-7+deb12u4	5.36.0-7+deb12u4
 procps	procps	2:4.0.2-3	2:4.0.2-3
 python3-minimal	python3-defaults	3.11.2-1+b1	3.11.2-1
 python3.11-minimal	python3.11	3.11.2-6+deb12u8	3.11.2-6+deb12u8

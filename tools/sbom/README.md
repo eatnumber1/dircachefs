@@ -17,11 +17,12 @@ What goes in (a pin missing from this list fails `//tools/sbom:sbom_test`):
 Debian binary package to its source package and source version, because
 OSV's Debian advisories are per source package (`libc6` is `glibc`,
 `mount` is `util-linux`); it comes from the `Packages` index of the pinned
-snapshot (`snapshot.debian.org/archive/debian/20261004T203145Z`), and the
+snapshots (see third_party/debian/README.md), and the
 test fails when `debs.lock` has a package with no row. When the Debian pin
 moves, regenerate it:
 
 ```
+# the Packages indexes of bookworm and bookworm-updates (archive/debian) and bookworm-security (archive/debian-security), concatenated:
 curl -fsSL https://snapshot.debian.org/archive/debian/<timestamp>/dists/bookworm/main/binary-amd64/Packages.xz | xz -dc > Packages
 # for each name_version in debs.lock: take Package, Source (name and optional
 # "(version)") and Version; the source version is the "(version)" when given,

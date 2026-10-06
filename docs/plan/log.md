@@ -545,3 +545,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (lane-4). The rest (unfixed in bookworm) need russ's policy: ignores with a reason and expiry
   (the image is a test-only NFS chroot), or moving the image to trixie.
 - Needs russ: policy for OSV findings that Debian has not fixed in the pinned release.
+- 5.3b security suites: third_party/debian now resolves bookworm + bookworm-updates
+  (archive/debian/20261006T082722Z) + bookworm-security (archive/debian-security/20261006T081244Z);
+  the old 20261004 snapshot lacked perl 5.36.0-7+deb12u4. Moved: libevent, expat, xz-utils, pcre2,
+  openssl, perl. nfs_test, version_check_test, ownership_test, sbom_test pass. osv under act: 158 ->
+  101 findings in 22 packages, all 101 unfixed in bookworm (no ignores added).

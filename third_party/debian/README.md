@@ -11,8 +11,8 @@ into `~/.cache/dcfs` (see "What this replaces" below).
 
 - Suite: `bookworm` (Debian 12), matching the suite
   `test/qemu/scripts/mkrootfs-debian.sh` used.
-- Snapshot timestamp: **`20261004T203145Z`** (confirmed present via
-  `curl -fsSL https://snapshot.debian.org/archive/debian/20261004T203145Z/dists/bookworm/InRelease`,
+- Snapshot timestamp: **`20261006T082722Z`** (confirmed present via
+  `curl -fsSL https://snapshot.debian.org/archive/debian/20261006T082722Z/dists/bookworm/InRelease`,
   picked from that day's listing at
   `https://snapshot.debian.org/archive/debian/?year=2026&month=10`
   -- not an arbitrary/rounded timestamp, an actual published snapshot run).
@@ -21,6 +21,17 @@ into `~/.cache/dcfs` (see "What this replaces" below).
   the list had 14 named packages): the 20 named in MODULE.bazel's
   `apt.install` below, plus everything they pull in transitively
   (`include_transitive` defaults to `True`).
+
+- Suites (step 5.3b): `bookworm` and `bookworm-updates` from
+  `archive/debian/20261006T082722Z`, and `bookworm-security` from the separate
+  `archive/debian-security/20261006T081244Z` (the 20261004T203145Z snapshot
+  that first pinned this had the other two but not perl 5.36.0-7+deb12u4,
+  which Debian's security tracker already required, so the pin moved to the
+  newest runs of 2026-10-06). rules_distroless takes the newest version
+  across the suites. Six packages moved: libevent, expat, xz-utils, pcre2,
+  openssl and perl (3 binaries + libperl); `tools/sbom/debian_sources.tsv`
+  must list every resolved package, so regenerate it with the pin
+  (tools/sbom/README.md).
 
 ### Updating the pin
 

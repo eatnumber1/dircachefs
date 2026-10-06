@@ -141,7 +141,24 @@ apt.sources_list(
     components = ["main"],
     suites = ["bookworm"],
     types = ["deb"],
-    uris = ["https://snapshot.debian.org/archive/debian/20261004T203145Z"],
+    uris = ["https://snapshot.debian.org/archive/debian/20261006T082722Z"],
+)
+# Step 5.3b: security fixes. bookworm-updates is in the same archive as
+# bookworm; bookworm-security is the separate debian-security archive, at
+# a snapshot of the same day (timestamps differ: each archive has its own snapshot runs).
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["bookworm-updates"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian/20261006T082722Z"],
+)
+apt.sources_list(
+    architectures = ["amd64"],
+    components = ["main"],
+    suites = ["bookworm-security"],
+    types = ["deb"],
+    uris = ["https://snapshot.debian.org/archive/debian-security/20261006T081244Z"],
 )
 apt.install(
     dependency_set = "debian",
@@ -167,7 +184,7 @@ apt.install(
         "util-linux",
         "xfsprogs",
     ],
-    suites = ["bookworm"],
+    suites = ["bookworm", "bookworm-updates", "bookworm-security"],
 )
 use_repo(apt, "debian")
 
