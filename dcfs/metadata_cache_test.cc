@@ -27,6 +27,7 @@
 #include "dcfs/sqlite.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "sqlite3.h"
 
 // This version of Abseil's status_matchers.h doesn't provide
 // ASSERT_OK_AND_ASSIGN, so define the usual helper locally (scoped to this
@@ -119,6 +120,26 @@ std::vector<std::string> ListNames(Context &ctx, InodeId dir) {
       });
   EXPECT_THAT(status, IsOk());
   return names;
+}
+
+// Runs `fn` and returns how many SQLite virtual-machine instructions it
+// executed, via a progress handler called at every instruction. A stable
+// measure of the work the database did (rows scanned, rows sorted), unlike
+// time, so a test can assert that a query does not scan or sort a whole
+// directory.
+template <typename Fn>
+int64_t CountVmInstructions(sqlite3::Connection &db, Fn &&fn) {
+  int64_t count = 0;
+  sqlite3_progress_handler(
+      db.Get(), 1,
+      [](void *arg) {
+        ++*static_cast<int64_t *>(arg);
+        return 0;
+      },
+      &count);
+  fn();
+  sqlite3_progress_handler(db.Get(), 0, nullptr, nullptr);
+  return count;
 }
 
 MATCHER_P(IsLookup, kind, "") { return arg.kind == kind; }
@@ -606,6 +627,152 @@ TEST_F(MetadataCacheTest, ListDirSpansBatchesAndAllowsWritesInCallback) {
                       }),
               IsOk());
   EXPECT_EQ(count, kEntries);
+}
+
+// Phase 6.2: a readdir reply is built from ListDir pages, so one page's cost
+// must depend on the page, not on the directory's size: with no index
+// serving "parent = ? AND rowid > ? ORDER BY rowid", every page scanned and
+// sorted the whole directory, and listing n entries took O(n^2) (a cached
+// 10000-entry listing took 3.5 s, 27x the backing filesystem's).
+TEST_F(MetadataCacheTest, ListDirPageCostDoesNotGrowWithTheDirectory) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(InodeId small, MakeDir(kRootInode, "small", 31));
+  ASSERT_OK_AND_ASSIGN(InodeId big, MakeDir(kRootInode, "big", 32));
+  constexpr int kSmall = 100;
+  constexpr int kBig = 5000;
+  ASSERT_THAT(db_.Transaction([&]() -> absl::Status {
+                for (int i = 0; i < kBig; ++i) {
+                  if (i < kSmall) {
+                    ABSL_RETURN_IF_ERROR(
+                        LinkDentry(ctx_, small, absl::StrCat("e", i), f.id));
+                  }
+                  ABSL_RETURN_IF_ERROR(
+                      LinkDentry(ctx_, big, absl::StrCat("e", i), f.id));
+                }
+                return absl::OkStatus();
+              }),
+              IsOk());
+
+  // One page (ListDir reads 64 rows per query), from the start and from
+  // near the end, stopping after the first entry delivered.
+  auto first_page_cost = [&](InodeId dir, int64_t cursor) {
+    return CountVmInstructions(db_, [&] {
+      EXPECT_THAT(ListDir(ctx_, dir, cursor,
+                          [](std::string_view, InodeId,
+                             int64_t) -> absl::StatusOr<bool> { return false; }),
+                  IsOk());
+    });
+  };
+  int64_t small_cost = first_page_cost(small, 0);
+  ASSERT_GT(small_cost, 0);
+  EXPECT_LE(first_page_cost(big, 0), 2 * small_cost);
+
+  int64_t last_cursor = 0;
+  ASSERT_THAT(ListDir(ctx_, big, 0,
+                      [&](std::string_view, InodeId,
+                          int64_t next) -> absl::StatusOr<bool> {
+                        last_cursor = next;
+                        return true;
+                      }),
+              IsOk());
+  ASSERT_GT(last_cursor, kBig);  // rowids: the directory rows came first
+  // A page from the middle of the big directory (cursor of its 2500th
+  // entry) is still one page's work.
+  int64_t middle = 0;
+  int n = 0;
+  ASSERT_THAT(ListDir(ctx_, big, 0,
+                      [&](std::string_view, InodeId,
+                          int64_t next) -> absl::StatusOr<bool> {
+                        middle = next;
+                        return ++n < kBig / 2;
+                      }),
+              IsOk());
+  EXPECT_LE(first_page_cost(big, middle), 2 * small_cost);
+}
+
+// The completeness check every readdir request starts with ("no name of this
+// directory is unknown") likewise looked at every entry of the directory.
+TEST_F(MetadataCacheTest, IsDirCompleteCostDoesNotGrowWithTheDirectory) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(InodeId small, MakeDir(kRootInode, "small", 31));
+  ASSERT_OK_AND_ASSIGN(InodeId big, MakeDir(kRootInode, "big", 32));
+  constexpr int kSmall = 100;
+  constexpr int kBig = 5000;
+  ASSERT_THAT(db_.Transaction([&]() -> absl::Status {
+                for (int i = 0; i < kBig; ++i) {
+                  if (i < kSmall) {
+                    ABSL_RETURN_IF_ERROR(
+                        LinkDentry(ctx_, small, absl::StrCat("e", i), f.id));
+                  }
+                  ABSL_RETURN_IF_ERROR(
+                      LinkDentry(ctx_, big, absl::StrCat("e", i), f.id));
+                }
+                return absl::OkStatus();
+              }),
+              IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, small, true), IsOk());
+  ASSERT_THAT(MarkDirComplete(ctx_, big, true), IsOk());
+
+  auto cost = [&](InodeId dir) {
+    return CountVmInstructions(db_, [&] {
+      EXPECT_THAT(IsDirComplete(ctx_, dir), IsOkAndHolds(true));
+    });
+  };
+  int64_t small_cost = cost(small);
+  ASSERT_GT(small_cost, 0);
+  EXPECT_LE(cost(big), 2 * small_cost);
+
+  // And it still notices an unknown name.
+  ASSERT_THAT(MarkUnknown(ctx_, big, std::vector<std::string>{"e4000"}),
+              IsOk());
+  EXPECT_THAT(IsDirComplete(ctx_, big), IsOkAndHolds(false));
+  ASSERT_THAT(LinkDentry(ctx_, big, "e4000", f.id), IsOk());
+  EXPECT_THAT(IsDirComplete(ctx_, big), IsOkAndHolds(true));
+}
+
+// A listing shows only present names, in first-linked order, and a name
+// that goes unknown and comes back keeps its position (its offset), so a
+// cursor taken before the change still resumes in the right place.
+TEST_F(MetadataCacheTest, ListDirOrderSurvivesStateChanges) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  for (std::string_view name : {"a", "b", "c", "d", "e"}) {
+    ASSERT_THAT(LinkDentry(ctx_, kRootInode, name, f.id), IsOk());
+  }
+  int64_t after_b = 0;
+  int n = 0;
+  ASSERT_THAT(ListDir(ctx_, kRootInode, 0,
+                      [&](std::string_view, InodeId,
+                          int64_t next) -> absl::StatusOr<bool> {
+                        after_b = next;
+                        return ++n < 2;
+                      }),
+              IsOk());
+  ASSERT_THAT(MarkUnknown(ctx_, kRootInode, std::vector<std::string>{"c"}),
+              IsOk());
+  ASSERT_THAT(SetNegative(ctx_, kRootInode, "d"), IsOk());
+  ASSERT_THAT(SetRefused(ctx_, kRootInode, "e"), IsOk());
+  EXPECT_THAT(ListNames(ctx_, kRootInode), ElementsAre("a", "b"));
+  std::vector<std::string> rest;
+  ASSERT_THAT(ListDir(ctx_, kRootInode, after_b,
+                      [&](std::string_view name, InodeId,
+                          int64_t) -> absl::StatusOr<bool> {
+                        rest.emplace_back(name);
+                        return true;
+                      }),
+              IsOk());
+  EXPECT_THAT(rest, ::testing::IsEmpty());
+  ASSERT_THAT(LinkDentry(ctx_, kRootInode, "e", f.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, kRootInode, "c", f.id), IsOk());
+  EXPECT_THAT(ListNames(ctx_, kRootInode), ElementsAre("a", "b", "c", "e"));
+  rest.clear();
+  ASSERT_THAT(ListDir(ctx_, kRootInode, after_b,
+                      [&](std::string_view name, InodeId,
+                          int64_t) -> absl::StatusOr<bool> {
+                        rest.emplace_back(name);
+                        return true;
+                      }),
+              IsOk());
+  EXPECT_THAT(rest, ElementsAre("c", "e"));
 }
 
 TEST_F(MetadataCacheTest, FuseGenerations) {

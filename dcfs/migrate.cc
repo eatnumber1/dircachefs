@@ -179,6 +179,8 @@ absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
     DROP TABLE dentries;
     ALTER TABLE dentries_v2 RENAME TO dentries;
     CREATE INDEX dentries_inode ON dentries (inode);
+    CREATE INDEX dentries_present ON dentries (parent) WHERE state = 'present';
+    CREATE INDEX dentries_unknown ON dentries (parent) WHERE state = 'unknown';
     CREATE TRIGGER inodes_delete_unknowns BEFORE DELETE ON inodes BEGIN
       UPDATE dentries SET state = 'unknown', inode = NULL
       WHERE inode = OLD.id;

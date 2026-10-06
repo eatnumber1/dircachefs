@@ -434,6 +434,22 @@ entry in place (rather than deleting and reinserting it) keeps its rowid,
 so a reader part way through a listing never sees an unchanged name twice.
 An index on `inode` supports looking entries up by child.
 
+Two partial indexes serve the directory-wide questions a readdir request
+asks: `dentries_present (parent) WHERE state = 'present'` makes "the
+present names of this directory after rowid `cursor`, in rowid order" a
+range scan with no sort (an index's entries are ordered by rowid after its
+key columns), and `dentries_unknown (parent) WHERE state = 'unknown'`
+answers "does this directory have an unknown name" without looking at the
+other entries. Without them SQLite used the primary key's index for
+`parent = ?` and scanned and sorted every entry of the directory for each
+page of 64 names, which made listing a directory of n names O(n^2): a
+cached 10000-name listing took 0.7 s (optimized build; 2.4 s in the
+unoptimized one) against 0.03-0.05 s on the backing filesystem, and now
+takes about 0.08 s. `ListDir` and `IsDirComplete` must keep the literal
+`state = '...'` in their SQL or the planner will not use the indexes; the
+unit tests count SQLite virtual-machine instructions per page for that
+reason.
+
 **The inode-delete trigger.** Deleting an inode row (an invalidation, or a
 cascade from its filesystem) must forget what the object was, not the
 names that led to it. `inodes_delete_unknowns` turns every dentry pointing

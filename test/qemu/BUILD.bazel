@@ -381,3 +381,17 @@ qemu_test(
     size = "enormous",
     timeout = "eternal",
 )
+
+# Phase 6.2: just the Readdir benchmark (guest/bench_readdir.sh), for the
+# readdir performance work; compare fastbuild with `-c opt`. Run it
+# by name (large tier: CI only).
+qemu_test(
+    name = "bench_readdir_test",
+    disks = [
+        ("vdb", "ext4", "1G"),
+        ("vdc", "ext4", "320M"),
+    ],
+    guest_script = "guest/bench_readdir.sh",
+    size = "large",
+    timeout = "long",
+)

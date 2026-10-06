@@ -643,6 +643,7 @@ qemu_cc_test(
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
       "@googletest//:gtest_main",
+      "@sqlite//:sqlite3",
     ],
 )
 

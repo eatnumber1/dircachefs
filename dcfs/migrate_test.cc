@@ -495,6 +495,12 @@ TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
   EXPECT_EQ(std::string(stored.begin(), stored.end()), device_bytes);
   EXPECT_EQ(state->Column<int>(3), 1);
   ASSERT_THAT(state->Step(), IsOkAndHolds(false));
+
+  // The upgraded dentries table has the readdir indexes a fresh one has
+  // (Phase 6.2: schema.sql, "dentries_present").
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'index' AND name IN "
+                             "('dentries_present', 'dentries_unknown')"),
+              IsOkAndHolds(2));
 }
 
 }  // namespace

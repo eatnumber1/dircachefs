@@ -626,6 +626,16 @@ is installed in the e2e initramfs as `/bin/dcfs_bench` and run by
 - `Memory`: dcfs's RSS after `find`, after `drop_caches=2`, and bytes per
   object.
 
+`bench_readdir_test` (large tier) runs only the three `Readdir` cases on a
+`READDIR_ENTRIES`-entry directory (default 10000), for the readdir
+performance work. The default build is fastbuild (unoptimized); to measure
+an optimized dcfs, SQLite, Abseil, libfuse and benchmark library without
+rebuilding the kernel and QEMU (`-c opt` does, and the QEMU build then
+needs network access), optimize just those sources:
+
+    bazel test //test/qemu:bench_readdir_test --test_output=all \
+      '--per_file_copt=^(dcfs|bench)/.*,external/(abseil-cpp|sqlite3|libfuse|google_benchmark)\+/.*@-O2,-DNDEBUG'
+
 The helpers `dcfs_bench mktree ROOT N BIG` (makes the tree; used by the
 idle and memory tests) and `dcfs_bench dm-delay NAME DEV MS` (device-mapper
 ioctls; the guest has no dmsetup) are subcommands of the same binary.

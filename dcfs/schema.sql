@@ -126,6 +126,20 @@ CREATE TABLE dentries (
 
 CREATE INDEX dentries_inode ON dentries (inode);
 
+-- The two directory-wide questions a readdir request asks (cache::ListDir
+-- and cache::IsDirComplete), as partial indexes holding only the rows that
+-- answer them: "the present names of `parent` after rowid `cursor`, in
+-- rowid order" is a range scan of dentries_present (an index's entries are
+-- ordered by rowid after their key columns), with no sort; "does `parent`
+-- have an unknown name" is a lookup in dentries_unknown, which is almost
+-- always empty. Without them the planner used the primary key's index for
+-- `parent = ?` and then scanned and sorted every entry of the directory
+-- for each page of 64 names, so listing n names cost O(n^2) (Phase 6.2:
+-- 10000 names took 3.5 s). The queries must keep the literal state they
+-- are indexed by, or SQLite will not use the index.
+CREATE INDEX dentries_present ON dentries (parent) WHERE state = 'present';
+CREATE INDEX dentries_unknown ON dentries (parent) WHERE state = 'unknown';
+
 -- Deleting an inode row (an invalidation, or a cascade from its
 -- filesystem's row) forgets what it was, not the names that led to it:
 -- those become unknown, never absent (audit F8).
