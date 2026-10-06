@@ -345,3 +345,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   write-large-passthrough-cpu (dcfs cpu ticks < 20) fails under load on all three filesystems, and
   pjdfstest_test_{ext4,btrfs} hit run-qemu.sh's 1200 s guest limit (pass alone in ~890 s). Both
   are 6.2 work, test first, no loosening without understanding; dispatched now to lane-2.
+- Phase 5.1 merged (ceb7925; dcfs-investigator): TCG hung in LAPIC timer calibration (no kvmclock,
+  PIT and PIC off); fix is pit=on,pic=on under TCG only (KVM path unchanged, boot_test 2.1 s before/
+  2.4 s after). DCFS_FORCE_TCG=1 forces TCG; kernel cmdline carries dcfs_accel; timeouts set after
+  the accelerator is known (KVM unit 60/e2e 1800 s; TCG unit 300/e2e 7200 s). TCG vs KVM (loaded
+  host): boot 8.6 s alone; unit tests 6-14 s; most e2e 2-9x; pjdfstest_ext4 3502 s (5.7x) which is
+  close to its eternal 3600 s Bazel timeout; readdir_boundary 488 s (12x, fork-heavy shell loop).
+  TCG suite 66/70; the 4 failures are write_test's CPU-tick check (ticks 46/40/20 under TCG vs the
+  < 20 limit; already borderline on btrfs under KVM at 19): handed to the 6.2 lane working on it.
+  Follow-ups: R3b in lane-1 now (mkfs wiring, 4 KiB blocks, README's TCG wording, run-qemu.sh
+  nits); CI step decides pjdfstest under TCG (ext4 only, or a longer timeout).
