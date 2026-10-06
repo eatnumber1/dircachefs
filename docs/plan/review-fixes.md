@@ -89,6 +89,14 @@ Each finding became a `Bug*` constant with a `known_bugs/` variant.
 
 ## R4.2 — Follow-ups from the R4 review (dcfs-protocol, test first)
 
+Done 2026-10-06 (5 commits, ef5dbf0..437f65f): EndWrites makes the last
+writable release a guard event, SyncSnapshot also holds open_for_write,
+writable Create calls BeginWriting right after the insert; BeginRemove
+verifies its resolution in phase 1 (3 tries, EAGAIN); MKDIR-during-syncfs
+test; FillGuards::max_touched; ClearDirty bulk fast path. Model: U1
+retries like R1 (MC_nolock 3.63M states); writable opens and hard links
+stay outside the model (README explains).
+
 - (High, coroutines) Writable opens escape the sync snapshot: `keep` is
   built from `open_for_write` at ClearDirty time and Release never
   Touches the guards, so the last close during a syncfs can let

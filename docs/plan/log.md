@@ -434,3 +434,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Readdir fix merged (b829d0e, 3366525): schema v3 migration adds the two indexes to existing caches (v2 database test failed first on the version). The 5000-entry test fill now uses one SQL statement after an OOM in the 256 MB ASan guest.
 - 6.2 bundle dispatched to lane-4: passthrough.sh's cpu_ticks check (convert to wakeups if it flakes; prove passthrough-off still fails) and pjdfstest sharding by test directory (1700 s vs 1800 s KVM limit under load; 3502 vs 3600 s under TCG).
 - Load 28 with four building lanes plus act: paused the 6.2 pjdfstest/passthrough lane (just started) until R2 merges.
+- R4.2 merged (ef5dbf0..437f65f; dcfs-protocol): all five review follow-ups, each failing first
+  (ReleaseDuringASyncPointKeepsTheDirtyRow, WritableCreateIsDirtyWhenReplied,
+  UnlinkMarksWhatItRemovesUnknown, ...); harness gains --wrap=syncfs and --wrap=name_to_handle_at
+  hooks. Unit+formal 29/29, ASan 18/18, presubmit 101/101. Coroutine note recorded in design.md.
+  Bazel servers were OOM-killed twice this evening when swap filled; agents now pass --jobs=2.
+  Next in lane-1: 12.2 trace validation.
