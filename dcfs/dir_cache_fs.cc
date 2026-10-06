@@ -392,6 +392,9 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
 
 absl::Status DirCacheFS::BeginWriting(InodeId id) {
   open_for_write_.insert(id);
+  // A removed object has no row to mark (see Setattr); being in
+  // open_for_write_ still gives its attribute replies a zero timeout.
+  if (removed_.contains(id)) return absl::OkStatus();
   // Ends right away: for as long as the open lasts, open_for_write_ (not an
   // in-flight mutation) is what keeps the attributes unknown (see
   // backing::RefreshAttrs), and the kernel itself removes
@@ -512,6 +515,18 @@ absl::Status DirCacheFS::Setattr(
     fuse_file_info *fi) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "setattr");
+  if (auto it = removed_.find(id); it != removed_.end()) {
+    // A removed object (step 23.2): through the descriptor its record
+    // holds. No phase 1 or 3: nothing about it is cached, in the database
+    // or in the record (whose every read goes to the descriptor), so there
+    // is nothing to mark unknown or record, and a crash loses nothing that
+    // could be stale (the record is in memory only).
+    ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
+    ABSL_RETURN_IF_ERROR(
+        backing::SetAttrFd(caller, *it->second.fd, *attr, to_set));
+    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr fresh, RequireAttrOrRemoved(id));
+    return req.ReplyAttr(fresh.st, AttrTimeoutFor(id));
+  }
 
   // Confirm this nodeid still has a row before changing anything (a
   // missing row is a stale nodeid: ESTALE, see RequireAttr). `fi` is not
@@ -1098,8 +1113,17 @@ absl::Status DirCacheFS::Link(
 
 absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
     InodeId id, FuseRequest &req) {
-  absl::StatusOr<FileDescriptor> fd =
-      backing::OpenNode(ctx_, id, O_RDWR | O_CLOEXEC);
+  // A removed object (step 23.2) is reopened through the descriptor its
+  // record holds (an open of /proc/<pid>/fd/<n> of an O_PATH descriptor on
+  // an unlinked file); anything else by handle.
+  auto removed = removed_.find(id);
+  auto open = [&](int flags) -> absl::StatusOr<FileDescriptor> {
+    if (removed != removed_.end()) {
+      return backing::ReopenFd(*removed->second.fd, flags);
+    }
+    return backing::OpenNode(ctx_, id, flags);
+  };
+  absl::StatusOr<FileDescriptor> fd = open(O_RDWR | O_CLOEXEC);
   bool writable = true;
   if (!fd.ok()) {
     int err = GetErrnoFromStatus(fd.status()).value_or(0);
@@ -1110,7 +1134,7 @@ absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
     // report it, unchanged.
     if (err != EACCES && err != EROFS && err != EPERM) return fd.status();
     writable = false;
-    ABSL_ASSIGN_OR_RETURN(fd, backing::OpenNode(ctx_, id, O_RDONLY | O_CLOEXEC));
+    ABSL_ASSIGN_OR_RETURN(fd, open(O_RDONLY | O_CLOEXEC));
   }
 
   // Ask the kernel to serve reads/writes directly against `fd`. A 0
@@ -1135,8 +1159,9 @@ absl::Status DirCacheFS::Open(
   // (do_file_open_root, fs/namei.c) automatically retries a failed open
   // once with LOOKUP_REVAL after -ESTALE, and that second FUSE OPEN hits
   // this same call against the now-invalidated row -- which must come
-  // back ESTALE again, not ENOENT.
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
+  // back ESTALE again, not ENOENT. A removed object (step 23.2) is
+  // answered by its record (reopened through its descriptor below).
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttrOrRemoved(id));
   ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
   // The kernel calls opendir(), not open(), on a directory, so this would
   // only trip on a row that changed type out from under a stale nodeid.
@@ -1226,10 +1251,15 @@ absl::Status DirCacheFS::Write(
   // Phase 1: the size/mtime/ctime (and side-effect xattrs) this write is
   // about to change. (A writable open already made `id` durably dirty, so
   // this commits without a WAL fsync unless a sync point has cleared that
-  // meanwhile.) Phase 3 of the xattrs is the last writable Release().
-  ABSL_ASSIGN_OR_RETURN(
-      cache::Mutation mutation,
-      cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
+  // meanwhile.) Phase 3 of the xattrs is the last writable Release(). A
+  // removed object has no row (see Setattr): no phases.
+  std::optional<cache::Mutation> mutation;
+  if (!removed_.contains(id)) {
+    ABSL_ASSIGN_OR_RETURN(
+        cache::Mutation begun,
+        cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
+    mutation.emplace(std::move(begun));
+  }
 
   // Phase 2: the write itself, against the shared fd (EBADF if it is
   // O_RDONLY -- see MakeBackingFile -- exactly as the kernel would report
@@ -1243,6 +1273,8 @@ absl::Status DirCacheFS::Write(
 }
 
 void DirCacheFS::RecordWrittenAttrs(InodeId id, int fd, std::string_view op) {
+  // A removed object has no row to record into (see Setattr).
+  if (removed_.contains(id)) return;
   absl::Status status = backing::RefreshAttrsFromFd(ctx_, id, fd);
   if (status.ok()) return;
   // Never fatal to the op (see this method's declaration): the data is on
@@ -1317,8 +1349,10 @@ absl::Status DirCacheFS::Release(
     // The refresh below takes its snapshot after it.
     EndWriting(id);
     RecordWrittenAttrs(id, *backing_file.fd, "Release");
-    ResolveSideEffectXattrs(id, kXattrsChangedByWrite, *backing_file.fd,
-                            "Release");
+    if (!removed_.contains(id)) {
+      ResolveSideEffectXattrs(id, kXattrsChangedByWrite, *backing_file.fd,
+                              "Release");
+    }
   }
   if (backing_file.refs > 0) return req.ReplyErrno(0);
 
@@ -1603,6 +1637,12 @@ absl::Status DirCacheFS::Fsyncdir(
     FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "fsyncdir");
+  if (auto it = removed_.find(id); it != removed_.end()) {
+    // A removed directory (step 23.2): through its record's descriptor.
+    ABSL_RETURN_IF_ERROR(backing::FsyncDirFd(*it->second.fd, datasync != 0));
+    SyncBackingNow("fsyncdir");
+    return req.ReplyErrno(0);
+  }
   // Missing row -> ESTALE; see RequireAttr(). There is no phase 1/3 here:
   // the syscall, then a sync point, as in Fsync().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
@@ -1631,6 +1671,13 @@ absl::Status DirCacheFS::Setxattr(
     std::string_view value, int flags) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "setxattr");
+  if (auto it = removed_.find(id); it != removed_.end()) {
+    // A removed object (step 23.2; see Setattr): through its descriptor.
+    ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
+    ABSL_RETURN_IF_ERROR(
+        backing::SetXattrFd(caller, *it->second.fd, name, value, flags));
+    return req.ReplyErrno(0);
+  }
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
@@ -1762,6 +1809,13 @@ absl::Status DirCacheFS::Removexattr(
     FuseRequest &req, fuse_ino_t ino, std::string_view name) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "removexattr");
+  if (auto it = removed_.find(id); it != removed_.end()) {
+    // A removed object (step 23.2; see Setattr): through its descriptor.
+    ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
+    ABSL_RETURN_IF_ERROR(
+        backing::RemoveXattrFd(caller, *it->second.fd, name));
+    return req.ReplyErrno(0);
+  }
   // Missing row -> ESTALE; see RequireAttr().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
@@ -1881,10 +1935,15 @@ absl::Status DirCacheFS::Fallocate(
       << "Fallocate on inode " << id << " with no BackingFile";
   int fd = *backing_it->second.fd;
 
-  // Phase 1.
-  ABSL_ASSIGN_OR_RETURN(
-      cache::Mutation mutation,
-      cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
+  // Phase 1 (none for a removed object, which has no row: see Setattr).
+  const bool removed = removed_.contains(id);
+  std::optional<cache::Mutation> mutation;
+  if (!removed) {
+    ABSL_ASSIGN_OR_RETURN(
+        cache::Mutation begun,
+        cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
+    mutation.emplace(std::move(begun));
+  }
 
   // Phase 2. The shared fd is O_RDONLY only when this inode could not be
   // opened O_RDWR (see MakeBackingFile); fallocate on it then fails EBADF,
@@ -1892,7 +1951,11 @@ absl::Status DirCacheFS::Fallocate(
   // read-only fd -- no special-casing needed here.
   absl::Status status = backing::FallocateFd(fd, mode, offset, length);
   // Phase 3 is refreshes only, which run as ordinary fills.
-  mutation.End();
+  if (mutation.has_value()) mutation->End();
+  if (removed) {
+    ABSL_RETURN_IF_ERROR(status);
+    return req.ReplyErrno(0);
+  }
   if (!status.ok()) {
     backing::RefreshAttrsFromFd(ctx_, id, fd).IgnoreError();
     return status;

@@ -722,9 +722,33 @@ filesystem.
 Nothing about such an object is in the database, so nothing about it
 survives a crash or a restart (the kernel of a new mount holds no
 nodeids), and an NFS handle to it fails with `ESTALE` as it should: the
-`.` lookup that resolves a handle (and every mutation) uses the cache
-rows only. Changing a removed object, or reopening an unlinked file, also
-fails with `ESTALE` (listed in the README's Limitations).
+`.` lookup that resolves a handle uses the cache rows only.
+
+**Changing a removed object** (step 23.2) works as on the backing
+filesystem: `SETATTR` (truncate, chmod, chown, utimes), `SETXATTR`,
+`REMOVEXATTR` and `FSYNCDIR` are applied through the record's descriptor
+(`backing::SetAttrFd`, `SetXattrFd`, `RemoveXattrFd`, `FsyncDirFd`: the
+same calls and credential rules as for an object with a row, reaching it
+through `/proc/self/fd` instead of a handle), and `OPEN` (an open of
+`/proc/<pid>/fd/<n>` of an `O_PATH` descriptor on an unlinked file)
+reopens it through the descriptor and registers it for passthrough like
+any open (`MakeBackingFile`); its writes, `FSYNC` and `RELEASE` work as
+for any open file, minus the cache bookkeeping. None of these has a phase
+1 or 3, and the record needs no tri-state of its own, because the record
+caches nothing that can change: every read of the object (attributes,
+xattrs, a symlink's target) goes to the descriptor (a `statx` or
+`getxattr` of an inode the kernel already holds in memory, no disk
+access), so a change leaves nothing stale behind, and a crash loses only
+the record, which is in memory and which a new mount never needs. (The
+protocol model is unaffected: it has no child objects' attributes.)
+`LINK` of a removed object still fails with `ESTALE` (step 23.4's
+`O_TMPFILE` work covers linking an unnamed file).
+
+An unlinked file that dcfs itself still has open keeps its row until the
+last release (above); changing it goes the ordinary way, by handle:
+`open_by_handle_at` does reach an unlinked inode while something holds it
+(the backing filesystem finds it in its inode cache; checked on ext4, xfs
+and btrfs by `removed_test`'s `unlinked-open-mutate`).
 
 ## Crashes, power loss and recovery
 
@@ -1348,7 +1372,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
 | `release_leak_test` | A failed attribute refresh on the last writable close (forced by holding the SQLite write lock) does not leak the backing descriptor or passthrough registration. |
-| `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on ext4 instead of failing `ESTALE`, also when their rows and attributes were cached; no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
+| `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on the backing filesystem instead of failing `ESTALE`, also when their rows and attributes were cached, including changing them (truncate, chmod, chown, utimes, xattrs, fsync, through an open descriptor, an `O_PATH` descriptor's magic link or a removed working directory) and reopening an unlinked file through `/proc/self/fd`; no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
 | `readdir_boundary_test` | A directory too large for one READDIR or READDIRPLUS reply lists every entry exactly once across several replies, and in time linear in its size. |
 | `names_test`, `names_random_test` | File names are bytes: about 60 names, one per hazard class (format delimiters, control and high-bit bytes, invalid UTF-8, the overlong "fake slash", NFC/NFD and other look-alike sets in the spirit of xfstests generic/453 and generic/454, path-walk specials, ordering and prefixes, 255-byte names), go through create, mkdir, symlink (including a 4095-byte target; 1023 on xfs), link, xattrs with NUL-containing values, a rename chain, handles, listing and removal, both created directly on the backing filesystem (dcfs populates from it) and created through dcfs, and are compared with the backing filesystem byte for byte; after a restart the same checks pass, the handles taken before it still open and a metadata pass reads zero sectors. Errors for `.`, `..` and 256-byte names match the backing filesystem's, a directory chain deeper than `PATH_MAX` works by descriptors and handles, and a newline in a logged name cannot forge a log line. The random test makes 1,000 seeded names of random bytes (100,000 in the slow tier, `names_random_slow_test`), half through dcfs and half on the backing filesystem, and compares the trees. |
 | `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; nothing behind a boundary is reachable even with `crossmnt` (the stub is listed). |
@@ -1364,13 +1388,9 @@ docs/conformance.md) now runs against ext4, xfs and btrfs, not just ext4.
 These are known and accepted for now; the README's Limitations section
 lists the user-visible ones.
 
-- **Removed objects can be read but not changed.** A removed object the
-  kernel still references is answered from its `removed_` record (see
-  [Row lifetime](#row-lifetime)), but `SETATTR`, xattr changes, `OPEN`
-  and `LINK` of it fail with `ESTALE`, where a local filesystem allows
-  them. Supporting them would need the backing operations to run through
-  the held descriptor instead of a handle (`open_by_handle_at` refuses an
-  unlinked inode).
+- **A removed object cannot be linked back.** `LINK` of a removed object
+  the kernel still references fails with `ESTALE` (see
+  [Row lifetime](#row-lifetime)).
 - **atime is not maintained** after passthrough reads, and `st_blocks`
   may lag behind delayed allocation until the next attribute refresh.
 - **A residual "ahead" window depends on the backing filesystem.** The

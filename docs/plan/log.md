@@ -626,3 +626,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   listed (ListDir merges present + refused in rowid order, cost test unchanged), ENOTSUP inside (logged
   once per stub), EXDEV for renaming it; backing inode numbers >= 2^63 refused (ENOTSUP). Link/rename
   into a stub give ENOTSUP, not 15.1's EXDEV: the kernel looks the target up in the stub first.
+- 23.2 (lane-1, step-23): changes to removed-but-referenced objects (SETATTR, xattrs, FSYNCDIR, OPEN
+  of /proc/<pid>/fd of an O_PATH fd) go through the removed_ record's fd; the record caches nothing, so no
+  tri-state or model change is needed. removed_test (3 fs) and harness tests; pjdfstest ext4 shards green.
+  The plan's "unlink-then-ftruncate on an open file fails today" was not so: that already worked.

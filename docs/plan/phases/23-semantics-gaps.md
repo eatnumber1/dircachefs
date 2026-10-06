@@ -39,6 +39,19 @@ btrfs; verify). Tests: unlink-then-ftruncate/fchmod/fsetxattr on an open
 file (fails today with ESTALE), chmod of a removed cwd, pjdfstest shards
 still green.
 
+**Done (2026-10-07, step-23 branch).** SETATTR, SETXATTR, REMOVEXATTR,
+FSYNCDIR and OPEN of a removed object go through its record's descriptor
+(`backing::SetAttrFd`/`SetXattrFd`/`RemoveXattrFd`/`FsyncDirFd`/`ReopenFd`);
+writes, FSYNC and RELEASE of a reopened one skip the cache bookkeeping. The
+record caches nothing that changes (every read already went to the
+descriptor), so its "tri-state" is degenerate (always unknown, read
+through), nothing can be stale after a change or a crash, and the model is
+unchanged. Found while testing: unlink-then-ftruncate/fchmod/fsetxattr on a
+file dcfs has *open* already worked (its row lives until the last release,
+and open_by_handle_at reaches an unlinked inode that is still held, on
+ext4, xfs and btrfs); the failing cases were the O_PATH magic link and the
+removed cwd. LINK of a removed object still ESTALE.
+
 ## 23.3 relatime semantics for atime (dcfs-implementer)
 
 Reads are passthrough, so dcfs never sees them. On OPEN of a regular file

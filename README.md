@@ -596,14 +596,12 @@ recovery protocol, concurrency, and the test strategy.
   and btrfs encode the generation in their handles, so this is covered
   there; on a filesystem whose handles carry no generation and which
   reports no birth time, a stale row could match a new object.
-- **Removed objects that are still referenced can be read, not changed.**
+- **Removed objects that are still referenced cannot be linked back.**
   A process whose working directory was removed, or an `O_PATH`
-  descriptor on an unlinked file, sees what a local filesystem shows
-  (`stat` works and reports `nlink` 0, listing a removed directory finds
-  nothing). Changing such an object (`chmod` of a removed working
-  directory, say), or reopening an unlinked file through
-  `/proc/<pid>/fd/<n>` of an `O_PATH` descriptor, fails with `ESTALE`,
-  where a local filesystem would allow it.
+  descriptor on an unlinked file, sees and can change what a local
+  filesystem allows (`stat` reports `nlink` 0, `chmod`, `truncate` and
+  xattrs work, an unlinked file can be reopened through
+  `/proc/<pid>/fd/<n>`), but a hard link to it fails with `ESTALE`.
 - **atime is not maintained.** Reads through passthrough update the
   backing file's access time, but dcfs keeps serving the one it last
   recorded. `st_blocks` can also lag behind delayed allocation until the

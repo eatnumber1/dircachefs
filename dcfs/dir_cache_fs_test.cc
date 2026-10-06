@@ -38,6 +38,7 @@
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -489,6 +490,27 @@ class DirCacheFSTest : public ::testing::Test {
     return {reply, out.attr};
   }
 
+  // A FORGET of `n` of the kernel's lookups of `id` (no reply).
+  void Forget(InodeId id, uint64_t n) {
+    struct fuse_forget_in in = {};
+    in.nlookup = n;
+    std::string body;
+    AppendBytes(body, in);
+    const uint64_t unique = next_unique_++;
+    std::string buf;
+    struct fuse_in_header hdr = {};
+    hdr.len = static_cast<uint32_t>(sizeof(hdr) + body.size());
+    hdr.opcode = FUSE_FORGET;
+    hdr.unique = unique;
+    hdr.nodeid = static_cast<uint64_t>(id);
+    AppendBytes(buf, hdr);
+    buf.append(body);
+    struct fuse_buf fbuf = {};
+    fbuf.mem = buf.data();
+    fbuf.size = buf.size();
+    fuse_session_process_buf(se_, &fbuf);
+  }
+
   Reply Opendir(InodeId id) {
     struct fuse_open_in in = {};
     std::string body;
@@ -509,8 +531,9 @@ class DirCacheFSTest : public ::testing::Test {
   Reply Setxattr(InodeId id, std::string_view name, std::string_view value) {
     struct fuse_setxattr_in in = {};
     in.size = static_cast<uint32_t>(value.size());
-    std::string body;
-    AppendBytes(body, in);
+    // The INIT did not ask for FUSE_SETXATTR_EXT: the old, short header.
+    std::string body(reinterpret_cast<const char *>(&in),
+                     FUSE_COMPAT_SETXATTR_IN_SIZE);
     body.append(name);
     body.push_back('\0');
     body.append(value);
@@ -1245,6 +1268,122 @@ TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
   EXPECT_EQ(Cached(kRootInode, "new").first, LookupResult::kFound);
 }
 
+
+// --- Changing removed objects (step 23.2) ---------------------------------
+//
+// An object removed while the kernel still holds its nodeid (an O_PATH
+// descriptor on an unlinked file, a removed working directory) has no row;
+// its removed_ record answers the kernel. Changes to it are applied through
+// the descriptor the record holds, and every read of it goes to that
+// descriptor, so nothing cached can be stale after one.
+
+TEST_F(DirCacheFSTest, RemovedFileCanBeChanged) {
+  WriteFile(Path("f"));
+  AppendToFile(Path("f"), "hello");
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  // Keep the object alive as the kernel's reference would (the record
+  // holds its own descriptor; this one lets the test look at the object).
+  const int held = ::open(Path("f").c_str(), O_PATH | O_CLOEXEC);
+  ASSERT_GE(held, 0);
+  ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
+  ASSERT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+
+  EXPECT_EQ(Chmod(f, S_IFREG | 0600).error, 0);
+  struct fuse_setattr_in truncate = {};
+  truncate.valid = FATTR_SIZE;
+  truncate.size = 2;
+  std::string body;
+  AppendBytes(body, truncate);
+  EXPECT_EQ(Send(FUSE_SETATTR, static_cast<uint64_t>(f), body).error, 0);
+  EXPECT_EQ(Setxattr(f, "user.k", "v").error, 0);
+  struct stat st {};
+  ASSERT_EQ(::fstat(held, &st), 0);
+  EXPECT_EQ(st.st_mode & 07777, 0600u);
+  EXPECT_EQ(st.st_size, 2);
+  EXPECT_EQ(st.st_nlink, 0u);
+  auto [getattr, attr] = Getattr(f);
+  ASSERT_EQ(getattr.error, 0);
+  EXPECT_EQ(attr.mode & 07777, 0600u);
+  EXPECT_EQ(attr.size, 2u);
+  Reply value = Getxattr(f, "user.k");
+  ASSERT_EQ(value.error, 0);
+  struct fuse_getxattr_out size {};
+  ASSERT_GE(value.payload.size(), sizeof(size));
+  std::memcpy(&size, value.payload.data(), sizeof(size));
+  EXPECT_EQ(size.size, 1u);
+
+  std::string name = "user.k";
+  name.push_back('\0');
+  EXPECT_EQ(Send(FUSE_REMOVEXATTR, static_cast<uint64_t>(f), name).error, 0);
+  EXPECT_EQ(Getxattr(f, "user.k").error, -ENODATA);
+
+  // A change the backing filesystem refuses is replied as it refused it.
+  struct fuse_setxattr_in replace = {};
+  replace.size = 1;
+  replace.flags = XATTR_REPLACE;
+  std::string replace_body(reinterpret_cast<const char *>(&replace),
+                           FUSE_COMPAT_SETXATTR_IN_SIZE);
+  replace_body.append("user.absent");
+  replace_body.push_back('\0');
+  replace_body.append("v");
+  EXPECT_EQ(Send(FUSE_SETXATTR, static_cast<uint64_t>(f), replace_body).error,
+            -ENODATA);
+
+  // Reopened (an open of /proc/<pid>/fd/<n>): through the held descriptor.
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  EXPECT_TRUE(fs_->HasOpenFiles(f));
+  struct fuse_fsync_in fsync_in = {};
+  fsync_in.fh = fh;
+  std::string fsync_body;
+  AppendBytes(fsync_body, fsync_in);
+  EXPECT_EQ(Send(FUSE_FSYNC, static_cast<uint64_t>(f), fsync_body).error, 0);
+  EXPECT_EQ(Release(f, fh).error, 0);
+  EXPECT_FALSE(fs_->HasOpenFiles(f));
+  // Still answered after the release, until the kernel forgets it.
+  EXPECT_EQ(Getattr(f).first.error, 0);
+  Forget(f, 1);
+  EXPECT_EQ(Getattr(f).first.error, -ESTALE);
+  EXPECT_EQ(Chmod(f, S_IFREG | 0644).error, -ESTALE);
+  ::close(held);
+}
+
+TEST_F(DirCacheFSTest, RemovedDirectoryCanBeChanged) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "d");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId d = static_cast<InodeId>(entry.nodeid);
+  const int held = ::open(Path("d").c_str(), O_RDONLY | O_DIRECTORY);
+  ASSERT_GE(held, 0);
+  std::string body = "d";
+  body.push_back('\0');
+  ASSERT_EQ(Send(FUSE_RMDIR, kRootInode, body).error, 0);
+
+  EXPECT_EQ(Chmod(d, S_IFDIR | 0700).error, 0);
+  EXPECT_EQ(Setxattr(d, "user.k", "v").error, 0);
+  struct stat st {};
+  ASSERT_EQ(::fstat(held, &st), 0);
+  EXPECT_EQ(st.st_mode & 07777, 0700u);
+  auto [getattr, attr] = Getattr(d);
+  ASSERT_EQ(getattr.error, 0);
+  EXPECT_EQ(attr.mode & 07777, 0700u);
+  // A truncate of a directory: the backing filesystem's EISDIR.
+  struct fuse_setattr_in truncate = {};
+  truncate.valid = FATTR_SIZE;
+  std::string truncate_body;
+  AppendBytes(truncate_body, truncate);
+  EXPECT_EQ(Send(FUSE_SETATTR, static_cast<uint64_t>(d), truncate_body).error,
+            -EISDIR);
+  // fsync of the removed directory (through an OPENDIR'd handle).
+  ASSERT_EQ(Opendir(d).error, 0);
+  EXPECT_EQ(Fsyncdir(d).error, 0);
+  ::close(held);
+}
 
 // --- Boundary stubs (step 23.5) -------------------------------------------
 //

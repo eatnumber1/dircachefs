@@ -2,7 +2,11 @@
 # dcfs step 6.3 (audit F10): an object that is removed while something
 # still refers to it -- a process whose working directory is removed, an
 # O_PATH descriptor on a file that is then unlinked -- must behave as it
-# does on the backing filesystem, not fail with ESTALE.
+# does on the backing filesystem, not fail with ESTALE. Step 23.2: that
+# includes changing it (truncate, chmod, chown, utimes, xattrs, fsync,
+# through an open descriptor, an O_PATH descriptor's /proc/self/fd magic
+# link, or a removed working directory) and reopening an unlinked file
+# through /proc/self/fd.
 #
 # The kernel keeps such an object's FUSE nodeid until its last reference
 # goes (then it sends FORGET), and keeps asking dcfs about it meanwhile
@@ -66,6 +70,13 @@ ref_file=$("$TESTUTIL" opath-unlink-stat /src/ref_file 2>&1)
 echo "ext4 unlinked O_PATH file: $ref_file"
 mkdir /src/ref_ls
 ref_ls=$(cd /src/ref_ls && rmdir /src/ref_ls && ls -a . 2>&1; echo "rc=$?")
+ref_umut=$("$TESTUTIL" unlinked-mutate /src/ref_umut 2>&1)
+echo "ext4 changes through an unlinked file's open fd: $ref_umut"
+ref_omut=$("$TESTUTIL" opath-unlinked-mutate /src/ref_omut 2>&1)
+echo "ext4 changes through an unlinked file's O_PATH fd: $ref_omut"
+mkdir /src/ref_cmut
+ref_cmut=$("$TESTUTIL" rmcwd-mutate /src/ref_cmut 2>&1)
+echo "ext4 changes to a removed cwd: $ref_cmut"
 sync
 
 # --- the same through dcfs --------------------------------------------------
@@ -103,9 +114,27 @@ stat "$MNT/statted" >/dev/null
 expect_same unlinked-statted-file "$ref_file" \
 	"$("$TESTUTIL" opath-unlink-stat "$MNT/statted" 2>&1)"
 
+# Step 23.2: changing them. Each also with its attributes cached first, so
+# a cached value cannot answer by accident.
+expect_same unlinked-open-mutate "$ref_umut" \
+	"$("$TESTUTIL" unlinked-mutate "$MNT/umut" 2>&1)"
+echo x >"$MNT/umut2"
+stat "$MNT/umut2" >/dev/null
+expect_same unlinked-open-mutate-statted "$ref_umut" \
+	"$("$TESTUTIL" unlinked-mutate "$MNT/umut2" 2>&1)"
+expect_same unlinked-opath-mutate "$ref_omut" \
+	"$("$TESTUTIL" opath-unlinked-mutate "$MNT/omut" 2>&1)"
+mkdir "$MNT/cmut"
+expect_same removed-cwd-mutate "$ref_cmut" \
+	"$("$TESTUTIL" rmcwd-mutate "$MNT/cmut" 2>&1)"
+mkdir "$MNT/cmut2"
+ls -la "$MNT/cmut2" >/dev/null
+expect_same removed-cwd-mutate-listed "$ref_cmut" \
+	"$("$TESTUTIL" rmcwd-mutate "$MNT/cmut2" 2>&1)"
+
 # Once the references are gone the objects are gone for good: the names
 # stay absent, and dcfs keeps serving the rest of the tree.
-for name in cwd file ls listed statted; do
+for name in cwd file ls listed statted umut umut2 omut cmut cmut2; do
 	if [ -e "$MNT/$name" ] || [ -e "$SRC/$name" ]; then
 		fail "gone-$name" "$name still exists"
 	else

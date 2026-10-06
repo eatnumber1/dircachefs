@@ -834,15 +834,16 @@ namespace {
 // If `read_back` is given, it is set, once the op has succeeded, to what
 // the object now stores under `name` (XattrOf, through `opath_fd`, the fd
 // the op itself used or one on the same object).
+//
+// ApplyXattrOpOn is the same on an object already reached: `opath_fd` is
+// any descriptor on it (O_PATH or not; a removed object's held one).
 template <typename ApplyReal, typename ApplyOpath>
-absl::Status ApplyXattrOp(Context &ctx, InodeId id, std::optional<int> open_fd,
-                          std::string_view name, ApplyReal apply_real,
-                          ApplyOpath apply_opath,
-                          XattrReadBack *read_back = nullptr) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor opath_fd,
-                        OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+absl::Status ApplyXattrOpOn(int opath_fd, std::optional<int> open_fd,
+                            std::string_view name, ApplyReal apply_real,
+                            ApplyOpath apply_opath,
+                            XattrReadBack *read_back = nullptr) {
   ABSL_ASSIGN_OR_RETURN(
-      struct statx stx, syscalls::statx(*opath_fd, "", AT_EMPTY_PATH, STATX_MODE));
+      struct statx stx, syscalls::statx(opath_fd, "", AT_EMPTY_PATH, STATX_MODE));
   mode_t type = stx.stx_mode & S_IFMT;
   if (S_ISREG(type) || S_ISDIR(type)) {
     if (open_fd.has_value()) {
@@ -850,14 +851,53 @@ absl::Status ApplyXattrOp(Context &ctx, InodeId id, std::optional<int> open_fd,
     } else {
       ABSL_ASSIGN_OR_RETURN(
           FileDescriptor fd,
-          syscalls::ReopenPathFd(*opath_fd, O_RDONLY | O_CLOEXEC));
+          syscalls::ReopenPathFd(opath_fd, O_RDONLY | O_CLOEXEC));
       ABSL_RETURN_IF_ERROR(apply_real(*fd));
     }
   } else {
-    ABSL_RETURN_IF_ERROR(apply_opath(*opath_fd));
+    ABSL_RETURN_IF_ERROR(apply_opath(opath_fd));
   }
-  if (read_back != nullptr) *read_back = XattrOf(*opath_fd, name);
+  if (read_back != nullptr) *read_back = XattrOf(opath_fd, name);
   return absl::OkStatus();
+}
+
+template <typename ApplyReal, typename ApplyOpath>
+absl::Status ApplyXattrOp(Context &ctx, InodeId id, std::optional<int> open_fd,
+                          std::string_view name, ApplyReal apply_real,
+                          ApplyOpath apply_opath,
+                          XattrReadBack *read_back = nullptr) {
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor opath_fd,
+                        OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  return ApplyXattrOpOn(*opath_fd, open_fd, name, apply_real, apply_opath,
+                        read_back);
+}
+
+// The setxattr and removexattr calls themselves, as the caller.
+auto SetXattrOps(const Credentials &caller, std::string_view name,
+                 std::span<const uint8_t> value, int flags) {
+  return std::make_pair(
+      [&caller, name, value, flags](int fd) {
+        return AsCaller(caller, [&] {
+          return syscalls::fsetxattr(fd, name, value, flags);
+        });
+      },
+      [&caller, name, value, flags](int fd) {
+        return AsCaller(caller, [&] {
+          return syscalls::setxattr_opath(fd, name, value, flags);
+        });
+      });
+}
+
+auto RemoveXattrOps(const Credentials &caller, std::string_view name) {
+  return std::make_pair(
+      [&caller, name](int fd) {
+        return AsCaller(caller,
+                        [&] { return syscalls::fremovexattr(fd, name); });
+      },
+      [&caller, name](int fd) {
+        return AsCaller(caller,
+                        [&] { return syscalls::removexattr_opath(fd, name); });
+      });
 }
 
 }  // namespace
@@ -869,34 +909,33 @@ absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, const Credentials &caller,
   std::span<const uint8_t> value_bytes(
       reinterpret_cast<const uint8_t *>(value.data()), value.size());
   XattrReadBack read_back = std::nullopt;
-  ABSL_RETURN_IF_ERROR(ApplyXattrOp(
-      ctx, id, open_fd, name,
-      [&](int fd) {
-        return AsCaller(caller, [&] {
-          return syscalls::fsetxattr(fd, name, value_bytes, flags);
-        });
-      },
-      [&](int fd) {
-        return AsCaller(caller, [&] {
-          return syscalls::setxattr_opath(fd, name, value_bytes, flags);
-        });
-      },
-      &read_back));
+  auto [apply_real, apply_opath] =
+      SetXattrOps(caller, name, value_bytes, flags);
+  ABSL_RETURN_IF_ERROR(ApplyXattrOp(ctx, id, open_fd, name, apply_real,
+                                    apply_opath, &read_back));
   return read_back;
+}
+
+absl::Status SetXattrFd(const Credentials &caller, int fd,
+                        std::string_view name, std::string_view value,
+                        int flags) {
+  std::span<const uint8_t> value_bytes(
+      reinterpret_cast<const uint8_t *>(value.data()), value.size());
+  auto [apply_real, apply_opath] =
+      SetXattrOps(caller, name, value_bytes, flags);
+  return ApplyXattrOpOn(fd, std::nullopt, name, apply_real, apply_opath);
 }
 
 absl::Status RemoveXattr(Context &ctx, const Credentials &caller, InodeId id,
                          std::string_view name, std::optional<int> open_fd) {
-  return ApplyXattrOp(
-      ctx, id, open_fd, name,
-      [&](int fd) {
-        return AsCaller(caller,
-                        [&] { return syscalls::fremovexattr(fd, name); });
-      },
-      [&](int fd) {
-        return AsCaller(caller,
-                        [&] { return syscalls::removexattr_opath(fd, name); });
-      });
+  auto [apply_real, apply_opath] = RemoveXattrOps(caller, name);
+  return ApplyXattrOp(ctx, id, open_fd, name, apply_real, apply_opath);
+}
+
+absl::Status RemoveXattrFd(const Credentials &caller, int fd,
+                           std::string_view name) {
+  auto [apply_real, apply_opath] = RemoveXattrOps(caller, name);
+  return ApplyXattrOpOn(fd, std::nullopt, name, apply_real, apply_opath);
 }
 
 absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id) {
@@ -1466,6 +1505,17 @@ absl::StatusOr<std::string> ReadSymlinkFd(int fd) {
   return syscalls::readlinkat(fd, "");
 }
 
+absl::StatusOr<FileDescriptor> ReopenFd(int fd, int flags) {
+  return syscalls::ReopenPathFd(fd, flags);
+}
+
+absl::Status FsyncDirFd(int fd, bool datasync) {
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor dir,
+      syscalls::ReopenPathFd(fd, O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+  return FsyncFd(*dir, datasync);
+}
+
 absl::Status StartupPurge(Context &ctx) {
   // Every non-source row left in the filesystems table is purged
   // unconditionally. Since amendment 12, ProbeChild/PopulateDirectory never
@@ -1651,12 +1701,20 @@ absl::Status ApplyTimes(const Credentials &caller, int opath_fd, mode_t type,
 absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
                      const struct stat &attr, int to_set) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  return SetAttrFd(caller, *fd, attr, to_set);
+}
+
+absl::Status SetAttrFd(const Credentials &caller, int fd,
+                       const struct stat &attr, int to_set) {
+  // Every call below works on any descriptor, O_PATH or not: the reopens go
+  // through /proc/self/fd, fchownat and the *_opath calls take an empty
+  // path.
   ABSL_ASSIGN_OR_RETURN(
-      struct statx stx, syscalls::statx(*fd, "", AT_EMPTY_PATH, STATX_MODE));
+      struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MODE));
   mode_t type = stx.stx_mode & S_IFMT;
 
   if (to_set & FUSE_SET_ATTR_SIZE) {
-    ABSL_RETURN_IF_ERROR(ApplySize(caller, *fd, type, attr.st_size));
+    ABSL_RETURN_IF_ERROR(ApplySize(caller, fd, type, attr.st_size));
   }
 
   if (to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID)) {
@@ -1666,12 +1724,12 @@ absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
                                              : static_cast<gid_t>(-1);
     // fchownat works on an O_PATH fd via AT_EMPTY_PATH with an empty path.
     ABSL_RETURN_IF_ERROR(AsCaller(caller, [&] {
-      return syscalls::fchownat(*fd, "", uid, gid, AT_EMPTY_PATH);
+      return syscalls::fchownat(fd, "", uid, gid, AT_EMPTY_PATH);
     }));
   }
 
   if (to_set & FUSE_SET_ATTR_MODE) {
-    ABSL_RETURN_IF_ERROR(ApplyMode(*fd, type, attr.st_mode));
+    ABSL_RETURN_IF_ERROR(ApplyMode(fd, type, attr.st_mode));
   } else if ((to_set & (FUSE_SET_ATTR_KILL_SUID | FUSE_SET_ATTR_KILL_SGID)) &&
              !S_ISLNK(type)) {
     // KILL_SUID/KILL_SGID sent without MODE: the kernel wants the
@@ -1681,7 +1739,7 @@ absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
     mode_t current_mode = stx.stx_mode & 07777;
     if (to_set & FUSE_SET_ATTR_KILL_SUID) current_mode &= ~S_ISUID;
     if (to_set & FUSE_SET_ATTR_KILL_SGID) current_mode &= ~S_ISGID;
-    ABSL_RETURN_IF_ERROR(ApplyMode(*fd, type, current_mode));
+    ABSL_RETURN_IF_ERROR(ApplyMode(fd, type, current_mode));
   }
 
   if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME |
@@ -1700,14 +1758,14 @@ absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
     } else if (to_set & FUSE_SET_ATTR_MTIME) {
       times[1] = attr.st_mtim;
     }
-    ABSL_RETURN_IF_ERROR(ApplyTimes(caller, *fd, type, times));
+    ABSL_RETURN_IF_ERROR(ApplyTimes(caller, fd, type, times));
   }
 
   // Nothing to set but (perhaps) ctime: a chown(path, -1, -1) (see
   // SetAttr's declaration comment). The ctime value is never used.
   if ((to_set & ~FUSE_SET_ATTR_CTIME) == 0) {
     ABSL_RETURN_IF_ERROR(AsCaller(caller, [&] {
-      return syscalls::fchownat(*fd, "", static_cast<uid_t>(-1),
+      return syscalls::fchownat(fd, "", static_cast<uid_t>(-1),
                                 static_cast<gid_t>(-1), AT_EMPTY_PATH);
     }));
   }

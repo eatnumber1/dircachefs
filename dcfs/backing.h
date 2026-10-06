@@ -427,6 +427,24 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrsFd(
 // The target of the symlink `fd` refers to.
 absl::StatusOr<std::string> ReadSymlinkFd(int fd);
 
+// Changes to such an object (step 23.2), through `fd` instead of a handle
+// (open_by_handle_at cannot reach an object that has no row): as SetAttr,
+// SetXattr (without the read-back: nothing caches the value) and
+// RemoveXattr, with the same credentials rules; an fsync of a directory
+// (reopened O_RDONLY through /proc/self/fd); and a reopen with open(2)
+// `flags` through /proc/self/fd (an open of /proc/<pid>/fd/<n> of an
+// O_PATH descriptor on an unlinked file, or an open of a removed working
+// directory, which the kernel sends as OPEN or OPENDIR of the nodeid).
+absl::Status SetAttrFd(const Credentials &caller, int fd,
+                       const struct stat &attr, int to_set);
+absl::Status SetXattrFd(const Credentials &caller, int fd,
+                        std::string_view name, std::string_view value,
+                        int flags);
+absl::Status RemoveXattrFd(const Credentials &caller, int fd,
+                           std::string_view name);
+absl::Status FsyncDirFd(int fd, bool datasync);
+absl::StatusOr<FileDescriptor> ReopenFd(int fd, int flags);
+
 // Run at startup, after InitRoot: forgets every non-source filesystem that
 // is no longer mounted where it was found (or whose mount point is gone),
 // and registers a mount fd for each one that still is.

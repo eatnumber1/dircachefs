@@ -184,10 +184,11 @@ class DirCacheFS {
 
   // As RequireAttr, but also answers for a removed object the kernel still
   // references (removed_): its current attributes, read through the
-  // descriptor dcfs holds on it (valid, nlink 0). For the ops that read an
-  // object (Getattr, Opendir, xattrs, Readlink, Statfs); everything that
-  // would change one, and Lookup, keep using RequireAttr, so a removed
-  // object can be neither changed nor looked up again (ESTALE).
+  // descriptor dcfs holds on it (valid, nlink 0). For the ops that read or
+  // open an object (Getattr, Open, Opendir, xattrs, Readlink, Statfs, and
+  // the reply of a change: Setattr, Setxattr, Removexattr and Fsyncdir
+  // apply changes to a removed object through that descriptor, step
+  // 23.2); Lookup and Link keep using RequireAttr (ESTALE).
   absl::StatusOr<cache::CachedAttr> RequireAttrOrRemoved(InodeId id);
 
   // Boundary stubs (step 23.5; docs/design.md, "Boundaries"). A refused
@@ -466,11 +467,14 @@ class DirCacheFS {
   // directory, an O_PATH descriptor on an unlinked file. Their rows are
   // already deleted, so nothing about them is in the cache, survives a
   // restart or resolves an NFS handle (which must fail ESTALE: the object
-  // is gone); but until the kernel's last FORGET, the reads it still sends
-  // for them (GETATTR, OPENDIR, xattrs, READLINK) are answered through
-  // `fd`, which also keeps the backing object alive exactly as the
-  // kernel's reference would on a local filesystem. `row` is the deleted
-  // row, for its nodeid generation and identity.
+  // is gone); but until the kernel's last FORGET, the requests it still
+  // sends for them (GETATTR, OPEN, OPENDIR, xattrs, READLINK, and changes:
+  // SETATTR, SETXATTR, REMOVEXATTR, FSYNCDIR) are served through `fd`,
+  // which also keeps the backing object alive exactly as the kernel's
+  // reference would on a local filesystem. `row` is the deleted row, for
+  // its nodeid generation and identity, and nothing else: the record
+  // caches no attribute or xattr (every read goes to `fd`), so a change
+  // through `fd` leaves nothing stale and needs no unknown state (23.2).
   struct Removed {
     cache::CachedAttr row;
     FileDescriptor fd;
