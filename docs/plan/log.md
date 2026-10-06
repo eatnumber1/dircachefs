@@ -412,3 +412,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   RemoveChild/BeginRemove/SettleUnlinkedFile trust a child id resolved before phase 1 (same shape as
   the rename gap; outside the model's scope): queue as R4.4 after the review.
 - russ: two additions. Phase 5.3: OSV-Scanner GitHub Action over an SBOM generated from all our pins (BCR, http_archives, Debian debs), test first with a known-vulnerable entry, weekly schedule, ignores with expiry. Phase 22: request cancellation (FUSE_INTERRUPT via libfuse): inventory worst-case durations on a slow backing, safe points, tri-state-preserving semantics (not cancellable between a mutation's syscall and phase 3), single-thread caveat (interrupt arrives as its own request), coroutine/io_uring token design, unit and guest tests first, docs; even if everything is fast, the policy, tests and docs land. Runs after R4, before Phase 13.
+- R4 merged (c0b27a5..411686f) after a dcfs-reviewer pass (audits/review-2026-10-06-r4.md): all three
+  fixes verified against their invariants; no regression reachable today. New findings (coroutine
+  future, fix now): writable opens escape the sync snapshot (high), RemoveChild has the rename gap
+  (confirmed), rename's retry loop cannot wait, two test gaps, a ClearDirty O(n*m) fast path. Queued
+  as R4.2 in review-fixes.md, dispatched to lane-1. The reviewer detached lane-1's HEAD by mistake
+  (reported it); restored.

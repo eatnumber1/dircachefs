@@ -13,3 +13,5 @@ finding was later fixed test-first, assigned to a step, or decided against;
 - `review-2026-10-06-waves-1-2.md`: review of everything merged in waves
   1-2 (cache hardening, pinned kernel/QEMU/busybox/Debian/e2fsprogs,
   harness wiring, sanitizer scoping).
+- `review-2026-10-06-r4.md`: review of the R4 protocol fixes (sync
+  snapshot, readdir listing, rename verification).
