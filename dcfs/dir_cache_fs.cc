@@ -1297,24 +1297,32 @@ absl::Status DirCacheFS::Open(
   // FUSE inode). The shared backing fd does not say: it may predate the
   // flag, or be read-only only because O_RDWR was refused while this
   // open's mode (O_WRONLY | O_APPEND on an append-only file) is allowed.
-  // So unless that fd was opened read-write just now, ask the backing
-  // filesystem with this open's access mode (a reopen of an inode in
-  // memory), and refuse as it does. (Found by copy_test: after a
+  // So ask the backing filesystem with this open's access mode (a reopen
+  // of an inode in memory), and refuse as it does -- unless the shared fd
+  // is read-write and no flag was set through dcfs since it was opened
+  // (flags change only through Ioctl, under exclusive access), which
+  // spares concurrent writers an extra open and close on the backing file
+  // (IN_CLOSE_WRITE, lease breaks). (Found by copy_test: after a
   // chattr +i, a writable open succeeded and wrote.)
-  if (writable && (shared || !backing_it->second.writable)) {
+  BackingFile &shared_file = backing_it->second;
+  if (writable && (!shared_file.writable || shared_file.flags_changed)) {
     // Through /proc/self/fd of the shared fd: the same object, and the
     // backing filesystem's own open-time checks (may_open).
     const int check_flags = (fi.flags & (O_ACCMODE | O_APPEND)) | O_CLOEXEC |
                             O_NOCTTY | O_NONBLOCK;
-    absl::Status allowed =
-        backing::ReopenFd(*backing_it->second.fd, check_flags).status();
+    absl::StatusOr<FileDescriptor> allowed =
+        backing::ReopenFd(*shared_file.fd, check_flags);
     if (!allowed.ok()) {
       if (!shared) {
         if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
         backing_files_.erase(backing_it);
       }
-      return allowed;
+      return allowed.status();
     }
+    // A read-only shared fd cannot carry what dcfs writes itself (fallback
+    // writes, fallocate, copy_file_range: review L1); this open's
+    // descriptor can, so it becomes the inode's write fd (WriteFd).
+    if (!shared_file.writable) shared_file.write_fd = *std::move(allowed);
   }
   backing_it->second.refs++;
   if (writable) {
@@ -1410,7 +1418,7 @@ absl::Status DirCacheFS::Write(
   // O_RDONLY -- see MakeBackingFile -- exactly as the kernel would report
   // for a write against a read-only fd).
   ABSL_ASSIGN_OR_RETURN(
-      size_t n, backing::WriteFile(*backing_it->second.fd, buf, off));
+      size_t n, backing::WriteFile(backing_it->second.WriteFd(), buf, off));
 
   // Phase 3: nothing yet -- Flush/Release/Fsync (below) pick up the fresh
   // size/mtime/ctime, not every individual write.
@@ -2096,7 +2104,7 @@ absl::Status DirCacheFS::Fallocate(
   auto backing_it = backing_files_.find(id);
   RET_CHECK(backing_it != backing_files_.end())
       << "Fallocate on inode " << id << " with no BackingFile";
-  int fd = *backing_it->second.fd;
+  int fd = backing_it->second.WriteFd();
 
   // Phase 1 (none for a removed object, which has no row: see Setattr).
   const bool removed = removed_.contains(id);
@@ -2147,7 +2155,7 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
   RET_CHECK(in_backing != backing_files_.end() &&
             out_backing != backing_files_.end())
       << "CopyFileRange on an inode with no BackingFile";
-  const int out_fd = *out_backing->second.fd;
+  const int out_fd = out_backing->second.WriteFd();
 
   // Phase 1, as a fallback Write: the destination's attributes and the
   // xattrs a write removes (none for a removed object, which has no row:
@@ -2274,6 +2282,10 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
   }
   absl::StatusOr<std::string> out = backing::IoctlFd(*fd, cmd, in, out_size);
   if (mutation.has_value()) mutation->End();
+  // The next writable open must ask the backing filesystem again (Open).
+  if (auto open = backing_files_.find(id); open != backing_files_.end()) {
+    open->second.flags_changed = true;
+  }
   if (!removed) {
     // Phase 3 (or, after a failure, best effort): refreshes, as fills.
     absl::Status refreshed = backing::RefreshAttrsFromFd(ctx_, id, *fd);

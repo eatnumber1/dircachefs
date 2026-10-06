@@ -1362,26 +1362,32 @@ TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
 // --- copy_file_range, ioctls, O_TMPFILE (step 23.4) -----------------------
 
 // A writable open that shares a backing fd opened before the file became
-// immutable is refused, as a fresh open by the backing filesystem is.
+// immutable is refused, as a fresh open by the backing filesystem is. The
+// flag is set through dcfs (FUSE_IOCTL, as chattr does): flags change only
+// that way under exclusive access, and only after such a change does a
+// writable open sharing a read-write fd ask the backing filesystem again.
 TEST_F(DirCacheFSTest, WritableOpenOfAnImmutableFileIsRefused) {
   WriteFile(Path("f"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
+  Reply get = Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int));
+  ASSERT_EQ(get.error, 0);
   int flags = 0;
-  const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(raw, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  std::memcpy(&flags, get.payload.data() + sizeof(struct fuse_ioctl_out),
+              sizeof(flags));
   const int immutable = flags | FS_IMMUTABLE_FL;
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  auto as_bytes = [](const int &v) {
+    return std::string(reinterpret_cast<const char *>(&v), sizeof(v));
+  };
+  ASSERT_EQ(Ioctl(f, FS_IOC_SETFLAGS, as_bytes(immutable), 0).error, 0);
   EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
   auto [ro, ro_fh] = Open(f, O_RDONLY);
   EXPECT_EQ(ro.error, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  ASSERT_EQ(Ioctl(f, FS_IOC_SETFLAGS, as_bytes(flags), 0).error, 0);
   auto [rw, rw_fh] = Open(f, O_WRONLY);
   EXPECT_EQ(rw.error, 0);
-  ::close(raw);
   for (uint64_t h : {fh, ro_fh, rw_fh}) {
     if (h != 0) {
       EXPECT_EQ(Release(f, h).error, 0);
@@ -1713,6 +1719,46 @@ TEST_F(DirCacheFSTest, RemovedFileCopyAndIoctl) {
   EXPECT_EQ(Release(f, out_fh).error, 0);
   EXPECT_EQ(Release(src, in_fh).error, 0);
   ::close(held);
+}
+
+// A writable open that shares a backing fd opened read-only (the file was
+// immutable then) and passes the writability check gets a descriptor that
+// can write: fallocate and copy_file_range into it work, as on the backing
+// filesystem (review L1; they got EBADF from the read-only shared fd).
+TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
+  WriteFile(Path("f"));
+  WriteFile(Path("src"));
+  AppendToFile(Path("src"), "abc");
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  int flags = 0;
+  const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(raw, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  const int immutable = flags | FS_IMMUTABLE_FL;
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  auto [ro, ro_fh] = Open(f, O_RDONLY);  // Shared fd: read-only.
+  ASSERT_EQ(ro.error, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  ::close(raw);
+  auto [rw, rw_fh] = Open(f, O_WRONLY);
+  ASSERT_EQ(rw.error, 0);
+
+  struct fuse_fallocate_in falloc = {};
+  falloc.fh = rw_fh;
+  falloc.length = 4096;
+  std::string body;
+  AppendBytes(body, falloc);
+  EXPECT_EQ(Send(FUSE_FALLOCATE, static_cast<uint64_t>(f), body).error, 0);
+  EXPECT_EQ(std::filesystem::file_size(Path("f")), 4096u);
+  auto [in, in_fh] = Open(src, O_RDONLY);
+  ASSERT_EQ(in.error, 0);
+  EXPECT_EQ(CopyFileRange(src, in_fh, f, rw_fh, 3), 3);
+  for (auto [id, fh] : {std::pair{f, rw_fh}, std::pair{f, ro_fh},
+                        std::pair{src, in_fh}}) {
+    EXPECT_EQ(Release(id, fh).error, 0);
+  }
 }
 
 // --- FORGET reconciliation (step 23.1) ------------------------------------

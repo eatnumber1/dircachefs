@@ -1159,9 +1159,15 @@ Step 23.4.
   may predate a `chattr +i` or be read-only only because `O_RDWR` was
   refused while this open's `O_WRONLY | O_APPEND` would be allowed,
   `DirCacheFS::Open` asks the backing filesystem again for a writable open
-  unless it has just opened that descriptor read-write: a reopen of the
-  shared descriptor through `/proc/self/fd` with the open's access mode,
-  refused as the backing filesystem refuses it. (Passthrough opens its own
+  unless the shared descriptor is read-write and no flag was set through
+  dcfs since it was opened (flags change only through `Ioctl` under
+  exclusive access; this spares concurrent writers an extra open and close
+  of the backing file, with its `IN_CLOSE_WRITE` and lease breaks): a
+  reopen of the shared descriptor through `/proc/self/fd` with the open's
+  access mode, refused as the backing filesystem refuses it. When the
+  shared descriptor is read-only and the open is allowed, that reopened
+  descriptor becomes the inode's write descriptor, which fallback writes,
+  `fallocate` and `copy_file_range` use (review L1: they got `EBADF`). (Passthrough opens its own
   backing file with the caller's flags, from dcfs's descriptor's path, and
   without that check.)
 - **`O_TMPFILE`** (`DirCacheFS::Tmpfile`, `FUSE_TMPFILE`): an unnamed file
