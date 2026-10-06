@@ -883,6 +883,26 @@ TEST_F(MetadataCacheTest, TouchAtimeFollowsTheMountsRule) {
               StatusIs(absl::StatusCode::kNotFound));
 }
 
+// Review L5: the startup sweep after a crash deletes non-directory rows
+// with no link and no name, and nothing else.
+TEST_F(MetadataCacheTest, ForgetUnnamedRowsKeepsNamedLinkedAndDirectories) {
+  auto make = [&](uint64_t ino, mode_t mode, int64_t nlink) {
+    return UpsertInode(ctx_, Handle(kSource, absl::StrCat("u", ino)),
+                       Stx(ino, mode, nlink - 3), 0);
+  };
+  ASSERT_OK_AND_ASSIGN(UpsertResult unnamed, make(60, S_IFREG | 0644, 0));
+  ASSERT_OK_AND_ASSIGN(UpsertResult named0, make(61, S_IFREG | 0644, 0));
+  ASSERT_OK_AND_ASSIGN(UpsertResult linked, make(62, S_IFREG | 0644, 1));
+  ASSERT_OK_AND_ASSIGN(UpsertResult dir0, make(63, S_IFDIR | 0755, 0));
+  ASSERT_THAT(LinkDentry(ctx_, kRootInode, "named0", named0.id), IsOk());
+  ASSERT_THAT(ForgetUnnamedRows(ctx_), IsOkAndHolds(1));
+  EXPECT_THAT(GetAttr(ctx_, unnamed.id), StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(GetAttr(ctx_, named0.id), IsOk());
+  EXPECT_THAT(GetAttr(ctx_, linked.id), IsOk());
+  EXPECT_THAT(GetAttr(ctx_, dir0.id), IsOk());
+  EXPECT_THAT(GetAttr(ctx_, kRootInode), IsOk());
+}
+
 TEST_F(MetadataCacheTest, FuseGenerations) {
   EXPECT_THAT(GetGeneration(ctx_, kRootInode), IsOkAndHolds(0u));
   // Random, so 100 draws of 32 bits collide with probability ~1e-6.

@@ -636,6 +636,16 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
 // Then empties the dirty set. Returns how many dirty entries there were.
 absl::StatusOr<int64_t> RecoverDirty(Context &ctx);
 
+// Startup after an unclean shutdown (backing::StartRun), after
+// RecoverDirty: deletes every non-directory row whose recorded link count
+// is 0 and that no present dentry names -- an unnamed O_TMPFILE file, or an
+// unlinked file dcfs still had open, whose last release never came. The
+// row-lifetime rule deletes such a row at that release; after a crash the
+// object is gone (or unreachable through dcfs), and a row deleted wrongly
+// only costs a re-probe. Directories are left (a removed one's row goes at
+// once). Returns how many rows went. One transaction.
+absl::StatusOr<int64_t> ForgetUnnamedRows(Context &ctx);
+
 // Registers a filesystem. AlreadyExists if `device` is already registered;
 // NotFound if `parent` is given but has no row.
 absl::Status AddFilesystem(Context &ctx, const DeviceId &device,

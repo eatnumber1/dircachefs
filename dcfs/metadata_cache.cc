@@ -1586,6 +1586,23 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   return absl::OkStatus();
 }
 
+absl::StatusOr<int64_t> ForgetUnnamedRows(Context &ctx) {
+  int64_t count = 0;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(
+        count,
+        Execute(ctx,
+                "DELETE FROM inodes WHERE id != ? AND nlink = 0 "
+                "AND (mode & ?) != ? "
+                "AND id NOT IN (SELECT inode FROM dentries "
+                "WHERE state = 'present')",
+                kRootInode, static_cast<int64_t>(S_IFMT),
+                static_cast<int64_t>(S_IFDIR)));
+    return absl::OkStatus();
+  }));
+  return count;
+}
+
 absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
   int64_t count = 0;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {

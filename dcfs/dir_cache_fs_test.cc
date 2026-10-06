@@ -124,6 +124,12 @@ std::map<uint64_t, uint64_t> &FakeInodeNumbers() {
   return *fake;
 }
 
+// If nonzero, the next statx fails with this errno (once).
+int &StatxFailure() {
+  static int err = 0;
+  return err;
+}
+
 }  // namespace
 }  // namespace dcfs
 
@@ -150,6 +156,10 @@ int __real_statx(int dirfd, const char *path, int flags, unsigned int mask,
                  struct statx *buf);
 int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
                  struct statx *buf) {
+  if (int err = std::exchange(dcfs::StatxFailure(), 0); err != 0) {
+    errno = err;
+    return -1;
+  }
   int ret = __real_statx(dirfd, path, flags, mask, buf);
   if (ret == 0) {
     auto it = dcfs::FakeInodeNumbers().find(buf->stx_ino);
@@ -288,6 +298,7 @@ class DirCacheFSTest : public ::testing::Test {
     NameToHandleHook() = {};
     SyncfsHook() = {};
     FakeInodeNumbers().clear();
+    StatxFailure() = 0;
     for (const std::string &mount : mounts_below_) {
       ::umount2(mount.c_str(), MNT_DETACH);
     }
@@ -1445,6 +1456,50 @@ TEST_F(DirCacheFSTest, TmpfileNeverLinkedLeavesNoRow) {
   EXPECT_EQ(Getattr(tmp.id).first.error, -ESTALE);
   EXPECT_THAT(List(kRootInode, false),
               IsOkAndHolds(UnorderedElementsAre(".", "..")));
+}
+
+// An unnamed file left by a crash (no release ever came) is forgotten at
+// the next start after an unclean shutdown, as the row-lifetime rule would
+// have at its last release; so is any non-directory row with no link and
+// no name (review L5). Rows with a name, or with links, stay.
+TEST_F(DirCacheFSTest, StartupAfterACrashForgetsUnnamedRows) {
+  WriteFile(Path("named"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId named, Id("named"));
+  Created tmp = Tmpfile(kRootInode, O_RDWR);
+  ASSERT_EQ(tmp.reply.error, 0);
+  ASSERT_THAT(cache::GetAttr(ctx_, tmp.id), IsOk());
+  // The daemon "crashes": no release; the next start finds an unclean
+  // shutdown.
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, tmp.id).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(cache::GetAttr(ctx_, named), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, kRootInode), IsOk());
+}
+
+// A tmpfile whose create fails after its row was recorded (here its first
+// attribute read) takes the row back with it (review L5).
+TEST_F(DirCacheFSTest, TmpfileUndoForgetsItsRow) {
+  Start();
+  // RecordTmpfile's probe calls name_to_handle_at after its own statx; the
+  // next statx is the reply's attribute refresh, which fails.
+  NameToHandleHook() = [] { StatxFailure() = EIO; };
+  Created tmp = Tmpfile(kRootInode, O_RDWR);
+  EXPECT_EQ(tmp.reply.error, -EIO);
+  ASSERT_OK_AND_ASSIGN(int64_t rows,
+                       [&]() -> absl::StatusOr<int64_t> {
+                         ABSL_ASSIGN_OR_RETURN(
+                             sqlite3::Statement * stmt,
+                             db_.Prepared("SELECT COUNT(*) FROM inodes"));
+                         ABSL_ASSIGN_OR_RETURN(bool row, stmt->Step());
+                         if (!row) return absl::InternalError("no row");
+                         int64_t n = stmt->Column<int64_t>(0);
+                         ABSL_RETURN_IF_ERROR(stmt->Reset());
+                         return n;
+                       }());
+  EXPECT_EQ(rows, 1);  // The root only.
 }
 
 // A tmpfile in a directory whose backing open fails, and in a stub.

@@ -1659,6 +1659,14 @@ absl::Status StartRun(Context &ctx, std::string_view boot_id) {
   // Model: Recover.
   ctx.events->Recovered(ctx);
   if (unclean || recovered > 0) {
+    // Rows whose last release never came (review L5): see
+    // cache::ForgetUnnamedRows.
+    ABSL_ASSIGN_OR_RETURN(int64_t forgotten, cache::ForgetUnnamedRows(ctx));
+    if (forgotten > 0) {
+      LOG(WARNING) << "forgot " << forgotten
+                   << " rows of unnamed or unlinked files left by the "
+                      "last run";
+    }
     const bool rebooted =
         last_boot_id.has_value() && *last_boot_id != boot_id;
     LOG(WARNING) << "the last run did not shut down cleanly ("

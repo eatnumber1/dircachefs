@@ -1195,7 +1195,11 @@ Step 23.4.
   object is already known: the model's `linkcreate` (a create with no
   probe), as which `fuse_ops.cc` reports it to the protocol events
   (`DirCacheFS::IsUnnamedTmpfile`). An `O_EXCL` one cannot be linked (the
-  kernel refuses before asking dcfs).
+  kernel refuses before asking dcfs). A tmpfile whose create fails after
+  its row was recorded deletes the row again, and after an unclean
+  shutdown `StartRun` deletes the rows whose last release never came (a
+  non-directory with no link and no name: `cache::ForgetUnnamedRows`,
+  review L5), so crashed tmpfiles do not accumulate rows.
 
 ## Out-of-band change detection
 

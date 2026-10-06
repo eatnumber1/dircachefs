@@ -2338,6 +2338,9 @@ absl::Status DirCacheFS::Tmpfile(FuseRequest &req, fuse_ino_t parent_ino,
     if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
     backing_files_.erase(child.id);
     tmpfiles_.erase(child.id);
+    written_.erase(child.id);
+    // The file goes with its only descriptor; so does its row (review L5).
+    LogPhase3Failure("Tmpfile undo", ForgetRemoved(child.id));
   };
   // Phase 1 for the writes the kernel will make through the passthrough
   // fd, as in Create (O_TMPFILE always asks for write access).
