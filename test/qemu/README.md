@@ -17,22 +17,26 @@ Step 4.4 finished wiring QEMU, qboot and busybox into the Bazel build
 (`third_party/qemu/`, `third_party/busybox/`): none of the three is a host
 tool any more. What's left:
 
-- `mkfs.ext4`, `mkfs.btrfs`, `mkfs.xfs`, `truncate` (for tests with a
-  `disks =` attribute) -- these mkfs the small scratch-disk images
-  `run-qemu.sh` creates on the host before boot; there is no equivalent
-  Bazel target for them.
-- `/dev/kvm`, writable by you. Put yourself in the `kvm` group
+- `truncate` (for tests with a `disks =` attribute) creates the small
+  scratch-disk images `run-qemu.sh` makes on the host before boot. They are
+  formatted by the pinned, Bazel-built `//third_party/e2fsprogs:mke2fs`
+  (with the checked-in `mke2fs.conf`, which gives even small images 4 KiB
+  blocks), `//third_party/xfsprogs:mkfs_xfs` and
+  `//third_party/btrfs-progs:mkfs_btrfs` (R3), so the filesystems under test
+  are the same everywhere; no host `mkfs.*` or `/etc/mke2fs.conf`.
+- `/dev/kvm`, writable by you (optional: without it tests run
+  under TCG). Put yourself in the `kvm` group
   (`sudo usermod -aG kvm "$USER"`, then re-login), or on a shell that
   predates the group change taking effect, wrap the `bazel test` /
   `run-qemu.sh` invocation in `sg kvm -c '...'`. Without a writable
-  `/dev/kvm`, QEMU falls back to TCG (software emulation), which still
-  works but is ten-plus times slower -- see `TIMEOUT` below.
+  `/dev/kvm` (or with `DCFS_FORCE_TCG=1`), QEMU falls back to TCG
+  (software emulation), which works but is slower (Phase 5.1 measured
+  2-9x, with an 8.6 s boot) -- see `TIMEOUT` below.
 - For `nfs_test` only: network access (to `snapshot.debian.org`) is
   needed once per pin, to fetch the pinned packages that assemble
   `//third_party/debian:rootfs` -- see "NFS test and the Debian rootfs"
-  below and `third_party/debian/README.md`. `mke2fs` itself is now the
-  pinned, Bazel-built `//third_party/e2fsprogs:mke2fs` (Phase 4c), not a
-  host tool. The test itself is fully offline (loopback only).
+  below and `third_party/debian/README.md`. The test itself is fully offline
+  (loopback only).
 
 ## The test kernel
 

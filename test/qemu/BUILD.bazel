@@ -1,3 +1,4 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
@@ -304,4 +305,14 @@ qemu_test_matrix(
     size = "enormous",
     other_size = "enormous",
     timeout = "eternal",
+)
+
+# R3 (L5): run-qemu.sh formats the scratch disks with the pinned tools it is
+# given, logs them, and refuses host paths (fake qemu and mkfs; no guest).
+sh_test(
+    name = "run_qemu_mkfs_test",
+    size = "small",
+    srcs = ["run_qemu_mkfs_test.sh"],
+    args = ["$(location scripts/run-qemu.sh)"],
+    data = ["scripts/run-qemu.sh"],
 )

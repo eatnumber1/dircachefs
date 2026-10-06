@@ -72,6 +72,18 @@ got:  $(echo $got)
 want: $(echo $want_fixed)"
 echo "PASS: mke2fs -t ext4 with the checked-in config: $(echo $got)"
 
+# R3: test images resemble a real disk: 4 KiB blocks at every size (1.47.4's
+# own "small" and "floppy" profiles would give 1 KiB below 512 MiB / 3 MiB).
+for size in 2M 64M 256M; do
+	truncate -s "$size" "$WORK/bs.img"
+	MKE2FS_CONFIG="$CONF" "$MKE2FS" -q -F -t ext4 "$WORK/bs.img" ||
+		fail "mke2fs -t ext4 failed on a $size image"
+	bs=$("$DEBUGFS" -R 'show_super_stats -h' "$WORK/bs.img" 2>/dev/null |
+		sed -n 's/^Block size:[[:space:]]*//p')
+	[ "$bs" = 4096 ] || fail "a $size image has block size '$bs', want 4096"
+done
+echo "PASS: 2M, 64M and 256M images all have 4096-byte blocks"
+
 # The environment variable is what decides, not a host or baked-in file: a
 # different config gives a different result.
 cat >"$WORK/other.conf" <<'EOT'

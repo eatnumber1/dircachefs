@@ -72,9 +72,10 @@ The repository carries forward the history of a 2023 experiment called
   Bazel 9.2.0 in `.bazelversion`) and a C++20 compiler. Every library
   dependency (Abseil, SQLite, stock libfuse 3.18.2) is fetched and built
   by Bazel; no system libfuse is needed.
-- **To test:** KVM and `mkfs.ext4`/`mkfs.btrfs`/`mkfs.xfs`. QEMU, its
-  qboot firmware, the guest's busybox and (for `nfs_test`) `mke2fs` are
-  all pinned and built by Bazel, not installed on the host. See
+- **To test:** `truncate`, network access once per pin, and KVM (optional,
+  but tests are 2-9x slower under TCG). QEMU, its qboot firmware, the
+  guest's busybox and the mkfs tools (`mke2fs`, `mkfs.xfs`, `mkfs.btrfs`)
+  are all pinned and built by Bazel, not installed on the host. See
   [Testing](#testing).
 
 ## Building
@@ -241,15 +242,15 @@ boot), so `bazel test //...` is dominated by compilation, not booting.
 
 ### One-time setup
 
-1. Install `mkfs.ext4`, `mkfs.btrfs`, `mkfs.xfs` (for tests with a scratch
-   disk). QEMU, its qboot firmware, busybox and the test kernel are all
+1. Install `truncate` (coreutils; creates the scratch-disk images). QEMU,
+   the mkfs tools, its qboot firmware, busybox and the test kernel are all
    pinned and fetched/built by Bazel (`//third_party/qemu`,
    `//third_party/busybox`, `//third_party/linux`); there is no host QEMU,
    qboot, busybox or manual kernel build step any more -- see
    `test/qemu/README.md`.
 2. Get write access to `/dev/kvm`: `sudo usermod -aG kvm "$USER"`, then log
-   in again. Without KVM, QEMU falls back to software emulation, which is
-   more than ten times slower and can make tests time out.
+   in again. KVM is optional: without it QEMU falls back to software
+   emulation (TCG), 2-9x slower (`DCFS_FORCE_TCG=1` forces this).
 3. For `nfs_test` only, the small Debian root image it chroots into is
    built by Bazel from a pinned package set, using the pinned, Bazel-built
    `//third_party/e2fsprogs:mke2fs` (Phase 4c; not a host tool):

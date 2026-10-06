@@ -254,7 +254,8 @@ from `@debian//:flat` directly -- see `third_party/debian/README.md`.
 
 `mke2fs.conf` is checked in and is e2fsprogs 1.47.4's own built-in
 default profile (`misc/mke2fs.conf.in`, byte for byte apart from a header
-comment). Without it an image depends on whichever file `mke2fs` finds:
+comment and 4 KiB blocks in the `small`/`floppy` profiles, so small test
+images have a real disk's block size). Without it an image depends on whichever file `mke2fs` finds:
 `$MKE2FS_CONFIG`, else `<sysconfdir>/mke2fs.conf` -- for the Bazel-built
 binary that is a path inside the sandbox of the build that produced it,
 which does not exist later, so it silently fell back to the built-in

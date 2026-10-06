@@ -136,8 +136,24 @@ def qemu_cc_test(
 
     # Step 4.4: the Bazel-built QEMU and qboot ROM, passed explicitly --
     # run-qemu.sh does no host lookup of its own.
-    qemu_data = ["//third_party/qemu:qemu_system_x86_64", "@qemu//:pc-bios/qboot.rom"]
+    qemu_data = [
+        "//third_party/qemu:qemu_system_x86_64",
+        "@qemu//:pc-bios/qboot.rom",
+        # R3 (L5): the pinned mkfs tools for the scratch disks.
+        "//third_party/btrfs-progs:mkfs_btrfs",
+        "//third_party/e2fsprogs:mke2fs",
+        "//third_party/e2fsprogs:mke2fs.conf",
+        "//third_party/xfsprogs:mkfs_xfs",
+    ]
     qemu_args = [
+        "--mke2fs",
+        "$(location //third_party/e2fsprogs:mke2fs)",
+        "--mke2fs-conf",
+        "$(location //third_party/e2fsprogs:mke2fs.conf)",
+        "--mkfs-xfs",
+        "$(location //third_party/xfsprogs:mkfs_xfs)",
+        "--mkfs-btrfs",
+        "$(location //third_party/btrfs-progs:mkfs_btrfs)",
         "--qemu",
         "$(location //third_party/qemu:qemu_system_x86_64)",
         "--qboot",

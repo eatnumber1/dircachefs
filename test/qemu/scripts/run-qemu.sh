@@ -6,7 +6,9 @@
 # mandatory in both modes (step 4.4): the Bazel-built
 # //third_party/qemu:qemu_system_x86_64 and @qemu//:pc-bios/qboot.rom
 # targets, passed as $(location ...) by qemu_test.bzl/qemu_cc_test.bzl --
-# never a host PATH lookup or a default path. Two modes:
+# never a host PATH lookup or a default path. So are the mkfs tools for the
+# scratch disks (R3): --mke2fs, --mke2fs-conf (MKE2FS_CONFIG), --mkfs-xfs and
+# --mkfs-btrfs, in front of the other flags. Two modes:
 #
 #   run-qemu.sh --unit --qemu <qemu-system-x86_64> --qboot <qboot.rom> \
 #       <bzImage> <initramfs.cpio.gz> [disk-spec...]
@@ -30,7 +32,7 @@
 # PC/ISA legacy devices we don't need (PIT/PIC/option ROMs), virtio-mmio
 # disks (microvm has no PCI). Firmware is qboot (QBOOT below): qboot uses
 # the kernel's PVH entry point directly when the kernel supports it (see
-# build-kernel.sh's CONFIG_PVH=y) for an effectively firmware-less boot,
+# the test kernel's CONFIG_PVH=y) for an effectively firmware-less boot,
 # and falls back to the normal Linux/x86 real-mode boot protocol otherwise
 # -- so this one firmware choice covers both cases with no detection logic
 # needed here. (bios-microvm.bin, this host's other microvm firmware
@@ -56,7 +58,7 @@
 # device (when ACPI is on) or a `virtio_mmio.device=` kernel command-line
 # parameter added automatically to the -append string (when ACPI is off;
 # this is what CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES, set by
-# build-kernel.sh, parses). The test kernel has no ACPI at all
+# third_party/linux/kernel.config, parses). The test kernel has no ACPI at all
 # (CONFIG_ACPI=n, trimmed along with everything else it doesn't need), so
 # with acpi=on/auto it never finds its disks -- confirmed experimentally
 # (verified with `info qtree` over the QEMU monitor: the virtio-blk-device
@@ -64,9 +66,6 @@
 # acpi=off the guest has no way to learn the transport's MMIO address and
 # /dev/vd* never appears).
 set -eu
-# Bazel runs tests with a minimal PATH that lacks the sbin directories
-# where mkfs.* live.
-export PATH="$PATH:/usr/sbin:/sbin"
 
 # Step 4.4: the QEMU binary and qboot ROM are Bazel-built targets
 # (//third_party/qemu:qemu_system_x86_64, @qemu//:pc-bios/qboot.rom) passed
@@ -75,6 +74,15 @@ export PATH="$PATH:/usr/sbin:/sbin"
 # test/qemu/README.md.
 QEMU_BIN=""
 QBOOT=""
+
+# R3 (L5): the scratch disks are formatted by the pinned, Bazel-built mkfs
+# tools (//third_party/{e2fsprogs,xfsprogs,btrfs-progs}) passed in explicitly,
+# like QEMU: no host mkfs.*, no host /etc/mke2fs.conf (MKE2FS_CONFIG is the
+# checked-in //third_party/e2fsprogs:mke2fs.conf).
+MKE2FS_BIN=""
+MKE2FS_CONF=""
+MKFS_XFS_BIN=""
+MKFS_BTRFS_BIN=""
 
 UNIT=0
 ROOTFS=""
@@ -96,6 +104,22 @@ while :; do
 		QBOOT=$2
 		shift 2
 		;;
+	--mke2fs)
+		MKE2FS_BIN=$2
+		shift 2
+		;;
+	--mke2fs-conf)
+		MKE2FS_CONF=$2
+		shift 2
+		;;
+	--mkfs-xfs)
+		MKFS_XFS_BIN=$2
+		shift 2
+		;;
+	--mkfs-btrfs)
+		MKFS_BTRFS_BIN=$2
+		shift 2
+		;;
 	*)
 		break
 		;;
@@ -108,6 +132,23 @@ if [ -z "$QEMU_BIN" ] || [ -z "$QBOOT" ]; then
 	exit 1
 fi
 
+if [ -z "$MKE2FS_BIN" ] || [ -z "$MKE2FS_CONF" ] || [ -z "$MKFS_XFS_BIN" ] ||
+	[ -z "$MKFS_BTRFS_BIN" ]; then
+	echo "run-qemu.sh: --mke2fs, --mke2fs-conf, --mkfs-xfs and --mkfs-btrfs are required" >&2
+	echo "(the Bazel-built //third_party/{e2fsprogs,xfsprogs,btrfs-progs} targets, not a host lookup)" >&2
+	exit 1
+fi
+
+for tool in "$MKE2FS_BIN" "$MKE2FS_CONF" "$MKFS_XFS_BIN" "$MKFS_BTRFS_BIN"; do
+	case "$tool" in
+	/usr/* | /bin/* | /sbin/*)
+		echo "run-qemu.sh: ERROR: '$tool' looks like a host path," \
+			"not a Bazel-built //third_party target" >&2
+		exit 1
+		;;
+	esac
+done
+
 KERNEL=$1
 INITRD=$2
 shift 2
@@ -116,33 +157,16 @@ if [ "$UNIT" -eq 0 ]; then
 	shift
 fi
 
-# kernel_image (test/qemu/kernel.bzl) writes a placeholder starting with
-# this marker when $DCFS_KERNEL_BUILD has no built kernel yet.
-MAGIC=$(dd if="$KERNEL" bs=1 count=20 2>/dev/null)
-case "$MAGIC" in
-DCFS-KERNEL-MISSING*)
-	echo "dcfs QEMU test kernel is not built:"
-	cat "$KERNEL"
-	exit 1
-	;;
-esac
-
-# kernel_image similarly writes a placeholder for the Debian NFS-test
-# rootfs image (test/qemu/scripts/mkrootfs-debian.sh) when it hasn't been
-# built yet.
-if [ -n "$ROOTFS" ]; then
-	ROOTFS_MAGIC=$(dd if="$ROOTFS" bs=1 count=20 2>/dev/null)
-	case "$ROOTFS_MAGIC" in
-	DCFS-ROOTFS-MISSING*)
-		echo "dcfs Debian NFS-test rootfs image is not built:"
-		cat "$ROOTFS"
-		exit 1
-		;;
-	esac
-fi
-
 WORKDIR="${TEST_TMPDIR:-$(mktemp -d)}"
 LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/serial.log"
+
+# Record the mkfs tools, for anyone auditing a serial log.
+{
+	echo "run-qemu.sh: mke2fs: $MKE2FS_BIN"
+	echo "run-qemu.sh: mke2fs.conf: $MKE2FS_CONF"
+	echo "run-qemu.sh: mkfs.xfs: $MKFS_XFS_BIN"
+	echo "run-qemu.sh: mkfs.btrfs: $MKFS_BTRFS_BIN"
+} >>"$LOG"
 
 # --- lay out the disks in letter order, one -drive/-device pair per index -
 specs_file="$WORKDIR/disk-specs"
@@ -173,9 +197,9 @@ while [ "$idx" -le "$max_index" ]; do
 		img="$WORKDIR/$dev.img"
 		truncate -s "$size" "$img"
 		case "$fstype" in
-		ext4) mkfs.ext4 -q -F "$img" ;;
-		btrfs) mkfs.btrfs -q -f "$img" ;;
-		xfs) mkfs.xfs -q -f "$img" ;;
+		ext4) MKE2FS_CONFIG="$MKE2FS_CONF" "$MKE2FS_BIN" -q -F -t ext4 "$img" ;;
+		btrfs) "$MKFS_BTRFS_BIN" -q -f "$img" ;;
+		xfs) "$MKFS_XFS_BIN" -q -f "$img" ;;
 		*)
 			echo "run-qemu.sh: unknown fstype '$fstype'" >&2
 			exit 1

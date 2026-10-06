@@ -91,6 +91,15 @@ fi
 
 if mount -t ext4 /dev/vdb /src; then
 	pass vdb-mount
+	# R3: test filesystems resemble a real disk: the checked-in mke2fs.conf
+	# gives even a 64 MiB image 4 KiB blocks (mke2fs's own "small" profile
+	# would pick 1 KiB). stat -f %s is the filesystem's block size.
+	BS=$(stat -f -c %s /src)
+	if [ "$BS" = 4096 ]; then
+		pass vdb-block-size
+	else
+		fail vdb-block-size "expected 4096-byte blocks, got $BS"
+	fi
 	umount /src
 else
 	fail vdb-mount "mount failed"
