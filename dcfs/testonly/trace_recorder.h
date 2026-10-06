@@ -175,6 +175,9 @@ class TraceRecorder final : public ProtocolEvents {
     // directory's mutation_lines at RefreshBegin).
     bool silent = false;
     int64_t mark = 0;
+    // kRequest: the object (key) each (directory, raw name) resolved to,
+    // as its lookups, probes and listings last reported.
+    std::map<std::pair<Ino, std::string>, std::string> resolved;
     // kSync: the callback count at its snapshot (SyncSnapshotTaken).
     int64_t snapshot_at = -1;
     // The requests of directories' traces this frame owns.
@@ -221,6 +224,13 @@ class TraceRecorder final : public ProtocolEvents {
   static Mapping Map(const Frame &request, Ino dir);
   // The traced directories a FUSE request mutates as a modelled request.
   std::vector<Ino> MutatedDirs(const Frame &request);
+  // The key of `id`'s row ("" if none).
+  std::string KeyOf(Context &ctx, Ino id);
+  // Notes in the innermost request that (dir, name) resolved to `key`.
+  void Resolved(Context &ctx, Ino dir, std::string_view name, std::string key);
+  // A mutation names `dir` as an object in request `rf`: a dir-itself cut
+  // if `rf` resolved one of its names to `dir`, else unexplained.
+  void ItselfOrUnexplained(Context &ctx, const Frame &rf, Ino dir);
   // Starts handling a callback: names it for the lines, and counts it.
   void Enter(const char *cause);
 

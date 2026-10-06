@@ -618,7 +618,7 @@ categories:
 |---|---|---|
 | `cross-directory-rename`, `rename-flags` | the model's rename is within D, flags 0 | crash, rename |
 | `link` | the model's objects never get a second name | crash, rename, create |
-| `dir-attrs`, `dir-itself` | the model has no mutation of D's own attributes; `dir-itself`: D named as an object (removed, moved) | crash (both), rename, create (`dir-itself`) |
+| `dir-attrs`, `dir-itself` | the model has no mutation of D's own attributes; `dir-itself`: D named as an object (removed, moved) by a request that resolved one of its names to D (else `unexplained`) | crash (both), rename, create (`dir-itself`) |
 | `boundary` | a refused mount or subvolume boundary is not modelled | rename, create |
 | `out-of-band` | not modelled (`ReconcileAttrs`) | create |
 | `invalidated` | a forgotten inode's dentries became unknown (`InvalidateInode` after `ESTALE`) | none |

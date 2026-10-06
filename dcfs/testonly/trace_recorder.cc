@@ -737,6 +737,9 @@ void TraceRecorder::LookupDecided(Context &ctx, Ino parent,
                                   std::string_view name,
                                   events::LookupOutcome outcome, Ino child) {
   Enter("LookupDecided");
+  if (outcome == events::LookupOutcome::kFound) {
+    Resolved(ctx, parent, name, KeyOf(ctx, child));
+  }
   if (Traced(parent)) {
     CHECK(!frames_.empty() && frames_.back().kind == Frame::kLookup);
     Req *req = Find(parent);
@@ -800,6 +803,9 @@ void TraceRecorder::ResolveProbed(Context &ctx, Ino parent,
                                   std::string_view name,
                                   const events::Probe &probe) {
   Enter("ResolveProbed");
+  if (probe.kind == events::Probe::kPresent) {
+    Resolved(ctx, parent, name, Key(probe.ino, probe.btime_sec, probe.btime_nsec));
+  }
   if (Traced(parent)) {
     Req *req = Find(parent);
     if (req == nullptr) {
@@ -895,6 +901,10 @@ void TraceRecorder::PopulateRead(Context &ctx, Ino dir,
     bool refused = false;
     listing([&](std::string_view name, const events::Probe &probe) {
       if (probe.kind == events::Probe::kRefused) refused = true;
+      if (probe.kind == events::Probe::kPresent) {
+        Resolved(ctx, dir, name,
+                 Key(probe.ino, probe.btime_sec, probe.btime_nsec));
+      }
       absl::StrAppend(&list, list.empty() ? "" : ",", "[", Name(name), ",",
                       ProbeValue(probe), "]");
     });
@@ -1023,6 +1033,40 @@ void TraceRecorder::RootRecorded(Context &ctx) {
 
 // --- Mutations ---------------------------------------------------------------
 
+std::string TraceRecorder::KeyOf(Context &ctx, Ino id) {
+  absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx, id);
+  if (!attr.ok()) return "";
+  return Key(attr->backing_ino, attr->btime.tv_sec, attr->btime.tv_nsec);
+}
+
+void TraceRecorder::Resolved(Context &ctx, Ino dir, std::string_view name,
+                             std::string key) {
+  if (Frame *rf = InnermostRequest(); rf != nullptr) {
+    rf->resolved[{dir, std::string(name)}] = std::move(key);
+  }
+}
+
+void TraceRecorder::ItselfOrUnexplained(Context &ctx, const Frame &rf,
+                                        Ino dir) {
+  // The directory as an object (removed, moved): the model has no mutation
+  // of D itself, so its trace ends -- if this request resolved one of its
+  // names to D. A request naming D otherwise (a wrong id, say) is
+  // unexplained.
+  const std::string key = KeyOf(ctx, dir);
+  auto resolved_to = [&](Ino parent, const std::string &name) {
+    auto it = rf.resolved.find({parent, name});
+    return it != rf.resolved.end() && !key.empty() && it->second == key;
+  };
+  if (resolved_to(rf.ino, rf.name) ||
+      (rf.newparent != 0 && resolved_to(rf.newparent, rf.newname))) {
+    Cut(ctx, dir, "dir-itself: a mutation of the directory itself");
+  } else {
+    Unexplained(ctx, dir,
+                "a mutation names the directory in a request that did not "
+                "resolve it");
+  }
+}
+
 void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
                                   bool synced) {
   Enter("MutationBegun");
@@ -1039,9 +1083,7 @@ void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
       continue;
     }
     if (m.kind == Mapping::kNone) {
-      // The directory as an object (removed, moved): the model has no
-      // mutation of D itself.
-      Cut(ctx, dir, "dir-itself: a mutation of the directory itself");
+      ItselfOrUnexplained(ctx, *rf, dir);
       continue;
     }
     // Any other phase 1 is the request's line, for the model to judge: a
@@ -1077,7 +1119,11 @@ void TraceRecorder::MutationAborted(Context &ctx, events::IdsFn ids) {
       }
     }
     if (req == nullptr) {
-      Unexplained(ctx, dir, "a verification outside its request");
+      if (rf != nullptr && Map(*rf, dir).kind == Mapping::kNone) {
+        ItselfOrUnexplained(ctx, *rf, dir);
+      } else {
+        Unexplained(ctx, dir, "a verification outside its request");
+      }
       continue;
     }
     Emit(ctx, dir, req, "phase1", ",\"outcome\":\"aborted\"");

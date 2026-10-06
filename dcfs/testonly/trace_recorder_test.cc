@@ -267,5 +267,51 @@ TEST_F(TraceRecorderTest, ChildRowFilledAgainstTheGuardIsUnexplained) {
                                        HasSubstr("since the fill's snapshot"))));
 }
 
+// --- A directory named as an object (re-review of 2026-10-07, finding 3) --
+
+// A mutation that names directory d as an object (an rmdir's child, a
+// rename's source) ends d's trace (dir-itself) only if the request resolved
+// one of its names to d; otherwise it is unexplained (a wrong id passed to
+// a Begin* function would otherwise just cut d).
+TEST_F(TraceRecorderTest, DirectoryNamedByAnUnresolvedRequestIsUnexplained) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_,
+        {.op = events::Op::kRmdir, .ino = cache::kRootInode, .name = "x"});
+    ASSERT_OK_AND_ASSIGN(
+        cache::Mutation mutation,
+        cache::BeginRemove(ctx_, cache::kRootInode, "x", d,
+                           cache::BeginFill(ctx_)));
+    request.Finish(absl::InternalError("stop here")).IgnoreError();
+  }
+  EXPECT_THAT(Lines(d), Contains(HasSubstr("\"ev\":\"unexplained\"")));
+  EXPECT_THAT(Lines(d), Not(Contains(HasSubstr("dir-itself"))));
+}
+
+TEST_F(TraceRecorderTest, DirectoryNamedByTheRequestsResolveIsCut) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_,
+        {.op = events::Op::kRmdir, .ino = cache::kRootInode, .name = "d"});
+    {
+      events::Scope lookup(*ctx_.events, ctx_, &ProtocolEvents::LookupBegin,
+                           &ProtocolEvents::LookupEnd, cache::kRootInode,
+                           std::string_view("d"));
+      ctx_.events->LookupDecided(ctx_, cache::kRootInode, "d",
+                                 events::LookupOutcome::kFound, d);
+    }
+    ASSERT_OK_AND_ASSIGN(
+        cache::Mutation mutation,
+        cache::BeginRemove(ctx_, cache::kRootInode, "d", d,
+                           cache::BeginFill(ctx_)));
+    request.Finish(absl::InternalError("stop here")).IgnoreError();
+  }
+  EXPECT_THAT(Lines(d), Contains(HasSubstr("dir-itself: ")));
+}
+
 }  // namespace
 }  // namespace dcfs::testonly
