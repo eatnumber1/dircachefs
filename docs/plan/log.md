@@ -534,3 +534,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   newer than the 20261004 snapshot's main suite) - a snapshot bump or ignores with reasons are
   russ's call; none added.
 
+- Phase 5.3 merged (323ad67; dcfs-implementer): tools/sbom (CycloneDX from every pin: 132 entries,
+  102 Debian source packages; sbom_test fails on a pin without an entry, hermetic Python via
+  rules_python), osv job (action pinned by SHA for v2.6.0; weekly cron; seeded zlib 1.2.11 fixture
+  must fail first, and does: 12 CVEs), empty osv-scanner.toml (ignores need id, ignoreUntil,
+  reason). OSV matches ONLY the Debian packages: pkg:github and pkg:generic purls report nothing
+  even for known-bad zlib/xz, and the kernel has no reachable ecosystem; README lists every such
+  pin. Real scan: 158 findings in 26 bookworm source packages (notes/osv-scan-2026-10-07.txt); 57
+  have fixes in bookworm, which means the image sources omit bookworm-security: fixing that now
+  (lane-4). The rest (unfixed in bookworm) need russ's policy: ignores with a reason and expiry
+  (the image is a test-only NFS chroot), or moving the image to trixie.
+- Needs russ: policy for OSV findings that Debian has not fixed in the pinned release.
