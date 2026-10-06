@@ -355,3 +355,17 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   < 20 limit; already borderline on btrfs under KVM at 19): handed to the 6.2 lane working on it.
   Follow-ups: R3b in lane-1 now (mkfs wiring, 4 KiB blocks, README's TCG wording, run-qemu.sh
   nits); CI step decides pjdfstest under TCG (ext4 only, or a longer timeout).
+- 6.2 CPU-tick flake fixed (25f7f10; dcfs-investigator): the old write-large-passthrough-cpu check
+  (daemon CPU ticks < 20) rose with host load because guest stime accounting inflates when vCPUs
+  are descheduled, not because dcfs did work; dcfs handled 70 requests during the 64 MiB write (64
+  GETXATTR, 0 READ/WRITE). New check write-large-passthrough-requests counts daemon wakeups
+  (voluntary context switches) in a window that ends after the writer's close: 9-10 with
+  passthrough on (KVM under load 24/24, TCG 6/6), 73-76 with passthrough off (scratch build, 12/12
+  fail). The first write.sh daemon runs with --sync_interval_sec=100000 so a periodic sync does not
+  land in the window.
+- dcfs finding (queue for dcfs-protocol, small): with passthrough on, the kernel still sends one
+  GETXATTR(security.capability) per write(2) (file_remove_privs); a program writing 4 KiB at a time
+  wakes dcfs once per write. Declaring FUSE_CAP_HANDLE_KILLPRIV_V2 (dcfs's backing filesystem kills
+  privileges on the real inode during passthrough writes) should stop them; verify the kernel's
+  behaviour for passthrough writes before enabling, test first (count GETXATTRs during a 4 KiB-write
+  loop). Also check guest/passthrough.sh's own cpu_ticks check for the same flake.
