@@ -370,3 +370,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   behaviour for passthrough writes before enabling, test first (count GETXATTRs during a 4 KiB-write
   loop). Also check guest/passthrough.sh's own cpu_ticks check for the same flake.
 - Phase 10 resumed in lane-4 (load back to ~8) from the earlier agent's uncommitted work.
+- R3b merged (ae5c462; dcfs-implementer): run-qemu.sh requires --mke2fs/--mke2fs-conf/--mkfs-xfs/
+  --mkfs-btrfs (refuses /usr, /bin, /sbin paths, logs them), the macros pass the Bazel-built tools;
+  mke2fs.conf's small/floppy profiles set blocksize=4096 (boot.sh vdb-block-size check failed with
+  1024 before, passes after); host-side run_qemu_mkfs_test with fake tools; README/test README drop
+  "ten-plus times slower". Full suite 100/103 before rebase; the 3 were the since-replaced CPU-tick
+  check. Phase 4 and R3 complete: no host mkfs, QEMU, qboot, busybox, kernel or mke2fs remain.
