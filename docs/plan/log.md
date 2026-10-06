@@ -401,3 +401,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   targets) was resolved by keeping both blocks; the readdir agent found the lane mid-rebase and
   correctly stopped until it was clean.
 - Phase 5.2 (CI workflow developed with pinned act; full job under act as the host-dependency detector, run only when load allows) started in lane-2 (dcfs-investigator). Nothing is published; russ pushes.
+- R4 done on step-r4 (dcfs-protocol, 4 commits, +1339/-359), awaiting an independent dcfs-reviewer
+  pass before merge: sync points snapshot the guard clock and dirty set before syncfs and ClearDirty
+  keeps anything newer (the suggested "keep in-flight inodes" was insufficient per the model);
+  readdir takes its listing right after the completeness check; rename re-verifies its resolution
+  inside phase 1 (kAborted -> re-resolve, 3 tries then EAGAIN). New dcfs:dir_cache_fs_test drives
+  DirCacheFS through forged FUSE requests with a --wrap hook. Model: SyncExclusive removed; the
+  three findings became Bug* constants with known_bugs variants; MC_nolock now covers all requests
+  (4.46M states). Unit+formal 29/29, ASan 18/18, presubmit 93/93. Follow-up found by the agent:
+  RemoveChild/BeginRemove/SettleUnlinkedFile trust a child id resolved before phase 1 (same shape as
+  the rename gap; outside the model's scope): queue as R4.4 after the review.
