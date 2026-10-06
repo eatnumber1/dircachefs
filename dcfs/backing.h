@@ -433,7 +433,10 @@ absl::Status StartupPurge(Context &ctx);
 // one transaction -- except for inodes in ctx.open_for_write, which the
 // kernel may still be writing to through a passthrough fd, so a later
 // crash could still leave the backing file ahead of the attributes the
-// last Release records. On a syncfs failure nothing is cleared (the dirty
+// last Release records -- and except for inodes a mutation was changing
+// while the sync point ran (in flight, or begun or ended since just before
+// the first syncfs: cache::BeginSync/ClearDirty), whose backing syscall the
+// syncfs may not cover. On a syncfs failure nothing is cleared (the dirty
 // entries only cost a larger re-read after a crash) and the error is
 // returned.
 absl::Status SyncBacking(Context &ctx);

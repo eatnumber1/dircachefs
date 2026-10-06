@@ -1,0 +1,23 @@
+------------------------ MODULE sync_during_mutation ------------------------
+(***************************************************************************)
+(* Known bug: formal/ finding sync_during_mutation (found by this model,  *)
+(* fixed in plan step R4). A sync point that ran while a mutation was     *)
+(* between phase 1 and its end could lose the mutation's dirty row.       *)
+(*                                                                         *)
+(* backing::SyncBacking was syncfs(2) on every mount fd, then             *)
+(* cache::ClearDirty, which emptied the dirty set except inodes with a    *)
+(* writable open. If a mutation's phase 1 committed before the syncfs and *)
+(* its backing syscall ran after it, ClearDirty removed the dirty row of  *)
+(* a change that was not durable yet; phase 3 then recorded it, and a     *)
+(* power loss that kept phase 3 and lost the syscall left the cache ahead *)
+(* of the backing filesystem with nothing for recovery to forget.         *)
+(* Unreachable while dcfs serves one request at a time; real under        *)
+(* coroutines. Fixed by cache::BeginSync/ClearDirty: a row stays if a     *)
+(* mutation of its inode began or ended since just before the syncfs, or  *)
+(* is in flight.                                                          *)
+(*                                                                         *)
+(* Re-introduced by BugSyncIgnoresMutations (ClearDirty clears D's row    *)
+(* whatever the fill guards say). Expected: CrashSafe is violated.        *)
+(***************************************************************************)
+EXTENDS MC
+=============================================================================

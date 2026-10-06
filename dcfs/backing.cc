@@ -1359,6 +1359,10 @@ absl::Status StartupPurge(Context &ctx) {
 }
 
 absl::Status SyncBacking(Context &ctx) {
+  // Taken before the first syncfs: whatever is dirty now and is not
+  // mutated again before ClearDirty is covered by the syncfs calls below
+  // (see cache::BeginSync).
+  ABSL_ASSIGN_OR_RETURN(cache::SyncSnapshot synced, cache::BeginSync(ctx));
   for (int fd : ctx.mounts.Fds()) {
     ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
   }
@@ -1366,7 +1370,7 @@ absl::Status SyncBacking(Context &ctx) {
   if (ctx.open_for_write != nullptr) {
     keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
   }
-  return cache::ClearDirty(ctx, keep);
+  return cache::ClearDirty(ctx, synced, keep);
 }
 
 absl::Status StartRun(Context &ctx, std::string_view boot_id) {

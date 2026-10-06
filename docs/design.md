@@ -689,7 +689,23 @@ point, and never serves state the backing filesystem did not keep.
 `backing::SyncBacking`: `syncfs(2)` on every mount fd, then, if all
 succeeded, empty the dirty set in one transaction, except inodes with a
 writable open outstanding (the kernel may still be writing to them through
-passthrough). On a `syncfs` failure nothing is cleared. Sync points run:
+passthrough) and rows the `syncfs` may not cover. On a `syncfs` failure
+nothing is cleared.
+
+A dirty row may go only once a `syncfs` that began after its mutation's
+backing syscall has returned. So the sync point first takes a snapshot
+(`cache::BeginSync`: the fill guards' clock and the dirty set), then runs
+`syncfs`, then (`cache::ClearDirty`) removes only rows that were in the
+snapshot and whose inode no mutation began or ended since the snapshot or
+has in flight (`CanFill`'s test). A row added after the snapshot, or whose
+inode a mutation was changing meanwhile, waits for the next sync point.
+Today nothing runs during a sync point; under coroutines a mutation may
+issue its syscall while the sync point waits on `syncfs`, or the sync point
+may run while a mutation waits on its syscall (the model's finding
+`sync_during_mutation`). If the fill guards were pruned since the snapshot
+(their floor passed it), every row stays.
+
+Sync points run:
 
 - after the kernel's `FSYNC` or `FSYNCDIR` (after the fsync itself),
   because the caller asked for what it did to be durable, and that
@@ -793,6 +809,9 @@ custom VFS. The code already follows the rules that make that safe:
   completeness meanwhile).
 - **Mutations own their phase-3 writes** only while no overlapping
   mutation of the same inode exists (`Mutation::Owns`).
+- **A sync point clears only what its `syncfs` covers**: rows in its
+  snapshot of the dirty set whose inode no mutation touched since (see
+  [Sync points](#sync-points)).
 - **Credential switches never span a suspension point.** `AsCaller` wraps
   exactly one synchronous syscall, and the switch is per thread (see
   [Caller credentials](#caller-credentials)).
@@ -1241,15 +1260,17 @@ model checker checks, within small bounds, that nothing served from the
 cache disagrees with the backing filesystem (also after a crash and
 recovery), that a mutation's records read unknown from phase 1 until phase 3,
 that completeness never hides a name, and that recovery terminates. Variants
-that put back the historical bugs from the audits (crash F1 and F3,
-tri-state F1 and F4) must produce counterexamples. `bazel test //formal/...`
+that put back the historical bugs (from the audits: crash F1 and F3,
+tri-state F1 and F4; found by the model: the gaps below, once fixed) must
+produce counterexamples. `bazel test //formal/...`
 runs all of it; `formal/README.md` explains the model, what it leaves out,
 and how to read a counterexample.
 
 The model describes the code as it is. It found three gaps that only today's
-single thread and the kernel's per-directory lock keep unreachable, each
-kept as an expected-counterexample test under `formal/findings/`: a sync
-point clears the dirty rows of mutations still in flight; Readdirplus lists
-after a suspension point without checking completeness again; and Rename's
-phase 3 trusts a source resolved before its phase 1. All three must be
-fixed before requests run concurrently.
+single thread and the kernel's per-directory lock kept unreachable: a sync
+point cleared the dirty rows of mutations still in flight (fixed: see
+[Sync points](#sync-points)); Readdirplus lists after a suspension point
+without checking completeness again; and Rename's phase 3 trusts a source
+resolved before its phase 1. The open ones are kept as
+expected-counterexample tests under `formal/findings/`, and must be fixed
+before requests run concurrently.

@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -1281,17 +1282,41 @@ absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx) {
   return ids;
 }
 
-absl::Status ClearDirty(Context &ctx, std::span<const InodeId> keep) {
+absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx) {
+  SyncSnapshot snapshot{.fills = BeginFill(ctx)};
+  ABSL_ASSIGN_OR_RETURN(snapshot.dirty, ListDirty(ctx));
+  return snapshot;
+}
+
+absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
+                        std::span<const InodeId> keep) {
+  bool any = false;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(Execute(ctx, "DELETE FROM dirty").status());
-    return InsertDirty(ctx, keep);
+    for (InodeId id : synced.dirty) {
+      if (std::find(keep.begin(), keep.end(), id) != keep.end()) continue;
+      // A mutation of `id` in flight now, or one that began or ended since
+      // the snapshot, may have issued its backing syscall after the syncfs
+      // started: the syncfs does not cover it, so its row stays until a
+      // later sync point's does. (CanFill is exactly "no mutation of `id`
+      // began or ended since the snapshot, and none is in flight"; a
+      // snapshot older than the guards' floor keeps every row.)
+      if (!CanFill(ctx, synced.fills, id)) continue;
+      ABSL_RETURN_IF_ERROR(
+          Execute(ctx, "DELETE FROM dirty WHERE inode = ?", id).status());
+    }
+    ABSL_ASSIGN_OR_RETURN(Statement * stmt,
+                          Query(ctx, "SELECT EXISTS (SELECT 1 FROM dirty)"));
+    return ReadOne(*stmt, [&](Statement &row) {
+             any = row.Column<int64_t>(0) != 0;
+             return absl::OkStatus();
+           }).status();
   }));
-  // The kept rows were durable before (a writable open's are inserted by
-  // its durable phase 1, or by the phase 3 that created its row) and this
-  // transaction only deleted others, but whether they are in
-  // ctx.dirty.durable is not tracked across the clear: start over.
+  // This transaction only deleted rows, so a kept row that was durable
+  // still is; but ctx.dirty.durable is not tracked per row across a clear:
+  // start over, which at worst costs a phase 1 a kSync commit it did not
+  // need.
   ctx.dirty.durable.clear();
-  ctx.dirty.any = !keep.empty();
+  ctx.dirty.any = any;
   return absl::OkStatus();
 }
 

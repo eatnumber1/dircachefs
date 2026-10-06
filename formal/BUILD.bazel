@@ -51,13 +51,15 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
-# Test first, for the model itself: each historical bug from
-# docs/plan/audits/, re-introduced, must be found.
+# Test first, for the model itself: each historical bug (from
+# docs/plan/audits/, or found by this model), re-introduced, must be found.
 KNOWN_BUGS = {
     "crash_f1_phase1_not_durable": "Invariant CacheNeverWrong is violated",
     "crash_f3_create_keeps_parent_attrs": "Invariant TriState is violated",
     "tristate_f1_unguarded_fills": "Invariant TriState is violated",
     "tristate_f4_restore_complete": "Invariant TriState is violated",
+    # Found by this model (formerly findings/); fixed in plan step R4.
+    "sync_during_mutation": "Invariant CrashSafe is violated",
 }
 
 [
@@ -79,7 +81,6 @@ KNOWN_BUGS = {
 FINDINGS = {
     "readdirplus_unlocked": "Invariant ServedFromCacheIsCurrent is violated",
     "rename_stale_source": "Invariant CacheNeverWrong is violated",
-    "sync_during_mutation": "Invariant CrashSafe is violated",
 }
 
 [

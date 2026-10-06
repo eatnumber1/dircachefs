@@ -47,6 +47,7 @@ namespace {
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
+using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::Optional;
 using ::testing::Pair;
@@ -153,6 +154,13 @@ class MetadataCacheTest : public ::testing::Test {
     ABSL_RETURN_IF_ERROR(LinkDentry(ctx_, parent, name, r.id));
     ABSL_RETURN_IF_ERROR(MarkDirComplete(ctx_, r.id, false));
     return r.id;
+  }
+
+  // A whole sync point's worth of clearing, with nothing running between
+  // its two halves (as backing::SyncBacking minus the syncfs).
+  absl::Status SyncClear(std::span<const InodeId> keep = {}) {
+    ABSL_ASSIGN_OR_RETURN(SyncSnapshot synced, BeginSync(ctx_));
+    return ClearDirty(ctx_, synced, keep);
   }
 
   sqlite3::Connection db_;
@@ -1033,7 +1041,7 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   ASSERT_THAT(MarkDirComplete(ctx_, b, true), IsOk());
 
   auto reset = [&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(ClearDirty(ctx_, {}));
+    ABSL_RETURN_IF_ERROR(SyncClear());
     for (auto [id, ino] : {std::pair{a, 20}, std::pair{b, 21},
                            std::pair{f.id, 30}, std::pair{g.id, 31}}) {
       ABSL_RETURN_IF_ERROR(UpdateAttr(ctx_, id, Stx(ino, S_IFREG)));
@@ -1132,7 +1140,7 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
 TEST_F(MetadataCacheTest, MarkDirtyIsNotDurableAndClearDirtyKeeps) {
   ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
   ASSERT_OK_AND_ASSIGN(UpsertResult g, Make(31));
-  ASSERT_THAT(ClearDirty(ctx_, {}), IsOk());
+  ASSERT_THAT(SyncClear(), IsOk());
   EXPECT_FALSE(ctx_.dirty.any);
 
   const InodeId ids[] = {f.id, g.id};
@@ -1142,13 +1150,95 @@ TEST_F(MetadataCacheTest, MarkDirtyIsNotDurableAndClearDirtyKeeps) {
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id, g.id)));
 
   const InodeId keep[] = {g.id};
-  ASSERT_THAT(ClearDirty(ctx_, keep), IsOk());
+  ASSERT_THAT(SyncClear(keep), IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(g.id)));
   EXPECT_TRUE(ctx_.dirty.any);
   EXPECT_TRUE(ctx_.dirty.durable.empty());
-  ASSERT_THAT(ClearDirty(ctx_, {}), IsOk());
+  ASSERT_THAT(SyncClear(), IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
   EXPECT_FALSE(ctx_.dirty.any);
+}
+
+// formal/ finding sync_during_mutation: a sync point clears only the rows
+// its syncfs covers. A row stays if a mutation of its inode was in flight
+// at any moment between BeginSync (just before the syncfs) and ClearDirty,
+// or if it was added after BeginSync.
+TEST_F(MetadataCacheTest, ClearDirtyKeepsWhatChangedDuringTheSync) {
+  std::vector<InodeId> ids;
+  for (uint64_t ino = 30; ino < 37; ++ino) {
+    ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(ino));
+    ids.push_back(r.id);
+  }
+  const InodeId done = ids[0], across = ids[1], ended = ids[2],
+                again = ids[3], late = ids[4], added = ids[5],
+                kept = ids[6];
+  ASSERT_THAT(SyncClear(), IsOk());
+
+  // Before the sync point: `done` was mutated (and finished); `across` and
+  // `ended` have a mutation in flight; `again` was mutated and finished;
+  // `kept` has a writable open.
+  ASSERT_THAT(BeginAttrChange(ctx_, done), IsOk());  // Ends at once.
+  ASSERT_OK_AND_ASSIGN(Mutation m_across, BeginAttrChange(ctx_, across));
+  ASSERT_OK_AND_ASSIGN(Mutation m_ended, BeginAttrChange(ctx_, ended));
+  ASSERT_THAT(BeginAttrChange(ctx_, again), IsOk());
+  ASSERT_THAT(BeginAttrChange(ctx_, kept), IsOk());
+
+  ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
+  EXPECT_THAT(synced.dirty, ElementsAre(done, across, ended, again, kept));
+  // While the syncfs runs: `ended`'s mutation ends (its syscall may have
+  // come after the syncfs started), `again` is mutated again, `late` gets
+  // a mutation that is still in flight, and `added` is made dirty by a
+  // phase 3 (MarkDirty).
+  m_ended.End();
+  ASSERT_THAT(BeginAttrChange(ctx_, again), IsOk());
+  ASSERT_OK_AND_ASSIGN(Mutation m_late, BeginAttrChange(ctx_, late));
+  const InodeId added_ids[] = {added};
+  ASSERT_THAT(MarkDirty(ctx_, added_ids), IsOk());
+
+  const InodeId keep[] = {kept};
+  ASSERT_THAT(ClearDirty(ctx_, synced, keep), IsOk());
+  // Only `done` was covered by the syncfs.
+  EXPECT_THAT(ListDirty(ctx_),
+              IsOkAndHolds(ElementsAre(across, ended, again, late, added,
+                                       kept)));
+  EXPECT_TRUE(ctx_.dirty.any);
+  EXPECT_TRUE(ctx_.dirty.durable.empty());
+
+  // The next sync point, with the mutations still in flight then over.
+  ASSERT_THAT(SyncClear(keep), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(across, late, kept)));
+  m_across.End();
+  m_late.End();
+  ASSERT_THAT(SyncClear(keep), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(kept)));
+  EXPECT_TRUE(ctx_.dirty.any);
+  ASSERT_THAT(SyncClear(), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+  EXPECT_FALSE(ctx_.dirty.any);
+}
+
+// If the fill guards forgot which inodes were mutated since BeginSync
+// (FillGuards::touched was pruned, raising the floor past the snapshot),
+// a sync point cannot tell which rows its syncfs covers, and keeps them
+// all.
+TEST_F(MetadataCacheTest, ClearDirtyKeepsEverythingPastTheFloor) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_THAT(SyncClear(), IsOk());
+  ASSERT_THAT(BeginAttrChange(ctx_, f.id), IsOk());
+  ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
+
+  // Mutations of more inodes than FillGuards::touched holds
+  // (metadata_cache.cc's kMaxTouched, 1 << 16): the guards prune it. The
+  // ids need no rows: BeginMutation only records them.
+  for (InodeId id = 1'000'000; ctx_.fills.floor <= synced.fills.seq; ++id) {
+    ASSERT_LT(id, 1'000'000 + (1 << 17));
+    const InodeId one[] = {id};
+    ASSERT_THAT(BeginMutation(ctx_, one, [] { return absl::OkStatus(); }),
+                IsOk());
+  }
+
+  ASSERT_THAT(ClearDirty(ctx_, synced, {}), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(Contains(f.id)));
 }
 
 TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
@@ -1180,7 +1270,7 @@ TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
   for (InodeId dir : {kRootInode, d, c}) {
     ASSERT_THAT(MarkDirComplete(ctx_, dir, true), IsOk());
   }
-  ASSERT_THAT(ClearDirty(ctx_, {}), IsOk());
+  ASSERT_THAT(SyncClear(), IsOk());
   const InodeId dirty[] = {d, f.id, s.id, 999 /* no row any more */};
   ASSERT_THAT(MarkDirty(ctx_, dirty), IsOk());
 

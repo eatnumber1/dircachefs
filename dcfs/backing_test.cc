@@ -758,6 +758,50 @@ TEST_F(BackingTest, SyncBackingClearsTheDirtySetExceptOpenWriters) {
   ctx_.open_for_write = nullptr;
 }
 
+// formal/ finding sync_during_mutation: a sync point that runs between a
+// mutation's phase 1 and its backing syscall must not drop the mutation's
+// dirty rows. The syncfs ran before the syscall, so it did not make the
+// syscall durable; if the dirty row went, a power loss that kept phase 3
+// and lost the syscall would leave the cache ahead with nothing for
+// recovery to forget. (Unreachable while dcfs is single-threaded; real
+// under coroutines, where a sync point can run while a request waits on
+// its syscall.)
+TEST_F(BackingTest, SyncPointKeepsAMutationInFlightDirty) {
+  ASSERT_THAT(SyncBacking(ctx_), IsOk());
+  ASSERT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
+
+  // Phase 1 of a mkdir of "new" in the root.
+  ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                       cache::BeginCreate(ctx_, kRootInode, "new"));
+  // A sync point now: the mkdir has not been issued yet.
+  ASSERT_THAT(SyncBacking(ctx_), IsOk());
+  EXPECT_THAT(cache::ListDirty(ctx_),
+              IsOkAndHolds(testing::ElementsAre(kRootInode)));
+  EXPECT_TRUE(ctx_.dirty.any);
+
+  // Phase 2 and phase 3.
+  absl::StatusOr<FileDescriptor> parent = OpenNode(
+      ctx_, kRootInode, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  ASSERT_THAT(parent, IsOk());
+  const Credentials root{.uid = 0, .gid = 0, .groups = {}};
+  ASSERT_THAT(MkdirAt(ctx_, root, **parent, "new", 0755), IsOk());
+  ASSERT_OK_AND_ASSIGN(NewChild child, RecordNewChild(ctx_, mutation,
+                                                      kRootInode, **parent,
+                                                      "new"));
+  mutation.End();
+  EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "new"),
+              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+  // Still dirty, the new child too: no syncfs since the mkdir.
+  EXPECT_THAT(cache::ListDirty(ctx_),
+              IsOkAndHolds(testing::UnorderedElementsAre(kRootInode,
+                                                         child.id)));
+
+  // The next sync point covers the mkdir: now both may go.
+  ASSERT_THAT(SyncBacking(ctx_), IsOk());
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
+  EXPECT_FALSE(ctx_.dirty.any);
+}
+
 TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));

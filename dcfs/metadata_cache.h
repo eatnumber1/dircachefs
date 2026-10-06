@@ -502,11 +502,35 @@ absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids);
 // The dirty set, sorted.
 absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx);
 
-// Empties the dirty set except for `keep` (inodes with a writable open
-// outstanding, which the kernel may still be changing: see
-// backing::SyncBacking), in one transaction. Only after the backing
-// filesystems have been synced.
-absl::Status ClearDirty(Context &ctx, std::span<const InodeId> keep);
+// A sync point (backing::SyncBacking) in two halves, around its syncfs(2)
+// calls. The rule it keeps (formal/ finding sync_during_mutation): a dirty
+// row may be removed only by a sync point whose syncfs began after every
+// backing syscall the row stands for had returned. A mutation's syscall
+// comes after its phase 1 and before its End(), so a mutation of `id` that
+// was in flight at any moment between the start of the syncfs and the
+// clear may have issued its syscall too late for the syncfs to cover it;
+// its row must stay (until the next sync point). Under today's single
+// thread no mutation runs during a sync point; under coroutines one can
+// run while the sync point waits on syncfs, or the sync point can run
+// while a mutation waits on its syscall.
+//
+// BeginSync, just before the first syncfs: the fill guards' clock and the
+// dirty set as it is now.
+struct SyncSnapshot {
+  FillSnapshot fills;
+  std::vector<InodeId> dirty;
+};
+absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx);
+
+// ClearDirty, once every syncfs succeeded: removes, in one transaction, each
+// row of `synced.dirty` unless its inode is in `keep` (inodes with a
+// writable open outstanding, which the kernel may still be changing: see
+// backing::SyncBacking) or a mutation of it began or ended since BeginSync
+// or is in flight (!CanFill(ctx, synced.fills, id)). Rows added after
+// BeginSync (by a phase 1, or by MarkDirty in a phase 3) are never in
+// `synced.dirty`, so they stay too.
+absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
+                        std::span<const InodeId> keep);
 
 // Startup recovery after an unclean shutdown, in one transaction: for every
 // inode in the dirty set, marks its attributes unknown, forgets its xattrs

@@ -22,10 +22,10 @@
 (* formal/README.md explains every variable and action, names the dcfs     *)
 (* function each one stands for, and lists the abstractions.               *)
 (*                                                                         *)
-(* The four Bug* constants re-introduce one historical bug each (see       *)
-(* docs/plan/audits/); every real configuration sets them all FALSE. They  *)
-(* exist so that formal/known_bugs/ can show the model is fine-grained     *)
-(* enough to find those bugs.                                              *)
+(* The Bug* constants re-introduce one historical bug each (see            *)
+(* docs/plan/audits/ and formal/README.md); every real configuration sets  *)
+(* them all FALSE. They exist so that formal/known_bugs/ can show the      *)
+(* model is fine-grained enough to find those bugs.                        *)
 (***************************************************************************)
 EXTENDS Naturals, FiniteSets, Sequences, TLC
 
@@ -36,11 +36,11 @@ CONSTANTS
     MaxMutations,   \* bound: mutations started over a whole behavior
     MaxCrashes,     \* bound: crashes over a whole behavior
     KernelDirLock,  \* the kernel serializes D's namespace ops, lookups, readdirs
-    SyncExclusive,  \* a sync point runs with no mutation in flight (README)
     BugPhase1NotDurable,        \* crash F1
     BugCreateKeepsParentAttrs,  \* crash F3
     BugUnguardedFills,          \* tri-state F1
-    BugRestoreComplete          \* tri-state F4
+    BugRestoreComplete,         \* tri-state F4
+    BugSyncIgnoresMutations     \* finding sync_during_mutation (R4)
 
 AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
              "create", "unlink", "rename", "sync"}
@@ -49,9 +49,10 @@ ASSUME /\ Names # {} /\ IsFiniteSet(Names)
        /\ Procs # {} /\ IsFiniteSet(Procs)
        /\ Requests \subseteq AllKinds
        /\ MaxMutations \in Nat /\ MaxCrashes \in Nat
-       /\ \A b \in {KernelDirLock, SyncExclusive, BugPhase1NotDurable,
+       /\ \A b \in {KernelDirLock, BugPhase1NotDurable,
                     BugCreateKeepsParentAttrs, BugUnguardedFills,
-                    BugRestoreComplete} : b \in BOOLEAN
+                    BugRestoreComplete, BugSyncIgnoresMutations} :
+              b \in BOOLEAN
 
 -----------------------------------------------------------------------------
 (* Values *)
@@ -120,7 +121,8 @@ vars == <<bCur, bOpts, dbCur, dbOpts, mode, seq, inflight, durableD,
 \* A request slot's local state. `pc` is where its code is; `locked` whether
 \* it holds the kernel's lock on D; `lk`/`cont` are the name and the
 \* continuation of a LookupOrPopulate in progress, `res` its answer; `snap`/
-\* `esnap` a fill's FillSnapshot and D's epoch at that time; `rd*` what a
+\* `esnap` a fill's FillSnapshot and D's epoch at that time (`snap`: also a
+\* sync point's BeginSync snapshot); `rd*` what a
 \* syscall read; `mseq` the seq of the mutation's phase 1 (Mutation::Owns);
 \* `src` a rename's resolved source; `was` the pre-phase-1 completeness
 \* (BugRestoreComplete only). Fields are reset once used, so that slots
@@ -592,22 +594,31 @@ RFail2(p) ==
 
 (***************************************************************************)
 (* A sync point (backing::SyncBacking): from the periodic                 *)
-(* DirCacheFS::MaybeSyncBacking, or after FSYNC/FSYNCDIR.                  *)
+(* DirCacheFS::MaybeSyncBacking, or after FSYNC/FSYNCDIR. Other requests  *)
+(* run while it waits on syncfs, as they will under coroutines.           *)
 (***************************************************************************)
 
-\* syncfs(2): every backing write so far is durable. With SyncExclusive the
-\* request keeps running until ClearDirty, as on today's single thread.
+\* cache::BeginSync (the guards' clock, in `snap`; D's row in the snapshot
+\* of the dirty set is implied: D only becomes dirty through a phase 1,
+\* which moves the clock), then syncfs(2): every backing write so far is
+\* durable.
 S1From(p, r) ==
     /\ bOpts' = {bCur}
-    /\ ps' = [ps EXCEPT ![p] = [r EXCEPT !.pc = "S2"]]
-    /\ running' = IF SyncExclusive THEN p ELSE None
+    /\ Syscall(p, [r EXCEPT !.pc = "S2", !.snap = seq])
     /\ UNCHANGED bCur /\ UnchangedDB /\ UnchangedGuards
     /\ UNCHANGED <<servedWrong, stamp>>
 
-\* cache::ClearDirty, at normal durability; Context::dirty.durable cleared.
+\* cache::ClearDirty, at normal durability: D's row goes only if no mutation
+\* of D began or ended since BeginSync and none is in flight (CanFill's
+\* test, with the snapshot); otherwise its syscall may have come after the
+\* syncfs started. Context::dirty.durable is cleared either way.
+\* BugSyncIgnoresMutations: the old ClearDirty, which kept only writable
+\* opens (finding sync_during_mutation).
 S2(p) ==
     /\ At(p, "S2")
-    /\ Commit([dbCur EXCEPT !.dirty = FALSE], FALSE)
+    /\ LET clear == BugSyncIgnoresMutations \/ (inflight = 0 /\ seq <= ps[p].snap)
+       IN Commit([dbCur EXCEPT !.dirty = IF clear THEN FALSE ELSE dbCur.dirty],
+                 FALSE)
     /\ durableD' = FALSE
     /\ Done(p)
     /\ UnchangedBacking /\ UNCHANGED <<seq, inflight, servedWrong, stamp>>
@@ -662,7 +673,6 @@ Arrive(p) ==
                /\ LKFrom(p, NewReq("rename", n, m, "LK", n, "R0",
                                    KernelDirLock))
        \/ /\ "sync" \in Requests
-          /\ SyncExclusive => inflight = 0
           /\ S1From(p, NewReq("sync", None, None, "S1", None, None, FALSE))
           /\ UNCHANGED muts
     /\ UNCHANGED <<mode, crashes>>

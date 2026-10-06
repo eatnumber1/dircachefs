@@ -123,10 +123,10 @@ whose names are the constant `Names`, and:
 
 **Concurrency**: requests interleave at every backing syscall, as they will
 under the planned coroutines (`docs/design.md`, "Concurrency, today and
-with coroutines"). The code between two syscalls runs without interruption
-(one thread, synchronous SQLite), but a crash can still happen between any
-two of its transactions. Two switches say how much the environment
-serializes:
+with coroutines"), and so does a sync point at its `syncfs`. The code
+between two syscalls runs without interruption (one thread, synchronous
+SQLite), but a crash can still happen between any two of its transactions.
+One switch says how much the environment serializes:
 
 - `KernelDirLock`: the kernel holds D's lock across every lookup, readdir
   and namespace mutation of D (the parent's `i_rwsem`, plus FUSE's
@@ -134,9 +134,6 @@ serializes:
   `FUSE_CAP_PARALLEL_DIROPS`), but not across a getattr or an fsync. TRUE in
   the main configurations, because that is true today and stays true under
   coroutines; `MC_nolock.cfg` checks the model without it.
-- `SyncExclusive`: a sync point never overlaps a mutation. That holds today
-  only because dcfs is single-threaded; nothing in the code ensures it (see
-  [Findings](#findings)).
 
 **Abstractions**, each chosen because the protocol property does not depend
 on the detail:
@@ -226,8 +223,8 @@ prints. A request's first step runs inside `Arrive`.
 | `RenameSyscall` | renameat2: moves whatever the source name holds now | Phase 2 | `backing::RenameAt` |
 | `RenamePhase3` | If `Owns(D)`: destination -> the resolved source, source name absent; `End` | Phase 3 | `Rename`'s phase-3 transaction |
 | `RenameStat`, `RenameFill`, `RenameFailed`, `RenameFailed2` | As for create (a failure re-resolves both names) | | `RefreshAfterRename`, `ReresolveAfterFailure` |
-| (sync, first step) | syncfs: every backing write so far is durable | Sync points | `backing::SyncBacking` |
-| `SyncClearDirty` | Empty the dirty set (normal durability), forget `dirty.durable` | Sync points | `cache::ClearDirty` |
+| (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
+| `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
 | `Crash` | Daemon crash, kernel crash or power loss: each disk keeps any of its possible states, memory is lost | Crashes, power loss and recovery | |
 | `Restart`, `Recover`, `StartRun` | Start again: `RecoverDirty` (one transaction), then `clean_shutdown = 0` with kSync | Recovery; Startup | `backing::StartRun`, `cache::RecoverDirty` |
 | `BeginShutdown`, `StopSync`, `StopClear`, `StopCkpt`, `StopFlag` | Unmount, sync point, TRUNCATE checkpoint, `clean_shutdown = 1` with kSync, exit | Shutdown; What the clean-shutdown flag adds | `backing::FinishRun` |
@@ -255,15 +252,15 @@ as distinct states.
 
 | Configuration | Test (tier) | Bounds | States | Time |
 |---|---|---|---|---|
-| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 241,381 | ~1 min |
+| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 368,668 | ~1 min |
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 32,839 | ~15-30 s |
-| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 2,637,471 | ~10 min |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; no rename or readdirplus (see Findings) | 1,098,314 | ~5 min |
+| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 3,950,002 | ~8 min |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; no rename or readdirplus (see Findings) | 1,701,417 | ~3 min |
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
-forgotten by `RecoverDirty` anyway. That cuts the small configuration
-from 409,410 states to 241,381. Liveness is checked without it, because
+forgotten by `RecoverDirty` anyway. When it was introduced it cut the small
+configuration from 409,410 states to 241,381. Liveness is checked without it, because
 merging states can hide or invent cycles.
 
 ## Known bugs: the model's own tests
@@ -280,6 +277,7 @@ FALSE in the real configurations.
 | `crash_f3_create_keeps_parent_attrs` | the parent not marked unknown on create (crash F3) | `TriState` | getattr records D's attributes; a create's phase 1 leaves them valid while it is in flight |
 | `tristate_f1_unguarded_fills` | unguarded fills (tri-state F1) | `TriState` | a getattr reads D's attributes, a create's phase 1 runs, the getattr commits what it read anyway (with only `CacheNeverWrong` checked: one step later, once the create's syscall changed D, the stale attributes are served) |
 | `tristate_f4_restore_complete` | the restore-completeness lost update (tri-state F4); needs two mutations of D in flight, so without the kernel lock | `TriState` | an unlink's phase 1 deletes `a`'s row and clears completeness; its syscall; a create of `a` begins (phase 1); the unlink's phase 3 restores completeness, so `a` reads absent while its create is in flight |
+| `sync_during_mutation` | a sync point cleared the dirty rows of mutations in flight (a [finding](#findings) of this model, fixed in plan step R4) | `CrashSafe` | a create of `b`: phase 1 (D dirty, kSync); a sync point: syncfs; the create's syscall, probe and phase 3 (`b` recorded), and its end; the sync point clears D's row. A crash may now keep that database and lose the unsynced create, and recovery has nothing to forget. (Keeping only the inodes in flight at `ClearDirty` would not help: the create had ended.) |
 
 ## Findings
 
@@ -290,11 +288,21 @@ today, since dcfs is single-threaded and the kernel serializes each
 directory. Each would become a real bug under coroutines, and each is kept
 as `findings/<name>.tla`/`.cfg` with a test that expects its counterexample.
 When the code is fixed and the model updated to match, the test fails: then
-fold the configuration into the real model.
+fold the configuration into the real model, delete the finding, and keep
+the old behavior as a `Bug*` constant and a [known bug](#known-bugs-the-models-own-tests).
+
+Fixed (plan step R4):
+
+- `sync_during_mutation`: a sync point cleared the dirty rows of mutations
+  in flight. The real configurations used to set a `SyncExclusive`
+  constant (no sync point overlaps a mutation); the constant is gone, and
+  every configuration lets sync points interleave. Now the known bug
+  `sync_during_mutation`.
+
+Open:
 
 | Finding | Expected | What happens |
 |---|---|---|
-| `sync_during_mutation` (`SyncExclusive = FALSE`) | `CrashSafe` | `SyncBacking` empties the dirty set (keeping only writable opens) without keeping inodes with a mutation in flight. A mutation whose phase 1 precedes the `syncfs` and whose syscall follows it loses its dirty row; a later power loss can keep its phase 3 and lose the syscall. Fix: `ClearDirty` also keeps `FillGuards::inflight`'s inodes, or the sync point waits for them |
 | `readdirplus_unlocked` (no kernel lock) | `ServedFromCacheIsCurrent` | `Readdirplus` checks `IsDirComplete`, then refreshes "."'s attributes (syscalls), then `ListDir` lists present rows without checking again: a name made unknown in between is left out. `Readdir` has the same shape for a non-root directory (`ParentOf`'s syscalls). Under the kernel lock it would still need a name made unknown without D's lock (an `InvalidateInode`, not modelled) |
 | `rename_stale_source` (no kernel lock) | `CacheNeverWrong` | `Rename` resolves the source before phase 1 and phase 3 links the destination to it if it `Owns` the parent; `Owns` only sees overlaps from phase 1 on. A source answered from a probe that was not recorded (a concurrent rename was in flight) is stale once that rename ends; phase 3 records the old object under the new name. In the code `LinkDentry` then fails if the old object's row is gone, but not if it has another link |
 
