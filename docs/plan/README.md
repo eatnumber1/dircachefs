@@ -40,7 +40,8 @@ phase's file; `log.md` says where things stand.
 | 10 | [Benchmarks](phases/10-benchmarks.md) | done 2026-10-06 (baseline recorded; readdir 27x slower than backing: investigation in lane-4) |
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
-| 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | in progress (12.1 model merged 2026-10-06, russ to read formal/README.md; 12.2 after Phase 11) |
+| 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | in progress (12.1 model merged 2026-10-06, russ to read formal/README.md; 12.2 pulled forward, see below) |
+| 12.2 | [Trace validation](phases/12-formal-model-and-trace-validation.md) | pulled forward (russ, 2026-10-06): after R4.2, before 22 and 13; traces from the existing crash/power/rename tests until Phase 11's suites exist |
 | 22 | [Request cancellation (Ctrl+C, EINTR)](phases/22-cancellation.md) | planned; runs here, after R4, before 13 |
 | 13 | [Connected backing fds](phases/13-connected-backing-fds.md) | planned |
 | 14 | [Identity from the backing filesystem](phases/14-identity-from-backing-fs.md) | planned |

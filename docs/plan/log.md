@@ -418,3 +418,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (confirmed), rename's retry loop cannot wait, two test gaps, a ClearDirty O(n*m) fast path. Queued
   as R4.2 in review-fixes.md, dispatched to lane-1. The reviewer detached lane-1's HEAD by mistake
   (reported it); restored.
+- russ: 12.2 trace validation pulled forward to right after R4.2 (traces from existing tests and the forged-request harness; reviewer checks call sites).

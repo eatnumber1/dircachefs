@@ -54,6 +54,17 @@ are made against a checked model.
 
 ## 12.2 Trace validation
 
+**Pulled forward (russ, 2026-10-06):** runs right after R4.2, before
+cancellation (Phase 22) and the identity/wrapper phases, so the C++ is
+checked against the model before those change the protocol. Until Phase
+11's crash and stress suites exist, the traces come from the existing
+guest tests (crash, power, rename, create, write, readdir_boundary) and
+the forged-request unit harness (`dcfs:dir_cache_fs_test`), which can drive
+exact interleavings. A `dcfs-reviewer` pass checks every event call site
+against the model action it claims (an event in the wrong place validates
+a lie). The action-coverage report lists model actions no trace reached.
+
+
 - An event interface in dcfs (`dcfs/protocol_events.h`): one method per
   model action (mutation phase 1/3, backing syscall done, fill
   start/finish, served answer, sync point, recovery steps). Production
