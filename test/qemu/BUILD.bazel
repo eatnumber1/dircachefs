@@ -375,6 +375,12 @@ qemu_test_matrix(
     # 4G (sparse): every name is an inode on the backing filesystem.
     disks = [("vdb", "ext4", "4G")],
     guest_script = "guest/names_random_slow.sh",
+    # Guest RAM: under ASan dcfs's peak is ~720 MiB for 50,000 names in one
+    # directory (plain: ~55 MiB), which leaves the default 1024 MiB guest
+    # ~180 MiB spare and a loaded host tips it into the guest's OOM killer:
+    # dcfs dies SIGKILLed with no report and the mount reads ENOTCONN
+    # (reproduced with 640). 2048 leaves a wide margin.
+    mem = 2048,
     size = "enormous",
     other_size = "enormous",
     timeout = "eternal",

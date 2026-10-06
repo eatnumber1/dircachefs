@@ -86,6 +86,9 @@ MKFS_BTRFS_BIN=""
 
 UNIT=0
 ROOTFS=""
+# --mem <MiB>: guest RAM for an e2e guest, overriding the 1024 default (the
+# slow names test needs more under ASan: its dcfs peaks near 720 MiB there).
+MEM_OVERRIDE=""
 while :; do
 	case "${1:-}" in
 	--unit)
@@ -94,6 +97,10 @@ while :; do
 		;;
 	--rootfs)
 		ROOTFS=$2
+		shift 2
+		;;
+	--mem)
+		MEM_OVERRIDE=$2
 		shift 2
 		;;
 	--qemu)
@@ -290,7 +297,7 @@ if [ "$UNIT" -eq 1 ]; then
 	MEM=256
 	SMP=1
 else
-	MEM=1024
+	MEM="${MEM_OVERRIDE:-1024}"
 	SMP=2
 fi
 

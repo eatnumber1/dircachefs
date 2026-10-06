@@ -26,6 +26,16 @@ cleanup() {
 	if [ "$rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
 		echo "--- dcfs stderr ---"
 		cat "$LOG" 2>/dev/null
+		# Did the daemon die (a sanitizer report or abort is in its stderr
+		# above), or did the guest kill it (the OOM killer's lines are in dmesg)?
+		if [ -n "$DAEMON_PID" ] && ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+			wait "$DAEMON_PID"
+			echo "--- dcfs (pid $DAEMON_PID) is no longer running; exit status $? (137 = SIGKILL, i.e. the guest's OOM killer) ---"
+		fi
+		echo "--- guest memory ---"
+		grep -E '^(MemTotal|MemFree|MemAvailable|Cached|Slab|SReclaimable):' /proc/meminfo
+		echo "--- dmesg: OOM lines ---"
+		dmesg 2>/dev/null | grep -i -E 'oom|out of memory|killed process' | tail -n 10
 	fi
 	if [ "$MOUNTED" -eq 1 ]; then
 		umount "$MNT" 2>/dev/null || umount -l "$MNT" 2>/dev/null || true
@@ -38,6 +48,23 @@ cleanup() {
 trap cleanup EXIT
 
 echo "names_random.sh: $RANDOM_COUNT random names, $PER_DIRECTION per direction"
+
+# mem_report WHEN: dcfs's resident-set peak and the guest's available memory,
+# so a run that dies has the numbers that show whether memory was the cause.
+mem_report() {
+	hwm=""
+	rss=""
+	if [ -n "$DAEMON_PID" ] && [ -r "/proc/$DAEMON_PID/status" ]; then
+		while read -r key val _; do
+			case "$key" in
+			VmHWM:) hwm=$val ;;
+			VmRSS:) rss=$val ;;
+			esac
+		done <"/proc/$DAEMON_PID/status"
+	fi
+	avail=$(sed -n 's/^MemAvailable: *\([0-9]*\).*/\1/p' /proc/meminfo)
+	echo "names_random.sh: memory $1: dcfs VmRSS=${rss:-gone} KiB VmHWM=${hwm:-gone} KiB, guest MemAvailable=$avail KiB"
+}
 
 same_dump() {
 	name=$1
@@ -73,8 +100,11 @@ else
 	exit "$FAILED"
 fi
 
+mem_report mounted
+
 # Direction 1: seen through dcfs.
 same_dump direct-seen-through-dcfs "$MNT/direct" /src/direct
+mem_report after-direction-1
 
 # Direction 2: created through dcfs, seen on the backing filesystem.
 mkdir "$MNT/viadcfs"
@@ -84,12 +114,16 @@ else
 	fail dcfs-create "$out"
 fi
 same_dump dcfs-created-matches-backing "$MNT/viadcfs" /src/viadcfs
+mem_report after-direction-2
 
 exit "$FAILED"
 fi
 
+mem_report mounted
+
 # Direction 1: seen through dcfs.
 same_dump direct-seen-through-dcfs "$MNT/direct" /src/direct
+mem_report after-direction-1
 
 # Direction 2: created through dcfs, seen on the backing filesystem.
 mkdir "$MNT/viadcfs"
@@ -99,6 +133,7 @@ else
 	fail dcfs-create "$out"
 fi
 same_dump dcfs-created-matches-backing "$MNT/viadcfs" /src/viadcfs
+mem_report after-direction-2
 
 # The same names, direct and through dcfs, give the same tree.
 mkdir /src/ref

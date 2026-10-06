@@ -17,7 +17,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 # process itself needs a little more than the guest RAM.
 E2E_RESOURCE_TAGS = ["cpu:2", "resources:memory:1200"]
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -37,6 +37,8 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             /tests in, and chroots into it to run guest_script with GNU
             userspace and nfs-utils available. See guest/init's
             dcfs_rootfs= branch and third_party/debian/README.md.
+        mem: optional guest RAM in MiB (run-qemu.sh's --mem; default 1024).
+            Also raises the Bazel resource estimate to match.
         size: required sh_test size, the test's tier: "small" (run
             constantly), "medium" (presubmit), "large"/"enormous" (CI).
             See README.md's "Test tiers".
@@ -88,6 +90,11 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         "$(location @qemu//:pc-bios/qboot.rom)",
     ]
 
+    mem_args = ["--mem", str(mem)] if mem else []
+    resource_tags = E2E_RESOURCE_TAGS
+    if mem:
+        resource_tags = ["cpu:2", "resources:memory:%d" % (mem + 200)]
+
     sh_test(
         name = name,
         srcs = ["scripts/run-qemu.sh"],
@@ -95,7 +102,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             ":initramfs",
             guest_script,
         ] + rootfs_data,
-        args = qemu_args + rootfs_args + kernel_args + [
+        args = qemu_args + rootfs_args + mem_args + kernel_args + [
             "$(location :initramfs)",
             guest_script_basename,
         ] + disk_args,
@@ -103,7 +110,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             "e2e",
             "no-sandbox",
             "requires-kvm",
-        ] + E2E_RESOURCE_TAGS,
+        ] + resource_tags,
         size = size,
         timeout = timeout,
     )
@@ -132,6 +139,7 @@ def qemu_test_matrix(
         other_size = None,
         timeout = None,
         rootfs = None,
+        mem = None,
         fstypes = ["ext4", "xfs", "btrfs"]):
     """Declares one qemu_test per backing filesystem in `fstypes`.
 
@@ -148,6 +156,7 @@ def qemu_test_matrix(
             btrfs), normally one tier up from `size`.
         timeout: required; same as qemu_test.
         rootfs: same as qemu_test.
+        mem: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
@@ -165,6 +174,7 @@ def qemu_test_matrix(
             size = size if fstype == fstypes[0] else other_size,
             timeout = timeout,
             rootfs = rootfs,
+            mem = mem,
         )
     native.alias(
         name = name,
