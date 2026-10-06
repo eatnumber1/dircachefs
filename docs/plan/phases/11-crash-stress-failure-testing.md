@@ -26,8 +26,8 @@ cache against the backing filesystem (every present/absent dentry and
 cached attribute matches). Fixed seeds in the test; a longer random-seed
 mode for manual runs.
 
-**11.3 I/O error injection.** device-mapper `error`, `flakey` and `dust`
-targets under the backing filesystem make reads or writes fail on demand.
+**11.3 I/O error injection.** device-mapper `error` and `flakey` targets (dm-dust dropped, russ
+2026-10-07; a bad block is one block mapped through dm-error) under the backing filesystem make reads or writes fail on demand.
 A failed backing operation must leave the affected entries unknown (never
 cached as having succeeded), return the error to the caller, and leave the
 cache consistent once the device recovers (checker).

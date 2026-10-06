@@ -318,7 +318,11 @@ Sonnet.
 recorded mount points and reverting stale ones, non-directory boundaries.
 Owner: Opus.
 **15.5 `fsck.dcfs` and `dcfs exports`.** Owner: Sonnet.
-**15.6 systemd guest** (Debian rootfs booting systemd in the QEMU harness)
+**15.6 systemd guest** (russ, 2026-10-07: a RELEASED cloud image fetched by
+its published checksum, not an image we build: Debian 13's nocloud image
+(kernel 6.12, has FUSE passthrough) or Ubuntu 26.04's if a newer kernel is
+wanted; the harness extracts the image's kernel and initramfs for direct
+boot, since the microvm has no bootloader) (Debian rootfs booting systemd in the QEMU harness)
 (its prerequisite, a root-owned Debian image, was done in Phase 4c:
 Bazel-built e2fsprogs builds the image from the root-owned package tar)
 and its tests. Owner: Sonnet.

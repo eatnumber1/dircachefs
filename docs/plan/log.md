@@ -652,3 +652,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the lanes already are separate clones merged by fetch + fast-forward.
 - Prior-art survey saved (notes/formal-prior-art-2026-10-07.md): no published TLA+ for filesystems; adopted as 12.6-12.10 the recovery-idempotence invariant, the effect-point property, the identity model from the NFS/kernel rules, a coherence parameter, a tree-sequence backing crash model with Ferrite litmus tests, directory streams, and a test-generation spike; ACE workloads into Phase 11.
 - russ (2026-10-07): Alpine series pins for kernel and tools (signed fetch, escape hatch, scheduled update job): spike first; systemd guest stays Debian; measure why e2e guests need 1 GB; CI trusts the test cache (weekly forced rerun), 'everything through Bazel' rule; no bigger machine.
+- russ (2026-10-07): all CI inside GitHub Actions (schedules are fine); dm-dust dropped (error +
+  table-switched flakey cover it); systemd guest from a released Debian/Ubuntu cloud image, not
+  built; no weekly forced test rerun (Bazel's invalidation is sound; flake hunting is targeted).
+  Needs russ: names_random_slow (100k names, 11 min x 3 fs, 2 GB guests): recommend removing, or
+  keeping one ext4 run in the slow tier.
