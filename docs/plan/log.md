@@ -650,3 +650,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   ~20%. TLA+: 12.3 widened to a revalidation model; 12.4 inode lifetime and 12.5 identity models
   added, trace validation in each. Agents no longer edit docs/plan/ (conflicts came from that);
   the lanes already are separate clones merged by fetch + fast-forward.
+- Prior-art survey saved (notes/formal-prior-art-2026-10-07.md): no published TLA+ for filesystems; adopted as 12.6-12.10 the recovery-idempotence invariant, the effect-point property, the identity model from the NFS/kernel rules, a coherence parameter, a tree-sequence backing crash model with Ferrite litmus tests, directory streams, and a test-generation spike; ACE workloads into Phase 11.

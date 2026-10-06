@@ -141,3 +141,42 @@ Further models, each with trace validation in the same step:
 - 12.5 Identity (before Phase 14): node ids, generations, handle validity
   across restart and cache wipe, inode recycling, ESTALE rules.
 - Cancellation stays in the main model (Phase 22).
+
+## 12.6-12.10 Ideas borrowed from prior art (notes/formal-prior-art-2026-10-07.md)
+
+In this order, each with a known-bug variant and trace validation:
+- 12.6 Recovery idempotence (FSCQ): an invariant that from every state
+  where recovery has partly run, the recovery precondition still holds;
+  check `Crash` fires during `RecoverDirty`/`StartRun` (coverage). ~1 day.
+- 12.7 Effect-point property (SibylFS): each request is call, effect,
+  reply; every reply equals what the backing would answer at some instant
+  between call and reply (`Obs.tla`); covers mutation results, not only
+  served answers. 3-5 days.
+- 12.5 Identity (`ident.tla`), from the kernel's exporting.rst, RFC 8881
+  §4/5.8.1.5 and RFC 1813: handle classes, recycling, durable vs volatile
+  ids, cache wipe and restart; safety: a handle never resolves to a
+  different object; ESTALE exactly when gone or generation differs;
+  disconnected objects rebuilt from the database. Before Phase 14.
+- 12.3 adds a coherence parameter (NFS close-to-open vs delegation):
+  `Exclusive` keeps CacheNeverWrong; `CloseToOpen` admits out-of-band
+  changes with the weaker "fresh as of the open" invariant, making the
+  documented limitation a checked statement.
+- 12.8 Backing crash model with tree sequences (Ferrite, DFSCQ): an
+  ordered sequence of backing states since the last sync replaces the set
+  of crash states; a constant selects sequential / metadata-prefix /
+  ext4-weak reordering; directory-fsync semantics as a switch; Ferrite's
+  litmus tests (atomic-replace-via-rename, atomic-create-via-rename,
+  implied-directory-fsync) as TLC configs: the bad outcome must be
+  reachable through dcfs only if reachable on the backing directly
+  (`CrashRefines`). Before any multi-directory model. 1-2 weeks.
+- 12.9 Directory streams (SibylFS must/may): opendir, cookie-based
+  chunks, concurrent mutation and refill between chunks; untouched
+  entries returned exactly once; cookies stable across a refill. ~1 week.
+- 12.10 (spike) Test generation from TLC's state graph replayed through
+  the forged-request harness with `--wrap` holds forcing the model's
+  interleavings (MongoDB's technique that worked; CCF's simulation
+  driver). 1-2 weeks, after 12.4.
+Phase 11 gains ACE's crash workloads (Apache-2.0) as inputs to the
+dm-log-writes replay, oracle "dcfs view equals the backing after
+recovery"; SibylFS's scripts (ISC) as a differential trace diff of dcfs
+against the backing only if pjdfstest, fsx and fsstress leave gaps.
