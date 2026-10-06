@@ -3,7 +3,6 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 
-#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -1068,6 +1067,8 @@ void RegisterMutation(Context &ctx, std::span<const InodeId> ids,
 
 FillSnapshot BeginFill(const Context &ctx) { return {.seq = ctx.fills.seq}; }
 
+void EndWrites(Context &ctx, InodeId id) { Touch(ctx.fills, id); }
+
 bool CanFill(const Context &ctx, FillSnapshot snapshot, InodeId id) {
   const FillGuards &fills = ctx.fills;
   if (snapshot.seq < fills.floor) return false;
@@ -1300,15 +1301,24 @@ absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx) {
 absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx) {
   SyncSnapshot snapshot{.fills = BeginFill(ctx)};
   ABSL_ASSIGN_OR_RETURN(snapshot.dirty, ListDirty(ctx));
+  if (ctx.open_for_write != nullptr) {
+    snapshot.open_for_write.assign(ctx.open_for_write->begin(),
+                                   ctx.open_for_write->end());
+  }
   return snapshot;
 }
 
 absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
                         std::span<const InodeId> keep) {
+  absl::flat_hash_set<InodeId> kept(keep.begin(), keep.end());
+  // Open for writing when the syncfs began: the kernel may have written to
+  // it after that (and released it since, which EndWrites also records in
+  // the guards; this does not depend on it).
+  kept.insert(synced.open_for_write.begin(), synced.open_for_write.end());
   bool any = false;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     for (InodeId id : synced.dirty) {
-      if (std::find(keep.begin(), keep.end(), id) != keep.end()) continue;
+      if (kept.contains(id)) continue;
       // A mutation of `id` in flight now, or one that began or ended since
       // the snapshot, may have issued its backing syscall after the syncfs
       // started: the syncfs does not cover it, so its row stays until a

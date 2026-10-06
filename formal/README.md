@@ -162,8 +162,24 @@ on the detail:
 - `clean_shutdown` is modelled but changes nothing: `StartRun` runs
   `RecoverDirty` whatever it says, and `RecoverDirty` with an empty dirty
   set does nothing.
-- Not modelled: writable opens (`open_for_write`, which keeps attributes
-  unknown and inodes dirty across sync points), xattrs, hard links, links
+- Writable opens are not modelled (`open_for_write`, which keeps a file's
+  attributes unknown while the kernel writes to it through passthrough,
+  the last release that records them, and its guard event
+  `cache::EndWrites`; the sync point keeps the dirty row of an inode open
+  for writing at any moment between its snapshot and its clear). D is a
+  directory and cannot be opened for writing, so modelling them needs a
+  file object with its own attributes, `attrValid`, dirty row and durable
+  flag, an open/released state, and writes that change its backing
+  attributes; and since `bOpts` and `dbOpts` are sets of whole disk
+  states, every one of those multiplies the sets a crash may leave. That is
+  a second inode's worth of state in every configuration, for a rule that
+  is the same as for D's mutations (a phase 1 before, a guard event at the
+  end, a sync point keeps what was in flight). The review of R4 (finding 1)
+  found the gap by reading; `dir_cache_fs_test` checks the release during
+  a sync point's `syncfs`, the writable create's window and the fill that
+  read before the release, and `metadata_cache_test` each half of the sync
+  point's protection.
+- Not modelled: xattrs, hard links, links
   across directories, out-of-band changes and `ReconcileAttrs`,
   `InvalidateInode` after `ESTALE`, refused boundaries, `ParentOf` of a
   non-root directory, `RENAME_EXCHANGE`/`RENAME_NOREPLACE`, and the

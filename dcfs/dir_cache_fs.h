@@ -281,6 +281,14 @@ class DirCacheFS {
   // last writable open.
   absl::Status BeginWriting(InodeId id);
 
+  // The other end: the last writable open of `id` is going away (Release,
+  // or an open or create that fails after BeginWriting). Tells the fill
+  // guards the writes are over (cache::EndWrites) and removes `id` from
+  // open_for_write_, with nothing in between, before anything about `id`
+  // is recorded: a fill or sync point snapshot taken while the open was
+  // outstanding then cannot record or clear anything about it.
+  void EndWriting(InodeId id);
+
   // A sync point now (if the dirty set may be non-empty), logging a failure
   // at WARNING: nothing that calls this may fail over it. `why` names the
   // caller in the log line.

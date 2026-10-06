@@ -352,6 +352,11 @@ absl::Status DirCacheFS::BeginWriting(InodeId id) {
   return cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite).status();
 }
 
+void DirCacheFS::EndWriting(InodeId id) {
+  cache::EndWrites(ctx_, id);
+  open_for_write_.erase(id);
+}
+
 void DirCacheFS::ResolveSideEffectXattrs(
     InodeId id, std::span<const std::string_view> names,
     std::optional<int> fd, std::string_view op) {
@@ -1040,7 +1045,7 @@ absl::Status DirCacheFS::Open(
     if (absl::Status status = BeginWriting(id); !status.ok()) {
       // Undo the registration above (the open is failing, so no Release
       // will ever come for it).
-      if (--backing_it->second.writable_refs == 0) open_for_write_.erase(id);
+      if (--backing_it->second.writable_refs == 0) EndWriting(id);
       if (--backing_it->second.refs == 0) {
         if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
         backing_files_.erase(backing_it);
@@ -1180,8 +1185,12 @@ absl::Status DirCacheFS::Release(
     // Phase 3 of the passthrough writes (see BeginWriting): the last
     // writable open of this inode is gone, so the kernel can no longer
     // write to it behind our back and the attributes can be recorded as
-    // current -- from the still-open shared fd, not a reopen.
-    open_for_write_.erase(id);
+    // current -- from the still-open shared fd, not a reopen. First the end
+    // of the writes, for the fill guards (EndWriting): a fill that read the
+    // attributes before the last writes must not record them, and a sync
+    // point whose syncfs began before them must not clear the dirty row.
+    // The refresh below takes its snapshot after it.
+    EndWriting(id);
     RecordWrittenAttrs(id, *backing_file.fd, "Release");
     ResolveSideEffectXattrs(id, kXattrsChangedByWrite, *backing_file.fd,
                             "Release");
@@ -1662,8 +1671,12 @@ absl::Status DirCacheFS::Create(
   //
   // A writable create is phase 1 of the passthrough writes that follow, as
   // in Open(): RecordNewChild records the new row with its attributes
-  // already marked unknown, in the same transaction, and the inode joins
-  // open_for_write_ before the reply.
+  // already marked unknown, in the same transaction, and BeginWriting runs
+  // before the reply. RecordNewChild's MarkDirty is not enough: no fill
+  // guard sees it, so a sync point while this create waits on a syscall
+  // after it (the parent's refresh, MakeBackingFile) may clear the row, and
+  // the writes after the reply would have none. BeginWriting's durable
+  // phase 1 makes the row dirty again, and lasts until the last release.
   bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(
@@ -1678,20 +1691,29 @@ absl::Status DirCacheFS::Create(
           writable));
   ABSL_ASSIGN_OR_RETURN(BackingFile backing_file, MakeBackingFile(child.id, req));
   backing_file.refs = 1;
-  if (writable) {
-    backing_file.writable_refs = 1;
-    open_for_write_.insert(child.id);
-  }
+  if (writable) backing_file.writable_refs = 1;
   int backing_id = backing_file.backing_id;
   backing_files_.emplace(child.id, std::move(backing_file));
+  // The create is failing after this point, so no Release will ever come
+  // for this open.
+  auto undo = [&] {
+    if (writable) EndWriting(child.id);
+    if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
+    backing_files_.erase(child.id);
+  };
+  // Phase 1 for every write the kernel will make through the passthrough
+  // fd, as in Open(), right after the BackingFile is registered.
+  if (writable) {
+    if (absl::Status status = BeginWriting(child.id); !status.ok()) {
+      undo();
+      return status;
+    }
+  }
   // After the BackingFile exists, so a writable create's still-unknown
   // attributes are served from its fd (RefreshAttrsOf), not a reopen.
   absl::StatusOr<fuse_entry_param> entry = EntryFor(child.id);
   if (!entry.ok()) {
-    // The create is failing, so no Release will ever come for this open.
-    open_for_write_.erase(child.id);
-    if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
-    backing_files_.erase(child.id);
+    undo();
     return entry.status();
   }
 

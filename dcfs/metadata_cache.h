@@ -412,6 +412,20 @@ class Mutation {
   std::vector<std::pair<InodeId, uint64_t>> ids_;
 };
 
+// The end of the writes the kernel made through a writable open of `id`
+// (DirCacheFS::Release of the last one), which began with that open's
+// phase 1 (DirCacheFS::BeginWriting, a BeginAttrChange that ends at once:
+// while the open lasts, ctx.open_for_write rather than an in-flight
+// mutation keeps the attributes unknown). A guard event like a mutation's
+// End(): it advances the clock and touches `id`, so that a snapshot taken
+// while the open was outstanding -- a fill's, which may have read the
+// attributes before the last writes, or a sync point's (BeginSync), whose
+// syncfs may have begun before them -- can no longer record or clear
+// anything about `id`. Must come before the release records anything, with
+// no suspension point between it and the removal of `id` from
+// ctx.open_for_write.
+void EndWrites(Context &ctx, InodeId id);
+
 // Guarded fills: each writes (in one transaction) only if
 // CanFill(ctx, snapshot, id), and returns whether it did.
 // UpdateAttr:
@@ -523,21 +537,32 @@ absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx);
 // run while the sync point waits on syncfs, or the sync point can run
 // while a mutation waits on its syscall.
 //
-// BeginSync, just before the first syncfs: the fill guards' clock and the
-// dirty set as it is now.
+// The same holds for the writes the kernel makes through a writable open,
+// which dcfs never sees: they lie between the open's phase 1 and the last
+// writable release (EndWrites), so an inode open for writing at any moment
+// between the start of the syncfs and the clear keeps its row too.
+//
+// BeginSync, just before the first syncfs: the fill guards' clock, the
+// dirty set as it is now, and the inodes open for writing now
+// (ctx.open_for_write).
 struct SyncSnapshot {
   FillSnapshot fills;
-  std::vector<InodeId> dirty;
+  std::vector<InodeId> dirty;  // Sorted.
+  std::vector<InodeId> open_for_write;
 };
 absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx);
 
 // ClearDirty, once every syncfs succeeded: removes, in one transaction, each
-// row of `synced.dirty` unless its inode is in `keep` (inodes with a
-// writable open outstanding, which the kernel may still be changing: see
-// backing::SyncBacking) or a mutation of it began or ended since BeginSync
-// or is in flight (!CanFill(ctx, synced.fills, id)). Rows added after
-// BeginSync (by a phase 1, or by MarkDirty in a phase 3) are never in
-// `synced.dirty`, so they stay too.
+// row of `synced.dirty` unless its inode
+//  - is in `keep` (the inodes open for writing now, which the kernel may
+//    still be changing: see backing::SyncBacking),
+//  - or was open for writing at BeginSync (synced.open_for_write: its last
+//    writes may have come after the syncfs began; with EndWrites this is a
+//    backstop, since a release after BeginSync also fails the next test),
+//  - or a mutation of it began or ended since BeginSync or is in flight, or
+//    its writable open ended since (!CanFill(ctx, synced.fills, id)).
+// Rows added after BeginSync (by a phase 1, or by MarkDirty in a phase 3)
+// are never in `synced.dirty`, so they stay too.
 absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
                         std::span<const InodeId> keep);
 

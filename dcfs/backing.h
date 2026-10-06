@@ -430,15 +430,17 @@ absl::Status StartupPurge(Context &ctx);
 
 // A sync point: syncfs(2) on every backing filesystem (every fd in
 // ctx.mounts), then, once all of them succeeded, empties the dirty set in
-// one transaction -- except for inodes in ctx.open_for_write, which the
-// kernel may still be writing to through a passthrough fd, so a later
-// crash could still leave the backing file ahead of the attributes the
-// last Release records -- and except for inodes a mutation was changing
-// while the sync point ran (in flight, or begun or ended since just before
-// the first syncfs: cache::BeginSync/ClearDirty), whose backing syscall the
-// syncfs may not cover. On a syncfs failure nothing is cleared (the dirty
-// entries only cost a larger re-read after a crash) and the error is
-// returned.
+// one transaction -- except for inodes in ctx.open_for_write when the
+// first syncfs began or now, which the kernel may have written to (or may
+// still be writing to) through a passthrough fd after the syncfs began, so
+// a later crash could still leave the backing file behind the attributes
+// the last Release records -- and except for inodes a mutation was
+// changing while the sync point ran (in flight, or begun or ended since
+// just before the first syncfs), or whose writable open ended meanwhile
+// (cache::BeginSync/ClearDirty, cache::EndWrites), whose backing syscall
+// or writes the syncfs may not cover. On a syncfs failure nothing is
+// cleared (the dirty entries only cost a larger re-read after a crash) and
+// the error is returned.
 absl::Status SyncBacking(Context &ctx);
 
 // Startup, after Migrate() and before InitRoot()/StartupPurge(): if the

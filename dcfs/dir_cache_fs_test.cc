@@ -13,11 +13,12 @@
 // coroutines"). This binary links with -Wl,--wrap=open_by_handle_at (see
 // BUILD.bazel), the syscall behind every backing::OpenNode: a test arms a
 // hook, and the next open_by_handle_at call runs it first, before the real
-// syscall. The hook can process a whole second request, or begin a
-// mutation and leave it in flight, while the request under test is
-// "suspended" there. The rule that transactions never span a syscall is
-// what makes this safe: the hook never runs inside one. No production code
-// knows about any of this.
+// syscall. It wraps syncfs the same way, so that a test can run requests
+// while a sync point (backing::SyncBacking) waits on its syncfs. A hook
+// can process a whole second request, or begin a mutation and leave it in
+// flight, while the request under test is "suspended" there. The rule that
+// transactions never span a syscall is what makes this safe: the hook never
+// runs inside one. No production code knows about any of this.
 
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
@@ -79,9 +80,14 @@
 namespace dcfs {
 namespace {
 
-// The hook the next open_by_handle_at runs (once), and how many calls it
-// has seen while armed or not.
+// The hook the next open_by_handle_at runs (once).
 std::function<void()> &OpenByHandleHook() {
+  static auto *hook = new std::function<void()>();
+  return *hook;
+}
+
+// The hook the next syncfs runs (once).
+std::function<void()> &SyncfsHook() {
   static auto *hook = new std::function<void()>();
   return *hook;
 }
@@ -98,6 +104,12 @@ int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
   if (hook) hook();
   return __real_open_by_handle_at(mount_fd, handle, flags);
 }
+int __real_syncfs(int fd);
+int __wrap_syncfs(int fd) {
+  std::function<void()> hook = std::exchange(dcfs::SyncfsHook(), {});
+  if (hook) hook();
+  return __real_syncfs(fd);
+}
 }  // extern "C"
 
 namespace dcfs {
@@ -107,7 +119,9 @@ namespace fs = std::filesystem;
 
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
+using ::testing::Contains;
 using ::testing::ElementsAre;
+using ::testing::Not;
 using ::testing::UnorderedElementsAre;
 using cache::InodeId;
 using cache::kRootInode;
@@ -127,6 +141,16 @@ void AppendBytes(std::string &out, const T &value) {
 void WriteFile(const std::string &path) {
   int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
   ASSERT_GE(fd, 0) << path << ": " << std::strerror(errno);
+  ::close(fd);
+}
+
+// A write the kernel would make through a passthrough fd, which dcfs never
+// sees.
+void AppendToFile(const std::string &path, std::string_view data) {
+  int fd = ::open(path.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
+  ASSERT_GE(fd, 0) << path << ": " << std::strerror(errno);
+  EXPECT_EQ(::write(fd, data.data(), data.size()),
+            static_cast<ssize_t>(data.size()));
   ::close(fd);
 }
 
@@ -207,6 +231,7 @@ class DirCacheFSTest : public ::testing::Test {
 
   void TearDown() override {
     OpenByHandleHook() = {};
+    SyncfsHook() = {};
     if (se_ != nullptr) fuse_session_destroy(se_);
     current_ = nullptr;
     fs_.reset();
@@ -255,6 +280,98 @@ class DirCacheFSTest : public ::testing::Test {
     body.append(newname);
     body.push_back('\0');
     return Send(FUSE_RENAME, static_cast<uint64_t>(parent), body);
+  }
+
+  // An open of `id` with `flags`, and the file handle it returned (0 on
+  // error).
+  std::pair<Reply, uint64_t> Open(InodeId id, int flags) {
+    struct fuse_open_in in = {};
+    in.flags = static_cast<uint32_t>(flags);
+    std::string body;
+    AppendBytes(body, in);
+    Reply reply = Send(FUSE_OPEN, static_cast<uint64_t>(id), body);
+    struct fuse_open_out out {};
+    if (reply.error != 0 || reply.payload.size() < sizeof(out)) {
+      return {reply, 0};
+    }
+    std::memcpy(&out, reply.payload.data(), sizeof(out));
+    return {reply, out.fh};
+  }
+
+  // A create of `name` in `parent` with `flags`, and the new inode and file
+  // handle it returned (0 on error).
+  struct Created {
+    Reply reply;
+    InodeId id = 0;
+    uint64_t fh = 0;
+  };
+  Created Create(InodeId parent, std::string_view name, int flags) {
+    struct fuse_create_in in = {};
+    in.flags = static_cast<uint32_t>(flags);
+    in.mode = S_IFREG | 0644;
+    std::string body;
+    AppendBytes(body, in);
+    body.append(name);
+    body.push_back('\0');
+    Created created{.reply = Send(FUSE_CREATE, static_cast<uint64_t>(parent),
+                                  body)};
+    struct fuse_entry_out entry {};
+    struct fuse_open_out open {};
+    if (created.reply.error != 0 ||
+        created.reply.payload.size() < sizeof(entry) + sizeof(open)) {
+      return created;
+    }
+    std::memcpy(&entry, created.reply.payload.data(), sizeof(entry));
+    std::memcpy(&open, created.reply.payload.data() + sizeof(entry),
+                sizeof(open));
+    created.id = static_cast<InodeId>(entry.nodeid);
+    created.fh = open.fh;
+    return created;
+  }
+
+  // A mkdir of `name` in `parent`, and the new inode (0 on error).
+  std::pair<Reply, InodeId> Mkdir(InodeId parent, std::string_view name) {
+    struct fuse_mkdir_in in = {};
+    in.mode = 0755;
+    std::string body;
+    AppendBytes(body, in);
+    body.append(name);
+    body.push_back('\0');
+    Reply reply = Send(FUSE_MKDIR, static_cast<uint64_t>(parent), body);
+    struct fuse_entry_out entry {};
+    if (reply.error != 0 || reply.payload.size() < sizeof(entry)) {
+      return {reply, 0};
+    }
+    std::memcpy(&entry, reply.payload.data(), sizeof(entry));
+    return {reply, static_cast<InodeId>(entry.nodeid)};
+  }
+
+  Reply Release(InodeId id, uint64_t fh) {
+    struct fuse_release_in in = {};
+    in.fh = fh;
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_RELEASE, static_cast<uint64_t>(id), body);
+  }
+
+  Reply Unlink(InodeId parent, std::string_view name) {
+    std::string body(name);
+    body.push_back('\0');
+    return Send(FUSE_UNLINK, static_cast<uint64_t>(parent), body);
+  }
+
+  // An fsync of directory `id`: the fsync itself, then a sync point.
+  Reply Fsyncdir(InodeId id) {
+    struct fuse_fsync_in in = {};
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_FSYNCDIR, static_cast<uint64_t>(id), body);
+  }
+
+  std::vector<InodeId> Dirty() {
+    absl::StatusOr<std::vector<InodeId>> dirty = cache::ListDirty(ctx_);
+    EXPECT_THAT(dirty, IsOk());
+    return dirty.ok() ? *std::move(dirty) : std::vector<InodeId>{};
   }
 
   // The names a READDIRPLUS (plus = true) or READDIR of `dir` from offset 0
@@ -511,6 +628,126 @@ TEST_F(DirCacheFSTest, RenameIsRefusedWhileItsParentKeepsChanging) {
   EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, 0);
   EXPECT_EQ(Cached(kRootInode, "b"),
             std::make_pair(LookupResult::kFound, InoOf(Path("b"))));
+}
+
+// --- Writable opens vs. sync points (review of R4, finding 1) -----------
+//
+// The kernel writes a file open for writing through passthrough, which
+// dcfs never sees, from the writable open (DirCacheFS::BeginWriting, a
+// durable phase 1) until the last writable RELEASE. A sync point may clear
+// the file's dirty row only if its syncfs began after the last of those
+// writes, i.e. after that RELEASE: before, the writes may not be durable,
+// and a power loss could keep the attributes the RELEASE recorded and lose
+// the writes, with nothing left for recovery to forget.
+
+// The last RELEASE arrives (after one more write) while the sync point
+// waits on its syncfs. The old code built the set of inodes to keep from
+// the writable opens outstanding at the clear, when the file had none any
+// more, and nothing told the fill guards the writes had ended.
+TEST_F(DirCacheFSTest, ReleaseDuringASyncPointKeepsTheDirtyRow) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_THAT(Dirty(), Contains(f));
+
+  std::optional<Reply> release;
+  SyncfsHook() = [&] {
+    AppendToFile(Path("f"), "late");
+    release = Release(f, fh);
+  };
+  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_TRUE(release.has_value()) << "the hook did not run";
+  EXPECT_EQ(release->error, 0);
+  EXPECT_THAT(Dirty(), Contains(f));
+
+  // The next sync point began after the last write: now it may go.
+  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(Dirty(), Not(Contains(f)));
+}
+
+// The same event as seen by a fill: attributes read while the file was
+// open for writing (the kernel may write at any moment) must not be
+// recorded as current once the last RELEASE is past, since the RELEASE
+// recorded fresher ones.
+TEST_F(DirCacheFSTest, ReleaseEndsTheWritesForAFillThatBeganBefore) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+
+  // A fill begins and reads f's attributes; then a write, and the RELEASE.
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
+  struct statx stale {};
+  ASSERT_EQ(::statx(AT_FDCWD, Path("f").c_str(), AT_SYMLINK_NOFOLLOW,
+                    STATX_BASIC_STATS | STATX_BTIME, &stale),
+            0);
+  AppendToFile(Path("f"), "late");
+  ASSERT_EQ(Release(f, fh).error, 0);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr fresh, cache::GetAttr(ctx_, f));
+  ASSERT_TRUE(fresh.valid);
+  ASSERT_EQ(fresh.st.st_size, 4);
+
+  EXPECT_THAT(cache::FillAttr(ctx_, snapshot, f, stale), IsOkAndHolds(false));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr after, cache::GetAttr(ctx_, f));
+  EXPECT_EQ(after.st.st_size, 4);
+}
+
+// A writable CREATE: its new row is dirty only through phase 3's MarkDirty,
+// which no fill guard sees, and the old code added the inode to the
+// writable opens only after more suspension points (here MakeBackingFile's
+// open_by_handle_at), at which a whole sync point could clear that row.
+// The writes after the reply then had no dirty row.
+TEST_F(DirCacheFSTest, WritableCreateIsDirtyWhenReplied) {
+  Start();
+  std::optional<Reply> fsync;
+  OpenByHandleHook() = [&] { fsync = Fsyncdir(kRootInode); };
+  Created created = Create(kRootInode, "new", O_RDWR | O_CREAT | O_EXCL);
+  ASSERT_TRUE(fsync.has_value()) << "the hook did not run";
+  EXPECT_EQ(fsync->error, 0);
+  ASSERT_EQ(created.reply.error, 0);
+  EXPECT_THAT(Dirty(), Contains(created.id));
+
+  // Written, released, synced: the row goes.
+  AppendToFile(Path("new"), "data");
+  ASSERT_EQ(Release(created.id, created.fh).error, 0);
+  EXPECT_THAT(Dirty(), Contains(created.id));
+  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(Dirty(), Not(Contains(created.id)));
+}
+
+// The failure paths: a writable OPEN or CREATE whose phase 1
+// (BeginWriting) fails -- here the database refuses writes from the
+// moment MakeBackingFile opens the file -- replies the error and undoes
+// its registration: no BackingFile, not open for writing.
+TEST_F(DirCacheFSTest, WritableOpenWhosePhase1FailsIsUndone) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  OpenByHandleHook() = [&] {
+    ASSERT_THAT(db_.Exec("PRAGMA query_only = 1"), IsOk());
+  };
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_THAT(db_.Exec("PRAGMA query_only = 0"), IsOk());
+  EXPECT_NE(open.error, 0);
+  EXPECT_FALSE(fs_->HasOpenFiles(f));
+  EXPECT_FALSE(ctx_.open_for_write->contains(f));
+}
+
+TEST_F(DirCacheFSTest, WritableCreateWhosePhase1FailsIsUndone) {
+  Start();
+  OpenByHandleHook() = [&] {
+    ASSERT_THAT(db_.Exec("PRAGMA query_only = 1"), IsOk());
+  };
+  Created created = Create(kRootInode, "new", O_RDWR | O_CREAT | O_EXCL);
+  ASSERT_THAT(db_.Exec("PRAGMA query_only = 0"), IsOk());
+  EXPECT_NE(created.reply.error, 0);
+  // The file was created (phase 2 succeeded before the open failed).
+  ASSERT_OK_AND_ASSIGN(InodeId id, Id("new"));
+  EXPECT_FALSE(fs_->HasOpenFiles(id));
+  EXPECT_FALSE(ctx_.open_for_write->contains(id));
 }
 
 }  // namespace

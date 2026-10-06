@@ -726,6 +726,21 @@ may run while a mutation waits on its syscall (the model's finding
 `sync_during_mutation`). If the fill guards were pruned since the snapshot
 (their floor passed it), every row stays.
 
+Writes through a writable open count the same way. dcfs never sees them
+one by one: they lie between the open's phase 1 (`BeginWriting`) and the
+last writable `Release`. So a row stays if its inode was open for writing
+at any moment between the snapshot and the clear: open at the snapshot
+(the snapshot lists `Context::open_for_write`), open at the clear (the
+writable opens outstanding then), or opened or released in between (both
+are guard events: `BeginWriting` is a phase 1, and the last release calls
+`cache::EndWrites`, which advances the clock and touches the inode before
+the release records anything). Without that, a release while the sync
+point waits on `syncfs` could let the clear drop the row of a file whose
+last writes the `syncfs` did not cover, and a power loss could then keep
+the attributes the release recorded and lose the writes. The snapshot of
+the writable opens is a backstop: the guard event alone covers a release
+after the snapshot.
+
 Sync points run:
 
 - after the kernel's `FSYNC` or `FSYNCDIR` (after the fsync itself),
@@ -895,13 +910,25 @@ released (phase 3), however often they are read meanwhile:
 - replies carry an attribute timeout of 0, so the kernel asks again each
   time rather than caching values that writes through a shared mapping
   would not invalidate;
-- the inode stays in the dirty set across sync points until that last
-  release.
+- the inode stays in the dirty set across sync points until the first
+  sync point that begins after that last release.
 
 `Flush` and `Fsync` refresh the attributes from the descriptor; the last
 writable `Release` records them as current and reads `security.capability`
 back. A crash while the file is open leaves its attributes unknown, never
 the pre-write size and mtime marked current.
+
+The last writable `Release` first tells the fill guards the writes are over
+(`DirCacheFS::EndWriting`: `cache::EndWrites` touches the inode, and it
+leaves `open_for_write` in the same synchronous step), and only then
+refreshes the attributes. A fill that read them while the file was open
+can then not record them over the release's fresher ones, and a sync point
+whose `syncfs` began before the last writes keeps the dirty row (see
+[Sync points](#sync-points)). A writable `Create` runs `BeginWriting` as
+`Open` does, right after registering its `BackingFile` and before the
+reply: the new row is dirty from phase 3's `MarkDirty`, which no guard
+sees, so a sync point while the create waits on a later syscall could clear
+it, and the writes after the reply would have no dirty row.
 
 ### The mmap caveat
 

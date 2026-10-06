@@ -1431,6 +1431,50 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsWhatChangedDuringTheSync) {
   EXPECT_FALSE(ctx_.dirty.any);
 }
 
+// A writable open's writes lie between its phase 1 and the last release
+// (EndWrites), which dcfs never sees one by one. Each half of the sync
+// point's protection, alone:
+//  - an inode open for writing when BeginSync ran keeps its row even if the
+//    open is gone by ClearDirty and nothing told the guards (the backstop);
+//  - EndWrites is a guard event: a release after BeginSync keeps the row
+//    even if the snapshot did not list the open, and a fill snapshot from
+//    before the release cannot record anything.
+TEST_F(MetadataCacheTest, ClearDirtyKeepsWhatWasOpenForWritingDuringTheSync) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult g, Make(31));
+  ASSERT_THAT(SyncClear(), IsOk());
+  absl::flat_hash_set<int64_t> open_for_write;
+  ctx_.open_for_write = &open_for_write;
+
+  // The backstop: f is open for writing at BeginSync, and released (with
+  // no EndWrites) before ClearDirty.
+  open_for_write.insert(f.id);
+  ASSERT_THAT(BeginAttrChange(ctx_, f.id), IsOk());  // BeginWriting.
+  ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
+  EXPECT_THAT(synced.open_for_write, ElementsAre(f.id));
+  open_for_write.erase(f.id);
+  ASSERT_THAT(ClearDirty(ctx_, synced, {}), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id)));
+  ASSERT_THAT(SyncClear(), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+
+  // The guard event: g's release (EndWrites) comes after a BeginSync that
+  // did not see g open.
+  ASSERT_THAT(BeginAttrChange(ctx_, g.id), IsOk());
+  const FillSnapshot fill = BeginFill(ctx_);
+  ASSERT_OK_AND_ASSIGN(synced, BeginSync(ctx_));
+  EXPECT_THAT(synced.open_for_write, ::testing::IsEmpty());
+  EndWrites(ctx_, g.id);
+  EXPECT_FALSE(CanFill(ctx_, fill, g.id));
+  EXPECT_TRUE(CanFill(ctx_, fill, f.id));
+  EXPECT_TRUE(CanFill(ctx_, BeginFill(ctx_), g.id));
+  ASSERT_THAT(ClearDirty(ctx_, synced, {}), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(g.id)));
+  ASSERT_THAT(SyncClear(), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+  ctx_.open_for_write = nullptr;
+}
+
 // If the fill guards forgot which inodes were mutated since BeginSync
 // (FillGuards::touched was pruned, raising the floor past the snapshot),
 // a sync point cannot tell which rows its syncfs covers, and keeps them
