@@ -1090,7 +1090,11 @@ limits:
   (`RetireRemoved`), so its space is not held; one unlinked behind dcfs's
   back stays allocated until its `FORGET`.
 - `DESTROY` reconciles every file left in the set: one `statx` through a
-  held descriptor each, no disk.
+  held descriptor each, no disk. Measured (`destroy_test`, review M2):
+  with 100,000 written files cached, SIGTERM to exit took 4.8 s, the
+  final sync point and checkpoint included, and dcfs held 100,010
+  descriptors; the test bounds it at 60 s. It only delays the daemon's
+  exit, never `umount(2)`.
 
 **What is still not covered.**
 

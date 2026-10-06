@@ -360,6 +360,20 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 23.7 (review M2): DESTROY's reconciliation of 100000 written files
+# (one statx through a held descriptor each) is bounded, and the shutdown
+# is recorded clean -- see guest/destroy.sh. Large tier: writing the files
+# takes minutes.
+qemu_test(
+    name = "destroy_test",
+    disks = [("vdb", "ext4", "2G")],
+    guest_script = "guest/destroy.sh",
+    size = "large",
+    # Writing 100000 files through dcfs took 530 s of the 542 s run (plain
+    # build, 2026-10-07); headroom for a sanitizer build and a loaded host.
+    timeout = "eternal",
+)
+
 # Step 9: file names are bytes. names_test runs the whole name corpus
 # (guest/names.sh, tools/testutil.c's names-* subcommands) on each backing
 # filesystem; names_random_test creates 1,000 seeded random names, half in
