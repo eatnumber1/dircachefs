@@ -1451,6 +1451,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `setattr_test` | chmod (file, directory, FIFO; `EOPNOTSUPP` on a symlink), chown, truncate and utimes land on the backing filesystem and are then served from the cache with zero sectors, also after a restart. |
 | `create_test` | mkdir, create, mknod, symlink and link, including error cases; the whole tree's listing agrees with the backing filesystem; zero sectors for a full metadata pass over everything created; `EEXIST` for a boundary stub's name and `ENOTSUP` inside it. |
 | `rename_test` | unlink (including of an open file, whose row and handle live until the last close), rmdir, and every rename variant (across directories, over an existing file, `RENAME_NOREPLACE`, `RENAME_EXCHANGE`, a directory with its cached subtree); negative entries and completeness are recorded, not re-read. |
+| `atime_test` | After a read, `stat` through dcfs reports the access time the backing filesystem gave it (relatime: a two-day-old atime becomes now, one after mtime and within the day stays) without a backing read, and a second read within the day changes neither. |
 | `copy_test` | `copy_file_range` through dcfs shares extents on btrfs and xfs as natively and leaves the copy's attributes cached; `FICLONE` fails `EOPNOTSUPP` (the VFS's answer); `lsattr`/`chattr` (`FS_IOC_GETFLAGS`/`SETFLAGS`, `FSGETXATTR`) and `FS_IOC_GETVERSION` match the backing file, `chattr +i` is enforced (also for a file already open for writing), other ioctls get `ENOTTY`; `O_TMPFILE` linked by `AT_EMPTY_PATH` and through `/proc/self/fd`, `O_EXCL` and never linked, each as on the backing filesystem; a warm metadata pass reads nothing. |
 | `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; a store through a shared mapping after the last close is reconciled at the inode's last `FORGET` (no out-of-band warning); served from the cache after a restart. |
 | `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
@@ -1476,8 +1477,17 @@ lists the user-visible ones.
 - **A removed object cannot be linked back.** `LINK` of a removed object
   the kernel still references fails with `ESTALE` (see
   [Row lifetime](#row-lifetime)).
-- **atime is not maintained** after passthrough reads, and `st_blocks`
-  may lag behind delayed allocation until the next attribute refresh.
+- **atime is predicted, not read.** Reads go through passthrough, so dcfs
+  records at a read open the access time the backing mount's rule gives
+  (`cache::TouchAtime`, step 23.3: relatime, the default: if the cached
+  atime is not after mtime or ctime, or is a day old; strictatime: always;
+  noatime: never; read from the mount's `statvfs` flags at startup), with
+  no backing I/O. The backing filesystem stamps the read's time, so the two
+  can differ by the time between the open and the read, and an open that
+  never reads still moves the cached atime. Directories' atimes (which
+  dcfs's own listing of a directory moves on the backing filesystem) are
+  not predicted. `st_blocks` may lag behind delayed allocation until the
+  next attribute refresh.
 - **A residual "ahead" window depends on the backing filesystem.** The
   dirty-set argument assumes `syncfs` really makes earlier changes durable
   on the backing device.

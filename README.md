@@ -607,9 +607,15 @@ recovery protocol, concurrency, and the test strategy.
   filesystem allows (`stat` reports `nlink` 0, `chmod`, `truncate` and
   xattrs work, an unlinked file can be reopened through
   `/proc/<pid>/fd/<n>`), but a hard link to it fails with `ESTALE`.
-- **atime is not maintained.** Reads through passthrough update the
-  backing file's access time, but dcfs keeps serving the one it last
-  recorded. `st_blocks` can also lag behind delayed allocation until the
+- **Access times are predicted.** Reads go through passthrough, so dcfs
+  never sees them: when a file is opened for reading it records the access
+  time the backing filesystem's mount option gives a read (relatime, the
+  default: if the old one is not after the modification or change time,
+  or is a day old; strictatime: always; noatime: never), without touching
+  the disk. The backing filesystem stamps the read itself, so the two can
+  differ by the moment between the open and the read, and an open that
+  reads nothing still moves dcfs's. Directories' access times are not
+  maintained. `st_blocks` can lag behind delayed allocation until the
   file's attributes are next refreshed.
 - **Reflinks fail with `EOPNOTSUPP`; most ioctls with `ENOTTY`.** The
   kernel answers `FICLONE`, `FICLONERANGE` and `FIDEDUPERANGE` itself and

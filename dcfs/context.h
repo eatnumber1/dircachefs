@@ -61,6 +61,18 @@ struct FillGuards {
   size_t max_touched = size_t{1} << 16;
 };
 
+// When the backing filesystem updates a file's access time on a read (its
+// mount's atime option: statvfs's ST_NOATIME and ST_RELATIME), which dcfs
+// mirrors in the cache when a file is opened for reading (step 23.3;
+// cache::TouchAtime): reads go through passthrough, so dcfs never sees
+// them.
+enum class AtimePolicy {
+  kRelative,  // relatime (the default): if older than mtime or ctime, or
+              // more than a day old
+  kStrict,    // strictatime: on every read
+  kNever,     // noatime
+};
+
 // Everything a dcfs operation may touch, passed explicitly as the first
 // argument of every cache/backing-layer call instead of living in globals.
 // Keeping it explicit means there is exactly one place per thread (later:
@@ -89,6 +101,9 @@ struct Context {
   // stay in step with ctx.db's dirty table.
   DirtyState dirty;
   FillGuards fills;
+  // The source filesystem's atime policy, from its mount options
+  // (backing::InitRoot).
+  AtimePolicy atime = AtimePolicy::kRelative;
   // The protocol events (dcfs/protocol_events.h): records nothing in
   // production; trace validation's recorder in the testonly builds. Never
   // null; not owned.

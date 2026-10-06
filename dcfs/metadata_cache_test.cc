@@ -838,6 +838,51 @@ TEST_F(MetadataCacheTest, RecoveryForgetsStubs) {
               IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
 }
 
+// Step 23.3: the access time a read open records (cache::TouchAtime).
+TEST_F(MetadataCacheTest, TouchAtimeFollowsTheMountsRule) {
+  // Stx's times: atime ...001.111, mtime ...002.222, ctime ...003.333.
+  struct statx stx = Stx(50, S_IFREG | 0644);
+  ASSERT_OK_AND_ASSIGN(UpsertResult r, UpsertInode(ctx_, Handle(kSource, "h50"),
+                                                   stx, 0));
+  auto atime = [&]() -> int64_t {
+    absl::StatusOr<CachedAttr> attr = GetAttr(ctx_, r.id);
+    EXPECT_THAT(attr, IsOk());
+    return attr.ok() ? attr->st.st_atim.tv_sec : -1;
+  };
+  const struct timespec soon = {.tv_sec = 1'700'000'010, .tv_nsec = 5};
+  // Not after mtime: updated.
+  EXPECT_THAT(TouchAtime(ctx_, r.id, soon), IsOkAndHolds(true));
+  EXPECT_EQ(atime(), soon.tv_sec);
+  // After mtime and ctime, within the day: kept.
+  const struct timespec later = {.tv_sec = soon.tv_sec + 3600};
+  EXPECT_THAT(TouchAtime(ctx_, r.id, later), IsOkAndHolds(false));
+  EXPECT_EQ(atime(), soon.tv_sec);
+  // A day old: updated.
+  const struct timespec next_day = {.tv_sec = soon.tv_sec + 86400};
+  EXPECT_THAT(TouchAtime(ctx_, r.id, next_day), IsOkAndHolds(true));
+  EXPECT_EQ(atime(), next_day.tv_sec);
+  // strictatime: always; noatime: never.
+  ctx_.atime = AtimePolicy::kStrict;
+  const struct timespec a_second = {.tv_sec = next_day.tv_sec + 1};
+  EXPECT_THAT(TouchAtime(ctx_, r.id, a_second), IsOkAndHolds(true));
+  EXPECT_EQ(atime(), a_second.tv_sec);
+  ctx_.atime = AtimePolicy::kNever;
+  EXPECT_THAT(TouchAtime(ctx_, r.id, {.tv_sec = a_second.tv_sec + 99999}),
+              IsOkAndHolds(false));
+  EXPECT_EQ(atime(), a_second.tv_sec);
+  ctx_.atime = AtimePolicy::kRelative;
+  // Unknown attributes are left alone (they are re-read, atime included).
+  ASSERT_THAT(MarkAttrsUnknown(ctx_, r.id), IsOk());
+  EXPECT_THAT(TouchAtime(ctx_, r.id, {.tv_sec = a_second.tv_sec + 99999}),
+              IsOkAndHolds(false));
+  // No row.
+  EXPECT_THAT(TouchAtime(ctx_, 9999, soon),
+              StatusIs(absl::StatusCode::kNotFound));
+  ctx_.atime = AtimePolicy::kNever;
+  EXPECT_THAT(TouchAtime(ctx_, 9999, soon),
+              StatusIs(absl::StatusCode::kNotFound));
+}
+
 TEST_F(MetadataCacheTest, FuseGenerations) {
   EXPECT_THAT(GetGeneration(ctx_, kRootInode), IsOkAndHolds(0u));
   // Random, so 100 draws of 32 bits collide with probability ~1e-6.

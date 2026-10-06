@@ -326,6 +326,18 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 23.3: a read open records the access time the backing mount's
+# relatime rule gives, from the cache, matching the backing file -- see
+# guest/atime.sh.
+qemu_test_matrix(
+    name = "atime_test",
+    disks = [("vdb", "ext4", "320M")],
+    guest_script = "guest/atime.sh",
+    size = "small",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
 # Step 9: file names are bytes. names_test runs the whole name corpus
 # (guest/names.sh, tools/testutil.c's names-* subcommands) on each backing
 # filesystem; names_random_test creates 1,000 seeded random names, half in

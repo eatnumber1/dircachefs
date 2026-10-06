@@ -12,6 +12,7 @@
 #include <string_view>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <time.h>
 #include <utility>
 #include <vector>
 
@@ -1303,6 +1304,21 @@ absl::Status DirCacheFS::Open(
         backing_files_.erase(backing_it);
       }
       return status;
+    }
+  }
+
+  // Step 23.3: the reads this open makes go through passthrough, and the
+  // backing filesystem updates the file's access time for them by its
+  // mount's rule; record now what it will (a cache write only, no backing
+  // I/O). A writable open's attributes are unknown until its last release
+  // (and re-read then, atime included), and O_NOATIME asks for none.
+  if (!writable && !(fi.flags & O_NOATIME) && !removed_.contains(id)) {
+    struct timespec now {};
+    clock_gettime(CLOCK_REALTIME, &now);
+    if (absl::StatusOr<bool> touched = cache::TouchAtime(ctx_, id, now);
+        !touched.ok()) {
+      LOG(WARNING) << "Open: could not record the access time of inode "
+                   << id << ": " << touched.status();
     }
   }
 

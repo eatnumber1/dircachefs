@@ -79,6 +79,19 @@ own atime on read); no backing I/O. Tests: cached atime after an open
 follows the relatime rule; a second open within a day does not change it;
 zero backing reads.
 
+**Done (2026-10-07, step-23 branch).** `cache::TouchAtime` at a read OPEN
+(not O_NOATIME, not writable: a writable open's attributes are unknown and
+re-read at its last release), one transaction, no backing I/O; the rule is
+the kernel's `relatime_need_update` (atime not after mtime *or ctime*, or a
+day old), strictatime always, noatime never, from the source mount's
+`statvfs` flags at `InitRoot` (`Context::atime`). Tests: `atime_test`
+(3 fs: matches the backing atime within 2 s, zero backing reads for the
+stat, unchanged on a second read), `RelatimeTest.*` (incl. a remount to
+strictatime and noatime), `TouchAtimeFollowsTheMountsRule`. Known
+differences: dcfs stamps the open, the backing filesystem the read; an
+open that reads nothing still moves dcfs's atime; directories' atimes are
+not predicted.
+
 ## 23.4 O_TMPFILE, copy_file_range, FICLONE/FICLONERANGE, ioctls
 
 - `copy_file_range`: FUSE_COPY_FILE_RANGE, passthrough to

@@ -493,6 +493,11 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
   }));
   // Model: a whole getattr fill of the root (nothing is in flight yet).
   ctx.events->RootRecorded(ctx);
+  // The access-time rule reads mirror (step 23.3): the source mount's.
+  ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(*source_fd));
+  ctx.atime = (vfs.f_flag & ST_NOATIME)    ? AtimePolicy::kNever
+              : (vfs.f_flag & ST_RELATIME) ? AtimePolicy::kRelative
+                                           : AtimePolicy::kStrict;
   absl::Status inserted = ctx.mounts.Insert(device, std::move(source_fd));
   if (!inserted.ok() && !absl::IsAlreadyExists(inserted)) return inserted;
   return absl::OkStatus();

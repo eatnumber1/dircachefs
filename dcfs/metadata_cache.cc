@@ -995,6 +995,56 @@ absl::Status UpdateAttr(Context &ctx, InodeId id, const struct statx &stx) {
   });
 }
 
+absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
+                                const struct timespec &now) {
+  if (ctx.atime == AtimePolicy::kNever) {
+    ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
+    return false;
+  }
+  bool touched = false;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(
+        Statement * stmt,
+        Query(ctx,
+              "SELECT attrs_valid, atime_s, atime_ns, mtime_s, mtime_ns, "
+              "ctime_s, ctime_ns FROM inodes WHERE id = ?",
+              id));
+    bool valid = false;
+    struct timespec atime {}, mtime {}, ctime {};
+    ABSL_ASSIGN_OR_RETURN(bool found, ReadOne(*stmt, [&](Statement &row) {
+                            valid = row.Column<bool>(0);
+                            atime = {row.Column<int64_t>(1),
+                                     row.Column<int64_t>(2)};
+                            mtime = {row.Column<int64_t>(3),
+                                     row.Column<int64_t>(4)};
+                            ctime = {row.Column<int64_t>(5),
+                                     row.Column<int64_t>(6)};
+                            return absl::OkStatus();
+                          }));
+    if (!found) return NoInode(id);
+    if (!valid) return absl::OkStatus();
+    // fs/inode.c relatime_need_update: an atime not after mtime or ctime,
+    // or 24 hours old or more, is updated.
+    auto not_after = [](const struct timespec &a, const struct timespec &b) {
+      return a.tv_sec < b.tv_sec ||
+             (a.tv_sec == b.tv_sec && a.tv_nsec <= b.tv_nsec);
+    };
+    const bool update =
+        ctx.atime == AtimePolicy::kStrict || not_after(atime, mtime) ||
+        not_after(atime, ctime) || now.tv_sec - atime.tv_sec >= 24 * 60 * 60;
+    if (!update) return absl::OkStatus();
+    ABSL_RETURN_IF_ERROR(Execute(ctx,
+                                 "UPDATE inodes SET atime_s = ?, atime_ns = ? "
+                                 "WHERE id = ?",
+                                 static_cast<int64_t>(now.tv_sec),
+                                 static_cast<int64_t>(now.tv_nsec), id)
+                             .status());
+    touched = true;
+    return absl::OkStatus();
+  }));
+  return touched;
+}
+
 absl::Status SetSymlink(Context &ctx, InodeId id, std::string_view target) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));

@@ -342,6 +342,19 @@ absl::Status MarkAttrsUnknown(Context &ctx, InodeId id);
 // NotFound if no row.
 absl::Status UpdateAttr(Context &ctx, InodeId id, const struct statx &stx);
 
+// Step 23.3: `id` is being opened for reading at `now`. Reads go through
+// passthrough, so the backing filesystem updates the file's access time
+// without dcfs seeing it; this records in the cache, in one transaction
+// with no syscall, the access time the backing filesystem gives the file
+// for a read now, by ctx.atime (the kernel's rule for relatime: if the
+// cached atime is not after mtime or ctime, or is a day old or more).
+// Only current attributes are touched (unknown ones are re-read anyway,
+// atime included); a fill's guard is not needed, since nothing is read
+// from the backing filesystem and the decision and the write are one
+// transaction. Returns whether it changed the atime. NotFound if no row.
+absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
+                                const struct timespec &now);
+
 // Caches `id`'s symlink target. NotFound if no row.
 absl::Status SetSymlink(Context &ctx, InodeId id, std::string_view target);
 

@@ -21,6 +21,9 @@
  *       utimensat(AT_FDCWD, <path>, {{sec,nsec},{sec,nsec}},
  *       AT_SYMLINK_NOFOLLOW): sets both atime and mtime to the same
  *       timestamp, without following a symlink.
+ *   testutil utimes2 <path> <atime-sec> <mtime-sec>
+ *       utimensat(2) with different access and modification times
+ *       (whole seconds), following a symlink.
  *   testutil lchmod <path> <octal-mode>
  *       fchmodat(AT_FDCWD, <path>, mode, AT_SYMLINK_NOFOLLOW): chmod
  *       without following a symlink. On Linux this always fails with
@@ -249,6 +252,21 @@ static int cmd_utimens(
 	times[1] = times[0];
 
 	if (utimensat(AT_FDCWD, path, times, AT_SYMLINK_NOFOLLOW) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	return 0;
+}
+
+static int cmd_utimes2(const char *path, const char *atime_str,
+		       const char *mtime_str)
+{
+	struct timespec times[2] = {
+		{.tv_sec = (time_t) strtoll(atime_str, NULL, 10)},
+		{.tv_sec = (time_t) strtoll(mtime_str, NULL, 10)},
+	};
+
+	if (utimensat(AT_FDCWD, path, times, 0) == -1) {
 		print_err(errno);
 		return 1;
 	}
@@ -2176,6 +2194,8 @@ int main(int argc, char *argv[])
 		return cmd_truncate(argv[2], argv[3]);
 	if (argc == 5 && strcmp(argv[1], "utimens") == 0)
 		return cmd_utimens(argv[2], argv[3], argv[4]);
+	if (argc == 5 && strcmp(argv[1], "utimes2") == 0)
+		return cmd_utimes2(argv[2], argv[3], argv[4]);
 	if (argc == 4 && strcmp(argv[1], "lchmod") == 0)
 		return cmd_lchmod(argv[2], argv[3]);
 	if (argc == 5 && strcmp(argv[1], "lchown") == 0)

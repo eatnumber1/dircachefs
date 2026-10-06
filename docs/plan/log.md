@@ -638,3 +638,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (chattr/lsattr/GETVERSION; else ENOTTY), O_TMPFILE (a row, linked by LINK = the model's new
   "linkcreate", validated). FICLONE/FICLONERANGE/FIDEDUPERANGE are impossible without a kernel FUSE
   remap op: the VFS answers EOPNOTSUPP before FUSE. Writable OPENs now re-check writability (chattr +i).
+- 23.3 (lane-1, step-23): relatime: a read open records the atime the backing mount's rule gives
+  (relatime incl. ctime, strictatime, noatime from statvfs at InitRoot), cache only. atime_test (3 fs),
+  RelatimeTest.*, TouchAtime cache test.

@@ -1548,6 +1548,166 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
   EXPECT_EQ(Ioctl(12345, FS_IOC_GETFLAGS, "", sizeof(int)).error, -ESTALE);
 }
 
+// --- relatime (step 23.3) ---------------------------------------------------
+//
+// Reads go through passthrough: dcfs never sees them, the backing
+// filesystem updates the access time by its mount's rule. A read open
+// records in the cache what that rule gives, with no backing I/O.
+
+// Sets path's atime and mtime (seconds before now).
+void SetTimes(const std::string &path, int64_t atime_ago, int64_t mtime_ago) {
+  struct timespec now {};
+  clock_gettime(CLOCK_REALTIME, &now);
+  const struct timespec times[2] = {
+      {.tv_sec = now.tv_sec - atime_ago, .tv_nsec = 0},
+      {.tv_sec = now.tv_sec - mtime_ago, .tv_nsec = 0},
+  };
+  ASSERT_EQ(::utimensat(AT_FDCWD, path.c_str(), times, 0), 0)
+      << path << ": " << std::strerror(errno);
+}
+
+class RelatimeTest : public DirCacheFSTest {
+ protected:
+  // The cached atime of `id` (seconds), which must be current.
+  int64_t CachedAtime(InodeId id) {
+    absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
+    EXPECT_THAT(attr, IsOk());
+    if (!attr.ok()) return -1;
+    EXPECT_TRUE(attr->valid);
+    return attr->st.st_atim.tv_sec;
+  }
+
+  // Opens `id` with `flags` and releases it.
+  void OpenAndRelease(InodeId id, int flags) {
+    auto [open, fh] = Open(id, flags);
+    ASSERT_EQ(open.error, 0);
+    ASSERT_EQ(Release(id, fh).error, 0);
+  }
+
+  // Remounts the disk the source is on with `flag` (MS_RELATIME,
+  // MS_STRICTATIME, MS_NOATIME), and back to relatime at TearDown.
+  void RemountSource(unsigned long flag) {
+    const char *tmpdir = std::getenv("TEST_TMPDIR");
+    ASSERT_EQ(::mount(nullptr, tmpdir, nullptr, MS_REMOUNT | flag, nullptr),
+              0)
+        << std::strerror(errno);
+    remounted_ = true;
+  }
+
+  void TearDown() override {
+    if (remounted_) {
+      ::mount(nullptr, std::getenv("TEST_TMPDIR"), nullptr,
+              MS_REMOUNT | MS_RELATIME, nullptr);
+    }
+    DirCacheFSTest::TearDown();
+  }
+
+  bool remounted_ = false;
+};
+
+TEST_F(RelatimeTest, ReadOpenFollowsTheRelatimeRule) {
+  // Setting the times makes the ctime now, and an atime not after the
+  // ctime is updated too: "recent" needs one after it (in the future), and
+  // within the day.
+  WriteFile(Path("old"));     // atime 2 days ago, mtime 3 days ago
+  WriteFile(Path("recent"));  // atime in an hour, mtime 2 hours ago
+  WriteFile(Path("stale"));   // atime 2 hours ago, mtime 1 hour ago
+  SetTimes(Path("old"), 2 * 86400, 3 * 86400);
+  SetTimes(Path("recent"), -3600, 7200);
+  SetTimes(Path("stale"), 7200, 3600);
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId old, Id("old"));
+  ASSERT_OK_AND_ASSIGN(InodeId recent, Id("recent"));
+  ASSERT_OK_AND_ASSIGN(InodeId stale, Id("stale"));
+  const int64_t recent_before = CachedAtime(recent);
+  struct timespec now {};
+  clock_gettime(CLOCK_REALTIME, &now);
+
+  OpenAndRelease(old, O_RDONLY);
+  OpenAndRelease(recent, O_RDONLY);
+  OpenAndRelease(stale, O_RDONLY);
+  EXPECT_GE(CachedAtime(old), now.tv_sec);        // A day old.
+  EXPECT_EQ(CachedAtime(recent), recent_before);  // After m/ctime, recent.
+  EXPECT_GE(CachedAtime(stale), now.tv_sec);      // Not after mtime.
+
+  // Once updated, a second open within the day changes nothing.
+  const int64_t first = CachedAtime(old);
+  OpenAndRelease(old, O_RDONLY);
+  EXPECT_EQ(CachedAtime(old), first);
+}
+
+// O_NOATIME, and a writable open (its attributes are unknown until its
+// last release, which re-reads them, atime included), record nothing.
+TEST_F(RelatimeTest, NoatimeAndWritableOpensLeaveTheAtime) {
+  WriteFile(Path("f"));
+  SetTimes(Path("f"), 2 * 86400, 3 * 86400);
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const int64_t before = CachedAtime(f);
+  OpenAndRelease(f, O_RDONLY | O_NOATIME);
+  EXPECT_EQ(CachedAtime(f), before);
+  OpenAndRelease(f, O_WRONLY);
+  EXPECT_EQ(CachedAtime(f), before);  // The backing's, re-read at release.
+}
+
+TEST_F(RelatimeTest, StrictatimeUpdatesOnEveryReadOpen) {
+  WriteFile(Path("f"));
+  SetTimes(Path("f"), 60, 3600);
+  RemountSource(MS_STRICTATIME);
+  Start();
+  ASSERT_EQ(ctx_.atime, AtimePolicy::kStrict);
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const int64_t before = CachedAtime(f);
+  OpenAndRelease(f, O_RDONLY);
+  EXPECT_GT(CachedAtime(f), before);
+}
+
+TEST_F(RelatimeTest, NoatimeBackingNeverUpdates) {
+  WriteFile(Path("f"));
+  SetTimes(Path("f"), 2 * 86400, 3 * 86400);
+  RemountSource(MS_NOATIME);
+  Start();
+  ASSERT_EQ(ctx_.atime, AtimePolicy::kNever);
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const int64_t before = CachedAtime(f);
+  OpenAndRelease(f, O_RDONLY);
+  EXPECT_EQ(CachedAtime(f), before);
+}
+
+// copy_file_range into, and ioctls of, a removed object (no row: no
+// bookkeeping, through its descriptor).
+TEST_F(DirCacheFSTest, RemovedFileCopyAndIoctl) {
+  WriteFile(Path("src"));
+  AppendToFile(Path("src"), "abc");
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  const int held = ::open(Path("f").c_str(), O_PATH | O_CLOEXEC);
+  ASSERT_GE(held, 0);
+  ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
+
+  Reply get = Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int));
+  EXPECT_EQ(get.error, 0);
+  auto [in, in_fh] = Open(src, O_RDONLY);
+  auto [out, out_fh] = Open(f, O_RDWR);
+  ASSERT_EQ(in.error, 0);
+  ASSERT_EQ(out.error, 0);
+  EXPECT_EQ(CopyFileRange(src, in_fh, f, out_fh, 100), 3);
+  struct stat st {};
+  ASSERT_EQ(::fstat(held, &st), 0);
+  EXPECT_EQ(st.st_size, 3);
+  // Set the flags it has (ext4 refuses to clear its extents flag).
+  const std::string set = get.payload.substr(sizeof(struct fuse_ioctl_out));
+  ASSERT_EQ(set.size(), sizeof(int));
+  EXPECT_EQ(Ioctl(f, FS_IOC_SETFLAGS, set, 0).error, 0);
+  EXPECT_EQ(Release(f, out_fh).error, 0);
+  EXPECT_EQ(Release(src, in_fh).error, 0);
+  ::close(held);
+}
+
 // --- FORGET reconciliation (step 23.1) ------------------------------------
 //
 // A store through a shared writable mapping after the last close reaches

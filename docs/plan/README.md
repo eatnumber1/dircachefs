@@ -41,7 +41,7 @@ phase's file; `log.md` says where things stand.
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
 | 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | done 2026-10-07 (model + trace validation, two review rounds; russ to read formal/README.md) |
-| 23 | [Semantics gaps: mmap/FORGET reconcile, removed objects, relatime, O_TMPFILE/copy_file_range/reflinks/ioctls, boundary stubs](phases/23-semantics-gaps.md) | in progress (lane-1, after S3 passed 2026-10-07) |
+| 23 | [Semantics gaps: mmap/FORGET reconcile, removed objects, relatime, O_TMPFILE/copy_file_range/reflinks/ioctls, boundary stubs](phases/23-semantics-gaps.md) | implemented on step-23 (lane-1), awaiting review; reflinks impossible without a kernel FUSE remap op |
 | 22 | [Request cancellation (Ctrl+C, EINTR)](phases/22-cancellation.md) | planned; runs here, after R4, before 13 |
 | 13 | [Connected backing fds](phases/13-connected-backing-fds.md) | planned |
 | 14 | [Identity from the backing filesystem](phases/14-identity-from-backing-fs.md) | planned |
