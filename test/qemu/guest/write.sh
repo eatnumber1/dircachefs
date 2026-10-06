@@ -32,9 +32,10 @@
 # busybox has any applet for at all.
 #
 # Also step 4.8's runtime submount refusal (amendment 12), using vdc as a
-# second filesystem mounted below the source after dcfs starts: a write
-# targeting a name behind a refused boundary fails with EXDEV
-# (write-boundary-refused below) -- see README's Limitations and
+# second filesystem mounted below the source after dcfs starts: the
+# boundary is a stub directory (step 23.5), and a write targeting a name
+# inside it fails with ENOTSUP (write-boundary-refused below) -- see
+# README's Limitations and
 # dcfs/backing.cc's ProbeChild/PopulateDirectory. (The startup-refusal half
 # of amendment 12 is exercised once, in readonly.sh.)
 #
@@ -162,8 +163,8 @@ else
 fi
 
 # --- write-boundary-refused: a filesystem mounted below the source at -----
-# --- runtime is refused (amendment 12), so writing into it fails with -----
-# --- EXDEV, exactly as it would across a real device boundary -------------
+# --- runtime is refused (amendment 12): it is a stub directory (step ------
+# --- 23.5), so writing into it fails with ENOTSUP -------------------------
 
 mkdir /src/d/mp
 mount /dev/vdc /src/d/mp
@@ -174,16 +175,16 @@ out=$(echo subcontent 2>&1 >"$MNT/d/mp/subfile")
 rc=$?
 if [ "$rc" -ne 0 ]; then
 	case "$out" in
-	*cross-device*) pass write-boundary-refused ;;
-	*) fail write-boundary-refused "want cross-device in error, got: $out" ;;
+	*"not supported"*) pass write-boundary-refused ;;
+	*) fail write-boundary-refused "want ENOTSUP in error, got: $out" ;;
 	esac
 else
 	fail write-boundary-refused "echo redirect unexpectedly succeeded"
 fi
 listing=$(ls -1 "$MNT/d" 2>&1)
 case "$listing" in
-*mp*) fail boundary-not-listed "mp appeared in /mnt/d: $listing" ;;
-*) pass boundary-not-listed ;;
+*mp*) pass boundary-listed-as-stub ;;
+*) fail boundary-listed-as-stub "mp missing from /mnt/d: $listing" ;;
 esac
 errors=$(grep -c "refusing to cache mp" "$LOG1")
 if [ "$errors" -eq 1 ]; then
