@@ -846,5 +846,32 @@ TEST_F(DirCacheFSTest, UnlinkIsRefusedWhileItsParentKeepsChanging) {
   EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::kNegative);
 }
 
+// --- formal/ finding sync_during_mutation --------------------------------
+//
+// The model's counterexample, through the real request path: the root is
+// dirty; an FSYNCDIR's sync point takes its snapshot and waits on syncfs;
+// meanwhile a whole MKDIR in the root runs (phase 1, mkdirat, phase 3, its
+// end). The syncfs may have begun before the mkdirat, so the clear must
+// keep the root's row (in the snapshot, but mutated since) and the new
+// directory's (added after the snapshot); only what was dirty and
+// untouched (the first directory) may go.
+TEST_F(DirCacheFSTest, MkdirDuringASyncPointKeepsItsDirtyRows) {
+  Start();
+  auto [first, first_id] = Mkdir(kRootInode, "first");
+  ASSERT_EQ(first.error, 0);
+  ASSERT_THAT(Dirty(), UnorderedElementsAre(kRootInode, first_id));
+
+  std::optional<std::pair<Reply, InodeId>> mkdir;
+  SyncfsHook() = [&] { mkdir = Mkdir(kRootInode, "new"); };
+  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  ASSERT_TRUE(mkdir.has_value()) << "the hook did not run";
+  ASSERT_EQ(mkdir->first.error, 0);
+  EXPECT_THAT(Dirty(), UnorderedElementsAre(kRootInode, mkdir->second));
+
+  // The next sync point began after the mkdirat: now both may go.
+  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(Dirty(), ::testing::IsEmpty());
+}
+
 }  // namespace
 }  // namespace dcfs
