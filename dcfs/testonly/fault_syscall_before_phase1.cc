@@ -41,6 +41,7 @@ absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
 absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved) {
+  ctx.events->MutationSyscallStarting(ctx);
   const absl::Status unlinked =
       RealUnlinkAt(ctx, Credentials{.uid = 0, .gid = 0}, parent, name, 0);
   ctx.events->MutationSyscall(ctx, unlinked);

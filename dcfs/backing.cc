@@ -1482,6 +1482,7 @@ absl::Status SyncBacking(Context &ctx) {
     ABSL_ASSIGN_OR_RETURN(cache::SyncSnapshot synced, cache::BeginSync(ctx));
     // Model: the sync request's first step (S1From), or StopSync.
     ctx.events->SyncSnapshotTaken(ctx);
+    ctx.events->SyncfsStarting(ctx);
     for (int fd : ctx.mounts.Fds()) {
       ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
     }

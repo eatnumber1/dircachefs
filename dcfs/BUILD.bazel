@@ -167,6 +167,7 @@ qemu_cc_test(
 
 cc_library(
     name = "syscalls",
+    visibility = ["//dcfs/testonly:__pkg__"],
     hdrs = [
       "syscalls.h",
       "fd.h",
@@ -525,7 +526,11 @@ tla_trace_test(
 #   syscall_before_phase1: an unlink's unlinkat runs before its phase 1.
 #   phase3_before_syscall: an unlink's phase 3 and End run before its
 #       unlinkat.
+#   snapshot_after_syncfs: a sync point takes its snapshot after its
+#       syncfs calls.
 BEGIN_REMOVE = "_ZN4dcfs5cache11BeginRemoveERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEElNS0_12FillSnapshotE"
+
+BEGIN_SYNC = "_ZN4dcfs5cache9BeginSyncERNS_7ContextE"
 
 UNLINK_AT = "_ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElSt17basic_string_viewIcSt11char_traitsIcEEi"
 
@@ -540,9 +545,9 @@ DIR_CACHE_FS_FAULTS = {
     "syscall_before_phase1": dict(
         wraps = [BEGIN_REMOVE, UNLINK_AT],
         test = "TraceScenarioUnlink",
-        # The unlinkat, while nothing is in flight (and "a" is still
-        # present).
-        event = "\"ev\":\"syscall\".*\"inflight\":0\\}",
+        # The unlinkat's start, while nothing is in flight (and "a" is
+        # still present).
+        event = "\"c\":\"MutationSyscallStarting\",\"ev\":\"unexplained\".*\"inflight\":0\\}",
     ),
     "phase3_before_syscall": dict(
         wraps = [BEGIN_REMOVE],
@@ -550,6 +555,12 @@ DIR_CACHE_FS_FAULTS = {
         # The End, which comes with "a" already absent in the cache and no
         # syscall yet: a change no step explains.
         event = "\"c\":\"MutationEnded\",\"ev\":\"unexplained\".*\\[\"a\",\"absent\"\\]",
+    ),
+    "snapshot_after_syncfs": dict(
+        wraps = [BEGIN_SYNC],
+        test = "TraceScenarioMkdirDuringSync",
+        # The syncfs calls' start, with no snapshot right before it.
+        event = "\"c\":\"SyncfsStarting\",\"ev\":\"unexplained\"",
     ),
 }
 

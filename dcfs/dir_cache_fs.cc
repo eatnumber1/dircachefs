@@ -422,6 +422,7 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor parent_fd,
       backing::OpenNode(ctx_, parent, O_RDONLY | O_DIRECTORY));
+  ctx_.events->MutationSyscallStarting(ctx_);
   absl::Status created = do_create(*parent_fd);
   // Model: CreateSyscall.
   ctx_.events->MutationSyscall(ctx_, created);
@@ -713,6 +714,7 @@ absl::Status DirCacheFS::RemoveChild(
   // Phase 2: the backing unlinkat. On failure (ENOTEMPTY, EBUSY, ...) the
   // error is returned as is, after a best-effort re-resolve (see
   // ReresolveAfterFailure).
+  ctx_.events->MutationSyscallStarting(ctx_);
   absl::Status unlinked = backing::UnlinkAt(ctx_, caller, parent, name,
                                             is_dir ? AT_REMOVEDIR : 0);
   // Model: UnlinkSyscall.
@@ -841,6 +843,7 @@ absl::Status DirCacheFS::Rename(
   // Phase 2: the backing renameat2. On failure (EXDEV, ENOTEMPTY, EEXIST
   // for RENAME_NOREPLACE, ...) the error is returned unchanged, after a
   // best-effort re-resolve (see ReresolveAfterFailure).
+  ctx_.events->MutationSyscallStarting(ctx_);
   absl::Status renamed = backing::RenameAt(ctx_, caller, parent, name,
                                            newparent, newname, flags);
   // Model: RenameSyscall.
@@ -987,6 +990,7 @@ absl::Status DirCacheFS::Link(
   // (newparent, newname) is re-resolved from the backing filesystem (see
   // CreateChild's identical handling) before the error (errno payload
   // intact) is returned.
+  ctx_.events->MutationSyscallStarting(ctx_);
   absl::Status linked = backing::LinkAt(ctx_, src, newparent, newname);
   ctx_.events->MutationSyscall(ctx_, linked);
   if (absl::Status status = linked; !status.ok()) {

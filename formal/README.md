@@ -450,12 +450,14 @@ right after the code the model's step stands for, with no backing syscall
 | `MutationBegun` | `cache::BeginMutation`, after the commit and `RegisterMutation` | `phase1` (`begun`, `synced`) | the create's `Arrive` (`C1From`), `UnlinkPhase1`, `RenamePhase1` | Phase 1 |
 | `MutationAborted` | `cache::BeginMutation`, when `BeginRemove`/`BeginRename`'s verification fails | `phase1` (`aborted`) | the retry or `EAGAIN` case of `UnlinkPhase1`, `RenamePhase1` | Rules that hold now (resolves) |
 | `NameResolved` | `RemoveChild`, `Rename`, after the (source) resolve | `resolved` | `UnlinkPhase1`'s ENOENT case; `RenameResolveDst` | Phase 1 |
+| `MutationSyscallStarting` | `CreateChild`, `RemoveChild`, `Rename`, `Link`, before the syscall | (`unexplained` if phase 1 has not begun) | none: the recorder requires the request's phase 1 to have begun | Phase 2 |
 | `MutationSyscall` | `CreateChild`, `RemoveChild`, `Rename`, `Link`, after the syscall | `syscall` | `CreateSyscall`, `UnlinkSyscall`, `RenameSyscall` | Phase 2 |
 | `NewChildProbed` | `RecordNewChild`, after its openat and statx | `probe` | `CreateProbe` | Phase 3 |
 | `MutationEnding`, `MutationEnded` | `cache::Mutation::End`: before and after it changes the guards | `end` (`owned`: what `Owns` said) | `CreatePhase3`, `UnlinkPhase3`, `RenamePhase3`; `CreateFailed`, `UnlinkFailed`, `RenameFailed` | Phase 3; Concurrency (`Owns`) |
 | `Reresolve` | `ReresolveAfterFailure`, per name | `reresolve` | `RenameFailed2` for a rename's second name | Phase 2 |
 | `WritesEnded` | `cache::EndWrites` | | not modelled (a file's; the model has no writable opens) | Writable opens |
 | `SyncSnapshotTaken` | `SyncBacking`, after `cache::BeginSync` | `sync_begin`, `stop_sync` | a sync's `Arrive` (`S1From`); `StopSync` | Sync points |
+| `SyncfsStarting` | `SyncBacking`, before the syncfs calls | (`unexplained` unless the snapshot came right before) | none: the recorder requires `SyncSnapshotTaken` to be the callback right before it | Sync points |
 | `SyncfsDone` | `SyncBacking`, after the syncfs calls | `syncfs` | nothing (the model's syncfs takes effect at S1) | Sync points |
 | `SyncCleared` | `SyncBacking`, after `cache::ClearDirty` | `sync_clear`, `stop_clear` | `SyncClearDirty`; `StopClear` | Sync points |
 | `RunStarting` | `backing::StartRun`, first | `crash` (if the clean-shutdown flag is 0), `restart` | `Crash`, `Restart` | Crashes, power loss and recovery |
@@ -523,6 +525,12 @@ Where the code's step is spread over syscalls and the model's is one:
   changed a name the reads saw, no behavior matches (the model's earlier
   read returns the old value) and validation fails: the reordering can
   only reject, never accept a run the model does not allow.
+- When a syscall starts is checked by the recorder, not the model: a
+  mutation's phase-2 syscall must start after its phase 1 began
+  (`MutationSyscallStarting`), a sync point's syncfs calls right after its
+  snapshot (`SyncfsStarting`). Otherwise a syscall issued before the step
+  that must precede it, but returning after, would match the model's
+  order.
 - A resolve's snapshot (`ResolveName`'s `BeginFill`) and its probe are one
   step in the model (`ResolveProbe`) and two places in the code with one
   statx between them, at which no request runs today or in the harness.
@@ -626,8 +634,9 @@ renames with flags and syscall failures.
   | Fault | Scenario | Rejected at |
   |---|---|---|
   | `skip_mark_unknown`: phase 1 does not mark names unknown | `CreateMarksItsNameUnknown` | the create's `phase1`, whose state has no row for `new` (the model's has it unknown) |
-  | `syscall_before_phase1`: an unlink's unlinkat before its phase 1 | `TraceScenarioUnlink` | the `syscall`, with nothing in flight and `a` still present |
+  | `syscall_before_phase1`: an unlink's unlinkat before its phase 1 | `TraceScenarioUnlink` | `unexplained` at `MutationSyscallStarting`, with nothing in flight and `a` still present (without that event: the `syscall` line, which the model rejects at `U1`) |
   | `phase3_before_syscall`: an unlink's phase 3 and End before its unlinkat | `TraceScenarioUnlink` | `unexplained` at the End: `a` absent with no syscall yet |
+  | `snapshot_after_syncfs`: a sync point's snapshot taken after its syncfs calls | `TraceScenarioMkdirDuringSync` | `unexplained` at `SyncfsStarting`: no snapshot right before |
 
   For example:
 
@@ -637,8 +646,9 @@ renames with flags and syscall failures.
   ```
 
   Before the review of 2026-10-06 (`docs/plan/audits/`), the two unlink
-  faults validated: the syscall before phase 1 wrote no line, and the End
-  before the syscall was a cut.
+  faults validated (the syscall before phase 1 wrote no line, and the End
+  before the syscall was a cut), and so did the sync fault (no event said
+  when a syscall started).
 
 ### Action coverage
 

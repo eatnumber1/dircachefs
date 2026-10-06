@@ -1094,6 +1094,16 @@ TEST_F(DirCacheFSTest, TraceScenarioUnlink) {
   Unlink(kRootInode, "a");
 }
 
+// A mkdir in the root during a sync point's syncfs (as
+// MkdirDuringASyncPointKeepsItsDirtyRows, without its expectations).
+TEST_F(DirCacheFSTest, TraceScenarioMkdirDuringSync) {
+  Start();
+  StartTrace();
+  Mkdir(kRootInode, "first");
+  SyncfsHook() = [&] { Mkdir(kRootInode, "new"); };
+  Fsyncdir(kRootInode);
+}
+
 // A mkdir in a directory whose listing is complete. Phase 1 marks the new
 // name unknown, and the trace shows it. Trace validation's fault-injection
 // test (//dcfs:trace_fault_skip_mark_unknown_test) runs this test alone in a build

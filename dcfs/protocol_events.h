@@ -256,6 +256,10 @@ class ProtocolEvents {
   // RenamePhase1.
   virtual void MutationAborted(Context &ctx, events::IdsFn ids) {}
 
+  // The phase-2 syscall of the request's mutation is about to be issued
+  // (no model step: a recorder checks that phase 1 has begun).
+  virtual void MutationSyscallStarting(Context &ctx) {}
+
   // The phase-2 syscall of the request's mutation returned. Model:
   // CreateSyscall, UnlinkSyscall, RenameSyscall.
   virtual void MutationSyscall(Context &ctx, const absl::Status &status) {}
@@ -297,6 +301,9 @@ class ProtocolEvents {
   // cache::BeginSync took its snapshot; the syncfs calls follow. Model: a
   // sync request's Arrive (S1From), or StopSync.
   virtual void SyncSnapshotTaken(Context &ctx) {}
+  // The syncfs calls are about to be issued (no model step: a recorder
+  // checks that the snapshot came right before, with nothing between).
+  virtual void SyncfsStarting(Context &ctx) {}
   // Every syncfs returned. Model: nothing (the model's syncfs takes effect
   // at S1, which only allows more crash outcomes).
   virtual void SyncfsDone(Context &ctx) {}

@@ -81,3 +81,17 @@ cc_library(
         "@absl//absl/status:statusor",
     ],
 )
+
+cc_library(
+    name = "snapshot_after_syncfs",
+    srcs = ["snapshot_after_syncfs.cc"],
+    alwayslink = True,
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:context",
+        "//dcfs:metadata_cache",
+        "//dcfs:syscalls",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+    ],
+)

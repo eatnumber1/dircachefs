@@ -102,6 +102,7 @@ class TraceRecorder final : public ProtocolEvents {
 
   void MutationBegun(Context &ctx, events::IdsFn ids, bool synced) override;
   void MutationAborted(Context &ctx, events::IdsFn ids) override;
+  void MutationSyscallStarting(Context &ctx) override;
   void MutationSyscall(Context &ctx, const absl::Status &status) override;
   void NewChildProbed(Context &ctx, events::Ino parent, std::string_view name,
                       const events::Probe &probe) override;
@@ -115,6 +116,7 @@ class TraceRecorder final : public ProtocolEvents {
   void WritesEnded(Context &ctx, events::Ino id) override;
 
   void SyncSnapshotTaken(Context &ctx) override;
+  void SyncfsStarting(Context &ctx) override;
   void SyncfsDone(Context &ctx) override;
   void SyncCleared(Context &ctx) override;
 
@@ -165,6 +167,8 @@ class TraceRecorder final : public ProtocolEvents {
     // kRefresh: of valid attributes, outside any request that expects it:
     // nothing the model can see, so no lines.
     bool silent = false;
+    // kSync: the callback count at its snapshot (SyncSnapshotTaken).
+    int64_t snapshot_at = -1;
     // The requests of directories' traces this frame owns.
     std::map<Ino, Req> reqs;
   };
@@ -191,6 +195,10 @@ class TraceRecorder final : public ProtocolEvents {
   };
 
   static Mapping Map(const Frame &request, Ino dir);
+  // The traced directories a FUSE request mutates as a modelled request.
+  std::vector<Ino> MutatedDirs(const Frame &request);
+  // Starts handling a callback: names it for the lines, and counts it.
+  void Enter(const char *cause);
 
   // The innermost FUSE request frame, or null.
   Frame *InnermostRequest();
@@ -240,6 +248,7 @@ class TraceRecorder final : public ProtocolEvents {
   bool shutdown_ = false;
   int64_t line_ = 0;
   const char *cause_ = "";  // the callback being handled, for the lines
+  int64_t callbacks_ = 0;   // callbacks handled so far
   std::set<Ino> covered_;   // directories given a line by this callback
   int64_t changes_ = -1;    // sqlite3_total_changes at the last check
 };
