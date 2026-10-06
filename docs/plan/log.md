@@ -595,3 +595,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Wave 3 complete. Next: Phase 23 (semantics gaps) in lane-1; pending build-speed measurements in
   lane-4 (two building lanes).
 - Build-speed measurements complete (notes/build-speed-2026-10-07.md): cold total ~32 min of actions, kernel 690 s + QEMU 518 s = 62%; sanitizer configs rebuild the six foreign_cc tools (~890 s avoidable); exec-config actions (kernel, busybox, bc, Debian image, TLC) are config-independent already. Distro kernels: Alpine linux-virt and Debian 13 boot no faster than ours under KVM, both lack DM_DUST, Debian needs ACPI and modules, Alpine pins vanish from mirrors within weeks. Recommendation: make the tool builds config-independent now; remote cache for CI; do not replace our kernel.
+- Phase 23 implemented on step-23 (dcfs-protocol; +4235/-356; presubmit 140/140, formal 22/22,
+  large/enormous 14/14, ASan small 24/24, 38 traces valid), under dcfs-reviewer before merge.
+  Findings: FICLONE/FICLONERANGE/FIDEDUPERANGE cannot be implemented in a FUSE server (the VFS
+  handles them; FUSE has no remap_file_range op): kernel work; cp --reflink=auto still shares
+  extents via copy_file_range, which now works. The "mapping writes longer than the kernel keeps
+  the inode" case cannot happen (the backing file holds the FUSE path, so the last FORGET follows
+  munmap). Bug found and fixed: after chattr +i a writable open could still write through a
+  pre-flag shared backing fd. Deviations: stubs are rows (schema v4 `stubs` table), link/rename
+  INTO a stub gives ENOTSUP (kernel looks the target up first), O_TMPFILE is a row without a
+  dentry, removed-object changes need no tri-state (record caches nothing mutable; reviewer to
+  confirm). Needs russ: FORGET reconciliation's statx may spin up a sleeping disk when the backing
+  fs has dropped the inode; alternative is holding one fd per written file until its FORGET.
