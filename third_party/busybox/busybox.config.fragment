@@ -158,6 +158,11 @@ CONFIG_HEAD=y
 # with no options works and "head: invalid option -- 'c'"/"-- 'n'".
 CONFIG_FEATURE_FANCY_HEAD=y
 CONFIG_TAIL=y
+# tail -1 (pjdfstest's misc.sh pipes every expect() through it; without this
+# only bare "tail" works: "tail: invalid option -- '1'", the pjdfstest suite
+# then fails ~97% of its checks identically on the raw filesystem and
+# through dcfs, and passes) and tail -n/-c/-f are under FEATURE_FANCY_TAIL.
+CONFIG_FEATURE_FANCY_TAIL=y
 CONFIG_CUT=y
 CONFIG_DATE=y
 CONFIG_KILL=y

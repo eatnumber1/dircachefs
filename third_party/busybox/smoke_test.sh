@@ -111,6 +111,8 @@ check find-exec "x y" "$(find t/a t/b -type f -exec basename {} \; | sort | tr '
 printf 'abcdefgh' >h
 check head-c "abcd" "$(head -c 4 h)"
 check head-n "abcdefgh" "$(head -n 1 h)"
+# pjdfstest's misc.sh expect() pipes every result through `tail -1`.
+check tail-1 "b" "$(printf 'a\nb\n' | tail -1)"
 
 sleep 0.01 || fail "sleep 0.01 (fractional duration)"
 echo "PASS: sleep 0.01"
