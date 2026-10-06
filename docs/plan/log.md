@@ -419,3 +419,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   as R4.2 in review-fixes.md, dispatched to lane-1. The reviewer detached lane-1's HEAD by mistake
   (reported it); restored.
 - russ: 12.2 trace validation pulled forward to right after R4.2 (traces from existing tests and the forged-request harness; reviewer checks call sites).
+- Readdir performance (lane-4, dcfs-investigator, pending a schema-version follow-up before merge):
+  cause was a missing index, not a design problem: ListDir's page query (parent, rowid>cursor,
+  state='present', ORDER BY rowid LIMIT 64) and IsDirComplete's unknown-name probe each scanned the
+  whole directory per request, making a listing O(n^2) (2k entries 0.19 s, 10k 2.4 s). Fix: partial
+  indexes dentries_present and dentries_unknown; per-page cost now constant (metadata_cache_test
+  counts SQLite VM instructions). 10k entries: fastbuild 2409 -> 284 ms; optimized 704 -> ~160-300 ms
+  vs backing ~30-170 ms (noisy host). `-c opt` is unusable for the bench (rebuilds kernel/QEMU;
+  QEMU's build then tries pip offline): README documents a per_file_copt -O2 for dcfs/bench/sqlite/
+  abseil/libfuse/benchmark instead. New bench_readdir_test (large).
+- Watch (6.2): pjdfstest_test_ext4 took 1700 s under load in that lane, against run-qemu.sh's new
+  1800 s KVM e2e limit; either the limit needs headroom for a loaded host or pjdfstest needs
+  sharding by test directory.
