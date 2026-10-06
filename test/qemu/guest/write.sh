@@ -90,6 +90,36 @@ cpu_ticks() {
 	awk '{print $14 + $15}' "/proc/$1/stat"
 }
 
+# daemon_wakeups PID: sets WAKEUPS to the voluntary context switches of the
+# (single-threaded) daemon so far -- one per FUSE request it blocks waiting
+# for, see the write-large-passthrough comment below.
+daemon_wakeups() {
+	WAKEUPS=$(awk '/^voluntary_ctxt_switches:/ {print $2}' "/proc/$1/status")
+}
+
+# quiesce_daemon PID: waits (up to 10s) until the daemon has had no wakeup
+# for 0.3s. drop_caches makes the kernel send a FORGET for every cached inode
+# and dentry, asynchronously and in batches, and opening a file makes dcfs
+# commit to its SQLite database; each wakeup would otherwise be counted
+# against the write that happens to be running then.
+quiesce_daemon() {
+	daemon_wakeups "$1"
+	q_last=$WAKEUPS
+	q_stable=0
+	q_n=0
+	while [ "$q_stable" -lt 3 ] && [ "$q_n" -lt 100 ]; do
+		usleep 100000
+		daemon_wakeups "$1"
+		if [ "$WAKEUPS" = "$q_last" ]; then
+			q_stable=$((q_stable + 1))
+		else
+			q_stable=0
+			q_last=$WAKEUPS
+		fi
+		q_n=$((q_n + 1))
+	done
+}
+
 # check_src NAME COND: evaluates the shell condition COND (which should only
 # look at /src) and reports NAME-src.
 check_src() {
@@ -156,7 +186,12 @@ mkdir -p /src/d
 sync
 
 mkdir -p /cache /mnt
-if start_daemon "$LOG1"; then
+# No periodic sync point (default every 5s while the dirty set is non-empty):
+# one that fires inside the 64 MiB write-large-passthrough window runs
+# syncfs over the dirty data, and the disk waits in it are dozens of
+# wakeups that have nothing to do with passthrough (step 6.2). Nothing here
+# asserts on periodic syncs; sync points are tested by their own scripts.
+if start_daemon "$LOG1" --sync_interval_sec=100000; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"
@@ -242,28 +277,94 @@ check_cold write-overwrite '[ "$(stat -c %s /mnt/f)" = 4096 ]'
 check_src write-truncate-open '[ "$(stat -c %s /src/f)" = 0 ]'
 check_cold write-truncate-open '[ "$(stat -c %s /mnt/f)" = 0 ]'
 
-# --- write-large-passthrough: a 64 MiB write, low daemon CPU proves the -----
+# --- write-large-passthrough: a 64 MiB write; few daemon wakeups prove the --
 # kernel (not dcfs) moved the bytes -----------------------------------------
+
+# Why this counts requests and not CPU ticks (step 6.2): dcfs's utime+stime
+# over this write was a poor proxy. Under host load it read 21-36 ticks
+# (limit was 20) with the same work done, and under TCG 20-46 (sampled tick
+# accounting in a guest whose vCPUs are descheduled at random). What
+# passthrough changes is the number of requests dcfs has to serve: with it
+# active the kernel moves the bytes itself, and dcfs sees only the
+# create/flush/release plus one GETXATTR (security.capability, from the
+# kernel's file_remove_privs) per write(2); with it off it gets one
+# FUSE_WRITE per max_write (1 MiB) chunk, 64 for 64 MiB. Each request wakes
+# dcfs's single thread from its blocking read of /dev/fuse, and the count of
+# those wakeups (voluntary context switches, read from /proc/PID/status) does
+# not depend on host load or on KVM vs TCG. Measured, 64 MiB as 4 writes of
+# 16 MiB: 8-10 wakeups with passthrough (KVM idle, KVM under load, TCG),
+# 73-76 with passthrough disabled in a scratch build; the limit is 32. The
+# writes are 16 MiB because at 1 MiB the per-write GETXATTRs (64) would match
+# the 64 WRITEs a non-passthrough run adds and the check would tell nothing.
+# The CPU ticks are only printed.
 
 dd if=/dev/urandom of=/tmp/big_src.bin bs=1M count=64 2>/dev/null
 src_want_md5=$(md5sum /tmp/big_src.bin | cut -d' ' -f1)
 
+# The write runs in a background child that creates the file first, then
+# waits for "go", so that the counted window holds the writes and the close
+# but not the create (which makes dcfs commit to its SQLite database; the
+# disk waits that takes, a variable number and more under load, are wakeups
+# too). The child is the only process holding the file open: every
+# close of a descriptor on it, including by a forked helper exiting, is a
+# FUSE_FLUSH that wakes the daemon, so the measuring is done from the parent.
+big_writer() {
+	exec 7>"$MNT/big"
+	: >/tmp/bw.ready
+	read -r _ </tmp/bw.go
+	dd if=/tmp/big_src.bin bs=16M >&7 2>/dev/null
+	echo $? >/tmp/bw.done
+}
+
+# wait_for_file PATH: up to 30s.
+wait_for_file() {
+	w_n=0
+	while [ ! -e "$1" ] && [ "$w_n" -lt 300 ]; do
+		usleep 100000
+		w_n=$((w_n + 1))
+	done
+	[ -e "$1" ]
+}
+
+rm -f /tmp/bw.ready /tmp/bw.done /tmp/bw.go
+mkfifo /tmp/bw.go
 drop_caches
+big_writer &
+WRITER_PID=$!
+if ! wait_for_file /tmp/bw.ready; then
+	fail write-large-tool "writer never opened $MNT/big"
+fi
+quiesce_daemon "$DAEMON_PID"
+daemon_wakeups "$DAEMON_PID"
+before_wakeups=$WAKEUPS
 before_ticks=$(cpu_ticks "$DAEMON_PID")
-dd if=/tmp/big_src.bin of="$MNT/big" bs=1M 2>/dev/null
-rc=$?
+echo go >/tmp/bw.go
+wait_for_file /tmp/bw.done
+# Without passthrough dd can finish while dcfs is still working through the
+# kernel's queued WRITEs (the page cache absorbs them); the writer's close
+# waits for all of them, so the window ends when the writer has exited.
+wait "$WRITER_PID"
 after_ticks=$(cpu_ticks "$DAEMON_PID")
+daemon_wakeups "$DAEMON_PID"
+after_wakeups=$WAKEUPS
+rc=$(cat /tmp/bw.done 2>/dev/null || echo 1)
 tick_delta=$((after_ticks - before_ticks))
+wakeup_delta=$((after_wakeups - before_wakeups))
+
 if [ "$rc" -eq 0 ]; then
 	pass write-large-tool
 else
 	fail write-large-tool "dd rc=$rc"
 fi
-if [ "$tick_delta" -lt 20 ]; then
-	pass write-large-passthrough-cpu
+# Under 64 MiB / 1 MiB = 64 WRITEs would be needed without passthrough; half
+# of that leaves room for the handful of other requests and for load.
+if [ "$wakeup_delta" -lt 32 ]; then
+	pass write-large-passthrough-requests
 else
-	fail write-large-passthrough-cpu "cpu ticks delta=$tick_delta (want < 20)"
+	fail write-large-passthrough-requests \
+		"dcfs woke $wakeup_delta times during the 64 MiB write (want < 32); passthrough is not active?"
 fi
+echo "write.sh: info: 64 MiB write: dcfs wakeups=$wakeup_delta cpu ticks=$tick_delta"
 check_src write-large-content "[ \"\$(md5sum /src/big | cut -d' ' -f1)\" = \"$src_want_md5\" ]"
 mnt_md5=$(md5sum "$MNT/big" | cut -d' ' -f1)
 if [ "$mnt_md5" = "$src_want_md5" ]; then
