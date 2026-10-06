@@ -15,3 +15,6 @@ finding was later fixed test-first, assigned to a step, or decided against;
   harness wiring, sanitizer scoping).
 - `review-2026-10-06-r4.md`: review of the R4 protocol fixes (sync
   snapshot, readdir listing, rename verification).
+- `review-2026-10-06-trace-validation.md`: review of the first trace
+  validation; the recorder's cuts and the script's pass rule let forbidden
+  orderings validate (fixed in 12.2b).

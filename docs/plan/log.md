@@ -462,3 +462,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the traced rename run flaked on rename.sh's unlink-mnt zero-reads check when a sync point fell in
   the window under tracing load (passes 4/4 after trimming output): rename.sh's windows are fragile
   under load (6.2).
+- 12.2 review (audits/review-2026-10-06-trace-validation.md): event placement sound, production
+  code clean; but validation unsound as delivered: structural cuts (syscall before phase 1, End
+  before syscall, silent getattr) stop the trace at a valid prefix and trace_validate.sh passes any
+  trace without an invalid line; no syscall-start events (a sync snapshot taken after syncfs began is
+  accepted); InodeForgotten cuts whole directories; fills over valid attributes unchecked;
+  mid-run initial state trusted; T_Recover wider than RecoverDirty. Sent back as 12.2b with the
+  reviewer's fixes and two more fault tests; re-review required before merge.
