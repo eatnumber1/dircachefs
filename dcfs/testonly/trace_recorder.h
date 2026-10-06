@@ -260,6 +260,9 @@ class TraceRecorder final : public ProtocolEvents {
   // directory whose state changed an "unexplained" line, or a cut if the
   // change is exactly that of a forgotten inode (forgotten_).
   void After(Context &ctx);
+  // How a directory row first seen at this callback came to be (a begin
+  // line's "origin": existing, mkdir, listing, parent, or other).
+  std::string Origin();
   std::vector<Ino> AllDirs(Context &ctx);
 
   int fd_;

@@ -6,6 +6,11 @@
 #   trace_validate.sh --java JAVA --cp CLASSPATH --spec-dir DIR --lock BOOL
 #       [--allow-cuts CATS] [--root TRACE --root-cuts CATS]
 #       [--expect-reject TRACE ERE] -- RUN_QEMU [RUN_QEMU_ARGS...]
+#   trace_validate.sh ... --log LOG
+#
+# The second form checks the traces in LOG (a serial log, or any file of
+# trace lines) instead of booting a guest: formal/trace_tests/ uses it to
+# test Trace.tla itself on hand-written traces.
 #
 # DIR holds Trace.tla, Trace.cfg and dcfs.tla. --lock says whether the run
 # kept the kernel's directory lock (the model's KernelDirLock).
@@ -39,6 +44,7 @@ reject_ere=""
 allow_cuts=""
 root=""
 root_cuts=""
+log=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --java) java="$2"; shift 2 ;;
@@ -49,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --allow-cuts) allow_cuts="$2"; shift 2 ;;
     --root) root="$2"; shift 2 ;;
     --root-cuts) root_cuts="$2"; shift 2 ;;
+    --log) log="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "trace_validate.sh: unknown argument $1" >&2; exit 2 ;;
   esac
@@ -59,15 +66,19 @@ rm -rf "$work"
 mkdir -p "$work/traces" "$work/tlc" "$work/tmp"
 
 # --- the guest run ----------------------------------------------------------
-status=0
-"$@" >"$work/qemu.out" 2>&1 || status=$?
-serial="${TEST_UNDECLARED_OUTPUTS_DIR:-$TEST_TMPDIR}/serial.log"
-if [[ "$status" -ne 0 ]]; then
-  tail -n 200 "$work/qemu.out"
-  echo "trace_validate.sh: FAIL: the guest run failed (exit status $status)"
-  exit 1
+if [[ -n "$log" ]]; then
+  serial="$log"
+else
+  status=0
+  "$@" >"$work/qemu.out" 2>&1 || status=$?
+  serial="${TEST_UNDECLARED_OUTPUTS_DIR:-$TEST_TMPDIR}/serial.log"
+  if [[ "$status" -ne 0 ]]; then
+    tail -n 200 "$work/qemu.out"
+    echo "trace_validate.sh: FAIL: the guest run failed (exit status $status)"
+    exit 1
+  fi
+  echo "trace_validate.sh: the guest run passed"
 fi
-echo "trace_validate.sh: the guest run passed"
 
 # --- the traces ---------------------------------------------------------------
 tr -d '\r' <"$serial" | grep -a '^DCFS-TRACE ' >"$work/lines" || true
@@ -146,9 +157,18 @@ for f in "$work"/traces/*.jsonl; do
     echo "trace_validate.sh: valid: $name ($events events)"
     continue
   fi
+  # No initial state matches the trace's begin line (TLC still reports a
+  # depth of 1 then): the begin line is the first thing not explained.
+  if grep -q '^Finished computing initial states: 0 distinct states generated' "$out"; then
+    depth=0
+  fi
   bad="$(sed -n "$((depth + 1))p" "$f")"
+  explained="the model explains $((depth - 1)) of $events events; the first it cannot (event $depth)"
+  if [[ "$depth" -eq 0 ]]; then
+    explained="no initial state of the model matches its begin line"
+  fi
   if [[ "$name" == "$reject_trace" ]]; then
-    echo "trace_validate.sh: rejected: $name: the model explains $((depth - 1)) of $events events; the first it cannot (event $depth):"
+    echo "trace_validate.sh: rejected: $name: $explained:"
     echo "  $bad"
     if grep -Eq -- "$reject_ere" <<<"$bad"; then
       rejected_as_expected=1
@@ -156,7 +176,7 @@ for f in "$work"/traces/*.jsonl; do
     continue
   fi
   invalid=$((invalid + 1))
-  echo "trace_validate.sh: INVALID: $name: the model explains $((depth - 1)) of $events events; the first it cannot (event $depth):"
+  echo "trace_validate.sh: INVALID: $name: $explained:"
   echo "  $bad"
   if [[ "$depth" -ge 2 ]]; then
     echo "  after: $(sed -n "${depth}p" "$f")"

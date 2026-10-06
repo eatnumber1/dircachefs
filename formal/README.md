@@ -554,10 +554,17 @@ What a trace observes and what it leaves free:
 - The initial state is the model's `Init` except that the directory's
   cached state is the one its trace begins with (a directory's trace
   begins when the cache first has it, or when the harness starts
-  recording), which is assumed correct and durable; and that a name whose
-  backing state the trace observes (a probe, a listing) before any syscall
-  could have changed it starts in that state. Both only remove initial
-  states, so neither can make an invalid trace valid.
+  recording), and that a name whose backing state the trace observes (a
+  probe, a listing) before any syscall could have changed it starts in
+  that state. The second only removes initial states. The first is the
+  code's own state, so it is checked against how the row came to be (the
+  begin line's `origin`): a directory created by a mkdir starts with an
+  empty backing directory, no cached entries, its dirty row and epoch 0;
+  one first seen in its parent's listing or by `ParentOf` with no entries,
+  an incomplete listing, epoch 0 and no dirty row; a row that appears at
+  any other step is `unexplained`. Only a directory already in the cache
+  when the trace began (`existing`: at the harness's `StartTrace`, or a
+  guest's first start) is assumed correct (and durable).
 - Attribute values (the model's stamp), the guards' absolute clock, and
   which answer a listing served are not compared. Their effects are: the
   attributes' validity, the dentries a listing was built from, and the
@@ -662,6 +669,10 @@ renames with flags and syscall failures.
   faults validated (the syscall before phase 1 wrote no line, and the End
   before the syscall was a cut), and so did the sync fault (no event said
   when a syscall started).
+
+- `//formal:trace_*_test` check `Trace.tla` itself on hand-written traces
+  (`formal/trace_tests/`, no guest): the begin-line origins, and how
+  recovery may forget a clean directory's dentries.
 
 ### Action coverage
 

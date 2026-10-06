@@ -88,3 +88,31 @@ exports_files(
     ],
     visibility = ["//visibility:public"],
 )
+
+# Trace.tla's own tests: hand-written traces (trace_tests/*.log, lines as
+# the recorder writes them) checked without a guest. Each states what it
+# shows.
+load(":trace.bzl", "tla_trace_log_test")
+
+TRACE_TESTS = {
+    # A directory created by a mkdir starts empty (its backing directory
+    # is), and its cached state may say complete with no entries: valid.
+    "origin_mkdir_fresh": None,
+    # ... but not with a cached entry: no initial state matches.
+    "origin_mkdir_with_entry": "\"ev\":\"begin\",\"origin\":\"mkdir\"",
+    # A directory first seen in its parent's listing starts with an
+    # incomplete listing of its own (EnsureDirectory): one that says
+    # complete is rejected.
+    "origin_listing_complete": "\"ev\":\"begin\",\"origin\":\"listing\"",
+}
+
+[
+    tla_trace_log_test(
+        name = "trace_%s_test" % test,
+        size = "small",
+        expect_reject = "t@2" if event else "",
+        expect_reject_event = event or "",
+        log = "trace_tests/%s.log" % test,
+    )
+    for test, event in TRACE_TESTS.items()
+]

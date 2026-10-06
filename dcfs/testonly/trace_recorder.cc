@@ -430,6 +430,24 @@ void TraceRecorder::Cut(Context &ctx, Ino dir, std::string_view why) {
   covered_.insert(dir);
 }
 
+std::string TraceRecorder::Origin() {
+  // What made a directory row appear, from the callback that saw it first:
+  // the trace's start, a mkdir's phase 3 (RecordNewChild, whose End
+  // follows at once), a listing's or resolve's commit (RecordChild),
+  // ParentOf. Trace.tla checks the row's first state against it.
+  const std::string_view cause = cause_;
+  if (cause == "BeginAll" || cause == "RunStarted") return "existing";
+  if (cause == "MutationEnded") {
+    const Frame *rf = InnermostRequest();
+    if (rf != nullptr && rf->op == events::Op::kMkdir) return "mkdir";
+  }
+  if (cause == "PopulateCommitted" || cause == "ResolveCommitted") {
+    return "listing";
+  }
+  if (cause == "ParentRecorded") return "parent";
+  return "other";
+}
+
 void TraceRecorder::After(Context &ctx) {
   // Nothing is looked at inside a transaction (an invalidation inside an
   // upsert, say): the state there is half-written. The next callback
@@ -451,13 +469,18 @@ void TraceRecorder::After(Context &ctx) {
     dirs_[dir] = Dir{};
     State now = SnapshotState(ctx, dir);
     const std::string db = now.Json();
+    const std::string origin = Origin();
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"begin\",\"db\":", db, "}"));
+                            ",\"ev\":\"begin\",\"origin\":",
+                            JsonStr(origin), ",\"db\":", db, "}"));
     dirs_[dir].last = db;
     dirs_[dir].last_state = std::move(now);
     covered_.insert(dir);
     if (db.find("\"refused\"") != std::string::npos) {
       Cut(ctx, dir, "boundary: a refused boundary");
+    } else if (origin == "other") {
+      Unexplained(ctx, dir, "a directory row appeared at a step that does "
+                            "not create one");
     }
   }
   for (auto &[dir, state] : dirs_) {

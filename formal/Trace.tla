@@ -164,11 +164,29 @@ ObservedPresent(x, i) ==
 Determined == {x \in Names : FirstObs(x) # 0 /\ ~ChangedBefore(x, FirstObs(x))}
 DetPresent == {x \in Determined : ObservedPresent(x, FirstObs(x))}
 
+\* How the directory's row came to be (the begin line's "origin"): created by
+\* a mkdir (its backing directory is empty, its cached state has no
+\* entries and its dirty row from the create's phase 3), first seen in its
+\* parent's listing or by ParentOf (a new directories row: no entries, an
+\* incomplete listing, epoch 0, not dirty), or already there when the
+\* trace began ("existing": the assumption that it was correct).
+Origin == IF Has(Header, "origin") THEN Header.origin ELSE "existing"
+OriginOK ==
+    CASE Origin = "mkdir" ->
+           /\ HDB.dent = <<>> /\ HDB.dirty /\ HDB.epoch = 0
+      [] Origin \in {"listing", "parent"} ->
+           /\ HDB.dent = <<>> /\ ~HDB.complete /\ HDB.epoch = 0
+           /\ ~HDB.dirty
+      [] Origin = "existing" -> TRUE
+      [] OTHER -> FALSE
+
 TraceInit ==
     /\ l = 1
     /\ HDB.inflight = 0
+    /\ OriginOK
     /\ \E free \in SUBSET (Names \ Determined) :
          LET present == DetPresent \cup free IN
+         /\ Origin = "mkdir" => present = {}
          /\ \A x \in Names :
               LET v == ObsVal(HDB, x) IN
               /\ IsKey(v) => x \in present

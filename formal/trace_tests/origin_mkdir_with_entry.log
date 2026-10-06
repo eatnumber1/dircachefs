@@ -1,0 +1,2 @@
+DCFS-TRACE t 2 {"i":1,"c":"MutationEnded","ev":"begin","origin":"mkdir","db":{"dent":[["x","k:5.1.1"]],"complete":true,"dirty":true,"epoch":0,"valid":true,"clean":true,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":2,"c":"GetattrBegin","ev":"attr_check","p":"p1","req":{"k":"getattr","n":"","m":""},"valid":true}
