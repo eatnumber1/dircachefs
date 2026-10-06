@@ -523,3 +523,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   CONFIG_FEATURE_FANCY_TAIL added with a smoke check, plus a pjdfstest-suite-sane guard (<5% of
   checks failing on the raw filesystem). With tail fixed both sides fail the same 28 TODO checks
   (ext4/xfs/btrfs shards sum to 8827 checks).
+- 6.2 bundle merged (tip bf6c3fc). lane-4 next: Phase 5.3 OSV-Scanner.
