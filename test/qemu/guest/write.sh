@@ -685,6 +685,51 @@ kill "$MM_PID" 2>/dev/null || true
 wait "$MM_PID" 2>/dev/null || true
 rm -f "$MNT/mm"
 
+# --- mmap-store-after-close-reconciled-on-forget (step 23.1): a store
+# through a shared writable mapping after the last close (the RELEASE
+# recorded the attributes) changes the backing mtime with no request at
+# all. The mapping's backing file holds the dcfs file's path
+# (backing_file_open's user_path), so the kernel cannot forget the inode
+# before the mapping goes. Once it does (the process exits) and the kernel
+# lets go of the inode (FORGET, here by dropping its caches), dcfs re-reads
+# the attributes of a file that was open for writing during this run, so
+# the next stat through dcfs sees the store's mtime -- and calls it no
+# out-of-band change.
+oob_before=$(grep -c "out-of-band" "$LOG1")
+head -c 4096 /dev/zero >"$MNT/mm2"
+touch -d "2001-09-09 01:46:40" "$MNT/mm2"
+"$TESTUTIL" mmapwrite-closed "$MNT/mm2" 2 >/tmp/mm2.out 2>&1 &
+MM_PID=$!
+i=0
+while [ "$i" -lt 10 ] && ! grep -q MAPPED /tmp/mm2.out; do
+	i=$((i + 1))
+	sleep 1
+done
+stat -c %Y "$MNT/mm2" >/dev/null
+i=0
+while [ "$i" -lt 10 ] && ! grep -q STORED /tmp/mm2.out; do
+	i=$((i + 1))
+	sleep 1
+done
+kill "$MM_PID" 2>/dev/null || true
+wait "$MM_PID" 2>/dev/null || true
+echo 2 >/proc/sys/vm/drop_caches
+quiesce_daemon "$DAEMON_PID"
+mm_src=$(stat -c %Y "$SRC/mm2")
+mm_mnt=$(stat -c %Y "$MNT/mm2")
+if [ "$mm_src" != 1000000000 ] && [ "$mm_mnt" = "$mm_src" ]; then
+	pass mmap-store-after-close-reconciled-on-forget
+else
+	fail mmap-store-after-close-reconciled-on-forget \
+		"mtime src=$mm_src mnt=$mm_mnt ($(cat /tmp/mm2.out))"
+fi
+if [ "$(grep -c "out-of-band" "$LOG1")" = "$oob_before" ]; then
+	pass mmap-store-after-close-not-out-of-band
+else
+	fail mmap-store-after-close-not-out-of-band "$(grep "out-of-band" "$LOG1")"
+fi
+rm -f "$MNT/mm2"
+
 # --- listing-matches: "d" is excluded -- see readonly.sh's identity-checks
 # comment on why /src/d and the cached /mnt/d deliberately diverge after the
 # write-boundary-refused check above. -----------------------------------

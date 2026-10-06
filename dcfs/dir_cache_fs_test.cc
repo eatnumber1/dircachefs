@@ -511,6 +511,32 @@ class DirCacheFSTest : public ::testing::Test {
     fuse_session_process_buf(se_, &fbuf);
   }
 
+  // A BATCH_FORGET of (id, n) pairs (no reply).
+  void BatchForget(std::vector<std::pair<InodeId, uint64_t>> forgets) {
+    struct fuse_batch_forget_in in = {};
+    in.count = static_cast<uint32_t>(forgets.size());
+    std::string body;
+    AppendBytes(body, in);
+    for (auto [id, n] : forgets) {
+      struct fuse_forget_one one = {};
+      one.nodeid = static_cast<uint64_t>(id);
+      one.nlookup = n;
+      AppendBytes(body, one);
+    }
+    const uint64_t unique = next_unique_++;
+    std::string buf;
+    struct fuse_in_header hdr = {};
+    hdr.len = static_cast<uint32_t>(sizeof(hdr) + body.size());
+    hdr.opcode = FUSE_BATCH_FORGET;
+    hdr.unique = unique;
+    AppendBytes(buf, hdr);
+    buf.append(body);
+    struct fuse_buf fbuf = {};
+    fbuf.mem = buf.data();
+    fbuf.size = buf.size();
+    fuse_session_process_buf(se_, &fbuf);
+  }
+
   Reply Opendir(InodeId id) {
     struct fuse_open_in in = {};
     std::string body;
@@ -1268,6 +1294,120 @@ TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
   EXPECT_EQ(Cached(kRootInode, "new").first, LookupResult::kFound);
 }
 
+
+// --- FORGET reconciliation (step 23.1) ------------------------------------
+//
+// A store through a shared writable mapping after the last close reaches
+// the backing file with no request at all (passthrough's mapping holds
+// only the backing file), after the last RELEASE recorded the attributes.
+// When the kernel lets go of such an inode (its last FORGET), dcfs re-reads
+// its attributes; if they changed, as a mutation (durably dirty first), so
+// that a power loss cannot keep the new attributes and lose the stores.
+// The harness stands for the stores with writes to the backing file.
+
+TEST_F(DirCacheFSTest, LastForgetOfAWrittenFileReconcilesItsAttributes) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: f is clean.
+  ASSERT_THAT(Dirty(), Not(Contains(f)));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr before, cache::GetAttr(ctx_, f));
+  ASSERT_TRUE(before.valid);
+  ASSERT_EQ(before.st.st_size, 0);
+
+  // Trace validation (formal/README.md): the reconciliation is a file's
+  // mutation and refresh, outside any request, which no directory's trace
+  // may show a change for.
+  StartTrace();
+  AppendToFile(Path("f"), "stored");  // The mapping's stores.
+  Forget(f, 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr after, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(after.valid);
+  EXPECT_EQ(after.st.st_size, 6);
+  // Recorded as a mutation records: dirty until a sync point covers it.
+  EXPECT_THAT(Dirty(), Contains(f));
+  EXPECT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_THAT(Dirty(), Not(Contains(f)));
+
+  // Once is enough: forgotten again (after a new lookup) with no writable
+  // open meanwhile, it is not looked at again.
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  AppendToFile(Path("f"), "more");  // Behind dcfs's back now.
+  Forget(f, 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr later, cache::GetAttr(ctx_, f));
+  EXPECT_EQ(later.st.st_size, 6);
+  EXPECT_THAT(Dirty(), Not(Contains(f)));
+}
+
+// Nothing changed since the last release: one statx, no mutation (the
+// inode stays clean), whether the FORGET comes alone or in a batch.
+TEST_F(DirCacheFSTest, LastForgetOfAnUnchangedFileChangesNothing) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start();
+  auto [lf, ef] = Lookup(kRootInode, "f");
+  auto [lg, eg] = Lookup(kRootInode, "g");
+  ASSERT_EQ(lf.error, 0);
+  ASSERT_EQ(lg.error, 0);
+  const InodeId f = static_cast<InodeId>(ef.nodeid);
+  const InodeId g = static_cast<InodeId>(eg.nodeid);
+  for (InodeId id : {f, g}) {
+    auto [open, fh] = Open(id, O_WRONLY);
+    ASSERT_EQ(open.error, 0);
+    ASSERT_EQ(Release(id, fh).error, 0);
+  }
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  AppendToFile(Path("g"), "stored");
+
+  BatchForget({{f, 1}, {g, 1}});
+  EXPECT_THAT(Dirty(), Not(Contains(f)));
+  EXPECT_THAT(Dirty(), Contains(g));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr_g, cache::GetAttr(ctx_, g));
+  EXPECT_TRUE(attr_g.valid);
+  EXPECT_EQ(attr_g.st.st_size, 6);
+}
+
+// A file that is gone from the backing filesystem by the time of its last
+// FORGET: the re-read finds its handle stale and forgets the row, as any
+// open by handle would.
+TEST_F(DirCacheFSTest, LastForgetOfARemovedWrittenFileForgetsItsRow) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);
+  ASSERT_EQ(::unlink(Path("f").c_str()), 0);  // Behind dcfs's back.
+  Forget(f, 1);
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+}
+
+// At unmount the kernel sends no FORGETs: a written file the kernel still
+// held is reconciled at DESTROY instead.
+TEST_F(DirCacheFSTest, DestroyReconcilesWrittenFiles) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);
+  AppendToFile(Path("f"), "stored");
+  EXPECT_EQ(Send(FUSE_DESTROY, 0, "").error, 0);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr after, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(after.valid);
+  EXPECT_EQ(after.st.st_size, 6);
+  EXPECT_THAT(Dirty(), Contains(f));
+}
 
 // --- Changing removed objects (step 23.2) ---------------------------------
 //

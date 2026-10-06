@@ -307,6 +307,24 @@ class DirCacheFS {
   // last writable open.
   absl::Status BeginWriting(InodeId id);
 
+  // FORGET reconciliation (step 23.1). With passthrough, a shared writable
+  // mapping holds only the backing file, so the last close sends RELEASE
+  // (which records the attributes) while the mapping can still store, and
+  // those stores change the backing size, mtime, ctime and blocks with no
+  // request at all. The only later request about the file is the kernel's
+  // last FORGET of it. So for an inode that had a writable open during this
+  // run (written_), the last FORGET -- and DESTROY, since the kernel sends
+  // no FORGETs at unmount -- re-reads its attributes by handle
+  // (backing::StatWritten: one statx). If they match the cache, nothing
+  // happens. If they differ, or are unknown, they are recorded as a
+  // mutation records: a phase 1 (attributes unknown, durably dirty), then
+  // a refresh as a fill; the dirty row keeps a power loss from keeping the
+  // new attributes while losing the stores, until a sync point's syncfs
+  // has covered them. A mapping that stores after the kernel has let go of
+  // the inode is still not seen (that needs the kernel to keep the FUSE
+  // file referenced until munmap). The inode leaves written_ either way.
+  void ReconcileWritten(InodeId id);
+
   // The other end: the last writable open of `id` is going away (Release,
   // or an open or create that fails after BeginWriting). Tells the fill
   // guards the writes are over (cache::EndWrites) and removes `id` from
@@ -480,6 +498,10 @@ class DirCacheFS {
     FileDescriptor fd;
   };
   absl::flat_hash_map<InodeId, Removed> removed_;
+
+  // The inodes that had a writable open during this run and whose last
+  // FORGET has not come since (see ReconcileWritten).
+  absl::flat_hash_set<InodeId> written_;
 
   // The stubs whose refusal RefuseStub has logged in this run.
   absl::flat_hash_set<InodeId> stubs_logged_;

@@ -93,11 +93,18 @@ quiesce_backing() {
 # drop_caches_quiesced: drop_caches; quiesce_backing; drop_caches. The
 # second drop catches an inode released by the first (FORGET, then dcfs
 # closes a backing fd) whose cleanup would otherwise land after the
-# quiesce, inside the measured window.
+# quiesce, inside the measured window. With a daemon running (DAEMON_PID),
+# it then waits for the daemon to go quiet: the last FORGET of a file
+# written during the run makes dcfs re-read its attributes (step 23.1, a
+# statx that may read the backing device once its caches are dropped), and
+# that must land before a zero-reads baseline, not inside the window.
 drop_caches_quiesced() {
 	drop_caches
 	quiesce_backing
 	drop_caches
+	if [ -n "${DAEMON_PID:-}" ] && kill -0 "$DAEMON_PID" 2>/dev/null; then
+		quiesce_daemon "$DAEMON_PID"
+	fi
 }
 
 # --- daemon activity probes (write.sh, passthrough.sh) -------------------

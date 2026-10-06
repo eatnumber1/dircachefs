@@ -23,6 +23,22 @@ model gains nothing (attributes of child objects are outside it) but
 trace validation must still pass with the new call site mapped as a
 refresh.
 
+**Done (2026-10-07, step-23 branch).** `DirCacheFS::ReconcileWritten` at
+the last FORGET/FORGET_MULTI and at DESTROY (the kernel sends no FORGETs at
+unmount): one `backing::StatWritten` (statx by handle, identity checked, not
+an out-of-band change); unchanged -> nothing; changed or unknown -> phase 1
+(`BeginAttrChange`, durably dirty) then a refresh as a fill. Finding: the
+plan's "not covered: a mapping that keeps writing longer than the kernel
+keeps the inode" cannot happen: the mapping's backing file holds the FUSE
+file's path (`backing_file_open` takes `user_path`), so the last FORGET
+comes after munmap. What is left: stale attributes between munmap and the
+last FORGET (and after a crash in that window), and the statx at FORGET can
+spin up a disk whose cache dropped the file. Tests: write.sh
+`mmap-store-after-close-reconciled-on-forget` (3 fs), harness LastForget*,
+DestroyReconcilesWrittenFiles (traced; validates). lib.sh's
+`drop_caches_quiesced` now waits for the daemon to go quiet, so that a
+reconciliation's statx lands before a zero-reads baseline.
+
 ## 23.2 Mutations on removed-but-referenced objects
 
 Objects with no row (unlinked files still open, removed working

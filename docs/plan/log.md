@@ -630,3 +630,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   of /proc/<pid>/fd of an O_PATH fd) go through the removed_ record's fd; the record caches nothing, so no
   tri-state or model change is needed. removed_test (3 fs) and harness tests; pjdfstest ext4 shards green.
   The plan's "unlink-then-ftruncate on an open file fails today" was not so: that already worked.
+- 23.1 (lane-1, step-23): FORGET reconciliation of files written this run (statx by handle; a change is
+  recorded as a phase 1 + fill). The last FORGET cannot precede munmap (backing_file_open pins the FUSE
+  path), so the stores are always seen then; remaining: staleness between munmap and FORGET, and a possible
+  disk spin-up for the statx. drop_caches_quiesced waits for the daemon (reconcile I/O before baselines).

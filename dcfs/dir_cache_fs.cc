@@ -193,9 +193,13 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
 
 absl::Status DirCacheFS::Destroy() {
   // The kernel has let go of every nodeid (it sends no FORGETs at
-  // unmount).
+  // unmount): reconcile the written files it still held (see
+  // ReconcileWritten), before FinishRun's sync point.
+  const std::vector<InodeId> written(written_.begin(), written_.end());
+  for (InodeId id : written) ReconcileWritten(id);
   removed_.clear();
   lookups_.clear();
+  written_.clear();
   return absl::OkStatus();
 }
 
@@ -395,6 +399,8 @@ absl::Status DirCacheFS::BeginWriting(InodeId id) {
   // A removed object has no row to mark (see Setattr); being in
   // open_for_write_ still gives its attribute replies a zero timeout.
   if (removed_.contains(id)) return absl::OkStatus();
+  // Its last FORGET looks at it again (see ReconcileWritten).
+  written_.insert(id);
   // Ends right away: for as long as the open lasts, open_for_write_ (not an
   // in-flight mutation) is what keeps the attributes unknown (see
   // backing::RefreshAttrs), and the kernel itself removes
@@ -632,11 +638,71 @@ bool DropLookups(absl::flat_hash_map<InodeId, uint64_t> &lookups, InodeId id,
 
 }  // namespace
 
+void DirCacheFS::ReconcileWritten(InodeId id) {
+  written_.erase(id);
+  // Still open (the kernel cannot have forgotten it then, but DESTROY
+  // comes regardless): its attributes are unknown and served from its
+  // descriptor, and the last release records them.
+  if (HasOpenFiles(id)) return;
+  absl::StatusOr<cache::CachedAttr> cached = cache::GetAttr(ctx_, id);
+  if (!cached.ok()) {
+    // NotFound: gone already (invalidated, or deleted with its last link).
+    if (!absl::IsNotFound(cached.status())) {
+      LOG(WARNING) << "could not read the cached attributes of written "
+                   << "inode " << id << " to reconcile them: "
+                   << cached.status();
+    }
+    return;
+  }
+  absl::StatusOr<struct statx> fresh = backing::StatWritten(ctx_, id);
+  if (!fresh.ok()) {
+    // ESTALE: the object is gone and OpenNode has forgotten the row.
+    if (GetErrnoFromStatus(fresh.status()).value_or(0) != ESTALE) {
+      LOG(WARNING) << "could not re-read the attributes of written inode "
+                   << id << ": " << fresh.status();
+    }
+    return;
+  }
+  // What a store through a mapping changes: the size (not past EOF, but
+  // the file may have been truncated or written before the last close),
+  // the blocks it allocates, mtime and ctime.
+  const struct stat &st = cached->st;
+  const bool same =
+      cached->valid && static_cast<uint64_t>(st.st_size) == fresh->stx_size &&
+      static_cast<uint64_t>(st.st_blocks) == fresh->stx_blocks &&
+      st.st_mtim.tv_sec == fresh->stx_mtime.tv_sec &&
+      st.st_mtim.tv_nsec == static_cast<long>(fresh->stx_mtime.tv_nsec) &&
+      st.st_ctim.tv_sec == fresh->stx_ctime.tv_sec &&
+      st.st_ctim.tv_nsec == static_cast<long>(fresh->stx_ctime.tv_nsec);
+  if (same) return;
+  // Phase 1, as for a setattr: the attributes unknown and the inode
+  // durably dirty before anything new is recorded. There is no syscall of
+  // its own (the stores already happened); phase 3 is the refresh, an
+  // ordinary fill after the mutation's end.
+  absl::StatusOr<cache::Mutation> mutation = cache::BeginAttrChange(ctx_, id);
+  if (!mutation.ok()) {
+    LOG(WARNING) << "could not begin reconciling the attributes of written "
+                 << "inode " << id << ", leaving them as they are: "
+                 << mutation.status();
+    return;
+  }
+  mutation->End();
+  if (absl::Status refreshed = backing::RefreshAttrs(ctx_, id);
+      !refreshed.ok() && !absl::IsNotFound(refreshed)) {
+    LOG(WARNING) << "could not record the reconciled attributes of written "
+                 << "inode " << id << ", leaving them unknown: " << refreshed;
+  }
+}
+
 void DirCacheFS::Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup) {
   InodeId id = static_cast<InodeId>(ino);
   // The last FORGET of a removed object closes its descriptor, which lets
-  // the backing filesystem free it.
-  if (DropLookups(lookups_, id, nlookup)) removed_.erase(id);
+  // the backing filesystem free it; that of a file written during this run
+  // reconciles its attributes (see ReconcileWritten).
+  if (DropLookups(lookups_, id, nlookup)) {
+    removed_.erase(id);
+    if (written_.contains(id)) ReconcileWritten(id);
+  }
   // forget/forget_multi have no error reply: fuse_reply_none is the only
   // valid one.
   req.ReplyNone();
@@ -646,7 +712,10 @@ void DirCacheFS::ForgetMulti(
     FuseRequest &req, std::span<const fuse_forget_data> forgets) {
   for (const fuse_forget_data &forget : forgets) {
     InodeId id = static_cast<InodeId>(forget.ino);
-    if (DropLookups(lookups_, id, forget.nlookup)) removed_.erase(id);
+    if (DropLookups(lookups_, id, forget.nlookup)) {
+      removed_.erase(id);
+      if (written_.contains(id)) ReconcileWritten(id);
+    }
   }
   req.ReplyNone();
 }

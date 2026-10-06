@@ -116,6 +116,15 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags);
 // and STATX_BTIME). Does not update the cache.
 absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id);
 
+// As StatNode, for a file whose attributes are expected to differ from the
+// cache's: one written through a shared mapping after its last close,
+// which dcfs never hears of (DirCacheFS's FORGET reconciliation, step
+// 23.1). Identity is verified as by OpenNode (ESTALE, the row forgotten,
+// if the handle no longer reaches the object), but a difference is not
+// reported or adopted as an out-of-band change: the caller records it as
+// a mutation.
+absl::StatusOr<struct statx> StatWritten(Context &ctx, InodeId id);
+
 // Refreshes `id`'s cached attributes from the backing filesystem (StatNode
 // followed by cache::UpdateAttr). Called when CachedAttr.valid is false.
 // If `id` is in ctx.open_for_write (a writable open is outstanding), the

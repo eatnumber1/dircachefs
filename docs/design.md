@@ -1037,20 +1037,46 @@ reply: the new row is dirty from phase 3's `MarkDirty`, which no guard
 sees, so a sync point while the create waits on a later syscall could clear
 it, and the writes after the reply would have no dirty row.
 
-### The mmap caveat
+### The mmap caveat, and FORGET reconciliation
 
 `mmap` of a passthrough file swaps the mapping's file to the backing file
 (`backing_file_mmap`, `vma_set_file`), so the mapping no longer holds the
 FUSE file. `close()` after `mmap(MAP_SHARED, PROT_WRITE)` therefore drops
 the last reference and the kernel sends RELEASE while the mapping is still
 writable. Stores through it reach the backing file with no FUSE request at
-all. dcfs records the attributes as current at that release, and later
-stores change the backing mtime, ctime and size without dcfs knowing. NFS
-clients, which detect changes from ctime because FUSE reports no change
-cookie, may then keep stale data. This is documented as unsupported
-(amendment 16). The proper fix is in the kernel: keep the FUSE file
-referenced by passthrough shared writable mappings until `munmap`, so that
-RELEASE means no more writers. Its feasibility is unverified.
+all, and change its mtime, ctime and blocks after the release recorded
+them (amendment 16).
+
+The mapping's backing file does hold the FUSE file's *path*, though
+(`backing_file_open` takes a reference on its `user_path`), so the kernel
+cannot forget the FUSE inode while the mapping exists: the last `FORGET`
+of the inode comes after the last store. Step 23.1 uses that
+(`DirCacheFS::ReconcileWritten`): every inode that had a writable open
+during this run is remembered (`written_`), and at its last `FORGET`
+(and at `DESTROY`, since the kernel sends no `FORGET`s at unmount) dcfs
+re-reads its attributes by handle (`backing::StatWritten`: one `statx`,
+identity verified, not reported as an out-of-band change). If they match
+the cache nothing happens. If they differ, or are unknown, they are
+recorded as a mutation records them: a phase 1 (`cache::BeginAttrChange`:
+unknown, durably dirty) and then a refresh as a fill, so that a power loss
+before the next sync point cannot keep the new attributes and lose the
+stores. The inode is forgotten from `written_` either way.
+
+What is left:
+
+- Between the `munmap` and the last `FORGET` (the kernel keeps an inode it
+  is not short of memory for as long as it likes), dcfs serves the
+  attributes the release recorded, and NFS clients, which detect changes
+  from ctime, may serve stale data. A daemon crash or power loss in that
+  window leaves those attributes recorded as current.
+- The `statx` at `FORGET` may read the backing device, if its own inode
+  cache has dropped the file too: a spun-down disk can spin up for it.
+  Keeping a descriptor per written file until its `FORGET` would pin the
+  backing inode in memory instead, at the cost of a descriptor each and of
+  keeping unlinked files allocated until then; not done.
+- The proper fix is still in the kernel: keep the FUSE file referenced by
+  passthrough shared writable mappings until `munmap`, so that RELEASE
+  means no more writers. Its feasibility is unverified.
 
 ## Out-of-band change detection
 
@@ -1367,7 +1393,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `setattr_test` | chmod (file, directory, FIFO; `EOPNOTSUPP` on a symlink), chown, truncate and utimes land on the backing filesystem and are then served from the cache with zero sectors, also after a restart. |
 | `create_test` | mkdir, create, mknod, symlink and link, including error cases; the whole tree's listing agrees with the backing filesystem; zero sectors for a full metadata pass over everything created; `EEXIST` for a boundary stub's name and `ENOTSUP` inside it. |
 | `rename_test` | unlink (including of an open file, whose row and handle live until the last close), rmdir, and every rename variant (across directories, over an existing file, `RENAME_NOREPLACE`, `RENAME_EXCHANGE`, a directory with its cached subtree); negative entries and completeness are recorded, not re-read. |
-| `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; served from the cache after a restart. |
+| `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; a store through a shared mapping after the last close is reconciled at the inode's last `FORGET` (no out-of-band warning); served from the cache after a restart. |
 | `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
@@ -1418,7 +1444,9 @@ None of this is built.
   be cached with their own `st_dev` (see
   [above](#how-kernel-submount-support-would-plug-in-not-built)).
 - **A kernel fix for passthrough shared writable mappings,** so that
-  RELEASE is not sent while a writable mapping still exists.
+  RELEASE is not sent while a writable mapping still exists (FORGET
+  reconciliation covers the stores, but only once the kernel lets go of
+  the inode; see [the mmap caveat](#the-mmap-caveat-and-forget-reconciliation)).
 - **A notifier thread** for kernel cache invalidation, if out-of-band
   detection ever needs to reach the kernel.
 - **ZFS**, once OpenZFS ships `FS_IOC_GETFSUUID`. A test gated on

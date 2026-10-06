@@ -59,6 +59,11 @@
  *       mapping, msync(2)s it, prints "STORED", and then sleeps forever
  *       WITHOUT closing the fd or unmapping, until killed: a store the
  *       kernel never tells dcfs about (no write(2), no FLUSH).
+ *   testutil mmapwrite-closed <path> <delay-seconds>
+ *       As mmapwrite, but close(2)s the descriptor right after mmap(2),
+ *       before printing "MAPPED": the store then comes after the last close
+ *       (on dcfs, after the last RELEASE), through a mapping that holds only
+ *       the backing file (step 23.1).
  *   testutil fsfreeze <path> <freeze|thaw>
  *       FIFREEZE/FITHAW on the filesystem <path> is on: while frozen, every
  *       write to it (a rename, say) blocks until it is thawed -- a way to
@@ -358,7 +363,8 @@ static int cmd_removexattr(const char *path, const char *name)
 	return 0;
 }
 
-static int cmd_mmapwrite(const char *path, const char *delay_str)
+static int cmd_mmapwrite(const char *path, const char *delay_str,
+			 int close_first)
 {
 	int fd = open(path, O_RDWR);
 	char *p;
@@ -369,6 +375,10 @@ static int cmd_mmapwrite(const char *path, const char *delay_str)
 	}
 	p = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (p == MAP_FAILED) {
+		print_err(errno);
+		return 1;
+	}
+	if (close_first && close(fd) == -1) {
 		print_err(errno);
 		return 1;
 	}
@@ -1977,7 +1987,9 @@ int main(int argc, char *argv[])
 	if (argc == 4 && strcmp(argv[1], "getxattrhex") == 0)
 		return cmd_getxattrhex(argv[2], argv[3]);
 	if (argc == 4 && strcmp(argv[1], "mmapwrite") == 0)
-		return cmd_mmapwrite(argv[2], argv[3]);
+		return cmd_mmapwrite(argv[2], argv[3], 0);
+	if (argc == 4 && strcmp(argv[1], "mmapwrite-closed") == 0)
+		return cmd_mmapwrite(argv[2], argv[3], 1);
 	if (argc == 4 && strcmp(argv[1], "fsfreeze") == 0)
 		return cmd_fsfreeze(argv[2], argv[3]);
 	if (argc == 6 && strcmp(argv[1], "fallocate") == 0)

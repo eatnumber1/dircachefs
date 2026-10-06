@@ -556,13 +556,18 @@ recovery protocol, concurrency, and the test strategy.
   (`FUSE_ATTR_SUBMOUNT`, today used only by virtiofs) would allow lifting
   this.
 - **Writes through a shared writable `mmap` after the last `close()` are
-  not tracked.** With passthrough, the mapping holds only the backing file,
+  seen late.** With passthrough, the mapping holds only the backing file,
   so the kernel releases the dcfs file at `close()` and later stores reach
-  the backing file without dcfs hearing of them. The file's cached size,
-  mtime and ctime stay as they were at `close()`, and NFS clients, which
-  detect changes through ctime, may keep serving stale data. While the
-  file is still open for writing, attributes are current. Fixing this
-  needs a kernel change.
+  the backing file without dcfs hearing of them. dcfs re-reads the
+  attributes of every file that was open for writing when the kernel
+  finally lets go of its inode (which cannot happen before the mapping is
+  gone) and at unmount; until then the file's cached mtime and ctime stay
+  as they were at `close()`, and NFS clients, which detect changes through
+  ctime, may serve stale data. That re-read is one `statx` of the backing
+  file, which can spin up a sleeping disk if the backing filesystem has
+  dropped the file from its own cache. While the file is still open for
+  writing, attributes are current. Fixing this fully needs a kernel
+  change.
 - **NFS handles do not survive deleting the cache database.** They fail
   with `ESTALE`, never by resolving to a different file. Handles do survive
   restarts of dcfs.
