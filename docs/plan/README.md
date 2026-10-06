@@ -40,7 +40,7 @@ phase's file; `log.md` says where things stand.
 | 10 | [Benchmarks](phases/10-benchmarks.md) | paused 2026-10-06 (machine saturated; partial work in lane-4) |
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
-| 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | planned |
+| 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | in progress (12.1 model merged 2026-10-06, russ to read formal/README.md; 12.2 after Phase 11) |
 | 13 | [Connected backing fds](phases/13-connected-backing-fds.md) | planned |
 | 14 | [Identity from the backing filesystem](phases/14-identity-from-backing-fs.md) | planned |
 | 15 | [The `mount.dcfs` wrapper](phases/15-mount-dcfs-wrapper.md) | planned |

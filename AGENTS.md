@@ -54,11 +54,15 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
 - **Tri-state records.** Every database record that mirrors something on
   the backing filesystem is present, absent or unknown, and a mutation
   sets it unknown before the backing syscall and present/absent after.
-- **The protocol has a model** (from phase 12): a change to the
-  write-through protocol (mutation phases, fills, the dirty set, sync
-  points, recovery) updates the TLA+ model in `formal/` in the same
-  change; trace validation fails if the code does something the model
-  does not allow.
+- **The protocol has a model.** A change to the write-through protocol
+  (mutation phases, fills and their guards, completeness, the dirty set,
+  sync points, recovery) updates the TLA+ model in `formal/` in the same
+  change, and `bazel test //formal/...` passes (see `formal/README.md`,
+  "Changing the model"). A protocol bug the model can express gets a
+  `formal/known_bugs/` variant whose test expects its counterexample.
+  Fixing a gap listed in `formal/findings/` moves its configuration into
+  the real model. From phase 12.2, trace validation fails if the code does
+  something the model does not allow.
 - **File names are bytes.** Never treat a name, symlink target or xattr
   name as text; escape it whenever it is printed (from phase 9).
 - **Third-party code is fetched and built by Bazel** (from phase 4), not
