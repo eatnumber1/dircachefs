@@ -425,6 +425,41 @@ cc_library(
     ],
 )
 
+# DirCacheFS through forged FUSE requests on a real libfuse session (no
+# kernel, no mount), with a link-time --wrap of open_by_handle_at that lets
+# a test run another request, or begin a mutation, at a backing syscall of
+# the request under test: the interleavings coroutines will produce (see
+# dir_cache_fs_test.cc). A target of its own, so the wrap affects nothing
+# else.
+qemu_cc_test(
+    name = "dir_cache_fs_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["dir_cache_fs_test.cc"],
+    disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
+    linkopts = ["-Wl,--wrap=open_by_handle_at"],
+    deps = [
+      ":backing",
+      ":context",
+      ":dir_cache_fs",
+      ":fuse_ops",
+      ":metadata_cache",
+      ":migrate",
+      ":mount_fds",
+      ":sqlite",
+      ":status",
+      ":syscalls",
+      "@absl//absl/random",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@absl//absl/time",
+      "@googletest//:gtest_main",
+      "@libfuse//:libfuse",
+    ],
+)
+
 cc_library(
     name = "mounts_below",
     srcs = ["mounts_below.cc"],

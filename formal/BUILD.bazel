@@ -41,7 +41,7 @@ tlc_test(
 )
 
 # Without the kernel's directory lock (the coroutine future), minus the
-# request kinds with known gaps there (findings/); about five minutes.
+# request kinds with known gaps there (findings/); about three minutes.
 tlc_test(
     name = "nolock_test",
     size = "large",
@@ -60,6 +60,7 @@ KNOWN_BUGS = {
     "tristate_f4_restore_complete": "Invariant TriState is violated",
     # Found by this model (formerly findings/); fixed in plan step R4.
     "sync_during_mutation": "Invariant CrashSafe is violated",
+    "readdirplus_unlocked": "Invariant ServedFromCacheIsCurrent is violated",
 }
 
 [
@@ -79,7 +80,6 @@ KNOWN_BUGS = {
 # the code is fixed and the model updated, the test fails: move the
 # configuration into the real model then.
 FINDINGS = {
-    "readdirplus_unlocked": "Invariant ServedFromCacheIsCurrent is violated",
     "rename_stale_source": "Invariant CacheNeverWrong is violated",
 }
 

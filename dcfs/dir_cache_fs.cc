@@ -1291,20 +1291,52 @@ size_t DirEntryPlusSize(std::string_view name) {
 
 }  // namespace
 
-absl::Status DirCacheFS::EnsureListed(InodeId dir) {
+absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
+    InodeId dir, int64_t cursor, size_t budget,
+    absl::FunctionRef<size_t(std::string_view)> entry_size) {
   // A readdir reply is built from the cached dentries (its offsets are
   // their rowids), so it needs the listing recorded, not just read. A
   // PopulateDirectory that could not record it (a mutation of `dir` ran
   // concurrently: see cache::CanFill) is retried; one still in flight
   // blocks every attempt.
   // TODO(coroutines): wait for the in-flight mutation instead.
+  //
+  // The invariant this relies on (formal/ finding readdirplus_unlocked):
+  // the IsDirComplete check that vouches for a listing and the ListDir
+  // that builds it run with no backing syscall between them -- under
+  // coroutines, no suspension point -- so no name can become unknown in
+  // between. ListDir skips every row that is not present, so a name made
+  // unknown after the check (a mutation's phase 1) would otherwise be left
+  // out although it may still exist. Only cache reads happen from the
+  // check to the return; the callers' "." and ".." (ParentOf, EntryFor's
+  // refresh) and readdirplus's per-entry EntryFor come after, and serve
+  // this snapshot, which was the directory's state when it was checked.
   constexpr int kAttempts = 3;
-  for (int attempt = 0; attempt < kAttempts; ++attempt) {
+  for (int attempt = 0;; ++attempt) {
     ABSL_ASSIGN_OR_RETURN(bool complete, cache::IsDirComplete(ctx_, dir));
-    if (complete) return absl::OkStatus();
-    ABSL_ASSIGN_OR_RETURN(backing::Populated populated,
-                          backing::PopulateDirectory(ctx_, dir));
-    if (populated.cached) return absl::OkStatus();
+    if (complete) {
+      std::vector<Listed> listed;
+      size_t used = 0;
+      ABSL_RETURN_IF_ERROR(cache::ListDir(
+          ctx_, dir, cursor,
+          [&](std::string_view name, InodeId child,
+              int64_t next_cursor) -> absl::StatusOr<bool> {
+            // Stop once the reply is full: the kernel will call again from
+            // the cursor this entry's offset encodes.
+            const size_t size = entry_size(name);
+            if (used + size > budget) return false;
+            listed.push_back({.name = std::string(name),
+                              .child = child,
+                              .next_cursor = next_cursor});
+            used += size;
+            return true;
+          }));
+      return listed;
+    }
+    if (attempt == kAttempts) break;
+    // Recorded or not, the loop checks completeness again: only that check
+    // may vouch for the listing.
+    ABSL_RETURN_IF_ERROR(backing::PopulateDirectory(ctx_, dir).status());
   }
   return dcfs::ErrnoToStatus(
       EAGAIN, absl::StrCat("directory ", dir,
@@ -1315,14 +1347,19 @@ absl::Status DirCacheFS::Readdir(
     FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info &fi) {
   InodeId dir = static_cast<InodeId>(ino);
-  ABSL_RETURN_IF_ERROR(EnsureListed(dir));
+  size_t used = 0;
+  if (off < 1) used += DirEntrySize(".");
+  if (off < 2) used += DirEntrySize("..");
+  // First, before any syscall: see ListCached.
+  ABSL_ASSIGN_OR_RETURN(
+      std::vector<Listed> listed,
+      ListCached(dir, CursorFromOffset(off), size > used ? size - used : 0,
+                 DirEntrySize));
 
   std::vector<FuseDirEntry> entries;
-  size_t used = 0;
   if (off < 1) {
     ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(dir));
     entries.push_back({.name = ".", .stbuf = DotStat(attr), .off = 1});
-    used += DirEntrySize(entries.back().name);
   }
   if (off < 2) {
     // The root is its own parent (ParentOf), as a mount's root is: what is
@@ -1330,27 +1367,14 @@ absl::Status DirCacheFS::Readdir(
     ABSL_ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
     ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(parent));
     entries.push_back({.name = "..", .stbuf = DotStat(attr), .off = 2});
-    used += DirEntrySize(entries.back().name);
   }
-
-  ABSL_RETURN_IF_ERROR(cache::ListDir(
-      ctx_, dir, CursorFromOffset(off),
-      [&](std::string_view name, InodeId child,
-          int64_t next_cursor) -> absl::StatusOr<bool> {
-        size_t entry_size = DirEntrySize(name);
-        // Stop once this reply is full -- the kernel will call again with
-        // the resume cursor `next_cursor` already encodes as this entry's
-        // offset.
-        if (used + entry_size > size) return false;
-        ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(child));
-        struct stat st = {};
-        st.st_ino = attr.backing_ino;
-        st.st_mode = attr.st.st_mode;
-        entries.push_back(
-            {.name = std::string(name), .stbuf = st, .off = next_cursor + 2});
-        used += entry_size;
-        return true;
-      }));
+  for (const Listed &e : listed) {
+    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(e.child));
+    struct stat st = {};
+    st.st_ino = attr.backing_ino;
+    st.st_mode = attr.st.st_mode;
+    entries.push_back({.name = e.name, .stbuf = st, .off = e.next_cursor + 2});
+  }
   return req.ReplyDirs(entries, size);
 }
 
@@ -1358,43 +1382,38 @@ absl::Status DirCacheFS::Readdirplus(
     FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
     fuse_file_info &fi) {
   InodeId dir = static_cast<InodeId>(ino);
-  ABSL_RETURN_IF_ERROR(EnsureListed(dir));
+  size_t used = 0;
+  if (off < 1) used += DirEntryPlusSize(".");
+  if (off < 2) used += DirEntryPlusSize("..");
+  // First, before any syscall: see ListCached.
+  ABSL_ASSIGN_OR_RETURN(
+      std::vector<Listed> listed,
+      ListCached(dir, CursorFromOffset(off), size > used ? size - used : 0,
+                 DirEntryPlusSize));
 
   std::vector<FuseDirEntryPlus> entries;
-  size_t used = 0;
   if (off < 1) {
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(dir));
     entries.push_back({.name = ".", .entry = entry, .off = 1});
-    used += DirEntryPlusSize(entries.back().name);
   }
   if (off < 2) {
     ABSL_ASSIGN_OR_RETURN(InodeId parent, backing::ParentOf(ctx_, dir));
     ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(parent));
     entries.push_back({.name = "..", .entry = entry, .off = 2});
-    used += DirEntryPlusSize(entries.back().name);
   }
-
-  ABSL_RETURN_IF_ERROR(cache::ListDir(
-      ctx_, dir, CursorFromOffset(off),
-      [&](std::string_view name, InodeId child,
-          int64_t next_cursor) -> absl::StatusOr<bool> {
-        size_t entry_size = DirEntryPlusSize(name);
-        // Checked (and, on failure, EntryFor -- which can itself write to
-        // the cache -- skipped) before touching the cache at all, same as
-        // Readdir above.
-        if (used + entry_size > size) return false;
-        ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child));
-        entries.push_back(
-            {.name = std::string(name), .entry = entry,
-             .off = next_cursor + 2});
-        used += entry_size;
-        return true;
-      }));
+  // EntryFor may refresh an entry's attributes (syscalls; a fill, guarded
+  // on its own). Only entries that fit the reply were listed, so nothing
+  // is refreshed for an entry the reply then drops.
+  for (const Listed &e : listed) {
+    ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(e.child));
+    entries.push_back(
+        {.name = e.name, .entry = entry, .off = e.next_cursor + 2});
+  }
   ABSL_RETURN_IF_ERROR(req.ReplyDirsPlus(entries, size));
   // The kernel counts a lookup for every entry in the reply with a nonzero
   // nodeid except "." and ".." (fuse_direntplus_link), whether or not it
   // fits the caller's buffer (it sends FORGET for those it cannot link).
-  // Every entry collected above fits the reply (checked as it was added),
+  // Every entry collected above fits the reply (checked as it was listed),
   // so all of them were sent.
   for (const FuseDirEntryPlus &e : entries) {
     if (e.name != "." && e.name != ".." && e.entry.ino != 0) {

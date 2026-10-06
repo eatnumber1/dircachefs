@@ -40,7 +40,8 @@ CONSTANTS
     BugCreateKeepsParentAttrs,  \* crash F3
     BugUnguardedFills,          \* tri-state F1
     BugRestoreComplete,         \* tri-state F4
-    BugSyncIgnoresMutations     \* finding sync_during_mutation (R4)
+    BugSyncIgnoresMutations,    \* finding sync_during_mutation (R4)
+    BugReaddirplusUnlocked      \* finding readdirplus_unlocked (R4)
 
 AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
              "create", "unlink", "rename", "sync"}
@@ -51,7 +52,8 @@ ASSUME /\ Names # {} /\ IsFiniteSet(Names)
        /\ MaxMutations \in Nat /\ MaxCrashes \in Nat
        /\ \A b \in {KernelDirLock, BugPhase1NotDurable,
                     BugCreateKeepsParentAttrs, BugUnguardedFills,
-                    BugRestoreComplete, BugSyncIgnoresMutations} :
+                    BugRestoreComplete, BugSyncIgnoresMutations,
+                    BugReaddirplusUnlocked} :
               b \in BOOLEAN
 
 -----------------------------------------------------------------------------
@@ -292,7 +294,7 @@ PDRead(p) ==
 \* link every listed child, prune every other row (PruneDentriesNotIn) and
 \* mark D complete, in one transaction. Then LookupOrPopulate answers from
 \* the cache if the listing was recorded, else from the listing itself;
-\* readdir (EnsureListed) checks again or retries.
+\* readdir (ListCached) checks again or retries.
 PDCommit(p) ==
     /\ At(p, "PD_commit")
     /\ LET r == ps[p]
@@ -323,21 +325,24 @@ PDCommit(p) ==
 LK(p) == At(p, "LK") /\ LKFrom(p, ps[p])
 
 (***************************************************************************)
-(* Readdir and Readdirplus (DirCacheFS::EnsureListed, then ListDir).      *)
+(* Readdir and Readdirplus (DirCacheFS::ListCached, then "." and "..").   *)
 (***************************************************************************)
 
-\* EnsureListed: if the listing can be served (IsDirComplete), Readdir lists
-\* the present rows at once (ParentOf of the root needs no syscall).
-\* Readdirplus first replies "." with EntryFor(D), which refreshes D's
-\* attributes (BeginFill, then syscalls) if they are unknown, and only then
-\* lists. Otherwise populate and check again, up to kAttempts = 3 times
-\* (then EAGAIN).
+\* ListCached: if the listing can be served (IsDirComplete), it is taken
+\* from the cache (ListDir: the present rows) at once, before any syscall,
+\* and that is the answer. Readdir then needs no syscall (ParentOf of the
+\* root needs none); Readdirplus replies "." with EntryFor(D), which
+\* refreshes D's attributes (BeginFill, then syscalls) if they are unknown.
+\* Otherwise populate and check again, up to kAttempts = 3 times (then
+\* EAGAIN). BugReaddirplusUnlocked: Readdirplus lists only after "."'s
+\* refresh, without checking again (finding readdirplus_unlocked).
 RDFrom(p, r) ==
     /\ IF DirListable(dbCur)
        THEN IF r.kind = "readdir" \/ dbCur.attrValid
             THEN Serve(ListRes(Listing(dbCur))) /\ Done(p)
-            ELSE NoServe /\ Syscall(p, [r EXCEPT !.pc = "RDP_stat",
-                                                 !.snap = seq])
+            ELSE /\ IF BugReaddirplusUnlocked THEN NoServe
+                    ELSE Serve(ListRes(Listing(dbCur)))
+                 /\ Syscall(p, [r EXCEPT !.pc = "RDP_stat", !.snap = seq])
        ELSE /\ NoServe
             /\ IF r.attempts < 3
                THEN Syscall(p, [r EXCEPT !.pc = "PD_read",
@@ -347,15 +352,17 @@ RDFrom(p, r) ==
 
 RD(p) == At(p, "RD") /\ RDFrom(p, ps[p])
 
-\* Readdirplus: FillAttrs(D), then ListDir: the present rows, without
-\* checking IsDirComplete again.
-RDPList(p) ==
-    /\ At(p, "RDP_list")
+\* Readdirplus: FillAttrs(D), and the reply (the listing taken before the
+\* refresh). BugReaddirplusUnlocked: ListDir now, without checking
+\* IsDirComplete again.
+RDPFill(p) ==
+    /\ At(p, "RDP_fill")
     /\ IF CanFill(ps[p].snap)
        THEN Commit([dbCur EXCEPT !.attrValid = TRUE, !.attr = ps[p].rdVer],
                    FALSE)
        ELSE UnchangedDB
-    /\ Serve(ListRes(Listing(dbCur)))
+    /\ IF BugReaddirplusUnlocked THEN Serve(ListRes(Listing(dbCur)))
+       ELSE NoServe
     /\ Done(p)
     /\ UnchangedBacking /\ UnchangedGuards /\ UNCHANGED stamp
 
@@ -687,8 +694,8 @@ ResolveCommit(p)   == RNCommit(p) /\ F
 PopulateRead(p)    == PDRead(p) /\ F
 PopulateCommit(p)  == PDCommit(p) /\ F
 ReaddirStep(p)     == RD(p) /\ F
-ReaddirplusStat(p) == Stat(p, "RDP_stat", "RDP_list") /\ F
-ReaddirplusList(p) == RDPList(p) /\ F
+ReaddirplusStat(p) == Stat(p, "RDP_stat", "RDP_fill") /\ F
+ReaddirplusFill(p) == RDPFill(p) /\ F
 GetattrStat(p)     == Stat(p, "GA_stat", "GA_fill") /\ F
 GetattrFill(p)     == FillAttrsAndReply(p, "GA_fill") /\ F
 CreateSyscall(p)   == CSys(p) /\ F
@@ -829,7 +836,7 @@ Next ==
          \/ Arrive(p)
          \/ LookupStep(p) \/ ResolveProbe(p) \/ ResolveCommit(p)
          \/ PopulateRead(p) \/ PopulateCommit(p)
-         \/ ReaddirStep(p) \/ ReaddirplusStat(p) \/ ReaddirplusList(p)
+         \/ ReaddirStep(p) \/ ReaddirplusStat(p) \/ ReaddirplusFill(p)
          \/ GetattrStat(p) \/ GetattrFill(p)
          \/ CreateSyscall(p) \/ CreateProbe(p) \/ CreatePhase3(p)
          \/ CreateStat(p) \/ CreateFill(p) \/ CreateFailed(p)

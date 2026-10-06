@@ -521,10 +521,15 @@ that gets `EEXIST`) re-resolves its names the same way, so the common
 failures cost one probe rather than a relist.
 
 **Readdir** needs the listing recorded, not merely read, because its
-offsets are dentry rowids: `DirCacheFS::EnsureListed` populates and
+offsets are dentry rowids: `DirCacheFS::ListCached` populates and
 retries if a concurrent mutation prevented the listing from being recorded.
-Readdirplus additionally returns each child's attributes, refreshing any
-that are unknown.
+It takes the reply's entries from the cache right after the completeness
+check that vouches for them, before any backing syscall ("." and "..",
+which may need `ParentOf` or an attribute refresh, come after): a name made
+unknown in between would otherwise be left out, since a listing skips
+every entry that is not present (the model's finding
+`readdirplus_unlocked`). Readdirplus additionally returns each child's
+attributes, refreshing any that are unknown.
 
 **What still touches the backing filesystem** when the cache is warm:
 opening a file (contents go through passthrough), any mutation, `statfs`
@@ -812,13 +817,17 @@ custom VFS. The code already follows the rules that make that safe:
 - **A sync point clears only what its `syncfs` covers**: rows in its
   snapshot of the dirty set whose inode no mutation touched since (see
   [Sync points](#sync-points)).
+- **A check and what it vouches for have no suspension point between
+  them.** A directory listing is taken from the cache right after the
+  completeness check (`DirCacheFS::ListCached`), and everything that needs
+  a syscall comes after.
 - **Credential switches never span a suspension point.** `AsCaller` wraps
   exactly one synchronous syscall, and the switch is per thread (see
   [Caller credentials](#caller-credentials)).
 - **Replies can be deferred.** `FuseRequest` is movable and owns exactly
   one reply; libfuse allows replying from any thread.
 
-Places still marked `TODO(coroutines)`: `EnsureListed` retries a
+Places still marked `TODO(coroutines)`: `ListCached` retries a
 population a few times when a concurrent mutation keeps it from being
 recorded, where a coroutine would wait for the mutation instead. The
 status macros embed `return` and will need `co_return` variants.
@@ -1269,8 +1278,9 @@ and how to read a counterexample.
 The model describes the code as it is. It found three gaps that only today's
 single thread and the kernel's per-directory lock kept unreachable: a sync
 point cleared the dirty rows of mutations still in flight (fixed: see
-[Sync points](#sync-points)); Readdirplus lists after a suspension point
-without checking completeness again; and Rename's phase 3 trusts a source
-resolved before its phase 1. The open ones are kept as
+[Sync points](#sync-points)); Readdirplus listed after a suspension point
+without checking completeness again (fixed: see Readdir under
+[Population policy](#population-policy)); and Rename's phase 3 trusts a
+source resolved before its phase 1. The open ones are kept as
 expected-counterexample tests under `formal/findings/`, and must be fixed
 before requests run concurrently.

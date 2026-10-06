@@ -3,11 +3,13 @@
 
 #include <sys/types.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -233,8 +235,20 @@ class DirCacheFS {
   // is outstanding, else opts_.attr_timeout.
   absl::Duration AttrTimeoutFor(InodeId id) const;
 
-  // Makes sure `dir`'s listing is cached (complete), populating it if not.
-  absl::Status EnsureListed(InodeId dir);
+  // One reply's worth of `dir`'s cached entries after `cursor` (a ListDir
+  // cursor), as many as fit in `budget` bytes by `entry_size`, populating
+  // `dir` first if its listing is not complete (a few attempts, then
+  // EAGAIN). Taken from the cache with no backing syscall between the
+  // completeness check and the listing (see the definition): callers do
+  // everything that needs a syscall ("." and "..", EntryFor) afterwards.
+  struct Listed {
+    std::string name;
+    InodeId child = 0;
+    int64_t next_cursor = 0;
+  };
+  absl::StatusOr<std::vector<Listed>> ListCached(
+      InodeId dir, int64_t cursor, size_t budget,
+      absl::FunctionRef<size_t(std::string_view)> entry_size);
 
   // `attr` (id's row) if valid, else refreshed (RefreshAttrsOf) and answered
   // from the fresh statx itself, whether or not the cache recorded it (see

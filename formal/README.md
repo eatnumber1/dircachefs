@@ -205,8 +205,8 @@ prints. A request's first step runs inside `Arrive`.
 | `ResolveCommit` | Record the name if `CanFill(D)`; answer from the probe either way | same | `ResolveName`, `cache::CanFill`, `SetNegative`/`LinkDentry` |
 | `PopulateRead` | Fill snapshot, D's epoch, getdents64 and every probe | Population policy | `backing::PopulateDirectory` phase A, `cache::DirEpoch` |
 | `PopulateCommit` | If `CanFill(D)` and the epoch is unchanged: link the listed names, prune the rest, mark complete. Answer from the cache if recorded, else from the listing | Population policy, Concurrency (compare-and-set completeness) | `PopulateDirectory` phase B, `PruneDentriesNotIn`, `MarkDirComplete` |
-| `ReaddirStep` | Serve the listing if `IsDirComplete`; else populate (at most 3 attempts, then `EAGAIN`). Readdirplus first refreshes D's attributes if unknown | Population policy | `DirCacheFS::EnsureListed`, `Readdir`, `Readdirplus`, `cache::IsDirComplete`, `ListDir` |
-| `ReaddirplusStat`, `ReaddirplusList` | Readdirplus: statx of D, then fill D's attributes and list the present rows | same | `DirCacheFS::Readdirplus`, `EntryFor` |
+| `ReaddirStep` | If `IsDirComplete`, serve the listing (the present rows) at once, before any syscall; else populate and check again (at most 3 attempts, then `EAGAIN`). Readdirplus then refreshes D's attributes if unknown | Population policy | `DirCacheFS::ListCached`, `Readdir`, `Readdirplus`, `cache::IsDirComplete`, `ListDir` |
+| `ReaddirplusStat`, `ReaddirplusFill` | Readdirplus: statx of D, then fill D's attributes and reply | same | `DirCacheFS::Readdirplus`, `EntryFor` |
 | `GetattrStat`, `GetattrFill` | Getattr of D with unknown attributes: statx, fill if `CanFill(D)`; reply what was read (a getattr with valid attributes is served in `Arrive`) | Concurrency (fill guards) | `DirCacheFS::Getattr`, `EntryFor`, `backing::RefreshAttrs`, `FillAttrs` |
 | (create, first step) | Phase 1: the name and D's attributes unknown, D dirty, committed kSync unless D is durably dirty (fast path) | The write-through protocol: Phase 1 | `DirCacheFS::CreateChild`, `cache::BeginCreate`, `BeginMutation` |
 | `CreateSyscall` | Phase 2: mkdirat/openat(O_CREAT)...; `EEXIST` if the name exists | Phase 2 | `backing::MkdirAt` etc. |
@@ -255,7 +255,7 @@ as distinct states.
 | `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 368,668 | ~1 min |
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 32,839 | ~15-30 s |
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 3,950,002 | ~8 min |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; no rename or readdirplus (see Findings) | 1,701,417 | ~3 min |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; no rename (see Findings) | 3,029,643 | ~4 min |
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
@@ -278,6 +278,7 @@ FALSE in the real configurations.
 | `tristate_f1_unguarded_fills` | unguarded fills (tri-state F1) | `TriState` | a getattr reads D's attributes, a create's phase 1 runs, the getattr commits what it read anyway (with only `CacheNeverWrong` checked: one step later, once the create's syscall changed D, the stale attributes are served) |
 | `tristate_f4_restore_complete` | the restore-completeness lost update (tri-state F4); needs two mutations of D in flight, so without the kernel lock | `TriState` | an unlink's phase 1 deletes `a`'s row and clears completeness; its syscall; a create of `a` begins (phase 1); the unlink's phase 3 restores completeness, so `a` reads absent while its create is in flight |
 | `sync_during_mutation` | a sync point cleared the dirty rows of mutations in flight (a [finding](#findings) of this model, fixed in plan step R4) | `CrashSafe` | a create of `b`: phase 1 (D dirty, kSync); a sync point: syncfs; the create's syscall, probe and phase 3 (`b` recorded), and its end; the sync point clears D's row. A crash may now keep that database and lose the unsynced create, and recovery has nothing to forget. (Keeping only the inodes in flight at `ClearDirty` would not help: the create had ended.) |
+| `readdirplus_unlocked` | Readdirplus listed after a suspension point without checking completeness again (a finding, fixed in R4); without the kernel lock | `ServedFromCacheIsCurrent` | a lookup populates D (`a` present, complete); a readdirplus finds D complete with its attributes unknown and goes to statx D; a create of `a` begins (phase 1: `a` unknown); the readdirplus fills D's attributes and lists the present rows: none, while `a` exists |
 
 ## Findings
 
@@ -298,12 +299,18 @@ Fixed (plan step R4):
   constant (no sync point overlaps a mutation); the constant is gone, and
   every configuration lets sync points interleave. Now the known bug
   `sync_during_mutation`.
+- `readdirplus_unlocked`: Readdirplus (and Readdir of a non-root
+  directory) checked completeness, ran syscalls ("."'s refresh,
+  `ParentOf`), then listed without checking again, so a name made unknown
+  in between was left out. Now `DirCacheFS::ListCached` takes the listing
+  right after the check, before any syscall. `MC_nolock.cfg` includes
+  readdirplus (the finding's configuration); now the known bug
+  `readdirplus_unlocked`.
 
 Open:
 
 | Finding | Expected | What happens |
 |---|---|---|
-| `readdirplus_unlocked` (no kernel lock) | `ServedFromCacheIsCurrent` | `Readdirplus` checks `IsDirComplete`, then refreshes "."'s attributes (syscalls), then `ListDir` lists present rows without checking again: a name made unknown in between is left out. `Readdir` has the same shape for a non-root directory (`ParentOf`'s syscalls). Under the kernel lock it would still need a name made unknown without D's lock (an `InvalidateInode`, not modelled) |
 | `rename_stale_source` (no kernel lock) | `CacheNeverWrong` | `Rename` resolves the source before phase 1 and phase 3 links the destination to it if it `Owns` the parent; `Owns` only sees overlaps from phase 1 on. A source answered from a probe that was not recorded (a concurrent rename was in flight) is stale once that rename ends; phase 3 records the old object under the new name. In the code `LinkDentry` then fails if the old object's row is gone, but not if it has another link |
 
 ## Reading a counterexample
