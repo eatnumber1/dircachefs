@@ -470,3 +470,18 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   mid-run initial state trusted; T_Recover wider than RecoverDirty. Sent back as 12.2b with the
   reviewer's fixes and two more fault tests; re-review required before merge.
 - 2026-10-07 ~03:10: a usage limit cut off the three running agents (12.2b, 6.2 bundle, 5.2 CI) mid-step; all three resumed with their context after the reset. Lanes' uncommitted work was intact.
+- Phase 5.2 merged (f9380f1; dcfs-investigator): .github/workflows/ci.yml with fast/presubmit/full
+  jobs and .github/ci/*.sh; act v0.2.89 pinned (http_archive), runner image catthehacker ubuntu
+  act-latest pinned by digest, actions by SHA; wrapper passes /dev/kvm + kvm gid, label
+  dcfs.owner=act, --rm, a 6g memory cap. Under act with KVM: fast 52/52 (warm 3-8 min; cold 1h04
+  incl. a 40 min kernel build), presubmit 100/100 (8-16 min), full plain 116/117 (idle_short_test_xfs
+  again), full ASan 108/117: memory_test x4 (ASan's allocator inflates bytes per entry: 7862 vs 256;
+  the test must not assert allocator-dependent bytes under sanitizers while keeping the second-tree
+  bound), names_random_slow_test x4 (dcfs DISCONNECTS, ENOTCONN, during the 100k-name run under ASan
+  on the host too: likely a real memory error only the slow tier reaches: investigate first). Host
+  dependencies the detector exposed, now installed in prepare.sh and listed in README: cpio
+  (mkinitramfs.sh printed "cpio: not found", exited 0 and cached an EMPTY initramfs: fix with
+  pipefail or busybox's cpio), ninja (QEMU configure), flex/bison (kernel), libelf-dev (objtool).
+  ftp.gnu.org unreachable once: gnu_bc has a mirrors.kernel.org second URL. pjdfstest under TCG:
+  ext4 only, 7200 s. Kernel matrix deferred (kernel.config asks for FUSE_IO_URING, 6.14+; the stated
+  minimum of 6.9 is not buildable as pinned). Nothing published; russ pushes when ready.
