@@ -1,0 +1,15 @@
+# OSV-Scanner configuration (plan step 5.3; see "Dependency vulnerability
+# scanning" in README.md and tools/sbom/README.md).
+#
+# One [[IgnoredVulns]] entry per accepted finding, and nothing else ignores
+# anything. Every entry needs:
+#
+#   id          = "DEBIAN-CVE-2026-0000"   # the OSV id shown in the report
+#   ignoreUntil = 2026-12-31               # expiry date: the ignore ends then
+#   reason      = "why this does not affect dcfs, and what would end it"
+#
+# `tools/sbom/sbom.py check-ignores` (CI job `osv`, and the Bazel test
+# //tools/sbom:sbom_test) fails when an entry has no reason, no date, or a
+# date in the past, so an ignore always comes back for review.
+#
+# Currently no findings are ignored.

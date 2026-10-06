@@ -29,6 +29,10 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # New advisories against unchanged pins: only the `osv` job runs on the
+  # schedule (the test jobs are skipped), so it needs no code change.
+  schedule:
+    - cron: "17 5 * * 1"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -39,6 +43,7 @@ permissions:
 
 jobs:
   fast:
+    if: ${{ github.event_name != 'schedule' }}
     # Small tests: `bazel test --config=fast //...` (about a minute with KVM, once built).
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -171,3 +176,41 @@ jobs:
             ~/.cache/bazel-repo-cache
             ~/.cache/bazelisk
           key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  osv:
+    # Dependency vulnerability scan (plan step 5.3): the SBOM of every pin
+    # (tools/sbom/, README.md "Dependency vulnerability scanning") against
+    # OSV. The scanner version is the one of the action pinned below (its
+    # image, ghcr.io/google/osv-scanner-action:v2.6.0). Fails on any finding
+    # that osv-scanner.toml does not ignore, and on an expired ignore.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check ignores, generate the SBOM
+        run: ./.github/ci/osv.sh
+      - name: Scanner self-check (a deliberately old zlib must be found)
+        id: seeded
+        continue-on-error: true
+        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+        with:
+          scan-args: |-
+            scan
+            source
+            -L
+            tools/sbom/testdata/seeded_vulnerable.cdx.json
+      - name: The self-check found something
+        run: |
+          test "${{ steps.seeded.outcome }}" = failure || {
+            echo "scanner reported nothing for a known-vulnerable zlib 1.2.11: the scan is vacuous" >&2
+            exit 1
+          }
+      - name: Scan the pins
+        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+        with:
+          scan-args: |-
+            scan
+            source
+            --config=osv-scanner.toml
+            -L
+            osv/dcfs.cdx.json

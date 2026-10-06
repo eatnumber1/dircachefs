@@ -1,0 +1,39 @@
+{
+  "_comment": "Maps every pin (a bazel_dep or a repository declared in MODULE.bazel) to the package URL its SBOM entry uses. 'purl' is the purl without version; 'version' says where the version comes from for repositories ('strip_prefix', 'dtc_strip_prefix', or 'url:<regex>' with one group). 'kind' is 'code' (shipped in or used to build what the tests run), 'build-rules' (Bazel rules, never in an artifact) or 'tool'. OSV matches only purl types with an OSV ecosystem (deb here); every other entry is carried so the SBOM is complete and is listed in README.md as unmatched. tools/sbom/sbom_test.py fails when a pin has no entry here.",
+  "bazel_dep": {
+    "abseil-cpp": {"purl": "pkg:github/abseil/abseil-cpp", "kind": "code"},
+    "sqlite3": {"purl": "pkg:generic/sqlite", "kind": "code"},
+    "libfuse": {"purl": "pkg:github/libfuse/libfuse", "kind": "code"},
+    "googletest": {"purl": "pkg:github/google/googletest", "kind": "code"},
+    "google_benchmark": {"purl": "pkg:github/google/benchmark", "kind": "code"},
+    "glib": {"purl": "pkg:generic/glib", "kind": "code"},
+    "zlib": {"purl": "pkg:github/madler/zlib", "kind": "code"},
+    "rules_cc": {"purl": "pkg:github/bazelbuild/rules_cc", "kind": "build-rules"},
+    "rules_shell": {"purl": "pkg:github/bazelbuild/rules_shell", "kind": "build-rules"},
+    "bazel_skylib": {"purl": "pkg:github/bazelbuild/bazel-skylib", "kind": "build-rules"},
+    "rules_foreign_cc": {"purl": "pkg:github/bazel-contrib/rules_foreign_cc", "kind": "build-rules"},
+    "rules_distroless": {"purl": "pkg:github/bazel-contrib/rules_distroless", "kind": "build-rules"},
+    "rules_java": {"purl": "pkg:github/bazelbuild/rules_java", "kind": "build-rules"},
+    "rules_python": {"purl": "pkg:github/bazel-contrib/rules_python", "kind": "build-rules"}
+  },
+  "repository": {
+    "linux_source": {"purl": "pkg:generic/linux", "kind": "code", "version": "strip_prefix"},
+    "gnu_bc": {"purl": "pkg:generic/bc", "kind": "tool", "version": "strip_prefix"},
+    "pjdfstest": {"purl": "pkg:github/pjd/pjdfstest", "kind": "tool", "version": "strip_prefix"},
+    "qemu": {"purl": "pkg:generic/qemu", "kind": "tool", "version": "strip_prefix"},
+    "qemu.dtc": {"purl": "pkg:generic/dtc", "kind": "tool", "version": "dtc_strip_prefix"},
+    "e2fsprogs_src": {"purl": "pkg:generic/e2fsprogs", "kind": "tool", "version": "strip_prefix"},
+    "e2fsprogs_libarchive": {"purl": "pkg:github/libarchive/libarchive", "kind": "tool", "version": "strip_prefix"},
+    "busybox": {"purl": "pkg:generic/busybox", "kind": "code", "version": "strip_prefix"},
+    "util_linux_src": {"purl": "pkg:generic/util-linux", "kind": "tool", "version": "strip_prefix"},
+    "userspace_rcu_src": {"purl": "pkg:generic/userspace-rcu", "kind": "tool", "version": "strip_prefix"},
+    "inih_src": {"purl": "pkg:github/benhoyt/inih", "kind": "tool", "version": "strip_prefix"},
+    "xfsprogs_src": {"purl": "pkg:generic/xfsprogs", "kind": "tool", "version": "strip_prefix"},
+    "btrfs_progs_src": {"purl": "pkg:generic/btrfs-progs", "kind": "tool", "version": "strip_prefix"},
+    "tla2tools": {"purl": "pkg:github/tlaplus/tlaplus", "kind": "tool", "version": "url:/download/v([^/]+)/"},
+    "act": {"purl": "pkg:github/nektos/act", "kind": "tool", "version": "url:/download/v([^/]+)/"}
+  },
+  "script": {
+    "bazelisk": {"purl": "pkg:github/bazelbuild/bazelisk", "kind": "tool"}
+  }
+}

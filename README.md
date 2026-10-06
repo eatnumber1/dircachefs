@@ -386,6 +386,47 @@ build or test that quietly depends on this machine's tools fails there:
 running the `full` job under `act` is how the host requirements above were
 found. Run it again after adding a tool or a test.
 
+### Dependency vulnerability scanning (OSV-Scanner)
+
+The `osv` CI job (every push to `main`, every pull request, and weekly on
+Mondays, so new advisories reach unchanged pins) generates a CycloneDX SBOM
+of everything pinned (`tools/sbom/`: `MODULE.bazel`'s modules and
+repositories, the Debian packages of `third_party/debian/debs.lock`,
+Bazelisk) and scans it with the pinned `osv-scanner-action`
+(`tools/sbom/README.md`). It fails on any finding that `osv-scanner.toml` does
+not ignore; an ignore needs a reason and an expiry date, and an expired or
+unexplained ignore fails the job. A self-check step scans a deliberately old
+zlib (`tools/sbom/testdata/`) and fails the job if the scanner reports
+nothing. Run it with `bazel run //third_party/act -- -j osv`;
+`bazel test //tools/sbom:sbom_test` checks that no pin lacks an SBOM entry.
+
+What OSV can and cannot match (observed with osv-scanner v2.6.0, 2026-10-06):
+
+- **Matched: the Debian packages** (`pkg:deb/debian/<source>@<version>`,
+  matched against Debian's security tracker).
+- **Not matched, carried in the SBOM so the list is complete.** The scanner
+  accepts `pkg:github/...` and `pkg:generic/...` purls but OSV has no
+  package ecosystem for them (`pkg:github/madler/zlib@v1.2.11` and
+  `pkg:generic/zlib@1.2.11` report nothing, while the same zlib as
+  `pkg:deb/...` reports twelve findings). These pins therefore get no
+  vulnerability coverage from this job:
+  - purl type `generic`: the Linux kernel (`linux` 7.2.9; OSV's `Linux`
+    ecosystem exists but `api.osv.dev` returned nothing for a `Kernel`/`Linux`
+    query of old, vulnerable versions, and no purl type reaches it), QEMU,
+    dtc, busybox, GNU bc, e2fsprogs, util-linux, xfsprogs, btrfs-progs,
+    userspace-rcu, sqlite3 (BCR module), glib (BCR module);
+  - purl type `github`: abseil-cpp, googletest, google_benchmark, libfuse,
+    zlib (BCR module), libarchive, inih, pjdfstest, TLA+ tools, act, Bazelisk,
+    and the Bazel rule sets (`rules_cc`, `rules_shell`, `bazel_skylib`,
+    `rules_foreign_cc`, `rules_distroless`, `rules_java`, `rules_python`; build
+    rules, never part of an artifact).
+  Types also tried and not recognised or not matched by the scanner:
+  `conan`, `rpm`, `alpine`, `vcpkg`, `bazel`, `linux`, `kernel`. The
+  alternative (the `GIT`-range advisories OSV has for most C projects) needs
+  a commit hash per pin, which the tarball pins do not carry.
+  Several of these programs are also in the Debian rootfs, whose copies are
+  scanned, but that says nothing about the pinned upstream version.
+
 ## Design overview
 
 dcfs is layered so that exactly one module touches the backing filesystem

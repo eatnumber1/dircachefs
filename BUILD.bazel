@@ -1,3 +1,9 @@
-# The root package exists only to export the lock file to
-# //third_party/debian:version_check_test.
-exports_files(["MODULE.bazel.lock"])
+# The root package exists only to export files other packages check:
+# the lock file (//third_party/debian:version_check_test) and the pins the
+# SBOM test reads (//tools/sbom:sbom_test).
+exports_files([
+    "MODULE.bazel",
+    "MODULE.bazel.lock",
+    "osv-scanner.toml",
+    ".github/ci/prepare.sh",
+])

@@ -524,3 +524,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   checks failing on the raw filesystem). With tail fixed both sides fail the same 28 TODO checks
   (ext4/xfs/btrfs shards sum to 8827 checks).
 - 6.2 bundle merged (tip bf6c3fc). lane-4 next: Phase 5.3 OSV-Scanner.
+- 5.3 OSV-Scanner (step-5.3-osv). Scanner v2.6.0 (action commit a345acff...). SBOM: 132 entries,
+  102 Debian source packages matchable, 30 pins OSV cannot match (github/generic purls give no
+  findings even for known-bad versions; Linux ecosystem not returned by api.osv.dev for old
+  kernels): README. Seeded zlib 1.2.11 under act: 12 findings, job's self-check passes. Real
+  scan under act: red, 158 findings in 26 Debian bookworm source packages (python3.11 24, expat
+  28, glibc 16, perl 16, openssl 12, util-linux 9, libevent 8, pcre2 7, sqlite3 6, others <=3);
+  fixed versions exist in bookworm for 57 of them (expat, libevent, openssl, pcre2, perl:
+  newer than the 20261004 snapshot's main suite) - a snapshot bump or ignores with reasons are
+  russ's call; none added.
+

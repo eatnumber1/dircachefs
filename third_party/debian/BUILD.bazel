@@ -81,3 +81,6 @@ sh_test(
         "//third_party/e2fsprogs:debugfs",
     ],
 )
+
+# The pinned package list, read by //tools/sbom:sbom_test.
+exports_files(["debs.lock"])

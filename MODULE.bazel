@@ -270,3 +270,14 @@ http_archive(
     sha256 = "0191d6f1f3b716b5c55820032605d05fc3c1cdbf581ebeff655019e5dd1524c0",
     urls = ["https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz"],
 )
+
+# Phase 5.3: Python for tools/sbom/ (the SBOM generator and its test), a
+# hermetic interpreter from rules_python so that no host python is needed
+# by `bazel test`. See tools/sbom/README.md.
+bazel_dep(name = "rules_python", version = "1.9.0")
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    is_default = True,
+    python_version = "3.12",
+)
