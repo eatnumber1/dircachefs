@@ -1282,15 +1282,13 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsEverythingPastTheFloor) {
   ASSERT_THAT(BeginAttrChange(ctx_, f.id), IsOk());
   ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
 
-  // Mutations of more inodes than FillGuards::touched holds
-  // (metadata_cache.cc's kMaxTouched, 1 << 16): the guards prune it. The
-  // ids need no rows: BeginMutation only records them.
-  for (InodeId id = 1'000'000; ctx_.fills.floor <= synced.fills.seq; ++id) {
-    ASSERT_LT(id, 1'000'000 + (1 << 17));
-    const InodeId one[] = {id};
-    ASSERT_THAT(BeginMutation(ctx_, one, [] { return absl::OkStatus(); }),
-                IsOk());
-  }
+  // The prune, as metadata_cache.cc's Touch does it once `touched` holds
+  // kMaxTouched (1 << 16) inodes: forget them all and raise the floor.
+  // Done directly: getting there for real takes 65536 mutations, which
+  // under ASan runs the test guest out of memory.
+  ctx_.fills.touched.clear();
+  ctx_.fills.floor = ++ctx_.fills.seq;
+  ASSERT_GT(ctx_.fills.floor, synced.fills.seq);
 
   ASSERT_THAT(ClearDirty(ctx_, synced, {}), IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(Contains(f.id)));
