@@ -6,7 +6,8 @@
 # the boundary root's mode, owner and times, and a nodeid -- shown as its
 # inode number -- from the range at or above 2^63 that no backing inode
 # number may use), and anything inside it fails with ENOTSUP, logged at
-# ERROR once per stub. Renaming the stub itself fails with EXDEV. A link or
+# ERROR once per stub. Renaming the stub itself fails with EXDEV, removing
+# it with EBUSY. A link or
 # rename *into* the stub fails with ENOTSUP rather than EXDEV: the kernel
 # looks the target name up in the stub first, and that lookup is "anything
 # inside". The stub keeps its inode number across a dcfs restart, and
@@ -146,6 +147,7 @@ check_stub() {
 	expect_fail "$tag-rename-stub" "EXDEV" \
 		"$TESTUTIL" rename2 "$stub" "$MNT/$dir/$name.moved" 0
 	expect_fail "$tag-chmod-stub" "not supported" chmod 700 "$stub"
+	expect_fail "$tag-rmdir-stub" "busy" rmdir "$stub"
 
 	# Nothing reached the other side of the boundary.
 	if [ -e "$SRC/$dir/$name/new" ] || [ -e "$SRC/$dir/$name/newdir" ] ||

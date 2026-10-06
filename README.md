@@ -551,7 +551,8 @@ recovery protocol, concurrency, and the test strategy.
   may use; dcfs refuses, with `ENOTSUP`, any object whose backing inode
   number is in it). The stub can be looked up, `stat`ed and used as a
   mount point; anything inside it (listing it, looking up, creating,
-  opening) fails with `ENOTSUP`, logged once per stub, and renaming it
+  opening) fails with `ENOTSUP`, logged once per stub, removing it with
+  `EBUSY` (as a mount point), and renaming it
   with `EXDEV`. A link or rename *into* a stub fails with `ENOTSUP` rather
   than `EXDEV`, because the kernel looks the target name up in the stub
   first. The stub keeps its inode number across restarts (until its

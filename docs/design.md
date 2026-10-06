@@ -381,10 +381,11 @@ served.
   (`ENODATA`: no ACLs, so its mode decides permission checks),
   `LISTXATTR` (empty), `ACCESS` and `FORGET` are answered from the stub's
   row. Everything else -- any lookup, listing, open or creation inside it,
-  and `SETATTR`, xattr changes or `UNLINK`/`RMDIR` of it -- is refused
-  with `ENOTSUP` (`DirCacheFS::RefuseStub`, logged at ERROR once per stub
-  per run), and a `RENAME` or `LINK` across it, or of the stub itself,
-  with `EXDEV`. The kernel looks a link's or rename's target name up
+  and `SETATTR` or xattr changes of it -- is refused with `ENOTSUP`
+  (`DirCacheFS::RefuseStub`, logged at ERROR once per stub per run, naming
+  the errno), `UNLINK`/`RMDIR` of it with `EBUSY` (as for a mount point),
+  an ioctl with `ENOTTY`, and a `RENAME` or `LINK` across it, or of the
+  stub itself, with `EXDEV`. The kernel looks a link's or rename's target name up
   before sending the request, so a link or rename *into* a stub fails at
   that lookup, with `ENOTSUP`.
 - **Not done here** (Phase 15.4): the bind form's recorded mount points,

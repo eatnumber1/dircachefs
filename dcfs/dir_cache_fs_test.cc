@@ -2094,6 +2094,62 @@ TEST_F(DirCacheFSTest, BoundaryIsAStubDirectory) {
   EXPECT_NE(::access(Path("d/mp2").c_str(), F_OK), 0);
 }
 
+// Every refused operation on a stub, with its errno (review L2): removing
+// it is EBUSY (as for a mount point), linking it EXDEV, and anything
+// inside it ENOTSUP.
+TEST_F(DirCacheFSTest, EveryOperationOnAStubIsRefused) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_EQ(::mkdir(Path("d/mp").c_str(), 0755), 0);
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  MountBelow("d/mp");
+  auto [lookup, entry] = Lookup(d, "mp");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId stub = static_cast<InodeId>(entry.nodeid);
+  auto name = [](std::string_view n) {
+    std::string body(n);
+    body.push_back('\0');
+    return body;
+  };
+  EXPECT_EQ(Send(FUSE_RMDIR, static_cast<uint64_t>(d), name("mp")).error,
+            -EBUSY);
+  EXPECT_EQ(Unlink(d, "mp").error, -EBUSY);
+  EXPECT_EQ(Link(stub, d, "mp2").error, -EXDEV);
+  EXPECT_EQ(Send(FUSE_READLINK, static_cast<uint64_t>(stub), "").error,
+            -ENOTSUP);
+  struct fuse_mknod_in mknod = {};
+  mknod.mode = S_IFIFO | 0644;
+  std::string mknod_body;
+  AppendBytes(mknod_body, mknod);
+  mknod_body.append(name("fifo"));
+  EXPECT_EQ(Send(FUSE_MKNOD, static_cast<uint64_t>(stub), mknod_body).error,
+            -ENOTSUP);
+  EXPECT_EQ(Send(FUSE_SYMLINK, static_cast<uint64_t>(stub),
+                 name("link") + name("target"))
+                .error,
+            -ENOTSUP);
+  EXPECT_EQ(Send(FUSE_RMDIR, static_cast<uint64_t>(stub), name("x")).error,
+            -ENOTSUP);
+  EXPECT_EQ(ErrnoOf(List(stub, false).status()), ENOTSUP);
+  EXPECT_EQ(ErrnoOf(List(stub, true).status()), ENOTSUP);
+  EXPECT_EQ(Fsyncdir(stub).error, -ENOTSUP);
+  EXPECT_EQ(Send(FUSE_REMOVEXATTR, static_cast<uint64_t>(stub), name("user.x"))
+                .error,
+            -ENOTSUP);
+  EXPECT_EQ(Ioctl(stub, FS_IOC_GETFLAGS, "", sizeof(int), FUSE_IOCTL_DIR)
+                .error,
+            -ENOTTY);
+  EXPECT_EQ(Tmpfile(stub, O_RDWR).reply.error, -ENOTSUP);
+  // Its reads are answered.
+  EXPECT_EQ(Send(FUSE_STATFS, static_cast<uint64_t>(stub), "").error, 0);
+  struct fuse_getxattr_in list = {};
+  std::string list_body;
+  AppendBytes(list_body, list);
+  EXPECT_EQ(Send(FUSE_LISTXATTR, static_cast<uint64_t>(stub), list_body).error,
+            0);
+  EXPECT_EQ(::access(Path("d/mp").c_str(), F_OK), 0);
+}
+
 // The stub's nodeid is recorded with its dentry: a lookup resolved by a
 // single probe (an unknown name in a complete listing) gets the same stub
 // as the listing, and a FORGET of it is counted like any other.

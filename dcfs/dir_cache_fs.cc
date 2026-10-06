@@ -82,6 +82,12 @@ std::vector<std::string_view> XattrsChangedBySetattr(int to_set) {
   return names;
 }
 
+// The symbolic name of `err` ("EBUSY"), for log lines.
+std::string ErrnoName(int err) {
+  const char *name = strerrorname_np(err);
+  return name != nullptr ? name : absl::StrCat("errno ", err);
+}
+
 }  // namespace
 
 DirCacheFS::DirCacheFS(Context &ctx, Options opts)
@@ -313,7 +319,7 @@ absl::Status DirCacheFS::RefuseStub(FuseRequest &req, InodeId id,
                << (stub.ok() ? EscapeBytes(stub->name) : "(gone)")
                << " (nodeid " << static_cast<uint64_t>(id) << ", in directory "
                << (stub.ok() ? stub->parent : 0) << ") with "
-               << (err == EXDEV ? "EXDEV" : "ENOTSUP")
+               << ErrnoName(err)
                << ": a mount point or subvolume boundary, which one dcfs "
                   "does not cross (see README); logged once per stub";
   }
@@ -866,9 +872,9 @@ absl::Status DirCacheFS::RemoveChild(
     if (child.kind == cache::LookupResult::kNegative) {
       return req.ReplyErrno(ENOENT);
     }
-    // A boundary stub: removing it would cross the boundary.
+    // A boundary stub: EBUSY, as for removing a mount point (review L2).
     if (child.kind == cache::LookupResult::kRefused) {
-      return RefuseStub(req, child.id, is_dir ? "rmdir" : "unlink", EXDEV);
+      return RefuseStub(req, child.id, is_dir ? "rmdir" : "unlink", EBUSY);
     }
     RET_CHECK_EQ(child.kind, cache::LookupResult::kFound);
 
@@ -1164,9 +1170,9 @@ absl::Status DirCacheFS::Link(
     std::string_view newname) {
   InodeId src = static_cast<InodeId>(ino);
   InodeId newparent = static_cast<InodeId>(newparent_ino);
-  // A stub is a directory (the kernel links none); into one is across the
-  // boundary.
-  if (cache::IsStub(src)) return RefuseStub(req, src, "link", EPERM);
+  // A stub, or into one: across the boundary (the kernel links no
+  // directory anyway, so only a forged request gets here).
+  if (cache::IsStub(src)) return RefuseStub(req, src, "link", EXDEV);
   if (cache::IsStub(newparent)) {
     return RefuseStub(req, newparent, "link", EXDEV);
   }
