@@ -642,3 +642,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (relatime incl. ctime, strictatime, noatime from statvfs at InitRoot), cache only. atime_test (3 fs),
   RelatimeTest.*, TouchAtime cache test.
 - Phase 23 (23.1-23.5) merged (1554bee..e5c27cc). 23.6 + 23.7 starting in lane-1.
+- russ (2026-10-07): FORGET hook stays (RELEASE precedes munmap; only FORGET follows it); kernel
+  pinned to a series is acceptable in principle, but Alpine's exact pins die within weeks (old
+  commits unbuildable, weekly bump bot) and Debian's durable 6.12 lacks FUSE io_uring: decision
+  pending; dm-dust can be an out-of-tree module (not a blocker). Cold-run pie: tests 84 min vs
+  compile ~40 min; of compile: kernel ~25%, QEMU ~20%, our C++ + abseil/sqlite ~30%, other tools
+  ~20%. TLA+: 12.3 widened to a revalidation model; 12.4 inode lifetime and 12.5 identity models
+  added, trace validation in each. Agents no longer edit docs/plan/ (conflicts came from that);
+  the lanes already are separate clones merged by fetch + fast-forward.

@@ -117,3 +117,27 @@ open. Known-bug variant: the pre-fix behaviour (reuse the shared fd's
 mode). Trace validation: map the existing OPEN, RELEASE and IOCTL events
 (and WRITE's wakeups are not events: use the harness's forged requests)
 onto it. Owner dcfs-protocol; after Phase 23 merges.
+
+## 12.3 widened (russ, 2026-10-07): a revalidation model, and further models
+
+Generalise 12.3 from fds to the class the chattr +i and casefold findings
+share: dcfs reuses something (a shared backing fd, a cached mode or ACL
+used by default_permissions, a cached negative entry or complete listing,
+a cached decision) across a change of the backing's state that should
+have invalidated it. Invariant: nothing dcfs holds grants more than the
+backing would grant at the moment of use, except where POSIX grandfathers
+(already-open descriptors). `formal/reval.tla`: objects with permission
+state (mode/flags/casefold), dcfs's held fds and cached decisions,
+changes through dcfs and out of band (the latter only to show the
+documented limitation), opens/uses. Known-bug variants: the pre-fix
+shared-fd reuse, SETFLAGS changing casefold under a complete listing.
+Trace validation from the start (OPEN/RELEASE/IOCTL/SETATTR events).
+
+Further models, each with trace validation in the same step:
+- 12.4 Inode lifetime: rows retired at the last release, in-memory records
+  for removed objects, stub rows, lookup counts and FORGET/BATCH_FORGET,
+  DESTROY; invariant: no reply refers to an object the kernel no longer
+  references, and no row or record is dropped while referenced.
+- 12.5 Identity (before Phase 14): node ids, generations, handle validity
+  across restart and cache wipe, inode recycling, ESTALE rules.
+- Cancellation stays in the main model (Phase 22).
