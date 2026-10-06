@@ -369,6 +369,8 @@ sh_test(
     srcs = ["run_qemu_mkfs_test.sh"],
     args = ["$(location scripts/run-qemu.sh)"],
     data = ["scripts/run-qemu.sh"],
+)
+
 qemu_test(
     name = "bench_full_test",
     disks = [
