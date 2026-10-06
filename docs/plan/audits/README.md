@@ -18,3 +18,6 @@ finding was later fixed test-first, assigned to a step, or decided against;
 - `review-2026-10-06-trace-validation.md`: review of the first trace
   validation; the recorder's cuts and the script's pass rule let forbidden
   orderings validate (fixed in 12.2b).
+- `review-2026-10-07-trace-validation-2.md`: re-review after 12.2b; one
+  recorder bug (held lines dropped when a directory dies mid-listing) and
+  two "failed" cuts that did not check the request's outcome.

@@ -506,3 +506,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   chown+chmod / rest per filesystem (187-474 s per shard under load; rename/ alone is 90-150 s).
   Lesson (second time): a pinned minimal busybox can hollow out tests that compare two sides;
   every comparison-style test needs a sanity floor like pjdfstest's.
+- 12.2 re-review (audits/review-2026-10-07-trace-validation-2.md): original holes closed; new: held lines dropped when a directory dies during a listing (a forbidden step inside a population validates), 'failed' cuts for a half-way listing and for unmodelled syscall errnos fire regardless of the request's outcome, dir-itself cut too broad, child-fill guard judged by the code's own CanFill, root check accepts a trace that merely stops, fault regexes lack reason text. Sent back as 12.2c; merge after.
