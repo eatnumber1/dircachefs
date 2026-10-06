@@ -127,7 +127,7 @@ normalize_stat() {
 # not just regular files).
 run_pass() {
 	dir=$1
-	find "$dir" -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/pass_stat.txt
+	find "$dir" -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/pass_stat.txt
 	readlink "$dir/link_to_file" >/dev/null
 }
 
@@ -205,7 +205,7 @@ run_pass "$MNT" # pass 1 (cold): populates the cache from the backing tree.
 
 # --- warm pass: dcfs must not touch the backing devices at all ----------
 
-drop_caches
+drop_caches_quiesced
 before_vdb=$(sectors_read vdb)
 
 run_pass "$MNT" # pass 2: everything above should already be cached.
@@ -245,8 +245,8 @@ fi
 # have deliberately diverged, which is the whole point of those checks --
 # see the README's Coherence section on why dcfs never revisits a directory
 # it has already cached complete.
-find /src -path /src/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
-find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+find /src -path /src/d -prune -o -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/src_stat.txt
+find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/mnt_stat.txt
 normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
 normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
 set -- $(md5sum /tmp/src_stat_norm.txt)
@@ -291,7 +291,7 @@ else
 	exit "$FAILED"
 fi
 
-drop_caches
+drop_caches_quiesced
 before_vdb=$(sectors_read vdb)
 
 run_pass "$MNT" # pass 3: same cache db, fresh process -- still cached.

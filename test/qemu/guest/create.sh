@@ -129,7 +129,7 @@ normalize_stat() {
 # entry's stat, plus resolving every symlink. No content reads.
 run_pass() {
 	dir=$1
-	find "$dir" -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/pass_stat.txt
+	find "$dir" -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/pass_stat.txt
 	readlink "$dir/l1" >/dev/null
 	readlink "$dir/l2" >/dev/null
 }
@@ -371,8 +371,8 @@ fi
 # btrfs.
 # -----------------------------------------------------------------------
 
-find /src \( -path /src/d -o -path /src/d2 \) -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
-find /mnt \( -path /mnt/d -o -path /mnt/d2 \) -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+find /src \( -path /src/d -o -path /src/d2 \) -prune -o -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/src_stat.txt
+find /mnt \( -path /mnt/d -o -path /mnt/d2 \) -prune -o -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/mnt_stat.txt
 normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
 normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
 set -- $(md5sum /tmp/src_stat_norm.txt)
@@ -393,7 +393,7 @@ fi
 # touch either backing device -- RecordNewChild/RecordNewLink already wrote
 # it all into the cache -------------------------------------------------
 
-drop_caches
+drop_caches_quiesced
 before_vdb=$(sectors_read vdb)
 
 run_pass "$MNT"
@@ -446,7 +446,7 @@ else
 	fail restart-persists "one or more created objects did not survive the restart"
 fi
 
-drop_caches
+drop_caches_quiesced
 before_vdb=$(sectors_read vdb)
 
 run_pass "$MNT" # metadata only -- no content reads.

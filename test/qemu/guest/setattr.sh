@@ -103,7 +103,7 @@ verify_cached() {
 	path=$2
 	fmt=$3
 	expected=$4
-	drop_caches
+	drop_caches_quiesced
 	before=$(sectors_read vdb)
 	got=$(stat -c "$fmt" "$path" 2>&1)
 	after=$(sectors_read vdb)
@@ -209,7 +209,7 @@ fi
 verify_immediate truncate-shrink-matches-src "$MNT/f1" "$SRC/f1" '%s'
 verify_cached truncate-shrink-cached "$MNT/f1" '%s' 3
 
-drop_caches
+drop_caches_quiesced
 before=$(sectors_read vdb)
 shrunk=$(cat "$MNT/f1")
 after=$(sectors_read vdb)

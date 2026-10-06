@@ -131,7 +131,7 @@ fi
 
 # --- a content read, unlike metadata, must hit the backing device --------
 
-drop_caches
+drop_caches_quiesced
 before=$(sectors_read vdb)
 cat "$MNT/big.bin" >/dev/null
 after=$(sectors_read vdb)

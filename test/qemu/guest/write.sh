@@ -134,8 +134,7 @@ check_src() {
 # must only look at /mnt, metadata only -- no content reads) and requires
 # both that it holds and that neither backing device was read meanwhile.
 check_cold() {
-	sync
-	echo 3 >/proc/sys/vm/drop_caches
+	drop_caches_quiesced
 	b_vdb=$(sectors_read vdb)
 	b_vdc=$(sectors_read vdc)
 	if eval "$2"; then ok=1; else ok=0; fi
@@ -151,7 +150,7 @@ check_cold() {
 }
 
 run_pass() {
-	find "$1" -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/pass_stat.txt
+	find "$1" -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/pass_stat.txt
 }
 
 normalize_stat() {
@@ -502,7 +501,7 @@ if [ "$got_src" = v ]; then
 else
 	fail setxattr-matches-src "got '$got_src'"
 fi
-drop_caches
+drop_caches_quiesced
 before=$(sectors_read vdb)
 got_mnt=$("$TESTUTIL" getxattr "$MNT/xf" user.a)
 after=$(sectors_read vdb)
@@ -671,8 +670,7 @@ if [ "$rc1" -eq 0 ] && [ "$rc2" -ne 0 ]; then
 else
 	fail mkdir-eexist "rc1=$rc1 rc2=$rc2 out2='$out2'"
 fi
-sync
-echo 3 >/proc/sys/vm/drop_caches
+drop_caches_quiesced
 b_vdb=$(sectors_read vdb)
 b_vdc=$(sectors_read vdc)
 ok1=0
@@ -726,8 +724,8 @@ rm -f "$MNT/mm"
 # comment on why /src/d and the cached /mnt/d deliberately diverge after the
 # write-boundary-refused check above. -----------------------------------
 
-find /src -path /src/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/src_stat.txt
-find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %U %G %s %N' {} + >/tmp/mnt_stat.txt
+find /src -path /src/d -prune -o -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/src_stat.txt
+find /mnt -path /mnt/d -prune -o -exec stat -c '%i %A %h %u %g %s %N' {} + >/tmp/mnt_stat.txt
 normalize_stat /tmp/src_stat.txt "$SRC" | sort >/tmp/src_stat_norm.txt
 normalize_stat /tmp/mnt_stat.txt "$MNT" | sort >/tmp/mnt_stat_norm.txt
 if cmp -s /tmp/src_stat_norm.txt /tmp/mnt_stat_norm.txt; then
@@ -742,8 +740,7 @@ fi
 
 # --- warm-after-all ------------------------------------------------------
 
-sync
-echo 3 >/proc/sys/vm/drop_caches
+drop_caches_quiesced
 before_vdb=$(sectors_read vdb)
 run_pass "$MNT"
 after_vdb=$(sectors_read vdb)
@@ -778,8 +775,7 @@ else
 	exit "$FAILED"
 fi
 
-sync
-echo 3 >/proc/sys/vm/drop_caches
+drop_caches_quiesced
 before_vdb=$(sectors_read vdb)
 run_pass "$MNT"
 after_vdb=$(sectors_read vdb)
@@ -802,7 +798,7 @@ else
 	fail restart-content-value "got '$(cat "$MNT/f")'"
 fi
 
-drop_caches
+drop_caches_quiesced
 before=$(sectors_read vdb)
 got=$("$TESTUTIL" getxattr "$MNT/xdir" user.d)
 after=$(sectors_read vdb)

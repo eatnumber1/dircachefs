@@ -125,7 +125,7 @@ populate_tree() {
 populate_tree "$SRC"
 
 stat_snapshot() {
-	find "$1" -exec stat -c '%i %A %h %U %G %s %N' {} + | sort
+	find "$1" -exec stat -c '%i %A %h %u %g %s %N' {} + | sort
 }
 
 # --- usage: no arguments at all ------------------------------------------

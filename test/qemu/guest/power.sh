@@ -126,7 +126,7 @@ must_start() {
 # (none of it touched by a lost mutation) and requires zero backing sectors
 # read.
 warm_check() {
-	drop_caches
+	drop_caches_quiesced
 	before=$(sectors_read vdb)
 	ok=1
 	[ "$(stat -c %s "$MNT/c/c1")" = 3 ] || ok=0

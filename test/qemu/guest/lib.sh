@@ -51,6 +51,50 @@ drop_caches() {
 	echo 3 >/proc/sys/vm/drop_caches
 }
 
+# quiesce_backing: drains any backing-filesystem work the PREVIOUS mutation
+# left running in the background before a zero-backing-reads baseline is
+# taken. (Moved here from rename.sh; every zero-reads baseline uses it via
+# drop_caches_quiesced, review L12.)
+#
+# xfs defers the on-disk half of removing an inode (freeing its extents and
+# AG metadata -- "inode inactivation"/inodegc) to a background workqueue so
+# that unlink/rmdir/a replacing rename don't have to wait for it; under
+# heavy host load that workqueue can still be mid-run (reading AG metadata
+# from vdb) when the baseline sectors_read is taken moments later, so the
+# read lands inside the measured window and looks like a cache miss it is
+# not (confirmed by reading fs/xfs/xfs_icache.c: xfs_inodegc_stop(), the
+# only thing that drains it, runs nowhere except freeze and unmount).
+# FIFREEZE forces exactly that drain (xfs_fs_freeze -> xfs_fs_sync_fs's
+# SB_FREEZE_PAGEFAULT stage -> xfs_inodegc_stop) synchronously before it
+# returns; FITHAW re-enables it with nothing left queued, so it cannot
+# introduce a read of its own. Both ioctls are plain VFS freeze_super/
+# thaw_super, supported the same way on ext4 and btrfs, so this runs
+# unconditionally rather than branching on backing_fstype. Called before
+# the baseline, not between it and the check, so a backing read genuinely
+# caused by serving the check itself still falls inside the window and is
+# still caught.
+#
+# A freeze that fails leaves nothing frozen (ignored, as before); a thaw
+# that fails after a successful freeze leaves $SRC frozen and the next
+# mutation would hang until the harness timeout, so that is a FAIL.
+quiesce_backing() {
+	if "${TESTUTIL:-/bin/testutil}" fsfreeze "$SRC" freeze >/dev/null 2>&1; then
+		if ! "${TESTUTIL:-/bin/testutil}" fsfreeze "$SRC" thaw >/dev/null 2>&1; then
+			fail quiesce-thaw "thaw of $SRC failed after a successful freeze; $SRC may still be frozen"
+		fi
+	fi
+}
+
+# drop_caches_quiesced: drop_caches; quiesce_backing; drop_caches. The
+# second drop catches an inode released by the first (FORGET, then dcfs
+# closes a backing fd) whose cleanup would otherwise land after the
+# quiesce, inside the measured window.
+drop_caches_quiesced() {
+	drop_caches
+	quiesce_backing
+	drop_caches
+}
+
 # start_daemon LOG [extra dcfs flags...]: starts dcfs against $SRC/$DB,
 # mounted at $MNT, with any extra flags inserted before $MNT; waits up to
 # 10s for the mount to appear. Sets DAEMON_PID and MOUNTED (1 if the mount

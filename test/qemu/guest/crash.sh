@@ -235,7 +235,7 @@ check_same live-closed f
 
 # --- untouched files are still served warm (zero backing reads) -------------
 
-drop_caches
+drop_caches_quiesced
 before=$(sectors_read vdb)
 warm_ok=1
 [ "$(stat -c %s "$MNT/d/u1")" = 4 ] || warm_ok=0
