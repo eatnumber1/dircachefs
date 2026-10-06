@@ -326,7 +326,8 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
   checks, as root and as unprivileged users), once through dcfs and once
   directly on the same ext4 filesystem, and fails on any dcfs-specific
   failure. Today both runs fail the same 28 checks. See
-  `docs/conformance.md`. This test is slow (tens of minutes).
+  `docs/conformance.md`. This test is slow: it runs as three guests per
+  filesystem (shards by test directory), each a few minutes.
 
 Bugs get a regression test first: the test is shown to fail on the
 unfixed code, then the fix makes it pass.
@@ -504,6 +505,17 @@ recovery protocol, concurrency, and the test strategy.
   has no timer, so a dirty set left by the last burst of activity is only
   cleared by the next request, `fsync` or shutdown; that is safe but makes
   the re-read larger.
+- **xfs writes to the disk by itself for about a minute after the last
+  write.** Not dcfs: after the last change to an xfs filesystem, its log
+  worker writes two small log records (+4 block writes in all), one per
+  30-second tick (`fs.xfs.xfssyncd_centisecs`), to mark the log clean. A
+  disk that spins down after less than about a minute of inactivity can
+  spin up once more because of it; after that an idle xfs and an idle dcfs
+  on top of it do no I/O (measured in the test guest: 240 s with
+  dcfs mounted, 100 s with dcfs stopped; ext4 and btrfs did not show it in
+  the 60 s idle test). Syncing and freezing/thawing the filesystem
+  (`fsfreeze -f` / `-u`) does that work immediately, which is what the idle
+  test does before its measurement. No mount option was needed or tested.
 - **Generation 0 objects.** dcfs reads the backing inode generation
   (`FS_IOC_GETVERSION`) only for regular files and directories; symlinks,
   device nodes, FIFOs and sockets, and every object on a filesystem without

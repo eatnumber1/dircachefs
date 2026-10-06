@@ -507,3 +507,19 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Lesson (second time): a pinned minimal busybox can hollow out tests that compare two sides;
   every comparison-style test needs a sanity floor like pjdfstest's.
 - 12.2 re-review (audits/review-2026-10-07-trace-validation-2.md): original holes closed; new: held lines dropped when a directory dies during a listing (a forbidden step inside a population validates), 'failed' cuts for a half-way listing and for unmodelled syscall errnos fire regardless of the request's outcome, dir-itself cut too broad, child-fill guard judged by the code's own CanFill, root check accepts a trace that merely stops, fault regexes lack reason text. Sent back as 12.2c; merge after.
+- 6.2 lane-4 (dcfs-investigator): (1) idle_short_test_xfs: the +4 writes are xfs log covering
+  (xfs_log_worker, fs.xfs.xfssyncd_centisecs=3000: +2 writes at ~34 s and +2 at ~65 s after the
+  last write, nothing for the remaining ~175 s of a 240 s window; the same with dcfs unmounted), a
+  bounded settling, not a recurring cost; fixed in the test by drop_caches_quiesced in the warm-up
+  (freeze/thaw covers the log), 9/9 runs pass on ext4/xfs/btrfs, and a scratch dcfs that writes
+  and syncs every 20 s fails all three (not committed). README note for spin-down users.
+  (2) passthrough.sh cpu_ticks: did not flake (0-5 ticks on KVM under load and TCG) but was too
+  weak: with passthrough off in a scratch build it read 7-86 ticks and passed 2 of 6 runs; now
+  counts FUSE wakeups (< 32; on: 3-5, off: 68-150, 6 of 6 fail). Helpers moved to lib.sh.
+  (3) pjdfstest sharded (rename / chown+chmod / rest, test_suites keep the old names), shards
+  3-8 min each on a loaded host (single guest before: ext4 817-989 s, btrfs 755 s, xfs 685 s).
+  FOUND: pjdfstest had been passing vacuously since busybox lost `tail -1`
+  (8570 of 8827 checks failed identically on the raw filesystem and through dcfs):
+  CONFIG_FEATURE_FANCY_TAIL added with a smoke check, plus a pjdfstest-suite-sane guard (<5% of
+  checks failing on the raw filesystem). With tail fixed both sides fail the same 28 TODO checks
+  (ext4/xfs/btrfs shards sum to 8827 checks).

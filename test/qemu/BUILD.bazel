@@ -245,23 +245,42 @@ qemu_test(
     timeout = "long",
 )
 
-# pjdfstest_test (step 4.5): POSIX conformance, ~8800 checks
+# pjdfstest (step 4.5): POSIX conformance, ~8800 checks
 # (github.com/pjd/pjdfstest) run twice -- through the dcfs mount and
 # directly against the backing filesystem -- and diffed; see
 # guest/pjdfstest.sh and docs/conformance.md. Step 5.2: run against ext4,
 # xfs and btrfs (qemu_test_matrix below); guest/pjdfstest.sh picks the
 # right per-filesystem baseline (guest/pjdfstest.<fstype>.expected_failures)
-# at runtime from the detected backing filesystem. Two ~8800-check suites
-# serially, each check a full FUSE round trip, comfortably exceeds
-# qemu_test's default size/timeout (large/long, 900s), hence the larger
-# explicit size/timeout below.
-qemu_test_matrix(
-    name = "pjdfstest_test",
+# at runtime from the detected backing filesystem.
+#
+# Step 6.2: one guest per shard, by test directory (guest/pjdfstest_<shard>.sh
+# set PJD_SHARD and source guest/pjdfstest.sh, which fixes the assignment in
+# shard_of()): rename (rename/), chown (chown/, chmod/) and rest (every
+# other directory). In one guest the suite took 14-16 minutes on a loaded
+# host (ext4 989 s, btrfs 755 s, xfs 685 s, all three at once); the shards
+# take 3-4 minutes each (docs/plan/log.md, step 6.2). The tier stays
+# enormous: three shards per filesystem would add about ten minutes to
+# presubmit. `pjdfstest_test_<fstype>` and `pjdfstest_test` are test_suites
+# over the shards, so the old names still run everything.
+PJDFSTEST_SHARDS = ["rename", "chown", "rest"]
+
+[qemu_test_matrix(
+    name = "pjdfstest_%s_test" % shard,
     disks = [("vdb", "ext4", "512M")],
-    guest_script = "guest/pjdfstest.sh",
+    guest_script = "guest/pjdfstest_%s.sh" % shard,
     size = "enormous",
     other_size = "enormous",
     timeout = "eternal",
+) for shard in PJDFSTEST_SHARDS]
+
+[test_suite(
+    name = "pjdfstest_test_%s" % fstype,
+    tests = [":pjdfstest_%s_test_%s" % (shard, fstype) for shard in PJDFSTEST_SHARDS],
+) for fstype in ["ext4", "xfs", "btrfs"]]
+
+test_suite(
+    name = "pjdfstest_test",
+    tests = [":pjdfstest_test_ext4"],
 )
 
 # Step 6.3 (audit F10): objects removed while still referenced (a removed

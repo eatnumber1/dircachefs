@@ -339,6 +339,20 @@ bazel test //test/qemu:write_test
 bazel test //test/qemu:nfs_test
 ```
 
+**Step 6.2: pjdfstest shards.** `pjdfstest_test_<fstype>` is a `test_suite`
+over three guests, `pjdfstest_{rename,chown,rest}_test_<fstype>`, each a
+three-line wrapper (`guest/pjdfstest_<shard>.sh`) that sets `PJD_SHARD` and
+sources `guest/pjdfstest.sh`. The assignment is by test directory and fixed
+in `shard_of()` there (`rename/`; `chown/` and `chmod/`; every other
+directory, including any pjdfstest adds later), so it does not depend on
+file order. Each shard runs the same two-run comparison on its own
+directories and applies only the part of
+`pjdfstest.<fstype>.expected_failures` that names them; the guest refuses to
+start without a valid shard and fails when more than 5% of the checks fail
+directly on the raw filesystem (a broken guest toolchain makes every check
+fail on both sides and look "not dcfs's fault": see the busybox
+`FEATURE_FANCY_TAIL` note in `docs/plan/log.md`).
+
 **Step 5.2: ext4, xfs and btrfs.** `readonly_test`, `passthrough_test`,
 `setattr_test`, `handles_test`, `create_test`, `rename_test`, `write_test`,
 `crash_test`, `power_test`, `credentials_test`, `removed_test` and

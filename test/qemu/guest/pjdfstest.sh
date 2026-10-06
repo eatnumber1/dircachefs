@@ -38,6 +38,24 @@
 # each file's own fresh shell), so the pair (relative path, number) is only
 # meaningful together, never the number alone.
 #
+# Shards (step 6.2): the whole suite takes about 14 minutes in one guest on
+# a loaded host (both runs, ~7 minutes each; rename and chown are ~120 s each
+# of ~390 s per run, everything else is 1-40 s per directory), so test/qemu
+# runs it as three guests, one per shard, each a one-line wrapper script that
+# sets PJD_SHARD and sources this file (pjdfstest_rename.sh,
+# pjdfstest_chown.sh, pjdfstest_rest.sh; same pattern as idle_short.sh):
+#
+#   rename: rename/
+#   chown:  chown/ chmod/
+#   rest:   every other directory (open, unlink, link, truncate, ...)
+#
+# Assignment is by test directory, fixed in shard_of() below, so it never
+# depends on the order or number of files; a directory that is not named
+# there lands in "rest", so no check can fall out of every shard. With
+# PJD_SHARD unset the script refuses to run. Each
+# shard runs the same two-run comparison on its own directories and uses the
+# part of the expected_failures baseline that names them.
+#
 # Run as /tests/pjdfstest.sh by guest/init when booted with
 # dcfs_test=pjdfstest.sh.
 FAILED=0
@@ -74,6 +92,40 @@ trap cleanup EXIT
 
 echo "pjdfstest.sh: kernel $(uname -r)"
 
+# --- shards ---------------------------------------------------------------
+
+
+# shard_of DIR: the shard that runs tests/DIR/.
+shard_of() {
+	case "$1" in
+	rename) echo rename ;;
+	chown | chmod) echo chown ;;
+	*) echo rest ;;
+	esac
+}
+
+# in_shard PATH: true if the .t file or "<dir>/<file>.t:<n>" baseline entry
+# PATH belongs to this guest's shard.
+in_shard() {
+	[ "$(shard_of "${1%%/*}")" = "$PJD_SHARD" ]
+}
+
+# filter_shard FILE: FILE's lines that in_shard() accepts, on stdout.
+filter_shard() {
+	while IFS= read -r fs_line; do
+		if in_shard "$fs_line"; then echo "$fs_line"; fi
+	done <"$1"
+}
+
+case "${PJD_SHARD:-}" in
+rename | chown | rest) ;;
+*)
+	fail pjdfstest-shard "PJD_SHARD '${PJD_SHARD:-}' is not rename, chown or rest (run a guest/pjdfstest_<shard>.sh wrapper)"
+	exit "$FAILED"
+	;;
+esac
+echo "pjdfstest.sh: shard: $PJD_SHARD"
+
 # run_suite ROOT OUTFILE: runs every tests/**/*.t under $TESTS_DIR with cwd
 # set to ROOT (a fresh, empty directory on the filesystem under test --
 # same layout pjdfstest's own `prove -rv tests` invocation uses: it never
@@ -88,14 +140,22 @@ run_suite() {
 	outfile="$2"
 	mkdir -p "$root"
 	: >"$outfile"
+	: >"$outfile.times"
 	(cd "$TESTS_DIR" && find . -name '*.t' | sed 's#^\./##') | sort |
 		while IFS= read -r t; do
+			in_shard "$t" || continue
+			t_start=$(cut -d' ' -f1 /proc/uptime)
 			(cd "$root" && sh "$TESTS_DIR/$t") 2>>/tmp/pjd-stderr.log |
 				awk -v rel="$t" '
 					/^ok [0-9]+/     { print rel ":" $2 ":ok" }
 					/^not ok [0-9]+/ { print rel ":" $3 ":notok" }
 				'
+			echo "$t $t_start $(cut -d' ' -f1 /proc/uptime)" >>"$outfile.times"
 		done >"$outfile"
+	# Seconds per test directory, for balancing the shards.
+	awk '{ split($1, p, "/"); d[p[1]] += $3 - $2 }
+		END { for (k in d) printf "%s=%.0f ", k, d[k]; print "" }' "$outfile.times" |
+		sed 's/^/pjdfstest.sh: seconds per directory: /'
 }
 
 # The backing filesystem under test: vdb, mounted with no -t so the kernel
@@ -173,7 +233,8 @@ set_diff /tmp/fail_backing.txt /tmp/fail_dcfs.txt /tmp/dcfs_specific.txt
 
 EXPECTED_FAILURES="$PJD_ROOT/pjdfstest.$FSTYPE.expected_failures"
 grep -v '^#' "$EXPECTED_FAILURES" 2>/dev/null |
-	grep -v '^$' | sort -u >/tmp/expected_clean.txt
+	grep -v '^$' | sort -u >/tmp/expected_all.txt
+filter_shard /tmp/expected_all.txt >/tmp/expected_clean.txt
 
 set_diff /tmp/expected_clean.txt /tmp/dcfs_specific.txt /tmp/new_regressions.txt
 set_diff /tmp/dcfs_specific.txt /tmp/expected_clean.txt /tmp/now_passing.txt
@@ -201,6 +262,21 @@ done </tmp/backing_only.txt
 while IFS= read -r line; do
 	echo "dcfs-fail: $line"
 done </tmp/fail_dcfs.txt
+
+# A run in which almost everything fails on the raw backing filesystem
+# proves nothing: every dcfs failure is then also a backing failure and is
+# filtered out as "not dcfs's fault". That is how a busybox without `tail -1`
+# (pjdfstest's misc.sh expect() pipes through it) made 8570 of 8827 checks
+# fail on both sides while the test passed. On a healthy guest the raw
+# filesystem fails only the 28-66 known TODO checks (the backing_failures
+# files), well under 1%; require under 5%, and that something ran at all.
+if [ "$total_backing" -gt 0 ] && [ $((backing_failed * 20)) -lt "$total_backing" ] &&
+	[ "$total_dcfs" -eq "$total_backing" ]; then
+	pass pjdfstest-suite-sane
+else
+	fail pjdfstest-suite-sane "$backing_failed of $total_backing checks failed directly on $FSTYPE ($total_dcfs ran through dcfs); the pjdfstest tooling in the guest is broken, so no dcfs failure can be told apart from it (see pjdfstest.sh's note and /tmp/pjd-stderr.log)"
+	head -20 /tmp/pjd-stderr.log
+fi
 
 if [ -s /tmp/now_passing.txt ]; then
 	while IFS= read -r line; do
