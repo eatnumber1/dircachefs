@@ -550,3 +550,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the old 20261004 snapshot lacked perl 5.36.0-7+deb12u4. Moved: libevent, expat, xz-utils, pcre2,
   openssl, perl. nfs_test, version_check_test, ownership_test, sbom_test pass. osv under act: 158 ->
   101 findings in 22 packages, all 101 unfixed in bookworm (no ignores added).
+- 5.3b merged: Debian image now sources bookworm + bookworm-updates + bookworm-security (snapshots 20261006T082722Z / debian-security 20261006T081244Z; six source packages moved; nfs_test passes). OSV: 101 findings in 22 packages, all unfixed in bookworm as of 2026-10-06; policy still needs russ.
