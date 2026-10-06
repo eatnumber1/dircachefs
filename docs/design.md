@@ -826,8 +826,9 @@ custom VFS. The code already follows the rules that make that safe:
   - `inflight[id]`: how many mutations of the inode are between phase 1
     and their end;
   - `touched[id]`: `seq` at the latest phase 1 or end of a mutation of the
-    inode (pruned past 65536 entries by raising a `floor` below which every
-    snapshot is invalid);
+    inode (pruned past `max_touched` entries, 65536 by default, by raising
+    a `floor` below which every snapshot is invalid; also the end of a
+    file's writable open, `cache::EndWrites`);
   - a fill takes a snapshot of `seq` before its first syscall, and may
     record something about inode `id` only if, at commit time and in the
     commit's transaction, no mutation of `id` is in flight and none began

@@ -1,6 +1,7 @@
 #ifndef DCFS_CONTEXT_H_
 #define DCFS_CONTEXT_H_
 
+#include <cstddef>
 #include <cstdint>
 
 #include "absl/container/flat_hash_map.h"
@@ -49,8 +50,14 @@ struct FillGuards {
   // Entries are erased when they reach 0.
   absl::flat_hash_map<int64_t, int> inflight;
   // Inode id -> `seq` at the latest phase 1 or end of a mutation of it.
-  // Pruned (cleared, raising `floor`) when it grows past a bound.
+  // Pruned (cleared, raising `floor`) when it would grow past
+  // `max_touched` entries.
   absl::flat_hash_map<int64_t, uint64_t> touched;
+  // The prune bound: memory for `touched` against how often a prune makes
+  // the fills running at that moment skip caching (and a sync point
+  // running then keep every dirty row). A setting rather than a constant
+  // so that a test can reach a real prune cheaply.
+  size_t max_touched = size_t{1} << 16;
 };
 
 // Everything a dcfs operation may touch, passed explicitly as the first

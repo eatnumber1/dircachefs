@@ -1037,12 +1037,12 @@ absl::Status PurgeFilesystem(Context &ctx, const DeviceId &device) {
 
 namespace {
 
-// Past this many entries, FillGuards::touched is cleared (raising the
-// floor, which only makes fills that are running right now skip caching).
-constexpr size_t kMaxTouched = 1 << 16;
-
+// Past FillGuards::max_touched entries, FillGuards::touched is cleared
+// (raising the floor, which only makes fills that are running right now
+// skip caching, and a sync point running now keep every row).
 void Touch(FillGuards &fills, InodeId id) {
-  if (fills.touched.size() >= kMaxTouched && !fills.touched.contains(id)) {
+  if (fills.touched.size() >= fills.max_touched &&
+      !fills.touched.contains(id)) {
     fills.touched.clear();
     fills.floor = ++fills.seq;
   }

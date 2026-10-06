@@ -1526,23 +1526,31 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsWhatWasOpenForWritingDuringTheSync) {
 // If the fill guards forgot which inodes were mutated since BeginSync
 // (FillGuards::touched was pruned, raising the floor past the snapshot),
 // a sync point cannot tell which rows its syncfs covers, and keeps them
-// all.
+// all. A small prune bound (FillGuards::max_touched) gets there with three
+// mutations instead of 65536.
 TEST_F(MetadataCacheTest, ClearDirtyKeepsEverythingPastTheFloor) {
+  ctx_.fills.max_touched = 2;
   ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult g, Make(31));
+  ASSERT_OK_AND_ASSIGN(UpsertResult h, Make(32));
   ASSERT_THAT(SyncClear(), IsOk());
   ASSERT_THAT(BeginAttrChange(ctx_, f.id), IsOk());
   ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
+  const FillSnapshot before = BeginFill(ctx_);
 
-  // The prune, as metadata_cache.cc's Touch does it once `touched` holds
-  // kMaxTouched (1 << 16) inodes: forget them all and raise the floor.
-  // Done directly: getting there for real takes 65536 mutations, which
-  // under ASan runs the test guest out of memory.
-  ctx_.fills.touched.clear();
-  ctx_.fills.floor = ++ctx_.fills.seq;
-  ASSERT_GT(ctx_.fills.floor, synced.fills.seq);
+  // During the syncfs: g's mutation fills `touched` to its bound, and h's
+  // (a new inode) prunes it.
+  ASSERT_THAT(BeginAttrChange(ctx_, g.id), IsOk());
+  ASSERT_LE(ctx_.fills.floor, synced.fills.seq);
+  ASSERT_THAT(BeginAttrChange(ctx_, h.id), IsOk());
+  EXPECT_GT(ctx_.fills.floor, synced.fills.seq);
+  EXPECT_LE(ctx_.fills.touched.size(), 2u);
+  EXPECT_FALSE(CanFill(ctx_, before, f.id));
+  EXPECT_TRUE(CanFill(ctx_, BeginFill(ctx_), f.id));
 
+  // f was not mutated since the snapshot, but the guards no longer know.
   ASSERT_THAT(ClearDirty(ctx_, synced, {}), IsOk());
-  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(Contains(f.id)));
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id, g.id, h.id)));
 }
 
 TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
