@@ -128,6 +128,7 @@ class TraceRecorder final : public ProtocolEvents {
   void CleanShutdownRecorded(Context &ctx) override;
 
   void OutOfBandChange(Context &ctx, events::Ino id) override;
+  void InodeForgetting(Context &ctx, events::Ino id) override;
   void InodeForgotten(Context &ctx, events::Ino id) override;
 
  private:
@@ -181,8 +182,18 @@ class TraceRecorder final : public ProtocolEvents {
     std::string why;  // kUnmodelled
   };
 
+  // A directory's cached state, as a line's "db" spells it: its dentries
+  // (raw name, then the value: "unknown", "absent", "refused" or a key),
+  // and the rest of the object, already spelled.
+  struct State {
+    std::vector<std::pair<std::string, std::string>> dent;
+    std::string rest;
+    std::string Json() const;
+  };
+
   struct Dir {
     std::string last;  // the state in its last line
+    State last_state;  // the same, as a State
     bool dead = false;  // cut, unexplained or gone: no more lines
     std::set<int> slots;  // held by open requests
     // A population between PopulateStarted and PopulateRead: its line goes
@@ -221,6 +232,7 @@ class TraceRecorder final : public ProtocolEvents {
 
   bool Traced(Ino dir) const;
   std::string Snapshot(Context &ctx, Ino dir);
+  State SnapshotState(Context &ctx, Ino dir);
   // Writes one line of `dir`'s trace: {"ev": ev, "p": ..., fields..., "db":
   // the state now}. `fields` is "" or starts with ",".
   void Emit(Context &ctx, Ino dir, Req *req, std::string_view ev,
@@ -235,10 +247,11 @@ class TraceRecorder final : public ProtocolEvents {
   static std::string FrameEnd(std::string_view what,
                               const absl::Status &status);
   void Write(Ino dir, const std::string &json);
-  // After every callback: begins the traces of new directories, ends those
-  // of deleted ones, and gives every other directory whose state changed
-  // an "unexplained" line (a cut instead if `cut_changes`).
-  void After(Context &ctx, bool cut_changes = false);
+  // After every callback outside a transaction: begins the traces of new
+  // directories, ends those of deleted ones, and gives every other
+  // directory whose state changed an "unexplained" line, or a cut if the
+  // change is exactly that of a forgotten inode (forgotten_).
+  void After(Context &ctx);
   std::vector<Ino> AllDirs(Context &ctx);
 
   int fd_;
@@ -250,6 +263,9 @@ class TraceRecorder final : public ProtocolEvents {
   const char *cause_ = "";  // the callback being handled, for the lines
   int64_t callbacks_ = 0;   // callbacks handled so far
   std::set<Ino> covered_;   // directories given a line by this callback
+  // Directory -> raw names whose rows pointed at an inode forgotten since
+  // the last check (InodeForgetting).
+  std::map<Ino, std::set<std::string>> forgotten_;
   int64_t changes_ = -1;    // sqlite3_total_changes at the last check
 };
 

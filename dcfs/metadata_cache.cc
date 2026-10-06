@@ -984,6 +984,7 @@ absl::Status InvalidateInode(Context &ctx, InodeId id) {
   RET_CHECK_NE(id, kRootInode) << "the root inode cannot be invalidated";
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, id));
+    ctx.events->InodeForgetting(ctx, id);
     // The schema's inodes_delete_unknowns trigger makes every dentry that
     // pointed at it unknown; its own dentries (if a directory) cascade.
     return Execute(ctx, "DELETE FROM inodes WHERE id = ?", id).status();

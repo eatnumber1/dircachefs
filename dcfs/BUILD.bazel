@@ -321,6 +321,7 @@ cc_library(
 
 cc_library(
     name = "device_id",
+    visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["device_id.cc"],
     hdrs = ["device_id.h"],
     deps = [
@@ -362,6 +363,7 @@ qemu_cc_test(
 
 cc_library(
     name = "mount_fds",
+    visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["mount_fds.cc"],
     hdrs = ["mount_fds.h"],
     deps = [
@@ -392,6 +394,7 @@ qemu_cc_test(
 
 cc_library(
     name = "file_handle",
+    visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["file_handle.cc"],
     hdrs = ["file_handle.h"],
     deps = [

@@ -269,8 +269,24 @@ std::vector<Ino> TraceRecorder::AllDirs(Context &ctx) {
   return dirs;
 }
 
-std::string TraceRecorder::Snapshot(Context &ctx, Ino dir) {
+std::string TraceRecorder::State::Json() const {
   std::string out = "{\"dent\":[";
+  bool first = true;
+  for (const auto &[name, value] : dent) {
+    absl::StrAppend(&out, first ? "" : ",", "[", Name(name), ",",
+                    JsonStr(value), "]");
+    first = false;
+  }
+  absl::StrAppend(&out, "]", rest, "}");
+  return out;
+}
+
+std::string TraceRecorder::Snapshot(Context &ctx, Ino dir) {
+  return SnapshotState(ctx, dir).Json();
+}
+
+TraceRecorder::State TraceRecorder::SnapshotState(Context &ctx, Ino dir) {
+  State out;
   {
     absl::StatusOr<sqlite3::Statement *> stmt = ctx.db.Prepared(
         "SELECT d.name, d.state, i.backing_ino, i.btime_s, i.btime_ns "
@@ -278,20 +294,15 @@ std::string TraceRecorder::Snapshot(Context &ctx, Ino dir) {
         "WHERE d.parent = ? ORDER BY d.name");
     CHECK_OK(stmt.status());
     CHECK_OK((*stmt)->Bind(1, dir));
-    bool first = true;
     CHECK_OK((*stmt)->ForEachRow([&](sqlite3::Statement &row) {
-      const std::string name = row.Column<std::string>(0);
+      std::string name = row.Column<std::string>(0);
       const std::string state = row.Column<std::string>(1);
-      std::string value;
-      if (state == "present") {
-        value = JsonStr(Key(row.Column<uint64_t>(2), row.Column<int64_t>(3),
-                            row.Column<int64_t>(4)));
-      } else {
-        value = JsonStr(state);
-      }
-      absl::StrAppend(&out, first ? "" : ",", "[", Name(name), ",", value,
-                      "]");
-      first = false;
+      out.dent.emplace_back(
+          std::move(name),
+          state == "present" ? Key(row.Column<uint64_t>(2),
+                                   row.Column<int64_t>(3),
+                                   row.Column<int64_t>(4))
+                             : state);
       return absl::OkStatus();
     }));
   }
@@ -333,13 +344,13 @@ std::string TraceRecorder::Snapshot(Context &ctx, Ino dir) {
   absl::StatusOr<bool> clean = GetCleanShutdown(ctx.db);
   CHECK_OK(clean.status());
   auto inflight = ctx.fills.inflight.find(dir);
-  absl::StrAppend(
-      &out, "],\"complete\":", Bool(complete), ",\"epoch\":", epoch,
+  out.rest = absl::StrCat(
+      ",\"complete\":", Bool(complete), ",\"epoch\":", epoch,
       ",\"valid\":", Bool(valid), ",\"dirty\":", Bool(dirty),
       ",\"clean\":", Bool(*clean),
       ",\"durable\":", Bool(ctx.dirty.durable.contains(dir)),
       ",\"inflight\":",
-      inflight == ctx.fills.inflight.end() ? 0 : inflight->second, "}");
+      inflight == ctx.fills.inflight.end() ? 0 : inflight->second);
   return out;
 }
 
@@ -375,7 +386,8 @@ void TraceRecorder::Emit(Context &ctx, Ino dir, Req *req, std::string_view ev,
       req->arrived = true;
     }
   }
-  const std::string db = Snapshot(ctx, dir);
+  State now = SnapshotState(ctx, dir);
+  const std::string db = now.Json();
   Dir &state = dirs_[dir];
   // An unchanged state is left out (the serial console is slow, and slows
   // the guest): formal/trace_validate.sh puts the previous line's back.
@@ -387,6 +399,7 @@ void TraceRecorder::Emit(Context &ctx, Ino dir, Req *req, std::string_view ev,
   }
   Write(dir, json);
   state.last = db;
+  state.last_state = std::move(now);
   covered_.insert(dir);
 }
 
@@ -417,7 +430,11 @@ void TraceRecorder::Cut(Context &ctx, Ino dir, std::string_view why) {
   covered_.insert(dir);
 }
 
-void TraceRecorder::After(Context &ctx, bool cut_changes) {
+void TraceRecorder::After(Context &ctx) {
+  // Nothing is looked at inside a transaction (an invalidation inside an
+  // upsert, say): the state there is half-written. The next callback
+  // outside one checks what the transaction did.
+  if (ctx.db.InTransaction()) return;
   const std::vector<Ino> all = AllDirs(ctx);
   const std::set<Ino> present(all.begin(), all.end());
   for (auto &[dir, state] : dirs_) {
@@ -432,19 +449,36 @@ void TraceRecorder::After(Context &ctx, bool cut_changes) {
     // A new directory row (or the first look at an existing one): its
     // trace begins in the state it is in now.
     dirs_[dir] = Dir{};
-    const std::string db = Snapshot(ctx, dir);
+    State now = SnapshotState(ctx, dir);
+    const std::string db = now.Json();
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"begin\",\"db\":", db, "}"));
     dirs_[dir].last = db;
+    dirs_[dir].last_state = std::move(now);
     covered_.insert(dir);
+    if (db.find("\"refused\"") != std::string::npos) {
+      Cut(ctx, dir, "boundary: a refused boundary");
+    }
   }
   for (auto &[dir, state] : dirs_) {
     if (state.dead || covered_.contains(dir)) continue;
     const std::string db = Snapshot(ctx, dir);
     if (db == state.last) continue;
-    if (cut_changes) {
-      Cut(ctx, dir, "invalidated: a forgotten inode's dentries became unknown");
-      continue;
+    // A forgotten inode (InodeForgetting) made the names that pointed at
+    // it unknown, which no model step does: a cut, if that is the whole
+    // change.
+    if (auto it = forgotten_.find(dir); it != forgotten_.end()) {
+      State expected = state.last_state;
+      for (auto &[name, value] : expected.dent) {
+        if (it->second.contains(name) &&
+            value.starts_with("k:")) {
+          value = "unknown";
+        }
+      }
+      if (expected.Json() == db) {
+        Cut(ctx, dir, "invalidated: a forgotten inode's dentries became unknown");
+        continue;
+      }
     }
     // Changed by something that is not one of its events: no model action
     // matches this line, so validation stops here.
@@ -452,6 +486,7 @@ void TraceRecorder::After(Context &ctx, bool cut_changes) {
                             ",\"ev\":\"unexplained\",\"db\":", db, "}"));
     state.dead = true;
   }
+  forgotten_.clear();
   covered_.clear();
 }
 
@@ -1242,11 +1277,26 @@ void TraceRecorder::OutOfBandChange(Context &ctx, Ino id) {
   After(ctx);
 }
 
+void TraceRecorder::InodeForgetting(Context &ctx, Ino id) {
+  Enter("InodeForgetting");
+  // The present rows pointing at it, which its deletion makes unknown
+  // (schema.sql's inodes_delete_unknowns).
+  absl::StatusOr<sqlite3::Statement *> stmt = ctx.db.Prepared(
+      "SELECT parent, name FROM dentries WHERE inode = ? AND state = "
+      "'present'");
+  CHECK_OK(stmt.status());
+  CHECK_OK((*stmt)->Bind(1, id));
+  CHECK_OK((*stmt)->ForEachRow([&](sqlite3::Statement &row) {
+    forgotten_[row.Column<int64_t>(0)].insert(row.Column<std::string>(1));
+    return absl::OkStatus();
+  }));
+}
+
 void TraceRecorder::InodeForgotten(Context &ctx, Ino id) {
   Enter("InodeForgotten");
-  // Its own trace ends ("gone", below); dentries pointing at it became
-  // unknown, which the model has no step for.
-  After(ctx, /*cut_changes=*/true);
+  // Its own trace ends ("gone"), and the directories that named it are cut
+  // if that is all that changed (After), once its transaction committed.
+  After(ctx);
 }
 
 }  // namespace dcfs::testonly

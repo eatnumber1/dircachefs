@@ -333,8 +333,12 @@ class ProtocolEvents {
 
   // backing::ReconcileAttrs adopted an out-of-band change of `id`.
   virtual void OutOfBandChange(Context &ctx, events::Ino id) {}
-  // cache::InvalidateInode/DeleteInode deleted `id`'s row (every dentry
-  // that pointed at it is now unknown).
+  // cache::InvalidateInode/DeleteInode is about to delete `id`'s row,
+  // inside its transaction (which may be nested in a caller's): every
+  // dentry that points at it will become unknown.
+  virtual void InodeForgetting(Context &ctx, events::Ino id) {}
+  // ... and deleted it (the caller's transaction, if any, has not
+  // committed yet).
   virtual void InodeForgotten(Context &ctx, events::Ino id) {}
 };
 

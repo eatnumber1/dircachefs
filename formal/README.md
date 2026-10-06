@@ -465,7 +465,7 @@ right after the code the model's step stands for, with no backing syscall
 | `RunStarted` | `StartRun`, after its kSync commit | `start_run` | `StartRun` | Startup |
 | `ShutdownBegin`, `Checkpointed`, `CleanShutdownRecorded` | `backing::FinishRun` | `shutdown`, `checkpoint`, `clean` | `BeginShutdown`, `StopCkpt`, `StopFlag` | Shutdown |
 | `OutOfBandChange` | `backing::ReconcileAttrs`, when it adopts a change | `cut` | none (no out-of-band changes in the model) | Out-of-band change detection |
-| `InodeForgotten` | `cache::InvalidateInode` (and `DeleteInode`) | `gone`, `cut` | none | Identity model |
+| `InodeForgetting`, `InodeForgotten` | `cache::InvalidateInode` (and `DeleteInode`), before and after its DELETE | `gone`; `cut` (`invalidated`) | none. The recorder notes the present rows that point at the inode; once the (outermost) transaction has committed, a directory whose state changed by exactly those names becoming unknown is cut, any other change is `unexplained` | Identity model |
 
 ### The projection, and why it is sound
 
@@ -570,7 +570,9 @@ observes. Nothing outside a directory's events may change its cached
 state: after every event the recorder compares every other directory's
 state with its last line, and a change gets an `unexplained` line, which
 no action matches (an uninstrumented write fails validation where it
-happened). A step the model does not have ends the trace with a `cut`
+happened). It looks only outside transactions: a callback inside one (an
+invalidation inside an upsert) leaves the check to the next callback after
+the commit, so a half-written transaction is never compared. A step the model does not have ends the trace with a `cut`
 line, `"why":"<category>: <detail>"`; what came before is still checked.
 Only steps the model *lacks* are cuts, and each test lists the categories
 its traces may end at (`allow_cuts` of `tla_trace_test`): any other cut

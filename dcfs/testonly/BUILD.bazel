@@ -2,6 +2,7 @@
 # in a testonly/ directory whose targets set testonly = 1).
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 
 package(default_testonly = 1)
 
@@ -93,5 +94,31 @@ cc_library(
         "//dcfs:syscalls",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
+    ],
+)
+
+# The recorder's own decisions (what it explains, cuts or calls
+# unexplained), on an in-memory cache.
+qemu_cc_test(
+    name = "trace_recorder_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["trace_recorder_test.cc"],
+    deps = [
+        ":trace_recorder",
+        "//dcfs:context",
+        "//dcfs:device_id",
+        "//dcfs:file_handle",
+        "//dcfs:metadata_cache",
+        "//dcfs:migrate",
+        "//dcfs:mount_fds",
+        "//dcfs:protocol_events",
+        "//dcfs:sqlite",
+        "@absl//absl/random",
+        "@absl//absl/status",
+        "@absl//absl/status:status_matchers",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@googletest//:gtest_main",
     ],
 )
