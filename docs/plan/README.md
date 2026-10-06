@@ -32,7 +32,7 @@ phase's file; `log.md` says where things stand.
 | 2 | [Fix: world-readable cache database](phases/02-fix-cache-permissions.md) | done 2026-10-05 |
 | 3 | [Drop the kernel patch; download and build the test kernel](phases/03-drop-kernel-patch-and-build-test-kernel.md) | done 2026-10-05 (deprecated patched-kernel path removed with Phase 4's wiring) |
 | 4 | [Pinned host tools; `third_party/` convention](phases/04-pinned-host-tools.md) | done 2026-10-06 (R3: scratch filesystems from pinned mkfs tools, 4 KiB blocks) |
-| 5 | [CI runs the QEMU suite](phases/05-ci.md) | in progress (5.1 done; 5.2 CI workflow with act in lane-2) |
+| 5 | [CI runs the QEMU suite](phases/05-ci.md) | in progress (5.1 done; 5.2 CI workflow with act in lane-2; 5.3 OSV-Scanner after 5.2) |
 | 6 | [Test tiers and test speed](phases/06-test-tiers-and-test-speed.md) | in progress (6.1 tiers done 2026-10-06; 6.3 first fix merged; 6.2 throughout) |
 | 7 | [Pinned toolchain, coverage, warnings, UBSan, clang-tidy](phases/07-toolchain-coverage-warnings-ubsan.md) | planned |
 | 8 | [Coverage close to 100%](phases/08-coverage-to-100.md) | planned |
@@ -41,6 +41,7 @@ phase's file; `log.md` says where things stand.
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
 | 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | in progress (12.1 model merged 2026-10-06, russ to read formal/README.md; 12.2 after Phase 11) |
+| 22 | [Request cancellation (Ctrl+C, EINTR)](phases/22-cancellation.md) | planned; runs here, after R4, before 13 |
 | 13 | [Connected backing fds](phases/13-connected-backing-fds.md) | planned |
 | 14 | [Identity from the backing filesystem](phases/14-identity-from-backing-fs.md) | planned |
 | 15 | [The `mount.dcfs` wrapper](phases/15-mount-dcfs-wrapper.md) | planned |
