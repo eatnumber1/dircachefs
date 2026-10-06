@@ -184,6 +184,18 @@ class MetadataCacheTest : public ::testing::Test {
     return ClearDirty(ctx_, synced, keep);
   }
 
+  // Links names "e0" .. "e<count-1>" to `child` in `dir` with one SQL
+  // statement (thousands of LinkDentry calls exhaust the 256 MB ASan guest
+  // through allocator quarantine).
+  absl::Status FillDirectory(InodeId dir, int count, InodeId child) {
+    return db_.ExecScript(absl::StrCat(
+        "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n "
+        "WHERE i < ", count - 1, ") "
+        "INSERT INTO dentries (parent, name, state, inode) "
+        "SELECT ", dir, ", CAST('e' || i AS BLOB), 'present', ", child,
+        " FROM n"));
+  }
+
   sqlite3::Connection db_;
   MountFds mounts_;
   // Fixed seed: generations are random, but tests should be reproducible.
@@ -640,18 +652,8 @@ TEST_F(MetadataCacheTest, ListDirPageCostDoesNotGrowWithTheDirectory) {
   ASSERT_OK_AND_ASSIGN(InodeId big, MakeDir(kRootInode, "big", 32));
   constexpr int kSmall = 100;
   constexpr int kBig = 5000;
-  ASSERT_THAT(db_.Transaction([&]() -> absl::Status {
-                for (int i = 0; i < kBig; ++i) {
-                  if (i < kSmall) {
-                    ABSL_RETURN_IF_ERROR(
-                        LinkDentry(ctx_, small, absl::StrCat("e", i), f.id));
-                  }
-                  ABSL_RETURN_IF_ERROR(
-                      LinkDentry(ctx_, big, absl::StrCat("e", i), f.id));
-                }
-                return absl::OkStatus();
-              }),
-              IsOk());
+  ASSERT_THAT(FillDirectory(small, kSmall, f.id), IsOk());
+  ASSERT_THAT(FillDirectory(big, kBig, f.id), IsOk());
 
   // One page (ListDir reads 64 rows per query), from the start and from
   // near the end, stopping after the first entry delivered.
@@ -698,18 +700,8 @@ TEST_F(MetadataCacheTest, IsDirCompleteCostDoesNotGrowWithTheDirectory) {
   ASSERT_OK_AND_ASSIGN(InodeId big, MakeDir(kRootInode, "big", 32));
   constexpr int kSmall = 100;
   constexpr int kBig = 5000;
-  ASSERT_THAT(db_.Transaction([&]() -> absl::Status {
-                for (int i = 0; i < kBig; ++i) {
-                  if (i < kSmall) {
-                    ABSL_RETURN_IF_ERROR(
-                        LinkDentry(ctx_, small, absl::StrCat("e", i), f.id));
-                  }
-                  ABSL_RETURN_IF_ERROR(
-                      LinkDentry(ctx_, big, absl::StrCat("e", i), f.id));
-                }
-                return absl::OkStatus();
-              }),
-              IsOk());
+  ASSERT_THAT(FillDirectory(small, kSmall, f.id), IsOk());
+  ASSERT_THAT(FillDirectory(big, kBig, f.id), IsOk());
   ASSERT_THAT(MarkDirComplete(ctx_, small, true), IsOk());
   ASSERT_THAT(MarkDirComplete(ctx_, big, true), IsOk());
 

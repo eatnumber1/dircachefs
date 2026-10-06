@@ -1,4 +1,4 @@
--- dcfs schema v2 (see kSchemaVersion in dcfs/migrate.h for the history;
+-- dcfs schema v3 (see kSchemaVersion in dcfs/migrate.h for the history;
 -- Migrate() upgrades older databases in place).
 --
 -- Executed as a script against a fresh database by Migrate() (see

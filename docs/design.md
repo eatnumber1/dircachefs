@@ -367,10 +367,10 @@ forget the ones that are not. The comment at `LogRefusedBoundary()` in
 
 ## The schema
 
-`dcfs/schema.sql` is the full definition, schema version 2. All tables are
+`dcfs/schema.sql` is the full definition, schema version 3. All tables are
 `STRICT`. `Migrate()` (`dcfs/migrate.cc`) creates a fresh database in one
-transaction, or upgrades a version 1 database to version 2 in one
-transaction, and refuses versions it does not understand.
+transaction, or upgrades an older one (one version step at a time) to
+version 3 in one transaction, and refuses versions it does not understand.
 
 ### `cache_state`: one row of cache-wide state
 

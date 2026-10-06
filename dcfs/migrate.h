@@ -25,7 +25,9 @@ namespace dcfs {
 //     present/absent/unknown state on xattrs rows; the directories
 //     completeness epoch; explicit present/absent/unknown/refused states
 //     on dentries rows, and the inodes_delete_unknowns trigger.
-inline constexpr int kSchemaVersion = 2;
+// v3: the partial indexes dentries_present and dentries_unknown (readdir
+//     costs a page of rows per query, not a whole directory).
+inline constexpr int kSchemaVersion = 3;
 
 // Identifies the root of the cache: the backing filesystem being cached,
 // and the backing (ino, generation) of its root directory. Only consulted

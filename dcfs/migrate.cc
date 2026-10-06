@@ -179,8 +179,6 @@ absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
     DROP TABLE dentries;
     ALTER TABLE dentries_v2 RENAME TO dentries;
     CREATE INDEX dentries_inode ON dentries (inode);
-    CREATE INDEX dentries_present ON dentries (parent) WHERE state = 'present';
-    CREATE INDEX dentries_unknown ON dentries (parent) WHERE state = 'unknown';
     CREATE TRIGGER inodes_delete_unknowns BEFORE DELETE ON inodes BEGIN
       UPDATE dentries SET state = 'unknown', inode = NULL
       WHERE inode = OLD.id;
@@ -204,6 +202,20 @@ absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
   return absl::OkStatus();
 }
 
+// v2 -> v3 (Phase 6.2): the partial indexes that make a readdir request's
+// queries (cache::ListDir, cache::IsDirComplete) cost a page instead of a
+// whole directory; see schema.sql. No row changes.
+absl::Status MigrateV2ToV3(sqlite3::Connection &db) {
+  ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
+    CREATE INDEX dentries_present ON dentries (parent) WHERE state = 'present';
+    CREATE INDEX dentries_unknown ON dentries (parent) WHERE state = 'unknown';
+    UPDATE cache_state SET schema_version = 3 WHERE id = 1;
+  )sql"));
+  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  RET_CHECK_EQ(version, 3);
+  return absl::OkStatus();
+}
+
 // Upgrades an existing database, one version at a time, to kSchemaVersion,
 // in one transaction. A version newer than this build's is refused.
 absl::Status UpgradeSchema(sqlite3::Connection &db) {
@@ -217,6 +229,10 @@ absl::Status UpgradeSchema(sqlite3::Connection &db) {
     if (version == 1) {
       ABSL_RETURN_IF_ERROR(MigrateV1ToV2(db));
       version = 2;
+    }
+    if (version == 2) {
+      ABSL_RETURN_IF_ERROR(MigrateV2ToV3(db));
+      version = 3;
     }
     RET_CHECK_EQ(version, kSchemaVersion);
     return absl::OkStatus();

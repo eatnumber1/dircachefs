@@ -126,6 +126,35 @@ TEST_F(MigrateTest, MigratingAgainIsANoOp) {
   EXPECT_THAT(CountRows(db_, "directories"), IsOkAndHolds(dirs_before));
 }
 
+// Phase 6.2: a cache made before the readdir indexes existed (schema v2)
+// gets them when the new code opens it, and is then at version 3; its rows
+// are untouched.
+TEST_F(MigrateTest, V2DatabaseGainsTheReaddirIndexes) {
+  RootIdentity root = TestRoot();
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  ASSERT_THAT(db_.ExecScript("DROP INDEX dentries_present; "
+                             "DROP INDEX dentries_unknown; "
+                             "UPDATE cache_state SET schema_version = 2;"),
+              IsOk());
+  ASSERT_THAT(GetSchemaVersion(db_), IsOkAndHolds(2));
+  ASSERT_THAT(CountRows(db_, "sqlite_master WHERE name IN "
+                             "('dentries_present', 'dentries_unknown')"),
+              IsOkAndHolds(0));
+  ASSERT_THAT(db_.Exec("INSERT INTO dentries (parent, name, state, inode) "
+                       "VALUES (1, x'61', 'absent', NULL)"),
+              IsOk());
+
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(3));
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'index' AND name IN "
+                             "('dentries_present', 'dentries_unknown')"),
+              IsOkAndHolds(2));
+  EXPECT_THAT(CountRows(db_, "dentries"), IsOkAndHolds(1));
+  // Opening it again is a no-op.
+  EXPECT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(3));
+}
+
 TEST_F(MigrateTest, WrongSchemaVersionFailsPrecondition) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
@@ -489,7 +518,7 @@ TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
       db_.Prepared("SELECT schema_version, typeof(source_device_id), "
                    "source_device_id, clean_shutdown FROM cache_state"));
   ASSERT_THAT(state->Step(), IsOkAndHolds(true));
-  EXPECT_EQ(state->Column<int>(0), 2);
+  EXPECT_EQ(state->Column<int>(0), kSchemaVersion);
   EXPECT_EQ(state->Column<std::string>(1), "blob");
   std::vector<uint8_t> stored = state->Column<std::vector<uint8_t>>(2);
   EXPECT_EQ(std::string(stored.begin(), stored.end()), device_bytes);
