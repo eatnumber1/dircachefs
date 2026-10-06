@@ -97,3 +97,23 @@ to the protocol updates the model in the same change.
 KLEE was planned as a one-function trial and dropped (russ, 2026-10-05):
 it supports only LLVM 16 (partially up to 19), far behind the pinned
 toolchain.
+
+
+## 12.3 Shared backing fd model (russ, 2026-10-07)
+
+Phase 23 found that after `chattr +i` a writable open still wrote through
+a shared backing fd opened before the flag. The main model abstracts one
+directory's cache records and has no fds or permission state, so this
+class (a shared fd outliving a permission change: immutable or
+append-only flags, chmod removing write, an ACL change) is outside it.
+Add a small second module, `formal/fds.tla`: per object, a backing
+permission state (writable or not, mutable through a flag change or
+chmod), dcfs's shared backing fd with its access mode, OPEN/RELEASE with
+modes, WRITE through an open. Invariant: a dcfs OPEN for writing succeeds
+exactly when the backing would open for writing at that moment, and an
+already-open descriptor keeps its rights (POSIX's own rule), so no write
+ever happens through dcfs that the backing would have refused at that
+open. Known-bug variant: the pre-fix behaviour (reuse the shared fd's
+mode). Trace validation: map the existing OPEN, RELEASE and IOCTL events
+(and WRITE's wakeups are not events: use the harness's forged requests)
+onto it. Owner dcfs-protocol; after Phase 23 merges.

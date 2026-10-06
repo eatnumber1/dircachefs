@@ -85,3 +85,36 @@ ENOTSUP with a one-time ERROR log, rename/link across it EXDEV. Keep
 Phase 15.4's remaining items (the bind form's recorded mount points)
 there. Tests: the Phase 15.1 stub tests, written now, failing today
 (`ls` shows the subvolume, `ls sub/` gives ENOTSUP not EXDEV).
+
+## 23.6 Held fd instead of a statx at FORGET (russ, 2026-10-07)
+
+Replace 23.1's statx-by-handle at the last FORGET with an fd dcfs keeps
+open for every file written during this run until that file's last
+FORGET; the reconciliation then reads attributes through the held fd
+(`fstatx`), which the kernel answers from the pinned inode without a
+disk read, so a sleeping backing disk stays asleep. Cost: one fd per
+written file until the kernel forgets it (bounded by the kernel's inode
+cache, as the lookup map is); raise RLIMIT_NOFILE at startup and
+document it.
+**Document carefully, in three places that point at each other** (the
+reason this exists and when to remove it):
+- `docs/design.md`: passthrough mmap keeps only the backing file, so the
+  kernel releases the dcfs file at `close()`, before `munmap`; stores
+  through a mapping after the last close reach the backing file without
+  a FUSE request; the last FORGET is the only later event, hence the
+  reconciliation there, and the held fd keeps that reconciliation off the
+  disk. The fix belongs in the kernel: a passthrough mapping should keep
+  the FUSE file referenced so RELEASE follows `munmap`; once that lands
+  (and the minimum kernel requires it), delete the written-file set, the
+  held fds and the FORGET hook, and let the existing last-writable-
+  release path cover mmap.
+- the code: one marker comment (`// See design.md "mmap after close"
+  (held-fd workaround)`) at the written-file set, the held fd and the
+  FORGET hook, so a grep finds all three.
+- `docs/plan/README.md` future work: the kernel change, with the pointer
+  back to the workaround.
+Tests: the 23.1 tests unchanged; plus the idle test extended with a
+written-then-forgotten file (drop_caches) showing zero backing reads at
+the FORGET (fails with 23.1's statx when the inode is cold: prove it with
+a cold backing, e.g. after dropping the backing fs's caches via a second
+drop or dm-delay timing).

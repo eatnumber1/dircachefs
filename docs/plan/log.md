@@ -607,3 +607,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   dentry, removed-object changes need no tri-state (record caches nothing mutable; reviewer to
   confirm). Needs russ: FORGET reconciliation's statx may spin up a sleeping disk when the backing
   fs has dropped the inode; alternative is holding one fd per written file until its FORGET.
+- russ (2026-10-07): held fd per written file instead of a statx at FORGET (23.6), documented in
+  three linked places so the workaround is removed when the kernel keeps the FUSE file referenced
+  by passthrough mappings; tool builds independent of sanitizer flags: do it (6.3b, lane-4 now);
+  remote cache: dropped (hosting not worth it); prebuilt kernel: dropped for the same reason;
+  Alpine linux-virt: no durable pin even per series (old apks vanish), equal KVM boot time, no
+  DM_DUST: keep our kernel; chattr +i class -> a small second TLA+ module (12.3).

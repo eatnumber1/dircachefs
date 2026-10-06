@@ -90,6 +90,14 @@ final hardware check (Phase 21.2).
   - A FUSE backing that itself uses passthrough needs dcfs's
     `max_stack_depth` raised to stay within the kernel's stacking limit
     (fs/fuse/backing.c).
+- **Kernel: passthrough mmap should keep the FUSE file referenced** so
+  RELEASE follows `munmap`. Until then dcfs holds an fd per written file
+  and reconciles at the last FORGET (Phase 23.6, marked in the code);
+  delete that workaround when the kernel change is the minimum.
+- **Kernel: a FUSE remap_file_range operation** so FICLONE/FICLONERANGE/
+  FIDEDUPERANGE can reach a FUSE server (today the VFS handles them and
+  they fail EOPNOTSUPP on every FUSE filesystem; copy_file_range shares
+  extents on btrfs/xfs meanwhile).
 - **FUSEX, FUSE's next protocol version** (possible direction). The
   proposal on fuse-devel (Miklos Szeredi, 2026-04-29) identifies objects
   by a variable-size id instead of a nodeid, and Luis Henriques's
