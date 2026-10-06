@@ -170,6 +170,7 @@ tests; readonly/create/handles/rename/nfs updated. Deviation from 15.1's
 text: a link or rename *into* a stub fails ENOTSUP, not EXDEV, because the
 kernel looks the target name up in the stub first (EXDEV is what renaming
 the stub itself, and a forged RENAME/LINK into it, get).
+
 ## 23.6 Held fd instead of a statx at FORGET (russ, 2026-10-07)
 
 Replace 23.1's statx-by-handle at the last FORGET with an fd dcfs keeps
