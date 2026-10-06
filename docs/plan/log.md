@@ -586,3 +586,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ decided (2026-10-07): FORGET reconciliation for mmap-after-close, mutations on removed-but-referenced objects, relatime semantics, and O_TMPFILE/copy_file_range/FICLONE/ioctls: Phase 23 (with boundary stubs pulled forward as 23.5: visible in readdir, ENOTSUP inside, not EXDEV). Dispatch after S3 (memory).
 - Cleanup: ~90 orphaned agent polling loops (self-matching 'while pgrep -f' and 'until grep -q MARKER' loops, some a day old) killed; only the S3 run and russ's shells remain. Rule added to CLAUDE.md and the agent definitions.
 - S3 plain: 157/158 on dde52b9; the one failure was sbom_test catching 12.2's new tla_community_modules pin with no SBOM entry (the test doing its job); fixed (8720d86). ASan suite in progress.
+- S3 PASSED (2026-10-07): main dde52b9 + the sbom pin fix 8720d86. Plain 157/158 (119 executed,
+  84 min), ASan 157/158 (129 executed, 97 min), the single failure in both being sbom_test's
+  missing tla_community_modules pin, fixed on main before the ASan run ended. Every former flake
+  held: idle_short_test_xfs, write/passthrough wakeup checks, all nine pjdfstest shards,
+  names_random_slow under ASan on three filesystems, trace tests, bench_full, idle_long, memory.
+  Capped server (1.5 GB heap, memory=3500, one test at a time) ran without OOM at load 1-5.
+  Wave 3 complete. Next: Phase 23 (semantics gaps) in lane-1; pending build-speed measurements in
+  lane-4 (two building lanes).
