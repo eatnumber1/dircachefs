@@ -469,3 +469,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   accepted); InodeForgotten cuts whole directories; fills over valid attributes unchecked;
   mid-run initial state trusted; T_Recover wider than RecoverDirty. Sent back as 12.2b with the
   reviewer's fixes and two more fault tests; re-review required before merge.
+- 2026-10-07 ~03:10: a usage limit cut off the three running agents (12.2b, 6.2 bundle, 5.2 CI) mid-step; all three resumed with their context after the reset. Lanes' uncommitted work was intact.
