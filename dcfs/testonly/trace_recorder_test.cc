@@ -7,6 +7,7 @@
 #include "dcfs/testonly/trace_recorder.h"
 
 #include <fcntl.h>
+#include <linux/fs.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -407,6 +408,33 @@ TEST_F(TraceRecorderTest, DirectoryNamedByTheRequestsResolveIsCut) {
     request.Finish(absl::InternalError("stop here")).IgnoreError();
   }
   EXPECT_THAT(Lines(d), Contains(HasSubstr("dir-itself: ")));
+}
+
+// --- IOCTL of a directory (review of Phase 23, tests) --------------------
+
+// A read-only ioctl of D (lsattr's FS_IOC_GETFLAGS) changes nothing: its
+// getattr is the model's getattr, not a cut. Only a set (chattr) is a
+// mutation of D's attributes the model does not have.
+TEST_F(TraceRecorderTest, ReadOnlyIoctlOfADirectoryIsNoCut) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_,
+        {.op = events::Op::kIoctl, .ino = d, .flags = FS_IOC_GETFLAGS});
+    recorder_->GetattrBegin(ctx_, d, /*valid=*/true);
+    recorder_->GetattrEnd(ctx_, absl::OkStatus());
+  }
+  EXPECT_THAT(Lines(d), Not(Contains(HasSubstr("\"ev\":\"cut\""))));
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_,
+        {.op = events::Op::kIoctl, .ino = d, .flags = FS_IOC_SETFLAGS});
+    recorder_->GetattrBegin(ctx_, d, /*valid=*/true);
+    recorder_->GetattrEnd(ctx_, absl::OkStatus());
+  }
+  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"cut\""),
+                                       HasSubstr("dir-attrs"))));
 }
 
 }  // namespace

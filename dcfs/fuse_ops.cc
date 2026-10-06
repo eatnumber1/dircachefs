@@ -338,7 +338,7 @@ void CopyFileRange(fuse_req_t req, fuse_ino_t ino_in, off_t off_in,
 void Ioctl(fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
            fuse_file_info *fi, unsigned flags, const void *in_buf,
            size_t in_bufsz, size_t out_bufsz) {
-  Serve(req, {.op = events::Op::kIoctl, .ino = Ino(ino)},
+  Serve(req, {.op = events::Op::kIoctl, .ino = Ino(ino), .flags = cmd},
         [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Ioctl(
               fr, ino, cmd, fi, flags,

@@ -1,5 +1,6 @@
 #include "dcfs/testonly/trace_recorder.h"
 
+#include <linux/fs.h>  // FS_IOC_*
 #include <unistd.h>
 
 #include <cerrno>
@@ -183,7 +184,10 @@ TraceRecorder::Mapping TraceRecorder::Map(const Frame &r, Ino dir) {
       if (r.newparent == dir) request("linkcreate", EscapeBytes(r.newname));
       break;
     case Op::kIoctl:
-      if (r.ino == dir) {
+      // Only a set changes D (its flags and ctime); a read (lsattr's
+      // FS_IOC_GETFLAGS) is nothing to D, and its getattr a getattr.
+      if (r.ino == dir &&
+          (r.flags == FS_IOC_SETFLAGS || r.flags == FS_IOC_FSSETXATTR)) {
         unmodelled("dir-attrs: an ioctl changing the directory's flags");
       }
       break;

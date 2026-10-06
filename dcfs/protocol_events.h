@@ -99,7 +99,7 @@ struct Request {
   std::string_view name;
   Ino newparent = 0;
   std::string_view newname;
-  unsigned int flags = 0;  // rename flags
+  unsigned int flags = 0;  // rename flags; an ioctl's command
   int64_t offset = 0;      // readdir offset
 };
 

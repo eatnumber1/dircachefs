@@ -185,8 +185,9 @@ TEST_F(MigrateTest, V3DatabaseGainsStubsAndForgetsItsRefusals) {
               IsOkAndHolds(1));
 }
 
-// The stubs triggers: a stub goes when its dentry stops being refused,
-// when the dentry is deleted, and with its parent.
+// The stubs triggers: a stub goes when its dentry stops being refused and
+// when the dentry is deleted. (That it goes with its parent's row is
+// metadata_cache_test's StubsLiveWithTheirRefusals.)
 TEST_F(MigrateTest, StubsGoWithTheirRefusals) {
   ASSERT_THAT(Migrate(db_, TestRoot()), IsOk());
   auto add = [&](std::string_view name_hex, int64_t id) {

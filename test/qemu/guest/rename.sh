@@ -451,6 +451,7 @@ else
 	fail rename-stub-exdev "testutil rename2 of a boundary stub -> '$out'"
 fi
 check_src rename-stub-exdev '[ -d /src/d/mp ] && absent /src/d/mp2'
+check_cold rename-stub-exdev '[ -d /mnt/d/mp ] && absent /mnt/d/mp2'
 
 # --- listing-matches: "d" is excluded -- see readonly.sh's identity-checks
 # comment on why /src/d and the cached /mnt/d deliberately diverge after the

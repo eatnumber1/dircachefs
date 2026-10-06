@@ -205,21 +205,12 @@ case "$raw" in
 *EOPNOTSUPP*) pass handle-boundary-refused ;;
 *) fail handle-boundary-refused "fhtest handle -> '$raw' (want EOPNOTSUPP)" ;;
 esac
-# The stub's own handle decodes (LOOKUP(stub, ".") once the kernel has
-# forgotten it) to the stub, which then refuses to be opened as a
-# directory: EOPNOTSUPP, not ESTALE.
-raw=$("$FHTEST" handle "$MNT/d/mp" 2>&1)
-set -- $raw
-if [ "$#" -eq 3 ]; then
-	echo 2 >/proc/sys/vm/drop_caches
-	out=$("$FHTEST" open "$MNT" "$1" "$3" 2>&1)
-	case "$out" in
-	*EOPNOTSUPP*) pass handle-boundary-stub-decodes ;;
-	*) fail handle-boundary-stub-decodes "fhtest open -> '$out' (want EOPNOTSUPP)" ;;
-	esac
-else
-	fail handle-boundary-stub-decodes "fhtest handle -> '$raw'"
-fi
+# The stub's own handle decodes to the stub, which then refuses to be
+# opened as a directory: EOPNOTSUPP, not ESTALE. Checked after the restart
+# below (handle-boundary-stub-decodes), where the new mount's kernel holds
+# no inode at all, so the decode has to go through LOOKUP(stub, ".")
+# (dropping caches here would not guarantee the stub's dentry went).
+STUB_HANDLE=$("$FHTEST" handle "$MNT/d/mp" 2>&1)
 errors=$(grep -c "refusing to cache mp" "$LOG1")
 if [ "$errors" -eq 1 ]; then
 	pass handle-boundary-error-logged-once
@@ -234,6 +225,16 @@ umount /src/d/mp
 # cache database.
 
 if restart_daemon handle-survives-restart "$LOG2"; then
+	set -- $STUB_HANDLE
+	if [ "$#" -eq 3 ]; then
+		out=$("$FHTEST" open "$MNT" "$1" "$3" 2>&1)
+		case "$out" in
+		*EOPNOTSUPP*) pass handle-boundary-stub-decodes ;;
+		*) fail handle-boundary-stub-decodes "fhtest open -> '$out' (want EOPNOTSUPP)" ;;
+		esac
+	else
+		fail handle-boundary-stub-decodes "fhtest handle -> '$STUB_HANDLE'"
+	fi
 	if [ -n "$TYPE_A" ]; then
 		res=$(open_of "$MNT" "$TYPE_A" "$HEX_A")
 		set -- $res

@@ -2225,8 +2225,8 @@ TEST_F(DirCacheFSTest, AGoneStubIsStale) {
 }
 
 // The stub's nodeid is recorded with its dentry: a lookup resolved by a
-// single probe (an unknown name in a complete listing) gets the same stub
-// as the listing, and a FORGET of it is counted like any other.
+// single probe (an unknown name in a complete listing) gets a stub, and a
+// name that is no longer a boundary drops it (the old nodeid is stale).
 TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
   ASSERT_EQ(::mkdir(Path("mp").c_str(), 0755), 0);
   WriteFile(Path("a"));

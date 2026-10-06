@@ -494,7 +494,9 @@ Which requests are which model request, in D's trace:
   RENAME within D with no flags a rename. TMPFILE in D is no request of
   D's (it changes nothing cached about D), nor are COPY_FILE_RANGE and
   IOCTL of a file (a file's attributes are outside the model); an IOCTL of
-  D that sets its flags is a `dir-attrs` cut.
+  D that sets its flags is a `dir-attrs` cut, one that reads them
+  (`lsattr`) nothing (the ioctl's command travels in the request's
+  `flags`).
 - A getattr of D inside another request (an `EntryFor(D)` replying D's
   entry from its parent's lookup, readdirplus or ".." lookup) is a getattr
   request of its own. A refresh of D's unknown attributes that no request
