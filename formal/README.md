@@ -637,8 +637,11 @@ renames with flags and syscall failures.
   mkdir in the same directory keeps invalidating until they give up
   (`*GivesUpWhile*`: phase 1's retry and EAGAIN, readdir's), the common
   requests in a row (`CommonRequestsMatchTheModel`), refreshes of unknown
-  attributes (`UnknownAttributesAreRefreshed`), and the fault-injection
-  scenario (`CreateMarksItsNameUnknown`). The harness runs requests inside
+  attributes (`UnknownAttributesAreRefreshed`), and the scenarios the
+  fault builds break (`CreateMarksItsNameUnknown`, `TraceScenarioUnlink`,
+  `TraceScenarioMkdirDuringSync`), whose traces must validate here.
+  `//dcfs/testonly:trace_recorder_test` tests the recorder's own decisions
+  (invalidations, fills over valid attributes) on an in-memory cache. The harness runs requests inside
   other requests' syscalls, so it is validated without the kernel's lock
   (`KernelDirLock` FALSE).
 - `//test/qemu:trace_{crash,power,rename,create}_test` run those guest
