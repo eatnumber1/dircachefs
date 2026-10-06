@@ -8,11 +8,11 @@
 # and a 64 MiB md5sum); reading big.bin's *content* -- unlike metadata --
 # does move vdb's block-read counter (a sanity check that this test can
 # tell the difference); a second metadata-only pass causes no further
-# reads; the CPU time dcfs's own process consumes while a 64 MiB read
-# happens stays under 20 clock ticks (200ms), which is only possible if
-# the kernel is reading the backing file directly rather than routing the
-# data through us; a non-read-only open succeeds and its write lands on the
-# backing filesystem (step 4.4 -- see write_test / guest/write.sh for the
+# reads; dcfs wakes fewer than 32 times (FUSE requests served) while a
+# 64 MiB read happens, which is only possible if the kernel is reading the
+# backing file directly rather than routing the data through us; a
+# non-read-only open succeeds and its write lands on the backing
+# filesystem (step 4.4 -- see write_test / guest/write.sh for the
 # full write-through test; this file only keeps a minimal smoke check so
 # passthrough opens of every access mode stay exercised here too); 200
 # open/read/release cycles leave no fd leak in the daemon; and all of this
@@ -67,13 +67,6 @@ trap cleanup EXIT
 echo "passthrough.sh: kernel $(uname -r)"
 
 # --- helpers -----------------------------------------------------------
-
-# utime (field 14) + stime (field 15) of pid $1, in clock ticks -- see
-# proc(5). dcfs's comm ("dcfs") has no spaces or parens, so splitting the
-# line on plain whitespace is safe.
-cpu_ticks() {
-	awk '{print $14 + $15}' "/proc/$1/stat"
-}
 
 # 200 files spread three levels deep under $1, for the open-many check.
 populate_tree() {
@@ -155,18 +148,36 @@ else
 	fail metadata-still-zero "sectors_read(vdb) $before -> $after between passes"
 fi
 
-# --- dcfs's own CPU time proves the kernel, not dcfs, moved the bytes ----
+# --- dcfs's request count proves the kernel, not dcfs, moved the bytes ----
 
+# Why this counts requests and not CPU ticks (step 6.2): dcfs's utime+stime
+# over a 64 MiB read is sampled tick accounting, and it cannot tell the two
+# cases apart. Measured on ext4 with passthrough on, 12 runs (KVM idle/loaded
+# host and TCG): 0-5 ticks. With passthrough disabled in a scratch build
+# (backing_id forced to 0), KVM, 6 runs: 44, 86, 64, 54, 7 and 11 ticks, so
+# the old "< 20" check passed 2 of 6 runs with passthrough off. What
+# passthrough changes is the number of requests dcfs has to serve: with it
+# the kernel reads the backing file itself and dcfs sees only the
+# open/flush/release; without it every read(2) (up to 1 MiB, the max_read
+# of the mount) is a FUSE_READ. Each request wakes dcfs's single thread from
+# its blocking read of /dev/fuse, and the count of those wakeups (voluntary
+# context switches in /proc/PID/status) does not depend on host load or on
+# KVM vs TCG. The CPU ticks are only printed.
 drop_caches
+quiesce_daemon "$DAEMON_PID"
+daemon_wakeups "$DAEMON_PID"
+before_wakeups=$WAKEUPS
 before_ticks=$(cpu_ticks "$DAEMON_PID")
 dd if="$MNT/big.bin" of=/dev/null bs=1M 2>/dev/null
 after_ticks=$(cpu_ticks "$DAEMON_PID")
+daemon_wakeups "$DAEMON_PID"
+wakeup_delta=$((WAKEUPS - before_wakeups))
 tick_delta=$((after_ticks - before_ticks))
-if [ "$tick_delta" -lt 20 ]; then
+echo "passthrough.sh: info: 64 MiB read: dcfs wakeups=$wakeup_delta cpu ticks=$tick_delta"
+if [ "$wakeup_delta" -lt 32 ]; then
 	pass passthrough-active
 else
-	echo "passthrough.sh: dcfs consumed $tick_delta clock ticks reading 64 MiB (want < 20)"
-	fail passthrough-active "cpu ticks delta=$tick_delta"
+	fail passthrough-active "dcfs woke $wakeup_delta times during the 64 MiB read (want < 32); passthrough is not active?"
 fi
 
 # --- step 4.4: writes are now allowed -- a non-read-only open must SUCCEED

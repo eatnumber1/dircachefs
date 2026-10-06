@@ -100,6 +100,47 @@ drop_caches_quiesced() {
 	drop_caches
 }
 
+# --- daemon activity probes (write.sh, passthrough.sh) -------------------
+#
+# Shared so every "the kernel, not dcfs, moved the bytes" check measures the
+# same way (step 6.2: counting dcfs's FUSE wakeups, not its CPU ticks).
+
+# utime (field 14) + stime (field 15) of pid $1, in clock ticks -- see
+# proc(5).
+cpu_ticks() {
+	awk '{print $14 + $15}' "/proc/$1/stat"
+}
+
+# daemon_wakeups PID: sets WAKEUPS to the voluntary context switches of the
+# (single-threaded) daemon so far -- one per FUSE request it blocks waiting
+# for (see the write-large-passthrough comment in write.sh).
+daemon_wakeups() {
+	WAKEUPS=$(awk '/^voluntary_ctxt_switches:/ {print $2}' "/proc/$1/status")
+}
+
+# quiesce_daemon PID: waits (up to 10s) until the daemon has had no wakeup
+# for 0.3s. drop_caches makes the kernel send a FORGET for every cached inode
+# and dentry, asynchronously and in batches, and opening a file makes dcfs
+# commit to its SQLite database; each wakeup would otherwise be counted
+# against the write that happens to be running then.
+quiesce_daemon() {
+	daemon_wakeups "$1"
+	q_last=$WAKEUPS
+	q_stable=0
+	q_n=0
+	while [ "$q_stable" -lt 3 ] && [ "$q_n" -lt 100 ]; do
+		usleep 100000
+		daemon_wakeups "$1"
+		if [ "$WAKEUPS" = "$q_last" ]; then
+			q_stable=$((q_stable + 1))
+		else
+			q_stable=0
+			q_last=$WAKEUPS
+		fi
+		q_n=$((q_n + 1))
+	done
+}
+
 # start_daemon LOG [extra dcfs flags...]: starts dcfs against $SRC/$DB,
 # mounted at $MNT, with any extra flags inserted before $MNT; waits up to
 # 10s for the mount to appear. Sets DAEMON_PID and MOUNTED (1 if the mount
