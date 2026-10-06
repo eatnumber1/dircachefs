@@ -13,7 +13,10 @@
 # the kernel's referenced inodes and not the tree:
 #   - find-grows-rss: the find did add to dcfs's RSS (the test measures
 #     something);
-#   - bytes-per-inode: what a full find adds is under 256 bytes per entry;
+#   - bytes-per-inode: what a full find adds is under 256 bytes per entry
+#     (plain builds only: under ASan the allocator's redzones and shadow
+#     memory make bytes per entry an artifact of the sanitizer, 7000+ here,
+#     so the number is printed and not asserted);
 #   - second-tree: a capacity-keeping map is fine as long as it is bounded
 #     by what the kernel referenced at once, not by the tree: after find
 #     over half the tree and a drop, a find over the OTHER half and a drop
@@ -21,6 +24,14 @@
 #     the first half's entries in the map, the second half would add its
 #     own on top, about as much again, and the test fails).
 # bytes_per_inode and the RSS at each step are printed.
+#
+# Under ASan dcfs also runs with the allocator's quarantine off
+# (quarantine_size_mb=0): the quarantine parks up to 256 MiB of freed memory
+# instead of reusing it, so RSS keeps climbing for the first quarter-GiB of
+# frees whatever FORGET releases (measured: the second half added more than
+# the first, 100 MiB against 74, and second-tree failed). Without it RSS
+# follows live memory again and the second-tree bound holds as it does in a
+# plain build.
 FAILED=0
 . "$(dirname "$0")/lib.sh"
 
@@ -38,6 +49,17 @@ if [ "${DCFS_ACCEL:-kvm}" = tcg ]; then
 else
 	ENTRIES=${ENTRIES:-50000}
 fi
+
+# Sanitized dcfs: ASan's runtime is in the binary (libasan as a needed shared
+# library for gcc, the runtime's strings when linked statically).
+ASAN=0
+if grep -q -e libasan -e AddressSanitizer "$DCFS"; then
+	ASAN=1
+	ASAN_OPTIONS="${ASAN_OPTIONS:+$ASAN_OPTIONS:}quarantine_size_mb=0:thread_local_quarantine_size_kb=0"
+	export ASAN_OPTIONS
+fi
+
+BYTES_PER_INODE_LIMIT=256
 
 DAEMON_PID=""
 MOUNTED=0
@@ -68,7 +90,7 @@ rss_kb() {
 	done <"/proc/$DAEMON_PID/status"
 }
 
-echo "memory.sh: kernel $(uname -r), ENTRIES=$ENTRIES"
+echo "memory.sh: kernel $(uname -r), ENTRIES=$ENTRIES, ASAN=$ASAN"
 
 mount /dev/vdb $SRC
 echo "memory.sh: making the tree: $(date +%s)"
@@ -132,10 +154,12 @@ else
 	fail find-grows-rss "RSS grew only ${grew} KiB over $ENTRIES entries"
 fi
 
-if [ "$bytes_per_inode" -le 256 ]; then
+if [ "$ASAN" -eq 1 ]; then
+	skip bytes-per-inode "ASan: $bytes_per_inode bytes per entry depends on the sanitizer's allocator, not asserted"
+elif [ "$bytes_per_inode" -le "$BYTES_PER_INODE_LIMIT" ]; then
 	pass bytes-per-inode
 else
-	fail bytes-per-inode "$bytes_per_inode bytes per entry (limit 256)"
+	fail bytes-per-inode "$bytes_per_inode bytes per entry (limit $BYTES_PER_INODE_LIMIT)"
 fi
 
 # Everything the second half adds on top of the first drop is sqlite page
