@@ -193,11 +193,18 @@ class ProtocolEvents {
 
   // ResolveName's transaction committed: the name was recorded iff
   // `recorded` (cache::CanFill of `parent`). `snapshot` is the fill
-  // snapshot (FillSnapshot::seq); `child` the row recorded for a present
-  // name, 0 otherwise. Model: ResolveCommit.
+  // snapshot (FillSnapshot::seq). Model: ResolveCommit.
   virtual void ResolveCommitted(Context &ctx, events::Ino parent,
                                 std::string_view name, uint64_t snapshot,
-                                bool recorded, events::Ino child) {}
+                                bool recorded) {}
+
+  // Inside a listing's or a resolve's transaction (RecordChild): the row of
+  // `child`, an entry of `dir`, was upserted, its attributes recorded as
+  // current iff `filled` (the code's own decision: CanFill, and not open
+  // for writing). PopulateCommitted or ResolveCommitted follows once the
+  // transaction committed. Model: a whole getattr fill of `child`.
+  virtual void ChildRowRecorded(Context &ctx, events::Ino dir,
+                                events::Ino child, bool filled) {}
 
   // PopulateDirectory took its fill snapshot and the directory's epoch;
   // its reads (getdents64, then a probe of every name) follow. Model: where
@@ -212,12 +219,9 @@ class ProtocolEvents {
                             events::ListingFn listing) {}
 
   // PopulateDirectory's phase B committed; the listing was recorded iff
-  // `recorded`. `children` are the child rows it upserted (each one's
-  // attributes recorded iff CanFill(snapshot, child)). Model:
-  // PopulateCommit.
+  // `recorded`. Model: PopulateCommit.
   virtual void PopulateCommitted(Context &ctx, events::Ino dir,
-                                 uint64_t snapshot, bool recorded,
-                                 events::IdsFn children) {}
+                                 uint64_t snapshot, bool recorded) {}
 
   // DirCacheFS::ListCached checked whether `dir`'s listing can be served
   // (cache::IsDirComplete); if `complete`, the listing it serves was taken
@@ -234,10 +238,11 @@ class ProtocolEvents {
   virtual void AttrsFilled(Context &ctx, events::Ino id, bool recorded) {}
 
   // backing::ParentOf recorded the parent row `parent` from the backing
-  // filesystem (its attributes recorded iff CanFill(snapshot, parent)).
-  // Model: a whole getattr fill of that directory.
+  // filesystem, its attributes as current iff `filled` (the code's own
+  // decision). `snapshot` is its fill snapshot. Model: a whole getattr
+  // fill of that directory.
   virtual void ParentRecorded(Context &ctx, events::Ino parent,
-                              uint64_t snapshot) {}
+                              uint64_t snapshot, bool filled) {}
 
   // backing::InitRoot recorded the root's identity and attributes (fresh,
   // at startup). Model: a whole getattr fill of the root.

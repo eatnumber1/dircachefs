@@ -439,13 +439,14 @@ right after the code the model's step stands for, with no backing syscall
 | `SyncBegin` / `SyncEnd` | `backing::SyncBacking` | | a sync request (or, in `FinishRun`, `StopSync`/`StopClear`) | Sync points |
 | `LookupDecided` | `LookupOrPopulate`, after the cache read | `lookup` | `LookupStep`, or the `Arrive` of a lookup, unlink or rename (`LKFrom`): served, `RN_probe` next, or `PD_read` next | Population policy |
 | `ResolveProbed` | `ProbeChild` (for `ResolveName`), after its openat and statx | `probe` | `ResolveProbe` | Population policy; Concurrency |
-| `ResolveCommitted` | `ResolveName`, after its transaction | `resolve_commit`; `child_fill` for a child directory's row | `ResolveCommit`; `T_GetattrWhole` (below) | Population policy |
+| `ResolveCommitted` | `ResolveName`, after its transaction | `resolve_commit`; then the `child_fill` lines of its `ChildRowRecorded` | `ResolveCommit`; `T_GetattrWhole` (below) | Population policy |
+| `ChildRowRecorded` | `RecordChild` (in a listing's or resolve's transaction), with the code's decision `filled` | `child_fill` (written once the transaction committed), or `unexplained` if it filled against the guard's rule | `T_GetattrWhole` | Population policy |
 | `PopulateStarted`, `PopulateRead` | `PopulateDirectory`: after its snapshot and epoch; after phase A | `populate_read` (placed at `PopulateStarted`) | `PopulateRead` | Population policy |
-| `PopulateCommitted` | `PopulateDirectory`, after phase B | `populate_commit`; `child_fill` for child directories | `PopulateCommit`; `T_GetattrWhole` | Population policy; Concurrency (completeness epoch) |
+| `PopulateCommitted` | `PopulateDirectory`, after phase B | `populate_commit`; then its `child_fill` lines | `PopulateCommit` | Population policy; Concurrency (completeness epoch) |
 | `ListChecked` | `DirCacheFS::ListCached`, after `IsDirComplete` | `list_check` | `ReaddirStep`, or the `Arrive` of a readdir (`RDFrom`) | Population policy (Readdir) |
 | `AttrsStatted` | `RefreshAttrs*`, after the statx | `stat` | `GetattrStat`, `ReaddirplusStat`, `CreateStat`, `UnlinkStat`, `RenameStat` | Phase 3 |
 | `AttrsFilled` | `backing::FillAttrs`, after its transaction | `fill` | `GetattrFill`, `ReaddirplusFill`, `CreateFill`, `UnlinkFill`, `RenameFill` | Concurrency (fill guards) |
-| `ParentRecorded` | `backing::ParentOf`, after recording the parent row | `child_fill` | `T_GetattrWhole` | Population policy |
+| `ParentRecorded` | `backing::ParentOf`, after recording the parent row, with the code's decision `filled` | `child_fill`, or `unexplained` if it filled against the guard's rule | `T_GetattrWhole` | Population policy |
 | `RootRecorded` | `backing::InitRoot` | `child_fill` | `T_GetattrWhole` | Startup |
 | `MutationBegun` | `cache::BeginMutation`, after the commit and `RegisterMutation` | `phase1` (`begun`, `synced`) | the create's `Arrive` (`C1From`), `UnlinkPhase1`, `RenamePhase1` | Phase 1 |
 | `MutationAborted` | `cache::BeginMutation`, when `BeginRemove`/`BeginRename`'s verification fails | `phase1` (`aborted`) | the retry or `EAGAIN` case of `UnlinkPhase1`, `RenamePhase1` | Rules that hold now (resolves) |
@@ -491,8 +492,9 @@ Which requests are which model request, in D's trace:
   of D expects (e.g. a rename's refresh of a directory it moved) is a
   getattr that found them unknown; one of valid attributes is no step at
   all (the model would serve them, and refreshing a correct value changes
-  nothing it can see, nor can the fill record anything if a mutation of D
-  overlapped).
+  nothing it can see), but the recorder checks its fill: recording
+  (`AttrsFilled`'s `recorded`) after a `phase1` or `end` line of D since
+  the refresh began, or with a mutation of D in flight, is `unexplained`.
 - A sync point is a sync request in every directory's trace.
 - A LookupOrPopulate outside any request of D (a test resolving a name
   directly) is a lookup request.
@@ -511,9 +513,11 @@ interleaving:
   not one of D's own requests' (its parent's listing recording D's row,
   `ParentOf`, `InitRoot`): a whole getattr (`GAFrom`, `GetattrStat`,
   `GetattrFill`) taken at once, whose snapshot is therefore taken in the
-  same step as its fill. Valid attributes stay valid (as for the silent
-  refresh above); a fill the code may not record leaves unknown ones
-  unknown.
+  same step as its fill. The line carries the code's own decision
+  (`filled`); the recorder makes one that filled against the guard's rule
+  (`CanFill` with the code's snapshot) an `unexplained` line instead. Valid
+  attributes stay valid (the value is not compared, as for the silent
+  refresh above); a fill that did not record leaves unknown ones unknown.
 
 Where the code's step is spread over syscalls and the model's is one:
 
@@ -555,9 +559,16 @@ What a trace observes and what it leaves free:
   could have changed it starts in that state. Both only remove initial
   states, so neither can make an invalid trace valid.
 - Attribute values (the model's stamp), the guards' absolute clock, and
-  which answer a listing served are not compared; their effects (the
-  attributes' validity, every guard decision, the dentries a listing was
-  built from) are.
+  which answer a listing served are not compared. Their effects are: the
+  attributes' validity, the dentries a listing was built from, and the
+  guard decisions, each the code's own: a fill's `recorded`, phase 3's
+  `owned`, a verification's outcome, compared with the model's guard for
+  every fill that is a model step; and for the fills over valid attributes
+  that are no model step (a silent refresh, a `child_fill` over valid
+  attributes), the recorder checks the decision against the mutations of
+  D the trace saw. Before the review of 2026-10-06 those were dropped (a
+  silent refresh had no check, and `child_fill`'s decision was the
+  recorder's own computation, not the code's).
 - Phase 1's durability: the code commits with a WAL fsync unless every
   inode it names is durably dirty, the model unless D is. Where the model
   takes the fast path the code may still fsync; that leaves fewer crash

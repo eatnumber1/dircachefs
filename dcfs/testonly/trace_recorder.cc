@@ -487,6 +487,8 @@ void TraceRecorder::After(Context &ctx) {
     state.dead = true;
   }
   forgotten_.clear();
+  // Child rows whose transaction never reported its commit rolled back.
+  child_rows_.clear();
   covered_.clear();
 }
 
@@ -625,10 +627,12 @@ void TraceRecorder::RefreshBegin(Context &ctx, Ino id) {
     if (!expected) {
       absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx, id);
       if (attr.ok() && attr->valid) {
-        // Of valid attributes: the model would serve them; refreshing
-        // them changes nothing it can see (and a mutation meanwhile makes
-        // the fill record nothing).
+        // Of valid attributes: the model would serve them, and refreshing
+        // a correct value changes nothing it can see. Its fill must record
+        // nothing if a mutation of the directory begins or ends meanwhile
+        // (checked in AttrsFilled).
         frames_.back().silent = true;
+        frames_.back().mark = dirs_[id].mutation_lines;
       } else {
         // A getattr of its own, whose check found them unknown.
         Req &req = Open(frames_.back(), id, "getattr");
@@ -751,7 +755,7 @@ void TraceRecorder::ResolveProbed(Context &ctx, Ino parent,
 
 void TraceRecorder::ResolveCommitted(Context &ctx, Ino parent,
                                      std::string_view name, uint64_t snapshot,
-                                     bool recorded, Ino child) {
+                                     bool recorded) {
   Enter("ResolveCommitted");
   if (Traced(parent)) {
     Req *req = Find(parent);
@@ -763,13 +767,42 @@ void TraceRecorder::ResolveCommitted(Context &ctx, Ino parent,
       req->terminal = true;
     }
   }
-  if (child != 0 && child != parent && Traced(child)) {
-    // The child row's attributes: a whole getattr fill of that directory.
-    Emit(ctx, child, nullptr, "child_fill",
-         absl::StrCat(",\"allowed\":",
-                      Bool(cache::CanFill(ctx, {.seq = snapshot}, child))));
-  }
+  ChildFills(ctx, parent, snapshot);
   After(ctx);
+}
+
+void TraceRecorder::ChildRowRecorded(Context &ctx, Ino dir, Ino child,
+                                     bool filled) {
+  Enter("ChildRowRecorded");
+  // Inside the caller's transaction: its line once that committed.
+  child_rows_[dir].emplace_back(child, filled);
+}
+
+void TraceRecorder::ChildFills(Context &ctx, Ino dir, uint64_t snapshot) {
+  auto it = child_rows_.find(dir);
+  if (it == child_rows_.end()) return;
+  for (const auto &[child, filled] : it->second) {
+    if (child == dir || !Traced(child)) continue;
+    Fill(ctx, child, snapshot, filled);
+  }
+  child_rows_.erase(it);
+}
+
+void TraceRecorder::Fill(Context &ctx, Ino dir, uint64_t snapshot,
+                         bool filled) {
+  // The code's own decision, checked against the guard's rule with the
+  // code's snapshot: recording although a mutation of the directory began
+  // or ended since, or is in flight, is unexplained (the model's whole
+  // getattr would not record, and over valid attributes it would not even
+  // run).
+  if (filled && !cache::CanFill(ctx, {.seq = snapshot}, dir)) {
+    Unexplained(ctx, dir,
+                "attributes recorded although a mutation of the directory "
+                "began or ended since the fill's snapshot");
+    return;
+  }
+  Emit(ctx, dir, nullptr, "child_fill",
+       absl::StrCat(",\"filled\":", Bool(filled)));
 }
 
 void TraceRecorder::PopulateStarted(Context &ctx, Ino dir) {
@@ -833,8 +866,7 @@ void TraceRecorder::PopulateRead(Context &ctx, Ino dir,
 }
 
 void TraceRecorder::PopulateCommitted(Context &ctx, Ino dir,
-                                      uint64_t snapshot, bool recorded,
-                                      events::IdsFn children) {
+                                      uint64_t snapshot, bool recorded) {
   Enter("PopulateCommitted");
   if (Traced(dir)) {
     Req *req = Find(dir);
@@ -846,12 +878,7 @@ void TraceRecorder::PopulateCommitted(Context &ctx, Ino dir,
       req->terminal = true;
     }
   }
-  for (Ino child : Distinct(children)) {
-    if (child == dir || !Traced(child)) continue;
-    Emit(ctx, child, nullptr, "child_fill",
-         absl::StrCat(",\"allowed\":",
-                      Bool(cache::CanFill(ctx, {.seq = snapshot}, child))));
-  }
+  ChildFills(ctx, dir, snapshot);
   After(ctx);
 }
 
@@ -893,7 +920,15 @@ void TraceRecorder::AttrsFilled(Context &ctx, Ino id, bool recorded) {
   Enter("AttrsFilled");
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kRefresh &&
         frames_.back().id == id);
-  if (Traced(id) && !frames_.back().silent) {
+  if (Traced(id) && frames_.back().silent) {
+    auto inflight = ctx.fills.inflight.find(id);
+    if (recorded && (dirs_[id].mutation_lines != frames_.back().mark ||
+                     inflight != ctx.fills.inflight.end())) {
+      Unexplained(ctx, id,
+                  "a refresh of valid attributes recorded although a "
+                  "mutation of the directory began or ended since it began");
+    }
+  } else if (Traced(id)) {
     Req *req = Find(id);
     if (req == nullptr) {
       Unexplained(ctx, id, "a refresh outside a request");
@@ -908,20 +943,18 @@ void TraceRecorder::AttrsFilled(Context &ctx, Ino id, bool recorded) {
 }
 
 void TraceRecorder::ParentRecorded(Context &ctx, Ino parent,
-                                   uint64_t snapshot) {
+                                   uint64_t snapshot, bool filled) {
   Enter("ParentRecorded");
-  if (Traced(parent)) {
-    Emit(ctx, parent, nullptr, "child_fill",
-         absl::StrCat(",\"allowed\":",
-                      Bool(cache::CanFill(ctx, {.seq = snapshot}, parent))));
-  }
+  if (Traced(parent)) Fill(ctx, parent, snapshot, filled);
   After(ctx);
 }
 
 void TraceRecorder::RootRecorded(Context &ctx) {
   Enter("RootRecorded");
+  // UpsertRoot records the root's attributes unconditionally, at startup,
+  // with nothing in flight.
   if (Traced(cache::kRootInode)) {
-    Emit(ctx, cache::kRootInode, nullptr, "child_fill", ",\"allowed\":true");
+    Emit(ctx, cache::kRootInode, nullptr, "child_fill", ",\"filled\":true");
   }
   After(ctx);
 }
@@ -958,6 +991,7 @@ void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
     req->begun = true;
     Emit(ctx, dir, req, "phase1",
          absl::StrCat(",\"outcome\":\"begun\",\"synced\":", Bool(synced)));
+    ++dirs_[dir].mutation_lines;
   }
   After(ctx);
 }
@@ -1097,6 +1131,7 @@ void TraceRecorder::MutationEnded(Context &ctx, events::IdsFn ids) {
     }
     Emit(ctx, dir, &req, "end",
          absl::StrCat(",\"owned\":", Bool(req.owned)));
+    ++dirs_[dir].mutation_lines;
     if (req.syscall_ok && !req.probe_absent) req.expects_refresh = true;
   }
   After(ctx);

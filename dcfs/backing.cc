@@ -917,9 +917,13 @@ absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
   // UpsertInode marks the attributes current; a child that is open for
   // writing keeps them unknown (see WriteAttrs), as does one a mutation
   // may have changed since the probe.
-  if (!child_ok || OpenForWrite(ctx, row.id)) {
+  const bool filled = child_ok && !OpenForWrite(ctx, row.id);
+  if (!filled) {
     ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
   }
+  // Model: a whole getattr fill of the child (its line once the caller's
+  // transaction committed).
+  ctx.events->ChildRowRecorded(ctx, dir, row.id, filled);
   if (S_ISDIR(child.stx.stx_mode)) {
     ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
   }
@@ -1034,13 +1038,7 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     return absl::OkStatus();
   }));
   // Model: PopulateCommit.
-  ctx.events->PopulateCommitted(
-      ctx, dir, snapshot.seq, result.cached,
-      [&](absl::FunctionRef<void(events::Ino)> each) {
-        for (const auto &[name, entry] : result.entries) {
-          if (entry.kind == cache::LookupResult::kFound) each(entry.id);
-        }
-      });
+  ctx.events->PopulateCommitted(ctx, dir, snapshot.seq, result.cached);
   return result;
 }
 
@@ -1168,10 +1166,12 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
           << ": dentry unknown, resolved its parent from the backing "
              "filesystem";
   InodeId parent = 0;
+  bool filled = false;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ABSL_ASSIGN_OR_RETURN(cache::UpsertResult row,
                           cache::UpsertInode(ctx, handle, stx, gen));
-    if (!cache::CanFill(ctx, snapshot, row.id) || OpenForWrite(ctx, row.id)) {
+    filled = cache::CanFill(ctx, snapshot, row.id) && !OpenForWrite(ctx, row.id);
+    if (!filled) {
       ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
     }
     ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
@@ -1179,7 +1179,7 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
     return absl::OkStatus();
   }));
   // Model: a whole getattr fill of the parent (see formal/README.md).
-  ctx.events->ParentRecorded(ctx, parent, snapshot.seq);
+  ctx.events->ParentRecorded(ctx, parent, snapshot.seq, filled);
   return parent;
 }
 
@@ -1234,9 +1234,7 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
     return absl::OkStatus();
   }));
   // Model: ResolveCommit.
-  ctx.events->ResolveCommitted(
-      ctx, parent, name, snapshot.seq, recorded,
-      result.kind == cache::LookupResult::kFound ? result.id : 0);
+  ctx.events->ResolveCommitted(ctx, parent, name, snapshot.seq, recorded);
   if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
   return result;
 }

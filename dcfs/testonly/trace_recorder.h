@@ -87,17 +87,19 @@ class TraceRecorder final : public ProtocolEvents {
                      const events::Probe &probe) override;
   void ResolveCommitted(Context &ctx, events::Ino parent,
                         std::string_view name, uint64_t snapshot,
-                        bool recorded, events::Ino child) override;
+                        bool recorded) override;
+  void ChildRowRecorded(Context &ctx, events::Ino dir, events::Ino child,
+                        bool filled) override;
   void PopulateStarted(Context &ctx, events::Ino dir) override;
   void PopulateRead(Context &ctx, events::Ino dir,
                     events::ListingFn listing) override;
   void PopulateCommitted(Context &ctx, events::Ino dir, uint64_t snapshot,
-                         bool recorded, events::IdsFn children) override;
+                         bool recorded) override;
   void ListChecked(Context &ctx, events::Ino dir, bool complete) override;
   void AttrsStatted(Context &ctx, events::Ino id) override;
   void AttrsFilled(Context &ctx, events::Ino id, bool recorded) override;
-  void ParentRecorded(Context &ctx, events::Ino parent,
-                      uint64_t snapshot) override;
+  void ParentRecorded(Context &ctx, events::Ino parent, uint64_t snapshot,
+                      bool filled) override;
   void RootRecorded(Context &ctx) override;
 
   void MutationBegun(Context &ctx, events::IdsFn ids, bool synced) override;
@@ -166,8 +168,11 @@ class TraceRecorder final : public ProtocolEvents {
     Ino id = 0;
     std::string lookup_name;
     // kRefresh: of valid attributes, outside any request that expects it:
-    // nothing the model can see, so no lines.
+    // nothing the model can see, so no lines; but its fill may record only
+    // if no mutation line of the directory came since (`mark`: the
+    // directory's mutation_lines at RefreshBegin).
     bool silent = false;
+    int64_t mark = 0;
     // kSync: the callback count at its snapshot (SyncSnapshotTaken).
     int64_t snapshot_at = -1;
     // The requests of directories' traces this frame owns.
@@ -203,6 +208,9 @@ class TraceRecorder final : public ProtocolEvents {
     int read_slot = 0;
     std::string read_db;  // the state when it started
     std::vector<std::string> held;
+    // Its phase1 (begun) and end lines so far: the mutations of it the
+    // trace has seen begin or end.
+    int64_t mutation_lines = 0;
   };
 
   static Mapping Map(const Frame &request, Ino dir);
@@ -266,6 +274,15 @@ class TraceRecorder final : public ProtocolEvents {
   // Directory -> raw names whose rows pointed at an inode forgotten since
   // the last check (InodeForgetting).
   std::map<Ino, std::set<std::string>> forgotten_;
+  // Directory -> the child rows (child, filled) its listing or resolve
+  // recorded in the transaction not yet reported committed.
+  std::map<Ino, std::vector<std::pair<Ino, bool>>> child_rows_;
+  // Writes the child_fill lines of `dir`'s listing or resolve that took
+  // `snapshot`.
+  void ChildFills(Context &ctx, Ino dir, uint64_t snapshot);
+  // A child_fill line for `dir` (the code's decision `filled`), or an
+  // "unexplained" one if it filled against the guard's rule.
+  void Fill(Context &ctx, Ino dir, uint64_t snapshot, bool filled);
   int64_t changes_ = -1;    // sqlite3_total_changes at the last check
 };
 

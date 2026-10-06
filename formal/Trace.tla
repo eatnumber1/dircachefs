@@ -368,12 +368,14 @@ T_UnlinkFill      == FillOK /\ UnlinkFill(P)      /\ Matches(E, {})
 T_RenameFill      == FillOK /\ RenameFill(P)      /\ Matches(E, {})
 
 \* A fill of the directory's attributes outside its own requests (see
-\* GetattrWhole). Valid attributes stay valid (the model does not see the
-\* value: refreshing a correct value changes nothing); a fill that may not
-\* record (CanFill) leaves unknown ones unknown.
+\* GetattrWhole); `filled` is the code's own decision. Valid attributes
+\* stay valid (the model does not see the value: refreshing a correct value
+\* changes nothing; the recorder makes a fill that records against the
+\* guard's rule an "unexplained" line); a fill that did not record leaves
+\* unknown ones unknown.
 T_GetattrWhole ==
     /\ Ev("child_fill")
-    /\ IF dbCur.attrValid \/ ~E.allowed THEN Stutter ELSE GetattrWhole
+    /\ IF dbCur.attrValid \/ ~E.filled THEN Stutter ELSE GetattrWhole
     /\ Matches(E, {})
 
 \* Phase 1. The code commits with a WAL fsync unless every inode it names

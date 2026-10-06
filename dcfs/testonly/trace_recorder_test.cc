@@ -201,5 +201,71 @@ TEST_F(TraceRecorderTest, ForgottenInodeInATransactionHidesNothing) {
   EXPECT_THAT(Lines(d1), Not(Contains(HasSubstr("\"ev\":\"cut\""))));
 }
 
+// --- Fills over valid attributes (review of 2026-10-06, finding 4) -------
+
+// A refresh of valid attributes has no line (the model would serve them),
+// but its fill may record only if no mutation of the directory began or
+// ended since its snapshot: one that records after a mutation is
+// unexplained.
+TEST_F(TraceRecorderTest, SilentRefreshThatRecordsOverAMutationIsUnexplained) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+
+  recorder_->RefreshBegin(ctx_, d);  // Valid attributes: silent.
+  {
+    // A whole mkdir in d, inside the refresh (at its statx, say).
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kMkdir, .ino = d, .name = "x"});
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginCreate(ctx_, d, "x"));
+    ctx_.events->MutationSyscallStarting(ctx_);
+    ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
+    mutation.End();
+  }
+  recorder_->AttrsStatted(ctx_, d);
+  recorder_->AttrsFilled(ctx_, d, /*recorded=*/true);
+  recorder_->RefreshEnd(ctx_, absl::OkStatus());
+  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                                       HasSubstr("\"c\":\"AttrsFilled\""))));
+}
+
+// The same refresh, with no mutation meanwhile: nothing to say.
+TEST_F(TraceRecorderTest, SilentRefreshWithNothingMeanwhileIsSilent) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+
+  recorder_->RefreshBegin(ctx_, d);
+  recorder_->AttrsStatted(ctx_, d);
+  recorder_->AttrsFilled(ctx_, d, /*recorded=*/true);
+  recorder_->RefreshEnd(ctx_, absl::OkStatus());
+  EXPECT_THAT(Lines(d), Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
+  EXPECT_THAT(Lines(d), Not(Contains(HasSubstr("\"ev\":\"cut\""))));
+}
+
+// A child row's fill reports the code's own decision; recording it
+// although a mutation of the child ran since the fill's snapshot is
+// unexplained (not a stutter over valid attributes).
+TEST_F(TraceRecorderTest, ChildRowFilledAgainstTheGuardIsUnexplained) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kMkdir, .ino = d, .name = "x"});
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginCreate(ctx_, d, "x"));
+    ctx_.events->MutationSyscallStarting(ctx_);
+    ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
+    mutation.End();
+  }
+  // The root's listing records d's row as filled anyway.
+  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true);
+  recorder_->PopulateCommitted(ctx_, cache::kRootInode, snapshot.seq,
+                               /*recorded=*/false);
+  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                                       HasSubstr("since the fill's snapshot"))));
+}
+
 }  // namespace
 }  // namespace dcfs::testonly
