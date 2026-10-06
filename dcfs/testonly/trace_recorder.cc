@@ -227,17 +227,42 @@ TraceRecorder::Req &TraceRecorder::Open(Frame &frame, Ino dir,
   return req;
 }
 
+void TraceRecorder::Defer(Ino dir, Req &req, std::string why) {
+  // The trace ends here, as a cut if the request fails, or "unexplained"
+  // if it replies OK (Close decides); nothing more is written for it.
+  if (!req.pending.empty()) return;
+  EndHeld(dir);
+  req.pending = std::move(why);
+  dirs_[dir].pending = true;
+}
+
 void TraceRecorder::Close(
-    Context &ctx, Frame &frame,
+    Context &ctx, Frame &frame, const absl::Status &status,
     absl::FunctionRef<std::string(const Req &)> unmodelled_end) {
   for (auto &[dir, req] : frame.reqs) {
     if (Dir &state = dirs_[dir]; state.reading && state.read_slot == req.slot) {
-      // Its population failed half-way: the trace ends where it began.
-      state.reading = false;
-      state.held.clear();
-      Cut(ctx, dir, "failed: a listing failed half-way");
+      // Its population never reported its reads: a failure ends the trace
+      // where the population began; a frame that returned OK anyway is
+      // unexplained.
+      if (status.ok()) {
+        Unexplained(ctx, dir,
+                    "a listing's reads ended without their line, and its "
+                    "request replied OK");
+      } else {
+        Cut(ctx, dir, absl::StrCat("failed: a listing failed half-way: ",
+                                   status.ToString()));
+      }
     }
-    if (Traced(dir) && req.arrived) {
+    if (!req.pending.empty()) {
+      dirs_[dir].pending = false;
+      if (status.ok()) {
+        Unexplained(ctx, dir,
+                    absl::StrCat(req.pending, ", and its request replied OK"));
+      } else {
+        Cut(ctx, dir, absl::StrCat("failed: ", req.pending, ": ",
+                                   status.ToString()));
+      }
+    } else if (Traced(dir) && req.arrived) {
       const std::string why = unmodelled_end(req);
       if (why.empty()) {
         Emit(ctx, dir, &req, "reply");
@@ -355,9 +380,12 @@ TraceRecorder::State TraceRecorder::SnapshotState(Context &ctx, Ino dir) {
 }
 
 void TraceRecorder::Write(Ino dir, const std::string &json) {
-  if (auto it = dirs_.find(dir); it != dirs_.end() && it->second.reading) {
-    it->second.held.push_back(json);
-    return;
+  if (auto it = dirs_.find(dir); it != dirs_.end()) {
+    if (it->second.pending) return;  // Its end is decided later (Defer).
+    if (it->second.reading) {
+      it->second.held.push_back(json);
+      return;
+    }
   }
   const std::string line =
       absl::StrCat("DCFS-TRACE ", trace_, " ", dir, " ", json, "\n");
@@ -497,7 +525,7 @@ void TraceRecorder::After(Context &ctx) {
     }
   }
   for (auto &[dir, state] : dirs_) {
-    if (state.dead || covered_.contains(dir)) continue;
+    if (state.dead || state.pending || covered_.contains(dir)) continue;
     const std::string db = Snapshot(ctx, dir);
     if (db == state.last) continue;
     // A forgotten inode (InodeForgetting) made the names that pointed at
@@ -552,14 +580,8 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
   const int err = ErrnoOf(status);
-  Close(ctx, frame, [&](const Req &req) -> std::string {
-    if (err == 0) {
-      if (req.ended_early) {
-        return "unexplained: a mutation ended before its syscall, and its "
-               "request succeeded";
-      }
-      return "";
-    }
+  Close(ctx, frame, status, [&](const Req &req) -> std::string {
+    if (err == 0) return "";
     // The errors the model has: a create's EEXIST (or the name gone before
     // its probe), an unlink's or rename's ENOENT from its syscall, and the
     // EAGAIN of a readdir, unlink or rename that kept finding changes.
@@ -624,7 +646,8 @@ void TraceRecorder::GetattrEnd(Context &ctx, const absl::Status &status) {
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kGetattr);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
-  Close(ctx, frame, [&](const Req &) { return FrameEnd("a getattr", status); });
+  Close(ctx, frame, status,
+        [&](const Req &) { return FrameEnd("a getattr", status); });
   After(ctx);
 }
 
@@ -642,7 +665,8 @@ void TraceRecorder::LookupEnd(Context &ctx, const absl::Status &status) {
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kLookup);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
-  Close(ctx, frame, [&](const Req &) { return FrameEnd("a lookup", status); });
+  Close(ctx, frame, status,
+        [&](const Req &) { return FrameEnd("a lookup", status); });
   After(ctx);
 }
 
@@ -686,7 +710,8 @@ void TraceRecorder::RefreshEnd(Context &ctx, const absl::Status &status) {
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kRefresh);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
-  Close(ctx, frame, [&](const Req &) { return FrameEnd("a refresh", status); });
+  Close(ctx, frame, status,
+        [&](const Req &) { return FrameEnd("a refresh", status); });
   After(ctx);
 }
 
@@ -701,7 +726,7 @@ void TraceRecorder::SyncEnd(Context &ctx, const absl::Status &status) {
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kSync);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
-  Close(ctx, frame,
+  Close(ctx, frame, status,
         [&](const Req &) { return FrameEnd("a sync point", status); });
   After(ctx);
 }
@@ -1103,9 +1128,12 @@ void TraceRecorder::MutationSyscall(Context &ctx, const absl::Status &status) {
           err == 0 || (req.kind == "create" && err == EEXIST) ||
           (req.kind != "create" && err == ENOENT);
       if (!modelled) {
-        Cut(ctx, dir, absl::StrCat("failed: a syscall error the model does "
-                                   "not have: ",
-                                   status.ToString()));
+        // Whether the request then failed (the model's requests always
+        // finish: a cut) or replied OK regardless (unexplained), its
+        // RequestEnd says.
+        Defer(dir, req, absl::StrCat("a syscall error the model does not "
+                                     "have: ",
+                                     status.ToString()));
         continue;
       }
       req.syscall_seen = true;
@@ -1161,9 +1189,8 @@ void TraceRecorder::MutationEnded(Context &ctx, events::IdsFn ids) {
     if (!req.syscall_seen) {
       // Before its syscall: the end of a request that failed before its
       // syscall (an OpenNode error, say), or a forbidden step. Which one,
-      // its RequestEnd says: a failure ends the trace there, a success is
-      // unexplained.
-      req.ended_early = true;
+      // its RequestEnd says (Defer).
+      Defer(dir, req, "a mutation ended before its syscall");
       continue;
     }
     Emit(ctx, dir, &req, "end",

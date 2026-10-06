@@ -600,12 +600,16 @@ its traces may end at (`allow_cuts` of `tla_trace_test`): any other cut
 fails it. A step the model *forbids* is never a cut: it is written as a
 line for the model to reject (a syscall before phase 1, a phase 1 before
 the resolve, a second phase 1, a step of the wrong kind of request), or,
-where no line can stand for it, as an `unexplained` line (a mutation that
-ended before its syscall in a request that succeeded; a resolve, listing,
-probe or refresh outside any request). A frame (request, getattr, lookup,
-refresh, sync point) that returns an error ends the trace with a `failed`
-cut; one that returns OK replies, and `T_Reply` requires its model request
-to have replied, so a frame that skipped a step is rejected there. The
+where no line can stand for it, as an `unexplained` line (a resolve,
+listing, probe or refresh outside any request). Where whether a step is
+lacking or forbidden depends on how its request ends (a mutation that ends
+before its syscall, a syscall error the model does not have, a listing
+whose reads never report), the trace ends there and the request's end
+decides: a `failed` cut if it failed, `unexplained` if it replied OK. A
+frame (request, getattr, lookup, refresh, sync point) that returns an error
+ends the trace with a `failed` cut; one that returns OK replies, and
+`T_Reply` requires its model request to have replied, so a frame that
+skipped a step is rejected there. The
 guest tests also name the root directory's trace (`root`), which must reach
 the end of the run or one of the cuts listed for it (`root_cuts`). The
 categories:
@@ -661,8 +665,9 @@ renames with flags and syscall failures.
   |---|---|---|
   | `skip_mark_unknown`: phase 1 does not mark names unknown | `CreateMarksItsNameUnknown` | the create's `phase1`, whose state has no row for `new` (the model's has it unknown) |
   | `syscall_before_phase1`: an unlink's unlinkat before its phase 1 | `TraceScenarioUnlink` | `unexplained` at `MutationSyscallStarting`, with nothing in flight and `a` still present (without that event: the `syscall` line, which the model rejects at `U1`) |
-  | `phase3_before_syscall`: an unlink's phase 3 and End before its unlinkat | `TraceScenarioUnlink` | `unexplained` at the End: `a` absent with no syscall yet |
+  | `phase3_before_syscall`: an unlink's phase 3 and End before its unlinkat | `TraceScenarioUnlink` | `unexplained` at the request's reply: the mutation ended before its syscall and the request replied OK (`a` absent) |
   | `snapshot_after_syncfs`: a sync point's snapshot taken after its syncfs calls | `TraceScenarioMkdirDuringSync` | `unexplained` at `SyncfsStarting`: no snapshot right before |
+  | `swallow_syscall_error`: an unlink's syscall reports EBUSY, which the request ignores, replying OK | `TraceScenarioUnlink` | `unexplained` at the request's reply: a syscall error the model does not have, and its request replied OK |
   | `create_syscall_before_phase1`: a create's syscall started before its phase 1, inside a readdir's population of the same directory | `TraceScenarioMkdirDuringListing` | `unexplained` at `MutationSyscallStarting`, written although the directory's lines were held for the listing |
 
   For example:

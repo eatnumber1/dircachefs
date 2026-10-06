@@ -149,7 +149,9 @@ class TraceRecorder final : public ProtocolEvents {
     bool syscall_ok = false;
     bool probe_absent = false;     // a create's probe found nothing
     bool owned = false;            // Mutation::Owns at its End
-    bool ended_early = false;      // its End came before its syscall
+    // Why its trace ends at a point whose kind (a cut if the request fails,
+    // "unexplained" if it replies OK) its end decides (Defer).
+    std::string pending;
   };
 
   // A frame: a FUSE request, or a getattr, lookup, refresh or sync point
@@ -208,6 +210,9 @@ class TraceRecorder final : public ProtocolEvents {
     int read_slot = 0;
     std::string read_db;  // the state when it started
     std::vector<std::string> held;
+    // Its trace ends at a request's end (Defer): lines meanwhile are
+    // dropped, and its state is not checked.
+    bool pending = false;
     // Its phase1 (begun) and end lines so far: the mutations of it the
     // trace has seen begin or end.
     int64_t mutation_lines = 0;
@@ -235,8 +240,10 @@ class TraceRecorder final : public ProtocolEvents {
   // "reply" line, or with a cut if `unmodelled_end(req)` names a reason
   // (an end the model does not have), or an "unexplained" line if the
   // reason starts with "unexplained: ".
-  void Close(Context &ctx, Frame &frame,
+  void Close(Context &ctx, Frame &frame, const absl::Status &status,
              absl::FunctionRef<std::string(const Req &)> unmodelled_end);
+  // Ends `dir`'s trace at this point, as Close of `req`'s frame decides.
+  void Defer(Ino dir, Req &req, std::string why);
 
   bool Traced(Ino dir) const;
   std::string Snapshot(Context &ctx, Ino dir);

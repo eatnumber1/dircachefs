@@ -533,6 +533,8 @@ tla_trace_test(
 #       syncfs calls.
 #   create_syscall_before_phase1: a create's syscall starts before its
 #       phase 1, inside a readdir's population of the same directory.
+#   swallow_syscall_error: an unlink's syscall reports an error the model
+#       does not have, which the request ignores, replying OK.
 BEGIN_REMOVE = "_ZN4dcfs5cache11BeginRemoveERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEElNS0_12FillSnapshotE"
 
 BEGIN_SYNC = "_ZN4dcfs5cache9BeginSyncERNS_7ContextE"
@@ -559,9 +561,9 @@ DIR_CACHE_FS_FAULTS = {
     "phase3_before_syscall": dict(
         wraps = [BEGIN_REMOVE],
         test = "TraceScenarioUnlink",
-        # The End, which comes with "a" already absent in the cache and no
-        # syscall yet: a change no step explains.
-        event = "\"c\":\"MutationEnded\",\"ev\":\"unexplained\".*\\[\"a\",\"absent\"\\]",
+        # The reply: OK, after the mutation ended before its syscall (with
+        # "a" absent by then).
+        event = "\"c\":\"RequestEnd\",\"ev\":\"unexplained\",\"why\":\"a mutation ended before its syscall, and its request replied OK\".*\\[\"a\",\"absent\"\\]",
     ),
     "snapshot_after_syncfs": dict(
         wraps = [BEGIN_SYNC],
@@ -576,6 +578,12 @@ DIR_CACHE_FS_FAULTS = {
         # The mkdir's syscall start, written although d's lines were held
         # for the listing's reads.
         event = "\"c\":\"MutationSyscallStarting\",\"ev\":\"unexplained\",\"why\":\"a mutation's syscall started before its phase 1\"",
+    ),
+    "swallow_syscall_error": dict(
+        wraps = [UNLINK_AT],
+        test = "TraceScenarioUnlink",
+        # The reply: OK, after a syscall error the model does not have.
+        event = "\"c\":\"RequestEnd\",\"ev\":\"unexplained\",\"why\":\"a syscall error the model does not have: .*EBUSY.*, and its request replied OK\"",
     ),
 }
 

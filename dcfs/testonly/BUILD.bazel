@@ -134,3 +134,17 @@ cc_library(
         "@absl//absl/status:statusor",
     ],
 )
+
+cc_library(
+    name = "swallow_syscall_error",
+    srcs = ["swallow_syscall_error.cc"],
+    alwayslink = True,
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:context",
+        "//dcfs:credentials",
+        "//dcfs:metadata_cache",
+        "//dcfs:status",
+        "@absl//absl/status",
+    ],
+)
