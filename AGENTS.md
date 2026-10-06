@@ -39,6 +39,12 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
   //...'` if your login session predates joining the `kvm` group. A
   Bazel server started without KVM access makes every guest fall back to
   slow emulation: run `bazel shutdown` first when switching.
+- **Everything goes through Bazel.** Every build step, tool, image and
+  test is a Bazel target with declared inputs; nothing is built or run
+  by a script outside the graph. That is what makes Bazel's caching of
+  builds and test results sound, locally and in CI (where the restored
+  disk cache lets unchanged tests count as passed; a weekly run forces
+  every test to rerun to catch flakes).
 - Never pipe Bazel through `tail` or `head` in an `&&` chain: the pipe
   hides Bazel's exit status.
 - Shut down Bazel servers you started in temporary worktrees when you are
