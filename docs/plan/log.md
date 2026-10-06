@@ -496,3 +496,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   crash/rename/create stop at the first link or cross-directory rename (explicit root_cuts); only
   power.sh's reaches the end; modelling links/cross-directory renames is future model scope. Second
   reviewer pass dispatched before merge.
+- 6.2 bundle done on step-6.2-pjd (dcfs-investigator), merging after rebase: xfs idle writes are
+  xfs_log_worker's log covering (two +2 bursts at 30 and 60 s after the last write, then nothing;
+  identical with dcfs gone), test warm-up now quiesces, README note for spin-down users;
+  passthrough.sh's tick check passed 2/6 with passthrough OFF (too weak, not flaky): now counts
+  wakeups (3-5 on vs 68-150 off); pjdfstest PASSED VACUOUSLY since 4d (busybox tail lacked -1:
+  8570/8827 checks failed on both sides; FEATURE_FANCY_TAIL added, smoke test checks tail -1, new
+  pjdfstest-suite-sane guard fails if >5% fail on the raw fs); pjdfstest sharded into rename /
+  chown+chmod / rest per filesystem (187-474 s per shard under load; rename/ alone is 90-150 s).
+  Lesson (second time): a pinned minimal busybox can hollow out tests that compare two sides;
+  every comparison-style test needs a sanity floor like pjdfstest's.
