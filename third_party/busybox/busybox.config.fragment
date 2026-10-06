@@ -49,6 +49,12 @@ CONFIG_ASH_CMDCMD=y
 CONFIG_MKDIR=y
 CONFIG_MOUNT=y
 CONFIG_FEATURE_MOUNT_HELPERS=y
+# mount -o bind/rbind/remount/noatime/ro/--make-private style flags (init's
+# bind mounts for the Debian chroot, tests' remounts): without
+# FEATURE_MOUNT_FLAGS the option table holds only ro/rw/remount and
+# `mount -o bind` works only because busybox autodetects a directory source
+# as a bind mount (review L2); rbind, noatime and friends silently fail.
+CONFIG_FEATURE_MOUNT_FLAGS=y
 CONFIG_MDEV=y
 CONFIG_ECHO=y
 CONFIG_UNAME=y

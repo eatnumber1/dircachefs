@@ -203,3 +203,14 @@ a *host* busybox binary in as `@kernel_image//:busybox`) and
 `scripts/mkinitramfs.sh`/`run-qemu.sh` is the next step, after the
 kernel lane (editing `kernel.bzl` concurrently) merges. This step only
 makes `//third_party/busybox/...` build and pass its own smoke test.
+
+## Checks (review R2)
+
+- `build_busybox.sh` fails the build if any line of `busybox.config.fragment`
+  is not in the final `.config` exactly as written (a misspelled or renamed
+  symbol, or one whose dependency is off), like the kernel build's check, and
+  sets `KCONFIG_NOTIMESTAMP` so the version banner carries no build time.
+- `smoke_test.sh` runs each feature the guests rely on (`$((...))`, `stat -c`
+  and `-f`, `find -path/-prune/...`, `head -c`, `sleep 0.01`, `dd conv=`,
+  sorted `ls`, `md5sum`, `touch -d`, ...) and checks that
+  `FEATURE_MOUNT_FLAGS` is compiled in.

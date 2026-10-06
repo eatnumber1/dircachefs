@@ -42,6 +42,11 @@ make() {
 	command make "$@"
 }
 
+# No build timestamp in .config or the version banner (reproducible builds,
+# review L10): confdata.c leaves AUTOCONF_TIMESTAMP empty.
+KCONFIG_NOTIMESTAMP=1
+export KCONFIG_NOTIMESTAMP
+
 make -C "$SRC" O="$BUILD" allnoconfig >/dev/null
 
 while IFS= read -r line; do
@@ -53,6 +58,31 @@ while IFS= read -r line; do
 done <"$FRAGMENT_ABS"
 
 make -C "$SRC" O="$BUILD" silentoldconfig >/dev/null
+
+# The sed above only rewrites "# CONFIG_X is not set" lines: a symbol that
+# was misspelled, renamed or removed by a busybox version bump is silently
+# ignored, and silentoldconfig silently resets a symbol whose dependencies
+# are off. Fail the build unless every fragment line is in the final
+# .config exactly as written (the same check as the kernel's,
+# third_party/linux/build_kernel.sh; review L2).
+echo "Checking every fragment symbol survived silentoldconfig..."
+missing=0
+while IFS= read -r line; do
+	case "$line" in
+	\#* | "") continue ;;
+	esac
+	sym=${line%%=*}
+	if ! grep -qxF "$line" "$BUILD/.config"; then
+		echo "MISSING: fragment wants '$line', final .config has: $(grep "^${sym}=" "$BUILD/.config" || echo "(unset)")" >&2
+		missing=$((missing + 1))
+	fi
+done <"$FRAGMENT_ABS"
+if [ "$missing" -ne 0 ]; then
+	echo "FAIL: $missing fragment symbol(s) did not survive silentoldconfig" \
+		"(misspelled/renamed/removed, or a dependency is off). Fix busybox.config.fragment." >&2
+	exit 1
+fi
+echo "OK: every fragment symbol is set as requested."
 
 make -C "$SRC" O="$BUILD" -j"$(nproc)" busybox
 
