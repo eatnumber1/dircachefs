@@ -556,7 +556,7 @@ DIR_CACHE_FS_FAULTS = {
         test = "TraceScenarioUnlink",
         # The unlinkat's start, while nothing is in flight (and "a" is
         # still present).
-        event = "\"c\":\"MutationSyscallStarting\",\"ev\":\"unexplained\".*\"inflight\":0\\}",
+        event = "\"c\":\"MutationSyscallStarting\",\"ev\":\"unexplained\",\"why\":\"a mutation's syscall started before its phase 1\".*\"inflight\":0\\}",
     ),
     "phase3_before_syscall": dict(
         wraps = [BEGIN_REMOVE],
@@ -569,7 +569,7 @@ DIR_CACHE_FS_FAULTS = {
         wraps = [BEGIN_SYNC],
         test = "TraceScenarioMkdirDuringSync",
         # The syncfs calls' start, with no snapshot right before it.
-        event = "\"c\":\"SyncfsStarting\",\"ev\":\"unexplained\"",
+        event = "\"c\":\"SyncfsStarting\",\"ev\":\"unexplained\",\"why\":\"a sync point's syncfs started without its snapshot right before\"",
     ),
     "create_syscall_before_phase1": dict(
         wraps = [BEGIN_CREATE],

@@ -751,12 +751,14 @@ reported here rather than fitted silently.
   dirty, which the model does not track), and `Trace.tla`'s `T_Recover` is
   that action, restricted by the `recover` line's `dirty_keys` (the keys of
   every inode that was dirty) to dentries pointing at one of them
-  (`formal:trace_recover_forgets_*_test`). No known-bug variant: in the
-  one-directory model a child is only ever dirty with D (every mutation of
-  a child names D, and a sync point clears them together), so the old
-  recovery and the new one leave the same states reachable for every
-  property; forgetting more is always safe, and `CrashSafe` checks the
-  least recovery forgets.
+  (`formal:trace_recover_forgets_*_test`). The new behaviours are a
+  superset of the old (`RecoverForgetting(d, {}) = RecoverDirty(d)`), so
+  more states are reachable (`small.cfg` now reaches 687,731 distinct
+  states, more than before) and no invariant or `Bug*` configuration is
+  weakened: every old behaviour is still checked. Forgetting more is
+  always safe (unknown is), and `CrashSafe` still checks the least
+  recovery forgets (`RecoverDirty`). No known-bug variant: the old
+  recovery is not a bug of the model's, only narrower than the code's.
 - **Syscall failures.** The model's create fails only with `EEXIST` and
   its unlink and rename only with `ENOENT`, each when the name says so; the
   code handles any error the same way (End, re-resolve, reply the error),

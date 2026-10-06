@@ -806,6 +806,8 @@ RecoverDirty(d) ==
 \* model's dirty set (README: abstractions), so recovery may make unknown
 \* any of D's present dentries besides: those whose objects were dirty.
 \* (Unknown is always safe; CrashSafe checks the least recovery forgets.)
+\* RecoverForgetting(d, {}) = RecoverDirty(d): Recover's behaviours are a
+\* superset of the old ones (more states reachable, none lost).
 PresentNames(d) == {x \in Names : d.dent[x] \in Objs}
 RecoverForgetting(d, forget) ==
     [RecoverDirty(d) EXCEPT
