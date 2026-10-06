@@ -43,6 +43,87 @@ echo "boot: kernel $(uname -r)"
 DCFS_ACCEL=$(sed -n 's/.*\bdcfs_accel=\([^ ]*\).*/\1/p' /proc/cmdline)
 export DCFS_ACCEL
 
+# Guest memory sampler (step 6.2): one awk process, started below and killed
+# by mem_report, that every 0.1 s reads /proc/meminfo and every process's
+# /proc/<pid>/status and keeps the extremes, rewriting them to /dev/memstat
+# each time (devtmpfs, so no file system the test uses and nothing the OOM
+# killer can take away). mem_report prints them as one `MEM ...` line just
+# before the verdict, so every test's serial log says how much of its RAM it
+# used, and the `mem=` allowances in test/qemu/*.bzl can be checked against
+# it. Fields (KiB except samples):
+#   total        MemTotal (the -m size less the kernel's own reservations)
+#   min_avail    lowest MemAvailable seen
+#   peak_used    highest MemTotal - MemAvailable: what cannot be reclaimed
+#   peak_cached/peak_anon/peak_shmem/peak_slab
+#                the highest Cached, AnonPages, Shmem (tmpfs: /tmp and the
+#                like) and Slab, each on its own (they peak at different times)
+#   dcfs_hwm     highest VmHWM of any process named dcfs* (the kernel's own
+#                peak, so exact), 0 when none ran
+#   top          the process (name:pid) with the highest VmHWM, and that VmHWM
+#   samples      how many times the loop ran
+# The processes' status files are read through `cat ... 2>/dev/null` so one
+# that exits between the glob and the read cannot abort the loop.
+start_mem_sampler() {
+	awk -v out=/dev/memstat 'BEGIN {
+		minav = -1
+		for (;;) {
+			while ((getline l < "/proc/meminfo") > 0) {
+				split(l, a, " ")
+				m[a[1]] = a[2]
+			}
+			close("/proc/meminfo")
+			getline up < "/proc/uptime"
+			close("/proc/uptime")
+			split(up, u, " ")
+			total = m["MemTotal:"]
+			avail = m["MemAvailable:"]
+			if (minav < 0 || avail < minav) minav = avail
+			if (total - avail > pused) pused = total - avail
+			if (m["Cached:"] > pcached) pcached = m["Cached:"]
+			if (m["AnonPages:"] > panon) panon = m["AnonPages:"]
+			if (m["Shmem:"] > pshmem) pshmem = m["Shmem:"]
+			if (m["Slab:"] > pslab) pslab = m["Slab:"]
+			cmd = "cat /proc/[0-9]*/status 2>/dev/null"
+			while ((cmd | getline l) > 0) {
+				split(l, f, " ")
+				if (f[1] == "Name:") name = f[2]
+				else if (f[1] == "Pid:") pid = f[2]
+				else if (f[1] == "VmHWM:") {
+					if (name ~ /^dcfs/ && f[2] > dcfs) dcfs = f[2]
+					if (f[2] > top) { top = f[2]; topname = name ":" pid }
+				}
+			}
+			close(cmd)
+			n++
+			printf "MEM total=%d min_avail=%d peak_used=%d peak_cached=%d peak_anon=%d peak_shmem=%d peak_slab=%d dcfs_hwm=%d top=%s:%d samples=%d up=%s\n", total, minav, pused, pcached, panon, pshmem, pslab, dcfs, topname, top, n, u[1] > out
+			close(out)
+			# Not system("sleep 0.1"): in busybox awk system() returns
+			# at once without waiting, which made this a busy loop.
+			nap = "sleep 0.1"
+			nap | getline
+			close(nap)
+		}
+	}' &
+	MEM_SAMPLER_PID=$!
+}
+
+# Stop the sampler and print its last line (nothing if it never completed a
+# sample), then any OOM-killer lines as MEM-OOM: lines.
+mem_report() {
+	[ -n "${MEM_SAMPLER_PID:-}" ] && kill "$MEM_SAMPLER_PID" 2>/dev/null
+	MEM_SAMPLER_PID=
+	[ -s /dev/memstat ] && cat /dev/memstat
+	# The console runs at loglevel=3, which hides the OOM killer's own lines
+	# (they are KERN_ERR): fetch them from the kernel log so a run that lost a
+	# process to memory pressure says so in the serial log (run-qemu.sh
+	# reports it on a FAIL), instead of failing on some unrelated-looking
+	# check.
+	dmesg 2>/dev/null | grep -i -E 'out of memory|oom-kill|killed process' |
+		head -n 10 | sed 's/^/MEM-OOM: /'
+}
+
+start_mem_sampler
+
 finish() {
 	sync
 	# `sync` flushes the block devices, not the serial console: the line
@@ -90,6 +171,7 @@ if [ -f /test/run ]; then
 	# exit status, and word-splitting $(cat /test/args) is deliberate.
 	/test/run $(cat /test/args 2>/dev/null)
 	rc=$?
+	mem_report
 	echo "DCFS-TEST-EXIT=$rc"
 	finish
 	exit 0
@@ -210,6 +292,7 @@ else
 	rc=$?
 fi
 
+mem_report
 if [ "$rc" -eq 0 ]; then
 	echo "ALL-TESTS-PASSED"
 else

@@ -347,6 +347,27 @@ end=$(date +%s.%N)
 echo "run-qemu.sh: qemu end $end" >>"$LOG"
 
 echo
+# Step 6.2: a guest that ran out of memory says so, whatever else failed: the
+# OOM killer's lines (guest/init's mem_report prints them as MEM-OOM:) or a
+# panic from having nothing left to kill. The fix is a bigger `mem=` on the
+# qemu_test (test/qemu/qemu_test.bzl), not a debugging session on whichever
+# check happened to lose its process.
+if grep -q -E "^MEM-OOM:|System is deadlocked on memory|Out of memory and no killable" "$LOG"; then
+	echo "run-qemu.sh: ERROR: the guest ran out of memory (-m $MEM MiB); the lines:" >&2
+	grep -E "^MEM-OOM:|System is deadlocked on memory|Out of memory and no killable" "$LOG" | head -n 10 >&2
+	echo "run-qemu.sh: raise this test's mem= (test/qemu/qemu_test.bzl, README.md)" >&2
+	echo "== RESULT: FAIL (guest out of memory; see $LOG) =="
+	exit 1
+fi
+# Step 6.2: guest/init prints one `MEM ...` line (the guest memory sampler's
+# extremes) before the verdict. A run without it means the sampler or the
+# init changes it rides on are broken, so it cannot pass: the memory
+# allowances (`mem=` in test/qemu/*.bzl) are only as good as that line.
+if ! grep -q "^MEM total=" "$LOG"; then
+	echo "run-qemu.sh: no MEM line in the serial log (guest/init's memory sampler)" >&2
+	echo "== RESULT: FAIL (see $LOG) =="
+	exit 1
+fi
 if [ "$UNIT" -eq 1 ]; then
 	if grep -q "^DCFS-TEST-EXIT=0" "$LOG"; then
 		echo "== RESULT: PASS ($(awk "BEGIN{printf \"%.3f\", $end-$start}")s) =="
