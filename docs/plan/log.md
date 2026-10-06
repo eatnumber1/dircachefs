@@ -562,3 +562,17 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (purl with commit reports nothing); libfuse 3.2.0 -> CVE-2018-10906 proves it. act -j osv: shipped scan
   clean, test-only 101 findings printed but not gating. OSV holds records for libfuse, sqlite, abseil
   (main-branch history only; LTS tags unmatched); none for gloop, liburing, numactl.
+- 5.3c merged (fbbf780): OSV gates only the shipped set, derived from the Bazel graph of
+  //dcfs:main(_static) (abseil, gloop, libfuse, liburing, numactl, sqlite3), matched by git commit
+  through synthetic git roots (purls match nothing); proof: libfuse 3.2.0's commit reports
+  CVE-2018-10906, sqlite 3.30.0 gives 19. OSV holds nothing for gloop, liburing, numactl, and its
+  one abseil record misses LTS tags (documented). Shipped scan: no issues. Test-only scan
+  informational (101 findings), never gates. verify-commits needs network in CI.
+- ASan lane merged (d47929c..b8622e0): names_random_slow's ENOTCONN was the GUEST OOM killer, not a
+  dcfs bug (ASan dcfs VmHWM 716 MiB vs 55 MiB plain; reproduced at 640 MiB, OOM lines in dmesg):
+  slow names tests get mem=2048 (new run-qemu.sh --mem, qemu_test mem=); memory_test runs the ASan
+  daemon with the quarantine off and asserts bytes-per-inode only plain (223 measured under ASan
+  without quarantine, so it would hold); mkinitramfs.sh uses busybox cpio and fails loudly (host
+  test with cpio hidden). Note: .github/ci/prepare.sh still installs cpio (kernel build may need it).
+- Session cut off by the usage limit while 12.2c (trace validation final round) was finishing its
+  tests in lane-1; resume it first. Then S3 (full plain + ASan on main).
