@@ -583,3 +583,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   final event); 54 formal+dcfs tests, 126 presubmit, four guest trace tests green; faults rejected:
   skip mark-unknown, syscall before phase 1 (unlink and create-inside-listing), phase 3 before
   syscall, snapshot after syncfs, swallowed syscall error. Phase 12 done. S3 next.
+- russ decided (2026-10-07): FORGET reconciliation for mmap-after-close, mutations on removed-but-referenced objects, relatime semantics, and O_TMPFILE/copy_file_range/FICLONE/ioctls: Phase 23 (with boundary stubs pulled forward as 23.5: visible in readdir, ENOTSUP inside, not EXDEV). Dispatch after S3 (memory).
