@@ -363,7 +363,7 @@ test and names the first event it cannot explain.
 
 ```sh
 bazel test //dcfs:dir_cache_fs_trace_test     # the forged-request harness (~3 min)
-bazel test //dcfs:trace_fault_injection_test  # test first: a broken build is caught
+bazel test //dcfs:all --test_tag_filters=e2e      # with the fault builds (test first)
 bazel test //test/qemu:trace_crash_test //test/qemu:trace_power_test \
            //test/qemu:trace_rename_test //test/qemu:trace_create_test
 ```
@@ -563,18 +563,38 @@ state: after every event the recorder compares every other directory's
 state with its last line, and a change gets an `unexplained` line, which
 no action matches (an uninstrumented write fails validation where it
 happened). A step the model does not have ends the trace with a `cut`
-line; what came before is still checked, and the test log lists every
-cut. The cuts are:
+line, `"why":"<category>: <detail>"`; what came before is still checked.
+Only steps the model *lacks* are cuts, and each test lists the categories
+its traces may end at (`allow_cuts` of `tla_trace_test`): any other cut
+fails it. A step the model *forbids* is never a cut: it is written as a
+line for the model to reject (a syscall before phase 1, a phase 1 before
+the resolve, a second phase 1, a step of the wrong kind of request), or,
+where no line can stand for it, as an `unexplained` line (a mutation that
+ended before its syscall in a request that succeeded; a resolve, listing,
+probe or refresh outside any request). A frame (request, getattr, lookup,
+refresh, sync point) that returns an error ends the trace with a `failed`
+cut; one that returns OK replies, and `T_Reply` requires its model request
+to have replied, so a frame that skipped a step is rejected there. The
+guest tests also name the root directory's trace (`root`), which must reach
+the end of the run or one of the cuts listed for it (`root_cuts`). The
+categories:
 
-| Cut | Why the model cannot follow |
-|---|---|
-| rename across directories, rename with flags | the model's rename is within D, flags 0 |
-| link into the directory | the model's objects never get a second name |
-| setattr or xattr change of the directory, or any mutation that names it as an object (moved, removed) | the model has no mutation of D's own attributes |
-| a refused boundary | not modelled |
-| an out-of-band change; a forgotten inode's dentries became unknown | not modelled (`ReconcileAttrs`, `InvalidateInode` after `ESTALE`) |
-| a syscall error other than create's `EEXIST` and unlink's/rename's `ENOENT`; a request, getattr, lookup, refresh or sync point that failed half-way | the model's syscalls fail only that way, and its requests always finish |
-| a mutation, resolve or listing outside a request; a second phase 1 in one request; a listing during another listing's reads | the code's requests never do that; the harness's direct calls into the cache do |
+| Category | Why the model cannot follow | Allowed in |
+|---|---|---|
+| `cross-directory-rename`, `rename-flags` | the model's rename is within D, flags 0 | crash, rename |
+| `link` | the model's objects never get a second name | crash, rename, create |
+| `dir-attrs`, `dir-itself` | the model has no mutation of D's own attributes; `dir-itself`: D named as an object (removed, moved) | crash (both), rename, create (`dir-itself`) |
+| `boundary` | a refused mount or subvolume boundary is not modelled | rename, create |
+| `out-of-band` | not modelled (`ReconcileAttrs`) | create |
+| `invalidated` | a forgotten inode's dentries became unknown (`InvalidateInode` after `ESTALE`) | none |
+| `failed` | a syscall error other than create's `EEXIST` and unlink's/rename's `ENOENT`, or a frame that returned an error: the model's syscalls fail only that way, and its requests always finish | the guest tests |
+| `overlapping-listings` | a listing of D during another listing's reads (the reordering of `populate_read` cannot place both) | none |
+
+The root traces: `power.sh`'s reaches the end of the run; `crash.sh`'s ends
+at its first cross-directory rename, `rename.sh`'s and `create.sh`'s at
+their first link. Following them further needs the model (or the
+projection) to have links and cross-directory renames, and for `rename.sh`
+renames with flags and syscall failures.
 
 ### The traces
 
@@ -597,19 +617,28 @@ cut. The cuts are:
   scripts, unchanged, on the traced initramfs (`//test/qemu:initramfs_traced`),
   with the kernel's lock (`KernelDirLock` TRUE). `crash.sh` and `power.sh`
   cover crashes (a SIGKILLed daemon), recovery and clean shutdown.
-- Test first: `//dcfs:trace_fault_injection_test` runs
-  `CreateMarksItsNameUnknown` in a build whose phase 1 does not mark names
-  unknown (`dcfs/testonly/skip_mark_unknown.cc`, linked with
-  `-Wl,--wrap=sqlite3_step`), and passes only if validation rejects the
-  trace at that create's phase 1:
+- Test first: fault builds. Each `//dcfs:trace_fault_<fault>_test` runs one
+  scenario of the harness in a build with a fault (a link-time `--wrap`
+  fake in `dcfs/testonly/`, listed in `dcfs/BUILD.bazel`'s
+  `DIR_CACHE_FS_FAULTS`) and passes only if validation rejects that
+  scenario's trace at an event, and with a state, that show the fault:
+
+  | Fault | Scenario | Rejected at |
+  |---|---|---|
+  | `skip_mark_unknown`: phase 1 does not mark names unknown | `CreateMarksItsNameUnknown` | the create's `phase1`, whose state has no row for `new` (the model's has it unknown) |
+  | `syscall_before_phase1`: an unlink's unlinkat before its phase 1 | `TraceScenarioUnlink` | the `syscall`, with nothing in flight and `a` still present |
+  | `phase3_before_syscall`: an unlink's phase 3 and End before its unlinkat | `TraceScenarioUnlink` | `unexplained` at the End: `a` absent with no syscall yet |
+
+  For example:
 
   ```
   trace_validate.sh: rejected: DirCacheFSTest.CreateMarksItsNameUnknown@1: the model explains 0 of 5 events; the first it cannot (event 1):
     {"i":2,"c":"MutationBegun","ev":"phase1","p":"p1","req":{"k":"create","n":"new","m":""},"outcome":"begun","synced":true,"db":{"dent":[["a","k:14.1791271400.915708585"]],"complete":true,"epoch":0,"valid":false,"dirty":true,"clean":true,"durable":true,"inflight":1}}
   ```
 
-  (the model's phase 1 leaves `new` unknown; the code's left no row, which
-  in a complete listing reads absent).
+  Before the review of 2026-10-06 (`docs/plan/audits/`), the two unlink
+  faults validated: the syscall before phase 1 wrote no line, and the End
+  before the syscall was a cut.
 
 ### Action coverage
 
@@ -762,7 +791,8 @@ model in the same change (AGENTS.md). In practice:
   needs its protocol event (`dcfs/protocol_events.h`) at the place the
   model's step now stands for, `Trace.tla`'s action for it, and the event
   table in [Trace validation](#trace-validation) updated. Run
-  `bazel test //dcfs:dir_cache_fs_trace_test //dcfs:trace_fault_injection_test`
+  `bazel test //dcfs:dir_cache_fs_trace_test //dcfs:trace_fault_*` (every
+  `trace_fault_*_test`)
   and the `//test/qemu:trace_*_test` targets.
 - Keep every action reachable: run TLC with `-coverage 1` and check that
   no action reports 0, except these, which report 0 in every

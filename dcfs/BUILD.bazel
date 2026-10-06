@@ -57,6 +57,7 @@ cc_library(
     deps = [
       "@absl//absl/functional:function_ref",
       "@absl//absl/status",
+      "@absl//absl/status:statusor",
     ],
 )
 
@@ -245,6 +246,7 @@ qemu_cc_test(
 
 cc_library(
     name = "credentials",
+    visibility = ["//dcfs/testonly:__pkg__"],
     hdrs = ["credentials.h"],
 )
 
@@ -514,32 +516,71 @@ tla_trace_test(
     unit = True,
 )
 
-# Test first, for trace validation itself: the same harness with a fault
-# (dcfs/testonly/skip_mark_unknown.cc: phase 1 does not mark names unknown),
-# running only the scenario it breaks. Its trace must be rejected, at that
-# create's phase 1.
-qemu_cc_test(
-    name = "dir_cache_fs_fault_test",
-    size = "small",
-    timeout = "short",
-    srcs = ["dir_cache_fs_test.cc"],
-    args = ["--gtest_filter=DirCacheFSTest.CreateMarksItsNameUnknown"],
-    disks = [("vdb", "ext4", "32M")],
-    linkopts = DIR_CACHE_FS_TEST_WRAPS + ["-Wl,--wrap=sqlite3_step"],
-    deps = DIR_CACHE_FS_TEST_DEPS + ["//dcfs/testonly:skip_mark_unknown"],
-)
+# Test first, for trace validation itself: the harness with a fault, each
+# running only the scenario it breaks; validation must reject that
+# scenario's trace at the event that shows the fault. Each fault is a
+# link-time --wrap fake in dcfs/testonly/ (the mangled names below are the
+# C++ functions it wraps):
+#   skip_mark_unknown: phase 1 does not mark names unknown (create).
+#   syscall_before_phase1: an unlink's unlinkat runs before its phase 1.
+#   phase3_before_syscall: an unlink's phase 3 and End run before its
+#       unlinkat.
+BEGIN_REMOVE = "_ZN4dcfs5cache11BeginRemoveERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEElNS0_12FillSnapshotE"
 
-tla_trace_test(
-    name = "trace_fault_injection_test",
-    size = "medium",
-    timeout = "long",
-    disks = ["vdb:ext4:32M"],
-    expect_reject = "DirCacheFSTest.CreateMarksItsNameUnknown@1",
-    expect_reject_event = "\"ev\":\"phase1\".*\"req\":\\{\"k\":\"create\",\"n\":\"new\"",
-    initramfs = ":dir_cache_fs_fault_test.cpio.gz",
-    lock = False,
-    unit = True,
-)
+UNLINK_AT = "_ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElSt17basic_string_viewIcSt11char_traitsIcEEi"
+
+DIR_CACHE_FS_FAULTS = {
+    "skip_mark_unknown": dict(
+        wraps = ["sqlite3_step"],
+        test = "CreateMarksItsNameUnknown",
+        # The create's phase 1, whose state has no row for "new" (the
+        # model's has it unknown).
+        event = "\"ev\":\"phase1\".*\"req\":\\{\"k\":\"create\",\"n\":\"new\".*\"dent\":\\[\\[\"a\",\"k:[0-9.]*\"\\]\\],\"complete\":true",
+    ),
+    "syscall_before_phase1": dict(
+        wraps = [BEGIN_REMOVE, UNLINK_AT],
+        test = "TraceScenarioUnlink",
+        # The unlinkat, while nothing is in flight (and "a" is still
+        # present).
+        event = "\"ev\":\"syscall\".*\"inflight\":0\\}",
+    ),
+    "phase3_before_syscall": dict(
+        wraps = [BEGIN_REMOVE],
+        test = "TraceScenarioUnlink",
+        # The End, which comes with "a" already absent in the cache and no
+        # syscall yet: a change no step explains.
+        event = "\"c\":\"MutationEnded\",\"ev\":\"unexplained\".*\\[\"a\",\"absent\"\\]",
+    ),
+}
+
+[
+    qemu_cc_test(
+        name = "dir_cache_fs_fault_%s_test" % fault,
+        size = "small",
+        timeout = "short",
+        srcs = ["dir_cache_fs_test.cc"],
+        args = ["--gtest_filter=DirCacheFSTest." + spec["test"]],
+        disks = [("vdb", "ext4", "32M")],
+        linkopts = DIR_CACHE_FS_TEST_WRAPS + ["-Wl,--wrap=" + w for w in spec["wraps"]],
+        deps = DIR_CACHE_FS_TEST_DEPS + ["//dcfs/testonly:" + fault],
+    )
+    for fault, spec in DIR_CACHE_FS_FAULTS.items()
+]
+
+[
+    tla_trace_test(
+        name = "trace_fault_%s_test" % fault,
+        size = "medium",
+        timeout = "long",
+        disks = ["vdb:ext4:32M"],
+        expect_reject = "DirCacheFSTest.%s@1" % spec["test"],
+        expect_reject_event = spec["event"],
+        initramfs = ":dir_cache_fs_fault_%s_test.cpio.gz" % fault,
+        lock = False,
+        unit = True,
+    )
+    for fault, spec in DIR_CACHE_FS_FAULTS.items()
+]
 
 cc_library(
     name = "mounts_below",
@@ -735,6 +776,7 @@ qemu_cc_test(
 
 cc_library(
     name = "backing",
+    visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["backing.cc"],
     hdrs = ["backing.h"],
     deps = [

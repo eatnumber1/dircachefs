@@ -51,8 +51,12 @@ def _tla_trace_test_impl(ctx):
     spec_dir = ctx.file._trace_tla.short_path.rsplit("/", 1)[0]
 
     expect = []
+    if ctx.attr.allow_cuts:
+        expect += ["--allow-cuts", ",".join(ctx.attr.allow_cuts)]
+    if ctx.attr.root:
+        expect += ["--root", ctx.attr.root, "--root-cuts", ",".join(ctx.attr.root_cuts)]
     if ctx.attr.expect_reject:
-        expect = ["--expect-reject", ctx.attr.expect_reject, ctx.attr.expect_reject_event]
+        expect += ["--expect-reject", ctx.attr.expect_reject, ctx.attr.expect_reject_event]
 
     def q(s):
         return "'" + s.replace("'", "'\\''") + "'"
@@ -126,6 +130,18 @@ _tla_trace_test = rule(
             doc = "Whether the run kept the kernel's directory lock (the " +
                   "model's KernelDirLock): true for a guest's real " +
                   "requests, false for the forged-request harness.",
+        ),
+        "allow_cuts": attr.string_list(
+            doc = "The categories of cut (a step the model does not have; " +
+                  "see dcfs/testonly/trace_recorder.h) a trace of this run " +
+                  "may end at. Any other cut fails the test.",
+        ),
+        "root": attr.string(
+            doc = "A trace (<trace name>@<directory inode>) that must be " +
+                  "valid and reach the end of the run, or a cut in root_cuts.",
+        ),
+        "root_cuts": attr.string_list(
+            doc = "The cut categories `root` may end at (default: none).",
         ),
         "expect_reject": attr.string(
             doc = "The fault-injection test: the trace " +

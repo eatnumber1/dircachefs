@@ -4,15 +4,23 @@
 # serial log, and checks each with TLC against formal/Trace.tla.
 #
 #   trace_validate.sh --java JAVA --cp CLASSPATH --spec-dir DIR --lock BOOL
+#       [--allow-cuts CATS] [--root TRACE --root-cuts CATS]
 #       [--expect-reject TRACE ERE] -- RUN_QEMU [RUN_QEMU_ARGS...]
 #
 # DIR holds Trace.tla, Trace.cfg and dcfs.tla. --lock says whether the run
-# kept the kernel's directory lock (the model's KernelDirLock). Without
-# --expect-reject every trace must be valid (or end in a "cut" the recorder
-# made at a step the model does not have, which is reported); with it, the
-# trace TRACE (<trace name>@<directory inode>) must be rejected, and the
-# first event no behavior of the model explains must match the extended
-# regular expression ERE (the fault-injection test).
+# kept the kernel's directory lock (the model's KernelDirLock).
+#
+# A trace may end with a "cut": the recorder stops a directory's trace at a
+# step the model does not have, giving "<category>: <detail>". Only the
+# categories in CATS (comma-separated) may end a trace in this run; any
+# other cut fails the test. --root names a trace (<trace>@<directory inode>)
+# that must be valid and must reach the end of the run, or end at a cut in
+# its own, narrower --root-cuts.
+#
+# Without --expect-reject every trace must be valid; with it, the trace
+# TRACE must be rejected, and the first event no behavior of the model
+# explains must match the extended regular expression ERE (a fault build's
+# test).
 #
 # Each line the recorder writes is "DCFS-TRACE <trace> <dir> <json>"; the
 # lines of one (trace, dir) pair, from its first "begin" line to a "cut" or
@@ -28,6 +36,9 @@ spec_dir=""
 lock=""
 reject_trace=""
 reject_ere=""
+allow_cuts=""
+root=""
+root_cuts=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --java) java="$2"; shift 2 ;;
@@ -35,6 +46,9 @@ while [[ $# -gt 0 ]]; do
     --spec-dir) spec_dir="$2"; shift 2 ;;
     --lock) lock="$2"; shift 2 ;;
     --expect-reject) reject_trace="$2"; reject_ere="$3"; shift 3 ;;
+    --allow-cuts) allow_cuts="$2"; shift 2 ;;
+    --root) root="$2"; shift 2 ;;
+    --root-cuts) root_cuts="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "trace_validate.sh: unknown argument $1" >&2; exit 2 ;;
   esac
@@ -149,9 +163,37 @@ for f in "$work"/traces/*.jsonl; do
   fi
 done
 
+# The cuts: each must be of a category this run allows.
+bad_cuts=0
+in_list() {  # in_list WORD COMMA-LIST
+  [[ ",$2," == *",$1,"* ]]
+}
+root_end=""
 if [[ -s "$work/traces/ends.tsv" ]]; then
   echo "trace_validate.sh: traces that end at a step the model does not have:"
-  awk -F '\t' '{ print "  " $1 ": " $2 }' "$work/traces/ends.tsv"
+  while IFS=$'\t' read -r key json; do
+    echo "  $key: $json"
+    [[ "$key" == "$root" ]] && root_end="$json"
+    [[ "$json" == *'"ev":"gone"'* ]] && continue
+    category="$(sed -n 's/.*"why":"\([a-z-]*\): .*/\1/p' <<<"$json")"
+    if [[ -z "$category" ]] || ! in_list "$category" "$allow_cuts"; then
+      echo "trace_validate.sh: CUT NOT ALLOWED: $key ends at a cut of category '$category' (allowed: $allow_cuts)"
+      bad_cuts=$((bad_cuts + 1))
+    fi
+  done <"$work/traces/ends.tsv"
+fi
+if [[ -n "$root" ]]; then
+  root_file="$work/traces/$(sed 's/[^A-Za-z0-9._@-]/_/g' <<<"$root").jsonl"
+  root_category="$(sed -n 's/.*"why":"\([a-z-]*\): .*/\1/p' <<<"$root_end")"
+  if [[ ! -s "$root_file" ]]; then
+    echo "trace_validate.sh: ROOT MISSING: no trace $root"
+    bad_cuts=$((bad_cuts + 1))
+  elif [[ -n "$root_end" ]] && ! in_list "$root_category" "$root_cuts"; then
+    echo "trace_validate.sh: ROOT CUT SHORT: $root ends before the end of the run (allowed: ${root_cuts:-none}): $root_end"
+    bad_cuts=$((bad_cuts + 1))
+  else
+    echo "trace_validate.sh: $root reaches ${root_end:+a cut it may end at: }${root_end:-the end of the run}"
+  fi
 fi
 echo "trace_validate.sh: action coverage (states that matched an event, over the valid traces):"
 awk '{ n[$1] += $2 } END { for (a in n) printf "  %-24s %d\n", a, n[a] }' \
@@ -166,7 +208,7 @@ if [[ -n "$reject_trace" ]]; then
   echo "trace_validate.sh: FAIL: expected $reject_trace to be rejected at an event matching: $reject_ere"
   exit 1
 fi
-if [[ "$invalid" -ne 0 || "$errors" -ne 0 || "$valid" -eq 0 ]]; then
+if [[ "$invalid" -ne 0 || "$errors" -ne 0 || "$valid" -eq 0 || "$bad_cuts" -ne 0 ]]; then
   echo "trace_validate.sh: FAIL"
   exit 1
 fi

@@ -658,25 +658,31 @@ absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {
 absl::Status RefreshAttrs(Context &ctx, InodeId id, struct statx *fetched) {
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::RefreshBegin,
                       &ProtocolEvents::RefreshEnd, id);
-  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
-  ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, id));
-  // Model: the refresh's statx (GA_stat, ..., R_stat).
-  ctx.events->AttrsStatted(ctx, id);
-  if (fetched != nullptr) *fetched = stx;
-  return FillAttrs(ctx, snapshot, id, stx);
+  // The frame's result is its End's status.
+  return scope.Finish([&]() -> absl::Status {
+    const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+    ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, id));
+    // Model: the refresh's statx (GA_stat, ..., R_stat).
+    ctx.events->AttrsStatted(ctx, id);
+    if (fetched != nullptr) *fetched = stx;
+    return FillAttrs(ctx, snapshot, id, stx);
+  }());
 }
 
 absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd,
                                 struct statx *fetched) {
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::RefreshBegin,
                       &ProtocolEvents::RefreshEnd, id);
-  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
-  ABSL_ASSIGN_OR_RETURN(
-      struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
-  // Model: as in RefreshAttrs.
-  ctx.events->AttrsStatted(ctx, id);
-  if (fetched != nullptr) *fetched = stx;
-  return FillAttrs(ctx, snapshot, id, stx);
+  // The frame's result is its End's status.
+  return scope.Finish([&]() -> absl::Status {
+    const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+    ABSL_ASSIGN_OR_RETURN(
+        struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
+    // Model: as in RefreshAttrs.
+    ctx.events->AttrsStatted(ctx, id);
+    if (fetched != nullptr) *fetched = stx;
+    return FillAttrs(ctx, snapshot, id, stx);
+  }());
 }
 
 absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
@@ -1070,63 +1076,66 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   }
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::LookupBegin,
                       &ProtocolEvents::LookupEnd, parent, name);
-  ABSL_ASSIGN_OR_RETURN(cache::LookupResult result,
-                        cache::Lookup(ctx, parent, name));
-  // `name` is a persisted refusal (see ProbeChild/cache::SetRefused): it
-  // exists on the backing filesystem but dcfs will not cache across it, so
-  // this must never be reported as absent -- answer EXDEV, straight from
-  // the cache, every time. Checked before the kUnknown fast-out below since
-  // kRefused is never kUnknown, but also never worth re-populating for.
-  if (result.kind == cache::LookupResult::kRefused) {
-    ctx.events->LookupDecided(ctx, parent, name,
-                              events::LookupOutcome::kRefused, 0);
-    return ExdevBoundary();
-  }
-  if (result.kind != cache::LookupResult::kUnknown) {
-    // Model: LookupStep (or the request's Arrive) serving from the cache.
-    ctx.events->LookupDecided(
-        ctx, parent, name,
-        result.kind == cache::LookupResult::kFound
-            ? events::LookupOutcome::kFound
-            : events::LookupOutcome::kNegative,
-        result.id);
-    return result;
-  }
-
-  // An unknown name in a complete listing (e.g. left by a mutation's phase
-  // 1, or an invalidation): everything else is known, so resolve just it
-  // (audit F7) rather than relisting the directory.
-  ABSL_ASSIGN_OR_RETURN(bool listed, cache::ChildrenComplete(ctx, parent));
-  // Model: LookupStep (or the request's Arrive) going to the backing
-  // filesystem; no syscall since the cache read.
-  ctx.events->LookupDecided(ctx, parent, name,
-                            listed ? events::LookupOutcome::kResolve
-                                   : events::LookupOutcome::kPopulate,
-                            0);
-  if (listed) return ResolveName(ctx, parent, name);
-
-  ABSL_ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
-  if (!populated.cached) {
-    // Not recorded (a concurrent mutation of `parent`): answer from the
-    // listing itself, caching nothing about `name`.
-    auto it = populated.entries.find(name);
-    if (it == populated.entries.end()) {
-      return cache::LookupResult{.kind = cache::LookupResult::kNegative,
-                                 .id = 0};
-    }
-    if (it->second.kind == cache::LookupResult::kRefused) {
+  // The frame's result is its End's status.
+  return scope.Finish([&]() -> absl::StatusOr<cache::LookupResult> {
+    ABSL_ASSIGN_OR_RETURN(cache::LookupResult result,
+                          cache::Lookup(ctx, parent, name));
+    // `name` is a persisted refusal (see ProbeChild/cache::SetRefused): it
+    // exists on the backing filesystem but dcfs will not cache across it, so
+    // this must never be reported as absent -- answer EXDEV, straight from
+    // the cache, every time. Checked before the kUnknown fast-out below since
+    // kRefused is never kUnknown, but also never worth re-populating for.
+    if (result.kind == cache::LookupResult::kRefused) {
+      ctx.events->LookupDecided(ctx, parent, name,
+                                events::LookupOutcome::kRefused, 0);
       return ExdevBoundary();
     }
-    return it->second;
-  }
-  ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
-  if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
-  // A recorded listing names every child, and makes every other name
-  // absent.
-  RET_CHECK_NE(result.kind, cache::LookupResult::kUnknown)
-      << "name " << EscapeBytes(name) << " of directory " << parent
-      << " still unknown after its listing was recorded";
-  return result;
+    if (result.kind != cache::LookupResult::kUnknown) {
+      // Model: LookupStep (or the request's Arrive) serving from the cache.
+      ctx.events->LookupDecided(
+          ctx, parent, name,
+          result.kind == cache::LookupResult::kFound
+              ? events::LookupOutcome::kFound
+              : events::LookupOutcome::kNegative,
+          result.id);
+      return result;
+    }
+
+    // An unknown name in a complete listing (e.g. left by a mutation's phase
+    // 1, or an invalidation): everything else is known, so resolve just it
+    // (audit F7) rather than relisting the directory.
+    ABSL_ASSIGN_OR_RETURN(bool listed, cache::ChildrenComplete(ctx, parent));
+    // Model: LookupStep (or the request's Arrive) going to the backing
+    // filesystem; no syscall since the cache read.
+    ctx.events->LookupDecided(ctx, parent, name,
+                              listed ? events::LookupOutcome::kResolve
+                                     : events::LookupOutcome::kPopulate,
+                              0);
+    if (listed) return ResolveName(ctx, parent, name);
+
+    ABSL_ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
+    if (!populated.cached) {
+      // Not recorded (a concurrent mutation of `parent`): answer from the
+      // listing itself, caching nothing about `name`.
+      auto it = populated.entries.find(name);
+      if (it == populated.entries.end()) {
+        return cache::LookupResult{.kind = cache::LookupResult::kNegative,
+                                   .id = 0};
+      }
+      if (it->second.kind == cache::LookupResult::kRefused) {
+        return ExdevBoundary();
+      }
+      return it->second;
+    }
+    ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
+    if (result.kind == cache::LookupResult::kRefused) return ExdevBoundary();
+    // A recorded listing names every child, and makes every other name
+    // absent.
+    RET_CHECK_NE(result.kind, cache::LookupResult::kUnknown)
+        << "name " << EscapeBytes(name) << " of directory " << parent
+        << " still unknown after its listing was recorded";
+    return result;
+  }());
 }
 
 absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
@@ -1465,24 +1474,27 @@ absl::Status StartupPurge(Context &ctx) {
 absl::Status SyncBacking(Context &ctx) {
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::SyncBegin,
                       &ProtocolEvents::SyncEnd);
-  // Taken before the first syncfs: whatever is dirty now, is not mutated
-  // again before ClearDirty and is not open for writing at either end is
-  // covered by the syncfs calls below (see cache::BeginSync).
-  ABSL_ASSIGN_OR_RETURN(cache::SyncSnapshot synced, cache::BeginSync(ctx));
-  // Model: the sync request's first step (S1From), or StopSync.
-  ctx.events->SyncSnapshotTaken(ctx);
-  for (int fd : ctx.mounts.Fds()) {
-    ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
-  }
-  ctx.events->SyncfsDone(ctx);
-  std::vector<InodeId> keep;
-  if (ctx.open_for_write != nullptr) {
-    keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
-  }
-  ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep));
-  // Model: SyncClearDirty, or StopClear.
-  ctx.events->SyncCleared(ctx);
-  return absl::OkStatus();
+  // The frame's result is its End's status.
+  return scope.Finish([&]() -> absl::Status {
+    // Taken before the first syncfs: whatever is dirty now, is not mutated
+    // again before ClearDirty and is not open for writing at either end is
+    // covered by the syncfs calls below (see cache::BeginSync).
+    ABSL_ASSIGN_OR_RETURN(cache::SyncSnapshot synced, cache::BeginSync(ctx));
+    // Model: the sync request's first step (S1From), or StopSync.
+    ctx.events->SyncSnapshotTaken(ctx);
+    for (int fd : ctx.mounts.Fds()) {
+      ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
+    }
+    ctx.events->SyncfsDone(ctx);
+    std::vector<InodeId> keep;
+    if (ctx.open_for_write != nullptr) {
+      keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
+    }
+    ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep));
+    // Model: SyncClearDirty, or StopClear.
+    ctx.events->SyncCleared(ctx);
+    return absl::OkStatus();
+  }());
 }
 
 absl::Status StartRun(Context &ctx, std::string_view boot_id) {

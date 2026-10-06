@@ -467,20 +467,45 @@ genrule(
     tools = ["scripts/mkinitramfs.sh"],
 )
 
+# Each run's traces may end only at the cuts listed (steps the model does
+# not have; see dcfs/testonly/trace_recorder.h), and the root directory's
+# trace (e2e@1) must reach the end of the run or one of root_cuts: the
+# first step in that script's root the model cannot follow.
+TRACED_GUEST_SCRIPTS = {
+    "crash": dict(
+        disks = ["vdb:ext4:320M"],
+        cuts = ["cross-directory-rename", "link", "dir-attrs", "dir-itself", "failed"],
+        root_cuts = ["cross-directory-rename"],
+    ),
+    "power": dict(
+        disks = ["vdb:ext4:320M"],
+        cuts = ["failed"],
+        root_cuts = [],
+    ),
+    "rename": dict(
+        disks = ["vdb:ext4:320M", "vdc:ext4:64M"],
+        cuts = ["cross-directory-rename", "rename-flags", "link", "dir-itself", "boundary", "failed"],
+        root_cuts = ["link"],
+    ),
+    "create": dict(
+        disks = ["vdb:ext4:320M", "vdc:ext4:64M"],
+        cuts = ["link", "out-of-band", "boundary", "dir-itself", "failed"],
+        root_cuts = ["link"],
+    ),
+}
+
 [
     tla_trace_test(
         name = "trace_%s_test" % script,
         size = "large",
         timeout = "long",
-        disks = disks,
+        allow_cuts = spec["cuts"],
+        disks = spec["disks"],
         guest_script = "%s.sh" % script,
         initramfs = ":initramfs_traced",
         lock = True,
+        root = "e2e@1",
+        root_cuts = spec["root_cuts"],
     )
-    for script, disks in [
-        ("crash", ["vdb:ext4:320M"]),
-        ("power", ["vdb:ext4:320M"]),
-        ("rename", ["vdb:ext4:320M", "vdc:ext4:64M"]),
-        ("create", ["vdb:ext4:320M", "vdc:ext4:64M"]),
-    ]
+    for script, spec in TRACED_GUEST_SCRIPTS.items()
 ]

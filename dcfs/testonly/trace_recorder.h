@@ -71,14 +71,14 @@ class TraceRecorder final : public ProtocolEvents {
   void RequestBegin(Context &ctx, const events::Request &request) override;
   void RequestEnd(Context &ctx, const absl::Status &status) override;
   void GetattrBegin(Context &ctx, events::Ino id, bool valid) override;
-  void GetattrEnd(Context &ctx) override;
+  void GetattrEnd(Context &ctx, const absl::Status &status) override;
   void LookupBegin(Context &ctx, events::Ino parent,
                    std::string_view name) override;
-  void LookupEnd(Context &ctx) override;
+  void LookupEnd(Context &ctx, const absl::Status &status) override;
   void RefreshBegin(Context &ctx, events::Ino id) override;
-  void RefreshEnd(Context &ctx) override;
+  void RefreshEnd(Context &ctx, const absl::Status &status) override;
   void SyncBegin(Context &ctx) override;
-  void SyncEnd(Context &ctx) override;
+  void SyncEnd(Context &ctx, const absl::Status &status) override;
 
   void LookupDecided(Context &ctx, events::Ino parent, std::string_view name,
                      events::LookupOutcome outcome,
@@ -144,6 +144,7 @@ class TraceRecorder final : public ProtocolEvents {
     bool syscall_ok = false;
     bool probe_absent = false;     // a create's probe found nothing
     bool owned = false;            // Mutation::Owns at its End
+    bool ended_early = false;      // its End came before its syscall
   };
 
   // A frame: a FUSE request, or a getattr, lookup, refresh or sync point
@@ -205,7 +206,8 @@ class TraceRecorder final : public ProtocolEvents {
             std::string m = "");
   // Closes `frame`: frees its slots and ends each of its requests with a
   // "reply" line, or with a cut if `unmodelled_end(req)` names a reason
-  // (an end the model does not have).
+  // (an end the model does not have), or an "unexplained" line if the
+  // reason starts with "unexplained: ".
   void Close(Context &ctx, Frame &frame,
              absl::FunctionRef<std::string(const Req &)> unmodelled_end);
 
@@ -215,7 +217,15 @@ class TraceRecorder final : public ProtocolEvents {
   // the state now}. `fields` is "" or starts with ",".
   void Emit(Context &ctx, Ino dir, Req *req, std::string_view ev,
             std::string_view fields = "");
+  // Ends `dir`'s trace at a step the model does not have. `why` is
+  // "<category>: <detail>"; formal/trace_validate.sh fails a test whose
+  // traces end at a category it does not allow.
   void Cut(Context &ctx, Ino dir, std::string_view why);
+  // A line no model action matches: validation fails here.
+  void Unexplained(Context &ctx, Ino dir, std::string_view why);
+  // How a frame that ends with `status` ends its requests (see Close).
+  static std::string FrameEnd(std::string_view what,
+                              const absl::Status &status);
   void Write(Ino dir, const std::string &json);
   // After every callback: begins the traces of new directories, ends those
   // of deleted ones, and gives every other directory whose state changed

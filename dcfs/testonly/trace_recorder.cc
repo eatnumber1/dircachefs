@@ -156,24 +156,24 @@ TraceRecorder::Mapping TraceRecorder::Map(const Frame &r, Ino dir) {
     case Op::kRename:
       if (r.ino != dir && r.newparent != dir) break;
       if (r.ino != r.newparent) {
-        unmodelled("rename across directories");
+        unmodelled("cross-directory-rename: a rename across directories");
       } else if (r.flags != 0) {
-        unmodelled("rename with flags");
+        unmodelled("rename-flags: a rename with flags");
       } else if (r.name == r.newname) {
-        unmodelled("rename of a name onto itself");
+        unmodelled("rename-flags: a rename of a name onto itself");
       } else {
         request("rename", EscapeBytes(r.name), EscapeBytes(r.newname));
       }
       break;
     case Op::kLink:
-      if (r.newparent == dir) unmodelled("link into the directory");
+      if (r.newparent == dir) unmodelled("link: a link into the directory");
       break;
     case Op::kSetattr:
-      if (r.ino == dir) unmodelled("setattr of the directory");
+      if (r.ino == dir) unmodelled("dir-attrs: a setattr of the directory");
       break;
     case Op::kSetxattr:
     case Op::kRemovexattr:
-      if (r.ino == dir) unmodelled("xattr change of the directory");
+      if (r.ino == dir) unmodelled("dir-attrs: an xattr change of the directory");
       break;
     default:
       break;
@@ -230,12 +230,14 @@ void TraceRecorder::Close(
       // Its population failed half-way: the trace ends where it began.
       state.reading = false;
       state.held.clear();
-      Cut(ctx, dir, "a listing failed");
+      Cut(ctx, dir, "failed: a listing failed half-way");
     }
     if (Traced(dir) && req.arrived) {
       const std::string why = unmodelled_end(req);
       if (why.empty()) {
         Emit(ctx, dir, &req, "reply");
+      } else if (why.starts_with("unexplained: ")) {
+        Unexplained(ctx, dir, why.substr(13));
       } else {
         Cut(ctx, dir, why);
       }
@@ -383,6 +385,25 @@ void TraceRecorder::Emit(Context &ctx, Ino dir, Req *req, std::string_view ev,
   covered_.insert(dir);
 }
 
+std::string TraceRecorder::FrameEnd(std::string_view what,
+                                    const absl::Status &status) {
+  // A frame that failed ends the trace (its request did not finish, which
+  // the model's requests always do). One that succeeded replies, and the
+  // model checks that its request had (T_Reply): one that skipped a step
+  // it must take is rejected there.
+  if (status.ok()) return "";
+  return absl::StrCat("failed: ", what, " failed: ", status.ToString());
+}
+
+void TraceRecorder::Unexplained(Context &ctx, Ino dir, std::string_view why) {
+  if (!Traced(dir)) return;
+  Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
+                          ",\"ev\":\"unexplained\",\"why\":", JsonStr(why),
+                          ",\"db\":", Snapshot(ctx, dir), "}"));
+  dirs_[dir].dead = true;
+  covered_.insert(dir);
+}
+
 void TraceRecorder::Cut(Context &ctx, Ino dir, std::string_view why) {
   if (!Traced(dir)) return;
   Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
@@ -417,7 +438,7 @@ void TraceRecorder::After(Context &ctx, bool cut_changes) {
     const std::string db = Snapshot(ctx, dir);
     if (db == state.last) continue;
     if (cut_changes) {
-      Cut(ctx, dir, "a forgotten inode's dentries became unknown");
+      Cut(ctx, dir, "invalidated: a forgotten inode's dentries became unknown");
       continue;
     }
     // Changed by something that is not one of its events: no model action
@@ -453,7 +474,13 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
   frames_.pop_back();
   const int err = ErrnoOf(status);
   Close(ctx, frame, [&](const Req &req) -> std::string {
-    if (err == 0) return "";
+    if (err == 0) {
+      if (req.ended_early) {
+        return "unexplained: a mutation ended before its syscall, and its "
+               "request succeeded";
+      }
+      return "";
+    }
     // The errors the model has: a create's EEXIST (or the name gone before
     // its probe), an unlink's or rename's ENOENT from its syscall, and the
     // EAGAIN of a readdir, unlink or rename that kept finding changes.
@@ -470,7 +497,7 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
         err == EAGAIN) {
       return "";
     }
-    return absl::StrCat("request failed: ", status.ToString());
+    return absl::StrCat("failed: the request failed: ", status.ToString());
   });
   After(ctx);
 }
@@ -513,14 +540,12 @@ void TraceRecorder::GetattrBegin(Context &ctx, Ino id, bool valid) {
   After(ctx);
 }
 
-void TraceRecorder::GetattrEnd(Context &ctx) {
+void TraceRecorder::GetattrEnd(Context &ctx, const absl::Status &status) {
   cause_ = "GetattrEnd";
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kGetattr);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
-  Close(ctx, frame, [](const Req &req) -> std::string {
-    return req.terminal ? "" : "a getattr's refresh failed";
-  });
+  Close(ctx, frame, [&](const Req &) { return FrameEnd("a getattr", status); });
   After(ctx);
 }
 
@@ -533,14 +558,12 @@ void TraceRecorder::LookupBegin(Context &ctx, Ino parent,
   After(ctx);
 }
 
-void TraceRecorder::LookupEnd(Context &ctx) {
+void TraceRecorder::LookupEnd(Context &ctx, const absl::Status &status) {
   cause_ = "LookupEnd";
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kLookup);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
-  Close(ctx, frame, [](const Req &req) -> std::string {
-    return req.terminal ? "" : "a lookup failed";
-  });
+  Close(ctx, frame, [&](const Req &) { return FrameEnd("a lookup", status); });
   After(ctx);
 }
 
@@ -577,14 +600,12 @@ void TraceRecorder::RefreshBegin(Context &ctx, Ino id) {
   After(ctx);
 }
 
-void TraceRecorder::RefreshEnd(Context &ctx) {
+void TraceRecorder::RefreshEnd(Context &ctx, const absl::Status &status) {
   cause_ = "RefreshEnd";
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kRefresh);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
-  Close(ctx, frame, [](const Req &req) -> std::string {
-    return req.terminal ? "" : "a refresh failed";
-  });
+  Close(ctx, frame, [&](const Req &) { return FrameEnd("a refresh", status); });
   After(ctx);
 }
 
@@ -594,14 +615,13 @@ void TraceRecorder::SyncBegin(Context &ctx) {
   After(ctx);
 }
 
-void TraceRecorder::SyncEnd(Context &ctx) {
+void TraceRecorder::SyncEnd(Context &ctx, const absl::Status &status) {
   cause_ = "SyncEnd";
   CHECK(!frames_.empty() && frames_.back().kind == Frame::kSync);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
-  Close(ctx, frame, [](const Req &req) -> std::string {
-    return req.terminal ? "" : "a sync point failed";
-  });
+  Close(ctx, frame,
+        [&](const Req &) { return FrameEnd("a sync point", status); });
   After(ctx);
 }
 
@@ -624,8 +644,8 @@ void TraceRecorder::LookupDecided(Context &ctx, Ino parent,
             m.req_kind == "rename") {
           req = &Open(*rf, parent, m.req_kind, m.n, m.m);
         } else {
-          Cut(ctx, parent, absl::StrCat("a lookup in a ", m.req_kind,
-                                        " request"));
+          // Not a step of this kind of request: the model rejects it.
+          req = &Open(*rf, parent, m.req_kind, m.n, m.m);
         }
       } else {
         // A lookup of its own (LookupOrPopulate outside any request of
@@ -657,7 +677,7 @@ void TraceRecorder::LookupDecided(Context &ctx, Ino parent,
           break;
       }
       if (outcome == events::LookupOutcome::kRefused) {
-        Cut(ctx, parent, "a refused boundary");
+        Cut(ctx, parent, "boundary: a refused boundary");
       } else {
         Emit(ctx, parent, req, "lookup", fields);
         if (outcome == events::LookupOutcome::kFound ||
@@ -677,9 +697,9 @@ void TraceRecorder::ResolveProbed(Context &ctx, Ino parent,
   if (Traced(parent)) {
     Req *req = Find(parent);
     if (req == nullptr) {
-      Cut(ctx, parent, "a resolve outside a request");
+      Unexplained(ctx, parent, "a resolve outside a request");
     } else if (probe.kind == events::Probe::kRefused) {
-      Cut(ctx, parent, "a refused boundary");
+      Cut(ctx, parent, "boundary: a refused boundary");
     } else {
       Emit(ctx, parent, req, "probe",
            absl::StrCat(",\"n\":", Name(name), ",\"what\":",
@@ -696,7 +716,7 @@ void TraceRecorder::ResolveCommitted(Context &ctx, Ino parent,
   if (Traced(parent)) {
     Req *req = Find(parent);
     if (req == nullptr) {
-      Cut(ctx, parent, "a resolve outside a request");
+      Unexplained(ctx, parent, "a resolve outside a request");
     } else {
       Emit(ctx, parent, req, "resolve_commit",
            absl::StrCat(",\"recorded\":", Bool(recorded)));
@@ -718,9 +738,10 @@ void TraceRecorder::PopulateStarted(Context &ctx, Ino dir) {
     Req *req = Find(dir);
     Dir &state = dirs_[dir];
     if (req == nullptr) {
-      Cut(ctx, dir, "a listing outside a request");
+      Unexplained(ctx, dir, "a listing outside a request");
     } else if (state.reading) {
-      Cut(ctx, dir, "a listing during another listing's reads");
+      Cut(ctx, dir,
+          "overlapping-listings: a listing during another listing's reads");
     } else {
       state.read_db = Snapshot(ctx, dir);
       state.read_slot = req->slot;
@@ -743,7 +764,7 @@ void TraceRecorder::PopulateRead(Context &ctx, Ino dir,
                       ProbeValue(probe), "]");
     });
     if (!state.reading) {
-      Cut(ctx, dir, "a listing read without its start");
+      Unexplained(ctx, dir, "a listing read without its start");
     } else {
       // The line goes where the population started, before the lines
       // held since: the model's PopulateRead is one step at that point.
@@ -755,7 +776,7 @@ void TraceRecorder::PopulateRead(Context &ctx, Ino dir,
       if (refused) {
         Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":",
                                 JsonStr(cause_),
-                                ",\"ev\":\"cut\",\"why\":\"a refused boundary\"}"));
+                                ",\"ev\":\"cut\",\"why\":\"boundary: a refused boundary\"}"));
         state.dead = true;
       } else {
         Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":",
@@ -778,7 +799,7 @@ void TraceRecorder::PopulateCommitted(Context &ctx, Ino dir,
   if (Traced(dir)) {
     Req *req = Find(dir);
     if (req == nullptr) {
-      Cut(ctx, dir, "a listing outside a request");
+      Unexplained(ctx, dir, "a listing outside a request");
     } else {
       Emit(ctx, dir, req, "populate_commit",
            absl::StrCat(",\"recorded\":", Bool(recorded)));
@@ -807,7 +828,7 @@ void TraceRecorder::ListChecked(Context &ctx, Ino dir, bool complete) {
            absl::StrCat(",\"complete\":", Bool(complete)));
       if (complete && req.kind == "readdir") req.terminal = true;
     } else {
-      Cut(ctx, dir, "a listing check outside a readdir");
+      Unexplained(ctx, dir, "a listing check outside a readdir");
     }
   }
   After(ctx);
@@ -820,7 +841,7 @@ void TraceRecorder::AttrsStatted(Context &ctx, Ino id) {
   if (Traced(id) && !frames_.back().silent) {
     Req *req = Find(id);
     if (req == nullptr) {
-      Cut(ctx, id, "a refresh outside a request");
+      Unexplained(ctx, id, "a refresh outside a request");
     } else {
       Emit(ctx, id, req, "stat");
     }
@@ -835,7 +856,7 @@ void TraceRecorder::AttrsFilled(Context &ctx, Ino id, bool recorded) {
   if (Traced(id) && !frames_.back().silent) {
     Req *req = Find(id);
     if (req == nullptr) {
-      Cut(ctx, id, "a refresh outside a request");
+      Unexplained(ctx, id, "a refresh outside a request");
     } else {
       Emit(ctx, id, req, "fill",
            absl::StrCat(",\"recorded\":", Bool(recorded)));
@@ -874,7 +895,7 @@ void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
   for (Ino dir : Distinct(ids)) {
     if (!Traced(dir)) continue;
     if (rf == nullptr) {
-      Cut(ctx, dir, "a mutation outside a request");
+      Unexplained(ctx, dir, "a mutation outside a request");
       continue;
     }
     const Mapping m = Map(*rf, dir);
@@ -882,23 +903,18 @@ void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
       Cut(ctx, dir, m.why);
       continue;
     }
-    if (m.kind == Mapping::kNone || !IsMutation(m.req_kind)) {
-      Cut(ctx, dir, "a mutation of the directory itself");
+    if (m.kind == Mapping::kNone) {
+      // The directory as an object (removed, moved): the model has no
+      // mutation of D itself.
+      Cut(ctx, dir, "dir-itself: a mutation of the directory itself");
       continue;
     }
-    Req *req = nullptr;
-    if (m.req_kind == "create") {
-      if (rf->reqs.contains(dir)) {
-        Cut(ctx, dir, "a second phase 1 in one create");
-        continue;
-      }
-      req = &Open(*rf, dir, "create", m.n);
-    } else if (rf->reqs.contains(dir)) {
-      req = &rf->reqs[dir];
-    } else {
-      Cut(ctx, dir, "a phase 1 before its resolve");
-      continue;
-    }
+    // Any other phase 1 is the request's line, for the model to judge: a
+    // second phase 1 in one create, one in a request that is no mutation,
+    // or an unlink's or rename's before its resolve all are rejected.
+    Req *req = rf->reqs.contains(dir)
+                   ? &rf->reqs[dir]
+                   : &Open(*rf, dir, m.req_kind, m.n, m.m);
     req->begun = true;
     Emit(ctx, dir, req, "phase1",
          absl::StrCat(",\"outcome\":\"begun\",\"synced\":", Bool(synced)));
@@ -918,15 +934,14 @@ void TraceRecorder::MutationAborted(Context &ctx, events::IdsFn ids) {
         Cut(ctx, dir, m.why);
         continue;
       }
-      auto it = rf->reqs.find(dir);
-      if (m.kind == Mapping::kRequest &&
-          (m.req_kind == "unlink" || m.req_kind == "rename") &&
-          it != rf->reqs.end()) {
-        req = &it->second;
+      if (m.kind == Mapping::kRequest) {
+        // As for phase 1: the model judges where it may come.
+        req = rf->reqs.contains(dir) ? &rf->reqs[dir]
+                                     : &Open(*rf, dir, m.req_kind, m.n, m.m);
       }
     }
     if (req == nullptr) {
-      Cut(ctx, dir, "a verification outside its request");
+      Unexplained(ctx, dir, "a verification outside its request");
       continue;
     }
     Emit(ctx, dir, req, "phase1", ",\"outcome\":\"aborted\"");
@@ -939,16 +954,27 @@ void TraceRecorder::MutationSyscall(Context &ctx, const absl::Status &status) {
   Frame *rf = InnermostRequest();
   if (rf != nullptr) {
     const int err = ErrnoOf(status);
-    for (auto &[dir, req] : rf->reqs) {
-      if (!Traced(dir) || !IsMutation(req.kind) || !req.begun ||
-          req.syscall_seen) {
-        continue;
-      }
+    // The syscall's line goes to every directory the request mutates as a
+    // modelled request, whether or not its phase 1 has begun (or its
+    // syscall has run before): where the model has no syscall step for it,
+    // it rejects the line.
+    std::vector<Ino> dirs = {rf->ino};
+    if (rf->newparent != 0 && rf->newparent != rf->ino) {
+      dirs.push_back(rf->newparent);
+    }
+    for (Ino dir : dirs) {
+      if (!Traced(dir)) continue;
+      const Mapping m = Map(*rf, dir);
+      if (m.kind != Mapping::kRequest || !IsMutation(m.req_kind)) continue;
+      Req &req = rf->reqs.contains(dir)
+                     ? rf->reqs[dir]
+                     : Open(*rf, dir, m.req_kind, m.n, m.m);
       const bool modelled =
           err == 0 || (req.kind == "create" && err == EEXIST) ||
           (req.kind != "create" && err == ENOENT);
       if (!modelled) {
-        Cut(ctx, dir, absl::StrCat("a syscall error the model does not have: ",
+        Cut(ctx, dir, absl::StrCat("failed: a syscall error the model does "
+                                   "not have: ",
                                    status.ToString()));
         continue;
       }
@@ -971,7 +997,7 @@ void TraceRecorder::NewChildProbed(Context &ctx, Ino parent,
   if (Traced(parent)) {
     Req *req = RequestReq(parent);
     if (req == nullptr || req->kind != "create") {
-      Cut(ctx, parent, "a create's probe outside its request");
+      Unexplained(ctx, parent, "a create's probe outside its request");
     } else {
       req->probe_absent = probe.kind == events::Probe::kAbsent;
       Emit(ctx, parent, req, "probe",
@@ -998,12 +1024,16 @@ void TraceRecorder::MutationEnded(Context &ctx, events::IdsFn ids) {
     if (!Traced(dir)) continue;
     Req *found = RequestReq(dir);
     if (found == nullptr || !IsMutation(found->kind)) {
-      Cut(ctx, dir, "a mutation's end outside its request");
+      Unexplained(ctx, dir, "a mutation's end outside its request");
       continue;
     }
     Req &req = *found;
     if (!req.syscall_seen) {
-      Cut(ctx, dir, "a mutation ended before its syscall");
+      // Before its syscall: the end of a request that failed before its
+      // syscall (an OpenNode error, say), or a forbidden step. Which one,
+      // its RequestEnd says: a failure ends the trace there, a success is
+      // unexplained.
+      req.ended_early = true;
       continue;
     }
     Emit(ctx, dir, &req, "end",
@@ -1019,7 +1049,7 @@ void TraceRecorder::NameResolved(Context &ctx, Ino parent,
   if (Traced(parent)) {
     Req *req = RequestReq(parent);
     if (req == nullptr || (req->kind != "unlink" && req->kind != "rename")) {
-      Cut(ctx, parent, "a resolve outside an unlink or rename");
+      Unexplained(ctx, parent, "a resolve outside an unlink or rename");
     } else {
       Emit(ctx, parent, req, "resolved",
            absl::StrCat(",\"n\":", Name(name), ",\"found\":", Bool(found)));
@@ -1034,7 +1064,7 @@ void TraceRecorder::Reresolve(Context &ctx, Ino parent,
   if (Traced(parent)) {
     Req *req = RequestReq(parent);
     if (req == nullptr || !IsMutation(req->kind)) {
-      Cut(ctx, parent, "a re-resolve outside its mutation");
+      Unexplained(ctx, parent, "a re-resolve outside its mutation");
     } else {
       Emit(ctx, parent, req, "reresolve",
            absl::StrCat(",\"n\":", Name(name)));
@@ -1046,7 +1076,7 @@ void TraceRecorder::Reresolve(Context &ctx, Ino parent,
 void TraceRecorder::WritesEnded(Context &ctx, Ino id) {
   cause_ = "WritesEnded";
   // A file's: the model has no writable opens (and so no file).
-  if (Traced(id)) Cut(ctx, id, "writes ended on a directory");
+  if (Traced(id)) Unexplained(ctx, id, "writes ended on a directory");
   After(ctx);
 }
 
@@ -1165,7 +1195,7 @@ void TraceRecorder::CleanShutdownRecorded(Context &ctx) {
 
 void TraceRecorder::OutOfBandChange(Context &ctx, Ino id) {
   cause_ = "OutOfBandChange";
-  if (Traced(id)) Cut(ctx, id, "an out-of-band change");
+  if (Traced(id)) Cut(ctx, id, "out-of-band: an out-of-band change");
   After(ctx);
 }
 

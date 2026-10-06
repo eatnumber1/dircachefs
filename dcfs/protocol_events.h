@@ -36,6 +36,7 @@
 
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
+#include "absl/status/statusor.h"
 
 namespace dcfs {
 
@@ -135,7 +136,10 @@ class ProtocolEvents {
   // --- Frames ---------------------------------------------------------
   //
   // Which events belong to one request (model: one request slot). Begin
-  // and End nest; use the RAII scopes below.
+  // and End nest; use the RAII scopes below. Each End gets the status the
+  // frame returned (OK unless the code told its scope otherwise, with
+  // Finish): a recorder ends a request that failed differently from one
+  // that succeeded without the steps it should have taken.
 
   // A FUSE request (fuse_ops.cc), from dispatch to reply. The status is
   // what was replied (OK also for a reply sent by the handler itself).
@@ -147,27 +151,27 @@ class ProtocolEvents {
   // Model: Arrive of a getattr (GAFrom), or Readdirplus's check of "."'s
   // attributes (part of RDFrom).
   virtual void GetattrBegin(Context &ctx, events::Ino id, bool valid) {}
-  virtual void GetattrEnd(Context &ctx) {}
+  virtual void GetattrEnd(Context &ctx, const absl::Status &status) {}
 
   // backing::LookupOrPopulate(parent, name). Model: a LookupOrPopulate
   // (LK and what follows): a lookup request's, an unlink's or a rename's
   // resolve, or a failed mutation's re-resolve.
   virtual void LookupBegin(Context &ctx, events::Ino parent,
                            std::string_view name) {}
-  virtual void LookupEnd(Context &ctx) {}
+  virtual void LookupEnd(Context &ctx, const absl::Status &status) {}
 
   // backing::RefreshAttrs/RefreshAttrsFromFd of `id`, from its fill
   // snapshot (taken right after this call) to its end. Model: the statx and
   // the fill that end a getattr, a readdirplus or a mutation (GA_stat ...
   // R_fill).
   virtual void RefreshBegin(Context &ctx, events::Ino id) {}
-  virtual void RefreshEnd(Context &ctx) {}
+  virtual void RefreshEnd(Context &ctx, const absl::Status &status) {}
 
   // backing::SyncBacking (a sync point), from before cache::BeginSync to
   // its return. Model: a sync request (S1, S2), or StopSync/StopClear
   // inside FinishRun.
   virtual void SyncBegin(Context &ctx) {}
-  virtual void SyncEnd(Context &ctx) {}
+  virtual void SyncEnd(Context &ctx, const absl::Status &status) {}
 
   // --- Reading the cache and the backing filesystem ------------------
 
@@ -327,7 +331,10 @@ class ProtocolEvents {
   virtual void InodeForgotten(Context &ctx, events::Ino id) {}
 };
 
-// The implementation every production Context uses: records nothing.
+// The implementation every production Context uses: records nothing. A
+// function-local static, but a stateless one (no members, every method
+// empty): nothing is shared through it, which is why it may be one object
+// for every Context.
 inline ProtocolEvents &NoProtocolEvents() {
   static ProtocolEvents none;
   return none;
@@ -365,24 +372,38 @@ class RequestScope {
   absl::Status status_;
 };
 
-// Calls (ev.*begin)(ctx, args...) now and (ev.*end)(ctx) at scope exit.
+// Calls (ev.*begin)(ctx, args...) now and (ev.*end)(ctx, status) at scope
+// exit, where status is what Finish was given (OK if it never was).
 class Scope {
  public:
   template <typename... BeginArgs, typename... Args>
   Scope(ProtocolEvents &ev, Context &ctx,
         void (ProtocolEvents::*begin)(Context &, BeginArgs...),
-        void (ProtocolEvents::*end)(Context &), Args &&...args)
+        void (ProtocolEvents::*end)(Context &, const absl::Status &),
+        Args &&...args)
       : ev_(ev), ctx_(ctx), end_(end) {
     (ev_.*begin)(ctx_, static_cast<Args &&>(args)...);
   }
   Scope(const Scope &) = delete;
   Scope &operator=(const Scope &) = delete;
-  ~Scope() { (ev_.*end_)(ctx_); }
+  ~Scope() { (ev_.*end_)(ctx_, status_); }
+
+  // Records the frame's result, and returns it.
+  absl::Status Finish(absl::Status status) {
+    status_ = status;
+    return status;
+  }
+  template <typename T>
+  absl::StatusOr<T> Finish(absl::StatusOr<T> result) {
+    status_ = result.status();
+    return result;
+  }
 
  private:
   ProtocolEvents &ev_;
   Context &ctx_;
-  void (ProtocolEvents::*end_)(Context &);
+  void (ProtocolEvents::*end_)(Context &, const absl::Status &);
+  absl::Status status_;
 };
 
 }  // namespace events

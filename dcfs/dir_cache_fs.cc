@@ -339,13 +339,16 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
   // caller read `attr` from the cache with no syscall since.
   events::Scope scope(*ctx_.events, ctx_, &ProtocolEvents::GetattrBegin,
                       &ProtocolEvents::GetattrEnd, id, attr.valid);
-  if (attr.valid) return attr;
-  struct statx stx {};
-  ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id, &stx));
-  // The row itself (fuse_gen, identity) may have changed meanwhile, e.g.
-  // an invalidation by the open's identity check: re-read it.
-  ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
-  return cache::WithStatx(attr, stx);
+  // The frame's result is its End's status.
+  return scope.Finish([&]() -> absl::StatusOr<cache::CachedAttr> {
+    if (attr.valid) return attr;
+    struct statx stx {};
+    ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id, &stx));
+    // The row itself (fuse_gen, identity) may have changed meanwhile, e.g.
+    // an invalidation by the open's identity check: re-read it.
+    ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
+    return cache::WithStatx(attr, stx);
+  }());
 }
 
 absl::Status DirCacheFS::BeginWriting(InodeId id) {

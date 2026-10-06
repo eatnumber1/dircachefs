@@ -1076,9 +1076,27 @@ TEST_F(DirCacheFSTest, UnknownAttributesAreRefreshed) {
   }
 }
 
+// --- Scenarios for trace validation's fault builds ------------------------
+//
+// Requests with no expectations of their own: a fault build
+// (dcfs/BUILD.bazel's DIR_CACHE_FS_FAULTS) breaks what they do, and only
+// trace validation is to notice. The normal build validates their traces
+// with the others.
+
+// An unlink of a cached name in the root.
+TEST_F(DirCacheFSTest, TraceScenarioUnlink) {
+  WriteFile(Path("a"));
+  WriteFile(Path("b"));
+  Start();
+  ASSERT_THAT(Id("a"), IsOk());  // Populates the root.
+
+  StartTrace();
+  Unlink(kRootInode, "a");
+}
+
 // A mkdir in a directory whose listing is complete. Phase 1 marks the new
 // name unknown, and the trace shows it. Trace validation's fault-injection
-// test (//dcfs:trace_fault_injection_test) runs this test alone in a build
+// test (//dcfs:trace_fault_skip_mark_unknown_test) runs this test alone in a build
 // whose phase 1 skips that write (testonly/skip_mark_unknown.cc), and
 // requires validation to reject its trace at that phase 1.
 TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
