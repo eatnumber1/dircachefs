@@ -387,3 +387,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (27x; readdir without plus 2.1 s). Investigation dispatched to lane-4 (dcfs-investigator):
   measure with `-c opt` too, profile, find the per-entry cost. Benchmarks should also get an
   optimized-build run (6.2 follow-up: a `bench_full_opt` config or `-c opt` in its rule).
+- Phase 10 merged (fd47bbd; three dcfs-implementer agents): google/benchmark suite in the guest
+  (bench/dcfs_bench, dm-delay and mktree helpers, clock shim for the timer-less guest kernel), idle
+  test (60 s warm cache: zero backing reads/writes; the cold control moves the counter), memory test
+  (second tree adds at most half of the first's growth; TCG uses 20k entries), smoke and full runs.
+  Baseline, KVM, fastbuild (NOT optimized): stat 303 us dcfs vs 801 us backing; lookup 1.5 ms vs
+  5.5 ms (slow 5 ms backing: 20 ms vs 92 ms); open+close 738 vs 516 us; small read 1.7 vs 0.95 ms;
+  startup with 100k entries 20 ms; recovery of 10k dirty entries 166 ms; ~100 bytes per referenced
+  inode. FINDING: cached readdir of a 10k-entry directory 3.5 s through dcfs vs 0.13 s backing (27x;
+  plain readdir 2.1 s). Investigation in lane-4 (dcfs-investigator): measure with -c opt too,
+  profile, find the per-entry cost; benchmarks also need an optimized-build run.
+- Orchestrator note: a rebase conflict in test/qemu/BUILD.bazel (R3b and Phase 10 both appended
+  targets) was resolved by keeping both blocks; the readdir agent found the lane mid-rebase and
+  correctly stopped until it was clean.
