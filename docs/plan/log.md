@@ -551,3 +551,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   openssl, perl. nfs_test, version_check_test, ownership_test, sbom_test pass. osv under act: 158 ->
   101 findings in 22 packages, all 101 unfixed in bookworm (no ignores added).
 - 5.3b merged: Debian image now sources bookworm + bookworm-updates + bookworm-security (snapshots 20261006T082722Z / debian-security 20261006T081244Z; six source packages moved; nfs_test passes). OSV: 101 findings in 22 packages, all unfixed in bookworm as of 2026-10-06; policy still needs russ.
+- russ: OSV scans shipped dependencies only (abseil, SQLite, libfuse, liburing, toolchain); the 101
+  Debian-image findings are test-only and do not matter. "Needs russ: OSV policy" resolved. 5.3c
+  dispatched to lane-4: SBOM split into shipped (gating) and test-only (informational), commit-based
+  matching for the shipped pins, verified with a known-vulnerable commit.
