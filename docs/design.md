@@ -385,7 +385,9 @@ served.
   (`DirCacheFS::RefuseStub`, logged at ERROR once per stub per run, naming
   the errno), `UNLINK`/`RMDIR` of it with `EBUSY` (as for a mount point),
   an ioctl with `ENOTTY`, and a `RENAME` or `LINK` across it, or of the
-  stub itself, with `EXDEV`. The kernel looks a link's or rename's target name up
+  stub itself, with `EXDEV`. A stub whose row is gone (its dentry stopped
+  being refused) is a stale nodeid: `ESTALE`, so the kernel looks the
+  name up again. The kernel looks a link's or rename's target name up
   before sending the request, so a link or rename *into* a stub fails at
   that lookup, with `ENOTSUP`.
 - **Not done here** (Phase 15.4): the bind form's recorded mount points,

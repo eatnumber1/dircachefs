@@ -313,8 +313,15 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::StubEntry(InodeId id) {
 
 absl::Status DirCacheFS::RefuseStub(FuseRequest &req, InodeId id,
                                     std::string_view op, int err) {
+  // A stub whose row is gone (its dentry relisted, or recovered) is a stale
+  // nodeid like any other: ESTALE makes the kernel's path walk look the
+  // name up again (LOOKUP_REVAL) and find what it is now (review L3).
+  absl::StatusOr<cache::StubRow> current = cache::GetStub(ctx_, id);
+  if (!current.ok() && absl::IsNotFound(current.status())) {
+    return req.ReplyErrno(ESTALE);
+  }
   if (stubs_logged_.insert(id).second) {
-    absl::StatusOr<cache::StubRow> stub = cache::GetStub(ctx_, id);
+    const absl::StatusOr<cache::StubRow> &stub = current;
     LOG(ERROR) << "refusing " << op << " on or inside the boundary stub "
                << (stub.ok() ? EscapeBytes(stub->name) : "(gone)")
                << " (nodeid " << static_cast<uint64_t>(id) << ", in directory "

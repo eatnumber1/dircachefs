@@ -239,7 +239,8 @@ class DirCacheFS {
   absl::StatusOr<fuse_entry_param> StubEntry(InodeId id);
 
   // Replies `err` to `op` on or inside stub `id`, logging it at ERROR the
-  // first time per stub in this run (stubs_logged_), naming the boundary.
+  // first time per stub in this run (stubs_logged_), naming the boundary;
+  // ESTALE instead if the stub's row is gone.
   // A refusal is an answer, not a failure of dcfs's: replied with
   // ReplyErrno, which logs nothing more.
   absl::Status RefuseStub(FuseRequest &req, InodeId id, std::string_view op,

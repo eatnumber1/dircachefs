@@ -2150,6 +2150,25 @@ TEST_F(DirCacheFSTest, EveryOperationOnAStubIsRefused) {
   EXPECT_EQ(::access(Path("d/mp").c_str(), F_OK), 0);
 }
 
+// A stub whose row is gone (its dentry relisted or recovered) is a stale
+// nodeid: ESTALE, so the kernel's path walk retries with LOOKUP_REVAL and
+// finds what the name is now, rather than ENOTSUP (review L3).
+TEST_F(DirCacheFSTest, AGoneStubIsStale) {
+  ASSERT_EQ(::mkdir(Path("mp").c_str(), 0755), 0);
+  Start();
+  MountBelow("mp");
+  auto [lookup, entry] = Lookup(kRootInode, "mp");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId stub = static_cast<InodeId>(entry.nodeid);
+  ASSERT_THAT(cache::MarkUnknown(ctx_, kRootInode,
+                                 std::vector<std::string>{"mp"}),
+              IsOk());
+  EXPECT_EQ(Lookup(stub, "x").first.error, -ESTALE);
+  EXPECT_EQ(Opendir(stub).error, -ESTALE);
+  EXPECT_EQ(Mkdir(stub, "x").first.error, -ESTALE);
+  EXPECT_EQ(Rename(kRootInode, "a", stub, "a").error, -ESTALE);
+}
+
 // The stub's nodeid is recorded with its dentry: a lookup resolved by a
 // single probe (an unknown name in a complete listing) gets the same stub
 // as the listing, and a FORGET of it is counted like any other.
