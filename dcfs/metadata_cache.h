@@ -472,10 +472,19 @@ absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent,
 // absent, or if it is src itself): marks both names unknown, and the
 // attributes of both parents, src and dst unknown. Dirty: parent,
 // newparent, src, dst.
+//
+// `resolved` is a snapshot (BeginFill) the caller took before resolving
+// src and dst. Phase 3 links the names to src and dst, which is right only
+// if they still are what the names hold, and Mutation::Owns sees overlaps
+// only from phase 1 on. So this first verifies, in phase 1's transaction,
+// that no mutation of parent, newparent, src or dst began or ended since
+// `resolved`, or is in flight (CanFill for each); if one did, it writes
+// nothing, begins no mutation, and fails with kAborted: resolve again.
 absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent,
                                      std::string_view name, InodeId newparent,
                                      std::string_view newname, InodeId src,
-                                     std::optional<InodeId> dst);
+                                     std::optional<InodeId> dst,
+                                     FillSnapshot resolved);
 // Link of src as (newparent, newname): marks `newname` unknown, and the
 // attributes of newparent and src unknown. Dirty: newparent, src.
 absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src,

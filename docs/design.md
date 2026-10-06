@@ -821,6 +821,14 @@ custom VFS. The code already follows the rules that make that safe:
   them.** A directory listing is taken from the cache right after the
   completeness check (`DirCacheFS::ListCached`), and everything that needs
   a syscall comes after.
+- **A mutation verifies in phase 1 what it resolved before it.** `Rename`
+  resolves its source and destination (which may take syscalls) and phase
+  3 links the names to those ids, but `Mutation::Owns` only notices
+  overlaps from phase 1 on. So `Rename` takes a fill snapshot before
+  resolving, and `cache::BeginRename` checks, in phase 1's transaction,
+  that no mutation of the parents, the source or the destination began or
+  ended since or is in flight; if one did, it writes nothing and `Rename`
+  resolves again (a few times, then `EAGAIN`).
 - **Credential switches never span a suspension point.** `AsCaller` wraps
   exactly one synchronous syscall, and the switch is per thread (see
   [Caller credentials](#caller-credentials)).
@@ -829,7 +837,8 @@ custom VFS. The code already follows the rules that make that safe:
 
 Places still marked `TODO(coroutines)`: `ListCached` retries a
 population a few times when a concurrent mutation keeps it from being
-recorded, where a coroutine would wait for the mutation instead. The
+recorded, and `Rename` retries its resolve when phase 1 finds it stale,
+where a coroutine would wait for the mutation instead. The
 status macros embed `return` and will need `co_return` variants.
 
 ## Writable opens and file contents
@@ -1276,11 +1285,12 @@ runs all of it; `formal/README.md` explains the model, what it leaves out,
 and how to read a counterexample.
 
 The model describes the code as it is. It found three gaps that only today's
-single thread and the kernel's per-directory lock kept unreachable: a sync
-point cleared the dirty rows of mutations still in flight (fixed: see
+single thread and the kernel's per-directory lock kept unreachable, all
+fixed since (plan step R4), and each now a known-bug variant: a sync point
+cleared the dirty rows of mutations still in flight (see
 [Sync points](#sync-points)); Readdirplus listed after a suspension point
-without checking completeness again (fixed: see Readdir under
-[Population policy](#population-policy)); and Rename's phase 3 trusts a
-source resolved before its phase 1. The open ones are kept as
-expected-counterexample tests under `formal/findings/`, and must be fixed
-before requests run concurrently.
+without checking completeness again (see Readdir under
+[Population policy](#population-policy)); and Rename's phase 3 trusted a
+source resolved before its phase 1 (see the rule on resolves under
+[Rules that hold now](#rules-that-hold-now-so-that-coroutines-need-no-redesign)).
+The configurations that found them are now part of the real model.

@@ -1220,12 +1220,27 @@ absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent, std::string_v
 
 absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent, std::string_view name,
                          InodeId newparent, std::string_view newname,
-                         InodeId src, std::optional<InodeId> dst) {
+                         InodeId src, std::optional<InodeId> dst,
+                         FillSnapshot resolved) {
   const std::string names[] = {std::string(name)};
   const std::string newnames[] = {std::string(newname)};
   std::vector<InodeId> ids = {parent, newparent, src};
   if (dst.has_value()) ids.push_back(*dst);
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    // First, before writing anything: the verification (formal/ finding
+    // rename_stale_source). If no mutation of any inode this rename names
+    // began or ended since `resolved`, or is in flight, then neither name's
+    // entry changed through dcfs since the caller resolved src and dst, so
+    // both are still what the names hold: phase 3 may link them. From
+    // here on Mutation::Owns takes over. Otherwise the transaction rolls
+    // back, the mutation never begins, and the caller resolves again.
+    for (InodeId id : ids) {
+      if (!CanFill(ctx, resolved, id)) {
+        return absl::AbortedError(absl::StrCat(
+            "rename of ", EscapeBytes(name), " in ", parent, ": inode ", id,
+            " changed since its source and destination were resolved"));
+      }
+    }
     ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, parent, names));
     ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, newparent, newnames));
     for (InodeId id : ids) ABSL_RETURN_IF_ERROR(MarkAttrsUnknown(ctx, id));

@@ -2,8 +2,8 @@
 #
 # Every target runs TLC on the host (no root, no kernel control: the QEMU
 # rule in AGENTS.md does not apply). The model's own configurations must
-# find no error; each known-bug variant and each finding must produce
-# exactly its expected counterexample.
+# find no error; each known-bug variant must produce exactly its expected
+# counterexample.
 
 load("//third_party/tlaplus:tlc.bzl", "tlc_test")
 
@@ -40,8 +40,8 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
-# Without the kernel's directory lock (the coroutine future), minus the
-# request kinds with known gaps there (findings/); about three minutes.
+# Without the kernel's directory lock (the coroutine future); a few
+# minutes.
 tlc_test(
     name = "nolock_test",
     size = "large",
@@ -61,6 +61,7 @@ KNOWN_BUGS = {
     # Found by this model (formerly findings/); fixed in plan step R4.
     "sync_during_mutation": "Invariant CrashSafe is violated",
     "readdirplus_unlocked": "Invariant ServedFromCacheIsCurrent is violated",
+    "rename_stale_source": "Invariant CacheNeverWrong is violated",
 }
 
 [
@@ -73,24 +74,4 @@ KNOWN_BUGS = {
         srcs = MODEL,
     )
     for bug, violation in KNOWN_BUGS.items()
-]
-
-# Gaps in today's code that the model found (unreachable while dcfs is
-# single-threaded and the kernel locks the directory; see each .tla). When
-# the code is fixed and the model updated, the test fails: move the
-# configuration into the real model then.
-FINDINGS = {
-    "rename_stale_source": "Invariant CacheNeverWrong is violated",
-}
-
-[
-    tlc_test(
-        name = "finding_%s_test" % finding,
-        size = "medium",
-        config = "findings/%s.cfg" % finding,
-        expect_violation = violation,
-        spec = "findings/%s.tla" % finding,
-        srcs = MODEL,
-    )
-    for finding, violation in FINDINGS.items()
 ]

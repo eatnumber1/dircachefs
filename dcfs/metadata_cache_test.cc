@@ -1077,7 +1077,9 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
 
   // Rename of a/f over b/g.
   ASSERT_THAT(reset(), IsOk());
-  ASSERT_THAT(BeginRename(ctx_, a, "f", b, "g", f.id, g.id), IsOk());
+  ASSERT_THAT(
+      BeginRename(ctx_, a, "f", b, "g", f.id, g.id, BeginFill(ctx_)),
+      IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, b, f.id, g.id)));
   EXPECT_THAT(Lookup(ctx_, a, "f"),
               IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
@@ -1086,7 +1088,8 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   for (InodeId id : {a, b, f.id, g.id}) EXPECT_FALSE(valid(id)) << id;
   // And without a destination.
   ASSERT_THAT(reset(), IsOk());
-  ASSERT_THAT(BeginRename(ctx_, a, "x", a, "y", f.id, std::nullopt), IsOk());
+  ASSERT_THAT(BeginRename(ctx_, a, "x", a, "y", f.id, std::nullopt,
+                          BeginFill(ctx_)), IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, f.id)));
   ASSERT_THAT(LinkDentry(ctx_, a, "f", f.id), IsOk());
   ASSERT_THAT(LinkDentry(ctx_, b, "g", g.id), IsOk());
@@ -1135,6 +1138,58 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   EXPECT_THAT(GetXattr(ctx_, f.id, "user.k"), IsOkAndHolds(std::nullopt));
   EXPECT_THAT(GetXattr(ctx_, f.id, "user.other"),
               IsOkAndHolds(Optional(std::string("w"))));
+}
+
+// formal/ finding rename_stale_source: a rename's phase 1 verifies that
+// nothing it names changed since its caller resolved the source and the
+// destination; if something did, it writes nothing and begins nothing.
+TEST_F(MetadataCacheTest, BeginRenameRefusesAStaleResolution) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
+  ASSERT_OK_AND_ASSIGN(UpsertResult x, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult y, Make(31));
+  ASSERT_OK_AND_ASSIGN(UpsertResult z, Make(32));
+  ASSERT_THAT(LinkDentry(ctx_, d, "x", x.id), IsOk());
+  ASSERT_THAT(LinkDentry(ctx_, d, "y", y.id), IsOk());
+  ASSERT_THAT(SyncClear(), IsOk());
+  auto unchanged = [&] {
+    for (const char *name : {"x", "y"}) {
+      EXPECT_THAT(Lookup(ctx_, d, name),
+                  IsOkAndHolds(IsLookup(LookupResult::kFound)));
+    }
+    EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+    EXPECT_FALSE(ctx_.fills.inflight.contains(d));
+  };
+
+  // Each inode the rename names, changed by a mutation that began and
+  // ended after the snapshot: d (the parent), x (the source), y (the
+  // destination).
+  for (InodeId changed : {d, x.id, y.id}) {
+    SCOPED_TRACE(changed);
+    const FillSnapshot resolved = BeginFill(ctx_);
+    ASSERT_THAT(BeginAttrChange(ctx_, changed), IsOk());  // Ends at once.
+    ASSERT_THAT(SyncClear(), IsOk());
+    EXPECT_THAT(BeginRename(ctx_, d, "x", d, "y", x.id, y.id, resolved),
+                StatusIs(absl::StatusCode::kAborted));
+    unchanged();
+  }
+  // A mutation of the parent that was already in flight at the snapshot
+  // (and still is): what the resolve saw may be about to change.
+  {
+    ASSERT_OK_AND_ASSIGN(Mutation other, BeginCreate(ctx_, d, "w"));
+    const FillSnapshot resolved = BeginFill(ctx_);
+    EXPECT_THAT(BeginRename(ctx_, d, "x", d, "y", x.id, y.id, resolved),
+                StatusIs(absl::StatusCode::kAborted));
+    other.End();
+    ASSERT_THAT(SyncClear(), IsOk());
+  }
+  // An unrelated inode's mutation does not matter.
+  const FillSnapshot resolved = BeginFill(ctx_);
+  ASSERT_THAT(BeginAttrChange(ctx_, z.id), IsOk());
+  ASSERT_OK_AND_ASSIGN(Mutation rename,
+                       BeginRename(ctx_, d, "x", d, "y", x.id, y.id, resolved));
+  EXPECT_TRUE(rename.Owns(d));
+  EXPECT_THAT(Lookup(ctx_, d, "x"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
 }
 
 TEST_F(MetadataCacheTest, MarkDirtyIsNotDurableAndClearDirtyKeeps) {
@@ -1540,7 +1595,9 @@ TEST_F(MetadataCacheTest, ListDirCursorSurvivesRenameOverAndFailedRemove) {
   ASSERT_THAT(list_after(cursor), ElementsAre("e", "c"));
 
   // rename(d/a, d/b) over the existing b: phase 1, then phase 3.
-  ASSERT_THAT(BeginRename(ctx_, d, "a", d, "b", a.id, b.id), IsOk());
+  ASSERT_THAT(
+      BeginRename(ctx_, d, "a", d, "b", a.id, b.id, BeginFill(ctx_)),
+      IsOk());
   ASSERT_THAT(LinkDentry(ctx_, d, "b", a.id), IsOk());
   ASSERT_THAT(SetNegative(ctx_, d, "a"), IsOk());
   EXPECT_THAT(list_after(cursor), ElementsAre("e", "c"));

@@ -130,6 +130,13 @@ void WriteFile(const std::string &path) {
   ::close(fd);
 }
 
+uint64_t InoOf(const std::string &path) {
+  struct stat st {};
+  EXPECT_EQ(::lstat(path.c_str(), &st), 0) << path << ": "
+                                          << std::strerror(errno);
+  return st.st_ino;
+}
+
 // A reply as the kernel would receive it.
 struct Reply {
   int error = 0;  // fuse_out_header.error: 0 or a negative errno.
@@ -410,6 +417,100 @@ TEST_F(DirCacheFSTest, ReaddirplusIsNotServedWhileAMutationIsInFlight) {
   unlink.End();
   EXPECT_THAT(List(kRootInode, true),
               IsOkAndHolds(UnorderedElementsAre(".", "..", "a", "b")));
+}
+
+// --- formal/ finding rename_stale_source ---------------------------------
+//
+// Rename resolves its source (and destination) before its phase 1, and
+// phase 3 links the new name to the resolved source. Mutation::Owns only
+// notices mutations that overlap from phase 1 on, so phase 1 must verify
+// that nothing the rename names changed since it resolved them.
+//
+// The interleaving, in a directory d (the root would be opened through its
+// mount fd, which the hook does not see): "a" and "link_a" are hard links
+// to one file, "c" is another. A rename of a over b begins; b has no row
+// and d's listing is incomplete, so resolving b populates d, and at that
+// population's first syscall (OpenNode of d) a rename of c over a runs to
+// completion. Then the first rename's renameat2 moves c's file to b.
+class RenameStaleSourceTest : public DirCacheFSTest {
+ protected:
+  void Build(bool second_link) {
+    ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+    WriteFile(Path("d/a"));
+    if (second_link) {
+      ASSERT_EQ(::link(Path("d/a").c_str(), Path("d/link_a").c_str()), 0);
+    }
+    WriteFile(Path("d/c"));
+    ino_a_ = InoOf(Path("d/a"));
+    ino_c_ = InoOf(Path("d/c"));
+    Start();
+    ASSERT_OK_AND_ASSIGN(d_, Id("d"));
+    ASSERT_THAT(Id("a", d_), IsOk());  // Populates d: rows for all.
+    ASSERT_THAT(Id("c", d_), IsOk());
+    ASSERT_THAT(cache::MarkDirComplete(ctx_, d_, false), IsOk());
+    ASSERT_EQ(Cached(d_, "b").first, LookupResult::kUnknown);
+  }
+
+  // Runs the interleaving; both renames must succeed.
+  void RunRenames() {
+    std::optional<Reply> concurrent;
+    OpenByHandleHook() = [&] { concurrent = Rename(d_, "c", d_, "a"); };
+    Reply reply = Rename(d_, "a", d_, "b");
+    ASSERT_TRUE(concurrent.has_value()) << "the hook did not run";
+    EXPECT_EQ(concurrent->error, 0);
+    EXPECT_EQ(reply.error, 0);
+    // On the backing filesystem, c's file ended up as b.
+    ASSERT_EQ(InoOf(Path("d/b")), ino_c_);
+    ASSERT_NE(::access(Path("d/a").c_str(), F_OK), 0);
+    ASSERT_NE(::access(Path("d/c").c_str(), F_OK), 0);
+  }
+
+  InodeId d_ = 0;
+  uint64_t ino_a_ = 0;
+  uint64_t ino_c_ = 0;
+};
+
+// With a second link the old file's row survives the concurrent rename, so
+// the old phase 3 recorded b -> the old file, which b is not.
+TEST_F(RenameStaleSourceTest, OldObjectWithAnotherLinkIsNotLinked) {
+  Build(/*second_link=*/true);
+  RunRenames();
+  EXPECT_EQ(Cached(d_, "b"), std::make_pair(LookupResult::kFound, ino_c_));
+  EXPECT_NE(Cached(d_, "a").first, LookupResult::kFound);
+  EXPECT_NE(Cached(d_, "c").first, LookupResult::kFound);
+  EXPECT_EQ(Cached(d_, "link_a"),
+            std::make_pair(LookupResult::kFound, ino_a_));
+}
+
+// Without one the old file's row is gone; the old phase 3's LinkDentry
+// failed and rolled back, leaving b unknown. Now the rename re-resolves
+// and records what b really is.
+TEST_F(RenameStaleSourceTest, OldObjectWithoutAnotherLinkIsNotLinked) {
+  Build(/*second_link=*/false);
+  RunRenames();
+  EXPECT_EQ(Cached(d_, "b"), std::make_pair(LookupResult::kFound, ino_c_));
+  EXPECT_NE(Cached(d_, "a").first, LookupResult::kFound);
+  EXPECT_NE(Cached(d_, "c").first, LookupResult::kFound);
+}
+
+// The other side: while a mutation of the parent stays in flight, a
+// rename's phase 1 cannot verify what it resolved; after a few attempts
+// the rename fails with EAGAIN (TODO(coroutines): wait instead), and
+// nothing has been renamed.
+TEST_F(DirCacheFSTest, RenameIsRefusedWhileItsParentKeepsChanging) {
+  WriteFile(Path("a"));
+  WriteFile(Path("x"));
+  Start();
+  ASSERT_THAT(Id("a"), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::Mutation other,
+                       cache::BeginCreate(ctx_, kRootInode, "x2"));
+  EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, -EAGAIN);
+  EXPECT_EQ(::access(Path("a").c_str(), F_OK), 0);
+  EXPECT_NE(::access(Path("b").c_str(), F_OK), 0);
+  other.End();
+  EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, 0);
+  EXPECT_EQ(Cached(kRootInode, "b"),
+            std::make_pair(LookupResult::kFound, InoOf(Path("b"))));
 }
 
 }  // namespace

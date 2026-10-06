@@ -732,37 +732,61 @@ absl::Status DirCacheFS::Rename(
   ABSL_RETURN_IF_ERROR(RequireAttr(newparent).status());
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
-  ABSL_ASSIGN_OR_RETURN(cache::LookupResult src,
-                        backing::LookupOrPopulate(ctx_, parent, name));
-  if (src.kind == cache::LookupResult::kNegative) {
-    return req.ReplyErrno(ENOENT);
-  }
-  RET_CHECK_EQ(src.kind, cache::LookupResult::kFound);
-  // The destination is resolved (populating newparent if need be) rather
-  // than merely looked up: if the rename replaces an existing object, its
-  // row -- which may be cached through another hard link, or an NFS
-  // handle, even when this name is not -- must learn its new link count
-  // (or be deleted) in phase 3, and that needs its id.
-  ABSL_ASSIGN_OR_RETURN(cache::LookupResult dst,
-                        backing::LookupOrPopulate(ctx_, newparent, newname));
-  RET_CHECK_NE(dst.kind, cache::LookupResult::kUnknown);
-  const bool dst_exists = dst.kind == cache::LookupResult::kFound;
-  if (exchange && !dst_exists) return req.ReplyErrno(ENOENT);
-  // Two links to one inode: the kernel's vfs_rename() treats this as a
-  // successful no-op and never sends it, but dcfs handles it the same way
-  // should one arrive (e.g. through a stale kernel dentry).
-  const bool same_inode = dst_exists && dst.id == src.id;
-
-  // Phase 1, one transaction: mark both names unknown, and every attribute
-  // set the rename changes unknown.
+  // Resolve the source and the destination, then phase 1, which verifies
+  // that nothing the rename names changed since the resolve began (see
+  // cache::BeginRename's `resolved`): phase 3 links the names to these
+  // ids, and Mutation::Owns only notices overlaps from phase 1 on
+  // (formal/ finding rename_stale_source). If something changed, resolve
+  // again. Today nothing can run in between; under coroutines the
+  // resolves' syscalls are suspension points.
+  // TODO(coroutines): wait for the overlapping mutation instead.
+  constexpr int kAttempts = 3;
+  cache::LookupResult src;
+  cache::LookupResult dst;
+  bool dst_exists = false;
+  bool same_inode = false;
+  std::optional<cache::Mutation> mutation;
   std::vector<std::string> names = {std::string(name)};
   std::vector<std::string> newnames = {std::string(newname)};
-  ABSL_ASSIGN_OR_RETURN(
-      cache::Mutation mutation,
-      cache::BeginRename(ctx_, parent, name, newparent, newname, src.id,
-                         dst_exists && !same_inode
-                             ? std::optional<InodeId>(dst.id)
-                             : std::nullopt));
+  for (int attempt = 0; !mutation.has_value(); ++attempt) {
+    if (attempt == kAttempts) {
+      return dcfs::ErrnoToStatus(
+          EAGAIN, absl::StrCat("rename of ", EscapeBytes(name), " in ",
+                               parent, ": its directories kept changing"));
+    }
+    const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
+    ABSL_ASSIGN_OR_RETURN(src, backing::LookupOrPopulate(ctx_, parent, name));
+    if (src.kind == cache::LookupResult::kNegative) {
+      return req.ReplyErrno(ENOENT);
+    }
+    RET_CHECK_EQ(src.kind, cache::LookupResult::kFound);
+    // The destination is resolved (populating newparent if need be) rather
+    // than merely looked up: if the rename replaces an existing object, its
+    // row -- which may be cached through another hard link, or an NFS
+    // handle, even when this name is not -- must learn its new link count
+    // (or be deleted) in phase 3, and that needs its id.
+    ABSL_ASSIGN_OR_RETURN(dst,
+                          backing::LookupOrPopulate(ctx_, newparent, newname));
+    RET_CHECK_NE(dst.kind, cache::LookupResult::kUnknown);
+    dst_exists = dst.kind == cache::LookupResult::kFound;
+    if (exchange && !dst_exists) return req.ReplyErrno(ENOENT);
+    // Two links to one inode: the kernel's vfs_rename() treats this as a
+    // successful no-op and never sends it, but dcfs handles it the same way
+    // should one arrive (e.g. through a stale kernel dentry).
+    same_inode = dst_exists && dst.id == src.id;
+
+    // Phase 1, one transaction: mark both names unknown, and every
+    // attribute set the rename changes unknown.
+    absl::StatusOr<cache::Mutation> begun = cache::BeginRename(
+        ctx_, parent, name, newparent, newname, src.id,
+        dst_exists && !same_inode ? std::optional<InodeId>(dst.id)
+                                  : std::nullopt,
+        resolved);
+    if (absl::IsAborted(begun.status())) continue;
+    ABSL_RETURN_IF_ERROR(begun.status());
+    mutation.emplace(*std::move(begun));
+  }
+
   // A replaced dst is removed as an unlink would remove it (see
   // RemoveChild).
   std::optional<FileDescriptor> held_dst;
@@ -777,7 +801,7 @@ absl::Status DirCacheFS::Rename(
           backing::RenameAt(ctx_, caller, parent, name, newparent, newname,
                             flags);
       !status.ok()) {
-    mutation.End();
+    mutation->End();
     ReresolveAfterFailure(parent, names);
     ReresolveAfterFailure(newparent, newnames);
     return status;
@@ -790,10 +814,15 @@ absl::Status DirCacheFS::Rename(
   // directory moves only its own dentry; its cached subtree hangs off its
   // (unchanged) id and so stays valid as is. Each parent's dentry only if
   // no other mutation of it overlapped this one (cache::Mutation::Owns);
-  // otherwise that name stays unknown.
+  // otherwise that name stays unknown. src and dst are what the names held
+  // at phase 1 (BeginRename verified it) and, with Owns, still were when
+  // renameat2 ran, so linking them is right whether or not the objects
+  // have other links. (This used to rest partly on LinkDentry failing, and
+  // the transaction rolling back, when a stale source's row was gone; a
+  // stale source that survived through another hard link was recorded.)
   LogPhase3Failure("Rename", ctx_.db.Transaction([&]() -> absl::Status {
-    const bool own_parent = mutation.Owns(parent);
-    const bool own_newparent = mutation.Owns(newparent);
+    const bool own_parent = mutation->Owns(parent);
+    const bool own_newparent = mutation->Owns(newparent);
     if (own_newparent) {
       ABSL_RETURN_IF_ERROR(
           cache::LinkDentry(ctx_, newparent, newname, src.id));
@@ -807,7 +836,7 @@ absl::Status DirCacheFS::Rename(
     }
     return absl::OkStatus();
   }));
-  mutation.End();
+  mutation->End();
 
   RefreshAfterRename(parent, newparent, src, dst, dst_exists, same_inode,
                      exchange, std::move(held_dst));

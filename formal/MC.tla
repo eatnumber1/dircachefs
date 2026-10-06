@@ -1,14 +1,15 @@
 --------------------------------- MODULE MC ---------------------------------
 (***************************************************************************)
 (* The model-checking root module: the configurations (MC_small.cfg,      *)
-(* MC_large.cfg, known_bugs/*.cfg, findings/*.cfg) check this module and  *)
-(* bind dcfs's constants. See README.md for what each configuration       *)
-(* checks and how long it takes.                                          *)
+(* MC_large.cfg, MC_nolock.cfg, MC_liveness.cfg, known_bugs/*.cfg) check  *)
+(* this module and bind dcfs's constants. See README.md for what each     *)
+(* configuration checks and how long it takes.                            *)
 (***************************************************************************)
 EXTENDS dcfs
 
-\* Every request kind, and every kind but one: for configurations that leave
-\* out a request whose known gap (findings/) would otherwise stop TLC first.
+\* Every request kind, and subsets of them: for known-bug configurations
+\* that leave out a request whose bug (when it was open) would otherwise
+\* have stopped TLC first.
 AllRequests == AllKinds
 AllButRename == AllKinds \ {"rename"}
 AllButReaddirplus == AllKinds \ {"readdirplus"}

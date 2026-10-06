@@ -41,7 +41,8 @@ CONSTANTS
     BugUnguardedFills,          \* tri-state F1
     BugRestoreComplete,         \* tri-state F4
     BugSyncIgnoresMutations,    \* finding sync_during_mutation (R4)
-    BugReaddirplusUnlocked      \* finding readdirplus_unlocked (R4)
+    BugReaddirplusUnlocked,     \* finding readdirplus_unlocked (R4)
+    BugRenameStaleSource        \* finding rename_stale_source (R4)
 
 AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
              "create", "unlink", "rename", "sync"}
@@ -53,7 +54,7 @@ ASSUME /\ Names # {} /\ IsFiniteSet(Names)
        /\ \A b \in {KernelDirLock, BugPhase1NotDurable,
                     BugCreateKeepsParentAttrs, BugUnguardedFills,
                     BugRestoreComplete, BugSyncIgnoresMutations,
-                    BugReaddirplusUnlocked} :
+                    BugReaddirplusUnlocked, BugRenameStaleSource} :
               b \in BOOLEAN
 
 -----------------------------------------------------------------------------
@@ -126,14 +127,17 @@ vars == <<bCur, bOpts, dbCur, dbOpts, mode, seq, inflight, durableD,
 \* `esnap` a fill's FillSnapshot and D's epoch at that time (`snap`: also a
 \* sync point's BeginSync snapshot); `rd*` what a
 \* syscall read; `mseq` the seq of the mutation's phase 1 (Mutation::Owns);
-\* `src` a rename's resolved source; `was` the pre-phase-1 completeness
-\* (BugRestoreComplete only). Fields are reset once used, so that slots
-\* doing the same thing are the same state.
+\* `src` a rename's resolved source, `rsnap` the FillSnapshot taken before
+\* it resolved its names; `attempts` how many times a readdir populated or
+\* a rename's phase 1 found its resolve stale; `was` the pre-phase-1
+\* completeness (BugRestoreComplete only). Fields are reset once used, so
+\* that slots doing the same thing are the same state.
 IdleProc == [pc |-> "idle", kind |-> None, n |-> None, m |-> None,
              locked |-> FALSE, lk |-> None, cont |-> None, res |-> NoRes,
              snap |-> 0, esnap |-> 0, rdObj |-> NoObj,
              rdList |-> [x \in Names |-> NoObj], rdVer |-> 0,
-             mseq |-> 0, src |-> NoObj, attempts |-> 0, was |-> FALSE]
+             mseq |-> 0, src |-> NoObj, rsnap |-> 0, attempts |-> 0,
+             was |-> FALSE]
 
 TypeOK ==
     /\ bCur \in BStates /\ bOpts \subseteq BStates /\ bCur \in bOpts
@@ -553,12 +557,28 @@ R0(p) ==
     /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards
     /\ UNCHANGED <<servedWrong, stamp>>
 
-\* Phase 1 (cache::BeginRename): both names and D's attributes unknown, D
-\* dirty. Then renameat2.
+\* Phase 1 (cache::BeginRename): first the verification, in its
+\* transaction: no mutation of D began or ended since the snapshot taken
+\* before the source was resolved (`rsnap`), and none is in flight
+\* (CanFill's test). If it holds, both names and D's attributes unknown, D
+\* dirty, then renameat2. If not, nothing is written and the rename
+\* resolves both names again from a new snapshot, at most 3 times in all
+\* (then EAGAIN). BugRenameStaleSource: no verification (finding
+\* rename_stale_source).
 R1(p) ==
     /\ At(p, "R1")
-    /\ BeginMutation({ps[p].n, ps[p].m}, TRUE)
-    /\ Syscall(p, InFlight(ps[p], "R_sys"))
+    /\ LET r == ps[p] IN
+       IF BugRenameStaleSource \/ (inflight = 0 /\ seq <= r.rsnap)
+       THEN /\ BeginMutation({r.n, r.m}, TRUE)
+            /\ Syscall(p, [InFlight(r, "R_sys") EXCEPT !.rsnap = 0,
+                                                       !.attempts = 0])
+       ELSE /\ UnchangedDB /\ UnchangedGuards
+            /\ IF r.attempts < 2
+               THEN Then(p, [r EXCEPT !.pc = "LK", !.lk = r.n, !.cont = "R0",
+                                      !.rsnap = seq, !.src = NoObj,
+                                      !.res = NoRes,
+                                      !.attempts = r.attempts + 1])
+               ELSE Done(p)  \* EAGAIN
     /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
 
 \* Phase 2: renameat2(D, n, D, m): moves whatever n names now over m;
@@ -577,8 +597,9 @@ RSys(p) ==
                /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "R_fail"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
 
-\* Phase 3, one transaction if Owns(D): m -> the source resolved before
-\* phase 1, n absent. End; RefreshAfterRename's RefreshAttrs(D) as a fill.
+\* Phase 3, one transaction if Owns(D): m -> the source (resolved before
+\* phase 1, and verified by it), n absent. End; RefreshAfterRename's
+\* RefreshAttrs(D) as a fill.
 R3(p) ==
     /\ At(p, "R3")
     /\ LET r == ps[p] IN
@@ -677,8 +698,8 @@ Arrive(p) ==
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n, m \in Names :
                /\ n # m
-               /\ LKFrom(p, NewReq("rename", n, m, "LK", n, "R0",
-                                   KernelDirLock))
+               /\ LKFrom(p, [NewReq("rename", n, m, "LK", n, "R0",
+                                    KernelDirLock) EXCEPT !.rsnap = seq])
        \/ /\ "sync" \in Requests
           /\ S1From(p, NewReq("sync", None, None, "S1", None, None, FALSE))
           /\ UNCHANGED muts

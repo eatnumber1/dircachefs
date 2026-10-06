@@ -54,9 +54,8 @@ mkdir -p /tmp/tlc && cp formal/*.tla formal/*.cfg /tmp/tlc && cd /tmp/tlc
 ```
 
 `-coverage 1` adds how often each action fired (an action that never fires
-is a sign that part of the model is dead). For a known bug or a finding,
-copy `known_bugs/*` or `findings/*` into the same directory and name its
-module instead of `MC`.
+is a sign that part of the model is dead). For a known bug, copy
+`known_bugs/*` into the same directory and name its module instead of `MC`.
 
 ## TLA+ in five minutes
 
@@ -218,10 +217,10 @@ prints. A request's first step runs inside `Arrive`.
 | `UnlinkSyscall` | unlinkat; `ENOENT` if gone | Phase 2 | `backing::UnlinkAt` |
 | `UnlinkPhase3` | Name absent if `Owns(D)`; `End` | Phase 3 | `cache::SetNegative`, `Mutation::Owns` |
 | `UnlinkStat`, `UnlinkFill`, `UnlinkFailed` | As for create | | `backing::RefreshAttrs`, `ReresolveAfterFailure` |
-| `RenameResolveDst` | After resolving the source: `ENOENT`, or resolve the destination | | `DirCacheFS::Rename` |
-| `RenamePhase1` | Both names and D's attributes unknown, D dirty | Phase 1 | `cache::BeginRename` |
+| `RenameResolveDst` | After resolving the source (the resolve began with a fill snapshot, `rsnap`): `ENOENT`, or resolve the destination | | `DirCacheFS::Rename` |
+| `RenamePhase1` | Verify that no mutation of D began or ended since the snapshot taken before the source was resolved, and none is in flight; if so, both names and D's attributes unknown, D dirty; if not, resolve both names again (at most 3 times, then `EAGAIN`) | Phase 1 | `cache::BeginRename` (`resolved`), `DirCacheFS::Rename` |
 | `RenameSyscall` | renameat2: moves whatever the source name holds now | Phase 2 | `backing::RenameAt` |
-| `RenamePhase3` | If `Owns(D)`: destination -> the resolved source, source name absent; `End` | Phase 3 | `Rename`'s phase-3 transaction |
+| `RenamePhase3` | If `Owns(D)`: destination -> the resolved (and verified) source, source name absent; `End` | Phase 3 | `Rename`'s phase-3 transaction |
 | `RenameStat`, `RenameFill`, `RenameFailed`, `RenameFailed2` | As for create (a failure re-resolves both names) | | `RefreshAfterRename`, `ReresolveAfterFailure` |
 | (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
@@ -255,7 +254,7 @@ as distinct states.
 | `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 368,668 | ~1 min |
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 32,839 | ~15-30 s |
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 3,950,002 | ~8 min |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; no rename (see Findings) | 3,029,643 | ~4 min |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 4,460,210 | ~6 min |
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
@@ -279,39 +278,43 @@ FALSE in the real configurations.
 | `tristate_f4_restore_complete` | the restore-completeness lost update (tri-state F4); needs two mutations of D in flight, so without the kernel lock | `TriState` | an unlink's phase 1 deletes `a`'s row and clears completeness; its syscall; a create of `a` begins (phase 1); the unlink's phase 3 restores completeness, so `a` reads absent while its create is in flight |
 | `sync_during_mutation` | a sync point cleared the dirty rows of mutations in flight (a [finding](#findings) of this model, fixed in plan step R4) | `CrashSafe` | a create of `b`: phase 1 (D dirty, kSync); a sync point: syncfs; the create's syscall, probe and phase 3 (`b` recorded), and its end; the sync point clears D's row. A crash may now keep that database and lose the unsynced create, and recovery has nothing to forget. (Keeping only the inodes in flight at `ClearDirty` would not help: the create had ended.) |
 | `readdirplus_unlocked` | Readdirplus listed after a suspension point without checking completeness again (a finding, fixed in R4); without the kernel lock | `ServedFromCacheIsCurrent` | a lookup populates D (`a` present, complete); a readdirplus finds D complete with its attributes unknown and goes to statx D; a create of `a` begins (phase 1: `a` unknown); the readdirplus fills D's attributes and lists the present rows: none, while `a` exists |
+| `rename_stale_source` | Rename's phase 3 linked a source resolved before phase 1 without verifying it (a finding, fixed in R4); without the kernel lock | `CacheNeverWrong` | a rename of `b` over `a` resolves `o2` and runs phase 1; a rename of `a` over `b` probes `a` (`o1`); the first rename's renameat2 and phase 3 (`a` -> `o2`); the second's probe cannot be recorded but answers `o1`; it resolves `b` (absent), runs phase 1 and renameat2 (which moves `o2`), and phase 3 records `b` -> `o1` |
 
 ## Findings
 
-Writing and checking the model exposed three places where the code does not
+Writing and checking the model exposed three places where the code did not
 deliver what `docs/design.md` says the concurrency rules are for ("Rules
-that hold now so that coroutines need no redesign"). None is reachable
+that hold now so that coroutines need no redesign"). None was reachable
 today, since dcfs is single-threaded and the kernel serializes each
-directory. Each would become a real bug under coroutines, and each is kept
-as `findings/<name>.tla`/`.cfg` with a test that expects its counterexample.
-When the code is fixed and the model updated to match, the test fails: then
-fold the configuration into the real model, delete the finding, and keep
-the old behavior as a `Bug*` constant and a [known bug](#known-bugs-the-models-own-tests).
-
-Fixed (plan step R4):
+directory; each would have become a real bug under coroutines. Each was
+kept as `findings/<name>.tla`/`.cfg`, with a test that expected its
+counterexample, until the code was fixed (plan step R4). Then its
+configuration became part of the real model, and the old behavior a
+`Bug*` constant and a [known bug](#known-bugs-the-models-own-tests). A
+new finding goes the same way.
 
 - `sync_during_mutation`: a sync point cleared the dirty rows of mutations
   in flight. The real configurations used to set a `SyncExclusive`
   constant (no sync point overlaps a mutation); the constant is gone, and
-  every configuration lets sync points interleave. Now the known bug
-  `sync_during_mutation`.
+  every configuration lets sync points interleave. Fixed by
+  `cache::BeginSync`/`ClearDirty` (see `docs/design.md`, "Sync points").
 - `readdirplus_unlocked`: Readdirplus (and Readdir of a non-root
   directory) checked completeness, ran syscalls ("."'s refresh,
   `ParentOf`), then listed without checking again, so a name made unknown
-  in between was left out. Now `DirCacheFS::ListCached` takes the listing
+  in between was left out. `DirCacheFS::ListCached` now takes the listing
   right after the check, before any syscall. `MC_nolock.cfg` includes
-  readdirplus (the finding's configuration); now the known bug
-  `readdirplus_unlocked`.
-
-Open:
-
-| Finding | Expected | What happens |
-|---|---|---|
-| `rename_stale_source` (no kernel lock) | `CacheNeverWrong` | `Rename` resolves the source before phase 1 and phase 3 links the destination to it if it `Owns` the parent; `Owns` only sees overlaps from phase 1 on. A source answered from a probe that was not recorded (a concurrent rename was in flight) is stale once that rename ends; phase 3 records the old object under the new name. In the code `LinkDentry` then fails if the old object's row is gone, but not if it has another link |
+  readdirplus (the finding's configuration).
+- `rename_stale_source`: `Rename` resolved the source before phase 1 and
+  phase 3 linked the destination to it if it `Owns` the parent, but `Owns`
+  only sees overlaps from phase 1 on. A source answered from a probe that
+  was not recorded (a concurrent rename was in flight) was stale once that
+  rename ended, and phase 3 recorded the old object under the new name (in
+  the code, `LinkDentry` then failed if the old object's row was gone, but
+  not if it had another link). Now `cache::BeginRename` verifies, in phase
+  1's transaction, that no mutation of the inodes the rename names began or
+  ended since a snapshot taken before the resolve, or is in flight, and
+  `Rename` resolves again if one did (`R1` in the model). `MC_nolock.cfg`
+  includes rename (the finding's configuration).
 
 ## Reading a counterexample
 
@@ -373,7 +376,8 @@ model in the same change (AGENTS.md). In practice:
   constant that puts it back, and a `known_bugs/` variant whose test
   expects the counterexample.
 - Keep every action reachable: run TLC with `-coverage 1` and check that
-  no action reports 0. Today `RenameFailed` and `RenameFailed2` fire only
-  in `findings/rename_stale_source`, and `UnlinkFailed` only in
-  `MC_nolock.cfg`: under the kernel lock nothing can remove a name between
-  its resolve and the unlink or rename syscall.
+  no action reports 0. Today `RenameFailed`, `RenameFailed2` and
+  `UnlinkFailed` fire only in `MC_nolock.cfg`: under the kernel lock
+  nothing can remove a name between its resolve and the unlink or rename
+  syscall. `MC_nolock.cfg` also reaches both branches of a rename's failed
+  phase-1 verification (the retry and the `EAGAIN`).

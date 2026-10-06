@@ -13,10 +13,14 @@
 (* It needs two mutations of D in flight at once, which the kernel's lock *)
 (* on D prevents today, so this configuration runs without it            *)
 (* (KernelDirLock = FALSE: the coroutine case the audit rated [CORO]),   *)
-(* and without the request kinds whose own lock-free gaps                 *)
-(* (formal/findings/) TLC would otherwise report first. Expected:         *)
-(* TriState is violated (a name read absent while its create is in        *)
-(* flight).                                                               *)
+(* and without the request kinds whose own lock-free gaps (since fixed:   *)
+(* known_bugs/readdirplus_unlocked, rename_stale_source) TLC would then   *)
+(* have reported first. Only TriState is checked: the same lost update    *)
+(* also breaks CacheNeverWrong at the same depth (a create of a name that *)
+(* exists, whose row the restore turns into "absent"), and which of the   *)
+(* two TLC's parallel workers report first varies from run to run.        *)
+(* Expected: TriState is violated (a name read absent while its create is *)
+(* in flight).                                                            *)
 (***************************************************************************)
 EXTENDS MC
 =============================================================================
