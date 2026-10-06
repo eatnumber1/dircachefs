@@ -857,6 +857,11 @@ TEST_F(MetadataCacheTest, TouchAtimeFollowsTheMountsRule) {
   const struct timespec later = {.tv_sec = soon.tv_sec + 3600};
   EXPECT_THAT(TouchAtime(ctx_, r.id, later), IsOkAndHolds(false));
   EXPECT_EQ(atime(), soon.tv_sec);
+  // Review L7: deciding to keep it takes no write transaction (every read
+  // OPEN asks): it works on a read-only connection.
+  ASSERT_THAT(db_.Exec("PRAGMA query_only = 1"), IsOk());
+  EXPECT_THAT(TouchAtime(ctx_, r.id, later), IsOkAndHolds(false));
+  ASSERT_THAT(db_.Exec("PRAGMA query_only = 0"), IsOk());
   // A day old: updated.
   const struct timespec next_day = {.tv_sec = soon.tv_sec + 86400};
   EXPECT_THAT(TouchAtime(ctx_, r.id, next_day), IsOkAndHolds(true));

@@ -350,8 +350,9 @@ absl::Status UpdateAttr(Context &ctx, InodeId id, const struct statx &stx);
 // cached atime is not after mtime or ctime, or is a day old or more).
 // Only current attributes are touched (unknown ones are re-read anyway,
 // atime included); a fill's guard is not needed, since nothing is read
-// from the backing filesystem and the decision and the write are one
-// transaction. Returns whether it changed the atime. NotFound if no row.
+// from the backing filesystem. It reads first and takes a write
+// transaction only when the atime changes (a compare-and-set on the atime
+// it read). Returns whether it changed the atime. NotFound if no row.
 absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
                                 const struct timespec &now);
 
