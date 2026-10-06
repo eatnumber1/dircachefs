@@ -353,7 +353,10 @@ served.
 
 - **Identity.** A stub's nodeid is at or above 2^63 (`cache::IsStub`: a
   negative `InodeId`), a range `inodes.id` never reaches. Its inode
-  number (`st_ino`, `d_ino`) is its nodeid. From Phase 14 on, nodeids are
+  number (`st_ino`, `d_ino`) is its nodeid, so a 32-bit program built
+  without large-file support gets `EOVERFLOW` listing a directory that
+  holds a stub (the compat `getdents` cannot return it; review L8). From
+  Phase 14 on, nodeids are
   backing inode numbers, so dcfs already refuses any backing object whose
   inode number is in that range (`RefuseReservedIno` in `backing.cc`, at
   every probe, `ParentOf` and the source root: ERROR and `ENOTSUP`; ext4's
@@ -365,7 +368,10 @@ served.
   generation (as for inode rows: a nodeid handed out again after its stub
   went never comes back with an old generation), and the boundary root's
   attributes from the probe's `statx`. A name refused again keeps its stub
-  (nodeid and generation) and refreshes the attributes. Triggers delete
+  (nodeid and generation) and refreshes the attributes. They are therefore
+  as of the last probe (review L4): the other filesystem's root changes
+  through its own mount without dcfs hearing of it, and the stub keeps the
+  old values, across restarts, until the directory is listed again. Triggers delete
   the stub whenever its dentry stops being refused (a mutation's phase 1,
   an out-of-band relisting, recovery) or goes, and the foreign key with
   its parent, so a `stubs` row exists exactly while its dentry is
@@ -1539,9 +1545,15 @@ lists the user-visible ones.
   noatime: never; read from the mount's `statvfs` flags at startup), with
   no backing I/O. The backing filesystem stamps the read's time, so the two
   can differ by the time between the open and the read, and an open that
-  never reads still moves the cached atime. Directories' atimes (which
-  dcfs's own listing of a directory moves on the backing filesystem) are
-  not predicted. `st_blocks` may lag behind delayed allocation until the
+  never reads still moves the cached atime (the private open the kernel
+  makes for `lsattr`/`chattr` too). atime is therefore exempt from the
+  rule that the cache mirrors the backing filesystem (review L6): a file's
+  `FS_NOATIME_FL` (`chattr +A`) is ignored, and the prediction is not a
+  mutation (no phase 1, no dirty row), so after a power loss a predicted
+  atime can survive while the backing filesystem lost its own update;
+  recovery does not revisit it. Directories' atimes (which dcfs's own
+  listing of a directory moves on the backing filesystem) are not
+  predicted. `st_blocks` may lag behind delayed allocation until the
   next attribute refresh.
 - **A residual "ahead" window depends on the backing filesystem.** The
   dirty-set argument assumes `syncfs` really makes earlier changes durable

@@ -547,9 +547,13 @@ recovery protocol, concurrency, and the test strategy.
   a btrfs subvolume (pre-existing or freshly created), the first time dcfs
   lists the directory it lives in: logged as an error and shown as an
   empty **stub directory** with the boundary root's mode, owner and times
-  and an inode number at or above 2^63 (a range no backing inode number
-  may use; dcfs refuses, with `ENOTSUP`, any object whose backing inode
-  number is in it). The stub can be looked up, `stat`ed and used as a
+  as of the last time dcfs probed the name (they are not refreshed when the
+  other filesystem's root changes through its own mount, until the
+  directory is listed again) and an inode number at or above 2^63 (a range
+  no backing inode number may use; dcfs refuses, with `ENOTSUP`, any object
+  whose backing inode number is in it). A 32-bit program built without
+  large-file support cannot list a directory that holds a stub: the
+  kernel's compat `getdents` returns `EOVERFLOW` for its inode number. The stub can be looked up, `stat`ed and used as a
   mount point; anything inside it (listing it, looking up, creating,
   opening) fails with `ENOTSUP`, logged once per stub, removing it with
   `EBUSY` (as a mount point), and renaming it
@@ -623,7 +627,10 @@ recovery protocol, concurrency, and the test strategy.
   or is a day old; strictatime: always; noatime: never), without touching
   the disk. The backing filesystem stamps the read itself, so the two can
   differ by the moment between the open and the read, and an open that
-  reads nothing still moves dcfs's. Directories' access times are not
+  reads nothing still moves dcfs's (so does the private open behind
+  `lsattr` and `chattr`). A file's own `noatime` flag (`chattr +A`) is not
+  taken into account, and after a power loss dcfs may keep an access time
+  the backing filesystem lost. Directories' access times are not
   maintained. `st_blocks` can lag behind delayed allocation until the
   file's attributes are next refreshed.
 - **Reflinks fail with `EOPNOTSUPP`; most ioctls with `ENOTTY`.** The
