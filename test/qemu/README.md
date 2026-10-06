@@ -314,6 +314,24 @@ guest doesn't have configured; `guest/init` sets
 `ASAN_OPTIONS=detect_leaks=0` (only if unset) so that limitation doesn't
 fail every ASan build.
 
+The tools a guest test uses (QEMU, `mke2fs`/`debugfs`, `mkfs.xfs`,
+`mkfs.btrfs` and the libraries they are built with) do not follow the
+sanitizer flags: `//third_party/qemu:qemu_system_x86_64` and the other
+tool labels are `exec_file` targets (`third_party/exec_file.bzl`) that
+depend on the real `configure_make` build with `cfg = "exec"`. The exec
+configuration takes neither `--copt` nor `--linkopt`, so the same QEMU,
+e2fsprogs, xfsprogs, btrfs-progs, util-linux and urcu builds serve plain,
+`--config=asan` and `--config=ubsan`, and the Debian image's exec `mke2fs`
+is the same build as the tests' `mke2fs` (e2fsprogs and libarchive are
+built once, not twice). They are built with the exec toolchain's `-c opt`
+flags (`-O2 -DNDEBUG`; QEMU's overlay adds `-UNDEBUG`, which its headers
+require). `//tools:tool_identity_test` (part of `bazel test //...`) checks
+that the files a test sees under the `--config=asan` flags are the plain
+configuration's files; `//tools:tool_keys_test` (manual, it starts its own
+Bazel server; `bazel test //tools:tool_keys_test`) compares `bazel aquery`
+action keys of every tool, and of the kernel, busybox, bc, Debian image
+and TLC jar as a control, under plain, asan and ubsan.
+
 ## e2e tests (`qemu_test`)
 
 `boot_test` and `readonly_test` (`test/qemu/BUILD.bazel`) are the bigger,

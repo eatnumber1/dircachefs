@@ -4,6 +4,7 @@ exports_files([
 ])
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//third_party:exec_file.bzl", "exec_file")
 load(":pkgconfig_shim.bzl", "pkgconfig_shim")
 
 # See pkgconfig_shim.bzl's docstring: QEMU's meson.build looks up glib
@@ -50,9 +51,14 @@ pkgconfig_shim(
 # the normal way to pull one specific output group out as a plain,
 # single-file target other rules (like :smoke_test, below) can depend on.
 filegroup(
-    name = "qemu_system_x86_64",
+    name = "_qemu_system_x86_64_raw",
     srcs = ["@qemu//:qemu"],
     output_group = "qemu-system-x86_64",
+)
+
+exec_file(
+    name = "qemu_system_x86_64",
+    src = ":_qemu_system_x86_64_raw",
     visibility = ["//visibility:public"],
 )
 

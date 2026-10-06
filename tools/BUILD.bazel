@@ -1,4 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(":sanitizer_variant.bzl", "sanitizer_variant")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 
 # File-handle test client (name_to_handle_at / open_by_handle_at /
@@ -51,4 +54,103 @@ cc_binary(
 sh_binary(
     name = "smoke_readonly",
     srcs = ["smoke_readonly.sh"],
+)
+
+# Phase 6.3 follow-up: the pinned test tools (QEMU, the mkfs tools and their
+# libraries) are built once for every configuration, not once per
+# --config=asan/ubsan. Compares `bazel aquery` action keys under plain, asan
+# and ubsan; the kernel, busybox, bc, Debian image and TLC jar are the
+# positive control. See the test's docstring.
+#
+# Host-side, and it starts its own Bazel server (the workspace's is busy
+# running this test): `local` and `no-sandbox` so it can find the workspace
+# and its repository cache, `manual` because the extra server loads every
+# external repository again (minutes, and a JVM beside the workspace's), so
+# `bazel test //...` leaves it out; run it by name, as CI's full job does.
+py_test(
+    name = "tool_keys_test",
+    size = "large",
+    srcs = ["tool_keys_test.py"],
+    args = [
+        "--workspace-file=$(location //:MODULE.bazel)",
+        "--bazel=/usr/bin/bazel",
+    ],
+    data = ["//:MODULE.bazel"],
+    env_inherit = ["HOME"],
+    main = "tool_keys_test.py",
+    tags = [
+        "local",
+        "manual",
+        "no-sandbox",
+    ],
+    timeout = "eternal",
+)
+
+# The same property seen from the files themselves: the tools a test uses
+# under `--config=asan` (the flags of .bazelrc's build:asan, applied through
+# a transition so one invocation holds both) are the very files the plain
+# configuration uses, not a second build of them.
+sanitizer_variant(
+    name = "qemu_asan",
+    testonly = 1,
+    srcs = ["//third_party/qemu:qemu_system_x86_64"],
+)
+
+sanitizer_variant(
+    name = "mke2fs_asan",
+    testonly = 1,
+    srcs = ["//third_party/e2fsprogs:mke2fs"],
+)
+
+sanitizer_variant(
+    name = "debugfs_asan",
+    testonly = 1,
+    srcs = ["//third_party/e2fsprogs:debugfs"],
+)
+
+sanitizer_variant(
+    name = "mkfs_xfs_asan",
+    testonly = 1,
+    srcs = ["//third_party/xfsprogs:mkfs_xfs"],
+)
+
+sanitizer_variant(
+    name = "mkfs_btrfs_asan",
+    testonly = 1,
+    srcs = ["//third_party/btrfs-progs:mkfs_btrfs"],
+)
+
+sh_test(
+    name = "tool_identity_test",
+    size = "small",
+    srcs = ["tool_identity_test.sh"],
+    args = [
+        "qemu",
+        "$(location //third_party/qemu:qemu_system_x86_64)",
+        "$(location :qemu_asan)",
+        "mke2fs",
+        "$(location //third_party/e2fsprogs:mke2fs)",
+        "$(location :mke2fs_asan)",
+        "debugfs",
+        "$(location //third_party/e2fsprogs:debugfs)",
+        "$(location :debugfs_asan)",
+        "mkfs_xfs",
+        "$(location //third_party/xfsprogs:mkfs_xfs)",
+        "$(location :mkfs_xfs_asan)",
+        "mkfs_btrfs",
+        "$(location //third_party/btrfs-progs:mkfs_btrfs)",
+        "$(location :mkfs_btrfs_asan)",
+    ],
+    data = [
+        ":qemu_asan",
+        "//third_party/qemu:qemu_system_x86_64",
+        ":mke2fs_asan",
+        "//third_party/e2fsprogs:mke2fs",
+        ":debugfs_asan",
+        "//third_party/e2fsprogs:debugfs",
+        ":mkfs_xfs_asan",
+        "//third_party/xfsprogs:mkfs_xfs",
+        ":mkfs_btrfs_asan",
+        "//third_party/btrfs-progs:mkfs_btrfs",
+    ],
 )

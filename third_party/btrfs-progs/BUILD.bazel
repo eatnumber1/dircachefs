@@ -1,4 +1,5 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//third_party:exec_file.bzl", "exec_file")
 
 # Pinned, Bazel-built, static mkfs.btrfs and btrfs (docs/plan/review-fixes.md,
 # R3/L5). See README.md; BUILD.btrfs_progs is the configure_make overlay
@@ -8,16 +9,26 @@ exports_files(["BUILD.btrfs_progs"])
 # See third_party/e2fsprogs/BUILD.bazel for why these are filegroups over an
 # output group.
 filegroup(
-    name = "mkfs_btrfs",
+    name = "_mkfs_btrfs_raw",
     srcs = ["@btrfs_progs_src//:btrfs_progs"],
     output_group = "mkfs.btrfs",
+)
+
+exec_file(
+    name = "mkfs_btrfs",
+    src = ":_mkfs_btrfs_raw",
     visibility = ["//visibility:public"],
 )
 
 filegroup(
-    name = "btrfs",
+    name = "_btrfs_raw",
     srcs = ["@btrfs_progs_src//:btrfs_progs"],
     output_group = "btrfs",
+)
+
+exec_file(
+    name = "btrfs",
+    src = ":_btrfs_raw",
     visibility = ["//visibility:public"],
 )
 

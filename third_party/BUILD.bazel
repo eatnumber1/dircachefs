@@ -1,1 +1,1 @@
-exports_files(["BUILD.bazel"])
+exports_files(["BUILD.bazel", "exec_file.bzl"])

@@ -1,4 +1,5 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//third_party:exec_file.bzl", "exec_file")
 
 # Phase 4, part c follow-up (docs/plan/phases/04-pinned-host-tools.md): a
 # pinned, Bazel-built, static mke2fs and debugfs, replacing the host's
@@ -22,16 +23,26 @@ exports_files([
 # plain, single-file target other rules (third_party/debian:rootfs,
 # third_party/debian:ownership_test) can depend on directly.
 filegroup(
-    name = "mke2fs",
+    name = "_mke2fs_raw",
     srcs = ["@e2fsprogs_src//:e2fsprogs"],
     output_group = "mke2fs",
+)
+
+exec_file(
+    name = "mke2fs",
+    src = ":_mke2fs_raw",
     visibility = ["//visibility:public"],
 )
 
 filegroup(
-    name = "debugfs",
+    name = "_debugfs_raw",
     srcs = ["@e2fsprogs_src//:e2fsprogs"],
     output_group = "debugfs",
+)
+
+exec_file(
+    name = "debugfs",
+    src = ":_debugfs_raw",
     visibility = ["//visibility:public"],
 )
 

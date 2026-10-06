@@ -153,6 +153,14 @@ QEMU_CONFIGURE_OPTIONS = [
     # runtimes.
     "--extra-cflags=-fno-sanitize=address,undefined",
     "--extra-ldflags=-fno-sanitize=address,undefined",
+
+    # Phase 6.3 follow-up: the tool is built in the exec configuration (see
+    # //third_party:exec_file.bzl), whose toolchain flags are `-c opt`'s,
+    # `-O2 -DNDEBUG`; the fastbuild flags it used before had no NDEBUG.
+    # QEMU's include/qemu/osdep.h refuses to compile with it ("building
+    # with NDEBUG is not supported": its asserts are not optional), and
+    # these extra flags come after the toolchain's, so -UNDEBUG wins.
+    "--extra-cflags=-UNDEBUG",
 ]
 
 configure_make(

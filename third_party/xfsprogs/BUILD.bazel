@@ -1,4 +1,5 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//third_party:exec_file.bzl", "exec_file")
 
 # Pinned, Bazel-built, static mkfs.xfs and xfs_io (docs/plan/review-fixes.md,
 # R3/L5). See README.md; BUILD.xfsprogs is the configure_make overlay placed
@@ -9,16 +10,26 @@ exports_files(["BUILD.xfsprogs"])
 # out_binaries each get an OutputGroupInfo group (see
 # third_party/e2fsprogs/BUILD.bazel).
 filegroup(
-    name = "mkfs_xfs",
+    name = "_mkfs_xfs_raw",
     srcs = ["@xfsprogs_src//:xfsprogs"],
     output_group = "mkfs.xfs",
+)
+
+exec_file(
+    name = "mkfs_xfs",
+    src = ":_mkfs_xfs_raw",
     visibility = ["//visibility:public"],
 )
 
 filegroup(
-    name = "xfs_io",
+    name = "_xfs_io_raw",
     srcs = ["@xfsprogs_src//:xfsprogs"],
     output_group = "xfs_io",
+)
+
+exec_file(
+    name = "xfs_io",
+    src = ":_xfs_io_raw",
     visibility = ["//visibility:public"],
 )
 
