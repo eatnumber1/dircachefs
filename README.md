@@ -389,43 +389,64 @@ found. Run it again after adding a tool or a test.
 ### Dependency vulnerability scanning (OSV-Scanner)
 
 The `osv` CI job (every push to `main`, every pull request, and weekly on
-Mondays, so new advisories reach unchanged pins) generates a CycloneDX SBOM
-of everything pinned (`tools/sbom/`: `MODULE.bazel`'s modules and
-repositories, the Debian packages of `third_party/debian/debs.lock`,
-Bazelisk) and scans it with the pinned `osv-scanner-action`
-(`tools/sbom/README.md`). It fails on any finding that `osv-scanner.toml` does
+Mondays, so new advisories reach unchanged pins) scans with the pinned
+`osv-scanner-action` (`tools/sbom/README.md`). Only what the dcfs binaries
+**ship** gates the job; everything else is scanned for information.
+
+**Gated: the shipped dependencies**, the external repositories of the Bazel
+dependency graph of `//dcfs:main` and `//dcfs:main_static`
+(`//dcfs:linked_deps`; `bazel test //tools/sbom:sbom_test` fails when a
+linked repository has no entry in `tools/sbom/pins.json` or a test-only one
+is linked): abseil-cpp, gloop (a dependency of abseil-cpp), SQLite, libfuse,
+liburing and numactl (libfuse's), each pinned with the upstream git commit of
+its release tag (`sbom.py verify-commits`, run by the job, checks the tag
+still points at that commit). The compiler toolchain joins this list when
+Phase 7 pins it. The job fails on any finding that `osv-scanner.toml` does
 not ignore; an ignore needs a reason and an expiry date, and an expired or
 unexplained ignore fails the job. A self-check step scans a deliberately old
-zlib (`tools/sbom/testdata/`) and fails the job if the scanner reports
-nothing. Run it with `bazel run //third_party/act -- -j osv`;
-`bazel test //tools/sbom:sbom_test` checks that no pin lacks an SBOM entry.
+libfuse (3.2.0, CVE-2018-10906; `tools/sbom/testdata/`) with the very same
+invocation and fails the job if the scanner reports nothing.
 
-What OSV can and cannot match (observed with osv-scanner v2.6.0, 2026-10-06):
+**Informational, never gating: the test-only dependencies** (the Debian
+test image, kernel, QEMU, busybox, e2fsprogs, xfsprogs, btrfs-progs,
+util-linux, urcu, inih, bc, dtc, pjdfstest, googletest, google_benchmark,
+TLA+ tools, act, Bazelisk, the Bazel rule sets). Their SBOM
+(`testonly.cdx.json`) is scanned and the findings are printed in the job log,
+but the step cannot fail the job.
 
-- **Matched: the Debian packages** (`pkg:deb/debian/<source>@<version>`,
-  matched against Debian's security tracker).
-- **Not matched, carried in the SBOM so the list is complete.** The scanner
-  accepts `pkg:github/...` and `pkg:generic/...` purls but OSV has no
-  package ecosystem for them (`pkg:github/madler/zlib@v1.2.11` and
-  `pkg:generic/zlib@1.2.11` report nothing, while the same zlib as
-  `pkg:deb/...` reports twelve findings). These pins therefore get no
-  vulnerability coverage from this job:
-  - purl type `generic`: the Linux kernel (`linux` 7.2.9; OSV's `Linux`
-    ecosystem exists but `api.osv.dev` returned nothing for a `Kernel`/`Linux`
-    query of old, vulnerable versions, and no purl type reaches it), QEMU,
-    dtc, busybox, GNU bc, e2fsprogs, util-linux, xfsprogs, btrfs-progs,
-    userspace-rcu, sqlite3 (BCR module), glib (BCR module);
-  - purl type `github`: abseil-cpp, googletest, google_benchmark, libfuse,
-    zlib (BCR module), libarchive, inih, pjdfstest, TLA+ tools, act, Bazelisk,
-    and the Bazel rule sets (`rules_cc`, `rules_shell`, `bazel_skylib`,
-    `rules_foreign_cc`, `rules_distroless`, `rules_java`, `rules_python`; build
-    rules, never part of an artifact).
-  Types also tried and not recognised or not matched by the scanner:
-  `conan`, `rpm`, `alpine`, `vcpkg`, `bazel`, `linux`, `kernel`. The
-  alternative (the `GIT`-range advisories OSV has for most C projects) needs
-  a commit hash per pin, which the tarball pins do not carry.
-  Several of these programs are also in the Debian rootfs, whose copies are
-  scanned, but that says nothing about the pinned upstream version.
+Run it with `bazel run //third_party/act -- -j osv`.
+
+How OSV matches each shipped project (observed with osv-scanner v2.6.0 and
+`api.osv.dev`, 2026-10-06). OSV has no package ecosystem for C/C++
+libraries: a `pkg:github/...` or `pkg:generic/...` purl in an SBOM, even with
+a commit as its version, reports nothing. What OSV does hold for these
+projects are advisories with `GIT` ranges (a repository URL and the commits
+that introduced and fixed the bug), matched against a commit. osv-scanner
+takes a commit only from a git root, so the job writes one detached git root
+(`.git/HEAD` naming the commit, nothing else) per shipped project and scans
+those with `scan source --include-git-root`. Proof that this path works:
+libfuse 3.2.0 (commit `cfdca8c6...`) is reported as CVE-2018-10906, and
+libfuse 3.18.2, the pinned one, is not. What OSV holds per project:
+
+| Shipped project | Matched by | OSV advisories for it today |
+|---|---|---|
+| libfuse 3.18.2 | git commit | yes (e.g. CVE-2018-10906, fixed long before 3.18.2) |
+| SQLite 3.53.4 | git commit of the `sqlite/sqlite` GitHub mirror | yes, many (19 for 3.30.0); OSV's ranges name the `github.com/sqlite/sqlite` mirror of the fossil repository |
+| abseil-cpp 20260817.0 | git commit | one (CVE-2025-0838). It is matched for commits on the main branch's history only: the release tags of older LTS branches (`20240116.0`, `20240722.0`) were *not* reported although CVE-2025-0838 affects them, so a vulnerable LTS pin would be missed; the pinned release is a newer one |
+| gloop 20260708.rc1 | git commit | none (the repository is new; the scan matches when an advisory appears) |
+| liburing 2.14 | git commit | none for `axboe/liburing` |
+| numactl 2.0.19 | git commit | none for `numactl/numactl` |
+
+Not covered, by construction: a vulnerability OSV does not hold with a `GIT`
+range (the scan reports what OSV holds; nothing is checked against NVD or
+CPEs here).
+
+The test-only dependencies are matched as before: the **Debian packages**
+(`pkg:deb/debian/<source>@<version>`) against Debian's security tracker; the
+other test-only pins (kernel, QEMU, busybox, ...) carry `pkg:github` or
+`pkg:generic` purls that OSV does not match, and are listed in the SBOM for
+completeness only. Several of those programs are also in the Debian rootfs,
+whose copies are scanned.
 
 ## Design overview
 

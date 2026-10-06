@@ -1,10 +1,18 @@
-"""SBOM and OSV ignore checks for dcfs (plan step 5.3).
+"""SBOMs and OSV ignore checks for dcfs (plan step 5.3).
 
-OSV-Scanner does not read MODULE.bazel.lock, so the pins are written out as a
-CycloneDX SBOM. Pins come from:
+OSV-Scanner does not read MODULE.bazel.lock, so the pins are written out as
+two CycloneDX SBOMs: shipped.cdx.json (what the dcfs binaries link; gates the
+`osv` CI job) and testonly.cdx.json (everything else; informational).
 
-  * MODULE.bazel: every bazel_dep, and every http_archive / http_file /
-    qemu_repo (plus QEMU's separately pinned dtc);
+The shipped set is the external repositories of the Bazel dependency graph
+of //dcfs:main and //dcfs:main_static (//dcfs:linked_deps); each is a Bazel
+module whose resolved version (MODULE.bazel.lock) and upstream git commit
+are recorded in pins.json. OSV matches C/C++ projects by git commit only, and
+the CLI takes commits only from git roots, so `git-roots` writes a detached
+git root per shipped component (README.md). Test-only pins come from:
+
+  * MODULE.bazel: every bazel_dep not shipped, and every http_archive /
+    http_file / qemu_repo (plus QEMU's separately pinned dtc);
   * third_party/debian/debs.lock: the Debian packages of the NFS rootfs
     (pkg:deb/debian/<source package>@<version>, the form OSV's Debian
     ecosystem matches; the binary-to-source table is debian_sources.tsv);
@@ -18,7 +26,9 @@ import argparse
 import ast
 import datetime
 import json
+import os
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -110,9 +120,159 @@ def parse_bazelisk(prepare_sh):
     return m.group(1)
 
 
-def build(module_text, debs_lock, sources_tsv, prepare_sh, pins):
-    """Returns the CycloneDX document (a dict)."""
+def parse_lock_versions(lock_text):
+    """Returns {module: version} of the modules Bazel selected.
+
+    MODULE.bazel.lock lists a MODULE.bazel file for every version considered
+    but a source.json only for the selected one.
+    """
+    out = {}
+    for url in json.loads(lock_text).get("registryFileHashes", {}):
+        m = re.search(r"/modules/([^/]+)/([^/]+)/source\.json$", url)
+        if m:
+            if m.group(1) in out:
+                raise SbomError(f"{m.group(1)}: two selected versions in MODULE.bazel.lock")
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def graph_repos(graph_text):
+    """Returns the external repositories (canonical names) of a label list."""
+    repos = set()
+    for line in graph_text.splitlines():
+        m = re.match(r"@@([^/@]+)//", line.strip())
+        if m:
+            repos.add(m.group(1))
+    return repos
+
+
+def check_graph(graph_text, pins):
+    """Every linked repository is shipped or build-only, and vice versa.
+
+    Returns the linked shipped module names.
+    """
+    shipped = {m + "+": m for m in pins["shipped"]}
+    build_only = set(pins["build_only"])
+    repos = graph_repos(graph_text)
+    if not repos:
+        raise SbomError("the dependency graph (//dcfs:linked_deps) lists no external repository")
+    for r in sorted(repos):
+        if r not in shipped and r not in build_only:
+            raise SbomError(
+                f"{r} is linked into the dcfs binaries but has no entry under"
+                " 'shipped' (or 'build_only') in tools/sbom/pins.json")
+    for r in sorted(set(shipped) | build_only):
+        if r not in repos:
+            raise SbomError(
+                f"{r.rstrip('+')} is listed in tools/sbom/pins.json but"
+                " //dcfs:linked_deps does not link it: remove the entry")
+    return sorted(shipped[r] for r in repos if r in shipped)
+
+
+def shipped_component(module, pin, version, direct):
+    if pin["version"] != version:
+        raise SbomError(
+            f"{module}: pins.json says version {pin['version']} but"
+            f" MODULE.bazel.lock resolved {version}: update the tag and commit"
+            " in tools/sbom/pins.json")
+    if not re.fullmatch(r"[0-9a-f]{40}", pin["commit"]):
+        raise SbomError(f"{module}: commit {pin['commit']!r} is not a 40-digit git hash")
+    m = re.fullmatch(r"https://github\.com/([^/]+)/([^/]+)", pin["repo"])
+    if not m:
+        raise SbomError(f"{module}: repo {pin['repo']!r} is not a github.com URL")
+    if pin["osv"] not in ("records", "no-records"):
+        raise SbomError(f"{module}: osv must be 'records' or 'no-records'")
+    return {
+        "type": "library",
+        "name": pin.get("name", module),
+        "version": version,
+        "purl": f"pkg:github/{m.group(1)}/{m.group(2)}@{pin['commit']}",
+        "externalReferences": [{"type": "vcs", "url": pin["repo"]}],
+        "properties": [
+            {"name": "dcfs:pin", "value": ("bazel_dep:" if direct else "module:") + module},
+            {"name": "dcfs:kind", "value": "code"},
+            {"name": "dcfs:scope", "value": "shipped"},
+            {"name": "dcfs:commit", "value": pin["commit"]},
+            {"name": "dcfs:tag", "value": pin["tag"]},
+            {"name": "dcfs:osv-matchable", "value": "true"},
+            {"name": "dcfs:osv-records", "value": pin["osv"]},
+            {"name": "dcfs:purl-type", "value": "github"},
+        ],
+    }
+
+
+def write_git_roots(sbom, out_dir):
+    """Writes one detached git root per component with a dcfs:commit.
+
+    osv-scanner (scan source --include-git-root) reads HEAD of each git root
+    it finds and asks OSV which advisories' git ranges contain that commit;
+    no object database is needed. Returns the root directories.
+    """
+    roots = []
+    for c in sbom["components"]:
+        props = {p["name"]: p["value"] for p in c.get("properties", [])}
+        commit = props.get("dcfs:commit")
+        if not commit or not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise SbomError(f"{c['name']}: no dcfs:commit to write a git root for")
+        git = os.path.join(out_dir, c["name"], ".git")
+        os.makedirs(os.path.join(git, "objects"), exist_ok=True)
+        os.makedirs(os.path.join(git, "refs"), exist_ok=True)
+        with open(os.path.join(git, "HEAD"), "w", encoding="utf-8") as f:
+            f.write(commit + "\n")
+        url = c["externalReferences"][0]["url"]
+        with open(os.path.join(git, "config"), "w", encoding="utf-8") as f:
+            f.write("[core]\n\trepositoryformatversion = 0\n\tbare = false\n"
+                    f'[remote "origin"]\n\turl = {url}\n')
+        roots.append(os.path.join(out_dir, c["name"]))
+    return roots
+
+
+def _git_ls_remote(repo, patterns):
+    return subprocess.run(["git", "ls-remote", repo] + patterns, check=True,
+                          capture_output=True, text=True).stdout
+
+
+def verify_commits(shipped_pins, ls_remote=_git_ls_remote):
+    """Checks every pinned (tag, commit) against the upstream repository.
+
+    Needs the network, so it is not part of the Bazel test: the osv CI job
+    runs it. Annotated tags are peeled (the ^{} line is the commit).
+    """
+    problems = []
+    for module, pin in sorted(shipped_pins.items()):
+        tag = pin["tag"]
+        out = ls_remote(pin["repo"], [f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"])
+        refs = {}
+        for line in (out or "").splitlines():
+            sha, _, ref = line.partition("\t")
+            refs[ref] = sha
+        got = refs.get(f"refs/tags/{tag}^{{}}") or refs.get(f"refs/tags/{tag}")
+        if got is None:
+            problems.append(f"{module}: tag {tag} not found in {pin['repo']}")
+        elif got != pin["commit"]:
+            problems.append(f"{module}: tag {tag} moved: upstream {got}, pins.json {pin['commit']}")
+    return problems
+
+
+def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
+          prepare_sh, pins):
+    """Returns {"shipped": CycloneDX doc, "testonly": CycloneDX doc}."""
     deps, repos = parse_module(module_text)
+    # Without the graph (the osv CI job has no Bazel build) every shipped
+    # pin is used; //tools/sbom:sbom_test has already checked the pins
+    # against the graph.
+    linked = (check_graph(graph_text, pins) if graph_text is not None
+              else sorted(pins["shipped"]))
+    versions = parse_lock_versions(lock_text)
+    shipped = []
+    for module in linked:
+        if module in pins["bazel_dep"]:
+            raise SbomError(
+                f"{module} is shipped: remove it from 'bazel_dep' in tools/sbom/pins.json")
+        if module not in versions:
+            raise SbomError(f"{module}: not selected in MODULE.bazel.lock")
+        shipped.append(shipped_component(module, pins["shipped"][module],
+                                         versions[module], module in deps))
     comps = []
 
     def add(name, version, purl, pin, kind, osv):
@@ -130,6 +290,8 @@ def build(module_text, debs_lock, sources_tsv, prepare_sh, pins):
         })
 
     for name, version in sorted(deps.items()):
+        if name in pins["shipped"]:
+            continue
         pin = pins["bazel_dep"].get(name)
         if pin is None:
             raise SbomError(f"bazel_dep {name}: no entry in tools/sbom/pins.json")
@@ -184,15 +346,25 @@ def build(module_text, debs_lock, sources_tsv, prepare_sh, pins):
         seen.add(key)
         unique.append(c)
     return {
+        "shipped": _doc("dcfs-shipped", shipped),
+        "testonly": _doc("dcfs-testonly", unique),
+    }
+
+
+def _doc(name, components):
+    return {
         "bomFormat": "CycloneDX",
         "specVersion": "1.5",
         "version": 1,
-        "metadata": {"component": {"type": "application", "name": "dcfs-pins"}},
-        "components": unique,
+        "metadata": {"component": {"type": "application", "name": name}},
+        "components": components,
     }
 
 
 def pins_covered(sbom):
+    """The pins an SBOM covers; takes one document or build()'s pair."""
+    if "shipped" in sbom:
+        return pins_covered(sbom["shipped"]) | pins_covered(sbom["testonly"])
     return {p["value"] for c in sbom["components"] for p in c["properties"]
             if p["name"] == "dcfs:pin"}
 
@@ -221,31 +393,51 @@ def check_ignores(toml_text, today):
 def main(argv):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    g = sub.add_parser("generate")
+    g = sub.add_parser("generate", help="write shipped.cdx.json and testonly.cdx.json")
     g.add_argument("--module", default="MODULE.bazel")
+    g.add_argument("--lock", default="MODULE.bazel.lock")
+    g.add_argument("--graph", default=None,
+                   help="check the shipped pins against //dcfs:linked_deps"
+                   " (bazel build //dcfs:linked_deps; bazel-bin/dcfs/linked_deps)")
     g.add_argument("--debs-lock", default="third_party/debian/debs.lock")
     g.add_argument("--debian-sources", default="tools/sbom/debian_sources.tsv")
     g.add_argument("--prepare-sh", default=".github/ci/prepare.sh")
     g.add_argument("--pins", default="tools/sbom/pins.json")
-    g.add_argument("--out", required=True)
+    g.add_argument("--out-dir", required=True)
+    r = sub.add_parser("git-roots", help="write a detached git root per SBOM component")
+    r.add_argument("--sbom", required=True)
+    r.add_argument("--out-dir", required=True)
+    v = sub.add_parser("verify-commits", help="check pinned tags against upstream (network)")
+    v.add_argument("--pins", default="tools/sbom/pins.json")
     c = sub.add_parser("check-ignores")
     c.add_argument("--config", default="osv-scanner.toml")
     c.add_argument("--today", default=None, help="YYYY-MM-DD (default: today, UTC)")
     a = ap.parse_args(argv)
+    read = lambda p: open(p, encoding="utf-8").read()
     try:
         if a.cmd == "generate":
-            read = lambda p: open(p, encoding="utf-8").read()
-            doc = build(read(a.module), read(a.debs_lock), read(a.debian_sources),
-                        read(a.prepare_sh), json.loads(read(a.pins)))
-            with open(a.out, "w", encoding="utf-8") as f:
-                json.dump(doc, f, indent=2, sort_keys=True)
-                f.write("\n")
-            deb = sum(c["purl"].startswith("pkg:deb/") for c in doc["components"])
-            print(f"SBOM {a.out}: {len(doc['components'])} entries, {deb} matchable by OSV")
+            docs = build(read(a.module), read(a.lock),
+                         read(a.graph) if a.graph else None, read(a.debs_lock),
+                         read(a.debian_sources), read(a.prepare_sh), json.loads(read(a.pins)))
+            os.makedirs(a.out_dir, exist_ok=True)
+            for kind in ("shipped", "testonly"):
+                path = os.path.join(a.out_dir, kind + ".cdx.json")
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(docs[kind], f, indent=2, sort_keys=True)
+                    f.write("\n")
+                print(f"SBOM {path}: {len(docs[kind]['components'])} entries")
+        elif a.cmd == "git-roots":
+            roots = write_git_roots(json.loads(read(a.sbom)), a.out_dir)
+            print(f"{len(roots)} git roots under {a.out_dir}")
+        elif a.cmd == "verify-commits":
+            problems = verify_commits(json.loads(read(a.pins))["shipped"])
+            for p in problems:
+                print(f"pins.json: {p}", file=sys.stderr)
+            return 1 if problems else 0
         else:
             today = (datetime.date.fromisoformat(a.today) if a.today
                      else datetime.datetime.now(datetime.timezone.utc).date())
-            problems = check_ignores(open(a.config, encoding="utf-8").read(), today)
+            problems = check_ignores(read(a.config), today)
             for p in problems:
                 print(f"osv-scanner.toml: {p}", file=sys.stderr)
             return 1 if problems else 0

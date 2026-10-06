@@ -730,3 +730,23 @@ cc_binary(
     visibility = ["//test/qemu:__pkg__"],
     deps = MAIN_DEPS,
 )
+
+# Every target the shipped binaries (the dynamic :main and the static
+# :main_static) depend on, one label per line: //tools/sbom:sbom_test checks
+# that every external repository in it has an entry in the shipped SBOM
+# (tools/sbom/README.md), so a new linked dependency cannot slip past the
+# vulnerability scan.
+genquery(
+    name = "linked_deps",
+    expression = "deps(//dcfs:main) + deps(//dcfs:main_static)",
+    opts = [
+        "--output=label",
+        "--noimplicit_deps",
+        "--consistent_labels",
+    ],
+    scope = [
+        ":main",
+        ":main_static",
+    ],
+    visibility = ["//tools/sbom:__pkg__"],
+)

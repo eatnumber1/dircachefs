@@ -1,9 +1,19 @@
 {
-  "_comment": "Maps every pin (a bazel_dep or a repository declared in MODULE.bazel) to the package URL its SBOM entry uses. 'purl' is the purl without version; 'version' says where the version comes from for repositories ('strip_prefix', 'dtc_strip_prefix', or 'url:<regex>' with one group). 'kind' is 'code' (shipped in or used to build what the tests run), 'build-rules' (Bazel rules, never in an artifact) or 'tool'. OSV matches only purl types with an OSV ecosystem (deb here); every other entry is carried so the SBOM is complete and is listed in README.md as unmatched. tools/sbom/sbom_test.py fails when a pin has no entry here.",
+  "_comment": "Maps every pin to the package URL its SBOM entry uses. 'shipped' lists the Bazel modules linked into the dcfs binaries (the external repositories of the dependency graph of //dcfs:main and //dcfs:main_static, which //tools/sbom:sbom_test checks against //dcfs:linked_deps): 'version' is the resolved BCR module version (checked against MODULE.bazel.lock), 'repo' the upstream git repository, 'tag' and 'commit' the upstream release tag and the git commit it points at (the commit is what OSV matches: `sbom.py verify-commits` checks the pair against the upstream tags), 'osv' whether OSV holds advisories with git ranges for that repository ('records') or none today ('no-records'; the scan still runs and will match when one appears). 'build_only' lists external repositories in that graph that contribute no code to the binaries (build rules, platform constraints, Bazel's own tools), with the reason. Everything else is test-only (informational scan): 'bazel_dep' and 'repository' map each pin in MODULE.bazel to its purl ('purl' without version; 'version' says where a repository's version comes from: 'strip_prefix', 'dtc_strip_prefix', or 'url:<regex>' with one group; 'kind' is 'code' (used to build or run what the tests run), 'build-rules' or 'tool'). OSV matches only purl types with an OSV ecosystem (deb here); every other test-only entry is carried so the SBOM is complete. tools/sbom/sbom_test.py fails when a pin has no entry here.",
+  "shipped": {
+    "abseil-cpp": {"version": "20260817.0", "repo": "https://github.com/abseil/abseil-cpp", "tag": "20260817.0", "commit": "2065f4ded0558c6f89fee67c8e5228feb4eb960e", "osv": "records"},
+    "gloop": {"version": "20260708.rc1", "repo": "https://github.com/abseil/gloop", "tag": "20260708.rc1", "commit": "c7c43eea388b9ec2c79daf41517d1b07df95d0df", "osv": "no-records"},
+    "libfuse": {"version": "3.18.2", "repo": "https://github.com/libfuse/libfuse", "tag": "fuse-3.18.2", "commit": "033844748010a3b8265bf1c90b9ae8ffe4cd9ca7", "osv": "records"},
+    "liburing": {"version": "2.14", "repo": "https://github.com/axboe/liburing", "tag": "liburing-2.14", "commit": "e3d35ea59d3ba09075ed4d7751e4bb9049cce64a", "osv": "no-records"},
+    "numactl": {"version": "2.0.19.bcr.1", "repo": "https://github.com/numactl/numactl", "tag": "v2.0.19", "commit": "3bc85e37d5a30da6790cb7e8bb488bb8f679170f", "osv": "no-records"},
+    "sqlite3": {"name": "sqlite", "version": "3.53.4", "repo": "https://github.com/sqlite/sqlite", "tag": "version-3.53.4", "commit": "b09c88c14082339b66c7b7158d609a771e64ca69", "osv": "records"}
+  },
+  "build_only": {
+    "bazel_tools": "Bazel's own tool repository: toolchain configuration labels, no code in the binaries",
+    "platforms": "platform and constraint definitions: build configuration only",
+    "rules_cc+": "C++ build rules (link_extra_lib is an empty library by default): no code in the binaries"
+  },
   "bazel_dep": {
-    "abseil-cpp": {"purl": "pkg:github/abseil/abseil-cpp", "kind": "code"},
-    "sqlite3": {"purl": "pkg:generic/sqlite", "kind": "code"},
-    "libfuse": {"purl": "pkg:github/libfuse/libfuse", "kind": "code"},
     "googletest": {"purl": "pkg:github/google/googletest", "kind": "code"},
     "google_benchmark": {"purl": "pkg:github/google/benchmark", "kind": "code"},
     "glib": {"purl": "pkg:generic/glib", "kind": "code"},

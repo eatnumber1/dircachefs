@@ -2,7 +2,8 @@ load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
-# SBOM of every pin, for OSV-Scanner (plan step 5.3; README.md here).
+# SBOMs of the pins, for OSV-Scanner (plan step 5.3; README.md here): the
+# shipped one gates, the test-only one is informational.
 py_library(
     name = "sbom_lib",
     srcs = ["sbom.py"],
@@ -17,14 +18,19 @@ py_binary(
 
 # Fails when a pin (bazel_dep, http_archive/http_file/qemu_repo in
 # MODULE.bazel, a .deb in third_party/debian/debs.lock, Bazelisk) has no
-# SBOM entry, and checks the ignore-expiry rule. Host-side like
-# //third_party/debian:version_check_test: it needs neither root nor a kernel.
+# SBOM entry, when an external repository of the dependency graph of the
+# binaries (//dcfs:linked_deps) has no shipped entry (or a test-only one is
+# linked), and checks the ignore-expiry rule and the pinned commits' format.
+# Host-side like //third_party/debian:version_check_test: it needs neither
+# root nor a kernel.
 py_test(
     name = "sbom_test",
     size = "small",
     srcs = ["sbom_test.py"],
     args = [
         "module=$(location //:MODULE.bazel)",
+        "lock=$(location //:MODULE.bazel.lock)",
+        "graph=$(location //dcfs:linked_deps)",
         "debs=$(location //third_party/debian:debs.lock)",
         "sources=$(location debian_sources.tsv)",
         "prepare=$(location //:.github/ci/prepare.sh)",
@@ -38,7 +44,9 @@ py_test(
         "testdata/seeded_vulnerable.cdx.json",
         "//:.github/ci/prepare.sh",
         "//:MODULE.bazel",
+        "//:MODULE.bazel.lock",
         "//:osv-scanner.toml",
+        "//dcfs:linked_deps",
         "//third_party/debian:debs.lock",
     ],
     deps = [":sbom_lib"],

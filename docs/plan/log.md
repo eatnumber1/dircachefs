@@ -555,3 +555,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Debian-image findings are test-only and do not matter. "Needs russ: OSV policy" resolved. 5.3c
   dispatched to lane-4: SBOM split into shipped (gating) and test-only (informational), commit-based
   matching for the shipped pins, verified with a known-vulnerable commit.
+- 5.3c (lane-4, step-5.3c-scope): OSV scope is shipped dependencies. Shipped = external repos in deps(//dcfs:main,
+  //dcfs:main_static): abseil-cpp 20260817.0, gloop 20260708.rc1, libfuse 3.18.2, liburing 2.14, numactl
+  2.0.19.bcr.1, sqlite3 3.53.4 (build-only: rules_cc, platforms, bazel_tools). SBOM split into shipped (gates)
+  and test-only (informational). OSV matches C/C++ by git commit only and only through osv-scanner git roots
+  (purl with commit reports nothing); libfuse 3.2.0 -> CVE-2018-10906 proves it. act -j osv: shipped scan
+  clean, test-only 101 findings printed but not gating. OSV holds records for libfuse, sqlite, abseil
+  (main-branch history only; LTS tags unmatched); none for gloop, liburing, numactl.

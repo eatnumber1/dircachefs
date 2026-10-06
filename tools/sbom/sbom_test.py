@@ -17,13 +17,22 @@ def read(name):
         return f.read()
 
 
-def build(module=None, debs=None, sources=None, prepare=None, pins=None):
+def build(module=None, lock=None, graph=None, debs=None, sources=None,
+          prepare=None, pins=None):
+    """Returns sbom.build's {"shipped": doc, "testonly": doc}."""
     return sbom.build(
         read("module") if module is None else module,
+        read("lock") if lock is None else lock,
+        read("graph") if graph is None else graph,
         read("debs") if debs is None else debs,
         read("sources") if sources is None else sources,
         read("prepare") if prepare is None else prepare,
         json.loads(read("pins")) if pins is None else pins)
+
+
+def components(docs=None):
+    docs = docs or build()
+    return docs["shipped"]["components"] + docs["testonly"]["components"]
 
 
 class RealPins(unittest.TestCase):
@@ -49,7 +58,7 @@ class RealPins(unittest.TestCase):
                 self.assertIn(f"deb:{binary}", covered)
 
     def test_debian_purls_are_osv_shaped(self):
-        comps = build()["components"]
+        comps = build()["testonly"]["components"]
         debs = [c for c in comps if c["purl"].startswith("pkg:deb/debian/")]
         self.assertGreater(len(debs), 90)
         for c in debs:
@@ -61,7 +70,7 @@ class RealPins(unittest.TestCase):
         self.assertFalse(any(p.startswith("pkg:deb/debian/libc6@") for p in purls))
 
     def test_versions_come_from_the_pins(self):
-        purls = {c["purl"] for c in build()["components"]}
+        purls = {c["purl"] for c in components()}
         self.assertIn("pkg:generic/linux@7.2.9", purls)
         self.assertIn("pkg:generic/qemu@11.1.2", purls)
         self.assertIn("pkg:github/nektos/act@0.2.89", purls)
@@ -69,7 +78,7 @@ class RealPins(unittest.TestCase):
         self.assertIn("pkg:github/benhoyt/inih@r62", purls)
 
     def test_every_entry_says_whether_osv_can_match_it(self):
-        for c in build()["components"]:
+        for c in build()["testonly"]["components"]:
             props = {p["name"]: p["value"] for p in c["properties"] if p["name"] != "dcfs:pin"}
             self.assertIn(props["dcfs:osv-matchable"], ("true", "false"))
             self.assertEqual(props["dcfs:osv-matchable"] == "true",
@@ -111,11 +120,184 @@ class MissingEntries(unittest.TestCase):
             build(pins=pins)
 
 
+class Shipped(unittest.TestCase):
+    """The shipped SBOM is what the Bazel graph of the binaries links."""
+
+    def pins(self):
+        return json.loads(read("pins"))
+
+    def test_graph_lists_the_linked_repositories(self):
+        # Guards the graph file itself: a genquery that went empty would make
+        # every check below pass vacuously.
+        repos = sbom.graph_repos(read("graph"))
+        for r in ("abseil-cpp+", "sqlite3+", "libfuse+", "liburing+", "numactl+"):
+            self.assertIn(r, repos)
+
+    def test_every_external_repo_in_the_graph_is_accounted_for(self):
+        pins = self.pins()
+        shipped = {k + "+" for k in pins["shipped"]}
+        build_only = set(pins["build_only"])
+        for r in sbom.graph_repos(read("graph")):
+            self.assertIn(r, shipped | build_only,
+                          f"{r} is linked into the binaries but has no entry")
+
+    def test_shipped_sbom_has_every_shipped_repo_and_nothing_else(self):
+        docs = build()
+        names = {c["name"] for c in docs["shipped"]["components"]}
+        expected = {r.rstrip("+") for r in sbom.graph_repos(read("graph"))
+                    if r not in self.pins()["build_only"]}
+        self.assertEqual({self.pins()["shipped"][m].get("name", m)
+                          for m in expected}, names)
+
+    def test_no_test_only_repo_is_in_the_shipped_sbom(self):
+        docs = build()
+        shipped_pins = sbom.pins_covered(docs["shipped"])
+        testonly_pins = sbom.pins_covered(docs["testonly"])
+        self.assertEqual(shipped_pins & testonly_pins, set())
+        # The things only tests use must not be linked.
+        graph = sbom.graph_repos(read("graph"))
+        for r in ("googletest+", "google_benchmark+", "glib+", "zlib+", "qemu",
+                  "linux_source", "busybox", "pjdfstest", "tla2tools", "act",
+                  "rules_python+", "rules_foreign_cc+"):
+            self.assertNotIn(r, graph)
+        for c in docs["shipped"]["components"]:
+            self.assertNotIn("deb:", "".join(
+                p["value"] for p in c["properties"] if p["name"] == "dcfs:pin"))
+            self.assertIn(("dcfs:scope", "shipped"),
+                          {(p["name"], p["value"]) for p in c["properties"]})
+
+    def test_without_a_graph_every_shipped_pin_is_used(self):
+        docs = sbom.build(read("module"), read("lock"), None, read("debs"),
+                          read("sources"), read("prepare"), self.pins())
+        self.assertEqual(docs["shipped"], build()["shipped"])
+
+    def test_a_new_linked_repo_without_an_entry_fails(self):
+        graph = read("graph") + "@@brand_new_lib+//lib:thing\n"
+        with self.assertRaisesRegex(sbom.SbomError, "brand_new_lib"):
+            build(graph=graph)
+
+    def test_a_shipped_entry_nothing_links_fails(self):
+        graph = "\n".join(l for l in read("graph").splitlines()
+                          if not l.startswith("@@numactl+"))
+        with self.assertRaisesRegex(sbom.SbomError, "numactl"):
+            build(graph=graph)
+
+    def test_shipped_entries_have_a_commit_and_a_github_purl(self):
+        for c in build()["shipped"]["components"]:
+            props = {p["name"]: p["value"] for p in c["properties"]}
+            self.assertRegex(props["dcfs:commit"], r"^[0-9a-f]{40}$")
+            self.assertRegex(c["purl"], r"^pkg:github/[^/@]+/[^/@]+@" + props["dcfs:commit"] + "$")
+            self.assertTrue(props["dcfs:tag"])
+            self.assertEqual(c["externalReferences"][0]["url"].split("/")[2], "github.com")
+
+    def test_pins_version_must_equal_the_resolved_module_version(self):
+        # The lock file records only the selected version's source.json.
+        lock = read("lock").replace("/libfuse/3.18.2/source.json",
+                                    "/libfuse/3.18.3/source.json")
+        with self.assertRaisesRegex(sbom.SbomError, "libfuse.*3.18.2.*3.18.3"):
+            build(lock=lock)
+
+    def test_module_missing_from_the_lock_fails(self):
+        lock = json.loads(read("lock"))
+        lock["registryFileHashes"] = {
+            k: v for k, v in lock["registryFileHashes"].items()
+            if "/liburing/2.14/source.json" not in k}
+        with self.assertRaisesRegex(sbom.SbomError, "liburing"):
+            build(lock=json.dumps(lock))
+
+    def test_a_bad_commit_fails(self):
+        pins = self.pins()
+        pins["shipped"]["libfuse"]["commit"] = "fuse-3.18.2"
+        with self.assertRaisesRegex(sbom.SbomError, "libfuse.*commit"):
+            build(pins=pins)
+
+    def test_a_module_in_both_scopes_fails(self):
+        pins = self.pins()
+        pins["bazel_dep"]["libfuse"] = {"purl": "pkg:github/libfuse/libfuse", "kind": "code"}
+        with self.assertRaisesRegex(sbom.SbomError, "libfuse"):
+            build(pins=pins)
+
+    def test_shipped_pins_record_osv_coverage(self):
+        for m, p in self.pins()["shipped"].items():
+            self.assertIn(p["osv"], ("records", "no-records"), m)
+
+
+class GitRoots(unittest.TestCase):
+    """osv-scanner matches commits only through a git root (README.md)."""
+
+    def test_writes_one_detached_git_root_per_component(self):
+        import tempfile
+        doc = build()["shipped"]
+        with tempfile.TemporaryDirectory() as out:
+            roots = sbom.write_git_roots(doc, out)
+            self.assertEqual(len(roots), len(doc["components"]))
+            for c in doc["components"]:
+                commit = [p["value"] for p in c["properties"]
+                          if p["name"] == "dcfs:commit"][0]
+                git = os.path.join(out, c["name"], ".git")
+                self.assertEqual(open(os.path.join(git, "HEAD")).read(), commit + "\n")
+                self.assertTrue(os.path.isdir(os.path.join(git, "objects")))
+                self.assertTrue(os.path.isdir(os.path.join(git, "refs")))
+                self.assertIn(c["externalReferences"][0]["url"],
+                              open(os.path.join(git, "config")).read())
+
+    def test_a_component_without_a_commit_fails(self):
+        import tempfile
+        doc = {"components": [{"name": "x", "properties": []}]}
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaisesRegex(sbom.SbomError, "x"):
+                sbom.write_git_roots(doc, out)
+
+
 class Fixture(unittest.TestCase):
-    def test_seeded_fixture_is_a_deliberately_old_zlib(self):
+    def test_seeded_fixture_is_a_deliberately_old_libfuse(self):
+        # libfuse 3.2.0 predates the fix of CVE-2018-10906, which OSV holds
+        # as a GIT range: the scanner self-check in ci.yml must find it.
         doc = json.loads(read("fixture"))
-        self.assertEqual([c["purl"] for c in doc["components"]],
-                         ["pkg:deb/debian/zlib@1.2.11?distro=bookworm"])
+        self.assertEqual([(c["name"], c["purl"]) for c in doc["components"]],
+                         [("libfuse", "pkg:github/libfuse/libfuse@cfdca8c6a0f901f409d0a66dd158bd6c8b470bb6")])
+        props = {p["name"]: p["value"] for p in doc["components"][0]["properties"]}
+        self.assertEqual(props["dcfs:commit"], "cfdca8c6a0f901f409d0a66dd158bd6c8b470bb6")
+
+
+class VerifyCommits(unittest.TestCase):
+    def fake(self, refs):
+        return lambda repo, patterns: refs
+
+    def pins(self):
+        return json.loads(read("pins"))["shipped"]
+
+    def test_agreeing_commits_pass(self):
+        pins = self.pins()
+        def ls(repo, patterns):
+            for p in pins.values():
+                if p["repo"] == repo:
+                    return f"{p['commit']}\trefs/tags/{p['tag']}\n"
+        self.assertEqual(sbom.verify_commits(pins, ls), [])
+
+    def test_annotated_tags_are_peeled(self):
+        pins = self.pins()
+        def ls(repo, patterns):
+            for p in pins.values():
+                if p["repo"] == repo:
+                    return (f"{'0' * 40}\trefs/tags/{p['tag']}\n"
+                            f"{p['commit']}\trefs/tags/{p['tag']}^{{}}\n")
+        self.assertEqual(sbom.verify_commits(pins, ls), [])
+
+    def test_a_moved_tag_is_reported(self):
+        pins = self.pins()
+        def ls(repo, patterns):
+            for p in pins.values():
+                if p["repo"] == repo:
+                    return f"{'1' * 40}\trefs/tags/{p['tag']}\n"
+        problems = sbom.verify_commits(pins, ls)
+        self.assertEqual(len(problems), len(pins))
+        self.assertIn("moved", problems[0])
+
+    def test_a_missing_tag_is_reported(self):
+        problems = sbom.verify_commits(self.pins(), lambda r, p: "")
+        self.assertEqual(len(problems), len(self.pins()))
+        self.assertIn("not found", problems[0])
 
 
 TODAY = datetime.date(2026, 10, 6)

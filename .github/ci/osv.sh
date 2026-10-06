@@ -1,12 +1,21 @@
 #!/bin/bash
 # Prepares the `osv` job (plan step 5.3): checks osv-scanner.toml's ignores
-# (every one needs a reason and an expiry date that has not passed) and
-# writes the SBOM of every pin (tools/sbom/README.md) to osv/dcfs.cdx.json,
-# which the scanner action then scans. Uses the runner's python3 (3.11 or
-# newer: tomllib); //tools/sbom:sbom_test runs the same code under Bazel's
-# hermetic interpreter.
+# (every one needs a reason and an expiry date that has not passed), checks
+# the pinned upstream tags against their commits (network), and writes to osv/:
+#   shipped.cdx.json   the SBOM of what the dcfs binaries link (gates)
+#   testonly.cdx.json  the SBOM of everything else (informational)
+#   shipped-git/       one detached git root per shipped component, the form
+#                      in which osv-scanner takes commits (tools/sbom/README.md)
+#   seeded-git/        the same for the known-vulnerable self-check fixture
+# Uses the runner's python3 (3.11 or newer: tomllib); //tools/sbom:sbom_test
+# runs the same code under Bazel's hermetic interpreter.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 python3 tools/sbom/sbom.py check-ignores --config osv-scanner.toml
+python3 tools/sbom/sbom.py verify-commits
+rm -rf osv
 mkdir -p osv
-python3 tools/sbom/sbom.py generate --out osv/dcfs.cdx.json
+python3 tools/sbom/sbom.py generate --out-dir osv
+python3 tools/sbom/sbom.py git-roots --sbom osv/shipped.cdx.json --out-dir osv/shipped-git
+python3 tools/sbom/sbom.py git-roots --sbom tools/sbom/testdata/seeded_vulnerable.cdx.json \
+  --out-dir osv/seeded-git

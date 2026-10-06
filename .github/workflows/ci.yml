@@ -178,18 +178,22 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
   osv:
-    # Dependency vulnerability scan (plan step 5.3): the SBOM of every pin
-    # (tools/sbom/, README.md "Dependency vulnerability scanning") against
-    # OSV. The scanner version is the one of the action pinned below (its
-    # image, ghcr.io/google/osv-scanner-action:v2.6.0). Fails on any finding
+    # Dependency vulnerability scan (plan step 5.3; tools/sbom/README.md and
+    # README.md "Dependency vulnerability scanning"). Only what the dcfs
+    # binaries link (the shipped SBOM) gates: each shipped project is scanned
+    # by its upstream git commit, the form OSV matches C/C++ projects by.
+    # The test-only pins (Debian image, kernel, QEMU, busybox, ...) are
+    # scanned informationally and never fail the job. The scanner version is
+    # the one of the action pinned below (its image,
+    # ghcr.io/google/osv-scanner-action:v2.6.0). Fails on any shipped finding
     # that osv-scanner.toml does not ignore, and on an expired ignore.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check ignores, generate the SBOM
+      - name: Check ignores and pinned commits, generate the SBOMs and git roots
         run: ./.github/ci/osv.sh
-      - name: Scanner self-check (a deliberately old zlib must be found)
+      - name: Scanner self-check (libfuse 3.2.0 must be found, CVE-2018-10906)
         id: seeded
         continue-on-error: true
         uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
@@ -197,20 +201,41 @@ jobs:
           scan-args: |-
             scan
             source
-            -L
-            tools/sbom/testdata/seeded_vulnerable.cdx.json
+            --include-git-root
+            --no-ignore
+            -r
+            osv/seeded-git
       - name: The self-check found something
         run: |
           test "${{ steps.seeded.outcome }}" = failure || {
-            echo "scanner reported nothing for a known-vulnerable zlib 1.2.11: the scan is vacuous" >&2
+            echo "scanner reported nothing for libfuse 3.2.0 (a known-vulnerable commit): the shipped scan is vacuous" >&2
             exit 1
           }
-      - name: Scan the pins
+      - name: Scan the shipped dependencies (gates)
         uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
         with:
           scan-args: |-
             scan
             source
             --config=osv-scanner.toml
+            --include-git-root
+            --no-ignore
+            -r
+            osv/shipped-git
+      - name: Scan the test-only dependencies (informational, never fails)
+        id: testonly
+        continue-on-error: true
+        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+        with:
+          scan-args: |-
+            scan
+            source
             -L
-            osv/dcfs.cdx.json
+            osv/testonly.cdx.json
+      - name: Test-only scan result
+        run: |
+          if test "${{ steps.testonly.outcome }}" = success; then
+            echo "test-only dependencies: no findings (informational)"
+          else
+            echo "test-only dependencies: findings listed in the step above (informational, not gating)"
+          fi
