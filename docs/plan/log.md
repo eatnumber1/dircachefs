@@ -440,3 +440,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   hooks. Unit+formal 29/29, ASan 18/18, presubmit 101/101. Coroutine note recorded in design.md.
   Bazel servers were OOM-killed twice this evening when swap filled; agents now pass --jobs=2.
   Next in lane-1: 12.2 trace validation.
+- R1+R2 merged (a4bfc3c..11b3b25; dcfs-implementer, ~10 h incl. OOM-killed servers): startup check
+  that the database grants no more access than the backing root (cases 6-12 failing first; a
+  database owned by the backing root's owner is now accepted); M2 one-word sanitizer cancel (ubsan
+  smoke test failed first on libubsan); kernel config block (POSIX_TIMERS, KCMP, AIO, SYSVIPC,
+  ADVISE_SYSCALLS, MEMBARRIER, RSEQ, BUG, XFS_QUOTA, LOCALVERSION=-dcfs-stock; nfs_test
+  timers-timeout-fires failed first); build_kernel.sh re-execs under sh -eu; boot.sh requires the
+  -dcfs-stock stamp; busybox survival check + feature smoke test + FEATURE_MOUNT_FLAGS; %u/%g in six
+  scripts (no mismatches exposed); drop_caches_quiesced before every zero-reads baseline, failed
+  thaw fails the test; reproducible kernel/busybox/rootfs stamps; clock shim removed. Full suite
+  116/117: idle_short_test_xfs FAILS (writes +4 over 60 s idle), pre-existing (also fails on the
+  base commit): investigate now (lane-4) since idle writes defeat spin-down.

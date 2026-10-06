@@ -4,7 +4,7 @@ Fix steps for the 2026-10-06 review of waves 1-2. Finding ids (M1, L3,
 ...) refer to that report, which has the evidence and suggested fixes.
 Every item is test first. Commit subjects are prefixed `R1:`, `R2:`, `R3:`.
 
-## R1 — Cache database permissions check (replaces M1)
+## R1 — Cache database permissions check (replaces M1) — done 2026-10-06
 
 **Decision (russ, 2026-10-06):** the hostile-cache-directory hardening
 (M1: trusting the directory, link counts, `SQLITE_OPEN_NOFOLLOW`,
@@ -25,7 +25,7 @@ Every item is test first. Commit subjects are prefixed `R1:`, `R2:`, `R3:`.
 - L6: README and docs/design.md describe the Phase 2 behavior and this
   check.
 
-## R2 — Build and test infrastructure
+## R2 — Build and test infrastructure — done 2026-10-06 (nfs.sh baselines not quiesced: testutil is not in the chroot; QEMU version marker lives in the README pending a BUILD arg)
 
 - M2: QEMU's `--extra-cflags`/`--extra-ldflags` cancel flags as one word
   (`-fno-sanitize=address,undefined`), plus a check (no libubsan/libasan
@@ -58,7 +58,7 @@ Every item is test first. Commit subjects are prefixed `R1:`, `R2:`, `R3:`.
   stale comments, `repository_ctx.delete`, the QEMU version compared with
   the pin.
 
-## R3 — Pinned mkfs tools (reopens Phase 4)
+## R3 — Pinned mkfs tools (reopens Phase 4) — done 2026-10-06
 
 - L5: scratch filesystems are made by host `mkfs.ext4/xfs/btrfs` with
   host defaults. Use the Bazel-built `mke2fs` with an explicit config, and
