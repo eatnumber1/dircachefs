@@ -581,7 +581,7 @@ WAL. The phase 1 of each mutation kind is one named function:
 | Mutation | Phase 1 (`cache::Begin*`) | Dirty |
 |---|---|---|
 | create, mknod, mkdir, symlink | the new name unknown; parent's attributes unknown | parent (the new child is added in phase 3) |
-| unlink, rmdir | the name unknown; parent's and child's attributes unknown | parent, child |
+| unlink, rmdir | the name unknown; parent's and child's attributes unknown (after verifying the resolved child, see below) | parent, child |
 | rename (incl. `RENAME_NOREPLACE`, `RENAME_EXCHANGE`) | both names unknown; attributes of both parents, the source and any replaced target unknown | all of those |
 | link | the new name unknown; new parent's and source's attributes unknown | new parent, source |
 | setattr, writable open, fallback write, fallocate | attributes unknown; side-effect xattrs unknown | the inode |
@@ -859,7 +859,14 @@ custom VFS. The code already follows the rules that make that safe:
   resolving, and `cache::BeginRename` checks, in phase 1's transaction,
   that no mutation of the parents, the source or the destination began or
   ended since or is in flight; if one did, it writes nothing and `Rename`
-  resolves again (a few times, then `EAGAIN`).
+  resolves again (a few times, then `EAGAIN`). `RemoveChild` (unlink,
+  rmdir) does the same for the parent and the child it resolved
+  (`cache::BeginRemove`): its `unlinkat` removes whatever the name holds
+  when it runs, while phase 1 marks the resolved child's attributes
+  unknown and phase 3 settles that child's row. Without the check, a
+  rename onto the name between the resolve and phase 1 would make the
+  unlink remove a different object, whose link count would stay cached as
+  current, and settle the wrong row.
 - **Credential switches never span a suspension point.** `AsCaller` wraps
   exactly one synchronous syscall, and the switch is per thread (see
   [Caller credentials](#caller-credentials)).
@@ -868,8 +875,13 @@ custom VFS. The code already follows the rules that make that safe:
 
 Places still marked `TODO(coroutines)`: `ListCached` retries a
 population a few times when a concurrent mutation keeps it from being
-recorded, and `Rename` retries its resolve when phase 1 finds it stale,
-where a coroutine would wait for the mutation instead. The
+recorded, and `Rename` and `RemoveChild` retry their resolve when phase 1
+finds it stale, where a coroutine would wait for the mutation instead.
+These loops are not real retries yet: when the resolve is a cache hit,
+nothing suspends between the attempts, so an overlapping mutation still in
+flight makes every attempt fail at once (`EAGAIN`, which `rename(2)` and
+`unlink(2)` callers do not expect). The coroutine design needs "wait until
+the overlapping mutation ends" there. The
 status macros embed `return` and will need `co_return` variants.
 
 ## Writable opens and file contents

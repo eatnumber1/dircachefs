@@ -426,11 +426,12 @@ cc_library(
 )
 
 # DirCacheFS through forged FUSE requests on a real libfuse session (no
-# kernel, no mount), with link-time --wraps of open_by_handle_at and syncfs
-# that let a test run another request, or begin a mutation, at a backing
-# syscall of the request (or sync point) under test: the interleavings
-# coroutines will produce (see dir_cache_fs_test.cc). A target of its own,
-# so the wraps affect nothing else.
+# kernel, no mount), with link-time --wraps of name_to_handle_at,
+# open_by_handle_at and syncfs that let a test run another request, or
+# begin a mutation, at a backing syscall of the request (or sync point)
+# under test: the interleavings coroutines will produce (see
+# dir_cache_fs_test.cc). A target of its own, so the wraps affect nothing
+# else.
 qemu_cc_test(
     name = "dir_cache_fs_test",
     size = "small",
@@ -438,6 +439,7 @@ qemu_cc_test(
     srcs = ["dir_cache_fs_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
     linkopts = [
+        "-Wl,--wrap=name_to_handle_at",
         "-Wl,--wrap=open_by_handle_at",
         "-Wl,--wrap=syncfs",
     ],

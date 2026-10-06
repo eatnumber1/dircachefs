@@ -14,7 +14,10 @@
 // BUILD.bazel), the syscall behind every backing::OpenNode: a test arms a
 // hook, and the next open_by_handle_at call runs it first, before the real
 // syscall. It wraps syncfs the same way, so that a test can run requests
-// while a sync point (backing::SyncBacking) waits on its syncfs. A hook
+// while a sync point (backing::SyncBacking) waits on its syncfs, and
+// name_to_handle_at, which a probe (ProbeObject) calls after it has opened
+// the name it probes: a hook there runs after a resolve read its answer
+// and before it is recorded (or acted on). A hook
 // can process a whole second request, or begin a mutation and leave it in
 // flight, while the request under test is "suspended" there. The rule that
 // transactions never span a syscall is what makes this safe: the hook never
@@ -86,6 +89,12 @@ std::function<void()> &OpenByHandleHook() {
   return *hook;
 }
 
+// The hook the next name_to_handle_at runs (once).
+std::function<void()> &NameToHandleHook() {
+  static auto *hook = new std::function<void()>();
+  return *hook;
+}
+
 // The hook the next syncfs runs (once).
 std::function<void()> &SyncfsHook() {
   static auto *hook = new std::function<void()>();
@@ -103,6 +112,16 @@ int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
   std::function<void()> hook = std::exchange(dcfs::OpenByHandleHook(), {});
   if (hook) hook();
   return __real_open_by_handle_at(mount_fd, handle, flags);
+}
+int __real_name_to_handle_at(int dirfd, const char *pathname,
+                             struct file_handle *handle, int *mount_id,
+                             int flags);
+int __wrap_name_to_handle_at(int dirfd, const char *pathname,
+                             struct file_handle *handle, int *mount_id,
+                             int flags) {
+  std::function<void()> hook = std::exchange(dcfs::NameToHandleHook(), {});
+  if (hook) hook();
+  return __real_name_to_handle_at(dirfd, pathname, handle, mount_id, flags);
 }
 int __real_syncfs(int fd);
 int __wrap_syncfs(int fd) {
@@ -231,6 +250,7 @@ class DirCacheFSTest : public ::testing::Test {
 
   void TearDown() override {
     OpenByHandleHook() = {};
+    NameToHandleHook() = {};
     SyncfsHook() = {};
     if (se_ != nullptr) fuse_session_destroy(se_);
     current_ = nullptr;
@@ -484,7 +504,8 @@ TEST_F(DirCacheFSTest, ReaddirplusListsWhatWasCompleteWhenChecked) {
 
   std::optional<cache::Mutation> unlink;
   OpenByHandleHook() = [&] {
-    absl::StatusOr<cache::Mutation> m = cache::BeginRemove(ctx_, d, "x", x);
+    absl::StatusOr<cache::Mutation> m =
+        cache::BeginRemove(ctx_, d, "x", x, cache::BeginFill(ctx_));
     ASSERT_THAT(m, IsOk());
     unlink.emplace(*std::move(m));
   };
@@ -509,7 +530,8 @@ TEST_F(DirCacheFSTest, ReaddirListsWhatWasCompleteWhenChecked) {
 
   std::optional<cache::Mutation> unlink;
   OpenByHandleHook() = [&] {
-    absl::StatusOr<cache::Mutation> m = cache::BeginRemove(ctx_, d, "x", x);
+    absl::StatusOr<cache::Mutation> m =
+        cache::BeginRemove(ctx_, d, "x", x, cache::BeginFill(ctx_));
     ASSERT_THAT(m, IsOk());
     unlink.emplace(*std::move(m));
   };
@@ -528,7 +550,8 @@ TEST_F(DirCacheFSTest, ReaddirplusIsNotServedWhileAMutationIsInFlight) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId a, Id("a"));
   ASSERT_OK_AND_ASSIGN(cache::Mutation unlink,
-                       cache::BeginRemove(ctx_, kRootInode, "a", a));
+                       cache::BeginRemove(ctx_, kRootInode, "a", a,
+                                          cache::BeginFill(ctx_)));
   EXPECT_EQ(ErrnoOf(List(kRootInode, true).status()), EAGAIN);
   EXPECT_EQ(ErrnoOf(List(kRootInode, false).status()), EAGAIN);
   unlink.End();
@@ -748,6 +771,79 @@ TEST_F(DirCacheFSTest, WritableCreateWhosePhase1FailsIsUndone) {
   ASSERT_OK_AND_ASSIGN(InodeId id, Id("new"));
   EXPECT_FALSE(fs_->HasOpenFiles(id));
   EXPECT_FALSE(ctx_.open_for_write->contains(id));
+}
+
+// --- Unlink's stale resolve (review of R4, finding 2) --------------------
+//
+// RemoveChild resolves the child (which may take syscalls) before its
+// phase 1, and phase 1 marks the attributes of that child unknown, while
+// the unlinkat removes whatever the name holds when it runs. As for
+// Rename, phase 1 must verify that nothing it names changed since the
+// resolve began.
+//
+// The interleaving, in a directory d: "a" and "link_a" are hard links to
+// one file X, "b" and "link_b" to another, Y. An unlink of a resolves it
+// (its row is unknown), and right after the probe opened X (at
+// name_to_handle_at) a rename of b over a runs to completion; the probe's
+// answer cannot be recorded, but it answers X. Then the unlink's unlinkat
+// removes Y's link a. The old code had marked X unknown instead, so Y's
+// row stayed current with the link count from before (2), and the unlink
+// settled X rather than Y.
+TEST_F(DirCacheFSTest, UnlinkMarksWhatItRemovesUnknown) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  WriteFile(Path("d/a"));
+  ASSERT_EQ(::link(Path("d/a").c_str(), Path("d/link_a").c_str()), 0);
+  WriteFile(Path("d/b"));
+  ASSERT_EQ(::link(Path("d/b").c_str(), Path("d/link_b").c_str()), 0);
+  const uint64_t ino_x = InoOf(Path("d/a"));
+  const uint64_t ino_y = InoOf(Path("d/b"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_OK_AND_ASSIGN(InodeId x, Id("a", d));  // Populates d.
+  ASSERT_OK_AND_ASSIGN(InodeId y, Id("b", d));
+  ASSERT_THAT(cache::UnlinkDentry(ctx_, d, "a"), IsOk());
+  ASSERT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(true));
+
+  std::optional<Reply> concurrent;
+  NameToHandleHook() = [&] { concurrent = Rename(d, "b", d, "a"); };
+  Reply reply = Unlink(d, "a");
+  ASSERT_TRUE(concurrent.has_value()) << "the hook did not run";
+  EXPECT_EQ(concurrent->error, 0);
+  EXPECT_EQ(reply.error, 0);
+  // On the backing filesystem, Y's link a is what the unlink removed.
+  ASSERT_NE(::access(Path("d/a").c_str(), F_OK), 0);
+  ASSERT_NE(::access(Path("d/b").c_str(), F_OK), 0);
+  ASSERT_EQ(InoOf(Path("d/link_a")), ino_x);
+  ASSERT_EQ(InoOf(Path("d/link_b")), ino_y);
+
+  EXPECT_EQ(Cached(d, "a").first, LookupResult::kNegative);
+  // Each file's row is unknown or right: one link left each.
+  for (InodeId id : {x, y}) {
+    SCOPED_TRACE(id);
+    ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, id));
+    if (attr.valid) {
+      EXPECT_EQ(attr.st.st_nlink, 1u);
+    }
+  }
+}
+
+// The other side: while a mutation of the parent stays in flight, an
+// unlink's phase 1 cannot verify what it resolved; after a few attempts
+// it fails with EAGAIN (TODO(coroutines): wait instead), and nothing has
+// been removed.
+TEST_F(DirCacheFSTest, UnlinkIsRefusedWhileItsParentKeepsChanging) {
+  WriteFile(Path("a"));
+  Start();
+  ASSERT_THAT(Id("a"), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::Mutation other,
+                       cache::BeginCreate(ctx_, kRootInode, "x2"));
+  EXPECT_EQ(Unlink(kRootInode, "a").error, -EAGAIN);
+  EXPECT_EQ(::access(Path("a").c_str(), F_OK), 0);
+  EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::kFound);
+  other.End();
+  EXPECT_EQ(Unlink(kRootInode, "a").error, 0);
+  EXPECT_NE(::access(Path("a").c_str(), F_OK), 0);
+  EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::kNegative);
 }
 
 }  // namespace

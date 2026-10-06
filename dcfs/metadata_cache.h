@@ -480,8 +480,18 @@ absl::StatusOr<Mutation> BeginCreate(Context &ctx, InodeId parent,
                                      std::string_view name);
 // Unlink/Rmdir of (parent, name) -> child: marks `name` unknown, and both
 // attribute sets unknown. Dirty: parent, child.
+//
+// `resolved` is a snapshot (BeginFill) the caller took before resolving
+// `child`. The unlinkat removes whatever `name` holds when it runs, and
+// phase 1 marks `child` unknown (and phase 3 settles its row), which is
+// right only if `name` still holds `child`. So, as BeginRename does, this
+// first verifies in phase 1's transaction that no mutation of parent or
+// child began or ended since `resolved`, or is in flight (CanFill for
+// each); if one did, it writes nothing, begins no mutation, and fails with
+// kAborted: resolve again.
 absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent,
-                                     std::string_view name, InodeId child);
+                                     std::string_view name, InodeId child,
+                                     FillSnapshot resolved);
 // Rename (parent, name) -> src over (newparent, newname) -> dst (nullopt if
 // absent, or if it is src itself): marks both names unknown, and the
 // attributes of both parents, src and dst unknown. Dirty: parent,

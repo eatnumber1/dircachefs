@@ -127,9 +127,10 @@ vars == <<bCur, bOpts, dbCur, dbOpts, mode, seq, inflight, durableD,
 \* `esnap` a fill's FillSnapshot and D's epoch at that time (`snap`: also a
 \* sync point's BeginSync snapshot); `rd*` what a
 \* syscall read; `mseq` the seq of the mutation's phase 1 (Mutation::Owns);
-\* `src` a rename's resolved source, `rsnap` the FillSnapshot taken before
-\* it resolved its names; `attempts` how many times a readdir populated or
-\* a rename's phase 1 found its resolve stale; `was` the pre-phase-1
+\* `src` a rename's resolved source, `rsnap` the FillSnapshot a rename or
+\* unlink took before it resolved its names; `attempts` how many times a
+\* readdir populated or a rename's or unlink's phase 1 found its resolve
+\* stale; `was` the pre-phase-1
 \* completeness (BugRestoreComplete only). Fields are reset once used, so
 \* that slots doing the same thing are the same state.
 IdleProc == [pc |-> "idle", kind |-> None, n |-> None, m |-> None,
@@ -510,12 +511,29 @@ Fail(p, label, name, cont) ==
 
 \* After resolving the name: ENOENT, or phase 1 (cache::BeginRemove: the
 \* name and D's attributes unknown, D dirty), then the unlinkat syscall.
+\* As in R1, phase 1's transaction first verifies that no mutation of D
+\* began or ended since the snapshot taken before the resolve (`rsnap`),
+\* and none is in flight; if one did, nothing is written and the name is
+\* resolved again from a new snapshot, at most 3 times in all (then
+\* EAGAIN). In the code the check protects the resolved child's records
+\* (phase 1 marks them unknown, the unlinkat removes whatever the name
+\* holds); child records are not modelled, so here it only keeps the
+\* model's behaviors (retries, EAGAIN) those of the code.
 U1(p) ==
     /\ At(p, "U1")
-    /\ IF ps[p].res.k = "neg"
+    /\ LET r == ps[p] IN
+       IF r.res.k = "neg"
        THEN Done(p) /\ UnchangedDB /\ UnchangedGuards  \* ENOENT
-       ELSE /\ BeginMutation({ps[p].n}, TRUE)
-            /\ Syscall(p, InFlight(ps[p], "U_sys"))
+       ELSE IF inflight = 0 /\ seq <= r.rsnap
+       THEN /\ BeginMutation({r.n}, TRUE)
+            /\ Syscall(p, [InFlight(r, "U_sys") EXCEPT !.rsnap = 0,
+                                                       !.attempts = 0])
+       ELSE /\ UnchangedDB /\ UnchangedGuards
+            /\ IF r.attempts < 2
+               THEN Then(p, [r EXCEPT !.pc = "LK", !.lk = r.n, !.cont = "U1",
+                                      !.rsnap = seq, !.res = NoRes,
+                                      !.attempts = r.attempts + 1])
+               ELSE Done(p)  \* EAGAIN
     /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
 
 \* Phase 2: unlinkat(D, name): ENOENT if the name is gone.
@@ -692,8 +710,8 @@ Arrive(p) ==
        \/ /\ "unlink" \in Requests /\ LockFree(KernelDirLock)
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n \in Names :
-               LKFrom(p, NewReq("unlink", n, None, "LK", n, "U1",
-                                KernelDirLock))
+               LKFrom(p, [NewReq("unlink", n, None, "LK", n, "U1",
+                                 KernelDirLock) EXCEPT !.rsnap = seq])
        \/ /\ "rename" \in Requests /\ LockFree(KernelDirLock)
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n, m \in Names :

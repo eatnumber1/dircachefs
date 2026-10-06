@@ -821,7 +821,9 @@ TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
 
   // A mutation's phase 1 and phase 3 both committed, then the daemon (or
   // the machine) died before any sync point.
-  ASSERT_THAT(cache::BeginRemove(ctx_, dir, "inner", inner), IsOk());
+  ASSERT_THAT(
+      cache::BeginRemove(ctx_, dir, "inner", inner, cache::BeginFill(ctx_)),
+      IsOk());
   ASSERT_THAT(RefreshAttrs(ctx_, dir), IsOk());
   ASSERT_THAT(RefreshAttrs(ctx_, inner), IsOk());
   ASSERT_THAT(cache::SetNegative(ctx_, dir, "inner"), IsOk());

@@ -1208,11 +1208,26 @@ absl::StatusOr<Mutation> BeginCreate(Context &ctx, InodeId parent, std::string_v
   });
 }
 
-absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent, std::string_view name,
-                         InodeId child) {
+absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent,
+                                     std::string_view name, InodeId child,
+                                     FillSnapshot resolved) {
   const std::string names[] = {std::string(name)};
   const InodeId ids[] = {parent, child};
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    // First, before writing anything: the verification (review of R4,
+    // finding 2; as in BeginRename). (parent, name) can only stop holding
+    // `child` through dcfs by a mutation naming `parent`, which touches it;
+    // so if CanFill holds for both, `name` still holds `child` and the
+    // unlinkat will remove it. From here on Mutation::Owns takes over.
+    // Otherwise the transaction rolls back, the mutation never begins, and
+    // the caller resolves again.
+    for (InodeId id : ids) {
+      if (!CanFill(ctx, resolved, id)) {
+        return absl::AbortedError(absl::StrCat(
+            "removal of ", EscapeBytes(name), " in ", parent, ": inode ", id,
+            " changed since it was resolved"));
+      }
+    }
     ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, parent, names));
     ABSL_RETURN_IF_ERROR(MarkAttrsUnknown(ctx, parent));
     return MarkAttrsUnknown(ctx, child);

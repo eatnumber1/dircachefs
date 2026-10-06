@@ -656,20 +656,41 @@ absl::Status DirCacheFS::RemoveChild(
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
 
   // The child's id is needed for phase 3 (its row's fate depends on its
-  // remaining link count), so an uncached name is resolved first.
-  ABSL_ASSIGN_OR_RETURN(cache::LookupResult child,
-                        backing::LookupOrPopulate(ctx_, parent, name));
-  if (child.kind == cache::LookupResult::kNegative) {
-    return req.ReplyErrno(ENOENT);
-  }
-  RET_CHECK_EQ(child.kind, cache::LookupResult::kFound);
-
-  // Phase 1: mark (parent, name) unknown and mark the attributes that are about
-  // to change (the parent's mtime/ctime/nlink, the child's nlink/ctime)
-  // unknown, in one transaction.
+  // remaining link count), so an uncached name is resolved first. Then
+  // phase 1, which verifies that neither the parent nor the child changed
+  // since the resolve began (see cache::BeginRemove's `resolved`): the
+  // unlinkat removes whatever the name holds by then, and phase 1 marks the
+  // resolved child unknown. If something changed, resolve again (review of
+  // R4, finding 2). Today nothing can run in between; under coroutines the
+  // resolve's syscalls are suspension points.
+  // TODO(coroutines): wait for the overlapping mutation instead.
+  constexpr int kAttempts = 3;
+  cache::LookupResult child;
+  std::optional<cache::Mutation> begun;
   std::vector<std::string> names = {std::string(name)};
-  ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
-                        cache::BeginRemove(ctx_, parent, name, child.id));
+  for (int attempt = 0; !begun.has_value(); ++attempt) {
+    if (attempt == kAttempts) {
+      return dcfs::ErrnoToStatus(
+          EAGAIN, absl::StrCat("removal of ", EscapeBytes(name), " in ",
+                               parent, ": it kept changing"));
+    }
+    const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
+    ABSL_ASSIGN_OR_RETURN(child, backing::LookupOrPopulate(ctx_, parent, name));
+    if (child.kind == cache::LookupResult::kNegative) {
+      return req.ReplyErrno(ENOENT);
+    }
+    RET_CHECK_EQ(child.kind, cache::LookupResult::kFound);
+
+    // Phase 1: mark (parent, name) unknown and mark the attributes that are
+    // about to change (the parent's mtime/ctime/nlink, the child's
+    // nlink/ctime) unknown, in one transaction.
+    absl::StatusOr<cache::Mutation> m =
+        cache::BeginRemove(ctx_, parent, name, child.id, resolved);
+    if (absl::IsAborted(m.status())) continue;
+    ABSL_RETURN_IF_ERROR(m.status());
+    begun.emplace(*std::move(m));
+  }
+  cache::Mutation &mutation = *begun;
   // The kernel will keep asking about the child if something still refers
   // to it (a working directory, an O_PATH descriptor); once removed, it is
   // reachable only through a descriptor taken now.

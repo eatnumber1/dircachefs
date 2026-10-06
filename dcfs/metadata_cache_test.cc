@@ -1225,7 +1225,7 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
 
   // Unlink of a/f.
   ASSERT_THAT(reset(), IsOk());
-  ASSERT_THAT(BeginRemove(ctx_, a, "f", f.id), IsOk());
+  ASSERT_THAT(BeginRemove(ctx_, a, "f", f.id, BeginFill(ctx_)), IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, f.id)));
   EXPECT_THAT(Lookup(ctx_, a, "f"),
               IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
@@ -1347,6 +1347,54 @@ TEST_F(MetadataCacheTest, BeginRenameRefusesAStaleResolution) {
   ASSERT_OK_AND_ASSIGN(Mutation rename,
                        BeginRename(ctx_, d, "x", d, "y", x.id, y.id, resolved));
   EXPECT_TRUE(rename.Owns(d));
+  EXPECT_THAT(Lookup(ctx_, d, "x"),
+              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+}
+
+// Review of R4, finding 2: an unlink's phase 1 verifies the same way that
+// neither the parent nor the child changed since its caller resolved the
+// child.
+TEST_F(MetadataCacheTest, BeginRemoveRefusesAStaleResolution) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(kRootInode, "d", 20));
+  ASSERT_OK_AND_ASSIGN(UpsertResult x, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult z, Make(32));
+  ASSERT_THAT(LinkDentry(ctx_, d, "x", x.id), IsOk());
+  ASSERT_THAT(SyncClear(), IsOk());
+  auto unchanged = [&] {
+    EXPECT_THAT(Lookup(ctx_, d, "x"),
+                IsOkAndHolds(IsLookup(LookupResult::kFound)));
+    EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+    EXPECT_FALSE(ctx_.fills.inflight.contains(d));
+    EXPECT_FALSE(ctx_.fills.inflight.contains(x.id));
+  };
+
+  // The parent, and the child, each changed by a mutation that began and
+  // ended after the snapshot.
+  for (InodeId changed : {d, x.id}) {
+    SCOPED_TRACE(changed);
+    const FillSnapshot resolved = BeginFill(ctx_);
+    ASSERT_THAT(BeginAttrChange(ctx_, changed), IsOk());  // Ends at once.
+    ASSERT_THAT(SyncClear(), IsOk());
+    EXPECT_THAT(BeginRemove(ctx_, d, "x", x.id, resolved),
+                StatusIs(absl::StatusCode::kAborted));
+    unchanged();
+  }
+  // A mutation of the parent in flight since before the snapshot.
+  {
+    ASSERT_OK_AND_ASSIGN(Mutation other, BeginCreate(ctx_, d, "w"));
+    const FillSnapshot resolved = BeginFill(ctx_);
+    EXPECT_THAT(BeginRemove(ctx_, d, "x", x.id, resolved),
+                StatusIs(absl::StatusCode::kAborted));
+    other.End();
+    ASSERT_THAT(SyncClear(), IsOk());
+  }
+  // An unrelated inode's mutation does not matter.
+  const FillSnapshot resolved = BeginFill(ctx_);
+  ASSERT_THAT(BeginAttrChange(ctx_, z.id), IsOk());
+  ASSERT_OK_AND_ASSIGN(Mutation unlink,
+                       BeginRemove(ctx_, d, "x", x.id, resolved));
+  EXPECT_TRUE(unlink.Owns(d));
+  EXPECT_TRUE(unlink.Owns(x.id));
   EXPECT_THAT(Lookup(ctx_, d, "x"),
               IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
 }
@@ -1804,7 +1852,7 @@ TEST_F(MetadataCacheTest, ListDirCursorSurvivesRenameOverAndFailedRemove) {
   EXPECT_THAT(list_after(cursor), ElementsAre("e", "c"));
 
   // rmdir(d/e) failing (ENOTEMPTY): phase 1, then the name re-resolved.
-  ASSERT_THAT(BeginRemove(ctx_, d, "e", e), IsOk());
+  ASSERT_THAT(BeginRemove(ctx_, d, "e", e, BeginFill(ctx_)), IsOk());
   ASSERT_THAT(LinkDentry(ctx_, d, "e", e), IsOk());
   EXPECT_THAT(list_after(cursor), ElementsAre("e", "c"));
 }

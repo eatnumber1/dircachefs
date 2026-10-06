@@ -179,6 +179,20 @@ on the detail:
   a sync point's `syncfs`, the writable create's window and the fill that
   read before the release, and `metadata_cache_test` each half of the sync
   point's protection.
+- Child objects' records and hard links are not modelled, so the model
+  cannot find the stale-resolve gap that `RemoveChild` had (review of R4,
+  finding 2: a rename onto the name between the unlink's resolve and its
+  phase 1 made the unlink mark one object unknown and remove another,
+  whose link count stayed cached as current when it had another link).
+  The model's unlink records nothing about the object it resolved, so a
+  stale resolve leaves every modelled record right. Finding it needs each
+  object's attributes (at least `nlink`) and `attrValid`, more than one
+  link per object, and the unlink's phase 1 and phase 3 on the resolved
+  object, which multiplies the database states (and every crash-state set)
+  by the objects' attribute states. The verification itself is modelled
+  (`U1`, as `R1`), so that the model allows what the code does (retries,
+  `EAGAIN`); `dir_cache_fs_test` checks the interleaving
+  (`UnlinkMarksWhatItRemovesUnknown`).
 - Not modelled: xattrs, hard links, links
   across directories, out-of-band changes and `ReconcileAttrs`,
   `InvalidateInode` after `ESTALE`, refused boundaries, `ParentOf` of a
@@ -229,7 +243,7 @@ prints. A request's first step runs inside `Arrive`.
 | `CreatePhase3` | Record the dentry if `Owns(D)`; `Mutation::End`; fill snapshot for D's refresh | Phase 3, Concurrency (`Owns`) | `RecordNewChild` phase B, `Mutation::Owns`, `End` |
 | `CreateStat`, `CreateFill` | Refresh D's attributes as a fill, reply | Phase 3 | `backing::RefreshAttrsFromFd` |
 | `CreateFailed` | Failed phase 2: `End`, re-resolve the name, reply the error | Phase 2 | `ReresolveAfterFailure` |
-| `UnlinkPhase1` | After resolving the name: `ENOENT`, or phase 1 (name and D's attributes unknown, D dirty) | Phase 1 | `DirCacheFS::RemoveChild`, `cache::BeginRemove` |
+| `UnlinkPhase1` | After resolving the name (from a fill snapshot, `rsnap`): `ENOENT`, or verify that no mutation of D began or ended since the snapshot and none is in flight; if so, phase 1 (name and D's attributes unknown, D dirty); if not, resolve again (at most 3 times, then `EAGAIN`) | Phase 1 | `DirCacheFS::RemoveChild`, `cache::BeginRemove` (`resolved`) |
 | `UnlinkSyscall` | unlinkat; `ENOENT` if gone | Phase 2 | `backing::UnlinkAt` |
 | `UnlinkPhase3` | Name absent if `Owns(D)`; `End` | Phase 3 | `cache::SetNegative`, `Mutation::Owns` |
 | `UnlinkStat`, `UnlinkFill`, `UnlinkFailed` | As for create | | `backing::RefreshAttrs`, `ReresolveAfterFailure` |
@@ -270,7 +284,7 @@ as distinct states.
 | `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 368,668 | ~1 min |
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 32,839 | ~15-30 s |
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 3,950,002 | ~8 min |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 4,460,210 | ~6 min |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 3,633,518 | ~6-8 min |
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
@@ -392,8 +406,13 @@ model in the same change (AGENTS.md). In practice:
   constant that puts it back, and a `known_bugs/` variant whose test
   expects the counterexample.
 - Keep every action reachable: run TLC with `-coverage 1` and check that
-  no action reports 0. Today `RenameFailed`, `RenameFailed2` and
-  `UnlinkFailed` fire only in `MC_nolock.cfg`: under the kernel lock
-  nothing can remove a name between its resolve and the unlink or rename
-  syscall. `MC_nolock.cfg` also reaches both branches of a rename's failed
+  no action reports 0, except these, which report 0 in every
+  configuration: `RenameFailed`, `RenameFailed2` and `UnlinkFailed`.
+  Nothing in the model can remove a name between a rename's or an
+  unlink's resolve and its syscall any more: under the kernel lock nothing
+  runs there, and without it the phase-1 verification (`R1`, `U1`) refuses
+  to begin while another mutation of D is in flight or has run since the
+  resolve, and the model has no out-of-band changes. They stay because the
+  code's failure paths do (an out-of-band change can still make the
+  syscall fail). `MC_nolock.cfg` reaches both branches of a failed
   phase-1 verification (the retry and the `EAGAIN`).
