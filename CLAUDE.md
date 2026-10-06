@@ -45,6 +45,11 @@ up one row (implementer to protocol, mechanical to implementer).
   them starts that checkout's server, and a server started without the
   `kvm` group makes every later test fall back to slow emulation
   (2026-10-05: a stray `bazel help` cost a full-suite run).
+- Never leave a background polling loop (`while pgrep -f ...; do sleep`,
+  `until grep -q MARKER log; do sleep`): the pattern matches the loop's
+  own command line, or the marker never arrives once the run it waits for
+  dies. About 90 such orphans were found on 2026-10-07. Wait in the
+  foreground with the tool's timeout and rerun instead.
 - Never `pkill -f` / `pgrep -f` with a pattern that also appears in your
   own command line: it matches (and kills) your own shell. Prefer
   `pgrep -f '^bazel\(name\)'` anchored patterns or kill by PID.
