@@ -19,8 +19,9 @@
 # step the model does not have, giving "<category>: <detail>". Only the
 # categories in CATS (comma-separated) may end a trace in this run; any
 # other cut fails the test. --root names a trace (<trace>@<directory inode>)
-# that must be valid and must reach the end of the run, or end at a cut in
-# its own, narrower --root-cuts.
+# that must be valid, have events, and reach the end of the run (its last
+# line the run's final event, clean or stop_clear), or end at a cut in its
+# own, narrower --root-cuts.
 #
 # Without --expect-reject every trace must be valid; with it, the trace
 # TRACE must be rejected, and the first event no behavior of the model
@@ -185,8 +186,8 @@ done
 
 # The cuts: each must be of a category this run allows.
 bad_cuts=0
-in_list() {  # in_list WORD COMMA-LIST
-  [[ ",$2," == *",$1,"* ]]
+in_list() {  # in_list WORD COMMA-LIST (an empty WORD is in no list)
+  [[ -n "$1" && ",$2," == *",$1,"* ]]
 }
 root_end=""
 if [[ -s "$work/traces/ends.tsv" ]]; then
@@ -205,11 +206,29 @@ fi
 if [[ -n "$root" ]]; then
   root_file="$work/traces/$(sed 's/[^A-Za-z0-9._@-]/_/g' <<<"$root").jsonl"
   root_category="$(sed -n 's/.*"why":"\([a-z-]*\): .*/\1/p' <<<"$root_end")"
+  # Uncut, the root must reach the run's final event: its last line is a
+  # clean or stop_clear (FinishRun's last step, written for every traced
+  # directory at once), and nothing of the run (no line of this trace
+  # name, of any directory) follows it but that same step's lines.
+  root_trace="${root%@*}"
+  root_dir="${root##*@}"
+  root_last_nr="$(awk -v t="$root_trace" -v d="$root_dir" \
+    '$2 == t && $3 == d { n = NR } END { print n + 0 }' "$work/lines")"
+  root_after="$(awk -v t="$root_trace" -v n="$root_last_nr" \
+    'NR > n && $2 == t && $0 !~ /"ev":"(clean|stop_clear)"/' "$work/lines" | wc -l)"
+  root_last="$(tail -n 1 "$root_file" 2>/dev/null || true)"
   if [[ ! -s "$root_file" ]]; then
     echo "trace_validate.sh: ROOT MISSING: no trace $root"
     bad_cuts=$((bad_cuts + 1))
+  elif [[ "$(wc -l <"$root_file")" -lt 2 ]]; then
+    echo "trace_validate.sh: ROOT WITHOUT EVENTS: $root has only its begin line"
+    bad_cuts=$((bad_cuts + 1))
   elif [[ -n "$root_end" ]] && ! in_list "$root_category" "$root_cuts"; then
     echo "trace_validate.sh: ROOT CUT SHORT: $root ends before the end of the run (allowed: ${root_cuts:-none}): $root_end"
+    bad_cuts=$((bad_cuts + 1))
+  elif [[ -z "$root_end" ]] &&
+    { ! grep -Eq '"ev":"(clean|stop_clear)"' <<<"$root_last" || [[ "$root_after" -ne 0 ]]; }; then
+    echo "trace_validate.sh: ROOT CUT SHORT: $root ends before the run's final event ($root_after later lines of the run): $root_last"
     bad_cuts=$((bad_cuts + 1))
   else
     echo "trace_validate.sh: $root reaches ${root_end:+a cut it may end at: }${root_end:-the end of the run}"

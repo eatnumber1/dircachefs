@@ -616,8 +616,12 @@ frame (request, getattr, lookup, refresh, sync point) that returns an error
 ends the trace with a `failed` cut; one that returns OK replies, and
 `T_Reply` requires its model request to have replied, so a frame that
 skipped a step is rejected there. The
-guest tests also name the root directory's trace (`root`), which must reach
-the end of the run or one of the cuts listed for it (`root_cuts`). The
+guest tests also name the root directory's trace (`root`), which must have
+events and reach the end of the run, its last line the run's final event
+(`clean` or `stop_clear`, with no later line of the run but that step's
+for other directories), or end at one of the cuts listed for it
+(`root_cuts`; a `gone` line or a cut whose category does not parse never
+qualifies). `formal/trace_tests/root_*.log` test these rules. The
 categories:
 
 | Category | Why the model cannot follow | Allowed in |

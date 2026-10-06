@@ -469,7 +469,7 @@ genrule(
 
 # Each run's traces may end only at the cuts listed (steps the model does
 # not have; see dcfs/testonly/trace_recorder.h), and the root directory's
-# trace (e2e@1) must reach the end of the run or one of root_cuts: the
+# trace (e2e@1) must reach the run's final event or one of root_cuts: the
 # first step in that script's root the model cannot follow.
 TRACED_GUEST_SCRIPTS = {
     "crash": dict(

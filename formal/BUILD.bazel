@@ -121,3 +121,32 @@ TRACE_TESTS = {
     )
     for test, event in TRACE_TESTS.items()
 ]
+
+# The validator's root check (--root): the root trace must have events and
+# reach the run's final event (clean or stop_clear, with nothing of the run
+# after it), or end at a cut of a category in root_cuts.
+ROOT_TESTS = {
+    # Valid: begin, the shutdown's steps, clean.
+    "root_reaches_clean": None,
+    # A root with only its begin line.
+    "root_without_events": "ROOT WITHOUT EVENTS",
+    # A root that just stops (no cut, no end line) before the run ends.
+    "root_stops": "ROOT CUT SHORT: t@2 ends before the run's final event",
+    # The root ends at clean, but the run went on after it.
+    "root_not_the_final_event": "ROOT CUT SHORT: t@2 ends before the run's final event",
+    # With no root cuts allowed, a gone line or a cut whose category does
+    # not parse still ends the root short.
+    "root_gone": "ROOT CUT SHORT: t@2 ends before the end of the run",
+    "root_cut_unparsable": "ROOT CUT SHORT: t@2 ends before the end of the run",
+}
+
+[
+    tla_trace_log_test(
+        name = "trace_%s_test" % test,
+        size = "small",
+        expect_validator_failure = failure or "",
+        log = "trace_tests/%s.log" % test,
+        root = "t@2",
+    )
+    for test, failure in ROOT_TESTS.items()
+]
