@@ -157,6 +157,40 @@ class DirCacheFS {
       FuseRequest &req, fuse_ino_t ino, int mode, off_t offset, off_t length,
       fuse_file_info &fi);
 
+  // Step 23.4. copy_file_range(2) between two open files: the backing
+  // filesystem's own copy on their shared backing fds (on btrfs and xfs, a
+  // reflink where it can), with the destination's write-through
+  // bookkeeping (as a fallback Write: phase 1, the copy, refreshes).
+  absl::Status CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
+                             off_t off_in, fuse_file_info &fi_in,
+                             fuse_ino_t ino_out, off_t off_out,
+                             fuse_file_info &fi_out, size_t len, int flags);
+
+  // Step 23.4. The ioctls forwarded to the backing file, an allowlist (see
+  // dir_cache_fs.cc): FS_IOC_GETFLAGS/SETFLAGS and FS_IOC_FSGETXATTR/
+  // FSSETXATTR (the VFS's fileattr calls, chattr/lsattr, which FUSE sends
+  // as FUSE_IOCTL on a private open) and FS_IOC_GETVERSION. A set is a
+  // mutation of the object's attributes (its ctime). Anything else:
+  // ENOTTY. (FICLONE, FICLONERANGE and FIDEDUPERANGE never arrive: the VFS
+  // handles them itself, and FUSE has no remap_file_range.)
+  absl::Status Ioctl(FuseRequest &req, fuse_ino_t ino, unsigned int cmd,
+                     fuse_file_info *fi, unsigned int flags,
+                     std::string_view in, size_t out_size);
+
+  // Step 23.4. O_TMPFILE: an unnamed file in `parent`'s backing directory,
+  // opened (like Create) and recorded as a row with no dentry
+  // (backing::RecordTmpfile). Not a mutation of `parent`: the backing
+  // filesystem changes neither its entries nor its attributes. If it is
+  // linked into a name (Link), it gets a dentry; if not, its last release
+  // retires its row (nlink 0, the row-lifetime rule).
+  absl::Status Tmpfile(FuseRequest &req, fuse_ino_t parent, mode_t mode,
+                       fuse_file_info &fi);
+
+  // Whether `ino` is an unnamed file Tmpfile made and nothing has linked
+  // yet: a LINK of it is, to its new parent, a create (fuse_ops.cc reports
+  // it as one to the protocol events: the model's "linkcreate").
+  bool IsUnnamedTmpfile(fuse_ino_t ino) const;
+
   // Called at the start of every request (see fuse_ops.cc): runs a sync
   // point if the dirty set may be non-empty and opts_.sync_interval has
   // passed since the last one. dcfs is single-threaded inside libfuse's
@@ -498,6 +532,10 @@ class DirCacheFS {
     FileDescriptor fd;
   };
   absl::flat_hash_map<InodeId, Removed> removed_;
+
+  // The unnamed files Tmpfile made that no link has named yet (see
+  // IsUnnamedTmpfile).
+  absl::flat_hash_set<InodeId> tmpfiles_;
 
   // The inodes that had a writable open during this run and whose last
   // FORGET has not come since (see ReconcileWritten).

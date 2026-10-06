@@ -244,10 +244,10 @@ ArriveAs(p, k, n, m) ==
               /\ GAFrom(p, NewReq("getattr", None, None, None, None, None,
                                   FALSE))
               /\ UNCHANGED muts
-         [] k = "create" ->
+         [] k \in {"create", "linkcreate"} ->
               /\ LockFree(KernelDirLock)
               /\ muts < MaxMutations /\ muts' = muts + 1
-              /\ C1From(p, NewReq("create", n, None, "C1", None, None,
+              /\ C1From(p, NewReq(k, n, None, "C1", None, None,
                                   KernelDirLock))
          [] k = "unlink" ->
               /\ LockFree(KernelDirLock)
@@ -404,9 +404,9 @@ SyncedOK == ~durableD => E.synced
 
 T_ArriveCreate ==
     /\ Ev("phase1") /\ E.outcome = "begun" /\ ps[P].pc = "idle"
-    /\ E.req.k = "create"
+    /\ E.req.k \in {"create", "linkcreate"}
     /\ SyncedOK
-    /\ ArriveAs(P, "create", Req(E).n, None)
+    /\ ArriveAs(P, E.req.k, Req(E).n, None)
     /\ Matches(E, {})
 
 T_UnlinkPhase1 ==
@@ -445,8 +445,10 @@ T_RenameResolveDst ==
     /\ Matches(E, {})
 
 SyscallOK(okpc) == E.errno = 0 <=> ps'[P].pc = okpc
+\* (A linkcreate has no probe: its phase 3 is next.)
 T_CreateSyscall ==
-    /\ Ev("syscall") /\ CreateSyscall(P) /\ SyscallOK("C_probe")
+    /\ Ev("syscall") /\ CreateSyscall(P)
+    /\ SyscallOK(IF ps[P].kind = "linkcreate" THEN "C_rec" ELSE "C_probe")
     /\ Matches(E, {})
 T_UnlinkSyscall ==
     /\ Ev("syscall") /\ UnlinkSyscall(P) /\ SyscallOK("U3")

@@ -105,6 +105,8 @@ class FuseRequest {
   absl::Status ReplyCreate(
       const fuse_entry_param &entry, const fuse_file_info &fi);
   absl::Status ReplyWrite(size_t count);
+  // An ioctl's result: `result` (0) and its output buffer.
+  absl::Status ReplyIoctl(int result, std::string_view buf);
 
   // Wraps fuse_passthrough_open(): tells the kernel to serve reads and
   // writes on this open directly against `fd` instead of routing them

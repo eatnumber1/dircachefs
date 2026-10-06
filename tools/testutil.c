@@ -128,6 +128,32 @@
  *       back). rmcwd-mutate chdir(2)s into <dir>, rmdir(2)s it, and changes
  *       "." (chmod, chown, utimensat, *xattr). Step 23.2: the removed-
  *       object records answer the kernel's changes too.
+ *   testutil copyrange <src> <dst>
+ *       copy_file_range(2) of all of <src> to the start of <dst> (created
+ *       or truncated, mode 0644), looping until EOF; prints "copied=<n>".
+ *   testutil clone <src> <dst>
+ *       FICLONE: <dst> (created or truncated) becomes a reflink of <src>.
+ *   testutil shared-extents <path>
+ *       FS_IOC_FIEMAP: prints "shared=<n> extents=<m>", how many of the
+ *       file's extents are shared (FIEMAP_EXTENT_SHARED: reflinked).
+ *   testutil getflags <path>
+ *   testutil setflags <path> <hex>
+ *       FS_IOC_GETFLAGS (prints the flags in hex) / FS_IOC_SETFLAGS on an
+ *       O_RDONLY descriptor (chattr/lsattr without the applets).
+ *   testutil fsxattr <path>
+ *       FS_IOC_FSGETXATTR: prints "xflags=<hex> extsize=<n> projid=<n>".
+ *   testutil getversion <path>
+ *       FS_IOC_GETVERSION: prints the inode generation.
+ *   testutil ioctl-unknown <path>
+ *       An ioctl dcfs does not forward (FS_IOC_GETFSLABEL on a file):
+ *       prints its outcome.
+ *   testutil tmpfile <dir> <name> <empty|proc|excl|none>
+ *       open(<dir>, O_TMPFILE|O_RDWR, 0640), writes "tmp", and prints its
+ *       nlink, then links it as <dir>/<name>: "empty" with linkat(fd, "",
+ *       AT_EMPTY_PATH), "proc" with linkat of /proc/self/fd/<n>
+ *       (AT_SYMLINK_FOLLOW), "excl" opens with O_EXCL (never linkable) and
+ *       tries "empty", "none" does not link; prints each step's outcome and
+ *       the linked file's nlink and size.
  *   testutil readdir-ino <dir> [small-first]
  *       Lists <dir> with getdents64, printing "<name> <d_ino>" per entry,
  *       in whatever order the directory itself returns them -- which,
@@ -171,6 +197,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <linux/fiemap.h>
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -762,6 +789,187 @@ static int cmd_rmcwd_mutate(const char *dir)
 	step_getxattr(n, buf);
 	step("removexattr", removexattr(".", "user.dcfs"));
 	print_stat(stat(".", &st), &st, 1);
+	printf("\n");
+	return 0;
+}
+
+static int cmd_copyrange(const char *src, const char *dst)
+{
+	int in = open(src, O_RDONLY), out;
+	long long total = 0;
+
+	if (in == -1) {
+		print_err(errno);
+		return 1;
+	}
+	out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (out == -1) {
+		print_err(errno);
+		return 1;
+	}
+	for (;;) {
+		ssize_t n = copy_file_range(in, NULL, out, NULL, 1 << 30, 0);
+
+		if (n == -1) {
+			print_err(errno);
+			return 1;
+		}
+		if (n == 0)
+			break;
+		total += n;
+	}
+	printf("copied=%lld\n", total);
+	close(in);
+	close(out);
+	return 0;
+}
+
+static int cmd_clone(const char *src, const char *dst)
+{
+	int in = open(src, O_RDONLY), out;
+
+	if (in == -1) {
+		print_err(errno);
+		return 1;
+	}
+	out = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	if (out == -1 || ioctl(out, FICLONE, in) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("cloned\n");
+	return 0;
+}
+
+static int cmd_shared_extents(const char *path)
+{
+	union {
+		struct fiemap map;
+		char buf[sizeof(struct fiemap) +
+			 64 * sizeof(struct fiemap_extent)];
+	} u;
+	unsigned int i, shared = 0;
+	int fd = open(path, O_RDONLY);
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	memset(&u, 0, sizeof(u));
+	u.map.fm_length = ~0ULL;
+	u.map.fm_flags = FIEMAP_FLAG_SYNC;
+	u.map.fm_extent_count = 64;
+	if (ioctl(fd, FS_IOC_FIEMAP, &u.map) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	for (i = 0; i < u.map.fm_mapped_extents; i++)
+		if (u.map.fm_extents[i].fe_flags & FIEMAP_EXTENT_SHARED)
+			shared++;
+	printf("shared=%u extents=%u\n", shared, u.map.fm_mapped_extents);
+	return 0;
+}
+
+static int cmd_getflags(const char *path)
+{
+	int flags = 0, fd = open(path, O_RDONLY | O_NONBLOCK);
+
+	if (fd == -1 || ioctl(fd, FS_IOC_GETFLAGS, &flags) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("%x\n", flags);
+	return 0;
+}
+
+static int cmd_setflags(const char *path, const char *hex)
+{
+	int flags = (int) strtol(hex, NULL, 16);
+	int fd = open(path, O_RDONLY | O_NONBLOCK);
+
+	if (fd == -1 || ioctl(fd, FS_IOC_SETFLAGS, &flags) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	return 0;
+}
+
+static int cmd_fsxattr(const char *path)
+{
+	struct fsxattr fsx;
+	int fd = open(path, O_RDONLY | O_NONBLOCK);
+
+	memset(&fsx, 0, sizeof(fsx));
+	if (fd == -1 || ioctl(fd, FS_IOC_FSGETXATTR, &fsx) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("xflags=%x extsize=%u projid=%u\n", fsx.fsx_xflags,
+	       fsx.fsx_extsize, fsx.fsx_projid);
+	return 0;
+}
+
+static int cmd_getversion(const char *path)
+{
+	long gen = 0;
+	int fd = open(path, O_RDONLY | O_NONBLOCK);
+
+	if (fd == -1 || ioctl(fd, FS_IOC_GETVERSION, &gen) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("%lu\n", (unsigned long) (uint32_t) gen);
+	return 0;
+}
+
+static int cmd_ioctl_unknown(const char *path)
+{
+	char label[FSLABEL_MAX];
+	int fd = open(path, O_RDONLY | O_NONBLOCK);
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("ioctl");
+	step("getfslabel", ioctl(fd, FS_IOC_GETFSLABEL, label));
+	printf("\n");
+	return 0;
+}
+
+static int cmd_tmpfile(const char *dir, const char *name, const char *how)
+{
+	char path[4096], proc[64];
+	struct stat st;
+	int excl = strcmp(how, "excl") == 0;
+	int fd = open(dir, O_TMPFILE | O_RDWR | (excl ? O_EXCL : 0), 0640);
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	snprintf(proc, sizeof(proc), "/proc/self/fd/%d", fd);
+	printf("tmpfile");
+	step("write", (int) write(fd, "tmp", 3));
+	if (fstat(fd, &st) == 0)
+		printf(" nlink=%lu mode=%o", (unsigned long) st.st_nlink,
+		       (unsigned) (st.st_mode & 07777));
+	if (strcmp(how, "proc") == 0)
+		step("link", linkat(AT_FDCWD, proc, AT_FDCWD, path,
+				    AT_SYMLINK_FOLLOW));
+	else if (strcmp(how, "none") != 0)
+		step("link", linkat(fd, "", AT_FDCWD, path, AT_EMPTY_PATH));
+	if (fstat(fd, &st) == 0)
+		printf(" nlink=%lu", (unsigned long) st.st_nlink);
+	step("relink", linkat(fd, "", AT_FDCWD, path, AT_EMPTY_PATH));
+	close(fd);
+	if (stat(path, &st) == 0)
+		printf(" linked=size:%lld,nlink:%lu,mode:%o",
+		       (long long) st.st_size, (unsigned long) st.st_nlink,
+		       (unsigned) (st.st_mode & 07777));
+	else
+		step("linked", -1);
 	printf("\n");
 	return 0;
 }
@@ -2004,6 +2212,24 @@ int main(int argc, char *argv[])
 		return cmd_opath_unlink_stat(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "rmcwd") == 0)
 		return cmd_rmcwd(argv[2]);
+	if (argc == 4 && strcmp(argv[1], "copyrange") == 0)
+		return cmd_copyrange(argv[2], argv[3]);
+	if (argc == 4 && strcmp(argv[1], "clone") == 0)
+		return cmd_clone(argv[2], argv[3]);
+	if (argc == 3 && strcmp(argv[1], "shared-extents") == 0)
+		return cmd_shared_extents(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "getflags") == 0)
+		return cmd_getflags(argv[2]);
+	if (argc == 4 && strcmp(argv[1], "setflags") == 0)
+		return cmd_setflags(argv[2], argv[3]);
+	if (argc == 3 && strcmp(argv[1], "fsxattr") == 0)
+		return cmd_fsxattr(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "getversion") == 0)
+		return cmd_getversion(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "ioctl-unknown") == 0)
+		return cmd_ioctl_unknown(argv[2]);
+	if (argc == 5 && strcmp(argv[1], "tmpfile") == 0)
+		return cmd_tmpfile(argv[2], argv[3], argv[4]);
 	if (argc == 3 && strcmp(argv[1], "unlinked-mutate") == 0)
 		return cmd_unlinked_mutate(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "opath-unlinked-mutate") == 0)

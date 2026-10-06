@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdio>  // RENAME_NOREPLACE, RENAME_EXCHANGE
 #include <fcntl.h>
+#include <linux/fs.h>  // FS_IOC_*
 #include <optional>
 #include <span>
 #include <string>
@@ -111,6 +112,9 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // value is the definitive "did the kernel grant passthrough" answer,
   // known here at startup rather than only per-open.
   bool passthrough = fuse_set_feature_flag(&conn, FUSE_CAP_PASSTHROUGH);
+  // Ioctls on directories (FS_IOC_GETFLAGS and friends: chattr/lsattr of a
+  // directory); without it libfuse answers them ENOTTY itself.
+  fuse_set_feature_flag(&conn, FUSE_CAP_IOCTL_DIR);
   // Unset, not left alone: do_init() (fuse_lowlevel.c) turns this on by
   // default -- before this callback ever runs -- whenever the kernel
   // offered it (LL_SET_DEFAULT(1, FUSE_CAP_ATOMIC_O_TRUNC)). With it on, the
@@ -268,6 +272,8 @@ absl::Status DirCacheFS::RetireRemoved(InodeId id,
                                        std::optional<FileDescriptor> held) {
   RET_CHECK(!HasOpenFiles(id)) << "retiring inode " << id
                                << " with an open file";
+  // An unnamed file that was never linked goes this way too.
+  tmpfiles_.erase(id);
   absl::StatusOr<cache::CachedAttr> row = cache::GetAttr(ctx_, id);
   if (!row.ok() && !absl::IsNotFound(row.status())) return row.status();
   ABSL_RETURN_IF_ERROR(ForgetRemoved(id));
@@ -589,9 +595,9 @@ absl::Status DirCacheFS::Lookup(
   }
   if (cache::IsStub(parent)) {
     if (name != "..") return RefuseStub(req, parent, "lookup");
-    absl::StatusOr<cache::StubRow> stub = cache::GetStub(ctx_, parent);
-    if (!stub.ok()) return RequireAttr(parent).status();  // ESTALE
-    ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(stub->parent));
+    ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());  // ESTALE if gone
+    ABSL_ASSIGN_OR_RETURN(cache::StubRow stub, cache::GetStub(ctx_, parent));
+    ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(stub.parent));
     return ReplyEntry(req, entry);
   }
   if (name == "..") {
@@ -1165,7 +1171,8 @@ absl::Status DirCacheFS::Link(
 
   // Phase 3: record the new dentry and the bumped nlink together. The link
   // exists: failures from here on are logged, never replied
-  // (audit-races F7).
+  // (audit-races F7). An unnamed file (Tmpfile) has its first name now.
+  tmpfiles_.erase(src);
   LogPhase3Failure(
       "Link", backing::RecordNewLink(ctx_, mutation, src, newparent, newname)
                   .status());
@@ -1247,15 +1254,41 @@ absl::Status DirCacheFS::Open(
   // other open of `id` is already outstanding, else create it fresh.
   auto backing_it = backing_files_.find(id);
   int backing_id;
-  if (backing_it == backing_files_.end()) {
+  bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
+  const bool shared = backing_it != backing_files_.end();
+  if (!shared) {
     ABSL_ASSIGN_OR_RETURN(BackingFile backing_file, MakeBackingFile(id, req));
     backing_id = backing_file.backing_id;
     backing_it = backing_files_.emplace(id, std::move(backing_file)).first;
   } else {
     backing_id = backing_it->second.backing_id;
   }
+  // Whether this open may write is the backing filesystem's call at open
+  // time (an immutable or append-only file, step 23.4's chattr, or a
+  // read-only filesystem; the kernel's own check sees no such flag on a
+  // FUSE inode). The shared backing fd does not say: it may predate the
+  // flag, or be read-only only because O_RDWR was refused while this
+  // open's mode (O_WRONLY | O_APPEND on an append-only file) is allowed.
+  // So unless that fd was opened read-write just now, ask the backing
+  // filesystem with this open's access mode (a reopen of an inode in
+  // memory), and refuse as it does. (Found by copy_test: after a
+  // chattr +i, a writable open succeeded and wrote.)
+  if (writable && (shared || !backing_it->second.writable)) {
+    // Through /proc/self/fd of the shared fd: the same object, and the
+    // backing filesystem's own open-time checks (may_open).
+    const int check_flags = (fi.flags & (O_ACCMODE | O_APPEND)) | O_CLOEXEC |
+                            O_NOCTTY | O_NONBLOCK;
+    absl::Status allowed =
+        backing::ReopenFd(*backing_it->second.fd, check_flags).status();
+    if (!allowed.ok()) {
+      if (!shared) {
+        if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
+        backing_files_.erase(backing_it);
+      }
+      return allowed;
+    }
+  }
   backing_it->second.refs++;
-  bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
   if (writable) {
     backing_it->second.writable_refs++;
     // Phase 1 for every write the kernel will make through the passthrough
@@ -2034,6 +2067,199 @@ absl::Status DirCacheFS::Fallocate(
   LogPhase3Failure("Fallocate", backing::RefreshAttrsFromFd(ctx_, id, fd));
   ResolveSideEffectXattrs(id, kXattrsChangedByWrite, fd, "Fallocate");
   return req.ReplyErrno(0);
+}
+
+absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
+                                       off_t off_in, fuse_file_info &fi_in,
+                                       fuse_ino_t ino_out, off_t off_out,
+                                       fuse_file_info &fi_out, size_t len,
+                                       int flags) {
+  auto in_it = open_files_.find(fi_in.fh);
+  auto out_it = open_files_.find(fi_out.fh);
+  RET_CHECK(in_it != open_files_.end())
+      << "CopyFileRange from unknown handle " << fi_in.fh;
+  RET_CHECK(out_it != open_files_.end())
+      << "CopyFileRange to unknown handle " << fi_out.fh;
+  const InodeId out = out_it->second.ino;
+  auto in_backing = backing_files_.find(in_it->second.ino);
+  auto out_backing = backing_files_.find(out);
+  RET_CHECK(in_backing != backing_files_.end() &&
+            out_backing != backing_files_.end())
+      << "CopyFileRange on an inode with no BackingFile";
+  const int out_fd = *out_backing->second.fd;
+
+  // Phase 1, as a fallback Write: the destination's attributes and the
+  // xattrs a write removes (none for a removed object, which has no row:
+  // see Setattr). The destination is open for writing, so its attributes
+  // stay unknown until its last release anyway.
+  const bool removed = removed_.contains(out);
+  std::optional<cache::Mutation> mutation;
+  if (!removed) {
+    ABSL_ASSIGN_OR_RETURN(
+        cache::Mutation begun,
+        cache::BeginAttrChange(ctx_, out, kXattrsChangedByWrite));
+    mutation.emplace(std::move(begun));
+  }
+  // Phase 2. Whatever the backing filesystem says is replied (EBADF for a
+  // destination it could only open read-only, EINVAL for overlapping
+  // ranges of one file, ...); the kernel falls back to copying the data
+  // itself for EOPNOTSUPP and EXDEV.
+  absl::StatusOr<size_t> copied = backing::CopyFileRangeFd(
+      *in_backing->second.fd, off_in, out_fd, off_out, len,
+      static_cast<unsigned int>(flags));
+  if (mutation.has_value()) mutation->End();
+  if (removed) {
+    ABSL_RETURN_IF_ERROR(copied.status());
+    return req.ReplyWrite(*copied);
+  }
+  if (!copied.ok()) {
+    backing::RefreshAttrsFromFd(ctx_, out, out_fd).IgnoreError();
+    return copied.status();
+  }
+  // Phase 3: refreshes, as fills. Failures are logged, never replied.
+  RecordWrittenAttrs(out, out_fd, "CopyFileRange");
+  ResolveSideEffectXattrs(out, kXattrsChangedByWrite, out_fd,
+                          "CopyFileRange");
+  return req.ReplyWrite(*copied);
+}
+
+namespace {
+
+// The ioctls Ioctl forwards, and whether each changes the object.
+// FS_IOC_GETFLAGS/SETFLAGS take an int (FUSE's fileattr ioctls send 4
+// bytes; the _IOC size says long), FS_IOC_FSGETXATTR/FSSETXATTR a struct
+// fsxattr, FS_IOC_GETVERSION returns an int (the _IOC size says long).
+struct ForwardedIoctl {
+  unsigned int cmd;
+  bool changes;
+};
+constexpr ForwardedIoctl kForwardedIoctls[] = {
+    {FS_IOC_GETFLAGS, false},   {FS_IOC_SETFLAGS, true},
+    {FS_IOC_FSGETXATTR, false}, {FS_IOC_FSSETXATTR, true},
+    {FS_IOC_GETVERSION, false},
+};
+
+}  // namespace
+
+absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
+                               unsigned int cmd, fuse_file_info *fi,
+                               unsigned int flags, std::string_view in,
+                               size_t out_size) {
+  const InodeId id = static_cast<InodeId>(ino);
+  if (cache::IsStub(id)) return RefuseStub(req, id, "ioctl", ENOTTY);
+  const ForwardedIoctl *forwarded = nullptr;
+  for (const ForwardedIoctl &f : kForwardedIoctls) {
+    if (f.cmd == cmd) forwarded = &f;
+  }
+  // Not forwarded, or from a 32-bit caller (whose argument layout differs:
+  // the kernel only converts the fileattr ones, which arrive native).
+  if (forwarded == nullptr || (flags & FUSE_IOCTL_COMPAT)) {
+    return req.ReplyErrno(ENOTTY);
+  }
+
+  // A real descriptor on the object: its shared backing fd if it is open
+  // (a FS_IOC_GETVERSION on a file the caller opened, or the private open
+  // FUSE makes for the fileattr ioctls), the removed record's (reopened),
+  // or a fresh one by handle. Read-only is enough for every command
+  // forwarded (the kernel checked the caller's right to change the flags,
+  // fileattr_set_prepare, before sending a set).
+  std::optional<FileDescriptor> opened;
+  std::optional<int> fd = OpenFdOf(id);
+  if (!fd.has_value()) {
+    if (auto it = removed_.find(id); it != removed_.end()) {
+      ABSL_ASSIGN_OR_RETURN(
+          opened, backing::ReopenFd(*it->second.fd,
+                                    O_RDONLY | O_NONBLOCK | O_NOCTTY));
+    } else {
+      ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
+      ABSL_ASSIGN_OR_RETURN(
+          opened, backing::OpenNode(ctx_, id,
+                                    O_RDONLY | O_NONBLOCK | O_NOCTTY));
+    }
+    fd = **opened;
+  }
+
+  if (!forwarded->changes) {
+    ABSL_ASSIGN_OR_RETURN(std::string out,
+                          backing::IoctlFd(*fd, cmd, in, out_size));
+    return req.ReplyIoctl(0, out);
+  }
+  // A set changes the inode's flags and its ctime: a mutation of its
+  // attributes (none for a removed object, which has no row: see Setattr).
+  const bool removed = removed_.contains(id);
+  std::optional<cache::Mutation> mutation;
+  if (!removed) {
+    ABSL_ASSIGN_OR_RETURN(cache::Mutation begun,
+                          cache::BeginAttrChange(ctx_, id));
+    mutation.emplace(std::move(begun));
+  }
+  absl::StatusOr<std::string> out = backing::IoctlFd(*fd, cmd, in, out_size);
+  if (mutation.has_value()) mutation->End();
+  if (!removed) {
+    // Phase 3 (or, after a failure, best effort): refreshes, as fills.
+    absl::Status refreshed = backing::RefreshAttrsFromFd(ctx_, id, *fd);
+    if (out.ok()) LogPhase3Failure("Ioctl", refreshed);
+  }
+  ABSL_RETURN_IF_ERROR(out.status());
+  return req.ReplyIoctl(0, *out);
+}
+
+absl::Status DirCacheFS::Tmpfile(FuseRequest &req, fuse_ino_t parent_ino,
+                                 mode_t mode, fuse_file_info &fi) {
+  const InodeId parent = static_cast<InodeId>(parent_ino);
+  if (cache::IsStub(parent)) return RefuseStub(req, parent, "tmpfile");
+  // Missing row -> ESTALE; see RequireAttr().
+  ABSL_RETURN_IF_ERROR(RequireAttr(parent).status());
+  ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor parent_fd,
+      backing::OpenNode(ctx_, parent, O_RDONLY | O_DIRECTORY));
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor fd,
+      backing::TmpfileAt(ctx_, caller, *parent_fd, fi.flags, mode));
+  ABSL_ASSIGN_OR_RETURN(backing::NewChild child,
+                        backing::RecordTmpfile(ctx_, parent, *fd));
+  // The descriptor is the file's shared backing file (it is O_RDWR, and a
+  // brand new inode cannot have another): registered once, as Create's.
+  ABSL_ASSIGN_OR_RETURN(int backing_id, req.PassthroughOpen(*fd));
+  const bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
+  backing_files_.emplace(child.id, BackingFile{.fd = std::move(fd),
+                                               .backing_id = backing_id,
+                                               .writable = true,
+                                               .writable_refs = writable ? 1 : 0,
+                                               .refs = 1});
+  tmpfiles_.insert(child.id);
+  auto undo = [&] {
+    if (writable) EndWriting(child.id);
+    if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
+    backing_files_.erase(child.id);
+    tmpfiles_.erase(child.id);
+  };
+  // Phase 1 for the writes the kernel will make through the passthrough
+  // fd, as in Create (O_TMPFILE always asks for write access).
+  if (writable) {
+    if (absl::Status status = BeginWriting(child.id); !status.ok()) {
+      undo();
+      return status;
+    }
+  }
+  absl::StatusOr<fuse_entry_param> entry = EntryFor(child.id);
+  if (!entry.ok()) {
+    undo();
+    return entry.status();
+  }
+  if (backing_id > 0) fi.backing_id = backing_id;
+  fi.keep_cache = 0;
+  uint64_t handle = next_handle_++;
+  open_files_.emplace(handle, OpenFile{.ino = child.id, .writable = writable});
+  fi.fh = handle;
+  ABSL_RETURN_IF_ERROR(req.ReplyCreate(*entry, fi));
+  ++lookups_[child.id];
+  return absl::OkStatus();
+}
+
+bool DirCacheFS::IsUnnamedTmpfile(fuse_ino_t ino) const {
+  return tmpfiles_.contains(static_cast<InodeId>(ino));
 }
 
 bool DirCacheFS::HasOpenFiles(InodeId id) const {

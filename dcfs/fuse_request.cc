@@ -149,6 +149,15 @@ absl::Status FuseRequest::ReplyWrite(size_t count) {
   return st;
 }
 
+absl::Status FuseRequest::ReplyIoctl(int result, std::string_view buf) {
+  RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  absl::Status st = dcfs::ErrnoToStatus(
+      -fuse_reply_ioctl(*req_, result, buf.data(), buf.size()),
+      "fuse_reply_ioctl");
+  req_ = std::nullopt;
+  return st;
+}
+
 absl::StatusOr<int> FuseRequest::PassthroughOpen(int fd) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   // fuse_passthrough_open() itself never returns negative -- it clamps any

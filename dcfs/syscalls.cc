@@ -481,6 +481,16 @@ absl::Status fallocate(int fd, int mode, off_t offset, off_t len) {
   return absl::OkStatus();
 }
 
+absl::StatusOr<size_t> copy_file_range(int fd_in, off_t off_in, int fd_out,
+                                       off_t off_out, size_t len,
+                                       unsigned int flags) {
+  loff_t in = off_in;
+  loff_t out = off_out;
+  ssize_t nbytes = ::copy_file_range(fd_in, &in, fd_out, &out, len, flags);
+  if (nbytes == -1) return ErrnoToStatus(errno, "copy_file_range");
+  return static_cast<size_t>(nbytes);
+}
+
 absl::StatusOr<size_t> pread(int fd, void *buf, size_t count, off_t offset) {
   ssize_t nbytes = ::pread(fd, buf, count, offset);
   if (nbytes == -1) {

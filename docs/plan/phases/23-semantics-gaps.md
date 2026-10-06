@@ -101,6 +101,37 @@ zero backing reads.
   destination object's attributes (outside the one-directory model);
   tmpfile+linkat is a create (`CreateArrive` with no probe): add it.
 
+**Done (2026-10-07, step-23 branch), with one item impossible.**
+- copy_file_range: `DirCacheFS::CopyFileRange` on the shared backing fds
+  (phase 1 / copy / refreshes as a fallback write). On btrfs and xfs the
+  copy shares extents as natively (`copy_test`: `shared=1` through dcfs,
+  `shared=0` before).
+- **FICLONE/FICLONERANGE/FIDEDUPERANGE cannot be done**: the VFS handles
+  them (`do_vfs_ioctl` -> `vfs_clone_file_range`), FUSE has no
+  `remap_file_range`, so they never reach a FUSE server and fail
+  EOPNOTSUPP on every backing filesystem (ext4's own answer too; xfs and
+  btrfs differ). It needs a kernel FUSE op; the ioctl path could not carry
+  it anyway (the source fd is a number in the caller's process).
+  `cp --reflink=auto` gets copy_file_range's sharing.
+- ioctls: allowlist FS_IOC_GETFLAGS/SETFLAGS, FSGETXATTR/FSSETXATTR (the
+  VFS fileattr calls: FUSE sends them as FUSE_IOCTL on a private
+  OPEN/RELEASE) and FS_IOC_GETVERSION; a set is a phase 1 + refresh;
+  anything else ENOTTY; FUSE_CAP_IOCTL_DIR requested. Found: the shared
+  backing fd may predate `chattr +i` (the private open's RELEASE is
+  asynchronous), so a writable OPEN now re-checks writability with a reopen
+  of that fd with its access mode.
+- O_TMPFILE: a row without a dentry (not an in-memory record: the nodeid
+  needs a row's id, and the row-lifetime rule already retires it), linked
+  by an ordinary LINK; the model has `linkcreate` (a create whose phase 3
+  needs no probe); the recorder maps a LINK of an unnamed tmpfile
+  (`Op::kLinkTmpfile`) to it; `dir_cache_fs_trace_test` validates
+  TmpfileLinkedIntoANameIsACreate (EEXIST and success). States: small
+  773,371, large 7,238,097, nolock 6,036,816; every known bug still found.
+- Error paths: harness unit tests (CopyFileRange EBADF, ioctl ENOTTY,
+  COMPAT, ESTALE, a refused set; tmpfile in a stub and a stale parent;
+  removed destinations). Not covered: the tmpfile's undo after a failed
+  BeginWriting (no fault point short of Phase 8's sweep).
+
 ## 23.5 Boundary stubs now (pulled forward from Phase 15.4)
 
 russ (2026-10-07): submounts and btrfs subvolumes must appear in readdir,

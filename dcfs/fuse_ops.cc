@@ -152,8 +152,13 @@ void Rename(
 void Link(
     fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent,
     const char *newname) {
+  // The link of an unnamed O_TMPFILE file is, to the new parent, a create
+  // (the protocol events' kLinkTmpfile).
+  const DirCacheFS *fs = static_cast<DirCacheFS *>(fuse_req_userdata(req));
+  CHECK_NE(fs, nullptr);
   Serve(req,
-        {.op = events::Op::kLink,
+        {.op = fs->IsUnnamedTmpfile(ino) ? events::Op::kLinkTmpfile
+                                         : events::Op::kLink,
          .ino = Ino(ino),
          .newparent = Ino(newparent),
          .newname = newname},
@@ -318,6 +323,39 @@ void Fallocate(
         });
 }
 
+void CopyFileRange(fuse_req_t req, fuse_ino_t ino_in, off_t off_in,
+                   fuse_file_info *fi_in, fuse_ino_t ino_out, off_t off_out,
+                   fuse_file_info *fi_out, size_t len, int flags) {
+  CHECK_NE(fi_in, nullptr);
+  CHECK_NE(fi_out, nullptr);
+  Serve(req, {.op = events::Op::kCopyFileRange, .ino = Ino(ino_out)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.CopyFileRange(fr, ino_in, off_in, *fi_in, ino_out,
+                                  off_out, *fi_out, len, flags);
+        });
+}
+
+void Ioctl(fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
+           fuse_file_info *fi, unsigned flags, const void *in_buf,
+           size_t in_bufsz, size_t out_bufsz) {
+  Serve(req, {.op = events::Op::kIoctl, .ino = Ino(ino)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Ioctl(
+              fr, ino, cmd, fi, flags,
+              std::string_view(static_cast<const char *>(in_buf), in_bufsz),
+              out_bufsz);
+        });
+}
+
+void Tmpfile(fuse_req_t req, fuse_ino_t parent, mode_t mode,
+             fuse_file_info *fi) {
+  CHECK_NE(fi, nullptr);
+  Serve(req, {.op = events::Op::kTmpfile, .ino = Ino(parent)},
+        [&](DirCacheFS &fs, FuseRequest &fr) {
+          return fs.Tmpfile(fr, parent, mode, *fi);
+        });
+}
+
 }  // namespace
 
 fuse_lowlevel_ops MakeFuseOps() {
@@ -356,6 +394,9 @@ fuse_lowlevel_ops MakeFuseOps() {
   ops.access = Access;
   ops.create = Create;
   ops.fallocate = Fallocate;
+  ops.copy_file_range = CopyFileRange;
+  ops.ioctl = Ioctl;
+  ops.tmpfile = Tmpfile;
   return ops;
 }
 

@@ -648,7 +648,7 @@ WAL. The phase 1 of each mutation kind is one named function:
 | unlink, rmdir | the name unknown; parent's and child's attributes unknown (after verifying the resolved child, see below) | parent, child |
 | rename (incl. `RENAME_NOREPLACE`, `RENAME_EXCHANGE`) | both names unknown; attributes of both parents, the source and any replaced target unknown | all of those |
 | link | the new name unknown; new parent's and source's attributes unknown | new parent, source |
-| setattr, writable open, fallback write, fallocate | attributes unknown; side-effect xattrs unknown | the inode |
+| setattr, writable open, fallback write, fallocate, copy_file_range (its destination), an ioctl that sets flags | attributes unknown; side-effect xattrs unknown | the inode |
 | setxattr, removexattr | that one xattr name unknown; attributes unknown (ctime changes) | the inode |
 
 **The fast path.** If every inode a phase 1 names is already durably
@@ -1078,6 +1078,64 @@ What is left:
   passthrough shared writable mappings until `munmap`, so that RELEASE
   means no more writers. Its feasibility is unverified.
 
+### copy_file_range, reflinks, ioctls and O_TMPFILE
+
+Step 23.4.
+
+- **`copy_file_range`** (`DirCacheFS::CopyFileRange`, `FUSE_COPY_FILE_RANGE`)
+  is the backing filesystem's own `copy_file_range(2)` on the two files'
+  shared backing descriptors, so btrfs and xfs share the extents (a
+  reflink) and ext4 copies in the kernel. The destination's bookkeeping is
+  a fallback write's: phase 1 (attributes and `security.capability`
+  unknown, durably dirty), the copy, then refreshes as fills. An error is
+  replied as the backing filesystem gives it; for `EOPNOTSUPP` and `EXDEV`
+  the kernel falls back to copying the data itself.
+- **Reflinks** (`FICLONE`, `FICLONERANGE`, `FIDEDUPERANGE`) never reach
+  dcfs: `do_vfs_ioctl` handles them through `remap_file_range`, which FUSE
+  does not have, so they fail with `EOPNOTSUPP` whatever the backing
+  filesystem (verified by `copy_test` on all three). Doing them would need
+  that kernel operation; the ioctl path cannot carry them (its argument,
+  the source descriptor, is a number in the caller's process).
+- **Ioctls** (`DirCacheFS::Ioctl`): an allowlist is forwarded to a real
+  descriptor on the backing object (its shared backing descriptor if open,
+  else one by handle): `FS_IOC_GETFLAGS`/`SETFLAGS` and
+  `FS_IOC_FSGETXATTR`/`FSSETXATTR`, which the VFS's fileattr calls
+  (`chattr`, `lsattr`) send as `FUSE_IOCTL` on a private open after
+  checking the caller's right to change the flags, and
+  `FS_IOC_GETVERSION`. Their arguments are plain buffers. A set is a
+  mutation of the object's attributes (its ctime changes): phase 1, the
+  ioctl, a refresh. Everything else, and anything from a 32-bit caller, is
+  `ENOTTY`. dcfs requests `FUSE_CAP_IOCTL_DIR` for directories.
+- **Writable opens and the flags.** The backing filesystem decides at open
+  time whether a file may be written (immutable, append-only, a read-only
+  filesystem), and the kernel's check on the FUSE side does not see those
+  flags. Since every open of an inode shares one backing descriptor, which
+  may predate a `chattr +i` or be read-only only because `O_RDWR` was
+  refused while this open's `O_WRONLY | O_APPEND` would be allowed,
+  `DirCacheFS::Open` asks the backing filesystem again for a writable open
+  unless it has just opened that descriptor read-write: a reopen of the
+  shared descriptor through `/proc/self/fd` with the open's access mode,
+  refused as the backing filesystem refuses it. (Passthrough opens its own
+  backing file with the caller's flags, from dcfs's descriptor's path, and
+  without that check.)
+- **`O_TMPFILE`** (`DirCacheFS::Tmpfile`, `FUSE_TMPFILE`): an unnamed file
+  made in the backing directory with `openat(".", O_TMPFILE | O_RDWR)`, as
+  the caller, and recorded as a row without a dentry
+  (`backing::RecordTmpfile`: dirty, its attributes unknown while it is
+  open for writing). The plan said "an in-memory record"; a row is simpler
+  and safe: the nodeid has to come from somewhere rows never collide with,
+  and the row-lifetime rule already retires the row at the last release
+  with `nlink` 0 (into a `removed_` record while the kernel holds the
+  nodeid). Creating it changes nothing cached about the directory (ext4,
+  xfs and btrfs change neither its entries nor its times). Linking it into
+  a name (`linkat` with `AT_EMPTY_PATH`, or of `/proc/self/fd/<n>`) is an
+  ordinary `LINK` of that row (`open_by_handle_at` reaches the unlinked
+  inode the descriptor holds), which to the directory is a create whose
+  object is already known: the model's `linkcreate` (a create with no
+  probe), as which `fuse_ops.cc` reports it to the protocol events
+  (`DirCacheFS::IsUnnamedTmpfile`). An `O_EXCL` one cannot be linked (the
+  kernel refuses before asking dcfs).
+
 ## Out-of-band change detection
 
 dcfs requires exclusive access and does not look for changes made behind
@@ -1393,6 +1451,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `setattr_test` | chmod (file, directory, FIFO; `EOPNOTSUPP` on a symlink), chown, truncate and utimes land on the backing filesystem and are then served from the cache with zero sectors, also after a restart. |
 | `create_test` | mkdir, create, mknod, symlink and link, including error cases; the whole tree's listing agrees with the backing filesystem; zero sectors for a full metadata pass over everything created; `EEXIST` for a boundary stub's name and `ENOTSUP` inside it. |
 | `rename_test` | unlink (including of an open file, whose row and handle live until the last close), rmdir, and every rename variant (across directories, over an existing file, `RENAME_NOREPLACE`, `RENAME_EXCHANGE`, a directory with its cached subtree); negative entries and completeness are recorded, not re-read. |
+| `copy_test` | `copy_file_range` through dcfs shares extents on btrfs and xfs as natively and leaves the copy's attributes cached; `FICLONE` fails `EOPNOTSUPP` (the VFS's answer); `lsattr`/`chattr` (`FS_IOC_GETFLAGS`/`SETFLAGS`, `FSGETXATTR`) and `FS_IOC_GETVERSION` match the backing file, `chattr +i` is enforced (also for a file already open for writing), other ioctls get `ENOTTY`; `O_TMPFILE` linked by `AT_EMPTY_PATH` and through `/proc/self/fd`, `O_EXCL` and never linked, each as on the backing filesystem; a warm metadata pass reads nothing. |
 | `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; a store through a shared mapping after the last close is reconciled at the inode's last `FORGET` (no out-of-band warning); served from the cache after a restart. |
 | `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |

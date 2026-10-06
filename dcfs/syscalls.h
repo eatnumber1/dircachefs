@@ -141,6 +141,12 @@ absl::Status fdatasync(int fd);
 absl::Status syncfs(int fd);
 absl::Status fallocate(int fd, int mode, off_t offset, off_t len);
 absl::StatusOr<size_t> pread(int fd, void *buf, size_t count, off_t offset);
+// copy_file_range(2) of up to `len` bytes from `fd_in` at `off_in` to
+// `fd_out` at `off_out` (neither file's offset moves); returns how many
+// bytes it copied (0 at the end of `fd_in`).
+absl::StatusOr<size_t> copy_file_range(int fd_in, off_t off_in, int fd_out,
+                                       off_t off_out, size_t len,
+                                       unsigned int flags);
 absl::StatusOr<size_t> pwrite(int fd, const void *buf, size_t count,
                               off_t offset);
 absl::StatusOr<size_t> write(int fd, const void *buf, size_t count);

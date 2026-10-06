@@ -313,6 +313,19 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 23.4: copy_file_range (shares extents on btrfs and xfs), FICLONE
+# (EOPNOTSUPP: the VFS answers it), the forwarded ioctls (chattr +i) and
+# O_TMPFILE with linkat, each against the backing filesystem -- see
+# guest/copy.sh.
+qemu_test_matrix(
+    name = "copy_test",
+    disks = [("vdb", "ext4", "320M")],
+    guest_script = "guest/copy.sh",
+    size = "small",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
 # Step 9: file names are bytes. names_test runs the whole name corpus
 # (guest/names.sh, tools/testutil.c's names-* subcommands) on each backing
 # filesystem; names_random_test creates 1,000 seeded random names, half in

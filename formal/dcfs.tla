@@ -45,7 +45,7 @@ CONSTANTS
     BugRenameStaleSource        \* finding rename_stale_source (R4)
 
 AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
-             "create", "unlink", "rename", "sync"}
+             "create", "linkcreate", "unlink", "rename", "sync"}
 
 ASSUME /\ Names # {} /\ IsFiniteSet(Names)
        /\ Procs # {} /\ IsFiniteSet(Procs)
@@ -447,7 +447,12 @@ InFlight(r, next) ==
     [r EXCEPT !.pc = next, !.mseq = seq + 1, !.res = NoRes,
               !.was = BugRestoreComplete /\ dbCur.complete]
 
-(* Create (DirCacheFS::CreateChild; Mknod, Mkdir, Symlink, Create). *)
+(* Create (DirCacheFS::CreateChild; Mknod, Mkdir, Symlink, Create), and   *)
+(* "linkcreate": the link of an unnamed O_TMPFILE file into D (step 23.4; *)
+(* DirCacheFS::Link of a file Tmpfile made). To D the second is a create  *)
+(* too: a new object appears under a name that did not exist; the only    *)
+(* difference is that the code knows which object, so its phase 3 needs  *)
+(* no probe (backing::RecordNewLink links the name to the file's row).    *)
 
 \* Phase 1 (cache::BeginCreate): the name unknown, D's attributes unknown
 \* (not with BugCreateKeepsParentAttrs), D dirty. Then OpenNode(D) and the
@@ -457,7 +462,9 @@ C1From(p, r) ==
     /\ Syscall(p, InFlight(r, "C_sys"))
     /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
 
-\* Phase 2: mkdirat/openat(O_CREAT)/...: EEXIST if the name exists.
+\* Phase 2: mkdirat/openat(O_CREAT)/... (or a linkcreate's linkat): EEXIST
+\* if the name exists. A linkcreate's object is the unnamed file, new to D
+\* (a fresh identity), and its phase 3 is next, knowing it.
 CSys(p) ==
     /\ At(p, "C_sys")
     /\ LET n == ps[p].n IN
@@ -465,7 +472,10 @@ CSys(p) ==
        THEN /\ BWrite([names |-> [bCur.names EXCEPT ![n] = Obj(stamp)],
                        ver |-> stamp])
             /\ stamp' = stamp + 1
-            /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "C_probe"])
+            /\ AfterSyscall(p,
+                   IF ps[p].kind = "linkcreate"
+                   THEN [ps[p] EXCEPT !.pc = "C_rec", !.rdObj = Obj(stamp)]
+                   ELSE [ps[p] EXCEPT !.pc = "C_probe"])
        ELSE /\ UNCHANGED <<bCur, bOpts, stamp>>
             /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "C_fail"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
@@ -706,6 +716,11 @@ Arrive(p) ==
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n \in Names :
                C1From(p, NewReq("create", n, None, "C1", None, None,
+                                KernelDirLock))
+       \/ /\ "linkcreate" \in Requests /\ LockFree(KernelDirLock)
+          /\ muts < MaxMutations /\ muts' = muts + 1
+          /\ \E n \in Names :
+               C1From(p, NewReq("linkcreate", n, None, "C1", None, None,
                                 KernelDirLock))
        \/ /\ "unlink" \in Requests /\ LockFree(KernelDirLock)
           /\ muts < MaxMutations /\ muts' = muts + 1

@@ -611,9 +611,17 @@ recovery protocol, concurrency, and the test strategy.
   backing file's access time, but dcfs keeps serving the one it last
   recorded. `st_blocks` can also lag behind delayed allocation until the
   file's attributes are next refreshed.
-- **Not implemented:** `O_TMPFILE`, `copy_file_range`, reflinks
-  (`FICLONE`) and other ioctls; tools fall back to plain reads and writes.
-  File locks are handled by the kernel, locally within the mount.
+- **Reflinks fail with `EOPNOTSUPP`; most ioctls with `ENOTTY`.** The
+  kernel answers `FICLONE`, `FICLONERANGE` and `FIDEDUPERANGE` itself and
+  FUSE has no way to forward them, so `cp --reflink=always` fails on every
+  backing filesystem. `copy_file_range` does reach the backing filesystem,
+  which on btrfs and xfs shares the extents as a reflink would:
+  `cp --reflink=auto` (coreutils' default) gets that. Of the other
+  ioctls only `FS_IOC_GETFLAGS`/`FS_IOC_SETFLAGS` and
+  `FS_IOC_FSGETXATTR`/`FS_IOC_FSSETXATTR` (`chattr`, `lsattr`) and
+  `FS_IOC_GETVERSION` reach the backing file; any other fails with
+  `ENOTTY`. `O_TMPFILE`, and linking such a file into a name, work. File
+  locks are handled by the kernel, locally within the mount.
 - **Filesystem coverage.** ext4, xfs and btrfs are all exercised by the
   test suite (step 5.2). ZFS is refused until it supports
   `FS_IOC_GETFSUUID`.

@@ -121,9 +121,11 @@ whose names are the constant `Names`, and:
 - for both disks, every state a crash may leave (see `bOpts`, `dbOpts`);
 - the daemon's memory: the fill guards, `Context::dirty.durable`, and the
   requests in flight, each a small program counter with its local state;
-- requests: lookup, readdir, readdirplus, getattr of D, create, unlink,
-  rename (within D), and sync points; crashes at any moment; startup
-  (`StartRun`, `RecoverDirty`) and clean shutdown (`FinishRun`).
+- requests: lookup, readdir, readdirplus, getattr of D, create, linkcreate
+  (the link of an unnamed `O_TMPFILE` file into D, step 23.4: a create
+  whose phase 3 needs no probe), unlink, rename (within D), and sync
+  points; crashes at any moment; startup (`StartRun`, `RecoverDirty`) and
+  clean shutdown (`FinishRun`).
 
 **Concurrency**: requests interleave at every backing syscall, as they will
 under the planned coroutines (`docs/design.md`, "Concurrency, today and
@@ -243,9 +245,9 @@ prints. A request's first step runs inside `Arrive`.
 | `ReaddirplusStat`, `ReaddirplusFill` | Readdirplus: statx of D, then fill D's attributes and reply | same | `DirCacheFS::Readdirplus`, `EntryFor` |
 | `GetattrStat`, `GetattrFill` | Getattr of D with unknown attributes: statx, fill if `CanFill(D)`; reply what was read (a getattr with valid attributes is served in `Arrive`) | Concurrency (fill guards) | `DirCacheFS::Getattr`, `EntryFor`, `backing::RefreshAttrs`, `FillAttrs` |
 | (create, first step) | Phase 1: the name and D's attributes unknown, D dirty, committed kSync unless D is durably dirty (fast path) | The write-through protocol: Phase 1 | `DirCacheFS::CreateChild`, `cache::BeginCreate`, `BeginMutation` |
-| `CreateSyscall` | Phase 2: mkdirat/openat(O_CREAT)...; `EEXIST` if the name exists | Phase 2 | `backing::MkdirAt` etc. |
-| `CreateProbe` | Probe the new name | Phase 3 | `backing::RecordNewChild` phase A |
-| `CreatePhase3` | Record the dentry if `Owns(D)`; `Mutation::End`; fill snapshot for D's refresh | Phase 3, Concurrency (`Owns`) | `RecordNewChild` phase B, `Mutation::Owns`, `End` |
+| `CreateSyscall` | Phase 2: mkdirat/openat(O_CREAT)... (a linkcreate: linkat of the unnamed file, which is new to D, and its phase 3 comes next, knowing it); `EEXIST` if the name exists | Phase 2 | `backing::MkdirAt` etc.; `backing::LinkAt` |
+| `CreateProbe` | Probe the new name (not a linkcreate's) | Phase 3 | `backing::RecordNewChild` phase A |
+| `CreatePhase3` | Record the dentry if `Owns(D)`; `Mutation::End`; fill snapshot for D's refresh | Phase 3, Concurrency (`Owns`) | `RecordNewChild` phase B (a linkcreate: `backing::RecordNewLink`), `Mutation::Owns`, `End` |
 | `CreateStat`, `CreateFill` | Refresh D's attributes as a fill, reply | Phase 3 | `backing::RefreshAttrsFromFd` |
 | `CreateFailed` | Failed phase 2: `End`, re-resolve the name, reply the error | Phase 2 | `ReresolveAfterFailure` |
 | `UnlinkPhase1` | After resolving the name (from a fill snapshot, `rsnap`): `ENOENT`, or verify that no mutation of D began or ended since the snapshot and none is in flight; if so, phase 1 (name and D's attributes unknown, D dirty); if not, resolve again (at most 3 times, then `EAGAIN`) | Phase 1 | `DirCacheFS::RemoveChild`, `cache::BeginRemove` (`resolved`) |
@@ -282,14 +284,15 @@ prints. A request's first step runs inside `Arrive`.
 `MC.tla` is the root module every configuration checks: it extends `dcfs`
 and defines the request sets and the `View` the configurations use. Times
 are from russ's machine (4 cores, loaded); the state counts are what TLC
-reports as distinct states (since 12.2b's `RecoverForgetting`).
+reports as distinct states (since step 23.4's `linkcreate`, run of
+2026-10-07; 12.2b's `RecoverForgetting` had small at 687,731).
 
 | Configuration | Test (tier) | Bounds | States | Time |
 |---|---|---|---|---|
-| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 687,731 | ~2-3 min |
-| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 72,604 | ~30 s |
-| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 6,343,605 | ~13 min |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 5,103,028 | ~7-8 min |
+| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants | 773,371 | ~1 min |
+| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 75,184 | ~10 s |
+| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 7,238,097 | ~8 min |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 6,036,816 | ~5 min |
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
@@ -485,8 +488,13 @@ Which requests are which model request, in D's trace:
   OPENDIR(D) a getattr; READDIR(D) a readdir; READDIRPLUS(D) at offset 0
   a readdirplus, at a later offset a readdir (a continuation has no "."
   entry, so it never refreshes D's attributes); MKNOD/MKDIR/SYMLINK/CREATE
-  in D a create; UNLINK/RMDIR in D an unlink; RENAME within D with no flags
-  a rename.
+  in D a create; a LINK into D of an unnamed `O_TMPFILE` file a linkcreate
+  (`events::Op::kLinkTmpfile`, which `fuse_ops.cc` picks when
+  `DirCacheFS::IsUnnamedTmpfile`; step 23.4); UNLINK/RMDIR in D an unlink;
+  RENAME within D with no flags a rename. TMPFILE in D is no request of
+  D's (it changes nothing cached about D), nor are COPY_FILE_RANGE and
+  IOCTL of a file (a file's attributes are outside the model); an IOCTL of
+  D that sets its flags is a `dir-attrs` cut.
 - A getattr of D inside another request (an `EntryFor(D)` replying D's
   entry from its parent's lookup, readdirplus or ".." lookup) is a getattr
   request of its own. A refresh of D's unknown attributes that no request
@@ -627,8 +635,8 @@ categories:
 | Category | Why the model cannot follow | Allowed in |
 |---|---|---|
 | `cross-directory-rename`, `rename-flags` | the model's rename is within D, flags 0 | crash, rename |
-| `link` | the model's objects never get a second name | crash, rename, create |
-| `dir-attrs`, `dir-itself` | the model has no mutation of D's own attributes; `dir-itself`: D named as an object (removed, moved) by a request that resolved one of its names to D (else `unexplained`) | crash (both), rename, create (`dir-itself`) |
+| `link` | the model's objects never get a second name (an unnamed `O_TMPFILE` file's first one is a linkcreate, not a cut) | crash, rename, create |
+| `dir-attrs`, `dir-itself` | the model has no mutation of D's own attributes (a setattr, xattr change or flag-setting ioctl of D); `dir-itself`: D named as an object (removed, moved) by a request that resolved one of its names to D (else `unexplained`) | crash (both), rename, create (`dir-itself`) |
 | `boundary` | a refused mount or subvolume boundary is not modelled | rename, create |
 | `out-of-band` | not modelled (`ReconcileAttrs`) | create |
 | `invalidated` | a forgotten inode's dentries became unknown (`InvalidateInode` after `ESTALE`) | none |
@@ -654,7 +662,13 @@ renames with flags and syscall failures.
   mkdir in the same directory keeps invalidating until they give up
   (`*GivesUpWhile*`: phase 1's retry and EAGAIN, readdir's), the common
   requests in a row (`CommonRequestsMatchTheModel`), refreshes of unknown
-  attributes (`UnknownAttributesAreRefreshed`), and the scenarios the
+  attributes (`UnknownAttributesAreRefreshed`), an `O_TMPFILE` file linked
+  into a name, after a link onto an existing one failed
+  (`TmpfileLinkedIntoANameIsACreate`: linkcreate's begin, `EEXIST` and
+  success), a written file's reconciliation at its last FORGET
+  (`LastForgetOfAWrittenFileReconcilesItsAttributes`: a file's mutation
+  outside any request, which no directory's trace may show), and the
+  scenarios the
   fault builds break (`CreateMarksItsNameUnknown`, `TraceScenarioUnlink`,
   `TraceScenarioMkdirDuringSync`), whose traces must validate here.
   `//dcfs/testonly:trace_recorder_test` tests the recorder's own decisions
@@ -707,7 +721,7 @@ the run of 2026-10-06). `Arrive` is split by request kind.
 | `Arrive`: lookup, unlink, rename (`T_ArriveLookup`) | harness, crash, power, rename, create |
 | `Arrive`: readdir, readdirplus (`T_ArriveReaddir`) | harness, crash, power, rename, create |
 | `Arrive`: getattr (`T_ArriveGetattr`) | harness, crash, power, rename, create |
-| `Arrive`: create (`T_ArriveCreate`) | harness, crash, power, create |
+| `Arrive`: create (`T_ArriveCreate`; linkcreate in the harness) | harness, crash, power, create |
 | `Arrive`: sync (`T_ArriveSync`) | harness, power, rename |
 | `LookupStep` | harness, power |
 | `ResolveProbe`, `ResolveCommit` | harness, power |

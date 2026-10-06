@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -759,6 +760,25 @@ absl::Status FallocateFd(int fd, int mode, off_t offset, off_t length) {
   return syscalls::fallocate(fd, mode, offset, length);
 }
 
+absl::StatusOr<size_t> CopyFileRangeFd(int fd_in, off_t off_in, int fd_out,
+                                       off_t off_out, size_t len,
+                                       unsigned int flags) {
+  return syscalls::copy_file_range(fd_in, off_in, fd_out, off_out, len, flags);
+}
+
+absl::StatusOr<std::string> IoctlFd(int fd, unsigned int cmd,
+                                    std::string_view in, size_t out_size) {
+  // Large enough for every forwarded command's argument (struct fsxattr is
+  // the largest, 28 bytes); the backing filesystem reads and writes at most
+  // that much, whatever sizes the request claims.
+  std::string buf(std::max<size_t>({in.size(), out_size, 64}), '\0');
+  std::copy(in.begin(), in.end(), buf.begin());
+  ABSL_RETURN_IF_ERROR(
+      syscalls::ioctl(fd, static_cast<int>(cmd), buf.data()).status());
+  buf.resize(out_size);
+  return buf;
+}
+
 absl::Status FsyncFd(int fd, bool datasync) {
   return datasync ? syscalls::fdatasync(fd) : syscalls::fsync(fd);
 }
@@ -1439,6 +1459,43 @@ absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, const Credentials &caller,
   return AsCaller(caller, [&] {
     return syscalls::openat(parent_fd, name, flags | O_CREAT, mode);
   });
+}
+
+absl::StatusOr<FileDescriptor> TmpfileAt(Context &ctx,
+                                         const Credentials &caller,
+                                         int parent_fd, int flags,
+                                         mode_t mode) {
+  return AsCaller(caller, [&] {
+    return syscalls::openat(parent_fd, ".",
+                            O_TMPFILE | O_RDWR | (flags & O_EXCL), mode);
+  });
+}
+
+absl::StatusOr<NewChild> RecordTmpfile(Context &ctx, InodeId parent, int fd) {
+  const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+  ABSL_ASSIGN_OR_RETURN(struct statx stx,
+                        syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr,
+                        cache::GetAttr(ctx, parent));
+  ABSL_ASSIGN_OR_RETURN(ChildRecord record,
+                        ProbeObject(fd, "", parent_attr.device, stx));
+  NewChild result;
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(
+        cache::UpsertResult row,
+        cache::UpsertInode(ctx, record.handle, record.stx, record.backing_gen));
+    if (cache::CanFill(ctx, snapshot, row.id)) {
+      ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
+    }
+    // Dirty as a created row is (RecordNewChild): a power loss that keeps
+    // this transaction and loses the file must not serve its attributes.
+    const InodeId ids[] = {row.id};
+    ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, ids));
+    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+    result = NewChild{.id = row.id, .fuse_gen = row.fuse_gen, .stx = record.stx};
+    return absl::OkStatus();
+  }));
+  return result;
 }
 
 absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,

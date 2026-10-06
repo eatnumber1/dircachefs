@@ -35,6 +35,8 @@
 #include "dcfs/dir_cache_fs.h"
 
 #include <fcntl.h>
+#include <linux/fs.h>
+#include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
@@ -272,7 +274,7 @@ class DirCacheFSTest : public ::testing::Test {
     // What DirCacheFS::Init requires (it refuses the INIT without POSIX
     // ACLs and DONT_MASK) and what it uses.
     init_in.flags = FUSE_POSIX_ACL | FUSE_DONT_MASK | FUSE_DO_READDIRPLUS |
-                    FUSE_EXPORT_SUPPORT;
+                    FUSE_EXPORT_SUPPORT | FUSE_IOCTL_DIR;
     std::string body;
     AppendBytes(body, init_in);
     Reply reply = Send(FUSE_INIT, 0, body);
@@ -535,6 +537,67 @@ class DirCacheFSTest : public ::testing::Test {
     fbuf.mem = buf.data();
     fbuf.size = buf.size();
     fuse_session_process_buf(se_, &fbuf);
+  }
+
+  // A TMPFILE in `parent` with `flags`: the new inode and file handle (0
+  // on error).
+  Created Tmpfile(InodeId parent, int flags) {
+    struct fuse_create_in in = {};
+    in.flags = static_cast<uint32_t>(flags);
+    in.mode = S_IFREG | 0640;
+    std::string body;
+    AppendBytes(body, in);
+    body.append("/");
+    body.push_back('\0');
+    Created created{
+        .reply = Send(FUSE_TMPFILE, static_cast<uint64_t>(parent), body)};
+    struct fuse_entry_out entry {};
+    struct fuse_open_out open {};
+    if (created.reply.error != 0 ||
+        created.reply.payload.size() < sizeof(entry) + sizeof(open)) {
+      return created;
+    }
+    std::memcpy(&entry, created.reply.payload.data(), sizeof(entry));
+    std::memcpy(&open, created.reply.payload.data() + sizeof(entry),
+                sizeof(open));
+    created.id = static_cast<InodeId>(entry.nodeid);
+    created.fh = open.fh;
+    return created;
+  }
+
+  // A COPY_FILE_RANGE of `len` bytes from the start of open file (in,
+  // fh_in) to the start of (out, fh_out); the reply's count, or its errno
+  // negated.
+  int64_t CopyFileRange(InodeId in, uint64_t fh_in, InodeId out,
+                        uint64_t fh_out, uint64_t len) {
+    struct fuse_copy_file_range_in arg = {};
+    arg.fh_in = fh_in;
+    arg.nodeid_out = static_cast<uint64_t>(out);
+    arg.fh_out = fh_out;
+    arg.len = len;
+    std::string body;
+    AppendBytes(body, arg);
+    Reply reply = Send(FUSE_COPY_FILE_RANGE, static_cast<uint64_t>(in), body);
+    if (reply.error != 0) return reply.error;
+    struct fuse_write_out written {};
+    if (reply.payload.size() < sizeof(written)) return -EIO;
+    std::memcpy(&written, reply.payload.data(), sizeof(written));
+    return written.size;
+  }
+
+  // An IOCTL of `id` with `cmd`, input `in` and `out_size` bytes of output:
+  // the reply (its payload a fuse_ioctl_out and the output).
+  Reply Ioctl(InodeId id, unsigned int cmd, std::string_view in,
+              uint32_t out_size, uint32_t flags = 0) {
+    struct fuse_ioctl_in arg = {};
+    arg.cmd = cmd;
+    arg.flags = flags;
+    arg.in_size = static_cast<uint32_t>(in.size());
+    arg.out_size = out_size;
+    std::string body;
+    AppendBytes(body, arg);
+    body.append(in);
+    return Send(FUSE_IOCTL, static_cast<uint64_t>(id), body);
   }
 
   Reply Opendir(InodeId id) {
@@ -1294,6 +1357,196 @@ TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
   EXPECT_EQ(Cached(kRootInode, "new").first, LookupResult::kFound);
 }
 
+
+// --- copy_file_range, ioctls, O_TMPFILE (step 23.4) -----------------------
+
+// A writable open that shares a backing fd opened before the file became
+// immutable is refused, as a fresh open by the backing filesystem is.
+TEST_F(DirCacheFSTest, WritableOpenOfAnImmutableFileIsRefused) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  int flags = 0;
+  const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(raw, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  const int immutable = flags | FS_IMMUTABLE_FL;
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
+  auto [ro, ro_fh] = Open(f, O_RDONLY);
+  EXPECT_EQ(ro.error, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  auto [rw, rw_fh] = Open(f, O_WRONLY);
+  EXPECT_EQ(rw.error, 0);
+  ::close(raw);
+  for (uint64_t h : {fh, ro_fh, rw_fh}) {
+    if (h != 0) {
+      EXPECT_EQ(Release(f, h).error, 0);
+    }
+  }
+}
+
+// An unnamed file (O_TMPFILE) has a row but no name; linking it into a
+// name is, to the directory, a create (the model's "linkcreate", which
+// trace validation checks here: the second link is EEXIST).
+TEST_F(DirCacheFSTest, TmpfileLinkedIntoANameIsACreate) {
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  WriteFile(Path("d/taken"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(Id("taken", d), IsOk());  // Populates d.
+  StartTrace();
+  Created tmp = Tmpfile(d, O_RDWR);
+  ASSERT_EQ(tmp.reply.error, 0);
+  EXPECT_TRUE(fs_->IsUnnamedTmpfile(static_cast<fuse_ino_t>(tmp.id)));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, tmp.id));
+  EXPECT_FALSE(attr.valid);  // Open for writing, and nlink 0.
+  EXPECT_THAT(Dirty(), Contains(tmp.id));
+  EXPECT_THAT(List(d, true),
+              IsOkAndHolds(UnorderedElementsAre(".", "..", "taken")));
+
+  EXPECT_EQ(Link(tmp.id, d, "taken").error, -EEXIST);
+  EXPECT_TRUE(fs_->IsUnnamedTmpfile(static_cast<fuse_ino_t>(tmp.id)));
+  EXPECT_EQ(Link(tmp.id, d, "named").error, 0);
+  EXPECT_FALSE(fs_->IsUnnamedTmpfile(static_cast<fuse_ino_t>(tmp.id)));
+  ASSERT_OK_AND_ASSIGN(attr, cache::GetAttr(ctx_, tmp.id));
+  EXPECT_EQ(Cached(d, "named"),
+            std::make_pair(LookupResult::kFound, attr.backing_ino));
+  EXPECT_EQ(Release(tmp.id, tmp.fh).error, 0);
+  ASSERT_OK_AND_ASSIGN(attr, cache::GetAttr(ctx_, tmp.id));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_nlink, 1u);
+  EXPECT_EQ(InoOf(Path("d/named")), attr.backing_ino);
+}
+
+// One never linked: its last release retires its row (nlink 0), and the
+// kernel's reference keeps it readable until the last FORGET.
+TEST_F(DirCacheFSTest, TmpfileNeverLinkedLeavesNoRow) {
+  Start();
+  Created tmp = Tmpfile(kRootInode, O_WRONLY | O_EXCL);
+  ASSERT_EQ(tmp.reply.error, 0);
+  EXPECT_EQ(Release(tmp.id, tmp.fh).error, 0);
+  EXPECT_THAT(cache::GetAttr(ctx_, tmp.id).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_FALSE(fs_->IsUnnamedTmpfile(static_cast<fuse_ino_t>(tmp.id)));
+  auto [getattr, attr] = Getattr(tmp.id);
+  ASSERT_EQ(getattr.error, 0);
+  EXPECT_EQ(attr.nlink, 0u);
+  Forget(tmp.id, 1);
+  EXPECT_EQ(Getattr(tmp.id).first.error, -ESTALE);
+  EXPECT_THAT(List(kRootInode, false),
+              IsOkAndHolds(UnorderedElementsAre(".", "..")));
+}
+
+// A tmpfile in a directory whose backing open fails, and in a stub.
+TEST_F(DirCacheFSTest, TmpfileFailuresAreReplied) {
+  ASSERT_EQ(::mkdir(Path("mp").c_str(), 0755), 0);
+  Start();
+  MountBelow("mp");
+  auto [lookup, entry] = Lookup(kRootInode, "mp");
+  ASSERT_EQ(lookup.error, 0);
+  EXPECT_EQ(Tmpfile(static_cast<InodeId>(entry.nodeid), O_RDWR).reply.error,
+            -ENOTSUP);
+  EXPECT_EQ(Tmpfile(12345, O_RDWR).reply.error, -ESTALE);
+}
+
+TEST_F(DirCacheFSTest, CopyFileRangeCopiesOnTheBackingFiles) {
+  WriteFile(Path("src"));
+  AppendToFile(Path("src"), "0123456789");
+  WriteFile(Path("dst"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  ASSERT_OK_AND_ASSIGN(InodeId dst, Id("dst"));
+  auto [in, in_fh] = Open(src, O_RDONLY);
+  auto [out, out_fh] = Open(dst, O_WRONLY);
+  ASSERT_EQ(in.error, 0);
+  ASSERT_EQ(out.error, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_EQ(CopyFileRange(src, in_fh, dst, out_fh, 100), 10);
+  EXPECT_EQ(std::filesystem::file_size(Path("dst")), 10u);
+  EXPECT_THAT(Dirty(), Contains(dst));  // The copy's phase 1.
+  EXPECT_EQ(Release(dst, out_fh).error, 0);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, dst));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_size, 10);
+
+  // A failure the backing filesystem reports is replied, and leaves the
+  // attributes right: here a destination whose shared backing fd is
+  // read-only (the file was immutable when it was opened).
+  int flags = 0;
+  const int raw = ::open(Path("dst").c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(raw, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  const int immutable = flags | FS_IMMUTABLE_FL;
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  auto [ro, ro_fh] = Open(dst, O_RDONLY);
+  ASSERT_EQ(ro.error, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  ::close(raw);
+  EXPECT_EQ(CopyFileRange(src, in_fh, dst, ro_fh, 100), -EBADF);
+  EXPECT_EQ(std::filesystem::file_size(Path("dst")), 10u);
+  EXPECT_EQ(Release(dst, ro_fh).error, 0);
+  EXPECT_EQ(Release(src, in_fh).error, 0);
+}
+
+TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
+  WriteFile(Path("f"));
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  int flags = 0;
+  {
+    const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
+    ASSERT_GE(raw, 0);
+    ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+    ::close(raw);
+  }
+  auto output = [](const Reply &reply) {
+    return reply.payload.substr(sizeof(struct fuse_ioctl_out));
+  };
+  // A get: the backing flags (no open needed: by handle).
+  Reply get = Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int));
+  ASSERT_EQ(get.error, 0);
+  int got = 0;
+  ASSERT_EQ(output(get).size(), sizeof(got));
+  std::memcpy(&got, output(get).data(), sizeof(got));
+  EXPECT_EQ(got, flags);
+  // A set: the flags, and the attributes (ctime) refreshed after.
+  const int nodump = flags | FS_NODUMP_FL;
+  std::string in(reinterpret_cast<const char *>(&nodump), sizeof(nodump));
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_EQ(Ioctl(f, FS_IOC_SETFLAGS, in, 0).error, 0);
+  EXPECT_THAT(Dirty(), Contains(f));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(attr.valid);
+  struct stat st {};
+  ASSERT_EQ(::stat(Path("f").c_str(), &st), 0);
+  EXPECT_EQ(attr.st.st_ctim.tv_sec, st.st_ctim.tv_sec);
+  EXPECT_EQ(attr.st.st_ctim.tv_nsec, st.st_ctim.tv_nsec);
+  // A directory's (FUSE_IOCTL_DIR), and the generation.
+  EXPECT_EQ(Ioctl(d, FS_IOC_GETFLAGS, "", sizeof(int), FUSE_IOCTL_DIR).error,
+            0);
+  Reply version = Ioctl(f, FS_IOC_GETVERSION, "", sizeof(long));
+  ASSERT_EQ(version.error, 0);
+  ASSERT_OK_AND_ASSIGN(attr, cache::GetAttr(ctx_, f));
+  uint32_t gen = 0;
+  std::memcpy(&gen, output(version).data(), sizeof(gen));
+  EXPECT_EQ(gen, attr.backing_gen);
+  // Not forwarded: ENOTTY; a set the backing filesystem refuses: its errno.
+  EXPECT_EQ(Ioctl(f, FS_IOC_GETFSLABEL, "", FSLABEL_MAX).error, -ENOTTY);
+  EXPECT_EQ(Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int), FUSE_IOCTL_COMPAT)
+                .error,
+            -ENOTTY);
+  const int bogus = -1;
+  std::string bad(reinterpret_cast<const char *>(&bogus), sizeof(bogus));
+  EXPECT_NE(Ioctl(f, FS_IOC_SETFLAGS, bad, 0).error, 0);
+  ASSERT_OK_AND_ASSIGN(attr, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(Ioctl(12345, FS_IOC_GETFLAGS, "", sizeof(int)).error, -ESTALE);
+}
 
 // --- FORGET reconciliation (step 23.1) ------------------------------------
 //

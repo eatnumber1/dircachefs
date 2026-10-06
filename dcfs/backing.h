@@ -168,6 +168,40 @@ absl::StatusOr<size_t> WriteFile(int fd, std::span<const char> buf,
 // verified real fd -- DirCacheFS::Fallocate's shared per-inode backing fd).
 absl::Status FallocateFd(int fd, int mode, off_t offset, off_t length);
 
+// copy_file_range(2) between two such fds (DirCacheFS::CopyFileRange, step
+// 23.4): the backing filesystem's own copy, which on btrfs and xfs shares
+// the extents (a reflink) where it can. Returns how many bytes it copied.
+absl::StatusOr<size_t> CopyFileRangeFd(int fd_in, off_t off_in, int fd_out,
+                                       off_t off_out, size_t len,
+                                       unsigned int flags);
+
+// The ioctls DirCacheFS::Ioctl forwards (step 23.4), on a real fd on the
+// object: `cmd` with `in` as its input and an output buffer of `out_size`
+// bytes (zeroed first), which it returns. Only for the allowlist in
+// dir_cache_fs.cc, whose arguments are plain buffers (no pointers).
+absl::StatusOr<std::string> IoctlFd(int fd, unsigned int cmd,
+                                    std::string_view in, size_t out_size);
+
+// An unnamed regular file in the already-open directory `parent_fd`
+// (openat(".", O_TMPFILE | O_RDWR), plus O_EXCL if `flags` has it, which
+// makes it unlinkable), as `caller` (its owner, group, umask and default
+// ACL rules as for a create; see MkdirAt). Always O_RDWR, whatever the
+// caller asked for: the descriptor becomes the file's one shared backing
+// file (DirCacheFS::BackingFile), and creating the file needs no
+// permission on it.
+absl::StatusOr<FileDescriptor> TmpfileAt(Context &ctx,
+                                         const Credentials &caller,
+                                         int parent_fd, int flags,
+                                         mode_t mode);
+
+// Records the unnamed file `fd` (from TmpfileAt in `parent`) as a row
+// (DirCacheFS::Tmpfile): probed as RecordNewChild probes a new child
+// (statx, handle, generation, xattrs), in one transaction: UpsertInode,
+// its xattrs, MarkDirty, and its attributes left unknown (it is open for
+// writing, and its link count is 0). No dentry: it has no name, until a
+// link gives it one (DirCacheFS::Link, recorded by RecordNewLink).
+absl::StatusOr<NewChild> RecordTmpfile(Context &ctx, InodeId parent, int fd);
+
 // fsync(2) (datasync false) or fdatasync(2) (true) on `fd`. Backing
 // durability is the backing filesystem's own job; this simply passes the
 // request through.

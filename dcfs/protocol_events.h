@@ -81,6 +81,12 @@ enum class Op {
   kAccess,
   kCreate,
   kFallocate,
+  kCopyFileRange,
+  kIoctl,
+  kTmpfile,
+  // A LINK of an unnamed O_TMPFILE file (DirCacheFS::IsUnnamedTmpfile):
+  // to the new parent, a create (the model's "linkcreate", step 23.4).
+  kLinkTmpfile,
 };
 
 // A request as it arrived: `ino` is the inode it names (the parent for a

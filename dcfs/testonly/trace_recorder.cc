@@ -80,8 +80,14 @@ int ErrnoOf(const absl::Status &status) {
   return GetErrnoFromStatus(status).value_or(-1);
 }
 
+// A create, or a link of an unnamed O_TMPFILE file, which to its new
+// parent is a create without a probe (the model's "linkcreate").
+bool IsCreate(const std::string &kind) {
+  return kind == "create" || kind == "linkcreate";
+}
+
 bool IsMutation(const std::string &kind) {
-  return kind == "create" || kind == "unlink" || kind == "rename";
+  return IsCreate(kind) || kind == "unlink" || kind == "rename";
 }
 
 // Distinct ids, in order of first appearance.
@@ -172,6 +178,14 @@ TraceRecorder::Mapping TraceRecorder::Map(const Frame &r, Ino dir) {
       break;
     case Op::kLink:
       if (r.newparent == dir) unmodelled("link: a link into the directory");
+      break;
+    case Op::kLinkTmpfile:
+      if (r.newparent == dir) request("linkcreate", EscapeBytes(r.newname));
+      break;
+    case Op::kIoctl:
+      if (r.ino == dir) {
+        unmodelled("dir-attrs: an ioctl changing the directory's flags");
+      }
       break;
     case Op::kSetattr:
       if (r.ino == dir) unmodelled("dir-attrs: a setattr of the directory");
@@ -585,7 +599,7 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
     // The errors the model has: a create's EEXIST (or the name gone before
     // its probe), an unlink's or rename's ENOENT from its syscall, and the
     // EAGAIN of a readdir, unlink or rename that kept finding changes.
-    if (req.kind == "create" &&
+    if (IsCreate(req.kind) &&
         (err == EEXIST || (err == ENOENT && req.probe_absent))) {
       return "";
     }
@@ -1210,8 +1224,8 @@ void TraceRecorder::MutationSyscall(Context &ctx, const absl::Status &status) {
                      ? rf->reqs[dir]
                      : Open(*rf, dir, m.req_kind, m.n, m.m);
       const bool modelled =
-          err == 0 || (req.kind == "create" && err == EEXIST) ||
-          (req.kind != "create" && err == ENOENT);
+          err == 0 || (IsCreate(req.kind) && err == EEXIST) ||
+          (!IsCreate(req.kind) && err == ENOENT);
       if (!modelled) {
         // Whether the request then failed (the model's requests always
         // finish: a cut) or replied OK regardless (unexplained), its

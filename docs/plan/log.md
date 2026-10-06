@@ -634,3 +634,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   recorded as a phase 1 + fill). The last FORGET cannot precede munmap (backing_file_open pins the FUSE
   path), so the stores are always seen then; remaining: staleness between munmap and FORGET, and a possible
   disk spin-up for the statx. drop_caches_quiesced waits for the daemon (reconcile I/O before baselines).
+- 23.4 (lane-1, step-23): copy_file_range (backing CFR: extents shared on btrfs/xfs), the ioctl allowlist
+  (chattr/lsattr/GETVERSION; else ENOTTY), O_TMPFILE (a row, linked by LINK = the model's new
+  "linkcreate", validated). FICLONE/FICLONERANGE/FIDEDUPERANGE are impossible without a kernel FUSE
+  remap op: the VFS answers EOPNOTSUPP before FUSE. Writable OPENs now re-check writability (chattr +i).
