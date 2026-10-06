@@ -1,0 +1,4 @@
+# The TLA+ tools: see README.md. The jar itself is @tla2tools//file
+# (MODULE.bazel); tlc.bzl defines tlc_test.
+
+exports_files(["tlc_test_runner.sh.tpl"])

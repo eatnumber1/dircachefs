@@ -1,0 +1,95 @@
+# The TLA+ model of dcfs's write-through protocol: see README.md.
+#
+# Every target runs TLC on the host (no root, no kernel control: the QEMU
+# rule in AGENTS.md does not apply). The model's own configurations must
+# find no error; each known-bug variant and each finding must produce
+# exactly its expected counterexample.
+
+load("//third_party/tlaplus:tlc.bzl", "tlc_test")
+
+MODEL = [
+    "MC.tla",
+    "dcfs.tla",
+]
+
+# The real model. MC_small: every request kind and invariant, today's
+# kernel locking (about a minute). MC_liveness: RecoveryTerminates.
+tlc_test(
+    name = "small_test",
+    size = "medium",
+    config = "MC_small.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+tlc_test(
+    name = "liveness_test",
+    size = "medium",
+    config = "MC_liveness.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+# Larger bounds (about ten minutes on four cores).
+tlc_test(
+    name = "large_test",
+    size = "large",
+    timeout = "long",
+    config = "MC_large.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+# Without the kernel's directory lock (the coroutine future), minus the
+# request kinds with known gaps there (findings/); about five minutes.
+tlc_test(
+    name = "nolock_test",
+    size = "large",
+    timeout = "long",
+    config = "MC_nolock.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+# Test first, for the model itself: each historical bug from
+# docs/plan/audits/, re-introduced, must be found.
+KNOWN_BUGS = {
+    "crash_f1_phase1_not_durable": "Invariant CacheNeverWrong is violated",
+    "crash_f3_create_keeps_parent_attrs": "Invariant TriState is violated",
+    "tristate_f1_unguarded_fills": "Invariant TriState is violated",
+    "tristate_f4_restore_complete": "Invariant TriState is violated",
+}
+
+[
+    tlc_test(
+        name = "known_bug_%s_test" % bug,
+        size = "medium",
+        config = "known_bugs/%s.cfg" % bug,
+        expect_violation = violation,
+        spec = "known_bugs/%s.tla" % bug,
+        srcs = MODEL,
+    )
+    for bug, violation in KNOWN_BUGS.items()
+]
+
+# Gaps in today's code that the model found (unreachable while dcfs is
+# single-threaded and the kernel locks the directory; see each .tla). When
+# the code is fixed and the model updated, the test fails: move the
+# configuration into the real model then.
+FINDINGS = {
+    "readdirplus_unlocked": "Invariant ServedFromCacheIsCurrent is violated",
+    "rename_stale_source": "Invariant CacheNeverWrong is violated",
+    "sync_during_mutation": "Invariant CrashSafe is violated",
+}
+
+[
+    tlc_test(
+        name = "finding_%s_test" % finding,
+        size = "medium",
+        config = "findings/%s.cfg" % finding,
+        expect_violation = violation,
+        spec = "findings/%s.tla" % finding,
+        srcs = MODEL,
+    )
+    for finding, violation in FINDINGS.items()
+]

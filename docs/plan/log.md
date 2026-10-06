@@ -323,3 +323,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   a release asset (not byte-stable by contract).
 - Phase 10 (benchmarks, idle and memory tests) started in lane-4 (dcfs-implementer).
 - Machine saturated (load 19, swap 9/9 GB): Phase 10 agent stopped and lane-4's Bazel server shut down; its uncommitted work stays in lane-4 for a later agent. Resume when load allows.
+- Phase 12.1 merged (1683e6b; dcfs-protocol): formal/dcfs.tla + MC configs, TLC 1.7.4 on a remote
+  JDK via third_party/tlaplus/tlc_test; 11 tests green (small 241k states/54 s, large 2.6M/9 min);
+  the four historical bugs reintroduced each give the expected counterexample. Three latent gaps
+  found in today's code (formal/findings/, unreachable while single-threaded under the kernel's
+  per-directory lock, real under coroutines): (1) SyncBacking/ClearDirty drop inodes with a mutation
+  in flight, so a sync point between phase 1 and the syscall loses the dirty row (CrashSafe);
+  (2) Readdirplus/Readdir check completeness, run syscalls, then list without rechecking
+  (ServedFromCacheIsCurrent); (3) rename phase 3 links a source id resolved before phase 1 and the
+  hard-link case escapes LinkDentry's rollback (CacheNeverWrong). Queued as step R4 (dcfs-protocol,
+  test first, each fix moves its findings/ config into the real model), before Phase 13.
+- Needs russ: read formal/README.md (the newcomer guide) and say whether the model is legible.

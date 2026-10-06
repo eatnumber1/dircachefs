@@ -31,6 +31,7 @@ Contents:
 17. [Test strategy](#test-strategy)
 18. [Known gaps](#known-gaps)
 19. [Future work](#future-work)
+20. [The protocol model](#the-protocol-model)
 
 ## Goals and non-goals
 
@@ -1198,3 +1199,28 @@ None of this is built.
   detection ever needs to reach the kernel.
 - **ZFS**, once OpenZFS ships `FS_IOC_GETFSUUID`. A test gated on
   `DCFS_TEST_ZFS_PATH` documents today's `ENOTTY` and is meant to flip.
+
+## The protocol model
+
+`formal/dcfs.tla` is a TLA+ model of the write-through protocol described
+above: the three phases of a mutation, fills and their guards
+(`CanFill`, `Mutation::Owns`, the completeness epoch), the durable dirty set
+and its fast path, sync points, crashes that keep any prefix of each disk's
+unsynced writes, and `StartRun`/`RecoverDirty`/`FinishRun`. Requests
+interleave at every backing syscall, as they will under coroutines. The TLC
+model checker checks, within small bounds, that nothing served from the
+cache disagrees with the backing filesystem (also after a crash and
+recovery), that a mutation's records read unknown from phase 1 until phase 3,
+that completeness never hides a name, and that recovery terminates. Variants
+that put back the historical bugs from the audits (crash F1 and F3,
+tri-state F1 and F4) must produce counterexamples. `bazel test //formal/...`
+runs all of it; `formal/README.md` explains the model, what it leaves out,
+and how to read a counterexample.
+
+The model describes the code as it is. It found three gaps that only today's
+single thread and the kernel's per-directory lock keep unreachable, each
+kept as an expected-counterexample test under `formal/findings/`: a sync
+point clears the dirty rows of mutations still in flight; Readdirplus lists
+after a suspension point without checking completeness again; and Rename's
+phase 3 trusts a source resolved before its phase 1. All three must be
+fixed before requests run concurrently.

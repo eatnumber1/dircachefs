@@ -1,0 +1,22 @@
+-------------------- MODULE tristate_f4_restore_complete --------------------
+(***************************************************************************)
+(* Known bug: tri-state audit F4 (docs/plan/audits/tristate.md). Before   *)
+(* dentries had an explicit unknown state, phase 1 deleted the name's row *)
+(* and cleared the directory's completeness, and phase 3 set completeness *)
+(* back from a snapshot taken before phase 1. That restore is a lost      *)
+(* update: anything that cleared completeness in between (another         *)
+(* mutation's phase 1, an invalidation) was undone, and a name nothing    *)
+(* knew about read as absent. Fixed by per-name unknown rows: phase 1 no  *)
+(* longer touches completeness, so there is nothing to restore.           *)
+(*                                                                         *)
+(* Re-introduced by BugRestoreComplete (the old phase 1 and the restore). *)
+(* It needs two mutations of D in flight at once, which the kernel's lock *)
+(* on D prevents today, so this configuration runs without it            *)
+(* (KernelDirLock = FALSE: the coroutine case the audit rated [CORO]),   *)
+(* and without the request kinds whose own lock-free gaps                 *)
+(* (formal/findings/) TLC would otherwise report first. Expected:         *)
+(* TriState is violated (a name read absent while its create is in        *)
+(* flight).                                                               *)
+(***************************************************************************)
+EXTENDS MC
+=============================================================================

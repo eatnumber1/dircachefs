@@ -66,3 +66,21 @@ Every item is test first. Commit subjects are prefixed `R1:`, `R2:`, `R3:`.
   lock), version check covering transitive packages.
 - Nits inside `run-qemu.sh` (dead placeholder checks, stale comments).
 Runs after Phase 5.1 merges (both edit `run-qemu.sh`).
+
+## R4 — Gaps the TLA+ model found (formal/findings/)
+
+From Phase 12.1 (2026-10-06). Unreachable today (single thread, kernel
+directory lock) but real under coroutines; fix now while the model is
+fresh, test first (a unit or guest test where one can reach it, else the
+model's configuration becomes part of the real model as the test):
+- `sync_during_mutation`: keep inodes with an in-flight mutation
+  (`FillGuards::inflight`) in the dirty set across a sync point, or make
+  the sync point wait for them.
+- `readdirplus_unlocked`: re-check completeness after the syscalls
+  (`EntryFor`, `ParentOf`) and before `ListDir`, in `Readdirplus` and
+  `Readdir`.
+- `rename_stale_source`: resolve the rename source inside phase 1 (or
+  verify it is unchanged), and make `LinkDentry` roll back when the old
+  object still exists through another hard link.
+Owner: dcfs-protocol. After each fix, move the finding's configuration
+into the real model and delete the `findings/` variant.
