@@ -309,6 +309,7 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttrOrRemoved(
     InodeId id) {
   auto it = removed_.find(id);
   if (it == removed_.end()) return RequireAttr(id);
+  BackingCall("StatFd");
   ABSL_ASSIGN_OR_RETURN(struct statx stx, backing::StatFd(*it->second.fd));
   cache::CachedAttr attr = cache::WithStatx(it->second.row, stx);
   attr.valid = true;
@@ -621,6 +622,7 @@ absl::Status DirCacheFS::Setattr(
     // is nothing to mark unknown or record, and a crash loses nothing that
     // could be stale (the record is in memory only).
     ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
+    BackingCall("SetAttrFd");
     ABSL_RETURN_IF_ERROR(
         backing::SetAttrFd(caller, *it->second.fd, *attr, to_set));
     ABSL_ASSIGN_OR_RETURN(cache::CachedAttr fresh, RequireAttrOrRemoved(id));
@@ -768,6 +770,7 @@ void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
     if (held.has_value()) {
       // The held descriptor is the object itself (it pins it: no recycled
       // inode number to check for), and the statx touches no disk.
+      BackingCall("StatFd");
       absl::StatusOr<struct statx> stx = backing::StatFd(**held);
       if (stx.ok()) {
         fresh = *stx;
@@ -875,6 +878,7 @@ absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "readlink");
   if (auto it = removed_.find(id); it != removed_.end()) {
+    BackingCall("ReadSymlinkFd");
     ABSL_ASSIGN_OR_RETURN(std::string target,
                           backing::ReadSymlinkFd(*it->second.fd));
     return req.ReplyReadlink(target);
@@ -1271,6 +1275,7 @@ absl::Status DirCacheFS::SettleUnlinkedFile(
   if (held.has_value()) {
     // The descriptor held across the unlink still reaches the object
     // whether or not links remain.
+    BackingCall("StatFd");
     ABSL_ASSIGN_OR_RETURN(struct statx stx, backing::StatFd(**held));
     if (stx.stx_nlink == 0) return RetireRemoved(id, std::move(held));
     return backing::RefreshAttrsFromFd(ctx_, id, **held);
@@ -1350,6 +1355,7 @@ absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
   auto removed = removed_.find(id);
   auto open_node = [&](int flags) -> absl::StatusOr<FileDescriptor> {
     if (removed != removed_.end()) {
+      BackingCall("ReopenFd");
       return backing::ReopenFd(*removed->second.fd, flags);
     }
     return backing::OpenNode(ctx_, id, flags);
@@ -1450,6 +1456,7 @@ absl::Status DirCacheFS::OpenInode(
     // on the shared fd reads them from the inode in memory (no disk I/O,
     // one syscall, no open file the backing filesystem would notice), and
     // this refuses as may_open() would: EPERM.
+    BackingCall("IoctlFd");
     absl::StatusOr<std::string> got =
         backing::IoctlFd(*shared_file.fd, FS_IOC_GETFLAGS, "", sizeof(int));
     if (got.ok()) {
@@ -1474,6 +1481,7 @@ absl::Status DirCacheFS::OpenInode(
     // backing filesystem's own open-time checks (may_open).
     const int check_flags = (fi.flags & (O_ACCMODE | O_APPEND)) | O_CLOEXEC |
                             O_NOCTTY | O_NONBLOCK;
+    BackingCall("ReopenFd");
     absl::StatusOr<FileDescriptor> allowed =
         backing::ReopenFd(*shared_file.fd, check_flags);
     if (!allowed.ok()) {
@@ -1561,6 +1569,7 @@ absl::Status DirCacheFS::Read(
   auto backing_it = backing_files_.find(it->second.ino);
   RET_CHECK(backing_it != backing_files_.end())
       << "Read on inode " << it->second.ino << " with no BackingFile";
+  BackingCall("ReadFile");
   ABSL_ASSIGN_OR_RETURN(
       std::string buf, backing::ReadFile(*backing_it->second.fd, size, off));
   return req.ReplyBuf(buf);
@@ -1595,6 +1604,7 @@ absl::Status DirCacheFS::Write(
   // Phase 2: the write itself, against the shared fd (EBADF if it is
   // O_RDONLY -- see MakeBackingFile -- exactly as the kernel would report
   // for a write against a read-only fd).
+  BackingCall("WriteFile");
   ABSL_ASSIGN_OR_RETURN(
       size_t n, backing::WriteFile(backing_it->second.WriteFd(), buf, off));
 
@@ -1759,6 +1769,7 @@ absl::Status DirCacheFS::Release(
                         "last FORGET marks their attributes unknown instead";
       }
     } else {
+      BackingCall("ReopenFd");
       absl::StatusOr<FileDescriptor> path_fd =
           backing::ReopenFd(*backing_file.fd, O_PATH | O_CLOEXEC);
       if (path_fd.ok()) {
@@ -1803,6 +1814,7 @@ absl::Status DirCacheFS::Fsync(
   }
   // Backing durability is the backing filesystem's own job; passing the
   // sync through is still correct (and cheap) regardless of `writable`.
+  BackingCall("FsyncFd");
   ABSL_RETURN_IF_ERROR(backing::FsyncFd(fd, datasync != 0));
   // The caller wants what it did durable, and that includes what dcfs
   // cached about it: a sync point makes the backing filesystems durable
@@ -2032,6 +2044,7 @@ absl::Status DirCacheFS::Fsyncdir(
   if (cache::IsStub(id)) return RefuseStub(req, id, "fsyncdir");
   if (auto it = removed_.find(id); it != removed_.end()) {
     // A removed directory (step 23.2): through its record's descriptor.
+    BackingCall("FsyncDirFd");
     ABSL_RETURN_IF_ERROR(backing::FsyncDirFd(*it->second.fd, datasync != 0));
     SyncBackingNow("fsyncdir");
     return req.ReplyErrno(0);
@@ -2067,6 +2080,7 @@ absl::Status DirCacheFS::Setxattr(
   if (auto it = removed_.find(id); it != removed_.end()) {
     // A removed object (step 23.2; see Setattr): through its descriptor.
     ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
+    BackingCall("SetXattrFd");
     ABSL_RETURN_IF_ERROR(
         backing::SetXattrFd(caller, *it->second.fd, name, value, flags));
     return req.ReplyErrno(0);
@@ -2133,6 +2147,7 @@ absl::Status DirCacheFS::Getxattr(
   if (auto it = removed_.find(id); it != removed_.end()) {
     // Read through the held descriptor (the kernel asks for the ACLs of a
     // removed directory, say, when checking an open of it).
+    BackingCall("ReadXattrFd");
     ABSL_ASSIGN_OR_RETURN(std::optional<std::string> fresh,
                           backing::ReadXattrFd(*it->second.fd, name));
     if (!fresh.has_value()) return req.ReplyErrno(ENODATA);
@@ -2169,6 +2184,7 @@ absl::Status DirCacheFS::Listxattr(
   if (cache::IsStub(id)) {
     names.emplace();  // None (see Getxattr).
   } else if (auto it = removed_.find(id); it != removed_.end()) {
+    BackingCall("ReadXattrsFd");
     ABSL_ASSIGN_OR_RETURN(
         (std::vector<std::pair<std::string, std::string>> xattrs),
         backing::ReadXattrsFd(*it->second.fd));
@@ -2205,6 +2221,7 @@ absl::Status DirCacheFS::Removexattr(
   if (auto it = removed_.find(id); it != removed_.end()) {
     // A removed object (step 23.2; see Setattr): through its descriptor.
     ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
+    BackingCall("RemoveXattrFd");
     ABSL_RETURN_IF_ERROR(
         backing::RemoveXattrFd(caller, *it->second.fd, name));
     return req.ReplyErrno(0);
@@ -2347,6 +2364,7 @@ absl::Status DirCacheFS::Fallocate(
   // opened O_RDWR (see MakeBackingFile); fallocate on it then fails EBADF,
   // exactly as the kernel would report for any write-family syscall on a
   // read-only fd -- no special-casing needed here.
+  BackingCall("FallocateFd");
   absl::Status status = backing::FallocateFd(fd, mode, offset, length);
   // Phase 3 is refreshes only, which run as ordinary fills.
   if (mutation.has_value()) mutation->End();
@@ -2400,6 +2418,7 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
   // destination it could only open read-only, EINVAL for overlapping
   // ranges of one file, ...); the kernel falls back to copying the data
   // itself for EOPNOTSUPP and EXDEV.
+  BackingCall("CopyFileRangeFd");
   absl::StatusOr<size_t> copied = backing::CopyFileRangeFd(
       *in_backing->second.fd, off_in, out_fd, off_out, len,
       static_cast<unsigned int>(flags));
@@ -2463,6 +2482,7 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
   std::optional<int> fd = OpenFdOf(id);
   if (!fd.has_value()) {
     if (auto it = removed_.find(id); it != removed_.end()) {
+      BackingCall("ReopenFd");
       ABSL_ASSIGN_OR_RETURN(
           opened, backing::ReopenFd(*it->second.fd,
                                     O_RDONLY | O_NONBLOCK | O_NOCTTY));
@@ -2476,6 +2496,7 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
   }
 
   if (!forwarded->changes) {
+    BackingCall("IoctlFd");
     ABSL_ASSIGN_OR_RETURN(std::string out,
                           backing::IoctlFd(*fd, cmd, in, out_size));
     return req.ReplyIoctl(0, out);
@@ -2491,6 +2512,7 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
   if (cmd == FS_IOC_SETFLAGS) {
     int wanted = 0;
     std::memcpy(&wanted, in.data(), std::min(in.size(), sizeof(wanted)));
+    BackingCall("IoctlFd");
     ABSL_ASSIGN_OR_RETURN(std::string current,
                           backing::IoctlFd(*fd, FS_IOC_GETFLAGS, "",
                                            sizeof(int)));
@@ -2507,6 +2529,7 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
                           cache::BeginAttrChange(ctx_, id));
     mutation.emplace(std::move(begun));
   }
+  BackingCall("IoctlFd");
   absl::StatusOr<std::string> out = backing::IoctlFd(*fd, cmd, in, out_size);
   if (mutation.has_value()) mutation->End();
   if (!removed) {

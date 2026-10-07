@@ -37,6 +37,7 @@
 #include "dcfs/credentials.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
+#include "dcfs/invariant_checks.h"
 #include "dcfs/escape.h"
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
@@ -63,6 +64,18 @@ constexpr size_t kDirentBufferBytes = 64 * 1024;
 
 int ErrnoOf(const absl::Status &status) {
   return GetErrnoFromStatus(status).value_or(0);
+}
+
+// The runtime invariant checks' hook (dcfs/invariant_checks.h). Called
+// right before every backing syscall made by a function of this file that
+// holds a Context, and before every call such a function makes into code
+// without one that makes backing syscalls (this file's descriptor-only
+// helpers, AsCaller, FileHandle, GetDeviceId), with no database access in
+// between: the point where "no transaction spans a backing syscall" must
+// hold. Code without a Context cannot open a transaction, so nothing it
+// does in between can break it. `what` names the call for the message.
+void BackingCall(Context &ctx, std::string_view what) {
+  ctx.checks->BackingCall(ctx, what);
 }
 
 // --- Helpers over the plain syscalls:: wrappers -----------------------------
@@ -344,6 +357,7 @@ bool IsBoundary(const struct statx &parent, const struct statx &child) {
 absl::StatusOr<FileDescriptor> OpenRoot(Context &ctx, int flags) {
   ABSL_ASSIGN_OR_RETURN(DeviceId source, GetSourceDeviceId(ctx.db));
   ABSL_ASSIGN_OR_RETURN(int mount_fd, ctx.mounts.Get(source));
+  BackingCall(ctx, "openat");
   return syscalls::openat(mount_fd, ".", flags);
 }
 
@@ -598,6 +612,8 @@ struct RootProbe {
 
 absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
   RootProbe probe;
+  // No database access below: one check covers every call.
+  BackingCall(ctx, "GetDeviceId, fstatfs, statx, ReadGeneration");
   ABSL_ASSIGN_OR_RETURN(probe.identity.device_id, GetDeviceId(source_fd));
   ABSL_ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(source_fd));
   probe.identity.fstype = static_cast<int64_t>(sfs.f_type);
@@ -630,6 +646,7 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
            << stored.ToString() << ") than the source (" << device.ToString()
            << ")";
   }
+  BackingCall(ctx, "FileHandle::FromFd");
   ABSL_ASSIGN_OR_RETURN(FileHandle handle,
                         FileHandle::FromFd(*source_fd, device));
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
@@ -640,6 +657,7 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
   // Model: a whole getattr fill of the root (nothing is in flight yet).
   ctx.events->RootRecorded(ctx);
   // The access-time rule reads mirror (step 23.3): the source mount's.
+  BackingCall(ctx, "fstatvfs");
   ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(*source_fd));
   ctx.atime = (vfs.f_flag & ST_NOATIME)    ? AtimePolicy::kNever
               : (vfs.f_flag & ST_RELATIME) ? AtimePolicy::kRelative
@@ -759,11 +777,13 @@ absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,
 absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
     Context &ctx, cache::FillSnapshot snapshot, InodeId id,
     const cache::CachedAttr &attr, FileDescriptor fd) {
+  BackingCall(ctx, "statx");
   ABSL_ASSIGN_OR_RETURN(struct statx stx,
                         syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask));
   bool same = stx.stx_ino == attr.backing_ino;
   uint64_t gen = 0;
   if (same && attr.backing_gen != 0) {
+    BackingCall(ctx, "ReadGeneration");
     ABSL_ASSIGN_OR_RETURN(gen, ReadGeneration(*fd, stx.stx_mode));
     // 0 means the generation cannot be read right now, not that it changed.
     same = gen == 0 || gen == attr.backing_gen;
@@ -806,6 +826,7 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
   ABSL_ASSIGN_OR_RETURN(FileHandle handle, cache::GetHandle(ctx, id));
 
+  BackingCall(ctx, "open_by_handle_at");
   absl::StatusOr<FileDescriptor> fd = handle.Open(ctx.mounts, flags);
   if (!fd.ok()) {
     if (ErrnoOf(fd.status()) == ESTALE) {
@@ -828,6 +849,7 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
 absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  BackingCall(ctx, "statx");
   return syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask);
 }
 
@@ -852,6 +874,7 @@ absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd,
   // The frame's result is its End's status.
   return scope.Finish([&]() -> absl::Status {
     const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+    BackingCall(ctx, "statx");
     ABSL_ASSIGN_OR_RETURN(
         struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
     // Model: as in RefreshAttrs.
@@ -918,6 +941,7 @@ absl::Status FsyncFd(int fd, bool datasync) {
 absl::Status FsyncDir(Context &ctx, InodeId id, bool datasync) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_RDONLY | O_DIRECTORY));
+  BackingCall(ctx, "FsyncFd");
   return FsyncFd(*fd, datasync);
 }
 
@@ -925,6 +949,7 @@ absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   // An empty path makes readlinkat read the O_PATH symlink fd itself.
+  BackingCall(ctx, "readlinkat");
   return ReadLinkAt(*fd, "");
 }
 
@@ -932,6 +957,7 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
     Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  BackingCall(ctx, "XattrsOf");
   return XattrsOf(*fd);
 }
 
@@ -979,6 +1005,7 @@ absl::StatusOr<std::optional<std::string>> RefreshXattr(
     ABSL_ASSIGN_OR_RETURN(opened, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
     open_fd = **opened;
   }
+  BackingCall(ctx, "XattrOf");
   ABSL_ASSIGN_OR_RETURN(std::optional<std::string> value,
                         XattrOf(*open_fd, name));
   ABSL_ASSIGN_OR_RETURN(
@@ -1039,6 +1066,7 @@ absl::Status ApplyXattrOp(Context &ctx, InodeId id, std::optional<int> open_fd,
                           XattrReadBack *read_back = nullptr) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor opath_fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  BackingCall(ctx, "ApplyXattrOpOn");
   return ApplyXattrOpOn(*opath_fd, open_fd, name, apply_real, apply_opath,
                         read_back);
 }
@@ -1112,6 +1140,7 @@ absl::Status RemoveXattrFd(const Credentials &caller, int fd,
 absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
   ABSL_ASSIGN_OR_RETURN(int mount_fd, ctx.mounts.Get(attr.device));
+  BackingCall(ctx, "fstatvfs");
   return syscalls::fstatvfs(mount_fd);
 }
 
@@ -1187,10 +1216,12 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // Model: PopulateRead takes place here (the snapshot and the epoch; the
   // reads below return what the directory holds now: PopulateRead).
   ctx.events->PopulateStarted(ctx, dir);
+  BackingCall(ctx, "statx");
   ABSL_ASSIGN_OR_RETURN(
       struct statx dir_stx,
       syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
+  BackingCall(ctx, "getdents64");
   ABSL_ASSIGN_OR_RETURN(std::vector<std::string> names, ReadDirNames(*dir_fd));
 
   // A child left out of `children` below is either a vanished dirent
@@ -1206,6 +1237,7 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   children.reserve(names.size());
   for (const std::string &name : names) {
     std::optional<struct statx> refused;
+    BackingCall(ctx, "ProbeChild");
     ABSL_ASSIGN_OR_RETURN(
         std::optional<ChildRecord> child,
         ProbeChild(*dir_fd, dir_stx, dir_attr.device, dir, name, refused,
@@ -1394,6 +1426,8 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
                         OpenNode(ctx, dir, O_PATH | O_DIRECTORY));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
+  // No database access until the GetAttr below.
+  BackingCall(ctx, "openat, statx");
   ABSL_ASSIGN_OR_RETURN(FileDescriptor up_fd,
                         syscalls::openat(*dir_fd, "..", O_PATH | O_DIRECTORY));
   ABSL_ASSIGN_OR_RETURN(struct statx stx,
@@ -1408,6 +1442,7 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
       root_attr.backing_ino == stx.stx_ino) {
     return cache::kRootInode;
   }
+  BackingCall(ctx, "FileHandle::FromFd, ReadGeneration");
   ABSL_ASSIGN_OR_RETURN(FileHandle handle,
                         FileHandle::FromFd(*up_fd, dir_attr.device));
   ABSL_ASSIGN_OR_RETURN(uint64_t gen, ReadGeneration(*up_fd, stx.stx_mode));
@@ -1441,12 +1476,14 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
   ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
                         OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+  BackingCall(ctx, "statx");
   ABSL_ASSIGN_OR_RETURN(
       struct statx dir_stx,
       syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr,
                         cache::GetAttr(ctx, parent));
   std::optional<struct statx> refused;
+  BackingCall(ctx, "ProbeChild");
   ABSL_ASSIGN_OR_RETURN(
       std::optional<ChildRecord> child,
       ProbeChild(*dir_fd, dir_stx, dir_attr.device, parent, name, refused,
@@ -1499,6 +1536,7 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
   // does for an existing directory entry, minus the mount-boundary check
   // (nothing can already be mounted on an object that did not exist a
   // moment ago).
+  BackingCall(ctx, "openat, statx");
   absl::StatusOr<FileDescriptor> child_fd =
       syscalls::openat(parent_fd, name, O_PATH | O_NOFOLLOW);
   if (!child_fd.ok()) {
@@ -1515,6 +1553,7 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
   // Model: CreateProbe (the read; the identity cannot change after it).
   ctx.events->NewChildProbed(ctx, parent, name, ProbeOf(stx));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr, cache::GetAttr(ctx, parent));
+  BackingCall(ctx, "ProbeObject");
   ABSL_ASSIGN_OR_RETURN(
       ChildRecord record, ProbeObject(**child_fd, name, parent_attr.device, stx));
 
@@ -1568,12 +1607,14 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
 
 absl::Status MkdirAt(Context &ctx, const Credentials &caller, int parent_fd,
                      std::string_view name, mode_t mode) {
+  BackingCall(ctx, "mkdirat");
   return AsCaller(caller,
                   [&] { return syscalls::mkdirat(parent_fd, name, mode); });
 }
 
 absl::Status MknodAt(Context &ctx, const Credentials &caller, int parent_fd,
                      std::string_view name, mode_t mode, dev_t rdev) {
+  BackingCall(ctx, "mknodat");
   return AsCaller(caller, [&] {
     return syscalls::mknodat(parent_fd, name, mode, rdev);
   });
@@ -1581,6 +1622,7 @@ absl::Status MknodAt(Context &ctx, const Credentials &caller, int parent_fd,
 
 absl::Status SymlinkAt(Context &ctx, const Credentials &caller, int parent_fd,
                        std::string_view name, std::string_view target) {
+  BackingCall(ctx, "symlinkat");
   return AsCaller(caller,
                   [&] { return syscalls::symlinkat(target, parent_fd, name); });
 }
@@ -1588,6 +1630,7 @@ absl::Status SymlinkAt(Context &ctx, const Credentials &caller, int parent_fd,
 absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, const Credentials &caller,
                                         int parent_fd, std::string_view name,
                                         int flags, mode_t mode) {
+  BackingCall(ctx, "openat O_CREAT");
   return AsCaller(caller, [&] {
     return syscalls::openat(parent_fd, name, flags | O_CREAT, mode);
   });
@@ -1597,6 +1640,7 @@ absl::StatusOr<FileDescriptor> TmpfileAt(Context &ctx,
                                          const Credentials &caller,
                                          int parent_fd, int flags,
                                          mode_t mode) {
+  BackingCall(ctx, "openat O_TMPFILE");
   return AsCaller(caller, [&] {
     return syscalls::openat(parent_fd, ".",
                             O_TMPFILE | O_RDWR | (flags & O_EXCL), mode);
@@ -1605,10 +1649,12 @@ absl::StatusOr<FileDescriptor> TmpfileAt(Context &ctx,
 
 absl::StatusOr<NewChild> RecordTmpfile(Context &ctx, InodeId parent, int fd) {
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+  BackingCall(ctx, "statx");
   ABSL_ASSIGN_OR_RETURN(struct statx stx,
                         syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr,
                         cache::GetAttr(ctx, parent));
+  BackingCall(ctx, "ProbeObject");
   ABSL_ASSIGN_OR_RETURN(ChildRecord record,
                         ProbeObject(fd, "", parent_attr.device, stx));
   NewChild result;
@@ -1637,6 +1683,7 @@ absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor newparent_fd,
       OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
+  BackingCall(ctx, "linkat");
   return syscalls::linkat(*src_fd, "", *newparent_fd, newname, AT_EMPTY_PATH);
 }
 
@@ -1659,6 +1706,7 @@ absl::Status UnlinkAt(Context &ctx, const Credentials &caller, InodeId parent,
                       std::string_view name, int flags) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor parent_fd,
                         OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
+  BackingCall(ctx, "unlinkat");
   return AsCaller(caller,
                   [&] { return syscalls::unlinkat(*parent_fd, name, flags); });
 }
@@ -1670,6 +1718,7 @@ absl::Status RenameAt(Context &ctx, const Credentials &caller, InodeId parent,
                         OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
   ABSL_ASSIGN_OR_RETURN(FileDescriptor newparent_fd,
                         OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
+  BackingCall(ctx, "renameat2");
   return AsCaller(caller, [&] {
     return syscalls::renameat2(*parent_fd, name, *newparent_fd, newname, flags);
   });
@@ -1690,6 +1739,7 @@ absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
     }
     return fd.status();
   }
+  BackingCall(ctx, "statx");
   ABSL_ASSIGN_OR_RETURN(struct statx stx,
                         syscalls::statx(**fd, "", AT_EMPTY_PATH, STATX_NLINK));
   return static_cast<uint64_t>(stx.stx_nlink);
@@ -1796,6 +1846,7 @@ absl::Status SyncBacking(Context &ctx) {
     ctx.events->SyncSnapshotTaken(ctx);
     ctx.events->SyncfsStarting(ctx);
     for (int fd : ctx.mounts.Fds()) {
+      BackingCall(ctx, "syncfs");
       ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
     }
     ctx.events->SyncfsDone(ctx);
@@ -1927,6 +1978,9 @@ absl::Status Startup(Context &ctx, FileDescriptor source_fd,
   ABSL_RETURN_IF_ERROR(InitRoot(ctx, std::move(source_fd)));
   ABSL_RETURN_IF_ERROR(StartupPurge(ctx));
   ProbeRecoveredRows(ctx, recovered);
+  // After the probe: the start-up's full check sees the state the first
+  // request will (the probe deletes rows a crash left).
+  ctx.checks->RunStarted(ctx);
   return absl::OkStatus();
 }
 
@@ -2013,6 +2067,7 @@ absl::Status ApplyTimes(const Credentials &caller, int opath_fd, mode_t type,
 absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
                      const struct stat &attr, int to_set) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  BackingCall(ctx, "SetAttrFd");
   return SetAttrFd(caller, *fd, attr, to_set);
 }
 

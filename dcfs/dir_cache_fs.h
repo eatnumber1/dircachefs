@@ -23,6 +23,7 @@
 #include "dcfs/context.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
+#include "dcfs/invariant_checks.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/protocol_events.h"
 #include "fuse_lowlevel.h"
@@ -30,6 +31,10 @@
 namespace dcfs {
 
 using cache::InodeId;
+
+namespace testonly {
+struct DirCacheFSPeer;
+}  // namespace testonly
 
 // DirCacheFS is the low-level FUSE filesystem: every op below reads and
 // writes through cache::/backing:: against `ctx_`, never touching the
@@ -225,6 +230,19 @@ class DirCacheFS {
   bool HasOpenFiles(InodeId id) const;
 
  private:
+  // The runtime invariant checks (docs/design.md, "Runtime invariant
+  // checks") read the in-memory bookkeeping below through this testonly
+  // peer, and their tests break it on purpose through it; nothing else
+  // does.
+  friend struct testonly::DirCacheFSPeer;
+
+  // The runtime invariant checks' hook (dcfs/invariant_checks.h), called
+  // right before each backing:: helper that takes only a descriptor
+  // (backing.cc checks the calls it makes itself).
+  void BackingCall(std::string_view what) const {
+    ctx_.checks->BackingCall(ctx_, what);
+  }
+
   // cache::GetAttr(ctx_, id), except that NotFound from a non-root id is
   // reported as ESTALE, not NotFound: that is what a nodeid the kernel is
   // still holding, but this cache no longer has a row for (e.g. its

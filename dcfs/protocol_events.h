@@ -87,6 +87,11 @@ enum class Op {
   // A LINK of an unnamed O_TMPFILE file (DirCacheFS::IsUnnamedTmpfile):
   // to the new parent, a create (the model's "linkcreate", step 23.4).
   kLinkTmpfile,
+  // FORGET and BATCH_FORGET: no protocol-event frame is opened for them
+  // (they change nothing the model has); only the invariant checks'
+  // request frames (dcfs/invariant_checks.h) name them.
+  kForget,
+  kBatchForget,
 };
 
 // A request as it arrived: `ino` is the inode it names (the parent for a

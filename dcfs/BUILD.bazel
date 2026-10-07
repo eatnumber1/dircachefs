@@ -3,14 +3,17 @@ load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 load("//tools/warnings:flags_test.bzl", "flags_test")
 
-# Shared by :main, :main_static (the QEMU-initramfs copy, see below) and
-# :main_static_traced so their dependency lists can't drift apart. Every
-# binary adds exactly one definition of MainProtocolEvents() (see
-# protocol_events.h): :protocol_events_main in production, the recorder in
-# the testonly recording build.
+# Shared by :main, :main_static (the QEMU-initramfs copy, see below),
+# :main_static_traced and :main_static_checked so their dependency lists
+# can't drift apart. Every binary adds exactly one definition of
+# MainProtocolEvents() (see protocol_events.h): :protocol_events_main in
+# production, the recorder in the testonly recording build; and exactly one
+# of MainInvariantChecks() (see invariant_checks.h): :invariant_checks_main
+# in production, the checker in the testonly checking build.
 MAIN_DEPS = [
     ":version",
     ":backing",
+    ":invariant_checks",
     ":protocol_events",
     ":context",
     ":dir_cache_fs",
@@ -47,7 +50,26 @@ MAIN_DEPS = [
 cc_binary(
     name = "main",
     srcs = ["main.cc"],
-    deps = MAIN_DEPS + [":protocol_events_main"],
+    deps = MAIN_DEPS + [
+        ":invariant_checks_main",
+        ":protocol_events_main",
+    ],
+)
+
+# The runtime invariant checks (invariant_checks.h, step 26.2): the hooks
+# every layer calls through Context::checks, and the production
+# MainInvariantChecks(), which checks nothing. The checker is
+# //dcfs/testonly:invariant_checker.
+cc_library(
+    name = "invariant_checks",
+    visibility = ["//dcfs/testonly:__pkg__"],
+    hdrs = ["invariant_checks.h"],
+)
+
+cc_library(
+    name = "invariant_checks_main",
+    srcs = ["invariant_checks_main.cc"],
+    deps = [":invariant_checks"],
 )
 
 # The protocol events (protocol_events.h): the interface every layer calls
@@ -411,6 +433,7 @@ cc_library(
     hdrs = ["fuse_ops.h"],
     srcs = ["fuse_ops.cc"],
     deps = [
+      ":invariant_checks",
       ":protocol_events",
       ":dir_cache_fs",
       ":fuse_request",
@@ -548,9 +571,11 @@ qemu_cc_test(
 
 cc_library(
     name = "dir_cache_fs",
+    visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["dir_cache_fs.cc"],
     hdrs = ["dir_cache_fs.h"],
     deps = [
+      ":invariant_checks",
       ":protocol_events",
       ":escape",
       ":backing",
@@ -597,7 +622,9 @@ DIR_CACHE_FS_TEST_DEPS = [
     ":syscalls",
     ":syscalls_backing",
     "//dcfs/testonly:assert_ok_and_assign",
+    "//dcfs/testonly:dir_cache_fs_peer",
     "//dcfs/testonly:files",
+    "//dcfs/testonly:invariant_checker",
     "//dcfs/testonly:step_counter",
     "//dcfs/testonly:trace_recorder",
     "@absl//absl/base:log_severity",
@@ -894,6 +921,7 @@ cc_library(
     hdrs = ["context.h"],
     deps = [
       ":device_id",
+      ":invariant_checks",
       ":mount_fds",
       ":protocol_events",
       ":sqlite",
@@ -965,6 +993,7 @@ cc_library(
     srcs = ["backing.cc"],
     hdrs = ["backing.h"],
     deps = [
+      ":invariant_checks",
       ":protocol_events",
       ":escape",
       ":context",
@@ -1045,7 +1074,10 @@ cc_binary(
         "//test/qemu:__pkg__",
         "//tools:__pkg__",
     ],
-    deps = MAIN_DEPS + [":protocol_events_main"],
+    deps = MAIN_DEPS + [
+        ":invariant_checks_main",
+        ":protocol_events_main",
+    ],
 )
 
 # The testonly recording build of :main_static, for trace validation
@@ -1064,7 +1096,34 @@ cc_binary(
     }),
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
-    deps = MAIN_DEPS + ["//dcfs/testonly:main_recorder"],
+    deps = MAIN_DEPS + [
+        ":invariant_checks_main",
+        "//dcfs/testonly:main_recorder",
+    ],
+)
+
+# The testonly checking build of :main_static (step 26.2; docs/design.md,
+# "Runtime invariant checks"): the same code, linked with the checker's
+# MainInvariantChecks() (dcfs/testonly/main_invariant_checker.cc), which
+# aborts the daemon when an invariant fails. //test/qemu's
+# :initramfs_checked uses it, which every small and medium qemu_test boots
+# (the fast and presubmit tiers); the large and enormous ones boot the plain
+# :main_static.
+cc_binary(
+    name = "main_static_checked",
+    testonly = 1,
+    srcs = ["main.cc"],
+    features = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
+    linkstatic = True,
+    visibility = ["//test/qemu:__pkg__"],
+    deps = MAIN_DEPS + [
+        ":protocol_events_main",
+        "//dcfs/testonly:main_invariant_checker",
+    ],
 )
 
 # Every target the shipped binaries (the dynamic :main and the static

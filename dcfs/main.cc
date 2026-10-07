@@ -44,6 +44,7 @@
 #include "dcfs/migrate.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/mounts_below.h"
+#include "dcfs/invariant_checks.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
@@ -442,6 +443,9 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // Records nothing, except in the testonly recording build (see
   // dcfs/protocol_events.h).
   ctx.events = &MainProtocolEvents();
+  // Checks nothing, except in the testonly checking build (see
+  // dcfs/invariant_checks.h).
+  ctx.checks = &MainInvariantChecks();
 
   ABSL_ASSIGN_OR_RETURN(RootIdentity root, backing::ProbeRoot(ctx, *source_fd));
   ABSL_RETURN_IF_ERROR(Migrate(db, root));

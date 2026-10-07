@@ -92,7 +92,9 @@
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/dir_cache_fs_peer.h"
 #include "dcfs/testonly/files.h"
+#include "dcfs/testonly/invariant_checker.h"
 #include "dcfs/testonly/step_counter.h"
 #include "dcfs/testonly/trace_recorder.h"
 #include "fuse_kernel.h"
@@ -254,6 +256,10 @@ class DirCacheFSTest : public ::testing::Test {
   void Start() {
     ASSERT_OK_AND_ASSIGN(
         db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
+    // Every request (and backing syscall) checks the invariants
+    // (dcfs/testonly/invariant_checker.h); a violation aborts the test.
+    checker_ = std::make_unique<testonly::InvariantChecker>();
+    ctx_.checks = checker_.get();
     ASSERT_OK_AND_ASSIGN(
         FileDescriptor owned,
         syscalls::openat(AT_FDCWD, source_, O_RDONLY | O_DIRECTORY));
@@ -313,6 +319,8 @@ class DirCacheFSTest : public ::testing::Test {
     if (se_ != nullptr) fuse_session_destroy(se_);
     current_ = nullptr;
     fs_.reset();
+    ctx_.checks = &NoInvariantChecks();
+    checker_.reset();
     if (!source_.empty()) testonly::RemoveAll(source_);
   }
 
@@ -808,6 +816,7 @@ class DirCacheFSTest : public ::testing::Test {
                                .max_held_fds = 64};
   std::unique_ptr<DirCacheFS> fs_;
   std::unique_ptr<testonly::TraceRecorder> recorder_;
+  std::unique_ptr<testonly::InvariantChecker> checker_;
   fuse_lowlevel_ops ops_{};
   struct fuse_session *se_ = nullptr;
 
@@ -3308,6 +3317,315 @@ TEST_F(DirCacheFSTest, TmpfileRowGoesAtTheStartAfterACrash) {
   ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
   EXPECT_THAT(cache::GetAttr(ctx_, tmp.id).status(),
               ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+}
+
+// --- Runtime invariant checks (step 26.2) ----------------------------------
+//
+// Each test breaks one invariant on purpose and expects the checker the
+// fixture installs (dcfs/testonly/invariant_checker.h) to abort, naming the
+// invariant and the request. What breaks it is the test's own doing (a
+// transaction it opens, a row it rewrites, DirCacheFS bookkeeping it
+// changes through the testonly peer), inside the death test's child, so
+// that the fixture's own checks at DESTROY still pass: no production code
+// is faulted.
+
+using DirCacheFSDeathTest = DirCacheFSTest;
+using testonly::DirCacheFSPeer;
+
+// A regex for "in request <op> nodeid <id>" in a violation's message.
+std::string InRequest(std::string_view op, InodeId id) {
+  return absl::StrCat("in request ", op, " nodeid ", id, "[,)]");
+}
+
+TEST_F(DirCacheFSDeathTest, TransactionOpenAtABackingSyscall) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  // Its GETATTR must reach the backing file (open_by_handle_at).
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec("BEGIN"), IsOk());
+        Getattr(f);
+      },
+      "invariant violated: no-transaction-at-backing-call: a transaction is "
+      "open.*open_by_handle_at.*" + InRequest("GETATTR", f));
+}
+
+TEST_F(DirCacheFSDeathTest, StatementMidStepAtABackingSyscall) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+  EXPECT_DEATH(
+      {
+        // A read cursor part way through its rows holds a read transaction.
+        absl::StatusOr<sqlite3::Statement> cursor =
+            sqlite3::Statement::Prepare(db_, "SELECT id FROM inodes");
+        ASSERT_THAT(cursor, IsOk());
+        ASSERT_THAT(cursor->Step(), IsOkAndHolds(true));
+        Getattr(f);
+      },
+      "invariant violated: no-transaction-at-backing-call: a statement is "
+      "part way through its rows: SELECT id FROM inodes.*" +
+          InRequest("GETATTR", f));
+}
+
+TEST_F(DirCacheFSDeathTest, TransactionOpenAtARequestEnd) {
+  Start();
+  // The root's attributes are cached: its GETATTR makes no backing syscall.
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec("BEGIN"), IsOk());
+        Getattr(kRootInode);
+      },
+      "invariant violated: no-transaction-at-request-end: a transaction is "
+      "open.*" + InRequest("GETATTR", kRootInode));
+}
+
+// The dirty-set bug phase 1's fast path could hide: an inode taken for
+// durably dirty that has no dirty row, so that a phase 1 skips its insert.
+TEST_F(DirCacheFSDeathTest, MutationInFlightWithoutADirtyRow) {
+  Start();
+  ASSERT_THAT(Dirty(), Not(Contains(kRootInode)));
+  EXPECT_DEATH(
+      {
+        ctx_.dirty.durable.insert(kRootInode);
+        Mkdir(kRootInode, "d");
+      },
+      "invariant violated: dirty-set: inode 1 has a mutation in "
+      "flight but no dirty row.*" +
+          InRequest("MKDIR", kRootInode));
+}
+
+TEST_F(DirCacheFSDeathTest, DurablyDirtyWithoutADirtyRow) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_THAT(Dirty(), Not(Contains(f)));
+  EXPECT_DEATH(
+      {
+        ctx_.dirty.durable.insert(f);
+        Getattr(f);
+      },
+      absl::StrCat("invariant violated: dirty-set: inode ", f,
+                   " is in Context::dirty.durable but has no dirty "
+                   "row.*",
+                   InRequest("GETATTR", f)));
+}
+
+TEST_F(DirCacheFSDeathTest, DirtySetSaidEmptyButIsNot) {
+  Start();
+  ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
+  ASSERT_THAT(Dirty(), Contains(kRootInode));
+  EXPECT_DEATH(
+      {
+        ctx_.dirty.any = false;
+        Getattr(kRootInode);
+      },
+      "invariant violated: dirty-set: Context::dirty.any is false "
+      "but the dirty table has rows.*" +
+          InRequest("GETATTR", kRootInode));
+}
+
+TEST_F(DirCacheFSDeathTest, AttributesCurrentWithNoLinks) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec(absl::StrCat(
+                        "UPDATE inodes SET nlink = 0 WHERE id = ", f)),
+                    IsOk());
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: tri-state: inode ", f,
+                   ": attributes recorded as current with nlink 0"));
+}
+
+TEST_F(DirCacheFSDeathTest, RefusedDentryWithoutAStub) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(
+            db_.Exec("UPDATE dentries SET state = 'refused', inode = NULL "
+                     "WHERE parent = 1 AND name = CAST('f' AS BLOB)"),
+            IsOk());
+        Getattr(kRootInode);
+      },
+      "invariant violated: tri-state: dentry \"f\" of inode 1 is "
+      "refused but has no stub");
+}
+
+TEST_F(DirCacheFSDeathTest, NonRootGenerationZero) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec(absl::StrCat(
+                        "UPDATE inodes SET fuse_gen = 0 WHERE id = ", f)),
+                    IsOk());
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: identity: inode ", f,
+                   " has FUSE generation 0"));
+}
+
+TEST_F(DirCacheFSDeathTest, AttributesCurrentWhileOpenForWriting) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec(absl::StrCat(
+                        "UPDATE inodes SET attrs_valid = 1 WHERE id = ", f)),
+                    IsOk());
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   " is open for writing but its attributes are "
+                   "recorded as current"));
+}
+
+TEST_F(DirCacheFSDeathTest, OpenForWritingWithoutADirtyRow) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(
+            db_.Exec(absl::StrCat("DELETE FROM dirty WHERE inode = ", f)),
+            IsOk());
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   " is open for writing but has no dirty row"));
+}
+
+TEST_F(DirCacheFSDeathTest, OpenForWritingButNotInWritten) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  EXPECT_DEATH(
+      {
+        DirCacheFSPeer::MutableWritten(*fs_).erase(f);
+        Getattr(f);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   " is open for writing but not in written_.*",
+                   InRequest("GETATTR", f)));
+}
+
+TEST_F(DirCacheFSDeathTest, ForgetOfMoreLookupsThanCounted) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_DEATH(Forget(f, 2),
+               absl::StrCat("invariant violated: lookup-count: FORGET of 2 "
+                            "lookups of nodeid ", f, ", but 1 counted.*",
+                            InRequest("FORGET", f)));
+}
+
+// The same nodeid twice in one BATCH_FORGET counts as one FORGET of both.
+TEST_F(DirCacheFSDeathTest, BatchForgetOfMoreLookupsThanCounted) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_DEATH(BatchForget({{f, 1}, {f, 1}}),
+               absl::StrCat("invariant violated: lookup-count: FORGET of 2 "
+                            "lookups of nodeid ", f, ", but 1 counted.*",
+                            InRequest("BATCH_FORGET", f)));
+}
+
+TEST_F(DirCacheFSDeathTest, ZeroLookupCountKept) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_DEATH(
+      {
+        DirCacheFSPeer::MutableLookups(*fs_)[f] = 0;
+        Getattr(f);
+      },
+      absl::StrCat("invariant violated: lookup-count: nodeid ", f,
+                   " has a lookup count of 0"));
+}
+
+// A held descriptor dropped without telling held_fds_.
+TEST_F(DirCacheFSDeathTest, HeldDescriptorDroppedBehindTheCount) {
+  Start();
+  Created f = Create(kRootInode, "f", O_RDWR);
+  ASSERT_EQ(f.reply.error, 0);
+  ASSERT_EQ(Release(f.id, f.fh).error, 0);
+  ASSERT_TRUE(DirCacheFSPeer::Written(*fs_).at(f.id).has_value());
+  EXPECT_DEATH(
+      {
+        DirCacheFSPeer::MutableWritten(*fs_)[f.id].reset();
+        Getattr(kRootInode);
+      },
+      "invariant violated: held-fds: held_fds_ is 1 but 0 entries "
+      "of written_ hold a descriptor");
+}
+
+TEST_F(DirCacheFSDeathTest, RemovedRecordWithoutALookup) {
+  Start();
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr root,
+                       cache::GetAttr(ctx_, kRootInode));
+  constexpr InodeId kGone = 12345;
+  EXPECT_DEATH(
+      {
+        absl::StatusOr<FileDescriptor> fd =
+            syscalls::openat(AT_FDCWD, source_, O_PATH);
+        ASSERT_THAT(fd, IsOk());
+        DirCacheFSPeer::AddRemoved(*fs_, kGone, root, *std::move(fd));
+        Getattr(kRootInode);
+      },
+      "invariant violated: removed-record: nodeid 12345 has a "
+      "removed record but the kernel holds no lookup of it");
+}
+
+// What step 26.6 calls after an injected fault: the checks as a status.
+TEST_F(DirCacheFSTest, InvariantChecksReportAsAStatus) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
+  EXPECT_THAT(checker_->CheckBackingCall(ctx_), IsOk());
+  DirCacheFSPeer::MutableLookups(*fs_)[f] = 0;
+  absl::Status all = checker_->CheckAll(ctx_, fs_.get());
+  EXPECT_EQ(all.code(), absl::StatusCode::kFailedPrecondition);
+  EXPECT_THAT(all.message(), ::testing::StartsWith("lookup-count: "));
+  DirCacheFSPeer::MutableLookups(*fs_)[f] = 1;
+  EXPECT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
 }
 
 }  // namespace

@@ -91,6 +91,66 @@ cc_library(
     ],
 )
 
+# DirCacheFS's in-memory bookkeeping, for the invariant checker and its
+# tests (DirCacheFS names the peer as a friend).
+cc_library(
+    name = "dir_cache_fs_peer",
+    hdrs = ["dir_cache_fs_peer.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:dir_cache_fs",
+        "//dcfs:metadata_cache",
+        "//dcfs:syscalls",
+        "@absl//absl/container:flat_hash_map",
+        "@absl//absl/container:flat_hash_set",
+        "@absl//absl/functional:function_ref",
+    ],
+)
+
+# The runtime invariant checks (step 26.2; docs/design.md, "Runtime
+# invariant checks"): the checking InvariantChecks.
+cc_library(
+    name = "invariant_checker",
+    srcs = ["invariant_checker.cc"],
+    hdrs = ["invariant_checker.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        ":dir_cache_fs_peer",
+        "//dcfs:context",
+        "//dcfs:dir_cache_fs",
+        "//dcfs:escape",
+        "//dcfs:invariant_checks",
+        "//dcfs:metadata_cache",
+        "//dcfs:protocol_events",
+        "//dcfs:sqlite",
+        "//dcfs:status",
+        "//dcfs:syscalls",
+        "@absl//absl/container:flat_hash_map",
+        "@absl//absl/container:flat_hash_set",
+        "@absl//absl/log",
+        "@absl//absl/status",
+        "@absl//absl/status:status_macros",
+        "@absl//absl/status:statusor",
+        "@absl//absl/strings",
+        "@sqlite//:sqlite3",
+    ],
+)
+
+# MainInvariantChecks() for //dcfs:main_static_checked: the checker, instead
+# of //dcfs:invariant_checks_main's no-op (link-time selection).
+cc_library(
+    name = "main_invariant_checker",
+    srcs = ["main_invariant_checker.cc"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        ":invariant_checker",
+        "//dcfs:invariant_checks",
+        "//dcfs:syscalls",
+        "@absl//absl/log",
+        "@absl//absl/status:statusor",
+    ],
+)
+
 # The fault-injected build's fault (see skip_mark_unknown.cc): wraps
 # sqlite3_step, so the binary must link with -Wl,--wrap=sqlite3_step.
 cc_library(
