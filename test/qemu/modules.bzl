@@ -21,14 +21,16 @@ def test_modules(disks, extra = [], rootfs = False):
         rootfs: whether the test boots a Debian ext4 root filesystem.
 
     Returns:
-        fuse (dcfs mounts a FUSE filesystem in every test), virtio_blk and
-        the filesystem modules of the disks when there are any, and extra.
+        fuse (dcfs mounts a FUSE filesystem in every test), virtio_blk (the
+        coverage profile disk), the filesystem modules of the disks, and extra.
     """
     modules = {"fuse": True}
     for module in extra:
         modules[module] = True
-    if disks or rootfs:
-        modules["virtio_blk"] = True
+    # Every guest gets virtio_blk: under `bazel coverage` run-qemu.sh adds a
+    # disk the guest writes its profiles to (step 7.2); a plain run has none
+    # for it to drive.
+    modules["virtio_blk"] = True
     for disk in disks:
         modules[_FS_MODULES[disk[1]]] = True
     if rootfs:

@@ -10,6 +10,7 @@ test/qemu/guest/init for the guest side.
 """
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//test/qemu:coverage.bzl", "E2E_COVERAGE_OBJECTS", "coverage_args", "coverage_data")
 load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 
 # Guest memory (step 6.2). Every guest has an allowance, in MiB, passed to
@@ -166,8 +167,8 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         data = kernel_data + qemu_data + [
             ":initramfs",
             guest_script,
-        ] + rootfs_data,
-        args = qemu_args + kernel_failure_args + rootfs_args + mem_args + kernel_args + [
+        ] + rootfs_data + coverage_data(E2E_COVERAGE_OBJECTS),
+        args = qemu_args + coverage_args(E2E_COVERAGE_OBJECTS) + kernel_failure_args + rootfs_args + mem_args + kernel_args + [
             "$(location :initramfs)",
             guest_script_basename,
         ] + disk_args,

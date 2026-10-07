@@ -1,3 +1,4 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
@@ -19,6 +20,8 @@ exports_files([
     "guest/init",
     "scripts/mkinitramfs.sh",
     "scripts/run-qemu.sh",
+    "scripts/cov-lcov.sh",
+    "scripts/check-lcov.sh",
 ])
 
 # Set by --define=dcfs_sanitizer=asan/ubsan (see .bazelrc's build:asan /
@@ -30,6 +33,14 @@ exports_files([
 config_setting(
     name = "asan_build",
     values = {"define": "dcfs_sanitizer=asan"},
+)
+
+# `bazel coverage` (--config=coverage, step 7.2): the QEMU test macros then
+# ship the LLVM tools and the instrumented binaries to run-qemu.sh
+# (coverage.bzl).
+config_setting(
+    name = "coverage_build",
+    values = {"collect_code_coverage": "true"},
 )
 
 config_setting(
@@ -725,5 +736,37 @@ sh_test(
     data = [
         "guest/lib.sh",
         "guest/strace_lib.sh",
+    ],
+)
+
+# ---- Step 7.2: the coverage pipeline's self-check ------------------------
+
+# An instrumented program with a function that runs and one that does not.
+cc_binary(
+    name = "cov_fixture",
+    testonly = 1,
+    srcs = ["testdata/cov_fixture.cc"],
+    copts = ["-fprofile-instr-generate", "-fcoverage-mapping"],
+    linkopts = ["-fprofile-instr-generate"],
+)
+
+sh_test(
+    name = "coverage_pipeline_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["coverage_pipeline_test.sh"],
+    args = [
+        "$(rootpath scripts/cov-lcov.sh)",
+        "$(rootpath scripts/check-lcov.sh)",
+        "$(rootpath @llvm_toolchain_llvm//:bin/llvm-profdata)",
+        "$(rootpath @llvm_toolchain_llvm//:bin/llvm-cov)",
+        "$(rootpath :cov_fixture)",
+    ],
+    data = [
+        ":cov_fixture",
+        "scripts/check-lcov.sh",
+        "scripts/cov-lcov.sh",
+        "@llvm_toolchain_llvm//:bin/llvm-cov",
+        "@llvm_toolchain_llvm//:bin/llvm-profdata",
     ],
 )

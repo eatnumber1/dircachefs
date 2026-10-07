@@ -110,6 +110,18 @@ MEM_OVERRIDE=""
 MODULES=""
 # --expect-kernel-failure <script>: see the kernel-failure check below.
 EXPECT_KERNEL_FAILURE=""
+# Step 7.2, coverage (only under `bazel coverage`, which sets COVERAGE_DIR;
+# test/qemu/coverage.bzl passes these only then): the LLVM tools and the
+# instrumented binaries (--cov-object, repeatable). The guest then writes the
+# .profraw files its processes wrote to an extra disk (guest/init,
+# dump_profraw), and after the run they become COVERAGE_DIR/<name>.dat
+# (cov-lcov.sh), which Bazel's lcov merger picks up. A guest that dies
+# (power-cut tests, SIGKILLed daemons) writes no profile: that is not a
+# failure, just no coverage from that process.
+COV_SCRIPT=""
+COV_PROFDATA=""
+COV_LLVM_COV=""
+COV_OBJECTS=""
 while :; do
 	case "${1:-}" in
 	--unit)
@@ -130,6 +142,22 @@ while :; do
 		;;
 	--expect-kernel-failure)
 		EXPECT_KERNEL_FAILURE=$2
+		shift 2
+		;;
+	--cov-script)
+		COV_SCRIPT=$2
+		shift 2
+		;;
+	--cov-llvm-profdata)
+		COV_PROFDATA=$2
+		shift 2
+		;;
+	--cov-llvm-cov)
+		COV_LLVM_COV=$2
+		shift 2
+		;;
+	--cov-object)
+		COV_OBJECTS="$COV_OBJECTS $2"
 		shift 2
 		;;
 	--qemu)
@@ -299,6 +327,25 @@ if [ -n "$ROOTFS" ]; then
 	rootfs_append=" dcfs_rootfs=/dev/$rootfs_dev"
 fi
 
+# --- optional coverage disk (step 7.2): the next letter after the last disk
+# and the rootfs; a raw file the guest writes a tar of its profiles to
+# (guest/init, dump_profraw: the serial console moves about 8 KB/s, too slow
+# for profiles of a few MB) -------------------------------------------------
+COVDISK_IMG=""
+cov_append=""
+if [ -n "${COVERAGE_DIR:-}" ] && [ -n "$COV_OBJECTS" ] &&
+	[ -n "$COV_PROFDATA" ] && [ -n "$COV_LLVM_COV" ] && [ -n "$COV_SCRIPT" ]; then
+	cov_index=$((max_index + 1))
+	if [ -n "$ROOTFS" ]; then
+		cov_index=$((cov_index + 1))
+	fi
+	cov_letter=$(awk -v i="$cov_index" 'BEGIN{printf "%c", 97+i}')
+	COVDISK_IMG="$WORKDIR/coverage.img"
+	truncate -s 256M "$COVDISK_IMG"
+	drive_args="$drive_args -drive id=covdisk,file=$COVDISK_IMG,format=raw,if=none -device virtio-blk-device,drive=covdisk"
+	cov_append=" dcfs_cov=/dev/vd$cov_letter"
+fi
+
 # --- boot ------------------------------------------------------------
 # KVM only when /dev/kvm is usable by this user; otherwise plain TCG
 # (2-12x slower, see the timeouts below).
@@ -378,6 +425,11 @@ if [ "$UNIT" -eq 0 ]; then
 	append="$append dcfs_test=$DCFS_TEST"
 fi
 append="$append$rootfs_append"
+COVERAGE=0
+if [ -n "$COVDISK_IMG" ]; then
+	COVERAGE=1
+	append="$append$cov_append"
+fi
 
 # Record exactly which binaries this run used, for anyone auditing a
 # serial log (and for the harness check below): a Bazel-fetched path is
@@ -417,6 +469,22 @@ timeout "$TIMEOUT_SECS" "$QEMU_BIN" \
 	2>&1 | tee -a "$LOG" || true
 end=$(date +%s.%N)
 echo "run-qemu.sh: qemu end $end" >>"$LOG"
+
+# Step 7.2: the profiles the guest wrote to the coverage disk (a tar, see
+# guest/init's dump_profraw) become this test's lcov file in COVERAGE_DIR.
+if [ "$COVERAGE" -eq 1 ]; then
+	rawdir="$WORKDIR/profraw"
+	mkdir -p "$rawdir"
+	tar -x -C "$rawdir" -f "$COVDISK_IMG" 2>/dev/null ||
+		echo "run-qemu.sh: no profiles on the coverage disk (no instrumented process exited normally)"
+	rm -f "$COVDISK_IMG"
+	# shellcheck disable=SC2086 # COV_OBJECTS is a list of paths
+	"$COV_SCRIPT" "$COV_PROFDATA" "$COV_LLVM_COV" "$rawdir" \
+		"$COVERAGE_DIR/qemu-$(printf '%s' "${TEST_TARGET:-test}" | tr -c 'A-Za-z0-9_.-' _).dat" $COV_OBJECTS ||
+		echo "run-qemu.sh: WARNING: no lcov from the profiles" >&2
+	# The test's own lcov, kept beside the serial log for inspection.
+	cp "$COVERAGE_DIR"/qemu-*.dat "${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/" 2>/dev/null || true
+fi
 
 echo
 # Step 6.2: a guest that ran out of memory says so, whatever else failed: the

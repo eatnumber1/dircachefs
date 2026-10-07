@@ -97,6 +97,18 @@ build:ubsan --linkopt -fno-sanitize-recover=all
 # practice.
 build:ubsan --define=dcfs_sanitizer=ubsan
 
+# Step 7.2: `bazel coverage //...` measures our code (dcfs, bench, tools; not
+# tests and not external repositories) with clang's source-based coverage
+# (the toolchain's `coverage` feature: -fprofile-instr-generate
+# -fcoverage-mapping). Why Bazel's native coverage and not a --config: the
+# toolchain already provides the feature, Bazel computes which sources are
+# instrumented, and its lcov merger and combined report (the one file CI
+# publishes, bazel-out/_coverage/_coverage_report.dat) are free. The QEMU test
+# macros ship the guest's profiles out and add their lcov to COVERAGE_DIR
+# (test/qemu/coverage.bzl, scripts/run-qemu.sh, README.md "Coverage").
+coverage --instrumentation_filter=^//(dcfs|bench|tools)[/:]
+coverage --combined_report=lcov
+
 # Per-checkout settings that are not committed (e.g. the agent lane
 # clones' `startup --max_idle_secs=...`). See docs/plan/process.md.
 try-import %workspace%/user.bazelrc

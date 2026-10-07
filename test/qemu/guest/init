@@ -193,6 +193,27 @@ mem_report() {
 
 start_mem_sampler
 
+# Step 7.2, coverage: with dcfs_cov=<disk> on the kernel command line (run-qemu.sh
+# under `bazel coverage`) every instrumented process writes its profile to
+# /cov at exit (%m: one file per binary, merged by the runtime across
+# processes), and dump_profraw tars /cov onto that disk before the
+# verdict. A process that does not exit normally (SIGKILL, a power cut)
+# leaves no profile.
+COV=$(sed -n 's/.*\bdcfs_cov=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$COV" ]; then
+	mkdir -p /cov
+	export LLVM_PROFILE_FILE=/cov/%m.profraw
+fi
+dump_profraw() {
+	[ -n "$COV" ] || return 0
+	if tar -c -C /cov . >"$COV"; then
+		echo "init: profiles written to $COV"
+	else
+		echo "init: could not write the profiles to $COV"
+	fi
+	sync
+}
+
 finish() {
 	sync
 	# `sync` flushes the block devices, not the serial console: the line
@@ -243,6 +264,7 @@ if [ -f /test/run ]; then
 	# exit status, and word-splitting $(cat /test/args) is deliberate.
 	/test/run $(cat /test/args 2>/dev/null)
 	rc=$?
+	dump_profraw
 	mem_report
 	echo "DCFS-TEST-EXIT=$rc"
 	finish
@@ -296,6 +318,8 @@ if [ -n "$ROOTFS" ]; then
 	mount -o bind /proc /newroot/proc
 	mount -o bind /sys /newroot/sys
 	mount -o bind /dev /newroot/dev
+	# Coverage: the chrooted processes write their profiles to /cov too.
+	[ -n "$COV" ] && mkdir -p /newroot/cov && mount -o bind /cov /newroot/cov
 	cp /bin/dcfs /bin/fhtest /bin/testutil /newroot/usr/local/bin/
 	cp -a /tests/. /newroot/tests/
 
@@ -365,6 +389,7 @@ else
 	rc=$?
 fi
 
+dump_profraw
 mem_report
 if [ "$rc" -eq 0 ]; then
 	echo "ALL-TESTS-PASSED"
