@@ -448,7 +448,10 @@ cc_library(
     name = "device_id",
     visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["device_id.cc"],
-    hdrs = ["device_id.h"],
+    hdrs = [
+      "device_id.h",
+      "fsuuid_compat.h",
+    ],
     deps = [
       ":status",
       ":syscalls",
@@ -486,6 +489,30 @@ qemu_cc_test(
       "@absl//absl/hash",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@googletest//:gtest_main",
+    ],
+)
+
+# Fault-injection test for GetDeviceId (step 8, coverage gaps): link-time
+# --wraps of ioctl and fstatfs fake the ioctl errors, a wrong uuid length and
+# the btrfs answers; a target of its own, so the wrapping touches no other test.
+qemu_cc_test(
+    name = "device_id_fault_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["device_id_fault_test.cc"],
+    disks = [("vdb", "ext4", "32M")],
+    linkopts = [
+      "-Wl,--wrap=ioctl",
+      "-Wl,--wrap=fstatfs64",  # fstatfs under _FILE_OFFSET_BITS=64
+    ],
+    deps = [
+      ":device_id",
+      ":status",
+      ":syscalls_backing",
+      "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@absl//absl/status:statusor",
       "@googletest//:gtest_main",

@@ -1,7 +1,10 @@
 #ifndef DCFS_FILE_HANDLE_H_
 #define DCFS_FILE_HANDLE_H_
 
+#include <sys/stat.h>
+
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,6 +15,11 @@
 #include "dcfs/mount_fds.h"
 
 namespace dcfs {
+
+// The mount id a statx(2) result carries: the unique one if the kernel set
+// STATX_MNT_ID_UNIQUE (it promises not to reuse the value), else the plain
+// STATX_MNT_ID, else nullopt (the kernel understood neither request bit).
+std::optional<uint64_t> MountIdFromStatx(const struct statx &stx);
 
 // A FileHandle is a durable, path-independent reference to a single inode
 // (file, directory, symlink, ...) on some filesystem: a kernel file handle

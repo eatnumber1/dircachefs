@@ -5,8 +5,10 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <climits>
 #include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,6 +32,11 @@ namespace {
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
+using ::testing::ContainsRegex;
+using ::testing::EndsWith;
+using ::testing::HasSubstr;
+using ::testing::Not;
+using ::testing::Optional;
 
 // True if `status` reflects the backing filesystem lacking support this
 // test needs, rather than a real bug: GetDeviceId() returns Unimplemented
@@ -80,6 +87,96 @@ TEST(FileHandleValueTest, SerializeParseRoundTripEmptyBytes) {
 TEST(FileHandleValueTest, ParseRejectsShortInput) {
   EXPECT_THAT(FileHandle::Parse(std::string(27, 'x')),
               StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+// Every length below the 28-byte minimum (24 of device, 4 of type) is
+// refused, the error says how many bytes it got, and 28 exactly is a handle
+// with no bytes.
+TEST(FileHandleValueTest, ParseLengthBoundary) {
+  for (size_t len :
+       {size_t{0}, size_t{1}, size_t{23}, size_t{24}, size_t{27}}) {
+    EXPECT_THAT(FileHandle::Parse(std::string(len, '\0')),
+                StatusIs(absl::StatusCode::kInvalidArgument,
+                         HasSubstr(absl::StrCat("got ", len, " bytes"))))
+        << "length " << len;
+  }
+  absl::StatusOr<FileHandle> minimal = FileHandle::Parse(std::string(28, '\0'));
+  ASSERT_THAT(minimal, IsOk());
+  EXPECT_TRUE(minimal->bytes.empty());
+  EXPECT_EQ(minimal->handle_type, 0);
+}
+
+// handle_type travels as four little-endian bytes of an int32: a negative
+// type (the kernel's FILEID_* values are small positive ints, but this is a
+// foreign value read back from a database) and the extremes survive.
+TEST(FileHandleValueTest, HandleTypeSurvivesTheWireWhateverItsSign) {
+  for (int32_t type : {int32_t{0}, int32_t{1}, int32_t{255}, int32_t{256},
+                       int32_t{-1}, INT32_MIN, INT32_MAX}) {
+    FileHandle fh = MakeArbitraryHandle();
+    fh.handle_type = type;
+    absl::StatusOr<FileHandle> parsed = FileHandle::Parse(fh.Serialize());
+    ASSERT_THAT(parsed, IsOk());
+    EXPECT_EQ(parsed->handle_type, type);
+    EXPECT_EQ(*parsed, fh);
+  }
+}
+
+TEST(FileHandleValueTest, TheTypeBytesAreLittleEndianAfterTheDevice) {
+  FileHandle fh = MakeArbitraryHandle();
+  fh.handle_type = 0x04030201;
+  std::string wire = fh.Serialize();
+  ASSERT_GE(wire.size(), 28u);
+  EXPECT_EQ(wire.substr(24, 4), std::string("\x01\x02\x03\x04", 4));
+}
+
+// A longer handle than the kernel's MAX_HANDLE_SZ parses (Parse only splits
+// the record); it is Open that the kernel refuses. Unlike a short one, it is
+// not a decode error.
+TEST(FileHandleValueTest, ParseAcceptsAnyHandleLength) {
+  FileHandle fh = MakeArbitraryHandle();
+  fh.bytes.assign(MAX_HANDLE_SZ + 1, 0x5a);
+  absl::StatusOr<FileHandle> parsed = FileHandle::Parse(fh.Serialize());
+  ASSERT_THAT(parsed, IsOk());
+  EXPECT_EQ(parsed->bytes.size(), static_cast<size_t>(MAX_HANDLE_SZ + 1));
+}
+
+// ToString is for logs: it must carry each field a reader looks for, and is
+// not compared whole (docs/style.md, tests).
+TEST(FileHandleValueTest, ToStringHasEveryField) {
+  FileHandle fh = MakeArbitraryHandle();
+  std::string s = fh.ToString();
+  EXPECT_THAT(s, HasSubstr("01020304-0506-0708-090a-0b0c0d0e0f10"))
+      << "the filesystem uuid";
+  EXPECT_THAT(s, HasSubstr(absl::StrCat("subvol=", fh.device.subvol_id)))
+      << "the btrfs subvolume";
+  EXPECT_THAT(s, ContainsRegex("/7:")) << "the handle type";
+  EXPECT_THAT(s, HasSubstr("000102030405060708090a0b0c0d0e0f10111213"))
+      << "the handle bytes, as hex";
+}
+
+TEST(FileHandleValueTest, ToStringOfAnEmptyHandleAndNoSubvolume) {
+  FileHandle fh;
+  fh.device.uuid.fill(0xAB);
+  fh.handle_type = -3;
+  std::string s = fh.ToString();
+  EXPECT_THAT(s, HasSubstr("abababab-abab-abab-abab-abababababab"));
+  EXPECT_THAT(s, Not(HasSubstr("subvol"))) << "no subvolume when it is 0";
+  EXPECT_THAT(s, HasSubstr("/-3:")) << "the handle type, signed";
+  EXPECT_THAT(s, EndsWith(":")) << "no handle bytes";
+}
+
+TEST(MountIdFromStatxTest, PrefersTheUniqueIdThenThePlainOneThenNothing) {
+  struct statx stx = {};
+  stx.stx_mnt_id = 42;
+
+  stx.stx_mask = STATX_MNT_ID_UNIQUE | STATX_MNT_ID;
+  EXPECT_THAT(MountIdFromStatx(stx), Optional(42u));
+  stx.stx_mask = STATX_MNT_ID_UNIQUE;
+  EXPECT_THAT(MountIdFromStatx(stx), Optional(42u));
+  stx.stx_mask = STATX_MNT_ID;
+  EXPECT_THAT(MountIdFromStatx(stx), Optional(42u));
+  stx.stx_mask = STATX_TYPE | STATX_MODE;  // the kernel understood neither
+  EXPECT_EQ(MountIdFromStatx(stx), std::nullopt);
 }
 
 TEST(FileHandleValueTest, EqualityAndHashing) {

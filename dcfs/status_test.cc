@@ -10,6 +10,7 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/cord.h"
 #include "absl/types/source_location.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -166,6 +167,56 @@ TEST(StatusToErrnoTest, CodeTableMapsPlainCodes) {
   EXPECT_EQ(StatusToErrno(absl::InvalidArgumentError("x")), EINVAL);
   EXPECT_EQ(StatusToErrno(absl::UnimplementedError("x")), ENOSYS);
   EXPECT_EQ(StatusToErrno(absl::PermissionDeniedError("x")), EPERM);
+}
+
+// Every code of the fallback table (status.cc's StatusCodeToErrno), which
+// serves a status that carries no errno payload: the code of a failure that
+// did not come from a syscall. kOk is not here: StatusToErrno answers 0 for
+// an ok status before the table is consulted.
+TEST(StatusToErrnoTest, CodeTableHasAnErrnoForEveryCode) {
+  const struct {
+    absl::StatusCode code;
+    int want;
+  } kCases[] = {
+      {absl::StatusCode::kCancelled, ECANCELED},
+      {absl::StatusCode::kUnknown, EPROTO},
+      {absl::StatusCode::kInvalidArgument, EINVAL},
+      {absl::StatusCode::kDeadlineExceeded, ETIMEDOUT},
+      {absl::StatusCode::kNotFound, ENOENT},
+      {absl::StatusCode::kAlreadyExists, EEXIST},
+      {absl::StatusCode::kPermissionDenied, EPERM},
+      {absl::StatusCode::kResourceExhausted, ENOSPC},
+      {absl::StatusCode::kFailedPrecondition, EBUSY},
+      {absl::StatusCode::kAborted, EDEADLK},
+      {absl::StatusCode::kOutOfRange, ERANGE},
+      {absl::StatusCode::kUnimplemented, ENOSYS},
+      {absl::StatusCode::kInternal, ELIBBAD},
+      {absl::StatusCode::kUnavailable, EAGAIN},
+      {absl::StatusCode::kDataLoss, ENOTRECOVERABLE},
+      {absl::StatusCode::kUnauthenticated, EPERM},
+  };
+  for (const auto &[code, want] : kCases) {
+    EXPECT_EQ(StatusToErrno(absl::Status(code, "x")), want)
+        << "code " << absl::StatusCodeToString(code);
+  }
+}
+
+TEST(StatusToErrnoTest, ACodeOutsideTheEnumIsAProtocolError) {
+  // absl keeps a code it does not know as it came (a status from a newer
+  // library, a corrupted one): the table's default.
+  EXPECT_EQ(
+      StatusToErrno(absl::Status(static_cast<absl::StatusCode>(4242), "x")),
+      EPROTO);
+}
+
+TEST(StatusToErrnoTest, AnUnreadablePayloadFallsBackToTheCode) {
+  // A payload whose name is not an errno name (written by something else, or
+  // by a build whose table differs) must not be trusted: the code decides.
+  absl::Status status = absl::NotFoundError("x");
+  status.SetPayload(kErrnoTypeUrl, absl::Cord("NOT_AN_ERRNO_NAME"));
+  EXPECT_THAT(GetErrnoFromStatus(status),
+              StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(StatusToErrno(status), ENOENT);
 }
 
 }  // namespace

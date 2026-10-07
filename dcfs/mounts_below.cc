@@ -76,21 +76,15 @@ absl::StatusOr<std::string> ReadAll(int fd) {
 
 }  // namespace
 
-absl::StatusOr<std::vector<std::string>> MountsBelow(
-    std::string_view source_path) {
-  ABSL_ASSIGN_OR_RETURN(std::string source, Canonicalize(source_path));
+std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
+                                          std::string_view source) {
   // The root filesystem is its own special case: every other mount's point
   // trivially "starts with" "/", so the ordinary `source + "/"` prefix
   // (which would double the slash) is skipped in favor of "/" itself.
   const std::string prefix = source == "/" ? "/" : absl::StrCat(source, "/");
 
-  ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor mountinfo,
-      syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
-  ABSL_ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
-
   std::vector<std::string> below;
-  for (std::string_view line : absl::StrSplit(contents, '\n')) {
+  for (std::string_view line : absl::StrSplit(mountinfo, '\n')) {
     if (line.empty()) continue;
     // Fields: (1) mount id, (2) parent id, (3) major:minor, (4) root,
     // (5) mount point, (6) mount options, (7...) optional fields, "-",
@@ -108,6 +102,16 @@ absl::StatusOr<std::vector<std::string>> MountsBelow(
     }
   }
   return below;
+}
+
+absl::StatusOr<std::vector<std::string>> MountsBelow(
+    std::string_view source_path) {
+  ABSL_ASSIGN_OR_RETURN(std::string source, Canonicalize(source_path));
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor mountinfo,
+      syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
+  ABSL_ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
+  return MountPointsBelow(contents, source);
 }
 
 }  // namespace dcfs

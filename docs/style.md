@@ -349,6 +349,16 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
   `ASSERT_*` when the test cannot continue, `EXPECT_*` otherwise.
   `GTEST_SKIP() << reason` when the guest filesystem lacks a capability (23
   uses).
+- **A debug or log string is tested for its important fields, never
+  against a hard-coded whole.** One substring (or regex) per field the
+  reader of the string depends on: for a file handle's `ToString`, the
+  filesystem uuid, the subvolume, the handle type and the handle bytes; for
+  a node's, the node id, the generation and the handle length. Neither the
+  separators between them nor the order is part of the contract, so a
+  reformatting that keeps every field does not break the test, and a field
+  that goes missing does (`FileHandleValueTest.ToStringHasEveryField`). A
+  string that is a format other code parses (a wire or database key) is a
+  different thing, and its exact bytes are tested.
 - **Fakes, not mocks**: no `MOCK_METHOD` (0 uses; matchers are fine). A
   dependency is injected and a small fake stands in (`ProtocolEvents`,
   `FakeChannel` in `fuse_request_channel_test.cc`). Syscall faults are

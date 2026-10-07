@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -74,6 +75,136 @@ TEST_F(MountsBelowTest, AMountOnTheSourceItselfIsNotReported) {
   auto result = MountsBelow(source_);
   EXPECT_THAT(syscalls::umount2(source_, MNT_DETACH), IsOk());
   EXPECT_THAT(result, IsOkAndHolds(IsEmpty()));
+}
+
+// --- The parser, on canned /proc/self/mountinfo text ---------------------
+
+// A mountinfo line with the five leading fields the parser reads, `point` as
+// field 5 (already escaped by the caller), some optional fields and the
+// separator.
+std::string Line(std::string_view point,
+                 std::string_view optional = "shared:1") {
+  return absl::StrCat("36 35 98:0 / ", point, " rw,noatime ", optional,
+                      " - ext4 /dev/root rw\n");
+}
+
+TEST(MountPointsBelowTest, OnlyMountsStrictlyBelowTheSource) {
+  std::string info =
+      absl::StrCat(Line("/"), Line("/src"), Line("/src/a"), Line("/srcother"),
+                   Line("/src/a/b"), Line("/elsewhere/src/c"), Line("/sr"));
+  EXPECT_THAT(MountPointsBelow(info, "/src"),
+              ::testing::ElementsAre("/src/a", "/src/a/b"));
+}
+
+TEST(MountPointsBelowTest, ARootSourceTakesEveryOtherMount) {
+  std::string info = absl::StrCat(Line("/"), Line("/proc"), Line("/a/b"));
+  EXPECT_THAT(MountPointsBelow(info, "/"),
+              ::testing::ElementsAre("/proc", "/a/b"));
+}
+
+TEST(MountPointsBelowTest, OctalEscapesAreDecoded) {
+  std::string info =
+      absl::StrCat(Line("/src/with\\040space"), Line("/src/tab\\011in"),
+                   Line("/src/new\\012line"), Line("/src/back\\134slash"));
+  EXPECT_THAT(MountPointsBelow(info, "/src"),
+              ::testing::ElementsAre("/src/with space", "/src/tab\tin",
+                                     "/src/new\nline", "/src/back\\slash"));
+}
+
+// A backslash that does not start a three-digit octal escape is a plain
+// character, wherever the field ends.
+TEST(MountPointsBelowTest, ABackslashThatIsNotAnEscapeIsKept) {
+  std::string info = absl::StrCat(Line("/src/a\\08x"), Line("/src/b\\04"),
+                                  Line("/src/c\\"), Line("/src/d\\0409"));
+  EXPECT_THAT(MountPointsBelow(info, "/src"),
+              ::testing::ElementsAre("/src/a\\08x", "/src/b\\04", "/src/c\\",
+                                     "/src/d 9"));
+}
+
+TEST(MountPointsBelowTest, ASourceNameThatNeedsEscapingStillMatches) {
+  // The source is canonical (decoded); the file's field is escaped.
+  std::string info = absl::StrCat(Line("/my\\040src"), Line("/my\\040src/m"));
+  EXPECT_THAT(MountPointsBelow(info, "/my src"),
+              ::testing::ElementsAre("/my src/m"));
+}
+
+TEST(MountPointsBelowTest, ShortLinesAndBlankLinesAreIgnored) {
+  std::string info =
+      absl::StrCat("\n", "36 35 98:0 /\n", "36 35 98:0 /src/short\n", "   \n",
+                   Line("/src/ok"), "\n\n");
+  EXPECT_THAT(MountPointsBelow(info, "/src"),
+              ::testing::ElementsAre("/src/ok"));
+}
+
+TEST(MountPointsBelowTest, ExactlyFiveFieldsIsEnough) {
+  EXPECT_THAT(MountPointsBelow("1 2 3:4 / /src/five\n", "/src"),
+              ::testing::ElementsAre("/src/five"));
+}
+
+TEST(MountPointsBelowTest, ExtraSpacesBetweenFieldsAreSkipped) {
+  EXPECT_THAT(MountPointsBelow("1  2   3:4 / /src/x rw - ext4 a b\n", "/src"),
+              ::testing::ElementsAre("/src/x"));
+}
+
+TEST(MountPointsBelowTest, NoTrailingNewlineIsFine) {
+  EXPECT_THAT(MountPointsBelow("1 2 3:4 / /src/x rw - ext4 a b", "/src"),
+              ::testing::ElementsAre("/src/x"));
+}
+
+TEST(MountPointsBelowTest, EmptyInputHasNothingBelow) {
+  EXPECT_THAT(MountPointsBelow("", "/src"), IsEmpty());
+}
+
+// --- The real mountinfo ------------------------------------------------
+
+TEST_F(MountsBelowTest, NestedMountsAreAllReported) {
+  ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt"), "tmpfs", 0, nullptr),
+              IsOk());
+  mounted_ = true;
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mnt/inner"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt/inner"), "tmpfs", 0, nullptr),
+              IsOk());
+  EXPECT_THAT(MountsBelow(source_), IsOkAndHolds(UnorderedElementsAre(
+                                        Path("mnt"), Path("mnt/inner"))));
+}
+
+// The kernel escapes a mount point's space, tab, newline and backslash; a
+// mount below a directory named with all four is still found, by its real
+// name.
+TEST_F(MountsBelowTest, AMountPointWithSpecialCharactersIsReportedByName) {
+  const std::string name = "sp ace\ttab\nnl\\bs";
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path(name), 0755), IsOk());
+  ASSERT_THAT(syscalls::mount("tmpfs", Path(name), "tmpfs", 0, nullptr),
+              IsOk());
+  auto result = MountsBelow(source_);
+  EXPECT_THAT(syscalls::umount2(Path(name), MNT_DETACH), IsOk());
+  EXPECT_THAT(result, IsOkAndHolds(UnorderedElementsAre(Path(name))));
+}
+
+// A path that is not canonical (a "..", a symlink) names the same source.
+TEST_F(MountsBelowTest, ThePathIsCanonicalizedFirst) {
+  ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt"), "tmpfs", 0, nullptr),
+              IsOk());
+  mounted_ = true;
+  EXPECT_THAT(MountsBelow(Path("plain/..")),
+              IsOkAndHolds(UnorderedElementsAre(Path("mnt"))));
+}
+
+TEST_F(MountsBelowTest, ASourceThatDoesNotExistIsAnError) {
+  EXPECT_THAT(MountsBelow(Path("missing")),
+              absl_testing::StatusIs(absl::StatusCode::kNotFound));
+}
+
+// With "/" as the source, every other mount is below it, and "/" itself is
+// not.
+TEST_F(MountsBelowTest, TheRootSourceSeesTheGuestsMounts) {
+  ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt"), "tmpfs", 0, nullptr),
+              IsOk());
+  mounted_ = true;
+  absl::StatusOr<std::vector<std::string>> below = MountsBelow("/");
+  ASSERT_THAT(below, IsOk());
+  EXPECT_THAT(*below, ::testing::Contains(Path("mnt")));
+  EXPECT_THAT(*below, ::testing::Not(::testing::Contains("/")));
 }
 
 }  // namespace

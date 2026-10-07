@@ -25,6 +25,7 @@
 //dcfs/testonly:trace_recorder_test_bin
 //dcfs:backing_fault_test_bin
 //dcfs:backing_test_bin
+//dcfs:device_id_fault_test_bin
 //dcfs:device_id_test_bin
 //dcfs:dir_cache_fs_fault_create_syscall_before_phase1_test_bin
 //dcfs:dir_cache_fs_fault_phase3_before_syscall_test_bin

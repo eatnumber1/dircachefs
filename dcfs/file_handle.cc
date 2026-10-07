@@ -55,6 +55,8 @@ absl::StatusOr<RawHandle> NameToHandle(int dirfd, std::string_view pathname,
   return raw;
 }
 
+}  // namespace
+
 // Both STATX_MNT_ID and STATX_MNT_ID_UNIQUE report the mount id in the same
 // stx_mnt_id field; STATX_MNT_ID_UNIQUE additionally promises the kernel
 // won't reuse the value later, which STATX_MNT_ID alone does not. Prefer
@@ -66,8 +68,6 @@ std::optional<uint64_t> MountIdFromStatx(const struct statx &stx) {
   if ((stx.stx_mask & STATX_MNT_ID) != 0) return stx.stx_mnt_id;
   return std::nullopt;
 }
-
-}  // namespace
 
 std::string FileHandle::Serialize() const {
   std::string out = device.Serialize();

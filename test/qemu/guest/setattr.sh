@@ -330,6 +330,68 @@ else
 	pass symlink-chmod-no-side-effect
 fi
 
+# --- opath-times-xattrs: the helpers for objects with no real fd ---------
+
+# A fifo and a symlink cannot be reopened to get an fd futimens(2) or
+# fsetxattr(2) accept, so backing.cc sets their times and xattrs through the
+# O_PATH fd (FutimensOPath, SetXattrOPath, RemoveXattrOPath: /proc/self/fd
+# paths). Regular files and directories take the reopen path instead (the
+# checks above). user.* xattrs are refused on both, so trusted.* (root's) is
+# used. Each change must land on the backing filesystem and come back from
+# the cache.
+OPATH_TIME=1111111111
+for node in p1 l1; do
+	out=$("$TESTUTIL" utimens "$MNT/$node" "$OPATH_TIME" 0)
+	rc=$?
+	if [ "$rc" -eq 0 ]; then
+		pass "utimens-$node-tool"
+	else
+		fail "utimens-$node-tool" "rc=$rc out='$out'"
+	fi
+	verify_immediate "utimens-$node-matches-src" "$MNT/$node" "$SRC/$node" '%Y'
+	verify_cached "utimens-$node-cached" "$MNT/$node" '%Y' "$OPATH_TIME"
+
+	out=$("$TESTUTIL" setxattr "$MNT/$node" trusted.dcfs opath)
+	rc=$?
+	if [ "$rc" -eq 0 ]; then
+		pass "setxattr-$node-tool"
+	else
+		fail "setxattr-$node-tool" "rc=$rc out='$out'"
+	fi
+	got=$("$TESTUTIL" getxattr "$SRC/$node" trusted.dcfs)
+	if [ "$got" = opath ]; then
+		pass "setxattr-$node-matches-src"
+	else
+		fail "setxattr-$node-matches-src" "got '$got'"
+	fi
+	got=$("$TESTUTIL" getxattr "$MNT/$node" trusted.dcfs)
+	if [ "$got" = opath ]; then
+		pass "getxattr-$node-through-dcfs"
+	else
+		fail "getxattr-$node-through-dcfs" "got '$got'"
+	fi
+
+	out=$("$TESTUTIL" removexattr "$MNT/$node" trusted.dcfs)
+	rc=$?
+	if [ "$rc" -eq 0 ]; then
+		pass "removexattr-$node-tool"
+	else
+		fail "removexattr-$node-tool" "rc=$rc out='$out'"
+	fi
+	got=$("$TESTUTIL" getxattr "$SRC/$node" trusted.dcfs)
+	if [ "$got" = "ERR ENODATA" ]; then
+		pass "removexattr-$node-gone-src"
+	else
+		fail "removexattr-$node-gone-src" "got '$got'"
+	fi
+	got=$("$TESTUTIL" getxattr "$MNT/$node" trusted.dcfs)
+	if [ "$got" = "ERR ENODATA" ]; then
+		pass "removexattr-$node-gone-through-dcfs"
+	else
+		fail "removexattr-$node-gone-through-dcfs" "got '$got'"
+	fi
+done
+
 # --- warm-after-all: the whole tree, from cache, twice --------------------
 
 verify_tree_cached warm-after-all

@@ -30,6 +30,15 @@ namespace dcfs {
 absl::StatusOr<std::vector<std::string>> MountsBelow(
     std::string_view source_path);
 
+// The parsing half of MountsBelow, on the text of /proc/self/mountinfo and
+// an already canonical `source` (so it can be tested on canned input):
+// every mount point lying strictly below `source`, in file order, with the
+// kernel's octal escapes (\040 space, \011 tab, \012 newline, \134
+// backslash) decoded. A line with fewer than the five leading fields is
+// ignored, not an error.
+std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
+                                          std::string_view source);
+
 }  // namespace dcfs
 
 #endif  // DCFS_MOUNTS_BELOW_H_

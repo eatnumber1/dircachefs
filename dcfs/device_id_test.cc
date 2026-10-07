@@ -93,6 +93,11 @@ TEST(DeviceIdTest, FstypeNameKnown) {
   EXPECT_EQ(FstypeName(0x6969), "nfs");
   EXPECT_EQ(FstypeName(0x65735546), "fuse");
   EXPECT_EQ(FstypeName(0x794C7630), "overlayfs");
+  EXPECT_EQ(FstypeName(0x9FA0), "proc");
+  EXPECT_EQ(FstypeName(0x62656572), "sysfs");
+  EXPECT_EQ(FstypeName(0x858458F6), "ramfs");
+  EXPECT_EQ(FstypeName(0x4D44), "vfat");
+  EXPECT_EQ(FstypeName(0x2011BAB0), "exfat");
   EXPECT_EQ(FstypeName(0xF2F52010), "f2fs");
   EXPECT_EQ(FstypeName(0xCA451A4E), "bcachefs");
 }
