@@ -7,24 +7,27 @@ common --lockfile_mode=error
 # Never fall back to a host compiler: the toolchain is the pinned clang
 # (MODULE.bazel; -std=c++20 is set there).
 build --repo_env=BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1
-build --copt -Wno-sign-compare
-build --copt -Werror
-build --copt -Wimplicit-fallthrough
 build --copt -D_FILE_OFFSET_BITS=64
 build --disk_cache=~/.cache/bazel-disk-cache
 # Keep the shared disk cache bounded: Bazel garbage-collects it down to
 # this size while the server is idle.
 build --experimental_disk_cache_gc_max_size=50G
 
-# --copt -Werror above also applies to external repositories' own compiles.
-# The libfuse module (BCR overlay) pulls in liburing, which has -Wunused-
-# parameter warnings that are not errors upstream; without this, building
-# anything that depends on @libfuse//:libfuse fails. Scope -Werror back off
-# for code under external/ only; our own sources are unaffected.
-build --per_file_copt=external/.*@-Wno-error
-# Same for the -Wimplicit-fallthrough above (sqlite3 and libfuse still warn
-# under clang): not ours.
-build --per_file_copt=external/.*@-Wno-implicit-fallthrough
+# Warnings: every warning in our code is an error, compile and link, and
+# external repositories (abseil, libfuse, liburing, numactl, SQLite, ...)
+# build with their own flags only. --per_file_copt takes `regex,-regex@flags`
+# (include, exclude); Bazel applies it to a source when its label OR its
+# path is included, so an external source (label `@@abseil-cpp+//...`, path
+# `external/...`) must be excluded by both, and everything else is ours. The
+# regexes cannot contain `@` (the filter ends at the first one): `\\x40` is it
+# (the rc file parser takes one backslash away). -Wno-sign-compare goes away
+# with phase 7.3's -Weverything.
+build --per_file_copt=.*,-external/.*,-\\x40.*@-Werror,-Wimplicit-fallthrough,-Wno-sign-compare
+# The linker has no such scope: --linkopt reaches every link in the graph,
+# which are ours and the pjdfstest binaries (third-party code built by our
+# overlay), and all of them link without a warning. tools/warnings/ and
+# //dcfs:warning_flags_*_test check these flags on the command lines.
+build --linkopt -Wl,--fatal-warnings
 
 # Link statically everywhere: the daemon ships fully static in an initramfs.
 # This also keeps Bazel from building a useless .so for every cc_binary's

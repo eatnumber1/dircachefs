@@ -1,6 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
+load("//tools/warnings:flags_test.bzl", "flags_test")
 
 # Shared by :main, :main_static (the QEMU-initramfs copy, see below) and
 # :main_static_traced so their dependency lists can't drift apart. Every
@@ -1134,3 +1135,36 @@ genquery(
 )
 
 exports_files(["syscalls_backing_users.txt"])
+
+# Our code builds with every warning an error (.bazelrc): a compile of one of
+# our libraries, a link of the production binary and a link of a QEMU test
+# binary. tools/warnings/BUILD.bazel has the same check for external code.
+flags_test(
+    name = "warning_flags_compile_test",
+    size = "small",
+    timeout = "short",
+    mnemonic = "CppCompile",
+    present = [
+        "-Werror",
+        "-Wimplicit-fallthrough",
+    ],
+    target_under_test = ":status",
+)
+
+flags_test(
+    name = "warning_flags_link_test",
+    size = "small",
+    timeout = "short",
+    mnemonic = "CppLink",
+    present = ["-Wl,--fatal-warnings"],
+    target_under_test = ":main",
+)
+
+flags_test(
+    name = "warning_flags_test_link_test",
+    size = "small",
+    timeout = "short",
+    mnemonic = "CppLink",
+    present = ["-Wl,--fatal-warnings"],
+    target_under_test = ":status_test_bin",
+)

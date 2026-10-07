@@ -1,0 +1,28 @@
+load(":flags_test.bzl", "flags_test")
+
+# Tests of the warning flags (flags_test.bzl) on external repositories, whose
+# compiles must not get our warning flags (.bazelrc). The tests of our own
+# code are in //dcfs, whose targets are private. Each target's compile
+# actions have neither -Werror nor -Wno-error (which only undid it before)
+# nor our other warning flags.
+[
+    flags_test(
+        name = "external_compile_%s_test" % name,
+        size = "small",
+        timeout = "short",
+        absent = [
+            "-Werror",
+            "-Wno-error",
+            "-Wimplicit-fallthrough",
+            "-Wno-sign-compare",
+        ],
+        mnemonic = "CppCompile",
+        target_under_test = target,
+    )
+    for name, target in {
+        "absl": "@absl//absl/strings",
+        "googletest": "@googletest//:gtest",
+        "libfuse": "@libfuse//:libfuse",
+        "sqlite": "@sqlite//:sqlite3",
+    }.items()
+]
