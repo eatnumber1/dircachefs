@@ -56,7 +56,10 @@ process (its waves and file ownership table) is in `history.md`.
 5. **Review** (orchestrator, in the lane): read the full diff and run the step's tests
    and the tier russ expects for the phase (see "Running tests"). Check:
    - the rules in `/AGENTS.md` (test first, fakes not mocks, test code
-     out of production files, warnings, names as bytes, `third_party/`);
+     out of production files, warnings, names as bytes, `third_party/`)
+     and `/docs/style.md` (StatusBuilder helpers, flat namespaces,
+     `syscalls::` call form, manpage-named wrappers only in `syscalls.h`,
+     `enum class`, message wording, comment style);
    - the dcfs invariants: every cache/backing function takes `Context&`;
      no paths after startup (objects are reached by fd or handle; Phase 13
      opens names relative to a parent fd, which is still not a path); no

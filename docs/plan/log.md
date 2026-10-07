@@ -715,3 +715,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   wrapper per manpage-documented call, compositions (`*_opath`, ReopenPathFd, ...) move to backing;
   enum class; clang-format always, enforced by a Bazel format test + opt-in pre-commit hook (7.6);
   IWYU via layering_check + misc-include-cleaner (7.7). Draft in lane-4 (step-style), revising.
+- Style guide merged (ecacef4, docs/style.md, 455 lines; AGENTS.md "Follow docs/style.md"; review
+  checklist points at it). Phase 25 (style convergence) written from its Appendix A: 25.1 errors,
+  wrappers, enums after Phase 23 merges (same files); 25.2 flat namespaces (clashes: ParentOf,
+  SetXattr, RemoveXattr in cache and backing); format/includes in 7.6/7.7.
