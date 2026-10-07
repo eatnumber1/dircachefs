@@ -816,3 +816,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Bazel-downloader trade). fast 84/84, presubmit 144/145 (readdir_boundary warm-listing 3.2 s vs
   2.5 s budget under load; 3/3 alone), asan boot + dcfs units 33/33. AGENTS.md gains the Alpine
   exception sentence (russ to see). Final review (24.3 + fixes) in flight; then merge, then push.
+- russ (2026-10-07): downloads stay in Bazel. ae28089 (apk fetches via Python urllib, for a testable
+  404 message) is being replaced by `rctx.download(allow_fail = True)` + the message in Starlark;
+  no test for the message. Rule for the future: a repository rule fetches only through Bazel's
+  downloader (repository cache, distdir, proxy/netrc, retries); verification may run a tool.
