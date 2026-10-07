@@ -37,7 +37,7 @@ phase's file; `log.md` says where things stand.
 | 7 | [Pinned toolchain, coverage, warnings, UBSan, clang-tidy](phases/07-toolchain-coverage-warnings-ubsan.md) | in progress (7.1 pinned clang started 2026-10-07, lane-4) |
 | 8 | [Coverage close to 100%](phases/08-coverage-to-100.md) | planned |
 | 9 | [File names are bytes](phases/09-file-names-are-bytes.md) | done 2026-10-06 (mountinfo/fstab/exports escaping in Phase 15; flag paths in main.cc deferred) |
-| 10 | [Benchmarks](phases/10-benchmarks.md) | done 2026-10-06 (baseline recorded; readdir 27x slower than backing: investigation in lane-4) |
+| 10 | [Benchmarks](phases/10-benchmarks.md) | done 2026-10-06 (baseline recorded; readdir was 27x slower than the backing, 8x after the v3 indexes: 916 ms vs 114 ms for 10k entries, 2026-10-07; reduction plan in log) |
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
 | 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | 12.1-12.2 done 2026-10-07 (two review rounds; russ to read formal/README.md); 12.3 revalidation model done 2026-10-07 (2c3d79c); 12.4 inode lifetime started 2026-10-07 (lane-2); 12.5-12.10 planned |

@@ -1049,3 +1049,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   directory, SQLite settings, a ranked reduction plan with expected counts and the protocol
   transitions each change touches; what the 27x readdir slowdown is made of. Steps follow after
   25.1 merges (same files).
+- SQLite-count investigation (lane-3, report only; stopped on two auto-mode denials: temporary
+  edits to strace_lib.sh/syscall_traces.sh, and `ls bazel-testlogs` -> Needs russ). Findings:
+  readdir is 8x (916 vs 114 ms, 10k entries), not 27x (stale, pre-v3-indexes); counts are steps
+  (a hit = 2); warm readdir = per-call completeness (2) + unknown probe (1) + ./.. handling, per
+  entry 1 row step + GetAttr (2); READDIRPLUS pages fetch 64 rows for ~25 entries per reply;
+  create's 2 fsyncs are its two durable phase-1 WAL commits; each transaction costs 2 steps, a
+  kSync one 6 (synchronous FULL/NORMAL flips). Plan, ranked: (1) join attrs into ListDir (-2N, no
+  protocol change); (2) LIMIT = reply budget; (3) ReadOne stops after the first row (every
+  sql_stmts budget drops); (4) merge the completeness statements; (5) merge create's phase-3
+  fills (touches the fill guards: model + trace validation; needs the real breakdown); (6)
+  profile per-row C++ (DeviceId::Parse per GetAttr, 21 columns) and the daemon's own CPU (bench
+  does not record it). Steps after 25.1 merges.
