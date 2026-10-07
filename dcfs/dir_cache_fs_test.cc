@@ -764,8 +764,8 @@ class DirCacheFSTest : public ::testing::Test {
                                                  std::string_view name) {
     absl::StatusOr<LookupResult> result = cache::Lookup(ctx_, dir, name);
     EXPECT_THAT(result, IsOk());
-    if (!result.ok()) return {LookupResult::kUnknown, 0};
-    if (result->kind != LookupResult::kFound) return {result->kind, 0};
+    if (!result.ok()) return {LookupResult::Kind::kUnknown, 0};
+    if (result->kind != LookupResult::Kind::kFound) return {result->kind, 0};
     absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, result->id);
     EXPECT_THAT(attr, IsOk());
     return {result->kind, attr.ok() ? attr->backing_ino : 0};
@@ -775,7 +775,7 @@ class DirCacheFSTest : public ::testing::Test {
     absl::StatusOr<LookupResult> result =
         backing::LookupOrPopulate(ctx_, dir, name);
     if (!result.ok()) return result.status();
-    if (result->kind != LookupResult::kFound) {
+    if (result->kind != LookupResult::Kind::kFound) {
       return absl::NotFoundError(absl::StrCat(name, " not found"));
     }
     return result->id;
@@ -932,7 +932,7 @@ class RenameStaleSourceTest : public DirCacheFSTest {
     ASSERT_THAT(Id("a", d_), IsOk());  // Populates d: rows for all.
     ASSERT_THAT(Id("c", d_), IsOk());
     ASSERT_THAT(cache::MarkDirComplete(ctx_, d_, false), IsOk());
-    ASSERT_EQ(Cached(d_, "b").first, LookupResult::kUnknown);
+    ASSERT_EQ(Cached(d_, "b").first, LookupResult::Kind::kUnknown);
   }
 
   // Runs the interleaving; both renames must succeed.
@@ -960,11 +960,12 @@ class RenameStaleSourceTest : public DirCacheFSTest {
 TEST_F(RenameStaleSourceTest, OldObjectWithAnotherLinkIsNotLinked) {
   Build(/*second_link=*/true);
   RunRenames();
-  EXPECT_EQ(Cached(d_, "b"), std::make_pair(LookupResult::kFound, ino_c_));
-  EXPECT_NE(Cached(d_, "a").first, LookupResult::kFound);
-  EXPECT_NE(Cached(d_, "c").first, LookupResult::kFound);
+  EXPECT_EQ(Cached(d_, "b"),
+            std::make_pair(LookupResult::Kind::kFound, ino_c_));
+  EXPECT_NE(Cached(d_, "a").first, LookupResult::Kind::kFound);
+  EXPECT_NE(Cached(d_, "c").first, LookupResult::Kind::kFound);
   EXPECT_EQ(Cached(d_, "link_a"),
-            std::make_pair(LookupResult::kFound, ino_a_));
+            std::make_pair(LookupResult::Kind::kFound, ino_a_));
 }
 
 // Without one the old file's row is gone; the old phase 3's LinkDentry
@@ -973,9 +974,10 @@ TEST_F(RenameStaleSourceTest, OldObjectWithAnotherLinkIsNotLinked) {
 TEST_F(RenameStaleSourceTest, OldObjectWithoutAnotherLinkIsNotLinked) {
   Build(/*second_link=*/false);
   RunRenames();
-  EXPECT_EQ(Cached(d_, "b"), std::make_pair(LookupResult::kFound, ino_c_));
-  EXPECT_NE(Cached(d_, "a").first, LookupResult::kFound);
-  EXPECT_NE(Cached(d_, "c").first, LookupResult::kFound);
+  EXPECT_EQ(Cached(d_, "b"),
+            std::make_pair(LookupResult::Kind::kFound, ino_c_));
+  EXPECT_NE(Cached(d_, "a").first, LookupResult::Kind::kFound);
+  EXPECT_NE(Cached(d_, "c").first, LookupResult::Kind::kFound);
 }
 
 // The other side: while a mutation of the parent stays in flight, a
@@ -995,7 +997,7 @@ TEST_F(DirCacheFSTest, RenameIsRefusedWhileItsParentKeepsChanging) {
   other.End();
   EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, 0);
   EXPECT_EQ(Cached(kRootInode, "b"),
-            std::make_pair(LookupResult::kFound, InoOf(Path("b"))));
+            std::make_pair(LookupResult::Kind::kFound, InoOf(Path("b"))));
 }
 
 // --- Writable opens vs. sync points (review of R4, finding 1) -----------
@@ -1164,7 +1166,7 @@ TEST_F(DirCacheFSTest, UnlinkMarksWhatItRemovesUnknown) {
   ASSERT_EQ(InoOf(Path("d/link_a")), ino_x);
   ASSERT_EQ(InoOf(Path("d/link_b")), ino_y);
 
-  EXPECT_EQ(Cached(d, "a").first, LookupResult::kNegative);
+  EXPECT_EQ(Cached(d, "a").first, LookupResult::Kind::kNegative);
   // Each file's row is unknown or right: one link left each.
   for (InodeId id : {x, y}) {
     SCOPED_TRACE(id);
@@ -1187,11 +1189,11 @@ TEST_F(DirCacheFSTest, UnlinkIsRefusedWhileItsParentKeepsChanging) {
                        cache::BeginCreate(ctx_, kRootInode, "x2"));
   EXPECT_EQ(Unlink(kRootInode, "a").error, -EAGAIN);
   EXPECT_EQ(::access(Path("a").c_str(), F_OK), 0);
-  EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::kFound);
+  EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::Kind::kFound);
   other.End();
   EXPECT_EQ(Unlink(kRootInode, "a").error, 0);
   EXPECT_NE(::access(Path("a").c_str(), F_OK), 0);
-  EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::kNegative);
+  EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::Kind::kNegative);
 }
 
 // --- formal/ finding sync_during_mutation --------------------------------
@@ -1412,7 +1414,7 @@ TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
 
   StartTrace();
   EXPECT_EQ(Mkdir(kRootInode, "new").first.error, 0);
-  EXPECT_EQ(Cached(kRootInode, "new").first, LookupResult::kFound);
+  EXPECT_EQ(Cached(kRootInode, "new").first, LookupResult::Kind::kFound);
 }
 
 
@@ -1614,7 +1616,7 @@ TEST_F(DirCacheFSTest, TmpfileLinkedIntoANameIsACreate) {
   EXPECT_FALSE(fs_->IsUnnamedTmpfile(static_cast<fuse_ino_t>(tmp.id)));
   ASSERT_OK_AND_ASSIGN(attr, cache::GetAttr(ctx_, tmp.id));
   EXPECT_EQ(Cached(d, "named"),
-            std::make_pair(LookupResult::kFound, attr.backing_ino));
+            std::make_pair(LookupResult::Kind::kFound, attr.backing_ino));
   EXPECT_EQ(Release(tmp.id, tmp.fh).error, 0);
   ASSERT_OK_AND_ASSIGN(attr, cache::GetAttr(ctx_, tmp.id));
   EXPECT_TRUE(attr.valid);
@@ -2763,11 +2765,11 @@ TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
   ASSERT_THAT(cache::MarkUnknown(ctx_, kRootInode,
                                  std::vector<std::string>{"mp"}),
               IsOk());
-  ASSERT_EQ(Cached(kRootInode, "mp").first, LookupResult::kUnknown);
+  ASSERT_EQ(Cached(kRootInode, "mp").first, LookupResult::Kind::kUnknown);
   auto [second, second_entry] = Lookup(kRootInode, "mp");
   ASSERT_EQ(second.error, 0);
   EXPECT_GE(second_entry.nodeid, kFirstStubNodeid);
-  EXPECT_EQ(Cached(kRootInode, "mp").first, LookupResult::kRefused);
+  EXPECT_EQ(Cached(kRootInode, "mp").first, LookupResult::Kind::kRefused);
 
   // Once the name is no longer a boundary, the stub goes with the refusal.
   ASSERT_EQ(::umount2(Path("mp").c_str(), MNT_DETACH), 0);
@@ -2798,8 +2800,8 @@ TEST_F(DirCacheFSTest, BackingInodeNumbersInTheStubRangeAreRefused) {
   EXPECT_EQ(Lookup(d, "big").first.error, -ENOTSUP);
   EXPECT_EQ(Lookup(d, "small").first.error, -ENOTSUP);
   EXPECT_EQ(ErrnoOf(List(d, false).status()), ENOTSUP);
-  EXPECT_EQ(Cached(d, "big").first, LookupResult::kUnknown);
-  EXPECT_EQ(Cached(d, "small").first, LookupResult::kUnknown);
+  EXPECT_EQ(Cached(d, "big").first, LookupResult::Kind::kUnknown);
+  EXPECT_EQ(Cached(d, "small").first, LookupResult::Kind::kUnknown);
 
   // A number below the range is served again.
   FakeInodeNumbers().clear();

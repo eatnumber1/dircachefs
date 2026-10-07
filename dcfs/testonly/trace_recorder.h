@@ -183,8 +183,8 @@ class TraceRecorder final : public ProtocolEvents {
   // A frame: a FUSE request, or a getattr, lookup, refresh or sync point
   // running inside one (or on its own).
   struct Frame {
-    enum Kind { kRequest, kGetattr, kLookup, kRefresh, kSync };
-    Kind kind = kRequest;
+    enum class Kind { kRequest, kGetattr, kLookup, kRefresh, kSync };
+    Kind kind = Kind::kRequest;
     // kRequest: the request.
     events::Op op = events::Op::kOther;
     Ino ino = 0;
@@ -213,8 +213,8 @@ class TraceRecorder final : public ProtocolEvents {
 
   // What a FUSE request is to directory `dir`'s trace.
   struct Mapping {
-    enum Kind { kNone, kRequest, kUnmodelled };
-    Kind kind = kNone;
+    enum class Kind { kNone, kRequest, kUnmodelled };
+    Kind kind = Kind::kNone;
     std::string req_kind, n, m;
     std::string why;  // kUnmodelled
   };

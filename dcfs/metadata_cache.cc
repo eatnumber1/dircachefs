@@ -186,27 +186,27 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
       bool found, ReadOne(*stmt, [&](Statement &row) -> absl::Status {
         const std::string state = row.Column<std::string>(0);
         if (state == "present") {
-          result = {LookupResult::kFound, row.Column<int64_t>(1)};
+          result = {LookupResult::Kind::kFound, row.Column<int64_t>(1)};
         } else if (state == "absent") {
-          result = {LookupResult::kNegative, 0};
+          result = {LookupResult::Kind::kNegative, 0};
         } else if (state == "refused") {
           // schema.sql: a refused dentry always has its stub.
           std::optional<int64_t> stub = row.Column<std::optional<int64_t>>(2);
           RET_CHECK(stub.has_value())
               << "refused dentry " << EscapeBytes(name) << " of " << parent
               << " has no stub";
-          result = {LookupResult::kRefused, *stub};
+          result = {LookupResult::Kind::kRefused, *stub};
         } else {
           RET_CHECK_EQ(state, "unknown") << "bad dentries.state";
-          result = {LookupResult::kUnknown, 0};
+          result = {LookupResult::Kind::kUnknown, 0};
         }
         return absl::OkStatus();
       }));
   if (found) return result;
   // No row: the listing's completeness decides.
   ABSL_ASSIGN_OR_RETURN(bool complete, ChildrenComplete(ctx, parent));
-  return LookupResult{complete ? LookupResult::kNegative
-                               : LookupResult::kUnknown,
+  return LookupResult{complete ? LookupResult::Kind::kNegative
+                               : LookupResult::Kind::kUnknown,
                       0};
 }
 
@@ -870,7 +870,7 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
                           InodeId newparent, std::string_view newname) {
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_ASSIGN_OR_RETURN(LookupResult source, Lookup(ctx, parent, name));
-    if (source.kind != LookupResult::kFound) {
+    if (source.kind != LookupResult::Kind::kFound) {
       return NotFoundErrorBuilder()
              << "no cached positive dentry " << EscapeBytes(name) << " in "
              << parent << " to rename";

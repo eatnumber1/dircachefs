@@ -687,13 +687,13 @@ absl::Status DirCacheFS::Lookup(
 
   ABSL_ASSIGN_OR_RETURN(
       cache::LookupResult result, backing::LookupOrPopulate(ctx_, parent, name));
-  if (result.kind == cache::LookupResult::kNegative) {
+  if (result.kind == cache::LookupResult::Kind::kNegative) {
     return req.ReplyNegativeEntry(opts_.entry_timeout);
   }
   // LookupOrPopulate never returns kUnknown -- it always resolves to a
   // positive entry, a (possibly freshly-cached) negative one, or a refused
   // boundary with its stub (EntryFor answers a stub from its row).
-  RET_CHECK_NE(result.kind, cache::LookupResult::kUnknown);
+  RET_CHECK_NE(result.kind, cache::LookupResult::Kind::kUnknown);
   ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(result.id));
   return ReplyEntry(req, entry);
 }
@@ -965,16 +965,17 @@ absl::Status DirCacheFS::RemoveChild(
     const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
     ABSL_ASSIGN_OR_RETURN(child, backing::LookupOrPopulate(ctx_, parent, name));
     // Model: UnlinkPhase1's ENOENT branch, if not found.
-    ctx_.events->NameResolved(ctx_, parent, name,
-                              child.kind != cache::LookupResult::kNegative);
-    if (child.kind == cache::LookupResult::kNegative) {
+    ctx_.events->NameResolved(
+        ctx_, parent, name,
+        child.kind != cache::LookupResult::Kind::kNegative);
+    if (child.kind == cache::LookupResult::Kind::kNegative) {
       return req.ReplyErrno(ENOENT);
     }
     // A boundary stub: EBUSY, as for removing a mount point (review L2).
-    if (child.kind == cache::LookupResult::kRefused) {
+    if (child.kind == cache::LookupResult::Kind::kRefused) {
       return RefuseStub(req, child.id, is_dir ? "rmdir" : "unlink", EBUSY);
     }
-    RET_CHECK_EQ(child.kind, cache::LookupResult::kFound);
+    RET_CHECK_EQ(child.kind, cache::LookupResult::Kind::kFound);
 
     // Phase 1: mark (parent, name) unknown and mark the attributes that are
     // about to change (the parent's mtime/ctime/nlink, the child's
@@ -1087,15 +1088,15 @@ absl::Status DirCacheFS::Rename(
     ABSL_ASSIGN_OR_RETURN(src, backing::LookupOrPopulate(ctx_, parent, name));
     // Model: RenameResolveDst.
     ctx_.events->NameResolved(ctx_, parent, name,
-                              src.kind != cache::LookupResult::kNegative);
-    if (src.kind == cache::LookupResult::kNegative) {
+                              src.kind != cache::LookupResult::Kind::kNegative);
+    if (src.kind == cache::LookupResult::Kind::kNegative) {
       return req.ReplyErrno(ENOENT);
     }
     // The stub itself, moved or replaced: across the boundary.
-    if (src.kind == cache::LookupResult::kRefused) {
+    if (src.kind == cache::LookupResult::Kind::kRefused) {
       return RefuseStub(req, src.id, "rename", EXDEV);
     }
-    RET_CHECK_EQ(src.kind, cache::LookupResult::kFound);
+    RET_CHECK_EQ(src.kind, cache::LookupResult::Kind::kFound);
     // The destination is resolved (populating newparent if need be) rather
     // than merely looked up: if the rename replaces an existing object, its
     // row -- which may be cached through another hard link, or an NFS
@@ -1103,11 +1104,11 @@ absl::Status DirCacheFS::Rename(
     // (or be deleted) in phase 3, and that needs its id.
     ABSL_ASSIGN_OR_RETURN(dst,
                           backing::LookupOrPopulate(ctx_, newparent, newname));
-    RET_CHECK_NE(dst.kind, cache::LookupResult::kUnknown);
-    if (dst.kind == cache::LookupResult::kRefused) {
+    RET_CHECK_NE(dst.kind, cache::LookupResult::Kind::kUnknown);
+    if (dst.kind == cache::LookupResult::Kind::kRefused) {
       return RefuseStub(req, dst.id, "rename", EXDEV);
     }
-    dst_exists = dst.kind == cache::LookupResult::kFound;
+    dst_exists = dst.kind == cache::LookupResult::Kind::kFound;
     if (exchange && !dst_exists) return req.ReplyErrno(ENOENT);
     // Two links to one inode: the kernel's vfs_rename() treats this as a
     // successful no-op and never sends it, but dcfs handles it the same way

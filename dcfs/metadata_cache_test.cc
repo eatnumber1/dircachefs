@@ -144,7 +144,7 @@ int64_t CountVmInstructions(sqlite3::Connection &db, Fn &&fn) {
 
 MATCHER_P(IsLookup, kind, "") { return arg.kind == kind; }
 MATCHER_P(IsFoundAs, id, "") {
-  return arg.kind == LookupResult::kFound && arg.id == id;
+  return arg.kind == LookupResult::Kind::kFound && arg.id == id;
 }
 
 class MetadataCacheTest : public ::testing::Test {
@@ -249,7 +249,7 @@ TEST_F(MetadataCacheTest, DifferentHandleOrBirthTimeIsANewObject) {
   EXPECT_THAT(Readlink(ctx_, by_handle.id),
               StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(Lookup(ctx_, dir, "s"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(IsDirComplete(ctx_, dir), IsOkAndHolds(false));
   EXPECT_THAT(GetHandle(ctx_, by_handle.id),
               IsOkAndHolds(Handle(kSource, "h30-reborn")));
@@ -309,10 +309,10 @@ TEST_F(MetadataCacheTest, HardLinksShareOneRow) {
 
 TEST_F(MetadataCacheTest, NegativeEntries) {
   EXPECT_THAT(Lookup(ctx_, kRootInode, "x"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   ASSERT_THAT(SetNegative(ctx_, kRootInode, "x"), IsOk());
   EXPECT_THAT(Lookup(ctx_, kRootInode, "x"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
 
   ASSERT_OK_AND_ASSIGN(UpsertResult file, Make(30));
   ASSERT_THAT(LinkDentry(ctx_, kRootInode, "x", file.id), IsOk());
@@ -321,16 +321,16 @@ TEST_F(MetadataCacheTest, NegativeEntries) {
   // And back: a negative entry replaces a positive one.
   ASSERT_THAT(SetNegative(ctx_, kRootInode, "x"), IsOk());
   EXPECT_THAT(Lookup(ctx_, kRootInode, "x"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   EXPECT_THAT(Lookup(ctx_, kRootInode, "never"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
 
   // Names are byte strings, including embedded NULs.
   std::string odd("a\0b\xff", 4);
   ASSERT_THAT(LinkDentry(ctx_, kRootInode, odd, file.id), IsOk());
   EXPECT_THAT(Lookup(ctx_, kRootInode, odd), IsOkAndHolds(IsFoundAs(file.id)));
   EXPECT_THAT(Lookup(ctx_, kRootInode, "a"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
 
   EXPECT_THAT(SetNegative(ctx_, 999, "x"),
               StatusIs(absl::StatusCode::kNotFound));
@@ -348,14 +348,14 @@ TEST_F(MetadataCacheTest, RenameAcrossParents) {
 
   ASSERT_THAT(RenameDentry(ctx_, a, "f", b, "moved"), IsOk());
   EXPECT_THAT(Lookup(ctx_, a, "f"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(Lookup(ctx_, b, "moved"), IsOkAndHolds(IsFoundAs(f.id)));
 
   // Replacing an existing target.
   ASSERT_THAT(RenameDentry(ctx_, b, "moved", b, "g"), IsOk());
   EXPECT_THAT(Lookup(ctx_, b, "g"), IsOkAndHolds(IsFoundAs(f.id)));
   EXPECT_THAT(Lookup(ctx_, b, "moved"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   // The replaced inode's row survives (it may have other links).
   EXPECT_THAT(GetAttr(ctx_, g.id), IsOk());
 
@@ -379,7 +379,7 @@ TEST_F(MetadataCacheTest, UnlinkDentryLeavesInodeRow) {
   ASSERT_THAT(LinkDentry(ctx_, kRootInode, "f", f.id), IsOk());
   ASSERT_THAT(UnlinkDentry(ctx_, kRootInode, "f"), IsOk());
   EXPECT_THAT(Lookup(ctx_, kRootInode, "f"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(GetAttr(ctx_, f.id), IsOk());
   // Absent: no-op.
   EXPECT_THAT(UnlinkDentry(ctx_, kRootInode, "f"), IsOk());
@@ -405,9 +405,9 @@ TEST_F(MetadataCacheTest, DeleteInodeRemovesEverything) {
   EXPECT_THAT(GetAttr(ctx_, link.id), StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(Readlink(ctx_, link.id), StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(Lookup(ctx_, a, "l1"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(Lookup(ctx_, b, "l2"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(IsDirComplete(ctx_, a), IsOkAndHolds(false));
   EXPECT_THAT(IsDirComplete(ctx_, b), IsOkAndHolds(false));
   EXPECT_THAT(CountRows(db_, absl::StrCat("xattrs WHERE inode = ", link.id)),
@@ -417,7 +417,7 @@ TEST_F(MetadataCacheTest, DeleteInodeRemovesEverything) {
   // it, but not the child's inode row.
   ASSERT_THAT(DeleteInode(ctx_, d), IsOk());
   EXPECT_THAT(Lookup(ctx_, a, "d"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(CountRows(db_, absl::StrCat("directories WHERE inode = ", d)),
               IsOkAndHolds(0));
   EXPECT_THAT(CountRows(db_, absl::StrCat("dentries WHERE parent = ", d)),
@@ -444,7 +444,7 @@ TEST_F(MetadataCacheTest, ForgetNegativeDentriesKeepsPositiveOnes) {
 
   ASSERT_THAT(ForgetNegativeDentries(ctx_, dir), IsOk());
   EXPECT_THAT(Lookup(ctx_, dir, "ghost"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(Lookup(ctx_, dir, "f"), IsOkAndHolds(IsFoundAs(file.id)));
   EXPECT_THAT(IsDirComplete(ctx_, dir), IsOkAndHolds(false));
   EXPECT_THAT(ForgetNegativeDentries(ctx_, 999),
@@ -464,7 +464,7 @@ TEST_F(MetadataCacheTest, RecycledBackingInodeGetsNewRow) {
   EXPECT_NE(fresh.fuse_gen, old.fuse_gen);
   EXPECT_THAT(GetAttr(ctx_, old.id), StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(Lookup(ctx_, dir, "f"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(IsDirComplete(ctx_, dir), IsOkAndHolds(false));
   EXPECT_THAT(CountRows(db_, "xattrs"), IsOkAndHolds(0));
   ASSERT_OK_AND_ASSIGN(CachedAttr attr, GetAttr(ctx_, fresh.id));
@@ -499,7 +499,7 @@ TEST_F(MetadataCacheTest, PurgeFilesystem) {
 
   ASSERT_THAT(PurgeFilesystem(ctx_, kSecond), IsOk());
   EXPECT_THAT(Lookup(ctx_, kRootInode, "mnt"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
   for (InodeId id : {mnt, f2.id, sub, f3.id}) {
     EXPECT_THAT(GetAttr(ctx_, id), StatusIs(absl::StatusCode::kNotFound))
@@ -556,7 +556,7 @@ TEST_F(MetadataCacheTest, MarkUnknownIsPhaseOne) {
   ASSERT_THAT(MarkUnknown(ctx_, kRootInode, names), IsOk());
   for (const std::string &name : names) {
     EXPECT_THAT(Lookup(ctx_, kRootInode, name),
-                IsOkAndHolds(IsLookup(LookupResult::kUnknown)))
+                IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)))
         << name;
   }
   EXPECT_THAT(Lookup(ctx_, kRootInode, "stays"),
@@ -797,9 +797,9 @@ TEST_F(MetadataCacheTest, StubsLiveWithTheirRefusals) {
   EXPECT_EQ(row.attr.st.st_mode, S_IFDIR | 0751u);
   EXPECT_EQ(row.attr.st.st_uid, 1001u);
   EXPECT_THAT(Lookup(ctx_, dir, "mp"),
-              IsOkAndHolds(::testing::AllOf(IsLookup(LookupResult::kRefused),
-                                            ::testing::Field(
-                                                &LookupResult::id, mp))));
+              IsOkAndHolds(::testing::AllOf(
+                  IsLookup(LookupResult::Kind::kRefused),
+                  ::testing::Field(&LookupResult::id, mp))));
 
   // Refused again: the same stub, attributes refreshed.
   ASSERT_THAT(SetRefused(ctx_, dir, "mp", Stx(2, S_IFDIR | 0755, 3)),
@@ -835,7 +835,7 @@ TEST_F(MetadataCacheTest, RecoveryForgetsStubs) {
   ASSERT_THAT(RecoverDirty(ctx_), IsOkAndHolds(1));
   EXPECT_THAT(GetStub(ctx_, mp), StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(Lookup(ctx_, dir, "mp"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
 }
 
 // Step 23.3: the access time a read open records (cache::TouchAtime).
@@ -1207,7 +1207,7 @@ TEST_F(MetadataCacheTest, WriteRollsBackWithCallersTransaction) {
   EXPECT_FALSE(db_.InTransaction());
   EXPECT_THAT(CountRows(db_, "inodes"), IsOkAndHolds(1));
   EXPECT_THAT(Lookup(ctx_, kRootInode, "n"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
 
   // And a failing nested write unwinds only itself.
   status = db_.Transaction([&]() -> absl::Status {
@@ -1221,7 +1221,7 @@ TEST_F(MetadataCacheTest, WriteRollsBackWithCallersTransaction) {
   EXPECT_THAT(status, IsOk());
   EXPECT_FALSE(db_.InTransaction());
   EXPECT_THAT(Lookup(ctx_, kRootInode, "kept"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
 }
 
 TEST_F(MetadataCacheTest, EnsureDirectoryKeepsExistingCompleteness) {
@@ -1255,11 +1255,11 @@ TEST_F(MetadataCacheTest, PruneDentriesNotIn) {
   ASSERT_THAT(PruneDentriesNotIn(ctx_, a, names), IsOk());
   EXPECT_THAT(Lookup(ctx_, a, "keep"), IsOkAndHolds(IsFoundAs(f.id)));
   EXPECT_THAT(Lookup(ctx_, a, "neg_keep"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   EXPECT_THAT(Lookup(ctx_, a, "drop"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(Lookup(ctx_, a, "neg_drop"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   // Other directories and the inode row are untouched.
   EXPECT_THAT(Lookup(ctx_, b, "drop"), IsOkAndHolds(IsFoundAs(f.id)));
   EXPECT_THAT(GetAttr(ctx_, f.id), IsOk());
@@ -1380,7 +1380,7 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a)));
   EXPECT_TRUE(ctx_.dirty.durable.contains(a));
   EXPECT_THAT(Lookup(ctx_, a, "new"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(IsDirComplete(ctx_, a), IsOkAndHolds(false));
 
   // Unlink of a/f.
@@ -1388,7 +1388,7 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   ASSERT_THAT(BeginRemove(ctx_, a, "f", f.id, BeginFill(ctx_)), IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, f.id)));
   EXPECT_THAT(Lookup(ctx_, a, "f"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_FALSE(valid(a));
   EXPECT_FALSE(valid(f.id));
   EXPECT_TRUE(valid(b));
@@ -1401,9 +1401,9 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
       IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, b, f.id, g.id)));
   EXPECT_THAT(Lookup(ctx_, a, "f"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(Lookup(ctx_, b, "g"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   for (InodeId id : {a, b, f.id, g.id}) EXPECT_FALSE(valid(id)) << id;
   // And without a destination.
   ASSERT_THAT(reset(), IsOk());
@@ -1473,7 +1473,7 @@ TEST_F(MetadataCacheTest, BeginRenameRefusesAStaleResolution) {
   auto unchanged = [&] {
     for (const char *name : {"x", "y"}) {
       EXPECT_THAT(Lookup(ctx_, d, name),
-                  IsOkAndHolds(IsLookup(LookupResult::kFound)));
+                  IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
     }
     EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
     EXPECT_FALSE(ctx_.fills.inflight.contains(d));
@@ -1508,7 +1508,7 @@ TEST_F(MetadataCacheTest, BeginRenameRefusesAStaleResolution) {
                        BeginRename(ctx_, d, "x", d, "y", x.id, y.id, resolved));
   EXPECT_TRUE(rename.Owns(d));
   EXPECT_THAT(Lookup(ctx_, d, "x"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
 }
 
 // Review of R4, finding 2: an unlink's phase 1 verifies the same way that
@@ -1522,7 +1522,7 @@ TEST_F(MetadataCacheTest, BeginRemoveRefusesAStaleResolution) {
   ASSERT_THAT(SyncClear(), IsOk());
   auto unchanged = [&] {
     EXPECT_THAT(Lookup(ctx_, d, "x"),
-                IsOkAndHolds(IsLookup(LookupResult::kFound)));
+                IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
     EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
     EXPECT_FALSE(ctx_.fills.inflight.contains(d));
     EXPECT_FALSE(ctx_.fills.inflight.contains(x.id));
@@ -1556,7 +1556,7 @@ TEST_F(MetadataCacheTest, BeginRemoveRefusesAStaleResolution) {
   EXPECT_TRUE(unlink.Owns(d));
   EXPECT_TRUE(unlink.Owns(x.id));
   EXPECT_THAT(Lookup(ctx_, d, "x"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
 }
 
 TEST_F(MetadataCacheTest, MarkDirtyIsNotDurableAndClearDirtyKeeps) {
@@ -1807,7 +1807,7 @@ TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
               IsOkAndHolds(0));
   EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
   EXPECT_THAT(Lookup(ctx_, kRootInode, "d"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
   // f: attributes and xattrs unknown (rows gone), every dentry to it gone.
   ASSERT_OK_AND_ASSIGN(CachedAttr f_attr, GetAttr(ctx_, f.id));
@@ -1830,7 +1830,7 @@ TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
   EXPECT_THAT(IsDirComplete(ctx_, c), IsOkAndHolds(true));
   EXPECT_THAT(Lookup(ctx_, c, "y"), IsOkAndHolds(IsFoundAs(cchild.id)));
   EXPECT_THAT(Lookup(ctx_, c, "neg"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   EXPECT_THAT(Lookup(ctx_, kRootInode, "c"), IsOkAndHolds(IsFoundAs(c)));
   EXPECT_THAT(Lookup(ctx_, kRootInode, "k"), IsOkAndHolds(IsFoundAs(k.id)));
   EXPECT_THAT(ListXattrs(ctx_, k.id),
@@ -1870,7 +1870,7 @@ TEST_F(MetadataCacheTest, PhaseThreeDoesNotUndoAnotherInvalidation) {
   ASSERT_THAT(InvalidateInode(ctx_, s.id), IsOk());
   ASSERT_THAT(SetNegative(ctx_, d, "new"), IsOk());  // phase 3
   EXPECT_THAT(Lookup(ctx_, d, "s"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
 
   // The same with an out-of-band change detected meanwhile: new names may
@@ -1880,7 +1880,7 @@ TEST_F(MetadataCacheTest, PhaseThreeDoesNotUndoAnotherInvalidation) {
   ASSERT_THAT(SetNegative(ctx_, d, "new2"), IsOk());
   EXPECT_THAT(ChildrenComplete(ctx_, d), IsOkAndHolds(false));
   EXPECT_THAT(Lookup(ctx_, d, "other"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
 }
 
 // Audit F1: a fill (read the backing filesystem, then record what it read)
@@ -1990,7 +1990,7 @@ TEST_F(MetadataCacheTest, DeletingAnInodeRowLeavesItsDentriesUnknown) {
   ASSERT_THAT(db_.Exec(absl::StrCat("DELETE FROM inodes WHERE id = ", x.id)),
               IsOk());
   EXPECT_THAT(Lookup(ctx_, d, "x"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   // A listing with an unknown name in it is not complete.
   EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
 }
@@ -2006,9 +2006,9 @@ TEST_F(MetadataCacheTest, PhaseOneMarksOnlyItsOwnNameUnknown) {
 
   ASSERT_THAT(BeginCreate(ctx_, d, "new"), IsOk());
   EXPECT_THAT(Lookup(ctx_, d, "new"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(Lookup(ctx_, d, "other"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   EXPECT_THAT(Lookup(ctx_, d, "x"), IsOkAndHolds(IsFoundAs(x.id)));
   // Not listable while "new" is unknown...
   EXPECT_THAT(IsDirComplete(ctx_, d), IsOkAndHolds(false));
@@ -2020,9 +2020,9 @@ TEST_F(MetadataCacheTest, PhaseOneMarksOnlyItsOwnNameUnknown) {
   // Invalidating a child makes just its name unknown, too.
   ASSERT_THAT(InvalidateInode(ctx_, x.id), IsOk());
   EXPECT_THAT(Lookup(ctx_, d, "x"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(Lookup(ctx_, d, "other"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
 }
 
 // Audit-races F8: a readdir resumed from a cursor (a dentry rowid) must

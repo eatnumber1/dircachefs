@@ -183,7 +183,7 @@ class BackingTest : public ::testing::Test {
   absl::StatusOr<InodeId> Id(std::string_view name, InodeId dir = kRootInode) {
     absl::StatusOr<LookupResult> result = LookupOrPopulate(ctx_, dir, name);
     if (!result.ok()) return result.status();
-    if (result->kind != LookupResult::kFound) {
+    if (result->kind != LookupResult::Kind::kFound) {
       return absl::NotFoundError(absl::StrCat(name, " not found"));
     }
     return result->id;
@@ -224,7 +224,7 @@ std::vector<std::string> ListNames(Context &ctx, InodeId dir) {
 
 TEST_F(BackingTest, PopulatedDirectoryIsServedFromTheCache) {
   ASSERT_THAT(LookupOrPopulate(ctx_, kRootInode, "file"),
-              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
   const std::vector<std::string> names = {"dir", "fifo", "file",
                                           "hl1", "hl2",  "link"};
   std::vector<struct statx> expected;
@@ -292,16 +292,16 @@ TEST_F(BackingTest, PopulatedDirectoryIsServedFromTheCache) {
 
 TEST_F(BackingTest, MissingNameIsCachedAsNegative) {
   EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, "missing"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "missing"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
 
   Lock();
   EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, "missing"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   // The listing is complete, so another absent name needs no I/O either.
   EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, "also_missing"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
 }
 
 TEST_F(BackingTest, RepopulationTracksChangesOnDisk) {
@@ -315,11 +315,11 @@ TEST_F(BackingTest, RepopulationTracksChangesOnDisk) {
 
   // Gone from the listing, which is complete: absent.
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "fifo"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "ghost"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "new"),
-              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
   EXPECT_THAT(Id("file"), IsOkAndHolds(file));
   EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(true));
   EXPECT_THAT(ListNames(ctx_, kRootInode),
@@ -349,7 +349,7 @@ TEST_F(BackingTest, OpenNodeRejectsARecycledInode) {
   EXPECT_THAT(cache::GetAttr(ctx_, old_id),
               StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "file"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
 }
 
@@ -375,7 +375,7 @@ TEST_F(BackingTest, BackingReadsByInode) {
   }
   // A subdirectory is populated through its handle.
   EXPECT_THAT(LookupOrPopulate(ctx_, dir, "inner"),
-              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
   EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(true));
 }
 
@@ -464,7 +464,7 @@ void ExpectFakeMountPurged(Context &ctx, MountFds &mounts,
   EXPECT_THAT(cache::GetAttr(ctx, mount.child),
               StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(cache::Lookup(ctx, kRootInode, name),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(cache::IsDirComplete(ctx, kRootInode), IsOkAndHolds(false));
   // The source filesystem is never purged.
   ASSERT_OK_AND_ASSIGN(std::vector<cache::FilesystemRow> filesystems,
@@ -697,7 +697,7 @@ TEST_F(BackingTest, OpenNodeDetectsANewFileInADirectory) {
   ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));
   // Populates `dir` and caches "newfile" as known absent.
   ASSERT_THAT(LookupOrPopulate(ctx_, dir, "newfile"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   ASSERT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(true));
   WaitForNextTimestamp();
   WriteFile(Path("dir/newfile"), "new");
@@ -709,7 +709,7 @@ TEST_F(BackingTest, OpenNodeDetectsANewFileInADirectory) {
     // its unchanged children again.
     ASSERT_OK_AND_ASSIGN(LookupResult found,
                          LookupOrPopulate(ctx_, dir, "newfile"));
-    EXPECT_EQ(found.kind, LookupResult::kFound);
+    EXPECT_EQ(found.kind, LookupResult::Kind::kFound);
   }
   EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(true));
   EXPECT_THAT(Id("inner", dir), IsOk());
@@ -833,7 +833,7 @@ TEST_F(BackingTest, SyncPointKeepsAMutationInFlightDirty) {
                                                       "new"));
   mutation.End();
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "new"),
-              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
   // Still dirty, the new child too: no syncfs since the mkdir.
   EXPECT_THAT(cache::ListDirty(ctx_),
               IsOkAndHolds(testing::UnorderedElementsAre(kRootInode,
@@ -888,19 +888,19 @@ TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
   EXPECT_FALSE(valid(inner));
   EXPECT_THAT(cache::IsDirComplete(ctx_, dir), IsOkAndHolds(false));
   EXPECT_THAT(cache::Lookup(ctx_, dir, "inner"),
-              IsOkAndHolds(IsLookup(LookupResult::kUnknown)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_TRUE(valid(file));
   EXPECT_TRUE(valid(hl1));
   EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "file"),
-              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
   EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
   EXPECT_THAT(GetBootId(db_), IsOkAndHolds(Optional(std::string("boot-2"))));
 
   // And the truth is re-read from the backing filesystem: inner still
   // exists there (the phase 2 unlink never ran in this test).
   EXPECT_THAT(LookupOrPopulate(ctx_, dir, "inner"),
-              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
 }
 
 TEST_F(BackingTest, FinishRunMarksACleanShutdown) {
@@ -987,7 +987,7 @@ TEST_F(BoundaryTest, BoundaryIsListedAsItsStub) {
   EXPECT_TRUE(populated->cached);
   ASSERT_TRUE(populated->entries.contains("boundary"));
   const LookupResult listed = populated->entries.at("boundary");
-  EXPECT_EQ(listed.kind, LookupResult::kRefused);
+  EXPECT_EQ(listed.kind, LookupResult::Kind::kRefused);
   EXPECT_TRUE(cache::IsStub(listed.id));
   EXPECT_THAT(ListNames(ctx_, kRootInode), Contains("boundary"));
   EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(true));
@@ -1008,7 +1008,7 @@ TEST_F(BoundaryTest, LookupOfABoundaryReturnsItsStubWithoutCachingNegative) {
     RefusalLog log(1);
     first = LookupOrPopulate(ctx_, kRootInode, "boundary");
   }
-  ASSERT_THAT(first, IsOkAndHolds(IsLookup(LookupResult::kRefused)));
+  ASSERT_THAT(first, IsOkAndHolds(IsLookup(LookupResult::Kind::kRefused)));
   EXPECT_TRUE(cache::IsStub(first->id));
   // A second lookup answers straight from the persisted refusal: no
   // repopulation (the directory is already complete), no second log line,
@@ -1018,14 +1018,14 @@ TEST_F(BoundaryTest, LookupOfABoundaryReturnsItsStubWithoutCachingNegative) {
     RefusalLog log(0);
     second = LookupOrPopulate(ctx_, kRootInode, "boundary");
   }
-  ASSERT_THAT(second, IsOkAndHolds(IsLookup(LookupResult::kRefused)));
+  ASSERT_THAT(second, IsOkAndHolds(IsLookup(LookupResult::Kind::kRefused)));
   EXPECT_EQ(second->id, first->id);
   // Never cached negative: cache::Lookup on its own (no populate) reports
   // kRefused -- the object exists, so this must never come back kNegative
   // (which would mean dcfs claims it is absent) or kUnknown (which would
   // let some other caller fall through to caching it negative).
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "boundary"),
-              IsOkAndHolds(IsLookup(LookupResult::kRefused)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kRefused)));
 }
 
 TEST_F(BoundaryTest, BoundaryRefusalPersistsAcrossRestart) {
@@ -1043,7 +1043,7 @@ TEST_F(BoundaryTest, BoundaryRefusalPersistsAcrossRestart) {
   Context restarted{db_, mounts_, bitgen_};
   absl::StatusOr<LookupResult> after =
       LookupOrPopulate(restarted, kRootInode, "boundary");
-  ASSERT_THAT(after, IsOkAndHolds(IsLookup(LookupResult::kRefused)));
+  ASSERT_THAT(after, IsOkAndHolds(IsLookup(LookupResult::Kind::kRefused)));
   EXPECT_EQ(after->id, before.id);
 }
 
@@ -1067,14 +1067,14 @@ TEST_F(BackingTest, ReresolvingOneUnknownNameProbesOnlyThatName) {
   // Phase 1 of `mkdir dir` (which will fail: EEXIST).
   ASSERT_THAT(cache::BeginCreate(ctx_, kRootInode, "dir"), IsOk());
   EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, "dir"),
-              IsOkAndHolds(IsLookup(LookupResult::kFound)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
   EXPECT_THAT(Id("dir"), IsOkAndHolds(dir));
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr file_attr, cache::GetAttr(ctx_, file));
   EXPECT_FALSE(file_attr.valid) << "the sibling was re-probed";
   // And a name that turns out not to exist is resolved absent.
   ASSERT_THAT(cache::BeginCreate(ctx_, kRootInode, "nothere"), IsOk());
   EXPECT_THAT(LookupOrPopulate(ctx_, kRootInode, "nothere"),
-              IsOkAndHolds(IsLookup(LookupResult::kNegative)));
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   ASSERT_OK_AND_ASSIGN(file_attr, cache::GetAttr(ctx_, file));
   EXPECT_FALSE(file_attr.valid) << "the sibling was re-probed";
 }

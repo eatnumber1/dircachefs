@@ -108,8 +108,8 @@ struct Request {
 // number and birth time, which is what a recorder compares with the cached
 // rows), nothing, or a refused mount/subvolume boundary.
 struct Probe {
-  enum Kind { kPresent, kAbsent, kRefused };
-  Kind kind = kAbsent;
+  enum class Kind { kPresent, kAbsent, kRefused };
+  Kind kind = Kind::kAbsent;
   uint64_t ino = 0;
   int64_t btime_sec = 0;
   uint32_t btime_nsec = 0;

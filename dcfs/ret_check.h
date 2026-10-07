@@ -37,14 +37,30 @@ inline absl::StatusBuilder RetCheckFail(
 // operator<< on absl::StatusBuilder has no overload for std::nullptr_t (a
 // common RET_CHECK_NE(ptr, nullptr) operand), so route it through a name
 // that does: print "nullptr" for the null-pointer-constant type, and pass
-// everything else through unchanged.
+// everything else through unchanged (but see the scoped enums below).
 inline const char *RetCheckStreamable(std::nullptr_t) { return "nullptr"; }
+
+// A scoped enum has no operator<< either: print its underlying value.
+template <typename T, bool = std::is_enum_v<T>>
+struct IsScopedEnum : std::false_type {};
+template <typename T>
+struct IsScopedEnum<T, true>
+    : std::bool_constant<!std::is_convertible_v<T, std::underlying_type_t<T>>> {
+};
+template <typename T>
+inline constexpr bool kIsScopedEnum = IsScopedEnum<T>::value;
 
 template <typename T,
           typename = std::enable_if_t<
-              !std::is_same_v<std::decay_t<T>, std::nullptr_t>>>
+              !std::is_same_v<std::decay_t<T>, std::nullptr_t> &&
+              !kIsScopedEnum<T>>>
 const T &RetCheckStreamable(const T &value) {
   return value;
+}
+
+template <typename T, typename = std::enable_if_t<kIsScopedEnum<T>>>
+std::underlying_type_t<T> RetCheckStreamable(const T &value) {
+  return static_cast<std::underlying_type_t<T>>(value);
 }
 
 // Evaluates and stores both RET_CHECK_{EQ,NE,...} operands (by value) via a

@@ -384,7 +384,7 @@ absl::Status FillAttrs(Context &ctx, cache::FillSnapshot snapshot, InodeId id,
 
 // What a probe's statx says the name holds, for the protocol events.
 events::Probe ProbeOf(const struct statx &stx) {
-  return {.kind = events::Probe::kPresent,
+  return {.kind = events::Probe::Kind::kPresent,
           .ino = stx.stx_ino,
           .btime_sec = stx.stx_btime.tv_sec,
           .btime_nsec = stx.stx_btime.tv_nsec};
@@ -548,7 +548,7 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
   if (!child.ok()) {
     if (ErrnoOf(child.status()) == ENOENT) {
       VLOG(1) << "child " << EscapeBytes(name) << " vanished while listing its directory";
-      on_read({.kind = events::Probe::kAbsent});
+      on_read({.kind = events::Probe::Kind::kAbsent});
       return std::nullopt;
     }
     return child.status();
@@ -560,7 +560,7 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
   if (IsBoundary(dir_stx, stx)) {
     refused = stx;
     LogRefusedBoundary(dir, name);
-    on_read({.kind = events::Probe::kRefused});
+    on_read({.kind = events::Probe::Kind::kRefused});
     return std::nullopt;
   }
   on_read(ProbeOf(stx));
@@ -1108,7 +1108,7 @@ absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
   // (e.g. `dir` itself) already matches, so nothing is logged twice.
   ABSL_ASSIGN_OR_RETURN(cache::LookupResult cached_dentry,
                         cache::Lookup(ctx, dir, child.name));
-  if (cached_dentry.kind == cache::LookupResult::kFound) {
+  if (cached_dentry.kind == cache::LookupResult::Kind::kFound) {
     ABSL_ASSIGN_OR_RETURN(cache::CachedAttr cached,
                           cache::GetAttr(ctx, cached_dentry.id));
     if (cached.device == child.handle.device &&
@@ -1205,7 +1205,7 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
           each(child.name, ProbeOf(child.stx));
         }
         for (const auto &[name, root] : refused_names) {
-          each(name, {.kind = events::Probe::kRefused});
+          each(name, {.kind = events::Probe::Kind::kRefused});
         }
       });
 
@@ -1227,8 +1227,8 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     for (const ChildRecord &child : children) {
       ABSL_ASSIGN_OR_RETURN(InodeId id,
                             RecordChild(ctx, snapshot, dir, child, dir_ok));
-      result.entries[child.name] =
-          cache::LookupResult{.kind = cache::LookupResult::kFound, .id = id};
+      result.entries[child.name] = cache::LookupResult{
+          .kind = cache::LookupResult::Kind::kFound, .id = id};
       seen.push_back(child.name);
     }
     for (const auto &[name, root] : refused_names) {
@@ -1238,8 +1238,8 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
       if (dir_ok) {
         ABSL_ASSIGN_OR_RETURN(stub, cache::SetRefused(ctx, dir, name, root));
       }
-      result.entries[name] =
-          cache::LookupResult{.kind = cache::LookupResult::kRefused, .id = stub};
+      result.entries[name] = cache::LookupResult{
+          .kind = cache::LookupResult::Kind::kRefused, .id = stub};
       seen.push_back(name);
     }
     if (!dir_ok) {
@@ -1268,7 +1268,7 @@ namespace {
 absl::StatusOr<cache::LookupResult> WithStub(cache::LookupResult result,
                                              InodeId parent,
                                              std::string_view name) {
-  if (result.kind == cache::LookupResult::kRefused && result.id == 0) {
+  if (result.kind == cache::LookupResult::Kind::kRefused && result.id == 0) {
     return dcfs::ErrnoToStatus(
         EAGAIN, absl::StrCat("boundary ", EscapeBytes(name), " in ", parent,
                              ": its stub could not be recorded"));
@@ -1307,16 +1307,16 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
     // this must never be reported as absent -- it is its stub, straight from
     // the cache, every time. Checked before the kUnknown fast-out below since
     // kRefused is never kUnknown, but also never worth re-populating for.
-    if (result.kind == cache::LookupResult::kRefused) {
+    if (result.kind == cache::LookupResult::Kind::kRefused) {
       ctx.events->LookupDecided(ctx, parent, name,
                                 events::LookupOutcome::kRefused, 0);
       return result;
     }
-    if (result.kind != cache::LookupResult::kUnknown) {
+    if (result.kind != cache::LookupResult::Kind::kUnknown) {
       // Model: LookupStep (or the request's Arrive) serving from the cache.
       ctx.events->LookupDecided(
           ctx, parent, name,
-          result.kind == cache::LookupResult::kFound
+          result.kind == cache::LookupResult::Kind::kFound
               ? events::LookupOutcome::kFound
               : events::LookupOutcome::kNegative,
           result.id);
@@ -1344,7 +1344,7 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
       // listing itself, caching nothing about `name`.
       auto it = populated.entries.find(name);
       if (it == populated.entries.end()) {
-        return cache::LookupResult{.kind = cache::LookupResult::kNegative,
+        return cache::LookupResult{.kind = cache::LookupResult::Kind::kNegative,
                                    .id = 0};
       }
       return WithStub(it->second, parent, name);
@@ -1352,7 +1352,7 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
     ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
     // A recorded listing names every child, and makes every other name
     // absent.
-    RET_CHECK_NE(result.kind, cache::LookupResult::kUnknown)
+    RET_CHECK_NE(result.kind, cache::LookupResult::Kind::kUnknown)
         << "name " << EscapeBytes(name) << " of directory " << parent
         << " still unknown after its listing was recorded";
     return result;
@@ -1441,19 +1441,19 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
     if (child.has_value()) {
       ABSL_ASSIGN_OR_RETURN(InodeId id,
                             RecordChild(ctx, snapshot, parent, *child, dir_ok));
-      result = {cache::LookupResult::kFound, id};
+      result = {cache::LookupResult::Kind::kFound, id};
     } else if (refused.has_value()) {
       InodeId stub = 0;  // None unless recorded (see LookupOrPopulate).
       if (dir_ok) {
         ABSL_ASSIGN_OR_RETURN(stub,
                               cache::SetRefused(ctx, parent, name, *refused));
       }
-      result = {cache::LookupResult::kRefused, stub};
+      result = {cache::LookupResult::Kind::kRefused, stub};
     } else {
       if (dir_ok) {
         ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
       }
-      result = {cache::LookupResult::kNegative, 0};
+      result = {cache::LookupResult::Kind::kNegative, 0};
     }
     if (!dir_ok) {
       VLOG(1) << "directory " << parent << ": not caching " << EscapeBytes(name)
@@ -1482,7 +1482,7 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
     if (ErrnoOf(child_fd.status()) == ENOENT) {
       // Model: CreateProbe finding nothing.
       ctx.events->NewChildProbed(ctx, parent, name,
-                                 {.kind = events::Probe::kAbsent});
+                                 {.kind = events::Probe::Kind::kAbsent});
     }
     return child_fd.status();
   }

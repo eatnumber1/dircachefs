@@ -89,7 +89,7 @@ struct CachedAttr {
 CachedAttr WithStatx(CachedAttr attr, const struct statx &stx);
 
 struct LookupResult {
-  enum Kind {
+  enum class Kind {
     kFound,     // A positive dentry; `id` is its inode.
     kNegative,  // A cached negative dentry: the name is known to be absent.
     kRefused,   // The name exists but is a refused mount/subvolume boundary
@@ -98,7 +98,7 @@ struct LookupResult {
     kUnknown,   // Nothing is known about this name: an unknown row, or no
                 // row while the listing is incomplete.
   };
-  Kind kind = kUnknown;
+  Kind kind = Kind::kUnknown;
   // The inode for kFound, the stub for kRefused (0 if no stub was
   // recorded: a listing that could not record its result); 0 otherwise.
   InodeId id = 0;
@@ -254,7 +254,7 @@ absl::Status SetNegative(Context &ctx, InodeId parent, std::string_view name);
 // Caches (parent, name) as a refused mount/subvolume boundary (amendment
 // 12): the name exists on the backing filesystem but dcfs will not cache
 // across it. Unlike SetNegative, this must never be read back as "absent" --
-// see LookupResult::kRefused. Replaces whatever was cached for that name,
+// see LookupResult::Kind::kRefused. Replaces whatever was cached for that name,
 // same as LinkDentry/SetNegative, and records the stub it is served as, in
 // the same transaction, with `root` (a statx of the boundary's root
 // directory) as its attributes: the stub it already had, if the name was
@@ -321,8 +321,8 @@ absl::Status MarkUnknown(Context &ctx, InodeId parent,
                          std::span<const std::string> names);
 
 // Forgets every cached negative or refused dentry of `dir` (see
-// LookupResult::kRefused) and marks `dir` incomplete, leaving its positive
-// dentries alone. For a directory found to have changed on the backing
+// LookupResult::Kind::kRefused) and marks `dir` incomplete, leaving its
+// positive dentries alone. For a directory found to have changed on the backing
 // filesystem behind dcfs's back (see backing::ReconcileAttrs): a new name
 // may have appeared that a negative entry would otherwise keep hiding, a
 // refused boundary may no longer be one (or a new one may have appeared),

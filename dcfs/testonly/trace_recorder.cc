@@ -70,11 +70,11 @@ std::string Key(uint64_t ino, int64_t btime_sec, int64_t btime_nsec) {
 
 std::string ProbeValue(const events::Probe &probe) {
   switch (probe.kind) {
-    case events::Probe::kPresent:
+    case events::Probe::Kind::kPresent:
       return JsonStr(Key(probe.ino, probe.btime_sec, probe.btime_nsec));
-    case events::Probe::kAbsent:
+    case events::Probe::Kind::kAbsent:
       return JsonStr("absent");
-    case events::Probe::kRefused:
+    case events::Probe::Kind::kRefused:
       return JsonStr("refused");
   }
   return JsonStr("?");
@@ -129,13 +129,13 @@ TraceRecorder::Mapping TraceRecorder::Map(const Frame &r, Ino dir) {
   Mapping m;
   auto request = [&](std::string kind, std::string n = "",
                      std::string mm = "") {
-    m.kind = Mapping::kRequest;
+    m.kind = Mapping::Kind::kRequest;
     m.req_kind = std::move(kind);
     m.n = std::move(n);
     m.m = std::move(mm);
   };
   auto unmodelled = [&](std::string why) {
-    m.kind = Mapping::kUnmodelled;
+    m.kind = Mapping::Kind::kUnmodelled;
     m.why = std::move(why);
   };
   switch (r.op) {
@@ -210,7 +210,7 @@ TraceRecorder::Mapping TraceRecorder::Map(const Frame &r, Ino dir) {
 
 TraceRecorder::Frame *TraceRecorder::InnermostRequest() {
   for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
-    if (it->kind == Frame::kRequest) return &*it;
+    if (it->kind == Frame::Kind::kRequest) return &*it;
   }
   return nullptr;
 }
@@ -222,7 +222,7 @@ TraceRecorder::Req *TraceRecorder::Find(Ino dir, Frame **owner) {
       if (owner != nullptr) *owner = &*it;
       return &found->second;
     }
-    if (it->kind == Frame::kRequest) break;
+    if (it->kind == Frame::Kind::kRequest) break;
   }
   return nullptr;
 }
@@ -586,7 +586,7 @@ void TraceRecorder::After(Context &ctx) {
 void TraceRecorder::RequestBegin(Context &ctx, const events::Request &r) {
   Enter("RequestBegin");
   Frame frame;
-  frame.kind = Frame::kRequest;
+  frame.kind = Frame::Kind::kRequest;
   frame.op = r.op;
   frame.ino = r.ino;
   frame.newparent = r.newparent;
@@ -601,7 +601,7 @@ void TraceRecorder::RequestBegin(Context &ctx, const events::Request &r) {
 
 void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
   Enter("RequestEnd");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kRequest);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kRequest);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
   const int err = ErrnoOf(status);
@@ -631,15 +631,15 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
 
 void TraceRecorder::GetattrBegin(Context &ctx, Ino id, bool valid) {
   Enter("GetattrBegin");
-  frames_.push_back(Frame{.kind = Frame::kGetattr, .id = id});
+  frames_.push_back(Frame{.kind = Frame::Kind::kGetattr, .id = id});
   if (Traced(id)) {
     Frame *rf = InnermostRequest();
     const Mapping m = rf != nullptr ? Map(*rf, id) : Mapping{};
     const std::string fields = absl::StrCat(",\"valid\":", Bool(valid));
-    if (m.kind == Mapping::kUnmodelled) {
+    if (m.kind == Mapping::Kind::kUnmodelled) {
       Cut(ctx, id, m.why);
-    } else if (m.kind == Mapping::kRequest && m.req_kind == "readdirplus" &&
-               rf->reqs.contains(id)) {
+    } else if (m.kind == Mapping::Kind::kRequest &&
+               m.req_kind == "readdirplus" && rf->reqs.contains(id)) {
       // "."'s attributes, part of the readdirplus's first step (RDFrom).
       Req &req = rf->reqs[id];
       Emit(ctx, id, &req, "rdp_attr_check", fields);
@@ -651,7 +651,7 @@ void TraceRecorder::GetattrBegin(Context &ctx, Ino id, bool valid) {
     } else {
       // A getattr request of its own: the FUSE request's (GETATTR,
       // LOOKUP of ".", OPENDIR), or one inside another request.
-      Frame &owner = (m.kind == Mapping::kRequest &&
+      Frame &owner = (m.kind == Mapping::Kind::kRequest &&
                       m.req_kind == "getattr" && !rf->reqs.contains(id))
                          ? *rf
                          : frames_.back();
@@ -669,7 +669,7 @@ void TraceRecorder::GetattrBegin(Context &ctx, Ino id, bool valid) {
 
 void TraceRecorder::GetattrEnd(Context &ctx, const absl::Status &status) {
   Enter("GetattrEnd");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kGetattr);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kGetattr);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
   Close(ctx, frame, status,
@@ -680,7 +680,7 @@ void TraceRecorder::GetattrEnd(Context &ctx, const absl::Status &status) {
 void TraceRecorder::LookupBegin(Context &ctx, Ino parent,
                                 std::string_view name) {
   Enter("LookupBegin");
-  frames_.push_back(Frame{.kind = Frame::kLookup,
+  frames_.push_back(Frame{.kind = Frame::Kind::kLookup,
                           .id = parent,
                           .lookup_name = std::string(name)});
   After(ctx);
@@ -688,7 +688,7 @@ void TraceRecorder::LookupBegin(Context &ctx, Ino parent,
 
 void TraceRecorder::LookupEnd(Context &ctx, const absl::Status &status) {
   Enter("LookupEnd");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kLookup);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kLookup);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
   Close(ctx, frame, status,
@@ -698,7 +698,7 @@ void TraceRecorder::LookupEnd(Context &ctx, const absl::Status &status) {
 
 void TraceRecorder::RefreshBegin(Context &ctx, Ino id) {
   Enter("RefreshBegin");
-  frames_.push_back(Frame{.kind = Frame::kRefresh, .id = id});
+  frames_.push_back(Frame{.kind = Frame::Kind::kRefresh, .id = id});
   if (Traced(id)) {
     // A refresh a request of the directory expects (a getattr's, a
     // readdirplus's or a mutation's last steps) is that request's.
@@ -709,7 +709,7 @@ void TraceRecorder::RefreshBegin(Context &ctx, Ino id) {
         expected = true;
         break;
       }
-      if (frames_[i].kind == Frame::kRequest) break;
+      if (frames_[i].kind == Frame::Kind::kRequest) break;
     }
     if (!expected) {
       absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx, id);
@@ -733,7 +733,7 @@ void TraceRecorder::RefreshBegin(Context &ctx, Ino id) {
 
 void TraceRecorder::RefreshEnd(Context &ctx, const absl::Status &status) {
   Enter("RefreshEnd");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kRefresh);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kRefresh);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
   Close(ctx, frame, status,
@@ -743,13 +743,13 @@ void TraceRecorder::RefreshEnd(Context &ctx, const absl::Status &status) {
 
 void TraceRecorder::SyncBegin(Context &ctx) {
   Enter("SyncBegin");
-  frames_.push_back(Frame{.kind = Frame::kSync});
+  frames_.push_back(Frame{.kind = Frame::Kind::kSync});
   After(ctx);
 }
 
 void TraceRecorder::SyncEnd(Context &ctx, const absl::Status &status) {
   Enter("SyncEnd");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kSync);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kSync);
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
   Close(ctx, frame, status,
@@ -772,14 +772,14 @@ void TraceRecorder::LookupDecided(Context &ctx, Ino parent,
     listing_marks_[parent] = mutation_seq_;
   }
   if (Traced(parent)) {
-    CHECK(!frames_.empty() && frames_.back().kind == Frame::kLookup);
+    CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kLookup);
     Req *req = Find(parent);
     if (req == nullptr) {
       Frame *rf = InnermostRequest();
       const Mapping m = rf != nullptr ? Map(*rf, parent) : Mapping{};
-      if (m.kind == Mapping::kUnmodelled) {
+      if (m.kind == Mapping::Kind::kUnmodelled) {
         Cut(ctx, parent, m.why);
-      } else if (m.kind == Mapping::kRequest) {
+      } else if (m.kind == Mapping::Kind::kRequest) {
         if (m.req_kind == "lookup" || m.req_kind == "unlink" ||
             m.req_kind == "rename") {
           req = &Open(*rf, parent, m.req_kind, m.n, m.m);
@@ -834,14 +834,14 @@ void TraceRecorder::ResolveProbed(Context &ctx, Ino parent,
                                   std::string_view name,
                                   const events::Probe &probe) {
   Enter("ResolveProbed");
-  if (probe.kind == events::Probe::kPresent) {
+  if (probe.kind == events::Probe::Kind::kPresent) {
     Resolved(ctx, parent, name, Key(probe.ino, probe.btime_sec, probe.btime_nsec));
   }
   if (Traced(parent)) {
     Req *req = Find(parent);
     if (req == nullptr) {
       Unexplained(ctx, parent, "a resolve outside a request");
-    } else if (probe.kind == events::Probe::kRefused) {
+    } else if (probe.kind == events::Probe::Kind::kRefused) {
       Cut(ctx, parent, "boundary: a refused boundary");
     } else {
       Emit(ctx, parent, req, "probe",
@@ -954,8 +954,8 @@ void TraceRecorder::PopulateRead(Context &ctx, Ino dir,
     std::string list;
     bool refused = false;
     listing([&](std::string_view name, const events::Probe &probe) {
-      if (probe.kind == events::Probe::kRefused) refused = true;
-      if (probe.kind == events::Probe::kPresent) {
+      if (probe.kind == events::Probe::Kind::kRefused) refused = true;
+      if (probe.kind == events::Probe::Kind::kPresent) {
         Resolved(ctx, dir, name,
                  Key(probe.ino, probe.btime_sec, probe.btime_nsec));
       }
@@ -1013,7 +1013,7 @@ void TraceRecorder::ListChecked(Context &ctx, Ino dir, bool complete) {
   if (Traced(dir)) {
     Frame *rf = InnermostRequest();
     const Mapping m = rf != nullptr ? Map(*rf, dir) : Mapping{};
-    if (m.kind == Mapping::kRequest &&
+    if (m.kind == Mapping::Kind::kRequest &&
         (m.req_kind == "readdir" || m.req_kind == "readdirplus")) {
       Req &req = rf->reqs.contains(dir) ? rf->reqs[dir]
                                         : Open(*rf, dir, m.req_kind);
@@ -1029,7 +1029,7 @@ void TraceRecorder::ListChecked(Context &ctx, Ino dir, bool complete) {
 
 void TraceRecorder::AttrsStatted(Context &ctx, Ino id) {
   Enter("AttrsStatted");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kRefresh &&
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kRefresh &&
         frames_.back().id == id);
   if (Traced(id) && !frames_.back().silent) {
     Req *req = Find(id);
@@ -1044,7 +1044,7 @@ void TraceRecorder::AttrsStatted(Context &ctx, Ino id) {
 
 void TraceRecorder::AttrsFilled(Context &ctx, Ino id, bool recorded) {
   Enter("AttrsFilled");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kRefresh &&
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kRefresh &&
         frames_.back().id == id);
   if (Traced(id) && frames_.back().silent) {
     auto inflight = ctx.fills.inflight.find(id);
@@ -1143,11 +1143,11 @@ void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
       continue;
     }
     const Mapping m = Map(*rf, dir);
-    if (m.kind == Mapping::kUnmodelled) {
+    if (m.kind == Mapping::Kind::kUnmodelled) {
       Cut(ctx, dir, m.why);
       continue;
     }
-    if (m.kind == Mapping::kNone) {
+    if (m.kind == Mapping::Kind::kNone) {
       ItselfOrUnexplained(ctx, *rf, dir);
       continue;
     }
@@ -1173,18 +1173,18 @@ void TraceRecorder::MutationAborted(Context &ctx, events::IdsFn ids) {
     Req *req = nullptr;
     if (rf != nullptr) {
       const Mapping m = Map(*rf, dir);
-      if (m.kind == Mapping::kUnmodelled) {
+      if (m.kind == Mapping::Kind::kUnmodelled) {
         Cut(ctx, dir, m.why);
         continue;
       }
-      if (m.kind == Mapping::kRequest) {
+      if (m.kind == Mapping::Kind::kRequest) {
         // As for phase 1: the model judges where it may come.
         req = rf->reqs.contains(dir) ? &rf->reqs[dir]
                                      : &Open(*rf, dir, m.req_kind, m.n, m.m);
       }
     }
     if (req == nullptr) {
-      if (rf != nullptr && Map(*rf, dir).kind == Mapping::kNone) {
+      if (rf != nullptr && Map(*rf, dir).kind == Mapping::Kind::kNone) {
         ItselfOrUnexplained(ctx, *rf, dir);
       } else {
         Unexplained(ctx, dir, "a verification outside its request");
@@ -1203,7 +1203,9 @@ std::vector<TraceRecorder::Ino> TraceRecorder::MutatedDirs(const Frame &rf) {
   for (Ino dir : dirs) {
     if (!Traced(dir)) continue;
     const Mapping m = Map(rf, dir);
-    if (m.kind == Mapping::kRequest && IsMutation(m.req_kind)) out.push_back(dir);
+    if (m.kind == Mapping::Kind::kRequest && IsMutation(m.req_kind)) {
+      out.push_back(dir);
+    }
   }
   return out;
 }
@@ -1268,7 +1270,7 @@ void TraceRecorder::NewChildProbed(Context &ctx, Ino parent,
     if (req == nullptr || req->kind != "create") {
       Unexplained(ctx, parent, "a create's probe outside its request");
     } else {
-      req->probe_absent = probe.kind == events::Probe::kAbsent;
+      req->probe_absent = probe.kind == events::Probe::Kind::kAbsent;
       Emit(ctx, parent, req, "probe",
            absl::StrCat(",\"n\":", Name(name), ",\"what\":",
                         ProbeValue(probe)));
@@ -1354,7 +1356,7 @@ void TraceRecorder::WritesEnded(Context &ctx, Ino id) {
 
 void TraceRecorder::SyncSnapshotTaken(Context &ctx) {
   Enter("SyncSnapshotTaken");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kSync);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kSync);
   frames_.back().snapshot_at = callbacks_;
   for (auto &[dir, state] : dirs_) {
     if (state.dead) continue;
@@ -1370,7 +1372,7 @@ void TraceRecorder::SyncSnapshotTaken(Context &ctx) {
 
 void TraceRecorder::SyncfsStarting(Context &ctx) {
   Enter("SyncfsStarting");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kSync);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kSync);
   // The syncfs calls must follow the snapshot with nothing in between (the
   // model's S1 is both): a snapshot taken later, or anything run between,
   // is unexplained.
@@ -1388,7 +1390,7 @@ void TraceRecorder::SyncfsStarting(Context &ctx) {
 
 void TraceRecorder::SyncfsDone(Context &ctx) {
   Enter("SyncfsDone");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kSync);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kSync);
   for (auto &[dir, req] : frames_.back().reqs) {
     if (Traced(dir)) Emit(ctx, dir, &req, "syncfs");
   }
@@ -1397,7 +1399,7 @@ void TraceRecorder::SyncfsDone(Context &ctx) {
 
 void TraceRecorder::SyncCleared(Context &ctx) {
   Enter("SyncCleared");
-  CHECK(!frames_.empty() && frames_.back().kind == Frame::kSync);
+  CHECK(!frames_.empty() && frames_.back().kind == Frame::Kind::kSync);
   if (shutdown_) {
     for (auto &[dir, state] : dirs_) {
       if (!state.dead) Emit(ctx, dir, nullptr, "stop_clear");

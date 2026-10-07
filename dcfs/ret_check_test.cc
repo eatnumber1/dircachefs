@@ -33,6 +33,13 @@ absl::StatusOr<int> CheckFalseInStatusOrFunction() {
   return 42;
 }
 
+enum class Color { kRed = 1, kBlue = 2 };
+
+absl::Status CheckScopedEnumEqFails() {
+  RET_CHECK_EQ(Color::kRed, Color::kBlue);
+  return absl::OkStatus();
+}
+
 absl::Status CheckEqFails() {
   RET_CHECK_EQ(1 + 1, 3);
   return absl::OkStatus();
@@ -113,6 +120,13 @@ TEST(RetCheckTest, OperandsEvaluatedExactlyOnce) {
   g_eval_count = 0;
   EXPECT_THAT(CheckEqEvaluatesOperandsOnce(), IsOk());
   EXPECT_EQ(g_eval_count, 1);
+}
+
+// A scoped enum has no operator<<, so RET_CHECK_EQ prints its underlying
+// value.
+TEST(RetCheckTest, ScopedEnumOperandsPrintTheirValues) {
+  EXPECT_THAT(CheckScopedEnumEqFails(),
+              StatusIs(absl::StatusCode::kInternal, HasSubstr("(1 vs 2)")));
 }
 
 }  // namespace
