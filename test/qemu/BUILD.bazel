@@ -1068,16 +1068,16 @@ sh_test(
     args = [
         "$(rootpath scripts/cov-lcov.sh)",
         "$(rootpath scripts/check-lcov.sh)",
-        "$(rootpath @llvm_toolchain_llvm//:bin/llvm-profdata)",
-        "$(rootpath @llvm_toolchain_llvm//:bin/llvm-cov)",
+        "$(rootpath @dcfs_llvm//:bin/llvm-profdata)",
+        "$(rootpath @dcfs_llvm//:bin/llvm-cov)",
         "$(rootpath :cov_fixture)",
     ],
     data = [
         ":cov_fixture",
         "scripts/check-lcov.sh",
         "scripts/cov-lcov.sh",
-        "@llvm_toolchain_llvm//:bin/llvm-cov",
-        "@llvm_toolchain_llvm//:bin/llvm-profdata",
+        "@dcfs_llvm//:bin/llvm-cov",
+        "@dcfs_llvm//:bin/llvm-profdata",
     ],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )

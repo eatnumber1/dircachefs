@@ -18,8 +18,8 @@ E2E_COVERAGE_OBJECTS = [
 
 _TOOLS = [
     "//test/qemu:scripts/cov-lcov.sh",
-    "@llvm_toolchain_llvm//:bin/llvm-cov",
-    "@llvm_toolchain_llvm//:bin/llvm-profdata",
+    "@dcfs_llvm//:bin/llvm-cov",
+    "@dcfs_llvm//:bin/llvm-profdata",
 ]
 
 def coverage_data(objects):
@@ -36,9 +36,9 @@ def coverage_args(objects):
             "--cov-script",
             "$(rootpath //test/qemu:scripts/cov-lcov.sh)",
             "--cov-llvm-profdata",
-            "$(rootpath @llvm_toolchain_llvm//:bin/llvm-profdata)",
+            "$(rootpath @dcfs_llvm//:bin/llvm-profdata)",
             "--cov-llvm-cov",
-            "$(rootpath @llvm_toolchain_llvm//:bin/llvm-cov)",
+            "$(rootpath @dcfs_llvm//:bin/llvm-cov)",
         ] + [
             a
             for o in objects
