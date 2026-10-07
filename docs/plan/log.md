@@ -973,3 +973,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   real gate code on known-bad input (lib.sh, pjdfstest.sh refactored to a function, the man tests,
   busybox_test.sh with a fake busybox, rootfs invariant with a tampered synthetic tar), bash +
   pipefail + 2-space, README table complete.
+- destroy_test diagnosed (lane-2, ca8d196): the guest kernel RECLAIMED inodes: ~9 KiB per written
+  file, the 832 MiB guest hit its low watermark at ~73k files and evicted; held fds rose
+  monotonically until then (no sync-point or FORGET loss; hypotheses 1-3 out). MemAvailable counts
+  reclaimable cache, so the MEM-line sizing rule hid it (peak_used 349 of 781 MiB). Fix: mem=1536
+  (needs ~1030), thresholds exact (100% held, before == after the drop), a reclaim-scans check.
+  Generalizing before merge: reclaim counters in every MEM line + run-qemu WARNING +
+  `require_no_reclaim` in idle/release_leak/destroy; guest timeout from Bazel's TEST_TIMEOUT.
+  Lesson for 6.2's rule: a sizing run must show reclaim_scans=0.
