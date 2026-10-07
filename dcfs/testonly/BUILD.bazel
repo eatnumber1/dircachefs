@@ -6,6 +6,17 @@ load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 
 package(default_testonly = 1)
 
+# The one ASSERT_OK_AND_ASSIGN for every test (the pinned Abseil has none).
+cc_library(
+    name = "assert_ok_and_assign",
+    hdrs = ["assert_ok_and_assign.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "@absl//absl/status:status_matchers",
+        "@googletest//:gtest",
+    ],
+)
+
 # The recording ProtocolEvents for trace validation (formal/README.md,
 # "Trace validation").
 cc_library(
@@ -106,6 +117,7 @@ qemu_cc_test(
     timeout = "short",
     srcs = ["trace_recorder_test.cc"],
     deps = [
+        ":assert_ok_and_assign",
         ":trace_recorder",
         "//dcfs:context",
         "//dcfs:device_id",

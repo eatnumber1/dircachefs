@@ -39,19 +39,10 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
+#include "dcfs/testonly/assert_ok_and_assign.h"
 #include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-#define DCFS_TEST_CONCAT_INNER(x, y) x##y
-#define DCFS_TEST_CONCAT(x, y) DCFS_TEST_CONCAT_INNER(x, y)
-#define ASSERT_OK_AND_ASSIGN(lhs, rexpr)                        \
-  ASSERT_OK_AND_ASSIGN_IMPL(                                    \
-      DCFS_TEST_CONCAT(_status_or_value_, __LINE__), lhs, rexpr)
-#define ASSERT_OK_AND_ASSIGN_IMPL(statusor, lhs, rexpr) \
-  auto statusor = (rexpr);                              \
-  ASSERT_THAT(statusor, ::absl_testing::IsOk());        \
-  lhs = std::move(statusor).value()
 
 namespace dcfs::testonly {
 namespace {

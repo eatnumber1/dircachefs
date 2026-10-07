@@ -13,21 +13,9 @@
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-// This version of Abseil's status_matchers.h doesn't provide
-// ASSERT_OK_AND_ASSIGN, so define the usual helper locally (scoped to this
-// file only) -- same as dcfs/backing_test.cc / dcfs/metadata_cache_test.cc.
-#define DCFS_TEST_CONCAT_INNER(x, y) x##y
-#define DCFS_TEST_CONCAT(x, y) DCFS_TEST_CONCAT_INNER(x, y)
-#define ASSERT_OK_AND_ASSIGN(lhs, rexpr)                        \
-  ASSERT_OK_AND_ASSIGN_IMPL(                                    \
-      DCFS_TEST_CONCAT(_status_or_value_, __LINE__), lhs, rexpr)
-#define ASSERT_OK_AND_ASSIGN_IMPL(statusor, lhs, rexpr) \
-  auto statusor = (rexpr);                              \
-  ASSERT_THAT(statusor, ::absl_testing::IsOk());        \
-  lhs = std::move(statusor).value()
 
 namespace dcfs {
 namespace {
