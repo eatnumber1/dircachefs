@@ -1119,3 +1119,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   walks use getdents64; baseline empty: raw_syscalls_test enforces. fast 123/123, presubmit+
   formal 189/189, asan //dcfs/... 34/34. Targeted review (production sites, testonly wiring,
   assertion fidelity) before merge.
+- 12.4 merged (def2352): model fixes from review (clean flag depends on writable opens; finding
+  (c) now the read-only-open path; destroy-with-opens config; T_LifeRestart taken; a recorder gap
+  fixed test-first: run lines did not update the directory's last state). formal 63/63 (lifetime
+  318k states 39 s). 12.4b dispatched (lane-2): stub id high-water mark + keep stub rows on a mere
+  forget; unclean-start probe of dirty inodes without a present dentry; sweep at every start.
+- 25.1c review: faithful, no weakened assertions; fix before merge: the realpath allow line now
+  covers the wrapper (ban the mangled wrapper symbol, allow only from mounts_below); std::
+  filesystem/ifstream back doors in tests and bench converted and added to the scanner; doc
+  statements; `pause` wrapped; `remove` dropped from the list (std::remove algorithm).
