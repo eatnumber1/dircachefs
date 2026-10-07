@@ -33,8 +33,9 @@ its own test-first step.
   unqualified libc syscall call outside `syscalls.cc` (regex over the
   tracked C++; clang-tidy takes over in 7.5); every site converted. The
   one exception: `tools/fhtest.c` and `tools/testutil.c` are C programs
-  for the guest and cannot use the C++ wrappers; recommendation: port
-  them to C++ in a later step (needs russ's yes), documented until then.
+  for the guest and cannot use the C++ wrappers; they stay as they are
+  (russ, 2026-10-07: fhtest.c is a hand-synced copy from
+  fuse-generation-qemu, third-party; testutil.c stays C beside it).
 - 25.2 Flat namespaces (after 25.1). `cache` (673 uses), `backing`
   (147), `events` (182), `internal` (9), `testonly` (4) fold into `dcfs`;
   only `dcfs::syscalls` and `dcfs::sqlite3` stay (russ, 2026-10-07),

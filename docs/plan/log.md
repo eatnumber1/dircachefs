@@ -937,3 +937,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   become Status there). 25.1b queued behind 25.1 in lane-1: raw_syscalls_test + conversion.
   Needs russ: port tools/fhtest.c and tools/testutil.c (guest C programs) to C++ so the rule has
   no exception? (recommended; until then they are the documented exception).
+- russ (2026-10-07): tools/fhtest.c (copied from fuse-generation-qemu) and tools/testutil.c stay C,
+  excluded from the syscalls rule; third-party code is never rewritten.
