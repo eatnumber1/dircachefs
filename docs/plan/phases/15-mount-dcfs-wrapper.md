@@ -224,7 +224,15 @@
     `http_archive` and sha256; `third_party/pandoc/` holds only the
     BUILD overlay) in a Bazel genrule; a test renders it with
     `groff -man -ww -z` and fails on warnings. README's installation
-    section says where to copy it.
+    section says where to copy it. **Pulled forward (russ, 2026-10-07)**
+    as step 15.0, independent of the wrapper: pandoc and the genrule now;
+    groff for the render test comes from the Phase 24 `alpine_package`
+    rule (until then, the check is pandoc reading its own man output back
+    with `-f man`, plus a grep for the required sections). The page
+    documents today's `dcfs` flags and gains the wrapper names later.
+    Alongside it: `dcfs --help` under the installed name printed "No
+    flags matched" (Abseil shows only flags from files named after the
+    program); fixed with a `FlagsUsageConfig`, with `--version`.
 
 **15.1 Tests first (QEMU; must fail on today's main; quote the output).**
 fstab tests run in the Debian rootfs (util-linux `mount`); systemd tests in

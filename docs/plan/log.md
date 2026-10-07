@@ -669,3 +669,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 5.4a (lane-4, e9678d2): CI trusts Bazel's test-result cache (test.sh drops --cache_test_results=no;
   AGENTS.md "everything through Bazel" no longer promises a weekly forced rerun; the schedule is for
   OSV and tool-keys only). Not yet run on a real runner; russ pushes when ready.
+- Phase 23 (23.6 held fd + 23.7 review fixes M1, M2, L1-L8) finished verification in lane-1
+  (873caf1: presubmit 140/140, formal + large trace tests, asan small). One-in-eight
+  copy_test_btrfs `immutable-ctime` off-by-one-second seen once; under review (dcfs-reviewer)
+  before merge.
+- russ (2026-10-07): `dcfs --help` useless under the installed name (Abseil's main-file heuristic;
+  "No flags matched"): fix + --version dispatched to lane-4 (step-help). Man page from the README:
+  Phase 15 item 26 pulled forward as 15.0 (pandoc pinned, genrule, render test).
