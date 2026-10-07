@@ -806,3 +806,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   clang toolchain started in lane-4 (independent of the open branches). 12.3 revalidation model
   waits for Phase 23 to merge (it maps the changed OPEN re-check); 25.1, Phase 22 and the guest
   helper dedupe also wait for it (same files).
+- 24.3 + review fixes done in lane-2 (step-24 @ 53ea1fb, 12 commits, +3860/-5730): QEMU 11.0.3,
+  e2fsprogs 1.47.4(+extra), xfsprogs 7.0.1, btrfs-progs 6.17.1, busybox-static 1.37.0 from Alpine
+  v3.24 via musl-loader wrappers; mkrootfs.py replaces `mke2fs -d tarball` (image tree identical:
+  8715 paths, debugfs ls/rdump); removed rules_foreign_cc, glib, zlib, util-linux, urcu, inih,
+  libarchive, exec_file.bzl, tool_identity/keys tests + tool-keys CI job, device-allowlist test;
+  all Alpine fetches together 22 s / 76 MB vs ~30 min of compiles. Review items M1, L1-L8 and nits
+  closed (apk downloads moved to Python urllib for a testable 404 message: reviewer to weigh the
+  Bazel-downloader trade). fast 84/84, presubmit 144/145 (readdir_boundary warm-listing 3.2 s vs
+  2.5 s budget under load; 3/3 alone), asan boot + dcfs units 33/33. AGENTS.md gains the Alpine
+  exception sentence (russ to see). Final review (24.3 + fixes) in flight; then merge, then push.
