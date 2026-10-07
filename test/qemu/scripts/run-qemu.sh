@@ -332,9 +332,9 @@ fi
 append="$append$rootfs_append"
 
 # Record exactly which binaries this run used, for anyone auditing a
-# serial log (and for the harness check below): a Bazel-fetched path looks
-# like ".../external/+alpine_package+alpine_qemu/wrappers/..." or an
-# external-repo path under ".../external/qemu+/...", never "/usr/...".
+# serial log (and for the harness check below): a Bazel-fetched path is
+# a wrapper under an Alpine repository's directory (".../wrappers/..."),
+# never "/usr/...".
 echo "run-qemu.sh: qemu binary: $QEMU_BIN ($("$QEMU_BIN" --version 2>&1 | head -1))" >>"$LOG"
 echo "run-qemu.sh: qboot rom: $QBOOT" >>"$LOG"
 case "$QEMU_BIN" in

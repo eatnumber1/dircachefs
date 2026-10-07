@@ -16,7 +16,8 @@ job: no package version appears in our tree, and nothing compares versions.
 
 What each fetched repository took is in its `resolved.json` (name, origin,
 version, branch, repository); the SBOM and the logs use it. Bazel's output
-base has them, e.g. `bazel info output_base`/external/+alpine_package+alpine_linux_virt/resolved.json.
+base has them: `bazel cquery --output=files @alpine_linux_virt//:resolved.json`
+prints the path relative to `bazel info output_base`.
 
 ## What the rules check
 

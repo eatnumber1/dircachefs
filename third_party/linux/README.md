@@ -58,8 +58,8 @@ Alpine's kernel has ACPI, EFI, many drivers and module signing
 (`MODULE_SIG` on, not forced: our modules are the signed ones from the apk,
 loaded by `insmod`). The bzImage is 12.6 MB (the old one 3.5 MB) and boots
 in about the same time with the minimal module set (spike, 2026-10-07).
-The kernel image and modules are in the Bazel output base under
-`external/+alpine_package+alpine_linux_virt/`.
+The kernel image and modules are in the Bazel output base; `bazel cquery
+--output=files @alpine_linux_virt//:root/boot/vmlinuz-virt` names the file.
 
 ## Kernel matrix (not yet)
 

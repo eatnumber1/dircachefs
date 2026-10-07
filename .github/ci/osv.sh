@@ -21,8 +21,10 @@ alpine=()
 output_base=$(bazel info output_base)
 for repo in $(python3 tools/sbom/sbom.py alpine-repos); do
   bazel fetch "--repo=@${repo}"
-  alpine+=(--alpine
-    "${repo}=${output_base}/external/+alpine_package+${repo}/resolved.json")
+  # cquery prints the file's path relative to the output base, whatever the
+  # repository's canonical name is.
+  file=$(bazel cquery --output=files "@${repo}//:resolved.json" 2>/dev/null)
+  alpine+=(--alpine "${repo}=${output_base}/${file}")
 done
 python3 tools/sbom/sbom.py generate --out-dir osv "${alpine[@]}"
 python3 tools/sbom/sbom.py git-roots --sbom osv/shipped.cdx.json --out-dir osv/shipped-git
