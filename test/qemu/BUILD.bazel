@@ -639,8 +639,8 @@ sh_test(
 
 # Phase 22: request cancellation (docs/design.md, "Cancellation"): on a
 # delayed backing, an interrupted or killed listing of a cold 20,000-entry
-# directory returns within 2 s, dcfs keeps serving, and the listing is then
-# complete and right.
+# directory returns within 2 s (8 s under TCG), dcfs keeps serving, and the
+# listing is then complete and right.
 qemu_test(
     name = "cancel_test",
     disks = [

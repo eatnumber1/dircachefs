@@ -1085,12 +1085,26 @@ reads the next message only once the handler has returned, so a request
 never saw its own interrupt. `SessionLoop` (`dcfs/session_loop.h`, the
 daemon's loop) drains `/dev/fuse` without blocking at each checkpoint (one
 `poll`): an interrupt goes to libfuse at once (`do_interrupt` marks the
-request, `fuse_req_interrupted` reports it), any other message is queued
-and served after the current request. The kernel delivers interrupts ahead
-of queued requests, so the drain finds one. No thread, and nothing runs
-while dcfs is idle. In `cancel_test` (dm-delay, 10 ms per I/O) an
-interrupted `ls` of an unlisted 20,000-entry directory returns within
-about 0.8 s, and a SIGKILLed `find` within 0.7 s.
+request, `fuse_req_interrupted` reports it), and the drain stops at the
+first other message, which is queued and served after the current request:
+at most one request is read ahead per checkpoint, so a long request does
+not pull the kernel's whole queue into dcfs's memory. The kernel delivers
+interrupts ahead of queued requests (`fuse_dev_do_read`), so the drain
+finds an interrupt before any request. dcfs turns `FUSE_CAP_SPLICE_READ`
+off, so every message arrives in memory and a drained one is never a pipe
+that libfuse would have to read during the current request. No thread, and
+nothing runs while dcfs is idle. In `cancel_test` (dm-delay, 10 ms per
+I/O) an interrupted `ls` of an unlisted 20,000-entry directory returns
+0.7-0.9 s after the signal (12.1 s without checkpoints), and a SIGKILLed
+`find` of another one 0.7-1.0 s after the kill (under TCG: 1.2 s and
+0.8 s).
+
+Owning the loop also means owning its end. libfuse refuses an `INIT` it
+cannot accept (a `max_read` the kernel did not offer, an old protocol
+version) by ending the session, and keeps the error in a private field;
+its own loop returns it, and `SessionLoop::Run` returns `-EPROTO` when the
+message it just processed was `INIT` and the session has ended, so the
+daemon exits non-zero instead of reporting a clean unmount.
 
 **The tri-state rule holds through it** (`formal/dcfs.tla`'s `Interrupt`,
 with `GuardsBalanced`; `formal/README.md`): an interrupted fill commits
@@ -1098,10 +1112,14 @@ nothing (a population's probes so far are dropped, the directory stays
 incomplete); a mutation interrupted after its phase 1 and before its
 syscall ends (`Mutation::End`, releasing its guard) with its names and
 attributes still unknown and dirty, which is sound because the backing
-filesystem is unchanged; a mutation is never interrupted between its
-syscall and its phase 3: the change exists, phase 3 records it, and the
-request replies success. An interrupted `FSYNC` may have synced; repeating
-it is harmless. The model's variants show what breaks otherwise (an
+filesystem is unchanged; a mutation has no checkpoint after its syscall,
+so it is never interrupted between its syscall and its phase 3: the change
+exists, phase 3 records it, and the request replies success. A failed
+mutation's re-resolution of its names (`ReresolveAfterFailure`) is a fill
+with checkpoints of its own: its first `EINTR` ends the request with
+`EINTR` (the names stay unknown), and a rename skips its second name. An
+interrupted `FSYNC` may have synced (its sync point has a checkpoint after
+the backing `fsync`); repeating it is harmless. The model's variants show what breaks otherwise (an
 interrupt after the syscall that puts the old name back: `CacheNeverWrong`;
 the same before the syscall without the kernel's lock: `TriState`; an
 interrupted mutation that never Ends: `GuardsBalanced`).

@@ -9,7 +9,9 @@
 # checkpoints an interrupted `ls` waits for the whole population.
 #
 #   - `timeout -s INT 1 ls` of it returns within BOUND_MS of the signal;
-#   - `kill -9` of a `find` blocked in it returns within BOUND_MS;
+#   - `kill -9` of a `find` blocked in another such directory (k/big, so
+#     the first one's population, complete when checkpoints are missing,
+#     cannot make it pass) returns within BOUND_MS;
 #   - dcfs serves a stat elsewhere afterwards;
 #   - a full listing then completes, and equals the backing directory's
 #     (an interrupted population recorded nothing wrong).
@@ -22,7 +24,17 @@ DCFS=/bin/dcfs
 BENCH=/bin/dcfs_bench
 DELAY_MS=${DELAY_MS:-10}
 BIG=${BIG:-20000}
-BOUND_MS=${BOUND_MS:-2000}
+# Under KVM the interrupted paths take 0.7-1.0 s. TCG runs the guest 2-12x
+# slower (Phase 5.1 measured 2-9x), so the bound scales by 4 there: 8 s
+# (1.2 s and 0.8 s measured under TCG on 2026-10-07, much of the wait being
+# DELAY_MS per I/O, which TCG does not lengthen) still fails a run without
+# checkpoints, whose wait is the rest of the population (12.1 s after the
+# signal under KVM).
+if [ "${DCFS_ACCEL:-kvm}" = tcg ]; then
+	BOUND_MS=${BOUND_MS:-8000}
+else
+	BOUND_MS=${BOUND_MS:-2000}
+fi
 
 SRC=/src
 MNT=/mnt
@@ -66,7 +78,7 @@ within() {
 	fi
 }
 
-echo "cancel.sh: kernel $(uname -r), DELAY_MS=$DELAY_MS BIG=$BIG BOUND_MS=$BOUND_MS"
+echo "cancel.sh: kernel $(uname -r), accel ${DCFS_ACCEL:-kvm}, DELAY_MS=$DELAY_MS BIG=$BIG BOUND_MS=$BOUND_MS"
 mkdir -p /prep "$SRC" "$MNT" /cache
 mount /dev/vdb /cache || {
 	fail mount-cache "could not mount /dev/vdb"
@@ -76,7 +88,8 @@ mount /dev/vdc /prep || {
 	fail mount-prep "could not mount /dev/vdc"
 	exit 1
 }
-"$BENCH" mktree /prep 200 "$BIG" || {
+mkdir -p /prep/k
+"$BENCH" mktree /prep 200 "$BIG" && "$BENCH" mktree /prep/k 1 "$BIG" || {
 	fail mktree "could not make the tree"
 	exit 1
 }
@@ -125,9 +138,9 @@ fi
 t1=$(uptime_ms)
 echo "cancel.sh: stat elsewhere took $((t1 - t0)) ms"
 
-# SIGKILL of a find blocked in the population.
+# SIGKILL of a find blocked in another directory's population.
 drop_caches
-find "$MNT/big" >/dev/null 2>&1 &
+find "$MNT/k/big" >/dev/null 2>&1 &
 FIND_PID=$!
 sleep 1
 if kill -0 "$FIND_PID" 2>/dev/null; then

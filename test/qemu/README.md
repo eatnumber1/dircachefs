@@ -503,7 +503,7 @@ gate is disabled.
 | runtime invariant checks (26.2: each invariant the checker enforces) | `//dcfs:dir_cache_fs_test`'s `DirCacheFSDeathTest.*` (each breaks one invariant on purpose and expects the abort naming it) and `InvariantChecksReportAsAStatus` |
 | run-qemu.sh invariant-violation verdict (26.2) | `//test/qemu:run_qemu_verdict_test` (a canned `DCFS-INVARIANT-VIOLATION` line fails the run; the words mid-line do not) |
 | fast and presubmit tiers boot the checking build (26.2) | `//test/qemu:invariant_checks_on_test` (a small test whose daemon must say `invariant checks: on`) |
-| interrupt checkpoints (Phase 22: an interrupted request replies `EINTR` at its next checkpoint) | `//dcfs:dir_cache_fs_test`'s cancellation tests (a fake interruption source, and a forged `FUSE_INTERRUPT` read by the real `SessionLoop`) and `//test/qemu:cancel_test`; without the checkpoints the harness tests fail, and the guest's listing took 13.6-19.5 s (`cancel_inventory_test`) |
+| interrupt checkpoints (Phase 22: an interrupted request replies `EINTR` at its next checkpoint) | `//dcfs:dir_cache_fs_test`'s cancellation tests (a fake interruption source, and a forged `FUSE_INTERRUPT` read by the real `SessionLoop`) and `//test/qemu:cancel_test`; without the checkpoints the harness tests fail, and `cancel_test`'s interrupted listing took 12.1 s after the signal (the population's 13.6-19.5 s in `cancel_inventory_test`) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
@@ -1130,7 +1130,7 @@ ioctls; the guest has no dmsetup) are subcommands of the same binary.
 | `idle_long_test` | large | the same for 600 s |
 | `memory_test` (matrix) | medium (ext4), large | pass/fail: RSS after `find` is under 256 bytes per entry, and after a `drop_caches` of half the tree a find over the other half adds nothing; see the comment in `guest/memory.sh` for why "RSS shrinks back" cannot be asserted |
 | `cancel_inventory_test` | enormous | Phase 22.1: the wall time of each request path that waits on the backing filesystem, every backing I/O delayed 10 ms (dm-delay); prints the table below |
-| `cancel_test` | large | pass/fail (Phase 22): on the same delayed backing, an interrupted (`timeout -s INT 1`) or killed (`kill -9`) listing of an unlisted 20,000-entry directory ends within 2 s, dcfs serves other requests afterwards, and the listing then equals the backing directory's |
+| `cancel_test` | large | pass/fail (Phase 22): on the same delayed backing, an interrupted (`timeout -s INT 1`) or killed (`kill -9`) listing of an unlisted 20,000-entry directory (a different one each) ends within 2 s (8 s under TCG; measured 0.7-1.0 s under KVM, 0.8-1.2 s under TCG), dcfs serves other requests afterwards, and the listing then equals the backing directory's |
 
 The cancellation inventory (`cancel_inventory_test`, 10 ms per backing I/O,
 fastbuild dcfs, a loaded host, 2026-10-07; each one request unless noted).

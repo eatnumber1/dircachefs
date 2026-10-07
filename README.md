@@ -606,7 +606,10 @@ recovery protocol, concurrency, and the test strategy.
   uncached directory on a slow disk. A backing syscall already blocked in
   the kernel (a disk spinning up, a hung network mount, a long `fsync`)
   is waited out first. A change that already reached the backing
-  filesystem is completed and reported as done, never as `EINTR`. See
+  filesystem is completed and reported as done, never as `EINTR`. The
+  exception is `fsync`: interrupted after its backing `fsync` and before
+  the sync point that makes it durable in dcfs's cache, it replies `EINTR`
+  although the file's data was synced; repeating it is harmless. See
   docs/design.md, "Cancellation".
 - **Exclusive access to the backing tree is required.** Everything that
   changes the backing tree must go through dcfs. There is no fanotify
