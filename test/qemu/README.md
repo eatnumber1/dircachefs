@@ -505,6 +505,7 @@ gate is disabled.
 | interrupt checkpoints (Phase 22: an interrupted request replies `EINTR` at its next checkpoint) | `//dcfs:dir_cache_fs_test`'s cancellation tests (a fake interruption source, and a forged `FUSE_INTERRUPT` read by the real `SessionLoop`) and `//test/qemu:cancel_test`; without the checkpoints the harness tests fail, and `cancel_test`'s interrupted listing took 12.1 s after the signal (the population's 13.6-19.5 s in `cancel_inventory_test`) |
 | fault sweep: every backing call site a short workload reaches, failed once (26.6) | `//dcfs:dir_cache_fs_fault_sites_test`'s `FaultSitesTest.SweepReportsABrokenInvariant` (an iteration that breaks an invariant is reported, naming the site it failed) |
 | slopes: every operation class's steps, transactions, WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by a * N + b (26.4b) | `//dcfs:dir_cache_fs_slope_test`'s `SlopeTest.AnExtraCostPerOperationIsCaught` (two more statement steps per create exceed the bound) |
+| FUSE requests per user-level operation (26.4b: `guest/request_budgets.txt`) | `//test/qemu:request_lib_test` (the real `guest/request_lib.sh` delta over canned counter snapshots, and a request count above its budget failing) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
@@ -608,6 +609,17 @@ the counts where an order may legitimately change. Only deterministic counts
 are budgeted: no time, no sizes, and the cache database's own syscalls
 (`cache`) are reported, not gated. The gate's self-check is
 `//test/qemu:strace_lib_test`.
+
+### Request budgets
+
+`guest/request_budgets.txt` (step 26.4b) holds, per user-level operation
+(`ls -l` of 100 entries, `find` over a tree, `stat` of a path 10 deep, `cat`
+of a file), the most FUSE requests of each opcode (LOOKUP, GETATTR,
+READDIRPLUS, READDIR, OPENDIR, OPEN) the kernel may send dcfs for it, on a
+cold kernel cache and a warm dcfs cache. `//test/qemu:request_counts_test`
+counts them with the checking daemon's cost counter (`$DCFS_COUNTERS_FILE`,
+`guest/request_lib.sh`) and compares them as the syscall budgets are
+compared. The budgets started at the observed counts.
 
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 

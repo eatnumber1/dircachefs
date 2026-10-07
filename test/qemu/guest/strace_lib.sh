@@ -215,12 +215,13 @@ strace_golden() {
 # sql_stmts, sql_txns). A count above its budget fails; below it passes
 # (lowering a budget is an edit too, but nothing fails for an improvement).
 
-# strace_budget_compare BUDGETS COUNTS OP: 0 when every budgeted count of OP
-# in the COUNTS file is within its budget; else prints one line per
+# strace_budget_compare BUDGETS COUNTS OP [NAME]: 0 when every budgeted count
+# of OP in the COUNTS file is within its budget; else prints one line per
 # violation and returns 1. An OP with no budget line, or a budgeted kind the
-# counts lack, is a violation.
+# counts lack, is a violation. NAME is the budgets file's name in the message
+# (syscall_budgets.txt by default).
 strace_budget_compare() {
-	awk -v op="$3" '
+	awk -v op="$3" -v file="${4:-syscall_budgets.txt}" '
 	FNR == NR {
 		if ($1 == op && $1 !~ /^#/) { want[$2] = $3; n++ }
 		next
@@ -237,7 +238,7 @@ strace_budget_compare() {
 				print op " " k ": no such count in this trace"
 				bad = 1
 			} else if (got[k] + 0 > want[k] + 0) {
-				print op " " k ": count rose from " want[k] " to " got[k] "; raising a budget is a deliberate edit of syscall_budgets.txt whose commit says why"
+				print op " " k ": count rose from " want[k] " to " got[k] "; raising a budget is a deliberate edit of " file " whose commit says why"
 				bad = 1
 			}
 		}

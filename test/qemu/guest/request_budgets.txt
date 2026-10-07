@@ -1,0 +1,43 @@
+# Budgets for guest/request_counts.sh (step 26.4b): the most FUSE requests of
+# each opcode the kernel may send dcfs for one user-level operation, on a cold
+# kernel cache and a warm dcfs cache, as the checking daemon's cost counter
+# counts them (guest/request_lib.sh). A count above its budget fails; raising
+# one is a deliberate edit of this file whose commit says why; lowering one
+# after an improvement is welcome. Format: OP OPCODE MAX. The budgets started
+# at the observed counts (stable over three runs).
+
+# ls -l of a directory of 100 files: the directory's lookup and open, and
+# six READDIRPLUS replies (the entries come with their attributes: no
+# GETATTR, no LOOKUP per entry).
+ls-l-100 LOOKUP 1
+ls-l-100 GETATTR 0
+ls-l-100 READDIRPLUS 6
+ls-l-100 READDIR 0
+ls-l-100 OPENDIR 1
+ls-l-100 OPEN 0
+
+# find over a tree of 13 directories and 45 files: one lookup (the top),
+# one OPENDIR and two READDIRPLUS (the entries, then the end) per directory.
+find-tree LOOKUP 1
+find-tree GETATTR 0
+find-tree READDIRPLUS 26
+find-tree READDIR 0
+find-tree OPENDIR 13
+find-tree OPEN 0
+
+# stat of a file 10 directories deep: one LOOKUP per path component (12).
+stat-deep-10 LOOKUP 12
+stat-deep-10 GETATTR 0
+stat-deep-10 READDIRPLUS 0
+stat-deep-10 READDIR 0
+stat-deep-10 OPENDIR 0
+stat-deep-10 OPEN 0
+
+# cat of a file: its lookup and its open (the read goes through passthrough
+# or the page cache).
+cat LOOKUP 1
+cat GETATTR 0
+cat READDIRPLUS 0
+cat READDIR 0
+cat OPENDIR 0
+cat OPEN 1

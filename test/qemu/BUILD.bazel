@@ -75,7 +75,10 @@ config_setting(
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "@alpine_dmsetup//:root",  # step 11.1: /sbin/dmsetup and libdevmapper
         "guest/init",
-    ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + ["guest/syscall_budgets.txt"],
+    ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + [
+        "guest/request_budgets.txt",
+        "guest/syscall_budgets.txt",
+    ],
     outs = [name + ".cpio.gz"],
     testonly = 1,
     cmd = "$(location scripts/mkinitramfs.sh) $@ " +
@@ -906,4 +909,33 @@ qemu_test(
     guest_script = "guest/invariant_checks_on.sh",
     size = "small",
     timeout = "moderate",
+)
+
+# Step 26.4b: FUSE requests per user-level operation (guest/request_counts.sh,
+# guest/request_lib.sh), from the checking daemon's cost counter, held to
+# guest/request_budgets.txt.
+qemu_test(
+    name = "request_counts_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/request_counts.sh",
+    size = "small",
+    timeout = "moderate",
+)
+
+# Step 26.4b: self-check of the request-count gate: the real
+# guest/request_lib.sh delta over canned counter snapshots, and the budget
+# comparison (strace_lib.sh's) failing a count above its budget.
+sh_test(
+    name = "request_lib_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["request_lib_test.sh"],
+    args = [
+        "$(location guest/strace_lib.sh)",
+        "$(location guest/request_lib.sh)",
+    ],
+    data = [
+        "guest/request_lib.sh",
+        "guest/strace_lib.sh",
+    ],
 )

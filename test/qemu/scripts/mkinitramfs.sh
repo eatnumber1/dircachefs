@@ -198,7 +198,9 @@ else
 			cp "$f" "$ROOT/pjdfstest/$(basename "$f")"
 			;;
 		*.sh) cp "$f" "$ROOT/tests/$(basename "$f")" ;;
-		*/syscall_budgets.txt) cp "$f" "$ROOT/tests/syscall_budgets.txt" ;;
+		*/syscall_budgets.txt | */request_budgets.txt)
+			cp "$f" "$ROOT/tests/$(basename "$f")"
+			;;
 		esac
 	done
 
