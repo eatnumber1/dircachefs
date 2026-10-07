@@ -300,6 +300,7 @@ sg kvm -c 'bazel test //...'                         # everything
 sg kvm -c 'bazel test //dcfs:metadata_cache_test'    # one unit test
 sg kvm -c 'bazel test //test/qemu:write_test --test_output=streamed'
 sg kvm -c 'bazel test --config=asan //dcfs:all'      # under ASan
+sg kvm -c 'bazel test --config=ubsan //dcfs:all'     # under UBSan
 ```
 
 `--test_output=streamed` shows a guest's console as it runs. Afterwards,
@@ -347,7 +348,7 @@ unfixed code, then the fix makes it pass.
 |---|---|---|
 | `fast` | `bazel test --config=fast //...` (small tests) | |
 | `presubmit` | `bazel test --config=presubmit //...` (small and medium) | `fast` |
-| `full` | `bazel test //...` (every tier, pjdfstest on all three filesystems), then `bazel test --config=asan //...` | `presubmit` |
+| `full` | `bazel test //...` (every tier, pjdfstest on all three filesystems), then `bazel test --config=asan //...` and `bazel test --config=ubsan //...` | `presubmit` |
 
 - **Caches.** Bazel's disk cache, repository cache and Bazelisk's download
   are restored and saved with `actions/cache`, even when tests fail (the

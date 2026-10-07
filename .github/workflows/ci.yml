@@ -170,7 +170,8 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
   full:
-    # Every test, then every test again under AddressSanitizer.
+    # Every test, then every test again under AddressSanitizer and under
+    # UndefinedBehaviorSanitizer.
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     needs: presubmit
@@ -203,6 +204,9 @@ jobs:
       - name: Test (AddressSanitizer)
         if: ${{ !cancelled() }}
         run: ./.github/ci/test.sh --config=asan
+      - name: Test (UndefinedBehaviorSanitizer)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/test.sh --config=ubsan
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh

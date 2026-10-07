@@ -80,11 +80,16 @@ build:asan --define=dcfs_sanitizer=asan
 
 build:ubsan --strip=never
 build:ubsan --copt -fsanitize=undefined
+# clang 22's -fsanitize=undefined does not include vptr (the compile line
+# shows fsanitize=alignment,array-bounds,...,vla-bound only): name it
+# (//dcfs:ubsan_runtime_test).
+build:ubsan --copt -fsanitize=vptr
 build:ubsan --copt -fno-sanitize-recover=all
 build:ubsan --copt -O1
 build:ubsan --copt -g
 build:ubsan --copt -fno-omit-frame-pointer
 build:ubsan --linkopt -fsanitize=undefined
+build:ubsan --linkopt -fsanitize=vptr
 # The vptr check lives in ubsan_standalone_cxx (see build:asan).
 build:ubsan --linkopt -fsanitize-link-c++-runtime
 build:ubsan --linkopt -fno-sanitize-recover=all

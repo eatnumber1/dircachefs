@@ -404,6 +404,8 @@ gate is disabled.
 | rootfs_invariant_test (Debian rootfs matches tar) | `//third_party/debian:rootfs_invariant_self_check` (imports the real `header_problems`) |
 | the C++ toolchain is the pinned clang (7.1) | `//tools:toolchain_self_check_test` (the checker over a gcc and a wrong-version clang info file must fail) |
 | banned symbols in `//dcfs:main_static` (26.8) | `//tools:banned_symbols_self_check_test` (the real checker and deny list over a program that calls `realpath`) |
+| the ASan build reports and dies (C++ runtime linked, 7.1) | `//dcfs:asan_runtime_test` (only under `--config=asan`: alloc-dealloc-mismatch must kill the process) |
+| the UBSan build reports and dies (7.4) | `//dcfs:ubsan_runtime_test` (only under `--config=ubsan`: a signed overflow, a misaligned load and a vptr misuse must each kill the process; the vptr one failed to die until `-fsanitize=vptr` was named) |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
@@ -534,6 +536,28 @@ initramfs instead. ASan needs `ptrace` to symbolize leak reports, which the
 guest doesn't have configured; `guest/init` sets
 `ASAN_OPTIONS=detect_leaks=0` (only if unset) so that limitation doesn't
 fail every ASan build.
+
+`--config=ubsan` is `-fsanitize=undefined -fsanitize=vptr` with
+`-fno-sanitize-recover=all` (any report kills the process, so the test
+fails) and the C++ runtime linked (`-fsanitize-link-c++-runtime`). Named
+explicitly because clang 22's `undefined` omits `vptr`, so `//dcfs:ubsan_runtime_test`
+would not catch the misuse. Deliberately left out: `implicit-conversion`
+(measured 2026-10-07: the first report of every unit test is SQLite's
+`sqlite3.c:190778`, a defined `int` to `unsigned` sign change, and it ends
+the run) and `unsigned-integer-overflow` (defined wraparound that Abseil's
+hashing and SQLite rely on; `-Weverything` finds our own conversions at
+compile time),
+`float-divide-by-zero` (defined by IEEE 754), `local-bounds` (traps without
+a message; `array-bounds` in `undefined` reports), `nullability` (we have no
+annotations). `guest/init` sets `UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1`
+(only if unset); the guest has no llvm-symbolizer, so a stack is addresses
+and module offsets, while the report's first line names the source file,
+line and column from the compiler's own data. The whole suite passes
+under it with no report in our code, Abseil, SQLite, libfuse, liburing or
+numactl, so there is no suppressions file (`UBSAN_OPTIONS=suppressions=` is
+the way to add one, with a reason per line). UBSan guests need no more
+memory than ASan's `asan_mem=`; `memory_test_xfs` reclaims
+(`reclaim_scans` > 0) in the plain build too, at its 448 MiB.
 
 The tools a guest test uses (QEMU, `mke2fs`/`debugfs`, `mkfs.xfs`,
 `mkfs.btrfs`, busybox) are downloaded Alpine packages, not built here, so

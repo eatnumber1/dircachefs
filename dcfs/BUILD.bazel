@@ -1111,6 +1111,20 @@ qemu_cc_test(
     deps = ["@googletest//:gtest_main"],
 )
 
+# The UBSan build must report (and die on) the checks that matter most:
+# signed overflow, a misaligned load and a vptr misuse. Only under --config=ubsan.
+qemu_cc_test(
+    name = "ubsan_runtime_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["ubsan_runtime_test.cc"],
+    target_compatible_with = select({
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["@googletest//:gtest_main"],
+)
+
 # The direct dependents of //dcfs:syscalls_backing, for
 # //tools:syscalls_backing_users_test (step 26.7): which targets may reach the
 # backing filesystem through syscalls is a golden list

@@ -233,6 +233,9 @@ if [ -f /test/run ]; then
 	# has neither configured, so leak detection is disabled rather than
 	# have every ASan build fail on an unrelated guest limitation.
 	export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+	# UBSan (--config=ubsan, fatal at compile time already): the stack of a
+	# report, and an exit status that cannot be mistaken for the test's own.
+	export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 
 	[ -d /test/data ] && cd /test/data
 
@@ -269,6 +272,7 @@ fi
 # needs the same leak-detection workaround for the same reason (no ptrace
 # in this guest).
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 
 # qemu_test's optional rootfs= attribute (test/qemu/qemu_test.bzl) attaches
 # a Debian rootfs image (test/qemu/scripts/mkrootfs-debian.sh) as an extra
