@@ -1422,3 +1422,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   re-resolve, Drain reads at most one request ahead, SPLICE_READ unset, parameterized checkpoint
   tests, large TLC runs to completion, cancel_test bound by accelerator, docs/AGENTS wording.
   Deviations recorded in the phase file.
+- 12.5 merged (e3fe0aa, 4 commits, +2671/-21): formal/ident.tla (OneHandleOneObject,
+  HeldResolvesToItsObject, HandlesResolveToTheirObject, ServedWhileLive, GoneIsStale,
+  ReuseDetected, NoBadInode; Target = today | Phase 14; Evidence), 6 known bugs, 5 limitations,
+  IdentityResolved event + DCFS-IDENT traces (36 valid), design.md's population-policy text
+  corrected (order of the reads is irrelevant: one O_PATH fd), README: NFS handles of rows
+  recorded since the last durable commit (fills, and the objects a change creates) are lost at a
+  power loss. formal 83/83, fast 167 + 2 skips. 12.6 (recovery idempotence) + 12.7 (effect-point
+  property) dispatched to the same agent.
