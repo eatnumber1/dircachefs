@@ -1474,3 +1474,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   sanitizer runtimes are musl. Pending: `7.1b:` subject prefixes, rebase, full tiers, repro gate;
   then review. Follow-ups: glibc into the shipped SBOM (git-commit purls only today); extract
   only the needed parts of the 12 GB tarball.
+- Lane-5 round merged (56980ad, 5 commits): 7.4b memory tests mem=704/asan 832 by reclaim; CI:
+  full/asan/ubsan as 3-shard matrices (test.sh --shard, shard.sh + shard_test), osv restores the
+  repository cache read-only (45 min), subject-gate failure names the hash; 6.4a: 100 of 226 tests
+  skipped under each sanitizer config; 6.4b: destroy_test 20k (mem 384 / asan 1344); 8.3: cheap
+  coverage gaps + the debug-string rule in style.md + FileHandle::ToString tested per field.
+  fast 169/169 nocache, asan small 31 + 1 skip on the rebased tree; presubmit's only failure was
+  dir_cache_fs_trace_test at its 900 s limit under load 28 (823 s alone): timeout to raise.
+  PUSH POINT: main 56980ad+ (the osv fix is in). Mutation step sits in full's shard 0 until
+  lane-4 moves it to its own job.
