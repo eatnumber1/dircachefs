@@ -802,3 +802,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (VIRTIO_MMIO, SERIAL_8250); L6 AGENTS.md/style.md third_party rule gets the Alpine exception;
   L7 /proc/sys/kernel/modprobe hook naming the undeclared module; L8 no hard-coded external paths.
   Sent to lane-2 for after 24.3.
+- russ (2026-10-07): more lanes now that memory is plentiful (CPU, 4 cores, is the limit). 7.1 pinned
+  clang toolchain started in lane-4 (independent of the open branches). 12.3 revalidation model
+  waits for Phase 23 to merge (it maps the changed OPEN re-check); 25.1, Phase 22 and the guest
+  helper dedupe also wait for it (same files).
