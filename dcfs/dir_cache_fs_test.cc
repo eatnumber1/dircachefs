@@ -1549,6 +1549,46 @@ TEST_F(DirCacheFSTest, ChmodAndChattrOfAnOpenFileMatchTheRevalModel) {
   }
 }
 
+// For trace validation against the revalidation model (formal/reval.tla):
+// a flag change the backing filesystem refuses (FS_IOC_FSSETXATTR of a
+// project id, which an ext4 without the project feature answers with
+// EOPNOTSUPP, changing nothing), and the append-only flag set and cleared
+// through FS_IOC_FSSETXATTR, with the writable opens it decides in between.
+TEST_F(DirCacheFSTest, RefusedAndFsxattrFlagChangesMatchTheRevalModel) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  StartTrace();
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  Reply getx = Ioctl(f, FS_IOC_FSGETXATTR, "", sizeof(struct fsxattr));
+  ASSERT_EQ(getx.error, 0);
+  struct fsxattr fsx {};
+  std::memcpy(&fsx, getx.payload.data() + sizeof(struct fuse_ioctl_out),
+              sizeof(fsx));
+  auto as_bytes = [](const struct fsxattr &v) {
+    return std::string(reinterpret_cast<const char *>(&v), sizeof(v));
+  };
+  struct fsxattr project = fsx;
+  project.fsx_projid = 7;
+  EXPECT_EQ(Ioctl(f, FS_IOC_FSSETXATTR, as_bytes(project), 0).error,
+            -EOPNOTSUPP);
+  struct fsxattr append_only = fsx;
+  append_only.fsx_xflags |= FS_XFLAG_APPEND;
+  ASSERT_EQ(Ioctl(f, FS_IOC_FSSETXATTR, as_bytes(append_only), 0).error, 0);
+  EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
+  auto [app, app_fh] = Open(f, O_WRONLY | O_APPEND);
+  EXPECT_EQ(app.error, 0);
+  ASSERT_EQ(Ioctl(f, FS_IOC_FSSETXATTR, as_bytes(fsx), 0).error, 0);
+  auto [rw, rw_fh] = Open(f, O_WRONLY);
+  EXPECT_EQ(rw.error, 0);
+  for (uint64_t h : {fh, app_fh, rw_fh}) {
+    if (h != 0) {
+      EXPECT_EQ(Release(f, h).error, 0);
+    }
+  }
+}
+
 // An unnamed file (O_TMPFILE) has a row but no name; linking it into a
 // name is, to the directory, a create (the model's "linkcreate", which
 // trace validation checks here: the second link is EEXIST).

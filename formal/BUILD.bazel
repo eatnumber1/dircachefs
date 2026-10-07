@@ -123,6 +123,9 @@ REVAL_KNOWN_BUGS = {
     # Review L1 and L-a of Phase 23, fixed in 23.7.
     "reval_no_write_fd": "Invariant WriteFdHeld is violated",
     "reval_write_fd_last_writer": "Invariant WriteFdKeepsOffsets is violated",
+    # Not a historical bug: the write fd kept past the last writer (the
+    # invariant that rules it out came with review of 12.3).
+    "reval_write_fd_never_dropped": "Invariant WriteFdOnlyBesideWriters is violated",
 }
 
 [

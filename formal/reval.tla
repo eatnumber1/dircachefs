@@ -73,7 +73,8 @@ CONSTANTS
     BugRecheckOnlyIfChanged,  \* ... only after a flag change through dcfs
     BugCasefoldPassedThrough, \* SETFLAGS changing FS_CASEFOLD_FL is forwarded
     BugNoWriteFd,             \* no write fd beside a read-only shared fd
-    BugWriteFdLastWriter      \* each writable open replaces the write fd
+    BugWriteFdLastWriter,     \* each writable open replaces the write fd
+    BugWriteFdNeverDropped    \* the last writable release keeps the write fd
 
 None == "none"
 
@@ -262,7 +263,7 @@ ReleaseF(h) ==
        IN /\ hs' = [hs EXCEPT ![h] = Closed]
           /\ cF' = IF lastWriter \/ (rest = {} /\ ~cF.valid)
                    THEN Known(bF.w) ELSE cF
-          /\ wfd' = IF lastWriter THEN None ELSE wfd
+          /\ wfd' = IF lastWriter /\ ~BugWriteFdNeverDropped THEN None ELSE wfd
           /\ sfd' = IF rest = {} THEN NoFd ELSE sfd
     /\ UNCHANGED <<kAttr, lastOpen, writeErr>>
 
@@ -464,6 +465,9 @@ WritesUseAWritableFd == writeErr = "none"
 \* not.
 WriteFdHeld ==
     Writers # {} => (RW(sfd) \/ (Held(sfd) /\ wfd # None))
+\* ... and only then: the write fd exists only beside writable opens over a
+\* read-only shared fd (it goes with the last writable release).
+WriteFdOnlyBesideWriters == wfd # None => (sfd.st = "ro" /\ Writers # {})
 WriteFdKeepsOffsets ==
     (sfd.st = "ro" /\ \E h \in Writers : hs[h].m = "w")
       => wfd = "plain"
