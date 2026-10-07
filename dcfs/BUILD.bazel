@@ -250,31 +250,9 @@ qemu_cc_test(
     ],
 )
 
-# Fault-injection tests for syscalls.cc races/limits that no real syscall
-# can be made to hit deterministically (see syscalls_fault_test.cc):
-# a link-time --wrap fake for readlinkat, kept in a
-# target of its own (not folded into syscalls_test) so the wrapping --
-# which rewrites every reference to these symbols in the whole binary --
-# cannot affect any other test.
-qemu_cc_test(
-    name = "syscalls_fault_test",
-    size = "small",
-    timeout = "short",
-    srcs = ["syscalls_fault_test.cc"],
-    disks = [("vdb", "ext4", "32M")],  # xattrs need a real filesystem
-    linkopts = ["-Wl,--wrap=readlinkat"],
-    deps = [
-      ":status",
-      ":syscalls",
-      "@absl//absl/status",
-      "@absl//absl/status:status_matchers",
-      "@googletest//:gtest_main",
-    ],
-)
-
-# Fault-injection test for the xattr retry loops in backing.cc (see
-# backing_fault_test.cc): link-time --wrap fakes for getxattr/listxattr, in
-# a target of its own so the wrapping cannot affect any other test.
+# Fault-injection test for the retry loops in backing.cc (xattr size races,
+# the symlink target cap; see backing_fault_test.cc): link-time --wrap fakes
+# for getxattr/listxattr/readlinkat, in a target of its own so the wrapping cannot affect any other test.
 qemu_cc_test(
     name = "backing_fault_test",
     size = "small",
@@ -284,9 +262,11 @@ qemu_cc_test(
     linkopts = [
       "-Wl,--wrap=getxattr",
       "-Wl,--wrap=listxattr",
+      "-Wl,--wrap=readlinkat",
     ],
     deps = [
       ":backing",
+      ":status",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",

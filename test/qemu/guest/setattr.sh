@@ -151,7 +151,7 @@ else
 	exit "$FAILED"
 fi
 
-# --- chmod-file: mode on a regular file (ReopenPathFd + fchmod) ---------
+# --- chmod-file: mode on a regular file (ReopenFd + fchmod) ---------
 
 chmod 640 "$MNT/f1"
 verify_immediate chmod-file-matches-src "$MNT/f1" "$SRC/f1" '%a'
@@ -163,7 +163,7 @@ chmod 750 "$MNT/d1"
 verify_immediate chmod-dir-matches-src "$MNT/d1" "$SRC/d1" '%a'
 verify_cached chmod-dir-cached "$MNT/d1" '%a' 750
 
-# --- chmod-fifo: mode on a fifo (fchmod_opath) ---------------------------
+# --- chmod-fifo: mode on a fifo (FchmodOPath) ---------------------------
 
 chmod 600 "$MNT/p1"
 verify_immediate chmod-fifo-matches-src "$MNT/p1" "$SRC/p1" '%a'

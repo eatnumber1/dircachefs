@@ -9,7 +9,9 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/file.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
@@ -72,7 +74,10 @@ absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence);
 absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
                                     unsigned int mask);
 absl::StatusOr<struct statfs> fstatfs(int fd);
-absl::StatusOr<std::string> readlinkat(int dirfd, std::string_view path);
+// readlinkat(2): one call; returns how many bytes it wrote to `buf`. A
+// result equal to `size` may be truncated (backing.cc grows the buffer).
+absl::StatusOr<size_t> readlinkat(int dirfd, std::string_view path, char *buf,
+                                  size_t size);
 // fgetxattr(2)/flistxattr(2): one call each, returning the size. A null
 // `value`/`list` with size 0 asks for the size needed. The size-then-read
 // loop (the value can grow in between) is backing.cc's.
@@ -150,8 +155,14 @@ mode_t umask(mode_t mask);
 // per-process semantics, implemented with a signal to each thread).
 absl::Status setgroups(std::span<const gid_t> groups);
 
-// getgroups(2): the calling thread's supplementary groups.
-absl::StatusOr<std::vector<gid_t>> getgroups();
+// getgroups(2): the calling thread's supplementary groups; with size 0 only
+// the count.
+absl::StatusOr<int> getgroups(int size, gid_t *list);
+
+// getrlimit(2), setrlimit(2), flock(2).
+absl::StatusOr<struct rlimit> getrlimit(int resource);
+absl::Status setrlimit(int resource, const struct rlimit &limit);
+absl::Status flock(int fd, int operation);
 
 }  // namespace syscalls
 

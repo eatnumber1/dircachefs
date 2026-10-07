@@ -479,6 +479,9 @@ absl::Status RemoveXattrFd(const Credentials &caller, int fd,
 absl::Status FsyncDirFd(int fd, bool datasync);
 absl::StatusOr<FileDescriptor> ReopenFd(int fd, int flags);
 
+// The calling thread's supplementary groups (getgroups(2), sized first).
+absl::StatusOr<std::vector<gid_t>> GetGroups();
+
 // Run at startup, after InitRoot: forgets every non-source filesystem that
 // is no longer mounted where it was found (or whose mount point is gone),
 // and registers a mount fd for each one that still is.

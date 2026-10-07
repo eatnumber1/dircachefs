@@ -7,7 +7,9 @@
 #include <fcntl.h>
 #include <linux/openat2.h>
 #include <string_view>
+#include <sys/file.h>
 #include <sys/fsuid.h>
+#include <sys/resource.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <linux/fs.h>
@@ -131,27 +133,12 @@ absl::StatusOr<struct statfs> fstatfs(int fd) {
   return buf;
 }
 
-absl::StatusOr<std::string> readlinkat(int dirfd, std::string_view path) {
+absl::StatusOr<size_t> readlinkat(int dirfd, std::string_view path, char *buf,
+                                  size_t size) {
   std::string path_str(path);
-  std::string result;
-  size_t bufsize = 256;
-  while (true) {
-    result.resize(bufsize);
-    ssize_t nbytes = ::readlinkat(dirfd, path_str.c_str(),
-                                   result.data(), result.size());
-    if (nbytes == -1) {
-      return ErrnoToStatus(errno, "readlinkat");
-    }
-    if (static_cast<size_t>(nbytes) < bufsize) {
-      result.resize(nbytes);
-      return result;
-    }
-    // Buffer too small, double it (cap at PATH_MAX*4)
-    if (bufsize >= PATH_MAX * 4) {
-      return ErrnoToStatus(ENAMETOOLONG, "readlinkat: target longer than PATH_MAX*4");
-    }
-    bufsize *= 2;
-  }
+  ssize_t nbytes = ::readlinkat(dirfd, path_str.c_str(), buf, size);
+  if (nbytes == -1) return ErrnoToStatus(errno, "readlinkat");
+  return static_cast<size_t>(nbytes);
 }
 
 absl::StatusOr<size_t> fgetxattr(int fd, std::string_view name, void *value,
@@ -421,21 +408,32 @@ absl::Status setgroups(std::span<const gid_t> groups) {
   return absl::OkStatus();
 }
 
-absl::StatusOr<std::vector<gid_t>> getgroups() {
-  while (true) {
-    int n = ::getgroups(0, nullptr);
-    if (n == -1) return ErrnoToStatus(errno, "getgroups");
-    std::vector<gid_t> groups(n);
-    int got = ::getgroups(n, groups.data());
-    if (got == -1) {
-      // The list grew in between (another thread cannot change ours, but
-      // be exact anyway): ask again.
-      if (errno == EINVAL) continue;
-      return ErrnoToStatus(errno, "getgroups");
-    }
-    groups.resize(got);
-    return groups;
+absl::StatusOr<int> getgroups(int size, gid_t *list) {
+  int n = ::getgroups(size, list);
+  if (n == -1) return ErrnoToStatus(errno, "getgroups");
+  return n;
+}
+
+absl::StatusOr<struct rlimit> getrlimit(int resource) {
+  struct rlimit limit {};
+  if (::getrlimit(static_cast<__rlimit_resource_t>(resource), &limit) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("getrlimit(", resource, ")"));
   }
+  return limit;
+}
+
+absl::Status setrlimit(int resource, const struct rlimit &limit) {
+  if (::setrlimit(static_cast<__rlimit_resource_t>(resource), &limit) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("setrlimit(", resource, ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status flock(int fd, int operation) {
+  if (::flock(fd, operation) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("flock(", fd, ")"));
+  }
+  return absl::OkStatus();
 }
 
 }  // namespace syscalls

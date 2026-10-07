@@ -142,19 +142,13 @@ TEST_F(SyscallsTest, SymlinkatAndReadlinkat) {
   const std::string target = "test_file";
   EXPECT_THAT(syscalls::symlinkat(target, tmpdir_fd_, "test_link"), IsOk());
 
-  auto link_result = syscalls::readlinkat(tmpdir_fd_, "test_link");
-  ASSERT_THAT(link_result, IsOk());
-  EXPECT_EQ(*link_result, target);
-}
-
-TEST_F(SyscallsTest, SymlinkatWithLongTarget) {
-  std::string long_target(500, 'a');
-  EXPECT_THAT(syscalls::symlinkat(long_target, tmpdir_fd_, "test_long_link"),
-              IsOk());
-
-  auto link_result = syscalls::readlinkat(tmpdir_fd_, "test_long_link");
-  ASSERT_THAT(link_result, IsOk());
-  EXPECT_EQ(*link_result, long_target);
+  char buf[64];
+  auto n = syscalls::readlinkat(tmpdir_fd_, "test_link", buf, sizeof(buf));
+  ASSERT_THAT(n, IsOk());
+  EXPECT_EQ(std::string(buf, *n), target);
+  // A full buffer is the caller's cue that the target may be longer.
+  EXPECT_THAT(syscalls::readlinkat(tmpdir_fd_, "test_link", buf, 4),
+              IsOkAndHolds(4u));
 }
 
 TEST_F(SyscallsTest, LinkatRaisesStNlink) {
@@ -485,47 +479,6 @@ TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {
   ASSERT_THAT(a, IsOk());
   ASSERT_THAT(b, IsOk());
   EXPECT_EQ(a->st_ino, b->st_ino);
-}
-
-// The raw setgroups system call changes only the calling thread's groups
-// (glibc's setgroups() would change every thread's), and setfsuid/setfsgid
-// report the previous value, with -1 reading the current one back.
-TEST(SyscallsCredentialsTest, SetgroupsIsPerThread) {
-  absl::StatusOr<std::vector<gid_t>> original = syscalls::getgroups();
-  ASSERT_THAT(original, IsOk());
-  std::vector<gid_t> in_thread;
-  std::vector<gid_t> in_main_meanwhile;
-  std::thread([&] {
-    const gid_t groups[] = {4242, 4243};
-    ASSERT_THAT(syscalls::setgroups(groups), IsOk());
-    absl::StatusOr<std::vector<gid_t>> mine = syscalls::getgroups();
-    ASSERT_THAT(mine, IsOk());
-    in_thread = *mine;
-    // Read the main thread's groups from here, while this thread still
-    // has its own: /proc/self/task/<main tid>/status is not this thread's.
-    std::string status_path =
-        "/proc/self/task/" + std::to_string(::getpid()) + "/status";
-    FILE *f = std::fopen(status_path.c_str(), "r");
-    ASSERT_NE(f, nullptr);
-    char line[512];
-    while (std::fgets(line, sizeof(line), f) != nullptr) {
-      if (std::strncmp(line, "Groups:", 7) != 0) continue;
-      char *p = line + 7;
-      char *end;
-      for (unsigned long g = std::strtoul(p, &end, 10); end != p;
-           g = std::strtoul(p, &end, 10)) {
-        in_main_meanwhile.push_back(static_cast<gid_t>(g));
-        p = end;
-      }
-    }
-    std::fclose(f);
-  }).join();
-  EXPECT_EQ(in_thread, (std::vector<gid_t>{4242, 4243}));
-  std::vector<gid_t> sorted_original = *original;
-  std::sort(sorted_original.begin(), sorted_original.end());
-  std::sort(in_main_meanwhile.begin(), in_main_meanwhile.end());
-  EXPECT_EQ(in_main_meanwhile, sorted_original);
-  EXPECT_THAT(syscalls::getgroups(), absl_testing::IsOkAndHolds(*original));
 }
 
 TEST(SyscallsCredentialsTest, SetfsuidReturnsPreviousAndReadsBack) {

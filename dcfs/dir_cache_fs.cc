@@ -34,6 +34,7 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
@@ -107,13 +108,12 @@ std::pair<size_t, std::string> MaxHeldFds(const DirCacheFS::Options &opts) {
   if (opts.max_held_fds.has_value()) {
     return {*opts.max_held_fds, "Options::max_held_fds"};
   }
-  struct rlimit limit {};
-  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) {
-    return {0, absl::StrCat("getrlimit(RLIMIT_NOFILE) failed: ",
-                            std::strerror(errno))};
+  absl::StatusOr<struct rlimit> limit = syscalls::getrlimit(RLIMIT_NOFILE);
+  if (!limit.ok()) {
+    return {0, absl::StrCat("getrlimit failed: ", limit.status().ToString())};
   }
-  return {DirCacheFS::DefaultMaxHeldFds(limit.rlim_cur),
-          absl::StrCat("the soft RLIMIT_NOFILE of ", limit.rlim_cur)};
+  return {DirCacheFS::DefaultMaxHeldFds(limit->rlim_cur),
+          absl::StrCat("the soft RLIMIT_NOFILE of ", limit->rlim_cur)};
 }
 
 }  // namespace

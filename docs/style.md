@@ -13,7 +13,7 @@ Google style or a rule below, Appendix A counts the sites and gives a
 command that finds them, for a later mechanical step. Nothing here is open:
 russ settled the questions on 2026-10-07.
 
-Derived from the tree at 463aa5f (2026-10-07), after step 25.1. Counts are of production
+Derived from the tree after step 25.1 (2026-10-07). Counts are of production
 code (`dcfs/`, `bench/`, no tests) unless stated. File:line references
 drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 `docs/design.md` or `docs/plan/process.md`, or is russ's decision.
@@ -246,7 +246,7 @@ each.
   `DirCacheFS` and `cache::` never name `syscalls::`. The allowed peers are
   `file_handle.cc`, `device_id.cc`, `fd.cc` and startup in `main.cc`
   (`docs/design.md`, "Architecture and layering"); `mounts_below.cc` is not
-  listed (C9). Only `syscalls.cc` calls libc directly (C10). `cache::` is
+  listed (C9). Only `syscalls.cc` calls libc directly. `cache::` is
   pure SQLite: it never sees a descriptor.
 - **No transaction spans a backing syscall.** Backing I/O first, then one
   short synchronous transaction (`ctx.db.Transaction(...)`); no statement
@@ -449,7 +449,7 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
 
 ## Appendix A: Convergence
 
-Sites that break Google style or a rule above, as of 463aa5f. Run each
+Sites that break Google style or a rule above, as of step 25.1. Run each
 command from the repository root in bash. Rows marked (new) come from the
 2026-10-07 decisions. Google rules surveyed: formatting, includes,
 `using namespace`, `typedef`, `thread_local`, exceptions, casts, naming,

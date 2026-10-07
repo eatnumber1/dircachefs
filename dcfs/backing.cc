@@ -79,6 +79,28 @@ std::string ProcFdPath(int fd) {
 uid_t FsUid() { return syscalls::setfsuid(static_cast<uid_t>(-1)); }
 gid_t FsGid() { return syscalls::setfsgid(static_cast<gid_t>(-1)); }
 
+// readlinkat(2) into a buffer that doubles until the target fits (at most
+// PATH_MAX*4: a longer target is ENAMETOOLONG, not silently truncated).
+absl::StatusOr<std::string> ReadLinkAt(int dirfd, std::string_view path) {
+  std::string result;
+  size_t bufsize = 256;
+  while (true) {
+    result.resize(bufsize);
+    ABSL_ASSIGN_OR_RETURN(
+        size_t nbytes,
+        syscalls::readlinkat(dirfd, path, result.data(), result.size()));
+    if (nbytes < bufsize) {
+      result.resize(nbytes);
+      return result;
+    }
+    if (bufsize >= PATH_MAX * 4) {
+      return dcfs::ErrnoToStatus(
+          ENAMETOOLONG, "readlinkat: target longer than PATH_MAX*4");
+    }
+    bufsize *= 2;
+  }
+}
+
 // FS_IOC_GETVERSION: the inode generation of the file `fd` (not O_PATH)
 // refers to.
 absl::StatusOr<uint32_t> GetInodeGeneration(int fd) {
@@ -254,7 +276,7 @@ void RestoreRoot(const SavedGroups &groups) {
 absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
   RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
-  ABSL_ASSIGN_OR_RETURN(SavedGroups saved, syscalls::getgroups());
+  ABSL_ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
   absl::Status status;
   syscalls::setfsgid(caller.gid);
   if (FsGid() != caller.gid) {
@@ -488,7 +510,7 @@ absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
   ABSL_ASSIGN_OR_RETURN(record.handle, FileHandle::FromFd(fd, device));
   ABSL_ASSIGN_OR_RETURN(record.backing_gen, ReadGeneration(fd, stx.stx_mode));
   if (S_ISLNK(stx.stx_mode)) {
-    ABSL_ASSIGN_OR_RETURN(record.symlink_target, syscalls::readlinkat(fd, ""));
+    ABSL_ASSIGN_OR_RETURN(record.symlink_target, ReadLinkAt(fd, ""));
   }
   ABSL_ASSIGN_OR_RETURN(record.xattrs, XattrsOf(fd));
   return record;
@@ -902,7 +924,7 @@ absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   // An empty path makes readlinkat read the O_PATH symlink fd itself.
-  return syscalls::readlinkat(*fd, "");
+  return ReadLinkAt(*fd, "");
 }
 
 absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
@@ -1687,13 +1709,27 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrsFd(
 }
 
 absl::StatusOr<std::string> ReadSymlinkFd(int fd) {
-  return syscalls::readlinkat(fd, "");
+  return ReadLinkAt(fd, "");
 }
 
 absl::StatusOr<FileDescriptor> ReopenFd(int fd, int flags) {
   // Opens /proc/self/fd/<fd> with the given flags (| O_CLOEXEC). This is
   // needed because xattr/ioctl syscalls reject O_PATH fds.
   return syscalls::openat(AT_FDCWD, ProcFdPath(fd), flags);
+}
+
+absl::StatusOr<std::vector<gid_t>> GetGroups() {
+  while (true) {
+    ABSL_ASSIGN_OR_RETURN(int n, syscalls::getgroups(0, nullptr));
+    std::vector<gid_t> groups(n);
+    absl::StatusOr<int> got = syscalls::getgroups(n, groups.data());
+    // The list grew in between (another thread cannot change ours, but be
+    // exact anyway): ask again.
+    if (!got.ok() && ErrnoOf(got.status()) == EINVAL) continue;
+    ABSL_RETURN_IF_ERROR(got.status());
+    groups.resize(*got);
+    return groups;
+  }
 }
 
 absl::Status FsyncDirFd(int fd, bool datasync) {

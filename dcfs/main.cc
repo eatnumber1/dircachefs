@@ -244,11 +244,12 @@ void InstallFlagsUsageConfig() {
 // only means fewer held descriptors (those files' FORGET then marks their
 // attributes unknown instead), so it is logged, not fatal.
 void RaiseFileLimit() {
-  struct rlimit limit {};
-  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) {
-    LOG(WARNING) << "getrlimit(RLIMIT_NOFILE): " << std::strerror(errno);
+  absl::StatusOr<struct rlimit> current = syscalls::getrlimit(RLIMIT_NOFILE);
+  if (!current.ok()) {
+    LOG(WARNING) << current.status();
     return;
   }
+  const struct rlimit limit = *current;
   rlim_t want = limit.rlim_max;
   if (absl::StatusOr<std::string> value = ReadProcValue("/proc/sys/fs/nr_open");
       value.ok()) {
@@ -260,21 +261,21 @@ void RaiseFileLimit() {
     LOG(WARNING) << "fs.nr_open: " << value.status();
   }
   struct rlimit raised = {.rlim_cur = want, .rlim_max = want};
-  if (setrlimit(RLIMIT_NOFILE, &raised) == 0) return;
-  const int err = errno;
+  absl::Status first = syscalls::setrlimit(RLIMIT_NOFILE, raised);
+  if (first.ok()) return;
   // Not to fs.nr_open (no CAP_SYS_RESOURCE, as in a container): as far
   // as the hard limit allows, and say so either way, since the held
   // descriptors' cap (DirCacheFS::DefaultMaxHeldFds) follows from it.
   raised = {.rlim_cur = limit.rlim_max, .rlim_max = limit.rlim_max};
-  if (setrlimit(RLIMIT_NOFILE, &raised) == 0) {
+  absl::Status second = syscalls::setrlimit(RLIMIT_NOFILE, raised);
+  if (second.ok()) {
     LOG(WARNING) << "could not raise RLIMIT_NOFILE to fs.nr_open (" << want
-                 << "): " << std::strerror(err) << "; raised the soft limit "
+                 << "): " << first << "; raised the soft limit "
                  << "to the hard limit, " << limit.rlim_max;
   } else {
     LOG(WARNING) << "could not raise RLIMIT_NOFILE (soft " << limit.rlim_cur
                  << ", hard " << limit.rlim_max << ") to fs.nr_open (" << want
-                 << "): " << std::strerror(err) << ", nor to the hard limit: "
-                 << std::strerror(errno);
+                 << "): " << first << ", nor to the hard limit: " << second;
   }
 }
 
@@ -403,15 +404,15 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   {
     ABSL_ASSIGN_OR_RETURN(db_lock,
                           OpenHardenedCacheFile(cache_db, /*create=*/true, backing_root));
-    if (::flock(*db_lock, LOCK_EX | LOCK_NB) == -1) {
-      if (errno == EWOULDBLOCK) {
+    if (absl::Status locked = syscalls::flock(*db_lock, LOCK_EX | LOCK_NB);
+        !locked.ok()) {
+      if (StatusToErrno(locked) == EWOULDBLOCK) {
         return FailedPreconditionErrorBuilder()
                << "cache database " << cache_db
                << " is in use by another dcfs process; two daemons cannot "
                   "share one cache database";
       }
-      return dcfs::ErrnoToStatus(errno,
-                                 absl::StrCat("flock --cache_db=", cache_db));
+      return absl::StatusBuilder(locked) << "--cache_db=" << cache_db;
     }
   }
 

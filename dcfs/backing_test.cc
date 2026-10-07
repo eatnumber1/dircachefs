@@ -12,6 +12,8 @@
 #include <cerrno>
 #include <cstdint>
 #include <random>
+#include <cstdio>
+#include <thread>
 #include <span>
 #include <cstdlib>
 #include <cstring>
@@ -501,6 +503,15 @@ TEST_F(BackingTest, ReadXattrsFdReadsTheObjectNotTheSymlinkTarget) {
   FileDescriptor link(link_fd);
   ASSERT_OK_AND_ASSIGN(auto link_xattrs, ReadXattrsFd(*link));
   EXPECT_THAT(link_xattrs, ::testing::IsEmpty());
+}
+
+TEST_F(BackingTest, ReadSymlinkFdGrowsItsBufferForALongTarget) {
+  const std::string long_target(500, 'a');  // past the first 256 bytes
+  ASSERT_EQ(::symlink(long_target.c_str(), Path("long_link").c_str()), 0);
+  int fd = ::open(Path("long_link").c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
+  ASSERT_GE(fd, 0);
+  FileDescriptor link(fd);
+  EXPECT_THAT(ReadSymlinkFd(*link), IsOkAndHolds(long_target));
 }
 
 TEST_F(BackingTest, StartupPurgeForgetsAFilesystemNoLongerMounted) {
@@ -1116,11 +1127,11 @@ FileDescriptor MakeParent(const std::string &path, mode_t mode, gid_t gid) {
 void ExpectRootAgain(const std::vector<gid_t> &groups) {
   EXPECT_EQ(syscalls::setfsuid(static_cast<uid_t>(-1)), 0u);
   EXPECT_EQ(syscalls::setfsgid(static_cast<gid_t>(-1)), 0u);
-  EXPECT_THAT(syscalls::getgroups(), IsOkAndHolds(groups));
+  EXPECT_THAT(GetGroups(), IsOkAndHolds(groups));
 }
 
 TEST_F(BackingTest, CreateFamilyRunsAsTheCaller) {
-  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, GetGroups());
   FileDescriptor parent = MakeParent(Path("pub"), 0777, 0);
   const Credentials alice{.uid = 1000, .gid = 1000, .groups = {1000}};
 
@@ -1137,7 +1148,7 @@ TEST_F(BackingTest, CreateFamilyRunsAsTheCaller) {
 }
 
 TEST_F(BackingTest, CallerGetsNoFilesystemCapabilities) {
-  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, GetGroups());
   // Root's 0755 directory: root may create in it, the caller may not (no
   // CAP_DAC_OVERRIDE while fsuid is not 0).
   FileDescriptor parent = MakeParent(Path("rootonly"), 0755, 0);
@@ -1153,7 +1164,7 @@ TEST_F(BackingTest, CallerGetsNoFilesystemCapabilities) {
 }
 
 TEST_F(BackingTest, CallerSupplementaryGroupsApply) {
-  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, GetGroups());
   FileDescriptor parent = MakeParent(Path("grp"), 0770, 2000);
   const Credentials member{.uid = 1000, .gid = 1000, .groups = {1000, 2000}};
   const Credentials outsider{.uid = 1000, .gid = 1000, .groups = {1000}};
@@ -1173,7 +1184,7 @@ TEST_F(BackingTest, SetgidParentGroupIsInherited) {
 }
 
 TEST_F(BackingTest, CallerIdentityThatDoesNotTakeIsRefused) {
-  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, GetGroups());
   FileDescriptor parent = MakeParent(Path("pub"), 0777, 0);
   // -1 is what the kernel would send for an id with no mapping; setfsuid
   // and setfsgid silently ignore it, so only reading back catches it.
@@ -1189,7 +1200,7 @@ TEST_F(BackingTest, CallerIdentityThatDoesNotTakeIsRefused) {
 }
 
 TEST_F(BackingTest, UnlinkAndRenameHonorTheStickyBit) {
-  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, syscalls::getgroups());
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, GetGroups());
   FileDescriptor sticky = MakeParent(Path("sticky"), 01777, 0);
   const Credentials alice{.uid = 1000, .gid = 1000, .groups = {}};
   const Credentials bob{.uid = 1001, .gid = 1001, .groups = {}};
@@ -1202,6 +1213,47 @@ TEST_F(BackingTest, UnlinkAndRenameHonorTheStickyBit) {
   EXPECT_THAT(RenameAt(ctx_, bob, dir, "bf", dir, "bf2", 0), IsOk());
   EXPECT_THAT(UnlinkAt(ctx_, bob, dir, "bf2", 0), IsOk());
   ExpectRootAgain(groups);
+}
+
+// The raw setgroups system call changes only the calling thread's groups
+// (glibc's setgroups() would change every thread's), and setfsuid/setfsgid
+// report the previous value, with -1 reading the current one back.
+TEST(BackingCredentialsTest, SetgroupsIsPerThread) {
+  absl::StatusOr<std::vector<gid_t>> original = GetGroups();
+  ASSERT_THAT(original, IsOk());
+  std::vector<gid_t> in_thread;
+  std::vector<gid_t> in_main_meanwhile;
+  std::thread([&] {
+    const gid_t groups[] = {4242, 4243};
+    ASSERT_THAT(syscalls::setgroups(groups), IsOk());
+    absl::StatusOr<std::vector<gid_t>> mine = GetGroups();
+    ASSERT_THAT(mine, IsOk());
+    in_thread = *mine;
+    // Read the main thread's groups from here, while this thread still
+    // has its own: /proc/self/task/<main tid>/status is not this thread's.
+    std::string status_path =
+        "/proc/self/task/" + std::to_string(::getpid()) + "/status";
+    FILE *f = std::fopen(status_path.c_str(), "r");
+    ASSERT_NE(f, nullptr);
+    char line[512];
+    while (std::fgets(line, sizeof(line), f) != nullptr) {
+      if (std::strncmp(line, "Groups:", 7) != 0) continue;
+      char *p = line + 7;
+      char *end;
+      for (unsigned long g = std::strtoul(p, &end, 10); end != p;
+           g = std::strtoul(p, &end, 10)) {
+        in_main_meanwhile.push_back(static_cast<gid_t>(g));
+        p = end;
+      }
+    }
+    std::fclose(f);
+  }).join();
+  EXPECT_EQ(in_thread, (std::vector<gid_t>{4242, 4243}));
+  std::vector<gid_t> sorted_original = *original;
+  std::sort(sorted_original.begin(), sorted_original.end());
+  std::sort(in_main_meanwhile.begin(), in_main_meanwhile.end());
+  EXPECT_EQ(in_main_meanwhile, sorted_original);
+  EXPECT_THAT(GetGroups(), absl_testing::IsOkAndHolds(*original));
 }
 
 }  // namespace
