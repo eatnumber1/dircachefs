@@ -70,3 +70,21 @@ assertions).
 
 Order: 6.1 with the CI phase (CI needs the tiers); 6.2 continuously,
 first pass right after 6.1.
+
+## 6.4 Test speed from the first GitHub runs (2026-10-08)
+
+Slowest (plain / ASan): formal:large_test 634/634 s, idle_long 624/627,
+formal:nolock_test 506/506, destroy_test 500/224, bench_full 299/350,
+nfs 219, pjdfstest shards 100-200 each. Per push: fast ~4 min, presubmit
+~7, full = plain 35 + ASan ~40 + UBSan ~60-90 sequential (7.4b splits
+them), coverage ~40 and reproducible ~12 in parallel.
+- 6.4a Host-only tests (formal TLC, man, sbom, tools, repo shape) rerun
+  under every sanitizer and coverage config because the config hash
+  changes: mark them `target_compatible_with` incompatible under
+  asan/ubsan/coverage (the banned_symbols pattern): -19 min per such job.
+- 6.4b destroy_test writes 100k files at ~5 ms per create on the runner
+  (489 s): 20k keeps every assertion (shutdown reads nothing, exact held
+  counts) and the measurable shutdown cost; the 5 ms per create is the
+  product finding (2 durable fsyncs per CREATE): 26.4b's create slope
+  test decides whether fsyncs are per create or per sync point.
+- 6.4c TLC worker count follows the runner (4 vCPUs; today 2 workers).

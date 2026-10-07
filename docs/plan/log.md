@@ -1367,3 +1367,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-08): default_permissions required: Init() verifies and refuses; --fuse_opt naming
   it rejected; Access handler kept fail-closed (EACCES + error log; ENOSYS would mean ALLOW) with
   a forged-request test. Joins the Phase 8 cleanup step (after Phase 22 merges: same files).
+- Test-speed review from the GitHub runs (phase 6 file, 6.4): host-only tests rerun under every
+  sanitizer/coverage config (TLC 19 min each time) -> incompatible under those configs; destroy
+  _test 100k -> 20k (5 ms per create on the runner = 2 durable fsyncs per CREATE: a product
+  finding for 26.4b's create slope test); TLC workers = runner CPUs. For the next free lane.

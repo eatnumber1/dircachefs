@@ -91,7 +91,10 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
   class, not only readdir: create N, unlink N, rename N, mkdir N, cold
   lookup N, setattr N, each bounded a*N + b in SQLite steps, transactions
   and backing syscalls at N = 100 and 1000 in the harness (the create
-  path, 119 steps / 10 transactions / 2 fsyncs, is the first target).
+  path, 119 steps / 10 transactions / 2 fsyncs, is the first target: the
+  slope test must count fsyncs per create in ONE directory across N
+  creates; destroy_test's 5 ms per create on the runner says they are per
+  create, which the design's durable phase 1 may or may not require).
   Not adopted: allocations per operation (maybe later; cheap), recovery
   and shutdown budgets (ad hoc measurements suffice), workload budgets
   over realistic sequences (no).
