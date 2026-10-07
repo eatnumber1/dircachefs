@@ -637,6 +637,21 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Step 22.1: the cancellation inventory's measurements: each request path
+# that waits on the backing filesystem, timed with every backing I/O
+# delayed (dm-delay); prints the numbers, passes if every step ran.
+qemu_test(
+    name = "cancel_inventory_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "320M"),
+    ],
+    guest_script = "guest/cancel_inventory.sh",
+    modules = ["dm_delay"],
+    size = "enormous",
+    timeout = "eternal",
+)
+
 qemu_test(
     name = "bench_full_test",
     disks = [
