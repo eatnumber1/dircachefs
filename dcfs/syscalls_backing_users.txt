@@ -28,6 +28,7 @@
 //dcfs:backing_test_bin
 //dcfs:device_id_fault_test_bin
 //dcfs:device_id_test_bin
+//dcfs:dir_cache_fs_crash_during_recovery_test_bin
 //dcfs:dir_cache_fs_fault_create_syscall_before_phase1_test_bin
 //dcfs:dir_cache_fs_fault_sites_test_bin
 //dcfs:dir_cache_fs_slope_test_bin
