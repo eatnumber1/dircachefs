@@ -63,8 +63,10 @@ process (its waves and file ownership table) is in `history.md`.
    - the dcfs invariants: every cache/backing function takes `Context&`;
      no paths after startup (objects are reached by fd or handle; Phase 13
      opens names relative to a parent fd, which is still not a path); no
-     database transaction spans a backing syscall; only `backing.cc`
-     calls `syscalls::`; no globals or `thread_local`; every record that
+     database transaction spans a backing syscall; every syscall that can
+     reach the backing filesystem (a backing fd, handle or name) is made
+     in `backing.cc` (process-local syscalls may use `syscalls::` anywhere;
+     russ, 2026-10-07); no globals or `thread_local`; every record that
      mirrors the backing filesystem follows the present/absent/unknown
      rule;
    - coverage of the new code (from Phase 7) and the TLA+ model updated if
