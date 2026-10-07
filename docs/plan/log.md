@@ -996,3 +996,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   list in the merge note, ioctl request type unsigned long, source-location assertion, doc claims.
 - Dispatched 26.8 banned symbols (nm over main_static), 26.9 dependency golden (genquery, shared
   with the SBOM), 26.13 repository-shape tests + CI commit-subject check (lane-3, implementer).
+- 26.8/26.9/26.13 merged (lane-3): banned_symbols_test (nm -u over the linked objects via an
+  aspect; deny list with per-symbol rules; library-origin allows with reasons; first-party
+  strerror at main.cc:246-274, dir_cache_fs.cc:113, fuse_request.cc:196 allowed as known
+  violations -> 25.1c; mounts_below.cc:63 realpath allowed as startup-only); shipped_deps_test
+  (golden dcfs/shipped_deps.txt = abseil, gloop, libfuse, liburing, numactl, sqlite3; reuses the
+  //dcfs:linked_deps genquery the SBOM uses); repo_shape_test (third_party READMEs, guest scripts
+  referenced, DISABLED_ names in README Limitations; tagged external: Bazel cannot declare "every
+  directory" as an input) + .github/ci/commit_subjects.sh in the fast job. Tree fixes: pjdfstest
+  README, two DISABLED_ names added to README Limitations. Each with a self-check. fast 117/117.
