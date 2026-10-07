@@ -877,3 +877,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `testutil ext4-tune-casefold`, `DISABLED_casefold-tune-online-oops` under the `disabled` helper,
   with an explicit per-test `kernel_failure = "expected"` opt-in so the harness's oops rule stays
   strict everywhere else.
+- DISABLED reproducer merged (3d4c32f): casefold_tune_oops_test (small, own guest, no dcfs) reports
+  `DISABLED_casefold-tune-online-oops would FAIL (kernel: BUG: kernel NULL pointer dereference,
+  address: 0000000000000018)` on 6.18.55; `kernel_failure = "expected"` opt-in, refused for unit
+  mode or any other script; an oops is tolerated only if the guest itself reported it as would
+  FAIL; warnings/panics still fail. Verdict test +8 cases. fast 85/85.
