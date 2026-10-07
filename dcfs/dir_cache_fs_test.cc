@@ -1968,8 +1968,8 @@ TEST_F(RelatimeTest, NoatimeBackingNeverUpdates) {
 // Today's numbers (steps per entry, and per listing), measured with
 // RecordProperty below; lowering them after a reduction is welcome.
 // (In tenths: steps * 10 <= per_entry * n + fixed.)
-constexpr int64_t kReaddirStepsPerEntry = 14;      // measured 1.17 to 1.30
-constexpr int64_t kReaddirplusStepsPerEntry = 14;  // measured 1.26 to 1.40
+constexpr int64_t kReaddirStepsPerEntry = 13;      // measured 1.12 to 1.28
+constexpr int64_t kReaddirplusStepsPerEntry = 13;  // measured 1.22 to 1.31
 constexpr int64_t kReaddirStepsFixed = 100;
 
 // --- readdir work counting (step N4) ----------------------------------------

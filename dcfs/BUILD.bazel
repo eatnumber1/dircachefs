@@ -917,6 +917,7 @@ cc_library(
       ":ret_check",
       ":sqlite",
       ":status",
+      "@absl//absl/cleanup",
       "@absl//absl/container:flat_hash_set",
       "@absl//absl/functional:function_ref",
       "@absl//absl/log",

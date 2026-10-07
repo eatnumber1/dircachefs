@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
 #include "absl/log/log.h"
@@ -70,18 +71,20 @@ absl::StatusOr<int64_t> Execute(Context &ctx, std::string_view sql,
   return ctx.db.Changes();
 }
 
-// Runs `stmt`, which must produce at most one row, calling `fn` on that row
-// if there is one. Returns whether there was. Always leaves `stmt` reset,
-// so no read cursor outlives the call.
+// Runs `stmt`, a lookup that cannot produce more than one row (a primary or
+// unique key, an aggregate, or LIMIT 1), calling `fn` on that row if there
+// is one. Returns whether there was. Stops after the first row: no step to
+// find the end of a result that cannot have more (it cost a statement step
+// per lookup). A query that could return several and must check uses
+// ForEachRow (ParentOf: LIMIT 2). Always leaves `stmt` reset, so no read
+// cursor outlives the call.
 absl::StatusOr<bool> ReadOne(Statement &stmt,
                              absl::FunctionRef<absl::Status(Statement &)> fn) {
-  bool found = false;
-  ABSL_RETURN_IF_ERROR(stmt.ForEachRow([&](Statement &row) -> absl::Status {
-    RET_CHECK(!found) << "expected at most one row from: " << row.Sql();
-    found = true;
-    return fn(row);
-  }));
-  return found;
+  absl::Cleanup reset_when_done = [&stmt] { stmt.Reset().IgnoreError(); };
+  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt.Step());
+  if (!has_row) return false;
+  ABSL_RETURN_IF_ERROR(fn(stmt));
+  return true;
 }
 
 absl::Status NoInode(InodeId id) {

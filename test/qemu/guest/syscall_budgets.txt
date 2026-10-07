@@ -10,13 +10,13 @@
 cold-lookup backing 11
 cold-lookup procfd 2
 cold-lookup sync 0
-cold-lookup sql_stmts 51
+cold-lookup sql_stmts 37
 cold-lookup sql_txns 1
 
 warm-lookup backing 0
 warm-lookup procfd 0
 warm-lookup sync 0
-warm-lookup sql_stmts 4
+warm-lookup sql_stmts 2
 warm-lookup sql_txns 0
 
 cached-stat backing 0
@@ -28,53 +28,53 @@ cached-stat sql_txns 0
 warm-readdir backing 0
 warm-readdir procfd 0
 warm-readdir sync 0
-warm-readdir sql_stmts 21
+warm-readdir sql_stmts 15
 warm-readdir sql_txns 0
 
 create backing 21
 create procfd 5
 create sync 2
-create sql_stmts 136
+create sql_stmts 119
 create sql_txns 10
 
 forget-written backing 2
 forget-written procfd 0
 forget-written sync 0
-forget-written sql_stmts 2
+forget-written sql_stmts 1
 forget-written sql_txns 0
 
 unlink backing 12
 unlink procfd 1
 unlink sync 1
-unlink sql_stmts 52
+unlink sql_stmts 41
 unlink sql_txns 4
 
 mkdir backing 10
 mkdir procfd 2
 mkdir sync 0
-mkdir sql_stmts 63
+mkdir sql_stmts 51
 mkdir sql_txns 3
 
 rename backing 14
 rename procfd 1
 rename sync 1
-rename sql_stmts 82
+rename sql_stmts 66
 rename sql_txns 4
 
 write backing 8
 write procfd 4
 write sync 1
-write sql_stmts 84
+write sql_stmts 66
 write sql_txns 6
 
 fsync backing 11
 fsync procfd 3
 fsync sync 2
-fsync sql_stmts 86
+fsync sql_stmts 76
 fsync sql_txns 8
 
 chmod backing 19
 chmod procfd 5
 chmod sync 1
-chmod sql_stmts 47
+chmod sql_stmts 35
 chmod sql_txns 3
