@@ -114,5 +114,3 @@ allow <runtime> _ZN4dcfs8syscalls13clock_gettimeEi | the wrapper is linked with 
 allow dcfs/_objs/syscalls/* clock_gettime | the syscalls::clock_gettime wrapper itself, for the tests
 allow <runtime> execve | execle of the libfuse fusermount3 fallback
 allow <runtime> execvpe | posix_spawnp of the libfuse fusermount3 fallback
-allow <runtime> __fprintf_chk | glibc's own archive code (our objects build with -U_FORTIFY_SOURCE)
-allow <runtime> __sprintf_chk | libfuse's and libnuma's fortified sprintf
