@@ -1262,3 +1262,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-08): auto-mode denials resolved; libfuse's io_uring stays (needed later; libnuma +
   liburing remain shipped with their banned-symbol allows); coverage baseline to be looked at
   when convenient; a push from f9103b3 is reasonable (first GitHub run on the clang toolchain).
+- 12.4b merged (7136ac2, 5 commits): schema v5 (cache_state.last_stub_id, inodes_unlinked
+  partial index); refused dentries go unknown on a mere forget (same stub nodeid + generation
+  across it); backing::Startup() = StartRun (ListDirty before RecoverDirty) -> InitRoot ->
+  StartupPurge -> ProbeRecoveredRows, shared by main.cc and the harness (the first version ran
+  the probe before the mount fds existed: caught in review); sweep at every start (query-plan
+  test); formal/findings empty, three new known-bug variants; `probe` lifetime trace line.
+  presubmit+formal 209 pass + 1 skip, asan 35/35. Phase 22 (cancellation) dispatched to lane-2.
