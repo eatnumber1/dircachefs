@@ -1207,3 +1207,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   thread-safety-analysis). Cache-less plain and asan builds: zero warnings from our code. fast
   147 pass + 1 skip, presubmit 216 pass + 1 skip. Nit left: Bazel warns `platforms` 1.1.0 vs the
   root's 1.0.0 (7.1's bazel_dep: bump to 1.1.0 in the next MODULE.bazel touch).
+- 7.2 + 26.12 done (lane-4, step-7.2 / step-26.12 @ 2a5fb96): native `bazel coverage` with the
+  toolchain's coverage feature, instrumentation filter ^//(dcfs|bench|tools), combined lcov;
+  guest profiles via LLVM_PROFILE_FILE=/cov/%m.profraw tarred onto an extra virtio disk (serial
+  at 8 KB/s timed out), cov-lcov.sh -> COVERAGE_DIR; coverage_pipeline_test self-check; CI
+  `coverage` job uploads the lcov (no gate until Phase 8). BASELINE (small+medium tiers): dcfs/*.cc
+  92.0% lines / 72.5% branches; all ours 87.7%; least covered: status.cc 60.7, syscalls_process
+  77.4, sqlite.cc 82.5, device_id.cc 82.8, main.cc 84.7, file_handle.cc 85.4, mounts_below 88.5,
+  syscalls.cc 88.5, dir_cache_fs.cc 90.0, backing.cc 91.5; fuse_ops.cc 30/98 branches. Crash/
+  power/SIGKILL paths produce no profile (documented). 26.12: two builds from different paths and
+  output bases are byte-identical today (toolchain redacts __DATE__/__TIME__, relative paths);
+  gate `bazel run //tools:reproducible_build` (~12 min cold) + repro_compare self-check; CI job.
+  Under review. Needs russ: the baseline above is the one to pick tests from (Phase 8).
