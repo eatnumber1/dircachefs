@@ -61,5 +61,6 @@ a job. No version of any package appears in our tree.
    module list; the full suite green; cold-build time before/after (the
    kernel's 690 s and the tools' ~900 s disappear; downloads ~100 MB).
 Owner: dcfs-investigator for 1-3 (musl wrappers, modules), dcfs-implementer
-for 4-6. Order: after the guest-memory step merges (both touch run-qemu.sh
-and the macros).
+for 4-6. Order: as soon as possible (russ, 2026-10-07: the tests get much
+faster); it runs alongside the guest-memory step and rebases over it
+(both touch run-qemu.sh and the macros).

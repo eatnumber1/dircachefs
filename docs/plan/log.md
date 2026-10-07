@@ -724,3 +724,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   bash) as a documented deviation until Phase 24 can ship bash; shfmt + shellcheck join 7.6.
 - russ (2026-10-07): no `backing` namespace exception; a wrapper class may hold the functions.
   syscalls wrappers keep libc names (`setxattr`), other functions CamelCase (`SetXattr`): no clash.
+- russ (2026-10-07): Alpine moved earlier, ASAP. 24.1-24.3 dispatched to lane-2 (dcfs-investigator,
+  from the spike branch); it rebases over the guest-memory step when that merges. CI: russ pushed
+  (github.com/eatnumber1/dircachefs); first run on 95595f3 in progress (osv green, fast running);
+  an earlier run on 8ed3851 failed in fast and osv (logs need auth; checking the new run instead).

@@ -42,7 +42,7 @@ phase's file; `log.md` says where things stand.
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
 | 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | done 2026-10-07 (model + trace validation, two review rounds; russ to read formal/README.md) |
 | 23 | [Semantics gaps: mmap/FORGET reconcile, removed objects, relatime, O_TMPFILE/copy_file_range/reflinks/ioctls, boundary stubs](phases/23-semantics-gaps.md) | 23.1-23.5 merged 2026-10-07 (reviewed); 23.6 held fd and 23.7 review fixes in progress; reflinks need a kernel FUSE remap op |
-| 24 | [Alpine series pins for the kernel and host tools](phases/24-alpine-series-pins.md) | planned; after the guest-memory step |
+| 24 | [Alpine series pins for the kernel and host tools](phases/24-alpine-series-pins.md) | in progress (russ 2026-10-07: ASAP; started in lane-2 alongside the guest-memory step, rebases over it) |
 | 25 | [Style convergence](phases/25-style-convergence.md) | planned; 25.1 after Phase 23 merges, 25.2 after 25.1; format items in 7.6/7.7 |
 | 22 | [Request cancellation (Ctrl+C, EINTR)](phases/22-cancellation.md) | planned; runs here, after R4, before 13 |
 | 13 | [Connected backing fds](phases/13-connected-backing-fds.md) | planned |
