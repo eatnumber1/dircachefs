@@ -43,6 +43,38 @@ run() {
 		"$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
 }
 
+# guest/init copies only the kernel log's real failures to the serial log as
+# KERNEL-OOPS: lines (which fail the run whatever they say). Hardware-
+# vulnerability advisories printed at boot contain "WARNING:" (AMD runners
+# print them; an Intel box does not) and are not failures. The pattern is
+# taken from guest/init itself.
+INIT=$2
+PATTERN=$(sed -n "s/.*dmesg 2>\/dev\/null | grep -E '\(.*Call Trace:.*\)' |\$/\1/p" "$INIT")
+[ -n "$PATTERN" ] || fail "no kernel-failure pattern found in $INIT"
+dmesg_oops() { printf '%s\n' "$1" | grep -E "$PATTERN" || true; }
+while IFS= read -r line; do
+	[ -z "$(dmesg_oops "$line")" ] || fail "guest/init copies an advisory as a failure: $line"
+done <<'EOF3'
+Speculative Return Stack Overflow: WARNING: See https://kernel.org/doc/html/latest/admin-guide/hw-vuln/srso.html for mitigation options.
+Spectre V2 : WARNING: Unprivileged eBPF is enabled with eIBRS on, data leaks possible via Spectre v2 BHB attacks!
+RETBleed: WARNING: Spectre v2 mitigation leaves CPU vulnerable to RETBleed attacks, data leaks possible!
+MDS: WARNING: Microcode update is needed
+EOF3
+while IFS= read -r line; do
+	[ -n "$(dmesg_oops "$line")" ] || fail "guest/init does not copy a real failure: $line"
+done <<'EOF4'
+[    3.2] WARNING: CPU: 0 PID: 123 at fs/fuse/dir.c:99 fuse_lookup+0x10/0x20
+WARNING: at fs/fuse/dir.c:99 fuse_lookup+0x10/0x20
+[    3.1] ------------[ cut here ]------------
+BUG: kernel NULL pointer dereference, address: 0000000000000000
+Oops: 0000 [#1] SMP NOPTI
+kernel BUG at fs/ext4/inode.c:1234!
+Call Trace:
+Kernel panic - not syncing: VFS
+general protection fault, probably for non-canonical address 0xdead: 0000 [#1] SMP
+EOF4
+echo "PASS: guest/init's dmesg filter skips hw-vuln advisories and keeps real failures"
+
 # A guest that passed: guest/init's MEM line and DCFS-TEST-EXIT=0, around
 # whatever else is in $WORK/extra.
 canned() {

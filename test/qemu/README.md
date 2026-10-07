@@ -314,7 +314,10 @@ A test that outgrows its allowance fails visibly instead of hanging:
 - a kernel oops, `BUG`, `WARNING` or panic fails the run whatever the test's
   checks said (`run-qemu.sh`, step 23.7): the console shows only the worst of
   them at loglevel 3, so `guest/init` copies the matching lines of the
-  kernel log to the end of the serial log as `KERNEL-OOPS: ...` lines;
+  kernel log to the end of the serial log as `KERNEL-OOPS: ...` lines
+  (real warnings only: the hardware-vulnerability advisories some CPUs
+  print at boot, such as AMD's SRSO, contain "WARNING:" and are not
+  failures);
   the one exception is `casefold_tune_oops_test` (`kernel_failure =
   "expected"`, `run-qemu.sh --expect-kernel-failure <its script>`, refused
   for any other script): it reproduces a Linux bug on purpose (below), and

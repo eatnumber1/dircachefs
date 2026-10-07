@@ -183,8 +183,11 @@ mem_report() {
 		head -n 10 | sed 's/^/MEM-OOM: /'
 	# The same for the kernel's own failures: the console shows only an oops
 	# or a BUG, not a WARNING or the call trace (run-qemu.sh fails a run
-	# that has a KERNEL-OOPS: line).
-	dmesg 2>/dev/null | grep -E 'BUG:|Oops|kernel BUG at|WARNING: |Call Trace:|Kernel panic|general protection fault' |
+	# that has a KERNEL-OOPS: line). Only real kernel warnings match
+	# ("WARNING: CPU:", older "WARNING: at ", or the "cut here" marker):
+	# the hardware-vulnerability advisories printed at boot on some CPUs
+	# (AMD: "SRSO: WARNING: See ...") are not failures.
+	dmesg 2>/dev/null | grep -E 'BUG:|Oops|kernel BUG at|WARNING: CPU:|WARNING: at |------------\[ cut here \]------------|Call Trace:|Kernel panic|general protection fault' |
 		head -n 20 | sed 's/^/KERNEL-OOPS: /'
 }
 

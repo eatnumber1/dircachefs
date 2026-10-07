@@ -532,8 +532,14 @@ sh_test(
     name = "run_qemu_verdict_test",
     size = "small",
     srcs = ["run_qemu_verdict_test.sh"],
-    args = ["$(location scripts/run-qemu.sh)"],
-    data = ["scripts/run-qemu.sh"],
+    args = [
+        "$(location scripts/run-qemu.sh)",
+        "$(location guest/init)",
+    ],
+    data = [
+        "guest/init",
+        "scripts/run-qemu.sh",
+    ],
 )
 
 qemu_test(

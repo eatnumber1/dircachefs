@@ -492,7 +492,8 @@ fi
 # start a kernel message (after the console's timestamp, if any), so the
 # same words in a test's output do not match (absl's own userspace "WARNING:
 # All log messages before absl::InitializeLog()..." does not: a kernel warning
-# says "WARNING: CPU:", and any other kernel "WARNING:" arrives as a
+# says "WARNING: CPU:", and the other real kernel warnings (guest/init lists
+# them; hardware-vulnerability advisories are not among them) arrive as a
 # KERNEL-OOPS: line).
 KERNEL_FAIL='^KERNEL-OOPS:|(^|[] ])(BUG:|Oops[: ]|kernel BUG at|WARNING: CPU:|Call Trace:|Kernel panic)'
 # A kernel failure under --expect-kernel-failure (step 23.7): the guest
