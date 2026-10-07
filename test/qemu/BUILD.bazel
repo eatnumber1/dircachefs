@@ -367,6 +367,14 @@ qemu_test_matrix(
 qemu_test(
     name = "destroy_test",
     disks = [("vdb", "ext4", "2G")],
+    # 100,000 written files' dentries and inodes stay pinned (dcfs's held
+    # descriptors, then the test's holder): at 256 MiB the kernel reclaimed
+    # them and the test failed (17,784 held). Measured at 1024: MEM
+    # peak_used=512672 KiB of total=1018448 (2026-10-07); with the kernel's
+    # 29 MiB, 530 + 50% rounds up to 832 (README, "Guest memory"). ASan is
+    # not measured: bench_smoke's 1856 (also 100,000 entries) is a guess.
+    mem = 832,
+    asan_mem = 1856,
     guest_script = "guest/destroy.sh",
     size = "large",
     # Writing 100000 files through dcfs took 530 s of the 542 s run (plain

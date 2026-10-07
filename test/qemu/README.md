@@ -244,6 +244,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | write | 136-153 | 224-248 | 320 | 448 |
 | memory | 197-256 | 279-376 | 448 | 576 |
 | bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |
+| destroy | 501 | not measured | 832 | 1856 (a guess, from bench_smoke) |
 | bench_readdir | 157 | 1432-1509 | 320 | 2304 |
 | bench_full | 569 | over 2001 (killed by the OOM killer at 2048; not measured further) | 896 | 3072 (a guess) |
 
