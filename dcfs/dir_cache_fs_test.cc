@@ -129,6 +129,12 @@ std::function<void()> &SyncfsHook() {
   return *hook;
 }
 
+// The hook the next statx runs (once).
+std::function<void()> &StatxHook() {
+  static auto *hook = new std::function<void()>();
+  return *hook;
+}
+
 // Inode numbers every statx reports differently while set: a backing inode
 // number (the key) is reported as another (the value). For backing inode
 // numbers no supported filesystem hands out (>= 2^63).
@@ -207,6 +213,9 @@ int __real_statx(int dirfd, const char *path, int flags, unsigned int mask,
 int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
                  struct statx *buf) {
   dcfs::NoTransactionAt("statx");
+  if (std::function<void()> hook = std::exchange(dcfs::StatxHook(), {}); hook) {
+    hook();
+  }
   if (int err = std::exchange(dcfs::StatxFailure(), 0); err != 0) {
     errno = err;
     return -1;
@@ -303,8 +312,10 @@ namespace {
 
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
+using ::absl_testing::StatusIs;
 using ::testing::Contains;
 using ::testing::ElementsAre;
+using ::testing::HasSubstr;
 using ::testing::Not;
 using ::testing::UnorderedElementsAre;
 using cache::InodeId;
@@ -429,6 +440,7 @@ class DirCacheFSTest : public ::testing::Test {
     SyncfsHook() = {};
     FakeInodeNumbers().clear();
     StatxFailure() = 0;
+    StatxHook() = {};
     for (const std::string &mount : mounts_below_) {
       syscalls::umount2(mount, MNT_DETACH).IgnoreError();
     }
@@ -4151,6 +4163,104 @@ TEST_F(DirCacheFSTest, InvariantChecksRecountOnlyBelowTheLimit) {
   --DirCacheFSPeer::MutableHeldFds(*fs_);
   EXPECT_THAT(checker_->CheckChanged(ctx_, fs_.get(), {}), IsOk());
 }
+
+// --- 8.2: survivors of the first mutation run (tools/mutation) -----------
+
+// A tmpfile whose create fails after its row was recorded takes the row
+// back (ForgetRemoved). Here the row is already gone by then (invalidated
+// meanwhile): "already gone is fine", the create's own error is replied and
+// the undo reports nothing.
+TEST_F(DirCacheFSTest, TmpfileUndoToleratesARowThatIsAlreadyGone) {
+  Start();
+  // As TmpfileUndoForgetsItsRow: the statx after RecordTmpfile's probe is the
+  // reply's attribute refresh, which fails; just before it the row goes.
+  NameToHandleHook() = [&] {
+    StatxHook() = [&] {
+      ASSERT_THAT(db_.Exec("DELETE FROM inodes WHERE id <> 1"), IsOk());
+      StatxFailure() = EIO;
+    };
+  };
+  WarningCapture capture;
+  Created tmp = Tmpfile(kRootInode, O_RDWR);
+  EXPECT_EQ(tmp.reply.error, -EIO);
+  // (The create's own error is logged too, at ERROR, when replied.)
+  EXPECT_THAT(capture.lines, Not(Contains(HasSubstr("Tmpfile undo"))))
+      << absl::StrJoin(capture.lines, "\n");
+}
+
+// The other side: a row that cannot be deleted (here by a trigger) is
+// reported at WARNING, once, and the RELEASE still replies 0 (the kernel
+// ignores its errors); the row stays for the next start's sweep.
+TEST_F(DirCacheFSTest, ReleaseOfAnUnlinkedFileWhoseRowCannotBeDeletedWarns) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_delete BEFORE DELETE ON inodes "
+                       "BEGIN SELECT RAISE(ABORT, 'no deletes'); END"),
+              IsOk());
+
+  WarningCapture capture;
+  EXPECT_EQ(Release(f, fh).error, 0);
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_delete"), IsOk());
+  EXPECT_THAT(capture.lines,
+              ElementsAre(HasSubstr("Release: could not delete the row of "
+                                    "unlinked inode")));
+  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());  // Left for next time.
+  // Leave the cache as the checker expects it.
+  ASSERT_THAT(cache::DeleteInode(ctx_, f), IsOk());
+}
+
+// A copy_file_range's mutation ends after its backing copy and before its
+// phase-3 refreshes, which run as ordinary fills (a fill is refused while a
+// mutation of the inode is in flight): at the refresh's first backing call
+// nothing is in flight.
+TEST_F(DirCacheFSTest, CopyFileRangeEndsItsMutationBeforeItsRefreshes) {
+  WriteFile(Path("src"));
+  AppendToFile(Path("src"), "0123456789");
+  WriteFile(Path("dst"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  ASSERT_OK_AND_ASSIGN(InodeId dst, Id("dst"));
+  auto [in, in_fh] = Open(src, O_RDONLY);
+  auto [out, out_fh] = Open(dst, O_WRONLY);
+  ASSERT_EQ(in.error, 0);
+  ASSERT_EQ(out.error, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+
+  // Phase 1 and the backing copy make no statx: the first is the refresh.
+  std::optional<size_t> in_flight;
+  StatxHook() = [&] { in_flight = ctx_.fills.inflight.size(); };
+  EXPECT_EQ(CopyFileRange(src, in_fh, dst, out_fh, 100), 10);
+  ASSERT_TRUE(in_flight.has_value()) << "the hook did not run";
+  EXPECT_EQ(*in_flight, 0u) << "the copy's mutation was still in flight when "
+                               "its phase-3 refresh began";
+  EXPECT_EQ(Release(dst, out_fh).error, 0);
+  EXPECT_EQ(Release(src, in_fh).error, 0);
+}
+
+// Trace validation of a copy_file_range (a missing End shows in the trace:
+// //dcfs:trace_fault_skip_copy_file_range_end_test).
+TEST_F(DirCacheFSTest, TraceScenarioCopyFileRange) {
+  WriteFile(Path("src"));
+  AppendToFile(Path("src"), "0123456789");
+  WriteFile(Path("dst"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  ASSERT_OK_AND_ASSIGN(InodeId dst, Id("dst"));
+  auto [in, in_fh] = Open(src, O_RDONLY);
+  auto [out, out_fh] = Open(dst, O_WRONLY);
+  ASSERT_EQ(in.error, 0);
+  ASSERT_EQ(out.error, 0);
+
+  StartTrace();
+  EXPECT_EQ(CopyFileRange(src, in_fh, dst, out_fh, 100), 10);
+  EXPECT_EQ(Release(dst, out_fh).error, 0);
+  EXPECT_EQ(Release(src, in_fh).error, 0);
+}
+
 
 // The backstop under the hooks: a backing syscall made where no hook was
 // called (here backing::StatFd, a descriptor-only helper whose callers

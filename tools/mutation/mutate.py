@@ -392,6 +392,10 @@ def run(args):
             r = dict(m, status=status, seconds=round(time.time() - t, 1), killer=killer)
             if status == "error":
                 r["tail"] = tail[-1500:]
+            if args.show_output and status == "killed":
+                failing = [l for l in tail.splitlines() if re.search(
+                    r"\[  FAILED  \]|Failure|Expected|Actual|Value of|FAIL|failed", l)]
+                print("\n".join("    | " + l[:200] for l in failing[:12]), file=sys.stderr)
             results.append(r)
             print("[%d/%d] mutant %d %s:%d %s: %s (%.0fs)%s" % (
                 i, len(mutants), m["id"], m["file"], m["line"], m["op"], status,
@@ -429,6 +433,8 @@ def main():
     r.add_argument("--seed", type=int, default=1)
     r.add_argument("--only", default="")
     r.add_argument("--timeout", type=int, default=1800)
+    r.add_argument("--show-output", action="store_true",
+                   help="print the failing lines of the test that killed a mutant")
     r.add_argument("--killers", default="--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test")
     a = ap.parse_args()
     if a.cmd == "generate":
