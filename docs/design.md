@@ -1094,10 +1094,12 @@ limits:
   inode cache keeps (the same bound as `lookups_`), up to a cap
   (`Options::max_held_fds`, review M-1). `main.cc` raises `RLIMIT_NOFILE`
   to `fs.nr_open` at startup, and the cap defaults to what the soft limit
-  leaves after a reserve of 64Ki descriptors or half the limit, whichever
-  reserve is larger: 524,288 at the default `fs.nr_open` of 1,048,576, and
-  none if the limit could not be raised past 64Ki (without
-  `CAP_SYS_RESOURCE`, from the usual 1,024). The reserve is for what requests open (shared
+  leaves after a reserve of half the limit, at least 16Ki and at most 64Ki
+  descriptors: 983,040 at the default `fs.nr_open` of 1,048,576, 32,768 at
+  a container's 65,536, and none at 16Ki or less (the usual 1,024, when
+  the limit cannot be raised without `CAP_SYS_RESOURCE`). `main.cc` warns
+  when the raise to `fs.nr_open` fails, and dcfs warns at startup when the
+  cap is 0, since the workaround is then off. The reserve is for what requests open (shared
   backing descriptors, removed objects' holds, SQLite's files): without a
   cap, enough cached written files would make every one of them fail with
   `EMFILE`. A file written beyond the cap holds none, and neither does one

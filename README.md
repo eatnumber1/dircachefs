@@ -574,10 +574,10 @@ recovery protocol, concurrency, and the test strategy.
   finally lets go of its inode (which cannot happen before the mapping is
   gone) and at unmount, through a descriptor it keeps on each such file
   until then, so that costs no disk access (dcfs raises its open-file limit
-  at startup for these, and holds at most half of it, leaving at least
-  65,536 for everything else; past that, or if the limit cannot be raised
-  from the usual 1,024, the re-read waits for the next access and reads the
-  disk). Until then the file's cached mtime and ctime stay
+  at startup for these, and leaves half of it, at least 16,384 and at most
+  65,536, for everything else; past that, or if the limit cannot be raised
+  from the usual 1,024 (dcfs warns at startup then), the re-read waits for
+  the next access and reads the disk). Until then the file's cached mtime and ctime stay
   as they were at `close()`, and NFS clients, which detect changes through
   ctime, may serve stale data. A mapping that is still writing when dcfs
   is unmounted keeps writing to the backing file afterwards, and the next

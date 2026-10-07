@@ -64,11 +64,17 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/log_severity.h"
+#include "absl/log/log_entry.h"
+#include "absl/log/log_sink.h"
+#include "absl/log/log_sink_registry.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
 #include "dcfs/context.h"
@@ -2190,12 +2196,56 @@ TEST_F(DirCacheFSTest, HeldDescriptorsStopAtTheCap) {
   EXPECT_EQ(refreshed.st.st_size, 6);
 }
 
-TEST(DefaultMaxHeldFdsTest, LeavesTheLargerReserve) {
+// The reserve is half the limit, but at least 16Ki and at most 64Ki: a
+// container's 64Ki limit still holds half of it.
+TEST(DefaultMaxHeldFdsTest, LeavesAReserve) {
   EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(1024), 0u);
-  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(65536), 0u);
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(16384), 0u);
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(20000), 3616u);
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(65536), 32768u);
   EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(131072), 65536u);
-  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(200000), 100000u);
-  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(1048576), 524288u);
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(1048576), 983040u);
+}
+
+// Collects the log lines at WARNING and above while it lives.
+class WarningCapture : public absl::LogSink {
+ public:
+  WarningCapture() { absl::AddLogSink(this); }
+  ~WarningCapture() override { absl::RemoveLogSink(this); }
+  void Send(const absl::LogEntry &entry) override {
+    if (entry.log_severity() >= absl::LogSeverity::kWarning) {
+      lines.emplace_back(entry.text_message());
+    }
+  }
+  std::vector<std::string> lines;
+};
+
+// Holding no descriptor at all (cap 0) disables the workaround: said once,
+// at WARNING, when dcfs starts, with what it costs; not again at each
+// release.
+TEST_F(DirCacheFSTest, NoHeldDescriptorsIsAWarningAtStartup) {
+  WriteFile(Path("f"));
+  options_.max_held_fds = 0;
+  WarningCapture capture;
+  Start();
+  auto said = [&](std::string_view text) {
+    return std::count_if(capture.lines.begin(), capture.lines.end(),
+                         [&](const std::string &line) {
+                           return absl::StrContains(line, text);
+                         });
+  };
+  EXPECT_EQ(said("no descriptors on written files"), 1)
+      << absl::StrJoin(capture.lines, "\n");
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  for (int i = 0; i < 2; ++i) {
+    auto [open, fh] = Open(f, O_RDWR);
+    ASSERT_EQ(open.error, 0);
+    ASSERT_EQ(Release(f, fh).error, 0);
+  }
+  EXPECT_EQ(said("hold a descriptor"), 0)
+      << absl::StrJoin(capture.lines, "\n");
 }
 
 // A held descriptor is closed at the file's last FORGET, when dcfs removes

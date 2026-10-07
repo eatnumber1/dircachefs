@@ -258,11 +258,20 @@ void RaiseFileLimit() {
   }
   struct rlimit raised = {.rlim_cur = want, .rlim_max = want};
   if (setrlimit(RLIMIT_NOFILE, &raised) == 0) return;
+  const int err = errno;
+  // Not to fs.nr_open (no CAP_SYS_RESOURCE, as in a container): as far
+  // as the hard limit allows, and say so either way, since the held
+  // descriptors' cap (DirCacheFS::DefaultMaxHeldFds) follows from it.
   raised = {.rlim_cur = limit.rlim_max, .rlim_max = limit.rlim_max};
-  if (setrlimit(RLIMIT_NOFILE, &raised) != 0) {
+  if (setrlimit(RLIMIT_NOFILE, &raised) == 0) {
+    LOG(WARNING) << "could not raise RLIMIT_NOFILE to fs.nr_open (" << want
+                 << "): " << std::strerror(err) << "; raised the soft limit "
+                 << "to the hard limit, " << limit.rlim_max;
+  } else {
     LOG(WARNING) << "could not raise RLIMIT_NOFILE (soft " << limit.rlim_cur
-                 << ", hard " << limit.rlim_max
-                 << "): " << std::strerror(errno);
+                 << ", hard " << limit.rlim_max << ") to fs.nr_open (" << want
+                 << "): " << std::strerror(err) << ", nor to the hard limit: "
+                 << std::strerror(errno);
   }
 }
 

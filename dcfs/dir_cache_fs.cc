@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <time.h>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -91,30 +92,51 @@ std::string ErrnoName(int err) {
 }  // namespace
 
 size_t DirCacheFS::DefaultMaxHeldFds(rlim_t soft_limit) {
-  constexpr rlim_t kFixedReserve = 64 * 1024;
-  const rlim_t reserve = std::max(kFixedReserve, soft_limit / 2);
+  constexpr rlim_t kMinReserve = 16 * 1024;
+  constexpr rlim_t kMaxReserve = 64 * 1024;
+  const rlim_t reserve =
+      std::max(kMinReserve, std::min(kMaxReserve, soft_limit / 2));
   return soft_limit > reserve ? static_cast<size_t>(soft_limit - reserve) : 0;
 }
 
 namespace {
 
-size_t MaxHeldFds(const DirCacheFS::Options &opts) {
-  if (opts.max_held_fds.has_value()) return *opts.max_held_fds;
+// Options::max_held_fds, or the default for the soft descriptor limit, and
+// where it came from (for the log).
+std::pair<size_t, std::string> MaxHeldFds(const DirCacheFS::Options &opts) {
+  if (opts.max_held_fds.has_value()) {
+    return {*opts.max_held_fds, "Options::max_held_fds"};
+  }
   struct rlimit limit {};
-  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) return 0;
-  return DirCacheFS::DefaultMaxHeldFds(limit.rlim_cur);
+  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) {
+    return {0, absl::StrCat("getrlimit(RLIMIT_NOFILE) failed: ",
+                            std::strerror(errno))};
+  }
+  return {DirCacheFS::DefaultMaxHeldFds(limit.rlim_cur),
+          absl::StrCat("the soft RLIMIT_NOFILE of ", limit.rlim_cur)};
 }
 
 }  // namespace
 
 DirCacheFS::DirCacheFS(Context &ctx, Options opts)
-    : ctx_(ctx),
-      opts_(opts),
-      last_sync_(absl::Now()),
-      max_held_fds_(MaxHeldFds(opts)) {
+    : ctx_(ctx), opts_(opts), last_sync_(absl::Now()) {
   ctx_.open_for_write = &open_for_write_;
-  LOG(INFO) << "holding at most " << max_held_fds_
-            << " descriptors on written files until their last FORGET";
+  std::string source;
+  std::tie(max_held_fds_, source) = MaxHeldFds(opts);
+  if (max_held_fds_ == 0) {
+    // See design.md "mmap after close" (held-fd workaround).
+    LOG(WARNING) << "holding no descriptors on written files (from " << source
+                 << "): the last FORGET of a file written during this run "
+                    "will record its attributes unknown and durably dirty "
+                    "instead of re-reading them, and the next access "
+                    "re-reads them from the backing disk (raise the "
+                    "descriptor limit past 16384 to hold some)";
+  } else {
+    LOG(INFO) << "holding at most " << max_held_fds_
+              << " descriptors on written files until their last FORGET "
+                 "(from "
+              << source << ")";
+  }
 }
 
 std::optional<FileDescriptor> DirCacheFS::TakeWritten(InodeId id) {
@@ -1688,7 +1710,8 @@ absl::Status DirCacheFS::Release(
       written != written_.end() && !delete_row &&
       !written->second.has_value()) {
     if (held_fds_ >= max_held_fds_) {
-      if (!held_cap_logged_) {
+      // At cap 0 the constructor said so already.
+      if (!held_cap_logged_ && max_held_fds_ > 0) {
         held_cap_logged_ = true;
         LOG(WARNING) << "Release: " << held_fds_ << " written files already "
                      << "hold a descriptor (the cap); files written from now "

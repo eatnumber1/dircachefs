@@ -73,10 +73,10 @@ class DirCacheFS {
   };
 
   // The default Options::max_held_fds for a soft descriptor limit: what
-  // is left after a reserve of 64Ki descriptors or half the limit,
-  // whichever reserve is larger: 0 up to 64Ki (so at the usual 1024),
-  // half from 128Ki (half of fs.nr_open's default 1048576 once main.cc
-  // raised the limit).
+  // is left after a reserve of half the limit, but at least 16Ki and at
+  // most 64Ki descriptors: 0 up to 16Ki (so at the usual 1024), 32768 at
+  // 65536, and 983040 at fs.nr_open's default 1048576 (main.cc raises the
+  // limit to it).
   static size_t DefaultMaxHeldFds(rlim_t soft_limit);
 
   // `ctx` must outlive this DirCacheFS, which points ctx.open_for_write at
@@ -599,7 +599,7 @@ class DirCacheFS {
   // of entries holding one.
   absl::flat_hash_map<InodeId, std::optional<FileDescriptor>> written_;
   size_t held_fds_ = 0;
-  const size_t max_held_fds_;
+  size_t max_held_fds_ = 0;  // Set once, by the constructor.
   bool held_cap_logged_ = false;
 
   // The stubs whose refusal RefuseStub has logged in this run.
