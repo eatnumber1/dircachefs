@@ -1077,3 +1077,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   rebase over 7.1). Needs russ: libnuma + liburing are shipped only for libfuse's fuse_uring.c
   (dcfs never passes -o io_uring): turn HAVE_URING off in the libfuse overlay (drops both
   dependencies from the shipped binary and the SBOM) or keep FUSE-over-io_uring for later?
+- 12.4 done in lane-2 (step-12.4, 4 commits, +2321/-31): formal/lifetime.tla with NodeidStable/
+  ReferencedServed, NotRetiredWhileReferenced, HeldOnlyWhileWritten/WrittenUntilLastForget,
+  ForgetKnown, LookupsExact/NothingLeaks, KernelForgotAfterCrash/UnnamedRowsSwept; four known-bug
+  variants reproduce (non-final FORGET drops the held fd; removed record retired while referenced;
+  pre-23.7 tmpfile row; FORGET_MULTI counted once); events LifetimeChanged/Destroyed; harness
+  nodeid traces (32 valid); MC_lifetime 114k states 13 s. THREE FINDINGS in the code
+  (formal/findings/, tests expect the violation): (a) a stub's synthetic nodeid is reused while
+  the kernel still holds it (SetRefused takes MAX+1 of live stubs; an out-of-band relisting) ->
+  a live nodeid names another object instead of ESTALE; (b) a crash between unlink's syscall
+  and phase 3 leaves a row of a freed object the sweep keeps (nlink column not 0); (c) DESTROY
+  with a tmpfile open, then a clean start: no sweep, the row stays. Under review (reviewer
+  verifies each finding against the code); fixes follow as 12.4b, test first.
