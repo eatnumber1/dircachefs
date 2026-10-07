@@ -722,3 +722,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-07): Google's style guides for every language (C++, Python, Shell, Markdown docs;
   Bazel per buildifier). Shell: bash for host scripts; guest scripts stay POSIX sh (busybox has no
   bash) as a documented deviation until Phase 24 can ship bash; shfmt + shellcheck join 7.6.
+- russ (2026-10-07): no `backing` namespace exception; a wrapper class may hold the functions.
+  syscalls wrappers keep libc names (`setxattr`), other functions CamelCase (`SetXattr`): no clash.

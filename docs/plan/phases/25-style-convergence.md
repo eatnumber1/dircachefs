@@ -25,21 +25,22 @@ its own test-first step.
   `third_party/pjdfstest/README.md` (C12). Owner: dcfs-mechanical for the
   conversions, dcfs-implementer for the `syscalls.h` moves; review by
   dcfs-reviewer (the moves touch error paths).
-- 25.2 Flat namespaces (after 25.1). `cache` (673 uses), `events` (182),
-  `internal` (9), `testonly` (4) fold into `dcfs`; `dcfs::syscalls` and
-  `dcfs::sqlite3` stay (russ, 2026-10-07), called as `syscalls::x` and
-  `sqlite3::x`; `backing` (147) pending russ's answer to the exception
-  request (a layer boundary like `syscalls`; keeping it dissolves the
-  three clashes below without renames).
-  Clashes to rename first: `ParentOf`, `SetXattr`, `RemoveXattr` exist in
-  both `cache` and `backing` (`ParentOf` differs only in return type):
-  the cache side becomes `CachedParentOf`/`CacheSetXattr`/... or the
-  backing side `BackingSetXattr`/...; pick per pair for readability at the
-  call sites (the `backing::` prefix carried meaning there), and say in
-  the commit which. The `events` and `sqlite3` names get a prefix where a
-  bare name would be ambiguous (`sqlite3::Statement` → `SqliteStatement`
-  only if `Statement` clashes). Owner: dcfs-implementer, mechanical
-  renames with the compiler as the check; full presubmit after.
+- 25.2 Flat namespaces (after 25.1). `cache` (673 uses), `backing`
+  (147), `events` (182), `internal` (9), `testonly` (4) fold into `dcfs`;
+  only `dcfs::syscalls` and `dcfs::sqlite3` stay (russ, 2026-10-07),
+  called as `syscalls::x` and `sqlite3::x`. `backing` does not get an
+  exception (russ): where the functions need a home, a wrapper class is
+  the tool (e.g. a `Backing` class whose methods are today's `backing::`
+  functions, so a call reads `backing.SetXattr(...)` against the cache's
+  bare `SetXattr(...)`); that dissolves the `ParentOf`/`SetXattr`/
+  `RemoveXattr` clashes without invented prefixes. Decide class versus
+  free functions per group by what the call sites read like, say which
+  in the commit. Naming keeps the layers apart: `syscalls::` wrappers
+  carry their libc names (`setxattr`), everything else is CamelCase
+  (`SetXattr`), so those never clash. `events` and `sqlite3`-adjacent
+  names get a prefix only where a bare name is ambiguous. Owner:
+  dcfs-implementer, mechanical renames with the compiler as the check;
+  full presubmit after.
 - Formatting, includes and Python line length (C3, C4, C11, C13, F1-F6,
   P1) are Phase 7.6/7.7 (pinned clang-format, buildifier, format_test,
   layering_check, misc-include-cleaner), not this phase: nothing is
