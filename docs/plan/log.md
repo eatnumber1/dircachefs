@@ -1128,3 +1128,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   covers the wrapper (ban the mangled wrapper symbol, allow only from mounts_below); std::
   filesystem/ifstream back doors in tests and bench converted and added to the scanner; doc
   statements; `pause` wrapped; `remove` dropped from the list (std::remove algorithm).
+- 7.1 review: switch sound (641 compiles/152 links on the pinned LLVM; main_static static, no
+  libstdc++; --wrap names verified; 22.1.8 right: 23.1.2's lld NEEDs libicu*.so.70). Fix before
+  merge: ASan lost its C++ runtime (the C driver links asan.a without asan_cxx.a: new/delete
+  mismatches unreported, a regression vs GCC's libasan) -> `-fsanitize-link-c++-runtime` for asan
+  and ubsan + a guest self-check; banned_symbols tests incompatible under sanitizer configs
+  (interceptors, -O1 printf folding, dynamic binary); `--dynamic_mode=off` restored with the real
+  reason (lld rejects libfuse's .symver in a -shared link; 16 useless .so links otherwise); host
+  dependencies documented fully (liburing probes still use host GCC's crt/libgcc -> -rtlib=
+  compiler-rt; -L/usr/lib/gcc on every link; UAPI headers from the host; ld.lld needs libxml2 ->
+  ICU 74/liblzma; /bin/bash); one numactl override (7.1's; lane-5 drops its two patches); SBOM
+  gains llvm-project under shipped; toolchain_test self-check; allow-line reasons; READMEs with
+  Pin sections; BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1; CI repository-cache keying (1.94 GB tarball
+  vs the 10 GB quota). Lane-5 told.
