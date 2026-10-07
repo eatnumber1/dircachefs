@@ -232,3 +232,33 @@ drop or dm-delay timing).
 - Tests: fix the two over-claiming comments; `handle-boundary-stub-decodes`
   must actually evict the dentry; `rename-stub-exdev` gets a check_cold;
   the recorder maps a read-only GETFLAGS on D to no cut.
+
+## Done (2026-10-07, a64e666)
+
+23.1-23.5 merged 1554bee..e5c27cc; 23.6 + 23.7 merged a64e666 after two
+review rounds (audits/phase23-review.md findings M1, M2, L1-L8 all
+closed). Deviations from the text above, recorded per the reviewer:
+- L1: instead of keeping the reopened fd as the shared fd, a separate
+  `write_fd` (first writer's; yields only to a non-O_APPEND one; dropped
+  with the last writer), and every writable open that reuses a shared fd
+  re-checks the flags with one FS_IOC_GETFLAGS on it (in-memory inode, no
+  disk I/O; EPERM on immutable or append-only without O_APPEND), so an
+  out-of-band chattr is still refused (russ's default kept).
+- L7's `StatWritten` and the by-handle refresh went away with 23.6 (the
+  held fd replaces both).
+- M2 measures (destroy_test: 100k files, 0 sectors read after SIGTERM,
+  about 5 s to exit) rather than marking attributes unknown.
+- L5's sweep runs only after an unclean shutdown; rows of files unlinked
+  while open at a clean, lazily unmounted shutdown are not swept.
+- 23.6 extras: held fds capped (reserve = half the soft limit, within
+  16Ki..64Ki; a cap of 0 is logged once at startup), FORGET_MULTI/DESTROY
+  batch their phase-1 transaction, the guests' busybox had no `usleep`
+  (quiesce never waited; `lib.sh` now checks the commands it needs),
+  ASan unit guests measured (dir_cache_fs_test asan_mem=448), destroy_test
+  mem=832.
+- Kernel gap found: no attribute invalidation after a successful
+  fileattr_set (notes/kernel-facts.md); the check is
+  `DISABLED_immutable-ctime`, README Limitations has the sentence.
+- Open: in destroy_test at 832 MiB about 1,000 of 100,010 held inodes
+  still got FORGETs with no memory pressure (test tolerates >= 90%);
+  undiagnosed, for an investigator.

@@ -832,3 +832,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   flake under load and fail under TCG; next step: count work (rows read / SQLite steps) in
   dir_cache_fs_test, or a 4N-vs-N CPU-tick ratio. N7: when Phase 23 and Alpine meet, copy_test's
   casefold check needs the unicode module declared if Alpine builds CONFIG_UNICODE=m.
+- Phase 23 merged (a64e666; 26 commits replayed without docs/plan hunks, tree identical to the
+  tested tip 1c73972): presubmit 144/144, large/trace 44/44, asan //dcfs/... 32/32. Final round:
+  cap reserve = half the soft limit within 16Ki..64Ki (65,536 -> 32,768; 1M -> 983,040), cap 0
+  logged at startup (LogSink fake); BeginAttrChanges skips a missing row; lib.sh require_commands
+  (nfs.sh names its own: the Debian chroot lacks sed); dir_cache_fs_test asan_mem=448 from MEM
+  lines; destroy_test mem=832 (the 256 default let the kernel reclaim the pinned inodes).
+  Unexplained: ~1,000 FORGETs of 100,010 held inodes at 832 MiB, no memory pressure. Unblocked:
+  12.3 (lane-3), 25.1 (lane-1), N4 readdir timing (after 25.1: same test file).
