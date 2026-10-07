@@ -1,5 +1,6 @@
 # numactl
 
+The BCR module `numactl` (a dependency of `libfuse`), with one patch:
 
 `0001-no-version-script.patch` drops the version script from `libnuma`'s
 `linkopts`, so that `--config=asan` binaries can export clang's ASan malloc
