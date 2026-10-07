@@ -46,6 +46,7 @@
 #include "dcfs/mount_fds.h"
 #include "dcfs/mounts_below.h"
 #include "dcfs/protocol_events.h"
+#include "dcfs/session_loop.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -557,7 +558,12 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // so this is purely about who owns the controlling terminal from here on.
   fuse_daemonize(absl::GetFlag(FLAGS_foreground) ? 1 : 0);
 
-  int rc = fuse_session_loop(session);
+  // libfuse's loop, plus draining /dev/fuse at a checkpoint so that a
+  // request sees its own FUSE_INTERRUPT (dcfs/session_loop.h).
+  SessionLoop loop(session);
+  ctx.interrupts = &loop;
+  int rc = loop.Run();
+  ctx.interrupts = &NoInterrupts();
 
   // Shutdown order matters: unmount first, so the kernel stops sending new
   // requests and fusermount's mount table entry is gone, then tear down the
@@ -579,11 +585,10 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     LOG(WARNING) << "closing cache database: " << close_status;
   }
 
-  // fuse_session_loop() returns 0 when the kernel connection was closed
-  // (e.g. the mount was unmounted externally), a positive signal number
-  // when fuse_set_signal_handlers()'s handler stopped the loop, or a
-  // negative -errno on an actual error -- only the last of those is a
-  // failure.
+  // SessionLoop::Run() returns 0 when the kernel connection was closed
+  // (e.g. the mount was unmounted externally) or a signal handler stopped
+  // the loop, or a negative -errno on an actual error -- only the last of
+  // those is a failure.
   if (rc < 0) {
     return InternalErrorBuilder() << "fuse_session_loop: " << rc;
   }

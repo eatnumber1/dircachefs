@@ -75,6 +75,8 @@ absl::StatusOr<struct timespec> clock_gettime(clockid_t clock);
 absl::StatusOr<struct rlimit> getrlimit(int resource);
 absl::Status setrlimit(int resource, const struct rlimit &limit);
 absl::Status flock(int fd, int operation);
+// poll(2) of one descriptor: its revents (0 if `timeout_ms` passed).
+absl::StatusOr<short> poll(int fd, short events, int timeout_ms);
 
 }  // namespace syscalls
 

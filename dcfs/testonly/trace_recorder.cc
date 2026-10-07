@@ -292,7 +292,11 @@ void TraceRecorder::Close(
                                    status.ToString()));
       }
     } else if (Traced(dir) && req.arrived) {
-      const std::string why = unmodelled_end(req);
+      // An interrupted request's EINTR is the model's (its interrupt line
+      // made the request idle); anything else is the frame's to judge.
+      const std::string why = req.interrupted && ErrnoOf(status) == EINTR
+                                  ? ""
+                                  : unmodelled_end(req);
       if (why.empty()) {
         Emit(ctx, dir, &req, "reply");
       } else if (why.starts_with("unexplained: ")) {
@@ -1309,6 +1313,13 @@ void TraceRecorder::MutationEnded(Context &ctx, events::IdsFn ids) {
       continue;
     }
     Req &req = *found;
+    if (!req.syscall_seen && req.interrupted) {
+      // Interrupted between its phase 1 and its syscall: the model's
+      // Interrupt, which Ends it (Interrupted left its line to here).
+      Emit(ctx, dir, &req, "interrupt");
+      MutationLine(dir, /*begun=*/false);
+      continue;
+    }
     if (!req.syscall_seen) {
       // Before its syscall: the end of a request that failed before its
       // syscall (an OpenNode error, say), or a forbidden step. Which one,
@@ -1607,6 +1618,11 @@ void TraceRecorder::FileOpened(Context &ctx, Ino id, int flags, bool shared,
                                const absl::Status &status,
                                const events::SharedFd &after) {
   Enter("FileOpened");
+  // An open stopped at its checkpoint (EINTR) opened nothing.
+  if (ErrnoOf(status) == EINTR) {
+    After(ctx);
+    return;
+  }
   if (files_enabled_ && !files_.contains(id) && !shared) {
     // A file's trace begins with no open of it outstanding (the model's
     // Init: no shared fd, no handle); one first seen shared is not traced.
@@ -1637,6 +1653,44 @@ void TraceRecorder::FileReleased(Context &ctx, Ino id, bool writable,
     FileLine(id, "release",
              absl::StrCat(",\"writable\":", Bool(writable),
                           ",\"fd\":", FdJson(after)));
+  }
+  After(ctx);
+}
+
+// --- Interrupts -------------------------------------------------------------
+
+void TraceRecorder::Interrupted(Context &ctx) {
+  Enter("Interrupted");
+  // Every directory request the innermost FUSE request (and the frames
+  // inside it) is: the model's Interrupt of each.
+  for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+    for (auto &[dir, req] : it->reqs) {
+      if (!Traced(dir) || !req.arrived || req.interrupted) continue;
+      req.interrupted = true;
+      Dir &state = dirs_[dir];
+      if (state.reading && state.read_slot == req.slot) {
+        // Between a population's probe batches: its reads are abandoned.
+        // The line goes where the population started (as PopulateRead's
+        // would have), before the lines held since.
+        std::vector<std::string> held = std::move(state.held);
+        state.held.clear();
+        state.reading = false;
+        Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":",
+                                JsonStr(cause_),
+                                ",\"ev\":\"interrupt\",\"p\":\"p", req.slot,
+                                "\",\"db\":", state.read_db, "}"));
+        for (const std::string &json : held) Write(dir, json);
+        // The next line carries its state (the held lines changed it).
+        state.last.clear();
+        covered_.insert(dir);
+      } else if (req.begun && !req.syscall_seen) {
+        // Between its phase 1 and its syscall: its End comes next, and the
+        // line with it (MutationEnded).
+      } else {
+        Emit(ctx, dir, &req, "interrupt");
+      }
+    }
+    if (it->kind == Frame::Kind::kRequest) break;
   }
   After(ctx);
 }

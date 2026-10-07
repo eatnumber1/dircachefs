@@ -48,10 +48,13 @@ void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
   DirCacheFS &fs = GetFS(req);
   Context &ctx = fs.context();
   ctx.checks->RequestBegin(ctx, fs, request);
+  // The request checkpoints ask about (dcfs/interrupts.h).
+  ctx.interrupts->Begin(req);
   {
     events::RequestScope scope(*ctx.events, ctx, request);
     fr.ReplyFailureAndLogIfNotOk(scope.Finish(handler(fs, fr)));
   }
+  ctx.interrupts->End();
   ctx.checks->RequestEnd(ctx, fs, request);
 }
 

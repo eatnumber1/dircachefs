@@ -55,6 +55,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <iostream>
 #include <iterator>
@@ -93,6 +94,7 @@
 #include "dcfs/mount_fds.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/protocol_events.h"
+#include "dcfs/session_loop.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
@@ -404,9 +406,10 @@ class DirCacheFSTest : public ::testing::Test {
     se_ = fuse_session_new(&args, &ops_, sizeof(ops_), fs_.get());
     ASSERT_NE(se_, nullptr);
     struct fuse_custom_io io = {};
-    io.read = [](int, void *, size_t, void *) -> ssize_t {
-      errno = ENOSYS;  // Never called: requests come in through Send().
-      return -1;
+    // Requests come in through Send(); a read is SessionLoop draining
+    // the device at a checkpoint, which gets what a test queued (Kernel).
+    io.read = [](int, void *buf, size_t size, void *) -> ssize_t {
+      return current_->ReadQueued(buf, size);
     };
     // The I/O callbacks get the session's userdata, which is the
     // DirCacheFS (fuse_ops.cc reaches it through fuse_req_userdata), so
@@ -984,6 +987,40 @@ class DirCacheFSTest : public ::testing::Test {
   static inline DirCacheFSTest *current_ = nullptr;
   std::map<uint64_t, Reply> replies_;
   uint64_t next_unique_ = 1;
+  // Messages "the kernel" queued for the next read of the device
+  // (QueueInterrupt), which only SessionLoop's draining does.
+  std::deque<std::string> kernel_reads_;
+
+  ssize_t ReadQueued(void *buf, size_t size) {
+    if (kernel_reads_.empty()) {
+      errno = EAGAIN;
+      return -1;
+    }
+    std::string msg = std::move(kernel_reads_.front());
+    kernel_reads_.pop_front();
+    const size_t n = std::min(size, msg.size());
+    std::memcpy(buf, msg.data(), n);
+    return static_cast<ssize_t>(n);
+  }
+
+ protected:
+  // The unique of the next request Send() sends.
+  uint64_t NextUnique() const { return next_unique_; }
+  bool KernelReadsEmpty() const { return kernel_reads_.empty(); }
+  // Queues the FUSE_INTERRUPT the kernel sends for request `unique` (its
+  // caller got a signal).
+  void QueueInterrupt(uint64_t unique) {
+    struct fuse_interrupt_in in = {};
+    in.unique = unique;
+    std::string msg;
+    struct fuse_in_header hdr = {};
+    hdr.len = static_cast<uint32_t>(sizeof(hdr) + sizeof(in));
+    hdr.opcode = FUSE_INTERRUPT;
+    hdr.unique = next_unique_++;
+    AppendBytes(msg, hdr);
+    AppendBytes(msg, in);
+    kernel_reads_.push_back(std::move(msg));
+  }
 };
 
 // --- formal/ finding readdirplus_unlocked --------------------------------
@@ -4281,6 +4318,188 @@ TEST_F(DirCacheFSDeathTest, UnhookedBackingSyscallInATransaction) {
       },
       "invariant violated: no-transaction-at-backing-call \\(the harness's "
       "backstop\\): statx while a transaction is open");
+}
+
+// --- Cancellation (Phase 22; docs/design.md, "Cancellation") -------------
+//
+// An interrupted request stops at a checkpoint (dcfs/checkpoint.h) just
+// before a backing syscall and replies EINTR, leaving the cache as the
+// tri-state rule wants: nothing recorded it did not finish, a mutation's
+// phase-1 records unknown and dirty, every guard released, no transaction
+// open (formal/dcfs.tla's Interrupt, GuardsBalanced).
+
+// The harness's interruption source: the request being served is
+// interrupted from the `at`-th checkpoint on (0: never), counting from
+// when the test set it.
+class FakeInterrupts final : public Interrupts {
+ public:
+  bool Interrupted() override {
+    ++checkpoints;
+    return at != 0 && checkpoints >= at;
+  }
+  int at = 0;
+  int checkpoints = 0;
+};
+
+// Counts the probes (name_to_handle_at) from now on.
+std::shared_ptr<int> CountProbes() {
+  auto count = std::make_shared<int>(0);
+  auto arm = std::make_shared<std::function<void()>>();
+  *arm = [count, arm] {
+    NameToHandleHook() = [count, arm] {
+      ++*count;
+      (*arm)();
+    };
+  };
+  (*arm)();
+  return count;
+}
+
+// Interrupted on arrival (its first checkpoint): a lookup that needs a
+// population replies EINTR without touching the backing filesystem, and
+// the next one, not interrupted, is served.
+TEST_F(DirCacheFSTest, InterruptedLookupRepliesEintrWithoutTheBacking) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  WriteFile(Path("d/f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  StartTrace();
+  interrupts.at = 1;
+  std::shared_ptr<int> probes = CountProbes();
+  int opens = 0;
+  OpenByHandleHook() = [&] { ++opens; };
+  EXPECT_EQ(Lookup(d, "f").first.error, -EINTR);
+  EXPECT_EQ(*probes, 0);
+  EXPECT_EQ(opens, 0);
+  EXPECT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(false));
+  EXPECT_FALSE(ctx_.db.InTransaction());
+  interrupts.at = 0;
+  EXPECT_EQ(Lookup(d, "f").first.error, 0);
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// A population interrupted between its probe batches stops: nothing of it
+// is recorded (the directory stays incomplete), no guard or transaction is
+// left, and the next listing populates it whole.
+TEST_F(DirCacheFSTest, InterruptedPopulationRecordsNothing) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  constexpr int kNames = 200;
+  for (int i = 0; i < kNames; ++i) WriteFile(Path(absl::StrCat("d/f", i)));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  // (Not traced: the trace spec's initial states range over every subset
+  // of the names, 2^200 here; InterruptedPopulationIsTraced is.)
+  // Its first checkpoints pass: probes run, then the interrupt is seen.
+  interrupts.at = 3;
+  std::shared_ptr<int> probes = CountProbes();
+  EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
+  EXPECT_GT(*probes, 0);
+  EXPECT_LT(*probes, kNames);
+  EXPECT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(false));
+  EXPECT_EQ(Cached(d, "f0").first, LookupResult::Kind::kUnknown);
+  EXPECT_TRUE(ctx_.fills.inflight.empty());
+  EXPECT_FALSE(ctx_.db.InTransaction());
+  interrupts.at = 0;
+  absl::StatusOr<std::vector<std::string>> names = List(d, false);
+  ASSERT_THAT(names, IsOk());
+  EXPECT_EQ(names->size(), static_cast<size_t>(kNames + 2));
+  EXPECT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(true));
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// The same at the population's first probe batch, traced (three names:
+// the trace's "interrupt" line goes where the population started).
+TEST_F(DirCacheFSTest, InterruptedPopulationIsTraced) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  for (const char *name : {"a", "b", "c"}) {
+    WriteFile(Path(absl::StrCat("d/", name)));
+  }
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  StartTrace();
+  interrupts.at = 1;
+  EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
+  EXPECT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(false));
+  interrupts.at = 0;
+  EXPECT_THAT(List(d, false), IsOkAndHolds(::testing::SizeIs(5)));
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// A mutation interrupted before its backing syscall replies EINTR: the
+// backing filesystem is untouched, the names phase 1 made unknown stay
+// unknown and dirty, and the mutation's guard is released.
+TEST_F(DirCacheFSTest, MutationInterruptedBeforeItsSyscallLeavesItUnknown) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_THAT(List(kRootInode, false), IsOk());  // f cached, no lookup.
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  StartTrace();
+  interrupts.at = 1;
+  EXPECT_EQ(Unlink(kRootInode, "f").error, -EINTR);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("f")), IsOk());
+  EXPECT_EQ(Cached(kRootInode, "f").first, LookupResult::Kind::kUnknown);
+  EXPECT_THAT(Dirty(), Contains(kRootInode));
+  EXPECT_TRUE(ctx_.fills.inflight.empty());
+  interrupts.checkpoints = 0;
+  EXPECT_EQ(Mkdir(kRootInode, "d").first.error, -EINTR);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("d")).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(Cached(kRootInode, "d").first, LookupResult::Kind::kUnknown);
+  EXPECT_TRUE(ctx_.fills.inflight.empty());
+  EXPECT_FALSE(ctx_.db.InTransaction());
+  interrupts.at = 0;
+  EXPECT_EQ(Unlink(kRootInode, "f").error, 0);
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// Interrupted once its syscall has run (here: during its phase 3), a
+// mutation completes and replies success: the change exists.
+TEST_F(DirCacheFSTest, MutationInterruptedAfterItsSyscallCompletes) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_THAT(List(kRootInode, false), IsOk());  // f cached, no lookup.
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  StartTrace();
+  // The first open by handle comes after the checkpoint: the backing
+  // unlink's or phase 3's.
+  OpenByHandleHook() = [&] { interrupts.at = 1; };
+  EXPECT_EQ(Unlink(kRootInode, "f").error, 0);
+  EXPECT_NE(interrupts.at, 0) << "the hook did not run";
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("f")).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(Cached(kRootInode, "f").first, LookupResult::Kind::kNegative);
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// End to end: the kernel's FUSE_INTERRUPT for the request being served,
+// read from the device by SessionLoop at a checkpoint (as the daemon's
+// loop does), stops a population.
+TEST_F(DirCacheFSTest, ForgedFuseInterruptStopsAPopulation) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  for (int i = 0; i < 200; ++i) WriteFile(Path(absl::StrCat("d/f", i)));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  SessionLoop loop(se_);
+  ctx_.interrupts = &loop;
+  // (Not traced, as InterruptedPopulationRecordsNothing.)
+  // The readdir about to be sent is next_unique_; its caller is
+  // interrupted during the first probe.
+  const uint64_t readdir = NextUnique();
+  NameToHandleHook() = [&] { QueueInterrupt(readdir); };
+  EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
+  EXPECT_THAT(cache::ChildrenComplete(ctx_, d), IsOkAndHolds(false));
+  EXPECT_TRUE(KernelReadsEmpty());
+  // Not interrupted: served.
+  EXPECT_THAT(List(d, false), IsOk());
+  ctx_.interrupts = &NoInterrupts();
 }
 
 }  // namespace

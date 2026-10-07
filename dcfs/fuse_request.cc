@@ -221,7 +221,12 @@ absl::Status FuseRequest::ReplyFailure(const absl::Status &status) {
 
 void FuseRequest::ReplyFailureAndLogIfNotOk(const absl::Status &status) {
   if (status.ok()) return;
-  LOG(ERROR) << status;
+  // An interrupted request (dcfs/checkpoint.h) is no error of dcfs's.
+  if (StatusToErrno(status) == EINTR) {
+    LOG(INFO) << status;
+  } else {
+    LOG(ERROR) << status;
+  }
   absl::Status reply_s = ReplyFailure(status);
   LOG_IF(WARNING, !reply_s.ok()) << "Failed to reply with failure: " << reply_s;
 }

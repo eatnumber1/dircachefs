@@ -587,6 +587,52 @@ TEST_F(TraceRecorderTest, FileRequestsBecomeLinesOfItsTrace) {
                               HasSubstr("failed: a write failed: errno 5")));
 }
 
+// --- Interrupts (formal/dcfs.tla's Interrupt) -----------------------------
+
+// A checkpoint's interrupt (ProtocolEvents::Interrupted) is an "interrupt"
+// line of each directory the request is the model's request of, and its
+// EINTR reply a "reply" line, not a cut: a lookup interrupted before its
+// population, and a mkdir interrupted between its phase 1 and its syscall,
+// whose line comes with its End (the model's Interrupt Ends it).
+TEST_F(TraceRecorderTest, InterruptedRequestsReplyEintr) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kLookup, .ino = d, .name = "x"});
+    events::Scope lookup(*ctx_.events, ctx_, &ProtocolEvents::LookupBegin,
+                         &ProtocolEvents::LookupEnd, d, std::string_view("x"));
+    ctx_.events->LookupDecided(ctx_, d, "x", events::LookupOutcome::kPopulate,
+                               0);
+    ctx_.events->Interrupted(ctx_);
+    lookup.Finish(ErrnoToStatus(EINTR, "interrupted")).IgnoreError();
+    request.Finish(ErrnoToStatus(EINTR, "interrupted")).IgnoreError();
+  }
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kMkdir, .ino = d, .name = "y"});
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginCreate(ctx_, d, "y"));
+    ctx_.events->Interrupted(ctx_);
+    mutation.End();
+    request.Finish(ErrnoToStatus(EINTR, "interrupted")).IgnoreError();
+  }
+  const std::vector<std::string> lines = Lines(d);
+  EXPECT_THAT(lines, Not(Contains(HasSubstr("\"ev\":\"cut\""))));
+  EXPECT_THAT(lines, Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
+  std::vector<std::string> evs;
+  for (const std::string &line : lines) {
+    const size_t at = line.find("\"ev\":\"");
+    evs.push_back(line.substr(at + 6, line.find('"', at + 6) - at - 6));
+  }
+  EXPECT_THAT(evs, ::testing::ElementsAre("begin", "lookup", "interrupt",
+                                          "reply", "phase1", "interrupt",
+                                          "reply"));
+  // The mkdir's interrupt line is written after its End: no mutation in
+  // flight.
+  EXPECT_THAT(lines[5], HasSubstr("\"inflight\":0"));
+}
+
 // --- Startup lines ---------------------------------------------------------
 
 // A start in the same process after a clean shutdown (FinishRun, then

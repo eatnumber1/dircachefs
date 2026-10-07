@@ -1,6 +1,7 @@
 #include "dcfs/syscalls.h"
 
 #include <fcntl.h>
+#include <poll.h>
 #include <sys/file.h>
 #include <sys/fsuid.h>
 #include <sys/stat.h>
@@ -131,6 +132,13 @@ absl::Status flock(int fd, int operation) {
     return ErrnoToStatus(errno, absl::StrCat("flock(", fd, ")"));
   }
   return absl::OkStatus();
+}
+
+absl::StatusOr<short> poll(int fd, short events, int timeout_ms) {
+  struct pollfd pfd = {.fd = fd, .events = events, .revents = 0};
+  const int n = ::poll(&pfd, 1, timeout_ms);
+  if (n == -1) return ErrnoToStatus(errno, absl::StrCat("poll(", fd, ")"));
+  return n == 0 ? static_cast<short>(0) : pfd.revents;
 }
 
 }  // namespace syscalls

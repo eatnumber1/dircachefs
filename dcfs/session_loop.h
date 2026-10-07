@@ -1,0 +1,64 @@
+#ifndef DCFS_SESSION_LOOP_H_
+#define DCFS_SESSION_LOOP_H_
+
+#ifndef FUSE_USE_VERSION
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
+#endif
+
+// dcfs's FUSE session loop (main.cc), and the daemon's interruption source
+// (dcfs/interrupts.h; docs/design.md, "Cancellation").
+//
+// libfuse's own loop (fuse_session_loop) reads the next message from
+// /dev/fuse only once the current request's handler has returned, and the
+// kernel queues a request's FUSE_INTERRUPT only after dcfs has read the
+// request, so a single-threaded dcfs would never see an interrupt of the
+// request it serves. This loop is libfuse's, plus Interrupted(): at a
+// checkpoint it drains what /dev/fuse already holds without blocking. A
+// FUSE_INTERRUPT goes to libfuse at once (fuse_session_process_buf: its
+// do_interrupt marks the request it names, which fuse_req_interrupted then
+// reports); every other message is queued and served, in order, after the
+// current request, before the loop reads again. The kernel delivers a
+// request's interrupt ahead of the requests queued after it
+// (fuse_dev_do_read), so the drain finds it. No thread, no wakeup while
+// idle: draining happens only inside a request.
+
+#include <deque>
+#include <vector>
+
+#include "dcfs/interrupts.h"
+#include "fuse_lowlevel.h"
+
+namespace dcfs {
+
+class SessionLoop final : public Interrupts {
+ public:
+  // Not owned; must outlive this.
+  explicit SessionLoop(struct fuse_session *se);
+  ~SessionLoop() override;
+
+  // fuse_session_loop: serves requests until the session exits or the
+  // device is gone; 0, or a negative errno from reading the device. (Not
+  // libfuse's se->error, which is private: the EPROTO of a refused INIT
+  // reads as 0 here; DirCacheFS::Init logs it.)
+  int Run();
+
+  void Begin(fuse_req *req) override;
+  void End() override;
+  // Drains /dev/fuse (see the top of this file), then asks libfuse whether
+  // the request being served was interrupted.
+  bool Interrupted() override;
+
+ private:
+  void Drain();
+
+  struct fuse_session *se_;
+  // The requests being served, innermost last (they nest only in tests).
+  std::vector<fuse_req *> serving_;
+  // Messages drained at a checkpoint, to serve after the current request.
+  // Each buffer's memory is libfuse's malloc (fuse_session_receive_buf).
+  std::deque<struct fuse_buf> queued_;
+};
+
+}  // namespace dcfs
+
+#endif  // DCFS_SESSION_LOOP_H_

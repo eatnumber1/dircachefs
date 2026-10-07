@@ -26,6 +26,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
+#include "dcfs/checkpoint.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
 #include "dcfs/escape.h"
@@ -554,6 +555,13 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   std::vector<std::string> names = {std::string(name)};
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginCreate(ctx_, parent, name));
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "a create's syscall");
+      !interrupted.ok()) {
+    mutation.End();
+    return interrupted;
+  }
 
   // Phase 2: the op-specific backing syscall, against a parent fd opened
   // once and shared with phase 3 below. On failure (EEXIST, ENOENT, ...)
@@ -647,6 +655,13 @@ absl::Status DirCacheFS::Setattr(
       XattrsChangedBySetattr(to_set);
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginAttrChange(ctx_, id, side_effects));
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "a setattr's syscall");
+      !interrupted.ok()) {
+    mutation.End();
+    return interrupted;
+  }
 
   // Phase 2: the syscall(s) themselves.
   absl::Status set_status =
@@ -1004,6 +1019,13 @@ absl::Status DirCacheFS::RemoveChild(
     begun.emplace(*std::move(m));
   }
   cache::Mutation &mutation = *begun;
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "an unlink's syscall");
+      !interrupted.ok()) {
+    mutation.End();
+    return interrupted;
+  }
   // The kernel will keep asking about the child if something still refers
   // to it (a working directory, an O_PATH descriptor); once removed, it is
   // reachable only through a descriptor taken now.
@@ -1147,6 +1169,13 @@ absl::Status DirCacheFS::Rename(
     mutation.emplace(*std::move(begun));
   }
 
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "a rename's syscall");
+      !interrupted.ok()) {
+    mutation->End();
+    return interrupted;
+  }
   // A replaced dst is removed as an unlink would remove it (see
   // RemoveChild).
   std::optional<FileDescriptor> held_dst;
@@ -1312,6 +1341,13 @@ absl::Status DirCacheFS::Link(
   std::vector<std::string> names = {std::string(newname)};
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginLink(ctx_, src, newparent, newname));
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "a link's syscall");
+      !interrupted.ok()) {
+    mutation.End();
+    return interrupted;
+  }
 
   // Phase 2: the backing linkat. On failure (EEXIST, EXDEV, ...)
   // (newparent, newname) is re-resolved from the backing filesystem (see
@@ -1431,6 +1467,8 @@ absl::Status DirCacheFS::OpenInode(
   bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
   const bool shared = backing_it != backing_files_.end();
   if (!shared) {
+    // A cold open reopens the object by handle (dcfs/checkpoint.h).
+    ABSL_RETURN_IF_ERROR(Checkpoint(ctx_, "an open"));
     ABSL_ASSIGN_OR_RETURN(BackingFile backing_file, MakeBackingFile(id, req));
     backing_id = backing_file.backing_id;
     backing_it = backing_files_.emplace(id, std::move(backing_file)).first;
@@ -1599,6 +1637,13 @@ absl::Status DirCacheFS::Write(
         cache::Mutation begun,
         cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
     mutation.emplace(std::move(begun));
+  }
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "a write's syscall");
+      !interrupted.ok()) {
+    if (mutation.has_value()) mutation->End();
+    return interrupted;
   }
 
   // Phase 2: the write itself, against the shared fd (EBADF if it is
@@ -1814,11 +1859,16 @@ absl::Status DirCacheFS::Fsync(
   }
   // Backing durability is the backing filesystem's own job; passing the
   // sync through is still correct (and cheap) regardless of `writable`.
+  // Checkpoints before the fsync and before the sync point
+  // (dcfs/checkpoint.h): an fsync replied EINTR may have run; repeating it
+  // is harmless.
+  ABSL_RETURN_IF_ERROR(Checkpoint(ctx_, "an fsync"));
   BackingCall("FsyncFd");
   ABSL_RETURN_IF_ERROR(backing::FsyncFd(fd, datasync != 0));
   // The caller wants what it did durable, and that includes what dcfs
   // cached about it: a sync point makes the backing filesystems durable
   // and then empties the dirty set (a no-op if it is already empty).
+  ABSL_RETURN_IF_ERROR(Checkpoint(ctx_, "a sync point"));
   SyncBackingNow("fsync");
   return req.ReplyErrno(0);
 }
@@ -2052,7 +2102,9 @@ absl::Status DirCacheFS::Fsyncdir(
   // Missing row -> ESTALE; see RequireAttr(). There is no phase 1/3 here:
   // the syscall, then a sync point, as in Fsync().
   ABSL_RETURN_IF_ERROR(RequireAttr(id).status());
+  ABSL_RETURN_IF_ERROR(Checkpoint(ctx_, "an fsyncdir"));
   ABSL_RETURN_IF_ERROR(backing::FsyncDir(ctx_, id, datasync != 0));
+  ABSL_RETURN_IF_ERROR(Checkpoint(ctx_, "a sync point"));
   SyncBackingNow("fsyncdir");
   return req.ReplyErrno(0);
 }
@@ -2093,6 +2145,13 @@ absl::Status DirCacheFS::Setxattr(
   // cache::ForgetXattr), and the attributes (setxattr(2) bumps ctime).
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginXattrChange(ctx_, id, name));
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "an xattr change's syscall");
+      !interrupted.ok()) {
+    mutation.End();
+    return interrupted;
+  }
 
   // Phase 2: the backing syscall, reusing this inode's shared backing fd
   // (see the BackingFile map) if one is already open. XATTR_CREATE/
@@ -2233,6 +2292,13 @@ absl::Status DirCacheFS::Removexattr(
   // Phase 1, as Setxattr.
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginXattrChange(ctx_, id, name));
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "an xattr change's syscall");
+      !interrupted.ok()) {
+    mutation.End();
+    return interrupted;
+  }
 
   // Phase 2: ENODATA (already removed, or never existed) passes straight
   // through from the real syscall.
@@ -2359,6 +2425,13 @@ absl::Status DirCacheFS::Fallocate(
         cache::BeginAttrChange(ctx_, id, kXattrsChangedByWrite));
     mutation.emplace(std::move(begun));
   }
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "a fallocate");
+      !interrupted.ok()) {
+    if (mutation.has_value()) mutation->End();
+    return interrupted;
+  }
 
   // Phase 2. The shared fd is O_RDONLY only when this inode could not be
   // opened O_RDWR (see MakeBackingFile); fallocate on it then fails EBADF,
@@ -2413,6 +2486,13 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
         cache::Mutation begun,
         cache::BeginAttrChange(ctx_, out, kXattrsChangedByWrite));
     mutation.emplace(std::move(begun));
+  }
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "a copy_file_range");
+      !interrupted.ok()) {
+    if (mutation.has_value()) mutation->End();
+    return interrupted;
   }
   // Phase 2. Whatever the backing filesystem says is replied (EBADF for a
   // destination it could only open read-only, EINVAL for overlapping
@@ -2528,6 +2608,13 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
     ABSL_ASSIGN_OR_RETURN(cache::Mutation begun,
                           cache::BeginAttrChange(ctx_, id));
     mutation.emplace(std::move(begun));
+  }
+  // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
+  // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
+  if (absl::Status interrupted = Checkpoint(ctx_, "an ioctl's syscall");
+      !interrupted.ok()) {
+    if (mutation.has_value()) mutation->End();
+    return interrupted;
   }
   BackingCall("IoctlFd");
   absl::StatusOr<std::string> out = backing::IoctlFd(*fd, cmd, in, out_size);

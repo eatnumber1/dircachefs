@@ -15,6 +15,8 @@ MAIN_DEPS = [
     ":backing",
     ":invariant_checks",
     ":protocol_events",
+    ":interrupts",
+    ":session_loop",
     ":context",
     ":dir_cache_fs",
     ":file_handle",
@@ -433,6 +435,7 @@ cc_library(
     hdrs = ["fuse_ops.h"],
     srcs = ["fuse_ops.cc"],
     deps = [
+      ":interrupts",
       ":invariant_checks",
       ":protocol_events",
       ":dir_cache_fs",
@@ -603,6 +606,7 @@ cc_library(
     hdrs = ["dir_cache_fs.h"],
     deps = [
       ":invariant_checks",
+      ":checkpoint",
       ":protocol_events",
       ":escape",
       ":backing",
@@ -640,6 +644,8 @@ DIR_CACHE_FS_TEST_DEPS = [
     ":context",
     ":dir_cache_fs",
     ":fuse_ops",
+    ":interrupts",
+    ":session_loop",
     ":metadata_cache",
     ":migrate",
     ":mount_fds",
@@ -983,11 +989,44 @@ qemu_cc_test(
 )
 
 cc_library(
+    name = "interrupts",
+    visibility = ["//dcfs/testonly:__pkg__"],
+    hdrs = ["interrupts.h"],
+)
+
+cc_library(
+    name = "session_loop",
+    srcs = ["session_loop.cc"],
+    hdrs = ["session_loop.h"],
+    deps = [
+      ":interrupts",
+      ":syscalls",
+      "@absl//absl/log",
+      "@absl//absl/status:statusor",
+      "@libfuse//:libfuse",
+    ],
+)
+
+cc_library(
+    name = "checkpoint",
+    srcs = ["checkpoint.cc"],
+    hdrs = ["checkpoint.h"],
+    deps = [
+      ":context",
+      ":protocol_events",
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/strings",
+    ],
+)
+
+cc_library(
     name = "context",
     visibility = ["//dcfs/testonly:__pkg__"],
     hdrs = ["context.h"],
     deps = [
       ":device_id",
+      ":interrupts",
       ":invariant_checks",
       ":mount_fds",
       ":protocol_events",
@@ -1061,6 +1100,7 @@ cc_library(
     hdrs = ["backing.h"],
     deps = [
       ":invariant_checks",
+      ":checkpoint",
       ":protocol_events",
       ":escape",
       ":context",

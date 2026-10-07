@@ -189,6 +189,8 @@ class TraceRecorder final : public ProtocolEvents {
   void FileReleased(Context &ctx, events::Ino id, bool writable,
                     const events::SharedFd &after) override;
 
+  void Interrupted(Context &ctx) override;
+
   void LifetimeChanged(Context &ctx, events::Ino id,
                        events::LifetimeStep step, uint64_t arg,
                        events::LifetimeFn after) override;
@@ -217,6 +219,7 @@ class TraceRecorder final : public ProtocolEvents {
     bool syscall_ok = false;
     bool probe_absent = false;     // a create's probe found nothing
     bool owned = false;            // Mutation::Owns at its End
+    bool interrupted = false;      // a checkpoint found it interrupted
     // Why its trace ends at a point whose kind (a cut if the request fails,
     // "unexplained" if it replies OK) its end decides (Defer).
     std::string pending;

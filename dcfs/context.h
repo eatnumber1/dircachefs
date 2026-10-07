@@ -9,6 +9,7 @@
 #include "absl/random/bit_gen_ref.h"
 #include "absl/status/statusor.h"
 #include "absl/time/clock_interface.h"
+#include "dcfs/interrupts.h"
 #include "dcfs/invariant_checks.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/protocol_events.h"
@@ -110,6 +111,10 @@ struct Context {
   // production; trace validation's recorder in the testonly builds. Never
   // null; not owned.
   ProtocolEvents *events = &NoProtocolEvents();
+  // Whether the request being served was interrupted (dcfs/interrupts.h):
+  // SessionLoop in the daemon, never in unit tests unless they set one.
+  // Never null; not owned.
+  Interrupts *interrupts = &NoInterrupts();
   // The clock every time-based decision reads (the periodic sync point,
   // relatime at read-open): the real clock in production, an
   // absl::SimulatedClock in tests. Never null; not owned. Production code

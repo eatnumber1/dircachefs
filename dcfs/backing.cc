@@ -33,6 +33,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
+#include "dcfs/checkpoint.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
 #include "dcfs/device_id.h"
@@ -1258,7 +1259,14 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // attributes).
   std::vector<std::pair<std::string, struct statx>> refused_names;
   children.reserve(names.size());
-  for (const std::string &name : names) {
+  for (size_t i = 0; i < names.size(); ++i) {
+    // Between probe batches (formal/dcfs.tla's Interrupt at PD_commit):
+    // an interrupted population stops here and records nothing.
+    constexpr size_t kProbesPerCheckpoint = 64;
+    if (i % kProbesPerCheckpoint == 0) {
+      ABSL_RETURN_IF_ERROR(Checkpoint(ctx, "a directory's probes"));
+    }
+    const std::string &name = names[i];
     std::optional<struct statx> refused;
     BackingCall(ctx, "ProbeChild");
     ABSL_ASSIGN_OR_RETURN(
@@ -1411,6 +1419,10 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                               listed ? events::LookupOutcome::kResolve
                                      : events::LookupOutcome::kPopulate,
                               0);
+    // Before the probe or the population's I/O (formal/dcfs.tla's
+    // Interrupt at RN_probe, PD_read).
+    ABSL_RETURN_IF_ERROR(Checkpoint(
+        ctx, listed ? "resolving a name" : "listing a directory"));
     if (listed) {
       ABSL_ASSIGN_OR_RETURN(result, ResolveName(ctx, parent, name));
       return WithStub(result, parent, name);

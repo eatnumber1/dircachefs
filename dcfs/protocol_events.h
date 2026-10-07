@@ -420,6 +420,14 @@ class ProtocolEvents {
   // FORGETs at unmount). Model: Destroy.
   virtual void Destroyed(Context &ctx) {}
 
+  // --- Interrupts (formal/dcfs.tla's Interrupt) ----------------------
+
+  // A checkpoint (dcfs/checkpoint.h) found the request being served
+  // interrupted: it replies EINTR, a mutation past phase 1 Ending first
+  // (MutationEnding/MutationEnded follow) without its phase 3. Model:
+  // Interrupt.
+  virtual void Interrupted(Context &ctx) {}
+
   // --- Identity: the identity model (formal/ident.tla) ----------------
   //
   // Not the main model's: what a reopen of nodeid `id`'s handle reached
