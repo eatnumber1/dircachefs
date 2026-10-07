@@ -1389,3 +1389,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   tarball on a runner with no repository cache -> lane-5 (restore the repo cache read-only /
   avoid the toolchain for the fetch / raise the timeout). Nothing else ran. process.md: the
   dispatch prompt names the subject prefix.
+- 8.1 + 26.5 merged (6788fc6): tools/coverage_gate.sh in the CI coverage job against dcfs/
+  coverage_baseline.txt (92.40 / 73.30; fails below, fails on an unrecorded rise >= 0.1 naming
+  the new baseline; self-check over canned lcovs); mutation testing: tools/mutation/mutate.py
+  (clang AST JSON, pinned clang; negate conditions, delete Begin*/End*/Mark* calls, swap
+  present/absent; scope.txt), `bazel run //tools/mutation:mutate`, killers = fast //dcfs/...
+  then the trace test; 277 mutants; 25-sample: 21 killed (19 by the small tier, 2 only by trace
+  validation), 4 survived (8.2), 91 s per mutant, ~13 h full on this machine -> schedule job;
+  mull rejected (host-side runner, LLVM 22.1.2 deb, no sha256 fetch). 12.5 done (lane-1), in
+  review: findings for Phase 14 (generation check under recycling) and a README correction
+  (NFS handles lost after a power loss for rows since the last durable commit).

@@ -67,3 +67,16 @@ everything after it.
   closed file, main.cc startup failure modes (a guest misuse test).
 - Error branches after syscalls and SQLite steps: not hand-written; 26.6
   and Phase 11's cache-disk error injection cover them.
+
+## 8.2 Mutation survivors (from 26.5's first run, 2026-10-08)
+
+Each survivor is a missing test; tests first, then the mutant must die:
+1. `dir_cache_fs.cc:1257` `ForgetRemoved`: `DeleteInode` reporting NotFound
+   must still let the FORGET of a removed inode succeed.
+2. `dir_cache_fs.cc:1619` `RecordWrittenAttrs`: the double failure
+   (attribute refresh fails AND `MarkAttrsUnknown` fails): needs the
+   cache-disk error injection of Phase 11; recorded, not now.
+3. `dir_cache_fs.cc:1779` `Release`: a failing `RetireRemoved`.
+4. `dir_cache_fs.cc:2406` `CopyFileRange`: a deleted `mutation->End()`
+   goes unnoticed: a copy_file_range followed by a listing or sync point
+   that depends on the mutation having ended.
