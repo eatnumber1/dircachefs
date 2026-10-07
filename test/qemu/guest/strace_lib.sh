@@ -67,6 +67,8 @@ strace_reduce() {
 			fdpath = substr(head, index(head, "<") + 1)
 			fdpath = substr(fdpath, 1, length(fdpath) - 1)
 		}
+		# Anonymous memory (the allocator, sanitizer shadow memory) is no file.
+		if (name == "mmap" && fdpath == "") next
 		quoted = ""
 		if (match(line, /"([^"\\]|\\.)*"/))
 			quoted = substr(line, RSTART + 1, RLENGTH - 2)

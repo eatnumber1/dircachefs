@@ -39,6 +39,7 @@ cat >"${WORK}/raw" <<'EOT'
 520   write(2</tmp/dcfs-2.log>, "I1007 sqlite3_step: BEGIN", 25) = 25
 520   fsync(5</cache/dcfs.db-wal>) = 0
 520   syncfs(3</src/t>)             = 0
+520   mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f00
 EOT
 
 # shellcheck disable=SC1090
