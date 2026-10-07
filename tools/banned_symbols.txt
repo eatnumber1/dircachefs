@@ -54,8 +54,6 @@ allow dcfs/_objs/mounts_below/* realpath | startup only: mounts_below.cc:63 cano
 
 # First party, existing violations of "statuses carry the message" (found by
 # step 26.8, to be fixed; each line goes when its use does).
-allow dcfs/_objs/main_static/* strerror | main.cc:246-274, getrlimit(RLIMIT_NOFILE) startup messages (known violation)
-allow dcfs/_objs/dir_cache_fs/* strerror | dir_cache_fs.cc:113, getrlimit(RLIMIT_NOFILE) failure text (known violation)
 allow dcfs/_objs/fuse_request/* strerror | fuse_request.cc:196, VLOG of a fuse_req_getgroups failure (known violation)
 
 # Abseil: formatting and diagnostics internals.
