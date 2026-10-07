@@ -926,3 +926,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   "syscalls that can reach the backing filesystem (a backing fd, handle or name) only in
   backing.cc; process-local syscalls (rlimits, credentials, /proc, the cache db file, mount tables)
   may call syscalls:: anywhere". style.md 1.7 updated by the 25.1 agent; C9 dropped.
+- GitHub run 37582181373 complete: osv, fast, presubmit green; full: plain tiers 171/172 (only
+  destroy_test: held 69,577 of 100,000 after a 489 s write phase on a contended 4-vCPU runner,
+  54,356 after drop_caches, no memory pressure; shutdown still read nothing), ASan tiers 172/172
+  (destroy_test passed there in 224 s). First green ASan suite on GitHub. The held-fd loss scales
+  with write-phase duration, not memory: hypothesis = something periodic (the sync point
+  reconciling written_ / releasing held fds, or a FUSE dentry invalidation) drops held fds over
+  time; sent to the lane-2 investigation with a slowed-writer reproduction plan.
