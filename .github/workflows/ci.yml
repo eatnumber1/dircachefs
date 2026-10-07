@@ -8,11 +8,11 @@
 # Developed with nektos/act before publication: see "CI" in README.md and
 # third_party/act/README.md (`bazel run //third_party/act -- -j fast`).
 #
-# Kernel matrix: not yet. The tests boot the one pinned kernel
-# (//third_party/linux:bzImage, today the latest stable release); testing the
-# minimum supported kernel (6.9, README.md) as well needs a second pinned
-# kernel, a config fragment without the options newer than 6.9 (FUSE_IO_URING
-# is 6.14) and a Bazel flag selecting the kernel in the qemu_test macros. See
+# Kernel matrix: not yet. The tests boot Alpine's linux-virt of the one
+# pinned branch (//third_party/linux:vmlinuz, series 6.18 on v3.24, fetched
+# fresh on each run so the branch's current build is what is tested); testing
+# the minimum supported kernel (6.9, README.md) as well needs a second
+# kernel, and a Bazel flag selecting it in the qemu_test macros. See
 # "Kernel matrix" in third_party/linux/README.md.
 #
 # Caches: the disk cache is content addressed, so a pin change invalidates
@@ -209,6 +209,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (Bazelisk, which fetches the Alpine packages)
+        run: ./.github/ci/prepare.sh
       - name: Check ignores and pinned commits, generate the SBOMs and git roots
         run: ./.github/ci/osv.sh
       - name: Scanner self-check (libfuse 3.2.0 must be found, CVE-2018-10906)

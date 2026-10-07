@@ -16,7 +16,10 @@ git root per shipped component (README.md). Test-only pins come from:
   * third_party/debian/debs.lock: the Debian packages of the NFS rootfs
     (pkg:deb/debian/<source package>@<version>, the form OSV's Debian
     ecosystem matches; the binary-to-source table is debian_sources.tsv);
-  * .github/ci/prepare.sh: the pinned Bazelisk.
+  * .github/ci/prepare.sh: the pinned Bazelisk;
+  * the Alpine repositories (third_party/alpine): each package a fetch took,
+    from its resolved.json, as pkg:apk/alpine/<origin>@<version>?distro=
+    alpine-<release> (the origin package, which is what OSV matches).
 
 `pins.json` maps each pin to its purl; a pin without an entry is an error
 (tools/sbom/sbom_test.py), so a new pin cannot slip past the scanner.
@@ -64,6 +67,68 @@ def parse_module(text):
         elif fn in ("http_archive", "http_file", "qemu_repo"):
             repos[kwargs["name"]] = kwargs
     return deps, repos
+
+
+def parse_alpine_repos(text):
+    """Returns {repository name: [package names]} of the alpine_package calls
+    in MODULE.bazel's text (third_party/alpine)."""
+    repos = {}
+    for node in ast.parse(text).body:
+        if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "alpine_package"):
+            continue
+        kwargs = {k.arg: _literal(k.value) for k in node.value.keywords if k.arg}
+        repos[kwargs["name"]] = list(kwargs["packages"])
+    return repos
+
+
+def alpine_components(wanted, resolved):
+    """Returns the test-only components of the fetched Alpine packages.
+
+    Args:
+        wanted: {repository name: [package names]} from MODULE.bazel.
+        resolved: {repository name: text of its resolved.json}.
+
+    Each package is reported under its origin package, which is the name
+    OSV's Alpine advisories use (the binary linux-virt is linux-lts): a
+    component named after a binary subpackage matches nothing, silently.
+    """
+    for name in sorted(wanted):
+        if name not in resolved:
+            raise SbomError(
+                f"{name} is an alpine_package in MODULE.bazel but no"
+                " resolved.json was given for it (--alpine"
+                f" {name}=<its resolved.json>)")
+    for name in sorted(resolved):
+        if name not in wanted:
+            raise SbomError(
+                f"a resolved.json was given for {name}, which is not an"
+                " alpine_package in MODULE.bazel")
+    comps = []
+    for name in sorted(wanted):
+        doc = json.loads(resolved[name])
+        got = {p["name"] for p in doc["packages"]}
+        for package in wanted[name]:
+            if package not in got:
+                raise SbomError(
+                    f"{name}: resolved.json does not list {package}")
+        distro = "alpine-" + doc["branch"].lstrip("v")
+        for p in doc["packages"]:
+            comps.append({
+                "type": "library",
+                "name": p["origin"],
+                "version": p["version"],
+                "purl": (f"pkg:apk/alpine/{p['origin']}@{p['version']}"
+                         f"?distro={distro}"),
+                "properties": [
+                    {"name": "dcfs:pin", "value": f"alpine:{p['name']}"},
+                    {"name": "dcfs:kind", "value": "tool"},
+                    {"name": "dcfs:osv-matchable", "value": "true"},
+                    {"name": "dcfs:purl-type", "value": "apk"},
+                ],
+            })
+    return comps
 
 
 def _repo_urls(kwargs):
@@ -255,8 +320,12 @@ def verify_commits(shipped_pins, ls_remote=_git_ls_remote):
 
 
 def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
-          prepare_sh, pins):
-    """Returns {"shipped": CycloneDX doc, "testonly": CycloneDX doc}."""
+          prepare_sh, pins, alpine=None):
+    """Returns {"shipped": CycloneDX doc, "testonly": CycloneDX doc}.
+
+    `alpine` maps each alpine_package repository's name to the text of its
+    resolved.json (what the fetch took from the Alpine branch).
+    """
     deps, repos = parse_module(module_text)
     # Without the graph (the osv CI job has no Bazel build) every shipped
     # pin is used; //tools/sbom:sbom_test has already checked the pins
@@ -334,6 +403,8 @@ def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
             ],
         })
 
+    comps += alpine_components(parse_alpine_repos(module_text), alpine or {})
+
     # One entry per distinct (purl): binary packages of one source collapse.
     seen, unique = set(), []
     for c in comps:
@@ -403,10 +474,18 @@ def main(argv):
     g.add_argument("--debian-sources", default="tools/sbom/debian_sources.tsv")
     g.add_argument("--prepare-sh", default=".github/ci/prepare.sh")
     g.add_argument("--pins", default="tools/sbom/pins.json")
+    g.add_argument("--alpine", action="append", default=[],
+                   metavar="NAME=PATH",
+                   help="resolved.json of an alpine_package repository (in"
+                   " Bazel's output base after a fetch: external/+alpine_"
+                   "package+NAME/resolved.json), once per repository")
     g.add_argument("--out-dir", required=True)
     r = sub.add_parser("git-roots", help="write a detached git root per SBOM component")
     r.add_argument("--sbom", required=True)
     r.add_argument("--out-dir", required=True)
+    ar = sub.add_parser("alpine-repos",
+                        help="print the alpine_package repositories of MODULE.bazel")
+    ar.add_argument("--module", default="MODULE.bazel")
     v = sub.add_parser("verify-commits", help="check pinned tags against upstream (network)")
     v.add_argument("--pins", default="tools/sbom/pins.json")
     c = sub.add_parser("check-ignores")
@@ -416,9 +495,14 @@ def main(argv):
     read = lambda p: open(p, encoding="utf-8").read()
     try:
         if a.cmd == "generate":
+            alpine = {}
+            for spec in a.alpine:
+                name, _, path = spec.partition("=")
+                alpine[name] = read(path)
             docs = build(read(a.module), read(a.lock),
                          read(a.graph) if a.graph else None, read(a.debs_lock),
-                         read(a.debian_sources), read(a.prepare_sh), json.loads(read(a.pins)))
+                         read(a.debian_sources), read(a.prepare_sh),
+                         json.loads(read(a.pins)), alpine=alpine)
             os.makedirs(a.out_dir, exist_ok=True)
             for kind in ("shipped", "testonly"):
                 path = os.path.join(a.out_dir, kind + ".cdx.json")
@@ -426,6 +510,9 @@ def main(argv):
                     json.dump(docs[kind], f, indent=2, sort_keys=True)
                     f.write("\n")
                 print(f"SBOM {path}: {len(docs[kind]['components'])} entries")
+        elif a.cmd == "alpine-repos":
+            for name in sorted(parse_alpine_repos(read(a.module))):
+                print(name)
         elif a.cmd == "git-roots":
             roots = write_git_roots(json.loads(read(a.sbom)), a.out_dir)
             print(f"{len(roots)} git roots under {a.out_dir}")

@@ -1,7 +1,7 @@
 """qemu_test(name, guest_script, disks): a dcfs QEMU end-to-end test.
 
 Boots the shared dcfs QEMU initramfs (:initramfs) and test kernel
-(//third_party/linux:bzImage) under the pinned, Bazel-built
+(//third_party/linux:vmlinuz, Alpine's linux-virt) under the pinned, Bazel-built
 //third_party/qemu:qemu_system_x86_64 (step 4.4), telling guest/init (via
 the dcfs_test= kernel command-line parameter) to run the given guest_script,
 found inside the initramfs at /tests/<basename of guest_script>. See
@@ -10,6 +10,7 @@ test/qemu/guest/init for the guest side.
 """
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 
 # Guest memory (step 6.2). Every guest has an allowance, in MiB, passed to
 # run-qemu.sh as --mem; the defaults below are for a test that is no bigger
@@ -57,7 +58,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = []):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -81,6 +82,11 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             default E2E_MEM), also the basis of the Bazel resource tag.
         asan_mem: guest RAM in MiB for --config=asan/ubsan builds (default:
             E2E_ASAN_MEM, or mem if that is larger).
+        modules: kernel modules this test needs beyond the defaults (fuse,
+            and virtio_blk plus the filesystem modules of `disks` and
+            `rootfs`), e.g. ["nfsd", "nfsv4"]; the guest loads them with
+            their dependencies before the test runs (modules.bzl,
+            third_party/linux/README.md).
         size: required sh_test size, the test's tier: "small" (run
             constantly), "medium" (presubmit), "large"/"enormous" (CI).
             See README.md's "Test tiers".
@@ -98,12 +104,16 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     rootfs_data = [rootfs] if rootfs else []
     rootfs_args = ["--rootfs", "$(location " + rootfs + ")"] if rootfs else []
 
-    # Step 3.2 dropped the FUSE_ATTR_GENERATION kernel patch; step 4.4
-    # removed the deprecated out-of-tree "patched" kernel entirely (and
-    # with it the //test/qemu:kernel string_flag) -- every test now boots
-    # the pinned, Bazel-built //third_party/linux:bzImage unconditionally.
-    kernel_data = ["//third_party/linux:bzImage"]
-    kernel_args = ["$(location //third_party/linux:bzImage)"]
+    # The test kernel is Alpine's linux-virt (step 24.2): //third_party/linux:
+    # vmlinuz. Its drivers are modules; the initramfs gets the archive of the
+    # ones this test needs (modules.bzl), which run-qemu.sh appends.
+    modules_archive = modules_cpio(test_modules(disks, modules, rootfs != None))
+    kernel_data = ["//third_party/linux:vmlinuz", modules_archive]
+    kernel_args = [
+        "--modules",
+        "$(location " + modules_archive + ")",
+        "$(location //third_party/linux:vmlinuz)",
+    ]
 
     # Step 4.4: the Bazel-built QEMU and qboot ROM, passed explicitly --
     # run-qemu.sh does no host lookup of its own. See run-qemu.sh's usage
@@ -182,6 +192,7 @@ def qemu_test_matrix(
         rootfs = None,
         mem = None,
         asan_mem = None,
+        modules = [],
         fstypes = ["ext4", "xfs", "btrfs"]):
     """Declares one qemu_test per backing filesystem in `fstypes`.
 
@@ -200,6 +211,7 @@ def qemu_test_matrix(
         rootfs: same as qemu_test.
         mem: same as qemu_test.
         asan_mem: same as qemu_test.
+        modules: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
@@ -219,6 +231,7 @@ def qemu_test_matrix(
             rootfs = rootfs,
             mem = mem,
             asan_mem = asan_mem,
+            modules = modules,
         )
     native.alias(
         name = name,

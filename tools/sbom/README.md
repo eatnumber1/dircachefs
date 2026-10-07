@@ -61,9 +61,22 @@ What goes in (a pin missing from this list fails `//tools/sbom:sbom_test`):
 | `http_archive`, `http_file`, `qemu_repo` (and QEMU's dtc) in `MODULE.bazel` | version from `strip_prefix` or the URL | per `pins.json` |
 | `third_party/debian/debs.lock` | every `.deb`, under its **source package** name | `pkg:deb/debian/<source>@<version>?distro=bookworm` |
 | `.github/ci/prepare.sh` | Bazelisk | `pkg:github/bazelbuild/bazelisk` |
+| each `alpine_package` repository's `resolved.json` | every package the fetch took (the kernel; the tools from 24.3), under its **origin** package | `pkg:apk/alpine/<origin>@<version>?distro=alpine-<release>` |
 
-Only the Debian entries are matched by OSV; the rest are carried so the SBOM
-is complete.
+Only the Debian and Alpine entries are matched by OSV; the rest are carried
+so the SBOM is complete.
+
+The Alpine entries use the origin package (`o:` in Alpine's index) because
+that is what OSV's Alpine advisories name: the binary `linux-virt` is built
+from `linux-lts`, and an SBOM entry named `linux-virt` reports "no issues",
+silently (osv-scanner v2.6.0, measured in the Phase 24 spike). `sbom_test`
+fails when a component is named after a binary subpackage, when an
+`alpine_package` in `MODULE.bazel` has no `resolved.json`, and when a
+`resolved.json` lacks a package the repository asks for. What a fetch took
+is whatever the Alpine branch had at that time; the scan sees the same.
+`sbom.py generate --alpine <repository>=<resolved.json>` takes one per
+repository (`.github/ci/osv.sh` fetches them: `sbom.py alpine-repos` lists
+the repositories).
 
 `pins.json` maps each pin to its purl. `debian_sources.tsv` maps each
 Debian binary package to its source package and source version, because

@@ -36,7 +36,7 @@ echo "PASS: $BB --help runs"
 # difference.
 required_applets="
 [ ash awk basename cat chgrp chmod chown chroot cmp cp cpio cut date dd diff
-dirname dmesg echo fallocate false find free grep head id ip kill ln ls
+dirname dmesg echo fallocate false find free grep head id insmod ip kill ln ls
 md5sum mdev mkdir mkfifo mknod more mount mountpoint mv printf pwd
 readlink reboot rm rmdir sed sh sleep sort stat sync tail test timeout
 touch tr true truncate umount uname uniq wc which

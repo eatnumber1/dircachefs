@@ -12,6 +12,7 @@ qemu_test/qemu_cc_test run them (test/qemu/scripts/run-qemu.sh).
 load("@rules_java//java/common:java_common.bzl", "java_common")
 load("//test/qemu:qemu_cc_test.bzl", "UNIT_ASAN_MEM", "UNIT_MEM")
 load("//test/qemu:qemu_test.bzl", "E2E_ASAN_MEM", "E2E_MEM", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
+load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 
 def _tla_trace_test_impl(ctx):
     runtime = ctx.attr._jdk[java_common.JavaRuntimeInfo]
@@ -37,6 +38,8 @@ def _tla_trace_test_impl(ctx):
         sp(ctx.file._qemu),
         "--qboot",
         sp(ctx.file._qboot),
+        "--modules",
+        sp(ctx.file.modules),
         sp(ctx.file._kernel),
         sp(ctx.file.initramfs),
     ]
@@ -89,6 +92,7 @@ def _tla_trace_test_impl(ctx):
         ctx.file._validate,
         ctx.file._run_qemu,
         ctx.file.initramfs,
+        ctx.file.modules,
         ctx.file._kernel,
         ctx.file._qemu,
         ctx.file._qboot,
@@ -119,6 +123,11 @@ _tla_trace_test = rule(
             mandatory = True,
             doc = "The guest initramfs: a qemu_cc_test's <name>.cpio.gz " +
                   "(unit = True), or //test/qemu:initramfs_traced.",
+        ),
+        "modules": attr.label(
+            allow_single_file = True,
+            mandatory = True,
+            doc = "The kernel modules' archive (tla_trace_test makes it).",
         ),
         "unit": attr.bool(
             doc = "A qemu_cc_test's initramfs (run-qemu.sh --unit).",
@@ -170,7 +179,7 @@ _tla_trace_test = rule(
             allow_single_file = True,
         ),
         "_kernel": attr.label(
-            default = "//third_party/linux:bzImage",
+            default = "//third_party/linux:vmlinuz",
             allow_single_file = True,
         ),
         "_qemu": attr.label(
@@ -216,12 +225,13 @@ _tla_trace_test = rule(
     },
 )
 
-def tla_trace_test(name, tags = [], mem = None, asan_mem = None, **kwargs):
+def tla_trace_test(name, tags = [], disks = [], modules = [], mem = None, asan_mem = None, **kwargs):
     """Declares a trace validation test (see _tla_trace_test's attributes).
 
     It boots a QEMU guest, so it carries qemu_test's tags (KVM, no sandbox,
     the guest's resources) on top of `tags`, and takes the same guest memory
-    allowances (test/qemu/qemu_test.bzl; the unit or e2e defaults).
+    allowances (test/qemu/qemu_test.bzl; the unit or e2e defaults). `modules`
+    are the kernel modules beyond the defaults (qemu_test's).
     """
     unit = kwargs.get("unit", False)
     mem, asan_mem = resolve_mem(
@@ -233,6 +243,11 @@ def tla_trace_test(name, tags = [], mem = None, asan_mem = None, **kwargs):
     _tla_trace_test(
         name = name,
         mem_args = mem_args_for(mem, asan_mem),
+        disks = disks,
+        modules = modules_cpio(test_modules(
+            [d.split(":") for d in disks],
+            modules,
+        )),
         tags = ["e2e", "no-sandbox", "requires-kvm", "cpu:2", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
         **kwargs
     )

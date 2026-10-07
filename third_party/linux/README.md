@@ -1,210 +1,67 @@
-# The pinned, stock upstream test kernel (step 3.1a)
+# The test kernel: Alpine's linux-virt (Phase 24)
 
-A second kernel the QEMU tests can select (`--//test/qemu:kernel=stock`,
-see `test/qemu/README.md`), next to the patched kernel that stays the
-default for now (`test/qemu/scripts/build-kernel.sh`,
-`docs/plan/phases/03-drop-kernel-patch-and-build-test-kernel.md`). Unlike
-that kernel, this one is fetched and built entirely by Bazel: no
-`~/Sources/linux` checkout, no `~/.cache/dcfs/kernel-build`, no out-of-tree
-script.
+Every QEMU test boots Alpine's `linux-virt` kernel of the pinned Alpine
+branch (`MODULE.bazel`'s `alpine_index`, `third_party/alpine/README.md`):
+`//third_party/linux:vmlinuz` is the package's `/boot/vmlinuz-virt`. It
+replaces the kernel Bazel used to build from source (a pinned kernel.org
+release from `tinyconfig` plus a fragment: about 690 s on a cold cache, with
+host flex, bison, libelf and GNU bc).
 
-## Pin
+## Series, not version
 
-- Version: **7.2.9** (latest `stable` release on kernel.org as of
-  2026-10-05; `>= 6.9` for FUSE passthrough and `FS_IOC_GETFSUUID`, `>= 6.8`
-  for `STATX_MNT_ID_UNIQUE` -- both comfortably satisfied).
-- URL: `https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.9.tar.xz`
-- sha256: `b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba`
-  (downloaded directly and hashed; matches the sha256 kernel.org publishes
-  at `https://cdn.kernel.org/pub/linux/kernel/v7.x/sha256sums.asc`).
+The branch carries one kernel series for its life (v3.24: 6.18), so the
+branch is the pin. Alpine publishing 6.18.56 for 6.18.55 is taken as it
+comes: `guest/boot.sh` accepts `6.18.*-virt`, never an exact release, and
+nothing hard-codes `uname -r` or the module directory (which carries the
+release). The kernel and its modules always come from the same apk. A new
+branch with another series needs `boot.sh`'s pattern updated (the failure
+says so).
 
-Declared in `MODULE.bazel` as the `linux_source` `http_archive`.
+## Modules
 
-## Update procedure
+Alpine builds most drivers as modules (virtio_blk, fuse, ext4, xfs, btrfs,
+nfs, device-mapper targets), so a guest loads what its test needs, and only
+that: loading is the bulk of the boot time (measured: xfs about 2 s, ext4
+0.85 s, jbd2 0.5 s, btrfs 0.5 s, virtio_blk 0.5 s under KVM; the whole set
+5 s against 1.8 s for the minimum).
 
-1. Check `https://www.kernel.org/releases.json` (or the front page) for the
-   current `stable` release.
-2. Download the `.tar.xz` from `cdn.kernel.org` and compute its sha256
-   (`sha256sum`); cross-check against `sha256sums.asc` in the same
-   directory.
-3. Update the `url`, `sha256` and `strip_prefix` in `MODULE.bazel`'s
-   `linux_source` `http_archive`, and the version in this file.
-4. `bazel build //third_party/linux:kernel_build`. If it fails with
-   `MISSING: ... fragment symbol(s) did not survive olddefconfig`, a
-   Kconfig symbol in `kernel.config` was renamed, removed, or gained a new
-   dependency in the new version -- see "Kconfig dependency notes" below for
-   how to track one down, and fix `kernel.config`.
-5. `bazel test //test/qemu:boot_test --//test/qemu:kernel=stock` and then
-   the full suite on the default (patched) kernel.
+`qemu_test`, `qemu_test_matrix` and `qemu_cc_test` take `modules = [...]`.
+What every test needs is the default: `fuse` always, and `virtio_blk` and
+the filesystem modules of the test's `disks` (and of its `rootfs`). `modules`
+adds to that. `test/qemu/scripts/mkmodules.py` builds, per distinct module
+set, a small cpio archive with the modules and their dependencies
+(`modules.dep`, plus `modules.softdep`: btrfs wants its checksum algorithms
+loaded first), decompressed at build time; `run-qemu.sh` appends it to the
+shared initramfs and `guest/init` runs `insmod` over `/etc/dcfs-modules`,
+which lists them in load order. A module the kernel has built in is skipped
+(an Alpine config change inside a branch never fails a test); an unknown
+module fails the build with its name.
 
-## Config: `tinyconfig` plus `kernel.config`
+## The option list
 
-`build_kernel.sh` runs `make tinyconfig` (effectively `allnoconfig` plus a
-few size-optimization defaults -- every optional symbol off), merges
-`kernel.config` on top (`scripts/kconfig/merge_config.sh -m`, merge only),
-runs `make olddefconfig` to resolve dependencies, and then **fails the
-build** if `olddefconfig` dropped anything `kernel.config` asked for (a
-line-for-line comparison -- see the script). This is deliberately much
-stricter than `test/qemu/scripts/build-kernel.sh`'s `x86_64_defconfig` +
-`kvm_guest.config` + a long `scripts/config -e/-d` list: that baseline
-already turns on a large amount of scaffolding (`BLOCK`, `NETDEVICES`,
-`HYPERVISOR_GUEST`, ...) that `tinyconfig` does not, so `kernel.config` has
-to ask for all of it explicitly. See `docs/plan/execution.md`'s "Kernel
-config once": later phases needing a new option add a line here instead of
-editing concurrently.
+`required_options.txt` lists the kernel options the tests rely on, each with
+its reason (it was `kernel.config`, the build fragment).
+`//third_party/linux:kernel_config_test` checks every one against the
+package's `/boot/config-*`: built in or a module, never off. To add a
+requirement, add the line with the reason; if Alpine's kernel lacks it the
+test fails, and the options of the kernel are Alpine's to choose, so the answer
+is then to drop the need or to take a different kernel (not to patch one).
+`CONFIG_DM_DUST` is the one option we gave up (Alpine does not build it;
+Phase 11 uses dm-error and dm-flakey).
 
-### Kconfig dependency notes
+## What we do not control
 
-Getting `kernel.config` right took real trial and error, worth recording so
-the next pin update isn't a repeat:
-
-- **`menuconfig`/`bool "..." if EXPERT`-style symbols with a `default y`
-  are still off under `tinyconfig`.** `allnoconfig` (what `tinyconfig` is
-  built on) explicitly ignores ordinary Kconfig defaults and sets
-  everything to `n` unless something forces it on. `x86_64_defconfig`
-  doesn't have this problem (it honors defaults), which is why
-  `build-kernel.sh`'s list never needed to mention `BLOCK`, `TTY`,
-  `HYPERVISOR_GUEST`, `MULTIUSER`, `NETWORK_FILESYSTEMS`, `NETDEVICES` or
-  `MD` -- `kernel.config` has to turn every one of these "wrapping" symbols
-  on explicitly, or everything nested under them (`EXT4_FS`,
-  `VIRTIO_BLK`/`VIRTIO_NET`, `PARAVIRT`/`KVM_GUEST`/`PVH`, `NFS_FS`/`NFSD`,
-  `BLK_DEV_DM`/`DM_*`) silently disappears -- not a build failure, just an
-  absent option, which is exactly what the build script's fragment-vs-final
-  comparison is for.
-- **Prompt-less symbols (`tristate`/`bool` with no quoted string) can only
-  be turned on by another symbol's `select`, never by a fragment.** Kconfig
-  recalculates them from scratch every time regardless of what's sitting in
-  the merged `.config`. `ZLIB_DEFLATE`, `LZO_COMPRESS`, `ZSTD_COMPRESS` (and
-  their `_DECOMPRESS`/`_INFLATE` counterparts) and `SUNRPC` are all like
-  this: `CONFIG_BTRFS_FS` already `select`s the compression ones, and
-  `CONFIG_NFS_FS`/`CONFIG_NFSD` already `select` `SUNRPC`, so listing them
-  directly in `kernel.config` does nothing but trip the "dropped by
-  olddefconfig" check. Trust the `select`ing symbol instead.
-- **A symbol can simply stop existing.** `CONFIG_LIBCRC32C` (present in
-  `build-kernel.sh`'s list) was folded into the crypto subsystem some
-  releases back; `CONFIG_CRYPTO_CRC32C` is the whole story in 7.2.9.
-- To track one of these down for a future pin: extract the new tarball,
-  `grep -rn "^config SYMBOL_NAME$" .` to find its definition, read upward
-  for an enclosing `if FOO`/`menuconfig FOO` block, and check whether FOO
-  itself needs the same treatment.
-
-## Build
-
-`BUILD.bazel`'s `:kernel_build` genrule runs `build_kernel.sh` as an
-ordinary Bazel action:
-
-- Out-of-tree (`make O=...`), so the read-only `@linux_source` checkout
-  Bazel hands the action is never written to -- only the action's own
-  scratch directories (`mktemp -d`, cleaned up by Bazel, not a declared
-  output) are.
-- No network access.
-- Declared outputs: `bzImage` and `kernel-build.log` (enabled-symbol counts
-  and the final `bzImage` size, same information
-  `test/qemu/scripts/build-kernel.sh` used to log).
-
-### Hermetic build tools
-
-Per `AGENTS.md`'s third-party convention, the Bazel Central Registry is
-preferred over host tools wherever practical:
-
-- **GNU bc**: not in the BCR. Fetched and built from source by Bazel --
-  see `third_party/bc/README.md`. Used on `PATH` ahead of any host `bc` for
-  `kernel/time/timeconst.bc`.
-- **flex and bison**: *tried and reverted.* Both are in the BCR
-  (`flex@2.6.4.bcr.3`, `bison@3.8.2`) and both build and run standalone
-  fine (`bazel build @flex//:flex @bison//:bin/bison`; `--version` works).
-  But `scripts/kconfig/conf` needs them to actually *generate*
-  `lexer.lex.c`/`parser.tab.c` from `lexer.l`/`parser.y` (no pre-generated
-  `.c` ships in the kernel's release tarball), and invoking either BCR
-  binary for that -- whether from its own `bazel-out` location or copied/
-  symlinked elsewhere, with or without `RUNFILES_DIR`/
-  `RUNFILES_MANIFEST_FILE` set -- fails: flex forks an internal `m4`-based
-  pipeline (`@m4+//:m4`, declared in `flex.runfiles`) that dies with
-  `SIGPIPE`, and bison can't find its own `bison/data/m4sugar/m4sugar.m4`
-  runtime data. Both are Bazel-runfiles-dependent tools, and the specific
-  failure mode didn't resolve with the two straightforward fixes tried, so
-  per the step's own guidance this was reverted rather than pursued
-  further: `build_kernel.sh` uses whatever `flex`/`bison` the *host* has on
-  `PATH`, same as `third_party/bc`'s build. A future pass could revisit
-  this by wrapping the BCR binaries in a small launcher that sets up their
-  runfiles environment correctly before exec-ing them (e.g. mimicking what
-  `bazel run` itself does), but that's nontrivial enough to be its own unit
-  of work.
-- **The C toolchain (gcc, binutils) and libelf/zlib headers**: left to the
-  *host*, as the step text explicitly allows until Phase 7 pins an LLVM
-  toolchain (`make LLVM=1` then). `kernel.config`'s minimal feature set
-  (`tinyconfig`-based, no `DEBUG_INFO_BTF`, no `STACK_VALIDATION`/objtool)
-  does not actually exercise libelf or zlib during this build -- this
-  kernel's object files are produced by plain `gcc`/`ld`/`as`/`ar`, no
-  `objtool`/`pahole` step runs -- so this build has no real runtime
-  dependency on the BCR's `elfutils`/`zlib` modules either way; they were
-  not pursued for that reason (nothing to wire them into).
-
-### Remaining host tools
-
-Not made hermetic, listed here per the step's instructions so nothing is
-silently depended on:
-
-- `flex`, `bison` (kconfig lexer/parser generation -- see above).
-- `gcc`/`cc`, `ld`, `as`, `ar`, `nm`, `objcopy` (the host C
-  toolchain/binutils -- Phase 7 pins an LLVM toolchain and switches this to
-  `make LLVM=1`).
-- `perl`, `python3`, `awk`, `sed`, `bash`/`sh`, `make`, coreutils
-  (ordinary kbuild scripting dependencies; these are effectively universal
-  on any Linux build host and were not considered worth pinning
-  separately).
-- `libelf` *headers* (`libelf-dev`): objtool (`tools/objtool`, built by
-  every x86 kernel build) includes `<gelf.h>`. An earlier version of this
-  file said the build did not use them: it only seemed so because every
-  development host had them. Found by running the build in a fresh
-  GitHub-runner-like container (`act`, Phase 5.2); the BCR's `elfutils`
-  would make it hermetic and has not been tried.
+Alpine's kernel has ACPI, EFI, many drivers and module signing
+(`MODULE_SIG` on, not forced: our modules are the signed ones from the apk,
+loaded by `insmod`). The bzImage is 12.6 MB (the old one 3.5 MB) and boots
+in about the same time with the minimal module set (spike, 2026-10-07).
+The kernel image and modules are in the Bazel output base under
+`external/+alpine_package+alpine_linux_virt/`.
 
 ## Kernel matrix (not yet)
 
-CI would run the suite on the minimum supported kernel (README.md says 6.9)
-as well as the pinned one. That is not cheap with today's tree, so it is a
-follow-up (Phase 5.2 checked):
-
-1. a second `http_archive` for the latest 6.9.x release and a second
-   `:kernel_build` target;
-2. a config fragment for it: `kernel.config` asks for `CONFIG_FUSE_IO_URING`
-   (6.14 and later), which `build_kernel.sh` rejects as "did not survive
-   olddefconfig" on 6.9, and possibly other symbols that changed names;
-3. a Bazel flag selecting the kernel in `qemu_test`, `qemu_test_matrix` and
-   `qemu_cc_test` (`test/qemu/*.bzl`): they all name `:bzImage` directly
-   since step 4.4 removed the old flag;
-4. dcfs itself must run without io_uring on a kernel that lacks it (the
-   guest scripts and tests that expect it need a skip).
-
-Then the workflow gets a `kernel` matrix dimension over the two targets.
-
-## Selecting the kernel
-
-There is only one kernel: every `qemu_test`/`qemu_test_matrix`/
-`qemu_cc_test` target (`test/qemu/qemu_test.bzl`, `qemu_cc_test.bzl`)
-boots this package's `:bzImage` unconditionally. Step 3.2 dropped dcfs's
-`FUSE_ATTR_GENERATION` kernel patch and its matching libfuse patch, and
-step 4.4 removed the deprecated, out-of-tree "patched" kernel this file
-used to describe (`test/qemu/scripts/build-kernel.sh`, the
-`@kernel_image` repository rule in the now-deleted `test/qemu/kernel.bzl`,
-and the `--//test/qemu:kernel` flag that selected between the two) along
-with the host `qemu-system-x86_64`/`qboot.rom`/`busybox` that build path
-depended on indirectly -- see `test/qemu/README.md` and
-`third_party/qemu/README.md`/`third_party/busybox/README.md`.
-
-dcfs's full suite passes against this kernel.
-
-## Build identity and reproducibility (review R2)
-
-- `kernel.config` sets `CONFIG_LOCALVERSION="-dcfs-stock"`, so `uname -r` is
-  `<pinned version>-dcfs-stock`; `guest/boot.sh` requires that suffix instead
-  of hard-coding the pinned version (a pin bump needs no test edit).
-- `build_kernel.sh` re-executes itself under `sh -eu` for the real build and
-  prints the log to stderr on failure (a `{ ...; } || ...` block ignores
-  `set -e`, which once made a failed fragment check silent). It sets
-  `KBUILD_BUILD_TIMESTAMP/USER/HOST/VERSION` to constants.
-- The EXPERT-gated symbols `tinyconfig` turns off (`POSIX_TIMERS`, `KCMP`,
-  `AIO`, `SYSVIPC`, `ADVISE_SYSCALLS`, `MEMBARRIER`, `RSEQ`, `BUG`) are
-  turned back on in one block at the end of `kernel.config`, with the
-  options considered and left off listed there.
+Testing the minimum supported kernel (6.9) as well would need a second
+kernel with none of the options newer than 6.9 (`FUSE_IO_URING` is 6.14) and
+a Bazel flag choosing the kernel in the `qemu_test` macros. Alpine's older
+branches carry older series (v3.20: 6.6), so a second `alpine_package` of an
+older branch is one candidate; nothing here does it yet.

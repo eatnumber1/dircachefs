@@ -40,43 +40,54 @@ tool any more. What's left:
 
 ## The test kernel
 
-`//third_party/linux:bzImage` -- a pinned upstream release, fetched and
-built entirely by Bazel (no out-of-tree script, no `~/Sources/linux`, no
-manual build step), configured from `make tinyconfig` plus a checked-in
-fragment (`third_party/linux/kernel.config`). See
-`third_party/linux/README.md` for the pin, the fragment's rationale, and
-which host tools the build still depends on.
+`//third_party/linux:vmlinuz` -- Alpine's `linux-virt` of the Alpine branch
+pinned in `MODULE.bazel` (Phase 24; `third_party/alpine/README.md`), fetched
+and signature-checked by Bazel. The branch carries one kernel series for its
+life (v3.24: 6.18), so a new Alpine build inside the branch is taken as it
+comes and nothing here names an exact release (`guest/boot.sh` accepts
+`6.18.*-virt`). See `third_party/linux/README.md` for the module mechanism
+and the option list (`required_options.txt`, checked against the package's
+config by `//third_party/linux:kernel_config_test`). It replaces the kernel
+Bazel used to build from source (690 s cold, with host flex, bison, libelf
+and bc).
 
 It is the kernel every test boots (`qemu_test`, `qemu_test_matrix` and
-`qemu_cc_test` alike; there is no other kernel to select -- step 3.2
-dropped dcfs's `FUSE_ATTR_GENERATION` kernel patch, and step 4.4 removed
-the deprecated out-of-tree "patched" kernel and the
-`--//test/qemu:kernel` flag that used to choose between them).
+`qemu_cc_test` alike; there is no other kernel to select).
 
-### Why this kernel is minimal
+### Kernel modules
 
-Every unit test now pays this kernel's boot cost, so it is trimmed hard:
-`tinyconfig` (every optional symbol off) plus exactly what the guest
-needs on top (PVH direct boot, virtio-mmio + virtio-blk, ext4/btrfs/xfs,
-FUSE + `FUSE_IO_URING`, NFSv4 client+server, `FHANDLE`/`EXPORTFS`,
-devtmpfs, tmpfs with POSIX ACLs, cgroups, namespaces), with every bulky
-subsystem the guest never touches left off (DRM/FB/VGA console, sound,
-USB, input/HID, I2C, thermal, watchdog, Bluetooth/NFC/Wi-Fi, media,
-PCMCIA, ATA/SCSI, wired Ethernet, netfilter, IPv6, HPET, ACPI, loadable
-modules, debug info, kexec, hibernation, cpufreq/cpuidle, Xen/Hyper-V/
-VMware guest drivers). See `third_party/linux/kernel.config` for the exact
-list.
+Most drivers are modules in Alpine's kernel, and loading them is the bulk of
+the boot time, so each test loads only what it needs. The macros take
+`modules = [...]`; the default is `fuse` and, when the test has `disks` (or a
+`rootfs`), `virtio_blk` and the filesystem modules of those disks (a matrix
+test's `xfs` and `btrfs` variants get `xfs` and `btrfs`, which also need
+their checksum algorithm modules: `mkmodules.py` reads `modules.dep` and
+`modules.softdep`). A test whose guest script needs more says so, e.g.
+`modules = ["dm_delay"]` for the benchmarks' delay device or the NFS
+modules for `nfs_test`. A module the guest cannot load shows as
+`init: insmod <path> failed` in the serial log; a name the kernel does not
+have fails the build. The modules are decompressed when the archive is
+built, and `run-qemu.sh --modules <archive>` appends it to the shared
+initramfs (the kernel unpacks concatenated archives into one).
 
-Two consequences worth knowing:
+### What the guest looks like
 
-- **No ACPI.** The guest cannot power off via ACPI. `guest/init` instead
+Alpine's kernel is a general-purpose virtual-machine kernel (ACPI, EFI,
+PCI, many drivers): bigger than the `tinyconfig` kernel used until Phase 24
+(a 12.6 MB image against 3.5 MB), and it boots in about the same time when
+only the needed modules are loaded (spike, 2026-10-07: 1.8 s against 1.7 s
+under KVM with virtio_blk and ext4). Two properties of the guest do not
+change:
+
+- **No ACPI power-off.** The guest cannot power off via ACPI (the
+  microvm machine has `acpi=off`, see "Fast boot"). `guest/init` instead
   runs `reboot -f` with `reboot=t` on the kernel command line: the kernel
   forces a reboot via triple fault, and QEMU's `-no-reboot` makes that
   *quit* the VM instead of actually rebooting it. If you ever see a QEMU
   guest that boots but never returns, check that `-no-reboot` and
   `reboot=t` are both still there.
-- **No PCI.** Disks are virtio-mmio (`-device virtio-blk-device`), not
-  virtio-pci; the `microvm` machine type has no PCI bus at all.
+- **No PCI devices.** Disks are virtio-mmio (`-device virtio-blk-device`),
+  not virtio-pci; the `microvm` machine type has no PCI bus at all.
 
 ## Fast boot
 
@@ -110,11 +121,13 @@ nothing (nothing in the guest polls it) and skips both stalls.
 the guest about its virtio-mmio disks one of two ways -- an ACPI DSDT
 device (ACPI on) or a `virtio_mmio.device=...` parameter QEMU appends to
 the kernel command line automatically (ACPI off; this is what
-`CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES` parses). The test kernel has no ACPI
-at all, so with ACPI on/auto (QEMU's default) the guest never learns
-where its disks are -- `info qtree` over the QEMU monitor confirms the
-`virtio-blk-device` is correctly attached to a virtio-mmio transport
-either way, but `/dev/vd*` only appears with `acpi=off`.
+`CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES` parses). The first test kernel (a
+`tinyconfig` build) had no ACPI at all, so with ACPI on/auto (QEMU's
+default) the guest never learned where its disks were -- `info qtree` over
+the QEMU monitor confirmed the `virtio-blk-device` is correctly attached to
+a virtio-mmio transport either way, but `/dev/vd*` only appeared with
+`acpi=off`. Alpine's kernel has ACPI; `acpi=off` stays, as what the boot
+times were measured with.
 
 **Firmware: qboot, not `bios-microvm.bin`.** `microvm`'s other stock
 firmware option, `bios-microvm.bin` (a cut-down SeaBIOS build), turns out
@@ -123,7 +136,7 @@ is implemented as an option ROM, so with option ROMs disabled it falls
 through to normal BIOS boot-device probing and fails with "No bootable
 device" (verified experimentally while building this). qboot has no such
 dependency, and has a second advantage: it detects the kernel's PVH entry
-point (`CONFIG_PVH=y`, set by `third_party/linux/kernel.config`) and uses
+point (`CONFIG_PVH=y`, which Alpine's kernel has) and uses
 it directly when present -- an even faster, effectively firmware-less boot
 -- falling back to the normal Linux/x86 real-mode boot protocol for a
 kernel that lacks it. So there's no PVH-vs-not branch in `run-qemu.sh`:
@@ -816,9 +829,9 @@ has no NFS client (that needs the nfs_test Debian rootfs).
 ## `run-qemu.sh` internals
 
 One script serves both kinds of test (see the usage comment at the top of
-`scripts/run-qemu.sh`): `--qemu <...> --qboot <...> --unit <bzImage>
+`scripts/run-qemu.sh`): `--qemu <...> --qboot <...> --modules <archive> --unit <vmlinuz>
 <initramfs> [disk-spec...]` for `qemu_cc_test`, or `--qemu <...> --qboot
-<...> <bzImage> <initramfs> <dcfs_test-name> [disk-spec...]` for
+<...> --modules <archive> <vmlinuz> <initramfs> <dcfs_test-name> [disk-spec...]` for
 `qemu_test`. `--qemu`/`--qboot` are mandatory in both modes (step 4.4; see
 "Firmware: qboot" above). Each `disk-spec` is `<device>:<fstype>:<size>`,
 e.g. `vdb:ext4:256M`; disks are attached in `<letter>` order, with a small

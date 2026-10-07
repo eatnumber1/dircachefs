@@ -228,3 +228,9 @@ CONFIG_STATIC=y
 # no editors (vi), no package-manager-style tools, no syslog daemons.
 # allnoconfig already turns every one of these off; nothing here
 # re-enables any of them.
+
+# guest/init (step 24.2): loads the kernel modules a test declares with
+# insmod, from the list /etc/dcfs-modules (test/qemu/scripts/mkmodules.py).
+# The modules are decompressed when the initramfs is built, so no gzip
+# support is needed here.
+CONFIG_INSMOD=y

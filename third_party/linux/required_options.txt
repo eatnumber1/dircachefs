@@ -1,19 +1,17 @@
-# Kernel config fragment for the dcfs QEMU test kernel (step 3.1a).
+# Kernel options the dcfs QEMU tests need (step 3.1a, kept by step 24.2).
 #
-# Base: `make tinyconfig` (effectively allnoconfig + a few size-optimization
-# defaults), which turns every optional symbol off. This fragment lists
-# every symbol the test suite -- today's tests and the ones named in later
-# plan phases -- needs turned back on, each with a comment saying who needs
-# it, so later phases never have to edit this file concurrently (see
-# docs/plan/execution.md, "Kernel config once"). Built by
-# third_party/linux/build_kernel.sh: tinyconfig, merge this fragment,
-# olddefconfig, then a hard failure if olddefconfig dropped anything this
-# file asked for.
+# The test kernel is Alpine's linux-virt, so this is no longer a build
+# fragment: it is the list of what the tests rely on, each with a comment
+# saying who needs it, and //third_party/linux:kernel_config_test checks it
+# against the package's /boot/config-*. Every option must be built in (=y)
+# or a module (=m) there, never off; a module also has to be in the
+# `modules` of the tests that use it (test/qemu/qemu_test.bzl). Add a line
+# here, with the reason, when a test starts to need another option, so later
+# phases never have to edit anything else (docs/plan/execution.md, "Kernel
+# config once").
 #
-# Everything is =y, never =m: the guest kernel boots with no initramfs
-# module loading (CONFIG_MODULES is off, inherited from tinyconfig's
-# baseline -- modules would need firmware/module-loading infrastructure
-# the guest has no use for).
+# Left out on purpose: CONFIG_DM_DUST (Alpine does not build it; Phase 11
+# injects errors with dm-error and dm-flakey, which it does).
 
 # --- foundational symbols tinyconfig's allnoconfig-style baseline turns off
 # that a normal defconfig gets "for free" (every one of these is a
@@ -167,13 +165,12 @@ CONFIG_FUTEX=y
 CONFIG_POSIX_MQUEUE=y
 
 # --- device-mapper (Phase 11: dm-log-writes power-loss replay, fsfreeze,
-# I/O error injection via dm-flakey/dm-dust/dm-delay; "error" is dm-mod's
+# I/O error injection via dm-flakey/dm-delay; "error" is dm-mod's
 # own built-in target, no separate symbol) -------------------------------
 CONFIG_BLK_DEV_DM=y
 CONFIG_DM_DELAY=y
 CONFIG_DM_LOG_WRITES=y
 CONFIG_DM_FLAKEY=y
-CONFIG_DM_DUST=y
 
 # --- namespaces and the new mount API (Phase 15: mount.dcfs wrapper's
 # throwaway-namespace capture; systemd's PrivateNetwork=/PrivateUsers=) ----
@@ -233,8 +230,3 @@ CONFIG_XFS_QUOTA=y
 # fuse/.dcfs mount need, beyond the above: AIO, QUOTA (present), FALLOCATE
 # via the filesystems (present), loop (present), dm-flakey/log-writes
 # (present).
-
-# The build's own identity: guest/boot.sh requires `uname -r` to end in this
-# (L4: instead of a hard-coded pinned version that silently skipped checks
-# when the pin moved).
-CONFIG_LOCALVERSION="-dcfs-stock"

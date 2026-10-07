@@ -1,39 +1,51 @@
-exports_files([
-    "BUILD.linux_source",
-    "kernel.config",
-    "build_kernel.sh",
-])
+load("@rules_python//python:py_test.bzl", "py_test")
 
-# Step 3.1a: the pinned, stock upstream test kernel -- a second kernel the
-# QEMU tests can select (see //test/qemu:kernel, test/qemu/kernel.bzl) next
-# to the patched kernel that stays the default for now (test/qemu/README.md,
-# docs/plan/phases/03-drop-kernel-patch-and-build-test-kernel.md). Built as
-# an ordinary Bazel action: no writes outside this genrule's declared
-# outputs, no network access. See README.md for the pin, the config
-# fragment's rationale, and which host tools this build still depends on.
-genrule(
-    name = "kernel_build",
-    srcs = [
-        "@linux_source//:all",
-        "@linux_source//:Makefile",
-        "kernel.config",
-    ],
-    outs = [
-        "bzImage",
-        "kernel-build.log",
-    ],
-    cmd = """
-        $(location build_kernel.sh) \
-            "$$(dirname '$(location @linux_source//:Makefile)')" \
-            '$(location kernel.config)' \
-            '$(location //third_party/bc:bc)' \
-            '$(location bzImage)' \
-            '$(location kernel-build.log)' \
-            4
-    """,
-    tools = [
-        "build_kernel.sh",
-        "//third_party/bc:bc",
-    ],
+exports_files(["required_options.txt"])
+
+# The test kernel is Alpine's linux-virt of the pinned branch (step 24.2;
+# third_party/alpine/README.md, third_party/linux/README.md): a bzImage
+# whose drivers are mostly modules, which each test declares and its
+# initramfs carries (test/qemu/qemu_test.bzl).
+alias(
+    name = "vmlinuz",
+    actual = "@alpine_linux_virt//:root/boot/vmlinuz-virt",
     visibility = ["//visibility:public"],
+)
+
+# Everything the package unpacked (the module tree, /boot/config-*).
+filegroup(
+    name = "package",
+    srcs = ["@alpine_linux_virt//:root"],
+    visibility = ["//visibility:public"],
+)
+
+# The package's kernel configuration (its file name carries the release).
+genrule(
+    name = "config",
+    srcs = [":package"],
+    outs = ["config"],
+    cmd = """
+        for f in $(locations :package); do
+            case "$$f" in
+                */boot/config-*) cp "$$f" "$@" ;;
+            esac
+        done
+    """,
+)
+
+# Every option the tests need is built in or a module in Alpine's kernel,
+# never off.
+py_test(
+    name = "kernel_config_test",
+    size = "small",
+    srcs = ["kernel_config_test.py"],
+    args = [
+        "$(location required_options.txt)",
+        "$(location :config)",
+    ],
+    data = [
+        "required_options.txt",
+        ":config",
+    ],
+    main = "kernel_config_test.py",
 )

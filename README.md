@@ -88,11 +88,9 @@ these packages on a CI runner.
 
 | Package (Debian/Ubuntu) | Used by | Why it is not hermetic yet |
 |---|---|---|
-| `build-essential` (gcc, g++, binutils, make) | every C/C++ compile, the kernel, QEMU and the mkfs tools | Phase 7 pins an LLVM toolchain |
-| `flex`, `bison` | the kernel build (kconfig's lexer and parser) | the BCR builds fail on them, `third_party/linux/README.md` |
+| `build-essential` (gcc, g++, binutils, make) | every C/C++ compile, QEMU and the mkfs tools | Phase 7 pins an LLVM toolchain |
 | `ninja-build` | QEMU's build (`third_party/qemu`) | found by `act` (Phase 5.2); QEMU's configure fails with "Cannot find Ninja" |
-| `libelf-dev` | the kernel build: objtool includes `<gelf.h>` | found by `act` (Phase 5.2); the BCR's `elfutils` is the hermetic candidate, not pursued (`third_party/linux/README.md`) |
-| `python3`, `perl` | QEMU's configure and meson, the kernel's scripts | universal on build hosts |
+| `python3`, `perl` | QEMU's configure and meson | universal on build hosts |
 | `coreutils` (`truncate`), `curl`, `xz-utils`, `git` | scratch-disk images, fetching, archives | universal on build hosts |
 
 ## Building
@@ -364,12 +362,12 @@ unfixed code, then the fix makes it pass.
   the other tests' variants); `.github/ci/test.sh` does both.
 - **Failures** upload every test's `test.log`, `test.xml` and `test.outputs/`
   (the guest's serial console) as the `test-logs-<job>` artifact.
-- **Kernel matrix: not yet.** Every test boots the one pinned kernel
-  (`//third_party/linux:bzImage`, the latest stable release when pinned).
-  Testing the minimum supported kernel (6.9) too needs a second pinned
-  kernel, a config fragment without the options newer than 6.9
-  (`FUSE_IO_URING` is 6.14) and a Bazel flag choosing the kernel in the
-  `qemu_test` macros: `third_party/linux/README.md`, "Kernel matrix".
+- **Kernel matrix: not yet.** Every test boots Alpine's `linux-virt` of the
+  one pinned Alpine branch (`//third_party/linux:vmlinuz`, series 6.18 on
+  v3.24; CI fetches the branch's current build on each run). Testing the
+  minimum supported kernel (6.9) too needs a second kernel (its options
+  newer than 6.9, `FUSE_IO_URING` is 6.14, must be absent) and a Bazel flag
+  choosing the kernel in the `qemu_test` macros: `third_party/linux/README.md`.
 - **Host tools.** `.github/ci/prepare.sh` installs the packages of
   [Host requirements](#host-requirements) explicitly and the pinned
   Bazelisk (sha256-checked).
@@ -414,7 +412,7 @@ invocation and fails the job if the scanner reports nothing.
 
 **Informational, never gating: the test-only dependencies** (the Debian
 test image, kernel, QEMU, busybox, e2fsprogs, xfsprogs, btrfs-progs,
-util-linux, urcu, inih, bc, dtc, pjdfstest, googletest, google_benchmark,
+util-linux, urcu, inih, dtc, pjdfstest, googletest, google_benchmark,
 TLA+ tools, act, Bazelisk, the Bazel rule sets). Their SBOM
 (`testonly.cdx.json`) is scanned and the findings are printed in the job log,
 but the step cannot fail the job.

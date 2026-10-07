@@ -14,18 +14,33 @@ FAILED=0
 KVER=$(uname -r)
 echo "boot.sh: kernel $KVER"
 
-# The kernel is //third_party/linux:bzImage, the pinned upstream kernel
-# (see third_party/linux/README.md). Its kernel.config sets
-# CONFIG_LOCALVERSION="-dcfs-stock", so `uname -r` is "<pinned
-# version>-dcfs-stock": the build stamps its own identity and bumping the
-# pin needs no edit here, while any other kernel (a host kernel, a stale
-# build) fails. Options from kernel.config are checked by behavior (no
-# /proc/config.gz: CONFIG_IKCONFIG is off, see the fragment's
-# size-minimization goals).
+# The kernel is //third_party/linux:vmlinuz, Alpine's linux-virt of the
+# pinned branch (third_party/linux/README.md). A branch carries one kernel
+# series for its life, so `uname -r` is "6.18.<build>-<alpine release>-virt"
+# and the check accepts the series, never an exact release: an Alpine
+# update inside the branch must not fail this test. The kernel and its
+# modules come from the same package, so the guest's module directory is
+# named by `uname -r`. A new branch with another series fails here, saying
+# so. Options the tests need are checked against the package's config
+# by //third_party/linux:kernel_config_test, and by the tests themselves.
 case "$KVER" in
-[0-9]*.[0-9]*-dcfs-stock) pass stock-kernel-version ;;
-*) fail stock-kernel-version "uname -r is '$KVER', want <version>-dcfs-stock (the build in third_party/linux)" ;;
+6.18.*-virt) pass stock-kernel-version ;;
+*) fail stock-kernel-version "uname -r is '$KVER', want 6.18.*-virt (Alpine's linux-virt; update the series here when the branch changes)" ;;
 esac
+
+if [ -d "/lib/modules/$KVER/kernel" ]; then
+	pass kernel-modules-match
+else
+	fail kernel-modules-match "no /lib/modules/$KVER/kernel: modules from another kernel build?"
+fi
+
+# The modules the test declared are loaded: fuse is every test's default
+# (qemu_test.bzl), so it is a module of the running kernel, or built in.
+if grep -q '^fuse ' /proc/modules || [ -d /sys/module/fuse ]; then
+	pass fuse-loaded
+else
+	fail fuse-loaded "the fuse module is not loaded"
+fi
 
 # CONFIG_NAMESPACES + CONFIG_NET_NS/CONFIG_USER_NS: procfs only exposes a
 # namespace's /proc/self/ns/<type> entry when that namespace type is

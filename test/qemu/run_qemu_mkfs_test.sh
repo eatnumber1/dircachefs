@@ -22,6 +22,11 @@ mkdir "$WORK/bin" "$WORK/host"
 cat >"$WORK/bin/qemu" <<'E'
 #!/bin/sh
 [ "${1:-}" = --version ] && echo "fake qemu 0"
+# Keep what the guest would be given as its initramfs.
+while [ $# -gt 0 ]; do
+	[ "$1" = -initrd ] && cat "$2" >"$(dirname "$0")/../initrd.seen"
+	shift
+done
 exit 0
 E
 for t in mke2fs mkfs-xfs mkfs-btrfs; do
@@ -69,6 +74,22 @@ for want in "mke2fs: $WORK/bin/mke2fs" "mke2fs.conf: $WORK/mke2fs.conf" \
 	grep -q "^run-qemu.sh: $want" "$LOG" || fail "serial.log does not record '$want'"
 done
 echo "PASS: scratch disks are made by the explicitly passed tools, which are logged"
+
+# The kernel-module archive (step 24.2) is appended to the initramfs the
+# guest is given: the kernel unpacks concatenated archives into one.
+printf 'MODULES' >"$WORK/modules.cpio.gz"
+printf 'BASE' >"$WORK/initrd"
+rm -f "$WORK/initrd.seen"
+# shellcheck disable=SC2086
+run $good --modules "$WORK/modules.cpio.gz"
+[ "$(cat "$WORK/initrd.seen")" = BASEMODULES ] ||
+	fail "the guest's initramfs is not the base followed by the modules: '$(cat "$WORK/initrd.seen" 2>&1)'"
+rm -f "$WORK/initrd.seen"
+# shellcheck disable=SC2086
+run $good
+[ "$(cat "$WORK/initrd.seen")" = BASE ] ||
+	fail "without --modules the initramfs is not the base alone"
+echo "PASS: --modules appends the module archive to the initramfs"
 
 # A host path is refused, before any image is made.
 rm -f "$WORK/mkfs-calls"

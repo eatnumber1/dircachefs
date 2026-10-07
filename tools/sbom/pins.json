@@ -27,8 +27,6 @@
     "rules_python": {"purl": "pkg:github/bazel-contrib/rules_python", "kind": "build-rules"}
   },
   "repository": {
-    "linux_source": {"purl": "pkg:generic/linux", "kind": "code", "version": "strip_prefix"},
-    "gnu_bc": {"purl": "pkg:generic/bc", "kind": "tool", "version": "strip_prefix"},
     "pjdfstest": {"purl": "pkg:github/pjd/pjdfstest", "kind": "tool", "version": "strip_prefix"},
     "qemu": {"purl": "pkg:generic/qemu", "kind": "tool", "version": "strip_prefix"},
     "qemu.dtc": {"purl": "pkg:generic/dtc", "kind": "tool", "version": "dtc_strip_prefix"},

@@ -8,7 +8,10 @@
 # targets, passed as $(location ...) by qemu_test.bzl/qemu_cc_test.bzl --
 # never a host PATH lookup or a default path. So are the mkfs tools for the
 # scratch disks (R3): --mke2fs, --mke2fs-conf (MKE2FS_CONFIG), --mkfs-xfs and
-# --mkfs-btrfs, in front of the other flags. Two modes:
+# --mkfs-btrfs, in front of the other flags. The kernel is Alpine's
+# linux-virt, whose drivers are modules: --modules <cpio.gz> (step 24.2), the
+# archive mkmodules.py builds for the test, is appended to the shared
+# initramfs, and guest/init loads what it lists. Two modes:
 #
 #   run-qemu.sh --unit --qemu <qemu-system-x86_64> --qboot <qboot.rom> \
 #       <bzImage> <initramfs.cpio.gz> [disk-spec...]
@@ -32,7 +35,7 @@
 # PC/ISA legacy devices we don't need (PIT/PIC/option ROMs), virtio-mmio
 # disks (microvm has no PCI). Firmware is qboot (QBOOT below): qboot uses
 # the kernel's PVH entry point directly when the kernel supports it (see
-# the test kernel's CONFIG_PVH=y) for an effectively firmware-less boot,
+# the test kernel's CONFIG_PVH=y, which Alpine's has) for an effectively firmware-less boot,
 # and falls back to the normal Linux/x86 real-mode boot protocol otherwise
 # -- so this one firmware choice covers both cases with no detection logic
 # needed here. (bios-microvm.bin, this host's other microvm firmware
@@ -57,14 +60,16 @@
 # virtio-mmio devices to the guest one of two ways -- an ACPI DSDT
 # device (when ACPI is on) or a `virtio_mmio.device=` kernel command-line
 # parameter added automatically to the -append string (when ACPI is off;
-# this is what CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES, set by
-# third_party/linux/kernel.config, parses). The test kernel has no ACPI at all
-# (CONFIG_ACPI=n, trimmed along with everything else it doesn't need), so
-# with acpi=on/auto it never finds its disks -- confirmed experimentally
-# (verified with `info qtree` over the QEMU monitor: the virtio-blk-device
-# is correctly attached to a virtio-mmio transport either way, but without
-# acpi=off the guest has no way to learn the transport's MMIO address and
-# /dev/vd* never appears).
+# this is what CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES parses; the option list in
+# third_party/linux/required_options.txt, checked against Alpine's linux-virt
+# by //third_party/linux:kernel_config_test, has it). The first test kernel
+# here had no ACPI at all and so never found its disks with acpi=on/auto,
+# confirmed experimentally (verified with `info qtree` over the QEMU monitor:
+# the virtio-blk-device is correctly attached to a virtio-mmio transport
+# either way, but without acpi=off the guest has no way to learn the
+# transport's MMIO address and /dev/vd* never appears). Alpine's kernel does
+# have ACPI; acpi=off stays because it is what the boot was measured with and
+# leaves nothing to enumerate.
 set -eu
 
 # Step 4.4: the QEMU binary and qboot ROM are Bazel-built targets
@@ -92,6 +97,10 @@ ROOTFS=""
 # --test_env=DCFS_MEM=2048`) overrides both, to measure a test's real peak
 # with room to spare or to see how a too-small guest fails.
 MEM_OVERRIDE=""
+# --modules <cpio.gz>: the kernel modules this test declared (step 24.2),
+# appended to the initramfs given below (the kernel unpacks concatenated
+# archives into one).
+MODULES=""
 while :; do
 	case "${1:-}" in
 	--unit)
@@ -104,6 +113,10 @@ while :; do
 		;;
 	--mem)
 		MEM_OVERRIDE=$2
+		shift 2
+		;;
+	--modules)
+		MODULES=$2
 		shift 2
 		;;
 	--qemu)
@@ -169,6 +182,11 @@ fi
 
 WORKDIR="${TEST_TMPDIR:-$(mktemp -d)}"
 LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/serial.log"
+
+if [ -n "$MODULES" ]; then
+	cat "$INITRD" "$MODULES" >"$WORKDIR/initramfs-with-modules.cpio.gz"
+	INITRD="$WORKDIR/initramfs-with-modules.cpio.gz"
+fi
 
 # Record the mkfs tools, for anyone auditing a serial log.
 {

@@ -1,3 +1,6 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//formal:trace.bzl", "tla_trace_test")
 load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
@@ -262,6 +265,12 @@ qemu_test(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/nfs.sh",
+    # The NFSv4 client and server (and, as their dependencies, sunrpc,
+    # lockd and the rest); the Debian userland only mounts and exports.
+    modules = [
+        "nfsd",
+        "nfsv4",
+    ],
     rootfs = "//third_party/debian:rootfs",
     size = "large",
     timeout = "long",
@@ -448,6 +457,8 @@ qemu_test_matrix(
     ],
     guest_script = "guest/bench_smoke.sh",
     asan_mem = 1856,  # dcfs and the benchmark under ASan hold 1178 MiB
+    # The delay target of the benchmarks' slow device (guest/bench.sh).
+    modules = ["dm_delay"],
     size = "small",
     other_size = "medium",
     timeout = "moderate",
@@ -502,6 +513,7 @@ qemu_test(
     # 1818 MiB of anonymous memory in use, and the host cannot spare a bigger
     # guest while measuring. 3072 is a guess; run it and read the MEM line.
     asan_mem = 3072,
+    modules = ["dm_delay"],
     size = "enormous",
     timeout = "eternal",
 )
@@ -518,6 +530,7 @@ qemu_test(
     guest_script = "guest/bench_readdir.sh",
     mem = 320,  # peak 157 MiB
     asan_mem = 2304,  # 1509
+    modules = ["dm_delay"],
     size = "large",
     timeout = "long",
 )
@@ -592,3 +605,27 @@ TRACED_GUEST_SCRIPTS = {
     )
     for script, spec in TRACED_GUEST_SCRIPTS.items()
 ]
+
+# Builds the kernel-module part of a guest's initramfs (qemu_test.bzl's
+# `modules`): the modules a test declares and their dependencies.
+py_library(
+    name = "mkmodules",
+    srcs = ["scripts/mkmodules.py"],
+    imports = ["scripts"],
+    visibility = ["//visibility:public"],
+)
+
+py_binary(
+    name = "mkmodules_bin",
+    srcs = ["scripts/mkmodules.py"],
+    main = "scripts/mkmodules.py",
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "mkmodules_test",
+    size = "small",
+    srcs = ["scripts/mkmodules_test.py"],
+    main = "scripts/mkmodules_test.py",
+    deps = [":mkmodules"],
+)

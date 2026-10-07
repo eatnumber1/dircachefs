@@ -44,9 +44,7 @@ TARGETS = [
     ("debugfs", "//third_party/e2fsprogs:debugfs", False),
     ("mkfs.xfs", "//third_party/xfsprogs:mkfs_xfs", False),
     ("mkfs.btrfs", "//third_party/btrfs-progs:mkfs_btrfs", False),
-    ("kernel", "//third_party/linux:bzImage", True),
     ("busybox", "//third_party/busybox:busybox_build", True),
-    ("bc", "//third_party/bc:bc", True),
     ("debian rootfs", "//third_party/debian:rootfs", True),
     ("tlc overrides jar", "//third_party/tlaplus:tlc_overrides", True),
 ]

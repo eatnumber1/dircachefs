@@ -4,7 +4,7 @@ QEMU guest, root, on the project's own kernel.
 PROJECT DECISION: dcfs requires root (real open_by_handle_at,
 FS_IOC_GETFSUUID, etc.), so there is no host-side test execution -- every
 test, including plain unit tests, boots a minimal kernel
-(//third_party/linux:bzImage) under the pinned, Bazel-built QEMU
+(//third_party/linux:vmlinuz) under the pinned, Bazel-built QEMU
 (//third_party/qemu:qemu_system_x86_64, step 4.4; see test/qemu/README.md
 for the boot-time budget this depends on) and runs as root inside it. This
 is the replacement for a plain cc_test.
@@ -34,6 +34,7 @@ absolute paths so the dynamic loader finds them with no rpath surgery.
 
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 load("//test/qemu:qemu_test.bzl", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
 
 # Unit guests (step 6.2): the plain tests peak at 35 MiB (MemTotal - MemAvailable
@@ -67,6 +68,7 @@ def qemu_cc_test(
         tags = [],
         mem = None,
         asan_mem = None,
+        modules = [],
         **kwargs):
     """Declares a dcfs unit test that boots the QEMU guest to run it.
 
@@ -92,6 +94,9 @@ def qemu_cc_test(
             basis of the Bazel resource tag.
         asan_mem: guest RAM in MiB for --config=asan/ubsan builds (default
             UNIT_ASAN_MEM, or mem if that is larger).
+        modules: kernel modules the test needs beyond the defaults (fuse,
+            and virtio_blk plus the filesystem modules of `disks`); see
+            qemu_test.bzl.
         **kwargs: forwarded to the underlying cc_binary (e.g. extra
             copts).
     """
@@ -141,12 +146,16 @@ def qemu_cc_test(
 
     disk_args = [d[0] + ":" + d[1] + ":" + d[2] for d in disks]
 
-    # Step 3.2 dropped the FUSE_ATTR_GENERATION kernel patch; step 4.4
-    # removed the deprecated out-of-tree "patched" kernel entirely (and
-    # with it the //test/qemu:kernel string_flag) -- every test now boots
-    # the pinned, Bazel-built //third_party/linux:bzImage unconditionally.
-    kernel_data = ["//third_party/linux:bzImage"]
-    kernel_args = ["$(location //third_party/linux:bzImage)"]
+    # The test kernel is Alpine's linux-virt (step 24.2): //third_party/linux:
+    # vmlinuz. Its drivers are modules; the initramfs gets the archive of the
+    # ones this test needs (modules.bzl), which run-qemu.sh appends.
+    modules_archive = modules_cpio(test_modules(disks, modules))
+    kernel_data = ["//third_party/linux:vmlinuz", modules_archive]
+    kernel_args = [
+        "--modules",
+        "$(location " + modules_archive + ")",
+        "$(location //third_party/linux:vmlinuz)",
+    ]
 
     # Step 4.4: the Bazel-built QEMU and qboot ROM, passed explicitly --
     # run-qemu.sh does no host lookup of its own.

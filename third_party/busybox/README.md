@@ -78,11 +78,11 @@ grep -ohE '\b(mount|umount|stat|...)\b' test/qemu/guest/*.sh test/qemu/guest/ini
 ```
 
 (see the fragment file's own header for the full, current command and
-reasoning). As of this pin, 62 applets are enabled:
+reasoning). As of this pin, 63 applets are enabled (`insmod`, for Phase 24's kernel modules, is the newest; the Alpine kernel's drivers are modules):
 
 ```
 [ ash awk basename cat chgrp chmod chown chroot cmp cp cut date dd diff
-dirname dmesg echo fallocate false find free grep head id ip kill ln ls
+dirname dmesg echo fallocate false find free grep head id insmod ip kill ln ls
 md5sum mdev mkdir mkfifo mknod more mount mountpoint mv printf pwd
 readlink reboot rm rmdir sed sh sleep sort stat sync tail test timeout
 touch tr true truncate umount uname uniq wc which

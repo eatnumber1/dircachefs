@@ -17,8 +17,13 @@ def read(name):
         return f.read()
 
 
+def alpine_docs():
+    """{repository name: resolved.json text} of the fetched Alpine repos."""
+    return {k: read(k) for k in REPO if k.startswith("alpine_")}
+
+
 def build(module=None, lock=None, graph=None, debs=None, sources=None,
-          prepare=None, pins=None):
+          prepare=None, pins=None, alpine=None):
     """Returns sbom.build's {"shipped": doc, "testonly": doc}."""
     return sbom.build(
         read("module") if module is None else module,
@@ -27,7 +32,8 @@ def build(module=None, lock=None, graph=None, debs=None, sources=None,
         read("debs") if debs is None else debs,
         read("sources") if sources is None else sources,
         read("prepare") if prepare is None else prepare,
-        json.loads(read("pins")) if pins is None else pins)
+        json.loads(read("pins")) if pins is None else pins,
+        alpine=alpine_docs() if alpine is None else alpine)
 
 
 def components(docs=None):
@@ -56,6 +62,15 @@ class RealPins(unittest.TestCase):
             if line.strip():
                 binary = line.split("_")[0]
                 self.assertIn(f"deb:{binary}", covered)
+        # Every package an alpine_package names is in the SBOM (by its name
+        # in the pin, its purl uses the origin: AlpineComponents).
+        packages = re.findall(
+            r'^alpine_package\(.*?packages\s*=\s*\[([^\]]*)\]', module,
+            re.M | re.S)
+        self.assertTrue(packages)
+        for group in packages:
+            for name in re.findall(r'"([^"]+)"', group):
+                self.assertIn(f"alpine:{name}", covered)
 
     def test_debian_purls_are_osv_shaped(self):
         comps = build()["testonly"]["components"]
@@ -71,7 +86,6 @@ class RealPins(unittest.TestCase):
 
     def test_versions_come_from_the_pins(self):
         purls = {c["purl"] for c in components()}
-        self.assertIn("pkg:generic/linux@7.2.9", purls)
         self.assertIn("pkg:generic/qemu@11.1.2", purls)
         self.assertIn("pkg:github/nektos/act@0.2.89", purls)
         self.assertIn("pkg:github/tlaplus/tlaplus@1.7.4", purls)
@@ -82,7 +96,66 @@ class RealPins(unittest.TestCase):
             props = {p["name"]: p["value"] for p in c["properties"] if p["name"] != "dcfs:pin"}
             self.assertIn(props["dcfs:osv-matchable"], ("true", "false"))
             self.assertEqual(props["dcfs:osv-matchable"] == "true",
-                             c["purl"].startswith("pkg:deb/"))
+                             c["purl"].startswith(("pkg:deb/", "pkg:apk/")))
+
+
+class AlpineComponents(unittest.TestCase):
+    """The packages of the Alpine repositories (third_party/alpine)."""
+
+    def resolved(self):
+        return {name: json.loads(text) for name, text in alpine_docs().items()}
+
+    def test_components_are_the_fetched_packages_under_their_origin(self):
+        purls = {c["purl"] for c in build()["testonly"]["components"]}
+        self.assertTrue(self.resolved())
+        for doc in self.resolved().values():
+            distro = "alpine-" + doc["branch"].lstrip("v")
+            self.assertRegex(distro, r"^alpine-[0-9]+\.[0-9]+$")
+            for p in doc["packages"]:
+                self.assertIn(
+                    f"pkg:apk/alpine/{p['origin']}@{p['version']}"
+                    f"?distro={distro}", purls)
+
+    def test_no_component_is_a_binary_subpackage_name(self):
+        # OSV matches Alpine advisories by origin package: a component named
+        # after a binary subpackage (linux-virt, whose origin is linux-lts)
+        # finds nothing, silently.
+        purls = {c["purl"] for c in build()["testonly"]["components"]}
+        subpackages = {
+            p["name"] for doc in self.resolved().values()
+            for p in doc["packages"] if p["name"] != p["origin"]}
+        self.assertIn("linux-virt", subpackages)
+        origins = {p["origin"] for doc in self.resolved().values()
+                   for p in doc["packages"]}
+        self.assertNotIn("linux-virt", origins)
+        for name in subpackages - origins:
+            self.assertFalse(
+                any(p.startswith(f"pkg:apk/alpine/{name}@") for p in purls),
+                name)
+
+    def test_the_kernel_is_reported_as_linux_lts(self):
+        purls = {c["purl"] for c in build()["testonly"]["components"]}
+        self.assertTrue(any(p.startswith("pkg:apk/alpine/linux-lts@6.")
+                            for p in purls), sorted(purls)[:5])
+
+    def test_the_repositories_come_from_module_bazel(self):
+        self.assertEqual(sorted(sbom.parse_alpine_repos(read("module"))),
+                         sorted(alpine_docs()))
+
+    def test_an_alpine_repository_without_resolved_json_fails(self):
+        with self.assertRaisesRegex(sbom.SbomError, "alpine_linux_virt"):
+            build(alpine={})
+
+    def test_a_resolved_json_nothing_declares_fails(self):
+        docs = dict(alpine_docs(), alpine_stray=read("alpine_linux_virt"))
+        with self.assertRaisesRegex(sbom.SbomError, "alpine_stray"):
+            build(alpine=docs)
+
+    def test_a_resolved_json_without_the_named_package_fails(self):
+        doc = json.loads(read("alpine_linux_virt"))
+        doc["packages"] = []
+        with self.assertRaisesRegex(sbom.SbomError, "linux-virt"):
+            build(alpine={"alpine_linux_virt": json.dumps(doc)})
 
 
 class MissingEntries(unittest.TestCase):
@@ -115,8 +188,8 @@ class MissingEntries(unittest.TestCase):
 
     def test_pins_json_entry_removed_fails(self):
         pins = json.loads(read("pins"))
-        del pins["repository"]["linux_source"]
-        with self.assertRaisesRegex(sbom.SbomError, "linux_source"):
+        del pins["repository"]["pjdfstest"]
+        with self.assertRaisesRegex(sbom.SbomError, "pjdfstest"):
             build(pins=pins)
 
 
@@ -168,7 +241,8 @@ class Shipped(unittest.TestCase):
 
     def test_without_a_graph_every_shipped_pin_is_used(self):
         docs = sbom.build(read("module"), read("lock"), None, read("debs"),
-                          read("sources"), read("prepare"), self.pins())
+                          read("sources"), read("prepare"), self.pins(),
+                          alpine=alpine_docs())
         self.assertEqual(docs["shipped"], build()["shipped"])
 
     def test_a_new_linked_repo_without_an_entry_fails(self):

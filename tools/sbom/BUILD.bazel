@@ -37,6 +37,7 @@ py_test(
         "pins=$(location pins.json)",
         "fixture=$(location testdata/seeded_vulnerable.cdx.json)",
         "config=$(location //:osv-scanner.toml)",
+        "alpine_linux_virt=$(location @alpine_linux_virt//:resolved.json)",
     ],
     data = [
         "debian_sources.tsv",
@@ -48,6 +49,7 @@ py_test(
         "//:osv-scanner.toml",
         "//dcfs:linked_deps",
         "//third_party/debian:debs.lock",
+        "@alpine_linux_virt//:resolved.json",
     ],
     deps = [":sbom_lib"],
 )
