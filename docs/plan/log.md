@@ -1252,3 +1252,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   item 5), per-row C++ (item 6). New flake class seen: atime_test second-boundary race (want
   ...067 got ...068; 4/4 on rerun) -> make it deterministic with the injected clock (26.10)
   when touched. dir_cache_fs_test under ASan: timeout moderate, asan_mem 960. Under review.
+- readdir review: no correctness bug (all 21 ReadOne callers unique/aggregate/LIMIT 1; the join
+  cannot drop a present dentry; stubs and attrs_valid=0 take the old path; LIMIT never too
+  small; merged statements equivalent; budgets match; bench consistent). Fixes before merge:
+  design.md (join, LIMIT, ratio check; a Phase 22 note: attributes now read at listing time),
+  stale step_counter comment, re-measure the ratio check's bite on the faster code, one macro
+  for the attribute columns, the step counter counts without formatting SQL (the ASan peak),
+  ReadOne's unique-only contract guarded in the checking build.
