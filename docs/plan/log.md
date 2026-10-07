@@ -1284,3 +1284,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   loop, non-blocking drain of /dev/fuse at checkpoints, EINTR there), single-threaded; async
   interruption of kernel-blocked syscalls (spin-up, syncfs, network) waits for coroutines/
   io_uring. Implementation (22.2 model, 22.3 tests + checkpoints, 22.4 docs) dispatched (lane-2).
+- readdir step merged (9fd9605, 8 commits): N4 (ReaddirWorkTest step bound; readdir_boundary as a
+  CPU-tick ratio: quadratic variant 39 vs 435 ticks, 11x, fails) + reductions 1-4; every sql_stmts
+  budget lowered; warm 10k listing 652 -> 252 ms; DCFS_ATTR_COLUMNS/_NULLS macros; the step
+  counter raises sqlite.cc's verbosity only; ReadOne documented unique-only in style.md (a debug
+  second step would restore the counted step: the checking build is the place). presubmit+formal
+  217 pass + 1 skip, asan small 30/30. dir_cache_fs_test asan_mem 960 (ASan quarantine, measured).

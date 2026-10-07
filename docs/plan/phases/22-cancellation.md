@@ -90,3 +90,14 @@ already changed state that cannot be undone).
 Owner: dcfs-protocol (22.2, 22.3's unit tests), dcfs-investigator (22.1),
 dcfs-implementer (guest tests, docs). Order: after R4 merges (it touches
 the same request paths), before Phase 13.
+
+## Note from the readdir step (2026-10-08)
+
+Since the readdir reductions, children's attributes are read in the
+listing statement (`ListDir`'s join), not per entry when it is served.
+Under checkpoints this changes nothing (no interleaving inside a request
+today); under coroutines, a mutation interleaving during an earlier
+entry's refresh no longer makes a later entry's attributes unknown before
+they are served; the kernel discards readdirplus attributes older than a
+completed modifying op on the same mount (attr_version), so this is safe,
+but the coroutine design should re-check it. See docs/design.md "Readdir".
