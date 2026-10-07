@@ -1280,3 +1280,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   /dev/fuse at safe points; EINTR at the next probe batch / before a phase-2 syscall), written
   so the coroutine rewrite inherits them; kernel-blocked syscalls (spin-up, syncfs, network)
   stay uninterruptible until (c)/(d), documented. Needs russ: approve (b) + the documented limit.
+- russ (2026-10-08): Phase 22 = option (b): synchronous interrupt checkpoints now (own session
+  loop, non-blocking drain of /dev/fuse at checkpoints, EINTR there), single-threaded; async
+  interruption of kernel-blocked syscalls (spin-up, syncfs, network) waits for coroutines/
+  io_uring. Implementation (22.2 model, 22.3 tests + checkpoints, 22.4 docs) dispatched (lane-2).
