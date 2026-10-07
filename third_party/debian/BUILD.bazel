@@ -134,3 +134,25 @@ sh_test(
 
 # The pinned package list, read by //tools/sbom:sbom_test.
 exports_files(["debs.lock"])
+
+# The real image against the tar it was made from: for every member of
+# @debian//:flat (resolved through the tar's own symlinks), one batched
+# debugfs stat gives type, mode, owner, group, size and hard-link grouping,
+# compared with the header. (ownership_test keeps its spot checks and the
+# ext4 features.)
+py_test(
+    name = "rootfs_invariant_test",
+    size = "medium",
+    srcs = ["scripts/rootfs_invariant_test.py"],
+    args = [
+        "$(location @debian//:flat)",
+        "$(location :rootfs)",
+        "$(location @alpine_fstools//:debugfs)",
+    ],
+    data = [
+        ":rootfs",
+        "@alpine_fstools//:debugfs",
+        "@debian//:flat",
+    ],
+    main = "scripts/rootfs_invariant_test.py",
+)
