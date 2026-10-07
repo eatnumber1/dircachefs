@@ -86,11 +86,12 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
 - 26.10 Injected clock (yes; russ: "why do we need the current time?"):
   two call sites in dir_cache_fs.cc: the periodic sync point (`last_sync_`
   / `sync_interval_sec`) and relatime at read-open (a raw `clock_gettime`,
-  which 25.1b's rule also catches). Abseil has `absl::Time`/`absl::Now()`
-  but no clock to inject: a small `Clock` interface returning `absl::Time`
-  carried in `Context`, the real one calling `absl::Now()`, a fake in
-  `dcfs/testonly/`; production code never reads the time otherwise (a
-  7.5b matcher / 26.8 symbol). Makes the sync interval testable in the
+  which 25.1b's rule also catches). Use Abseil's own: `absl::Clock`
+  (`absl/time/clock_interface.h`) carried in `Context`, the real clock in
+  production and `absl::SimulatedClock` (`absl/time/simulated_clock.h`,
+  `AdvanceTime`) in tests; no clock type of our own (russ, 2026-10-07).
+  Production code never reads the time otherwise (a 7.5b matcher / 26.8
+  symbol). Makes the sync interval testable in the
   harness (the destroy_test time-dependence). Before Phase 11.
 - 26.11 Strong types (yes; after 25.2, it changes core signatures):
   `BackingFd` (minted only by backing.cc), `CacheFd`, `Nodeid`,

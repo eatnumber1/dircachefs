@@ -957,3 +957,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   clock_gettime), 26.11 strong types (after 25.2), 26.12 reproducible build (after 7.1), 26.13
   repository-shape tests; schema golden/migrations dropped (no users yet). 26.1 dispatched (lane-3,
   dcfs-mechanical): inventory of gates, missing self-checks, README table.
+- russ (2026-10-07): 26.10 uses absl::Clock + absl::SimulatedClock (both in the pinned Abseil),
+  not a clock type of our own; orchestrator had claimed Abseil lacked one.
