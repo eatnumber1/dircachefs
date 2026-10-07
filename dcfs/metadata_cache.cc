@@ -21,7 +21,6 @@
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/str_cat.h"
 #include "dcfs/context.h"
 #include "dcfs/device_id.h"
 #include "dcfs/escape.h"
@@ -30,6 +29,7 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/sqlite.h"
+#include "dcfs/status.h"
 
 namespace dcfs::cache {
 namespace {
@@ -85,7 +85,7 @@ absl::StatusOr<bool> ReadOne(Statement &stmt,
 }
 
 absl::Status NoInode(InodeId id) {
-  return absl::NotFoundError(absl::StrCat("no cached inode ", id));
+  return NotFoundErrorBuilder() << "no cached inode " << id;
 }
 
 // NotFound unless `id` has a row. Write paths check this up front so that a
@@ -283,7 +283,7 @@ absl::StatusOr<StubRow> GetStub(Context &ctx, InodeId id) {
         return absl::OkStatus();
       }));
   if (!found) {
-    return absl::NotFoundError(absl::StrCat("no boundary stub ", id));
+    return NotFoundErrorBuilder() << "no boundary stub " << id;
   }
   return stub;
 }
@@ -399,7 +399,7 @@ absl::StatusOr<std::string> Readlink(Context &ctx, InodeId id) {
                           return absl::OkStatus();
                         }));
   if (!found) {
-    return absl::NotFoundError(absl::StrCat("no cached symlink target for ", id));
+    return NotFoundErrorBuilder() << "no cached symlink target for " << id;
   }
   return target;
 }
@@ -466,8 +466,8 @@ absl::StatusOr<std::optional<std::string>> GetXattr(Context &ctx, InodeId id,
                          return absl::OkStatus();
                        }).status());
   auto absent = [&] {
-    return absl::NotFoundError(
-        absl::StrCat("inode ", id, " has no xattr ", EscapeBytes(name)));
+    return NotFoundErrorBuilder()
+           << "inode " << id << " has no xattr " << EscapeBytes(name);
   };
   if (state.has_value()) {
     if (*state == "present") {
@@ -505,7 +505,7 @@ absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id) {
       }));
   if (!found) return NoInode(id);
   if (!handle.has_value()) {
-    return absl::NotFoundError(absl::StrCat("no cached handle for inode ", id));
+    return NotFoundErrorBuilder() << "no cached handle for inode " << id;
   }
   return *std::move(handle);
 }
@@ -563,8 +563,7 @@ absl::StatusOr<FilesystemRow> GetFilesystem(Context &ctx,
         return absl::OkStatus();
       }));
   if (!found) {
-    return absl::NotFoundError(
-        absl::StrCat("no filesystem ", device.ToString()));
+    return NotFoundErrorBuilder() << "no filesystem " << device.ToString();
   }
   return *std::move(result);
 }
@@ -842,7 +841,7 @@ absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
                            return absl::OkStatus();
                          }).status());
     if (max.has_value() && *max == -1) {
-      return absl::ResourceExhaustedError("no boundary stub nodeid left");
+      return ResourceExhaustedErrorBuilder() << "no boundary stub nodeid left";
     }
     stub = max.has_value() ? *max + 1 : kFirstStubId;
     const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed,
@@ -872,9 +871,9 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
   return ctx.db.Transaction([&]() -> absl::Status {
     ABSL_ASSIGN_OR_RETURN(LookupResult source, Lookup(ctx, parent, name));
     if (source.kind != LookupResult::kFound) {
-      return absl::NotFoundError(absl::StrCat(
-          "no cached positive dentry ", EscapeBytes(name), " in ", parent,
-          " to rename"));
+      return NotFoundErrorBuilder()
+             << "no cached positive dentry " << EscapeBytes(name) << " in "
+             << parent << " to rename";
     }
     if (parent == newparent && name == newname) return absl::OkStatus();
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, newparent));
@@ -1164,8 +1163,8 @@ absl::Status AddFilesystem(Context &ctx, const DeviceId &device,
   return ctx.db.Transaction([&]() -> absl::Status {
     absl::StatusOr<FilesystemRow> existing = GetFilesystem(ctx, device);
     if (existing.ok()) {
-      return absl::AlreadyExistsError(
-          absl::StrCat("filesystem ", device.ToString(), " already exists"));
+      return AlreadyExistsErrorBuilder()
+             << "filesystem " << device.ToString() << " already exists";
     }
     if (!absl::IsNotFound(existing.status())) return existing.status();
     if (parent.has_value()) {
@@ -1415,9 +1414,9 @@ absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent,
     // the caller resolves again.
     for (InodeId id : ids) {
       if (!CanFill(ctx, resolved, id)) {
-        return absl::AbortedError(absl::StrCat(
-            "removal of ", EscapeBytes(name), " in ", parent, ": inode ", id,
-            " changed since it was resolved"));
+        return AbortedErrorBuilder()
+               << "removal of " << EscapeBytes(name) << " in " << parent
+               << ": inode " << id << " changed since it was resolved";
       }
     }
     ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, parent, names));
@@ -1444,9 +1443,10 @@ absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent, std::string_v
     // back, the mutation never begins, and the caller resolves again.
     for (InodeId id : ids) {
       if (!CanFill(ctx, resolved, id)) {
-        return absl::AbortedError(absl::StrCat(
-            "rename of ", EscapeBytes(name), " in ", parent, ": inode ", id,
-            " changed since its source and destination were resolved"));
+        return AbortedErrorBuilder()
+               << "rename of " << EscapeBytes(name) << " in " << parent
+               << ": inode " << id
+               << " changed since its source and destination were resolved";
       }
     }
     ABSL_RETURN_IF_ERROR(MarkUnknown(ctx, parent, names));

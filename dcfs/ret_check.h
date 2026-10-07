@@ -10,6 +10,7 @@
 #include "absl/status/status.h"
 #include "absl/status/status_builder.h"
 #include "absl/types/source_location.h"
+#include "dcfs/status.h"
 
 // RET_CHECK* build a kInternal `absl::StatusBuilder` and return it from the
 // current function when the check fails. Like ABSL_RETURN_IF_ERROR, the
@@ -30,8 +31,7 @@ namespace internal {
 inline absl::StatusBuilder RetCheckFail(
     std::string_view expr_str,
     absl::SourceLocation loc = absl::SourceLocation::current()) {
-  return absl::StatusBuilder(absl::StatusCode::kInternal, loc)
-      << "RET_CHECK failure: " << expr_str;
+  return InternalErrorBuilder(loc) << "RET_CHECK failure: " << expr_str;
 }
 
 // operator<< on absl::StatusBuilder has no overload for std::nullptr_t (a
@@ -72,7 +72,7 @@ absl::StatusBuilder RetCheckFailOp(
     std::string_view lhs_str, std::string_view op_str,
     std::string_view rhs_str, const Lhs &lhs_value, const Rhs &rhs_value,
     absl::SourceLocation loc = absl::SourceLocation::current()) {
-  return absl::StatusBuilder(absl::StatusCode::kInternal, loc)
+  return InternalErrorBuilder(loc)
       << "RET_CHECK failure: " << lhs_str << " " << op_str << " " << rhs_str
       << " (" << RetCheckStreamable(lhs_value) << " vs "
       << RetCheckStreamable(rhs_value) << ")";
@@ -83,7 +83,7 @@ absl::StatusBuilder RetCheckFailOp(
 inline absl::StatusBuilder RetCheckFailStatus(
     std::string_view expr_str, const absl::Status &status,
     absl::SourceLocation loc = absl::SourceLocation::current()) {
-  return absl::StatusBuilder(absl::StatusCode::kInternal, loc)
+  return InternalErrorBuilder(loc)
       << "RET_CHECK_OK failure: " << expr_str << " is not OK: " << status;
 }
 

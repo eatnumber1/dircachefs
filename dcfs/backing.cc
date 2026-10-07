@@ -480,9 +480,10 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
   const DeviceId &device = probe.identity.device_id;
   ABSL_ASSIGN_OR_RETURN(DeviceId stored, GetSourceDeviceId(ctx.db));
   if (stored != device) {
-    return absl::FailedPreconditionError(absl::StrCat(
-        "cache database belongs to a different filesystem (",
-        stored.ToString(), ") than the source (", device.ToString(), ")"));
+    return FailedPreconditionErrorBuilder()
+           << "cache database belongs to a different filesystem ("
+           << stored.ToString() << ") than the source (" << device.ToString()
+           << ")";
   }
   ABSL_ASSIGN_OR_RETURN(FileHandle handle,
                         FileHandle::FromFd(*source_fd, device));
@@ -1703,9 +1704,9 @@ absl::Status FinishRun(Context &ctx) {
   // Model: StopCkpt.
   ctx.events->Checkpointed(ctx);
   if (ctx.dirty.any) {
-    return absl::FailedPreconditionError(
-        "dirty cache entries remain (a writable open is still "
-        "outstanding); leaving the clean-shutdown flag unset");
+    return FailedPreconditionErrorBuilder()
+           << "dirty cache entries remain (a writable open is still "
+              "outstanding); leaving the clean-shutdown flag unset";
   }
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
       [&] { return SetCleanShutdown(ctx.db, true); },

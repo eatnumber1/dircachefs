@@ -98,7 +98,7 @@ namespace {
 // where printing the usage banner again would just be noise.
 absl::Status UsageError(absl::string_view message) {
   std::cerr << absl::ProgramUsageMessage() << "\n";
-  return absl::InvalidArgumentError(message);
+  return InvalidArgumentErrorBuilder() << message;
 }
 
 // A /proc/sys value (its first 64 bytes), without
@@ -150,12 +150,13 @@ absl::Status CheckNoMoreAccessThanRoot(const std::string &path,
     reason = "grants others write the backing root does not";
   }
   if (reason.empty()) return absl::OkStatus();
-  return absl::FailedPreconditionError(absl::StrCat(
-      path, " grants more access than the backing root directory (", reason,
-      "): ", path, " is mode ", absl::StrFormat("0%o", m & 07777), " uid ",
-      st.st_uid, " gid ", st.st_gid, "; the backing root is mode ",
-      absl::StrFormat("0%o", rm & 07777), " uid ", root.st_uid, " gid ",
-      root.st_gid));
+  return FailedPreconditionErrorBuilder()
+         << path << " grants more access than the backing root directory ("
+         << reason << "): " << path << " is mode "
+         << absl::StrFormat("0%o", m & 07777) << " uid " << st.st_uid
+         << " gid " << st.st_gid << "; the backing root is mode "
+         << absl::StrFormat("0%o", rm & 07777) << " uid " << root.st_uid
+         << " gid " << root.st_gid;
 }
 
 // Opens `path` -- the cache database itself, or one of its -wal/-shm
@@ -192,18 +193,17 @@ absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
       return FileDescriptor();
     }
     if (errno == ELOOP) {
-      return absl::FailedPreconditionError(absl::StrCat(
-          path,
-          " is a symlink; refusing to open a cache file through a symlink "
-          "(another local user could have pointed it anywhere)"));
+      return FailedPreconditionErrorBuilder()
+             << path
+             << " is a symlink; refusing to open a cache file through a "
+                "symlink (another local user could have pointed it anywhere)";
     }
     return dcfs::ErrnoToStatus(errno, absl::StrCat("open ", path));
   }
   FileDescriptor result(fd);
   ABSL_ASSIGN_OR_RETURN(struct stat st, syscalls::fstat(*result));
   if (!S_ISREG(st.st_mode)) {
-    return absl::FailedPreconditionError(
-        absl::StrCat(path, " is not a regular file"));
+    return FailedPreconditionErrorBuilder() << path << " is not a regular file";
   }
   ABSL_RETURN_IF_ERROR(CheckNoMoreAccessThanRoot(path, st, backing_root));
   if ((st.st_mode & 07777) != 0600) {
@@ -349,11 +349,11 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     // runtime (see backing::ProbeChild/PopulateDirectory).
     ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below, MountsBelow(source));
     if (!below.empty()) {
-      return absl::FailedPreconditionError(absl::StrCat(
-          "dcfs does not yet support filesystems mounted below --source: "
-          "their inode numbers would collide under one st_dev; unmount "
-          "them or point --source elsewhere. Mounted below ",
-          source, ": ", absl::StrJoin(below, ", ")));
+      return FailedPreconditionErrorBuilder()
+             << "dcfs does not yet support filesystems mounted below --source: "
+                "their inode numbers would collide under one st_dev; unmount "
+                "them or point --source elsewhere. Mounted below "
+             << source << ": " << absl::StrJoin(below, ", ");
     }
   }
 
@@ -407,10 +407,10 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
                           OpenHardenedCacheFile(cache_db, /*create=*/true, backing_root));
     if (::flock(*db_lock, LOCK_EX | LOCK_NB) == -1) {
       if (errno == EWOULDBLOCK) {
-        return absl::FailedPreconditionError(absl::StrCat(
-            "cache database ", cache_db,
-            " is in use by another dcfs process; two daemons cannot share "
-            "one cache database"));
+        return FailedPreconditionErrorBuilder()
+               << "cache database " << cache_db
+               << " is in use by another dcfs process; two daemons cannot "
+                  "share one cache database";
       }
       return dcfs::ErrnoToStatus(errno,
                                  absl::StrCat("flock --cache_db=", cache_db));
@@ -449,11 +449,11 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // check here instead, before InitRoot, so the message names both.
   ABSL_ASSIGN_OR_RETURN(DeviceId stored_device, GetSourceDeviceId(db));
   if (stored_device != root.device_id) {
-    return absl::FailedPreconditionError(absl::StrCat(
-        "cache database ", cache_db, " was created for filesystem ",
-        stored_device.ToString(), ", but --source is on ",
-        root.device_id.ToString(),
-        "; delete the database to start a cold cache"));
+    return FailedPreconditionErrorBuilder()
+           << "cache database " << cache_db << " was created for filesystem "
+           << stored_device.ToString() << ", but --source is on "
+           << root.device_id.ToString()
+           << "; delete the database to start a cold cache";
   }
   // Nor one built for another directory on the same filesystem (audit-crash
   // F4): --source pointed elsewhere, or the source directory replaced while
@@ -477,12 +477,13 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
          stored_root.backing_gen == root.backing_gen) &&
         (!stored_handle.ok() || *stored_handle == handle);
     if (!same) {
-      return absl::FailedPreconditionError(absl::StrCat(
-          "cache database ", cache_db,
-          " was created for a different source directory (inode ",
-          stored_root.backing_ino, ", generation ", stored_root.backing_gen,
-          ") than --source (inode ", root.backing_ino, ", generation ",
-          root.backing_gen, "); delete the database to start a cold cache"));
+      return FailedPreconditionErrorBuilder()
+             << "cache database " << cache_db
+             << " was created for a different source directory (inode "
+             << stored_root.backing_ino << ", generation "
+             << stored_root.backing_gen << ") than --source (inode "
+             << root.backing_ino << ", generation " << root.backing_gen
+             << "); delete the database to start a cold cache";
     }
   }
   // Before anything reads the cache: after an unclean shutdown, forget
@@ -532,19 +533,19 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   struct fuse_session *session =
       fuse_session_new(&fuse_args, &ops, sizeof(ops), &fs);
   if (session == nullptr) {
-    return absl::InternalError("fuse_session_new failed");
+    return InternalErrorBuilder() << "fuse_session_new failed";
   }
 
   if (fuse_set_signal_handlers(session) != 0) {
     fuse_session_destroy(session);
-    return absl::InternalError("fuse_set_signal_handlers failed");
+    return InternalErrorBuilder() << "fuse_set_signal_handlers failed";
   }
 
   if (fuse_session_mount(session, mountpoint) != 0) {
     fuse_remove_signal_handlers(session);
     fuse_session_destroy(session);
-    return absl::InternalError(
-        absl::StrCat("fuse_session_mount(", mountpoint, ") failed"));
+    return InternalErrorBuilder()
+           << "fuse_session_mount(" << mountpoint << ") failed";
   }
 
   // Non-zero (the default) keeps this process in the foreground; zero
@@ -580,7 +581,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // negative -errno on an actual error -- only the last of those is a
   // failure.
   if (rc < 0) {
-    return absl::InternalError(absl::StrCat("fuse_session_loop: ", rc));
+    return InternalErrorBuilder() << "fuse_session_loop: " << rc;
   }
   return EXIT_SUCCESS;
 }

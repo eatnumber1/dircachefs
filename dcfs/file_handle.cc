@@ -19,6 +19,7 @@
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
 #include "dcfs/mount_fds.h"
+#include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 
 namespace dcfs {
@@ -80,9 +81,9 @@ std::string FileHandle::Serialize() const {
 
 absl::StatusOr<FileHandle> FileHandle::Parse(std::string_view data) {
   if (data.size() < 28) {
-    return absl::InvalidArgumentError(absl::StrCat(
-        "FileHandle::Parse: expected at least 28 bytes, got ", data.size(),
-        " bytes"));
+    return InvalidArgumentErrorBuilder()
+           << "FileHandle::Parse: expected at least 28 bytes, got "
+           << data.size() << " bytes";
   }
 
   ABSL_ASSIGN_OR_RETURN(DeviceId device, DeviceId::Parse(data.substr(0, 24)));

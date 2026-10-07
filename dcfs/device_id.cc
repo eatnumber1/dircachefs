@@ -52,9 +52,9 @@ std::string DeviceId::Serialize() const {
 
 absl::StatusOr<DeviceId> DeviceId::Parse(std::string_view data) {
   if (data.size() != 24) {
-    return absl::InvalidArgumentError(absl::StrCat(
-        "DeviceId::Parse: expected a 24-byte value, got ", data.size(),
-        " bytes"));
+    return InvalidArgumentErrorBuilder()
+           << "DeviceId::Parse: expected a 24-byte value, got " << data.size()
+           << " bytes";
   }
 
   DeviceId id;
@@ -194,16 +194,16 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
     int saved_errno = errno;
     if (saved_errno == ENOTTY || saved_errno == EOPNOTSUPP ||
         saved_errno == ENOSYS) {
-      return absl::UnimplementedError(absl::StrCat(
-          FstypeName(f_type), " does not support FS_IOC_GETFSUUID"));
+      return UnimplementedErrorBuilder()
+             << FstypeName(f_type) << " does not support FS_IOC_GETFSUUID";
     }
     return ErrnoToStatus(saved_errno, "FS_IOC_GETFSUUID ioctl");
   }
 
   if (fsuuid.len != 16) {
-    return absl::FailedPreconditionError(absl::StrCat(
-        "FS_IOC_GETFSUUID returned an unexpected uuid length: ",
-        static_cast<int>(fsuuid.len)));
+    return FailedPreconditionErrorBuilder()
+           << "FS_IOC_GETFSUUID returned an unexpected uuid length: "
+           << static_cast<int>(fsuuid.len);
   }
 
   std::copy(std::begin(fsuuid.uuid), std::end(fsuuid.uuid), id.uuid.begin());

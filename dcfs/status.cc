@@ -3,7 +3,6 @@
 #include <cerrno>
 
 #include "absl/strings/cord.h"
-#include "absl/strings/str_cat.h"
 
 namespace dcfs {
 
@@ -18,9 +17,8 @@ absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status) {
 
   absl::optional<absl::Cord> payload = status.GetPayload(kErrnoTypeUrl);
   if (!payload) {
-    return absl::NotFoundError(
-        absl::StrCat(
-          "Cannot get errno from Status: No payload in Status: ", status));
+    return NotFoundErrorBuilder()
+           << "Cannot get errno from Status: No payload in Status: " << status;
   }
 
   return ErrorNameToErrno(std::string(*payload));

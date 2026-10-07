@@ -3,12 +3,14 @@
 #include <cerrno>
 #include <cstring>
 #include <string>
+#include <utility>
 
 #include "absl/status/status.h"
 #include "absl/status/status_builder.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "absl/types/source_location.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -76,6 +78,44 @@ TEST(ErrnoPayloadTest, ErrnoToStatusSetsPayload) {
 
 TEST(ErrnoPayloadTest, OkStatusHasNoPayload) {
   EXPECT_THAT(GetErrnoFromStatus(absl::OkStatus()), IsOkAndHolds(0));
+}
+
+// The builder is made on the line of the macro call, so its recorded source
+// location must be that line.
+#define EXPECT_HELPER(helper, expected_code)                              \
+  do {                                                                    \
+    absl::StatusBuilder builder = helper();                               \
+    EXPECT_EQ(builder.source_location().line(), __LINE__);                \
+    EXPECT_NE(std::string(builder.source_location().file_name())          \
+                  .find("status_test.cc"),                                \
+              std::string::npos);                                         \
+    absl::Status status = std::move(builder) << "went wrong: " << 42;     \
+    EXPECT_EQ(status.code(), expected_code);                              \
+    EXPECT_EQ(status.message(), "went wrong: 42");                        \
+    EXPECT_FALSE(status.GetPayload(kErrnoTypeUrl).has_value());           \
+  } while (0)
+
+TEST(ErrorBuilderTest, EachHelperHasItsCodeMessageAndCallerLine) {
+  EXPECT_HELPER(InternalErrorBuilder, absl::StatusCode::kInternal);
+  EXPECT_HELPER(FailedPreconditionErrorBuilder,
+                absl::StatusCode::kFailedPrecondition);
+  EXPECT_HELPER(NotFoundErrorBuilder, absl::StatusCode::kNotFound);
+  EXPECT_HELPER(InvalidArgumentErrorBuilder,
+                absl::StatusCode::kInvalidArgument);
+  EXPECT_HELPER(AbortedErrorBuilder, absl::StatusCode::kAborted);
+  EXPECT_HELPER(UnimplementedErrorBuilder, absl::StatusCode::kUnimplemented);
+  EXPECT_HELPER(AlreadyExistsErrorBuilder, absl::StatusCode::kAlreadyExists);
+  EXPECT_HELPER(ResourceExhaustedErrorBuilder,
+                absl::StatusCode::kResourceExhausted);
+}
+
+TEST(ErrorBuilderTest, ConvertsToStatusOrAndKeepsAnExplicitLocation) {
+  auto f = []() -> absl::StatusOr<int> {
+    return NotFoundErrorBuilder() << "no row " << 7;
+  };
+  EXPECT_THAT(f(), StatusIs(absl::StatusCode::kNotFound, "no row 7"));
+  absl::StatusBuilder b = InternalErrorBuilder(absl::SourceLocation::current());
+  EXPECT_EQ(b.source_location().line(), __LINE__ - 1);
 }
 
 TEST(ErrnoPayloadTest, MissingPayloadIsNotFound) {

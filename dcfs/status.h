@@ -5,7 +5,9 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
+#include "absl/status/status_builder.h"
 #include "absl/status/statusor.h"
+#include "absl/types/source_location.h"
 
 namespace dcfs {
 
@@ -17,6 +19,46 @@ constexpr inline std::string_view kErrnoTypeUrl = "rus.har.mn/dcfs/status/errno"
 // GetErrnoFromStatus()/StatusToErrno() and callers such as
 // backing::ReadGeneration() rely on to recover the original errno.
 absl::Status ErrnoToStatus(int error_number, absl::string_view message);
+// Builders for new errors that do not come from a syscall (docs/style.md
+// 1.6). Abseil has no absl::InternalErrorBuilder and the like. Each returns
+// an absl::StatusBuilder with the code, so the message is streamed:
+//
+//   return InternalErrorBuilder() << "fuse_session_new failed";
+//
+// `loc` defaults to the caller's line, which the status then records.
+inline absl::StatusBuilder InternalErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kInternal, loc);
+}
+inline absl::StatusBuilder FailedPreconditionErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kFailedPrecondition, loc);
+}
+inline absl::StatusBuilder NotFoundErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kNotFound, loc);
+}
+inline absl::StatusBuilder InvalidArgumentErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kInvalidArgument, loc);
+}
+inline absl::StatusBuilder AbortedErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kAborted, loc);
+}
+inline absl::StatusBuilder UnimplementedErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kUnimplemented, loc);
+}
+inline absl::StatusBuilder AlreadyExistsErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kAlreadyExists, loc);
+}
+inline absl::StatusBuilder ResourceExhaustedErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kResourceExhausted, loc);
+}
+
 absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status);
 
 absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name);

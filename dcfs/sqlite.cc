@@ -18,6 +18,7 @@
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/ret_check.h"
+#include "dcfs/status.h"
 
 namespace dcfs {
 namespace sqlite3 {
@@ -81,15 +82,14 @@ absl::Status Sqlite3ErrorCodeToStatus(int err) {
 absl::StatusOr<int> GetSqliteCodeFromStatus(const absl::Status &status) {
   std::optional<absl::Cord> payload = status.GetPayload(kSqliteTypeUrl);
   if (!payload) {
-    return absl::NotFoundError(
-        absl::StrCat(
-          "Cannot get sqlite code from Status: no payload in Status: ",
-          status));
+    return NotFoundErrorBuilder()
+           << "Cannot get sqlite code from Status: no payload in Status: "
+           << status;
   }
   int code = 0;
   if (!absl::SimpleAtoi(std::string(*payload), &code)) {
-    return absl::InternalError(
-        absl::StrCat("Malformed sqlite status payload: ", *payload));
+    return InternalErrorBuilder()
+           << "Malformed sqlite status payload: " << *payload;
   }
   return code;
 }
@@ -124,14 +124,14 @@ absl::StatusOr<Statement> Statement::Prepare(
       &tail);
   if (rc != SQLITE_OK) {
     return absl::StatusBuilder(db.LastErrorStatus())
-        << "; while preparing SQL: " << sql;
+        << "while preparing SQL: " << sql;
   }
   RET_CHECK_NE(stmt, nullptr);
   if (tail != sql.data() + sql.size()) {
     // Statement::Prepare only prepares a single SQL statement.
     sqlite3_finalize(stmt);
-    return absl::InvalidArgumentError(
-        absl::StrCat("Extra SQL text after first statement: ", tail));
+    return InvalidArgumentErrorBuilder()
+           << "Extra SQL text after first statement: " << tail;
   }
   return Statement(*stmt);
 }
@@ -308,7 +308,7 @@ absl::Status Connection::ExecScript(std::string_view sql) {
   // LastErrorStatus() below) -- included too since it sometimes has more
   // context (e.g. which statement in the script failed).
   return absl::StatusBuilder(LastErrorStatus())
-      << "; sqlite3_exec: " << (errmsg != nullptr ? errmsg : "(no message)");
+      << "sqlite3_exec: " << (errmsg != nullptr ? errmsg : "(no message)");
 }
 
 absl::StatusOr<Statement *> Connection::Prepared(std::string_view sql) {
@@ -332,9 +332,10 @@ absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body,
                                      Durability durability) {
   if (durability == Durability::kNormal || savepoint_depth_ > 0) {
     if (durability == Durability::kSync && !sync_transaction_) {
-      return absl::FailedPreconditionError(
-          "Connection::Transaction: a Durability::kSync transaction cannot "
-          "nest inside a kNormal one (only the outermost COMMIT is synced)");
+      return FailedPreconditionErrorBuilder()
+             << "Connection::Transaction: a Durability::kSync transaction "
+                "cannot nest inside a kNormal one (only the outermost COMMIT "
+                "is synced)";
     }
     return RunTransaction(body);
   }
@@ -348,7 +349,7 @@ absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body,
   if (!restored.ok()) {
     if (status.ok()) return restored;
     return absl::StatusBuilder(status)
-           << "; additionally, restoring synchronous=NORMAL failed: "
+           << "additionally, restoring synchronous=NORMAL failed: "
            << restored;
   }
   return status;
@@ -373,7 +374,7 @@ absl::Status Connection::RunTransaction(
     // to a known state and unwind rather than risk leaking an open
     // transaction/savepoint because of it.
     absl::Status invariant_status =
-        absl::StatusBuilder(absl::StatusCode::kInternal)
+        InternalErrorBuilder()
         << "Connection::Transaction: savepoint depth changed unexpectedly "
            "while running body (expected "
         << (depth + 1) << ", got " << savepoint_depth_ << ")";
@@ -409,7 +410,7 @@ absl::Status Connection::UnwindFailedTransaction(
   }
   if (!rollback_status.ok()) {
     return absl::StatusBuilder(status)
-        << "; additionally, rolling back the transaction failed: "
+        << "additionally, rolling back the transaction failed: "
         << rollback_status;
   }
   return status;
@@ -450,11 +451,13 @@ absl::Status ApplyOpenPragmas(Connection &conn) {
   const char *filename = sqlite3_db_filename(conn.Get(), "main");
   const bool file_backed = filename != nullptr && filename[0] != '\0';
   if (file_backed && journal_mode != "wal") {
-    return absl::FailedPreconditionError(absl::StrCat(
-        "cannot put ", filename, " in WAL mode (PRAGMA journal_mode=WAL "
-        "left it in journal_mode=", journal_mode,
-        "); keep the cache database on a local filesystem that supports "
-        "shared memory"));
+    return FailedPreconditionErrorBuilder()
+           << "cannot put " << filename
+           << " in WAL mode (PRAGMA journal_mode=WAL left it in "
+              "journal_mode="
+           << journal_mode
+           << "); keep the cache database on a local filesystem that supports "
+              "shared memory";
   }
 
   ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA synchronous=NORMAL"));
