@@ -765,3 +765,20 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   follow the config, so ASan runs are under-reserved (README says fewer test jobs; a
   `test:asan --local_test_jobs=2` in .bazelrc would enforce it); Alpine (lane-2) must rebase over
   this (run-qemu.sh --mem defaults, macros' mem=).
+- 24.1 + 24.2 committed in lane-2 `step-24` (ecb3b17 rule, d8037c5 kernel; rebased on 345827e), NOT
+  merged yet: presubmit, asan boot_test and a review are still owed. Kernel: Alpine v3.24
+  linux-virt 6.18.55 (43 MB apk, fetch 8-12 s, replaces the 690 s build; bc gone); per-test
+  `modules=` with mkmodules.py (dep/softdep, built-in modules skipped); boot.sh accepts
+  `6.18.*-virt`; `required_options.txt` + kernel_config_test (DM_DUST dropped); SBOM reads
+  resolved.json (`linux-lts@6.18.55-r0`), osv.sh fetches the Alpine repos. Rule: shared
+  `alpine_index` per branch (one snapshot for all packages), stdlib RSA, signature_test (tampered
+  index/control/data refused; failing first 3/21). fast 86/86, write xfs/btrfs, bench_smoke_xfs,
+  trace_power, nfs green. 24.3 WIP is `git stash@{0}` in lane-2 (untested). 24.3 findings: Alpine
+  mke2fs lacks `-d tarball` (libarchive): the Debian rootfs needs a mkrootfs (extract + `mke2fs -d
+  dir` + debugfs for the 4 non-root files; no host symlink following) — approve or redirect; no
+  util-linux tools are actually used (drop it); Alpine qemu ships the same qboot.rom; removing
+  glib/zlib/rules_foreign_cc needs a lockfile update.
+- All agents stopped at 2026-10-07 ~04:30 UTC; safe to reboot. After: (1) cap-0 warning to
+  lane-1 then merge Phase 23 (rebase over 6.2: the ASan unit guests' 512 MB fix meets asan_mem=384);
+  (2) Alpine 24.3 in lane-2 after a reviewer pass on 24.1/24.2; (3) 25.1 style convergence;
+  (4) the failed GitHub `fast` job (log from russ).
