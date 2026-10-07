@@ -139,6 +139,11 @@ Rules that keep the layering honest:
   syscalls (resource limits, credentials, `/proc` reads, the cache
   database file, mount tables) may call the `syscalls::` wrappers from any
   file. The point is that the io_uring rewrite replaces one module.
+  The build graph enforces the split: the backing-reaching wrappers are
+  `//dcfs:syscalls_backing`, the process-local ones `//dcfs:syscalls`, and
+  the targets that depend on the former are a golden
+  (`dcfs/syscalls_backing_users.txt`, checked by
+  `//tools:syscalls_backing_users_test`).
 - **`cache::` is pure SQLite.** It never sees a file descriptor. Each write
   function is one transaction, which nests as a savepoint inside a
   caller's transaction.
@@ -859,6 +864,16 @@ Sync points run:
   after the previous sync point, while the dirty set may be non-empty
   (`DirCacheFS::MaybeSyncBacking`, called from `fuse_ops.cc`);
 - at clean shutdown (`backing::FinishRun`).
+
+**The clock.** dcfs reads the time only through `Context::clock`, an
+`absl::Clock`: the real clock in production, an `absl::SimulatedClock` in
+the tests (step 26.10). There are two readers: the periodic sync point
+(`DirCacheFS::MaybeSyncBacking`, `--sync_interval_sec`) and the relatime
+prediction at a read open (below). `absl::Now`, `clock_gettime`, `time` and
+`gettimeofday` are banned from the shipped binary (`tools/banned_symbols.txt`)
+and from the sources (`//tools:raw_syscalls_test`). The kernel's own clock is
+not ours: the times a backing filesystem stamps (including `UTIME_NOW` in
+`backing.cc`'s `utimensat`/`futimens` calls) stay the kernel's.
 
 dcfs is single-threaded inside libfuse's blocking loop, which has no idle
 hook, so there is no timer: an idle daemon keeps a non-empty dirty set
