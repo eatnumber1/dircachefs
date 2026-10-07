@@ -782,3 +782,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   lane-1 then merge Phase 23 (rebase over 6.2: the ASan unit guests' 512 MB fix meets asan_mem=384);
   (2) Alpine 24.3 in lane-2 after a reviewer pass on 24.1/24.2; (3) 25.1 style convergence;
   (4) the failed GitHub `fast` job (log from russ).
+- russ (2026-10-07): mkrootfs approved (extract + `mke2fs -d dir` + debugfs for ownership; no host
+  symlink following); `gh` will be installed after the reboot: use it to read the failed `fast` job.
