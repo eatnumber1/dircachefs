@@ -1483,3 +1483,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   dir_cache_fs_trace_test at its 900 s limit under load 28 (823 s alone): timeout to raise.
   PUSH POINT: main 56980ad+ (the osv fix is in). Mutation step sits in full's shard 0 until
   lane-4 moves it to its own job.
+- Dispatched: lane-4 moves the per-push mutation step to its own job and splits/raises
+  dir_cache_fs_trace_test (823 s vs 900 s); lane-5 starts Phase 11.1 (dm-flakey/dm-error helper
+  over the cache and backing disks via Alpine's dmsetup, first I/O-error and power-cut tests per
+  phase, each stating its invariant; findings stop the step).
