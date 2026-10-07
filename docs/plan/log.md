@@ -1507,3 +1507,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   freed object's row stays; identity safe). 12.6b: keep the listed rows dirty until probed (fix
   test-first, finding -> real invariant). formal 87 pass + the two large configs timing out at
   900 s under load (to be run alone with a long timeout); trace test 131 valid; fast 171 + 2 skips.
+- 12.6/12.7 review: finding real (window opens at RecoverDirty's commit; only leaked rows of
+  freed objects are lost; nothing live deleted); fix shape confirmed (rows stay dirty through the
+  probe, one short delete transaction after the loop; lifetime.tla keeps the queued rows). Model
+  critique: dcfs.tla's RecoveryIdempotent is CrashSafe-during-recovery plus a tautological
+  fixpoint conjunct; MC_small (MaxCrashes = 1) never reaches a crash during a dirty recovery ->
+  a MaxCrashes = 2 medium config; EffectAtSyscall follows from CacheNeverWrong + BackingAtSyscall
+  (keep as the observable restatement; tie its permission to the syscall actions for Phase 22's
+  Interrupt); the plan's 12.7 reply check (errnos, mutation results vs the backing between call
+  and reply) is not implemented: implement or record as 12.7b; CacheLearnsAtCommit onto traces.
+  Sent with 12.6b to lane-1.
