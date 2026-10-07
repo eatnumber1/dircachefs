@@ -31,7 +31,10 @@
 //   no-transaction-at-request-end  as above, once the request is over.
 //   tri-state  an inode's attributes recorded as current have every column
 //       and a link count above 0 (backing::WriteAttrs keeps nlink 0
-//       unknown); a dentry is 'refused' exactly when its stub row exists.
+//       unknown); a refused dentry has its stub row, and a stub row's
+//       dentry is refused or unknown (schema v5: a stub outlives its
+//       refusal while the name is unknown; recording it present or absent
+//       deletes the stub).
 //   identity  only the root has FUSE generation 0.
 //   dirty-set  as above; an inode in Context::dirty.durable has its dirty
 //       row (phase 1's fast path skips the insert for those); if
@@ -58,11 +61,15 @@
 //  in the run (readdir_boundary_test's 6000 created files made its warm
 //  listing quadratic at 16384).
 //
-//  At backing::StartRun's end (RunStarted) and after DESTROY (Destroyed):
-//  all of the above over the whole database and every DirCacheFS entry.
+//  At backing::Startup's end, after its probe of the recovered rows
+//  (RunStarted), and after DESTROY (Destroyed): all of the above over the
+//  whole database and every DirCacheFS entry. StartRun's end
+//  (RunStarting) checks nothing: the rows it recovered are probed after
+//  it, and its opens (the harness's, standing for a crash) are the crashed
+//  run's.
 //
 // A violation is fatal: LOG(FATAL) "invariant violated: <invariant>: <what>
-// (in request <OPCODE> nodeid <n>...)" (or "in StartRun", "in DESTROY",
+// (in request <OPCODE> nodeid <n>...)" (or "in Startup", "in DESTROY",
 // "outside any request"), after the same line, as
 // "DCFS-INVARIANT-VIOLATION <invariant>: ...", is written to `console_fd`
 // if there is one (the daemon's is /dev/console, the guest's serial log,
@@ -114,6 +121,7 @@ class InvariantChecker final : public InvariantChecks {
                   const events::Request &request) override;
   void Forgetting(Context &ctx, const DirCacheFS &fs, uint64_t ino,
                   uint64_t nlookup) override;
+  void RunStarting(Context &ctx) override;
   void RunStarted(Context &ctx) override;
   void Destroyed(Context &ctx, const DirCacheFS &fs) override;
 
@@ -135,7 +143,7 @@ class InvariantChecker final : public InvariantChecks {
 
  private:
   // One request being served (requests nest; see RequestBegin), or
-  // StartRun's or DESTROY's check (`label`).
+  // Startup's or DESTROY's check (`label`).
   struct Frame {
     std::string_view label;
     events::Op op = events::Op::kOther;
@@ -155,11 +163,12 @@ class InvariantChecker final : public InvariantChecks {
   // fuse_gen, nlink, whether an attribute column is NULL).
   absl::Status CheckInodeRow(const Context &ctx, const DirCacheFS *fs,
                              sqlite3::Statement &row);
-  // The dentry with rowid `rowid`, if it still exists: refused exactly
-  // when it has a stub. Adds its parent and child to `interest`.
+  // The dentry with rowid `rowid`, if it still exists: refused only with
+  // a stub, present or absent only without one. Adds its parent and child
+  // to `interest`.
   absl::Status CheckDentry(Context &ctx, int64_t rowid,
                            absl::flat_hash_set<InodeId> &interest);
-  // The stub `id`, if it still exists: its dentry is refused.
+  // The stub `id`, if it still exists: its dentry is refused or unknown.
   absl::Status CheckStub(Context &ctx, int64_t id);
   // CheckAll; `destroyed`: after DirCacheFS::Destroy, which empties
   // written_ by design (an inode still open for writing then is not in

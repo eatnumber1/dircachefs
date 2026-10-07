@@ -1592,7 +1592,9 @@ backing syscall it makes from a function holding a `Context` (and before
 each call into code without one that makes them: `FileHandle`,
 `GetDeviceId`, `AsCaller`, its descriptor-only helpers), `DirCacheFS`
 before each of those helpers it calls, `fuse_ops.cc` around every request
-(after the reply) and every `FORGET` entry, `StartRun` at its end, and
+(after the reply) and every `FORGET` entry, `Startup` at its end (after
+its probe of the recovered rows; `StartRun` marks the run's start, with no
+check, so that the opens the harness keeps across it are left out), and
 DESTROY. Code without a `Context` cannot open a transaction (the database
 is reachable only through `Context::db`), so the hook before such a call
 covers every syscall the call makes. Production links the no-op
@@ -1639,9 +1641,9 @@ The checking build (`//dcfs:main_static_checked`, linking
   never in the database file), and SQLite never truncates a table with a
   trigger: no transaction or cursor open (`no-transaction-at-request-end`);
   attributes recorded as current have every column and a link count above
-  0, and a dentry is
-  `refused` exactly when its stub exists (`tri-state`); only the root has
-  FUSE generation 0 (`identity`); an inode in `Context::dirty.durable` has
+  0, and a dentry is `refused` only with its stub and a stub's dentry is
+  `refused` or `unknown` (`tri-state`); only the root has FUSE generation
+  0 (`identity`); an inode in `Context::dirty.durable` has
   its dirty row, and `dirty.any` false means an empty table (`dirty-set`);
   an inode open for writing has its attributes unknown, its dirty row, and
   a `written_` entry unless it is a removed object, and a `BackingFile`
@@ -1651,8 +1653,8 @@ The checking build (`//dcfs:main_static_checked`, linking
   a descriptor, at most the cap (`held-fds`); a removed record exists only
   while the kernel holds a lookup of it, and never beside a `written_`
   entry (`removed-record`);
-- at `StartRun` and after DESTROY: all of it over the whole database and
-  every in-memory entry.
+- at `Startup`'s end and after DESTROY: all of it over the whole database
+  and every in-memory entry.
 
 What the checklist states but the checker does not: "the dirty set equals
 the set of unknown rows" is not an invariant of this design (a population

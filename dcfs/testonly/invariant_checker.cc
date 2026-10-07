@@ -276,17 +276,21 @@ void InvariantChecker::Forgetting(Context &ctx, const DirCacheFS &fs,
   }
 }
 
-void InvariantChecker::RunStarted(Context &ctx) {
+void InvariantChecker::RunStarting(Context &ctx) {
   Attach(ctx);
-  frames_.push_back(Frame{.label = "StartRun"});
   // A run starts with no open file: main.cc makes the DirCacheFS after
-  // StartRun. The harness restarts the run under a live DirCacheFS to
-  // stand for a crash, whose opens are the crashed run's, not this one's:
-  // they are left out until they are released.
+  // Startup. The harness calls StartRun under a live DirCacheFS to stand
+  // for a crash, whose opens are the crashed run's, not this one's: they
+  // are left out until they are released.
   stale_opens_.clear();
   if (ctx.open_for_write != nullptr) {
     for (InodeId id : *ctx.open_for_write) stale_opens_.insert(id);
   }
+}
+
+void InvariantChecker::RunStarted(Context &ctx) {
+  Attach(ctx);
+  frames_.push_back(Frame{.label = "Startup"});
   FailIfNotOk(CheckAll(ctx, nullptr));
   frames_.pop_back();
 }
@@ -417,15 +421,17 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
     }));
     ABSL_RETURN_IF_ERROR(found);
   }
-  // Every dentry that is refused without a stub, or has a stub without
-  // being refused; every stub without a refused dentry.
+  // Every dentry that is refused without a stub, or present or absent
+  // with one; every stub whose dentry is not refused or unknown.
   {
     ABSL_ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
-            "SELECT rowid FROM dentries AS d WHERE (d.state = 'refused') != "
+            "SELECT rowid FROM dentries AS d WHERE (d.state = 'refused') > "
             "EXISTS (SELECT 1 FROM stubs AS s WHERE s.parent = d.parent AND "
-            "s.name = d.name)"));
+            "s.name = d.name) OR (d.state IN ('present', 'absent') AND "
+            "EXISTS (SELECT 1 FROM stubs AS s WHERE s.parent = d.parent AND "
+            "s.name = d.name))"));
     std::vector<int64_t> rowids;
     ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       rowids.push_back(row.Column<int64_t>(0));
@@ -553,7 +559,9 @@ absl::Status InvariantChecker::CheckDentry(
       found = Violation(kTriState, "dentry \"", EscapeBytes(name),
                         "\" of inode ", parent,
                         " is refused but has no stub");
-    } else if (state != "refused" && stub) {
+    } else if ((state == "present" || state == "absent") && stub) {
+      // A stub outlives its refusal only while the name is unknown (schema
+      // v5: forgotten, so that refusing it again keeps its nodeid).
       found = Violation(kTriState, "dentry \"", EscapeBytes(name),
                         "\" of inode ", parent, " is ", state,
                         " but has a stub");
@@ -574,7 +582,7 @@ absl::Status InvariantChecker::CheckStub(Context &ctx, int64_t id) {
   ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
     const std::optional<std::string> state =
         row.Column<std::optional<std::string>>(2);
-    if (state != "refused") {
+    if (state != "refused" && state != "unknown") {
       found = Violation(kTriState, "stub ", static_cast<uint64_t>(id),
                         " of dentry \"",
                         EscapeBytes(row.Column<std::string>(1)),

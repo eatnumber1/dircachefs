@@ -63,7 +63,13 @@ class InvariantChecks {
   virtual void Forgetting(Context &ctx, const DirCacheFS &fs, uint64_t ino,
                           uint64_t nlookup) {}
 
-  // backing::StartRun has recovered the dirty set and started the run.
+  // backing::StartRun has recovered the dirty set and started the run
+  // (Startup's probe of the recovered rows has not run yet).
+  virtual void RunStarting(Context &ctx) {}
+
+  // backing::Startup is done: StartRun, InitRoot, StartupPurge and the
+  // probe of the recovered rows (ProbeRecoveredRows), so the state is the
+  // one the first request will see.
   virtual void RunStarted(Context &ctx) {}
 
   // fuse_ops.cc: DESTROY's DirCacheFS::Destroy has returned (the kernel

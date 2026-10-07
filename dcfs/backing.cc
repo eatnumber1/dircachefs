@@ -1966,6 +1966,7 @@ absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
       sqlite3::Durability::kSync));
   // Model: StartRun.
   ctx.events->RunStarted(ctx);
+  ctx.checks->RunStarting(ctx);
   // The rows to probe once the mount fds exist (Startup).
   if (unclean || recovered > 0) return dirty;
   return std::vector<InodeId>{};

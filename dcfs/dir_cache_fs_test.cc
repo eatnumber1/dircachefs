@@ -450,10 +450,18 @@ class DirCacheFSTest : public ::testing::Test {
     MountFds mounts;
     Context ctx{db_, mounts, bitgen_};
     ctx.events = ctx_.events;
+    ctx.checks = ctx_.checks;  // The new process is checked too (step 26.2).
     ABSL_ASSIGN_OR_RETURN(FileDescriptor source,
                           syscalls::openat(AT_FDCWD, source_,
                                            O_RDONLY | O_DIRECTORY | O_CLOEXEC));
-    return backing::Startup(ctx, std::move(source), boot_id);
+    absl::Status started = backing::Startup(ctx, std::move(source), boot_id);
+    // From here on ctx_ is the dead process's memory, which no longer
+    // describes the database the new process recovered (its durable set,
+    // its opens): it is not checked any more (the new process was, through
+    // Startup). Its DESTROY at TearDown is the harness's cleanup, not a
+    // daemon's.
+    ctx_.checks = &NoInvariantChecks();
+    return started;
   }
 
   std::string Path(std::string_view rel) const {
@@ -3952,8 +3960,9 @@ TEST_F(DirCacheFSDeathTest, RemovedRecordBesideAWrittenEntry) {
                    " has both a removed record and a written_ entry"));
 }
 
-// StartRun's full check finds what no request changed, and names itself.
-TEST_F(DirCacheFSDeathTest, FullCheckAtStartRun) {
+// Startup's full check (after its probe of the recovered rows) finds what
+// no request changed, and names itself.
+TEST_F(DirCacheFSDeathTest, FullCheckAtStartup) {
   WriteFile(Path("f"));
   Start();
   auto [lookup, entry] = Lookup(kRootInode, "f");
@@ -3964,11 +3973,30 @@ TEST_F(DirCacheFSDeathTest, FullCheckAtStartRun) {
         ASSERT_THAT(db_.Exec(absl::StrCat(
                         "UPDATE inodes SET nlink = 0 WHERE id = ", f)),
                     IsOk());
-        ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+        ASSERT_THAT(Restart("boot"), IsOk());
       },
       absl::StrCat("invariant violated: tri-state: inode ", f,
                    ": attributes recorded as current with nlink 0 \\(in "
-                   "StartRun\\)"));
+                   "Startup\\)"));
+}
+
+// Schema v5: a stub outlives its refusal while the name is unknown (a
+// mutation's phase 1 forgot it, so that refusing it again keeps its
+// nodeid), not once the name is recorded present or absent.
+TEST_F(DirCacheFSTest, StubOfAnUnknownDentryIsLegal) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  ASSERT_THAT(db_.Exec(absl::StrCat(kInsertStub, "u", kInsertStubEnd)),
+              IsOk());
+  ASSERT_THAT(db_.Exec("INSERT INTO dentries (parent, name, state) "
+                       "VALUES (1, CAST('u' AS BLOB), 'unknown')"),
+              IsOk());
+  EXPECT_THAT(checker_->CheckChanged(ctx_, fs_.get(), {}), IsOk());
+  EXPECT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
+  ASSERT_THAT(db_.Exec("DELETE FROM stubs WHERE id = -5"), IsOk());
+  ASSERT_THAT(db_.Exec("DELETE FROM dentries WHERE name = CAST('u' AS BLOB)"),
+              IsOk());
 }
 
 // DESTROY's full check names itself, and its exemption (written_, which
