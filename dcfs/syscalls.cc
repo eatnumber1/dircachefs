@@ -454,6 +454,15 @@ absl::StatusOr<FileDescriptor> mkstemp(std::string &pattern) {
   return FileDescriptor(fd);
 }
 
+absl::Status nanosleep(const struct timespec &duration) {
+  if (::nanosleep(&duration, nullptr) == -1) {
+    return ErrnoToStatus(errno, "nanosleep");
+  }
+  return absl::OkStatus();
+}
+
+pid_t getpid() { return ::getpid(); }
+
 absl::StatusOr<int> fcntl(int fd, int cmd, int arg) {
   int rc = ::fcntl(fd, cmd, arg);
   if (rc == -1) return ErrnoToStatus(errno, absl::StrCat("fcntl(", fd, ")"));

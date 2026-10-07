@@ -172,6 +172,11 @@ absl::Status umount2(std::string_view target, int flags);
 absl::StatusOr<std::string> mkdtemp(std::string_view pattern);
 absl::StatusOr<FileDescriptor> mkstemp(std::string &pattern);
 
+// nanosleep(2): sleeps for `duration` (EINTR is an error status, as for the
+// others), and getpid(2) (never fails).
+absl::Status nanosleep(const struct timespec &duration);
+pid_t getpid();
+
 // fcntl(2) with an integer argument (or none). Commands that return a new
 // descriptor (F_DUPFD) are for `dup` below, not this.
 absl::StatusOr<int> fcntl(int fd, int cmd, int arg = 0);

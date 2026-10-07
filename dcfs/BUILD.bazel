@@ -923,6 +923,7 @@ qemu_cc_test(
       ":status",
       ":syscalls",
       "//dcfs/testonly:assert_ok_and_assign",
+      "//dcfs/testonly:files",
       "@absl//absl/base:log_severity",
       "@absl//absl/container:flat_hash_set",
       "@absl//absl/log:scoped_mock_log",

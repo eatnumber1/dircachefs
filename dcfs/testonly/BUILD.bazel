@@ -17,6 +17,18 @@ cc_library(
     ],
 )
 
+# File helpers for tests, over the syscalls:: wrappers.
+cc_library(
+    name = "files",
+    hdrs = ["files.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:syscalls",
+        "@absl//absl/status:status_macros",
+        "@absl//absl/status:statusor",
+    ],
+)
+
 # The recording ProtocolEvents for trace validation (formal/README.md,
 # "Trace validation").
 cc_library(

@@ -32,7 +32,10 @@
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_split.h"
+#include "absl/strings/strip.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
 #include "dcfs/device_id.h"
@@ -45,6 +48,7 @@
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/files.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -80,20 +84,28 @@ int ErrnoOf(const absl::Status &status) {
 }
 
 struct statx StatPath(const std::string &path) {
-  struct statx stx {};
-  EXPECT_EQ(::statx(AT_FDCWD, path.c_str(), AT_SYMLINK_NOFOLLOW,
-                    STATX_BASIC_STATS | STATX_BTIME, &stx),
-            0)
-      << path << ": " << std::strerror(errno);
-  return stx;
+  absl::StatusOr<struct statx> stx = syscalls::statx(
+      AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS | STATX_BTIME);
+  EXPECT_THAT(stx, IsOk()) << path;
+  return stx.ok() ? *stx : (struct statx){};
+}
+
+// setxattr(2) of a string value on `path`.
+absl::Status SetUserXattr(const std::string &path, std::string_view name,
+                          std::string_view value) {
+  return syscalls::setxattr(
+      path, name,
+      std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t *>(value.data()), value.size()),
+      0);
 }
 
 void WriteFile(const std::string &path, std::string_view contents) {
-  int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-  ASSERT_GE(fd, 0) << path << ": " << std::strerror(errno);
-  ASSERT_EQ(::write(fd, contents.data(), contents.size()),
-            static_cast<ssize_t>(contents.size()));
-  ::close(fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor fd,
+      syscalls::openat(AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC, 0644));
+  EXPECT_THAT(syscalls::write(*fd, contents.data(), contents.size()),
+              IsOkAndHolds(contents.size()));
 }
 
 class BackingTest : public ::testing::Test {
@@ -102,29 +114,30 @@ class BackingTest : public ::testing::Test {
     const char *tmpdir = std::getenv("TEST_TMPDIR");
     ASSERT_NE(tmpdir, nullptr);
     std::string templ = absl::StrCat(tmpdir, "/backing_XXXXXX");
-    ASSERT_NE(::mkdtemp(templ.data()), nullptr) << std::strerror(errno);
-    source_ = templ;
+    ASSERT_OK_AND_ASSIGN(source_, syscalls::mkdtemp(templ));
 
     // The source tree every test starts from.
     WriteFile(Path("file"), "hello");
-    ASSERT_EQ(::mkdir(Path("dir").c_str(), 0755), 0);
+    ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("dir"), 0755), IsOk());
     WriteFile(Path("dir/inner"), "inner");
-    ASSERT_EQ(::symlink("file", Path("link").c_str()), 0);
-    ASSERT_EQ(::mkfifo(Path("fifo").c_str(), 0644), 0);
+    ASSERT_THAT(syscalls::symlinkat("file", AT_FDCWD, Path("link")), IsOk());
+    ASSERT_THAT(
+        syscalls::mknodat(AT_FDCWD, Path("fifo"), S_IFIFO | 0644, 0), IsOk());
     WriteFile(Path("hl1"), "linked");
-    ASSERT_EQ(::link(Path("hl1").c_str(), Path("hl2").c_str()), 0);
-    xattrs_supported_ = ::setxattr(Path("file").c_str(), "user.test", "value",
-                                   5, 0) == 0;
+    ASSERT_THAT(
+        syscalls::linkat(AT_FDCWD, Path("hl1"), AT_FDCWD, Path("hl2"), 0),
+        IsOk());
+    xattrs_supported_ = SetUserXattr(Path("file"), "user.test", "value").ok();
 
     ASSERT_OK_AND_ASSIGN(
         db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
     // A real (non-O_PATH) fd: InitRoot registers it as the source
     // filesystem's mount fd, and open_by_handle_at's mount fd argument
     // rejects O_PATH (fs/fhandle.c get_path_from_fd()).
-    int source_fd =
-        ::open(source_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    ASSERT_GE(source_fd, 0);
-    FileDescriptor owned(source_fd);
+    ASSERT_OK_AND_ASSIGN(
+        FileDescriptor owned,
+        syscalls::openat(AT_FDCWD, source_, O_RDONLY | O_DIRECTORY));
+    const int source_fd = *owned;
     ASSERT_OK_AND_ASSIGN(RootIdentity root, ProbeRoot(ctx_, source_fd));
     ASSERT_THAT(Migrate(db_, root), IsOk());
     ASSERT_THAT(InitRoot(ctx_, std::move(owned)), IsOk());
@@ -155,17 +168,18 @@ class BackingTest : public ::testing::Test {
     std::reverse(paths.begin(), paths.end());
     paths.push_back(source_);
     for (const fs::path &path : paths) {
-      struct stat st {};
-      ASSERT_EQ(::lstat(path.c_str(), &st), 0);
+      ASSERT_OK_AND_ASSIGN(
+          struct stat st,
+          syscalls::fstatat(AT_FDCWD, path.string(), AT_SYMLINK_NOFOLLOW));
       if (S_ISLNK(st.st_mode)) continue;
       locked_.emplace_back(path.string(), st.st_mode & 07777);
-      ASSERT_EQ(::chmod(path.c_str(), 0), 0);
+      ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, path.string(), 0, 0), IsOk());
     }
   }
 
   void Unlock() {
     for (auto it = locked_.rbegin(); it != locked_.rend(); ++it) {
-      ::chmod(it->first.c_str(), it->second);
+      syscalls::fchmodat(AT_FDCWD, it->first, it->second, 0).IgnoreError();
     }
     locked_.clear();
   }
@@ -183,7 +197,7 @@ class BackingTest : public ::testing::Test {
   // file got the old inode number back (ext4 usually reuses it at once).
   bool Recreate(std::string_view name) {
     struct statx before = StatPath(Path(name));
-    EXPECT_EQ(::unlink(Path(name).c_str()), 0);
+    EXPECT_THAT(syscalls::unlinkat(AT_FDCWD, Path(name), 0), IsOk());
     WriteFile(Path(name), "recreated");
     struct statx after = StatPath(Path(name));
     return before.stx_ino == after.stx_ino;
@@ -299,7 +313,7 @@ TEST_F(BackingTest, RepopulationTracksChangesOnDisk) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   ASSERT_THAT(cache::SetNegative(ctx_, kRootInode, "ghost"), IsOk());
 
-  ASSERT_EQ(::unlink(Path("fifo").c_str()), 0);
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("fifo"), 0), IsOk());
   WriteFile(Path("new"), "new");
   ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
 
@@ -370,18 +384,17 @@ TEST_F(BackingTest, BackingReadsByInode) {
 }
 
 TEST_F(BackingTest, ReadGeneration) {
-  int file_fd = ::open(Path("file").c_str(), O_PATH | O_CLOEXEC);
-  ASSERT_GE(file_fd, 0);
-  FileDescriptor file(file_fd);
-  int link_fd = ::open(Path("link").c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
-  ASSERT_GE(link_fd, 0);
-  FileDescriptor link(link_fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor file,
+      syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor link,
+      syscalls::openat(AT_FDCWD, Path("link"), O_PATH | O_NOFOLLOW));
 
   EXPECT_THAT(ReadGeneration(*link, S_IFLNK), IsOkAndHolds(0u));
   EXPECT_THAT(ReadGeneration(*file, S_IFIFO), IsOkAndHolds(0u));
 
-  struct statfs sfs {};
-  ASSERT_EQ(::fstatfs(*file, &sfs), 0);
+  ASSERT_OK_AND_ASSIGN(struct statfs sfs, syscalls::fstatfs(*file));
   if (sfs.f_type != EXT4_SUPER_MAGIC) {
     GTEST_SKIP() << "generations are only known to be nonzero on ext4";
   }
@@ -398,17 +411,14 @@ TEST_F(BackingTest, ReadGeneration) {
 // test/qemu/guest/init), so this creates the file directly under /tmp,
 // which is always tmpfs in the QEMU guest.
 TEST_F(BackingTest, ReadGenerationOnTmpfsFileIsZero) {
-  char path[] = "/tmp/dcfs_backing_test_tmpfs_XXXXXX";
-  int fd = ::mkstemp(path);
-  ASSERT_GE(fd, 0) << std::strerror(errno);
-  FileDescriptor file(fd);
+  std::string path = "/tmp/dcfs_backing_test_tmpfs_XXXXXX";
+  ASSERT_OK_AND_ASSIGN(FileDescriptor file, syscalls::mkstemp(path));
 
-  struct statfs sfs {};
-  ASSERT_EQ(::fstatfs(*file, &sfs), 0);
+  ASSERT_OK_AND_ASSIGN(struct statfs sfs, syscalls::fstatfs(*file));
   ASSERT_EQ(sfs.f_type, TMPFS_MAGIC) << "/tmp is not tmpfs in this guest";
 
   EXPECT_THAT(ReadGeneration(*file, S_IFREG), IsOkAndHolds(0u));
-  ::unlink(path);
+  EXPECT_THAT(syscalls::unlinkat(AT_FDCWD, path, 0), IsOk());
 }
 
 // Registers a fake filesystem "mounted" at root/`name`, with its root inode
@@ -464,15 +474,16 @@ void ExpectFakeMountPurged(Context &ctx, MountFds &mounts,
 }
 
 TEST_F(BackingTest, ReopenFdReopensAnOPathDescriptorForReal) {
-  int path_fd = ::open(Path("file").c_str(), O_PATH | O_CLOEXEC);
-  ASSERT_GE(path_fd, 0);
-  FileDescriptor path(path_fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor path,
+      syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
 
   ASSERT_OK_AND_ASSIGN(FileDescriptor reopened, ReopenFd(*path, O_RDWR));
   ASSERT_OK_AND_ASSIGN(struct stat original, syscalls::fstat(*path));
   ASSERT_OK_AND_ASSIGN(struct stat now, syscalls::fstat(*reopened));
   EXPECT_EQ(original.st_ino, now.st_ino);
-  EXPECT_NE(::fcntl(*reopened, F_GETFD) & FD_CLOEXEC, 0);
+  ASSERT_OK_AND_ASSIGN(int fd_flags, syscalls::fcntl(*reopened, F_GETFD));
+  EXPECT_NE(fd_flags & FD_CLOEXEC, 0);
 
   // What the reopening is for: xattr calls reject O_PATH descriptors.
   if (!xattrs_supported_) GTEST_SKIP() << "no user xattrs here";
@@ -490,27 +501,28 @@ TEST_F(BackingTest, ReopenFdReopensAnOPathDescriptorForReal) {
 // symlink reads the symlink's own xattrs, not its target's.
 TEST_F(BackingTest, ReadXattrsFdReadsTheObjectNotTheSymlinkTarget) {
   if (!xattrs_supported_) GTEST_SKIP() << "no user xattrs here";
-  int file_fd = ::open(Path("file").c_str(), O_PATH | O_CLOEXEC);
-  ASSERT_GE(file_fd, 0);
-  FileDescriptor file(file_fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor file,
+      syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
   ASSERT_OK_AND_ASSIGN(auto file_xattrs, ReadXattrsFd(*file));
   EXPECT_THAT(file_xattrs, ::testing::Contains(
                                std::make_pair(std::string("user.test"),
                                               std::string("value"))));
 
-  int link_fd = ::open(Path("link").c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
-  ASSERT_GE(link_fd, 0);
-  FileDescriptor link(link_fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor link,
+      syscalls::openat(AT_FDCWD, Path("link"), O_PATH | O_NOFOLLOW));
   ASSERT_OK_AND_ASSIGN(auto link_xattrs, ReadXattrsFd(*link));
   EXPECT_THAT(link_xattrs, ::testing::IsEmpty());
 }
 
 TEST_F(BackingTest, ReadSymlinkFdGrowsItsBufferForALongTarget) {
   const std::string long_target(500, 'a');  // past the first 256 bytes
-  ASSERT_EQ(::symlink(long_target.c_str(), Path("long_link").c_str()), 0);
-  int fd = ::open(Path("long_link").c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
-  ASSERT_GE(fd, 0);
-  FileDescriptor link(fd);
+  ASSERT_THAT(syscalls::symlinkat(long_target, AT_FDCWD, Path("long_link")),
+              IsOk());
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor link,
+      syscalls::openat(AT_FDCWD, Path("long_link"), O_PATH | O_NOFOLLOW));
   EXPECT_THAT(ReadSymlinkFd(*link), IsOkAndHolds(long_target));
 }
 
@@ -530,10 +542,11 @@ TEST_F(BackingTest, StartupPurgeForgetsAFilesystemNoLongerMounted) {
 }
 
 TEST_F(BackingTest, StartupPurgeForgetsAFilesystemWhoseMountPointIsGone) {
-  ASSERT_EQ(::mkdir(Path("mnt").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mnt"), 0755), IsOk());
   ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
   ASSERT_OK_AND_ASSIGN(FakeMount mount, AddFakeMount(ctx_, "mnt"));
-  ASSERT_EQ(::rmdir(Path("mnt").c_str()), 0);
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("mnt"), AT_REMOVEDIR),
+              IsOk());
 
   ASSERT_THAT(StartupPurge(ctx_), IsOk());
   ExpectFakeMountPurged(ctx_, mounts_, mount, "mnt");
@@ -562,9 +575,10 @@ TEST_F(BackingTest, RefreshAttrsFromFdMarksValid) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, file), IsOk());
   WriteFile(Path("file"), "longer contents");
-  int fd = ::open(Path("file").c_str(), O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(fd, 0);
-  FileDescriptor owned(fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor owned,
+      syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
+  const int fd = *owned;
 
   ASSERT_THAT(RefreshAttrsFromFd(ctx_, file, fd), IsOk());
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
@@ -576,9 +590,10 @@ TEST_F(BackingTest, AttrsOfAFileOpenForWriteStayUnknown) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   absl::flat_hash_set<int64_t> open_for_write = {file};
   ctx_.open_for_write = &open_for_write;
-  int fd = ::open(Path("file").c_str(), O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(fd, 0);
-  FileDescriptor owned(fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor owned,
+      syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
+  const int fd = *owned;
   WriteFile(Path("file"), "longer contents");
 
   // Every way of recording fresh attributes stores them (so they can be
@@ -607,10 +622,11 @@ TEST_F(BackingTest, AttrsOfAFileOpenForWriteStayUnknown) {
 // leave nlink 0 cached as current.
 TEST_F(BackingTest, AttrsWithNoLinksLeftStayUnknown) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
-  int fd = ::open(Path("file").c_str(), O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(fd, 0);
-  FileDescriptor owned(fd);
-  ASSERT_EQ(::unlink(Path("file").c_str()), 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor owned,
+      syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
+  const int fd = *owned;
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("file"), 0), IsOk());
 
   ASSERT_THAT(RefreshAttrsFromFd(ctx_, file, fd), IsOk());
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
@@ -625,7 +641,7 @@ TEST_F(BackingTest, AttrsWithNoLinksLeftStayUnknown) {
 // changes below observable through the timestamps too.
 void WaitForNextTimestamp() {
   struct timespec ts = {.tv_sec = 0, .tv_nsec = 30'000'000};
-  ::nanosleep(&ts, nullptr);
+  EXPECT_THAT(syscalls::nanosleep(ts), IsOk());
 }
 
 // Expects exactly `times` "out-of-band" warnings while it is alive, and
@@ -663,10 +679,12 @@ TEST_F(BackingTest, OpenNodeDetectsOutOfBandChmod) {
 TEST_F(BackingTest, OpenNodeDetectsOutOfBandAppend) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   WaitForNextTimestamp();
-  int fd = ::open(Path("file").c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
-  ASSERT_GE(fd, 0);
-  ASSERT_EQ(::write(fd, " world", 6), 6);
-  ::close(fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor fd_owner,
+      syscalls::openat(AT_FDCWD, Path("file"), O_WRONLY | O_APPEND));
+  const int fd = *fd_owner;
+  ASSERT_THAT(syscalls::write(fd, " world", 6), IsOkAndHolds(6u));
+  ASSERT_THAT(syscalls::close(std::move(fd_owner)), IsOk());
   {
     OutOfBandLog log(1);
     ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
@@ -683,7 +701,7 @@ TEST_F(BackingTest, OpenNodeDetectsOutOfBandTouch) {
   // touch -d 2001-09-09T01:46:40Z
   struct timespec times[2] = {{.tv_sec = 1'000'000'000, .tv_nsec = 0},
                               {.tv_sec = 1'000'000'000, .tv_nsec = 0}};
-  ASSERT_EQ(::utimensat(AT_FDCWD, Path("file").c_str(), times, 0), 0);
+  ASSERT_THAT(syscalls::utimensat(AT_FDCWD, Path("file"), times, 0), IsOk());
   {
     OutOfBandLog log(1);
     ASSERT_THAT(OpenNode(ctx_, file, O_PATH), IsOk());
@@ -720,7 +738,7 @@ TEST_F(BackingTest, OpenNodeDetectsAnOutOfBandXattr) {
   ASSERT_THAT(cache::ListXattrs(ctx_, file),
               IsOkAndHolds(Optional(ElementsAre("user.test"))));
   WaitForNextTimestamp();
-  ASSERT_EQ(::setxattr(Path("file").c_str(), "user.added", "x", 1, 0), 0);
+  ASSERT_THAT(SetUserXattr(Path("file"), "user.added", "x"), IsOk());
   {
     OutOfBandLog log(1);
     ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
@@ -943,15 +961,17 @@ class BoundaryTest : public BackingTest {
  protected:
   void SetUp() override {
     BackingTest::SetUp();
-    ASSERT_EQ(::mkdir(Path("boundary").c_str(), 0755), 0);
-    ASSERT_EQ(::mount("tmpfs", Path("boundary").c_str(), "tmpfs", 0, nullptr),
-              0)
-        << std::strerror(errno);
+    ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("boundary"), 0755), IsOk());
+    ASSERT_THAT(
+        syscalls::mount("tmpfs", Path("boundary"), "tmpfs", 0, nullptr),
+        IsOk());
     mounted_ = true;
   }
 
   void TearDown() override {
-    if (mounted_) ::umount2(Path("boundary").c_str(), MNT_DETACH);
+    if (mounted_) {
+      syscalls::umount2(Path("boundary"), MNT_DETACH).IgnoreError();
+    }
     BackingTest::TearDown();
   }
 
@@ -994,8 +1014,8 @@ TEST_F(BoundaryTest, BoundaryIsListedAsItsStub) {
   ASSERT_OK_AND_ASSIGN(cache::StubRow stub, cache::GetStub(ctx_, listed.id));
   EXPECT_EQ(stub.name, "boundary");
   EXPECT_EQ(stub.parent, kRootInode);
-  struct stat root {};
-  ASSERT_EQ(::stat(Path("boundary").c_str(), &root), 0);
+  ASSERT_OK_AND_ASSIGN(struct stat root,
+                       syscalls::fstatat(AT_FDCWD, Path("boundary")));
   EXPECT_EQ(stub.attr.st.st_mode, root.st_mode);
   EXPECT_EQ(stub.attr.st.st_ino, static_cast<uint64_t>(listed.id));
 }
@@ -1084,7 +1104,7 @@ TEST_F(BackingTest, ReresolvingOneUnknownNameProbesOnlyThatName) {
 // (the FUSE layer used to answer ENOENT for "..", breaking readdir and NFS
 // reconnection of that directory).
 TEST_F(BackingTest, ParentOfAnUnknownDentryIsResolvedFromTheBacking) {
-  ASSERT_EQ(::mkdir(Path("dir/sub").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("dir/sub"), 0755), IsOk());
   ASSERT_OK_AND_ASSIGN(InodeId dir, Id("dir"));
   ASSERT_OK_AND_ASSIGN(InodeId sub, Id("sub", dir));
   EXPECT_THAT(ParentOf(ctx_, sub), IsOkAndHolds(dir));
@@ -1114,12 +1134,13 @@ TEST_F(BackingTest, ParentOfAnUnknownDentryIsResolvedFromTheBacking) {
 // A parent directory for the credential tests: `mode`, owned by root and
 // group `gid`, opened as the create-family functions expect.
 FileDescriptor MakeParent(const std::string &path, mode_t mode, gid_t gid) {
-  EXPECT_EQ(::mkdir(path.c_str(), 0), 0) << std::strerror(errno);
-  EXPECT_EQ(::chown(path.c_str(), 0, gid), 0) << std::strerror(errno);
-  EXPECT_EQ(::chmod(path.c_str(), mode), 0) << std::strerror(errno);
-  int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  EXPECT_GE(fd, 0) << std::strerror(errno);
-  return FileDescriptor(fd);
+  EXPECT_THAT(syscalls::mkdirat(AT_FDCWD, path, 0), IsOk());
+  EXPECT_THAT(syscalls::fchownat(AT_FDCWD, path, 0, gid, 0), IsOk());
+  EXPECT_THAT(syscalls::fchmodat(AT_FDCWD, path, mode, 0), IsOk());
+  absl::StatusOr<FileDescriptor> fd =
+      syscalls::openat(AT_FDCWD, path, O_RDONLY | O_DIRECTORY);
+  EXPECT_THAT(fd, IsOk());
+  return fd.ok() ? *std::move(fd) : FileDescriptor();
 }
 
 // The thread is root again after every switch: fsuid/fsgid 0 and the
@@ -1196,7 +1217,7 @@ TEST_F(BackingTest, CallerIdentityThatDoesNotTakeIsRefused) {
   ExpectRootAgain(groups);
   EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, bad_gid, *parent, "d", 0755)), EPERM);
   ExpectRootAgain(groups);
-  EXPECT_EQ(::access(Path("pub/d").c_str(), F_OK), -1);
+  EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("pub/d")).ok());
 }
 
 TEST_F(BackingTest, UnlinkAndRenameHonorTheStickyBit) {
@@ -1232,21 +1253,18 @@ TEST(BackingCredentialsTest, SetgroupsIsPerThread) {
     // Read the main thread's groups from here, while this thread still
     // has its own: /proc/self/task/<main tid>/status is not this thread's.
     std::string status_path =
-        "/proc/self/task/" + std::to_string(::getpid()) + "/status";
-    FILE *f = std::fopen(status_path.c_str(), "r");
-    ASSERT_NE(f, nullptr);
-    char line[512];
-    while (std::fgets(line, sizeof(line), f) != nullptr) {
-      if (std::strncmp(line, "Groups:", 7) != 0) continue;
-      char *p = line + 7;
-      char *end;
-      for (unsigned long g = std::strtoul(p, &end, 10); end != p;
-           g = std::strtoul(p, &end, 10)) {
+        "/proc/self/task/" + std::to_string(syscalls::getpid()) + "/status";
+    ASSERT_OK_AND_ASSIGN(std::string status_text,
+                         testonly::ReadFileToString(status_path));
+    for (std::string_view line : absl::StrSplit(status_text, '\n')) {
+      if (!absl::ConsumePrefix(&line, "Groups:")) continue;
+      for (std::string_view word :
+           absl::StrSplit(line, ' ', absl::SkipWhitespace())) {
+        uint32_t g = 0;
+        ASSERT_TRUE(absl::SimpleAtoi(word, &g)) << word;
         in_main_meanwhile.push_back(static_cast<gid_t>(g));
-        p = end;
       }
     }
-    std::fclose(f);
   }).join();
   EXPECT_EQ(in_thread, (std::vector<gid_t>{4242, 4243}));
   std::vector<gid_t> sorted_original = *original;
