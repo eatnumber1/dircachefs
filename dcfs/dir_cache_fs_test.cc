@@ -2899,13 +2899,13 @@ TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
 // generations; no nodeid passes to the other boundary
 // (formal/findings/lifetime_stub_nodeid_reused, fixed).
 TEST_F(DirCacheFSTest, ForgottenStubsKeepTheirNodeids) {
-  ASSERT_EQ(::mkdir(Path("mp1").c_str(), 0755), 0);
-  ASSERT_EQ(::mkdir(Path("mp2").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mp1"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mp2"), 0755), IsOk());
   Start();
   MountBelow("mp1");
   MountBelow("mp2");
-  ASSERT_EQ(::chmod(Path("mp1").c_str(), 0700), 0);
-  ASSERT_EQ(::chmod(Path("mp2").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("mp1"), 0700, 0), IsOk());
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("mp2"), 0755, 0), IsOk());
   auto [l1, e1] = Lookup(kRootInode, "mp1");
   auto [l2, e2] = Lookup(kRootInode, "mp2");
   ASSERT_EQ(l1.error, 0);
@@ -3116,7 +3116,7 @@ absl::StatusOr<int64_t> InodeRows(sqlite3::Connection &db) {
 TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
   WriteFile(Path("f"));
   WriteFile(Path("kept"));
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   Start();
   ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
@@ -3130,8 +3130,8 @@ TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
         cache::BeginRemove(ctx_, kRootInode, name, id, cache::BeginFill(ctx_)));
     phase1.End();  // In memory only: the database keeps phase 1 alone.
   }
-  ASSERT_EQ(::unlink(Path("f").c_str()), 0);
-  ASSERT_EQ(::rmdir(Path("d").c_str()), 0);
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("d"), AT_REMOVEDIR), IsOk());
   const InodeId touched[] = {kept};
   ASSERT_THAT(cache::MarkDirty(ctx_, touched), IsOk());
 
