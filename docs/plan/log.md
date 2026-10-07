@@ -1198,3 +1198,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   CPU ratio) and SQLite reductions 1-4 (attrs joined into ListDir, LIMIT = reply budget, ReadOne
   stops after the first row, merged completeness statements), budgets lowered per change,
   bench_readdir before/after; (5) create's phase-3 merge and (6) profiling deferred.
+- Warnings audit ready (lane-5, step-warnings @ ed88abe, 3 commits on 7.1; NOT yet merged: its rebase onto the current main conflicts after 26.7/26.10, handed to the agent; the orchestrator's chained command logged a merge that had not happened, corrected here): -Werror/-Wimplicit-fallthrough/
+  -Wno-sign-compare scoped to our sources (externals get none of our flags; 7.1's external
+  -Wno-implicit-fallthrough and the -Wno-error lines removed), global -Wl,--fatal-warnings,
+  analysis tests (warning_flags_*, external_compile_*), kernel_config rename, Initramfs echo
+  removed; the libfuse/googletest/numactl patches and SQLite define dropped (moot under lld);
+  two narrow per-repo -Wno flags remain (liburing unused-parameter, google_benchmark
+  thread-safety-analysis). Cache-less plain and asan builds: zero warnings from our code. fast
+  147 pass + 1 skip, presubmit 216 pass + 1 skip. Nit left: Bazel warns `platforms` 1.1.0 vs the
+  root's 1.0.0 (7.1's bazel_dep: bump to 1.1.0 in the next MODULE.bazel touch).
