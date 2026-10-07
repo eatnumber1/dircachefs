@@ -840,3 +840,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   lines; destroy_test mem=832 (the 256 default let the kernel reclaim the pinned inodes).
   Unexplained: ~1,000 FORGETs of 100,010 held inodes at 832 MiB, no memory pressure. Unblocked:
   12.3 (lane-3), 25.1 (lane-1), N4 readdir timing (after 25.1: same test file).
+- Dispatched: 12.3 revalidation model (lane-3, dcfs-protocol: formal/reval.tla, known-bug variants
+  for the pre-23 reuse and the flags_changed-only re-check, trace mapping of OPEN/RELEASE/IOCTL/
+  SETATTR); 25.1 style convergence (lane-1). Four lanes busy: 1 style, 2 Alpine fixes, 3 model,
+  4 clang. Load to watch; guest timeouts flake first.
