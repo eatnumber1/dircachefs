@@ -160,6 +160,13 @@ else
 		"no 'Release: could not refresh the attributes' warning in $LOG -- the fault injection did not land"
 fi
 
+# Since step 23.6 dcfs keeps one O_PATH descriptor on a written file from
+# its last close until the kernel forgets it (design.md, "mmap after
+# close"); make the kernel forget it (twice: the dentry LRU's second
+# chance), so the count compares the leaked backing file alone.
+echo 2 >/proc/sys/vm/drop_caches
+echo 2 >/proc/sys/vm/drop_caches
+quiesce_daemon "$DAEMON_PID"
 after_release=$(daemon_fd_count)
 if [ "$after_release" -eq "$before_open" ]; then
 	pass no-fd-leak
