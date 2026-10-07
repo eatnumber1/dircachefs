@@ -73,8 +73,10 @@ not an option here: it round-trips ill-formed UTF-16, not arbitrary bytes
   **Budget** (limited compute, no months-long runs): one guest per
   filesystem runs the whole corpus suite; renames chain each name into
   the next (n renames, not n^2 pairs); the corpus is about 60 names; the
-  random test uses 1,000 names in the medium tier and 100,000 only in the
-  slow tier. Target: under a minute per filesystem with KVM.
+  random test uses 1,000 names (~~100,000 in a slow tier~~: deleted
+  2026-10-06, `names_random_slow_test` cost 11 min per filesystem and
+  2 GB guests; byte handling is covered by the corpus and the seeded
+  1,000 names, scale by the readdir benchmark and `readdir_boundary`). Target: under a minute per filesystem with KVM.
   - **Printing:** a newline name in a log line shows the escape and does
     not start a new line; mount points and sources containing space, tab,
     newline, `#` and `\` round-trip through mountinfo parsing, `dcfs

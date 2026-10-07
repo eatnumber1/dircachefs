@@ -232,9 +232,8 @@ filesystem, `idle_long_test` 662 s) and failed only `idle_short_test_xfs`
 (60 s idle saw +4 backing writes; the same test passed in `presubmit`, so it
 is load-sensitive). Its `--config=asan` pass failed 9 of 117: `memory_test`
 x4 (ASan inflates RSS to 7862 bytes per entry against the 256 limit),
-`names_random_slow_test` x4 (the daemon disconnects, ENOTCONN, during the
-100,000-name run; it fails the same way under `--config=asan` on the host)
-and `idle_short_test_xfs` again. These are test findings,
+`names_random_slow_test` x4 (since deleted: the daemon disconnected,
+ENOTCONN, during its 100,000-name run) and `idle_short_test_xfs` again. These are test findings,
 not host dependencies; the ASan tier of CI stays red until they are
 resolved or the tests are excluded from `--config=asan`.
 

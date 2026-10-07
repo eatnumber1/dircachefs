@@ -2,9 +2,7 @@
 # dcfs step 9: names of random bytes (any byte but NUL and '/', 1-255 bytes),
 # seeded, created through dcfs and directly on the backing filesystem, and
 # compared both ways. RANDOM_COUNT names in all, half in each direction: 1000
-# here (the medium tier); names_random_slow.sh runs it with 100000 (the slow
-# tier, on a larger disk: every name is an inode on the backing filesystem,
-# twice over, and a small ext4 has only a few thousand).
+# by default (RANDOM_COUNT overrides it).
 FAILED=0
 . "$(dirname "$0")/lib.sh"
 

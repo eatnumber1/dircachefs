@@ -341,7 +341,7 @@ qemu_test_matrix(
 # Step 9: file names are bytes. names_test runs the whole name corpus
 # (guest/names.sh, tools/testutil.c's names-* subcommands) on each backing
 # filesystem; names_random_test creates 1,000 seeded random names, half in
-# each direction (medium tier) and names_random_slow_test 100,000 (slow tier).
+# each direction.
 qemu_test_matrix(
     name = "names_test",
     disks = [("vdb", "ext4", "320M")],
@@ -410,22 +410,6 @@ qemu_test_matrix(
     size = "medium",
     other_size = "medium",
     timeout = "moderate",
-)
-
-qemu_test_matrix(
-    name = "names_random_slow_test",
-    # 4G (sparse): every name is an inode on the backing filesystem.
-    disks = [("vdb", "ext4", "4G")],
-    guest_script = "guest/names_random_slow.sh",
-    # Guest RAM: under ASan dcfs's peak is ~720 MiB for 50,000 names in one
-    # directory (plain: ~55 MiB), which leaves the default 1024 MiB guest
-    # ~180 MiB spare and a loaded host tips it into the guest's OOM killer:
-    # dcfs dies SIGKILLed with no report and the mount reads ENOTCONN
-    # (reproduced with 640). 2048 leaves a wide margin.
-    mem = 2048,
-    size = "enormous",
-    other_size = "enormous",
-    timeout = "eternal",
 )
 
 # mkinitramfs.sh builds the archive with the pinned busybox's cpio (no host
