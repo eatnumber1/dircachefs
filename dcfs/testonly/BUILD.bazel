@@ -163,3 +163,10 @@ cc_library(
         "@absl//absl/status",
     ],
 )
+
+# The C++ sources, for //tools:raw_syscalls_test.
+filegroup(
+    name = "cxx_sources",
+    srcs = glob(["*.cc", "*.h"]),
+    visibility = ["//tools:__pkg__"],
+)

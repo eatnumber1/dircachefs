@@ -989,3 +989,10 @@ genquery(
         "//tools/sbom:__pkg__",
     ],
 )
+
+# The C++ sources, for //tools:raw_syscalls_test.
+filegroup(
+    name = "cxx_sources",
+    srcs = glob(["*.cc", "*.h"]),
+    visibility = ["//tools:__pkg__"],
+)
