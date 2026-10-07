@@ -1241,3 +1241,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (+5-15%); presubmit 1309/1388 s vs 1055/978 s (+25-35%); harness within noise. readdir_boundary
   runs the plain build (its timing guards the algorithm); kRecountLimit 16384 -> 1024. Rebasing
   onto main (many branches landed since), then merge; 26.6 follows.
+- readdir step done (lane-1, step-readdir @ 09e8f3d): N4 = ReaddirWorkTest (SQLite step bound for
+  N=100/1000, plain and plus; a per-entry completeness check makes it fail) + readdir_boundary as
+  a 6000-vs-1500 daemon CPU-tick ratio (quadratic variant: 246 vs 23 ticks FAIL); reductions:
+  attrs joined into ListDir (1000 entries: 3298 -> 1298 steps), LIMIT = reply budget (plus 2800
+  -> 1262), ReadOne stops after the first row (every sql_stmts budget down: warm-lookup 4 -> 2,
+  create 136 -> 119), merged completeness/ParentOf statements (warm-readdir 31 -> 13). bench_
+  readdir 10k entries: 652 -> 252 ms (backing 83): 7x -> 3x. No golden or backing count moved;
+  no modelled transition. Remaining: create 119 statements / 10 transactions / 2 syncs (plan
+  item 5), per-row C++ (item 6). New flake class seen: atime_test second-boundary race (want
+  ...067 got ...068; 4/4 on rerun) -> make it deterministic with the injected clock (26.10)
+  when touched. dir_cache_fs_test under ASan: timeout moderate, asan_mem 960. Under review.
