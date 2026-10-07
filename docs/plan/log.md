@@ -872,3 +872,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   writable mount + CONFIG_UNICODE=y; reproducer is the removed cmd_ext4_casefold at f45ef20^.
   Fix options: load the encoding in the ioctl, or check s_encoding (not the feature bit) in
   setflags/dirhash, or refuse enabling casefold while mounted. Present in v6.18, v7.2, 7.3-rc.
+- russ (2026-10-07): keep a DISABLED_ test that fails because of the ext4 casefold-tune kernel bug.
+  Dispatched (lane-2, step-oops-2): `casefold_tune_oops_test`, its own guest, reproducer restored as
+  `testutil ext4-tune-casefold`, `DISABLED_casefold-tune-online-oops` under the `disabled` helper,
+  with an explicit per-test `kernel_failure = "expected"` opt-in so the harness's oops rule stays
+  strict everywhere else.
