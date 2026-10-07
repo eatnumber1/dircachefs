@@ -11,6 +11,11 @@ The model describes what the code does today (`dcfs/backing.cc`,
 `dcfs/metadata_cache.cc`, `dcfs/dir_cache_fs.cc`), not what `docs/design.md`
 intends. Where the two differ, see [Findings](#findings).
 
+A second, smaller model, `reval.tla`, covers what dcfs reuses across a
+change of the backing filesystem's state (shared backing descriptors and
+their access mode, cached permission state, cached directory answers): see
+[The revalidation model](#the-revalidation-model).
+
 This file assumes no TLA+ background.
 
 Contents:
@@ -27,6 +32,7 @@ Contents:
 10. [Trace validation](#trace-validation)
 11. [Reading a counterexample](#reading-a-counterexample)
 12. [Changing the model](#changing-the-model)
+13. [The revalidation model](#the-revalidation-model)
 
 ## Running it
 
@@ -34,6 +40,7 @@ Contents:
 bazel test //formal/...                    # everything (about 20 minutes)
 bazel test //formal:small_test             # the real model, small bounds (~1 min)
 bazel test //formal:known_bug_crash_f1_phase1_not_durable_test
+bazel test //formal:reval_test             # the revalidation model (~20 s)
 ```
 
 (On russ's machine, wrap Bazel in `sg kvm -c '...'` as for every Bazel
@@ -461,6 +468,7 @@ right after the code the model's step stands for, with no backing syscall
 | `MutationEnding`, `MutationEnded` | `cache::Mutation::End`: before and after it changes the guards | `end` (`owned`: what `Owns` said) | `CreatePhase3`, `UnlinkPhase3`, `RenamePhase3`; `CreateFailed`, `UnlinkFailed`, `RenameFailed` | Phase 3; Concurrency (`Owns`) |
 | `Reresolve` | `ReresolveAfterFailure`, per name | `reresolve` | `RenameFailed2` for a rename's second name | Phase 2 |
 | `WritesEnded` | `cache::EndWrites` | | not modelled (a file's; the model has no writable opens) | Writable opens |
+| `FileOpened`, `FileReleased` | the end of `DirCacheFS::Open`, `Release`, and of a successful `Create` or `Tmpfile` | (a file's trace: `open`, `release`) | none in `dcfs.tla`; `reval.tla`'s `OpenF`, `ReleaseF` ([below](#trace-validation-of-files)) | Writable opens and the flags |
 | `SyncSnapshotTaken` | `SyncBacking`, after `cache::BeginSync` | `sync_begin`, `stop_sync` | a sync's `Arrive` (`S1From`); `StopSync` | Sync points |
 | `SyncfsStarting` | `SyncBacking`, before the syncfs calls | (`unexplained` unless the snapshot came right before) | none: the recorder requires `SyncSnapshotTaken` to be the callback right before it | Sync points |
 | `SyncfsDone` | `SyncBacking`, after the syncfs calls | `syncfs` | nothing (the model's syncfs takes effect at S1) | Sync points |
@@ -876,6 +884,12 @@ model in the same change (AGENTS.md). In practice:
   `bazel test //dcfs:dir_cache_fs_trace_test //dcfs:trace_fault_*` (every
   `trace_fault_*_test`)
   and the `//test/qemu:trace_*_test` targets.
+- A change to what dcfs reuses across a change of the backing state (the
+  shared backing fd and its access mode, the write fd, the GETFLAGS
+  re-check, what the kernel's permission check reads, a cached answer a
+  backing change could invalidate) updates `reval.tla` instead, with its
+  `FileOpened`/`FileReleased` events and `RevalTrace.tla` (see
+  [The revalidation model](#the-revalidation-model)).
 - Keep every action reachable: run TLC with `-coverage 1` and check that
   no action reports 0, except these, which report 0 in every
   configuration: `RenameFailed`, `RenameFailed2` and `UnlinkFailed`.
@@ -887,3 +901,185 @@ model in the same change (AGENTS.md). In practice:
   code's failure paths do (an out-of-band change can still make the
   syscall fail). `MC_nolock.cfg` reaches both branches of a failed
   phase-1 verification (the retry and the `EAGAIN`).
+
+## The revalidation model
+
+`reval.tla` is a second, separate model for one class of bug: dcfs reuses
+something it holds across a change of the backing filesystem's state that
+should have invalidated it. Phase 23 found two: a writable open reused a
+read-write shared backing descriptor opened before `chattr +i` (the open
+was granted and wrote), and `chattr +F` through dcfs made a directory
+case-insensitive under dcfs's byte-keyed cached entries
+(`docs/plan/audits/review-2026-10-07-phase23.md`, M1; L-b in step 23.7).
+The invariant: nothing dcfs holds grants more than the backing filesystem
+would grant at the moment of use, except where POSIX grandfathers it (an
+open descriptor keeps the rights it was opened with).
+
+How it relates to `dcfs.tla`: it shares no module and no state. `dcfs.tla`
+is one directory's cached records under the write-through protocol, with
+interleaving and crashes; it has no files, no descriptors and no
+permission state, and its backing directory changes only through dcfs.
+`reval.tla` has no crashes and no interleaving (each request is one step,
+at its effect point: a request concurrent with another may be ordered
+before or after it, as on a local filesystem), and instead has what the
+other leaves out: one file F with its permission state, dcfs's shared
+backing fd, write fd and open handles of it, dcfs's cached mode and the
+kernel's cached attributes, and one directory D whose lookups can become
+case-insensitive. The two never need each other's state: what
+`dcfs.tla` checks (that a cached record is unknown or right) is
+`reval.tla`'s starting assumption (`Init`: whatever is cached is right).
+
+```sh
+bazel test //formal:reval_test //formal:reval_oob_test //formal:reval_liveness_test
+bazel test //formal:known_bug_reval_no_recheck_test    # and the other known_bug_reval_*
+bazel test //formal:limitation_out_of_band_mode_test   # and the other limitation_*
+bazel test //formal:trace_reval_chattr_through_dcfs_test  # and the other trace_reval_*
+```
+
+By hand, as above, with `MCreval` (or a variant module) instead of `MC`:
+`-config MC_reval.cfg MCreval`.
+
+### What is in it
+
+| Variable | Meaning | In dcfs |
+|---|---|---|
+| `bF` | F's permission state on the backing filesystem: `w` (its mode bits and ACL let the caller write), `imm`, `app` (`FS_IMMUTABLE_FL`, `FS_APPEND_FL`) | the backing file |
+| `cF` | dcfs's cached attributes of F: `valid`, and `w` | `inodes.attrs_valid`, the cached mode and owner |
+| `kAttr` | the kernel's cached attributes of F (model-only: no event observes them) | the FUSE inode's attributes, for `--attr_timeout_sec` |
+| `sfd` | F's shared backing fd: none, `"rw"` (opened `O_RDWR`) or `"ro"`; `chg` is only for `BugRecheckOnlyIfChanged` | `DirCacheFS::BackingFile::fd`, `writable` |
+| `wfd` | the write fd beside a read-only shared fd: none, `"plain"`, `"append"` | `BackingFile::write_fd`, `write_fd_appends` |
+| `hs` | dcfs's open handles of F: mode (`"r"`, `"w"`, `"wa"`: with `O_APPEND`), and whether the backing filesystem's flags (`fl`) and mode (`ml`) allowed it when it was granted | `open_files_` |
+| `lastOpen`, `writeErr` | history: the last OPEN's outcome (who refused it, if anyone, and what the backing filesystem would have said at that moment), and whether a write through dcfs went wrong | (checking only) |
+| `bD`, `cD` | D on the backing filesystem (its casefold flag, the names stored in it: `"a"` and `"A"`, which casefold makes one), and dcfs's cached answer for each name (a complete listing records the names it did not list as absent) | the backing directory; `dentries`, `children_complete` |
+| `changes` | changes of the backing state so far (the bound) | (checking only) |
+
+| Action | What it does | dcfs |
+|---|---|---|
+| `Open(h, m)` | The kernel's `default_permissions` check (its cached attributes, or a GETATTR that dcfs answers from its cache or a fresh statx); then a fresh shared fd (`O_RDWR` as root, `O_RDONLY` if the flags refuse it), or the existing one: if read-write, the GETFLAGS re-check (EPERM on immutable, or append-only without `O_APPEND`); if read-only, a reopen with the open's mode, which becomes the write fd (the first writer's, replaced only by one without `O_APPEND`). A writable open marks F's attributes unknown | `DirCacheFS::Open`, `MakeBackingFile`, `BeginWriting` |
+| `Release(h)` | The last writable release records F's attributes from the fd and drops the write fd; the last release closes the shared fd | `DirCacheFS::Release`, `EndWriting`, `RecordWrittenAttrs` |
+| `Write(h)` | dcfs writes for an open through `WriteFd()` (EBADF with none; an appending one for an open without `O_APPEND` writes at the end) | `Write` (fallback), `Fallocate`, `CopyFileRange` |
+| `Getattr` | A GETATTR when the kernel has nothing cached | `Getattr`, `FreshAttr` |
+| `Chmod(v)` | A chmod through dcfs (refused by the backing filesystem on an immutable or append-only file); the reply goes into the kernel's cache | `Setattr` |
+| `SetFlags(imm, app)` | `FS_IOC_SETFLAGS` of F through dcfs | `Ioctl` |
+| `Expire`, `EvictF`, `EvictD(x)` | The kernel's attribute timeout passes; dcfs forgets F's attributes or a name's answer | `cache::InvalidateInode` |
+| `DirStep(x)`, `ListD` | A lookup of an unknown name (a probe), a create or unlink through dcfs, a complete listing | `ResolveName`, `CreateChild`, `RemoveChild`, `PopulateDirectory` |
+| `DirChange(v)` | `FS_IOC_SETFLAGS` of D changing `FS_CASEFOLD_FL`: refused by dcfs (EOPNOTSUPP), so it happens only with `BugCasefoldPassedThrough` | `Ioctl` (step 23.7) |
+| `OutOfBandChange` | If `OutOfBand`: any change of F's mode and flags, or `chattr +F`/`-F` of an empty D, behind dcfs's back | |
+
+| Property | Kind | Says |
+|---|---|---|
+| `OpenExact` | invariant | A dcfs OPEN succeeds exactly when the backing filesystem would let the caller open F in that mode at that moment |
+| `OpenFlagsExact` | invariant | Once past the kernel's check, an open is granted exactly when F's flags allow it (what a shared fd could otherwise grant past) |
+| `OpenModeExact`, `OpenModeNeverGrantsMore` | invariant | The kernel's check, which reads cached attributes, refuses exactly when F's mode does; never grants what the mode refuses |
+| `HeldFlagsLegit`, `HeldModeLegit` | invariant | Every writable open dcfs holds was allowed when it was granted |
+| `WriteFdHeld`, `WriteFdKeepsOffsets`, `WritesUseAWritableFd` | invariant | With a writable open, dcfs has a descriptor that can carry its writes, one that does not append if some writable open does not; every write went through one |
+| `DirCacheNeverWrong` | invariant | A cached answer for a name of D agrees with a lookup on the backing directory |
+| `CachedModeCurrent`, `KernelModeCurrent` | invariant | dcfs's and the kernel's cached mode agree with F's |
+| `NothingGrantsMore` | invariant | `OpenExact`, `HeldFlagsLegit`, `HeldModeLegit`, `WritesUseAWritableFd` and `DirCacheNeverWrong`: the phase's invariant |
+| `CachedDecisionsConverge` | temporal | Once the changes stop, the kernel's permission decision and every cached answer agree with the backing filesystem from some point on |
+
+`OutOfBand` is a constant. dcfs requires exclusive access
+(`docs/design.md`, "Assumptions"), so the real configuration has it
+FALSE; with it TRUE, the model says what breaks without that rule. The
+flags part does not break (`MC_reval_oob.cfg`): the GETFLAGS re-check and
+the reopen ask the backing file, so they see a `chattr` made by anyone.
+The mode part and D's cached answers do (`limitations/`).
+
+### Configurations
+
+Distinct states from TLC's report (run of 2026-10-07 on russ's machine, 2
+workers; a violating run's count varies a little with the workers'
+order). `MCreval.tla` adds the symmetry of the handles, for safety
+checking only.
+
+| Configuration | Test (tier) | Checks | States | Time |
+|---|---|---|---|---|
+| `MC_reval.cfg` | `reval_test` (medium) | 2 handles, 3 changes, through dcfs only; every invariant | 69,104 | ~15 s |
+| `MC_reval_oob.cfg` | `reval_oob_test` (medium) | as above with `OutOfBand`; the flags part: `OpenFlagsExact`, `HeldFlagsLegit`, `WriteFd*`, `WritesUseAWritableFd` | 442,736 | ~45-70 s |
+| `MC_reval_liveness.cfg` | `reval_liveness_test` (medium) | 2 changes, no symmetry; `CachedDecisionsConverge` and `NothingGrantsMore` | 67,632 | ~20 s |
+| `known_bugs/reval_recheck_if_changed_exclusive.cfg` | `reval_recheck_if_changed_exclusive_test` (medium) | `BugRecheckOnlyIfChanged` without `OutOfBand`: no violation | 69,104 | ~15 s |
+
+Coverage (`-coverage 1` on `MC_reval.cfg`): every action fires. `Write`,
+`Getattr`, `LookupD` and `ListD` add no distinct state there (a write
+changes nothing when it succeeds, and the others reach states `Init`
+already has); `DirChange` and `OutOfBandChange` are disabled (they need a
+bug constant or `OutOfBand`).
+
+### Known bugs and limitations
+
+Each is a test that passes only if TLC reports the expected violation
+(small tier, a few seconds each).
+
+| Variant | Bug | Expected | The counterexample |
+|---|---|---|---|
+| `known_bugs/reval_no_recheck` | a writable open sharing a read-write fd took the fd's mode (before step 23.7; review L-b) | `OpenFlagsExact` | open `O_WRONLY` (shared fd `O_RDWR`); `chattr +i` through dcfs; open `O_WRONLY` granted |
+| `known_bugs/reval_recheck_if_changed` | the declined fix: re-check only after a flag change through dcfs; with `OutOfBand` | `OpenFlagsExact` | open `O_WRONLY`; `chattr +a` (and `chmod a-w`) behind dcfs's back; open `O_WRONLY` granted |
+| `known_bugs/reval_casefold_passed_through` | `SETFLAGS` changing `FS_CASEFOLD_FL` forwarded (review M1) | `DirCacheNeverWrong` | `a` cached absent; `chattr +F` of the empty D; create `A`; `a` still absent while the backing finds `A` |
+| `known_bugs/reval_no_write_fd` | no write fd beside a read-only shared fd (review L1) | `WriteFdHeld` | open `O_WRONLY \| O_APPEND` of an append-only file: the shared fd falls back to `O_RDONLY`, the open is allowed, nothing can carry its writes |
+| `known_bugs/reval_write_fd_last_writer` | each writable open replaced the write fd (review L-a) | `WriteFdKeepsOffsets` | a read-only shared fd; open `O_WRONLY` (write fd plain); open `O_WRONLY \| O_APPEND`: the write fd appends, for both |
+| `limitations/out_of_band_mode` | `OutOfBand`: a chmod behind dcfs's back | `OpenModeNeverGrantsMore` | the kernel has F's attributes cached (writable); `chmod a-w` on the backing file; open `O_WRONLY` granted (dcfs's own cached mode does the same once the kernel asks it, and dcfs opens as root) |
+| `limitations/out_of_band_casefold` | `OutOfBand`: `chattr +F` behind dcfs's back | `DirCacheNeverWrong` | as the casefold bug, with the flag set directly on the backing directory |
+| `limitations/out_of_band_stale` | `OutOfBand`: nothing revalidates a cached record | `CachedDecisionsConverge` (liveness) | a change behind dcfs's back, after which nothing has to happen that invalidates the stale cached mode |
+
+### Trace validation of files
+
+`RevalTrace.tla` validates one file's trace against `reval.tla`, as
+`Trace.tla` does a directory's against `dcfs.tla` (same validator, same
+depth rule). The recorder writes files' traces only when made with `files`
+(the forged-request harness's `StartTrace()` does; the guests' recorder
+does not yet), on lines `DCFS-REVAL <trace> <file> <json>`. A file's trace
+begins at an open that finds no shared backing fd (the model's `Init` has
+none), or at a create; a file first seen shared is not traced.
+
+| Line | From | Model step (`RevalTrace.tla`) |
+|---|---|---|
+| `open` (`mode`, `shared`, `errno`, `fd`) | `FileOpened` | `T_Open`: `OpenF` of some closed handle; `shared` must be whether the model has a shared fd, errno 0 must be a grant and EPERM a refusal by the re-check or the reopen (the kernel's own EACCES never reaches dcfs); any other errno is a `failed` cut |
+| `release` (`writable`, `fd`) | `FileReleased` | `T_Release`: `ReleaseF` of an open handle that may write iff `writable` (dcfs's own record of the open: a RELEASE's flags are not the open's) |
+| `setflags` (`errno`, `imm`, `app`) | `RequestEnd` of an IOCTL `FS_IOC_SETFLAGS` (its argument: `Request::ioctl_arg`), or `FS_IOC_FSSETXATTR` (values free) | `T_SetFlags`: `SetFlagsF`, or `FailedAttrChangeF` if it failed |
+| `getflags` | `RequestEnd` of an IOCTL `FS_IOC_GETFLAGS` | `T_GetFlags`: no change |
+| `chmod` (`errno`) | `RequestEnd` of a SETATTR of the mode, uid or gid (`Request::flags` is setattr's `to_set`) | `T_Chmod`: `ChmodF` (its value free: the trace does not know the caller), or `FailedAttrChangeF` |
+| `write` (`errno`) | `RequestEnd` of a WRITE, FALLOCATE or COPY_FILE_RANGE into the file | `T_Write`: `WriteF`; errno 0 must find a descriptor that can write, EBADF none; another errno is a `failed` cut |
+| `oob` | the test (`TraceRecorder::NoteOutOfBand`), after changing the backing file directly | `T_OutOfBand`: any change of F's mode and flags |
+
+Each `open` and `release` line carries the shared backing fd the code left
+(`fd`: none, `rw` or `ro`, the write fd, the outstanding opens and writable
+opens), which the model's must equal. What no event observes, and stays
+model-only: the kernel's cached attributes and every permission decision
+it takes from them, dcfs's cached mode (a file's `attrs_valid` changes at
+many steps this projection does not follow), the caller (so the mode's
+value), and D (no directory event is mapped onto `reval.tla`; `dcfs.tla`'s
+traces cover D's records, but not casefold, which dcfs refuses).
+
+The traces: `//dcfs:dir_cache_fs_trace_test` validates the files' traces
+of every recording test, among them
+`WritableOpenOfAnImmutableFileIsRefused` (`chattr +i` behind dcfs's back),
+`WritableOpenAfterChattrThroughDcfsIsRefused`,
+`WritableOpenOfAnAppendOnlyFileNeedsOAppend`,
+`WritableOpenAfterChattrMinusIWritesThroughItsFd`,
+`AnAppendingWriterKeepsTheFirstWritersFd` and
+`ChmodAndChattrOfAnOpenFileMatchTheRevalModel` (the run of 2026-10-07: ten
+files' traces, all valid; `T_Open`, `T_Release`, `T_SetFlags`,
+`T_GetFlags`, `T_Chmod`, `T_Write` and `T_OutOfBand` all taken).
+`formal/trace_tests/reval_*.log` keep four of them, and the
+`//formal:trace_reval_*_test` targets check them against the real model
+and against known-bug variants as the model (`--reval-cfg`,
+`trace_tests/reval_<bug>.cfg`):
+
+| Test | Log, model | Expected |
+|---|---|---|
+| `trace_reval_chattr_through_dcfs_test` | `chattr +i` through dcfs, real model | valid |
+| `trace_reval_chattr_through_dcfs_no_recheck_test` | the same, `BugNoRecheck` | rejected at the refused `O_WRONLY` open after `setflags` (`imm`) |
+| `trace_reval_chattr_through_dcfs_recheck_if_changed_test` | the same, `BugRecheckOnlyIfChanged` | valid (the change went through dcfs) |
+| `trace_reval_chattr_out_of_band_test` | `chattr +i` behind dcfs's back, real model | valid |
+| `trace_reval_chattr_out_of_band_{no_recheck,recheck_if_changed}_test` | the same, either variant | rejected at the refused open |
+| `trace_reval_chmod_and_chattr_test` | chmod, `chattr +a`, a refused chmod, the opens, real model | valid |
+| `trace_reval_chmod_of_append_only_test` | the same with the refused chmod edited to succeed | rejected there |
+| `trace_reval_appending_writer_test` | two writers beside a read-only fd, real model | valid |
+| `trace_reval_appending_writer_write_fd_last_writer_test` | the same, `BugWriteFdLastWriter` | rejected at the `O_APPEND` open (the code kept the write fd plain) |
+
+For example, against `BugNoRecheck`:
+
+```
+trace_validate.sh: rejected: reval/t@2: the model explains 3 of 10 events; the first it cannot (event 4):
+  {"i":5,"c":"FileOpened","ev":"open","mode":"w","shared":true,"errno":1,"fd":{"sfd":"rw","wfd":"none","refs":1,"wrefs":1}}
+```

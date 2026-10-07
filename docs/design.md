@@ -1675,3 +1675,23 @@ where the code is more conservative than the model (recovery forgot more
 dentries than the model's, which the model now has), listed with the event
 table, the projection and the action coverage in `formal/README.md`
 ("Trace validation").
+
+A second model, `formal/reval.tla`, covers what dcfs reuses across a
+change of the backing filesystem's state that should have invalidated it:
+a file's shared backing descriptor and its access mode, the write
+descriptor beside a read-only one, the cached mode the kernel's
+`default_permissions` check reads, and cached negative entries and
+complete listings. Its invariant: a dcfs open succeeds exactly when the
+backing filesystem would allow it at that moment, nothing dcfs holds
+grants more than that (an open descriptor keeps the rights it was granted
+with, as in POSIX), and every write dcfs makes has a descriptor that can
+carry it. Variants put back Phase 23's bugs of this kind (the shared
+descriptor reused without the GETFLAGS re-check, `chattr +F` forwarded,
+the missing write descriptor and the one handed to the last writer). The
+fix that was declined, re-checking only after a flag change through dcfs,
+holds under exclusive access and fails without it; with changes behind
+dcfs's back the model also shows what does not survive whatever the fix
+(the cached mode and the cached directory answers), which is the
+exclusive-access assumption stated as a checked one. Files' traces from
+the forged-request harness are validated against it (`formal/README.md`,
+"The revalidation model").
