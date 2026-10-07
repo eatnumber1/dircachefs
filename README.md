@@ -353,9 +353,11 @@ unfixed code, then the fix makes it pass.
 different paths, in two Bazel output bases (one with its own repository
 contents cache) and without a disk cache, and fails unless the outputs are
 byte-identical (it prints the strings that differ). CI runs it as the
-`reproducible` job. It holds on one host: the binaries link the host's glibc
-(`main_static` its static `libc.a`), so reproducibility across hosts waits for
-the sysroot (step 7.1b). Today they are identical with nothing special: the
+`reproducible` job. The binaries link a pinned glibc and Linux headers (the
+Debian sysroot of `@dcfs_llvm`, step 7.1b) and the compiler runs on pinned
+libraries, so nothing the host's packages provide reaches the outputs and the
+comparison should hold across hosts as well (only one host has been measured).
+They are identical with nothing special: the
 toolchain redacts `__DATE__`/`__TIME__`, compiles with paths relative to the
 execroot, and the man page carries no date.
 

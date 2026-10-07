@@ -7,9 +7,11 @@
 #   bazel run //tools:reproducible_build [-- <bazel build flags>]
 #
 # The outputs are //dcfs:main, //dcfs:main_static (the SBOM calls them the
-# shipped binaries) and //man:dcfs.8. Same host only, until step 7.1b: the
-# binaries link the host's glibc (and main_static its static libc.a and the
-# host's Linux headers), so two hosts with different libc6-dev differ. A difference prints the
+# shipped binaries) and //man:dcfs.8. Since step 7.1b the binaries link a
+# pinned glibc and Linux headers (the Debian sysroot of @dcfs_llvm) and the
+# compiler runs on pinned libraries, so nothing the host's packages provide
+# reaches the outputs and the comparison should hold across hosts too (only
+# the same host has been measured). A difference prints the
 # strings that differ (tools/repro_compare.py), which is where an embedded
 # path, host name or timestamp shows up. The gate's own self-check is
 # //tools:repro_compare_self_check_test.
@@ -52,7 +54,7 @@ for x in a b; do
 		# The second build also has a repository contents cache of its own:
 		# a path or time that leaked into an extracted repository of the
 		# shared cache would then differ between the two (it costs a second
-		# extraction of every repository, LLVM's 12 GB included).
+		# extraction of every repository, LLVM's 1.9 GB included).
 		contents=()
 		if [ "$x" = b ]; then
 			contents=(--repo_contents_cache="$tmp/contents_b")

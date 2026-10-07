@@ -394,8 +394,10 @@ sh_test(
 
 # The gate itself is `bazel run //tools:reproducible_build` (CI runs it): it
 # builds //dcfs:main, //dcfs:main_static and //man:dcfs.8 in two output bases
-# and compares them with repro_compare.py. Same host only until 7.1b (the
-# host's glibc is linked). It cannot be a `bazel test` (it starts Bazel).
+# and compares them with repro_compare.py. Since 7.1b the glibc, the headers
+# and the compiler's libraries are pinned (@dcfs_llvm), so the comparison no
+# longer depends on the host's packages (two hosts: not yet measured). It
+# cannot be a `bazel test` (it starts Bazel).
 py_library(
     name = "repro_compare_lib",
     srcs = ["repro_compare.py"],
