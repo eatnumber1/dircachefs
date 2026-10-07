@@ -17,6 +17,17 @@
 # the backing device (review L-d): the no-disk claim itself, not only the
 # time.
 #
+# The guest must hold all of this in memory: 100000 pinned inodes (dcfs's
+# and the backing filesystem's, with their dentries) and the written files'
+# page cache cost about 9 KiB each, and once MemFree reaches the kernel's
+# low watermark kswapd evicts the inodes nothing pins yet (all of them
+# while the files are being written), the kernel sends a FORGET for each,
+# and dcfs drops that file's held descriptor (measured 2026-10-07: no
+# reclaim until MemFree fell to 60 MB at 73,418 files, then the held count
+# fell as kswapd scanned). MemAvailable does not show it (it counts the
+# reclaimable caches as available), so the test reads the reclaim counters
+# and fails, saying so, when the guest was too small for the tree.
+#
 # Run as /tests/destroy.sh by guest/init when booted with dcfs_test=destroy.sh.
 FAILED=0
 . "$(dirname "$0")/lib.sh"
@@ -59,6 +70,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# reclaim_scans: pages the kernel's reclaim has scanned since boot, plus
+# the objects its slab shrinkers have scanned: both zero while the guest has
+# memory to spare, and the first nonzero reading means it began evicting.
+reclaim_scans() {
+	awk '/^pgscan_/ && !/throttle/ { s += $2 } /^slabs_scanned / { s += $2 } END { print s + 0 }' /proc/vmstat
+}
+
 # uptime_ms: milliseconds since boot (busybox date has no %N).
 uptime_ms() {
 	read -r up _ </proc/uptime
@@ -75,6 +93,7 @@ else
 	exit "$FAILED"
 fi
 
+scans0=$(reclaim_scans)
 t0=$(uptime_ms)
 if "$BENCH" mktree "$MNT" "$ENTRIES" 0; then
 	pass mktree
@@ -85,10 +104,10 @@ fi
 t1=$(uptime_ms)
 fds=$(ls /proc/"$DAEMON_PID"/fd | wc -l)
 echo "destroy.sh: wrote $ENTRIES files in $(((t1 - t0) / 1000)) s; dcfs holds $fds descriptors"
-if [ "$fds" -ge $((ENTRIES * 9 / 10)) ]; then
+if [ "$fds" -ge "$ENTRIES" ]; then
 	pass held-descriptors
 else
-	fail held-descriptors "dcfs holds $fds descriptors for $ENTRIES written files"
+	fail held-descriptors "dcfs holds $fds descriptors for $ENTRIES written files (MemFree $(awk '/^MemFree:/ {print $2}' /proc/meminfo) KiB, reclaim scans $(($(reclaim_scans) - scans0)): the guest ran short of memory if nonzero)"
 fi
 
 # Keep every written file's dcfs inode, then drop every cache.
@@ -102,20 +121,30 @@ while [ "$i" -lt 300 ] && ! grep -q READY /tmp/hold.out; do
 	i=$((i + 1))
 	sleep 1
 done
-if grep -q READY /tmp/hold.out; then
+# mktree writes ENTRIES files and the one at the bottom of deep/.
+if grep -qx "READY $((ENTRIES + 1))" /tmp/hold.out; then
 	pass hold-tree
 	echo "destroy.sh: holder: $(cat /tmp/hold.out)"
 else
 	fail hold-tree "holder not ready: $(cat /tmp/hold.out)"
 	exit "$FAILED"
 fi
+fds_held=$(daemon_fd_count)
+scans1=$(reclaim_scans)
+echo "destroy.sh: dcfs holds $fds_held descriptors with the holder ready; MemFree $(awk '/^MemFree:/ {print $2}' /proc/meminfo) KiB, reclaim scans $((scans1 - scans0))"
+if [ "$scans1" -eq "$scans0" ]; then
+	pass no-reclaim
+else
+	fail no-reclaim "the kernel reclaimed memory while the tree was written and held ($((scans1 - scans0)) scans): the guest is too small for $ENTRIES files"
+fi
 drop_caches_quiesced
 fds_dropped=$(daemon_fd_count)
 echo "destroy.sh: after dropping the caches dcfs holds $fds_dropped descriptors"
-if [ "$fds_dropped" -ge $((ENTRIES * 9 / 10)) ]; then
+# Every inode is pinned by the holder, so the drop must forget none.
+if [ "$fds_dropped" -eq "$fds_held" ]; then
 	pass still-held
 else
-	fail still-held "dcfs holds $fds_dropped descriptors after drop_caches (FORGETs came despite the holder)"
+	fail still-held "dcfs held $fds_held descriptors and $fds_dropped after drop_caches (FORGETs came despite the holder)"
 fi
 
 r0=$(sectors_read "$DEV")

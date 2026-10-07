@@ -395,12 +395,18 @@ qemu_test(
     name = "destroy_test",
     disks = [("vdb", "ext4", "2G")],
     # 100,000 written files' dentries and inodes stay pinned (dcfs's held
-    # descriptors, then the test's holder): at 256 MiB the kernel reclaimed
-    # them and the test failed (17,784 held). Measured at 1024: MEM
-    # peak_used=512672 KiB of total=1018448 (2026-10-07); with the kernel's
-    # 29 MiB, 530 + 50% rounds up to 832 (README, "Guest memory"). ASan is
-    # not measured: bench_smoke's 1856 (also 100,000 entries) is a guess.
-    mem = 832,
+    # descriptors, then the test's holder), and each costs about 9 KiB of
+    # slab and page cache (measured 2026-10-07 at 832: MemFree fell from
+    # 705 MB to the low watermark, about 60 MB, at 73,418 files; kswapd then
+    # evicted the unpinned inodes, the kernel sent their FORGETs and dcfs
+    # dropped their held descriptors: 67,292 held at the end of a loaded
+    # run, 52,326 after the holder). The sizing rule's MemAvailable peak
+    # (MEM peak_used=349584 KiB) cannot see this: it counts the reclaimable
+    # caches as available. About 1030 MiB are needed (76 MiB at boot, 100,000
+    # x 9 KiB, the watermark); at 1536 the run ended with MemFree 490 MiB of
+    # 1474 and no reclaim, 100,010 descriptors held and none lost to the drop.
+    # destroy.sh fails, saying so, if the kernel reclaims anything.
+    mem = 1536,
     asan_mem = 1856,
     guest_script = "guest/destroy.sh",
     size = "large",
