@@ -38,8 +38,21 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
   `syscall(path-kind)` lines; a checked-in golden per operation and cache
   state: a cached LOOKUP = nothing, a cached READDIR = nothing, unlink =
   `unlinkat` + the phase-3 `fstatat`, create, rename, write-through,
-  FORGET of a written file = nothing (held fd), ... A diff fails the
-  test, with the trace printed. Owner: dcfs-implementer.
+  FORGET of a written file = `statx` + `close` through the held fd (the
+  text first said "nothing"; design.md's FORGET hook does a statx), ...
+  A diff fails the test, with the trace printed. Owner: dcfs-implementer.
+  Done 2026-10-07 (44da625): Alpine strace (+3.8 MB per e2e initramfs,
+  dynamic with musl's loader), `strace_lib.sh`, goldens for warm lookup/
+  stat/readdir (empty), cold lookup (13 backing calls), create (26),
+  unlink (13), mkdir (12), rename (15), write-through (12: open/release
+  only, passthrough), fsync (14), chmod (24), forget-written (2); stable
+  over 3 runs; self-check; `--sync_interval_sec` raised in the test so
+  the periodic syncfs stays out. Findings: design.md says the generation
+  is read before `name_to_handle_at`, the code does it after (doc or
+  identity question for 12.5/14); the per-op counts (create 26, chmod 24
+  incl. `security.capability` / `posix_acl_access` reads) are the first
+  exact cost statement and worth an investigator's look once 26.4 pins
+  them.
 - 26.4 Ratchets on deterministic counts only (russ: wary of brittleness).
   From 26.3's traces and a counting SQLite hook: backing syscalls per
   operation, SQLite statements and transactions per operation, fsyncs per

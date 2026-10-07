@@ -1019,3 +1019,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   DESTROY, crash + sweep), six invariants, four known-bug variants (incl. the non-final-FORGET
   hypothesis), trace mapping of existing events. Five lanes busy: 1 style 25.1, 2 lifetime
   model, 3 strace goldens, 4 clang, 5 warnings.
+- 26.3 merged (44da625, lane-3): see the phase file's Done note; 26.4 ratchets dispatched to the
+  same agent (budgets file, SQLite statement/transaction counts if a cheap deterministic counter
+  exists, ASan must give the same counts).
+- 7.1 done on its branch (lane-4): toolchains_llvm 1.11.1 + LLVM 22.1.8 (23.1.2's lld needs ICU 70:
+  the release binaries depend on host libc/libstdc++/zlib/libxml2/ICU; no sysroot: glibc headers
+  and static libs are the host's; wrapper needs host mktemp/realpath/rm) -> 7.1b follow-up: a
+  Debian sysroot, or Alpine's clang/lld through the musl loader (the Phase 24 pattern). Static
+  main_static with lld + libc++; --dynamic_mode=off gone; clang found a missing <thread>, an
+  unused private field, libstdc++ mangled names in the --wrap fakes; patches: liburing probes
+  (host ld leak), toolchains_llvm cc_wrapper response-file bug (QEMU link; may be moot after the
+  rebase), numactl version script dropped (its `local: *` hid clang's static ASan malloc: 10 ASan
+  tests failed "bad-free"). presubmit 145/145, asan small 24/24, ubsan main_static builds.
+  Rebasing over Alpine (its base predates it), then review.
