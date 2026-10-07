@@ -126,3 +126,17 @@ unshare
 realpath
 setns
 pivot_root
+opendir
+readdir
+closedir
+waitpid
+execv
+_exit
+usleep
+sleep
+nftw
+mkdtemp
+getpid
+fopen
+syscall
+remove

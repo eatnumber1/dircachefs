@@ -4,15 +4,17 @@ Every syscall goes through dcfs/syscalls.h, which turns the failure into a
 Status; this test scans the tree's C++ for a call of any name in
 raw_syscalls_names.txt that is not qualified with `syscalls::`.
 
-What it catches: `name(`, `::name(` and `std::name(`-less global calls in
-code (comments and string/char literals are blanked first). What it
-ignores: `syscalls::name(`, any `Scope::name(` or `.name(` or `->name(` (a
-member or another namespace's function), and `__wrap_name`/`__real_name`
-(the link-time fault fakes of the *_test.cc files define and call those:
-`\\b` does not match inside a longer identifier). What it cannot catch: a
-call through a macro or function pointer, a name not in the list, a raw
-string literal containing a quote, and a call whose name is a local
-function or lambda of the same spelling (a false positive: rename it).
+What it catches: `name(`, `::name(`, `std::name(`, `(name)(` and `x>name(`
+in code (comments and string/char literals are blanked first; a `'` inside a
+number is a digit separator, not a char literal). What it ignores:
+`syscalls::name(`, any other `Scope::name(`, `.name(` and `->name(` (a member
+or another namespace's function), and `__wrap_name`/`__real_name` (the
+link-time fault fakes of the *_test.cc files define and call those: the
+negative lookbehind on a word character keeps the pattern from matching
+inside a longer identifier). What it cannot catch: a call through a macro or
+function pointer, a name not in the list, a raw string literal containing a
+quote, and a call whose name is a local function or lambda of the same
+spelling (a false positive: rename it).
 
 It is a ratchet while the tree converges (step 25.1c): raw_syscalls_baseline.txt
 holds the count per file still to convert, and the test fails when any file
@@ -37,9 +39,23 @@ def load_names(path):
 
 
 def pattern(names):
+    alt = "|".join(map(re.escape, names))
+    # group 1 the qualifier, group 2 the name; `(name)(` has the same groups.
     return re.compile(
-        r"(?<![\w.>])((?:\w+::)*)(%s)\s*\(" % "|".join(map(re.escape, names))
+        r"(?<![\w.])(?<!->)((?:\w+::)*)(%s)\s*\(|"
+        r"(?<![\w.])(?<!->)\(\s*((?:\w+::)*)(%s)\s*\)\s*\(" % (alt, alt)
     )
+
+
+QUALIFIERS = ("", "std::")
+
+
+def is_digit_separator(src, i):
+    """True when the `'` at src[i] sits inside a numeric literal (1'000)."""
+    j = i
+    while j > 0 and (src[j - 1].isalnum() or src[j - 1] in "_'"):
+        j -= 1
+    return j < i and src[j].isdigit() and i + 1 < len(src) and src[i + 1].isalnum()
 
 
 def blank(src):
@@ -56,6 +72,9 @@ def blank(src):
             j = n if j < 0 else j + 2
             out.append(re.sub(r"[^\n]", "", src[i:j]))
             i = j
+        elif c == "'" and is_digit_separator(src, i):
+            out.append(c)
+            i += 1
         elif c in "\"'":
             j = i + 1
             while j < n and src[j] != c:
@@ -73,9 +92,11 @@ def find_raw_calls(src, pat):
     s = blank(src)
     found = []
     for m in pat.finditer(s):
-        if m.group(1) not in ("", "::"):
+        qualifier = m.group(1) if m.group(2) else m.group(3)
+        name = m.group(2) or m.group(4)
+        if qualifier not in QUALIFIERS:
             continue
-        found.append((s.count("\n", 0, m.start()) + 1, m.group(2)))
+        found.append((s.count("\n", 0, m.start()) + 1, name))
     return found
 
 
@@ -109,6 +130,22 @@ class FinderTest(unittest.TestCase):
             "char c = '(';",
         ):
             self.assertEqual(self.calls(src), [], src)
+
+    def test_flags_std_parenthesized_and_after_angle(self):
+        self.assertEqual(self.calls("std::close(fd);"), ["close"])
+        self.assertEqual(self.calls("::std::close(fd);"), ["close"])
+        self.assertEqual(self.calls("int rc = (open)(p, 0);"), ["open"])
+        self.assertEqual(self.calls("if (a>close(fd)) {}"), ["close"])
+        self.assertEqual(self.calls("p = x->close(1);"), [])
+        self.assertEqual(self.calls("(syscalls::open)(p);"), [])
+
+    def test_digit_separators_are_not_char_literals(self):
+        self.assertEqual(self.calls("int n = 1'000'000; close(fd);"),
+                         ["close"])
+        self.assertEqual(self.calls("auto m = 0x1'F; open(p);"), ["open"])
+        # A real char literal still hides what follows on its line.
+        self.assertEqual(self.calls("char c = 'a'; // open(x)"), [])
+        self.assertEqual(self.calls("f('\\''); close(1);"), ["close"])
 
     def test_reports_the_line(self):
         self.assertEqual(find_raw_calls("a;\n\nclose(1);", self.pat),
