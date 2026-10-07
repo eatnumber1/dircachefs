@@ -902,3 +902,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   only beside writers over a read-only shared fd + BugWriteFdNeverDropped variant; F1 the liveness
   config is trivial under exclusive access; F5 harness test for a refused SETFLAGS and FSSETXATTR.
   F4 (plan: coherence parameter not implemented; Done note) is the orchestrator's at merge.
+- 25.1 done in lane-1 (step-25.1, 7 commits + docs): 8 *ErrorBuilder() helpers, 45 sites converted,
+  4 `; ;` texts; C5/C6/C8/C14/C16; syscalls.h thin wrappers only (opath helpers, ReopenFd, FsUid/
+  FsGid, GetInodeGeneration -> backing.cc; new getxattr/listxattr/setxattr/removexattr/fchmodat/
+  utimensat wrappers; setgroups; LogOpenFlags in log_open_flags.h as a hidden friend, with a test;
+  backing_fault_test with --wrap on getxattr/listxattr); enum class x4 (RET_CHECK streams the
+  underlying value); ASSERT_OK_AND_ASSIGN once; pjdfstest README. presubmit 146/146, asan small
+  26/26. Finishing: getrlimit/setrlimit/flock wrappers (C10 to zero), readlinkat/getgroups loops,
+  setattr.sh comments; then review (fresh dcfs-reviewer), then merge and 25.2.
