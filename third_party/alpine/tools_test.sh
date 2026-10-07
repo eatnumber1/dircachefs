@@ -32,12 +32,32 @@ main() {
   check qemu-version bash -c \
     "'${qemu}' --version | grep -Eq '^QEMU emulator version [0-9]+\\.[0-9]+'"
   check qemu-has-kvm bash -c "'${qemu}' -accel help | grep -qx kvm"
+  check qemu-has-tcg bash -c "'${qemu}' -accel help | grep -qx tcg"
+  # TCG starts too (the fallback when a runner has no /dev/kvm).
+  check qemu-tcg-start bash -c \
+    "echo quit | '${qemu}' -M microvm,accel=tcg -cpu max -S -display none \
+      -nodefaults -monitor stdio -m 16"
   # KVM really works, and the machine's data comes from the wrapper's -L.
   if [[ -w /dev/kvm ]]; then
     check qemu-kvm-start bash -c \
       "echo quit | '${qemu}' -M microvm,accel=kvm -cpu host -S -display none \
         -nodefaults -monitor stdio -m 16"
   fi
+
+  # A wrapper that is not next to its tree must not run anything: with an
+  # empty root it would start the host's /lib/ld-musl and /usr/bin programs.
+  cp "${mke2fs}" "${TMP}/lonely-wrapper"
+  check wrapper-without-tree-exits-127 bash -c \
+    "'${TMP}/lonely-wrapper' -V 2>&1; [[ \$? -eq 127 ]]"
+  check wrapper-without-tree-says-why bash -c \
+    "'${TMP}/lonely-wrapper' -V 2>&1 | grep -q 'cannot find root/ next to'"
+  # The loader's own search path file is empty: a library missing from the
+  # tree is an error, never a host library of /lib or /usr/lib.
+  local tree
+  tree=$(cd "$(dirname "${mke2fs}")/../root" && pwd)
+  check ld-path-file-is-empty bash -c \
+    "[[ -e '${tree}/etc/ld-musl-x86_64.path' && ! -s \
+       '${tree}/etc/ld-musl-x86_64.path' ]]"
 
   truncate -s 64M "${TMP}/e"
   truncate -s 320M "${TMP}/x"
