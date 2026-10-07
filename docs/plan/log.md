@@ -1443,3 +1443,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   59/61, device_id 127/127, mounts_below 55/55, file_handle 99/103, setattr.sh covers the *OPath
   helpers (reached only for non-regular files: fifo/symlink); FileHandle::ToString per field;
   style.md's debug-string rule written.
+- 8.2 + 26.5b merged (4af0981): three survivors killed test-first; per-push mutation mode
+  (`mutate.py changed --range`, <= 30 mutants, fails on a survivor in changed code; wired into
+  `full`, 120-min step) and the weekly 6-shard mutation job (survivors as an artifact, fails
+  only on tooling errors; ~2.7 h per shard estimated). First per-push run: 2 of 91 mutants
+  sampled, both survived (8.2b: Release `writable` negation; Fallocate End deleted). Model gap
+  12.11: no event for the end of an attribute change. Note for lane-5's merge: the mutation
+  step sits in `full`, which lane-5 shards: it should become its own job (lane-4 after lane-5
+  lands).

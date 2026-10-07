@@ -80,3 +80,12 @@ Each survivor is a missing test; tests first, then the mutant must die:
 4. `dir_cache_fs.cc:2406` `CopyFileRange`: a deleted `mutation->End()`
    goes unnoticed: a copy_file_range followed by a listing or sync point
    that depends on the mutation having ended.
+
+8.2 done 2026-10-08 (4af0981): #1 `TmpfileUndoToleratesARowThatIsAlreadyGone`,
+#3 `ReleaseOfAnUnlinkedFileWhoseRowCannotBeDeletedWarns`, #4
+`CopyFileRangeEndsItsMutationBeforeItsRefreshes`, each shown killing its
+mutant; #2 waits for Phase 11. A missing `Mutation::End` cannot make trace
+validation reject: no model has an event for the end of an attribute
+change (a 12.x item). 8.2b, from the first per-push run: `Release`
+(`dir_cache_fs.cc:1704`, `writable` negated in a `?:`) and `Fallocate`
+(`:2370`, `mutation->End()` deleted: the #4 pattern).

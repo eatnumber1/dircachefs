@@ -201,3 +201,12 @@ recorder does not yet write file traces (gap documented in
 formal/README.md). Every T_* branch is taken by a validated trace except
 T_Write's EBADF (unreachable in fixed code). Review: merge as is +
 follow-ups done. Deviation: recorder unit tests written after the code.
+
+## 12.11 (from 8.2, 2026-10-08): the end of an attribute change as an event
+
+Mutation testing showed that deleting a `Mutation::End()` after an
+attribute change (copy_file_range, fallocate) is invisible to trace
+validation: no model has an event for the end of an attribute change, so
+the trace still validates. Add the event to dcfs.tla's attribute-change
+transitions (and the recorder), with a known-bug variant "End skipped"
+that validation rejects.
