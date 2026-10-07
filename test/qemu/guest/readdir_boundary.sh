@@ -14,19 +14,16 @@
 # itself (mkdir/touch), then a full listing is taken both through dcfs and
 # directly against the backing filesystem and compared byte for byte after
 # sorting -- any entry silently dropped, duplicated, or corrupted at a
-# reply-buffer boundary shows up as a mismatch. This is timed too: with the
-# cache already fully warm (see create.sh's identical "warm-after-all"
-# technique), a correct, buffer-bounded implementation does one cache
-# lookup per entry across the whole listing; 49a9b9c's own commit message
-# describes the pre-fix behavior as pulling *every remaining* entry from
-# the cache on *every* READDIR call regardless of what fits, which is
-# quadratic in directory size -- so on a directory big enough to need many
-# round trips, a reverted fix should take much longer to list even though
-# (per 49a9b9c's own analysis; see AppendDirEntries, unchanged by this fix)
-# the actual bytes returned to the kernel, and hence correctness, do not
-# differ. Both checks are kept: the correctness one because it is the
-# thing that actually matters, the timing one because it is what would
-# actually distinguish the fix from its revert.
+# reply-buffer boundary shows up as a mismatch. The listing's cost is checked
+# too, as a RATIO of the daemon's own CPU ticks (/proc/PID/stat) listing 4N
+# entries against N entries, both already cached: a buffer-bounded listing
+# costs time linear in the entries (about 4x), whereas 49a9b9c's pre-fix
+# behavior (pulling every remaining entry from the cache on every READDIR
+# call) is quadratic (about 16x). A ratio tolerates a uniformly slow or
+# loaded host, which an absolute wall-clock budget (2.5 s) did not: it
+# failed at 3.2, 2.98 and 3.04 s under load. The deterministic form of the
+# same check is the harness's step counting (dir_cache_fs_test.cc,
+# ReaddirWorkTest).
 #
 # Uses only busybox applets/options (verified against the exact busybox
 # baked into the initramfs).
@@ -103,6 +100,13 @@ while [ "$i" -lt "$N" ]; do
 	: >"$MNT/many/file-$(printf '%05d' "$i")-the-quick-brown-fox-jumped"
 	i=$((i + 1))
 done
+# A quarter of it, for the ratio below.
+mkdir "$MNT/quarter"
+i=0
+while [ "$i" -lt "$((N / 4))" ]; do
+	: >"$MNT/quarter/file-$(printf '%05d' "$i")-the-quick-brown-fox-jumped"
+	i=$((i + 1))
+done
 
 # --- correctness: full listing matches the backing filesystem exactly ----
 
@@ -130,34 +134,43 @@ else
 	fail no-duplicate-entries "duplicated across reply-buffer boundaries: $dupes"
 fi
 
-# --- warm-listing timing: quadratic (pre-fix) vs. linear (fixed) ----------
+# --- warm-listing cost: quadratic (pre-fix) vs. linear (fixed) ------------
 
-sync
-echo 3 >/proc/sys/vm/drop_caches
+# The daemon's CPU ticks (1/100 s) for one `find` of directory $1 with the
+# kernel's caches dropped; sets TICKS and COUNT.
+list_cost() {
+	sync
+	# Quiesced: the sync point owed for the files created above must not
+	# land inside the measured window.
+	drop_caches_quiesced
+	t0=$(cpu_ticks "$DAEMON_PID")
+	find "$1" -mindepth 1 >/tmp/find_pass.txt
+	t1=$(cpu_ticks "$DAEMON_PID")
+	TICKS=$((t1 - t0))
+	COUNT=$(wc -l </tmp/find_pass.txt)
+}
 
-before=$(centiseconds)
-find "$MNT/many" -mindepth 1 >/tmp/find_pass.txt
-after=$(centiseconds)
-elapsed_cs=$((after - before))
-count=$(wc -l </tmp/find_pass.txt)
-echo "readdir_boundary.sh: warm find pass over $count entries took ${elapsed_cs}cs"
+list_cost "$MNT/quarter"
+quarter_ticks=$TICKS
+quarter_count=$COUNT
+list_cost "$MNT/many"
+many_ticks=$TICKS
+count=$COUNT
+echo "readdir_boundary.sh: warm find pass: $quarter_count entries ${quarter_ticks} ticks, $count entries ${many_ticks} ticks of daemon CPU"
 if [ "$count" = "$N" ]; then
 	pass find-sees-all-entries
 else
 	fail find-sees-all-entries "find saw $count entries, want $N"
 fi
-# Measured directly against this test's own N: the fixed implementation
-# lists these 6000 already-cached entries in ~50cs (0.5s); reverting
-# 49a9b9c's early-stop (see the commit message) back to "pull every
-# remaining entry on every call" measured ~780cs (7.8s) for the same
-# directory -- roughly 16x slower, consistent with the quadratic-vs-linear
-# difference the fix describes. 250cs sits with wide margin (5x) on both
-# sides of that gap, comfortably tolerating a slower CI host without
-# masking the regression.
-if [ "$elapsed_cs" -lt 250 ]; then
+# Linear is about 4x for 4x the entries; quadratic about 16x. A floor of 2
+# ticks on the small side keeps a very fast small listing from making the
+# ratio meaningless.
+small=$quarter_ticks
+[ "$small" -lt 2 ] && small=2
+if [ "$many_ticks" -le $((small * 8)) ]; then
 	pass warm-listing-is-not-quadratic
 else
-	fail warm-listing-is-not-quadratic "took ${elapsed_cs}cs (>= 250cs / 2.5s) for $N already-cached entries -- looks quadratic, not buffer-bounded"
+	fail warm-listing-is-not-quadratic "$count entries cost ${many_ticks} ticks against ${quarter_ticks} for $quarter_count: more than 8x for 4x the entries, looks quadratic, not buffer-bounded"
 fi
 
 # --- "." and ".." inode numbers ---------------------------------------------

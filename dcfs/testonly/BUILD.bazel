@@ -17,6 +17,22 @@ cc_library(
     ],
 )
 
+# Counts SQLite statement steps in-process (the harness's work-counting
+# tests; the same VLOG(2) lines guest/syscall_traces.sh budgets).
+cc_library(
+    name = "step_counter",
+    hdrs = ["step_counter.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "@absl//absl/log:globals",
+        "@absl//absl/log:initialize",
+        "@absl//absl/log:log_entry",
+        "@absl//absl/log:log_sink",
+        "@absl//absl/log:log_sink_registry",
+        "@absl//absl/strings",
+    ],
+)
+
 # File helpers for tests, over the syscalls:: wrappers.
 cc_library(
     name = "files",

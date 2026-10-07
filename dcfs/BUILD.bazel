@@ -598,6 +598,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     ":syscalls_backing",
     "//dcfs/testonly:assert_ok_and_assign",
     "//dcfs/testonly:files",
+    "//dcfs/testonly:step_counter",
     "//dcfs/testonly:trace_recorder",
     "@absl//absl/base:log_severity",
     "@absl//absl/log:log_entry",

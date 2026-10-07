@@ -53,6 +53,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -73,6 +74,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/time/simulated_clock.h"
 #include "absl/time/time.h"
@@ -90,6 +92,7 @@
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "dcfs/testonly/files.h"
+#include "dcfs/testonly/step_counter.h"
 #include "dcfs/testonly/trace_recorder.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
@@ -1960,6 +1963,104 @@ TEST_F(RelatimeTest, NoatimeBackingNeverUpdates) {
   const int64_t before = CachedAtime(f);
   OpenAndRelease(f, O_RDONLY);
   EXPECT_EQ(CachedAtime(f), before);
+}
+
+// Today's numbers (steps per entry, and per listing), measured with
+// RecordProperty below; lowering them after a reduction is welcome.
+// (In tenths: steps * 10 <= per_entry * n + fixed.)
+constexpr int64_t kReaddirStepsPerEntry = 34;      // measured 3.17 to 3.30
+constexpr int64_t kReaddirplusStepsPerEntry = 49;  // measured 4.50 to 4.80
+constexpr int64_t kReaddirStepsFixed = 200;
+
+// --- readdir work counting (step N4) ----------------------------------------
+//
+// A listing of N cached entries costs SQLite steps linear in N: counting
+// them replaces the wall-clock budget that failed under load. The bounds
+// are today's numbers (steps <= a * N + b); a listing that re-checks
+// completeness or re-reads attributes per entry, or one that rescans the
+// directory from the start on every reply, exceeds them (and the 1000-entry
+// case exceeds ten times the 100-entry one).
+
+class ReaddirWorkTest : public DirCacheFSTest {
+ protected:
+  // The whole listing of `dir` through replies of `reply_size` bytes (each
+  // resuming at the last entry's offset), as the kernel reads it; returns
+  // the names without "." and "..".
+  std::vector<std::string> ListAll(InodeId dir, bool plus,
+                                   uint32_t reply_size = 4096) {
+    std::vector<std::string> names;
+    uint64_t off = 0;
+    while (true) {
+      struct fuse_read_in in = {};
+      in.offset = off;
+      in.size = reply_size;
+      std::string body;
+      AppendBytes(body, in);
+      Reply reply = Send(plus ? FUSE_READDIRPLUS : FUSE_READDIR,
+                         static_cast<uint64_t>(dir), body);
+      EXPECT_EQ(reply.error, 0);
+      if (reply.error != 0 || reply.payload.empty()) break;
+      const std::string &p = reply.payload;
+      size_t pos = 0;
+      while (pos < p.size()) {
+        const size_t at =
+            plus ? pos + offsetof(struct fuse_direntplus, dirent) : pos;
+        struct fuse_dirent d {};
+        std::memcpy(&d, p.data() + at, FUSE_NAME_OFFSET);
+        std::string name = p.substr(at + FUSE_NAME_OFFSET, d.namelen);
+        if (name != "." && name != "..") names.push_back(std::move(name));
+        off = d.off;
+        pos += plus ? FUSE_DIRENT_ALIGN(FUSE_NAME_OFFSET_DIRENTPLUS + d.namelen)
+                    : FUSE_DIRENT_ALIGN(FUSE_NAME_OFFSET + d.namelen);
+      }
+    }
+    return names;
+  }
+
+  // Steps of one warm full listing of a directory of `n` entries.
+  void WarmListingSteps(int n, bool plus, int64_t *steps) {
+    EXPECT_THAT(syscalls::mkdirat(AT_FDCWD, Path("many"), 0755), IsOk());
+    for (int i = 0; i < n; ++i) {
+      WriteFile(Path(absl::StrFormat("many/file-%05d", i)));
+    }
+    Start();
+    ASSERT_OK_AND_ASSIGN(InodeId many, Id("many"));
+    // Cold: the first listing populates the cache.
+    EXPECT_EQ(ListAll(many, plus).size(), static_cast<size_t>(n));
+    testonly::SqliteStepCounter counter;
+    EXPECT_EQ(ListAll(many, plus).size(), static_cast<size_t>(n));
+    *steps = counter.steps();
+    std::cerr << "READDIR-STEPS " << (plus ? "plus" : "plain") << " n=" << n
+              << " steps=" << *steps << "\n";
+  }
+};
+
+TEST_F(ReaddirWorkTest, WarmReaddirStepsAreLinearInTheEntries) {
+  int64_t steps = 0;
+  WarmListingSteps(100, /*plus=*/false, &steps);
+  RecordProperty("steps_100", steps);
+  EXPECT_LE(steps * 10, kReaddirStepsPerEntry * 100 + kReaddirStepsFixed);
+}
+
+TEST_F(ReaddirWorkTest, WarmReaddirplusStepsAreLinearInTheEntries) {
+  int64_t steps = 0;
+  WarmListingSteps(100, /*plus=*/true, &steps);
+  RecordProperty("steps_100", steps);
+  EXPECT_LE(steps * 10, kReaddirplusStepsPerEntry * 100 + kReaddirStepsFixed);
+}
+
+TEST_F(ReaddirWorkTest, ThousandEntriesAreLinearToo) {
+  int64_t steps = 0;
+  WarmListingSteps(1000, /*plus=*/false, &steps);
+  RecordProperty("steps_1000", steps);
+  EXPECT_LE(steps * 10, kReaddirStepsPerEntry * 1000 + kReaddirStepsFixed);
+}
+
+TEST_F(ReaddirWorkTest, ThousandEntriesPlusAreLinearToo) {
+  int64_t steps = 0;
+  WarmListingSteps(1000, /*plus=*/true, &steps);
+  RecordProperty("steps_1000", steps);
+  EXPECT_LE(steps * 10, kReaddirplusStepsPerEntry * 1000 + kReaddirStepsFixed);
 }
 
 // --- the injected clock (step 26.10) ----------------------------------------
