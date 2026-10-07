@@ -338,6 +338,16 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
 Bugs get a regression test first: the test is shown to fail on the
 unfixed code, then the fix makes it pass.
 
+### Reproducible build
+
+`bazel run //tools:reproducible_build` builds `//dcfs:main_static` and
+`//man:dcfs.8` from two copies of the repository at different paths, in two
+Bazel output bases and without a disk cache, and fails unless the outputs are
+byte-identical (it prints the strings that differ). CI runs it as the
+`reproducible` job. Today they are identical with nothing special: the
+toolchain redacts `__DATE__`/`__TIME__`, compiles with paths relative to the
+execroot, and the man page carries no date.
+
 ### Coverage
 
 ```

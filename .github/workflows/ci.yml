@@ -233,6 +233,35 @@ jobs:
             ~/.cache/bazelisk
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
+  reproducible:
+    # Step 26.12: two builds of main_static and dcfs.8 from two copies of the
+    # repository at different paths, in two output bases, with no disk cache,
+    # must be byte-identical (tools/reproducible_build.sh). Two cold builds, so
+    # only the repository cache helps.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    needs: fast
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        id: repocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Reproducible build
+        run: bazel run //tools:reproducible_build
+      - name: Save the repository cache
+        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: ${{ steps.repocache.outputs.cache-primary-key }}
+
   full:
     # Every test, then every test again under AddressSanitizer and under
     # UndefinedBehaviorSanitizer.

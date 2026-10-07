@@ -435,6 +435,7 @@ gate is disabled.
 | rootfs_invariant_test (Debian rootfs matches tar) | `//third_party/debian:rootfs_invariant_self_check` (imports the real `header_problems`) |
 | the C++ toolchain is the pinned clang (7.1) | `//tools:toolchain_self_check_test` (the checker over a gcc and a wrong-version clang info file must fail) |
 | the coverage report has coverage in it (7.2) | `//test/qemu:coverage_pipeline_test` (an instrumented fixture: the function that ran has hits, the one that did not shows 0 hits; an empty lcov, a missing source and a covered function claimed uncovered are rejected by `check-lcov.sh`) |
+| the shipped outputs are reproducible (26.12) | `//tools:repro_compare_self_check_test` (the comparison over a binary that embeds the build date: identical files pass, two builds at different times fail and the report names the date string); the gate is `bazel run //tools:reproducible_build` (CI job `reproducible`) |
 | banned symbols in `//dcfs:main_static` (26.8) | `//tools:banned_symbols_self_check_test` (the real checker and deny list over a program that calls `realpath`) |
 | the ASan build reports and dies (C++ runtime linked, 7.1) | `//dcfs:asan_runtime_test` (only under `--config=asan`: alloc-dealloc-mismatch must kill the process) |
 | the UBSan build reports and dies (7.4) | `//dcfs:ubsan_runtime_test` (only under `--config=ubsan`: a signed overflow, a misaligned load and a vptr misuse must each kill the process; the vptr one failed to die until `-fsanitize=vptr` was named) |

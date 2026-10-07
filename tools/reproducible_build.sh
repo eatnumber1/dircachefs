@@ -13,15 +13,22 @@
 set -euo pipefail
 
 workspace=${BUILD_WORKSPACE_DIRECTORY:?run with: bazel run //tools:reproducible_build}
-compare=$(realpath "$(dirname "$0")/repro_compare")
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/dcfs-repro.XXXXXX")
+compare="${RUNFILES_DIR:-$0.runfiles}/_main/tools/repro_compare"
+# REPRO_TMP=<dir>: keep the copies and outputs there and reuse the outputs of
+# an earlier run (for debugging a difference without rebuilding).
+if [ -n "${REPRO_TMP:-}" ]; then
+	tmp=$REPRO_TMP
+	mkdir -p "$tmp"
+else
+	tmp=$(mktemp -d "${TMPDIR:-/tmp}/dcfs-repro.XXXXXX")
+fi
 cleanup() {
 	for x in a b; do
 		if [ -d "$tmp/ob_$x" ]; then
 			(cd "$tmp/src_$x" && bazel --output_base="$tmp/ob_$x" shutdown >/dev/null 2>&1) || true
 		fi
 	done
-	rm -rf "$tmp"
+	[ -n "${REPRO_TMP:-}" ] || rm -rf "$tmp"
 }
 trap cleanup EXIT
 
@@ -29,6 +36,7 @@ targets=(//dcfs:main_static //man:dcfs.8)
 outputs=(dcfs/main_static man/dcfs.8)
 
 for x in a b; do
+	[ -d "$tmp/out_$x" ] && continue
 	# A copy of the tracked and untracked (not ignored) files, plus the
 	# per-checkout bazelrc (it has CI's cache settings): a different path
 	# for each build.
