@@ -18,11 +18,16 @@ every resolved package's files. The image is made without privilege:
      shadow group of the few files that have one, none of which a
      non-root user can create in a directory.
 
-The image is reproducible: fixed clock, UUID and hash seed, the packages'
-own mtimes.
+The image is reproducible: fixed UUID and hash seed, the packages' own
+mtimes, and e2fsprogs's clock (SOURCE_DATE_EPOCH, which clamps every inode
+time later than it) set to --source-date-epoch, which must be later than
+every package's mtime: only times made here (directories the tar lacks, the
+fixed-up paths, the superblock) are clamped. A package mtime later than the
+epoch is an error, because it would be clamped silently: the epoch moves
+with the snapshot pin in MODULE.bazel.
 
 usage: mkrootfs.py --flat TAR --out IMAGE --size 768M --mke2fs PROG
-           --debugfs PROG --mke2fs-conf FILE
+           --debugfs PROG --mke2fs-conf FILE --source-date-epoch SECONDS
 """
 
 import argparse
@@ -62,7 +67,7 @@ class Tree:
         self.root = root
         # image path -> (mode with type bits, uid, gid)
         self.attrs = {}
-        self.mtimes = {}
+        self.dirs = {}  # directory path -> mtime, for set_directory_times
 
     def _real(self, parts):
         return os.path.join(self.root, *parts)
@@ -111,6 +116,15 @@ class Tree:
             return None, None
         return self._resolve(parts[:-1]), parts[-1]
 
+    def set_directory_times(self):
+        """Gives every directory its tar mtime, after its children changed it.
+
+        Deepest first, so a child directory's change does not touch a parent
+        already done.
+        """
+        for rel in sorted(self.dirs, key=lambda r: r.count('/'), reverse=True):
+            os.utime(self._real(rel.split('/')), (self.dirs[rel], ) * 2)
+
     def add(self, name, kind, mode, uid, gid, mtime, data=None, target=None):
         """Adds one entry: kind is dir, file, symlink or hardlink."""
         if kind == 'dir':
@@ -121,13 +135,18 @@ class Tree:
             rel = '/'.join(done)
             os.chmod(self._real(done), 0o755)
             self.attrs[rel] = (stat.S_IFDIR | mode, uid, gid)
-            self.mtimes[rel] = mtime
+            if done:
+                self.dirs[rel] = mtime
             return
         parent, base = self._place(name)
         if base is None:
             raise RootfsError(f'{name}: a {kind} entry for the root')
+        if base == '..':
+            raise RootfsError(f'{name}: ends in a .. component')
         rel = '/'.join(parent + [base])
         path = self._real(parent + [base])
+        if os.path.isdir(path) and not os.path.islink(path):
+            raise RootfsError(f'{name}: a {kind} over a directory')
         if os.path.lexists(path):
             os.unlink(path)
         if kind == 'file':
@@ -141,23 +160,34 @@ class Tree:
         elif kind == 'hardlink':
             tparent, tbase = self._place(target)
             source = self._real(tparent + [tbase])
-            if not os.path.exists(source):
+            # lexists: the target may be a symlink (dangling, or with an
+            # absolute target that means the host's, never ours); the link is
+            # to the symlink itself.
+            if not os.path.lexists(source):
                 raise RootfsError(f'hard link {name} to missing {target}')
-            os.link(source, path)
+            os.link(source, path, follow_symlinks=False)
             self.attrs[rel] = self.attrs['/'.join(tparent + [tbase])]
         else:
             raise RootfsError(f'{name}: unsupported entry kind {kind}')
-        if kind != 'symlink':
-            os.utime(path, (mtime, mtime))
-            self.mtimes[rel] = mtime
+        os.utime(path, (mtime, mtime), follow_symlinks=False)
 
 
-def unpack(tar_path, tree):
-    """Fills the tree from the tar; returns the number of entries."""
+def unpack(tar_path, tree, epoch):
+    """Fills the tree from the tar; returns the number of entries.
+
+    Raises:
+        RootfsError: an entry the image cannot hold, or a package mtime later
+            than epoch (e2fsprogs would clamp it).
+    """
     count = 0
     with tarfile.open(tar_path) as archive:
         for member in archive:
             count += 1
+            if member.mtime > epoch:
+                raise RootfsError(
+                    f'{member.name}: mtime {member.mtime} is later than '
+                    f'--source-date-epoch {epoch}, which e2fsprogs would '
+                    'clamp it to; move the epoch with the snapshot pin')
             common = (member.mode & 0o7777, member.uid, member.gid,
                       member.mtime)
             if member.isdir():
@@ -188,6 +218,11 @@ def add_fixups(tree):
 
 
 def _quote(path):
+    try:
+        path.encode('utf-8')
+    except UnicodeEncodeError as e:
+        raise RootfsError(f'{path!r} is not valid UTF-8; debugfs is scripted '
+                          'in text and the image needs UTF-8 names') from e
     if '"' in path or '\n' in path:
         raise RootfsError(f'cannot script the path {path!r} for debugfs')
     return '"/' + path + '"'
@@ -225,14 +260,16 @@ def run_debugfs(debugfs, image, script):
 def build(args):
     env = dict(os.environ,
                MKE2FS_CONFIG=os.path.abspath(args.mke2fs_conf),
-               SOURCE_DATE_EPOCH='0',
-               E2FSPROGS_FAKE_TIME='0')
+               SOURCE_DATE_EPOCH=str(args.source_date_epoch),
+               E2FSPROGS_FAKE_TIME=str(args.source_date_epoch))
     with tempfile.TemporaryDirectory() as work:
         root = os.path.join(work, 'root')
         os.mkdir(root)
         tree = Tree(root)
-        unpack(args.flat, tree)
+        unpack(args.flat, tree, args.source_date_epoch)
         add_fixups(tree)
+        # After the fixups: they add entries to directories the tar dated.
+        tree.set_directory_times()
         image = os.path.join(work, 'rootfs.ext4')
         with open(image, 'wb') as f:
             f.truncate(_size(args.size))
@@ -268,6 +305,8 @@ def main(argv):
     parser.add_argument('--mke2fs', required=True)
     parser.add_argument('--debugfs', required=True)
     parser.add_argument('--mke2fs-conf', required=True)
+    parser.add_argument('--source-date-epoch', required=True, type=int,
+                        help='e2fsprogs clock; later than every package mtime')
     parser.add_argument('--skip-ownership', action='store_true',
                         help='for the test of the test: leave the ownership '
                         'step out')

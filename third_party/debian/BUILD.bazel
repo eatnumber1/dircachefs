@@ -43,7 +43,12 @@ genrule(
           "--out $@ --size 768M " +
           "--mke2fs $(location @alpine_fstools//:mke2fs) " +
           "--debugfs $(location @alpine_fstools//:debugfs) " +
-          "--mke2fs-conf $(location //third_party/e2fsprogs:mke2fs.conf)",
+          "--mke2fs-conf $(location //third_party/e2fsprogs:mke2fs.conf) " +
+          # e2fsprogs's clock: the snapshot's timestamp (MODULE.bazel,
+          # apt.sources_list: 20261006T082722Z), later than every package's
+          # mtime. mkrootfs.py fails if a package is newer, so move this
+          # with the snapshot pin.
+          "--source-date-epoch 1791275242",
     tools = [
         ":mkrootfs",
         "//third_party/e2fsprogs:mke2fs.conf",

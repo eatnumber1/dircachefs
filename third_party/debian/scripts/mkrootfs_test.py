@@ -9,9 +9,11 @@ user who built it.
 usage: mkrootfs_test.py MKE2FS DEBUGFS MKE2FS_CONF
 """
 
+import contextlib
 import io
 import os
 import re
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -76,13 +78,13 @@ class MkRootfsTest(unittest.TestCase):
         out = os.path.join(cls.tmp.name, name)
         rc = mkrootfs.main([
             '--flat', cls.flat, '--out', out, '--size', '32M', '--mke2fs',
-            MKE2FS, '--debugfs', DEBUGFS, '--mke2fs-conf', CONF
+            MKE2FS, '--debugfs', DEBUGFS, '--mke2fs-conf', CONF,
+            '--source-date-epoch', EPOCH
         ] + extra)
         assert rc == 0, 'mkrootfs.py failed'
         return out
 
     def debugfs(self, image, command):
-        import subprocess
         return subprocess.run([DEBUGFS, '-R', command, image],
                               capture_output=True, text=True,
                               check=True).stdout
@@ -149,12 +151,125 @@ class MkRootfsTest(unittest.TestCase):
         self.assertEqual(got['uid'], os.getuid())
         self.assertNotEqual(got['uid'], 0)
 
+    def mtime(self, path, image=None):
+        text = self.debugfs(image or self.image, f'stat "{path}"')
+        return int(re.search(r'mtime: 0x([0-9a-f]+)', text).group(1), 16)
+
+    def test_package_mtimes_survive(self):
+        # make_tar gives every entry the mtime 1700000000; the image's
+        # clock (SOURCE_DATE_EPOCH) is later, so nothing is clamped.
+        for path in ('/usr/bin/mount', '/bin', '/usr/bin', '/var/local',
+                     '/etc/dir-secret/key'):
+            self.assertEqual(self.mtime(path), 1700000000, path)
+
+    def test_times_made_here_are_clamped_not_the_build_time(self):
+        # A directory the tar lacks, and the fixed-up paths, get a time made
+        # at build, which the epoch clamps: the image is reproducible.
+        self.assertLessEqual(self.mtime('/var/lib/dpkg'), int(EPOCH))
+        self.assertLessEqual(self.mtime('/etc/exports'), int(EPOCH))
+
     def test_the_image_is_reproducible(self):
         again = self.build('again.ext4', [])
         with open(again, 'rb') as a, open(self.image, 'rb') as b:
             self.assertEqual(a.read(), b.read())
 
 
+def run_main(entries, extra=()):
+    """Builds a tar of entries (a function of the archive) and runs main.
+
+    Returns (exit code, stderr text).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        flat = os.path.join(tmp, 'flat.tar')
+        with tarfile.open(flat, 'w') as archive:
+            entries(archive)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = mkrootfs.main([
+                '--flat', flat, '--out', os.path.join(tmp, 'out.ext4'),
+                '--size', '16M', '--mke2fs', MKE2FS, '--debugfs', DEBUGFS,
+                '--mke2fs-conf', CONF, '--source-date-epoch', EPOCH, *extra
+            ])
+        return rc, stderr.getvalue(), os.path.join(tmp, 'out.ext4')
+
+
+class HostileTarTest(unittest.TestCase):
+    """What a tar may not do, and what it must be refused for, cleanly."""
+
+    def test_a_hard_link_to_an_absolute_symlink_stays_in_the_tree(self):
+        with tempfile.TemporaryDirectory() as host:
+            secret = os.path.join(host, 'secret')
+            with open(secret, 'w') as f:
+                f.write('host data')
+
+            def entries(t):
+                _entry(t, './link', 'symlink', 0o777, link=secret)
+                _entry(t, './hl', 'hardlink', link='./link')
+
+            with tempfile.TemporaryDirectory() as tmp:
+                flat = os.path.join(tmp, 'f.tar')
+                with tarfile.open(flat, 'w') as t:
+                    entries(t)
+                out = os.path.join(tmp, 'o.ext4')
+                self.assertEqual(mkrootfs.main([
+                    '--flat', flat, '--out', out, '--size', '16M',
+                    '--mke2fs', MKE2FS, '--debugfs', DEBUGFS,
+                    '--mke2fs-conf', CONF, '--source-date-epoch', EPOCH
+                ]), 0)
+                text = subprocess.run([DEBUGFS, '-R', 'stat /hl', out],
+                                      capture_output=True, text=True).stdout
+                self.assertIn('Type: symlink', text)
+                dump = subprocess.run([DEBUGFS, '-R', 'cat /hl', out],
+                                      capture_output=True).stdout
+                self.assertNotIn(b'host data', dump)
+
+    def test_a_hard_link_to_a_dangling_symlink_is_made(self):
+        def entries(t):
+            _entry(t, './link', 'symlink', 0o777, link='/nowhere/at/all')
+            _entry(t, './hl', 'hardlink', link='./link')
+        rc, err, _ = run_main(entries)
+        self.assertEqual(rc, 0, err)
+
+    def test_a_hard_link_to_nothing_is_refused(self):
+        rc, err, _ = run_main(
+            lambda t: _entry(t, './hl', 'hardlink', link='./missing'))
+        self.assertEqual(rc, 1)
+        self.assertIn('missing', err)
+
+    def test_a_final_dotdot_component_is_refused(self):
+        rc, err, _ = run_main(lambda t: _entry(t, './a/..', 'file'))
+        self.assertEqual(rc, 1)
+        self.assertIn('mkrootfs.py:', err)
+
+    def test_a_file_over_a_directory_is_refused(self):
+        def entries(t):
+            _entry(t, './d/', 'dir')
+            _entry(t, './d', 'file', data=b'x')
+        rc, err, _ = run_main(entries)
+        self.assertEqual(rc, 1)
+        self.assertIn('mkrootfs.py:', err)
+
+    def test_a_name_that_is_not_utf8_is_refused_clearly(self):
+        def entries(t):
+            info = tarfile.TarInfo('./caf\udce9')  # a lone 0xE9 byte
+            info.size = 1
+            t.addfile(info, io.BytesIO(b'x'))
+        rc, err, _ = run_main(entries)
+        self.assertEqual(rc, 1)
+        self.assertIn('UTF-8', err)
+
+    def test_a_package_newer_than_the_epoch_is_refused(self):
+        # The clock must be later than every package's mtime, or e2fsprogs
+        # would clamp it: the snapshot date moved and the epoch did not.
+        rc, err, _ = run_main(lambda t: _entry(t, './f', 'file'),
+                              ['--source-date-epoch', '1600000000'])
+        self.assertEqual(rc, 1)
+        self.assertIn('source-date-epoch', err)
+
+
 if __name__ == '__main__':
+    # 1700000000 is every test entry's mtime: later, but before any real
+    # build, so what the host makes is clamped to it.
     MKE2FS, DEBUGFS, CONF = sys.argv[1:4]
+    EPOCH = '1700000100'
     unittest.main(argv=sys.argv[:1])
