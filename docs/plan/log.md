@@ -1173,3 +1173,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   partial index), refused dentries go unknown instead of deleted (same stub nodeid/generation
   across a forget), ProbeRecoveredRows at unclean start, sweep at every start; formal/findings
   empty; presubmit+formal 206/206, asan 33/33; under review.
+- 26.7 + 26.10 done (lane-1, step-26.7 @ d35d6ea): `//dcfs:syscalls_backing` split out (openat..
+  open_by_handle_at, ioctl, mount/umount2; process-local stay in `syscalls`); enforcement is a
+  genquery golden of direct dependents (visibility cannot name one target inside a package):
+  dir_cache_fs/metadata_cache are not dependents; failing-first with a deliberate dep. Clock:
+  `Context::clock` (absl::Clock*, GetRealClock default); SimulatedClock tests: no sync before
+  the interval, exactly one after AdvanceTime, held fd unchanged across a sync point, relatime
+  records the simulated time + 24 h rule (failed first with wall times); scanner and ban list
+  cover clock_gettime/gettimeofday/time/absl::Now (0 sites). presubmit+formal 208/208, asan small
+  26/26. Pending: design.md paragraph, rebase over 7.1, retest; then merge.
