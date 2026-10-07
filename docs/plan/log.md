@@ -793,3 +793,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   BeginAttrChanges NotFound, lib.sh applet check, rebase over 6.2 with measured asan_mem); reviewer
   on 24.1/24.2 (read via git, not the working tree); lane-2 24.3 (mkrootfs approved, util-linux
   dropped).
+- Alpine 24.1/24.2 review (dcfs-reviewer): verification chain correct (index signature over the
+  raw stream, per-apk signature, index C: checksum, datahash; nothing extracted before all pass;
+  full PKCS#1 encoding compared; unknown key fails closed; lockfile untouched; one index snapshot
+  for all packages). Merge after: M1 old-index 404 gets a clear message + refetch hint; L1/L2 tar
+  extraction hardening (hard links, device nodes, escaping symlinks); L3 verifier tests (malformed
+  padding, RSA256 path); L4 bind index to branch (regex + DESCRIPTION); L5 built-in-only options
+  (VIRTIO_MMIO, SERIAL_8250); L6 AGENTS.md/style.md third_party rule gets the Alpine exception;
+  L7 /proc/sys/kernel/modprobe hook naming the undeclared module; L8 no hard-coded external paths.
+  Sent to lane-2 for after 24.3.
