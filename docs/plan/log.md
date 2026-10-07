@@ -1306,3 +1306,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 7.1b dispatched (lane-6, dcfs-investigator): sysroot (Debian via rules_distroless) vs Alpine
   clang/lld through the musl loader (vs the hybrid B'): decide with the hermeticity build
   (/usr/include, /usr/lib/gcc, host libs blocked), prototype the winner.
+- 26.2 green on main-as-of-12.4b (harness 110/110, fast 149 + 1 skip, presubmit 217 + 1 skip +
+  one serial-console MEM-line garble flake on removed_test_btrfs, 3/3 on rerun; asan small 30/30
+  with dir_cache_fs_test's ASan guest at 832 MiB); the start-up full check runs at the end of
+  Startup after the probe; the v5 stub rule in the tri-state check; a dead Context's DESTROY
+  tripping "dirty-set" in a crash test is handled harness-side (a crashed daemon runs no DESTROY).
+  One more rebase (readdir step + detector fix) handed to the agent; then merge, then 26.6.
