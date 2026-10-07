@@ -650,6 +650,19 @@ the way to add one, with a reason per line). UBSan guests need no more
 memory than ASan's `asan_mem=`; `memory_test_xfs` reclaims
 (`reclaim_scans` > 0) in the plain build too, at its 448 MiB.
 
+Tests that run on the host and do not depend on how our code is built (TLC,
+the man page and flag checks, the repository-shape, SBOM and toolchain checks,
+the shell and Python tests of the test tooling: 98 targets) carry
+`target_compatible_with = HOST_ONLY_COMPATIBLE` (`test/qemu/host_only.bzl`;
+the `tlc_test` and `tla_trace_log_test` macros add it themselves), so
+`--config=asan`, `--config=ubsan` and `bazel coverage` skip them instead of
+rerunning them under a new configuration hash (`formal:large_test` and
+`nolock_test` alone were 19 minutes per sanitizer job): 100 of the 226 test
+targets are skipped under each sanitizer (101 under coverage), 2 in the plain
+build. A new host-only test gets the same line. Tests that read the build's
+own flags or binaries (the `flags_test`s, `banned_symbols_test`) are not
+host-only and say which builds they are for.
+
 The tools a guest test uses (QEMU, `mke2fs`/`debugfs`, `mkfs.xfs`,
 `mkfs.btrfs`, busybox) are downloaded Alpine packages, not built here, so
 the sanitizer flags cannot touch them and `--config=asan`/`--config=ubsan`

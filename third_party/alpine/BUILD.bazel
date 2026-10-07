@@ -1,6 +1,7 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 
 # The Alpine keys (alpine-keys 2.6-r0, cross-checked against aports; see
 # README.md), the verifier and the repository rules' script.
@@ -38,6 +39,7 @@ py_test(
     ],
     main = "signature_test.py",
     deps = [":apk"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # The Alpine host tools run on this glibc host through musl's loader: QEMU
@@ -78,6 +80,7 @@ sh_test(
     srcs = ["busybox_test.sh"],
     args = ["$(location @alpine_busybox//:root/bin/busybox.static)"],
     data = ["@alpine_busybox//:root/bin/busybox.static"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 26.1: self-check of busybox_test: drives the real busybox_test.sh with
@@ -89,4 +92,5 @@ sh_test(
     srcs = ["busybox_test_self_check.sh"],
     args = ["$(location busybox_test.sh)"],
     data = ["busybox_test.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )

@@ -2,6 +2,7 @@ load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 
 # Phase 4, part c (docs/plan/phases/04-pinned-host-tools.md): the Debian
 # NFS-test rootfs image, built by Bazel from packages rules_distroless
@@ -79,6 +80,7 @@ py_test(
     ],
     main = "scripts/mkrootfs_test.py",
     deps = [":mkrootfs_lib"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Test first: fails the moment the resolved packages' versions drift from
@@ -108,6 +110,7 @@ sh_test(
         "//:MODULE.bazel.lock",
         "@debian//:dpkg_status",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # The image has real ownership: before Phase 4's e2fsprogs follow-up every
@@ -128,6 +131,7 @@ sh_test(
         ":rootfs",
         "@alpine_fstools//:debugfs",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # The pinned package list, read by //tools/sbom:sbom_test.
@@ -153,6 +157,7 @@ py_test(
         "@debian//:flat",
     ],
     main = "scripts/rootfs_invariant_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 py_library(
@@ -184,4 +189,5 @@ py_test(
         ":mkrootfs_lib",
         ":rootfs_invariant_lib",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )

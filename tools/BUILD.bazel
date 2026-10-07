@@ -4,6 +4,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load("//tools:first_party_objects.bzl", "linked_objects")
 
 # File-handle test client (name_to_handle_at / open_by_handle_at /
@@ -172,6 +173,7 @@ py_test(
         "//dcfs:shipped_deps.txt",
     ],
     deps = [":shipped_deps_lib"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Self-check of the golden (26.1): a golden with one line removed must fail.
@@ -188,6 +190,7 @@ py_test(
         "//dcfs:shipped_deps.txt",
     ],
     deps = [":shipped_deps_lib"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # ---- Step 26.7: who may depend on the backing-reaching syscalls ---------
@@ -215,6 +218,7 @@ py_test(
         "//dcfs:syscalls_backing_users.txt",
     ],
     deps = [":syscalls_backing_users_lib"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # ---- Step 26.13: repository-shape tests ---------------------------------
@@ -236,6 +240,7 @@ py_test(
     srcs = ["repo_shape_test.py"],
     args = ["anchor=$(location //:MODULE.bazel)"],
     data = ["//:MODULE.bazel"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
     tags = ["external"],
     deps = [":repo_shape_lib"],
 )
@@ -246,6 +251,7 @@ py_test(
     size = "small",
     srcs = ["repo_shape_self_check_test.py"],
     deps = [":repo_shape_lib"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Self-check of .github/ci/commit_subjects.sh (the fourth rule, which needs
@@ -256,6 +262,7 @@ sh_test(
     srcs = ["commit_subjects_test.sh"],
     args = ["$(location //:.github/ci/commit_subjects.sh)"],
     data = ["//:.github/ci/commit_subjects.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Every syscall goes through dcfs/syscalls.h (docs/style.md 1.5): no raw libc
@@ -270,6 +277,7 @@ py_test(
     timeout = "short",
     srcs = ["raw_syscalls_test.py"],
     main = "raw_syscalls_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 py_test(
@@ -291,6 +299,7 @@ py_test(
         "//dcfs/testonly:cxx_sources",
     ],
     main = "raw_syscalls_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 7.1: the C++ toolchain is the pinned, hermetic clang (MODULE.bazel,
@@ -310,6 +319,7 @@ sh_test(
     srcs = ["toolchain_test.sh"],
     args = ["$(location :cc_toolchain_info)"],
     data = [":cc_toolchain_info"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Self-check of toolchain_test: it must reject a host gcc and a clang of
@@ -326,6 +336,7 @@ sh_test(
     data = [
         "toolchain_test.sh",
     ] + glob(["toolchain_fixtures/*.txt"]),
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # ---- Step 26.12: reproducible build -------------------------------------
@@ -377,6 +388,7 @@ py_test(
     args = ["$(location :repro_date_fixture)"],
     data = [":repro_date_fixture"],
     deps = [":repro_compare_lib"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # ---- Step 8.1: the coverage gate ----------------------------------------

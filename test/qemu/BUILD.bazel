@@ -4,6 +4,7 @@ load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//formal:trace.bzl", "tla_trace_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 
 # Guest memory classes (step 6.2), in MiB; the measurements behind each are in
@@ -551,6 +552,7 @@ sh_test(
         "scripts/mkinitramfs.sh",
         "@alpine_busybox//:root/bin/busybox.static",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # R3 (L5): run-qemu.sh formats the scratch disks with the pinned tools it is
@@ -561,6 +563,7 @@ sh_test(
     srcs = ["run_qemu_mkfs_test.sh"],
     args = ["$(location scripts/run-qemu.sh)"],
     data = ["scripts/run-qemu.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 23.7: run-qemu.sh fails a run whose kernel logged an oops, a BUG, a
@@ -577,6 +580,7 @@ sh_test(
         "guest/init",
         "scripts/run-qemu.sh",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 qemu_test(
@@ -706,6 +710,7 @@ py_test(
     srcs = ["scripts/mkmodules_test.py"],
     main = "scripts/mkmodules_test.py",
     deps = [":mkmodules"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 26.1: self-check of the require_commands gate: sources the real
@@ -717,6 +722,7 @@ sh_test(
     srcs = ["require_commands_test.sh"],
     args = ["$(location guest/lib.sh)"],
     data = ["guest/lib.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 26.1: self-check of the pjdfstest-suite-sane gate: the real
@@ -735,6 +741,7 @@ sh_test(
         "guest/lib.sh",
         "guest/pjdfstest_lib.sh",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 26.3: golden backing-syscall traces per operation, from strace on the
@@ -769,6 +776,7 @@ sh_test(
         "guest/lib.sh",
         "guest/strace_lib.sh",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # ---- Step 7.2: the coverage pipeline's self-check ------------------------
@@ -801,6 +809,7 @@ sh_test(
         "@llvm_toolchain_llvm//:bin/llvm-cov",
         "@llvm_toolchain_llvm//:bin/llvm-profdata",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 26.2: self-check of the runtime invariant checks' tier selection: a

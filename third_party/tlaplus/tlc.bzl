@@ -13,6 +13,7 @@ violation, or no violation at all.
 """
 
 load("@rules_java//java/common:java_common.bzl", "java_common")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 
 def _tlc_test_impl(ctx):
     runtime = ctx.attr._jdk[java_common.JavaRuntimeInfo]
@@ -38,7 +39,7 @@ def _tlc_test_impl(ctx):
     )
     return [DefaultInfo(executable = script, runfiles = runfiles)]
 
-tlc_test = rule(
+_tlc_test = rule(
     implementation = _tlc_test_impl,
     test = True,
     doc = "Runs TLC on `spec` with `config`; passes iff the outcome is the expected one.",
@@ -80,6 +81,19 @@ tlc_test = rule(
         ),
     },
 )
+
+def tlc_test(name, **kwargs):
+    """Runs TLC on `spec` with `config`; see _tlc_test.
+
+    The result does not depend on the build configuration, so the test is
+    left out of the sanitizer and coverage builds (HOST_ONLY_COMPATIBLE,
+    step 6.4a).
+    """
+    _tlc_test(
+        name = name,
+        target_compatible_with = HOST_ONLY_COMPATIBLE,
+        **kwargs
+    )
 
 def _tlc_overrides_jar_impl(ctx):
     runtime = ctx.attr._jdk[java_common.JavaRuntimeInfo]

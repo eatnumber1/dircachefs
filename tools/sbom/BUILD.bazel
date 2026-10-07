@@ -1,6 +1,7 @@
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 
 # SBOMs of the pins, for OSV-Scanner (plan step 5.3; README.md here): the
 # shipped one gates, the test-only one is informational.
@@ -63,4 +64,5 @@ py_test(
         "@alpine_strace//:resolved.json",
     ],
     deps = [":sbom_lib"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )

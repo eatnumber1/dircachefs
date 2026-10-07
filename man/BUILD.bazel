@@ -1,4 +1,5 @@
 load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 
 # dcfs(8), generated from README.md by the pinned pandoc (step 15.0;
 # third_party/pandoc/README.md). tools/man/extract_sections.py fails the
@@ -50,6 +51,7 @@ py_test(
     srcs = ["dcfs_8_test.py"],
     args = ["$(location :dcfs_8_plain)"],
     data = [":dcfs_8_plain"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 py_test(
@@ -65,6 +67,7 @@ py_test(
         "//:README.md",
         "//dcfs:main.cc",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 26.1: self-check of dcfs_8_test: runs the real dcfs_8_test.py over
@@ -76,6 +79,7 @@ py_test(
     srcs = ["dcfs_8_test_self_check.py"],
     args = ["$(location dcfs_8_test.py)"],
     data = ["dcfs_8_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 26.1: self-check of flags_consistency_test: runs the real
@@ -88,4 +92,5 @@ py_test(
     srcs = ["flags_consistency_test_self_check.py"],
     args = ["$(location flags_consistency_test.py)"],
     data = ["flags_consistency_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )

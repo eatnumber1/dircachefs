@@ -1,4 +1,5 @@
 load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 
 exports_files(["required_options.txt"])
 
@@ -48,4 +49,5 @@ py_test(
         ":config",
     ],
     main = "kernel_config_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )

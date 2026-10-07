@@ -13,6 +13,7 @@ kernel, exactly as qemu_test/qemu_cc_test run them
 """
 
 load("@rules_java//java/common:java_common.bzl", "java_common")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load("//test/qemu:qemu_cc_test.bzl", "UNIT_ASAN_MEM", "UNIT_MEM")
 load("//test/qemu:qemu_test.bzl", "E2E_ASAN_MEM", "E2E_MEM", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
 load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
@@ -358,7 +359,7 @@ def _tla_trace_log_test_impl(ctx):
         runfiles = ctx.runfiles(files = files, transitive_files = runtime.files),
     )]
 
-tla_trace_log_test = rule(
+_tla_trace_log_test = rule(
     implementation = _tla_trace_log_test_impl,
     test = True,
     doc = "Checks the traces in a file of trace lines against Trace.tla " +
@@ -414,3 +415,12 @@ tla_trace_log_test = rule(
         ),
     },
 )
+
+def tla_trace_log_test(name, **kwargs):
+    """A hand-written trace against Trace.tla; host only, so left out of the
+    sanitizer and coverage builds (HOST_ONLY_COMPATIBLE, step 6.4a)."""
+    _tla_trace_log_test(
+        name = name,
+        target_compatible_with = HOST_ONLY_COMPATIBLE,
+        **kwargs
+    )

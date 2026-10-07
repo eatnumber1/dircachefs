@@ -1,4 +1,5 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 
 # e2fsprogs itself is Alpine's (@alpine_fstools, third_party/alpine); what
 # lives here is the checked-in mke2fs profile every test image is made with
@@ -23,4 +24,5 @@ sh_test(
         "@alpine_fstools//:debugfs",
         "@alpine_fstools//:mke2fs",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
