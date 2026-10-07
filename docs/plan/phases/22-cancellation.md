@@ -101,3 +101,21 @@ entry's refresh no longer makes a later entry's attributes unknown before
 they are served; the kernel discards readdirplus attributes older than a
 completed modifying op on the same mount (attr_version), so this is safe,
 but the coroutine design should re-check it. See docs/design.md "Readdir".
+
+## As built (2026-10-08, step-22, pending its review fixes)
+
+Option (b): synchronous checkpoints, single-threaded. Deviations from
+the text above: an interrupted population commits nothing (22.2 said
+"probed entries present"): the directory stays incomplete and the next
+readdir completes it; the guest test uses a 20,000-entry directory (not
+100k); the inventory (notes/cancellation-inventory-2026-10-08.md) is its
+own enormous test, not a bench_full table. Review (merge after fixes):
+a refused INIT must exit non-zero (SessionLoop cannot see libfuse's
+private se->error: detect FUSE_INIT + fuse_session_exited); rename's
+double re-resolve stops at the first EINTR; Drain stops after the first
+non-INTERRUPT message so queued requests stay kernel-cancellable;
+FUSE_CAP_SPLICE_READ unset; a parameterized cancellation test over every
+checkpoint; cancel_test's bound scaled by the accelerator; AGENTS.md
+wording: "checks for interruption at checkpoints (dcfs/checkpoint.h),
+each just before a backing syscall and never between a mutation's
+syscall and its phase 3, and has a cancellation test".

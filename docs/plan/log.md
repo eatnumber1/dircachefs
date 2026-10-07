@@ -1418,3 +1418,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   now returns 0 (SessionLoop cannot see libfuse's se->error). AGENTS.md phrase changed: "at safe
   points" -> "at checkpoints before its backing syscalls (dcfs/checkpoint.h)" (russ to see).
   Under review.
+- Phase 22 review: sound; merge after: INIT refusal exits non-zero (required), rename's double
+  re-resolve, Drain reads at most one request ahead, SPLICE_READ unset, parameterized checkpoint
+  tests, large TLC runs to completion, cancel_test bound by accelerator, docs/AGENTS wording.
+  Deviations recorded in the phase file.
