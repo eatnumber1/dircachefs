@@ -254,6 +254,117 @@ class ApkTest(unittest.TestCase):
             self.assertFalse(os.path.lexists(os.path.join(tmp, 'link')))
 
 
+def make_apk_with(members):
+    """Returns a signed .apk whose data tar holds the given TarInfo members.
+
+    members: a list of (TarInfo, bytes or None).
+    """
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode='w') as archive:
+        for info, content in members:
+            archive.addfile(info, io.BytesIO(content) if content else None)
+    data = gzip.compress(buf.getvalue(), mtime=0)
+    pkginfo = (f'datahash = {hashlib.sha256(data).hexdigest()}\n'
+               ).encode('ascii')
+    control = _tar_gz({'.PKGINFO': pkginfo})
+    return _signature(control) + control + data
+
+
+def _member(name, kind='file', link='', size=0):
+    info = tarfile.TarInfo(name)
+    info.size = size
+    info.mode = 0o644
+    if kind == 'symlink':
+        info.type, info.linkname = tarfile.SYMTYPE, link
+    elif kind == 'hardlink':
+        info.type, info.linkname = tarfile.LNKTYPE, link
+    elif kind == 'chardev':
+        info.type, info.devmajor, info.devminor = tarfile.CHRTYPE, 1, 3
+    return info
+
+
+class ExtractionTest(unittest.TestCase):
+    """What a signed package may not do while it is unpacked.
+
+    The signature proves who built the package, not that it is harmless:
+    the extraction must stay inside its directory whatever the tar says.
+    """
+
+    def setUp(self):
+        self.keys = {KEY_FILE: KEY.pem}
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = os.path.join(self.tmp.name, 'root')
+        self.outside = os.path.join(self.tmp.name, 'outside')
+        os.makedirs(self.outside)
+
+    def unpack(self, members):
+        path = os.path.join(self.tmp.name, 'p.apk')
+        with open(path, 'wb') as f:
+            f.write(make_apk_with(members))
+        apk.unpack(path, self.keys, '', self.root)
+
+    def assertRefused(self, members):
+        before = sorted(os.listdir(self.outside))
+        with self.assertRaises(apk.ApkError):
+            self.unpack(members)
+        self.assertEqual(sorted(os.listdir(self.outside)), before)
+
+    def test_a_path_leaving_the_directory_is_refused(self):
+        self.assertRefused([(_member('../outside/x', size=1), b'x')])
+
+    def test_an_absolute_hard_link_is_refused(self):
+        host_file = os.path.join(self.outside, 'host')
+        with open(host_file, 'w') as f:
+            f.write('host')
+        self.assertRefused([
+            (_member('x', 'hardlink', link=host_file), None),
+            (_member('x', size=4), b'evil'),
+        ])
+        with open(host_file) as f:
+            self.assertEqual(f.read(), 'host')
+
+    def test_a_hard_link_leaving_the_directory_is_refused(self):
+        self.assertRefused([(_member('x', 'hardlink', link='../outside/h'),
+                             None)])
+
+    def test_a_device_node_is_refused(self):
+        self.assertRefused([(_member('dev/null', 'chardev'), None)])
+
+    def test_a_relative_symlink_leaving_the_directory_is_refused(self):
+        self.assertRefused([(_member('a/b', 'symlink',
+                                     link='../../outside'), None)])
+
+    def test_a_symlink_to_a_directory_cannot_be_written_through(self):
+        self.assertRefused([
+            (_member('d', 'symlink', link='../outside'), None),
+            (_member('d/x', size=4), b'evil'),
+        ])
+
+    def test_an_absolute_symlink_becomes_relative_inside_the_tree(self):
+        self.unpack([(_member('usr/bin/tool', 'symlink',
+                              link='/usr/lib/tool'), None),
+                     (_member('usr/lib/tool', size=1), b'x')])
+        link = os.path.join(self.root, 'usr/bin/tool')
+        self.assertEqual(os.readlink(link), '../lib/tool')
+        apk.finish(self.root)
+        self.assertTrue(os.path.exists(link))
+
+    def test_finish_refuses_a_link_that_resolves_outside_the_tree(self):
+        os.makedirs(self.root)
+        os.symlink('../outside', os.path.join(self.root, 'escape'))
+        with self.assertRaisesRegex(apk.ApkError, 'escape'):
+            apk.finish(self.root)
+
+    def test_finish_follows_chains_of_links(self):
+        os.makedirs(os.path.join(self.root, 'a'))
+        os.symlink('b', os.path.join(self.root, 'a', 'one'))
+        os.symlink('../a/one', os.path.join(self.root, 'two'))
+        os.symlink('../outside', os.path.join(self.root, 'a', 'b'))
+        with self.assertRaises(apk.ApkError):
+            apk.finish(self.root)
+
+
 class RealPackageTest(unittest.TestCase):
     """A real Alpine package, signed by a key checked in under keys/."""
 

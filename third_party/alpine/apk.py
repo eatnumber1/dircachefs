@@ -358,18 +358,24 @@ def verify_apk(data, keys, expected_checksum=''):
 
 
 def finish(root):
-    """Makes the symlinks of an unpacked tree usable by Bazel.
+    """Makes the symlinks of an unpacked tree usable by Bazel, or fails.
 
     An absolute symlink target would point at the host, so it becomes
     relative to `root`; Bazel's glob() rejects dangling symlinks, so a link
     whose target is not in the tree (a package outside the closure
-    provides it) is removed.
+    provides it) is removed. A link that resolves, through any chain of
+    links, to a path outside `root` would let host files into
+    glob(["root/**"]): the unpacking filter already refuses such a link,
+    this is the check that does not trust it.
 
     Args:
         root: the directory the apks were unpacked into.
 
     Returns:
         The paths (relative to root) of the removed dangling links.
+
+    Raises:
+        ApkError: a link resolves outside root.
     """
     root = os.path.abspath(root)
     links = []
@@ -385,20 +391,53 @@ def finish(root):
             target = os.path.relpath(
                 os.path.join(root, target.lstrip('/')), os.path.dirname(path))
             os.symlink(target, path)
+    real_root = os.path.realpath(root)
     removed = []
     for path in links:
+        resolved = os.path.realpath(path)
+        if resolved != real_root and not resolved.startswith(real_root + os.sep):
+            raise ApkError(f'{os.path.relpath(path, root)} is a symlink that '
+                           f'resolves outside the package tree ({resolved})')
         if not os.path.exists(path):
             os.unlink(path)
             removed.append(os.path.relpath(path, root))
     return sorted(removed)
 
 
+def _extraction_filter(member, dest):
+    """tarfile filter: absolute symlinks become relative, then data_filter.
+
+    data_filter refuses absolute names, names and links that leave `dest`,
+    hard links outside it, and device nodes and other special files, and it
+    drops setuid bits and owners. Alpine's packages use absolute symlinks
+    (/usr/bin/x -> /bin/busybox), which data_filter would refuse, but which
+    are harmless once relative to the tree.
+    """
+    if member.issym() and member.linkname.startswith('/'):
+        member = member.replace(
+            linkname=os.path.relpath(
+                member.linkname,
+                os.path.dirname('/' + member.name.lstrip('/'))),
+            deep=False)
+    return tarfile.data_filter(member, dest)
+
+
 def unpack(apk_path, keys, expected_checksum, out_dir):
-    """Verifies an .apk and extracts its files into out_dir."""
+    """Verifies an .apk and extracts its files into out_dir.
+
+    Raises:
+        ApkError: a check failed, or the package holds an entry that would
+            leave out_dir or a device node.
+    """
     with open(apk_path, 'rb') as f:
         data_tar = verify_apk(f.read(), keys, expected_checksum)
-    with tarfile.open(fileobj=io.BytesIO(data_tar)) as archive:
-        archive.extractall(out_dir, filter='tar')
+    os.makedirs(out_dir, exist_ok=True)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data_tar)) as archive:
+            archive.extractall(out_dir, filter=_extraction_filter)
+    except tarfile.TarError as e:
+        raise ApkError(f'{os.path.basename(apk_path)}: refusing to unpack: '
+                       f'{e}') from e
 
 
 _STALE_INDEX = ('the index snapshot names a build the mirror no longer '
