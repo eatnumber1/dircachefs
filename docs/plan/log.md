@@ -1497,3 +1497,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   its own non-gating job (lane-4); the orchestrator runs commit_subjects.sh over every branch
   before merging (process.md). A push of main past 38303ec (plan: commits only) runs the full
   pipeline.
+- 12.6 + 12.7 done in lane-1 (step-12.6; merge pending the large TLC runs and 12.6b): dcfs.tla
+  `RecoveryIdempotent` (crash during recovery: Next split into CrashServing/Recovering/Stopping),
+  lifetime.tla's `RecoveryIdempotent` (probe steps separate, crash between); 12.7 action
+  properties EffectAtSyscall, BackingAtSyscall, CacheLearnsAtCommit (the first two also on every
+  recorded trace); variants recover_clears_dirty_first, effect_before_syscall, effect_after_
+  syscall. FINDING: recovery is not idempotent: RecoverDirty clears the dirty set durably before
+  ProbeRecoveredRows runs from memory, so a crash during the probe loses the unprobed rows (a
+  freed object's row stays; identity safe). 12.6b: keep the listed rows dirty until probed (fix
+  test-first, finding -> real invariant). formal 87 pass + the two large configs timing out at
+  900 s under load (to be run alone with a long timeout); trace test 131 valid; fast 171 + 2 skips.
