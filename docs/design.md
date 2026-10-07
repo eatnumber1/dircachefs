@@ -1173,7 +1173,14 @@ Step 23.4.
   with the casefold feature it would make a directory case-insensitive,
   which dcfs's cache of byte names cannot follow (Phase 16 refuses such
   directories); `FSSETXATTR` has no casefold bit. Everything else, and
-  anything from a 32-bit caller, is `ENOTTY`. dcfs requests `FUSE_CAP_IOCTL_DIR` for directories.
+  anything from a 32-bit caller, is `ENOTTY`. A kernel gap: after a
+  successful set, neither `fuse_fileattr_set` (`fs/fuse/ioctl.c`) nor
+  `vfs_fileattr_set` invalidates the FUSE inode's cached attributes, so
+  `stat` serves the ctime of the `GETATTR` before the `chattr` until the
+  attribute timeout, although dcfs's cache has the new one (the refresh
+  above). `copy_test`'s `DISABLED_immutable-ctime` shows it on every run;
+  dcfs could push the change with `fuse_lowlevel_notify_inval_inode`, not
+  done (the maintainer's call). dcfs requests `FUSE_CAP_IOCTL_DIR` for directories.
 - **Writable opens and the flags.** The backing filesystem decides at open
   time whether a file may be written (immutable, append-only, a read-only
   filesystem), and the kernel's check on the FUSE side does not see those

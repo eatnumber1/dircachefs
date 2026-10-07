@@ -512,7 +512,11 @@ ext4, xfs and btrfs.
   also yields ESTALE, from a freshly reseeded generation counter. Two
   consequences of the exclusive-access model (no write-through
   invalidation until Phase 4) that this test cannot demonstrate are
-  reported as `SKIP`, not a faked pass. Also step 4.8's runtime submount
+  reported as `SKIP`, not a faked pass. A check that fails for a reason
+  outside dcfs (a kernel gap) is kept and disabled googletest-style:
+  `disabled` (`guest/lib.sh`) reports it as `TEST DISABLED_<name>
+  DISABLED (<reason>)` and its would-be verdict ("would PASS"/"would
+  FAIL") on the next line, never failing the run. Also step 4.8's runtime submount
   refusal (amendment 12): no `fhtest handle` can be minted for a name
   behind a boundary vdc is mounted onto at runtime (`handle-boundary-*`).
 - `setattr_test` (`guest/setattr.sh`): step 4.1's `Setattr` write-through --

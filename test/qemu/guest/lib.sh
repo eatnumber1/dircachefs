@@ -16,6 +16,24 @@
 pass() { echo "TEST $1 PASS"; }
 fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
 skip() { echo "TEST $1 SKIP ($2)"; }
+# disabled NAME REASON CHECK [ARGS...]: a check that fails for a reason
+# outside dcfs (a kernel limitation) and is kept, googletest-style, so the
+# day it starts passing shows in the log. Runs CHECK ARGS (exit status 0:
+# pass; its output is the detail) and reports "TEST DISABLED_NAME DISABLED
+# (REASON)" either way, never failing the run, then its would-be verdict on
+# the next line: "would PASS" or "would FAIL (detail)".
+disabled() {
+	d_name=$1
+	d_reason=$2
+	shift 2
+	if d_detail=$("$@" 2>&1); then
+		d_verdict="would PASS"
+	else
+		d_verdict="would FAIL"
+	fi
+	echo "TEST DISABLED_$d_name DISABLED ($d_reason)"
+	echo "  $d_verdict${d_detail:+ ($d_detail)}"
+}
 
 is_mounted() { grep -q " $1 " /proc/mounts; }
 

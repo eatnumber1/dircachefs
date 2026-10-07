@@ -646,7 +646,10 @@ recovery protocol, concurrency, and the test strategy.
   `FS_IOC_FSGETXATTR`/`FS_IOC_FSSETXATTR` (`chattr`, `lsattr`) and
   `FS_IOC_GETVERSION` reach the backing file (but `chattr +F`, which
   would make a directory case-insensitive, fails with `EOPNOTSUPP`); any
-  other fails with `ENOTTY`. `O_TMPFILE`, and linking such a file into a name, work. File
+  other fails with `ENOTTY`. After `chattr` through dcfs the kernel may
+  serve the previous ctime until its attribute timeout: it does not drop
+  its cached attributes after a successful `FS_IOC_SETFLAGS` or
+  `FS_IOC_FSSETXATTR` on a FUSE file, and dcfs is not asked. `O_TMPFILE`, and linking such a file into a name, work. File
   locks are handled by the kernel, locally within the mount.
 - **Filesystem coverage.** ext4, xfs and btrfs are all exercised by the
   test suite (step 5.2). ZFS is refused until it supports
