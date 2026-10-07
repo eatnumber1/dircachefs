@@ -25,7 +25,6 @@ cc_library(
     visibility = ["//dcfs:__pkg__"],
     deps = [
         "@absl//absl/log:globals",
-        "@absl//absl/log:initialize",
         "@absl//absl/log:log_entry",
         "@absl//absl/log:log_sink",
         "@absl//absl/log:log_sink_registry",

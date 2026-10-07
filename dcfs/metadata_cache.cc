@@ -123,6 +123,11 @@ absl::Status MarkIncomplete(Context &ctx, InodeId dir) {
 #define DCFS_ATTR_COLUMNS                                                  \
   "mode, nlink, uid, gid, rdev, size, blocks, blksize, atime_s, atime_ns, " \
   "mtime_s, mtime_ns, ctime_s, ctime_ns, btime_s, btime_ns"
+// One NULL for each DCFS_ATTR_COLUMNS column (the stub half of ListDir's
+// union has no inode row; a different count fails to prepare).
+#define DCFS_ATTR_NULLS \
+  "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, " \
+  "NULL, NULL, NULL, NULL"
 #define DCFS_ATTR_PLACEHOLDERS "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
 constexpr int kNumAttrColumns = 16;
 
@@ -358,15 +363,12 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
         Query(ctx,
               "SELECT d.rowid, d.name, d.inode, i.attrs_valid, i.fuse_gen, "
               "i.device_id, i.backing_ino, i.backing_gen, "
-              "i.mode, i.nlink, i.uid, i.gid, i.rdev, i.size, i.blocks, "
-              "i.blksize, i.atime_s, i.atime_ns, i.mtime_s, i.mtime_ns, "
-              "i.ctime_s, i.ctime_ns, i.btime_s, i.btime_ns "
-              "FROM dentries d JOIN inodes i ON i.id = d.inode "
+              DCFS_ATTR_COLUMNS  // no clash with dentries' columns
+              " FROM dentries d JOIN inodes i ON i.id = d.inode "
               "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'present' "
               "UNION ALL "
               "SELECT d.rowid, d.name, s.id, NULL, NULL, NULL, NULL, NULL, "
-              "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
-              "NULL, NULL, NULL, NULL, NULL, NULL FROM dentries d "
+              DCFS_ATTR_NULLS " FROM dentries d "
               "JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
               "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'refused' "
               "ORDER BY 1 LIMIT ?3",

@@ -638,8 +638,24 @@ check that vouches for them, before any backing syscall ("." and "..",
 which may need `ParentOf` or an attribute refresh, come after): a name made
 unknown in between would otherwise be left out, since a listing skips
 every entry that is not present (the model's finding
-`readdirplus_unlocked`). Readdirplus additionally returns each child's
-attributes, refreshing any that are unknown.
+`readdirplus_unlocked`). The listing statement is one join of the
+dentries with the children's inode rows (`cache::ListDir`), so a child whose
+attributes are valid arrives with them (plain READDIR needs only the inode
+number and type; READDIRPLUS the whole entry, through the same
+`FreshAttr` as any other entry), and only a child with unknown attributes
+(or a stub) is read, and refreshed, per entry afterwards. The query reads
+only as many rows as the reply can hold at its smallest entry (about 26 for
+a 4 KiB READDIRPLUS reply), not the cache's usual 64, and goes on a batch at
+a time if more fit. Attributes are therefore read at listing time: under
+cancellation or coroutines (Phase 22), a mutation that interleaves during
+an earlier entry's refresh does not make a later entry's attributes unknown
+before they are served. That is safe: the kernel's `attr_version` discards
+stale READDIRPLUS attributes, and today dcfs is single-threaded. The cost
+is counted, not timed: `ReaddirWorkTest` (`dir_cache_fs_test.cc`) bounds the
+SQLite steps of a warm listing of 100 and of 1000 entries per entry
+(about 1.1 to 1.3 steps each, plain or plus), and `readdir_boundary_test`
+compares the daemon's CPU ticks listing 6000 entries with 1500 (a linear
+listing is about 4x, a quadratic one 10x or more; it fails above 8x).
 
 **What still touches the backing filesystem** when the cache is warm:
 opening a file (contents go through passthrough), any mutation, `statfs`
@@ -1603,7 +1619,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
 | `release_leak_test` | A failed attribute refresh on the last writable close (forced by holding the SQLite write lock) does not leak the backing descriptor or passthrough registration. |
 | `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on the backing filesystem instead of failing `ESTALE`, also when their rows and attributes were cached, including changing them (truncate, chmod, chown, utimes, xattrs, fsync, through an open descriptor, an `O_PATH` descriptor's magic link or a removed working directory) and reopening an unlinked file through `/proc/self/fd`; no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
-| `readdir_boundary_test` | A directory too large for one READDIR or READDIRPLUS reply lists every entry exactly once across several replies, and in time linear in its size. |
+| `readdir_boundary_test` | A directory too large for one READDIR or READDIRPLUS reply lists every entry exactly once across several replies, and in time linear in its size (the daemon's CPU ticks for 6000 entries against 1500, at most 8x). |
 | `names_test`, `names_random_test` | File names are bytes: about 60 names, one per hazard class (format delimiters, control and high-bit bytes, invalid UTF-8, the overlong "fake slash", NFC/NFD and other look-alike sets in the spirit of xfstests generic/453 and generic/454, path-walk specials, ordering and prefixes, 255-byte names), go through create, mkdir, symlink (including a 4095-byte target; 1023 on xfs), link, xattrs with NUL-containing values, a rename chain, handles, listing and removal, both created directly on the backing filesystem (dcfs populates from it) and created through dcfs, and are compared with the backing filesystem byte for byte; after a restart the same checks pass, the handles taken before it still open and a metadata pass reads zero sectors. Errors for `.`, `..` and 256-byte names match the backing filesystem's, a directory chain deeper than `PATH_MAX` works by descriptors and handles, and a newline in a logged name cannot forge a log line. The random test makes 1,000 seeded names of random bytes, half through dcfs and half on the backing filesystem, and compares the trees. |
 | `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; nothing behind a boundary is reachable even with `crossmnt` (the stub is listed). |
 | `pjdfstest_test` | POSIX conformance, as above. |

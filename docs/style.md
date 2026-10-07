@@ -80,6 +80,14 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
   (6 uses). In `dcfs/` only `syscalls.cc` calls `close()` by hand.
 - `TODO(topic): ...` names what the work waits for (4 uses, all
   `TODO(coroutines)`).
+- **`ReadOne` is for unique lookups only** (`metadata_cache.cc`): a primary
+  or unique key, an aggregate, or `LIMIT 1`. It stops after the first row
+  (no step to find the end: one statement step less per lookup, and
+  `test/qemu/guest/syscall_budgets.txt` counts steps), so a second row would
+  go unnoticed. A query that could return several and must check uses
+  `ForEachRow` with `LIMIT 2` (`ParentOf`). There is no debug-only second
+  step: it would restore the step the budgets count in the fastbuild; the
+  checking build (26.2) is the place for one.
 
 ### 1.3 Namespaces
 

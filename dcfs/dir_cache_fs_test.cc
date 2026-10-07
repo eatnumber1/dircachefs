@@ -65,6 +65,7 @@
 #include <vector>
 
 #include "absl/base/log_severity.h"
+#include "absl/log/initialize.h"
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
@@ -1971,6 +1972,11 @@ TEST_F(RelatimeTest, NoatimeBackingNeverUpdates) {
 constexpr int64_t kReaddirStepsPerEntry = 13;      // measured 1.12 to 1.28
 constexpr int64_t kReaddirplusStepsPerEntry = 13;  // measured 1.22 to 1.31
 constexpr int64_t kReaddirStepsFixed = 100;
+
+// Logging is initialized for the whole run, before any test: the step
+// counter below needs it (see testonly/step_counter.h), and initializing
+// per test would change what later tests print.
+const bool kLogInitialized = (absl::InitializeLog(), true);
 
 // --- readdir work counting (step N4) ----------------------------------------
 //
