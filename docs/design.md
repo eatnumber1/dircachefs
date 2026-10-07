@@ -615,8 +615,13 @@ invalidation. A mutation never clears them; it marks only its own names
 needed and its listing is not complete, `backing::PopulateDirectory` reads
 all of it: `getdents64`, then for each child `openat(dir_fd, name,
 O_PATH | O_NOFOLLOW)`, `statx` (all basic attributes, birth time and mount
-id), the generation, `name_to_handle_at`, the symlink target and every
-xattr. All of this I/O happens first. Then one transaction upserts every
+id), `name_to_handle_at`, the generation, the symlink target and every
+xattr, all through that one descriptor. It pins the inode, so its number
+cannot be freed and recycled between the reads, and the statx, the handle
+and the generation describe one object whatever their order; read by name
+instead, a recycling after the statx would go unnoticed in either order
+without a birth time (`formal/README.md`, "The order of the handle and the
+generation"). All of this I/O happens first. Then one transaction upserts every
 child's row, links its dentry, records refused boundaries, prunes cached
 names that no longer exist, and marks the directory complete. After that
 every lookup and listing in the directory is answered from the cache,
@@ -1876,3 +1881,33 @@ row surviving a crash between an unlink's syscall and its phase 3, or a
 `DESTROY` with the unlinked file still open for reading (a clean shutdown,
 after which the start did not sweep). Nodeids' traces from the forged-request harness are validated
 against it (`formal/README.md`, "The lifetime model").
+
+A fourth model, `formal/ident.tla`, covers identity (see
+[Identity model](#identity-model)): what a nodeid and its generation stand
+for, how a request (`OpenNode`: the handle, then `VerifyBackingIdentity`)
+and an NFS client's handle (the kernel's inode, or `LOOKUP(nodeid, ".")`
+and the kernel's generation compare) resolve, through inode-number
+recycling, renames, crashes, power losses, cache wipes, stubs and changes
+behind dcfs's back, for today's identity and for Phase 14's (nodeid = inode
+number), and with what the filesystem lets dcfs see (the handle's
+generation, `FS_IOC_GETVERSION`, the birth time). Its invariants: one
+`(nodeid, generation)` never stands for two objects; a nodeid the kernel
+holds, or a handle it accepts, reaches its object or `ESTALE`, never
+another and never `EIO` (dcfs never replies with a generation other than
+the kernel's inode has, which would make `fuse_iget` mark it bad); a handle
+of an object that still exists is served, and a row whose object is gone
+is caught at every entry point. Variants put back an `OpenNode` without the
+identity check, a probe reading by name instead of through one descriptor
+(in either order of handle and generation), generations from a counter, a
+stub generation reused and row ids from `MAX(id)`. What it shows does not
+hold is checked too: today a cache wipe, and a power loss that rolls back
+rows recorded since the last durable commit, lose the handles of objects
+that still exist (`ESTALE`, never another object); a filesystem with
+neither generations nor birth times can take a recovered row over for a
+recycled inode; and Phase 14's identity, with a recycling behind dcfs's
+back, makes the kernel mark the old inode bad, and, for a held nodeid
+whose row went, would reach the new object unless it checks the generation
+it handed out (only `LOOKUP(".")` has the kernel compare). Each reopen
+reports its outcome (`IdentityResolved`), and nodeids' identity traces
+from the forged-request harness are validated against it
+(`formal/README.md`, "The identity model").
