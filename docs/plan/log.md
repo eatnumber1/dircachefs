@@ -680,3 +680,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `dcfs 0.1.0-dev` (dcfs/version.h; Phase 15 stamps it). help_test (small, guest) failed first with
   "No flags matched". Note for Phase 15: Abseil exits 1 after --help (0 after --version); the
   wrapper's own parser should exit 0, and dcfs itself if it is cheap without bypassing ParseCommandLine.
+- 15.0 (lane-4, 26a8857): dcfs(8) from the README: pandoc 3.12 pinned (@pandoc, http_archive,
+  sha256), tools/man/extract_sections.py (named sections; a missing one fails the build; tables
+  become definition lists; >3 columns fail), //man:dcfs.8, dcfs_8_test (pandoc round trip: sections,
+  every flag and default, no table rules), flags_consistency_test (main.cc vs README flag table; no
+  drift). groff -man -ww -z check deferred to the Phase 24 groff pin (TODO in man/BUILD.bazel).
+  Failing first: '--attr_timeout_sec' not found / 'FLAGS' not found with the Flags section omitted.

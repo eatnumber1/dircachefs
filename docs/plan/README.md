@@ -46,7 +46,7 @@ phase's file; `log.md` says where things stand.
 | 22 | [Request cancellation (Ctrl+C, EINTR)](phases/22-cancellation.md) | planned; runs here, after R4, before 13 |
 | 13 | [Connected backing fds](phases/13-connected-backing-fds.md) | planned |
 | 14 | [Identity from the backing filesystem](phases/14-identity-from-backing-fs.md) | planned |
-| 15 | [The `mount.dcfs` wrapper](phases/15-mount-dcfs-wrapper.md) | planned |
+| 15 | [The `mount.dcfs` wrapper](phases/15-mount-dcfs-wrapper.md) | planned (15.0 man page done 2026-10-07) |
 | 16 | [Reject case-insensitive and encrypted directories](phases/16-reject-casefold-and-encrypted-dirs.md) | planned |
 | 17 | [xfstests subset](phases/17-xfstests-subset.md) | planned |
 | 18 | [Disk quota (EDQUOT)](phases/18-disk-quota-edquot.md) | planned (just before 19) |
