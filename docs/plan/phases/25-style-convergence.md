@@ -29,13 +29,13 @@ its own test-first step.
   (147), `events` (182), `internal` (9), `testonly` (4) fold into `dcfs`;
   only `dcfs::syscalls` and `dcfs::sqlite3` stay (russ, 2026-10-07),
   called as `syscalls::x` and `sqlite3::x`. `backing` does not get an
-  exception (russ): where the functions need a home, a wrapper class is
-  the tool (e.g. a `Backing` class whose methods are today's `backing::`
-  functions, so a call reads `backing.SetXattr(...)` against the cache's
-  bare `SetXattr(...)`); that dissolves the `ParentOf`/`SetXattr`/
-  `RemoveXattr` clashes without invented prefixes. Decide class versus
-  free functions per group by what the call sites read like, say which
-  in the commit. Naming keeps the layers apart: `syscalls::` wrappers
+  exception (russ). Default: free functions in `dcfs`, renamed only
+  where they clash (`ParentOf`, `SetXattr`, `RemoveXattr` exist in both
+  `cache` and `backing`: give the three pairs distinguishing names, e.g.
+  `BackingSetXattr`, and leave everything else as is). A wrapper class
+  is allowed only if the clashes turn out to be more than those three
+  and renaming reads worse (russ: "don't do the wrapper class unless it's
+  needed"); say so in the commit if used. Naming keeps the layers apart: `syscalls::` wrappers
   carry their libc names (`setxattr`), everything else is CamelCase
   (`SetXattr`), so those never clash. `events` and `sqlite3`-adjacent
   names get a prefix only where a bare name is ambiguous. Owner:
