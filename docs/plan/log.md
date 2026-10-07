@@ -1231,3 +1231,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   build; banned_symbols incompatible under the coverage config; the filter's junk records;
   Phase 8 scope = dcfs/ only, branches reported; CI cache sizes (does the saved repo cache
   include the 12 GB extracted LLVM?). 26.2 interaction: E2E_COVERAGE_OBJECTS follows initramfs_for.
+- 26.2 review fixes done (lane-3): the truncate blind spot closed by a no-op TEMP trigger on
+  `dirty` held by the checker's connection (SQLite then deletes row by row and the update hook
+  sees every row; the per-request sweep first tried made a 6,000-file test quadratic); harness
+  `--wrap` backstop over 26 libc calls aborts on an open transaction/cursor (an unhooked
+  StatFd failed to die before); 15 more branch death tests (33 total, harness 98 tests);
+  checker linked into main_static_traced; RSS level over 5 find/drop cycles (no retention).
+  RUNTIME of the checks (two runs each, load 8-15, nocache): fast 295/290 s vs plain 280/234 s
+  (+5-15%); presubmit 1309/1388 s vs 1055/978 s (+25-35%); harness within noise. readdir_boundary
+  runs the plain build (its timing guards the algorithm); kRecountLimit 16384 -> 1024. Rebasing
+  onto main (many branches landed since), then merge; 26.6 follows.
