@@ -1166,3 +1166,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   harness `--wrap` fake over backing's libc calls asserting no open transaction, so unhooked call
   sites fail; death tests for the untested branches; the tiers' added wall time measured (26.6's
   baseline); checker into main_static_traced; nits. Three deviations recorded in the phase file.
+- 7.1 merged (f218d45, 13 commits): presubmit 208 pass + 1 skip (ASan-only test), asan //dcfs
+  //tools 44 pass, ubsan //... builds, hermeticity build with host gcc/ld and /usr/lib/gcc blocked
+  passes. Warnings lane released to rebase/prune; 7.2 coverage then 26.12 reproducible build
+  dispatched (lane-4). 12.4b done in lane-2 (1efbe54): schema v5 (last_stub_id, inodes_unlinked
+  partial index), refused dentries go unknown instead of deleted (same stub nodeid/generation
+  across a forget), ProbeRecoveredRows at unclean start, sweep at every start; formal/findings
+  empty; presubmit+formal 206/206, asan 33/33; under review.

@@ -11,6 +11,20 @@ are then the same on every machine and in CI.
   ld.gold) with lld; keep it only if still needed. The guest initramfs
   gets whatever runtime the new toolchain's binaries need (sanitizer
   runtimes for 7.4). Done when the full suite passes, ASan included.
+- 7.1 done 2026-10-07 (f218d45): toolchains_llvm 1.11.1 + LLVM 22.1.8
+  (23.1.2's lld needs ICU 70); `main_static` static with lld, libc++,
+  libc++abi, libunwind, compiler-rt; ASan/UBSan link their C++ runtimes
+  (`-fsanitize-link-c++-runtime`; the C driver otherwise omits them: a
+  guest self-check); `--dynamic_mode=off` stays (lld rejects libfuse's
+  `.symver` in a shared link); liburing probes use compiler-rt; numactl's
+  version script dropped (hid ASan's malloc); toolchain_test + self-check;
+  llvm-project in the SBOM as toolchain runtime; CI repository cache keyed
+  by the lock file. Remaining host dependencies (documented in
+  `third_party/llvm/README.md`): the LLVM binaries' libc/libstdc++/zlib/
+  libxml2/ICU/libgcc_s, glibc headers + static libs and the Linux UAPI
+  headers from the host (no sysroot), bash/mktemp/realpath/rm.
+- 7.1b (follow-up): close those with a Debian sysroot, or Alpine's
+  clang/lld packages through the musl loader (the Phase 24 pattern).
 - 7.2 Coverage: clang source-based coverage
   (`-fprofile-instr-generate -fcoverage-mapping`). The guest writes its
   `.profraw` files to a scratch virtio disk; `run-qemu.sh` copies them out,
