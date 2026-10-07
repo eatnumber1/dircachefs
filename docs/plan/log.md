@@ -1334,3 +1334,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   UBSan step after ASan in `full`. Follow-ups: memory_test_xfs reclaims in the PLAIN build at
   mem=448 (22k scans) and under UBSan at 576 (0 at 768): resize; the `full` job's 350-min
   timeout is tight with ASan + UBSan: split the sanitizer runs into their own jobs.
+- Dispatched (lane-5): 7.4b memory_test sizing (plain xfs reclaims at 448) + sanitizer suites as
+  their own CI jobs; then Phase 8 cheap gaps (status/device_id/mounts_below/file_handle unit
+  tests, FileHandle::ToString with the debug-string rule written into style.md, utimensat/
+  removexattr-on-closed-file guest checks). Deletions and the dcfs-over-dcfs variant wait for 22.
