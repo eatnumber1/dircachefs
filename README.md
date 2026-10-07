@@ -115,6 +115,10 @@ sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs
 kernel is a placeholder that makes any test fail fast with a pointer to
 the build script.
 
+The `dcfs(8)` man page is generated from this README: `bazel build
+//man:dcfs.8` produces `bazel-bin/man/dcfs.8`; copy it to
+`/usr/local/share/man/man8/`.
+
 Format changes with `tools/format.sh` (clang-format and buildifier, if
 installed) before sending them.
 

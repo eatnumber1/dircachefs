@@ -1,0 +1,2 @@
+# Overlay for the pandoc release tarball (statically linked binary).
+exports_files(["bin/pandoc"])

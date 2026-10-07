@@ -3,6 +3,7 @@
 # SBOM test reads (//tools/sbom:sbom_test).
 exports_files([
     "MODULE.bazel",
+    "README.md",
     "MODULE.bazel.lock",
     "osv-scanner.toml",
     ".github/ci/prepare.sh",

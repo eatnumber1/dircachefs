@@ -299,6 +299,17 @@ http_archive(
     urls = ["https://github.com/nektos/act/releases/download/v0.2.89/act_Linux_x86_64.tar.gz"],
 )
 
+# Step 15.0: pandoc, which renders the dcfs(8) man page from README.md in a
+# Bazel genrule (//man:dcfs.8). The static Linux release binary, pinned by
+# sha256; see third_party/pandoc/README.md for the update procedure.
+http_archive(
+    name = "pandoc",
+    build_file = "//third_party/pandoc:BUILD.pandoc",
+    sha256 = "67d7d011fed8c8543306022b985b9b2499ab9b74818df91d8727c7e9ebc5ba06",
+    strip_prefix = "pandoc-3.12",
+    urls = ["https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-linux-amd64.tar.gz"],
+)
+
 # Phase 5.3: Python for tools/sbom/ (the SBOM generator and its test), a
 # hermetic interpreter from rules_python so that no host python is needed
 # by `bazel test`. See tools/sbom/README.md.

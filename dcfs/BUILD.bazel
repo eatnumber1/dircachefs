@@ -687,7 +687,11 @@ qemu_cc_test(
     deps = ["@googletest//:gtest_main"],
 )
 
-exports_files(["schema.sql"])
+exports_files([
+    "main.cc",
+    "schema.sql",
+    "version.h",
+])
 
 genrule(
     name = "schema_sql_cc",

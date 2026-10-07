@@ -1,0 +1,8 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+
+py_binary(
+    name = "extract_sections",
+    srcs = ["extract_sections.py"],
+    main = "extract_sections.py",
+    visibility = ["//man:__pkg__"],
+)

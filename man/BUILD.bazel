@@ -1,0 +1,68 @@
+load("@rules_python//python:py_test.bzl", "py_test")
+
+# dcfs(8), generated from README.md by the pinned pandoc (step 15.0;
+# third_party/pandoc/README.md). tools/man/extract_sections.py fails the
+# build if a named README section no longer exists.
+#
+# TODO(Phase 24): add a `groff -man -ww -z` render check once groff is
+# pinned (the Phase 24 alpine_package rule); no host groff is called.
+genrule(
+    name = "dcfs_8_md",
+    srcs = [
+        "//:README.md",
+        "//dcfs:version.h",
+    ],
+    outs = ["dcfs.8.md"],
+    cmd = "$(location //tools/man:extract_sections) $(location //:README.md) " +
+          "$(location //dcfs:version.h) Usage Flags Example " +
+          "'Mounting over the source directory' 'Running under systemd' " +
+          "'Exporting over NFS' 'Shutdown, crashes and restarts' " +
+          "Limitations > $@",
+    tools = ["//tools/man:extract_sections"],
+)
+
+genrule(
+    name = "dcfs_8",
+    srcs = [":dcfs_8_md"],
+    outs = ["dcfs.8"],
+    cmd = "$(location @pandoc//:bin/pandoc) -s -f markdown-smart -t man $< -o $@",
+    tools = ["@pandoc//:bin/pandoc"],
+)
+
+filegroup(
+    name = "man",
+    srcs = [":dcfs_8"],
+)
+
+# The page read back by pandoc, as plain text, for the test below.
+genrule(
+    name = "dcfs_8_plain",
+    srcs = [":dcfs_8"],
+    outs = ["dcfs.8.txt"],
+    cmd = "$(location @pandoc//:bin/pandoc) -f man -t plain --columns=200 $< -o $@",
+    tools = ["@pandoc//:bin/pandoc"],
+)
+
+py_test(
+    name = "dcfs_8_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["dcfs_8_test.py"],
+    args = ["$(location :dcfs_8_plain)"],
+    data = [":dcfs_8_plain"],
+)
+
+py_test(
+    name = "flags_consistency_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["flags_consistency_test.py"],
+    args = [
+        "$(location //dcfs:main.cc)",
+        "$(location //:README.md)",
+    ],
+    data = [
+        "//:README.md",
+        "//dcfs:main.cc",
+    ],
+)
