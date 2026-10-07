@@ -52,7 +52,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -209,6 +211,11 @@ void WriteFile(const std::string &path) {
 
 // A write the kernel would make through a passthrough fd, which dcfs never
 // sees.
+std::string ReadWholeFile(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
 void AppendToFile(const std::string &path, std::string_view data) {
   int fd = ::open(path.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
   ASSERT_GE(fd, 0) << path << ": " << std::strerror(errno);
@@ -401,6 +408,25 @@ class DirCacheFSTest : public ::testing::Test {
     body.append(newname);
     body.push_back('\0');
     return Send(FUSE_RENAME, static_cast<uint64_t>(parent), body);
+  }
+
+  // Opens `id` (the file at `rel`) read-only while its backing file is
+  // immutable (set and cleared behind dcfs's back), so that the shared
+  // backing descriptor is read-only. Returns the handle (0 on failure).
+  uint64_t OpenReadOnlySharedFd(const std::string &rel, InodeId id) {
+    const int raw = ::open(Path(rel).c_str(), O_RDONLY | O_CLOEXEC);
+    if (raw < 0) return 0;
+    int flags = 0;
+    uint64_t fh = 0;
+    if (::ioctl(raw, FS_IOC_GETFLAGS, &flags) == 0) {
+      const int immutable = flags | FS_IMMUTABLE_FL;
+      if (::ioctl(raw, FS_IOC_SETFLAGS, &immutable) == 0) {
+        fh = Open(id, O_RDONLY).second;
+        if (::ioctl(raw, FS_IOC_SETFLAGS, &flags) != 0) fh = 0;
+      }
+    }
+    ::close(raw);
+    return fh;
   }
 
   // An open of `id` with `flags`, and the file handle it returned (0 on
@@ -1820,6 +1846,77 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
   }
 }
 
+// The descriptors this process has open.
+int OpenFdCount() {
+  int n = 0;
+  for ([[maybe_unused]] const auto &entry :
+       std::filesystem::directory_iterator("/proc/self/fd")) {
+    ++n;
+  }
+  return n;
+}
+
+
+// Writable opens sharing a read-only backing descriptor (review L-a): the
+// write fd is kept from the first, and replaced only by one without
+// O_APPEND, so a later O_APPEND writer does not make the first writer's
+// copy_file_range fail (EBADF: the kernel refuses an O_APPEND destination)
+// or move its fallback writes to the end of the file.
+TEST_F(DirCacheFSTest, AnAppendingWriterKeepsTheFirstWritersFd) {
+  WriteFile(Path("f"));
+  WriteFile(Path("src"));
+  AppendToFile(Path("src"), "abc");
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  const uint64_t ro_fh = OpenReadOnlySharedFd("f", f);
+  ASSERT_NE(ro_fh, 0u);
+  auto [a, a_fh] = Open(f, O_WRONLY);
+  ASSERT_EQ(a.error, 0);
+  auto [b, b_fh] = Open(f, O_WRONLY | O_APPEND);
+  ASSERT_EQ(b.error, 0);
+  auto [in, in_fh] = Open(src, O_RDONLY);
+  ASSERT_EQ(in.error, 0);
+  EXPECT_EQ(CopyFileRange(src, in_fh, f, a_fh, 3), 3);
+  struct fuse_write_in write = {};
+  write.fh = a_fh;
+  write.offset = 1;
+  write.size = 1;
+  std::string body;
+  AppendBytes(body, write);
+  body.append("x");
+  EXPECT_EQ(Send(FUSE_WRITE, static_cast<uint64_t>(f), body).error, 0);
+  EXPECT_EQ(ReadWholeFile(Path("f")), "axc");
+  for (auto [id, fh] : {std::pair{f, a_fh}, std::pair{f, b_fh},
+                        std::pair{f, ro_fh}, std::pair{src, in_fh}}) {
+    EXPECT_EQ(Release(id, fh).error, 0);
+  }
+}
+
+// The write fd goes with the last writable open (review L-a), at its
+// release or when the open fails after it was made, while the read-only
+// shared descriptor stays for the reader.
+TEST_F(DirCacheFSTest, TheWriteFdGoesWithTheLastWriter) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const uint64_t ro_fh = OpenReadOnlySharedFd("f", f);
+  ASSERT_NE(ro_fh, 0u);
+  const int base = OpenFdCount();
+  auto [w, w_fh] = Open(f, O_WRONLY);
+  ASSERT_EQ(w.error, 0);
+  EXPECT_EQ(OpenFdCount(), base + 1);
+  ASSERT_EQ(Release(f, w_fh).error, 0);
+  EXPECT_EQ(OpenFdCount(), base) << "after the last writer's release";
+
+  ASSERT_THAT(db_.Exec("PRAGMA query_only = 1"), IsOk());  // Phase 1 fails.
+  auto [failed, failed_fh] = Open(f, O_WRONLY);
+  ASSERT_THAT(db_.Exec("PRAGMA query_only = 0"), IsOk());
+  EXPECT_NE(failed.error, 0);
+  EXPECT_EQ(OpenFdCount(), base) << "after a writable open failed";
+  EXPECT_EQ(Release(f, ro_fh).error, 0);
+}
+
 // --- FORGET reconciliation (step 23.1) ------------------------------------
 //
 // A store through a shared writable mapping after the last close reaches
@@ -1944,16 +2041,6 @@ TEST_F(DirCacheFSTest, LastForgetWithoutAHeldDescriptorMarksUnknown) {
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
   EXPECT_FALSE(attr.valid);
   EXPECT_THAT(Dirty(), Contains(f));
-}
-
-// The descriptors this process has open.
-int OpenFdCount() {
-  int n = 0;
-  for ([[maybe_unused]] const auto &entry :
-       std::filesystem::directory_iterator("/proc/self/fd")) {
-    ++n;
-  }
-  return n;
 }
 
 // Held descriptors stop at Options::max_held_fds (review M-1), leaving the

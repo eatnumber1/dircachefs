@@ -1403,8 +1403,20 @@ absl::Status DirCacheFS::Open(
     }
     // A read-only shared fd cannot carry what dcfs writes itself (fallback
     // writes, fallocate, copy_file_range: review L1); this open's
-    // descriptor can, so it becomes the inode's write fd (WriteFd).
-    if (!shared_file.writable) shared_file.write_fd = *std::move(allowed);
+    // descriptor can, so it becomes the inode's write fd (WriteFd) -- if
+    // there is none yet, or it replaces one opened O_APPEND by one without
+    // (review L-a): copy_file_range refuses an O_APPEND destination, and a
+    // pwrite through one lands at the end whatever offset the kernel sent,
+    // so the first writer must not lose its descriptor to a later
+    // appending one. (A file that is append-only allows only O_APPEND
+    // descriptors: then every one appends, as the backing file would.)
+    const bool appends = (fi.flags & O_APPEND) != 0;
+    if (!shared_file.writable &&
+        (!shared_file.write_fd.has_value() ||
+         (shared_file.write_fd_appends && !appends))) {
+      shared_file.write_fd = *std::move(allowed);
+      shared_file.write_fd_appends = appends;
+    }
   }
   backing_it->second.refs++;
   if (writable) {
@@ -1415,7 +1427,10 @@ absl::Status DirCacheFS::Open(
     if (absl::Status status = BeginWriting(id); !status.ok()) {
       // Undo the registration above (the open is failing, so no Release
       // will ever come for it).
-      if (--backing_it->second.writable_refs == 0) EndWriting(id);
+      if (--backing_it->second.writable_refs == 0) {
+        EndWriting(id);
+        backing_it->second.DropWriteFd();
+      }
       if (--backing_it->second.refs == 0) {
         if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
         backing_files_.erase(backing_it);
@@ -1588,6 +1603,9 @@ absl::Status DirCacheFS::Release(
       ResolveSideEffectXattrs(id, kXattrsChangedByWrite, *backing_file.fd,
                               "Release");
     }
+    // No writer is left to write through it (review L-a); a readers'
+    // shared fd stays.
+    backing_file.DropWriteFd();
   }
   if (backing_file.refs > 0) return req.ReplyErrno(0);
 

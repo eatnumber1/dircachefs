@@ -503,15 +503,22 @@ class DirCacheFS {
     // which is when this BackingFile itself is torn down.
     int refs = 0;
     // When `fd` is read-only but a later writable open was allowed (the
-    // file was immutable when `fd` was opened, or is append-only): that
-    // open's descriptor, for what dcfs writes itself (review L1).
+    // file was immutable when `fd` was opened, or is append-only): the
+    // descriptor of such an open, for what dcfs writes itself (review L1).
+    // The first one's, unless it was opened O_APPEND and a later one was
+    // not (review L-a); dropped when writable_refs reaches 0.
     std::optional<FileDescriptor> write_fd;
+    bool write_fd_appends = false;
     // Whether an ioctl changed the file's flags (chattr) since `fd` was
     // opened: a writable open then asks the backing filesystem again even
     // though `fd` is read-write (see Open).
     bool flags_changed = false;
     // The descriptor fallback writes, fallocate and copy_file_range use.
     int WriteFd() const { return write_fd.has_value() ? **write_fd : *fd; }
+    void DropWriteFd() {
+      write_fd.reset();
+      write_fd_appends = false;
+    }
   };
 
   // One fi.fh handle: which inode's BackingFile it uses, and whether this
