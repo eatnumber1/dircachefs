@@ -2242,7 +2242,11 @@ TEST_F(ClockTest, PeriodicSyncPointFollowsTheInjectedClock) {
   Start();
   int syncs = 0;
   SyncfsHook() = [&] { ++syncs; };
-  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  // A LOOKUP, not Id(): the FORGET below must forget a lookup the kernel
+  // was handed (the invariant checks' lookup-count, step 26.2).
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   ASSERT_EQ(Release(f, fh).error, 0);  // written, held

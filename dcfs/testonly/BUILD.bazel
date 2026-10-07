@@ -124,7 +124,7 @@ cc_library(
         "//dcfs:protocol_events",
         "//dcfs:sqlite",
         "//dcfs:status",
-        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/container:flat_hash_map",
         "@absl//absl/container:flat_hash_set",
         "@absl//absl/log",
@@ -145,7 +145,7 @@ cc_library(
     deps = [
         ":invariant_checker",
         "//dcfs:invariant_checks",
-        "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/log",
         "@absl//absl/status:statusor",
     ],

@@ -22,7 +22,7 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/dir_cache_fs_peer.h"
 #include "sqlite3.h"
 

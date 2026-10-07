@@ -12,7 +12,7 @@
 #include "absl/status/statusor.h"
 #include "dcfs/fd.h"
 #include "dcfs/invariant_checks.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/invariant_checker.h"
 
 namespace dcfs {

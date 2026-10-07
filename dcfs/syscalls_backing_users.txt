@@ -12,8 +12,10 @@
 //dcfs:main_static_traced
 //dcfs:mounts_below
 
-# testonly code and benchmark driver (trace file, fault wraps, test fixtures)
+# testonly code and benchmark driver (trace file, invariant-violation console line, fault wraps, test fixtures)
 //dcfs/testonly:files
+//dcfs/testonly:invariant_checker
+//dcfs/testonly:main_invariant_checker
 //dcfs/testonly:main_recorder
 //dcfs/testonly:snapshot_after_syncfs
 //dcfs/testonly:trace_recorder
