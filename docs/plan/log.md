@@ -1382,3 +1382,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   workers follow the CPUs) added to lane-5's CI round, ahead of its Phase 8 cheap-gaps round.
 - russ (2026-10-08): shard the sanitizer and large-tier suites across runners (6.4d, 3 shards per
   suite, deterministic target partition in test.sh); added to lane-5's CI round.
+- GitHub run 37667603332 (de64dbb): `fast` failed at the new commit-subject gate (26.13): the eight
+  readdir commits carry `N4:` (the orchestrator's brief named the review finding, not the step
+  26.4); the gate was right; pushed history stays; the next push range starts after them.
+  `osv` was cancelled at 20 min inside prepare (1 min before 7.1): the fetch now pulls the LLVM
+  tarball on a runner with no repository cache -> lane-5 (restore the repo cache read-only /
+  avoid the toolchain for the fetch / raise the timeout). Nothing else ran. process.md: the
+  dispatch prompt names the subject prefix.

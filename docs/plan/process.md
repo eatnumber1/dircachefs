@@ -41,7 +41,10 @@ process (its waves and file ownership table) is in `history.md`.
    worktree isolation: on russ's machine it picked the home-directory
    dotfiles repository and triggered ssh prompts.)
 2. **Dispatch.** The subagent's prompt contains: the worktree path and
-   branch; the step's text from its phase file; `/AGENTS.md`; the files it
+   branch; the commit-subject prefix (the plan step, `N.M:`; never a
+   review-finding label: eight `N4:` commits reached main on 2026-10-08
+   and the CI subject gate rightly failed the push); the step's text
+   from its phase file; `/AGENTS.md`; the files it
    should read first; the step's "done" criteria; and the instructions
    below. Agents are told not to explore the tree beyond that, not to touch
    files outside the step, to stop and report after two failed attempts at
