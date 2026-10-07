@@ -36,13 +36,18 @@ CONSTANTS
     MaxMutations,   \* bound: mutations started over a whole behavior
     MaxCrashes,     \* bound: crashes over a whole behavior
     KernelDirLock,  \* the kernel serializes D's namespace ops, lookups, readdirs
+    Interrupts,     \* FUSE_INTERRUPT is modelled (Phase 22: Interrupt)
     BugPhase1NotDurable,        \* crash F1
     BugCreateKeepsParentAttrs,  \* crash F3
     BugUnguardedFills,          \* tri-state F1
     BugRestoreComplete,         \* tri-state F4
     BugSyncIgnoresMutations,    \* finding sync_during_mutation (R4)
     BugReaddirplusUnlocked,     \* finding readdirplus_unlocked (R4)
-    BugRenameStaleSource        \* finding rename_stale_source (R4)
+    BugRenameStaleSource,       \* finding rename_stale_source (R4)
+    \* Interrupts (Phase 22; none historical, known_bugs/interrupt_*):
+    BugInterruptAfterSyscall,   \* interruptible after the backing syscall
+    BugInterruptUndo,           \* an interrupt puts the resolved name back
+    BugInterruptLeaksGuard      \* an interrupted mutation never Ends
 
 AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
              "create", "linkcreate", "unlink", "rename", "sync"}
@@ -51,10 +56,12 @@ ASSUME /\ Names # {} /\ IsFiniteSet(Names)
        /\ Procs # {} /\ IsFiniteSet(Procs)
        /\ Requests \subseteq AllKinds
        /\ MaxMutations \in Nat /\ MaxCrashes \in Nat
-       /\ \A b \in {KernelDirLock, BugPhase1NotDurable,
+       /\ \A b \in {KernelDirLock, Interrupts, BugPhase1NotDurable,
                     BugCreateKeepsParentAttrs, BugUnguardedFills,
                     BugRestoreComplete, BugSyncIgnoresMutations,
-                    BugReaddirplusUnlocked, BugRenameStaleSource} :
+                    BugReaddirplusUnlocked, BugRenameStaleSource,
+                    BugInterruptAfterSyscall, BugInterruptUndo,
+                    BugInterruptLeaksGuard} :
               b \in BOOLEAN
 
 -----------------------------------------------------------------------------
@@ -680,6 +687,49 @@ S2(p) ==
     /\ UnchangedBacking /\ UNCHANGED <<seq, inflight, servedWrong, stamp>>
 
 (***************************************************************************)
+(* FUSE_INTERRUPT (Phase 22; docs/design.md, "Cancellation"). dcfs serves  *)
+(* one request at a time and cannot stop a backing syscall once issued;   *)
+(* it looks for an interrupt of the request it serves at checkpoints      *)
+(* (Checkpoint in dcfs/interrupts.h), each just before a backing syscall: *)
+(* before LookupOrPopulate's probe or population (RN_probe, PD_read),     *)
+(* between the population's probe batches (PD_commit: its reads are      *)
+(* abandoned, nothing is committed), and before a mutation's phase-2      *)
+(* syscall (C_sys, U_sys, R_sys). There an interrupted request replies    *)
+(* EINTR; a mutation past phase 1 ends (Mutation::End) without a phase 3, *)
+(* its names and D's attributes left unknown and D dirty, as phase 1 left *)
+(* them: the backing filesystem is unchanged, so unknown is sound. From    *)
+(* the syscall through phase 3 there is no checkpoint: the change exists  *)
+(* and is recorded, and the request replies success.                      *)
+(*                                                                         *)
+(* BugInterruptAfterSyscall: also interruptible after the syscall, before *)
+(* phase 3, cancelling the mutation by putting its resolved name back.    *)
+(* BugInterruptUndo: an interrupt before the syscall puts the resolved    *)
+(* name back instead of leaving it unknown. BugInterruptLeaksGuard: the   *)
+(* interrupted mutation never Ends (its guard stays raised).              *)
+(***************************************************************************)
+
+InterruptPcs == {"RN_probe", "PD_read", "PD_commit", "C_sys", "U_sys", "R_sys"}
+AfterSyscallPcs == {"C_probe", "C_rec", "U3", "R3"}
+
+\* Putting a rename's source name back (the only resolved name the model
+\* keeps past phase 1): what cancelling the mutation would do.
+UndoRename(r, d) ==
+    IF r.kind = "rename" THEN [d EXCEPT !.dent[r.n] = r.src] ELSE d
+
+Interrupt(p) ==
+    /\ Interrupts /\ mode = "up" /\ Free(p)
+    /\ \/ ps[p].pc \in InterruptPcs
+       \/ BugInterruptAfterSyscall /\ ps[p].pc \in AfterSyscallPcs
+    /\ LET r == ps[p]
+           mutating == r.mseq # 0
+           undo == mutating /\ (BugInterruptUndo \/ r.pc \in AfterSyscallPcs)
+       IN /\ IF mutating /\ ~BugInterruptLeaksGuard THEN EndMutation
+             ELSE UnchangedGuards
+          /\ IF undo THEN Commit(UndoRename(r, dbCur), FALSE) ELSE UnchangedDB
+    /\ Done(p)
+    /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp, mode, muts, crashes>>
+
+(***************************************************************************)
 (* A request arrives (fuse_ops.cc dispatching to DirCacheFS) and runs its *)
 (* first step. With KernelDirLock, the kernel holds D's lock across       *)
 (* lookups, readdirs and namespace mutations of D (i_rwsem, and FUSE's    *)
@@ -916,6 +966,7 @@ Next ==
          \/ RenamePhase3(p) \/ RenameStat(p) \/ RenameFill(p)
          \/ RenameFailed(p) \/ RenameFailed2(p)
          \/ SyncClearDirty(p)
+         \/ Interrupt(p)
     \/ Crash \/ Restart \/ Recover \/ StartRun
     \/ BeginShutdown \/ StopSync \/ StopClear \/ StopCkpt \/ StopFlag
 
@@ -980,6 +1031,12 @@ DurableSetSound == durableD => \A s \in dbOpts : s.dirty
 
 \* clean_shutdown = 1 is only ever durable with an empty dirty set.
 CleanMeansNoDirty == \A s \in dbOpts : s.clean => ~s.dirty
+
+\* The fill guards are balanced: a mutation is in flight on D (inflight)
+\* exactly while some request is between its phase 1 and its End
+\* (Mutation::End releases it on every path, an interrupt's included).
+GuardsBalanced ==
+    inflight = Cardinality({p \in Procs : ps[p].mseq # 0})
 
 \* Recovery always terminates: the daemon always gets back to serving.
 RecoveryTerminates == (mode # "up") ~> (mode = "up")

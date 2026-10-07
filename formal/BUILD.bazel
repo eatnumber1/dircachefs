@@ -30,6 +30,36 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
+# FUSE_INTERRUPT (Phase 22): the Interrupt action, with the kernel's lock
+# (about a minute), and with two mutations or without the lock (a few
+# minutes each).
+tlc_test(
+    name = "interrupt_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_interrupt.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+tlc_test(
+    name = "interrupt_muts2_test",
+    size = "large",
+    timeout = "long",
+    config = "MC_interrupt_muts2.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+tlc_test(
+    name = "interrupt_nolock_test",
+    size = "large",
+    timeout = "long",
+    config = "MC_interrupt_nolock.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
 # Larger bounds (about ten minutes on four cores).
 tlc_test(
     name = "large_test",
@@ -62,6 +92,10 @@ KNOWN_BUGS = {
     "sync_during_mutation": "Invariant CrashSafe is violated",
     "readdirplus_unlocked": "Invariant ServedFromCacheIsCurrent is violated",
     "rename_stale_source": "Invariant CacheNeverWrong is violated",
+    # Not historical (Phase 22): what an interrupt must not do.
+    "interrupt_after_syscall": "Invariant CacheNeverWrong is violated",
+    "interrupt_undo": "Invariant TriState is violated",
+    "interrupt_leaks_guard": "Invariant GuardsBalanced is violated",
 }
 
 [

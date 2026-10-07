@@ -496,6 +496,10 @@ T_Syncfs ==
 T_SyncClearDirty ==
     /\ Ev("sync_clear") /\ SyncClearDirty(P) /\ Matches(E, {})
 
+\* A checkpoint found the request interrupted (FUSE_INTERRUPT): it replies
+\* EINTR, ending a mutation past phase 1 without phase 3.
+T_Interrupt == Ev("interrupt") /\ Interrupt(P) /\ Matches(E, {})
+
 \* The request replied; the model's request had already (its last step).
 T_Reply ==
     /\ Ev("reply") /\ ps[P].pc = "idle" /\ Stutter /\ Matches(E, {})
@@ -547,7 +551,7 @@ TraceNext ==
     \/ T_CreateFailed \/ T_UnlinkFailed \/ T_RenameFailed
     \/ T_RenameFailed2 \/ T_Reresolve
     \/ T_ArriveSync \/ T_Syncfs \/ T_SyncClearDirty
-    \/ T_Reply
+    \/ T_Interrupt \/ T_Reply
     \/ T_BeginShutdown \/ T_StopSync \/ T_StopClear \/ T_StopCkpt
     \/ T_StopFlag
     \/ T_Crash \/ T_Restart \/ T_Recover \/ T_StartRun
