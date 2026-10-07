@@ -1,0 +1,17 @@
+# Mutation testing scope (step 26.5; README.md in this directory).
+#
+# A `file` line names a source file and the Bazel target that compiles it
+# (for its compile command); the lines under it say which functions of the
+# file are mutated:
+#   all             every function defined in the file
+#   names A B ...   the functions with these unqualified names
+#   calls REGEX     every function whose body calls a function whose name
+#                   matches REGEX (the three-phase functions and fills)
+# The operators (mutate.py) apply inside those functions only.
+
+file dcfs/metadata_cache.cc //dcfs:metadata_cache
+  all
+
+file dcfs/dir_cache_fs.cc //dcfs:dir_cache_fs
+  calls ^(Begin|End|Mark)[A-Za-z]*$
+  names Forget ForgetRemoved Release ReconcileWritten SyncBackingNow MaybeSyncBacking HoldForRemoval RetireRemoved RefreshAttrsOf TakeWritten

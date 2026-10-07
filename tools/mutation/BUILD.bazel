@@ -1,0 +1,30 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_test.bzl", "py_test")
+
+# Step 26.5: the mutation tester (README.md). `bazel run //tools/mutation:mutate
+# -- generate --out mutants.json`, then `-- run --mutants mutants.json --result
+# result.json [--sample N]`. Not a test: it starts Bazel on a copy of the tree
+# for every mutant.
+exports_files(["scope.txt"])
+
+py_binary(
+    name = "mutate",
+    srcs = ["mutate.py"],
+    data = ["scope.txt"],
+    main = "mutate.py",
+)
+
+py_test(
+    name = "mutate_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["mutate_test.py"],
+    deps = [":mutate_lib"],
+)
+
+py_library(
+    name = "mutate_lib",
+    srcs = ["mutate.py"],
+    imports = ["."],
+)
