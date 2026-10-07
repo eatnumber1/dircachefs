@@ -1669,8 +1669,8 @@ A violation aborts the daemon (`LOG(FATAL)`: "invariant violated:
 same line, as `DCFS-INVARIANT-VIOLATION ...`, to the console, where
 `run-qemu.sh` fails the run on it. Every `small` and `medium` `qemu_test`
 (the fast and presubmit tiers) boots the checking build, except
-`syscall_traces_test` and `memory_test`, which measure what ships (its
-SQLite statements and its memory); `large` and `enormous` boot the plain
+`syscall_traces_test`, `memory_test` and `readdir_boundary_test`, which
+measure what ships (its SQLite statements, its memory, a listing's time); `large` and `enormous` boot the plain
 one (`test/qemu/README.md`, "Test tiers").
 
 ### Conformance

@@ -113,8 +113,9 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         plain_dcfs: boot the plain dcfs that ships (:initramfs) whatever
             the tier (step 26.2), for a test that measures the shipped
             binary's own costs: syscall_traces_test counts the daemon's
-            SQLite statements and memory_test its RSS, which the checking
-            build's queries and bookkeeping would add to.
+            SQLite statements, memory_test its RSS and readdir_boundary_test
+            a listing's time, which the checking build's queries and
+            bookkeeping would add to.
         size: required sh_test size, the test's tier: "small" (run
             constantly), "medium" (presubmit), "large"/"enormous" (CI).
             See README.md's "Test tiers".

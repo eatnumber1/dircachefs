@@ -231,8 +231,10 @@ guest against the checks, and so does CI for those tiers, while CI's large
 tier runs what ships. `plain_dcfs = True` boots the plain build whatever
 the tier, for a test that measures what ships: `syscall_traces_test` (it
 counts the daemon's SQLite statements, and the checker's own queries would
-count) and `memory_test` (its RSS ratios would count the checker's full
-check at startup filling SQLite's page cache, and its per-request sets). The
+count), `memory_test` (its RSS ratios would count the checker's full
+check at startup filling SQLite's page cache, and its per-request sets) and
+`readdir_boundary_test` (its warm listing's time limit would count the
+checks' per-request cost). The
 forged-request harness (`//dcfs:dir_cache_fs_test`) installs the checker
 itself, in every tier.
 

@@ -256,6 +256,11 @@ qemu_test(
     name = "readdir_boundary_test",
     disks = [("vdb", "ext4", "128M")],
     guest_script = "guest/readdir_boundary.sh",
+    # What ships is what is timed (step 26.2): its warm-listing check (under
+    # 2.5 s for 6000 cached entries) measured 214 and 297 cs in the checking
+    # build against 56 and 115 in the plain one on a loaded host, and failed
+    # once; the checks' per-request cost is not what it guards.
+    plain_dcfs = True,
     asan_mem = ASAN_BIG_DCFS_MEM,
     size = "medium",
     timeout = "moderate",
