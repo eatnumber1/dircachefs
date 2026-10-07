@@ -36,6 +36,9 @@ cat >"${WORK}/raw" <<'EOT'
 520   statx(AT_FDCWD</>, "relative", 0, STATX_ALL, 0x7ffd) = -1 ENOENT (No such file or directory)
 520   unlinkat(AT_FDCWD</>, "/src/t/victim", 0) = 0
 520   write(8</dev/fuse>, "/x", 2) = 2
+520   write(2</tmp/dcfs-2.log>, "I1007 sqlite3_step: BEGIN", 25) = 25
+520   fsync(5</cache/dcfs.db-wal>) = 0
+520   syncfs(3</src/t>)             = 0
 EOT
 
 # shellcheck disable=SC1090
@@ -58,7 +61,10 @@ getxattr(procfd) !ENODATA
 openat(other)
 statx(other) !ENOENT
 unlinkat(backing)
-write(fuse)'
+write(fuse)
+write(log)
+fsync(cache)
+syncfs(backing)'
 got=$(strace_reduce /src/t /cache <"${WORK}/raw")
 [[ "${got}" == "${want}" ]] || fail "reduction: got
 ${got}
@@ -75,7 +81,8 @@ openat(procfd)
 getxattr(procfd) !ENODATA
 openat(other)
 statx(other) !ENOENT
-unlinkat(backing)'
+unlinkat(backing)
+syncfs(backing)'
 [[ "${got}" == "${want}" ]] || fail "golden lines: got
 ${got}
 want
@@ -83,7 +90,7 @@ ${want}"
 echo "PASS: backing, procfd and other lines are kept, cache/proc/fuse dropped"
 
 got=$(strace_reduce /src/t /cache <"${WORK}/raw" | strace_counts | tr '\n' ' ')
-[[ "${got}" == "backing 5 procfd 2 other 2 cache 2 proc 2 fuse 2 " ]] ||
+[[ "${got}" == "backing 6 procfd 2 other 2 cache 3 proc 2 fuse 2 log 1 sync 2 " ]] ||
   fail "counts: got '${got}'"
 echo "PASS: counts per kind"
 
@@ -110,3 +117,21 @@ echo "${out}" | grep -q '^+statx(backing)$' ||
 strace_golden dropped op <"${WORK}/golden" >/dev/null || true
 [[ "${FAILED}" -eq 1 ]] || fail "FAILED is ${FAILED} after a differing golden"
 echo "PASS: a differing golden fails and prints the diff"
+
+# Budgets: counts above a budget fail, naming both numbers; equal or below
+# pass; an operation without a budget fails.
+printf 'backing 6\nprocfd 2\nsync 2\nsql_stmts 10\n' >"${WORK}/counts"
+printf '# comment\nop backing 6\nop procfd 2\nop sync 2\nop sql_stmts 10\nother backing 0\n' >"${WORK}/budgets"
+strace_budget_compare "${WORK}/budgets" "${WORK}/counts" op ||
+  fail "counts equal to the budgets were refused"
+printf 'op backing 7\nop sync 3\nop sql_stmts 11\n' >"${WORK}/loose"
+strace_budget_compare "${WORK}/loose" "${WORK}/counts" op ||
+  fail "counts below the budgets were refused"
+printf 'op backing 5\nop procfd 2\nop sync 2\nop sql_stmts 10\n' >"${WORK}/tight"
+out=$(strace_budget_compare "${WORK}/tight" "${WORK}/counts" op) &&
+  fail "a count above its budget passed"
+[[ "${out}" == "op backing: count rose from 5 to 6; raising a budget is a deliberate edit of syscall_budgets.txt whose commit says why" ]] ||
+  fail "budget message: '${out}'"
+strace_budget_compare "${WORK}/budgets" "${WORK}/counts" nobudget >/dev/null &&
+  fail "an operation without a budget passed"
+echo "PASS: budgets fail above, pass at or below"

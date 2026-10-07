@@ -403,7 +403,7 @@ gate is disabled.
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
-| syscall-trace goldens (26.3: the reducer and the golden comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs) |
+| syscall-trace goldens and budgets (26.3, 26.4: the reducer, the golden comparison, the budget comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
@@ -441,6 +441,22 @@ raw strace output follow it), and replace the heredoc in
 names the passage that explains it. Run the daemon with
 `--sync_interval_sec=1000000`, or the periodic `syncfs` lands in whichever
 trace is running at the time.
+
+### Budgets
+
+`guest/syscall_budgets.txt` (step 26.4) holds, per operation, the most calls
+of each kind it may make: `backing` and `procfd` syscalls and `sync` (fsync,
+fdatasync and syncfs of any kind, so the cache database's WAL fsyncs count)
+from strace, and `sql_stmts` (statement steps) and `sql_txns` (outermost
+`BEGIN`s) from the daemon's own `--v=2` log (`VLOG(2)` in
+`Statement::Step`: no production change). `strace_budget` fails an operation
+whose count rose above its budget, naming both numbers; a count below passes.
+The budgets started at the observed counts. Raising one is a deliberate edit
+of the file whose commit says why. The goldens pin the order; the budgets pin
+the counts where an order may legitimately change. Only deterministic counts
+are budgeted: no time, no sizes, and the cache database's own syscalls
+(`cache`) are reported, not gated. The gate's self-check is
+`//test/qemu:strace_lib_test`.
 
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 

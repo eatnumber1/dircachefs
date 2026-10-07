@@ -22,6 +22,8 @@
 #               backing object through a descriptor, so a backing call
 #     proc      other /proc
 #     fuse      /dev/fuse
+#     log       write to descriptor 2: the daemon's own log (--v=2 makes it
+#               log every SQLite statement, which strace_op counts)
 #     other     anything else: a finding, goldens never contain one
 #
 # The golden holds the backing, procfd and other lines in strace's order
@@ -77,6 +79,7 @@ strace_reduce() {
 			path = fdpath
 		}
 		kind = (path == "") ? "other" : classify(path)
+		if (name ~ /^(write|writev)$/ && line ~ /^[a-z_0-9]+\(2</) kind = "log"
 		err = ""
 		if (match(line, / = -1 E[A-Z0-9]+/)) {
 			err = substr(line, RSTART + 6, RLENGTH - 6)
@@ -92,13 +95,18 @@ strace_backing() {
 }
 
 # strace_counts: strace_reduce output on stdin; "kind count" per kind, in a
-# fixed order (zero counts included), for step 26.4's ratchets.
+# fixed order (zero counts included), then "sync N": the fsync, fdatasync and
+# syncfs calls of any kind. These are what step 26.4 ratchets.
 strace_counts() {
 	awk '
-	{ k = $1; sub(/^[^(]*\(/, "", k); sub(/\).*/, "", k); n[k]++ }
+	{
+		k = $1; sub(/^[^(]*\(/, "", k); sub(/\).*/, "", k); n[k]++
+		if ($1 ~ /^(fsync|fdatasync|syncfs)\(/) sync++
+	}
 	END {
-		split("backing procfd other cache proc fuse", kinds, " ")
-		for (i = 1; i <= 6; i++) print kinds[i], n[kinds[i]] + 0
+		split("backing procfd other cache proc fuse log", kinds, " ")
+		for (i = 1; i <= 7; i++) print kinds[i], n[kinds[i]] + 0
+		print "sync", sync + 0
 	}'
 }
 
@@ -116,6 +124,14 @@ strace_compare() {
 
 STRACE_DIR=/tmp/strace
 
+# sql_count PATTERN: how many lines of the daemon's log ($STRACE_SQL_LOG,
+# written with --v=2 --stderrthreshold=0) say "sqlite3_step: <sql>" with
+# <sql> starting PATTERN (every statement step; "BEGIN" for the outermost
+# transactions).
+sql_count() {
+	grep -c "sqlite3_step: $1" "$STRACE_SQL_LOG" || true
+}
+
 # strace_op NAME COMMAND...: with the daemon (DAEMON_PID, SRC and DB set)
 # quiesced, attaches strace to it, runs COMMAND, waits for the daemon to go
 # idle again, detaches, and writes $STRACE_DIR/NAME.{raw,all,trace,counts}.
@@ -127,6 +143,10 @@ strace_op() {
 	mkdir -p "$STRACE_DIR"
 	quiesce_daemon "$DAEMON_PID"
 	rm -f "$STRACE_DIR/$so_name.raw"
+	if [ -n "${STRACE_SQL_LOG:-}" ]; then
+		so_stmts=$(sql_count "")
+		so_txns=$(sql_count "BEGIN")
+	fi
 	strace -f -y -qq -e "trace=$STRACE_TRACE" -o "$STRACE_DIR/$so_name.raw" \
 		-p "$DAEMON_PID" 2>"$STRACE_DIR/$so_name.err" &
 	so_pid=$!
@@ -154,6 +174,10 @@ strace_op() {
 	strace_reduce "$SRC" "$(dirname "$DB")" <"$STRACE_DIR/$so_name.raw" >"$STRACE_DIR/$so_name.all"
 	strace_backing <"$STRACE_DIR/$so_name.all" >"$STRACE_DIR/$so_name.trace"
 	strace_counts <"$STRACE_DIR/$so_name.all" >"$STRACE_DIR/$so_name.counts"
+	if [ -n "${STRACE_SQL_LOG:-}" ]; then
+		echo "sql_stmts $(($(sql_count "") - so_stmts))" >>"$STRACE_DIR/$so_name.counts"
+		echo "sql_txns $(($(sql_count "BEGIN") - so_txns))" >>"$STRACE_DIR/$so_name.counts"
+	fi
 	return "$so_rc"
 }
 
@@ -173,5 +197,53 @@ strace_golden() {
 		cat "$STRACE_DIR/$sg_name.all"
 		echo "--- strace output of $sg_name ---"
 		cat "$STRACE_DIR/$sg_name.raw"
+	fi
+}
+
+# --- budgets (step 26.4) -----------------------------------------------------
+#
+# guest/syscall_budgets.txt: one "OP KIND MAX" per line (# comments), OP a
+# strace_op name and KIND a line of its .counts (backing, procfd, sync,
+# sql_stmts, sql_txns). A count above its budget fails; below it passes
+# (lowering a budget is an edit too, but nothing fails for an improvement).
+
+# strace_budget_compare BUDGETS COUNTS OP: 0 when every budgeted count of OP
+# in the COUNTS file is within its budget; else prints one line per
+# violation and returns 1. An OP with no budget line, or a budgeted kind the
+# counts lack, is a violation.
+strace_budget_compare() {
+	awk -v op="$3" '
+	FNR == NR {
+		if ($1 == op && $1 !~ /^#/) { want[$2] = $3; n++ }
+		next
+	}
+	{ got[$1] = $2 }
+	END {
+		bad = 0
+		if (n == 0) {
+			print op ": no budget line in the budgets file"
+			exit 1
+		}
+		for (k in want) {
+			if (!(k in got)) {
+				print op " " k ": no such count in this trace"
+				bad = 1
+			} else if (got[k] + 0 > want[k] + 0) {
+				print op " " k ": count rose from " want[k] " to " got[k] "; raising a budget is a deliberate edit of syscall_budgets.txt whose commit says why"
+				bad = 1
+			}
+		}
+		exit bad
+	}' "$1" "$2"
+}
+
+# strace_budget CHECK NAME: the budget check of NAME's counts, reported as
+# TEST CHECK PASS/FAIL. The budgets file is $STRACE_BUDGETS.
+strace_budget() {
+	echo "  counts $2: $(tr '\n' ' ' <"$STRACE_DIR/$2.counts")"
+	if sb_out=$(strace_budget_compare "$STRACE_BUDGETS" "$STRACE_DIR/$2.counts" "$2"); then
+		pass "$1"
+	else
+		fail "$1" "$sb_out"
 	fi
 }

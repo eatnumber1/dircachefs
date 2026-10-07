@@ -1,0 +1,80 @@
+# Budgets for guest/syscall_traces.sh (step 26.4): the most calls each
+# operation may make, per kind, as observed by strace on the daemon
+# (backing, procfd, sync: fsync/fdatasync/syncfs of any kind, the cache
+# database's WAL fsyncs included) and by the daemon's own --v=2 log
+# (sql_stmts: statement steps; sql_txns: outermost BEGINs).
+# A count above its budget fails the test. Raising one is a deliberate edit
+# of this file whose commit says why; lowering one after an improvement is
+# welcome. Format: OP KIND MAX. See test/qemu/README.md, "Syscall traces".
+
+cold-lookup backing 11
+cold-lookup procfd 2
+cold-lookup sync 0
+cold-lookup sql_stmts 51
+cold-lookup sql_txns 1
+
+warm-lookup backing 0
+warm-lookup procfd 0
+warm-lookup sync 0
+warm-lookup sql_stmts 4
+warm-lookup sql_txns 0
+
+cached-stat backing 0
+cached-stat procfd 0
+cached-stat sync 0
+cached-stat sql_stmts 0
+cached-stat sql_txns 0
+
+warm-readdir backing 0
+warm-readdir procfd 0
+warm-readdir sync 0
+warm-readdir sql_stmts 31
+warm-readdir sql_txns 0
+
+create backing 21
+create procfd 5
+create sync 2
+create sql_stmts 136
+create sql_txns 10
+
+forget-written backing 2
+forget-written procfd 0
+forget-written sync 0
+forget-written sql_stmts 2
+forget-written sql_txns 0
+
+unlink backing 12
+unlink procfd 1
+unlink sync 1
+unlink sql_stmts 52
+unlink sql_txns 4
+
+mkdir backing 10
+mkdir procfd 2
+mkdir sync 0
+mkdir sql_stmts 63
+mkdir sql_txns 3
+
+rename backing 14
+rename procfd 1
+rename sync 1
+rename sql_stmts 82
+rename sql_txns 4
+
+write backing 8
+write procfd 4
+write sync 1
+write sql_stmts 84
+write sql_txns 6
+
+fsync backing 11
+fsync procfd 3
+fsync sync 2
+fsync sql_stmts 86
+fsync sql_txns 8
+
+chmod backing 19
+chmod procfd 5
+chmod sync 1
+chmod sql_stmts 47
+chmod sql_txns 3

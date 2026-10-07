@@ -55,7 +55,7 @@ genrule(
         "@alpine_busybox//:root/bin/busybox.static",
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "guest/init",
-    ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]),
+    ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + ["guest/syscall_budgets.txt"],
     outs = ["initramfs.cpio.gz"],
     testonly = 1,
     cmd = "$(location scripts/mkinitramfs.sh) $@ " +

@@ -15,12 +15,14 @@ FAILED=0
 . "$(dirname "$0")/lib.sh"
 . "$(dirname "$0")/strace_lib.sh"
 
+STRACE_BUDGETS="$(dirname "$0")/syscall_budgets.txt"
 DCFS=/bin/dcfs
 TESTUTIL=/bin/testutil
 
 MNT=/mnt
 LOG1=/tmp/dcfs-1.log
 LOG2=/tmp/dcfs-2.log
+STRACE_SQL_LOG=$LOG1
 
 DAEMON_PID=""
 MOUNTED=0
@@ -29,9 +31,9 @@ cleanup() {
 	rc=$?
 	if [ "$rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then
 		echo "--- dcfs stderr (cold run) ---"
-		cat "$LOG1" 2>/dev/null
+		tail -n 100 "$LOG1" 2>/dev/null
 		echo "--- dcfs stderr (warm run) ---"
-		cat "$LOG2" 2>/dev/null
+		tail -n 100 "$LOG2" 2>/dev/null
 	fi
 	if [ "$MOUNTED" -eq 1 ]; then
 		umount "$MNT" 2>/dev/null || true
@@ -86,7 +88,7 @@ pass strace-runs
 
 SRC=/src/cold
 DB=/cache/cold.db
-if ! start_daemon "$LOG1" --sync_interval_sec=1000000; then
+if ! start_daemon "$LOG1" --sync_interval_sec=1000000 --v=2 --stderrthreshold=0; then
 	fail cold-mount "daemon did not start"
 	exit 1
 fi
@@ -114,13 +116,15 @@ listxattr(procfd)
 close(backing)
 close(backing)
 EOT
+strace_budget budget-cold-lookup cold-lookup
 stop_daemon
+STRACE_SQL_LOG=$LOG2
 
 # --- warm: the same operations are answered from the cache ----------------
 
 SRC=/src/t
 DB=/cache/warm.db
-if ! start_daemon "$LOG2" --sync_interval_sec=1000000; then
+if ! start_daemon "$LOG2" --sync_interval_sec=1000000 --v=2 --stderrthreshold=0; then
 	fail warm-mount "daemon did not start"
 	exit 1
 fi
@@ -134,6 +138,7 @@ drop_caches_quiesced
 strace_op warm-lookup stat "$MNT/known"
 strace_golden warm-lookup warm-lookup <<'EOT'
 EOT
+strace_budget budget-warm-lookup warm-lookup
 
 # The kernel's own caches answer: nothing reaches the daemon at all.
 # Replies carry an attribute and entry timeout of one hour, so a second stat
@@ -141,12 +146,14 @@ EOT
 strace_op cached-stat stat "$MNT/known"
 strace_golden cached-stat cached-stat <<'EOT'
 EOT
+strace_budget budget-cached-stat cached-stat
 
 drop_caches_quiesced
 # A complete directory is listed from the cache (design.md "Readdir").
 strace_op warm-readdir ls "$MNT"
 strace_golden warm-readdir warm-readdir <<'EOT'
 EOT
+strace_budget budget-warm-readdir warm-readdir
 
 # CREATE. Phase 1 makes no backing call. Phase 2: the parent is opened
 # ("." of the source root), openat O_CREAT, closed. Phase 3 fills the new
@@ -188,6 +195,7 @@ getxattr(procfd) !ENODATA
 openat(procfd)
 close(backing)
 EOT
+strace_budget budget-create create
 
 # The last FORGET of a file written during the run: design.md "mmap after
 # close": the reconciliation's statx goes through the O_PATH descriptor held
@@ -199,6 +207,7 @@ strace_golden forget-written forget-written <<'EOT'
 statx(backing)
 close(backing)
 EOT
+strace_budget budget-forget-written forget-written
 
 # UNLINK. Resolving the child to verify it (open_by_handle_at O_PATH,
 # statx, generation: "after verifying the resolved child"), then phase 2:
@@ -222,6 +231,7 @@ close(backing)
 statx(backing)
 close(backing)
 EOT
+strace_budget budget-unlink unlink
 
 # MKDIR: like create without the writable open: phase 2 mkdirat, phase 3
 # the populate-style fill of the new directory, then the parent's statx.
@@ -240,6 +250,7 @@ close(backing)
 statx(backing)
 close(backing)
 EOT
+strace_budget budget-mkdir mkdir
 
 # RENAME: both parents opened (the same directory twice), renameat, closed;
 # phase 3 refreshes the parent (O_PATH, statx) and the renamed object
@@ -262,6 +273,7 @@ close(backing)
 statx(backing)
 close(backing)
 EOT
+strace_budget budget-rename rename
 
 # WRITE-THROUGH: dd opens for write, writes, closes. With passthrough the
 # writes bypass dcfs (no read/write line at all): the trace is the open
@@ -283,6 +295,7 @@ getxattr(procfd) !ENODATA
 openat(procfd)
 close(backing)
 EOT
+strace_budget budget-write write
 
 # FSYNC of a written file: the backing fsync, then the sync point that
 # follows it (syncfs on the mount fd), "Sync points run after the kernel's
@@ -304,6 +317,7 @@ statx(backing)
 getxattr(procfd) !ENODATA
 close(backing)
 EOT
+strace_budget budget-fsync fsync
 
 # SETATTR chmod: resolve the inode (handle open O_PATH, statx, generation),
 # statx of the mode, phase 2 fchmod through /proc/self/fd (O_PATH rejects
@@ -337,6 +351,7 @@ close(backing)
 getxattr(procfd) !ENODATA
 close(backing)
 EOT
+strace_budget budget-chmod chmod
 
 require_no_reclaim no-reclaim
 
