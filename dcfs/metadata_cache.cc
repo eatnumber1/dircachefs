@@ -1481,7 +1481,15 @@ absl::StatusOr<Mutation> BeginAttrChange(Context &ctx, InodeId id,
 absl::StatusOr<Mutation> BeginAttrChanges(Context &ctx,
                                           std::span<const InodeId> ids) {
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
-    for (InodeId id : ids) ABSL_RETURN_IF_ERROR(MarkAttrsUnknown(ctx, id));
+    for (InodeId id : ids) {
+      // A row gone meanwhile (invalidated) has nothing to mark; the others
+      // still need their phase 1. Its dirty row is harmless (the next sync
+      // point clears it; recovery finds nothing to forget).
+      if (absl::Status marked = MarkAttrsUnknown(ctx, id);
+          !marked.ok() && !absl::IsNotFound(marked)) {
+        return marked;
+      }
+    }
     return absl::OkStatus();
   });
 }

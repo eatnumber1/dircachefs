@@ -908,6 +908,25 @@ TEST_F(MetadataCacheTest, ForgetUnnamedRowsKeepsNamedLinkedAndDirectories) {
   EXPECT_THAT(GetAttr(ctx_, kRootInode), IsOk());
 }
 
+// The FORGET reconciliation's batch phase 1 marks every inode it names
+// that still has a row; one whose row went meanwhile (invalidated) costs
+// the others nothing.
+TEST_F(MetadataCacheTest, BeginAttrChangesSkipsAVanishedRow) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult a, Make(70));
+  ASSERT_OK_AND_ASSIGN(UpsertResult b, Make(71));
+  const InodeId vanished = 7777;  // No such row.
+  ASSERT_THAT(GetAttr(ctx_, vanished), StatusIs(absl::StatusCode::kNotFound));
+  const InodeId ids[] = {a.id, vanished, b.id};
+  absl::StatusOr<Mutation> mutation = BeginAttrChanges(ctx_, ids);
+  ASSERT_THAT(mutation.status(), IsOk());
+  mutation->End();
+  for (InodeId id : {a.id, b.id}) {
+    ASSERT_OK_AND_ASSIGN(CachedAttr attr, GetAttr(ctx_, id));
+    EXPECT_FALSE(attr.valid) << id;
+  }
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsSupersetOf({a.id, b.id})));
+}
+
 TEST_F(MetadataCacheTest, FuseGenerations) {
   EXPECT_THAT(GetGeneration(ctx_, kRootInode), IsOkAndHolds(0u));
   // Random, so 100 draws of 32 bits collide with probability ~1e-6.

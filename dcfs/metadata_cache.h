@@ -573,7 +573,8 @@ absl::StatusOr<Mutation> BeginAttrChange(
     Context &ctx, InodeId id, std::span<const std::string_view> xattrs = {});
 // The FORGET reconciliation of written files (DirCacheFS::ReconcileWritten)
 // of several inodes at once: marks the attributes of each of `ids` unknown,
-// in one phase 1. Dirty: ids.
+// in one phase 1, skipping any whose row is gone (no failure for it).
+// Dirty: ids.
 absl::StatusOr<Mutation> BeginAttrChanges(Context &ctx,
                                           std::span<const InodeId> ids);
 // Setxattr/Removexattr of `name` on `id`: ForgetXattr(name) (only that
