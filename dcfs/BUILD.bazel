@@ -174,6 +174,29 @@ qemu_cc_test(
     ],
 )
 
+# LogOpenFlags: prints open(2) flags by name (a hidden-friend AbslStringify).
+cc_library(
+    name = "log_open_flags",
+    hdrs = ["log_open_flags.h"],
+    deps = [
+      "@absl//absl/container:flat_hash_map",
+      "@absl//absl/strings",
+      "@absl//absl/strings:str_format",
+    ],
+)
+
+qemu_cc_test(
+    name = "log_open_flags_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["log_open_flags_test.cc"],
+    deps = [
+      ":log_open_flags",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "syscalls",
     visibility = ["//dcfs/testonly:__pkg__"],
@@ -189,7 +212,6 @@ cc_library(
       ":escape",
       ":ret_check",
       ":status",
-      "@absl//absl/container:flat_hash_map",
       "@absl//absl/log",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
@@ -229,7 +251,7 @@ qemu_cc_test(
 
 # Fault-injection tests for syscalls.cc races/limits that no real syscall
 # can be made to hit deterministically (see syscalls_fault_test.cc):
-# link-time --wrap fakes for fgetxattr/flistxattr/readlinkat, kept in a
+# a link-time --wrap fake for readlinkat, kept in a
 # target of its own (not folded into syscalls_test) so the wrapping --
 # which rewrites every reference to these symbols in the whole binary --
 # cannot affect any other test.
@@ -239,14 +261,31 @@ qemu_cc_test(
     timeout = "short",
     srcs = ["syscalls_fault_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # xattrs need a real filesystem
-    linkopts = [
-      "-Wl,--wrap=fgetxattr",
-      "-Wl,--wrap=flistxattr",
-      "-Wl,--wrap=readlinkat",
-    ],
+    linkopts = ["-Wl,--wrap=readlinkat"],
     deps = [
       ":status",
       ":syscalls",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
+# Fault-injection test for the xattr retry loops in backing.cc (see
+# backing_fault_test.cc): link-time --wrap fakes for getxattr/listxattr, in
+# a target of its own so the wrapping cannot affect any other test.
+qemu_cc_test(
+    name = "backing_fault_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["backing_fault_test.cc"],
+    disks = [("vdb", "ext4", "32M")],  # xattrs need a real filesystem
+    linkopts = [
+      "-Wl,--wrap=getxattr",
+      "-Wl,--wrap=listxattr",
+    ],
+    deps = [
+      ":backing",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",

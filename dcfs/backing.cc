@@ -5,6 +5,7 @@
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include <fcntl.h>
+#include <linux/fs.h>  // FS_IOC_GETVERSION
 #include <linux/limits.h>  // NAME_MAX (255, the generic Linux VFS cap)
 #include <sys/stat.h>
 #include <sys/statfs.h>
@@ -63,6 +64,127 @@ int ErrnoOf(const absl::Status &status) {
   return GetErrnoFromStatus(status).value_or(0);
 }
 
+// --- Helpers over the plain syscalls:: wrappers -----------------------------
+//
+// syscalls.h holds one thin wrapper per syscall; what composes calls lives
+// here.
+
+std::string ProcFdPath(int fd) {
+  return absl::StrFormat("/proc/self/fd/%d", fd);
+}
+
+// The calling thread's filesystem uid/gid. setfsuid(2)/setfsgid(2) return
+// the previous value and report no error, and passing an invalid id such
+// as -1 changes nothing, so that reads the current value.
+uid_t FsUid() { return syscalls::setfsuid(static_cast<uid_t>(-1)); }
+gid_t FsGid() { return syscalls::setfsgid(static_cast<gid_t>(-1)); }
+
+// FS_IOC_GETVERSION: the inode generation of the file `fd` (not O_PATH)
+// refers to.
+absl::StatusOr<uint32_t> GetInodeGeneration(int fd) {
+  uint32_t generation = 0;
+  ABSL_RETURN_IF_ERROR(
+      syscalls::ioctl(fd, FS_IOC_GETVERSION, &generation).status());
+  return generation;
+}
+
+// The listxattr(2)/getxattr(2)/setxattr(2)/removexattr(2) calls on
+// "/proc/self/fd/<fd>" -- the path-following variants. The magic link
+// resolves to exactly the object `fd` refers to, even when that object is
+// itself a symlink (it is not followed further), so these work on an O_PATH
+// fd for any file type: unlike flistxattr and fgetxattr they need neither a
+// non-O_PATH fd nor an open() of the object, which for a FIFO or device
+// could block or have side effects. setxattr and removexattr are the write
+// side, used for symlinks and other special files, which fsetxattr(2)/
+// fremovexattr(2) cannot reach directly (they need a non-O_PATH fd) and
+// which reopening for one could block on or have a side effect on.
+
+// Splits a listxattr(2) result: NUL-terminated names, back to back.
+std::vector<std::string> SplitXattrList(std::string_view buf) {
+  std::vector<std::string> result;
+  size_t pos = 0;
+  while (pos < buf.size()) {
+    size_t end = buf.find('\0', pos);
+    if (end == std::string_view::npos) end = buf.size();
+    result.emplace_back(buf.substr(pos, end - pos));
+    pos = end + 1;
+  }
+  return result;
+}
+
+absl::StatusOr<std::vector<std::string>> ListXattrOPath(int fd) {
+  const std::string path = ProcFdPath(fd);
+  // The list can grow between sizing and reading it; ERANGE then means
+  // "size again", which a few retries make overwhelmingly likely to settle.
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    ABSL_ASSIGN_OR_RETURN(size_t size, syscalls::listxattr(path, nullptr, 0));
+    if (size == 0) return std::vector<std::string>();
+    std::string buf(size, '\0');
+    absl::StatusOr<size_t> nbytes =
+        syscalls::listxattr(path, buf.data(), buf.size());
+    if (!nbytes.ok()) {
+      if (ErrnoOf(nbytes.status()) == ERANGE) continue;
+      return nbytes.status();
+    }
+    buf.resize(*nbytes);
+    return SplitXattrList(buf);
+  }
+  return dcfs::ErrnoToStatus(
+      ERANGE, absl::StrCat("listxattr(", path, "): kept growing"));
+}
+
+absl::StatusOr<std::string> GetXattrOPath(int fd, std::string_view name) {
+  const std::string path = ProcFdPath(fd);
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    ABSL_ASSIGN_OR_RETURN(size_t size,
+                          syscalls::getxattr(path, name, nullptr, 0));
+    if (size == 0) return std::string();
+    std::string value(size, '\0');
+    absl::StatusOr<size_t> nbytes =
+        syscalls::getxattr(path, name, value.data(), value.size());
+    if (!nbytes.ok()) {
+      if (ErrnoOf(nbytes.status()) == ERANGE) continue;
+      return nbytes.status();
+    }
+    value.resize(*nbytes);
+    return value;
+  }
+  return dcfs::ErrnoToStatus(
+      ERANGE, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name),
+                           "): kept growing"));
+}
+
+absl::Status SetXattrOPath(int fd, std::string_view name,
+                           std::span<const uint8_t> value, int flags) {
+  return syscalls::setxattr(ProcFdPath(fd), name, value, flags);
+}
+
+absl::Status RemoveXattrOPath(int fd, std::string_view name) {
+  return syscalls::removexattr(ProcFdPath(fd), name);
+}
+
+// fchmodat(AT_FDCWD, "/proc/self/fd/<fd>", mode, 0) -- as the xattr calls
+// above, for fchmod(2), which (like flistxattr/fgetxattr) rejects O_PATH
+// fds. Intended for FIFOs, sockets and devices, which reopening for a real
+// fd (to use plain fchmod) could block on or have side effects on. Not
+// called for a symlink in practice: Linux has no way to chmod a symlink's
+// own mode (there is no lchmod syscall) and this path correctly surfaces
+// that as EOPNOTSUPP (verified experimentally) rather than silently
+// chmoding the target, but callers reject that case explicitly before ever
+// reaching this function.
+absl::Status FchmodOPath(int fd, mode_t mode) {
+  return syscalls::fchmodat(AT_FDCWD, ProcFdPath(fd), mode, 0);
+}
+
+// utimensat(AT_FDCWD, "/proc/self/fd/<fd>", times, 0) -- as FchmodOPath,
+// for futimens(2) on the same set of file types, plus symlinks: verified
+// experimentally that this sets a symlink's own timestamp (not its
+// target's), matching the magic link's usual "resolves to exactly the
+// object the fd refers to, without following further" behavior.
+absl::Status FutimensOPath(int fd, const struct timespec times[2]) {
+  return syscalls::utimensat(AT_FDCWD, ProcFdPath(fd), times, 0);
+}
+
 // --- Taking on the caller's identity -----------------------------------------
 //
 // dcfs runs as root, but a backing syscall made on behalf of a FUSE request
@@ -75,7 +197,7 @@ int ErrnoOf(const absl::Status &status) {
 // caller's for just that syscall -- the approach virtiofsd and nfsd take.
 //
 // Only the one syscall: never the open_by_handle_at (OpenNode) or /proc
-// reopen (ReopenPathFd) that reaches the object first, nor the phase-3
+// reopen (ReopenFd) that reaches the object first, nor the phase-3
 // probes after it. open_by_handle_at needs CAP_DAC_READ_SEARCH, which the
 // kernel removes from the effective set while fsuid is not 0 (together
 // with every other filesystem capability: CAP_CHOWN, CAP_DAC_OVERRIDE,
@@ -113,11 +235,11 @@ using SavedGroups = std::vector<gid_t>;
 // is fatal.
 void RestoreRoot(const SavedGroups &groups) {
   syscalls::setfsuid(0);
-  absl::Status status = syscalls::setgroups_thread(groups);
+  absl::Status status = syscalls::setgroups(groups);
   syscalls::setfsgid(0);
-  CHECK(status.ok() && syscalls::fsuid() == 0 && syscalls::fsgid() == 0)
+  CHECK(status.ok() && FsUid() == 0 && FsGid() == 0)
       << "cannot restore root filesystem credentials: " << status
-      << " (fsuid " << syscalls::fsuid() << ", fsgid " << syscalls::fsgid()
+      << " (fsuid " << FsUid() << ", fsgid " << FsGid()
       << ")";
 }
 
@@ -130,19 +252,19 @@ void RestoreRoot(const SavedGroups &groups) {
 // with the thread restored. Refuses to nest: a thread not at fsuid/fsgid 0
 // on entry means an earlier switch leaked.
 absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
-  RET_CHECK_EQ(syscalls::fsuid(), 0u) << "credential switch already active";
-  RET_CHECK_EQ(syscalls::fsgid(), 0u) << "credential switch already active";
+  RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
+  RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
   ABSL_ASSIGN_OR_RETURN(SavedGroups saved, syscalls::getgroups());
   absl::Status status;
   syscalls::setfsgid(caller.gid);
-  if (syscalls::fsgid() != caller.gid) {
+  if (FsGid() != caller.gid) {
     status = dcfs::ErrnoToStatus(
         EPERM, absl::StrCat("setfsgid(", caller.gid, ") did not take"));
   }
-  if (status.ok()) status = syscalls::setgroups_thread(caller.groups);
+  if (status.ok()) status = syscalls::setgroups(caller.groups);
   if (status.ok()) {
     syscalls::setfsuid(caller.uid);
-    if (syscalls::fsuid() != caller.uid) {
+    if (FsUid() != caller.uid) {
       status = dcfs::ErrnoToStatus(
           EPERM, absl::StrCat("setfsuid(", caller.uid, ") did not take"));
     }
@@ -280,14 +402,14 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> XattrsOf(
     int fd) {
   std::vector<std::pair<std::string, std::string>> xattrs;
   absl::StatusOr<std::vector<std::string>> names =
-      syscalls::listxattr_opath(fd);
+      ListXattrOPath(fd);
   if (!names.ok()) {
     int err = ErrnoOf(names.status());
     if (err == ENOTSUP || err == EOPNOTSUPP) return xattrs;
     return names.status();
   }
   for (std::string &name : *names) {
-    absl::StatusOr<std::string> value = syscalls::getxattr_opath(fd, name);
+    absl::StatusOr<std::string> value = GetXattrOPath(fd, name);
     if (!value.ok()) {
       // Removed between listing and reading it: it no longer exists.
       if (ErrnoOf(value.status()) == ENODATA) continue;
@@ -509,7 +631,7 @@ absl::StatusOr<uint64_t> ReadGeneration(int opath_fd, mode_t mode) {
   // FS_IOC_GETVERSION rejects O_PATH fds, so ask through a real one.
   // O_NONBLOCK and O_NOCTTY are belt and braces: only regular files and
   // directories get here.
-  absl::StatusOr<FileDescriptor> fd = syscalls::ReopenPathFd(
+  absl::StatusOr<FileDescriptor> fd = ReopenFd(
       opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC);
   absl::StatusOr<uint32_t> gen =
       fd.ok() ? GetInodeGeneration(**fd) : absl::StatusOr<uint32_t>(fd.status());
@@ -812,7 +934,7 @@ namespace {
 // EOPNOTSUPP, a filesystem without xattrs, as XattrsOf).
 absl::StatusOr<std::optional<std::string>> XattrOf(int fd,
                                                    std::string_view name) {
-  absl::StatusOr<std::string> value = syscalls::getxattr_opath(fd, name);
+  absl::StatusOr<std::string> value = GetXattrOPath(fd, name);
   if (!value.ok()) {
     int err = ErrnoOf(value.status());
     if (err == ENODATA || err == ENOTSUP || err == EOPNOTSUPP) {
@@ -855,7 +977,7 @@ namespace {
 // whichever real fd `apply` should use -- `open_fd` if given, else a fresh
 // /proc reopen for a regular file/directory (freed automatically at the end
 // of the calling statement). Special files use `opath_fd` itself via the
-// *_opath syscalls instead of ever calling `apply`.
+// *OPath helpers instead of ever calling `apply`.
 //
 // If `read_back` is given, it is set, once the op has succeeded, to what
 // the object now stores under `name` (XattrOf, through `opath_fd`, the fd
@@ -877,7 +999,7 @@ absl::Status ApplyXattrOpOn(int opath_fd, std::optional<int> open_fd,
     } else {
       ABSL_ASSIGN_OR_RETURN(
           FileDescriptor fd,
-          syscalls::ReopenPathFd(opath_fd, O_RDONLY | O_CLOEXEC));
+          ReopenFd(opath_fd, O_RDONLY | O_CLOEXEC));
       ABSL_RETURN_IF_ERROR(apply_real(*fd));
     }
   } else {
@@ -909,7 +1031,7 @@ auto SetXattrOps(const Credentials &caller, std::string_view name,
       },
       [&caller, name, value, flags](int fd) {
         return AsCaller(caller, [&] {
-          return syscalls::setxattr_opath(fd, name, value, flags);
+          return SetXattrOPath(fd, name, value, flags);
         });
       });
 }
@@ -922,7 +1044,7 @@ auto RemoveXattrOps(const Credentials &caller, std::string_view name) {
       },
       [&caller, name](int fd) {
         return AsCaller(caller,
-                        [&] { return syscalls::removexattr_opath(fd, name); });
+                        [&] { return RemoveXattrOPath(fd, name); });
       });
 }
 
@@ -1569,13 +1691,15 @@ absl::StatusOr<std::string> ReadSymlinkFd(int fd) {
 }
 
 absl::StatusOr<FileDescriptor> ReopenFd(int fd, int flags) {
-  return syscalls::ReopenPathFd(fd, flags);
+  // Opens /proc/self/fd/<fd> with the given flags (| O_CLOEXEC). This is
+  // needed because xattr/ioctl syscalls reject O_PATH fds.
+  return syscalls::openat(AT_FDCWD, ProcFdPath(fd), flags);
 }
 
 absl::Status FsyncDirFd(int fd, bool datasync) {
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor dir,
-      syscalls::ReopenPathFd(fd, O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+      ReopenFd(fd, O_RDONLY | O_DIRECTORY | O_CLOEXEC));
   return FsyncFd(*dir, datasync);
 }
 
@@ -1721,7 +1845,7 @@ namespace {
 // Bits SetAttr's mode-related branches (an explicit FUSE_SET_ATTR_MODE, or
 // a KILL_SUID/KILL_SGID-only clear) share: reopening `opath_fd` as a real
 // fd when the node is a regular file or directory (fchmod rejects O_PATH),
-// else fchmod_opath -- except a symlink, which cannot be chmod'd at all on
+// else FchmodOPath -- except a symlink, which cannot be chmod'd at all on
 // Linux (no lchmod).
 //
 // Runs as root, not AsCaller (see SetAttr's declaration comment): the
@@ -1734,11 +1858,11 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   if (S_ISREG(type) || S_ISDIR(type)) {
     ABSL_ASSIGN_OR_RETURN(
         FileDescriptor fd,
-        syscalls::ReopenPathFd(
+        ReopenFd(
             opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
     return syscalls::fchmod(*fd, mode);
   }
-  return syscalls::fchmod_opath(opath_fd, mode);
+  return FchmodOPath(opath_fd, mode);
 }
 
 // FUSE_SET_ATTR_SIZE: only ever valid for a regular file, same as the
@@ -1754,24 +1878,24 @@ absl::Status ApplySize(const Credentials &caller, int opath_fd, mode_t type,
         EINVAL, "truncate on a non-regular, non-directory file");
   }
   ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor fd, syscalls::ReopenPathFd(opath_fd, O_WRONLY | O_CLOEXEC));
+      FileDescriptor fd, ReopenFd(opath_fd, O_WRONLY | O_CLOEXEC));
   return AsCaller(caller, [&] { return syscalls::ftruncate(*fd, size); });
 }
 
 // FUSE_SET_ATTR_ATIME/MTIME(_NOW): the regular/dir-vs-other-types split as
-// ApplyMode, but with no symlink exception -- futimens_opath is verified
-// safe there (see syscalls.h).
+// ApplyMode, but with no symlink exception -- FutimensOPath is verified
+// safe there.
 absl::Status ApplyTimes(const Credentials &caller, int opath_fd, mode_t type,
                         const struct timespec times[2]) {
   if (S_ISREG(type) || S_ISDIR(type)) {
     ABSL_ASSIGN_OR_RETURN(
         FileDescriptor fd,
-        syscalls::ReopenPathFd(
+        ReopenFd(
             opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
     return AsCaller(caller, [&] { return syscalls::futimens(*fd, times); });
   }
   return AsCaller(caller,
-                  [&] { return syscalls::futimens_opath(opath_fd, times); });
+                  [&] { return FutimensOPath(opath_fd, times); });
 }
 
 }  // namespace
@@ -1785,7 +1909,7 @@ absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
 absl::Status SetAttrFd(const Credentials &caller, int fd,
                        const struct stat &attr, int to_set) {
   // Every call below works on any descriptor, O_PATH or not: the reopens go
-  // through /proc/self/fd, fchownat and the *_opath calls take an empty
+  // through /proc/self/fd, fchownat and the *OPath helpers take an empty
   // path.
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MODE));

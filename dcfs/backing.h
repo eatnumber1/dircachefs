@@ -244,10 +244,10 @@ using XattrReadBack = absl::StatusOr<std::optional<std::string>>;
 // identity-verified fd on `id`, e.g. DirCacheFS's shared per-inode backing
 // fd), it is used directly -- any access mode works, fsetxattr/fremovexattr
 // need no particular open mode on the fd. Otherwise: a regular file or
-// directory is reopened via /proc (syscalls::ReopenPathFd); a symlink or
+// directory is reopened via /proc (ReopenFd); a symlink or
 // other special file -- which cannot be safely reopened for a real fd, and
 // which fsetxattr/fremovexattr reject as an O_PATH fd regardless -- goes
-// through setxattr_opath/removexattr_opath instead, following the magic
+// through SetXattrOPath/RemoveXattrOPath instead, following the magic
 // link the same way ReadXattrs's XattrsOf already does for reads. The
 // kernel itself rejects a "user." xattr on a symlink or special file with
 // EPERM; that happens inside the real syscall here and needs no special
@@ -548,7 +548,7 @@ absl::Status FinishRun(Context &ctx);
 // FUSE_SET_ATTR_MODE
 // dispatches on the node's current type: regular files and directories
 // are chmod'd through a reopened non-O_PATH fd (fchmod rejects O_PATH);
-// FIFOs, sockets and devices go through fchmod_opath (reopening one of
+// FIFOs, sockets and devices go through FchmodOPath (reopening one of
 // those for a real fd could block or have a side effect); a symlink's
 // mode cannot be changed at all on Linux (there is no lchmod) and this
 // fails with EOPNOTSUPP. FUSE_SET_ATTR_KILL_SUID/KILL_SGID without

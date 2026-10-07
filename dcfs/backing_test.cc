@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <random>
+#include <span>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -470,6 +471,48 @@ void ExpectFakeMountPurged(Context &ctx, MountFds &mounts,
                        cache::ListFilesystems(ctx));
   ASSERT_EQ(filesystems.size(), 1u);
   EXPECT_FALSE(filesystems[0].parent_inode.has_value());
+}
+
+TEST_F(BackingTest, ReopenFdReopensAnOPathDescriptorForReal) {
+  int path_fd = ::open(Path("file").c_str(), O_PATH | O_CLOEXEC);
+  ASSERT_GE(path_fd, 0);
+  FileDescriptor path(path_fd);
+
+  ASSERT_OK_AND_ASSIGN(FileDescriptor reopened, ReopenFd(*path, O_RDWR));
+  ASSERT_OK_AND_ASSIGN(struct stat original, syscalls::fstat(*path));
+  ASSERT_OK_AND_ASSIGN(struct stat now, syscalls::fstat(*reopened));
+  EXPECT_EQ(original.st_ino, now.st_ino);
+  EXPECT_NE(::fcntl(*reopened, F_GETFD) & FD_CLOEXEC, 0);
+
+  // What the reopening is for: xattr calls reject O_PATH descriptors.
+  if (!xattrs_supported_) GTEST_SKIP() << "no user xattrs here";
+  const std::string value = "test";
+  EXPECT_THAT(syscalls::fsetxattr(
+                  *reopened, "user.dcfs_reopen",
+                  std::span<const uint8_t>(
+                      reinterpret_cast<const uint8_t *>(value.data()),
+                      value.size()),
+                  0),
+              IsOk());
+}
+
+// ReadXattrsFd goes through /proc/self/fd, so an O_PATH descriptor on a
+// symlink reads the symlink's own xattrs, not its target's.
+TEST_F(BackingTest, ReadXattrsFdReadsTheObjectNotTheSymlinkTarget) {
+  if (!xattrs_supported_) GTEST_SKIP() << "no user xattrs here";
+  int file_fd = ::open(Path("file").c_str(), O_PATH | O_CLOEXEC);
+  ASSERT_GE(file_fd, 0);
+  FileDescriptor file(file_fd);
+  ASSERT_OK_AND_ASSIGN(auto file_xattrs, ReadXattrsFd(*file));
+  EXPECT_THAT(file_xattrs, ::testing::Contains(
+                               std::make_pair(std::string("user.test"),
+                                              std::string("value"))));
+
+  int link_fd = ::open(Path("link").c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
+  ASSERT_GE(link_fd, 0);
+  FileDescriptor link(link_fd);
+  ASSERT_OK_AND_ASSIGN(auto link_xattrs, ReadXattrsFd(*link));
+  EXPECT_THAT(link_xattrs, ::testing::IsEmpty());
 }
 
 TEST_F(BackingTest, StartupPurgeForgetsAFilesystemNoLongerMounted) {
@@ -1083,8 +1126,8 @@ FileDescriptor MakeParent(const std::string &path, mode_t mode, gid_t gid) {
 // The thread is root again after every switch: fsuid/fsgid 0 and the
 // supplementary groups it started with.
 void ExpectRootAgain(const std::vector<gid_t> &groups) {
-  EXPECT_EQ(syscalls::fsuid(), 0u);
-  EXPECT_EQ(syscalls::fsgid(), 0u);
+  EXPECT_EQ(syscalls::setfsuid(static_cast<uid_t>(-1)), 0u);
+  EXPECT_EQ(syscalls::setfsgid(static_cast<gid_t>(-1)), 0u);
   EXPECT_THAT(syscalls::getgroups(), IsOkAndHolds(groups));
 }
 

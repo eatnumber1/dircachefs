@@ -1,6 +1,7 @@
 #include "dcfs/syscalls.h"
 
 #include <fcntl.h>
+#include <linux/fs.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -9,7 +10,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/status/status_matchers.h"
@@ -20,6 +23,7 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
+using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 
 class SyscallsTest : public ::testing::Test {
@@ -236,14 +240,24 @@ TEST_F(SyscallsTest, FsetxattrFgetxattrFremovexattr) {
   }
   EXPECT_THAT(set_status, IsOk());
 
-  auto retrieved = syscalls::fgetxattr(file_fd_, attr_name);
-  ASSERT_THAT(retrieved, IsOk());
-  EXPECT_EQ(*retrieved, attr_value);
+  // A null buffer asks for the size; then read it.
+  EXPECT_THAT(syscalls::fgetxattr(file_fd_, attr_name, nullptr, 0),
+              IsOkAndHolds(attr_value.size()));
+  std::string retrieved(attr_value.size(), '\0');
+  EXPECT_THAT(syscalls::fgetxattr(file_fd_, attr_name, retrieved.data(),
+                                  retrieved.size()),
+              IsOkAndHolds(attr_value.size()));
+  EXPECT_EQ(retrieved, attr_value);
+  // A buffer that is too small is ERANGE (the caller's loop retries).
+  char tiny[1];
+  auto too_small = syscalls::fgetxattr(file_fd_, attr_name, tiny, 1);
+  ASSERT_FALSE(too_small.ok());
+  EXPECT_EQ(GetErrnoFromStatus(too_small.status()).value_or(0), ERANGE);
 
   EXPECT_THAT(syscalls::fremovexattr(file_fd_, attr_name), IsOk());
 }
 
-TEST_F(SyscallsTest, FlistxattrSplitsNulList) {
+TEST_F(SyscallsTest, FlistxattrReturnsTheNulSeparatedList) {
   const std::string attr_name1 = "user.dcfs_test1";
   const std::string attr_name2 = "user.dcfs_test2";
   const std::string attr_value = "test";
@@ -271,55 +285,15 @@ TEST_F(SyscallsTest, FlistxattrSplitsNulList) {
       0);
   EXPECT_THAT(set_status2, IsOk());
 
-  auto attrs = syscalls::flistxattr(file_fd_);
-  ASSERT_THAT(attrs, IsOk());
-  EXPECT_TRUE(std::find(attrs->begin(), attrs->end(), attr_name1) !=
-              attrs->end());
-  EXPECT_TRUE(std::find(attrs->begin(), attrs->end(), attr_name2) !=
-              attrs->end());
-}
-
-TEST_F(SyscallsTest, ReopenPathFdAllowsXattr) {
-  int path_fd = ::openat(tmpdir_fd_, "test_file", O_PATH);
-  ASSERT_GE(path_fd, 0);
-
-  auto reopened = syscalls::ReopenPathFd(path_fd, O_RDWR);
-  ASSERT_THAT(reopened, IsOk());
-
-  const std::string attr_name = "user.dcfs_test";
-  const std::string attr_value = "test";
-  absl::Status set_status = syscalls::fsetxattr(
-      **reopened, attr_name,
-      std::span<const uint8_t>(
-          reinterpret_cast<const uint8_t *>(attr_value.data()),
-          attr_value.size()),
-      0);
-  if (!set_status.ok()) {
-    auto errno_val = GetErrnoFromStatus(set_status);
-    if (errno_val.ok() &&
-        (*errno_val == ENOTSUP || *errno_val == EOPNOTSUPP)) {
-      GTEST_SKIP() << "Extended attributes not supported on this filesystem";
-    }
-  }
-
-  ::close(path_fd);
-}
-
-TEST_F(SyscallsTest, ReopenPathFdAndFstatMatch) {
-  int path_fd = ::openat(tmpdir_fd_, "test_file", O_PATH);
-  ASSERT_GE(path_fd, 0);
-
-  auto st_original = syscalls::fstat(file_fd_);
-  ASSERT_THAT(st_original, IsOk());
-
-  auto reopened_fd = syscalls::ReopenPathFd(path_fd, O_RDONLY);
-  ASSERT_THAT(reopened_fd, IsOk());
-  auto st_reopened = syscalls::fstat(**reopened_fd);
-  ASSERT_THAT(st_reopened, IsOk());
-
-  EXPECT_EQ(st_original->st_ino, st_reopened->st_ino);
-
-  ::close(path_fd);
+  auto size = syscalls::flistxattr(file_fd_, nullptr, 0);
+  ASSERT_THAT(size, IsOk());
+  std::string buf(*size, '\0');
+  EXPECT_THAT(syscalls::flistxattr(file_fd_, buf.data(), buf.size()),
+              IsOkAndHolds(*size));
+  // The raw result: names, each followed by a NUL.
+  const std::string_view list(buf);
+  EXPECT_NE(list.find(attr_name1 + '\0'), std::string_view::npos);
+  EXPECT_NE(list.find(attr_name2 + '\0'), std::string_view::npos);
 }
 
 TEST_F(SyscallsTest, FstatfsReturnsNonzeroFsize) {
@@ -366,16 +340,6 @@ TEST_F(SyscallsTest, StatxAndFstat) {
   EXPECT_EQ(stx_result->stx_ino, static_cast<uint64_t>(st_result->st_ino));
 }
 
-TEST_F(SyscallsTest, GetInodeGeneration) {
-  auto gen = GetInodeGeneration(file_fd_);
-  if (!gen.ok()) {
-    auto errno_val = GetErrnoFromStatus(gen.status());
-    if (errno_val.ok() && *errno_val == ENOTTY) {
-      GTEST_SKIP() << "FS_IOC_GETVERSION not supported";
-    }
-  }
-}
-
 // Regression test for the bug where syscalls::ioctl() built its failure via
 // absl::ErrnoToStatus() (no errno payload) instead of dcfs::ErrnoToStatus():
 // without the payload, GetErrnoFromStatus() cannot recover ENOTTY here, and
@@ -384,13 +348,14 @@ TEST_F(SyscallsTest, GetInodeGeneration) {
 // a real disk (see test/qemu/guest/init), so this uses /tmp directly, which
 // is always tmpfs in the QEMU guest and does not implement
 // FS_IOC_GETVERSION.
-TEST(SyscallsTmpfsTest, GetInodeGenerationOnTmpfsIsEnotty) {
+TEST(SyscallsTmpfsTest, IoctlOnTmpfsIsEnottyWithTheErrnoPayload) {
   char path[] = "/tmp/dcfs_syscalls_test_tmpfs_XXXXXX";
   int fd = ::mkstemp(path);
   ASSERT_GE(fd, 0) << std::strerror(errno);
   ::unlink(path);
 
-  auto gen = GetInodeGeneration(fd);
+  uint32_t generation = 0;
+  auto gen = syscalls::ioctl(fd, FS_IOC_GETVERSION, &generation);
   ASSERT_FALSE(gen.ok());
   auto errno_val = GetErrnoFromStatus(gen.status());
   ASSERT_THAT(errno_val, IsOk());
@@ -429,7 +394,9 @@ TEST_F(SyscallsTest, NameToHandleAtRoundTrip) {
   // kernel's non-raw fd class (fs/fhandle.c get_path_from_fd()), which
   // rejects O_PATH descriptors with EBADF -- tmpdir_fd_ is O_PATH (see
   // SetUp), so a separate real fd is needed here.
-  auto real_tmpdir_fd = syscalls::ReopenPathFd(tmpdir_fd_, O_RDONLY | O_DIRECTORY);
+  auto real_tmpdir_fd = syscalls::openat(
+      AT_FDCWD, "/proc/self/fd/" + std::to_string(tmpdir_fd_),
+      O_RDONLY | O_DIRECTORY);
   ASSERT_THAT(real_tmpdir_fd, IsOk());
   auto reopened_fd =
       syscalls::open_by_handle_at(**real_tmpdir_fd, *handle, O_RDONLY);
@@ -444,38 +411,68 @@ TEST_F(SyscallsTest, NameToHandleAtRoundTrip) {
   EXPECT_EQ(st_original->st_ino, st_reopened->st_ino);
 }
 
-TEST_F(SyscallsTest, XattrOpathReadsTheObjectNotTheSymlinkTarget) {
+// The path-following variants, on the "/proc/self/fd/<fd>" path of an
+// O_PATH descriptor (how backing.cc reaches objects it cannot open).
+TEST_F(SyscallsTest, PathXattrCallsOnAProcFdPath) {
   const std::string value = "opath";
   if (::fsetxattr(file_fd_, "user.dcfs_opath", value.data(), value.size(),
                   0) != 0) {
     GTEST_SKIP() << "user xattrs unsupported here: " << std::strerror(errno);
   }
-  int file_path_fd = ::openat(tmpdir_fd_, "test_file", O_PATH);
-  ASSERT_GE(file_path_fd, 0);
-  auto names = syscalls::listxattr_opath(file_path_fd);
-  ASSERT_THAT(names, IsOk());
-  EXPECT_NE(std::find(names->begin(), names->end(), "user.dcfs_opath"),
-            names->end());
-  auto got = syscalls::getxattr_opath(file_path_fd, "user.dcfs_opath");
-  ASSERT_THAT(got, IsOk());
-  EXPECT_EQ(*got, value);
-  auto absent = syscalls::getxattr_opath(file_path_fd, "user.dcfs_absent");
+  const std::string path = "/proc/self/fd/" + std::to_string(file_fd_);
+
+  EXPECT_THAT(syscalls::getxattr(path, "user.dcfs_opath", nullptr, 0),
+              IsOkAndHolds(value.size()));
+  std::string got(value.size(), '\0');
+  EXPECT_THAT(
+      syscalls::getxattr(path, "user.dcfs_opath", got.data(), got.size()),
+      IsOkAndHolds(value.size()));
+  EXPECT_EQ(got, value);
+  auto absent = syscalls::getxattr(path, "user.dcfs_absent", nullptr, 0);
   ASSERT_FALSE(absent.ok());
   EXPECT_EQ(GetErrnoFromStatus(absent.status()).value_or(0), ENODATA);
 
-  // Through an O_PATH fd on a symlink to that file, the magic link resolves
-  // to the symlink itself, so the target's xattr is not visible.
-  ::unlinkat(tmpdir_fd_, "opath_link", 0);
-  ASSERT_EQ(::symlinkat("test_file", tmpdir_fd_, "opath_link"), 0);
-  int link_fd = ::openat(tmpdir_fd_, "opath_link", O_PATH | O_NOFOLLOW);
-  ASSERT_GE(link_fd, 0);
-  auto link_names = syscalls::listxattr_opath(link_fd);
-  ASSERT_THAT(link_names, IsOk());
-  EXPECT_EQ(std::find(link_names->begin(), link_names->end(),
-                      "user.dcfs_opath"),
-            link_names->end());
-  ::close(link_fd);
-  ::close(file_path_fd);
+  auto size = syscalls::listxattr(path, nullptr, 0);
+  ASSERT_THAT(size, IsOk());
+  std::string list(*size, '\0');
+  EXPECT_THAT(syscalls::listxattr(path, list.data(), list.size()),
+              IsOkAndHolds(*size));
+  EXPECT_NE(list.find(std::string("user.dcfs_opath") + '\0'),
+            std::string::npos);
+
+  const std::string more = "more";
+  EXPECT_THAT(
+      syscalls::setxattr(
+          path, "user.dcfs_set",
+          std::span<const uint8_t>(
+              reinterpret_cast<const uint8_t *>(more.data()), more.size()),
+          0),
+      IsOk());
+  EXPECT_THAT(syscalls::getxattr(path, "user.dcfs_set", nullptr, 0),
+              IsOkAndHolds(more.size()));
+  EXPECT_THAT(syscalls::removexattr(path, "user.dcfs_set"), IsOk());
+  auto removed = syscalls::getxattr(path, "user.dcfs_set", nullptr, 0);
+  ASSERT_FALSE(removed.ok());
+  EXPECT_EQ(GetErrnoFromStatus(removed.status()).value_or(0), ENODATA);
+}
+
+TEST_F(SyscallsTest, FchmodatAndUtimensatOnAProcFdPath) {
+  const std::string path = "/proc/self/fd/" + std::to_string(file_fd_);
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, path, 0640, 0), IsOk());
+  auto st = syscalls::fstat(file_fd_);
+  ASSERT_THAT(st, IsOk());
+  EXPECT_EQ(st->st_mode & 07777, 0640u);
+
+  const struct timespec times[2] = {{1000, 0}, {2000, 0}};
+  ASSERT_THAT(syscalls::utimensat(AT_FDCWD, path, times, 0), IsOk());
+  st = syscalls::fstat(file_fd_);
+  ASSERT_THAT(st, IsOk());
+  EXPECT_EQ(st->st_atim.tv_sec, 1000);
+  EXPECT_EQ(st->st_mtim.tv_sec, 2000);
+
+  auto missing = syscalls::fchmodat(tmpdir_fd_, "no_such_file", 0600, 0);
+  ASSERT_FALSE(missing.ok());
+  EXPECT_EQ(GetErrnoFromStatus(missing).value_or(0), ENOENT);
 }
 
 TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {
@@ -493,14 +490,14 @@ TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {
 // The raw setgroups system call changes only the calling thread's groups
 // (glibc's setgroups() would change every thread's), and setfsuid/setfsgid
 // report the previous value, with -1 reading the current one back.
-TEST(SyscallsCredentialsTest, SetgroupsThreadIsPerThread) {
+TEST(SyscallsCredentialsTest, SetgroupsIsPerThread) {
   absl::StatusOr<std::vector<gid_t>> original = syscalls::getgroups();
   ASSERT_THAT(original, IsOk());
   std::vector<gid_t> in_thread;
   std::vector<gid_t> in_main_meanwhile;
   std::thread([&] {
     const gid_t groups[] = {4242, 4243};
-    ASSERT_THAT(syscalls::setgroups_thread(groups), IsOk());
+    ASSERT_THAT(syscalls::setgroups(groups), IsOk());
     absl::StatusOr<std::vector<gid_t>> mine = syscalls::getgroups();
     ASSERT_THAT(mine, IsOk());
     in_thread = *mine;
@@ -532,16 +529,17 @@ TEST(SyscallsCredentialsTest, SetgroupsThreadIsPerThread) {
 }
 
 TEST(SyscallsCredentialsTest, SetfsuidReturnsPreviousAndReadsBack) {
-  ASSERT_EQ(syscalls::fsuid(), 0u);
+  constexpr uid_t kRead = static_cast<uid_t>(-1);  // changes nothing
+  ASSERT_EQ(syscalls::setfsuid(kRead), 0u);
   EXPECT_EQ(syscalls::setfsuid(1000), 0u);
-  EXPECT_EQ(syscalls::fsuid(), 1000u);
+  EXPECT_EQ(syscalls::setfsuid(kRead), 1000u);
   EXPECT_EQ(syscalls::setfsuid(0), 1000u);
-  EXPECT_EQ(syscalls::fsuid(), 0u);
-  ASSERT_EQ(syscalls::fsgid(), 0u);
+  EXPECT_EQ(syscalls::setfsuid(kRead), 0u);
+  ASSERT_EQ(syscalls::setfsgid(kRead), 0u);
   EXPECT_EQ(syscalls::setfsgid(1000), 0u);
-  EXPECT_EQ(syscalls::fsgid(), 1000u);
+  EXPECT_EQ(syscalls::setfsgid(kRead), 1000u);
   EXPECT_EQ(syscalls::setfsgid(0), 1000u);
-  EXPECT_EQ(syscalls::fsgid(), 0u);
+  EXPECT_EQ(syscalls::setfsgid(kRead), 0u);
 }
 
 }  // namespace

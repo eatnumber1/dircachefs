@@ -20,8 +20,6 @@
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/container/flat_hash_map.h"
-#include "absl/strings/str_join.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 
@@ -75,48 +73,28 @@ absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
                                     unsigned int mask);
 absl::StatusOr<struct statfs> fstatfs(int fd);
 absl::StatusOr<std::string> readlinkat(int dirfd, std::string_view path);
-absl::StatusOr<std::string> fgetxattr(int fd, std::string_view name);
-absl::StatusOr<std::vector<std::string>> flistxattr(int fd);
+// fgetxattr(2)/flistxattr(2): one call each, returning the size. A null
+// `value`/`list` with size 0 asks for the size needed. The size-then-read
+// loop (the value can grow in between) is backing.cc's.
+absl::StatusOr<size_t> fgetxattr(int fd, std::string_view name, void *value,
+                                 size_t size);
+absl::StatusOr<size_t> flistxattr(int fd, char *list, size_t size);
 absl::Status fsetxattr(int fd, std::string_view name,
                        std::span<const uint8_t> value, int flags);
 absl::Status fremovexattr(int fd, std::string_view name);
-absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags);
-
-// listxattr(2)/getxattr(2) on "/proc/self/fd/<fd>" -- the path-following
-// variants. The magic link resolves to exactly the object `fd` refers to,
-// even when that object is itself a symlink (it is not followed further),
-// so these work on an O_PATH fd for any file type: unlike flistxattr and
-// fgetxattr they need neither a non-O_PATH fd nor an open() of the object,
-// which for a FIFO or device could block or have side effects.
-absl::StatusOr<std::vector<std::string>> listxattr_opath(int fd);
-absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name);
-
-// setxattr(2)/removexattr(2) on "/proc/self/fd/<fd>" -- the same
-// path-following trick as listxattr_opath/getxattr_opath, for the write
-// side. Used for symlinks and other special files, which fsetxattr(2)/
-// fremovexattr(2) cannot reach directly (they need a non-O_PATH fd) and
-// which reopening for one could block on or have a side effect on.
-absl::Status setxattr_opath(int fd, std::string_view name,
-                            std::span<const uint8_t> value, int flags);
-absl::Status removexattr_opath(int fd, std::string_view name);
-
-// fchmodat(AT_FDCWD, "/proc/self/fd/<fd>", mode, 0) -- as listxattr_opath,
-// for fchmod(2), which (like flistxattr/fgetxattr) rejects O_PATH fds.
-// Intended for FIFOs, sockets and devices, which reopening for a real fd
-// (to use plain fchmod) could block on or have side effects on. Not
-// called for a symlink in practice: Linux has no way to chmod a
-// symlink's own mode (there is no lchmod syscall) and this path
-// correctly surfaces that as EOPNOTSUPP (verified experimentally) rather
-// than silently chmoding the target, but callers reject that case
-// explicitly before ever reaching this function.
-absl::Status fchmod_opath(int fd, mode_t mode);
-
-// utimensat(AT_FDCWD, "/proc/self/fd/<fd>", times, 0) -- as fchmod_opath,
-// for futimens(2) on the same set of file types, plus symlinks: verified
-// experimentally that this sets a symlink's own timestamp (not its
-// target's), matching the magic link's usual "resolves to exactly the
-// object the fd refers to, without following further" behavior.
-absl::Status futimens_opath(int fd, const struct timespec times[2]);
+// The path-following xattr, chmod and utimes calls. backing.cc uses them on
+// "/proc/self/fd/<fd>" to reach an O_PATH descriptor's object.
+absl::StatusOr<size_t> getxattr(std::string_view path, std::string_view name,
+                                void *value, size_t size);
+absl::StatusOr<size_t> listxattr(std::string_view path, char *list,
+                                 size_t size);
+absl::Status setxattr(std::string_view path, std::string_view name,
+                      std::span<const uint8_t> value, int flags);
+absl::Status removexattr(std::string_view path, std::string_view name);
+absl::Status fchmodat(int dirfd, std::string_view path, mode_t mode,
+                      int flags);
+absl::Status utimensat(int dirfd, std::string_view path,
+                       const struct timespec times[2], int flags);
 
 // fcntl(fd, F_DUPFD_CLOEXEC, 0).
 absl::StatusOr<FileDescriptor> dup(int fd);
@@ -157,11 +135,9 @@ absl::StatusOr<size_t> write(int fd, const void *buf, size_t count);
 // silently ignored (the previous value is returned either way), so a caller
 // must read the value back to know whether a switch took effect -- passing
 // an invalid id such as -1 changes nothing and returns the current value
-// (that is what fsuid()/fsgid() below do).
+// (backing.cc reads the current ids that way).
 uid_t setfsuid(uid_t uid);
 gid_t setfsgid(gid_t gid);
-uid_t fsuid();
-gid_t fsgid();
 
 // umask(2): sets the process's file mode creation mask and returns the
 // previous one. Cannot fail. Process-wide (the fs_struct is shared by every
@@ -172,25 +148,12 @@ mode_t umask(mode_t mask);
 // CALLING THREAD's supplementary groups. Not glibc's setgroups(), which
 // broadcasts the change to every thread of the process (the POSIX
 // per-process semantics, implemented with a signal to each thread).
-absl::Status setgroups_thread(std::span<const gid_t> groups);
+absl::Status setgroups(std::span<const gid_t> groups);
 
 // getgroups(2): the calling thread's supplementary groups.
 absl::StatusOr<std::vector<gid_t>> getgroups();
 
 }  // namespace syscalls
-
-absl::StatusOr<uint32_t> GetInodeGeneration(int fd);
-
-struct LogOpenFlags {
- public:
-  explicit LogOpenFlags(int flags);
-
-  template <typename Sink>
-  friend void AbslStringify(Sink &sink, const LogOpenFlags &l);
-
- private:
-  int flags_ = 0;
-};
 
 // Implementation below here
 
@@ -203,76 +166,6 @@ absl::StatusOr<int> ioctl(int fd, int op, auto &&... args) {
 }
 
 }  // namespace syscalls
-
-template <typename Sink>
-void AbslStringify(Sink &sink, const LogOpenFlags &l) {
-  static const absl::flat_hash_map<int, const std::string> kFlagsToNames {
-#define F(n) {n, #n}
-#ifdef O_ACCMODE
-      F(O_ACCMODE),
-#endif  // O_ACCMODE
-#ifdef O_RDONLY
-      F(O_RDONLY),
-#endif  // O_RDONLY
-#ifdef O_WRONLY
-      F(O_WRONLY),
-#endif  // O_WRONLY
-#ifdef O_RDWR
-      F(O_RDWR),
-#endif  // O_RDWR
-#ifdef O_CREAT
-      F(O_CREAT),
-#endif  // O_CREAT
-#ifdef O_EXCL
-      F(O_EXCL),
-#endif  // O_EXCL
-#ifdef O_NOCTTY
-      F(O_NOCTTY),
-#endif  // O_NOCTTY
-#ifdef O_TRUNC
-      F(O_TRUNC),
-#endif  // O_TRUNC
-#ifdef O_APPEND
-      F(O_APPEND),
-#endif  // O_APPEND
-#ifdef O_NONBLOCK
-      F(O_NONBLOCK),
-#endif  // O_NONBLOCK
-#ifdef O_DSYNC
-      F(O_DSYNC),
-#endif  // O_DSYNC
-#ifdef FASYNC
-      F(FASYNC),
-#endif  // FASYNC
-#ifdef O_DIRECT
-      F(O_DIRECT),
-#endif  // O_DIRECT
-#ifdef O_LARGEFILE
-      F(O_LARGEFILE),
-#endif  // O_LARGEFILE
-#ifdef O_DIRECTORY
-      F(O_DIRECTORY),
-#endif  // O_DIRECTORY
-#ifdef O_NOFOLLOW
-      F(O_NOFOLLOW),
-#endif  // O_NOFOLLOW
-#ifdef O_NOATIME
-      F(O_NOATIME),
-#endif  // O_NOATIME
-#ifdef O_CLOEXEC
-      F(O_CLOEXEC),
-#endif  // O_CLOEXEC
-#undef F
-  };
-
-  std::vector<std::string_view> flag_names;
-  int flags = l.flags_;
-  for (const auto &[flag, name] : kFlagsToNames) {
-    if ((flags & flag) == 0) continue;
-    flag_names.emplace_back(name);
-  }
-  absl::Format(&sink, "%s", absl::StrJoin(flag_names, " | "));
-}
 
 }  // namespace dcfs
 

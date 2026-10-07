@@ -154,79 +154,18 @@ absl::StatusOr<std::string> readlinkat(int dirfd, std::string_view path) {
   }
 }
 
-absl::StatusOr<std::string> fgetxattr(int fd, std::string_view name) {
+absl::StatusOr<size_t> fgetxattr(int fd, std::string_view name, void *value,
+                                 size_t size) {
   std::string name_str(name);
-  // Query size with a null buffer first
-  ssize_t size = ::fgetxattr(fd, name_str.c_str(), nullptr, 0);
-  if (size == -1) {
-    return ErrnoToStatus(errno, "fgetxattr");
-  }
-  if (size == 0) {
-    return std::string();
-  }
-  // Now read the actual value; retry once if size grows (ERANGE on second call)
-  for (int attempt = 0; attempt < 2; ++attempt) {
-    std::string result(size, '\0');
-    ssize_t nbytes = ::fgetxattr(fd, name_str.c_str(), result.data(),
-                                 result.size());
-    if (nbytes == -1) {
-      int err = errno;
-      if (err == ERANGE && attempt == 0) {
-        // Value grew between query and read; retry by re-querying
-        size = ::fgetxattr(fd, name_str.c_str(), nullptr, 0);
-        if (size == -1) {
-          return ErrnoToStatus(errno, "fgetxattr");
-        }
-        if (size == 0) {
-          return std::string();
-        }
-        continue;
-      }
-      return ErrnoToStatus(err, "fgetxattr");
-    }
-    result.resize(nbytes);
-    return result;
-  }
-  // Should not reach here
-  return ErrnoToStatus(ERANGE, "fgetxattr: retry loop exhausted");
+  ssize_t nbytes = ::fgetxattr(fd, name_str.c_str(), value, size);
+  if (nbytes == -1) return ErrnoToStatus(errno, "fgetxattr");
+  return static_cast<size_t>(nbytes);
 }
 
-absl::StatusOr<std::vector<std::string>> flistxattr(int fd) {
-  // Query size with a null buffer first; retry once if list grows (ERANGE on second call)
-  for (int attempt = 0; attempt < 2; ++attempt) {
-    ssize_t size = ::flistxattr(fd, nullptr, 0);
-    if (size == -1) {
-      return ErrnoToStatus(errno, "flistxattr");
-    }
-    if (size == 0) {
-      return std::vector<std::string>();
-    }
-    // Now read the actual list
-    std::string buf(size, '\0');
-    ssize_t nbytes = ::flistxattr(fd, buf.data(), buf.size());
-    if (nbytes == -1) {
-      int err = errno;
-      if (err == ERANGE && attempt == 0) {
-        // List grew between query and read; retry from the start
-        continue;
-      }
-      return ErrnoToStatus(err, "flistxattr");
-    }
-    // Parse the NUL-separated list
-    std::vector<std::string> result;
-    size_t pos = 0;
-    while (pos < static_cast<size_t>(nbytes)) {
-      const char *str = buf.data() + pos;
-      const void *nul = std::memchr(str, '\0', nbytes - pos);
-      size_t len = nul == nullptr ? nbytes - pos
-                                  : static_cast<const char *>(nul) - str;
-      result.emplace_back(str, len);
-      pos += len + 1;
-    }
-    return result;
-  }
-  // Should not reach here
-  return ErrnoToStatus(ERANGE, "flistxattr: retry loop exhausted");
+absl::StatusOr<size_t> flistxattr(int fd, char *list, size_t size) {
+  ssize_t nbytes = ::flistxattr(fd, list, size);
+  if (nbytes == -1) return ErrnoToStatus(errno, "flistxattr");
+  return static_cast<size_t>(nbytes);
 }
 
 absl::Status fsetxattr(int fd, std::string_view name,
@@ -248,114 +187,67 @@ absl::Status fremovexattr(int fd, std::string_view name) {
   return absl::OkStatus();
 }
 
-absl::StatusOr<FileDescriptor> ReopenPathFd(int fd, int flags) {
-  // Opens /proc/self/fd/<fd> with the given flags (| O_CLOEXEC).
-  // This is needed because xattr/ioctl syscalls reject O_PATH fds.
-  std::string path = absl::StrFormat("/proc/self/fd/%d", fd);
-  int new_fd = ::open(path.c_str(), flags | O_CLOEXEC);
-  if (new_fd == -1) {
-    return ErrnoToStatus(errno, absl::StrFormat("open(%s)", path));
-  }
-  return FileDescriptor(new_fd);
-}
-
-namespace {
-
-std::string ProcFdPath(int fd) {
-  return absl::StrFormat("/proc/self/fd/%d", fd);
-}
-
-// Splits a listxattr(2) result: NUL-terminated names, back to back.
-std::vector<std::string> SplitXattrList(std::string_view buf) {
-  std::vector<std::string> result;
-  size_t pos = 0;
-  while (pos < buf.size()) {
-    size_t end = buf.find('\0', pos);
-    if (end == std::string_view::npos) end = buf.size();
-    result.emplace_back(buf.substr(pos, end - pos));
-    pos = end + 1;
-  }
-  return result;
-}
-
-}  // namespace
-
-absl::StatusOr<std::vector<std::string>> listxattr_opath(int fd) {
-  const std::string path = ProcFdPath(fd);
-  // The list can grow between sizing and reading it; ERANGE then means
-  // "size again", which a few retries make overwhelmingly likely to settle.
-  for (int attempt = 0; attempt < 4; ++attempt) {
-    ssize_t size = ::listxattr(path.c_str(), nullptr, 0);
-    if (size == -1) return ErrnoToStatus(errno, absl::StrCat("listxattr(", path, ")"));
-    if (size == 0) return std::vector<std::string>();
-    std::string buf(size, '\0');
-    ssize_t nbytes = ::listxattr(path.c_str(), buf.data(), buf.size());
-    if (nbytes == -1) {
-      if (errno == ERANGE) continue;
-      return ErrnoToStatus(errno, absl::StrCat("listxattr(", path, ")"));
-    }
-    buf.resize(nbytes);
-    return SplitXattrList(buf);
-  }
-  return ErrnoToStatus(ERANGE, absl::StrCat("listxattr(", path, "): kept growing"));
-}
-
-absl::StatusOr<std::string> getxattr_opath(int fd, std::string_view name) {
-  const std::string path = ProcFdPath(fd);
+absl::StatusOr<size_t> getxattr(std::string_view path, std::string_view name,
+                                void *value, size_t size) {
+  const std::string path_str(path);
   const std::string name_str(name);
-  for (int attempt = 0; attempt < 4; ++attempt) {
-    ssize_t size = ::getxattr(path.c_str(), name_str.c_str(), nullptr, 0);
-    if (size == -1) {
-      return ErrnoToStatus(errno, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name), ")"));
-    }
-    if (size == 0) return std::string();
-    std::string value(size, '\0');
-    ssize_t nbytes =
-        ::getxattr(path.c_str(), name_str.c_str(), value.data(), value.size());
-    if (nbytes == -1) {
-      if (errno == ERANGE) continue;
-      return ErrnoToStatus(errno, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name), ")"));
-    }
-    value.resize(nbytes);
-    return value;
+  ssize_t nbytes = ::getxattr(path_str.c_str(), name_str.c_str(), value, size);
+  if (nbytes == -1) {
+    return ErrnoToStatus(
+        errno, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name), ")"));
   }
-  return ErrnoToStatus(ERANGE, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name),
-                                            "): kept growing"));
+  return static_cast<size_t>(nbytes);
 }
 
-absl::Status setxattr_opath(int fd, std::string_view name,
-                            std::span<const uint8_t> value, int flags) {
-  const std::string path = ProcFdPath(fd);
+absl::StatusOr<size_t> listxattr(std::string_view path, char *list,
+                                 size_t size) {
+  const std::string path_str(path);
+  ssize_t nbytes = ::listxattr(path_str.c_str(), list, size);
+  if (nbytes == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("listxattr(", path, ")"));
+  }
+  return static_cast<size_t>(nbytes);
+}
+
+absl::Status setxattr(std::string_view path, std::string_view name,
+                      std::span<const uint8_t> value, int flags) {
+  const std::string path_str(path);
   const std::string name_str(name);
-  if (::setxattr(path.c_str(), name_str.c_str(),
+  if (::setxattr(path_str.c_str(), name_str.c_str(),
                  reinterpret_cast<const void *>(value.data()), value.size(),
                  flags) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("setxattr(", path, ", ", EscapeBytes(name), ")"));
+    return ErrnoToStatus(
+        errno, absl::StrCat("setxattr(", path, ", ", EscapeBytes(name), ")"));
   }
   return absl::OkStatus();
 }
 
-absl::Status removexattr_opath(int fd, std::string_view name) {
-  const std::string path = ProcFdPath(fd);
+absl::Status removexattr(std::string_view path, std::string_view name) {
+  const std::string path_str(path);
   const std::string name_str(name);
-  if (::removexattr(path.c_str(), name_str.c_str()) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("removexattr(", path, ", ", EscapeBytes(name), ")"));
+  if (::removexattr(path_str.c_str(), name_str.c_str()) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("removexattr(", path, ", ",
+                                             EscapeBytes(name), ")"));
   }
   return absl::OkStatus();
 }
 
-absl::Status fchmod_opath(int fd, mode_t mode) {
-  const std::string path = ProcFdPath(fd);
-  if (::fchmodat(AT_FDCWD, path.c_str(), mode, 0) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("fchmodat(", path, ")"));
+absl::Status fchmodat(int dirfd, std::string_view path, mode_t mode,
+                      int flags) {
+  const std::string path_str(path);
+  if (::fchmodat(dirfd, path_str.c_str(), mode, flags) == -1) {
+    return ErrnoToStatus(
+        errno, absl::StrFormat("fchmodat(%d, %s)", dirfd, EscapeBytes(path)));
   }
   return absl::OkStatus();
 }
 
-absl::Status futimens_opath(int fd, const struct timespec times[2]) {
-  const std::string path = ProcFdPath(fd);
-  if (::utimensat(AT_FDCWD, path.c_str(), times, 0) == -1) {
-    return ErrnoToStatus(errno, absl::StrCat("utimensat(", path, ")"));
+absl::Status utimensat(int dirfd, std::string_view path,
+                       const struct timespec times[2], int flags) {
+  const std::string path_str(path);
+  if (::utimensat(dirfd, path_str.c_str(), times, flags) == -1) {
+    return ErrnoToStatus(
+        errno, absl::StrFormat("utimensat(%d, %s)", dirfd, EscapeBytes(path)));
   }
   return absl::OkStatus();
 }
@@ -520,13 +412,9 @@ uid_t setfsuid(uid_t uid) { return static_cast<uid_t>(::setfsuid(uid)); }
 
 gid_t setfsgid(gid_t gid) { return static_cast<gid_t>(::setfsgid(gid)); }
 
-uid_t fsuid() { return setfsuid(static_cast<uid_t>(-1)); }
-
-gid_t fsgid() { return setfsgid(static_cast<gid_t>(-1)); }
-
 mode_t umask(mode_t mask) { return ::umask(mask); }
 
-absl::Status setgroups_thread(std::span<const gid_t> groups) {
+absl::Status setgroups(std::span<const gid_t> groups) {
   if (::syscall(SYS_setgroups, groups.size(), groups.data()) == -1) {
     return ErrnoToStatus(errno, "setgroups");
   }
@@ -551,14 +439,5 @@ absl::StatusOr<std::vector<gid_t>> getgroups() {
 }
 
 }  // namespace syscalls
-
-absl::StatusOr<uint32_t> GetInodeGeneration(int fd) {
-  uint32_t generation = 0;
-  ABSL_RETURN_IF_ERROR(
-      syscalls::ioctl(fd, FS_IOC_GETVERSION, &generation).status());
-  return generation;
-}
-
-LogOpenFlags::LogOpenFlags(int flags) : flags_(flags) {}
 
 }  // namespace dcfs

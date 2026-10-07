@@ -22,7 +22,6 @@
 #include <fcntl.h>
 #include <string>
 #include <sys/stat.h>
-#include <sys/xattr.h>
 #include <unistd.h>
 
 #include "absl/status/status_matchers.h"
@@ -38,21 +37,6 @@ using ::absl_testing::IsOk;
 // SyscallsFaultTest::TearDown() after every test, so tests never leak
 // their fault into one another.
 struct FaultState {
-  // fgetxattr: once this fd/name pair is seen on a size-query call
-  // (value == nullptr, size == 0), fsetxattr()s `grow_value` onto it for
-  // real -- between the query and the read that immediately follows --
-  // so the subsequent read call gets a genuine ERANGE from the kernel.
-  int fgetxattr_fd = -1;
-  std::string fgetxattr_name;
-  std::string grow_value;
-  bool grown = false;
-
-  // flistxattr: once this fd is seen on a size-query call, fsetxattr()s a
-  // brand new xattr (name `grow_new_name`) onto it for real, growing the
-  // list between the query and the read that immediately follows.
-  int flistxattr_fd = -1;
-  std::string grow_new_name;
-
   // readlinkat: for this exact (dirfd, path) pair, always report "buffer
   // completely full" (never delegating to the real syscall) -- simulating
   // a symlink target longer than any real Linux filesystem can actually
@@ -71,42 +55,6 @@ FaultState &GetFaultState() {
 }  // namespace dcfs
 
 extern "C" {
-
-ssize_t __real_fgetxattr(int fd, const char *name, void *value, size_t size);
-ssize_t __real_flistxattr(int fd, void *list, size_t size);
-
-ssize_t __wrap_fgetxattr(int fd, const char *name, void *value, size_t size) {
-  dcfs::FaultState &st = dcfs::GetFaultState();
-  ssize_t rc = __real_fgetxattr(fd, name, value, size);
-  // Only the size-query shape (as dcfs::syscalls::fgetxattr makes it)
-  // triggers the fault, and only once: the retry re-query that follows a
-  // real ERANGE must see the real, already-grown size.
-  if (!st.grown && value == nullptr && size == 0 && fd == st.fgetxattr_fd &&
-      name != nullptr && st.fgetxattr_name == name) {
-    st.grown = true;
-    if (::fsetxattr(fd, name, st.grow_value.data(), st.grow_value.size(),
-                    0) != 0) {
-      ADD_FAILURE() << "test setup: fsetxattr to grow " << name
-                    << " failed: " << std::strerror(errno);
-    }
-  }
-  return rc;
-}
-
-ssize_t __wrap_flistxattr(int fd, void *list, size_t size) {
-  dcfs::FaultState &st = dcfs::GetFaultState();
-  ssize_t rc = __real_flistxattr(fd, list, size);
-  if (!st.grown && list == nullptr && size == 0 && fd == st.flistxattr_fd) {
-    st.grown = true;
-    const std::string value = "v";
-    if (::fsetxattr(fd, st.grow_new_name.c_str(), value.data(), value.size(),
-                    0) != 0) {
-      ADD_FAILURE() << "test setup: fsetxattr to grow the list failed: "
-                    << std::strerror(errno);
-    }
-  }
-  return rc;
-}
 
 ssize_t __real_readlinkat(int dirfd, const char *pathname, char *buf,
                           size_t bufsize);
@@ -149,50 +97,6 @@ class SyscallsFaultTest : public ::testing::Test {
   int tmpdir_fd_ = -1;
   int file_fd_ = -1;
 };
-
-// Regression test for bdfd61c: fgetxattr()'s size-query-then-read is
-// inherently racy against a concurrent writer of the same xattr, and the
-// bug was that ERANGE from the *read* call (the value grew after the
-// query) was not retried at all -- only a (never actually reachable)
-// ERANGE from the query call was. __wrap_fgetxattr (above) grows the
-// value for real in that exact window, so the read that follows gets a
-// genuine ERANGE from the kernel -- no timing dependency at all.
-TEST_F(SyscallsFaultTest, FgetxattrRetriesOnErangeFromReadNotQuery) {
-  const std::string small_value = "x";
-  const std::string grown_value(256, 'y');
-  if (::fsetxattr(file_fd_, "user.dcfs_erange", small_value.data(),
-                  small_value.size(), 0) != 0) {
-    GTEST_SKIP() << "user xattrs unsupported here: " << std::strerror(errno);
-  }
-  FaultState &st = GetFaultState();
-  st.fgetxattr_fd = file_fd_;
-  st.fgetxattr_name = "user.dcfs_erange";
-  st.grow_value = grown_value;
-
-  auto value = syscalls::fgetxattr(file_fd_, "user.dcfs_erange");
-  ASSERT_THAT(value, IsOk());
-  EXPECT_EQ(*value, grown_value);
-}
-
-// As FgetxattrRetriesOnErangeFromReadNotQuery, for flistxattr(): the list
-// grows (a new xattr appears) between the size query and the read.
-TEST_F(SyscallsFaultTest, FlistxattrRetriesOnErangeFromReadNotQuery) {
-  const std::string value = "v";
-  if (::fsetxattr(file_fd_, "user.dcfs_list_a", value.data(), value.size(),
-                  0) != 0) {
-    GTEST_SKIP() << "user xattrs unsupported here: " << std::strerror(errno);
-  }
-  FaultState &st = GetFaultState();
-  st.flistxattr_fd = file_fd_;
-  st.grow_new_name = "user.dcfs_list_b";
-
-  auto names = syscalls::flistxattr(file_fd_);
-  ASSERT_THAT(names, IsOk());
-  EXPECT_NE(std::find(names->begin(), names->end(), "user.dcfs_list_a"),
-            names->end());
-  EXPECT_NE(std::find(names->begin(), names->end(), "user.dcfs_list_b"),
-            names->end());
-}
 
 // Regression test for bdfd61c: readlinkat() must report ENAMETOOLONG, not
 // silently truncate, once its doubling loop's buffer reaches the
