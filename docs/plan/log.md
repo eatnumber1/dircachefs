@@ -1348,3 +1348,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   gate (baseline file at 92.4/73.3, ratchet) and 26.5 (lane-4).
 - dir_cache_fs_test (plain) timed out at its 60 s `short` under load 18 on main itself (the
   harness grew: readdir work test, lifetime tests): 26.2's rebase sets it `moderate`.
+- Dispatched (lane-4): 8.1 the coverage gate (dcfs/coverage_baseline.txt at 92.4/73.3, fails on a
+  drop and on an unrecorded rise >= 0.1: the baseline only moves up in the raising commit;
+  self-checks) then 26.5 limited mutation testing (mull on clang 22 or an AST-JSON mutator;
+  first run's survivors as findings; cost per mutant).
+- russ asked whether default_permissions should be required: it already is by construction
+  (dcfs appends it; FUSE has no "no" form). Proposed: Init() verifies it and refuses otherwise;
+  reject --fuse_opt naming it; keep the Access handler as a fail-closed EACCES (ENOSYS would
+  make the kernel ALLOW) covered by a forged-request test, instead of deleting it. Awaiting yes.
