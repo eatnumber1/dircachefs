@@ -378,3 +378,24 @@ py_test(
     data = [":repro_date_fixture"],
     deps = [":repro_compare_lib"],
 )
+
+# ---- Step 8.1: the coverage gate ----------------------------------------
+
+# Run by .github/ci/coverage.sh on the published lcov against
+# dcfs/coverage_baseline.txt (README.md, "Coverage"). Self-check: the gate over
+# canned lcovs below, equal to, within tolerance of and above a canned baseline.
+exports_files(["coverage_gate.sh"])
+
+sh_test(
+    name = "coverage_gate_self_check_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["coverage_gate_self_check_test.sh"],
+    args = [
+        "$(rootpath coverage_gate.sh)",
+        "tools/coverage_gate_fixtures",
+    ],
+    data = [
+        "coverage_gate.sh",
+    ] + glob(["coverage_gate_fixtures/*"]),
+)

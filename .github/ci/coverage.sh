@@ -3,8 +3,9 @@
 # section) over the tests the arguments select (--config=presubmit, ...), then
 # checks that the combined lcov report really has coverage in it (a harness
 # that silently stopped shipping profiles must not publish an empty report)
-# and copies it to ci-coverage/, which the workflow uploads. No threshold yet
-# (Phase 8).
+# and copies it to ci-coverage/, which the workflow uploads. Then the gate
+# (step 8.1, tools/coverage_gate.sh): dcfs/*.cc lines and branches must match
+# dcfs/coverage_baseline.txt (not below it, and not 0.1 or more above it).
 set -euo pipefail
 targets=(//...)
 if [ "${DCFS_CI_KVM:-0}" != 1 ]; then
@@ -25,6 +26,11 @@ if [ -s "$report" ]; then
 	# main.cc runs only in the end-to-end tests: hits here prove the whole
 	# guest -> coverage disk -> lcov path, not only the unit tests'.
 	test/qemu/scripts/check-lcov.sh ci-coverage/coverage.lcov dcfs/main.cc
+	# The gate (step 8.1): dcfs/*.cc lines and branches against the committed
+	# baseline; it also fails when coverage rose by 0.1 or more, so that the
+	# baseline is raised in the commit that raised the coverage. A failure
+	# here fails the job, but the report above is already published.
+	tools/coverage_gate.sh ci-coverage/coverage.lcov dcfs/coverage_baseline.txt || status=1
 else
 	echo "coverage.sh: no combined report at $report" >&2
 	status=1

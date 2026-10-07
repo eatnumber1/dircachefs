@@ -1,0 +1,86 @@
+#!/bin/sh
+# Step 8.1: the coverage gate (CI coverage job only).
+#
+#   coverage_gate.sh <coverage.lcov> <baseline file>
+#
+# Computes the line and branch coverage of dcfs/*.cc from the published lcov
+# (headers, bench/ and tools/ are printed, not gated) and compares it with the
+# committed baseline (dcfs/coverage_baseline.txt: `lines 92.40`, `branches
+# 73.30`):
+#   - below the baseline on either: FAIL with the numbers;
+#   - above it by 0.1 or more on either: FAIL too, with the values to put in
+#     the baseline in this commit (the baseline only moves up, in the commit
+#     that raised the coverage; 0.1 is the tolerance for noise);
+#   - otherwise pass.
+# Self-check: //tools:coverage_gate_self_check_test.
+set -eu
+
+lcov=$1
+baseline=$2
+
+base_of() {
+	awk -v k="$1" '$1 == k { print $2 }' "$baseline"
+}
+base_lines=$(base_of lines)
+base_branches=$(base_of branches)
+if [ -z "$base_lines" ] || [ -z "$base_branches" ]; then
+	echo "coverage_gate.sh: $baseline needs a 'lines' and a 'branches' value" >&2
+	exit 2
+fi
+
+# "<scope> <LH> <LF> <BRH> <BRF>" per scope: the sums over the records whose
+# SF: is under the scope's prefix (dcfs/*.cc only for the gated one).
+totals=$(awk '
+	/^SF:/ { sf = substr($0, 4); scope = ""
+		if (sf ~ /^dcfs\/.*\.cc$/) scope = "dcfs"
+		else if (sf ~ /^bench\//) scope = "bench"
+		else if (sf ~ /^tools\//) scope = "tools" }
+	scope != "" && /^LH:/ { v[scope, "lh"] += substr($0, 4) }
+	scope != "" && /^LF:/ { v[scope, "lf"] += substr($0, 4) }
+	scope != "" && /^BRH:/ { v[scope, "brh"] += substr($0, 5) }
+	scope != "" && /^BRF:/ { v[scope, "brf"] += substr($0, 5) }
+	END { n = split("dcfs bench tools", names, " ")
+		for (i = 1; i <= n; i++) { s = names[i]
+			print s, v[s, "lh"] + 0, v[s, "lf"] + 0, v[s, "brh"] + 0, v[s, "brf"] + 0 } }
+' "$lcov")
+
+pct() { awk -v h="$1" -v f="$2" 'BEGIN { if (f == 0) print "0.00"; else printf "%.2f", 100 * h / f }'; }
+floor2() { awk -v h="$1" -v f="$2" 'BEGIN { if (f == 0) print "0.00"; else printf "%.2f", int(10000 * h / f) / 100 }'; }
+
+fail=0
+dcfs_lh=0 dcfs_lf=0 dcfs_brh=0 dcfs_brf=0
+echo "$totals" | while read -r scope lh lf brh brf; do
+	echo "coverage_gate.sh: $scope: lines $lh/$lf = $(pct "$lh" "$lf")%, branches $brh/$brf = $(pct "$brh" "$brf")%$([ "$scope" = dcfs ] || echo ' (reported, not gated)')"
+done
+set -- $(echo "$totals" | awk '$1 == "dcfs" { print $2, $3, $4, $5 }')
+dcfs_lh=$1 dcfs_lf=$2 dcfs_brh=$3 dcfs_brf=$4
+if [ "$dcfs_lf" -eq 0 ]; then
+	echo "coverage_gate.sh: FAIL: no dcfs/*.cc line in $lcov" >&2
+	exit 1
+fi
+lines=$(pct "$dcfs_lh" "$dcfs_lf")
+branches=$(pct "$dcfs_brh" "$dcfs_brf")
+
+cmp() { # cmp A B: -1, 0, 1 at two decimals
+	awk -v a="$1" -v b="$2" 'BEGIN { x = int(a * 100 + 0.5); y = int(b * 100 + 0.5); print (x < y) ? -1 : (x > y) ? 1 : 0 }'
+}
+raised() { # raised A B: 1 when A is at least 0.1 above B
+	awk -v a="$1" -v b="$2" 'BEGIN { print (int(a * 100 + 0.5) - int(b * 100 + 0.5) >= 10) ? 1 : 0 }'
+}
+
+if [ "$(cmp "$lines" "$base_lines")" -lt 0 ] || [ "$(cmp "$branches" "$base_branches")" -lt 0 ]; then
+	echo "coverage_gate.sh: FAIL: dcfs/*.cc coverage fell below the baseline: lines $lines (baseline $base_lines), branches $branches (baseline $base_branches)" >&2
+	fail=1
+fi
+if [ "$(raised "$lines" "$base_lines")" -eq 1 ] || [ "$(raised "$branches" "$base_branches")" -eq 1 ]; then
+	new_lines=$base_lines
+	new_branches=$base_branches
+	[ "$(raised "$lines" "$base_lines")" -eq 1 ] && new_lines=$(floor2 "$dcfs_lh" "$dcfs_lf")
+	[ "$(raised "$branches" "$base_branches")" -eq 1 ] && new_branches=$(floor2 "$dcfs_brh" "$dcfs_brf")
+	echo "coverage_gate.sh: FAIL: coverage rose (lines $lines, branches $branches; baseline $base_lines / $base_branches): raise dcfs/coverage_baseline.txt to $new_lines / $new_branches in this commit" >&2
+	fail=1
+fi
+if [ "$fail" -eq 0 ]; then
+	echo "coverage_gate.sh: ok: lines $lines (baseline $base_lines), branches $branches (baseline $base_branches)"
+fi
+exit "$fail"

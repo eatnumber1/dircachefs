@@ -373,12 +373,20 @@ that is itself cut off (a power-cut test ending the VM) loses its processes'.
 The report covers the small and medium tiers only (`--config=presubmit`):
 the large and enormous tests, and the trace-validation tests, are not in it.
 CI publishes it as the `coverage-lcov` artifact (dcfs, bench and tools only);
-there is no threshold yet. The first baseline (small and medium tiers): all
+the gate below runs only there. The first baseline (small and medium tiers): all
 of `dcfs/*.cc` 92.4% of lines and 73.3% of branches.
 
-Intended scope of the Phase 8 gate: gate on `dcfs/` only; report `bench/` and
-`tools/` (`fhtest.c` and `testutil.c` are test helpers) separately; report
-branches alongside lines.
+The gate (step 8.1, `tools/coverage_gate.sh`, run by `.github/ci/coverage.sh`
+in the CI coverage job only, not in the local tiers): `dcfs/*.cc` line and
+branch coverage of the published report must equal the committed baseline
+`dcfs/coverage_baseline.txt` (`lines 92.40`, `branches 73.30`, two decimals).
+Below it on either, the job fails with the numbers. Above it by 0.1 or more on
+either, the job fails too and prints `raise dcfs/coverage_baseline.txt to X /
+Y in this commit`: the baseline only moves up, in the commit that raised the
+coverage (0.1 is the tolerance for noise). `bench/` and `tools/` (`fhtest.c`
+and `testutil.c` are test helpers) are printed, not gated. Self-check:
+`//tools:coverage_gate_self_check_test` runs the gate over canned lcovs below,
+equal to, within tolerance of and above a canned baseline.
 
 ## Continuous integration
 
