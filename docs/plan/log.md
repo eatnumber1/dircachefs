@@ -1044,3 +1044,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   chmod 19/5/1/47/3, forget-written 2/0/0/2/0. FINDINGS for an investigator (Phase 10's readdir
   27x and the create path): 31 statements per warm listing; 136 statements / 10 transactions /
   2 syncs per create.
+- Dispatched (lane-3, dcfs-investigator, report only): why a warm readdir steps 31 statements and
+  a create 136/10 transactions/2 fsyncs; per-entry vs per-call grouping, slope with a 1,000-entry
+  directory, SQLite settings, a ranked reduction plan with expected counts and the protocol
+  transitions each change touches; what the 27x readdir slowdown is made of. Steps follow after
+  25.1 merges (same files).
