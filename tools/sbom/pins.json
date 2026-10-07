@@ -21,7 +21,8 @@
     "bazel_skylib": {"purl": "pkg:github/bazelbuild/bazel-skylib", "kind": "build-rules"},
     "rules_distroless": {"purl": "pkg:github/bazel-contrib/rules_distroless", "kind": "build-rules"},
     "rules_java": {"purl": "pkg:github/bazelbuild/rules_java", "kind": "build-rules"},
-    "rules_python": {"purl": "pkg:github/bazel-contrib/rules_python", "kind": "build-rules"}
+    "rules_python": {"purl": "pkg:github/bazel-contrib/rules_python", "kind": "build-rules"},
+    "toolchains_llvm": {"purl": "pkg:github/bazel-contrib/toolchains_llvm", "kind": "build-rules"}
   },
   "repository": {
     "pjdfstest": {"purl": "pkg:github/pjd/pjdfstest", "kind": "tool", "version": "strip_prefix"},
