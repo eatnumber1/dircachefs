@@ -1096,3 +1096,17 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   stays (dependency under review); banned_symbols resolves llvm-nm via runfiles, allow lines
   adjusted for clang's codegen (fprintf: abseil str_format, libnuma). Under review (fresh
   dcfs-reviewer): hermeticity completeness, static-link flags, the --wrap mangled names, patches.
+- 12.4 review: merge after M1/M2. Corrections: finding (c)'s path is a READ-ONLY open of an
+  unlinked file across a clean shutdown (a tmpfile keeps the flag unclean: writable open = durably
+  dirty through FinishRun); finding (a) is broader: ForgetNegativeDentries on ANY detected
+  out-of-band change in the parent deletes all its stubs, the relisting re-mints MAX+1 in listing
+  order, two boundaries can swap nodeids; the kernel marks the old inode bad (EIO, not ESTALE);
+  NFS handles safe (generations); the unit test StubsLiveWithTheirRefusals asserts the reuse on
+  purpose. Finding (b) confirmed (BeginRemove leaves nlink; sweep matches nlink=0 only; rmdir too).
+  12.4b (dcfs-protocol, after merge): (a) persisted monotonic stub high-water mark (negative
+  int64s: no AUTOINCREMENT) + keep stub rows when the dentry is merely forgotten (unknown), so a
+  re-refusal keeps id and generation (else d_invalidate detaches a mount on the stub); (b) at an
+  unclean start probe dirty-set inodes without a present dentry by handle, delete on ESTALE/
+  nlink 0, else refresh (directories included); (c) sweep at every start with a partial index on
+  nlink = 0 (or Destroy retires rows of open objects with no link). Each: finding config moves
+  into the real model; failing-first tests.
