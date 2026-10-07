@@ -939,3 +939,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   no exception? (recommended; until then they are the documented exception).
 - russ (2026-10-07): tools/fhtest.c (copied from fuse-generation-qemu) and tools/testutil.c stay C,
   excluded from the syscalls rule; third-party code is never rewritten.
+- russ (2026-10-07): style rules as AST checks (yes: 7.5b clang-query matchers, replaces the regex
+  test); a small hermetic ML model as a style gate (no: nondeterministic, slow, weak where it
+  matters; judgement rules stay with the merge review).

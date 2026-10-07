@@ -42,6 +42,18 @@ are then the same on every machine and in CI.
   `WarningsAsErrors: '*'`. Our code only, not `third_party/` or external
   repositories. CI runs it on every push; findings that are real bugs get
   a test first. It runs on the host (no root or kernel needed).
+- 7.5b Our own style rules as AST matchers (russ's idea, 2026-10-07): the
+  mechanical rules of `docs/style.md` that a regex cannot enforce (no
+  `absl::XError(StrCat(...))`, the `syscalls::` call form and no raw libc
+  syscall outside `syscalls.cc`, `ErrnoToStatus` for every syscall
+  failure, `enum class` only, ADL hooks as hidden friends, no nested
+  namespaces but `syscalls`/`sqlite3`) as a checked-in matcher file run
+  by `clang-query` (from the pinned LLVM) over every translation unit,
+  as a Bazel test; a clang-tidy plugin with the same matchers if we
+  outgrow it. Replaces 25.1b's regex `raw_syscalls_test`. Not adopted: a
+  small local ML model as a style judge (nondeterministic, slow on CPU
+  runners, weak on exactly the judgement rules; those stay with the
+  review at merge).
 - 7.6 Formatting enforced (russ, 2026-10-07; `docs/style.md`): the pinned
   LLVM's clang-format and a pinned buildifier (BCR or `http_file`) behind
   `bazel run //tools:format` (replaces `tools/format.sh`'s "if installed"),
