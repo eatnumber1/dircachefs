@@ -745,3 +745,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   - Next after the merges: 25.1 style convergence (after Phase 23), 24.2/24.3 continue, Phase 22
     cancellation, then Phase 7 with 7.6/7.7.
   - All Bazel servers die with the reboot: nothing to do; first commands restart them via sg kvm.
+- Second review of the Phase 23 fix commits (52890de..2941566) landed before the reboot: nothing
+  high or medium. Merge after: (a) a startup WARNING when max_held_fds computes to 0 (any soft
+  limit <= 64Ki, e.g. a 65,536 container hard limit; russ may prefer a softer curve below 128Ki) and
+  reworded cap warning; (b) nice-to-have: BeginAttrChanges tolerates NotFound per id; lib.sh checks
+  the busybox applets it uses exist (the usleep gap; no vacuous passes on main, flakes only; the
+  callers are listed in the review). Informational: FUSE inodes never carry S_APPEND, so F_SETFL
+  can clear O_APPEND and async passthrough writes (io_uring/AIO) ignore append-only (future work /
+  README). Batched phase 1 keeps tri-state per file, no model change; write_fd yield closes the old
+  fd; ASan 512 MB guests do not oversubscribe at local_test_jobs=2. DISABLED_immutable-ctime is
+  russ's decision (recorded above). FIRST AFTER THE REBOOT: send (a)+(b) to lane-1, then merge.
