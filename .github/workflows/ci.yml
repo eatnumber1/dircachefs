@@ -177,6 +177,24 @@ jobs:
             ~/.cache/bazelisk
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
+  tool-keys:
+    # Weekly (the schedule) and on demand: the pinned test tools must not
+    # depend on the sanitizer flags (//tools:tool_keys_test compares `bazel
+    # aquery` action keys under plain, asan and ubsan; docs/plan/notes/
+    # build-speed-2026-10-07.md). It starts a second Bazel server and loads
+    # every external repository again, so it is not part of the per-push
+    # jobs; //tools:tool_identity_test, which checks the same property from
+    # the built files, is in every tier.
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Compare the tools' action keys across configurations
+        run: bazel test --test_output=errors --cache_test_results=no //tools:tool_keys_test
+
   osv:
     # Dependency vulnerability scan (plan step 5.3; tools/sbom/README.md and
     # README.md "Dependency vulnerability scanning"). Only what the dcfs

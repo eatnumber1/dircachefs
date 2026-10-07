@@ -73,10 +73,13 @@ py_test(
     srcs = ["tool_keys_test.py"],
     args = [
         "--workspace-file=$(location //:MODULE.bazel)",
-        "--bazel=/usr/bin/bazel",
+        "--bazel=bazel",
     ],
     data = ["//:MODULE.bazel"],
-    env_inherit = ["HOME"],
+    env_inherit = [
+        "HOME",
+        "PATH",
+    ],
     main = "tool_keys_test.py",
     tags = [
         "local",
