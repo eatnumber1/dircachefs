@@ -210,5 +210,3 @@ if ! (cd "$ROOT" && find . | "$BUSYBOX_ABS" cpio -o -H newc >"$CPIO") ||
 	echo "mkinitramfs.sh: building the initramfs failed" >&2
 	exit 1
 fi
-
-echo "Initramfs: $OUT_ABS"

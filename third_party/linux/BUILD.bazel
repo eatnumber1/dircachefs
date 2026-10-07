@@ -23,7 +23,7 @@ filegroup(
 genrule(
     name = "config",
     srcs = [":package"],
-    outs = ["config"],
+    outs = ["kernel_config"],
     cmd = """
         for f in $(locations :package); do
             case "$$f" in
