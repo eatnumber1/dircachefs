@@ -73,7 +73,11 @@ process (its waves and file ownership table) is in `history.md`.
      the protocol changed (from Phase 12);
    - docs updated (`docs/design.md`, `README.md`) and no drift from the
      plan; if the plan was wrong, the phase file is corrected in the same
-     merge.
+     merge;
+   - every gate the step adds (a test or check whose job is to reject
+     something) has a committed self-check with a known-bad fixture
+     (Phase 26.1; `test/qemu/README.md` "Gates and their self-checks");
+     a gate without one is a review finding.
    Fixes go back to the same agent with `SendMessage` (it keeps its
    context, which is cheaper than a new agent).
 6. **Merge.** In the lane: rebase the step branch on `origin/main` and
