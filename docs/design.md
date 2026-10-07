@@ -1180,15 +1180,21 @@ Step 23.4.
   flags. Since every open of an inode shares one backing descriptor, which
   may predate a `chattr +i` or be read-only only because `O_RDWR` was
   refused while this open's `O_WRONLY | O_APPEND` would be allowed,
-  `DirCacheFS::Open` asks the backing filesystem again for a writable open
-  unless the shared descriptor is read-write and no flag was set through
-  dcfs since it was opened (flags change only through `Ioctl` under
-  exclusive access; this spares concurrent writers an extra open and close
-  of the backing file, with its `IN_CLOSE_WRITE` and lease breaks): a
-  reopen of the shared descriptor through `/proc/self/fd` with the open's
-  access mode, refused as the backing filesystem refuses it. When the
-  shared descriptor is read-only and the open is allowed, that reopened
-  descriptor becomes the inode's write descriptor, which fallback writes,
+  `DirCacheFS::Open` checks every writable open that shares an existing
+  descriptor. If that descriptor is read-write, the backing filesystem
+  allowed writing when it was opened and cannot be remounted read-only
+  while it is open, so only an immutable or append-only flag set since
+  can refuse the open, through dcfs or behind its back (review L-b): one
+  `FS_IOC_GETFLAGS` on the shared descriptor reads the flags from the
+  inode in memory (one syscall, no disk I/O, no open file the backing
+  filesystem would see), and the open is refused with `EPERM` as
+  `may_open` would (immutable, or append-only without `O_APPEND`). If it
+  is read-only, the shared descriptor is reopened through `/proc/self/fd`
+  with the open's access mode, refused as the backing filesystem refuses
+  it. When the shared descriptor is read-only and the open is allowed, that
+  reopened descriptor becomes the inode's write descriptor (the first
+  writer's; an `O_APPEND` one gives way to one without, review L-a; it
+  goes with the last writable open), which fallback writes,
   `fallocate` and `copy_file_range` use (review L1: they got `EBADF`). (Passthrough opens its own
   backing file with the caller's flags, from dcfs's descriptor's path, and
   without that check.)

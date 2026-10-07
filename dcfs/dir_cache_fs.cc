@@ -1376,18 +1376,42 @@ absl::Status DirCacheFS::Open(
   // Whether this open may write is the backing filesystem's call at open
   // time (an immutable or append-only file, step 23.4's chattr, or a
   // read-only filesystem; the kernel's own check sees no such flag on a
-  // FUSE inode). The shared backing fd does not say: it may predate the
-  // flag, or be read-only only because O_RDWR was refused while this
-  // open's mode (O_WRONLY | O_APPEND on an append-only file) is allowed.
-  // So ask the backing filesystem with this open's access mode (a reopen
-  // of an inode in memory), and refuse as it does -- unless the shared fd
-  // is read-write and no flag was set through dcfs since it was opened
-  // (flags change only through Ioctl, under exclusive access), which
-  // spares concurrent writers an extra open and close on the backing file
-  // (IN_CLOSE_WRITE, lease breaks). (Found by copy_test: after a
-  // chattr +i, a writable open succeeded and wrote.)
+  // FUSE inode). A shared backing fd made for this open (O_RDWR, which
+  // the backing filesystem allowed) answers it. One that was already
+  // there does not: it may predate a flag, set through dcfs or behind its
+  // back (review L-b), or be read-only only because O_RDWR was refused
+  // while this open's mode (O_WRONLY | O_APPEND on an append-only file)
+  // is allowed. (Found by copy_test: after a chattr +i, a writable open
+  // succeeded and wrote.)
   BackingFile &shared_file = backing_it->second;
-  if (writable && (!shared_file.writable || shared_file.flags_changed)) {
+  if (writable && shared && shared_file.writable) {
+    // A read-write fd outstanding: the backing filesystem allowed writing
+    // when it was opened, and while it is open the filesystem cannot be
+    // remounted read-only (a writer blocks that), so only an immutable or
+    // append-only flag set since can refuse this open. One FS_IOC_GETFLAGS
+    // on the shared fd reads them from the inode in memory (no disk I/O,
+    // one syscall, no open file the backing filesystem would notice), and
+    // this refuses as may_open() would: EPERM.
+    absl::StatusOr<std::string> got =
+        backing::IoctlFd(*shared_file.fd, FS_IOC_GETFLAGS, "", sizeof(int));
+    if (got.ok()) {
+      int flags = 0;
+      std::memcpy(&flags, got->data(), std::min(got->size(), sizeof(flags)));
+      if ((flags & FS_IMMUTABLE_FL) ||
+          ((flags & FS_APPEND_FL) && !(fi.flags & O_APPEND))) {
+        return dcfs::ErrnoToStatus(
+            EPERM, absl::StrCat("writable open of inode ", id,
+                                ": the backing file is ",
+                                (flags & FS_IMMUTABLE_FL) ? "immutable"
+                                                          : "append-only"));
+      }
+    } else if (int err = dcfs::StatusToErrno(got.status());
+               err != ENOTTY && err != EOPNOTSUPP && err != EINVAL) {
+      // (A filesystem without these flags answers ENOTTY or EOPNOTSUPP:
+      // nothing can refuse the open there.)
+      return got.status();
+    }
+  } else if (writable && !shared_file.writable) {
     // Through /proc/self/fd of the shared fd: the same object, and the
     // backing filesystem's own open-time checks (may_open).
     const int check_flags = (fi.flags & (O_ACCMODE | O_APPEND)) | O_CLOEXEC |
@@ -2397,10 +2421,6 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
   }
   absl::StatusOr<std::string> out = backing::IoctlFd(*fd, cmd, in, out_size);
   if (mutation.has_value()) mutation->End();
-  // The next writable open must ask the backing filesystem again (Open).
-  if (auto open = backing_files_.find(id); open != backing_files_.end()) {
-    open->second.flags_changed = true;
-  }
   if (!removed) {
     // Phase 3 (or, after a failure, best effort): refreshes, as fills.
     absl::Status refreshed = backing::RefreshAttrsFromFd(ctx_, id, *fd);

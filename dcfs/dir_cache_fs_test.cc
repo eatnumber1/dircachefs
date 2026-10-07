@@ -1413,6 +1413,34 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnImmutableFileIsRefused) {
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
+  int flags = 0;
+  const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(raw, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  const int immutable = flags | FS_IMMUTABLE_FL;
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
+  auto [ro, ro_fh] = Open(f, O_RDONLY);
+  EXPECT_EQ(ro.error, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  auto [rw, rw_fh] = Open(f, O_WRONLY);
+  EXPECT_EQ(rw.error, 0);
+  ::close(raw);
+  for (uint64_t h : {fh, ro_fh, rw_fh}) {
+    if (h != 0) {
+      EXPECT_EQ(Release(f, h).error, 0);
+    }
+  }
+}
+
+// The same with the flag set through dcfs (FUSE_IOCTL, as chattr on the
+// mount does).
+TEST_F(DirCacheFSTest, WritableOpenAfterChattrThroughDcfsIsRefused) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
   Reply get = Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int));
   ASSERT_EQ(get.error, 0);
   int flags = 0;
@@ -1430,6 +1458,33 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnImmutableFileIsRefused) {
   auto [rw, rw_fh] = Open(f, O_WRONLY);
   EXPECT_EQ(rw.error, 0);
   for (uint64_t h : {fh, ro_fh, rw_fh}) {
+    if (h != 0) {
+      EXPECT_EQ(Release(f, h).error, 0);
+    }
+  }
+}
+
+// Append-only behind dcfs's back, with a read-write shared fd: a writable
+// open without O_APPEND is refused, one with it allowed, as the backing
+// filesystem decides (review L-b).
+TEST_F(DirCacheFSTest, WritableOpenOfAnAppendOnlyFileNeedsOAppend) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  int flags = 0;
+  const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
+  ASSERT_GE(raw, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  const int append_only = flags | FS_APPEND_FL;
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &append_only), 0);
+  EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
+  auto [app, app_fh] = Open(f, O_WRONLY | O_APPEND);
+  EXPECT_EQ(app.error, 0);
+  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  ::close(raw);
+  for (uint64_t h : {fh, app_fh}) {
     if (h != 0) {
       EXPECT_EQ(Release(f, h).error, 0);
     }

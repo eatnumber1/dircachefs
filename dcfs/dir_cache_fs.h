@@ -509,10 +509,6 @@ class DirCacheFS {
     // not (review L-a); dropped when writable_refs reaches 0.
     std::optional<FileDescriptor> write_fd;
     bool write_fd_appends = false;
-    // Whether an ioctl changed the file's flags (chattr) since `fd` was
-    // opened: a writable open then asks the backing filesystem again even
-    // though `fd` is read-write (see Open).
-    bool flags_changed = false;
     // The descriptor fallback writes, fallocate and copy_file_range use.
     int WriteFd() const { return write_fd.has_value() ? **write_fd : *fd; }
     void DropWriteFd() {
