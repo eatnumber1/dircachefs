@@ -949,3 +949,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   recording (yes), 26.4 ratchets on deterministic counts only (yes-ish, brittleness), 26.5 limited
   mutation testing (yes), 26.6 fast in-process fault enumeration (proposed; needs yes), reference-
   model differential testing dropped (pjdfstest/xfstests/fsstress + TLA+ test generation cover it).
+- 12.3 merged (2c3d79c, 5 commits). Uncached: formal 43/45 (large_test and nolock_test hit 900 s
+  under load 20; their inputs are unchanged from main where they pass in 460/322 s: rerun at the
+  next quiet moment / sync point), harness trace test 49/49, guest trace tests 4/4, fast 104/104.

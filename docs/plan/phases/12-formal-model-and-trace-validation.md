@@ -160,7 +160,10 @@ In this order, each with a known-bug variant and trace validation:
 - 12.3 adds a coherence parameter (NFS close-to-open vs delegation):
   `Exclusive` keeps CacheNeverWrong; `CloseToOpen` admits out-of-band
   changes with the weaker "fresh as of the open" invariant, making the
-  documented limitation a checked statement.
+  documented limitation a checked statement. (Status 2026-10-07: 12.3
+  shipped `OutOfBand` as the parameter and `formal/limitations/` as the
+  checked statements of what breaks without exclusive access; the weaker
+  "fresh as of the open" invariant is NOT written; deferred to 12.6+.)
 - 12.8 Backing crash model with tree sequences (Ferrite, DFSCQ): an
   ordered sequence of backing states since the last sync replaces the set
   of crash states; a constant selects sequential / metadata-prefix /
@@ -180,3 +183,21 @@ Phase 11 gains ACE's crash workloads (Apache-2.0) as inputs to the
 dm-log-writes replay, oracle "dcfs view equals the backing after
 recovery"; SibylFS's scripts (ISC) as a differential trace diff of dcfs
 against the backing only if pjdfstest, fsx and fsstress leave gaps.
+
+## 12.3 done (2026-10-07, 2c3d79c)
+
+`formal/reval.tla` (not `fds.tla`: the widened revalidation model), with
+`MC_reval`, `MC_reval_oob`, `MC_reval_liveness` (the last a smoke check:
+under exclusive access the safety invariants already force convergence;
+the real liveness content is `limitations/out_of_band_stale`);
+known-bug variants: no re-check (the pre-Phase-23 bug), re-check only
+when flags changed through dcfs (the bypass with OutOfBand; passes
+without), casefold, no write fd, write fd replaced by a later writer,
+write fd never dropped; `formal/limitations/` for out-of-band mode,
+casefold and staleness. Trace validation: `FileOpened`/`FileReleased`
+events, `ioctl_arg`, setattr `to_set`, per-file `DCFS-REVAL` traces,
+`oob` lines from tests (`NoteOutOfBand`), harness only: the guest
+recorder does not yet write file traces (gap documented in
+formal/README.md). Every T_* branch is taken by a validated trace except
+T_Write's EBADF (unreachable in fixed code). Review: merge as is +
+follow-ups done. Deviation: recorder unit tests written after the code.

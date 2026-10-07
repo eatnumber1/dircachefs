@@ -40,7 +40,7 @@ phase's file; `log.md` says where things stand.
 | 10 | [Benchmarks](phases/10-benchmarks.md) | done 2026-10-06 (baseline recorded; readdir 27x slower than backing: investigation in lane-4) |
 | 11 | [Crash, stress and failure testing](phases/11-crash-stress-failure-testing.md) | planned |
 | — | **Trial point:** [21.1 trial on a spare disk](phases/21-real-hardware-checks.md) (russ, manual) | after 11 |
-| 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | 12.1-12.2 done 2026-10-07 (two review rounds; russ to read formal/README.md); 12.3 revalidation model started 2026-10-07, lane-3 |
+| 12 | [Formal model (TLA+) and trace validation](phases/12-formal-model-and-trace-validation.md) | 12.1-12.2 done 2026-10-07 (two review rounds; russ to read formal/README.md); 12.3 revalidation model done 2026-10-07 (2c3d79c); 12.4-12.10 planned |
 | 23 | [Semantics gaps: mmap/FORGET reconcile, removed objects, relatime, O_TMPFILE/copy_file_range/reflinks/ioctls, boundary stubs](phases/23-semantics-gaps.md) | done 2026-10-07 (23.1-23.5 e5c27cc; 23.6 held fd + 23.7 review fixes a64e666, two review rounds; one open investigation, see phase file) |
 | 24 | [Alpine series pins for the kernel and host tools](phases/24-alpine-series-pins.md) | done 2026-10-07 (d0b2cc2: kernel linux-virt 6.18 + QEMU, e2fsprogs, xfsprogs, btrfs-progs, busybox from Alpine v3.24; ~30 min of cold compiles -> 22 s fetch; two review rounds) |
 | 25 | [Style convergence](phases/25-style-convergence.md) | in progress (25.1 started 2026-10-07, lane-1; 25.2 after it; format items in 7.6/7.7) |
