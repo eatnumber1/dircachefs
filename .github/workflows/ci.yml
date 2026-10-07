@@ -29,8 +29,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  # New advisories against unchanged pins: only the `osv` job runs on the
-  # schedule (the test jobs are skipped), so it needs no code change.
+  # The schedule exists only for what changes without a commit: OSV
+  # advisories and the `tool-keys` check. The test jobs are skipped on it.
   schedule:
     - cron: "17 5 * * 1"
 
