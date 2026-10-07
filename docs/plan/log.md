@@ -1378,3 +1378,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   guests too (they were capped at 60 s regardless: the real cause of the harness timeouts under
   load; verdict test failed first). presubmit+formal 220 pass + 2 skips. 26.6 (fault enumeration
   by call site, runtime to be reported) and then 26.4b dispatched to the same agent.
+- 6.4a-c (host-only tests incompatible under sanitizer/coverage configs; destroy_test 20k; TLC
+  workers follow the CPUs) added to lane-5's CI round, ahead of its Phase 8 cheap-gaps round.
