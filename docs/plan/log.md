@@ -896,3 +896,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   recorder gap documented). Failing first: harness trace rejected by the no-recheck variant
   ("explains 3 of 10 events"). Formal 44/44, fast 101/101. Recorder unit tests written after the
   code (deviation). Under review (dcfs-reviewer).
+- 12.3 review: merge as is (model faithful; matches the code at the tip; variants reproduce the
+  Phase 23 counterexamples; exclusive config passes for the right reason; production footprint
+  negligible, no behaviour change). Follow-ups before merge (sent): F3 invariant that wfd exists
+  only beside writers over a read-only shared fd + BugWriteFdNeverDropped variant; F1 the liveness
+  config is trivial under exclusive access; F5 harness test for a refused SETFLAGS and FSSETXATTR.
+  F4 (plan: coherence parameter not implemented; Done note) is the orchestrator's at merge.
