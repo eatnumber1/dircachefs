@@ -2846,9 +2846,8 @@ TEST_F(DirCacheFSTest, AGoneStubIsStale) {
   auto [lookup, entry] = Lookup(kRootInode, "mp");
   ASSERT_EQ(lookup.error, 0);
   const InodeId stub = static_cast<InodeId>(entry.nodeid);
-  ASSERT_THAT(cache::MarkUnknown(ctx_, kRootInode,
-                                 std::vector<std::string>{"mp"}),
-              IsOk());
+  // Relisted as something else (here: gone).
+  ASSERT_THAT(cache::SetNegative(ctx_, kRootInode, "mp"), IsOk());
   EXPECT_EQ(Lookup(stub, "x").first.error, -ESTALE);
   EXPECT_EQ(Opendir(stub).error, -ESTALE);
   EXPECT_EQ(Mkdir(stub, "x").first.error, -ESTALE);
@@ -2875,7 +2874,8 @@ TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
   ASSERT_EQ(Cached(kRootInode, "mp").first, LookupResult::Kind::kUnknown);
   auto [second, second_entry] = Lookup(kRootInode, "mp");
   ASSERT_EQ(second.error, 0);
-  EXPECT_GE(second_entry.nodeid, kFirstStubNodeid);
+  EXPECT_EQ(second_entry.nodeid, first_entry.nodeid);
+  EXPECT_EQ(second_entry.generation, first_entry.generation);
   EXPECT_EQ(Cached(kRootInode, "mp").first, LookupResult::Kind::kRefused);
 
   // Once the name is no longer a boundary, the stub goes with the refusal.
@@ -2890,6 +2890,49 @@ TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
   // The old stub's nodeid is stale now.
   EXPECT_EQ(Getattr(static_cast<InodeId>(second_entry.nodeid)).first.error,
             -ESTALE);
+}
+
+// An out-of-band change in a directory holding two boundaries forgets
+// their refusals (ForgetNegativeDentries, before its relisting): each
+// stub's nodeid still answers for its own boundary meanwhile, and the
+// names refused again, in the other order, keep their nodeids and
+// generations; no nodeid passes to the other boundary
+// (formal/findings/lifetime_stub_nodeid_reused, fixed).
+TEST_F(DirCacheFSTest, ForgottenStubsKeepTheirNodeids) {
+  ASSERT_EQ(::mkdir(Path("mp1").c_str(), 0755), 0);
+  ASSERT_EQ(::mkdir(Path("mp2").c_str(), 0755), 0);
+  Start();
+  MountBelow("mp1");
+  MountBelow("mp2");
+  ASSERT_EQ(::chmod(Path("mp1").c_str(), 0700), 0);
+  ASSERT_EQ(::chmod(Path("mp2").c_str(), 0755), 0);
+  auto [l1, e1] = Lookup(kRootInode, "mp1");
+  auto [l2, e2] = Lookup(kRootInode, "mp2");
+  ASSERT_EQ(l1.error, 0);
+  ASSERT_EQ(l2.error, 0);
+  ASSERT_NE(e1.nodeid, e2.nodeid);
+  const InodeId stub1 = static_cast<InodeId>(e1.nodeid);
+  const InodeId stub2 = static_cast<InodeId>(e2.nodeid);
+
+  ASSERT_THAT(cache::ForgetNegativeDentries(ctx_, kRootInode), IsOk());
+  auto [g1, a1] = Getattr(stub1);
+  ASSERT_EQ(g1.error, 0);
+  EXPECT_EQ(a1.mode & 07777, 0700u);
+
+  auto [m2, f2] = Lookup(kRootInode, "mp2");
+  auto [m1, f1] = Lookup(kRootInode, "mp1");
+  ASSERT_EQ(m2.error, 0);
+  ASSERT_EQ(m1.error, 0);
+  EXPECT_EQ(f1.nodeid, e1.nodeid);
+  EXPECT_EQ(f1.generation, e1.generation);
+  EXPECT_EQ(f2.nodeid, e2.nodeid);
+  EXPECT_EQ(f2.generation, e2.generation);
+  auto [h1, b1] = Getattr(stub1);
+  auto [h2, b2] = Getattr(stub2);
+  ASSERT_EQ(h1.error, 0);
+  ASSERT_EQ(h2.error, 0);
+  EXPECT_EQ(b1.mode & 07777, 0700u);
+  EXPECT_EQ(b2.mode & 07777, 0755u);
 }
 
 // Backing inode numbers at or above 2^63 are the stubs' (and, from Phase

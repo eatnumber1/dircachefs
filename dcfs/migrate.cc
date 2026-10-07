@@ -266,6 +266,43 @@ absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
   return absl::OkStatus();
 }
 
+// v4 -> v5 (step 12.4b): the stub nodeids' high-water mark, from the stubs
+// there are (an id that went before cannot be known: one may come back
+// once, as it could before), and the triggers that keep a forgotten
+// refusal's stub. The column only if missing: a test that makes an older
+// database from a fresh one may keep it.
+absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * column,
+      db.Prepared("SELECT 1 FROM pragma_table_info('cache_state') "
+                  "WHERE name = 'last_stub_id'"));
+  ABSL_ASSIGN_OR_RETURN(bool has_column, column->Step());
+  ABSL_RETURN_IF_ERROR(column->Reset());
+  if (!has_column) {
+    ABSL_RETURN_IF_ERROR(db.Exec(
+        "ALTER TABLE cache_state ADD COLUMN last_stub_id INTEGER NULL"));
+  }
+  ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
+    UPDATE cache_state SET last_stub_id = (SELECT MAX(id) FROM stubs)
+        WHERE id = 1;
+    DROP TRIGGER IF EXISTS dentries_unrefused;
+    DROP TRIGGER IF EXISTS dentries_refused_deleted;
+    CREATE TRIGGER dentries_unrefused AFTER UPDATE OF state ON dentries
+        WHEN OLD.state IN ('refused', 'unknown')
+             AND NEW.state IN ('present', 'absent') BEGIN
+      DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
+    END;
+    CREATE TRIGGER dentries_refused_deleted AFTER DELETE ON dentries
+        WHEN OLD.state IN ('refused', 'unknown') BEGIN
+      DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
+    END;
+    UPDATE cache_state SET schema_version = 5 WHERE id = 1;
+  )sql"));
+  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  RET_CHECK_EQ(version, 5);
+  return absl::OkStatus();
+}
+
 // Upgrades an existing database, one version at a time, to kSchemaVersion,
 // in one transaction. A version newer than this build's is refused.
 absl::Status UpgradeSchema(sqlite3::Connection &db) {
@@ -287,6 +324,10 @@ absl::Status UpgradeSchema(sqlite3::Connection &db) {
     if (version == 3) {
       ABSL_RETURN_IF_ERROR(MigrateV3ToV4(db));
       version = 4;
+    }
+    if (version == 4) {
+      ABSL_RETURN_IF_ERROR(MigrateV4ToV5(db));
+      version = 5;
     }
     RET_CHECK_EQ(version, kSchemaVersion);
     return absl::OkStatus();

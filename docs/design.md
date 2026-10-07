@@ -371,18 +371,26 @@ served.
   from 256, so none is ever met). A directory containing one cannot be
   listed.
 - **Record.** `cache::SetRefused` writes the dentry and its `stubs` row in
-  one transaction: the next nodeid up from 2^63, a random nonzero
-  generation (as for inode rows: a nodeid handed out again after its stub
-  went never comes back with an old generation), and the boundary root's
-  attributes from the probe's `statx`. A name refused again keeps its stub
-  (nodeid and generation) and refreshes the attributes. They are therefore
+  one transaction: the next nodeid up from the highest ever handed out
+  (`cache_state.last_stub_id`, advanced in the same transaction, from
+  2^63; step 12.4b: a stub's nodeid is never handed out again, since a
+  kernel may still hold it), a random nonzero generation (as for inode
+  rows), and the boundary root's attributes from the probe's `statx`. A
+  name refused again keeps its stub (nodeid and generation) and refreshes
+  the attributes, also after its refusal was forgotten meanwhile (the
+  kernel's revalidation of the name must find the nodeid it holds:
+  another would detach a mount sitting on the stub). They are therefore
   as of the last probe (review L4): the other filesystem's root changes
   through its own mount without dcfs hearing of it, and the stub keeps the
-  old values, across restarts, until the directory is listed again. Triggers delete
-  the stub whenever its dentry stops being refused (a mutation's phase 1,
-  an out-of-band relisting, recovery) or goes, and the foreign key with
-  its parent, so a `stubs` row exists exactly while its dentry is
-  `refused`. The attributes have no unknown state of their own: dcfs never
+  old values, across restarts, until the directory is listed again. A
+  refusal forgotten (a mutation's phase 1, or `ForgetNegativeDentries`
+  before an out-of-band relisting) makes the dentry unknown and keeps the
+  stub; triggers delete the stub when the dentry is recorded present or
+  absent (relisted as something else, or gone) or deleted (a relisting
+  that does not find it, recovery), and the foreign key with its parent,
+  so a `stubs` row exists while its dentry is `refused`, or `unknown`
+  since it was. An unknown dentry is served as unknown (a lookup probes
+  it again); its stub only answers requests on its nodeid meanwhile. The attributes have no unknown state of their own: dcfs never
   changes them (every change to a stub is refused), so the dentry's
   present/absent/unknown/refused state is the record the tri-state rule
   applies to. A listing or probe that could not record its result (a
@@ -400,11 +408,7 @@ served.
   an ioctl with `ENOTTY`, and a `RENAME` or `LINK` across it, or of the
   stub itself, with `EXDEV`. A stub whose row is gone (its dentry stopped
   being refused) is a stale nodeid: `ESTALE`, so the kernel looks the
-  name up again (not yet in one case: its nodeid can be handed out again
-  to another stub while the kernel holds it, which answers the old holder
-  with the other stub and then gets `EIO` from the kernel; the lifetime
-  model's finding `lifetime_stub_nodeid_reused`, `formal/README.md`). The
-  kernel looks a link's or rename's target name up
+  name up again. The kernel looks a link's or rename's target name up
   before sending the request, so a link or rename *into* a stub fails at
   that lookup, with `ENOTSUP`.
 - **Not done here** (Phase 15.4): the bind form's recorded mount points,
@@ -450,6 +454,7 @@ dentries, which have no stub, become unknown and are probed again.
 | `source_device_id` | `DeviceId::Serialize()` of the source filesystem, written once at creation. |
 | `clean_shutdown` | 1 after a clean shutdown (backing synced, dirty set empty, WAL checkpointed); set to 0, durably, at every start. 0 at the next start means the last run crashed. |
 | `boot_id` | `/proc/sys/kernel/random/boot_id` at the last start, so that recovery can log whether the machine rebooted (a kernel crash or power loss) or only the daemon died. |
+| `last_stub_id` | The highest boundary stub nodeid ever handed out (NULL before the first): the next stub's is the one above, so none is handed out twice ([Boundary stubs](#boundary-stubs)). |
 
 Access goes through typed accessors in `dcfs/migrate.h`.
 
@@ -556,8 +561,10 @@ must neither include nor silently omit a name whose state is unknown.
 | `fuse_gen` | Random, nonzero. |
 | `mode`, ..., `btime_*` | The boundary root's attributes, from the last probe. |
 
-A row exists exactly while its dentry is `refused` (`cache::SetRefused`
-and the triggers `dentries_unrefused` and `dentries_refused_deleted`). See
+A row exists while its dentry is `refused`, or `unknown` since it was
+(`cache::SetRefused` and the triggers `dentries_unrefused` and
+`dentries_refused_deleted`); `cache_state.last_stub_id` is the highest id
+ever handed out. See
 [Boundary stubs](#boundary-stubs).
 
 ### `symlinks`
@@ -1734,10 +1741,10 @@ not count and nothing it keeps outlives the last `FORGET`; and after a
 crash the start sweeps every unnamed row. Variants put back a non-final
 `FORGET` dropping the held descriptor or the removed record, the pre-23.7
 crash that left an `O_TMPFILE` row behind, and a `FORGET_MULTI` counted as
-one. It found three minor gaps, kept as tests that expect them
-(`formal/findings/`): a stub's nodeid can be handed out again while the
-kernel still holds it (after any out-of-band change in its parent), and a
-row of a removed object survives the start's sweep after a crash between
+one, and a stub's nodeid handed out again while the kernel still holds it
+(a gap the model found, fixed in step 12.4b). It found two more minor
+gaps, kept as tests that expect them (`formal/findings/`): a row of a
+removed object survives the start's sweep after a crash between
 an unlink's syscall and its phase 3, or after a `DESTROY` with the
 unlinked file still open for reading (a clean shutdown, so no sweep). Nodeids' traces from the forged-request harness are validated
 against it (`formal/README.md`, "The lifetime model").

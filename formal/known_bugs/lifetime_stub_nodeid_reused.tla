@@ -1,0 +1,21 @@
+-------------------- MODULE lifetime_stub_nodeid_reused ---------------------
+(***************************************************************************)
+(* Found by this model (formerly findings/), fixed in step 12.4b: a stub's *)
+(* nodeid was the next up from the highest live stub's (cache::SetRefused, *)
+(* MAX(id) + 1), so once the highest stub went the next refused name got   *)
+(* its nodeid again, which the kernel could still hold for the old one.    *)
+(* Stubs went on any out-of-band change detected in their parent           *)
+(* (ForgetNegativeDentries deleted every refused dentry there, the trigger *)
+(* their stubs, and the relisting minted them again in listing order: two  *)
+(* boundaries could swap nodeids); the kernel's revalidation then found    *)
+(* the same nodeid with a different generation and marked the old inode    *)
+(* bad (EIO). The fix: a persisted high-water mark                         *)
+(* (cache_state.last_stub_id), and stubs kept while their refusal is only  *)
+(* forgotten.                                                              *)
+(*                                                                         *)
+(* Put in by BugStubIdFromMax, with OutOfBand. Expected: NodeidStable is   *)
+(* violated: refuse m1 (stub 11); look it up; m1's stub goes; refuse m2:   *)
+(* stub 11 again, which the kernel holds for m1.                           *)
+(***************************************************************************)
+EXTENDS MClifetime
+=============================================================================

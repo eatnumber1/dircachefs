@@ -160,7 +160,7 @@ TEST_F(MigrateTest, V3DatabaseGainsStubsAndForgetsItsRefusals) {
               IsOk());
 
   ASSERT_THAT(Migrate(db_, root), IsOk());
-  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(4));
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
   EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name IN ('stubs', "
                              "'dentries_refused', 'dentries_unrefused', "
                              "'dentries_refused_deleted')"),
@@ -173,9 +173,10 @@ TEST_F(MigrateTest, V3DatabaseGainsStubsAndForgetsItsRefusals) {
               IsOkAndHolds(1));
 }
 
-// The stubs triggers: a stub goes when its dentry stops being refused and
-// when the dentry is deleted. (That it goes with its parent's row is
-// metadata_cache_test's StubsLiveWithTheirRefusals.)
+// The stubs triggers: a stub goes when its dentry is recorded present or
+// absent (relisted as something else, or gone) and when the dentry is
+// deleted; a dentry merely forgotten (unknown) keeps it. (That it goes with
+// its parent's row is metadata_cache_test's StubsLiveWithTheirRefusals.)
 TEST_F(MigrateTest, StubsGoWithTheirRefusals) {
   ASSERT_THAT(Migrate(db_, TestRoot()), IsOk());
   auto add = [&](std::string_view name_hex, int64_t id) {
@@ -195,8 +196,19 @@ TEST_F(MigrateTest, StubsGoWithTheirRefusals) {
   ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'unknown' "
                        "WHERE name = x'61'"),
               IsOk());
+  EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(2));
+  ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'absent' "
+                       "WHERE name = x'61'"),
+              IsOk());
   EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(1));
   ASSERT_THAT(db_.Exec("DELETE FROM dentries WHERE name = x'62'"), IsOk());
+  EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(0));
+  // ... and a forgotten one deleted (a relisting that does not find it).
+  add("65", -9223372036854775807 + 3);
+  ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'unknown' "
+                       "WHERE name = x'65'"),
+              IsOk());
+  ASSERT_THAT(db_.Exec("DELETE FROM dentries WHERE name = x'65'"), IsOk());
   EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(0));
   // A refused dentry staying refused keeps its stub.
   add("63", -9223372036854775807 + 1);
@@ -208,6 +220,44 @@ TEST_F(MigrateTest, StubsGoWithTheirRefusals) {
   EXPECT_FALSE(db_.Exec("INSERT INTO stubs VALUES (5, 1, x'64', 7, 16877, "
                         "2, 0, 0, 0, 0, 0, 4096, 0, 0, 0, 0, 0, 0, 0, 0)")
                    .ok());
+}
+
+// Step 12.4b: a v4 cache gains the stub high-water mark (the highest stub
+// nodeid it ever handed out, so that none is handed out again) and the
+// triggers that keep a forgotten refusal's stub.
+TEST_F(MigrateTest, V4DatabaseGainsTheStubHighWaterMark) {
+  RootIdentity root = TestRoot();
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  ASSERT_THAT(db_.ExecScript(R"sql(
+    ALTER TABLE cache_state DROP COLUMN last_stub_id;
+    DROP TRIGGER dentries_unrefused;
+    DROP TRIGGER dentries_refused_deleted;
+    CREATE TRIGGER dentries_unrefused AFTER UPDATE OF state ON dentries
+        WHEN OLD.state = 'refused' AND NEW.state != 'refused' BEGIN
+      DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
+    END;
+    CREATE TRIGGER dentries_refused_deleted AFTER DELETE ON dentries
+        WHEN OLD.state = 'refused' BEGIN
+      DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
+    END;
+    INSERT INTO dentries (parent, name, state, inode)
+        VALUES (1, x'61', 'refused', NULL);
+    INSERT INTO stubs VALUES (-9223372036854775806, 1, x'61', 7, 16877, 2,
+        0, 0, 0, 0, 0, 4096, 0, 0, 0, 0, 0, 0, 0, 0);
+    UPDATE cache_state SET schema_version = 4;
+  )sql"),
+              IsOk());
+
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
+  EXPECT_THAT(CountRows(db_, "cache_state WHERE "
+                             "last_stub_id = -9223372036854775806"),
+              IsOkAndHolds(1));
+  ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'unknown'"), IsOk());
+  EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(1));
+  // Opening it again is a no-op.
+  EXPECT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
 }
 
 TEST_F(MigrateTest, WrongSchemaVersionFailsPrecondition) {

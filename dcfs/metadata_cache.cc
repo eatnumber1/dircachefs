@@ -808,10 +808,11 @@ absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
   InodeId stub = 0;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, parent));
-    // Before the stub: a dentry that was not refused yet must not take an
-    // old stub of the same name with it (the triggers), and one that was
-    // keeps its stub (an upsert that leaves the state 'refused' fires
-    // neither trigger).
+    // The dentry first. A stub of the same name exists only if the dentry
+    // was refused, or forgotten since (unknown): the triggers delete it
+    // when the dentry is recorded present or absent. That stub is kept,
+    // with its nodeid and generation (the kernel's revalidation of the name
+    // must find the nodeid it holds).
     ABSL_RETURN_IF_ERROR(PutDentry(ctx, parent, name, "refused", std::nullopt));
     ABSL_ASSIGN_OR_RETURN(
         Statement * existing,
@@ -831,19 +832,27 @@ absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
       ABSL_RETURN_IF_ERROR(update->Bind(1 + kNumAttrColumns, stub));
       return update->ExecuteOnce();
     }
-    // The next nodeid up from kFirstStubId (2^63). Ids of stubs that went
-    // may come back; the random generation tells their holders apart.
-    ABSL_ASSIGN_OR_RETURN(Statement * next,
-                          Query(ctx, "SELECT MAX(id) FROM stubs"));
-    std::optional<int64_t> max;
-    ABSL_RETURN_IF_ERROR(ReadOne(*next, [&](Statement &row) {
-                           max = row.Column<std::optional<int64_t>>(0);
-                           return absl::OkStatus();
-                         }).status());
-    if (max.has_value() && *max == -1) {
+    // The next nodeid up from the highest ever handed out
+    // (cache_state.last_stub_id), or kFirstStubId (2^63): never one a
+    // stub that went had, which a kernel may still hold
+    // (formal/lifetime.tla's NodeidStable).
+    ABSL_ASSIGN_OR_RETURN(
+        Statement * last,
+        Query(ctx, "SELECT last_stub_id FROM cache_state WHERE id = 1"));
+    std::optional<int64_t> highest;
+    ABSL_ASSIGN_OR_RETURN(bool has_state, ReadOne(*last, [&](Statement &row) {
+                            highest = row.Column<std::optional<int64_t>>(0);
+                            return absl::OkStatus();
+                          }));
+    RET_CHECK(has_state) << "the cache_state row is missing";
+    if (highest.has_value() && *highest == -1) {
       return ResourceExhaustedErrorBuilder() << "no boundary stub nodeid left";
     }
-    stub = max.has_value() ? *max + 1 : kFirstStubId;
+    stub = highest.has_value() ? *highest + 1 : kFirstStubId;
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx, "UPDATE cache_state SET last_stub_id = ? WHERE id = 1",
+                stub)
+            .status());
     const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed,
                                             ctx.rng, uint32_t{1}, UINT32_MAX);
     ABSL_ASSIGN_OR_RETURN(
@@ -962,8 +971,16 @@ absl::Status ForgetNegativeDentries(Context &ctx, InodeId dir) {
     ABSL_RETURN_IF_ERROR(RequireInode(ctx, dir));
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "DELETE FROM dentries "
-                "WHERE parent = ? AND state IN ('absent', 'refused')",
+                "DELETE FROM dentries WHERE parent = ? AND state = 'absent'",
+                dir)
+            .status());
+    // A refusal is forgotten, not deleted: its stub stays (schema.sql), so
+    // that the relisting, if it finds the name refused again, keeps its
+    // nodeid and generation.
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "UPDATE dentries SET state = 'unknown' "
+                "WHERE parent = ? AND state = 'refused'",
                 dir)
             .status());
     return MarkIncomplete(ctx, dir);

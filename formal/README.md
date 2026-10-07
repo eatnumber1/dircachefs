@@ -1154,7 +1154,7 @@ rollback is `dcfs.tla`'s).
 ```sh
 bazel test //formal:lifetime_test //formal:lifetime_stubs_test
 bazel test //formal:known_bug_lifetime_nonfinal_forget_drops_held_test  # and the other known_bug_lifetime_*
-bazel test //formal:finding_lifetime_stub_nodeid_reused_test            # and the other finding_lifetime_*
+bazel test //formal:finding_lifetime_crash_before_settle_test           # and the other finding_lifetime_*
 bazel test //formal:trace_life_nonfinal_forget_test                     # and the other trace_life_*
 ```
 
@@ -1202,7 +1202,7 @@ dcfs counted).
 | Property | Says |
 |---|---|
 | `NodeidStable` | (1) a nodeid the kernel holds resolves to the object it was handed out for, or to `ESTALE`, never to another (stubs' nodeids included) |
-| `ReferencedServed` | ... and never to `ESTALE`: the kernel's reference keeps a removed object reachable, as on a local filesystem (step 23.2) |
+| `ReferencedServed` | ... and never to `ESTALE`: the kernel's reference keeps a removed object reachable, as on a local filesystem (step 23.2); not for a stub that went after an out-of-band change (`ESTALE` is its answer) |
 | `NotRetiredWhileReferenced` | (2) an object's row or removed record goes only when the kernel holds no lookup, no file is open and no held descriptor is left; a removed record never stands beside a row |
 | `HeldOnlyWhileWritten` | (3) a `written_` entry (so a held descriptor) exists only for a file with a writable open since `k` last rose from 0, whose last `FORGET` has not come, and which still has its row (dcfs's own removal of its last link drops it) |
 | `WrittenUntilLastForget` | ... and such a file keeps it until its last `FORGET`, the only later event at which a store through a mapping after close can be seen |
@@ -1214,9 +1214,9 @@ dcfs counted).
 Two of them hold by construction and are there to say so: `NodeidStable`
 for rows (ids come from a counter that never goes back, `AUTOINCREMENT`,
 and a crash resets the kernel), and `KernelForgotAfterCrash` (`Crash` and
-`Destroy` reset every nodeid). Their content is the stubs' nodeids, which
-are reused ([findings](#findings-of-the-lifetime-model)), and the
-variants that break the counting.
+`Destroy` reset every nodeid). Their content is the stubs' nodeids
+(`known_bugs/lifetime_stub_nodeid_reused`) and the variants that break the
+counting.
 
 ### Configurations
 
@@ -1227,12 +1227,12 @@ workers; a loaded machine takes up to three times as long).
 |---|---|---|---|---|
 | `MC_lifetime.cfg` | `lifetime_test` (medium) | names a, b (o1, o2), o3 to create, 2 row ids, lookups to 2, 2 opens per nodeid, 1 crash; every property but `RowsNameLiveObjects` | 318,324 | ~40 s |
 | `MC_lifetime_destroy_opens.cfg` | `lifetime_destroy_opens_test` (medium) | as above with 1 open per nodeid and `DestroyWithOpens`; every property but `RowsNameLiveObjects` and `UnnamedRowsSwept` (a finding) | 110,125 | ~20 s |
-| `MC_lifetime_stubs.cfg` | `lifetime_stubs_test` (medium) | 1 row id, 2 refused names, 2 stub nodeids (stubs never go: exclusive access) | 32,890 | ~7 s |
+| `MC_lifetime_stubs.cfg` | `lifetime_stubs_test` (medium) | 1 row id, 2 refused names, 2 stub nodeids, stubs going after out-of-band relistings (`OutOfBand`; `ReferencedServed` then excludes stubs, whose answer after going is `ESTALE`) | 135,094 | ~45 s |
 
 Coverage (`-coverage 1`): on `MC_lifetime.cfg` every action fires except
 the stubs' (no refused names there); `MC_lifetime_stubs.cfg` takes `Refuse`
 and `LookupStub` (its one row id leaves `Create` nothing to make).
-`StubGone` needs `OutOfBand` (`findings/lifetime_stub_nodeid_reused`).
+`StubGone` needs `OutOfBand`, which `MC_lifetime_stubs.cfg` has.
 
 ### Known bugs and findings
 
@@ -1245,17 +1245,18 @@ tier, a few seconds each).
 | `known_bugs/lifetime_nonfinal_forget_drops_rec` | a `FORGET` that is not the last ends the removed record | `ReferencedServed` | two lookups of a; unlink a (held; phase 3 makes the record); a `FORGET` of one: nothing pins the object, and the nodeid the kernel holds resolves to `ESTALE` |
 | `known_bugs/lifetime_tmpfile_row_survives_crash` | no sweep of unnamed rows at the start (before step 23.7, review L5) | `UnnamedRowsSwept` | `TMPFILE`; crash; start: its row stays, nothing open |
 | `known_bugs/lifetime_forget_multi_counted_as_one` | each `FORGET_MULTI` entry takes off one lookup, not its nlookup | `LookupsExact` | two lookups of a; a `FORGET_MULTI` of both: dcfs counts one left, the kernel none (and a record or held descriptor would outlive the last `FORGET`) |
+| `known_bugs/lifetime_stub_nodeid_reused` | found by this model (formerly a finding), fixed in step 12.4b: a stub's nodeid was the next up from the highest live stub's (`MAX(id) + 1`), so once the highest stub went, the next refused name got its nodeid again, which the kernel could still hold. Stubs went on any out-of-band change detected in their parent (`ForgetNegativeDentries` deleted every refused dentry and the trigger its stub; the relisting minted them again in listing order, so two boundaries could swap nodeids), and the kernel's revalidation then marked the old inode bad (`EIO`). Fixed by `cache_state.last_stub_id` (a persisted high-water mark; not `AUTOINCREMENT`: stub ids are negative) and by keeping a stub while its refusal is only forgotten | `NodeidStable` (with `OutOfBand`) | refuse m1 (stub 11); look it up; m1's stub goes; refuse m2: stub 11 again, which the kernel holds for m1 |
 
 ### Findings of the lifetime model
 
 Gaps in the code that the model found, each a configuration in
 `findings/` (module `findings/lifetime_findings.tla`) whose test expects the
-violation; fixing the code moves the configuration into the real model. All
-three are minor.
+violation; fixing the code moves the configuration into the real model
+(`lifetime_stub_nodeid_reused` was one, fixed in step 12.4b: now a
+known-bug variant). Both left are minor.
 
 | Finding | Expected | The counterexample | Severity |
 |---|---|---|---|
-| `lifetime_stub_nodeid_reused`: a stub's nodeid is the next up from the highest live stub's (`cache::SetRefused`, `MAX(id) + 1`), so once the highest stub goes, the next refused name gets its nodeid again, which the kernel may still hold for the old one. Stubs go on any out-of-band change detected in their parent: `ReconcileAttrs` relists it, `cache::ForgetNegativeDentries` deletes every refused dentry there and the trigger their stubs, and the relisting mints them again in listing order, so two boundaries can swap nodeids | `NodeidStable` (with `OutOfBand`) | refuse m1 (stub 11); look it up; m1's stub goes; refuse m2: stub 11 again. Until the kernel's next revalidation, a `GETATTR` (or `LOOKUP` of `..`) from the old holder is answered with m2's stub; the revalidation finds the same nodeid with a different generation and marks the old inode bad, so its holder gets `EIO`, not the `ESTALE` `docs/design.md` ("Boundary stubs") promises. NFS handles are safe (the generation is compared). `metadata_cache_test.cc`'s `StubsLiveWithTheirRefusals` asserts the reuse on purpose: the fix's failing-first is that assertion flipped | low: needs an out-of-band change in a directory holding a boundary; the fix is a persisted stub high-water mark that never goes down (stub ids are negative, so not `AUTOINCREMENT`), with stub rows kept while their dentry is only forgotten |
 | `lifetime_crash_before_settle`: a crash between an unlink's or rename's backing syscall and its phase 3 leaves the row of an object with no name left, its nlink column still not 0, so the start's sweep keeps it | `RowsNameLiveObjects` | unlink a (nothing held); crash; start: a's row, a freed object's, stays until something reaches it by handle (`ESTALE`, and the row goes) | low: one row per such crash, nothing served wrongly |
 | `lifetime_destroy_with_open_files`: DESTROY with a file still open (SIGTERM, or a lazy unmount: libfuse aborts the connection). `FinishRun` records a clean shutdown when no writable open is left (one keeps its row durably dirty: a `TMPFILE` still open for writing makes the next start unclean, and its row is swept); after a clean one the start does not sweep, so the row of an unlinked file open only for reading (nlink 0 since its phase 3), or of an `O_TMPFILE` file reopened read-only after its writable descriptor closed, stays, its object freed | `UnnamedRowsSwept` (with `DestroyWithOpens`) | look a up; open it read-only; unlink it (phase 3 keeps the row, nlink 0); DESTROY; the start (clean, no sweep) | low: as above; the sweep could run at every start (with a partial index on nlink = 0) |
 

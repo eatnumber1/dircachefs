@@ -30,7 +30,10 @@ namespace dcfs {
 // v4: boundary stubs (step 23.5): the `stubs` table, its triggers and the
 //     partial index dentries_refused; refused dentries of an older cache
 //     become unknown (they had no stub, and are probed again).
-inline constexpr int kSchemaVersion = 4;
+// v5: cache_state.last_stub_id, the stub nodeids' high-water mark (step
+//     12.4b: a stub's nodeid is never handed out again), and stubs kept
+//     while their dentry is only forgotten (the triggers).
+inline constexpr int kSchemaVersion = 5;
 
 // Identifies the root of the cache: the backing filesystem being cached,
 // and the backing (ino, generation) of its root directory. Only consulted

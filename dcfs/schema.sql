@@ -39,12 +39,19 @@
 --                     start (backing::StartRun), so the next start can
 --                     tell a machine crash from a daemon crash in its log.
 --                     NULL until the first start.
+--   last_stub_id      the highest stub nodeid (stubs.id) ever handed out,
+--                     NULL before the first: cache::SetRefused hands out
+--                     the next one up and advances it in the same
+--                     transaction, so a stub's nodeid is never handed out
+--                     again, even after its stub went (a kernel may still
+--                     hold it; formal/lifetime.tla's NodeidStable).
 CREATE TABLE cache_state (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   schema_version INTEGER NOT NULL,
   source_device_id BLOB NOT NULL,
   clean_shutdown INTEGER NOT NULL,  -- bool
-  boot_id TEXT NULL
+  boot_id TEXT NULL,
+  last_stub_id INTEGER NULL
 ) STRICT;
 
 -- Every backing filesystem under the source, plus the dentry through which
@@ -151,15 +158,19 @@ CREATE TRIGGER inodes_delete_unknowns BEFORE DELETE ON inodes BEGIN
 END;
 
 -- The stub directory a refused dentry is served as (step 23.5; docs/
--- design.md, "Boundaries"): a row here exists exactly while dentry
--- (parent, name) is 'refused'. cache::SetRefused writes both in one
--- transaction; the triggers below delete the stub whenever the dentry
--- stops being refused or goes, and the foreign key with its parent.
+-- design.md, "Boundaries"): a row here exists while dentry (parent, name)
+-- is 'refused', or 'unknown' since it was (forgotten: a mutation's phase 1,
+-- cache::ForgetNegativeDentries before a relisting), so that refusing the
+-- name again keeps its nodeid and generation. cache::SetRefused writes
+-- both in one transaction; the triggers below delete the stub when the
+-- dentry is recorded present or absent (relisted as something else, or
+-- gone) or deleted, and the foreign key with its parent.
 --   id        the stub's FUSE nodeid (and the inode number it reports),
 --             from the range at or above 2^63, which no backing inode
 --             number may use (backing.cc refuses one): as a signed 64-bit
 --             SQLite integer, always negative. Kept for as long as the
---             dentry stays refused, across restarts.
+--             stub, across restarts, and never handed out again
+--             (cache_state.last_stub_id).
 --   fuse_gen  its FUSE generation: random, nonzero, as inodes.fuse_gen.
 --   the attribute columns: the boundary root's statx when the name was
 --             last probed. Nothing dcfs does changes them (every operation
@@ -190,12 +201,13 @@ CREATE TABLE stubs (
 ) STRICT;
 
 CREATE TRIGGER dentries_unrefused AFTER UPDATE OF state ON dentries
-    WHEN OLD.state = 'refused' AND NEW.state != 'refused' BEGIN
+    WHEN OLD.state IN ('refused', 'unknown')
+         AND NEW.state IN ('present', 'absent') BEGIN
   DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
 END;
 
 CREATE TRIGGER dentries_refused_deleted AFTER DELETE ON dentries
-    WHEN OLD.state = 'refused' BEGIN
+    WHEN OLD.state IN ('refused', 'unknown') BEGIN
   DELETE FROM stubs WHERE parent = OLD.parent AND name = OLD.name;
 END;
 

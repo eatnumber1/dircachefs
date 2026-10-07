@@ -560,8 +560,9 @@ recovery protocol, concurrency, and the test strategy.
   `EBUSY` (as a mount point), and renaming it
   with `EXDEV`. A link or rename *into* a stub fails with `ENOTSUP` rather
   than `EXDEV`, because the kernel looks the target name up in the stub
-  first. The stub keeps its inode number across restarts (until its
-  directory is relisted). Its NFS handle stops working after a cache wipe.
+  first. The stub keeps its inode number across restarts and relistings
+  (until the name is found to be no boundary any more), and no other stub
+  ever gets it. Its NFS handle stops working after a cache wipe.
   Mount another dcfs (or the native filesystem) on the stub to reach what
   is behind it (`boundary_test` covers mounts on all three filesystems and
   btrfs subvolumes). Kernel support for FUSE submounts

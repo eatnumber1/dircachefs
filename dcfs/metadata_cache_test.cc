@@ -797,17 +797,33 @@ TEST_F(MetadataCacheTest, StubsLiveWithTheirRefusals) {
   EXPECT_EQ(again.attr.st.st_mode, S_IFDIR | 0755u);
   EXPECT_EQ(again.attr.st.st_uid, 1003u);
 
-  // No longer refused (a mutation's phase 1, a relisting): no stub.
+  // Merely forgotten (a mutation's phase 1, ForgetNegativeDentries before
+  // a relisting): the stub stays, the name reads unknown, and refusing the
+  // same name again keeps its nodeid and generation (the kernel's
+  // revalidation must not see a new nodeid: it would detach a mount on it).
   ASSERT_THAT(MarkUnknown(ctx_, dir, std::vector<std::string>{"mp"}), IsOk());
+  EXPECT_THAT(GetStub(ctx_, mp), IsOk());
+  ASSERT_THAT(ForgetNegativeDentries(ctx_, dir), IsOk());
+  EXPECT_THAT(GetStub(ctx_, sv), IsOk());
+  EXPECT_THAT(Lookup(ctx_, dir, "sv"),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
+  ASSERT_THAT(SetRefused(ctx_, dir, "mp", Stx(2, S_IFDIR | 0751)),
+              IsOkAndHolds(mp));
+  ASSERT_OK_AND_ASSIGN(StubRow kept, GetStub(ctx_, mp));
+  EXPECT_EQ(kept.attr.fuse_gen, row.attr.fuse_gen);
+
+  // Relisted as something else, or gone: no stub.
+  ASSERT_THAT(SetNegative(ctx_, dir, "mp"), IsOk());
   EXPECT_THAT(GetStub(ctx_, mp), StatusIs(absl::StatusCode::kNotFound));
   ASSERT_THAT(PruneDentriesNotIn(ctx_, dir, {}), IsOk());
   EXPECT_THAT(GetStub(ctx_, sv), StatusIs(absl::StatusCode::kNotFound));
 
-  // A stub's nodeid may be handed out again once its stub is gone; its
-  // generation is drawn again.
+  // A stub's nodeid is never handed out again (formal/lifetime.tla's
+  // NodeidStable): the next one is past every stub's so far, whichever
+  // boundary it is for.
   ASSERT_OK_AND_ASSIGN(InodeId again_id, SetRefused(ctx_, dir, "mp",
                                                     Stx(2, S_IFDIR | 0751)));
-  EXPECT_EQ(again_id, kFirstStubId);
+  EXPECT_EQ(again_id, kFirstStubId + 2);
   // And it goes with its directory.
   ASSERT_THAT(InvalidateInode(ctx_, dir), IsOk());
   EXPECT_THAT(GetStub(ctx_, again_id), StatusIs(absl::StatusCode::kNotFound));
