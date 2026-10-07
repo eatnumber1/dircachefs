@@ -79,3 +79,14 @@ sh_test(
     args = ["$(location @alpine_busybox//:root/bin/busybox.static)"],
     data = ["@alpine_busybox//:root/bin/busybox.static"],
 )
+
+# Step 26.1: self-check of busybox_test: drives the real busybox_test.sh with
+# a fake busybox whose --list lacks an applet.
+sh_test(
+    name = "busybox_test_self_check",
+    size = "small",
+    timeout = "short",
+    srcs = ["busybox_test_self_check.sh"],
+    args = ["$(location busybox_test.sh)"],
+    data = ["busybox_test.sh"],
+)

@@ -60,6 +60,7 @@
 # dcfs_test=pjdfstest.sh.
 FAILED=0
 . "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/pjdfstest_lib.sh"
 
 DCFS=/bin/dcfs
 PJD_ROOT=/pjdfstest
@@ -146,10 +147,7 @@ run_suite() {
 			in_shard "$t" || continue
 			t_start=$(cut -d' ' -f1 /proc/uptime)
 			(cd "$root" && sh "$TESTS_DIR/$t") 2>>/tmp/pjd-stderr.log |
-				awk -v rel="$t" '
-					/^ok [0-9]+/     { print rel ":" $2 ":ok" }
-					/^not ok [0-9]+/ { print rel ":" $3 ":notok" }
-				'
+				tap_results "$t"
 			echo "$t $t_start $(cut -d' ' -f1 /proc/uptime)" >>"$outfile.times"
 		done >"$outfile"
 	# Seconds per test directory, for balancing the shards.
@@ -263,18 +261,9 @@ while IFS= read -r line; do
 	echo "dcfs-fail: $line"
 done </tmp/fail_dcfs.txt
 
-# A run in which almost everything fails on the raw backing filesystem
-# proves nothing: every dcfs failure is then also a backing failure and is
-# filtered out as "not dcfs's fault". That is how a busybox without `tail -1`
-# (pjdfstest's misc.sh expect() pipes through it) made 8570 of 8827 checks
-# fail on both sides while the test passed. On a healthy guest the raw
-# filesystem fails only the 28-66 known TODO checks (the backing_failures
-# files), well under 1%; require under 5%, and that something ran at all.
-if [ "$total_backing" -gt 0 ] && [ $((backing_failed * 20)) -lt "$total_backing" ] &&
-	[ "$total_dcfs" -eq "$total_backing" ]; then
-	pass pjdfstest-suite-sane
-else
-	fail pjdfstest-suite-sane "$backing_failed of $total_backing checks failed directly on $FSTYPE ($total_dcfs ran through dcfs); the pjdfstest tooling in the guest is broken, so no dcfs failure can be told apart from it (see pjdfstest.sh's note and /tmp/pjd-stderr.log)"
+# See pjdfstest_lib.sh for why a run that fails almost everything on the raw
+# backing filesystem must not pass.
+if ! pjdfstest_suite_sane "$FSTYPE" /tmp/dcfs_results.txt /tmp/backing_results.txt; then
 	head -20 /tmp/pjd-stderr.log
 fi
 

@@ -112,6 +112,28 @@ def stat_all(debugfs, image, paths):
     return results
 
 
+def header_problems(entries, got):
+    """Returns one line per path whose image attributes differ from the tar's.
+
+    ENTRIES is expected_entries()'s first result, GOT stat_all()'s. A path
+    missing from the image is not reported here (another test does that).
+    """
+    problems = []
+    for path, (kind, mode, uid, gid, size) in entries.items():
+        if not path or not got.get(path):
+            continue
+        image = got[path]
+        want = (kind, mode, uid, gid)
+        have = (image['type'], image['mode'] & 0o7777, image['uid'],
+                image['gid'])
+        if kind in ('regular', 'symlink'):
+            want += (size, )
+            have += (image['size'], )
+        if want != have:
+            problems.append(f'/{path}: tar {want}, image {have}')
+    return problems
+
+
 class RootfsInvariantTest(unittest.TestCase):
 
     @classmethod
@@ -126,20 +148,7 @@ class RootfsInvariantTest(unittest.TestCase):
         self.assertGreater(len(self.entries), 8000)
 
     def test_type_mode_owner_group_and_size_match_the_headers(self):
-        problems = []
-        for path, (kind, mode, uid, gid, size) in self.entries.items():
-            if not path or not self.got.get(path):
-                continue
-            image = self.got[path]
-            want = (kind, mode, uid, gid)
-            have = (image['type'], image['mode'] & 0o7777, image['uid'],
-                    image['gid'])
-            if kind in ('regular', 'symlink'):
-                want += (size, )
-                have += (image['size'], )
-            if want != have:
-                problems.append(f'/{path}: tar {want}, image {have}')
-        self.assertEqual(problems[:10], [])
+        self.assertEqual(header_problems(self.entries, self.got)[:10], [])
 
     def test_hard_link_groups_are_the_same_sets_of_paths(self):
         parent = {}

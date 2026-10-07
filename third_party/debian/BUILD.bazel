@@ -154,3 +154,34 @@ py_test(
     ],
     main = "scripts/rootfs_invariant_test.py",
 )
+
+py_library(
+    name = "rootfs_invariant_lib",
+    testonly = 1,
+    srcs = ["scripts/rootfs_invariant_test.py"],
+    imports = ["scripts"],
+)
+
+# Step 26.1: self-check of rootfs_invariant_test: a synthetic tar and image
+# made with the real mkrootfs.py, then the test's own header comparison
+# (header_problems) over a tar whose mode or owner was altered.
+py_test(
+    name = "rootfs_invariant_self_check",
+    size = "small",
+    srcs = ["scripts/rootfs_invariant_self_check.py"],
+    args = [
+        "$(location @alpine_fstools//:mke2fs)",
+        "$(location @alpine_fstools//:debugfs)",
+        "$(location //third_party/e2fsprogs:mke2fs.conf)",
+    ],
+    data = [
+        "//third_party/e2fsprogs:mke2fs.conf",
+        "@alpine_fstools//:debugfs",
+        "@alpine_fstools//:mke2fs",
+    ],
+    main = "scripts/rootfs_invariant_self_check.py",
+    deps = [
+        ":mkrootfs_lib",
+        ":rootfs_invariant_lib",
+    ],
+)

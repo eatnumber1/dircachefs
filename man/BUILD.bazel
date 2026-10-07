@@ -66,3 +66,26 @@ py_test(
         "//dcfs:main.cc",
     ],
 )
+
+# Step 26.1: self-check of dcfs_8_test: runs the real dcfs_8_test.py over
+# canned pages missing a section and a flag.
+py_test(
+    name = "dcfs_8_test_self_check",
+    size = "small",
+    timeout = "short",
+    srcs = ["dcfs_8_test_self_check.py"],
+    args = ["$(location dcfs_8_test.py)"],
+    data = ["dcfs_8_test.py"],
+)
+
+# Step 26.1: self-check of flags_consistency_test: runs the real
+# flags_consistency_test.py over canned main.cc/README pairs with a flag
+# missing on each side.
+py_test(
+    name = "flags_consistency_test_self_check",
+    size = "small",
+    timeout = "short",
+    srcs = ["flags_consistency_test_self_check.py"],
+    args = ["$(location flags_consistency_test.py)"],
+    data = ["flags_consistency_test.py"],
+)

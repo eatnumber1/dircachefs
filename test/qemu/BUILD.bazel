@@ -657,3 +657,32 @@ py_test(
     main = "scripts/mkmodules_test.py",
     deps = [":mkmodules"],
 )
+
+# Step 26.1: self-check of the require_commands gate: sources the real
+# guest/lib.sh and calls the real function with a missing name.
+sh_test(
+    name = "require_commands_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["require_commands_test.sh"],
+    args = ["$(location guest/lib.sh)"],
+    data = ["guest/lib.sh"],
+)
+
+# Step 26.1: self-check of the pjdfstest-suite-sane gate: the real
+# guest/pjdfstest_lib.sh functions (the ones guest/pjdfstest.sh calls) over
+# sabotaged, empty and garbled results.
+sh_test(
+    name = "pjdfstest_suite_sane_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["pjdfstest_suite_sane_test.sh"],
+    args = [
+        "$(location guest/lib.sh)",
+        "$(location guest/pjdfstest_lib.sh)",
+    ],
+    data = [
+        "guest/lib.sh",
+        "guest/pjdfstest_lib.sh",
+    ],
+)

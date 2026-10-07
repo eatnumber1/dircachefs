@@ -346,6 +346,41 @@ resolved or the tests are excluded from `--config=asan`.
 that has only what a fresh runner has (`third_party/act/README.md`): the way
 to find out that a test quietly uses a tool of your machine.
 
+## Gates and their self-checks
+
+Step 26.1: every enforcement target (a gate: a test or check that rejects
+something) ships a committed self-check test that verifies the gate actually
+rejects known-bad input, so gates cannot rot into vacuous passes. Examples:
+pjdfstest passed while busybox's `tail -1` didn't exist; ASan `bench_smoke`
+passed while dcfs was OOM-killed; `quiesce_daemon` never waited because `usleep`
+was missing. Each gate below has a self-check target that must fail when its
+gate is disabled.
+
+| Gate | Self-Check Target |
+|------|-------------------|
+| run-qemu.sh MEM-OOM detection | `//test/qemu:run_qemu_verdict_test` |
+| run-qemu.sh MEM line presence | `//test/qemu:run_qemu_verdict_test` |
+| run-qemu.sh boot failure detection | `//test/qemu:run_qemu_verdict_test` |
+| run-qemu.sh kernel failure detection | `//test/qemu:run_qemu_verdict_test` |
+| run-qemu.sh mkfs tool path validation | `//test/qemu:run_qemu_mkfs_test` |
+| run-qemu.sh disk-spec fourth field (ext4 only) | `//test/qemu:run_qemu_mkfs_test` |
+| require_commands (missing applets in guest) | `//test/qemu:require_commands_test` (sources the real `guest/lib.sh`) |
+| pjdfstest-suite-sane (tooling health, tail -1 lesson) | `//test/qemu:pjdfstest_suite_sane_test` (sources the real `guest/pjdfstest_lib.sh`, which `pjdfstest.sh` calls) |
+| kernel_config_test (required kernel options) | `//third_party/linux:kernel_config_test` (BuiltinTest, CheckerTest) |
+| busybox_test (required applets present) | `//third_party/alpine:busybox_test_self_check` (runs the real `busybox_test.sh` over a fake busybox) |
+| signature_test (Alpine package signatures) | `//third_party/alpine:signature_test` (TestKey, tampered packages) |
+| tools_test (wrapper-outside-tree detection) | `//third_party/alpine:tools_test` (lines 50-54) |
+| mkmodules_test (unknown module rejection) | `//third_party/alpine:mkmodules_test` (test_unknown_module_is_refused) |
+| dcfs_8_test (man page sections/flags) | `//man:dcfs_8_test_self_check` (runs the real `dcfs_8_test.py`) |
+| flags_consistency_test (README/main.cc match) | `//man:flags_consistency_test_self_check` (runs the real `flags_consistency_test.py`) |
+| sbom_test (pins have SBOM entries) | `//tools/sbom:sbom_test` (test_every_pin_has_an_entry, test_pins_json_entry_removed_fails) |
+| ownership_test (Debian image root ownership) | `//third_party/debian:mkrootfs_test` (its `--skip-ownership` control image must be user-owned, the real one root-owned) |
+| rootfs_invariant_test (Debian rootfs matches tar) | `//third_party/debian:rootfs_invariant_self_check` (imports the real `header_problems`) |
+| `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
+
+A gate without a self-check is a review finding: the review checklist asks
+whether every gate in the tree has a self-check, and if not, why not.
+
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 
 ```
