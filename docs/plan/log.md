@@ -1110,3 +1110,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   nlink 0, else refresh (directories included); (c) sweep at every start with a partial index on
   nlink = 0 (or Destroy retires rows of open objects with no link). Each: finding config moves
   into the real model; failing-first tests.
+- 25.1c done (lane-1, step-25.1c @ caa9cf0, 7 commits): scanner gaps closed (digit separators,
+  std::/(name)(/>name( forms; `->name(` still ignored), 320 sites converted (production 5: two
+  lambdas renamed open_node/read_row, clock_gettime and realpath wrappers; fuse_request.cc
+  strerror gone; tests 247; bench 66), new wrappers (mount, umount2, mkdtemp, mkstemp, fcntl,
+  realpath, clock_gettime, nanosleep, getpid, sync) and a testonly syscalls_process library
+  (fork, execv, waitpid, kill, dup2, _exit) so execv stays out of main_static; bench's readdir
+  walks use getdents64; baseline empty: raw_syscalls_test enforces. fast 123/123, presubmit+
+  formal 189/189, asan //dcfs/... 34/34. Targeted review (production sites, testonly wiring,
+  assertion fidelity) before merge.
