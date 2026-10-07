@@ -222,6 +222,19 @@ class VerifierTest(unittest.TestCase):
             apk.parse_index(_signature(body, 'sha256') + forged, keys)
 
 
+class StreamTest(unittest.TestCase):
+
+    def test_a_stream_that_inflates_beyond_the_limit_is_refused(self):
+        bomb = gzip.compress(b'\0' * (4 << 20), mtime=0)
+        with self.assertRaisesRegex(apk.ApkError, 'larger than'):
+            apk.split_streams(bomb, max_size=1 << 20)
+
+    def test_a_stream_within_the_limit_is_accepted(self):
+        data = gzip.compress(b'\0' * (1 << 20), mtime=0)
+        self.assertEqual(len(apk.split_streams(data, max_size=1 << 20)[0][1]),
+                         1 << 20)
+
+
 class IndexTest(unittest.TestCase):
 
     def setUp(self):
@@ -343,7 +356,8 @@ class ApkTest(unittest.TestCase):
 
     def test_control_not_matching_the_index_is_refused(self):
         with self.assertRaisesRegex(apk.ApkError, 'does not match the index'):
-            apk.verify_apk(make_apk(), self.keys, 'Q1AAAAAAAAAAAAAAAAAAAAAAAAAA=')
+            apk.verify_apk(make_apk(), self.keys,
+                           'Q1AAAAAAAAAAAAAAAAAAAAAAAAAA=')
 
     def test_control_matching_the_index_is_accepted(self):
         package = make_apk()

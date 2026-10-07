@@ -4,9 +4,9 @@ Step 24.2. required_options.txt lists, each with the reason, the kernel
 options the guests rely on (FUSE and its passthrough, the three backing
 filesystems, namespaces, ...). The kernel is Alpine's, so we do not choose
 its configuration; this test fails when a branch of Alpine's kernel does not
-offer one: every option listed `=y` must be built in or a module in the package's
-/boot/config-*, never off; every option listed `=builtin` must be built in,
-because nothing can load a module before it is needed (the console, the
+offer one: every option listed `=y` must be built in or a module in the
+package's /boot/config-*, never off; every option listed `=builtin` must be
+built in, because nothing can load a module before it is needed (the console, the
 virtio-mmio devices the kernel learns of from its command line, the
 initramfs, module loading itself). A module still has to be listed in a
 test's `modules` (test/qemu/qemu_test.bzl) to be loaded.

@@ -44,26 +44,36 @@ class ApkError(Exception):
     """A verification or resolution failure, with a message for a person."""
 
 
-def split_streams(data):
+# No stream of a real package comes near this (the largest data stream, the
+# kernel's modules, is about 150 MB); a signed package may still be hostile.
+MAX_STREAM_SIZE = 1 << 30
+
+
+def split_streams(data, max_size=MAX_STREAM_SIZE):
     """Splits concatenated gzip streams.
 
     Args:
         data: the bytes of the concatenation.
+        max_size: the most any one stream may inflate to.
 
     Returns:
         A list of (raw, decompressed) pairs, one per stream; `raw` is the
         stream exactly as stored (what the signatures and hashes cover).
 
     Raises:
-        ApkError: the data is not a sequence of gzip streams.
+        ApkError: the data is not a sequence of gzip streams, or one inflates
+            beyond max_size.
     """
     streams = []
     while data:
         decompressor = zlib.decompressobj(wbits=31)
         try:
-            decompressed = decompressor.decompress(data)
+            decompressed = decompressor.decompress(data, max_size + 1)
         except zlib.error as e:
             raise ApkError(f'not a gzip stream: {e}') from e
+        if len(decompressed) > max_size:
+            raise ApkError(f'a gzip stream is larger than {max_size} bytes '
+                           'when unpacked')
         if not decompressor.eof:
             raise ApkError('truncated gzip stream')
         rest = decompressor.unused_data
@@ -264,6 +274,7 @@ def _provides(packages):
 
 
 def _dependency_name(token):
+    """Returns the package or provider name of a `D:` token (no version)."""
     return re.split(r'[<>=~]', token, maxsplit=1)[0]
 
 
@@ -337,6 +348,7 @@ def resolve(packages, names, branch, with_closure):
 
 
 def apk_file_name(package):
+    """Returns the mirror file name of an index record: name-version.apk."""
     return f'{package["P"]}-{package["V"]}.apk'
 
 
@@ -419,7 +431,9 @@ def finish(root):
     removed = []
     for path in links:
         resolved = os.path.realpath(path)
-        if resolved != real_root and not resolved.startswith(real_root + os.sep):
+        inside = (resolved == real_root or
+                  resolved.startswith(real_root + os.sep))
+        if not inside:
             raise ApkError(f'{os.path.relpath(path, root)} is a symlink that '
                            f'resolves outside the package tree ({resolved})')
         if not os.path.exists(path):

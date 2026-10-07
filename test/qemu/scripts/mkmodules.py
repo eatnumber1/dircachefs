@@ -94,6 +94,19 @@ class ModuleTree:
                 ]
         return []
 
+    def _is_builtin(self, name):
+        """Whether `name`, a module name or an alias, is built into the kernel.
+        """
+        key = name.replace('-', '_')
+        if key in self.builtin:
+            return True
+        for alias in (name, 'crypto-' + name):
+            targets = self.aliases.get(alias)
+            if targets and all(
+                    t.replace('-', '_') in self.builtin for t in targets):
+                return True
+        return False
+
     def load_order(self, requested):
         """Returns module paths in the order insmod must load them.
 
@@ -117,7 +130,7 @@ class ModuleTree:
         for name in requested:
             paths = self._resolve(name)
             if not paths:
-                if name.replace('-', '_') in self.builtin:
+                if self._is_builtin(name):
                     continue
                 raise ModulesError(
                     f'module {name!r} is neither a module nor built in '

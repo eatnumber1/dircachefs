@@ -83,6 +83,12 @@ class MkModulesTest(unittest.TestCase):
     def test_builtin_module_is_skipped(self):
         self.assertEqual(self.paths('sha256'), [])
 
+    def test_a_name_that_is_an_alias_of_a_builtin_module_is_skipped(self):
+        self.write('modules.alias', 'alias crypto-sum sum_impl\n'
+                   'alias sum sum_impl\n'
+                   'alias crypto-hash sha256\n')
+        self.assertEqual(self.paths('hash'), [])
+
     def test_unknown_module_is_refused(self):
         with self.assertRaisesRegex(mkmodules.ModulesError, "'nonesuch'"):
             self.paths('nonesuch')
