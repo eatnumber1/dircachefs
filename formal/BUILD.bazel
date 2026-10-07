@@ -175,7 +175,9 @@ REVAL_LIMITATIONS = {
 
 # The lifetime model (lifetime.tla; README.md, "The lifetime model"): which
 # nodeids the kernel holds and what dcfs keeps for each. MC_lifetime: every
-# invariant; MC_lifetime_stubs: with boundary stubs.
+# invariant; MC_lifetime_stubs: with boundary stubs; MC_lifetime_destroy_opens:
+# DESTROY with files open, every invariant but UnnamedRowsSwept (until the
+# finding lifetime_destroy_with_open_files is fixed).
 LIFETIME = [
     "MClifetime.tla",
     "lifetime.tla",
@@ -186,6 +188,15 @@ tlc_test(
     size = "medium",
     timeout = "moderate",
     config = "MC_lifetime.cfg",
+    spec = "MClifetime.tla",
+    srcs = ["lifetime.tla"],
+)
+
+tlc_test(
+    name = "lifetime_destroy_opens_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_lifetime_destroy_opens.cfg",
     spec = "MClifetime.tla",
     srcs = ["lifetime.tla"],
 )

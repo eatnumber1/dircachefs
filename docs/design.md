@@ -395,7 +395,11 @@ served.
   an ioctl with `ENOTTY`, and a `RENAME` or `LINK` across it, or of the
   stub itself, with `EXDEV`. A stub whose row is gone (its dentry stopped
   being refused) is a stale nodeid: `ESTALE`, so the kernel looks the
-  name up again. The kernel looks a link's or rename's target name up
+  name up again (not yet in one case: its nodeid can be handed out again
+  to another stub while the kernel holds it, which answers the old holder
+  with the other stub and then gets `EIO` from the kernel; the lifetime
+  model's finding `lifetime_stub_nodeid_reused`, `formal/README.md`). The
+  kernel looks a link's or rename's target name up
   before sending the request, so a link or rename *into* a stub fails at
   that lookup, with `ENOTSUP`.
 - **Not done here** (Phase 15.4): the bind form's recorded mount points,
@@ -1708,17 +1712,17 @@ an object, `DESTROY`, crashes and the start's sweep of unnamed rows. Its
 invariants: a nodeid the kernel holds resolves to the object it was handed
 out for (never to another, and not to `ESTALE` while the kernel's reference
 keeps the object alive); a row or removed record goes only when nothing
-references it; a held descriptor lasts exactly from a written file's last
+references it; a held descriptor lasts at most from a written file's last
 close to its last `FORGET` (or `DESTROY`, or dcfs's removal of its last
-link); dcfs's count is the kernel's, so no `FORGET` is for a lookup it did
+link; the cap may leave none); dcfs's count is the kernel's, so no `FORGET` is for a lookup it did
 not count and nothing it keeps outlives the last `FORGET`; and after a
 crash the start sweeps every unnamed row. Variants put back a non-final
 `FORGET` dropping the held descriptor or the removed record, the pre-23.7
 crash that left an `O_TMPFILE` row behind, and a `FORGET_MULTI` counted as
 one. It found three minor gaps, kept as tests that expect them
 (`formal/findings/`): a stub's nodeid can be handed out again while the
-kernel still holds it (after an out-of-band relisting), and a row of a
-removed object survives the start's sweep after a crash between an
-unlink's syscall and its phase 3, or after a `DESTROY` with the file still
-open. Nodeids' traces from the forged-request harness are validated
+kernel still holds it (after any out-of-band change in its parent), and a
+row of a removed object survives the start's sweep after a crash between
+an unlink's syscall and its phase 3, or after a `DESTROY` with the
+unlinked file still open for reading (a clean shutdown, so no sweep). Nodeids' traces from the forged-request harness are validated
 against it (`formal/README.md`, "The lifetime model").

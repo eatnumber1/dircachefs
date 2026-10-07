@@ -116,8 +116,8 @@ T_LifeOpen ==
 
 \* RELEASE (the held descriptor's cap left free).
 T_LifeRelease ==
-    /\ Ev("release") /\ nd.op > 0
-    /\ \E heldOk \in BOOLEAN : nd' = AfterRelease(nd, named, heldOk)
+    /\ Ev("release") /\ nd.op > 0 /\ MayRelease(nd, E.w)
+    /\ \E heldOk \in BOOLEAN : nd' = AfterRelease(nd, E.w, named, heldOk)
     /\ UNCHANGED <<named, cln>>
     /\ Step
 
@@ -143,9 +143,11 @@ T_LifeForget ==
     /\ Step
 
 \* DESTROY, a crash, a start after a clean shutdown: the kernel holds
-\* nothing, dcfs's memory is gone; the row stays.
+\* nothing, dcfs's memory is gone; the row stays. Whether the shutdown
+\* after a DESTROY is clean depends on every nodeid's writable opens, not
+\* only this one's: the next run's crash or restart line says.
 T_LifeDestroy ==
-    /\ Ev("destroy") /\ nd' = AfterReset(nd) /\ cln' = TRUE
+    /\ Ev("destroy") /\ nd' = AfterReset(nd) /\ cln' \in BOOLEAN
     /\ UNCHANGED named
     /\ Step
 T_LifeCrash ==
@@ -165,6 +167,8 @@ T_LifeStart ==
     /\ Step
 
 TraceNext ==
-    \/ T_LifeLookup \/ T_LifeLookupDot \/ T_LifeLink \/ T_LifeCreate \/ T_LifeTmpfile \/ T_LifeOpen \/ T_LifeRelease
-    \/ T_LifeRemoved \/ T_LifeForget \/ T_LifeDestroy \/ T_LifeCrash \/ T_LifeRestart \/ T_LifeStart
+    \/ T_LifeLookup \/ T_LifeLookupDot \/ T_LifeLink \/ T_LifeCreate
+    \/ T_LifeTmpfile \/ T_LifeOpen \/ T_LifeRelease \/ T_LifeRemoved
+    \/ T_LifeForget \/ T_LifeDestroy \/ T_LifeCrash \/ T_LifeRestart
+    \/ T_LifeStart
 =============================================================================

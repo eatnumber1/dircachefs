@@ -105,6 +105,7 @@ AllIds == Ids \cup StubIds
 (*         out for, since the count last rose from 0 (checking only)       *)
 (*   op    open files (the kernel's, each one of dcfs's open_files_; the   *)
 (*         shared backing fd exists while op > 0)                          *)
+(*   wo    ... of which may write (BackingFile::writable_refs)             *)
 (*   wrote a writable open of it since the count last rose from 0 in this  *)
 (*         run (checking only)                                             *)
 (*   lk    dcfs's count of the kernel's lookups (lookups_)                 *)
@@ -116,11 +117,12 @@ AllIds == Ids \cup StubIds
 
 IdStates ==
     [k : 0..MaxLookups, ko : Objs \cup Boundaries \cup {None},
-     op : 0..MaxOpens, wrote : BOOLEAN, lk : 0..MaxLookups,
+     op : 0..MaxOpens, wo : 0..MaxOpens, wrote : BOOLEAN,
+     lk : 0..MaxLookups,
      row : BOOLEAN, nl0 : BOOLEAN, rec : BOOLEAN,
      wr : {"no", "nofd", "held"}]
 
-Fresh == [k |-> 0, ko |-> None, op |-> 0, wrote |-> FALSE, lk |-> 0,
+Fresh == [k |-> 0, ko |-> None, op |-> 0, wo |-> 0, wrote |-> FALSE, lk |-> 0,
           row |-> FALSE, nl0 |-> FALSE, rec |-> FALSE, wr |-> "no"]
 
 (* What each step does to one nodeid's state. The global actions below and *)
@@ -139,7 +141,7 @@ WithRow(s, nl0) == IF s.row THEN s ELSE [s EXCEPT !.row = TRUE, !.nl0 = nl0]
 \* An open (Open, or a Create's or Tmpfile's): a writable one puts it in
 \* written_ (BeginWriting), unless a removed record answers for it.
 AfterOpen(s, w) ==
-    [s EXCEPT !.op = @ + 1, !.wrote = @ \/ w,
+    [s EXCEPT !.op = @ + 1, !.wo = IF w THEN @ + 1 ELSE @, !.wrote = @ \/ w,
               !.wr = IF w /\ ~s.rec /\ @ = "no" THEN "nofd" ELSE @]
 
 \* RetireRemoved with a descriptor on the object (`held`): the row goes,
@@ -148,14 +150,16 @@ Retire(s, held) ==
     [s EXCEPT !.row = FALSE, !.nl0 = FALSE, !.wr = "no",
               !.rec = held /\ s.lk > 0]
 
-\* A release (Release). The last one of a row whose object has no link
-\* left retires it (delete_row), keeping the shared fd for the removed
-\* record; that of a written file otherwise takes the held descriptor, or
-\* none at the cap (heldOk FALSE).
-AfterRelease(s, named, heldOk) ==
-    IF s.op > 1 THEN [s EXCEPT !.op = @ - 1]
-    ELSE IF s.row /\ ~named THEN Retire([s EXCEPT !.op = 0], TRUE)
-    ELSE [s EXCEPT !.op = 0,
+\* A release (Release) of an open that may write iff w. The last one of a
+\* row whose object has no link left retires it (delete_row), keeping the
+\* shared fd for the removed record; that of a written file otherwise
+\* takes the held descriptor, or none at the cap (heldOk FALSE).
+MayRelease(s, w) == IF w THEN s.wo > 0 ELSE s.op > s.wo
+AfterRelease(s, w, named, heldOk) ==
+    LET r == [s EXCEPT !.wo = IF w THEN @ - 1 ELSE @] IN
+    IF s.op > 1 THEN [r EXCEPT !.op = @ - 1]
+    ELSE IF s.row /\ ~named THEN Retire([r EXCEPT !.op = 0], TRUE)
+    ELSE [r EXCEPT !.op = 0,
                    !.wr = IF @ = "nofd" /\ heldOk THEN "held" ELSE @]
 
 \* Phase 3 of a removal of one of the object's names (SettleUnlinkedFile,
@@ -185,8 +189,8 @@ AfterForget(s, n, cnt) ==
 \* A crash or DESTROY: the kernel holds nothing any more, and dcfs's
 \* memory (lookups_, removed_, written_, open files) is gone or cleared.
 AfterReset(s) ==
-    [s EXCEPT !.k = 0, !.ko = None, !.op = 0, !.wrote = FALSE, !.lk = 0,
-              !.rec = FALSE, !.wr = "no"]
+    [s EXCEPT !.k = 0, !.ko = None, !.op = 0, !.wo = 0, !.wrote = FALSE,
+              !.lk = 0, !.rec = FALSE, !.wr = "no"]
 
 \* The start's sweep (cache::ForgetUnnamedRows): a row with nlink 0 and no
 \* name goes.
@@ -343,11 +347,11 @@ Open(i, w) ==
     /\ UNCHANGED <<obj, nextId, stub, bName, bState, pend, run, clean,
                    crashes, forgetErr>>
 
-\* RELEASE of an open of nodeid i.
-Release(i) ==
-    /\ Up /\ st[i].op > 0
+\* RELEASE of an open of nodeid i that may write iff w.
+Release(i, w) ==
+    /\ Up /\ st[i].op > 0 /\ MayRelease(st[i], w)
     /\ \E heldOk \in BOOLEAN :
-         st' = [st EXCEPT ![i] = AfterRelease(@, Named(obj[i]), heldOk)]
+         st' = [st EXCEPT ![i] = AfterRelease(@, w, Named(obj[i]), heldOk)]
     /\ UNCHANGED <<obj, nextId, stub, bName, pend, run, clean, crashes,
                    forgetErr>>
     /\ Freed(bState)
@@ -408,11 +412,16 @@ ForgetMulti(f) ==
 \* DESTROY (DirCacheFS::Destroy), then FinishRun: the kernel let go of
 \* everything (it sends no FORGETs at unmount). With DestroyWithOpens,
 \* files may still be open (SIGTERM, or a lazy unmount: libfuse aborts the
-\* connection); dcfs exits and closes them.
+\* connection); dcfs exits and closes them. FinishRun records a clean
+\* shutdown only with nothing left dirty (ctx.dirty.any): a writable open
+\* keeps its row durably dirty through the sync point (BeginWriting; the
+\* last writable release's EndWriting lets it go), so a row with a
+\* writable open left makes the next start unclean.
 Destroy ==
     /\ Up /\ (DestroyWithOpens \/ \A i \in AllIds : st[i].op = 0)
     /\ st' = [i \in AllIds |-> AfterReset(st[i])]
-    /\ run' = "down" /\ clean' = TRUE
+    /\ run' = "down"
+    /\ clean' = ~(\E i \in Ids : st[i].wo > 0 /\ st[i].row)
     /\ UNCHANGED <<obj, nextId, stub, bName, pend, crashes, forgetErr>>
     /\ Freed(bState)
 
@@ -479,7 +488,7 @@ Next ==
     \/ Tmpfile
     \/ \E i \in Ids, n \in Names : Link(i, n)
     \/ \E i \in Ids, w \in BOOLEAN : Open(i, w)
-    \/ \E i \in Ids : Release(i)
+    \/ \E i \in Ids, w \in BOOLEAN : Release(i, w)
     \/ \E n \in Names, src \in Names \cup {None} : Remove(n, src)
     \/ Settle
     \/ \E i \in AllIds, n \in 1..MaxLookups : Forget(i, n)
