@@ -922,3 +922,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `-Wl,--fatal-warnings`, our flags never reach externals, why dcfs links libnuma at all (drop or
   patch numactl's version script), a test that our targets carry -Werror/--fatal-warnings;
   coordinates with 7.1 (clang/lld in lane-4). Five lanes busy.
+- russ (2026-10-07): the "only backing.cc calls syscalls::" rule was about spin-ups; relaxed to
+  "syscalls that can reach the backing filesystem (a backing fd, handle or name) only in
+  backing.cc; process-local syscalls (rlimits, credentials, /proc, the cache db file, mount tables)
+  may call syscalls:: anywhere". style.md 1.7 updated by the 25.1 agent; C9 dropped.
