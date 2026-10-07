@@ -844,3 +844,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   for the pre-23 reuse and the flags_changed-only re-check, trace mapping of OPEN/RELEASE/IOCTL/
   SETATTR); 25.1 style convergence (lane-1). Four lanes busy: 1 style, 2 Alpine fixes, 3 model,
   4 clang. Load to watch; guest timeouts flake first.
+- Phase 24 merged (d0b2cc2, 18 commits, +4173/-5791): fast 83/83, presubmit 145/145 on the
+  rebased tip. Final fixes: wrapper exits 127 outside its tree, empty ld-musl path file (strace:
+  no host /lib probing), unset LD_PRELOAD, TCG start tested; mkrootfs keeps package mtimes
+  (SOURCE_DATE_EPOCH = snapshot time), refuses traversal/non-UTF-8/newer-than-epoch; committed
+  rootfs_invariant_test (tar vs image, every member); hedged download messages; stale names
+  fixed. Phase 23 interactions: CONFIG_UNICODE=y (no module needed), GUEST_COMMANDS all present.
+  OBSERVATION (not fixed): copy_test_ext4's serial log shows a kernel oops (NULL deref in utf8byte
+  via utf8_casefold <- ext4fs_dirhash <- ext4_readdir) during the online-casefold check on Alpine's
+  6.18.55; the test still passes; unknown whether 7.2.9 oopsed too. Needs an investigator: is
+  `testutil ext4-casefold` enabling casefold on a filesystem without an encoding (a kernel bug
+  worth reporting, or a test that should mkfs -O casefold), and should the harness fail a run on
+  any oops/BUG in the serial log (it should). Also pending: N4 readdir timing budget, the
+  destroy_test FORGET count.
