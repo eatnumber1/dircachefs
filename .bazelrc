@@ -106,9 +106,7 @@ build:ubsan --define=dcfs_sanitizer=ubsan
 # publishes, bazel-out/_coverage/_coverage_report.dat) are free. The QEMU test
 # macros ship the guest's profiles out and add their lcov to COVERAGE_DIR
 # (test/qemu/coverage.bzl, scripts/run-qemu.sh, README.md "Coverage").
-# (-^//dcfs:modules_: the kernel-module archives are genrules over Alpine's
-# kernel files, 911 baseline records of code that is not ours.)
-coverage --instrumentation_filter=^//(dcfs|bench|tools)[/:],-^//dcfs:modules_
+coverage --instrumentation_filter=^//(dcfs|bench|tools)[/:]
 coverage --combined_report=lcov
 # Continuous mode (guest/init sets LLVM_PROFILE_FILE with %c): the counters
 # live in the profile file's own mapping, so a process killed mid-exit (a

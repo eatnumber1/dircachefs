@@ -374,7 +374,7 @@ The report covers the small and medium tiers only (`--config=presubmit`):
 the large and enormous tests, and the trace-validation tests, are not in it.
 CI publishes it as the `coverage-lcov` artifact (dcfs, bench and tools only);
 there is no threshold yet. The first baseline (small and medium tiers): all
-of `dcfs/*.cc` 92.0% of lines and 72.5% of branches.
+of `dcfs/*.cc` 92.4% of lines and 73.3% of branches.
 
 Intended scope of the Phase 8 gate: gate on `dcfs/` only; report `bench/` and
 `tools/` (`fhtest.c` and `testutil.c` are test helpers) separately; report
