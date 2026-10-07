@@ -226,7 +226,7 @@ Every guest prints one line just before its verdict, from a sampler that
 `guest/init` runs for the whole test (every 0.1 s, one `awk` process):
 
 ```
-MEM total=1018448 min_avail=964728 peak_used=54452 peak_cached=... peak_anon=... peak_shmem=... peak_slab=... dcfs_hwm=... top=<name>:<pid>:<VmHWM> samples=N up=<s>
+MEM total=1018448 min_avail=964728 peak_used=54452 peak_cached=... peak_anon=... peak_shmem=... peak_slab=... dcfs_hwm=... top=<name>:<pid>:<VmHWM> samples=N up=<s> reclaim_scans=N slabs_scanned=N
 ```
 
 (all KiB except `samples` and `up`, seconds of guest uptime at the last sample). `peak_used` is the highest `MemTotal - MemAvailable`: what could
@@ -237,6 +237,19 @@ in). `dcfs_hwm` is the kernel's own `VmHWM` of the daemon. The same
 came within 10% of running out (or 40% of `MemTotal` in tmpfs, which is
 capped at half of it), and refuses to pass a run that lacks the line.
 `grep '^MEM ' bazel-testlogs/test/qemu/<test>/test.log` for any test.
+
+**`peak_used` alone is not enough: a sizing run must show `reclaim_scans=0`.**
+`MemAvailable` counts the reclaimable caches (cached inodes, dentries, page
+cache) as available, so a guest can be short of memory, with kswapd evicting
+inodes and the kernel sending FORGETs for them, while `peak_used` looks
+small: `destroy_test` at 832 MiB showed `peak_used` 349 MiB of 781 and lost
+a third of its held descriptors. `reclaim_scans` is the pages kswapd and
+direct reclaim scanned since the sampler started (`slabs_scanned`, the slab
+shrinkers' objects, also counts `drop_caches`, so only the first is judged).
+`run-qemu.sh` warns when it is nonzero; a test whose meaning depends on
+nothing being evicted (`destroy.sh`, `idle.sh`, `release_leak.sh`) calls
+`require_no_reclaim` (`guest/lib.sh`) and fails. For a test that holds many
+inodes, size by `MemTotal - MemFree` at the end of the run instead.
 
 **The allowance rule**: peak plus 50% or 128 MiB, whichever is more, the
 peak including the kernel's own reservation (-m less `MemTotal`: about 17

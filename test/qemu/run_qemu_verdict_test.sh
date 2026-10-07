@@ -61,6 +61,35 @@ run
 grep -q "== RESULT: PASS" "$WORK/stdout" || fail "a clean run did not pass"
 echo "PASS: a clean run passes"
 
+# Step 23.7: a guest whose kernel reclaimed memory (the MEM line's
+# reclaim_scans, guest/init) gets a WARNING: tests that depend on cached
+# inodes or pages may be invalid. A guest that did not (a zero, or an older
+# line without the field) does not.
+: >"$WORK/extra"
+for scans in 0 ""; do
+	{
+		echo "TEST first PASS"
+		echo "MEM total=268435456 min_avail=200000000 peak_used=50000000 peak_shmem=1000000${scans:+ reclaim_scans=$scans slabs_scanned=0}"
+		echo "DCFS-TEST-EXIT=0"
+	} >"$WORK/canned"
+	run
+	[ "$RC" -eq 0 ] || fail "a run without reclaim failed: $(cat "$WORK/stdout")"
+	if grep -q "the guest reclaimed memory" "$WORK/stdout"; then
+		fail "a warning for a run without reclaim (reclaim_scans='$scans')"
+	fi
+done
+echo "PASS: no reclaim, no warning"
+{
+	echo "TEST first PASS"
+	echo "MEM total=268435456 min_avail=200000000 peak_used=50000000 peak_shmem=1000000 reclaim_scans=1234 slabs_scanned=99"
+	echo "DCFS-TEST-EXIT=0"
+} >"$WORK/canned"
+run
+[ "$RC" -eq 0 ] || fail "reclaim failed the run (it only warns): $(cat "$WORK/stdout")"
+grep -q "WARNING: the guest reclaimed memory (1234 pages scanned)" "$WORK/stdout" ||
+	fail "no reclaim warning: $(cat "$WORK/stdout")"
+echo "PASS: reclaim_scans > 0 produces the WARNING"
+
 # Each line is what the kernel prints for one kind of failure (with the
 # timestamp the console adds when it adds one, and without, as guest/init's
 # dump of the kernel log does).

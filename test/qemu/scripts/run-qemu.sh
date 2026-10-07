@@ -452,12 +452,23 @@ eval "$(grep -a "^MEM total=" "$LOG" | tail -n 1 | awk '{
 	printf "MEM_TOTAL_MIB=%d MEM_MIN_AVAIL_MIB=%d MEM_PEAK_USED_MIB=%d HEADROOM_LOW=%d\n",
 		v["total"] / 1024, v["min_avail"] / 1024, v["peak_used"] / 1024,
 		(v["min_avail"] * 10 < v["total"] || v["peak_shmem"] * 5 > v["total"] * 2)
+	printf "RECLAIM_SCANS=%d\n", v["reclaim_scans"]
 }')"
 echo "run-qemu.sh: guest memory: -m $MEM, MemTotal $MEM_TOTAL_MIB MiB, peak in use $MEM_PEAK_USED_MIB MiB, lowest MemAvailable $MEM_MIN_AVAIL_MIB MiB"
 if [ "$HEADROOM_LOW" -eq 1 ]; then
 	echo "run-qemu.sh: WARNING: the guest came within 10% of running out of memory (or" \
 		"40% of MemTotal in tmpfs, which is capped at 50%); if this run failed, that is" \
 		"the first suspect: raise this test's mem= (test/qemu/README.md, \"Guest memory\")" >&2
+fi
+# Step 23.7: reclaim. MemAvailable counts the reclaimable caches (cached
+# inodes, dentries, pages) as available, so a guest can be evicting them
+# while the headroom above looks fine; a test that depends on something
+# staying cached (destroy_test: 100,000 pinned inodes) is invalid then.
+# guest/init counts the pages kswapd and direct reclaim scanned.
+if [ "${RECLAIM_SCANS:-0}" -gt 0 ]; then
+	echo "run-qemu.sh: WARNING: the guest reclaimed memory ($RECLAIM_SCANS pages scanned):" \
+		"tests that depend on cached inodes or pages may be invalid; raise this test's" \
+		"mem= (test/qemu/README.md, \"Guest memory\")" >&2
 fi
 # Step 23.7: a kernel that oopsed, hit a BUG or a WARNING, or panicked is a
 # failure whatever the test's own checks said (an ext4 casefold oops went

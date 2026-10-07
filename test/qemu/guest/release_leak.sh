@@ -184,4 +184,5 @@ else
 	fail attrs-repopulate-after-forced-failure "stat size=$size_mnt, want 16"
 fi
 
+require_no_reclaim no-reclaim
 exit "$FAILED"

@@ -26,7 +26,7 @@
 # reclaim until MemFree fell to 60 MB at 73,418 files, then the held count
 # fell as kswapd scanned). MemAvailable does not show it (it counts the
 # reclaimable caches as available), so the test reads the reclaim counters
-# and fails, saying so, when the guest was too small for the tree.
+# and fails (require_no_reclaim), saying so, when the guest was too small.
 #
 # Run as /tests/destroy.sh by guest/init when booted with dcfs_test=destroy.sh.
 FAILED=0
@@ -70,13 +70,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# reclaim_scans: pages the kernel's reclaim has scanned since boot, plus
-# the objects its slab shrinkers have scanned: both zero while the guest has
-# memory to spare, and the first nonzero reading means it began evicting.
-reclaim_scans() {
-	awk '/^pgscan_/ && !/throttle/ { s += $2 } /^slabs_scanned / { s += $2 } END { print s + 0 }' /proc/vmstat
-}
-
 # uptime_ms: milliseconds since boot (busybox date has no %N).
 uptime_ms() {
 	read -r up _ </proc/uptime
@@ -93,7 +86,6 @@ else
 	exit "$FAILED"
 fi
 
-scans0=$(reclaim_scans)
 t0=$(uptime_ms)
 if "$BENCH" mktree "$MNT" "$ENTRIES" 0; then
 	pass mktree
@@ -107,7 +99,7 @@ echo "destroy.sh: wrote $ENTRIES files in $(((t1 - t0) / 1000)) s; dcfs holds $f
 if [ "$fds" -ge "$ENTRIES" ]; then
 	pass held-descriptors
 else
-	fail held-descriptors "dcfs holds $fds descriptors for $ENTRIES written files (MemFree $(awk '/^MemFree:/ {print $2}' /proc/meminfo) KiB, reclaim scans $(($(reclaim_scans) - scans0)): the guest ran short of memory if nonzero)"
+	fail held-descriptors "dcfs holds $fds descriptors for $ENTRIES written files (MemFree $(awk '/^MemFree:/ {print $2}' /proc/meminfo) KiB,)"
 fi
 
 # Keep every written file's dcfs inode, then drop every cache.
@@ -130,13 +122,8 @@ else
 	exit "$FAILED"
 fi
 fds_held=$(daemon_fd_count)
-scans1=$(reclaim_scans)
-echo "destroy.sh: dcfs holds $fds_held descriptors with the holder ready; MemFree $(awk '/^MemFree:/ {print $2}' /proc/meminfo) KiB, reclaim scans $((scans1 - scans0))"
-if [ "$scans1" -eq "$scans0" ]; then
-	pass no-reclaim
-else
-	fail no-reclaim "the kernel reclaimed memory while the tree was written and held ($((scans1 - scans0)) scans): the guest is too small for $ENTRIES files"
-fi
+echo "destroy.sh: dcfs holds $fds_held descriptors with the holder ready; MemFree $(awk '/^MemFree:/ {print $2}' /proc/meminfo) KiB"
+require_no_reclaim no-reclaim
 drop_caches_quiesced
 fds_dropped=$(daemon_fd_count)
 echo "destroy.sh: after dropping the caches dcfs holds $fds_dropped descriptors"

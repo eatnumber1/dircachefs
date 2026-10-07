@@ -92,9 +92,19 @@ export DCFS_ACCEL
 #                peak, so exact), 0 when none ran
 #   top          the process (name:pid) with the highest VmHWM, and that VmHWM
 #   samples      how many times the loop ran
+# mem_report appends two counters of the kernel's reclaim since the sampler
+# started (cumulative, so nothing samples them): reclaim_scans (pages kswapd
+# and direct reclaim scanned) and slabs_scanned (objects the slab shrinkers
+# scanned; also counted by drop_caches, so a test that drops caches has some).
+# Any reclaim_scans means the guest ran short of memory and evicted cached
+# inodes and pages, which MemAvailable does not show (it counts them as
+# available): run-qemu.sh warns, and lib.sh's require_no_reclaim fails a test
+# whose meaning depends on nothing being evicted.
 # The processes' status files are read through `cat ... 2>/dev/null` so one
 # that exits between the glob and the read cannot abort the loop.
 start_mem_sampler() {
+	RECLAIM_BASE=$(reclaim_counters)
+	export RECLAIM_BASE
 	awk -v out=/dev/memstat 'BEGIN {
 		minav = -1
 		for (;;) {
@@ -138,6 +148,11 @@ start_mem_sampler() {
 	MEM_SAMPLER_PID=$!
 }
 
+# reclaim_counters: "<pgscan_kswapd + pgscan_direct> <slabs_scanned>" now.
+reclaim_counters() {
+	awk '/^pgscan_(kswapd|direct) / { p += $2 } /^slabs_scanned / { s += $2 } END { print p + 0, s + 0 }' /proc/vmstat
+}
+
 # Stop the sampler and print its last line (nothing if it never completed a
 # sample), then any OOM-killer lines as MEM-OOM: lines and the kernel's oopses
 # and warnings as KERNEL-OOPS: lines.
@@ -152,7 +167,13 @@ mem_report() {
 	done
 	[ -n "${MEM_SAMPLER_PID:-}" ] && kill "$MEM_SAMPLER_PID" 2>/dev/null
 	MEM_SAMPLER_PID=
-	[ -s /dev/memstat ] && cat /dev/memstat
+	if [ -s /dev/memstat ]; then
+		echo "$(cat /dev/memstat) $(awk -v now="$(reclaim_counters)" -v base="$RECLAIM_BASE" 'BEGIN {
+			split(now, n, " ")
+			split(base, b, " ")
+			printf "reclaim_scans=%d slabs_scanned=%d", n[1] - b[1], n[2] - b[2]
+		}')"
+	fi
 	# The console runs at loglevel=3, which hides the OOM killer's own lines
 	# (they are KERN_ERR): fetch them from the kernel log so a run that lost a
 	# process to memory pressure says so in the serial log (run-qemu.sh

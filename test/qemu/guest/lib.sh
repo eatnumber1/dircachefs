@@ -31,6 +31,25 @@ require_commands() {
 	fi
 }
 
+# require_no_reclaim NAME: FAILs the check NAME if the guest's kernel has
+# reclaimed memory (kswapd or direct reclaim scanned any pages) since
+# guest/init started its sampler (RECLAIM_BASE), else passes it. For a test
+# whose meaning depends on nothing being evicted (inodes held by dcfs's
+# descriptors, a FORGET that must come from the test's own action): reclaim
+# sends FORGETs and drops caches nobody asked for, and MemAvailable does not
+# show it. Call it at the end, over the whole run; the fix is the test's
+# `mem=` (test/qemu/README.md, "Guest memory"). Step 23.7: destroy_test
+# lost 30% of its held descriptors to it at 832 MiB.
+require_no_reclaim() {
+	rnr_now=$(awk '/^pgscan_(kswapd|direct) / { p += $2 } END { print p + 0 }' /proc/vmstat)
+	rnr_base=${RECLAIM_BASE%% *}
+	if [ "$rnr_now" -eq "${rnr_base:-0}" ]; then
+		pass "$1"
+	else
+		fail "$1" "the kernel reclaimed memory during the run ($((rnr_now - ${rnr_base:-0})) pages scanned): cached inodes and pages were evicted; raise this test's mem="
+	fi
+}
+
 # The commands the guest scripts run, as busybox applets of the
 # initramfs (/bin/busybox), checked whenever a script sources this file
 # there. The

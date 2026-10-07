@@ -199,4 +199,5 @@ else
 	fail counters-live "a cold direct read of the backing directory did not move the read counter"
 fi
 
+require_no_reclaim no-reclaim
 exit "$FAILED"
