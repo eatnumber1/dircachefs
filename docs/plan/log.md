@@ -886,3 +886,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   inodes at 832 MiB; hypothesis order: opath-hold-tree holds fewer than counted; the cap; a
   non-final FORGET (nlookup < count) wrongly dropping the held fd (would be a dcfs bug, test
   first); inode-cache shrinking; fd counting. Threshold (>= 90%) to be tightened either way.
+- 12.3 done in lane-3 (step-12.3, 4 commits, +2077/-36): formal/reval.tla (OpenExact, HeldFlagsLegit/
+  HeldModeLegit, WritesUseAWritableFd, WriteFdHeld, WriteFdKeepsOffsets, DirCacheNeverWrong,
+  liveness CachedDecisionsConverge); known bugs: no-recheck (pre-23), recheck-if-changed with
+  OutOfBand (bypass; passes with exclusive access), casefold, no write_fd, write_fd last-writer;
+  formal/limitations/ for out-of-band mode/casefold/stale; MC_reval 69k states 11-23 s, _oob 443k
+  44-72 s, _liveness 68k (medium); trace mapping: FileOpened/FileReleased events, ioctl_arg,
+  setattr to_set, per-file DCFS-REVAL traces, `oob` lines via NoteOutOfBand (harness only; guest
+  recorder gap documented). Failing first: harness trace rejected by the no-recheck variant
+  ("explains 3 of 10 events"). Formal 44/44, fast 101/101. Recorder unit tests written after the
+  code (deviation). Under review (dcfs-reviewer).
