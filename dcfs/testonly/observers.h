@@ -244,6 +244,10 @@ class Observers final : public ProtocolEvents {
     for (ProtocolEvents *o : observers_) o->IdentityResolved(ctx, id, check);
   }
 
+  void Interrupted(Context &ctx) override {
+    for (ProtocolEvents *o : observers_) o->Interrupted(ctx);
+  }
+
  private:
   std::vector<ProtocolEvents *> observers_;
 };
