@@ -86,12 +86,19 @@ class RealPins(unittest.TestCase):
         debs = [c for c in comps if c["purl"].startswith("pkg:deb/debian/")]
         self.assertGreater(len(debs), 90)
         for c in debs:
-            self.assertTrue(c["purl"].endswith("?distro=bookworm"), c["purl"])
+            # The toolchain's UAPI headers are trixie's (third_party/llvm).
+            distro = "trixie" if c["name"] == "linux" else "bookworm"
+            self.assertTrue(c["purl"].endswith("?distro=" + distro), c["purl"])
             self.assertNotIn(":", c["purl"].split("@", 1)[1].split("?")[0])
         # A binary package is matched under its source package's name.
         purls = {c["purl"] for c in comps}
         self.assertTrue(any(p.startswith("pkg:deb/debian/glibc@") for p in purls))
         self.assertFalse(any(p.startswith("pkg:deb/debian/libc6@") for p in purls))
+        # The sysroot's and the runtime libraries' packages (llvm_distribution
+        # in MODULE.bazel) are in the SBOM too, under their source packages.
+        for source in ("linux", "libxml2", "icu", "gcc-12", "xz-utils", "zlib"):
+            self.assertTrue(any(p.startswith(f"pkg:deb/debian/{source}@")
+                                for p in purls), source)
 
     def test_versions_come_from_the_pins(self):
         purls = {c["purl"] for c in components()}

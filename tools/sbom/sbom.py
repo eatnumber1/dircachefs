@@ -16,6 +16,10 @@ git root per shipped component (README.md). Test-only pins come from:
   * third_party/debian/debs.lock: the Debian packages of the NFS rootfs
     (pkg:deb/debian/<source package>@<version>, the form OSV's Debian
     ecosystem matches; the binary-to-source table is debian_sources.tsv);
+  * the Debian packages of the toolchain's sysroot and runtime libraries
+    (the llvm_distribution call in MODULE.bazel, third_party/llvm), by the
+    same table; the table's optional fifth column is the package's Debian
+    release when it is not bookworm;
   * .github/ci/prepare.sh: the pinned Bazelisk;
   * the Alpine repositories (third_party/alpine): each package a fetch took,
     from its resolved.json, as pkg:apk/alpine/<origin>@<version>?distro=
@@ -155,14 +159,35 @@ def repo_version(name, kwargs, how):
     raise SbomError(f"{name}: unknown version rule {how!r}")
 
 
+def parse_toolchain_debs(text):
+    """Returns the debs.lock-style lines (`<file name> <sha256>`) of the .deb
+    packages the llvm_distribution call in MODULE.bazel's text names."""
+    lines = []
+    for node in ast.parse(text).body:
+        if not (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Name)
+                and node.value.func.id == "llvm_distribution"):
+            continue
+        kwargs = {k.arg: _literal(k.value)
+                  for k in node.value.keywords if k.arg}
+        for attr in ("sysroot_debs", "runtime_debs"):
+            for url in (kwargs.get(attr) or {}):
+                lines.append(url.rsplit("/", 1)[1] + " -")
+    return "\n".join(lines)
+
+
 def parse_debs(debs_lock, sources_tsv):
-    """Returns [(binary, source, version, source_version)] for debs.lock."""
+    """Returns [(binary, source, version, source_version, distro)] for
+    debs.lock's text (or parse_toolchain_debs's)."""
     table = {}
     for line in sources_tsv.splitlines():
         if not line or line.startswith("#"):
             continue
-        binary, source, version, source_version = line.split("\t")
-        table[(binary, version.split(":", 1)[-1])] = (source, version, source_version)
+        fields = line.split("\t")
+        binary, source, version, source_version = fields[:4]
+        distro = fields[4] if len(fields) > 4 else "bookworm"
+        table[(binary, version.split(":", 1)[-1])] = (
+            source, version, source_version, distro)
     out = []
     for line in debs_lock.splitlines():
         if not line.strip():
@@ -174,8 +199,8 @@ def parse_debs(debs_lock, sources_tsv):
             raise SbomError(
                 f"{filename}: no row in debian_sources.tsv (binary package,"
                 " source package, versions); see tools/sbom/README.md")
-        source, full, source_version = table[(binary, version)]
-        out.append((binary, source, full, source_version))
+        source, full, source_version, distro = table[(binary, version)]
+        out.append((binary, source, full, source_version, distro))
     return out
 
 
@@ -390,7 +415,9 @@ def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
     add("bazelisk", parse_bazelisk(prepare_sh), pins["script"]["bazelisk"]["purl"],
         "script:bazelisk", "tool", False)
 
-    for binary, source, full, source_version in parse_debs(debs_lock, sources_tsv):
+    for binary, source, full, source_version, distro in (
+            parse_debs(debs_lock, sources_tsv) +
+            parse_debs(parse_toolchain_debs(module_text), sources_tsv)):
         # OSV's Debian advisories are per source package, so the entry is
         # the source package and its version (the tsv column already carries
         # the source's own epoch, or the binary's when Source: names none).
@@ -399,7 +426,8 @@ def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
             "type": "library",
             "name": source,
             "version": sv,
-            "purl": f"pkg:deb/debian/{source}@{sv.replace(chr(58), '%3A')}?distro=bookworm",
+            "purl": (f"pkg:deb/debian/{source}@{sv.replace(chr(58), '%3A')}"
+                     f"?distro={distro}"),
             "properties": [
                 {"name": "dcfs:pin", "value": f"deb:{binary}"},
                 {"name": "dcfs:kind", "value": "code"},

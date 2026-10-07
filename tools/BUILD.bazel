@@ -110,7 +110,7 @@ py_test(
     size = "small",
     srcs = ["banned_symbols_test.py"],
     args = [
-        "nm=$(rootpath @llvm_toolchain_llvm//:nm)",
+        "nm=$(rootpath @dcfs_llvm//:nm)",
         "deny_list=$(location banned_symbols.txt)",
         "objects=$(location :main_static_objects)",
         "binary=$(location //dcfs:main_static)",
@@ -119,7 +119,7 @@ py_test(
         "banned_symbols.txt",
         ":main_static_objects",
         "//dcfs:main_static",
-        "@llvm_toolchain_llvm//:nm",
+        "@dcfs_llvm//:nm",
     ],
     target_compatible_with = BANNED_SYMBOLS_COMPATIBLE,
     deps = [":banned_symbols_lib"],
@@ -133,7 +133,7 @@ py_test(
     size = "small",
     srcs = ["banned_symbols_self_check_test.py"],
     args = [
-        "nm=$(rootpath @llvm_toolchain_llvm//:nm)",
+        "nm=$(rootpath @dcfs_llvm//:nm)",
         "deny_list=$(location banned_symbols.txt)",
         "objects=$(location :banned_symbols_fixture_objects)",
         "binary=$(location :banned_symbols_fixture)",
@@ -142,7 +142,7 @@ py_test(
         "banned_symbols.txt",
         ":banned_symbols_fixture",
         ":banned_symbols_fixture_objects",
-        "@llvm_toolchain_llvm//:nm",
+        "@dcfs_llvm//:nm",
     ],
     target_compatible_with = BANNED_SYMBOLS_COMPATIBLE,
     deps = [":banned_symbols_lib"],
@@ -331,6 +331,46 @@ sh_test(
     args = ["$(location :cc_toolchain_info)"],
     data = [":cc_toolchain_info"],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 7.1b: what the toolchain finds outside the workspace. The genrule asks
+# the toolchain's $(CC) where the C library files are, what its include search
+# list is, and which shared libraries the compiler and the linker load while
+# linking a program (ld.so's LD_DEBUG=libs); toolchain_hermetic_test
+# fails on anything of the host's but libc (third_party/llvm/README.md).
+genrule(
+    name = "cc_toolchain_probe",
+    outs = ["cc_toolchain_probe.txt"],
+    cmd = """
+set +e
+{
+  echo '== include'
+  $(CC) -E -v -x c++ /dev/null 2>&1 |
+    sed -n '/#include <...> search starts here:/,/End of search list./p' |
+    sed '1d;$$d'
+  echo '== files'
+  for name in libc.a libm.a crt1.o crti.o crtn.o; do
+    echo "$$name=$$($(CC) -print-file-name=$$name || true)"
+  done
+  echo '== loaded'
+  printf 'int main(void) { return 0; }\\n' > $(@D)/probe.c
+  LD_DEBUG=libs $(CC) -fuse-ld=lld -rtlib=compiler-rt $(@D)/probe.c \\
+    -o $(@D)/probe.out 2>&1 || true
+  echo '== link'
+  if [ -x $(@D)/probe.out ]; then echo LINK-OK; fi
+  echo '== end'
+} > $@
+""",
+    toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
+)
+
+sh_test(
+    name = "toolchain_hermetic_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["toolchain_hermetic_test.sh"],
+    args = ["$(location :cc_toolchain_probe)"],
+    data = [":cc_toolchain_probe"],
 )
 
 # Self-check of toolchain_test: it must reject a host gcc and a clang of

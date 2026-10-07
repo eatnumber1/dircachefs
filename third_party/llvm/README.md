@@ -3,57 +3,120 @@
 Every C and C++ target, in the target and the exec configuration alike, is
 built by clang, linked by lld against a statically linked libc++ (with
 libc++abi, libunwind and compiler-rt's builtins), all from LLVM's own
-release tarball. `MODULE.bazel` registers it with `toolchains_llvm`;
-`.bazelrc` sets `BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1`, so the build never
-falls back to a host compiler. `//tools:toolchain_test` checks the compiler
-and its version.
+release tarball, against a glibc sysroot of pinned Debian packages.
+`MODULE.bazel` registers it with `toolchains_llvm`; `.bazelrc` sets
+`BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1`, so the build never falls back to a host
+compiler. `//tools:toolchain_test` checks the compiler and its version and
+`//tools:toolchain_hermetic_test` that nothing it finds outside the
+workspace is the host's (below).
+
+## What `@dcfs_llvm` is
+
+One repository (`llvm.bzl`, step 7.1b), handed to `toolchains_llvm` as its
+`toolchain_root` and `sysroot`:
+
+- LLVM's release (clang, lld, libc++, compiler-rt, llvm-ar and the other
+  tools), laid out as `toolchains_llvm`'s `BUILD.llvm_repo` expects.
+- `sysroot/`: the target's glibc headers, static libraries and `crt*.o`, and
+  the Linux UAPI headers, merged from pinned Debian packages. `bin/clang.cfg`
+  (and `clang++.cfg`, `clang-cpp.cfg`) make it the default `--sysroot` of every
+  clang the repository provides, so a configure script's probe (liburing's)
+  sees the same headers as the build. dcfs's binaries are statically linked
+  against this glibc: the host's glibc does not matter to them.
+- `lib/`: the shared libraries the release's binaries link besides libc:
+  libstdc++, libgcc_s, zlib, libxml2 (which `ld.lld` needs) and what libxml2
+  loads (ICU, liblzma). The binaries' RUNPATH is `$ORIGIN/../lib`, so they find
+  these before the host's. A RUNPATH covers a library's direct dependencies
+  only, so the libraries that load others (libxml2, ICU) get `$ORIGIN` as their
+  own RUNPATH, set with Alpine's patchelf (`@alpine_patchelf`, run through
+  musl's loader like the other Alpine tools) when the repository is fetched.
 
 ## Pin
 
-- Module: `toolchains_llvm` 1.11.1 from the Bazel Central Registry (the
-  latest 1.x on 2026-10-06).
+LLVM:
+
 - LLVM 22.1.8: `LLVM-22.1.8-Linux-X64.tar.xz` from
   `https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/`,
   sha256
   `df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384`
-  (1.9 GB). The module carries the sha256 in its release table
-  (`toolchain/distributions/github.jsonc`); it was not computed here.
-  Obtained 2026-10-06. The upstream commit of the release tag is
-  `ca7933e47d3a3451d81e72ac174dcb5aa28b59d1` (`pins.json`'s
+  (1.9 GB; 12 GB unpacked). The sha256 is the one in `toolchains_llvm`
+  1.11.1's release table (`toolchain/distributions/github.jsonc`); it was
+  not computed here. Obtained 2026-10-06. The upstream commit of the release
+  tag is `ca7933e47d3a3451d81e72ac174dcb5aa28b59d1` (`pins.json`'s
   `toolchain_runtime`: the static C++ runtime is in every binary).
 - LLVM 22.1.8 and not the newest the module lists (23.1.2): 23.1.2's
   `ld.lld` needs `libicui18n.so.70`, which Ubuntu 24.04 (ICU 74) does not
-  have.
+  have. With the ICU shipped in `lib/` the host's ICU no longer matters, so
+  this limit is gone; moving to LLVM 23 means finding the ICU it needs.
+- Module: `toolchains_llvm` 1.11.1 from the Bazel Central Registry.
 
-## Known limits (to close in step 7.1b)
+Debian: every package is a `.deb` of the snapshot
+`https://snapshot.debian.org/archive/debian/20261006T082722Z/` (the snapshot
+of `third_party/debian`), by URL and sha256 in `MODULE.bazel`. The sha256s
+are the `SHA256` fields of the snapshot's `Packages.xz` for the suite named
+(obtained 2026-10-07; `Packages.xz` is served over TLS by snapshot.debian.org,
+and Bazel's downloader checks each `.deb` against its hash).
 
-The toolchain is hermetic for what it compiles with, not for what it runs on
-and links against. Verified by building `//dcfs:main_static //tools:testutil
-//tools:fhtest` with `--disk_cache=`, `--action_env=PATH=/usr/bin:/bin` and
-`--sandbox_block_path` on the host's `gcc`, `cc`, `c++`, `g++`,
-`x86_64-linux-gnu-{gcc,g++,ld}`, `ld`, `ld.bfd`, `ld.gold`, `/usr/lib/gcc`
-and `/usr/libexec/gcc`. What is still the host's:
+| Package | Suite | Why |
+|---|---|---|
+| `libc6`, `libc6-dev` 2.36-9+deb12u14 | bookworm | the sysroot's glibc: headers, `libc.a` and the other static libraries, `crt1.o`, `ld-linux` |
+| `linux-libc-dev` 6.12.107-1 | trixie | the sysroot's Linux UAPI headers (`linux/openat2.h`, `btrfs.h`, `fs.h`, `statx.h`). dcfs needs 6.8 or later (`STATX_MNT_ID_UNIQUE`); bookworm's are 6.1. UAPI headers do not depend on the libc |
+| `libstdc++6`, `libgcc-s1` 12.2.0-14+deb12u1 | bookworm | run clang, lld and the other LLVM tools (`GLIBCXX_3.4.30`) |
+| `zlib1g`, `liblzma5`, `libxml2`, `libicu72` | bookworm | run `ld.lld` (libxml2, and what it loads) and the other tools |
 
-- Running the toolchain: the release binaries link the host's shared
-  libraries: `ld.lld` needs `libxml2.so.2` (and through it ICU and
-  `liblzma`), clang and `llvm-nm` need `libgcc_s` and `libstdc++`, and the
-  cc_wrapper needs `/bin/bash` and the host's `mktemp`, `realpath` and `rm`
-  (a build with `PATH=/nonexistent` fails). `.github/ci/prepare.sh` installs
-  `libxml2` because it uses `--no-install-recommends`.
-- Headers: `/usr/local/include`, `/usr/include/x86_64-linux-gnu` and
-  `/usr/include` (glibc, and the Linux UAPI headers `linux/openat2.h`,
-  `linux/btrfs.h`, `linux/fs.h`, so the kernel interface dcfs is built
-  against is the host's), and glibc's static libraries and `crt1.o`.
-  There is no sysroot.
-- Every link line carries `-L/usr/lib/gcc/x86_64-linux-gnu/13`. Nothing is
-  taken from it (the build passes with it blocked); it is a toolchains_llvm
-  default for the host layout.
-- The libfuse, liburing and numactl patches in `third_party/` exist because of
-  this toolchain; see their READMEs.
+`@alpine_patchelf` is Alpine's `patchelf` of the branch `v3.24`, verified by
+the signatures `third_party/alpine/README.md` describes.
 
-Two ways to close them, for the plan as 7.1b: a Debian sysroot (the
-`rules_distroless` pins exist), or Alpine's clang/lld packages run through
-the musl loader (the Phase 24 pattern).
+## What is still the host's
+
+The host's kernel, Bazel, and what Bazel's own actions use. Verified by
+building `//dcfs:main_static //tools:testutil //tools:fhtest` with
+`--disk_cache=`, `--action_env=PATH=/usr/bin:/bin` and `--sandbox_block_path`
+on: `/usr/include`, `/usr/local/include`, `/usr/lib/gcc`, `/usr/libexec/gcc`,
+the host's `gcc`, `cc`, `c++`, `g++`, `x86_64-linux-gnu-{gcc,g++,ld}`, `ld`,
+`ld.bfd`, `ld.gold`, every file of the host's `libc6-dev` under
+`/usr/lib/x86_64-linux-gnu` (`libc.a`, `crt1.o`, ...), and the host's
+`libstdc++`, `libgcc_s`, `libxml2`, `libicu*`, `liblzma` and `libz` shared
+objects. What remains:
+
+- **glibc's runtime** (`libc.so.6`, `libm.so.6`, `ld-linux-x86-64.so.2`),
+  which runs the LLVM binaries (their interpreter is the host's) and every
+  other program of an action. The host's glibc must be 2.36 or newer:
+  the release needs 2.34, and Debian's libstdc++6 (12.2) needs 2.36. Ubuntu
+  24.04 (2.39) qualifies, Ubuntu 22.04 (2.35) does not. dcfs's own binaries do
+  not depend on it.
+- **bash, `mktemp`, `realpath`, `rm`**: `toolchains_llvm`'s `cc_wrapper.sh`.
+  Bazel's genrules and `sh_test`s need a shell and coreutils anyway.
+- Fetching: `rules_distroless` (the Debian rootfs of `third_party/debian`)
+  runs the host's `tar` and `grep` in its repository rules; `@dcfs_llvm`
+  itself uses neither (Bazel unpacks the archives).
+
+The libfuse, liburing and numactl patches in `third_party/` exist because of
+this toolchain; see their READMEs.
+
+## Updating the pins
+
+LLVM: change `url`, `sha256` and `strip_prefix` of `llvm_distribution` in
+`MODULE.bazel`, `llvm_version` of the `toolchains_llvm` tag and
+`llvm_major_version`; the version must be one `toolchains_llvm` lists for
+Linux x86_64 (take the sha256 from its `github.jsonc`). Run `ldd` on the
+unpacked `bin/ld.lld` to see what else it needs. Change the version in
+`tools/toolchain_test.sh` and `tools/toolchain_fixtures/llvm_22.txt`, and
+`toolchain_runtime` in `tools/sbom/pins.json` (version, tag and the commit
+`git ls-remote` gives for the peeled tag). Then run the hermeticity build
+above, `--config=asan //dcfs/...` and `bazel build --config=ubsan //...`.
+
+Debian: pick a snapshot timestamp (a real run; the listing is
+`https://snapshot.debian.org/archive/debian/?year=2026&month=10`), then for
+each package look up its `Filename` and `SHA256` in
+`.../dists/<suite>/main/binary-amd64/Packages.xz` of that snapshot (the
+`debian-security` archive has its own timestamps) and put the URL and sha256
+in `MODULE.bazel`. Keep `libc6` and `libc6-dev` at one version. Keep
+`libstdc++6`, `libgcc-s1` and the other runtime libraries at versions whose
+glibc requirement the build hosts meet (`objdump -T lib/*.so* | grep -o
+'GLIBC_[0-9.]*' | sort -uV | tail -1` in the unpacked repository). A new
+`libicu` soname changes the file names in `lib/`; nothing else names them.
+Changing any pin refetches the whole repository, the 12 GB unpack included.
 
 ## Upstream issue worth filing
 
@@ -62,15 +125,3 @@ with `while IFS= read -r opt`, which drops a last line without a trailing
 newline (ninja's and meson's response files have none; the link then fails
 with "clang: error: no input files"). We carried a patch while QEMU was built
 from source; with Alpine's QEMU nothing hits it, so it is dropped.
-
-## Updating the pin
-
-Change `bazel_dep(name = "toolchains_llvm")` and `llvm_version` in
-`MODULE.bazel`; the version must be one the module lists for Linux x86_64
-and whose `ld.lld` runs on the build hosts (`ldd` the unpacked
-`bin/ld.lld`). Refresh the lock file with `bazel mod deps
---lockfile_mode=update`, change the version in `tools/toolchain_test.sh` and `tools/toolchain_fixtures/llvm_22.txt`,
-and `toolchain_runtime` in `tools/sbom/pins.json` (version, tag and the
-commit `git ls-remote` gives for the peeled tag). Then run the hermeticity
-build above, `--config=asan //dcfs/...` and `bazel build --config=ubsan
-//...`, and update the sha256 here from the module's release table.

@@ -69,9 +69,11 @@ The repository carries forward the history of a 2023 experiment called
   implements `FS_IOC_GETFSUUID`; dcfs refuses to start on it.
 - **To build:** Bazel through
   [bazelisk](https://github.com/bazelbuild/bazelisk) (the repository pins
-  Bazel 9.2.0 in `.bazelversion`) and a C++20 compiler. Every library
-  dependency (Abseil, SQLite, stock libfuse 3.18.2) is fetched and built
-  by Bazel; no system libfuse is needed.
+  Bazel 9.2.0 in `.bazelversion`). Every library dependency (Abseil,
+  SQLite, stock libfuse 3.18.2) is fetched and built by Bazel; no system
+  libfuse is needed. Nor is a host compiler, linker, or C library header or
+  static library: the compiler is LLVM's release and the glibc and kernel
+  headers are a pinned Debian sysroot (`third_party/llvm/README.md`).
 - **To test:** KVM (optional, but tests are 2-9x slower under TCG), network
   access once per pin, and the host tools below. QEMU, its qboot firmware,
   the guest's busybox and the mkfs tools (`mke2fs`, `mkfs.xfs`,
@@ -88,8 +90,7 @@ these packages on a CI runner.
 
 | Package (Debian/Ubuntu) | Used by | Why it is not hermetic yet |
 |---|---|---|
-| `libc6-dev`, `linux-libc-dev` (via `build-essential`) | every C/C++ compile and link: the glibc headers and static libraries, and the Linux UAPI headers (`/usr/include/linux`, `openat2.h`, `btrfs.h`, `fs.h`), come from the host | no sysroot yet (step 7.1b); the compiler itself is the pinned clang and no host gcc, ld or `/usr/lib/gcc` is used (checked with them blocked) |
-| `libxml2`, `libicu`, `liblzma`, `libgcc-s1`, `libstdc++6`, `zlib1g`, `bash`, `coreutils` (`mktemp`, `realpath`, `rm`) | running the pinned clang, lld and llvm-nm, and its `cc_wrapper.sh` | LLVM's release binaries link the host's shared libraries (`ld.lld` needs `libxml2.so.2` and through it ICU; this is why LLVM 23 could not be pinned); see `third_party/llvm/README.md` |
+| `libc6` 2.36 or newer, `bash`, `coreutils` (`mktemp`, `realpath`, `rm`) | running the pinned clang, lld and llvm-nm (their ELF interpreter is the host's), and the toolchain's `cc_wrapper.sh` | the release's binaries are glibc programs and Bazel's own actions run on the host's shell and libc; everything else they need (libstdc++, libgcc_s, zlib, libxml2, ICU, liblzma; the glibc headers and static libraries and the Linux UAPI headers the targets build against) is pinned and fetched by Bazel (`third_party/llvm/README.md`, step 7.1b) |
 | `python3` | the `osv` CI job's SBOM generator (`.github/ci/osv.sh`); Bazel's own Python is hermetic | universal on build hosts |
 | `coreutils` (`truncate`), `curl`, `xz-utils`, `git` | scratch-disk images, fetching, archives | universal on build hosts |
 
