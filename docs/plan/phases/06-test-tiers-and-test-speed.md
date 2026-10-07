@@ -56,6 +56,17 @@ assertions).
   dynamic ASan initramfs, guest memory size versus ASan's shadow memory.
 - Done when: the full ASan suite's time is measured before and after,
   with each change's effect, and every test still runs under ASan.
+- 6.3b (done 2026-10-07): the six foreign_cc tools (QEMU, mke2fs,
+  debugfs, mkfs.xfs, mkfs.btrfs, busybox) are built once for every
+  configuration. Their public labels are `exec_file` rules
+  (`third_party/exec_file.bzl`, `cfg = "exec"`) over the `configure_make`
+  outputs, so `--copt`/`--linkopt` never reach them: a cold sanitizer
+  configuration no longer rebuilds about 890 s of tools, and e2fsprogs is
+  built once instead of twice. Guarded by `//tools:tool_identity_test`
+  (built files identical across configurations; every tier) and
+  `//tools:tool_keys_test` (`aquery` action keys equal under plain, asan
+  and ubsan; the weekly `tool-keys` CI job, since it starts a second
+  Bazel server). Numbers in `notes/build-speed-2026-10-07.md`.
 
 Order: 6.1 with the CI phase (CI needs the tiers); 6.2 continuously,
 first pass right after 6.1.

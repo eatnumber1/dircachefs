@@ -451,3 +451,59 @@ tests at all. Not recommended; see 4.4.
 
 Not done: Firecracker's published guest configs (not requested in the second
 pass), Tiny Core (noted and not recommended, unchanged).
+
+## Follow-up (6.3b, 2026-10-07): config-independent tool builds, done and measured
+
+Change: `//third_party/qemu:qemu_system_x86_64`, `//third_party/e2fsprogs:{mke2fs,debugfs}`,
+`//third_party/xfsprogs:{mkfs_xfs,xfs_io}` and `//third_party/btrfs-progs:{mkfs_btrfs,btrfs}`
+are now `exec_file` rules (`third_party/exec_file.bzl`): a one-file forwarding rule whose
+`src` (the former filegroup over the `configure_make` output group) has `cfg = "exec"`.
+Every consumer (the test macros, `formal/trace.bzl`, the smoke tests, the Debian rootfs
+genrule's `tools`) kept its label. An explicit transition was not needed: the exec
+configuration already ignores `--copt`/`--linkopt`, the tools' own flags (static linking,
+`-fno-sanitize`, the pkg-config shims) are untouched, and the graph gained one rule per tool.
+`--per_file_copt` and `--define` do not matter either (the key test is green for all three
+configs). Consequences found on the way: the exec toolchain is `-c opt` (`-O2 -DNDEBUG`), and
+QEMU's `osdep.h` refuses `NDEBUG`; BUILD.qemu now passes `--extra-cflags=-UNDEBUG`. e2fsprogs
+and libarchive, which the Debian image already built for exec, are now the same configured
+targets the tests use, so they build once.
+
+Tests (both new):
+
+- `//tools:tool_keys_test` (manual; starts its own Bazel server, 335 s): `bazel aquery
+  'deps(T)'` action keys of every tool target under plain, `--config=asan` and
+  `--config=ubsan`, kernel/busybox/bc/Debian rootfs/TLC jar as the positive control. Failing
+  first, on the tree before the change: QEMU 147 of 6,976 actions differ per sanitizer config
+  (the `build_script.sh` plus glib/pcre2/zlib compiles), mkfs.btrfs 18 of 6,715, mkfs.xfs 4 of
+  6,685, mke2fs and debugfs 2 of 6,680 each; the five controls passed. After: all ten pass.
+- `//tools:tool_identity_test` (small, in `//...`): the tool files as built with the
+  `--config=asan` flags (a Starlark transition on `--copt`, `--linkopt`, `--per_file_copt`,
+  `--strip`, `tools/sanitizer_variant.bzl`) against the plain ones: same sha256 and the same
+  file. Failing first: all five differ (different binaries, different `bazel-out` directories);
+  after: all five are `bazel-out/k8-opt-exec/...` and identical.
+
+Cold-cache measurement (`--disk_cache=` empty, repository cache intact, `--jobs=2`, lane-4;
+`--host_action_env=DCFS_HOST=cold1` forces the exec actions, bootstrap included, to run;
+load average 5 at the start and 12-14 at the end because another lane's Bazel and guests
+were running):
+
+| Build | Wall (s) | Actions executed |
+|---|---|---|
+| `--config=asan`, the five tool targets (QEMU, mke2fs, debugfs, mkfs.xfs, mkfs.btrfs, with glib, pcre2, zlib, libarchive, util-linux uuid/blkid, urcu, inih and the exec bootstrap) | 1,090 (critical path 689: the QEMU `configure_make`, 658 s under load against 517 s unloaded) | 3,617 |
+| then `--config=ubsan`, same targets | 19 | 0 |
+| then plain, same targets | 10 | 0 |
+
+So a cold asan or ubsan lane, which used to build the six tools again (about 890 s of
+`configure_make` plus 24 s of glib/pcre2/zlib on top of plain's own copy), now builds
+nothing: one build (about 890 s of tools plus the 133 s exec bootstrap, roughly the same
+1,090 s measured under load) serves all three configurations. Saving per sanitizer
+configuration on a cold cache: about 890-915 s (the note's estimate, confirmed by the 0-action
+ubsan and plain rebuilds; the "before" is the section 1.6 numbers, not re-measured). Saving
+for the plain build too: e2fsprogs plus libarchive (123-135 s) is built once instead of twice.
+Not measured again: the whole-suite `--config=asan` wall time, which is dominated by the
+kernel and the tests. Presubmit (`--config=presubmit //...`) 129 of 129 pass; `--config=asan
+//test/qemu:boot_test //test/qemu:write_test_ext4 //tools:tool_identity_test` pass.
+
+Open item: the guests now run the exec build of QEMU (`-O2 -DNDEBUG`, `-UNDEBUG` for QEMU
+itself) and the mkfs tools (`-O2 -DNDEBUG`, so their `assert`s are off, as in the exec e2fsprogs
+the Debian image already used); the smoke tests and every guest test passed unchanged.

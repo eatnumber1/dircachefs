@@ -658,3 +658,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Needs russ: names_random_slow (100k names, 11 min x 3 fs, 2 GB guests): recommend removing, or
   keeping one ext4 run in the slow tier.
 - russ (2026-10-07): dust dropped; distro kernels boot directly (the disk image is only the systemd guest's root fs); delete names_random_slow_test; Alpine spike positive (notes/alpine-spike-2026-10-07.md): Phase 24 written from its design.
+- names_random_slow_test deleted (4882ff6, lane-2): the 100k-name run was the only 2 GB guest.
+- 6.3b (lane-4, acad8bf): tool builds independent of the configuration (exec_file over
+  configure_make, cfg = "exec"). Failing-first key counts: qemu 147 actions differing, mkfs.btrfs 18,
+  mkfs.xfs 4, mke2fs/debugfs 2 each; after: a cold --config=asan tool build 1,090 s under load, then 0
+  actions for ubsan (19 s) and plain (10 s). The exec toolchain is -c opt, so QEMU gets -UNDEBUG.
+  Presubmit 129/129; asan boot_test and write_test_ext4 pass. tool_keys_test (544 s, second Bazel
+  server) runs in a weekly/on-demand `tool-keys` CI job; the test finds bazel on PATH (prepare.sh
+  installs Bazelisk under ~/.local/bin).
