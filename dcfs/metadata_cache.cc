@@ -210,6 +210,36 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
                       0};
 }
 
+// Decodes attrs_valid, fuse_gen, device_id, backing_ino, backing_gen and
+// DCFS_ATTR_COLUMNS, starting at column `base` of `row`, into `attr`.
+absl::Status DecodeAttr(Statement &row, int base, CachedAttr &attr) {
+  attr.valid = row.Column<bool>(base);
+  attr.fuse_gen = static_cast<uint32_t>(row.Column<int64_t>(base + 1));
+  ABSL_ASSIGN_OR_RETURN(attr.device,
+                        DeviceId::Parse(row.Column<std::string>(base + 2)));
+  attr.backing_ino = row.Column<uint64_t>(base + 3);
+  attr.backing_gen = row.Column<uint64_t>(base + 4);
+  // Attribute columns are NULL until first set; Column<> reads NULL as 0,
+  // which is what an unset `st` should hold anyway.
+  struct stat &st = attr.st;
+  const int c = base + 5;
+  st.st_dev = 0;
+  st.st_ino = attr.backing_ino;
+  st.st_mode = row.Column<int64_t>(c);
+  st.st_nlink = row.Column<int64_t>(c + 1);
+  st.st_uid = row.Column<int64_t>(c + 2);
+  st.st_gid = row.Column<int64_t>(c + 3);
+  st.st_rdev = row.Column<uint64_t>(c + 4);
+  st.st_size = row.Column<int64_t>(c + 5);
+  st.st_blocks = row.Column<int64_t>(c + 6);
+  st.st_blksize = row.Column<int64_t>(c + 7);
+  st.st_atim = {row.Column<int64_t>(c + 8), row.Column<int64_t>(c + 9)};
+  st.st_mtim = {row.Column<int64_t>(c + 10), row.Column<int64_t>(c + 11)};
+  st.st_ctim = {row.Column<int64_t>(c + 12), row.Column<int64_t>(c + 13)};
+  attr.btime = {row.Column<int64_t>(c + 14), row.Column<int64_t>(c + 15)};
+  return absl::OkStatus();
+}
+
 absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id) {
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
@@ -220,30 +250,7 @@ absl::StatusOr<CachedAttr> GetAttr(Context &ctx, InodeId id) {
   CachedAttr attr;
   ABSL_ASSIGN_OR_RETURN(
       bool found, ReadOne(*stmt, [&](Statement &row) -> absl::Status {
-        attr.valid = row.Column<bool>(0);
-        attr.fuse_gen = static_cast<uint32_t>(row.Column<int64_t>(1));
-        ABSL_ASSIGN_OR_RETURN(attr.device,
-                              DeviceId::Parse(row.Column<std::string>(2)));
-        attr.backing_ino = row.Column<uint64_t>(3);
-        attr.backing_gen = row.Column<uint64_t>(4);
-        // Attribute columns are NULL until first set; Column<> reads NULL
-        // as 0, which is what an unset `st` should hold anyway.
-        struct stat &st = attr.st;
-        st.st_dev = 0;
-        st.st_ino = attr.backing_ino;
-        st.st_mode = row.Column<int64_t>(5);
-        st.st_nlink = row.Column<int64_t>(6);
-        st.st_uid = row.Column<int64_t>(7);
-        st.st_gid = row.Column<int64_t>(8);
-        st.st_rdev = row.Column<uint64_t>(9);
-        st.st_size = row.Column<int64_t>(10);
-        st.st_blocks = row.Column<int64_t>(11);
-        st.st_blksize = row.Column<int64_t>(12);
-        st.st_atim = {row.Column<int64_t>(13), row.Column<int64_t>(14)};
-        st.st_mtim = {row.Column<int64_t>(15), row.Column<int64_t>(16)};
-        st.st_ctim = {row.Column<int64_t>(17), row.Column<int64_t>(18)};
-        attr.btime = {row.Column<int64_t>(19), row.Column<int64_t>(20)};
-        return absl::OkStatus();
+        return DecodeAttr(row, 0, attr);
       }));
   if (!found) return NoInode(id);
   return attr;
@@ -320,37 +327,62 @@ absl::StatusOr<uint32_t> GetGeneration(Context &ctx, InodeId id) {
 
 absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
                      ListDirCallback cb) {
+  return ListDir(ctx, dir, cursor,
+                 [&](std::string_view name, InodeId child, int64_t next_cursor,
+                     const CachedAttr *) { return cb(name, child, next_cursor); });
+}
+
+absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
+                     ListDirAttrsCallback cb) {
   struct Entry {
     int64_t rowid;
     std::string name;
     InodeId child;
+    std::optional<CachedAttr> attr;  // only when the row's attributes are valid
   };
   std::vector<Entry> batch;
   while (true) {
     batch.clear();
-    // Present names and stubs, merged in rowid order. Each half keeps the
-    // literal state of its partial index (dentries_present,
+    // Present names (with their inode rows' attributes: one join, not a
+    // GetAttr per entry) and stubs, merged in rowid order. Each half keeps
+    // the literal state of its partial index (dentries_present,
     // dentries_refused; see schema.sql), so each is a range scan with no
-    // sort, and the merge reads only as far as the LIMIT.
+    // sort, and the merge reads only as far as the LIMIT. The attribute
+    // columns of a stub are NULL: its row is not an inode's.
     ABSL_ASSIGN_OR_RETURN(
         Statement * stmt,
         Query(ctx,
-              "SELECT rowid, name, inode FROM dentries "
-              "WHERE parent = ?1 AND rowid > ?2 AND state = 'present' "
+              "SELECT d.rowid, d.name, d.inode, i.attrs_valid, i.fuse_gen, "
+              "i.device_id, i.backing_ino, i.backing_gen, "
+              "i.mode, i.nlink, i.uid, i.gid, i.rdev, i.size, i.blocks, "
+              "i.blksize, i.atime_s, i.atime_ns, i.mtime_s, i.mtime_ns, "
+              "i.ctime_s, i.ctime_ns, i.btime_s, i.btime_ns "
+              "FROM dentries d JOIN inodes i ON i.id = d.inode "
+              "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'present' "
               "UNION ALL "
-              "SELECT d.rowid, d.name, s.id FROM dentries d "
+              "SELECT d.rowid, d.name, s.id, NULL, NULL, NULL, NULL, NULL, "
+              "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, "
+              "NULL, NULL, NULL, NULL, NULL, NULL FROM dentries d "
               "JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
               "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'refused' "
               "ORDER BY 1 LIMIT ?3",
               dir, cursor, kListDirBatch));
-    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
-      batch.push_back({row.Column<int64_t>(0), row.Column<std::string>(1),
-                       row.Column<int64_t>(2)});
+    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) -> absl::Status {
+      Entry entry{row.Column<int64_t>(0), row.Column<std::string>(1),
+                  row.Column<int64_t>(2), std::nullopt};
+      if (row.Column<bool>(3)) {  // attrs_valid (NULL for a stub: false)
+        CachedAttr attr;
+        ABSL_RETURN_IF_ERROR(DecodeAttr(row, 3, attr));
+        entry.attr = std::move(attr);
+      }
+      batch.push_back(std::move(entry));
       return absl::OkStatus();
     }));
     // The statement is reset now, so callbacks may use the cache freely.
     for (const Entry &entry : batch) {
-      ABSL_ASSIGN_OR_RETURN(bool more, cb(entry.name, entry.child, entry.rowid));
+      ABSL_ASSIGN_OR_RETURN(
+          bool more, cb(entry.name, entry.child, entry.rowid,
+                        entry.attr.has_value() ? &*entry.attr : nullptr));
       if (!more) return absl::OkStatus();
     }
     if (static_cast<int64_t>(batch.size()) < kListDirBatch) {

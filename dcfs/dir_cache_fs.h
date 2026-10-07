@@ -289,6 +289,10 @@ class DirCacheFS {
   // timeouts from opts_. See RequireAttr() for the NotFound -> ESTALE
   // conversion.
   absl::StatusOr<fuse_entry_param> EntryFor(InodeId id);
+  // EntryFor with `id`'s row already read (`attr`): the same reply, the
+  // same getattr events, without the second read.
+  absl::StatusOr<fuse_entry_param> EntryForAttr(InodeId id,
+                                                cache::CachedAttr attr);
 
   // Refreshes `id`'s cached attributes when they are not valid: from the
   // shared backing fd if `id` is open (a statx on an fd already open -- no
@@ -325,6 +329,9 @@ class DirCacheFS {
     std::string name;
     InodeId child = 0;
     int64_t next_cursor = 0;
+    // The child's attributes if the cache had them valid (read with the
+    // dentry), else nullopt: the caller reads them its own way.
+    std::optional<cache::CachedAttr> attr;
   };
   absl::StatusOr<std::vector<Listed>> ListCached(
       InodeId dir, int64_t cursor, size_t budget,

@@ -396,6 +396,11 @@ absl::Status DirCacheFS::RefuseStub(FuseRequest &req, InodeId id,
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
   if (cache::IsStub(id)) return StubEntry(id);
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
+  return EntryForAttr(id, std::move(attr));
+}
+
+absl::StatusOr<fuse_entry_param> DirCacheFS::EntryForAttr(
+    InodeId id, cache::CachedAttr attr) {
   ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
 
   fuse_entry_param entry{};
@@ -1893,15 +1898,18 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
       size_t used = 0;
       ABSL_RETURN_IF_ERROR(cache::ListDir(
           ctx_, dir, cursor,
-          [&](std::string_view name, InodeId child,
-              int64_t next_cursor) -> absl::StatusOr<bool> {
+          [&](std::string_view name, InodeId child, int64_t next_cursor,
+              const cache::CachedAttr *attr) -> absl::StatusOr<bool> {
             // Stop once the reply is full: the kernel will call again from
             // the cursor this entry's offset encodes.
             const size_t size = entry_size(name);
             if (used + size > budget) return false;
             listed.push_back({.name = std::string(name),
                               .child = child,
-                              .next_cursor = next_cursor});
+                              .next_cursor = next_cursor,
+                              .attr = attr != nullptr
+                                          ? std::optional<cache::CachedAttr>(*attr)
+                                          : std::nullopt});
             used += size;
             return true;
           }));
@@ -1944,11 +1952,15 @@ absl::Status DirCacheFS::Readdir(
     entries.push_back({.name = "..", .stbuf = DotStat(attr), .off = 2});
   }
   for (const Listed &e : listed) {
-    // A stub's backing_ino is its nodeid (cache::StubRow).
-    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(e.child));
+    // A stub's backing_ino is its nodeid (cache::StubRow). Rows with valid
+    // attributes came with the listing; the rest are read as before.
+    std::optional<cache::CachedAttr> attr = e.attr;
+    if (!attr.has_value()) {
+      ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(e.child));
+    }
     struct stat st = {};
-    st.st_ino = attr.backing_ino;
-    st.st_mode = attr.st.st_mode;
+    st.st_ino = attr->backing_ino;
+    st.st_mode = attr->st.st_mode;
     entries.push_back({.name = e.name, .stbuf = st, .off = e.next_cursor + 2});
   }
   return req.ReplyDirs(entries, size);
@@ -1982,7 +1994,9 @@ absl::Status DirCacheFS::Readdirplus(
   // on its own). Only entries that fit the reply were listed, so nothing
   // is refreshed for an entry the reply then drops.
   for (const Listed &e : listed) {
-    ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(e.child));
+    ABSL_ASSIGN_OR_RETURN(
+        fuse_entry_param entry,
+        e.attr.has_value() ? EntryForAttr(e.child, *e.attr) : EntryFor(e.child));
     entries.push_back(
         {.name = e.name, .entry = entry, .off = e.next_cursor + 2});
   }

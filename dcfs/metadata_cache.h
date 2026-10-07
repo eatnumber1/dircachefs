@@ -159,6 +159,14 @@ absl::StatusOr<uint32_t> GetGeneration(Context &ctx, InodeId id);
 using ListDirCallback = absl::FunctionRef<absl::StatusOr<bool>(
     std::string_view name, InodeId child, int64_t next_cursor)>;
 
+// As ListDirCallback, with `attr`: the child's row read in the same query as
+// its dentry (GetAttr's result), or null when the row's attributes are not
+// valid or the child is a stub (the caller then reads them its own way).
+// Valid only during the call.
+using ListDirAttrsCallback = absl::FunctionRef<absl::StatusOr<bool>(
+    std::string_view name, InodeId child, int64_t next_cursor,
+    const CachedAttr *attr)>;
+
 // Calls `cb` for each present dentry of `dir` after `cursor` (0 starts
 // from the beginning), and each refused one (with its stub as `child`), in
 // a stable order: cursors are dentry rowids, and updating an existing
@@ -169,6 +177,11 @@ using ListDirCallback = absl::FunctionRef<absl::StatusOr<bool>(
 // callback.
 absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
                      ListDirCallback cb);
+
+// ListDir, handing each entry's valid attributes to the callback too: one
+// join instead of a GetAttr per entry.
+absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
+                     ListDirAttrsCallback cb);
 
 // Whether `dir`'s listing is complete: every name without a row is absent
 // (children_complete; a missing directories row counts as incomplete).
