@@ -138,11 +138,14 @@ def make_apk(files=None):
     return _signature(control) + control + data
 
 
-def make_index(records):
+def make_index(records, description='v3.99.0-1-gabc'):
     """Returns the bytes of an APKINDEX.tar.gz signed with the test key."""
     text = '\n\n'.join('\n'.join(f'{k}:{v}' for k, v in r.items())
                        for r in records) + '\n\n'
-    body = _tar_gz({'DESCRIPTION': b'test', 'APKINDEX': text.encode('utf-8')})
+    body = _tar_gz({
+        'DESCRIPTION': description.encode('utf-8'),
+        'APKINDEX': text.encode('utf-8')
+    })
     return _signature(body) + body
 
 
@@ -257,6 +260,61 @@ class IndexTest(unittest.TestCase):
     def test_truncated_index_is_refused(self):
         with self.assertRaises(apk.ApkError):
             apk.parse_index(make_index(self.records)[:-8], self.keys)
+
+
+class BranchTest(unittest.TestCase):
+    """The index is bound to the branch the repository names."""
+
+    def setUp(self):
+        self.keys = {KEY_FILE: KEY.pem}
+        self.index = make_index([{'C': 'Q1x', 'P': 'a', 'V': '1'}])
+
+    def run_index(self, branch, index=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            key = os.path.join(tmp, KEY_FILE)
+            with open(key, 'w') as f:
+                f.write(KEY.pem)
+            path = os.path.join(tmp, 'APKINDEX-main.tar.gz')
+            with open(path, 'wb') as f:
+                f.write(index or self.index)
+            stderr, old = io.StringIO(), sys.stderr
+            sys.stderr = stderr
+            try:
+                rc = apk.main([
+                    'index', '--key', key, '--branch', branch, '--out',
+                    os.path.join(tmp, 'index.json'), f'main={path}'
+                ])
+            finally:
+                sys.stderr = old
+            return rc, stderr.getvalue()
+
+    def test_a_release_branch_is_accepted(self):
+        self.assertEqual(self.run_index('v3.99')[0], 0)
+
+    def test_rolling_and_alias_branches_are_refused(self):
+        for branch in ('edge', 'latest-stable', 'v3', 'v3.99.1', '3.99',
+                       'v3.99/../edge'):
+            rc, err = self.run_index(branch)
+            self.assertEqual(rc, 1, branch)
+            self.assertIn('release branch', err)
+
+    def test_an_index_of_another_branch_is_refused(self):
+        other = make_index([{'C': 'Q1x', 'P': 'a', 'V': '1'}],
+                           description='v3.98.4-12-gdef')
+        rc, err = self.run_index('v3.99', other)
+        self.assertEqual(rc, 1)
+        self.assertIn('v3.98.4-12-gdef', err)
+        self.assertIn('v3.99', err)
+
+    def test_the_branch_must_be_followed_by_a_dot(self):
+        # v3.9 must not accept the index of v3.99.
+        rc, _ = self.run_index('v3.9')
+        self.assertEqual(rc, 1)
+
+    def test_an_index_without_a_description_is_refused(self):
+        rc, err = self.run_index('v3.99', make_index([{'P': 'a', 'V': '1'}],
+                                                     description=''))
+        self.assertEqual(rc, 1)
 
 
 class ApkTest(unittest.TestCase):

@@ -24,6 +24,11 @@ base has them, e.g. `bazel info output_base`/external/+alpine_package+alpine_lin
   its RSA signature against the keys in `keys/`. All repositories and all
   packages resolve against this one snapshot (two fetches seconds apart
   could otherwise disagree about a dependency).
+  The branch must be a release branch (`vMAJOR.MINOR`: not `edge`, not
+  `latest-stable`, which move), and the index's `DESCRIPTION` (aports' `git
+  describe`, e.g. `v3.24.2-90-gc2cd9709075`) must start with the branch and a
+  dot, so a mirror serving another branch's signed index at this URL is
+  caught.
 - `alpine_package` takes the branch's current version of each named
   package (and with `closure = True` of every dependency, found through the
   index's `D:` and `p:` fields), downloads each apk and checks three things

@@ -175,12 +175,31 @@ def load_keys(paths):
     return keys
 
 
-def parse_index(data, keys):
+_BRANCH = re.compile(r'v[0-9]+\.[0-9]+')
+
+
+def check_branch(branch):
+    """Accepts only a release branch such as v3.24.
+
+    Raises:
+        ApkError: anything else (edge, latest-stable, a path).
+    """
+    if not _BRANCH.fullmatch(branch):
+        raise ApkError(f'{branch!r} is not an Alpine release branch (vMAJOR.'
+                       'MINOR, e.g. v3.24); edge and latest-stable move')
+
+
+def parse_index(data, keys, branch=None):
     """Verifies an APKINDEX.tar.gz and returns its package records.
 
     Args:
         data: the bytes of APKINDEX.tar.gz.
         keys: as for verify_signature.
+        branch: if given, the release branch the index must belong to: its
+            DESCRIPTION member (aports' `git describe`, e.g.
+            v3.24.2-90-gc2cd9709075) starts with the branch and a dot, so a
+            mirror serving another branch's (validly signed) index at this
+            branch's URL is caught.
 
     Returns:
         A list of dicts keyed by the index's one-letter fields (P name,
@@ -197,8 +216,13 @@ def parse_index(data, keys):
     try:
         archive = tarfile.open(fileobj=io.BytesIO(streams[1][1]))
         text = archive.extractfile('APKINDEX').read().decode('utf-8')
+        description = archive.extractfile('DESCRIPTION').read().decode(
+            'utf-8').strip()
     except (tarfile.TarError, KeyError) as e:
         raise ApkError(f'unreadable APKINDEX: {e}') from e
+    if branch is not None and not description.startswith(branch + '.'):
+        raise ApkError(f'the index says it is {description!r}, not Alpine '
+                       f'{branch}')
     packages = []
     for block in text.split('\n\n'):
         record = {}
@@ -493,12 +517,13 @@ def _cmd_download(args):
 
 
 def _cmd_index(args):
+    check_branch(args.branch)
     keys = load_keys(args.key)
     packages = []
     for spec in args.index:
         repo, _, path = spec.partition('=')
         with open(path, 'rb') as f:
-            records = parse_index(f.read(), keys)
+            records = parse_index(f.read(), keys, args.branch)
         for record in records:
             record['repo'] = repo
             packages.append(record)
