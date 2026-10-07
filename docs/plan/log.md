@@ -1325,3 +1325,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   stack depth: source on a FUSE mount) -> e2e variant dcfs-over-dcfs, not deletion; delete the
   dead Access handler, FuseRequest move-assign, openat2 wrapper; test FileHandle::ToString with a
   fields-not-literal rule for debug strings (style.md); default_permissions stays.
+- 7.4 merged (1a65836): `--config=ubsan` = undefined + an explicit vptr (clang 22's `undefined`
+  omits it: the self-check's vptr case failed to die until named), -fno-sanitize-recover=all,
+  UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 in the guest; implicit-conversion, unsigned-
+  integer-overflow, float-divide-by-zero, local-bounds, nullability left out with reasons. Whole
+  suite under UBSan: fast 65 (22 min), presubmit 216 (+12 min), large/enormous 243 total (+52
+  min), 3 skipped (sanitizer-incompatible gates); NO findings anywhere (no ubsan.supp). CI:
+  UBSan step after ASan in `full`. Follow-ups: memory_test_xfs reclaims in the PLAIN build at
+  mem=448 (22k scans) and under UBSan at 576 (0 at 768): resize; the `full` job's 350-min
+  timeout is tight with ASan + UBSan: split the sanitizer runs into their own jobs.
