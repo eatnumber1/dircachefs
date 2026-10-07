@@ -1273,3 +1273,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   1 skip, asan small 30/30; the checker caught 26.10's ClockTest forging a FORGET of an uncounted
   lookup: fixed); needs one more rebase over 12.4b (conflicts in dir_cache_fs.cc/backing.cc:
   Startup(), the probe, v5 stub semantics) -> agent; then merge, then 26.6.
+- Phase 22.1/22.2 design round done (lane-2; notes/cancellation-inventory-2026-10-08.md). Key
+  fact: once dcfs has read a request the caller cannot be killed, even by SIGKILL, until dcfs
+  replies; a 100k-entry first listing on a slow disk (~70-100 s) makes `ls` unkillable today.
+  Recommendation (b): single-threaded safe points (own session loop, non-blocking poll of
+  /dev/fuse at safe points; EINTR at the next probe batch / before a phase-2 syscall), written
+  so the coroutine rewrite inherits them; kernel-blocked syscalls (spin-up, syncfs, network)
+  stay uninterruptible until (c)/(d), documented. Needs russ: approve (b) + the documented limit.
