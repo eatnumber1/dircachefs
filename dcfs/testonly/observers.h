@@ -239,6 +239,11 @@ class Observers final : public ProtocolEvents {
     for (ProtocolEvents *o : observers_) o->SqliteTransaction(durable);
   }
 
+  void IdentityResolved(Context &ctx, events::Ino id,
+                        const events::IdentityCheck &check) override {
+    for (ProtocolEvents *o : observers_) o->IdentityResolved(ctx, id, check);
+  }
+
  private:
   std::vector<ProtocolEvents *> observers_;
 };
