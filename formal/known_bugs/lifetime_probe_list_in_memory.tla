@@ -1,0 +1,21 @@
+------------------- MODULE lifetime_probe_list_in_memory -------------------
+(***************************************************************************)
+(* Found by this model (formerly findings/lifetime_crash_during_probe,     *)
+(* step 12.6), fixed in step 12.6b: the start's probe of the recovered     *)
+(* rows (ProbeRecoveredRows, step 12.4b) worked from a list in memory.     *)
+(* RecoverDirty emptied the dirty set and StartRun's kSync commit made     *)
+(* that durable before Startup probed the listed rows, so a crash during   *)
+(* the probe lost the rows not yet probed: the next start found the dirty  *)
+(* set empty and probed nothing, and the row of an object a cut removal    *)
+(* freed stayed. The fix: RecoverDirty keeps the dirty set, and Startup    *)
+(* takes the probed rows out after the probe (cache::ClearDirtyRows).      *)
+(*                                                                         *)
+(* Put in by Restart <- RestartForgetsProbeList. Expected:                 *)
+(* RecoveryIdempotent is violated at the first unclean start (a row still  *)
+(* to probe is no longer dirty); with only RowsNameLiveObjects checked,    *)
+(* two crashes show its consequence: unlink a, a crash before its phase 3, *)
+(* the start lists a's row, a crash before the probe, the next start       *)
+(* probes nothing.                                                         *)
+(***************************************************************************)
+EXTENDS MClifetime
+=============================================================================

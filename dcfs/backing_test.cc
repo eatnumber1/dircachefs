@@ -968,7 +968,10 @@ TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
   EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "file"),
               IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
-  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
+  // The dirty entries stay dirty until Startup has probed their rows (step
+  // 12.6b): StartRun returns them for that.
+  EXPECT_THAT(cache::ListDirty(ctx_),
+              IsOkAndHolds(testing::UnorderedElementsAre(dir, inner)));
   EXPECT_THAT(GetBootId(db_), IsOkAndHolds(Optional(std::string("boot-2"))));
 
   // And the truth is re-read from the backing filesystem: inner still

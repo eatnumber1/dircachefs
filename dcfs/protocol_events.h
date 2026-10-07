@@ -472,6 +472,10 @@ class ProtocolEvents {
   // StartRun's last transaction (clean_shutdown = 0) committed. Model:
   // StartRun.
   virtual void RunStarted(Context &ctx) {}
+  // backing::Startup's probe of the recovered rows ended and its
+  // transaction took the probed rows out of the dirty set (step 12.6b).
+  // Model: ClearRecovered.
+  virtual void RecoveryDone(Context &ctx) {}
   // backing::FinishRun began (no request is in flight). Model:
   // BeginShutdown.
   virtual void ShutdownBegin(Context &ctx) {}

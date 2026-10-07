@@ -459,7 +459,9 @@ Crash ==
     /\ st' = [i \in AllIds |-> AfterReset(st[i])]
     /\ pend' = NoPend
     /\ run' = "down" /\ clean' = FALSE /\ crashes' = crashes + 1
-    /\ cut' = pend.id
+    \* A row still to be probed stays dirty (step 12.6b); otherwise the
+    \* removal this crash cut, if any.
+    /\ cut' = IF pend.id # 0 THEN pend.id ELSE cut
     /\ queued' = {}
     /\ UNCHANGED <<obj, nextId, stubVars, bName, forgetErr>>
     /\ Freed(bState)
@@ -469,32 +471,45 @@ Crash ==
 \* only after an unclean shutdown, before step 12.4b); after an unclean
 \* shutdown, the rows recovery found dirty are listed for ProbeRecoveredRows
 \* (the row of a removal the crash cut; the code lists every dirty row,
-\* which changes nothing for the others), and RecoverDirty empties the
-\* dirty set in the same start: the list is in memory only (the finding
-\* lifetime_crash_during_probe). The probe itself is ProbeRow, after it.
-Restart ==
+\* which changes nothing for the others). Since step 12.6b they stay in the
+\* dirty set until the start has probed them (ClearProbed takes them out),
+\* so a crash during the probe leaves them to the next start.
+RestartWith(forget) ==
     /\ run = "down"
     /\ LET q == IF clean \/ BugNoRecoveredProbe \/ cut = 0 THEN {} ELSE {cut}
        IN /\ queued' = q
           /\ run' = IF q = {} THEN "up" ELSE "probing"
+          /\ cut' = IF forget \/ q = {} THEN 0 ELSE cut
     /\ st' = [i \in AllIds |->
                 IF i \notin Ids THEN st[i]
                 ELSE IF BugNoUnnamedSweep \/ (clean /\ BugSweepOnlyUnclean)
                      THEN st[i] ELSE AfterSweep(st[i], Named(obj[i]))]
-    /\ cut' = 0
     /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, clean, crashes,
                    forgetErr>>
+Restart == RestartWith(FALSE)
+
+\* Not the code since step 12.6b (known_bugs/lifetime_probe_list_in_memory,
+\* put in by Restart <- RestartForgetsProbeList): RecoverDirty emptied the
+\* dirty set before the probe, which worked from its list in memory.
+RestartForgetsProbeList == RestartWith(TRUE)
 
 \* backing::Startup's probe of one listed row by handle
 \* (ProbeRecoveredRows): the row goes if its object was freed (ESTALE) or
-\* has no link left. Then the daemon serves.
+\* has no link left.
 ProbeRow(i) ==
     /\ run = "probing" /\ i \in queued
     /\ st' = [st EXCEPT ![i] = AfterProbe(@, bState[obj[i]] = "dead")]
     /\ queued' = queued \ {i}
-    /\ run' = IF queued' = {} THEN "up" ELSE "probing"
-    /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, clean, crashes,
-                   cut, forgetErr>>
+    /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, run, clean,
+                   crashes, cut, forgetErr>>
+
+\* ... then one transaction takes the probed rows out of the dirty set
+\* (cache::ClearDirtyRows), and the daemon serves.
+ClearProbed ==
+    /\ run = "probing" /\ queued = {}
+    /\ cut' = 0 /\ run' = "up"
+    /\ UNCHANGED <<st, obj, nextId, stubVars, bName, bState, pend, clean,
+                   crashes, queued, forgetErr>>
 
 -----------------------------------------------------------------------------
 (* Boundary stubs (cache::SetRefused): the next nodeid up from the highest *)
@@ -554,6 +569,7 @@ Next ==
     \/ Crash
     \/ Restart
     \/ \E i \in Ids : ProbeRow(i)
+    \/ ClearProbed
     \/ \E m \in Boundaries : Refuse(m) \/ LookupStub(m) \/ StubGone(m)
 
 Spec == Init /\ [][Next]_vars
@@ -630,10 +646,8 @@ RowsNameLiveObjects ==
 \* (7) Recovery is idempotent (FSCQ's crash condition for recovery, step
 \* 12.6): what the start still has to do is durable, so that a crash
 \* during recovery leaves it to the next start: every row still to be
-\* probed is still in the dirty set (cut). Not true of the code
-\* (formal/findings/lifetime_crash_during_probe): RecoverDirty empties the
-\* dirty set before the probe runs, and a crash during the probe loses the
-\* rows not yet probed.
+\* probed is still in the dirty set (cut). Since step 12.6b
+\* (known_bugs/lifetime_probe_list_in_memory: before it).
 RecoveryIdempotent == \A i \in queued : i = cut
 
 \* Every invariant the real configurations check.

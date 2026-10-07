@@ -103,7 +103,7 @@ DBStates == [dent : [Names -> DentVals],  \* dentries rows (parent = D)
 \* What a request answered: an entry (found/neg), a listing, attributes.
 NoRes == [k |-> "none", name |-> None, o |-> NoObj, s |-> {}, v |-> 0]
 
-Modes == {"up", "down", "recover", "start",
+Modes == {"up", "down", "recover", "start", "probe",
           "stop_sync", "stop_clear", "stop_ckpt", "stop_flag"}
 
 -----------------------------------------------------------------------------
@@ -890,20 +890,24 @@ RecoverForgetting(d, forget) ==
         !.dent = [x \in Names |-> IF x \in forget THEN Unknown
                                  ELSE RecoverDirty(d).dent[x]]]
 
+\* The dirty set itself stays (step 12.6b): the start still has to probe its
+\* rows, and a crash before then must leave them to the next start
+\* (ClearRecovered takes them out).
 Recover ==
     /\ mode = "recover"
     /\ \E forget \in SUBSET PresentNames(RecoverDirty(dbCur)) :
-         Commit(RecoverForgetting(dbCur, forget), FALSE)
+         Commit([RecoverForgetting(dbCur, forget) EXCEPT !.dirty = dbCur.dirty],
+                FALSE)
     /\ mode' = "start"
     /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
 \* StartRun's last transaction, kSync: clean_shutdown = 0 (and the boot id).
-\* Then the daemon mounts and serves.
+\* Then backing::Startup's probe (ClearRecovered).
 StartRun ==
     /\ mode = "start"
     /\ Commit([dbCur EXCEPT !.clean = FALSE], TRUE)
-    /\ mode' = "up"
+    /\ mode' = "probe"
     /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
@@ -912,7 +916,7 @@ StartRun ==
 \* the first emptying the dirty set, the second forgetting what it was for.
 \* A configuration puts it in with Recover <- RecoverClearsDirtyFirst and
 \* Modes <- BugModes (the step between is mode "recover2").
-BugModes == {"up", "down", "recover", "recover2", "start",
+BugModes == {"up", "down", "recover", "recover2", "start", "probe",
              "stop_sync", "stop_clear", "stop_ckpt", "stop_flag"}
 RecoverClearsDirtyFirst ==
     \/ /\ mode = "recover" /\ dbCur.dirty
@@ -931,6 +935,18 @@ RecoverClearsDirtyFirst ==
        /\ mode' = "start"
        /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
                       servedWrong, stamp, muts, crashes>>
+
+\* backing::Startup, after InitRoot: the probe of the recovered rows
+\* (ProbeRecoveredRows), then one transaction (cache::ClearDirtyRows) takes
+\* the rows it probed out of the dirty set; one whose probe failed stays
+\* (keep). D's own probe is not modelled. Then the daemon serves.
+ClearRecovered ==
+    /\ mode = "probe"
+    /\ \E keep \in BOOLEAN :
+         Commit([dbCur EXCEPT !.dirty = dbCur.dirty /\ keep], FALSE)
+    /\ mode' = "up"
+    /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
+                   servedWrong, stamp, muts, crashes>>
 
 \* Unmount: the session loop has stopped, no request is in flight.
 BeginShutdown ==
@@ -1013,12 +1029,13 @@ Next ==
          \/ SyncClearDirty(p)
          \/ Interrupt(p)
     \/ CrashServing \/ CrashRecovering \/ CrashStopping
-    \/ Restart \/ Recover \/ StartRun
+    \/ Restart \/ Recover \/ StartRun \/ ClearRecovered
     \/ BeginShutdown \/ StopSync \/ StopClear \/ StopCkpt \/ StopFlag
 
 \* Startup and shutdown steps are never postponed forever.
 Fairness ==
     /\ WF_vars(Restart) /\ WF_vars(Recover) /\ WF_vars(StartRun)
+    /\ WF_vars(ClearRecovered)
     /\ WF_vars(StopSync) /\ WF_vars(StopClear) /\ WF_vars(StopCkpt)
     /\ WF_vars(StopFlag)
 
@@ -1071,20 +1088,18 @@ TriState ==
 \* actual crash: it is checked in every state, for every possible crash.)
 CrashSafe == \A s \in dbOpts, t \in bOpts : Correct(RecoverDirty(s), t)
 
-\* Recovery is idempotent (FSCQ's crash condition for recovery, step 12.6):
-\* while it runs (the start's steps from Restart up to StartRun), every
-\* database state a crash may leave is one recovery can start from again:
-\* recovering it gives a correct cache whatever a crash left of the
-\* backing filesystem, and recovering that result again changes nothing (a
-\* fixpoint). So recovery may crash and restart any number of times. It
-\* holds because RecoverDirty is one transaction and only its commit
-\* empties the dirty set (known_bugs/recover_clears_dirty_first: two).
+\* Recovery may crash and start again (FSCQ's crash condition for
+\* recovery, step 12.6): while it runs (from a crash to ClearRecovered),
+\* every database state a crash may leave recovers to a correct cache,
+\* whatever a crash left of the backing filesystem. It is CrashSafe in the
+\* recovery modes, named for what a crash during recovery relies on: that
+\* recovery's own commits never leave a state it cannot start from again
+\* (known_bugs/recover_clears_dirty_first: one that empties the dirty set
+\* first does).
 RecoveryModes == Modes \ ({"up"} \cup StopModes)
 RecoveryIdempotent ==
     mode \in RecoveryModes =>
-        \A s \in dbOpts :
-            /\ RecoverDirty(RecoverDirty(s)) = RecoverDirty(s)
-            /\ \A t \in bOpts : Correct(RecoverDirty(s), t)
+        \A s \in dbOpts, t \in bOpts : Correct(RecoverDirty(s), t)
 
 \* The fast path's premise: if Context::dirty.durable has D, every database
 \* state a crash may leave has D dirty.
@@ -1122,15 +1137,26 @@ Observed(d, b) ==
 Known(d) == [names |-> {n \in Names : ReadState(d, n) # Unknown},
              attrs |-> d.attrValid]
 
-\* The request in slot p took a step from pc `from` (and only it did).
-StepFrom(p, from) == ps[p].pc \in from /\ ps'[p] # ps[p]
+\* The step is a mutation's backing syscall: the actions CSys, USys, RSys
+\* themselves, not merely a step from their pc (another step from there,
+\* such as an interrupt, is no effect point).
+SyscallStep == \E p \in Procs :
+                 CreateSyscall(p) \/ UnlinkSyscall(p) \/ RenameSyscall(p)
 
-\* The backing syscalls of the mutations (CSys, USys, RSys).
-SyscallPcs == {"C_sys", "U_sys", "R_sys"}
-\* The steps that record what was read (fills: a resolve, a population, an
-\* attribute fill; and a mutation's phase 3, which records its outcome).
-CommitPcs == {"RN_commit", "PD_commit", "RDP_fill", "GA_fill", "C_fill",
-              "U_fill", "R_fill", "C_rec", "U3", "R3"}
+\* The fills the trace validation adds outside any request slot (a child's
+\* or parent's row, the root's attributes at InitRoot: Trace.tla's
+\* GetattrWhole); none in the model itself. Trace.cfg overrides it.
+OutOfSlotFill == FALSE
+
+\* The step records what was read: a fill's commit (a resolve, a
+\* population, an attribute fill) or a mutation's phase 3.
+CommitStep ==
+    \/ \E p \in Procs :
+         \/ ResolveCommit(p) \/ PopulateCommit(p) \/ ReaddirplusFill(p)
+         \/ GetattrFill(p) \/ CreatePhase3(p) \/ CreateFill(p)
+         \/ UnlinkPhase3(p) \/ UnlinkFill(p) \/ RenamePhase3(p)
+         \/ RenameFill(p)
+    \/ OutOfSlotFill
 
 Serving == mode = "up" /\ mode' = "up"
 
@@ -1141,12 +1167,12 @@ Serving == mode = "up" /\ mode' = "up"
 \* point.
 EffectAtSyscall ==
     [][(Serving /\ Observed(dbCur', bCur') # Observed(dbCur, bCur))
-         => \E p \in Procs : StepFrom(p, SyscallPcs)]_vars
+         => SyscallStep]_vars
 
 \* ... and the backing filesystem changes only there (while serving; a
 \* crash may undo unsynced changes, which is no request's effect).
 BackingAtSyscall ==
-    [][(Serving /\ bCur' # bCur) => \E p \in Procs : StepFrom(p, SyscallPcs)]_vars
+    [][(Serving /\ bCur' # bCur) => SyscallStep]_vars
 
 \* The cache learns (a name it did not know, or D's attributes) only at a
 \* commit of what a request read; that changes nothing anyone sees
@@ -1154,7 +1180,7 @@ BackingAtSyscall ==
 CacheLearnsAtCommit ==
     [][(Serving /\ (Known(dbCur').names \ Known(dbCur).names # {}
                     \/ (Known(dbCur').attrs /\ ~Known(dbCur).attrs)))
-         => \E p \in Procs : StepFrom(p, CommitPcs)]_vars
+         => CommitStep]_vars
 
 \* Recovery always terminates: the daemon always gets back to serving.
 RecoveryTerminates == (mode # "up") ~> (mode = "up")

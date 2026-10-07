@@ -208,7 +208,9 @@ TraceInit ==
     /\ dbOpts = {dbCur}
     /\ okey = [o \in {InitObj(x) : x \in {y \in Names : IsKey(ObsVal(HDB, y))}}
                  |-> ObsVal(HDB, CHOOSE x \in Names : InitObj(x) = o)]
-    /\ mode = "up"
+    \* A daemon's recorder begins the traces when StartRun has committed,
+    \* before backing::Startup's probe ends (ClearRecovered): "probe" then.
+    /\ mode \in {"up", "probe"}
     /\ seq = 0 /\ inflight = 0 /\ durableD = HDB.durable /\ running = None
     /\ ps = [p \in Procs |-> IdleProc]
     /\ servedWrong = FALSE
@@ -274,7 +276,7 @@ ArriveAs(p, k, n, m) ==
 \* recording its child rows (PopulateDirectory, ResolveName), ParentOf,
 \* and InitRoot at startup.
 GetattrWhole ==
-    /\ mode = "up" /\ running = None /\ "getattr" \in Requests
+    /\ mode \in {"up", "probe"} /\ running = None /\ "getattr" \in Requests
     /\ \E p \in Procs : ps[p].pc = "idle"
     /\ ~dbCur.attrValid
     /\ IF inflight = 0
@@ -530,6 +532,8 @@ T_Recover ==
            (rd.dent[x] \in DOMAIN okey /\ okey[rd.dent[x]] \in DirtyKeys(E))
     /\ Matches(E, {})
 T_StartRun == Ev("start_run") /\ StartRun /\ Matches(E, {})
+\* backing::Startup's probe ended: the probed rows left the dirty set.
+T_ClearRecovered == Ev("recovery_done") /\ ClearRecovered /\ Matches(E, {})
 
 \* One step per event (each action checks there is a next event, and moves
 \* past it).
@@ -554,7 +558,7 @@ TraceNext ==
     \/ T_Interrupt \/ T_Reply
     \/ T_BeginShutdown \/ T_StopSync \/ T_StopClear \/ T_StopCkpt
     \/ T_StopFlag
-    \/ T_Crash \/ T_Restart \/ T_Recover \/ T_StartRun
+    \/ T_Crash \/ T_Restart \/ T_Recover \/ T_StartRun \/ T_ClearRecovered
 
 TraceSpec == TraceInit /\ [][TraceNext]_<<vars, traceVars>>
 =============================================================================

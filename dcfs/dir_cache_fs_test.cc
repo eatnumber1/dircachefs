@@ -3750,14 +3750,16 @@ TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
   EXPECT_THAT(InodeRows(db_), IsOkAndHolds(before - 2));
 }
 
-// A crash during recovery (step 12.6): recovery may stop anywhere and run
-// again. Here the start that follows a crash between an unlink's syscall
-// and its phase 3 dies in RecoverDirty when the binary is built with the
-// crash (//dcfs:dir_cache_fs_crash_during_recovery_test, whose traces
+// A crash during recovery (steps 12.6, 12.6b): recovery may stop anywhere
+// and run again. Here the start that follows a crash between an unlink's
+// syscall and its phase 3 dies in RecoverDirty, and the next one before it
+// probes the unlinked file's row, when the binary is built with those
+// crashes (//dcfs:dir_cache_fs_crash_during_recovery_test, whose traces
 // trace validation checks; trace_tests/recover_crash.log keeps the
-// root's), and the next start recovers as if nothing had happened: the
-// root's listing and its name are forgotten, the unlinked file's row
-// probed away. Without the crash, the one start does the same.
+// root's). The row stays in the dirty set until a start has probed it, so
+// the third start does, and recovery ends as if nothing had happened: the
+// root's listing and names forgotten, the file's row gone, nothing dirty.
+// Without the crashes, the first start does all of it.
 TEST_F(DirCacheFSTest, CrashDuringRecoveryRecoversAgain) {
   WriteFile(Path("f"));
   WriteFile(Path("g"));
@@ -3780,6 +3782,9 @@ TEST_F(DirCacheFSTest, CrashDuringRecoveryRecoversAgain) {
     EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(Contains(kRootInode)));
     ASSERT_THAT(Restart("boot"), IsOk());
   }
+  // A start (the last one, or one that died before probing the file's row,
+  // whose row it left dirty) and another.
+  ASSERT_THAT(Restart("boot"), IsOk());
   EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
   EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
   EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
@@ -4449,8 +4454,12 @@ TEST_F(DirCacheFSDeathTest, OpenOlderThanTheRunIsLeftOutUntilReleased) {
   const InodeId f = static_cast<InodeId>(entry.nodeid);
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
-  ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
-  ASSERT_THAT(Dirty(), Not(Contains(f)));  // Recovered.
+  ASSERT_OK_AND_ASSIGN(std::vector<InodeId> recovered,
+                       backing::StartRun(ctx_, "boot"));
+  // Recovered (and, as Startup's probe would, taken out of the dirty set).
+  ASSERT_THAT(recovered, Contains(f));
+  ASSERT_THAT(cache::ClearDirtyRows(ctx_, recovered), IsOk());
+  ASSERT_THAT(Dirty(), Not(Contains(f)));
   EXPECT_EQ(Getattr(kRootInode).first.error, 0);  // Left out: no abort.
   ASSERT_EQ(Release(f, fh).error, 0);
   ASSERT_EQ(Open(f, O_RDWR).first.error, 0);

@@ -318,3 +318,16 @@ cc_library(
         "@absl//absl/status:statusor",
     ],
 )
+
+cc_library(
+    name = "probe_fails_once",
+    srcs = ["probe_fails_once.cc"],
+    alwayslink = True,
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:context",
+        "//dcfs:metadata_cache",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+    ],
+)

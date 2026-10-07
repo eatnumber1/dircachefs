@@ -660,8 +660,15 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
 // backing change may have added names nothing cached), and marks every
 // dentry pointing at it unknown (its name may have changed). Inode rows are
 // kept, so NFS handles still resolve (and are verified when next opened).
-// Then empties the dirty set. Returns how many dirty entries there were.
+// The dirty set is kept: the start still has to probe its rows
+// (backing::Startup), and a crash before it has must leave them to the
+// next start (step 12.6b); ClearDirtyRows takes them out once probed.
+// Returns how many dirty entries there are.
 absl::StatusOr<int64_t> RecoverDirty(Context &ctx);
+
+// Removes `ids` from the dirty set, in one transaction: the rows the start
+// probed after RecoverDirty (backing::Startup).
+absl::Status ClearDirtyRows(Context &ctx, std::span<const InodeId> ids);
 
 // Every start (backing::StartRun), after RecoverDirty: deletes every
 // non-directory row whose recorded link count is 0 and that no present

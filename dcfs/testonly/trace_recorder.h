@@ -175,6 +175,7 @@ class TraceRecorder final : public ProtocolEvents {
   void RunStarting(Context &ctx) override;
   void Recovered(Context &ctx) override;
   void RunStarted(Context &ctx) override;
+  void RecoveryDone(Context &ctx) override;
   void ShutdownBegin(Context &ctx) override;
   void Checkpointed(Context &ctx) override;
   void CleanShutdownRecorded(Context &ctx) override;

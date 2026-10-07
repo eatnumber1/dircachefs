@@ -1567,6 +1567,19 @@ absl::StatusOr<Mutation> BeginXattrChange(Context &ctx, InodeId id,
   });
 }
 
+absl::Status ClearDirtyRows(Context &ctx, std::span<const InodeId> ids) {
+  return ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(
+        Statement * remove,
+        ctx.db.Prepared("DELETE FROM dirty WHERE inode = ?"));
+    for (InodeId id : ids) {
+      ABSL_RETURN_IF_ERROR(remove->Bind(1, id));
+      ABSL_RETURN_IF_ERROR(remove->ExecuteOnce());
+    }
+    return absl::OkStatus();
+  });
+}
+
 absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids) {
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&] { return InsertDirty(ctx, ids); }));
   ctx.dirty.any = true;
@@ -1732,10 +1745,13 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
         Execute(ctx,
                 "DELETE FROM symlinks WHERE inode IN (SELECT inode FROM dirty)")
             .status());
-    return Execute(ctx, "DELETE FROM dirty").status();
+    // The dirty set itself stays until the start has probed its rows
+    // (backing::Startup, ClearDirtyRows): a crash before then leaves them
+    // to the next start (step 12.6b).
+    return absl::OkStatus();
   }));
   ctx.dirty.durable.clear();
-  ctx.dirty.any = false;
+  ctx.dirty.any = count > 0;
   return count;
 }
 

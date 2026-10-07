@@ -1838,8 +1838,11 @@ TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
   ASSERT_THAT(MarkDirty(ctx_, dirty), IsOk());
 
   EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(4));
-  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
-  EXPECT_FALSE(ctx_.dirty.any);
+  // The dirty set stays until the start has probed its rows (step 12.6b):
+  // a crash before then leaves them to the next start.
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::UnorderedElementsAre(
+                                   d, f.id, s.id, 999)));
+  EXPECT_TRUE(ctx_.dirty.any);
 
   // d: attributes unknown, listing forgotten (positive and negative) and
   // incomplete, and its own dentry forgotten, so the root is incomplete.
@@ -1878,7 +1881,16 @@ TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
   EXPECT_THAT(ListXattrs(ctx_, k.id),
               IsOkAndHolds(Optional(ElementsAre("user.b"))));
 
-  // Nothing dirty: nothing to do.
+  // Recovering again (a crash before the probe) finds the same rows and
+  // changes nothing more; once they are probed and cleared, nothing is
+  // dirty and there is nothing to do.
+  EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(4));
+  EXPECT_THAT(IsDirComplete(ctx_, c), IsOkAndHolds(true));
+  const InodeId probed[] = {d, f.id, s.id};
+  ASSERT_THAT(ClearDirtyRows(ctx_, probed), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(999)));
+  const InodeId rest[] = {999};
+  ASSERT_THAT(ClearDirtyRows(ctx_, rest), IsOk());
   EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(0));
 }
 

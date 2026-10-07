@@ -23,6 +23,15 @@ tlc_test(
 )
 
 tlc_test(
+    name = "recovery_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_recovery.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+tlc_test(
     name = "liveness_test",
     size = "medium",
     config = "MC_liveness.cfg",
@@ -241,6 +250,15 @@ tlc_test(
 )
 
 tlc_test(
+    name = "lifetime_recovery_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_lifetime_recovery.cfg",
+    spec = "MClifetime.tla",
+    srcs = ["lifetime.tla"],
+)
+
+tlc_test(
     name = "lifetime_stubs_test",
     size = "medium",
     timeout = "moderate",
@@ -263,6 +281,8 @@ LIFETIME_KNOWN_BUGS = {
     "lifetime_stub_nodeid_reused": "Invariant NodeidStable is violated",
     "lifetime_crash_before_settle": "Invariant RowsNameLiveObjects is violated",
     "lifetime_destroy_with_open_files": "Invariant UnnamedRowsSwept is violated",
+    # Found by step 12.6 (formerly findings/); fixed in step 12.6b.
+    "lifetime_probe_list_in_memory": "Invariant RowsNameLiveObjects is violated",
 }
 
 [
@@ -355,29 +375,6 @@ IDENT_LIMITATIONS = {
         srcs = IDENT,
     )
     for limitation, violation in IDENT_LIMITATIONS.items()
-]
-
-# Findings (README.md, "Findings of the lifetime model"): gaps the models
-# found in the code, not fixed yet; each test passes only if TLC still
-# reports the violation, so a fix must move its configuration into the
-# real model (and the test with it).
-LIFETIME_FINDINGS = {
-    # Step 12.6: a crash during the start's probe of the recovered rows
-    # loses the rows not yet probed (the list is in memory only).
-    "lifetime_crash_during_probe": "Invariant RowsNameLiveObjects is violated",
-}
-
-[
-    tlc_test(
-        name = "finding_%s_test" % finding,
-        size = "small",
-        timeout = "short",
-        config = "findings/%s.cfg" % finding,
-        expect_violation = violation,
-        spec = "findings/%s.tla" % finding,
-        srcs = LIFETIME,
-    )
-    for finding, violation in LIFETIME_FINDINGS.items()
 ]
 
 # Trace validation (README.md, "Trace validation"): the spec, its

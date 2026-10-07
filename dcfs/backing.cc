@@ -1913,15 +1913,27 @@ namespace {
 // access to read (a refresh here would be a fill outside any request).
 // Bounded by the dirty set. It needs the mount fds (open_by_handle_at's
 // mount fd: InitRoot, StartupPurge), so Startup runs it after them, never
-// StartRun (review of 12.4b: run before them, every probe failed). Best
-// effort, as the sweep: a row left behind only costs a probe later.
+// StartRun (review of 12.4b: run before them, every probe failed).
+//
+// The rows stay in the dirty set until probed (RecoverDirty keeps them):
+// one transaction after the loop takes out those whose probe ended, so a
+// crash during the probe, or a probe that failed, leaves the rest to the
+// next start (step 12.6b: formal/known_bugs/lifetime_probe_list_in_memory).
+// Best effort, as the sweep: a row left behind only costs a probe later.
 void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
   int64_t forgotten = 0;
+  std::vector<InodeId> probed;
   for (InodeId id : dirty) {
-    if (id == cache::kRootInode) continue;
+    if (id == cache::kRootInode) {
+      probed.push_back(id);
+      continue;
+    }
     // Gone already (the sweep, or a cascade from its directory's row).
     absl::StatusOr<cache::CachedAttr> row = cache::GetAttr(ctx, id);
-    if (absl::IsNotFound(row.status())) continue;
+    if (absl::IsNotFound(row.status())) {
+      probed.push_back(id);
+      continue;
+    }
     absl::StatusOr<std::optional<uint64_t>> nlink = BackingNlink(ctx, id);
     absl::Status status = row.ok() ? nlink.status() : row.status();
     bool gone = false;
@@ -1933,7 +1945,8 @@ void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
     }
     if (gone) ++forgotten;
     if (status.ok()) {
-      // The lifetime model's probe (formal/lifetime.tla's Restart): a new
+      probed.push_back(id);
+      // The lifetime model's probe (formal/lifetime.tla's ProbeRow): a new
       // process keeps nothing for the nodeid.
       ctx.events->LifetimeChanged(ctx, id, events::LifetimeStep::kProbed,
                                   gone ? 1 : 0,
@@ -1941,7 +1954,7 @@ void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
     }
     if (!status.ok()) {
       LOG(WARNING) << "could not probe recovered inode " << id
-                   << " (its row stays until an access finds it gone): "
+                   << " (it stays dirty: the next start probes it again): "
                    << status;
     }
   }
@@ -1950,6 +1963,15 @@ void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
                  << " rows of objects removed by mutations the last run's "
                     "end cut short";
   }
+  absl::Status cleared = cache::ClearDirtyRows(ctx, probed);
+  if (!cleared.ok()) {
+    LOG(WARNING) << "could not take the probed rows out of the dirty set "
+                    "(the next unclean start probes them again): "
+                 << cleared;
+  }
+  // Model: ClearRecovered (formal/dcfs.tla), and lifetime.tla's
+  // ClearProbed.
+  ctx.events->RecoveryDone(ctx);
 }
 
 }  // namespace
