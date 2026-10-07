@@ -728,3 +728,20 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   from the spike branch); it rebases over the guest-memory step when that merges. CI: russ pushed
   (github.com/eatnumber1/dircachefs); first run on 95595f3 in progress (osv green, fast running);
   an earlier run on 8ed3851 failed in fast and osv (logs need auth; checking the new run instead).
+- PAUSE for a reboot (russ, 2026-10-07; more memory afterwards). No new agents started. State:
+  - lane-1 `step-23.6` @ 2941566 (clean): all review fixes done and verified (presubmit 144/144,
+    formal + large/trace targets, asan small). A second read-only review of the fix commits
+    (52890de..2941566) was in flight; if it is lost, rerun it with the same focus list (batched
+    phase-1 tri-state and mid-batch failure; cap default = 0 at a 1,024 limit; GETFLAGS on a
+    replaced/deleted shared fd and O_APPEND|O_TRUNC; yielded write_fd lifetime; which tests waited
+    zero before the usleep fix; ASan 512 MB guests vs the 400 memory tag). Then merge.
+  - lane-2 `step-24` @ ebc0ee5 (24.1 committed; 11 uncommitted files = 24.2 in progress): Alpine
+    rule done, kernel step underway. After the reboot: `git stash` or commit WIP first, then resume.
+  - lane-3 `measure-guest-mem` @ 3007586 (1 uncommitted file): per-class mem=/asan_mem= allowances
+    committed; measurement/tabulation nearly done. Merge after lane-2 is told to rebase over it.
+  - lane-4 idle at main.
+  - GitHub: first real run on 95595f3 (fast in progress at 03:47 UTC, osv green); the earlier run on
+    8ed3851 failed in fast + osv (logs need auth). Check the result after the reboot.
+  - Next after the merges: 25.1 style convergence (after Phase 23), 24.2/24.3 continue, Phase 22
+    cancellation, then Phase 7 with 7.6/7.7.
+  - All Bazel servers die with the reboot: nothing to do; first commands restart them via sg kvm.
