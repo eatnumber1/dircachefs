@@ -5,4 +5,3 @@
 18 bench/process.cc
 6 bench/tree.cc
 2 dcfs/backing_test.cc
-116 dcfs/dir_cache_fs_test.cc

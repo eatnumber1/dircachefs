@@ -87,7 +87,9 @@
 #include "dcfs/sqlite.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/files.h"
 #include "dcfs/testonly/trace_recorder.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
@@ -201,31 +203,32 @@ void AppendBytes(std::string &out, const T &value) {
 }
 
 void WriteFile(const std::string &path) {
-  int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-  ASSERT_GE(fd, 0) << path << ": " << std::strerror(errno);
-  ::close(fd);
+  ASSERT_THAT(syscalls::openat(AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC,
+                               0644),
+              IsOk())
+      << path;  // the descriptor closes at once
 }
 
 // A write the kernel would make through a passthrough fd, which dcfs never
 // sees.
 std::string ReadWholeFile(const std::string &path) {
-  std::ifstream in(path, std::ios::binary);
-  return std::string(std::istreambuf_iterator<char>(in), {});
+  absl::StatusOr<std::string> contents = testonly::ReadFileToString(path);
+  EXPECT_THAT(contents, IsOk()) << path;
+  return contents.value_or("");
 }
 
 void AppendToFile(const std::string &path, std::string_view data) {
-  int fd = ::open(path.c_str(), O_WRONLY | O_APPEND | O_CLOEXEC);
-  ASSERT_GE(fd, 0) << path << ": " << std::strerror(errno);
-  EXPECT_EQ(::write(fd, data.data(), data.size()),
-            static_cast<ssize_t>(data.size()));
-  ::close(fd);
+  ASSERT_OK_AND_ASSIGN(FileDescriptor fd,
+                       syscalls::openat(AT_FDCWD, path, O_WRONLY | O_APPEND));
+  EXPECT_THAT(syscalls::write(*fd, data.data(), data.size()),
+              IsOkAndHolds(data.size()));
 }
 
 uint64_t InoOf(const std::string &path) {
-  struct stat st {};
-  EXPECT_EQ(::lstat(path.c_str(), &st), 0) << path << ": "
-                                          << std::strerror(errno);
-  return st.st_ino;
+  absl::StatusOr<struct stat> st =
+      syscalls::fstatat(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW);
+  EXPECT_THAT(st, IsOk()) << path;
+  return st.ok() ? st->st_ino : 0;
 }
 
 // A reply as the kernel would receive it.
@@ -240,8 +243,7 @@ class DirCacheFSTest : public ::testing::Test {
     const char *tmpdir = std::getenv("TEST_TMPDIR");
     ASSERT_NE(tmpdir, nullptr);
     std::string templ = absl::StrCat(tmpdir, "/dcfs_XXXXXX");
-    ASSERT_NE(::mkdtemp(templ.data()), nullptr) << std::strerror(errno);
-    source_ = templ;
+    ASSERT_OK_AND_ASSIGN(source_, syscalls::mkdtemp(templ));
   }
 
   // Starts the filesystem over the source tree built so far: a fresh
@@ -249,10 +251,10 @@ class DirCacheFSTest : public ::testing::Test {
   void Start() {
     ASSERT_OK_AND_ASSIGN(
         db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
-    int source_fd =
-        ::open(source_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    ASSERT_GE(source_fd, 0);
-    FileDescriptor owned(source_fd);
+    ASSERT_OK_AND_ASSIGN(
+        FileDescriptor owned,
+        syscalls::openat(AT_FDCWD, source_, O_RDONLY | O_DIRECTORY));
+    const int source_fd = *owned;
     ASSERT_OK_AND_ASSIGN(RootIdentity root,
                          backing::ProbeRoot(ctx_, source_fd));
     ASSERT_THAT(Migrate(db_, root), IsOk());
@@ -276,8 +278,9 @@ class DirCacheFSTest : public ::testing::Test {
     io.writev = [](int, struct iovec *iov, int count, void *) -> ssize_t {
       return current_->Capture(iov, count);
     };
-    int dummy_fd = ::open("/dev/null", O_RDWR | O_CLOEXEC);
-    ASSERT_GE(dummy_fd, 0);
+    ASSERT_OK_AND_ASSIGN(FileDescriptor dummy,
+                         syscalls::openat(AT_FDCWD, "/dev/null", O_RDWR));
+    const int dummy_fd = std::move(dummy).Release();  // the session owns it
     current_ = this;
     ASSERT_EQ(fuse_session_custom_io(se_, &io, sizeof(io), dummy_fd), 0);
 
@@ -302,7 +305,7 @@ class DirCacheFSTest : public ::testing::Test {
     FakeInodeNumbers().clear();
     StatxFailure() = 0;
     for (const std::string &mount : mounts_below_) {
-      ::umount2(mount.c_str(), MNT_DETACH);
+      syscalls::umount2(mount, MNT_DETACH).IgnoreError();
     }
     if (se_ != nullptr) fuse_session_destroy(se_);
     current_ = nullptr;
@@ -419,20 +422,21 @@ class DirCacheFSTest : public ::testing::Test {
   // immutable (set and cleared behind dcfs's back), so that the shared
   // backing descriptor is read-only. Returns the handle (0 on failure).
   uint64_t OpenReadOnlySharedFd(const std::string &rel, InodeId id) {
-    const int raw = ::open(Path(rel).c_str(), O_RDONLY | O_CLOEXEC);
-    if (raw < 0) return 0;
+    absl::StatusOr<FileDescriptor> raw_fd =
+        syscalls::openat(AT_FDCWD, Path(rel), O_RDONLY);
+    if (!raw_fd.ok()) return 0;
+    const int raw = **raw_fd;
     int flags = 0;
     uint64_t fh = 0;
-    if (::ioctl(raw, FS_IOC_GETFLAGS, &flags) == 0) {
+    if (syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags).ok()) {
       const int immutable = flags | FS_IMMUTABLE_FL;
-      if (::ioctl(raw, FS_IOC_SETFLAGS, &immutable) == 0) {
+      if (syscalls::ioctl(raw, FS_IOC_SETFLAGS, &immutable).ok()) {
         OutOfBand(id);
         fh = Open(id, O_RDONLY).second;
-        if (::ioctl(raw, FS_IOC_SETFLAGS, &flags) != 0) fh = 0;
+        if (!syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags).ok()) fh = 0;
         OutOfBand(id);
       }
     }
-    ::close(raw);
     return fh;
   }
 
@@ -696,8 +700,9 @@ class DirCacheFSTest : public ::testing::Test {
   // boundary below the source. Unmounted at TearDown.
   void MountBelow(std::string_view rel) {
     const std::string path = Path(rel);
-    ASSERT_EQ(::mount("tmpfs", path.c_str(), "tmpfs", 0, "mode=0751"), 0)
-        << path << ": " << std::strerror(errno);
+    ASSERT_THAT(syscalls::mount("tmpfs", path, "tmpfs", 0, "mode=0751"),
+                IsOk())
+        << path;
     mounts_below_.push_back(path);
   }
 
@@ -828,7 +833,7 @@ class DirCacheFSTest : public ::testing::Test {
 // and is still in flight (its unlinkat has not run) when the old code built
 // the listing.
 TEST_F(DirCacheFSTest, ReaddirplusListsWhatWasCompleteWhenChecked) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/x"));
   WriteFile(Path("d/y"));
   Start();
@@ -854,7 +859,7 @@ TEST_F(DirCacheFSTest, ReaddirplusListsWhatWasCompleteWhenChecked) {
 // Readdir of a directory whose own dentry is unknown resolves ".." from the
 // backing filesystem (backing::ParentOf): a suspension point too.
 TEST_F(DirCacheFSTest, ReaddirListsWhatWasCompleteWhenChecked) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/x"));
   WriteFile(Path("d/y"));
   Start();
@@ -910,10 +915,10 @@ TEST_F(DirCacheFSTest, ReaddirplusIsNotServedWhileAMutationIsInFlight) {
 class RenameStaleSourceTest : public DirCacheFSTest {
  protected:
   void Build(bool second_link) {
-    ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+    ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
     WriteFile(Path("d/a"));
     if (second_link) {
-      ASSERT_EQ(::link(Path("d/a").c_str(), Path("d/link_a").c_str()), 0);
+      ASSERT_THAT(syscalls::linkat(AT_FDCWD, Path("d/a"), AT_FDCWD, Path("d/link_a"), 0), IsOk());
     }
     WriteFile(Path("d/c"));
     ino_a_ = InoOf(Path("d/a"));
@@ -937,8 +942,8 @@ class RenameStaleSourceTest : public DirCacheFSTest {
     EXPECT_EQ(reply.error, 0);
     // On the backing filesystem, c's file ended up as b.
     ASSERT_EQ(InoOf(Path("d/b")), ino_c_);
-    ASSERT_NE(::access(Path("d/a").c_str(), F_OK), 0);
-    ASSERT_NE(::access(Path("d/c").c_str(), F_OK), 0);
+    ASSERT_FALSE(syscalls::fstatat(AT_FDCWD, Path("d/a")).ok());
+    ASSERT_FALSE(syscalls::fstatat(AT_FDCWD, Path("d/c")).ok());
   }
 
   InodeId d_ = 0;
@@ -983,8 +988,8 @@ TEST_F(DirCacheFSTest, RenameIsRefusedWhileItsParentKeepsChanging) {
   ASSERT_OK_AND_ASSIGN(cache::Mutation other,
                        cache::BeginCreate(ctx_, kRootInode, "x2"));
   EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, -EAGAIN);
-  EXPECT_EQ(::access(Path("a").c_str(), F_OK), 0);
-  EXPECT_NE(::access(Path("b").c_str(), F_OK), 0);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("a")), IsOk());
+  EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("b")).ok());
   other.End();
   EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, 0);
   EXPECT_EQ(Cached(kRootInode, "b"),
@@ -1042,10 +1047,10 @@ TEST_F(DirCacheFSTest, ReleaseEndsTheWritesForAFillThatBeganBefore) {
 
   // A fill begins and reads f's attributes; then a write, and the RELEASE.
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
-  struct statx stale {};
-  ASSERT_EQ(::statx(AT_FDCWD, Path("f").c_str(), AT_SYMLINK_NOFOLLOW,
-                    STATX_BASIC_STATS | STATX_BTIME, &stale),
-            0);
+  ASSERT_OK_AND_ASSIGN(
+      struct statx stale,
+      syscalls::statx(AT_FDCWD, Path("f"), AT_SYMLINK_NOFOLLOW,
+                      STATX_BASIC_STATS | STATX_BTIME));
   AppendToFile(Path("f"), "late");
   ASSERT_EQ(Release(f, fh).error, 0);
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr fresh, cache::GetAttr(ctx_, f));
@@ -1130,11 +1135,11 @@ TEST_F(DirCacheFSTest, WritableCreateWhosePhase1FailsIsUndone) {
 // row stayed current with the link count from before (2), and the unlink
 // settled X rather than Y.
 TEST_F(DirCacheFSTest, UnlinkMarksWhatItRemovesUnknown) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/a"));
-  ASSERT_EQ(::link(Path("d/a").c_str(), Path("d/link_a").c_str()), 0);
+  ASSERT_THAT(syscalls::linkat(AT_FDCWD, Path("d/a"), AT_FDCWD, Path("d/link_a"), 0), IsOk());
   WriteFile(Path("d/b"));
-  ASSERT_EQ(::link(Path("d/b").c_str(), Path("d/link_b").c_str()), 0);
+  ASSERT_THAT(syscalls::linkat(AT_FDCWD, Path("d/b"), AT_FDCWD, Path("d/link_b"), 0), IsOk());
   const uint64_t ino_x = InoOf(Path("d/a"));
   const uint64_t ino_y = InoOf(Path("d/b"));
   Start();
@@ -1152,8 +1157,8 @@ TEST_F(DirCacheFSTest, UnlinkMarksWhatItRemovesUnknown) {
   EXPECT_EQ(concurrent->error, 0);
   EXPECT_EQ(reply.error, 0);
   // On the backing filesystem, Y's link a is what the unlink removed.
-  ASSERT_NE(::access(Path("d/a").c_str(), F_OK), 0);
-  ASSERT_NE(::access(Path("d/b").c_str(), F_OK), 0);
+  ASSERT_FALSE(syscalls::fstatat(AT_FDCWD, Path("d/a")).ok());
+  ASSERT_FALSE(syscalls::fstatat(AT_FDCWD, Path("d/b")).ok());
   ASSERT_EQ(InoOf(Path("d/link_a")), ino_x);
   ASSERT_EQ(InoOf(Path("d/link_b")), ino_y);
 
@@ -1179,11 +1184,11 @@ TEST_F(DirCacheFSTest, UnlinkIsRefusedWhileItsParentKeepsChanging) {
   ASSERT_OK_AND_ASSIGN(cache::Mutation other,
                        cache::BeginCreate(ctx_, kRootInode, "x2"));
   EXPECT_EQ(Unlink(kRootInode, "a").error, -EAGAIN);
-  EXPECT_EQ(::access(Path("a").c_str(), F_OK), 0);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("a")), IsOk());
   EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::Kind::kFound);
   other.End();
   EXPECT_EQ(Unlink(kRootInode, "a").error, 0);
-  EXPECT_NE(::access(Path("a").c_str(), F_OK), 0);
+  EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("a")).ok());
   EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::Kind::kNegative);
 }
 
@@ -1228,7 +1233,7 @@ TEST_F(DirCacheFSTest, MkdirDuringASyncPointKeepsItsDirtyRows) {
 // (after its fill snapshot, so the resolve cannot record the name, which
 // stays unknown), so phase 1's verification fails every time: EAGAIN.
 TEST_F(DirCacheFSTest, RenameGivesUpWhileItsParentKeepsChanging) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/a"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
@@ -1243,12 +1248,12 @@ TEST_F(DirCacheFSTest, RenameGivesUpWhileItsParentKeepsChanging) {
   });
   EXPECT_EQ(Rename(d, "a", d, "b").error, -EAGAIN);
   EXPECT_EQ(mkdirs, 3);
-  EXPECT_EQ(::access(Path("d/a").c_str(), F_OK), 0);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("d/a")), IsOk());
 }
 
 // The same for an unlink.
 TEST_F(DirCacheFSTest, UnlinkGivesUpWhileItsParentKeepsChanging) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/a"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
@@ -1263,14 +1268,14 @@ TEST_F(DirCacheFSTest, UnlinkGivesUpWhileItsParentKeepsChanging) {
   });
   EXPECT_EQ(Unlink(d, "a").error, -EAGAIN);
   EXPECT_EQ(mkdirs, 3);
-  EXPECT_EQ(::access(Path("d/a").c_str(), F_OK), 0);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("d/a")), IsOk());
 }
 
 // A readdir of an incomplete directory populates it three times, and a
 // mkdir in it runs during each population (after its fill snapshot), so no
 // listing can be recorded: EAGAIN.
 TEST_F(DirCacheFSTest, ReaddirGivesUpWhileItsDirectoryKeepsChanging) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/a"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
@@ -1295,7 +1300,7 @@ TEST_F(DirCacheFSTest, ReaddirGivesUpWhileItsDirectoryKeepsChanging) {
 // and one that succeeds, a rename and an unlink (and both again, ENOENT),
 // and a sync point.
 TEST_F(DirCacheFSTest, CommonRequestsMatchTheModel) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/a"));
   WriteFile(Path("d/b"));
   Start();
@@ -1325,8 +1330,8 @@ TEST_F(DirCacheFSTest, CommonRequestsMatchTheModel) {
 // A getattr and a readdirplus of directories whose attributes are unknown
 // (left so by the setup): each refreshes them (its statx, then a fill).
 TEST_F(DirCacheFSTest, UnknownAttributesAreRefreshed) {
-  ASSERT_EQ(::mkdir(Path("d1").c_str(), 0755), 0);
-  ASSERT_EQ(::mkdir(Path("d2").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d1"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d2"), 0755), IsOk());
   WriteFile(Path("d2/a"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d1, Id("d1"));
@@ -1379,7 +1384,7 @@ TEST_F(DirCacheFSTest, TraceScenarioMkdirDuringSync) {
 // A mkdir in d during a readdir's population of d (at its first probe,
 // after its fill snapshot): the recorder holds d's lines meanwhile.
 TEST_F(DirCacheFSTest, TraceScenarioMkdirDuringListing) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/a"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
@@ -1424,20 +1429,21 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnImmutableFileIsRefused) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   int flags = 0;
-  const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(raw, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor raw_fd,
+      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  const int raw = *raw_fd;
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int immutable = flags | FS_IMMUTABLE_FL;
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &immutable), IsOk());
   OutOfBand(f);
   EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
   auto [ro, ro_fh] = Open(f, O_RDONLY);
   EXPECT_EQ(ro.error, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags), IsOk());
   OutOfBand(f);
   auto [rw, rw_fh] = Open(f, O_WRONLY);
   EXPECT_EQ(rw.error, 0);
-  ::close(raw);
   for (uint64_t h : {fh, ro_fh, rw_fh}) {
     if (h != 0) {
       EXPECT_EQ(Release(f, h).error, 0);
@@ -1488,18 +1494,19 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnAppendOnlyFileNeedsOAppend) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   int flags = 0;
-  const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(raw, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor raw_fd,
+      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  const int raw = *raw_fd;
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int append_only = flags | FS_APPEND_FL;
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &append_only), 0);
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &append_only), IsOk());
   OutOfBand(f);
   EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
   auto [app, app_fh] = Open(f, O_WRONLY | O_APPEND);
   EXPECT_EQ(app.error, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags), IsOk());
   OutOfBand(f);
-  ::close(raw);
   for (uint64_t h : {fh, app_fh}) {
     if (h != 0) {
       EXPECT_EQ(Release(f, h).error, 0);
@@ -1586,7 +1593,7 @@ TEST_F(DirCacheFSTest, RefusedAndFsxattrFlagChangesMatchTheRevalModel) {
 // name is, to the directory, a create (the model's "linkcreate", which
 // trace validation checks here: the second link is EEXIST).
 TEST_F(DirCacheFSTest, TmpfileLinkedIntoANameIsACreate) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/taken"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
@@ -1696,7 +1703,7 @@ TEST_F(DirCacheFSTest, TmpfileUndoForgetsItsRow) {
 
 // A tmpfile in a directory whose backing open fails, and in a stub.
 TEST_F(DirCacheFSTest, TmpfileFailuresAreReplied) {
-  ASSERT_EQ(::mkdir(Path("mp").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mp"), 0755), IsOk());
   Start();
   MountBelow("mp");
   auto [lookup, entry] = Lookup(kRootInode, "mp");
@@ -1730,15 +1737,16 @@ TEST_F(DirCacheFSTest, CopyFileRangeCopiesOnTheBackingFiles) {
   // attributes right: here a destination whose shared backing fd is
   // read-only (the file was immutable when it was opened).
   int flags = 0;
-  const int raw = ::open(Path("dst").c_str(), O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(raw, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor raw_fd,
+      syscalls::openat(AT_FDCWD, Path("dst"), O_RDONLY));
+  const int raw = *raw_fd;
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int immutable = flags | FS_IMMUTABLE_FL;
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &immutable), IsOk());
   auto [ro, ro_fh] = Open(dst, O_RDONLY);
   ASSERT_EQ(ro.error, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
-  ::close(raw);
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags), IsOk());
   EXPECT_EQ(CopyFileRange(src, in_fh, dst, ro_fh, 100), -EBADF);
   EXPECT_EQ(std::filesystem::file_size(Path("dst")), 10u);
   EXPECT_EQ(Release(dst, ro_fh).error, 0);
@@ -1747,16 +1755,17 @@ TEST_F(DirCacheFSTest, CopyFileRangeCopiesOnTheBackingFiles) {
 
 TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
   WriteFile(Path("f"));
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
   int flags = 0;
   {
-    const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
-    ASSERT_GE(raw, 0);
-    ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
-    ::close(raw);
+    ASSERT_OK_AND_ASSIGN(
+        FileDescriptor raw_fd,
+        syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+    const int raw = *raw_fd;
+    ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   }
   auto output = [](const Reply &reply) {
     return reply.payload.substr(sizeof(struct fuse_ioctl_out));
@@ -1776,8 +1785,8 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
   EXPECT_THAT(Dirty(), Contains(f));
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
   EXPECT_TRUE(attr.valid);
-  struct stat st {};
-  ASSERT_EQ(::stat(Path("f").c_str(), &st), 0);
+  ASSERT_OK_AND_ASSIGN(struct stat st,
+                       syscalls::fstatat(AT_FDCWD, Path("f")));
   EXPECT_EQ(attr.st.st_ctim.tv_sec, st.st_ctim.tv_sec);
   EXPECT_EQ(attr.st.st_ctim.tv_nsec, st.st_ctim.tv_nsec);
   // A directory's (FUSE_IOCTL_DIR), and the generation.
@@ -1816,14 +1825,13 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
 
 // Sets path's atime and mtime (seconds before now).
 void SetTimes(const std::string &path, int64_t atime_ago, int64_t mtime_ago) {
-  struct timespec now {};
-  clock_gettime(CLOCK_REALTIME, &now);
+  ASSERT_OK_AND_ASSIGN(struct timespec now,
+                       syscalls::clock_gettime(CLOCK_REALTIME));
   const struct timespec times[2] = {
       {.tv_sec = now.tv_sec - atime_ago, .tv_nsec = 0},
       {.tv_sec = now.tv_sec - mtime_ago, .tv_nsec = 0},
   };
-  ASSERT_EQ(::utimensat(AT_FDCWD, path.c_str(), times, 0), 0)
-      << path << ": " << std::strerror(errno);
+  ASSERT_THAT(syscalls::utimensat(AT_FDCWD, path, times, 0), IsOk()) << path;
 }
 
 class RelatimeTest : public DirCacheFSTest {
@@ -1848,16 +1856,17 @@ class RelatimeTest : public DirCacheFSTest {
   // MS_STRICTATIME, MS_NOATIME), and back to relatime at TearDown.
   void RemountSource(unsigned long flag) {
     const char *tmpdir = std::getenv("TEST_TMPDIR");
-    ASSERT_EQ(::mount(nullptr, tmpdir, nullptr, MS_REMOUNT | flag, nullptr),
-              0)
-        << std::strerror(errno);
+    ASSERT_THAT(
+        syscalls::mount(nullptr, tmpdir, nullptr, MS_REMOUNT | flag, nullptr),
+        IsOk());
     remounted_ = true;
   }
 
   void TearDown() override {
     if (remounted_) {
-      ::mount(nullptr, std::getenv("TEST_TMPDIR"), nullptr,
-              MS_REMOUNT | MS_RELATIME, nullptr);
+      syscalls::mount(nullptr, std::getenv("TEST_TMPDIR"), nullptr,
+                      MS_REMOUNT | MS_RELATIME, nullptr)
+          .IgnoreError();
     }
     DirCacheFSTest::TearDown();
   }
@@ -1880,8 +1889,8 @@ TEST_F(RelatimeTest, ReadOpenFollowsTheRelatimeRule) {
   ASSERT_OK_AND_ASSIGN(InodeId recent, Id("recent"));
   ASSERT_OK_AND_ASSIGN(InodeId stale, Id("stale"));
   const int64_t recent_before = CachedAtime(recent);
-  struct timespec now {};
-  clock_gettime(CLOCK_REALTIME, &now);
+  ASSERT_OK_AND_ASSIGN(struct timespec now,
+                       syscalls::clock_gettime(CLOCK_REALTIME));
 
   OpenAndRelease(old, O_RDONLY);
   OpenAndRelease(recent, O_RDONLY);
@@ -1945,8 +1954,10 @@ TEST_F(DirCacheFSTest, RemovedFileCopyAndIoctl) {
   auto [lookup, entry] = Lookup(kRootInode, "f");
   ASSERT_EQ(lookup.error, 0);
   const InodeId f = static_cast<InodeId>(entry.nodeid);
-  const int held = ::open(Path("f").c_str(), O_PATH | O_CLOEXEC);
-  ASSERT_GE(held, 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor held_fd,
+      syscalls::openat(AT_FDCWD, Path("f"), O_PATH));
+  const int held = *held_fd;
   ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
 
   Reply get = Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int));
@@ -1956,8 +1967,7 @@ TEST_F(DirCacheFSTest, RemovedFileCopyAndIoctl) {
   ASSERT_EQ(in.error, 0);
   ASSERT_EQ(out.error, 0);
   EXPECT_EQ(CopyFileRange(src, in_fh, f, out_fh, 100), 3);
-  struct stat st {};
-  ASSERT_EQ(::fstat(held, &st), 0);
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstat(held));
   EXPECT_EQ(st.st_size, 3);
   // Set the flags it has (ext4 refuses to clear its extents flag).
   const std::string set = get.payload.substr(sizeof(struct fuse_ioctl_out));
@@ -1965,7 +1975,6 @@ TEST_F(DirCacheFSTest, RemovedFileCopyAndIoctl) {
   EXPECT_EQ(Ioctl(f, FS_IOC_SETFLAGS, set, 0).error, 0);
   EXPECT_EQ(Release(f, out_fh).error, 0);
   EXPECT_EQ(Release(src, in_fh).error, 0);
-  ::close(held);
 }
 
 // A writable open that shares a backing fd opened read-only (the file was
@@ -1981,16 +1990,17 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
   ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
   StartTrace();  // and the files' (formal/reval.tla)
   int flags = 0;
-  const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
-  ASSERT_GE(raw, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor raw_fd,
+      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  const int raw = *raw_fd;
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int immutable = flags | FS_IMMUTABLE_FL;
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &immutable), IsOk());
   auto [ro, ro_fh] = Open(f, O_RDONLY);  // Shared fd: read-only.
   ASSERT_EQ(ro.error, 0);
-  ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags), IsOk());
   OutOfBand(f);
-  ::close(raw);
   auto [rw, rw_fh] = Open(f, O_WRONLY);
   ASSERT_EQ(rw.error, 0);
 
@@ -2171,7 +2181,8 @@ TEST_F(DirCacheFSTest, LastForgetOfARemovedWrittenFileForgetsItsRow) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   ASSERT_EQ(Release(f, fh).error, 0);
-  ASSERT_EQ(::unlink(Path("f").c_str()), 0);  // Behind dcfs's back.
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0),
+              IsOk());  // Behind dcfs's back.
   Forget(f, 1);
   EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
               ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
@@ -2189,16 +2200,17 @@ TEST_F(DirCacheFSTest, LastForgetWithoutAHeldDescriptorMarksUnknown) {
   const InodeId f = static_cast<InodeId>(entry.nodeid);
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
-  struct rlimit saved {};
-  ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &saved), 0);
-  const int lowest_free = ::dup(0);
-  ASSERT_GE(lowest_free, 0);
-  ::close(lowest_free);
+  ASSERT_OK_AND_ASSIGN(struct rlimit saved, syscalls::getrlimit(RLIMIT_NOFILE));
+  int lowest_free = -1;
+  {
+    ASSERT_OK_AND_ASSIGN(FileDescriptor probe, syscalls::dup(0));
+    lowest_free = *probe;  // closed again at the end of the block
+  }
   struct rlimit tight = saved;
   tight.rlim_cur = static_cast<rlim_t>(lowest_free);
-  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &tight), 0);
+  ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, tight), IsOk());
   Reply release = Release(f, fh);  // Cannot hold a descriptor now.
-  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &saved), 0);
+  ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, saved), IsOk());
   ASSERT_EQ(release.error, 0);
   ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: f is clean.
   ASSERT_THAT(Dirty(), Not(Contains(f)));
@@ -2236,14 +2248,15 @@ TEST_F(DirCacheFSTest, HeldDescriptorsStopAtTheCap) {
   }
   const InodeId later = lookup("later");
 
-  struct rlimit saved {};
-  ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &saved), 0);
-  const int lowest_free = ::dup(0);
-  ASSERT_GE(lowest_free, 0);
-  ::close(lowest_free);
+  ASSERT_OK_AND_ASSIGN(struct rlimit saved, syscalls::getrlimit(RLIMIT_NOFILE));
+  int lowest_free = -1;
+  {
+    ASSERT_OK_AND_ASSIGN(FileDescriptor probe, syscalls::dup(0));
+    lowest_free = *probe;  // closed again at the end of the block
+  }
   struct rlimit tight = saved;
   tight.rlim_cur = static_cast<rlim_t>(lowest_free + kCap + kReaders + 2);
-  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &tight), 0);
+  ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, tight), IsOk());
   std::vector<std::pair<InodeId, uint64_t>> opened;
   for (InodeId id : written) {
     auto [open, fh] = Open(id, O_RDWR);
@@ -2259,7 +2272,7 @@ TEST_F(DirCacheFSTest, HeldDescriptorsStopAtTheCap) {
     if (fh != 0) opened.emplace_back(id, fh);
   }
   for (auto [id, fh] : opened) EXPECT_EQ(Release(id, fh).error, 0);
-  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &saved), 0);
+  ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, saved), IsOk());
 
   // Within the cap: held, so its FORGET re-reads through it.
   ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
@@ -2350,24 +2363,24 @@ TEST_F(DirCacheFSTest, HeldDescriptorsAreClosed) {
     ASSERT_EQ(reply.error, 0);
     ids[name] = static_cast<InodeId>(entry.nodeid);
   }
-  auto write = [&](InodeId id) {
+  auto write_file = [&](InodeId id) {
     auto [open, fh] = Open(id, O_RDWR);
     ASSERT_EQ(open.error, 0);
     ASSERT_EQ(Release(id, fh).error, 0);
   };
   const int base = OpenFdCount();
-  write(ids["f"]);
+  write_file(ids["f"]);
   EXPECT_EQ(OpenFdCount(), base + 1);
   Forget(ids["f"], 1);
   EXPECT_EQ(OpenFdCount(), base) << "after the last FORGET";
 
-  write(ids["g"]);
+  write_file(ids["g"]);
   ASSERT_EQ(Unlink(kRootInode, "g").error, 0);
   EXPECT_EQ(OpenFdCount(), base + 1) << "the removed record's alone";
   Forget(ids["g"], 1);
   EXPECT_EQ(OpenFdCount(), base) << "after the removed file's last FORGET";
 
-  write(ids["h"]);
+  write_file(ids["h"]);
   EXPECT_EQ(OpenFdCount(), base + 1);
   EXPECT_EQ(Send(FUSE_DESTROY, 0, "").error, 0);
   EXPECT_EQ(OpenFdCount(), base) << "after DESTROY";
@@ -2438,16 +2451,17 @@ TEST_F(DirCacheFSTest, WrittenAgainKeepsItsHeldDescriptor) {
   ASSERT_EQ(Release(f, first_fh).error, 0);  // Held from here.
   auto [again, again_fh] = Open(f, O_RDWR);
   ASSERT_EQ(again.error, 0);
-  struct rlimit saved {};
-  ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &saved), 0);
-  const int lowest_free = ::dup(0);
-  ASSERT_GE(lowest_free, 0);
-  ::close(lowest_free);
+  ASSERT_OK_AND_ASSIGN(struct rlimit saved, syscalls::getrlimit(RLIMIT_NOFILE));
+  int lowest_free = -1;
+  {
+    ASSERT_OK_AND_ASSIGN(FileDescriptor probe, syscalls::dup(0));
+    lowest_free = *probe;  // closed again at the end of the block
+  }
   struct rlimit tight = saved;
   tight.rlim_cur = static_cast<rlim_t>(lowest_free);
-  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &tight), 0);
+  ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, tight), IsOk());
   Reply release = Release(f, again_fh);  // No new descriptor possible.
-  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &saved), 0);
+  ASSERT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, saved), IsOk());
   ASSERT_EQ(release.error, 0);
   ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
   AppendToFile(Path("f"), "stored");
@@ -2493,8 +2507,10 @@ TEST_F(DirCacheFSTest, RemovedFileCanBeChanged) {
   const InodeId f = static_cast<InodeId>(entry.nodeid);
   // Keep the object alive as the kernel's reference would (the record
   // holds its own descriptor; this one lets the test look at the object).
-  const int held = ::open(Path("f").c_str(), O_PATH | O_CLOEXEC);
-  ASSERT_GE(held, 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor held_fd,
+      syscalls::openat(AT_FDCWD, Path("f"), O_PATH));
+  const int held = *held_fd;
   ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
   ASSERT_THAT(cache::GetAttr(ctx_, f).status(),
               ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
@@ -2507,8 +2523,7 @@ TEST_F(DirCacheFSTest, RemovedFileCanBeChanged) {
   AppendBytes(body, truncate);
   EXPECT_EQ(Send(FUSE_SETATTR, static_cast<uint64_t>(f), body).error, 0);
   EXPECT_EQ(Setxattr(f, "user.k", "v").error, 0);
-  struct stat st {};
-  ASSERT_EQ(::fstat(held, &st), 0);
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstat(held));
   EXPECT_EQ(st.st_mode & 07777, 0600u);
   EXPECT_EQ(st.st_size, 2);
   EXPECT_EQ(st.st_nlink, 0u);
@@ -2556,25 +2571,25 @@ TEST_F(DirCacheFSTest, RemovedFileCanBeChanged) {
   Forget(f, 1);
   EXPECT_EQ(Getattr(f).first.error, -ESTALE);
   EXPECT_EQ(Chmod(f, S_IFREG | 0644).error, -ESTALE);
-  ::close(held);
 }
 
 TEST_F(DirCacheFSTest, RemovedDirectoryCanBeChanged) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   Start();
   auto [lookup, entry] = Lookup(kRootInode, "d");
   ASSERT_EQ(lookup.error, 0);
   const InodeId d = static_cast<InodeId>(entry.nodeid);
-  const int held = ::open(Path("d").c_str(), O_RDONLY | O_DIRECTORY);
-  ASSERT_GE(held, 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor held_fd,
+      syscalls::openat(AT_FDCWD, Path("d"), O_RDONLY | O_DIRECTORY));
+  const int held = *held_fd;
   std::string body = "d";
   body.push_back('\0');
   ASSERT_EQ(Send(FUSE_RMDIR, kRootInode, body).error, 0);
 
   EXPECT_EQ(Chmod(d, S_IFDIR | 0700).error, 0);
   EXPECT_EQ(Setxattr(d, "user.k", "v").error, 0);
-  struct stat st {};
-  ASSERT_EQ(::fstat(held, &st), 0);
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstat(held));
   EXPECT_EQ(st.st_mode & 07777, 0700u);
   auto [getattr, attr] = Getattr(d);
   ASSERT_EQ(getattr.error, 0);
@@ -2589,7 +2604,6 @@ TEST_F(DirCacheFSTest, RemovedDirectoryCanBeChanged) {
   // fsync of the removed directory (through an OPENDIR'd handle).
   ASSERT_EQ(Opendir(d).error, 0);
   EXPECT_EQ(Fsyncdir(d).error, 0);
-  ::close(held);
 }
 
 // --- Boundary stubs (step 23.5) -------------------------------------------
@@ -2602,8 +2616,8 @@ TEST_F(DirCacheFSTest, RemovedDirectoryCanBeChanged) {
 constexpr uint64_t kFirstStubNodeid = uint64_t{1} << 63;
 
 TEST_F(DirCacheFSTest, BoundaryIsAStubDirectory) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
-  ASSERT_EQ(::mkdir(Path("d/mp").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d/mp"), 0755), IsOk());
   WriteFile(Path("d/f"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
@@ -2657,19 +2671,19 @@ TEST_F(DirCacheFSTest, BoundaryIsAStubDirectory) {
   EXPECT_EQ(Link(f, stub, "f").error, -EXDEV);
 
   // Nothing reached either side of the boundary.
-  EXPECT_EQ(::access(Path("d/mp/inside").c_str(), F_OK), 0);
-  EXPECT_NE(::access(Path("d/mp/x").c_str(), F_OK), 0);
-  EXPECT_NE(::access(Path("d/mp/f").c_str(), F_OK), 0);
-  EXPECT_EQ(::access(Path("d/f").c_str(), F_OK), 0);
-  EXPECT_NE(::access(Path("d/mp2").c_str(), F_OK), 0);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("d/mp/inside")), IsOk());
+  EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("d/mp/x")).ok());
+  EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("d/mp/f")).ok());
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("d/f")), IsOk());
+  EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("d/mp2")).ok());
 }
 
 // Every refused operation on a stub, with its errno (review L2): removing
 // it is EBUSY (as for a mount point), linking it EXDEV, and anything
 // inside it ENOTSUP.
 TEST_F(DirCacheFSTest, EveryOperationOnAStubIsRefused) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
-  ASSERT_EQ(::mkdir(Path("d/mp").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d/mp"), 0755), IsOk());
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
   MountBelow("d/mp");
@@ -2717,14 +2731,14 @@ TEST_F(DirCacheFSTest, EveryOperationOnAStubIsRefused) {
   AppendBytes(list_body, list);
   EXPECT_EQ(Send(FUSE_LISTXATTR, static_cast<uint64_t>(stub), list_body).error,
             0);
-  EXPECT_EQ(::access(Path("d/mp").c_str(), F_OK), 0);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("d/mp")), IsOk());
 }
 
 // A stub whose row is gone (its dentry relisted or recovered) is a stale
 // nodeid: ESTALE, so the kernel's path walk retries with LOOKUP_REVAL and
 // finds what the name is now, rather than ENOTSUP (review L3).
 TEST_F(DirCacheFSTest, AGoneStubIsStale) {
-  ASSERT_EQ(::mkdir(Path("mp").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mp"), 0755), IsOk());
   Start();
   MountBelow("mp");
   auto [lookup, entry] = Lookup(kRootInode, "mp");
@@ -2743,7 +2757,7 @@ TEST_F(DirCacheFSTest, AGoneStubIsStale) {
 // single probe (an unknown name in a complete listing) gets a stub, and a
 // name that is no longer a boundary drops it (the old nodeid is stale).
 TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
-  ASSERT_EQ(::mkdir(Path("mp").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mp"), 0755), IsOk());
   WriteFile(Path("a"));
   Start();
   MountBelow("mp");
@@ -2763,7 +2777,7 @@ TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
   EXPECT_EQ(Cached(kRootInode, "mp").first, LookupResult::Kind::kRefused);
 
   // Once the name is no longer a boundary, the stub goes with the refusal.
-  ASSERT_EQ(::umount2(Path("mp").c_str(), MNT_DETACH), 0);
+  ASSERT_THAT(syscalls::umount2(Path("mp"), MNT_DETACH), IsOk());
   mounts_below_.clear();
   ASSERT_THAT(cache::MarkDirComplete(ctx_, kRootInode, false), IsOk());
   ASSERT_THAT(cache::ForgetNegativeDentries(ctx_, kRootInode), IsOk());
@@ -2780,7 +2794,7 @@ TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
 // 14, nodeids are backing inode numbers): an object with one is refused,
 // ENOTSUP, not served under a nodeid a stub may hold.
 TEST_F(DirCacheFSTest, BackingInodeNumbersInTheStubRangeAreRefused) {
-  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/big"));
   WriteFile(Path("d/small"));
   Start();

@@ -664,7 +664,7 @@ class OutOfBandLog {
 TEST_F(BackingTest, OpenNodeDetectsOutOfBandChmod) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   WaitForNextTimestamp();
-  ASSERT_EQ(::chmod(Path("file").c_str(), 0600), 0);
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("file"), 0600, 0), IsOk());
   {
     OutOfBandLog log(1);
     ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
@@ -756,7 +756,7 @@ TEST_F(BackingTest, OpenNodeDetectsAnOutOfBandXattr) {
 TEST_F(BackingTest, RepopulationDetectsAnOutOfBandChangeOnce) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   WaitForNextTimestamp();
-  ASSERT_EQ(::chmod(Path("file").c_str(), 0600), 0);
+  ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, Path("file"), 0600, 0), IsOk());
   ASSERT_THAT(cache::MarkDirComplete(ctx_, kRootInode, false), IsOk());
   {
     OutOfBandLog log(1);
