@@ -45,6 +45,13 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      cold:
+        description: >-
+          Run every job with no cache restored and none saved: the cold path
+          (an evicted cache, a changed lock file), to check the timeouts.
+        type: boolean
+        default: false
   # The schedule exists only for what changes without a commit: OSV
   # advisories. The test jobs are skipped on it.
   schedule:
@@ -58,25 +65,38 @@ permissions:
   contents: read
 
 jobs:
-  fast:
+  subjects:
+    # Step 26.13: every commit subject of the range starts with a plan step.
+    # A job of its own, seconds, no cache: a bad subject fails the run's
+    # status but gates no test job (nothing `needs` it). The rule stays strict;
+    # the orchestrator checks branches before merging.
     if: ${{ github.event_name != 'schedule' }}
-    # Small tests: `bazel test --config=fast //...` (about a minute with KVM, once built).
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0  # the commit range below needs the history
-      - name: Commit subjects start with a plan step (step 26.13)
+      - name: Commit subjects start with a plan step
         run: >-
           ./.github/ci/commit_subjects.sh
           "${{ github.event_name == 'pull_request'
           && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
           || format('{0}..{1}', github.event.before, github.sha) }}"
+
+  fast:
+    if: ${{ github.event_name != 'schedule' }}
+    # Small tests: `bazel test --config=fast //...` (about a minute with KVM, once built).
+    runs-on: ubuntu-24.04
+    # Limit = 2x the cold estimate (2026-10-07, measured here under load 18 on 4 cores: fetch of every repository with empty caches 24 min, our C++ build about 20 min, tests 3 min: about 50 min)
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache
         id: repocache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
@@ -85,6 +105,7 @@ jobs:
             bazel-repo-
       - name: Restore Bazel caches
         id: cache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -108,13 +129,13 @@ jobs:
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
-        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -125,7 +146,8 @@ jobs:
   presubmit:
     # Small and medium tests.
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # Limit = 2x the cold estimate (2026-10-07: fetch 24 min + build 20 min + small and medium tests about 30 min: about 75 min)
+    timeout-minutes: 150
     needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -133,6 +155,7 @@ jobs:
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache
         id: repocache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
@@ -141,6 +164,7 @@ jobs:
             bazel-repo-
       - name: Restore Bazel caches
         id: cache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -164,13 +188,13 @@ jobs:
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
-        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -182,7 +206,8 @@ jobs:
     # Source-based coverage of our code over the small and medium tests (step
     # 7.2): the combined lcov report is an artifact. No threshold gate yet.
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # Limit = 2x the cold estimate (2026-10-07: fetch 24 min + instrumented build and the small and medium tests about 50 min (a coverage run took 37 min with warm externals): about 75 min)
+    timeout-minutes: 150
     needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -190,6 +215,7 @@ jobs:
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache
         id: repocache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
@@ -202,6 +228,7 @@ jobs:
       # externals and compiles our code again.
       - name: Restore Bazel caches (presubmit's, read-only)
         id: cache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -232,7 +259,7 @@ jobs:
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
-        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
@@ -244,7 +271,8 @@ jobs:
     # must be byte-identical (tools/reproducible_build.sh). Two cold builds, so
     # only the repository cache helps.
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # Limit = 2x the cold estimate (2026-10-07: fetch 24 min, two cold builds of 6 to 12 min, and the second build's own contents cache (a second 13 GB extraction, about 10 min): about 60 min)
+    timeout-minutes: 120
     needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -252,6 +280,7 @@ jobs:
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache
         id: repocache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
@@ -261,11 +290,70 @@ jobs:
       - name: Reproducible build
         run: bazel run //tools:reproducible_build
       - name: Save the repository cache
-        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
+
+  mutation-changed:
+    # Step 26.5b, the per-push bumper: only the functions of
+    # tools/mutation/scope.txt whose lines the range touches, at most 30
+    # mutants (a sample with a fixed seed beyond that); a mutant that survives
+    # the small tier and trace validation fails the job: the change needs a
+    # test. Survivors elsewhere are the weekly job's (mutation.yml). A job of
+    # its own, once per push: not inside the shards of `full`. It saves no
+    # cache (the mutants' compiles are one-off): the repository cache and
+    # presubmit's disk cache are only restored.
+    if: ${{ github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' }}
+    runs-on: ubuntu-24.04
+    # Limit = 2x the cold estimate (2026-10-07: fetch 24 min + build 15 min, then up to 30 mutants of 1.5 min (killed by the small tier) to 11 min (survivors): 40 min + a bound of about 2 h, the usual push touches a handful of functions)
+    timeout-minutes: 180
+    needs: fast
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # the commit range needs the history
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Restore Bazel caches (presubmit's, read-only)
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-mutation-changed-restore-only-${{ github.sha }}
+          restore-keys: |
+            bazel-presubmit-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-presubmit-
+            bazel-
+      - name: Mutation testing of the protocol code this push touched
+        run: >
+          python3 tools/mutation/mutate.py changed
+          --range "${{ github.event_name == 'pull_request'
+          && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+          || format('{0}..{1}', github.event.before, github.sha) }}"
+          --result mutation-changed.json
+          --survivors-out mutation-changed-survivors.txt
+          --fail-on-survivor
+      - name: Upload the mutation survivors
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-changed
+          path: |
+            mutation-changed.json
+            mutation-changed-survivors.txt
+          if-no-files-found: ignore
 
   full:
     # The large and enormous tiers (small and medium ran in `presubmit`), in three shards
@@ -277,16 +365,16 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
+    # Limit = 2x the cold estimate (only the cold part is measured (fetch 24 min + build 20 min = 45 min): a shard's warm test time is unmeasured here; lane-5's limit stays until a `cold` run measures it)
     timeout-minutes: 180
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0  # the mutation step's commit range needs the history
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache
         id: repocache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
@@ -295,6 +383,7 @@ jobs:
             bazel-repo-
       - name: Restore Bazel caches
         id: cache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -308,33 +397,6 @@ jobs:
             bazel-
       - name: Test (shard ${{ matrix.shard }} of 3)
         run: ./.github/ci/test.sh --sizes=large,enormous --shard=${{ matrix.shard }}/3
-      - name: Mutation testing of the protocol code this push touched
-        # Step 26.5b, the per-push bumper: only the functions of
-        # tools/mutation/scope.txt whose lines the range touches, at most 30
-        # mutants (a sample with a fixed seed beyond that); a mutant that
-        # survives the small tier and trace validation fails the job: the
-        # change needs a test. Survivors elsewhere are the weekly job's.
-        # Only in shard 0 of `full`: once per push, not once per shard (it
-        # moves to a job of its own, step 26.5b's follow-up).
-        if: ${{ matrix.shard == 0 && !cancelled() && github.event_name != 'workflow_dispatch' }}
-        timeout-minutes: 120
-        run: >
-          python3 tools/mutation/mutate.py changed
-          --range "${{ github.event_name == 'pull_request'
-          && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
-          || format('{0}..{1}', github.event.before, github.sha) }}"
-          --result mutation-changed.json
-          --survivors-out mutation-changed-survivors.txt
-          --fail-on-survivor
-      - name: Upload the mutation survivors
-        if: ${{ matrix.shard == 0 && failure() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: mutation-changed
-          path: |
-            mutation-changed.json
-            mutation-changed-survivors.txt
-          if-no-files-found: ignore
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
@@ -346,13 +408,13 @@ jobs:
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
-        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -370,6 +432,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
+    # Limit = 2x the cold estimate (as full: the sanitizer build is cold in every run; measured only fetch 24 min + build 20 min)
     timeout-minutes: 180
     needs: presubmit
     steps:
@@ -378,6 +441,7 @@ jobs:
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache
         id: repocache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
@@ -386,6 +450,7 @@ jobs:
             bazel-repo-
       - name: Restore Bazel caches
         id: cache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -410,13 +475,13 @@ jobs:
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
-        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -434,6 +499,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
+    # Limit = 2x the cold estimate (as full: the sanitizer build is cold in every run; measured only fetch 24 min + build 20 min)
     timeout-minutes: 180
     needs: presubmit
     steps:
@@ -442,6 +508,7 @@ jobs:
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache
         id: repocache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
@@ -450,6 +517,7 @@ jobs:
             bazel-repo-
       - name: Restore Bazel caches
         id: cache
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -474,13 +542,13 @@ jobs:
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
-        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -513,6 +581,7 @@ jobs:
       - name: Prepare the runner (Bazelisk, which fetches the Alpine packages)
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache (read-only)
+        if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bazel-repo-cache

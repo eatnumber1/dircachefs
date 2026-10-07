@@ -55,7 +55,7 @@ read while it goes.
 
 ## Per push and on a schedule (step 26.5b)
 
-- **Per push** (`ci.yml`, the `full` job, after the tests): `mutate.py changed
+- **Per push** (`ci.yml`, the `mutation-changed` job): `mutate.py changed
   --range BASE..TIP --fail-on-survivor` mutates only the functions of
   `scope.txt` whose lines the range touches (the `git diff -U0` hunks, mapped
   to the AST's function ranges), at most `--max-mutants` (30; a sample with the

@@ -741,16 +741,94 @@ qemu_cc_test(
 
 # Trace validation (formal/README.md): runs :dir_cache_fs_test's guest and
 # checks the trace of every test that records one (StartTrace) against
-# formal/Trace.tla. The harness runs requests inside other requests'
-# syscalls, which the kernel's directory lock would forbid: lock = False.
-tla_trace_test(
+# formal/Trace.tla (and the files', nodeids' and identity models). The harness
+# runs requests inside other requests' syscalls, which the kernel's directory
+# lock would forbid: lock = False.
+#
+# In three targets of about the same size (one run took 823 s under load, at
+# its 900 s limit): each boots the same guest binary with its own
+# --gtest_filter and validates the traces of the tests it ran. A and B name
+# their tests (balanced by the validation time each target took, measured: 225,
+# 208 and 448 s under load at the first split, whence the second); C is everything else, as a negative filter, so a new test with
+# a trace lands in C and no trace is ever left out. `dir_cache_fs_trace_test`
+# is the suite of the three.
+TRACE_GROUP_A = [
+    "DirCacheFSTest.CommonRequestsMatchTheModel",
+    "DirCacheFSTest.UnlinkGivesUpWhileItsParentKeepsChanging",
+    "DirCacheFSTest.TmpfileLinkedIntoANameIsACreate",
+    "DirCacheFSTest.RemovedFileIsServedUntilItsLastForget",
+    "DirCacheFSTest.TraceScenarioMkdirDuringListing",
+    "DirCacheFSTest.UnknownAttributesAreRefreshed",
+    "DirCacheFSTest.TmpfileRowGoesAtTheStartAfterACrash",
+    "DirCacheFSTest.LastForgetOfAWrittenFileReconcilesItsAttributes",
+    "DirCacheFSTest.WritableOpenAfterChattrThroughDcfsIsRefused",
+    "DirCacheFSTest.WritableOpenOfAnAppendOnlyFileNeedsOAppend",
+    "DirCacheFSTest.ReleaseDuringASyncPointKeepsTheDirtyRow",
+]
+
+TRACE_GROUP_B = [
+    "DirCacheFSTest.ReaddirGivesUpWhileItsDirectoryKeepsChanging",
+    "RenameStaleSourceTest.*",
+    "DirCacheFSTest.TraceScenarioMkdirDuringSync",
+    "DirCacheFSTest.DestroyLetsGoOfEveryNodeid",
+    "DirCacheFSTest.ForgetMultiTakesOffEachEntrysCount",
+    "DirCacheFSTest.RenameOverAnOpenFileRetiresItAtTheLastRelease",
+    "DirCacheFSTest.UnlinkMarksWhatItRemovesUnknown",
+    "DirCacheFSTest.CrashBetweenUnlinkAndPhase3LeavesNoRow",
+    "DirCacheFSTest.AnAppendingWriterKeepsTheFirstWritersFd",
+    "DirCacheFSTest.WritableOpenAfterChattrMinusIWritesThroughItsFd",
+    "DirCacheFSTest.RefusedAndFsxattrFlagChangesMatchTheRevalModel",
+    "DirCacheFSTest.TraceScenarioUnlink",
+    "DirCacheFSTest.OutOfBandReplacementGetsEstaleFromItsHandle",
+]
+
+TRACE_GROUP_FILTERS = {
+    "a": ":".join(TRACE_GROUP_A),
+    "b": ":".join(TRACE_GROUP_B),
+    "c": "*-" + ":".join(TRACE_GROUP_A + TRACE_GROUP_B),
+}
+
+[
+    genrule(
+        name = "dir_cache_fs_trace_%s_initramfs" % group,
+        testonly = 1,
+        srcs = [
+            "@alpine_busybox//:root/bin/busybox.static",
+            "//test/qemu:guest/init",
+            ":dir_cache_fs_test_bin",
+        ],
+        outs = ["dir_cache_fs_trace_%s.cpio.gz" % group],
+        cmd = " ".join([
+            "$(location //test/qemu:scripts/mkinitramfs.sh)",
+            "--unit",
+            "$@",
+            "$(location @alpine_busybox//:root/bin/busybox.static)",
+            "$(location //test/qemu:guest/init)",
+            "$(location :dir_cache_fs_test_bin)",
+            "vdb",
+            "'--gtest_filter=%s'" % filt,
+        ]),
+        tools = ["//test/qemu:scripts/mkinitramfs.sh"],
+    )
+    for group, filt in TRACE_GROUP_FILTERS.items()
+]
+
+[
+    tla_trace_test(
+        name = "dir_cache_fs_trace_%s_test" % group,
+        size = "medium",
+        timeout = "long",
+        disks = ["vdb:ext4:32M"],
+        initramfs = ":dir_cache_fs_trace_%s.cpio.gz" % group,
+        lock = False,
+        unit = True,
+    )
+    for group in TRACE_GROUP_FILTERS
+]
+
+test_suite(
     name = "dir_cache_fs_trace_test",
-    size = "medium",
-    timeout = "long",
-    disks = ["vdb:ext4:32M"],
-    initramfs = ":dir_cache_fs_test.cpio.gz",
-    lock = False,
-    unit = True,
+    tests = [":dir_cache_fs_trace_%s_test" % group for group in TRACE_GROUP_FILTERS],
 )
 
 # Test first, for trace validation itself: the harness with a fault, each

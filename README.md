@@ -403,8 +403,12 @@ the two sanitizer suites:
 
 | Job | Runs | Needs |
 |---|---|---|
+| `subjects` | every commit subject of the push or pull request starts with a plan step (`.github/ci/commit_subjects.sh`); seconds, no cache, gates nothing | |
 | `fast` | `bazel test --config=fast //...` (small tests) | |
 | `presubmit` | `bazel test --config=presubmit //...` (small and medium) | `fast` |
+| `coverage` | `bazel coverage` of the small and medium tests, the lcov artifact and the coverage gate | `fast` |
+| `reproducible` | two builds of the shipped outputs in two output bases are byte-identical | `fast` |
+| `mutation-changed` | mutation testing of the protocol functions the push touched (at most 30 mutants); fails on a survivor | `fast` |
 | `full` | the large and enormous tests (pjdfstest on all three filesystems), in 3 shards | `presubmit` |
 | `asan` | `bazel test --config=asan` over every tier, in 3 shards | `presubmit` |
 | `ubsan` | `bazel test --config=ubsan` over every tier, in 3 shards | `presubmit` |
@@ -432,7 +436,20 @@ measured, budget the ubsan figure and a half again. Each shard uploads
   are restored and saved with `actions/cache`, even when tests fail (the
   kernel build takes half an hour). The disk cache is content addressed, so
   a pin change invalidates only the actions whose inputs changed; the keys
-  end in the commit and fall back to the newest entry of the same job.
+  end in the commit and fall back to the newest entry of the same job. The
+  repository cache (the downloaded archives) has its own key, the hash of
+  `MODULE.bazel.lock`; the extracted repositories (13 GB) are never saved.
+  The coverage, reproducible and mutation jobs save no disk cache.
+- **Cold runs.** Caches are evicted (10 GB per repository, seven days idle)
+  and a lock-file change starts from nothing, so every job's limit covers
+  the cold path. Measured on this 4-core machine at load 18 (2026-10-07):
+  fetching every repository with empty caches took 24 minutes (2.4 GB
+  downloaded, 13 GB extracted, the LLVM tarball being 1.9 GB of it), our C++
+  build about 20 minutes, a `//dcfs:main_static` build alone 6 to 10; the
+  limits in `ci.yml` are twice those estimates, with the estimate and its
+  date beside each. `workflow_dispatch` has a `cold` input: with it every
+  job restores and saves no cache, to run the cold path on purpose (the
+  `mutation-changed` job, which needs a push range, is skipped on dispatch).
 - **KVM.** `.github/ci/prepare.sh` makes `/dev/kvm` usable if the runner has
   one (public repositories' standard Linux runners do; private ones do
   not) and the tests log which accelerator they used. Without KVM the tests
