@@ -22,7 +22,11 @@
 //
 //  At the end of every request, after its reply (RequestEnd), for the rows
 //  the request changed (SQLite's update hook tells which, so the work is
-//  proportional to them, not to the database) and the inodes it named:
+//  proportional to them, not to the database; except a DELETE with no
+//  WHERE, which SQLite runs as a truncation without calling the hook), the
+//  inodes it named, and every inode open for writing or durably dirty
+//  (those whose dirty row such a truncating DELETE could drop: ClearDirty's
+//  one-statement clear), while there are at most kRecountLimit of them:
 //   no-transaction-at-request-end  as above, once the request is over.
 //   tri-state  an inode's attributes recorded as current have every column
 //       and a link count above 0 (backing::WriteAttrs keeps nlink 0

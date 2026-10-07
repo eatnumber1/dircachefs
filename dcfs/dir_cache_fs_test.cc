@@ -40,12 +40,15 @@
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
+#include <sys/statfs.h>
+#include <sys/statvfs.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdarg>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -65,7 +68,9 @@
 #include <vector>
 
 #include "absl/base/log_severity.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/log/initialize.h"
+#include "absl/log/log.h"
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
@@ -101,6 +106,7 @@
 #include "fuse_lowlevel.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "sqlite3.h"
 
 namespace dcfs {
 namespace {
@@ -137,6 +143,41 @@ int &StatxFailure() {
   return err;
 }
 
+// The harness's cache database while a test runs (Start to TearDown), for
+// NoTransactionAt.
+::sqlite3 *&HarnessDb() {
+  static ::sqlite3 *db = nullptr;
+  return db;
+}
+
+// Step 26.2: the backstop under the invariant checks' hooks
+// (dcfs/invariant_checks.h). Every libc call through which backing.cc,
+// file_handle.cc and device_id.cc reach the backing filesystem is wrapped
+// below and calls this first: one made while a transaction or a statement
+// cursor is open aborts, whether or not its call site called the hook, so
+// a backing syscall added without a hook fails here. Not wrapped (SQLite
+// makes them itself, inside its transactions): open, close, pread,
+// pwrite, fsync, fdatasync, ftruncate, fstat, fcntl; nor the variadic
+// ioctl and syscall (getdents64).
+void NoTransactionAt(const char *call) {
+  ::sqlite3 *db = HarnessDb();
+  if (db == nullptr) return;
+  if (sqlite3_get_autocommit(db) == 0) {
+    LOG(FATAL) << "invariant violated: no-transaction-at-backing-call (the "
+                  "harness's backstop): "
+               << call << " while a transaction is open";
+  }
+  for (sqlite3_stmt *stmt = sqlite3_next_stmt(db, nullptr); stmt != nullptr;
+       stmt = sqlite3_next_stmt(db, stmt)) {
+    if (sqlite3_stmt_busy(stmt) != 0) {
+      LOG(FATAL) << "invariant violated: no-transaction-at-backing-call (the "
+                    "harness's backstop): "
+                 << call << " while a statement is part way through its rows: "
+                 << sqlite3_sql(stmt);
+    }
+  }
+}
+
 }  // namespace
 }  // namespace dcfs
 
@@ -145,6 +186,7 @@ int __real_open_by_handle_at(int mount_fd, struct file_handle *handle,
                              int flags);
 int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
                              int flags) {
+  dcfs::NoTransactionAt("open_by_handle_at");
   std::function<void()> hook = std::exchange(dcfs::OpenByHandleHook(), {});
   if (hook) hook();
   return __real_open_by_handle_at(mount_fd, handle, flags);
@@ -155,6 +197,7 @@ int __real_name_to_handle_at(int dirfd, const char *pathname,
 int __wrap_name_to_handle_at(int dirfd, const char *pathname,
                              struct file_handle *handle, int *mount_id,
                              int flags) {
+  dcfs::NoTransactionAt("name_to_handle_at");
   std::function<void()> hook = std::exchange(dcfs::NameToHandleHook(), {});
   if (hook) hook();
   return __real_name_to_handle_at(dirfd, pathname, handle, mount_id, flags);
@@ -163,6 +206,7 @@ int __real_statx(int dirfd, const char *path, int flags, unsigned int mask,
                  struct statx *buf);
 int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
                  struct statx *buf) {
+  dcfs::NoTransactionAt("statx");
   if (int err = std::exchange(dcfs::StatxFailure(), 0); err != 0) {
     errno = err;
     return -1;
@@ -176,9 +220,80 @@ int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
 }
 int __real_syncfs(int fd);
 int __wrap_syncfs(int fd) {
+  dcfs::NoTransactionAt("syncfs");
   std::function<void()> hook = std::exchange(dcfs::SyncfsHook(), {});
   if (hook) hook();
   return __real_syncfs(fd);
+}
+
+// The rest of the backstop's wraps (see dcfs::NoTransactionAt): each checks,
+// then makes the real call.
+#define DCFS_BACKSTOP(ret, name, params, args) \
+  ret __real_##name params;                    \
+  ret __wrap_##name params {                   \
+    dcfs::NoTransactionAt(#name);              \
+    return __real_##name args;                 \
+  }
+DCFS_BACKSTOP(int, unlinkat, (int d, const char *p, int f), (d, p, f))
+DCFS_BACKSTOP(int, renameat2,
+              (int od, const char *op, int nd, const char *np, unsigned f),
+              (od, op, nd, np, f))
+DCFS_BACKSTOP(int, mkdirat, (int d, const char *p, mode_t m), (d, p, m))
+DCFS_BACKSTOP(int, mknodat, (int d, const char *p, mode_t m, dev_t r),
+              (d, p, m, r))
+DCFS_BACKSTOP(int, symlinkat, (const char *t, int d, const char *p),
+              (t, d, p))
+DCFS_BACKSTOP(int, linkat,
+              (int od, const char *op, int nd, const char *np, int f),
+              (od, op, nd, np, f))
+DCFS_BACKSTOP(int, fchownat, (int d, const char *p, uid_t u, gid_t g, int f),
+              (d, p, u, g, f))
+DCFS_BACKSTOP(int, fchmodat, (int d, const char *p, mode_t m, int f),
+              (d, p, m, f))
+DCFS_BACKSTOP(int, utimensat,
+              (int d, const char *p, const struct timespec t[2], int f),
+              (d, p, t, f))
+DCFS_BACKSTOP(int, futimens, (int d, const struct timespec t[2]), (d, t))
+DCFS_BACKSTOP(ssize_t, readlinkat, (int d, const char *p, char *b, size_t n),
+              (d, p, b, n))
+DCFS_BACKSTOP(ssize_t, fgetxattr, (int d, const char *n, void *v, size_t s),
+              (d, n, v, s))
+DCFS_BACKSTOP(ssize_t, flistxattr, (int d, char *l, size_t s), (d, l, s))
+DCFS_BACKSTOP(int, fsetxattr,
+              (int d, const char *n, const void *v, size_t s, int f),
+              (d, n, v, s, f))
+DCFS_BACKSTOP(int, fremovexattr, (int d, const char *n), (d, n))
+DCFS_BACKSTOP(ssize_t, getxattr,
+              (const char *p, const char *n, void *v, size_t s), (p, n, v, s))
+DCFS_BACKSTOP(ssize_t, listxattr, (const char *p, char *l, size_t s),
+              (p, l, s))
+DCFS_BACKSTOP(int, setxattr,
+              (const char *p, const char *n, const void *v, size_t s, int f),
+              (p, n, v, s, f))
+DCFS_BACKSTOP(int, removexattr, (const char *p, const char *n), (p, n))
+DCFS_BACKSTOP(int, fstatat64,
+              (int d, const char *p, struct stat64 *b, int f), (d, p, b, f))
+DCFS_BACKSTOP(int, fstatfs64, (int d, struct statfs64 *b), (d, b))
+DCFS_BACKSTOP(int, fstatvfs64, (int d, struct statvfs64 *b), (d, b))
+DCFS_BACKSTOP(int, fallocate64, (int d, int m, off64_t o, off64_t l),
+              (d, m, o, l))
+DCFS_BACKSTOP(ssize_t, copy_file_range,
+              (int i, loff_t *oi, int o, loff_t *oo, size_t l, unsigned f),
+              (i, oi, o, oo, l, f))
+#undef DCFS_BACKSTOP
+
+// openat is variadic (the mode, with O_CREAT or O_TMPFILE).
+int __real_openat64(int dirfd, const char *path, int flags, ...);
+int __wrap_openat64(int dirfd, const char *path, int flags, ...) {
+  dcfs::NoTransactionAt("openat");
+  mode_t mode = 0;
+  if ((flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE) {
+    va_list ap;
+    va_start(ap, flags);
+    mode = va_arg(ap, mode_t);
+    va_end(ap);
+  }
+  return __real_openat64(dirfd, path, flags, mode);
 }
 }  // extern "C"
 
@@ -260,6 +375,7 @@ class DirCacheFSTest : public ::testing::Test {
     // (dcfs/testonly/invariant_checker.h); a violation aborts the test.
     checker_ = std::make_unique<testonly::InvariantChecker>();
     ctx_.checks = checker_.get();
+    HarnessDb() = db_.Get();
     ASSERT_OK_AND_ASSIGN(
         FileDescriptor owned,
         syscalls::openat(AT_FDCWD, source_, O_RDONLY | O_DIRECTORY));
@@ -321,6 +437,7 @@ class DirCacheFSTest : public ::testing::Test {
     fs_.reset();
     ctx_.checks = &NoInvariantChecks();
     checker_.reset();
+    HarnessDb() = nullptr;
     if (!source_.empty()) testonly::RemoveAll(source_);
   }
 
@@ -3626,6 +3743,331 @@ TEST_F(DirCacheFSTest, InvariantChecksReportAsAStatus) {
   EXPECT_THAT(all.message(), ::testing::StartsWith("lookup-count: "));
   DirCacheFSPeer::MutableLookups(*fs_)[f] = 1;
   EXPECT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
+}
+
+// A sync point's one-statement clear, DELETE FROM dirty with no WHERE
+// (SQLite's truncate optimisation, which its update hook does not see),
+// dropping the row of an inode open for writing that the request does not
+// name (a passthrough-written file: no WRITE reaches dcfs).
+TEST_F(DirCacheFSDeathTest, DirtyRowOfAnOpenFileTruncatedAway) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  ASSERT_THAT(Dirty(), Contains(f));
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec("DELETE FROM dirty"), IsOk());
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   " is open for writing but has no dirty row.*",
+                   InRequest("GETATTR", kRootInode)));
+}
+
+// The same for a durably dirty inode the request does not name.
+TEST_F(DirCacheFSDeathTest, DurableDirtyRowTruncatedAway) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
+  ASSERT_TRUE(ctx_.dirty.durable.contains(kRootInode));
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec("DELETE FROM dirty"), IsOk());
+        Getattr(f);
+      },
+      "invariant violated: dirty-set: inode 1 is in Context::dirty.durable "
+      "but has no dirty row.*" +
+          InRequest("GETATTR", f));
+}
+
+constexpr std::string_view kInsertStub =
+    "INSERT INTO stubs (id, parent, name, fuse_gen, mode, nlink, uid, gid, "
+    "rdev, size, blocks, blksize, atime_s, atime_ns, mtime_s, mtime_ns, "
+    "ctime_s, ctime_ns, btime_s, btime_ns) VALUES (-5, 1, CAST('";
+constexpr std::string_view kInsertStubEnd =
+    "' AS BLOB), 7, 16877, 2, 0, 0, 0, 0, 0, 4096, 0, 0, 0, 0, 0, 0, 0, 0)";
+
+TEST_F(DirCacheFSDeathTest, StubWithoutARefusedDentry) {
+  Start();
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec(absl::StrCat(kInsertStub, "x", kInsertStubEnd)),
+                    IsOk());
+        Getattr(kRootInode);
+      },
+      "invariant violated: tri-state: stub [0-9]+ of dentry \"x\" of inode 1 "
+      "whose dentry is missing");
+}
+
+TEST_F(DirCacheFSDeathTest, DentryWithAStubButNotRefused) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec(absl::StrCat(kInsertStub, "f", kInsertStubEnd)),
+                    IsOk());
+        ASSERT_THAT(db_.Exec("UPDATE dentries SET inode = inode "
+                             "WHERE parent = 1 AND name = CAST('f' AS BLOB)"),
+                    IsOk());
+        Getattr(kRootInode);
+      },
+      "invariant violated: tri-state: dentry \"f\" of inode 1 is present but "
+      "has a stub");
+}
+
+TEST_F(DirCacheFSDeathTest, AttributesCurrentWithAColumnNull) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec(absl::StrCat(
+                        "UPDATE inodes SET mode = NULL WHERE id = ", f)),
+                    IsOk());
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: tri-state: inode ", f,
+                   ": attributes recorded as current with a column NULL"));
+}
+
+TEST_F(DirCacheFSDeathTest, GenerationAbove32Bits) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(
+            db_.Exec(absl::StrCat(
+                "UPDATE inodes SET fuse_gen = 4294967296 WHERE id = ", f)),
+            IsOk());
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: identity: inode ", f,
+                   " has FUSE generation 4294967296"));
+}
+
+TEST_F(DirCacheFSDeathTest, HeldDescriptorsAboveTheCap) {
+  Start();
+  EXPECT_DEATH(
+      {
+        DirCacheFSPeer::MutableHeldFds(*fs_) = 65;
+        Getattr(kRootInode);
+      },
+      "invariant violated: held-fds: held_fds_ is 65, above max_held_fds_ "
+      "64");
+}
+
+TEST_F(DirCacheFSDeathTest, SharedFileWithNoRefs) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  EXPECT_DEATH(
+      {
+        DirCacheFSPeer::MutableRefs(*fs_, f) = 0;
+        Getattr(f);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   "'s shared backing file has refs 0 and writable_refs 1"));
+}
+
+TEST_F(DirCacheFSDeathTest, SharedFileWithMoreWritableRefsThanRefs) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  EXPECT_DEATH(
+      {
+        DirCacheFSPeer::MutableWritableRefs(*fs_, f) = 2;
+        Getattr(f);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   "'s shared backing file has refs 1 and writable_refs 2"));
+}
+
+TEST_F(DirCacheFSDeathTest, WritableSharedFileNotOpenForWriting) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  EXPECT_DEATH(
+      {
+        DirCacheFSPeer::MutableOpenForWrite(*fs_).erase(f);
+        Getattr(f);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   " has writable opens but is not open for writing"));
+}
+
+TEST_F(DirCacheFSDeathTest, OpenForWriteSetNotDirCacheFSs) {
+  Start();
+  absl::flat_hash_set<int64_t> other;
+  EXPECT_DEATH(
+      {
+        ctx_.open_for_write = &other;
+        Getattr(kRootInode);
+      },
+      "invariant violated: writable-open: Context::open_for_write is not "
+      "DirCacheFS's set");
+}
+
+TEST_F(DirCacheFSDeathTest, RemovedRecordBesideAWrittenEntry) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr row, cache::GetAttr(ctx_, f));
+  EXPECT_DEATH(
+      {
+        absl::StatusOr<FileDescriptor> fd =
+            syscalls::openat(AT_FDCWD, Path("f"), O_PATH);
+        ASSERT_THAT(fd, IsOk());
+        DirCacheFSPeer::AddRemoved(*fs_, f, row, *std::move(fd));
+        DirCacheFSPeer::MutableWritten(*fs_)[f];
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: removed-record: nodeid ", f,
+                   " has both a removed record and a written_ entry"));
+}
+
+// StartRun's full check finds what no request changed, and names itself.
+TEST_F(DirCacheFSDeathTest, FullCheckAtStartRun) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(db_.Exec(absl::StrCat(
+                        "UPDATE inodes SET nlink = 0 WHERE id = ", f)),
+                    IsOk());
+        ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+      },
+      absl::StrCat("invariant violated: tri-state: inode ", f,
+                   ": attributes recorded as current with nlink 0 \\(in "
+                   "StartRun\\)"));
+}
+
+// DESTROY's full check names itself, and its exemption (written_, which
+// Destroy empties) does not cover a file still open for writing without
+// its dirty row.
+TEST_F(DirCacheFSDeathTest, FullCheckAtDestroy) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(
+            db_.Exec(absl::StrCat("DELETE FROM dirty WHERE inode = ", f)),
+            IsOk());
+        fuse_session_destroy(se_);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   " is open for writing but has no dirty row \\(in "
+                   "DESTROY\\)"));
+}
+
+// The exemption itself: DESTROY with a file still open for writing (a lazy
+// unmount) passes, although Destroy emptied written_.
+TEST_F(DirCacheFSTest, DestroyWithAFileStillOpenForWriting) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  fuse_session_destroy(se_);  // Would abort on a violation.
+  se_ = nullptr;
+  EXPECT_TRUE(DirCacheFSPeer::Written(*fs_).empty());
+}
+
+// An open older than the run (the harness standing for a crash: StartRun
+// under a live DirCacheFS) is left out, but only until it is released: a
+// writable open of this run is checked again.
+TEST_F(DirCacheFSDeathTest, OpenOlderThanTheRunIsLeftOutUntilReleased) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+  ASSERT_THAT(Dirty(), Not(Contains(f)));  // Recovered.
+  EXPECT_EQ(Getattr(kRootInode).first.error, 0);  // Left out: no abort.
+  ASSERT_EQ(Release(f, fh).error, 0);
+  ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
+  ASSERT_THAT(Dirty(), Contains(f));
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(
+            db_.Exec(absl::StrCat("DELETE FROM dirty WHERE inode = ", f)),
+            IsOk());
+        Getattr(kRootInode);
+      },
+      absl::StrCat("invariant violated: writable-open: inode ", f,
+                   " is open for writing but has no dirty row"));
+}
+
+// Above kRecountLimit written_ entries a request's check no longer recounts
+// held_fds_ (only the full check does); at or below it, it does.
+TEST_F(DirCacheFSTest, InvariantChecksRecountOnlyBelowTheLimit) {
+  Start();
+  auto &written = DirCacheFSPeer::MutableWritten(*fs_);
+  for (InodeId id = 1'000'000;
+       written.size() <= testonly::InvariantChecker::kRecountLimit; ++id) {
+    written[id];  // An entry holding no descriptor.
+  }
+  ++DirCacheFSPeer::MutableHeldFds(*fs_);  // Says one does.
+  EXPECT_THAT(checker_->CheckChanged(ctx_, fs_.get(), {}), IsOk());
+  absl::Status all = checker_->CheckAll(ctx_, fs_.get());
+  EXPECT_THAT(all.message(), ::testing::StartsWith("held-fds: "));
+  written.clear();
+  absl::Status changed = checker_->CheckChanged(ctx_, fs_.get(), {});
+  EXPECT_THAT(changed.message(), ::testing::StartsWith("held-fds: "));
+  --DirCacheFSPeer::MutableHeldFds(*fs_);
+  EXPECT_THAT(checker_->CheckChanged(ctx_, fs_.get(), {}), IsOk());
+}
+
+// The backstop under the hooks: a backing syscall made where no hook was
+// called (here backing::StatFd, a descriptor-only helper whose callers
+// call the hook) while a transaction is open still aborts, at the wrapped
+// libc call (see __wrap_statx at the top of this file).
+TEST_F(DirCacheFSDeathTest, UnhookedBackingSyscallInATransaction) {
+  Start();
+  ASSERT_OK_AND_ASSIGN(FileDescriptor fd,
+                       syscalls::openat(AT_FDCWD, source_, O_PATH));
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(ctx_.db.Transaction([&]() -> absl::Status {
+          return backing::StatFd(*fd).status();
+        }),
+                    IsOk());
+      },
+      "invariant violated: no-transaction-at-backing-call \\(the harness's "
+      "backstop\\): statx while a transaction is open");
 }
 
 }  // namespace

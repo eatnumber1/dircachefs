@@ -219,7 +219,8 @@ void InvariantChecker::Fail(const absl::Status &violation) {
       violation.message(), " (", Where(), ")");
   if (console_fd_ >= 0) {
     const std::string line =
-        absl::StrCat("DCFS-INVARIANT-VIOLATION ", what, "\n");
+        // A newline first: the console may be part way through a line.
+        absl::StrCat("\nDCFS-INVARIANT-VIOLATION ", what, "\n");
     // Best effort: the abort below says it all again on stderr.
     (void)syscalls::write(console_fd_, line.data(), line.size());
   }
@@ -337,6 +338,19 @@ absl::Status InvariantChecker::CheckChanged(Context &ctx, const DirCacheFS *fs,
   for (InodeId id : ids) interest.insert(id);
   for (const auto *rows : {&inodes, &dirty, &directories, &symlinks}) {
     for (int64_t id : *rows) interest.insert(id);
+  }
+  // A dirty row can go without the update hook seeing it: DELETE FROM
+  // dirty with no WHERE (ClearDirty's one-statement clear, RecoverDirty)
+  // uses SQLite's truncate optimisation, which calls no hook. So every
+  // inode open for writing and every durably dirty one is looked at too,
+  // while there are at most kRecountLimit of them: a passthrough-written
+  // file is named by no request while it is written.
+  if (ctx.open_for_write != nullptr &&
+      ctx.open_for_write->size() <= kRecountLimit) {
+    for (InodeId id : *ctx.open_for_write) interest.insert(id);
+  }
+  if (ctx.dirty.durable.size() <= kRecountLimit) {
+    for (InodeId id : ctx.dirty.durable) interest.insert(id);
   }
   for (int64_t rowid : dentries) {
     ABSL_RETURN_IF_ERROR(CheckDentry(ctx, rowid, interest));

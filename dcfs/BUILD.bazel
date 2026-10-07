@@ -628,6 +628,8 @@ DIR_CACHE_FS_TEST_DEPS = [
     "//dcfs/testonly:step_counter",
     "//dcfs/testonly:trace_recorder",
     "@absl//absl/base:log_severity",
+    "@absl//absl/container:flat_hash_set",
+    "@absl//absl/log",
     "@absl//absl/log:initialize",
     "@absl//absl/log:log_entry",
     "@absl//absl/log:log_sink",
@@ -641,6 +643,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     "@absl//absl/time:simulated_clock",
     "@googletest//:gtest_main",
     "@libfuse//:libfuse",
+    "@sqlite//:sqlite3",
 ]
 
 DIR_CACHE_FS_TEST_WRAPS = [
@@ -648,6 +651,37 @@ DIR_CACHE_FS_TEST_WRAPS = [
     "-Wl,--wrap=open_by_handle_at",
     "-Wl,--wrap=statx",
     "-Wl,--wrap=syncfs",
+] + [
+    # Step 26.2: the backstop under the invariant checks' hooks (see
+    # NoTransactionAt in dir_cache_fs_test.cc).
+    "-Wl,--wrap=" + call
+    for call in [
+        "copy_file_range",
+        "fallocate64",
+        "fchmodat",
+        "fchownat",
+        "fgetxattr",
+        "flistxattr",
+        "fremovexattr",
+        "fsetxattr",
+        "fstatat64",
+        "fstatfs64",
+        "fstatvfs64",
+        "futimens",
+        "getxattr",
+        "linkat",
+        "listxattr",
+        "mkdirat",
+        "mknodat",
+        "openat64",
+        "readlinkat",
+        "removexattr",
+        "renameat2",
+        "setxattr",
+        "symlinkat",
+        "unlinkat",
+        "utimensat",
+    ]
 ]
 
 qemu_cc_test(
@@ -1083,8 +1117,10 @@ cc_binary(
 # The testonly recording build of :main_static, for trace validation
 # (formal/README.md, "Trace validation"): the same code, linked with the
 # recorder's MainProtocolEvents() (dcfs/testonly/main_recorder.cc), which
-# writes every protocol event to the console. Only //test/qemu's traced
-# initramfs uses it.
+# writes every protocol event to the console, and with the invariant
+# checker's MainInvariantChecks() (step 26.2: dcfs/testonly/
+# main_invariant_checker.cc), as :main_static_checked. Only //test/qemu's
+# traced initramfs uses it.
 cc_binary(
     name = "main_static_traced",
     testonly = 1,
@@ -1096,8 +1132,9 @@ cc_binary(
     }),
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
+    # The invariant checks too (step 26.2): a traced run is also checked.
     deps = MAIN_DEPS + [
-        ":invariant_checks_main",
+        "//dcfs/testonly:main_invariant_checker",
         "//dcfs/testonly:main_recorder",
     ],
 )

@@ -1602,6 +1602,25 @@ A compile-time switch would have made every object differ between the
 two builds; a hook inside the `syscalls::` wrappers would have needed a
 global, since they have no `Context`.
 
+Not hooked, because no transaction can be open there: `close(2)` of a
+backing descriptor by a `FileDescriptor` destructor (a scope's end, in code
+that holds no transaction body open: a body that held one across a close
+would also hold it across the syscalls before it, which are hooked);
+`main.cc`'s startup `open`, `fstat` and `FileHandle::FromFd` of
+`--source`, which run before anything opens a transaction and outside any
+request; and `fuse_passthrough_open`/`close` (`FuseRequest`), an `ioctl`
+on `/dev/fuse` that never reaches the backing filesystem. The harness also
+holds the hooks in place from below: it wraps, with `-Wl,--wrap`, every
+libc call through which `backing.cc`, `file_handle.cc` and
+`device_id.cc` reach the backing filesystem (`openat`, `statx`,
+`open_by_handle_at`, `name_to_handle_at`, the `*at` mutations, `syncfs`,
+the xattr calls, `fstatat`, `fstatfs`, `fstatvfs`, `fallocate`,
+`copy_file_range`, `futimens`; not those SQLite itself makes inside its
+transactions, `open`, `pread`, `pwrite`, `fsync`, `ftruncate`, `fstat`,
+nor the variadic `ioctl` and `syscall`), and each aborts if a transaction
+or a cursor is open, so a backing syscall added without its hook fails
+there.
+
 The checking build (`//dcfs:main_static_checked`, linking
 `dcfs/testonly/main_invariant_checker.cc`) and the harness install
 `testonly::InvariantChecker`, which checks:
@@ -1612,9 +1631,15 @@ The checking build (`//dcfs:main_static_checked`, linking
   has its dirty row (`dirty-set`);
 - at the end of every request, after its reply, for the rows the request
   changed (SQLite's update hook names them, so the work is proportional to
-  them, not to the database) and the inodes it named: no transaction or
-  cursor open (`no-transaction-at-request-end`); attributes recorded as
-  current have every column and a link count above 0, and a dentry is
+  them, not to the database; but not those of a `DELETE` with no `WHERE`,
+  which SQLite runs as a truncation without calling the hook: `ClearDirty`'s
+  one-statement clear and `RecoverDirty`), the inodes it named, and every
+  inode open for writing or durably dirty (whose dirty rows such a
+  truncation could drop, for a file no request names while the kernel
+  writes it through passthrough; while there are at most 16384 of each):
+  no transaction or cursor open (`no-transaction-at-request-end`);
+  attributes recorded as current have every column and a link count above
+  0, and a dentry is
   `refused` exactly when its stub exists (`tri-state`); only the root has
   FUSE generation 0 (`identity`); an inode in `Context::dirty.durable` has
   its dirty row, and `dirty.any` false means an empty table (`dirty-set`);

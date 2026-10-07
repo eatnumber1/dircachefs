@@ -74,6 +74,17 @@ struct DirCacheFSPeer {
   MutableWritten(DirCacheFS &fs) {
     return fs.written_;
   }
+  static size_t &MutableHeldFds(DirCacheFS &fs) { return fs.held_fds_; }
+  static absl::flat_hash_set<int64_t> &MutableOpenForWrite(DirCacheFS &fs) {
+    return fs.open_for_write_;
+  }
+  // `id`'s BackingFile counts, which must exist.
+  static int &MutableRefs(DirCacheFS &fs, InodeId id) {
+    return fs.backing_files_.at(id).refs;
+  }
+  static int &MutableWritableRefs(DirCacheFS &fs, InodeId id) {
+    return fs.backing_files_.at(id).writable_refs;
+  }
   static void AddRemoved(DirCacheFS &fs, InodeId id, cache::CachedAttr row,
                          FileDescriptor fd) {
     fs.removed_.insert_or_assign(

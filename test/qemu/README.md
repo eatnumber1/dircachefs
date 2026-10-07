@@ -244,7 +244,9 @@ Reading a violation: the daemon writes one line to the console (the
 serial log, `bazel-testlogs/<package>/<test>/test.outputs/serial.log`) and
 aborts,
 
-    DCFS-INVARIANT-VIOLATION writable-open: inode 7 is open for writing but has no dirty row (in request GETATTR nodeid 1)
+```text
+DCFS-INVARIANT-VIOLATION writable-open: inode 7 is open for writing but has no dirty row (in request GETATTR nodeid 1)
+```
 
 and `run-qemu.sh` fails the run with `FAIL (dcfs invariant violated ...)`,
 quoting the first such line, whatever the guest script's own checks said.
