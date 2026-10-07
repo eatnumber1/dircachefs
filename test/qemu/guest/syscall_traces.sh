@@ -338,4 +338,6 @@ getxattr(procfd) !ENODATA
 close(backing)
 EOT
 
+require_no_reclaim no-reclaim
+
 exit "$FAILED"
