@@ -1067,3 +1067,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   strerror, L2-L6 doc/typing items), 26.2 (lane-3, dcfs-protocol: --//dcfs:check_invariants
   build; the no-transaction-across-backing-syscall guard first; request-end tri-state/dirty-set/
   lookup-count/held-fd checks; fault tests first; fast+presubmit run the checking build).
+- Warnings audit done (lane-5, step-warnings, holds for 7.1): 6 kinds / ~82 sites, none from our
+  code; sources: numactl version script (13 links x 7 gold lines), static-glibc getaddrinfo
+  (googletest, numactl) and dlopen (SQLite, libfuse) notes, liburing -Wunused-parameter, a Bazel
+  rule/file name clash in third_party/linux, 2 GCC -Warray-bounds in abseil under ASan. Fixed:
+  -Werror/-Wimplicit-fallthrough/-Wno-sign-compare scoped to our sources via per_file_copt (0 of
+  580 external compiles carry them), global -Wl,--fatal-warnings, skylib analysis tests asserting
+  both on our targets (fail first), patches/flags for the rest (most moot under lld: pruned at the
+  rebase over 7.1). Needs russ: libnuma + liburing are shipped only for libfuse's fuse_uring.c
+  (dcfs never passes -o io_uring): turn HAVE_URING off in the libfuse overlay (drops both
+  dependencies from the shipped binary and the SBOM) or keep FUSE-over-io_uring for later?
