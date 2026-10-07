@@ -288,6 +288,10 @@ A test that outgrows its allowance fails visibly instead of hanging:
 - the OOM killer's lines are printed by `guest/init` as `MEM-OOM: ...` and
   `run-qemu.sh` fails the run with `ERROR: the guest ran out of memory`
   and those lines (the console's loglevel hides them otherwise);
+- a kernel oops, `BUG`, `WARNING` or panic fails the run whatever the test's
+  checks said (`run-qemu.sh`, step 23.7): the console shows only the worst of
+  them at loglevel 3, so `guest/init` copies the matching lines of the
+  kernel log to the end of the serial log as `KERNEL-OOPS: ...` lines;
 - a guest too small for its own initramfs says `Initramfs unpacking failed`
   or panics before init, which `run-qemu.sh` reports as `the guest died
   while booting`;
@@ -661,6 +665,13 @@ qemu_test_matrix(
 )
 ```
 
+An ext4 disk tuple may carry mke2fs options as a fourth element, e.g.
+`("vdb", "ext4", "320M", "-O casefold -E encoding=utf8")` (`copy_test`: a
+filesystem on which `chattr +F` works); `qemu_test_matrix` keeps them for the
+ext4 variant only. Make such features at mkfs time: switching casefold on
+under a mounted ext4 (`EXT4_IOC_SET_TUNE_SB_PARAM`) leaves the kernel without
+the encoding, and the next readdir of a casefolded directory oopses.
+
 which generates `<name>_test_ext4`/`_xfs`/`_btrfs` plus a plain
 `<name>_test` alias to the ext4 variant -- see `guest/lib.sh`'s
 `backing_fstype` for how a script detects which filesystem it is actually
@@ -827,7 +838,7 @@ One script serves both kinds of test (see the usage comment at the top of
 <initramfs> [disk-spec...]` for `qemu_cc_test`, or `--qemu <...> --qboot
 <...> --modules <archive> <vmlinuz> <initramfs> <dcfs_test-name> [disk-spec...]` for
 `qemu_test`. `--qemu`/`--qboot` are mandatory in both modes (step 4.4; see
-"Firmware: qboot" above). Each `disk-spec` is `<device>:<fstype>:<size>`,
-e.g. `vdb:ext4:256M`; disks are attached in `<letter>` order, with a small
+"Firmware: qboot" above). Each `disk-spec` is `<device>:<fstype>:<size>[:<mke2fs options>]`,
+e.g. `vdb:ext4:256M` (options for ext4 only); disks are attached in `<letter>` order, with a small
 unformatted filler drive for any skipped letter, so the guest kernel
 enumerates the requested disk at exactly `/dev/vd<letter>`.

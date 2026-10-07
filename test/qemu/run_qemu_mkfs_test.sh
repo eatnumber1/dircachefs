@@ -48,13 +48,13 @@ chmod +x "$WORK/host/mkfs.ext4"
 : >"$WORK/qboot.rom"
 : >"$WORK/mke2fs.conf"
 
-run() { # <extra args...> -- disks; sets RC
+run() { # <extra args...>; sets RC; $VDB_SPEC overrides the vdb disk-spec
 	mkdir -p "$WORK/t" "$WORK/out"
 	rm -f "$WORK/out/serial.log"
 	RC=0
 	PATH="$WORK/host:$PATH" TEST_TMPDIR="$WORK/t" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
 		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" "$@" \
-		"$WORK/kernel" "$WORK/initrd" vdb:ext4:8M vdc:xfs:8M vdd:btrfs:8M \
+		"$WORK/kernel" "$WORK/initrd" "${VDB_SPEC:-vdb:ext4:8M}" vdc:xfs:8M vdd:btrfs:8M \
 		>"$WORK/stdout" 2>&1 || RC=$?
 }
 
@@ -74,6 +74,20 @@ for want in "mke2fs: $WORK/bin/mke2fs" "mke2fs.conf: $WORK/mke2fs.conf" \
 	grep -q "^run-qemu.sh: $want" "$LOG" || fail "serial.log does not record '$want'"
 done
 echo "PASS: scratch disks are made by the explicitly passed tools, which are logged"
+
+# Step 23.7: an ext4 disk-spec may carry mke2fs options as a fourth field
+# (a casefold-capable filesystem, made at mkfs time: the kernel cannot load
+# the encoding when the feature is switched on under a mounted filesystem).
+rm -f "$WORK/mkfs-calls"
+# shellcheck disable=SC2086
+VDB_SPEC="vdb:ext4:8M:-O casefold -E encoding=utf8" run $good
+grep -q "^mke2fs MKE2FS_CONFIG=$WORK/mke2fs.conf .*-t ext4 -O casefold -E encoding=utf8 " "$WORK/mkfs-calls" ||
+	fail "the fourth field is not passed to mke2fs: $(cat "$WORK/mkfs-calls")"
+echo "PASS: an ext4 disk-spec's fourth field is passed to mke2fs"
+VDB_SPEC="vdb:xfs:8M:-O casefold" run $good
+[ "$RC" -ne 0 ] || fail "mkfs options for xfs were accepted"
+grep -q "only supported for ext4" "$WORK/stdout" || fail "no ext4-only error: $(cat "$WORK/stdout")"
+echo "PASS: mkfs options are refused for other filesystems"
 
 # The kernel-module archive (step 24.2) is appended to the initramfs the
 # guest is given: the kernel unpacks concatenated archives into one.

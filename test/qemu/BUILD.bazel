@@ -350,7 +350,11 @@ qemu_test_matrix(
 # guest/copy.sh.
 qemu_test_matrix(
     name = "copy_test",
-    disks = [("vdb", "ext4", "320M")],
+    # Casefold-capable (step 23.7): chattr +F works on the raw filesystem, so
+    # the test can check that dcfs refuses it. The feature cannot be switched
+    # on under a mounted filesystem: the kernel then never loads the encoding
+    # and the next readdir of a casefolded directory oopses.
+    disks = [("vdb", "ext4", "320M", "-O casefold -E encoding=utf8")],
     guest_script = "guest/copy.sh",
     size = "small",
     other_size = "medium",

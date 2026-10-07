@@ -144,7 +144,8 @@ def qemu_cc_test(
         tools = ["//test/qemu:scripts/mkinitramfs.sh"],
     )
 
-    disk_args = [d[0] + ":" + d[1] + ":" + d[2] for d in disks]
+    # A disk-spec with mke2fs options has spaces: Bazel shell-tokenizes `args`.
+    disk_args = ["'" + ":".join(d) + "'" if len(d) > 3 else ":".join(d) for d in disks]
 
     # The test kernel is Alpine's linux-virt (step 24.2): //third_party/linux:
     # vmlinuz. Its drivers are modules; the initramfs gets the archive of the

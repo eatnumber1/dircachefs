@@ -25,8 +25,11 @@
 #       runs /tests/<dcfs_test-basename> (guest/init's e2e branch) and
 #       prints ALL-TESTS-PASSED or TEST-FAILED. Exit 0 iff the former.
 #
-# Each disk-spec is <device>:<fstype>:<size>, e.g. vdb:ext4:256M, where
-# <device> is a /dev/vd<letter> name. Disks are attached to QEMU in
+# Each disk-spec is <device>:<fstype>:<size>[:<mkfs options>], e.g.
+# vdb:ext4:256M, where <device> is a /dev/vd<letter> name. The optional
+# fourth field (ext4 only; step 23.7) is words handed to mke2fs after
+# `-t ext4`, e.g. "vdb:ext4:256M:-O casefold -E encoding=utf8" for a
+# casefold-capable filesystem (no colons in the options). Disks are attached to QEMU in
 # <letter> order (vda, vdb, ...); any skipped letter gets a small
 # unformatted filler drive, so the guest kernel enumerates the requested
 # disk at exactly /dev/vd<letter>.
@@ -204,9 +207,20 @@ for spec in "$@"; do
 	rest=${spec#*:}
 	fstype=${rest%%:*}
 	size=${rest#*:}
+	opts=
+	case "$size" in
+	*:*)
+		opts=${size#*:}
+		size=${size%%:*}
+		;;
+	esac
+	if [ -n "$opts" ] && [ "$fstype" != ext4 ]; then
+		echo "run-qemu.sh: mkfs options are only supported for ext4 ('$spec')" >&2
+		exit 1
+	fi
 	letter=${dev#vd}
 	index=$(($(printf '%d' "'$letter") - $(printf '%d' "'a")))
-	echo "$index:$dev:$fstype:$size" >>"$specs_file"
+	echo "$index:$dev:$fstype:$size:$opts" >>"$specs_file"
 done
 
 max_index=-1
@@ -222,10 +236,12 @@ while [ "$idx" -le "$max_index" ]; do
 		dev=$(echo "$line" | cut -d: -f2)
 		fstype=$(echo "$line" | cut -d: -f3)
 		size=$(echo "$line" | cut -d: -f4)
+		opts=$(echo "$line" | cut -d: -f5-)
 		img="$WORKDIR/$dev.img"
 		truncate -s "$size" "$img"
 		case "$fstype" in
-		ext4) MKE2FS_CONFIG="$MKE2FS_CONF" "$MKE2FS_BIN" -q -F -t ext4 "$img" ;;
+		# shellcheck disable=SC2086 # opts is a deliberate list of words
+		ext4) MKE2FS_CONFIG="$MKE2FS_CONF" "$MKE2FS_BIN" -q -F -t ext4 $opts "$img" ;;
 		btrfs) "$MKFS_BTRFS_BIN" -q -f "$img" ;;
 		xfs) "$MKFS_XFS_BIN" -q -f "$img" ;;
 		*)

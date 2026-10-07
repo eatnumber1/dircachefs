@@ -68,6 +68,8 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             the guest/*.sh glob in this package's initramfs genrule).
         disks: list of (device, fstype, size) tuples, e.g.
             ("vdb", "ext4", "256M"). device is a /dev/vd<letter> name;
+            an ext4 tuple may have a fourth element, mke2fs options
+            (e.g. "-O casefold -E encoding=utf8", no colons);
             see run-qemu.sh for how the letter maps to QEMU drive order.
         rootfs: optional label of a Debian rootfs ext4 image (normally
             "//third_party/debian:rootfs"). When given, run-qemu.sh
@@ -98,7 +100,8 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     """
     if size == None or timeout == None:
         fail("qemu_test(%s): size and timeout are required (the test tier; see test/qemu/README.md)" % name)
-    disk_args = [d[0] + ":" + d[1] + ":" + d[2] for d in disks]
+    # A disk-spec with mke2fs options has spaces: Bazel shell-tokenizes `args`.
+    disk_args = ["'" + ":".join(d) + "'" if len(d) > 3 else ":".join(d) for d in disks]
     guest_script_basename = guest_script.split("/")[-1]
 
     rootfs_data = [rootfs] if rootfs else []
@@ -203,6 +206,8 @@ def qemu_test_matrix(
         disks: same shape as qemu_test's `disks`, but the first entry's
             fstype field is overridden per generated variant -- pass
             whatever placeholder fstype reads best (by convention "ext4").
+            An optional fourth element (mke2fs options) is kept for the
+            ext4 variant only.
         size: required; the tier of the first (ext4) variant, which
             "<name>" aliases.
         other_size: required; the tier of the remaining variants (xfs,
@@ -221,7 +226,12 @@ def qemu_test_matrix(
     if size == None or other_size == None or timeout == None:
         fail("qemu_test_matrix(%s): size, other_size and timeout are required" % name)
     for fstype in fstypes:
-        varied_disks = [(disks[0][0], fstype, disks[0][2])] + list(disks[1:])
+        # The mkfs options (a fourth element) are ext4's: the other variants
+        # drop them.
+        first = (disks[0][0], fstype, disks[0][2])
+        if fstype == "ext4":
+            first = tuple(disks[0])
+        varied_disks = [first] + list(disks[1:])
         qemu_test(
             name = name + "_" + fstype,
             guest_script = guest_script,

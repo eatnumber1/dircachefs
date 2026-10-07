@@ -95,20 +95,20 @@ ref_fsx=$("$TESTUTIL" fsxattr /src/ref/plain 2>&1)
 ref_unknown=$("$TESTUTIL" ioctl-unknown /src/ref/plain 2>&1)
 # Step 23.7 (M1): on an ext4 with the casefold feature, chattr +F makes an
 # empty directory case-insensitive. The raw filesystem allows it; dcfs,
-# whose cache is case-sensitive, must refuse it.
+# whose cache is case-sensitive, must refuse it. The test's disk is made with
+# the feature (-O casefold -E encoding=utf8, in BUILD.bazel): switching it on
+# under the mounted filesystem leaves the kernel without the encoding, and
+# the next readdir of a casefolded directory oopses.
 casefold=0
 if [ "$FSTYPE" = ext4 ]; then
-	if "$TESTUTIL" ext4-casefold /src >/tmp/casefold.out 2>&1; then
-		casefold=1
-		mkdir /src/ref/cf /src/cf
-		ref_cf=$("$TESTUTIL" getflags /src/ref/cf)
-		ref_cf_set=$("$TESTUTIL" setflags /src/ref/cf \
-			"$(printf '%x' $((0x$ref_cf | 0x40000000)))" 2>&1 &&
-			"$TESTUTIL" getflags /src/ref/cf)
-		echo "ext4 chattr +F on the raw filesystem: $ref_cf_set"
-	else
-		fail ext4-casefold "could not enable casefold: $(cat /tmp/casefold.out)"
-	fi
+	casefold=1
+	mkdir /src/ref/cf /src/cf
+	ref_cf=$("$TESTUTIL" getflags /src/ref/cf)
+	ref_cf_set=$("$TESTUTIL" setflags /src/ref/cf \
+		"$(printf '%x' $((0x$ref_cf | 0x40000000)))" 2>&1 &&
+		"$TESTUTIL" getflags /src/ref/cf)
+	echo "ext4 chattr +F on the raw filesystem: $ref_cf_set"
+	expect_eq casefold-raw-accepts "$(printf '%x' $((0x$ref_cf | 0x40000000)))" "$ref_cf_set"
 fi
 echo "$FSTYPE flags: $ref_flags; fsxattr: $ref_fsx; $ref_unknown"
 for how in empty proc excl none; do
