@@ -23,6 +23,8 @@
 #include <cstdint>
 #include <string_view>
 
+#include "absl/types/source_location.h"
+
 namespace dcfs {
 
 struct Context;
@@ -45,8 +47,10 @@ class InvariantChecks {
   // helper that takes only a descriptor (backing::ReadFile, StatFd, ...).
   // Code without a Context cannot open a transaction (the cache database
   // is reachable only through Context::db), so checking here covers every
-  // backing syscall: none can run inside a transaction.
-  virtual void BackingCall(Context &ctx, std::string_view what) {}
+  // backing syscall: none can run inside a transaction. `site` is the call
+  // site (the step 26.6 fault sweep fails each site's syscalls in turn).
+  virtual void BackingCall(Context &ctx, std::string_view what,
+                           absl::SourceLocation site) {}
 
   // fuse_ops.cc: a request was dispatched (after the periodic sync point,
   // before its handler), and its reply has been sent. Requests nest when

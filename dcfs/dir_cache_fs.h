@@ -19,6 +19,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
+#include "absl/types/source_location.h"
 #include "dcfs/backing.h"
 #include "dcfs/context.h"
 #include "dcfs/fd.h"
@@ -239,8 +240,10 @@ class DirCacheFS {
   // The runtime invariant checks' hook (dcfs/invariant_checks.h), called
   // right before each backing:: helper that takes only a descriptor
   // (backing.cc checks the calls it makes itself).
-  void BackingCall(std::string_view what) const {
-    ctx_.checks->BackingCall(ctx_, what);
+  void BackingCall(
+      std::string_view what,
+      absl::SourceLocation site = absl::SourceLocation::current()) const {
+    ctx_.checks->BackingCall(ctx_, what, site);
   }
 
   // cache::GetAttr(ctx_, id), except that NotFound from a non-root id is

@@ -66,6 +66,7 @@ cc_library(
     name = "invariant_checks",
     visibility = ["//dcfs/testonly:__pkg__"],
     hdrs = ["invariant_checks.h"],
+    deps = ["@absl//absl/types:source_location"],
 )
 
 cc_library(
@@ -628,6 +629,7 @@ cc_library(
       "@absl//absl/strings",
       "@absl//absl/time",
       "@libfuse//:libfuse",
+      "@absl//absl/types:source_location",
     ],
 )
 
@@ -734,7 +736,24 @@ qemu_cc_test(
     # "Guest memory").
     asan_mem = 1088,
     srcs = ["dir_cache_fs_test.cc"],
+    # The fault sweep has its target (dir_cache_fs_fault_sites_test).
+    args = ["--gtest_filter=-FaultSitesTest.*"],
     disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
+    linkopts = DIR_CACHE_FS_TEST_WRAPS,
+    deps = DIR_CACHE_FS_TEST_DEPS,
+)
+
+# Step 26.6: the fault sweep (FaultSitesTest in dir_cache_fs_test.cc): one
+# short workload per operation type, every backing call site it reaches
+# failed once (EIO, and each errno the code branches on there), the
+# invariant checks and a recovery after each.
+qemu_cc_test(
+    name = "dir_cache_fs_fault_sites_test",
+    size = "small",
+    timeout = "moderate",
+    srcs = ["dir_cache_fs_test.cc"],
+    args = ["--gtest_filter=FaultSitesTest.*"],
+    disks = [("vdb", "ext4", "32M")],
     linkopts = DIR_CACHE_FS_TEST_WRAPS,
     deps = DIR_CACHE_FS_TEST_DEPS,
 )
@@ -1202,6 +1221,7 @@ cc_library(
       "@absl//absl/strings",
       "@absl//absl/strings:str_format",
       "@libfuse//:libfuse",
+      "@absl//absl/types:source_location",
     ],
 )
 

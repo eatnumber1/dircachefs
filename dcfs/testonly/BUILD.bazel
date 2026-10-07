@@ -132,6 +132,7 @@ cc_library(
         "@absl//absl/status:status_macros",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",
+        "@absl//absl/types:source_location",
         "@sqlite//:sqlite3",
     ],
 )

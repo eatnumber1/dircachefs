@@ -80,14 +80,17 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
+#include "absl/types/source_location.h"
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/invariant_checks.h"
@@ -114,7 +117,8 @@ class InvariantChecker final : public InvariantChecks {
   ~InvariantChecker() override;
 
   // InvariantChecks: each aborts on a violation.
-  void BackingCall(Context &ctx, std::string_view what) override;
+  void BackingCall(Context &ctx, std::string_view what,
+                   absl::SourceLocation site) override;
   void RequestBegin(Context &ctx, const DirCacheFS &fs,
                     const events::Request &request) override;
   void RequestEnd(Context &ctx, const DirCacheFS &fs,
@@ -140,6 +144,17 @@ class InvariantChecker final : public InvariantChecks {
   // What RunStarted and Destroyed check: everything; forgets the changed
   // rows.
   absl::Status CheckAll(Context &ctx, const DirCacheFS *fs);
+
+  // For the step 26.6 fault sweep (dcfs/dir_cache_fs_test.cc,
+  // FaultSitesTest). `observer` is called with each backing call's site,
+  // after its checks (empty: none). With `record` the hooks record a
+  // violation (violations()) instead of aborting, so that one iteration's
+  // finding does not end the sweep.
+  void ObserveBackingCalls(std::function<void(absl::SourceLocation)> observer) {
+    on_backing_call_ = std::move(observer);
+  }
+  void RecordViolations(bool record) { recording_ = record; }
+  const std::vector<std::string> &violations() const { return violations_; }
 
  private:
   // One request being served (requests nest; see RequestBegin), or
@@ -211,6 +226,9 @@ class InvariantChecker final : public InvariantChecks {
   int console_fd_;
   ::sqlite3 *db_ = nullptr;
   std::vector<Frame> frames_;
+  std::function<void(absl::SourceLocation)> on_backing_call_;
+  bool recording_ = false;
+  std::vector<std::string> violations_;
   // The TEMP trigger is in place (SeeEveryDirtyDelete).
   bool no_truncate_ = false;
   // The inodes open for writing when the run started (see RunStarted).

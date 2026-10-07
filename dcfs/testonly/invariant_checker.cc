@@ -224,16 +224,22 @@ void InvariantChecker::Fail(const absl::Status &violation) {
     // Best effort: the abort below says it all again on stderr.
     (void)syscalls::write(console_fd_, line.data(), line.size());
   }
+  if (recording_) {
+    violations_.push_back(what);
+    return;
+  }
   LOG(FATAL) << "invariant violated: " << what;
 }
 
-void InvariantChecker::BackingCall(Context &ctx, std::string_view what) {
+void InvariantChecker::BackingCall(Context &ctx, std::string_view what,
+                                   absl::SourceLocation site) {
   Attach(ctx);
   absl::Status status = CheckBackingCall(ctx);
   if (!status.ok()) {
     Fail(absl::Status(status.code(),
                       absl::StrCat(status.message(), ", at ", what)));
   }
+  if (on_backing_call_) on_backing_call_(site);
 }
 
 void InvariantChecker::RequestBegin(Context &ctx, const DirCacheFS &fs,

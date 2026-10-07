@@ -48,6 +48,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdarg>
 #include <cerrno>
 #include <cstddef>
@@ -63,6 +64,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -186,8 +188,76 @@ void NoTransactionAt(const char *call) {
   }
 }
 
+// Step 26.6: the fault sweep's state (FaultSitesTest). A backing call site
+// is a hook's source location (InvariantChecks::BackingCall) and one
+// wrapped libc call after it, before the next hook: the j-th call of that
+// name there (a probe's openat, then its reopen's). Recording, it lists the
+// sites a workload reaches, over every time it reaches each hook (so the
+// list does not depend on which name a listing probes first); injecting,
+// it fails one site the first time it is reached.
+struct FaultSweep {
+  struct Site {
+    std::string hook;
+    std::string call;
+    int j = 0;
+  };
+  bool recording = false;
+  std::vector<Site> sites;
+  std::vector<std::string> hooks;  // every hook location reached
+  // Since the last hook: where it is, and how many calls of each name.
+  std::string at;
+  std::map<std::string, int> seen;
+  // Injecting: fail `target` with `err`, once.
+  std::optional<Site> target;
+  int err = 0;
+  std::string fired;  // The call that failed ("" until one has).
+};
+
+FaultSweep &Sweep() {
+  static auto *sweep = new FaultSweep();
+  return *sweep;
+}
+
+// The checker's observer of every backing call's hook.
+void SweepAtHook(absl::SourceLocation where) {
+  FaultSweep &f = Sweep();
+  f.at = absl::StrCat(where.file_name(), ":", where.line());
+  f.seen.clear();
+  if (f.recording &&
+      std::find(f.hooks.begin(), f.hooks.end(), f.at) == f.hooks.end()) {
+    f.hooks.push_back(f.at);
+  }
+}
+
+// In every wrapped libc call: the errno to fail it with, or 0.
+int InjectedFault(const char *call) {
+  FaultSweep &f = Sweep();
+  if (f.at.empty()) return 0;  // Not after a hook (the test's own calls).
+  const int j = f.seen[call]++;
+  if (f.recording) {
+    bool known = false;
+    for (const FaultSweep::Site &s : f.sites) {
+      known = known || (s.hook == f.at && s.call == call && s.j == j);
+    }
+    if (!known) f.sites.push_back({.hook = f.at, .call = call, .j = j});
+  }
+  if (!f.target.has_value() || !f.fired.empty()) return 0;
+  if (f.target->hook != f.at || f.target->call != call || f.target->j != j) {
+    return 0;
+  }
+  f.fired = call;
+  return f.err;
+}
+
 }  // namespace
 }  // namespace dcfs
+
+// A wrap fails with the sweep's errno when it says so (step 26.6).
+#define DCFS_INJECT(call, failed)                               \
+  if (int injected = dcfs::InjectedFault(call); injected != 0) { \
+    errno = injected;                                           \
+    return failed;                                              \
+  }
 
 extern "C" {
 int __real_open_by_handle_at(int mount_fd, struct file_handle *handle,
@@ -195,6 +265,7 @@ int __real_open_by_handle_at(int mount_fd, struct file_handle *handle,
 int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
                              int flags) {
   dcfs::NoTransactionAt("open_by_handle_at");
+  DCFS_INJECT("open_by_handle_at", -1)
   std::function<void()> hook = std::exchange(dcfs::OpenByHandleHook(), {});
   if (hook) hook();
   return __real_open_by_handle_at(mount_fd, handle, flags);
@@ -206,6 +277,7 @@ int __wrap_name_to_handle_at(int dirfd, const char *pathname,
                              struct file_handle *handle, int *mount_id,
                              int flags) {
   dcfs::NoTransactionAt("name_to_handle_at");
+  DCFS_INJECT("name_to_handle_at", -1)
   std::function<void()> hook = std::exchange(dcfs::NameToHandleHook(), {});
   if (hook) hook();
   return __real_name_to_handle_at(dirfd, pathname, handle, mount_id, flags);
@@ -218,6 +290,7 @@ int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
   if (std::function<void()> hook = std::exchange(dcfs::StatxHook(), {}); hook) {
     hook();
   }
+  DCFS_INJECT("statx", -1)
   if (int err = std::exchange(dcfs::StatxFailure(), 0); err != 0) {
     errno = err;
     return -1;
@@ -232,6 +305,7 @@ int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
 int __real_syncfs(int fd);
 int __wrap_syncfs(int fd) {
   dcfs::NoTransactionAt("syncfs");
+  DCFS_INJECT("syncfs", -1)
   std::function<void()> hook = std::exchange(dcfs::SyncfsHook(), {});
   if (hook) hook();
   return __real_syncfs(fd);
@@ -243,6 +317,7 @@ int __wrap_syncfs(int fd) {
   ret __real_##name params;                    \
   ret __wrap_##name params {                   \
     dcfs::NoTransactionAt(#name);              \
+    DCFS_INJECT(#name, -1)                     \
     return __real_##name args;                 \
   }
 DCFS_BACKSTOP(int, unlinkat, (int d, const char *p, int f), (d, p, f))
@@ -297,6 +372,7 @@ DCFS_BACKSTOP(ssize_t, copy_file_range,
 int __real_openat64(int dirfd, const char *path, int flags, ...);
 int __wrap_openat64(int dirfd, const char *path, int flags, ...) {
   dcfs::NoTransactionAt("openat");
+  DCFS_INJECT("openat", -1)
   mode_t mode = 0;
   if ((flags & O_CREAT) != 0 || (flags & O_TMPFILE) == O_TMPFILE) {
     va_list ap;
@@ -4918,6 +4994,433 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<CheckpointCase> &info) {
       return info.param.name;
     });
+
+// --- The fault sweep (step 26.6) ---------------------------------------------
+//
+// Short workloads, one per operation type, each run once recording the
+// backing call sites it reaches (a site: an InvariantChecks::BackingCall
+// hook's location and the k-th wrapped libc call after it, see FaultSweep);
+// then, for each site, the workload again on a fresh tree and cache with
+// that site's first call failed: with EIO, and with every errno the code
+// branches on for that call (ErrnosFor). After each run: the invariant
+// checks over everything (CheckAll, the status API), then a recovery (an
+// unclean Startup on the same database, as after a crash right then) and
+// the checks again. Bounded by call site, never "every N-th call of a long
+// workload". A violation is a finding: the test fails, naming it.
+
+// One fresh fixture per sweep run: its own source tree, cache database,
+// DirCacheFS and checker (in record mode: a violation is collected, not
+// fatal).
+class FaultIteration : public DirCacheFSTest {
+ public:
+  void TestBody() override {}
+
+  void Begin() {
+    SetUp();
+    MakeTree();
+    Start();
+    checker_->RecordViolations(true);
+    checker_->ObserveBackingCalls(SweepAtHook);
+  }
+
+  void End() {
+    checker_->ObserveBackingCalls({});
+    TearDown();
+  }
+
+  // For the self-check: the in-memory flag says the dirty set is empty.
+  void BreakDirtyAny() { ctx_.dirty.any = false; }
+
+  // What every workload starts from.
+  void MakeTree() {
+    for (const char *f : {"f1", "f2", "f3"}) {
+      WriteFile(Path(f));
+      AppendToFile(Path(f), "contents");
+    }
+    for (const char *d : {"d", "e1", "e2"}) {
+      ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path(d), 0755), IsOk());
+    }
+    WriteFile(Path("d/g1"));
+    WriteFile(Path("d/g2"));
+    const std::string value = "v";
+    ASSERT_THAT(syscalls::setxattr(Path("f1"), "user.k",
+                                   std::span<const uint8_t>(
+                                       reinterpret_cast<const uint8_t *>(
+                                           value.data()),
+                                       value.size()),
+                                   0),
+                IsOk());
+    ASSERT_THAT(syscalls::symlinkat("f1", AT_FDCWD, Path("s")), IsOk());
+  }
+
+  InodeId L(InodeId parent, std::string_view name) {
+    auto [reply, entry] = Lookup(parent, name);
+    return reply.error == 0 ? static_cast<InodeId>(entry.nodeid) : 0;
+  }
+
+  Reply Simple(uint32_t opcode, InodeId id, std::string_view name) {
+    std::string body(name);
+    body.push_back('\0');
+    return Send(opcode, static_cast<uint64_t>(id), body);
+  }
+
+  Reply Write(InodeId id, uint64_t fh, std::string_view data, uint64_t off) {
+    struct fuse_write_in in = {};
+    in.fh = fh;
+    in.offset = off;
+    in.size = static_cast<uint32_t>(data.size());
+    std::string body;
+    AppendBytes(body, in);
+    body.append(data);
+    return Send(FUSE_WRITE, static_cast<uint64_t>(id), body);
+  }
+
+  Reply Fsync(InodeId id, uint64_t fh) {
+    struct fuse_fsync_in in = {};
+    in.fh = fh;
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_FSYNC, static_cast<uint64_t>(id), body);
+  }
+
+  Reply Setattr(InodeId id, uint32_t valid, uint64_t size) {
+    struct fuse_setattr_in in = {};
+    in.valid = valid;
+    in.size = size;
+    in.atime = 1000;
+    in.mtime = 2000;
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_SETATTR, static_cast<uint64_t>(id), body);
+  }
+
+  Reply Listxattr(InodeId id) {
+    struct fuse_getxattr_in in = {};
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_LISTXATTR, static_cast<uint64_t>(id), body);
+  }
+
+  Reply Releasedir(InodeId id) {
+    struct fuse_release_in in = {};
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_RELEASEDIR, static_cast<uint64_t>(id), body);
+  }
+
+  void OpenRelease(InodeId id, int flags) {
+    if (id == 0) return;
+    auto [open, fh] = Open(id, flags);
+    if (open.error == 0) Release(id, fh);
+  }
+
+  // The workloads: about ten requests each, ignoring their replies (a
+  // failed request is the point; what it leaves behind is what is checked).
+  void Run(std::string_view workload) {
+    if (workload == "lookup") {
+      for (const char *n : {"f1", "f2", "f3", "d", "s", "missing"}) {
+        L(kRootInode, n);
+      }
+      if (InodeId d = L(kRootInode, "d"); d != 0) {
+        L(d, "g1");
+        L(d, "missing");
+      }
+      if (InodeId f = L(kRootInode, "f1"); f != 0) Getattr(f);
+    } else if (workload == "create") {
+      for (const char *n : {"c1", "c2", "c3"}) {
+        Created c = Create(kRootInode, n, O_RDWR);
+        if (c.reply.error == 0) Release(c.id, c.fh);
+      }
+      if (InodeId d = L(kRootInode, "d"); d != 0) {
+        Created c = Create(d, "c4", O_WRONLY);
+        if (c.reply.error == 0) Release(c.id, c.fh);
+      }
+      Create(kRootInode, "f1", O_RDWR | O_EXCL);  // EEXIST
+    } else if (workload == "write") {
+      if (InodeId f = L(kRootInode, "f1"); f != 0) {
+        auto [open, fh] = Open(f, O_RDWR);
+        if (open.error == 0) {
+          Write(f, fh, "abc", 0);
+          Write(f, fh, "defgh", 3);
+          Fsync(f, fh);
+          Release(f, fh);
+        }
+        OpenRelease(f, O_RDONLY);
+        Getattr(f);
+      }
+    } else if (workload == "unlink") {
+      L(kRootInode, "f1");
+      L(kRootInode, "f2");
+      Unlink(kRootInode, "f1");
+      Unlink(kRootInode, "f2");
+      Unlink(kRootInode, "missing");
+      if (InodeId d = L(kRootInode, "d"); d != 0) {
+        L(d, "g1");
+        Unlink(d, "g1");
+        Unlink(d, "g2");
+      }
+    } else if (workload == "rename") {
+      InodeId d = L(kRootInode, "d");
+      L(kRootInode, "f1");
+      Rename(kRootInode, "f1", kRootInode, "r1");
+      Rename(kRootInode, "f2", kRootInode, "f3");  // over an existing file
+      if (d != 0) {
+        Rename(kRootInode, "f3", d, "g1");
+        Rename(d, "g2", kRootInode, "r2");
+      }
+      Rename(kRootInode, "missing", kRootInode, "r3");
+    } else if (workload == "mkdir") {
+      Mkdir(kRootInode, "m1");
+      Mkdir(kRootInode, "m2");
+      Mkdir(kRootInode, "d");  // EEXIST
+      if (InodeId d = L(kRootInode, "d"); d != 0) Mkdir(d, "m3");
+      if (InodeId m = L(kRootInode, "m1"); m != 0) Mkdir(m, "m4");
+    } else if (workload == "rmdir") {
+      L(kRootInode, "e1");
+      Simple(FUSE_RMDIR, kRootInode, "e1");
+      Simple(FUSE_RMDIR, kRootInode, "e2");
+      Simple(FUSE_RMDIR, kRootInode, "d");  // ENOTEMPTY
+      Simple(FUSE_RMDIR, kRootInode, "missing");
+      Simple(FUSE_RMDIR, kRootInode, "f1");  // ENOTDIR
+    } else if (workload == "setattr") {
+      if (InodeId f = L(kRootInode, "f1"); f != 0) {
+        Chmod(f, 0600);
+        Setattr(f, FATTR_SIZE, 2);
+        Setattr(f, FATTR_ATIME | FATTR_MTIME, 0);
+        Getattr(f);
+      }
+      if (InodeId d = L(kRootInode, "d"); d != 0) Chmod(d, 0700);
+      if (InodeId s = L(kRootInode, "s"); s != 0) {
+        Setattr(s, FATTR_ATIME | FATTR_MTIME, 0);
+      }
+    } else if (workload == "xattr") {
+      if (InodeId f = L(kRootInode, "f1"); f != 0) {
+        Setxattr(f, "user.a", "1");
+        Getxattr(f, "user.a");
+        Getxattr(f, "user.k");
+        Getxattr(f, "user.missing");
+        Listxattr(f);
+        Simple(FUSE_REMOVEXATTR, f, "user.a");
+        Simple(FUSE_REMOVEXATTR, f, "user.missing");
+      }
+      if (InodeId d = L(kRootInode, "d"); d != 0) {
+        Setxattr(d, "user.b", "2");
+        Listxattr(d);
+      }
+    } else if (workload == "readdir") {
+      Opendir(kRootInode);
+      (void)List(kRootInode, true);
+      (void)List(kRootInode, false);
+      Releasedir(kRootInode);
+      if (InodeId d = L(kRootInode, "d"); d != 0) {
+        Opendir(d);
+        (void)List(d, true);
+        Releasedir(d);
+      }
+    } else if (workload == "open-release") {
+      InodeId f = L(kRootInode, "f1");
+      OpenRelease(f, O_RDONLY);
+      OpenRelease(f, O_RDWR);
+      OpenRelease(f, O_WRONLY | O_TRUNC);
+      OpenRelease(L(kRootInode, "f2"), O_RDWR | O_APPEND);
+      OpenRelease(L(kRootInode, "d"), O_RDONLY | O_DIRECTORY);
+    } else if (workload == "forget") {
+      InodeId f1 = L(kRootInode, "f1");
+      L(kRootInode, "f1");
+      InodeId f2 = L(kRootInode, "f2");
+      InodeId d = L(kRootInode, "d");
+      InodeId f3 = L(kRootInode, "f3");
+      OpenRelease(f3, O_RDWR);  // written: its last FORGET reconciles it
+      if (f1 != 0) Forget(f1, 2);
+      std::vector<std::pair<InodeId, uint64_t>> batch;
+      for (InodeId id : {f2, d}) {
+        if (id != 0) batch.emplace_back(id, 1);
+      }
+      if (!batch.empty()) BatchForget(batch);
+      if (f3 != 0) Forget(f3, 1);
+    }
+  }
+
+  // The invariants now, then after an unclean start on the same database
+  // (Startup in a new Context: the process died right here). Every
+  // violation, as found.
+  std::vector<std::string> CheckAndRecover() {
+    std::vector<std::string> found;
+    if (absl::Status s = checker_->CheckAll(ctx_, fs_.get()); !s.ok()) {
+      found.push_back(absl::StrCat("after the workload: ", s.message()));
+    }
+    MountFds mounts;
+    Context ctx{db_, mounts, bitgen_};
+    ctx.checks = checker_.get();
+    absl::StatusOr<FileDescriptor> source =
+        syscalls::openat(AT_FDCWD, source_, O_RDONLY | O_DIRECTORY);
+    absl::Status started =
+        !source.ok() ? source.status()
+                     : SetCleanShutdown(db_, false).ok()
+                           ? backing::Startup(ctx, *std::move(source), "boot")
+                           : absl::InternalError("SetCleanShutdown");
+    if (!started.ok()) {
+      found.push_back(absl::StrCat("recovery failed: ", started.ToString()));
+    } else if (absl::Status s = checker_->CheckAll(ctx, nullptr); !s.ok()) {
+      found.push_back(absl::StrCat("after recovery: ", s.message()));
+    }
+    for (const std::string &v : checker_->violations()) {
+      found.push_back(absl::StrCat("hook: ", v));
+    }
+    // From here on ctx_ is the dead process's memory (see Restart).
+    ctx_.checks = &NoInvariantChecks();
+    return found;
+  }
+};
+
+// `err`'s name, for a finding.
+std::string ErrnoName(int err) {
+  for (const auto &[name, value] : ErrnoNameTable()) {
+    if (value == err) return name;
+  }
+  return absl::StrCat("errno ", err);
+}
+
+// The errnos to fail `call` with: EIO, and those the code branches on for
+// it (backing.cc, dir_cache_fs.cc, device_id.cc): ENOENT (a probe's
+// openat: the name vanished), EACCES (MakeBackingFile's read-only
+// fallback), ESTALE and EPERM (OpenNode's open_by_handle_at), ENODATA,
+// EOPNOTSUPP and ERANGE (the xattr reads and their retry). EEXIST, ENOSPC
+// and ENAMETOOLONG have no branch: EIO stands for them.
+std::vector<int> ErrnosFor(std::string_view call) {
+  if (call == "openat") return {EIO, ENOENT, EACCES};
+  if (call == "open_by_handle_at") return {EIO, ESTALE, EPERM};
+  if (call == "getxattr" || call == "listxattr" || call == "fgetxattr" ||
+      call == "flistxattr") {
+    return {EIO, ENODATA, EOPNOTSUPP, ERANGE};
+  }
+  return {EIO};
+}
+
+constexpr const char *kWorkloads[] = {
+    "lookup", "create", "write",   "unlink",       "rename", "mkdir",
+    "rmdir",  "setattr", "xattr", "readdir", "open-release", "forget"};
+
+struct SweepResult {
+  int hooks = 0;      // hook locations reached
+  int calls = 0;      // new sites failed
+  int iterations = 0;
+  std::vector<std::string> silent;  // hooks with no wrapped call after them
+  std::vector<std::string> findings;
+};
+
+// Records `workload`'s sites, then fails each in turn that is not in
+// `done` (a site an earlier workload already failed: bounded by call
+// site, each is failed once), adding it. `breaker` (the self-check) runs
+// after each faulted workload; at most `max_iterations` if not -1.
+SweepResult SweepWorkload(std::string_view workload,
+                          absl::flat_hash_set<std::string> &done,
+                          const std::function<void(FaultIteration &)> &breaker =
+                              {},
+                          int max_iterations = -1) {
+  SweepResult result;
+  FaultSweep &f = Sweep();
+  f = FaultSweep();
+  {
+    FaultIteration it;
+    it.Begin();
+    f.recording = true;
+    it.Run(workload);
+    f.recording = false;
+    f.at.clear();
+    for (const std::string &v : it.CheckAndRecover()) {
+      result.findings.push_back(absl::StrCat(workload, " (no fault): ", v));
+    }
+    it.End();
+  }
+  const std::vector<FaultSweep::Site> sites = f.sites;
+  result.hooks = static_cast<int>(f.hooks.size());
+  for (const std::string &hook : f.hooks) {
+    bool calls = false;
+    for (const FaultSweep::Site &site : sites) {
+      calls = calls || site.hook == hook;
+    }
+    if (!calls && done.insert(hook).second) result.silent.push_back(hook);
+  }
+  for (const FaultSweep::Site &site : sites) {
+    if (result.iterations == max_iterations) break;
+    const std::string key =
+        absl::StrCat(site.hook, " ", site.call, " #", site.j);
+    if (!done.insert(key).second) continue;
+    ++result.calls;
+    for (int err : ErrnosFor(site.call)) {
+      f = FaultSweep();
+      FaultIteration it;
+      it.Begin();  // (Start's own backing calls are not the workload's.)
+      f.target = site;
+      f.err = err;
+      it.Run(workload);
+      const std::string fired = f.fired;
+      f = FaultSweep();  // Nothing fails during the checks and recovery.
+      if (breaker) breaker(it);
+      const std::string what = absl::StrCat(workload, ": ", key,
+                                            " failed with ", ErrnoName(err));
+      if (fired.empty()) {
+        result.findings.push_back(absl::StrCat(what, ": never reached"));
+      }
+      for (const std::string &v : it.CheckAndRecover()) {
+        result.findings.push_back(absl::StrCat(what, ": ", v));
+      }
+      it.End();
+      ++result.iterations;
+    }
+  }
+  return result;
+}
+
+TEST(FaultSitesTest, EveryBackingCallSiteFailedOnce) {
+  const auto start = std::chrono::steady_clock::now();
+  SweepResult all;
+  absl::flat_hash_set<std::string> done;
+  for (const char *workload : kWorkloads) {
+    const auto began = std::chrono::steady_clock::now();
+    SweepResult r = SweepWorkload(workload, done);
+    std::cout << "FAULT-SWEEP " << workload << ": " << r.hooks
+              << " hooks reached, " << r.calls << " new sites, " << r.iterations
+              << " iterations, "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(
+                     std::chrono::steady_clock::now() - began)
+                     .count()
+              << " ms" << std::endl;
+    all.hooks += r.hooks;
+    all.calls += r.calls;
+    all.iterations += r.iterations;
+    all.silent.insert(all.silent.end(), r.silent.begin(), r.silent.end());
+    all.findings.insert(all.findings.end(), r.findings.begin(),
+                        r.findings.end());
+  }
+  std::cout << "FAULT-SWEEP total: " << all.calls
+            << " sites, " << all.iterations << " iterations, "
+            << std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - start)
+                   .count()
+            << " ms; hooks with no wrapped call after them (not failed): "
+            << absl::StrJoin(all.silent, " ") << std::endl;
+  EXPECT_GT(all.calls, 0);
+  EXPECT_THAT(all.findings, ::testing::IsEmpty());
+}
+
+// The sweep's self-check: an iteration that breaks an invariant is
+// reported, naming the site it failed.
+TEST(FaultSitesTest, SweepReportsABrokenInvariant) {
+  absl::flat_hash_set<std::string> done;
+  SweepResult r = SweepWorkload(
+      "mkdir", done,
+      [](FaultIteration &it) {
+        // A phase 1 left its dirty row; the in-memory flag says none.
+        it.BreakDirtyAny();
+      },
+      /*max_iterations=*/3);
+  ASSERT_GT(r.iterations, 0);
+  EXPECT_THAT(r.findings,
+              Contains(::testing::HasSubstr(
+                  "dirty-set: Context::dirty.any is false")));
+}
 
 }  // namespace
 }  // namespace dcfs

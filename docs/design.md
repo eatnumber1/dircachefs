@@ -1741,6 +1741,21 @@ The checking build (`//dcfs:main_static_checked`, linking
 - at `Startup`'s end and after DESTROY: all of it over the whole database
   and every in-memory entry.
 
+The checks also run after injected failures (step 26.6,
+`//dcfs:dir_cache_fs_fault_sites_test`): one short workload per operation
+type (lookup, create, write, unlink, rename, mkdir, rmdir, setattr, xattr,
+readdir, open and release, forget) is run once recording the backing call
+sites it reaches (a hook's location and each wrapped libc call after it:
+the harness wraps them for the backstop), then again on a fresh tree and
+cache for each site not yet failed, with that site's first call failed:
+`EIO`, and each errno the code branches on there (`ENOENT` and `EACCES`
+for `openat`, `ESTALE` and `EPERM` for `open_by_handle_at`, `ENODATA`,
+`EOPNOTSUPP` and `ERANGE` for the xattr reads). After each: `CheckAll`, an
+unclean `Startup` on the same database, and `CheckAll` again; a violation
+fails the test. Three hooks are not failed: their calls (`pwrite`,
+`fsync`, `getdents64`) are not wrapped, as SQLite makes the first two
+inside its own transactions and the third goes through `syscall`.
+
 What the checklist states but the checker does not: "the dirty set equals
 the set of unknown rows" is not an invariant of this design (a population
 leaves rows unknown that no mutation touched, an invalidation makes names

@@ -504,6 +504,7 @@ gate is disabled.
 | run-qemu.sh invariant-violation verdict (26.2) | `//test/qemu:run_qemu_verdict_test` (a canned `DCFS-INVARIANT-VIOLATION` line fails the run; the words mid-line do not) |
 | fast and presubmit tiers boot the checking build (26.2) | `//test/qemu:invariant_checks_on_test` (a small test whose daemon must say `invariant checks: on`) |
 | interrupt checkpoints (Phase 22: an interrupted request replies `EINTR` at its next checkpoint) | `//dcfs:dir_cache_fs_test`'s cancellation tests (a fake interruption source, and a forged `FUSE_INTERRUPT` read by the real `SessionLoop`) and `//test/qemu:cancel_test`; without the checkpoints the harness tests fail, and `cancel_test`'s interrupted listing took 12.1 s after the signal (the population's 13.6-19.5 s in `cancel_inventory_test`) |
+| fault sweep: every backing call site a short workload reaches, failed once (26.6) | `//dcfs:dir_cache_fs_fault_sites_test`'s `FaultSitesTest.SweepReportsABrokenInvariant` (an iteration that breaks an invariant is reported, naming the site it failed) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks

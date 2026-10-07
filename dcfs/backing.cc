@@ -33,6 +33,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
+#include "absl/types/source_location.h"
 #include "dcfs/checkpoint.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
@@ -75,8 +76,10 @@ int ErrnoOf(const absl::Status &status) {
 // between: the point where "no transaction spans a backing syscall" must
 // hold. Code without a Context cannot open a transaction, so nothing it
 // does in between can break it. `what` names the call for the message.
-void BackingCall(Context &ctx, std::string_view what) {
-  ctx.checks->BackingCall(ctx, what);
+void BackingCall(
+    Context &ctx, std::string_view what,
+    absl::SourceLocation site = absl::SourceLocation::current()) {
+  ctx.checks->BackingCall(ctx, what, site);
 }
 
 // --- Helpers over the plain syscalls:: wrappers -----------------------------
