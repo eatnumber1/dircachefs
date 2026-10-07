@@ -512,6 +512,10 @@ qemu_cc_test(
     name = "dir_cache_fs_test",
     size = "small",
     timeout = "short",
+    # Under ASan it peaks at 268 MiB used (MEM peak_used=274516 KiB of
+    # total=374244 at -m 384, 2026-10-07): with the kernel's 18.5 MiB,
+    # 287 + 50% rounds up to 448 (test/qemu/README.md, "Guest memory").
+    asan_mem = 448,
     srcs = ["dir_cache_fs_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
     linkopts = DIR_CACHE_FS_TEST_WRAPS,
