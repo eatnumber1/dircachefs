@@ -715,8 +715,9 @@ Every `dcfs/BUILD.bazel` test target is one of these. It builds:
   (`fully_static_link`) so it needs no dynamic loader in the initramfs.
   Under `--config=asan`/`--config=ubsan` it's linked dynamically instead
   (glibc can't be fully statically linked with a sanitizer runtime; see
-  "Sanitizers" below), and the resulting initramfs carries its `ldd(1)`
-  closure.
+  "Sanitizers" below), and the resulting initramfs carries its shared
+  libraries and loader, copied from the pinned toolchain's glibc sysroot
+  (`@dcfs_llvm//sysroot`, step 7.1b), not the host's.
 - `foo_test.cpio.gz`: a per-test initramfs (`scripts/mkinitramfs.sh
   --unit`) with busybox, `guest/init`, the test binary at `/test/run`, any
   `data =` files under `/test/data/` (`TEST_SRCDIR`), and a `/test/args`
@@ -765,7 +766,8 @@ works the same way: `test/qemu:asan_build`/`test/qemu:ubsan_build`
 by `.bazelrc`'s `build:asan`/`build:ubsan`) tell `qemu_cc_test` to skip the
 `fully_static_link` feature, and `mkinitramfs.sh` to copy the dynamically
 linked test binary's shared-library closure (and ELF interpreter) into the
-initramfs instead. ASan needs `ptrace` to symbolize leak reports, which the
+initramfs instead, from the toolchain's glibc sysroot (`DCFS_SYSROOT` and
+`DCFS_READELF`, set by the genrules through `guest_libs.bzl`). ASan needs `ptrace` to symbolize leak reports, which the
 guest doesn't have configured; `guest/init` sets
 `ASAN_OPTIONS=detect_leaks=0` (only if unset) so that limitation doesn't
 fail every ASan build.

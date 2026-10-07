@@ -5,6 +5,7 @@ load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
+load(":guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
 load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 
 # Guest memory classes (step 6.2), in MiB; the measurements behind each are in
@@ -29,8 +30,8 @@ exports_files([
 # build:ubsan). qemu_cc_test uses these to skip the fully_static_link
 # feature under a sanitizer: glibc cannot be fully statically linked with
 # ASan (and in practice UBSan's runtime has the same problem), so those
-# builds link dynamically and mkinitramfs.sh copies the ldd(1) closure
-# into the initramfs instead.
+# builds link dynamically and mkinitramfs.sh copies the libraries and the
+# loader from the toolchain's glibc sysroot into the initramfs instead.
 config_setting(
     name = "asan_build",
     values = {"define": "dcfs_sanitizer=asan"},
@@ -83,14 +84,14 @@ config_setting(
     ],
     outs = [name + ".cpio.gz"],
     testonly = 1,
-    cmd = "$(location scripts/mkinitramfs.sh) $@ " +
+    cmd = GUEST_LIBS_ENV + " $(location scripts/mkinitramfs.sh) $@ " +
           "$(location @alpine_busybox//:root/bin/busybox.static) " +
           "$(location " + dcfs + ") " +
           "$(location //tools:fhtest) " +
           "$(location //tools:testutil) " +
           "$(location guest/init) " +
           "$(SRCS)",
-    tools = ["scripts/mkinitramfs.sh"],
+    tools = ["scripts/mkinitramfs.sh"] + GUEST_LIBS_TOOLS,
 ) for name, dcfs in [
     ("initramfs", "//dcfs:main_static"),
     ("initramfs_checked", "//dcfs:main_static_checked"),
@@ -750,12 +751,24 @@ sh_test(
     args = [
         "$(location scripts/mkinitramfs.sh)",
         "$(location @alpine_busybox//:root/bin/busybox.static)",
+        "$(location @dcfs_llvm//:bin/llvm-readelf)",
+        "$(location @dcfs_llvm//sysroot)",
+        "$(location :dynamic_fixture)",
     ],
     data = [
+        ":dynamic_fixture",
         "scripts/mkinitramfs.sh",
         "@alpine_busybox//:root/bin/busybox.static",
-    ],
+    ] + GUEST_LIBS_TOOLS,
     target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# A dynamically linked program (the toolchain links dynamically unless a
+# target asks for fully_static_link), for mkinitramfs_test.
+cc_binary(
+    name = "dynamic_fixture",
+    testonly = 1,
+    srcs = ["dynamic_fixture.c"],
 )
 
 # R3 (L5): run-qemu.sh formats the scratch disks with the pinned tools it is
@@ -871,14 +884,14 @@ genrule(
     ] + glob(["guest/*.sh"]),
     outs = ["initramfs_traced.cpio.gz"],
     testonly = 1,
-    cmd = "$(location scripts/mkinitramfs.sh) $@ " +
+    cmd = GUEST_LIBS_ENV + " $(location scripts/mkinitramfs.sh) $@ " +
           "$(location @alpine_busybox//:root/bin/busybox.static) " +
           "$(location //dcfs:main_static_traced) " +
           "$(location //tools:fhtest) " +
           "$(location //tools:testutil) " +
           "$(location guest/init) " +
           "$(SRCS)",
-    tools = ["scripts/mkinitramfs.sh"],
+    tools = ["scripts/mkinitramfs.sh"] + GUEST_LIBS_TOOLS,
 )
 
 # Each run's traces may end only at the cuts listed (steps the model does

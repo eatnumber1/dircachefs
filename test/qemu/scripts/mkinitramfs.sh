@@ -29,32 +29,80 @@
 #
 # In both modes, any dynamically linked binary (dcfs/fhtest/testutil/the
 # test binary; normal builds are fully static -- see qemu_cc_test.bzl -- but
-# ASan/UBSan builds cannot be) has its ldd(1) closure and ELF interpreter
-# copied into the initramfs at the same absolute paths, so the dynamic
-# loader finds them with no rpath surgery. This is a no-op for a static
-# binary: ldd exits nonzero and prints nothing matched by the pattern
-# below.
+# ASan/UBSan builds cannot be) gets its ELF interpreter and the shared
+# libraries it needs (its DT_NEEDED entries, and theirs) copied into the
+# initramfs at their paths in the glibc sysroot of the pinned toolchain, so
+# the guest runs the glibc the binary was built against and the host's
+# libraries are never used (step 7.1b). The sysroot and the readelf to read
+# the ELF files with are named by the environment:
+#
+#   DCFS_SYSROOT   the sysroot directory (@dcfs_llvm//sysroot)
+#   DCFS_READELF   llvm-readelf of the pinned toolchain
+#
+# Both are required; a static binary needs neither, but the check is cheap
+# and a build that forgot them must not pass silently.
 set -eu
 
-# Copies $1 (a binary already installed in $ROOT) plus every shared object
-# ldd(1) reports for it -- including the ELF interpreter -- into $ROOT at
-# their original absolute host paths.
+: "${DCFS_SYSROOT:?mkinitramfs.sh: DCFS_SYSROOT is not set}"
+: "${DCFS_READELF:?mkinitramfs.sh: DCFS_READELF is not set}"
+case "$DCFS_SYSROOT" in
+/*) ;;
+*) DCFS_SYSROOT="$(pwd)/$DCFS_SYSROOT" ;;
+esac
+case "$DCFS_READELF" in
+/*) ;;
+*) DCFS_READELF="$(pwd)/$DCFS_READELF" ;;
+esac
+
+# Prints the DT_NEEDED sonames of the ELF file $1 (nothing for a static or
+# non-ELF file) and, after them, its interpreter prefixed with "interp:".
+elf_needs() {
+	"$DCFS_READELF" --elf-output-style=GNU --dynamic "$1" 2>/dev/null |
+		sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p'
+	"$DCFS_READELF" --elf-output-style=GNU --program-headers "$1" 2>/dev/null |
+		sed -n 's/.*Requesting program interpreter: \(.*\)\]/interp:\1/p'
+}
+
+# Copies the sysroot's file $1 (a path in the sysroot, symlinks followed)
+# into $ROOT at the same path.
+install_from_sysroot() {
+	dest="$ROOT$1"
+	[ -f "$dest" ] && return 0
+	mkdir -p "$(dirname "$dest")"
+	cp -L "$DCFS_SYSROOT$1" "$dest"
+}
+
+# Copies the interpreter and the shared libraries of $1 (a binary already
+# installed in $ROOT), and of those libraries in turn, from the sysroot.
 copy_deps() {
-	bin=$1
-	ldd "$bin" 2>/dev/null | while read -r line; do
-		path=$(echo "$line" | awk '
-			$2 == "=>" && $3 ~ /^\// { print $3; next }
-			$1 ~ /^\// { print $1 }
-		')
-		case "$path" in
-		/*)
-			dest="$ROOT$path"
-			[ -f "$dest" ] && continue
-			mkdir -p "$(dirname "$dest")"
-			cp "$path" "$dest"
+	pending=$(elf_needs "$1")
+	seen=""
+	while [ -n "$pending" ]; do
+		item=$(echo "$pending" | sed -n 1p)
+		pending=$(echo "$pending" | sed 1d)
+		[ -n "$item" ] || continue
+		case " $seen " in
+		*" $item "*) continue ;;
+		esac
+		seen="$seen $item"
+		case "$item" in
+		interp:*)
+			install_from_sysroot "${item#interp:}"
+			;;
+		*)
+			for dir in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu; do
+				if [ -f "$DCFS_SYSROOT$dir/$item" ]; then
+					install_from_sysroot "$dir/$item"
+					pending="$pending
+$(elf_needs "$DCFS_SYSROOT$dir/$item" | sed '/^interp:/d')"
+					continue 2
+				fi
+			done
+			echo "mkinitramfs.sh: $1 needs $item, not in the sysroot" >&2
+			exit 1
 			;;
 		esac
-	done || true
+	done
 }
 
 OUT_ARG=$1

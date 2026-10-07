@@ -1344,8 +1344,9 @@ qemu_cc_test(
 # qemu_cc_test.bzl's identical select(), whose own comment explains why:
 # glibc cannot be fully statically linked with ASan, and in practice
 # UBSan's runtime has the same problem); test/qemu/scripts/mkinitramfs.sh's
-# copy_deps() then copies its ldd(1) closure into the e2e initramfs, same
-# as it already does for any dynamically linked qemu_cc_test binary.
+# copy_deps() then copies its libraries and loader from the toolchain's glibc
+# sysroot into the e2e initramfs, same as it already does for any
+# dynamically linked qemu_cc_test binary.
 cc_binary(
     name = "main_static",
     srcs = ["main.cc"],

@@ -28,13 +28,15 @@ with ASan (or UBSan's runtime, which has the same problem in practice), so
 under `--config=asan`/`--config=ubsan` (detected via the sanitizer
 config_settings below, set by --define=dcfs_sanitizer=... in .bazelrc)
 the binary is linked dynamically instead, and mkinitramfs.sh copies its
-ldd(1) closure (and the ELF interpreter) into the initramfs at the same
-absolute paths so the dynamic loader finds them with no rpath surgery.
+shared libraries and the ELF interpreter from the toolchain's glibc sysroot
+(step 7.1b: the host's libraries are not used) into the initramfs at their
+sysroot paths, so the dynamic loader finds them with no rpath surgery.
 """
 
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//test/qemu:coverage.bzl", "coverage_args", "coverage_data")
+load("//test/qemu:guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
 load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 load("//test/qemu:qemu_test.bzl", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
 
@@ -133,6 +135,7 @@ def qemu_cc_test(
         ] + data,
         outs = [initramfs_out],
         cmd = " ".join([
+            GUEST_LIBS_ENV,
             "$(location //test/qemu:scripts/mkinitramfs.sh)",
             "--unit",
             "$@",
@@ -142,7 +145,7 @@ def qemu_cc_test(
             disk0,
             "'" + " ".join(args) + "'",
         ] + data_pairs),
-        tools = ["//test/qemu:scripts/mkinitramfs.sh"],
+        tools = ["//test/qemu:scripts/mkinitramfs.sh"] + GUEST_LIBS_TOOLS,
     )
 
     # A disk-spec with mke2fs options has spaces: Bazel shell-tokenizes `args`.

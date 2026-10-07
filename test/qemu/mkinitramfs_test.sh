@@ -9,11 +9,20 @@
 #   - a failing cpio fails the script: with a fake busybox whose cpio exits 1
 #     the script exits nonzero and leaves no output file.
 #
-# Usage: mkinitramfs_test.sh <mkinitramfs.sh> <busybox>
+#   - a dynamically linked binary gets its interpreter and libraries from the
+#     toolchain's sysroot (step 7.1b), not from the host: the archive's libc is
+#     the sysroot's file, byte for byte.
+#
+# Usage: mkinitramfs_test.sh <mkinitramfs.sh> <busybox> <llvm-readelf> \
+#            <sysroot> <dynamically linked binary>
 set -eu
 
 MKINITRAMFS=$(readlink -f "$1")
 BUSYBOX=$(readlink -f "$2")
+DCFS_READELF=$(readlink -f "$3")
+DCFS_SYSROOT=$(readlink -f "$4")
+DYNAMIC=$(readlink -f "$5")
+export DCFS_READELF DCFS_SYSROOT
 SH=$(command -v sh)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -25,7 +34,7 @@ fail() {
 
 # A PATH with the tools mkinitramfs.sh uses, and no cpio.
 mkdir "$WORK/tools"
-for t in mktemp rm mkdir cp ln chmod find gzip ldd awk dirname basename cat sed; do
+for t in mktemp rm mkdir cp ln chmod find gzip dirname basename cat sed; do
 	p=$(command -v "$t") || fail "host has no $t"
 	ln -s "$p" "$WORK/tools/$t"
 done
@@ -33,7 +42,7 @@ if PATH="$WORK/tools" command -v cpio >/dev/null 2>&1; then
 	fail "cpio is still on the restricted PATH"
 fi
 
-# Inputs: a non-ELF "binary" (ldd finds nothing to copy), an init, a guest script.
+# Inputs: a non-ELF "binary" (nothing to copy), an init, a guest script.
 : >"$WORK/init"
 printf '#!/bin/sh\n' >"$WORK/testbin"
 printf '#!/bin/sh\n' >"$WORK/names.sh"
@@ -94,4 +103,19 @@ for mode in unit e2e; do
 	[ ! -s "$WORK/bad.cpio.gz" ] || fail "$mode: an initramfs was left behind after cpio failed"
 done
 echo "PASS: a failing cpio fails the script and leaves no initramfs"
+
+# --- a dynamic binary's libraries come from the sysroot ----------------------
+rm -f "$WORK/dyn.cpio.gz"
+(cd "$WORK" && cp "$BUSYBOX" busybox && PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit \
+	dyn.cpio.gz ./busybox "$WORK/init" "$DYNAMIC" - "") >"$WORK/dyn.out" 2>&1 ||
+	fail "--unit with a dynamic binary: $(cat "$WORK/dyn.out")"
+want "$WORK/dyn.cpio.gz" lib/x86_64-linux-gnu/libc.so.6
+want "$WORK/dyn.cpio.gz" lib64/ld-linux-x86-64.so.2
+mkdir "$WORK/dyn"
+(cd "$WORK/dyn" && gzip -dc "$WORK/dyn.cpio.gz" | "$BUSYBOX" cpio -id 2>/dev/null)
+cmp "$WORK/dyn/lib/x86_64-linux-gnu/libc.so.6" "$DCFS_SYSROOT/lib/x86_64-linux-gnu/libc.so.6" ||
+	fail "the archive's libc.so.6 is not the sysroot's"
+cmp "$WORK/dyn/lib64/ld-linux-x86-64.so.2" "$DCFS_SYSROOT/lib64/ld-linux-x86-64.so.2" ||
+	fail "the archive's interpreter is not the sysroot's"
+echo "PASS: a dynamic binary's libc and interpreter are the sysroot's"
 echo "PASS: all checks passed"
