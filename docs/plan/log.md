@@ -1451,3 +1451,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   12.11: no event for the end of an attribute change. Note for lane-5's merge: the mutation
   step sits in `full`, which lane-5 shards: it should become its own job (lane-4 after lane-5
   lands).
+- USAGE LIMIT (2026-10-08): orchestrator cut off; agents keep running and report when resumed.
+  State: main 048ebb9. In flight: lane-1 12.6/12.7 (then 12.11); lane-2 Phase 22 review fixes
+  (INIT exit code, re-resolve, drain, parameterized checkpoint tests, large TLC, rebase) ->
+  review-light merge -> Phase 8 cleanup (default_permissions required, fail-closed Access,
+  deletions, dcfs-over-dcfs variant); lane-3 26.6 (runtime to report) -> 26.4b; lane-4 8.2b ->
+  move the per-push mutation step out of the sharded full once lane-5 lands; lane-5 step-7.4b
+  (CI shards, osv cache fix, 6.4a-c, 8.3) rebasing + full tiers -> MERGE FIRST, then russ pushes;
+  lane-6 7.1b (interim status asked after 3 h of silence). Needs russ: push after lane-5 merges;
+  linux-ext4 report; AGENTS.md cancellation wording at the Phase 22 merge.
