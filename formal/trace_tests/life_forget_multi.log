@@ -1,0 +1,5 @@
+DCFS-LIFE t 2 {"i":3,"c":"LifetimeChanged","ev":"begin","st":{"lk":0,"rec":false,"wr":"no","refs":0,"row":true,"nl0":false}}
+DCFS-LIFE t 2 {"i":4,"c":"LifetimeChanged","ev":"lookup","via":"lookup","st":{"lk":1,"rec":false,"wr":"no","refs":0,"row":true,"nl0":false}}
+DCFS-LIFE t 2 {"i":6,"c":"LifetimeChanged","ev":"lookup","via":"lookup","st":{"lk":2,"rec":false,"wr":"no","refs":0,"row":true,"nl0":false}}
+DCFS-LIFE t 2 {"i":7,"c":"LifetimeChanged","ev":"removed","held":true,"st":{"lk":2,"rec":true,"wr":"no","refs":0,"row":false,"nl0":false}}
+DCFS-LIFE t 2 {"i":9,"c":"LifetimeChanged","ev":"forget","n":2,"batch":true,"st":{"lk":0,"rec":false,"wr":"no","refs":0,"row":false,"nl0":false}}

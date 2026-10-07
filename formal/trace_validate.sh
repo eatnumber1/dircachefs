@@ -5,7 +5,7 @@
 #
 #   trace_validate.sh --java JAVA --cp CLASSPATH --spec-dir DIR --lock BOOL
 #       [--allow-cuts CATS] [--root TRACE --root-cuts CATS]
-#       [--expect-reject TRACE ERE] [--reval-cfg CFG]
+#       [--expect-reject TRACE ERE] [--reval-cfg CFG] [--life-cfg CFG]
 #       -- RUN_QEMU [RUN_QEMU_ARGS...]
 #   trace_validate.sh ... --log LOG
 #
@@ -13,8 +13,9 @@
 # trace lines) instead of booting a guest: formal/trace_tests/ uses it to
 # test Trace.tla itself on hand-written traces.
 #
-# DIR holds Trace.tla, Trace.cfg and dcfs.tla, and RevalTrace.tla,
-# RevalTrace.cfg and reval.tla. --lock says whether the run kept the
+# DIR holds Trace.tla, Trace.cfg and dcfs.tla, RevalTrace.tla,
+# RevalTrace.cfg and reval.tla, and LifetimeTrace.tla, LifetimeTrace.cfg and
+# lifetime.tla. --lock says whether the run kept the
 # kernel's directory lock (the model's KernelDirLock).
 #
 # Files' traces (formal/reval.tla): the lines "DCFS-REVAL <trace> <file>
@@ -22,6 +23,11 @@
 # RevalTrace.tla with RevalTrace.cfg, or CFG if --reval-cfg names one (a
 # known-bug variant as the model); they are named "reval/<trace>@<file>"
 # below, in --expect-reject and in the cuts.
+#
+# Nodeids' traces (formal/lifetime.tla): the lines "DCFS-LIFE <trace>
+# <nodeid> <json>" are one trace per (trace, nodeid) pair, checked against
+# LifetimeTrace.tla with LifetimeTrace.cfg, or CFG if --life-cfg names one;
+# they are named "life/<trace>@<nodeid>".
 #
 # A trace may end with a "cut": the recorder stops a directory's trace at a
 # step the model does not have, giving "<category>: <detail>". Only the
@@ -51,6 +57,7 @@ lock=""
 reject_trace=""
 reject_ere=""
 reval_cfg=""
+life_cfg=""
 allow_cuts=""
 root=""
 root_cuts=""
@@ -67,6 +74,7 @@ while [[ $# -gt 0 ]]; do
     --root-cuts) root_cuts="$2"; shift 2 ;;
     --log) log="$2"; shift 2 ;;
     --reval-cfg) reval_cfg="$2"; shift 2 ;;
+    --life-cfg) life_cfg="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "trace_validate.sh: unknown argument $1" >&2; exit 2 ;;
   esac
@@ -74,7 +82,7 @@ done
 
 work="${TEST_TMPDIR:?}/trace"
 rm -rf "$work"
-mkdir -p "$work/traces" "$work/reval" "$work/tlc" "$work/tmp"
+mkdir -p "$work/traces" "$work/reval" "$work/life" "$work/tlc" "$work/tmp"
 
 # --- the guest run ----------------------------------------------------------
 if [[ -n "$log" ]]; then
@@ -156,9 +164,31 @@ awk -v dir="$work/reval" -v ends="$work/traces/ends.tsv" '
     print json > file[key]
   }' "$work/reval_lines"
 
+# The nodeids' traces: from a nodeid's begin line on, every line.
+tr -d '\r' <"$serial" | grep -a '^DCFS-LIFE ' >"$work/life_lines" || true
+echo "trace_validate.sh: $(wc -l <"$work/life_lines") nodeid trace lines"
+awk -v dir="$work/life" '
+  function safe(s) { gsub(/[^A-Za-z0-9._-]/, "_", s); return s }
+  {
+    key = $2 "@" $3
+    json = $0
+    sub(/^DCFS-LIFE [^ ]+ [^ ]+ /, "", json)
+    if (json ~ /"ev":"begin"/) {
+      if (!(key in file)) {
+        file[key] = dir "/" safe($2) "@" $3 ".jsonl"
+        print json > file[key]
+      }
+      next
+    }
+    if (!(key in file)) next
+    print json > file[key]
+  }' "$work/life_lines"
+
 cp "$spec_dir/Trace.tla" "$spec_dir/Trace.cfg" "$spec_dir/dcfs.tla" \
-  "$spec_dir/RevalTrace.tla" "$spec_dir/reval.tla" "$work/tlc/"
+  "$spec_dir/RevalTrace.tla" "$spec_dir/reval.tla" \
+  "$spec_dir/LifetimeTrace.tla" "$spec_dir/lifetime.tla" "$work/tlc/"
 cp "${reval_cfg:-$spec_dir/RevalTrace.cfg}" "$work/tlc/RevalTrace.cfg"
+cp "${life_cfg:-$spec_dir/LifetimeTrace.cfg}" "$work/tlc/LifetimeTrace.cfg"
 
 valid=0
 invalid=0
@@ -233,6 +263,10 @@ done
 for f in "$work"/reval/*.jsonl; do
   [[ -e "$f" ]] || continue
   check_trace "$f" "reval/$(basename "$f" .jsonl)" RevalTrace
+done
+for f in "$work"/life/*.jsonl; do
+  [[ -e "$f" ]] || continue
+  check_trace "$f" "life/$(basename "$f" .jsonl)" LifetimeTrace
 done
 
 # The cuts: each must be of a category this run allows.

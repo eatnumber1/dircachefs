@@ -252,11 +252,14 @@ LIFETIME_FINDINGS = {
 # //test/qemu, next to the guests that record the traces).
 exports_files(
     [
+        "LifetimeTrace.cfg",
+        "LifetimeTrace.tla",
         "RevalTrace.cfg",
         "RevalTrace.tla",
         "Trace.cfg",
         "Trace.tla",
         "dcfs.tla",
+        "lifetime.tla",
         "reval.tla",
         "trace_validate.sh",
     ],
@@ -398,4 +401,63 @@ REVAL_TRACE_TESTS = {
         reval_cfg = "trace_tests/%s.cfg" % cfg if cfg else None,
     )
     for test, (log, cfg, event) in REVAL_TRACE_TESTS.items()
+]
+
+# LifetimeTrace.tla's own tests: nodeids' traces recorded by
+# //dcfs:dir_cache_fs_trace_test (trace_tests/life_*.log, one nodeid's lines
+# of one harness test each), checked against lifetime.tla and against its
+# known-bug variants as the model (trace_tests/life_<bug>.cfg). Each entry:
+# the log, the variant (None: the real model), and the event the first
+# rejection must be at (None: the trace must be valid).
+LIFE_TRACE_TESTS = {
+    # NonFinalForgetKeepsTheHeldDescriptor: two lookups, a writable open and
+    # its release (a held descriptor), a FORGET of one lookup, then of the
+    # other: valid; the variant whose non-final FORGET ends the written_
+    # entry is rejected at the first FORGET (the code still holds it).
+    "life_nonfinal_forget": ("life_nonfinal_forget", None, None),
+    "life_nonfinal_forget_drops_held": (
+        "life_nonfinal_forget",
+        "life_nonfinal_forget_drops_held",
+        "\"ev\":\"forget\",\"n\":1,.*\"lk\":1,.*\"wr\":\"held\"",
+    ),
+    # RemovedFileIsServedUntilItsLastForget: two lookups, an unlink (a
+    # removed record), a FORGET of one, then the other: valid; the variant
+    # whose non-final FORGET ends the record is rejected at the first.
+    "life_removed": ("life_removed", None, None),
+    "life_removed_drops_rec": (
+        "life_removed",
+        "life_nonfinal_forget_drops_rec",
+        "\"ev\":\"forget\",\"n\":1,.*\"rec\":true",
+    ),
+    # ForgetMultiTakesOffEachEntrysCount (the unlinked file's nodeid): two
+    # lookups, an unlink, a FORGET_MULTI entry of 2: valid; the variant that
+    # takes one off per entry is rejected there.
+    "life_forget_multi": ("life_forget_multi", None, None),
+    "life_forget_multi_counted_as_one": (
+        "life_forget_multi",
+        "life_forget_multi_counted_as_one",
+        "\"ev\":\"forget\",\"n\":2,\"batch\":true",
+    ),
+    # TmpfileRowGoesAtTheStartAfterACrash: a TMPFILE, a crash, the start
+    # sweeps its row: valid; without the sweep (before step 23.7) rejected
+    # at the start.
+    "life_tmpfile_crash": ("life_tmpfile_crash", None, None),
+    "life_tmpfile_crash_no_sweep": (
+        "life_tmpfile_crash",
+        "life_tmpfile_row_survives_crash",
+        "\"ev\":\"start\"",
+    ),
+}
+
+[
+    tla_trace_log_test(
+        name = "trace_%s_test" % test,
+        size = "small",
+        timeout = "short",
+        expect_reject = "life/t@2" if event else "",
+        expect_reject_event = event or "",
+        life_cfg = "trace_tests/%s.cfg" % cfg if cfg else None,
+        log = "trace_tests/%s.log" % log,
+    )
+    for test, (log, cfg, event) in LIFE_TRACE_TESTS.items()
 ]

@@ -1,0 +1,4 @@
+DCFS-LIFE t 2 {"i":1,"c":"LifetimeChanged","ev":"begin","st":{"lk":0,"rec":false,"wr":"no","refs":0,"row":false,"nl0":false}}
+DCFS-LIFE t 2 {"i":2,"c":"LifetimeChanged","ev":"tmpfile","st":{"lk":1,"rec":false,"wr":"nofd","refs":1,"row":true,"nl0":true}}
+DCFS-LIFE t 2 {"i":3,"c":"RunStarting","ev":"crash","st":{"row":true,"nl0":true}}
+DCFS-LIFE t 2 {"i":4,"c":"RunStarted","ev":"start","st":{"row":false,"nl0":false}}
