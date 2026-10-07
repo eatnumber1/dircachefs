@@ -17,7 +17,9 @@ shell Bazel itself uses:
 
 - LLVM's own release tarball (clang, lld, libc++, compiler-rt, the tools),
   laid out as toolchains_llvm's `BUILD.llvm_repo` expects, so MODULE.bazel
-  hands the repository to toolchains_llvm as its `toolchain_root`.
+  hands the repository to toolchains_llvm as its `toolchain_root`. extract.py
+  leaves out the static libraries of LLVM, MLIR and flang, lldb and the tools
+  nothing here runs (9.7 of the 11.6 GB).
 - `sysroot/`: the target's glibc headers and static libraries and the Linux
   UAPI headers, merged from pinned Debian packages (a package of its own with
   a `sysroot` filegroup, which is the shape toolchains_llvm's `sysroot` takes).
@@ -34,6 +36,8 @@ See README.md for the pins and how to move them.
 """
 
 _BUILD_TEMPLATE = Label("@toolchains_llvm//toolchain:BUILD.llvm_repo.tpl")
+_PYTHON = Label("@python_3_12_x86_64-unknown-linux-gnu//:bin/python3")
+_EXTRACT = Label("//third_party/llvm:extract.py")
 
 def _deb_data_member(rctx, deb, work):
     rctx.extract(deb, output = work)
@@ -52,11 +56,22 @@ def _unpack_deb(rctx, url, sha256, index, output, strip_prefix = ""):
     rctx.delete(deb)
 
 def _llvm_distribution_impl(rctx):
-    rctx.download_and_extract(
-        rctx.attr.url,
-        sha256 = rctx.attr.sha256,
-        stripPrefix = rctx.attr.strip_prefix,
+    # extract.py leaves out what no build step uses (9.7 of the 11.6 GB).
+    rctx.download(rctx.attr.url, "llvm.tar.xz", sha256 = rctx.attr.sha256)
+    result = rctx.execute(
+        [
+            rctx.path(_PYTHON),
+            "-I",
+            rctx.path(_EXTRACT),
+            "llvm.tar.xz",
+            rctx.attr.strip_prefix,
+            ".",
+        ],
+        timeout = 3600,
     )
+    if result.return_code != 0:
+        fail("extracting the LLVM release: " + result.stderr)
+    rctx.delete("llvm.tar.xz")
     rctx.file("BUILD.bazel", rctx.read(_BUILD_TEMPLATE).format(
         LLVM_VERSION = rctx.attr.llvm_major_version,
     ))

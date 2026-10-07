@@ -39,7 +39,7 @@ LLVM:
   `https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/`,
   sha256
   `df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384`
-  (1.9 GB; 12 GB unpacked). The sha256 is the one in `toolchains_llvm`
+  (1.9 GB; 12 GB unpacked, 1.9 GB of it kept by `extract.py`). The sha256 is the one in `toolchains_llvm`
   1.11.1's release table (`toolchain/distributions/github.jsonc`); it was
   not computed here. Obtained 2026-10-06. The upstream commit of the release
   tag is `ca7933e47d3a3451d81e72ac174dcb5aa28b59d1` (`pins.json`'s
@@ -116,7 +116,10 @@ in `MODULE.bazel`. Keep `libc6` and `libc6-dev` at one version. Keep
 glibc requirement the build hosts meet (`objdump -T lib/*.so* | grep -o
 'GLIBC_[0-9.]*' | sort -uV | tail -1` in the unpacked repository). A new
 `libicu` soname changes the file names in `lib/`; nothing else names them.
-Changing any pin refetches the whole repository, the 12 GB unpack included.
+Changing any pin refetches the whole repository and unpacks the archive again
+(`extract.py` writes 1.9 of its 11.6 GB: 3.8 CPU minutes, 9.4 minutes of wall
+time at load 13 on a 4-core machine, dominated by decompressing the archive;
+writing all of it took 12 to 17 minutes at load 20).
 
 ## Upstream issue worth filing
 

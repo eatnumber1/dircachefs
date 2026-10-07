@@ -1,2 +1,5 @@
 # See README.md. The repository is @dcfs_llvm (llvm.bzl, MODULE.bazel).
-exports_files(["llvm.bzl"])
+exports_files([
+    "extract.py",
+    "llvm.bzl",
+])
