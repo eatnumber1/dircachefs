@@ -1,6 +1,7 @@
 # CI: the whole test suite, in three jobs of increasing size (the tiers of
 # test/qemu/README.md) and two sanitizer suites (`asan`, `ubsan`) that run in
-# parallel with the last tier, `full`. Every dcfs test, unit tests included,
+# parallel with the last tier, `full`; those three jobs are matrices of three
+# shards each (.github/ci/test.sh --shard=I/3). Every dcfs test, unit tests included,
 # boots the project's own kernel under QEMU as root; KVM is used when the runner has
 # it (public repositories' standard Linux runners do) and TCG otherwise
 # (.github/ci/prepare.sh, .github/ci/test.sh). Bazel builds everything the
@@ -267,10 +268,16 @@ jobs:
           key: ${{ steps.repocache.outputs.cache-primary-key }}
 
   full:
-    # Every test, every tier (the sanitizer suites are the jobs below, in
-    # parallel with this one).
+    # The large and enormous tiers (small and medium ran in `presubmit`), in three shards
+    # (.github/ci/test.sh --shard=I/3: a deterministic partition of the suite's
+    # test targets; the jobs run in parallel with each other and with the
+    # other suites).
     runs-on: ubuntu-24.04
-    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    timeout-minutes: 180
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -293,20 +300,23 @@ jobs:
           path: |
             ~/.cache/bazel-disk-cache
             ~/.cache/bazelisk
-          key: bazel-full-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          key: bazel-full-${{ matrix.shard }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
           restore-keys: |
-            bazel-full-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-full-${{ matrix.shard }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-full-${{ matrix.shard }}-
             bazel-full-
             bazel-
-      - name: Test (all tiers)
-        run: ./.github/ci/test.sh
+      - name: Test (shard ${{ matrix.shard }} of 3)
+        run: ./.github/ci/test.sh --sizes=large,enormous --shard=${{ matrix.shard }}/3
       - name: Mutation testing of the protocol code this push touched
         # Step 26.5b, the per-push bumper: only the functions of
         # tools/mutation/scope.txt whose lines the range touches, at most 30
         # mutants (a sample with a fixed seed beyond that); a mutant that
         # survives the small tier and trace validation fails the job: the
         # change needs a test. Survivors elsewhere are the weekly job's.
-        if: ${{ !cancelled() && github.event_name != 'workflow_dispatch' }}
+        # Only in shard 0 of `full`: once per push, not once per shard (it
+        # moves to a job of its own, step 26.5b's follow-up).
+        if: ${{ matrix.shard == 0 && !cancelled() && github.event_name != 'workflow_dispatch' }}
         timeout-minutes: 120
         run: >
           python3 tools/mutation/mutate.py changed
@@ -317,7 +327,7 @@ jobs:
           --survivors-out mutation-changed-survivors.txt
           --fail-on-survivor
       - name: Upload the mutation survivors
-        if: ${{ failure() }}
+        if: ${{ matrix.shard == 0 && failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mutation-changed
@@ -332,7 +342,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: test-logs-full
+          name: test-logs-full-${{ matrix.shard }}
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
@@ -351,10 +361,16 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
   asan:
-    # Every test, every tier, under AddressSanitizer (--config=asan). Its own job,
-    # in parallel with `full`, so neither job's time limit is the other's.
+    # Every tier under AddressSanitizer, in three shards
+    # (.github/ci/test.sh --shard=I/3: a deterministic partition of the suite's
+    # test targets; the jobs run in parallel with each other and with the
+    # other suites).
     runs-on: ubuntu-24.04
-    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    timeout-minutes: 180
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -375,13 +391,14 @@ jobs:
           path: |
             ~/.cache/bazel-disk-cache
             ~/.cache/bazelisk
-          key: bazel-asan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          key: bazel-asan-${{ matrix.shard }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
           restore-keys: |
-            bazel-asan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-asan-${{ matrix.shard }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-asan-${{ matrix.shard }}-
             bazel-asan-
             bazel-
-      - name: Test (AddressSanitizer)
-        run: ./.github/ci/test.sh --config=asan
+      - name: Test (shard ${{ matrix.shard }} of 3)
+        run: ./.github/ci/test.sh --config=asan --shard=${{ matrix.shard }}/3
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
@@ -389,7 +406,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: test-logs-asan
+          name: test-logs-asan-${{ matrix.shard }}
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
@@ -408,10 +425,16 @@ jobs:
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
   ubsan:
-    # Every test, every tier, under UndefinedBehaviorSanitizer (--config=ubsan). Its own job,
-    # in parallel with `full`, so neither job's time limit is the other's.
+    # Every tier under UndefinedBehaviorSanitizer, in three shards
+    # (.github/ci/test.sh --shard=I/3: a deterministic partition of the suite's
+    # test targets; the jobs run in parallel with each other and with the
+    # other suites).
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    timeout-minutes: 180
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -432,13 +455,14 @@ jobs:
           path: |
             ~/.cache/bazel-disk-cache
             ~/.cache/bazelisk
-          key: bazel-ubsan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          key: bazel-ubsan-${{ matrix.shard }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
           restore-keys: |
-            bazel-ubsan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-ubsan-${{ matrix.shard }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-ubsan-${{ matrix.shard }}-
             bazel-ubsan-
             bazel-
-      - name: Test (UndefinedBehaviorSanitizer)
-        run: ./.github/ci/test.sh --config=ubsan
+      - name: Test (shard ${{ matrix.shard }} of 3)
+        run: ./.github/ci/test.sh --config=ubsan --shard=${{ matrix.shard }}/3
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
@@ -446,7 +470,7 @@ jobs:
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: test-logs-ubsan
+          name: test-logs-ubsan-${{ matrix.shard }}
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache
@@ -474,12 +498,27 @@ jobs:
     # the one of the action pinned below (its image,
     # ghcr.io/google/osv-scanner-action:v2.6.0). Fails on any shipped finding
     # that osv-scanner.toml does not ignore, and on an expired ignore.
+    #
+    # The repository cache (what the test jobs download: the Alpine packages
+    # among them) is restored read-only, like theirs but never saved from
+    # here: a cold runner fetches the five Alpine repositories in about a
+    # minute (measured with empty output base and caches, 2026-10-08: fetch
+    # 63 s, cquery 3 s; this sequence does not fetch the C++ toolchain), but
+    # the limit is 45 minutes for what a slow mirror costs (a run was
+    # cancelled at the former 20).
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (Bazelisk, which fetches the Alpine packages)
         run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache (read-only)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
       - name: Check ignores and pinned commits, generate the SBOMs and git roots
         run: ./.github/ci/osv.sh
       - name: Scanner self-check (libfuse 3.2.0 must be found, CVE-2018-10906)

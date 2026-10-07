@@ -54,4 +54,18 @@ fi
   echo "FAIL: wrong subject named: ${out}" >&2
   exit 1
 }
+
+# --stdin-log carries a hash per subject, and the failure names the hash
+# of the offending commit and only that one.
+if out=$(printf '%s\t%s\n' abc1234 "26.8: fine" def5678 "N4: review finding" 0a1b2c3 "plan: fine" |
+  "${script}" --stdin-log 2>&1); then
+  echo "FAIL: a bad subject in a log passed" >&2
+  exit 1
+fi
+[[ "${out}" == *"commit def5678"* && "${out}" == *"-> N4: review finding"* &&
+  "${out}" != *abc1234* && "${out}" != *0a1b2c3* ]] || {
+  echo "FAIL: wrong hash or subject named: ${out}" >&2
+  exit 1
+}
+printf '%s\t%s\n' abc1234 "26.8: fine" | "${script}" --stdin-log
 echo "PASS"

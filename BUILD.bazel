@@ -8,4 +8,5 @@ exports_files([
     "osv-scanner.toml",
     ".github/ci/prepare.sh",
     ".github/ci/commit_subjects.sh",  # //tools:commit_subjects_test (26.13)
+    ".github/ci/shard.sh",  # //tools:shard_test (7.4b)
 ])

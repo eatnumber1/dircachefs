@@ -265,6 +265,17 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Self-check of .github/ci/shard.sh (step 7.4b), which deals the suite's test
+# targets out to the CI shards: a partition, stable, size-balanced.
+sh_test(
+    name = "shard_test",
+    size = "small",
+    srcs = ["shard_test.sh"],
+    args = ["$(location //:.github/ci/shard.sh)"],
+    data = ["//:.github/ci/shard.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
 # Every syscall goes through dcfs/syscalls.h (docs/style.md 1.5): no raw libc
 # call outside dcfs/syscalls.cc in any C++ file. The finder's own unit tests
 # are one target; the scan of the tree (dcfs/, dcfs/testonly/, bench/) fails

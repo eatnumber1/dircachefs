@@ -398,24 +398,35 @@ equal to, within tolerance of and above a canned baseline.
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs the whole suite on GitHub Actions
-(`ubuntu-24.04` runners) in five jobs, the tiers of `test/qemu/README.md` and
+(`ubuntu-24.04` runners) in the jobs below, the tiers of `test/qemu/README.md` and
 the two sanitizer suites:
 
 | Job | Runs | Needs |
 |---|---|---|
 | `fast` | `bazel test --config=fast //...` (small tests) | |
 | `presubmit` | `bazel test --config=presubmit //...` (small and medium) | `fast` |
-| `full` | `bazel test //...` (every tier, pjdfstest on all three filesystems) | `presubmit` |
-| `asan` | `bazel test --config=asan //...` (every tier) | `presubmit` |
-| `ubsan` | `bazel test --config=ubsan //...` (every tier) | `presubmit` |
+| `full` | the large and enormous tests (pjdfstest on all three filesystems), in 3 shards | `presubmit` |
+| `asan` | `bazel test --config=asan` over every tier, in 3 shards | `presubmit` |
+| `ubsan` | `bazel test --config=ubsan` over every tier, in 3 shards | `presubmit` |
 
-`full`, `asan` and `ubsan` run in parallel, each on its own runner with its
-own cache key and time limit (350, 300 and 240 minutes); one suite's length
-no longer bounds the others. Expected wall times with KVM and a warm cache
-(measured on a shared 4-core machine at two test jobs): `full` about 70
-minutes (Phase 5.2's `act` run), `ubsan` about 85 minutes (22 small, 12
-medium, 52 large and enormous), `asan` not measured (its guests are bigger
-and its binaries slower, so budget more); a cold cache adds the build (about an hour).
+`full`, `asan` and `ubsan` run in parallel, nine runners in all, each with its
+own cache key and a 180-minute limit, so no suite's length bounds the others.
+A shard is a deterministic partition of the suite's test targets
+(`.github/ci/test.sh --shard=I/N`, dealt out by `.github/ci/shard.sh` over
+the sorted list, size by size, so each shard gets its share of the slow
+tests; `//tools:shard_test`), passed to Bazel as explicit targets, so the
+test-result cache applies per shard. The sanitizer shards skip the host-only
+tests (`HOST_ONLY_COMPATIBLE`, `test/qemu/README.md`), which leaves 126 of
+the 226 test targets, 42 per shard. `full`'s 24 large and enormous targets
+are 8 per shard (small and medium are `presubmit`'s). Expected wall time per
+shard, from local runs on a shared 4-core machine at two test jobs: ubsan
+took 22 min for the small tier, 12 for medium and 52 for large and
+enormous (86 min, of which the build was about 10-15), so a shard is about
+35 min of tests plus the sanitizer build; the plain large and enormous
+tiers took 35 min on the first GitHub runs, so a `full` shard is about
+12 min plus the plain build (already cached by `presubmit`); `asan` was not
+measured, budget the ubsan figure and a half again. Each shard uploads
+`test-logs-<job>-<shard>` on failure.
 
 - **Caches.** Bazel's disk cache, repository cache and Bazelisk's download
   are restored and saved with `actions/cache`, even when tests fail (the
