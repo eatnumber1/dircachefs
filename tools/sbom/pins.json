@@ -25,6 +25,7 @@
     "rules_distroless": {"purl": "pkg:github/bazel-contrib/rules_distroless", "kind": "build-rules"},
     "rules_java": {"purl": "pkg:github/bazelbuild/rules_java", "kind": "build-rules"},
     "rules_python": {"purl": "pkg:github/bazel-contrib/rules_python", "kind": "build-rules"},
+    "platforms": {"purl": "pkg:github/bazelbuild/platforms", "kind": "build-rules"},
     "toolchains_llvm": {"purl": "pkg:github/bazel-contrib/toolchains_llvm", "kind": "build-rules"}
   },
   "repository": {
