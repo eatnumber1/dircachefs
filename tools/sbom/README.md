@@ -61,7 +61,7 @@ What goes in (a pin missing from this list fails `//tools/sbom:sbom_test`):
 | `http_archive`, `http_file` in `MODULE.bazel` | version from `strip_prefix` or the URL | per `pins.json` |
 | `third_party/debian/debs.lock` | every `.deb`, under its **source package** name | `pkg:deb/debian/<source>@<version>?distro=bookworm` |
 | `.github/ci/prepare.sh` | Bazelisk | `pkg:github/bazelbuild/bazelisk` |
-| each `alpine_package` repository's `resolved.json` | every package the fetch took (the kernel, QEMU, the filesystem tools, busybox), under its **origin** package | `pkg:apk/alpine/<origin>@<version>?distro=alpine-<release>` |
+| each `alpine_package` repository's `resolved.json` | every package the fetch took (the kernel, QEMU, the filesystem tools, busybox, strace), under its **origin** package | `pkg:apk/alpine/<origin>@<version>?distro=alpine-<release>` |
 
 Only the Debian and Alpine entries are matched by OSV; the rest are carried
 so the SBOM is complete.
