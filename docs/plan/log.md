@@ -981,3 +981,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Generalizing before merge: reclaim counters in every MEM line + run-qemu WARNING +
   `require_no_reclaim` in idle/release_leak/destroy; guest timeout from Bazel's TEST_TIMEOUT.
   Lesson for 6.2's rule: a sizing run must show reclaim_scans=0.
+- 26.1 merged (d5b6607): six self-checks that execute the real gates (lib.sh require_commands;
+  pjdfstest's sanity check refactored into guest/pjdfstest_lib.sh and fed empty/garbled/sabotaged
+  prove output; the two man tests as subprocesses; busybox_test.sh over a fake busybox; the
+  rootfs invariant's header_problems over a tampered synthetic tar), each shown failing with its
+  gate disabled; README "Gates and their self-checks" table; the old copies moved out of guest/
+  (the initramfs glob would have shipped them). fast 110/110, pjdfstest ext4 shards green.
