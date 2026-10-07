@@ -1036,3 +1036,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   25/25; raw_syscalls_test now an untagged per-file ratchet (baseline 301 sites in 21 files; a
   rising count fails). Merge pending: rebase conflicts with 26.13's pjdfstest README; handed to
   the lane agent with a rerun against the new 26.x gates.
+- 26.4 merged (lane-3): budgets per op (backing/procfd/sync/sql_stmts/sql_txns) in
+  guest/syscall_budgets.txt, `strace_budget` after each op, SQLite counts from the daemon's VLOG(2)
+  step lines (no production change), identical under ASan (reducer skips fd-less mmap). Budgets:
+  cold-lookup 11/2/0/51/1, warm-lookup 0/0/0/4/0, warm-readdir 0/0/0/31/0, create 21/5/2/136/10,
+  unlink 12/1/1/52/4, mkdir 10/2/0/63/3, rename 14/1/1/82/4, write 8/4/1/84/6, fsync 11/3/2/86/8,
+  chmod 19/5/1/47/3, forget-written 2/0/0/2/0. FINDINGS for an investigator (Phase 10's readdir
+  27x and the create path): 31 statements per warm listing; 136 statements / 10 transactions /
+  2 syncs per create.
