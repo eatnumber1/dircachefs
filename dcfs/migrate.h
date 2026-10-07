@@ -31,8 +31,9 @@ namespace dcfs {
 //     partial index dentries_refused; refused dentries of an older cache
 //     become unknown (they had no stub, and are probed again).
 // v5: cache_state.last_stub_id, the stub nodeids' high-water mark (step
-//     12.4b: a stub's nodeid is never handed out again), and stubs kept
-//     while their dentry is only forgotten (the triggers).
+//     12.4b: a stub's nodeid is never handed out again), stubs kept while
+//     their dentry is only forgotten (the triggers), and the partial index
+//     inodes_unlinked (the sweep of unnamed rows at every start).
 inline constexpr int kSchemaVersion = 5;
 
 // Identifies the root of the cache: the backing filesystem being cached,

@@ -268,8 +268,9 @@ absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
 
 // v4 -> v5 (step 12.4b): the stub nodeids' high-water mark, from the stubs
 // there are (an id that went before cannot be known: one may come back
-// once, as it could before), and the triggers that keep a forgotten
-// refusal's stub. The column only if missing: a test that makes an older
+// once, as it could before), the triggers that keep a forgotten refusal's
+// stub, and the partial index of rows with nlink 0 (the sweep at every
+// start). The column only if missing: a test that makes an older
 // database from a fresh one may keep it.
 absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
   ABSL_ASSIGN_OR_RETURN(
@@ -285,6 +286,8 @@ absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
   ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
     UPDATE cache_state SET last_stub_id = (SELECT MAX(id) FROM stubs)
         WHERE id = 1;
+    CREATE INDEX IF NOT EXISTS inodes_unlinked ON inodes (id)
+        WHERE nlink = 0;
     DROP TRIGGER IF EXISTS dentries_unrefused;
     DROP TRIGGER IF EXISTS dentries_refused_deleted;
     CREATE TRIGGER dentries_unrefused AFTER UPDATE OF state ON dentries

@@ -93,7 +93,8 @@ CONSTANTS
     BugNoUnnamedSweep,          \* no sweep of unnamed rows (before 23.7)
     BugForgetMultiCountsOne,    \* a FORGET_MULTI entry takes off 1
     BugStubIdFromMax,           \* a stub's nodeid: MAX(live) + 1 (12.4b)
-    BugNoRecoveredProbe         \* no probe of recovered rows (12.4b)
+    BugNoRecoveredProbe,        \* no probe of recovered rows (12.4b)
+    BugSweepOnlyUnclean         \* the sweep only after a crash (12.4b)
 
 None == "none"
 
@@ -458,18 +459,20 @@ Crash ==
 \* The next start (StartRun): after an unclean shutdown, the probe of the
 \* rows recovery found dirty (ProbeRecoveredRows: the row of a removal the
 \* crash cut goes once its object is freed; the code probes every dirty
-\* row, which changes nothing for the others) and the sweep of unnamed rows
-\* (cache::ForgetUnnamedRows; also when recovery found dirty rows, which a
-\* clean shutdown never leaves).
+\* row, which changes nothing for the others); at every start, the sweep
+\* of unnamed rows (cache::ForgetUnnamedRows; BugSweepOnlyUnclean puts back
+\* its running only after an unclean shutdown, before step 12.4b).
 Restart ==
     /\ run = "down"
     /\ run' = "up"
     /\ st' = [i \in AllIds |->
-                IF i \notin Ids \/ clean THEN st[i]
-                ELSE AfterProbe(IF BugNoUnnamedSweep THEN st[i]
-                                ELSE AfterSweep(st[i], Named(obj[i])),
-                                i = cut /\ ~BugNoRecoveredProbe
-                                  /\ bState[obj[i]] = "dead")]
+                IF i \notin Ids THEN st[i]
+                ELSE LET swept ==
+                       IF BugNoUnnamedSweep \/ (clean /\ BugSweepOnlyUnclean)
+                       THEN st[i] ELSE AfterSweep(st[i], Named(obj[i]))
+                     IN IF clean THEN swept
+                        ELSE AfterProbe(swept, i = cut /\ ~BugNoRecoveredProbe
+                                                /\ bState[obj[i]] = "dead")]
     /\ cut' = 0
     /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, clean, crashes,
                    forgetErr>>

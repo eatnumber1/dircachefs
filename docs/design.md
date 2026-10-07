@@ -1262,10 +1262,13 @@ Step 23.4.
   probe), as which `fuse_ops.cc` reports it to the protocol events
   (`DirCacheFS::IsUnnamedTmpfile`). An `O_EXCL` one cannot be linked (the
   kernel refuses before asking dcfs). A tmpfile whose create fails after
-  its row was recorded deletes the row again, and after an unclean
-  shutdown `StartRun` deletes the rows whose last release never came (a
-  non-directory with no link and no name: `cache::ForgetUnnamedRows`,
-  review L5), so crashed tmpfiles do not accumulate rows.
+  its row was recorded deletes the row again, and `StartRun` deletes the
+  rows whose last release never came (a non-directory with no link and no
+  name: `cache::ForgetUnnamedRows`, review L5), so crashed tmpfiles do not
+  accumulate rows. It does at every start (step 12.4b), not only after an
+  unclean shutdown: a `DESTROY` with an unlinked file or a tmpfile still
+  open for reading ends in a clean shutdown. The partial index
+  `inodes_unlinked` (`nlink = 0`) keeps it from reading the whole table.
 
 ## Out-of-band change detection
 
@@ -1748,11 +1751,9 @@ not count and nothing it keeps outlives the last `FORGET`; and after a
 crash the start sweeps every unnamed row. Variants put back a non-final
 `FORGET` dropping the held descriptor or the removed record, the pre-23.7
 crash that left an `O_TMPFILE` row behind, and a `FORGET_MULTI` counted as
-one, and two gaps the model found, fixed in step 12.4b: a stub's nodeid
+one, and three gaps the model found, fixed in step 12.4b: a stub's nodeid
 handed out again while the kernel still holds it, and a removed object's
-row surviving a crash between an unlink's syscall and its phase 3. It
-found one more minor gap, kept as a test that expects it
-(`formal/findings/`): a row of a removed object survives the start's sweep
-after a `DESTROY` with the unlinked file still open for reading (a clean
-shutdown, so no sweep). Nodeids' traces from the forged-request harness are validated
+row surviving a crash between an unlink's syscall and its phase 3, or a
+`DESTROY` with the unlinked file still open for reading (a clean shutdown,
+after which the start did not sweep). Nodeids' traces from the forged-request harness are validated
 against it (`formal/README.md`, "The lifetime model").

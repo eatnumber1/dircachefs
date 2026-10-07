@@ -174,10 +174,9 @@ REVAL_LIMITATIONS = {
 ]
 
 # The lifetime model (lifetime.tla; README.md, "The lifetime model"): which
-# nodeids the kernel holds and what dcfs keeps for each. MC_lifetime: every
-# invariant; MC_lifetime_stubs: with boundary stubs; MC_lifetime_destroy_opens:
-# DESTROY with files open, every invariant but UnnamedRowsSwept (until the
-# finding lifetime_destroy_with_open_files is fixed).
+# nodeids the kernel holds and what dcfs keeps for each. Every invariant in
+# each: MC_lifetime; MC_lifetime_stubs, with boundary stubs going out of
+# band; MC_lifetime_destroy_opens, with DESTROY while files are open.
 LIFETIME = [
     "MClifetime.tla",
     "lifetime.tla",
@@ -223,6 +222,7 @@ LIFETIME_KNOWN_BUGS = {
     # Found by this model (formerly findings/); fixed in step 12.4b.
     "lifetime_stub_nodeid_reused": "Invariant NodeidStable is violated",
     "lifetime_crash_before_settle": "Invariant RowsNameLiveObjects is violated",
+    "lifetime_destroy_with_open_files": "Invariant UnnamedRowsSwept is violated",
 }
 
 [
@@ -236,27 +236,6 @@ LIFETIME_KNOWN_BUGS = {
         srcs = LIFETIME,
     )
     for bug, violation in LIFETIME_KNOWN_BUGS.items()
-]
-
-# Gaps the lifetime model found in the code (findings/lifetime_findings.tla;
-# README.md, "Findings of the lifetime model"): each must fail as described
-# there until the code is fixed, when its configuration moves into the real
-# model.
-LIFETIME_FINDINGS = {
-    "lifetime_destroy_with_open_files": "Invariant UnnamedRowsSwept is violated",
-}
-
-[
-    tlc_test(
-        name = "finding_%s_test" % finding,
-        size = "small",
-        timeout = "short",
-        config = "findings/%s.cfg" % finding,
-        expect_violation = violation,
-        spec = "findings/lifetime_findings.tla",
-        srcs = LIFETIME,
-    )
-    for finding, violation in LIFETIME_FINDINGS.items()
 ]
 
 # Trace validation (README.md, "Trace validation"): the spec, its

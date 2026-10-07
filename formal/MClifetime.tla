@@ -1,9 +1,8 @@
 ----------------------------- MODULE MClifetime -----------------------------
 (***************************************************************************)
 (* The model-checking root module of the lifetime model (lifetime.tla):   *)
-(* MC_lifetime*.cfg, known_bugs/lifetime_*.cfg and findings/lifetime_*.cfg *)
-(* check this module. README.md, "The lifetime model", says what each     *)
-(* checks.                                                                 *)
+(* MC_lifetime*.cfg and known_bugs/lifetime_*.cfg check this module.      *)
+(* README.md, "The lifetime model", says what each checks.                 *)
 (***************************************************************************)
 EXTENDS lifetime, TLC
 

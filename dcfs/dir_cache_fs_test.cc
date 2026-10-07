@@ -3144,6 +3144,31 @@ TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
   EXPECT_THAT(InodeRows(db_), IsOkAndHolds(before - 2));
 }
 
+// DESTROY while an unlinked file is still open for reading (SIGTERM, a
+// lazy unmount): its row, kept by phase 3 with nlink 0 until the last
+// release that never comes, goes at the next start although that start is
+// clean (no writable open kept anything dirty)
+// (formal/findings/lifetime_destroy_with_open_files, fixed).
+TEST_F(DirCacheFSTest, CleanStartSweepsTheRowOfAFileOpenAtDestroy) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  ASSERT_EQ(attr.st.st_nlink, 0u);
+  EXPECT_EQ(Send(FUSE_DESTROY, 0, "").error, 0);
+  ASSERT_THAT(backing::FinishRun(ctx_), IsOk());
+  ASSERT_THAT(GetCleanShutdown(db_), IsOkAndHolds(true));
+  ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+}
+
 // An O_TMPFILE file left open by a crash: the next start (unclean) sweeps
 // its row.
 TEST_F(DirCacheFSTest, TmpfileRowGoesAtTheStartAfterACrash) {

@@ -105,6 +105,11 @@ CREATE TABLE inodes (
   UNIQUE (device_id, backing_ino, backing_gen)
 ) STRICT;
 
+-- The rows with a recorded link count of 0 (an unnamed O_TMPFILE file, an
+-- unlinked file dcfs has open): cache::ForgetUnnamedRows, at every start,
+-- reads only these (step 12.4b), not the whole table.
+CREATE INDEX inodes_unlinked ON inodes (id) WHERE nlink = 0;
+
 -- Cached directory entries, each in an explicit state:
 --   present  the name exists and is `inode`;
 --   absent   the name is known not to exist (a negative entry);

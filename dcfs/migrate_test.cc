@@ -223,13 +223,15 @@ TEST_F(MigrateTest, StubsGoWithTheirRefusals) {
 }
 
 // Step 12.4b: a v4 cache gains the stub high-water mark (the highest stub
-// nodeid it ever handed out, so that none is handed out again) and the
-// triggers that keep a forgotten refusal's stub.
+// nodeid it ever handed out, so that none is handed out again), the
+// triggers that keep a forgotten refusal's stub, and the index of rows with
+// nlink 0.
 TEST_F(MigrateTest, V4DatabaseGainsTheStubHighWaterMark) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
   ASSERT_THAT(db_.ExecScript(R"sql(
     ALTER TABLE cache_state DROP COLUMN last_stub_id;
+    DROP INDEX inodes_unlinked;
     DROP TRIGGER dentries_unrefused;
     DROP TRIGGER dentries_refused_deleted;
     CREATE TRIGGER dentries_unrefused AFTER UPDATE OF state ON dentries
@@ -252,6 +254,9 @@ TEST_F(MigrateTest, V4DatabaseGainsTheStubHighWaterMark) {
   EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
   EXPECT_THAT(CountRows(db_, "cache_state WHERE "
                              "last_stub_id = -9223372036854775806"),
+              IsOkAndHolds(1));
+  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'index' AND "
+                             "name = 'inodes_unlinked'"),
               IsOkAndHolds(1));
   ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'unknown'"), IsOk());
   EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(1));

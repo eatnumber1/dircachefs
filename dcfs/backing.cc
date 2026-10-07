@@ -1864,23 +1864,25 @@ absl::Status StartRun(Context &ctx, std::string_view boot_id) {
   ABSL_ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
   // Model: Recover.
   ctx.events->Recovered(ctx);
+  if (unclean || recovered > 0) ProbeRecoveredRows(ctx, dirty);
+  // Rows whose last release never came (review L5): see
+  // cache::ForgetUnnamedRows. At every start, clean or not: a DESTROY with
+  // an unlinked file still open for reading ends in a clean shutdown
+  // (formal/findings/lifetime_destroy_with_open_files, step 12.4b); the
+  // partial index keeps it from reading the whole table. Best effort: a
+  // row left behind only costs a re-probe, so a failure is logged and
+  // startup goes on.
+  absl::StatusOr<int64_t> forgotten = cache::ForgetUnnamedRows(ctx);
+  if (!forgotten.ok()) {
+    LOG(WARNING) << "could not forget the rows of unnamed or unlinked "
+                    "files left by the last run (they stay until a probe "
+                    "finds them gone): "
+                 << forgotten.status();
+  } else if (*forgotten > 0) {
+    LOG(WARNING) << "forgot " << *forgotten
+                 << " rows of unnamed or unlinked files left by the last run";
+  }
   if (unclean || recovered > 0) {
-    ProbeRecoveredRows(ctx, dirty);
-    // Rows whose last release never came (review L5): see
-    // cache::ForgetUnnamedRows.
-    // Best effort: a row left behind only costs a re-probe, so a failure
-    // is logged and startup goes on.
-    absl::StatusOr<int64_t> forgotten = cache::ForgetUnnamedRows(ctx);
-    if (!forgotten.ok()) {
-      LOG(WARNING) << "could not forget the rows of unnamed or unlinked "
-                      "files left by the last run (they stay until a probe "
-                      "finds them gone): "
-                   << forgotten.status();
-    } else if (*forgotten > 0) {
-      LOG(WARNING) << "forgot " << *forgotten
-                   << " rows of unnamed or unlinked files left by the "
-                      "last run";
-    }
     const bool rebooted =
         last_boot_id.has_value() && *last_boot_id != boot_id;
     LOG(WARNING) << "the last run did not shut down cleanly ("
