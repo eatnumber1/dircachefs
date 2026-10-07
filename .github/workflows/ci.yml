@@ -169,6 +169,70 @@ jobs:
             ~/.cache/bazelisk
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
+  coverage:
+    # Source-based coverage of our code over the small and medium tests (step
+    # 7.2): the combined lcov report is an artifact. No threshold gate yet.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    needs: fast
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        id: repocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Restore Bazel caches
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-coverage-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-coverage-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-coverage-
+            bazel-
+      - name: Test
+        run: ./.github/ci/coverage.sh --config=presubmit
+      - name: Upload the lcov report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-lcov
+          path: ci-coverage
+          if-no-files-found: ignore
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Upload test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-coverage
+          path: ci-test-logs
+          if-no-files-found: ignore
+      - name: Save the repository cache
+        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: ${{ steps.repocache.outputs.cache-primary-key }}
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
   full:
     # Every test, then every test again under AddressSanitizer and under
     # UndefinedBehaviorSanitizer.

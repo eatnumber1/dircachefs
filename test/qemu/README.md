@@ -372,6 +372,37 @@ resolved or the tests are excluded from `--config=asan`.
 that has only what a fresh runner has (`third_party/act/README.md`): the way
 to find out that a test quietly uses a tool of your machine.
 
+## Coverage
+
+`bazel coverage` (`.bazelrc`, `coverage` section) builds our code with clang's
+source-based coverage and collects it from the guests:
+
+- `guest/init`: with `dcfs_cov=<disk>` on the kernel command line it sets
+  `LLVM_PROFILE_FILE=/cov/%m.profraw` (one merged file per binary; chrooted
+  e2e tests bind-mount `/cov`) and `dump_profraw` tars `/cov` onto that disk
+  before the verdict. The serial console moves about 8 KB/s, too slow for
+  profiles of a few MB, hence the disk (every guest therefore loads
+  `virtio_blk`).
+- `run-qemu.sh`: with `COVERAGE_DIR` set and `--cov-*` flags (passed only
+  under `bazel coverage`, by `coverage.bzl`) it adds that disk (a raw 256 MiB
+  sparse file, the next letter after the other disks), and after the run
+  unpacks the tar and calls `scripts/cov-lcov.sh` (`llvm-profdata merge`,
+  `llvm-cov export -format=lcov`, external code, tests and `testonly/`
+  dropped, `/proc/self/cwd/` paths made relative) to write
+  `COVERAGE_DIR/qemu-<target>.dat`, which Bazel's lcov merger folds into
+  the test's `coverage.dat` and the combined report. The test's lcov is also
+  kept beside the serial log as an undeclared output.
+- A process that never exits normally writes no profile (the crash and
+  power-cut tests, SIGKILLed daemons); the daemon exits normally on
+  SIGTERM/umount, so its profile is there. That is a limit of the
+  measurement, not a failure.
+
+Self-checks: `//test/qemu:coverage_pipeline_test` runs an instrumented
+fixture through the same `cov-lcov.sh` and requires the function that ran to
+have hits and the one that did not to appear with 0 hits (`check-lcov.sh
+--zero`); `.github/ci/coverage.sh` runs `check-lcov.sh` over the combined
+report so an empty report fails CI.
+
 ## Gates and their self-checks
 
 Step 26.1: every enforcement target (a gate: a test or check that rejects
@@ -403,6 +434,7 @@ gate is disabled.
 | ownership_test (Debian image root ownership) | `//third_party/debian:mkrootfs_test` (its `--skip-ownership` control image must be user-owned, the real one root-owned) |
 | rootfs_invariant_test (Debian rootfs matches tar) | `//third_party/debian:rootfs_invariant_self_check` (imports the real `header_problems`) |
 | the C++ toolchain is the pinned clang (7.1) | `//tools:toolchain_self_check_test` (the checker over a gcc and a wrong-version clang info file must fail) |
+| the coverage report has coverage in it (7.2) | `//test/qemu:coverage_pipeline_test` (an instrumented fixture: the function that ran has hits, the one that did not shows 0 hits; an empty lcov, a missing source and a covered function claimed uncovered are rejected by `check-lcov.sh`) |
 | banned symbols in `//dcfs:main_static` (26.8) | `//tools:banned_symbols_self_check_test` (the real checker and deny list over a program that calls `realpath`) |
 | the ASan build reports and dies (C++ runtime linked, 7.1) | `//dcfs:asan_runtime_test` (only under `--config=asan`: alloc-dealloc-mismatch must kill the process) |
 | the UBSan build reports and dies (7.4) | `//dcfs:ubsan_runtime_test` (only under `--config=ubsan`: a signed overflow, a misaligned load and a vptr misuse must each kill the process; the vptr one failed to die until `-fsanitize=vptr` was named) |

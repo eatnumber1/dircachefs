@@ -338,6 +338,26 @@ tests) in `bazel-testlogs/<package>/<target>/test.outputs/serial.log`.
 Bugs get a regression test first: the test is shown to fail on the
 unfixed code, then the fix makes it pass.
 
+### Coverage
+
+```
+bazel coverage --config=presubmit //...      # or a single test: bazel coverage //dcfs:status_test
+```
+
+Clang's source-based coverage (the pinned toolchain's `coverage` feature) of
+our code (`dcfs/`, `bench/`, `tools/`; not the tests and not external
+repositories), unit and end-to-end tests alike. The combined lcov report is
+`bazel-out/_coverage/_coverage_report.dat` (`$(bazel info output_path)/_coverage/`);
+a test's own is `bazel-testlogs/<package>/<test>/coverage.dat`. Render one
+with `genhtml` if you want a browsable view. How it works: the guest runs the
+instrumented binaries, which write `.profraw` files to `/cov`; `guest/init`
+tars them onto an extra virtio disk, `run-qemu.sh` merges them
+(`llvm-profdata`) and exports lcov (`llvm-cov`) into Bazel's `COVERAGE_DIR`
+(`test/qemu/README.md`, "Coverage"). A process that does not exit normally
+(a power cut, SIGKILL) leaves no profile, so the crash tests add nothing.
+CI publishes the report of the small and medium tests as the `coverage-lcov`
+artifact; there is no threshold yet (Phase 8).
+
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs the whole suite on GitHub Actions
