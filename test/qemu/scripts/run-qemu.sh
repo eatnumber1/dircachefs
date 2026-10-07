@@ -587,6 +587,18 @@ if [ -n "$KERNEL_FAIL" ] && grep -q -a -E "$KERNEL_FAIL" "$LOG"; then
 	echo "== RESULT: FAIL (kernel failure in the guest; see $LOG) =="
 	exit 1
 fi
+# Step 26.2: the testonly checking build of dcfs (the fast and presubmit
+# tiers' guests run it) writes a violated invariant to the console as a
+# DCFS-INVARIANT-VIOLATION line before it aborts
+# (dcfs/testonly/invariant_checker.h). That fails the run whatever the
+# test's own checks said: a guest script may never read the daemon's own
+# log, nor notice a daemon that died at its unmount.
+if grep -q -a "^DCFS-INVARIANT-VIOLATION " "$LOG"; then
+	echo "run-qemu.sh: ERROR: dcfs found an invariant violated; the first such line:" >&2
+	grep -a -m 1 "^DCFS-INVARIANT-VIOLATION " "$LOG" >&2
+	echo "== RESULT: FAIL (dcfs invariant violated; see $LOG) =="
+	exit 1
+fi
 if [ "$UNIT" -eq 1 ]; then
 	if grep -q "^DCFS-TEST-EXIT=0" "$LOG"; then
 		echo "== RESULT: PASS ($(awk "BEGIN{printf \"%.3f\", $end-$start}")s) =="

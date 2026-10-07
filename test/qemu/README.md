@@ -220,6 +220,42 @@ machine. Timeouts are explicit (`short` unit, `moderate` e2e, `long` nfs,
 New tests: pick the tier from the measured duration (read it from
 `bazel-testlogs/**/test.xml`).
 
+### Which dcfs a guest runs: the invariant checks
+
+Step 26.2 (docs/design.md, "Runtime invariant checks"). Every `small` and
+`medium` `qemu_test` boots `:initramfs_checked`, whose dcfs is the testonly
+checking build (`//dcfs:main_static_checked`); `large` and `enormous` boot
+`:initramfs`, the plain build that ships (`qemu_test.bzl`,
+`initramfs_for`). So `--config=fast` and `--config=presubmit` run every
+guest against the checks, and so does CI for those tiers, while CI's large
+tier runs what ships. `plain_dcfs = True` boots the plain build whatever
+the tier, for a test that measures what ships: `syscall_traces_test` (it
+counts the daemon's SQLite statements, and the checker's own queries would
+count) and `memory_test` (its RSS ratios would count the checker's full
+check at startup filling SQLite's page cache, and its per-request sets). The
+forged-request harness (`//dcfs:dir_cache_fs_test`) installs the checker
+itself, in every tier.
+
+To run one e2e test against the checking build, run it as usual if it is
+small or medium; for a large one, temporarily give it `size = "medium"`.
+The checking daemon says `invariant checks: on (...)` at startup.
+
+Reading a violation: the daemon writes one line to the console (the
+serial log, `bazel-testlogs/<package>/<test>/test.outputs/serial.log`) and
+aborts,
+
+    DCFS-INVARIANT-VIOLATION writable-open: inode 7 is open for writing but has no dirty row (in request GETATTR nodeid 1)
+
+and `run-qemu.sh` fails the run with `FAIL (dcfs invariant violated ...)`,
+quoting the first such line, whatever the guest script's own checks said.
+The name after the marker is the invariant (the list is at the top of
+`dcfs/testonly/invariant_checker.h`); "in request" names the FUSE request
+being served (innermost first, then ", inside ..." for one it ran within),
+or "outside any request" for startup and the periodic sync point at a
+request's start. The daemon's own log has the same text after
+`invariant violated:`. A violation is a bug to fix (or a rule of the design
+to correct, with its reason), never a check to loosen.
+
 ## Guest timeout
 
 `run-qemu.sh` stops the guest (`timeout`) after `TEST_TIMEOUT` less 60 s,
@@ -448,6 +484,9 @@ gate is disabled.
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
 | syscall-trace goldens and budgets (26.3, 26.4: the reducer, the golden comparison, the budget comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs) |
+| runtime invariant checks (26.2: each invariant the checker enforces) | `//dcfs:dir_cache_fs_test`'s `DirCacheFSDeathTest.*` (each breaks one invariant on purpose and expects the abort naming it) and `InvariantChecksReportAsAStatus` |
+| run-qemu.sh invariant-violation verdict (26.2) | `//test/qemu:run_qemu_verdict_test` (a canned `DCFS-INVARIANT-VIOLATION` line fails the run; the words mid-line do not) |
+| fast and presubmit tiers boot the checking build (26.2) | `//test/qemu:invariant_checks_on_test` (a small test whose daemon must say `invariant checks: on`) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks

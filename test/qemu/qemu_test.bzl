@@ -1,6 +1,7 @@
 """qemu_test(name, guest_script, disks): a dcfs QEMU end-to-end test.
 
-Boots the shared dcfs QEMU initramfs (:initramfs) and test kernel
+Boots the shared dcfs QEMU initramfs (:initramfs_checked for the small and
+medium tiers, :initramfs for large and enormous; see initramfs_for) and test kernel
 (//third_party/linux:vmlinuz, Alpine's linux-virt) under the pinned, Bazel-built
 @alpine_qemu//:qemu_system_x86_64 (step 4.4), telling guest/init (via
 the dcfs_test= kernel command-line parameter) to run the given guest_script,
@@ -40,6 +41,18 @@ E2E_ASAN_MEM = 384
 # were a plain one. Use fewer test jobs for ASan runs (--local_test_jobs).
 QEMU_OVERHEAD_MB = 100
 
+# Step 26.2: the dcfs a guest boots, by tier. The fast and presubmit tiers
+# (small, medium) run the testonly checking build (:initramfs_checked,
+# //dcfs:main_static_checked: docs/design.md, "Runtime invariant checks");
+# the large and enormous tiers the plain build that ships (:initramfs).
+# //test/qemu:invariant_checks_on_test checks that a small test gets the
+# checked one.
+def initramfs_for(size, plain_dcfs = False):
+    """The initramfs label a qemu_test of tier `size` boots."""
+    if plain_dcfs:
+        return ":initramfs"
+    return ":initramfs_checked" if size in ("small", "medium") else ":initramfs"
+
 def mem_args_for(mem, asan_mem):
     """run-qemu.sh's --mem flag for the build configuration (a select())."""
     sanitizer_args = ["--mem", str(asan_mem)]
@@ -59,7 +72,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -97,6 +110,11 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             check (casefold_tune_oops_test). The oops is tolerated only
             if the guest reports it as "would FAIL (kernel: ...)"; the
             verdict follows its other checks. Never for a test of dcfs.
+        plain_dcfs: boot the plain dcfs that ships (:initramfs) whatever
+            the tier (step 26.2), for a test that measures the shipped
+            binary's own costs: syscall_traces_test counts the daemon's
+            SQLite statements and memory_test its RSS, which the checking
+            build's queries and bookkeeping would add to.
         size: required sh_test size, the test's tier: "small" (run
             constantly), "medium" (presubmit), "large"/"enormous" (CI).
             See README.md's "Test tiers".
@@ -161,15 +179,22 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     mem_args = mem_args_for(mem, asan_mem)
     resource_tags = ["cpu:2", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)]
 
+    initramfs = initramfs_for(size, plain_dcfs)
+    # Under `bazel coverage`, the dcfs that wrote the profiles: the one this
+    # guest boots.
+    cov_objects = [
+        "//dcfs:main_static_checked" if o == "//dcfs:main_static" and initramfs == ":initramfs_checked" else o
+        for o in E2E_COVERAGE_OBJECTS
+    ]
     sh_test(
         name = name,
         srcs = ["scripts/run-qemu.sh"],
         data = kernel_data + qemu_data + [
-            ":initramfs",
+            initramfs,
             guest_script,
-        ] + rootfs_data + coverage_data(E2E_COVERAGE_OBJECTS),
-        args = qemu_args + coverage_args(E2E_COVERAGE_OBJECTS) + kernel_failure_args + rootfs_args + mem_args + kernel_args + [
-            "$(location :initramfs)",
+        ] + rootfs_data + coverage_data(cov_objects),
+        args = qemu_args + coverage_args(cov_objects) + kernel_failure_args + rootfs_args + mem_args + kernel_args + [
+            "$(location " + initramfs + ")",
             guest_script_basename,
         ] + disk_args,
         tags = [
@@ -208,7 +233,8 @@ def qemu_test_matrix(
         mem = None,
         asan_mem = None,
         modules = [],
-        fstypes = ["ext4", "xfs", "btrfs"]):
+        fstypes = ["ext4", "xfs", "btrfs"],
+        plain_dcfs = False):
     """Declares one qemu_test per backing filesystem in `fstypes`.
 
     Args:
@@ -229,6 +255,7 @@ def qemu_test_matrix(
         mem: same as qemu_test.
         asan_mem: same as qemu_test.
         modules: same as qemu_test.
+        plain_dcfs: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
@@ -254,6 +281,7 @@ def qemu_test_matrix(
             mem = mem,
             asan_mem = asan_mem,
             modules = modules,
+            plain_dcfs = plain_dcfs,
         )
     native.alias(
         name = name,

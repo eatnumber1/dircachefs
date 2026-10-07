@@ -172,6 +172,26 @@ canned
 run
 [ "$RC" -eq 0 ] || fail "ordinary words failed the run: $(cat "$WORK/stdout")"
 echo "PASS: words that are not kernel messages do not fail the run"
+# Step 26.2: a DCFS-INVARIANT-VIOLATION line (the testonly checking build of
+# dcfs found an invariant violated, and aborted) fails the run, quoted;
+# the same words elsewhere on a line do not.
+line="DCFS-INVARIANT-VIOLATION tri-state: inode 5: attributes recorded as current with nlink 0 (in request GETATTR nodeid 1)"
+printf '%s\n' "$line" "DCFS-INVARIANT-VIOLATION dirty-set: a later one" >"$WORK/extra"
+canned
+run
+[ "$RC" -ne 0 ] || fail "an invariant violation did not fail the run"
+grep -q "== RESULT: FAIL (dcfs invariant violated" "$WORK/stdout" ||
+	fail "no FAIL verdict for an invariant violation: $(cat "$WORK/stdout")"
+[ "$(sed -n '/the first such line/{n;p;}' "$WORK/stdout")" = "$line" ] ||
+	fail "the message does not quote the first violation: $(cat "$WORK/stdout")"
+echo "PASS: an invariant violation fails the run"
+printf '%s\n' "TEST no-violation PASS: no DCFS-INVARIANT-VIOLATION line" \
+	"F1007 invariant_checker.cc:225] invariant violated: tri-state: ..." >"$WORK/extra"
+canned
+run
+[ "$RC" -eq 0 ] || fail "the words mid-line failed the run: $(cat "$WORK/stdout")"
+echo "PASS: the words mid-line do not fail the run"
+
 # --expect-kernel-failure <script> (step 23.7, casefold_tune_oops_test): the
 # one deliberate exception. An oops is tolerated only if the guest script
 # reported it itself as "would FAIL (kernel: ..." on a DISABLED_ check, and

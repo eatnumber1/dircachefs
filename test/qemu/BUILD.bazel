@@ -54,10 +54,17 @@ config_setting(
 # see guest/init and scripts/mkinitramfs.sh), and (step 4.5) the pjdfstest
 # binary plus its tests/ tree, installed under /pjdfstest/ (see
 # //third_party/pjdfstest:BUILD.pjdfstest and guest/pjdfstest.sh).
-genrule(
-    name = "initramfs",
+#
+# Step 26.2: two of them, alike but for dcfs. :initramfs has the plain build
+# that ships (//dcfs:main_static); :initramfs_checked the testonly checking
+# build (//dcfs:main_static_checked), which aborts naming the invariant when
+# one fails (docs/design.md, "Runtime invariant checks"). qemu_test boots
+# the checked one for the small and medium tiers (fast, presubmit) and the
+# plain one for large and enormous (qemu_test.bzl, initramfs_for).
+[genrule(
+    name = name,
     srcs = [
-        "//dcfs:main_static",
+        dcfs,
         "//tools:fhtest",
         "//tools:testutil",
         "//bench:dcfs_bench",
@@ -67,17 +74,20 @@ genrule(
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + ["guest/syscall_budgets.txt"],
-    outs = ["initramfs.cpio.gz"],
+    outs = [name + ".cpio.gz"],
     testonly = 1,
     cmd = "$(location scripts/mkinitramfs.sh) $@ " +
           "$(location @alpine_busybox//:root/bin/busybox.static) " +
-          "$(location //dcfs:main_static) " +
+          "$(location " + dcfs + ") " +
           "$(location //tools:fhtest) " +
           "$(location //tools:testutil) " +
           "$(location guest/init) " +
           "$(SRCS)",
     tools = ["scripts/mkinitramfs.sh"],
-)
+) for name, dcfs in [
+    ("initramfs", "//dcfs:main_static"),
+    ("initramfs_checked", "//dcfs:main_static_checked"),
+]]
 
 qemu_test(
     name = "boot_test",
@@ -470,6 +480,11 @@ qemu_test_matrix(
     name = "memory_test",
     disks = [("vdb", "ext4", "2G")],
     guest_script = "guest/memory.sh",
+    # What ships is what is measured (step 26.2): the checking build's full
+    # check at startup fills SQLite's page cache before the first find, and
+    # its per-request sets add to the heap, which the RSS ratios would count
+    # (measured: second-tree failed, 1108 KiB against 764).
+    plain_dcfs = True,
     mem = 448,  # the page cache and slab of a 100000-entry find: peak 256 MiB
     asan_mem = 576,  # 342
     size = "medium",
@@ -720,6 +735,9 @@ qemu_test(
     name = "syscall_traces_test",
     disks = [("vdb", "ext4", "64M")],
     guest_script = "guest/syscall_traces.sh",
+    # What ships is what is measured (step 26.2): the checking build's own
+    # SQLite queries would count against the statement budgets.
+    plain_dcfs = True,
     size = "small",
     timeout = "moderate",
 )
@@ -772,4 +790,16 @@ sh_test(
         "@llvm_toolchain_llvm//:bin/llvm-cov",
         "@llvm_toolchain_llvm//:bin/llvm-profdata",
     ],
+)
+
+# Step 26.2: self-check of the runtime invariant checks' tier selection: a
+# small test (so it boots :initramfs_checked, as every fast- and
+# presubmit-tier guest does) whose daemon must say at startup that its
+# checks are on (guest/invariant_checks_on.sh).
+qemu_test(
+    name = "invariant_checks_on_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/invariant_checks_on.sh",
+    size = "small",
+    timeout = "moderate",
 )
