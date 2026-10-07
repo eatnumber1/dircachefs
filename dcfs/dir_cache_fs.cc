@@ -197,6 +197,10 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // fill guards) has no locking (audit-races F4). libfuse checks this after
   // Init() returns, so unsetting it here is enough.
   fuse_unset_feature_flag(&conn, FUSE_CAP_OVER_IO_URING);
+  // No spliced reads of /dev/fuse: SessionLoop's checkpoint drain
+  // (dcfs/session_loop.h) queues a message it read ahead, and a spliced one
+  // lives in libfuse's per-thread pipe, which the next read reuses.
+  fuse_unset_feature_flag(&conn, FUSE_CAP_SPLICE_READ);
   // FUSE_BACKING_STACKED_OVER (1), not the default FUSE_BACKING_STACKED_UNDER
   // (0): dcfs's source directory is arbitrary and may itself be on a
   // stacked filesystem (e.g. overlayfs), which the default forbids
@@ -250,8 +254,8 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
             << conn.proto_minor
             << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted")
             << "; FUSE_CAP_POSIX_ACL and FUSE_CAP_DONT_MASK requested"
-            << "; FUSE_CAP_ATOMIC_O_TRUNC and FUSE_CAP_OVER_IO_URING "
-               "intentionally not requested";
+            << "; FUSE_CAP_ATOMIC_O_TRUNC, FUSE_CAP_OVER_IO_URING and "
+               "FUSE_CAP_SPLICE_READ intentionally not requested";
   return absl::OkStatus();
 }
 
@@ -578,7 +582,7 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   ctx_.events->MutationSyscall(ctx_, created);
   if (!created.ok()) {
     mutation.End();
-    ReresolveAfterFailure(parent, names);
+    ABSL_RETURN_IF_ERROR(ReresolveAfterFailure(parent, names));
     return created;
   }
 
@@ -1041,7 +1045,7 @@ absl::Status DirCacheFS::RemoveChild(
   ctx_.events->MutationSyscall(ctx_, unlinked);
   if (!unlinked.ok()) {
     mutation.End();
-    ReresolveAfterFailure(parent, names);
+    ABSL_RETURN_IF_ERROR(ReresolveAfterFailure(parent, names));
     return unlinked;
   }
 
@@ -1193,8 +1197,8 @@ absl::Status DirCacheFS::Rename(
   ctx_.events->MutationSyscall(ctx_, renamed);
   if (!renamed.ok()) {
     mutation->End();
-    ReresolveAfterFailure(parent, names);
-    ReresolveAfterFailure(newparent, newnames);
+    ABSL_RETURN_IF_ERROR(ReresolveAfterFailure(parent, names));
+    ABSL_RETURN_IF_ERROR(ReresolveAfterFailure(newparent, newnames));
     return renamed;
   }
 
@@ -1268,7 +1272,7 @@ void DirCacheFS::RefreshAfterRename(
   }
 }
 
-void DirCacheFS::ReresolveAfterFailure(
+absl::Status DirCacheFS::ReresolveAfterFailure(
     InodeId parent, std::span<const std::string> names) {
   // Phase 1 left `names` unknown, which is safe but not free: e.g. a
   // directory whose own dentry is unknown has no cached parent, so its ".."
@@ -1277,11 +1281,20 @@ void DirCacheFS::ReresolveAfterFailure(
   // filesystem now (one probe each, backing::ResolveName; not assuming the
   // failed syscall changed nothing) restores that. Best effort: the op's
   // own error is what gets replied, whatever happens here.
+  // An interrupt at a re-resolve's checkpoint (dcfs/checkpoint.h) ends the
+  // request there: the EINTR is returned, to be replied, and the names not
+  // re-resolved yet stay unknown (formal/dcfs.tla's Interrupt at the
+  // re-resolve's RN_probe or PD_read: the request is done).
   for (const std::string &name : names) {
     // Model: RenameFailed2 before a rename's second re-resolve.
     ctx_.events->Reresolve(ctx_, parent, name);
-    backing::LookupOrPopulate(ctx_, parent, name).IgnoreError();
+    absl::StatusOr<cache::LookupResult> resolved =
+        backing::LookupOrPopulate(ctx_, parent, name);
+    if (!resolved.ok() && StatusToErrno(resolved.status()) == EINTR) {
+      return resolved.status();
+    }
   }
+  return absl::OkStatus();
 }
 
 absl::Status DirCacheFS::ForgetRemoved(InodeId id) {
@@ -1358,7 +1371,7 @@ absl::Status DirCacheFS::Link(
   ctx_.events->MutationSyscall(ctx_, linked);
   if (absl::Status status = linked; !status.ok()) {
     mutation.End();
-    ReresolveAfterFailure(newparent, names);
+    ABSL_RETURN_IF_ERROR(ReresolveAfterFailure(newparent, names));
     // Best effort, as Setattr: the op's own error is what gets replied.
     RefreshAttrsOf(src).IgnoreError();
     backing::RefreshAttrs(ctx_, newparent).IgnoreError();

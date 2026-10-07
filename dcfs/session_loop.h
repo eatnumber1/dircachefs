@@ -16,11 +16,11 @@
 // checkpoint it drains what /dev/fuse already holds without blocking. A
 // FUSE_INTERRUPT goes to libfuse at once (fuse_session_process_buf: its
 // do_interrupt marks the request it names, which fuse_req_interrupted then
-// reports); every other message is queued and served, in order, after the
-// current request, before the loop reads again. The kernel delivers a
-// request's interrupt ahead of the requests queued after it
-// (fuse_dev_do_read), so the drain finds it. No thread, no wakeup while
-// idle: draining happens only inside a request.
+// reports); the first other message ends the drain and is served after the
+// current request, before the loop reads again (at most one read ahead per
+// checkpoint). The kernel delivers interrupts ahead of forgets and
+// requests (fuse_dev_do_read), so the drain finds a request's own. No
+// thread, no wakeup while idle: draining happens only inside a request.
 
 #include <deque>
 #include <vector>
@@ -37,9 +37,9 @@ class SessionLoop final : public Interrupts {
   ~SessionLoop() override;
 
   // fuse_session_loop: serves requests until the session exits or the
-  // device is gone; 0, or a negative errno from reading the device. (Not
-  // libfuse's se->error, which is private: the EPROTO of a refused INIT
-  // reads as 0 here; DirCacheFS::Init logs it.)
+  // device is gone; 0, -EPROTO after a refused FUSE_INIT (what libfuse's
+  // private se->error says then), or a negative errno from reading the
+  // device.
   int Run();
 
   void Begin(fuse_req *req) override;

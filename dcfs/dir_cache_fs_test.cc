@@ -1006,9 +1006,80 @@ class DirCacheFSTest : public ::testing::Test {
  protected:
   // The unique of the next request Send() sends.
   uint64_t NextUnique() const { return next_unique_; }
+  size_t KernelReadsLeft() const { return kernel_reads_.size(); }
+  // The reply to request `unique`, served by something other than Send()
+  // (SessionLoop::Run); error -EIO if none came.
+  Reply TakeReply(uint64_t unique) {
+    auto it = replies_.find(unique);
+    if (it == replies_.end()) return Reply{.error = -EIO};
+    Reply reply = std::move(it->second);
+    replies_.erase(it);
+    return reply;
+  }
+  // Queues a request message for "the kernel" to hand out; its unique.
+  uint64_t QueueRequest(uint32_t opcode, uint64_t nodeid,
+                        std::string_view body) {
+    std::string msg;
+    struct fuse_in_header hdr = {};
+    hdr.len = static_cast<uint32_t>(sizeof(hdr) + body.size());
+    hdr.opcode = opcode;
+    hdr.unique = next_unique_++;
+    hdr.nodeid = nodeid;
+    AppendBytes(msg, hdr);
+    msg.append(body);
+    kernel_reads_.push_back(std::move(msg));
+    return hdr.unique;
+  }
   bool KernelReadsEmpty() const { return kernel_reads_.empty(); }
   // Queues the FUSE_INTERRUPT the kernel sends for request `unique` (its
   // caller got a signal).
+  // A second session over `fs` (the same forged I/O as Start's), with
+  // extra command-line arguments; null on failure.
+  struct fuse_session *NewSession(DirCacheFS *fs,
+                                  std::vector<std::string> extra) {
+    std::vector<std::string> words = {"dir_cache_fs_test"};
+    words.insert(words.end(), extra.begin(), extra.end());
+    std::vector<char *> argv;
+    for (std::string &w : words) argv.push_back(w.data());
+    struct fuse_args args =
+        FUSE_ARGS_INIT(static_cast<int>(argv.size()), argv.data());
+    struct fuse_session *se = fuse_session_new(&args, &ops_, sizeof(ops_), fs);
+    fuse_opt_free_args(&args);
+    if (se == nullptr) return nullptr;
+    struct fuse_custom_io io = {};
+    io.read = [](int, void *buf, size_t size, void *) -> ssize_t {
+      return current_->ReadQueued(buf, size);
+    };
+    io.writev = [](int, struct iovec *iov, int count, void *) -> ssize_t {
+      return current_->Capture(iov, count);
+    };
+    absl::StatusOr<FileDescriptor> dummy =
+        syscalls::openat(AT_FDCWD, "/dev/null", O_RDWR);
+    if (!dummy.ok() ||
+        fuse_session_custom_io(se, &io, sizeof(io),
+                               std::move(*dummy).Release()) != 0) {
+      fuse_session_destroy(se);
+      return nullptr;
+    }
+    return se;
+  }
+
+  // Queues the FUSE_INIT the kernel sends when it mounts.
+  void QueueInit() {
+    struct fuse_init_in in = {};
+    in.major = FUSE_KERNEL_VERSION;
+    in.minor = FUSE_KERNEL_MINOR_VERSION;
+    in.flags = FUSE_POSIX_ACL | FUSE_DONT_MASK;
+    std::string msg;
+    struct fuse_in_header hdr = {};
+    hdr.len = static_cast<uint32_t>(sizeof(hdr) + sizeof(in));
+    hdr.opcode = FUSE_INIT;
+    hdr.unique = next_unique_++;
+    AppendBytes(msg, hdr);
+    AppendBytes(msg, in);
+    kernel_reads_.push_back(std::move(msg));
+  }
+
   void QueueInterrupt(uint64_t unique) {
     struct fuse_interrupt_in in = {};
     in.unique = unique;
@@ -4501,6 +4572,285 @@ TEST_F(DirCacheFSTest, ForgedFuseInterruptStopsAPopulation) {
   EXPECT_THAT(List(d, false), IsOk());
   ctx_.interrupts = &NoInterrupts();
 }
+
+// A refused FUSE_INIT ends the loop with -EPROTO, as libfuse's own loop
+// does (its private se->error): here the session asks for max_read=4096
+// and DirCacheFS does not ("init() and fuse_session_new() requested
+// different maximum read size").
+TEST_F(DirCacheFSTest, RefusedInitEndsTheLoopWithEproto) {
+  Start();
+  // Its own Context: a DirCacheFS points its Context at its own state.
+  MountFds mounts;
+  Context ctx{db_, mounts, bitgen_};
+  DirCacheFS other(ctx, options_);
+  struct fuse_session *se = NewSession(&other, {"-o", "max_read=4096"});
+  ASSERT_NE(se, nullptr);
+  QueueInit();
+  {
+    SessionLoop loop(se);
+    EXPECT_EQ(loop.Run(), -EPROTO);
+  }
+  fuse_session_destroy(se);
+}
+
+// Interrupted at a failed mutation's re-resolve (after its syscall, whose
+// error it would reply): the request stops there with EINTR. A rename does
+// not re-resolve its second name then.
+TEST_F(DirCacheFSTest, InterruptedReresolveStopsAFailedRename) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("a"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("b"), 0755), IsOk());
+  WriteFile(Path("b/x"));
+  Start();
+  ASSERT_THAT(List(kRootInode, false), IsOk());
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  // The first checkpoint (before renameat2) passes; renameat2 fails
+  // (ENOTEMPTY); the re-resolve of "a" is interrupted.
+  interrupts.at = 2;
+  EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, -EINTR);
+  EXPECT_EQ(interrupts.checkpoints, 2);
+  EXPECT_EQ(Cached(kRootInode, "b").first, LookupResult::Kind::kUnknown);
+  EXPECT_TRUE(ctx_.fills.inflight.empty());
+  EXPECT_FALSE(ctx_.db.InTransaction());
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// The same for a mkdir whose syscall fails (EEXIST, a step the model has),
+// traced: the re-resolve's interrupt is the model's Interrupt at its probe.
+TEST_F(DirCacheFSTest, InterruptedReresolveIsTraced) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("a"), 0755), IsOk());
+  Start();
+  ASSERT_THAT(List(kRootInode, false), IsOk());
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  StartTrace();
+  interrupts.at = 2;
+  EXPECT_EQ(Mkdir(kRootInode, "a").first.error, -EINTR);
+  EXPECT_EQ(Cached(kRootInode, "a").first, LookupResult::Kind::kUnknown);
+  EXPECT_TRUE(ctx_.fills.inflight.empty());
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// What a checkpoint drains besides the interrupt: the first other message
+// ends the drain (one read ahead, the rest left to the kernel) and is
+// served after the interrupted request (SessionLoop::Run).
+TEST_F(DirCacheFSTest, DrainedRequestIsServedAfterTheInterruptedOne) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  for (int i = 0; i < 40; ++i) WriteFile(Path(absl::StrCat("d/f", i)));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  SessionLoop loop(se_);
+  ctx_.interrupts = &loop;
+  const uint64_t readdir = NextUnique();
+  struct fuse_getattr_in getattr_in = {};
+  std::string getattr_body;
+  AppendBytes(getattr_body, getattr_in);
+  uint64_t first = 0, second = 0;
+  NameToHandleHook() = [&] {
+    QueueInterrupt(readdir);
+    first = QueueRequest(FUSE_GETATTR, kRootInode, getattr_body);
+    second = QueueRequest(FUSE_GETATTR, static_cast<uint64_t>(d),
+                          getattr_body);
+  };
+  EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
+  // The interrupt and the first GETATTR were read; the second was not.
+  EXPECT_EQ(KernelReadsLeft(), 1u);
+  EXPECT_EQ(TakeReply(first).error, -EIO);  // not served yet
+  // The loop serves the queued GETATTR, then reads the next one.
+  EXPECT_EQ(loop.Run(), -EAGAIN);  // nothing more to read
+  EXPECT_EQ(TakeReply(first).error, 0);
+  EXPECT_EQ(TakeReply(second).error, 0);
+  ctx_.interrupts = &NoInterrupts();
+}
+
+// Every checkpoint before a backing syscall (AGENTS.md: each has a
+// cancellation test): interrupted at its first checkpoint, the request
+// replies EINTR, the backing file is unchanged, no mutation is in flight,
+// no transaction is open, and what phase 1 made unknown stays unknown and
+// dirty.
+struct CheckpointCase {
+  std::string name;
+  // Sends the request (handles opened before are in `fh`); its reply.
+  std::function<Reply(DirCacheFSTest &, InodeId f, uint64_t fh,
+                      uint64_t fh2)>
+      send;
+  bool needs_open = false;  // f open O_RDWR (fh), g O_RDWR (fh2)
+  bool attrs_unknown = true;  // f's attributes unknown and f dirty after
+};
+
+class CheckpointTest : public DirCacheFSTest,
+                       public ::testing::WithParamInterface<CheckpointCase> {
+ public:
+  using DirCacheFSTest::CopyFileRange;
+  using DirCacheFSTest::Fsyncdir;
+  using DirCacheFSTest::Ioctl;
+  using DirCacheFSTest::Link;
+  using DirCacheFSTest::Open;
+  using DirCacheFSTest::Rename;
+  using DirCacheFSTest::Send;
+  using DirCacheFSTest::Setxattr;
+  using DirCacheFSTest::Chmod;
+};
+
+std::string FuseBody(const auto &in, std::string_view tail = "") {
+  std::string body(reinterpret_cast<const char *>(&in), sizeof(in));
+  body.append(tail);
+  return body;
+}
+
+const CheckpointCase kCheckpointCases[] = {
+    {.name = "rename",
+     .send = [](DirCacheFSTest &t, InodeId, uint64_t, uint64_t) {
+       return static_cast<CheckpointTest &>(t).Rename(kRootInode, "f",
+                                                      kRootInode, "h");
+     },
+     .attrs_unknown = false},
+    {.name = "link",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+       return static_cast<CheckpointTest &>(t).Link(f, kRootInode, "l");
+     }},
+    {.name = "setattr",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+       return static_cast<CheckpointTest &>(t).Chmod(f, S_IFREG | 0600);
+     }},
+    {.name = "setxattr",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+       return static_cast<CheckpointTest &>(t).Setxattr(f, "user.new", "v");
+     }},
+    {.name = "removexattr",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+       std::string name = "user.old";
+       name.push_back('\0');
+       return static_cast<CheckpointTest &>(t).Send(
+           FUSE_REMOVEXATTR, static_cast<uint64_t>(f), name);
+     }},
+    {.name = "write",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
+       struct fuse_write_in in = {};
+       in.fh = fh;
+       in.size = 1;
+       return static_cast<CheckpointTest &>(t).Send(
+           FUSE_WRITE, static_cast<uint64_t>(f), FuseBody(in, "x"));
+     },
+     .needs_open = true},
+    {.name = "fallocate",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
+       struct fuse_fallocate_in in = {};
+       in.fh = fh;
+       in.length = 1 << 20;
+       return static_cast<CheckpointTest &>(t).Send(
+           FUSE_FALLOCATE, static_cast<uint64_t>(f), FuseBody(in));
+     },
+     .needs_open = true},
+    {.name = "copy_file_range",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t fh2) {
+       struct fuse_copy_file_range_in in = {};
+       in.fh_in = fh2;
+       in.nodeid_out = static_cast<uint64_t>(f);
+       in.fh_out = fh;
+       in.len = 5;
+       in.off_out = 5;
+       return static_cast<CheckpointTest &>(t).Send(
+           FUSE_COPY_FILE_RANGE, static_cast<uint64_t>(f), FuseBody(in));
+     },
+     .needs_open = true},
+    {.name = "ioctl",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
+       const int flags = FS_NODUMP_FL;
+       return static_cast<CheckpointTest &>(t).Ioctl(
+           f, FS_IOC_SETFLAGS,
+           std::string_view(reinterpret_cast<const char *>(&flags),
+                            sizeof(flags)),
+           0);
+     },
+     .needs_open = true},
+    {.name = "cold_open",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+       return static_cast<CheckpointTest &>(t).Open(f, O_RDWR).first;
+     },
+     .attrs_unknown = false},
+    {.name = "fsync",
+     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
+       struct fuse_fsync_in in = {};
+       in.fh = fh;
+       return static_cast<CheckpointTest &>(t).Send(
+           FUSE_FSYNC, static_cast<uint64_t>(f), FuseBody(in));
+     },
+     .needs_open = true},
+    {.name = "fsyncdir",
+     .send = [](DirCacheFSTest &t, InodeId, uint64_t, uint64_t) {
+       return static_cast<CheckpointTest &>(t).Fsyncdir(kRootInode);
+     },
+     .attrs_unknown = false},
+};
+
+TEST_P(CheckpointTest, InterruptedAtItsFirstCheckpoint) {
+  const CheckpointCase &c = GetParam();
+  WriteFile(Path("f"));
+  AppendToFile(Path("f"), "hello");
+  WriteFile(Path("g"));
+  AppendToFile(Path("g"), "world");
+  const uint8_t v[] = {'v'};
+  ASSERT_THAT(syscalls::setxattr(Path("f"), "user.old", v, 0), IsOk());
+  Start();
+  ASSERT_THAT(List(kRootInode, false), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_OK_AND_ASSIGN(InodeId g, Id("g"));
+  uint64_t fh = 0, fh2 = 0;
+  if (c.needs_open) {
+    auto [open, h] = Open(f, O_RDWR);
+    ASSERT_EQ(open.error, 0);
+    fh = h;
+    auto [open2, h2] = Open(g, O_RDWR);
+    ASSERT_EQ(open2.error, 0);
+    fh2 = h2;
+  }
+  ASSERT_THAT(Fsyncdir(kRootInode).error, 0);  // A sync point: all clean.
+  ASSERT_OK_AND_ASSIGN(struct stat before,
+                       syscalls::fstatat(AT_FDCWD, Path("f")));
+  FakeInterrupts interrupts;
+  ctx_.interrupts = &interrupts;
+  interrupts.at = 1;
+  EXPECT_EQ(c.send(*this, f, fh, fh2).error, -EINTR);
+  EXPECT_EQ(interrupts.checkpoints, 1);
+  ctx_.interrupts = &NoInterrupts();
+
+  // The backing file is as it was.
+  ASSERT_OK_AND_ASSIGN(struct stat after,
+                       syscalls::fstatat(AT_FDCWD, Path("f")));
+  EXPECT_EQ(after.st_size, before.st_size);
+  EXPECT_EQ(after.st_mode, before.st_mode);
+  EXPECT_EQ(after.st_nlink, before.st_nlink);
+  EXPECT_EQ(ReadWholeFile(Path("f")), "hello");
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("h")).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("l")).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  // Nothing in flight, no transaction open.
+  EXPECT_TRUE(ctx_.fills.inflight.empty());
+  EXPECT_FALSE(ctx_.db.InTransaction());
+  // Phase 1's records stay unknown and dirty.
+  if (c.attrs_unknown) {
+    ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+    EXPECT_FALSE(attr.valid);
+    EXPECT_THAT(Dirty(), Contains(f));
+  }
+  if (c.name == "rename") {
+    EXPECT_EQ(Cached(kRootInode, "f").first, LookupResult::Kind::kUnknown);
+    EXPECT_EQ(Cached(kRootInode, "h").first, LookupResult::Kind::kUnknown);
+    EXPECT_THAT(Dirty(), Contains(kRootInode));
+  }
+  if (c.name == "link") {
+    EXPECT_EQ(Cached(kRootInode, "l").first, LookupResult::Kind::kUnknown);
+  }
+  if (c.name == "cold_open") EXPECT_FALSE(fs_->HasOpenFiles(f));
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    EveryCheckpoint, CheckpointTest, ::testing::ValuesIn(kCheckpointCases),
+    [](const ::testing::TestParamInfo<CheckpointCase> &info) {
+      return info.param.name;
+    });
 
 }  // namespace
 }  // namespace dcfs
