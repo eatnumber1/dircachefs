@@ -177,18 +177,24 @@ def _alpine_package_impl(rctx):
     ).stdout)
 
     branch = selected[0]["branch"]
-    mirror = rctx.attr.mirror
-    pending = []
-    for package in selected:
-        pending.append((package, rctx.download(
-            _base_url(mirror, branch, package["repo"], rctx.attr.arch) +
-            "/" + package["file"],
-            "apks/" + package["file"],
-            block = False,
-        )))
-    for package, waiter in pending:
-        if not waiter.wait().success:
-            fail("downloading %s from Alpine %s failed" % (package["file"], branch))
+    # apk.py downloads (in parallel): a 404 there means the index snapshot is
+    # stale, and it says so (a bare Bazel download error does not).
+    rctx.file("selected.json", json.encode(selected))
+    _run(
+        rctx,
+        [
+            "download",
+            "--resolved",
+            "selected.json",
+            "--mirror",
+            rctx.attr.mirror,
+            "--arch",
+            rctx.attr.arch,
+            "--out",
+            "apks",
+        ],
+        "downloading from Alpine %s" % branch,
+    )
 
     for package in selected:
         _run(
@@ -206,6 +212,7 @@ def _alpine_package_impl(rctx):
     _run(rctx, ["finish", "--root", "root"], "fixing symlinks")
     for package in selected:
         rctx.delete("apks/" + package["file"])
+    rctx.delete("selected.json")
 
     resolved = sorted(
         [

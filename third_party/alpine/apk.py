@@ -19,19 +19,24 @@ Subcommands (see main):
   index    verify the APKINDEX.tar.gz files and write them as one JSON file;
   resolve  pick the branch's current version of the named packages (and
            their dependency closure) from that JSON file;
+  download download the resolved apks (a 404 means a stale index);
   unpack   verify one .apk and extract it;
   finish   fix the symlinks of the unpacked tree.
 """
 
 import argparse
 import base64
+import concurrent.futures
 import hashlib
 import io
 import json
 import os
 import re
+import shutil
 import sys
 import tarfile
+import urllib.error
+import urllib.request
 import zlib
 
 
@@ -396,6 +401,58 @@ def unpack(apk_path, keys, expected_checksum, out_dir):
         archive.extractall(out_dir, filter='tar')
 
 
+_STALE_INDEX = ('the index snapshot names a build the mirror no longer '
+                'serves; run `bazel fetch --force --repo=@alpine_index`')
+
+
+def _download_one(url, path):
+    """Downloads one file, with a reason a person can act on on failure."""
+    try:
+        with urllib.request.urlopen(url, timeout=300) as response:
+            with open(path, 'wb') as f:
+                shutil.copyfileobj(response, f)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise ApkError(f'{os.path.basename(path)}: {_STALE_INDEX} '
+                           f'({url})') from e
+        raise ApkError(f'downloading {url}: HTTP {e.code}') from e
+    except (urllib.error.URLError, OSError) as e:
+        raise ApkError(f'downloading {url}: {e}') from e
+
+
+def download(selected, mirror, arch, out_dir):
+    """Downloads the selected apks in parallel into out_dir.
+
+    Alpine's mirror drops a superseded build within about a week, so a 404
+    means the index snapshot a repository was resolved from is stale.
+
+    Args:
+        selected: resolve's records ('file', 'repo', 'branch').
+        mirror: the mirror's base URL.
+        arch: the architecture directory.
+        out_dir: where the apks go (created).
+
+    Raises:
+        ApkError: a download failed.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [
+            pool.submit(
+                _download_one,
+                f'{mirror}/{p["branch"]}/{p["repo"]}/{arch}/{p["file"]}',
+                os.path.join(out_dir, p['file'])) for p in selected
+        ]
+        for future in futures:
+            future.result()
+
+
+def _cmd_download(args):
+    with open(args.resolved, encoding='utf-8') as f:
+        selected = json.load(f)
+    download(selected, args.mirror.rstrip('/'), args.arch, args.out)
+
+
 def _cmd_index(args):
     keys = load_keys(args.key)
     packages = []
@@ -458,6 +515,14 @@ def main(argv):
     resolver.add_argument('--name', action='append', required=True)
     resolver.add_argument('--closure', action='store_true')
     resolver.set_defaults(handler=_cmd_resolve)
+
+    downloader = subparsers.add_parser('download')
+    downloader.add_argument('--resolved', required=True,
+                            help="resolve's output")
+    downloader.add_argument('--mirror', required=True)
+    downloader.add_argument('--arch', required=True)
+    downloader.add_argument('--out', required=True)
+    downloader.set_defaults(handler=_cmd_download)
 
     unpacker = subparsers.add_parser('unpack')
     unpacker.add_argument('--key', action='append', required=True)

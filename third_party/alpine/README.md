@@ -53,6 +53,13 @@ This refetches the index; every package repository depends on the index file,
 so those whose index changed are refetched on the next build. To refetch one
 repository regardless: `bazel fetch --force --repo=@alpine_linux_virt`.
 
+A package repository is resolved against the index it was fetched with, and
+Alpine's mirror drops a superseded build within about a week. So refetching
+one repository (or a fresh output base that kept an old index) can meet a
+404; the fetch then fails with "the index snapshot names a build the mirror
+no longer serves; run `bazel fetch --force --repo=@alpine_index`", and that
+command is the fix.
+
 CI starts with no fetched repositories (the external directory is not in its
 cache) and so tests the branch's current packages. A developer and CI may
 therefore differ within the series. The weekly scheduled run keeps running
