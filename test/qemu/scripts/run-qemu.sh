@@ -24,6 +24,10 @@
 #       For qemu_test (test/qemu/qemu_test.bzl): boots the guest, which
 #       runs /tests/<dcfs_test-basename> (guest/init's e2e branch) and
 #       prints ALL-TESTS-PASSED or TEST-FAILED. Exit 0 iff the former.
+#       --expect-kernel-failure <dcfs_test-basename> (step 23.7; e2e only,
+#       and the name must be the test's own): the one guest whose job is to
+#       reproduce a kernel bug (casefold_tune_oops_test). See "A kernel
+#       failure" below.
 #
 # Each disk-spec is <device>:<fstype>:<size>[:<mkfs options>], e.g.
 # vdb:ext4:256M, where <device> is a /dev/vd<letter> name. The optional
@@ -104,6 +108,8 @@ MEM_OVERRIDE=""
 # appended to the initramfs given below (the kernel unpacks concatenated
 # archives into one).
 MODULES=""
+# --expect-kernel-failure <script>: see the kernel-failure check below.
+EXPECT_KERNEL_FAILURE=""
 while :; do
 	case "${1:-}" in
 	--unit)
@@ -120,6 +126,10 @@ while :; do
 		;;
 	--modules)
 		MODULES=$2
+		shift 2
+		;;
+	--expect-kernel-failure)
+		EXPECT_KERNEL_FAILURE=$2
 		shift 2
 		;;
 	--qemu)
@@ -181,6 +191,15 @@ shift 2
 if [ "$UNIT" -eq 0 ]; then
 	DCFS_TEST=$1
 	shift
+fi
+
+# The opt-in is deliberate: it names the guest script, which must be this
+# test's own, and it exists only for an e2e test.
+if [ -n "$EXPECT_KERNEL_FAILURE" ] &&
+	{ [ "$UNIT" -eq 1 ] || [ "$EXPECT_KERNEL_FAILURE" != "$DCFS_TEST" ]; }; then
+	echo "run-qemu.sh: --expect-kernel-failure must name this test's guest script" \
+		"(an e2e test; got '$EXPECT_KERNEL_FAILURE', test '${DCFS_TEST:-<unit>}')" >&2
+	exit 1
 fi
 
 WORKDIR="${TEST_TMPDIR:-$(mktemp -d)}"
@@ -452,7 +471,21 @@ fi
 # says "WARNING: CPU:", and any other kernel "WARNING:" arrives as a
 # KERNEL-OOPS: line).
 KERNEL_FAIL='^KERNEL-OOPS:|(^|[] ])(BUG:|Oops[: ]|kernel BUG at|WARNING: CPU:|Call Trace:|Kernel panic)'
-if grep -q -a -E "$KERNEL_FAIL" "$LOG"; then
+# A kernel failure under --expect-kernel-failure (step 23.7): the guest
+# script is a reproducer of a kernel bug (guest/casefold_tune_oops.sh, a
+# DISABLED_ check) and the oops is what it demonstrates. Tolerated only if
+# the guest reported it itself ("would FAIL (kernel: ..."), and only an oops
+# (not a WARNING, a BUG at, or a panic); the verdict then follows the other
+# checks. A fixed kernel logs nothing and passes too.
+KERNEL_OOPS_ONLY='BUG: (kernel NULL pointer dereference|unable to handle)|Oops[: ]|Call Trace:|general protection fault'
+if [ -n "$EXPECT_KERNEL_FAILURE" ] && grep -q -a -E "$KERNEL_FAIL" "$LOG"; then
+	unexpected=$(grep -a -E "$KERNEL_FAIL" "$LOG" | grep -a -v -E "$KERNEL_OOPS_ONLY" | head -n 1 || true)
+	if [ -z "$unexpected" ] && grep -q -a "would FAIL (kernel: " "$LOG"; then
+		echo "run-qemu.sh: the guest's kernel oops is expected (--expect-kernel-failure $EXPECT_KERNEL_FAILURE)"
+		KERNEL_FAIL=
+	fi
+fi
+if [ -n "$KERNEL_FAIL" ] && grep -q -a -E "$KERNEL_FAIL" "$LOG"; then
 	echo "run-qemu.sh: ERROR: the guest kernel logged a failure (an oops, BUG, WARNING or panic); the first such line:" >&2
 	grep -a -m 1 -E "$KERNEL_FAIL" "$LOG" >&2
 	echo "run-qemu.sh: the lines around it are in $LOG (KERNEL-OOPS: lines are the kernel log's)" >&2

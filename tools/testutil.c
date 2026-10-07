@@ -166,6 +166,12 @@
  *       (AT_SYMLINK_FOLLOW), "excl" opens with O_EXCL (never linkable) and
  *       tries "empty", "none" does not link; prints each step's outcome and
  *       the linked file's nlink and size.
+ *   testutil ext4-tune-casefold <path>
+ *       Switches the casefold feature on under the mounted ext4 filesystem
+ *       <path> is on (EXT4_IOC_SET_TUNE_SB_PARAM, Linux 6.18+). The kernel
+ *       does not load the encoding then, so a directory made case-insensitive
+ *       afterwards (chattr +F) oopses the next readdir: the reproducer of
+ *       guest/casefold_tune_oops.sh (a kernel bug; no other test uses it).
  *   testutil readdir-ino <dir> [small-first]
  *       Lists <dir> with getdents64, printing "<name> <d_ino>" per entry,
  *       in whatever order the directory itself returns them -- which,
@@ -1059,6 +1065,69 @@ static int cmd_tmpfile(const char *dir, const char *name, const char *how)
 	else
 		step("linked", -1);
 	printf("\n");
+	return 0;
+}
+
+/* EXT4_IOC_{GET,SET}_TUNE_SB_PARAM, copied from the kernel's
+ * <linux/ext4.h> UAPI header (as the btrfs ioctl above): the sysroot's
+ * headers predate it. */
+struct ext4_tune_sb_params {
+	uint32_t set_flags;
+	uint32_t checkinterval;
+	uint16_t errors_behavior;
+	uint16_t mnt_count;
+	uint16_t max_mnt_count;
+	uint16_t raid_stride;
+	uint64_t last_check_time;
+	uint64_t reserved_blocks;
+	uint64_t blocks_count;
+	uint32_t default_mnt_opts;
+	uint32_t reserved_uid;
+	uint32_t reserved_gid;
+	uint32_t raid_stripe_width;
+	uint16_t encoding;
+	uint16_t encoding_flags;
+	uint8_t def_hash_alg;
+	uint8_t pad_1;
+	uint16_t pad_2;
+	uint32_t feature_compat;
+	uint32_t feature_incompat;
+	uint32_t feature_ro_compat;
+	uint32_t set_feature_compat_mask;
+	uint32_t set_feature_incompat_mask;
+	uint32_t set_feature_ro_compat_mask;
+	uint32_t clear_feature_compat_mask;
+	uint32_t clear_feature_incompat_mask;
+	uint32_t clear_feature_ro_compat_mask;
+	uint8_t mount_opts[64];
+	uint8_t pad[68];
+};
+#define EXT4_IOC_GET_TUNE_SB_PARAM _IOR('f', 45, struct ext4_tune_sb_params)
+#define EXT4_IOC_SET_TUNE_SB_PARAM _IOW('f', 46, struct ext4_tune_sb_params)
+#define EXT4_TUNE_FL_EDIT_FEATURES 0x00004000
+#define EXT4_FEATURE_INCOMPAT_CASEFOLD 0x20000
+
+static int cmd_ext4_tune_casefold(const char *path)
+{
+	struct ext4_tune_sb_params params;
+	int fd = open(path, O_RDONLY);
+
+	memset(&params, 0, sizeof(params));
+	if (fd == -1 || ioctl(fd, EXT4_IOC_GET_TUNE_SB_PARAM, &params) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	params.set_flags = EXT4_TUNE_FL_EDIT_FEATURES;
+	params.set_feature_compat_mask = 0;
+	params.set_feature_incompat_mask = EXT4_FEATURE_INCOMPAT_CASEFOLD;
+	params.set_feature_ro_compat_mask = 0;
+	params.clear_feature_compat_mask = 0;
+	params.clear_feature_incompat_mask = 0;
+	params.clear_feature_ro_compat_mask = 0;
+	if (ioctl(fd, EXT4_IOC_SET_TUNE_SB_PARAM, &params) == -1) {
+		print_err(errno);
+		return 1;
+	}
 	return 0;
 }
 
@@ -2330,6 +2399,8 @@ int main(int argc, char *argv[])
 		return cmd_opath_unlinked_mutate(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "rmcwd-mutate") == 0)
 		return cmd_rmcwd_mutate(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "ext4-tune-casefold") == 0)
+		return cmd_ext4_tune_casefold(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "readdir-ino") == 0)
 		return cmd_readdir_ino(argv[2], 0);
 	if (argc == 4 && strcmp(argv[1], "readdir-ino") == 0 &&

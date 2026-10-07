@@ -58,7 +58,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = []):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -89,6 +89,13 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             `rootfs`), e.g. ["nfsd", "nfsv4"]; the guest loads them with
             their dependencies before the test runs (modules.bzl,
             third_party/linux/README.md).
+        kernel_failure: None (the default: a kernel oops, BUG, WARNING or
+            panic in the serial log fails the run) or "expected" (step 23.7):
+            run-qemu.sh --expect-kernel-failure <guest script>, for the one
+            test whose guest script reproduces a kernel bug as a DISABLED_
+            check (casefold_tune_oops_test). The oops is tolerated only
+            if the guest reports it as "would FAIL (kernel: ...)"; the
+            verdict follows its other checks. Never for a test of dcfs.
         size: required sh_test size, the test's tier: "small" (run
             constantly), "medium" (presubmit), "large"/"enormous" (CI).
             See README.md's "Test tiers".
@@ -103,6 +110,10 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     # A disk-spec with mke2fs options has spaces: Bazel shell-tokenizes `args`.
     disk_args = ["'" + ":".join(d) + "'" if len(d) > 3 else ":".join(d) for d in disks]
     guest_script_basename = guest_script.split("/")[-1]
+
+    if kernel_failure not in (None, "expected"):
+        fail("qemu_test(%s): kernel_failure must be None or \"expected\"" % name)
+    kernel_failure_args = ["--expect-kernel-failure", guest_script.split("/")[-1]] if kernel_failure else []
 
     rootfs_data = [rootfs] if rootfs else []
     rootfs_args = ["--rootfs", "$(location " + rootfs + ")"] if rootfs else []
@@ -156,7 +167,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             ":initramfs",
             guest_script,
         ] + rootfs_data,
-        args = qemu_args + rootfs_args + mem_args + kernel_args + [
+        args = qemu_args + kernel_failure_args + rootfs_args + mem_args + kernel_args + [
             "$(location :initramfs)",
             guest_script_basename,
         ] + disk_args,

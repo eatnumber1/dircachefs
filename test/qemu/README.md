@@ -292,6 +292,11 @@ A test that outgrows its allowance fails visibly instead of hanging:
   checks said (`run-qemu.sh`, step 23.7): the console shows only the worst of
   them at loglevel 3, so `guest/init` copies the matching lines of the
   kernel log to the end of the serial log as `KERNEL-OOPS: ...` lines;
+  the one exception is `casefold_tune_oops_test` (`kernel_failure =
+  "expected"`, `run-qemu.sh --expect-kernel-failure <its script>`, refused
+  for any other script): it reproduces a Linux bug on purpose (below), and
+  its oops is tolerated only when the guest itself reports it as `would
+  FAIL (kernel: ...)`; a warning or panic still fails it;
 - a guest too small for its own initramfs says `Initramfs unpacking failed`
   or panics before init, which `run-qemu.sh` reports as `the guest died
   while booting`;
@@ -528,7 +533,14 @@ ext4, xfs and btrfs.
   outside dcfs (a kernel gap) is kept and disabled googletest-style:
   `disabled` (`guest/lib.sh`) reports it as `TEST DISABLED_<name>
   DISABLED (<reason>)` and its would-be verdict ("would PASS"/"would
-  FAIL") on the next line, never failing the run. Also step 4.8's runtime submount
+  FAIL") on the next line, never failing the run. The one kernel
+  bug kept this way is `casefold_tune_oops_test`'s
+  `DISABLED_casefold-tune-online-oops`, the reproducer (Linux 6.18 to
+  7.3-rc): `EXT4_IOC_SET_TUNE_SB_PARAM` (`testutil ext4-tune-casefold`)
+  switches casefold on under a mounted ext4 without loading `sb->s_encoding`
+  (only mount does), `chattr +F` checks only the feature bit, and the next
+  readdir of the directory dereferences NULL in `utf8byte`. It would PASS
+  when the listing works or the kernel refuses the ioctl or `+F`. Also step 4.8's runtime submount
   refusal (amendment 12): no `fhtest handle` can be minted for a name
   behind a boundary vdc is mounted onto at runtime (`handle-boundary-*`).
 - `setattr_test` (`guest/setattr.sh`): step 4.1's `Setattr` write-through --

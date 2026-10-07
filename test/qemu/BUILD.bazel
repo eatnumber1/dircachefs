@@ -361,6 +361,20 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 23.7: the reproducer of a kernel bug (EXT4_IOC_SET_TUNE_SB_PARAM turns
+# casefold on without loading the encoding, then readdir of a +F directory
+# oopses), a DISABLED_ check -- see guest/casefold_tune_oops.sh. The disk is
+# made WITHOUT casefold. Kernel only; the one test whose oops run-qemu.sh
+# expects.
+qemu_test(
+    name = "casefold_tune_oops_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/casefold_tune_oops.sh",
+    kernel_failure = "expected",
+    size = "small",
+    timeout = "short",
+)
+
 # Step 23.3: a read open records the access time the backing mount's
 # relatime rule gives, from the cache, matching the backing file -- see
 # guest/atime.sh.
