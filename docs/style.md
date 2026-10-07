@@ -1,14 +1,17 @@
 # dcfs style guide
 
-This guide **extends the [Google C++ Style
-Guide](https://google.github.io/styleguide/cppguide.html)**, and our C++
-must conform to it; Python follows the [Google Python Style
-Guide](https://google.github.io/styleguide/pyguide.html) the same way (80
-columns). A section here says only what adds to or narrows Google's rules,
-or covers what Google does not (tests, Bazel, shell, docs, commits). Where
-the tree breaks Google style or a rule below, Appendix A counts the sites
-and gives a command that finds them, for a later mechanical step. Nothing
-here is open: russ settled the questions on 2026-10-07.
+This guide **extends Google's style guides**, and our code and docs must
+conform to them: [C++](https://google.github.io/styleguide/cppguide.html),
+[Python](https://google.github.io/styleguide/pyguide.html) (80 columns),
+[Shell](https://google.github.io/styleguide/shellguide.html) and, for
+documents,
+[Markdown](https://google.github.io/styleguide/docguide/style.html).
+Bazel files follow Bazel's BUILD style guide as buildifier enforces it. A
+section here says only what adds to or narrows Google's rules, or covers
+what Google does not (tests, Bazel, docs, commits). Where the tree breaks
+Google style or a rule below, Appendix A counts the sites and gives a
+command that finds them, for a later mechanical step. Nothing here is open:
+russ settled the questions on 2026-10-07.
 
 Derived from the tree at c632ca4 (2026-10-07). Counts are of production
 code (`dcfs/`, `bench/`, no tests) unless stated. File:line references
@@ -21,15 +24,16 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 
 - **Formatting is enforced, not requested.** clang-format (Google style,
   `.clang-format`: `IndentWidth: 2`, `ColumnLimit: 80`, `PointerAlignment:
-  Right`) for C and C++, buildifier for Bazel files. Both are pinned
-  through Bazel. `//tools:format_test` (tier `small`) runs them in check
-  mode (`clang-format --dry-run -Werror`, `buildifier -mode=check`) over
-  the tracked files, so `bazel test --config=fast //...` and CI fail on an
-  unformatted file. `bazel run //tools:format` reformats (it replaces
+  Right`) for C and C++, buildifier for Bazel files, shfmt for shell (4).
+  All are pinned through Bazel. `//tools:format_test` (tier `small`) runs
+  them in check mode (`clang-format --dry-run -Werror`, `buildifier
+  -mode=check`, `shfmt -d`) over the tracked files, so `bazel test
+  --config=fast //...` and CI fail on an unformatted file. `bazel run
+  //tools:format` reformats (it replaces
   `tools/format.sh`). An opt-in `.githooks/pre-commit` runs the check
   (`git config core.hooksPath .githooks`). `tools/*.c` are reformatted,
   not excluded. None of this exists yet (Appendix A, F1-F5); it arrives
-  with phase 7's LLVM toolchain.
+  with phase 7's LLVM toolchain (shell: step 7.6, with shellcheck).
 - **Include what you use, enforced**: a target includes only headers of its
   direct deps (`layering_check`) and clang-tidy's `misc-include-cleaner`
   finds missing and unused includes, both with phase 7's clang toolchain
@@ -75,12 +79,15 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 
 ### 1.3 Namespaces
 
-All code is in `namespace dcfs`, flat: no nested namespaces, with one
-exception, `dcfs::syscalls`, whose wrappers keep their libc names and so
-need the qualifier. Call them as `syscalls::open(...)`, never
-`dcfs::syscalls::open` and never with a `using`. The other sub-namespaces
-(`cache`, `backing`, `testonly`, `sqlite3`, `events`, `internal`) go: name
-things so that a flat `dcfs::` stays unambiguous (N1-N6).
+All code is in `namespace dcfs`, flat: no nested namespaces, with two
+exceptions, `dcfs::syscalls` (its wrappers keep their libc names and so
+need the qualifier) and `dcfs::sqlite3` (the SQLite wrapper layer). Call
+them as `syscalls::open(...)` and `sqlite3::Connection`, never
+`dcfs::syscalls::open` or `dcfs::sqlite3::Connection` and never with a
+`using`. The other sub-namespaces (`cache`, `backing`, `testonly`,
+`events`, `internal`) go: name things so that a flat `dcfs::` stays
+unambiguous (N1, N2, N3, N5, N6). An exception for `backing` is being
+requested from russ (N2).
 
 ### 1.4 Enums
 
@@ -315,6 +322,7 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
 
 ## 3. Bazel
 
+- Bazel's BUILD style guide, as buildifier enforces it (1.1).
 - Targets are `snake_case` after the file stem (`metadata_cache`,
   `metadata_cache_test`); a matrix test generates `<name>_ext4`, `_xfs`,
   `_btrfs`. Load rules explicitly (`dcfs/BUILD.bazel:1-3`). `testonly = 1`
@@ -339,25 +347,36 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
 
 ## 4. Shell
 
-Google's shell guide is not adopted: this is the repository's own rule.
-- Two dialects, by where the script runs.
-  - POSIX `sh` (`#!/bin/sh`, 55 scripts): all guest scripts (busybox ash:
-    `test/qemu/guest/*`, `guest/init`), `third_party/*` build and smoke
-    helpers, `test/qemu/scripts/`. No `[[`, arrays, `local` or `function`;
-    `[ ]`, `$(...)` (never backticks), `printf`.
-  - bash (`#!/bin/bash`, 7 scripts): `.github/ci/*`,
-    `formal/trace_validate.sh`, `tools/tool_identity_test.sh`; `set -euo
-    pipefail`, `[[ ]]` allowed.
-- Host-side scripts begin `set -eu` (bash: `-euo pipefail`; 25 scripts).
-  **Guest test scripts do not use `set -e`**: a failed check is a `TEST ...
+Google's shell guide applies: bash, 2-space indent (no tabs), 80 columns,
+`[[ ]]`, `local`, `lower_snake` functions, `UPPER_SNAKE` constants, a file
+header comment, `$(...)`, quoted expansions, and a `main` function in a
+script that defines any other function. shfmt enforces the layout:
+`shfmt -i 2 -ci -bn` (2 spaces, indented `case` alternatives, a pipe or
+`&&` that wraps starts the next line, as the guide's pipeline and `case`
+sections show; check the flags against the guide's examples when 7.6 pins
+shfmt), run by `//tools:format_test`; shellcheck is pinned in the same step
+(7.6). Our additions and narrowings:
+- **Host-side scripts are bash**: `#!/bin/bash`, then `set -euo pipefail`
+  (our narrowing; the guide only says to use `set` flags sparingly). 7 do
+  today (`.github/ci/*`, `formal/trace_validate.sh`,
+  `tools/tool_identity_test.sh`).
+- **One documented deviation: scripts that run inside the busybox guest**
+  (`test/qemu/guest/*`, `guest/init`) are POSIX `sh` (`#!/bin/sh`: no
+  `[[`, arrays, `local` or `function`; `[ ]`, `$(...)`), because the guest
+  has no bash. They still follow the guide's layout, naming and quoting.
+  Revisit when the Alpine work (phase 24) can put bash in the guest.
+- **Guest test scripts do not use `set -e`**: a failed check is a `TEST ...
   FAIL` line and the script goes on. They set `FAILED=0`, source `lib.sh`,
   `trap cleanup EXIT` (dumping the daemon log when something failed) and
-  `exit "$FAILED"`.
+  `exit "$FAILED"`. The line protocol is in section 2.
+- **Length.** The guide says a script over 100 lines should be rewritten in a
+  structured language. 37 scripts are over 100 lines (27 guest, 10 host;
+  the guest scripts total 8,418 lines). russ accepted shell for guest tests
+  (2026-10-07): they stay, with shared helpers in `lib.sh` instead of
+  copies (C15). New host-side tooling over 100 lines is Python (section 5).
 - A comment right after the shebang says what the script does and how it
-  runs (63 of 63 scripts). Comments say why, as in C++.
-- Indent with tabs (48 scripts; 5 use spaces, C11). Quote every expansion
-  (`"$SRC"`, `"$@"`). Check names are lower case with hyphens, functions
-  with underscores. The zsh caveats belong to `CLAUDE.md`, not scripts.
+  runs (63 of 63 scripts). Check names are lower case with hyphens. The zsh
+  caveats belong to `CLAUDE.md`, not scripts.
 
 ## 5. Python
 
@@ -394,9 +413,16 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
   program does and does not do. Measured numbers carry units, date and
   environment ("about 1 minute (KVM)", "released 2026-05-13; the latest
   stable release as of 2026-10-05"). A decision names its maker and date
-  ("(russ, 2026-10-06)"). Markdown wraps at 80 columns (tables and URLs
-  excepted); headings are sentence case; a list item stating a rule may
-  open with it in bold (`docs/design.md`, "Architecture and layering").
+  ("(russ, 2026-10-06)"). Headings are sentence case; a list item stating
+  a rule may open with it in bold (`docs/design.md`, "Architecture and
+  layering").
+- **Markdown follows Google's docguide**: ATX headings (`#`), one H1 per
+  file, `-` bullets, 80-column wrap (tables, links and code excepted), no
+  trailing whitespace, and fenced code blocks with the language declared
+  (`bash`, `text`, `c++`, `python`, `starlark`; `text` for output). The tree
+  already uses ATX only (0 setext), `-` only (0 `*`), no trailing
+  whitespace and no tabs in 24 docs outside `docs/plan/`; D1, D2 are the
+  rest.
 - **Commit subject**: `N.M: area: what changed` for a plan step (`23.4:
   copy_file_range, the ioctl allowlist and O_TMPFILE`); `plan:`, `notes:`
   and `agents:` for orchestrator edits, notes and agent instructions. No
@@ -414,8 +440,10 @@ Sites that break Google style or a rule above, as of c632ca4. Run each
 command from the repository root in bash. Rows marked (new) come from the
 2026-10-07 decisions. Google rules surveyed: formatting, includes,
 `using namespace`, `typedef`, `thread_local`, exceptions, casts, naming,
-header guards, `explicit` constructors, macros; others (and the Google
-Python rules beyond line length) were not.
+header guards, `explicit` constructors, macros; for shell, indent, line
+length, shebang, `main`, `[[`, backticks; for Markdown, headings, bullets,
+fences, line length, whitespace. Other rules (the Google Python rules beyond
+line length, shellcheck findings, quoting) were not surveyed.
 
 | # | Rule | Count | Find them |
 |---|---|---|---|
@@ -429,7 +457,14 @@ Python rules beyond line length) were not.
 | C8 | Syscall message: `name(args)` or bare name | 2: `main.cc:191,323` | `grep -rnE 'ErrnoToStatus\(.*"[a-z_0-9]+ "' dcfs --include='*.cc'` |
 | C9 | `syscalls::` only in `backing.cc` and the listed peers | `mounts_below.cc:77,95` is not in `docs/design.md`'s list (add it there or route through `backing.cc`) | `grep -rln 'syscalls::' dcfs --include='*.cc' --include='*.h' \| grep -v -e _test -e testonly` |
 | C10 | Raw libc only in `syscalls.cc` | 8: `device_id.cc:126,140,144,148,150`, `main.cc:180,321,325` | `grep -nE '(^\|[^_a-zA-Z:.])(::)?(ioctl\|fstatfs\|open\|close\|stat\|mkdir)\(' dcfs/device_id.cc dcfs/main.cc` |
-| C11 | Shell indented with tabs | 5 scripts with spaces: `formal/trace_validate.sh`, `tools/smoke_readonly.sh`, `tools/tool_identity_test.sh`, `tools/format.sh`, `.github/ci/osv.sh` (1 line) | `grep -lP '^ +\S' $(git ls-files '*.sh')` |
+| C11 | Google shell: 2-space indent, no tabs (4) (7.6) | 48 scripts use tabs (all guest scripts but a few wrappers, most host scripts); 5 use spaces and conform (`formal/trace_validate.sh`, `tools/smoke_readonly.sh`, `tools/tool_identity_test.sh`, `tools/format.sh`, `.github/ci/osv.sh`) | `grep -lP '^\t' $(git ls-files '*.sh' test/qemu/guest/init)` |
+| SH1 | Host-side scripts are bash (4) (7.6) | 19 of 26 host-side scripts are `#!/bin/sh` (`third_party/*` build and smoke helpers, `test/qemu/scripts/`, `tools/`); each becomes `#!/bin/bash` with `set -euo pipefail` (all 19 already have `set -eu`) | `grep -L '^#!/bin/bash' $(git ls-files '*.sh' \| grep -v test/qemu/guest/)` |
+| SH2 | Google shell: 80 columns (4) (7.6) | 246 lines over 80 in 48 scripts (measured with a tab as 2 columns; 375 lines in 54 scripts with a tab as 8) | `grep -nE '^.{81,}$' $(git ls-files '*.sh')` after expanding tabs (`expand -t2`) |
+| SH3 | A script with functions has `main` (4) (7.6) | 40 scripts define functions, 0 define `main` | `grep -L '^main()' $(grep -lE '^[a-z_]+\(\) \{' $(git ls-files '*.sh'))` |
+| SH4 | Bash scripts use `[[ ]]`, not `[ ]` (4) (7.6) | 13 `[ ... ]` tests in 3 bash scripts: `.github/ci/prepare.sh` 7, `tools/tool_identity_test.sh` 4, `.github/ci/test.sh` 2 | `grep -nE '(^\|[^[])\[ ' .github/ci/*.sh tools/tool_identity_test.sh` |
+| SH5 | shfmt formatting and shellcheck clean (4) (7.6) | not pinned, not run; the number of findings is unknown (no backtick command substitution: 0 of 63 scripts) | after pinning: `bazel test //tools:format_test` |
+| D1 | Markdown: fenced blocks declare a language (7) | 37 bare fences in 12 files (`README.md` 11, `test/qemu/README.md` 8, `tools/sbom/README.md` 3, `third_party/*` 12, `docs/design.md` 2, others) | `grep -rnE '^[`]{3}$' $(git ls-files '*.md' \| grep -v docs/plan/)` (opening and closing fences both match: halve) |
+| D2 | Markdown: 80-column wrap (7) | 21 prose lines over 80 in 9 files outside `docs/plan/` (`formal/README.md` 11, `test/qemu/README.md` 2, 7 `third_party` READMEs/`tools/sbom/README.md` 1 to 2 each); tables, headings, links exempt | `grep -nE '^.{81,}$' $(git ls-files '*.md' \| grep -v -e docs/plan/ -e .claude/) \| grep -v -e '\|' -e http -e '^[^:]*:[0-9]*:#'` |
 | C12 | Every `third_party/<name>/` has a README with the pin | 1: `pjdfstest` (pin only in `MODULE.bazel:21-26`) | `for d in third_party/*/; do [ -f $d/README.md ] \|\| echo $d; done` |
 | C13 | BUILD list elements indented 4 (buildifier) | 292 lines at 6 spaces, all in `dcfs/BUILD.bazel` | `grep -cP '^      \S' dcfs/BUILD.bazel` |
 | C14 | No unused include | `syscalls.h:21` (`absl/base/nullability.h`); others need F6 | `grep -n 'nullability\|absl_nonnull' dcfs/syscalls.h dcfs/syscalls.cc` |
@@ -437,9 +472,9 @@ Python rules beyond line length) were not.
 | C16 | Google: no using-directives | 1: `bench/dcfs_bench.cc:396` (`using namespace dcfs_bench;`) | `grep -rn 'using namespace' dcfs bench tools` |
 | P1 | Google Python: 80 columns (5) | 50 lines over 80: `sbom.py` 25, `sbom_test.py` 22, `tool_keys_test.py` 3 | `grep -nE '^.{81,}$' $(git ls-files '*.py')` |
 | N1 | Flat `dcfs`: remove `dcfs::cache` (1.3) (new) | 3 declarations (`metadata_cache.h/.cc/_test.cc`); 673 `cache::` uses (407 production) in 20 files. Clash if flattened: `ParentOf` (same parameters as `backing::ParentOf`, differing only in return type), `SetXattr`, `RemoveXattr` all also exist in `backing` (3 names: rename one side first) | `grep -rn 'namespace cache\|cache::' dcfs bench \| wc -l` |
-| N2 | Remove `dcfs::backing` | 3 declarations; 147 uses (138 production) in 15 files; clashes: the same 3 names as N1 | `grep -rn 'namespace backing\|backing::' dcfs bench \| wc -l` |
+| N2 | Remove `dcfs::backing` (an exception is being requested from russ: a layer boundary like `syscalls`; it would also dissolve the three clashes without renames) | 3 declarations; 147 uses (138 production) in 15 files; clashes: the same 3 names as N1 | `grep -rn 'namespace backing\|backing::' dcfs bench \| wc -l` |
 | N3 | Remove `dcfs::testonly` | 8 declarations (all in `dcfs/testonly/`); 4 uses | `grep -rn 'namespace testonly\|testonly::' dcfs bench` |
-| N4 | Remove `dcfs::sqlite3` | 3 declarations (`sqlite.h/.cc`, `sqlite_test.cc`); 104 uses (62 production) in 13 files; generic names become dcfs-wide (`Connection`, `Statement`, `ConnectionFactory`, `Durability`); no clash found; `sqlite3` is also the C library's struct tag | `grep -rn 'namespace sqlite3\|sqlite3::' dcfs bench \| wc -l` |
+| N4 | `sqlite3::` never `dcfs::sqlite3::` or `using` (1.3) | `dcfs::sqlite3` stays (exception): 3 declarations (`sqlite.h/.cc`, `sqlite_test.cc`), 104 `sqlite3::` uses (62 production) in 13 files are fine; 1 `using sqlite3::Statement;` to drop (`metadata_cache.cc:37`) | `grep -rn 'dcfs::sqlite3::\|using .*sqlite3' dcfs bench` |
 | N5 | Remove `dcfs::events` | 2 declarations (`protocol_events.h`); 182 uses (164 production) in 7 files; generic names (`Request`, `Op`, `Ino`) become dcfs-wide; no clash found | `grep -rn 'namespace events\|events::' dcfs bench \| wc -l` |
 | N6 | Remove `dcfs::internal` | 2 declarations (`ret_check.h`, `sqlite.h`); 9 uses; helpers would need distinct names (`RetCheck*`, `IsOptional`) | `grep -rn 'namespace internal\|internal::' dcfs` |
 | N7 | `syscalls::` never `dcfs::syscalls::` or `using` | 0 code sites (2 in comments: `backing.h:33`, `syscalls_fault_test.cc:81`); the 190 `syscalls::` uses (99 production) are fine | `grep -rn 'dcfs::syscalls::\|using .*syscalls' dcfs bench` |
@@ -448,7 +483,7 @@ Python rules beyond line length) were not.
 | S2 | No composition in a wrapper | 4 wrappers loop and decode: `flistxattr`, `fgetxattr` (`syscalls.cc:168,196`, 2 attempts) and the `_opath` pair (:287,306, 4 attempts); the retry moves to backing | `grep -n 'attempt <' dcfs/syscalls.cc` |
 | S3 | ADL hooks are hidden friends in their class's namespace (1.2) (new) | 1: `LogOpenFlags` and its `AbslStringify` (`syscalls.h:187-190,209`: friend declared in the class, defined out of line). They leave `syscalls.h` together, the hook defined in the class as a hidden friend, namespace unchanged (`dcfs`) so ADL still finds it. Already conforming: `AbslHashValue` in `file_handle.h:33`, `device_id.h:32`. Nothing in `dcfs::syscalls` defines a hook (only the `ioctl` template), so the `syscalls::name` rule and a flattening cannot break ADL | `grep -rnE 'AbslStringify\|AbslHashValue\|operator<<\|swap\(' dcfs --include='*.h' --include='*.cc' \| grep -v _test.cc` |
 | F1 | `//tools:format_test` (small) in check mode (1.1) (new) | does not exist | `bazel query //tools:format_test` |
-| F2 | Pinned clang-format and buildifier | not in `MODULE.bazel`; neither is on the host (phase 7 LLVM toolchain) | `grep -n 'clang\|buildifier' MODULE.bazel` |
+| F2 | Pinned clang-format, buildifier, shfmt, shellcheck | none in `MODULE.bazel`, none on the host (phase 7 LLVM toolchain; shfmt and shellcheck in 7.6) | `grep -n 'clang\|buildifier\|shfmt\|shellcheck' MODULE.bazel` |
 | F3 | `bazel run //tools:format` | `tools/format.sh` is a host script that skips missing tools | `cat tools/format.sh` |
 | F4 | `.githooks/pre-commit` (opt-in) | does not exist | `ls .githooks` |
 | F5 | `tools/*.c` reformatted | 2,537 tab-indented lines (`fhtest.c`, `testutil.c`) | `grep -lP '\t' tools/*.c` |
