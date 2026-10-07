@@ -88,14 +88,26 @@ class TestKey:
         self.pem = ('-----BEGIN PUBLIC KEY-----\n' + b64 +
                     '\n-----END PUBLIC KEY-----\n')
 
-    def sign(self, signed):
-        size = (self.n.bit_length() + 7) // 8
-        digest = (bytes.fromhex('3021300906052b0e03021a05000414') +
-                  hashlib.sha1(signed).digest())
-        padded = (b'\x00\x01' + b'\xff' * (size - len(digest) - 3) + b'\x00' +
-                  digest)
-        return pow(int.from_bytes(padded, 'big'), self.d,
-                   self.n).to_bytes(size, 'big')
+    def size(self):
+        return (self.n.bit_length() + 7) // 8
+
+    def sign_block(self, block):
+        """Signs an already padded block: private-key operation, no checks."""
+        return pow(int.from_bytes(block, 'big'), self.d,
+                   self.n).to_bytes(self.size(), 'big')
+
+    def digest_info(self, signed, algorithm):
+        prefix = {
+            'sha1': '3021300906052b0e03021a05000414',
+            'sha256': '3031300d060960864801650304020105000420',
+        }[algorithm]
+        return bytes.fromhex(prefix) + hashlib.new(algorithm, signed).digest()
+
+    def sign(self, signed, algorithm='sha1'):
+        digest = self.digest_info(signed, algorithm)
+        return self.sign_block(b'\x00\x01' + b'\xff' *
+                               (self.size() - len(digest) - 3) + b'\x00' +
+                               digest)
 
 
 KEY = TestKey()
@@ -112,8 +124,9 @@ def _tar_gz(members):
     return gzip.compress(buf.getvalue(), mtime=0)
 
 
-def _signature(signed):
-    return _tar_gz({f'.SIGN.RSA.{KEY_FILE}': KEY.sign(signed)})
+def _signature(signed, algorithm='sha1'):
+    scheme = 'RSA' if algorithm == 'sha1' else 'RSA256'
+    return _tar_gz({f'.SIGN.{scheme}.{KEY_FILE}': KEY.sign(signed, algorithm)})
 
 
 def make_apk(files=None):
@@ -135,6 +148,75 @@ def make_index(records):
 
 def flip(data, offset):
     return data[:offset] + bytes([data[offset] ^ 1]) + data[offset + 1:]
+
+
+class VerifierTest(unittest.TestCase):
+    """rsa_verify accepts exactly one encoding of a signature."""
+
+    DATA = b'signed bytes'
+
+    def verify(self, signature, algorithm='sha1'):
+        return apk.rsa_verify(KEY.pem, algorithm, self.DATA, signature)
+
+    def block(self, padding_byte=0xFF, block_type=1, algorithm='sha1',
+              trailer=b'', pad_len=None, separator=b'\x00'):
+        digest = KEY.digest_info(self.DATA, algorithm)
+        if pad_len is None:
+            pad_len = KEY.size() - len(digest) - 3 - len(trailer)
+        return (b'\x00' + bytes([block_type]) + bytes([padding_byte]) * pad_len
+                + separator + digest + trailer)
+
+    def test_the_well_formed_signature_is_accepted(self):
+        self.assertTrue(self.verify(KEY.sign_block(self.block())))
+
+    def test_garbage_padding_behind_the_right_digest_is_refused(self):
+        self.assertFalse(self.verify(KEY.sign_block(self.block(0xFE))))
+        mixed = bytearray(self.block())
+        mixed[5] = 0x00
+        self.assertFalse(self.verify(KEY.sign_block(bytes(mixed))))
+
+    def test_block_type_2_is_refused(self):
+        self.assertFalse(self.verify(KEY.sign_block(self.block(block_type=2))))
+
+    def test_trailing_garbage_after_the_digest_is_refused(self):
+        # The classic forgery for lenient parsers: a short run of padding
+        # and junk after the hash.
+        self.assertFalse(self.verify(KEY.sign_block(
+            self.block(trailer=b'\x01' * 20))))
+
+    def test_a_missing_separator_is_refused(self):
+        self.assertFalse(self.verify(KEY.sign_block(
+            self.block(separator=b'\xff'))))
+
+    def test_a_signature_of_the_wrong_hash_is_refused(self):
+        self.assertFalse(self.verify(KEY.sign(b'other bytes')))
+        self.assertFalse(self.verify(KEY.sign(self.DATA, 'sha256')))
+
+    def test_a_signature_not_below_the_modulus_is_refused(self):
+        good = int.from_bytes(KEY.sign(self.DATA), 'big')
+        forged = (good + KEY.n).to_bytes(KEY.size() + 1, 'big')
+        self.assertFalse(self.verify(forged))
+        same_length = good + KEY.n
+        if same_length.bit_length() <= KEY.size() * 8:
+            self.assertFalse(self.verify(same_length.to_bytes(KEY.size(),
+                                                              'big')))
+
+    def test_sha256_signatures_are_accepted_and_checked(self):
+        signature = KEY.sign(self.DATA, 'sha256')
+        self.assertTrue(self.verify(signature, 'sha256'))
+        self.assertFalse(self.verify(signature, 'sha1'))
+        self.assertFalse(self.verify(flip(signature, 40), 'sha256'))
+
+    def test_an_rsa256_signed_index_and_apk_are_verified(self):
+        keys = {KEY_FILE: KEY.pem}
+        body = _tar_gz({'DESCRIPTION': b'v3.99.0-1-gabc',
+                        'APKINDEX': b'P:x\nV:1\n\n'})
+        index = _signature(body, 'sha256') + body
+        self.assertEqual(apk.parse_index(index, keys)[0]['P'], 'x')
+        forged = _tar_gz({'DESCRIPTION': b'v3.99.0-1-gabc',
+                          'APKINDEX': b'P:evil\nV:1\n\n'})
+        with self.assertRaisesRegex(apk.ApkError, 'BAD SIGNATURE'):
+            apk.parse_index(_signature(body, 'sha256') + forged, keys)
 
 
 class IndexTest(unittest.TestCase):

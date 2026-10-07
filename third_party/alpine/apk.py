@@ -119,10 +119,10 @@ def rsa_verify(pem, algorithm, signed, signature):
     """
     modulus, exponent = _rsa_public_key(pem)
     size = (modulus.bit_length() + 7) // 8
-    if len(signature) != size:
+    value = int.from_bytes(signature, 'big')
+    if len(signature) != size or value >= modulus:
         return False
-    padded = pow(int.from_bytes(signature, 'big'), exponent,
-                 modulus).to_bytes(size, 'big')
+    padded = pow(value, exponent, modulus).to_bytes(size, 'big')
     digest = _DIGEST_INFO[algorithm] + hashlib.new(algorithm, signed).digest()
     expected = (b'\x00\x01' + b'\xff' * (size - len(digest) - 3) + b'\x00' +
                 digest)
