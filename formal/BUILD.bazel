@@ -238,6 +238,85 @@ LIFETIME_KNOWN_BUGS = {
     for bug, violation in LIFETIME_KNOWN_BUGS.items()
 ]
 
+IDENT = [
+    "MCident.tla",
+    "ident.tla",
+]
+
+# The identity model (README.md, "The identity model"): today's identity,
+# with changes behind dcfs's back, with a power loss and the weakest
+# supported evidence, with the birth time as the only evidence, with
+# boundary stubs, and Phase 14's identity.
+[
+    tlc_test(
+        name = "ident%s_test" % suffix,
+        size = "medium",
+        timeout = "moderate",
+        config = "MC_ident%s.cfg" % suffix,
+        spec = "MCident.tla",
+        srcs = ["ident.tla"],
+    )
+    for suffix in [
+        "",
+        "_oob",
+        "_power",
+        "_btime",
+        "_stubs",
+        "_target",
+    ]
+]
+
+# Its known bugs (each a few seconds).
+IDENT_KNOWN_BUGS = {
+    # OpenNode without VerifyBackingIdentity.
+    "ident_skip_identity_statx": "Invariant HeldResolvesToItsObject is violated",
+    # A probe reading by name instead of through one descriptor, in either
+    # order (the 26.3 question).
+    "ident_probe_by_name_handle_first": "Invariant HeldResolvesToItsObject is violated",
+    "ident_probe_by_name_gen_first": "Invariant HeldResolvesToItsObject is violated",
+    # Generations that follow from the row id, not random.
+    "ident_generation_from_counter": "Invariant OneHandleOneObject is violated",
+    # A stub's generation not drawn afresh.
+    "ident_stub_generation_reused": "Invariant OneHandleOneObject is violated",
+    # Row ids as MAX(id) + 1, not AUTOINCREMENT.
+    "ident_rowid_from_max": "Invariant NoBadInode is violated",
+}
+
+[
+    tlc_test(
+        name = "known_bug_%s_test" % bug,
+        size = "small",
+        timeout = "short",
+        config = "known_bugs/%s.cfg" % bug,
+        expect_violation = violation,
+        spec = "known_bugs/%s.tla" % bug,
+        srcs = IDENT,
+    )
+    for bug, violation in IDENT_KNOWN_BUGS.items()
+]
+
+# What the identity model shows does not hold (limitations/ident_limits.tla).
+IDENT_LIMITATIONS = {
+    "ident_wipe": "Invariant ServedWhileLive is violated",
+    "ident_power_loss": "Invariant ServedWhileLive is violated",
+    "ident_no_generations": "Invariant ReuseDetected is violated",
+    "ident_target_out_of_band": "Invariant NoBadInode is violated",
+    "ident_target_uncached_nodeid": "Invariant HeldResolvesToItsObject is violated",
+}
+
+[
+    tlc_test(
+        name = "limitation_%s_test" % limitation,
+        size = "small",
+        timeout = "short",
+        config = "limitations/%s.cfg" % limitation,
+        expect_violation = violation,
+        spec = "limitations/ident_limits.tla",
+        srcs = IDENT,
+    )
+    for limitation, violation in IDENT_LIMITATIONS.items()
+]
+
 # Trace validation (README.md, "Trace validation"): the spec, its
 # configuration and the script the tla_trace_test targets run (in //dcfs and
 # //test/qemu, next to the guests that record the traces).

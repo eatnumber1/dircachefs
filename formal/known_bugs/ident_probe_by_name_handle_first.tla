@@ -1,0 +1,23 @@
+------------------ MODULE ident_probe_by_name_handle_first ------------------
+(***************************************************************************)
+(* A probe whose reads each resolve the name again, instead of going       *)
+(* through the one O_PATH descriptor ProbeObject reads everything through: *)
+(* the statx, then the handle, then the generation (the code's order).     *)
+(* The descriptor pins the inode, so its number cannot be recycled between *)
+(* the reads; by name, it can.                                             *)
+(*                                                                         *)
+(* Put in by ProbeByName, ProbeOrder "handle_first", with OutOfBand and no *)
+(* birth time (Evidence: the handle's generation and FS_IOC_GETVERSION).   *)
+(* Expected: HeldResolvesToItsObject is violated: the statx of a reads o1; *)
+(* behind dcfs's back a is unlinked and o3 created on o1's inode number;   *)
+(* the handle and the generation read o3's; the row (made for o1, whose    *)
+(* attributes the reply carried) now matches o3, and the nodeid resolves   *)
+(* to o3. ident_probe_by_name_gen_first is the same with the generation    *)
+(* read first: the order of the two does not matter. A recycling between   *)
+(* the two reads is caught in either order (the handle's generation or     *)
+(* FS_IOC_GETVERSION disagrees with the other); one between the statx and  *)
+(* both is not, and only the birth time (from the statx) or one descriptor *)
+(* for all three reads catches it.                                         *)
+(***************************************************************************)
+EXTENDS MCident
+=============================================================================

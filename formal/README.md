@@ -21,6 +21,13 @@ dcfs keeps for each (rows, removed records, the written-file set and its
 held descriptors, open files), and when each goes: see
 [The lifetime model](#the-lifetime-model).
 
+A fourth, `ident.tla`, covers what a nodeid and its generation stand for:
+how dcfs mints them, how a request and an NFS client's handle resolve to a
+backing object, and what happens when the backing filesystem recycles an
+inode number, at a crash, a power loss or a cache wipe, and with changes
+behind dcfs's back, for today's identity and Phase 14's: see
+[The identity model](#the-identity-model).
+
 This file assumes no TLA+ background.
 
 Contents:
@@ -39,6 +46,7 @@ Contents:
 12. [Changing the model](#changing-the-model)
 13. [The revalidation model](#the-revalidation-model)
 14. [The lifetime model](#the-lifetime-model)
+15. [The identity model](#the-identity-model)
 
 ## Running it
 
@@ -48,6 +56,7 @@ bazel test //formal:small_test             # the real model, small bounds (~1 mi
 bazel test //formal:known_bug_crash_f1_phase1_not_durable_test
 bazel test //formal:reval_test             # the revalidation model (~20 s)
 bazel test //formal:lifetime_test          # the lifetime model (~40 s)
+bazel test //formal:ident_test             # the identity model (~15 s)
 ```
 
 (On russ's machine, wrap Bazel in `sg kvm -c '...'` as for every Bazel
@@ -1330,3 +1339,203 @@ kernel's `FORGET` counts are not validated (only the harness's forged
 ones; `removed_test` checks in a guest that no `FORGET` exceeds dcfs's
 count). A new daemon process would also need to know which nodeids' traces
 the killed one had begun, as it does for directories.
+
+## The identity model
+
+`ident.tla` is a fourth, separate model, of identity: what a nodeid and its
+FUSE generation stand for, how dcfs mints them, what a request and an NFS
+client's handle resolve to, and what is left of that after the backing
+filesystem recycles an inode number, after a daemon crash, a power loss or
+a cache wipe, and after changes behind dcfs's back. The kernel puts
+`(nodeid, generation)` in an NFS file handle (`fuse_encode_fh`); decoding
+one (`fuse_get_dentry`) uses the kernel's own inode if its generation
+matches, and otherwise sends `LOOKUP(nodeid, ".")` and returns `ESTALE`
+unless the reply carries the handle's generation (an `ENOENT` reply becomes
+`ESTALE` too). An entry reply with another generation than the inode the
+kernel holds for that nodeid makes the kernel mark that inode bad
+(`fuse_iget`): its users get `EIO`, not `ESTALE`. Requests on an inode
+carry only the nodeid, so the generation protects only the decode.
+
+The invariant, from `docs/design.md` ("Safe NFS export", "Identity
+model"): a nodeid and generation never stand for two objects; a nodeid the
+kernel holds, or a handle it accepts, resolves to the object it was handed
+out for or to `ESTALE`, never to another and never to `EIO`; a handle of
+an object that still exists is served, one of an object that is gone gets
+`ESTALE`; a recycled inode number is caught at every entry point that
+resolves identity.
+
+The model has both identities, by a constant:
+
+- **Today** (`Target = FALSE`): a nodeid is a row id (`AUTOINCREMENT`),
+  its generation a random draw (`cache::UpsertInode`); the row records the
+  object's inode number, generation (`FS_IOC_GETVERSION`, 0 when it cannot
+  be read), handle and birth time, read by one probe through one `O_PATH`
+  descriptor (`ProbeObject`). A request that reaches the backing
+  filesystem reopens the handle (`open_by_handle_at`) and compares the
+  result with the row (`VerifyBackingIdentity`): `ESTALE`, and the row
+  goes, if the handle is stale or reaches another object. A probe of a
+  name invalidates the rows of the old objects of its inode number
+  (`UpsertInode`). `LOOKUP(nodeid, ".")` is answered from the row. After an
+  unclean shutdown the start probes the dirty set's rows by handle
+  (`ProbeRecoveredRows`).
+- **Phase 14's target** (`Target = TRUE`, `docs/plan/phases/14-*.md`): the
+  nodeid is the backing inode number and the generation the one in the
+  backing handle; rows are keyed by inode number; a request for a nodeid
+  without a row opens the inode by number (any generation), and
+  `LOOKUP(nodeid, ".")` replies with the generation it finds, which the
+  kernel compares.
+
+How it relates to the others: it shares no module and no state.
+`lifetime.tla` owns the kernel's lookup counts, the open files and the
+held descriptor, and when rows and removed records go; it takes a row's
+handle to reach its object while the object is allocated. `ident.tla`
+takes that handle apart: what dcfs can see of an object (`Evidence`), how
+the decode and the identity check decide, what a power loss rolls back
+and what a wipe loses, and the NFS client's handles, which outlive the
+mount and the daemon. It keeps only what it needs of the lifetime: a
+kernel inode per nodeid (made by an entry reply, gone at eviction or
+with the mount) and a removed record from an unlink until the eviction.
+`dcfs.tla` is where a cached dentry is shown to name the object a probe
+would find; here every lookup probes.
+
+```sh
+bazel test //formal:ident_test //formal:ident_oob_test //formal:ident_power_test \
+  //formal:ident_btime_test //formal:ident_stubs_test //formal:ident_target_test
+bazel test //formal:known_bug_ident_skip_identity_statx_test   # and the other known_bug_ident_*
+bazel test //formal:limitation_ident_wipe_test                 # and the other limitation_ident_*
+```
+
+By hand, as above, with `MCident` (or a variant module) instead of `MC`:
+`-config MC_ident.cfg MCident`.
+
+### What is in it
+
+The backing directory: names `Names`, objects `Objs`, each with a fixed
+inode number (`InoOf`; two objects with one number are a recycling: `o3`
+gets `o1`'s once `o1` is freed) and a generation and birth time unique to
+it (`GenOf`). What dcfs can see of an object besides its inode number is
+`Evidence`: the generation in the handle (`handle_gen`: ext4, xfs and
+btrfs), `FS_IOC_GETVERSION` (`getversion`: their regular files and
+directories), the birth time (`btime`); 0 is "unknown", as in the code.
+
+| Variable | Meaning | In dcfs |
+|---|---|---|
+| `bName`, `bState` | the object at each name; each object `unborn`, `alive` or `dead` (freed once nothing names it and no removed record holds it) | the backing filesystem |
+| `rows[r]` | nodeid `r`'s row: the inode number, handle (inode number and generation), generation and birth time it recorded, its FUSE generation `fgen`, whether it is a stub (and its name); `obj`, the object (or a stub's name) it was made for, is for checking only | `inodes`, `stubs` |
+| `nextId`, `stubHigh` | the next row id; the highest stub nodeid handed out | `AUTOINCREMENT`, `cache_state.last_stub_id` |
+| `dirty`, `dur` | the dirty set; the database as of the last durable commit, which a power loss rolls back to | `dirty`; WAL with `synchronous=NORMAL`, kSync phase 1s |
+| `rec[r]` | the object a removed record answers for | `removed_` |
+| `kin[r]` | the kernel's inode for nodeid `r` in this mount: its generation, and the object of the reply that made it (checking only) | the kernel (model-only) |
+| `nfs` | the NFS client's handles `[id, gen, obj]` (`obj` for checking) | the client (model-only) |
+| `mints` | random generations drawn: each is fresh | `Context::rng` |
+| `probe` | a probe by name in flight (only with `ProbeByName`, not the code) | |
+| `run`, `clean`, `crashes`, `powers`, `wipes`, `badMade` | the run; the clean-shutdown flag; the bounds' counts; dcfs made the kernel mark an inode bad (history) | |
+
+| Action | What it does | dcfs |
+|---|---|---|
+| `Lookup(n)` | the probe of n (one step: one descriptor); the stub of n goes; `UpsertInode`: the row that matches (inode number, generations agreeing, handle bytes, birth times agreeing), else the stale rows of that inode number go and a new row takes the next id and a fresh generation (Phase 14: the row of the inode number); the entry reply | `LookupOrPopulate`, `ResolveName`, `ProbeObject`, `UpsertInode`, `ReplyEntry` |
+| `Refuse(n)` | a refused name's stub: the one it has, else the next id up from `last_stub_id` with a fresh generation | `cache::SetRefused` |
+| `Create(n)` | a new object, maybe on a recycled inode number, recorded and replied | `RecordNewChild` |
+| `Unlink(n)`, `Rename(n, m)` | phase 1 marks the row dirty (a durable commit unless it already was); an unlink's removed record holds the object if the kernel holds the nodeid, and phase 3 deletes the row; a rename keeps the row and nodeid | `RemoveChild`, `HoldForRemoval`, `Rename` |
+| `Access(r)` | a request on a nodeid the kernel or a handle names reaches the backing filesystem and resolves to `ESTALE`: the row goes | `OpenNode`, `VerifyBackingIdentity`, `ForgetStale` (and through `OpenNode`: `ParentOf`, refreshes, opens) |
+| `DotLookup(h)` | the client presents a handle the kernel has no matching inode for: `LOOKUP(id, ".")`, answered from the row (Phase 14 without a row: by inode number); the kernel makes its inode and compares generations | `Lookup` of `"."`, `EntryFor` |
+| `NfsTake(r)`, `Evict(r)` | the client takes a handle of an inode the kernel holds; the kernel evicts an inode (its removed record goes) | `fuse_encode_fh`; `Forget` |
+| `Sync`, `Persist` | a sync point empties the dirty set (not durable by itself); a durable commit (a phase 1 elsewhere, a WAL checkpoint) | `SyncBacking`, `ClearDirty` |
+| `OobUnlink(n)`, `OobCreate(n)`, `OobRename(n, m)` | with `OutOfBand`, changes behind dcfs's back, running or not (a create may recycle an inode number, or mount a filesystem at a name) | |
+| `Crash`, `PowerLoss`, `Stop`, `Wipe`, `Start` | the daemon dies (the database keeps its commits) or the power goes (it rolls back to `dur`; the backing filesystem keeps what it did); a clean stop; the database deleted while stopped; the start, which after an unclean shutdown probes the dirty rows by handle | `StartRun`, `ProbeRecoveredRows`, `FinishRun` |
+| `ProbeStat(n)`, `ProbeRead` | with `ProbeByName` (not the code): the statx, then the handle and the generation in `ProbeOrder`, each read resolving the name again | |
+
+| Property | Says |
+|---|---|
+| `OneHandleOneObject` | (1) no two references the kernel or the client holds with one `(nodeid, generation)` stand for different objects |
+| `HeldResolvesToItsObject` | ... a nodeid the kernel holds resolves to its object or to `ESTALE` |
+| `HandlesResolveToTheirObject` | ... and so does a handle the kernel accepts |
+| `ServedWhileLive` | (2) a handle of an object that still exists is accepted and reaches it |
+| `GoneIsStale` | ... and one of an object that is gone is not served (not for a stub whose boundary went behind dcfs's back: answered from its row until its parent is listed again) |
+| `ReuseDetected` | (3) a row whose object is gone resolves to `ESTALE` at every entry point (a reopen by handle, and through it `ParentOf` and the start's probe), and no probe of a live object matches it (`UpsertInode` does not take it over) |
+| `NoBadInode` | (4) dcfs never replies with another generation than the kernel's inode for that nodeid has (`fuse_iget` would mark it bad: `EIO`) |
+
+Point (4) across a restart is (1) for the client's handles: the nodeid in a
+handle is re-attached to the same object (its row survived) or answered
+`ESTALE` (no row, or a row of a reissued id with a fresh generation, which
+the kernel compares). Point (5), a filesystem without generations, is
+`Evidence`: with only the handle's generation, or only the birth time,
+everything holds (`MC_ident_power.cfg`, `MC_ident_btime.cfg`); with
+neither, `limitations/ident_no_generations` shows what breaks.
+
+Abstractions: a random generation is fresh (the design's 2^-32 per
+reissued nodeid taken as zero); every request and every probe is one step
+(the probe reads everything through one descriptor, which pins the inode:
+no recycling can come between its reads); a power loss rolls back only the
+database (`dcfs.tla`'s crash states cover the backing filesystem's side);
+a cached dentry answers as a probe would (`dcfs.tla`'s
+`CacheNeverWrong`); the root is not modelled; btrfs's identical handle
+after its own power loss (audit F6, which the birth time catches) is not
+modelled: every object has its own generation.
+
+### Configurations
+
+Distinct states from TLC's report (run of 2026-10-07 on russ's machine, 2
+workers, other lanes running).
+
+| Configuration | Test (tier) | Checks | States | Time |
+|---|---|---|---|---|
+| `MC_ident.cfg` | `ident_test` (medium) | today's identity, ext4's evidence, names a, b (o1, o2), o3 recycling o1's inode number, 3 row ids, 2 handles, 1 crash; every property | 11,351 | ~15 s |
+| `MC_ident_oob.cfg` | `ident_oob_test` (medium) | as above with changes behind dcfs's back; every property | 49,833 | ~35 s |
+| `MC_ident_power.cfg` | `ident_power_test` (medium) | a power loss and a crash, the handle's generation the only evidence; every property but `ServedWhileLive` | 193,781 | ~70 s |
+| `MC_ident_btime.cfg` | `ident_btime_test` (medium) | the birth time the only evidence, changes behind dcfs's back; every property | 49,833 | ~25 s |
+| `MC_ident_stubs.cfg` | `ident_stubs_test` (medium) | filesystems mounted at a and b, 2 stub ids, mounts and unmounts behind dcfs's back, a power loss; every property but `ServedWhileLive` | 217,366 | ~70 s |
+| `MC_ident_target.cfg` | `ident_target_test` (medium) | Phase 14's identity, a crash, a power loss and a cache wipe; every property | 145,136 | ~60 s |
+
+Coverage (`-coverage 1`): every action fires where its constants allow it
+(`Refuse` needs boundaries, `PowerLoss` and `Persist` a power loss, `Wipe`
+a wipe, the `Oob*` actions `OutOfBand`, `ProbeStat` and `ProbeRead`
+`ProbeByName`); `Access` fires only where a row can outlive its object
+(out-of-band changes, or Phase 14 after a power loss), which under
+exclusive access today it cannot. `DotLookup` adds no state the lookups
+did not reach already (it makes the same kernel inode).
+
+### Known bugs and limitations
+
+Each is a test that passes only if TLC reports the expected violation (small
+tier, a few seconds each).
+
+| Variant | Bug | Expected | The counterexample |
+|---|---|---|---|
+| `known_bugs/ident_skip_identity_statx` | `OpenNode` without `VerifyBackingIdentity`, on a filesystem whose handles carry no generation | `HeldResolvesToItsObject` | look a up (o1); behind dcfs's back, unlink a and create o3 on o1's inode number: the nodeid the kernel holds for o1 resolves to o3 |
+| `known_bugs/ident_probe_by_name_handle_first` | a probe reading by name (statx, handle, generation), not through one descriptor; no birth time | `HeldResolvesToItsObject` | the statx of a reads o1; a is replaced by o3 on o1's inode number; the handle and generation read o3's: the row made for o1 matches o3 |
+| `known_bugs/ident_probe_by_name_gen_first` | the same with the generation read first | `HeldResolvesToItsObject` | the same behavior |
+| `known_bugs/ident_generation_from_counter` | a row's generation following from its id (a counter) | `OneHandleOneObject` | look a up (row 1, generation 1); the client takes its handle; a power loss loses the row; look b up: row 1, generation 1, for o2 |
+| `known_bugs/ident_stub_generation_reused` | a stub's generation not drawn afresh | `OneHandleOneObject` | refuse a (stub 11); the client takes its handle; a power loss rolls back the stub and `last_stub_id`; refuse b: stub 11 with the same generation |
+| `known_bugs/ident_rowid_from_max` | row ids as `MAX(id) + 1`, not `AUTOINCREMENT` (the rows' half of step 12.4b's stub fix) | `NoBadInode` | look a up (row 1); unlink a; look b up: row 1 again with another generation while the kernel holds row 1's inode |
+| `limitations/ident_wipe` | today: a cache wipe | `ServedWhileLive` | look a up; the client takes its handle; stop; wipe; start: `ESTALE` for a live object (README: handles do not survive deleting the database) |
+| `limitations/ident_power_loss` | today: a power loss | `ServedWhileLive` | look a up (its row not yet durable); the client takes its handle; power loss; start: `ESTALE` for a live object (README: handles of objects first recorded since the last durable commit) |
+| `limitations/ident_no_generations` | no generation in the handle, no `FS_IOC_GETVERSION`, no birth time | `ReuseDetected` | look a up; unlink a; the kernel evicts it; create o3 on o1's inode number; power loss (the deletion of a's row is lost, the dirty mark is not); the start's probe reaches o3 and keeps the row for it |
+| `limitations/ident_target_out_of_band` | Phase 14 with a recycling behind dcfs's back | `NoBadInode` | look a up (inode 1, o1's generation); a unlinked behind dcfs's back; create b: o3 gets inode 1, and the reply's generation makes the kernel mark the old inode bad (`EIO`). Today's identity gives o3 a new nodeid (`MC_ident_oob.cfg`) |
+| `limitations/ident_target_uncached_nodeid` | Phase 14 with a recycling behind dcfs's back, a held nodeid whose row went | `HeldResolvesToItsObject` | look a up; a replaced behind dcfs's back by o3 on the same inode number; a request finds the row stale (`ESTALE`, the row goes); the next request opens inode 1 by number and reaches o3. Only `LOOKUP(".")` has the kernel compare generations: Phase 14 must compare the generation it handed out in this mount (or answer `ESTALE`) for every other request on a nodeid without a row |
+
+### The order of the handle and the generation (step 26.3's question)
+
+`docs/design.md`'s population policy listed the generation before
+`name_to_handle_at`; the code (`ProbeObject`, `ParentOf`, `Probe`) reads
+the handle first. Neither order matters, because both reads, and the
+statx before them, go through one `O_PATH` descriptor opened on the name:
+`name_to_handle_at(fd, "", AT_EMPTY_PATH)` encodes the inode the
+descriptor's dentry pins (`fs/fhandle.c`, `do_sys_name_to_handle` ->
+`exportfs_encode_fh`), and `FS_IOC_GETVERSION` reads `i_generation` of
+the same inode through a reopen of `/proc/self/fd/N`, which resolves to
+the descriptor's own path, not to the name. While the descriptor is open
+the inode cannot be evicted, so its number cannot be freed and handed to
+another object (ext4 frees an unlinked inode's number in
+`ext4_evict_inode`; xfs and btrfs likewise at the last reference). The
+only thing that changes `i_generation` of a live inode is ext4's
+`EXT4_IOC_SETVERSION`, which needs the owner or `CAP_FOWNER` and is
+refused with `metadata_csum` (mkfs's default); between the two reads,
+either order is then still fail-safe: the handle's generation and the one
+recorded disagree, and the decode (`ext4_nfs_get_inode` compares the
+handle's generation) or `VerifyBackingIdentity` answers `ESTALE`. The
+known-bug variants above show what the descriptor buys: with reads by
+name, a recycling between the statx and both identity reads goes
+unnoticed in either order (only the birth time, from the statx, would
+catch it); one between the two identity reads is caught in either order.
+The design doc now gives the code's order and this reason.
