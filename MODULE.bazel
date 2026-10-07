@@ -246,13 +246,6 @@ use_repo(llvm, "llvm_toolchain")
 
 register_toolchains("@llvm_toolchain//:all")
 
-single_version_override(
-    module_name = "toolchains_llvm",
-    patch_strip = 1,
-    patches = ["//third_party/llvm:0001-cc-wrapper-response-file-last-line.patch"],
-    version = "1.11.1",
-)
-
 # liburing (libfuse's dependency): see third_party/liburing/README.md.
 single_version_override(
     module_name = "liburing",

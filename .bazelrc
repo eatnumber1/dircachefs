@@ -20,7 +20,8 @@ build --experimental_disk_cache_gc_max_size=50G
 # anything that depends on @libfuse//:libfuse fails. Scope -Werror back off
 # for code under external/ only; our own sources are unaffected.
 build --per_file_copt=external/.*@-Wno-error
-# Same for the -Wimplicit-fallthrough above (sqlite3, libfuse): not ours.
+# Same for the -Wimplicit-fallthrough above (sqlite3 and libfuse still warn
+# under clang): not ours.
 build --per_file_copt=external/.*@-Wno-implicit-fallthrough
 
 # PROJECT DECISION: dcfs requires root, so there is no host-side test
