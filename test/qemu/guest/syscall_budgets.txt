@@ -28,7 +28,7 @@ cached-stat sql_txns 0
 warm-readdir backing 0
 warm-readdir procfd 0
 warm-readdir sync 0
-warm-readdir sql_stmts 15
+warm-readdir sql_stmts 13
 warm-readdir sql_txns 0
 
 create backing 21

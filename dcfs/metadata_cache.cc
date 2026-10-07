@@ -410,19 +410,22 @@ absl::StatusOr<bool> ChildrenComplete(Context &ctx, InodeId dir) {
 }
 
 absl::StatusOr<bool> IsDirComplete(Context &ctx, InodeId dir) {
-  ABSL_ASSIGN_OR_RETURN(bool complete, ChildrenComplete(ctx, dir));
-  if (!complete) return false;
-  // A listing must not leave out (or list) a name whose state is unknown.
+  // ChildrenComplete, and a listing must not leave out (or list) a name
+  // whose state is unknown: one statement (a missing directories row counts
+  // as incomplete, as in ChildrenComplete).
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
       Query(ctx,
-            "SELECT 1 FROM dentries WHERE parent = ? AND state = 'unknown' "
-            "LIMIT 1",
+            "SELECT children_complete AND NOT EXISTS ("
+            "SELECT 1 FROM dentries WHERE parent = ?1 AND state = 'unknown') "
+            "FROM directories WHERE inode = ?1",
             dir));
-  ABSL_ASSIGN_OR_RETURN(
-      bool any_unknown,
-      ReadOne(*stmt, [](Statement &) { return absl::OkStatus(); }));
-  return !any_unknown;
+  bool complete = false;
+  ABSL_RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
+                         complete = row.Column<bool>(0);
+                         return absl::OkStatus();
+                       }).status());
+  return complete;
 }
 
 absl::StatusOr<std::string> Readlink(Context &ctx, InodeId id) {
@@ -548,19 +551,25 @@ absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id) {
 
 absl::StatusOr<std::optional<InodeId>> ParentOf(Context &ctx, InodeId dir) {
   if (dir == kRootInode) return kRootInode;
-  ABSL_RETURN_IF_ERROR(RequireInode(ctx, dir));
-  // LIMIT 2 is enough to tell "one" from "more than one".
+  // One statement for "is there such an inode" (NotFound if not, as
+  // RequireInode says) and its parents: the LEFT JOIN gives one NULL row for
+  // an inode with no present dentry and none for a missing inode. LIMIT 2 is
+  // enough to tell "one" from "more than one".
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
       Query(ctx,
-            "SELECT parent FROM dentries "
-            "WHERE inode = ? AND state = 'present' LIMIT 2",
+            "SELECT d.parent FROM inodes i LEFT JOIN dentries d "
+            "ON d.inode = i.id AND d.state = 'present' WHERE i.id = ? "
+            "LIMIT 2",
             dir));
+  bool inode_exists = false;
   std::vector<InodeId> parents;
   ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
-    parents.push_back(row.Column<int64_t>(0));
+    inode_exists = true;
+    if (!row.ColumnIsNull(0)) parents.push_back(row.Column<int64_t>(0));
     return absl::OkStatus();
   }));
+  if (!inode_exists) return NoInode(dir);
   if (parents.empty()) return std::nullopt;
   // Directories cannot be hard linked, so two cached dentries for one
   // directory means the cache is inconsistent.
