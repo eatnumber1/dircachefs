@@ -90,9 +90,38 @@ std::string ErrnoName(int err) {
 
 }  // namespace
 
+size_t DirCacheFS::DefaultMaxHeldFds(rlim_t soft_limit) {
+  constexpr rlim_t kFixedReserve = 64 * 1024;
+  const rlim_t reserve = std::max(kFixedReserve, soft_limit / 2);
+  return soft_limit > reserve ? static_cast<size_t>(soft_limit - reserve) : 0;
+}
+
+namespace {
+
+size_t MaxHeldFds(const DirCacheFS::Options &opts) {
+  if (opts.max_held_fds.has_value()) return *opts.max_held_fds;
+  struct rlimit limit {};
+  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) return 0;
+  return DirCacheFS::DefaultMaxHeldFds(limit.rlim_cur);
+}
+
+}  // namespace
+
 DirCacheFS::DirCacheFS(Context &ctx, Options opts)
-    : ctx_(ctx), opts_(opts), last_sync_(absl::Now()) {
+    : ctx_(ctx),
+      opts_(opts),
+      last_sync_(absl::Now()),
+      max_held_fds_(MaxHeldFds(opts)) {
   ctx_.open_for_write = &open_for_write_;
+  LOG(INFO) << "holding at most " << max_held_fds_
+            << " descriptors on written files until their last FORGET";
+}
+
+std::optional<FileDescriptor> DirCacheFS::TakeWritten(InodeId id) {
+  auto node = written_.extract(id);
+  if (node.empty()) return std::nullopt;
+  if (node.mapped().has_value()) --held_fds_;
+  return std::move(node.mapped());
 }
 
 DirCacheFS::~DirCacheFS() {
@@ -215,6 +244,7 @@ absl::Status DirCacheFS::Destroy() {
   removed_.clear();
   lookups_.clear();
   written_.clear();
+  held_fds_ = 0;
   return absl::OkStatus();
 }
 
@@ -287,7 +317,7 @@ absl::Status DirCacheFS::RetireRemoved(InodeId id,
   tmpfiles_.erase(id);
   // Its held descriptor would keep the unlinked file's space allocated
   // (design.md "mmap after close"); the removed record, if any, holds one.
-  written_.erase(id);
+  TakeWritten(id);
   absl::StatusOr<cache::CachedAttr> row = cache::GetAttr(ctx_, id);
   if (!row.ok() && !absl::IsNotFound(row.status())) return row.status();
   ABSL_RETURN_IF_ERROR(ForgetRemoved(id));
@@ -668,9 +698,8 @@ bool DropLookups(absl::flat_hash_map<InodeId, uint64_t> &lookups, InodeId id,
 
 void DirCacheFS::ReconcileWritten(InodeId id) {
   // See design.md "mmap after close" (held-fd workaround).
-  auto node = written_.extract(id);
-  if (node.empty()) return;
-  std::optional<FileDescriptor> held = std::move(node.mapped());
+  if (!written_.contains(id)) return;
+  std::optional<FileDescriptor> held = TakeWritten(id);
   // Still open (the kernel cannot have forgotten it then, but DESTROY
   // comes regardless): its attributes are unknown and served from its
   // shared descriptor, and the last release records them.
@@ -1569,18 +1598,33 @@ absl::Status DirCacheFS::Release(
   // keeps an O_PATH descriptor until its last FORGET, which pins the
   // backing inode for the reconciliation there. O_PATH: no open file the
   // backing filesystem would see (no writer, no lease), only a reference.
+  // At most max_held_fds_ of them (review M-1): beyond that the file holds
+  // none, and its FORGET is the phase 1 alone.
   if (auto written = written_.find(id);
       written != written_.end() && !delete_row) {
-    absl::StatusOr<FileDescriptor> path_fd =
-        backing::ReopenFd(*backing_file.fd, O_PATH | O_CLOEXEC);
-    if (path_fd.ok()) {
-      written->second = *std::move(path_fd);
+    const bool had = written->second.has_value();
+    if (!had && held_fds_ >= max_held_fds_) {
+      if (!held_cap_logged_) {
+        held_cap_logged_ = true;
+        LOG(WARNING) << "Release: " << held_fds_ << " written files already "
+                     << "hold a descriptor (the cap); files written from now "
+                        "on hold none until some are forgotten, and their "
+                        "last FORGET marks their attributes unknown instead";
+      }
     } else {
-      written->second.reset();
-      LOG(WARNING) << "Release: could not hold written inode " << id
-                   << " until its FORGET (its reconciliation there will "
-                      "mark its attributes unknown instead): "
-                   << path_fd.status();
+      absl::StatusOr<FileDescriptor> path_fd =
+          backing::ReopenFd(*backing_file.fd, O_PATH | O_CLOEXEC);
+      if (path_fd.ok()) {
+        written->second = *std::move(path_fd);
+        if (!had) ++held_fds_;
+      } else {
+        if (had) --held_fds_;
+        written->second.reset();
+        LOG(WARNING) << "Release: could not hold written inode " << id
+                     << " until its FORGET (its reconciliation there will "
+                        "mark its attributes unknown instead): "
+                     << path_fd.status();
+      }
     }
   }
   backing_files_.erase(backing_it);
@@ -2338,7 +2382,7 @@ absl::Status DirCacheFS::Tmpfile(FuseRequest &req, fuse_ino_t parent_ino,
     if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
     backing_files_.erase(child.id);
     tmpfiles_.erase(child.id);
-    written_.erase(child.id);
+    TakeWritten(child.id);
     // The file goes with its only descriptor; so does its row (review L5).
     LogPhase3Failure("Tmpfile undo", ForgetRemoved(child.id));
   };

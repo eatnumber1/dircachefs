@@ -1,6 +1,7 @@
 #ifndef DCFS_DIR_CACHE_FS_H_
 #define DCFS_DIR_CACHE_FS_H_
 
+#include <sys/resource.h>
 #include <sys/types.h>
 
 #include <cerrno>
@@ -59,7 +60,24 @@ class DirCacheFS {
     // runs a sync point (backing::SyncBacking: syncfs of the backing
     // filesystems, then the dirty set is emptied). See MaybeSyncBacking().
     absl::Duration sync_interval = absl::Seconds(5);
+
+    // At most how many written files hold a descriptor until their last
+    // FORGET (written_; design.md "mmap after close" (held-fd workaround)).
+    // Beyond it a written file holds none and its FORGET is the phase 1
+    // alone (attributes unknown, no I/O), so that the held descriptors
+    // never take the ones requests need (a backing open, a removed
+    // object's hold, SQLite's files). nullopt: DefaultMaxHeldFds of the
+    // soft RLIMIT_NOFILE when the DirCacheFS is made (after main.cc
+    // raised it).
+    std::optional<size_t> max_held_fds;
   };
+
+  // The default Options::max_held_fds for a soft descriptor limit: what
+  // is left after a reserve of 64Ki descriptors or half the limit,
+  // whichever reserve is larger: 0 up to 64Ki (so at the usual 1024),
+  // half from 128Ki (half of fs.nr_open's default 1048576 once main.cc
+  // raised the limit).
+  static size_t DefaultMaxHeldFds(rlim_t soft_limit);
 
   // `ctx` must outlive this DirCacheFS, which points ctx.open_for_write at
   // its own set of inodes with a writable open outstanding.
@@ -366,6 +384,10 @@ class DirCacheFS {
   // written_, and its descriptor is closed, either way.
   void ReconcileWritten(InodeId id);
 
+  // Removes `id` from written_ and returns the descriptor it held, if any,
+  // keeping held_fds_ in step.
+  std::optional<FileDescriptor> TakeWritten(InodeId id);
+
   // The other end: the last writable open of `id` is going away (Release,
   // or an open or create that fails after BeginWriting). Tells the fill
   // guards the writes are over (cache::EndWrites) and removes `id` from
@@ -560,12 +582,19 @@ class DirCacheFS {
   // FORGET has not come since (see ReconcileWritten), each with an O_PATH
   // descriptor held from its last close (Release) until then: it pins the
   // backing inode in memory so that the reconciliation reads no disk.
-  // nullopt while the file is still open, or if no descriptor could be
-  // opened (EMFILE: main.cc raises RLIMIT_NOFILE for these). Bounded by the
-  // kernel's inode cache, as lookups_ is. A file whose row is retired (its
-  // last link gone: RetireRemoved) leaves it, so that an unlinked file's
-  // space is not held.
+  // nullopt while the file is still open, once max_held_fds_ files hold
+  // one (review M-1), or if no descriptor could be opened (EMFILE: main.cc
+  // raises RLIMIT_NOFILE for these). Bounded by the kernel's inode cache,
+  // as lookups_ is, and its descriptors by max_held_fds_. A file whose row
+  // is retired (its last link gone: RetireRemoved) leaves it (the removed
+  // record, if the kernel still holds the nodeid, holds its own descriptor
+  // until the last FORGET). Only TakeWritten removes an entry that may
+  // hold one, and only Release stores one, so held_fds_ stays the number
+  // of entries holding one.
   absl::flat_hash_map<InodeId, std::optional<FileDescriptor>> written_;
+  size_t held_fds_ = 0;
+  const size_t max_held_fds_;
+  bool held_cap_logged_ = false;
 
   // The stubs whose refusal RefuseStub has logged in this run.
   absl::flat_hash_set<InodeId> stubs_logged_;

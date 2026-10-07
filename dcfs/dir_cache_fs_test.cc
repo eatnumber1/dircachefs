@@ -254,9 +254,7 @@ class DirCacheFSTest : public ::testing::Test {
     ASSERT_THAT(Migrate(db_, root), IsOk());
     ASSERT_THAT(backing::InitRoot(ctx_, std::move(owned)), IsOk());
 
-    // No periodic sync point in the middle of a test.
-    fs_ = std::make_unique<DirCacheFS>(
-        ctx_, DirCacheFS::Options{.sync_interval = absl::Hours(24)});
+    fs_ = std::make_unique<DirCacheFS>(ctx_, options_);
     ops_ = MakeFuseOps();
     char arg0[] = "dir_cache_fs_test";
     char *argv[] = {arg0};
@@ -747,6 +745,12 @@ class DirCacheFSTest : public ::testing::Test {
   MountFds mounts_;
   absl::BitGen bitgen_{std::seed_seq{4, 10}};
   Context ctx_{db_, mounts_, bitgen_};
+  // What Start() makes the DirCacheFS with (a test may change it first).
+  // No periodic sync point in the middle of a test; held descriptors
+  // (written_) up to a fixed cap, not the default derived from the test
+  // process's descriptor limit (0 at the usual 1024).
+  DirCacheFS::Options options_{.sync_interval = absl::Hours(24),
+                               .max_held_fds = 64};
   std::unique_ptr<DirCacheFS> fs_;
   std::unique_ptr<testonly::TraceRecorder> recorder_;
   fuse_lowlevel_ops ops_{};
@@ -1940,6 +1944,137 @@ TEST_F(DirCacheFSTest, LastForgetWithoutAHeldDescriptorMarksUnknown) {
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
   EXPECT_FALSE(attr.valid);
   EXPECT_THAT(Dirty(), Contains(f));
+}
+
+// The descriptors this process has open.
+int OpenFdCount() {
+  int n = 0;
+  for ([[maybe_unused]] const auto &entry :
+       std::filesystem::directory_iterator("/proc/self/fd")) {
+    ++n;
+  }
+  return n;
+}
+
+// Held descriptors stop at Options::max_held_fds (review M-1), leaving the
+// rest of the descriptor limit to requests: with the limit a few above the
+// cap, opens of other files still succeed after more files than that were
+// written. A written file beyond the cap holds nothing (its last FORGET is
+// the phase 1 alone), and a FORGET gives its held descriptor's place back.
+TEST_F(DirCacheFSTest, HeldDescriptorsStopAtTheCap) {
+  constexpr int kCap = 2;
+  constexpr int kWritten = kCap + 6;
+  constexpr int kReaders = 3;
+  for (int i = 0; i < kWritten; ++i) WriteFile(Path(absl::StrCat("w", i)));
+  for (int i = 0; i < kReaders; ++i) WriteFile(Path(absl::StrCat("r", i)));
+  WriteFile(Path("later"));
+  options_.max_held_fds = kCap;
+  Start();
+  auto lookup = [&](std::string_view name) {
+    auto [reply, entry] = Lookup(kRootInode, name);
+    EXPECT_EQ(reply.error, 0) << name;
+    return static_cast<InodeId>(entry.nodeid);
+  };
+  std::vector<InodeId> written, readers;
+  for (int i = 0; i < kWritten; ++i) {
+    written.push_back(lookup(absl::StrCat("w", i)));
+  }
+  for (int i = 0; i < kReaders; ++i) {
+    readers.push_back(lookup(absl::StrCat("r", i)));
+  }
+  const InodeId later = lookup("later");
+
+  struct rlimit saved {};
+  ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &saved), 0);
+  const int lowest_free = ::dup(0);
+  ASSERT_GE(lowest_free, 0);
+  ::close(lowest_free);
+  struct rlimit tight = saved;
+  tight.rlim_cur = static_cast<rlim_t>(lowest_free + kCap + kReaders + 2);
+  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &tight), 0);
+  std::vector<std::pair<InodeId, uint64_t>> opened;
+  for (InodeId id : written) {
+    auto [open, fh] = Open(id, O_RDWR);
+    EXPECT_EQ(open.error, 0);
+    if (fh != 0) {
+      EXPECT_EQ(Release(id, fh).error, 0);
+    }
+  }
+  for (InodeId id : readers) {
+    auto [open, fh] = Open(id, O_RDONLY);
+    EXPECT_EQ(open.error, 0) << "open of reader " << id << " with "
+                             << kWritten << " files written";
+    if (fh != 0) opened.emplace_back(id, fh);
+  }
+  for (auto [id, fh] : opened) EXPECT_EQ(Release(id, fh).error, 0);
+  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &saved), 0);
+
+  // Within the cap: held, so its FORGET re-reads through it.
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  Forget(written[0], 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr held, cache::GetAttr(ctx_, written[0]));
+  EXPECT_TRUE(held.valid);
+  EXPECT_THAT(Dirty(), Not(Contains(written[0])));
+  // Beyond it: the phase 1 alone.
+  Forget(written[kCap], 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr unheld,
+                       cache::GetAttr(ctx_, written[kCap]));
+  EXPECT_FALSE(unheld.valid);
+  EXPECT_THAT(Dirty(), Contains(written[kCap]));
+  // written[0]'s FORGET gave its place back: a file written now is held.
+  auto [open, fh] = Open(later, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(later, fh).error, 0);
+  AppendToFile(Path("later"), "stored");
+  Forget(later, 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr refreshed, cache::GetAttr(ctx_, later));
+  EXPECT_TRUE(refreshed.valid);
+  EXPECT_EQ(refreshed.st.st_size, 6);
+}
+
+TEST(DefaultMaxHeldFdsTest, LeavesTheLargerReserve) {
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(1024), 0u);
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(65536), 0u);
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(131072), 65536u);
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(200000), 100000u);
+  EXPECT_EQ(DirCacheFS::DefaultMaxHeldFds(1048576), 524288u);
+}
+
+// A held descriptor is closed at the file's last FORGET, when dcfs removes
+// the file (the removed record holds its own until the last FORGET), and at
+// DESTROY: none outlives what it is held for.
+TEST_F(DirCacheFSTest, HeldDescriptorsAreClosed) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  WriteFile(Path("h"));
+  Start();
+  std::map<std::string, InodeId> ids;
+  for (const char *name : {"f", "g", "h"}) {
+    auto [reply, entry] = Lookup(kRootInode, name);
+    ASSERT_EQ(reply.error, 0);
+    ids[name] = static_cast<InodeId>(entry.nodeid);
+  }
+  auto write = [&](InodeId id) {
+    auto [open, fh] = Open(id, O_RDWR);
+    ASSERT_EQ(open.error, 0);
+    ASSERT_EQ(Release(id, fh).error, 0);
+  };
+  const int base = OpenFdCount();
+  write(ids["f"]);
+  EXPECT_EQ(OpenFdCount(), base + 1);
+  Forget(ids["f"], 1);
+  EXPECT_EQ(OpenFdCount(), base) << "after the last FORGET";
+
+  write(ids["g"]);
+  ASSERT_EQ(Unlink(kRootInode, "g").error, 0);
+  EXPECT_EQ(OpenFdCount(), base + 1) << "the removed record's alone";
+  Forget(ids["g"], 1);
+  EXPECT_EQ(OpenFdCount(), base) << "after the removed file's last FORGET";
+
+  write(ids["h"]);
+  EXPECT_EQ(OpenFdCount(), base + 1);
+  EXPECT_EQ(Send(FUSE_DESTROY, 0, "").error, 0);
+  EXPECT_EQ(OpenFdCount(), base) << "after DESTROY";
 }
 
 // At unmount the kernel sends no FORGETs: a written file the kernel still

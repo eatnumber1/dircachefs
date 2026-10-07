@@ -1091,10 +1091,19 @@ step 23.1's `statx` by handle read the inode back from the disk there).
 limits:
 
 - One descriptor per written file the kernel still caches, as many as its
-  inode cache keeps (the same bound as `lookups_`). `main.cc` raises
-  `RLIMIT_NOFILE` to `fs.nr_open` at startup. If a descriptor cannot be
-  opened (`EMFILE`), that file's reconciliation is the phase 1 alone (its
-  attributes unknown, no I/O), and the next access re-reads them.
+  inode cache keeps (the same bound as `lookups_`), up to a cap
+  (`Options::max_held_fds`, review M-1). `main.cc` raises `RLIMIT_NOFILE`
+  to `fs.nr_open` at startup, and the cap defaults to what the soft limit
+  leaves after a reserve of 64Ki descriptors or half the limit, whichever
+  reserve is larger: 524,288 at the default `fs.nr_open` of 1,048,576, and
+  none if the limit could not be raised past 64Ki (without
+  `CAP_SYS_RESOURCE`, from the usual 1,024). The reserve is for what requests open (shared
+  backing descriptors, removed objects' holds, SQLite's files): without a
+  cap, enough cached written files would make every one of them fail with
+  `EMFILE`. A file written beyond the cap holds none, and neither does one
+  whose descriptor cannot be opened (`EMFILE`): its reconciliation is the
+  phase 1 alone (its attributes unknown, no I/O), and the next access
+  re-reads them. A `FORGET` gives its descriptor's place back.
 - A file whose last link dcfs removes leaves the set at once
   (`RetireRemoved`), so its space is not held; one unlinked behind dcfs's
   back stays allocated until its `FORGET`.
