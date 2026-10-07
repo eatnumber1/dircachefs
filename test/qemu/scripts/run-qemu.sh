@@ -475,7 +475,7 @@ echo "run-qemu.sh: qemu end $end" >>"$LOG"
 if [ "$COVERAGE" -eq 1 ]; then
 	rawdir="$WORKDIR/profraw"
 	mkdir -p "$rawdir"
-	tar -x -C "$rawdir" -f "$COVDISK_IMG" 2>/dev/null ||
+	tar -x -C "$rawdir" -f "$COVDISK_IMG" ||
 		echo "run-qemu.sh: no profiles on the coverage disk (no instrumented process exited normally)"
 	rm -f "$COVDISK_IMG"
 	# shellcheck disable=SC2086 # COV_OBJECTS is a list of paths

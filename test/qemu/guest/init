@@ -196,29 +196,54 @@ start_mem_sampler
 # Step 7.2, coverage: with dcfs_cov=<disk> on the kernel command line (run-qemu.sh
 # under `bazel coverage`) every instrumented process writes its profile to
 # /cov at exit (%m: one file per binary, merged by the runtime across
-# processes), and dump_profraw tars /cov onto that disk before the
-# verdict. A process that does not exit normally (SIGKILL, a power cut)
-# leaves no profile.
+# processes; %c: continuous mode, so a process killed mid-exit still leaves
+# a complete profile), and dump_profraw tars /cov onto that disk before the
+# verdict.
 COV=$(sed -n 's/.*\bdcfs_cov=\([^ ]*\).*/\1/p' /proc/cmdline)
 if [ -n "$COV" ]; then
 	mkdir -p /cov
-	export LLVM_PROFILE_FILE=/cov/%m.profraw
+	export LLVM_PROFILE_FILE=/cov/%m%c.profraw
 fi
 dump_profraw() {
 	[ -n "$COV" ] || return 0
-	# A daemon the test left running writes its profile only when it exits:
-	# ask it to (SIGTERM is its normal shutdown), and wait for every
-	# instrumented process to be gone before the tar reads /cov, or the
-	# archive holds a half-written profile.
-	killall -TERM dcfs fhtest testutil dcfs_bench 2>/dev/null
+	# A daemon the test left running writes its profile only when it exits.
+	# First give the processes the test already told to stop (its cleanup
+	# SIGTERMs the daemon and does not wait) three seconds to finish: a
+	# second SIGTERM while the daemon writes its profile at exit kills it
+	# mid-write (libfuse puts the default action back once the session loop
+	# ends), which left a truncated profile one test run in three. Then ask
+	# the rest to stop (SIGTERM is the daemon's normal shutdown) and wait
+	# for every instrumented process to be gone before the tar reads /cov.
 	waited=0
-	while pidof dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 100 ]; do
+	while pidof dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 30 ]; do
 		sleep 0.1
 		waited=$((waited + 1))
 	done
-	if [ "$waited" -ge 100 ]; then
-		echo "init: an instrumented process is still running; its profile is lost"
+	if pidof dcfs fhtest testutil dcfs_bench >/dev/null 2>&1; then
+		killall -TERM dcfs fhtest testutil dcfs_bench 2>/dev/null
+		waited=0
+		while pidof dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 100 ]; do
+			sleep 0.1
+			waited=$((waited + 1))
+		done
+		if [ "$waited" -ge 100 ]; then
+			echo "init: an instrumented process is still running; its profile is lost"
+		fi
 	fi
+	# pidof does not see a process that has begun to exit, and a daemon the
+	# test unmounted may still be writing its profile (at exit, 2 MB): wait
+	# until /cov stops changing (observed: archives holding a half-written
+	# profile, one test run in three).
+	last=
+	waited=0
+	while [ "$waited" -lt 100 ]; do
+		now=$(ls -l /cov | md5sum)
+		[ "$now" = "$last" ] && break
+		last=$now
+		sleep 0.3
+		waited=$((waited + 1))
+	done
+	ls -l /cov | sed 's/^/init: cov /'
 	if tar -c -C /cov . >"$COV"; then
 		echo "init: profiles written to $COV"
 	else

@@ -110,6 +110,13 @@ build:ubsan --define=dcfs_sanitizer=ubsan
 # kernel files, 911 baseline records of code that is not ours.)
 coverage --instrumentation_filter=^//(dcfs|bench|tools)[/:],-^//dcfs:modules_
 coverage --combined_report=lcov
+# Continuous mode (guest/init sets LLVM_PROFILE_FILE with %c): the counters
+# live in the profile file's own mapping, so a process killed mid-exit (a
+# test's cleanup SIGTERMs a daemon that is already writing its profile; the
+# default action is back once libfuse's session loop has ended) or by SIGKILL
+# still leaves a complete profile. Linux needs the counters relocatable.
+coverage --copt=-mllvm
+coverage --copt=-runtime-counter-relocation
 
 # Per-checkout settings that are not committed (e.g. the agent lane
 # clones' `startup --max_idle_secs=...`). See docs/plan/process.md.

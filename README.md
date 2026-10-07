@@ -366,8 +366,10 @@ with `genhtml` if you want a browsable view. How it works: the guest runs the
 instrumented binaries, which write `.profraw` files to `/cov`; `guest/init`
 tars them onto an extra virtio disk, `run-qemu.sh` merges them
 (`llvm-profdata`) and exports lcov (`llvm-cov`) into Bazel's `COVERAGE_DIR`
-(`test/qemu/README.md`, "Coverage"). A process that does not exit normally
-(a power cut, SIGKILL) leaves no profile, so the crash tests add nothing.
+(`test/qemu/README.md`, "Coverage"). The profiles are written in LLVM's
+continuous mode (`%c`, counters mapped into the profile file), so a daemon
+that a test SIGTERMs or SIGKILLs still leaves a complete profile; only a guest
+that is itself cut off (a power-cut test ending the VM) loses its processes'.
 The report covers the small and medium tiers only (`--config=presubmit`):
 the large and enormous tests, and the trace-validation tests, are not in it.
 CI publishes it as the `coverage-lcov` artifact (dcfs, bench and tools only);

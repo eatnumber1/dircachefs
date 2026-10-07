@@ -392,10 +392,15 @@ source-based coverage and collects it from the guests:
   `COVERAGE_DIR/qemu-<target>.dat`, which Bazel's lcov merger folds into
   the test's `coverage.dat` and the combined report. The test's lcov is also
   kept beside the serial log as an undeclared output.
-- A process that never exits normally writes no profile (the crash and
-  power-cut tests, SIGKILLed daemons); the daemon exits normally on
-  SIGTERM/umount, so its profile is there. That is a limit of the
-  measurement, not a failure.
+- Profiles are written in continuous mode (`LLVM_PROFILE_FILE=/cov/%m%c.profraw`,
+  with `-mllvm -runtime-counter-relocation` in `.bazelrc`): the counters live
+  in the profile file's mapping, so a process killed mid-exit or by SIGKILL still
+  leaves a complete profile. This was found the hard way: a test's cleanup
+  SIGTERMs the daemon, which may already be writing its exit-time profile, and
+  libfuse restores SIGTERM's default action once the session loop ends, so one
+  atime_test run in three left a truncated profile (`cov-lcov.sh` now refuses
+  such a file, and the test fails). Only a guest that is cut off as a whole loses
+  its processes' profiles.
 
 Self-checks: `//test/qemu:coverage_pipeline_test` runs an instrumented
 fixture through the same `cov-lcov.sh` and requires the function that ran to
