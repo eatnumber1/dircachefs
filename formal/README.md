@@ -284,6 +284,7 @@ prints. A request's first step runs inside `Arrive`.
 | `RenameStat`, `RenameFill`, `RenameFailed`, `RenameFailed2` | As for create (a failure re-resolves both names) | | `RefreshAfterRename`, `ReresolveAfterFailure` |
 | (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
+| `Interrupt` | With `Interrupts`: FUSE_INTERRUPT seen at a checkpoint, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned; `C_sys`, `U_sys`, `R_sys`): the request replies `EINTR`; a mutation past phase 1 `End`s without phase 3, its names and D's attributes left unknown, D dirty, the backing unchanged. Never between a syscall and its phase 3 | Cancellation | `Checkpoint` (`dcfs/checkpoint.h`), `SessionLoop` |
 | `Crash` | Daemon crash, kernel crash or power loss: each disk keeps any of its possible states, memory is lost | Crashes, power loss and recovery | |
 | `Restart`, `Recover`, `StartRun` | Start again: `RecoverDirty` (one transaction; it may also make unknown any present dentry, standing for those that point at dirty children, which the model does not track: `RecoverForgetting`), then `clean_shutdown = 0` with kSync | Recovery; Startup | `backing::StartRun`, `cache::RecoverDirty` |
 | `BeginShutdown`, `StopSync`, `StopClear`, `StopCkpt`, `StopFlag` | Unmount, sync point, TRUNCATE checkpoint, `clean_shutdown = 1` with kSync, exit | Shutdown; What the clean-shutdown flag adds | `backing::FinishRun` |
@@ -299,6 +300,7 @@ prints. A request's first step runs inside `Arrive`.
 | `CrashSafe` | invariant | In every state, every combination of states the two disks could be left in recovers to a correct cache. It is checked without taking the crash, so it finds crash bugs early |
 | `DurableSetSound` | invariant | If `Context::dirty.durable` has D, every database state a crash may leave has D dirty (the fast path's premise) |
 | `CleanMeansNoDirty` | invariant | `clean_shutdown = 1` is never durable together with a dirty row |
+| `GuardsBalanced` | invariant | `FillGuards::inflight` is the number of requests between their phase 1 and their `End` (an interrupted mutation releases its guard) |
 | `TypeOK` | invariant | Every variable has the expected shape |
 | `RecoveryTerminates` | temporal | `(mode # "up") ~> (mode = "up")`: after any crash or shutdown, the daemon gets back to serving (recovery always terminates) |
 
@@ -316,6 +318,13 @@ reports as distinct states (since step 23.4's `linkcreate`, run of
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 75,184 | ~10 s |
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 7,238,097 | ~8 min |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 6,036,816 | ~5 min |
+| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 207,595 | ~45 s |
+| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one) | 840,060 | ~2 min |
+| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation | 923,187 | ~2-3 min |
+
+`Interrupts` (Phase 22) is off in the first four: with it, `MC_small.cfg`
+grows to 2,154,085 states (6 min), so the interrupts have configurations
+of their own. All of them check `GuardsBalanced`.
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
@@ -340,6 +349,9 @@ FALSE in the real configurations.
 | `sync_during_mutation` | a sync point cleared the dirty rows of mutations in flight (a [finding](#findings) of this model, fixed in plan step R4) | `CrashSafe` | a create of `b`: phase 1 (D dirty, kSync); a sync point: syncfs; the create's syscall, probe and phase 3 (`b` recorded), and its end; the sync point clears D's row. A crash may now keep that database and lose the unsynced create, and recovery has nothing to forget. (Keeping only the inodes in flight at `ClearDirty` would not help: the create had ended.) |
 | `readdirplus_unlocked` | Readdirplus listed after a suspension point without checking completeness again (a finding, fixed in R4); without the kernel lock | `ServedFromCacheIsCurrent` | a lookup populates D (`a` present, complete); a readdirplus finds D complete with its attributes unknown and goes to statx D; a create of `a` begins (phase 1: `a` unknown); the readdirplus fills D's attributes and lists the present rows: none, while `a` exists |
 | `rename_stale_source` | Rename's phase 3 linked a source resolved before phase 1 without verifying it (a finding, fixed in R4); without the kernel lock | `CacheNeverWrong` | a rename of `b` over `a` resolves `o2` and runs phase 1; a rename of `a` over `b` probes `a` (`o1`); the first rename's renameat2 and phase 3 (`a` -> `o2`); the second's probe cannot be recorded but answers `o1`; it resolves `b` (absent), runs phase 1 and renameat2 (which moves `o2`), and phase 3 records `b` -> `o1` |
+| `interrupt_after_syscall` | not historical (Phase 22): interruptible between the backing syscall and phase 3, cancelling by putting the resolved name back | `CacheNeverWrong` | a rename of `a` over `b` resolves `a`, runs phase 1 and renameat2; interrupted before phase 3, it puts `a` back, which the backing filesystem no longer has |
+| `interrupt_undo` | not historical: an interrupt before the syscall puts the resolved name back instead of leaving it unknown; without the kernel lock | `TriState` | a rename of `a` runs phase 1; a create of `a` runs phase 1 (in flight); the rename, interrupted before its syscall, puts `a` back while the create is in flight |
+| `interrupt_leaks_guard` | not historical: an interrupted mutation that never `End`s | `GuardsBalanced` | a create's phase 1; interrupted before its syscall, it replies without `End` |
 
 ## Findings
 
@@ -495,6 +507,7 @@ right after the code the model's step stands for, with no backing syscall
 | `ShutdownBegin`, `Checkpointed`, `CleanShutdownRecorded` | `backing::FinishRun` | `shutdown`, `checkpoint`, `clean` | `BeginShutdown`, `StopCkpt`, `StopFlag` | Shutdown |
 | `LifetimeChanged` | after every `++lookups_` (`ReplyEntry`, `Readdirplus`'s entries, `Create`, `Tmpfile`), a successful `Open`, the end of `Release`, each `Forget` and `ForgetMulti` entry, phase 3 of `RemoveChild` and of a rename over an object (`RefreshAfterRename`), and `backing::Startup`'s probe of a recovered row | (a nodeid's trace: `lookup`, `create`, `tmpfile`, `open`, `release`, `forget`, `removed`) | none in `dcfs.tla`; `lifetime.tla`'s ([below](#trace-validation-of-nodeids)) | Row lifetime; mmap after close |
 | `Destroyed` | the end of `DirCacheFS::Destroy` | (every nodeid's trace: `destroy`) | `lifetime.tla`'s `Destroy` | mmap after close |
+| `Interrupted` | `Checkpoint` (`dcfs/checkpoint.h`), when the request being served was interrupted | `interrupt` (a mutation's with its `End`; a population's where it started, its reads abandoned); the request's `EINTR` reply is its `reply` | `T_Interrupt` | Cancellation |
 | `OutOfBandChange` | `backing::ReconcileAttrs`, when it adopts a change | `cut` | none (no out-of-band changes in the model) | Out-of-band change detection |
 | `InodeForgetting`, `InodeForgotten` | `cache::InvalidateInode` (and `DeleteInode`), before and after its DELETE | `gone`; `cut` (`invalidated`) | none. The recorder notes the present rows that point at the inode; once the (outermost) transaction has committed, a directory whose state changed by exactly those names becoming unknown is cut, any other change is `unexplained` | Identity model |
 
@@ -766,6 +779,7 @@ the run of 2026-10-06). `Arrive` is split by request kind.
 | `BeginShutdown`, `StopSync` | crash, power, rename, create |
 | `StopClear`, `StopCkpt`, `StopFlag` | power, rename, create |
 | composite `T_GetattrWhole` | harness, crash, power, rename, create |
+| `Interrupt` (`T_Interrupt`) | harness (the cancellation tests: a lookup before its population, a population at its first probe batch, an unlink and a mkdir before their syscalls) |
 
 Never taken: **`UnlinkFailed`, `RenameFailed`, `RenameFailed2`**. They need
 the name to vanish between the resolve and the syscall, which nothing in

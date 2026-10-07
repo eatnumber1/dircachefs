@@ -499,10 +499,11 @@ gate is disabled.
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
-| syscall-trace goldens and budgets (26.3, 26.4: the reducer, the golden comparison, the budget comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs) |
+| syscall-trace goldens and budgets (26.3, 26.4: the reducer, the golden comparison, the budget comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs and a checkpoint's `poll` of `/dev/fuse`) |
 | runtime invariant checks (26.2: each invariant the checker enforces) | `//dcfs:dir_cache_fs_test`'s `DirCacheFSDeathTest.*` (each breaks one invariant on purpose and expects the abort naming it) and `InvariantChecksReportAsAStatus` |
 | run-qemu.sh invariant-violation verdict (26.2) | `//test/qemu:run_qemu_verdict_test` (a canned `DCFS-INVARIANT-VIOLATION` line fails the run; the words mid-line do not) |
 | fast and presubmit tiers boot the checking build (26.2) | `//test/qemu:invariant_checks_on_test` (a small test whose daemon must say `invariant checks: on`) |
+| interrupt checkpoints (Phase 22: an interrupted request replies `EINTR` at its next checkpoint) | `//dcfs:dir_cache_fs_test`'s cancellation tests (a fake interruption source, and a forged `FUSE_INTERRUPT` read by the real `SessionLoop`) and `//test/qemu:cancel_test`; without the checkpoints the harness tests fail, and the guest's listing took 13.6-19.5 s (`cancel_inventory_test`) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
@@ -1128,6 +1129,25 @@ ioctls; the guest has no dmsetup) are subcommands of the same binary.
 | `idle_short_test` (matrix) | medium (ext4), large | pass/fail, 60 s: the backing device's `/proc/diskstats` read and write counts do not move while a warm dcfs serves `statfs`, `stat` and `ls` of cached paths (after the kernel's caches were dropped) |
 | `idle_long_test` | large | the same for 600 s |
 | `memory_test` (matrix) | medium (ext4), large | pass/fail: RSS after `find` is under 256 bytes per entry, and after a `drop_caches` of half the tree a find over the other half adds nothing; see the comment in `guest/memory.sh` for why "RSS shrinks back" cannot be asserted |
+| `cancel_inventory_test` | enormous | Phase 22.1: the wall time of each request path that waits on the backing filesystem, every backing I/O delayed 10 ms (dm-delay); prints the table below |
+| `cancel_test` | large | pass/fail (Phase 22): on the same delayed backing, an interrupted (`timeout -s INT 1`) or killed (`kill -9`) listing of an unlisted 20,000-entry directory ends within 2 s, dcfs serves other requests afterwards, and the listing then equals the backing directory's |
+
+The cancellation inventory (`cancel_inventory_test`, 10 ms per backing I/O,
+fastbuild dcfs, a loaded host, 2026-10-07; each one request unless noted).
+Run it again after a change to a request path: a path above about 100 ms
+needs checkpoints (AGENTS.md, "Requests are cancellable"; docs/design.md,
+"Cancellation").
+
+| Path | Time |
+|---|---|
+| population of a 20,000-entry directory (one READDIR) | 13.6-19.5 s (the backing alone, `ls -l` on it: 3.4 s) |
+| a cold lookup three directories deep | 210-310 ms |
+| a cached READDIRPLUS, then a stat of each of 20,000 entries | 3.3-4.1 s in all, each request a few ms |
+| a cold open and read | 340-460 ms |
+| create / rename / unlink | 210 / 50-120 / 30-110 ms |
+| 32 MiB written, then an fsync (with its sync point) | 330-450 ms |
+| DESTROY and FinishRun with 500 written files (no caller) | 370-440 ms |
+| start-up: new cache / clean / after a crash with 500 dirty inodes (no caller) | 120-220 / 140-350 / 270-580 ms |
 
 Results are printed, not pass/fail (VM timing is noisy), except in the idle
 and memory tests. The guest kernel has POSIX timers

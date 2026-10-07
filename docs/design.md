@@ -1054,6 +1054,68 @@ flight makes every attempt fail at once (`EAGAIN`, which `rename(2)` and
 the overlapping mutation ends" there. The
 status macros embed `return` and will need `co_return` variants.
 
+## Cancellation
+
+**Goal** (Phase 22, russ 2026-10-06): a process interrupted while it waits
+on dcfs (Ctrl+C, a signal, a timeout) gets its answer promptly, and the
+slow work dcfs was doing for it stops. The kernel sends `FUSE_INTERRUPT`
+for a request whose caller got a signal, but keeps waiting for the
+request's reply, even for a SIGKILLed caller (`request_wait_answer` in
+`fs/fuse/dev.c`: once dcfs has read a request, only its reply ends the
+wait). So a request dcfs stops must still be replied: `EINTR`.
+
+**Checkpoints, not threads** (russ approved option (b), 2026-10-07). dcfs
+serves one request at a time, so an interrupt cannot stop a backing
+syscall already issued; dcfs looks for one at checkpoints
+(`Checkpoint`, `dcfs/checkpoint.h`), each just before a backing syscall:
+
+- before `LookupOrPopulate`'s probe of a name or population of a
+  directory, and every 16 probes inside `PopulateDirectory` (the slow
+  case: one request of 14-20 s for 20,000 entries at 10 ms per I/O,
+  `cancel_inventory_test`);
+- before every mutation's phase-2 syscall (create, unlink, rename, link,
+  setattr, the xattr changes, a fallback write, fallocate,
+  copy_file_range, ioctl);
+- before a cold open's open by handle, and before `FSYNC`'s and
+  `FSYNCDIR`'s fsync and their sync point.
+
+How a checkpoint learns of the interrupt: the kernel queues a request's
+`FUSE_INTERRUPT` only after dcfs read the request, and libfuse's own loop
+reads the next message only once the handler has returned, so a request
+never saw its own interrupt. `SessionLoop` (`dcfs/session_loop.h`, the
+daemon's loop) drains `/dev/fuse` without blocking at each checkpoint (one
+`poll`): an interrupt goes to libfuse at once (`do_interrupt` marks the
+request, `fuse_req_interrupted` reports it), any other message is queued
+and served after the current request. The kernel delivers interrupts ahead
+of queued requests, so the drain finds one. No thread, and nothing runs
+while dcfs is idle. In `cancel_test` (dm-delay, 10 ms per I/O) an
+interrupted `ls` of an unlisted 20,000-entry directory returns within
+about 0.8 s, and a SIGKILLed `find` within 0.7 s.
+
+**The tri-state rule holds through it** (`formal/dcfs.tla`'s `Interrupt`,
+with `GuardsBalanced`; `formal/README.md`): an interrupted fill commits
+nothing (a population's probes so far are dropped, the directory stays
+incomplete); a mutation interrupted after its phase 1 and before its
+syscall ends (`Mutation::End`, releasing its guard) with its names and
+attributes still unknown and dirty, which is sound because the backing
+filesystem is unchanged; a mutation is never interrupted between its
+syscall and its phase 3: the change exists, phase 3 records it, and the
+request replies success. An interrupted `FSYNC` may have synced; repeating
+it is harmless. The model's variants show what breaks otherwise (an
+interrupt after the syscall that puts the old name back: `CacheNeverWrong`;
+the same before the syscall without the kernel's lock: `TriState`; an
+interrupted mutation that never Ends: `GuardsBalanced`).
+
+**What cannot be interrupted yet**: a backing syscall already blocked in
+the kernel: the first I/O to a disk spinning up (seconds), a hung network
+mount, `syncfs` or `fsync` of much dirty data, DESTROY's reconciliation
+and start-up recovery (no caller). The request answers at its next
+checkpoint after the syscall returns. The coroutine and io_uring rewrite
+lifts this: each request carries a cancellation token checked at every
+await (the same checkpoints), and `IORING_OP_ASYNC_CANCEL` cancels
+in-flight backing I/O that io_uring can cancel; the rules above carry over
+unchanged.
+
 ## Writable opens and file contents
 
 ### One backing file per inode

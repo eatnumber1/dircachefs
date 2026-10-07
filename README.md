@@ -599,6 +599,15 @@ recovery protocol, concurrency, and the test strategy.
   escapes) does not exist yet: it arrives with the NFS export tooling
   (plan phase 15). The paths given on the command line (`--source`, the
   mount point, `--cache_db`) are not escaped in startup messages yet.
+- **Interrupting a request is prompt only between backing syscalls.** A
+  signal to a process waiting on dcfs (Ctrl+C, `timeout`, even `kill -9`)
+  ends the wait with `EINTR` at dcfs's next checkpoint, just before its
+  next backing syscall: within about a second while dcfs lists a large
+  uncached directory on a slow disk. A backing syscall already blocked in
+  the kernel (a disk spinning up, a hung network mount, a long `fsync`)
+  is waited out first. A change that already reached the backing
+  filesystem is completed and reported as done, never as `EINTR`. See
+  docs/design.md, "Cancellation".
 - **Exclusive access to the backing tree is required.** Everything that
   changes the backing tree must go through dcfs. There is no fanotify
   watch and no time-based revalidation. Changes made behind dcfs's back
