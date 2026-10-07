@@ -109,8 +109,12 @@ std::vector<Ino> Distinct(events::IdsFn ids) {
 
 }  // namespace
 
-TraceRecorder::TraceRecorder(int fd, std::string trace, bool files)
-    : fd_(fd), trace_(std::move(trace)), files_enabled_(files) {}
+TraceRecorder::TraceRecorder(int fd, std::string trace, bool files,
+                             bool lifetimes)
+    : fd_(fd),
+      trace_(std::move(trace)),
+      files_enabled_(files),
+      lifetimes_enabled_(lifetimes) {}
 
 void TraceRecorder::Enter(const char *cause) {
   cause_ = cause;
@@ -1446,6 +1450,9 @@ void TraceRecorder::RunStarting(Context &ctx) {
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"restart\",\"db\":", db, "}"));
   }
+  // The nodeids' traces: a new mount holds no nodeid (lifetime.tla's Crash,
+  // or the Restart after a DESTROY).
+  LifeRunLines(ctx, "RunStarting", *clean ? "restart" : "crash");
 }
 
 void TraceRecorder::Recovered(Context &ctx) {
@@ -1472,6 +1479,8 @@ void TraceRecorder::RunStarted(Context &ctx) {
                             ",\"ev\":\"start_run\",\"db\":",
                             Snapshot(ctx, dir), "}"));
   }
+  // After the sweep of unnamed rows (lifetime.tla's Restart).
+  LifeRunLines(ctx, "RunStarted", "start");
   // The directories whose traces begin now (the others began in an earlier
   // run, and ignore this second "begin").
   After(ctx);
@@ -1659,6 +1668,140 @@ void TraceRecorder::FileRequestEnd(const Frame &request, int err) {
     default:
       break;
   }
+}
+
+// --- Nodeids' lifetime traces (formal/lifetime.tla) -------------------------
+
+namespace {
+
+const char *WrittenName(events::Lifetime::Written written) {
+  switch (written) {
+    case events::Lifetime::Written::kNo:
+      return "no";
+    case events::Lifetime::Written::kNoFd:
+      return "nofd";
+    case events::Lifetime::Written::kHeld:
+      return "held";
+  }
+  return "?";
+}
+
+// What DirCacheFS keeps for a nodeid, as a line's "st" spells it (the row
+// follows: RowJson).
+std::string KeptJson(const events::Lifetime &kept) {
+  return absl::StrCat("\"lk\":", kept.lookups, ",\"rec\":", Bool(kept.removed),
+                      ",\"wr\":", JsonStr(WrittenName(kept.written)),
+                      ",\"refs\":", kept.refs);
+}
+
+}  // namespace
+
+std::string TraceRecorder::RowJson(Context &ctx, Ino id) {
+  absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx, id);
+  if (!attr.ok()) {
+    CHECK(absl::IsNotFound(attr.status())) << attr.status();
+    return "\"row\":false,\"nl0\":false";
+  }
+  return absl::StrCat("\"row\":true,\"nl0\":", Bool(attr->st.st_nlink == 0));
+}
+
+void TraceRecorder::LifeLine(Ino id, std::string_view cause,
+                             std::string_view ev, std::string_view fields) {
+  WriteLine(absl::StrCat("DCFS-LIFE ", trace_, " ", id, " {\"i\":",
+                         ++life_line_, ",\"c\":", JsonStr(cause),
+                         ",\"ev\":", JsonStr(ev), fields, "}\n"));
+}
+
+void TraceRecorder::LifeRunLines(Context &ctx, std::string_view cause,
+                                 std::string_view ev) {
+  for (Ino id : lives_) {
+    LifeLine(id, cause, ev, absl::StrCat(",\"st\":{", RowJson(ctx, id), "}"));
+  }
+}
+
+void TraceRecorder::LifetimeChanged(Context &ctx, Ino id,
+                                    events::LifetimeStep step, uint64_t arg,
+                                    events::LifetimeFn after) {
+  // Not Enter(): no directory's trace sees these, and the callback count
+  // is the sync points' (SyncfsStarting).
+  if (!lifetimes_enabled_ || cache::IsStub(id)) return;
+  using events::LifetimeStep;
+  const events::Lifetime kept = after();
+  const bool creates =
+      step == LifetimeStep::kCreated || step == LifetimeStep::kTmpfile;
+  if (!lives_.contains(id)) {
+    // A trace begins with no lookup of the nodeid counted (the model's
+    // initial state); one first seen with lookups counted is not traced.
+    if ((step != LifetimeStep::kLookup && !creates) || kept.lookups != 1) {
+      return;
+    }
+    lives_.insert(id);
+    // The state before the step: a created nodeid had nothing (and no
+    // row); a looked-up one what it has now, less the lookup.
+    events::Lifetime before;
+    if (!creates) {
+      before = kept;
+      before.lookups = 0;
+    }
+    LifeLine(id, "LifetimeChanged", "begin",
+             absl::StrCat(",\"st\":{", KeptJson(before), ",",
+                          creates ? "\"row\":false,\"nl0\":false"
+                                  : RowJson(ctx, id),
+                          "}"));
+  }
+  std::string ev;
+  std::string fields;
+  switch (step) {
+    case LifetimeStep::kLookup: {
+      // Which request handed it out: a LINK (the model's Link), a LOOKUP
+      // of "." or ".." (by no name of the object), or by a name.
+      std::string via = "lookup";
+      if (const Frame *request = InnermostRequest(); request != nullptr) {
+        if (request->op == events::Op::kLink ||
+            request->op == events::Op::kLinkTmpfile) {
+          via = "link";
+        } else if (request->op == events::Op::kLookup &&
+                   (request->name == "." || request->name == "..")) {
+          via = "dot";
+        }
+      }
+      ev = "lookup";
+      fields = absl::StrCat(",\"via\":", JsonStr(via));
+      break;
+    }
+    case LifetimeStep::kCreated:
+      ev = "create";
+      fields = absl::StrCat(",\"w\":", Bool(arg != 0));
+      break;
+    case LifetimeStep::kTmpfile:
+      ev = "tmpfile";
+      break;
+    case LifetimeStep::kOpened:
+      ev = "open";
+      fields = absl::StrCat(",\"w\":", Bool(arg != 0));
+      break;
+    case LifetimeStep::kReleased:
+      ev = "release";
+      fields = absl::StrCat(",\"w\":", Bool(arg != 0));
+      break;
+    case LifetimeStep::kForgot:
+    case LifetimeStep::kForgotInBatch:
+      ev = "forget";
+      fields = absl::StrCat(",\"n\":", arg, ",\"batch\":",
+                            Bool(step == LifetimeStep::kForgotInBatch));
+      break;
+    case LifetimeStep::kRemoved:
+      ev = "removed";
+      fields = absl::StrCat(",\"held\":", Bool(arg != 0));
+      break;
+  }
+  LifeLine(id, "LifetimeChanged", ev,
+           absl::StrCat(fields, ",\"st\":{", KeptJson(kept), ",",
+                        RowJson(ctx, id), "}"));
+}
+
+void TraceRecorder::Destroyed(Context &ctx) {
+  LifeRunLines(ctx, "Destroyed", "destroy");
 }
 
 }  // namespace dcfs::testonly

@@ -26,7 +26,8 @@
 // Trace validation (formal/README.md): a test that calls StartTrace() has
 // its protocol events recorded (dcfs/testonly/trace_recorder.h) to stdout,
 // which is the guest's serial log; //dcfs:dir_cache_fs_trace_test runs this
-// binary and checks every trace against the model (formal/Trace.tla). The
+// binary and checks every trace against the models (formal/Trace.tla, and
+// RevalTrace.tla and LifetimeTrace.tla for files and nodeids). The
 // interleavings the hooks make are the reason to: they are the ones the
 // model checks and today's single thread never produces.
 
@@ -325,7 +326,7 @@ class DirCacheFSTest : public ::testing::Test {
     recorder_ = std::make_unique<testonly::TraceRecorder>(
         STDOUT_FILENO,
         absl::StrCat(info->test_suite_name(), ".", info->name()),
-        /*files=*/true);
+        /*files=*/true, /*lifetimes=*/true);
     ctx_.events = recorder_.get();
     recorder_->BeginAll(ctx_);
   }
@@ -2798,6 +2799,148 @@ TEST_F(DirCacheFSTest, BackingInodeNumbersInTheStubRangeAreRefused) {
   auto [lookup, entry] = Lookup(d, "big");
   ASSERT_EQ(lookup.error, 0);
   EXPECT_EQ(entry.attr.ino, InoOf(Path("d/big")));
+}
+
+// --- Nodeids' lifetimes (formal/lifetime.tla) ------------------------------
+//
+// Forged FORGETs with any nlookup, batches, removals and a crash: what dcfs
+// keeps for a nodeid (its row, a removed record, the written_ entry and its
+// held descriptor) must go exactly when the model says. Each records its
+// trace, which //dcfs:dir_cache_fs_trace_test validates against
+// formal/LifetimeTrace.tla (formal/trace_tests/life_*.log keep some of them
+// for the known-bug variants).
+
+// A FORGET of part of a written file's lookups keeps its held descriptor:
+// a store after it is seen at the last FORGET.
+TEST_F(DirCacheFSTest, NonFinalForgetKeepsTheHeldDescriptor) {
+  WriteFile(Path("f"));
+  Start();
+  StartTrace();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: f is clean.
+  Forget(f, 1);
+  EXPECT_THAT(Dirty(), Not(Contains(f)));  // Not reconciled yet.
+  AppendToFile(Path("f"), "stored");       // The mapping's stores.
+  Forget(f, 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_size, 6);
+  EXPECT_THAT(Dirty(), Contains(f));
+}
+
+// An unlinked file the kernel holds two lookups of is answered from its
+// removed record until both are forgotten, one at a time.
+TEST_F(DirCacheFSTest, RemovedFileIsServedUntilItsLastForget) {
+  WriteFile(Path("f"));
+  Start();
+  StartTrace();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(Getattr(f).second.nlink, 0u);
+  Forget(f, 1);
+  EXPECT_EQ(Getattr(f).first.error, 0);
+  Forget(f, 1);
+  EXPECT_EQ(Getattr(f).first.error, -ESTALE);
+}
+
+// A FORGET_MULTI takes each entry's nlookup off its nodeid's count: both
+// are forgotten, and the removed one's record goes.
+TEST_F(DirCacheFSTest, ForgetMultiTakesOffEachEntrysCount) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start();
+  StartTrace();
+  InodeId f = 0, g = 0;
+  for (int i = 0; i < 2; ++i) {
+    auto [lf, ef] = Lookup(kRootInode, "f");
+    auto [lg, eg] = Lookup(kRootInode, "g");
+    ASSERT_EQ(lf.error, 0);
+    ASSERT_EQ(lg.error, 0);
+    f = static_cast<InodeId>(ef.nodeid);
+    g = static_cast<InodeId>(eg.nodeid);
+  }
+  ASSERT_EQ(Unlink(kRootInode, "g").error, 0);
+  EXPECT_EQ(Getattr(g).first.error, 0);
+  BatchForget({{f, 2}, {g, 2}});
+  EXPECT_EQ(Getattr(g).first.error, -ESTALE);
+  // f's row stays (a named object's row is a cache record), and the next
+  // lookups count from 0 again, by its name or as ".", which an NFS
+  // handle's reconnection sends.
+  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  ASSERT_EQ(Lookup(f, ".").first.error, 0);
+  Forget(f, 2);
+}
+
+// A rename over an open file keeps its row until its last release (with
+// nlink 0 in it), which retires it into a removed record while the kernel
+// holds the nodeid.
+TEST_F(DirCacheFSTest, RenameOverAnOpenFileRetiresItAtTheLastRelease) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start();
+  StartTrace();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Rename(kRootInode, "g", kRootInode, "f").error, 0);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(attr.valid);
+  EXPECT_EQ(attr.st.st_nlink, 0u);
+  ASSERT_EQ(Release(f, fh).error, 0);
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(Getattr(f).first.error, 0);
+  Forget(f, 1);
+  EXPECT_EQ(Getattr(f).first.error, -ESTALE);
+}
+
+// DESTROY lets go of every nodeid: a written file's held descriptor and
+// written_ entry with them (its reconciliation is
+// DestroyReconcilesWrittenFiles's).
+TEST_F(DirCacheFSTest, DestroyLetsGoOfEveryNodeid) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start();
+  StartTrace();
+  auto [lf, ef] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lf.error, 0);
+  const InodeId f = static_cast<InodeId>(ef.nodeid);
+  auto [open, fh] = Open(f, O_WRONLY);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);
+  ASSERT_EQ(Lookup(kRootInode, "g").first.error, 0);
+  ASSERT_EQ(Unlink(kRootInode, "g").error, 0);
+  EXPECT_EQ(Send(FUSE_DESTROY, 0, "").error, 0);
+  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());
+}
+
+// An O_TMPFILE file left open by a crash: the next start (unclean) sweeps
+// its row.
+TEST_F(DirCacheFSTest, TmpfileRowGoesAtTheStartAfterACrash) {
+  Start();
+  // A running daemon's flag (StartRun clears it): the trace begins in a
+  // run, and the crash is the daemon's dying with the tmpfile open.
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  StartTrace();
+  Created tmp = Tmpfile(kRootInode, O_RDWR);
+  ASSERT_EQ(tmp.reply.error, 0);
+  ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, tmp.id).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
 }
 
 }  // namespace

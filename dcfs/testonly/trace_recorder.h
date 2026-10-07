@@ -55,6 +55,22 @@
 // dcfs's back (NoteOutOfBand). Each open and release line carries the
 // shared backing fd it left; the model's state is compared with it.
 //
+// Nodeids, for the lifetime model (formal/lifetime.tla, formal/README.md
+// "The lifetime model"), if the recorder was made with `lifetimes`: each
+// nodeid whose trace began (at the entry reply dcfs counts first, or at the
+// CREATE or TMPFILE that made it) gets its own trace, on lines
+//
+//   DCFS-LIFE <trace> <nodeid> <json>
+//
+// one per step of LifetimeChanged (lookup, create, tmpfile, open, release,
+// forget, removed), and one at DESTROY, at a start after a crash or a
+// clean shutdown, and when a start has run (its sweep). Each carries what
+// dcfs keeps for the nodeid after the step ("st": its lookup count,
+// removed record, written_ entry and open files as DirCacheFS reported
+// them, and its row and the row's nlink as the database has them; at the
+// run's lines only the row); the model's state is compared with it.
+// Stubs' nodeids are not traced.
+//
 // Not thread-safe: dcfs serves one request at a time.
 
 #include <cstdint>
@@ -74,8 +90,10 @@ namespace dcfs::testonly {
 class TraceRecorder final : public ProtocolEvents {
  public:
   // Writes lines to `fd` (not owned; each line is one write(2)) under the
-  // trace name `trace` (no spaces); with `files`, the files' traces too.
-  TraceRecorder(int fd, std::string trace, bool files = false);
+  // trace name `trace` (no spaces); with `files`, the files' traces too;
+  // with `lifetimes`, the nodeids' traces.
+  TraceRecorder(int fd, std::string trace, bool files = false,
+                bool lifetimes = false);
 
   // Begins the trace of every directory now in the cache. For a test that
   // sets Context::events itself, once its setup is done and nothing is in
@@ -153,6 +171,11 @@ class TraceRecorder final : public ProtocolEvents {
                   const events::SharedFd &after) override;
   void FileReleased(Context &ctx, events::Ino id, bool writable,
                     const events::SharedFd &after) override;
+
+  void LifetimeChanged(Context &ctx, events::Ino id,
+                       events::LifetimeStep step, uint64_t arg,
+                       events::LifetimeFn after) override;
+  void Destroyed(Context &ctx) override;
 
   // For a test: the backing file `id` changed behind dcfs's back (a flag or
   // mode change made directly on the backing filesystem). Its trace, if
@@ -356,6 +379,7 @@ class TraceRecorder final : public ProtocolEvents {
     bool dead = false;  // cut: no more lines
   };
   bool files_enabled_ = false;
+  bool lifetimes_enabled_ = false;
   std::map<Ino, FileTrace> files_;
   int64_t file_line_ = 0;
   // Whether `id` has a trace that still takes lines.
@@ -369,6 +393,21 @@ class TraceRecorder final : public ProtocolEvents {
   void FileRequestEnd(const Frame &request, int err);
   // Writes `line` (one write(2) per call).
   void WriteLine(const std::string &line);
+
+  // The nodeids' traces (formal/lifetime.tla): those that began.
+  std::set<Ino> lives_;
+  int64_t life_line_ = 0;
+  // Writes one line of nodeid `id`'s trace: {"i", "c": cause, "ev": ev,
+  // fields...}. `fields` is "" or starts with ",".
+  void LifeLine(Ino id, std::string_view cause, std::string_view ev,
+                std::string_view fields = "");
+  // The lines of the run's steps (crash, restart, start, destroy) for every
+  // nodeid trace, each with the row as the database has it.
+  void LifeRunLines(Context &ctx, std::string_view cause,
+                    std::string_view ev);
+  // `"row":..,"nl0":..`: whether `id` has a row, and whether its nlink
+  // column is 0.
+  static std::string RowJson(Context &ctx, Ino id);
 };
 
 }  // namespace dcfs::testonly

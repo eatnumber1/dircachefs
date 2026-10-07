@@ -126,6 +126,31 @@ struct SharedFd {
   int writable_refs = 0;              // ... that may write
 };
 
+// What dcfs keeps for a nodeid, as a step of its lifetime left it. For the
+// lifetime model (formal/lifetime.tla).
+struct Lifetime {
+  enum class Written { kNo, kNoFd, kHeld };
+  uint64_t lookups = 0;   // the kernel's lookups dcfs counted (lookups_)
+  bool removed = false;   // a removed record answers for it (removed_)
+  Written written = Written::kNo;  // written_: no entry, one without or
+                                   // with a held descriptor
+  int refs = 0;           // its open files (BackingFile::refs)
+};
+using LifetimeFn = absl::FunctionRef<Lifetime()>;
+
+// A step of a nodeid's lifetime (ProtocolEvents::LifetimeChanged).
+enum class LifetimeStep {
+  kLookup,    // an entry reply handed it out (arg: unused)
+  kCreated,   // a CREATE made it, open (arg: 1 if the open may write)
+  kTmpfile,   // a TMPFILE made it, open for writing
+  kOpened,    // an OPEN of it succeeded (arg: 1 if it may write)
+  kReleased,  // a RELEASE of an open of it ended (arg: 1 if it could write)
+  kForgot,    // a FORGET of it (arg: its nlookup)
+  kForgotInBatch,  // an entry of a FORGET_MULTI (arg: its nlookup)
+  kRemoved,   // phase 3 of an unlink, rmdir or rename that removed one of
+              // its names ended (arg: 1 if HoldForRemoval held it)
+};
+
 // The decision LookupOrPopulate takes after reading the cache.
 enum class LookupOutcome {
   kFound,     // served from the cache: present
@@ -343,6 +368,25 @@ class ProtocolEvents {
   // `writable`) ended; `after`: the shared backing fd now. Model: ReleaseF.
   virtual void FileReleased(Context &ctx, events::Ino id, bool writable,
                             const events::SharedFd &after) {}
+
+  // --- Nodeids: the lifetime model (formal/lifetime.tla) ------------
+  //
+  // Not the main model's: the kernel's lookup counts as dcfs counts them,
+  // and what dcfs keeps for a nodeid (its row, a removed record, the
+  // written_ entry and its held descriptor, open files) at each step that
+  // changes them. A recorder projects these onto one trace per nodeid.
+
+  // DirCacheFS finished `step` of nodeid `id` (see events::LifetimeStep;
+  // `arg` is the step's), right after the code the model's step stands
+  // for; `after` reads what dcfs keeps for it now. Model: Lookup, Create,
+  // Tmpfile, Link (a kLookup of a LINK), Open, Release, Remove and Settle
+  // (kRemoved), Forget, ForgetMulti.
+  virtual void LifetimeChanged(Context &ctx, events::Ino id,
+                               events::LifetimeStep step, uint64_t arg,
+                               events::LifetimeFn after) {}
+  // DirCacheFS::Destroy let go of every nodeid (the kernel sends no
+  // FORGETs at unmount). Model: Destroy.
+  virtual void Destroyed(Context &ctx) {}
 
   // --- Sync points ----------------------------------------------------
 

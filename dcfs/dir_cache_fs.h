@@ -467,6 +467,12 @@ class DirCacheFS {
   std::optional<int> OpenFdOf(InodeId id) const;
   // `id`'s shared backing descriptor, for the protocol events.
   events::SharedFd SharedFdOf(InodeId id) const;
+  // What dcfs keeps for nodeid `id` (lookups_, removed_, written_, open
+  // files), for the protocol events.
+  events::Lifetime LifetimeOf(InodeId id) const;
+  // The lifetime model's step `step` of `id` (formal/lifetime.tla): the
+  // protocol event, with what dcfs keeps for it now.
+  void NoteLifetime(InodeId id, events::LifetimeStep step, uint64_t arg = 0);
   // Open() of a file that is not a boundary stub.
   absl::Status OpenInode(FuseRequest &req, InodeId id, fuse_file_info &fi);
 

@@ -272,6 +272,8 @@ absl::Status DirCacheFS::Destroy() {
   lookups_.clear();
   written_.clear();
   held_fds_ = 0;
+  // The lifetime model's Destroy (formal/lifetime.tla).
+  ctx_.events->Destroyed(ctx_);
   return absl::OkStatus();
 }
 
@@ -320,6 +322,7 @@ absl::Status DirCacheFS::ReplyEntry(FuseRequest &req,
       entry.ino, entry.generation, entry.attr,
       AttrTimeoutFor(static_cast<InodeId>(entry.ino)), opts_.entry_timeout));
   ++lookups_[static_cast<InodeId>(entry.ino)];
+  NoteLifetime(static_cast<InodeId>(entry.ino), events::LifetimeStep::kLookup);
   return absl::OkStatus();
 }
 
@@ -837,6 +840,7 @@ void DirCacheFS::Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup) {
     const InodeId ids[] = {id};
     ReconcileWritten(ids);
   }
+  NoteLifetime(id, events::LifetimeStep::kForgot, nlookup);
   // forget/forget_multi have no error reply: fuse_reply_none is the only
   // valid one.
   req.ReplyNone();
@@ -855,6 +859,10 @@ void DirCacheFS::ForgetMulti(
     }
   }
   ReconcileWritten(forgotten);
+  for (const fuse_forget_data &forget : forgets) {
+    NoteLifetime(static_cast<InodeId>(forget.ino),
+                 events::LifetimeStep::kForgotInBatch, forget.nlookup);
+  }
   req.ReplyNone();
 }
 
@@ -1015,6 +1023,7 @@ absl::Status DirCacheFS::RemoveChild(
   }
   mutation.End();
   LogPhase3Failure("Unlink/Rmdir", backing::RefreshAttrs(ctx_, parent));
+  const bool was_held = held.has_value();
   if (is_dir) {
     // A directory has exactly one link that matters here and no open-file
     // state in dcfs (Opendir keeps nothing), so the backing rmdir removed
@@ -1023,6 +1032,8 @@ absl::Status DirCacheFS::RemoveChild(
   } else {
     LogPhase3Failure("Unlink", SettleUnlinkedFile(child.id, std::move(held)));
   }
+  // The lifetime model's Remove and Settle (formal/lifetime.tla).
+  NoteLifetime(child.id, events::LifetimeStep::kRemoved, was_held ? 1 : 0);
   return req.ReplyErrno(0);
 }
 
@@ -1202,13 +1213,19 @@ void DirCacheFS::RefreshAfterRename(
     } else if (absl::StatusOr<cache::CachedAttr> dst_attr = RequireAttr(dst.id);
                !dst_attr.ok()) {
       LogPhase3Failure("Rename", dst_attr.status());
-    } else if (S_ISDIR(dst_attr->st.st_mode)) {
-      // Replaced. A directory can only have been replaced if it was empty,
-      // and is gone for good; a file follows Unlink's row-lifetime rule.
-      LogPhase3Failure("Rename", RetireRemoved(dst.id, std::move(held_dst)));
     } else {
-      LogPhase3Failure("Rename",
-                       SettleUnlinkedFile(dst.id, std::move(held_dst)));
+      const bool was_held = held_dst.has_value();
+      if (S_ISDIR(dst_attr->st.st_mode)) {
+        // Replaced. A directory can only have been replaced if it was
+        // empty, and is gone for good; a file follows Unlink's row-lifetime
+        // rule.
+        LogPhase3Failure("Rename", RetireRemoved(dst.id, std::move(held_dst)));
+      } else {
+        LogPhase3Failure("Rename",
+                         SettleUnlinkedFile(dst.id, std::move(held_dst)));
+      }
+      // The lifetime model's Remove and Settle (formal/lifetime.tla).
+      NoteLifetime(dst.id, events::LifetimeStep::kRemoved, was_held ? 1 : 0);
     }
   }
 }
@@ -1368,6 +1385,10 @@ absl::Status DirCacheFS::Open(
   const bool shared = backing_files_.contains(id);
   absl::Status status = OpenInode(req, id, fi);
   ctx_.events->FileOpened(ctx_, id, fi.flags, shared, status, SharedFdOf(id));
+  if (status.ok()) {
+    NoteLifetime(id, events::LifetimeStep::kOpened,
+                 (fi.flags & O_ACCMODE) != O_RDONLY ? 1 : 0);
+  }
   return status;
 }
 
@@ -1666,6 +1687,7 @@ absl::Status DirCacheFS::Release(
   if (backing_file.refs > 0) {
     // The revalidation model's ReleaseF (formal/reval.tla).
     ctx_.events->FileReleased(ctx_, id, writable, SharedFdOf(id));
+    NoteLifetime(id, events::LifetimeStep::kReleased, writable ? 1 : 0);
     return req.ReplyErrno(0);
   }
 
@@ -1755,6 +1777,9 @@ absl::Status DirCacheFS::Release(
                    << id << ": " << retired;
     }
   }
+  // The lifetime model's Release (formal/lifetime.tla), after the
+  // retirement.
+  NoteLifetime(id, events::LifetimeStep::kReleased, writable ? 1 : 0);
   return req.ReplyErrno(0);
 }
 
@@ -1971,6 +1996,8 @@ absl::Status DirCacheFS::Readdirplus(
   for (const FuseDirEntryPlus &e : entries) {
     if (e.name != "." && e.name != ".." && e.entry.ino != 0) {
       ++lookups_[static_cast<InodeId>(e.entry.ino)];
+      NoteLifetime(static_cast<InodeId>(e.entry.ino),
+                   events::LifetimeStep::kLookup);
     }
   }
   return absl::OkStatus();
@@ -2274,6 +2301,8 @@ absl::Status DirCacheFS::Create(
   // The revalidation model's OpenF (formal/reval.tla), of a new file.
   ctx_.events->FileOpened(ctx_, child.id, fi.flags, /*shared=*/false,
                           absl::OkStatus(), SharedFdOf(child.id));
+  // The lifetime model's Create (formal/lifetime.tla).
+  NoteLifetime(child.id, events::LifetimeStep::kCreated, writable ? 1 : 0);
   return absl::OkStatus();
 }
 
@@ -2527,6 +2556,8 @@ absl::Status DirCacheFS::Tmpfile(FuseRequest &req, fuse_ino_t parent_ino,
   ++lookups_[child.id];
   ctx_.events->FileOpened(ctx_, child.id, fi.flags, /*shared=*/false,
                           absl::OkStatus(), SharedFdOf(child.id));
+  // The lifetime model's Tmpfile (formal/lifetime.tla).
+  NoteLifetime(child.id, events::LifetimeStep::kTmpfile);
   return absl::OkStatus();
 }
 
@@ -2556,6 +2587,28 @@ events::SharedFd DirCacheFS::SharedFdOf(InodeId id) const {
                                                  : WriteFd::kPlain,
           .refs = file.refs,
           .writable_refs = file.writable_refs};
+}
+
+events::Lifetime DirCacheFS::LifetimeOf(InodeId id) const {
+  events::Lifetime kept;
+  if (auto it = lookups_.find(id); it != lookups_.end()) {
+    kept.lookups = it->second;
+  }
+  kept.removed = removed_.contains(id);
+  if (auto it = written_.find(id); it != written_.end()) {
+    kept.written = it->second.has_value() ? events::Lifetime::Written::kHeld
+                                          : events::Lifetime::Written::kNoFd;
+  }
+  if (auto it = backing_files_.find(id); it != backing_files_.end()) {
+    kept.refs = it->second.refs;
+  }
+  return kept;
+}
+
+void DirCacheFS::NoteLifetime(InodeId id, events::LifetimeStep step,
+                              uint64_t arg) {
+  ctx_.events->LifetimeChanged(ctx_, id, step, arg,
+                               [&] { return LifetimeOf(id); });
 }
 
 }  // namespace dcfs

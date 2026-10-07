@@ -1,9 +1,11 @@
 // Tests of the trace recorder's own decisions (trace_recorder.h): which
 // changes of a directory's cached state it explains, cuts or calls
-// unexplained, and which files' events become lines of a file's trace
-// (formal/reval.tla). The events are produced by the cache functions themselves
-// (they call Context::events), on an in-memory database; the lines are read
-// back from a file in TEST_TMPDIR.
+// unexplained, which files' events become lines of a file's trace
+// (formal/reval.tla), and which nodeids' lifetime steps become lines of a
+// nodeid's trace (formal/lifetime.tla). The events are produced by the
+// cache functions themselves (they call Context::events), or called
+// directly, on an in-memory database; the lines are read back from a file
+// in TEST_TMPDIR.
 
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
@@ -119,9 +121,10 @@ class TraceRecorderTest : public ::testing::Test {
   }
 
   // Starts recording; every directory's trace begins now. With `files`,
-  // files' traces too.
-  void StartTrace(bool files = false) {
-    recorder_ = std::make_unique<TraceRecorder>(fd_, "test", files);
+  // files' traces too; with `lifetimes`, nodeids' traces.
+  void StartTrace(bool files = false, bool lifetimes = false) {
+    recorder_ =
+        std::make_unique<TraceRecorder>(fd_, "test", files, lifetimes);
     ctx_.events = recorder_.get();
     recorder_->BeginAll(ctx_);
   }
@@ -149,6 +152,17 @@ class TraceRecorderTest : public ::testing::Test {
     std::ifstream in(path_);
     std::vector<std::string> lines;
     const std::string prefix = absl::StrCat("DCFS-REVAL test ", id, " ");
+    for (std::string line; std::getline(in, line);) {
+      if (absl::StartsWith(line, prefix)) lines.push_back(line);
+    }
+    return lines;
+  }
+
+  // The lines of nodeid `id`'s lifetime trace so far.
+  std::vector<std::string> LifeLines(InodeId id) {
+    std::ifstream in(path_);
+    std::vector<std::string> lines;
+    const std::string prefix = absl::StrCat("DCFS-LIFE test ", id, " ");
     for (std::string line; std::getline(in, line);) {
       if (absl::StartsWith(line, prefix)) lines.push_back(line);
     }
@@ -566,6 +580,155 @@ TEST_F(TraceRecorderTest, FileRequestsBecomeLinesOfItsTrace) {
   EXPECT_THAT(lines[7], HasSubstr("\"ev\":\"write\",\"errno\":0}"));
   EXPECT_THAT(lines[8], AllOf(HasSubstr("\"ev\":\"cut\""),
                               HasSubstr("failed: a write failed: errno 5")));
+}
+
+// --- Nodeids' lifetime traces (formal/lifetime.tla) ----------------------
+
+// What DirCacheFS reports it keeps for a nodeid after a step.
+events::Lifetime Kept(uint64_t lookups, int refs = 0,
+                      events::Lifetime::Written written =
+                          events::Lifetime::Written::kNo,
+                      bool removed = false) {
+  return {.lookups = lookups,
+          .removed = removed,
+          .written = written,
+          .refs = refs};
+}
+
+void Step(TraceRecorder &recorder, Context &ctx, InodeId id,
+          events::LifetimeStep step, uint64_t arg,
+          const events::Lifetime &after) {
+  recorder.LifetimeChanged(ctx, id, step, arg, [&] { return after; });
+}
+
+// A nodeid's trace begins at the lookup dcfs counts first (lookups_ from 0
+// to 1), in the state it had before it (the model's initial state: no
+// lookup, nothing kept, its row as the database has it); one first seen
+// with lookups counted already is not traced, and nothing is unless the
+// recorder was made with `lifetimes`.
+TEST_F(TraceRecorderTest, LifetimeTraceBeginsAtTheFirstCountedLookup) {
+  ASSERT_OK_AND_ASSIGN(InodeId f, Make(60, S_IFREG | 0644));
+  ASSERT_OK_AND_ASSIGN(InodeId g, Make(61, S_IFREG | 0644));
+  StartTrace(/*files=*/true, /*lifetimes=*/false);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(1));
+  EXPECT_THAT(LifeLines(f), IsEmpty());
+
+  StartTrace(/*files=*/false, /*lifetimes=*/true);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(2));
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kForgot, 2, Kept(0));
+  EXPECT_THAT(LifeLines(f), IsEmpty());
+
+  Step(*recorder_, ctx_, g, events::LifetimeStep::kLookup, 0, Kept(1));
+  Step(*recorder_, ctx_, g, events::LifetimeStep::kOpened, 1,
+       Kept(1, 1, events::Lifetime::Written::kNoFd));
+  Step(*recorder_, ctx_, g, events::LifetimeStep::kReleased, 1,
+       Kept(1, 0, events::Lifetime::Written::kHeld));
+  Step(*recorder_, ctx_, g, events::LifetimeStep::kForgot, 1, Kept(0));
+  const std::vector<std::string> lines = LifeLines(g);
+  ASSERT_EQ(lines.size(), 5u);
+  EXPECT_THAT(lines[0],
+              AllOf(HasSubstr("\"ev\":\"begin\""),
+                    HasSubstr("\"st\":{\"lk\":0,\"rec\":false,"
+                              "\"wr\":\"no\",\"refs\":0,\"row\":true,"
+                              "\"nl0\":false}")));
+  EXPECT_THAT(lines[1],
+              AllOf(HasSubstr("\"ev\":\"lookup\",\"via\":\"lookup\""),
+                    HasSubstr("\"st\":{\"lk\":1,\"rec\":false,"
+                              "\"wr\":\"no\",\"refs\":0,\"row\":true,"
+                              "\"nl0\":false}")));
+  EXPECT_THAT(lines[2], AllOf(HasSubstr("\"ev\":\"open\",\"w\":true"),
+                              HasSubstr("\"wr\":\"nofd\",\"refs\":1")));
+  EXPECT_THAT(lines[3],
+              AllOf(HasSubstr("\"ev\":\"release\",\"w\":true"),
+                    HasSubstr("\"wr\":\"held\",\"refs\":0")));
+  EXPECT_THAT(lines[4],
+              AllOf(HasSubstr("\"ev\":\"forget\",\"n\":1,"
+                              "\"batch\":false"),
+                    HasSubstr("\"lk\":0,")));
+}
+
+// A CREATE or TMPFILE begins its nodeid's trace before the row it made
+// (the model's Create and Tmpfile make it); a stub's nodeid is not traced.
+TEST_F(TraceRecorderTest, LifetimeTraceOfACreatedNodeidBeginsWithoutItsRow) {
+  ASSERT_OK_AND_ASSIGN(InodeId f, Make(62, S_IFREG | 0644));
+  StartTrace(/*files=*/false, /*lifetimes=*/true);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kCreated, 0, Kept(1, 1));
+  const std::vector<std::string> lines = LifeLines(f);
+  ASSERT_EQ(lines.size(), 2u);
+  EXPECT_THAT(lines[0], AllOf(HasSubstr("\"ev\":\"begin\""),
+                              HasSubstr("\"row\":false,\"nl0\":false}")));
+  EXPECT_THAT(lines[1], AllOf(HasSubstr("\"ev\":\"create\",\"w\":false"),
+                              HasSubstr("\"refs\":1,\"row\":true,")));
+
+  constexpr InodeId kStub = -5;
+  Step(*recorder_, ctx_, kStub, events::LifetimeStep::kLookup, 0, Kept(1));
+  EXPECT_THAT(LifeLines(kStub), IsEmpty());
+}
+
+// How an entry reply handed the nodeid out, from the request it answered:
+// a LINK (the model's Link), a LOOKUP of "." or ".." (no name of the
+// object), or by a name.
+TEST_F(TraceRecorderTest, LifetimeLookupSaysWhichRequestHandedItOut) {
+  ASSERT_OK_AND_ASSIGN(InodeId f, Make(63, S_IFREG | 0644));
+  StartTrace(/*files=*/false, /*lifetimes=*/true);
+  {
+    events::RequestScope scope(*ctx_.events, ctx_,
+                               {.op = events::Op::kLookup, .ino = f,
+                                .name = "."});
+    Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(1));
+  }
+  {
+    events::RequestScope scope(*ctx_.events, ctx_,
+                               {.op = events::Op::kLinkTmpfile, .ino = f,
+                                .newparent = cache::kRootInode,
+                                .newname = "n"});
+    Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(2));
+  }
+  {
+    events::RequestScope scope(
+        *ctx_.events, ctx_,
+        {.op = events::Op::kReaddirplus, .ino = cache::kRootInode});
+    Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(3));
+  }
+  const std::vector<std::string> lines = LifeLines(f);
+  ASSERT_EQ(lines.size(), 4u);
+  EXPECT_THAT(lines[1], HasSubstr("\"via\":\"dot\""));
+  EXPECT_THAT(lines[2], HasSubstr("\"via\":\"link\""));
+  EXPECT_THAT(lines[3], HasSubstr("\"via\":\"lookup\""));
+}
+
+// A removal's phase 3, a FORGET_MULTI's entry, DESTROY, and a start after a
+// crash: each a line of every nodeid trace it concerns (the last two of
+// all of them), the run's lines with the row as the database has it.
+TEST_F(TraceRecorderTest, LifetimeRemovalBatchDestroyAndRestartLines) {
+  ASSERT_OK_AND_ASSIGN(InodeId f, Make(64, S_IFREG | 0644));
+  StartTrace(/*files=*/false, /*lifetimes=*/true);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(1));
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(2));
+  ASSERT_THAT(cache::DeleteInode(ctx_, f), IsOk());
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kRemoved, 1,
+       Kept(2, 0, events::Lifetime::Written::kNo, /*removed=*/true));
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kForgotInBatch, 1,
+       Kept(1, 0, events::Lifetime::Written::kNo, /*removed=*/true));
+  recorder_->Destroyed(ctx_);
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  recorder_->RunStarting(ctx_);
+  recorder_->RunStarted(ctx_);
+  const std::vector<std::string> lines = LifeLines(f);
+  ASSERT_EQ(lines.size(), 8u);
+  EXPECT_THAT(lines[3],
+              AllOf(HasSubstr("\"ev\":\"removed\",\"held\":true"),
+                    HasSubstr("\"lk\":2,\"rec\":true,"),
+                    HasSubstr("\"row\":false,")));
+  EXPECT_THAT(lines[4], HasSubstr("\"ev\":\"forget\",\"n\":1,"
+                                  "\"batch\":true"));
+  EXPECT_THAT(lines[5], AllOf(HasSubstr("\"ev\":\"destroy\""),
+                              HasSubstr("\"st\":{\"row\":false,"
+                                        "\"nl0\":false}")));
+  EXPECT_THAT(lines[6], HasSubstr("\"ev\":\"crash\""));
+  EXPECT_THAT(lines[7], AllOf(HasSubstr("\"ev\":\"start\""),
+                              HasSubstr("\"st\":{\"row\":false,"
+                                        "\"nl0\":false}")));
 }
 
 }  // namespace
