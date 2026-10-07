@@ -1582,6 +1582,72 @@ Where a bug cannot be reproduced deterministically (coroutine-only
 interleavings, a real power loss), the closest honest test is written and
 its limits are stated.
 
+### Runtime invariant checks
+
+The rules this document states in prose are also checked while tests run
+(step 26.2), in a testonly build of the daemon and in the forged-request
+harness, never in what ships. Every layer calls hooks through
+`Context::checks` (`dcfs/invariant_checks.h`): `backing.cc` before each
+backing syscall it makes from a function holding a `Context` (and before
+each call into code without one that makes them: `FileHandle`,
+`GetDeviceId`, `AsCaller`, its descriptor-only helpers), `DirCacheFS`
+before each of those helpers it calls, `fuse_ops.cc` around every request
+(after the reply) and every `FORGET` entry, `StartRun` at its end, and
+DESTROY. Code without a `Context` cannot open a transaction (the database
+is reachable only through `Context::db`), so the hook before such a call
+covers every syscall the call makes. Production links the no-op
+(`invariant_checks_main.cc`): one call to an empty function per hook, per
+backing syscall and per request, against syscalls that cost microseconds.
+A compile-time switch would have made every object differ between the
+two builds; a hook inside the `syscalls::` wrappers would have needed a
+global, since they have no `Context`.
+
+The checking build (`//dcfs:main_static_checked`, linking
+`dcfs/testonly/main_invariant_checker.cc`) and the harness install
+`testonly::InvariantChecker`, which checks:
+
+- at every backing syscall: no transaction is open and no statement is
+  part way through its rows (a read cursor holds a read transaction):
+  `no-transaction-at-backing-call`; every inode with a mutation in flight
+  has its dirty row (`dirty-set`);
+- at the end of every request, after its reply, for the rows the request
+  changed (SQLite's update hook names them, so the work is proportional to
+  them, not to the database) and the inodes it named: no transaction or
+  cursor open (`no-transaction-at-request-end`); attributes recorded as
+  current have every column and a link count above 0, and a dentry is
+  `refused` exactly when its stub exists (`tri-state`); only the root has
+  FUSE generation 0 (`identity`); an inode in `Context::dirty.durable` has
+  its dirty row, and `dirty.any` false means an empty table (`dirty-set`);
+  an inode open for writing has its attributes unknown, its dirty row, and
+  a `written_` entry unless it is a removed object, and a `BackingFile`
+  with writable opens is open for writing (`writable-open`); lookup counts
+  are positive and no `FORGET` drops more than was counted
+  (`lookup-count`); `held_fds_` is the number of `written_` entries holding
+  a descriptor, at most the cap (`held-fds`); a removed record exists only
+  while the kernel holds a lookup of it, and never beside a `written_`
+  entry (`removed-record`);
+- at `StartRun` and after DESTROY: all of it over the whole database and
+  every in-memory entry.
+
+What the checklist states but the checker does not: "the dirty set equals
+the set of unknown rows" is not an invariant of this design (a population
+leaves rows unknown that no mutation touched, an invalidation makes names
+unknown without dirtying anything, and phase 3 makes a dirty inode's
+records present again), so the checks are the one-way rules above; and
+"no held descriptor beside a writable shared descriptor" is not one either
+(`Release` keeps a held descriptor across a later writable open of the same
+file). Trace validation (`formal/`) checks what the checker cannot see
+from one moment's state: the order of a mutation's phases.
+
+A violation aborts the daemon (`LOG(FATAL)`: "invariant violated:
+<invariant>: <what> (in request <OPCODE> nodeid <n>)") after writing the
+same line, as `DCFS-INVARIANT-VIOLATION ...`, to the console, where
+`run-qemu.sh` fails the run on it. Every `small` and `medium` `qemu_test`
+(the fast and presubmit tiers) boots the checking build, except
+`syscall_traces_test` and `memory_test`, which measure what ships (its
+SQLite statements and its memory); `large` and `enormous` boot the plain
+one (`test/qemu/README.md`, "Test tiers").
+
 ### Conformance
 
 `pjdfstest_test` runs all of pjdfstest (238 files, about 8800 checks) as
