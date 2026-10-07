@@ -64,7 +64,8 @@ bool WriteFile(int rootfd, const std::string &rel) {
   absl::StatusOr<size_t> n = dcfs::syscalls::write(**fd, data, sizeof data);
   const bool ok = n.ok() && *n == sizeof data;
   if (!ok) {
-    fprintf(stderr, "write %s: %s\n", rel.c_str(),
+    fprintf(stderr, "write %s: wrote %zu of %zu bytes: %s\n", rel.c_str(),
+            n.ok() ? *n : size_t{0}, sizeof data,
             n.status().ToString().c_str());
   }
   return ok;

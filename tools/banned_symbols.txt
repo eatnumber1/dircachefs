@@ -5,6 +5,7 @@
 # "No paths after startup": nothing resolves, walks or globs a path name
 # once the daemon runs; everything goes through file descriptors.
 ban realpath | no paths after startup
+ban _ZN4dcfs8syscalls8realpath* | no paths after startup (the syscalls::realpath wrapper)
 ban getcwd | no paths after startup
 ban get_current_dir_name | no paths after startup
 ban _ZNSt10filesystem* | no paths after startup (std::filesystem, libstdc++)
@@ -50,7 +51,8 @@ ban __snprintf_chk | Abseil only
 # line that matches nothing, so this list only shrinks by deleting lines.
 
 # First party, startup only: "no paths after startup" permits these.
-allow dcfs/_objs/syscalls/* realpath | startup only: the syscalls::realpath wrapper, called by mounts_below.cc (MountsBelow canonicalizes --source once, from main.cc, before the mount)
+allow dcfs/_objs/syscalls/* realpath | the syscalls::realpath wrapper itself; its callers are gated by the wrapper's own ban
+allow dcfs/_objs/mounts_below/* _ZN4dcfs8syscalls8realpath* | startup only: mounts_below.cc canonicalizes --source once, from main.cc (MountsBelow), before the mount
 
 # Abseil: formatting and diagnostics internals.
 allow abseil-cpp+/* snprintf | Abseil's own number, float, stack-trace and Mutex-debug formatting

@@ -6,20 +6,24 @@ raw_syscalls_names.txt that is not qualified with `syscalls::`.
 
 What it catches: `name(`, `::name(`, `std::name(`, `(name)(` and `x>name(`
 in code (comments and string/char literals are blanked first; a `'` inside a
-number is a digit separator, not a char literal). What it ignores:
-`syscalls::name(`, any other `Scope::name(`, `.name(` and `->name(` (a member
-or another namespace's function), and `__wrap_name`/`__real_name` (the
-link-time fault fakes of the *_test.cc files define and call those: the
-negative lookbehind on a word character keeps the pattern from matching
-inside a longer identifier). What it cannot catch: a call through a macro or
-function pointer, a name not in the list, a raw string literal containing a
+number is a digit separator, not a char literal), and any use of
+`std::filesystem`, `std::ifstream`, `std::ofstream` and `std::fstream`.
+What it ignores: `syscalls::name(`, any other `Scope::name(`, `.name(` and
+`->name(` (a member or another namespace's function), and
+`__wrap_name`/`__real_name` (the link-time fault fakes of the *_test.cc
+files define and call those: the negative lookbehind on a word character
+keeps the pattern from matching inside a longer identifier). `remove` is not
+a name (it would flag the `std::remove` algorithm); the file calls are
+`unlink` and `unlinkat`. What it cannot catch: a call through a macro or
+function pointer, a name not in the list, a stream or filesystem type named
+without `std::` (a using-declaration), a raw string literal containing a
 quote, and a call whose name is a local function or lambda of the same
 spelling (a false positive: rename it).
 
 Scanned: the C++ of dcfs/, dcfs/testonly/ and bench/. Excluded:
 dcfs/syscalls.cc and dcfs/syscalls_process.cc (the wrappers) and their headers.
-tools/*.c are C programs run in the guest, and tools/*.cc (the banned-symbols
-fixture, which has banned calls on purpose) are not scanned.
+Not scanned: tools/fhtest.c and tools/testutil.c (C programs run in the
+guest) and tools/banned_symbols_fixture.cc (it has banned calls on purpose).
 """
 
 import re
@@ -49,6 +53,10 @@ def pattern(names):
 
 
 QUALIFIERS = ("", "std::")
+
+# std::filesystem and the file streams open and walk files behind
+# syscalls.h's back.
+LIBRARY_IO = re.compile(r"\bstd::(filesystem|ifstream|ofstream|fstream)\b")
 
 
 def is_digit_separator(src, i):
@@ -98,7 +106,9 @@ def find_raw_calls(src, pat):
         if qualifier not in QUALIFIERS:
             continue
         found.append((s.count("\n", 0, m.start()) + 1, name))
-    return found
+    for m in LIBRARY_IO.finditer(s):
+        found.append((s.count("\n", 0, m.start()) + 1, "std::" + m.group(1)))
+    return sorted(found)
 
 
 class FinderTest(unittest.TestCase):
@@ -148,6 +158,19 @@ class FinderTest(unittest.TestCase):
         self.assertEqual(self.calls("char c = 'a'; // open(x)"), [])
         self.assertEqual(self.calls("f('\\''); close(1);"), ["close"])
 
+    def test_flags_std_filesystem_and_file_streams(self):
+        for src, name in (
+            ("auto n = std::filesystem::file_size(p);", "std::filesystem"),
+            ("namespace fs = std::filesystem;", "std::filesystem"),
+            ("std::ifstream in(path);", "std::ifstream"),
+            ("std::ofstream out(path);", "std::ofstream"),
+            ("std::fstream f(path);", "std::fstream"),
+        ):
+            self.assertEqual(
+                [n for _, n in find_raw_calls(src, self.pat)], [name], src)
+        self.assertEqual(self.calls("std::string fstream_name;"), [])
+        self.assertEqual(self.calls("// std::ifstream in(p);"), [])
+
     def test_reports_the_line(self):
         self.assertEqual(find_raw_calls("a;\n\nclose(1);", self.pat),
                          [(3, "close")])
@@ -162,7 +185,7 @@ def main(argv):
             continue
         with open(path) as f:
             hits = find_raw_calls(f.read(), pat)
-        lines += ["%s:%d: raw %s(): use syscalls::%s" % (path, l, n, n)
+        lines += ["%s:%d: raw %s: use the syscalls:: wrappers" % (path, l, n)
                   for l, n in hits]
     if lines:
         print("\n".join(lines))

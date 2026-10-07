@@ -18,7 +18,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -55,7 +54,6 @@
 namespace dcfs::backing {
 namespace {
 
-namespace fs = std::filesystem;
 
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
@@ -146,10 +144,7 @@ class BackingTest : public ::testing::Test {
 
   void TearDown() override {
     Unlock();
-    if (!source_.empty()) {
-      std::error_code ec;
-      fs::remove_all(source_, ec);
-    }
+    if (!source_.empty()) testonly::RemoveAll(source_);
   }
 
   std::string Path(std::string_view rel) const {
@@ -160,20 +155,17 @@ class BackingTest : public ::testing::Test {
   // before their directories, the source itself last), so that any backing
   // access from here on fails with EACCES for this unprivileged test.
   void Lock() {
-    std::vector<fs::path> paths;
-    for (const fs::directory_entry &entry :
-         fs::recursive_directory_iterator(source_)) {
-      paths.push_back(entry.path());
-    }
+    ASSERT_OK_AND_ASSIGN(std::vector<std::string> paths,
+                         testonly::ListTree(source_));
     std::reverse(paths.begin(), paths.end());
     paths.push_back(source_);
-    for (const fs::path &path : paths) {
+    for (const std::string &path : paths) {
       ASSERT_OK_AND_ASSIGN(
           struct stat st,
-          syscalls::fstatat(AT_FDCWD, path.string(), AT_SYMLINK_NOFOLLOW));
+          syscalls::fstatat(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW));
       if (S_ISLNK(st.st_mode)) continue;
-      locked_.emplace_back(path.string(), st.st_mode & 07777);
-      ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, path.string(), 0, 0), IsOk());
+      locked_.emplace_back(path, st.st_mode & 07777);
+      ASSERT_THAT(syscalls::fchmodat(AT_FDCWD, path, 0, 0), IsOk());
     }
   }
 

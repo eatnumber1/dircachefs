@@ -10,15 +10,17 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_split.h"
 #include "bench/process.h"
 #include "dcfs/fd.h"
 #include "dcfs/syscalls.h"
+#include "dcfs/testonly/files.h"
 
 namespace dcfs_bench {
 namespace {
@@ -32,11 +34,17 @@ absl::StatusOr<FileDescriptor> OpenControl() {
   if (fd.ok()) return fd;
   // devtmpfs makes the node for the misc device on its own; this is the
   // fallback for a guest where it did not.
-  std::ifstream misc("/proc/misc");
-  unsigned minor;
-  std::string name;
-  while (misc >> minor >> name) {
-    if (name == "device-mapper") {
+  absl::StatusOr<std::string> misc =
+      dcfs::testonly::ReadFileToString("/proc/misc");
+  if (!misc.ok()) return fd.status();
+  for (std::string_view line :
+       absl::StrSplit(*misc, '\n', absl::SkipWhitespace())) {
+    // "<minor> <name>"
+    const std::vector<std::string_view> fields =
+        absl::StrSplit(line, ' ', absl::SkipWhitespace());
+    unsigned minor = 0;
+    if (fields.size() != 2 || !absl::SimpleAtoi(fields[0], &minor)) continue;
+    if (fields[1] == "device-mapper") {
       syscalls::mkdirat(AT_FDCWD, "/dev/mapper", 0755).IgnoreError();
       absl::Status made = syscalls::mknodat(
           AT_FDCWD, "/dev/mapper/control", S_IFCHR | 0600, makedev(10, minor));
@@ -64,7 +72,9 @@ bool Exists(const char *path) {
 // Reports a failed step on stderr; true when `rc` is ok.
 template <typename T>
 bool Check(const absl::StatusOr<T> &rc, const char *what) {
-  if (!rc.ok()) fprintf(stderr, "%s: %s\n", what, rc.status().ToString().c_str());
+  if (!rc.ok()) {
+    fprintf(stderr, "%s: %s\n", what, rc.status().ToString().c_str());
+  }
   return rc.ok();
 }
 
@@ -117,7 +127,7 @@ std::string CreateDelayDevice(
              "DM_DEV_SUSPEND (resume)")) {
     return "";
   }
-  control_fd = absl::InternalError("closed");  // closes the control fd
+  std::move(*control_fd).Close().IgnoreError();
 
   char node[64];
   snprintf(node, sizeof node, "/dev/dm-%u", minor(dev));

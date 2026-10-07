@@ -1,5 +1,8 @@
 # Libc/POSIX calls that must go through the dcfs::syscalls wrappers (docs/style.md,
 # 1.5). One name per line; read by tools/raw_syscalls_test.py.
+# `remove` is not listed: std::remove (the algorithm) would be flagged; the
+# file calls are unlink/unlinkat. std::filesystem and the file streams are
+# matched by the scanner itself.
 # Add a name here when a new wrapper is added to dcfs/syscalls.h.
 mkdir
 mkdirat
@@ -138,5 +141,6 @@ nftw
 mkdtemp
 getpid
 fopen
+freopen
+pause
 syscall
-remove

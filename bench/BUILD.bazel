@@ -21,8 +21,10 @@ cc_library(
     deps = [
         "//dcfs:syscalls",
         "//dcfs:syscalls_process",
+        "//dcfs/testonly:files",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
+        "@absl//absl/strings",
     ],
 )
 
@@ -41,6 +43,9 @@ cc_binary(
     visibility = ["//test/qemu:__pkg__"],
     deps = [
         ":bench_lib",
+        "//dcfs:syscalls",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
         "@google_benchmark//:benchmark",
     ],
 )

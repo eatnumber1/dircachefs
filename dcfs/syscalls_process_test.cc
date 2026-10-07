@@ -19,7 +19,8 @@ TEST(SyscallsProcessTest, ForkWaitpidReportsTheChildsExitStatus) {
   ASSERT_THAT(pid, IsOk());
   if (*pid == 0) syscalls::_exit(7);
   int status = 0;
-  ASSERT_THAT(syscalls::waitpid(*pid, &status, 0), ::absl_testing::IsOkAndHolds(*pid));
+  ASSERT_THAT(syscalls::waitpid(*pid, &status, 0),
+              ::absl_testing::IsOkAndHolds(*pid));
   EXPECT_TRUE(WIFEXITED(status));
   EXPECT_EQ(WEXITSTATUS(status), 7);
 }
@@ -28,7 +29,7 @@ TEST(SyscallsProcessTest, KillStopsAChildAndWaitpidSeesTheSignal) {
   absl::StatusOr<pid_t> pid = syscalls::fork();
   ASSERT_THAT(pid, IsOk());
   if (*pid == 0) {
-    while (true) pause();
+    while (true) syscalls::pause().IgnoreError();
   }
   ASSERT_THAT(syscalls::kill(*pid, SIGKILL), IsOk());
   int status = 0;

@@ -20,7 +20,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -32,6 +31,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_split.h"
 #include "dcfs/context.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
@@ -44,6 +44,7 @@
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/files.h"
 #include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -138,26 +139,26 @@ class TraceRecorderTest : public ::testing::Test {
                                {.op = events::Op::kStatfs, .ino = 999});
   }
 
-  // The lines of directory `dir`'s trace so far.
-  std::vector<std::string> Lines(InodeId dir) {
-    std::ifstream in(path_);
+  // The lines of the trace file that start with `prefix`.
+  std::vector<std::string> LinesWithPrefix(const std::string &prefix) {
     std::vector<std::string> lines;
-    const std::string prefix = absl::StrCat("DCFS-TRACE test ", dir, " ");
-    for (std::string line; std::getline(in, line);) {
-      if (absl::StartsWith(line, prefix)) lines.push_back(line);
+    absl::StatusOr<std::string> contents = ReadFileToString(path_);
+    EXPECT_THAT(contents, IsOk());
+    for (std::string_view line :
+         absl::StrSplit(contents.value_or(""), '\n', absl::SkipEmpty())) {
+      if (absl::StartsWith(line, prefix)) lines.emplace_back(line);
     }
     return lines;
   }
 
+  // The lines of directory `dir`'s trace so far.
+  std::vector<std::string> Lines(InodeId dir) {
+    return LinesWithPrefix(absl::StrCat("DCFS-TRACE test ", dir, " "));
+  }
+
   // The lines of file `id`'s trace so far.
   std::vector<std::string> FileLines(InodeId id) {
-    std::ifstream in(path_);
-    std::vector<std::string> lines;
-    const std::string prefix = absl::StrCat("DCFS-REVAL test ", id, " ");
-    for (std::string line; std::getline(in, line);) {
-      if (absl::StartsWith(line, prefix)) lines.push_back(line);
-    }
-    return lines;
+    return LinesWithPrefix(absl::StrCat("DCFS-REVAL test ", id, " "));
   }
 
   // The lines of nodeid `id`'s lifetime trace so far.

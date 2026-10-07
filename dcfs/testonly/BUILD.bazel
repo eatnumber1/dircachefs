@@ -21,7 +21,10 @@ cc_library(
 cc_library(
     name = "files",
     hdrs = ["files.h"],
-    visibility = ["//dcfs:__pkg__"],
+    visibility = [
+        "//bench:__pkg__",
+        "//dcfs:__pkg__",
+    ],
     deps = [
         "//dcfs:syscalls",
         "@absl//absl/status:status_macros",
@@ -133,6 +136,7 @@ qemu_cc_test(
     srcs = ["trace_recorder_test.cc"],
     deps = [
         ":assert_ok_and_assign",
+        ":files",
         ":trace_recorder",
         "//dcfs:context",
         "//dcfs:device_id",

@@ -128,19 +128,29 @@ daemon never links `fork` or `execv` (`tools/banned_symbols.txt`).
 
 **No raw syscalls anywhere** (russ, 2026-10-07: a firm rule). Syscalls go
 through `dcfs/syscalls.h`, where the failure is handled and converted into
-a `Status`: no call of a libc syscall wrapper outside `dcfs/syscalls.cc`,
-in production code, tests, `dcfs/testonly/`, `bench/` and any C++ in
-`tools/`. A test calls the `syscalls::` wrappers and checks them with
+a `Status`: no call of a libc syscall wrapper outside `dcfs/syscalls.cc` and
+`dcfs/syscalls_process.cc`, in production code, tests, `dcfs/testonly/`,
+`bench/` and any C++ in `tools/`; and no `std::filesystem` or file stream
+(`std::ifstream`, `std::ofstream`, `std::fstream`), which open and walk files
+behind the wrappers (`dcfs/testonly/files.h` has `ReadFileToString`,
+`ListDirectory`, `ListTree`, `RemoveAll` and `FileSize` over them). A test
+calls the `syscalls::` wrappers and checks them with
 `ASSERT_OK`/`ASSERT_OK_AND_ASSIGN`, or `.IgnoreError()` where failure is
 irrelevant; a missing wrapper is added to `syscalls.h`, not worked around.
 The `-Wl,--wrap` fakes of a `*_test.cc` define `__wrap_name` and call
-`__real_name`, which are not calls of the libc name. One exception:
-`tools/fhtest.c` is a copy of fuse-generation-qemu's `guest/fhtest.c` kept
-in sync by hand (third-party code, never restyled) and `tools/testutil.c`
-is a C program for the guest, kept in C alongside it; neither can use the
-C++ wrappers. `//tools:raw_syscalls_test` enforces the rule over `dcfs/`,
-`dcfs/testonly/` and `bench/` (names in `tools/raw_syscalls_names.txt`;
-what it cannot catch is in its docstring).
+`__real_name`, which are not calls of the libc name. Two exceptions, not
+scanned: `tools/fhtest.c` is a copy of fuse-generation-qemu's
+`guest/fhtest.c` kept in sync by hand (third-party code, never restyled) and
+`tools/testutil.c` is a C program for the guest, kept in C alongside it;
+neither can use the C++ wrappers; and `tools/banned_symbols_fixture.cc`
+makes banned calls on purpose. `//tools:raw_syscalls_test` enforces the rule
+over `dcfs/`, `dcfs/testonly/` and `bench/` (names in
+`tools/raw_syscalls_names.txt`). It cannot catch a call through a macro or
+function pointer, a name not in the list, a stream or filesystem type named
+without `std::`, a raw string literal containing a quote, or a local
+function that shares a name (a false positive: rename it); `remove` is not a
+listed name, because it would flag the `std::remove` algorithm (the file
+calls are `unlink` and `unlinkat`).
 
 ### 1.6 Errors
 

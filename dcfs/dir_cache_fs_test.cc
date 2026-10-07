@@ -52,8 +52,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -179,7 +177,6 @@ int __wrap_syncfs(int fd) {
 namespace dcfs {
 namespace {
 
-namespace fs = std::filesystem;
 
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
@@ -310,8 +307,7 @@ class DirCacheFSTest : public ::testing::Test {
     if (se_ != nullptr) fuse_session_destroy(se_);
     current_ = nullptr;
     fs_.reset();
-    std::error_code ec;
-    if (!source_.empty()) fs::remove_all(source_, ec);
+    if (!source_.empty()) testonly::RemoveAll(source_);
   }
 
   std::string Path(std::string_view rel) const {
@@ -918,7 +914,9 @@ class RenameStaleSourceTest : public DirCacheFSTest {
     ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
     WriteFile(Path("d/a"));
     if (second_link) {
-      ASSERT_THAT(syscalls::linkat(AT_FDCWD, Path("d/a"), AT_FDCWD, Path("d/link_a"), 0), IsOk());
+      ASSERT_THAT(
+          syscalls::linkat(AT_FDCWD, Path("d/a"), AT_FDCWD, Path("d/link_a"), 0),
+          IsOk());
     }
     WriteFile(Path("d/c"));
     ino_a_ = InoOf(Path("d/a"));
@@ -1137,9 +1135,13 @@ TEST_F(DirCacheFSTest, WritableCreateWhosePhase1FailsIsUndone) {
 TEST_F(DirCacheFSTest, UnlinkMarksWhatItRemovesUnknown) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   WriteFile(Path("d/a"));
-  ASSERT_THAT(syscalls::linkat(AT_FDCWD, Path("d/a"), AT_FDCWD, Path("d/link_a"), 0), IsOk());
+  ASSERT_THAT(
+      syscalls::linkat(AT_FDCWD, Path("d/a"), AT_FDCWD, Path("d/link_a"), 0),
+      IsOk());
   WriteFile(Path("d/b"));
-  ASSERT_THAT(syscalls::linkat(AT_FDCWD, Path("d/b"), AT_FDCWD, Path("d/link_b"), 0), IsOk());
+  ASSERT_THAT(
+      syscalls::linkat(AT_FDCWD, Path("d/b"), AT_FDCWD, Path("d/link_b"), 0),
+      IsOk());
   const uint64_t ino_x = InoOf(Path("d/a"));
   const uint64_t ino_y = InoOf(Path("d/b"));
   Start();
@@ -1726,7 +1728,7 @@ TEST_F(DirCacheFSTest, CopyFileRangeCopiesOnTheBackingFiles) {
   ASSERT_EQ(out.error, 0);
   ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
   EXPECT_EQ(CopyFileRange(src, in_fh, dst, out_fh, 100), 10);
-  EXPECT_EQ(std::filesystem::file_size(Path("dst")), 10u);
+  EXPECT_EQ(testonly::FileSize(Path("dst")).value_or(-1), 10);
   EXPECT_THAT(Dirty(), Contains(dst));  // The copy's phase 1.
   EXPECT_EQ(Release(dst, out_fh).error, 0);
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, dst));
@@ -1748,7 +1750,7 @@ TEST_F(DirCacheFSTest, CopyFileRangeCopiesOnTheBackingFiles) {
   ASSERT_EQ(ro.error, 0);
   ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags), IsOk());
   EXPECT_EQ(CopyFileRange(src, in_fh, dst, ro_fh, 100), -EBADF);
-  EXPECT_EQ(std::filesystem::file_size(Path("dst")), 10u);
+  EXPECT_EQ(testonly::FileSize(Path("dst")).value_or(-1), 10);
   EXPECT_EQ(Release(dst, ro_fh).error, 0);
   EXPECT_EQ(Release(src, in_fh).error, 0);
 }
@@ -2010,7 +2012,7 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
   std::string body;
   AppendBytes(body, falloc);
   EXPECT_EQ(Send(FUSE_FALLOCATE, static_cast<uint64_t>(f), body).error, 0);
-  EXPECT_EQ(std::filesystem::file_size(Path("f")), 4096u);
+  EXPECT_EQ(testonly::FileSize(Path("f")).value_or(-1), 4096);
   auto [in, in_fh] = Open(src, O_RDONLY);
   ASSERT_EQ(in.error, 0);
   EXPECT_EQ(CopyFileRange(src, in_fh, f, rw_fh, 3), 3);
@@ -2022,12 +2024,11 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
 
 // The descriptors this process has open.
 int OpenFdCount() {
-  int n = 0;
-  for ([[maybe_unused]] const auto &entry :
-       std::filesystem::directory_iterator("/proc/self/fd")) {
-    ++n;
-  }
-  return n;
+  absl::StatusOr<std::vector<std::string>> fds =
+      testonly::ListDirectory("/proc/self/fd");
+  EXPECT_THAT(fds, IsOk());
+  // The listing's own descriptor is among them, as in the iterator's.
+  return fds.ok() ? static_cast<int>(fds->size()) : 0;
 }
 
 

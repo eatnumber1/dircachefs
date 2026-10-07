@@ -45,6 +45,11 @@ absl::Status dup2(int oldfd, int newfd) {
   return absl::OkStatus();
 }
 
+absl::Status pause() {
+  ::pause();
+  return ErrnoToStatus(errno, "pause");
+}
+
 void _exit(int status) { ::_exit(status); }
 
 }  // namespace syscalls

@@ -8,14 +8,15 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
-#include <sstream>
 #include <utility>
 
 #include "absl/status/statusor.h"
+#include "absl/strings/str_split.h"
+#include "absl/strings/strip.h"
 #include "dcfs/fd.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_process.h"
+#include "dcfs/testonly/files.h"
 
 namespace dcfs_bench {
 
@@ -26,12 +27,13 @@ void SleepMicros(long micros) {
 }
 
 bool IsMounted(const std::string &mnt) {
-  std::ifstream f("/proc/self/mountinfo");
-  std::string line;
+  absl::StatusOr<std::string> info =
+      dcfs::testonly::ReadFileToString("/proc/self/mountinfo");
+  if (!info.ok()) return false;
   const std::string needle = " " + mnt + " ";
-  while (std::getline(f, line)) {
-    if (line.find(needle) != std::string::npos &&
-        line.find("fuse") != std::string::npos) {
+  for (std::string_view line : absl::StrSplit(*info, '\n')) {
+    if (line.find(needle) != std::string_view::npos &&
+        line.find("fuse") != std::string_view::npos) {
       return true;
     }
   }
@@ -101,11 +103,12 @@ void DcfsProcess::Crash() {
 }
 
 uint64_t RssBytes(pid_t pid) {
-  std::ifstream f("/proc/" + std::to_string(pid) + "/status");
-  std::string line;
-  while (std::getline(f, line)) {
-    if (line.rfind("VmRSS:", 0) == 0) {
-      return strtoull(line.c_str() + 6, nullptr, 10) * 1024;
+  absl::StatusOr<std::string> status = dcfs::testonly::ReadFileToString(
+      "/proc/" + std::to_string(pid) + "/status");
+  if (!status.ok()) return 0;
+  for (std::string_view line : absl::StrSplit(*status, '\n')) {
+    if (absl::ConsumePrefix(&line, "VmRSS:")) {
+      return strtoull(std::string(line).c_str(), nullptr, 10) * 1024;
     }
   }
   return 0;
@@ -119,7 +122,8 @@ void DropCaches(int what) {
   char c = static_cast<char>('0' + what);
   if (absl::StatusOr<size_t> n = dcfs::syscalls::write(**fd, &c, 1);
       !n.ok() || *n != 1) {
-    fprintf(stderr, "drop_caches: %s\n", n.status().ToString().c_str());
+    fprintf(stderr, "drop_caches: wrote %zu of 1 byte: %s\n",
+            n.ok() ? *n : size_t{0}, n.status().ToString().c_str());
   }
 }
 
