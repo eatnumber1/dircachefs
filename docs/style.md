@@ -119,6 +119,21 @@ be found through it: checked by grep, the only template there is `ioctl`,
 and `LogOpenFlags`/`AbslStringify` live in `dcfs/log_open_flags.h` as a
 hidden friend at `dcfs` scope. No exceptions remain (step 25.1).
 
+**No raw syscalls anywhere** (russ, 2026-10-07: a firm rule). Syscalls go
+through `dcfs/syscalls.h`, where the failure is handled and converted into
+a `Status`: no call of a libc syscall wrapper outside `dcfs/syscalls.cc`,
+in production code, tests, `dcfs/testonly/`, `bench/` and any C++ in
+`tools/`. A test calls the `syscalls::` wrappers and checks them with
+`ASSERT_OK`/`ASSERT_OK_AND_ASSIGN`, or `.IgnoreError()` where failure is
+irrelevant; a missing wrapper is added to `syscalls.h`, not worked around.
+The `-Wl,--wrap` fakes of a `*_test.cc` define `__wrap_name` and call
+`__real_name`, which are not calls of the libc name. One exception:
+`tools/fhtest.c` is a copy of fuse-generation-qemu's `guest/fhtest.c` kept
+in sync by hand (third-party code, never restyled) and `tools/testutil.c`
+is a C program for the guest, kept in C alongside it; neither can use the
+C++ wrappers. `//tools:raw_syscalls_test` enforces the rule (names in
+`tools/raw_syscalls_names.txt`; what it cannot catch is in its docstring).
+
 ### 1.6 Errors
 
 **`absl::Status`/`StatusOr<T>` are the only error channel**: no error
@@ -474,6 +489,7 @@ line length, shellcheck findings, quoting) were not surveyed.
 | C13 | BUILD list elements indented 4 (buildifier) | 292 lines at 6 spaces, all in `dcfs/BUILD.bazel` | `grep -cP '^      \S' dcfs/BUILD.bazel` |
 | C15 | Guest helpers shared in `lib.sh` | duplicated: `cleanup` 25, `normalize_stat` 5, `populate_tree`/`run_pass`/`expect_fail` 4 each, `start_daemon` 3, six more 2 each | `grep -hE '^[a-z_]+\(\) \{' test/qemu/guest/*.sh \| sort \| uniq -c \| sort -rn` |
 | P1 | Google Python: 80 columns (5) | 47 lines over 80: `sbom.py` 24, `sbom_test.py` 23 | `grep -nE '^.{81,}$' $(git ls-files '*.py')` |
+| C17 | No raw syscalls outside `syscalls.cc` (1.5) (new) | 300 sites in 20 files (`dcfs_bench.cc` 19, `dm_delay.cc` 17, `process.cc` 12, `tree.cc` 6, `backing_test.cc` 52, `dir_cache_fs_test.cc` 115, `file_handle_test.cc` 19, `syscalls_test.cc` 16, `fd_test.cc` 13, `backing_fault_test.cc` 8, `mounts_below_test.cc` 6, `device_id_test.cc` 5, `sqlite_test.cc` 2, 2 in `trace_recorder_test.cc`, 1 each in 4 other tests and `main_recorder.cc`, `trace_recorder.cc`). A few are false positives: local functions named `open`/`read` (`dir_cache_fs.cc:1335,1346`, `migrate.cc:57`), `dir_cache_fs.cc:1496` (`clock_gettime`). `//tools:raw_syscalls_test` is tagged `manual` until they are converted | `bazel test //tools:raw_syscalls_test` |
 | N1 | Flat `dcfs`: remove `dcfs::cache` (1.3) (new) | 3 declarations (`metadata_cache.h/.cc/_test.cc`); 673 `cache::` uses (407 production) in 20 files. Clash if flattened: `ParentOf` (same parameters as `backing::ParentOf`, differing only in return type), `SetXattr`, `RemoveXattr` all also exist in `backing` (3 names: rename one side first) | `grep -rn 'namespace cache\|cache::' dcfs bench \| wc -l` |
 | N2 | Remove `dcfs::backing`: it folds into `dcfs` as free functions; the three clashing pairs get distinguishing names (e.g. `BackingSetXattr`); a wrapper class only if the clashes prove to be more than those three and renaming reads worse | 3 declarations; 147 uses (138 production) in 15 files; clashes: `ParentOf`, `SetXattr`, `RemoveXattr` (same 3 names as N1) | `grep -rn 'namespace backing\|backing::' dcfs bench \| wc -l` |
 | N3 | Remove `dcfs::testonly` | 8 declarations (all in `dcfs/testonly/`); 4 uses | `grep -rn 'namespace testonly\|testonly::' dcfs bench` |
