@@ -915,3 +915,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Orchestrator error: reported the step as passed when it had merely finished. Failing tests to be
   read from the job log / test-log artifact once the job completes; candidates: a large-tier test
   or a timing budget under runner load (readdir_boundary's 2.5 s wall clock, N4).
+- russ (2026-10-07): warnings "all over" during compilation, and ld.gold's "wildcard match appears in
+  both version 'libnuma_1.1' and 'libnuma_1.2'": -Werror was meant to mean every warning is
+  addressed. Dispatched a warnings audit (lane-5, dcfs-investigator): catalogue every compile and
+  link warning on a clean build (plain + asan, no disk cache), zero for our code incl.
+  `-Wl,--fatal-warnings`, our flags never reach externals, why dcfs links libnuma at all (drop or
+  patch numactl's version script), a test that our targets carry -Werror/--fatal-warnings;
+  coordinates with 7.1 (clang/lld in lane-4). Five lanes busy.
