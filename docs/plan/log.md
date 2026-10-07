@@ -686,3 +686,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   every flag and default, no table rules), flags_consistency_test (main.cc vs README flag table; no
   drift). groff -man -ww -z check deferred to the Phase 24 groff pin (TODO in man/BUILD.bazel).
   Failing first: '--attr_timeout_sec' not found / 'FLAGS' not found with the Flags section omitted.
+- Phase 23 branch review (dcfs-reviewer, 873caf1): no high findings; merge after fixes. M-1 held fds
+  unbounded (EMFILE takes out every open, not just the fallback): cap with a reserve. L-a write_fd
+  replaced by a later O_APPEND open. L-b: with a shared fd outstanding, writable opens are re-checked
+  only when flags changed through dcfs, so an out-of-band chattr +i/+a is bypassed (before the branch
+  it was refused); orchestrator default: keep the pre-branch property (re-check every writable open
+  without disk I/O), russ may relax. L-c idle test must assert the FORGET happened; L-d destroy_test
+  measures zero reads after SIGTERM. L-e copy_test_btrfs immutable-ctime flake is a kernel gap: FUSE
+  does not invalidate cached attrs after fileattr_set, so stat serves the pre-chattr ctime; test
+  made deterministic + README limitation. Verified sound: held-fd lifetime (RELEASE precedes FORGET
+  via igrab), EMFILE tri-state, L5 recovery sweep (no model change), L7 compare-and-set.
+  Needs russ: (1) L-b: accept the always-re-check default or document the trade; (2) L-e kernel gap:
+  a FUSE patch (fuse_invalidate_attr after a successful fileattr_set) is small and upstreamable, or
+  dcfs sends notify_inval_inode (needs the notifier thread), or it stays a documented limitation.
