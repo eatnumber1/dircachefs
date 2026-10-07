@@ -163,13 +163,7 @@ class TraceRecorderTest : public ::testing::Test {
 
   // The lines of nodeid `id`'s lifetime trace so far.
   std::vector<std::string> LifeLines(InodeId id) {
-    std::ifstream in(path_);
-    std::vector<std::string> lines;
-    const std::string prefix = absl::StrCat("DCFS-LIFE test ", id, " ");
-    for (std::string line; std::getline(in, line);) {
-      if (absl::StartsWith(line, prefix)) lines.push_back(line);
-    }
-    return lines;
+    return LinesWithPrefix(absl::StrCat("DCFS-LIFE test ", id, " "));
   }
 
   // A FUSE request of file `id` that ends with `status`.
