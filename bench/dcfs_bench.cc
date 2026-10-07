@@ -19,11 +19,8 @@
 // caches (untimed) whenever they wrap, so the direct cases on the slow
 // device pay its latency and the cached dcfs cases must not.
 #include <benchmark/benchmark.h>
-#include <dirent.h>
 #include <fcntl.h>
-#include <ftw.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -32,11 +29,16 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "bench/dm_delay.h"
 #include "bench/process.h"
 #include "bench/tree.h"
+#include "dcfs/fd.h"
+#include "dcfs/syscalls.h"
 
 namespace dcfs_bench {
 namespace {
@@ -73,18 +75,55 @@ uint64_t Stride(uint64_t n) {
   return s;
 }
 
-uint64_t walked = 0;
+namespace syscalls = dcfs::syscalls;
+using dcfs::FileDescriptor;
 
-int CountWalk(const char *, const struct stat *, int, struct FTW *) {
-  ++walked;
-  return 0;
+// Calls `visit(name)` for every entry of the directory `dir_fd` except "."
+// and "..", read with getdents64. Returns false if the directory cannot be
+// read.
+template <typename Visit>
+bool ForEachEntry(int dir_fd, Visit visit) {
+  std::vector<char> buf(32768);
+  while (true) {
+    absl::StatusOr<ssize_t> n =
+        syscalls::getdents64(dir_fd, buf.data(), buf.size());
+    if (!n.ok()) return false;
+    if (*n == 0) return true;
+    for (ssize_t pos = 0; pos < *n;) {
+      const auto *entry =
+          reinterpret_cast<const syscalls::linux_dirent64 *>(buf.data() + pos);
+      pos += entry->d_reclen;
+      const std::string_view name(entry->d_name);
+      if (name == "." || name == "..") continue;
+      visit(name);
+    }
+  }
+}
+
+// The objects at and below directory `dir_fd`, each lstat'ed as nftw's
+// FTW_PHYS walk does; adds them to `walked`.
+void WalkDir(int dir_fd, uint64_t &walked) {
+  std::vector<std::string> subdirs;
+  ForEachEntry(dir_fd, [&](std::string_view name) {
+    ++walked;
+    absl::StatusOr<struct stat> st =
+        syscalls::fstatat(dir_fd, name, AT_SYMLINK_NOFOLLOW);
+    if (st.ok() && S_ISDIR(st->st_mode)) subdirs.emplace_back(name);
+  });
+  for (const std::string &name : subdirs) {
+    absl::StatusOr<FileDescriptor> sub = syscalls::openat(
+        dir_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    if (sub.ok()) WalkDir(**sub, walked);
+  }
 }
 
 // `find ROOT` through the filesystem under test; returns the number of
 // objects found.
 uint64_t Walk(const std::string &root) {
-  walked = 0;
-  nftw(root.c_str(), CountWalk, 64, FTW_PHYS);
+  uint64_t walked = 1;  // ROOT itself
+  absl::StatusOr<FileDescriptor> dir =
+      syscalls::openat(AT_FDCWD, root, O_RDONLY | O_DIRECTORY);
+  if (dir.ok()) WalkDir(**dir, walked);
   return walked;
 }
 
@@ -95,11 +134,11 @@ bool StartDcfs(
   std::string mnt = cfg.mnt_dir + "/" + name;
   std::string db = cfg.cache_dir + "/" + name + ".db";
   if (fresh_db) {
-    unlink(db.c_str());
-    unlink((db + "-wal").c_str());
-    unlink((db + "-shm").c_str());
+    for (const char *suffix : {"", "-wal", "-shm"}) {
+      syscalls::unlinkat(AT_FDCWD, db + suffix, 0).IgnoreError();
+    }
   }
-  mkdir(mnt.c_str(), 0755);
+  syscalls::mkdirat(AT_FDCWD, mnt, 0755).IgnoreError();
   if (!d->Start(cfg.dcfs, src, db, mnt, flags) || !d->WaitMounted(60)) {
     fprintf(stderr, "dcfs %s did not mount (see /tmp/dcfs-bench.log)\n",
             name.c_str());
@@ -122,7 +161,7 @@ bool Setup() {
   for (const auto &b : backings) {
     uint64_t big = std::min(cfg.big, b.entries);
     if (!MakeTree(b.src, b.entries, big)) return false;
-    sync();
+    syscalls::sync();
     targets.push_back({b.prefix + "backing", b.src, b.entries});
     for (const char *kind : {"dcfs", "dcfs0"}) {
       std::string name = b.prefix + kind;
@@ -164,28 +203,24 @@ void Cycle(benchmark::State &state, const Target &t, Op op) {
 
 void BM_Stat(benchmark::State &state, const Target *t) {
   Cycle(state, *t, [](const std::string &p) {
-    struct stat st;
-    return stat(p.c_str(), &st) == 0;
+    return syscalls::fstatat(AT_FDCWD, p).ok();
   });
 }
 
 void BM_OpenClose(benchmark::State &state, const Target *t) {
   Cycle(state, *t, [](const std::string &p) {
-    int fd = open(p.c_str(), O_RDONLY);
-    if (fd < 0) return false;
-    close(fd);
-    return true;
+    return syscalls::openat(AT_FDCWD, p, O_RDONLY).ok();
   });
 }
 
 void BM_SmallRead(benchmark::State &state, const Target *t) {
   Cycle(state, *t, [](const std::string &p) {
-    int fd = open(p.c_str(), O_RDONLY);
-    if (fd < 0) return false;
+    absl::StatusOr<FileDescriptor> fd =
+        syscalls::openat(AT_FDCWD, p, O_RDONLY);
+    if (!fd.ok()) return false;
     char buf[4096];
-    ssize_t r = pread(fd, buf, sizeof buf, 0);
-    close(fd);
-    return r == kFileBytes;
+    absl::StatusOr<size_t> r = syscalls::pread(**fd, buf, sizeof buf, 0);
+    return r.ok() && *r == kFileBytes;
   });
 }
 
@@ -197,8 +232,7 @@ void BM_Lookup(benchmark::State &state, const Target *t) {
     state.PauseTiming();
     DropCaches(3);
     state.ResumeTiming();
-    struct stat st;
-    if (stat(p.c_str(), &st) != 0) {
+    if (!syscalls::fstatat(AT_FDCWD, p).ok()) {
       state.SkipWithError("stat failed");
       return;
     }
@@ -213,14 +247,17 @@ void BM_Readdir(benchmark::State &state, const Target *t) {
     state.PauseTiming();
     DropCaches(3);
     state.ResumeTiming();
-    DIR *d = opendir(p.c_str());
-    if (d == nullptr) {
-      state.SkipWithError("opendir failed");
+    absl::StatusOr<FileDescriptor> d =
+        syscalls::openat(AT_FDCWD, p, O_RDONLY | O_DIRECTORY);
+    if (!d.ok()) {
+      state.SkipWithError("opening the directory failed");
       return;
     }
-    seen = 0;
-    while (readdir(d) != nullptr) ++seen;
-    closedir(d);
+    seen = 2;  // "." and ".."
+    if (!ForEachEntry(**d, [&](std::string_view) { ++seen; })) {
+      state.SkipWithError("getdents64 failed");
+      return;
+    }
   }
   state.counters["entries"] = static_cast<double>(seen);
 }
@@ -236,9 +273,8 @@ void BM_Startup(benchmark::State &state) {
   d->Stop();
   for (auto _ : state) {
     DcfsProcess p;
-    struct stat st;
     bool ok = p.Start(cfg.dcfs, cfg.src, db, mnt, {}) && p.WaitMounted(120) &&
-              stat((mnt + "/" + DeepPath()).c_str(), &st) == 0;
+              syscalls::fstatat(AT_FDCWD, mnt + "/" + DeepPath()).ok();
     state.PauseTiming();
     p.Stop();
     state.ResumeTiming();
@@ -254,8 +290,8 @@ void BM_Startup(benchmark::State &state) {
 void BM_Recovery(benchmark::State &state) {
   std::string mnt = cfg.mnt_dir + "/recovery";
   std::string db = cfg.cache_dir + "/recovery.db";
-  mkdir(mnt.c_str(), 0755);
-  unlink(db.c_str());
+  syscalls::mkdirat(AT_FDCWD, mnt, 0755).IgnoreError();
+  syscalls::unlinkat(AT_FDCWD, db, 0).IgnoreError();
   int round = 0;
   for (auto _ : state) {
     state.PauseTiming();
@@ -266,20 +302,18 @@ void BM_Recovery(benchmark::State &state) {
               p.WaitMounted(120);
     if (ok) {
       std::string dir = mnt + "/recovery" + std::to_string(round++);
-      ok = mkdir(dir.c_str(), 0755) == 0;
+      ok = syscalls::mkdirat(AT_FDCWD, dir, 0755).ok();
       for (uint64_t i = 0; ok && i < cfg.dirty; ++i) {
-        int fd = open((dir + "/f" + std::to_string(i)).c_str(),
-                      O_WRONLY | O_CREAT, 0644);
-        ok = fd >= 0;
-        if (fd >= 0) close(fd);
+        ok = syscalls::openat(AT_FDCWD, dir + "/f" + std::to_string(i),
+                              O_WRONLY | O_CREAT, 0644)
+                 .ok();
       }
     }
     p.Crash();
     state.ResumeTiming();
     DcfsProcess q;
-    struct stat st;
     ok = ok && q.Start(cfg.dcfs, cfg.src, db, mnt, {}) &&
-         q.WaitMounted(300) && stat(mnt.c_str(), &st) == 0;
+         q.WaitMounted(300) && syscalls::fstatat(AT_FDCWD, mnt).ok();
     state.PauseTiming();
     q.Stop();
     state.ResumeTiming();
@@ -306,7 +340,7 @@ void BM_Memory(benchmark::State &state) {
     state.PauseTiming();
     uint64_t rss1 = RssBytes(d->pid());
     DropCaches(2);
-    sleep(2);
+    SleepMicros(2'000'000);
     uint64_t rss2 = RssBytes(d->pid());
     d->Stop();
     state.counters["rss_mount_MiB"] = static_cast<double>(rss0) / 1048576;

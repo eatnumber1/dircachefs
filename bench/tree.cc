@@ -2,11 +2,16 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "dcfs/fd.h"
+#include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 
 namespace dcfs_bench {
 
@@ -33,10 +38,13 @@ bool MkdirP(int rootfd, const std::string &rel) {
     size_t next = rel.find('/', pos);
     if (next == std::string::npos) next = rel.size();
     cur = rel.substr(0, next);
-    if (!cur.empty() && mkdirat(rootfd, cur.c_str(), 0755) != 0 &&
-        errno != EEXIST) {
-      fprintf(stderr, "mkdir %s: %s\n", cur.c_str(), strerror(errno));
-      return false;
+    if (!cur.empty()) {
+      absl::Status made = dcfs::syscalls::mkdirat(rootfd, cur, 0755);
+      if (!made.ok() && dcfs::StatusToErrno(made) != EEXIST) {
+        fprintf(stderr, "mkdir %s: %s\n", cur.c_str(),
+                made.ToString().c_str());
+        return false;
+      }
     }
     pos = next + 1;
   }
@@ -44,27 +52,35 @@ bool MkdirP(int rootfd, const std::string &rel) {
 }
 
 bool WriteFile(int rootfd, const std::string &rel) {
-  int fd = openat(rootfd, rel.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if (fd < 0) {
-    fprintf(stderr, "create %s: %s\n", rel.c_str(), strerror(errno));
+  absl::StatusOr<dcfs::FileDescriptor> fd = dcfs::syscalls::openat(
+      rootfd, rel, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (!fd.ok()) {
+    fprintf(stderr, "create %s: %s\n", rel.c_str(),
+            fd.status().ToString().c_str());
     return false;
   }
   char data[kFileBytes];
   memset(data, 'x', sizeof data);
-  bool ok = write(fd, data, sizeof data) == static_cast<ssize_t>(sizeof data);
-  if (!ok) fprintf(stderr, "write %s: %s\n", rel.c_str(), strerror(errno));
-  close(fd);
+  absl::StatusOr<size_t> n = dcfs::syscalls::write(**fd, data, sizeof data);
+  const bool ok = n.ok() && *n == sizeof data;
+  if (!ok) {
+    fprintf(stderr, "write %s: %s\n", rel.c_str(),
+            n.status().ToString().c_str());
+  }
   return ok;
 }
 
 }  // namespace
 
 bool MakeTree(const std::string &root, uint64_t entries, uint64_t big) {
-  int rootfd = open(root.c_str(), O_RDONLY | O_DIRECTORY);
-  if (rootfd < 0) {
-    fprintf(stderr, "open %s: %s\n", root.c_str(), strerror(errno));
+  absl::StatusOr<dcfs::FileDescriptor> root_fd =
+      dcfs::syscalls::openat(AT_FDCWD, root, O_RDONLY | O_DIRECTORY);
+  if (!root_fd.ok()) {
+    fprintf(stderr, "open %s: %s\n", root.c_str(),
+            root_fd.status().ToString().c_str());
     return false;
   }
+  const int rootfd = **root_fd;
   bool ok = MkdirP(rootfd, "t") && MkdirP(rootfd, "big") &&
             MkdirP(rootfd, "deep/l1/l2/l3/l4/l5/l6") &&
             WriteFile(rootfd, DeepPath());
@@ -79,7 +95,6 @@ bool MakeTree(const std::string &root, uint64_t entries, uint64_t big) {
     ok = ok && WriteFile(rootfd, p);
   }
   for (uint64_t j = 0; ok && j < big; ++j) ok = WriteFile(rootfd, BigPath(j));
-  close(rootfd);
   return ok;
 }
 

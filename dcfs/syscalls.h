@@ -2,25 +2,21 @@
 #define DCFS_SYSCALLS_H_
 
 #include <cerrno>
-#include <array>
 #include <cstddef>
 #include <fcntl.h>
 #include <linux/openat2.h>
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/file.h>
-#include <sys/mount.h>
+#include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
-#include <sys/xattr.h>
 #include <time.h>
 #include <unistd.h>
 #include <utility>
-#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -57,7 +53,7 @@ absl::Status name_to_handle_at(
 absl::StatusOr<FileDescriptor> open_by_handle_at(
     int mount_fd, const file_handle &handle, int flags = 0);
 
-absl::StatusOr<int> ioctl(int fd, int op, auto &&... args);
+absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&... args);
 
 // Definition from https://man7.org/linux/man-pages/man2/getdents.2.html
 struct linux_dirent64 {
@@ -172,6 +168,9 @@ absl::Status umount2(std::string_view target, int flags);
 absl::StatusOr<std::string> mkdtemp(std::string_view pattern);
 absl::StatusOr<FileDescriptor> mkstemp(std::string &pattern);
 
+// sync(2).
+void sync();
+
 // nanosleep(2): sleeps for `duration` (EINTR is an error status, as for the
 // others), and getpid(2) (never fails).
 absl::Status nanosleep(const struct timespec &duration);
@@ -198,8 +197,8 @@ absl::Status flock(int fd, int operation);
 
 namespace syscalls {
 
-absl::StatusOr<int> ioctl(int fd, int op, auto &&... args) {
-  int rc = ::ioctl(fd, op, std::forward<decltype(args)>(args)...);
+absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&... args) {
+  int rc = ::ioctl(fd, request, std::forward<decltype(args)>(args)...);
   if (rc == -1) return dcfs::ErrnoToStatus(errno, "ioctl");
   return rc;
 }

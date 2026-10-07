@@ -14,6 +14,8 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <vector>
+#include <sys/xattr.h>
 #include <linux/fs.h>
 
 #include "absl/log/log.h"
@@ -453,6 +455,8 @@ absl::StatusOr<FileDescriptor> mkstemp(std::string &pattern) {
   }
   return FileDescriptor(fd);
 }
+
+void sync() { ::sync(); }
 
 absl::Status nanosleep(const struct timespec &duration) {
   if (::nanosleep(&duration, nullptr) == -1) {

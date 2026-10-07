@@ -3,24 +3,33 @@
 #include <fcntl.h>
 #include <linux/dm-ioctl.h>
 #include <linux/fs.h>
-#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
-#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <utility>
 #include <vector>
+
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "bench/process.h"
+#include "dcfs/fd.h"
+#include "dcfs/syscalls.h"
 
 namespace dcfs_bench {
 namespace {
 
-int OpenControl() {
-  int fd = open("/dev/mapper/control", O_RDWR);
-  if (fd >= 0) return fd;
+using dcfs::FileDescriptor;
+namespace syscalls = dcfs::syscalls;
+
+absl::StatusOr<FileDescriptor> OpenControl() {
+  absl::StatusOr<FileDescriptor> fd =
+      syscalls::openat(AT_FDCWD, "/dev/mapper/control", O_RDWR);
+  if (fd.ok()) return fd;
   // devtmpfs makes the node for the misc device on its own; this is the
   // fallback for a guest where it did not.
   std::ifstream misc("/proc/misc");
@@ -28,16 +37,14 @@ int OpenControl() {
   std::string name;
   while (misc >> minor >> name) {
     if (name == "device-mapper") {
-      mkdir("/dev/mapper", 0755);
-      if (mknod("/dev/mapper/control", S_IFCHR | 0600, makedev(10, minor)) !=
-          0) {
-        break;
-      }
-      return open("/dev/mapper/control", O_RDWR);
+      syscalls::mkdirat(AT_FDCWD, "/dev/mapper", 0755).IgnoreError();
+      absl::Status made = syscalls::mknodat(
+          AT_FDCWD, "/dev/mapper/control", S_IFCHR | 0600, makedev(10, minor));
+      if (!made.ok()) return made;
+      return syscalls::openat(AT_FDCWD, "/dev/mapper/control", O_RDWR);
     }
   }
-  fprintf(stderr, "no /dev/mapper/control: %s\n", strerror(errno));
-  return -1;
+  return fd.status();
 }
 
 void Init(dm_ioctl *io, size_t size, const std::string &name) {
@@ -50,32 +57,40 @@ void Init(dm_ioctl *io, size_t size, const std::string &name) {
   snprintf(io->name, sizeof io->name, "%s", name.c_str());
 }
 
+bool Exists(const char *path) {
+  return syscalls::fstatat(AT_FDCWD, path).ok();
+}
+
+// Reports a failed step on stderr; true when `rc` is ok.
+template <typename T>
+bool Check(const absl::StatusOr<T> &rc, const char *what) {
+  if (!rc.ok()) fprintf(stderr, "%s: %s\n", what, rc.status().ToString().c_str());
+  return rc.ok();
+}
+
 }  // namespace
 
 std::string CreateDelayDevice(
     const std::string &name, const std::string &device, int delay_ms) {
-  int dev_fd = open(device.c_str(), O_RDONLY);
-  if (dev_fd < 0) {
-    fprintf(stderr, "open %s: %s\n", device.c_str(), strerror(errno));
-    return "";
-  }
   uint64_t bytes = 0;
-  int rc = ioctl(dev_fd, BLKGETSIZE64, &bytes);
-  close(dev_fd);
-  if (rc != 0) {
-    fprintf(stderr, "BLKGETSIZE64 %s: %s\n", device.c_str(), strerror(errno));
-    return "";
+  {
+    absl::StatusOr<FileDescriptor> dev =
+        syscalls::openat(AT_FDCWD, device, O_RDONLY);
+    if (!Check(dev, ("open " + device).c_str())) return "";
+    if (!Check(syscalls::ioctl(**dev, BLKGETSIZE64, &bytes),
+               ("BLKGETSIZE64 " + device).c_str())) {
+      return "";
+    }
   }
-  int control = OpenControl();
-  if (control < 0) return "";
+  absl::StatusOr<FileDescriptor> control_fd = OpenControl();
+  if (!Check(control_fd, "no /dev/mapper/control")) return "";
+  const int control = **control_fd;
 
   std::vector<char> buf(16384);
   auto *io = reinterpret_cast<dm_ioctl *>(buf.data());
 
   Init(io, buf.size(), name);
-  if (ioctl(control, DM_DEV_CREATE, io) != 0) {
-    fprintf(stderr, "DM_DEV_CREATE: %s\n", strerror(errno));
-    close(control);
+  if (!Check(syscalls::ioctl(control, DM_DEV_CREATE, io), "DM_DEV_CREATE")) {
     return "";
   }
   const uint64_t dev = io->dev;
@@ -92,24 +107,24 @@ std::string CreateDelayDevice(
   size_t used = sizeof(dm_target_spec) + static_cast<size_t>(n) + 1;
   used = (used + 7) & ~static_cast<size_t>(7);
   spec->next = static_cast<uint32_t>(used);
-  if (ioctl(control, DM_TABLE_LOAD, io) != 0) {
-    fprintf(stderr, "DM_TABLE_LOAD: %s\n", strerror(errno));
-    close(control);
+  if (!Check(syscalls::ioctl(control, DM_TABLE_LOAD, io), "DM_TABLE_LOAD")) {
     return "";
   }
 
   Init(io, buf.size(), name);
-  if (ioctl(control, DM_DEV_SUSPEND, io) != 0) {  // flags 0: resume
-    fprintf(stderr, "DM_DEV_SUSPEND (resume): %s\n", strerror(errno));
-    close(control);
+  // flags 0: resume
+  if (!Check(syscalls::ioctl(control, DM_DEV_SUSPEND, io),
+             "DM_DEV_SUSPEND (resume)")) {
     return "";
   }
-  close(control);
+  control_fd = absl::InternalError("closed");  // closes the control fd
 
   char node[64];
   snprintf(node, sizeof node, "/dev/dm-%u", minor(dev));
-  for (int i = 0; i < 100 && access(node, F_OK) != 0; ++i) usleep(50000);
-  if (access(node, F_OK) != 0) mknod(node, S_IFBLK | 0600, dev);
+  for (int i = 0; i < 100 && !Exists(node); ++i) SleepMicros(50000);
+  if (!Exists(node)) {
+    syscalls::mknodat(AT_FDCWD, node, S_IFBLK | 0600, dev).IgnoreError();
+  }
   return node;
 }
 

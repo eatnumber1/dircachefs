@@ -18,6 +18,12 @@ cc_library(
         "process.h",
         "tree.h",
     ],
+    deps = [
+        "//dcfs:syscalls",
+        "//dcfs:syscalls_process",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+    ],
 )
 
 cc_binary(

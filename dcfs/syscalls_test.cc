@@ -2,6 +2,8 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -471,6 +473,66 @@ TEST_F(SyscallsTest, FchmodatAndUtimensatOnAProcFdPath) {
   auto missing = syscalls::fchmodat(tmpdir_fd_, "no_such_file", 0600, 0);
   ASSERT_FALSE(missing.ok());
   EXPECT_EQ(GetErrnoFromStatus(missing).value_or(0), ENOENT);
+}
+
+TEST_F(SyscallsTest, RealpathResolvesAndReportsMissing) {
+  ASSERT_THAT(syscalls::symlinkat("test_file", tmpdir_fd_, "real_link"),
+              IsOk());
+  const std::string dir = "/proc/self/fd/" + std::to_string(tmpdir_fd_);
+  ASSERT_OK_AND_ASSIGN(std::string base, syscalls::realpath(dir));
+  EXPECT_THAT(syscalls::realpath(dir + "/real_link"),
+              IsOkAndHolds(base + "/test_file"));
+  auto missing = syscalls::realpath(dir + "/no_such_file");
+  ASSERT_FALSE(missing.ok());
+  EXPECT_EQ(StatusToErrno(missing.status()), ENOENT);
+}
+
+TEST_F(SyscallsTest, MkdtempAndMkstempMakeFreshNames) {
+  const std::string dir = "/proc/self/fd/" + std::to_string(tmpdir_fd_);
+  ASSERT_OK_AND_ASSIGN(std::string made,
+                       syscalls::mkdtemp(dir + "/dtemp_XXXXXX"));
+  EXPECT_NE(made, dir + "/dtemp_XXXXXX");
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, made), IsOk());
+  std::string pattern = dir + "/ftemp_XXXXXX";
+  ASSERT_OK_AND_ASSIGN(FileDescriptor fd, syscalls::mkstemp(pattern));
+  EXPECT_NE(pattern, dir + "/ftemp_XXXXXX");
+  ASSERT_OK_AND_ASSIGN(int flags, syscalls::fcntl(*fd, F_GETFD));
+  EXPECT_NE(flags & FD_CLOEXEC, 0);
+  std::string bad = "no_x_here";
+  EXPECT_FALSE(syscalls::mkstemp(bad).ok());
+  EXPECT_FALSE(syscalls::mkdtemp("no_x_here").ok());
+}
+
+TEST_F(SyscallsTest, RlimitFlockClockSleepAndPid) {
+  ASSERT_OK_AND_ASSIGN(struct rlimit limit, syscalls::getrlimit(RLIMIT_NOFILE));
+  EXPECT_GT(limit.rlim_cur, 0u);
+  EXPECT_THAT(syscalls::setrlimit(RLIMIT_NOFILE, limit), IsOk());
+  EXPECT_FALSE(syscalls::getrlimit(-1).ok());
+
+  EXPECT_THAT(syscalls::flock(file_fd_, LOCK_EX | LOCK_NB), IsOk());
+  EXPECT_THAT(syscalls::flock(file_fd_, LOCK_UN), IsOk());
+  EXPECT_FALSE(syscalls::flock(-1, LOCK_EX).ok());
+
+  ASSERT_OK_AND_ASSIGN(struct timespec before,
+                       syscalls::clock_gettime(CLOCK_MONOTONIC));
+  const struct timespec nap = {.tv_sec = 0, .tv_nsec = 5'000'000};
+  ASSERT_THAT(syscalls::nanosleep(nap), IsOk());
+  ASSERT_OK_AND_ASSIGN(struct timespec after,
+                       syscalls::clock_gettime(CLOCK_MONOTONIC));
+  EXPECT_GE((after.tv_sec - before.tv_sec) * 1'000'000'000L +
+                (after.tv_nsec - before.tv_nsec),
+            5'000'000L);
+  EXPECT_FALSE(syscalls::clock_gettime(static_cast<clockid_t>(-5)).ok());
+  EXPECT_GT(syscalls::getpid(), 0);
+}
+
+TEST_F(SyscallsTest, MountAndUmountReportTheirErrors) {
+  // Nothing is mounted on the test file, which is not a directory.
+  auto not_mounted = syscalls::umount2("/proc/self/fd/" +
+                                           std::to_string(file_fd_), 0);
+  EXPECT_FALSE(not_mounted.ok());
+  EXPECT_FALSE(syscalls::mount("tmpfs", "/no/such/dir", "tmpfs", 0, nullptr)
+                   .ok());
 }
 
 TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {

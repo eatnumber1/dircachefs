@@ -133,7 +133,7 @@ absl::StatusOr<int64_t> GetFsType(int fd) {
 // for performing fd-level operations on an O_PATH descriptor. This adds an
 // extra open()+close() only on the O_PATH path; a directly-usable fd is
 // unaffected.
-absl::Status IoctlAllowingOPath(int fd, int request, void *arg) {
+absl::Status IoctlAllowingOPath(int fd, unsigned long request, void *arg) {
   absl::StatusOr<int> rc = syscalls::ioctl(fd, request, arg);
   if (rc.ok()) return absl::OkStatus();
   if (StatusToErrno(rc.status()) != EBADF) return rc.status();

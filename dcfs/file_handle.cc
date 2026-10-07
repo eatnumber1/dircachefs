@@ -64,7 +64,7 @@ absl::StatusOr<RawHandle> NameToHandle(int dirfd, std::string_view pathname,
 std::optional<uint64_t> MountIdFromStatx(const struct statx &stx) {
   if ((stx.stx_mask & STATX_MNT_ID_UNIQUE) != 0) return stx.stx_mnt_id;
   if ((stx.stx_mask & STATX_MNT_ID) != 0) return stx.stx_mnt_id;
-  return absl::nullopt;
+  return std::nullopt;
 }
 
 }  // namespace

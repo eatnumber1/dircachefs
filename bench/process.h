@@ -36,6 +36,9 @@ class DcfsProcess {
 
 bool IsMounted(const std::string &mnt);
 
+// Sleeps for `micros` microseconds.
+void SleepMicros(long micros);
+
 // VmRSS of `pid` in bytes, or 0.
 uint64_t RssBytes(pid_t pid);
 

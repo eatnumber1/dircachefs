@@ -201,7 +201,10 @@ qemu_cc_test(
 
 cc_library(
     name = "syscalls",
-    visibility = ["//dcfs/testonly:__pkg__"],
+    visibility = [
+      "//bench:__pkg__",
+      "//dcfs/testonly:__pkg__",
+    ],
     hdrs = [
       "syscalls.h",
       "fd.h",
@@ -219,6 +222,37 @@ cc_library(
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
+    ],
+)
+
+# Process-control wrappers for the benchmark driver (bench/); a library of
+# its own so the daemon never links fork/execv (tools/banned_symbols.txt).
+cc_library(
+    name = "syscalls_process",
+    testonly = 1,
+    srcs = ["syscalls_process.cc"],
+    hdrs = ["syscalls_process.h"],
+    visibility = ["//bench:__pkg__"],
+    deps = [
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+qemu_cc_test(
+    name = "syscalls_process_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["syscalls_process_test.cc"],
+    deps = [
+      ":status",
+      ":syscalls",
+      ":syscalls_process",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
     ],
 )
 

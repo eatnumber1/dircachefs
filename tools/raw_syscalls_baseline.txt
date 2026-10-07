@@ -1,7 +1,0 @@
-# Raw syscall calls still to convert, per file (tools/raw_syscalls_test.py).
-# "count path"; lower a count when you convert calls, delete the line at 0.
-24 bench/dcfs_bench.cc
-18 bench/dm_delay.cc
-18 bench/process.cc
-6 bench/tree.cc
-2 dcfs/backing_test.cc

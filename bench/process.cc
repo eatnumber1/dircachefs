@@ -4,15 +4,26 @@
 #include <signal.h>
 #include <sys/mount.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <utility>
+
+#include "absl/status/statusor.h"
+#include "dcfs/fd.h"
+#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_process.h"
 
 namespace dcfs_bench {
+
+void SleepMicros(long micros) {
+  const struct timespec duration = {.tv_sec = micros / 1'000'000,
+                                    .tv_nsec = (micros % 1'000'000) * 1000};
+  dcfs::syscalls::nanosleep(duration).IgnoreError();
+}
 
 bool IsMounted(const std::string &mnt) {
   std::ifstream f("/proc/self/mountinfo");
@@ -35,19 +46,21 @@ bool DcfsProcess::Start(
       dcfs, "--source=" + src, "--cache_db=" + db};
   args.insert(args.end(), flags.begin(), flags.end());
   args.push_back(mnt);
-  pid_ = fork();
-  if (pid_ < 0) return false;
+  absl::StatusOr<pid_t> forked = dcfs::syscalls::fork();
+  if (!forked.ok()) return false;
+  pid_ = *forked;
   if (pid_ == 0) {
-    int fd = open("/tmp/dcfs-bench.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
-    if (fd >= 0) {
-      dup2(fd, 1);
-      dup2(fd, 2);
+    absl::StatusOr<dcfs::FileDescriptor> log = dcfs::syscalls::openat(
+        AT_FDCWD, "/tmp/dcfs-bench.log", O_WRONLY | O_CREAT | O_APPEND, 0644);
+    if (log.ok()) {
+      dcfs::syscalls::dup2(**log, 1).IgnoreError();
+      dcfs::syscalls::dup2(**log, 2).IgnoreError();
     }
     std::vector<char *> argv;
     for (auto &a : args) argv.push_back(a.data());
     argv.push_back(nullptr);
-    execv(dcfs.c_str(), argv.data());
-    _exit(127);
+    dcfs::syscalls::execv(dcfs.c_str(), argv.data()).IgnoreError();
+    dcfs::syscalls::_exit(127);
   }
   return true;
 }
@@ -56,31 +69,35 @@ bool DcfsProcess::WaitMounted(int seconds) {
   for (int i = 0; i < seconds * 100; ++i) {
     if (IsMounted(mnt_)) return true;
     int status;
-    if (waitpid(pid_, &status, WNOHANG) == pid_) {
+    absl::StatusOr<pid_t> reaped =
+        dcfs::syscalls::waitpid(pid_, &status, WNOHANG);
+    if (reaped.ok() && *reaped == pid_) {
       pid_ = -1;
       return false;
     }
-    usleep(10000);
+    SleepMicros(10000);
   }
   return false;
 }
 
 void DcfsProcess::Stop() {
   if (pid_ <= 0) return;
-  kill(pid_, SIGTERM);
+  dcfs::syscalls::kill(pid_, SIGTERM).IgnoreError();
   int status;
-  waitpid(pid_, &status, 0);
+  dcfs::syscalls::waitpid(pid_, &status, 0).IgnoreError();
   pid_ = -1;
-  if (IsMounted(mnt_)) umount2(mnt_.c_str(), MNT_DETACH);
+  if (IsMounted(mnt_)) {
+    dcfs::syscalls::umount2(mnt_, MNT_DETACH).IgnoreError();
+  }
 }
 
 void DcfsProcess::Crash() {
   if (pid_ <= 0) return;
-  kill(pid_, SIGKILL);
+  dcfs::syscalls::kill(pid_, SIGKILL).IgnoreError();
   int status;
-  waitpid(pid_, &status, 0);
+  dcfs::syscalls::waitpid(pid_, &status, 0).IgnoreError();
   pid_ = -1;
-  umount2(mnt_.c_str(), MNT_DETACH);
+  dcfs::syscalls::umount2(mnt_, MNT_DETACH).IgnoreError();
 }
 
 uint64_t RssBytes(pid_t pid) {
@@ -95,12 +112,15 @@ uint64_t RssBytes(pid_t pid) {
 }
 
 void DropCaches(int what) {
-  sync();
-  int fd = open("/proc/sys/vm/drop_caches", O_WRONLY);
-  if (fd < 0) return;
+  dcfs::syscalls::sync();
+  absl::StatusOr<dcfs::FileDescriptor> fd =
+      dcfs::syscalls::openat(AT_FDCWD, "/proc/sys/vm/drop_caches", O_WRONLY);
+  if (!fd.ok()) return;
   char c = static_cast<char>('0' + what);
-  if (write(fd, &c, 1) != 1) perror("drop_caches");
-  close(fd);
+  if (absl::StatusOr<size_t> n = dcfs::syscalls::write(**fd, &c, 1);
+      !n.ok() || *n != 1) {
+    fprintf(stderr, "drop_caches: %s\n", n.status().ToString().c_str());
+  }
 }
 
 }  // namespace dcfs_bench

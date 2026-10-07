@@ -16,21 +16,22 @@ function pointer, a name not in the list, a raw string literal containing a
 quote, and a call whose name is a local function or lambda of the same
 spelling (a false positive: rename it).
 
-It is a ratchet while the tree converges (step 25.1c): raw_syscalls_baseline.txt
-holds the count per file still to convert, and the test fails when any file
-has more than its baseline (a new file has baseline 0). Delete a line when
-its file is converted.
-
-Excluded files: dcfs/syscalls.cc (the wrappers) and dcfs/syscalls.h (their
-declarations). tools/*.c are C programs and are not scanned.
+Scanned: the C++ of dcfs/, dcfs/testonly/ and bench/. Excluded:
+dcfs/syscalls.cc and dcfs/syscalls_process.cc (the wrappers) and their headers.
+tools/*.c are C programs run in the guest, and tools/*.cc (the banned-symbols
+fixture, which has banned calls on purpose) are not scanned.
 """
 
-import collections
 import re
 import sys
 import unittest
 
-EXCLUDED = ("dcfs/syscalls.cc", "dcfs/syscalls.h")
+EXCLUDED = (
+    "dcfs/syscalls.cc",
+    "dcfs/syscalls.h",
+    "dcfs/syscalls_process.cc",
+    "dcfs/syscalls_process.h",
+)
 
 
 def load_names(path):
@@ -152,45 +153,23 @@ class FinderTest(unittest.TestCase):
                          [(3, "close")])
 
 
-def load_baseline(path):
-    """Per-file counts of the raw calls not converted yet ("count path")."""
-    baseline = {}
-    with open(path) as f:
-        for l in f:
-            if l.strip() and not l.startswith("#"):
-                count, name = l.split()
-                baseline[name] = int(count)
-    return baseline
-
-
 def main(argv):
-    """A ratchet: a file may have no more raw calls than its baseline."""
-    names_file, baseline_file, files = argv[0], argv[1], argv[2:]
+    names_file, files = argv[0], argv[1:]
     pat = pattern(load_names(names_file))
-    baseline = load_baseline(baseline_file)
-    failed = False
     lines = []
-    total = 0
     for path in sorted(files):
         if path.endswith(EXCLUDED):
             continue
         with open(path) as f:
             hits = find_raw_calls(f.read(), pat)
-        total += len(hits)
-        allowed = baseline.get(path, 0)
-        if len(hits) > allowed:
-            failed = True
-            lines += ["%s:%d: raw %s(): use syscalls::%s" % (path, l, n, n)
-                      for l, n in hits]
-            lines.append("%s has %d raw calls, baseline %d" %
-                         (path, len(hits), allowed))
-        elif len(hits) < allowed:
-            lines.append("note: %s has %d raw calls, baseline %d: lower it "
-                         "in %s" % (path, len(hits), allowed,
-                                    baseline_file))
-    print("\n".join(lines))
-    print("raw syscall calls in the tree: %d" % total)
-    return 1 if failed else 0
+        lines += ["%s:%d: raw %s(): use syscalls::%s" % (path, l, n, n)
+                  for l, n in hits]
+    if lines:
+        print("\n".join(lines))
+        print("%d raw syscall calls: use the dcfs::syscalls wrappers "
+              "(docs/style.md 1.5)" % len(lines))
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

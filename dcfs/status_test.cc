@@ -92,6 +92,9 @@ TEST(ErrnoPayloadTest, OkStatusHasNoPayload) {
     absl::Status status = std::move(builder) << "went wrong: " << 42;     \
     EXPECT_EQ(status.code(), expected_code);                              \
     EXPECT_EQ(status.message(), "went wrong: 42");                        \
+    /* The Status itself records the call site, not only the builder. */  \
+    ASSERT_FALSE(status.GetSourceLocations().empty());                    \
+    EXPECT_EQ(status.GetSourceLocations().front().line(), __LINE__);      \
     EXPECT_FALSE(status.GetPayload(kErrnoTypeUrl).has_value());           \
   } while (0)
 
