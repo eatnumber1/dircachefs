@@ -70,6 +70,24 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
   raising a budget is an explicit edit whose commit says why. No
   time-based or size-based ratchets; memory peaks are reported (MEM
   lines), not gated. Owner: dcfs-implementer, with 26.3.
+- 26.4b Cost accounting as tests, extended (russ, 2026-10-08). First
+  replace the step counting through `VLOG(2)` lines (`--v=2`, counting
+  `sqlite3_step:` text: it formats every statement, costs memory under
+  ASan, slows the instrumented daemon, and depends on a log format) with
+  a counter behind the no-op production hook interface the invariant
+  checker uses (`Context::checks`-style: one increment per step and per
+  transaction, nothing formatted, zero cost shipped). Then: (1) FUSE
+  requests per user-level operation: how many READDIRPLUS/GETATTR/LOOKUP/
+  OPEN the kernel sends for `ls -l` of N entries, `find`, `stat` of a path
+  N deep, `cat` of a file, counted from the daemon's request accounting
+  (same hook), budgeted like 26.4; (2) slope tests for every operation
+  class, not only readdir: create N, unlink N, rename N, mkdir N, cold
+  lookup N, setattr N, each bounded a*N + b in SQLite steps, transactions
+  and backing syscalls at N = 100 and 1000 in the harness (the create
+  path, 119 steps / 10 transactions / 2 fsyncs, is the first target).
+  Not adopted: allocations per operation (maybe later; cheap), recovery
+  and shutdown budgets (ad hoc measurements suffice), workload budgets
+  over realistic sequences (no).
 - 26.5 Limited mutation testing (russ: limited). Scope: `metadata_cache.cc`
   and the protocol paths of `dir_cache_fs.cc`; operators: negate a
   condition, delete a call to a phase function (Begin*/End*/Mark*),

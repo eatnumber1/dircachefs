@@ -1356,3 +1356,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (dcfs appends it; FUSE has no "no" form). Proposed: Init() verifies it and refuses otherwise;
   reject --fuse_opt naming it; keep the Access handler as a fail-closed EACCES (ENOSYS would
   make the kernel ALLOW) covered by a forged-request test, instead of deleting it. Awaiting yes.
+- russ (2026-10-08): 26.4b: FUSE requests per user-level operation (yes), slope tests for every
+  operation class (yes), allocations per op (maybe later), recovery/shutdown ad hoc, workload
+  budgets (no); the VLOG-based step counting is replaced by a hook counter first. Testing stays
+  process (presubmit before merge by the lanes; CI post-push), no git hook.
