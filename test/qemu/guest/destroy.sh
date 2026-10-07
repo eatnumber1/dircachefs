@@ -10,6 +10,13 @@
 # within BOUND_SECS and to be recorded clean (the next start recovers
 # nothing). The time and the descriptor count are printed.
 #
+# Before the SIGTERM, a holder keeps every written file's dcfs inode (so
+# the kernel sends no FORGET and DESTROY has them all to reconcile) and
+# every cache is dropped, which leaves the backing inodes in memory only
+# through dcfs's held descriptors. The shutdown must then read nothing from
+# the backing device (review L-d): the no-disk claim itself, not only the
+# time.
+#
 # Run as /tests/destroy.sh by guest/init when booted with dcfs_test=destroy.sh.
 FAILED=0
 . "$(dirname "$0")/lib.sh"
@@ -26,7 +33,10 @@ ENTRIES=${ENTRIES:-100000}
 BOUND_SECS=${BOUND_SECS:-60}
 
 DAEMON_PID=""
+HOLD_PID=""
 MOUNTED=0
+TESTUTIL=/bin/testutil
+DEV=vdb
 
 cleanup() {
 	rc=$?
@@ -34,6 +44,10 @@ cleanup() {
 		echo "--- dcfs stderr ---"
 		tail -50 "$LOG1" 2>/dev/null
 		tail -50 "$LOG2" 2>/dev/null
+	fi
+	if [ -n "$HOLD_PID" ]; then
+		kill "$HOLD_PID" 2>/dev/null || true
+		wait "$HOLD_PID" 2>/dev/null || true
 	fi
 	if is_mounted "$MNT"; then
 		umount "$MNT" 2>/dev/null || umount -l "$MNT" 2>/dev/null || true
@@ -77,12 +91,50 @@ else
 	fail held-descriptors "dcfs holds $fds descriptors for $ENTRIES written files"
 fi
 
+# Keep every written file's dcfs inode, then drop every cache.
+"$TESTUTIL" opath-hold-tree "$MNT" >/tmp/hold.out 2>&1 &
+HOLD_PID=$!
+i=0
+while [ "$i" -lt 300 ] && ! grep -q READY /tmp/hold.out; do
+	if ! kill -0 "$HOLD_PID" 2>/dev/null; then
+		break
+	fi
+	i=$((i + 1))
+	sleep 1
+done
+if grep -q READY /tmp/hold.out; then
+	pass hold-tree
+	echo "destroy.sh: holder: $(cat /tmp/hold.out)"
+else
+	fail hold-tree "holder not ready: $(cat /tmp/hold.out)"
+	exit "$FAILED"
+fi
+drop_caches_quiesced
+fds_dropped=$(daemon_fd_count)
+echo "destroy.sh: after dropping the caches dcfs holds $fds_dropped descriptors"
+if [ "$fds_dropped" -ge $((ENTRIES * 9 / 10)) ]; then
+	pass still-held
+else
+	fail still-held "dcfs holds $fds_dropped descriptors after drop_caches (FORGETs came despite the holder)"
+fi
+
+r0=$(sectors_read "$DEV")
 t2=$(uptime_ms)
 kill -TERM "$DAEMON_PID"
 wait "$DAEMON_PID"
 rc=$?
 t3=$(uptime_ms)
+r1=$(sectors_read "$DEV")
 DAEMON_PID=""
+kill "$HOLD_PID" 2>/dev/null || true
+wait "$HOLD_PID" 2>/dev/null || true
+HOLD_PID=""
+echo "destroy.sh: sectors read from $DEV between SIGTERM and exit: $((r1 - r0))"
+if [ "$r1" -eq "$r0" ]; then
+	pass shutdown-reads-nothing
+else
+	fail shutdown-reads-nothing "$((r1 - r0)) sectors read from $DEV between SIGTERM and exit"
+fi
 ms=$((t3 - t2))
 echo "destroy.sh: SIGTERM to exit: $ms ms for $ENTRIES written files"
 if [ "$rc" -eq 0 ]; then

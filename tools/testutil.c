@@ -110,6 +110,11 @@
  *       open(2)s <path> O_PATH, prints "READY", and sleeps forever with it
  *       open, until killed: on a dcfs mount the kernel then keeps the
  *       file's inode (no FORGET) without any FUSE open (idle.sh).
+ *   testutil opath-hold-tree <dir>
+ *       open(2)s every regular file below <dir> O_PATH (raising its own
+ *       RLIMIT_NOFILE to fs.nr_open first), prints "READY <n>", and sleeps
+ *       forever with them open, until killed: the kernel keeps every one of
+ *       those dcfs inodes (no FORGET) across drop_caches (destroy.sh).
  *   testutil opath-unlink-stat <path>
  *       open(2)s <path> O_PATH|O_NOFOLLOW, unlink(2)s <path>, then
  *       fstat(2)s the descriptor and prints "nlink=<n> size=<bytes>": an
@@ -202,6 +207,7 @@
 #include <errno.h>
 #include <grp.h>
 #include <fcntl.h>
+#include <ftw.h>
 #include <libgen.h>
 #include <sqlite3.h>
 #include <stdint.h>
@@ -212,6 +218,7 @@
 #include <linux/fs.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/xattr.h>
@@ -630,6 +637,51 @@ static int cmd_opath_hold(const char *path)
 		return 1;
 	}
 	printf("READY\n");
+	fflush(stdout);
+	for (;;)
+		pause();
+}
+
+static long opath_held;
+
+static int opath_hold_one(const char *path, const struct stat *st, int type,
+			  struct FTW *ftw)
+{
+	(void) st;
+	(void) ftw;
+	if (type != FTW_F)
+		return 0;
+	if (open(path, O_PATH) == -1) {
+		fprintf(stderr, "%s: ", path);
+		print_err(errno);
+		return 1;
+	}
+	opath_held++;
+	return 0;
+}
+
+static int cmd_opath_hold_tree(const char *dir)
+{
+	struct rlimit limit;
+	FILE *f = fopen("/proc/sys/fs/nr_open", "re");
+	unsigned long long nr_open = 0;
+
+	if (f != NULL) {
+		if (fscanf(f, "%llu", &nr_open) != 1)
+			nr_open = 0;
+		fclose(f);
+	}
+	if (nr_open > 0) {
+		limit.rlim_cur = limit.rlim_max = (rlim_t) nr_open;
+		if (setrlimit(RLIMIT_NOFILE, &limit) == -1) {
+			print_err(errno);
+			return 1;
+		}
+	}
+	/* FTW_PHYS: no symlinks followed; 64 directory descriptors at most. */
+	if (nftw(dir, opath_hold_one, 64, FTW_PHYS) != 0)
+		return 1;
+	printf("READY %ld\n", opath_held);
 	fflush(stdout);
 	for (;;)
 		pause();
@@ -2315,6 +2367,8 @@ int main(int argc, char *argv[])
 		return cmd_runas(argv);
 	if (argc == 3 && strcmp(argv[1], "opath-hold") == 0)
 		return cmd_opath_hold(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "opath-hold-tree") == 0)
+		return cmd_opath_hold_tree(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "opath-unlink-stat") == 0)
 		return cmd_opath_unlink_stat(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "rmcwd") == 0)
