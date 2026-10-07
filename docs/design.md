@@ -390,7 +390,10 @@ served.
   that does not find it, recovery), and the foreign key with its parent,
   so a `stubs` row exists while its dentry is `refused`, or `unknown`
   since it was. An unknown dentry is served as unknown (a lookup probes
-  it again); its stub only answers requests on its nodeid meanwhile. The attributes have no unknown state of their own: dcfs never
+  it again); its stub only answers requests on its nodeid meanwhile. So a
+  forgotten boundary's stub can outlive the boundary until its parent is
+  listed again (or the name looked up): bounded, and deliberate, since it
+  keeps a mount sitting on the stub attached. The attributes have no unknown state of their own: dcfs never
   changes them (every change to a stub is refused), so the dentry's
   present/absent/unknown/refused state is the record the tri-state rule
   applies to. A listing or probe that could not record its result (a
@@ -406,8 +409,8 @@ served.
   (`DirCacheFS::RefuseStub`, logged at ERROR once per stub per run, naming
   the errno), `UNLINK`/`RMDIR` of it with `EBUSY` (as for a mount point),
   an ioctl with `ENOTTY`, and a `RENAME` or `LINK` across it, or of the
-  stub itself, with `EXDEV`. A stub whose row is gone (its dentry stopped
-  being refused) is a stale nodeid: `ESTALE`, so the kernel looks the
+  stub itself, with `EXDEV`. A stub whose row is gone (its dentry was
+  recorded present or absent, or deleted) is a stale nodeid: `ESTALE`, so the kernel looks the
   name up again. The kernel looks a link's or rename's target name up
   before sending the request, so a link or rename *into* a stub fails at
   that lookup, with `ENOTSUP`.
@@ -815,14 +818,21 @@ directory) forgotten and the listing incomplete (a lost change may have
 added names), and every dentry pointing at it unknown (its name may have
 changed). Inode rows are kept, so NFS handles still resolve and are
 verified when next opened. The dirty set is then emptied, and a WARNING
-reports the count and whether `boot_id` changed. Then every inode that was
-in the set (except the root) is probed by handle (`ProbeRecoveredRows`,
-step 12.4b): a crash between a removal's backing syscall and its phase 3
+reports the count and whether `boot_id` changed. Then, once the mount fds
+exist (`backing::Startup`, which main.cc and the tests call: `StartRun`,
+`InitRoot`, `StartupPurge`, then the probe), every inode that was in the
+set (except the root) is probed by handle (`ProbeRecoveredRows`, step
+12.4b): a crash between a removal's backing syscall and its phase 3
 leaves the removed object's row, which no name leads to any more (recovery
 made them unknown) and whose recorded link count is not 0; if the object is
 gone (`ESTALE`) or has no link left, the row goes, a directory's too. One
 that still exists keeps its row, its attributes unknown for the next access
-to read. The probe is bounded by the dirty set.
+to read. The probe is bounded by the dirty set and costs one
+`open_by_handle_at` and `statx` per dirty inode: after a daemon crash (same
+boot) the inodes are in the backing filesystem's cache, about 10-20 µs each;
+after a power loss each is an inode-table read, which on a spinning disk
+can take seconds for thousands of dirty inodes. Start-up after a crash is
+slower by that much (`BM_Recovery`'s numbers move with it).
 
 So a power loss costs re-reading the entries mutated since the last sync
 point, and never serves state the backing filesystem did not keep.

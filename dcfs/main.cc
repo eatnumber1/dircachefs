@@ -491,9 +491,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // Before anything reads the cache: after an unclean shutdown, forget
   // whatever the dirty set says a power loss may have made wrong.
   ABSL_ASSIGN_OR_RETURN(std::string boot_id, ReadBootId());
-  ABSL_RETURN_IF_ERROR(backing::StartRun(ctx, boot_id));
-  ABSL_RETURN_IF_ERROR(backing::InitRoot(ctx, std::move(source_fd)));
-  ABSL_RETURN_IF_ERROR(backing::StartupPurge(ctx));
+  ABSL_RETURN_IF_ERROR(backing::Startup(ctx, std::move(source_fd), boot_id));
 
   DirCacheFS::Options opts{
       .attr_timeout = absl::Seconds(absl::GetFlag(FLAGS_attr_timeout_sec)),

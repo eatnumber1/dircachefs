@@ -1823,19 +1823,33 @@ namespace {
 // link left, its row goes, directories included; one that still exists
 // keeps its row, its attributes unknown since RecoverDirty, for the next
 // access to read (a refresh here would be a fill outside any request).
-// Bounded by the dirty set. Best effort, as the sweep: a row left behind
-// only costs a probe later.
+// Bounded by the dirty set. It needs the mount fds (open_by_handle_at's
+// mount fd: InitRoot, StartupPurge), so Startup runs it after them, never
+// StartRun (review of 12.4b: run before them, every probe failed). Best
+// effort, as the sweep: a row left behind only costs a probe later.
 void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
   int64_t forgotten = 0;
   for (InodeId id : dirty) {
     if (id == cache::kRootInode) continue;
+    // Gone already (the sweep, or a cascade from its directory's row).
+    absl::StatusOr<cache::CachedAttr> row = cache::GetAttr(ctx, id);
+    if (absl::IsNotFound(row.status())) continue;
     absl::StatusOr<std::optional<uint64_t>> nlink = BackingNlink(ctx, id);
-    absl::Status status = nlink.status();
-    if (nlink.ok() && !nlink->has_value()) {
-      ++forgotten;
-    } else if (nlink.ok() && **nlink == 0) {
+    absl::Status status = row.ok() ? nlink.status() : row.status();
+    bool gone = false;
+    if (row.ok() && nlink.ok() && !nlink->has_value()) {
+      gone = true;
+    } else if (row.ok() && nlink.ok() && **nlink == 0) {
       status = ForgetStale(ctx, id);
-      if (status.ok()) ++forgotten;
+      gone = status.ok();
+    }
+    if (gone) ++forgotten;
+    if (status.ok()) {
+      // The lifetime model's probe (formal/lifetime.tla's Restart): a new
+      // process keeps nothing for the nodeid.
+      ctx.events->LifetimeChanged(ctx, id, events::LifetimeStep::kProbed,
+                                  gone ? 1 : 0,
+                                  [] { return events::Lifetime{}; });
     }
     if (!status.ok()) {
       LOG(WARNING) << "could not probe recovered inode " << id
@@ -1852,7 +1866,8 @@ void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
 
 }  // namespace
 
-absl::Status StartRun(Context &ctx, std::string_view boot_id) {
+absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
+                                               std::string_view boot_id) {
   // Model: Crash (after an unclean shutdown) and Restart.
   ctx.events->RunStarting(ctx);
   ABSL_ASSIGN_OR_RETURN(bool clean, GetCleanShutdown(ctx.db));
@@ -1864,7 +1879,6 @@ absl::Status StartRun(Context &ctx, std::string_view boot_id) {
   ABSL_ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
   // Model: Recover.
   ctx.events->Recovered(ctx);
-  if (unclean || recovered > 0) ProbeRecoveredRows(ctx, dirty);
   // Rows whose last release never came (review L5): see
   // cache::ForgetUnnamedRows. At every start, clean or not: a DESTROY with
   // an unlinked file still open for reading ends in a clean shutdown
@@ -1901,6 +1915,18 @@ absl::Status StartRun(Context &ctx, std::string_view boot_id) {
       sqlite3::Durability::kSync));
   // Model: StartRun.
   ctx.events->RunStarted(ctx);
+  // The rows to probe once the mount fds exist (Startup).
+  if (unclean || recovered > 0) return dirty;
+  return std::vector<InodeId>{};
+}
+
+absl::Status Startup(Context &ctx, FileDescriptor source_fd,
+                     std::string_view boot_id) {
+  ABSL_ASSIGN_OR_RETURN(std::vector<InodeId> recovered,
+                        StartRun(ctx, boot_id));
+  ABSL_RETURN_IF_ERROR(InitRoot(ctx, std::move(source_fd)));
+  ABSL_RETURN_IF_ERROR(StartupPurge(ctx));
+  ProbeRecoveredRows(ctx, recovered);
   return absl::OkStatus();
 }
 

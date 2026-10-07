@@ -149,6 +149,8 @@ enum class LifetimeStep {
   kForgotInBatch,  // an entry of a FORGET_MULTI (arg: its nlookup)
   kRemoved,   // phase 3 of an unlink, rmdir or rename that removed one of
               // its names ended (arg: 1 if HoldForRemoval held it)
+  kProbed,    // a start probed its recovered row by handle
+              // (backing::Startup; arg: 1 if the row went)
 };
 
 // The decision LookupOrPopulate takes after reading the cache.
@@ -376,11 +378,12 @@ class ProtocolEvents {
   // written_ entry and its held descriptor, open files) at each step that
   // changes them. A recorder projects these onto one trace per nodeid.
 
-  // DirCacheFS finished `step` of nodeid `id` (see events::LifetimeStep;
-  // `arg` is the step's), right after the code the model's step stands
-  // for; `after` reads what dcfs keeps for it now. Model: Lookup, Create,
-  // Tmpfile, Link (a kLookup of a LINK), Open, Release, Remove and Settle
-  // (kRemoved), Forget, ForgetMulti.
+  // DirCacheFS (or, for kProbed, backing::Startup) finished `step` of
+  // nodeid `id` (see events::LifetimeStep; `arg` is the step's), right
+  // after the code the model's step stands for; `after` reads what dcfs
+  // keeps for it now. Model: Lookup, Create, Tmpfile, Link (a kLookup of a
+  // LINK), Open, Release, Remove and Settle (kRemoved), Forget,
+  // ForgetMulti, and Restart's probe (kProbed).
   virtual void LifetimeChanged(Context &ctx, events::Ino id,
                                events::LifetimeStep step, uint64_t arg,
                                events::LifetimeFn after) {}

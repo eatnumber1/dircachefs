@@ -511,10 +511,22 @@ absl::Status SyncBacking(Context &ctx);
 // the dirty set is not empty for any other reason, runs
 // cache::RecoverDirty and logs at WARNING how many entries it recovered
 // and whether the machine rebooted meanwhile (cache_state.boot_id differs
-// from `boot_id`, the current /proc/sys/kernel/random/boot_id). Then
-// records clean_shutdown 0 and `boot_id`, durably (Durability::kSync),
-// so a crash from here on is detected at the next start.
-absl::Status StartRun(Context &ctx, std::string_view boot_id);
+// from `boot_id`, the current /proc/sys/kernel/random/boot_id). Sweeps the
+// unnamed rows (cache::ForgetUnnamedRows) at every start. Then records
+// clean_shutdown 0 and `boot_id`, durably (Durability::kSync), so a crash
+// from here on is detected at the next start. Returns the inodes that were
+// dirty, after an unclean shutdown (none otherwise): Startup probes them
+// once the mount fds exist.
+absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
+                                               std::string_view boot_id);
+
+// The whole start, after Migrate(), in the one order main.cc and the tests
+// use: StartRun, InitRoot(source_fd), StartupPurge, then the probe of the
+// rows StartRun recovered (by handle: the mount fds must exist), which
+// deletes those whose object is gone or has no link left (a removal a
+// crash cut between its syscall and its phase 3; step 12.4b).
+absl::Status Startup(Context &ctx, FileDescriptor source_fd,
+                     std::string_view boot_id);
 
 // Clean shutdown, once no more requests can arrive: SyncBacking, a WAL
 // checkpoint, and, if the dirty set is then empty, records clean_shutdown

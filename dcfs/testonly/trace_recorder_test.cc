@@ -729,8 +729,11 @@ TEST_F(TraceRecorderTest, LifetimeRemovalBatchDestroyAndRestartLines) {
   ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
   recorder_->RunStarting(ctx_);
   recorder_->RunStarted(ctx_);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kProbed, 1, Kept(0));
   const std::vector<std::string> lines = LifeLines(f);
-  ASSERT_EQ(lines.size(), 8u);
+  ASSERT_EQ(lines.size(), 9u);
+  EXPECT_THAT(lines[8], AllOf(HasSubstr("\"ev\":\"probe\",\"gone\":true"),
+                              HasSubstr("\"lk\":0,")));
   EXPECT_THAT(lines[3],
               AllOf(HasSubstr("\"ev\":\"removed\",\"held\":true"),
                     HasSubstr("\"lk\":2,\"rec\":true,"),

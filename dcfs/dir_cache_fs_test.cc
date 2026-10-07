@@ -312,6 +312,21 @@ class DirCacheFSTest : public ::testing::Test {
     if (!source_.empty()) testonly::RemoveAll(source_);
   }
 
+  // The daemon starting again after its process died, as main.cc starts
+  // it: a new Context over the same database, with no mount fd yet
+  // (InitRoot registers the source's), through backing::Startup. The
+  // test's own ctx_ (the dead process's memory) is left as it was; the
+  // recorder, if one is on, records the new one too.
+  absl::Status Restart(std::string_view boot_id) {
+    MountFds mounts;
+    Context ctx{db_, mounts, bitgen_};
+    ctx.events = ctx_.events;
+    ABSL_ASSIGN_OR_RETURN(FileDescriptor source,
+                          syscalls::openat(AT_FDCWD, source_,
+                                           O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    return backing::Startup(ctx, std::move(source), boot_id);
+  }
+
   std::string Path(std::string_view rel) const {
     return absl::StrCat(source_, "/", rel);
   }
@@ -3107,12 +3122,14 @@ absl::StatusOr<int64_t> InodeRows(sqlite3::Connection &db) {
 }
 
 // A crash between an unlink's backing syscall and its phase 3 (here: phase
-// 1 and the unlink made by hand, then the start that follows a crash): the
-// removed file's row, its nlink column still 1, is probed by handle at
-// the start (it was in the dirty set) and goes, as phase 3 would have
-// deleted it; a dirty directory removed the same way goes too, and a dirty
-// file that still exists stays (formal/findings/lifetime_crash_before_settle,
-// fixed).
+// 1 and the unlink made by hand), then the start that follows a crash, in
+// main.cc's order (Restart): the removed file's row, its nlink column still
+// 1, is probed by handle (it was in the dirty set) and goes, as phase 3
+// would have deleted it; a dirty directory removed the same way goes too,
+// and a dirty file that still exists stays
+// (formal/known_bugs/lifetime_crash_before_settle). Recorded from the
+// crash on: the directory's trace ends ("gone") at the probe, and the kept
+// file's nodeid trace has its probe.
 TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
   WriteFile(Path("f"));
   WriteFile(Path("kept"));
@@ -3134,8 +3151,10 @@ TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
   ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("d"), AT_REMOVEDIR), IsOk());
   const InodeId touched[] = {kept};
   ASSERT_THAT(cache::MarkDirty(ctx_, touched), IsOk());
+  StartTrace();
+  ASSERT_EQ(Lookup(kRootInode, "kept").first.error, 0);
 
-  ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+  ASSERT_THAT(Restart("boot"), IsOk());
   EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
               ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(cache::GetAttr(ctx_, d).status(),

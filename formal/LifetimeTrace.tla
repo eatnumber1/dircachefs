@@ -150,27 +150,32 @@ T_LifeDestroy ==
     /\ Ev("destroy") /\ nd' = AfterReset(nd) /\ cln' \in BOOLEAN
     /\ UNCHANGED named
     /\ Step
+\* A crash may cut a removal (or a link) after its syscall and before the
+\* event that reports it: whether the object has a name is free again.
 T_LifeCrash ==
     /\ Ev("crash") /\ nd' = AfterReset(nd) /\ cln' = FALSE
-    /\ UNCHANGED named
+    /\ named' \in BOOLEAN
     /\ Step
 T_LifeRestart ==
     /\ Ev("restart") /\ nd' = AfterReset(nd) /\ cln' = TRUE
     /\ UNCHANGED named
     /\ Step
 
-\* The start ran: after an unclean shutdown, its probe of the rows that
-\* were dirty (which the trace does not see: a row of an object with no
-\* name, freed by the crash, may go); at every start, its sweep of unnamed
-\* rows.
+\* The start ran (StartRun): its sweep of unnamed rows, at every start.
 T_LifeStart ==
     /\ Ev("start")
-    /\ LET swept == IF BugNoUnnamedSweep \/ (cln /\ BugSweepOnlyUnclean)
-                    THEN nd ELSE AfterSweep(nd, named)
-       IN nd' \in IF cln THEN {swept}
-                  ELSE {swept} \cup
-                       (IF BugNoRecoveredProbe THEN {}
-                        ELSE {AfterProbe(swept, ~named)})
+    /\ nd' = IF BugNoUnnamedSweep \/ (cln /\ BugSweepOnlyUnclean)
+             THEN nd ELSE AfterSweep(nd, named)
+    /\ UNCHANGED <<named, cln>>
+    /\ Step
+
+\* After an unclean shutdown, the start probed the row by handle
+\* (backing::Startup, once the mount fds exist): it went (`gone`) iff its
+\* object was freed, which after a crash is iff it has no name.
+T_LifeProbe ==
+    /\ Ev("probe") /\ ~cln /\ nd.row /\ ~BugNoRecoveredProbe
+    /\ E.gone = ~named
+    /\ nd' = AfterProbe(nd, E.gone)
     /\ UNCHANGED <<named, cln>>
     /\ Step
 
@@ -178,5 +183,5 @@ TraceNext ==
     \/ T_LifeLookup \/ T_LifeLookupDot \/ T_LifeLink \/ T_LifeCreate
     \/ T_LifeTmpfile \/ T_LifeOpen \/ T_LifeRelease \/ T_LifeRemoved
     \/ T_LifeForget \/ T_LifeDestroy \/ T_LifeCrash \/ T_LifeRestart
-    \/ T_LifeStart
+    \/ T_LifeStart \/ T_LifeProbe
 =============================================================================

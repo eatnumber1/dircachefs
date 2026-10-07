@@ -5,7 +5,7 @@
 (* phase 3 left the row of an object with no name left, its nlink column   *)
 (* still not 0, so the start's sweep of unnamed rows kept it: a row of a   *)
 (* freed object, deleted only once something reached it by handle. The     *)
-(* fix: at a start after an unclean shutdown, backing::StartRun probes     *)
+(* fix: at a start after an unclean shutdown, backing::Startup probes      *)
 (* every row recovery found dirty by handle (ProbeRecoveredRows) and       *)
 (* deletes those whose object is gone or has no link left, directories     *)
 (* included.                                                               *)

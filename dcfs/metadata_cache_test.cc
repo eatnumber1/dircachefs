@@ -912,6 +912,44 @@ TEST_F(MetadataCacheTest, ForgetUnnamedRowsKeepsNamedLinkedAndDirectories) {
   EXPECT_THAT(GetAttr(ctx_, kRootInode), IsOk());
 }
 
+// The sweep runs at every start (step 12.4b), so it must not read the
+// whole inodes table: its DELETE, as SQLite plans it, searches the partial
+// index inodes_unlinked (WHERE nlink = 0; a partial index is used only for
+// a query with its predicate literally). The statement is caught as
+// ForgetUnnamedRows runs it (sqlite3_trace_v2), so the plan is of the SQL
+// the code has.
+TEST_F(MetadataCacheTest, ForgetUnnamedRowsSearchesTheUnlinkedIndex) {
+  std::vector<std::string> statements;
+  ASSERT_EQ(sqlite3_trace_v2(
+                db_.Get(), SQLITE_TRACE_STMT,
+                [](unsigned, void *out, void *stmt, void *) -> int {
+                  static_cast<std::vector<std::string> *>(out)->push_back(
+                      sqlite3_sql(static_cast<sqlite3_stmt *>(stmt)));
+                  return 0;
+                },
+                &statements),
+            SQLITE_OK);
+  ASSERT_THAT(ForgetUnnamedRows(ctx_), IsOk());
+  ASSERT_EQ(sqlite3_trace_v2(db_.Get(), 0, nullptr, nullptr), SQLITE_OK);
+  std::string sweep;
+  for (const std::string &sql : statements) {
+    if (sql.starts_with("DELETE FROM inodes")) sweep = sql;
+  }
+  ASSERT_FALSE(sweep.empty());
+  ASSERT_OK_AND_ASSIGN(
+      sqlite3::Statement * plan,
+      db_.Prepared(absl::StrCat("EXPLAIN QUERY PLAN ", sweep)));
+  std::vector<std::string> details;
+  ASSERT_THAT(plan->ForEachRow([&](sqlite3::Statement &row) {
+    details.push_back(row.Column<std::string>(3));
+    return absl::OkStatus();
+  }),
+              IsOk());
+  EXPECT_THAT(details, ::testing::Contains(::testing::HasSubstr(
+                           "USING INDEX inodes_unlinked")))
+      << ::testing::PrintToString(details);
+}
+
 // The FORGET reconciliation's batch phase 1 marks every inode it names
 // that still has a row; one whose row went meanwhile (invalidated) costs
 // the others nothing.

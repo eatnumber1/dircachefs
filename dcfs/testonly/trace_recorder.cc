@@ -1808,6 +1808,10 @@ void TraceRecorder::LifetimeChanged(Context &ctx, Ino id,
       ev = "removed";
       fields = absl::StrCat(",\"held\":", Bool(arg != 0));
       break;
+    case LifetimeStep::kProbed:
+      ev = "probe";
+      fields = absl::StrCat(",\"gone\":", Bool(arg != 0));
+      break;
   }
   LifeLine(id, "LifetimeChanged", ev,
            absl::StrCat(fields, ",\"st\":{", KeptJson(kept), ",",

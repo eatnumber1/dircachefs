@@ -63,7 +63,7 @@
 //   DCFS-LIFE <trace> <nodeid> <json>
 //
 // one per step of LifetimeChanged (lookup, create, tmpfile, open, release,
-// forget, removed), and one at DESTROY, at a start after a crash or a
+// forget, removed, probe), and one at DESTROY, at a start after a crash or a
 // clean shutdown, and when a start has run (its sweep). Each carries what
 // dcfs keeps for the nodeid after the step ("st": its lookup count,
 // removed record, written_ entry and open files as DirCacheFS reported
