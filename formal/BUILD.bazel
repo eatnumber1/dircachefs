@@ -175,9 +175,12 @@ REVAL_LIMITATIONS = {
 # //test/qemu, next to the guests that record the traces).
 exports_files(
     [
+        "RevalTrace.cfg",
+        "RevalTrace.tla",
         "Trace.cfg",
         "Trace.tla",
         "dcfs.tla",
+        "reval.tla",
         "trace_validate.sh",
     ],
     visibility = ["//visibility:public"],
@@ -243,4 +246,79 @@ ROOT_TESTS = {
         root = "t@2",
     )
     for test, failure in ROOT_TESTS.items()
+]
+
+# A writable open sharing a read-write fd, refused (EPERM).
+REFUSED_WRITABLE_OPEN = "\"ev\":\"open\",\"mode\":\"w\",\"shared\":true,\"errno\":1,"
+
+# RevalTrace.tla's own tests: files' traces recorded by
+# //dcfs:dir_cache_fs_trace_test (trace_tests/reval_*.log, the lines of one
+# harness test each), checked against reval.tla and against its known-bug
+# variants as the model (trace_tests/reval_<bug>.cfg). Each entry: the log,
+# the variant (None: the real model), and the event the first rejection
+# must be at (None: the trace must be valid).
+REVAL_TRACE_TESTS = {
+    # WritableOpenAfterChattrThroughDcfsIsRefused: open O_RDWR, chattr +i
+    # through dcfs, open O_WRONLY refused (EPERM), ...: valid.
+    "reval_chattr_through_dcfs": ("reval_chattr_through_dcfs", None, None),
+    # ... and as the pre-23.7 model, which grants that open: rejected there.
+    "reval_chattr_through_dcfs_no_recheck": (
+        "reval_chattr_through_dcfs",
+        "reval_no_recheck",
+        REFUSED_WRITABLE_OPEN,
+    ),
+    # ... as the flags_changed-only re-check: the chattr went through dcfs,
+    # so it re-checks too: valid.
+    "reval_chattr_through_dcfs_recheck_if_changed": (
+        "reval_chattr_through_dcfs",
+        "reval_recheck_if_changed",
+        None,
+    ),
+    # WritableOpenOfAnImmutableFileIsRefused: the same with chattr +i made
+    # behind dcfs's back ("oob"): valid; rejected at the refused open by
+    # both variants (the flags_changed-only re-check does not see it).
+    "reval_chattr_out_of_band": ("reval_chattr_out_of_band", None, None),
+    "reval_chattr_out_of_band_no_recheck": (
+        "reval_chattr_out_of_band",
+        "reval_no_recheck",
+        REFUSED_WRITABLE_OPEN,
+    ),
+    "reval_chattr_out_of_band_recheck_if_changed": (
+        "reval_chattr_out_of_band",
+        "reval_recheck_if_changed",
+        REFUSED_WRITABLE_OPEN,
+    ),
+    # AnAppendingWriterKeepsTheFirstWritersFd: a read-only shared fd, an
+    # O_WRONLY open (write fd "plain"), an O_WRONLY|O_APPEND one (still
+    # "plain"), writes: valid; the variant that hands the write fd to the
+    # last writer is rejected at the O_APPEND open.
+    # ChmodAndChattrOfAnOpenFileMatchTheRevalModel: chmod, chattr +a, a
+    # chmod refused (EPERM), the opens the flag decides, chattr -a, chmod:
+    # valid; with the refused chmod edited to succeed, rejected there (the
+    # backing filesystem refuses a mode change of an append-only file).
+    "reval_chmod_and_chattr": ("reval_chmod_and_chattr", None, None),
+    "reval_chmod_of_append_only": (
+        "reval_chmod_of_append_only",
+        None,
+        "\"i\":6,.*\"ev\":\"chmod\",\"errno\":0",
+    ),
+    "reval_appending_writer": ("reval_appending_writer", None, None),
+    "reval_appending_writer_write_fd_last_writer": (
+        "reval_appending_writer",
+        "reval_write_fd_last_writer",
+        "\"ev\":\"open\",\"mode\":\"wa\",.*\"wfd\":\"plain\"",
+    ),
+}
+
+[
+    tla_trace_log_test(
+        name = "trace_%s_test" % test,
+        size = "small",
+        timeout = "short",
+        expect_reject = "reval/t@2" if event else "",
+        expect_reject_event = event or "",
+        log = "trace_tests/%s.log" % log,
+        reval_cfg = "trace_tests/%s.cfg" % cfg if cfg else None,
+    )
+    for test, (log, cfg, event) in REVAL_TRACE_TESTS.items()
 ]

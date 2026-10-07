@@ -4,9 +4,10 @@ Boots a guest whose dcfs records its protocol events (a qemu_cc_test's
 initramfs whose test installs dcfs/testonly's recorder, or the traced e2e
 initramfs, //test/qemu:initramfs_traced, running a guest script), then runs
 formal/trace_validate.sh: it collects the traces from the serial log and
-checks each with TLC against formal/Trace.tla. TLC runs on the host on the
-pinned JDK; the guest under the pinned QEMU and kernel, exactly as
-qemu_test/qemu_cc_test run them (test/qemu/scripts/run-qemu.sh).
+checks each with TLC against formal/Trace.tla (a file's trace against
+formal/RevalTrace.tla). TLC runs on the host on the pinned JDK; the guest
+under the pinned QEMU and kernel, exactly as qemu_test/qemu_cc_test run
+them (test/qemu/scripts/run-qemu.sh).
 """
 
 load("@rules_java//java/common:java_common.bzl", "java_common")
@@ -106,6 +107,9 @@ def _tla_trace_test_impl(ctx):
         ctx.file._trace_tla,
         ctx.file._trace_cfg,
         ctx.file._dcfs_tla,
+        ctx.file._reval_trace_tla,
+        ctx.file._reval_trace_cfg,
+        ctx.file._reval_tla,
     ]
     runfiles = ctx.runfiles(files = files, transitive_files = runtime.files)
     for dep in [ctx.attr._qemu, ctx.attr._mke2fs, ctx.attr._mkfs_xfs, ctx.attr._mkfs_btrfs]:
@@ -116,7 +120,8 @@ _tla_trace_test = rule(
     implementation = _tla_trace_test_impl,
     test = True,
     doc = "Runs a recording guest and validates every trace it produced " +
-          "against formal/Trace.tla (see formal/trace_validate.sh).",
+          "against formal/Trace.tla or formal/RevalTrace.tla (see " +
+          "formal/trace_validate.sh).",
     attrs = {
         "initramfs": attr.label(
             allow_single_file = True,
@@ -174,6 +179,9 @@ _tla_trace_test = rule(
         "_trace_tla": attr.label(default = "//formal:Trace.tla", allow_single_file = True),
         "_trace_cfg": attr.label(default = "//formal:Trace.cfg", allow_single_file = True),
         "_dcfs_tla": attr.label(default = "//formal:dcfs.tla", allow_single_file = True),
+        "_reval_trace_tla": attr.label(default = "//formal:RevalTrace.tla", allow_single_file = True),
+        "_reval_trace_cfg": attr.label(default = "//formal:RevalTrace.cfg", allow_single_file = True),
+        "_reval_tla": attr.label(default = "//formal:reval.tla", allow_single_file = True),
         "_run_qemu": attr.label(
             default = "//test/qemu:scripts/run-qemu.sh",
             allow_single_file = True,
@@ -267,17 +275,21 @@ def _tla_trace_log_test_impl(ctx):
         args += ["--expect-reject", ctx.attr.expect_reject, ctx.attr.expect_reject_event]
     if ctx.attr.root:
         args += ["--root", ctx.attr.root, "--root-cuts", ",".join(ctx.attr.root_cuts)]
+    reval_cfg = []
+    if ctx.file.reval_cfg:
+        reval_cfg = ["--reval-cfg", "$PWD/" + sp(ctx.file.reval_cfg)]
     classpath = ":".join([
         "$PWD/" + sp(ctx.file._overrides),
         "$PWD/" + sp(ctx.file._jar),
         "$PWD/" + sp(ctx.file._community_modules),
     ])
-    validate = "\"$PWD/{validate}\" --java \"$PWD/{java}\" --cp \"{cp}\" --spec-dir \"$PWD/{spec}\" {args} --log \"$PWD/{log}\"".format(
+    validate = "\"$PWD/{validate}\" --java \"$PWD/{java}\" --cp \"{cp}\" --spec-dir \"$PWD/{spec}\" {args} {reval_cfg} --log \"$PWD/{log}\"".format(
         validate = sp(ctx.file._validate),
         java = runtime.java_executable_runfiles_path,
         cp = classpath,
         spec = ctx.file._trace_tla.short_path.rsplit("/", 1)[0],
         args = " ".join([q(a) for a in args]),
+        reval_cfg = " ".join(["\"" + a + "\"" for a in reval_cfg]),
         log = sp(ctx.file.log),
     )
     if ctx.attr.expect_validator_failure:
@@ -311,7 +323,10 @@ def _tla_trace_log_test_impl(ctx):
         ctx.file._trace_tla,
         ctx.file._trace_cfg,
         ctx.file._dcfs_tla,
-    ]
+        ctx.file._reval_trace_tla,
+        ctx.file._reval_trace_cfg,
+        ctx.file._reval_tla,
+    ] + ([ctx.file.reval_cfg] if ctx.file.reval_cfg else [])
     return [DefaultInfo(
         executable = script,
         runfiles = ctx.runfiles(files = files, transitive_files = runtime.files),
@@ -333,10 +348,19 @@ tla_trace_log_test = rule(
             doc = "An extended regular expression: the validator must fail " +
                   "and its output match it (a test of the validator's rules).",
         ),
+        "reval_cfg": attr.label(
+            allow_single_file = [".cfg"],
+            doc = "The configuration the files' traces are checked with " +
+                  "instead of RevalTrace.cfg (a known-bug variant of " +
+                  "reval.tla as the model).",
+        ),
         "_validate": attr.label(default = "//formal:trace_validate.sh", allow_single_file = True),
         "_trace_tla": attr.label(default = "//formal:Trace.tla", allow_single_file = True),
         "_trace_cfg": attr.label(default = "//formal:Trace.cfg", allow_single_file = True),
         "_dcfs_tla": attr.label(default = "//formal:dcfs.tla", allow_single_file = True),
+        "_reval_trace_tla": attr.label(default = "//formal:RevalTrace.tla", allow_single_file = True),
+        "_reval_trace_cfg": attr.label(default = "//formal:RevalTrace.cfg", allow_single_file = True),
+        "_reval_tla": attr.label(default = "//formal:reval.tla", allow_single_file = True),
         "_overrides": attr.label(default = "//third_party/tlaplus:tlc_overrides", allow_single_file = True),
         "_jar": attr.label(default = "@tla2tools//file", allow_single_file = True),
         "_community_modules": attr.label(default = "@tla_community_modules//file", allow_single_file = True),

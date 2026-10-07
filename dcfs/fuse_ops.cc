@@ -2,8 +2,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <span>
 #include <string_view>
+#include <linux/fs.h>  // FS_IOC_SETFLAGS
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -85,7 +87,10 @@ void Getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
 void Setattr(
     fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set,
     fuse_file_info *fi) {
-  Serve(req, {.op = events::Op::kSetattr, .ino = Ino(ino)},
+  Serve(req,
+        {.op = events::Op::kSetattr,
+         .ino = Ino(ino),
+         .flags = static_cast<unsigned int>(to_set)},
         [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Setattr(fr, ino, attr, to_set, fi);
         });
@@ -338,7 +343,15 @@ void CopyFileRange(fuse_req_t req, fuse_ino_t ino_in, off_t off_in,
 void Ioctl(fuse_req_t req, fuse_ino_t ino, unsigned int cmd, void *arg,
            fuse_file_info *fi, unsigned flags, const void *in_buf,
            size_t in_bufsz, size_t out_bufsz) {
-  Serve(req, {.op = events::Op::kIoctl, .ino = Ino(ino), .flags = cmd},
+  int ioctl_arg = 0;
+  if (cmd == FS_IOC_SETFLAGS && in_bufsz >= sizeof(ioctl_arg)) {
+    std::memcpy(&ioctl_arg, in_buf, sizeof(ioctl_arg));
+  }
+  Serve(req,
+        {.op = events::Op::kIoctl,
+         .ino = Ino(ino),
+         .flags = cmd,
+         .ioctl_arg = ioctl_arg},
         [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Ioctl(
               fr, ino, cmd, fi, flags,

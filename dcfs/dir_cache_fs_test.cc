@@ -334,9 +334,17 @@ class DirCacheFSTest : public ::testing::Test {
     std::fflush(stdout);
     recorder_ = std::make_unique<testonly::TraceRecorder>(
         STDOUT_FILENO,
-        absl::StrCat(info->test_suite_name(), ".", info->name()));
+        absl::StrCat(info->test_suite_name(), ".", info->name()),
+        /*files=*/true);
     ctx_.events = recorder_.get();
     recorder_->BeginAll(ctx_);
+  }
+
+  // Tells the trace, if one is recording, that this test changed the
+  // backing file of `id` behind dcfs's back (formal/reval.tla's
+  // out-of-band change).
+  void OutOfBand(InodeId id) {
+    if (recorder_ != nullptr) recorder_->NoteOutOfBand(id);
   }
 
   // Runs `fn(i)` (i counting down from `times`) inside each of the next
@@ -427,8 +435,10 @@ class DirCacheFSTest : public ::testing::Test {
     if (::ioctl(raw, FS_IOC_GETFLAGS, &flags) == 0) {
       const int immutable = flags | FS_IMMUTABLE_FL;
       if (::ioctl(raw, FS_IOC_SETFLAGS, &immutable) == 0) {
+        OutOfBand(id);
         fh = Open(id, O_RDONLY).second;
         if (::ioctl(raw, FS_IOC_SETFLAGS, &flags) != 0) fh = 0;
+        OutOfBand(id);
       }
     }
     ::close(raw);
@@ -1417,6 +1427,7 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnImmutableFileIsRefused) {
   WriteFile(Path("f"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  StartTrace();  // and the file's (formal/reval.tla)
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   int flags = 0;
@@ -1425,10 +1436,12 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnImmutableFileIsRefused) {
   ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
   const int immutable = flags | FS_IMMUTABLE_FL;
   ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &immutable), 0);
+  OutOfBand(f);
   EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
   auto [ro, ro_fh] = Open(f, O_RDONLY);
   EXPECT_EQ(ro.error, 0);
   ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  OutOfBand(f);
   auto [rw, rw_fh] = Open(f, O_WRONLY);
   EXPECT_EQ(rw.error, 0);
   ::close(raw);
@@ -1445,6 +1458,7 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrThroughDcfsIsRefused) {
   WriteFile(Path("f"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  StartTrace();  // and the file's (formal/reval.tla)
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   Reply get = Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int));
@@ -1477,6 +1491,7 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnAppendOnlyFileNeedsOAppend) {
   WriteFile(Path("f"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  StartTrace();  // and the file's (formal/reval.tla)
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   int flags = 0;
@@ -1485,11 +1500,48 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnAppendOnlyFileNeedsOAppend) {
   ASSERT_EQ(::ioctl(raw, FS_IOC_GETFLAGS, &flags), 0);
   const int append_only = flags | FS_APPEND_FL;
   ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &append_only), 0);
+  OutOfBand(f);
   EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
   auto [app, app_fh] = Open(f, O_WRONLY | O_APPEND);
   EXPECT_EQ(app.error, 0);
   ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  OutOfBand(f);
   ::close(raw);
+  for (uint64_t h : {fh, app_fh}) {
+    if (h != 0) {
+      EXPECT_EQ(Release(f, h).error, 0);
+    }
+  }
+}
+
+// For trace validation against the revalidation model (formal/reval.tla):
+// a chmod through dcfs of a file open for writing, chattr +a through dcfs,
+// a chmod the backing filesystem refuses (the file is append-only), the
+// writable opens the flag decides, chattr -a and a chmod again.
+TEST_F(DirCacheFSTest, ChmodAndChattrOfAnOpenFileMatchTheRevalModel) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  StartTrace();
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  EXPECT_EQ(Chmod(f, 0600).error, 0);
+  Reply get = Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int));
+  ASSERT_EQ(get.error, 0);
+  int flags = 0;
+  std::memcpy(&flags, get.payload.data() + sizeof(struct fuse_ioctl_out),
+              sizeof(flags));
+  auto as_bytes = [](const int &v) {
+    return std::string(reinterpret_cast<const char *>(&v), sizeof(v));
+  };
+  const int append_only = flags | FS_APPEND_FL;
+  ASSERT_EQ(Ioctl(f, FS_IOC_SETFLAGS, as_bytes(append_only), 0).error, 0);
+  EXPECT_EQ(Chmod(f, 0644).error, -EPERM);
+  EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
+  auto [app, app_fh] = Open(f, O_WRONLY | O_APPEND);
+  EXPECT_EQ(app.error, 0);
+  ASSERT_EQ(Ioctl(f, FS_IOC_SETFLAGS, as_bytes(flags), 0).error, 0);
+  EXPECT_EQ(Chmod(f, 0644).error, 0);
   for (uint64_t h : {fh, app_fh}) {
     if (h != 0) {
       EXPECT_EQ(Release(f, h).error, 0);
@@ -1894,6 +1946,7 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  StartTrace();  // and the files' (formal/reval.tla)
   int flags = 0;
   const int raw = ::open(Path("f").c_str(), O_RDONLY | O_CLOEXEC);
   ASSERT_GE(raw, 0);
@@ -1903,6 +1956,7 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
   auto [ro, ro_fh] = Open(f, O_RDONLY);  // Shared fd: read-only.
   ASSERT_EQ(ro.error, 0);
   ASSERT_EQ(::ioctl(raw, FS_IOC_SETFLAGS, &flags), 0);
+  OutOfBand(f);
   ::close(raw);
   auto [rw, rw_fh] = Open(f, O_WRONLY);
   ASSERT_EQ(rw.error, 0);
@@ -1946,6 +2000,7 @@ TEST_F(DirCacheFSTest, AnAppendingWriterKeepsTheFirstWritersFd) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
+  StartTrace();  // and the files' (formal/reval.tla)
   const uint64_t ro_fh = OpenReadOnlySharedFd("f", f);
   ASSERT_NE(ro_fh, 0u);
   auto [a, a_fh] = Open(f, O_WRONLY);

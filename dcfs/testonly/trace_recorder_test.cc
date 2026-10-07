@@ -1,8 +1,11 @@
 // Tests of the trace recorder's own decisions (trace_recorder.h): which
 // changes of a directory's cached state it explains, cuts or calls
-// unexplained. The events are produced by the cache functions themselves
+// unexplained, and which files' events become lines of a file's trace
+// (formal/reval.tla). The events are produced by the cache functions themselves
 // (they call Context::events), on an in-memory database; the lines are read
 // back from a file in TEST_TMPDIR.
+
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include "dcfs/testonly/trace_recorder.h"
 
@@ -35,6 +38,8 @@
 #include "dcfs/mount_fds.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
+#include "dcfs/status.h"
+#include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -122,9 +127,10 @@ class TraceRecorderTest : public ::testing::Test {
     return id;
   }
 
-  // Starts recording; every directory's trace begins now.
-  void StartTrace() {
-    recorder_ = std::make_unique<TraceRecorder>(fd_, "test");
+  // Starts recording; every directory's trace begins now. With `files`,
+  // files' traces too.
+  void StartTrace(bool files = false) {
+    recorder_ = std::make_unique<TraceRecorder>(fd_, "test", files);
     ctx_.events = recorder_.get();
     recorder_->BeginAll(ctx_);
   }
@@ -145,6 +151,23 @@ class TraceRecorderTest : public ::testing::Test {
       if (absl::StartsWith(line, prefix)) lines.push_back(line);
     }
     return lines;
+  }
+
+  // The lines of file `id`'s trace so far.
+  std::vector<std::string> FileLines(InodeId id) {
+    std::ifstream in(path_);
+    std::vector<std::string> lines;
+    const std::string prefix = absl::StrCat("DCFS-REVAL test ", id, " ");
+    for (std::string line; std::getline(in, line);) {
+      if (absl::StartsWith(line, prefix)) lines.push_back(line);
+    }
+    return lines;
+  }
+
+  // A FUSE request of file `id` that ends with `status`.
+  void FileRequest(events::Request request, absl::Status status) {
+    events::RequestScope scope(*ctx_.events, ctx_, request);
+    scope.Finish(std::move(status)).IgnoreError();
   }
 
   sqlite3::Connection db_;
@@ -435,6 +458,123 @@ TEST_F(TraceRecorderTest, ReadOnlyIoctlOfADirectoryIsNoCut) {
   }
   EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"cut\""),
                                        HasSubstr("dir-attrs"))));
+}
+
+// --- Files' traces (formal/reval.tla) ------------------------------------
+
+constexpr InodeId kFile = 50;
+
+events::SharedFd ReadWrite(int refs, int writable_refs) {
+  return {.held = true,
+          .writable = true,
+          .refs = refs,
+          .writable_refs = writable_refs};
+}
+
+// A file's trace begins at an open that finds no shared backing fd (the
+// model's initial state has none); a file first seen shared is not traced,
+// and nothing is unless the recorder was made with `files`.
+TEST_F(TraceRecorderTest, FileTraceBeginsAtAnOpenWithoutASharedFd) {
+  StartTrace(/*files=*/false);
+  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false,
+                        absl::OkStatus(), ReadWrite(1, 1));
+  EXPECT_THAT(FileLines(kFile), IsEmpty());
+
+  StartTrace(/*files=*/true);
+  recorder_->FileOpened(ctx_, kFile, O_RDONLY, /*shared=*/true,
+                        absl::OkStatus(), ReadWrite(2, 1));
+  recorder_->NoteOutOfBand(kFile);
+  EXPECT_THAT(FileLines(kFile), IsEmpty());
+
+  constexpr InodeId kOther = 51;
+  recorder_->FileOpened(ctx_, kOther, O_WRONLY | O_APPEND, /*shared=*/false,
+                        absl::OkStatus(), ReadWrite(1, 1));
+  recorder_->NoteOutOfBand(kOther);
+  recorder_->FileReleased(ctx_, kOther, /*writable=*/true, {});
+  const std::vector<std::string> lines = FileLines(kOther);
+  ASSERT_EQ(lines.size(), 4u);
+  EXPECT_THAT(lines[0], HasSubstr("\"ev\":\"begin\""));
+  EXPECT_THAT(lines[1],
+              AllOf(HasSubstr("\"ev\":\"open\",\"mode\":\"wa\""),
+                    HasSubstr("\"shared\":false,\"errno\":0"),
+                    HasSubstr("{\"sfd\":\"rw\",\"wfd\":\"none\","
+                              "\"refs\":1,\"wrefs\":1}")));
+  EXPECT_THAT(lines[2], HasSubstr("\"ev\":\"oob\""));
+  EXPECT_THAT(lines[3],
+              AllOf(HasSubstr("\"ev\":\"release\",\"writable\":true"),
+                    HasSubstr("\"sfd\":\"none\"")));
+}
+
+// An open refused for the backing file's flags (EPERM) is the model's; any
+// other failure is not, and ends the file's trace.
+TEST_F(TraceRecorderTest, FileOpenFailingOtherwiseThanEpermIsCut) {
+  StartTrace(/*files=*/true);
+  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false,
+                        absl::OkStatus(), ReadWrite(1, 1));
+  recorder_->FileOpened(ctx_, kFile, O_WRONLY, /*shared=*/true,
+                        ErrnoToStatus(EPERM, "immutable"), ReadWrite(1, 1));
+  EXPECT_THAT(FileLines(kFile),
+              Contains(HasSubstr("\"mode\":\"w\",\"shared\":true,"
+                                 "\"errno\":1,")));
+  recorder_->FileOpened(ctx_, kFile, O_WRONLY, /*shared=*/true,
+                        ErrnoToStatus(ESTALE, "gone"), ReadWrite(1, 1));
+  recorder_->FileReleased(ctx_, kFile, /*writable=*/true, {});
+  const std::vector<std::string> lines = FileLines(kFile);
+  ASSERT_FALSE(lines.empty());
+  EXPECT_THAT(lines.back(), AllOf(HasSubstr("\"ev\":\"cut\""),
+                                  HasSubstr("failed: the open failed")));
+}
+
+// The requests of a traced file that the model has: flag changes (the
+// flags SETFLAGS set; FSSETXATTR's left free), flag reads, a SETATTR of the
+// mode or owner (not of the size), and dcfs's own writes (EBADF is the
+// model's; another error ends the trace).
+TEST_F(TraceRecorderTest, FileRequestsBecomeLinesOfItsTrace) {
+  StartTrace(/*files=*/true);
+  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false,
+                        absl::OkStatus(), ReadWrite(1, 1));
+  FileRequest({.op = events::Op::kIoctl,
+               .ino = kFile,
+               .flags = FS_IOC_SETFLAGS,
+               .ioctl_arg = FS_IMMUTABLE_FL},
+              absl::OkStatus());
+  FileRequest({.op = events::Op::kIoctl,
+               .ino = kFile,
+               .flags = FS_IOC_FSSETXATTR},
+              ErrnoToStatus(EPERM, "x"));
+  FileRequest({.op = events::Op::kIoctl,
+               .ino = kFile,
+               .flags = FS_IOC_GETFLAGS},
+              absl::OkStatus());
+  FileRequest({.op = events::Op::kIoctl,
+               .ino = kFile,
+               .flags = FS_IOC_GETVERSION},
+              absl::OkStatus());
+  FileRequest({.op = events::Op::kSetattr,
+               .ino = kFile,
+               .flags = FUSE_SET_ATTR_SIZE},
+              absl::OkStatus());
+  FileRequest({.op = events::Op::kSetattr,
+               .ino = kFile,
+               .flags = FUSE_SET_ATTR_UID},
+              ErrnoToStatus(EPERM, "x"));
+  FileRequest({.op = events::Op::kFallocate, .ino = kFile},
+              ErrnoToStatus(EBADF, "x"));
+  FileRequest({.op = events::Op::kWrite, .ino = kFile}, absl::OkStatus());
+  FileRequest({.op = events::Op::kCopyFileRange, .ino = kFile},
+              ErrnoToStatus(EIO, "x"));
+  FileRequest({.op = events::Op::kWrite, .ino = kFile}, absl::OkStatus());
+  const std::vector<std::string> lines = FileLines(kFile);
+  ASSERT_EQ(lines.size(), 9u);
+  EXPECT_THAT(lines[2], HasSubstr("\"ev\":\"setflags\",\"errno\":0,"
+                                  "\"imm\":true,\"app\":false}"));
+  EXPECT_THAT(lines[3], HasSubstr("\"ev\":\"setflags\",\"errno\":1}"));
+  EXPECT_THAT(lines[4], HasSubstr("\"ev\":\"getflags\",\"errno\":0}"));
+  EXPECT_THAT(lines[5], HasSubstr("\"ev\":\"chmod\",\"errno\":1}"));
+  EXPECT_THAT(lines[6], HasSubstr("\"ev\":\"write\",\"errno\":9}"));
+  EXPECT_THAT(lines[7], HasSubstr("\"ev\":\"write\",\"errno\":0}"));
+  EXPECT_THAT(lines[8], AllOf(HasSubstr("\"ev\":\"cut\""),
+                              HasSubstr("failed: a write failed: errno 5")));
 }
 
 }  // namespace

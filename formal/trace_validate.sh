@@ -5,15 +5,23 @@
 #
 #   trace_validate.sh --java JAVA --cp CLASSPATH --spec-dir DIR --lock BOOL
 #       [--allow-cuts CATS] [--root TRACE --root-cuts CATS]
-#       [--expect-reject TRACE ERE] -- RUN_QEMU [RUN_QEMU_ARGS...]
+#       [--expect-reject TRACE ERE] [--reval-cfg CFG]
+#       -- RUN_QEMU [RUN_QEMU_ARGS...]
 #   trace_validate.sh ... --log LOG
 #
 # The second form checks the traces in LOG (a serial log, or any file of
 # trace lines) instead of booting a guest: formal/trace_tests/ uses it to
 # test Trace.tla itself on hand-written traces.
 #
-# DIR holds Trace.tla, Trace.cfg and dcfs.tla. --lock says whether the run
-# kept the kernel's directory lock (the model's KernelDirLock).
+# DIR holds Trace.tla, Trace.cfg and dcfs.tla, and RevalTrace.tla,
+# RevalTrace.cfg and reval.tla. --lock says whether the run kept the
+# kernel's directory lock (the model's KernelDirLock).
+#
+# Files' traces (formal/reval.tla): the lines "DCFS-REVAL <trace> <file>
+# <json>" are one trace per (trace, file) pair too, checked against
+# RevalTrace.tla with RevalTrace.cfg, or CFG if --reval-cfg names one (a
+# known-bug variant as the model); they are named "reval/<trace>@<file>"
+# below, in --expect-reject and in the cuts.
 #
 # A trace may end with a "cut": the recorder stops a directory's trace at a
 # step the model does not have, giving "<category>: <detail>". Only the
@@ -42,6 +50,7 @@ spec_dir=""
 lock=""
 reject_trace=""
 reject_ere=""
+reval_cfg=""
 allow_cuts=""
 root=""
 root_cuts=""
@@ -57,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --root) root="$2"; shift 2 ;;
     --root-cuts) root_cuts="$2"; shift 2 ;;
     --log) log="$2"; shift 2 ;;
+    --reval-cfg) reval_cfg="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "trace_validate.sh: unknown argument $1" >&2; exit 2 ;;
   esac
@@ -64,7 +74,7 @@ done
 
 work="${TEST_TMPDIR:?}/trace"
 rm -rf "$work"
-mkdir -p "$work/traces" "$work/tlc" "$work/tmp"
+mkdir -p "$work/traces" "$work/reval" "$work/tlc" "$work/tmp"
 
 # --- the guest run ----------------------------------------------------------
 if [[ -n "$log" ]]; then
@@ -119,7 +129,36 @@ awk -v dir="$work/traces" '
     print json > file[key]
   }' "$work/lines"
 
-cp "$spec_dir/Trace.tla" "$spec_dir/Trace.cfg" "$spec_dir/dcfs.tla" "$work/tlc/"
+# The files' traces: from a file's begin line to a cut, every line (no state
+# is left out of these).
+tr -d '\r' <"$serial" | grep -a '^DCFS-REVAL ' >"$work/reval_lines" || true
+echo "trace_validate.sh: $(wc -l <"$work/reval_lines") file trace lines"
+awk -v dir="$work/reval" -v ends="$work/traces/ends.tsv" '
+  function safe(s) { gsub(/[^A-Za-z0-9._-]/, "_", s); return s }
+  {
+    key = $2 "@" $3
+    json = $0
+    sub(/^DCFS-REVAL [^ ]+ [^ ]+ /, "", json)
+    if (key in done) next
+    if (json ~ /"ev":"begin"/) {
+      if (!(key in file)) {
+        file[key] = dir "/" safe($2) "@" $3 ".jsonl"
+        print json > file[key]
+      }
+      next
+    }
+    if (!(key in file)) next
+    if (json ~ /"ev":"cut"/) {
+      done[key] = 1
+      print "reval/" key "\t" json >> ends
+      next
+    }
+    print json > file[key]
+  }' "$work/reval_lines"
+
+cp "$spec_dir/Trace.tla" "$spec_dir/Trace.cfg" "$spec_dir/dcfs.tla" \
+  "$spec_dir/RevalTrace.tla" "$spec_dir/reval.tla" "$work/tlc/"
+cp "${reval_cfg:-$spec_dir/RevalTrace.cfg}" "$work/tlc/RevalTrace.cfg"
 
 valid=0
 invalid=0
@@ -127,36 +166,39 @@ errors=0
 empty=0
 rejected_as_expected=0
 : >"$work/coverage"
-for f in "$work"/traces/*.jsonl; do
-  [[ -e "$f" ]] || continue
-  name="$(basename "$f" .jsonl)"
+# check_trace FILE NAME MODULE: runs TLC with MODULE.cfg on one trace and
+# counts the outcome.
+check_trace() {
+  local f="$1" name="$2" module="$3"
+  local events out tlc_status depth bad explained safe_name
   events=$(($(wc -l <"$f") - 1))
   if [[ "$events" -eq 0 ]]; then
     empty=$((empty + 1))
-    continue
+    return
   fi
-  out="$work/tlc/$name.out"
+  safe_name="${name//\//_}"
+  out="$work/tlc/$safe_name.out"
   tlc_status=0
   (
     cd "$work/tlc"
     DCFS_TRACE="$f" DCFS_TRACE_LOCK="$lock" "$java" -XX:+UseParallelGC -XX:TieredStopAtLevel=1 -Xmx1g \
       -Xss16m -Djava.io.tmpdir="$work/tmp" -cp "$cp" tlc2.TLC \
       -deadlock -workers 1 -coverage 60 -cleanup \
-      -metadir "$work/tlc/states-$name" -config Trace.cfg Trace
+      -metadir "$work/tlc/states-$safe_name" -config "$module.cfg" "$module"
   ) >"$out" 2>&1 || tlc_status=$?
   depth="$(sed -n 's/^The depth of the complete state graph search is \([0-9]*\)\..*/\1/p' "$out")"
   if [[ "$tlc_status" -ne 0 || -z "$depth" ]]; then
     errors=$((errors + 1))
     grep -v '^\(Loading\|Parsing\|Semantic\)' "$out" | tail -n 40
     echo "trace_validate.sh: ERROR: TLC failed on $name (exit status $tlc_status)"
-    continue
+    return
   fi
   sed -n 's/^<\(T_[A-Za-z0-9]*\) line .*>: \([0-9]*\):[0-9]*$/\1 \2/p' "$out" \
     >>"$work/coverage"
   if [[ "$depth" -eq $((events + 1)) ]]; then
     valid=$((valid + 1))
     echo "trace_validate.sh: valid: $name ($events events)"
-    continue
+    return
   fi
   # No initial state matches the trace's begin line (TLC still reports a
   # depth of 1 then): the begin line is the first thing not explained.
@@ -174,7 +216,7 @@ for f in "$work"/traces/*.jsonl; do
     if grep -Eq -- "$reject_ere" <<<"$bad"; then
       rejected_as_expected=1
     fi
-    continue
+    return
   fi
   invalid=$((invalid + 1))
   echo "trace_validate.sh: INVALID: $name: $explained:"
@@ -182,6 +224,15 @@ for f in "$work"/traces/*.jsonl; do
   if [[ "$depth" -ge 2 ]]; then
     echo "  after: $(sed -n "${depth}p" "$f")"
   fi
+}
+
+for f in "$work"/traces/*.jsonl; do
+  [[ -e "$f" ]] || continue
+  check_trace "$f" "$(basename "$f" .jsonl)" Trace
+done
+for f in "$work"/reval/*.jsonl; do
+  [[ -e "$f" ]] || continue
+  check_trace "$f" "reval/$(basename "$f" .jsonl)" RevalTrace
 done
 
 # The cuts: each must be of a category this run allows.

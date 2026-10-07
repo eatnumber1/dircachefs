@@ -99,8 +99,9 @@ struct Request {
   std::string_view name;
   Ino newparent = 0;
   std::string_view newname;
-  unsigned int flags = 0;  // rename flags; an ioctl's command
+  unsigned int flags = 0;  // rename flags; an ioctl's command; setattr's to_set
   int64_t offset = 0;      // readdir offset
+  int ioctl_arg = 0;       // an FS_IOC_SETFLAGS's flags (FUSE sends an int)
 };
 
 // What a probe of a name read: the object it holds (by its backing inode
@@ -112,6 +113,17 @@ struct Probe {
   uint64_t ino = 0;
   int64_t btime_sec = 0;
   uint32_t btime_nsec = 0;
+};
+
+// A file's shared backing descriptor (DirCacheFS::BackingFile), as an open
+// or a release left it. For the revalidation model (formal/reval.tla).
+struct SharedFd {
+  enum class WriteFd { kNone, kPlain, kAppend };
+  bool held = false;      // some open of the file is outstanding
+  bool writable = false;  // the shared descriptor was opened O_RDWR
+  WriteFd write_fd = WriteFd::kNone;  // the write fd beside a read-only one
+  int refs = 0;                       // the outstanding opens
+  int writable_refs = 0;              // ... that may write
 };
 
 // The decision LookupOrPopulate takes after reading the cache.
@@ -310,6 +322,27 @@ class ProtocolEvents {
   // guard event, like Mutation::End). Not modelled (writable opens are a
   // file's, see formal/README.md); recorded so a trace shows it.
   virtual void WritesEnded(Context &ctx, events::Ino id) {}
+
+  // --- Files: the revalidation model (formal/reval.tla) --------------
+  //
+  // Not the main model's: a file's shared backing descriptor, its access
+  // mode and its write descriptor, which reval.tla models together with
+  // the flag and mode changes that should make dcfs ask the backing
+  // filesystem again. A recorder projects these, with the SETATTR and
+  // IOCTL request frames of the same file, onto one trace per file.
+
+  // DirCacheFS::Open of file `id` with open flags `flags`, or the open a
+  // Create or Tmpfile makes (only when it succeeds), ended with `status`
+  // (OK: the open was granted; Open refuses with EPERM where the backing
+  // file's flags do). `shared`: a shared backing fd existed when it began;
+  // `after`: the shared backing fd now. Model: OpenF.
+  virtual void FileOpened(Context &ctx, events::Ino id, int flags,
+                          bool shared, const absl::Status &status,
+                          const events::SharedFd &after) {}
+  // DirCacheFS::Release of an open of `id` (one that may write iff
+  // `writable`) ended; `after`: the shared backing fd now. Model: ReleaseF.
+  virtual void FileReleased(Context &ctx, events::Ino id, bool writable,
+                            const events::SharedFd &after) {}
 
   // --- Sync points ----------------------------------------------------
 

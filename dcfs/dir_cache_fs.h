@@ -24,6 +24,7 @@
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/metadata_cache.h"
+#include "dcfs/protocol_events.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
@@ -464,6 +465,10 @@ class DirCacheFS {
 
   // The fd of some outstanding open of `id`, if any.
   std::optional<int> OpenFdOf(InodeId id) const;
+  // `id`'s shared backing descriptor, for the protocol events.
+  events::SharedFd SharedFdOf(InodeId id) const;
+  // Open() of a file that is not a boundary stub.
+  absl::Status OpenInode(FuseRequest &req, InodeId id, fuse_file_info &fi);
 
   // One shared backing descriptor per inode with at least one dcfs open on
   // it. The kernel refuses a second, different backing file for one inode

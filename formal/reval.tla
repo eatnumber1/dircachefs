@@ -169,28 +169,25 @@ TypeOK ==
     /\ changes \in 0..MaxChanges
 
 -----------------------------------------------------------------------------
-(* What the kernel's permission check reads. Every step below that reads   *)
-(* the backing state takes it as a parameter b (in the model checker,      *)
-(* always bF; trace validation, which cannot see an out-of-band change,    *)
-(* lets one happen right before any event if OutOfBand).                   *)
+(* What the kernel's permission check reads.                              *)
 
 \* What dcfs answers a GETATTR of F with: its cached attributes if valid,
 \* else a fresh statx (DirCacheFS::FreshAttr; while F is open for writing,
 \* a statx of the shared fd).
-Served(b) == IF cF.valid THEN cF.w ELSE b.w
+Served == IF cF.valid THEN cF.w ELSE bF.w
 \* Whether the kernel's default_permissions check finds the mode lets the
 \* caller write: from its cached attributes, or else a GETATTR.
-Decision(b) == IF kAttr.valid THEN kAttr.w ELSE Served(b)
+Decision == IF kAttr.valid THEN kAttr.w ELSE Served
 \* After a GETATTR (made when the kernel has nothing cached): dcfs records
 \* what a fresh statx read (a fill), except while F is open for writing
 \* (open_for_write keeps the attributes unknown); the kernel keeps the
 \* answer for the attribute timeout, except while F is open for writing
 \* (the timeout is 0 then: AttrTimeoutFor).
-CacheAfterAsk(b) ==
-    IF ~kAttr.valid /\ ~cF.valid /\ Writers = {} THEN Known(b.w) ELSE cF
-KernelAfterAsk(b) ==
+CacheAfterAsk ==
+    IF ~kAttr.valid /\ ~cF.valid /\ Writers = {} THEN Known(bF.w) ELSE cF
+KernelAfterAsk ==
     IF kAttr.valid THEN kAttr
-    ELSE IF Writers = {} THEN Known(Served(b)) ELSE Unknown
+    ELSE IF Writers = {} THEN Known(Served) ELSE Unknown
 
 \* Whether a writable open sharing a read-write fd asks the backing
 \* filesystem again (the GETFLAGS re-check of step 23.7, review L-b).
@@ -211,20 +208,20 @@ WfdAfter(m) ==
 (* The file's steps.                                                       *)
 
 \* An OPEN of F in mode m, as handle h: the kernel's permission check
-\* (default_permissions), then DirCacheFS::Open. b: the backing state.
-OpenB(h, m, b) ==
+\* (default_permissions), then DirCacheFS::Open.
+OpenF(h, m) ==
     /\ hs[h].st = "closed"
-    /\ bF' = b
-    /\ LET fl == FlagsAllow(b, m)
-           ml == ModeAllows(b, m)
-           c1 == CacheAfterAsk(b)
-           k1 == KernelAfterAsk(b)
+    /\ UNCHANGED bF
+    /\ LET fl == FlagsAllow(bF, m)
+           ml == ModeAllows(bF, m)
+           c1 == CacheAfterAsk
+           k1 == KernelAfterAsk
            fresh == ~Held(sfd)
            \* The shared fd this open uses: one made now (MakeBackingFile:
            \* O_RDWR as root, falling back to O_RDONLY if the flags refuse
            \* it), or the one already there.
-           rw == IF fresh THEN RootRW(b) ELSE RW(sfd)
-           by == CASE Writes(m) /\ ~Decision(b) -> "kernel"
+           rw == IF fresh THEN RootRW(bF) ELSE RW(sfd)
+           by == CASE Writes(m) /\ ~Decision -> "kernel"
                    [] ~Writes(m) -> "granted"
                    \* An O_RDWR open made for this one: the backing
                    \* filesystem just allowed writing.
@@ -257,14 +254,14 @@ OpenB(h, m, b) ==
 \* phase 3 of the writes (EndWriting, then RecordWrittenAttrs from the fd)
 \* and drops the write fd; the last one closes the shared fd, refreshing
 \* unknown attributes from it first.
-ReleaseB(h, b) ==
+ReleaseF(h) ==
     /\ hs[h].st = "open"
-    /\ bF' = b
+    /\ UNCHANGED bF
     /\ LET rest == OpenHandles \ {h}
            lastWriter == Writes(hs[h].m) /\ \A g \in rest : ~Writes(hs[g].m)
        IN /\ hs' = [hs EXCEPT ![h] = Closed]
           /\ cF' = IF lastWriter \/ (rest = {} /\ ~cF.valid)
-                   THEN Known(b.w) ELSE cF
+                   THEN Known(bF.w) ELSE cF
           /\ wfd' = IF lastWriter THEN None ELSE wfd
           /\ sfd' = IF rest = {} THEN NoFd ELSE sfd
     /\ UNCHANGED <<kAttr, lastOpen, writeErr>>
@@ -274,9 +271,9 @@ ReleaseB(h, b) ==
 \* the write fd. None: EBADF (review L1). An O_APPEND one for an open
 \* without O_APPEND: copy_file_range refuses it and pwrite lands at the
 \* end (review L-a).
-WriteB(h, b) ==
+WriteF(h) ==
     /\ hs[h].st = "open" /\ Writes(hs[h].m)
-    /\ bF' = b
+    /\ UNCHANGED bF
     /\ LET fd == IF RW(sfd) THEN "rw" ELSE wfd
        IN writeErr' = CASE fd = None -> "ebadf"
                         [] fd = "append" /\ hs[h].m = "w" -> "appends"
@@ -284,20 +281,20 @@ WriteB(h, b) ==
     /\ UNCHANGED <<cF, kAttr, sfd, wfd, hs, lastOpen>>
 
 \* A GETATTR of F (a stat, or the attributes of a LOOKUP reply).
-GetattrB(b) ==
+GetattrF ==
     /\ ~kAttr.valid
-    /\ bF' = b
-    /\ cF' = CacheAfterAsk(b)
-    /\ kAttr' = KernelAfterAsk(b)
+    /\ UNCHANGED bF
+    /\ cF' = CacheAfterAsk
+    /\ kAttr' = KernelAfterAsk
     /\ UNCHANGED <<sfd, wfd, hs, lastOpen, writeErr>>
 
 \* A chmod through dcfs (DirCacheFS::Setattr: phase 1, the syscall, a
 \* refresh); the reply's attributes go into the kernel's cache, for the
 \* attribute timeout (0 while F is open for writing). The backing
 \* filesystem refuses a mode change of an immutable or append-only file.
-ChmodB(v, b) ==
-    /\ ~b.imm /\ ~b.app
-    /\ bF' = [b EXCEPT !.w = v]
+ChmodF(v) ==
+    /\ ~bF.imm /\ ~bF.app
+    /\ bF' = [bF EXCEPT !.w = v]
     /\ cF' = IF Writers = {} THEN Known(v) ELSE Unknown
     /\ kAttr' = IF Writers = {} THEN Known(v) ELSE Unknown
     /\ UNCHANGED <<sfd, wfd, hs, lastOpen, writeErr>>
@@ -305,22 +302,22 @@ ChmodB(v, b) ==
 \* An FS_IOC_SETFLAGS of F through dcfs (DirCacheFS::Ioctl: a mutation of
 \* its attributes, then a refresh). The kernel's cached attributes are not
 \* invalidated (a kernel gap, docs/design.md; the mode does not change).
-SetFlagsB(imm, app, b) ==
-    /\ bF' = [b EXCEPT !.imm = imm, !.app = app]
-    /\ cF' = IF Writers = {} THEN Known(b.w) ELSE Unknown
+SetFlagsF(imm, app) ==
+    /\ bF' = [bF EXCEPT !.imm = imm, !.app = app]
+    /\ cF' = IF Writers = {} THEN Known(bF.w) ELSE Unknown
     /\ sfd' = IF Held(sfd) THEN [sfd EXCEPT !.chg = TRUE] ELSE sfd
     /\ UNCHANGED <<kAttr, wfd, hs, lastOpen, writeErr>>
 
 \* A SETATTR or SETFLAGS through dcfs that the backing filesystem refused:
 \* its phase 1 and its refresh, nothing else (for trace validation).
-FailedAttrChangeB(b) ==
-    /\ bF' = b
-    /\ cF' = IF Writers = {} THEN Known(b.w) ELSE Unknown
+FailedAttrChangeF ==
+    /\ UNCHANGED bF
+    /\ cF' = IF Writers = {} THEN Known(bF.w) ELSE Unknown
     /\ UNCHANGED <<kAttr, sfd, wfd, hs, lastOpen, writeErr>>
 
 \* An FS_IOC_GETFLAGS through dcfs: reads the backing file, changes nothing.
-GetFlagsB(b) ==
-    /\ bF' = b
+GetFlagsF ==
+    /\ UNCHANGED bF
     /\ UNCHANGED <<cF, kAttr, sfd, wfd, hs, lastOpen, writeErr>>
 
 -----------------------------------------------------------------------------
@@ -383,15 +380,15 @@ Init ==
 
 Change == changes < MaxChanges /\ changes' = changes + 1
 
-Open(h, m) == OpenB(h, m, bF) /\ UNCHANGED <<dirVars, changes>>
-Release(h) == ReleaseB(h, bF) /\ UNCHANGED <<dirVars, changes>>
-Write(h) == WriteB(h, bF) /\ UNCHANGED <<dirVars, changes>>
-Getattr == GetattrB(bF) /\ UNCHANGED <<dirVars, changes>>
+Open(h, m) == OpenF(h, m) /\ UNCHANGED <<dirVars, changes>>
+Release(h) == ReleaseF(h) /\ UNCHANGED <<dirVars, changes>>
+Write(h) == WriteF(h) /\ UNCHANGED <<dirVars, changes>>
+Getattr == GetattrF /\ UNCHANGED <<dirVars, changes>>
 Chmod(v) ==
-    /\ v # bF.w /\ Change /\ ChmodB(v, bF) /\ UNCHANGED dirVars
+    /\ v # bF.w /\ Change /\ ChmodF(v) /\ UNCHANGED dirVars
 SetFlags(imm, app) ==
     /\ <<imm, app>> # <<bF.imm, bF.app>>
-    /\ Change /\ SetFlagsB(imm, app, bF) /\ UNCHANGED dirVars
+    /\ Change /\ SetFlagsF(imm, app) /\ UNCHANGED dirVars
 
 \* The kernel's attribute timeout passes.
 Expire ==
@@ -493,7 +490,7 @@ NothingGrantsMore ==
 \* cached record stays wrong until something happens to invalidate it,
 \* which nothing has to (limitation_out_of_band_stale.cfg).
 CachedDecisionsConverge ==
-    <>[](/\ Decision(bF) = bF.w
+    <>[](/\ Decision = bF.w
          /\ CachedModeCurrent
          /\ DirCacheNeverWrong)
 =============================================================================

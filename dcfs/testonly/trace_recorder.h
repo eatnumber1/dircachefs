@@ -41,6 +41,20 @@
 //    subdirectory) begin a trace ("begin" line with the state they start
 //    in); a directory row that disappears ends it ("gone").
 //
+// Files, for the revalidation model (formal/reval.tla, formal/README.md
+// "The revalidation model"), if the recorder was made with `files`: each
+// file whose trace began (at an open that found no shared backing fd, or a
+// create) gets its own trace, on lines
+//
+//   DCFS-REVAL <trace> <file> <json>
+//
+// one per open (FileOpened), release (FileReleased), FS_IOC_SETFLAGS,
+// FS_IOC_FSSETXATTR or FS_IOC_GETFLAGS ioctl, SETATTR of the mode or owner,
+// and write dcfs makes itself (WRITE, FALLOCATE, COPY_FILE_RANGE into it),
+// and an "oob" line where a test says it changed the backing file behind
+// dcfs's back (NoteOutOfBand). Each open and release line carries the
+// shared backing fd it left; the model's state is compared with it.
+//
 // Not thread-safe: dcfs serves one request at a time.
 
 #include <cstdint>
@@ -60,8 +74,8 @@ namespace dcfs::testonly {
 class TraceRecorder final : public ProtocolEvents {
  public:
   // Writes lines to `fd` (not owned; each line is one write(2)) under the
-  // trace name `trace` (no spaces).
-  TraceRecorder(int fd, std::string trace);
+  // trace name `trace` (no spaces); with `files`, the files' traces too.
+  TraceRecorder(int fd, std::string trace, bool files = false);
 
   // Begins the trace of every directory now in the cache. For a test that
   // sets Context::events itself, once its setup is done and nothing is in
@@ -134,6 +148,17 @@ class TraceRecorder final : public ProtocolEvents {
   void InodeForgetting(Context &ctx, events::Ino id) override;
   void InodeForgotten(Context &ctx, events::Ino id) override;
 
+  void FileOpened(Context &ctx, events::Ino id, int flags, bool shared,
+                  const absl::Status &status,
+                  const events::SharedFd &after) override;
+  void FileReleased(Context &ctx, events::Ino id, bool writable,
+                    const events::SharedFd &after) override;
+
+  // For a test: the backing file `id` changed behind dcfs's back (a flag or
+  // mode change made directly on the backing filesystem). Its trace, if
+  // one began, gets an "oob" line: the model's out-of-band change.
+  void NoteOutOfBand(events::Ino id);
+
  private:
   using Ino = events::Ino;
 
@@ -167,6 +192,7 @@ class TraceRecorder final : public ProtocolEvents {
     std::string name, newname;  // raw bytes
     unsigned int flags = 0;
     int64_t offset = 0;
+    int ioctl_arg = 0;
     // kGetattr, kRefresh: the inode; kLookup: the parent and the name.
     Ino id = 0;
     std::string lookup_name;
@@ -324,6 +350,25 @@ class TraceRecorder final : public ProtocolEvents {
   // Notes a phase1 (begun) or end line of `dir`.
   void MutationLine(Ino dir, bool begun);
   int64_t changes_ = -1;    // sqlite3_total_changes at the last check
+
+  // The files' traces (formal/reval.tla).
+  struct FileTrace {
+    bool dead = false;  // cut: no more lines
+  };
+  bool files_enabled_ = false;
+  std::map<Ino, FileTrace> files_;
+  int64_t file_line_ = 0;
+  // Whether `id` has a trace that still takes lines.
+  bool FileTraced(Ino id) const;
+  // Writes one line of file `id`'s trace: {"i", "c", "ev": ev, fields...}.
+  // `fields` is "" or starts with ",".
+  void FileLine(Ino id, std::string_view ev, std::string_view fields = "");
+  // Ends file `id`'s trace at a step the model does not have.
+  void FileCut(Ino id, std::string_view why);
+  // The file lines of a FUSE request that ended with errno `err`.
+  void FileRequestEnd(const Frame &request, int err);
+  // Writes `line` (one write(2) per call).
+  void WriteLine(const std::string &line);
 };
 
 }  // namespace dcfs::testonly

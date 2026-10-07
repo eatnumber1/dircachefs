@@ -26,6 +26,7 @@ cc_library(
         "@absl//absl/status",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",
+        "@libfuse//:libfuse",
         "@sqlite//:sqlite3",
     ],
 )
@@ -114,12 +115,14 @@ qemu_cc_test(
         "//dcfs:mount_fds",
         "//dcfs:protocol_events",
         "//dcfs:sqlite",
+        "//dcfs:status",
         "@absl//absl/random",
         "@absl//absl/status",
         "@absl//absl/status:status_matchers",
         "@absl//absl/status:statusor",
         "@absl//absl/strings",
         "@googletest//:gtest_main",
+        "@libfuse//:libfuse",
     ],
 )
 

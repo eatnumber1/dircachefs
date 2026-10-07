@@ -1,6 +1,9 @@
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
+
 #include "dcfs/testonly/trace_recorder.h"
 
-#include <linux/fs.h>  // FS_IOC_*
+#include <fcntl.h>     // O_ACCMODE, O_APPEND
+#include <linux/fs.h>  // FS_IOC_*, FS_*_FL
 #include <unistd.h>
 
 #include <cerrno>
@@ -25,6 +28,7 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
+#include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
 #include "sqlite3.h"
 
 namespace dcfs::testonly {
@@ -105,8 +109,8 @@ std::vector<Ino> Distinct(events::IdsFn ids) {
 
 }  // namespace
 
-TraceRecorder::TraceRecorder(int fd, std::string trace)
-    : fd_(fd), trace_(std::move(trace)) {}
+TraceRecorder::TraceRecorder(int fd, std::string trace, bool files)
+    : fd_(fd), trace_(std::move(trace)), files_enabled_(files) {}
 
 void TraceRecorder::Enter(const char *cause) {
   cause_ = cause;
@@ -405,8 +409,10 @@ void TraceRecorder::Write(Ino dir, const std::string &json) {
       return;
     }
   }
-  const std::string line =
-      absl::StrCat("DCFS-TRACE ", trace_, " ", dir, " ", json, "\n");
+  WriteLine(absl::StrCat("DCFS-TRACE ", trace_, " ", dir, " ", json, "\n"));
+}
+
+void TraceRecorder::WriteLine(const std::string &line) {
   size_t done = 0;
   while (done < line.size()) {
     const ssize_t n = ::write(fd_, line.data() + done, line.size() - done);
@@ -588,6 +594,7 @@ void TraceRecorder::RequestBegin(Context &ctx, const events::Request &r) {
   frame.newname = std::string(r.newname);
   frame.flags = r.flags;
   frame.offset = r.offset;
+  frame.ioctl_arg = r.ioctl_arg;
   frames_.push_back(std::move(frame));
   After(ctx);
 }
@@ -598,6 +605,7 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
   Frame frame = std::move(frames_.back());
   frames_.pop_back();
   const int err = ErrnoOf(status);
+  FileRequestEnd(frame, err);
   Close(ctx, frame, status, [&](const Req &req) -> std::string {
     if (err == 0) return "";
     // The errors the model has: a create's EEXIST (or the name gone before
@@ -1520,6 +1528,135 @@ void TraceRecorder::InodeForgotten(Context &ctx, Ino id) {
   // Its own trace ends ("gone"), and the directories that named it are cut
   // if that is all that changed (After), once its transaction committed.
   After(ctx);
+}
+
+// --- Files (formal/reval.tla) ---------------------------------------------
+
+namespace {
+
+// An open's access mode, as reval.tla's Modes spell it.
+const char *ModeOf(int flags) {
+  if ((flags & O_ACCMODE) == O_RDONLY) return "r";
+  return (flags & O_APPEND) != 0 ? "wa" : "w";
+}
+
+std::string FdJson(const events::SharedFd &fd) {
+  using WriteFd = events::SharedFd::WriteFd;
+  const char *sfd = !fd.held ? "none" : fd.writable ? "rw" : "ro";
+  const char *wfd = fd.write_fd == WriteFd::kNone    ? "none"
+                    : fd.write_fd == WriteFd::kPlain ? "plain"
+                                                     : "append";
+  return absl::StrCat("{\"sfd\":", JsonStr(sfd), ",\"wfd\":", JsonStr(wfd),
+                      ",\"refs\":", fd.refs, ",\"wrefs\":", fd.writable_refs,
+                      "}");
+}
+
+}  // namespace
+
+bool TraceRecorder::FileTraced(Ino id) const {
+  auto it = files_.find(id);
+  return it != files_.end() && !it->second.dead;
+}
+
+void TraceRecorder::FileLine(Ino id, std::string_view ev,
+                             std::string_view fields) {
+  WriteLine(absl::StrCat("DCFS-REVAL ", trace_, " ", id, " {\"i\":",
+                         ++file_line_, ",\"c\":", JsonStr(cause_),
+                         ",\"ev\":", JsonStr(ev), fields, "}\n"));
+}
+
+void TraceRecorder::FileCut(Ino id, std::string_view why) {
+  FileLine(id, "cut", absl::StrCat(",\"why\":", JsonStr(why)));
+  files_[id].dead = true;
+}
+
+void TraceRecorder::FileOpened(Context &ctx, Ino id, int flags, bool shared,
+                               const absl::Status &status,
+                               const events::SharedFd &after) {
+  Enter("FileOpened");
+  if (files_enabled_ && !files_.contains(id) && !shared) {
+    // A file's trace begins with no open of it outstanding (the model's
+    // Init: no shared fd, no handle); one first seen shared is not traced.
+    files_.emplace(id, FileTrace{});
+    FileLine(id, "begin");
+  }
+  if (FileTraced(id)) {
+    const int err = ErrnoOf(status);
+    // The model's opens fail only with the backing file's flags (EPERM);
+    // the kernel's own refusal (EACCES, default_permissions) never reaches
+    // dcfs.
+    if (err != 0 && err != EPERM) {
+      FileCut(id, absl::StrCat("failed: the open failed: ", status.ToString()));
+    } else {
+      FileLine(id, "open",
+               absl::StrCat(",\"mode\":", JsonStr(ModeOf(flags)),
+                            ",\"shared\":", Bool(shared), ",\"errno\":", err,
+                            ",\"fd\":", FdJson(after)));
+    }
+  }
+  After(ctx);
+}
+
+void TraceRecorder::FileReleased(Context &ctx, Ino id, bool writable,
+                                 const events::SharedFd &after) {
+  Enter("FileReleased");
+  if (FileTraced(id)) {
+    FileLine(id, "release",
+             absl::StrCat(",\"writable\":", Bool(writable),
+                          ",\"fd\":", FdJson(after)));
+  }
+  After(ctx);
+}
+
+void TraceRecorder::NoteOutOfBand(Ino id) {
+  cause_ = "NoteOutOfBand";
+  if (FileTraced(id)) FileLine(id, "oob");
+}
+
+void TraceRecorder::FileRequestEnd(const Frame &request, int err) {
+  if (!FileTraced(request.ino)) return;
+  const Ino id = request.ino;
+  const std::string errno_field = absl::StrCat(",\"errno\":", err);
+  switch (request.op) {
+    case events::Op::kIoctl:
+      if (request.flags == FS_IOC_SETFLAGS) {
+        FileLine(id, "setflags",
+                 absl::StrCat(errno_field, ",\"imm\":",
+                              Bool((request.ioctl_arg & FS_IMMUTABLE_FL) != 0),
+                              ",\"app\":",
+                              Bool((request.ioctl_arg & FS_APPEND_FL) != 0)));
+      } else if (request.flags == FS_IOC_FSSETXATTR) {
+        // Its xflags can set the immutable and append-only flags too; the
+        // values are left free.
+        FileLine(id, "setflags", errno_field);
+      } else if (request.flags == FS_IOC_GETFLAGS) {
+        FileLine(id, "getflags", errno_field);
+      }
+      break;
+    case events::Op::kSetattr:
+      // A change of the mode or owner: what the kernel's permission check
+      // reads (the model's "mode", left free: the trace does not know the
+      // caller).
+      if ((request.flags & (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_UID |
+                            FUSE_SET_ATTR_GID)) != 0) {
+        FileLine(id, "chmod", errno_field);
+      }
+      break;
+    case events::Op::kWrite:
+    case events::Op::kFallocate:
+    case events::Op::kCopyFileRange:
+      // What dcfs writes itself, through the file's write fd (WriteFd):
+      // EBADF if it has none that can write. Other errors are not the
+      // model's.
+      if (err != 0 && err != EBADF) {
+        FileCut(id, absl::StrCat("failed: a write failed: errno ", err));
+      } else {
+        FileLine(id, "write", errno_field);
+      }
+      break;
+    default:
+      break;
+  }
 }
 
 }  // namespace dcfs::testonly

@@ -1362,7 +1362,16 @@ absl::Status DirCacheFS::Open(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "open");
+  // The revalidation model's OpenF (formal/reval.tla): how the open ended,
+  // and the shared backing fd it left.
+  const bool shared = backing_files_.contains(id);
+  absl::Status status = OpenInode(req, id, fi);
+  ctx_.events->FileOpened(ctx_, id, fi.flags, shared, status, SharedFdOf(id));
+  return status;
+}
 
+absl::Status DirCacheFS::OpenInode(
+    FuseRequest &req, InodeId id, fuse_file_info &fi) {
   // RequireAttr(), not cache::GetAttr(): the kernel's generic open path
   // (do_file_open_root, fs/namei.c) automatically retries a failed open
   // once with LOOKUP_REVAL after -ESTALE, and that second FUSE OPEN hits
@@ -1653,7 +1662,11 @@ absl::Status DirCacheFS::Release(
     // shared fd stays.
     backing_file.DropWriteFd();
   }
-  if (backing_file.refs > 0) return req.ReplyErrno(0);
+  if (backing_file.refs > 0) {
+    // The revalidation model's ReleaseF (formal/reval.tla).
+    ctx_.events->FileReleased(ctx_, id, writable, SharedFdOf(id));
+    return req.ReplyErrno(0);
+  }
 
   // Row lifetime (see SettleUnlinkedFile): the last dcfs open of a file
   // whose last link is gone takes the row with it. A row whose attributes
@@ -1733,6 +1746,7 @@ absl::Status DirCacheFS::Release(
     }
   }
   backing_files_.erase(backing_it);
+  ctx_.events->FileReleased(ctx_, id, writable, SharedFdOf(id));
   if (delete_row) {
     if (absl::Status retired = RetireRemoved(id, std::move(held));
         !retired.ok()) {
@@ -2256,6 +2270,9 @@ absl::Status DirCacheFS::Create(
 
   ABSL_RETURN_IF_ERROR(req.ReplyCreate(*entry, fi));
   ++lookups_[child.id];
+  // The revalidation model's OpenF (formal/reval.tla), of a new file.
+  ctx_.events->FileOpened(ctx_, child.id, fi.flags, /*shared=*/false,
+                          absl::OkStatus(), SharedFdOf(child.id));
   return absl::OkStatus();
 }
 
@@ -2507,6 +2524,8 @@ absl::Status DirCacheFS::Tmpfile(FuseRequest &req, fuse_ino_t parent_ino,
   fi.fh = handle;
   ABSL_RETURN_IF_ERROR(req.ReplyCreate(*entry, fi));
   ++lookups_[child.id];
+  ctx_.events->FileOpened(ctx_, child.id, fi.flags, /*shared=*/false,
+                          absl::OkStatus(), SharedFdOf(child.id));
   return absl::OkStatus();
 }
 
@@ -2522,6 +2541,20 @@ std::optional<int> DirCacheFS::OpenFdOf(InodeId id) const {
   auto it = backing_files_.find(id);
   if (it == backing_files_.end()) return std::nullopt;
   return *it->second.fd;
+}
+
+events::SharedFd DirCacheFS::SharedFdOf(InodeId id) const {
+  auto it = backing_files_.find(id);
+  if (it == backing_files_.end()) return {};
+  const BackingFile &file = it->second;
+  using WriteFd = events::SharedFd::WriteFd;
+  return {.held = true,
+          .writable = file.writable,
+          .write_fd = !file.write_fd.has_value() ? WriteFd::kNone
+                      : file.write_fd_appends    ? WriteFd::kAppend
+                                                 : WriteFd::kPlain,
+          .refs = file.refs,
+          .writable_refs = file.writable_refs};
 }
 
 }  // namespace dcfs
