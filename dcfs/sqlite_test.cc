@@ -2,6 +2,7 @@
 
 #include <sys/stat.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
@@ -16,6 +17,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/ret_check.h"
+#include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
@@ -289,6 +291,47 @@ TEST_F(StatementTest, UniqueViolationMapsToAlreadyExists) {
 
   ASSERT_OK_AND_ASSIGN(int code, GetSqliteCodeFromStatus(result.status()));
   EXPECT_EQ(code, SQLITE_CONSTRAINT_PRIMARYKEY);
+}
+
+// A failure of the cache database's own storage reaches the kernel as EIO
+// (step 11.1b): the status keeps its code (UNAVAILABLE, which callers that
+// retry on BUSY and LOCKED see as before) and carries an errno, so that
+// StatusToErrno does not answer EAGAIN, which tells a caller to retry what
+// will not succeed.
+TEST(StorageErrorTest, EveryIoErrorCodeIsEio) {
+  for (int code : {SQLITE_IOERR, SQLITE_IOERR_READ, SQLITE_IOERR_SHORT_READ,
+                   SQLITE_IOERR_WRITE, SQLITE_IOERR_FSYNC, SQLITE_IOERR_DIR_FSYNC,
+                   SQLITE_IOERR_TRUNCATE, SQLITE_IOERR_NOMEM,
+                   SQLITE_IOERR_DELETE}) {
+    absl::Status status = Sqlite3ErrorCodeToStatus(code);
+    EXPECT_EQ(StatusToErrno(status), EIO) << sqlite3_errstr(code);
+    EXPECT_EQ(status.code(), absl::StatusCode::kUnavailable);
+    ASSERT_OK_AND_ASSIGN(int kept, GetSqliteCodeFromStatus(status));
+    EXPECT_EQ(kept, code) << "the extended code stays in its payload";
+  }
+}
+
+TEST(StorageErrorTest, AReadOnlyDatabaseIsEioToo) {
+  // SQLITE_READONLY is what a database on a filesystem that went read-only
+  // (an aborted journal) answers a write with; the user's own filesystem is
+  // not read-only, so EROFS would mislead.
+  ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
+  ASSERT_THAT(conn.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
+  ASSERT_THAT(conn.Exec("PRAGMA query_only=ON"), IsOk());
+  absl::Status status = conn.Exec("INSERT INTO t (id) VALUES (1)");
+  ASSERT_FALSE(status.ok());
+  ASSERT_OK_AND_ASSIGN(int code, GetSqliteCodeFromStatus(status));
+  EXPECT_EQ(code & 0xFF, SQLITE_READONLY);
+  EXPECT_EQ(StatusToErrno(status), EIO);
+}
+
+// What is not a storage failure keeps its errno-free code table answer.
+TEST(StorageErrorTest, OtherCodesAreUnchanged) {
+  EXPECT_EQ(StatusToErrno(Sqlite3ErrorCodeToStatus(SQLITE_BUSY)), EAGAIN);
+  EXPECT_EQ(StatusToErrno(Sqlite3ErrorCodeToStatus(SQLITE_LOCKED)), EAGAIN);
+  EXPECT_EQ(StatusToErrno(Sqlite3ErrorCodeToStatus(SQLITE_FULL)), ENOSPC);
+  EXPECT_EQ(StatusToErrno(Sqlite3ErrorCodeToStatus(SQLITE_CONSTRAINT_UNIQUE)),
+            EEXIST);
 }
 
 TEST(ExecScriptTest, RunsMultipleStatementsAndSkipsCommentSemicolons) {

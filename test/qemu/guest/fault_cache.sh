@@ -7,7 +7,7 @@
 #
 # 1. A write error in a mutation's phase 1 (the durable commit: SQLite's WAL
 #    is fsynced before the syscall). Nothing may reach the backing filesystem
-#    (the mutation's phase 2 never runs), the caller gets the error, and
+#    (the mutation's phase 2 never runs), the caller gets EIO, and
 #    nothing wrong is served from then on. After the disk is healed and dcfs
 #    restarted, it starts, serves what the backing filesystem holds and
 #    mutates again.
@@ -99,6 +99,13 @@ if [ "$rc" -ne 0 ]; then
 else
 	fail phase1-error-replied "touch succeeded with every cache-disk write failing"
 fi
+# A failure of the cache database's storage is EIO to the caller (step
+# 11.1b): not EAGAIN ("Resource temporarily unavailable"), which asks the
+# caller to retry what will not succeed.
+case "$out" in
+*"I/O error"*) pass phase1-error-is-eio ;; # musl's strerror(EIO)
+*) fail phase1-error-is-eio "touch said: $out" ;;
+esac
 if [ ! -e "$SRC/d2/new" ]; then
 	pass phase1-error-backing-untouched
 else

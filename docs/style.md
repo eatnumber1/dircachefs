@@ -236,6 +236,11 @@ added`, so start it with words, not `;` or a space.
   caller retries three times, then `EAGAIN` (`metadata_cache.cc:1413`,
   `dir_cache_fs.cc:824-831`). `kUnimplemented`, `kAlreadyExists`,
   `kResourceExhausted`: as named.
+- `kUnavailable` is BUSY and LOCKED from SQLite (`EAGAIN`: retry). A
+  failure of the cache database's storage (`SQLITE_IOERR`,
+  `SQLITE_READONLY`) keeps the code and carries an errno payload `EIO`
+  (`sqlite.cc`, item 1: an error the kernel should see as a given errno is
+  built with that errno), so that a caller is not told to retry it.
 - A status that reaches a FUSE reply and means something to the client
   carries an errno (item 1); without one `StatusToErrno` uses its code
   table (`kInternal` becomes `ELIBBAD`, `kFailedPrecondition` `EBUSY`): a

@@ -555,9 +555,10 @@ These run in the small tier with the checking build of dcfs
 (`initramfs_checked`): an error path that leaves an invariant broken aborts
 the daemon and the test fails. Each uses the default guest memory (the MEM
 line shows `reclaim_scans=0`: peak 72 MiB plain and 158 MiB under ASan, of
-256 and 384). The cache disk's I/O errors reach the caller as EAGAIN
-(`SQLITE_IOERR` is mapped to `UNAVAILABLE`, `sqlite.cc`), which the tests
-record and do not require to be EIO.
+256 and 384). The cache disk's I/O errors (`SQLITE_IOERR`, and `SQLITE_READONLY` from a cache
+filesystem that aborted its journal) reach the caller as EIO: `sqlite.cc` attaches
+the errno payload and keeps the status code `UNAVAILABLE`; `fault_cache_test`
+requires it (it first said EAGAIN, "Resource temporarily unavailable").
 
 ## Syscall traces
 

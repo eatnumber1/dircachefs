@@ -1,6 +1,7 @@
 #include "dcfs/sqlite.h"
 
 #include <bit>
+#include <cerrno>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -32,6 +33,20 @@ namespace {
 absl::Status MakeSqliteStatus(int extended_code, std::string_view message) {
   absl::Status status(Sqlite3ErrorCodeToCanonical(extended_code), message);
   status.SetPayload(kSqliteTypeUrl, absl::Cord(absl::StrCat(extended_code)));
+  // A failure of the cache database's own storage (its disk, or its
+  // filesystem gone read-only after an aborted journal) is EIO to the
+  // kernel, not what the code table gives UNAVAILABLE (EAGAIN: retry), which
+  // is right for BUSY and LOCKED only. The status keeps its code (callers
+  // that retry on UNAVAILABLE still see it); the errno payload is what
+  // StatusToErrno reads first (docs/style.md 1.6, item 1).
+  switch (extended_code & 0xFF) {
+    case SQLITE_IOERR:
+    case SQLITE_READONLY:
+      status.SetPayload(kErrnoTypeUrl, absl::Cord(ErrnoToErrorName(EIO)));
+      break;
+    default:
+      break;
+  }
   return status;
 }
 

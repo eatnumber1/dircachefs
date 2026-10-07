@@ -111,6 +111,7 @@ qemu_cc_test(
     deps = [
       ":ret_check",
       ":sqlite",
+      ":status",
       ":syscalls",
       ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
