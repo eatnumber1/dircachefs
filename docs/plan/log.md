@@ -1430,3 +1430,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   recorded since the last durable commit (fills, and the objects a change creates) are lost at a
   power loss. formal 83/83, fast 167 + 2 skips. 12.6 (recovery idempotence) + 12.7 (effect-point
   property) dispatched to the same agent.
+- 7.4b + 6.4a-d + 8.3 done in lane-5 (step-7.4b, 5 commits; rebase + full tier runs pending before
+  merge): memory_test mem=704/asan_mem=832 sized by reclaim_scans=0 (peak_used grows with the
+  allowance: size by reclaim, not peak); CI: full (large+enormous), asan, ubsan each a 3-shard
+  matrix (test.sh --shard=I/N --sizes, cquery drops config-incompatible tests, shard.sh +
+  shard_test; 42 ubsan tests per shard, 8 large per full shard; est. ~35 min of tests + build per
+  sanitizer shard); osv restores the repo cache read-only, 45 min (the 20-min hang did not
+  reproduce: 63 s cold); subject gate names the hash; 6.4a: 34 host-only tests + the tlc/trace
+  macros incompatible under sanitizers/coverage (100 of 226 skipped per sanitizer config, was 3);
+  6.4b: destroy_test 20k files, mem=384/asan 1344, plain 207 s / asan 138 s (6-17 ms per create
+  here, 5 on the runner: 26.4b); 6.4c: TLC already uses -workers auto. 8.3 cheap gaps: status.cc
+  59/61, device_id 127/127, mounts_below 55/55, file_handle 99/103, setattr.sh covers the *OPath
+  helpers (reached only for non-regular files: fifo/symlink); FileHandle::ToString per field;
+  style.md's debug-string rule written.
