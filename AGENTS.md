@@ -83,6 +83,10 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
   what we write for it (BUILD overlays, rules, patches, config, lock
   files) and a README saying how to update the pin. Every tool the build
   or the tests use is pinned this way.
+  The exception is Alpine's packages (from phase 24: the test kernel, QEMU,
+  the mkfs tools, busybox): they are pinned to a stable release branch, not
+  to a hash, and verified by Alpine's package signatures
+  (`third_party/alpine/README.md`).
 - Format C++ with the repository's `.clang-format`. From phase 7,
   clang-tidy (`.clang-tidy`) runs on our code and its findings are errors.
 - **Follow `docs/style.md`**: naming, includes, how errors are built

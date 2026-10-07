@@ -347,6 +347,9 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
   "Updating the pin" procedure (`third_party/busybox/README.md`).
   Third-party code is fetched by Bazel: the Bazel Central Registry
   (`bazel_dep`), else `http_archive`/`http_file` with a sha256.
+  The exception is Alpine's packages (Phase 24), which have no sha256 and no
+  Pin section: they are pinned to a stable release branch and verified by
+  Alpine's signatures, and `third_party/alpine/README.md` says how.
 - `MODULE.bazel`: a comment above a pin says what it is for and where its
   README is (7 of 13 `http_archive`s, 4 of 14 `bazel_dep`s; the others are
   self-evident). `MODULE.bazel.lock` is never rewritten silently
