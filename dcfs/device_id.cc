@@ -1,9 +1,7 @@
 #include "dcfs/device_id.h"
 
 #include <fcntl.h>
-#include <sys/ioctl.h>
 #include <sys/vfs.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -20,11 +18,13 @@
 #include <linux/types.h>
 
 #include "absl/status/status.h"
+#include "absl/status/status_builder.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 
 // This host's kernel headers (6.8) predate FS_IOC_GETFSUUID (added in
 // 6.9). The definitions below are copied verbatim from the upstream UAPI
@@ -122,10 +122,7 @@ namespace {
 
 // Returns the statfs(2) f_type of the filesystem containing `fd`.
 absl::StatusOr<int64_t> GetFsType(int fd) {
-  struct statfs sf;
-  if (fstatfs(fd, &sf) != 0) {
-    return ErrnoToStatus(errno, "fstatfs");
-  }
+  ABSL_ASSIGN_OR_RETURN(struct statfs sf, syscalls::fstatfs(fd));
   return static_cast<int64_t>(sf.f_type);
 }
 
@@ -136,20 +133,17 @@ absl::StatusOr<int64_t> GetFsType(int fd) {
 // for performing fd-level operations on an O_PATH descriptor. This adds an
 // extra open()+close() only on the O_PATH path; a directly-usable fd is
 // unaffected.
-int IoctlAllowingOPath(int fd, unsigned long request, void *arg) {
-  if (ioctl(fd, request, arg) == 0) return 0;
-  if (errno != EBADF) return -1;
+absl::Status IoctlAllowingOPath(int fd, int request, void *arg) {
+  absl::StatusOr<int> rc = syscalls::ioctl(fd, request, arg);
+  if (rc.ok()) return absl::OkStatus();
+  if (StatusToErrno(rc.status()) != EBADF) return rc.status();
 
   std::string proc_path = absl::StrCat("/proc/self/fd/", fd);
-  int reopened = open(proc_path.c_str(),
-                      O_RDONLY | O_CLOEXEC | O_NONBLOCK | O_NOCTTY);
-  if (reopened < 0) return -1;
-
-  int rc = ioctl(reopened, request, arg);
-  int saved_errno = errno;
-  close(reopened);
-  errno = saved_errno;
-  return rc;
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor reopened,
+      syscalls::openat(AT_FDCWD, proc_path,
+                       O_RDONLY | O_NONBLOCK | O_NOCTTY));
+  return syscalls::ioctl(*reopened, request, arg).status();
 }
 
 }  // namespace
@@ -171,18 +165,17 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
   if (f_type == BTRFS_SUPER_MAGIC) {
     struct btrfs_ioctl_fs_info_args fs_info;
     std::memset(&fs_info, 0, sizeof(fs_info));
-    if (IoctlAllowingOPath(fd, BTRFS_IOC_FS_INFO, &fs_info) != 0) {
-      return ErrnoToStatus(errno, "BTRFS_IOC_FS_INFO ioctl");
-    }
+    ABSL_RETURN_IF_ERROR(IoctlAllowingOPath(fd, BTRFS_IOC_FS_INFO, &fs_info))
+        << "BTRFS_IOC_FS_INFO";
     static_assert(sizeof(fs_info.fsid) == 16);
     std::copy(std::begin(fs_info.fsid), std::end(fs_info.fsid),
               id.uuid.begin());
 
     struct btrfs_ioctl_get_subvol_info_args args;
     std::memset(&args, 0, sizeof(args));
-    if (IoctlAllowingOPath(fd, BTRFS_IOC_GET_SUBVOL_INFO, &args) != 0) {
-      return ErrnoToStatus(errno, "BTRFS_IOC_GET_SUBVOL_INFO ioctl");
-    }
+    ABSL_RETURN_IF_ERROR(
+        IoctlAllowingOPath(fd, BTRFS_IOC_GET_SUBVOL_INFO, &args))
+        << "BTRFS_IOC_GET_SUBVOL_INFO";
     id.subvol_id = args.treeid;
     return id;
   }
@@ -190,14 +183,15 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
   struct fsuuid2 fsuuid;
   std::memset(&fsuuid, 0, sizeof(fsuuid));
 
-  if (IoctlAllowingOPath(fd, FS_IOC_GETFSUUID, &fsuuid) != 0) {
-    int saved_errno = errno;
+  if (absl::Status status = IoctlAllowingOPath(fd, FS_IOC_GETFSUUID, &fsuuid);
+      !status.ok()) {
+    int saved_errno = StatusToErrno(status);
     if (saved_errno == ENOTTY || saved_errno == EOPNOTSUPP ||
         saved_errno == ENOSYS) {
       return UnimplementedErrorBuilder()
              << FstypeName(f_type) << " does not support FS_IOC_GETFSUUID";
     }
-    return ErrnoToStatus(saved_errno, "FS_IOC_GETFSUUID ioctl");
+    return absl::StatusBuilder(status) << "FS_IOC_GETFSUUID";
   }
 
   if (fsuuid.len != 16) {

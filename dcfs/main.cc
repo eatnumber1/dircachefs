@@ -188,21 +188,22 @@ absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
     const std::string &path, bool create, const struct stat &backing_root) {
   int flags = O_RDWR | O_CLOEXEC | O_NOFOLLOW;
   if (create) flags |= O_CREAT;
-  int fd = ::open(path.c_str(), flags, 0600);
-  if (fd == -1) {
-    if (!create && errno == ENOENT) {
+  absl::StatusOr<FileDescriptor> opened =
+      syscalls::openat(AT_FDCWD, path, flags, 0600);
+  if (!opened.ok()) {
+    const int err = StatusToErrno(opened.status());
+    if (!create && err == ENOENT) {
       return FileDescriptor();
     }
-    if (errno == ELOOP) {
+    if (err == ELOOP) {
       return FailedPreconditionErrorBuilder()
              << path
              << " is a symlink; refusing to open a cache file through a "
                 "symlink (another local user could have pointed it anywhere)";
     }
-    return dcfs::ErrnoToStatus(
-        errno, absl::StrCat("openat(AT_FDCWD, ", path, ")"));
+    return opened.status();
   }
-  FileDescriptor result(fd);
+  FileDescriptor result = *std::move(opened);
   ABSL_ASSIGN_OR_RETURN(struct stat st, syscalls::fstat(*result));
   if (!S_ISREG(st.st_mode)) {
     return FailedPreconditionErrorBuilder() << path << " is not a regular file";
@@ -286,7 +287,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // 022) can never alter a mode on the backing filesystem -- found via
   // pjdfstest before the per-request umask existed (open/02.t, open/03.t:
   // `open(..., 0642)` landing as 0640 on the backing file).
-  umask(0);
+  syscalls::umask(0);
   InstallFlagsUsageConfig();
   absl::SetProgramUsageMessage(
       "--source=<dir> --cache_db=<path> [flags] mountpoint");
@@ -371,21 +372,15 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     size_t slash = cache_db.find_last_of('/');
     if (slash != std::string::npos) {
       std::string parent = slash == 0 ? "/" : cache_db.substr(0, slash);
-      struct stat st;
-      if (::stat(parent.c_str(), &st) == -1) {
-        if (errno != ENOENT) {
-          return dcfs::ErrnoToStatus(
-              errno, absl::StrCat("fstatat(AT_FDCWD, ", parent, ")"));
-        }
-        if (::mkdir(parent.c_str(), 0700) == -1) {
-          return dcfs::ErrnoToStatus(
-              errno, absl::StrCat("creating cache database directory ",
-                                   parent));
-        }
-      } else if ((st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
+      absl::StatusOr<struct stat> st = syscalls::fstatat(AT_FDCWD, parent);
+      if (!st.ok()) {
+        if (StatusToErrno(st.status()) != ENOENT) return st.status();
+        ABSL_RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, parent, 0700))
+            << "creating cache database directory " << parent;
+      } else if ((st->st_mode & (S_IRWXG | S_IRWXO)) != 0) {
         LOG(WARNING) << "cache database directory " << parent
                      << " is group- or world-accessible (mode "
-                     << absl::StrFormat("0%o", st.st_mode & 07777)
+                     << absl::StrFormat("0%o", st->st_mode & 07777)
                      << "); it holds a cache as sensitive as --source and "
                         "should be readable only by root (mode 0700)";
       }

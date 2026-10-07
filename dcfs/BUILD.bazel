@@ -334,6 +334,8 @@ cc_library(
     hdrs = ["device_id.h"],
     deps = [
       ":status",
+      ":syscalls",
+      "@absl//absl/status:status_builder",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
