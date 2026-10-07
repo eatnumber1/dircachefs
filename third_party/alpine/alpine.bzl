@@ -177,24 +177,37 @@ def _alpine_package_impl(rctx):
     ).stdout)
 
     branch = selected[0]["branch"]
-    # apk.py downloads (in parallel): a 404 there means the index snapshot is
-    # stale, and it says so (a bare Bazel download error does not).
-    rctx.file("selected.json", json.encode(selected))
-    _run(
-        rctx,
-        [
-            "download",
-            "--resolved",
-            "selected.json",
-            "--mirror",
+
+    # Bazel's downloader (proxy, netrc, retries, --distdir, downloader config)
+    # fetches the apks, in parallel. There is no sha256 (the index and the
+    # apk's signature are what we trust), so the repository cache, which is
+    # keyed by hash, is never consulted and cannot serve an old file for a
+    # URL whose content changed. Alpine's mirror drops a superseded build
+    # within about a week: an apk that is gone means the index snapshot this
+    # repository was resolved from is stale.
+    pending = []
+    for package in selected:
+        url = "%s/%s/%s/%s/%s" % (
             rctx.attr.mirror,
-            "--arch",
+            branch,
+            package["repo"],
             rctx.attr.arch,
-            "--out",
-            "apks",
-        ],
-        "downloading from Alpine %s" % branch,
-    )
+            package["file"],
+        )
+        pending.append((package, url, rctx.download(
+            url,
+            "apks/" + package["file"],
+            allow_fail = True,
+            block = False,
+        )))
+    for package, url, waiter in pending:
+        if not waiter.wait().success:
+            fail(("%s could not be downloaded from %s: the index snapshot " +
+                  "names a build the mirror no longer serves; run " +
+                  "`bazel fetch --force --repo=@alpine_index`") % (
+                package["file"],
+                url,
+            ))
 
     for package in selected:
         _run(
@@ -212,7 +225,6 @@ def _alpine_package_impl(rctx):
     _run(rctx, ["finish", "--root", "root"], "fixing symlinks")
     for package in selected:
         rctx.delete("apks/" + package["file"])
-    rctx.delete("selected.json")
 
     resolved = sorted(
         [
