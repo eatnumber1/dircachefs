@@ -3095,6 +3095,55 @@ TEST_F(DirCacheFSTest, DestroyLetsGoOfEveryNodeid) {
   EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());
 }
 
+// The number of rows in `inodes`.
+absl::StatusOr<int64_t> InodeRows(sqlite3::Connection &db) {
+  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                        db.Prepared("SELECT COUNT(*) FROM inodes"));
+  ABSL_ASSIGN_OR_RETURN(bool row, stmt->Step());
+  if (!row) return absl::InternalError("no row");
+  const int64_t n = stmt->Column<int64_t>(0);
+  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  return n;
+}
+
+// A crash between an unlink's backing syscall and its phase 3 (here: phase
+// 1 and the unlink made by hand, then the start that follows a crash): the
+// removed file's row, its nlink column still 1, is probed by handle at
+// the start (it was in the dirty set) and goes, as phase 3 would have
+// deleted it; a dirty directory removed the same way goes too, and a dirty
+// file that still exists stays (formal/findings/lifetime_crash_before_settle,
+// fixed).
+TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
+  WriteFile(Path("f"));
+  WriteFile(Path("kept"));
+  ASSERT_EQ(::mkdir(Path("d").c_str(), 0755), 0);
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_OK_AND_ASSIGN(InodeId kept, Id("kept"));
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_OK_AND_ASSIGN(const int64_t before, InodeRows(db_));
+  for (auto [name, id] : {std::pair<std::string, InodeId>{"f", f},
+                          std::pair<std::string, InodeId>{"d", d}}) {
+    ASSERT_OK_AND_ASSIGN(
+        cache::Mutation phase1,
+        cache::BeginRemove(ctx_, kRootInode, name, id, cache::BeginFill(ctx_)));
+    phase1.End();  // In memory only: the database keeps phase 1 alone.
+  }
+  ASSERT_EQ(::unlink(Path("f").c_str()), 0);
+  ASSERT_EQ(::rmdir(Path("d").c_str()), 0);
+  const InodeId touched[] = {kept};
+  ASSERT_THAT(cache::MarkDirty(ctx_, touched), IsOk());
+
+  ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(cache::GetAttr(ctx_, d).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(cache::GetAttr(ctx_, kept), IsOk());
+  EXPECT_THAT(InodeRows(db_), IsOkAndHolds(before - 2));
+}
+
 // An O_TMPFILE file left open by a crash: the next start (unclean) sweeps
 // its row.
 TEST_F(DirCacheFSTest, TmpfileRowGoesAtTheStartAfterACrash) {

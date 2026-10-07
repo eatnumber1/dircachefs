@@ -222,6 +222,7 @@ LIFETIME_KNOWN_BUGS = {
     "lifetime_forget_multi_counted_as_one": "Invariant LookupsExact is violated",
     # Found by this model (formerly findings/); fixed in step 12.4b.
     "lifetime_stub_nodeid_reused": "Invariant NodeidStable is violated",
+    "lifetime_crash_before_settle": "Invariant RowsNameLiveObjects is violated",
 }
 
 [
@@ -242,7 +243,6 @@ LIFETIME_KNOWN_BUGS = {
 # there until the code is fixed, when its configuration moves into the real
 # model.
 LIFETIME_FINDINGS = {
-    "lifetime_crash_before_settle": "Invariant RowsNameLiveObjects is violated",
     "lifetime_destroy_with_open_files": "Invariant UnnamedRowsSwept is violated",
 }
 

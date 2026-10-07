@@ -92,7 +92,8 @@ CONSTANTS
     BugNonFinalForgetDropsRec,  \* any FORGET ends the removed record
     BugNoUnnamedSweep,          \* no sweep of unnamed rows (before 23.7)
     BugForgetMultiCountsOne,    \* a FORGET_MULTI entry takes off 1
-    BugStubIdFromMax            \* a stub's nodeid: MAX(live) + 1 (12.4b)
+    BugStubIdFromMax,           \* a stub's nodeid: MAX(live) + 1 (12.4b)
+    BugNoRecoveredProbe         \* no probe of recovered rows (12.4b)
 
 None == "none"
 
@@ -193,6 +194,11 @@ AfterReset(s) ==
     [s EXCEPT !.k = 0, !.ko = None, !.op = 0, !.wo = 0, !.wrote = FALSE,
               !.lk = 0, !.rec = FALSE, !.wr = "no"]
 
+\* The start's probe of a recovered row by handle (ProbeRecoveredRows): its
+\* row goes if its object was freed (ESTALE) or has no link left.
+AfterProbe(s, freed) ==
+    IF s.row /\ freed THEN [s EXCEPT !.row = FALSE, !.nl0 = FALSE] ELSE s
+
 \* The start's sweep (cache::ForgetUnnamedRows): a row with nlink 0 and no
 \* name goes.
 AfterSweep(s, named) ==
@@ -214,11 +220,14 @@ VARIABLES
     run,      \* "up", or "down" (after a crash or DESTROY)
     clean,    \* the last run shut down cleanly (the clean-shutdown flag)
     crashes,  \* crashes so far (for the bound)
+    cut,      \* the removal a crash cut between its syscall and its phase 3
+              \* (its row is in the dirty set at the next start), or 0
     forgetErr \* a FORGET forgot more than dcfs counted (history)
 
 stubVars == <<stub, stubHigh>>
+crashVars == <<crashes, cut>>
 vars == <<st, obj, nextId, stubVars, bName, bState, pend, run, clean,
-          crashes, forgetErr>>
+          crashVars, forgetErr>>
 
 NoPend == [id |-> 0, held |-> FALSE]
 
@@ -234,6 +243,7 @@ TypeOK ==
     /\ run \in {"up", "down"}
     /\ clean \in BOOLEAN
     /\ crashes \in 0..MaxCrashes
+    /\ cut \in Ids \cup {0}
     /\ forgetErr \in BOOLEAN
 
 Named(o) == \E n \in Names : bName[n] = o
@@ -280,6 +290,7 @@ Init ==
     /\ run = "up"
     /\ clean = TRUE
     /\ crashes = 0
+    /\ cut = 0
     /\ forgetErr = FALSE
 
 \* A request may start: the daemon is up and no removal is half done.
@@ -304,7 +315,7 @@ Lookup(n) ==
          /\ RowFor(bName[n], i)
          /\ st[i].k < MaxLookups
          /\ st' = [st EXCEPT ![i] = AfterLookup(WithRow(@, FALSE), bName[n])]
-    /\ UNCHANGED <<stubVars, bName, bState, pend, run, clean, crashes,
+    /\ UNCHANGED <<stubVars, bName, bState, pend, run, clean, crashVars,
                    forgetErr>>
 
 \* CREATE of n (open, writable or not): a new object, its new row.
@@ -319,7 +330,7 @@ Create(n, w) ==
           /\ bState' = [bState EXCEPT ![o] = "alive"]
           /\ st' = [st EXCEPT ![i] = AfterOpen(AfterLookup(WithRow(@, FALSE),
                                                            o), w)]
-    /\ UNCHANGED <<stubVars, pend, run, clean, crashes, forgetErr>>
+    /\ UNCHANGED <<stubVars, pend, run, clean, crashVars, forgetErr>>
 
 \* TMPFILE (DirCacheFS::Tmpfile): a new unnamed object, open for writing,
 \* recorded as a row without a dentry, nlink 0.
@@ -333,7 +344,7 @@ Tmpfile ==
           /\ bState' = [bState EXCEPT ![o] = "alive"]
           /\ st' = [st EXCEPT ![i] = AfterOpen(AfterLookup(WithRow(@, TRUE),
                                                            o), TRUE)]
-    /\ UNCHANGED <<stubVars, bName, pend, run, clean, crashes, forgetErr>>
+    /\ UNCHANGED <<stubVars, bName, pend, run, clean, crashVars, forgetErr>>
 
 \* LINK of nodeid i to n: a second name, or the first of an O_TMPFILE file
 \* (its attributes refreshed: nlink 1). A removed object (no row) gets
@@ -343,7 +354,7 @@ Link(i, n) ==
     /\ bName[n] = None /\ bState[obj[i]] = "alive"
     /\ bName' = [bName EXCEPT ![n] = obj[i]]
     /\ st' = [st EXCEPT ![i] = AfterLookup([@ EXCEPT !.nl0 = FALSE], obj[i])]
-    /\ UNCHANGED <<obj, nextId, stubVars, bState, pend, run, clean, crashes,
+    /\ UNCHANGED <<obj, nextId, stubVars, bState, pend, run, clean, crashVars,
                    forgetErr>>
 
 \* OPEN of a nodeid the kernel holds, writable or not: of a row, or of a
@@ -352,14 +363,14 @@ Open(i, w) ==
     /\ Up /\ st[i].k > 0 /\ st[i].op < MaxOpens /\ Resolve(i) # "estale"
     /\ st' = [st EXCEPT ![i] = AfterOpen(@, w)]
     /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, run, clean,
-                   crashes, forgetErr>>
+                   crashVars, forgetErr>>
 
 \* RELEASE of an open of nodeid i that may write iff w.
 Release(i, w) ==
     /\ Up /\ st[i].op > 0 /\ MayRelease(st[i], w)
     /\ \E heldOk \in BOOLEAN :
          st' = [st EXCEPT ![i] = AfterRelease(@, w, Named(obj[i]), heldOk)]
-    /\ UNCHANGED <<obj, nextId, stubVars, bName, pend, run, clean, crashes,
+    /\ UNCHANGED <<obj, nextId, stubVars, bName, pend, run, clean, crashVars,
                    forgetErr>>
     /\ Freed(bState)
 
@@ -376,7 +387,7 @@ Remove(n, src) ==
          /\ pend' = [id |-> i, held |-> st[i].lk > 0]
     /\ bName' = IF src = None THEN [bName EXCEPT ![n] = None]
                 ELSE [bName EXCEPT ![n] = bName[src], ![src] = None]
-    /\ UNCHANGED <<stubVars, run, clean, crashes, forgetErr>>
+    /\ UNCHANGED <<stubVars, run, clean, crashVars, forgetErr>>
     /\ Freed(bState)
 
 \* Phase 3 of the removal: SettleUnlinkedFile (RefreshAfterRename for a
@@ -386,7 +397,7 @@ Settle ==
     /\ st' = [st EXCEPT ![pend.id] = AfterSettle(@, Named(obj[pend.id]),
                                                  pend.held)]
     /\ pend' = NoPend
-    /\ UNCHANGED <<obj, nextId, stubVars, bName, run, clean, crashes,
+    /\ UNCHANGED <<obj, nextId, stubVars, bName, run, clean, crashVars,
                    forgetErr>>
     /\ Freed(bState)
 
@@ -402,7 +413,7 @@ Forget(i, n) ==
     /\ Up /\ MayForget(i, n)
     /\ st' = [st EXCEPT ![i] = AfterForget(@, n, n)]
     /\ forgetErr' = (forgetErr \/ st[i].lk < n)
-    /\ UNCHANGED <<obj, nextId, stubVars, bName, pend, run, clean, crashes>>
+    /\ UNCHANGED <<obj, nextId, stubVars, bName, pend, run, clean, crashVars>>
     /\ Freed(bState)
 
 \* FORGET_MULTI (DirCacheFS::ForgetMulti): f[i] lookups of each nodeid i in
@@ -414,7 +425,7 @@ ForgetMulti(f) ==
                 IF i \in DOMAIN f THEN AfterForget(st[i], f[i], Counted(f[i]))
                 ELSE st[i]]
     /\ forgetErr' = (forgetErr \/ \E i \in DOMAIN f : st[i].lk < Counted(f[i]))
-    /\ UNCHANGED <<obj, nextId, stubVars, bName, pend, run, clean, crashes>>
+    /\ UNCHANGED <<obj, nextId, stubVars, bName, pend, run, clean, crashVars>>
     /\ Freed(bState)
 
 \* DESTROY (DirCacheFS::Destroy), then FinishRun: the kernel let go of
@@ -430,7 +441,7 @@ Destroy ==
     /\ st' = [i \in AllIds |-> AfterReset(st[i])]
     /\ run' = "down"
     /\ clean' = ~(\E i \in Ids : st[i].wo > 0 /\ st[i].row)
-    /\ UNCHANGED <<obj, nextId, stubVars, bName, pend, crashes, forgetErr>>
+    /\ UNCHANGED <<obj, nextId, stubVars, bName, pend, crashVars, forgetErr>>
     /\ Freed(bState)
 
 \* The daemon crashes, possibly between a removal's syscall and its phase
@@ -440,20 +451,26 @@ Crash ==
     /\ st' = [i \in AllIds |-> AfterReset(st[i])]
     /\ pend' = NoPend
     /\ run' = "down" /\ clean' = FALSE /\ crashes' = crashes + 1
+    /\ cut' = pend.id
     /\ UNCHANGED <<obj, nextId, stubVars, bName, forgetErr>>
     /\ Freed(bState)
 
-\* The next start (StartRun): after an unclean shutdown, the sweep of
-\* unnamed rows (cache::ForgetUnnamedRows; also when recovery found dirty
-\* rows, which a clean shutdown never leaves).
+\* The next start (StartRun): after an unclean shutdown, the probe of the
+\* rows recovery found dirty (ProbeRecoveredRows: the row of a removal the
+\* crash cut goes once its object is freed; the code probes every dirty
+\* row, which changes nothing for the others) and the sweep of unnamed rows
+\* (cache::ForgetUnnamedRows; also when recovery found dirty rows, which a
+\* clean shutdown never leaves).
 Restart ==
     /\ run = "down"
     /\ run' = "up"
-    /\ st' = IF ~clean /\ ~BugNoUnnamedSweep
-             THEN [i \in AllIds |->
-                     IF i \in Ids THEN AfterSweep(st[i], Named(obj[i]))
-                     ELSE st[i]]
-             ELSE st
+    /\ st' = [i \in AllIds |->
+                IF i \notin Ids \/ clean THEN st[i]
+                ELSE AfterProbe(IF BugNoUnnamedSweep THEN st[i]
+                                ELSE AfterSweep(st[i], Named(obj[i])),
+                                i = cut /\ ~BugNoRecoveredProbe
+                                  /\ bState[obj[i]] = "dead")]
+    /\ cut' = 0
     /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, clean, crashes,
                    forgetErr>>
 
@@ -478,7 +495,7 @@ Refuse(m) ==
     /\ Up /\ stub[m] = 0 /\ NextStub \in StubIds
     /\ stub' = [stub EXCEPT ![m] = NextStub]
     /\ stubHigh' = NextStub
-    /\ UNCHANGED <<st, obj, nextId, bName, bState, pend, run, clean, crashes,
+    /\ UNCHANGED <<st, obj, nextId, bName, bState, pend, run, clean, crashVars,
                    forgetErr>>
 
 \* LOOKUP of m: its stub's nodeid handed out.
@@ -486,7 +503,7 @@ LookupStub(m) ==
     /\ Up /\ stub[m] # 0 /\ st[stub[m]].k < MaxLookups
     /\ st' = [st EXCEPT ![stub[m]] = AfterLookup(@, m)]
     /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, run, clean,
-                   crashes, forgetErr>>
+                   crashVars, forgetErr>>
 
 \* With OutOfBand: m stops being refused (a relisting after an out-of-band
 \* change finds it a plain directory, or gone): the trigger deletes its
@@ -495,7 +512,7 @@ StubGone(m) ==
     /\ Up /\ OutOfBand /\ stub[m] # 0
     /\ stub' = [stub EXCEPT ![m] = 0]
     /\ UNCHANGED <<stubHigh, st, obj, nextId, bName, bState, pend, run, clean,
-                   crashes, forgetErr>>
+                   crashVars, forgetErr>>
 
 -----------------------------------------------------------------------------
 

@@ -815,7 +815,14 @@ directory) forgotten and the listing incomplete (a lost change may have
 added names), and every dentry pointing at it unknown (its name may have
 changed). Inode rows are kept, so NFS handles still resolve and are
 verified when next opened. The dirty set is then emptied, and a WARNING
-reports the count and whether `boot_id` changed.
+reports the count and whether `boot_id` changed. Then every inode that was
+in the set (except the root) is probed by handle (`ProbeRecoveredRows`,
+step 12.4b): a crash between a removal's backing syscall and its phase 3
+leaves the removed object's row, which no name leads to any more (recovery
+made them unknown) and whose recorded link count is not 0; if the object is
+gone (`ESTALE`) or has no link left, the row goes, a directory's too. One
+that still exists keeps its row, its attributes unknown for the next access
+to read. The probe is bounded by the dirty set.
 
 So a power loss costs re-reading the entries mutated since the last sync
 point, and never serves state the backing filesystem did not keep.
@@ -1741,10 +1748,11 @@ not count and nothing it keeps outlives the last `FORGET`; and after a
 crash the start sweeps every unnamed row. Variants put back a non-final
 `FORGET` dropping the held descriptor or the removed record, the pre-23.7
 crash that left an `O_TMPFILE` row behind, and a `FORGET_MULTI` counted as
-one, and a stub's nodeid handed out again while the kernel still holds it
-(a gap the model found, fixed in step 12.4b). It found two more minor
-gaps, kept as tests that expect them (`formal/findings/`): a row of a
-removed object survives the start's sweep after a crash between
-an unlink's syscall and its phase 3, or after a `DESTROY` with the
-unlinked file still open for reading (a clean shutdown, so no sweep). Nodeids' traces from the forged-request harness are validated
+one, and two gaps the model found, fixed in step 12.4b: a stub's nodeid
+handed out again while the kernel still holds it, and a removed object's
+row surviving a crash between an unlink's syscall and its phase 3. It
+found one more minor gap, kept as a test that expects it
+(`formal/findings/`): a row of a removed object survives the start's sweep
+after a `DESTROY` with the unlinked file still open for reading (a clean
+shutdown, so no sweep). Nodeids' traces from the forged-request harness are validated
 against it (`formal/README.md`, "The lifetime model").

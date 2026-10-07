@@ -1810,6 +1810,48 @@ absl::Status SyncBacking(Context &ctx) {
   }());
 }
 
+namespace {
+
+// At a start after an unclean shutdown: the rows that were dirty (a
+// mutation's phase 1, or a write, since the last sync point) may stand for
+// objects their mutation removed, if the crash fell between its backing
+// syscall and its phase 3 (formal/findings/lifetime_crash_before_settle,
+// step 12.4b): no name leads to them any more (RecoverDirty made every
+// name of a dirty inode unknown, so none has a present dentry), and their
+// nlink column is not 0, so ForgetUnnamedRows keeps them. Each is probed by
+// handle: gone (ESTALE, ENOENT: BackingNlink forgets the row) or with no
+// link left, its row goes, directories included; one that still exists
+// keeps its row, its attributes unknown since RecoverDirty, for the next
+// access to read (a refresh here would be a fill outside any request).
+// Bounded by the dirty set. Best effort, as the sweep: a row left behind
+// only costs a probe later.
+void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
+  int64_t forgotten = 0;
+  for (InodeId id : dirty) {
+    if (id == cache::kRootInode) continue;
+    absl::StatusOr<std::optional<uint64_t>> nlink = BackingNlink(ctx, id);
+    absl::Status status = nlink.status();
+    if (nlink.ok() && !nlink->has_value()) {
+      ++forgotten;
+    } else if (nlink.ok() && **nlink == 0) {
+      status = ForgetStale(ctx, id);
+      if (status.ok()) ++forgotten;
+    }
+    if (!status.ok()) {
+      LOG(WARNING) << "could not probe recovered inode " << id
+                   << " (its row stays until an access finds it gone): "
+                   << status;
+    }
+  }
+  if (forgotten > 0) {
+    LOG(WARNING) << "forgot " << forgotten
+                 << " rows of objects removed by mutations the last run's "
+                    "end cut short";
+  }
+}
+
+}  // namespace
+
 absl::Status StartRun(Context &ctx, std::string_view boot_id) {
   // Model: Crash (after an unclean shutdown) and Restart.
   ctx.events->RunStarting(ctx);
@@ -1817,10 +1859,13 @@ absl::Status StartRun(Context &ctx, std::string_view boot_id) {
   ABSL_ASSIGN_OR_RETURN(std::optional<std::string> last_boot_id,
                         GetBootId(ctx.db));
   const bool unclean = !clean;
+  // Read before RecoverDirty empties the set (ProbeRecoveredRows).
+  ABSL_ASSIGN_OR_RETURN(std::vector<InodeId> dirty, cache::ListDirty(ctx));
   ABSL_ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
   // Model: Recover.
   ctx.events->Recovered(ctx);
   if (unclean || recovered > 0) {
+    ProbeRecoveredRows(ctx, dirty);
     // Rows whose last release never came (review L5): see
     // cache::ForgetUnnamedRows.
     // Best effort: a row left behind only costs a re-probe, so a failure

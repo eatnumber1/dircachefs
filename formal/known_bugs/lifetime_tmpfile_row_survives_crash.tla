@@ -6,9 +6,11 @@
 (* no longer decodes.                                                      *)
 (*                                                                         *)
 (* Put in by BugNoUnnamedSweep (the start does not run                     *)
-(* cache::ForgetUnnamedRows). Expected: UnnamedRowsSwept is violated: a    *)
-(* TMPFILE (a row with nlink 0 and no name, open); a crash; the start: the *)
-(* row is still there, with nothing open.                                  *)
+(* cache::ForgetUnnamedRows) with BugNoRecoveredProbe (nor, before step    *)
+(* 23.7, any probe of the recovered rows, which would catch a dirty        *)
+(* tmpfile's row too). Expected: UnnamedRowsSwept is violated: a TMPFILE   *)
+(* (a row with nlink 0 and no name, open); a crash; the start: the row is  *)
+(* still there, with nothing open.                                         *)
 (***************************************************************************)
 EXTENDS MClifetime
 =============================================================================

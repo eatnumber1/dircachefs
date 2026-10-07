@@ -159,10 +159,16 @@ T_LifeRestart ==
     /\ UNCHANGED named
     /\ Step
 
-\* The start ran: after an unclean shutdown, its sweep of unnamed rows.
+\* The start ran: after an unclean shutdown, its probe of the rows that
+\* were dirty (which the trace does not see: a row of an object with no
+\* name, freed by the crash, may go) and its sweep of unnamed rows.
 T_LifeStart ==
     /\ Ev("start")
-    /\ nd' = IF ~cln /\ ~BugNoUnnamedSweep THEN AfterSweep(nd, named) ELSE nd
+    /\ LET swept == IF BugNoUnnamedSweep THEN nd ELSE AfterSweep(nd, named)
+       IN nd' \in IF cln THEN {nd}
+                  ELSE {swept} \cup
+                       (IF BugNoRecoveredProbe THEN {}
+                        ELSE {AfterProbe(swept, ~named)})
     /\ UNCHANGED <<named, cln>>
     /\ Step
 
