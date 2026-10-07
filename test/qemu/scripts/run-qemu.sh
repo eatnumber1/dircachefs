@@ -424,6 +424,25 @@ if [ "$HEADROOM_LOW" -eq 1 ]; then
 		"40% of MemTotal in tmpfs, which is capped at 50%); if this run failed, that is" \
 		"the first suspect: raise this test's mem= (test/qemu/README.md, \"Guest memory\")" >&2
 fi
+# Step 23.7: a kernel that oopsed, hit a BUG or a WARNING, or panicked is a
+# failure whatever the test's own checks said (an ext4 casefold oops went
+# unnoticed for a release because the test still passed). The console's
+# loglevel=3 shows only the worst of these; guest/init copies the kernel
+# log's matching lines to the end of the serial log as KERNEL-OOPS: lines
+# (mem_report), so the warnings and call traces are here too. The patterns
+# start a kernel message (after the console's timestamp, if any), so the
+# same words in a test's output do not match (absl's own userspace "WARNING:
+# All log messages before absl::InitializeLog()..." does not: a kernel warning
+# says "WARNING: CPU:", and any other kernel "WARNING:" arrives as a
+# KERNEL-OOPS: line).
+KERNEL_FAIL='^KERNEL-OOPS:|(^|[] ])(BUG:|Oops[: ]|kernel BUG at|WARNING: CPU:|Call Trace:|Kernel panic)'
+if grep -q -a -E "$KERNEL_FAIL" "$LOG"; then
+	echo "run-qemu.sh: ERROR: the guest kernel logged a failure (an oops, BUG, WARNING or panic); the first such line:" >&2
+	grep -a -m 1 -E "$KERNEL_FAIL" "$LOG" >&2
+	echo "run-qemu.sh: the lines around it are in $LOG (KERNEL-OOPS: lines are the kernel log's)" >&2
+	echo "== RESULT: FAIL (kernel failure in the guest; see $LOG) =="
+	exit 1
+fi
 if [ "$UNIT" -eq 1 ]; then
 	if grep -q "^DCFS-TEST-EXIT=0" "$LOG"; then
 		echo "== RESULT: PASS ($(awk "BEGIN{printf \"%.3f\", $end-$start}")s) =="

@@ -139,7 +139,8 @@ start_mem_sampler() {
 }
 
 # Stop the sampler and print its last line (nothing if it never completed a
-# sample), then any OOM-killer lines as MEM-OOM: lines.
+# sample), then any OOM-killer lines as MEM-OOM: lines and the kernel's oopses
+# and warnings as KERNEL-OOPS: lines.
 mem_report() {
 	# A test that ends within the first sample's time (a unit test of a
 	# few milliseconds on a slow-starting sampler) still gets its line:
@@ -159,6 +160,11 @@ mem_report() {
 	# check.
 	dmesg 2>/dev/null | grep -i -E 'out of memory|oom-kill|killed process' |
 		head -n 10 | sed 's/^/MEM-OOM: /'
+	# The same for the kernel's own failures: the console shows only an oops
+	# or a BUG, not a WARNING or the call trace (run-qemu.sh fails a run
+	# that has a KERNEL-OOPS: line).
+	dmesg 2>/dev/null | grep -E 'BUG:|Oops|kernel BUG at|WARNING: |Call Trace:|Kernel panic|general protection fault' |
+		head -n 20 | sed 's/^/KERNEL-OOPS: /'
 }
 
 start_mem_sampler

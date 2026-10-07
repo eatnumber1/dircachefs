@@ -501,6 +501,16 @@ sh_test(
     data = ["scripts/run-qemu.sh"],
 )
 
+# Step 23.7: run-qemu.sh fails a run whose kernel logged an oops, a BUG, a
+# WARNING or a panic (fake qemu printing canned serial logs; no guest).
+sh_test(
+    name = "run_qemu_verdict_test",
+    size = "small",
+    srcs = ["run_qemu_verdict_test.sh"],
+    args = ["$(location scripts/run-qemu.sh)"],
+    data = ["scripts/run-qemu.sh"],
+)
+
 qemu_test(
     name = "bench_full_test",
     disks = [
