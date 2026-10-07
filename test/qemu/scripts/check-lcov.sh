@@ -6,7 +6,7 @@
 #
 # --zero: also require <function> in <source> to be reported with 0 hits (a
 # known-uncovered function: the report must show what was NOT run too).
-# Self-check: //test/qemu:check_lcov_self_check_test.
+# Self-check: //test/qemu:coverage_pipeline_test.
 set -eu
 
 lcov=$1

@@ -15,9 +15,16 @@ bazel coverage --keep_going "$@" -- "${targets[@]}" || status=$?
 report="$(bazel info output_path)/_coverage/_coverage_report.dat"
 mkdir -p ci-coverage
 if [ -s "$report" ]; then
-	cp "$report" ci-coverage/coverage.lcov
+	# Our code only (dcfs/, bench/, tools/), and nothing that measured no
+	# line (test files and scripts Bazel lists with LF:0).
+	awk -v RS='end_of_record\n' -v ORS='' '
+		/(^|\n)SF:(dcfs|bench|tools)\// && !/\nLF:0\n/ { print $0 "end_of_record\n" }
+	' "$report" >ci-coverage/coverage.lcov
 	test/qemu/scripts/check-lcov.sh ci-coverage/coverage.lcov dcfs/status.cc
 	test/qemu/scripts/check-lcov.sh ci-coverage/coverage.lcov dcfs/metadata_cache.cc
+	# main.cc runs only in the end-to-end tests: hits here prove the whole
+	# guest -> coverage disk -> lcov path, not only the unit tests'.
+	test/qemu/scripts/check-lcov.sh ci-coverage/coverage.lcov dcfs/main.cc
 else
 	echo "coverage.sh: no combined report at $report" >&2
 	status=1

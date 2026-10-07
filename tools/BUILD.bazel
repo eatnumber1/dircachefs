@@ -63,6 +63,9 @@ sh_binary(
 BANNED_SYMBOLS_COMPATIBLE = select({
     "//test/qemu:asan_build": ["@platforms//:incompatible"],
     "//test/qemu:ubsan_build": ["@platforms//:incompatible"],
+    # An instrumented main_static is not the shipped binary, and the profile
+    # runtime may bring banned names of its own.
+    "//test/qemu:coverage_build": ["@platforms//:incompatible"],
     "//conditions:default": [],
 })
 
@@ -328,8 +331,9 @@ sh_test(
 # ---- Step 26.12: reproducible build -------------------------------------
 
 # The gate itself is `bazel run //tools:reproducible_build` (CI runs it): it
-# builds //dcfs:main_static and //man:dcfs.8 in two output bases and compares
-# them with repro_compare.py. It cannot be a `bazel test` (it starts Bazel).
+# builds //dcfs:main, //dcfs:main_static and //man:dcfs.8 in two output bases
+# and compares them with repro_compare.py. Same host only until 7.1b (the
+# host's glibc is linked). It cannot be a `bazel test` (it starts Bazel).
 py_library(
     name = "repro_compare_lib",
     srcs = ["repro_compare.py"],

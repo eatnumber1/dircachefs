@@ -206,6 +206,19 @@ if [ -n "$COV" ]; then
 fi
 dump_profraw() {
 	[ -n "$COV" ] || return 0
+	# A daemon the test left running writes its profile only when it exits:
+	# ask it to (SIGTERM is its normal shutdown), and wait for every
+	# instrumented process to be gone before the tar reads /cov, or the
+	# archive holds a half-written profile.
+	killall -TERM dcfs fhtest testutil dcfs_bench 2>/dev/null
+	waited=0
+	while pidof dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 100 ]; do
+		sleep 0.1
+		waited=$((waited + 1))
+	done
+	if [ "$waited" -ge 100 ]; then
+		echo "init: an instrumented process is still running; its profile is lost"
+	fi
 	if tar -c -C /cov . >"$COV"; then
 		echo "init: profiles written to $COV"
 	else

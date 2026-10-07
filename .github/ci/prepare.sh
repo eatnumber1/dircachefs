@@ -82,6 +82,12 @@ echo "$HOME/.local/bin" >>"$GITHUB_PATH"
 	echo "# Written by .github/ci/prepare.sh."
 	echo "build --disk_cache=$HOME/.cache/bazel-disk-cache"
 	echo "build --repository_cache=$HOME/.cache/bazel-repo-cache"
+	# Bazel 9 keeps the extracted repositories (the "repo contents cache")
+	# under the repository cache by default: 37 GB locally, about 12 GB of it
+	# the unpacked LLVM. Put it beside the repository cache, not in it, so
+	# that the saved cache (the downloaded archives, a few GB) stays inside
+	# GitHub's 10 GB quota; every job extracts what it needs again.
+	echo "build --repo_contents_cache=$HOME/.cache/bazel-repo-contents"
 	# GitHub's repository-wide cache quota is 10 GB for everything; keep the
 	# disk cache well inside it.
 	echo "build --experimental_disk_cache_gc_max_size=4G"

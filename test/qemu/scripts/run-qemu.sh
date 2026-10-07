@@ -480,8 +480,10 @@ if [ "$COVERAGE" -eq 1 ]; then
 	rm -f "$COVDISK_IMG"
 	# shellcheck disable=SC2086 # COV_OBJECTS is a list of paths
 	"$COV_SCRIPT" "$COV_PROFDATA" "$COV_LLVM_COV" "$rawdir" \
-		"$COVERAGE_DIR/qemu-$(printf '%s' "${TEST_TARGET:-test}" | tr -c 'A-Za-z0-9_.-' _).dat" $COV_OBJECTS ||
-		echo "run-qemu.sh: WARNING: no lcov from the profiles" >&2
+		"$COVERAGE_DIR/qemu-$(printf '%s' "${TEST_TARGET:-test}" | tr -c 'A-Za-z0-9_.-' _).dat" $COV_OBJECTS || {
+		echo "run-qemu.sh: ERROR: the profiles could not be turned into lcov; the test fails rather than report less coverage" >&2
+		exit 1
+	}
 	# The test's own lcov, kept beside the serial log for inspection.
 	cp "$COVERAGE_DIR"/qemu-*.dat "${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/" 2>/dev/null || true
 fi

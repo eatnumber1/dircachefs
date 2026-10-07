@@ -6,7 +6,10 @@
 #
 #   bazel run //tools:reproducible_build [-- <bazel build flags>]
 #
-# The outputs are //dcfs:main_static and //man:dcfs.8. A difference prints the
+# The outputs are //dcfs:main, //dcfs:main_static (the SBOM calls them the
+# shipped binaries) and //man:dcfs.8. Same host only, until step 7.1b: the
+# binaries link the host's glibc (and main_static its static libc.a and the
+# host's Linux headers), so two hosts with different libc6-dev differ. A difference prints the
 # strings that differ (tools/repro_compare.py), which is where an embedded
 # path, host name or timestamp shows up. The gate's own self-check is
 # //tools:repro_compare_self_check_test.
@@ -32,8 +35,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-targets=(//dcfs:main_static //man:dcfs.8)
-outputs=(dcfs/main_static man/dcfs.8)
+targets=(//dcfs:main //dcfs:main_static //man:dcfs.8)
+outputs=(dcfs/main dcfs/main_static man/dcfs.8)
 
 for x in a b; do
 	[ -d "$tmp/out_$x" ] && continue
@@ -46,7 +49,15 @@ for x in a b; do
 	[ -f "$workspace/user.bazelrc" ] && cp "$workspace/user.bazelrc" "$tmp/src_$x/"
 	(
 		cd "$tmp/src_$x"
-		bazel --output_base="$tmp/ob_$x" build --disk_cache= "$@" "${targets[@]}"
+		# The second build also has a repository contents cache of its own:
+		# a path or time that leaked into an extracted repository of the
+		# shared cache would then differ between the two (it costs a second
+		# extraction of every repository, LLVM's 12 GB included).
+		contents=()
+		if [ "$x" = b ]; then
+			contents=(--repo_contents_cache="$tmp/contents_b")
+		fi
+		bazel --output_base="$tmp/ob_$x" build --disk_cache= "${contents[@]}" "$@" "${targets[@]}"
 		mkdir -p "$tmp/out_$x"
 		for o in "${outputs[@]}"; do
 			mkdir -p "$tmp/out_$x/$(dirname "$o")"

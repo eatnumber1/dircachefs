@@ -1,10 +1,9 @@
 """Coverage plumbing of the QEMU test macros (step 7.2).
 
-Under `bazel coverage` (--config=coverage) the test binaries and dcfs are
-built with clang's source-based coverage; the guest writes their .profraw
-files, ships them over the serial console, and run-qemu.sh turns them into an
-lcov file in COVERAGE_DIR (scripts/cov-lcov.sh). In any other build these
-return nothing.
+Under `bazel coverage` the test binaries and dcfs are built with clang's
+source-based coverage; the guest writes their .profraw files, tars them onto
+an extra virtio disk, and run-qemu.sh turns them into an lcov file in
+COVERAGE_DIR (scripts/cov-lcov.sh). In any other build these return nothing.
 """
 
 COVERAGE_BUILD = "//test/qemu:coverage_build"

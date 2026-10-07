@@ -35,7 +35,7 @@ config_setting(
     values = {"define": "dcfs_sanitizer=asan"},
 )
 
-# `bazel coverage` (--config=coverage, step 7.2): the QEMU test macros then
+# `bazel coverage` (step 7.2): the QEMU test macros then
 # ship the LLVM tools and the instrumented binaries to run-qemu.sh
 # (coverage.bzl).
 config_setting(
@@ -712,7 +712,10 @@ sh_test(
 )
 
 # Step 26.3: golden backing-syscall traces per operation, from strace on the
-# daemon (guest/syscall_traces.sh, guest/strace_lib.sh).
+# daemon (guest/syscall_traces.sh, guest/strace_lib.sh). Also run under
+# `bazel coverage` (7.2): the instrumented daemon writes its profile to /cov in
+# the guest, not to the backing tree, so the traces are unchanged (the
+# presubmit coverage run had it green).
 qemu_test(
     name = "syscall_traces_test",
     disks = [("vdb", "ext4", "64M")],

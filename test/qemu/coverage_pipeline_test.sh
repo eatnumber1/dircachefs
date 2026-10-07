@@ -4,7 +4,7 @@
 # through scripts/cov-lcov.sh exactly as run-qemu.sh does, and the lcov must
 # show the function that ran with hits and the one that did not with none
 # (scripts/check-lcov.sh --zero). A report that left out what was not run,
-# or an empty one, would fail here.
+# or an empty one, or a truncated profile taken for good, would fail here.
 #
 #   coverage_pipeline_test.sh <cov-lcov.sh> <check-lcov.sh> <llvm-profdata>
 #       <llvm-cov> <fixture>
@@ -41,5 +41,24 @@ if "$check" "$dir/out.lcov" no/such/file.cc 2>/dev/null; then
 fi
 if "$check" "$dir/out.lcov" "$src" --zero Covered 2>/dev/null; then
 	echo "FAIL: a function with hits was accepted as uncovered" >&2
+	exit 1
+fi
+
+# A profile cut short (a process killed while writing it) must fail the step
+# and name the file, not silently drop the coverage of its binary: one good
+# and one truncated profile together fail too.
+bad="$dir/bad"
+mkdir -p "$bad"
+cp "$dir"/*.profraw "$bad/good.profraw"
+cp "$dir"/*.profraw "$bad/cut.profraw"
+size=$(wc -c <"$bad/cut.profraw")
+truncate -s $((size / 2)) "$bad/cut.profraw"
+if "$cov_lcov" "$profdata" "$llvm_cov" "$bad" "$bad/out.lcov" "$fixture" 2>"$bad/err"; then
+	echo "FAIL: a truncated profile was accepted" >&2
+	exit 1
+fi
+if ! grep -q "cut.profraw" "$bad/err"; then
+	echo "FAIL: the error does not name the truncated profile:" >&2
+	cat "$bad/err" >&2
 	exit 1
 fi

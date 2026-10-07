@@ -20,7 +20,20 @@ if ! ls "$raw"/*.profraw >/dev/null 2>&1; then
 	exit 0
 fi
 merged="$raw/merged.profdata"
-"$profdata" merge -sparse -o "$merged" "$raw"/*.profraw
+# A profile that cannot be read (a truncated file: the process was killed
+# while writing it) must not silently drop its binary's coverage: name it and
+# fail, so the test fails instead of reporting less.
+bad=0
+for f in "$raw"/*.profraw; do
+	if ! "$profdata" show "$f" >/dev/null 2>&1; then
+		echo "cov-lcov.sh: ERROR: unreadable profile $f" >&2
+		bad=1
+	fi
+done
+if [ "$bad" -ne 0 ]; then
+	exit 1
+fi
+"$profdata" merge -sparse --failure-mode=all -o "$merged" "$raw"/*.profraw
 
 first=$1
 shift

@@ -340,17 +340,20 @@ unfixed code, then the fix makes it pass.
 
 ### Reproducible build
 
-`bazel run //tools:reproducible_build` builds `//dcfs:main_static` and
-`//man:dcfs.8` from two copies of the repository at different paths, in two
-Bazel output bases and without a disk cache, and fails unless the outputs are
+`bazel run //tools:reproducible_build` builds `//dcfs:main`,
+`//dcfs:main_static` and `//man:dcfs.8` from two copies of the repository at
+different paths, in two Bazel output bases (one with its own repository
+contents cache) and without a disk cache, and fails unless the outputs are
 byte-identical (it prints the strings that differ). CI runs it as the
-`reproducible` job. Today they are identical with nothing special: the
+`reproducible` job. It holds on one host: the binaries link the host's glibc
+(`main_static` its static `libc.a`), so reproducibility across hosts waits for
+the sysroot (step 7.1b). Today they are identical with nothing special: the
 toolchain redacts `__DATE__`/`__TIME__`, compiles with paths relative to the
 execroot, and the man page carries no date.
 
 ### Coverage
 
-```
+```sh
 bazel coverage --config=presubmit //...      # or a single test: bazel coverage //dcfs:status_test
 ```
 
@@ -365,8 +368,15 @@ tars them onto an extra virtio disk, `run-qemu.sh` merges them
 (`llvm-profdata`) and exports lcov (`llvm-cov`) into Bazel's `COVERAGE_DIR`
 (`test/qemu/README.md`, "Coverage"). A process that does not exit normally
 (a power cut, SIGKILL) leaves no profile, so the crash tests add nothing.
-CI publishes the report of the small and medium tests as the `coverage-lcov`
-artifact; there is no threshold yet (Phase 8).
+The report covers the small and medium tiers only (`--config=presubmit`):
+the large and enormous tests, and the trace-validation tests, are not in it.
+CI publishes it as the `coverage-lcov` artifact (dcfs, bench and tools only);
+there is no threshold yet. The first baseline (small and medium tiers): all
+of `dcfs/*.cc` 92.0% of lines and 72.5% of branches.
+
+Intended scope of the Phase 8 gate: gate on `dcfs/` only; report `bench/` and
+`tools/` (`fhtest.c` and `testutil.c` are test helpers) separately; report
+branches alongside lines.
 
 ## Continuous integration
 
