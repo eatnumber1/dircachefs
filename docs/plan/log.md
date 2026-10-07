@@ -1460,3 +1460,17 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (CI shards, osv cache fix, 6.4a-c, 8.3) rebasing + full tiers -> MERGE FIRST, then russ pushes;
   lane-6 7.1b (interim status asked after 3 h of silence). Needs russ: push after lane-5 merges;
   linux-ext4 report; AGENTS.md cancellation wording at the Phase 22 merge.
+- 7.1b done in lane-6 (step-7.1b): option A+ = @dcfs_llvm: the LLVM release plus a Debian sysroot
+  (libc6/libc6-dev 2.36 from bookworm, linux-libc-dev 6.12 from trixie: bookworm's 6.1 UAPI lacks
+  STATX_MNT_ID_UNIQUE; same snapshot) and the LLVM binaries' runtime libs (libstdc++, libgcc_s,
+  zlib, libxml2, ICU, liblzma; patchelf from Alpine for RUNPATHs); `bin/clang.cfg` makes the
+  sysroot the default (liburing's probes see it too); registered via toolchains_llvm's
+  toolchain_root + sysroot. Remaining host dependence: glibc >= 2.36 to RUN bash/LLVM (Ubuntu
+  24.04 ok, 22.04 not), bash/mktemp/realpath/rm, rules_distroless's tar/grep. Hermeticity build
+  with /usr/include, /usr/lib/gcc, host compilers, libc6-dev files and the runtime libs blocked
+  passes; toolchain_hermetic_test and mkinitramfs_test fail first; main_static now against glibc
+  2.36 and identical over two differently-fetched builds; sanitizer guests take libc from the
+  sysroot. B (Alpine clang/lld) out: musl binary + custom cc_toolchain; B' out: Alpine's libc++/
+  sanitizer runtimes are musl. Pending: `7.1b:` subject prefixes, rebase, full tiers, repro gate;
+  then review. Follow-ups: glibc into the shipped SBOM (git-commit purls only today); extract
+  only the needed parts of the 12 GB tarball.
