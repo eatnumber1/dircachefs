@@ -162,11 +162,13 @@ if [ "$count" = "$N" ]; then
 else
 	fail find-sees-all-entries "find saw $count entries, want $N"
 fi
-# Linear is about 4x for 4x the entries; quadratic about 16x. A floor of 2
-# ticks on the small side keeps a very fast small listing from making the
-# ratio meaningless.
+# Linear is about 4x for 4x the entries; quadratic about 16x (10x measured
+# with a listing that rescans from the start on every reply: 23 and 246
+# ticks). A tick is 10 ms and the small listing now takes a few of them, so
+# a floor of 5 ticks on the small side keeps one tick of noise from making
+# the ratio meaningless (linear measured 4 and 28 ticks: 7x without it).
 small=$quarter_ticks
-[ "$small" -lt 2 ] && small=2
+[ "$small" -lt 5 ] && small=5
 if [ "$many_ticks" -le $((small * 8)) ]; then
 	pass warm-listing-is-not-quadratic
 else
