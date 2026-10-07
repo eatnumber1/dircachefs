@@ -910,3 +910,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   underlying value); ASSERT_OK_AND_ASSIGN once; pjdfstest README. presubmit 146/146, asan small
   26/26. Finishing: getrlimit/setrlimit/flock wrappers (C10 to zero), readlinkat/getgroups loops,
   setattr.sh comments; then review (fresh dcfs-reviewer), then merge and 25.2.
+- GitHub run 37582181373 (b41cd17): osv, fast (Test 153 s), presubmit (Test 305 s) green; full's
+  "Test (all tiers)" step FAILED after 2,110 s (ASan step continues on error, still running).
+  Orchestrator error: reported the step as passed when it had merely finished. Failing tests to be
+  read from the job log / test-log artifact once the job completes; candidates: a large-tier test
+  or a timing budget under runner load (readdir_boundary's 2.5 s wall clock, N4).
