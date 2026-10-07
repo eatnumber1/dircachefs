@@ -160,4 +160,5 @@ if fault_unwrap "$NAME"; then
 else
 	fail unwrap "dmsetup remove failed"
 fi
+require_no_reclaim no-reclaim
 exit "$FAILED"

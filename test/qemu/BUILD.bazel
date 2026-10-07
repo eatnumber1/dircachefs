@@ -126,42 +126,45 @@ qemu_test(
 )
 
 # Step 11.1: I/O errors on the backing disk, through dm-flakey (guest/fault_lib.sh).
-qemu_test(
+qemu_test_matrix(
     name = "fault_backing_test",
     disks = [
-        ("vdb", "ext4", "128M"),
+        ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_backing.sh",
     modules = ["dm_flakey"],
     size = "small",
+    other_size = "medium",
     timeout = "moderate",
 )
 
 # Step 11.1: I/O errors on the cache database's disk.
-qemu_test(
+qemu_test_matrix(
     name = "fault_cache_test",
     disks = [
-        ("vdb", "ext4", "128M"),
+        ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_cache.sh",
     modules = ["dm_flakey"],
     size = "small",
+    other_size = "medium",
     timeout = "moderate",
 )
 
 # Step 11.1: power cuts on real disks: both disks drop writes at one instant,
 # placed in a mutation's phases or a sync point with fsfreeze.
-qemu_test(
+qemu_test_matrix(
     name = "fault_power_test",
     disks = [
-        ("vdb", "ext4", "128M"),
+        ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_power.sh",
     modules = ["dm_flakey"],
     size = "small",
+    other_size = "medium",
     timeout = "moderate",
 )
 

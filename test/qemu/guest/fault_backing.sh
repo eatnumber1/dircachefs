@@ -67,9 +67,21 @@ fd_setup || {
 	exit "$FAILED"
 }
 mkdir "$SRC/d1" "$SRC/d2"
-echo known >"$SRC/d1/known"
 echo other >"$SRC/d2/other"
+# Thousands of files first, so that the one the cold lookup needs is made last
+# and its inode lies in metadata the mount (and dcfs's start) has not read: on
+# btrfs a small tree is one leaf, which a mount reads whole.
+mkdir "$SRC/pad"
+/bin/dcfs_bench mktree "$SRC/pad" 6000 0 >/dev/null 2>&1 || fail pad "could not make the padding tree"
+echo known >"$SRC/d1/known"
 sync
+# Mount the backing filesystem afresh, so that its own caches hold nothing of
+# what the cold lookup below must read from the disk.
+umount "$SRC"
+mount "$(fault_dev "$FD_BACK")" "$SRC" || {
+	fail remount-backing "cannot mount the backing filesystem"
+	exit "$FAILED"
+}
 
 if fd_start "$LOG1"; then
 	pass mount
@@ -138,11 +150,16 @@ if [ ! -e "$MNT/d2/new" ]; then
 else
 	fail create-error-name-not-present "d2/new is served as present"
 fi
-if [ "$(ls "$MNT/d2" 2>&1)" = other ]; then
-	pass create-error-listing
-else
-	fail create-error-listing "ls d2: $(ls "$MNT/d2" 2>&1)"
-fi
+# What dcfs lists is what the failed backing filesystem lists, whatever that
+# is (an error on xfs after its shutdown, nothing on btrfs after its
+# transaction aborted), and never the name whose create failed.
+via_backing=$(ls "$SRC/d2" 2>&1)
+via_dcfs=$(ls "$MNT/d2" 2>&1)
+echo "fault_backing.sh: after the failed create, d2 on the backing filesystem: $via_backing; through dcfs: $via_dcfs"
+case "$via_dcfs" in
+*new*) fail create-error-listing "ls d2 through dcfs shows the failed create: $via_dcfs" ;;
+*) pass create-error-listing ;;
+esac
 if alive; then pass daemon-alive-after-write-error; else fail daemon-alive-after-write-error "the daemon died"; fi
 
 # The disk is healed, and the daemon restarted over the remounted backing
