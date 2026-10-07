@@ -430,6 +430,17 @@ MarkUnknown(d, names, attrs) ==
        THEN [d1 EXCEPT !.complete = FALSE, !.epoch = d.epoch + 1]
        ELSE d1
 
+\* Not the code (known_bugs/effect_before_syscall): a phase 1 that records
+\* a removal's outcome (the names absent) before its syscall, instead of
+\* marking them unknown. A configuration puts it in with MarkUnknown <-
+\* MarkAbsentEarly.
+MarkAbsentEarly(d, names, attrs) ==
+    [d EXCEPT !.dent = [x \in Names |-> IF x \in names THEN Absent
+                                       ELSE d.dent[x]],
+              !.attrValid = IF attrs THEN FALSE ELSE d.attrValid,
+              !.attr = IF attrs THEN 0 ELSE d.attr,
+              !.dirty = TRUE]
+
 \* One transaction, committed durably (kSync: a WAL fsync) unless D is
 \* already durably dirty since the last sync point (the fast path, which
 \* commits at normal durability). Then the mutation is in flight on D
@@ -1087,6 +1098,63 @@ CleanMeansNoDirty == \A s \in dbOpts : s.clean => ~s.dirty
 \* (Mutation::End releases it on every path, an interrupt's included).
 GuardsBalanced ==
     inflight = Cardinality({p \in Procs : ps[p].mseq # 0})
+
+-----------------------------------------------------------------------------
+(* Effect points (step 12.7, SibylFS's call, effect, return): each request *)
+(* has at most one step at which what other requests see of D changes,    *)
+(* and it is the backing syscall of a mutation; a fill's effect is on the  *)
+(* cache only, at its commit, and changes nothing anyone sees. They are   *)
+(* properties of steps ([][A]_vars), so TLC checks them on every           *)
+(* transition: the observer reads D between any two steps.                *)
+
+\* What another request would see of D now: each name's object (or NoObj)
+\* and D's attributes, from the cache where it knows them, else from the
+\* backing filesystem (the fill such a request would make).
+Observed(d, b) ==
+    [names |-> [n \in Names |->
+                  LET r == ReadState(d, n) IN
+                  IF r = Unknown THEN b.names[n]
+                  ELSE IF r = Absent THEN NoObj ELSE r],
+     ver |-> IF d.attrValid THEN d.attr ELSE b.ver]
+
+\* What the cache knows: the names it answers without the backing
+\* filesystem, and whether D's attributes are valid.
+Known(d) == [names |-> {n \in Names : ReadState(d, n) # Unknown},
+             attrs |-> d.attrValid]
+
+\* The request in slot p took a step from pc `from` (and only it did).
+StepFrom(p, from) == ps[p].pc \in from /\ ps'[p] # ps[p]
+
+\* The backing syscalls of the mutations (CSys, USys, RSys).
+SyscallPcs == {"C_sys", "U_sys", "R_sys"}
+\* The steps that record what was read (fills: a resolve, a population, an
+\* attribute fill; and a mutation's phase 3, which records its outcome).
+CommitPcs == {"RN_commit", "PD_commit", "RDP_fill", "GA_fill", "C_fill",
+              "U_fill", "R_fill", "C_rec", "U3", "R3"}
+
+Serving == mode = "up" /\ mode' = "up"
+
+\* What other requests see of D changes only at a mutation's backing
+\* syscall: never at its phase 1 or phase 3, never at a fill, never at a
+\* step of a request that has no syscall (nor at an interrupt). Each
+\* request reaches its syscall at most once, so it has at most one effect
+\* point.
+EffectAtSyscall ==
+    [][(Serving /\ Observed(dbCur', bCur') # Observed(dbCur, bCur))
+         => \E p \in Procs : StepFrom(p, SyscallPcs)]_vars
+
+\* ... and the backing filesystem changes only there (while serving; a
+\* crash may undo unsynced changes, which is no request's effect).
+BackingAtSyscall ==
+    [][(Serving /\ bCur' # bCur) => \E p \in Procs : StepFrom(p, SyscallPcs)]_vars
+
+\* The cache learns (a name it did not know, or D's attributes) only at a
+\* commit of what a request read; that changes nothing anyone sees
+\* (EffectAtSyscall).
+CacheLearnsAtCommit ==
+    [][(Serving /\ (Known(dbCur').names \ Known(dbCur).names # {}
+                    \/ (Known(dbCur').attrs /\ ~Known(dbCur).attrs)))
+         => \E p \in Procs : StepFrom(p, CommitPcs)]_vars
 
 \* Recovery always terminates: the daemon always gets back to serving.
 RecoveryTerminates == (mode # "up") ~> (mode = "up")
