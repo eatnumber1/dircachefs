@@ -731,6 +731,10 @@ qemu_cc_test(
     # About 70 s at load 19 (the N = 1000 runs): presubmit, not fast.
     size = "medium",
     timeout = "moderate",
+    # Under ASan it peaks at 642 MiB in use (MEM peak_used=656992 KiB at
+    # -m 1536, 2026-10-08); with the kernel's 18.5 MiB, 660 + 50% rounds up
+    # to 1024 (test/qemu/README.md, "Guest memory").
+    asan_mem = 1024,
     srcs = ["dir_cache_fs_test.cc"],
     args = ["--gtest_filter=SlopeTest.*"],
     disks = [("vdb", "ext4", "32M")],
@@ -804,7 +808,9 @@ TRACE_GROUP_B = [
 TRACE_GROUP_FILTERS = {
     "a": ":".join(TRACE_GROUP_A),
     "b": ":".join(TRACE_GROUP_B),
-    "c": "*-" + ":".join(TRACE_GROUP_A + TRACE_GROUP_B),
+    # Not the fault sweep and the slope tests either: they record no trace
+    # and have targets of their own (as in dir_cache_fs_test's filter).
+    "c": "*-" + ":".join(TRACE_GROUP_A + TRACE_GROUP_B + ["FaultSitesTest.*", "SlopeTest.*"]),
 }
 
 [
@@ -837,6 +843,9 @@ TRACE_GROUP_FILTERS = {
         name = "dir_cache_fs_trace_%s_test" % group,
         size = "medium",
         timeout = "long",
+        # The harness's binary (dir_cache_fs_test's asan_mem); at the
+        # default 384 MiB the ASan run ran out of memory.
+        asan_mem = 1088,
         disks = ["vdb:ext4:32M"],
         initramfs = ":dir_cache_fs_trace_%s.cpio.gz" % group,
         lock = False,
