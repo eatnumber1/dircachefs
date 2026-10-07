@@ -1492,3 +1492,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `workflow_dispatch` input `cold: true` skips the caches so the cold path can be exercised on
   purpose; osv's one-minute past was the small module graph, not a special job: every job that
   evaluates the module graph restores the repository cache. Added to lane-4's CI follow-up.
+- GitHub run 37690838032 (38303ec): osv green (the cache fix held: 1 min); fast failed at the
+  subject gate on e3fe0aa ("12.5 review: ..."), everything else skipped. Fixes: the gate becomes
+  its own non-gating job (lane-4); the orchestrator runs commit_subjects.sh over every branch
+  before merging (process.md). A push of main past 38303ec (plan: commits only) runs the full
+  pipeline.

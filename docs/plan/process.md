@@ -91,7 +91,10 @@ process (its waves and file ownership table) is in `history.md`.
    Fixes go back to the same agent with `SendMessage` (it keeps its
    context, which is cheaper than a new agent).
 6. **Merge.** In the lane: rebase the step branch on `origin/main` and
-   rerun the tests. Then, in `~/Sources/dircachefs`: `git fetch
+   rerun the tests. Run `.github/ci/commit_subjects.sh origin/main..<branch>`
+   in the lane (the CI subject gate; two pushed runs were lost to a
+   `N4:` and a `12.5 review:` subject before this line existed). Then, in
+   `~/Sources/dircachefs`: `git fetch
    ~/Sources/dircachefs-lanes/lane-K step-N.M` and `git merge --ff-only
    FETCH_HEAD`. Update the status table and `log.md` and commit them.
    The lane stays for the next step.
