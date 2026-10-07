@@ -321,9 +321,15 @@ reports as distinct states (since step 23.4's `linkcreate`, run of
 | `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants and the three effect-point properties (step 12.7; also in `MC_recovery.cfg` and `MC_liveness.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) | 773,371 | ~1 min (4-5 min at load 20, 2026-10-07) |
 | `MC_recovery.cfg` | `recovery_test` (medium) | 1 name, 1 slot, 2 mutations, 2 crashes (one can come during the recovery of a dirty database: steps 12.6, 12.6b), all request kinds, all invariants and properties | 22,706 | ~15 s |
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 75,184 | ~10 s |
-| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 7,238,097 | ~8 min |
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 7,238,097 | ~8 min unloaded; 26 min alone at load 15 (2026-10-07: over the 900 s timeout) |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 6,036,816 | ~5 min unloaded; 18 min alone at load 15 (2026-10-07: over the 900 s timeout) |
+| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 207,595 | ~45 s |
+| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one) | 840,060 | ~2 min |
+| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation | 923,187 | ~2-3 min |
+
+`Interrupts` (Phase 22) is off in the first five: with it, `MC_small.cfg`
+grows to 2,154,085 states (6 min), so the interrupts have configurations
+of their own. All of them check `GuardsBalanced`.
 
 The `View` (in `MC.tla`) merges database states a crash may leave when
 recovery would make the same cache of them: a dirty state's rows are
