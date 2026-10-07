@@ -699,3 +699,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Needs russ: (1) L-b: accept the always-re-check default or document the trade; (2) L-e kernel gap:
   a FUSE patch (fuse_invalidate_attr after a successful fileattr_set) is small and upstreamable, or
   dcfs sends notify_inval_inode (needs the notifier thread), or it stays a documented limitation.
+- russ (2026-10-07): Phase 24 simplified: the pin is the Alpine stable branch only; Alpine advancing
+  within the series must never fail a test or job; no alpine.lock, no exact-version escape hatch, no
+  drift test (they only served each other). Resolution lives in the repository rule (not in the
+  lockfile); CI fetches fresh, developers refetch with `bazel fetch --force`; the weekly schedule is
+  the suite on a fresh fetch, not a version check.
