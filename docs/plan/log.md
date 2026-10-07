@@ -1009,3 +1009,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   strace_lib.sh (`strace_op`, reducer to backing/cache/proc/fuse kinds), goldens per operation
   and cache state explained by design.md (a discrepancy stops that check and is reported),
   self-check over a canned trace, README section.
+- destroy_test fix merged (a5f3227, lane-2): mem=1536 (needs ~1030; GitHub runners have 16 GB),
+  exact thresholds (100,010 held after write, with the holder, after the drop), reclaim counters
+  on every MEM line + run-qemu WARNING + `require_no_reclaim` in destroy/idle/release_leak, guest
+  timeout = TEST_TIMEOUT - 60 s (1800 only when unset; TIMEOUT= wins); verdict test covers both.
+  destroy_test 1140 s under load, reclaim_scans=0. CI's only red test should be green next push.
