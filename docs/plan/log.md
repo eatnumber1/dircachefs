@@ -1005,3 +1005,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   referenced, DISABLED_ names in README Limitations; tagged external: Bazel cannot declare "every
   directory" as an input) + .github/ci/commit_subjects.sh in the fast job. Tree fixes: pjdfstest
   README, two DISABLED_ names added to README Limitations. Each with a self-check. fast 117/117.
+- Dispatched 26.3 strace golden traces (lane-3, implementer): Alpine strace into the guest,
+  strace_lib.sh (`strace_op`, reducer to backing/cache/proc/fuse kinds), goldens per operation
+  and cache state explained by design.md (a discrepancy stops that check and is reported),
+  self-check over a canned trace, README section.

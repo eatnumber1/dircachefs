@@ -44,7 +44,7 @@ phase's file; `log.md` says where things stand.
 | 23 | [Semantics gaps: mmap/FORGET reconcile, removed objects, relatime, O_TMPFILE/copy_file_range/reflinks/ioctls, boundary stubs](phases/23-semantics-gaps.md) | done 2026-10-07 (23.1-23.5 e5c27cc; 23.6 held fd + 23.7 review fixes a64e666, two review rounds; one open investigation, see phase file) |
 | 24 | [Alpine series pins for the kernel and host tools](phases/24-alpine-series-pins.md) | done 2026-10-07 (d0b2cc2: kernel linux-virt 6.18 + QEMU, e2fsprogs, xfsprogs, btrfs-progs, busybox from Alpine v3.24; ~30 min of cold compiles -> 22 s fetch; two review rounds) |
 | 25 | [Style convergence](phases/25-style-convergence.md) | in progress (25.1 started 2026-10-07, lane-1; 25.2 after it; format items in 7.6/7.7) |
-| 26 | [Bumpers: narrow checks around generated code](phases/26-bumpers.md) | in progress (26.1 done 2026-10-07 d5b6607; 26.8/26.9/26.13 next in lane-3; 26.2 after 25.1; 26.6 approved as a try, must report its runtime) |
+| 26 | [Bumpers: narrow checks around generated code](phases/26-bumpers.md) | in progress (26.1, 26.8, 26.9, 26.13 done 2026-10-07; 26.3 started in lane-3; 26.2/26.7/26.10 after 25.1; 26.4 with 26.3; 26.5 after 7.2; 26.6 approved as a try, must report its runtime; 26.11 after 25.2; 26.12 after 7.1) |
 | 22 | [Request cancellation (Ctrl+C, EINTR)](phases/22-cancellation.md) | planned; runs here, after R4, before 13 |
 | 13 | [Connected backing fds](phases/13-connected-backing-fds.md) | planned |
 | 14 | [Identity from the backing filesystem](phases/14-identity-from-backing-fs.md) | planned |
