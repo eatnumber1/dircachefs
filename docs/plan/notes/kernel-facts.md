@@ -64,3 +64,15 @@ relying on one after a kernel upgrade.
 - `FS_IOC_GETFSUUID` exists since Linux 6.9.
 - Encrypted directories are reported by `STATX_ATTR_ENCRYPTED`;
   case-insensitive directories by `FS_CASEFOLD_FL` (`FS_IOC_GETFLAGS`).
+
+## fileattr_set does not invalidate FUSE's attribute cache (found 2026-10-07)
+
+`fuse_fileattr_set` (fs/fuse/ioctl.c) and `vfs_fileattr_set` (fs/file_attr.c)
+do not call `fuse_invalidate_attr` after a successful FS_IOC_SETFLAGS /
+FS_IOC_FSSETXATTR, so a `stat` after `chattr` through dcfs serves the ctime
+cached by the preceding GETATTR until the attribute timeout. Seen as the
+one-in-eight `immutable-ctime` failure (seconds differ only across a second
+boundary). Decision (russ): documented limitation (README), check kept as
+`DISABLED_immutable-ctime`. A fix would be a one-line kernel patch
+(invalidate attrs after a successful fileattr_set) or notify_inval_inode
+from dcfs (needs the notifier thread).

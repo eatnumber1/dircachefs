@@ -704,3 +704,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   drift test (they only served each other). Resolution lives in the repository rule (not in the
   lockfile); CI fetches fresh, developers refetch with `bazel fetch --force`; the weekly schedule is
   the suite on a fresh fetch, not a version check.
+- russ (2026-10-07): btrfs/FUSE ctime-after-chattr stays a documented limitation (no kernel patch
+  now); the failing check is kept and disabled by name (`DISABLED_immutable-ctime`, a `disabled`
+  helper in guest/lib.sh that reports its would-be verdict and never fails). Test-first check: yes
+  for every behaviour change so far; exceptions on record: the EMFILE fallback test written after
+  the code (verified to discriminate), destroy_test (measurement only), CI/config commits.
