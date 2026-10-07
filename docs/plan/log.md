@@ -1259,3 +1259,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   stale step_counter comment, re-measure the ratio check's bite on the faster code, one macro
   for the attribute columns, the step counter counts without formatting SQL (the ASan peak),
   ReadOne's unique-only contract guarded in the checking build.
+- russ (2026-10-08): auto-mode denials resolved; libfuse's io_uring stays (needed later; libnuma +
+  liburing remain shipped with their banned-symbol allows); coverage baseline to be looked at
+  when convenient; a push from f9103b3 is reasonable (first GitHub run on the clang toolchain).
