@@ -29,7 +29,7 @@ SKIP = re.compile(
             r"|polly|clang-tidy|clang-include-fixer)(/.*)?",
             # Tools nothing here runs.
             r"bin/(mlir-[^/]*|flang[^/]*|f18[^/]*|fir-[^/]*|bbc|tco|lldb[^/]*"
-            r"|clang-repl|clang-check|clangd|clang-doc|clang-change-namespace"
+            r"|clang-repl|clang-check|clang-doc|clang-change-namespace"
             r"|clang-move|clang-include-fixer|clang-reorder-fields"
             r"|clang-refactor|clang-extdef-mapping|clang-installapi"
             r"|clang-nvlink-wrapper|clang-sycl-linker|clang-linker-wrapper"
