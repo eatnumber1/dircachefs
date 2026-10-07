@@ -19,7 +19,7 @@
 #include "dcfs/fd.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/status.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"

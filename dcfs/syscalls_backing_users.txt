@@ -1,0 +1,44 @@
+# The direct dependents of //dcfs:syscalls_backing (tools/syscalls_backing_users.py).
+# A new line is a deliberate, reviewed edit: docs/style.md 1.8.
+
+# backing and its lower layers (file_handle: name_to_handle_at/statx/openat/open_by_handle_at; device_id: fstatfs/ioctl/openat)
+//dcfs:backing
+//dcfs:device_id
+//dcfs:file_handle
+
+# startup: main opens --source and the cache database (openat, fstat, fstatat, mkdirat, fchmod); mounts_below reads /proc/self/mountinfo (openat, read: procfs, no backing disk)
+//dcfs:main
+//dcfs:main_static
+//dcfs:main_static_traced
+//dcfs:mounts_below
+
+# testonly code and benchmark driver (trace file, fault wraps, test fixtures)
+//dcfs/testonly:files
+//dcfs/testonly:main_recorder
+//dcfs/testonly:snapshot_after_syncfs
+//dcfs/testonly:trace_recorder
+//dcfs/testonly:trace_recorder_test_bin
+
+# tests
+//dcfs/testonly:trace_recorder_test_bin
+//dcfs:backing_fault_test_bin
+//dcfs:backing_test_bin
+//dcfs:device_id_test_bin
+//dcfs:dir_cache_fs_fault_create_syscall_before_phase1_test_bin
+//dcfs:dir_cache_fs_fault_phase3_before_syscall_test_bin
+//dcfs:dir_cache_fs_fault_skip_mark_unknown_test_bin
+//dcfs:dir_cache_fs_fault_snapshot_after_syncfs_test_bin
+//dcfs:dir_cache_fs_fault_swallow_syscall_error_test_bin
+//dcfs:dir_cache_fs_fault_syscall_before_phase1_test_bin
+//dcfs:dir_cache_fs_test_bin
+//dcfs:fd_test_bin
+//dcfs:file_handle_test_bin
+//dcfs:fuse_request_channel_test_bin
+//dcfs:mount_fds_test_bin
+//dcfs:mounts_below_test_bin
+//dcfs:sqlite_test_bin
+//dcfs:syscalls_process_test_bin
+//dcfs:syscalls_test_bin
+
+# benchmark driver
+//bench:bench_lib

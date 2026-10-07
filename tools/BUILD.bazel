@@ -186,6 +186,33 @@ py_test(
     deps = [":shipped_deps_lib"],
 )
 
+# ---- Step 26.7: who may depend on the backing-reaching syscalls ---------
+
+# //dcfs:syscalls_backing_users (the direct dependents of
+# //dcfs:syscalls_backing) against dcfs/syscalls_backing_users.txt: the
+# layering rule of docs/style.md 1.8 as a golden of the build graph.
+py_library(
+    name = "syscalls_backing_users_lib",
+    srcs = ["syscalls_backing_users.py"],
+    imports = ["."],
+)
+
+py_test(
+    name = "syscalls_backing_users_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["syscalls_backing_users_test.py"],
+    args = [
+        "graph=$(location //dcfs:syscalls_backing_users)",
+        "golden=$(location //dcfs:syscalls_backing_users.txt)",
+    ],
+    data = [
+        "//dcfs:syscalls_backing_users",
+        "//dcfs:syscalls_backing_users.txt",
+    ],
+    deps = [":syscalls_backing_users_lib"],
+)
+
 # ---- Step 26.13: repository-shape tests ---------------------------------
 
 py_library(

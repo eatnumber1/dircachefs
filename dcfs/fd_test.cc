@@ -7,6 +7,7 @@
 #include "absl/status/status_matchers.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {

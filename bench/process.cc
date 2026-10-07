@@ -15,6 +15,7 @@
 #include "absl/strings/strip.h"
 #include "dcfs/fd.h"
 #include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"
 #include "dcfs/testonly/files.h"
 

@@ -22,6 +22,7 @@ MAIN_DEPS = [
     ":sqlite",
     ":status",
     ":syscalls",
+    ":syscalls_backing",
     "@absl//absl/base:log_severity",
     "@absl//absl/cleanup",
     "@absl//absl/flags:flag",
@@ -103,6 +104,7 @@ qemu_cc_test(
       ":ret_check",
       ":sqlite",
       ":syscalls",
+      ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
@@ -199,6 +201,8 @@ qemu_cc_test(
     ],
 )
 
+# The process-local wrappers (syscalls.h) and the FileDescriptor type: nothing
+# here can reach the backing filesystem, so any target may depend on it.
 cc_library(
     name = "syscalls",
     visibility = [
@@ -249,10 +253,34 @@ qemu_cc_test(
     deps = [
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       ":syscalls_process",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
+    ],
+)
+
+# The backing-reaching wrappers (syscalls_backing.h): anything given a backing
+# fd, file handle or name. Visible to this package, testonly and bench; which
+# targets of those may depend on it is //tools:syscalls_backing_users_test's
+# golden (dcfs/syscalls_backing_users.txt), docs/style.md 1.8.
+cc_library(
+    name = "syscalls_backing",
+    srcs = ["syscalls_backing.cc"],
+    hdrs = ["syscalls_backing.h"],
+    visibility = [
+      "//bench:__pkg__",
+      "//dcfs/testonly:__pkg__",
+    ],
+    deps = [
+      ":escape",
+      ":status",
+      ":syscalls",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@absl//absl/strings:str_format",
     ],
 )
 
@@ -264,6 +292,7 @@ qemu_cc_test(
     deps = [
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "@absl//absl/log:check",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
@@ -280,6 +309,7 @@ qemu_cc_test(
     deps = [
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
@@ -305,6 +335,7 @@ qemu_cc_test(
       ":backing",
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
@@ -365,6 +396,7 @@ qemu_cc_test(
       ":fuse_request",
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
@@ -396,6 +428,7 @@ cc_library(
     deps = [
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "@absl//absl/status:status_builder",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
@@ -425,6 +458,7 @@ qemu_cc_test(
       ":device_id",
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "@absl//absl/hash",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
@@ -459,6 +493,7 @@ qemu_cc_test(
       ":device_id",
       ":mount_fds",
       ":syscalls",
+      ":syscalls_backing",
       "@absl//absl/log:check",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
@@ -477,6 +512,7 @@ cc_library(
       ":mount_fds",
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
@@ -498,6 +534,7 @@ qemu_cc_test(
       ":mount_fds",
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/hash",
       "@absl//absl/status",
@@ -557,6 +594,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     ":sqlite",
     ":status",
     ":syscalls",
+    ":syscalls_backing",
     "//dcfs/testonly:assert_ok_and_assign",
     "//dcfs/testonly:files",
     "//dcfs/testonly:trace_recorder",
@@ -715,6 +753,7 @@ cc_library(
       ":escape",
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
@@ -730,6 +769,7 @@ qemu_cc_test(
     deps = [
       ":mounts_below",
       ":syscalls",
+      ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
@@ -928,6 +968,7 @@ cc_library(
       ":ret_check",
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "@absl//absl/cleanup",
       "@absl//absl/container:flat_hash_map",
       "@absl//absl/container:flat_hash_set",
@@ -959,6 +1000,7 @@ qemu_cc_test(
       ":sqlite",
       ":status",
       ":syscalls",
+      ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
       "//dcfs/testonly:files",
       "@absl//absl/base:log_severity",
@@ -1060,3 +1102,33 @@ qemu_cc_test(
     }),
     deps = ["@googletest//:gtest_main"],
 )
+
+# The direct dependents of //dcfs:syscalls_backing, for
+# //tools:syscalls_backing_users_test (step 26.7): which targets may reach the
+# backing filesystem through syscalls is a golden list
+# (syscalls_backing_users.txt), so the layering rule of docs/style.md 1.8 is
+# enforced by the build graph. (A genquery's scope takes labels only, so the
+# universe is every test of the packages, the daemon variants and the
+# benchmark library (not its binary: google_benchmark pulls a download):
+# anything that links the wrappers is under one of them.)
+test_suite(name = "every_test")
+
+genquery(
+    name = "syscalls_backing_users",
+    expression = "rdeps(set(//dcfs:every_test //dcfs/testonly:every_test //dcfs:main //dcfs:main_static //dcfs:main_static_traced //bench:bench_lib), //dcfs:syscalls_backing, 1) - //dcfs:syscalls_backing",
+    opts = [
+        "--output=label",
+        "--noimplicit_deps",
+    ],
+    scope = [
+        ":every_test",
+        ":main",
+        ":main_static",
+        ":main_static_traced",
+        "//bench:bench_lib",
+        "//dcfs/testonly:every_test",
+    ],
+    visibility = ["//tools:__pkg__"],
+)
+
+exports_files(["syscalls_backing_users.txt"])

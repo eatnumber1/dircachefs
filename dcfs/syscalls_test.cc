@@ -1,4 +1,5 @@
 #include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 
 #include <fcntl.h>
 #include <linux/fs.h>

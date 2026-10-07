@@ -127,8 +127,9 @@ layout is from `man 2 getdents`), not a wrapper. The process-control wrappers
 daemon never links `fork` or `execv` (`tools/banned_symbols.txt`).
 
 **No raw syscalls anywhere** (russ, 2026-10-07: a firm rule). Syscalls go
-through `dcfs/syscalls.h`, where the failure is handled and converted into
-a `Status`: no call of a libc syscall wrapper outside `dcfs/syscalls.cc` and
+through `dcfs/syscalls.h` and `dcfs/syscalls_backing.h`, where the failure
+is handled and converted into a `Status`: no call of a libc syscall wrapper
+outside `dcfs/syscalls.cc`, `dcfs/syscalls_backing.cc` and
 `dcfs/syscalls_process.cc`, in production code, tests, `dcfs/testonly/`,
 `bench/` and any C++ in `tools/`; and no `std::filesystem` or file stream
 (`std::ifstream`, `std::ofstream`, `std::fstream`), which open and walk files
@@ -283,8 +284,15 @@ each.
   `ioctl`); plus startup in `main.cc` (`openat` of `--source`, `fstat`).
   Process-local syscalls (resource limits, credentials, `/proc` reads, the
   cache database file, mount tables) may call the `syscalls::` wrappers
-  directly from any file. Only `syscalls.cc` calls libc directly. `cache::`
-  is pure SQLite: it never sees a descriptor.
+  directly from any file. The build graph enforces the split: the
+  backing-reaching wrappers are `//dcfs:syscalls_backing`
+  (`syscalls_backing.h`), the process-local ones `//dcfs:syscalls` (`syscalls.h`), and
+  `//tools:syscalls_backing_users_test` compares the targets that depend on
+  the former with `dcfs/syscalls_backing_users.txt` (a new dependent is a
+  reviewed edit; `dir_cache_fs` and `metadata_cache` are not on the list).
+  `mounts_below` is on it for its two `/proc/self/mountinfo` reads (`openat`,
+  `read`: procfs, no backing disk). Only the three wrapper files call libc
+  directly. `cache::` is pure SQLite: it never sees a descriptor.
 - **No transaction spans a backing syscall.** Backing I/O first, then one
   short synchronous transaction (`ctx.db.Transaction(...)`); no statement
   cursor held across a syscall; `AsCaller` wraps one syscall.

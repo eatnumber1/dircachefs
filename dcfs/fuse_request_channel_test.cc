@@ -33,7 +33,7 @@
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/status.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"

@@ -46,6 +46,7 @@
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "dcfs/testonly/files.h"
 #include "gmock/gmock.h"

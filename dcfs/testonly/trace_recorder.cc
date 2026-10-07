@@ -28,7 +28,7 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
 #include "sqlite3.h"
 

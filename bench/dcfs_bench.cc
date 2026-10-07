@@ -39,6 +39,7 @@
 #include "bench/tree.h"
 #include "dcfs/fd.h"
 #include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 
 namespace dcfs_bench {
 namespace {

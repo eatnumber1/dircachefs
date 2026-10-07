@@ -12,7 +12,7 @@
 #include "absl/status/statusor.h"
 #include "dcfs/context.h"
 #include "dcfs/metadata_cache.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 
 namespace dcfs::testonly {
 

@@ -19,7 +19,7 @@
 #include "absl/strings/str_split.h"
 #include "bench/process.h"
 #include "dcfs/fd.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/files.h"
 
 namespace dcfs_bench {

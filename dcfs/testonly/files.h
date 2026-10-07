@@ -13,7 +13,7 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "dcfs/fd.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 
 namespace dcfs::testonly {
 

@@ -13,7 +13,7 @@
 #include "absl/status/statusor.h"
 #include "dcfs/fd.h"
 #include "dcfs/protocol_events.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/trace_recorder.h"
 
 namespace dcfs {

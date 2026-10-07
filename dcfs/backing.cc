@@ -45,6 +45,7 @@
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs::backing {

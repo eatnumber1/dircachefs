@@ -21,7 +21,8 @@ quote, and a call whose name is a local function or lambda of the same
 spelling (a false positive: rename it).
 
 Scanned: the C++ of dcfs/, dcfs/testonly/ and bench/. Excluded:
-dcfs/syscalls.cc and dcfs/syscalls_process.cc (the wrappers) and their headers.
+dcfs/syscalls.cc, dcfs/syscalls_backing.cc and dcfs/syscalls_process.cc (the
+wrappers) and their headers.
 Not scanned: tools/fhtest.c and tools/testutil.c (C programs run in the
 guest) and tools/banned_symbols_fixture.cc (it has banned calls on purpose).
 """
@@ -33,6 +34,8 @@ import unittest
 EXCLUDED = (
     "dcfs/syscalls.cc",
     "dcfs/syscalls.h",
+    "dcfs/syscalls_backing.cc",
+    "dcfs/syscalls_backing.h",
     "dcfs/syscalls_process.cc",
     "dcfs/syscalls_process.h",
 )

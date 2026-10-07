@@ -8,6 +8,7 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 cc_library(
     name = "bench_lib",
     testonly = 1,
+    visibility = ["//dcfs:__pkg__"],
     srcs = [
         "dm_delay.cc",
         "process.cc",
@@ -20,6 +21,7 @@ cc_library(
     ],
     deps = [
         "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "//dcfs:syscalls_process",
         "//dcfs/testonly:files",
         "@absl//absl/status",
@@ -44,6 +46,7 @@ cc_binary(
     deps = [
         ":bench_lib",
         "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
         "@google_benchmark//:benchmark",

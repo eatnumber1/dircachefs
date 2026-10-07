@@ -20,7 +20,6 @@
 #include "absl/time/time.h"
 #include "dcfs/credentials.h"
 #include "dcfs/status.h"
-#include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {

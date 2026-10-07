@@ -21,7 +21,7 @@
 #include "dcfs/fd.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/status.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 
 namespace dcfs {
 namespace {

@@ -27,6 +27,7 @@ cc_library(
     ],
     deps = [
         "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/status:status_macros",
         "@absl//absl/status:statusor",
     ],
@@ -48,6 +49,7 @@ cc_library(
         "//dcfs:sqlite",
         "//dcfs:status",
         "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/functional:function_ref",
         "@absl//absl/log:check",
         "@absl//absl/status",
@@ -68,6 +70,7 @@ cc_library(
         ":trace_recorder",
         "//dcfs:protocol_events",
         "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/log:check",
         "@absl//absl/status:statusor",
     ],
@@ -122,6 +125,7 @@ cc_library(
         "//dcfs:context",
         "//dcfs:metadata_cache",
         "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/status",
         "@absl//absl/status:statusor",
     ],
@@ -148,6 +152,7 @@ qemu_cc_test(
         "//dcfs:sqlite",
         "//dcfs:status",
         "//dcfs:syscalls",
+        "//dcfs:syscalls_backing",
         "@absl//absl/random",
         "@absl//absl/status",
         "@absl//absl/status:status_matchers",
@@ -189,4 +194,10 @@ filegroup(
     name = "cxx_sources",
     srcs = glob(["*.cc", "*.h"]),
     visibility = ["//tools:__pkg__"],
+)
+
+# Every test of this package, for //dcfs:syscalls_backing_users's scope.
+test_suite(
+    name = "every_test",
+    visibility = ["//dcfs:__pkg__"],
 )

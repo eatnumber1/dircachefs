@@ -24,7 +24,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "dcfs/status.h"
-#include "dcfs/syscalls.h"
+#include "dcfs/syscalls_backing.h"
 
 // This host's kernel headers (6.8) predate FS_IOC_GETFSUUID (added in
 // 6.9). The definitions below are copied verbatim from the upstream UAPI
