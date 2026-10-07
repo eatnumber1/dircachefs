@@ -882,3 +882,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   address: 0000000000000018)` on 6.18.55; `kernel_failure = "expected"` opt-in, refused for unit
   mode or any other script; an oops is tolerated only if the guest itself reported it as would
   FAIL; warnings/panics still fail. Verdict test +8 cases. fast 85/85.
+- Dispatched (lane-2, dcfs-investigator): why destroy_test saw ~1,000 FORGETs of 100,010 pinned
+  inodes at 832 MiB; hypothesis order: opath-hold-tree holds fewer than counted; the cap; a
+  non-final FORGET (nlookup < count) wrongly dropping the held fd (would be a dcfs bug, test
+  first); inode-cache shrinking; fd counting. Threshold (>= 90%) to be tightened either way.
