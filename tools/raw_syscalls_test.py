@@ -14,6 +14,11 @@ call through a macro or function pointer, a name not in the list, a raw
 string literal containing a quote, and a call whose name is a local
 function or lambda of the same spelling (a false positive: rename it).
 
+It is a ratchet while the tree converges (step 25.1c): raw_syscalls_baseline.txt
+holds the count per file still to convert, and the test fails when any file
+has more than its baseline (a new file has baseline 0). Delete a line when
+its file is converted.
+
 Excluded files: dcfs/syscalls.cc (the wrappers) and dcfs/syscalls.h (their
 declarations). tools/*.c are C programs and are not scanned.
 """
@@ -110,28 +115,45 @@ class FinderTest(unittest.TestCase):
                          [(3, "close")])
 
 
+def load_baseline(path):
+    """Per-file counts of the raw calls not converted yet ("count path")."""
+    baseline = {}
+    with open(path) as f:
+        for l in f:
+            if l.strip() and not l.startswith("#"):
+                count, name = l.split()
+                baseline[name] = int(count)
+    return baseline
+
+
 def main(argv):
-    names_file, files = argv[0], argv[1:]
+    """A ratchet: a file may have no more raw calls than its baseline."""
+    names_file, baseline_file, files = argv[0], argv[1], argv[2:]
     pat = pattern(load_names(names_file))
-    counts = collections.OrderedDict()
+    baseline = load_baseline(baseline_file)
+    failed = False
     lines = []
+    total = 0
     for path in sorted(files):
         if path.endswith(EXCLUDED):
             continue
         with open(path) as f:
             hits = find_raw_calls(f.read(), pat)
-        if hits:
-            counts[path] = len(hits)
+        total += len(hits)
+        allowed = baseline.get(path, 0)
+        if len(hits) > allowed:
+            failed = True
             lines += ["%s:%d: raw %s(): use syscalls::%s" % (path, l, n, n)
                       for l, n in hits]
-    if counts:
-        print("\n".join(lines))
-        print("\nraw syscall calls per file:")
-        for path, c in counts.items():
-            print("  %4d  %s" % (c, path))
-        print("  %4d  total" % sum(counts.values()))
-        return 1
-    return 0
+            lines.append("%s has %d raw calls, baseline %d" %
+                         (path, len(hits), allowed))
+        elif len(hits) < allowed:
+            lines.append("note: %s has %d raw calls, baseline %d: lower it "
+                         "in %s" % (path, len(hits), allowed,
+                                    baseline_file))
+    print("\n".join(lines))
+    print("raw syscall calls in the tree: %d" % total)
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

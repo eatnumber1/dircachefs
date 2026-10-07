@@ -212,15 +212,16 @@ sh_test(
     data = ["//:.github/ci/commit_subjects.sh"],
 )
 
-# Every syscall goes through dcfs/syscalls.h (docs/style.md): no raw libc
+# Every syscall goes through dcfs/syscalls.h (docs/style.md 1.5): no raw libc
 # call outside dcfs/syscalls.cc in any C++ file. The finder's own unit tests
-# run always; the scan of the tree is tagged manual until step 25.1b's
-# conversion of the tests, testonly code and bench lands (then the tag goes).
+# are one target; the scan of the tree is a ratchet (a file's raw calls may
+# not exceed raw_syscalls_baseline.txt) until step 25.1c converts the rest.
 # tools/*.c are C programs run in the guest and are not scanned; a C++ file
 # added to tools/ needs a filegroup like the other packages' cxx_sources.
 py_test(
     name = "raw_syscalls_finder_test",
     size = "small",
+    timeout = "short",
     srcs = ["raw_syscalls_test.py"],
     main = "raw_syscalls_test.py",
 )
@@ -228,20 +229,22 @@ py_test(
 py_test(
     name = "raw_syscalls_test",
     size = "small",
+    timeout = "short",
     srcs = ["raw_syscalls_test.py"],
     args = [
         "--scan",
         "$(location raw_syscalls_names.txt)",
+        "$(location raw_syscalls_baseline.txt)",
         "$(locations //dcfs:cxx_sources)",
         "$(locations //dcfs/testonly:cxx_sources)",
         "$(locations //bench:cxx_sources)",
     ],
     data = [
+        "raw_syscalls_baseline.txt",
         "raw_syscalls_names.txt",
         "//bench:cxx_sources",
         "//dcfs:cxx_sources",
         "//dcfs/testonly:cxx_sources",
     ],
     main = "raw_syscalls_test.py",
-    tags = ["manual"],
 )

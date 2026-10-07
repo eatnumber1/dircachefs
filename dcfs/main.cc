@@ -337,8 +337,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     absl::StatusOr<FileDescriptor> opened =
         syscalls::openat(AT_FDCWD, source, O_RDONLY | O_DIRECTORY);
     if (!opened.ok()) {
-      return absl::StatusBuilder(opened.status())
-          << " (--source=" << source << ")";
+      return absl::StatusBuilder(opened.status()) << "--source=" << source;
     }
     source_fd = *std::move(opened);
     ABSL_ASSIGN_OR_RETURN(backing_root, syscalls::fstat(*source_fd));
@@ -375,7 +374,10 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
       std::string parent = slash == 0 ? "/" : cache_db.substr(0, slash);
       absl::StatusOr<struct stat> st = syscalls::fstatat(AT_FDCWD, parent);
       if (!st.ok()) {
-        if (StatusToErrno(st.status()) != ENOENT) return st.status();
+        if (StatusToErrno(st.status()) != ENOENT) {
+          return absl::StatusBuilder(st.status())
+                 << "cache database directory " << parent;
+        }
         ABSL_RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, parent, 0700))
             << "creating cache database directory " << parent;
       } else if ((st->st_mode & (S_IRWXG | S_IRWXO)) != 0) {

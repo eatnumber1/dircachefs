@@ -1,5 +1,5 @@
 # Libc/POSIX calls that must go through the dcfs::syscalls wrappers (docs/style.md,
-# 1.2 "Syscalls"). One name per line; read by tools/raw_syscalls_test.py.
+# 1.5). One name per line; read by tools/raw_syscalls_test.py.
 # Add a name here when a new wrapper is added to dcfs/syscalls.h.
 mkdir
 mkdirat
@@ -123,5 +123,6 @@ clock_gettime
 fork
 execve
 unshare
+realpath
 setns
 pivot_root

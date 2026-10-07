@@ -131,12 +131,14 @@ Non-goals:
 
 Rules that keep the layering honest:
 
-- **Only `backing.cc` touches the backing filesystem for request work.**
-  `DirCacheFS` and `cache::` never call `syscalls::`. The lower-level
-  modules `backing.cc` is built from (`file_handle.cc`, `device_id.cc`,
-  `fd.cc`) also call `syscalls::`, and `main.cc` opens `--source` once at
-  startup; those are peers, not violations. The point is that the
-  io_uring rewrite replaces one module.
+- **Syscalls that can reach the backing filesystem are made only in
+  `backing.cc`** (anything given a backing fd, file handle or name), where
+  the idle guarantees are reasoned about, and in the lower-level modules it
+  is built from and that only it calls (`file_handle.cc`, `device_id.cc`,
+  `fd.cc`); `main.cc` opens `--source` once at startup. Process-local
+  syscalls (resource limits, credentials, `/proc` reads, the cache
+  database file, mount tables) may call the `syscalls::` wrappers from any
+  file. The point is that the io_uring rewrite replaces one module.
 - **`cache::` is pure SQLite.** It never sees a file descriptor. Each write
   function is one transaction, which nests as a savepoint inside a
   caller's transaction.

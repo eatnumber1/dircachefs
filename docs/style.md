@@ -13,7 +13,8 @@ Google style or a rule below, Appendix A counts the sites and gives a
 command that finds them, for a later mechanical step. Nothing here is open:
 russ settled the questions on 2026-10-07.
 
-Derived from the tree after step 25.1 (2026-10-07). Counts are of production
+Derived from the tree at e680508 (2026-10-07) with step 25.1 applied (rows
+it touched say so). Counts are of production
 code (`dcfs/`, `bench/`, no tests) unless stated. File:line references
 drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 `docs/design.md` or `docs/plan/process.md`, or is russ's decision.
@@ -131,7 +132,10 @@ The `-Wl,--wrap` fakes of a `*_test.cc` define `__wrap_name` and call
 `tools/fhtest.c` is a copy of fuse-generation-qemu's `guest/fhtest.c` kept
 in sync by hand (third-party code, never restyled) and `tools/testutil.c`
 is a C program for the guest, kept in C alongside it; neither can use the
-C++ wrappers. `//tools:raw_syscalls_test` enforces the rule (names in
+C++ wrappers. `//tools:raw_syscalls_test` holds the line: until step 25.1c
+converts the remaining sites it is a ratchet (a file's count of raw calls
+may not exceed `tools/raw_syscalls_baseline.txt`; a new file has none), and
+it enforces the rule outright once the baseline is empty (names in
 `tools/raw_syscalls_names.txt`; what it cannot catch is in its docstring).
 
 ### 1.6 Errors
@@ -257,9 +261,12 @@ each.
 - **No paths after startup.** Objects are reached by descriptor or file
   handle (`FileHandle::Open`); a child is `openat(dir_fd, name, ...)`, never
   a joined path. Only startup uses a path (`--source`, the cache database).
-- **Syscalls that can reach the backing filesystem are made only in
-  `backing.cc`.** That is anything given a backing fd, file handle or name:
-  `backing.cc` is where the idle guarantees are reasoned about.
+- **Syscalls that can reach the backing filesystem, i.e. anything given a
+  backing fd, file handle or name, are made only in `backing.cc`**, where
+  the idle guarantees are reasoned about, and in the lower layers it is
+  built from and that only it calls: `file_handle.cc` (`name_to_handle_at`,
+  `statx`, `openat`, `open_by_handle_at`) and `device_id.cc` (`fstatfs`,
+  `ioctl`); plus startup in `main.cc` (`openat` of `--source`, `fstat`).
   Process-local syscalls (resource limits, credentials, `/proc` reads, the
   cache database file, mount tables) may call the `syscalls::` wrappers
   directly from any file. Only `syscalls.cc` calls libc directly. `cache::`
@@ -465,7 +472,7 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
 
 ## Appendix A: Convergence
 
-Sites that break Google style or a rule above, as of step 25.1. Run each
+Sites that break Google style or a rule above, as of e680508 plus step 25.1. Run each
 command from the repository root in bash. Rows marked (new) come from the
 2026-10-07 decisions. Google rules surveyed: formatting, includes,
 `using namespace`, `typedef`, `thread_local`, exceptions, casts, naming,
@@ -476,7 +483,7 @@ line length, shellcheck findings, quoting) were not surveyed.
 
 | # | Rule | Count | Find them |
 |---|---|---|---|
-| C3 | Google: 80 columns | 102 lines in 28 files (`backing.cc` 14, `syscalls.cc` 10, `metadata_cache_test.cc` 8) | `grep -rnE '^.{81,}$' dcfs bench tools --include='*.cc' --include='*.h' --include='*.c'` |
+| C3 | Google: 80 columns | 92 lines in 28 files (`backing.cc` 12, `metadata_cache_test.cc` 9, `dir_cache_fs.cc` 7), as of e680508 plus step 25.1 | `grep -rnE '^.{81,}$' dcfs bench tools --include='*.cc' --include='*.h' --include='*.c'` |
 | C4 | Google/clang-format include blocks and order | 16 out-of-order lines in 10 files (`backing.cc`, `errno.cc`, `fd.cc`, `main.cc`, `syscalls.cc`, `syscalls.h`, 4 tests); 37 files have one `<...>` block where Google has C and C++ headers apart (26 files have two or more); clang-format settles both | `LC_ALL=C awk 'FNR==1{p=""} /^#include/{if(p!=""&&$0<p)print FILENAME":"FNR": "$0;p=$0;next}{p=""}' $(git ls-files 'dcfs/*.cc' 'dcfs/*.h')` |
 | C11 | Google shell: 2-space indent, no tabs (4) (7.6) | 48 scripts use tabs (all guest scripts but a few wrappers, most host scripts); 4 use spaces and conform (`formal/trace_validate.sh`, `tools/smoke_readonly.sh`, `tools/format.sh`, `.github/ci/osv.sh`), as do the new `third_party/alpine/*.sh` | `grep -lP '^\t' $(git ls-files '*.sh' test/qemu/guest/init)` |
 | SH1 | Host-side scripts are bash (4) (7.6) | 19 of 26 host-side scripts are `#!/bin/sh` (`third_party/*` build and smoke helpers, `test/qemu/scripts/`, `tools/`); each becomes `#!/bin/bash` with `set -euo pipefail` (all 19 already have `set -eu`) | `grep -L '^#!/bin/bash' $(git ls-files '*.sh' \| grep -v test/qemu/guest/)` |
@@ -489,14 +496,14 @@ line length, shellcheck findings, quoting) were not surveyed.
 | C13 | BUILD list elements indented 4 (buildifier) | 292 lines at 6 spaces, all in `dcfs/BUILD.bazel` | `grep -cP '^      \S' dcfs/BUILD.bazel` |
 | C15 | Guest helpers shared in `lib.sh` | duplicated: `cleanup` 25, `normalize_stat` 5, `populate_tree`/`run_pass`/`expect_fail` 4 each, `start_daemon` 3, six more 2 each | `grep -hE '^[a-z_]+\(\) \{' test/qemu/guest/*.sh \| sort \| uniq -c \| sort -rn` |
 | P1 | Google Python: 80 columns (5) | 47 lines over 80: `sbom.py` 24, `sbom_test.py` 23 | `grep -nE '^.{81,}$' $(git ls-files '*.py')` |
-| C17 | No raw syscalls outside `syscalls.cc` (1.5) (new) | 300 sites in 20 files (`dcfs_bench.cc` 19, `dm_delay.cc` 17, `process.cc` 12, `tree.cc` 6, `backing_test.cc` 52, `dir_cache_fs_test.cc` 115, `file_handle_test.cc` 19, `syscalls_test.cc` 16, `fd_test.cc` 13, `backing_fault_test.cc` 8, `mounts_below_test.cc` 6, `device_id_test.cc` 5, `sqlite_test.cc` 2, 2 in `trace_recorder_test.cc`, 1 each in 4 other tests and `main_recorder.cc`, `trace_recorder.cc`). A few are false positives: local functions named `open`/`read` (`dir_cache_fs.cc:1335,1346`, `migrate.cc:57`), `dir_cache_fs.cc:1496` (`clock_gettime`). `//tools:raw_syscalls_test` is tagged `manual` until they are converted | `bazel test //tools:raw_syscalls_test` |
+| C17 | No raw syscalls outside `syscalls.cc` (1.5) (new) | 301 sites in 21 files, per `tools/raw_syscalls_baseline.txt`: `dir_cache_fs_test.cc` 115, `backing_test.cc` 52, `bench/` 54 (`dcfs_bench.cc` 19, `dm_delay.cc` 17, `process.cc` 12, `tree.cc` 6), `file_handle_test.cc` 19, `syscalls_test.cc` 16, `fd_test.cc` 13, `backing_fault_test.cc` 8, `mounts_below_test.cc` 6, `device_id_test.cc` 5, `sqlite_test.cc` 2, `trace_recorder_test.cc` 2, and 1 each in `fuse_request_channel_test.cc`, `mount_fds_test.cc`, `main_recorder.cc`, `trace_recorder.cc`. Production: `dir_cache_fs.cc` 3 (`clock_gettime` at :1496 is a real raw call; the two `open(` at :1335,1346 are a local function, a false positive), `migrate.cc:57` (`read(`, a local function: false positive), `mounts_below.cc:63` (`::realpath`, `::free`: a real raw call). `//tools:raw_syscalls_test` is a ratchet on the baseline until they are converted | `bazel test //tools:raw_syscalls_test` |
 | N1 | Flat `dcfs`: remove `dcfs::cache` (1.3) (new) | 3 declarations (`metadata_cache.h/.cc/_test.cc`); 673 `cache::` uses (407 production) in 20 files. Clash if flattened: `ParentOf` (same parameters as `backing::ParentOf`, differing only in return type), `SetXattr`, `RemoveXattr` all also exist in `backing` (3 names: rename one side first) | `grep -rn 'namespace cache\|cache::' dcfs bench \| wc -l` |
 | N2 | Remove `dcfs::backing`: it folds into `dcfs` as free functions; the three clashing pairs get distinguishing names (e.g. `BackingSetXattr`); a wrapper class only if the clashes prove to be more than those three and renaming reads worse | 3 declarations; 147 uses (138 production) in 15 files; clashes: `ParentOf`, `SetXattr`, `RemoveXattr` (same 3 names as N1) | `grep -rn 'namespace backing\|backing::' dcfs bench \| wc -l` |
 | N3 | Remove `dcfs::testonly` | 8 declarations (all in `dcfs/testonly/`); 4 uses | `grep -rn 'namespace testonly\|testonly::' dcfs bench` |
 | N4 | `sqlite3::` never `dcfs::sqlite3::` or `using` (1.3) | `dcfs::sqlite3` stays (exception): 3 declarations (`sqlite.h/.cc`, `sqlite_test.cc`), 104 `sqlite3::` uses (62 production) in 13 files are fine; 1 `using sqlite3::Statement;` to drop (`metadata_cache.cc:37`) | `grep -rn 'dcfs::sqlite3::\|using .*sqlite3' dcfs bench` |
 | N5 | Remove `dcfs::events` | 2 declarations (`protocol_events.h`); 182 uses (164 production) in 7 files; generic names (`Request`, `Op`, `Ino`) become dcfs-wide; no clash found | `grep -rn 'namespace events\|events::' dcfs bench \| wc -l` |
 | N6 | Remove `dcfs::internal` | 2 declarations (`ret_check.h`, `sqlite.h`); 9 uses; helpers would need distinct names (`RetCheck*`, `IsOptional`) | `grep -rn 'namespace internal\|internal::' dcfs` |
-| N7 | `syscalls::` never `dcfs::syscalls::` or `using` | 0 code sites (2 in comments: `backing.h:33`, `syscalls_fault_test.cc:81`); the 190 `syscalls::` uses (99 production) are fine | `grep -rn 'dcfs::syscalls::\|using .*syscalls' dcfs bench` |
+| N7 | `syscalls::` never `dcfs::syscalls::` or `using` | 0 code sites (1 in a comment: `backing.h:33`); the 188 `syscalls::` uses (98 production) are fine | `grep -rn 'dcfs::syscalls::\|using .*syscalls' dcfs bench` |
 | F1 | `//tools:format_test` (small) in check mode (1.1) (new) | does not exist | `bazel query //tools:format_test` |
 | F2 | Pinned clang-format, buildifier, shfmt, shellcheck | none in `MODULE.bazel`, none on the host (phase 7 LLVM toolchain; shfmt and shellcheck in 7.6) | `grep -n 'clang\|buildifier\|shfmt\|shellcheck' MODULE.bazel` |
 | F3 | `bazel run //tools:format` | `tools/format.sh` is a host script that skips missing tools | `cat tools/format.sh` |
