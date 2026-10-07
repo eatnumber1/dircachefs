@@ -51,6 +51,9 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 
 - **`std::string_view`, `std::optional`**, not the `absl::` aliases (339
   vs 5, 107 vs 4).
+- **Function names**: `syscalls::` wrappers carry their libc/manpage names
+  in lower case (`syscalls::setxattr`); every other function is CamelCase
+  (`SetXattr`). The two layers therefore never clash by construction.
 - **ADL hooks** (`AbslStringify`, `AbslHashValue`, `operator<<`, `swap`)
   are hidden friends: defined inside the class they belong to, in that
   class's namespace, never in another namespace or file
@@ -80,14 +83,17 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 ### 1.3 Namespaces
 
 All code is in `namespace dcfs`, flat: no nested namespaces, with two
-exceptions, `dcfs::syscalls` (its wrappers keep their libc names and so
-need the qualifier) and `dcfs::sqlite3` (the SQLite wrapper layer). Call
-them as `syscalls::open(...)` and `sqlite3::Connection`, never
+exceptions, `dcfs::syscalls` (its wrappers keep their libc names and so need
+the qualifier) and `dcfs::sqlite3` (the SQLite wrapper layer). Call them as
+`syscalls::open(...)` and `sqlite3::Connection`, never
 `dcfs::syscalls::open` or `dcfs::sqlite3::Connection` and never with a
-`using`. The other sub-namespaces (`cache`, `backing`, `testonly`,
-`events`, `internal`) go: name things so that a flat `dcfs::` stays
-unambiguous (N1, N2, N3, N5, N6). An exception for `backing` is being
-requested from russ (N2).
+`using`. The other sub-namespaces (`cache`, `backing`, `testonly`, `events`,
+`internal`) go: name things so that a flat `dcfs::` stays unambiguous (N1,
+N2, N3, N5, N6). `backing` folds into `dcfs` as free functions (russ,
+2026-10-07: no exception); only the three names that exist in both `cache`
+and `backing` (`ParentOf`, `SetXattr`, `RemoveXattr`) get distinguishing
+names (e.g. `BackingSetXattr`). A wrapper class is allowed only if the
+clashes turn out to be more than those three and renaming reads worse.
 
 ### 1.4 Enums
 
@@ -99,18 +105,19 @@ converted when touched. The four nested unscoped `enum Kind`s convert
 ### 1.5 `syscalls.h`
 
 One thin wrapper per documented Linux syscall or libc call, named for its
-manpage (`man 2 openat`, `man 3 ...`), returning `absl::Status` or
-`StatusOr` through `dcfs::ErrnoToStatus`. One call, no composition (no
-retry loops, no decoding into containers, no policy). Anything else is a
-helper in `backing.cc` built on the plain wrappers: the `/proc/self/fd/N`
-trick is a backing helper calling `syscalls::getxattr(path, ...)`. A
-wrapper that is thin but has a non-manpage name is renamed to its manpage
-name, with a comment on any per-thread raw-syscall detail
-(`setgroups_thread` becomes `setgroups`). Nothing that is not a wrapper
-lives in `dcfs::syscalls`, so no ADL hook can be found through it: checked
-by grep, the only template there is `ioctl`, and the one hook in the file
-(`LogOpenFlags`/`AbslStringify`) is at `dcfs` scope (`syscalls.h` closes
-`namespace syscalls` at line 181 before it). Current exceptions: S1-S3.
+manpage in lower case (`man 2 openat`, `man 3 ...`; `syscalls::setxattr`),
+returning `absl::Status` or `StatusOr` through `dcfs::ErrnoToStatus`. One
+call, no composition (no retry loops, no decoding into containers, no
+policy). Anything else is a helper in `backing.cc` built on the plain
+wrappers: the `/proc/self/fd/N` trick is a backing helper calling
+`syscalls::getxattr(path, ...)`. A wrapper that is thin but has a
+non-manpage name is renamed to its manpage name, with a comment on any
+per-thread raw-syscall detail (`setgroups_thread` becomes `setgroups`).
+Nothing that is not a wrapper lives in `dcfs::syscalls`, so no ADL hook can
+be found through it: checked by grep, the only template there is `ioctl`,
+and the one hook in the file (`LogOpenFlags`/`AbslStringify`) is at `dcfs`
+scope (`syscalls.h` closes `namespace syscalls` at line 181 before it).
+Current exceptions: S1-S3.
 
 ### 1.6 Errors
 
@@ -472,7 +479,7 @@ line length, shellcheck findings, quoting) were not surveyed.
 | C16 | Google: no using-directives | 1: `bench/dcfs_bench.cc:396` (`using namespace dcfs_bench;`) | `grep -rn 'using namespace' dcfs bench tools` |
 | P1 | Google Python: 80 columns (5) | 50 lines over 80: `sbom.py` 25, `sbom_test.py` 22, `tool_keys_test.py` 3 | `grep -nE '^.{81,}$' $(git ls-files '*.py')` |
 | N1 | Flat `dcfs`: remove `dcfs::cache` (1.3) (new) | 3 declarations (`metadata_cache.h/.cc/_test.cc`); 673 `cache::` uses (407 production) in 20 files. Clash if flattened: `ParentOf` (same parameters as `backing::ParentOf`, differing only in return type), `SetXattr`, `RemoveXattr` all also exist in `backing` (3 names: rename one side first) | `grep -rn 'namespace cache\|cache::' dcfs bench \| wc -l` |
-| N2 | Remove `dcfs::backing` (an exception is being requested from russ: a layer boundary like `syscalls`; it would also dissolve the three clashes without renames) | 3 declarations; 147 uses (138 production) in 15 files; clashes: the same 3 names as N1 | `grep -rn 'namespace backing\|backing::' dcfs bench \| wc -l` |
+| N2 | Remove `dcfs::backing`: it folds into `dcfs` as free functions; the three clashing pairs get distinguishing names (e.g. `BackingSetXattr`); a wrapper class only if the clashes prove to be more than those three and renaming reads worse | 3 declarations; 147 uses (138 production) in 15 files; clashes: `ParentOf`, `SetXattr`, `RemoveXattr` (same 3 names as N1) | `grep -rn 'namespace backing\|backing::' dcfs bench \| wc -l` |
 | N3 | Remove `dcfs::testonly` | 8 declarations (all in `dcfs/testonly/`); 4 uses | `grep -rn 'namespace testonly\|testonly::' dcfs bench` |
 | N4 | `sqlite3::` never `dcfs::sqlite3::` or `using` (1.3) | `dcfs::sqlite3` stays (exception): 3 declarations (`sqlite.h/.cc`, `sqlite_test.cc`), 104 `sqlite3::` uses (62 production) in 13 files are fine; 1 `using sqlite3::Statement;` to drop (`metadata_cache.cc:37`) | `grep -rn 'dcfs::sqlite3::\|using .*sqlite3' dcfs bench` |
 | N5 | Remove `dcfs::events` | 2 declarations (`protocol_events.h`); 182 uses (164 production) in 7 files; generic names (`Request`, `Op`, `Ino`) become dcfs-wide; no clash found | `grep -rn 'namespace events\|events::' dcfs bench \| wc -l` |
