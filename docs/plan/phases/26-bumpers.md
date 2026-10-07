@@ -68,10 +68,47 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
   after each. About a hundred sites x 2-3 errnos: a few hundred
   iterations at milliseconds each, one guest boot, small tier. Never
   "every N of a long workload". After 26.2.
-- Not adopted: a bespoke in-memory reference filesystem for differential
+- 26.7 Bazel visibility as the layering rule (russ yes, 2026-10-07): split
+  `//dcfs:syscalls` into the backing-reaching wrappers (visible only to
+  `//dcfs:backing` and its tests) and the process-local ones (visible to
+  all), so the relaxed syscalls rule is enforced by the build graph.
+  Trivial; with 26.1.
+- 26.8 Banned symbols in the shipped binary (yes): a small test runs `nm`
+  over `//dcfs:main_static` against a deny list: `realpath`, `getcwd`,
+  `std::filesystem::*`, `nftw`, `fts_*`, `glob` (no paths after startup);
+  `system`, `popen`, `exec*`, `dlopen`; `pthread_create` (single-threaded
+  by design; exactly one when the notifier thread arrives); `strerror`;
+  the `printf` family. A banned symbol names its rule in the failure.
+  With 26.1.
+- 26.9 Dependency golden (yes): `bazel query deps(//dcfs:main_static)`
+  reduced to external repositories, compared with a committed list; a new
+  dependency in the shipped binary is a deliberate edit. Feeds the SBOM.
+- 26.10 Injected clock (yes; russ: "why do we need the current time?"):
+  two call sites in dir_cache_fs.cc: the periodic sync point (`last_sync_`
+  / `sync_interval_sec`) and relatime at read-open (a raw `clock_gettime`,
+  which 25.1b's rule also catches). Abseil has `absl::Time`/`absl::Now()`
+  but no clock to inject: a small `Clock` interface returning `absl::Time`
+  carried in `Context`, the real one calling `absl::Now()`, a fake in
+  `dcfs/testonly/`; production code never reads the time otherwise (a
+  7.5b matcher / 26.8 symbol). Makes the sync interval testable in the
+  harness (the destroy_test time-dependence). Before Phase 11.
+- 26.11 Strong types (yes; after 25.2, it changes core signatures):
+  `BackingFd` (minted only by backing.cc), `CacheFd`, `Nodeid`,
+  `Generation`, a bytes `Name` type instead of `std::string`, phase tags;
+  a wrong-kind argument no longer compiles.
+- 26.12 Reproducible build (yes; after 7.1): two builds in different
+  output bases give byte-identical `main_static` and `dcfs.8`; flushes
+  embedded paths/timestamps and host leaks of the `uuid.h` kind.
+- 26.13 Repository-shape tests (yes; with 26.1): every `third_party/<name>/`
+  has a README; every guest script is used by a `qemu_test`; every
+  `DISABLED_` check is named in README's limitations; every commit
+  subject on a CI push range starts with a plan step (`N.M:` or a listed
+  prefix: plan, style, warnings, notes).
+- Not adopted: schema golden + migration round-trip (russ: no users yet,
+  migrations do not matter until launch); a bespoke in-memory reference filesystem for differential
   testing (pjdfstest, xfstests and fsstress already test against the
   kernel; TLA+ test generation, 12.10, is the random driver).
 
-Order: 26.1 and 26.2 as lanes free up (no new tooling); 26.3 + 26.4 next
-(Alpine's strace is one rule call away); 26.5 after 7.2; 26.6 if russ
-says yes, after 26.2.
+Order: 26.1 (+26.7, 26.8, 26.13) and 26.2 as lanes free up (no new
+tooling); 26.3 + 26.4 and 26.9 next; 26.10 before Phase 11; 26.5 after
+7.2; 26.12 after 7.1; 26.11 after 25.2; 26.6 if russ says yes, after 26.2.

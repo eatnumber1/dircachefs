@@ -952,3 +952,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 12.3 merged (2c3d79c, 5 commits). Uncached: formal 43/45 (large_test and nolock_test hit 900 s
   under load 20; their inputs are unchanged from main where they pass in 460/322 s: rerun at the
   next quiet moment / sync point), harness trace test 49/49, guest trace tests 4/4, fast 104/104.
+- russ (2026-10-07): second bumper set approved: 26.7 visibility split, 26.8 banned symbols, 26.9
+  deps golden, 26.10 injected clock (two call sites: sync interval, relatime; the latter a raw
+  clock_gettime), 26.11 strong types (after 25.2), 26.12 reproducible build (after 7.1), 26.13
+  repository-shape tests; schema golden/migrations dropped (no users yet). 26.1 dispatched (lane-3,
+  dcfs-mechanical): inventory of gates, missing self-checks, README table.
