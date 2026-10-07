@@ -820,3 +820,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   404 message) is being replaced by `rctx.download(allow_fail = True)` + the message in Starlark;
   no test for the message. Rule for the future: a repository rule fetches only through Bazel's
   downloader (repository cache, distdir, proxy/netrc, retries); verification may run a tool.
+- Final Alpine review (24.3 + fixes, tip bd92bef): merge after N1 wrapper fails hard when root/ is
+  missing (today it would exec the HOST's ld-musl and binaries), ld-musl path file + unset
+  LD_PRELOAD, TCG start in tools_test; N2 mkrootfs hard links must not follow symlinks; N3 download
+  message hedged (offline != stale index). Should: N5 SOURCE_DATE_EPOCH=0 clamps every inode time
+  to 0 (keep package mtimes with a fixed later epoch); N6 committed tar-vs-image invariant; N8/N9
+  stale names in sbom_test, README, BUILD comments, style.md. Verified: exec keeps PID (signals and
+  exit status propagate), musl error text matching not weaker, QEMU 11.0.3 has every flag/device
+  we use, lockfile diff real, no removed target referenced. N4 (pre-existing, medium):
+  readdir_boundary `warm-listing-is-not-quadratic` is an absolute 2.5 s wall-clock budget: will
+  flake under load and fail under TCG; next step: count work (rows read / SQLite steps) in
+  dir_cache_fs_test, or a 4N-vs-N CPU-tick ratio. N7: when Phase 23 and Alpine meet, copy_test's
+  casefold check needs the unicode module declared if Alpine builds CONFIG_UNICODE=m.
