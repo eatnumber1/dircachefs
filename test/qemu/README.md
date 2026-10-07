@@ -242,9 +242,9 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | boot, cache_permissions, lifecycle, atime, removed, copy, boundary, credentials, create, crash, handles, power, readonly, rename, setattr, release_leak, nfs, passthrough (60-102 plain) | 52-102 | 145-190 (nfs 169) | 256 | 384 |
 | names, names_random, readdir_boundary, idle_short, idle_long, pjdfstest (3 shards) | 57-75 | 433-570 | 256 | 832 |
 | write | 136-153 | 224-248 | 320 | 448 |
-| memory | 197-256 | 279-342 | 448 | 576 |
+| memory | 197-256 | 279-376 | 448 | 576 |
 | bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |
-| bench_readdir | 157 | 1509 | 320 | 2304 |
+| bench_readdir | 157 | 1432-1509 | 320 | 2304 |
 | bench_full | 569 | over 2001 (killed by the OOM killer at 2048; not measured further) | 896 | 3072 (a guess) |
 
 What fills the memory, in the plain guests: the initramfs (22 MiB of
