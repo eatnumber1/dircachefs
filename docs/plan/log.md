@@ -1371,3 +1371,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   sanitizer/coverage config (TLC 19 min each time) -> incompatible under those configs; destroy
   _test 100k -> 20k (5 ms per create on the runner = 2 durable fsyncs per CREATE: a product
   finding for 26.4b's create slope test); TLC workers = runner CPUs. For the next free lane.
+- 26.2 merged (4511503, 10 commits): runtime invariant checks in the checking build the small and
+  medium tiers boot; hooks before every backing call (harness --wrap backstop), request-end
+  checks, the TEMP-trigger fix for truncating deletes, 33 death tests, checker in the traced build
+  too; dir_cache_fs_test ASan allowance 1088; run-qemu.sh now honours TEST_TIMEOUT for unit
+  guests too (they were capped at 60 s regardless: the real cause of the harness timeouts under
+  load; verdict test failed first). presubmit+formal 220 pass + 2 skips. 26.6 (fault enumeration
+  by call site, runtime to be reported) and then 26.4b dispatched to the same agent.
