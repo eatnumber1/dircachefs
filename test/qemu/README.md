@@ -331,7 +331,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | write | 136-153 | 224-248 | 320 | 448 |
 | memory (sized by `reclaim_scans=0`, see above) | 104-270 at 576 | 354-478 at 768 | 704 | 832 |
 | bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |
-| destroy | 501 | not measured | 832 | 1856 (a guess, from bench_smoke) |
+| destroy (20000 files, step 6.4b) | 105 | 833 | 384 | 1344 |
 | bench_readdir | 157 | 1432-1509 | 320 | 2304 |
 | bench_full | 569 | over 2001 (killed by the OOM killer at 2048; not measured further) | 896 | 3072 (a guess) |
 
@@ -386,7 +386,8 @@ re-measure after a change: run the tier with `--test_output=all` (or read
 
 `.github/workflows/ci.yml` runs the three tiers as three jobs (`fast`,
 `presubmit`, `full`) plus the sanitizer suites as two more, parallel to `full`
-(`asan`, `ubsan`; the top-level README's "Continuous integration"
+(`asan`, `ubsan`; each of the three is a matrix of three shards, `test.sh
+--shard=I/3`; the top-level README's "Continuous integration"
 section has the whole story) with the same scripts and the same timeouts as
 a development machine:
 

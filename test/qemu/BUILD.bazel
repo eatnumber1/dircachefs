@@ -415,32 +415,32 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
-# Step 23.7 (review M2): DESTROY's reconciliation of 100000 written files
+# Step 23.7 (review M2): DESTROY's reconciliation of 20000 written files
 # (one statx through a held descriptor each) is bounded, and the shutdown
 # is recorded clean -- see guest/destroy.sh. Large tier: writing the files
-# takes minutes.
+# through dcfs takes minutes (step 6.4b: 100000 files was 500 s on the CI
+# runner at about 5 ms per create, 20000 keeps every assertion: exact held
+# counts, zero reads after SIGTERM, the bounded shutdown, no reclaim).
 qemu_test(
     name = "destroy_test",
     disks = [("vdb", "ext4", "2G")],
-    # 100,000 written files' dentries and inodes stay pinned (dcfs's held
-    # descriptors, then the test's holder), and each costs about 9 KiB of
-    # slab and page cache (measured 2026-10-07 at 832: MemFree fell from
-    # 705 MB to the low watermark, about 60 MB, at 73,418 files; kswapd then
-    # evicted the unpinned inodes, the kernel sent their FORGETs and dcfs
-    # dropped their held descriptors: 67,292 held at the end of a loaded
-    # run, 52,326 after the holder). The sizing rule's MemAvailable peak
-    # (MEM peak_used=349584 KiB) cannot see this: it counts the reclaimable
-    # caches as available. About 1030 MiB are needed (76 MiB at boot, 100,000
-    # x 9 KiB, the watermark); at 1536 the run ended with MemFree 490 MiB of
-    # 1474 and no reclaim, 100,010 descriptors held and none lost to the drop.
-    # destroy.sh fails, saying so, if the kernel reclaims anything.
-    mem = 1536,
-    asan_mem = 1856,
+    # The written files' dentries and inodes stay pinned (dcfs's held
+    # descriptors, then the test's holder), and the guest must not reclaim
+    # them (destroy.sh fails, saying so, if the kernel does: kswapd would
+    # evict the unpinned inodes, the kernel would send their FORGETs and dcfs
+    # would drop their held descriptors; MemAvailable counts those caches as
+    # free and cannot show it). At 20000 files, measured 2026-10-08: plain
+    # peak_used 105 MiB, slab 98 MiB, reclaim_scans=0 at 384 (and 512); ASan
+    # (dcfs holds 473 MiB) peak_used 833 MiB, reclaim_scans=0 at 1024,
+    # 161 MiB to spare; asan_mem is the rule's 1.5 times the peak, 64 MiB steps.
+    mem = 384,
+    asan_mem = 1344,
     guest_script = "guest/destroy.sh",
     size = "large",
-    # Writing 100000 files through dcfs took 530 s of the 542 s run (plain
-    # build, 2026-10-07); headroom for a sanitizer build and a loaded host.
-    timeout = "eternal",
+    # Writing 20000 files through dcfs took 328-345 s of a 356-363 s run on a
+    # busy machine (about 17 ms per create, plain and ASan), 100 s on the
+    # CI runner's 5 ms; headroom for a sanitizer build and a loaded host.
+    timeout = "long",
 )
 
 # Step 9: file names are bytes. names_test runs the whole name corpus

@@ -5,7 +5,7 @@
 # written during the run that the kernel still caches (design.md, "mmap
 # after close"): one statx through the descriptor dcfs holds on each, which
 # touches no disk, before FinishRun's sync point. This writes ENTRIES files
-# through dcfs (100000 by default), checks dcfs holds about that many
+# through dcfs (20000 by default), checks dcfs holds about that many
 # descriptors, stops it with SIGTERM, and requires the shutdown to finish
 # within BOUND_SECS and to be recorded clean (the next start recovers
 # nothing). The time and the descriptor count are printed.
@@ -17,7 +17,7 @@
 # the backing device (review L-d): the no-disk claim itself, not only the
 # time.
 #
-# The guest must hold all of this in memory: 100000 pinned inodes (dcfs's
+# The guest must hold all of this in memory: 20000 pinned inodes (dcfs's
 # and the backing filesystem's, with their dentries) and the written files'
 # page cache cost about 9 KiB each, and once MemFree reaches the kernel's
 # low watermark kswapd evicts the inodes nothing pins yet (all of them
@@ -40,7 +40,7 @@ MNT=/mnt
 DB=/cache/dcfs.db
 LOG1=/tmp/dcfs-1.log
 LOG2=/tmp/dcfs-2.log
-ENTRIES=${ENTRIES:-100000}
+ENTRIES=${ENTRIES:-20000}
 BOUND_SECS=${BOUND_SECS:-60}
 
 DAEMON_PID=""
