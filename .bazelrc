@@ -29,6 +29,16 @@ build --per_file_copt=.*,-external/.*,-\\x40.*@-Werror,-Wimplicit-fallthrough,-W
 # //dcfs:warning_flags_*_test check these flags on the command lines.
 build --linkopt -Wl,--fatal-warnings
 
+# Warnings clang still prints for external code that builds with its own
+# flags (they are not errors there, and not ours to fix):
+# - liburing: its BCR overlay builds with -Wall -Wextra, where upstream's
+#   Makefile adds -Wno-unused-parameter; the stub io_uring_register_wait_reg()
+#   warns on every build.
+# - google_benchmark: mutex.h's annotated Lock/Unlock wrapper trips
+#   -Wthread-safety-analysis (clang only; upstream builds with it).
+build --per_file_copt=liburing[+]/@-Wno-unused-parameter
+build --per_file_copt=google_benchmark[+]/@-Wno-thread-safety-analysis
+
 # Link statically everywhere: the daemon ships fully static in an initramfs.
 # This also keeps Bazel from building a useless .so for every cc_binary's
 # first-party libraries under `//...`. The BCR libfuse shared library does not
