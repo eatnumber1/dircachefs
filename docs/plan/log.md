@@ -1141,3 +1141,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   gains llvm-project under shipped; toolchain_test self-check; allow-line reasons; READMEs with
   Pin sections; BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1; CI repository-cache keying (1.94 GB tarball
   vs the 10 GB quota). Lane-5 told.
+- 26.2 done (lane-3, step-26.2, 3 commits, +1978/-24): Context::checks hook (no-op in production,
+  one empty virtual per backing call and request); checks: no transaction / busy statement at any
+  backing call; at request end (changed rows + named inodes): tri-state, identity (only root has
+  generation 0), dirty set (durable => dirty row; any==false => empty), writable-open, lookup
+  counts, held fds (= held written_ entries, <= cap), removed records; whole database at StartRun
+  and after DESTROY; LOG(FATAL) + DCFS-INVARIANT-VIOLATION on the console, run-qemu fails the run;
+  16 death tests failed first; small/medium tiers boot :initramfs_checked (no Starlark flag: it
+  would reconfigure everything), large and the measuring tests (syscall_traces, memory) the plain
+  binary; status-returning variants for 26.6. NO VIOLATION in any existing test. Two checklist
+  sentences were wrong as written (dirty set != unknown rows; a held fd can coexist with a later
+  writable open) and are checked one-way per design.md. Under review.
