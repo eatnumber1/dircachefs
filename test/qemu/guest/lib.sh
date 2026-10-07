@@ -31,15 +31,20 @@ require_commands() {
 	fi
 }
 
-# The commands the guest scripts run (busybox applets in the initramfs,
-# coreutils and friends under a dcfs_rootfs= tree), checked whenever a
-# script sources this file. A script needing more names them itself.
+# The commands the guest scripts run, as busybox applets of the
+# initramfs (/bin/busybox), checked whenever a script sources this file
+# there. The
+# dcfs_rootfs= Debian chroot (nfs_test) is a different set (no sed: its
+# packages are not Debian's essential set, third_party/debian/README.md),
+# so its script names what it runs itself.
 GUEST_COMMANDS="awk basename cat chgrp chmod chown chroot cmp cp cut date dd
 diff dirname dmesg find grep head ln ls md5sum mkdir mkfifo mknod mount mv
 readlink rm rmdir sed sleep sort stat sync tail timeout touch tr truncate
 umount uname uniq wc"
-# shellcheck disable=SC2086 # one word per command
-require_commands $GUEST_COMMANDS
+if [ -x /bin/busybox ]; then
+	# shellcheck disable=SC2086 # one word per command
+	require_commands $GUEST_COMMANDS
+fi
 
 # disabled NAME REASON CHECK [ARGS...]: a check that fails for a reason
 # outside dcfs (a kernel limitation) and is kept, googletest-style, so the

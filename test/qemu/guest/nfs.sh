@@ -62,7 +62,10 @@
 # exits nonzero if any check failed.
 FAILED=0
 . "$(dirname "$0")/lib.sh"
-require_commands rpcbind rpc.idmapd rpc.nfsd rpc.mountd exportfs pkill
+# What this script and the lib.sh functions it calls run, in the chroot.
+require_commands awk basename cat date dd diff dirname dmesg find grep ls \
+	md5sum mkdir mount readlink rm sleep sort stat sync tail timeout umount \
+	uname wc rpcbind rpc.idmapd rpc.nfsd rpc.mountd exportfs pkill
 
 DCFS=/usr/local/bin/dcfs
 
