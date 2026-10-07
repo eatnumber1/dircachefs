@@ -1182,3 +1182,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   records the simulated time + 24 h rule (failed first with wall times); scanner and ban list
   cover clock_gettime/gettimeofday/time/absl::Now (0 sites). presubmit+formal 208/208, asan small
   26/26. Pending: design.md paragraph, rebase over 7.1, retest; then merge.
+- 12.4b review: (a) and (c) correct; (b) SENT BACK: ProbeRecoveredRows runs inside StartRun, which
+  main.cc calls before InitRoot registers the mount fds, so in production every probe fails
+  (NotFound, no errno), logs a WARNING per dirty inode and deletes nothing; the harness fixture's
+  Start() order hid it. Fix: one backing::Startup() that main.cc and the harness share (ListDirty
+  before RecoverDirty; the probe after InitRoot/StartupPurge), test in production order with a
+  trace. Also: query-plan test for inodes_unlinked; design.md: a forgotten boundary's stub can
+  outlive it until the parent is relisted (deliberate); probe cost note. Lesson for the
+  checklist: a start-up change must be tested in main.cc's order, not the fixture's.
