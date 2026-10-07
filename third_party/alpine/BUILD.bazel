@@ -1,0 +1,40 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+
+# The Alpine keys (alpine-keys 2.6-r0, cross-checked against aports; see
+# README.md), the verifier and the repository rules' script.
+exports_files(
+    ["apk.py"],
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "keys",
+    srcs = glob(["keys/*.rsa.pub"]),
+    visibility = ["//visibility:public"],
+)
+
+py_library(
+    name = "apk",
+    srcs = ["apk.py"],
+    imports = ["."],
+)
+
+# A tampered index and a tampered apk are refused, a package missing from the
+# branch fails with a clear message, and a real signed package verifies
+# against the checked-in keys. Host-side: it needs neither root nor a kernel.
+py_test(
+    name = "signature_test",
+    size = "small",
+    srcs = ["signature_test.py"],
+    args = [
+        "$(location testdata/busybox-binsh-1.37.0-r31.apk)",
+        "$(locations :keys)",
+    ],
+    data = [
+        "testdata/busybox-binsh-1.37.0-r31.apk",
+        ":keys",
+    ],
+    main = "signature_test.py",
+    deps = [":apk"],
+)

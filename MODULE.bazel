@@ -320,3 +320,24 @@ python.toolchain(
     is_default = True,
     python_version = "3.12",
 )
+
+# Phase 24: the test kernel and the host-side test tools are Alpine's
+# packages of one release branch, verified against Alpine's signing keys
+# (third_party/alpine/README.md). The pin is the branch: change `branch` to
+# move to a new Alpine release.
+use_repo(python, "python_3_12_x86_64-unknown-linux-gnu")
+
+alpine_index = use_repo_rule("//third_party/alpine:alpine.bzl", "alpine_index")
+
+alpine_package = use_repo_rule("//third_party/alpine:alpine.bzl", "alpine_package")
+
+alpine_index(
+    name = "alpine_index",
+    branch = "v3.24",
+)
+
+alpine_package(
+    name = "alpine_linux_virt",
+    index = "@alpine_index//:index.json",
+    packages = ["linux-virt"],
+)
