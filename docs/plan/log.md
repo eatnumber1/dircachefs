@@ -1338,3 +1338,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   their own CI jobs; then Phase 8 cheap gaps (status/device_id/mounts_below/file_handle unit
   tests, FileHandle::ToString with the debug-string rule written into style.md, utimensat/
   removexattr-on-closed-file guest checks). Deletions and the dcfs-over-dcfs variant wait for 22.
+- 7.2 + 26.12 merged (96c53e1, 7 commits): native bazel coverage with the toolchain's feature,
+  guest profiles in continuous mode (%m%c + runtime-counter-relocation: a SIGKILLed or
+  mid-write daemon keeps its profile; atime_test's cleanup had been truncating profiles 2-4/10),
+  llvm-profdata --failure-mode=all, run-qemu fails on a bad profile, CI checks main.cc (e2e-only)
+  coverage, coverage job restores presubmit's cache read-only; CI repo contents cache no longer
+  saved (37 GB locally). 26.12: two builds (own output bases, own repo contents cache for one)
+  byte-identical for main_static, main and dcfs.8; same host only until 7.1b. Next: the Phase 8
+  gate (baseline file at 92.4/73.3, ratchet) and 26.5 (lane-4).
+- dir_cache_fs_test (plain) timed out at its 60 s `short` under load 18 on main itself (the
+  harness grew: readdir work test, lifetime tests): 26.2's rebase sets it `moderate`.
