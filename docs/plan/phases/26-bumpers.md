@@ -28,7 +28,17 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
   tests run against this build in the fast and presubmit tiers (the plain
   build stays what ships and what the large tier runs). Test first: each
   check gets a fault test that breaks the invariant on purpose. Owner:
-  dcfs-protocol.
+  dcfs-protocol. Deviations as built (2026-10-07): the small and medium
+  tiers boot `:initramfs_checked` by tier selection in `qemu_test`
+  instead of a `--//dcfs:check_invariants` flag (a Starlark flag would
+  reconfigure every target and drop the analysis cache per switch); the
+  guard is a `Context::checks` hook called at each backing call site
+  (plus a harness `--wrap` fake that holds the hooks in place) rather
+  than inside the wrappers; "the dirty set equals the unknown rows" is
+  false as written (populations and invalidations leave unknown rows
+  that are not dirty) and is checked one-way, as is "no held fd beside a
+  writable shared fd" (Release keeps a held fd across a later writable
+  open). No existing test violated any check.
 - 26.3 Golden backing-syscall traces per operation, with strace (russ:
   observe reality, not our accounting). Alpine's `strace` in the guest
   (alpine_package); a helper `strace_op` in lib.sh quiesces the daemon,

@@ -1160,3 +1160,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (syscalls split by visibility: backing-reaching vs process-local, analysis test) and 26.10
   (absl::Clock in Context, SimulatedClock harness tests for the sync point and relatime) to
   lane-1.
+- 26.2 review: sound; merge after: the request-end check misses sync-point deletions
+  (`DELETE FROM dirty` without WHERE takes SQLite's truncate path, invisible to the update hook):
+  check open_for_write and durable inodes at every request end + a no-WHERE death test; a
+  harness `--wrap` fake over backing's libc calls asserting no open transaction, so unhooked call
+  sites fail; death tests for the untested branches; the tiers' added wall time measured (26.6's
+  baseline); checker into main_static_traced; nits. Three deviations recorded in the phase file.
