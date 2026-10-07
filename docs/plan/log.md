@@ -1298,3 +1298,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   run_qemu_verdict_test). Lesson: the verdict self-check needs fixtures from a real runner's log,
   not only ours. The toolchain itself built and ran fine on the runner. 12.5 identity model
   dispatched (lane-1, dcfs-protocol).
+- Detector fix merged (f81d3f6): guest/init's dmesg grep matches real kernel warnings only
+  (WARNING: CPU:, WARNING: at, the cut-here marker, BUG:, Oops, kernel BUG at, Call Trace:,
+  Kernel panic, general protection fault); the SRSO/Spectre V2 eBPF/RETBleed/MDS advisories are
+  must-not-match fixtures in run_qemu_verdict_test (failing first). Not booted on an AMD host:
+  the next GitHub run is the proof. Push from f81d3f6.
