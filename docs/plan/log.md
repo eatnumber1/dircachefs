@@ -1303,3 +1303,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Kernel panic, general protection fault); the SRSO/Spectre V2 eBPF/RETBleed/MDS advisories are
   must-not-match fixtures in run_qemu_verdict_test (failing first). Not booted on an AMD host:
   the next GitHub run is the proof. Push from f81d3f6.
+- 7.1b dispatched (lane-6, dcfs-investigator): sysroot (Debian via rules_distroless) vs Alpine
+  clang/lld through the musl loader (vs the hybrid B'): decide with the hermeticity build
+  (/usr/include, /usr/lib/gcc, host libs blocked), prototype the winner.
