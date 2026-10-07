@@ -1,94 +1,26 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
-load("//third_party:exec_file.bzl", "exec_file")
 
-# Phase 4, part c follow-up (docs/plan/phases/04-pinned-host-tools.md): a
-# pinned, Bazel-built, static mke2fs and debugfs, replacing the host's
-# mke2fs third_party/debian/README.md's "Host tools" section flagged as
-# this project's one remaining non-hermetic build tool. See README.md for
-# the e2fsprogs/libarchive pins, the configure flag rationale and the
-# update procedure; BUILD.e2fsprogs and BUILD.libarchive (the overlays
-# placed into the two fetched source trees -- see MODULE.bazel) hold the
-# actual configure_make rules.
-
-exports_files([
-    "BUILD.e2fsprogs",
-    "BUILD.libarchive",
-    "0001-debugfs-static-link-libarchive.patch",
-])
-
-# configure_make's declared outputs aren't individually addressable by
-# on-disk path as a label (see third_party/qemu/BUILD.bazel's
-# :qemu_system_x86_64 comment) -- BUILD.e2fsprogs's out_binaries gives each
-# one a matching OutputGroupInfo group; these filegroups pull each out as a
-# plain, single-file target other rules (third_party/debian:rootfs,
-# third_party/debian:ownership_test) can depend on directly.
-filegroup(
-    name = "_mke2fs_raw",
-    srcs = ["@e2fsprogs_src//:e2fsprogs"],
-    output_group = "mke2fs",
-)
-
-exec_file(
-    name = "mke2fs",
-    src = ":_mke2fs_raw",
-    visibility = ["//visibility:public"],
-)
-
-filegroup(
-    name = "_debugfs_raw",
-    srcs = ["@e2fsprogs_src//:e2fsprogs"],
-    output_group = "debugfs",
-)
-
-exec_file(
-    name = "debugfs",
-    src = ":_debugfs_raw",
-    visibility = ["//visibility:public"],
-)
-
-# Host-side smoke test (AGENTS.md allows this: no root, no kernel control),
-# same spirit as third_party/qemu and third_party/busybox's own smoke
-# tests. Test first: before @e2fsprogs_src/@e2fsprogs_libarchive existed in
-# MODULE.bazel, both targets below failed with "no such package" (see this
-# step's commit history for the exact failing output). Checks:
-#   - both binaries are statically linked (no NEEDED entries at all);
-#   - both run and print their pinned version;
-#   - mke2fs actually builds a usable ext4 image from a plain tarball via
-#     -d (the feature this whole step exists for), and debugfs can stat an
-#     entry out of the result -- a real, if minimal, end-to-end exercise
-#     of the --with-libarchive=direct link, not just a --version probe.
-sh_test(
-    name = "smoke_test",
-    size = "small",
-    srcs = ["smoke_test.sh"],
-    args = [
-        "$(location :mke2fs)",
-        "$(location :debugfs)",
-    ],
-    data = [
-        ":debugfs",
-        ":mke2fs",
-    ],
-)
-
-# R3 (docs/plan/review-fixes.md, L5/L10): the checked-in mke2fs profile every
-# image made with the pinned mke2fs uses (MKE2FS_CONFIG), so a filesystem
-# never depends on the host's /etc/mke2fs.conf or on the sandbox path
-# configure baked in. See README.md.
+# e2fsprogs itself is Alpine's (@alpine_fstools, third_party/alpine); what
+# lives here is the checked-in mke2fs profile every test image is made with
+# (MKE2FS_CONFIG), so a filesystem never depends on a host or built-in
+# default. See README.md.
 exports_files(["mke2fs.conf"])
 
+# The profile gives the ext4 feature set it names, 4 KiB blocks at every
+# size, and MKE2FS_CONFIG alone decides (docs/plan/audits/
+# review-2026-10-06-waves-1-2.md, L5/L10).
 sh_test(
     name = "mke2fs_conf_test",
     size = "small",
     srcs = ["mke2fs_conf_test.sh"],
     args = [
-        "$(location :mke2fs)",
-        "$(location :debugfs)",
+        "$(location @alpine_fstools//:mke2fs)",
+        "$(location @alpine_fstools//:debugfs)",
         "$(location mke2fs.conf)",
     ],
     data = [
         "mke2fs.conf",
-        ":debugfs",
-        ":mke2fs",
+        "@alpine_fstools//:debugfs",
+        "@alpine_fstools//:mke2fs",
     ],
 )

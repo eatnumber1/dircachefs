@@ -175,7 +175,7 @@ out=$(echo subcontent 2>&1 >"$MNT/d/mp/subfile")
 rc=$?
 if [ "$rc" -ne 0 ]; then
 	case "$out" in
-	*"not supported"*) pass write-boundary-refused ;;
+	*"ot supported"*) pass write-boundary-refused ;;
 	*) fail write-boundary-refused "want ENOTSUP in error, got: $out" ;;
 	esac
 else

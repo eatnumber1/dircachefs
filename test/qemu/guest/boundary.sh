@@ -58,7 +58,8 @@ trap cleanup EXIT
 echo "boundary.sh: kernel $(uname -r)"
 
 # expect_fail NAME WANT CMD...: CMD must fail with WANT (a fragment of the
-# error message: "not supported" for ENOTSUP, "cross-device" for EXDEV, or
+# error message: "ot supported" for ENOTSUP (busybox is linked against musl,
+# which says "Not supported" where glibc says "Operation not supported"), "cross-device" for EXDEV, or
 # testutil's errno name) in its output.
 expect_fail() {
 	name=$1
@@ -137,16 +138,16 @@ check_stub() {
 		fail "$tag-mode-owner" "boundary root '$want', stub '$got'"
 	fi
 
-	expect_fail "$tag-ls-inside" "not supported" ls "$stub/"
-	expect_fail "$tag-stat-inside" "not supported" stat "$stub/inner"
-	expect_fail "$tag-touch-inside" "not supported" touch "$stub/new"
-	expect_fail "$tag-mkdir-inside" "not supported" mkdir "$stub/newdir"
-	expect_fail "$tag-ln-into" "not supported" ln "$MNT/f" "$stub/f"
+	expect_fail "$tag-ls-inside" "ot supported" ls "$stub/"
+	expect_fail "$tag-stat-inside" "ot supported" stat "$stub/inner"
+	expect_fail "$tag-touch-inside" "ot supported" touch "$stub/new"
+	expect_fail "$tag-mkdir-inside" "ot supported" mkdir "$stub/newdir"
+	expect_fail "$tag-ln-into" "ot supported" ln "$MNT/f" "$stub/f"
 	expect_fail "$tag-rename-into" "EOPNOTSUPP" \
 		"$TESTUTIL" rename2 "$MNT/f" "$stub/f" 0
 	expect_fail "$tag-rename-stub" "EXDEV" \
 		"$TESTUTIL" rename2 "$stub" "$MNT/$dir/$name.moved" 0
-	expect_fail "$tag-chmod-stub" "not supported" chmod 700 "$stub"
+	expect_fail "$tag-chmod-stub" "ot supported" chmod 700 "$stub"
 	expect_fail "$tag-rmdir-stub" "busy" rmdir "$stub"
 
 	# Nothing reached the other side of the boundary.
@@ -239,7 +240,7 @@ if restart_daemon restart "$LOG2"; then
 	*" mp "*) pass restart-listed ;;
 	*) fail restart-listed "$(ls -a "$MNT/d")" ;;
 	esac
-	expect_fail restart-ls-inside "not supported" ls "$MNT/d/mp/"
+	expect_fail restart-ls-inside "ot supported" ls "$MNT/d/mp/"
 	if [ "$subvol" -eq 1 ]; then
 		ino=$(stat -c %i "$MNT/d/subvol" 2>&1)
 		if [ "$ino" = "$STUB_INO_subvol" ]; then

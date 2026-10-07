@@ -1,3 +1,6 @@
+load("@rules_python//python:py_binary.bzl", "py_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 # Phase 4, part c (docs/plan/phases/04-pinned-host-tools.md): the Debian
@@ -12,23 +15,65 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 # data.tar (our 14 explicitly requested packages plus everything they pull
 # in transitively -- 136 packages total as of this pin) into one tar.
 #
-# mke2fs is //third_party/e2fsprogs:mke2fs (see that package's README.md)
-# -- a pinned, static mke2fs built by Bazel, fed @debian//:flat *directly*
-# via `mke2fs -d <tarball>` (mkrootfs.sh), not the host's mke2fs extracting
-# into a scratch directory first. See README.md's "Ownership" section.
+# The image is made without privilege by scripts/mkrootfs.py: it unpacks
+# @debian//:flat into a directory (following the tar's own symlinks only
+# inside it), makes the filesystem with Alpine's mke2fs -d (Alpine's mke2fs
+# cannot read a tar) and sets ownership and modes with debugfs. mke2fs and
+# debugfs are the wrappers that run Alpine's musl binaries on this host
+# (third_party/alpine/README.md); `@alpine_fstools//:root` is their tree.
+# The profile is third_party/e2fsprogs/mke2fs.conf. See README.md's
+# "Ownership" section.
+py_binary(
+    name = "mkrootfs",
+    srcs = ["scripts/mkrootfs.py"],
+    main = "scripts/mkrootfs.py",
+)
+
+py_library(
+    name = "mkrootfs_lib",
+    srcs = ["scripts/mkrootfs.py"],
+    imports = ["scripts"],
+)
+
 genrule(
     name = "rootfs",
     srcs = ["@debian//:flat"],
     outs = ["rootfs-debian.ext4"],
-    cmd = "$(location scripts/mkrootfs.sh) $@ $(location @debian//:flat) 768M " +
-          "$(location //third_party/e2fsprogs:mke2fs) " +
-          "$(location //third_party/e2fsprogs:mke2fs.conf)",
+    cmd = "$(location :mkrootfs) --flat $(location @debian//:flat) " +
+          "--out $@ --size 768M " +
+          "--mke2fs $(location @alpine_fstools//:mke2fs) " +
+          "--debugfs $(location @alpine_fstools//:debugfs) " +
+          "--mke2fs-conf $(location //third_party/e2fsprogs:mke2fs.conf)",
     tools = [
-        "scripts/mkrootfs.sh",
-        "//third_party/e2fsprogs:mke2fs",
+        ":mkrootfs",
         "//third_party/e2fsprogs:mke2fs.conf",
+        "@alpine_fstools//:debugfs",
+        "@alpine_fstools//:mke2fs",
+        "@alpine_fstools//:root",
     ],
     visibility = ["//test/qemu:__pkg__"],
+)
+
+# Test first: before scripts/mkrootfs.py existed the image was made by
+# `mke2fs -d <tarball>` of a source-built e2fsprogs; this checks the new
+# builder on a small tar with the real tools (ownership, modes, hard links,
+# symlinked parents, fixed-up paths, reproducibility).
+py_test(
+    name = "mkrootfs_test",
+    size = "small",
+    srcs = ["scripts/mkrootfs_test.py"],
+    args = [
+        "$(location @alpine_fstools//:mke2fs)",
+        "$(location @alpine_fstools//:debugfs)",
+        "$(location //third_party/e2fsprogs:mke2fs.conf)",
+    ],
+    data = [
+        "//third_party/e2fsprogs:mke2fs.conf",
+        "@alpine_fstools//:debugfs",
+        "@alpine_fstools//:mke2fs",
+    ],
+    main = "scripts/mkrootfs_test.py",
+    deps = [":mkrootfs_lib"],
 )
 
 # Test first: fails the moment the resolved packages' versions drift from
@@ -73,12 +118,12 @@ sh_test(
     size = "small",
     srcs = ["scripts/ownership_test.sh"],
     args = [
-        "$(location //third_party/e2fsprogs:debugfs)",
+        "$(location @alpine_fstools//:debugfs)",
         "$(location :rootfs)",
     ],
     data = [
         ":rootfs",
-        "//third_party/e2fsprogs:debugfs",
+        "@alpine_fstools//:debugfs",
     ],
 )
 

@@ -1,3 +1,4 @@
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
@@ -37,4 +38,44 @@ py_test(
     ],
     main = "signature_test.py",
     deps = [":apk"],
+)
+
+# The Alpine host tools run on this glibc host through musl's loader: QEMU
+# (with KVM), mke2fs and debugfs, mkfs.xfs, mkfs.btrfs and busybox.
+sh_test(
+    name = "tools_test",
+    size = "small",
+    srcs = ["tools_test.sh"],
+    args = [
+        "$(location @alpine_qemu//:qemu_system_x86_64)",
+        "$(location @alpine_fstools//:mke2fs)",
+        "$(location @alpine_fstools//:debugfs)",
+        "$(location @alpine_fstools//:mkfs_xfs)",
+        "$(location @alpine_fstools//:mkfs_btrfs)",
+        "$(location @alpine_busybox//:root/bin/busybox.static)",
+        "$(location //third_party/e2fsprogs:mke2fs.conf)",
+    ],
+    data = [
+        "//third_party/e2fsprogs:mke2fs.conf",
+        "@alpine_busybox//:root/bin/busybox.static",
+        "@alpine_fstools//:debugfs",
+        "@alpine_fstools//:mke2fs",
+        "@alpine_fstools//:mkfs_btrfs",
+        "@alpine_fstools//:mkfs_xfs",
+        "@alpine_qemu//:qemu_system_x86_64",
+    ],
+    tags = [
+        "no-sandbox",
+        "requires-kvm",
+    ],
+)
+
+# The guest's busybox is Alpine's busybox-static: statically linked, every
+# applet the guest scripts use, and the features they rely on.
+sh_test(
+    name = "busybox_test",
+    size = "small",
+    srcs = ["busybox_test.sh"],
+    args = ["$(location @alpine_busybox//:root/bin/busybox.static)"],
+    data = ["@alpine_busybox//:root/bin/busybox.static"],
 )

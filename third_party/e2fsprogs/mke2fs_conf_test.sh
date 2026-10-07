@@ -1,9 +1,9 @@
 #!/bin/sh
-# Host-side test: the Bazel-built mke2fs, run with the checked-in
+# Host-side test: mke2fs, run with the checked-in
 # mke2fs.conf (MKE2FS_CONFIG), produces the ext4 feature set the config
 # names -- never whatever the host's /etc/mke2fs.conf or a sandbox-path-baked
 # default says (docs/plan/audits/review-2026-10-06-waves-1-2.md, L5/L10).
-# `mke2fs -t ext4` is what mkfs.ext4 does, and debugfs (also Bazel-built)
+# `mke2fs -t ext4` is what mkfs.ext4 does, and debugfs (Alpine's too)
 # stands in for dumpe2fs -h, so the host's e2fsprogs is not needed at all.
 #
 # Usage: mke2fs_conf_test.sh <mke2fs> <debugfs> <mke2fs.conf>

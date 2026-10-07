@@ -4,7 +4,7 @@
 #
 # Boot the dcfs QEMU guest and report the verdict. --qemu and --qboot are
 # mandatory in both modes (step 4.4): the Bazel-built
-# //third_party/qemu:qemu_system_x86_64 and @qemu//:pc-bios/qboot.rom
+# @alpine_qemu//:qemu_system_x86_64 and @alpine_qemu//:root/usr/share/qemu/qboot.rom
 # targets, passed as $(location ...) by qemu_test.bzl/qemu_cc_test.bzl --
 # never a host PATH lookup or a default path. So are the mkfs tools for the
 # scratch disks (R3): --mke2fs, --mke2fs-conf (MKE2FS_CONFIG), --mkfs-xfs and
@@ -73,7 +73,7 @@
 set -eu
 
 # Step 4.4: the QEMU binary and qboot ROM are Bazel-built targets
-# (//third_party/qemu:qemu_system_x86_64, @qemu//:pc-bios/qboot.rom) passed
+# (@alpine_qemu//:qemu_system_x86_64, @alpine_qemu//:root/usr/share/qemu/qboot.rom) passed
 # in explicitly as --qemu/--qboot by qemu_test.bzl/qemu_cc_test.bzl -- no
 # host PATH lookup, no DCFS_QBOOT-style override, no default. See
 # test/qemu/README.md.
@@ -151,14 +151,14 @@ done
 
 if [ -z "$QEMU_BIN" ] || [ -z "$QBOOT" ]; then
 	echo "run-qemu.sh: --qemu <qemu-system-x86_64> and --qboot <qboot.rom> are required" >&2
-	echo "(they must be the Bazel-built //third_party/qemu targets, not a host lookup)" >&2
+	echo "(they must be the @alpine_qemu targets, not a host lookup)" >&2
 	exit 1
 fi
 
 if [ -z "$MKE2FS_BIN" ] || [ -z "$MKE2FS_CONF" ] || [ -z "$MKFS_XFS_BIN" ] ||
 	[ -z "$MKFS_BTRFS_BIN" ]; then
 	echo "run-qemu.sh: --mke2fs, --mke2fs-conf, --mkfs-xfs and --mkfs-btrfs are required" >&2
-	echo "(the Bazel-built //third_party/{e2fsprogs,xfsprogs,btrfs-progs} targets, not a host lookup)" >&2
+	echo "(the @alpine_fstools wrapper targets, not a host lookup)" >&2
 	exit 1
 fi
 
@@ -332,8 +332,8 @@ fi
 append="$append$rootfs_append"
 
 # Record exactly which binaries this run used, for anyone auditing a
-# serial log (and for the harness check below): a Bazel-built path looks
-# like ".../bazel-out/k8-fastbuild/bin/third_party/qemu/..." or an
+# serial log (and for the harness check below): a Bazel-fetched path looks
+# like ".../external/+alpine_package+alpine_qemu/wrappers/..." or an
 # external-repo path under ".../external/qemu+/...", never "/usr/...".
 echo "run-qemu.sh: qemu binary: $QEMU_BIN ($("$QEMU_BIN" --version 2>&1 | head -1))" >>"$LOG"
 echo "run-qemu.sh: qboot rom: $QBOOT" >>"$LOG"
@@ -347,7 +347,7 @@ esac
 case "$QBOOT" in
 /usr/*| /bin/*)
 	echo "run-qemu.sh: ERROR: qboot rom '$QBOOT' looks like a host path," \
-		"not the Bazel-built @qemu//:pc-bios/qboot.rom target" >&2
+		"not the Bazel-built @alpine_qemu//:root/usr/share/qemu/qboot.rom target" >&2
 	exit 1
 	;;
 esac

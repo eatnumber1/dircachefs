@@ -60,16 +60,17 @@ else
 	fail stock-kernel-cgroups "mount -t cgroup2 failed"
 fi
 
-# Step 4.4: busybox is now //third_party/busybox:busybox_build (pinned
-# 1.38.0, built by Bazel), not a host binary symlinked in by the removed
-# test/qemu/kernel.bzl repo rule. `busybox` with no arguments prints its
-# own version banner as its first line; a host-installed busybox (Debian's
-# is 1.36.1 as of this writing) would fail this check.
+# busybox is Alpine's busybox-static of the pinned branch (Phase 24): a branch
+# carries one major.minor of it (v3.24: 1.37), and a patch release inside the
+# branch must not fail this test. `busybox` with no arguments prints its own
+# version banner as its first line; a host-installed busybox would not be in
+# this guest at all, but a banner of another series means the wrong build.
 BBVER=$(busybox | head -n 1)
 case "$BBVER" in
-*"v1.38.0"*) pass busybox-version ;;
-*) fail busybox-version "expected busybox v1.38.0, got: $BBVER" ;;
+*"v1.37."*) pass busybox-version ;;
+*) fail busybox-version "expected busybox v1.37.x (Alpine's busybox-static; update the series here when the branch changes), got: $BBVER" ;;
 esac
+
 
 if [ -x /bin/dcfs ]; then
 	pass dcfs-present

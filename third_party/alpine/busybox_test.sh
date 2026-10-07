@@ -1,8 +1,12 @@
 #!/bin/sh
-# Host-side smoke test for the pinned, statically linked busybox build
-# (see BUILD.bazel and README.md). Needs neither root nor kernel control.
+# Host-side test of the guest's busybox, Alpine's busybox-static (step 24.3;
+# it replaced a source build, third_party/busybox, whose Kconfig fragment
+# chose the applets): it is statically linked, has every applet the guest
+# scripts use (grep test/qemu/guest/*.sh and guest/init before adding or
+# removing one below) and the features they rely on. Needs neither root nor
+# kernel control.
 #
-# Usage: smoke_test.sh <busybox-binary>
+# Usage: busybox_test.sh <busybox-binary>
 set -eu
 
 BB=$(readlink -f "$1") # absolute: the feature checks below cd into a scratch dir

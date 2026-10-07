@@ -52,13 +52,13 @@ genrule(
         "//bench:dcfs_bench",
         "@pjdfstest//:pjdfstest",
         "@pjdfstest//:tests",
-        "//third_party/busybox:busybox_build",
+        "@alpine_busybox//:root/bin/busybox.static",
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]),
     outs = ["initramfs.cpio.gz"],
     testonly = 1,
     cmd = "$(location scripts/mkinitramfs.sh) $@ " +
-          "$(location //third_party/busybox:busybox_build) " +
+          "$(location @alpine_busybox//:root/bin/busybox.static) " +
           "$(location //dcfs:main_static) " +
           "$(location //tools:fhtest) " +
           "$(location //tools:testutil) " +
@@ -483,11 +483,11 @@ sh_test(
     srcs = ["mkinitramfs_test.sh"],
     args = [
         "$(location scripts/mkinitramfs.sh)",
-        "$(location //third_party/busybox:busybox_build)",
+        "$(location @alpine_busybox//:root/bin/busybox.static)",
     ],
     data = [
         "scripts/mkinitramfs.sh",
-        "//third_party/busybox:busybox_build",
+        "@alpine_busybox//:root/bin/busybox.static",
     ],
 )
 
@@ -548,13 +548,13 @@ genrule(
         "//dcfs:main_static_traced",
         "//tools:fhtest",
         "//tools:testutil",
-        "//third_party/busybox:busybox_build",
+        "@alpine_busybox//:root/bin/busybox.static",
         "guest/init",
     ] + glob(["guest/*.sh"]),
     outs = ["initramfs_traced.cpio.gz"],
     testonly = 1,
     cmd = "$(location scripts/mkinitramfs.sh) $@ " +
-          "$(location //third_party/busybox:busybox_build) " +
+          "$(location @alpine_busybox//:root/bin/busybox.static) " +
           "$(location //dcfs:main_static_traced) " +
           "$(location //tools:fhtest) " +
           "$(location //tools:testutil) " +

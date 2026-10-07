@@ -88,9 +88,8 @@ these packages on a CI runner.
 
 | Package (Debian/Ubuntu) | Used by | Why it is not hermetic yet |
 |---|---|---|
-| `build-essential` (gcc, g++, binutils, make) | every C/C++ compile, QEMU and the mkfs tools | Phase 7 pins an LLVM toolchain |
-| `ninja-build` | QEMU's build (`third_party/qemu`) | found by `act` (Phase 5.2); QEMU's configure fails with "Cannot find Ninja" |
-| `python3`, `perl` | QEMU's configure and meson | universal on build hosts |
+| `build-essential` (gcc, g++, binutils, make) | every C/C++ compile | Phase 7 pins an LLVM toolchain |
+| `python3` | the `osv` CI job's SBOM generator (`.github/ci/osv.sh`); Bazel's own Python is hermetic | universal on build hosts |
 | `coreutils` (`truncate`), `curl`, `xz-utils`, `git` | scratch-disk images, fetching, archives | universal on build hosts |
 
 ## Building
@@ -265,8 +264,9 @@ boot), so `bazel test //...` is dominated by compilation, not booting.
 
 1. Install `truncate` (coreutils; creates the scratch-disk images). QEMU,
    the mkfs tools, its qboot firmware, busybox and the test kernel are all
-   pinned and fetched/built by Bazel (`//third_party/qemu`,
-   `//third_party/busybox`, `//third_party/linux`); there is no host QEMU,
+   Alpine packages of one pinned release branch, fetched by Bazel and checked
+   against Alpine's signing keys (`//third_party/alpine`,
+   `//third_party/linux`); there is no host QEMU,
    qboot, busybox or manual kernel build step any more -- see
    `test/qemu/README.md`.
 2. Get write access to `/dev/kvm`: `sudo usermod -aG kvm "$USER"`, then log

@@ -305,7 +305,7 @@ fi
 mkdir /src/d/mp
 mount /dev/vdc /src/d/mp
 expect_fail mkdir-boundary-refused "File exists" mkdir "$MNT/d/mp"
-expect_fail link-into-boundary "not supported" ln "$MNT/f1" "$MNT/d/mp"
+expect_fail link-into-boundary "ot supported" ln "$MNT/f1" "$MNT/d/mp"
 listing=$(ls -1 "$MNT/d" 2>&1)
 case "$listing" in
 *mp*) pass boundary-listed-as-stub ;;
@@ -338,7 +338,7 @@ umount /src/d/mp
 # "d"/"mp" above.
 if [ "$FSTYPE" = btrfs ]; then
 	if "$TESTUTIL" btrfs-subvol-create /src/d2/subvol >/tmp/subvol_create.out 2>&1; then
-		expect_fail btrfs-subvol-boundary-refused "not supported" mkdir "$MNT/d2/subvol/x"
+		expect_fail btrfs-subvol-boundary-refused "ot supported" mkdir "$MNT/d2/subvol/x"
 		listing=$(ls -1 "$MNT/d2" 2>&1)
 		case "$listing" in
 		*subvol*) pass btrfs-subvol-listed-as-stub ;;

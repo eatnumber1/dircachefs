@@ -48,15 +48,14 @@ class RealPins(unittest.TestCase):
         # Independent of sbom.parse_module: a regexp over the text.
         deps = set(re.findall(r'^bazel_dep\(\s*name\s*=\s*"([^"]+)"', module, re.M))
         repos = set(re.findall(
-            r'^(?:http_archive|http_file|qemu_repo)\(\s*name\s*=\s*"([^"]+)"',
+            r'^(?:http_archive|http_file)\(\s*name\s*=\s*"([^"]+)"',
             module, re.M))
         self.assertGreaterEqual(len(deps), 10)
-        self.assertGreaterEqual(len(repos), 14)
+        self.assertGreaterEqual(len(repos), 5)
         for d in deps:
             self.assertIn(f"bazel_dep:{d}", covered)
         for r in repos:
             self.assertIn(f"repository:{r}", covered)
-        self.assertIn("repository:qemu.dtc", covered)
         self.assertIn("script:bazelisk", covered)
         for line in read("debs").splitlines():
             if line.strip():
@@ -72,6 +71,14 @@ class RealPins(unittest.TestCase):
             for name in re.findall(r'"([^"]+)"', group):
                 self.assertIn(f"alpine:{name}", covered)
 
+    def test_pins_json_has_no_entry_for_a_pin_that_is_gone(self):
+        pins = json.loads(read("pins"))
+        deps, repos = sbom.parse_module(read("module"))
+        for name in pins["repository"]:
+            self.assertIn(name, repos, f"pins.json: repository {name} is not in MODULE.bazel")
+        for name in pins["bazel_dep"]:
+            self.assertIn(name, deps, f"pins.json: bazel_dep {name} is not in MODULE.bazel")
+
     def test_debian_purls_are_osv_shaped(self):
         comps = build()["testonly"]["components"]
         debs = [c for c in comps if c["purl"].startswith("pkg:deb/debian/")]
@@ -86,10 +93,8 @@ class RealPins(unittest.TestCase):
 
     def test_versions_come_from_the_pins(self):
         purls = {c["purl"] for c in components()}
-        self.assertIn("pkg:generic/qemu@11.1.2", purls)
         self.assertIn("pkg:github/nektos/act@0.2.89", purls)
         self.assertIn("pkg:github/tlaplus/tlaplus@1.7.4", purls)
-        self.assertIn("pkg:github/benhoyt/inih@r62", purls)
 
     def test_every_entry_says_whether_osv_can_match_it(self):
         for c in build()["testonly"]["components"]:
@@ -144,7 +149,8 @@ class AlpineComponents(unittest.TestCase):
 
     def test_an_alpine_repository_without_resolved_json_fails(self):
         with self.assertRaisesRegex(sbom.SbomError, "alpine_linux_virt"):
-            build(alpine={})
+            build(alpine={k: v for k, v in alpine_docs().items()
+                          if k != "alpine_linux_virt"})
 
     def test_a_resolved_json_nothing_declares_fails(self):
         docs = dict(alpine_docs(), alpine_stray=read("alpine_linux_virt"))
@@ -155,7 +161,8 @@ class AlpineComponents(unittest.TestCase):
         doc = json.loads(read("alpine_linux_virt"))
         doc["packages"] = []
         with self.assertRaisesRegex(sbom.SbomError, "linux-virt"):
-            build(alpine={"alpine_linux_virt": json.dumps(doc)})
+            build(alpine=dict(alpine_docs(),
+                              alpine_linux_virt=json.dumps(doc)))
 
 
 class MissingEntries(unittest.TestCase):

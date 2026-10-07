@@ -183,15 +183,15 @@ _tla_trace_test = rule(
             allow_single_file = True,
         ),
         "_qemu": attr.label(
-            default = "//third_party/qemu:qemu_system_x86_64",
+            default = "@alpine_qemu//:qemu_system_x86_64",
             allow_single_file = True,
         ),
         "_qboot": attr.label(
-            default = "@qemu//:pc-bios/qboot.rom",
+            default = "@alpine_qemu//:root/usr/share/qemu/qboot.rom",
             allow_single_file = True,
         ),
         "_mke2fs": attr.label(
-            default = "//third_party/e2fsprogs:mke2fs",
+            default = "@alpine_fstools//:mke2fs",
             allow_single_file = True,
         ),
         "_mke2fs_conf": attr.label(
@@ -199,11 +199,11 @@ _tla_trace_test = rule(
             allow_single_file = True,
         ),
         "_mkfs_xfs": attr.label(
-            default = "//third_party/xfsprogs:mkfs_xfs",
+            default = "@alpine_fstools//:mkfs_xfs",
             allow_single_file = True,
         ),
         "_mkfs_btrfs": attr.label(
-            default = "//third_party/btrfs-progs:mkfs_btrfs",
+            default = "@alpine_fstools//:mkfs_btrfs",
             allow_single_file = True,
         ),
         "_overrides": attr.label(

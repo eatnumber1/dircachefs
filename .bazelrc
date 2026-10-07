@@ -54,43 +54,6 @@ build:asan --linkopt -fsanitize=address
 # the initramfs.
 build:asan --define=dcfs_sanitizer=asan
 
-# Phase 6.3: the --copt flags above apply to every C/C++ compile, external
-# repositories included -- same leak the "external/.*@-Wno-error" rule
-# above this block already documents and fixes for -Werror. Confirmed by
-# reading the generated build_script.sh/compile lines: without this,
-# --config=asan also recompiles glib/zlib (and glib's own pcre2 dependency)
-# with ASan instrumentation purely to feed third_party/qemu's
-# rules_foreign_cc build (which separately leaks the same flags into
-# QEMU's own CFLAGS/LDFLAGS -- see that BUILD file's own fix) -- confirmed
-# with `bazel query 'somepath(//dcfs:main_static, @glib//glib)'` and
-# '...@zlib)': both empty, i.e. dcfs never links either, so there is no
-# ABI reason to instrument them, and doing so only adds rebuild time and
-# makes the *separate* qemu-system-x86_64 process slower, which is what
-# actually runs every guest.
-#
-# This is deliberately narrow -- NOT "external/.*" -- and must stay that
-# way: a first attempt did scope it to every external repo and broke
-# //dcfs:metadata_cache_test with a real SEGV inside
-# absl::container_internal::raw_hash_set (abseil's SwissTable
-# "generation" iterator-debugging feature gives hash tables a different
-# in-memory layout depending on the same ASan detection -- see
-# absl/container/internal/raw_hash_set.h's
-# ABSL_SWISSTABLE_ENABLE_GENERATIONS). dcfs's own translation units are
-# compiled *with* ASan (seeing the layout with generations);
-# de-sanitizing abseil-cpp's precompiled .cc files made their shared,
-# non-template helpers (raw_hash_set.cc) disagree about that same layout
-# -- an ABI mismatch, not a flag-scoping bug. The same risk applies to
-# every other external repo dcfs/tools/qemu_cc_test binaries actually
-# link (libfuse, sqlite3, numactl, liburing, googletest): they must keep
-# matching dcfs's own sanitizer settings, so only glib/zlib/pcre2 (used
-# exclusively by the separate-process qemu-system-x86_64, confirmed above
-# to be unreachable from dcfs) are safe to exclude this way. pjdfstest --
-# also third-party and also never linked into dcfs (its own separate
-# guest binary, no ABI coupling) -- gets the same treatment directly in
-# its own BUILD file instead, a cleaner, more obviously-correct place for
-# it than stretching this regex to match its external repo too.
-build:asan --per_file_copt=external/(glib|zlib|pcre2)\+.*@-fno-sanitize=address,-UADDRESS_SANITIZER
-
 build:ubsan --strip=never
 build:ubsan --copt -fsanitize=undefined
 build:ubsan --copt -fno-sanitize-recover=all
@@ -102,10 +65,6 @@ build:ubsan --linkopt -fno-sanitize-recover=all
 # See test:asan's --define above; UBSan's runtime has the same problem in
 # practice.
 build:ubsan --define=dcfs_sanitizer=ubsan
-
-# See build:asan's identical fix (and the abseil-cpp SwissTable ABI
-# mismatch it documents) above for the full explanation.
-build:ubsan --per_file_copt=external/(glib|zlib|pcre2)\+.*@-fno-sanitize=undefined
 
 # Per-checkout settings that are not committed (e.g. the agent lane
 # clones' `startup --max_idle_secs=...`). See docs/plan/process.md.

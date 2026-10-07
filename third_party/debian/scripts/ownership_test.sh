@@ -79,7 +79,7 @@ echo "PASS: /bin/mount is setuid root"
 
 # The image is made with the checked-in //third_party/e2fsprogs:mke2fs.conf
 # (mkrootfs.sh exports MKE2FS_CONFIG), not whatever profile the host or the
-# Bazel-built mke2fs's baked-in path would give: spot-check two features the
+# mke2fs's baked-in path would give: spot-check two features the
 # host's /etc/mke2fs.conf on this machine lacks (R3, L5/L10).
 features=$("$DEBUGFS" -R 'show_super_stats -h' "$IMAGE" 2>/dev/null |
 	sed -n 's/^Filesystem features:[[:space:]]*//p')

@@ -122,6 +122,14 @@ start_mem_sampler() {
 # Stop the sampler and print its last line (nothing if it never completed a
 # sample), then any OOM-killer lines as MEM-OOM: lines.
 mem_report() {
+	# A test that ends within the first sample's time (a unit test of a
+	# few milliseconds on a slow-starting sampler) still gets its line:
+	# wait for the first sample, for up to two seconds.
+	waited=0
+	while [ ! -s /dev/memstat ] && [ "$waited" -lt 20 ]; do
+		sleep 0.1
+		waited=$((waited + 1))
+	done
 	[ -n "${MEM_SAMPLER_PID:-}" ] && kill "$MEM_SAMPLER_PID" 2>/dev/null
 	MEM_SAMPLER_PID=
 	[ -s /dev/memstat ] && cat /dev/memstat

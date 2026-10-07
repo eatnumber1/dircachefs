@@ -4,8 +4,8 @@ QEMU guest, root, on the project's own kernel.
 PROJECT DECISION: dcfs requires root (real open_by_handle_at,
 FS_IOC_GETFSUUID, etc.), so there is no host-side test execution -- every
 test, including plain unit tests, boots a minimal kernel
-(//third_party/linux:vmlinuz) under the pinned, Bazel-built QEMU
-(//third_party/qemu:qemu_system_x86_64, step 4.4; see test/qemu/README.md
+(//third_party/linux:vmlinuz) under the Alpine's QEMU
+(@alpine_qemu//:qemu_system_x86_64, step 4.4; see test/qemu/README.md
 for the boot-time budget this depends on) and runs as root inside it. This
 is the replacement for a plain cc_test.
 
@@ -126,7 +126,7 @@ def qemu_cc_test(
         name = name + "_initramfs",
         testonly = 1,
         srcs = [
-            "//third_party/busybox:busybox_build",
+            "@alpine_busybox//:root/bin/busybox.static",
             "//test/qemu:guest/init",
             ":" + bin_name,
         ] + data,
@@ -135,7 +135,7 @@ def qemu_cc_test(
             "$(location //test/qemu:scripts/mkinitramfs.sh)",
             "--unit",
             "$@",
-            "$(location //third_party/busybox:busybox_build)",
+            "$(location @alpine_busybox//:root/bin/busybox.static)",
             "$(location //test/qemu:guest/init)",
             "$(location :" + bin_name + ")",
             disk0,
@@ -157,30 +157,30 @@ def qemu_cc_test(
         "$(location //third_party/linux:vmlinuz)",
     ]
 
-    # Step 4.4: the Bazel-built QEMU and qboot ROM, passed explicitly --
+    # Step 4.4: the Alpine's QEMU and qboot ROM, passed explicitly --
     # run-qemu.sh does no host lookup of its own.
     qemu_data = [
-        "//third_party/qemu:qemu_system_x86_64",
-        "@qemu//:pc-bios/qboot.rom",
+        "@alpine_qemu//:qemu_system_x86_64",
+        "@alpine_qemu//:root/usr/share/qemu/qboot.rom",
         # R3 (L5): the pinned mkfs tools for the scratch disks.
-        "//third_party/btrfs-progs:mkfs_btrfs",
-        "//third_party/e2fsprogs:mke2fs",
+        "@alpine_fstools//:mkfs_btrfs",
+        "@alpine_fstools//:mke2fs",
         "//third_party/e2fsprogs:mke2fs.conf",
-        "//third_party/xfsprogs:mkfs_xfs",
+        "@alpine_fstools//:mkfs_xfs",
     ]
     qemu_args = [
         "--mke2fs",
-        "$(location //third_party/e2fsprogs:mke2fs)",
+        "$(location @alpine_fstools//:mke2fs)",
         "--mke2fs-conf",
         "$(location //third_party/e2fsprogs:mke2fs.conf)",
         "--mkfs-xfs",
-        "$(location //third_party/xfsprogs:mkfs_xfs)",
+        "$(location @alpine_fstools//:mkfs_xfs)",
         "--mkfs-btrfs",
-        "$(location //third_party/btrfs-progs:mkfs_btrfs)",
+        "$(location @alpine_fstools//:mkfs_btrfs)",
         "--qemu",
-        "$(location //third_party/qemu:qemu_system_x86_64)",
+        "$(location @alpine_qemu//:qemu_system_x86_64)",
         "--qboot",
-        "$(location @qemu//:pc-bios/qboot.rom)",
+        "$(location @alpine_qemu//:root/usr/share/qemu/qboot.rom)",
     ]
 
     mem, asan_mem = resolve_mem(mem, asan_mem, UNIT_MEM, UNIT_ASAN_MEM)

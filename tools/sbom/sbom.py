@@ -12,7 +12,7 @@ the CLI takes commits only from git roots, so `git-roots` writes a detached
 git root per shipped component (README.md). Test-only pins come from:
 
   * MODULE.bazel: every bazel_dep not shipped, and every http_archive /
-    http_file / qemu_repo (plus QEMU's separately pinned dtc);
+    http_file;
   * third_party/debian/debs.lock: the Debian packages of the NFS rootfs
     (pkg:deb/debian/<source package>@<version>, the form OSV's Debian
     ecosystem matches; the binary-to-source table is debian_sources.tsv);
@@ -51,7 +51,7 @@ def parse_module(text):
     """Returns (bazel_deps, repositories) from MODULE.bazel's text.
 
     bazel_deps: {name: version}. repositories: {name: kwargs} for the
-    top-level http_archive / http_file / qemu_repo calls.
+    top-level http_archive / http_file calls.
     """
     deps, repos = {}, {}
     for node in ast.parse(text).body:
@@ -64,7 +64,7 @@ def parse_module(text):
         fn = call.func.id
         if fn == "bazel_dep":
             deps[kwargs["name"]] = kwargs["version"]
-        elif fn in ("http_archive", "http_file", "qemu_repo"):
+        elif fn in ("http_archive", "http_file"):
             repos[kwargs["name"]] = kwargs
     return deps, repos
 
@@ -137,7 +137,7 @@ def _repo_urls(kwargs):
 
 
 def repo_version(name, kwargs, how):
-    if how == "strip_prefix" or how == "dtc_strip_prefix":
+    if how == "strip_prefix":
         prefix = kwargs.get(how)
         if not prefix:
             raise SbomError(f"{name}: no {how} to take a version from")
@@ -373,12 +373,6 @@ def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
         version = repo_version(name, kwargs, pin["version"])
         add(pin["purl"].split("/")[-1], version, pin["purl"], f"repository:{name}",
             pin["kind"], False)
-        if kwargs.get("dtc_url"):
-            dtc = pins["repository"].get(name + ".dtc")
-            if dtc is None:
-                raise SbomError(f"repository {name}.dtc: no entry in pins.json")
-            add("dtc", repo_version(name + ".dtc", kwargs, dtc["version"]),
-                dtc["purl"], f"repository:{name}.dtc", dtc["kind"], False)
 
     if "bazelisk" not in pins["script"]:
         raise SbomError("bazelisk: no entry in tools/sbom/pins.json")

@@ -16,7 +16,7 @@ py_binary(
     main = "sbom.py",
 )
 
-# Fails when a pin (bazel_dep, http_archive/http_file/qemu_repo in
+# Fails when a pin (bazel_dep, http_archive/http_file in
 # MODULE.bazel, a .deb in third_party/debian/debs.lock, Bazelisk) has no
 # SBOM entry, when an external repository of the dependency graph of the
 # binaries (//dcfs:linked_deps) has no shipped entry (or a test-only one is
@@ -37,7 +37,10 @@ py_test(
         "pins=$(location pins.json)",
         "fixture=$(location testdata/seeded_vulnerable.cdx.json)",
         "config=$(location //:osv-scanner.toml)",
+        "alpine_busybox=$(location @alpine_busybox//:resolved.json)",
+        "alpine_fstools=$(location @alpine_fstools//:resolved.json)",
         "alpine_linux_virt=$(location @alpine_linux_virt//:resolved.json)",
+        "alpine_qemu=$(location @alpine_qemu//:resolved.json)",
     ],
     data = [
         "debian_sources.tsv",
@@ -49,7 +52,10 @@ py_test(
         "//:osv-scanner.toml",
         "//dcfs:linked_deps",
         "//third_party/debian:debs.lock",
+        "@alpine_busybox//:resolved.json",
+        "@alpine_fstools//:resolved.json",
         "@alpine_linux_virt//:resolved.json",
+        "@alpine_qemu//:resolved.json",
     ],
     deps = [":sbom_lib"],
 )

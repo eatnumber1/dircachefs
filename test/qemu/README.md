@@ -13,17 +13,20 @@ booting.
 
 ## Prerequisites
 
-Step 4.4 finished wiring QEMU, qboot and busybox into the Bazel build
-(`third_party/qemu/`, `third_party/busybox/`): none of the three is a host
-tool any more. What's left:
+QEMU, qboot, busybox, the kernel and the mkfs tools are Alpine's packages,
+fetched and signature-checked by Bazel (Phase 24, `third_party/alpine/`):
+none is a host tool, and none is built here. The Alpine binaries are linked
+against musl, so they run on the glibc host through musl's loader by small
+wrappers the repository rule writes (`@alpine_qemu//:qemu_system_x86_64`,
+`@alpine_fstools//:mke2fs`, ...). What's left:
 
 - `truncate` (for tests with a `disks =` attribute) creates the small
   scratch-disk images `run-qemu.sh` makes on the host before boot. They are
-  formatted by the pinned, Bazel-built `//third_party/e2fsprogs:mke2fs`
-  (with the checked-in `mke2fs.conf`, which gives even small images 4 KiB
-  blocks), `//third_party/xfsprogs:mkfs_xfs` and
-  `//third_party/btrfs-progs:mkfs_btrfs` (R3), so the filesystems under test
-  are the same everywhere; no host `mkfs.*` or `/etc/mke2fs.conf`.
+  formatted by Alpine's `@alpine_fstools//:mke2fs` (with the checked-in
+  `third_party/e2fsprogs/mke2fs.conf`, which gives even small images 4 KiB
+  blocks), `:mkfs_xfs` and `:mkfs_btrfs` (R3), so the filesystems under test
+  come from the same branch everywhere; no host `mkfs.*` or
+  `/etc/mke2fs.conf`.
 - `/dev/kvm`, writable by you (optional: without it tests run
   under TCG). Put yourself in the `kvm` group
   (`sudo usermod -aG kvm "$USER"`, then re-login), or on a shell that
@@ -92,12 +95,12 @@ change:
 ## Fast boot
 
 The runner (`scripts/run-qemu.sh`) boots the pinned, Bazel-built
-`//third_party/qemu:qemu_system_x86_64` with the `microvm` machine type,
+`@alpine_qemu//:qemu_system_x86_64` with the `microvm` machine type,
 direct kernel boot, and no legacy PC devices this guest doesn't need:
 
 ```
 -M microvm,x-option-roms=off,pit=off,pic=off,rtc=on,isa-serial=on,acpi=off
--bios <@qemu//:pc-bios/qboot.rom>
+-bios <@alpine_qemu//:root/usr/share/qemu/qboot.rom>
 -nodefaults -no-user-config -nographic -serial stdio
 -accel kvm -cpu host        # falls back to -accel tcg -cpu max, with a
                              # warning line in the log, if /dev/kvm isn't
@@ -145,8 +148,8 @@ one firmware choice (qboot) covers both, automatically.
 Step 4.4: `run-qemu.sh` takes the QEMU binary and the qboot ROM as
 mandatory `--qemu`/`--qboot` arguments -- `qemu_test`/`qemu_cc_test`
 (`qemu_test.bzl`/`qemu_cc_test.bzl`) pass
-`$(location //third_party/qemu:qemu_system_x86_64)` and
-`$(location @qemu//:pc-bios/qboot.rom)`. There is no host lookup, no
+`$(location @alpine_qemu//:qemu_system_x86_64)` and
+`$(location @alpine_qemu//:root/usr/share/qemu/qboot.rom)`. There is no host lookup, no
 `PATH` search and no default path any more: `run-qemu.sh` refuses to run
 (and refuses a path that merely *looks* like a host one, e.g. under
 `/usr` or `/bin`) if either is missing, and logs the resolved binary path
@@ -408,22 +411,13 @@ guest doesn't have configured; `guest/init` sets
 fail every ASan build.
 
 The tools a guest test uses (QEMU, `mke2fs`/`debugfs`, `mkfs.xfs`,
-`mkfs.btrfs` and the libraries they are built with) do not follow the
-sanitizer flags: `//third_party/qemu:qemu_system_x86_64` and the other
-tool labels are `exec_file` targets (`third_party/exec_file.bzl`) that
-depend on the real `configure_make` build with `cfg = "exec"`. The exec
-configuration takes neither `--copt` nor `--linkopt`, so the same QEMU,
-e2fsprogs, xfsprogs, btrfs-progs, util-linux and urcu builds serve plain,
-`--config=asan` and `--config=ubsan`, and the Debian image's exec `mke2fs`
-is the same build as the tests' `mke2fs` (e2fsprogs and libarchive are
-built once, not twice). They are built with the exec toolchain's `-c opt`
-flags (`-O2 -DNDEBUG`; QEMU's overlay adds `-UNDEBUG`, which its headers
-require). `//tools:tool_identity_test` (part of `bazel test //...`) checks
-that the files a test sees under the `--config=asan` flags are the plain
-configuration's files; `//tools:tool_keys_test` (manual, it starts its own
-Bazel server; `bazel test //tools:tool_keys_test`) compares `bazel aquery`
-action keys of every tool, and of the kernel, busybox, bc, Debian image
-and TLC jar as a control, under plain, asan and ubsan.
+`mkfs.btrfs`, busybox) are downloaded Alpine packages, not built here, so
+the sanitizer flags cannot touch them and `--config=asan`/`--config=ubsan`
+use exactly the plain configuration's files. (Until Phase 24 they were built
+from source in the exec configuration, with `exec_file` forwarding rules and
+two tests, `tool_identity_test` and `tool_keys_test`, to prove it; all of
+that is gone.) `//third_party/alpine:tools_test` runs them: QEMU with KVM,
+the mkfs tools, busybox.
 
 ## e2e tests (`qemu_test`)
 
@@ -693,7 +687,7 @@ longer a step run once by hand into `~/.cache/dcfs`. See
 `third_party/debian/README.md` for the package list (with each package's
 reason), the pin and its update procedure, and exactly how the image is
 assembled (`mke2fs -d` against a flattened package tree, using the
-pinned, Bazel-built `//third_party/e2fsprogs:mke2fs` since Phase 4c, not
+Alpine's `@alpine_fstools//:mke2fs` since Phase 24, not
 a host tool -- no root, no network, no loop mounts in the Bazel action
 itself).
 

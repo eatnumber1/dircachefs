@@ -2,7 +2,7 @@
 
 Boots the shared dcfs QEMU initramfs (:initramfs) and test kernel
 (//third_party/linux:vmlinuz, Alpine's linux-virt) under the pinned, Bazel-built
-//third_party/qemu:qemu_system_x86_64 (step 4.4), telling guest/init (via
+@alpine_qemu//:qemu_system_x86_64 (step 4.4), telling guest/init (via
 the dcfs_test= kernel command-line parameter) to run the given guest_script,
 found inside the initramfs at /tests/<basename of guest_script>. See
 test/qemu/scripts/run-qemu.sh for the boot/verdict mechanics and
@@ -115,31 +115,31 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         "$(location //third_party/linux:vmlinuz)",
     ]
 
-    # Step 4.4: the Bazel-built QEMU and qboot ROM, passed explicitly --
+    # Step 4.4: the Alpine's QEMU and qboot ROM, passed explicitly --
     # run-qemu.sh does no host lookup of its own. See run-qemu.sh's usage
     # comment and test/qemu/README.md.
     qemu_data = [
-        "//third_party/qemu:qemu_system_x86_64",
-        "@qemu//:pc-bios/qboot.rom",
+        "@alpine_qemu//:qemu_system_x86_64",
+        "@alpine_qemu//:root/usr/share/qemu/qboot.rom",
         # R3 (L5): the pinned mkfs tools for the scratch disks.
-        "//third_party/btrfs-progs:mkfs_btrfs",
-        "//third_party/e2fsprogs:mke2fs",
+        "@alpine_fstools//:mkfs_btrfs",
+        "@alpine_fstools//:mke2fs",
         "//third_party/e2fsprogs:mke2fs.conf",
-        "//third_party/xfsprogs:mkfs_xfs",
+        "@alpine_fstools//:mkfs_xfs",
     ]
     qemu_args = [
         "--mke2fs",
-        "$(location //third_party/e2fsprogs:mke2fs)",
+        "$(location @alpine_fstools//:mke2fs)",
         "--mke2fs-conf",
         "$(location //third_party/e2fsprogs:mke2fs.conf)",
         "--mkfs-xfs",
-        "$(location //third_party/xfsprogs:mkfs_xfs)",
+        "$(location @alpine_fstools//:mkfs_xfs)",
         "--mkfs-btrfs",
-        "$(location //third_party/btrfs-progs:mkfs_btrfs)",
+        "$(location @alpine_fstools//:mkfs_btrfs)",
         "--qemu",
-        "$(location //third_party/qemu:qemu_system_x86_64)",
+        "$(location @alpine_qemu//:qemu_system_x86_64)",
         "--qboot",
-        "$(location @qemu//:pc-bios/qboot.rom)",
+        "$(location @alpine_qemu//:root/usr/share/qemu/qboot.rom)",
     ]
 
     mem, asan_mem = resolve_mem(mem, asan_mem, E2E_MEM, E2E_ASAN_MEM)

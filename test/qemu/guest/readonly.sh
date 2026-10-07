@@ -197,7 +197,7 @@ if [ $? -eq 0 ]; then
 	fail boundary-inside-enotsup "unexpectedly succeeded: $out"
 else
 	case "$out" in
-	*"not supported"*) pass boundary-inside-enotsup ;;
+	*"ot supported"*) pass boundary-inside-enotsup ;;
 	*) fail boundary-inside-enotsup "want ENOTSUP, got: $out" ;;
 	esac
 fi
