@@ -258,6 +258,7 @@ class Shipped(unittest.TestCase):
                   "+alpine_package+alpine_qemu",
                   "+alpine_package+alpine_fstools",
                   "+alpine_package+alpine_busybox",
+                  "+alpine_package+alpine_dmsetup",
                   "+alpine_package+alpine_strace"):
             self.assertNotIn(r, graph)
         for c in docs["shipped"]["components"]:

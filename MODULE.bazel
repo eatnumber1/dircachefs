@@ -230,6 +230,18 @@ alpine_package(
     packages = ["strace"],
 )
 
+# dmsetup for the fault-injection harness (step 11.1, guest/fault_lib.sh): a
+# musl-linked dynamic program (device-mapper and its libdevmapper; musl is
+# strace's closure too), installed in the guest at its Alpine paths by
+# mkinitramfs.sh, which creates dm-flakey and dm-error tables over the
+# test disks.
+alpine_package(
+    name = "alpine_dmsetup",
+    closure = True,
+    index = "@alpine_index//:index.json",
+    packages = ["device-mapper"],
+)
+
 # Step 7.1: the pinned, hermetic C/C++ toolchain (every build, host and
 # exec configurations alike): toolchains_llvm fetches LLVM's own release
 # tarball by sha256. libc++ is linked statically and the linker is lld

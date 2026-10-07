@@ -16,7 +16,8 @@
 #       those under /pjdfstest/; every other [src] is ignored -- the
 #       genrule passes $(SRCS), which includes the named files above
 #       again. Step 26.3: the files of @alpine_strace//:root (matched by
-#       their "alpine_strace/root/" path) land at their Alpine paths.
+#       their "alpine_strace/root/" path) land at their Alpine paths; so
+#       (step 11.1) do dmsetup's, "alpine_dmsetup/root/".
 #
 #   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <test-binary> \
 #       <disk0-device-or-'-'> <args> [name:path...]
@@ -165,6 +166,17 @@ else
 			rel=${f#*alpine_strace/root/}
 			case "$rel" in
 			usr/bin/strace | lib/* | usr/lib/*)
+				mkdir -p "$ROOT/$(dirname "$rel")"
+				cp -L "$f" "$ROOT/$rel"
+				;;
+			esac
+			;;
+		*alpine_dmsetup/root/*)
+			# step 11.1: dmsetup (guest/fault_lib.sh), libdevmapper and
+			# musl, at their Alpine paths like strace's.
+			rel=${f#*alpine_dmsetup/root/}
+			case "$rel" in
+			sbin/dmsetup | lib/* | usr/lib/*)
 				mkdir -p "$ROOT/$(dirname "$rel")"
 				cp -L "$f" "$ROOT/$rel"
 				;;

@@ -73,6 +73,7 @@ config_setting(
         "@pjdfstest//:tests",
         "@alpine_busybox//:root/bin/busybox.static",
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
+        "@alpine_dmsetup//:root",  # step 11.1: /sbin/dmsetup and libdevmapper
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + ["guest/syscall_budgets.txt"],
     outs = [name + ".cpio.gz"],
@@ -104,6 +105,19 @@ qemu_test(
     name = "help_test",
     disks = [("vdb", "ext4", "64M")],
     guest_script = "guest/help.sh",
+    size = "small",
+    timeout = "moderate",
+)
+
+# Step 11.1: the fault-injection helper (guest/fault_lib.sh) over a disk: each
+# of its modes does what it says to a filesystem on the wrapped device (the
+# self-check of every Phase 11 failure test). dm-flakey is a module; dm-error is
+# part of dm-mod.
+qemu_test(
+    name = "fault_selftest_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/fault_selftest.sh",
+    modules = ["dm_flakey"],
     size = "small",
     timeout = "moderate",
 )
