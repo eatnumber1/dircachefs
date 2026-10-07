@@ -1536,3 +1536,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   OPERATION (each names an inode not yet durably dirty, so its phase 1 commits durably); only
   mkdir gets one per sync point; design.md's "a burst of creates costs one WAL fsync" is true for
   mkdir only; destroy_test's 5 ms per create is this fsync.
+- Phase 22 merged (87b35a0): see the phase file. Unblocked: the Phase 8 cleanup (default_permissions
+  required + fail-closed Access + deletions + the dcfs-over-dcfs variant) dispatched to lane-2.
+  Note: dir_cache_fs_trace_test at 867 s of its 900 s (lane-4 is splitting it).

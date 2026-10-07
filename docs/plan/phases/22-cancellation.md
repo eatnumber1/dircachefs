@@ -119,3 +119,13 @@ checkpoint; cancel_test's bound scaled by the accelerator; AGENTS.md
 wording: "checks for interruption at checkpoints (dcfs/checkpoint.h),
 each just before a backing syscall and never between a mutation's
 syscall and its phase 3, and has a cancellation test".
+
+Merged 2026-10-08 (87b35a0, 7 commits, +2070/-32) after the review fixes:
+a refused INIT exits -EPROTO; re-resolution stops at the first EINTR;
+Drain reads one message ahead at most, FUSE_CAP_SPLICE_READ unset; a
+parameterized cancellation test over all twelve checkpoints under the
+invariant checker; cancel_test bounds 2 s KVM / 8 s TCG (0.8 s measured;
+12.1 s with checkpoints off); large_test 7,238,097 states and nolock_test
+6,036,816 unchanged (1508 s / 1272 s alone under load 20). AGENTS.md's
+rule now reads "at checkpoints (dcfs/checkpoint.h), each just before a
+backing syscall and never between a mutation's syscall and its phase 3".
