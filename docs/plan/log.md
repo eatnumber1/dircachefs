@@ -965,3 +965,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   115, backing_test 52, bench 54, ...; false positives: local functions named open/read in
   dir_cache_fs.cc:1335,1346 and migrate.cc:57; clock_gettime at dir_cache_fs.cc:1496 is real and
   26.10's). Conversion = 25.1c (dcfs-mechanical, after merge). Fresh dcfs-reviewer on the branch.
+- russ (2026-10-07): 26.6 approved as a try; the report must state the runtime it adds (dropped if
+  not seconds).

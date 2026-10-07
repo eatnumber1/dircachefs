@@ -56,8 +56,9 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
   the whole scope and, per push, only for functions the push touched. A
   surviving mutant is a missing test, filed as a step. Owner:
   dcfs-investigator for the tooling, dcfs-protocol for the survivors.
-- 26.6 (needs russ's yes; proposed as the fast form of fault
-  enumeration; russ, 2026-10-07: wary of the number of runs) In the
+- 26.6 (russ, 2026-10-07: "sure, we can try", still sceptical; the
+  step's report MUST state the wall time it adds to the tier, and the
+  step is dropped if that is not seconds) In the
   forged-request harness, bounded by CALL SITE, not by dynamic call:
   short targeted workloads (one per operation type, about ten
   operations each); every backing call site reached by the workload is
@@ -112,4 +113,4 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
 
 Order: 26.1 (+26.7, 26.8, 26.13) and 26.2 as lanes free up (no new
 tooling); 26.3 + 26.4 and 26.9 next; 26.10 before Phase 11; 26.5 after
-7.2; 26.12 after 7.1; 26.11 after 25.2; 26.6 if russ says yes, after 26.2.
+7.2; 26.12 after 7.1; 26.11 after 25.2; 26.6 after 26.2 (report its added runtime).
