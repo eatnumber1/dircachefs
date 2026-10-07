@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <sys/file.h>
+#include <sys/mount.h>
 #include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -159,6 +160,21 @@ absl::Status setgroups(std::span<const gid_t> groups);
 // getgroups(2): the calling thread's supplementary groups; with size 0 only
 // the count.
 absl::StatusOr<int> getgroups(int size, gid_t *list);
+
+// mount(2) and umount2(2). Null `source`, `fstype` and `data` are allowed.
+absl::Status mount(const char *source, std::string_view target,
+                   const char *fstype, unsigned long flags, const void *data);
+absl::Status umount2(std::string_view target, int flags);
+
+// mkdtemp(3): creates the directory and returns its name; `pattern` ends in
+// XXXXXX. mkstemp(3): creates and opens the file, and `pattern` (ending in
+// XXXXXX) becomes its name. O_CLOEXEC is added to the file.
+absl::StatusOr<std::string> mkdtemp(std::string_view pattern);
+absl::StatusOr<FileDescriptor> mkstemp(std::string &pattern);
+
+// fcntl(2) with an integer argument (or none). Commands that return a new
+// descriptor (F_DUPFD) are for `dup` below, not this.
+absl::StatusOr<int> fcntl(int fd, int cmd, int arg = 0);
 
 // realpath(3): the canonical absolute path.
 absl::StatusOr<std::string> realpath(std::string_view path);

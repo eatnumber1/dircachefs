@@ -16,7 +16,9 @@
 #include <vector>
 
 #include "absl/status/status_matchers.h"
+#include "dcfs/fd.h"
 #include "dcfs/status.h"
+#include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {
@@ -31,19 +33,19 @@ class SyscallsTest : public ::testing::Test {
   void SetUp() override {
     const char *tmpdir = std::getenv("TEST_TMPDIR");
     ASSERT_NE(tmpdir, nullptr);
-    tmpdir_fd_ = ::openat(AT_FDCWD, tmpdir, O_PATH | O_DIRECTORY);
-    ASSERT_GE(tmpdir_fd_, 0);
+    ASSERT_OK_AND_ASSIGN(
+        tmpdir_, syscalls::openat(AT_FDCWD, tmpdir, O_PATH | O_DIRECTORY));
+    tmpdir_fd_ = *tmpdir_;
 
     // Create a test file
-    file_fd_ = ::openat(tmpdir_fd_, "test_file", O_CREAT | O_RDWR, 0600);
-    ASSERT_GE(file_fd_, 0);
+    ASSERT_OK_AND_ASSIGN(
+        file_, syscalls::openat(tmpdir_fd_, "test_file", O_CREAT | O_RDWR,
+                                0600));
+    file_fd_ = *file_;
   }
 
-  void TearDown() override {
-    if (file_fd_ >= 0) ::close(file_fd_);
-    if (tmpdir_fd_ >= 0) ::close(tmpdir_fd_);
-  }
-
+  FileDescriptor tmpdir_;
+  FileDescriptor file_;
   int tmpdir_fd_ = -1;
   int file_fd_ = -1;
 };
@@ -164,9 +166,9 @@ TEST_F(SyscallsTest, LinkatRaisesStNlink) {
 }
 
 TEST_F(SyscallsTest, Renameat2WithRenameNoreplace) {
-  int file2_fd = ::openat(tmpdir_fd_, "test_file2", O_CREAT | O_RDWR, 0600);
-  ASSERT_GE(file2_fd, 0);
-  ::close(file2_fd);
+  ASSERT_THAT(syscalls::openat(tmpdir_fd_, "test_file2", O_CREAT | O_RDWR,
+                               0600),
+              IsOk());  // the descriptor closes at once
 
   absl::Status status = syscalls::renameat2(
       tmpdir_fd_, "test_file", tmpdir_fd_, "test_file2", RENAME_NOREPLACE);
@@ -175,7 +177,7 @@ TEST_F(SyscallsTest, Renameat2WithRenameNoreplace) {
   EXPECT_TRUE(errno_val.ok());
   EXPECT_EQ(*errno_val, EEXIST);
 
-  ::unlinkat(tmpdir_fd_, "test_file2", 0);
+  EXPECT_THAT(syscalls::unlinkat(tmpdir_fd_, "test_file2", 0), IsOk());
 }
 
 TEST_F(SyscallsTest, Renameat2WithZeroFlags) {
@@ -297,11 +299,13 @@ TEST_F(SyscallsTest, FstatfsReturnsNonzeroFsize) {
 }
 
 TEST_F(SyscallsTest, Getdents64ListsCreatedNames) {
-  ::openat(tmpdir_fd_, "file1", O_CREAT, 0600);
-  ::openat(tmpdir_fd_, "file2", O_CREAT, 0600);
+  ASSERT_THAT(syscalls::openat(tmpdir_fd_, "file1", O_CREAT, 0600), IsOk());
+  ASSERT_THAT(syscalls::openat(tmpdir_fd_, "file2", O_CREAT, 0600), IsOk());
 
-  int dir_fd = ::openat(tmpdir_fd_, ".", O_DIRECTORY | O_RDONLY);
-  ASSERT_GE(dir_fd, 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor dir,
+      syscalls::openat(tmpdir_fd_, ".", O_DIRECTORY | O_RDONLY));
+  const int dir_fd = *dir;
 
   std::vector<uint8_t> dir_buf(4096);
   auto nbytes_result =
@@ -318,8 +322,6 @@ TEST_F(SyscallsTest, Getdents64ListsCreatedNames) {
 
   EXPECT_TRUE(std::find(names.begin(), names.end(), "file1") != names.end());
   EXPECT_TRUE(std::find(names.begin(), names.end(), "file2") != names.end());
-
-  ::close(dir_fd);
 }
 
 TEST_F(SyscallsTest, StatxAndFstat) {
@@ -343,10 +345,10 @@ TEST_F(SyscallsTest, StatxAndFstat) {
 // is always tmpfs in the QEMU guest and does not implement
 // FS_IOC_GETVERSION.
 TEST(SyscallsTmpfsTest, IoctlOnTmpfsIsEnottyWithTheErrnoPayload) {
-  char path[] = "/tmp/dcfs_syscalls_test_tmpfs_XXXXXX";
-  int fd = ::mkstemp(path);
-  ASSERT_GE(fd, 0) << std::strerror(errno);
-  ::unlink(path);
+  std::string path = "/tmp/dcfs_syscalls_test_tmpfs_XXXXXX";
+  ASSERT_OK_AND_ASSIGN(FileDescriptor file, syscalls::mkstemp(path));
+  const int fd = *file;
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, path, 0), IsOk());
 
   uint32_t generation = 0;
   auto gen = syscalls::ioctl(fd, FS_IOC_GETVERSION, &generation);
@@ -354,8 +356,6 @@ TEST(SyscallsTmpfsTest, IoctlOnTmpfsIsEnottyWithTheErrnoPayload) {
   auto errno_val = GetErrnoFromStatus(gen.status());
   ASSERT_THAT(errno_val, IsOk());
   EXPECT_EQ(*errno_val, ENOTTY);
-
-  ::close(fd);
 }
 
 TEST_F(SyscallsTest, ErrorPathOpenatMissing) {
@@ -409,9 +409,13 @@ TEST_F(SyscallsTest, NameToHandleAtRoundTrip) {
 // O_PATH descriptor (how backing.cc reaches objects it cannot open).
 TEST_F(SyscallsTest, PathXattrCallsOnAProcFdPath) {
   const std::string value = "opath";
-  if (::fsetxattr(file_fd_, "user.dcfs_opath", value.data(), value.size(),
-                  0) != 0) {
-    GTEST_SKIP() << "user xattrs unsupported here: " << std::strerror(errno);
+  if (absl::Status set = syscalls::fsetxattr(
+          file_fd_, "user.dcfs_opath",
+          std::span<const uint8_t>(
+              reinterpret_cast<const uint8_t *>(value.data()), value.size()),
+          0);
+      !set.ok()) {
+    GTEST_SKIP() << "user xattrs unsupported here: " << set;
   }
   const std::string path = "/proc/self/fd/" + std::to_string(file_fd_);
 
@@ -473,7 +477,8 @@ TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {
   auto duped = syscalls::dup(file_fd_);
   ASSERT_THAT(duped, IsOk());
   EXPECT_NE(**duped, file_fd_);
-  EXPECT_NE(::fcntl(**duped, F_GETFD) & FD_CLOEXEC, 0);
+  ASSERT_OK_AND_ASSIGN(int fd_flags, syscalls::fcntl(**duped, F_GETFD));
+  EXPECT_NE(fd_flags & FD_CLOEXEC, 0);
   auto a = syscalls::fstat(file_fd_);
   auto b = syscalls::fstat(**duped);
   ASSERT_THAT(a, IsOk());

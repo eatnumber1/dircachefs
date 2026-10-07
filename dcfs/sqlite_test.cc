@@ -16,6 +16,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/ret_check.h"
+#include "dcfs/syscalls.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -103,15 +104,15 @@ TEST(ConnectionTest, CheckpointTruncatesWal) {
   ASSERT_THAT(conn.Exec("INSERT INTO t (id) VALUES (1)"), IsOk());
 
   std::string wal_path = absl::StrCat(path, "-wal");
-  struct stat before_stat;
-  ASSERT_EQ(::stat(wal_path.c_str(), &before_stat), 0);
+  ASSERT_OK_AND_ASSIGN(struct stat before_stat,
+                       syscalls::fstatat(AT_FDCWD, wal_path));
   EXPECT_GT(before_stat.st_size, 0)
       << "expected a nonempty -wal file before checkpointing";
 
   ASSERT_THAT(conn.Checkpoint(), IsOk());
 
-  struct stat after_stat;
-  ASSERT_EQ(::stat(wal_path.c_str(), &after_stat), 0);
+  ASSERT_OK_AND_ASSIGN(struct stat after_stat,
+                       syscalls::fstatat(AT_FDCWD, wal_path));
   EXPECT_EQ(after_stat.st_size, 0);
 
   // The data committed before the checkpoint must still be there.

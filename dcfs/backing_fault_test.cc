@@ -14,7 +14,9 @@
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
+#include <span>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
 #include <sys/xattr.h>
 #include <unistd.h>
@@ -22,8 +24,12 @@
 #include <vector>
 
 #include "absl/status/status_matchers.h"
+#include "absl/status/status.h"
 #include "dcfs/backing.h"
+#include "dcfs/fd.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
+#include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -87,11 +93,15 @@ ssize_t __wrap_getxattr(const char *path, const char *name, void *value,
       st.getxattr_path == path && name != nullptr &&
       st.getxattr_name == name) {
     st.grown = true;
-    if (::setxattr(path, name, st.grow_value.data(), st.grow_value.size(),
-                   0) != 0) {
-      ADD_FAILURE() << "test setup: setxattr to grow " << name
-                    << " failed: " << std::strerror(errno);
-    }
+    EXPECT_THAT(dcfs::syscalls::setxattr(
+                    path, name,
+                    std::span<const uint8_t>(
+                        reinterpret_cast<const uint8_t *>(
+                            st.grow_value.data()),
+                        st.grow_value.size()),
+                    0),
+                ::absl_testing::IsOk())
+        << "test setup: setxattr to grow " << name;
   }
   return rc;
 }
@@ -103,11 +113,14 @@ ssize_t __wrap_listxattr(const char *path, char *list, size_t size) {
       st.listxattr_path == path) {
     st.grown = true;
     const std::string value = "v";
-    if (::setxattr(path, st.grow_new_name.c_str(), value.data(),
-                   value.size(), 0) != 0) {
-      ADD_FAILURE() << "test setup: setxattr to grow the list failed: "
-                    << std::strerror(errno);
-    }
+    EXPECT_THAT(dcfs::syscalls::setxattr(
+                    path, st.grow_new_name,
+                    std::span<const uint8_t>(
+                        reinterpret_cast<const uint8_t *>(value.data()),
+                        value.size()),
+                    0),
+                ::absl_testing::IsOk())
+        << "test setup: setxattr to grow the list failed";
   }
   return rc;
 }
@@ -138,24 +151,32 @@ class BackingFaultTest : public ::testing::Test {
   void SetUp() override {
     const char *tmpdir = std::getenv("TEST_TMPDIR");
     ASSERT_NE(tmpdir, nullptr);
-    tmpdir_fd_ = ::openat(AT_FDCWD, tmpdir, O_PATH | O_DIRECTORY);
-    ASSERT_GE(tmpdir_fd_, 0);
-    file_fd_ = ::openat(tmpdir_fd_, "test_file", O_CREAT | O_RDWR, 0600);
-    ASSERT_GE(file_fd_, 0);
+    ASSERT_OK_AND_ASSIGN(
+        tmpdir_fd_,
+        syscalls::openat(AT_FDCWD, tmpdir, O_PATH | O_DIRECTORY));
+    ASSERT_OK_AND_ASSIGN(
+        file_fd_, syscalls::openat(*tmpdir_fd_, "test_file",
+                                   O_CREAT | O_RDWR, 0600));
   }
 
   void TearDown() override {
     GetFaultState() = FaultState();
-    if (file_fd_ >= 0) ::close(file_fd_);
-    if (tmpdir_fd_ >= 0) ::close(tmpdir_fd_);
   }
 
   std::string ProcPath() const {
-    return "/proc/self/fd/" + std::to_string(file_fd_);
+    return "/proc/self/fd/" + std::to_string(*file_fd_);
   }
 
-  int tmpdir_fd_ = -1;
-  int file_fd_ = -1;
+  absl::Status SetXattr(std::string_view name, std::string_view value) {
+    return syscalls::fsetxattr(
+        *file_fd_, name,
+        std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t *>(value.data()), value.size()),
+        0);
+  }
+
+  FileDescriptor tmpdir_fd_;
+  FileDescriptor file_fd_;
 };
 
 // Regression test for bdfd61c: the size-query-then-read of an xattr value
@@ -168,16 +189,16 @@ class BackingFaultTest : public ::testing::Test {
 TEST_F(BackingFaultTest, XattrValueRetriesOnErangeFromReadNotQuery) {
   const std::string small_value = "x";
   const std::string grown_value(256, 'y');
-  if (::fsetxattr(file_fd_, "user.dcfs_erange", small_value.data(),
-                  small_value.size(), 0) != 0) {
-    GTEST_SKIP() << "user xattrs unsupported here: " << std::strerror(errno);
+  if (absl::Status set = SetXattr("user.dcfs_erange", small_value);
+      !set.ok()) {
+    GTEST_SKIP() << "user xattrs unsupported here: " << set;
   }
   FaultState &st = GetFaultState();
   st.getxattr_path = ProcPath();
   st.getxattr_name = "user.dcfs_erange";
   st.grow_value = grown_value;
 
-  auto xattrs = backing::ReadXattrsFd(file_fd_);
+  auto xattrs = backing::ReadXattrsFd(*file_fd_);
   ASSERT_THAT(xattrs, IsOk());
   EXPECT_THAT(*xattrs, Contains(Pair("user.dcfs_erange", grown_value)));
 }
@@ -186,15 +207,14 @@ TEST_F(BackingFaultTest, XattrValueRetriesOnErangeFromReadNotQuery) {
 // appears between the size query and the read.
 TEST_F(BackingFaultTest, XattrListRetriesOnErangeFromReadNotQuery) {
   const std::string value = "v";
-  if (::fsetxattr(file_fd_, "user.dcfs_list_a", value.data(), value.size(),
-                  0) != 0) {
-    GTEST_SKIP() << "user xattrs unsupported here: " << std::strerror(errno);
+  if (absl::Status set = SetXattr("user.dcfs_list_a", value); !set.ok()) {
+    GTEST_SKIP() << "user xattrs unsupported here: " << set;
   }
   FaultState &st = GetFaultState();
   st.listxattr_path = ProcPath();
   st.grow_new_name = "user.dcfs_list_b";
 
-  auto xattrs = backing::ReadXattrsFd(file_fd_);
+  auto xattrs = backing::ReadXattrsFd(*file_fd_);
   ASSERT_THAT(xattrs, IsOk());
   EXPECT_THAT(*xattrs, Contains(Pair("user.dcfs_list_a", value)));
   EXPECT_THAT(*xattrs, Contains(Pair("user.dcfs_list_b", value)));
@@ -208,10 +228,10 @@ TEST_F(BackingFaultTest, XattrListRetriesOnErangeFromReadNotQuery) {
 // reports a full buffer.
 TEST_F(BackingFaultTest, SymlinkTargetIsEnametoolongAtPathMaxTimesFourCap) {
   FaultState &st = GetFaultState();
-  st.fake_readlinkat_dirfd = tmpdir_fd_;
+  st.fake_readlinkat_dirfd = *tmpdir_fd_;
   st.fake_readlinkat_path = "";
 
-  auto target = backing::ReadSymlinkFd(tmpdir_fd_);
+  auto target = backing::ReadSymlinkFd(*tmpdir_fd_);
   ASSERT_FALSE(target.ok());
   auto errno_val = GetErrnoFromStatus(target.status());
   ASSERT_THAT(errno_val, IsOk());

@@ -19,6 +19,8 @@
 #include "dcfs/fd.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
+#include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -113,23 +115,24 @@ class FileHandleTest : public ::testing::Test {
     const ::testing::TestInfo *info =
         ::testing::UnitTest::GetInstance()->current_test_info();
     dir_path_ = absl::StrCat(tmpdir, "/", info->name());
-    ASSERT_EQ(::mkdir(dir_path_.c_str(), 0755), 0);
+    ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, dir_path_, 0755), IsOk());
 
-    dir_fd_ = ::open(dir_path_.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC);
-    ASSERT_GE(dir_fd_, 0);
+    ASSERT_OK_AND_ASSIGN(
+        dir_, syscalls::openat(AT_FDCWD, dir_path_, O_PATH | O_DIRECTORY));
+    dir_fd_ = *dir_;
 
-    file_fd_ =
-        ::openat(dir_fd_, "regular_file", O_CREAT | O_RDWR | O_CLOEXEC, 0600);
-    ASSERT_GE(file_fd_, 0);
+    ASSERT_OK_AND_ASSIGN(
+        file_, syscalls::openat(dir_fd_, "regular_file", O_CREAT | O_RDWR,
+                                0600));
+    file_fd_ = *file_;
 
-    ASSERT_EQ(::mkdirat(dir_fd_, "a_dir", 0755), 0);
-    ASSERT_EQ(::symlinkat("regular_file", dir_fd_, "a_symlink"), 0);
+    ASSERT_THAT(syscalls::mkdirat(dir_fd_, "a_dir", 0755), IsOk());
+    ASSERT_THAT(syscalls::symlinkat("regular_file", dir_fd_, "a_symlink"),
+                IsOk());
   }
 
-  void TearDown() override {
-    if (file_fd_ >= 0) ::close(file_fd_);
-    if (dir_fd_ >= 0) ::close(dir_fd_);
-  }
+  FileDescriptor dir_;
+  FileDescriptor file_;
 
   std::string dir_path_;
   int dir_fd_ = -1;
@@ -151,13 +154,14 @@ TEST_F(FileHandleTest, FromFdAndFromDirEntryAgreeOnRegularFile) {
 }
 
 TEST_F(FileHandleTest, FromFdAndFromDirEntryAgreeOnDirectory) {
-  int subdir_fd = ::openat(dir_fd_, "a_dir", O_PATH | O_DIRECTORY | O_CLOEXEC);
-  ASSERT_GE(subdir_fd, 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor subdir,
+      syscalls::openat(dir_fd_, "a_dir", O_PATH | O_DIRECTORY));
+  const int subdir_fd = *subdir;
 
   absl::StatusOr<FileHandle> from_fd = FileHandle::FromFd(subdir_fd);
   if (!from_fd.ok()) {
     ASSERT_TRUE(IsUnsupported(from_fd.status())) << from_fd.status();
-    ::close(subdir_fd);
     GTEST_SKIP() << from_fd.status();
   }
   EXPECT_FALSE(from_fd->bytes.empty());
@@ -166,8 +170,6 @@ TEST_F(FileHandleTest, FromFdAndFromDirEntryAgreeOnDirectory) {
       FileHandle::FromDirEntry(dir_fd_, "a_dir");
   ASSERT_THAT(from_entry, IsOk());
   EXPECT_EQ(*from_fd, *from_entry);
-
-  ::close(subdir_fd);
 }
 
 // FileHandle::FromFd(int) cannot be used on a symlink fd at all (see its
@@ -200,8 +202,9 @@ TEST_F(FileHandleTest, FromDirEntryMissingNameFails) {
 // crashing, and that if GetDeviceId ever does succeed here, procfs's
 // device really does differ from the root filesystem's.
 TEST(FileHandleValueTest, FromDirEntryAcrossMountBoundaryDoesNotCrash) {
-  int root_fd = ::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC);
-  ASSERT_GE(root_fd, 0);
+  ASSERT_OK_AND_ASSIGN(FileDescriptor root,
+                       syscalls::openat(AT_FDCWD, "/", O_PATH | O_DIRECTORY));
+  const int root_fd = *root;
 
   absl::StatusOr<FileHandle> fh = FileHandle::FromDirEntry(root_fd, "proc");
   if (!fh.ok()) {
@@ -211,8 +214,6 @@ TEST(FileHandleValueTest, FromDirEntryAcrossMountBoundaryDoesNotCrash) {
     ASSERT_THAT(root_device, IsOk());
     EXPECT_NE(fh->device, *root_device);
   }
-
-  ::close(root_fd);
 }
 
 TEST_F(FileHandleTest, FromFdWithKnownDeviceSkipsGetDeviceId) {
@@ -236,7 +237,9 @@ TEST_F(FileHandleTest, HardLinkYieldsEqualHandle) {
     GTEST_SKIP() << original.status();
   }
 
-  ASSERT_EQ(::linkat(dir_fd_, "regular_file", dir_fd_, "hard_link", 0), 0);
+  ASSERT_THAT(
+      syscalls::linkat(dir_fd_, "regular_file", dir_fd_, "hard_link", 0),
+      IsOk());
   absl::StatusOr<FileHandle> linked =
       FileHandle::FromDirEntry(dir_fd_, "hard_link");
   ASSERT_THAT(linked, IsOk());
@@ -250,13 +253,12 @@ TEST_F(FileHandleTest, DifferentFileYieldsDifferentHandle) {
     GTEST_SKIP() << original.status();
   }
 
-  int other_fd =
-      ::openat(dir_fd_, "other_file", O_CREAT | O_RDWR | O_CLOEXEC, 0600);
-  ASSERT_GE(other_fd, 0);
-  absl::StatusOr<FileHandle> other = FileHandle::FromFd(other_fd);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor other_file,
+      syscalls::openat(dir_fd_, "other_file", O_CREAT | O_RDWR, 0600));
+  absl::StatusOr<FileHandle> other = FileHandle::FromFd(*other_file);
   ASSERT_THAT(other, IsOk());
   EXPECT_NE(*original, *other);
-  ::close(other_fd);
 }
 
 TEST_F(FileHandleTest, OpenReopensFileViaMountFds) {
@@ -269,18 +271,17 @@ TEST_F(FileHandleTest, OpenReopensFileViaMountFds) {
   // Open() requires a real (non-O_PATH) mount fd -- open_by_handle_at
   // rejects O_PATH (fs/fhandle.c get_path_from_fd() uses the non-raw fd
   // class).
-  int mount_fd = ::open(dir_path_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  ASSERT_GE(mount_fd, 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor mount_fd,
+      syscalls::openat(AT_FDCWD, dir_path_, O_RDONLY | O_DIRECTORY));
   MountFds mounts;
-  ASSERT_THAT(mounts.Insert(fh->device, FileDescriptor(mount_fd)), IsOk());
+  ASSERT_THAT(mounts.Insert(fh->device, std::move(mount_fd)), IsOk());
 
   absl::StatusOr<FileDescriptor> opened = fh->Open(mounts, O_RDONLY);
   ASSERT_THAT(opened, IsOk());
 
-  struct stat original_st;
-  ASSERT_EQ(::fstat(file_fd_, &original_st), 0);
-  struct stat opened_st;
-  ASSERT_EQ(::fstat(**opened, &opened_st), 0);
+  ASSERT_OK_AND_ASSIGN(struct stat original_st, syscalls::fstat(file_fd_));
+  ASSERT_OK_AND_ASSIGN(struct stat opened_st, syscalls::fstat(**opened));
   EXPECT_EQ(original_st.st_ino, opened_st.st_ino);
 }
 
@@ -305,10 +306,11 @@ TEST_F(FileHandleTest, OpenWithCorruptedHandleFails) {
   ASSERT_FALSE(fh->bytes.empty());
   fh->bytes[0] ^= 0xFF;
 
-  int mount_fd = ::open(dir_path_.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  ASSERT_GE(mount_fd, 0);
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor mount_fd,
+      syscalls::openat(AT_FDCWD, dir_path_, O_RDONLY | O_DIRECTORY));
   MountFds mounts;
-  ASSERT_THAT(mounts.Insert(fh->device, FileDescriptor(mount_fd)), IsOk());
+  ASSERT_THAT(mounts.Insert(fh->device, std::move(mount_fd)), IsOk());
 
   // The corrupted handle should fail one way or another (typically ESTALE,
   // sometimes EBADF/EINVAL depending on how the bit flip lands); any

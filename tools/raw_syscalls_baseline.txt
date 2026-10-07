@@ -4,15 +4,5 @@
 18 bench/dm_delay.cc
 18 bench/process.cc
 6 bench/tree.cc
-8 dcfs/backing_fault_test.cc
 57 dcfs/backing_test.cc
-5 dcfs/device_id_test.cc
 116 dcfs/dir_cache_fs_test.cc
-13 dcfs/fd_test.cc
-19 dcfs/file_handle_test.cc
-1 dcfs/fuse_request_channel_test.cc
-1 dcfs/mount_fds_test.cc
-7 dcfs/mounts_below_test.cc
-2 dcfs/sqlite_test.cc
-16 dcfs/syscalls_test.cc
-2 dcfs/testonly/trace_recorder_test.cc

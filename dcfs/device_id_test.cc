@@ -14,9 +14,12 @@
 
 #include "absl/hash/hash.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
+#include "dcfs/fd.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -101,11 +104,9 @@ TEST(DeviceIdTest, FstypeNameUnknown) {
 // Opens `path` O_PATH and returns the DeviceId GetDeviceId() computes for
 // it, or the failing status (including from open() itself).
 absl::StatusOr<DeviceId> GetDeviceIdForPath(const char *path) {
-  int fd = open(path, O_PATH | O_CLOEXEC);
-  if (fd < 0) return ErrnoToStatus(errno, path);
-  absl::StatusOr<DeviceId> id = GetDeviceId(fd);
-  close(fd);
-  return id;
+  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
+                        syscalls::openat(AT_FDCWD, path, O_PATH));
+  return GetDeviceId(*fd);
 }
 
 TEST(DeviceIdTest, GetDeviceIdRoot) {
@@ -156,9 +157,8 @@ TEST(DeviceIdTest, GetDeviceIdBtrfsUsesFsInfoFallback) {
   ASSERT_NE(tmpdir, nullptr)
       << "TEST_TMPDIR must be set when running under bazel test";
   std::string mnt = std::string(tmpdir) + "/btrfs_mnt";
-  ASSERT_EQ(mkdir(mnt.c_str(), 0755), 0) << strerror(errno);
-  ASSERT_EQ(mount("/dev/vdc", mnt.c_str(), "btrfs", 0, nullptr), 0)
-      << strerror(errno);
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, mnt, 0755), IsOk());
+  ASSERT_THAT(syscalls::mount("/dev/vdc", mnt, "btrfs", 0, nullptr), IsOk());
 
   absl::StatusOr<DeviceId> id = GetDeviceIdForPath(mnt.c_str());
   ASSERT_THAT(id, IsOk()) << id.status();
@@ -173,7 +173,7 @@ TEST(DeviceIdTest, GetDeviceIdBtrfsUsesFsInfoFallback) {
   ASSERT_THAT(id2, IsOk());
   EXPECT_EQ(*id, *id2);
 
-  umount(mnt.c_str());
+  EXPECT_THAT(syscalls::umount2(mnt, 0), IsOk());
 }
 
 // Asserts the *current* pre-FS_IOC_GETFSUUID-support OpenZFS behavior.

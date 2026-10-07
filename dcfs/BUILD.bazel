@@ -102,6 +102,7 @@ qemu_cc_test(
     deps = [
       ":ret_check",
       ":sqlite",
+      ":syscalls",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
@@ -229,6 +230,7 @@ qemu_cc_test(
     deps = [
       ":status",
       ":syscalls",
+      "@absl//absl/log:check",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -244,6 +246,7 @@ qemu_cc_test(
     deps = [
       ":status",
       ":syscalls",
+      "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -267,6 +270,8 @@ qemu_cc_test(
     deps = [
       ":backing",
       ":status",
+      ":syscalls",
+      "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -325,6 +330,8 @@ qemu_cc_test(
     deps = [
       ":fuse_request",
       ":status",
+      ":syscalls",
+      "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -383,8 +390,10 @@ qemu_cc_test(
     deps = [
       ":device_id",
       ":status",
+      ":syscalls",
       "@absl//absl/hash",
       "@absl//absl/status",
+      "@absl//absl/status:status_macros",
       "@absl//absl/status:status_matchers",
       "@absl//absl/status:statusor",
       "@googletest//:gtest_main",
@@ -416,6 +425,7 @@ qemu_cc_test(
       ":device_id",
       ":mount_fds",
       ":syscalls",
+      "@absl//absl/log:check",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@absl//absl/status:statusor",
@@ -454,6 +464,7 @@ qemu_cc_test(
       ":mount_fds",
       ":status",
       ":syscalls",
+      "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/hash",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
@@ -681,6 +692,7 @@ qemu_cc_test(
     srcs = ["mounts_below_test.cc"],
     deps = [
       ":mounts_below",
+      ":syscalls",
       "//dcfs/testonly:assert_ok_and_assign",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",

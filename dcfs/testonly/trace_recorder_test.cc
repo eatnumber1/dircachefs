@@ -34,6 +34,7 @@
 #include "absl/strings/str_cat.h"
 #include "dcfs/context.h"
 #include "dcfs/device_id.h"
+#include "dcfs/fd.h"
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
@@ -41,6 +42,7 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
 #include "gmock/gmock.h"
@@ -87,13 +89,13 @@ class TraceRecorderTest : public ::testing::Test {
     path_ = absl::StrCat(tmpdir, "/trace_", ::testing::UnitTest::GetInstance()
                                                 ->current_test_info()
                                                 ->name());
-    fd_ = ::open(path_.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
-    ASSERT_GE(fd_, 0) << std::strerror(errno);
+    ASSERT_OK_AND_ASSIGN(
+        fd_, syscalls::openat(AT_FDCWD, path_,
+                              O_WRONLY | O_CREAT | O_TRUNC, 0600));
   }
 
   void TearDown() override {
     ctx_.events = &NoProtocolEvents();
-    if (fd_ >= 0) ::close(fd_);
   }
 
   // A row for a backing object, with a handle derived from `ino`.
@@ -124,7 +126,7 @@ class TraceRecorderTest : public ::testing::Test {
   // files' traces too; with `lifetimes`, nodeids' traces.
   void StartTrace(bool files = false, bool lifetimes = false) {
     recorder_ =
-        std::make_unique<TraceRecorder>(fd_, "test", files, lifetimes);
+        std::make_unique<TraceRecorder>(*fd_, "test", files, lifetimes);
     ctx_.events = recorder_.get();
     recorder_->BeginAll(ctx_);
   }
@@ -181,7 +183,7 @@ class TraceRecorderTest : public ::testing::Test {
   Context ctx_{db_, mounts_, bitgen_};
   std::unique_ptr<TraceRecorder> recorder_;
   std::string path_;
-  int fd_ = -1;
+  FileDescriptor fd_;
 };
 
 // --- InodeForgotten (review of 2026-10-06, finding 3) ----------------------

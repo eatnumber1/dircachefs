@@ -9,6 +9,7 @@
 #include <linux/openat2.h>
 #include <string_view>
 #include <sys/file.h>
+#include <sys/mount.h>
 #include <sys/fsuid.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
@@ -413,6 +414,50 @@ absl::StatusOr<int> getgroups(int size, gid_t *list) {
   int n = ::getgroups(size, list);
   if (n == -1) return ErrnoToStatus(errno, "getgroups");
   return n;
+}
+
+absl::Status mount(const char *source, std::string_view target,
+                   const char *fstype, unsigned long flags, const void *data) {
+  const std::string target_str(target);
+  if (::mount(source, target_str.c_str(), fstype, flags, data) == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("mount(", EscapeBytes(target), ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status umount2(std::string_view target, int flags) {
+  const std::string target_str(target);
+  if (::umount2(target_str.c_str(), flags) == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("umount2(", EscapeBytes(target), ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<std::string> mkdtemp(std::string_view pattern) {
+  std::string name(pattern);
+  if (::mkdtemp(name.data()) == nullptr) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("mkdtemp(", EscapeBytes(pattern), ")"));
+  }
+  return name;
+}
+
+absl::StatusOr<FileDescriptor> mkstemp(std::string &pattern) {
+  const std::string original = pattern;
+  int fd = ::mkostemp(pattern.data(), O_CLOEXEC);
+  if (fd == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("mkstemp(", EscapeBytes(original), ")"));
+  }
+  return FileDescriptor(fd);
+}
+
+absl::StatusOr<int> fcntl(int fd, int cmd, int arg) {
+  int rc = ::fcntl(fd, cmd, arg);
+  if (rc == -1) return ErrnoToStatus(errno, absl::StrCat("fcntl(", fd, ")"));
+  return rc;
 }
 
 absl::StatusOr<std::string> realpath(std::string_view path) {

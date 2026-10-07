@@ -131,6 +131,7 @@ qemu_cc_test(
         "//dcfs:protocol_events",
         "//dcfs:sqlite",
         "//dcfs:status",
+        "//dcfs:syscalls",
         "@absl//absl/random",
         "@absl//absl/status",
         "@absl//absl/status:status_matchers",

@@ -3,8 +3,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "absl/log/check.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {
@@ -17,6 +19,17 @@ TEST(FileDescriptorTest, DefaultConstructedInvalid) {
   EXPECT_FALSE(fd.valid());
 }
 
+// An O_PATH descriptor on TEST_TMPDIR, as a plain int the test owns (the
+// tests below hand it to a FileDescriptor and take it back).
+int OpenTmpdir() {
+  const char *tmpdir = std::getenv("TEST_TMPDIR");
+  CHECK(tmpdir != nullptr);
+  absl::StatusOr<FileDescriptor> fd =
+      syscalls::openat(AT_FDCWD, tmpdir, O_PATH | O_DIRECTORY);
+  CHECK_OK(fd);
+  return std::move(*fd).Release();
+}
+
 TEST(FileDescriptorTest, ConstructedWithFdIsValid) {
   FileDescriptor fd(STDOUT_FILENO);
   EXPECT_TRUE(fd.valid());
@@ -25,9 +38,7 @@ TEST(FileDescriptorTest, ConstructedWithFdIsValid) {
 }
 
 TEST(FileDescriptorTest, MoveConstructorTransfersOwnership) {
-  const char *tmpdir = std::getenv("TEST_TMPDIR");
-  ASSERT_NE(tmpdir, nullptr);
-  int tmp_fd = ::open(tmpdir, O_PATH | O_DIRECTORY);
+  const int tmp_fd = OpenTmpdir();
   ASSERT_GE(tmp_fd, 0);
 
   FileDescriptor fd1(tmp_fd);
@@ -40,13 +51,11 @@ TEST(FileDescriptorTest, MoveConstructorTransfersOwnership) {
   EXPECT_EQ(*fd2, tmp_fd);
 
   std::move(fd2).Release();  // Prevent close in destructor
-  ::close(tmp_fd);
+  EXPECT_THAT(syscalls::close(FileDescriptor(tmp_fd)), IsOk());
 }
 
 TEST(FileDescriptorTest, MoveAssignmentTransfersOwnership) {
-  const char *tmpdir = std::getenv("TEST_TMPDIR");
-  ASSERT_NE(tmpdir, nullptr);
-  int tmp_fd = ::open(tmpdir, O_PATH | O_DIRECTORY);
+  const int tmp_fd = OpenTmpdir();
   ASSERT_GE(tmp_fd, 0);
 
   FileDescriptor fd1(tmp_fd);
@@ -60,13 +69,11 @@ TEST(FileDescriptorTest, MoveAssignmentTransfersOwnership) {
   EXPECT_EQ(*fd2, tmp_fd);
 
   std::move(fd2).Release();  // Prevent close in destructor
-  ::close(tmp_fd);
+  EXPECT_THAT(syscalls::close(FileDescriptor(tmp_fd)), IsOk());
 }
 
 TEST(FileDescriptorTest, ReleaseStopsDestructorFromClosing) {
-  const char *tmpdir = std::getenv("TEST_TMPDIR");
-  ASSERT_NE(tmpdir, nullptr);
-  int tmp_fd = ::open(tmpdir, O_PATH | O_DIRECTORY);
+  const int tmp_fd = OpenTmpdir();
   ASSERT_GE(tmp_fd, 0);
 
   FileDescriptor fd(tmp_fd);
@@ -74,17 +81,14 @@ TEST(FileDescriptorTest, ReleaseStopsDestructorFromClosing) {
   EXPECT_EQ(released_fd, tmp_fd);
 
   // Verify the fd is still valid (destructor didn't close it)
-  int flags = ::fcntl(tmp_fd, F_GETFD);
-  EXPECT_GE(flags, 0);
+  EXPECT_THAT(syscalls::fcntl(tmp_fd, F_GETFD), IsOk());
 
   // Manual cleanup
-  ::close(tmp_fd);
+  EXPECT_THAT(syscalls::close(FileDescriptor(tmp_fd)), IsOk());
 }
 
 TEST(FileDescriptorTest, CloseIsIdempotent) {
-  const char *tmpdir = std::getenv("TEST_TMPDIR");
-  ASSERT_NE(tmpdir, nullptr);
-  int tmp_fd = ::open(tmpdir, O_PATH | O_DIRECTORY);
+  const int tmp_fd = OpenTmpdir();
   ASSERT_GE(tmp_fd, 0);
 
   FileDescriptor fd(tmp_fd);
@@ -97,9 +101,7 @@ TEST(FileDescriptorTest, CloseIsIdempotent) {
 }
 
 TEST(FileDescriptorTest, DestructorClosesValidFd) {
-  const char *tmpdir = std::getenv("TEST_TMPDIR");
-  ASSERT_NE(tmpdir, nullptr);
-  int tmp_fd = ::open(tmpdir, O_PATH | O_DIRECTORY);
+  const int tmp_fd = OpenTmpdir();
   ASSERT_GE(tmp_fd, 0);
 
   {
@@ -107,14 +109,13 @@ TEST(FileDescriptorTest, DestructorClosesValidFd) {
     EXPECT_TRUE(fd.valid());
   }
   // After destructor, the fd should be closed
-  int flags = ::fcntl(tmp_fd, F_GETFD);
-  EXPECT_EQ(flags, -1);  // EBADF
+  auto flags = syscalls::fcntl(tmp_fd, F_GETFD);
+  ASSERT_FALSE(flags.ok());
+  EXPECT_EQ(StatusToErrno(flags.status()), EBADF);
 }
 
 TEST(FileDescriptorTest, DefaultDestructorDoesNotClosePreviouslyReleasedFd) {
-  const char *tmpdir = std::getenv("TEST_TMPDIR");
-  ASSERT_NE(tmpdir, nullptr);
-  int tmp_fd = ::open(tmpdir, O_PATH | O_DIRECTORY);
+  const int tmp_fd = OpenTmpdir();
   ASSERT_GE(tmp_fd, 0);
 
   int released_fd;
@@ -125,11 +126,10 @@ TEST(FileDescriptorTest, DefaultDestructorDoesNotClosePreviouslyReleasedFd) {
   // Destructor ran but didn't close because fd was released
 
   // Verify the fd is still valid
-  int flags = ::fcntl(released_fd, F_GETFD);
-  EXPECT_GE(flags, 0);
+  EXPECT_THAT(syscalls::fcntl(released_fd, F_GETFD), IsOk());
 
   // Manual cleanup
-  ::close(released_fd);
+  EXPECT_THAT(syscalls::close(FileDescriptor(released_fd)), IsOk());
 }
 
 }  // namespace

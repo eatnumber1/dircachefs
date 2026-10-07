@@ -13,6 +13,7 @@
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "dcfs/syscalls.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -31,14 +32,15 @@ class MountsBelowTest : public ::testing::Test {
     const char *tmpdir = std::getenv("TEST_TMPDIR");
     ASSERT_NE(tmpdir, nullptr);
     std::string templ = absl::StrCat(tmpdir, "/mounts_below_XXXXXX");
-    ASSERT_NE(::mkdtemp(templ.data()), nullptr) << std::strerror(errno);
-    source_ = templ;
-    ASSERT_EQ(::mkdir(Path("plain").c_str(), 0755), 0);
-    ASSERT_EQ(::mkdir(Path("mnt").c_str(), 0755), 0);
+    ASSERT_OK_AND_ASSIGN(source_, syscalls::mkdtemp(templ));
+    ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("plain"), 0755), IsOk());
+    ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mnt"), 0755), IsOk());
   }
 
   void TearDown() override {
-    if (mounted_) ::umount2(Path("mnt").c_str(), MNT_DETACH);
+    if (mounted_) {
+      syscalls::umount2(Path("mnt"), MNT_DETACH).IgnoreError();
+    }
   }
 
   std::string Path(std::string_view rel) const {
@@ -54,8 +56,8 @@ TEST_F(MountsBelowTest, NothingBelowAPlainDirectory) {
 }
 
 TEST_F(MountsBelowTest, ReportsATmpfsMountedBelowTheSource) {
-  ASSERT_EQ(::mount("tmpfs", Path("mnt").c_str(), "tmpfs", 0, nullptr), 0)
-      << std::strerror(errno);
+  ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt"), "tmpfs", 0, nullptr),
+              IsOk());
   mounted_ = true;
   EXPECT_THAT(MountsBelow(source_), IsOkAndHolds(UnorderedElementsAre(Path("mnt"))));
 }
@@ -65,11 +67,11 @@ TEST_F(MountsBelowTest, ReportsATmpfsMountedBelowTheSource) {
 // onto itself) is not "below" it -- amendment 12's startup check must not
 // refuse this configuration.
 TEST_F(MountsBelowTest, AMountOnTheSourceItselfIsNotReported) {
-  ASSERT_EQ(::mount(source_.c_str(), source_.c_str(), nullptr, MS_BIND, nullptr),
-            0)
-      << std::strerror(errno);
+  ASSERT_THAT(
+      syscalls::mount(source_.c_str(), source_, nullptr, MS_BIND, nullptr),
+      IsOk());
   auto result = MountsBelow(source_);
-  ::umount2(source_.c_str(), MNT_DETACH);
+  EXPECT_THAT(syscalls::umount2(source_, MNT_DETACH), IsOk());
   EXPECT_THAT(result, IsOkAndHolds(IsEmpty()));
 }
 

@@ -6,11 +6,13 @@
 #include <cstdint>
 #include <utility>
 
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
+#include "dcfs/syscalls.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -30,7 +32,10 @@ DeviceId MakeId(uint8_t seed, uint64_t subvol_id = 0) {
 
 // Any valid, harmless fd works: MountFds never dereferences it.
 FileDescriptor OpenPlaceholderFd() {
-  return FileDescriptor(open("/", O_PATH | O_CLOEXEC));
+  absl::StatusOr<FileDescriptor> opened =
+      syscalls::openat(AT_FDCWD, "/", O_PATH);
+  CHECK_OK(opened);
+  return *std::move(opened);
 }
 
 TEST(MountFdsTest, InsertGetErase) {

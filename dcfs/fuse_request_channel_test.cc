@@ -30,8 +30,11 @@
 #include <unistd.h>
 
 #include "absl/status/status_matchers.h"
+#include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
+#include "dcfs/testonly/assert_ok_and_assign.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
 #include "gtest/gtest.h"
@@ -116,8 +119,9 @@ TEST(FuseRequestChannelTest, ReplyErrnoPreservesWriteFailureErrno) {
   // goes through fuse_session_process_buf() with hand-built buffers
   // below, never through this fd); /dev/null is a harmless real fd to
   // satisfy that check. fuse_session_destroy() closes it.
-  int dummy_fd = ::open("/dev/null", O_RDWR);
-  ASSERT_GE(dummy_fd, 0);
+  ASSERT_OK_AND_ASSIGN(FileDescriptor dummy,
+                       syscalls::openat(AT_FDCWD, "/dev/null", O_RDWR));
+  const int dummy_fd = std::move(dummy).Release();  // the session owns it
   ASSERT_EQ(fuse_session_custom_io(se, &io, sizeof(io), dummy_fd), 0);
 
   // FUSE_INIT: mandatory first request, and its reply must succeed (via
