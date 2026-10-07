@@ -857,3 +857,18 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   worth reporting, or a test that should mkfs -O casefold), and should the harness fail a run on
   any oops/BUG in the serial log (it should). Also pending: N4 readdir timing budget, the
   destroy_test FORGET count.
+- Casefold oops (lane-2, f45ef20): run-qemu.sh now FAILS a run on BUG:/Oops/kernel BUG at/WARNING:
+  CPU:/Call Trace:/Kernel panic in the serial log, and guest/init dumps matching dmesg lines as
+  KERNEL-OOPS: (console loglevel 3 hides them); run_qemu_verdict_test with canned logs (failing
+  first: a NULL-deref log did not fail the run); absl's userspace "WARNING: All log messages..."
+  false positive fixed. No other test's serial log (228 checked) has an oops or warning. The test
+  now creates its disk with `-O casefold -E encoding=utf8` (disk spec gained an ext4-only mke2fs
+  options field); testutil's `ext4-casefold` superblock tuning removed.
+  Needs russ: KERNEL BUG CANDIDATE for linux-ext4. EXT4_IOC_SET_TUNE_SB_PARAM with
+  EDIT_FEATURES enabling casefold on a mounted ext4 writes the feature bit and s_encoding on
+  disk but never loads sb->s_encoding (ext4_encoding_init runs only at mount); ext4_ioctl_setflags
+  then accepts +F (checks only the feature bit) and the next readdir calls utf8_casefold(NULL):
+  NULL deref in utf8nlookup <- utf8byte <- utf8_casefold <- ext4fs_dirhash <- ext4_readdir. Root +
+  writable mount + CONFIG_UNICODE=y; reproducer is the removed cmd_ext4_casefold at f45ef20^.
+  Fix options: load the encoding in the ioctl, or check s_encoding (not the feature bit) in
+  setflags/dirhash, or refuse enabling casefold while mounted. Present in v6.18, v7.2, 7.3-rc.
