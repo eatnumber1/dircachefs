@@ -242,12 +242,13 @@ each.
 - **No paths after startup.** Objects are reached by descriptor or file
   handle (`FileHandle::Open`); a child is `openat(dir_fd, name, ...)`, never
   a joined path. Only startup uses a path (`--source`, the cache database).
-- **Only `backing.cc` touches the backing filesystem for request work.**
-  `DirCacheFS` and `cache::` never name `syscalls::`. The allowed peers are
-  `file_handle.cc`, `device_id.cc`, `fd.cc` and startup in `main.cc`
-  (`docs/design.md`, "Architecture and layering"); `mounts_below.cc` is not
-  listed (C9). Only `syscalls.cc` calls libc directly. `cache::` is
-  pure SQLite: it never sees a descriptor.
+- **Syscalls that can reach the backing filesystem are made only in
+  `backing.cc`.** That is anything given a backing fd, file handle or name:
+  `backing.cc` is where the idle guarantees are reasoned about.
+  Process-local syscalls (resource limits, credentials, `/proc` reads, the
+  cache database file, mount tables) may call the `syscalls::` wrappers
+  directly from any file. Only `syscalls.cc` calls libc directly. `cache::`
+  is pure SQLite: it never sees a descriptor.
 - **No transaction spans a backing syscall.** Backing I/O first, then one
   short synchronous transaction (`ctx.db.Transaction(...)`); no statement
   cursor held across a syscall; `AsCaller` wraps one syscall.
@@ -462,7 +463,6 @@ line length, shellcheck findings, quoting) were not surveyed.
 |---|---|---|---|
 | C3 | Google: 80 columns | 102 lines in 28 files (`backing.cc` 14, `syscalls.cc` 10, `metadata_cache_test.cc` 8) | `grep -rnE '^.{81,}$' dcfs bench tools --include='*.cc' --include='*.h' --include='*.c'` |
 | C4 | Google/clang-format include blocks and order | 16 out-of-order lines in 10 files (`backing.cc`, `errno.cc`, `fd.cc`, `main.cc`, `syscalls.cc`, `syscalls.h`, 4 tests); 37 files have one `<...>` block where Google has C and C++ headers apart (26 files have two or more); clang-format settles both | `LC_ALL=C awk 'FNR==1{p=""} /^#include/{if(p!=""&&$0<p)print FILENAME":"FNR": "$0;p=$0;next}{p=""}' $(git ls-files 'dcfs/*.cc' 'dcfs/*.h')` |
-| C9 | `syscalls::` only in `backing.cc` and the listed peers | `mounts_below.cc:77,95` is not in `docs/design.md`'s list (add it there or route through `backing.cc`) | `grep -rln 'syscalls::' dcfs --include='*.cc' --include='*.h' \| grep -v -e _test -e testonly` |
 | C11 | Google shell: 2-space indent, no tabs (4) (7.6) | 48 scripts use tabs (all guest scripts but a few wrappers, most host scripts); 4 use spaces and conform (`formal/trace_validate.sh`, `tools/smoke_readonly.sh`, `tools/format.sh`, `.github/ci/osv.sh`), as do the new `third_party/alpine/*.sh` | `grep -lP '^\t' $(git ls-files '*.sh' test/qemu/guest/init)` |
 | SH1 | Host-side scripts are bash (4) (7.6) | 19 of 26 host-side scripts are `#!/bin/sh` (`third_party/*` build and smoke helpers, `test/qemu/scripts/`, `tools/`); each becomes `#!/bin/bash` with `set -euo pipefail` (all 19 already have `set -eu`) | `grep -L '^#!/bin/bash' $(git ls-files '*.sh' \| grep -v test/qemu/guest/)` |
 | SH2 | Google shell: 80 columns (4) (7.6) | 246 lines over 80 in 48 scripts (measured with a tab as 2 columns; 375 lines in 54 scripts with a tab as 8) | `grep -nE '^.{81,}$' $(git ls-files '*.sh')` after expanding tabs (`expand -t2`) |
