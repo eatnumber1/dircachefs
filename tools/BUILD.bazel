@@ -245,4 +245,22 @@ py_test(
         "//dcfs/testonly:cxx_sources",
     ],
     main = "raw_syscalls_test.py",
+
+# Step 7.1: the C++ toolchain is the pinned, hermetic clang (MODULE.bazel,
+# third_party/llvm/README.md), not the host's GCC. The genrule records what
+# the toolchain's $(CC) is and what it says about itself.
+genrule(
+    name = "cc_toolchain_info",
+    outs = ["cc_toolchain_info.txt"],
+    cmd = "echo \"CC=$(CC)\" > $@ && $(CC) --version >> $@ 2>&1",
+    toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
+)
+
+sh_test(
+    name = "toolchain_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["toolchain_test.sh"],
+    args = ["$(location :cc_toolchain_info)"],
+    data = [":cc_toolchain_info"],
 )
