@@ -824,9 +824,10 @@ ext4, xfs and btrfs.
 - `lifecycle_test` (`guest/lifecycle.sh`): step 3.5's daemon lifecycle and
   CLI -- usage/flag validation, a missing or non-directory `--source`, a
   cache database refused because it belongs to a different filesystem,
-  `--fuse_opt` (good and bad options), a clean SIGTERM shutdown (exit 0,
-  unmounted, WAL checkpointed), mounting dcfs back over its own `--source`,
-  and restarting against a previously-used cache database.
+  `--fuse_opt` (good, bad and redundant options), a clean SIGTERM
+  shutdown (exit 0, unmounted, WAL checkpointed), mounting dcfs back over
+  its own `--source`, and restarting against a previously-used cache
+  database.
 - `handles_test` (`guest/handles.sh`): step 3.4b's NFS export handles
   (`FUSE_CAP_EXPORT_SUPPORT`, exercised with `//tools:fhtest`) -- a handle
   for a file on the source device opens and

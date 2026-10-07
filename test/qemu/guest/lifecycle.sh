@@ -226,6 +226,19 @@ else
 	umount "$MNT" 2>/dev/null || true
 fi
 
+# default_permissions is dcfs's own and required: naming it is a usage
+# error (exit 1, before anything is opened), not passed through twice.
+OUT=$("$DCFS" --source="$SRC" --cache_db="$DB_FUSEOPT" \
+	--fuse_opt=suid,default_permissions "$MNT" 2>&1)
+RC=$?
+if [ "$RC" -eq 1 ] && [ "$(mount_count "$MNT")" -eq 0 ] &&
+	echo "$OUT" | grep -q "default_permissions is redundant"; then
+	pass fuse-opt-default-permissions-rejected
+else
+	fail fuse-opt-default-permissions-rejected "rc=$RC mount_count=$(mount_count "$MNT") out=$OUT"
+	umount "$MNT" 2>/dev/null || true
+fi
+
 # --- sigterm-clean: SIGTERM unmounts, exits 0, and checkpoints the WAL ---
 
 DB_SIGTERM=/cache/sigterm.db

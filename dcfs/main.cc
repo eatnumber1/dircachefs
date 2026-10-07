@@ -38,6 +38,7 @@
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fd.h"
+#include "dcfs/mount_options.h"
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/fuse_ops.h"
@@ -88,7 +89,8 @@ ABSL_FLAG(
     "(ordinary Abseil vector<string> flag semantics), so combine several "
     "options in one --fuse_opt=a,b instead of repeating the flag. Our own "
     "default_permissions (and allow_other, when --allow_other is set) are "
-    "always added on top of these.");
+    "always added on top of these; naming default_permissions here is an "
+    "error.");
 
 namespace dcfs {
 namespace {
@@ -319,6 +321,9 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
           "expected exactly one mountpoint argument, got ", args.size() - 1));
   }
   const char *mountpoint = args[1];
+  absl::StatusOr<MountOptions> mount_opts = BuildMountOptions(
+      absl::GetFlag(FLAGS_allow_other), absl::GetFlag(FLAGS_fuse_opt));
+  if (!mount_opts.ok()) return UsageError(mount_opts.status().message());
 
   // `source` (the --source path string) is scoped to this block alone: once
   // source_fd is open, every later use of the source filesystem goes
@@ -497,29 +502,16 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   DirCacheFS::Options opts{
       .attr_timeout = absl::Seconds(absl::GetFlag(FLAGS_attr_timeout_sec)),
       .entry_timeout = absl::Seconds(absl::GetFlag(FLAGS_entry_timeout_sec)),
+      .max_read = mount_opts->max_read,
       .sync_interval = absl::Seconds(absl::GetFlag(FLAGS_sync_interval_sec)),
+      // default_permissions (and allow_other, if requested) ahead of
+      // --fuse_opt's; Init() checks the first is there.
+      .mount_options = mount_opts->options,
   };
-
-  // default_permissions (and allow_other, if requested) are always added,
-  // ahead of whatever the caller passed via --fuse_opt.
-  std::vector<std::string> mount_opts = {"default_permissions"};
-  if (absl::GetFlag(FLAGS_allow_other)) {
-    mount_opts.push_back("allow_other");
-  }
-  for (const std::string &opt : absl::GetFlag(FLAGS_fuse_opt)) {
-    mount_opts.push_back(opt);
-    // See DirCacheFS::Options::max_read: DirCacheFS::Init() needs this
-    // value too, to satisfy libfuse's do_init() consistency check.
-    if (unsigned int max_read;
-        absl::StartsWith(opt, "max_read=") &&
-        absl::SimpleAtoi(std::string_view(opt).substr(9), &max_read)) {
-      opts.max_read = max_read;
-    }
-  }
 
   DirCacheFS fs(ctx, opts);
   std::vector<std::string> fuse_arg_strings = {
-      args[0], "-o", absl::StrJoin(mount_opts, ",")};
+      args[0], "-o", absl::StrJoin(opts.mount_options, ",")};
   std::vector<char *> fuse_arg_ptrs;
   fuse_arg_ptrs.reserve(fuse_arg_strings.size());
   for (std::string &arg : fuse_arg_strings) fuse_arg_ptrs.push_back(arg.data());

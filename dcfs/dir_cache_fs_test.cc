@@ -4783,6 +4783,47 @@ TEST_F(DirCacheFSTest, RefusedInitEndsTheLoopWithEproto) {
   fuse_session_destroy(se);
 }
 
+// default_permissions is required (README, "Flags"): a DirCacheFS whose
+// mount options lack it refuses the mount, naming the option, and the loop
+// ends with -EPROTO as for any refused INIT.
+TEST_F(DirCacheFSTest, MountWithoutDefaultPermissionsIsRefused) {
+  Start();
+  MountFds mounts;
+  Context ctx{db_, mounts, bitgen_};
+  DirCacheFS::Options options = options_;
+  options.mount_options = {"allow_other", "suid"};
+  DirCacheFS other(ctx, options);
+  struct fuse_session *se = NewSession(&other, {});
+  ASSERT_NE(se, nullptr);
+  WarningCapture capture;
+  QueueInit();
+  {
+    SessionLoop loop(se);
+    EXPECT_EQ(loop.Run(), -EPROTO);
+  }
+  fuse_session_destroy(se);
+  EXPECT_THAT(capture.lines, Contains(HasSubstr("default_permissions")))
+      << absl::StrJoin(capture.lines, "\n");
+}
+
+// The kernel sends ACCESS only when default_permissions is not in effect
+// (fuse_permission, fs/fuse/dir.c). dcfs checks no permissions itself, so
+// one arriving is denied, loudly: ENOSYS would make the kernel allow every
+// later access(2) without asking (fc->no_access).
+TEST_F(DirCacheFSTest, AccessFailsClosed) {
+  Start();
+  WarningCapture capture;
+  struct fuse_access_in in = {};
+  in.mask = R_OK;
+  std::string body;
+  AppendBytes(body, in);
+  EXPECT_EQ(Send(FUSE_ACCESS, kRootInode, body).error, -EACCES);
+  EXPECT_THAT(capture.lines,
+              Contains(HasSubstr(
+                  "ACCESS received: default_permissions is not in effect")))
+      << absl::StrJoin(capture.lines, "\n");
+}
+
 // Interrupted at a failed mutation's re-resolve (after its syscall, whose
 // error it would reply): the request stops there with EINTR. A rename does
 // not re-resolve its second name then.

@@ -1480,9 +1480,18 @@ updates ctime), utimes, the truncate, `setxattr` and `removexattr`.
   by the kernel;
 - opening an existing file, and every probe, read and refresh.
 
-The mount always uses `default_permissions`, so the kernel checks the
-caller's permissions against dcfs's cached attributes before a request is
-sent; `Access` has nothing left to check.
+**`default_permissions` is required** (russ, 2026-10-08). The kernel
+checks the caller's permissions against dcfs's cached attributes before a
+request is sent, which costs no backing I/O; the alternative, an `ACCESS`
+request per permission decision, would be a backing syscall per check or
+no more faithful than the kernel's own. `DirCacheFS::Init` refuses a mount
+whose options lack it (libfuse then refuses the `INIT` and the daemon
+exits non-zero), and `--fuse_opt=default_permissions` is rejected as
+redundant. Under it the kernel never sends `ACCESS`; `Access` stays as a
+fail-closed path: it replies `EACCES` and logs "ACCESS received:
+default_permissions is not in effect". `ENOSYS` would be wrong there: the
+kernel takes it to mean "allow every `access(2)` from now on"
+(`fc->no_access`).
 
 **POSIX ACLs** are enforced by the kernel: dcfs requests
 `FUSE_CAP_POSIX_ACL`, and the kernel then fetches

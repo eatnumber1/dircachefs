@@ -1,5 +1,6 @@
 #include "dcfs/fuse_ops.h"
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -61,7 +62,16 @@ void Init(void *userdata, fuse_conn_info *conn) {
   CHECK_NE(userdata, nullptr);
   CHECK_NE(conn, nullptr);
   absl::Status s = static_cast<DirCacheFS *>(userdata)->Init(*conn);
-  LOG_IF(ERROR, !s.ok()) << s;
+  if (s.ok()) return;
+  LOG(ERROR) << s;
+  // libfuse gives init() no way to fail the INIT. A wanted flag the kernel
+  // did not offer is what it refuses (do_init's want_flags_valid): EPROTO
+  // to the kernel, the session ended, and SessionLoop::Run returns -EPROTO.
+  const uint64_t unoffered = ~conn->capable_ext;
+  if (unoffered == 0) {
+    LOG(FATAL) << "cannot refuse the INIT: the kernel offered every flag";
+  }
+  conn->want_ext |= std::bit_floor(unoffered);
 }
 
 void Destroy(void *userdata) {

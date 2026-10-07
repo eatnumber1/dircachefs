@@ -23,6 +23,7 @@ MAIN_DEPS = [
     ":metadata_cache",
     ":migrate",
     ":mount_fds",
+    ":mount_options",
     ":mounts_below",
     ":sqlite",
     ":status",
@@ -538,6 +539,31 @@ qemu_cc_test(
 )
 
 cc_library(
+    name = "mount_options",
+    hdrs = ["mount_options.h"],
+    srcs = ["mount_options.cc"],
+    deps = [
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+qemu_cc_test(
+    name = "mount_options_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["mount_options_test.cc"],
+    deps = [
+      ":mount_options",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "file_handle",
     visibility = ["//dcfs/testonly:__pkg__"],
     srcs = ["file_handle.cc"],
@@ -594,6 +620,7 @@ cc_library(
       ":credentials",
       ":fuse_request",
       ":metadata_cache",
+      ":mount_options",
       ":ret_check",
       ":status",
       ":syscalls",

@@ -140,7 +140,7 @@ dcfs --source=<dir> --cache_db=<path> [flags] <mountpoint>
 | `--entry_timeout_sec` | `3600` | How long the kernel may cache a lookup result, including a negative one. |
 | `--sync_interval_sec` | `5` | While mutations have left dirty cache entries, the first request this many seconds after the last sync point runs a new one (`syncfs` of the backing filesystem, then the dirty set is cleared). Bounds how much is re-read after a power loss. |
 | `--foreground` | `true` | Stay in the foreground. With `false`, dcfs daemonizes after mounting and its standard error goes to `/dev/null`, so its log is lost. |
-| `--fuse_opt` | (empty) | Extra mount options passed to libfuse as `-o <opts>`, comma-separated, e.g. `--fuse_opt=max_read=65536`. Repeating the flag replaces the previous value, so combine options in one flag. `default_permissions` is always added. |
+| `--fuse_opt` | (empty) | Extra mount options passed to libfuse as `-o <opts>`, comma-separated, e.g. `--fuse_opt=max_read=65536`. Repeating the flag replaces the previous value, so combine options in one flag. `default_permissions` is always added, and required: dcfs makes no permission checks of its own and relies on the kernel's, from the attributes it caches (docs/design.md, "Caller credentials"), so naming it here is an error. |
 
 dcfs uses Abseil logging, so Abseil's logging flags work too: `--v=1`
 enables per-request debug logging, and `--stderrthreshold` (default

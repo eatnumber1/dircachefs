@@ -24,6 +24,7 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
 #include "dcfs/checkpoint.h"
@@ -32,6 +33,7 @@
 #include "dcfs/escape.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/metadata_cache.h"
+#include "dcfs/mount_options.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
@@ -152,6 +154,17 @@ DirCacheFS::~DirCacheFS() {
 }
 
 absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
+  // dcfs makes no permission checks: the kernel makes them from the
+  // attributes dcfs reports, but only under default_permissions. Without it
+  // every caller could do anything the daemon (root) can. The caller
+  // (fuse_ops.cc's Init) makes libfuse refuse the INIT on an error.
+  if (!HasDefaultPermissions(opts_.mount_options)) {
+    return FailedPreconditionErrorBuilder()
+           << "the mount options (" << absl::StrJoin(opts_.mount_options, ",")
+           << ") lack " << kDefaultPermissions
+           << ", which dcfs requires: the kernel would leave permission "
+              "checks to dcfs, which makes none; refusing to mount";
+  }
   // conn.max_read is not one of the fields fuse_apply_conn_info_opts() sets
   // and fuse_session_new() leaves it zero-initialized, so a "-o
   // max_read=N" mount option (see Options::max_read) must be copied here
@@ -2336,7 +2349,15 @@ absl::Status DirCacheFS::Removexattr(
 }
 
 absl::Status DirCacheFS::Access(FuseRequest &req, fuse_ino_t ino, int mask) {
-  return req.ReplyErrno(0);
+  // Init() refuses a mount without default_permissions, under which the
+  // kernel never sends ACCESS (fuse_permission, fs/fuse/dir.c). Should one
+  // arrive anyway, deny it: dcfs checks nothing itself, and ENOSYS would
+  // make the kernel allow every later access(2) without asking
+  // (fc->no_access).
+  LOG(ERROR) << "ACCESS received: default_permissions is not in effect; "
+                "denying (nodeid "
+             << ino << ", mask " << mask << ")";
+  return req.ReplyErrno(EACCES);
 }
 
 absl::Status DirCacheFS::Create(

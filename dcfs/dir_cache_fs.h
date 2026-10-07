@@ -25,6 +25,7 @@
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/metadata_cache.h"
+#include "dcfs/mount_options.h"
 #include "dcfs/protocol_events.h"
 #include "fuse_lowlevel.h"
 
@@ -76,6 +77,14 @@ class DirCacheFS {
     // soft RLIMIT_NOFILE when the DirCacheFS is made (after main.cc
     // raised it).
     std::optional<size_t> max_held_fds;
+
+    // The mount options dcfs gave libfuse (dcfs/mount_options.h). Init()
+    // refuses the mount (libfuse then refuses the INIT, and the daemon
+    // exits) unless they include default_permissions: without it the
+    // kernel would leave permission checks to dcfs, which makes none (see
+    // Access()).
+    std::vector<std::string> mount_options = {
+        std::string(kDefaultPermissions)};
   };
 
   // The default Options::max_held_fds for a soft descriptor limit: what
@@ -167,10 +176,10 @@ class DirCacheFS {
   absl::Status Removexattr(
       FuseRequest &req, fuse_ino_t ino, std::string_view name);
 
-  // The mount is started with -o default_permissions, so the kernel checks
-  // permissions itself against the cached attributes Getattr/Lookup report;
-  // by the time Access() is called the kernel has already decided to allow
-  // the operation, so there is nothing left for the filesystem to check.
+  // The mount is started with -o default_permissions (Init() refuses it
+  // otherwise), so the kernel checks permissions itself against the cached
+  // attributes Getattr/Lookup report and never sends ACCESS. One arriving
+  // anyway is denied (EACCES) and logged at ERROR: fail closed.
   absl::Status Access(FuseRequest &req, fuse_ino_t ino, int mask);
 
   absl::Status Create(
