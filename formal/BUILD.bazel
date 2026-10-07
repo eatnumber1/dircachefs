@@ -173,6 +173,80 @@ REVAL_LIMITATIONS = {
     for limitation, violation in REVAL_LIMITATIONS.items()
 ]
 
+# The lifetime model (lifetime.tla; README.md, "The lifetime model"): which
+# nodeids the kernel holds and what dcfs keeps for each. MC_lifetime: every
+# invariant; MC_lifetime_stubs: with boundary stubs.
+LIFETIME = [
+    "MClifetime.tla",
+    "lifetime.tla",
+]
+
+tlc_test(
+    name = "lifetime_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_lifetime.cfg",
+    spec = "MClifetime.tla",
+    srcs = ["lifetime.tla"],
+)
+
+tlc_test(
+    name = "lifetime_stubs_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_lifetime_stubs.cfg",
+    spec = "MClifetime.tla",
+    srcs = ["lifetime.tla"],
+)
+
+# Its known bugs (each a few seconds).
+LIFETIME_KNOWN_BUGS = {
+    # The hypothesis of the destroy_test investigation (false in the code).
+    "lifetime_nonfinal_forget_drops_held": "Invariant WrittenUntilLastForget is violated",
+    # A removed record dropped while the kernel still holds the nodeid.
+    "lifetime_nonfinal_forget_drops_rec": "Invariant ReferencedServed is violated",
+    # Before step 23.7 (review L5): no sweep of unnamed rows at the start.
+    "lifetime_tmpfile_row_survives_crash": "Invariant UnnamedRowsSwept is violated",
+    # A FORGET_MULTI entry taking off one lookup, not its nlookup.
+    "lifetime_forget_multi_counted_as_one": "Invariant LookupsExact is violated",
+}
+
+[
+    tlc_test(
+        name = "known_bug_%s_test" % bug,
+        size = "small",
+        timeout = "short",
+        config = "known_bugs/%s.cfg" % bug,
+        expect_violation = violation,
+        spec = "known_bugs/%s.tla" % bug,
+        srcs = LIFETIME,
+    )
+    for bug, violation in LIFETIME_KNOWN_BUGS.items()
+]
+
+# Gaps the lifetime model found in the code (findings/lifetime_findings.tla;
+# README.md, "Findings of the lifetime model"): each must fail as described
+# there until the code is fixed, when its configuration moves into the real
+# model.
+LIFETIME_FINDINGS = {
+    "lifetime_stub_nodeid_reused": "Invariant NodeidStable is violated",
+    "lifetime_crash_before_settle": "Invariant RowsNameLiveObjects is violated",
+    "lifetime_destroy_with_open_files": "Invariant UnnamedRowsSwept is violated",
+}
+
+[
+    tlc_test(
+        name = "finding_%s_test" % finding,
+        size = "small",
+        timeout = "short",
+        config = "findings/%s.cfg" % finding,
+        expect_violation = violation,
+        spec = "findings/lifetime_findings.tla",
+        srcs = LIFETIME,
+    )
+    for finding, violation in LIFETIME_FINDINGS.items()
+]
+
 # Trace validation (README.md, "Trace validation"): the spec, its
 # configuration and the script the tla_trace_test targets run (in //dcfs and
 # //test/qemu, next to the guests that record the traces).
