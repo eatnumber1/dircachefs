@@ -25,6 +25,16 @@ its own test-first step.
   `third_party/pjdfstest/README.md` (C12). Owner: dcfs-mechanical for the
   conversions, dcfs-implementer for the `syscalls.h` moves; review by
   dcfs-reviewer (the moves touch error paths).
+- 25.1b (russ, 2026-10-07; same lane, after 25.1): every syscall in the
+  tree goes through `syscalls.h`, tests, testonly, bench and tools
+  included ("a firm rule": errors are handled there and become Status;
+  russ found `::mkdir` in `dir_cache_fs_test.cc`; the guide's C10 count
+  was production-only). A host-side `raw_syscalls_test` fails on any
+  unqualified libc syscall call outside `syscalls.cc` (regex over the
+  tracked C++; clang-tidy takes over in 7.5); every site converted. The
+  one exception: `tools/fhtest.c` and `tools/testutil.c` are C programs
+  for the guest and cannot use the C++ wrappers; recommendation: port
+  them to C++ in a later step (needs russ's yes), documented until then.
 - 25.2 Flat namespaces (after 25.1). `cache` (673 uses), `backing`
   (147), `events` (182), `internal` (9), `testonly` (4) fold into `dcfs`;
   only `dcfs::syscalls` and `dcfs::sqlite3` stay (russ, 2026-10-07),

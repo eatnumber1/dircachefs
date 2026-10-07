@@ -933,3 +933,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   with write-phase duration, not memory: hypothesis = something periodic (the sync point
   reconciling written_ / releasing held fds, or a FUSE dentry invalidation) drops held fds over
   time; sent to the lane-2 investigation with a slowed-writer reproduction plan.
+- russ (2026-10-07): firm rule: every syscall goes through syscalls.h (tests included; errors
+  become Status there). 25.1b queued behind 25.1 in lane-1: raw_syscalls_test + conversion.
+  Needs russ: port tools/fhtest.c and tools/testutil.c (guest C programs) to C++ so the rule has
+  no exception? (recommended; until then they are the documented exception).
