@@ -1403,3 +1403,18 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   then 26.5b: the weekly/dispatch mutation job (sharded by mutant ids if over the 6 h limit;
   survivors as an artifact, never a failure) and a per-push `--changed <range>` mode bounded to
   ~30 mutants that fails on a survivor in changed code.
+- 12.5 review: merge after a README wording fix (a file CREATED through dcfs since the last
+  durable commit also loses its NFS handle at a power loss: its row is phase 3); the 26.3 order
+  question resolved against the doc (all reads through one O_PATH fd that pins the inode; ext4
+  frees an ino only at eviction); Phase 14 finding recorded in its phase file (generation check
+  for held nodeids under recycling; FUSE_ATTR_GENERATION would close it kernel-side).
+- Phase 22 done in lane-2 (step-22 @ 059a7e2): checkpoints (LookupOrPopulate, every 16 probes in
+  PopulateDirectory, before every phase-2 syscall, cold OpenInode, Fsync/Fsyncdir), SessionLoop
+  (non-blocking drain of /dev/fuse at checkpoints; INTERRUPT to libfuse at once, the rest queued),
+  dcfs/interrupts.h via Context, `Interrupted` event; model: Interrupt(p) behind `Interrupts`,
+  GuardsBalanced, 3 configs (medium 42 s; two large ~2 min), 3 variants; guest: timeout -s INT 1
+  ls on 20k entries ends 0.7-0.8 s after the signal (was 14-20 s), kill -9 of find 0.7 s;
+  presubmit+formal 223 pass + 2 skips, asan small 30. DEVIATION to fix: a refused INIT's EPROTO
+  now returns 0 (SessionLoop cannot see libfuse's se->error). AGENTS.md phrase changed: "at safe
+  points" -> "at checkpoints before its backing syscalls (dcfs/checkpoint.h)" (russ to see).
+  Under review.

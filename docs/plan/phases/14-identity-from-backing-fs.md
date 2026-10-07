@@ -90,3 +90,19 @@ crash and tri-state rules before merge.
 Owner: Opus (identity invariants), one step at a time; test-first per item.
 Order: Phase 13 (Connected backing fds) first (small, independent), then Phase 14 (Identity from the backing filesystem) (both touch
 `OpenNode`).
+
+## Finding from the identity model (12.5, 2026-10-08)
+
+Under out-of-band inode recycling, a nodeid the kernel still holds whose
+row went (14.2 resolves uncached nodeids by inode number) would be
+reopened by inode number and reach the NEW object: worse than "out-of-band
+recycling unsupported" suggests. In mainline FUSE only entry replies and
+handle decoding (`fuse_get_dentry` → LOOKUP(".")) make the kernel compare
+generations; a GETATTR/OPEN/READ on a held inode carries none. So 14.4
+must, for a nodeid held in this mount without a row, reopen with (or
+compare against) the generation it handed out in this mount, else answer
+ESTALE. russ's FUSE_ATTR_GENERATION kernel patch (protocol 7.47) makes
+attribute replies carry the generation and would close this kernel-side;
+the Phase 14 design should say which it relies on. The identity model's
+`IdentTrace.tla` encodes today's AUTOINCREMENT nodeids ("no reply after
+the row went") and `T_IdReply` needs relaxing when nodeid = inode number.
