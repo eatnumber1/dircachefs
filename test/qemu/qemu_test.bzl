@@ -11,13 +11,53 @@ test/qemu/guest/init for the guest side.
 
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
-# Guest resources, declared to Bazel's scheduler: `size` also sets the
-# default resource estimate (small assumes ~20 MB), which is wrong for a
-# QEMU guest. run-qemu.sh gives an e2e guest 1024 MB and -smp 2; the QEMU
-# process itself needs a little more than the guest RAM.
-E2E_RESOURCE_TAGS = ["cpu:2", "resources:memory:1200"]
+# Guest memory (step 6.2). Every guest has an allowance, in MiB, passed to
+# run-qemu.sh as --mem; the defaults below are for a test that is no bigger
+# than the lightest. The measurements and the rule they follow (peak +
+# max(50%, 128 MiB), the peak counting the kernel's own reservation) are in
+# test/qemu/README.md "Guest memory"; every guest prints its own peak on a
+# `MEM ...` line (guest/init), so a change that grows one shows up in the
+# serial log, and a guest that runs out of memory fails with the OOM
+# killer's lines (run-qemu.sh).
+#
+# Sanitizer builds need more: the ASan runtime's libraries land in the
+# initramfs (about 60 MiB of tmpfs the plain static build does not have),
+# dcfs's resident set grows several times over, and so does the benchmark
+# and test binaries'. mem= is the plain build's allowance and asan_mem= the
+# --config=asan and --config=ubsan builds' (picked by select() on
+# //test/qemu:asan_build and :ubsan_build; the UBSan runtime is a smaller
+# version of the same, so it shares ASan's number).
+E2E_MEM = 256
+E2E_ASAN_MEM = 384
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None):
+# `size` also sets Bazel's default resource estimate (small assumes about 20
+# MB), which is wrong for a QEMU guest, so each test declares its real needs
+# as tags. Bazel's scheduling resources are a tag, which cannot depend on the build
+# configuration, so a test declares its plain allowance plus the QEMU
+# process's own overhead (QEMU_OVERHEAD_MB); an ASan run schedules as if it
+# were a plain one. Use fewer test jobs for ASan runs (--local_test_jobs).
+QEMU_OVERHEAD_MB = 100
+
+def mem_args_for(mem, asan_mem):
+    """run-qemu.sh's --mem flag for the build configuration (a select())."""
+    sanitizer_args = ["--mem", str(asan_mem)]
+    return select({
+        "//test/qemu:asan_build": sanitizer_args,
+        "//test/qemu:ubsan_build": sanitizer_args,
+        "//conditions:default": ["--mem", str(mem)],
+    })
+
+def resolve_mem(mem, asan_mem, default, asan_default):
+    """The (plain, sanitizer) allowances; neither is ever below the other's floor."""
+    if mem == None:
+        mem = default
+    if asan_mem == None:
+        asan_mem = max(asan_default, mem)
+    if asan_mem < mem:
+        fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
+    return mem, asan_mem
+
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -37,8 +77,10 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             /tests in, and chroots into it to run guest_script with GNU
             userspace and nfs-utils available. See guest/init's
             dcfs_rootfs= branch and third_party/debian/README.md.
-        mem: optional guest RAM in MiB (run-qemu.sh's --mem; default 1024).
-            Also raises the Bazel resource estimate to match.
+        mem: guest RAM in MiB for the plain build (run-qemu.sh's --mem;
+            default E2E_MEM), also the basis of the Bazel resource tag.
+        asan_mem: guest RAM in MiB for --config=asan/ubsan builds (default:
+            E2E_ASAN_MEM, or mem if that is larger).
         size: required sh_test size, the test's tier: "small" (run
             constantly), "medium" (presubmit), "large"/"enormous" (CI).
             See README.md's "Test tiers".
@@ -90,10 +132,9 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         "$(location @qemu//:pc-bios/qboot.rom)",
     ]
 
-    mem_args = ["--mem", str(mem)] if mem else []
-    resource_tags = E2E_RESOURCE_TAGS
-    if mem:
-        resource_tags = ["cpu:2", "resources:memory:%d" % (mem + 200)]
+    mem, asan_mem = resolve_mem(mem, asan_mem, E2E_MEM, E2E_ASAN_MEM)
+    mem_args = mem_args_for(mem, asan_mem)
+    resource_tags = ["cpu:2", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)]
 
     sh_test(
         name = name,
@@ -140,6 +181,7 @@ def qemu_test_matrix(
         timeout = None,
         rootfs = None,
         mem = None,
+        asan_mem = None,
         fstypes = ["ext4", "xfs", "btrfs"]):
     """Declares one qemu_test per backing filesystem in `fstypes`.
 
@@ -157,6 +199,7 @@ def qemu_test_matrix(
         timeout: required; same as qemu_test.
         rootfs: same as qemu_test.
         mem: same as qemu_test.
+        asan_mem: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
@@ -175,6 +218,7 @@ def qemu_test_matrix(
             timeout = timeout,
             rootfs = rootfs,
             mem = mem,
+            asan_mem = asan_mem,
         )
     native.alias(
         name = name,

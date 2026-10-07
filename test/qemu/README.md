@@ -91,7 +91,8 @@ direct kernel boot, and no legacy PC devices this guest doesn't need:
 -accel kvm -cpu host        # falls back to -accel tcg -cpu max, with a
                              # warning line in the log, if /dev/kvm isn't
                              # writable
--m 256 -smp 1                # unit tests; e2e tests use -m 1024 -smp 2
+-m <mem> -smp 1              # unit tests (-smp 2 for e2e tests); <mem> is the
+                             # test's allowance, see "Guest memory" below
 ```
 
 **`rtc=on`, deliberately not `rtc=off`.** This is the one deviation from
@@ -194,14 +195,92 @@ and `qemu_cc_test` requires an explicit `size` and `timeout` (the macros
 | large / enormous | `bazel test //...` (everything; CI) | nfs_test (large), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes |
 
 `size` also sets Bazel's resource estimate (small assumes about 20 MB), so
-each QEMU test declares its real needs with tags: e2e guests `cpu:2` and
-`resources:memory:1200` (guest 1024 MB, `-smp 2`), unit guests `cpu:1` and
-`resources:memory:400` (guest 256 MB, `-smp 1`). Bazel then schedules
-only as many guests as fit in the machine. Timeouts are explicit
-(`short` unit, `moderate` e2e, `long` nfs, `eternal` pjdfstest).
+each QEMU test declares its real needs with tags: `cpu:2` (e2e, `-smp 2`) or
+`cpu:1` (unit, `-smp 1`) and `resources:memory:<guest allowance + 100>`
+(see "Guest memory"). Bazel then schedules only as many guests as fit in the
+machine. Timeouts are explicit (`short` unit, `moderate` e2e, `long` nfs,
+`eternal` pjdfstest).
 
 New tests: pick the tier from the measured duration (read it from
 `bazel-testlogs/**/test.xml`).
+
+## Guest memory
+
+Every guest prints one line just before its verdict, from a sampler that
+`guest/init` runs for the whole test (every 0.1 s, one `awk` process):
+
+```
+MEM total=1018448 min_avail=964728 peak_used=54452 peak_cached=... peak_anon=... peak_shmem=... peak_slab=... dcfs_hwm=... top=<name>:<pid>:<VmHWM> samples=N up=<s>
+```
+
+(all KiB except `samples` and `up`, seconds of guest uptime at the last sample). `peak_used` is the highest `MemTotal - MemAvailable`: what could
+not be reclaimed. `peak_shmem` is tmpfs (`/tmp`, and the initramfs itself:
+about 22 MiB plain, 84 MiB under ASan, whose runtime libraries are copied
+in). `dcfs_hwm` is the kernel's own `VmHWM` of the daemon. The same
+`run-qemu.sh` that reads the line prints a summary of it, warns when a guest
+came within 10% of running out (or 40% of `MemTotal` in tmpfs, which is
+capped at half of it), and refuses to pass a run that lacks the line.
+`grep '^MEM ' bazel-testlogs/test/qemu/<test>/test.log` for any test.
+
+**The allowance rule**: peak plus 50% or 128 MiB, whichever is more, the
+peak including the kernel's own reservation (-m less `MemTotal`: about 17
+MiB at 256, 30 MiB at 1024), rounded up to 64 MiB. A guest's RAM is only
+resident on the host when the guest touches it (the page cache fills what
+it is given, though), so the allowance mostly bounds the scheduler's
+reservation and what a runaway can take, but it also keeps a test honest: a
+guest at 1024 MiB hid that ASan `bench_smoke_test` was having dcfs killed by
+the guest's OOM killer while the test passed.
+
+Measured peaks (`peak_used`, MiB; KVM, 2026-10-07; ranges are across the
+ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
+`--config=asan`/`ubsan`, in `test/qemu/qemu_test.bzl`, `qemu_cc_test.bzl` and
+`BUILD.bazel`):
+
+| Test | peak plain | peak ASan | `mem` | `asan_mem` |
+|---|---|---|---|---|
+| unit tests (`qemu_cc_test`) | 22-35 | 52-234 (`dir_cache_fs_test` 234, `metadata_cache_test` 227, `backing_test` 191, the rest under 125) | 192 | 384 |
+| boot, cache_permissions, lifecycle, atime, removed, copy, boundary, credentials, create, crash, handles, power, readonly, rename, setattr, release_leak, nfs, passthrough (60-102 plain) | 52-102 | 145-190 (nfs 169) | 256 | 384 |
+| names, names_random, readdir_boundary, idle_short, idle_long, pjdfstest (3 shards) | 57-75 | 433-570 | 256 | 832 |
+| write | 136-153 | 224-248 | 320 | 448 |
+| memory | 197-256 | 279-342 | 448 | 576 |
+| bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |
+| bench_readdir | 157 | 1509 | 320 | 2304 |
+| bench_full | 569 | over 2001 (killed by the OOM killer at 2048; not measured further) | 896 | 3072 (a guess) |
+
+What fills the memory, in the plain guests: the initramfs (22 MiB of
+tmpfs, always), the kernel (about 30 MiB at 1024), the page cache of the
+scratch disks (a 320 MiB disk written once adds 25-90 MiB; `write_test`'s
+`dd`s 150 MiB), and dcfs itself, which is small (8-11 MiB of `VmHWM`, 16 for
+`bench_readdir`, 22 for `bench_full`; `memory_test` and the benchmarks show
+slab growing to 140-430 MiB for 100,000 entries, mostly the kernel's dentry
+and inode caches for the FUSE and backing trees, reclaimable). sqlite,
+pjdfstest and the Debian chroot for `nfs_test` add nothing visible (the
+chroot's rootfs is a disk, `nfs_test` peaks at 67 MiB). Under ASan, what
+grows is the initramfs (+62 MiB for the runtime and its shared-library
+closure) and dcfs (and the benchmark binary, and each test binary), by a
+factor of 40 or more in resident set: 400-620 MiB per daemon once it holds
+tens of thousands of objects.
+
+Bazel's resource tag cannot depend on the build configuration, so
+`resources:memory:` is the plain allowance + 100 MiB for QEMU's own
+overhead (`QEMU_OVERHEAD_MB`) in every build: an ASan run schedules as if
+it were a plain one. Run ASan with fewer jobs (`--local_test_jobs=1` or 2).
+
+A test that outgrows its allowance fails visibly instead of hanging:
+
+- the OOM killer's lines are printed by `guest/init` as `MEM-OOM: ...` and
+  `run-qemu.sh` fails the run with `ERROR: the guest ran out of memory`
+  and those lines (the console's loglevel hides them otherwise);
+- a guest too small for its own initramfs says `Initramfs unpacking failed`
+  or panics before init, which `run-qemu.sh` reports as `the guest died
+  while booting`;
+- anything in between (tmpfs full, ENOMEM) fails the test's own checks with
+  a `WARNING` from `run-qemu.sh` if the guest was within 10% of running out.
+
+`bazel test --test_env=DCFS_MEM=<MiB> ...` overrides every guest's allowance
+(to measure a test with room to spare, or to see how one fails). To
+re-measure after a change: run the tier with `--test_output=all` (or read
+`bazel-testlogs/**/test.log`) and compare the `MEM` lines with the table.
 
 ## CI
 
@@ -550,6 +629,9 @@ qemu_test(
     disks = [("vdb", "ext4", "256M")],
 )
 ```
+
+(plus `mem=`/`asan_mem=` if its `MEM` line, in the serial log, says it needs
+more than the default 256/384 MiB; see "Guest memory")
 
 or, if the test exercises backing-filesystem-dependent behavior worth
 checking on ext4, xfs and btrfs (step 5.2), as three:

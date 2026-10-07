@@ -86,8 +86,11 @@ MKFS_BTRFS_BIN=""
 
 UNIT=0
 ROOTFS=""
-# --mem <MiB>: guest RAM for an e2e guest, overriding the 1024 default (the
-# slow names test needs more under ASan: its dcfs peaks near 720 MiB there).
+# --mem <MiB>: guest RAM, overriding the default below. qemu_test and
+# qemu_cc_test always pass it (the per-test allowance, larger for the
+# sanitizer builds; see test/qemu/qemu_test.bzl). $DCFS_MEM (e.g. `bazel test
+# --test_env=DCFS_MEM=2048`) overrides both, to measure a test's real peak
+# with room to spare or to see how a too-small guest fails.
 MEM_OVERRIDE=""
 while :; do
 	case "${1:-}" in
@@ -293,11 +296,14 @@ else
 	TIMEOUT_SECS="${TIMEOUT:-$E2E_TIMEOUT}"
 fi
 
+# Defaults, the smallest class's allowance (step 6.2: measured peak
+# MemTotal-MemAvailable of 35 MiB for the unit tests and 102 MiB for the
+# lightest e2e tests, plain build; see test/qemu/README.md "Guest memory").
 if [ "$UNIT" -eq 1 ]; then
-	MEM=256
+	MEM="${DCFS_MEM:-${MEM_OVERRIDE:-192}}"
 	SMP=1
 else
-	MEM="${MEM_OVERRIDE:-1024}"
+	MEM="${DCFS_MEM:-${MEM_OVERRIDE:-256}}"
 	SMP=2
 fi
 
@@ -360,13 +366,45 @@ if grep -q -E "^MEM-OOM:|System is deadlocked on memory|Out of memory and no kil
 	exit 1
 fi
 # Step 6.2: guest/init prints one `MEM ...` line (the guest memory sampler's
-# extremes) before the verdict. A run without it means the sampler or the
-# init changes it rides on are broken, so it cannot pass: the memory
-# allowances (`mem=` in test/qemu/*.bzl) are only as good as that line.
-if ! grep -q "^MEM total=" "$LOG"; then
-	echo "run-qemu.sh: no MEM line in the serial log (guest/init's memory sampler)" >&2
+# extremes) before the verdict. Without it the guest never got that far, or
+# the sampler or the init changes it rides on are broken, so it cannot pass:
+# the memory allowances (`mem=` in test/qemu/*.bzl) are only as good as that
+# line. A guest whose RAM is too small for its own initramfs dies in the
+# kernel, before init, with one of these lines.
+# (A truncated unpack can still leave an init that runs, so that line fails a
+# run whatever else the log holds.)
+BOOT_DIED="Initramfs unpacking failed|Unable to mount root fs|Kernel panic"
+if grep -q "Initramfs unpacking failed" "$LOG" || ! grep -q "^MEM total=" "$LOG"; then
+	if grep -q -E "$BOOT_DIED" "$LOG"; then
+		echo "run-qemu.sh: ERROR: the guest died while booting; the lines:" >&2
+		grep -E "$BOOT_DIED" "$LOG" | head -n 5 >&2
+		echo "run-qemu.sh: -m $MEM MiB is probably too little for the initramfs (the unpacked" \
+			"archive lives in RAM); raise this test's mem= (test/qemu/README.md)" >&2
+	else
+		echo "run-qemu.sh: no MEM line in the serial log (guest/init's memory sampler)" >&2
+	fi
 	echo "== RESULT: FAIL (see $LOG) =="
 	exit 1
+fi
+# The guest's headroom, from that line: a lot of tests would pass or fail the
+# same with 10% more or less memory, but one that gets within 10% of MemTotal
+# has no room for a slow host's bigger page cache or a few more processes, and
+# when it fails anyway the lack of memory is the first suspect (ENOMEM and
+# ENOSPC on tmpfs leave no OOM-killer line to find). tmpfs, /tmp here, is
+# capped at half of MemTotal, so 40% of MemTotal in Shmem (the initramfs
+# counts too) is as close to that cap as 10% is to running out.
+HEADROOM_LOW=0
+eval "$(grep -a "^MEM total=" "$LOG" | tail -n 1 | awk '{
+	for (i = 2; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] }
+	printf "MEM_TOTAL_MIB=%d MEM_MIN_AVAIL_MIB=%d MEM_PEAK_USED_MIB=%d HEADROOM_LOW=%d\n",
+		v["total"] / 1024, v["min_avail"] / 1024, v["peak_used"] / 1024,
+		(v["min_avail"] * 10 < v["total"] || v["peak_shmem"] * 5 > v["total"] * 2)
+}')"
+echo "run-qemu.sh: guest memory: -m $MEM, MemTotal $MEM_TOTAL_MIB MiB, peak in use $MEM_PEAK_USED_MIB MiB, lowest MemAvailable $MEM_MIN_AVAIL_MIB MiB"
+if [ "$HEADROOM_LOW" -eq 1 ]; then
+	echo "run-qemu.sh: WARNING: the guest came within 10% of running out of memory (or" \
+		"40% of MemTotal in tmpfs, which is capped at 50%); if this run failed, that is" \
+		"the first suspect: raise this test's mem= (test/qemu/README.md, \"Guest memory\")" >&2
 fi
 if [ "$UNIT" -eq 1 ]; then
 	if grep -q "^DCFS-TEST-EXIT=0" "$LOG"; then

@@ -34,6 +34,14 @@ absolute paths so the dynamic loader finds them with no rpath surgery.
 
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//test/qemu:qemu_test.bzl", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
+
+# Unit guests (step 6.2): the plain tests peak at 35 MiB (MemTotal - MemAvailable
+# at its lowest), the ASan ones at 234 MiB (the sanitizer libraries in the
+# initramfs, 83 MiB, and the test binary's resident set). The rule and the
+# table are in test/qemu/README.md "Guest memory".
+UNIT_MEM = 192
+UNIT_ASAN_MEM = 384
 
 def _relpath(label):
     """Best-effort package-relative path for a same-package source label."""
@@ -57,6 +65,8 @@ def qemu_cc_test(
         size = None,
         timeout = None,
         tags = [],
+        mem = None,
+        asan_mem = None,
         **kwargs):
     """Declares a dcfs unit test that boots the QEMU guest to run it.
 
@@ -78,6 +88,10 @@ def qemu_cc_test(
             large, enormous; see test/qemu/README.md "Test tiers").
         timeout: required sh_test timeout.
         tags: extra tags, in addition to the ones this macro always sets.
+        mem: guest RAM in MiB for the plain build (default UNIT_MEM), also the
+            basis of the Bazel resource tag.
+        asan_mem: guest RAM in MiB for --config=asan/ubsan builds (default
+            UNIT_ASAN_MEM, or mem if that is larger).
         **kwargs: forwarded to the underlying cc_binary (e.g. extra
             copts).
     """
@@ -160,6 +174,8 @@ def qemu_cc_test(
         "$(location @qemu//:pc-bios/qboot.rom)",
     ]
 
+    mem, asan_mem = resolve_mem(mem, asan_mem, UNIT_MEM, UNIT_ASAN_MEM)
+
     sh_test(
         name = name,
         srcs = ["//test/qemu:scripts/run-qemu.sh"],
@@ -168,11 +184,11 @@ def qemu_cc_test(
         ],
         args = [
             "--unit",
-        ] + qemu_args + kernel_args + [
+        ] + qemu_args + mem_args_for(mem, asan_mem) + kernel_args + [
             "$(location :" + initramfs_out + ")",
         ] + disk_args,
-        # run-qemu.sh --unit gives the guest 256 MB and -smp 1.
-        tags = ["no-sandbox", "requires-kvm", "cpu:1", "resources:memory:400"] + tags,
+        # run-qemu.sh --unit: -smp 1 and the allowance above.
+        tags = ["no-sandbox", "requires-kvm", "cpu:1", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
         size = size,
         timeout = timeout,
     )

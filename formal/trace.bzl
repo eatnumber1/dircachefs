@@ -10,6 +10,8 @@ qemu_test/qemu_cc_test run them (test/qemu/scripts/run-qemu.sh).
 """
 
 load("@rules_java//java/common:java_common.bzl", "java_common")
+load("//test/qemu:qemu_cc_test.bzl", "UNIT_ASAN_MEM", "UNIT_MEM")
+load("//test/qemu:qemu_test.bzl", "E2E_ASAN_MEM", "E2E_MEM", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
 
 def _tla_trace_test_impl(ctx):
     runtime = ctx.attr._jdk[java_common.JavaRuntimeInfo]
@@ -21,6 +23,7 @@ def _tla_trace_test_impl(ctx):
     qemu_args = []
     if ctx.attr.unit:
         qemu_args.append("--unit")
+    qemu_args += ctx.attr.mem_args
     qemu_args += [
         "--mke2fs",
         sp(ctx.file._mke2fs),
@@ -120,6 +123,10 @@ _tla_trace_test = rule(
         "unit": attr.bool(
             doc = "A qemu_cc_test's initramfs (run-qemu.sh --unit).",
         ),
+        "mem_args": attr.string_list(
+            doc = "run-qemu.sh's --mem flag; set by tla_trace_test from " +
+                  "its mem/asan_mem (a select() on the sanitizer builds).",
+        ),
         "guest_script": attr.string(
             doc = "For an e2e initramfs: the guest/*.sh script to run.",
         ),
@@ -209,15 +216,24 @@ _tla_trace_test = rule(
     },
 )
 
-def tla_trace_test(name, tags = [], **kwargs):
+def tla_trace_test(name, tags = [], mem = None, asan_mem = None, **kwargs):
     """Declares a trace validation test (see _tla_trace_test's attributes).
 
     It boots a QEMU guest, so it carries qemu_test's tags (KVM, no sandbox,
-    the guest's resources) on top of `tags`.
+    the guest's resources) on top of `tags`, and takes the same guest memory
+    allowances (test/qemu/qemu_test.bzl; the unit or e2e defaults).
     """
+    unit = kwargs.get("unit", False)
+    mem, asan_mem = resolve_mem(
+        mem,
+        asan_mem,
+        UNIT_MEM if unit else E2E_MEM,
+        UNIT_ASAN_MEM if unit else E2E_ASAN_MEM,
+    )
     _tla_trace_test(
         name = name,
-        tags = ["e2e", "no-sandbox", "requires-kvm", "cpu:2", "resources:memory:1200"] + tags,
+        mem_args = mem_args_for(mem, asan_mem),
+        tags = ["e2e", "no-sandbox", "requires-kvm", "cpu:2", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
         **kwargs
     )
 

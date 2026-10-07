@@ -2,6 +2,14 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//formal:trace.bzl", "tla_trace_test")
 load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 
+# Guest memory classes (step 6.2), in MiB; the measurements behind each are in
+# README.md "Guest memory" (a test with neither mem= nor asan_mem= gets
+# qemu_test.bzl's E2E_MEM/E2E_ASAN_MEM). Plain-build allowances are peak +
+# max(50%, 128 MiB), the peak counting the kernel's 30 MiB reservation; most
+# tests need only the default. Under ASan the ones that make dcfs hold
+# thousands of objects grow to 430-520 MiB.
+ASAN_BIG_DCFS_MEM = 832  # names, names_random, readdir_boundary, idle, pjdfstest
+
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
 # and any other package with unit tests) to build each test's own initramfs.
 exports_files([
@@ -176,6 +184,8 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/write.sh",
+    mem = 320,  # dd and the page cache: peak 153 MiB
+    asan_mem = 448,  # 248
     size = "small",
     other_size = "medium",
     timeout = "moderate",
@@ -221,6 +231,7 @@ qemu_test(
     name = "readdir_boundary_test",
     disks = [("vdb", "ext4", "128M")],
     guest_script = "guest/readdir_boundary.sh",
+    asan_mem = ASAN_BIG_DCFS_MEM,
     size = "medium",
     timeout = "moderate",
 )
@@ -279,6 +290,7 @@ PJDFSTEST_SHARDS = ["rename", "chown", "rest"]
     name = "pjdfstest_%s_test" % shard,
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/pjdfstest_%s.sh" % shard,
+    asan_mem = ASAN_BIG_DCFS_MEM,
     size = "enormous",
     other_size = "enormous",
     timeout = "eternal",
@@ -356,6 +368,7 @@ qemu_test_matrix(
     name = "names_test",
     disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/names.sh",
+    asan_mem = ASAN_BIG_DCFS_MEM,
     size = "medium",
     other_size = "medium",
     timeout = "moderate",
@@ -371,6 +384,7 @@ qemu_test_matrix(
     name = "idle_short_test",
     disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/idle_short.sh",
+    asan_mem = ASAN_BIG_DCFS_MEM,
     size = "medium",
     other_size = "large",
     timeout = "moderate",
@@ -380,6 +394,7 @@ qemu_test(
     name = "idle_long_test",
     disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/idle_long.sh",
+    asan_mem = ASAN_BIG_DCFS_MEM,
     size = "large",
     timeout = "long",
 )
@@ -388,6 +403,8 @@ qemu_test_matrix(
     name = "memory_test",
     disks = [("vdb", "ext4", "2G")],
     guest_script = "guest/memory.sh",
+    mem = 448,  # the page cache and slab of a 100000-entry find: peak 256 MiB
+    asan_mem = 576,  # 342
     size = "medium",
     other_size = "large",
     timeout = "long",
@@ -408,6 +425,7 @@ qemu_test_matrix(
         ("vdc", "ext4", "320M"),
     ],
     guest_script = "guest/bench_smoke.sh",
+    asan_mem = 1856,  # dcfs and the benchmark under ASan hold 1178 MiB
     size = "small",
     other_size = "medium",
     timeout = "moderate",
@@ -417,6 +435,7 @@ qemu_test_matrix(
     name = "names_random_test",
     disks = [("vdb", "ext4", "320M")],
     guest_script = "guest/names_random.sh",
+    asan_mem = ASAN_BIG_DCFS_MEM,
     size = "medium",
     other_size = "medium",
     timeout = "moderate",
@@ -456,6 +475,11 @@ qemu_test(
         ("vdc", "ext4", "320M"),
     ],
     guest_script = "guest/bench_full.sh",
+    mem = 896,  # peak 569 MiB (slab 426)
+    # Not measured: the ASan run is killed by the OOM killer at 2048 MiB with
+    # 1818 MiB of anonymous memory in use, and the host cannot spare a bigger
+    # guest while measuring. 3072 is a guess; run it and read the MEM line.
+    asan_mem = 3072,
     size = "enormous",
     timeout = "eternal",
 )
@@ -470,6 +494,8 @@ qemu_test(
         ("vdc", "ext4", "320M"),
     ],
     guest_script = "guest/bench_readdir.sh",
+    mem = 320,  # peak 157 MiB
+    asan_mem = 2304,  # 1509
     size = "large",
     timeout = "long",
 )
