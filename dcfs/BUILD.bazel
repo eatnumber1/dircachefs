@@ -751,6 +751,11 @@ qemu_cc_test(
     name = "dir_cache_fs_fault_sites_test",
     size = "small",
     timeout = "moderate",
+    # Under ASan it peaks at 576 MiB in use (MEM peak_used=589700 KiB at
+    # -m 1536, 2026-10-08: a fresh fixture per iteration, through ASan's
+    # 256 MiB quarantine); with the kernel's 18.5 MiB, 595 + 50% rounds up
+    # to 896 (test/qemu/README.md, "Guest memory").
+    asan_mem = 896,
     srcs = ["dir_cache_fs_test.cc"],
     args = ["--gtest_filter=FaultSitesTest.*"],
     disks = [("vdb", "ext4", "32M")],
