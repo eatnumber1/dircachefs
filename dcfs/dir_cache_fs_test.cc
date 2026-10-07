@@ -4372,6 +4372,73 @@ TEST_F(DirCacheFSTest, TraceScenarioCopyFileRange) {
   EXPECT_EQ(Release(src, in_fh).error, 0);
 }
 
+// A fallocate's mutation, like a copy_file_range's, ends after its backing
+// call and before its phase-3 refreshes (see
+// CopyFileRangeEndsItsMutationBeforeItsRefreshes).
+TEST_F(DirCacheFSTest, FallocateEndsItsMutationBeforeItsRefreshes) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_WRONLY);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+
+  struct fuse_fallocate_in falloc = {};
+  falloc.fh = fh;
+  falloc.length = 4096;
+  std::string body;
+  AppendBytes(body, falloc);
+  // Phase 1 and the backing fallocate make no statx: the first is the refresh.
+  std::optional<size_t> in_flight;
+  StatxHook() = [&] { in_flight = ctx_.fills.inflight.size(); };
+  EXPECT_EQ(Send(FUSE_FALLOCATE, static_cast<uint64_t>(f), body).error, 0);
+  ASSERT_TRUE(in_flight.has_value()) << "the hook did not run";
+  EXPECT_EQ(*in_flight, 0u) << "the fallocate's mutation was still in flight "
+                               "when its phase-3 refresh began";
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// Records the lifetime steps with their argument.
+class LifetimeSteps : public ProtocolEvents {
+ public:
+  void LifetimeChanged(Context &, events::Ino, events::LifetimeStep step,
+                       uint64_t arg, events::LifetimeFn) override {
+    steps.emplace_back(step, arg);
+  }
+  std::vector<std::pair<events::LifetimeStep, uint64_t>> steps;
+};
+
+// A RELEASE says whether the open it ends could write (the lifetime model's
+// argument of kReleased): 1 for a writable open, 0 for a read-only one, both
+// when other opens remain and when it is the file's last.
+TEST_F(DirCacheFSTest, ReleaseReportsWhetherTheOpenCouldWrite) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [ro, ro_fh] = Open(f, O_RDONLY);
+  auto [rw, rw_fh] = Open(f, O_RDWR);
+  auto [last, last_fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(ro.error, 0);
+  ASSERT_EQ(rw.error, 0);
+  ASSERT_EQ(last.error, 0);
+
+  LifetimeSteps steps;
+  ctx_.events = &steps;
+  EXPECT_EQ(Release(f, ro_fh).error, 0);    // others remain
+  EXPECT_EQ(Release(f, rw_fh).error, 0);    // others remain
+  EXPECT_EQ(Release(f, last_fh).error, 0);  // the last, read-only
+  auto [again, again_fh] = Open(f, O_RDWR);
+  ASSERT_EQ(again.error, 0);
+  EXPECT_EQ(Release(f, again_fh).error, 0);  // the last, writable
+  ctx_.events = &NoProtocolEvents();
+  using events::LifetimeStep;
+  std::vector<uint64_t> released;
+  for (const auto &[step, arg] : steps.steps) {
+    if (step == LifetimeStep::kReleased) released.push_back(arg);
+  }
+  EXPECT_THAT(released, ElementsAre(0u, 1u, 0u, 1u));
+}
+
 // The backstop under the hooks: a backing syscall made where no hook was
 // called (here backing::StatFd, a descriptor-only helper whose callers
 // call the hook) while a transaction is open still aborts, at the wrapped
