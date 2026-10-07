@@ -6,8 +6,9 @@ raw_syscalls_names.txt that is not qualified with `syscalls::`.
 
 What it catches: `name(`, `::name(`, `std::name(`, `(name)(` and `x>name(`
 in code (comments and string/char literals are blanked first; a `'` inside a
-number is a digit separator, not a char literal), and any use of
-`std::filesystem`, `std::ifstream`, `std::ofstream` and `std::fstream`.
+number is a digit separator, not a char literal), any use of
+`std::filesystem`, `std::ifstream`, `std::ofstream` and `std::fstream`, and
+`absl::Now(`.
 What it ignores: `syscalls::name(`, any other `Scope::name(`, `.name(` and
 `->name(` (a member or another namespace's function), and
 `__wrap_name`/`__real_name` (the link-time fault fakes of the *_test.cc
@@ -61,6 +62,9 @@ QUALIFIERS = ("", "std::")
 # syscalls.h's back.
 LIBRARY_IO = re.compile(r"\bstd::(filesystem|ifstream|ofstream|fstream)\b")
 
+# absl::Now() reads the wall clock behind Context::clock (step 26.10).
+ABSL_NOW = re.compile(r"(?<![\w.])absl::Now\s*\(")
+
 
 def is_digit_separator(src, i):
     """True when the `'` at src[i] sits inside a numeric literal (1'000)."""
@@ -111,6 +115,8 @@ def find_raw_calls(src, pat):
         found.append((s.count("\n", 0, m.start()) + 1, name))
     for m in LIBRARY_IO.finditer(s):
         found.append((s.count("\n", 0, m.start()) + 1, "std::" + m.group(1)))
+    for m in ABSL_NOW.finditer(s):
+        found.append((s.count("\n", 0, m.start()) + 1, "absl::Now"))
     return sorted(found)
 
 
@@ -173,6 +179,17 @@ class FinderTest(unittest.TestCase):
                 [n for _, n in find_raw_calls(src, self.pat)], [name], src)
         self.assertEqual(self.calls("std::string fstream_name;"), [])
         self.assertEqual(self.calls("// std::ifstream in(p);"), [])
+
+    def test_flags_absl_now_and_the_clock_calls(self):
+        pat = pattern(["clock_gettime", "time"])
+        found = lambda src: [n for _, n in find_raw_calls(src, pat)]
+        self.assertEqual(found("auto t = absl::Now();"), ["absl::Now"])
+        self.assertEqual(found("clock_gettime(CLOCK_REALTIME, &ts);"),
+                         ["clock_gettime"])
+        self.assertEqual(found("time(nullptr);"), ["time"])
+        self.assertEqual(found("syscalls::clock_gettime(CLOCK_REALTIME);"), [])
+        self.assertEqual(found("clock_->TimeNow(); ctx.clock->TimeNow();"), [])
+        self.assertEqual(found("// absl::Now()"), [])
 
     def test_reports_the_line(self):
         self.assertEqual(find_raw_calls("a;\n\nclose(1);", self.pat),

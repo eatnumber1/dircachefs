@@ -3,6 +3,9 @@
 # `remove` is not listed: std::remove (the algorithm) would be flagged; the
 # file calls are unlink/unlinkat. std::filesystem and the file streams are
 # matched by the scanner itself.
+# The time: production reads it only through Context::clock (step 26.10), so
+# clock_gettime/gettimeofday/time and absl::Now (matched by the scanner)
+# are flagged everywhere; tests call syscalls::clock_gettime.
 # Add a name here when a new wrapper is added to dcfs/syscalls.h.
 mkdir
 mkdirat
@@ -144,3 +147,6 @@ fopen
 freopen
 pause
 syscall
+clock_gettime
+gettimeofday
+time
