@@ -15,7 +15,8 @@
 #       its ":tests" filegroup (see the case statement below) and installs
 #       those under /pjdfstest/; every other [src] is ignored -- the
 #       genrule passes $(SRCS), which includes the named files above
-#       again.
+#       again. Step 26.3: the files of @alpine_strace//:root (matched by
+#       their "alpine_strace/root/" path) land at their Alpine paths.
 #
 #   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <test-binary> \
 #       <disk0-device-or-'-'> <args> [name:path...]
@@ -157,6 +158,18 @@ else
 	# every current and future fstype's pair without listing each by name.
 	for f in "$@"; do
 		case "$f" in
+		*alpine_strace/root/*)
+			# step 26.3: strace and its musl closure, installed at their
+			# Alpine paths (/usr/bin/strace, /lib/ld-musl-x86_64.so.1,
+			# /usr/lib/*.so.*), where musl's loader finds them in the guest.
+			rel=${f#*alpine_strace/root/}
+			case "$rel" in
+			usr/bin/strace | lib/* | usr/lib/*)
+				mkdir -p "$ROOT/$(dirname "$rel")"
+				cp -L "$f" "$ROOT/$rel"
+				;;
+			esac
+			;;
 		*/tests/*)
 			rel=${f#*/tests/}
 			dest="$ROOT/pjdfstest/tests/$rel"

@@ -218,3 +218,13 @@ alpine_package(
     index = "@alpine_index//:index.json",
     packages = ["busybox-static"],
 )
+
+# strace for the syscall-trace goldens (step 26.3): a musl-linked dynamic
+# program, run in the guest with its closure (musl, and what strace needs)
+# installed at its Alpine paths by mkinitramfs.sh.
+alpine_package(
+    name = "alpine_strace",
+    closure = True,
+    index = "@alpine_index//:index.json",
+    packages = ["strace"],
+)

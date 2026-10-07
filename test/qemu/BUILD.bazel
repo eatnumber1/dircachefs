@@ -53,6 +53,7 @@ genrule(
         "@pjdfstest//:pjdfstest",
         "@pjdfstest//:tests",
         "@alpine_busybox//:root/bin/busybox.static",
+        "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]),
     outs = ["initramfs.cpio.gz"],
@@ -690,5 +691,33 @@ sh_test(
     data = [
         "guest/lib.sh",
         "guest/pjdfstest_lib.sh",
+    ],
+)
+
+# Step 26.3: golden backing-syscall traces per operation, from strace on the
+# daemon (guest/syscall_traces.sh, guest/strace_lib.sh).
+qemu_test(
+    name = "syscall_traces_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/syscall_traces.sh",
+    size = "small",
+    timeout = "moderate",
+)
+
+# Step 26.3: self-check of the syscall-trace gate: the real
+# guest/strace_lib.sh reducer and golden comparison over canned strace
+# output, including a golden that differs.
+sh_test(
+    name = "strace_lib_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["strace_lib_test.sh"],
+    args = [
+        "$(location guest/lib.sh)",
+        "$(location guest/strace_lib.sh)",
+    ],
+    data = [
+        "guest/lib.sh",
+        "guest/strace_lib.sh",
     ],
 )

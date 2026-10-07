@@ -403,10 +403,44 @@ gate is disabled.
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
+| syscall-trace goldens (26.3: the reducer and the golden comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
 whether every gate in the tree has a self-check, and if not, why not.
+
+## Syscall traces
+
+`//test/qemu:syscall_traces_test` (step 26.3) pins the backing-filesystem
+syscalls of each operation, observed with Alpine's `strace` on the running
+daemon rather than from dcfs's own accounting. `strace` and its musl closure
+are `@alpine_strace` (`MODULE.bazel`), installed by `mkinitramfs.sh` at their
+Alpine paths (`/usr/bin/strace`, `/lib/ld-musl-x86_64.so.1`, `/usr/lib`:
+about 3.8 MB in every e2e initramfs; Alpine has no static strace, and the
+guest has no musl loader of its own, so the dynamic binary carries it).
+
+To trace one operation in a guest script (`guest/strace_lib.sh`, sourced
+after `lib.sh`; `DAEMON_PID`, `SRC` and `DB` set):
+
+    strace_op NAME command...      # quiesce, attach, run, quiesce, detach
+    strace_golden CHECK NAME <<'EOT'
+    openat(backing)
+    EOT
+
+`strace_op` writes `/tmp/strace/NAME.{raw,all,trace,counts}`: `.all` is one
+`name(kind)` line per traced syscall (` !ERRNO` appended on failure), kind
+being `backing`, `cache`, `procfd` (`/proc/self/fd/N`, how dcfs reaches a
+backing object through a descriptor), `proc`, `fuse` or `other`; `.trace`
+keeps `backing`, `procfd` and `other` (a golden never has `other`), and
+`.counts` the number of calls of each kind for step 26.4's ratchets.
+
+To update a golden, run the test, read the diff it prints (the full trace and
+raw strace output follow it), and replace the heredoc in
+`guest/syscall_traces.sh`. A golden change needs a sentence of
+`docs/design.md` that explains the new syscalls: the comment above each golden
+names the passage that explains it. Run the daemon with
+`--sync_interval_sec=1000000`, or the periodic `syncfs` lands in whichever
+trace is running at the time.
 
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 
