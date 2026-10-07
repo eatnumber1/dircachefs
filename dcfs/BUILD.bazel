@@ -989,6 +989,35 @@ DIR_CACHE_FS_FAULTS = {
     for fault, spec in DIR_CACHE_FS_FAULTS.items()
 ]
 
+# Step 12.6: a crash during recovery. The harness built with the first
+# RecoverDirty failing (the daemon dying there), running only the scenario
+# written for it; trace validation must find its traces valid (the real
+# model has a crash at every step of recovery), and
+# //formal:trace_recover_crash_split_test checks the root's trace against a
+# recovery in two transactions, which must reject it.
+RECOVER_DIRTY = "_ZN4dcfs5cache12RecoverDirtyERNS_7ContextE"
+
+qemu_cc_test(
+    name = "dir_cache_fs_crash_during_recovery_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["dir_cache_fs_test.cc"],
+    args = ["--gtest_filter=DirCacheFSTest.CrashDuringRecoveryRecoversAgain"],
+    disks = [("vdb", "ext4", "32M")],
+    linkopts = DIR_CACHE_FS_TEST_WRAPS + ["-Wl,--wrap=" + RECOVER_DIRTY],
+    deps = DIR_CACHE_FS_TEST_DEPS + ["//dcfs/testonly:recover_dirty_fails_once"],
+)
+
+tla_trace_test(
+    name = "trace_crash_during_recovery_test",
+    size = "medium",
+    timeout = "long",
+    disks = ["vdb:ext4:32M"],
+    initramfs = ":dir_cache_fs_crash_during_recovery_test.cpio.gz",
+    lock = False,
+    unit = True,
+)
+
 cc_library(
     name = "mounts_below",
     srcs = ["mounts_below.cc"],

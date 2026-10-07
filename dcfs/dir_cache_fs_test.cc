@@ -3750,6 +3750,44 @@ TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
   EXPECT_THAT(InodeRows(db_), IsOkAndHolds(before - 2));
 }
 
+// A crash during recovery (step 12.6): recovery may stop anywhere and run
+// again. Here the start that follows a crash between an unlink's syscall
+// and its phase 3 dies in RecoverDirty when the binary is built with the
+// crash (//dcfs:dir_cache_fs_crash_during_recovery_test, whose traces
+// trace validation checks; trace_tests/recover_crash.log keeps the
+// root's), and the next start recovers as if nothing had happened: the
+// root's listing and its name are forgotten, the unlinked file's row
+// probed away. Without the crash, the one start does the same.
+TEST_F(DirCacheFSTest, CrashDuringRecoveryRecoversAgain) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(true));
+  {
+    ASSERT_OK_AND_ASSIGN(
+        cache::Mutation phase1,
+        cache::BeginRemove(ctx_, kRootInode, "f", f, cache::BeginFill(ctx_)));
+    phase1.End();  // In memory only: the database keeps phase 1 alone.
+  }
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
+  StartTrace();
+
+  absl::Status first = Restart("boot");
+  if (!first.ok()) {
+    // The daemon died during recovery: nothing of it was recorded.
+    EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(Contains(kRootInode)));
+    ASSERT_THAT(Restart("boot"), IsOk());
+  }
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
+  EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "g"),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
+}
+
 // DESTROY while an unlinked file is still open for reading (SIGTERM, a
 // lazy unmount): its row, kept by phase 3 with nlink 0 until the last
 // release that never comes, goes at the next start although that start is

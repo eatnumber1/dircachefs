@@ -1,0 +1,22 @@
+-------------------- MODULE recover_clears_dirty_first --------------------
+(***************************************************************************)
+(* Recovery that is not idempotent (step 12.6, FSCQ's crash condition for  *)
+(* recovery): RecoverDirty split into two transactions, the first emptying *)
+(* the dirty set and the second forgetting D's dentries and attributes. A  *)
+(* crash between them leaves a database whose dirty set no longer says     *)
+(* what the forgetting was for, so the next recovery does nothing and the  *)
+(* stale entries are served. cache::RecoverDirty does both in one          *)
+(* transaction.                                                            *)
+(*                                                                         *)
+(* Put in by overriding Recover with dcfs.tla's RecoverClearsDirtyFirst  *)
+(* (and Modes with BugModes, for the step between) from the               *)
+(* configuration (no VIEW: MC.tla's View merges dirty states that this    *)
+(* Recover tells apart). Expected: RecoveryIdempotent is violated: a       *)
+(* create of a (syscall, probe, phase 3: a recorded present); a crash      *)
+(* keeps that database and the backing filesystem before the create; the  *)
+(* start's first transaction empties the dirty set: a crash may now keep a *)
+(* database that says a is present, with nothing left to make recovery    *)
+(* forget it.                                                              *)
+(***************************************************************************)
+EXTENDS MC
+=============================================================================

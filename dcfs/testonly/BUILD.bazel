@@ -305,3 +305,16 @@ test_suite(
     name = "every_test",
     visibility = ["//dcfs:__pkg__"],
 )
+
+cc_library(
+    name = "recover_dirty_fails_once",
+    srcs = ["recover_dirty_fails_once.cc"],
+    alwayslink = True,
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:context",
+        "//dcfs:metadata_cache",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+    ],
+)

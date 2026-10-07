@@ -6,7 +6,7 @@
 #   trace_validate.sh --java JAVA --cp CLASSPATH --spec-dir DIR --lock BOOL
 #       [--allow-cuts CATS] [--root TRACE --root-cuts CATS]
 #       [--expect-reject TRACE ERE] [--reval-cfg CFG] [--life-cfg CFG]
-#       [--ident-cfg CFG]
+#       [--ident-cfg CFG] [--trace-cfg CFG]
 #       -- RUN_QEMU [RUN_QEMU_ARGS...]
 #   trace_validate.sh ... --log LOG
 #
@@ -35,6 +35,10 @@
 # <trace> <nodeid> <json>", likewise, checked against IdentTrace.tla with
 # IdentTrace.cfg, or CFG if --ident-cfg names one; named
 # "ident/<trace>@<nodeid>".
+#
+# --trace-cfg CFG checks the directories' traces with CFG instead of
+# Trace.cfg (a known-bug variant of dcfs.tla as the model, put in by a
+# definition override).
 #
 # A trace may end with a "cut": the recorder stops a directory's trace at a
 # step the model does not have, giving "<category>: <detail>". Only the
@@ -66,6 +70,7 @@ reject_ere=""
 reval_cfg=""
 life_cfg=""
 ident_cfg=""
+trace_cfg=""
 allow_cuts=""
 root=""
 root_cuts=""
@@ -84,6 +89,7 @@ while [[ $# -gt 0 ]]; do
     --reval-cfg) reval_cfg="$2"; shift 2 ;;
     --life-cfg) life_cfg="$2"; shift 2 ;;
     --ident-cfg) ident_cfg="$2"; shift 2 ;;
+    --trace-cfg) trace_cfg="$2"; shift 2 ;;
     --) shift; break ;;
     *) echo "trace_validate.sh: unknown argument $1" >&2; exit 2 ;;
   esac
@@ -221,6 +227,7 @@ cp "$spec_dir/Trace.tla" "$spec_dir/Trace.cfg" "$spec_dir/dcfs.tla" \
 cp "${reval_cfg:-$spec_dir/RevalTrace.cfg}" "$work/tlc/RevalTrace.cfg"
 cp "${life_cfg:-$spec_dir/LifetimeTrace.cfg}" "$work/tlc/LifetimeTrace.cfg"
 cp "${ident_cfg:-$spec_dir/IdentTrace.cfg}" "$work/tlc/IdentTrace.cfg"
+cp "${trace_cfg:-$spec_dir/Trace.cfg}" "$work/tlc/Trace.cfg"
 
 valid=0
 invalid=0

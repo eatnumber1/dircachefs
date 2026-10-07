@@ -285,7 +285,7 @@ prints. A request's first step runs inside `Arrive`.
 | (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
 | `Interrupt` | With `Interrupts`: FUSE_INTERRUPT seen at a checkpoint, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned; `C_sys`, `U_sys`, `R_sys`): the request replies `EINTR`; a mutation past phase 1 `End`s without phase 3, its names and D's attributes left unknown, D dirty, the backing unchanged. Never between a syscall and its phase 3 | Cancellation | `Checkpoint` (`dcfs/checkpoint.h`), `SessionLoop` |
-| `Crash` | Daemon crash, kernel crash or power loss: each disk keeps any of its possible states, memory is lost | Crashes, power loss and recovery | |
+| `Crash` | Daemon crash, kernel crash or power loss: each disk keeps any of its possible states, memory is lost. `Next` takes it as `CrashServing`, `CrashRecovering` (between `Restart` and `StartRun`) and `CrashStopping`, so that coverage shows each fires (step 12.6: on `MC_small.cfg`, `CrashRecovering` reaches 160 distinct states; `CrashStopping` none the others do not) | Crashes, power loss and recovery | |
 | `Restart`, `Recover`, `StartRun` | Start again: `RecoverDirty` (one transaction; it may also make unknown any present dentry, standing for those that point at dirty children, which the model does not track: `RecoverForgetting`), then `clean_shutdown = 0` with kSync | Recovery; Startup | `backing::StartRun`, `cache::RecoverDirty` |
 | `BeginShutdown`, `StopSync`, `StopClear`, `StopCkpt`, `StopFlag` | Unmount, sync point, TRUNCATE checkpoint, `clean_shutdown = 1` with kSync, exit | Shutdown; What the clean-shutdown flag adds | `backing::FinishRun` |
 
@@ -301,6 +301,7 @@ prints. A request's first step runs inside `Arrive`.
 | `DurableSetSound` | invariant | If `Context::dirty.durable` has D, every database state a crash may leave has D dirty (the fast path's premise) |
 | `CleanMeansNoDirty` | invariant | `clean_shutdown = 1` is never durable together with a dirty row |
 | `GuardsBalanced` | invariant | `FillGuards::inflight` is the number of requests between their phase 1 and their `End` (an interrupted mutation releases its guard) |
+| `RecoveryIdempotent` | invariant | Recovery may crash and start again (FSCQ's crash condition for recovery, step 12.6): while it runs (`down`, `recover`, `start`), every database state a crash may leave recovers to a correct cache whatever a crash left of the backing filesystem, and recovering that result again changes nothing. It holds because `RecoverDirty` is one transaction and only its commit empties the dirty set (`known_bugs/recover_clears_dirty_first`). With `CrashSafe` it is checked in every state; this one says what a crash during recovery relies on. Checked by `MC_small.cfg` only (it costs about 10% there, and the large configurations are close to their timeouts on a loaded machine) |
 | `TypeOK` | invariant | Every variable has the expected shape |
 | `RecoveryTerminates` | temporal | `(mode # "up") ~> (mode = "up")`: after any crash or shutdown, the daemon gets back to serving (recovery always terminates) |
 
@@ -346,6 +347,7 @@ FALSE in the real configurations.
 | `crash_f3_create_keeps_parent_attrs` | the parent not marked unknown on create (crash F3) | `TriState` | getattr records D's attributes; a create's phase 1 leaves them valid while it is in flight |
 | `tristate_f1_unguarded_fills` | unguarded fills (tri-state F1) | `TriState` | a getattr reads D's attributes, a create's phase 1 runs, the getattr commits what it read anyway (with only `CacheNeverWrong` checked: one step later, once the create's syscall changed D, the stale attributes are served) |
 | `tristate_f4_restore_complete` | the restore-completeness lost update (tri-state F4); needs two mutations of D in flight, so without the kernel lock | `TriState` | an unlink's phase 1 deletes `a`'s row and clears completeness; its syscall; a create of `a` begins (phase 1); the unlink's phase 3 restores completeness, so `a` reads absent while its create is in flight |
+| `recover_clears_dirty_first` | `RecoverDirty` in two transactions, the first emptying the dirty set (step 12.6; put in by overriding `Recover` with `RecoverClearsDirtyFirst` from the configuration, no `VIEW`) | `RecoveryIdempotent` | a create of a: syscall, probe, phase 3 (a recorded present); a crash keeps that database and the backing filesystem before the create; the start's first transaction empties the dirty set: a crash may now keep a database that says a is present, with nothing left to make recovery forget it |
 | `sync_during_mutation` | a sync point cleared the dirty rows of mutations in flight (a [finding](#findings) of this model, fixed in plan step R4) | `CrashSafe` | a create of `b`: phase 1 (D dirty, kSync); a sync point: syncfs; the create's syscall, probe and phase 3 (`b` recorded), and its end; the sync point clears D's row. A crash may now keep that database and lose the unsynced create, and recovery has nothing to forget. (Keeping only the inodes in flight at `ClearDirty` would not help: the create had ended.) |
 | `readdirplus_unlocked` | Readdirplus listed after a suspension point without checking completeness again (a finding, fixed in R4); without the kernel lock | `ServedFromCacheIsCurrent` | a lookup populates D (`a` present, complete); a readdirplus finds D complete with its attributes unknown and goes to statx D; a create of `a` begins (phase 1: `a` unknown); the readdirplus fills D's attributes and lists the present rows: none, while `a` exists |
 | `rename_stale_source` | Rename's phase 3 linked a source resolved before phase 1 without verifying it (a finding, fixed in R4); without the kernel lock | `CacheNeverWrong` | a rename of `b` over `a` resolves `o2` and runs phase 1; a rename of `a` over `b` probes `a` (`o1`); the first rename's renameat2 and phase 3 (`a` -> `o2`); the second's probe cannot be recorded but answers `o1`; it resolves `b` (absent), runs phase 1 and renameat2 (which moves `o2`), and phase 3 records `b` -> `o1` |
@@ -750,6 +752,22 @@ renames with flags and syscall failures.
 - `//formal:trace_*_test` check `Trace.tla` itself on hand-written traces
   (`formal/trace_tests/`, no guest): the begin-line origins, and how
   recovery may forget a clean directory's dentries.
+
+A crash during recovery (step 12.6): `//dcfs:trace_crash_during_recovery_test`
+runs the harness built so that the first `RecoverDirty` fails before it
+writes anything, as if the daemon died there
+(`dcfs/testonly/recover_dirty_fails_once.cc`, by `-Wl,--wrap`), on the
+scenario written for it, `CrashDuringRecoveryRecoversAgain` (a crash
+between an unlink's syscall and its phase 3; a start that dies in
+recovery; a start that recovers); its traces must be valid (the root's:
+crash, restart, crash, restart, recover, start_run).
+`trace_tests/recover_crash.log` keeps the root's trace:
+`//formal:trace_recover_crash_test` checks it against the real model
+(valid) and `//formal:trace_recover_crash_split_test` against
+`known_bugs/recover_clears_dirty_first` as the model (`--trace-cfg`,
+`trace_tests/recover_clears_dirty_first.cfg`, a definition override),
+which must reject it at the `recover` line, the recovery the code does in
+one transaction.
 
 ### Action coverage
 
@@ -1218,7 +1236,7 @@ dcfs counted).
 | `Remove(n, src)`, `Settle` | an unlink of n (or a rename of src over it): the resolve, `HoldForRemoval` if dcfs counts lookups, the syscall; then phase 3: an open object keeps its row (nlink 0 if no link is left), otherwise the row goes if no link is left, into a removed record if held, and the `written_` entry with it | `RemoveChild`, `RefreshAfterRename`, `SettleUnlinkedFile`, `RetireRemoved` |
 | `Forget(i, n)`, `ForgetMulti(f)` | the kernel gives back n lookups (all of them only with no file open); dcfs takes them off, and at its last ends the removed record and the `written_` entry (a batch: each entry's count, in one step) | `Forget`, `ForgetMulti`, `DropLookups`, `ReconcileWritten` |
 | `Destroy` | unmount: the kernel holds nothing (no `FORGET`s), dcfs's memory is cleared; the shutdown is clean unless a row still has a writable open (it keeps the row durably dirty, and `FinishRun` leaves the flag unset then). With `DestroyWithOpens`, files may still be open | `Destroy`, `FinishRun` |
-| `Crash`, `Restart` | the daemon dies (also between a removal's two steps): the kernel's and dcfs's memory go, the database stays; the next start, after an unclean shutdown, probes the recovered rows by handle (the row of a removal the crash cut goes once its object is freed), and at every start sweeps rows with nlink 0 and no name | `StartRun`, `ProbeRecoveredRows`, `cache::ForgetUnnamedRows` |
+| `Crash`, `Restart`, `ProbeRow(i)` | the daemon dies (also between a removal's two steps, and during the start's probe): the kernel's and dcfs's memory go, the database stays; the next start sweeps rows with nlink 0 and no name and, after an unclean shutdown, lists the recovered rows (the row of a removal the crash cut) and empties the dirty set; then probes each listed row by handle (it goes once its object is freed) before it serves | `StartRun`, `ProbeRecoveredRows`, `cache::ForgetUnnamedRows` |
 | `Refuse(m)`, `LookupStub(m)`, `StubGone(m)` | a refused name's stub (the next nodeid up from the highest live stub's), handed out; with `OutOfBand`, a stub going mid-run | `cache::SetRefused`, `StubEntry` |
 
 | Property | Says |
@@ -1278,7 +1296,26 @@ configuration in `findings/` whose test expected the violation. Step 12.4b
 fixed all three and moved them into the real model; they are the last
 three known-bug variants above (`lifetime_stub_nodeid_reused`,
 `lifetime_crash_before_settle`, `lifetime_destroy_with_open_files`).
-`findings/` is empty again.
+
+Step 12.6 (recovery idempotence) found a fourth, in
+`findings/lifetime_crash_during_probe` (test
+`//formal:finding_lifetime_crash_during_probe_test`, which expects the
+violation): the start's probe of the recovered rows works from a list in
+memory. `StartRun` reads the dirty set, `RecoverDirty` empties it and
+`StartRun`'s kSync commit makes that durable before `backing::Startup`
+probes the listed rows, so a crash during the probe loses the rows not yet
+probed, and the next start (clean flag unset, dirty set empty) probes
+nothing: the row of an object a cut removal freed stays (identity stays
+safe: its handle is stale). The model now takes the probe as its own steps
+(`Restart` lists the rows, `ProbeRow(i)` probes one, `Crash` may come
+between) and states the invariant a fix must make hold,
+`RecoveryIdempotent`: every row still to be probed is still in the dirty
+set. It is violated in `MC_lifetime.cfg`'s bounds, so the real
+configurations leave it out; the finding's configuration (two crashes)
+expects its consequence, `RowsNameLiveObjects`: unlink a, a crash before
+its phase 3, the start lists a's row, a crash before the probe, the next
+start probes nothing. A fix (keep the listed rows dirty until probed, or
+until the next sync point) moves it into the real model.
 
 ### Trace validation of nodeids
 

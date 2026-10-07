@@ -297,6 +297,8 @@ def _tla_trace_log_test_impl(ctx):
         variant_cfgs += ["--life-cfg", "$PWD/" + sp(ctx.file.life_cfg)]
     if ctx.file.ident_cfg:
         variant_cfgs += ["--ident-cfg", "$PWD/" + sp(ctx.file.ident_cfg)]
+    if ctx.file.trace_cfg:
+        variant_cfgs += ["--trace-cfg", "$PWD/" + sp(ctx.file.trace_cfg)]
     classpath = ":".join([
         "$PWD/" + sp(ctx.file._overrides),
         "$PWD/" + sp(ctx.file._jar),
@@ -353,7 +355,9 @@ def _tla_trace_log_test_impl(ctx):
         ctx.file._ident_tla,
     ] + ([ctx.file.reval_cfg] if ctx.file.reval_cfg else []) + (
         [ctx.file.life_cfg] if ctx.file.life_cfg else []
-    ) + ([ctx.file.ident_cfg] if ctx.file.ident_cfg else [])
+    ) + ([ctx.file.ident_cfg] if ctx.file.ident_cfg else []) + (
+        [ctx.file.trace_cfg] if ctx.file.trace_cfg else []
+    )
     return [DefaultInfo(
         executable = script,
         runfiles = ctx.runfiles(files = files, transitive_files = runtime.files),
@@ -386,6 +390,12 @@ _tla_trace_log_test = rule(
             doc = "The configuration the nodeids' traces are checked with " +
                   "instead of LifetimeTrace.cfg (a known-bug variant of " +
                   "lifetime.tla as the model).",
+        ),
+        "trace_cfg": attr.label(
+            allow_single_file = [".cfg"],
+            doc = "The configuration the directories' traces are checked " +
+                  "with instead of Trace.cfg (a known-bug variant of " +
+                  "dcfs.tla as the model, by a definition override).",
         ),
         "ident_cfg": attr.label(
             allow_single_file = [".cfg"],

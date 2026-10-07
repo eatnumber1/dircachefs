@@ -896,6 +896,31 @@ StartRun ==
     /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
+\* Not the code (known_bugs/recover_clears_dirty_first, and trace
+\* validation's variant of it): RecoverDirty split into two transactions,
+\* the first emptying the dirty set, the second forgetting what it was for.
+\* A configuration puts it in with Recover <- RecoverClearsDirtyFirst and
+\* Modes <- BugModes (the step between is mode "recover2").
+BugModes == {"up", "down", "recover", "recover2", "start",
+             "stop_sync", "stop_clear", "stop_ckpt", "stop_flag"}
+RecoverClearsDirtyFirst ==
+    \/ /\ mode = "recover" /\ dbCur.dirty
+       /\ Commit([dbCur EXCEPT !.dirty = FALSE], FALSE)
+       /\ mode' = "recover2"
+       /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
+                      servedWrong, stamp, muts, crashes>>
+    \/ /\ mode = "recover" /\ ~dbCur.dirty
+       /\ mode' = "start"
+       /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts, seq, inflight, durableD,
+                      running, ps, servedWrong, stamp, muts, crashes>>
+    \/ /\ mode = "recover2"
+       /\ LET d == [dbCur EXCEPT !.dirty = TRUE] IN
+            \E forget \in SUBSET PresentNames(RecoverDirty(d)) :
+              Commit(RecoverForgetting(d, forget), FALSE)
+       /\ mode' = "start"
+       /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
+                      servedWrong, stamp, muts, crashes>>
+
 \* Unmount: the session loop has stopped, no request is in flight.
 BeginShutdown ==
     /\ mode = "up" /\ \A p \in Procs : ps[p].pc = "idle"
@@ -951,6 +976,15 @@ Init ==
     /\ servedWrong = FALSE
     /\ stamp = NumNames + 1 /\ muts = 0 /\ crashes = 0
 
+\* A crash while serving, during startup recovery (Restart's steps up to
+\* StartRun), or during a clean shutdown: Crash, split only so that TLC's
+\* coverage shows each fires (step 12.6: a crash during recovery must be
+\* reachable for RecoveryIdempotent to mean anything).
+StopModes == {"stop_sync", "stop_clear", "stop_ckpt", "stop_flag"}
+CrashServing == mode = "up" /\ Crash
+CrashRecovering == mode \notin {"up", "down"} \cup StopModes /\ Crash
+CrashStopping == mode \in StopModes /\ Crash
+
 Next ==
     \/ \E p \in Procs :
          \/ Arrive(p)
@@ -967,7 +1001,8 @@ Next ==
          \/ RenameFailed(p) \/ RenameFailed2(p)
          \/ SyncClearDirty(p)
          \/ Interrupt(p)
-    \/ Crash \/ Restart \/ Recover \/ StartRun
+    \/ CrashServing \/ CrashRecovering \/ CrashStopping
+    \/ Restart \/ Recover \/ StartRun
     \/ BeginShutdown \/ StopSync \/ StopClear \/ StopCkpt \/ StopFlag
 
 \* Startup and shutdown steps are never postponed forever.
@@ -1024,6 +1059,21 @@ TriState ==
 \* turns it into a correct cache. (Stronger than CacheNeverWrong after an
 \* actual crash: it is checked in every state, for every possible crash.)
 CrashSafe == \A s \in dbOpts, t \in bOpts : Correct(RecoverDirty(s), t)
+
+\* Recovery is idempotent (FSCQ's crash condition for recovery, step 12.6):
+\* while it runs (the start's steps from Restart up to StartRun), every
+\* database state a crash may leave is one recovery can start from again:
+\* recovering it gives a correct cache whatever a crash left of the
+\* backing filesystem, and recovering that result again changes nothing (a
+\* fixpoint). So recovery may crash and restart any number of times. It
+\* holds because RecoverDirty is one transaction and only its commit
+\* empties the dirty set (known_bugs/recover_clears_dirty_first: two).
+RecoveryModes == Modes \ ({"up"} \cup StopModes)
+RecoveryIdempotent ==
+    mode \in RecoveryModes =>
+        \A s \in dbOpts :
+            /\ RecoverDirty(RecoverDirty(s)) = RecoverDirty(s)
+            /\ \A t \in bOpts : Correct(RecoverDirty(s), t)
 
 \* The fast path's premise: if Context::dirty.durable has D, every database
 \* state a crash may leave has D dirty.

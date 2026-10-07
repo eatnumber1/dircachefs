@@ -218,15 +218,19 @@ VARIABLES
     bName,    \* the backing directory: the object at each name, or None
     bState,   \* each object: "unborn", "alive" or "dead" (freed)
     pend,     \* the removal between its syscall and its phase 3
-    run,      \* "up", or "down" (after a crash or DESTROY)
+    run,      \* "up", "down" (after a crash or DESTROY), or "probing" (a
+              \* start probing the rows recovery found dirty, before it
+              \* serves)
     clean,    \* the last run shut down cleanly (the clean-shutdown flag)
     crashes,  \* crashes so far (for the bound)
     cut,      \* the removal a crash cut between its syscall and its phase 3
               \* (its row is in the dirty set at the next start), or 0
+    queued,   \* the rows the start still has to probe (ProbeRecoveredRows's
+              \* list, in memory)
     forgetErr \* a FORGET forgot more than dcfs counted (history)
 
 stubVars == <<stub, stubHigh>>
-crashVars == <<crashes, cut>>
+crashVars == <<crashes, cut, queued>>
 vars == <<st, obj, nextId, stubVars, bName, bState, pend, run, clean,
           crashVars, forgetErr>>
 
@@ -241,10 +245,11 @@ TypeOK ==
     /\ bName \in [Names -> Objs \cup {None}]
     /\ bState \in [Objs -> {"unborn", "alive", "dead"}]
     /\ pend \in [id : Ids \cup {0}, held : BOOLEAN]
-    /\ run \in {"up", "down"}
+    /\ run \in {"up", "down", "probing"}
     /\ clean \in BOOLEAN
     /\ crashes \in 0..MaxCrashes
     /\ cut \in Ids \cup {0}
+    /\ queued \subseteq Ids
     /\ forgetErr \in BOOLEAN
 
 Named(o) == \E n \in Names : bName[n] = o
@@ -292,6 +297,7 @@ Init ==
     /\ clean = TRUE
     /\ crashes = 0
     /\ cut = 0
+    /\ queued = {}
     /\ forgetErr = FALSE
 
 \* A request may start: the daemon is up and no removal is half done.
@@ -446,36 +452,49 @@ Destroy ==
     /\ Freed(bState)
 
 \* The daemon crashes, possibly between a removal's syscall and its phase
-\* 3. The database keeps its rows.
+\* 3, or while the start probes the recovered rows (step 12.6: a crash
+\* during recovery). The database keeps its rows.
 Crash ==
-    /\ run = "up" /\ crashes < MaxCrashes
+    /\ run \in {"up", "probing"} /\ crashes < MaxCrashes
     /\ st' = [i \in AllIds |-> AfterReset(st[i])]
     /\ pend' = NoPend
     /\ run' = "down" /\ clean' = FALSE /\ crashes' = crashes + 1
     /\ cut' = pend.id
+    /\ queued' = {}
     /\ UNCHANGED <<obj, nextId, stubVars, bName, forgetErr>>
     /\ Freed(bState)
 
-\* The next start (StartRun): after an unclean shutdown, the probe of the
-\* rows recovery found dirty (ProbeRecoveredRows: the row of a removal the
-\* crash cut goes once its object is freed; the code probes every dirty
-\* row, which changes nothing for the others); at every start, the sweep
-\* of unnamed rows (cache::ForgetUnnamedRows; BugSweepOnlyUnclean puts back
-\* its running only after an unclean shutdown, before step 12.4b).
+\* The next start (StartRun): at every start, the sweep of unnamed rows
+\* (cache::ForgetUnnamedRows; BugSweepOnlyUnclean puts back its running
+\* only after an unclean shutdown, before step 12.4b); after an unclean
+\* shutdown, the rows recovery found dirty are listed for ProbeRecoveredRows
+\* (the row of a removal the crash cut; the code lists every dirty row,
+\* which changes nothing for the others), and RecoverDirty empties the
+\* dirty set in the same start: the list is in memory only (the finding
+\* lifetime_crash_during_probe). The probe itself is ProbeRow, after it.
 Restart ==
     /\ run = "down"
-    /\ run' = "up"
+    /\ LET q == IF clean \/ BugNoRecoveredProbe \/ cut = 0 THEN {} ELSE {cut}
+       IN /\ queued' = q
+          /\ run' = IF q = {} THEN "up" ELSE "probing"
     /\ st' = [i \in AllIds |->
                 IF i \notin Ids THEN st[i]
-                ELSE LET swept ==
-                       IF BugNoUnnamedSweep \/ (clean /\ BugSweepOnlyUnclean)
-                       THEN st[i] ELSE AfterSweep(st[i], Named(obj[i]))
-                     IN IF clean THEN swept
-                        ELSE AfterProbe(swept, i = cut /\ ~BugNoRecoveredProbe
-                                                /\ bState[obj[i]] = "dead")]
+                ELSE IF BugNoUnnamedSweep \/ (clean /\ BugSweepOnlyUnclean)
+                     THEN st[i] ELSE AfterSweep(st[i], Named(obj[i]))]
     /\ cut' = 0
     /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, clean, crashes,
                    forgetErr>>
+
+\* backing::Startup's probe of one listed row by handle
+\* (ProbeRecoveredRows): the row goes if its object was freed (ESTALE) or
+\* has no link left. Then the daemon serves.
+ProbeRow(i) ==
+    /\ run = "probing" /\ i \in queued
+    /\ st' = [st EXCEPT ![i] = AfterProbe(@, bState[obj[i]] = "dead")]
+    /\ queued' = queued \ {i}
+    /\ run' = IF queued' = {} THEN "up" ELSE "probing"
+    /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, clean, crashes,
+                   cut, forgetErr>>
 
 -----------------------------------------------------------------------------
 (* Boundary stubs (cache::SetRefused): the next nodeid up from the highest *)
@@ -534,6 +553,7 @@ Next ==
     \/ Destroy
     \/ Crash
     \/ Restart
+    \/ \E i \in Ids : ProbeRow(i)
     \/ \E m \in Boundaries : Refuse(m) \/ LookupStub(m) \/ StubGone(m)
 
 Spec == Init /\ [][Next]_vars
@@ -606,6 +626,15 @@ UnnamedRowsSwept ==
 \* object that has been freed.
 RowsNameLiveObjects ==
     Up => \A i \in Ids : st[i].row => bState[obj[i]] = "alive"
+
+\* (7) Recovery is idempotent (FSCQ's crash condition for recovery, step
+\* 12.6): what the start still has to do is durable, so that a crash
+\* during recovery leaves it to the next start: every row still to be
+\* probed is still in the dirty set (cut). Not true of the code
+\* (formal/findings/lifetime_crash_during_probe): RecoverDirty empties the
+\* dirty set before the probe runs, and a crash during the probe loses the
+\* rows not yet probed.
+RecoveryIdempotent == \A i \in queued : i = cut
 
 \* Every invariant the real configurations check.
 LifetimeSafe ==
