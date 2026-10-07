@@ -57,6 +57,7 @@ allow dcfs/_objs/mounts_below/* _ZN4dcfs8syscalls8realpath* | startup only: moun
 # Abseil: formatting and diagnostics internals.
 allow abseil-cpp+/* snprintf | Abseil's own number, float, stack-trace and Mutex-debug formatting
 allow abseil-cpp+/* strerror_r | absl::base_internal::StrError
+allow abseil-cpp+/* fprintf | str_format's parser (a diagnostic on a path clang keeps as fprintf; GCC did not reference it)
 
 # SQLite: the amalgamation's unix VFS and extension loader.
 allow sqlite3+/* getcwd | unix VFS resolves a relative database name (startup, when the cache database is opened)
@@ -68,7 +69,6 @@ allow sqlite3+/* pthread_create | SQLite's optional sorter worker threads, off b
 # API) and its mount fallbacks.
 allow libfuse+/* dlopen | fuse_module loading of the high-level API, not used
 allow libfuse+/* *printf | usage text, debug output and mount option strings
-allow libfuse+/* puts | usage text of the helper
 allow libfuse+/* strerror | libfuse's own log messages
 allow libfuse+/* pthread_create | fuse_loop_mt and io_uring queues; dcfs runs fuse_session_loop (single threaded)
 allow libfuse+/* realpath | mount point resolution inside fuse_session_mount (startup)
@@ -77,6 +77,7 @@ allow libfuse+/* execle | fusermount3 fallback inside fuse_session_mount (startu
 
 # numactl (libnuma, linked by an Abseil dependency): its sysfs parsing.
 allow numactl+/* sprintf | libnuma builds sysfs paths
+allow numactl+/* fprintf | libnuma's warning prefix (clang keeps the fprintf(stderr, ...) GCC turned into fwrite)
 allow numactl+/* strerror | libnuma's own messages
 
 # Pulled in by the C runtime for the allowed uses above.

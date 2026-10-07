@@ -86,7 +86,7 @@ py_library(
 
 # The gate: fails when //dcfs:main_static, or a library it links, references
 # a symbol in banned_symbols.txt that no `allow` line covers. $(NM) is the
-# host's nm (the C++ toolchain is the host gcc until 7.1 pins llvm).
+# toolchain's nm (llvm-nm of the pinned clang, step 7.1), shipped as data.
 py_test(
     name = "banned_symbols_test",
     size = "small",
@@ -101,6 +101,7 @@ py_test(
         "banned_symbols.txt",
         ":main_static_objects",
         "//dcfs:main_static",
+        "@bazel_tools//tools/cpp:current_cc_toolchain",
     ],
     toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
     deps = [":banned_symbols_lib"],
@@ -123,6 +124,7 @@ py_test(
         "banned_symbols.txt",
         ":banned_symbols_fixture",
         ":banned_symbols_fixture_objects",
+        "@bazel_tools//tools/cpp:current_cc_toolchain",
     ],
     toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
     deps = [":banned_symbols_lib"],

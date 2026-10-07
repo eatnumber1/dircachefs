@@ -23,6 +23,7 @@ defined in the binary but referenced by no scanned object.
 
 import argparse
 import fnmatch
+import os
 import subprocess
 import sys
 
@@ -58,8 +59,22 @@ def parse_deny_list(text):
     return bans, allows
 
 
+def resolve_tool(tool):
+    """`$(NM)` is an execroot-relative path (external/<repo>/bin/nm) for a
+    hermetic toolchain; a test runs in the runfiles tree, where the repository
+    is a sibling of the main one."""
+    if os.path.isabs(tool) or os.path.exists(tool):
+        return tool
+    if tool.startswith("external/"):
+        sibling = os.path.join("..", tool[len("external/"):])
+        if os.path.exists(sibling):
+            return sibling
+    return tool
+
+
 def nm_symbols(nm, path, *flags):
     """Returns the names `nm` prints for `path`, version suffix removed."""
+    nm = resolve_tool(nm)
     out = subprocess.run([nm, "-P", *flags, path], check=True,
                          capture_output=True, text=True).stdout
     names = set()
