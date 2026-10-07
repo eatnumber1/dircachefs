@@ -85,6 +85,9 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
   or the tests use is pinned this way.
 - Format C++ with the repository's `.clang-format`. From phase 7,
   clang-tidy (`.clang-tidy`) runs on our code and its findings are errors.
+- **Follow `docs/style.md`**: naming, includes, how errors are built
+  (`StatusBuilder`, `ErrnoToStatus`) and worded, logging, comments, tests,
+  Bazel, shell, Python, docs and commit messages.
 
 ## Docs and commits
 
