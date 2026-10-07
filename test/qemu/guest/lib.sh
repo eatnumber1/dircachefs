@@ -142,7 +142,7 @@ quiesce_daemon() {
 	q_stable=0
 	q_n=0
 	while [ "$q_stable" -lt 3 ] && [ "$q_n" -lt 100 ]; do
-		usleep 100000
+		sleep 0.1
 		daemon_wakeups "$1"
 		if [ "$WAKEUPS" = "$q_last" ]; then
 			q_stable=$((q_stable + 1))

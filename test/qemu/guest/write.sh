@@ -284,7 +284,7 @@ big_writer() {
 wait_for_file() {
 	w_n=0
 	while [ ! -e "$1" ] && [ "$w_n" -lt 300 ]; do
-		usleep 100000
+		sleep 0.1
 		w_n=$((w_n + 1))
 	done
 	[ -e "$1" ]
