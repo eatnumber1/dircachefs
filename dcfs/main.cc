@@ -12,6 +12,7 @@
 #include "absl/cleanup/cleanup.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
+#include "absl/flags/usage_config.h"
 #include "absl/flags/usage.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
@@ -26,6 +27,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/string_view.h"
 #include "absl/strings/ascii.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
@@ -42,6 +44,7 @@
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
+#include "dcfs/version.h"
 #include "fuse_lowlevel.h"
 
 ABSL_FLAG(
@@ -204,6 +207,23 @@ absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
   return result;
 }
 
+// Abseil's --help lists only flags defined in files it calls "main" files,
+// by default those named after the program (dcfs.cc); our flags live in
+// dcfs/*.cc, so under the installed name `dcfs` none would match. Claim
+// every file under a dcfs/ directory instead.
+bool IsDcfsFlagFile(absl::string_view filename) {
+  return absl::StartsWith(filename, "dcfs/") ||
+         absl::StrContains(filename, "/dcfs/");
+}
+
+void InstallFlagsUsageConfig() {
+  absl::FlagsUsageConfig config;
+  config.contains_help_flags = IsDcfsFlagFile;
+  config.contains_helpshort_flags = IsDcfsFlagFile;
+  config.version_string = [] { return absl::StrCat("dcfs ", kVersion, "\n"); };
+  absl::SetFlagsUsageConfig(config);
+}
+
 absl::StatusOr<int> Main(int argc, char *argv[]) {
   // The backing create(2)-family syscalls (backing.h's MkdirAt/MknodAt/
   // CreateAt) run with the caller's umask, switched to around each one
@@ -214,6 +234,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // pjdfstest before the per-request umask existed (open/02.t, open/03.t:
   // `open(..., 0642)` landing as 0640 on the backing file).
   umask(0);
+  InstallFlagsUsageConfig();
   absl::SetProgramUsageMessage(
       "--source=<dir> --cache_db=<path> [flags] mountpoint");
   // WARNING and above go to stderr by default (Abseil's own default is

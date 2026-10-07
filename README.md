@@ -126,6 +126,8 @@ dcfs --source=<dir> --cache_db=<path> [flags] <mountpoint>
 
 ### Flags
 
+`dcfs --help` lists all flags and `dcfs --version` prints the version.
+
 | Flag | Default | Meaning |
 |---|---|---|
 | `--source` | (required) | The directory to cache. Opened once at startup; dcfs never uses the path again. |

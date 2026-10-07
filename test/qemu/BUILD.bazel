@@ -64,6 +64,16 @@ qemu_test(
     timeout = "moderate",
 )
 
+# Step 23: `dcfs --help` lists every flag and `dcfs --version` works under
+# the installed name -- see guest/help.sh.
+qemu_test(
+    name = "help_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/help.sh",
+    size = "small",
+    timeout = "moderate",
+)
+
 # Step 2: the cache database (and its -wal/-shm files) is mode 0600, not
 # world-readable; a missing cache-database directory is created 0700, and
 # an existing group-/world-accessible one gets a WARNING -- see
