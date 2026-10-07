@@ -1312,3 +1312,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Startup after the probe; the v5 stub rule in the tri-state check; a dead Context's DESTROY
   tripping "dirty-set" in a crash test is handled harness-side (a crashed daemon runs no DESTROY).
   One more rebase (readdir step + detector fix) handed to the agent; then merge, then 26.6.
+- Coverage baseline reviewed (notes/coverage-baseline-2026-10-08.md): dcfs 92.4% lines / 73.3%
+  branches; the non-passthrough data path has zero hits (Q1 for russ), four dead functions under
+  our configuration (Access handler, FuseRequest move-assign, openat2 wrapper, FileHandle::
+  ToString: Q2), cheap gaps (futimens/removexattr on O_PATH, status/device_id/mounts_below/
+  file_handle edges, main.cc misuse), error branches left to 26.6 + Phase 11; gate scope Q3.
+  7.2/26.12: review fixes done (continuous-mode profiles found atime_test's cleanup truncating the
+  daemon's profile 2-4/10 runs; CI repo contents cache no longer saved: 37 GB locally; coverage
+  job restores presubmit's cache read-only); final rebase over the readdir step handed back.
