@@ -13,6 +13,9 @@
     "platforms": "platform and constraint definitions: build configuration only",
     "rules_cc+": "C++ build rules (link_extra_lib is an empty library by default): no code in the binaries"
   },
+  "toolchain_runtime": {
+    "llvm-project": {"version": "22.1.8", "repo": "https://github.com/llvm/llvm-project", "tag": "llvmorg-22.1.8", "commit": "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1", "osv": "no-records"}
+  },
   "bazel_dep": {
     "googletest": {"purl": "pkg:github/google/googletest", "kind": "code"},
     "google_benchmark": {"purl": "pkg:github/google/benchmark", "kind": "code"},

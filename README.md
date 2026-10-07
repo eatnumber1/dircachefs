@@ -88,7 +88,8 @@ these packages on a CI runner.
 
 | Package (Debian/Ubuntu) | Used by | Why it is not hermetic yet |
 |---|---|---|
-| `build-essential` (gcc, g++, binutils, make) | every C/C++ compile | Phase 7 pins an LLVM toolchain |
+| `libc6-dev`, `linux-libc-dev` (via `build-essential`) | every C/C++ compile and link: the glibc headers and static libraries, and the Linux UAPI headers (`/usr/include/linux`, `openat2.h`, `btrfs.h`, `fs.h`), come from the host | no sysroot yet (step 7.1b); the compiler itself is the pinned clang and no host gcc, ld or `/usr/lib/gcc` is used (checked with them blocked) |
+| `libxml2`, `libicu`, `liblzma`, `libgcc-s1`, `libstdc++6`, `zlib1g`, `bash`, `coreutils` (`mktemp`, `realpath`, `rm`) | running the pinned clang, lld and llvm-nm, and its `cc_wrapper.sh` | LLVM's release binaries link the host's shared libraries (`ld.lld` needs `libxml2.so.2` and through it ICU; this is why LLVM 23 could not be pinned); see `third_party/llvm/README.md` |
 | `python3` | the `osv` CI job's SBOM generator (`.github/ci/osv.sh`); Bazel's own Python is hermetic | universal on build hosts |
 | `coreutils` (`truncate`), `curl`, `xz-utils`, `git` | scratch-disk images, fetching, archives | universal on build hosts |
 
@@ -404,8 +405,9 @@ linked repository has no entry in `tools/sbom/pins.json` or a test-only one
 is linked): abseil-cpp, gloop (a dependency of abseil-cpp), SQLite, libfuse,
 liburing and numactl (libfuse's), each pinned with the upstream git commit of
 its release tag (`sbom.py verify-commits`, run by the job, checks the tag
-still points at that commit). The compiler toolchain joins this list when
-Phase 7 pins it. The job fails on any finding that `osv-scanner.toml` does
+still points at that commit). The binaries also contain the pinned toolchain's static C++ runtime
+(libc++, libc++abi, libunwind, compiler-rt's builtins from llvm-project
+22.1.8), listed under `toolchain_runtime` in `pins.json`. The job fails on any finding that `osv-scanner.toml` does
 not ignore; an ignore needs a reason and an expiry date, and an expired or
 unexplained ignore fails the job. A self-check step scans a deliberately old
 libfuse (3.2.0, CVE-2018-10906; `tools/sbom/testdata/`) with the very same

@@ -3,16 +3,17 @@ running ./configure, so a CC given relative to the execroot (the hermetic
 clang's cc_wrapper.sh) is not found there and every feature probe fails
 ("has_idtype_t no", and the generated compat.h then redefines idtype_t).
 Make CC absolute first. The probes also link, and the genrule's CC carries
-no toolchain link flags: use the toolchain's lld, not the host's ld.
+no toolchain link flags: use the toolchain's lld and compiler-rt, so that no
+host GCC file (crtbeginS.o, libgcc) or host ld is used.
 
 --- a/BUILD.bazel	2026-10-06 22:19:31.553231948 -0700
-+++ b/BUILD.bazel	2026-10-07 01:36:50.041907445 -0700
++++ b/BUILD.bazel	2026-10-07 05:13:44.155099532 -0700
 @@ -20,7 +20,7 @@
          "src/include/liburing/io_uring_version.h",
      ],
      cmd = """
 -            export CC=$(CC) CXX=$(CC)++
-+            export CC="$$PWD/$(CC) -fuse-ld=lld" CXX="$$PWD/$(CC)++ -fuse-ld=lld"
++            export CC="$$PWD/$(CC) -fuse-ld=lld -rtlib=compiler-rt" CXX="$$PWD/$(CC)++ -fuse-ld=lld -rtlib=compiler-rt"
  
              # switch to the package dir to execute "configure" right there
              pushd $$(dirname $(location configure))

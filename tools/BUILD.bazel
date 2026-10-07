@@ -280,3 +280,19 @@ sh_test(
     args = ["$(location :cc_toolchain_info)"],
     data = [":cc_toolchain_info"],
 )
+
+# Self-check of toolchain_test: it must reject a host gcc and a clang of
+# another version (tools/toolchain_fixtures/; the version one moves with the pin).
+sh_test(
+    name = "toolchain_self_check_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["toolchain_self_check_test.sh"],
+    args = [
+        "$(location :toolchain_test.sh)",
+        "tools/toolchain_fixtures",
+    ],
+    data = [
+        "toolchain_test.sh",
+    ] + glob(["toolchain_fixtures/*.txt"]),
+)

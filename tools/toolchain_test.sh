@@ -1,5 +1,6 @@
 #!/bin/sh
-# Step 7.1: the C++ toolchain is the pinned clang from toolchains_llvm.
+# Step 7.1: the C++ toolchain is the pinned clang from toolchains_llvm (self-check:
+# toolchain_self_check_test.sh; the version here and in llvm_22.txt move together).
 # $1 is tools/cc_toolchain_info.txt: the toolchain's $(CC) and its
 # `--version` output.
 set -eu

@@ -86,7 +86,7 @@ allow libfuse+/* posix_spawn* | fusermount3 fallback inside fuse_session_mount (
 allow libfuse+/* execle | fusermount3 fallback inside fuse_session_mount (startup)
 
 # numactl (libnuma, linked by an Abseil dependency): its sysfs parsing.
-allow numactl+/* getaddrinfo | libnuma's affinity.o (affinity.c: hostname lookup for numa_run_on_node-style calls); dcfs never calls it. Goes with the libnuma/io_uring decision
+allow numactl+/* getaddrinfo | libnuma's affinity.c, the `ip:` affinity handler (numactl's command line); dcfs never calls it. Goes with the libnuma/io_uring decision
 allow numactl+/* sprintf | libnuma builds sysfs paths
 allow numactl+/* fprintf | libnuma's warning prefix; -O0 only (an optimized build folds fprintf(stderr, "...") into fwrite)
 allow numactl+/* strerror | libnuma's own messages

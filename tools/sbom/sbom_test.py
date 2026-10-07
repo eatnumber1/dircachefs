@@ -229,7 +229,22 @@ class Shipped(unittest.TestCase):
         expected = {r.rstrip("+") for r in sbom.graph_repos(read("graph"))
                     if r not in self.pins()["build_only"]}
         self.assertEqual({self.pins()["shipped"][m].get("name", m)
-                          for m in expected}, names)
+                          for m in expected} | set(self.pins()["toolchain_runtime"]),
+                         names)
+
+    def test_the_toolchains_static_runtime_is_shipped(self):
+        # libc++, libc++abi, libunwind and compiler-rt's builtins are in
+        # every binary: llvm-project at the llvm_version of MODULE.bazel.
+        by_name = {c["name"]: c for c in build()["shipped"]["components"]}
+        llvm = by_name["llvm-project"]
+        self.assertEqual(llvm["version"], "22.1.8")
+        self.assertIn("ca7933e47d3a3451d81e72ac174dcb5aa28b59d1", llvm["purl"])
+
+    def test_llvm_version_change_without_a_new_pin_fails(self):
+        module = read("module").replace('llvm_version = "22.1.8"',
+                                        'llvm_version = "22.1.9"')
+        with self.assertRaisesRegex(sbom.SbomError, "llvm-project.*22.1.8"):
+            build(module=module)
 
     def test_no_test_only_repo_is_in_the_shipped_sbom(self):
         docs = build()

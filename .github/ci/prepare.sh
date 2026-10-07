@@ -25,14 +25,18 @@ fi
 # runner image lacked flex, bison, cpio and ninja, which is how they were
 # found (Phase 5.2). Packages named here and not in a fresh runner are
 # non-hermetic dependencies: make one hermetic, then drop it from this list.
-#   build-essential  gcc, g++, binutils, make: every C/C++ compile (the tools
-#                    and the kernel are downloaded, nothing else is built)
+#   build-essential  libc6-dev and linux-libc-dev: the glibc and Linux UAPI
+#                    headers and glibc's static libraries every C/C++ compile
+#                    and link uses (the compiler is the pinned clang; gcc is
+#                    not used, but comes with the package)
+#   libxml2          libxml2.so.2: the pinned LLVM's ld.lld links it (and ICU,
+#                    liblzma) dynamically; --no-install-recommends skips it
 #   cpio             test/qemu/scripts/mkinitramfs.sh packs every initramfs
 #   python3          .github/ci/osv.sh (the SBOM generator; Bazel's own
 #                    Python is hermetic)
 #   coreutils (truncate), curl, xz-utils, git: tests' scratch disks, Bazelisk,
 #                    Bazel's archive extraction, repository rules
-HOST_PACKAGES="build-essential cpio python3 coreutils curl xz-utils git"
+HOST_PACKAGES="build-essential libxml2 cpio python3 coreutils curl xz-utils git"
 export DEBIAN_FRONTEND=noninteractive
 if ! dpkg -s $HOST_PACKAGES >/dev/null 2>&1; then
 	$SUDO apt-get update -qq

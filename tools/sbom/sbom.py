@@ -235,7 +235,7 @@ def check_graph(graph_text, pins):
     return sorted(shipped[r] for r in repos if r in shipped)
 
 
-def shipped_component(module, pin, version, direct):
+def shipped_component(module, pin, version, direct, pin_label=None):
     if pin["version"] != version:
         raise SbomError(
             f"{module}: pins.json says version {pin['version']} but"
@@ -255,7 +255,8 @@ def shipped_component(module, pin, version, direct):
         "purl": f"pkg:github/{m.group(1)}/{m.group(2)}@{pin['commit']}",
         "externalReferences": [{"type": "vcs", "url": pin["repo"]}],
         "properties": [
-            {"name": "dcfs:pin", "value": ("bazel_dep:" if direct else "module:") + module},
+            {"name": "dcfs:pin",
+             "value": pin_label or ("bazel_dep:" if direct else "module:") + module},
             {"name": "dcfs:kind", "value": "code"},
             {"name": "dcfs:scope", "value": "shipped"},
             {"name": "dcfs:commit", "value": pin["commit"]},
@@ -343,6 +344,15 @@ def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
             raise SbomError(f"{module}: not selected in MODULE.bazel.lock")
         shipped.append(shipped_component(module, pins["shipped"][module],
                                          versions[module], module in deps))
+    # What the toolchain links into every binary (libc++, libc++abi, libunwind
+    # and compiler-rt's builtins, statically): not a Bazel repository of the
+    # graph, so pinned apart; its version is MODULE.bazel's llvm_version.
+    llvm = re.search(r'llvm_version\s*=\s*"([^"]+)"', module_text)
+    for name, pin in sorted(pins.get("toolchain_runtime", {}).items()):
+        if llvm is None:
+            raise SbomError("MODULE.bazel has no llvm_version for 'toolchain_runtime'")
+        shipped.append(shipped_component(name, pin, llvm.group(1), False,
+                                         pin_label="toolchain:" + name))
     comps = []
 
     def add(name, version, purl, pin, kind, osv):
@@ -512,7 +522,8 @@ def main(argv):
             roots = write_git_roots(json.loads(read(a.sbom)), a.out_dir)
             print(f"{len(roots)} git roots under {a.out_dir}")
         elif a.cmd == "verify-commits":
-            problems = verify_commits(json.loads(read(a.pins))["shipped"])
+            problems = verify_commits({**json.loads(read(a.pins))["shipped"],
+                                    **json.loads(read(a.pins)).get("toolchain_runtime", {})})
             for p in problems:
                 print(f"pins.json: {p}", file=sys.stderr)
             return 1 if problems else 0

@@ -399,6 +399,7 @@ gate is disabled.
 | sbom_test (pins have SBOM entries) | `//tools/sbom:sbom_test` (test_every_pin_has_an_entry, test_pins_json_entry_removed_fails) |
 | ownership_test (Debian image root ownership) | `//third_party/debian:mkrootfs_test` (its `--skip-ownership` control image must be user-owned, the real one root-owned) |
 | rootfs_invariant_test (Debian rootfs matches tar) | `//third_party/debian:rootfs_invariant_self_check` (imports the real `header_problems`) |
+| the C++ toolchain is the pinned clang (7.1) | `//tools:toolchain_self_check_test` (the checker over a gcc and a wrong-version clang info file must fail) |
 | banned symbols in `//dcfs:main_static` (26.8) | `//tools:banned_symbols_self_check_test` (the real checker and deny list over a program that calls `realpath`) |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |

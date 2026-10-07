@@ -21,6 +21,13 @@
 # the cache is saved even when tests fail (the kernel build takes half an
 # hour). A job with no cache of its own starts from the newest cache of any
 # job ("bazel-"), so presubmit and full start from what fast built.
+#
+# The repository cache (downloaded archives: the 1.9 GB LLVM tarball, Alpine
+# packages, the kernel sources) is a cache of its own, keyed by
+# MODULE.bazel.lock alone and saved only on a key miss: GitHub keeps 10 GB per
+# repository, and saving it with the per-commit disk cache would store a copy
+# of the archives for every commit. A lock-file change misses once, restores
+# the newest older copy (restore-keys) and saves the new one.
 
 name: CI
 
@@ -59,13 +66,20 @@ jobs:
           || format('{0}..{1}', github.event.before, github.sha) }}"
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
         run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        id: repocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
       - name: Restore Bazel caches
         id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/bazel-disk-cache
-            ~/.cache/bazel-repo-cache
             ~/.cache/bazelisk
           key: bazel-fast-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
           restore-keys: |
@@ -84,13 +98,18 @@ jobs:
           name: test-logs-fast
           path: ci-test-logs
           if-no-files-found: ignore
+      - name: Save the repository cache
+        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/bazel-disk-cache
-            ~/.cache/bazel-repo-cache
             ~/.cache/bazelisk
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
@@ -103,13 +122,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
         run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        id: repocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
       - name: Restore Bazel caches
         id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/bazel-disk-cache
-            ~/.cache/bazel-repo-cache
             ~/.cache/bazelisk
           key: bazel-presubmit-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
           restore-keys: |
@@ -128,13 +154,18 @@ jobs:
           name: test-logs-presubmit
           path: ci-test-logs
           if-no-files-found: ignore
+      - name: Save the repository cache
+        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/bazel-disk-cache
-            ~/.cache/bazel-repo-cache
             ~/.cache/bazelisk
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
@@ -147,13 +178,20 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
         run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        id: repocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
       - name: Restore Bazel caches
         id: cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/bazel-disk-cache
-            ~/.cache/bazel-repo-cache
             ~/.cache/bazelisk
           key: bazel-full-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
           restore-keys: |
@@ -175,13 +213,18 @@ jobs:
           name: test-logs-full
           path: ci-test-logs
           if-no-files-found: ignore
+      - name: Save the repository cache
+        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/bazel-disk-cache
-            ~/.cache/bazel-repo-cache
             ~/.cache/bazelisk
           key: ${{ steps.cache.outputs.cache-primary-key }}
 
