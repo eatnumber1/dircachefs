@@ -1269,3 +1269,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the probe before the mount fds existed: caught in review); sweep at every start (query-plan
   test); formal/findings empty, three new known-bug variants; `probe` lifetime trace line.
   presubmit+formal 209 pass + 1 skip, asan 35/35. Phase 22 (cancellation) dispatched to lane-2.
+- 26.2 rebased over everything up to 0b184a7 and green (fast 149 + 1 skip, presubmit+formal 218 +
+  1 skip, asan small 30/30; the checker caught 26.10's ClockTest forging a FORGET of an uncounted
+  lookup: fixed); needs one more rebase over 12.4b (conflicts in dir_cache_fs.cc/backing.cc:
+  Startup(), the probe, v5 stub semantics) -> agent; then merge, then 26.6.
