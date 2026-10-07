@@ -13,7 +13,7 @@ Google style or a rule below, Appendix A counts the sites and gives a
 command that finds them, for a later mechanical step. Nothing here is open:
 russ settled the questions on 2026-10-07.
 
-Derived from the tree at c632ca4 (2026-10-07). Counts are of production
+Derived from the tree at 463aa5f (2026-10-07), after step 25.1. Counts are of production
 code (`dcfs/`, `bench/`, no tests) unless stated. File:line references
 drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 `docs/design.md` or `docs/plan/process.md`, or is russ's decision.
@@ -49,8 +49,8 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 
 ### 1.2 Narrowing Google's rules
 
-- **`std::string_view`, `std::optional`**, not the `absl::` aliases (339
-  vs 5, 107 vs 4).
+- **`std::string_view`, `std::optional`**, not the `absl::` aliases (none
+  left in production code).
 - **Function names**: `syscalls::` wrappers carry their libc/manpage names
   in lower case (`syscalls::setxattr`); every other function is CamelCase
   (`SetXattr`). The two layers therefore never clash by construction.
@@ -99,8 +99,9 @@ clashes turn out to be more than those three and renaming reads worse.
 
 `enum class`, nested inside the type it belongs to when it belongs to one
 (`struct LookupResult { enum class Kind { kFound, ... }; Kind kind; };`),
-converted when touched. The four nested unscoped `enum Kind`s convert
-(E1).
+converted when touched. The four nested unscoped `enum Kind`s were
+converted in step 25.1. A scoped enum has no `operator<<`, so
+`RET_CHECK_EQ/NE` print its underlying value (`RetCheckStreamable`).
 
 ### 1.5 `syscalls.h`
 
@@ -115,9 +116,8 @@ non-manpage name is renamed to its manpage name, with a comment on any
 per-thread raw-syscall detail (`setgroups_thread` becomes `setgroups`).
 Nothing that is not a wrapper lives in `dcfs::syscalls`, so no ADL hook can
 be found through it: checked by grep, the only template there is `ioctl`,
-and the one hook in the file (`LogOpenFlags`/`AbslStringify`) is at `dcfs`
-scope (`syscalls.h` closes `namespace syscalls` at line 181 before it).
-Current exceptions: S1-S3.
+and `LogOpenFlags`/`AbslStringify` live in `dcfs/log_open_flags.h` as a
+hidden friend at `dcfs` scope. No exceptions remain (step 25.1).
 
 ### 1.6 Errors
 
@@ -161,8 +161,7 @@ failure is a programming error or unrecoverable (`fuse_ops.cc:27`,
 
    Not `absl::InternalError(absl::StrCat(...))` or any `absl::XError(...)`
    in production code. A code with no helper uses
-   `absl::StatusBuilder(absl::StatusCode::kX)` directly. (The helpers do
-   not exist yet: C1.)
+   `absl::StatusBuilder(absl::StatusCode::kX)` directly.
 3. Context on a status from elsewhere: `absl::StatusBuilder(status) <<
    "..."` or `ABSL_RETURN_IF_ERROR(expr) << "..."` (tested,
    `status_test.cc:94`; no production use yet).
@@ -179,7 +178,7 @@ status with `StatusBuilder`, never by rebuilding it with
 `absl::Status(code, message)` (that drops the payload and `StatusToErrno`
 falls back to its code table). Not verified: `.SetCode()` on an errno
 status (nothing does it). The streamed text is joined as `original;
-added`, so start it with words, not `;` or a space (C2).
+added`, so start it with words, not `;` or a space.
 
 **Codes** (production constructor counts):
 - `kFailedPrecondition` (16): a startup check failed (`main.cc:144,186,300`),
@@ -450,7 +449,7 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
 
 ## Appendix A: Convergence
 
-Sites that break Google style or a rule above, as of c632ca4. Run each
+Sites that break Google style or a rule above, as of 463aa5f. Run each
 command from the repository root in bash. Rows marked (new) come from the
 2026-10-07 decisions. Google rules surveyed: formatting, includes,
 `using namespace`, `typedef`, `thread_local`, exceptions, casts, naming,
@@ -461,16 +460,9 @@ line length, shellcheck findings, quoting) were not surveyed.
 
 | # | Rule | Count | Find them |
 |---|---|---|---|
-| C1 | Errors via `dcfs::XErrorBuilder()` (1.6) (new) | The 8 helpers do not exist: add them to `dcfs/status.h` (with a `SourceLocation` default argument), then convert 41 `absl::XError(...)` constructors in 9 files (16 FailedPrecondition, 10 NotFound, 5 Internal, 4 InvalidArgument, 2 AlreadyExists, 2 Aborted, 1 Unimplemented, 1 ResourceExhausted; Internal at `main.cc:483,488,494,531`, `sqlite.cc:91`) and 5 direct `StatusBuilder(kX)` sites (`errno.cc:294`, `sqlite.cc:376`, `ret_check.h:33,75,86`) | `grep -rnE 'absl::[A-Za-z]+Error\(\|StatusBuilder\(absl::StatusCode' dcfs bench --include='*.cc' --include='*.h' \| grep -v -e _test.cc -e testonly` |
-| C2 | No leading `;` or space in StatusBuilder text | 5: `main.cc:285`, `sqlite.cc:127,311,351,412` (they print `; ; while ...`) | `grep -rn -A2 'StatusBuilder(' dcfs --include='*.cc' \| grep -E '<< "(; \| \()'` |
 | C3 | Google: 80 columns | 102 lines in 28 files (`backing.cc` 14, `syscalls.cc` 10, `metadata_cache_test.cc` 8) | `grep -rnE '^.{81,}$' dcfs bench tools --include='*.cc' --include='*.h' --include='*.c'` |
 | C4 | Google/clang-format include blocks and order | 16 out-of-order lines in 10 files (`backing.cc`, `errno.cc`, `fd.cc`, `main.cc`, `syscalls.cc`, `syscalls.h`, 4 tests); 37 files have one `<...>` block where Google has C and C++ headers apart (26 files have two or more); clang-format settles both | `LC_ALL=C awk 'FNR==1{p=""} /^#include/{if(p!=""&&$0<p)print FILENAME":"FNR": "$0;p=$0;next}{p=""}' $(git ls-files 'dcfs/*.cc' 'dcfs/*.h')` |
-| C5 | `std::` not `absl::` aliases | 9: `main.cc:96,214,461`, `status.h:19`, `status.cc:10,19`, `file_handle.cc:62,145,146` | `grep -rnE 'absl::(string_view\|optional)' dcfs bench --include='*.cc' --include='*.h' \| grep -v _test.cc` |
-| C6 | Message starts lower case unless an identifier | 5: `mount_fds.cc:25`, `sqlite.cc:84,91,133`, `status.cc:21` | `grep -rnE 'Error\($' -A2 dcfs --include='*.cc' \| grep -E '"(No\|Cannot\|Malformed\|Extra) '` |
-| C7 | `ASSERT_OK_AND_ASSIGN` defined once | defined in 7 test files (`metadata_cache_test.cc:36` and six more; the pinned `status_matchers.h` lacks it) | `grep -rln 'define ASSERT_OK_AND_ASSIGN' dcfs` |
-| C8 | Syscall message: `name(args)` or bare name | 2: `main.cc:191,323` | `grep -rnE 'ErrnoToStatus\(.*"[a-z_0-9]+ "' dcfs --include='*.cc'` |
 | C9 | `syscalls::` only in `backing.cc` and the listed peers | `mounts_below.cc:77,95` is not in `docs/design.md`'s list (add it there or route through `backing.cc`) | `grep -rln 'syscalls::' dcfs --include='*.cc' --include='*.h' \| grep -v -e _test -e testonly` |
-| C10 | Raw libc only in `syscalls.cc` | 8: `device_id.cc:126,140,144,148,150`, `main.cc:180,321,325` | `grep -nE '(^\|[^_a-zA-Z:.])(::)?(ioctl\|fstatfs\|open\|close\|stat\|mkdir)\(' dcfs/device_id.cc dcfs/main.cc` |
 | C11 | Google shell: 2-space indent, no tabs (4) (7.6) | 48 scripts use tabs (all guest scripts but a few wrappers, most host scripts); 4 use spaces and conform (`formal/trace_validate.sh`, `tools/smoke_readonly.sh`, `tools/format.sh`, `.github/ci/osv.sh`), as do the new `third_party/alpine/*.sh` | `grep -lP '^\t' $(git ls-files '*.sh' test/qemu/guest/init)` |
 | SH1 | Host-side scripts are bash (4) (7.6) | 19 of 26 host-side scripts are `#!/bin/sh` (`third_party/*` build and smoke helpers, `test/qemu/scripts/`, `tools/`); each becomes `#!/bin/bash` with `set -euo pipefail` (all 19 already have `set -eu`) | `grep -L '^#!/bin/bash' $(git ls-files '*.sh' \| grep -v test/qemu/guest/)` |
 | SH2 | Google shell: 80 columns (4) (7.6) | 246 lines over 80 in 48 scripts (measured with a tab as 2 columns; 375 lines in 54 scripts with a tab as 8) | `grep -nE '^.{81,}$' $(git ls-files '*.sh')` after expanding tabs (`expand -t2`) |
@@ -479,11 +471,8 @@ line length, shellcheck findings, quoting) were not surveyed.
 | SH5 | shfmt formatting and shellcheck clean (4) (7.6) | not pinned, not run; the number of findings is unknown (no backtick command substitution: 0 of 63 scripts) | after pinning: `bazel test //tools:format_test` |
 | D1 | Markdown: fenced blocks declare a language (7) | 37 bare fences in 12 files (`README.md` 11, `test/qemu/README.md` 8, `tools/sbom/README.md` 3, `third_party/*` 12, `docs/design.md` 2, others) | `grep -rnE '^[`]{3}$' $(git ls-files '*.md' \| grep -v docs/plan/)` (opening and closing fences both match: halve) |
 | D2 | Markdown: 80-column wrap (7) | 21 prose lines over 80 in 9 files outside `docs/plan/` (`formal/README.md` 11, `test/qemu/README.md` 2, 7 `third_party` READMEs/`tools/sbom/README.md` 1 to 2 each); tables, headings, links exempt | `grep -nE '^.{81,}$' $(git ls-files '*.md' \| grep -v -e docs/plan/ -e .claude/) \| grep -v -e '\|' -e http -e '^[^:]*:[0-9]*:#'` |
-| C12 | Every `third_party/<name>/` has a README with the pin | 1: `pjdfstest` (pin only in `MODULE.bazel:21-26`) | `for d in third_party/*/; do [ -f $d/README.md ] \|\| echo $d; done` |
 | C13 | BUILD list elements indented 4 (buildifier) | 292 lines at 6 spaces, all in `dcfs/BUILD.bazel` | `grep -cP '^      \S' dcfs/BUILD.bazel` |
-| C14 | No unused include | `syscalls.h:21` (`absl/base/nullability.h`); others need F6 | `grep -n 'nullability\|absl_nonnull' dcfs/syscalls.h dcfs/syscalls.cc` |
 | C15 | Guest helpers shared in `lib.sh` | duplicated: `cleanup` 25, `normalize_stat` 5, `populate_tree`/`run_pass`/`expect_fail` 4 each, `start_daemon` 3, six more 2 each | `grep -hE '^[a-z_]+\(\) \{' test/qemu/guest/*.sh \| sort \| uniq -c \| sort -rn` |
-| C16 | Google: no using-directives | 1: `bench/dcfs_bench.cc:396` (`using namespace dcfs_bench;`) | `grep -rn 'using namespace' dcfs bench tools` |
 | P1 | Google Python: 80 columns (5) | 47 lines over 80: `sbom.py` 24, `sbom_test.py` 23 | `grep -nE '^.{81,}$' $(git ls-files '*.py')` |
 | N1 | Flat `dcfs`: remove `dcfs::cache` (1.3) (new) | 3 declarations (`metadata_cache.h/.cc/_test.cc`); 673 `cache::` uses (407 production) in 20 files. Clash if flattened: `ParentOf` (same parameters as `backing::ParentOf`, differing only in return type), `SetXattr`, `RemoveXattr` all also exist in `backing` (3 names: rename one side first) | `grep -rn 'namespace cache\|cache::' dcfs bench \| wc -l` |
 | N2 | Remove `dcfs::backing`: it folds into `dcfs` as free functions; the three clashing pairs get distinguishing names (e.g. `BackingSetXattr`); a wrapper class only if the clashes prove to be more than those three and renaming reads worse | 3 declarations; 147 uses (138 production) in 15 files; clashes: `ParentOf`, `SetXattr`, `RemoveXattr` (same 3 names as N1) | `grep -rn 'namespace backing\|backing::' dcfs bench \| wc -l` |
@@ -492,10 +481,6 @@ line length, shellcheck findings, quoting) were not surveyed.
 | N5 | Remove `dcfs::events` | 2 declarations (`protocol_events.h`); 182 uses (164 production) in 7 files; generic names (`Request`, `Op`, `Ino`) become dcfs-wide; no clash found | `grep -rn 'namespace events\|events::' dcfs bench \| wc -l` |
 | N6 | Remove `dcfs::internal` | 2 declarations (`ret_check.h`, `sqlite.h`); 9 uses; helpers would need distinct names (`RetCheck*`, `IsOptional`) | `grep -rn 'namespace internal\|internal::' dcfs` |
 | N7 | `syscalls::` never `dcfs::syscalls::` or `using` | 0 code sites (2 in comments: `backing.h:33`, `syscalls_fault_test.cc:81`); the 190 `syscalls::` uses (99 production) are fine | `grep -rn 'dcfs::syscalls::\|using .*syscalls' dcfs bench` |
-| E1 | `enum class`, nested (1.4) (new) | 4 unscoped nested `enum Kind`: `LookupResult::Kind` (`metadata_cache.h:92`, about 130 `LookupResult::k*` uses), `Probe::Kind` (`protocol_events.h:110`), `Frame::Kind` and `Mapping::Kind` (`trace_recorder.h:161,190`); enumerators become `Type::Kind::kX` | `grep -rn '^\s*enum [A-Z]' dcfs` |
-| S1 | `syscalls.h` holds manpage-named thin wrappers only (1.5) (new) | not named for a manpage: `listxattr_opath`, `getxattr_opath`, `setxattr_opath`, `removexattr_opath`, `fchmod_opath`, `futimens_opath` (`syscalls.h:92-120`), `ReopenPathFd` (:84), `setgroups_thread` (:176; rename `setgroups`, with a comment on the per-thread raw syscall), `fsuid`/`fsgid` getters (:164-165), `GetInodeGeneration` (:183, outside `syscalls`). Each moves to a `backing.cc` helper over the plain wrappers, or is renamed | `grep -nE '^[A-Za-z].*(_opath\|ReopenPathFd\|GetInodeGeneration\|setgroups_thread\|fsuid\|fsgid)' dcfs/syscalls.h` |
-| S2 | No composition in a wrapper | 4 wrappers loop and decode: `flistxattr`, `fgetxattr` (`syscalls.cc:168,196`, 2 attempts) and the `_opath` pair (:287,306, 4 attempts); the retry moves to backing | `grep -n 'attempt <' dcfs/syscalls.cc` |
-| S3 | ADL hooks are hidden friends in their class's namespace (1.2) (new) | 1: `LogOpenFlags` and its `AbslStringify` (`syscalls.h:187-190,209`: friend declared in the class, defined out of line). They leave `syscalls.h` together, the hook defined in the class as a hidden friend, namespace unchanged (`dcfs`) so ADL still finds it. Already conforming: `AbslHashValue` in `file_handle.h:33`, `device_id.h:32`. Nothing in `dcfs::syscalls` defines a hook (only the `ioctl` template), so the `syscalls::name` rule and a flattening cannot break ADL | `grep -rnE 'AbslStringify\|AbslHashValue\|operator<<\|swap\(' dcfs --include='*.h' --include='*.cc' \| grep -v _test.cc` |
 | F1 | `//tools:format_test` (small) in check mode (1.1) (new) | does not exist | `bazel query //tools:format_test` |
 | F2 | Pinned clang-format, buildifier, shfmt, shellcheck | none in `MODULE.bazel`, none on the host (phase 7 LLVM toolchain; shfmt and shellcheck in 7.6) | `grep -n 'clang\|buildifier\|shfmt\|shellcheck' MODULE.bazel` |
 | F3 | `bazel run //tools:format` | `tools/format.sh` is a host script that skips missing tools | `cat tools/format.sh` |
