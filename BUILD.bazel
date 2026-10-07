@@ -7,4 +7,5 @@ exports_files([
     "MODULE.bazel.lock",
     "osv-scanner.toml",
     ".github/ci/prepare.sh",
+    ".github/ci/commit_subjects.sh",  # //tools:commit_subjects_test (26.13)
 ])

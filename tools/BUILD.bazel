@@ -1,5 +1,6 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("//tools:first_party_objects.bzl", "linked_objects")
@@ -168,4 +169,45 @@ py_test(
         "//dcfs:shipped_deps.txt",
     ],
     deps = [":shipped_deps_lib"],
+)
+
+# ---- Step 26.13: repository-shape tests ---------------------------------
+
+py_library(
+    name = "repo_shape_lib",
+    srcs = ["repo_shape.py"],
+    imports = ["."],
+)
+
+# Every third_party/<name>/ has a README.md, every guest script is used by a
+# qemu_test, every DISABLED_ check is named in README.md's Limitations. It
+# walks the real source tree (found through MODULE.bazel's symlink): Bazel
+# cannot declare "every directory of third_party" as inputs, so the target is
+# `external` (never cached) and is cheap.
+py_test(
+    name = "repo_shape_test",
+    size = "small",
+    srcs = ["repo_shape_test.py"],
+    args = ["anchor=$(location //:MODULE.bazel)"],
+    data = ["//:MODULE.bazel"],
+    tags = ["external"],
+    deps = [":repo_shape_lib"],
+)
+
+# Self-check of the three rules over fixture trees (26.1).
+py_test(
+    name = "repo_shape_self_check_test",
+    size = "small",
+    srcs = ["repo_shape_self_check_test.py"],
+    deps = [":repo_shape_lib"],
+)
+
+# Self-check of .github/ci/commit_subjects.sh (the fourth rule, which needs
+# git and therefore runs in CI's fast job) over canned subject lists.
+sh_test(
+    name = "commit_subjects_test",
+    size = "small",
+    srcs = ["commit_subjects_test.sh"],
+    args = ["$(location //:.github/ci/commit_subjects.sh)"],
+    data = ["//:.github/ci/commit_subjects.sh"],
 )

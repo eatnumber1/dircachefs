@@ -648,8 +648,17 @@ recovery protocol, concurrency, and the test strategy.
   other fails with `ENOTTY`. After `chattr` through dcfs the kernel may
   serve the previous ctime until its attribute timeout: it does not drop
   its cached attributes after a successful `FS_IOC_SETFLAGS` or
-  `FS_IOC_FSSETXATTR` on a FUSE file, and dcfs is not asked. `O_TMPFILE`, and linking such a file into a name, work. File
+  `FS_IOC_FSSETXATTR` on a FUSE file, and dcfs is not asked. The guest check
+  `immutable-ctime` (`DISABLED_immutable-ctime`) reproduces it and is kept
+  disabled until the kernel changes. `O_TMPFILE`, and linking such a file into a name, work. File
   locks are handled by the kernel, locally within the mount.
+- **A Linux bug can oops the kernel when casefold is enabled online.**
+  `EXT4_IOC_SET_TUNE_SB_PARAM` turns the casefold feature on under a
+  mounted ext4 without loading the filesystem's encoding, so the next
+  `readdir` of a `chattr +F` directory dereferences NULL (Linux 6.18 to
+  7.3-rc). It needs no dcfs; the guest check
+  `casefold-tune-online-oops` (`DISABLED_casefold-tune-online-oops`)
+  reproduces it and is kept disabled.
 - **Filesystem coverage.** ext4, xfs and btrfs are all exercised by the
   test suite (step 5.2). ZFS is refused until it supports
   `FS_IOC_GETFSUUID`.

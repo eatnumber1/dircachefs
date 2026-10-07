@@ -49,6 +49,14 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # the commit range below needs the history
+      - name: Commit subjects start with a plan step (step 26.13)
+        run: >-
+          ./.github/ci/commit_subjects.sh
+          "${{ github.event_name == 'pull_request'
+          && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+          || format('{0}..{1}', github.event.before, github.sha) }}"
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
         run: ./.github/ci/prepare.sh
       - name: Restore Bazel caches
