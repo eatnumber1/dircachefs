@@ -273,8 +273,9 @@ boot), so `bazel test //...` is dominated by compilation, not booting.
    in again. KVM is optional: without it QEMU falls back to software
    emulation (TCG), 2-9x slower (`DCFS_FORCE_TCG=1` forces this).
 3. For `nfs_test` only, the small Debian root image it chroots into is
-   built by Bazel from a pinned package set, using the pinned, Bazel-built
-   `//third_party/e2fsprogs:mke2fs` (Phase 4c; not a host tool):
+   built by Bazel from a pinned package set (`third_party/debian/scripts/
+   mkrootfs.py`, with Alpine's `mke2fs` and `debugfs`; no host tool, no
+   root):
 
    ```
    bazel build //third_party/debian:rootfs

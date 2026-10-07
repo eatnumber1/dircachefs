@@ -1,43 +1,45 @@
-#!/bin/sh
-# Host-side test of the guest's busybox, Alpine's busybox-static (step 24.3;
-# it replaced a source build, third_party/busybox, whose Kconfig fragment
-# chose the applets): it is statically linked, has every applet the guest
-# scripts use (grep test/qemu/guest/*.sh and guest/init before adding or
-# removing one below) and the features they rely on. Needs neither root nor
-# kernel control.
+#!/bin/bash
+# Host-side test of the guest's busybox, Alpine's busybox-static (step 24.3):
+# it is statically linked, has every applet the guest scripts use (grep
+# test/qemu/guest/*.sh and guest/init before adding or removing one below)
+# and the features they rely on. Alpine's busybox replaced a source build
+# whose Kconfig fragment chose the applets; now the package's choice is
+# checked against what the guests need. Needs neither root nor kernel
+# control.
 #
 # Usage: busybox_test.sh <busybox-binary>
-set -eu
+set -euo pipefail
 
-BB=$(readlink -f "$1") # absolute: the feature checks below cd into a scratch dir
+# Absolute: the feature checks below cd into a scratch directory.
+BB=$(readlink -f "$1")
 
 fail() {
-	echo "FAIL: $*" >&2
-	exit 1
+  echo "FAIL: $*" >&2
+  exit 1
 }
 
 # --- statically linked --------------------------------------------------
 case "$(file -b "$BB" 2>/dev/null || true)" in
 *"statically linked"* | *"static-pie"*) ;;
 *)
-	# `file` may not be installed on every host this test runs on; fall
-	# back to checking there's no ELF interpreter (PT_INTERP) segment,
-	# which is what "statically linked" actually means.
-	if readelf -l "$BB" 2>/dev/null | grep -q "INTERP"; then
-		fail "$BB is dynamically linked (has a PT_INTERP segment)"
-	fi
-	;;
+  # `file` may not be installed on every host this test runs on; fall
+  # back to checking there's no ELF interpreter (PT_INTERP) segment,
+  # which is what "statically linked" actually means.
+  if readelf -l "$BB" 2>/dev/null | grep -q "INTERP"; then
+    fail "$BB is dynamically linked (has a PT_INTERP segment)"
+  fi
+  ;;
 esac
 echo "PASS: $BB is statically linked"
 
 # --- --help runs ----------------------------------------------------------
-"$BB" --help >/dev/null 2>&1 || true # busybox --help exits nonzero; just check it doesn't crash
+# busybox --help exits nonzero; just check it does not crash.
+"$BB" --help >/dev/null 2>&1 || true
 echo "PASS: $BB --help runs"
 
 # --- every applet the guest scripts use is present ------------------------
-# Kept in sync by hand with busybox.config.fragment's groups; a mismatch
-# here is a bug in one file or the other, not a real requirements
-# difference.
+# The guest scripts' needs, by hand: a missing applet is a gap in Alpine's
+# package for this branch, or a new need to add here.
 required_applets="
 [ ash awk basename cat chgrp chmod chown chroot cmp cp cpio cut date dd diff
 dirname dmesg echo fallocate false find free grep head id insmod ip kill ln ls
@@ -50,17 +52,17 @@ actual_applets=$("$BB" --list)
 
 missing=""
 for applet in $required_applets; do
-	# -F/-x: fixed string, whole line -- "[" (the test-as-"[" applet) is
-	# not valid basic-regex syntax (an unterminated bracket expression),
-	# so a plain `grep -qx` on it fails with "Invalid regular expression"
-	# rather than just not matching.
-	if ! echo "$actual_applets" | grep -qFx "$applet"; then
-		missing="$missing $applet"
-	fi
+  # -F/-x: fixed string, whole line -- "[" (the test-as-"[" applet) is
+  # not valid basic-regex syntax (an unterminated bracket expression),
+  # so a plain `grep -qx` on it fails with "Invalid regular expression"
+  # rather than just not matching.
+  if ! grep -qFx "$applet" <<<"$actual_applets"; then
+    missing="$missing $applet"
+  fi
 done
 
-if [ -n "$missing" ]; then
-	fail "busybox --list is missing required applets:$missing"
+if [[ -n "$missing" ]]; then
+  fail "busybox --list is missing required applets:$missing"
 fi
 echo "PASS: all required applets present:$required_applets"
 
@@ -75,19 +77,24 @@ W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT
 mkdir "$W/bin"
 for applet in $("$BB" --list); do
-	ln -s "$(readlink -f "$BB")" "$W/bin/$applet"
+  ln -s "$(readlink -f "$BB")" "$W/bin/$applet"
 done
 HOST_PATH=$PATH
 PATH="$W/bin"
 export PATH
 cd "$W"
 
+# The sorted lines of stdin on one line.
+joined() {
+  sort | tr '\n' ' ' | sed 's/ $//'
+}
+
 check() {
-	name=$1
-	want=$2
-	got=$3
-	[ "$got" = "$want" ] || fail "$name: got '$got', want '$want'"
-	echo "PASS: $name"
+  name=$1
+  want=$2
+  got=$3
+  [[ "$got" = "$want" ]] || fail "$name: got '$got', want '$want'"
+  echo "PASS: $name"
 }
 
 check ash-arith "7" "$(sh -c 'i=3; echo $((i + 4))')"
@@ -98,7 +105,7 @@ check test-bracket "yes" "$(sh -c 'if [ -d "$1" ]; then echo yes; fi' sh "$W")"
 chmod 640 f
 check stat-c "640" "$(stat -c %a f)"
 check stat-c-uid-gid "$(id -u) $(id -g)" "$(stat -c '%u %g' f)"
-[ -n "$(stat -f -c %t "$W")" ] || fail "stat -f -c %t printed nothing"
+[[ -n "$(stat -f -c %t "$W")" ]] || fail "stat -f -c %t printed nothing"
 echo "PASS: stat -f -c %t"
 
 mkdir -p t/a t/skip/deep t/b
@@ -106,11 +113,12 @@ mkdir -p t/a t/skip/deep t/b
 : >t/b/y
 : >t/skip/deep/z
 check find-path-prune "t/a/x t/b/y" \
-	"$(find t \( -path t/skip \) -prune -o -type f -print | sort | tr '\n' ' ' | sed 's/ $//')"
-check find-maxdepth "t t/a t/b t/skip" "$(find t -maxdepth 1 | sort | tr '\n' ' ' | sed 's/ $//')"
+  "$(find t \( -path t/skip \) -prune -o -type f -print | joined)"
+check find-maxdepth "t t/a t/b t/skip" "$(find t -maxdepth 1 | joined)"
 check find-mindepth-type-d "t/a t/b t/skip" \
-	"$(find t -mindepth 1 -maxdepth 1 -type d | sort | tr '\n' ' ' | sed 's/ $//')"
-check find-exec "x y" "$(find t/a t/b -type f -exec basename {} \; | sort | tr '\n' ' ' | sed 's/ $//')"
+  "$(find t -mindepth 1 -maxdepth 1 -type d | joined)"
+check find-exec "x y" \
+  "$(find t/a t/b -type f -exec basename {} \; | joined)"
 
 printf 'abcdefgh' >h
 check head-c "abcd" "$(head -c 4 h)"
@@ -124,7 +132,8 @@ echo "PASS: sleep 0.01"
 printf 'hello world' >d
 printf 'HELLO' | dd of=d conv=notrunc 2>/dev/null || fail "dd conv=notrunc"
 check dd-conv-notrunc "HELLO world" "$(cat d)"
-dd if=/dev/zero of=d2 count=2 ibs=512 obs=512 conv=fsync 2>/dev/null || fail "dd ibs/obs conv=fsync"
+dd if=/dev/zero of=d2 count=2 ibs=512 obs=512 conv=fsync 2>/dev/null ||
+  fail "dd ibs/obs conv=fsync"
 check dd-size "1024" "$(wc -c <d2 | tr -d ' ')"
 
 mkdir sorted
@@ -132,7 +141,8 @@ for n in zz mm aa kk bb; do : >"sorted/$n"; done
 check ls-sorted "aa bb kk mm zz " "$(ls sorted | tr '\n' ' ')"
 check ls-recursive "sorted:|aa|bb|kk|mm|zz|" "$(ls -R sorted | tr '\n' '|')"
 
-check md5sum "5eb63bbbe01eeed093cb22bb8f5acdc3  -" "$(printf 'hello world' | md5sum)"
+check md5sum "5eb63bbbe01eeed093cb22bb8f5acdc3  -" \
+  "$(printf 'hello world' | md5sum)"
 touch -d '2001-02-03 04:05:06' tm
 check touch-d "2001-02-03" "$(date -r tm +%F)"
 timeout 1 sleep 0 || fail "timeout applet"
@@ -142,7 +152,8 @@ echo "PASS: timeout applet"
 # strictatime; without the feature only ro/rw/remount exist. The strings are
 # only in the binary when the feature is built in.
 for opt in noatime strictatime; do
-	PATH=$HOST_PATH grep -aqF "$opt" "$BB" || fail "mount option '$opt' not in the binary (CONFIG_FEATURE_MOUNT_FLAGS off?)"
+  PATH=$HOST_PATH grep -aqF "$opt" "$BB" ||
+    fail "mount option '$opt' not in the binary (FEATURE_MOUNT_FLAGS off?)"
 done
 echo "PASS: mount -o flags compiled in"
 echo "PASS: all checks passed"

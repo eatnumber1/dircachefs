@@ -79,7 +79,8 @@ def expected_entries(tar_path):
             entries[path] = ('symlink', 0o777, member.uid, member.gid,
                              len(member.linkname.encode()))
         elif member.islnk():
-            tparts = [p for p in member.linkname.split('/') if p not in ('', '.')]
+            tparts = [p for p in member.linkname.split('/')
+                      if p not in ('', '.')]
             target = '/'.join(resolve_dir(links, tparts[:-1]) + [tparts[-1]])
             hard[path] = target
             entries[path] = entries[target]

@@ -78,7 +78,8 @@ def parse_alpine_repos(text):
                 and isinstance(node.value.func, ast.Name)
                 and node.value.func.id == "alpine_package"):
             continue
-        kwargs = {k.arg: _literal(k.value) for k in node.value.keywords if k.arg}
+        kwargs = {k.arg: _literal(k.value)
+                  for k in node.value.keywords if k.arg}
         repos[kwargs["name"]] = list(kwargs["packages"])
     return repos
 
@@ -478,7 +479,7 @@ def main(argv):
     r.add_argument("--sbom", required=True)
     r.add_argument("--out-dir", required=True)
     ar = sub.add_parser("alpine-repos",
-                        help="print the alpine_package repositories of MODULE.bazel")
+                        help="print MODULE.bazel's alpine_package repositories")
     ar.add_argument("--module", default="MODULE.bazel")
     v = sub.add_parser("verify-commits", help="check pinned tags against upstream (network)")
     v.add_argument("--pins", default="tools/sbom/pins.json")

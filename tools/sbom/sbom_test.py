@@ -75,9 +75,11 @@ class RealPins(unittest.TestCase):
         pins = json.loads(read("pins"))
         deps, repos = sbom.parse_module(read("module"))
         for name in pins["repository"]:
-            self.assertIn(name, repos, f"pins.json: repository {name} is not in MODULE.bazel")
+            self.assertIn(name, repos,
+                          f"pins.json: repository {name} is not in MODULE.bazel")
         for name in pins["bazel_dep"]:
-            self.assertIn(name, deps, f"pins.json: bazel_dep {name} is not in MODULE.bazel")
+            self.assertIn(name, deps,
+                          f"pins.json: bazel_dep {name} is not in MODULE.bazel")
 
     def test_debian_purls_are_osv_shaped(self):
         comps = build()["testonly"]["components"]
@@ -236,9 +238,11 @@ class Shipped(unittest.TestCase):
         self.assertEqual(shipped_pins & testonly_pins, set())
         # The things only tests use must not be linked.
         graph = sbom.graph_repos(read("graph"))
-        for r in ("googletest+", "google_benchmark+", "glib+", "zlib+", "qemu",
-                  "linux_source", "busybox", "pjdfstest", "tla2tools", "act",
-                  "rules_python+", "rules_foreign_cc+"):
+        for r in ("googletest+", "google_benchmark+", "pjdfstest", "tla2tools",
+                  "act", "rules_python+", "+alpine_package+alpine_linux_virt",
+                  "+alpine_package+alpine_qemu",
+                  "+alpine_package+alpine_fstools",
+                  "+alpine_package+alpine_busybox"):
             self.assertNotIn(r, graph)
         for c in docs["shipped"]["components"]:
             self.assertNotIn("deb:", "".join(

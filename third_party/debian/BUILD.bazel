@@ -110,14 +110,12 @@ sh_test(
     ],
 )
 
-# Test first: before this step, every file in :rootfs was owned by
-# whatever uid/gid ran the genrule that assembled it (tar --no-same-owner
-# extraction -- see README.md's "Ownership" section), not root -- this
-# test failed accordingly (see this step's commit log for the exact
-# failing output: /etc/os-release came back "User: 1000 Group: 120", the
-# build uid/gid, not 0/0). mkrootfs.sh switching to `mke2fs -d <tarball>`
-# (fed @debian//:flat's own root-owned tar headers directly) is what makes
-# it pass.
+# The image has real ownership: before Phase 4's e2fsprogs follow-up every
+# file in :rootfs was owned by whatever uid/gid ran the genrule, and this
+# test failed with /etc/os-release reporting "User: 1000 Group: 120". It
+# spot-checks root:root on a few paths, /bin/mount's setuid bit and the ext4
+# features the checked-in mke2fs.conf asks for; rootfs_invariant_test (below)
+# checks every path against the tar.
 sh_test(
     name = "ownership_test",
     size = "small",

@@ -42,16 +42,17 @@ _MIRROR = "https://dl-cdn.alpinelinux.org/alpine"
 
 _PYTHON = Label("@python_3_12_x86_64-unknown-linux-gnu//:bin/python3")
 _APK = Label("//third_party/alpine:apk.py")
-_KEYS = [
-    Label("//third_party/alpine:keys/alpine-devel@lists.alpinelinux.org-4a6a0840.rsa.pub"),
-    Label("//third_party/alpine:keys/alpine-devel@lists.alpinelinux.org-5261cecb.rsa.pub"),
-    Label("//third_party/alpine:keys/alpine-devel@lists.alpinelinux.org-6165ee59.rsa.pub"),
-]
+
+# The checked-in Alpine release keys (keys/, README.md); a key is named by the
+# last part of its file name.
+_KEY_FILE = ("//third_party/alpine:keys/" +
+             "alpine-devel@lists.alpinelinux.org-%s.rsa.pub")
+_KEY_IDS = ["4a6a0840", "5261cecb", "6165ee59"]
 
 def _key_args(rctx):
     args = []
-    for key in _KEYS:
-        args += ["--key", str(rctx.path(key))]
+    for key_id in _KEY_IDS:
+        args += ["--key", str(rctx.path(Label(_KEY_FILE % key_id)))]
     return args
 
 def _run(rctx, args, what):
@@ -70,7 +71,12 @@ def _alpine_index_impl(rctx):
     specs = []
     for repo in rctx.attr.repos:
         file = "APKINDEX-%s.tar.gz" % repo
-        url = _base_url(rctx.attr.mirror, rctx.attr.branch, repo, rctx.attr.arch) + "/APKINDEX.tar.gz"
+        url = "%s/APKINDEX.tar.gz" % _base_url(
+            rctx.attr.mirror,
+            rctx.attr.branch,
+            repo,
+            rctx.attr.arch,
+        )
         if not rctx.download(url, file, allow_fail = True).success:
             fail(("the Alpine %s %s index could not be downloaded from %s: " +
                   "check the network, the branch name and the mirror") % (
@@ -141,7 +147,7 @@ _WRAPPER = """\
 # no tree it must run nothing (an empty root would start the host's own
 # /lib/ld-musl and /usr/bin programs).
 root=$(cd "$(dirname "$0")/../root" 2>/dev/null && pwd) || {
-  echo "$0: cannot find root/ next to wrappers/ (is this wrapper outside its tree?)" >&2
+  echo "$0: cannot find root/ next to wrappers/ (wrapper moved?)" >&2
   exit 127
 }
 unset LD_PRELOAD
@@ -175,7 +181,8 @@ def _write_wrappers(rctx):
     build = ""
     for name, path in rctx.attr.tools.items():
         values = {"args": args, "env": env, "lib": library_path, "path": path}
-        rctx.file("wrappers/" + name, _fill(_WRAPPER, values), executable = True)
+        wrapper = _fill(_WRAPPER, values)
+        rctx.file("wrappers/" + name, wrapper, executable = True)
         build += _fill(_TOOL_BUILD, {"name": name, "path": path})
     return build
 

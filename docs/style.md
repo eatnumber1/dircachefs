@@ -344,7 +344,7 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
 - `third_party/<name>/` holds only what we write for a pin (BUILD overlay,
   patches, config, lock files) and a `README.md` with a "Pin" section
   (version, URL, sha256, how the sha256 was obtained, date) and an
-  "Updating the pin" procedure (`third_party/busybox/README.md`).
+  "Updating the pin" procedure (`third_party/tlaplus/README.md`).
   Third-party code is fetched by Bazel: the Bazel Central Registry
   (`bazel_dep`), else `http_archive`/`http_file` with a sha256.
   The exception is Alpine's packages (Phase 24), which have no sha256 and no
@@ -367,9 +367,9 @@ sections show; check the flags against the guide's examples when 7.6 pins
 shfmt), run by `//tools:format_test`; shellcheck is pinned in the same step
 (7.6). Our additions and narrowings:
 - **Host-side scripts are bash**: `#!/bin/bash`, then `set -euo pipefail`
-  (our narrowing; the guide only says to use `set` flags sparingly). 7 do
+  (our narrowing; the guide only says to use `set` flags sparingly). 8 do
   today (`.github/ci/*`, `formal/trace_validate.sh`,
-  `tools/tool_identity_test.sh`).
+  `third_party/alpine/tools_test.sh`, `third_party/alpine/busybox_test.sh`).
 - **One documented deviation: scripts that run inside the busybox guest**
   (`test/qemu/guest/*`, `guest/init`) are POSIX `sh` (`#!/bin/sh`: no
   `[[`, arrays, `local` or `function`; `[ ]`, `$(...)`), because the guest
@@ -391,9 +391,13 @@ shfmt), run by `//tools:format_test`; shellcheck is pinned in the same step
 ## 5. Python
 
 - Google Python Style Guide, 80 columns; a formatter pinned through Bazel
-  joins `//tools:format_test` in phase 7. Only `tools/` and `man/` use
-  Python (6 files): Python 3.12 from the hermetic `rules_python`
-  toolchain, standard library only.
+  joins `//tools:format_test` in phase 7. Python is host-side tooling and
+  tests, 13 files: `tools/sbom/` (2), `tools/man/` (1), `man/` (2),
+  `third_party/alpine/` (2: `apk.py`, `signature_test.py`),
+  `third_party/debian/scripts/` (3: `mkrootfs.py` and its two tests),
+  `third_party/linux/kernel_config_test.py` and `test/qemu/scripts/`
+  (`mkmodules.py` and its test). Python 3.12 from the hermetic
+  `rules_python` toolchain, standard library only.
 - A module docstring says what the file does and its plan step
   (`tools/sbom/sbom.py:1`); `argparse` for a command line; `main(argv)`
   returns the exit code, called as `sys.exit(main(sys.argv[1:]))`.
@@ -467,11 +471,11 @@ line length, shellcheck findings, quoting) were not surveyed.
 | C8 | Syscall message: `name(args)` or bare name | 2: `main.cc:191,323` | `grep -rnE 'ErrnoToStatus\(.*"[a-z_0-9]+ "' dcfs --include='*.cc'` |
 | C9 | `syscalls::` only in `backing.cc` and the listed peers | `mounts_below.cc:77,95` is not in `docs/design.md`'s list (add it there or route through `backing.cc`) | `grep -rln 'syscalls::' dcfs --include='*.cc' --include='*.h' \| grep -v -e _test -e testonly` |
 | C10 | Raw libc only in `syscalls.cc` | 8: `device_id.cc:126,140,144,148,150`, `main.cc:180,321,325` | `grep -nE '(^\|[^_a-zA-Z:.])(::)?(ioctl\|fstatfs\|open\|close\|stat\|mkdir)\(' dcfs/device_id.cc dcfs/main.cc` |
-| C11 | Google shell: 2-space indent, no tabs (4) (7.6) | 48 scripts use tabs (all guest scripts but a few wrappers, most host scripts); 5 use spaces and conform (`formal/trace_validate.sh`, `tools/smoke_readonly.sh`, `tools/tool_identity_test.sh`, `tools/format.sh`, `.github/ci/osv.sh`) | `grep -lP '^\t' $(git ls-files '*.sh' test/qemu/guest/init)` |
+| C11 | Google shell: 2-space indent, no tabs (4) (7.6) | 48 scripts use tabs (all guest scripts but a few wrappers, most host scripts); 4 use spaces and conform (`formal/trace_validate.sh`, `tools/smoke_readonly.sh`, `tools/format.sh`, `.github/ci/osv.sh`), as do the new `third_party/alpine/*.sh` | `grep -lP '^\t' $(git ls-files '*.sh' test/qemu/guest/init)` |
 | SH1 | Host-side scripts are bash (4) (7.6) | 19 of 26 host-side scripts are `#!/bin/sh` (`third_party/*` build and smoke helpers, `test/qemu/scripts/`, `tools/`); each becomes `#!/bin/bash` with `set -euo pipefail` (all 19 already have `set -eu`) | `grep -L '^#!/bin/bash' $(git ls-files '*.sh' \| grep -v test/qemu/guest/)` |
 | SH2 | Google shell: 80 columns (4) (7.6) | 246 lines over 80 in 48 scripts (measured with a tab as 2 columns; 375 lines in 54 scripts with a tab as 8) | `grep -nE '^.{81,}$' $(git ls-files '*.sh')` after expanding tabs (`expand -t2`) |
 | SH3 | A script with functions has `main` (4) (7.6) | 40 scripts define functions, 0 define `main` | `grep -L '^main()' $(grep -lE '^[a-z_]+\(\) \{' $(git ls-files '*.sh'))` |
-| SH4 | Bash scripts use `[[ ]]`, not `[ ]` (4) (7.6) | 13 `[ ... ]` tests in 3 bash scripts: `.github/ci/prepare.sh` 7, `tools/tool_identity_test.sh` 4, `.github/ci/test.sh` 2 | `grep -nE '(^\|[^[])\[ ' .github/ci/*.sh tools/tool_identity_test.sh` |
+| SH4 | Bash scripts use `[[ ]]`, not `[ ]` (4) (7.6) | 9 `[ ... ]` tests in 2 bash scripts: `.github/ci/prepare.sh` 7, `.github/ci/test.sh` 2 | `grep -nE '(^\|[^[])\[ ' .github/ci/*.sh` |
 | SH5 | shfmt formatting and shellcheck clean (4) (7.6) | not pinned, not run; the number of findings is unknown (no backtick command substitution: 0 of 63 scripts) | after pinning: `bazel test //tools:format_test` |
 | D1 | Markdown: fenced blocks declare a language (7) | 37 bare fences in 12 files (`README.md` 11, `test/qemu/README.md` 8, `tools/sbom/README.md` 3, `third_party/*` 12, `docs/design.md` 2, others) | `grep -rnE '^[`]{3}$' $(git ls-files '*.md' \| grep -v docs/plan/)` (opening and closing fences both match: halve) |
 | D2 | Markdown: 80-column wrap (7) | 21 prose lines over 80 in 9 files outside `docs/plan/` (`formal/README.md` 11, `test/qemu/README.md` 2, 7 `third_party` READMEs/`tools/sbom/README.md` 1 to 2 each); tables, headings, links exempt | `grep -nE '^.{81,}$' $(git ls-files '*.md' \| grep -v -e docs/plan/ -e .claude/) \| grep -v -e '\|' -e http -e '^[^:]*:[0-9]*:#'` |
@@ -480,7 +484,7 @@ line length, shellcheck findings, quoting) were not surveyed.
 | C14 | No unused include | `syscalls.h:21` (`absl/base/nullability.h`); others need F6 | `grep -n 'nullability\|absl_nonnull' dcfs/syscalls.h dcfs/syscalls.cc` |
 | C15 | Guest helpers shared in `lib.sh` | duplicated: `cleanup` 25, `normalize_stat` 5, `populate_tree`/`run_pass`/`expect_fail` 4 each, `start_daemon` 3, six more 2 each | `grep -hE '^[a-z_]+\(\) \{' test/qemu/guest/*.sh \| sort \| uniq -c \| sort -rn` |
 | C16 | Google: no using-directives | 1: `bench/dcfs_bench.cc:396` (`using namespace dcfs_bench;`) | `grep -rn 'using namespace' dcfs bench tools` |
-| P1 | Google Python: 80 columns (5) | 50 lines over 80: `sbom.py` 25, `sbom_test.py` 22, `tool_keys_test.py` 3 | `grep -nE '^.{81,}$' $(git ls-files '*.py')` |
+| P1 | Google Python: 80 columns (5) | 47 lines over 80: `sbom.py` 24, `sbom_test.py` 23 | `grep -nE '^.{81,}$' $(git ls-files '*.py')` |
 | N1 | Flat `dcfs`: remove `dcfs::cache` (1.3) (new) | 3 declarations (`metadata_cache.h/.cc/_test.cc`); 673 `cache::` uses (407 production) in 20 files. Clash if flattened: `ParentOf` (same parameters as `backing::ParentOf`, differing only in return type), `SetXattr`, `RemoveXattr` all also exist in `backing` (3 names: rename one side first) | `grep -rn 'namespace cache\|cache::' dcfs bench \| wc -l` |
 | N2 | Remove `dcfs::backing`: it folds into `dcfs` as free functions; the three clashing pairs get distinguishing names (e.g. `BackingSetXattr`); a wrapper class only if the clashes prove to be more than those three and renaming reads worse | 3 declarations; 147 uses (138 production) in 15 files; clashes: `ParentOf`, `SetXattr`, `RemoveXattr` (same 3 names as N1) | `grep -rn 'namespace backing\|backing::' dcfs bench \| wc -l` |
 | N3 | Remove `dcfs::testonly` | 8 declarations (all in `dcfs/testonly/`); 4 uses | `grep -rn 'namespace testonly\|testonly::' dcfs bench` |

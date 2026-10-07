@@ -5,7 +5,8 @@
 # the checked-in profile), mkfs.xfs and mkfs.btrfs, and busybox. Versions are
 # only checked for their shape: the branch decides them.
 #
-# Usage: tools_test.sh QEMU MKE2FS DEBUGFS MKFS_XFS MKFS_BTRFS BUSYBOX MKE2FS_CONF
+# Usage: tools_test.sh QEMU MKE2FS DEBUGFS MKFS_XFS MKFS_BTRFS BUSYBOX \
+#                      MKE2FS_CONF
 set -euo pipefail
 
 FAILED=0

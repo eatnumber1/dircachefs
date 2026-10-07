@@ -57,7 +57,8 @@ def modules_cpio(modules):
             cmd = " ".join([
                 "$(location //test/qemu:mkmodules_bin)",
                 # The package's root directory is two levels above the image.
-                "--root \"$$(dirname \"$$(dirname \"$(location //third_party/linux:vmlinuz)\")\")\"",
+                "--root \"$$(dirname \"$$(dirname \"$(location " +
+                "//third_party/linux:vmlinuz)\")\")\"",
                 "--out $@",
             ] + modules),
             tools = ["//test/qemu:mkmodules_bin"],
