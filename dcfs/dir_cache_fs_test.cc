@@ -5653,5 +5653,38 @@ TEST(SlopeTest, AnExtraCostPerOperationIsCaught) {
                           "create n=100: steps 8403 > 82 * n + 3");
   EXPECT_FALSE(within);
 }
+
+// Without passthrough for a file (the harness's passthrough_open fails:
+// ENOTTY), the kernel sends READ and dcfs serves it from the backing file.
+TEST_F(DirCacheFSTest, ReadWithoutPassthroughReadsTheBackingFile) {
+  WriteFile(Path("f"));
+  AppendToFile(Path("f"), "hello world");
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  struct fuse_open_out out {};
+  ASSERT_GE(open.payload.size(), sizeof(out));
+  std::memcpy(&out, open.payload.data(), sizeof(out));
+  EXPECT_EQ(out.backing_id, 0);
+  auto fuse_read = [&](uint64_t offset, uint32_t size) {
+    struct fuse_read_in in = {};
+    in.fh = fh;
+    in.offset = offset;
+    in.size = size;
+    return Send(FUSE_READ, static_cast<uint64_t>(f), FuseBody(in));
+  };
+  Reply middle = fuse_read(6, 5);
+  EXPECT_EQ(middle.error, 0);
+  EXPECT_EQ(middle.payload, "world");
+  Reply whole = fuse_read(0, 4096);
+  EXPECT_EQ(whole.error, 0);
+  EXPECT_EQ(whole.payload, "hello world");
+  Reply past_end = fuse_read(100, 10);
+  EXPECT_EQ(past_end.error, 0);
+  EXPECT_EQ(past_end.payload, "");
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
 }  // namespace
 }  // namespace dcfs
