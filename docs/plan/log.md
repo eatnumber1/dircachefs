@@ -1517,3 +1517,22 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Interrupt); the plan's 12.7 reply check (errnos, mutation results vs the backing between call
   and reply) is not implemented: implement or record as 12.7b; CacheLearnsAtCommit onto traces.
   Sent with 12.6b to lane-1.
+- 11.1 merged (ba7687d): fault_lib.sh over dm-flakey/dm-error (healthy/error-writes/drop-writes/
+  error-reads/error-io/dead, switched live), Alpine dmsetup (420 KB) in the e2e initramfs,
+  fault_selftest (6 checks fail with injection stubbed), fault_backing/fault_cache/fault_power
+  tests (cuts at each create phase and a sync point via fsfreeze, both disks dropping writes),
+  all under the checking build, plain + ASan + UBSan: NO violation. Finding: a cache-disk I/O
+  error reaches the caller as EAGAIN (SQLITE_IOERR -> UNAVAILABLE): decided EIO (11.1b, lane-5),
+  then 11.2 (ACE workloads, real-kill variants, the fs matrix).
+- 26.6 + 26.4b done in lane-3 (pending rebase/merge): 26.6 = 12 workloads, 49 call sites, 111
+  iterations (EIO + the branched errnos), CheckAll + unclean Startup + CheckAll after each, no
+  finding, 16-27 s in the guest, fast tier +4 s (kept: "seconds"); 26.4b = ProtocolEvents the
+  single testonly observer (events, checks, counters; Context::checks gone), counters replace the
+  VLOG step counting (budgets identical), request budgets (ls -l 100 = 1 LOOKUP + 1 OPENDIR + 6
+  READDIRPLUS; cat = 1 LOOKUP + 1 OPEN; stat 10 deep = 12 LOOKUPs), slope tests exactly linear:
+  create 82N+3 steps / 7N transactions / N+1 WAL fsyncs / 14N+64 backing calls; mkdir 48N+3 / 3N /
+  1 fsync; unlink 38N / 4N / N; rename 59N / 4N / N; setattr 35N / 3N / N; cold lookup 20N+16.
+  FINDING for the design (Needs russ): create, unlink, rename and setattr fsync ONCE PER
+  OPERATION (each names an inode not yet durably dirty, so its phase 1 commits durably); only
+  mkdir gets one per sync point; design.md's "a burst of creates costs one WAL fsync" is true for
+  mkdir only; destroy_test's 5 ms per create is this fsync.
