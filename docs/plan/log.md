@@ -784,3 +784,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (4) the failed GitHub `fast` job (log from russ).
 - russ (2026-10-07): mkrootfs approved (extract + `mke2fs -d dir` + debugfs for ownership; no host
   symlink following); `gh` will be installed after the reboot: use it to read the failed `fast` job.
+- Back after the reboot (2026-10-07): 62 GB RAM, 4 cores; lane caps raised (memory=14000,
+  local_test_jobs=3, Xmx3g; jobs=2 stays, CPU is the limit). GitHub run on 95595f3: `fast` failed to
+  BUILD (61 tests) because xfsprogs and btrfs-progs need `uuid/uuid.h`, present on the dev host
+  (libuuid-dev) but not on the runner: a hermeticity leak in the util-linux wiring; KVM was available
+  (DCFS_CI_KVM=1); 22 tests passed. Decision: 24.3 (Alpine tools) removes those builds and is the
+  fix; CI stays red until it merges. Dispatched: lane-1 Phase 23 final fixes (cap-0 warning,
+  BeginAttrChanges NotFound, lib.sh applet check, rebase over 6.2 with measured asan_mem); reviewer
+  on 24.1/24.2 (read via git, not the working tree); lane-2 24.3 (mkrootfs approved, util-linux
+  dropped).
