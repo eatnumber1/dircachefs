@@ -688,12 +688,14 @@ qemu_cc_test(
     name = "dir_cache_fs_test",
     size = "small",
     timeout = "moderate",  # the 1000-entry readdir work tests under ASan
-    # Under ASan it peaks at 612 MiB in use (MEM peak_used=627652 KiB of
-    # total=929580 at -m 960, 2026-10-07; 383 MiB without the 1000-entry
-    # ReaddirWorkTest, whose allocation churn fills ASan's 256 MiB
-    # quarantine): with the kernel's 18.5 MiB, 631 + 50% rounds up to 960
-    # (test/qemu/README.md, "Guest memory").
-    asan_mem = 960,
+    # Under ASan it peaks at 687 MiB in use (MEM peak_used=703940 KiB of
+    # total=1251628 at -m 1280, 2026-10-08, with step 26.2's invariant
+    # checker, whose death tests keep a forked child resident beside the
+    # parent; 612 MiB before it, 383 without the 1000-entry ReaddirWorkTest,
+    # whose allocation churn fills ASan's 256 MiB quarantine): with the
+    # kernel's 18.5 MiB, 706 + 50% rounds up to 1088 (test/qemu/README.md,
+    # "Guest memory").
+    asan_mem = 1088,
     srcs = ["dir_cache_fs_test.cc"],
     disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
     linkopts = DIR_CACHE_FS_TEST_WRAPS,

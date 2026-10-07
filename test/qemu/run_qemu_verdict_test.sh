@@ -279,4 +279,22 @@ echo "PASS: --expect-kernel-failure is refused for unit tests"
 [ "$(guest_timeout TEST_TIMEOUT=900 TIMEOUT=77)" = 77 ] || fail "TIMEOUT=77 did not win"
 [ "$(guest_timeout TEST_TIMEOUT=60)" = 30 ] || fail "a TEST_TIMEOUT of 60 s did not give half of it"
 echo "PASS: the guest timeout follows TEST_TIMEOUT less 60 s, else 1800, and TIMEOUT wins"
+# Step 26.2: a unit test (--unit) keeps the 60 s default unless its target's
+# TEST_TIMEOUT gives more (moderate: 300 s, less 60).
+unit_timeout() {
+	: >"$WORK/extra"
+	canned
+	rm -f "$WORK/out/serial.log"
+	RC=0
+	env -u TEST_TIMEOUT -u TIMEOUT "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
+		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
+		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
+		"$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
+	sed -n 's/^run-qemu.sh: guest timeout \([0-9]*\) s.*/\1/p' "$WORK/stdout"
+}
+[ "$(unit_timeout TEST_TIMEOUT=60)" = 60 ] || fail "a short unit test did not keep 60 s: $(cat "$WORK/stdout")"
+[ "$(unit_timeout TEST_TIMEOUT=300)" = 240 ] || fail "a moderate unit test did not get 240 s: $(cat "$WORK/stdout")"
+[ "$(unit_timeout X=1)" = 60 ] || fail "a unit test without TEST_TIMEOUT did not get 60 s"
+echo "PASS: a unit test gets 60 s, or TEST_TIMEOUT less 60 s when that is more"
 echo "PASS: all checks passed"

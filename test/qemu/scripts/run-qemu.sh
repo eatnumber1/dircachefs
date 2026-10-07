@@ -400,6 +400,13 @@ case "${TEST_TIMEOUT:-}" in
 '' | *[!0-9]*) ;;
 *)
 	E2E_TIMEOUT=$((TEST_TIMEOUT > 120 ? TEST_TIMEOUT - 60 : TEST_TIMEOUT / 2))
+	# A unit test whose target asks for more than "short" gets it too
+	# (step 26.2: dir_cache_fs_test, with the invariant checker and its
+	# death tests, outgrew 60 s on a loaded host); never less than the
+	# default, so a "short" one keeps its 60 s.
+	if [ "$E2E_TIMEOUT" -gt "$UNIT_TIMEOUT" ]; then
+		UNIT_TIMEOUT=$E2E_TIMEOUT
+	fi
 	;;
 esac
 if [ "$UNIT" -eq 1 ]; then

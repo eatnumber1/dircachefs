@@ -267,6 +267,9 @@ where `TEST_TIMEOUT` is the seconds Bazel sets for the target's `timeout`
 (`eternal` is 3600), so the target's own `timeout` is the one knob and Bazel
 never kills the run before the guest's log is collected. Without it (a manual
 run) an e2e guest gets 1800 s (7200 under TCG) and a unit test 60 s (300).
+A unit test gets at least that 60 s (300): `TEST_TIMEOUT` less 60 only when
+that is more, so a `short` one (60) keeps 60 s and a `moderate` one gets
+240 (step 26.2).
 `TIMEOUT=<seconds>` in the environment overrides all of that
 (`--test_env=TIMEOUT=...` under Bazel).
 
