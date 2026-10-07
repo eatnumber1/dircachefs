@@ -1360,3 +1360,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   operation class (yes), allocations per op (maybe later), recovery/shutdown ad hoc, workload
   budgets (no); the VLOG-based step counting is replaced by a hook counter first. Testing stays
   process (presubmit before merge by the lanes; CI post-push), no git hook.
+- russ (2026-10-08): 26.4b reuses the protocol-event recorder for request-level accounting (FUSE
+  requests, phases, transactions per request = reductions of the trace); SQLite steps as a
+  counter on the same hook; the protocol-events and Context::checks hooks merge into one
+  testonly observer interface.

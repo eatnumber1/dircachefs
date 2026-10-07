@@ -75,12 +75,19 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
   `sqlite3_step:` text: it formats every statement, costs memory under
   ASan, slows the instrumented daemon, and depends on a log format) with
   a counter behind the no-op production hook interface the invariant
-  checker uses (`Context::checks`-style: one increment per step and per
-  transaction, nothing formatted, zero cost shipped). Then: (1) FUSE
-  requests per user-level operation: how many READDIRPLUS/GETATTR/LOOKUP/
-  OPEN the kernel sends for `ls -l` of N entries, `find`, `stat` of a path
-  N deep, `cat` of a file, counted from the daemon's request accounting
-  (same hook), budgeted like 26.4; (2) slope tests for every operation
+  checker uses, and that is the protocol-event recorder's (russ,
+  2026-10-08: reuse the trace-validation instrument): the recorder
+  already sees every request, phase, fill, sync point, FORGET, RELEASE,
+  open and lifetime step, so request-level accounting is a reduction of
+  the trace a test already produces; SQLite steps (below the protocol,
+  hundreds per op) become a counter method on the same hook object, not
+  trace lines; and the two testonly hooks that now exist (protocol
+  events, `Context::checks`) merge into one observer interface with one
+  no-op in the plain build. Then: (1) FUSE requests per user-level
+  operation: how many READDIRPLUS/GETATTR/LOOKUP/OPEN the kernel sends
+  for `ls -l` of N entries, `find`, `stat` of a path N deep, `cat` of a
+  file, counted from the trace's request events, budgeted like 26.4;
+  (2) slope tests for every operation
   class, not only readdir: create N, unlink N, rename N, mkdir N, cold
   lookup N, setattr N, each bounded a*N + b in SQLite steps, transactions
   and backing syscalls at N = 100 and 1000 in the harness (the create
