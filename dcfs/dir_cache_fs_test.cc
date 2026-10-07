@@ -1969,7 +1969,7 @@ TEST_F(RelatimeTest, NoatimeBackingNeverUpdates) {
 // RecordProperty below; lowering them after a reduction is welcome.
 // (In tenths: steps * 10 <= per_entry * n + fixed.)
 constexpr int64_t kReaddirStepsPerEntry = 14;      // measured 1.17 to 1.30
-constexpr int64_t kReaddirplusStepsPerEntry = 29;  // measured 2.50 to 2.80
+constexpr int64_t kReaddirplusStepsPerEntry = 14;  // measured 1.26 to 1.40
 constexpr int64_t kReaddirStepsFixed = 100;
 
 // --- readdir work counting (step N4) ----------------------------------------

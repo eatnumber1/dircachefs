@@ -180,8 +180,13 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
 
 // ListDir, handing each entry's valid attributes to the callback too: one
 // join instead of a GetAttr per entry.
+//
+// `batch_rows` (at most 64, the default) is how many rows each query
+// reads: a caller that can use only a few (a reply that holds 25 entries)
+// asks for about that many instead of paying for 64; more are read, a
+// batch at a time, if the callback keeps going.
 absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
-                     ListDirAttrsCallback cb);
+                     ListDirAttrsCallback cb, int64_t batch_rows = 64);
 
 // Whether `dir`'s listing is complete: every name without a row is absent
 // (children_complete; a missing directories row counts as incomplete).

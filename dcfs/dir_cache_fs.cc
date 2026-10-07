@@ -1896,6 +1896,10 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
     if (complete) {
       std::vector<Listed> listed;
       size_t used = 0;
+      // Rows to read per query: what a reply of `budget` bytes can hold at
+      // the smallest entry (a one-byte name), not the cache's usual 64.
+      const size_t smallest = entry_size("a");
+      const int64_t rows = static_cast<int64_t>(budget / smallest) + 1;
       ABSL_RETURN_IF_ERROR(cache::ListDir(
           ctx_, dir, cursor,
           [&](std::string_view name, InodeId child, int64_t next_cursor,
@@ -1912,7 +1916,8 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
                                           : std::nullopt});
             used += size;
             return true;
-          }));
+          },
+          rows));
       return listed;
     }
     if (attempt == kAttempts) break;

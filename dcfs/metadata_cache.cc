@@ -333,7 +333,8 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
 }
 
 absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
-                     ListDirAttrsCallback cb) {
+                     ListDirAttrsCallback cb, int64_t batch_rows) {
+  const int64_t limit = std::clamp<int64_t>(batch_rows, 1, kListDirBatch);
   struct Entry {
     int64_t rowid;
     std::string name;
@@ -366,7 +367,7 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
               "JOIN stubs s ON s.parent = d.parent AND s.name = d.name "
               "WHERE d.parent = ?1 AND d.rowid > ?2 AND d.state = 'refused' "
               "ORDER BY 1 LIMIT ?3",
-              dir, cursor, kListDirBatch));
+              dir, cursor, limit));
     ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) -> absl::Status {
       Entry entry{row.Column<int64_t>(0), row.Column<std::string>(1),
                   row.Column<int64_t>(2), std::nullopt};
@@ -385,7 +386,7 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
                         entry.attr.has_value() ? &*entry.attr : nullptr));
       if (!more) return absl::OkStatus();
     }
-    if (static_cast<int64_t>(batch.size()) < kListDirBatch) {
+    if (static_cast<int64_t>(batch.size()) < limit) {
       return absl::OkStatus();
     }
     cursor = batch.back().rowid;
