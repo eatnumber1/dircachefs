@@ -377,7 +377,6 @@ class TraceRecorder final : public ProtocolEvents {
   void Fill(Context &ctx, Ino dir, int64_t mark, bool filled);
   // Notes a phase1 (begun) or end line of `dir`.
   void MutationLine(Ino dir, bool begun);
-  int64_t changes_ = -1;    // sqlite3_total_changes at the last check
 
   // The files' traces (formal/reval.tla).
   struct FileTrace {

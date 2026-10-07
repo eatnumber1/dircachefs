@@ -15,6 +15,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "absl/status/status_matchers.h"

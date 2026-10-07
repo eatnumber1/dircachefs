@@ -1,0 +1,17 @@
+liburing's generate_headers genrule cd's into the package directory before
+running ./configure, so a CC given relative to the execroot (the hermetic
+clang's cc_wrapper.sh) is not found there and every feature probe fails
+("has_idtype_t no", and the generated compat.h then redefines idtype_t).
+Make CC absolute first.
+
+--- a/BUILD.bazel	2026-10-06 22:19:31.553231948 -0700
++++ b/BUILD.bazel	2026-10-06 22:19:31.559232025 -0700
+@@ -20,7 +20,7 @@
+         "src/include/liburing/io_uring_version.h",
+     ],
+     cmd = """
+-            export CC=$(CC) CXX=$(CC)++
++            export CC=$$PWD/$(CC) CXX=$$PWD/$(CC)++
+ 
+             # switch to the package dir to execute "configure" right there
+             pushd $$(dirname $(location configure))

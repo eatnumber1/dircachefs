@@ -1,0 +1,16 @@
+The cc_wrapper.sh response-file loop drops a last line that has no trailing
+newline, and ninja's (and meson's) response files have none, so the linker
+got an empty file and failed with "clang: error: no input files" (QEMU's
+final link, step 7.1).
+
+--- a/toolchain/cc_wrapper.sh.tpl	2026-10-06 23:57:56.157347214 -0700
++++ b/toolchain/cc_wrapper.sh.tpl	2026-10-06 23:57:56.162347281 -0700
+@@ -131,7 +131,7 @@
+     # Create a new, sanitized file.
+     tmpfile=$(mktemp)
+     CLEANUP_FILES+=("${tmpfile}")
+-    while IFS= read -r opt; do
++    while IFS= read -r opt || [[ -n ${opt} ]]; do
+       opt="$(
+         set -e
+         sanitize_option "${opt}"

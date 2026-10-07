@@ -5,7 +5,7 @@
 set -eu
 
 info=$1
-expected_version="23.1.2"
+expected_version="22.1.8"
 
 if ! grep -q "^CC=.*llvm_toolchain" "$info"; then
 	echo "FAIL: the compiler is not from @llvm_toolchain:" >&2
