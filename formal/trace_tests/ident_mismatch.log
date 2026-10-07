@@ -1,0 +1,6 @@
+DCFS-IDENT t 2 {"i":1,"c":"LifetimeChanged","ev":"begin","st":{"row":true}}
+DCFS-IDENT t 2 {"i":2,"c":"LifetimeChanged","ev":"reply","via":"lookup","fgen":"3540385141","st":{"row":true,"lk":1}}
+DCFS-IDENT t 2 {"i":3,"c":"LifetimeChanged","ev":"reply","via":"dot","fgen":"3540385141","st":{"row":true,"lk":2}}
+DCFS-IDENT t 2 {"i":4,"c":"IdentityResolved","ev":"resolve","outcome":"mismatch","ino":"same","gen":"other","bt":"same","st":{"row":true}}
+DCFS-IDENT t 2 {"i":5,"c":"InodeForgotten","ev":"gone","st":{"row":false}}
+DCFS-IDENT t 2 {"i":8,"c":"LifetimeChanged","ev":"forget","st":{"row":false,"lk":0}}

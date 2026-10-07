@@ -1074,6 +1074,7 @@ qemu_cc_test(
       ":metadata_cache",
       ":migrate",
       ":mount_fds",
+      ":protocol_events",
       ":sqlite",
       ":status",
       ":syscalls",

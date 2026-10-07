@@ -1539,3 +1539,63 @@ name, a recycling between the statx and both identity reads goes
 unnoticed in either order (only the birth time, from the statx, would
 catch it); one between the two identity reads is caught in either order.
 The design doc now gives the code's order and this reason.
+
+### Trace validation of identities
+
+`IdentTrace.tla` validates one nodeid's identity trace against
+`ident.tla`, as `LifetimeTrace.tla` does its lifetime (same validator,
+same depth rule). The recorder writes these traces only when made with
+`identities` (the forged-request harness's `StartTrace()` does; the
+guests' recorder does not), on lines `DCFS-IDENT <trace> <nodeid> <json>`.
+A trace begins at the entry reply dcfs counts first; a stub's nodeid is not
+traced.
+
+| Line | From | Model step (`IdentTrace.tla`) |
+|---|---|---|
+| `reply` (`via`, `fgen`) | `LifetimeChanged` `kLookup`, `kCreated`, `kTmpfile`: an entry reply; `fgen`, the generation it carried, is the row's (read from the database: nothing writes it between `EntryFor` and the event) | `T_IdReply`: the row exists and never went in this trace (no nodeid is handed out twice: `AUTOINCREMENT`), and every reply carries the same generation (`NoBadInode`) |
+| `forget` | `kForgot`, `kForgotInBatch` | `T_IdForget` |
+| `resolve` (`outcome`; `ino`, `gen`, `bt`) | `IdentityResolved`, the event added for this model: `OpenNode`'s decision (`served`, `stale_handle`, `mismatch`), and whether the inode number, generation and birth time of the object reached are the row's (`same`), another (`other`), or `unknown` (0 on either side) | `T_IdResolve`: `served` exactly when `ident.tla`'s identity check (`SameObject`, or anything with `BugSkipVerify`) says the reached object is the row's; a stale or mismatched reopen makes the row go next |
+| `gone` | `InodeForgotten` | `T_IdGone` |
+| `destroy`, `crash`, `restart`, `start` | `Destroyed`, `RunStarting`, `RunStarted` | `T_IdRun`: the kernel holds no inode any more; the row stays |
+
+Every line carries whether the nodeid has a row (`st.row`) and, at a
+reply or `FORGET`, dcfs's lookup count (`lk`), which the model's state must
+equal. Why the event was added: nothing else observed a reopen's outcome.
+A stale or mismatched reopen deletes the row (`InodeForgotten`), but that
+event does not say why, and a served reopen had no event at all. The rest
+maps onto existing events. What stays model-only: the backing objects and
+their recycling (a stale handle's object freed or recycled is free in the
+trace), the generations themselves (the trace sees only whether two are
+equal), the NFS client's handles and the kernel's generation comparison,
+power losses and wipes (no harness test makes one).
+
+A scenario whose invalidation of a row behind the other models' backs
+would end their traces (a step neither `dcfs.tla` nor `lifetime.tla` nor
+`reval.tla` has) records only identity traces
+(`StartTrace(/*identities_only=*/true)`: the recorder made without
+`directories`, `files` and `lifetimes`). The scenarios written for this
+model are `IdentityCheckRefusesAnotherObjectBehindTheHandle` (the row's
+recorded generation made not the object's, as a recycling behind dcfs's
+back looks where the handle carries no generation: the reopen is
+`mismatch`, the row goes, the nodeid's `LOOKUP(".")` gets `ESTALE`, the
+name a new nodeid and generation) and
+`OutOfBandReplacementGetsEstaleFromItsHandle` (the file unlinked and
+created again behind dcfs's back: `stale_handle`). `formal/trace_tests/`
+keeps them as `ident_mismatch.log` and `ident_stale_handle.log`
+(`//formal:trace_ident_stale_handle_test`: valid), and
+`//formal:trace_ident_mismatch_test` checks it against the real model
+(valid) and `//formal:trace_ident_mismatch_skip_identity_statx_test`
+against `known_bugs/ident_skip_identity_statx` as the model
+(`--ident-cfg`, `trace_tests/ident_skip_identity_statx.cfg`), which must
+reject it at the `mismatch` reopen:
+
+```
+trace_validate.sh: rejected: ident/t@2: the model explains 2 of 5 events; the first it cannot (event 3):
+  {"i":4,"c":"IdentityResolved","ev":"resolve","outcome":"mismatch","ino":"same","gen":"other","bt":"same","st":{"row":true}}
+```
+
+The gaps: the guest recorder writes no identity traces, so the real
+kernel's `LOOKUP(".")` reconnections and its NFS handles are checked only
+by `handles_test` and `nfs_test`, not against the model; no traced run has
+a power loss, a wipe or a recycling the handle does not show (the harness
+fakes one by changing the row's recorded generation).

@@ -322,6 +322,8 @@ IDENT_LIMITATIONS = {
 # //test/qemu, next to the guests that record the traces).
 exports_files(
     [
+        "IdentTrace.cfg",
+        "IdentTrace.tla",
         "LifetimeTrace.cfg",
         "LifetimeTrace.tla",
         "RevalTrace.cfg",
@@ -329,6 +331,7 @@ exports_files(
         "Trace.cfg",
         "Trace.tla",
         "dcfs.tla",
+        "ident.tla",
         "lifetime.tla",
         "reval.tla",
         "trace_validate.sh",
@@ -530,4 +533,41 @@ LIFE_TRACE_TESTS = {
         log = "trace_tests/%s.log" % log,
     )
     for test, (log, cfg, event) in LIFE_TRACE_TESTS.items()
+]
+
+# IdentTrace.tla's own tests: a nodeid's identity trace recorded by
+# //dcfs:dir_cache_fs_trace_test (trace_tests/ident_*.log), checked against
+# ident.tla and against its known-bug variants as the model
+# (trace_tests/ident_<bug>.cfg). Each entry: the log, the variant (None:
+# the real model), and the event the first rejection must be at (None: the
+# trace must be valid).
+IDENT_TRACE_TESTS = {
+    # IdentityCheckRefusesAnotherObjectBehindTheHandle: a lookup, a
+    # LOOKUP(".") answered from the row, a reopen that reaches an object
+    # whose generation is not the row's (mismatch), the row gone, the last
+    # FORGET: valid; with the identity statx skipped after
+    # open_by_handle_at, that reopen would have been served: rejected there.
+    "ident_mismatch": ("ident_mismatch", None, None),
+    # OutOfBandReplacementGetsEstaleFromItsHandle: a lookup, a reopen whose
+    # handle is stale (the file replaced behind dcfs's back), the row gone,
+    # the last FORGET: valid.
+    "ident_stale_handle": ("ident_stale_handle", None, None),
+    "ident_mismatch_skip_identity_statx": (
+        "ident_mismatch",
+        "ident_skip_identity_statx",
+        "\"ev\":\"resolve\",\"outcome\":\"mismatch\"",
+    ),
+}
+
+[
+    tla_trace_log_test(
+        name = "trace_%s_test" % test,
+        size = "small",
+        timeout = "short",
+        expect_reject = "ident/t@2" if event else "",
+        expect_reject_event = event or "",
+        ident_cfg = "trace_tests/%s.cfg" % cfg if cfg else None,
+        log = "trace_tests/%s.log" % log,
+    )
+    for test, (log, cfg, event) in IDENT_TRACE_TESTS.items()
 ]

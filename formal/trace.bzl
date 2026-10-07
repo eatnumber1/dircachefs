@@ -5,7 +5,8 @@ initramfs whose test installs dcfs/testonly's recorder, or the traced e2e
 initramfs, //test/qemu:initramfs_traced, running a guest script), then runs
 formal/trace_validate.sh: it collects the traces from the serial log and
 checks each with TLC against formal/Trace.tla (a file's trace against
-formal/RevalTrace.tla, a nodeid's against formal/LifetimeTrace.tla). TLC
+formal/RevalTrace.tla, a nodeid's against formal/LifetimeTrace.tla and
+formal/IdentTrace.tla). TLC
 runs on the host on the pinned JDK; the guest under the pinned QEMU and
 kernel, exactly as qemu_test/qemu_cc_test run them
 (test/qemu/scripts/run-qemu.sh).
@@ -114,6 +115,9 @@ def _tla_trace_test_impl(ctx):
         ctx.file._life_trace_tla,
         ctx.file._life_trace_cfg,
         ctx.file._lifetime_tla,
+        ctx.file._ident_trace_tla,
+        ctx.file._ident_trace_cfg,
+        ctx.file._ident_tla,
     ]
     runfiles = ctx.runfiles(files = files, transitive_files = runtime.files)
     for dep in [ctx.attr._qemu, ctx.attr._mke2fs, ctx.attr._mkfs_xfs, ctx.attr._mkfs_btrfs]:
@@ -189,6 +193,9 @@ _tla_trace_test = rule(
         "_life_trace_tla": attr.label(default = "//formal:LifetimeTrace.tla", allow_single_file = True),
         "_life_trace_cfg": attr.label(default = "//formal:LifetimeTrace.cfg", allow_single_file = True),
         "_lifetime_tla": attr.label(default = "//formal:lifetime.tla", allow_single_file = True),
+        "_ident_trace_tla": attr.label(default = "//formal:IdentTrace.tla", allow_single_file = True),
+        "_ident_trace_cfg": attr.label(default = "//formal:IdentTrace.cfg", allow_single_file = True),
+        "_ident_tla": attr.label(default = "//formal:ident.tla", allow_single_file = True),
         "_run_qemu": attr.label(
             default = "//test/qemu:scripts/run-qemu.sh",
             allow_single_file = True,
@@ -287,6 +294,8 @@ def _tla_trace_log_test_impl(ctx):
         variant_cfgs += ["--reval-cfg", "$PWD/" + sp(ctx.file.reval_cfg)]
     if ctx.file.life_cfg:
         variant_cfgs += ["--life-cfg", "$PWD/" + sp(ctx.file.life_cfg)]
+    if ctx.file.ident_cfg:
+        variant_cfgs += ["--ident-cfg", "$PWD/" + sp(ctx.file.ident_cfg)]
     classpath = ":".join([
         "$PWD/" + sp(ctx.file._overrides),
         "$PWD/" + sp(ctx.file._jar),
@@ -338,9 +347,12 @@ def _tla_trace_log_test_impl(ctx):
         ctx.file._life_trace_tla,
         ctx.file._life_trace_cfg,
         ctx.file._lifetime_tla,
+        ctx.file._ident_trace_tla,
+        ctx.file._ident_trace_cfg,
+        ctx.file._ident_tla,
     ] + ([ctx.file.reval_cfg] if ctx.file.reval_cfg else []) + (
         [ctx.file.life_cfg] if ctx.file.life_cfg else []
-    )
+    ) + ([ctx.file.ident_cfg] if ctx.file.ident_cfg else [])
     return [DefaultInfo(
         executable = script,
         runfiles = ctx.runfiles(files = files, transitive_files = runtime.files),
@@ -374,6 +386,12 @@ tla_trace_log_test = rule(
                   "instead of LifetimeTrace.cfg (a known-bug variant of " +
                   "lifetime.tla as the model).",
         ),
+        "ident_cfg": attr.label(
+            allow_single_file = [".cfg"],
+            doc = "The configuration the nodeids' identity traces are " +
+                  "checked with instead of IdentTrace.cfg (a known-bug " +
+                  "variant of ident.tla as the model).",
+        ),
         "_validate": attr.label(default = "//formal:trace_validate.sh", allow_single_file = True),
         "_trace_tla": attr.label(default = "//formal:Trace.tla", allow_single_file = True),
         "_trace_cfg": attr.label(default = "//formal:Trace.cfg", allow_single_file = True),
@@ -384,6 +402,9 @@ tla_trace_log_test = rule(
         "_life_trace_tla": attr.label(default = "//formal:LifetimeTrace.tla", allow_single_file = True),
         "_life_trace_cfg": attr.label(default = "//formal:LifetimeTrace.cfg", allow_single_file = True),
         "_lifetime_tla": attr.label(default = "//formal:lifetime.tla", allow_single_file = True),
+        "_ident_trace_tla": attr.label(default = "//formal:IdentTrace.tla", allow_single_file = True),
+        "_ident_trace_cfg": attr.label(default = "//formal:IdentTrace.cfg", allow_single_file = True),
+        "_ident_tla": attr.label(default = "//formal:ident.tla", allow_single_file = True),
         "_overrides": attr.label(default = "//third_party/tlaplus:tlc_overrides", allow_single_file = True),
         "_jar": attr.label(default = "@tla2tools//file", allow_single_file = True),
         "_community_modules": attr.label(default = "@tla_community_modules//file", allow_single_file = True),

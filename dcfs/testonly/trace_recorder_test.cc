@@ -57,6 +57,7 @@ using ::testing::AllOf;
 using ::testing::Contains;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
+using ::testing::SizeIs;
 using ::testing::Not;
 using cache::InodeId;
 
@@ -124,10 +125,12 @@ class TraceRecorderTest : public ::testing::Test {
   }
 
   // Starts recording; every directory's trace begins now. With `files`,
-  // files' traces too; with `lifetimes`, nodeids' traces.
-  void StartTrace(bool files = false, bool lifetimes = false) {
-    recorder_ =
-        std::make_unique<TraceRecorder>(*fd_, "test", files, lifetimes);
+  // files' traces too; with `lifetimes`, nodeids' traces; with
+  // `identities`, nodeids' identity traces.
+  void StartTrace(bool files = false, bool lifetimes = false,
+                  bool identities = false, bool directories = true) {
+    recorder_ = std::make_unique<TraceRecorder>(
+        *fd_, "test", files, lifetimes, identities, directories);
     ctx_.events = recorder_.get();
     recorder_->BeginAll(ctx_);
   }
@@ -164,6 +167,11 @@ class TraceRecorderTest : public ::testing::Test {
   // The lines of nodeid `id`'s lifetime trace so far.
   std::vector<std::string> LifeLines(InodeId id) {
     return LinesWithPrefix(absl::StrCat("DCFS-LIFE test ", id, " "));
+  }
+
+  // The lines of nodeid `id`'s identity trace so far.
+  std::vector<std::string> IdentLines(InodeId id) {
+    return LinesWithPrefix(absl::StrCat("DCFS-IDENT test ", id, " "));
   }
 
   // A FUSE request of file `id` that ends with `status`.
@@ -747,6 +755,113 @@ TEST_F(TraceRecorderTest, LifetimeRemovalBatchDestroyAndRestartLines) {
   EXPECT_THAT(lines[7], AllOf(HasSubstr("\"ev\":\"start\""),
                               HasSubstr("\"st\":{\"row\":false,"
                                         "\"nl0\":false}")));
+}
+
+// --- Nodeids' identity traces (formal/ident.tla) ------------------------
+
+// An identity trace begins at the entry reply dcfs counts first, and only
+// with `identities`; each reply carries the generation the row has (as a
+// string: a uint32), each FORGET the lookups left, and a stub is not
+// traced.
+TEST_F(TraceRecorderTest, IdentityTraceRecordsRepliesAndForgets) {
+  ASSERT_OK_AND_ASSIGN(InodeId f, Make(70, S_IFREG | 0644));
+  ASSERT_OK_AND_ASSIGN(uint32_t gen, cache::GetGeneration(ctx_, f));
+  StartTrace(/*files=*/false, /*lifetimes=*/true, /*identities=*/false);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(1));
+  EXPECT_THAT(IdentLines(f), IsEmpty());
+
+  StartTrace(/*files=*/false, /*lifetimes=*/false, /*identities=*/true);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(1));
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(2));
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kOpened, 0, Kept(2, 1));
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kForgot, 2, Kept(0));
+  constexpr InodeId kStub = -5;
+  Step(*recorder_, ctx_, kStub, events::LifetimeStep::kLookup, 0, Kept(1));
+  EXPECT_THAT(IdentLines(kStub), IsEmpty());
+  const std::vector<std::string> lines = IdentLines(f);
+  ASSERT_EQ(lines.size(), 4u);
+  EXPECT_THAT(lines[0], AllOf(HasSubstr("\"ev\":\"begin\""),
+                              HasSubstr("\"st\":{\"row\":true}")));
+  const std::string reply = absl::StrCat(
+      "\"ev\":\"reply\",\"via\":\"lookup\",\"fgen\":\"", gen, "\"");
+  EXPECT_THAT(lines[1], AllOf(HasSubstr(reply),
+                              HasSubstr("\"st\":{\"row\":true,\"lk\":1}")));
+  EXPECT_THAT(lines[2], HasSubstr("\"st\":{\"row\":true,\"lk\":2}"));
+  EXPECT_THAT(lines[3], AllOf(HasSubstr("\"ev\":\"forget\""),
+                              HasSubstr("\"st\":{\"row\":true,\"lk\":0}")));
+}
+
+// A reopen by handle is a resolve line: its outcome, and how what it
+// reached compares with the row (the inode number, and the generation and
+// birth time where both sides know them); a row that goes is a gone line,
+// and DESTROY and a start are the run's lines.
+TEST_F(TraceRecorderTest, IdentityTraceRecordsResolutionsAndRowsGoing) {
+  ASSERT_OK_AND_ASSIGN(InodeId f, Make(71, S_IFREG | 0644));
+  StartTrace(/*files=*/false, /*lifetimes=*/false, /*identities=*/true);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(1));
+  recorder_->IdentityResolved(
+      ctx_, f,
+      {.outcome = events::IdentityCheck::Outcome::kServed,
+       .row_ino = 71, .row_gen = 0, .row_btime_sec = 1071,
+       .row_btime_nsec = 7, .found_ino = 71, .found_gen = 0,
+       .found_btime_known = true, .found_btime_sec = 1071,
+       .found_btime_nsec = 7});
+  recorder_->IdentityResolved(
+      ctx_, f,
+      {.outcome = events::IdentityCheck::Outcome::kMismatch,
+       .row_ino = 71, .row_gen = 5, .row_btime_sec = 1071,
+       .row_btime_nsec = 7, .found_ino = 71, .found_gen = 6,
+       .found_btime_known = true, .found_btime_sec = 1071,
+       .found_btime_nsec = 8});
+  recorder_->IdentityResolved(
+      ctx_, f,
+      {.outcome = events::IdentityCheck::Outcome::kMismatch,
+       .row_ino = 71, .row_gen = 5, .row_btime_sec = 1071,
+       .row_btime_nsec = 7, .found_ino = 72, .found_gen = 0,
+       .found_btime_known = false});
+  recorder_->IdentityResolved(
+      ctx_, f, {.outcome = events::IdentityCheck::Outcome::kStaleHandle,
+                .row_ino = 71});
+  ASSERT_THAT(cache::DeleteInode(ctx_, f), IsOk());
+  recorder_->Destroyed(ctx_);
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  recorder_->RunStarting(ctx_);
+  recorder_->RunStarted(ctx_);
+  const std::vector<std::string> lines = IdentLines(f);
+  ASSERT_EQ(lines.size(), 10u);
+  EXPECT_THAT(lines[2],
+              HasSubstr("\"ev\":\"resolve\",\"outcome\":\"served\","
+                        "\"ino\":\"same\",\"gen\":\"unknown\","
+                        "\"bt\":\"same\",\"st\":{\"row\":true}"));
+  EXPECT_THAT(lines[3],
+              HasSubstr("\"outcome\":\"mismatch\",\"ino\":\"same\","
+                        "\"gen\":\"other\",\"bt\":\"other\""));
+  EXPECT_THAT(lines[4],
+              HasSubstr("\"outcome\":\"mismatch\",\"ino\":\"other\","
+                        "\"gen\":\"unknown\",\"bt\":\"unknown\""));
+  EXPECT_THAT(lines[5], HasSubstr("\"outcome\":\"stale_handle\","));
+  EXPECT_THAT(lines[6], AllOf(HasSubstr("\"ev\":\"gone\""),
+                              HasSubstr("\"st\":{\"row\":false}")));
+  EXPECT_THAT(lines[7], HasSubstr("\"ev\":\"destroy\""));
+  EXPECT_THAT(lines[8], HasSubstr("\"ev\":\"crash\""));
+  EXPECT_THAT(lines[9], AllOf(HasSubstr("\"ev\":\"start\""),
+                              HasSubstr("\"st\":{\"row\":false}")));
+}
+
+// Without `directories`, no directory's trace is written (an identity
+// scenario's invalidation would cut them), and the other traces are.
+TEST_F(TraceRecorderTest, WithoutDirectoriesOnlyTheOtherTracesAreWritten) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 72));
+  ASSERT_OK_AND_ASSIGN(InodeId f, Make(73, S_IFREG | 0644));
+  ASSERT_THAT(cache::LinkDentry(ctx_, d, "f", f), IsOk());
+  StartTrace(/*files=*/false, /*lifetimes=*/true, /*identities=*/true,
+             /*directories=*/false);
+  Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(1));
+  ASSERT_THAT(cache::DeleteInode(ctx_, f), IsOk());
+  Tick();
+  EXPECT_THAT(LinesWithPrefix("DCFS-TRACE "), IsEmpty());
+  EXPECT_THAT(IdentLines(f), SizeIs(3));
+  EXPECT_THAT(LifeLines(f), SizeIs(2));
 }
 
 }  // namespace

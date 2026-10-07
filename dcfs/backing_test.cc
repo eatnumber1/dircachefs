@@ -43,6 +43,7 @@
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
 #include "dcfs/mount_fds.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -348,6 +349,69 @@ TEST_F(BackingTest, OpenNodeRejectsARecycledInode) {
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "file"),
               IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
+}
+
+// Records the identity checks OpenNode reports (ProtocolEvents::
+// IdentityResolved), for the identity model's trace validation.
+class IdentityChecks final : public ProtocolEvents {
+ public:
+  void IdentityResolved(Context &, events::Ino id,
+                        const events::IdentityCheck &check) override {
+    checks.emplace_back(id, check);
+  }
+  std::vector<std::pair<events::Ino, events::IdentityCheck>> checks;
+};
+
+// Every reopen by handle reports what it reached: the row's object
+// (served), another object with the row's inode number (here: a row whose
+// recorded generation is not the object's, as after a recycling the handle
+// does not show), or nothing (the handle is stale: the object was freed).
+TEST_F(BackingTest, OpenNodeReportsItsIdentityCheck) {
+  ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, file));
+  IdentityChecks events;
+  ctx_.events = &events;
+
+  ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
+  ASSERT_EQ(events.checks.size(), 1u);
+  EXPECT_EQ(events.checks[0].first, file);
+  const events::IdentityCheck &served = events.checks[0].second;
+  EXPECT_EQ(served.outcome, events::IdentityCheck::Outcome::kServed);
+  EXPECT_EQ(served.row_ino, attr.backing_ino);
+  EXPECT_EQ(served.found_ino, attr.backing_ino);
+  EXPECT_EQ(served.row_gen, attr.backing_gen);
+  EXPECT_EQ(served.found_gen, attr.backing_gen);
+  EXPECT_EQ(served.row_btime_sec, attr.btime.tv_sec);
+  EXPECT_EQ(served.found_btime_known, attr.btime.tv_sec != 0);
+  EXPECT_EQ(served.found_btime_sec, attr.btime.tv_sec);
+
+  if (attr.backing_gen != 0) {
+    ASSERT_OK_AND_ASSIGN(
+        sqlite3::Statement * doctor,
+        db_.Prepared("UPDATE inodes SET backing_gen = ? WHERE id = ?"));
+    ASSERT_THAT(doctor->BindAll(attr.backing_gen + 1, file), IsOk());
+    ASSERT_THAT(doctor->ExecuteOnce(), IsOk());
+    absl::StatusOr<FileDescriptor> fd = OpenNode(ctx_, file, O_RDONLY);
+    EXPECT_EQ(ErrnoOf(fd.status()), ESTALE) << fd.status();
+    ASSERT_EQ(events.checks.size(), 2u);
+    const events::IdentityCheck &mismatch = events.checks[1].second;
+    EXPECT_EQ(mismatch.outcome, events::IdentityCheck::Outcome::kMismatch);
+    EXPECT_EQ(mismatch.row_gen, attr.backing_gen + 1);
+    EXPECT_EQ(mismatch.found_gen, attr.backing_gen);
+    EXPECT_EQ(mismatch.found_ino, attr.backing_ino);
+    EXPECT_THAT(cache::GetAttr(ctx_, file),
+                StatusIs(absl::StatusCode::kNotFound));
+  }
+
+  ASSERT_OK_AND_ASSIGN(InodeId again, Id("file"));
+  Recreate("file");
+  events.checks.clear();
+  absl::StatusOr<FileDescriptor> fd = OpenNode(ctx_, again, O_RDONLY);
+  EXPECT_EQ(ErrnoOf(fd.status()), ESTALE) << fd.status();
+  ASSERT_EQ(events.checks.size(), 1u);
+  EXPECT_EQ(events.checks[0].second.outcome,
+            events::IdentityCheck::Outcome::kStaleHandle);
+  ctx_.events = &NoProtocolEvents();
 }
 
 TEST_F(BackingTest, BackingReadsByInode) {

@@ -158,6 +158,30 @@ enum class LifetimeStep {
               // (backing::Startup; arg: 1 if the row went)
 };
 
+// What OpenNode found when it reopened a row's handle, for the identity
+// model (formal/ident.tla): the row's recorded identity and what the
+// reopened object reported, which a recorder compares. 0 is "unknown" for
+// a generation and a birth time, as in the cache.
+struct IdentityCheck {
+  enum class Outcome {
+    kServed,       // the object matches the row: served
+    kStaleHandle,  // open_by_handle_at failed with ESTALE
+    kMismatch,     // it reached another object (VerifyBackingIdentity)
+  };
+  Outcome outcome = Outcome::kServed;
+  uint64_t row_ino = 0;
+  uint64_t row_gen = 0;
+  int64_t row_btime_sec = 0;
+  int64_t row_btime_nsec = 0;
+  // The reopened object's (kStaleHandle: none). found_gen is 0 if it was
+  // not read: another inode number, or a row without a generation.
+  uint64_t found_ino = 0;
+  uint64_t found_gen = 0;
+  bool found_btime_known = false;
+  int64_t found_btime_sec = 0;
+  int64_t found_btime_nsec = 0;
+};
+
 // The decision LookupOrPopulate takes after reading the cache.
 enum class LookupOutcome {
   kFound,     // served from the cache: present
@@ -395,6 +419,15 @@ class ProtocolEvents {
   // DirCacheFS::Destroy let go of every nodeid (the kernel sends no
   // FORGETs at unmount). Model: Destroy.
   virtual void Destroyed(Context &ctx) {}
+
+  // --- Identity: the identity model (formal/ident.tla) ----------------
+  //
+  // Not the main model's: what a reopen of nodeid `id`'s handle reached
+  // (backing::OpenNode), right after the decision and before the row of a
+  // stale or mismatched one is forgotten. Model: the resolution an Access
+  // or a request takes (Resolve), and IdentTrace.tla's resolve step.
+  virtual void IdentityResolved(Context &ctx, events::Ino id,
+                                const events::IdentityCheck &check) {}
 
   // --- Sync points ----------------------------------------------------
 

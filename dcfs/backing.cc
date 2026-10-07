@@ -799,6 +799,21 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
     same = attr.btime.tv_sec == stx.stx_btime.tv_sec &&
            attr.btime.tv_nsec == static_cast<long>(stx.stx_btime.tv_nsec);
   }
+  // Model: the identity model's resolution (formal/ident.tla's Resolve),
+  // before a mismatched row is forgotten.
+  ctx.events->IdentityResolved(
+      ctx, id,
+      {.outcome = same ? events::IdentityCheck::Outcome::kServed
+                       : events::IdentityCheck::Outcome::kMismatch,
+       .row_ino = attr.backing_ino,
+       .row_gen = attr.backing_gen,
+       .row_btime_sec = attr.btime.tv_sec,
+       .row_btime_nsec = attr.btime.tv_nsec,
+       .found_ino = stx.stx_ino,
+       .found_gen = gen,
+       .found_btime_known = (stx.stx_mask & STATX_BTIME) != 0,
+       .found_btime_sec = stx.stx_btime.tv_sec,
+       .found_btime_nsec = stx.stx_btime.tv_nsec});
   if (!same) {
     LOG(WARNING) << "inode " << id
                  << ": out-of-band change on the backing filesystem "
@@ -830,6 +845,14 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
   absl::StatusOr<FileDescriptor> fd = handle.Open(ctx.mounts, flags);
   if (!fd.ok()) {
     if (ErrnoOf(fd.status()) == ESTALE) {
+      // Model: as in VerifyBackingIdentity (nothing was reached).
+      ctx.events->IdentityResolved(
+          ctx, id,
+          {.outcome = events::IdentityCheck::Outcome::kStaleHandle,
+           .row_ino = attr.backing_ino,
+           .row_gen = attr.backing_gen,
+           .row_btime_sec = attr.btime.tv_sec,
+           .row_btime_nsec = attr.btime.tv_nsec});
       ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
       return fd.status();
     }

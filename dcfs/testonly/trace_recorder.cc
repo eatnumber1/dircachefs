@@ -111,11 +111,13 @@ std::vector<Ino> Distinct(events::IdsFn ids) {
 }  // namespace
 
 TraceRecorder::TraceRecorder(int fd, std::string trace, bool files,
-                             bool lifetimes)
+                             bool lifetimes, bool identities, bool directories)
     : fd_(fd),
       trace_(std::move(trace)),
       files_enabled_(files),
-      lifetimes_enabled_(lifetimes) {}
+      lifetimes_enabled_(lifetimes),
+      identities_enabled_(identities),
+      directories_enabled_(directories) {}
 
 void TraceRecorder::Enter(const char *cause) {
   cause_ = cause;
@@ -407,6 +409,7 @@ TraceRecorder::State TraceRecorder::SnapshotState(Context &ctx, Ino dir) {
 }
 
 void TraceRecorder::Write(Ino dir, const std::string &json) {
+  if (!directories_enabled_) return;
   if (auto it = dirs_.find(dir); it != dirs_.end()) {
     if (it->second.pending) return;  // Its end is decided later (Defer).
     if (it->second.reading) {
@@ -1465,6 +1468,7 @@ void TraceRecorder::RunStarting(Context &ctx) {
   // The nodeids' traces: a new mount holds no nodeid (lifetime.tla's Crash,
   // or the Restart after a DESTROY).
   LifeRunLines(ctx, "RunStarting", *clean ? "restart" : "crash");
+  IdentRunLines(ctx, "RunStarting", *clean ? "restart" : "crash");
 }
 
 void TraceRecorder::Recovered(Context &ctx) {
@@ -1495,6 +1499,7 @@ void TraceRecorder::RunStarted(Context &ctx) {
   }
   // After the sweep of unnamed rows (lifetime.tla's Restart).
   LifeRunLines(ctx, "RunStarted", "start");
+  IdentRunLines(ctx, "RunStarted", "start");
   // The directories whose traces begin now (the others began in an earlier
   // run, and ignore this second "begin").
   After(ctx);
@@ -1549,6 +1554,9 @@ void TraceRecorder::InodeForgetting(Context &ctx, Ino id) {
 }
 
 void TraceRecorder::InodeForgotten(Context &ctx, Ino id) {
+  // Its identity trace's row is gone (ident.tla: an unlink's phase 3, an
+  // invalidation by a probe of a recycled inode number, ForgetStale).
+  if (idents_.contains(id)) IdentLine(ctx, id, "InodeForgotten", "gone");
   Enter("InodeForgotten");
   // Its own trace ends ("gone"), and the directories that named it are cut
   // if that is all that changed (After), once its transaction committed.
@@ -1738,9 +1746,13 @@ void TraceRecorder::LifetimeChanged(Context &ctx, Ino id,
                                     events::LifetimeFn after) {
   // Not Enter(): no directory's trace sees these, and the callback count
   // is the sync points' (SyncfsStarting).
-  if (!lifetimes_enabled_ || cache::IsStub(id)) return;
+  if (cache::IsStub(id) || (!lifetimes_enabled_ && !identities_enabled_)) {
+    return;
+  }
   using events::LifetimeStep;
   const events::Lifetime kept = after();
+  if (identities_enabled_) IdentStep(ctx, id, step, kept);
+  if (!lifetimes_enabled_) return;
   const bool creates =
       step == LifetimeStep::kCreated || step == LifetimeStep::kTmpfile;
   if (!lives_.contains(id)) {
@@ -1820,6 +1832,120 @@ void TraceRecorder::LifetimeChanged(Context &ctx, Ino id,
 
 void TraceRecorder::Destroyed(Context &ctx) {
   LifeRunLines(ctx, "Destroyed", "destroy");
+  IdentRunLines(ctx, "Destroyed", "destroy");
+}
+
+// --- Nodeids' identity traces (formal/ident.tla) ---------------------------
+
+namespace {
+
+// How a field of what a reopen reached compares with the row's: the same,
+// another, or unknown (0 on either side: not reported, or not read).
+const char *Compare(bool known, bool equal) {
+  if (!known) return "unknown";
+  return equal ? "same" : "other";
+}
+
+}  // namespace
+
+bool TraceRecorder::HasRow(Context &ctx, Ino id) {
+  absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx, id);
+  CHECK(attr.ok() || absl::IsNotFound(attr.status())) << attr.status();
+  return attr.ok();
+}
+
+void TraceRecorder::IdentLine(Context &ctx, Ino id, std::string_view cause,
+                              std::string_view ev, std::string_view fields,
+                              std::string_view more) {
+  WriteLine(absl::StrCat("DCFS-IDENT ", trace_, " ", id, " {\"i\":",
+                         ++ident_line_, ",\"c\":", JsonStr(cause),
+                         ",\"ev\":", JsonStr(ev), fields, ",\"st\":{\"row\":",
+                         Bool(HasRow(ctx, id)), more, "}}\n"));
+}
+
+void TraceRecorder::IdentRunLines(Context &ctx, std::string_view cause,
+                                  std::string_view ev) {
+  for (Ino id : idents_) IdentLine(ctx, id, cause, ev);
+}
+
+void TraceRecorder::IdentStep(Context &ctx, Ino id, events::LifetimeStep step,
+                              const events::Lifetime &kept) {
+  using events::LifetimeStep;
+  const bool creates =
+      step == LifetimeStep::kCreated || step == LifetimeStep::kTmpfile;
+  const bool reply = step == LifetimeStep::kLookup || creates;
+  const bool forget =
+      step == LifetimeStep::kForgot || step == LifetimeStep::kForgotInBatch;
+  if (!reply && !forget) return;
+  if (!idents_.contains(id)) {
+    // As the lifetime traces: at the reply dcfs counts first (the kernel
+    // held no inode for it before), the row as it was (a created nodeid
+    // had none).
+    if (!reply || kept.lookups != 1) return;
+    idents_.insert(id);
+    WriteLine(absl::StrCat("DCFS-IDENT ", trace_, " ", id, " {\"i\":",
+                           ++ident_line_,
+                           ",\"c\":\"LifetimeChanged\",\"ev\":\"begin\","
+                           "\"st\":{\"row\":",
+                           Bool(!creates && HasRow(ctx, id)), "}}\n"));
+  }
+  const std::string lk = absl::StrCat(",\"lk\":", kept.lookups);
+  if (forget) {
+    IdentLine(ctx, id, "LifetimeChanged", "forget", "", lk);
+    return;
+  }
+  // Which request handed it out (as the lifetime traces' "via").
+  std::string via = step == LifetimeStep::kCreated   ? "create"
+                    : step == LifetimeStep::kTmpfile ? "tmpfile"
+                                                     : "lookup";
+  if (const Frame *request = InnermostRequest();
+      request != nullptr && step == LifetimeStep::kLookup) {
+    if (request->op == events::Op::kLink ||
+        request->op == events::Op::kLinkTmpfile) {
+      via = "link";
+    } else if (request->op == events::Op::kLookup &&
+               (request->name == "." || request->name == "..")) {
+      via = "dot";
+    }
+  }
+  // The generation the reply carried: the row's (EntryFor read it, and
+  // nothing wrote it since). None if the row is gone (the model rejects a
+  // reply without one).
+  absl::StatusOr<uint32_t> gen = cache::GetGeneration(ctx, id);
+  CHECK(gen.ok() || absl::IsNotFound(gen.status())) << gen.status();
+  IdentLine(ctx, id, "LifetimeChanged", "reply",
+            absl::StrCat(",\"via\":", JsonStr(via), ",\"fgen\":\"",
+                         gen.ok() ? absl::StrCat(*gen) : "", "\""),
+            lk);
+}
+
+void TraceRecorder::IdentityResolved(Context &ctx, Ino id,
+                                     const events::IdentityCheck &check) {
+  if (!identities_enabled_ || !idents_.contains(id)) return;
+  using Outcome = events::IdentityCheck::Outcome;
+  if (check.outcome == Outcome::kStaleHandle) {
+    IdentLine(ctx, id, "IdentityResolved", "resolve",
+              ",\"outcome\":\"stale_handle\"");
+    return;
+  }
+  const bool row_btime = check.row_btime_sec != 0 || check.row_btime_nsec != 0;
+  const bool found_btime =
+      check.found_btime_known &&
+      (check.found_btime_sec != 0 || check.found_btime_nsec != 0);
+  const bool same_btime = check.found_btime_sec == check.row_btime_sec &&
+                          check.found_btime_nsec == check.row_btime_nsec;
+  IdentLine(
+      ctx, id, "IdentityResolved", "resolve",
+      absl::StrCat(
+          ",\"outcome\":",
+          JsonStr(check.outcome == Outcome::kServed ? "served" : "mismatch"),
+          ",\"ino\":",
+          JsonStr(Compare(true, check.found_ino == check.row_ino)),
+          ",\"gen\":",
+          JsonStr(Compare(check.row_gen != 0 && check.found_gen != 0,
+                          check.found_gen == check.row_gen)),
+          ",\"bt\":",
+          JsonStr(Compare(row_btime && found_btime, same_btime))));
 }
 
 }  // namespace dcfs::testonly

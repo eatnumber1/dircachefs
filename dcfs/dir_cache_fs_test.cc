@@ -472,14 +472,20 @@ class DirCacheFSTest : public ::testing::Test {
   // file), as the trace "<suite>.<test>". Call it once the test's setup is
   // done: its writes to the cache are the state each directory's trace
   // begins in.
-  void StartTrace() {
+  //
+  // With `identities_only`, only the nodeids' identity traces are written:
+  // for a scenario of the identity model (formal/ident.tla) whose
+  // invalidation of a row behind the other models' backs (a step neither
+  // dcfs.tla nor lifetime.tla nor reval.tla has) would end theirs.
+  void StartTrace(bool identities_only = false) {
     const ::testing::TestInfo *info =
         ::testing::UnitTest::GetInstance()->current_test_info();
     std::fflush(stdout);
     recorder_ = std::make_unique<testonly::TraceRecorder>(
         STDOUT_FILENO,
         absl::StrCat(info->test_suite_name(), ".", info->name()),
-        /*files=*/true, /*lifetimes=*/true);
+        /*files=*/!identities_only, /*lifetimes=*/!identities_only,
+        /*identities=*/true, /*directories=*/!identities_only);
     ctx_.events = recorder_.get();
     recorder_->BeginAll(ctx_);
   }
@@ -3251,6 +3257,69 @@ TEST_F(DirCacheFSTest, NonFinalForgetKeepsTheHeldDescriptor) {
   EXPECT_TRUE(attr.valid);
   EXPECT_EQ(attr.st.st_size, 6);
   EXPECT_THAT(Dirty(), Contains(f));
+}
+
+// Identity (formal/ident.tla): a reopen by handle that reaches another
+// object than the row's answers ESTALE and forgets the row (OpenNode's
+// VerifyBackingIdentity). Here the row's recorded generation is made not
+// the object's: what an inode number recycled behind dcfs's back looks
+// like where the handle carries no generation (on ext4 the handle itself
+// would be refused: OutOfBandReplacementGetsEstaleFromItsHandle). An NFS
+// client's handle for the nodeid (its LOOKUP(nodeid, ".")) then gets
+// ESTALE too, and the name gets a new nodeid and generation. Its identity
+// trace is formal/trace_tests/ident_mismatch.log.
+TEST_F(DirCacheFSTest, IdentityCheckRefusesAnotherObjectBehindTheHandle) {
+  WriteFile(Path("f"));
+  Start();
+  StartTrace(/*identities_only=*/true);
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  // An NFS client's reconnection, answered from the row.
+  auto [dot, dot_entry] = Lookup(f, ".");
+  ASSERT_EQ(dot.error, 0);
+  EXPECT_EQ(dot_entry.generation, entry.generation);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  ASSERT_NE(attr.backing_gen, 0u) << "ext4 reports generations";
+  ASSERT_OK_AND_ASSIGN(
+      sqlite3::Statement * doctor,
+      db_.Prepared("UPDATE inodes SET backing_gen = ? WHERE id = ?"));
+  ASSERT_THAT(doctor->BindAll(attr.backing_gen + 1, f), IsOk());
+  ASSERT_THAT(doctor->ExecuteOnce(), IsOk());
+
+  EXPECT_EQ(Open(f, O_RDONLY).first.error, -ESTALE);
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(Lookup(f, ".").first.error, -ESTALE);
+  auto [again, again_entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(again.error, 0);
+  EXPECT_NE(again_entry.nodeid, entry.nodeid);
+  EXPECT_NE(again_entry.generation, entry.generation);
+  Forget(f, 2);
+  Forget(static_cast<InodeId>(again_entry.nodeid), 1);
+}
+
+// ... and a file replaced behind dcfs's back (unlinked and created again,
+// which on ext4 usually recycles its inode number): its handle is stale
+// (open_by_handle_at: ESTALE, the handle's generation or a freed inode),
+// the row goes, and the nodeid the kernel holds answers ESTALE from then
+// on, never the new file.
+TEST_F(DirCacheFSTest, OutOfBandReplacementGetsEstaleFromItsHandle) {
+  WriteFile(Path("f"));
+  Start();
+  StartTrace(/*identities_only=*/true);
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
+  WriteFile(Path("f"));
+
+  EXPECT_EQ(Open(f, O_RDONLY).first.error, -ESTALE);
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(Getattr(f).first.error, -ESTALE);
+  EXPECT_EQ(Lookup(f, ".").first.error, -ESTALE);
+  Forget(f, 1);
 }
 
 // An unlinked file the kernel holds two lookups of is answered from its
