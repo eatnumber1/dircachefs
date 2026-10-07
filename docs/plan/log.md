@@ -1290,3 +1290,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   counter raises sqlite.cc's verbosity only; ReadOne documented unique-only in style.md (a debug
   second step would restore the counted step: the checking build is the place). presubmit+formal
   217 pass + 1 skip, asan small 30/30. dir_cache_fs_test asan_mem 960 (ASan quarantine, measured).
+- GitHub run 37651534035 (7f326a0, first on the clang toolchain): osv green; fast: 62 guest tests
+  FAILED with their tests green inside: the kernel-failure detector's dmesg pattern matched
+  "WARNING: " in the AMD runners' hardware-vulnerability advisories ("Speculative Return Stack
+  Overflow: WARNING: See https://kernel.org/..."); the Intel dev box never prints them. Fix in
+  lane-6 (narrow to WARNING: CPU: / WARNING: at / cut here; advisories as must-pass fixtures in
+  run_qemu_verdict_test). Lesson: the verdict self-check needs fixtures from a real runner's log,
+  not only ours. The toolchain itself built and ran fine on the runner. 12.5 identity model
+  dispatched (lane-1, dcfs-protocol).
