@@ -42,7 +42,24 @@ are then the same on every machine and in CI.
   `WarningsAsErrors: '*'`. Our code only, not `third_party/` or external
   repositories. CI runs it on every push; findings that are real bugs get
   a test first. It runs on the host (no root or kernel needed).
+- 7.6 Formatting enforced (russ, 2026-10-07; `docs/style.md`): the pinned
+  LLVM's clang-format and a pinned buildifier (BCR or `http_file`) behind
+  `bazel run //tools:format` (replaces `tools/format.sh`'s "if installed"),
+  and a `small` `//tools:format_test` that runs both in check mode
+  (`clang-format --dry-run -Werror`, `buildifier -mode=check`) over the
+  tracked C/C++ and Bazel files, so `--config=fast` and CI fail on an
+  unformatted file. An opt-in `.githooks/pre-commit` (`git config
+  core.hooksPath .githooks`) runs the same check. The same change
+  reformats the tree once (`tools/*.c` tabs, the ~100 long lines, the
+  6-space BUILD lists), so the test is green from its first commit. A
+  pinned Python formatter (Google Python style, 80 columns) for `tools/`
+  and `man/` joins it if rules_python offers one without a pip
+  dependency; otherwise it is a separate small step.
+- 7.7 Include-what-you-use (russ, 2026-10-07): `layering_check` (a target
+  includes only headers of its direct deps; needs the clang toolchain) on
+  our targets, and clang-tidy's `misc-include-cleaner` in 7.5's
+  configuration. Findings fixed in batches, mechanical.
 Owner: Sonnet (7.1, 7.2), Opus review; findings from 7.4 by owner of
 the affected area. Order: right after the CI phase, before the benchmarks
 (so every later phase runs under UBSan and has coverage); within it,
-7.1 then 7.2 (coverage) first, then 7.3, 7.4 and 7.5.
+7.1 then 7.2 (coverage) first, then 7.3, 7.4, 7.5, 7.6 and 7.7.

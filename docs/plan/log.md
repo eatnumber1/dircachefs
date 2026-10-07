@@ -709,3 +709,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   helper in guest/lib.sh that reports its would-be verdict and never fails). Test-first check: yes
   for every behaviour change so far; exceptions on record: the EMFILE fallback test written after
   the code (verified to discriminate), destroy_test (measurement only), CI/config commits.
+- russ (2026-10-07): a style guide, docs/style.md, extending the Google C++ Style Guide (code must
+  conform); StatusBuilder helpers in dcfs/status.h (Abseil has no per-code builders at all); no
+  nested namespaces except dcfs::syscalls, called as `syscalls::open`; syscalls.h holds one thin
+  wrapper per manpage-documented call, compositions (`*_opath`, ReopenPathFd, ...) move to backing;
+  enum class; clang-format always, enforced by a Bazel format test + opt-in pre-commit hook (7.6);
+  IWYU via layering_check + misc-include-cleaner (7.7). Draft in lane-4 (step-style), revising.
