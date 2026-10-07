@@ -174,4 +174,10 @@ else
 	fail second-tree "second half added ${second_growth} KiB after the first drop; the first half added ${first_growth} KiB (limit: half): FORGET does not release per-inode state"
 fi
 
+# Reclaim evicts the kernel's cached inodes and dentries, and so sends FORGETs
+# the find phases above did not ask for: the RSS figures would measure the
+# guest running short of memory (step 7.4b: at the old 448 MiB every variant
+# reclaimed, xfs most). The fix is this test's mem= (BUILD.bazel).
+require_no_reclaim no-reclaim
+
 exit "$FAILED"

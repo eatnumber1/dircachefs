@@ -1,6 +1,7 @@
 # CI: the whole test suite, in three jobs of increasing size (the tiers of
-# test/qemu/README.md). Every dcfs test, unit tests included, boots the
-# project's own kernel under QEMU as root; KVM is used when the runner has
+# test/qemu/README.md) and two sanitizer suites (`asan`, `ubsan`) that run in
+# parallel with the last tier, `full`. Every dcfs test, unit tests included,
+# boots the project's own kernel under QEMU as root; KVM is used when the runner has
 # it (public repositories' standard Linux runners do) and TCG otherwise
 # (.github/ci/prepare.sh, .github/ci/test.sh). Bazel builds everything the
 # tests need: the kernel, QEMU, busybox, the mkfs tools and the Debian image.
@@ -266,8 +267,8 @@ jobs:
           key: ${{ steps.repocache.outputs.cache-primary-key }}
 
   full:
-    # Every test, then every test again under AddressSanitizer and under
-    # UndefinedBehaviorSanitizer.
+    # Every test, every tier (the sanitizer suites are the jobs below, in
+    # parallel with this one).
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     needs: presubmit
@@ -299,12 +300,6 @@ jobs:
             bazel-
       - name: Test (all tiers)
         run: ./.github/ci/test.sh
-      - name: Test (AddressSanitizer)
-        if: ${{ !cancelled() }}
-        run: ./.github/ci/test.sh --config=asan
-      - name: Test (UndefinedBehaviorSanitizer)
-        if: ${{ !cancelled() }}
-        run: ./.github/ci/test.sh --config=ubsan
       - name: Mutation testing of the protocol code this push touched
         # Step 26.5b, the per-push bumper: only the functions of
         # tools/mutation/scope.txt whose lines the range touches, at most 30
@@ -338,6 +333,120 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-logs-full
+          path: ci-test-logs
+          if-no-files-found: ignore
+      - name: Save the repository cache
+        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: ${{ steps.repocache.outputs.cache-primary-key }}
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  asan:
+    # Every test, every tier, under AddressSanitizer (--config=asan). Its own job,
+    # in parallel with `full`, so neither job's time limit is the other's.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    needs: presubmit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        id: repocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Restore Bazel caches
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-asan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-asan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-asan-
+            bazel-
+      - name: Test (AddressSanitizer)
+        run: ./.github/ci/test.sh --config=asan
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Upload test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-asan
+          path: ci-test-logs
+          if-no-files-found: ignore
+      - name: Save the repository cache
+        if: ${{ !cancelled() && steps.repocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: ${{ steps.repocache.outputs.cache-primary-key }}
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  ubsan:
+    # Every test, every tier, under UndefinedBehaviorSanitizer (--config=ubsan). Its own job,
+    # in parallel with `full`, so neither job's time limit is the other's.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    needs: presubmit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        id: repocache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Restore Bazel caches
+        id: cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-ubsan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-ubsan-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-ubsan-
+            bazel-
+      - name: Test (UndefinedBehaviorSanitizer)
+        run: ./.github/ci/test.sh --config=ubsan
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Upload test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-ubsan
           path: ci-test-logs
           if-no-files-found: ignore
       - name: Save the repository cache

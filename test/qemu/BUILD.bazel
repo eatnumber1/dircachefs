@@ -490,8 +490,14 @@ qemu_test_matrix(
     # its per-request sets add to the heap, which the RSS ratios would count
     # (measured: second-tree failed, 1108 KiB against 764).
     plain_dcfs = True,
-    mem = 448,  # the page cache and slab of a 100000-entry find: peak 256 MiB
-    asan_mem = 576,  # 342
+    # Sized by reclaim_scans=0 (guest/memory.sh's require_no_reclaim), not by
+    # peak_used: the page cache of the tree's disk and the dentry and inode
+    # slab of a find fill the guest to its limit, and kswapd evicts what the
+    # test measures. Measured (7.4b), the least RAM with no reclaim:
+    # plain 576 (xfs; ext4 and btrfs 512), ASan 768 (xfs; btrfs 576 reclaims),
+    # UBSan between 640 and 704 (xfs). Plus one 64 MiB step.
+    mem = 704,
+    asan_mem = 832,
     size = "medium",
     other_size = "large",
     timeout = "long",

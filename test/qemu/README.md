@@ -303,6 +303,11 @@ shrinkers' objects, also counts `drop_caches`, so only the first is judged).
 nothing being evicted (`destroy.sh`, `idle.sh`, `release_leak.sh`) calls
 `require_no_reclaim` (`guest/lib.sh`) and fails. For a test that holds many
 inodes, size by `MemTotal - MemFree` at the end of the run instead.
+`memory_test` is sized that way (step 7.4b; `memory.sh` calls
+`require_no_reclaim`): its `peak_used` grows with the allowance (the page
+cache and slab fill what they are given), so the table's numbers are the
+`peak_used` at the allowance shown, and the allowance is the least that
+showed no reclaim (plain 576 on xfs, ASan 768) plus one 64 MiB step.
 
 **The allowance rule**: peak plus 50% or 128 MiB, whichever is more, the
 peak including the kernel's own reservation (-m less `MemTotal`: about 17
@@ -324,7 +329,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | boot, cache_permissions, lifecycle, atime, removed, copy, boundary, credentials, create, crash, handles, power, readonly, rename, setattr, release_leak, nfs, passthrough (60-102 plain) | 52-102 | 145-190 (nfs 169) | 256 | 384 |
 | names, names_random, readdir_boundary, idle_short, idle_long, pjdfstest (3 shards) | 57-75 | 433-570 | 256 | 832 |
 | write | 136-153 | 224-248 | 320 | 448 |
-| memory | 197-256 | 279-376 | 448 | 576 |
+| memory (sized by `reclaim_scans=0`, see above) | 104-270 at 576 | 354-478 at 768 | 704 | 832 |
 | bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |
 | destroy | 501 | not measured | 832 | 1856 (a guess, from bench_smoke) |
 | bench_readdir | 157 | 1432-1509 | 320 | 2304 |
@@ -380,7 +385,8 @@ re-measure after a change: run the tier with `--test_output=all` (or read
 ## CI
 
 `.github/workflows/ci.yml` runs the three tiers as three jobs (`fast`,
-`presubmit`, `full`; the top-level README's "Continuous integration"
+`presubmit`, `full`) plus the sanitizer suites as two more, parallel to `full`
+(`asan`, `ubsan`; the top-level README's "Continuous integration"
 section has the whole story) with the same scripts and the same timeouts as
 a development machine:
 

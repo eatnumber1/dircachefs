@@ -398,14 +398,24 @@ equal to, within tolerance of and above a canned baseline.
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs the whole suite on GitHub Actions
-(`ubuntu-24.04` runners) in three jobs, the tiers of
-`test/qemu/README.md`:
+(`ubuntu-24.04` runners) in five jobs, the tiers of `test/qemu/README.md` and
+the two sanitizer suites:
 
 | Job | Runs | Needs |
 |---|---|---|
 | `fast` | `bazel test --config=fast //...` (small tests) | |
 | `presubmit` | `bazel test --config=presubmit //...` (small and medium) | `fast` |
-| `full` | `bazel test //...` (every tier, pjdfstest on all three filesystems), then `bazel test --config=asan //...` and `bazel test --config=ubsan //...` | `presubmit` |
+| `full` | `bazel test //...` (every tier, pjdfstest on all three filesystems) | `presubmit` |
+| `asan` | `bazel test --config=asan //...` (every tier) | `presubmit` |
+| `ubsan` | `bazel test --config=ubsan //...` (every tier) | `presubmit` |
+
+`full`, `asan` and `ubsan` run in parallel, each on its own runner with its
+own cache key and time limit (350, 300 and 240 minutes); one suite's length
+no longer bounds the others. Expected wall times with KVM and a warm cache
+(measured on a shared 4-core machine at two test jobs): `full` about 70
+minutes (Phase 5.2's `act` run), `ubsan` about 85 minutes (22 small, 12
+medium, 52 large and enormous), `asan` not measured (its guests are bigger
+and its binaries slower, so budget more); a cold cache adds the build (about an hour).
 
 - **Caches.** Bazel's disk cache, repository cache and Bazelisk's download
   are restored and saved with `actions/cache`, even when tests fail (the
