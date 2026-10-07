@@ -1219,3 +1219,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   output bases are byte-identical today (toolchain redacts __DATE__/__TIME__, relative paths);
   gate `bazel run //tools:reproducible_build` (~12 min cold) + repro_compare self-check; CI job.
   Under review. Needs russ: the baseline above is the one to pick tests from (Phase 8).
+- Warnings audit merged (55caee3, 3 commits on 26.7): presubmit 217 pass + 1 skip. Our code builds
+  with zero compile or link warnings under the pinned clang; externals get none of our flags;
+  analysis tests pin both. 7.4 UBSan dispatched to lane-5 (dcfs-investigator).
