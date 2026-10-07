@@ -80,6 +80,11 @@ KNOWN_BUGS = {
 # what dcfs reuses across a change of the backing state. MC_reval: every
 # invariant, changes through dcfs only; MC_reval_oob: the flags part with
 # changes behind dcfs's back; MC_reval_liveness: CachedDecisionsConverge.
+REVAL = [
+    "MCreval.tla",
+    "reval.tla",
+]
+
 tlc_test(
     name = "reval_test",
     size = "medium",
@@ -106,6 +111,64 @@ tlc_test(
     spec = "MCreval.tla",
     srcs = ["reval.tla"],
 )
+
+# Its known bugs (each a few seconds).
+REVAL_KNOWN_BUGS = {
+    # Phase 23 (found by copy_test, review L-b), fixed in 23.7.
+    "reval_no_recheck": "Invariant OpenFlagsExact is violated",
+    # The flags_changed-only re-check, with changes behind dcfs's back.
+    "reval_recheck_if_changed": "Invariant OpenFlagsExact is violated",
+    # Review M1 of Phase 23, fixed in 23.7.
+    "reval_casefold_passed_through": "Invariant DirCacheNeverWrong is violated",
+    # Review L1 and L-a of Phase 23, fixed in 23.7.
+    "reval_no_write_fd": "Invariant WriteFdHeld is violated",
+    "reval_write_fd_last_writer": "Invariant WriteFdKeepsOffsets is violated",
+}
+
+[
+    tlc_test(
+        name = "known_bug_%s_test" % bug,
+        size = "small",
+        timeout = "short",
+        config = "known_bugs/%s.cfg" % bug,
+        expect_violation = violation,
+        spec = "known_bugs/%s.tla" % bug,
+        srcs = REVAL,
+    )
+    for bug, violation in REVAL_KNOWN_BUGS.items()
+]
+
+# The flags_changed-only re-check under exclusive access: no violation (the
+# trade the code declined, known_bugs/reval_recheck_if_changed.tla).
+tlc_test(
+    name = "reval_recheck_if_changed_exclusive_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "known_bugs/reval_recheck_if_changed_exclusive.cfg",
+    spec = "known_bugs/reval_recheck_if_changed.tla",
+    srcs = REVAL,
+)
+
+# What exclusive access buys: with changes behind dcfs's back, each of these
+# must fail as limitations/reval_out_of_band.tla says.
+REVAL_LIMITATIONS = {
+    "out_of_band_mode": "Invariant OpenModeNeverGrantsMore is violated",
+    "out_of_band_casefold": "Invariant DirCacheNeverWrong is violated",
+    "out_of_band_stale": "Temporal properties were violated",
+}
+
+[
+    tlc_test(
+        name = "limitation_%s_test" % limitation,
+        size = "small",
+        timeout = "short",
+        config = "limitations/%s.cfg" % limitation,
+        expect_violation = violation,
+        spec = "limitations/reval_out_of_band.tla",
+        srcs = REVAL,
+    )
+    for limitation, violation in REVAL_LIMITATIONS.items()
+]
 
 # Trace validation (README.md, "Trace validation"): the spec, its
 # configuration and the script the tla_trace_test targets run (in //dcfs and
