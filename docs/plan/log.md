@@ -1032,3 +1032,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   rebase), numactl version script dropped (its `local: *` hid clang's static ASan malloc: 10 ASan
   tests failed "bad-free"). presubmit 145/145, asan small 24/24, ubsan main_static builds.
   Rebasing over Alpine (its base predates it), then review.
+- 25.1 review fixes done (lane-1, 44b35e2): fast 113/113, presubmit+formal 179/179, asan small
+  25/25; raw_syscalls_test now an untagged per-file ratchet (baseline 301 sites in 21 files; a
+  rising count fails). Merge pending: rebase conflicts with 26.13's pjdfstest README; handed to
+  the lane agent with a rerun against the new 26.x gates.
