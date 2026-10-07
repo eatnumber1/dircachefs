@@ -838,9 +838,8 @@ qemu_test(
     name = "syscall_traces_test",
     disks = [("vdb", "ext4", "64M")],
     guest_script = "guest/syscall_traces.sh",
-    # What ships is what is measured (step 26.2): the checking build's own
-    # SQLite queries would count against the statement budgets.
-    plain_dcfs = True,
+    # The checking build (step 26.4b): its cost counter, which leaves the
+    # checker's own statements out, gives the statement budgets their counts.
     size = "small",
     timeout = "moderate",
 )

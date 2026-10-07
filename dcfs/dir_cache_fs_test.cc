@@ -103,8 +103,9 @@
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "dcfs/testonly/dir_cache_fs_peer.h"
 #include "dcfs/testonly/files.h"
+#include "dcfs/testonly/cost_counter.h"
 #include "dcfs/testonly/invariant_checker.h"
-#include "dcfs/testonly/step_counter.h"
+#include "dcfs/testonly/observers.h"
 #include "dcfs/testonly/trace_recorder.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
@@ -161,7 +162,7 @@ int &StatxFailure() {
 }
 
 // Step 26.2: the backstop under the invariant checks' hooks
-// (dcfs/invariant_checks.h). Every libc call through which backing.cc,
+// (ProtocolEvents::BackingCall). Every libc call through which backing.cc,
 // file_handle.cc and device_id.cc reach the backing filesystem is wrapped
 // below and calls this first: one made while a transaction or a statement
 // cursor is open aborts, whether or not its call site called the hook, so
@@ -189,7 +190,7 @@ void NoTransactionAt(const char *call) {
 }
 
 // Step 26.6: the fault sweep's state (FaultSitesTest). A backing call site
-// is a hook's source location (InvariantChecks::BackingCall) and one
+// is a hook's source location (ProtocolEvents::BackingCall) and one
 // wrapped libc call after it, before the next hook: the j-th call of that
 // name there (a probe's openat, then its reopen's). Recording, it lists the
 // sites a workload reaches, over every time it reaches each hook (so the
@@ -463,7 +464,9 @@ class DirCacheFSTest : public ::testing::Test {
     // Every request (and backing syscall) checks the invariants
     // (dcfs/testonly/invariant_checker.h); a violation aborts the test.
     checker_ = std::make_unique<testonly::InvariantChecker>();
-    ctx_.checks = checker_.get();
+    observers_ = std::make_unique<testonly::Observers>(
+        std::vector<ProtocolEvents *>{checker_.get(), &counter_});
+    Observe(ctx_, observers_.get());
     HarnessDb() = db_.Get();
     ASSERT_OK_AND_ASSIGN(
         FileDescriptor owned,
@@ -513,7 +516,11 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    ctx_.events = &NoProtocolEvents();
+    // The trace ends here (TearDown's DESTROY is not the test's); the
+    // checks go on through it.
+    if (observers_ != nullptr && recorder_ != nullptr) {
+      observers_->Remove(recorder_.get());
+    }
     OpenByHandleHook() = {};
     NameToHandleHook() = {};
     SyncfsHook() = {};
@@ -526,7 +533,9 @@ class DirCacheFSTest : public ::testing::Test {
     if (se_ != nullptr) fuse_session_destroy(se_);
     current_ = nullptr;
     fs_.reset();
-    ctx_.checks = &NoInvariantChecks();
+    if (db_.Get() != nullptr) Observe(ctx_, &NoProtocolEvents());
+    ctx_.events = &NoProtocolEvents();
+    observers_.reset();
     checker_.reset();
     HarnessDb() = nullptr;
     if (!source_.empty()) testonly::RemoveAll(source_);
@@ -540,8 +549,8 @@ class DirCacheFSTest : public ::testing::Test {
   absl::Status Restart(std::string_view boot_id) {
     MountFds mounts;
     Context ctx{db_, mounts, bitgen_};
+    // The new process is checked too (step 26.2), and recorded.
     ctx.events = ctx_.events;
-    ctx.checks = ctx_.checks;  // The new process is checked too (step 26.2).
     ABSL_ASSIGN_OR_RETURN(FileDescriptor source,
                           syscalls::openat(AT_FDCWD, source_,
                                            O_RDONLY | O_DIRECTORY | O_CLOEXEC));
@@ -550,8 +559,11 @@ class DirCacheFSTest : public ::testing::Test {
     // describes the database the new process recovered (its durable set,
     // its opens): it is not checked any more (the new process was, through
     // Startup). Its DESTROY at TearDown is the harness's cleanup, not a
-    // daemon's.
-    ctx_.checks = &NoInvariantChecks();
+    // daemon's. The recorder, if one is on, goes on recording it.
+    if (observers_ != nullptr) {
+      observers_->Remove(checker_.get());
+      observers_->Remove(&counter_);
+    }
     return started;
   }
 
@@ -577,7 +589,7 @@ class DirCacheFSTest : public ::testing::Test {
         absl::StrCat(info->test_suite_name(), ".", info->name()),
         /*files=*/!identities_only, /*lifetimes=*/!identities_only,
         /*identities=*/true, /*directories=*/!identities_only);
-    ctx_.events = recorder_.get();
+    observers_->Add(recorder_.get());
     recorder_->BeginAll(ctx_);
   }
 
@@ -1039,6 +1051,10 @@ class DirCacheFSTest : public ::testing::Test {
   std::unique_ptr<DirCacheFS> fs_;
   std::unique_ptr<testonly::TraceRecorder> recorder_;
   std::unique_ptr<testonly::InvariantChecker> checker_;
+  // The cost counters (step 26.4b), and the one observer Context::events
+  // is: the checker, the counter and, after StartTrace, the recorder.
+  testonly::CostCounter counter_;
+  std::unique_ptr<testonly::Observers> observers_;
   fuse_lowlevel_ops ops_{};
   struct fuse_session *se_ = nullptr;
 
@@ -2309,9 +2325,8 @@ constexpr int64_t kReaddirStepsPerEntry = 13;      // measured 1.12 to 1.28
 constexpr int64_t kReaddirplusStepsPerEntry = 13;  // measured 1.22 to 1.31
 constexpr int64_t kReaddirStepsFixed = 100;
 
-// Logging is initialized for the whole run, before any test: the step
-// counter below needs it (see testonly/step_counter.h), and initializing
-// per test would change what later tests print.
+// Logging is initialized for the whole run, before any test (initializing
+// per test would change what later tests print).
 const bool kLogInitialized = (absl::InitializeLog(), true);
 
 // --- readdir work counting (step N4) ----------------------------------------
@@ -2369,9 +2384,9 @@ class ReaddirWorkTest : public DirCacheFSTest {
     ASSERT_OK_AND_ASSIGN(InodeId many, Id("many"));
     // Cold: the first listing populates the cache.
     EXPECT_EQ(ListAll(many, plus).size(), static_cast<size_t>(n));
-    testonly::SqliteStepCounter counter;
+    counter_.Reset();
     EXPECT_EQ(ListAll(many, plus).size(), static_cast<size_t>(n));
-    *steps = counter.steps();
+    *steps = counter_.counts().steps;
     std::cerr << "READDIR-STEPS " << (plus ? "plus" : "plain") << " n=" << n
               << " steps=" << *steps << "\n";
   }
@@ -2984,7 +2999,7 @@ TEST_F(DirCacheFSTest, ForgetBatchReconcilesInOnePhase1) {
   }
   ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: all clean.
   CountMutations count;
-  ctx_.events = &count;
+  observers_->Add(&count);
   BatchForget({{ids[0], 1}, {ids[1], 1}, {ids[2], 1}});
   EXPECT_EQ(count.begun, 1);
   EXPECT_EQ(count.synced_begun, 1);
@@ -2993,7 +3008,7 @@ TEST_F(DirCacheFSTest, ForgetBatchReconcilesInOnePhase1) {
   EXPECT_EQ(Send(FUSE_DESTROY, 0, "").error, 0);
   EXPECT_EQ(count.begun, 2);
   EXPECT_EQ(count.ids_named, 6);
-  ctx_.events = &NoProtocolEvents();
+  observers_->Remove(&count);
   for (InodeId id : ids) {
     ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, id));
     EXPECT_FALSE(attr.valid) << id;
@@ -4005,6 +4020,29 @@ TEST_F(DirCacheFSDeathTest, RemovedRecordWithoutALookup) {
       "removed record but the kernel holds no lookup of it");
 }
 
+// The cost counters (step 26.4b): FUSE requests by opcode, SQLite steps and
+// transactions (durable ones apart), backing calls; the invariant
+// checker's own statements are not the daemon's cost.
+TEST_F(DirCacheFSTest, CostCounterCountsRequestsStepsAndTransactions) {
+  WriteFile(Path("f"));
+  Start();
+  counter_.Reset();
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
+  ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
+  const testonly::CostCounter::Counts counts = counter_.counts();
+  EXPECT_EQ(counts.requests.at("LOOKUP"), 2);
+  EXPECT_EQ(counts.requests.at("MKDIR"), 1);
+  EXPECT_GT(counts.steps, 0);
+  EXPECT_GT(counts.transactions, 0);
+  // The mkdir's phase 1 is durable: the root was not yet durably dirty.
+  EXPECT_GE(counts.durable_transactions, 1);
+  EXPECT_GT(counts.backing_calls, 0);
+  // The checker's statements are left out.
+  ASSERT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
+  EXPECT_EQ(counter_.counts().steps, counts.steps);
+}
+
 // What step 26.6 calls after an injected fault: the checks as a status.
 TEST_F(DirCacheFSTest, InvariantChecksReportAsAStatus) {
   WriteFile(Path("f"));
@@ -4998,7 +5036,7 @@ INSTANTIATE_TEST_SUITE_P(
 // --- The fault sweep (step 26.6) ---------------------------------------------
 //
 // Short workloads, one per operation type, each run once recording the
-// backing call sites it reaches (a site: an InvariantChecks::BackingCall
+// backing call sites it reaches (a site: a ProtocolEvents::BackingCall
 // hook's location and the k-th wrapped libc call after it, see FaultSweep);
 // then, for each site, the workload again on a fresh tree and cache with
 // that site's first call failed: with EIO, and with every errno the code
@@ -5251,7 +5289,7 @@ class FaultIteration : public DirCacheFSTest {
     }
     MountFds mounts;
     Context ctx{db_, mounts, bitgen_};
-    ctx.checks = checker_.get();
+    ctx.events = observers_.get();
     absl::StatusOr<FileDescriptor> source =
         syscalls::openat(AT_FDCWD, source_, O_RDONLY | O_DIRECTORY);
     absl::Status started =
@@ -5268,7 +5306,7 @@ class FaultIteration : public DirCacheFSTest {
       found.push_back(absl::StrCat("hook: ", v));
     }
     // From here on ctx_ is the dead process's memory (see Restart).
-    ctx_.checks = &NoInvariantChecks();
+    observers_->Remove(checker_.get());
     return found;
   }
 };

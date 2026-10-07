@@ -1672,7 +1672,9 @@ its limits are stated.
 The rules this document states in prose are also checked while tests run
 (step 26.2), in a testonly build of the daemon and in the forged-request
 harness, never in what ships. Every layer calls hooks through
-`Context::checks` (`dcfs/invariant_checks.h`): `backing.cc` before each
+`Context::events`, the one testonly observer (`dcfs/protocol_events.h`,
+step 26.4b: the protocol events, these checks' hooks and the cost
+counters, with one no-op in production): `backing.cc` before each
 backing syscall it makes from a function holding a `Context` (and before
 each call into code without one that makes them: `FileHandle`,
 `GetDeviceId`, `AsCaller`, its descriptor-only helpers), `DirCacheFS`
@@ -1683,7 +1685,7 @@ check, so that the opens the harness keeps across it are left out), and
 DESTROY. Code without a `Context` cannot open a transaction (the database
 is reachable only through `Context::db`), so the hook before such a call
 covers every syscall the call makes. Production links the no-op
-(`invariant_checks_main.cc`): one call to an empty function per hook, per
+(`protocol_events_main.cc`): one call to an empty function per hook, per
 backing syscall and per request, against syscalls that cost microseconds.
 A compile-time switch would have made every object differ between the
 two builds; a hook inside the `syscalls::` wrappers would have needed a
@@ -1771,9 +1773,18 @@ A violation aborts the daemon (`LOG(FATAL)`: "invariant violated:
 same line, as `DCFS-INVARIANT-VIOLATION ...`, to the console, where
 `run-qemu.sh` fails the run on it. Every `small` and `medium` `qemu_test`
 (the fast and presubmit tiers) boots the checking build, except
-`syscall_traces_test`, `memory_test` and `readdir_boundary_test`, which
-measure what ships (its SQLite statements, its memory, a listing's time); `large` and `enormous` boot the plain
-one (`test/qemu/README.md`, "Test tiers").
+`memory_test` and `readdir_boundary_test`, which measure what ships (its
+memory, a listing's time); `large` and `enormous` boot the plain one
+(`test/qemu/README.md`, "Test tiers").
+
+The same observer counts what operations cost (step 26.4b,
+`dcfs/testonly/cost_counter.h`): SQLite statement steps and outermost
+transactions (durable ones apart: each is a WAL fsync), from the cache
+database's `Connection` (`set_observer`, kept on the `sqlite3` handle),
+FUSE requests by opcode, and backing calls; the checker's own statements
+are left out. The harness reads the counts directly; the checking daemon
+writes them to `$DCFS_COUNTERS_FILE` after every request, for the guest
+budgets (`test/qemu/README.md`, "Budgets").
 
 ### Conformance
 

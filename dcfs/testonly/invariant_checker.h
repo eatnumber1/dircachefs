@@ -1,7 +1,7 @@
 #ifndef DCFS_TESTONLY_INVARIANT_CHECKER_H_
 #define DCFS_TESTONLY_INVARIANT_CHECKER_H_
 
-// The checking implementation of InvariantChecks (dcfs/invariant_checks.h;
+// The invariant checks of the testonly observer (dcfs/protocol_events.h;
 // docs/design.md, "Runtime invariant checks"; step 26.2). Test-only: the
 // daemon of the testonly checking build (//dcfs:main_static_checked, which
 // the fast and presubmit tiers' guests run) and the forged-request harness
@@ -93,7 +93,6 @@
 #include "absl/types/source_location.h"
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
-#include "dcfs/invariant_checks.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
@@ -101,7 +100,10 @@
 
 namespace dcfs::testonly {
 
-class InvariantChecker final : public InvariantChecks {
+// The FUSE opcode name of `op` ("LOOKUP", "BATCH_FORGET", ...).
+std::string_view OpName(events::Op op);
+
+class InvariantChecker final : public ProtocolEvents {
  public:
   // See the top of this file for the DirCacheFS-wide recounts.
   static constexpr size_t kRecountLimit = 1024;
@@ -116,18 +118,23 @@ class InvariantChecker final : public InvariantChecks {
   // must still be open.
   ~InvariantChecker() override;
 
-  // InvariantChecks: each aborts on a violation.
+  // The ProtocolEvents check hooks: each aborts on a violation.
   void BackingCall(Context &ctx, std::string_view what,
                    absl::SourceLocation site) override;
-  void RequestBegin(Context &ctx, const DirCacheFS &fs,
-                    const events::Request &request) override;
-  void RequestEnd(Context &ctx, const DirCacheFS &fs,
-                  const events::Request &request) override;
-  void Forgetting(Context &ctx, const DirCacheFS &fs, uint64_t ino,
-                  uint64_t nlookup) override;
-  void RunStarting(Context &ctx) override;
-  void RunStarted(Context &ctx) override;
-  void Destroyed(Context &ctx, const DirCacheFS &fs) override;
+  void CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+                         const events::Request &request) override;
+  void CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+                       const events::Request &request) override;
+  void CheckForgetting(Context &ctx, const DirCacheFS &fs, uint64_t ino,
+                       uint64_t nlookup) override;
+  void CheckRunStarting(Context &ctx) override;
+  void CheckRunStarted(Context &ctx) override;
+  void CheckDestroyed(Context &ctx, const DirCacheFS &fs) override;
+
+  // Every statement the checker runs starts with this comment, so that the
+  // cost counter (testonly/cost_counter.h) leaves the checker's own steps
+  // out.
+  static constexpr std::string_view kSqlMarker = "/*invariant-checker*/";
 
   // The checks themselves, for a test that wants to look rather than die
   // (step 26.6 checks the invariants after each injected fault): OK, or

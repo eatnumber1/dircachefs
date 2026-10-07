@@ -17,21 +17,6 @@ cc_library(
     ],
 )
 
-# Counts SQLite statement steps in-process (the harness's work-counting
-# tests; the same VLOG(2) lines guest/syscall_traces.sh budgets).
-cc_library(
-    name = "step_counter",
-    hdrs = ["step_counter.h"],
-    visibility = ["//dcfs:__pkg__"],
-    deps = [
-        "@absl//absl/log:globals",
-        "@absl//absl/log:log_entry",
-        "@absl//absl/log:log_sink",
-        "@absl//absl/log:log_sink_registry",
-        "@absl//absl/strings",
-    ],
-)
-
 # File helpers for tests, over the syscalls:: wrappers.
 cc_library(
     name = "files",
@@ -82,6 +67,8 @@ cc_library(
     srcs = ["main_recorder.cc"],
     visibility = ["//dcfs:__pkg__"],
     deps = [
+        ":checking_observers",
+        ":observers",
         ":trace_recorder",
         "//dcfs:protocol_events",
         "//dcfs:syscalls",
@@ -108,7 +95,7 @@ cc_library(
 )
 
 # The runtime invariant checks (step 26.2; docs/design.md, "Runtime
-# invariant checks"): the checking InvariantChecks.
+# invariant checks"): the checks of the testonly observer.
 cc_library(
     name = "invariant_checker",
     srcs = ["invariant_checker.cc"],
@@ -119,7 +106,6 @@ cc_library(
         "//dcfs:context",
         "//dcfs:dir_cache_fs",
         "//dcfs:escape",
-        "//dcfs:invariant_checks",
         "//dcfs:metadata_cache",
         "//dcfs:protocol_events",
         "//dcfs:sqlite",
@@ -137,18 +123,60 @@ cc_library(
     ],
 )
 
-# MainInvariantChecks() for //dcfs:main_static_checked: the checker, instead
-# of //dcfs:invariant_checks_main's no-op (link-time selection).
+# The testonly observer's other parts (step 26.4b): several observers as
+# one, and the cost counters.
+cc_library(
+    name = "observers",
+    hdrs = ["observers.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        "//dcfs:protocol_events",
+        "@absl//absl/status",
+        "@absl//absl/types:source_location",
+    ],
+)
+
+cc_library(
+    name = "cost_counter",
+    srcs = ["cost_counter.cc"],
+    hdrs = ["cost_counter.h"],
+    visibility = ["//dcfs:__pkg__"],
+    deps = [
+        ":invariant_checker",
+        "//dcfs:context",
+        "//dcfs:protocol_events",
+        "//dcfs:syscalls_backing",
+        "@absl//absl/strings",
+        "@absl//absl/types:source_location",
+    ],
+)
+
+# The testonly daemon's checker and counter (checking_observers.h).
+cc_library(
+    name = "checking_observers",
+    srcs = ["checking_observers.cc"],
+    hdrs = ["checking_observers.h"],
+    deps = [
+        ":cost_counter",
+        ":invariant_checker",
+        ":observers",
+        "//dcfs:syscalls_backing",
+        "@absl//absl/log",
+        "@absl//absl/log:check",
+        "@absl//absl/status:statusor",
+    ],
+)
+
+# MainProtocolEvents() for //dcfs:main_static_checked: the checker and the
+# counter, instead of //dcfs:protocol_events_main's no-op (link-time
+# selection).
 cc_library(
     name = "main_invariant_checker",
     srcs = ["main_invariant_checker.cc"],
     visibility = ["//dcfs:__pkg__"],
     deps = [
-        ":invariant_checker",
-        "//dcfs:invariant_checks",
-        "//dcfs:syscalls_backing",
-        "@absl//absl/log",
-        "@absl//absl/status:statusor",
+        ":checking_observers",
+        "//dcfs:protocol_events",
     ],
 )
 

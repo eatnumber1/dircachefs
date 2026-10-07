@@ -24,7 +24,6 @@
 #include "dcfs/context.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
-#include "dcfs/invariant_checks.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/protocol_events.h"
 #include "fuse_lowlevel.h"
@@ -237,13 +236,13 @@ class DirCacheFS {
   // does.
   friend struct testonly::DirCacheFSPeer;
 
-  // The runtime invariant checks' hook (dcfs/invariant_checks.h), called
+  // The runtime invariant checks' hook (ProtocolEvents::BackingCall), called
   // right before each backing:: helper that takes only a descriptor
   // (backing.cc checks the calls it makes itself).
   void BackingCall(
       std::string_view what,
       absl::SourceLocation site = absl::SourceLocation::current()) const {
-    ctx_.checks->BackingCall(ctx_, what, site);
+    ctx_.events->BackingCall(ctx_, what, site);
   }
 
   // cache::GetAttr(ctx_, id), except that NotFound from a non-root id is

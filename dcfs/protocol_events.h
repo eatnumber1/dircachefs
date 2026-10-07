@@ -30,6 +30,14 @@
 // Every method has an empty default body, so an implementation overrides
 // only what it records. Methods take the Context so that a recorder can read
 // the cache's state at that moment; they must not write to it.
+//
+// The one testonly observer of dcfs (step 26.4b): besides the protocol
+// events, the same interface carries the runtime invariant checks' hooks
+// (step 26.2; dcfs/testonly/invariant_checker.h) and the cost counters
+// (SQLite steps and transactions; the requests are the checks' request
+// frames). The testonly builds install the recorder, the checker and the
+// counter together (dcfs/testonly/observers.h fans one call out to each);
+// production pays one call to an empty function per hook.
 
 #include <cstdint>
 #include <string_view>
@@ -37,10 +45,12 @@
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/types/source_location.h"
 
 namespace dcfs {
 
 struct Context;
+class DirCacheFS;
 
 namespace events {
 
@@ -89,7 +99,7 @@ enum class Op {
   kLinkTmpfile,
   // FORGET and BATCH_FORGET: no protocol-event frame is opened for them
   // (they change nothing the model has); only the invariant checks'
-  // request frames (dcfs/invariant_checks.h) name them.
+  // request frames (CheckRequestBegin) name them.
   kForget,
   kBatchForget,
 };
@@ -481,6 +491,63 @@ class ProtocolEvents {
   // ... and deleted it (the caller's transaction, if any, has not
   // committed yet).
   virtual void InodeForgotten(Context &ctx, events::Ino id) {}
+
+  // --- The runtime invariant checks' hooks (step 26.2) ------------------
+  //
+  // dcfs/testonly/invariant_checker.h checks at each; nothing records them.
+
+  // A syscall that can reach the backing filesystem, or a call into code
+  // without a Context that makes such syscalls, named `what`, is about to
+  // be made. backing.cc calls it before each one it makes from a function
+  // holding a Context, and DirCacheFS before each call of a backing::
+  // helper that takes only a descriptor (backing::ReadFile, StatFd, ...).
+  // Code without a Context cannot open a transaction (the cache database
+  // is reachable only through Context::db), so checking here covers every
+  // backing syscall: none can run inside a transaction. `site` is the call
+  // site (the step 26.6 fault sweep fails each site's syscalls in turn).
+  virtual void BackingCall(Context &ctx, std::string_view what,
+                           absl::SourceLocation site) {}
+
+  // fuse_ops.cc: a request was dispatched (after the periodic sync point,
+  // before its handler), and its reply has been sent; FORGET and
+  // BATCH_FORGET included. Requests nest when one runs inside another's
+  // backing syscall (the forged-request harness does that today,
+  // coroutines will).
+  virtual void CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+                                 const events::Request &request) {}
+  virtual void CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+                               const events::Request &request) {}
+
+  // fuse_ops.cc, inside a FORGET's or BATCH_FORGET's frame: the kernel is
+  // about to drop `nlookup` of its lookups of nodeid `ino` (before
+  // DirCacheFS counts them down).
+  virtual void CheckForgetting(Context &ctx, const DirCacheFS &fs,
+                               uint64_t ino, uint64_t nlookup) {}
+
+  // backing::StartRun has recovered the dirty set and started the run
+  // (Startup's probe of the recovered rows has not run yet).
+  virtual void CheckRunStarting(Context &ctx) {}
+
+  // backing::Startup is done: StartRun, InitRoot, StartupPurge and the
+  // probe of the recovered rows, so the state is the one the first request
+  // will see.
+  virtual void CheckRunStarted(Context &ctx) {}
+
+  // fuse_ops.cc: DESTROY's DirCacheFS::Destroy has returned (the kernel
+  // holds no nodeid any more).
+  virtual void CheckDestroyed(Context &ctx, const DirCacheFS &fs) {}
+
+  // --- Cost counters (step 26.4b) -----------------------------------------
+  //
+  // From the cache database's Connection (sqlite3::Connection::
+  // set_observer), which has no Context.
+
+  // sqlite3::Statement::Step is about to step the statement `sql`.
+  virtual void SqliteStep(std::string_view sql) {}
+  // sqlite3::Connection::Transaction began an outermost transaction
+  // (BEGIN; a nested one is a SAVEPOINT), committed durably (a WAL fsync)
+  // iff `durable` (Durability::kSync).
+  virtual void SqliteTransaction(bool durable) {}
 };
 
 // The implementation every production Context uses: records nothing. A
@@ -493,9 +560,10 @@ inline ProtocolEvents &NoProtocolEvents() {
 }
 
 // The implementation main.cc installs: NoProtocolEvents() in production
-// (protocol_events_main.cc), a recorder in the testonly recording build
-// (dcfs/testonly/main_recorder.cc). Link-time selection: a binary links
-// exactly one of the two.
+// (protocol_events_main.cc); the checker and the counter in the testonly
+// checking build (dcfs/testonly/main_invariant_checker.cc), and the recorder
+// with them in the testonly recording build (dcfs/testonly/main_recorder.cc).
+// Link-time selection: a binary links exactly one.
 ProtocolEvents &MainProtocolEvents();
 
 namespace events {

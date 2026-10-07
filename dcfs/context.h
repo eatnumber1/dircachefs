@@ -10,7 +10,6 @@
 #include "absl/status/statusor.h"
 #include "absl/time/clock_interface.h"
 #include "dcfs/interrupts.h"
-#include "dcfs/invariant_checks.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
@@ -120,11 +119,15 @@ struct Context {
   // absl::SimulatedClock in tests. Never null; not owned. Production code
   // reads the time nowhere else (tools/banned_symbols.txt).
   absl::Clock *clock = &absl::Clock::GetRealClock();
-  // The runtime invariant checks (dcfs/invariant_checks.h): nothing in
-  // production; the checker in the testonly checking build and the
-  // forged-request harness. Never null; not owned.
-  InvariantChecks *checks = &NoInvariantChecks();
 };
+
+// Installs `events` (never null; not owned) as `ctx`'s observer: its
+// Context::events, and the observer of its database's statements and
+// transactions (sqlite3::Connection::set_observer, the cost counters).
+inline void Observe(Context &ctx, ProtocolEvents *events) {
+  ctx.events = events;
+  ctx.db.set_observer(events);
+}
 
 }  // namespace dcfs
 

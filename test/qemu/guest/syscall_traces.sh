@@ -22,7 +22,13 @@ TESTUTIL=/bin/testutil
 MNT=/mnt
 LOG1=/tmp/dcfs-1.log
 LOG2=/tmp/dcfs-2.log
-STRACE_SQL_LOG=$LOG1
+# The daemon is the testonly checking build (qemu_test.bzl's initramfs_for):
+# its cost counter writes the SQLite step and transaction counts the budgets
+# read (strace_lib.sh, counter_value) to $DCFS_COUNTERS_FILE, in the cache's
+# directory so that strace_reduce files its writes under "cache".
+DCFS_COUNTERS_FILE=/cache/counters-cold
+export DCFS_COUNTERS_FILE
+STRACE_COUNTERS=$DCFS_COUNTERS_FILE
 
 DAEMON_PID=""
 MOUNTED=0
@@ -88,7 +94,7 @@ pass strace-runs
 
 SRC=/src/cold
 DB=/cache/cold.db
-if ! start_daemon "$LOG1" --sync_interval_sec=1000000 --v=2 --stderrthreshold=0; then
+if ! start_daemon "$LOG1" --sync_interval_sec=1000000; then
 	fail cold-mount "daemon did not start"
 	exit 1
 fi
@@ -118,13 +124,14 @@ close(backing)
 EOT
 strace_budget budget-cold-lookup cold-lookup
 stop_daemon
-STRACE_SQL_LOG=$LOG2
+DCFS_COUNTERS_FILE=/cache/counters-warm
+STRACE_COUNTERS=$DCFS_COUNTERS_FILE
 
 # --- warm: the same operations are answered from the cache ----------------
 
 SRC=/src/t
 DB=/cache/warm.db
-if ! start_daemon "$LOG2" --sync_interval_sec=1000000 --v=2 --stderrthreshold=0; then
+if ! start_daemon "$LOG2" --sync_interval_sec=1000000; then
 	fail warm-mount "daemon did not start"
 	exit 1
 fi

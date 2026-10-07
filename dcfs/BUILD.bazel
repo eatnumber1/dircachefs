@@ -6,14 +6,13 @@ load("//tools/warnings:flags_test.bzl", "flags_test")
 # Shared by :main, :main_static (the QEMU-initramfs copy, see below),
 # :main_static_traced and :main_static_checked so their dependency lists
 # can't drift apart. Every binary adds exactly one definition of
-# MainProtocolEvents() (see protocol_events.h): :protocol_events_main in
-# production, the recorder in the testonly recording build; and exactly one
-# of MainInvariantChecks() (see invariant_checks.h): :invariant_checks_main
-# in production, the checker in the testonly checking build.
+# MainProtocolEvents(), the observer main.cc installs (see
+# protocol_events.h): :protocol_events_main's no-op in production, the
+# checker and counter in the testonly checking build, the recorder with them
+# in the testonly recording build.
 MAIN_DEPS = [
     ":version",
     ":backing",
-    ":invariant_checks",
     ":protocol_events",
     ":interrupts",
     ":session_loop",
@@ -52,27 +51,7 @@ MAIN_DEPS = [
 cc_binary(
     name = "main",
     srcs = ["main.cc"],
-    deps = MAIN_DEPS + [
-        ":invariant_checks_main",
-        ":protocol_events_main",
-    ],
-)
-
-# The runtime invariant checks (invariant_checks.h, step 26.2): the hooks
-# every layer calls through Context::checks, and the production
-# MainInvariantChecks(), which checks nothing. The checker is
-# //dcfs/testonly:invariant_checker.
-cc_library(
-    name = "invariant_checks",
-    visibility = ["//dcfs/testonly:__pkg__"],
-    hdrs = ["invariant_checks.h"],
-    deps = ["@absl//absl/types:source_location"],
-)
-
-cc_library(
-    name = "invariant_checks_main",
-    srcs = ["invariant_checks_main.cc"],
-    deps = [":invariant_checks"],
+    deps = MAIN_DEPS + [":protocol_events_main"],
 )
 
 # The protocol events (protocol_events.h): the interface every layer calls
@@ -86,6 +65,7 @@ cc_library(
       "@absl//absl/functional:function_ref",
       "@absl//absl/status",
       "@absl//absl/status:statusor",
+      "@absl//absl/types:source_location",
     ],
 )
 
@@ -106,6 +86,7 @@ cc_library(
     srcs = ["sqlite.cc"],
     hdrs = ["sqlite.h"],
     deps = [
+      ":protocol_events",
       ":ret_check",
       ":status",
       "@absl//absl/cleanup",
@@ -437,7 +418,6 @@ cc_library(
     srcs = ["fuse_ops.cc"],
     deps = [
       ":interrupts",
-      ":invariant_checks",
       ":protocol_events",
       ":dir_cache_fs",
       ":fuse_request",
@@ -606,7 +586,6 @@ cc_library(
     srcs = ["dir_cache_fs.cc"],
     hdrs = ["dir_cache_fs.h"],
     deps = [
-      ":invariant_checks",
       ":checkpoint",
       ":protocol_events",
       ":escape",
@@ -659,8 +638,9 @@ DIR_CACHE_FS_TEST_DEPS = [
     "//dcfs/testonly:assert_ok_and_assign",
     "//dcfs/testonly:dir_cache_fs_peer",
     "//dcfs/testonly:files",
+    "//dcfs/testonly:cost_counter",
     "//dcfs/testonly:invariant_checker",
-    "//dcfs/testonly:step_counter",
+    "//dcfs/testonly:observers",
     "//dcfs/testonly:trace_recorder",
     "@absl//absl/base:log_severity",
     "@absl//absl/container:flat_hash_set",
@@ -1129,7 +1109,6 @@ cc_library(
     deps = [
       ":device_id",
       ":interrupts",
-      ":invariant_checks",
       ":mount_fds",
       ":protocol_events",
       ":sqlite",
@@ -1201,7 +1180,6 @@ cc_library(
     srcs = ["backing.cc"],
     hdrs = ["backing.h"],
     deps = [
-      ":invariant_checks",
       ":checkpoint",
       ":protocol_events",
       ":escape",
@@ -1285,19 +1263,15 @@ cc_binary(
         "//test/qemu:__pkg__",
         "//tools:__pkg__",
     ],
-    deps = MAIN_DEPS + [
-        ":invariant_checks_main",
-        ":protocol_events_main",
-    ],
+    deps = MAIN_DEPS + [":protocol_events_main"],
 )
 
 # The testonly recording build of :main_static, for trace validation
 # (formal/README.md, "Trace validation"): the same code, linked with the
-# recorder's MainProtocolEvents() (dcfs/testonly/main_recorder.cc), which
-# writes every protocol event to the console, and with the invariant
-# checker's MainInvariantChecks() (step 26.2: dcfs/testonly/
-# main_invariant_checker.cc), as :main_static_checked. Only //test/qemu's
-# traced initramfs uses it.
+# MainProtocolEvents() of dcfs/testonly/main_recorder.cc: the recorder, which
+# writes every protocol event to the console, together with the invariant
+# checker and the cost counter, as :main_static_checked (steps 26.2,
+# 26.4b). Only //test/qemu's traced initramfs uses it.
 cc_binary(
     name = "main_static_traced",
     testonly = 1,
@@ -1309,17 +1283,14 @@ cc_binary(
     }),
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
-    # The invariant checks too (step 26.2): a traced run is also checked.
-    deps = MAIN_DEPS + [
-        "//dcfs/testonly:main_invariant_checker",
-        "//dcfs/testonly:main_recorder",
-    ],
+    deps = MAIN_DEPS + ["//dcfs/testonly:main_recorder"],
 )
 
 # The testonly checking build of :main_static (step 26.2; docs/design.md,
-# "Runtime invariant checks"): the same code, linked with the checker's
-# MainInvariantChecks() (dcfs/testonly/main_invariant_checker.cc), which
-# aborts the daemon when an invariant fails. //test/qemu's
+# "Runtime invariant checks"): the same code, linked with
+# MainProtocolEvents() of dcfs/testonly/main_invariant_checker.cc: the
+# checker, which aborts the daemon when an invariant fails, and the cost
+# counter (step 26.4b). //test/qemu's
 # :initramfs_checked uses it, which every small and medium qemu_test boots
 # (the fast and presubmit tiers); the large and enormous ones boot the plain
 # :main_static.
@@ -1334,10 +1305,7 @@ cc_binary(
     }),
     linkstatic = True,
     visibility = ["//test/qemu:__pkg__"],
-    deps = MAIN_DEPS + [
-        ":protocol_events_main",
-        "//dcfs/testonly:main_invariant_checker",
-    ],
+    deps = MAIN_DEPS + ["//dcfs/testonly:main_invariant_checker"],
 )
 
 # Every target the shipped binaries (the dynamic :main and the static

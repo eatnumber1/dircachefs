@@ -15,7 +15,6 @@
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fuse_request.h"
-#include "dcfs/invariant_checks.h"
 #include "dcfs/protocol_events.h"
 #include "fuse_lowlevel.h"
 
@@ -40,14 +39,14 @@ events::Ino Ino(fuse_ino_t ino) { return static_cast<events::Ino>(ino); }
 // returns the status to reply.
 //
 // It is also one frame of the runtime invariant checks
-// (dcfs/invariant_checks.h), around the protocol-event frame: RequestEnd
+// (ProtocolEvents::CheckRequestBegin), around the protocol-event frame: its end
 // comes after the reply has been sent.
 template <typename Handler>
 void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
   FuseRequest fr(req);
   DirCacheFS &fs = GetFS(req);
   Context &ctx = fs.context();
-  ctx.checks->RequestBegin(ctx, fs, request);
+  ctx.events->CheckRequestBegin(ctx, fs, request);
   // The request checkpoints ask about (dcfs/interrupts.h).
   ctx.interrupts->Begin(req);
   {
@@ -55,7 +54,7 @@ void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
     fr.ReplyFailureAndLogIfNotOk(scope.Finish(handler(fs, fr)));
   }
   ctx.interrupts->End();
-  ctx.checks->RequestEnd(ctx, fs, request);
+  ctx.events->CheckRequestEnd(ctx, fs, request);
 }
 
 void Init(void *userdata, fuse_conn_info *conn) {
@@ -70,7 +69,7 @@ void Destroy(void *userdata) {
   auto *fs = static_cast<DirCacheFS *>(userdata);
   absl::Status s = fs->Destroy();
   LOG_IF(ERROR, !s.ok()) << s;
-  fs->context().checks->Destroyed(fs->context(), *fs);
+  fs->context().events->CheckDestroyed(fs->context(), *fs);
 }
 
 void Lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
@@ -87,10 +86,10 @@ void Forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
   DirCacheFS &fs = GetFS(req);
   Context &ctx = fs.context();
   const events::Request request{.op = events::Op::kForget, .ino = Ino(ino)};
-  ctx.checks->RequestBegin(ctx, fs, request);
-  ctx.checks->Forgetting(ctx, fs, ino, nlookup);
+  ctx.events->CheckRequestBegin(ctx, fs, request);
+  ctx.events->CheckForgetting(ctx, fs, ino, nlookup);
   fs.Forget(fr, ino, nlookup);
-  ctx.checks->RequestEnd(ctx, fs, request);
+  ctx.events->CheckRequestEnd(ctx, fs, request);
 }
 
 void ForgetMulti(fuse_req_t req, size_t count, fuse_forget_data *forgets) {
@@ -101,12 +100,12 @@ void ForgetMulti(fuse_req_t req, size_t count, fuse_forget_data *forgets) {
   const events::Request request{
       .op = events::Op::kBatchForget,
       .ino = count > 0 ? Ino(forgets[0].ino) : 0};
-  ctx.checks->RequestBegin(ctx, fs, request);
+  ctx.events->CheckRequestBegin(ctx, fs, request);
   for (size_t i = 0; i < count; ++i) {
-    ctx.checks->Forgetting(ctx, fs, forgets[i].ino, forgets[i].nlookup);
+    ctx.events->CheckForgetting(ctx, fs, forgets[i].ino, forgets[i].nlookup);
   }
   fs.ForgetMulti(fr, std::span<const fuse_forget_data>(forgets, count));
-  ctx.checks->RequestEnd(ctx, fs, request);
+  ctx.events->CheckRequestEnd(ctx, fs, request);
 }
 
 void Getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {

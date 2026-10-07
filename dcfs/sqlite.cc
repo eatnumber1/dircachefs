@@ -17,6 +17,7 @@
 #include "absl/strings/cord.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 
@@ -200,8 +201,24 @@ bool Statement::ColumnIsNull(int index) {
   return sqlite3_column_type(stmt_, index) == SQLITE_NULL;
 }
 
+namespace {
+
+// The sqlite3_set_clientdata key of a connection's observer.
+constexpr char kObserverKey[] = "dcfs.observer";
+
+ProtocolEvents *ObserverOf(::sqlite3 *db) {
+  return db == nullptr ? nullptr
+                       : static_cast<ProtocolEvents *>(
+                             sqlite3_get_clientdata(db, kObserverKey));
+}
+
+}  // namespace
+
 absl::StatusOr<bool> Statement::Step() {
   VLOG(2) << "sqlite3_step: " << ExpandedSql();
+  if (ProtocolEvents *observer = ObserverOf(sqlite3_db_handle(stmt_))) {
+    observer->SqliteStep(Sql());
+  }
   int rc = sqlite3_step(stmt_);
   if (rc == SQLITE_ROW) return true;
   if (rc == SQLITE_DONE) return false;
@@ -359,6 +376,9 @@ absl::Status Connection::RunTransaction(
     absl::FunctionRef<absl::Status()> body) {
   int depth = savepoint_depth_;
   if (depth == 0) {
+    if (ProtocolEvents *observer = ObserverOf(db_)) {
+      observer->SqliteTransaction(sync_transaction_);
+    }
     ABSL_RETURN_IF_ERROR(Exec("BEGIN IMMEDIATE"));
   } else {
     ABSL_RETURN_IF_ERROR(Exec(absl::StrCat("SAVEPOINT sp_", depth)));
@@ -421,6 +441,10 @@ int64_t Connection::LastInsertRowId() const {
 }
 
 int64_t Connection::Changes() const { return sqlite3_changes64(db_); }
+
+void Connection::set_observer(ProtocolEvents *observer) {
+  sqlite3_set_clientdata(db_, kObserverKey, observer, nullptr);
+}
 
 bool Connection::InTransaction() const {
   return sqlite3_get_autocommit(db_) == 0;

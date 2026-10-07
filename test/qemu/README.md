@@ -229,9 +229,8 @@ checking build (`//dcfs:main_static_checked`); `large` and `enormous` boot
 `initramfs_for`). So `--config=fast` and `--config=presubmit` run every
 guest against the checks, and so does CI for those tiers, while CI's large
 tier runs what ships. `plain_dcfs = True` boots the plain build whatever
-the tier, for a test that measures what ships: `syscall_traces_test` (it
-counts the daemon's SQLite statements, and the checker's own queries would
-count), `memory_test` (its RSS ratios would count the checker's full
+the tier, for a test that measures what ships: `memory_test` (its RSS
+ratios would count the checker's full
 check at startup filling SQLite's page cache, and its per-request sets) and
 `readdir_boundary_test` (its warm listing's time limit would count the
 checks' per-request cost). The
@@ -597,8 +596,10 @@ trace is running at the time.
 of each kind it may make: `backing` and `procfd` syscalls and `sync` (fsync,
 fdatasync and syncfs of any kind, so the cache database's WAL fsyncs count)
 from strace, and `sql_stmts` (statement steps) and `sql_txns` (outermost
-`BEGIN`s) from the daemon's own `--v=2` log (`VLOG(2)` in
-`Statement::Step`: no production change). `strace_budget` fails an operation
+`BEGIN`s) from the checking daemon's cost counter (step 26.4b,
+`dcfs/testonly/cost_counter.h`: `$DCFS_COUNTERS_FILE`, read by
+`counter_value`; the checker's own statements are left out; until 26.4b
+they were counted from `--v=2` log lines, with the same results). `strace_budget` fails an operation
 whose count rose above its budget, naming both numbers; a count below passes.
 The budgets started at the observed counts. Raising one is a deliberate edit
 of the file whose commit says why. The goldens pin the order; the budgets pin

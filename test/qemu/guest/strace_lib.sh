@@ -131,12 +131,13 @@ strace_compare() {
 
 STRACE_DIR=/tmp/strace
 
-# sql_count PATTERN: how many lines of the daemon's log ($STRACE_SQL_LOG,
-# written with --v=2 --stderrthreshold=0) say "sqlite3_step: <sql>" with
-# <sql> starting PATTERN (every statement step; "BEGIN" for the outermost
-# transactions).
-sql_count() {
-	grep -c "sqlite3_step: $1" "$STRACE_SQL_LOG" || true
+# counter_value NAME: the testonly daemon's cost counter NAME ("steps":
+# every SQLite statement step; "transactions": the outermost transactions;
+# "request.LOOKUP", ...) as it last wrote it to $STRACE_COUNTERS (its
+# $DCFS_COUNTERS_FILE: dcfs/testonly/cost_counter.h, step 26.4b); 0 if it
+# has none.
+counter_value() {
+	awk -v k="$1" '$1 == k { v = $2 } END { print v + 0 }' "$STRACE_COUNTERS" 2>/dev/null || echo 0
 }
 
 # strace_op NAME COMMAND...: with the daemon (DAEMON_PID, SRC and DB set)
@@ -150,9 +151,9 @@ strace_op() {
 	mkdir -p "$STRACE_DIR"
 	quiesce_daemon "$DAEMON_PID"
 	rm -f "$STRACE_DIR/$so_name.raw"
-	if [ -n "${STRACE_SQL_LOG:-}" ]; then
-		so_stmts=$(sql_count "")
-		so_txns=$(sql_count "BEGIN")
+	if [ -n "${STRACE_COUNTERS:-}" ]; then
+		so_stmts=$(counter_value steps)
+		so_txns=$(counter_value transactions)
 	fi
 	strace -f -y -qq -e "trace=$STRACE_TRACE" -o "$STRACE_DIR/$so_name.raw" \
 		-p "$DAEMON_PID" 2>"$STRACE_DIR/$so_name.err" &
@@ -181,9 +182,9 @@ strace_op() {
 	strace_reduce "$SRC" "$(dirname "$DB")" <"$STRACE_DIR/$so_name.raw" >"$STRACE_DIR/$so_name.all"
 	strace_backing <"$STRACE_DIR/$so_name.all" >"$STRACE_DIR/$so_name.trace"
 	strace_counts <"$STRACE_DIR/$so_name.all" >"$STRACE_DIR/$so_name.counts"
-	if [ -n "${STRACE_SQL_LOG:-}" ]; then
-		echo "sql_stmts $(($(sql_count "") - so_stmts))" >>"$STRACE_DIR/$so_name.counts"
-		echo "sql_txns $(($(sql_count "BEGIN") - so_txns))" >>"$STRACE_DIR/$so_name.counts"
+	if [ -n "${STRACE_COUNTERS:-}" ]; then
+		echo "sql_stmts $(($(counter_value steps) - so_stmts))" >>"$STRACE_DIR/$so_name.counts"
+		echo "sql_txns $(($(counter_value transactions) - so_txns))" >>"$STRACE_DIR/$so_name.counts"
 	fi
 	return "$so_rc"
 }

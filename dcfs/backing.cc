@@ -41,7 +41,6 @@
 #include "dcfs/fd.h"
 #include "dcfs/escape.h"
 #include "dcfs/file_handle.h"
-#include "dcfs/invariant_checks.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
 #include "dcfs/protocol_events.h"
@@ -68,7 +67,7 @@ int ErrnoOf(const absl::Status &status) {
   return GetErrnoFromStatus(status).value_or(0);
 }
 
-// The runtime invariant checks' hook (dcfs/invariant_checks.h). Called
+// The runtime invariant checks' hook (ProtocolEvents::BackingCall). Called
 // right before every backing syscall made by a function of this file that
 // holds a Context, and before every call such a function makes into code
 // without one that makes backing syscalls (this file's descriptor-only
@@ -79,7 +78,7 @@ int ErrnoOf(const absl::Status &status) {
 void BackingCall(
     Context &ctx, std::string_view what,
     absl::SourceLocation site = absl::SourceLocation::current()) {
-  ctx.checks->BackingCall(ctx, what, site);
+  ctx.events->BackingCall(ctx, what, site);
 }
 
 // --- Helpers over the plain syscalls:: wrappers -----------------------------
@@ -2004,7 +2003,7 @@ absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
       sqlite3::Durability::kSync));
   // Model: StartRun.
   ctx.events->RunStarted(ctx);
-  ctx.checks->RunStarting(ctx);
+  ctx.events->CheckRunStarting(ctx);
   // The rows to probe once the mount fds exist (Startup).
   if (unclean || recovered > 0) return dirty;
   return std::vector<InodeId>{};
@@ -2019,7 +2018,7 @@ absl::Status Startup(Context &ctx, FileDescriptor source_fd,
   ProbeRecoveredRows(ctx, recovered);
   // After the probe: the start-up's full check sees the state the first
   // request will (the probe deletes rows a crash left).
-  ctx.checks->RunStarted(ctx);
+  ctx.events->CheckRunStarted(ctx);
   return absl::OkStatus();
 }
 

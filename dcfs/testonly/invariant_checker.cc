@@ -29,6 +29,10 @@
 namespace dcfs::testonly {
 namespace {
 
+// The prefix of every statement the checker runs (InvariantChecker::
+// kSqlMarker, which the cost counter leaves out).
+#define DCFS_CHECKER_SQL "/*invariant-checker*/ "
+
 // The invariants' names, as a violation reports them (see the header).
 constexpr std::string_view kNoTransactionAtBackingCall =
     "no-transaction-at-backing-call";
@@ -59,8 +63,9 @@ absl::Status Violation(std::string_view invariant, const Args &...what) {
 }
 
 absl::StatusOr<bool> HasDirtyRow(Context &ctx, InodeId id) {
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                        ctx.db.Prepared("SELECT 1 FROM dirty WHERE inode = ?"));
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT 1 FROM dirty WHERE inode = ?"));
   ABSL_RETURN_IF_ERROR(stmt->Bind(1, id));
   bool found = false;
   ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
@@ -102,8 +107,9 @@ absl::Status InFlightAreDirty(Context &ctx) {
 // dirty-set: Context::dirty.any false means the table is empty.
 absl::Status NoneDirtyUnlessAny(Context &ctx) {
   if (ctx.dirty.any) return absl::OkStatus();
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                        ctx.db.Prepared("SELECT 1 FROM dirty LIMIT 1"));
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT 1 FROM dirty LIMIT 1"));
   bool found = false;
   ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
     found = true;
@@ -114,51 +120,88 @@ absl::Status NoneDirtyUnlessAny(Context &ctx) {
                    "Context::dirty.any is false but the dirty table has rows");
 }
 
+}  // namespace
+
 std::string_view OpName(events::Op op) {
   using events::Op;
   switch (op) {
-    case Op::kOther: return "OTHER";
-    case Op::kLookup: return "LOOKUP";
-    case Op::kGetattr: return "GETATTR";
-    case Op::kSetattr: return "SETATTR";
-    case Op::kReadlink: return "READLINK";
-    case Op::kMknod: return "MKNOD";
-    case Op::kMkdir: return "MKDIR";
-    case Op::kUnlink: return "UNLINK";
-    case Op::kRmdir: return "RMDIR";
-    case Op::kSymlink: return "SYMLINK";
-    case Op::kRename: return "RENAME";
-    case Op::kLink: return "LINK";
-    case Op::kOpen: return "OPEN";
-    case Op::kRead: return "READ";
-    case Op::kWrite: return "WRITE";
-    case Op::kFlush: return "FLUSH";
-    case Op::kRelease: return "RELEASE";
-    case Op::kFsync: return "FSYNC";
-    case Op::kOpendir: return "OPENDIR";
-    case Op::kReaddir: return "READDIR";
-    case Op::kReaddirplus: return "READDIRPLUS";
-    case Op::kReleasedir: return "RELEASEDIR";
-    case Op::kFsyncdir: return "FSYNCDIR";
-    case Op::kStatfs: return "STATFS";
-    case Op::kSetxattr: return "SETXATTR";
-    case Op::kGetxattr: return "GETXATTR";
-    case Op::kListxattr: return "LISTXATTR";
-    case Op::kRemovexattr: return "REMOVEXATTR";
-    case Op::kAccess: return "ACCESS";
-    case Op::kCreate: return "CREATE";
-    case Op::kFallocate: return "FALLOCATE";
-    case Op::kCopyFileRange: return "COPY_FILE_RANGE";
-    case Op::kIoctl: return "IOCTL";
-    case Op::kTmpfile: return "TMPFILE";
-    case Op::kLinkTmpfile: return "LINK";
-    case Op::kForget: return "FORGET";
-    case Op::kBatchForget: return "BATCH_FORGET";
+    case Op::kOther:
+      return "OTHER";
+    case Op::kLookup:
+      return "LOOKUP";
+    case Op::kGetattr:
+      return "GETATTR";
+    case Op::kSetattr:
+      return "SETATTR";
+    case Op::kReadlink:
+      return "READLINK";
+    case Op::kMknod:
+      return "MKNOD";
+    case Op::kMkdir:
+      return "MKDIR";
+    case Op::kUnlink:
+      return "UNLINK";
+    case Op::kRmdir:
+      return "RMDIR";
+    case Op::kSymlink:
+      return "SYMLINK";
+    case Op::kRename:
+      return "RENAME";
+    case Op::kLink:
+      return "LINK";
+    case Op::kOpen:
+      return "OPEN";
+    case Op::kRead:
+      return "READ";
+    case Op::kWrite:
+      return "WRITE";
+    case Op::kFlush:
+      return "FLUSH";
+    case Op::kRelease:
+      return "RELEASE";
+    case Op::kFsync:
+      return "FSYNC";
+    case Op::kOpendir:
+      return "OPENDIR";
+    case Op::kReaddir:
+      return "READDIR";
+    case Op::kReaddirplus:
+      return "READDIRPLUS";
+    case Op::kReleasedir:
+      return "RELEASEDIR";
+    case Op::kFsyncdir:
+      return "FSYNCDIR";
+    case Op::kStatfs:
+      return "STATFS";
+    case Op::kSetxattr:
+      return "SETXATTR";
+    case Op::kGetxattr:
+      return "GETXATTR";
+    case Op::kListxattr:
+      return "LISTXATTR";
+    case Op::kRemovexattr:
+      return "REMOVEXATTR";
+    case Op::kAccess:
+      return "ACCESS";
+    case Op::kCreate:
+      return "CREATE";
+    case Op::kFallocate:
+      return "FALLOCATE";
+    case Op::kCopyFileRange:
+      return "COPY_FILE_RANGE";
+    case Op::kIoctl:
+      return "IOCTL";
+    case Op::kTmpfile:
+      return "TMPFILE";
+    case Op::kLinkTmpfile:
+      return "LINK";
+    case Op::kForget:
+      return "FORGET";
+    case Op::kBatchForget:
+      return "BATCH_FORGET";
   }
   return "?";
 }
-
-}  // namespace
 
 InvariantChecker::InvariantChecker(int console_fd) : console_fd_(console_fd) {}
 
@@ -212,11 +255,11 @@ std::string InvariantChecker::Where() const {
 }
 
 void InvariantChecker::Fail(const absl::Status &violation) {
-  const std::string what = absl::StrCat(
-      violation.code() == absl::StatusCode::kFailedPrecondition
-          ? ""
-          : "invariant-checker: a check could not run: ",
-      violation.message(), " (", Where(), ")");
+  const std::string what =
+      absl::StrCat(violation.code() == absl::StatusCode::kFailedPrecondition
+                       ? ""
+                       : "invariant-checker: a check could not run: ",
+                   violation.message(), " (", Where(), ")");
   if (console_fd_ >= 0) {
     const std::string line =
         // A newline first: the console may be part way through a line.
@@ -242,8 +285,8 @@ void InvariantChecker::BackingCall(Context &ctx, std::string_view what,
   if (on_backing_call_) on_backing_call_(site);
 }
 
-void InvariantChecker::RequestBegin(Context &ctx, const DirCacheFS &fs,
-                                    const events::Request &request) {
+void InvariantChecker::CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+                                         const events::Request &request) {
   Attach(ctx);
   Frame frame{.op = request.op, .nodeid = static_cast<uint64_t>(request.ino)};
   if (request.ino != 0) frame.ids.push_back(request.ino);
@@ -251,15 +294,15 @@ void InvariantChecker::RequestBegin(Context &ctx, const DirCacheFS &fs,
   frames_.push_back(std::move(frame));
 }
 
-void InvariantChecker::RequestEnd(Context &ctx, const DirCacheFS &fs,
-                                  const events::Request &request) {
+void InvariantChecker::CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+                                       const events::Request &request) {
   Attach(ctx);
   FailIfNotOk(CheckChanged(ctx, &fs, frames_.back().ids));
   frames_.pop_back();
 }
 
-void InvariantChecker::Forgetting(Context &ctx, const DirCacheFS &fs,
-                                  uint64_t ino, uint64_t nlookup) {
+void InvariantChecker::CheckForgetting(Context &ctx, const DirCacheFS &fs,
+                                       uint64_t ino, uint64_t nlookup) {
   Attach(ctx);
   const InodeId id = static_cast<InodeId>(ino);
   // What this request forgets of `id` so far (a BATCH_FORGET could name it
@@ -276,13 +319,12 @@ void InvariantChecker::Forgetting(Context &ctx, const DirCacheFS &fs,
   auto it = lookups.find(id);
   const uint64_t counted = it == lookups.end() ? 0 : it->second;
   if (counted < forgotten) {
-    Fail(Violation(kLookupCount, "FORGET of ", forgotten,
-                   " lookups of nodeid ", ino, ", but ", counted,
-                   " counted"));
+    Fail(Violation(kLookupCount, "FORGET of ", forgotten, " lookups of nodeid ",
+                   ino, ", but ", counted, " counted"));
   }
 }
 
-void InvariantChecker::RunStarting(Context &ctx) {
+void InvariantChecker::CheckRunStarting(Context &ctx) {
   Attach(ctx);
   // A run starts with no open file: main.cc makes the DirCacheFS after
   // Startup. The harness calls StartRun under a live DirCacheFS to stand
@@ -294,7 +336,7 @@ void InvariantChecker::RunStarting(Context &ctx) {
   }
 }
 
-void InvariantChecker::RunStarted(Context &ctx) {
+void InvariantChecker::CheckRunStarted(Context &ctx) {
   Attach(ctx);
   frames_.push_back(Frame{.label = "Startup"});
   FailIfNotOk(CheckAll(ctx, nullptr));
@@ -312,7 +354,7 @@ void InvariantChecker::ForgetReleasedStaleOpens(const Context &ctx) {
   });
 }
 
-void InvariantChecker::Destroyed(Context &ctx, const DirCacheFS &fs) {
+void InvariantChecker::CheckDestroyed(Context &ctx, const DirCacheFS &fs) {
   Attach(ctx);
   frames_.push_back(Frame{.label = "DESTROY"});
   FailIfNotOk(CheckEverything(ctx, &fs, /*destroyed=*/true));
@@ -323,7 +365,8 @@ absl::Status InvariantChecker::SeeEveryDirtyDelete(Context &ctx) {
   if (no_truncate_) return absl::OkStatus();
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
-      ctx.db.Prepared("SELECT 1 FROM sqlite_master "
+      ctx.db.Prepared(DCFS_CHECKER_SQL
+                      "SELECT 1 FROM sqlite_master "
                       "WHERE type = 'table' AND name = 'dirty'"));
   bool exists = false;
   ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
@@ -332,6 +375,7 @@ absl::Status InvariantChecker::SeeEveryDirtyDelete(Context &ctx) {
   }));
   if (!exists) return absl::OkStatus();  // Before Migrate.
   ABSL_RETURN_IF_ERROR(ctx.db.Exec(
+      DCFS_CHECKER_SQL
       "CREATE TEMP TRIGGER IF NOT EXISTS dcfs_invariant_checks_no_truncate "
       "AFTER DELETE ON main.dirty BEGIN SELECT 1; END"));
   no_truncate_ = true;
@@ -375,9 +419,10 @@ absl::Status InvariantChecker::CheckChanged(Context &ctx, const DirCacheFS *fs,
   }
   for (int64_t id : stubs) ABSL_RETURN_IF_ERROR(CheckStub(ctx, id));
   for (int64_t rowid : xattrs) {
-    ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                          ctx.db.Prepared("SELECT inode FROM xattrs "
-                                          "WHERE rowid = ?"));
+    ABSL_ASSIGN_OR_RETURN(
+        sqlite3::Statement * stmt,
+        ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT inode FROM xattrs "
+                                         "WHERE rowid = ?"));
     ABSL_RETURN_IF_ERROR(stmt->Bind(1, rowid));
     ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       interest.insert(row.Column<int64_t>(0));
@@ -418,8 +463,10 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
   {
     ABSL_ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
-        ctx.db.Prepared("SELECT id, attrs_valid, fuse_gen, nlink, "
-                        DCFS_ATTR_MISSING " FROM inodes"));
+        ctx.db.Prepared(
+            DCFS_CHECKER_SQL
+            "SELECT id, attrs_valid, fuse_gen, nlink, " DCFS_ATTR_MISSING
+            " FROM inodes"));
     absl::Status found;
     ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       if (found.ok()) found = CheckInodeRow(ctx, fs, row);
@@ -433,6 +480,7 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
     ABSL_ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
+            DCFS_CHECKER_SQL
             "SELECT rowid FROM dentries AS d WHERE (d.state = 'refused') > "
             "EXISTS (SELECT 1 FROM stubs AS s WHERE s.parent = d.parent AND "
             "s.name = d.name) OR (d.state IN ('present', 'absent') AND "
@@ -449,8 +497,9 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
     }
   }
   {
-    ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                          ctx.db.Prepared("SELECT id FROM stubs"));
+    ABSL_ASSIGN_OR_RETURN(
+        sqlite3::Statement * stmt,
+        ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT id FROM stubs"));
     std::vector<int64_t> ids;
     ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       ids.push_back(row.Column<int64_t>(0));
@@ -483,8 +532,10 @@ absl::Status InvariantChecker::CheckInode(Context &ctx, const DirCacheFS *fs,
   if (row_changed || OpenForWrite(ctx, id)) {
     ABSL_ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
-        ctx.db.Prepared("SELECT id, attrs_valid, fuse_gen, nlink, "
-                        DCFS_ATTR_MISSING " FROM inodes WHERE id = ?"));
+        ctx.db.Prepared(
+            DCFS_CHECKER_SQL
+            "SELECT id, attrs_valid, fuse_gen, nlink, " DCFS_ATTR_MISSING
+            " FROM inodes WHERE id = ?"));
     ABSL_RETURN_IF_ERROR(stmt->Bind(1, id));
     absl::Status found;
     ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
@@ -530,9 +581,9 @@ absl::Status InvariantChecker::CheckInodeRow(const Context &ctx,
                      nlink.value_or(0));
   }
   if (id != cache::kRootInode && (fuse_gen <= 0 || fuse_gen > 0xffffffff)) {
-    return Violation(kIdentity, "inode ", id, " has FUSE generation ",
-                     fuse_gen, " (only the root's is 0; others are 1 to "
-                               "2^32-1)");
+    return Violation(kIdentity, "inode ", id, " has FUSE generation ", fuse_gen,
+                     " (only the root's is 0; others are 1 to "
+                     "2^32-1)");
   }
   const bool removed = fs != nullptr && DirCacheFSPeer::IsRemoved(*fs, id);
   if (valid && !removed && OpenForWrite(ctx, id)) {
@@ -547,7 +598,8 @@ absl::Status InvariantChecker::CheckDentry(
     Context &ctx, int64_t rowid, absl::flat_hash_set<InodeId> &interest) {
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
-      ctx.db.Prepared("SELECT d.parent, d.name, d.state, d.inode, EXISTS "
+      ctx.db.Prepared(DCFS_CHECKER_SQL
+                      "SELECT d.parent, d.name, d.state, d.inode, EXISTS "
                       "(SELECT 1 FROM stubs AS s WHERE s.parent = d.parent "
                       "AND s.name = d.name) FROM dentries AS d "
                       "WHERE d.rowid = ?"));
@@ -563,14 +615,13 @@ absl::Status InvariantChecker::CheckDentry(
     if (inode.has_value()) interest.insert(*inode);
     if (state == "refused" && !stub) {
       found = Violation(kTriState, "dentry \"", EscapeBytes(name),
-                        "\" of inode ", parent,
-                        " is refused but has no stub");
+                        "\" of inode ", parent, " is refused but has no stub");
     } else if ((state == "present" || state == "absent") && stub) {
       // A stub outlives its refusal only while the name is unknown (schema
       // v5: forgotten, so that refusing it again keeps its nodeid).
-      found = Violation(kTriState, "dentry \"", EscapeBytes(name),
-                        "\" of inode ", parent, " is ", state,
-                        " but has a stub");
+      found =
+          Violation(kTriState, "dentry \"", EscapeBytes(name), "\" of inode ",
+                    parent, " is ", state, " but has a stub");
     }
     return absl::OkStatus();
   }));
@@ -580,7 +631,8 @@ absl::Status InvariantChecker::CheckDentry(
 absl::Status InvariantChecker::CheckStub(Context &ctx, int64_t id) {
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
-      ctx.db.Prepared("SELECT s.parent, s.name, d.state FROM stubs AS s "
+      ctx.db.Prepared(DCFS_CHECKER_SQL
+                      "SELECT s.parent, s.name, d.state FROM stubs AS s "
                       "LEFT JOIN dentries AS d ON d.parent = s.parent AND "
                       "d.name = s.name WHERE s.id = ?"));
   ABSL_RETURN_IF_ERROR(stmt->Bind(1, id));
@@ -589,11 +641,11 @@ absl::Status InvariantChecker::CheckStub(Context &ctx, int64_t id) {
     const std::optional<std::string> state =
         row.Column<std::optional<std::string>>(2);
     if (state != "refused" && state != "unknown") {
-      found = Violation(kTriState, "stub ", static_cast<uint64_t>(id),
-                        " of dentry \"",
-                        EscapeBytes(row.Column<std::string>(1)),
-                        "\" of inode ", row.Column<int64_t>(0),
-                        " whose dentry is ", state.value_or("missing"));
+      found =
+          Violation(kTriState, "stub ", static_cast<uint64_t>(id),
+                    " of dentry \"", EscapeBytes(row.Column<std::string>(1)),
+                    "\" of inode ", row.Column<int64_t>(0), " whose dentry is ",
+                    state.value_or("missing"));
     }
     return absl::OkStatus();
   }));

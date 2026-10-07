@@ -24,6 +24,8 @@
 // global scope, so this namespace cannot also be named `sqlite3` at global
 // scope. Nest it under `dcfs` instead.
 namespace dcfs {
+class ProtocolEvents;
+
 namespace sqlite3 {
 
 class Connection;
@@ -254,6 +256,15 @@ class Connection {
   int64_t Changes() const;
   // True iff a transaction (started by us, or otherwise) is active.
   bool InTransaction() const;
+
+  // The testonly observer's cost counters (dcfs/protocol_events.h,
+  // ProtocolEvents::SqliteStep and SqliteTransaction; step 26.4b): every
+  // statement stepped on this connection and every outermost transaction
+  // begun is reported to `observer` (null: none). Kept on the sqlite3
+  // handle (sqlite3_set_clientdata), so it follows a moved Connection and
+  // reaches statements prepared outside the cache. Context's Observe sets
+  // it.
+  void set_observer(ProtocolEvents *observer);
 
   // Runs a WAL checkpoint that writes every committed frame back into the
   // main database file and then truncates the WAL file to zero bytes
