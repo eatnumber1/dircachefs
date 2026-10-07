@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -60,7 +61,7 @@ absl::StatusOr<RawHandle> NameToHandle(int dirfd, std::string_view pathname,
 // the unique id when the kernel set that bit, otherwise fall back to the
 // plain one; return nullopt if the kernel set neither (statx didn't
 // understand either request bit at all).
-absl::optional<uint64_t> MountIdFromStatx(const struct statx &stx) {
+std::optional<uint64_t> MountIdFromStatx(const struct statx &stx) {
   if ((stx.stx_mask & STATX_MNT_ID_UNIQUE) != 0) return stx.stx_mnt_id;
   if ((stx.stx_mask & STATX_MNT_ID) != 0) return stx.stx_mnt_id;
   return absl::nullopt;
@@ -143,8 +144,8 @@ absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
       struct statx dir_stx,
       syscalls::statx(dirfd, "", AT_EMPTY_PATH, want_mnt_id));
 
-  absl::optional<uint64_t> entry_mnt_id = MountIdFromStatx(entry_stx);
-  absl::optional<uint64_t> dir_mnt_id = MountIdFromStatx(dir_stx);
+  std::optional<uint64_t> entry_mnt_id = MountIdFromStatx(entry_stx);
+  std::optional<uint64_t> dir_mnt_id = MountIdFromStatx(dir_stx);
 
   DeviceId device;
   if (entry_mnt_id.has_value() && dir_mnt_id.has_value() &&

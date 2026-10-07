@@ -189,7 +189,6 @@ cc_library(
       ":escape",
       ":ret_check",
       ":status",
-      "@absl//absl/base:nullability",
       "@absl//absl/container:flat_hash_map",
       "@absl//absl/log",
       "@absl//absl/status",

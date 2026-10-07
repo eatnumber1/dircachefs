@@ -83,13 +83,13 @@ absl::StatusOr<int> GetSqliteCodeFromStatus(const absl::Status &status) {
   std::optional<absl::Cord> payload = status.GetPayload(kSqliteTypeUrl);
   if (!payload) {
     return NotFoundErrorBuilder()
-           << "Cannot get sqlite code from Status: no payload in Status: "
+           << "cannot get sqlite code from Status: no payload in Status: "
            << status;
   }
   int code = 0;
   if (!absl::SimpleAtoi(std::string(*payload), &code)) {
     return InternalErrorBuilder()
-           << "Malformed sqlite status payload: " << *payload;
+           << "malformed sqlite status payload: " << *payload;
   }
   return code;
 }
@@ -131,7 +131,7 @@ absl::StatusOr<Statement> Statement::Prepare(
     // Statement::Prepare only prepares a single SQL statement.
     sqlite3_finalize(stmt);
     return InvalidArgumentErrorBuilder()
-           << "Extra SQL text after first statement: " << tail;
+           << "extra SQL text after first statement: " << tail;
   }
   return Statement(*stmt);
 }

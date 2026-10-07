@@ -1,12 +1,13 @@
 #include "dcfs/status.h"
 
 #include <cerrno>
+#include <optional>
 
 #include "absl/strings/cord.h"
 
 namespace dcfs {
 
-absl::Status ErrnoToStatus(int error_number, absl::string_view message) {
+absl::Status ErrnoToStatus(int error_number, std::string_view message) {
   absl::Status status = absl::ErrnoToStatus(error_number, message);
   status.SetPayload(kErrnoTypeUrl, absl::Cord(ErrnoToErrorName(error_number)));
   return status;
@@ -15,10 +16,10 @@ absl::Status ErrnoToStatus(int error_number, absl::string_view message) {
 absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status) {
   if (status.ok()) return 0;
 
-  absl::optional<absl::Cord> payload = status.GetPayload(kErrnoTypeUrl);
+  std::optional<absl::Cord> payload = status.GetPayload(kErrnoTypeUrl);
   if (!payload) {
     return NotFoundErrorBuilder()
-           << "Cannot get errno from Status: No payload in Status: " << status;
+           << "cannot get errno from Status: no payload in Status: " << status;
   }
 
   return ErrorNameToErrno(std::string(*payload));

@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
@@ -96,7 +97,7 @@ namespace {
 // arguments) -- as opposed to a valid-looking command line that fails once
 // we try to act on it (a bad --source, a foreign cache database, ...),
 // where printing the usage banner again would just be noise.
-absl::Status UsageError(absl::string_view message) {
+absl::Status UsageError(std::string_view message) {
   std::cerr << absl::ProgramUsageMessage() << "\n";
   return InvalidArgumentErrorBuilder() << message;
 }
@@ -198,7 +199,8 @@ absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
              << " is a symlink; refusing to open a cache file through a "
                 "symlink (another local user could have pointed it anywhere)";
     }
-    return dcfs::ErrnoToStatus(errno, absl::StrCat("open ", path));
+    return dcfs::ErrnoToStatus(
+        errno, absl::StrCat("openat(AT_FDCWD, ", path, ")"));
   }
   FileDescriptor result(fd);
   ABSL_ASSIGN_OR_RETURN(struct stat st, syscalls::fstat(*result));
@@ -220,7 +222,7 @@ absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
 // by default those named after the program (dcfs.cc); our flags live in
 // dcfs/*.cc, so under the installed name `dcfs` none would match. Claim
 // every file under a dcfs/ directory instead.
-bool IsDcfsFlagFile(absl::string_view filename) {
+bool IsDcfsFlagFile(std::string_view filename) {
   return absl::StartsWith(filename, "dcfs/") ||
          absl::StrContains(filename, "/dcfs/");
 }
@@ -372,7 +374,8 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
       struct stat st;
       if (::stat(parent.c_str(), &st) == -1) {
         if (errno != ENOENT) {
-          return dcfs::ErrnoToStatus(errno, absl::StrCat("stat ", parent));
+          return dcfs::ErrnoToStatus(
+              errno, absl::StrCat("fstatat(AT_FDCWD, ", parent, ")"));
         }
         if (::mkdir(parent.c_str(), 0700) == -1) {
           return dcfs::ErrnoToStatus(
@@ -511,7 +514,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     // value too, to satisfy libfuse's do_init() consistency check.
     if (unsigned int max_read;
         absl::StartsWith(opt, "max_read=") &&
-        absl::SimpleAtoi(absl::string_view(opt).substr(9), &max_read)) {
+        absl::SimpleAtoi(std::string_view(opt).substr(9), &max_read)) {
       opts.max_read = max_read;
     }
   }

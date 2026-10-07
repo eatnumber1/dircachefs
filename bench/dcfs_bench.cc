@@ -393,29 +393,28 @@ void ParseOwnFlags(int *argc, char **argv) {
 }  // namespace dcfs_bench
 
 int main(int argc, char **argv) {
-  using namespace dcfs_bench;
   if (argc == 5 && strcmp(argv[1], "mktree") == 0) {
-    return MakeTree(argv[2], strtoull(argv[3], nullptr, 10),
+    return dcfs_bench::MakeTree(argv[2], strtoull(argv[3], nullptr, 10),
                     strtoull(argv[4], nullptr, 10))
                ? 0
                : 1;
   }
   if (argc == 5 && strcmp(argv[1], "dm-delay") == 0) {
-    std::string node = CreateDelayDevice(argv[2], argv[3], atoi(argv[4]));
+    std::string node = dcfs_bench::CreateDelayDevice(argv[2], argv[3], atoi(argv[4]));
     if (node.empty()) return 1;
     printf("%s\n", node.c_str());
     return 0;
   }
-  ParseOwnFlags(&argc, argv);
+  dcfs_bench::ParseOwnFlags(&argc, argv);
   benchmark::Initialize(&argc, argv);
   int rc = 0;
-  if (!Setup()) {
+  if (!dcfs_bench::Setup()) {
     rc = 1;
   } else {
-    Register();
+    dcfs_bench::Register();
     benchmark::RunSpecifiedBenchmarks();
   }
-  for (auto &d : daemons) d->Stop();
+  for (auto &d : dcfs_bench::daemons) d->Stop();
   benchmark::Shutdown();
   return rc;
 }

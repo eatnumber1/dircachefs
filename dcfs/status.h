@@ -18,7 +18,7 @@ constexpr inline std::string_view kErrnoTypeUrl = "rus.har.mn/dcfs/status/errno"
 // only this wrapper attaches the kErrnoTypeUrl payload that
 // GetErrnoFromStatus()/StatusToErrno() and callers such as
 // backing::ReadGeneration() rely on to recover the original errno.
-absl::Status ErrnoToStatus(int error_number, absl::string_view message);
+absl::Status ErrnoToStatus(int error_number, std::string_view message);
 // Builders for new errors that do not come from a syscall (docs/style.md
 // 1.6). Abseil has no absl::InternalErrorBuilder and the like. Each returns
 // an absl::StatusBuilder with the code, so the message is streamed:
