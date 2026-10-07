@@ -1089,3 +1089,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   and phase 3 leaves a row of a freed object the sweep keeps (nlink column not 0); (c) DESTROY
   with a tmpfile open, then a clean start: no sweep, the row stays. Under review (reviewer
   verifies each finding against the code); fixes follow as 12.4b, test first.
+- 7.1 rebased over Alpine (lane-4, 58049eb): presubmit 186/186 (incl. toolchain_test), asan
+  //dcfs/... all sizes 32/32, ubsan //... builds, hermeticity build with host compilers blocked
+  passes; cold //... 19.5 min on 2 shared cores (was ~40), main_static 10 min incl. refetch; the
+  llvm cc_wrapper response-file patch dropped (README keeps the upstream note); numactl patch
+  stays (dependency under review); banned_symbols resolves llvm-nm via runfiles, allow lines
+  adjusted for clang's codegen (fprintf: abseil str_format, libnuma). Under review (fresh
+  dcfs-reviewer): hermeticity completeness, static-link flags, the --wrap mangled names, patches.
