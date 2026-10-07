@@ -657,3 +657,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   built; no weekly forced test rerun (Bazel's invalidation is sound; flake hunting is targeted).
   Needs russ: names_random_slow (100k names, 11 min x 3 fs, 2 GB guests): recommend removing, or
   keeping one ext4 run in the slow tier.
+- russ (2026-10-07): dust dropped; distro kernels boot directly (the disk image is only the systemd guest's root fs); delete names_random_slow_test; Alpine spike positive (notes/alpine-spike-2026-10-07.md): Phase 24 written from its design.
