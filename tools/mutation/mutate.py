@@ -3,7 +3,11 @@
 
   mutate.py generate --workspace W --scope scope.txt --out mutants.json
   mutate.py run      --workspace W --mutants mutants.json --result result.json
-                     [--sample N] [--seed S] [--only ID,ID] [--killers TARGETS]
+                     [--sample N] [--seed S] [--only ID,ID] [--shard K/N]
+                     [--killers PHASES] [--fail-on-survivor]
+                     [--survivors-out FILE]
+  mutate.py changed  --range A..B [--max-mutants 30] --result result.json
+                     [--fail-on-survivor] [--survivors-out FILE]
 
 `generate` finds the places to mutate with clang's AST (-ast-dump=json, the
 pinned clang, the file's own compile command from `bazel aquery`): inside the
@@ -16,6 +20,16 @@ killers (the small tier of //dcfs/... and the trace validation) with the
 first failure ending the mutant. A mutant that does not compile is `invalid`,
 one a test fails or times out on is `killed`, the rest `survived`: a missing
 test. See README.md. Run it with `bazel run //tools/mutation:mutate`.
+
+Exit status of `run` and `changed`: 0 (survivors are findings, listed in the
+output and --survivors-out), 1 with --fail-on-survivor when one survived, 2 on
+a tooling error (a mutant run that was neither killed, survived nor invalid,
+or a generator failure): the scheduled job fails only on 2, the per-push step
+on 1 and 2.
+
+`changed` is the per-push mode: only the functions whose lines the commit
+range touches (git diff hunks mapped to the AST's functions) are mutated, at
+most --max-mutants of them (a sample with a fixed seed beyond that).
 """
 
 import argparse
@@ -249,6 +263,59 @@ def mutants_in(fn, source):
     return found
 
 
+# ---- changed code ---------------------------------------------------------
+
+HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def parse_hunks(diff):
+    """The new-file line ranges [(first, last)] a `git diff -U0` touches."""
+    ranges = []
+    for line in diff.splitlines():
+        m = HUNK.match(line)
+        if not m:
+            continue
+        first = int(m.group(1))
+        count = 1 if m.group(2) is None else int(m.group(2))
+        # A pure deletion (count 0) sits between lines first and first + 1.
+        ranges.append((first, first + count - 1) if count else (first, first + 1))
+    return ranges
+
+
+def touches(fn_lines, hunks):
+    first, last = fn_lines
+    return any(a <= last and b >= first for a, b in hunks)
+
+
+ZEROS = "0" * 40
+
+
+def normalize_range(rev_range):
+    """A push of a new branch has an all-zero base (or none): diff the tip
+    against its parent then."""
+    base, _, tip = rev_range.partition("..")
+    if not tip:
+        return rev_range
+    if not base or base == ZEROS:
+        return "%s~1..%s" % (tip, tip)
+    return rev_range
+
+
+def changed_hunks(workspace, rev_range, path):
+    rev_range = normalize_range(rev_range)
+    diff = subprocess.run(["git", "diff", "-U0", "--no-color", rev_range, "--", path],
+                          cwd=workspace, capture_output=True, text=True, check=True).stdout
+    return parse_hunks(diff)
+
+
+def function_lines(fn, source):
+    """(first line, last line) of a function node, 1-based, or None."""
+    sp = span(fn)
+    if sp is None:
+        return None
+    return source.count("\n", 0, sp[0]) + 1, source.count("\n", 0, sp[1]) + 1
+
+
 # ---- generate -------------------------------------------------------------
 
 def sh(cmd, cwd=None, check=True):
@@ -280,6 +347,7 @@ def compile_command(workspace, target, source):
 
 
 def generate(args):
+    args.changed = getattr(args, "changed", None)
     workspace = os.path.abspath(args.workspace)
     execroot = bazel(workspace, "info", "execution_root").stdout.decode().strip()
     mutants = []
@@ -300,9 +368,16 @@ def generate(args):
                                                time.time() - t), file=sys.stderr)
         functions = parse_stream(p.stdout.decode("utf-8", "replace"), entry["file"])
         seen = set()
+        hunks = None
+        if args.changed:
+            hunks = changed_hunks(workspace, args.changed, entry["file"])
         for fn in functions:
             if not selected(fn, entry["rules"]):
                 continue
+            if hunks is not None:
+                lines = function_lines(fn, source)
+                if lines is None or not touches(lines, hunks):
+                    continue
             for op, (s, e), repl, before in mutants_in(fn, source):
                 key = (entry["file"], s, e, repl)
                 if key in seen:
@@ -337,6 +412,21 @@ def copy_tree(workspace, dest):
         shutil.copy(rc, dest)
 
 
+def shard_of(mutants, k, n):
+    """The k-th (1-based) of n contiguous slices of the id-ordered mutants."""
+    mutants = sorted(mutants, key=lambda m: m["id"])
+    return mutants[(k - 1) * len(mutants) // n:k * len(mutants) // n]
+
+
+def exit_code(results, fail_on_survivor):
+    """2 on a tooling error, 1 on a survivor if asked to, else 0."""
+    if any(r["status"] == "error" for r in results):
+        return 2
+    if fail_on_survivor and any(r["status"] == "survived" for r in results):
+        return 1
+    return 0
+
+
 def run(args):
     workspace = os.path.abspath(args.workspace)
     mutants = json.load(open(args.mutants))
@@ -346,6 +436,9 @@ def run(args):
     if args.sample and args.sample < len(mutants):
         random.Random(args.seed).shuffle(mutants)
         mutants = sorted(mutants[:args.sample], key=lambda m: m["id"])
+    if args.shard:
+        k, n = (int(x) for x in args.shard.split("/"))
+        mutants = shard_of(mutants, k, n)
     scratch = tempfile.mkdtemp(prefix="dcfs-mutate.")
     src = os.path.join(scratch, "src")
     os.makedirs(src)
@@ -371,7 +464,7 @@ def run(args):
                 for killers in phases:
                     try:
                         p = subprocess.run(
-                            ["bazel", "test", "--notest_keep_going", "--test_output=errors",
+                            [args.bazel, "test", "--notest_keep_going", "--test_output=errors",
                              "--jobs=2", "--local_test_jobs=2"] + killers,
                             cwd=src, capture_output=True, timeout=args.timeout)
                         rc = p.returncode
@@ -402,18 +495,27 @@ def run(args):
                 r["seconds"], " by " + killer if killer else ""), file=sys.stderr)
             json.dump(results, open(args.result, "w"), indent=1)
     finally:
-        subprocess.run(["bazel", "shutdown"], cwd=src, capture_output=True)
+        subprocess.run([args.bazel, "shutdown"], cwd=src, capture_output=True)
         shutil.rmtree(scratch, ignore_errors=True)
     wall = time.time() - started
     count = lambda s: sum(1 for r in results if r["status"] == s)
     print("mutants %d: killed %d, survived %d, invalid %d, error %d; wall %.0fs (%.0fs each)" % (
         len(results), count("killed"), count("survived"), count("invalid"), count("error"),
         wall, wall / max(len(results), 1)), file=sys.stderr)
+    lines = []
     for r in results:
         if r["status"] == "survived":
-            print("SURVIVOR %s:%d in %s: %s: `%s` -> `%s`" % (
+            lines.append("SURVIVOR %s:%d in %s: %s: `%s` -> `%s`" % (
                 r["file"], r["line"], r["function"], r["op"], r["before"][:70].replace("\n", " "),
                 r["replacement"][:70].replace("\n", " ")))
+        elif r["status"] == "error":
+            lines.append("ERROR mutant %d %s:%d: %s" % (r["id"], r["file"], r["line"],
+                                                      r.get("tail", "")[-300:].replace("\n", " ")))
+    print("\n".join(lines))
+    if args.survivors_out:
+        with open(args.survivors_out, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + ("\n" if lines else ""))
+    return exit_code(results, args.fail_on_survivor)
 
 
 def main():
@@ -425,6 +527,8 @@ def main():
     g.add_argument("--workspace", default=workspace)
     g.add_argument("--scope", default=scope)
     g.add_argument("--out", required=True)
+    g.add_argument("--changed", default="", metavar="RANGE",
+                   help="only functions whose lines this git range touches")
     r = sub.add_parser("run")
     r.add_argument("--workspace", default=workspace)
     r.add_argument("--mutants", required=True)
@@ -432,16 +536,43 @@ def main():
     r.add_argument("--sample", type=int, default=0)
     r.add_argument("--seed", type=int, default=1)
     r.add_argument("--only", default="")
+    r.add_argument("--shard", default="", metavar="K/N",
+                   help="the K-th of N contiguous id ranges (the scheduled job's matrix)")
+    r.add_argument("--fail-on-survivor", action="store_true")
+    r.add_argument("--survivors-out", default="")
+    r.add_argument("--bazel", default="bazel")
     r.add_argument("--timeout", type=int, default=1800)
     r.add_argument("--show-output", action="store_true",
                    help="print the failing lines of the test that killed a mutant")
     r.add_argument("--killers", default="--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test")
+    c = sub.add_parser("changed", help="per-push mode (see the docstring)")
+    c.add_argument("--workspace", default=workspace)
+    c.add_argument("--scope", default=scope)
+    c.add_argument("--range", required=True, dest="changed")
+    c.add_argument("--max-mutants", type=int, default=30)
+    c.add_argument("--seed", type=int, default=1)
+    c.add_argument("--result", required=True)
+    c.add_argument("--fail-on-survivor", action="store_true")
+    c.add_argument("--survivors-out", default="")
+    c.add_argument("--timeout", type=int, default=1800)
+    c.add_argument("--bazel", default="bazel")
+    c.add_argument("--killers", default="--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test")
     a = ap.parse_args()
     if a.cmd == "generate":
         generate(a)
-    else:
-        run(a)
+        return 0
+    if a.cmd == "changed":
+        a.out = a.result + ".mutants.json"
+        generate(a)
+        if not json.load(open(a.out)):
+            print("no mutants: the range touches no function in scope")
+            return 0
+        a.mutants, a.only, a.shard = a.out, "", ""
+        a.sample = a.max_mutants
+        a.show_output = False
+        return run(a)
+    return run(a)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

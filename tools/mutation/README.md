@@ -53,6 +53,32 @@ first failing test, so killed mutants are cheap and survivors cost the whole
 tier. The result file is rewritten after every mutant, so a long run can be
 read while it goes.
 
+## Per push and on a schedule (step 26.5b)
+
+- **Per push** (`ci.yml`, the `full` job, after the tests): `mutate.py changed
+  --range BASE..TIP --fail-on-survivor` mutates only the functions of
+  `scope.txt` whose lines the range touches (the `git diff -U0` hunks, mapped
+  to the AST's function ranges), at most `--max-mutants` (30; a sample with the
+  fixed seed 1 beyond that), and fails the job when one survives the small tier
+  and trace validation: the change to that function needs a test. A range that
+  touches nothing in scope runs nothing. A new branch's all-zero base means the
+  tip against its parent.
+- **On a schedule** (`.github/workflows/mutation.yml`: weekly, and by
+  `workflow_dispatch`): the whole scope, split into six contiguous id ranges
+  (`run --shard K/6`), one runner each. Survivors are findings (the
+  `mutation-survivors` artifact and the job summary), not failures; a job fails
+  only on a tooling error (exit status 2).
+- Estimate for a runner (4 idle vCPUs, from this machine's 91 s per mutant for
+  the small tier, 311 s more for the quarter that survives it): about 13 hours
+  in all, so 46 mutants and about 2.1 hours per shard plus half an hour of cold
+  build: about 2.7 hours each, under the 6-hour limit. Per push: a typical
+  commit touches a few functions (a dozen mutants, 30 at most): 20 to 150
+  minutes, the `full` job's step has a 120-minute limit.
+
+`mutate_test` covers both modes: the hunk-to-function mapping, the shards, the
+exit codes (survivor: 0 on the schedule and 1 per push, tooling error: 2), and
+`run` end to end over a throwaway git repository with a fake bazel.
+
 ## How long
 
 On this machine (4 cores shared with other lanes, load average about 18): a

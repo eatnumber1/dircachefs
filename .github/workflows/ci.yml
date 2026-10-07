@@ -273,6 +273,8 @@ jobs:
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # the mutation step's commit range needs the history
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
         run: ./.github/ci/prepare.sh
       - name: Restore the repository cache
@@ -303,6 +305,31 @@ jobs:
       - name: Test (UndefinedBehaviorSanitizer)
         if: ${{ !cancelled() }}
         run: ./.github/ci/test.sh --config=ubsan
+      - name: Mutation testing of the protocol code this push touched
+        # Step 26.5b, the per-push bumper: only the functions of
+        # tools/mutation/scope.txt whose lines the range touches, at most 30
+        # mutants (a sample with a fixed seed beyond that); a mutant that
+        # survives the small tier and trace validation fails the job: the
+        # change needs a test. Survivors elsewhere are the weekly job's.
+        if: ${{ !cancelled() && github.event_name != 'workflow_dispatch' }}
+        timeout-minutes: 120
+        run: >
+          python3 tools/mutation/mutate.py changed
+          --range "${{ github.event_name == 'pull_request'
+          && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+          || format('{0}..{1}', github.event.before, github.sha) }}"
+          --result mutation-changed.json
+          --survivors-out mutation-changed-survivors.txt
+          --fail-on-survivor
+      - name: Upload the mutation survivors
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-changed
+          path: |
+            mutation-changed.json
+            mutation-changed-survivors.txt
+          if-no-files-found: ignore
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh

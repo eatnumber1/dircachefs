@@ -1,0 +1,95 @@
+# Step 26.5b: the full mutation run (tools/mutation/README.md) on a schedule.
+# 277 mutants take about 13 hours on this machine (91 s each for the small
+# tier plus 311 s more for the quarter that survives it, under load); they are
+# split into six contiguous id ranges, one runner each: about 46 mutants, 2.1
+# hours of mutants and half an hour of cold build per shard, well under the
+# 6-hour job limit. Survivors are findings for the orchestrator to file, not
+# failures: a job fails only on a tooling error (tools/mutation/mutate.py
+# exits 2: a mutant run that was neither killed, survived nor invalid, or the
+# generator failing). The survivors of every shard are one artifact,
+# `mutation-survivors`. No cache is saved (the mutants' compiles are a week's
+# worth of one-off actions): the repository and disk caches are only restored.
+
+name: Mutation testing
+
+on:
+  schedule:
+    - cron: "23 3 * * 0"  # Sundays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mutate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Restore the disk cache (read-only)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-mutation-restore-only-${{ github.sha }}
+          restore-keys: |
+            bazel-full-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-full-
+            bazel-
+      - name: Generate the mutants
+        run: python3 tools/mutation/mutate.py generate --out mutants.json
+      - name: Run shard ${{ matrix.shard }} of 6
+        run: >
+          python3 tools/mutation/mutate.py run --mutants mutants.json
+          --shard ${{ matrix.shard }}/6
+          --result result-${{ matrix.shard }}.json
+          --survivors-out survivors-${{ matrix.shard }}.txt
+      - name: Upload the shard's result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-shard-${{ matrix.shard }}
+          path: |
+            result-${{ matrix.shard }}.json
+            survivors-${{ matrix.shard }}.txt
+          if-no-files-found: ignore
+
+  report:
+    # The survivors of all shards in one file (the findings), also in the
+    # job summary. Fails only if there is nothing to report (every shard died).
+    runs-on: ubuntu-24.04
+    needs: mutate
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: mutation-shard-*
+          merge-multiple: true
+      - name: Collect the survivors
+        run: |
+          ls
+          cat survivors-*.txt > survivors.txt
+          {
+            echo "## Mutation survivors ($(grep -c '^SURVIVOR' survivors.txt || true))"
+            echo '```'
+            cat survivors.txt
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-survivors
+          path: survivors.txt
