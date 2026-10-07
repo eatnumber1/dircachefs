@@ -1061,3 +1061,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   fills (touches the fill guards: model + trace validation; needs the real breakdown); (6)
   profile per-row C++ (DeviceId::Parse per GetAttr, 21 columns) and the daemon's own CPU (bench
   does not record it). Steps after 25.1 merges.
+- 25.1 merged (2f5515e, 13 commits, 55 files +2122/-1293): fast 122/122, presubmit+formal 188/188
+  on the rebased tip; two stale strerror allow lines dropped from banned_symbols.txt. Dispatched:
+  25.1c (lane-1: scanner gaps, 301 sites to syscalls::, false positives renamed, fuse_request.cc
+  strerror, L2-L6 doc/typing items), 26.2 (lane-3, dcfs-protocol: --//dcfs:check_invariants
+  build; the no-transaction-across-backing-syscall guard first; request-end tri-state/dirty-set/
+  lookup-count/held-fd checks; fault tests first; fast+presubmit run the checking build).
