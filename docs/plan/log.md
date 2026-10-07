@@ -1152,3 +1152,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   binary; status-returning variants for 26.6. NO VIOLATION in any existing test. Two checklist
   sentences were wrong as written (dirty set != unknown rows; a held fd can coexist with a later
   writable open) and are checked one-way per design.md. Under review.
+- 25.1c merged (752c573, 8 commits): raw_syscalls_test enforces outright (baseline deleted);
+  realpath gate fixed (mangled wrapper symbol banned, allowed only from mounts_below); std::
+  filesystem/ifstream back doors converted (testonly/files.h: ListDirectory, ListTree, RemoveAll,
+  FileSize, ReadFileToString) and added to the scanner; `pause` wrapped; `remove` dropped from
+  the names (std::remove algorithm). fast 138/138, presubmit+formal 207/207. Dispatched 26.7
+  (syscalls split by visibility: backing-reaching vs process-local, analysis test) and 26.10
+  (absl::Clock in Context, SimulatedClock harness tests for the sync point and relatime) to
+  lane-1.
