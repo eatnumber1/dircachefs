@@ -78,6 +78,9 @@ process (its waves and file ownership table) is in `history.md`.
    - docs updated (`docs/design.md`, `README.md`) and no drift from the
      plan; if the plan was wrong, the phase file is corrected in the same
      merge;
+   - a change to start-up or shutdown is tested in `main.cc`'s order
+     (the harness fixture's order hid 12.4b's probe running before the
+     mount fds existed; one shared `backing::Startup()` for both);
    - every gate the step adds (a test or check whose job is to reject
      something) has a committed self-check with a known-bad fixture
      (Phase 26.1; `test/qemu/README.md` "Gates and their self-checks");
