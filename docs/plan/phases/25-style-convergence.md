@@ -25,9 +25,12 @@ its own test-first step.
   `third_party/pjdfstest/README.md` (C12). Owner: dcfs-mechanical for the
   conversions, dcfs-implementer for the `syscalls.h` moves; review by
   dcfs-reviewer (the moves touch error paths).
-- 25.2 Flat namespaces (after 25.1). `cache` (673 uses), `backing` (147),
-  `sqlite3` (104), `events` (182), `internal` (9), `testonly` (4) fold
-  into `dcfs`; only `dcfs::syscalls` stays, called as `syscalls::x`.
+- 25.2 Flat namespaces (after 25.1). `cache` (673 uses), `events` (182),
+  `internal` (9), `testonly` (4) fold into `dcfs`; `dcfs::syscalls` and
+  `dcfs::sqlite3` stay (russ, 2026-10-07), called as `syscalls::x` and
+  `sqlite3::x`; `backing` (147) pending russ's answer to the exception
+  request (a layer boundary like `syscalls`; keeping it dissolves the
+  three clashes below without renames).
   Clashes to rename first: `ParentOf`, `SetXattr`, `RemoveXattr` exist in
   both `cache` and `backing` (`ParentOf` differs only in return type):
   the cache side becomes `CachedParentOf`/`CacheSetXattr`/... or the
