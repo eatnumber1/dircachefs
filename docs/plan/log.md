@@ -755,3 +755,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   README). Batched phase 1 keeps tri-state per file, no model change; write_fd yield closes the old
   fd; ASan 512 MB guests do not oversubscribe at local_test_jobs=2. DISABLED_immutable-ctime is
   russ's decision (recorded above). FIRST AFTER THE REBOOT: send (a)+(b) to lane-1, then merge.
+- 6.2 guest memory (lane-3, 0188e30): a sampler in guest/init prints a MEM line per test (no pass
+  without it); plain peaks 22-256 MiB (bench_full 569), ASan 52-1509 (bench_full > 2001, OOM at
+  2048: asan_mem=3072 is a guess, measure on the bigger machine); e2e default 1024 -> 256, unit
+  256 -> 192, per-class mem=/asan_mem= (select on asan/ubsan), tla_trace_test too; resource tags
+  1200 -> 356 (9 e2e guests fit where 2 did); DCFS_MEM=<MiB> override; OOM-killer lines and
+  boot-time death are reported and FAIL the run (bug: ASan bench_smoke PASSED while dcfs was
+  OOM-killed at 1024). Presubmit 140/140, large + ASan subsets green. Open: resource tags cannot
+  follow the config, so ASan runs are under-reserved (README says fewer test jobs; a
+  `test:asan --local_test_jobs=2` in .bazelrc would enforce it); Alpine (lane-2) must rebase over
+  this (run-qemu.sh --mem defaults, macros' mem=).
