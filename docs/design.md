@@ -1631,13 +1631,13 @@ The checking build (`//dcfs:main_static_checked`, linking
   has its dirty row (`dirty-set`);
 - at the end of every request, after its reply, for the rows the request
   changed (SQLite's update hook names them, so the work is proportional to
-  them, not to the database; but not those of a `DELETE` with no `WHERE`,
-  which SQLite runs as a truncation without calling the hook: `ClearDirty`'s
-  one-statement clear and `RecoverDirty`), the inodes it named, and every
-  inode open for writing or durably dirty (whose dirty rows such a
-  truncation could drop, for a file no request names while the kernel
-  writes it through passthrough; while there are at most 16384 of each):
-  no transaction or cursor open (`no-transaction-at-request-end`);
+  them, not to the database) and the inodes it named. A `DELETE` with no
+  `WHERE` (`ClearDirty`'s one-statement clear, `RecoverDirty`) would be a
+  truncation, which calls no hook and would hide a dropped dirty row of a
+  file no request names (one the kernel writes through passthrough); the
+  checker gives `dirty` a no-op `TEMP` trigger (its connection's only,
+  never in the database file), and SQLite never truncates a table with a
+  trigger: no transaction or cursor open (`no-transaction-at-request-end`);
   attributes recorded as current have every column and a link count above
   0, and a dentry is
   `refused` exactly when its stub exists (`tri-state`); only the root has

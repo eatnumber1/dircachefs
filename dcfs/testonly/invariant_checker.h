@@ -22,11 +22,12 @@
 //
 //  At the end of every request, after its reply (RequestEnd), for the rows
 //  the request changed (SQLite's update hook tells which, so the work is
-//  proportional to them, not to the database; except a DELETE with no
-//  WHERE, which SQLite runs as a truncation without calling the hook), the
-//  inodes it named, and every inode open for writing or durably dirty
-//  (those whose dirty row such a truncating DELETE could drop: ClearDirty's
-//  one-statement clear), while there are at most kRecountLimit of them:
+//  proportional to them, not to the database) and the inodes it named. A
+//  DELETE with no WHERE (ClearDirty's one-statement clear, RecoverDirty)
+//  would be a truncation, which calls no update hook; the checker gives
+//  the dirty table a TEMP trigger (this connection's only, never in the
+//  database file), which makes SQLite delete row by row, so that the hook
+//  names every dirty row that goes (SeeEveryDirtyDelete):
 //   no-transaction-at-request-end  as above, once the request is over.
 //   tri-state  an inode's attributes recorded as current have every column
 //       and a link count above 0 (backing::WriteAttrs keeps nlink 0
@@ -50,9 +51,12 @@
 //   removed-record  a removed record (DirCacheFS::removed_) exists only
 //       while the kernel holds a lookup of its nodeid, and never beside a
 //       written_ entry (RetireRemoved takes it).
-//  The DirCacheFS-wide counts are recounted while written_ and removed_
-//  hold at most kRecountLimit entries; above that only the request's own
-//  inodes are checked (DESTROY's full check still recounts).
+//  The DirCacheFS-wide counts are recounted while written_, removed_ and
+//  the open files hold at most kRecountLimit entries; above that only the
+//  request's own inodes are checked (DESTROY's full check still recounts).
+//  The limit keeps a request's check from growing with the files written
+//  in the run (readdir_boundary_test's 6000 created files made its warm
+//  listing quadratic at 16384).
 //
 //  At backing::StartRun's end (RunStarted) and after DESTROY (Destroyed):
 //  all of the above over the whole database and every DirCacheFS entry.
@@ -90,7 +94,7 @@ namespace dcfs::testonly {
 class InvariantChecker final : public InvariantChecks {
  public:
   // See the top of this file for the DirCacheFS-wide recounts.
-  static constexpr size_t kRecountLimit = 16384;
+  static constexpr size_t kRecountLimit = 1024;
 
   // `console_fd` (not owned; -1 for none): where a violation is also
   // written (see the top of this file). The harness passes none: its death
@@ -177,6 +181,11 @@ class InvariantChecker final : public InvariantChecks {
   // Drops from stale_opens_ what is no longer open for writing.
   void ForgetReleasedStaleOpens(const Context &ctx);
 
+  // Gives main.dirty a no-op TEMP trigger once it exists: a table with a
+  // trigger is never truncated, so the update hook sees every deleted row
+  // (ClearDirty's and RecoverDirty's DELETE FROM dirty with no WHERE).
+  absl::Status SeeEveryDirtyDelete(Context &ctx);
+
   // Points the update hook at ctx.db if it is not there yet.
   void Attach(Context &ctx);
   static void OnUpdate(void *self, int op, const char *db, const char *table,
@@ -193,6 +202,8 @@ class InvariantChecker final : public InvariantChecks {
   int console_fd_;
   ::sqlite3 *db_ = nullptr;
   std::vector<Frame> frames_;
+  // The TEMP trigger is in place (SeeEveryDirtyDelete).
+  bool no_truncate_ = false;
   // The inodes open for writing when the run started (see RunStarted).
   absl::flat_hash_set<InodeId> stale_opens_;
   // The rows changed since the last check, by table (rowids; an inode's,

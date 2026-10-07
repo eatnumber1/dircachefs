@@ -309,14 +309,35 @@ void InvariantChecker::Destroyed(Context &ctx, const DirCacheFS &fs) {
   frames_.pop_back();
 }
 
+absl::Status InvariantChecker::SeeEveryDirtyDelete(Context &ctx) {
+  if (no_truncate_) return absl::OkStatus();
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      ctx.db.Prepared("SELECT 1 FROM sqlite_master "
+                      "WHERE type = 'table' AND name = 'dirty'"));
+  bool exists = false;
+  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
+    exists = true;
+    return absl::OkStatus();
+  }));
+  if (!exists) return absl::OkStatus();  // Before Migrate.
+  ABSL_RETURN_IF_ERROR(ctx.db.Exec(
+      "CREATE TEMP TRIGGER IF NOT EXISTS dcfs_invariant_checks_no_truncate "
+      "AFTER DELETE ON main.dirty BEGIN SELECT 1; END"));
+  no_truncate_ = true;
+  return absl::OkStatus();
+}
+
 absl::Status InvariantChecker::CheckBackingCall(Context &ctx) {
   ABSL_RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtBackingCall));
+  ABSL_RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
   return InFlightAreDirty(ctx);
 }
 
 absl::Status InvariantChecker::CheckChanged(Context &ctx, const DirCacheFS *fs,
                                             std::span<const InodeId> ids) {
   ABSL_RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
+  ABSL_RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
   // Taken (and forgotten) first: the checker's own queries only read, but
   // a violation must not leave rows behind for the next check either.
   absl::flat_hash_set<int64_t> inodes = std::exchange(inodes_, {});
@@ -338,19 +359,6 @@ absl::Status InvariantChecker::CheckChanged(Context &ctx, const DirCacheFS *fs,
   for (InodeId id : ids) interest.insert(id);
   for (const auto *rows : {&inodes, &dirty, &directories, &symlinks}) {
     for (int64_t id : *rows) interest.insert(id);
-  }
-  // A dirty row can go without the update hook seeing it: DELETE FROM
-  // dirty with no WHERE (ClearDirty's one-statement clear, RecoverDirty)
-  // uses SQLite's truncate optimisation, which calls no hook. So every
-  // inode open for writing and every durably dirty one is looked at too,
-  // while there are at most kRecountLimit of them: a passthrough-written
-  // file is named by no request while it is written.
-  if (ctx.open_for_write != nullptr &&
-      ctx.open_for_write->size() <= kRecountLimit) {
-    for (InodeId id : *ctx.open_for_write) interest.insert(id);
-  }
-  if (ctx.dirty.durable.size() <= kRecountLimit) {
-    for (InodeId id : ctx.dirty.durable) interest.insert(id);
   }
   for (int64_t rowid : dentries) {
     ABSL_RETURN_IF_ERROR(CheckDentry(ctx, rowid, interest));
@@ -384,6 +392,7 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
                                                const DirCacheFS *fs,
                                                bool destroyed) {
   ABSL_RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
+  ABSL_RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
   inodes_.clear();
   dentries_.clear();
   stubs_.clear();
