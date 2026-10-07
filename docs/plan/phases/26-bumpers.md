@@ -57,11 +57,17 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
   surviving mutant is a missing test, filed as a step. Owner:
   dcfs-investigator for the tooling, dcfs-protocol for the survivors.
 - 26.6 (needs russ's yes; proposed as the fast form of fault
-  enumeration) In the forged-request harness: run a workload once
-  recording its K backing calls, then iterate N = 1..K in-process (fresh
-  in-memory cache database, the `--wrap` hooks failing the Nth call),
-  checking 26.2's invariants and recovery after each. One guest boot,
-  thousands of iterations at milliseconds each, small tier. After 26.2.
+  enumeration; russ, 2026-10-07: wary of the number of runs) In the
+  forged-request harness, bounded by CALL SITE, not by dynamic call:
+  short targeted workloads (one per operation type, about ten
+  operations each); every backing call site reached by the workload is
+  failed once (fresh in-memory cache database per iteration, the
+  `--wrap` hooks failing that site's first call), with one errno (EIO)
+  except where the code branches on the errno (ENOENT, EEXIST, ENOSPC,
+  ENAMETOOLONG: those too); 26.2's invariants and recovery checked
+  after each. About a hundred sites x 2-3 errnos: a few hundred
+  iterations at milliseconds each, one guest boot, small tier. Never
+  "every N of a long workload". After 26.2.
 - Not adopted: a bespoke in-memory reference filesystem for differential
   testing (pjdfstest, xfstests and fsstress already test against the
   kernel; TLA+ test generation, 12.10, is the random driver).
