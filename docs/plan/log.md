@@ -1539,3 +1539,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Phase 22 merged (87b35a0): see the phase file. Unblocked: the Phase 8 cleanup (default_permissions
   required + fail-closed Access + deletions + the dcfs-over-dcfs variant) dispatched to lane-2.
   Note: dir_cache_fs_trace_test at 867 s of its 900 s (lane-4 is splitting it).
+- 26.6 + 26.4b green on main-as-of-11.1 (step-26.4b @ 5a34528: harness 121 incl. death tests,
+  sweep 49 sites / 111 iterations / 14.7 s, budgets unchanged, fast 176 + 2 skips, presubmit+
+  formal 252 + 2, asan small 32 + 1; subjects ok); one more rebase over Phase 22 (checkpoints and
+  the Interrupted event in the same files) handed to the agent; then merge.
