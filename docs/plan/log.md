@@ -942,3 +942,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-07): style rules as AST checks (yes: 7.5b clang-query matchers, replaces the regex
   test); a small hermetic ML model as a style gate (no: nondeterministic, slow, weak where it
   matters; judgement rules stay with the merge review).
+- russ (2026-10-07): the tiny-model style judge reconsidered at the right size (one rule, one
+  chunk, sub-1B, deterministic): a measured spike, 7.5c, after the matchers.

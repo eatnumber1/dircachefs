@@ -50,10 +50,18 @@ are then the same on every machine and in CI.
   namespaces but `syscalls`/`sqlite3`) as a checked-in matcher file run
   by `clang-query` (from the pinned LLVM) over every translation unit,
   as a Bazel test; a clang-tidy plugin with the same matchers if we
-  outgrow it. Replaces 25.1b's regex `raw_syscalls_test`. Not adopted: a
-  small local ML model as a style judge (nondeterministic, slow on CPU
-  runners, weak on exactly the judgement rules; those stay with the
-  review at merge).
+  outgrow it. Replaces 25.1b's regex `raw_syscalls_test`.
+- 7.5c Spike (russ, 2026-10-07): a tiny hermetic model as a judge for the
+  rules matchers cannot express, one rule per prompt over one small chunk
+  (a comment, an error message, a commit message): weights by `http_file`
+  + sha256, llama.cpp built by Bazel, integer quantization, one thread,
+  greedy decoding (deterministic on one binary). Measure first: two or
+  three judgement rules ("the comment says why", "the message names the
+  call and what failed", "the commit quotes the failing-first run"), a
+  labelled set of ~100 chunks per rule from our tree (labelled by the
+  review agents, spot-checked by russ), precision/recall per rule. A rule
+  at >= 98% precision may gate; below that advisory or dropped. After
+  7.5b, so the matchers show what is left for a model.
 - 7.6 Formatting enforced (russ, 2026-10-07; `docs/style.md`): the pinned
   LLVM's clang-format and a pinned buildifier (BCR or `http_file`) behind
   `bazel run //tools:format` (replaces `tools/format.sh`'s "if installed"),
