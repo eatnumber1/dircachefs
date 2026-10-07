@@ -35,3 +35,30 @@
 Owner: Sonnet for the sweeps' infrastructure (Opus review); gap-closing
 by area owners. Order: right after the toolchain phase, before
 everything after it.
+
+## Decisions from the first report (russ, 2026-10-08; notes/coverage-baseline-2026-10-08.md)
+
+- The gate: `dcfs/*.cc` only, lines AND branches, fails on any drop
+  below a committed baseline file that starts at today's 92.4 / 73.3 and
+  only moves up (bumped in the commit that raised it); bench/ and tools/
+  reported, not gated.
+- The non-passthrough data path is NOT dead: the kernel grants
+  passthrough per mount but refuses it per file past the backing stack
+  depth (a source on a FUSE mount), so READ/WRITE fall back to dcfs; it
+  gets an e2e variant with the source on a FUSE mount (dcfs over dcfs
+  in the guest) rather than deletion.
+- Dead for real, delete: the FUSE `Access` handler (never sent under
+  `default_permissions`, which stays: the kernel's checks from cached
+  attributes cost no backing I/O; dropping it would mean an ACCESS
+  request per permission decision, either no more faithful or a backing
+  syscall per check), `FuseRequest`'s move-assignment, the `openat2`
+  wrapper.
+- `FileHandle::ToString` gets a test; style rule to add to docs/style.md
+  (tests): a debug/log string is tested for the important fields it must
+  contain (substrings or a regex per field), never compared to a
+  hard-coded whole.
+- Cheap gaps, one mechanical step: status.cc errno-name edges, device_id
+  parse failures, mountinfo parsing edges, utimensat/removexattr on a
+  closed file, main.cc startup failure modes (a guest misuse test).
+- Error branches after syscalls and SQLite steps: not hand-written; 26.6
+  and Phase 11's cache-disk error injection cover them.
