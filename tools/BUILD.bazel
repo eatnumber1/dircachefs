@@ -59,6 +59,12 @@ sh_binary(
 
 # ---- Step 26.8: banned symbols in the shipped binary --------------------
 
+BANNED_SYMBOLS_COMPATIBLE = select({
+    "//test/qemu:asan_build": ["@platforms//:incompatible"],
+    "//test/qemu:ubsan_build": ["@platforms//:incompatible"],
+    "//conditions:default": [],
+})
+
 # Every compiled object linked into //dcfs:main_static, with its origin
 # (tools/first_party_objects.bzl), so a banned symbol is attributed to the
 # library or the first-party file that references it.
@@ -85,14 +91,21 @@ py_library(
 )
 
 # The gate: fails when //dcfs:main_static, or a library it links, references
-# a symbol in banned_symbols.txt that no `allow` line covers. $(NM) is the
-# toolchain's nm (llvm-nm of the pinned clang, step 7.1), shipped as data.
+# a symbol in banned_symbols.txt that no `allow` line covers. The
+# pinned clang's llvm-nm (step 7.1), shipped as data.
+#
+# The allow lines in banned_symbols.txt describe the shipped binary in a
+# fastbuild (-O0; a `-c opt` build folds calls differently, e.g. printf to
+# puts, so some lines would match nothing). A sanitizer build cannot pass: its
+# static runtime defines interceptors named like the banned symbols, -O1 folds
+# calls, and the binary is dynamic. The gate is about the shipped unsanitized
+# binary, so the two tests are incompatible with --config=asan/ubsan.
 py_test(
     name = "banned_symbols_test",
     size = "small",
     srcs = ["banned_symbols_test.py"],
     args = [
-        "nm=$(NM)",
+        "nm=$(rootpath @llvm_toolchain_llvm//:nm)",
         "deny_list=$(location banned_symbols.txt)",
         "objects=$(location :main_static_objects)",
         "binary=$(location //dcfs:main_static)",
@@ -101,9 +114,9 @@ py_test(
         "banned_symbols.txt",
         ":main_static_objects",
         "//dcfs:main_static",
-        "@bazel_tools//tools/cpp:current_cc_toolchain",
+        "@llvm_toolchain_llvm//:nm",
     ],
-    toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
+    target_compatible_with = BANNED_SYMBOLS_COMPATIBLE,
     deps = [":banned_symbols_lib"],
 )
 
@@ -115,7 +128,7 @@ py_test(
     size = "small",
     srcs = ["banned_symbols_self_check_test.py"],
     args = [
-        "nm=$(NM)",
+        "nm=$(rootpath @llvm_toolchain_llvm//:nm)",
         "deny_list=$(location banned_symbols.txt)",
         "objects=$(location :banned_symbols_fixture_objects)",
         "binary=$(location :banned_symbols_fixture)",
@@ -124,9 +137,9 @@ py_test(
         "banned_symbols.txt",
         ":banned_symbols_fixture",
         ":banned_symbols_fixture_objects",
-        "@bazel_tools//tools/cpp:current_cc_toolchain",
+        "@llvm_toolchain_llvm//:nm",
     ],
-    toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
+    target_compatible_with = BANNED_SYMBOLS_COMPATIBLE,
     deps = [":banned_symbols_lib"],
 )
 
@@ -247,6 +260,7 @@ py_test(
         "//dcfs/testonly:cxx_sources",
     ],
     main = "raw_syscalls_test.py",
+)
 
 # Step 7.1: the C++ toolchain is the pinned, hermetic clang (MODULE.bazel,
 # third_party/llvm/README.md), not the host's GCC. The genrule records what

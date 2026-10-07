@@ -1046,3 +1046,17 @@ filegroup(
     srcs = glob(["*.cc", "*.h"]),
     visibility = ["//tools:__pkg__"],
 )
+
+# ASan's C++ runtime must be linked (alloc-dealloc-mismatch and the other
+# new/delete checks live in it): fails if the link lacks libclang_rt.asan_cxx.
+qemu_cc_test(
+    name = "asan_runtime_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["asan_runtime_test.cc"],
+    target_compatible_with = select({
+        "//test/qemu:asan_build": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = ["@googletest//:gtest_main"],
+)

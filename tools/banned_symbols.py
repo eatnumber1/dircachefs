@@ -7,7 +7,7 @@ reference, each with the rule it enforces. A violation is
   references a banned symbol (`nm -u`), unless an `allow` line covers that
   origin and symbol; or
 - a banned symbol defined in the linked binary that no scanned object
-  references (so something outside the Bazel graph, glibc or libstdc++, pulled
+  references (so something outside the Bazel graph, glibc or libc++, pulled
   it in).
 
 Line format of the deny list (`#` starts a comment, `|` separates fields):
@@ -23,12 +23,11 @@ defined in the binary but referenced by no scanned object.
 
 import argparse
 import fnmatch
-import os
 import subprocess
 import sys
 
 
-# The origin of a symbol the C or C++ runtime (glibc, libstdc++) pulls in on
+# The origin of a symbol the C or C++ runtime (glibc, libc++) pulls in on
 # its own, which no scanned object references.
 RUNTIME = "<runtime>"
 
@@ -59,22 +58,8 @@ def parse_deny_list(text):
     return bans, allows
 
 
-def resolve_tool(tool):
-    """`$(NM)` is an execroot-relative path (external/<repo>/bin/nm) for a
-    hermetic toolchain; a test runs in the runfiles tree, where the repository
-    is a sibling of the main one."""
-    if os.path.isabs(tool) or os.path.exists(tool):
-        return tool
-    if tool.startswith("external/"):
-        sibling = os.path.join("..", tool[len("external/"):])
-        if os.path.exists(sibling):
-            return sibling
-    return tool
-
-
 def nm_symbols(nm, path, *flags):
     """Returns the names `nm` prints for `path`, version suffix removed."""
-    nm = resolve_tool(nm)
     out = subprocess.run([nm, "-P", *flags, path], check=True,
                          capture_output=True, text=True).stdout
     names = set()
