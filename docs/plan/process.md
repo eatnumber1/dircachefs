@@ -68,7 +68,11 @@ process (its waves and file ownership table) is in `history.md`.
      in `backing.cc` (process-local syscalls may use `syscalls::` anywhere;
      russ, 2026-10-07); no globals or `thread_local`; every record that
      mirrors the backing filesystem follows the present/absent/unknown
-     rule;
+     rule (from 26.2 these are also checked at run time by the checking
+     build the small and medium tiers boot; the precise forms are in
+     `docs/design.md` "Runtime invariant checks": the dirty set is NOT
+     "equal to the unknown rows", and a held fd may coexist with a later
+     writable open);
    - coverage of the new code (from Phase 7) and the TLA+ model updated if
      the protocol changed (from Phase 12);
    - docs updated (`docs/design.md`, `README.md`) and no drift from the
