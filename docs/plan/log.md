@@ -967,3 +967,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   26.10's). Conversion = 25.1c (dcfs-mechanical, after merge). Fresh dcfs-reviewer on the branch.
 - russ (2026-10-07): 26.6 approved as a try; the report must state the runtime it adds (dropped if
   not seconds).
+- 26.1 escalated (mechanical -> implementer after two rounds): round 1 ran the self-checks by hand
+  (no Bazel targets, no README); round 2 wired targets but every self-check tested a COPY of the
+  gate's logic ("mirrors the logic of ..."), not the gate. Implementer rewrites them to execute the
+  real gate code on known-bad input (lib.sh, pjdfstest.sh refactored to a function, the man tests,
+  busybox_test.sh with a fake busybox, rootfs invariant with a tampered synthetic tar), bash +
+  pipefail + 2-space, README table complete.
