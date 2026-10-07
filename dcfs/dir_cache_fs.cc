@@ -237,10 +237,15 @@ absl::Status DirCacheFS::Destroy() {
   // unmount): reconcile the written files it still held (see
   // ReconcileWritten), before FinishRun's sync point.
   // See design.md "mmap after close" (held-fd workaround).
+  // In batches, each one phase 1 (a transaction) for those that need it.
+  constexpr size_t kBatch = 4096;
   std::vector<InodeId> written;
   written.reserve(written_.size());
   for (const auto &[id, fd] : written_) written.push_back(id);
-  for (InodeId id : written) ReconcileWritten(id);
+  for (size_t i = 0; i < written.size(); i += kBatch) {
+    ReconcileWritten(std::span<const InodeId>(written).subspan(
+        i, std::min(kBatch, written.size() - i)));
+  }
   removed_.clear();
   lookups_.clear();
   written_.clear();
@@ -696,76 +701,106 @@ bool DropLookups(absl::flat_hash_map<InodeId, uint64_t> &lookups, InodeId id,
 
 }  // namespace
 
-void DirCacheFS::ReconcileWritten(InodeId id) {
+void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
   // See design.md "mmap after close" (held-fd workaround).
-  if (!written_.contains(id)) return;
-  std::optional<FileDescriptor> held = TakeWritten(id);
-  // Still open (the kernel cannot have forgotten it then, but DESTROY
-  // comes regardless): its attributes are unknown and served from its
-  // shared descriptor, and the last release records them.
-  if (HasOpenFiles(id)) return;
-  absl::StatusOr<cache::CachedAttr> cached = cache::GetAttr(ctx_, id);
-  if (!cached.ok()) {
-    // NotFound: gone already (invalidated, or deleted with its last link).
-    if (!absl::IsNotFound(cached.status())) {
-      LOG(WARNING) << "could not read the cached attributes of written "
-                   << "inode " << id << " to reconcile them: "
-                   << cached.status();
+  //
+  // First each file alone: its held descriptor, its statx through it (no
+  // disk), and whether anything needs recording. Then one phase 1 for all
+  // that do (one transaction, durable unless all were durably dirty
+  // already: review M-1), then each refresh. The held descriptors stay
+  // open until their refresh; every inode of a batch is distinct (the
+  // kernel forgets each once, and written_ holds each once).
+  struct Changed {
+    InodeId id;
+    std::optional<FileDescriptor> held;
+    bool fresh;  // `held`'s statx succeeded: refresh through it.
+  };
+  std::vector<Changed> changed;
+  for (InodeId id : ids) {
+    if (!written_.contains(id)) continue;
+    std::optional<FileDescriptor> held = TakeWritten(id);
+    // Still open (the kernel cannot have forgotten it then, but DESTROY
+    // comes regardless): its attributes are unknown and served from its
+    // shared descriptor, and the last release records them.
+    if (HasOpenFiles(id)) continue;
+    absl::StatusOr<cache::CachedAttr> cached = cache::GetAttr(ctx_, id);
+    if (!cached.ok()) {
+      // NotFound: gone already (invalidated, or deleted with its last
+      // link).
+      if (!absl::IsNotFound(cached.status())) {
+        LOG(WARNING) << "could not read the cached attributes of written "
+                     << "inode " << id << " to reconcile them: "
+                     << cached.status();
+      }
+      continue;
     }
-    return;
-  }
-  std::optional<struct statx> fresh;
-  if (held.has_value()) {
-    // The held descriptor is the object itself (it pins it: no recycled
-    // inode number to check for), and the statx touches no disk.
-    absl::StatusOr<struct statx> stx = backing::StatFd(**held);
-    if (stx.ok()) {
-      fresh = *stx;
-    } else {
-      LOG(WARNING) << "could not re-read the attributes of written inode "
-                   << id << " through its held descriptor: " << stx.status();
+    std::optional<struct statx> fresh;
+    if (held.has_value()) {
+      // The held descriptor is the object itself (it pins it: no recycled
+      // inode number to check for), and the statx touches no disk.
+      absl::StatusOr<struct statx> stx = backing::StatFd(**held);
+      if (stx.ok()) {
+        fresh = *stx;
+      } else {
+        LOG(WARNING) << "could not re-read the attributes of written inode "
+                     << id << " through its held descriptor: "
+                     << stx.status();
+      }
     }
-  }
-  // Its last link went behind dcfs's back since its last close (dcfs's
-  // own unlink retires the row and drops the held descriptor): nothing
-  // reaches it any more, so the row goes, as the row-lifetime rule says.
-  if (fresh.has_value() && fresh->stx_nlink == 0) {
-    LogPhase3Failure("FORGET reconciliation", ForgetRemoved(id));
-    return;
-  }
-  // What a store through a mapping changes: the size (not past EOF, but
-  // the file may have been truncated or written before the last close),
-  // the blocks it allocates, mtime and ctime.
-  if (fresh.has_value() && cached->valid) {
-    const struct stat &st = cached->st;
-    if (static_cast<uint64_t>(st.st_size) == fresh->stx_size &&
-        static_cast<uint64_t>(st.st_blocks) == fresh->stx_blocks &&
-        st.st_mtim.tv_sec == fresh->stx_mtime.tv_sec &&
-        st.st_mtim.tv_nsec == static_cast<long>(fresh->stx_mtime.tv_nsec) &&
-        st.st_ctim.tv_sec == fresh->stx_ctime.tv_sec &&
-        st.st_ctim.tv_nsec == static_cast<long>(fresh->stx_ctime.tv_nsec)) {
-      return;
+    // Its last link went behind dcfs's back since its last close (dcfs's
+    // own unlink retires the row and drops the held descriptor): nothing
+    // reaches it any more, so the row goes, as the row-lifetime rule says.
+    if (fresh.has_value() && fresh->stx_nlink == 0) {
+      LogPhase3Failure("FORGET reconciliation", ForgetRemoved(id));
+      continue;
     }
+    // What a store through a mapping changes: the size (not past EOF, but
+    // the file may have been truncated or written before the last close),
+    // the blocks it allocates, mtime and ctime.
+    if (fresh.has_value() && cached->valid) {
+      const struct stat &st = cached->st;
+      if (static_cast<uint64_t>(st.st_size) == fresh->stx_size &&
+          static_cast<uint64_t>(st.st_blocks) == fresh->stx_blocks &&
+          st.st_mtim.tv_sec == fresh->stx_mtime.tv_sec &&
+          st.st_mtim.tv_nsec == static_cast<long>(fresh->stx_mtime.tv_nsec) &&
+          st.st_ctim.tv_sec == fresh->stx_ctime.tv_sec &&
+          st.st_ctim.tv_nsec == static_cast<long>(fresh->stx_ctime.tv_nsec)) {
+        continue;
+      }
+    }
+    changed.push_back(Changed{.id = id,
+                              .held = std::move(held),
+                              .fresh = fresh.has_value()});
   }
-  // Phase 1, as for a setattr: the attributes unknown and the inode
+  if (changed.empty()) return;
+  // Phase 1, as for a setattr: the attributes unknown and the inodes
   // durably dirty before anything new is recorded. There is no syscall of
   // its own (the stores already happened); phase 3 is the refresh, an
   // ordinary fill after the mutation's end, through the held descriptor.
   // Without one (or if its statx failed) the attributes stay unknown, for
   // the next access to re-read.
-  absl::StatusOr<cache::Mutation> mutation = cache::BeginAttrChange(ctx_, id);
+  std::vector<InodeId> changed_ids;
+  changed_ids.reserve(changed.size());
+  for (const Changed &c : changed) changed_ids.push_back(c.id);
+  absl::StatusOr<cache::Mutation> mutation =
+      cache::BeginAttrChanges(ctx_, changed_ids);
   if (!mutation.ok()) {
-    LOG(WARNING) << "could not begin reconciling the attributes of written "
-                 << "inode " << id << ", leaving them as they are: "
+    LOG(WARNING) << "could not begin reconciling the attributes of "
+                 << changed.size() << " written inode(s) (the first "
+                 << changed.front().id << "), leaving them as they are: "
                  << mutation.status();
     return;
   }
   mutation->End();
-  if (!fresh.has_value()) return;
-  if (absl::Status refreshed = backing::RefreshAttrsFromFd(ctx_, id, **held);
-      !refreshed.ok() && !absl::IsNotFound(refreshed)) {
-    LOG(WARNING) << "could not record the reconciled attributes of written "
-                 << "inode " << id << ", leaving them unknown: " << refreshed;
+  for (const Changed &c : changed) {
+    if (!c.fresh) continue;
+    if (absl::Status refreshed =
+            backing::RefreshAttrsFromFd(ctx_, c.id, **c.held);
+        !refreshed.ok() && !absl::IsNotFound(refreshed)) {
+      LOG(WARNING) << "could not record the reconciled attributes of "
+                   << "written inode " << c.id
+                   << ", leaving them unknown: " << refreshed;
+    }
   }
 }
 
@@ -777,7 +812,8 @@ void DirCacheFS::Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup) {
   // See design.md "mmap after close" (held-fd workaround).
   if (DropLookups(lookups_, id, nlookup)) {
     removed_.erase(id);
-    if (written_.contains(id)) ReconcileWritten(id);
+    const InodeId ids[] = {id};
+    ReconcileWritten(ids);
   }
   // forget/forget_multi have no error reply: fuse_reply_none is the only
   // valid one.
@@ -786,13 +822,17 @@ void DirCacheFS::Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup) {
 
 void DirCacheFS::ForgetMulti(
     FuseRequest &req, std::span<const fuse_forget_data> forgets) {
+  // The batch's written files are reconciled together: one phase 1 for
+  // all that need one (see ReconcileWritten).
+  std::vector<InodeId> forgotten;
   for (const fuse_forget_data &forget : forgets) {
     InodeId id = static_cast<InodeId>(forget.ino);
     if (DropLookups(lookups_, id, forget.nlookup)) {
       removed_.erase(id);
-      if (written_.contains(id)) ReconcileWritten(id);
+      if (written_.contains(id)) forgotten.push_back(id);
     }
   }
+  ReconcileWritten(forgotten);
   req.ReplyNone();
 }
 

@@ -1107,6 +1107,10 @@ limits:
 - A file whose last link dcfs removes leaves the set at once
   (`RetireRemoved`), so its space is not held; one unlinked behind dcfs's
   back stays allocated until its `FORGET`.
+- The files one `FORGET` batch (`FORGET_MULTI`) lets go of, and those
+  `DESTROY` reconciles in batches of 4,096, share one phase 1 for every
+  file that needs one (changed attributes, or no held descriptor): one
+  durable transaction per batch, not one per file.
 - `DESTROY` reconciles every file left in the set: one `statx` through a
   held descriptor each, no disk. Measured (`destroy_test`, review M2):
   with 100,000 written files cached, SIGTERM to exit took 4.8 s, the

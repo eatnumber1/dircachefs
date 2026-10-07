@@ -1478,6 +1478,14 @@ absl::StatusOr<Mutation> BeginAttrChange(Context &ctx, InodeId id,
   });
 }
 
+absl::StatusOr<Mutation> BeginAttrChanges(Context &ctx,
+                                          std::span<const InodeId> ids) {
+  return BeginMutation(ctx, ids, [&]() -> absl::Status {
+    for (InodeId id : ids) ABSL_RETURN_IF_ERROR(MarkAttrsUnknown(ctx, id));
+    return absl::OkStatus();
+  });
+}
+
 absl::StatusOr<Mutation> BeginXattrChange(Context &ctx, InodeId id,
                               std::string_view name) {
   const InodeId ids[] = {id};

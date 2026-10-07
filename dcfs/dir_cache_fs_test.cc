@@ -2077,6 +2077,57 @@ TEST_F(DirCacheFSTest, HeldDescriptorsAreClosed) {
   EXPECT_EQ(OpenFdCount(), base) << "after DESTROY";
 }
 
+// Counts phase 1s: each is a transaction, durable (a WAL fsync) unless
+// every inode it names is already durably dirty.
+class CountMutations : public ProtocolEvents {
+ public:
+  void MutationBegun(Context &, events::IdsFn ids, bool synced) override {
+    ++begun;
+    if (synced) ++synced_begun;
+    ids([&](InodeId) { ++ids_named; });
+  }
+  int begun = 0;
+  int synced_begun = 0;
+  int ids_named = 0;
+};
+
+// The written files of one FORGET batch (or of DESTROY) that hold no
+// descriptor -- or whose attributes changed -- share one phase 1, not one
+// durable transaction each (review M-1).
+TEST_F(DirCacheFSTest, ForgetBatchReconcilesInOnePhase1) {
+  options_.max_held_fds = 0;
+  const std::vector<std::string> names = {"a", "b", "c", "d", "e", "f"};
+  for (const std::string &name : names) WriteFile(Path(name));
+  Start();
+  std::vector<InodeId> ids;
+  for (const std::string &name : names) {
+    auto [reply, entry] = Lookup(kRootInode, name);
+    ASSERT_EQ(reply.error, 0);
+    const InodeId id = static_cast<InodeId>(entry.nodeid);
+    ids.push_back(id);
+    auto [open, fh] = Open(id, O_RDWR);
+    ASSERT_EQ(open.error, 0);
+    ASSERT_EQ(Release(id, fh).error, 0);
+  }
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);  // A sync point: all clean.
+  CountMutations count;
+  ctx_.events = &count;
+  BatchForget({{ids[0], 1}, {ids[1], 1}, {ids[2], 1}});
+  EXPECT_EQ(count.begun, 1);
+  EXPECT_EQ(count.synced_begun, 1);
+  EXPECT_EQ(count.ids_named, 3);
+  // DESTROY likewise, for the rest.
+  EXPECT_EQ(Send(FUSE_DESTROY, 0, "").error, 0);
+  EXPECT_EQ(count.begun, 2);
+  EXPECT_EQ(count.ids_named, 6);
+  ctx_.events = &NoProtocolEvents();
+  for (InodeId id : ids) {
+    ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, id));
+    EXPECT_FALSE(attr.valid) << id;
+    EXPECT_THAT(Dirty(), Contains(id));
+  }
+}
+
 // At unmount the kernel sends no FORGETs: a written file the kernel still
 // held is reconciled at DESTROY instead.
 TEST_F(DirCacheFSTest, DestroyReconcilesWrittenFiles) {

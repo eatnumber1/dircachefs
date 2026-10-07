@@ -571,6 +571,11 @@ absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src,
 // see DirCacheFS's side-effect xattrs). Dirty: id.
 absl::StatusOr<Mutation> BeginAttrChange(
     Context &ctx, InodeId id, std::span<const std::string_view> xattrs = {});
+// The FORGET reconciliation of written files (DirCacheFS::ReconcileWritten)
+// of several inodes at once: marks the attributes of each of `ids` unknown,
+// in one phase 1. Dirty: ids.
+absl::StatusOr<Mutation> BeginAttrChanges(Context &ctx,
+                                          std::span<const InodeId> ids);
 // Setxattr/Removexattr of `name` on `id`: ForgetXattr(name) (only that
 // name unknown) and marks the attributes unknown (the syscall bumps
 // ctime). Dirty: id.

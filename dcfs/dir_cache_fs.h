@@ -379,10 +379,13 @@ class DirCacheFS {
   // durably dirty), then a refresh as a fill through the same descriptor;
   // the dirty row keeps a power loss from keeping the new attributes while
   // losing the stores, until a sync point's syncfs has covered them.
-  // Without a held descriptor (none could be opened) it is the phase 1
-  // alone, no I/O: the next access re-reads them. The inode leaves
-  // written_, and its descriptor is closed, either way.
-  void ReconcileWritten(InodeId id);
+  // Without a held descriptor (none could be opened, or the cap) it is
+  // the phase 1 alone, no I/O: the next access re-reads them. The inode
+  // leaves written_, and its descriptor is closed, either way. `ids` (each
+  // once; those not in written_ are skipped) are reconciled together: the
+  // ones that need a phase 1 share one (review M-1), so a FORGET batch or
+  // DESTROY costs one durable transaction, not one per file.
+  void ReconcileWritten(std::span<const InodeId> ids);
 
   // Removes `id` from written_ and returns the descriptor it held, if any,
   // keeping held_fds_ in step.
