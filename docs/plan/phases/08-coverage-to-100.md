@@ -47,12 +47,17 @@ everything after it.
   depth (a source on a FUSE mount), so READ/WRITE fall back to dcfs; it
   gets an e2e variant with the source on a FUSE mount (dcfs over dcfs
   in the guest) rather than deletion.
-- Dead for real, delete: the FUSE `Access` handler (never sent under
-  `default_permissions`, which stays: the kernel's checks from cached
-  attributes cost no backing I/O; dropping it would mean an ACCESS
-  request per permission decision, either no more faithful or a backing
-  syscall per check), `FuseRequest`'s move-assignment, the `openat2`
-  wrapper.
+- `default_permissions` is REQUIRED (russ, 2026-10-08): `Init()` verifies
+  the mount options dcfs built contain it and refuses to start otherwise
+  (test); a `--fuse_opt` value naming `default_permissions` is rejected as
+  redundant (test); the FUSE `Access` handler stays as a fail-closed path
+  (EACCES + an error log "ACCESS received: default_permissions is not in
+  effect"; an ENOSYS reply would make the kernel ALLOW), covered by a
+  forged ACCESS request in the harness. The kernel's checks from cached
+  attributes cost no backing I/O; an ACCESS request per permission
+  decision would be either no more faithful or a backing syscall per
+  check. Dead for real, delete: `FuseRequest`'s move-assignment, the
+  `openat2` wrapper.
 - `FileHandle::ToString` gets a test; style rule to add to docs/style.md
   (tests): a debug/log string is tested for the important fields it must
   contain (substrings or a regex per field), never compared to a

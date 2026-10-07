@@ -1364,3 +1364,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   requests, phases, transactions per request = reductions of the trace); SQLite steps as a
   counter on the same hook; the protocol-events and Context::checks hooks merge into one
   testonly observer interface.
+- russ (2026-10-08): default_permissions required: Init() verifies and refuses; --fuse_opt naming
+  it rejected; Access handler kept fail-closed (EACCES + error log; ENOSYS would mean ALLOW) with
+  a forged-request test. Joins the Phase 8 cleanup step (after Phase 22 merges: same files).
