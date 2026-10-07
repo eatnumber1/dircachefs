@@ -42,6 +42,20 @@ else
 	fail fuse-loaded "the fuse module is not loaded"
 fi
 
+# The guest has no modprobe: when the kernel asks for a module (mount -t of a
+# filesystem the test did not declare, a crypto algorithm, a device-mapper
+# target), the helper guest/init installed says so, instead of the test
+# failing later with ENODEV or EINVAL. This test declares only ext4 on vdb;
+# mounting xfs makes the kernel request fs-xfs.
+mkdir -p /xfs_test
+OUT=$(mount -t xfs /dev/vdb /xfs_test 2>&1)
+if [ -s /tmp/undeclared-modules ] &&
+	grep -q 'kernel requested module fs-xfs, which this test did not declare' /tmp/undeclared-modules; then
+	pass undeclared-module-is-reported
+else
+	fail undeclared-module-is-reported "no report of the xfs request; mount said: $OUT; report: $(cat /tmp/undeclared-modules 2>&1)"
+fi
+
 # CONFIG_NAMESPACES + CONFIG_NET_NS/CONFIG_USER_NS: procfs only exposes a
 # namespace's /proc/self/ns/<type> entry when that namespace type is
 # actually compiled in.

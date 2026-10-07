@@ -38,6 +38,25 @@
 # dependencies, decompressed) and /etc/dcfs-modules, which lists them in load
 # order (test/qemu/scripts/mkmodules.py). A module that fails to load is
 # reported; the test then fails by itself where it needs the driver.
+# The guest has no modprobe, so a kernel request_module() (mount -t of a
+# filesystem not declared, a crypto algorithm, a device-mapper target, the
+# unicode tables of a casefolded directory, loop) would fail without a word
+# and the test would fail later with ENODEV or EINVAL. The kernel runs the
+# helper named by /proc/sys/kernel/modprobe instead: it says which module
+# was asked for, on the console and in /tmp/undeclared-modules, and fails.
+mkdir -p /sbin
+cat >/sbin/dcfs-modprobe <<'EOF_MODPROBE'
+#!/bin/sh
+# Called by the kernel as: modprobe -q -- MODULE (or MODULE ARGS...).
+for last in "$@"; do :; done
+msg="init: kernel requested module $last, which this test did not declare (modules = [...] in test/qemu/BUILD.bazel)"
+echo "$msg" >/dev/console
+echo "$msg" >>/tmp/undeclared-modules
+exit 1
+EOF_MODPROBE
+chmod +x /sbin/dcfs-modprobe
+echo /sbin/dcfs-modprobe >/proc/sys/kernel/modprobe
+
 if [ -f /etc/dcfs-modules ]; then
 	for module in $(cat /etc/dcfs-modules); do
 		insmod "$module" || echo "init: insmod $module failed"
