@@ -582,6 +582,24 @@ TEST_F(TraceRecorderTest, FileRequestsBecomeLinesOfItsTrace) {
                               HasSubstr("failed: a write failed: errno 5")));
 }
 
+// --- Startup lines ---------------------------------------------------------
+
+// A start in the same process after a clean shutdown (FinishRun, then
+// StartRun): the start's lines carry the directory's state, so the clean
+// flag StartRun clears is the start_run line's, not an unexplained change.
+TEST_F(TraceRecorderTest, StartAfterACleanShutdownExplainsTheClearedFlag) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 70));
+  ASSERT_THAT(SetCleanShutdown(db_, true), IsOk());
+  StartTrace();
+  recorder_->RunStarting(ctx_);
+  recorder_->Recovered(ctx_);
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  recorder_->RunStarted(ctx_);
+  Tick();
+  EXPECT_THAT(Lines(d), Contains(HasSubstr("\"ev\":\"start_run\"")));
+  EXPECT_THAT(Lines(d), Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
+}
+
 // --- Nodeids' lifetime traces (formal/lifetime.tla) ----------------------
 
 // What DirCacheFS reports it keeps for a nodeid after a step.

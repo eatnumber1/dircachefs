@@ -2910,11 +2910,15 @@ TEST_F(DirCacheFSTest, RenameOverAnOpenFileRetiresItAtTheLastRelease) {
 
 // DESTROY lets go of every nodeid: a written file's held descriptor and
 // written_ entry with them (its reconciliation is
-// DestroyReconcilesWrittenFiles's).
+// DestroyReconcilesWrittenFiles's). With no writable open left the
+// shutdown is clean, and the next start sweeps nothing.
 TEST_F(DirCacheFSTest, DestroyLetsGoOfEveryNodeid) {
   WriteFile(Path("f"));
   WriteFile(Path("g"));
   Start();
+  // A running daemon's flag (StartRun clears it): the trace begins in a
+  // run, which FinishRun ends.
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
   StartTrace();
   auto [lf, ef] = Lookup(kRootInode, "f");
   ASSERT_EQ(lf.error, 0);
@@ -2925,6 +2929,10 @@ TEST_F(DirCacheFSTest, DestroyLetsGoOfEveryNodeid) {
   ASSERT_EQ(Lookup(kRootInode, "g").first.error, 0);
   ASSERT_EQ(Unlink(kRootInode, "g").error, 0);
   EXPECT_EQ(Send(FUSE_DESTROY, 0, "").error, 0);
+  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());
+  ASSERT_THAT(backing::FinishRun(ctx_), IsOk());
+  ASSERT_THAT(GetCleanShutdown(db_), IsOkAndHolds(true));
+  ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
   EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());
 }
 

@@ -1423,6 +1423,14 @@ void TraceRecorder::SyncCleared(Context &ctx) {
 
 // --- Startup and shutdown ----------------------------------------------------
 
+void TraceRecorder::RunLineWritten(Context &ctx, Ino dir) {
+  auto it = dirs_.find(dir);
+  if (it == dirs_.end() || it->second.dead) return;
+  it->second.last_state = SnapshotState(ctx, dir);
+  it->second.last = it->second.last_state.Json();
+  covered_.insert(dir);
+}
+
 void TraceRecorder::RunStarting(Context &ctx) {
   Enter("RunStarting");
   absl::StatusOr<bool> clean = GetCleanShutdown(ctx.db);
@@ -1449,6 +1457,7 @@ void TraceRecorder::RunStarting(Context &ctx) {
     }
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"restart\",\"db\":", db, "}"));
+    RunLineWritten(ctx, dir);
   }
   // The nodeids' traces: a new mount holds no nodeid (lifetime.tla's Crash,
   // or the Restart after a DESTROY).
@@ -1468,6 +1477,7 @@ void TraceRecorder::Recovered(Context &ctx) {
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"recover\",\"dirty_keys\":[", keys,
                             "],\"db\":", Snapshot(ctx, dir), "}"));
+    RunLineWritten(ctx, dir);
   }
   dirty_keys_.clear();
 }
@@ -1478,6 +1488,7 @@ void TraceRecorder::RunStarted(Context &ctx) {
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"start_run\",\"db\":",
                             Snapshot(ctx, dir), "}"));
+    RunLineWritten(ctx, dir);
   }
   // After the sweep of unnamed rows (lifetime.tla's Restart).
   LifeRunLines(ctx, "RunStarted", "start");

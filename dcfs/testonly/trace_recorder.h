@@ -337,6 +337,11 @@ class TraceRecorder final : public ProtocolEvents {
   // line's "origin": existing, mkdir, listing, parent, or other).
   std::string Origin();
   std::vector<Ino> AllDirs(Context &ctx);
+  // A run's line (restart, recover, start_run; written for every
+  // directory, its trace's or not) carried `dir`'s state now: the state
+  // its next line is compared with (After). A start in the same process
+  // as a clean shutdown changes the clean flag there.
+  void RunLineWritten(Context &ctx, Ino dir);
 
   int fd_;
   std::string trace_;
