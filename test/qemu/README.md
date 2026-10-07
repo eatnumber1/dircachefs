@@ -495,6 +495,7 @@ gate is disabled.
 | banned symbols in `//dcfs:main_static` (26.8) | `//tools:banned_symbols_self_check_test` (the real checker and deny list over a program that calls `realpath`) |
 | the ASan build reports and dies (C++ runtime linked, 7.1) | `//dcfs:asan_runtime_test` (only under `--config=asan`: alloc-dealloc-mismatch must kill the process) |
 | the UBSan build reports and dies (7.4) | `//dcfs:ubsan_runtime_test` (only under `--config=ubsan`: a signed overflow, a misaligned load and a vptr misuse must each kill the process; the vptr one failed to die until `-fsanitize=vptr` was named) |
+| the fault-injection harness injects (11.1) | `//test/qemu:fault_selftest_test` (each mode of `guest/fault_lib.sh` on a filesystem over the wrapped disk; with `fault_table` answering `healthy` for every mode, 6 of its checks and the checks of all three failure tests below fail) |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
@@ -506,6 +507,54 @@ gate is disabled.
 
 A gate without a self-check is a review finding: the review checklist asks
 whether every gate in the tree has a self-check, and if not, why not.
+
+## Fault injection (Phase 11)
+
+`guest/fault_lib.sh` wraps a disk in a device-mapper device and switches its
+table live (`dmsetup suspend --nolockfs`, `load`, `resume`): `healthy` (a
+linear table), `error-writes`, `drop-writes`, `error-reads` and `error-io`
+(dm-flakey with its `error_writes`, `drop_writes` and `error_reads`
+features and an up interval of 0, so every I/O is in a down interval) and
+`dead` (dm-error). `fault_wrap NAME /dev/vdb` makes `/dev/mapper/NAME`
+(mount that, not the disk); `fault_mode NAME MODE` switches it;
+`fault_unwrap NAME` removes it. A test declares `modules = ["dm_flakey"]`
+(dm-error is in dm-mod). `dmsetup` is Alpine's `device-mapper` package
+(`@alpine_dmsetup` in `MODULE.bazel`: `/sbin/dmsetup` 117 KB and
+`libdevmapper` 301 KB, installed by `mkinitramfs.sh` at their Alpine paths
+beside strace's musl; the static package is 1.2 MB), in every e2e initramfs
+but the traced one.
+
+An error shows up later than the table switch, because a filesystem's writes
+go to its page cache and journal: an fsync, a `sync` or the journal's own
+commit meets it, and ext4 then aborts its journal and remounts read-only
+(`touch` fails with EROFS). `drop-writes` is the power cut: writes complete
+and are lost, so after the filesystem is unmounted (its own writes dropped)
+and mounted again on a healthy table it holds exactly what had reached the
+disk. `guest/fault_dcfs_lib.sh` builds dcfs on two such disks (backing at
+`$SRC`, cache database at `/cache`): `fd_cut` drops writes on both at one
+instant (a power cut is one instant), `fd_restore` brings both back, and
+`fd_freeze`/`fd_thaw` (FIFREEZE) hold the daemon inside a phase, since a
+mutation blocks in its first write to a frozen filesystem: a frozen backing
+filesystem holds a create in phase 2 with phase 1 durable in the cache, a
+frozen cache filesystem holds it in phase 3 or in the sync point's clearing
+of the dirty set. `fd_blocked` waits until the daemon is held (state D, in a
+syscall on a descriptor under the path given, three looks in a row: a
+`syncfs` waiting for its I/O is in state D for a moment too).
+
+| Test | What it injects | What must hold |
+|---|---|---|
+| `fault_selftest_test` | each mode on a plain filesystem | the mode does what it says |
+| `fault_backing_test` | backing read errors during a cold lookup; backing write errors until the journal aborts, then a create | the error goes back; nothing is recorded as present or absent (the lookup after healing answers the truth); the name is not served; the daemon lives; after a restart the dirty rows are recovered and the served tree matches the backing filesystem |
+| `fault_cache_test` | cache-disk write errors during a create's phase 1; the cache filesystem aborted, then a periodic sync point | the mutation never reaches the backing filesystem; the dirty set survives the failed clearing; after a restart everything served matches the backing filesystem and mutations work |
+| `fault_power_test` | a power cut before a create, between phases 1 and 2, between 2 and 3 (backing durable), after the cache has what the backing filesystem lost ("cache ahead"), and inside a sync point | after a restart every entry served matches the backing filesystem (type, size, mode, listings), and the recovery names the dirty rows that survived; a comparison that never differs would pass everything, so the last check adds a name behind dcfs's back and requires the comparison to fail |
+
+These run in the small tier with the checking build of dcfs
+(`initramfs_checked`): an error path that leaves an invariant broken aborts
+the daemon and the test fails. Each uses the default guest memory (the MEM
+line shows `reclaim_scans=0`: peak 72 MiB plain and 158 MiB under ASan, of
+256 and 384). The cache disk's I/O errors reach the caller as EAGAIN
+(`SQLITE_IOERR` is mapped to `UNAVAILABLE`, `sqlite.cc`), which the tests
+record and do not require to be EIO.
 
 ## Syscall traces
 
