@@ -76,6 +76,37 @@ KNOWN_BUGS = {
     for bug, violation in KNOWN_BUGS.items()
 ]
 
+# The revalidation model (reval.tla; README.md, "The revalidation model"):
+# what dcfs reuses across a change of the backing state. MC_reval: every
+# invariant, changes through dcfs only; MC_reval_oob: the flags part with
+# changes behind dcfs's back; MC_reval_liveness: CachedDecisionsConverge.
+tlc_test(
+    name = "reval_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_reval.cfg",
+    spec = "MCreval.tla",
+    srcs = ["reval.tla"],
+)
+
+tlc_test(
+    name = "reval_oob_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_reval_oob.cfg",
+    spec = "MCreval.tla",
+    srcs = ["reval.tla"],
+)
+
+tlc_test(
+    name = "reval_liveness_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_reval_liveness.cfg",
+    spec = "MCreval.tla",
+    srcs = ["reval.tla"],
+)
+
 # Trace validation (README.md, "Trace validation"): the spec, its
 # configuration and the script the tla_trace_test targets run (in //dcfs and
 # //test/qemu, next to the guests that record the traces).
