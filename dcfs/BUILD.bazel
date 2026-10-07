@@ -717,8 +717,23 @@ qemu_cc_test(
     asan_mem = 1088,
     srcs = ["dir_cache_fs_test.cc"],
     # The fault sweep has its target (dir_cache_fs_fault_sites_test).
-    args = ["--gtest_filter=-FaultSitesTest.*"],
+    args = ["--gtest_filter=-FaultSitesTest.*:SlopeTest.*"],
     disks = [("vdb", "ext4", "32M")],  # InitRoot needs FS_IOC_GETFSUUID
+    linkopts = DIR_CACHE_FS_TEST_WRAPS,
+    deps = DIR_CACHE_FS_TEST_DEPS,
+)
+
+# Step 26.4b: the slope tests (SlopeTest in dir_cache_fs_test.cc): every
+# operation class N times in one directory at N = 100 and 1000, its SQLite
+# steps, transactions, WAL fsyncs and backing syscalls bounded by a * N + b.
+qemu_cc_test(
+    name = "dir_cache_fs_slope_test",
+    # About 70 s at load 19 (the N = 1000 runs): presubmit, not fast.
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["dir_cache_fs_test.cc"],
+    args = ["--gtest_filter=SlopeTest.*"],
+    disks = [("vdb", "ext4", "32M")],
     linkopts = DIR_CACHE_FS_TEST_WRAPS,
     deps = DIR_CACHE_FS_TEST_DEPS,
 )

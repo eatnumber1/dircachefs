@@ -110,6 +110,7 @@
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
 #include "gmock/gmock.h"
+#include "gtest/gtest-spi.h"
 #include "gtest/gtest.h"
 #include "sqlite3.h"
 
@@ -230,8 +231,16 @@ void SweepAtHook(absl::SourceLocation where) {
   }
 }
 
+// How many wrapped libc calls (the backing filesystem's, see
+// NoTransactionAt) were made: the slope tests' backing syscalls.
+int64_t &WrappedCalls() {
+  static int64_t calls = 0;
+  return calls;
+}
+
 // In every wrapped libc call: the errno to fail it with, or 0.
 int InjectedFault(const char *call) {
+  ++WrappedCalls();
   FaultSweep &f = Sweep();
   if (f.at.empty()) return 0;  // Not after a hook (the test's own calls).
   const int j = f.seen[call]++;
@@ -5460,5 +5469,148 @@ TEST(FaultSitesTest, SweepReportsABrokenInvariant) {
                   "dirty-set: Context::dirty.any is false")));
 }
 
+// --- Slopes (step 26.4b) -------------------------------------------------------
+//
+// Every operation class, N times in one directory at N = 100 and 1000: the
+// SQLite steps, transactions, durable transactions (each a WAL fsync:
+// Durability::kSync) and backing syscalls (the wrapped libc calls) of the N
+// operations are bounded by a * N + b, a and b today's numbers; a cost that
+// grows with the directory, or per operation, exceeds them at N = 1000.
+
+struct Slope {
+  int64_t steps = 0;
+  int64_t transactions = 0;
+  int64_t durable = 0;  // WAL fsyncs
+  int64_t backing = 0;  // backing syscalls
+};
+
+class SlopeRun : public DirCacheFSTest {
+ public:
+  void TestBody() override {}
+
+  // `extra`, if given, runs after each operation (the self-check's added
+  // cost).
+  Slope Measure(std::string_view op, int n,
+                const std::function<void(SlopeRun &)> &extra = {}) {
+    SetUp();
+    const bool existing = op != "create" && op != "mkdir";
+    if (existing) {
+      for (int i = 0; i < n; ++i) WriteFile(Path(absl::StrCat("f", i)));
+    }
+    Start();
+    if (existing && op != "cold-lookup") {
+      for (int i = 0; i < n; ++i) Lookup(kRootInode, absl::StrCat("f", i));
+    }
+    counter_.Reset();
+    WrappedCalls() = 0;
+    for (int i = 0; i < n; ++i) {
+      const std::string name = absl::StrCat("f", i);
+      if (op == "create") {
+        Created c = Create(kRootInode, name, O_WRONLY);
+        EXPECT_EQ(c.reply.error, 0) << name;
+        Release(c.id, c.fh);
+      } else if (op == "mkdir") {
+        EXPECT_EQ(Mkdir(kRootInode, name).first.error, 0) << name;
+      } else if (op == "unlink") {
+        EXPECT_EQ(Unlink(kRootInode, name).error, 0) << name;
+      } else if (op == "rename") {
+        EXPECT_EQ(Rename(kRootInode, name, kRootInode, absl::StrCat("r", i))
+                      .error,
+                  0)
+            << name;
+      } else if (op == "cold-lookup") {
+        EXPECT_EQ(Lookup(kRootInode, name).first.error, 0) << name;
+      } else if (op == "setattr") {
+        auto [lookup, entry] = Lookup(kRootInode, name);
+        EXPECT_EQ(Chmod(static_cast<InodeId>(entry.nodeid), 0600).error, 0)
+            << name;
+      }
+      if (extra) extra(*this);
+    }
+    const testonly::CostCounter::Counts &c = counter_.counts();
+    const Slope slope{.steps = c.steps,
+                      .transactions = c.transactions,
+                      .durable = c.durable_transactions,
+                      .backing = WrappedCalls()};
+    TearDown();
+    std::cout << "SLOPE " << op << " n=" << n << " steps=" << slope.steps
+              << " transactions=" << slope.transactions
+              << " durable=" << slope.durable << " backing=" << slope.backing
+              << std::endl;
+    return slope;
+  }
+
+  // Two more statement steps: a row and the end (the self-check's
+  // regression).
+  void ExtraStep() { ASSERT_THAT(db_.Exec("SELECT 1"), IsOk()); }
+};
+
+// The bounds: a per operation and b per run, for steps, transactions, WAL
+// fsyncs and backing syscalls; today's numbers exactly (the counts are
+// deterministic). Raising one is a deliberate edit whose commit says why.
+//
+// The fsyncs: a create (O_WRONLY, as creat(2) and every shell redirection
+// open), an unlink, a rename and a setattr each cost one WAL fsync, every
+// time, in one directory: the phase 1 of an inode that is not yet durably
+// dirty is durable, and each of those names a new one (a create's writable
+// open, its new file; an unlink or a rename, the object it removes or
+// moves; a setattr, its inode). Only the directory's own dirty row is
+// durable once per sync interval (mkdir: one fsync for N). docs/design.md's
+// "a burst of creates in one directory costs one WAL fsync" holds for
+// mkdir, not for create.
+struct SlopeBound {
+  const char *op;
+  int64_t steps_a, steps_b;
+  int64_t transactions_a, transactions_b;
+  int64_t durable_a, durable_b;
+  int64_t backing_a, backing_b;
+};
+constexpr SlopeBound kSlopeBounds[] = {
+    {"create", 82, 3, 7, 0, 1, 1, 14, 64},
+    {"mkdir", 48, 3, 3, 0, 0, 1, 8, 0},
+    {"unlink", 38, 0, 4, 0, 1, 0, 8, 0},
+    {"rename", 59, 0, 4, 0, 1, 0, 9, 0},
+    {"cold-lookup", 20, 16, 0, 1, 0, 0, 5, 2},
+    {"setattr", 35, 0, 3, 0, 1, 0, 13, 0},
+};
+
+// Whether `s`, `bound.op` at N = `n`, is within its bounds (each count
+// failing is reported).
+bool WithinBounds(const SlopeBound &bound, int64_t n, const Slope &s) {
+  bool within = true;
+  auto check = [&](const char *what, int64_t count, int64_t a, int64_t b) {
+    if (count <= a * n + b) return;
+    within = false;
+    ADD_FAILURE() << bound.op << " n=" << n << ": " << what << " " << count
+                  << " > " << a << " * n + " << b;
+  };
+  check("steps", s.steps, bound.steps_a, bound.steps_b);
+  check("transactions", s.transactions, bound.transactions_a,
+        bound.transactions_b);
+  check("WAL fsyncs", s.durable, bound.durable_a, bound.durable_b);
+  check("backing syscalls", s.backing, bound.backing_a, bound.backing_b);
+  return within;
+}
+
+TEST(SlopeTest, EveryOperationClassIsBoundedByANPlusB) {
+  for (const SlopeBound &bound : kSlopeBounds) {
+    for (int64_t n : {100, 1000}) {
+      SlopeRun run;
+      WithinBounds(bound, n, run.Measure(bound.op, static_cast<int>(n)));
+    }
+  }
+}
+
+// The bounds' self-check: two more statement steps per create (a
+// regression's cost) is caught.
+TEST(SlopeTest, AnExtraCostPerOperationIsCaught) {
+  SlopeRun run;
+  const Slope s = run.Measure("create", 100,
+                              [](SlopeRun &r) { r.ExtraStep(); });
+  bool within = true;
+  EXPECT_NONFATAL_FAILURE(within = WithinBounds(kSlopeBounds[0], 100, s),
+                          "create n=100: steps 8403 > 82 * n + 3");
+  EXPECT_FALSE(within);
+}
 }  // namespace
 }  // namespace dcfs

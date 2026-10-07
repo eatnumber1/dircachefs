@@ -504,6 +504,7 @@ gate is disabled.
 | fast and presubmit tiers boot the checking build (26.2) | `//test/qemu:invariant_checks_on_test` (a small test whose daemon must say `invariant checks: on`) |
 | interrupt checkpoints (Phase 22: an interrupted request replies `EINTR` at its next checkpoint) | `//dcfs:dir_cache_fs_test`'s cancellation tests (a fake interruption source, and a forged `FUSE_INTERRUPT` read by the real `SessionLoop`) and `//test/qemu:cancel_test`; without the checkpoints the harness tests fail, and `cancel_test`'s interrupted listing took 12.1 s after the signal (the population's 13.6-19.5 s in `cancel_inventory_test`) |
 | fault sweep: every backing call site a short workload reaches, failed once (26.6) | `//dcfs:dir_cache_fs_fault_sites_test`'s `FaultSitesTest.SweepReportsABrokenInvariant` (an iteration that breaks an invariant is reported, naming the site it failed) |
+| slopes: every operation class's steps, transactions, WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by a * N + b (26.4b) | `//dcfs:dir_cache_fs_slope_test`'s `SlopeTest.AnExtraCostPerOperationIsCaught` (two more statement steps per create exceed the bound) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
