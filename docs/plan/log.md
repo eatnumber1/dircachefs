@@ -1190,3 +1190,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   trace. Also: query-plan test for inodes_unlinked; design.md: a forgotten boundary's stub can
   outlive it until the parent is relisted (deliberate); probe cost note. Lesson for the
   checklist: a start-up change must be tested in main.cc's order, not the fixture's.
+- 26.7 + 26.10 merged (a6b86df, 4 commits): syscalls_backing split with a dependents golden;
+  Context::clock (absl::Clock) with SimulatedClock tests; design.md "The clock" paragraph; the
+  absl::Now ban's mangled name holds under clang/libc++. presubmit+formal 209 pass + 1 skip (+
+  readdir_boundary timing flake, 3.04 s, third time: N4 now). Dispatched to lane-1 (step-readdir):
+  N4 as work counting (harness step-count bound for N=100/1000, readdir_boundary as a 4N-vs-N
+  CPU ratio) and SQLite reductions 1-4 (attrs joined into ListDir, LIMIT = reply budget, ReadOne
+  stops after the first row, merged completeness statements), budgets lowered per change,
+  bench_readdir before/after; (5) create's phase-3 merge and (6) profiling deferred.
