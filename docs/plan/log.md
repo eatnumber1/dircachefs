@@ -959,3 +959,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   dcfs-mechanical): inventory of gates, missing self-checks, README table.
 - russ (2026-10-07): 26.10 uses absl::Clock + absl::SimulatedClock (both in the pinned Abseil),
   not a clock type of our own; orchestrator had claimed Abseil lacked one.
+- 25.1 + 25.1b done in lane-1 (step-25.1 @ 2a7fec6, rebased): fast 87/87, presubmit 147/148
+  (readdir_boundary warm-listing 2.98 s vs 2.5 s under load; passes on rerun: N4 again), asan
+  small 25/25. 25.1b: raw_syscalls_test (manual) finds 300 sites in 20 files (dir_cache_fs_test
+  115, backing_test 52, bench 54, ...; false positives: local functions named open/read in
+  dir_cache_fs.cc:1335,1346 and migrate.cc:57; clock_gettime at dir_cache_fs.cc:1496 is real and
+  26.10's). Conversion = 25.1c (dcfs-mechanical, after merge). Fresh dcfs-reviewer on the branch.
