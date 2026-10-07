@@ -719,3 +719,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   checklist points at it). Phase 25 (style convergence) written from its Appendix A: 25.1 errors,
   wrappers, enums after Phase 23 merges (same files); 25.2 flat namespaces (clashes: ParentOf,
   SetXattr, RemoveXattr in cache and backing); format/includes in 7.6/7.7.
+- russ (2026-10-07): Google's style guides for every language (C++, Python, Shell, Markdown docs;
+  Bazel per buildifier). Shell: bash for host scripts; guest scripts stay POSIX sh (busybox has no
+  bash) as a documented deviation until Phase 24 can ship bash; shfmt + shellcheck join 7.6.

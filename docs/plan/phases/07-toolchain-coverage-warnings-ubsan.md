@@ -47,11 +47,13 @@ are then the same on every machine and in CI.
   `bazel run //tools:format` (replaces `tools/format.sh`'s "if installed"),
   and a `small` `//tools:format_test` that runs both in check mode
   (`clang-format --dry-run -Werror`, `buildifier -mode=check`) over the
-  tracked C/C++ and Bazel files, so `--config=fast` and CI fail on an
-  unformatted file. An opt-in `.githooks/pre-commit` (`git config
+  tracked C/C++ and Bazel files, plus a pinned `shfmt` (Google shell
+  style: 2-space indent, `-i 2 -ci -bn`) and `shellcheck` over every
+  shell script (russ, 2026-10-07: Google's style guides for every
+  language), so `--config=fast` and CI fail on an unformatted file. An opt-in `.githooks/pre-commit` (`git config
   core.hooksPath .githooks`) runs the same check. The same change
   reformats the tree once (`tools/*.c` tabs, the ~100 long lines, the
-  6-space BUILD lists), so the test is green from its first commit. A
+  6-space BUILD lists, 48 tab-indented shell scripts, host scripts to bash), so the test is green from its first commit. A
   pinned Python formatter (Google Python style, 80 columns) for `tools/`
   and `man/` joins it if rules_python offers one without a pip
   dependency; otherwise it is a separate small step.
