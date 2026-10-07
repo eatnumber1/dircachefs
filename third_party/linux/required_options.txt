@@ -3,9 +3,13 @@
 # The test kernel is Alpine's linux-virt, so this is no longer a build
 # fragment: it is the list of what the tests rely on, each with a comment
 # saying who needs it, and //third_party/linux:kernel_config_test checks it
-# against the package's /boot/config-*. Every option must be built in (=y)
-# or a module (=m) there, never off; a module also has to be in the
-# `modules` of the tests that use it (test/qemu/qemu_test.bzl). Add a line
+# against the package's /boot/config-*. An option listed `=y` must be built in
+# or a module (=m) there, never off; a module also has to be in the `modules`
+# of the tests that use it (test/qemu/qemu_test.bzl). An option listed
+# `=builtin` must be built in: nothing can load a module before it is needed
+# (the console, the virtio-mmio devices, which the kernel learns of from its
+# command line, something insmod does not read; the initramfs; the mounts
+# guest/init does first; module loading itself). Add a line
 # here, with the reason, when a test starts to need another option, so later
 # phases never have to edit anything else (docs/plan/execution.md, "Kernel
 # config once").
@@ -52,11 +56,11 @@ CONFIG_HIGH_RES_TIMERS=y
 # dance at all (test/qemu/scripts/run-qemu.sh, test/qemu/README.md "Fast
 # boot").
 CONFIG_PVH=y
-CONFIG_VIRTIO_MMIO=y
+CONFIG_VIRTIO_MMIO=builtin
 # microvm has no ACPI (run-qemu.sh's acpi=off); the kernel instead learns
 # about its virtio-mmio devices from a virtio_mmio.device= kernel command
 # line parameter QEMU appends automatically -- this symbol parses it.
-CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=y
+CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES=builtin
 # Scratch/source disks every qemu_test with a `disks =` attribute attaches
 # (test/qemu/qemu_test.bzl, test/qemu/scripts/run-qemu.sh).
 CONFIG_VIRTIO_BLK=y
@@ -66,31 +70,34 @@ CONFIG_VIRTIO_BLK=y
 # build-kernel.sh baseline this fragment replaces.
 CONFIG_VIRTIO_NET=y
 CONFIG_VIRTIO_CONSOLE=y
-CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250=builtin
 # run-qemu.sh's `-serial stdio` console=ttyS0.
-CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_SERIAL_8250_CONSOLE=builtin
 # Kernel boot diagnostics: README.md's boot-time measurement reads a pr_info
 # timestamp, and every test's serial.log capture depends on dmesg/boot
 # messages for debugging failures.
 CONFIG_PRINTK=y
 # test/qemu/guest/init execs /bin/busybox (an ELF binary) as the very first
 # user process, and every guest/*.sh test script is a #!/bin/sh script.
-CONFIG_BINFMT_ELF=y
-CONFIG_BINFMT_SCRIPT=y
+CONFIG_BINFMT_ELF=builtin
+CONFIG_BINFMT_SCRIPT=builtin
 # guest/init's initramfs boot.
-CONFIG_BLK_DEV_INITRD=y
-CONFIG_RD_GZIP=y
+CONFIG_BLK_DEV_INITRD=builtin
+CONFIG_RD_GZIP=builtin
+
+# insmod needs module support at all (no test boots without it any more).
+CONFIG_MODULES=builtin
 
 # --- pseudo filesystems every test's guest/init mounts --------------------
-CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS=builtin
 CONFIG_DEVTMPFS_MOUNT=y
-CONFIG_PROC_FS=y
-CONFIG_SYSFS=y
+CONFIG_PROC_FS=builtin
+CONFIG_SYSFS=builtin
 # guest/init's /tmp (and every qemu_cc_test's default TEST_TMPDIR when no
 # `disks=` is given); TMPFS_XATTR/TMPFS_POSIX_ACL: setattr_test/write_test's
 # xattr and ACL-equivalent-to-mode checks, and systemd's own requirement
 # (third_party/linux/README.md's systemd section) that tmpfs support both.
-CONFIG_TMPFS=y
+CONFIG_TMPFS=builtin
 CONFIG_TMPFS_XATTR=y
 CONFIG_TMPFS_POSIX_ACL=y
 CONFIG_SHMEM=y

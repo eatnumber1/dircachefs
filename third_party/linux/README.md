@@ -42,7 +42,10 @@ module fails the build with its name.
 `required_options.txt` lists the kernel options the tests rely on, each with
 its reason (it was `kernel.config`, the build fragment).
 `//third_party/linux:kernel_config_test` checks every one against the
-package's `/boot/config-*`: built in or a module, never off. To add a
+package's `/boot/config-*`: built in or a module, never off (`=y` in the
+list); the options nothing can load a module for (the console, virtio-mmio,
+the initramfs, module support, the early mounts) are listed `=builtin` and
+must be built in. To add a
 requirement, add the line with the reason; if Alpine's kernel lacks it the
 test fails, and the options of the kernel are Alpine's to choose, so the answer
 is then to drop the need or to take a different kernel (not to patch one).
