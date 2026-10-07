@@ -637,6 +637,22 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Phase 22: request cancellation (docs/design.md, "Cancellation"): on a
+# delayed backing, an interrupted or killed listing of a cold 20,000-entry
+# directory returns within 2 s, dcfs keeps serving, and the listing is then
+# complete and right.
+qemu_test(
+    name = "cancel_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "320M"),
+    ],
+    guest_script = "guest/cancel.sh",
+    modules = ["dm_delay"],
+    size = "large",
+    timeout = "long",
+)
+
 # Step 22.1: the cancellation inventory's measurements: each request path
 # that waits on the backing filesystem, timed with every backing I/O
 # delayed (dm-delay); prints the numbers, passes if every step ran.

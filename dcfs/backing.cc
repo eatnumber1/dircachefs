@@ -1262,7 +1262,7 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   for (size_t i = 0; i < names.size(); ++i) {
     // Between probe batches (formal/dcfs.tla's Interrupt at PD_commit):
     // an interrupted population stops here and records nothing.
-    constexpr size_t kProbesPerCheckpoint = 64;
+    constexpr size_t kProbesPerCheckpoint = 16;
     if (i % kProbesPerCheckpoint == 0) {
       ABSL_RETURN_IF_ERROR(Checkpoint(ctx, "a directory's probes"));
     }

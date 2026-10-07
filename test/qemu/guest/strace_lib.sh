@@ -31,7 +31,7 @@
 # trace (strace_counts) are what step 26.4 ratchets.
 
 # The syscalls whose first argument is a descriptor and that name no path.
-STRACE_FD_ONLY='read|write|readv|writev|pread64|pwrite64|close|fsync|fdatasync|fstat|fstatfs|ioctl|getdents64|getdents|copy_file_range|fallocate|ftruncate|fchmod|fchown|flistxattr|fgetxattr|fsetxattr|fremovexattr|lseek|syncfs|fcntl|flock|sendfile|splice|fadvise64|readahead|dup|dup2|dup3|mmap|msync'
+STRACE_FD_ONLY='poll|read|write|readv|writev|pread64|pwrite64|close|fsync|fdatasync|fstat|fstatfs|ioctl|getdents64|getdents|copy_file_range|fallocate|ftruncate|fchmod|fchown|flistxattr|fgetxattr|fsetxattr|fremovexattr|lseek|syncfs|fcntl|flock|sendfile|splice|fadvise64|readahead|dup|dup2|dup3|mmap|msync'
 
 # What strace traces: path syscalls, descriptor syscalls, the fstat family,
 # and the calls that are not covered by those classes.
@@ -63,6 +63,11 @@ strace_reduce() {
 		# AT_FDCWD, whose decoration is the working directory).
 		fdpath = ""
 		if (match(line, /^[a-z_0-9]+\([0-9]+<[^>]*>/)) {
+			head = substr(line, 1, RLENGTH)
+			fdpath = substr(head, index(head, "<") + 1)
+			fdpath = substr(fdpath, 1, length(fdpath) - 1)
+		} else if (match(line, /^poll\(\[\{fd=[0-9]+<[^>]*>/)) {
+			# poll of one descriptor (the drain of /dev/fuse at a checkpoint).
 			head = substr(line, 1, RLENGTH)
 			fdpath = substr(head, index(head, "<") + 1)
 			fdpath = substr(fdpath, 1, length(fdpath) - 1)

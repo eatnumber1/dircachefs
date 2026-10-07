@@ -22,6 +22,7 @@ fail() {
 
 cat >"${WORK}/raw" <<'EOT'
 520   read(8</dev/fuse>, "/\0\0\0\1\0\0\0X\0\0"..., 1052672) = 44
+520   poll([{fd=8</dev/fuse>, events=POLLIN}], 1, 0) = 0 (Timeout)
 520   openat(3</src/t>, "new", O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, 0100666) = 10</src/t/new>
 520   statx(10</src/t/new>, "", AT_EMPTY_PATH, STATX_ALL, {stx_mask=STATX_ALL, ...}) = 0
 520   open_by_handle_at(3</src/t>, {handle_bytes=8, handle_type=1, f_handle="\x11"}, O_RDONLY|O_PATH) = 9</>
@@ -49,6 +50,7 @@ FAILED=0
 . "${STRACE_LIB}"
 
 want='read(fuse)
+poll(fuse)
 openat(backing)
 statx(backing)
 open_by_handle_at(backing)
@@ -91,7 +93,7 @@ ${want}"
 echo "PASS: backing, procfd and other lines are kept, cache/proc/fuse dropped"
 
 got=$(strace_reduce /src/t /cache <"${WORK}/raw" | strace_counts | tr '\n' ' ')
-[[ "${got}" == "backing 6 procfd 2 other 2 cache 3 proc 2 fuse 2 log 1 sync 2 " ]] ||
+[[ "${got}" == "backing 6 procfd 2 other 2 cache 3 proc 2 fuse 3 log 1 sync 2 " ]] ||
   fail "counts: got '${got}'"
 echo "PASS: counts per kind"
 
