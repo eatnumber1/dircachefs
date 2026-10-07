@@ -8,6 +8,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/random/bit_gen_ref.h"
 #include "absl/status/statusor.h"
+#include "absl/time/clock_interface.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
@@ -108,6 +109,11 @@ struct Context {
   // production; trace validation's recorder in the testonly builds. Never
   // null; not owned.
   ProtocolEvents *events = &NoProtocolEvents();
+  // The clock every time-based decision reads (the periodic sync point,
+  // relatime at read-open): the real clock in production, an
+  // absl::SimulatedClock in tests. Never null; not owned. Production code
+  // reads the time nowhere else (tools/banned_symbols.txt).
+  absl::Clock *clock = &absl::Clock::GetRealClock();
 };
 
 }  // namespace dcfs

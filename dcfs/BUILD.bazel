@@ -608,6 +608,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     "@absl//absl/status:statusor",
     "@absl//absl/strings",
     "@absl//absl/time",
+    "@absl//absl/time:simulated_clock",
     "@googletest//:gtest_main",
     "@libfuse//:libfuse",
 ]
@@ -895,6 +896,7 @@ cc_library(
       "@absl//absl/container:flat_hash_set",
       "@absl//absl/random:bit_gen_ref",
       "@absl//absl/status:statusor",
+      "@absl//absl/time:clock_interface",
     ],
 )
 

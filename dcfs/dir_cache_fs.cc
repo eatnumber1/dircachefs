@@ -119,7 +119,7 @@ std::pair<size_t, std::string> MaxHeldFds(const DirCacheFS::Options &opts) {
 }  // namespace
 
 DirCacheFS::DirCacheFS(Context &ctx, Options opts)
-    : ctx_(ctx), opts_(opts), last_sync_(absl::Now()) {
+    : ctx_(ctx), opts_(opts), last_sync_(ctx.clock->TimeNow()) {
   ctx_.open_for_write = &open_for_write_;
   std::string source;
   std::tie(max_held_fds_, source) = MaxHeldFds(opts);
@@ -517,14 +517,14 @@ void DirCacheFS::ResolveSideEffectXattrs(
 
 void DirCacheFS::MaybeSyncBacking() {
   if (!ctx_.dirty.any) return;
-  absl::Time now = absl::Now();
+  absl::Time now = ctx_.clock->TimeNow();
   if (now - last_sync_ < opts_.sync_interval) return;
   SyncBackingNow("periodic");
 }
 
 void DirCacheFS::SyncBackingNow(std::string_view why) {
   if (!ctx_.dirty.any) return;
-  last_sync_ = absl::Now();
+  last_sync_ = ctx_.clock->TimeNow();
   if (absl::Status status = backing::SyncBacking(ctx_); !status.ok()) {
     // Safe to carry on: the dirty entries stay, and only cost a larger
     // re-read after a crash. The next request past the interval retries.
@@ -1522,15 +1522,9 @@ absl::Status DirCacheFS::OpenInode(
   // I/O). A writable open's attributes are unknown until its last release
   // (and re-read then, atime included), and O_NOATIME asks for none.
   if (!writable && !(fi.flags & O_NOATIME) && !removed_.contains(id)) {
-    absl::StatusOr<struct timespec> now =
-        syscalls::clock_gettime(CLOCK_REALTIME);
-    if (!now.ok()) {
-      LOG(WARNING) << "Open: could not read the clock to record the access "
-                      "time of inode "
-                   << id << ": " << now.status();
-    } else if (absl::StatusOr<bool> touched =
-                   cache::TouchAtime(ctx_, id, *now);
-               !touched.ok()) {
+    if (absl::StatusOr<bool> touched = cache::TouchAtime(
+            ctx_, id, absl::ToTimespec(ctx_.clock->TimeNow()));
+        !touched.ok()) {
       LOG(WARNING) << "Open: could not record the access time of inode "
                    << id << ": " << touched.status();
     }

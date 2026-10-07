@@ -74,6 +74,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
+#include "absl/time/simulated_clock.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
 #include "dcfs/context.h"
@@ -1944,6 +1945,105 @@ TEST_F(RelatimeTest, NoatimeBackingNeverUpdates) {
   const int64_t before = CachedAtime(f);
   OpenAndRelease(f, O_RDONLY);
   EXPECT_EQ(CachedAtime(f), before);
+}
+
+// --- the injected clock (step 26.10) ----------------------------------------
+//
+// DirCacheFS reads the time only through Context::clock: the periodic sync
+// point and relatime at read-open. A SimulatedClock makes both deterministic.
+
+class ClockTest : public DirCacheFSTest {
+ protected:
+  ClockTest() {
+    ctx_.clock = &clock_;
+    options_.sync_interval = absl::Seconds(5);
+  }
+
+  // An empty request, at which the periodic sync point is considered.
+  void Tick() {
+    struct fuse_getattr_in in = {};
+    std::string body;
+    AppendBytes(body, in);
+    EXPECT_EQ(Send(FUSE_GETATTR, static_cast<uint64_t>(kRootInode), body).error,
+              0);
+  }
+
+  int64_t CachedAtime(InodeId id) {
+    absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
+    EXPECT_THAT(attr, IsOk());
+    if (!attr.ok()) return -1;
+    EXPECT_TRUE(attr->valid);
+    return attr->st.st_atim.tv_sec;
+  }
+
+  void OpenAndRelease(InodeId id, int flags) {
+    auto [open, fh] = Open(id, flags);
+    ASSERT_EQ(open.error, 0);
+    ASSERT_EQ(Release(id, fh).error, 0);
+  }
+
+  absl::SimulatedClock clock_{absl::FromUnixSeconds(1'800'000'000)};
+};
+
+// The periodic sync point runs once the interval has elapsed on the
+// injected clock, not before, and exactly once; a descriptor held for a
+// written file survives it (the FORGET after it still re-reads through the
+// held descriptor).
+TEST_F(ClockTest, PeriodicSyncPointFollowsTheInjectedClock) {
+  WriteFile(Path("f"));
+  Start();
+  int syncs = 0;
+  SyncfsHook() = [&] { ++syncs; };
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);  // written, held
+  ASSERT_THAT(Dirty(), Contains(f));
+  ASSERT_EQ(syncs, 0);
+
+  clock_.AdvanceTime(absl::Seconds(4));
+  Tick();
+  EXPECT_EQ(syncs, 0) << "before the interval has elapsed";
+
+  clock_.AdvanceTime(absl::Seconds(2));
+  Tick();
+  EXPECT_EQ(syncs, 1) << "once, after it";
+  Tick();
+  EXPECT_EQ(syncs, 1) << "not again until another interval has elapsed";
+
+  // The held descriptor is unchanged across the sync point.
+  AppendToFile(Path("f"), "after");
+  Forget(f, 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_size, 5);
+}
+
+// A read open records the injected time as the atime when the relatime rule
+// says to update it, and applies the 24 h rule to that time.
+TEST_F(ClockTest, ReadOpenRecordsTheInjectedTimeAndAppliesTheDayRule) {
+  ASSERT_OK_AND_ASSIGN(struct timespec real,
+                       syscalls::clock_gettime(CLOCK_REALTIME));
+  WriteFile(Path("f"));
+  // atime after mtime and ctime, and recent: relatime leaves it.
+  const struct timespec times[2] = {{.tv_sec = real.tv_sec + 3600, .tv_nsec = 0},
+                                    {.tv_sec = real.tv_sec - 7200, .tv_nsec = 0}};
+  ASSERT_THAT(syscalls::utimensat(AT_FDCWD, Path("f"), times, 0), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const int64_t atime = real.tv_sec + 3600;
+  ASSERT_EQ(CachedAtime(f), atime);
+
+  // The simulated clock is two hours after the atime: within the day, no
+  // update.
+  clock_.SetTime(absl::FromUnixSeconds(atime + 7200));
+  OpenAndRelease(f, O_RDONLY);
+  EXPECT_EQ(CachedAtime(f), atime);
+
+  // Past the day: updated, to the simulated time (not the wall clock).
+  clock_.SetTime(absl::FromUnixSeconds(atime + 86400 + 5));
+  OpenAndRelease(f, O_RDONLY);
+  EXPECT_EQ(CachedAtime(f), atime + 86400 + 5);
 }
 
 // copy_file_range into, and ioctls of, a removed object (no row: no
