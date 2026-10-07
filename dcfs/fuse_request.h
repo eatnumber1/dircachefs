@@ -70,9 +70,12 @@ class FuseRequest {
   explicit FuseRequest(fuse_req_t req);
   ~FuseRequest();
 
-  FuseRequest(FuseRequest &&);
+  // Neither copied nor moved: each lives in the scope that serves its
+  // request (fuse_ops.cc's Serve), which is what makes "replied by the
+  // time it is destroyed" checkable.
+  FuseRequest(FuseRequest &&) = delete;
   FuseRequest(const FuseRequest &) = delete;
-  FuseRequest &operator=(FuseRequest &&);
+  FuseRequest &operator=(FuseRequest &&) = delete;
   FuseRequest &operator=(const FuseRequest &) = delete;
 
   // The caller's filesystem identity: the uid/gid the kernel sent with the

@@ -52,16 +52,6 @@ size_t AppendDirEntriesPlus(
 
 FuseRequest::FuseRequest(fuse_req_t req) : req_(std::move(req)) {}
 
-FuseRequest::FuseRequest(FuseRequest &&o)
-    : FuseRequest() {
-  *this = std::move(o);
-}
-
-FuseRequest &FuseRequest::operator=(FuseRequest &&o) {
-  using std::swap;
-  swap(req_, o.req_);
-  return *this;
-}
 
 FuseRequest::~FuseRequest() {
   if (!req_) return;

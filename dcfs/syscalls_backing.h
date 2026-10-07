@@ -10,7 +10,6 @@
 #include <cerrno>
 #include <cstddef>
 #include <fcntl.h>
-#include <linux/openat2.h>
 #include <span>
 #include <string_view>
 #include <sys/ioctl.h>
@@ -34,11 +33,6 @@ namespace syscalls {
 absl::StatusOr<FileDescriptor> openat(
     int dirfd, std::string_view pathname, int flags = 0,
     mode_t mode = 0);
-
-// O_CLOEXEC is unconditionally added to how.flags.
-absl::StatusOr<FileDescriptor> openat2(
-    int dirfd, std::string_view pathname, open_how how,
-    size_t size);
 
 absl::StatusOr<size_t> read(int fd, void *buf, size_t count);
 

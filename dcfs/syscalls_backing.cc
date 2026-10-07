@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
-#include <linux/openat2.h>
 #include <string_view>
 #include <sys/mount.h>
 #include <sys/syscall.h>
@@ -62,15 +61,6 @@ absl::StatusOr<struct stat> fstatat(
   int ret = ::fstatat(dirfd, pathname_str.c_str(), &buf, flags);
   if (ret == -1) return ErrnoToStatus(errno, "fstatat");
   return buf;
-}
-
-absl::StatusOr<FileDescriptor> openat2(
-    int dirfd, std::string_view pathname, open_how how, size_t size) {
-  how.flags |= O_CLOEXEC;
-  long fd = syscall(
-      SYS_openat2, dirfd, std::string(pathname).c_str(), &how, size);
-  if (fd == -1) return ErrnoToStatus(errno, "openat2");
-  return FileDescriptor(fd);
 }
 
 absl::Status name_to_handle_at(
