@@ -50,11 +50,7 @@ ban __snprintf_chk | Abseil only
 # line that matches nothing, so this list only shrinks by deleting lines.
 
 # First party, startup only: "no paths after startup" permits these.
-allow dcfs/_objs/mounts_below/* realpath | startup only: mounts_below.cc:63 canonicalizes --source once, called from main.cc (MountsBelow) before the mount
-
-# First party, existing violations of "statuses carry the message" (found by
-# step 26.8, to be fixed; each line goes when its use does).
-allow dcfs/_objs/fuse_request/* strerror | fuse_request.cc:196, VLOG of a fuse_req_getgroups failure (known violation)
+allow dcfs/_objs/syscalls/* realpath | startup only: the syscalls::realpath wrapper, called by mounts_below.cc (MountsBelow canonicalizes --source once, from main.cc, before the mount)
 
 # Abseil: formatting and diagnostics internals.
 allow abseil-cpp+/* snprintf | Abseil's own number, float, stack-trace and Mutex-debug formatting

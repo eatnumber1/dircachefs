@@ -16,6 +16,7 @@
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
 #include <sys/xattr.h>
+#include <time.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -158,6 +159,12 @@ absl::Status setgroups(std::span<const gid_t> groups);
 // getgroups(2): the calling thread's supplementary groups; with size 0 only
 // the count.
 absl::StatusOr<int> getgroups(int size, gid_t *list);
+
+// realpath(3): the canonical absolute path.
+absl::StatusOr<std::string> realpath(std::string_view path);
+
+// clock_gettime(2).
+absl::StatusOr<struct timespec> clock_gettime(clockid_t clock);
 
 // getrlimit(2), setrlimit(2), flock(2).
 absl::StatusOr<struct rlimit> getrlimit(int resource);

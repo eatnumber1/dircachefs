@@ -43,10 +43,10 @@ absl::StatusOr<bool> TableExists(sqlite3::Connection &db,
   return exists;
 }
 
-// Runs `sql`, a SELECT of the one cache_state row, and returns read(row).
+// Runs `sql`, a SELECT of the one cache_state row, and returns read_row(row).
 template <typename T, typename Read>
 absl::StatusOr<T> ReadCacheState(sqlite3::Connection &db, std::string_view sql,
-                                 Read read) {
+                                 Read read_row) {
   ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(sql));
   ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
   if (!has_row) {
@@ -54,7 +54,7 @@ absl::StatusOr<T> ReadCacheState(sqlite3::Connection &db, std::string_view sql,
     return FailedPreconditionErrorBuilder()
            << "corrupt cache: the cache_state row is missing";
   }
-  T value = read(*stmt);
+  T value = read_row(*stmt);
   ABSL_RETURN_IF_ERROR(stmt->Reset());
   return value;
 }

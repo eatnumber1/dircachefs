@@ -10,7 +10,10 @@
 #include <string>
 
 #include "absl/log/check.h"
+#include "absl/status/statusor.h"
+#include "dcfs/fd.h"
 #include "dcfs/protocol_events.h"
+#include "dcfs/syscalls.h"
 #include "dcfs/testonly/trace_recorder.h"
 
 namespace dcfs {
@@ -19,9 +22,11 @@ ProtocolEvents &MainProtocolEvents() {
   static testonly::TraceRecorder *recorder = [] {
     const char *path = std::getenv("DCFS_TRACE_FILE");
     if (path == nullptr || *path == '\0') path = "/dev/console";
-    const int fd =
-        ::open(path, O_WRONLY | O_APPEND | O_CREAT | O_NOCTTY | O_CLOEXEC, 0600);
-    PCHECK(fd >= 0) << "opening the trace file " << path;
+    absl::StatusOr<FileDescriptor> opened = syscalls::openat(
+        AT_FDCWD, path, O_WRONLY | O_APPEND | O_CREAT | O_NOCTTY, 0600);
+    CHECK_OK(opened) << "opening the trace file " << path;
+    // Never closed: the recorder lives for the life of the process.
+    const int fd = std::move(*opened).Release();
     const char *id = std::getenv("DCFS_TRACE_ID");
     return new testonly::TraceRecorder(
         fd, id != nullptr && *id != '\0' ? id : "e2e");

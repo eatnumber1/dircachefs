@@ -28,6 +28,7 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
 #include "sqlite3.h"
 
@@ -419,10 +420,12 @@ void TraceRecorder::Write(Ino dir, const std::string &json) {
 void TraceRecorder::WriteLine(const std::string &line) {
   size_t done = 0;
   while (done < line.size()) {
-    const ssize_t n = ::write(fd_, line.data() + done, line.size() - done);
-    if (n < 0 && errno == EINTR) continue;
-    PCHECK(n > 0) << "writing a trace line";
-    done += static_cast<size_t>(n);
+    absl::StatusOr<size_t> n =
+        syscalls::write(fd_, line.data() + done, line.size() - done);
+    if (!n.ok() && StatusToErrno(n.status()) == EINTR) continue;
+    CHECK_OK(n) << "writing a trace line";
+    CHECK_GT(*n, 0u) << "writing a trace line";
+    done += *n;
   }
 }
 

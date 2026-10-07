@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <climits>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
 #include <linux/openat2.h>
@@ -412,6 +413,26 @@ absl::StatusOr<int> getgroups(int size, gid_t *list) {
   int n = ::getgroups(size, list);
   if (n == -1) return ErrnoToStatus(errno, "getgroups");
   return n;
+}
+
+absl::StatusOr<std::string> realpath(std::string_view path) {
+  const std::string path_str(path);
+  char *resolved = ::realpath(path_str.c_str(), nullptr);
+  if (resolved == nullptr) {
+    return ErrnoToStatus(
+        errno, absl::StrCat("realpath(", EscapeBytes(path), ")"));
+  }
+  std::string result(resolved);
+  ::free(resolved);
+  return result;
+}
+
+absl::StatusOr<struct timespec> clock_gettime(clockid_t clock) {
+  struct timespec now {};
+  if (::clock_gettime(clock, &now) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("clock_gettime(", clock, ")"));
+  }
+  return now;
 }
 
 absl::StatusOr<struct rlimit> getrlimit(int resource) {

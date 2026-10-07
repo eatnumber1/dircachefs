@@ -193,7 +193,9 @@ absl::StatusOr<Credentials> FuseRequest::Caller() const {
   }
   if (n < 0 || n > static_cast<int>(groups.size())) {
     VLOG(1) << "pid " << ctx->pid << ": supplementary groups unreadable ("
-            << (n < 0 ? std::strerror(-n) : "list grew") << "); using none";
+            << (n < 0 ? ErrnoToStatus(-n, "fuse_req_getgroups").ToString()
+                      : std::string("list grew"))
+            << "); using none";
     return caller;
   }
   groups.resize(n);

@@ -35,6 +35,7 @@
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
+#include "dcfs/syscalls.h"
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
@@ -1343,13 +1344,13 @@ absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
   // record holds (an open of /proc/<pid>/fd/<n> of an O_PATH descriptor on
   // an unlinked file); anything else by handle.
   auto removed = removed_.find(id);
-  auto open = [&](int flags) -> absl::StatusOr<FileDescriptor> {
+  auto open_node = [&](int flags) -> absl::StatusOr<FileDescriptor> {
     if (removed != removed_.end()) {
       return backing::ReopenFd(*removed->second.fd, flags);
     }
     return backing::OpenNode(ctx_, id, flags);
   };
-  absl::StatusOr<FileDescriptor> fd = open(O_RDWR | O_CLOEXEC);
+  absl::StatusOr<FileDescriptor> fd = open_node(O_RDWR | O_CLOEXEC);
   bool writable = true;
   if (!fd.ok()) {
     int err = GetErrnoFromStatus(fd.status()).value_or(0);
@@ -1360,7 +1361,7 @@ absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
     // report it, unchanged.
     if (err != EACCES && err != EROFS && err != EPERM) return fd.status();
     writable = false;
-    ABSL_ASSIGN_OR_RETURN(fd, open(O_RDONLY | O_CLOEXEC));
+    ABSL_ASSIGN_OR_RETURN(fd, open_node(O_RDONLY | O_CLOEXEC));
   }
 
   // Ask the kernel to serve reads/writes directly against `fd`. A 0
@@ -1522,10 +1523,15 @@ absl::Status DirCacheFS::OpenInode(
   // I/O). A writable open's attributes are unknown until its last release
   // (and re-read then, atime included), and O_NOATIME asks for none.
   if (!writable && !(fi.flags & O_NOATIME) && !removed_.contains(id)) {
-    struct timespec now {};
-    clock_gettime(CLOCK_REALTIME, &now);
-    if (absl::StatusOr<bool> touched = cache::TouchAtime(ctx_, id, now);
-        !touched.ok()) {
+    absl::StatusOr<struct timespec> now =
+        syscalls::clock_gettime(CLOCK_REALTIME);
+    if (!now.ok()) {
+      LOG(WARNING) << "Open: could not read the clock to record the access "
+                      "time of inode "
+                   << id << ": " << now.status();
+    } else if (absl::StatusOr<bool> touched =
+                   cache::TouchAtime(ctx_, id, *now);
+               !touched.ok()) {
       LOG(WARNING) << "Open: could not record the access time of inode "
                    << id << ": " << touched.status();
     }

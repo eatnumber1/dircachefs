@@ -32,6 +32,7 @@ cc_library(
         "//dcfs:protocol_events",
         "//dcfs:sqlite",
         "//dcfs:status",
+        "//dcfs:syscalls",
         "@absl//absl/functional:function_ref",
         "@absl//absl/log:check",
         "@absl//absl/status",
@@ -51,7 +52,9 @@ cc_library(
     deps = [
         ":trace_recorder",
         "//dcfs:protocol_events",
+        "//dcfs:syscalls",
         "@absl//absl/log:check",
+        "@absl//absl/status:statusor",
     ],
 )
 
