@@ -1,6 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("//tools:first_party_objects.bzl", "linked_objects")
@@ -322,4 +323,54 @@ sh_test(
     data = [
         "toolchain_test.sh",
     ] + glob(["toolchain_fixtures/*.txt"]),
+)
+
+# ---- Step 26.12: reproducible build -------------------------------------
+
+# The gate itself is `bazel run //tools:reproducible_build` (CI runs it): it
+# builds //dcfs:main_static and //man:dcfs.8 in two output bases and compares
+# them with repro_compare.py. It cannot be a `bazel test` (it starts Bazel).
+py_library(
+    name = "repro_compare_lib",
+    srcs = ["repro_compare.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "repro_compare",
+    srcs = ["repro_compare.py"],
+    main = "repro_compare.py",
+)
+
+sh_binary(
+    name = "reproducible_build",
+    srcs = ["reproducible_build.sh"],
+    data = [":repro_compare"],
+)
+
+# Known-bad input for the self-check: a binary with the build time in it.
+genrule(
+    name = "repro_date_stamp",
+    outs = ["repro_date_stamp.h"],
+    cmd = "echo \"inline constexpr char kBuilt[] = \\\"built $$(date '+%b %e %Y %H:%M:%S')\\\";\" > $@",
+)
+
+cc_binary(
+    name = "repro_date_fixture",
+    srcs = [
+        "repro_date_fixture.cc",
+        ":repro_date_stamp",
+    ],
+)
+
+# Self-check (26.1 rule): the comparison accepts identical files and rejects
+# two builds of a program that embeds the date, naming the differing string.
+py_test(
+    name = "repro_compare_self_check_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["repro_compare_self_check_test.py"],
+    args = ["$(location :repro_date_fixture)"],
+    data = [":repro_date_fixture"],
+    deps = [":repro_compare_lib"],
 )
