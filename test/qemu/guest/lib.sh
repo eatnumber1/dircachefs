@@ -16,6 +16,31 @@
 pass() { echo "TEST $1 PASS"; }
 fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
 skip() { echo "TEST $1 SKIP ($2)"; }
+# require_commands NAME...: FAILs the run (check guest-commands) naming
+# every NAME that is not a command here. A script whose command is missing
+# would otherwise only print "<name>: not found" and carry on: the guests'
+# busybox has no usleep, and 34 test logs said so for weeks while every
+# quiesce_daemon returned at once.
+require_commands() {
+	rc_missing=""
+	for rc_name in "$@"; do
+		command -v "$rc_name" >/dev/null 2>&1 || rc_missing="$rc_missing $rc_name"
+	done
+	if [ -n "$rc_missing" ]; then
+		fail guest-commands "not in this guest:$rc_missing"
+	fi
+}
+
+# The commands the guest scripts run (busybox applets in the initramfs,
+# coreutils and friends under a dcfs_rootfs= tree), checked whenever a
+# script sources this file. A script needing more names them itself.
+GUEST_COMMANDS="awk basename cat chgrp chmod chown chroot cmp cp cut date dd
+diff dirname dmesg find grep head ln ls md5sum mkdir mkfifo mknod mount mv
+readlink rm rmdir sed sleep sort stat sync tail timeout touch tr truncate
+umount uname uniq wc"
+# shellcheck disable=SC2086 # one word per command
+require_commands $GUEST_COMMANDS
+
 # disabled NAME REASON CHECK [ARGS...]: a check that fails for a reason
 # outside dcfs (a kernel limitation) and is kept, googletest-style, so the
 # day it starts passing shows in the log. Runs CHECK ARGS (exit status 0:

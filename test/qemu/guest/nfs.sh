@@ -62,6 +62,7 @@
 # exits nonzero if any check failed.
 FAILED=0
 . "$(dirname "$0")/lib.sh"
+require_commands rpcbind rpc.idmapd rpc.nfsd rpc.mountd exportfs pkill
 
 DCFS=/usr/local/bin/dcfs
 
