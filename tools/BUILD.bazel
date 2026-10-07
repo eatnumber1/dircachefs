@@ -1,5 +1,8 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("//tools:first_party_objects.bzl", "linked_objects")
 
 # File-handle test client (name_to_handle_at / open_by_handle_at /
 # FS_IOC_GETVERSION). Used by the QEMU suite (see
@@ -51,4 +54,75 @@ cc_binary(
 sh_binary(
     name = "smoke_readonly",
     srcs = ["smoke_readonly.sh"],
+)
+
+# ---- Step 26.8: banned symbols in the shipped binary --------------------
+
+# Every compiled object linked into //dcfs:main_static, with its origin
+# (tools/first_party_objects.bzl), so a banned symbol is attributed to the
+# library or the first-party file that references it.
+linked_objects(
+    name = "main_static_objects",
+    binaries = ["//dcfs:main_static"],
+)
+
+# Known-bad input for the self-check: references realpath(3).
+cc_binary(
+    name = "banned_symbols_fixture",
+    srcs = ["banned_symbols_fixture.cc"],
+)
+
+linked_objects(
+    name = "banned_symbols_fixture_objects",
+    binaries = [":banned_symbols_fixture"],
+)
+
+py_library(
+    name = "banned_symbols_lib",
+    srcs = ["banned_symbols.py"],
+    imports = ["."],
+)
+
+# The gate: fails when //dcfs:main_static, or a library it links, references
+# a symbol in banned_symbols.txt that no `allow` line covers. $(NM) is the
+# host's nm (the C++ toolchain is the host gcc until 7.1 pins llvm).
+py_test(
+    name = "banned_symbols_test",
+    size = "small",
+    srcs = ["banned_symbols_test.py"],
+    args = [
+        "nm=$(NM)",
+        "deny_list=$(location banned_symbols.txt)",
+        "objects=$(location :main_static_objects)",
+        "binary=$(location //dcfs:main_static)",
+    ],
+    data = [
+        "banned_symbols.txt",
+        ":main_static_objects",
+        "//dcfs:main_static",
+    ],
+    toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
+    deps = [":banned_symbols_lib"],
+)
+
+# Self-check of the gate (26.1): the same checker and the real deny list over
+# a binary that calls realpath must fail and name the symbol and its rule,
+# and an allow line must silence exactly its origin and symbol.
+py_test(
+    name = "banned_symbols_self_check_test",
+    size = "small",
+    srcs = ["banned_symbols_self_check_test.py"],
+    args = [
+        "nm=$(NM)",
+        "deny_list=$(location banned_symbols.txt)",
+        "objects=$(location :banned_symbols_fixture_objects)",
+        "binary=$(location :banned_symbols_fixture)",
+    ],
+    data = [
+        "banned_symbols.txt",
+        ":banned_symbols_fixture",
+        ":banned_symbols_fixture_objects",
+    ],
+    toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
+    deps = [":banned_symbols_lib"],
 )

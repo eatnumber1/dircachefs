@@ -1,0 +1,90 @@
+# Symbols the shipped binary (//dcfs:main_static) must not reference
+# (plan step 26.8; format in banned_symbols.py). Each ban names the rule it
+# enforces.
+
+# "No paths after startup": nothing resolves, walks or globs a path name
+# once the daemon runs; everything goes through file descriptors.
+ban realpath | no paths after startup
+ban getcwd | no paths after startup
+ban get_current_dir_name | no paths after startup
+ban _ZNSt10filesystem* | no paths after startup (std::filesystem, libstdc++)
+ban _ZNSt3__110filesystem* | no paths after startup (std::filesystem, libc++)
+ban nftw | no paths after startup
+ban nftw64 | no paths after startup
+ban fts_open | no paths after startup
+ban fts64_open | no paths after startup
+ban glob | no paths after startup
+ban glob64 | no paths after startup
+
+# "No subprocesses or plugins".
+ban system | no subprocesses or plugins
+ban popen | no subprocesses or plugins
+ban execv* | no subprocesses or plugins
+ban execl* | no subprocesses or plugins
+ban posix_spawn* | no subprocesses or plugins
+ban dlopen | no subprocesses or plugins
+
+# Single-threaded by design: allow exactly one when the notifier thread
+# arrives (today: none in our code).
+ban pthread_create | single-threaded by design (one allowed when the notifier thread arrives)
+
+# Statuses carry the message.
+ban strerror | statuses carry the message (use ErrnoToStatus)
+ban strerror_r | statuses carry the message (use ErrnoToStatus)
+ban __xpg_strerror_r | statuses carry the message (use ErrnoToStatus)
+
+# Abseil only (absl::StrFormat, absl::StrCat, LOG).
+ban printf | Abseil only
+ban fprintf | Abseil only
+ban sprintf | Abseil only
+ban snprintf | Abseil only
+ban puts | Abseil only
+ban __printf_chk | Abseil only
+ban __fprintf_chk | Abseil only
+ban __sprintf_chk | Abseil only
+ban __snprintf_chk | Abseil only
+
+# ---- Allowed uses ------------------------------------------------------
+# Each line names an origin (an object path glob), a symbol and why that
+# use does not break the rule. //tools:banned_symbols_test fails on an allow
+# line that matches nothing, so this list only shrinks by deleting lines.
+
+# First party, startup only: "no paths after startup" permits these.
+allow dcfs/_objs/mounts_below/* realpath | startup only: mounts_below.cc:63 canonicalizes --source once, called from main.cc (MountsBelow) before the mount
+
+# First party, existing violations of "statuses carry the message" (found by
+# step 26.8, to be fixed; each line goes when its use does).
+allow dcfs/_objs/main_static/* strerror | main.cc:246-274, getrlimit(RLIMIT_NOFILE) startup messages (known violation)
+allow dcfs/_objs/dir_cache_fs/* strerror | dir_cache_fs.cc:113, getrlimit(RLIMIT_NOFILE) failure text (known violation)
+allow dcfs/_objs/fuse_request/* strerror | fuse_request.cc:196, VLOG of a fuse_req_getgroups failure (known violation)
+
+# Abseil: formatting and diagnostics internals.
+allow abseil-cpp+/* snprintf | Abseil's own number, float, stack-trace and Mutex-debug formatting
+allow abseil-cpp+/* strerror_r | absl::base_internal::StrError
+
+# SQLite: the amalgamation's unix VFS and extension loader.
+allow sqlite3+/* getcwd | unix VFS resolves a relative database name (startup, when the cache database is opened)
+allow sqlite3+/* dlopen | sqlite3_load_extension, never enabled by dcfs
+allow sqlite3+/* pthread_create | SQLite's optional sorter worker threads, off by default (SQLITE_MAX_WORKER_THREADS)
+
+# libfuse: code paths dcfs does not call (it uses the low-level session API
+# with fuse_session_loop; the helper and module code is for the high-level
+# API) and its mount fallbacks.
+allow libfuse+/* dlopen | fuse_module loading of the high-level API, not used
+allow libfuse+/* *printf | usage text, debug output and mount option strings
+allow libfuse+/* puts | usage text of the helper
+allow libfuse+/* strerror | libfuse's own log messages
+allow libfuse+/* pthread_create | fuse_loop_mt and io_uring queues; dcfs runs fuse_session_loop (single threaded)
+allow libfuse+/* realpath | mount point resolution inside fuse_session_mount (startup)
+allow libfuse+/* posix_spawn* | fusermount3 fallback inside fuse_session_mount (startup)
+allow libfuse+/* execle | fusermount3 fallback inside fuse_session_mount (startup)
+
+# numactl (libnuma, linked by an Abseil dependency): its sysfs parsing.
+allow numactl+/* sprintf | libnuma builds sysfs paths
+allow numactl+/* strerror | libnuma's own messages
+
+# Pulled in by the C runtime for the allowed uses above.
+allow <runtime> execve | execle of the libfuse fusermount3 fallback
+allow <runtime> execvpe | posix_spawnp of the libfuse fusermount3 fallback
+allow <runtime> __fprintf_chk | libfuse's fortified fprintf
+allow <runtime> __sprintf_chk | libfuse's and libnuma's fortified sprintf

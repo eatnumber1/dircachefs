@@ -905,7 +905,11 @@ cc_binary(
         "//conditions:default": ["fully_static_link"],
     }),
     linkstatic = True,
-    visibility = ["//test/qemu:__pkg__"],
+    # //tools:banned_symbols_test (step 26.8) scans this binary and its objects.
+    visibility = [
+        "//test/qemu:__pkg__",
+        "//tools:__pkg__",
+    ],
     deps = MAIN_DEPS + [":protocol_events_main"],
 )
 
