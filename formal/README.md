@@ -1552,7 +1552,7 @@ traced.
 
 | Line | From | Model step (`IdentTrace.tla`) |
 |---|---|---|
-| `reply` (`via`, `fgen`) | `LifetimeChanged` `kLookup`, `kCreated`, `kTmpfile`: an entry reply; `fgen`, the generation it carried, is the row's (read from the database: nothing writes it between `EntryFor` and the event) | `T_IdReply`: the row exists and never went in this trace (no nodeid is handed out twice: `AUTOINCREMENT`), and every reply carries the same generation (`NoBadInode`) |
+| `reply` (`via`, `fgen`) | `LifetimeChanged` `kLookup`, `kCreated`, `kTmpfile`: an entry reply; `fgen`, the generation it carried, is the row's (read from the database: nothing writes it between `EntryFor` and the event) | `T_IdReply`: the row exists and never went in this trace (no nodeid is handed out twice: today's `AUTOINCREMENT` identity; under Phase 14, where the nodeid is the inode number, a nodeid comes back after its row went and this must be relaxed), and every reply carries the same generation (`NoBadInode`) |
 | `forget` | `kForgot`, `kForgotInBatch` | `T_IdForget` |
 | `resolve` (`outcome`; `ino`, `gen`, `bt`) | `IdentityResolved`, the event added for this model: `OpenNode`'s decision (`served`, `stale_handle`, `mismatch`), and whether the inode number, generation and birth time of the object reached are the row's (`same`), another (`other`), or `unknown` (0 on either side) | `T_IdResolve`: `served` exactly when `ident.tla`'s identity check (`SameObject`, or anything with `BugSkipVerify`) says the reached object is the row's; a stale or mismatched reopen makes the row go next |
 | `gone` | `InodeForgotten` | `T_IdGone` |

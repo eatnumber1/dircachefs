@@ -238,12 +238,14 @@ If dcfs stops without a clean shutdown (a crash, `SIGKILL`, a kernel crash
 or a power loss), the next start notices, logs a warning with the number
 of affected entries, and forgets everything cached about the entries
 changed since the last sync point, so that they are re-read from the
-backing filesystem. Inode rows are kept, so NFS handles keep working;
-after a power loss or kernel crash, though, the handles of objects dcfs
-first recorded since the cache database's last durable commit (the first
-change through dcfs to an object since the last sync point makes one;
-lookups and listings do not) fail with
-`ESTALE`, never by resolving to a different file.
+backing filesystem. Inode rows are kept, so NFS handles keep working,
+except after a power loss or kernel crash: the cache database makes a
+durable commit at the first change through dcfs since the last sync point,
+at a WAL checkpoint and at a start, and rows recorded after it (by
+lookups, listings, and the objects a change creates) are lost, with their
+NFS handles. Those fail with `ESTALE`; a nodeid handed out again gets a
+fresh random generation, so an old handle resolves to a different file
+only with probability 2^-32 (docs/design.md, "Generations").
 
 After a crash the dead FUSE mount stays in place, and accessing it fails
 with `ENOTCONN`. Unmount it (`umount -l <mountpoint>`) before starting dcfs
@@ -644,8 +646,9 @@ recovery protocol, concurrency, and the test strategy.
   "mmap after close").
 - **NFS handles do not survive deleting the cache database.** They fail
   with `ESTALE`, never by resolving to a different file. Handles do survive
-  restarts of dcfs, and crashes, but a power loss can lose those of objects
-  recorded since the database's last durable commit (the same `ESTALE`).
+  restarts of dcfs, and crashes, but a power loss can lose those of rows
+  recorded since the database's last durable commit (see "Shutdown,
+  crashes and restarts"; the same `ESTALE`).
 - **Single-threaded.** dcfs serves one request at a time, so a request that
   has to wait for a disk to spin up delays every other request, including
   ones the cache could answer. The coroutine and io_uring design that
