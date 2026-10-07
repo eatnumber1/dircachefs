@@ -4241,8 +4241,11 @@ TEST_F(DirCacheFSTest, CopyFileRangeEndsItsMutationBeforeItsRefreshes) {
   EXPECT_EQ(Release(src, in_fh).error, 0);
 }
 
-// Trace validation of a copy_file_range (a missing End shows in the trace:
-// //dcfs:trace_fault_skip_copy_file_range_end_test).
+// Trace validation of a copy_file_range: the files' trace (formal/reval.tla)
+// has its open, write and releases. (A missing End of the copy's mutation is
+// not in any trace: neither model has an event for the end of an attribute
+// change, so no fault build can make validation reject it; the unit test
+// above is what catches it.)
 TEST_F(DirCacheFSTest, TraceScenarioCopyFileRange) {
   WriteFile(Path("src"));
   AppendToFile(Path("src"), "0123456789");
@@ -4250,17 +4253,16 @@ TEST_F(DirCacheFSTest, TraceScenarioCopyFileRange) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
   ASSERT_OK_AND_ASSIGN(InodeId dst, Id("dst"));
+
+  StartTrace();  // and the files' (formal/reval.tla)
   auto [in, in_fh] = Open(src, O_RDONLY);
   auto [out, out_fh] = Open(dst, O_WRONLY);
   ASSERT_EQ(in.error, 0);
   ASSERT_EQ(out.error, 0);
-
-  StartTrace();
   EXPECT_EQ(CopyFileRange(src, in_fh, dst, out_fh, 100), 10);
   EXPECT_EQ(Release(dst, out_fh).error, 0);
   EXPECT_EQ(Release(src, in_fh).error, 0);
 }
-
 
 // The backstop under the hooks: a backing syscall made where no hook was
 // called (here backing::StatFd, a descriptor-only helper whose callers
