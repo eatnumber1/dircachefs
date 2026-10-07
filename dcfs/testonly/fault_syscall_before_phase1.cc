@@ -27,17 +27,17 @@ using cache::Mutation;
 absl::StatusOr<Mutation> RealBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved)
-    asm("__real__ZN4dcfs5cache11BeginRemoveERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEElNS0_12FillSnapshotE");
+    asm("__real__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
 absl::Status RealUnlinkAt(Context &ctx, const Credentials &caller,
                           InodeId parent, std::string_view name, int flags)
-    asm("__real__ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElSt17basic_string_viewIcSt11char_traitsIcEEi");
+    asm("__real__ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEi");
 
 
 // The unlinkat, moved before phase 1 with its event; then phase 1.
 absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved)
-    asm("__wrap__ZN4dcfs5cache11BeginRemoveERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEElNS0_12FillSnapshotE");
+    asm("__wrap__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
 absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved) {
@@ -51,7 +51,7 @@ absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
 // Where the syscall used to be: nothing left to do.
 absl::Status WrapUnlinkAt(Context &ctx, const Credentials &caller,
                           InodeId parent, std::string_view name, int flags)
-    asm("__wrap__ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElSt17basic_string_viewIcSt11char_traitsIcEEi");
+    asm("__wrap__ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEi");
 absl::Status WrapUnlinkAt(Context &ctx, const Credentials &caller,
                           InodeId parent, std::string_view name, int flags) {
   return absl::OkStatus();

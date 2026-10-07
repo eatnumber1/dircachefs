@@ -22,12 +22,12 @@ namespace dcfs::testonly {
 absl::Status RealUnlinkAt(Context &ctx, const Credentials &caller,
                           cache::InodeId parent, std::string_view name,
                           int flags)
-    asm("__real__ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElSt17basic_string_viewIcSt11char_traitsIcEEi");
+    asm("__real__ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEi");
 
 absl::Status WrapUnlinkAt(Context &ctx, const Credentials &caller,
                           cache::InodeId parent, std::string_view name,
                           int flags)
-    asm("__wrap__ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElSt17basic_string_viewIcSt11char_traitsIcEEi");
+    asm("__wrap__ZN4dcfs7backing8UnlinkAtERNS_7ContextERKNS_11CredentialsElNSt3__117basic_string_viewIcNS6_11char_traitsIcEEEEi");
 absl::Status WrapUnlinkAt(Context &ctx, const Credentials &caller,
                           cache::InodeId parent, std::string_view name,
                           int flags) {

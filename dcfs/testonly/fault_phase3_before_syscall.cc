@@ -24,13 +24,13 @@ using cache::Mutation;
 absl::StatusOr<Mutation> RealBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved)
-    asm("__real__ZN4dcfs5cache11BeginRemoveERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEElNS0_12FillSnapshotE");
+    asm("__real__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
 
 
 absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved)
-    asm("__wrap__ZN4dcfs5cache11BeginRemoveERNS_7ContextElSt17basic_string_viewIcSt11char_traitsIcEElNS0_12FillSnapshotE");
+    asm("__wrap__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
 absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved) {
