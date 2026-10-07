@@ -336,6 +336,12 @@ fi
 #               15-25 shared with other Bazel runs, qemu's own CPU time 2660)
 #                                                 -> 1800 / 7200
 # Both are 3-20x the measurement: the machines these run on are shared.
+# Bazel's TEST_TIMEOUT (seconds, from the target's `timeout`) is the real
+# limit, though, and a fixed default under it killed destroy_test on a loaded
+# host (1800 s of a 3600 s eternal): the guest gets TEST_TIMEOUT less 60 s
+# for the teardown and the log collection (half of it, if that is under
+# 60 s), and the default above only when Bazel did not set it (a manual
+# run). An explicit TIMEOUT beats both.
 if [ "$ACCEL" = kvm ]; then
 	UNIT_TIMEOUT=60
 	E2E_TIMEOUT=1800
@@ -343,11 +349,18 @@ else
 	UNIT_TIMEOUT=300
 	E2E_TIMEOUT=7200
 fi
+case "${TEST_TIMEOUT:-}" in
+'' | *[!0-9]*) ;;
+*)
+	E2E_TIMEOUT=$((TEST_TIMEOUT > 120 ? TEST_TIMEOUT - 60 : TEST_TIMEOUT / 2))
+	;;
+esac
 if [ "$UNIT" -eq 1 ]; then
 	TIMEOUT_SECS="${TIMEOUT:-$UNIT_TIMEOUT}"
 else
 	TIMEOUT_SECS="${TIMEOUT:-$E2E_TIMEOUT}"
 fi
+echo "run-qemu.sh: guest timeout $TIMEOUT_SECS s (TEST_TIMEOUT ${TEST_TIMEOUT:-unset}, TIMEOUT ${TIMEOUT:-unset})"
 
 # Defaults, the smallest class's allowance (step 6.2: measured peak
 # MemTotal-MemAvailable of 35 MiB for the unit tests and 102 MiB for the

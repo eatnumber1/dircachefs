@@ -90,6 +90,24 @@ grep -q "WARNING: the guest reclaimed memory (1234 pages scanned)" "$WORK/stdout
 	fail "no reclaim warning: $(cat "$WORK/stdout")"
 echo "PASS: reclaim_scans > 0 produces the WARNING"
 
+# The guest's QEMU timeout (e2e mode) follows Bazel's TEST_TIMEOUT less 60 s
+# for teardown and log collection (half of it when that is less than 60 s); 1800 s when it is unset (a manual run); an
+# explicit TIMEOUT wins over both. The fake qemu ignores it: the line
+# run-qemu.sh prints says what it would have used.
+guest_timeout() {
+	: >"$WORK/extra"
+	canned_e2e ALL-TESTS-PASSED
+	FLAG=""
+	rm -f "$WORK/out/serial.log"
+	RC=0
+	env -u TEST_TIMEOUT -u TIMEOUT "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+		sh "$RUN_QEMU" --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
+		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
+		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
+		"$WORK/kernel" "$WORK/initrd" casefold_tune_oops.sh >"$WORK/stdout" 2>&1 || RC=$?
+	sed -n 's/^run-qemu.sh: guest timeout \([0-9]*\) s.*/\1/p' "$WORK/stdout"
+}
+
 # Each line is what the kernel prints for one kind of failure (with the
 # timestamp the console adds when it adds one, and without, as guest/init's
 # dump of the kernel log does).
@@ -203,4 +221,10 @@ FLAG="--unit --expect-kernel-failure casefold_tune_oops.sh"
 run_e2e
 [ "$RC" -ne 0 ] || fail "the flag was accepted in --unit mode"
 echo "PASS: --expect-kernel-failure is refused for unit tests"
+[ "$(guest_timeout TEST_TIMEOUT=900)" = 840 ] || fail "TEST_TIMEOUT=900 did not give 840 s: $(cat "$WORK/stdout")"
+[ "$(guest_timeout TEST_TIMEOUT=3600)" = 3540 ] || fail "TEST_TIMEOUT=3600 did not give 3540 s"
+[ "$(guest_timeout X=1)" = 1800 ] || fail "no TEST_TIMEOUT did not give 1800 s: $(cat "$WORK/stdout")"
+[ "$(guest_timeout TEST_TIMEOUT=900 TIMEOUT=77)" = 77 ] || fail "TIMEOUT=77 did not win"
+[ "$(guest_timeout TEST_TIMEOUT=60)" = 30 ] || fail "a TEST_TIMEOUT of 60 s did not give half of it"
+echo "PASS: the guest timeout follows TEST_TIMEOUT less 60 s, else 1800, and TIMEOUT wins"
 echo "PASS: all checks passed"
