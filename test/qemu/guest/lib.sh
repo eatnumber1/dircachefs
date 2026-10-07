@@ -125,6 +125,12 @@ daemon_wakeups() {
 	WAKEUPS=$(awk '/^voluntary_ctxt_switches:/ {print $2}' "/proc/$1/status")
 }
 
+# daemon_fd_count [PID]: the open-descriptor count of the daemon (PID, by
+# default $DAEMON_PID) right now.
+daemon_fd_count() {
+	ls "/proc/${1:-$DAEMON_PID}/fd" 2>/dev/null | wc -l
+}
+
 # quiesce_daemon PID: waits (up to 10s) until the daemon has had no wakeup
 # for 0.3s. drop_caches makes the kernel send a FORGET for every cached inode
 # and dentry, asynchronously and in batches, and opening a file makes dcfs

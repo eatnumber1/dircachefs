@@ -139,6 +139,10 @@ w0=$2
 echo "idle.sh: counters after warm-up: reads=$r0 writes=$w0"
 
 # Inside the window: let go of the written file; the kernel forgets it.
+# dcfs holds one descriptor on it until then (design.md "mmap after
+# close"), so its count drops by one exactly when the FORGET came: without
+# that, the window would pass without testing the FORGET at all.
+fds_held=$(daemon_fd_count)
 kill "$HOLD_PID" 2>/dev/null || true
 wait "$HOLD_PID" 2>/dev/null || true
 # Twice: an unused dentry that was recently referenced survives the first
@@ -147,6 +151,12 @@ wait "$HOLD_PID" 2>/dev/null || true
 echo 2 >/proc/sys/vm/drop_caches
 echo 2 >/proc/sys/vm/drop_caches
 quiesce_daemon "$DAEMON_PID"
+fds_forgotten=$(daemon_fd_count)
+if [ "$fds_forgotten" -eq $((fds_held - 1)) ]; then
+	pass written-forgotten
+else
+	fail written-forgotten "daemon descriptors $fds_held before the FORGET, $fds_forgotten after (want one fewer: the written file's FORGET did not come)"
+fi
 
 elapsed=0
 while [ "$elapsed" -lt "$IDLE_SECS" ]; do

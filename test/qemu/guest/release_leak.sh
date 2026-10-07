@@ -67,11 +67,6 @@ trap cleanup EXIT
 
 echo "release_leak.sh: kernel $(uname -r)"
 
-# The daemon's own open-fd count right now.
-daemon_fd_count() {
-	ls "/proc/$DAEMON_PID/fd" 2>/dev/null | wc -l
-}
-
 mount /dev/vdb /src
 sync
 
