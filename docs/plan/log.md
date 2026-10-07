@@ -1399,3 +1399,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   mull rejected (host-side runner, LLVM 22.1.2 deb, no sha256 fetch). 12.5 done (lane-1), in
   review: findings for Phase 14 (generation check under recycling) and a README correction
   (NFS handles lost after a power loss for rows since the last durable commit).
+- Dispatched (lane-4): 8.2 tests killing survivors #1, #3, #4 (each shown killing its mutant),
+  then 26.5b: the weekly/dispatch mutation job (sharded by mutant ids if over the 6 h limit;
+  survivors as an artifact, never a failure) and a per-push `--changed <range>` mode bounded to
+  ~30 mutants that fails on a survivor in changed code.
