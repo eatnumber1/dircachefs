@@ -1487,3 +1487,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   dir_cache_fs_trace_test (823 s vs 900 s); lane-5 starts Phase 11.1 (dm-flakey/dm-error helper
   over the cache and backing disks via Alpine's dmsetup, first I/O-error and power-cut tests per
   phase, each stating its invariant; findings stop the step).
+- russ (2026-10-08): CI timeouts must cover the cold-cache path (evictions, lock-file changes):
+  each job's limit = ~2x its measured cold time, with the estimate recorded beside it; a
+  `workflow_dispatch` input `cold: true` skips the caches so the cold path can be exercised on
+  purpose; osv's one-minute past was the small module graph, not a special job: every job that
+  evaluates the module graph restores the repository cache. Added to lane-4's CI follow-up.
