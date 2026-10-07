@@ -1222,3 +1222,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Warnings audit merged (55caee3, 3 commits on 26.7): presubmit 217 pass + 1 skip. Our code builds
   with zero compile or link warnings under the pinned clang; externals get none of our flags;
   analysis tests pin both. 7.4 UBSan dispatched to lane-5 (dcfs-investigator).
+- 7.2/26.12 review: pipeline correct (profiles merge across daemon restarts via %m and across unit
+  and e2e tests: hits summed, verified on the combined report; dcfs/ 92.4% lines 72.5% branches
+  small+medium tiers; trace tests contribute nothing). Fix before merge: llvm-profdata
+  --failure-mode (a truncated profraw silently dropped a test's lcov with only a WARNING; CI must
+  check an e2e-only file like main.cc); stale docs (serial console, --config=coverage); 26.12
+  compares //dcfs:main too and states same-host-only until 7.1b, own repo contents cache for one
+  build; banned_symbols incompatible under the coverage config; the filter's junk records;
+  Phase 8 scope = dcfs/ only, branches reported; CI cache sizes (does the saved repo cache
+  include the 12 GB extracted LLVM?). 26.2 interaction: E2E_COVERAGE_OBJECTS follows initramfs_for.
