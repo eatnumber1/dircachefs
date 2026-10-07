@@ -687,7 +687,11 @@ DIR_CACHE_FS_TEST_WRAPS = [
 qemu_cc_test(
     name = "dir_cache_fs_test",
     size = "small",
-    timeout = "moderate",  # the 1000-entry readdir work tests under ASan
+    # Moderate: the 1000-entry readdir work tests under ASan, and the plain
+    # build too, with step 26.2's invariant checks and death tests (114
+    # tests: 57.7 and 87.4 s at load 15-20, 2026-10-08; run-qemu.sh gives a
+    # unit guest TEST_TIMEOUT less 60 s when that is more than 60).
+    timeout = "moderate",
     # Under ASan it peaks at 687 MiB in use (MEM peak_used=703940 KiB of
     # total=1251628 at -m 1280, 2026-10-08, with step 26.2's invariant
     # checker, whose death tests keep a forked child resident beside the
