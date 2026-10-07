@@ -944,3 +944,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   matters; judgement rules stay with the merge review).
 - russ (2026-10-07): the tiny-model style judge reconsidered at the right size (one rule, one
   chunk, sub-1B, deterministic): a measured spike, 7.5c, after the matchers.
+- russ (2026-10-07): Phase 26 "Bumpers": 26.1 gate self-checks (yes), 26.2 runtime invariant checks
+  in test builds (yes), 26.3 golden per-op syscall traces with strace rather than in-process
+  recording (yes), 26.4 ratchets on deterministic counts only (yes-ish, brittleness), 26.5 limited
+  mutation testing (yes), 26.6 fast in-process fault enumeration (proposed; needs yes), reference-
+  model differential testing dropped (pjdfstest/xfstests/fsstress + TLA+ test generation cover it).
