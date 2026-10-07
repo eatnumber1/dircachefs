@@ -987,3 +987,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   rootfs invariant's header_problems over a tampered synthetic tar), each shown failing with its
   gate disabled; README "Gates and their self-checks" table; the old copies moved out of guest/
   (the initramfs glob would have shipped them). fast 110/110, pjdfstest ext4 shards green.
+- 25.1 review (fresh dcfs-reviewer): behaviour unchanged (all 46 error sites same code, no lost
+  errno payload, moved helpers identical, wrappers' branches identical); merge after: style.md 1.8
+  must name the lower layers (file_handle.cc, device_id.cc, startup in main.cc) and design.md's
+  layering bullet updated; the fifth `; ;` site (main.cc:341); the cache-dir stat error lost its
+  path; C17 wording; py_test timeouts; the manual raw_syscalls_test becomes a per-file ratchet now.
+  For 25.1c: scanner gaps (names list; digit separators; std:: calls), message-text changes to
+  list in the merge note, ioctl request type unsigned long, source-location assertion, doc claims.
+- Dispatched 26.8 banned symbols (nm over main_static), 26.9 dependency golden (genquery, shared
+  with the SBOM), 26.13 repository-shape tests + CI commit-subject check (lane-3, implementer).
