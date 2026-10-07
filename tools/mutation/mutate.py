@@ -350,7 +350,10 @@ def run(args):
     src = os.path.join(scratch, "src")
     os.makedirs(src)
     copy_tree(workspace, src)
-    killers = args.killers.split()
+    # Phases, in order; a mutant that survives one goes on to the next. (A
+    # size filter such as --config=fast applies to every target of its
+    # invocation, so trace validation, a medium test, needs a phase of its own.)
+    phases = [ph.split() for ph in args.killers.split(";")]
     results = []
     started = time.time()
     try:
@@ -363,15 +366,20 @@ def run(args):
             mutated = text[:m["start"]] + m["replacement"] + text[m["end"]:]
             open(path, "wb").write(mutated.encode("latin-1"))
             t = time.time()
+            rc, tail = 0, ""
             try:
-                p = subprocess.run(
-                    ["bazel", "test", "--notest_keep_going", "--test_output=errors",
-                     "--jobs=2", "--local_test_jobs=2"] + killers,
-                    cwd=src, capture_output=True, timeout=args.timeout)
-                rc = p.returncode
-                tail = (p.stdout + p.stderr).decode("utf-8", "replace")
-            except subprocess.TimeoutExpired:
-                rc, tail = 3, "mutant run timed out (counted as killed: a hang)"
+                for killers in phases:
+                    try:
+                        p = subprocess.run(
+                            ["bazel", "test", "--notest_keep_going", "--test_output=errors",
+                             "--jobs=2", "--local_test_jobs=2"] + killers,
+                            cwd=src, capture_output=True, timeout=args.timeout)
+                        rc = p.returncode
+                        tail = (p.stdout + p.stderr).decode("utf-8", "replace")
+                    except subprocess.TimeoutExpired:
+                        rc, tail = 3, "mutant run timed out (counted as killed: a hang)"
+                    if rc != 0:
+                        break
             finally:
                 open(path, "wb").write(original)
             # Bazel: 0 all passed, 3 a test failed or timed out, 1 a build
@@ -421,7 +429,7 @@ def main():
     r.add_argument("--seed", type=int, default=1)
     r.add_argument("--only", default="")
     r.add_argument("--timeout", type=int, default=1800)
-    r.add_argument("--killers", default="--config=fast //dcfs/... //dcfs:dir_cache_fs_trace_test")
+    r.add_argument("--killers", default="--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test")
     a = ap.parse_args()
     if a.cmd == "generate":
         generate(a)
