@@ -676,3 +676,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-07): `dcfs --help` useless under the installed name (Abseil's main-file heuristic;
   "No flags matched"): fix + --version dispatched to lane-4 (step-help). Man page from the README:
   Phase 15 item 26 pulled forward as 15.0 (pandoc pinned, genrule, render test).
+- --help fix (lane-4, step-help): FlagsUsageConfig claims dcfs/ files; `dcfs --version` prints
+  `dcfs 0.1.0-dev` (dcfs/version.h; Phase 15 stamps it). help_test (small, guest) failed first with
+  "No flags matched". Note for Phase 15: Abseil exits 1 after --help (0 after --version); the
+  wrapper's own parser should exit 0, and dcfs itself if it is cheap without bypassing ParseCommandLine.
