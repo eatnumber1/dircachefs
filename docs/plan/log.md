@@ -1014,3 +1014,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   on every MEM line + run-qemu WARNING + `require_no_reclaim` in destroy/idle/release_leak, guest
   timeout = TEST_TIMEOUT - 60 s (1800 only when unset; TIMEOUT= wins); verdict test covers both.
   destroy_test 1140 s under load, reclaim_scans=0. CI's only red test should be green next push.
+- Dispatched 12.4 inode lifetime model (lane-2, dcfs-protocol): formal/lifetime.tla (nlookup,
+  rows/removed records/held fds/open fds, unlink-while-open, rename-over, FORGET batching,
+  DESTROY, crash + sweep), six invariants, four known-bug variants (incl. the non-final-FORGET
+  hypothesis), trace mapping of existing events. Five lanes busy: 1 style 25.1, 2 lifetime
+  model, 3 strace goldens, 4 clang, 5 warnings.
