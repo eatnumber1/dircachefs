@@ -70,11 +70,14 @@ def _alpine_index_impl(rctx):
     specs = []
     for repo in rctx.attr.repos:
         file = "APKINDEX-%s.tar.gz" % repo
-        rctx.download(
-            _base_url(rctx.attr.mirror, rctx.attr.branch, repo, rctx.attr.arch) +
-            "/APKINDEX.tar.gz",
-            file,
-        )
+        url = _base_url(rctx.attr.mirror, rctx.attr.branch, repo, rctx.attr.arch) + "/APKINDEX.tar.gz"
+        if not rctx.download(url, file, allow_fail = True).success:
+            fail(("the Alpine %s %s index could not be downloaded from %s: " +
+                  "check the network, the branch name and the mirror") % (
+                rctx.attr.branch,
+                repo,
+                url,
+            ))
         specs.append("%s=%s" % (repo, file))
     _run(
         rctx,
@@ -215,9 +218,11 @@ def _alpine_package_impl(rctx):
         )))
     for package, url, waiter in pending:
         if not waiter.wait().success:
-            fail(("%s could not be downloaded from %s: the index snapshot " +
-                  "names a build the mirror no longer serves; run " +
-                  "`bazel fetch --force --repo=@alpine_index`") % (
+            fail(("%s could not be downloaded from %s. Usually the index " +
+                  "snapshot names a build the mirror no longer serves (it " +
+                  "drops superseded builds within about a week): run " +
+                  "`bazel fetch --force --repo=@alpine_index`. Otherwise " +
+                  "check the network and the mirror.") % (
                 package["file"],
                 url,
             ))

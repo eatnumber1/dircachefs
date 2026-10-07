@@ -62,9 +62,10 @@ repository regardless: `bazel fetch --force --repo=@alpine_linux_virt`.
 A package repository is resolved against the index it was fetched with, and
 Alpine's mirror drops a superseded build within about a week. So refetching
 one repository (or a fresh output base that kept an old index) can meet a
-404; the fetch then fails with "the index snapshot names a build the mirror
-no longer serves; run `bazel fetch --force --repo=@alpine_index`", and that
-command is the fix.
+404. The fetch then fails saying "usually the index snapshot names a build the
+mirror no longer serves ... run `bazel fetch --force --repo=@alpine_index`;
+otherwise check the network and the mirror": a download failure cannot tell
+the two apart, and the command is the fix for the usual one.
 
 CI starts with no fetched repositories (the external directory is not in its
 cache) and so tests the branch's current packages. A developer and CI may
