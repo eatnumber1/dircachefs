@@ -698,6 +698,7 @@ qemu_cc_test(
 exports_files([
     "main.cc",
     "schema.sql",
+    "shipped_deps.txt",  # the golden of //tools:shipped_deps_test (step 26.9)
     "version.h",
 ])
 
@@ -949,5 +950,8 @@ genquery(
         ":main",
         ":main_static",
     ],
-    visibility = ["//tools/sbom:__pkg__"],
+    visibility = [
+        "//tools:__pkg__",  # //tools:shipped_deps_test (step 26.9)
+        "//tools/sbom:__pkg__",
+    ],
 )

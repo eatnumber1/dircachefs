@@ -126,3 +126,46 @@ py_test(
     toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
     deps = [":banned_symbols_lib"],
 )
+
+# ---- Step 26.9: the shipped dependency golden ---------------------------
+
+# The external repositories of the shipped binaries, reduced from the same
+# genquery the SBOM test reads (//dcfs:linked_deps; tools/sbom/README.md), as
+# a list (dcfs/shipped_deps.txt) that only a deliberate edit changes.
+py_library(
+    name = "shipped_deps_lib",
+    srcs = ["shipped_deps.py"],
+    imports = ["."],
+    deps = ["//tools/sbom:sbom_lib"],
+)
+
+py_test(
+    name = "shipped_deps_test",
+    size = "small",
+    srcs = ["shipped_deps_test.py"],
+    args = [
+        "graph=$(location //dcfs:linked_deps)",
+        "golden=$(location //dcfs:shipped_deps.txt)",
+    ],
+    data = [
+        "//dcfs:linked_deps",
+        "//dcfs:shipped_deps.txt",
+    ],
+    deps = [":shipped_deps_lib"],
+)
+
+# Self-check of the golden (26.1): a golden with one line removed must fail.
+py_test(
+    name = "shipped_deps_self_check_test",
+    size = "small",
+    srcs = ["shipped_deps_self_check_test.py"],
+    args = [
+        "graph=$(location //dcfs:linked_deps)",
+        "golden=$(location //dcfs:shipped_deps.txt)",
+    ],
+    data = [
+        "//dcfs:linked_deps",
+        "//dcfs:shipped_deps.txt",
+    ],
+    deps = [":shipped_deps_lib"],
+)

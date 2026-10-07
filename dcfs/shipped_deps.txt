@@ -1,0 +1,11 @@
+# External repositories linked into the shipped binaries (//dcfs:main and
+# //dcfs:main_static), canonical names, one per line. Compared by
+# //tools:shipped_deps_test with //dcfs:linked_deps; a new dependency in the
+# shipped binary is a deliberate edit of this file (and of
+# tools/sbom/pins.json, which //tools/sbom:sbom_test checks).
+abseil-cpp+
+gloop+
+libfuse+
+liburing+
+numactl+
+sqlite3+

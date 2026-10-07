@@ -8,6 +8,9 @@ py_library(
     name = "sbom_lib",
     srcs = ["sbom.py"],
     imports = ["."],
+    # graph_repos() is also what //tools:shipped_deps_test (26.9) reduces
+    # //dcfs:linked_deps with.
+    visibility = ["//tools:__pkg__"],
 )
 
 py_binary(

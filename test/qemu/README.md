@@ -377,6 +377,7 @@ gate is disabled.
 | ownership_test (Debian image root ownership) | `//third_party/debian:mkrootfs_test` (its `--skip-ownership` control image must be user-owned, the real one root-owned) |
 | rootfs_invariant_test (Debian rootfs matches tar) | `//third_party/debian:rootfs_invariant_self_check` (imports the real `header_problems`) |
 | banned symbols in `//dcfs:main_static` (26.8) | `//tools:banned_symbols_self_check_test` (the real checker and deny list over a program that calls `realpath`) |
+| shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
