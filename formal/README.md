@@ -16,6 +16,11 @@ change of the backing filesystem's state (shared backing descriptors and
 their access mode, cached permission state, cached directory answers): see
 [The revalidation model](#the-revalidation-model).
 
+A third, `lifetime.tla`, covers which nodeids the kernel holds and what
+dcfs keeps for each (rows, removed records, the written-file set and its
+held descriptors, open files), and when each goes: see
+[The lifetime model](#the-lifetime-model).
+
 This file assumes no TLA+ background.
 
 Contents:
@@ -33,6 +38,7 @@ Contents:
 11. [Reading a counterexample](#reading-a-counterexample)
 12. [Changing the model](#changing-the-model)
 13. [The revalidation model](#the-revalidation-model)
+14. [The lifetime model](#the-lifetime-model)
 
 ## Running it
 
@@ -41,6 +47,7 @@ bazel test //formal/...                    # everything (about 20 minutes)
 bazel test //formal:small_test             # the real model, small bounds (~1 min)
 bazel test //formal:known_bug_crash_f1_phase1_not_durable_test
 bazel test //formal:reval_test             # the revalidation model (~20 s)
+bazel test //formal:lifetime_test          # the lifetime model (~40 s)
 ```
 
 (On russ's machine, wrap Bazel in `sg kvm -c '...'` as for every Bazel
@@ -477,6 +484,8 @@ right after the code the model's step stands for, with no backing syscall
 | `Recovered` | `StartRun`, after `cache::RecoverDirty` | `recover`, with the keys of the inodes that were dirty (read at `RunStarting`) | `Recover`, a dentry made unknown in a clean D only if its object's key is among them | Recovery |
 | `RunStarted` | `StartRun`, after its kSync commit | `start_run` | `StartRun` | Startup |
 | `ShutdownBegin`, `Checkpointed`, `CleanShutdownRecorded` | `backing::FinishRun` | `shutdown`, `checkpoint`, `clean` | `BeginShutdown`, `StopCkpt`, `StopFlag` | Shutdown |
+| `LifetimeChanged` | after every `++lookups_` (`ReplyEntry`, `Readdirplus`'s entries, `Create`, `Tmpfile`), a successful `Open`, the end of `Release`, each `Forget` and `ForgetMulti` entry, phase 3 of `RemoveChild` and of a rename over an object (`RefreshAfterRename`) | (a nodeid's trace: `lookup`, `create`, `tmpfile`, `open`, `release`, `forget`, `removed`) | none in `dcfs.tla`; `lifetime.tla`'s ([below](#trace-validation-of-nodeids)) | Row lifetime; mmap after close |
+| `Destroyed` | the end of `DirCacheFS::Destroy` | (every nodeid's trace: `destroy`) | `lifetime.tla`'s `Destroy` | mmap after close |
 | `OutOfBandChange` | `backing::ReconcileAttrs`, when it adopts a change | `cut` | none (no out-of-band changes in the model) | Out-of-band change detection |
 | `InodeForgetting`, `InodeForgotten` | `cache::InvalidateInode` (and `DeleteInode`), before and after its DELETE | `gone`; `cut` (`invalidated`) | none. The recorder notes the present rows that point at the inode; once the (outermost) transaction has committed, a directory whose state changed by exactly those names becoming unknown is cut, any other change is `unexplained` | Identity model |
 
@@ -890,6 +899,11 @@ model in the same change (AGENTS.md). In practice:
   backing change could invalidate) updates `reval.tla` instead, with its
   `FileOpened`/`FileReleased` events and `RevalTrace.tla` (see
   [The revalidation model](#the-revalidation-model)).
+- A change to what dcfs keeps for a nodeid and when it goes (lookup
+  counting, FORGET and FORGET_MULTI, removed records, the written-file set
+  and its held descriptors, row retirement, DESTROY, the start's sweep of
+  unnamed rows) updates `lifetime.tla`, with its `LifetimeChanged` events
+  and `LifetimeTrace.tla` (see [The lifetime model](#the-lifetime-model)).
 - Keep every action reachable: run TLC with `-coverage 1` and check that
   no action reports 0, except these, which report 0 in every
   configuration: `RenameFailed`, `RenameFailed2` and `UnlinkFailed`.
@@ -1104,3 +1118,206 @@ For example, against `BugNoRecheck`:
 trace_validate.sh: rejected: reval/t@2: the model explains 3 of 10 events; the first it cannot (event 4):
   {"i":5,"c":"FileOpened","ev":"open","mode":"w","shared":true,"errno":1,"fd":{"sfd":"rw","wfd":"none","refs":1,"wrefs":1}}
 ```
+
+## The lifetime model
+
+`lifetime.tla` is a third, separate model, of nodeids: which ones the
+kernel holds, what dcfs keeps for each, and when each thing goes. The
+kernel counts the entry replies that hand a nodeid out and gives them back
+with `FORGET` (or a `FORGET_MULTI` batch), the last one when it evicts the
+inode; dcfs counts the same replies (`DirCacheFS::lookups_`) and keeps,
+besides the row, an in-memory removed record for an object it removed
+while the kernel holds its nodeid (`removed_`, step 23.2), and for a file
+written in this run an entry in `written_` with a held `O_PATH`
+descriptor from its last close to its last `FORGET` (step 23.6,
+`docs/design.md` "mmap after close"). The invariant: a nodeid the kernel
+holds always resolves to the object it was handed out for (never to
+another, and not to `ESTALE` while the kernel's reference keeps the object
+alive), and nothing dcfs keeps for a nodeid outlives the kernel's
+references or goes before them.
+
+How it relates to the other two: it shares no module and no state.
+`dcfs.tla` is one directory's cached entries under the write-through
+protocol, with interleaving and crashes that keep any prefix of each
+disk's writes; it has no nodeids, no lookup counts, no files and no
+descriptors. `reval.tla` is one file's descriptors and permission state.
+`lifetime.tla` has what both leave out: the kernel's lookup counts and open
+files per nodeid, dcfs's count, row (and the row's nlink column), removed
+record, `written_` entry and held descriptor, the backing directory's names
+and whether each object is still allocated (freed once nothing names it
+and no descriptor of dcfs's holds it). It takes each request as one step,
+except an unlink's or rename's removal, which is two (the backing syscall,
+then phase 3's settling) so that a crash can fall between them; a crash is
+a daemon crash (the database keeps what it committed; a power loss's
+rollback is `dcfs.tla`'s).
+
+```sh
+bazel test //formal:lifetime_test //formal:lifetime_stubs_test
+bazel test //formal:known_bug_lifetime_nonfinal_forget_drops_held_test  # and the other known_bug_lifetime_*
+bazel test //formal:finding_lifetime_stub_nodeid_reused_test            # and the other finding_lifetime_*
+bazel test //formal:trace_life_nonfinal_forget_test                     # and the other trace_life_*
+```
+
+By hand, as above, with `MClifetime` (or a variant module) instead of
+`MC`: `-config MC_lifetime.cfg MClifetime`.
+
+### What is in it
+
+Per nodeid (`st[i]`, a record; nodeids are rows' ids `1..MaxId`, handed out
+in order and never twice, and stubs' `StubIds`):
+
+| Field | Meaning | In dcfs |
+|---|---|---|
+| `k` | the kernel's lookup count: entry replies minus `FORGET`s | the FUSE inode's `nlookup` (model-only) |
+| `ko` | the object (or refused name) the kernel's lookups were handed out for, since `k` last rose from 0 | (checking only) |
+| `op` | open files of it | `open_files_`, `BackingFile::refs` |
+| `wrote` | a writable open since `k` last rose from 0, in this run | (checking only) |
+| `lk` | dcfs's count of the kernel's lookups | `lookups_` |
+| `row`, `nl0` | its row exists; the row's nlink column is 0 | `inodes` |
+| `rec` | a removed record answers for it | `removed_` |
+| `wr` | no `written_` entry, one without a held descriptor (`nofd`: the cap, or `EMFILE`), or one with (`held`) | `written_` |
+
+Besides: `obj[i]` (the object row `i` was made for), `nextId`
+(`AUTOINCREMENT`), `stub[m]` (a refused name's stub nodeid), `bName` (the
+backing directory: names `Names` to objects `Objs`), `bState` (each object
+`unborn`, `alive` or `dead`), `pend` (a removal between its syscall and its
+phase 3, and whether `HoldForRemoval` held the object), `run`, `clean` (the
+clean-shutdown flag), `crashes`, `forgetErr` (a `FORGET` forgot more than
+dcfs counted).
+
+| Action | What it does | dcfs |
+|---|---|---|
+| `Lookup(n)` | the row of n's object, found or made (a new id), handed out | `Lookup`, a `READDIRPLUS` entry (`ReplyEntry`) |
+| `Create(n, w)`, `Tmpfile` | a new object, its new row (`Tmpfile`'s with nlink 0 and no name), handed out and open | `Create`, `Tmpfile` (`RecordTmpfile`) |
+| `Link(i, n)` | a new name for a nodeid the kernel holds (an `O_TMPFILE` file's first: nlink no longer 0), handed out | `Link` |
+| `Open(i, w)` | an open of a nodeid the kernel holds, of its row or its removed record; a writable one puts it in `written_` (not for a removed record) | `Open`, `BeginWriting` |
+| `Release(i)` | the last release of a row with no link left retires it (into a removed record if dcfs counts lookups); that of a written file otherwise takes the held descriptor, or none (the cap) | `Release`, `RetireRemoved` |
+| `Remove(n, src)`, `Settle` | an unlink of n (or a rename of src over it): the resolve, `HoldForRemoval` if dcfs counts lookups, the syscall; then phase 3: an open object keeps its row (nlink 0 if no link is left), otherwise the row goes if no link is left, into a removed record if held, and the `written_` entry with it | `RemoveChild`, `RefreshAfterRename`, `SettleUnlinkedFile`, `RetireRemoved` |
+| `Forget(i, n)`, `ForgetMulti(f)` | the kernel gives back n lookups (all of them only with no file open); dcfs takes them off, and at its last ends the removed record and the `written_` entry (a batch: each entry's count, in one step) | `Forget`, `ForgetMulti`, `DropLookups`, `ReconcileWritten` |
+| `Destroy` | unmount: the kernel holds nothing (no `FORGET`s), dcfs's memory is cleared, a clean shutdown | `Destroy`, `FinishRun` |
+| `Crash`, `Restart` | the daemon dies (also between a removal's two steps): the kernel's and dcfs's memory go, the database stays; the next start, after an unclean shutdown, sweeps rows with nlink 0 and no name | `StartRun`, `cache::ForgetUnnamedRows` |
+| `Refuse(m)`, `LookupStub(m)`, `StubGone(m)` | a refused name's stub (the next nodeid up from the highest live stub's), handed out; with `OutOfBand`, a stub going mid-run | `cache::SetRefused`, `StubEntry` |
+
+| Property | Says |
+|---|---|
+| `NodeidStable` | (1) a nodeid the kernel holds resolves to the object it was handed out for, or to `ESTALE`, never to another (stubs' nodeids included) |
+| `ReferencedServed` | ... and never to `ESTALE`: the kernel's reference keeps a removed object reachable, as on a local filesystem (step 23.2) |
+| `NotRetiredWhileReferenced` | (2) an object's row or removed record goes only when the kernel holds no lookup, no file is open and no held descriptor is left; a removed record never stands beside a row |
+| `HeldOnlyWhileWritten` | (3) a `written_` entry (so a held descriptor) exists only for a file with a writable open since `k` last rose from 0, whose last `FORGET` has not come, and which still has its row (dcfs's own removal of its last link drops it) |
+| `WrittenUntilLastForget` | ... and such a file keeps it until its last `FORGET`, the only later event at which a store through a mapping after close can be seen |
+| `ForgetKnown` | (4) no `FORGET` forgets a lookup dcfs did not count (`DropLookups`'s error path is unreachable) |
+| `LookupsExact`, `NothingLeaks` | (5) dcfs's count is the kernel's; a removed record and a `written_` entry exist only while the kernel holds the nodeid |
+| `KernelForgotAfterCrash`, `UnnamedRowsSwept` | (6) after a crash the kernel holds nothing and dcfs's memory is empty; once started, no row with nlink 0 and no name is left that nothing has open |
+| `RowsNameLiveObjects` | stronger than `UnnamedRowsSwept`: no row of a freed object; not true of the code ([findings](#findings-of-the-lifetime-model)) |
+
+### Configurations
+
+Distinct states from TLC's report (run of 2026-10-07 on russ's machine, 2
+workers; the main configuration took 42 s when the machine was loaded).
+
+| Configuration | Test (tier) | Checks | States | Time |
+|---|---|---|---|---|
+| `MC_lifetime.cfg` | `lifetime_test` (medium) | names a, b (o1, o2), o3 to create, 2 row ids, lookups to 2, 2 opens per nodeid, 1 crash; every property but `RowsNameLiveObjects` | 114,282 | ~15-45 s |
+| `MC_lifetime_stubs.cfg` | `lifetime_stubs_test` (medium) | 1 row id, 2 refused names, 2 stub nodeids (stubs never go: exclusive access) | 19,840 | ~5-15 s |
+
+Coverage (`-coverage 1`): on `MC_lifetime.cfg` every action fires except
+the stubs' (no refused names there); `MC_lifetime_stubs.cfg` takes `Refuse`
+and `LookupStub` (its one row id leaves `Create` nothing to make).
+`StubGone` needs `OutOfBand` (`findings/lifetime_stub_nodeid_reused`).
+
+### Known bugs and findings
+
+Each is a test that passes only if TLC reports the expected violation (small
+tier, a few seconds each).
+
+| Variant | Bug | Expected | The counterexample |
+|---|---|---|---|
+| `known_bugs/lifetime_nonfinal_forget_drops_held` | a `FORGET` that is not the last ends the `written_` entry and its held descriptor (the destroy_test investigation's hypothesis, false in the code) | `WrittenUntilLastForget` | two lookups of a; a writable open; a `FORGET` of one lookup: the entry is gone while the kernel holds the nodeid (a store after it would never be reconciled) |
+| `known_bugs/lifetime_nonfinal_forget_drops_rec` | a `FORGET` that is not the last ends the removed record | `ReferencedServed` | two lookups of a; unlink a (held; phase 3 makes the record); a `FORGET` of one: nothing pins the object, and the nodeid the kernel holds resolves to `ESTALE` |
+| `known_bugs/lifetime_tmpfile_row_survives_crash` | no sweep of unnamed rows at the start (before step 23.7, review L5) | `UnnamedRowsSwept` | `TMPFILE`; crash; start: its row stays, nothing open |
+| `known_bugs/lifetime_forget_multi_counted_as_one` | each `FORGET_MULTI` entry takes off one lookup, not its nlookup | `LookupsExact` | two lookups of a; a `FORGET_MULTI` of both: dcfs counts one left, the kernel none (and a record or held descriptor would outlive the last `FORGET`) |
+
+### Findings of the lifetime model
+
+Gaps in the code that the model found, each a configuration in
+`findings/` (module `findings/lifetime_findings.tla`) whose test expects the
+violation; fixing the code moves the configuration into the real model. All
+three are minor.
+
+| Finding | Expected | The counterexample | Severity |
+|---|---|---|---|
+| `lifetime_stub_nodeid_reused`: a stub's nodeid is the next up from the highest live stub's (`cache::SetRefused`), so once the highest stub goes, the next refused name gets its nodeid again, which the kernel may still hold for the old one | `NodeidStable` (with `OutOfBand`) | refuse m1 (stub 11); look it up; m1's stub goes (a relisting after an out-of-band change); refuse m2: stub 11 again. Until the kernel's next lookup of it tells the two apart by generation, a `GETATTR` (or `LOOKUP` of `..`) from the old holder is answered with m2's stub | low: stubs go only after an out-of-band change; the fix is a stub high-water mark that never goes down, as `AUTOINCREMENT` is for rows |
+| `lifetime_crash_before_settle`: a crash between an unlink's or rename's backing syscall and its phase 3 leaves the row of an object with no name left, its nlink column still not 0, so the start's sweep keeps it | `RowsNameLiveObjects` | unlink a (nothing held); crash; start: a's row, a freed object's, stays until something reaches it by handle (`ESTALE`, and the row goes) | low: one row per such crash, nothing served wrongly |
+| `lifetime_destroy_with_open_files`: DESTROY with a file open (SIGTERM, or a lazy unmount: libfuse aborts the connection) and a clean shutdown; the next start is clean and does not sweep, so an `O_TMPFILE` file's row (or an unlinked open file's) stays | `UnnamedRowsSwept` (with `DestroyWithOpens`) | `TMPFILE`; DESTROY; start | low: as above; the sweep could run at every start (one `DELETE`) |
+
+### Trace validation of nodeids
+
+`LifetimeTrace.tla` validates one nodeid's trace against `lifetime.tla`, as
+`RevalTrace.tla` does a file's against `reval.tla` (same validator, same
+depth rule), through the same per-nodeid operators the model's actions
+apply (`AfterLookup`, `AfterRelease`, ...), so a `Bug*` constant changes
+both. The recorder writes nodeids' traces only when made with `lifetimes`
+(the forged-request harness's `StartTrace()` does; the guests' recorder
+does not), on lines `DCFS-LIFE <trace> <nodeid> <json>`. A trace begins at
+the entry reply dcfs counts first (with what dcfs kept before it), or at the
+`CREATE` or `TMPFILE` that made the nodeid; one first seen with lookups
+counted is not traced, and neither is a stub's.
+
+| Line | From | Model step (`LifetimeTrace.tla`) |
+|---|---|---|
+| `lookup` (`via`: `lookup`, `dot`, `link`) | `LifetimeChanged` `kLookup`: an entry reply; `via` from the request it answered (a `LOOKUP` of `.` or `..`, a `LINK`, or by a name) | `T_LifeLookup` (`Lookup`: the object must have a name; its row found or made), `T_LifeLookupDot` (the row must exist), `T_LifeLink` (`Link`) |
+| `create` (`w`), `tmpfile` | `kCreated`, `kTmpfile` | `T_LifeCreate`, `T_LifeTmpfile` (a fresh nodeid) |
+| `open` (`w`), `release` (`w`) | `kOpened` (a successful `Open`), `kReleased` (the end of `Release`, after a retirement) | `T_LifeOpen`, `T_LifeRelease` (the held descriptor's cap free) |
+| `removed` (`held`) | `kRemoved`: phase 3 of `RemoveChild`, or of a rename over the object, ended | `T_LifeRemoved`: `Remove` then `Settle`; `held` must be whether dcfs counted a lookup; whether a name is left is free |
+| `forget` (`n`, `batch`) | `kForgot`, `kForgotInBatch` (after the batch's reconciliation) | `T_LifeForget`: `Forget` or a `ForgetMulti` entry; the kernel must hold n lookups |
+| `destroy` | `Destroyed` | `T_LifeDestroy` |
+| `crash`, `restart`; `start` | `RunStarting` (by the clean-shutdown flag); `RunStarted` (after the sweep) | `T_LifeCrash`, `T_LifeRestart`; `T_LifeStart` (the sweep after an unclean shutdown) |
+
+Each line carries what dcfs kept after the step (`st`: `lk`, `rec`, `wr`,
+`refs` from `DirCacheFS::LifetimeOf`, and `row` and `nl0` from the
+database; the run's lines only the row), which the model's state must
+equal. Why the two events were added: nothing else observes a lookup count
+(no event carried a nodeid's count, and `FORGET`/`FORGET_MULTI` had no event
+at all) or a retirement (a row's deletion shows as `InodeForgotten`, but the
+removed record, the `written_` entry and its held descriptor are
+`DirCacheFS`'s memory). What stays model-only: the kernel's own count and
+the object it holds the nodeid for (a trace's `k` is rebuilt from the lookup
+lines, so a `FORGET` of more than dcfs counted is rejected), whether the
+object still has a name on the backing filesystem, the held descriptor's
+cap, the other nodeids, and every request's reply (`Resolve`: no event says
+what a request on a nodeid was answered with).
+
+The traces: `//dcfs:dir_cache_fs_trace_test` validates every recording
+test's nodeids (the run of 2026-10-07: 32 nodeids' traces, all valid),
+among them the scenarios written for this model:
+`NonFinalForgetKeepsTheHeldDescriptor`,
+`RemovedFileIsServedUntilItsLastForget`,
+`ForgetMultiTakesOffEachEntrysCount`,
+`RenameOverAnOpenFileRetiresItAtTheLastRelease`,
+`DestroyLetsGoOfEveryNodeid` and `TmpfileRowGoesAtTheStartAfterACrash`.
+Every `T_Life*` action is taken except `T_LifeRestart` (no harness test
+starts cleanly after a DESTROY). `formal/trace_tests/life_*.log` keep four
+of them, and the `//formal:trace_life_*_test` targets check each against the
+real model (valid) and against its known-bug variant as the model
+(`--life-cfg`, `trace_tests/life_<bug>.cfg`), which must reject it:
+
+| Test | Log, model | Expected |
+|---|---|---|
+| `trace_life_nonfinal_forget_test` | two lookups, a writable open and release (held), `FORGET` 1, `FORGET` 1; real model | valid |
+| `trace_life_nonfinal_forget_drops_held_test` | the same, `BugNonFinalForgetDropsHeld` | rejected at the first `FORGET` (the code still holds the descriptor) |
+| `trace_life_removed_test`, `..._drops_rec_test` | two lookups, an unlink (a removed record), `FORGET` 1, `FORGET` 1; real model, `BugNonFinalForgetDropsRec` | valid; rejected at the first `FORGET` |
+| `trace_life_forget_multi_test`, `..._counted_as_one_test` | two lookups, an unlink, a `FORGET_MULTI` entry of 2; real model, `BugForgetMultiCountsOne` | valid; rejected at the batch entry |
+| `trace_life_tmpfile_crash_test`, `..._no_sweep_test` | `TMPFILE`, crash, start; real model, `BugNoUnnamedSweep` | valid; rejected at the start |
+
+For example, against `BugNonFinalForgetDropsHeld`:
+
+```
+trace_validate.sh: rejected: life/t@2: the model explains 4 of 6 events; the first it cannot (event 5):
+  {"i":6,"c":"LifetimeChanged","ev":"forget","n":1,"batch":false,"st":{"lk":1,"rec":false,"wr":"held","refs":0,"row":true,"nl0":false}}
+```
+
+The gaps: the guest recorder writes no nodeids' traces yet, so the real
+kernel's `FORGET` counts are not validated (only the harness's forged
+ones; `removed_test` checks in a guest that no `FORGET` exceeds dcfs's
+count). A new daemon process would also need to know which nodeids' traces
+the killed one had begun, as it does for directories.

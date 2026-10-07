@@ -1697,3 +1697,28 @@ dcfs's back the model also shows what does not survive whatever the fix
 exclusive-access assumption stated as a checked one. Files' traces from
 the forged-request harness are validated against it (`formal/README.md`,
 "The revalidation model").
+
+A third model, `formal/lifetime.tla`, covers nodeids (see
+[Row lifetime](#row-lifetime) and
+[mmap after close](#mmap-after-close-held-fd-workaround)): the kernel's
+lookup counts (entry replies minus `FORGET`s, batched or not), open files,
+and what dcfs keeps for each nodeid (its row, the removed record, the
+`written_` entry and its held descriptor), through unlinks and renames over
+an object, `DESTROY`, crashes and the start's sweep of unnamed rows. Its
+invariants: a nodeid the kernel holds resolves to the object it was handed
+out for (never to another, and not to `ESTALE` while the kernel's reference
+keeps the object alive); a row or removed record goes only when nothing
+references it; a held descriptor lasts exactly from a written file's last
+close to its last `FORGET` (or `DESTROY`, or dcfs's removal of its last
+link); dcfs's count is the kernel's, so no `FORGET` is for a lookup it did
+not count and nothing it keeps outlives the last `FORGET`; and after a
+crash the start sweeps every unnamed row. Variants put back a non-final
+`FORGET` dropping the held descriptor or the removed record, the pre-23.7
+crash that left an `O_TMPFILE` row behind, and a `FORGET_MULTI` counted as
+one. It found three minor gaps, kept as tests that expect them
+(`formal/findings/`): a stub's nodeid can be handed out again while the
+kernel still holds it (after an out-of-band relisting), and a row of a
+removed object survives the start's sweep after a crash between an
+unlink's syscall and its phase 3, or after a `DESTROY` with the file still
+open. Nodeids' traces from the forged-request harness are validated
+against it (`formal/README.md`, "The lifetime model").
