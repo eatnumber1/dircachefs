@@ -88,3 +88,10 @@ them), coverage ~40 and reproducible ~12 in parallel.
   product finding (2 durable fsyncs per CREATE): 26.4b's create slope
   test decides whether fsyncs are per create or per sync point.
 - 6.4c TLC worker count follows the runner (4 vCPUs; today 2 workers).
+- 6.4d (russ, 2026-10-08): shard the ASan, UBSan and plain large-tier
+  suites across runners with a job matrix (3 shards per suite to start:
+  the sanitizer compile is ~10-15 min per runner, so more shards flatten
+  out): a deterministic partition of the tier's test targets (sorted
+  `bazel query`, index modulo N) computed by `.github/ci/test.sh
+  --shard=i/n`, unit-tested; explicit targets so the test-result cache
+  still applies; expected wall for a push ~30-40 min instead of ~2.5 h.

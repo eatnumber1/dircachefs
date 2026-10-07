@@ -1380,3 +1380,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   by call site, runtime to be reported) and then 26.4b dispatched to the same agent.
 - 6.4a-c (host-only tests incompatible under sanitizer/coverage configs; destroy_test 20k; TLC
   workers follow the CPUs) added to lane-5's CI round, ahead of its Phase 8 cheap-gaps round.
+- russ (2026-10-08): shard the sanitizer and large-tier suites across runners (6.4d, 3 shards per
+  suite, deterministic target partition in test.sh); added to lane-5's CI round.
