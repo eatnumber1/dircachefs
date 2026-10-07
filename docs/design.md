@@ -1105,8 +1105,11 @@ limits:
   phase 1 alone (its attributes unknown, no I/O), and the next access
   re-reads them. A `FORGET` gives its descriptor's place back.
 - A file whose last link dcfs removes leaves the set at once
-  (`RetireRemoved`), so its space is not held; one unlinked behind dcfs's
-  back stays allocated until its `FORGET`.
+  (`RetireRemoved`) and its held descriptor is closed; if the kernel still
+  holds the nodeid, the removed record's descriptor keeps the space
+  allocated until the last `FORGET`, as the kernel's own reference would
+  on a local filesystem. One unlinked behind dcfs's back stays allocated
+  until its `FORGET` too.
 - The files one `FORGET` batch (`FORGET_MULTI`) lets go of, and those
   `DESTROY` reconciles in batches of 4,096, share one phase 1 for every
   file that needs one (changed attributes, or no held descriptor): one

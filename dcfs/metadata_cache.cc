@@ -1607,8 +1607,8 @@ absl::StatusOr<int64_t> ForgetUnnamedRows(Context &ctx) {
         Execute(ctx,
                 "DELETE FROM inodes WHERE id != ? AND nlink = 0 "
                 "AND (mode & ?) != ? "
-                "AND id NOT IN (SELECT inode FROM dentries "
-                "WHERE state = 'present')",
+                "AND NOT EXISTS (SELECT 1 FROM dentries "
+                "WHERE dentries.inode = inodes.id AND state = 'present')",
                 kRootInode, static_cast<int64_t>(S_IFMT),
                 static_cast<int64_t>(S_IFDIR)));
     return absl::OkStatus();

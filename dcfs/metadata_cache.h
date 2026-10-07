@@ -648,8 +648,9 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx);
 // unlinked file dcfs still had open, whose last release never came. The
 // row-lifetime rule deletes such a row at that release; after a crash the
 // object is gone (or unreachable through dcfs), and a row deleted wrongly
-// only costs a re-probe. Directories are left (a removed one's row goes at
-// once). Returns how many rows went. One transaction.
+// only costs a re-probe -- which gives the object a new nodeid, so an NFS
+// handle to the old one gets ESTALE. Directories are left (a removed one's
+// row goes at once). Returns how many rows went. One transaction.
 absl::StatusOr<int64_t> ForgetUnnamedRows(Context &ctx);
 
 // Registers a filesystem. AlreadyExists if `device` is already registered;

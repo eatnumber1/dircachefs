@@ -1661,9 +1661,16 @@ absl::Status StartRun(Context &ctx, std::string_view boot_id) {
   if (unclean || recovered > 0) {
     // Rows whose last release never came (review L5): see
     // cache::ForgetUnnamedRows.
-    ABSL_ASSIGN_OR_RETURN(int64_t forgotten, cache::ForgetUnnamedRows(ctx));
-    if (forgotten > 0) {
-      LOG(WARNING) << "forgot " << forgotten
+    // Best effort: a row left behind only costs a re-probe, so a failure
+    // is logged and startup goes on.
+    absl::StatusOr<int64_t> forgotten = cache::ForgetUnnamedRows(ctx);
+    if (!forgotten.ok()) {
+      LOG(WARNING) << "could not forget the rows of unnamed or unlinked "
+                      "files left by the last run (they stay until a probe "
+                      "finds them gone): "
+                   << forgotten.status();
+    } else if (*forgotten > 0) {
+      LOG(WARNING) << "forgot " << *forgotten
                    << " rows of unnamed or unlinked files left by the "
                       "last run";
     }

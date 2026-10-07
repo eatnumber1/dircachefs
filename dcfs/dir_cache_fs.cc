@@ -1681,11 +1681,13 @@ absl::Status DirCacheFS::Release(
   // backing inode for the reconciliation there. O_PATH: no open file the
   // backing filesystem would see (no writer, no lease), only a reference.
   // At most max_held_fds_ of them (review M-1): beyond that the file holds
-  // none, and its FORGET is the phase 1 alone.
+  // none, and its FORGET is the phase 1 alone. One held since an earlier
+  // close is the same object (it pins it) and stays: no reopen, and none
+  // lost to EMFILE.
   if (auto written = written_.find(id);
-      written != written_.end() && !delete_row) {
-    const bool had = written->second.has_value();
-    if (!had && held_fds_ >= max_held_fds_) {
+      written != written_.end() && !delete_row &&
+      !written->second.has_value()) {
+    if (held_fds_ >= max_held_fds_) {
       if (!held_cap_logged_) {
         held_cap_logged_ = true;
         LOG(WARNING) << "Release: " << held_fds_ << " written files already "
@@ -1698,10 +1700,8 @@ absl::Status DirCacheFS::Release(
           backing::ReopenFd(*backing_file.fd, O_PATH | O_CLOEXEC);
       if (path_fd.ok()) {
         written->second = *std::move(path_fd);
-        if (!had) ++held_fds_;
+        ++held_fds_;
       } else {
-        if (had) --held_fds_;
-        written->second.reset();
         LOG(WARNING) << "Release: could not hold written inode " << id
                      << " until its FORGET (its reconciliation there will "
                         "mark its attributes unknown instead): "

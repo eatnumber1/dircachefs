@@ -1564,6 +1564,22 @@ TEST_F(DirCacheFSTest, StartupAfterACrashForgetsUnnamedRows) {
   EXPECT_THAT(cache::GetAttr(ctx_, kRootInode), IsOk());
 }
 
+// The sweep of unnamed rows is best effort: if it fails, startup goes on
+// (the rows cost only a re-probe), logged, not a failed mount.
+TEST_F(DirCacheFSTest, StartupGoesOnIfTheUnnamedRowSweepFails) {
+  WriteFile(Path("named"));
+  Start();
+  Created tmp = Tmpfile(kRootInode, O_RDWR);
+  ASSERT_EQ(tmp.reply.error, 0);
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_delete BEFORE DELETE ON inodes "
+                       "BEGIN SELECT RAISE(ABORT, 'no deletes'); END"),
+              IsOk());
+  EXPECT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_delete"), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, tmp.id), IsOk());  // Left for next time.
+}
+
 // A tmpfile whose create fails after its row was recorded (here its first
 // attribute read) takes the row back with it (review L5).
 TEST_F(DirCacheFSTest, TmpfileUndoForgetsItsRow) {
@@ -2268,6 +2284,39 @@ TEST_F(DirCacheFSTest, ForgetBatchReconcilesInOnePhase1) {
     EXPECT_FALSE(attr.valid) << id;
     EXPECT_THAT(Dirty(), Contains(id));
   }
+}
+
+// A file written again after its last close keeps the descriptor it
+// holds (no reopen): one that cannot be opened now (EMFILE) does not cost
+// the one it has.
+TEST_F(DirCacheFSTest, WrittenAgainKeepsItsHeldDescriptor) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [first, first_fh] = Open(f, O_RDWR);
+  ASSERT_EQ(first.error, 0);
+  ASSERT_EQ(Release(f, first_fh).error, 0);  // Held from here.
+  auto [again, again_fh] = Open(f, O_RDWR);
+  ASSERT_EQ(again.error, 0);
+  struct rlimit saved {};
+  ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &saved), 0);
+  const int lowest_free = ::dup(0);
+  ASSERT_GE(lowest_free, 0);
+  ::close(lowest_free);
+  struct rlimit tight = saved;
+  tight.rlim_cur = static_cast<rlim_t>(lowest_free);
+  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &tight), 0);
+  Reply release = Release(f, again_fh);  // No new descriptor possible.
+  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &saved), 0);
+  ASSERT_EQ(release.error, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  AppendToFile(Path("f"), "stored");
+  Forget(f, 1);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(attr.valid);
+  EXPECT_EQ(attr.st.st_size, 6);
 }
 
 // At unmount the kernel sends no FORGETs: a written file the kernel still

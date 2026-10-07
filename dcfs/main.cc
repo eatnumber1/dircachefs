@@ -1,5 +1,5 @@
 #include <cerrno>
-#include <cstdio>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fcntl.h>
@@ -101,17 +101,23 @@ absl::Status UsageError(absl::string_view message) {
   return absl::InvalidArgumentError(message);
 }
 
-// The kernel's random per-boot UUID, so StartRun can tell a machine crash
-// (a new boot id) from a daemon crash in its log. Read by path: startup is
-// the one time dcfs uses paths.
-absl::StatusOr<std::string> ReadBootId() {
-  constexpr char kPath[] = "/proc/sys/kernel/random/boot_id";
+// A /proc/sys value (its first 64 bytes), without
+// surrounding whitespace. Read by path: startup is the one time dcfs uses
+// paths.
+absl::StatusOr<std::string> ReadProcValue(const char *path) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
-                        syscalls::openat(AT_FDCWD, kPath, O_RDONLY));
+                        syscalls::openat(AT_FDCWD, path, O_RDONLY));
   std::string buf(64, '\0');
   ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::pread(*fd, buf.data(), buf.size(), 0));
   buf.resize(n);
   return std::string(absl::StripAsciiWhitespace(buf));
+}
+
+// The kernel's random per-boot UUID, so StartRun can tell a machine crash
+// (a new boot id) from a daemon crash in its log. Read by path: startup is
+// the one time dcfs uses paths.
+absl::StatusOr<std::string> ReadBootId() {
+  return ReadProcValue("/proc/sys/kernel/random/boot_id");
 }
 
 // The cache files must grant no access beyond what the backing root
@@ -241,12 +247,14 @@ void RaiseFileLimit() {
     return;
   }
   rlim_t want = limit.rlim_max;
-  if (FILE *f = std::fopen("/proc/sys/fs/nr_open", "re"); f != nullptr) {
-    unsigned long long nr_open = 0;
-    if (std::fscanf(f, "%llu", &nr_open) == 1 && nr_open > want) {
+  if (absl::StatusOr<std::string> value = ReadProcValue("/proc/sys/fs/nr_open");
+      value.ok()) {
+    uint64_t nr_open = 0;
+    if (absl::SimpleAtoi(*value, &nr_open) && nr_open > want) {
       want = static_cast<rlim_t>(nr_open);
     }
-    std::fclose(f);
+  } else {
+    LOG(WARNING) << "fs.nr_open: " << value.status();
   }
   struct rlimit raised = {.rlim_cur = want, .rlim_max = want};
   if (setrlimit(RLIMIT_NOFILE, &raised) == 0) return;
