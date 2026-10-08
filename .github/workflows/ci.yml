@@ -432,7 +432,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
-    # Limit = 1.5x the estimate (2026-10-08: the cold part is fetch 24 min + build 20 min = 45 min, measured; the tests are the serial sum of the shard's measured plain times (61, 62 and 46 min) times 2.5 to 3 for ASan, divided by 1.5 for two guests at a time: 100-120 min for shards 0 and 1, 77-92 for shard 2, so 145-170 min with the cold part; step 11.2's ACE targets are in those sums)
+    # Limit = 1.5x the estimate (2026-10-08: the cold part is fetch 24 min + build 20 min = 45 min, measured; the tests are the serial sum of the shard's measured plain times (61, 62 and 46 min) times 2.5 to 3 for ASan, except step 11.2's ACE and kill tests, which measured the same under ASan as plain (fault_ace_fs_test_xfs 227 s under ASan, 199-247 s plain: their time is VM boots and mounts, not dcfs), divided by 1.5 for two guests at a time: 89-105, 96-114 and 71-84 min, so 116-159 min with the cold part; the limit keeps the margin of a noisy runner)
     timeout-minutes: 240
     needs: presubmit
     steps:

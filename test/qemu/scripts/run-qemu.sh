@@ -613,32 +613,38 @@ if [ -n "$KILL_ON" ]; then
 	qemu_cmd >"$fifo" 2>&1 &
 	qemu_job=$!
 	(
-		sleep "$TIMEOUT_SECS"
+		sleep "$TIMEOUT_SECS" &
+		wd_sleep=$!
+		# Killed when the boot is over: take the sleep with it.
+		trap 'kill "$wd_sleep" 2>/dev/null; exit 0' TERM
+		wait "$wd_sleep"
 		: >"$WORKDIR/timed-out"
 		kill -KILL "$(cat "$PIDFILE")" 2>/dev/null || true
 	) &
 	watchdog=$!
 	killed=0
-	alive_at_cut=0
+	cut_ok=0
 	cr=$(printf '\r')
 	while IFS= read -r line; do
 		printf '%s\n' "$line"
 		printf '%s\n' "$line" >>"$LOG"
 		# The marker is a line of its own, as the guest prints it (the console
 		# adds a carriage return), not the same words inside another line.
-		if [ "${line%"$cr"}" = "$KILL_ON" ]; then
+		# Once it has been read the loop goes on to the end of the output (the
+		# fifo must stay open for the job: the shell tells of a killed child on
+		# its stderr, and a closed fifo would kill the job with SIGPIPE, 141,
+		# instead of letting it end with the status of our SIGKILL).
+		if [ "$killed" -eq 0 ] && [ "${line%"$cr"}" = "$KILL_ON" ]; then
 			killed=1
-			# A QEMU that is going to end on its own has by now; the cut must
-			# be ours.
-			sleep 0.1
-			if kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
-				alive_at_cut=1
+			# At once: a QEMU that has gone by itself is not there to kill,
+			# and the cut is only ours if the kill finds it.
+			if kill -KILL "$(cat "$PIDFILE")" 2>/dev/null; then
+				cut_ok=1
 			fi
-			kill -KILL "$(cat "$PIDFILE")" 2>/dev/null || true
-			break
 		fi
 	done <"$fifo"
-	wait "$qemu_job" 2>/dev/null || true
+	qemu_status=0
+	wait "$qemu_job" 2>/dev/null || qemu_status=$?
 	kill "$watchdog" 2>/dev/null || true
 	wait "$watchdog" 2>/dev/null || true
 	rm -f "$fifo"
@@ -677,9 +683,14 @@ if [ -n "$KILL_ON" ]; then
 			echo "== RESULT: FAIL (timeout; see $LOG) =="
 			exit 1
 		fi
-		if [ "$alive_at_cut" -ne 1 ]; then
+		if [ "$cut_ok" -ne 1 ]; then
 			echo "run-qemu.sh: QEMU had ended on its own when its marker was read, so it was not cut" >&2
 			echo "== RESULT: FAIL (QEMU was not killed at the cut; see $LOG) =="
+			exit 1
+		fi
+		if [ "$qemu_status" -ne 137 ]; then
+			echo "run-qemu.sh: QEMU's status was $qemu_status, not 137 (our SIGKILL)" >&2
+			echo "== RESULT: FAIL (QEMU did not die of our kill; see $LOG) =="
 			exit 1
 		fi
 		echo "run-qemu.sh: QEMU killed at '$KILL_ON'"

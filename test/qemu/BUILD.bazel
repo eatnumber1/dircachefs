@@ -228,7 +228,8 @@ qemu_test(
 )
 
 # The same, all kinds, on xfs and btrfs over four of the operations (62
-# sequences each).
+# sequences each). `long` fits the asan job too: fault_ace_fs_test_xfs took 227 s
+# under --config=asan (199-247 s plain; the time is VM boots and mounts).
 qemu_test_matrix(
     name = "fault_ace_fs_test",
     checked_dcfs = True,
@@ -715,9 +716,11 @@ sh_test(
     args = [
         "$(location scripts/run-qemu.sh)",
         "$(location guest/init)",
+        "$(location guest/lib.sh)",
     ],
     data = [
         "guest/init",
+        "guest/lib.sh",
         "scripts/run-qemu.sh",
     ],
     target_compatible_with = HOST_ONLY_COMPATIBLE,

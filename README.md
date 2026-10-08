@@ -436,9 +436,7 @@ measured times on a shared 4-core machine at two test jobs, divided by 1.5 for
 the runner running two guests at a time; the sanitizer builds are cold in every
 run: fetch 24 min and build 20 min, measured on GitHub): `full` 46, 52 and
 55 min of tests serial, so 31, 35 and 37 min, 80 min with the cold part;
-`asan` 61, 62 and 46 min serial, 2.5 to 3 times under ASan, so 100 to 120 min
-for shards 0 and 1 and 77 to 92 for shard 2, 145 to 170 min with the cold part,
-against a limit of 240 min; `ubsan` about 1.5 times plain, 60 min and 105 with
+`asan` 61, 62 and 46 min serial, 2.5 to 3 times under ASan except the ACE and kill tests of step 11.2, which take the same under ASan as plain (`fault_ace_fs_test_xfs`: 227 s under ASan, 199-247 s plain), so 89-105, 96-114 and 71-84 min, and 116-159 min with the cold part, against a limit of 240 min; `ubsan` about 1.5 times plain, 60 min and 105 with
 the cold part, limit 180. ACE target a (568 s plain, 182 sequences) is the
 longest single test of its shard after `bench_full` (761 s) and `idle_long`
 (691 s). Each shard uploads `test-logs-<job>-<shard>` on failure. Dealing by

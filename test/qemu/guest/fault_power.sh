@@ -156,6 +156,11 @@ power_cut() {
 		# that failed on the way here (a freeze that did not hold, say) means
 		# the state is not the one the scenario names, so no cut is made.
 		[ "$FAILED" -eq 0 ] || exit "$FAILED"
+		# What this boot would otherwise report at its end (guest/init's
+		# scan of the kernel log, which a cut boot never reaches), for the
+		# host to read before the marker.
+		dmesg_oom_lines
+		dmesg_kernel_failures
 		echo "DCFS-POWER-CUT-NOW"
 		# The host kills QEMU on that line; nothing runs after it.
 		exec sleep 600

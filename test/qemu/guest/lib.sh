@@ -50,6 +50,23 @@ require_no_reclaim() {
 	fi
 }
 
+# dmesg_oom_lines / dmesg_kernel_failures: the kernel log's OOM-killer lines as
+# MEM-OOM: lines and its failures (oops, BUG, WARNING, call trace, panic) as
+# KERNEL-OOPS: lines, which the host's verdict (run-qemu.sh) fails a boot on.
+# The console runs at loglevel=3 and shows only the worst of these, so a boot
+# that is killed before guest/init's own scan at its end (the first boot of a
+# power cut, guest/fault_power.sh) prints them itself before it is cut. The
+# patterns are guest/init's (mem_report), which has them for the guests with no
+# lib.sh; //test/qemu:run_qemu_verdict_test checks that the two agree.
+dmesg_oom_lines() {
+	dmesg 2>/dev/null | grep -i -E 'out of memory|oom-kill|killed process' |
+		head -n 10 | sed 's/^/MEM-OOM: /'
+}
+dmesg_kernel_failures() {
+	dmesg 2>/dev/null | grep -E 'BUG:|Oops|kernel BUG at|WARNING: CPU:|WARNING: at |------------\[ cut here \]------------|Call Trace:|Kernel panic|general protection fault' |
+		head -n 20 | sed 's/^/KERNEL-OOPS: /'
+}
+
 # snapshot DIR: one line per entry under DIR (lost+found left out), sorted:
 # "<path> <type> <size> <mode> <links>" and, for a regular file, the md5sum of
 # its contents. What two trees must agree on to be the same tree: dcfs's served

@@ -26,7 +26,7 @@ fi
 cat "$(dirname "$0")/../canned"
 # A guest that goes on running after its last line, as one waiting for the
 # host to cut its power does (the kill-mode cases below).
-[ -f "$(dirname "$0")/../stay" ] && sleep 60
+[ -f "$(dirname "$0")/../stay" ] && exec sleep 60
 exit 0
 E
 for t in mke2fs mkfs-xfs mkfs-btrfs; do
@@ -80,6 +80,17 @@ Kernel panic - not syncing: VFS
 general protection fault, probably for non-canonical address 0xdead: 0000 [#1] SMP
 EOF4
 echo "PASS: guest/init's dmesg filter skips hw-vuln advisories and keeps real failures"
+
+# guest/lib.sh's dmesg_kernel_failures and dmesg_oom_lines (what the first boot
+# of a power cut prints before its marker, since it never reaches guest/init's
+# scan) use guest/init's patterns, word for word.
+LIB=$3
+LIB_PATTERN=$(sed -n "s/.*dmesg 2>\/dev\/null | grep -E '\(.*\)' |\$/\1/p" "$LIB")
+[ "$LIB_PATTERN" = "$PATTERN" ] || fail "lib.sh's kernel-failure pattern differs from guest/init's"
+OOM_INIT=$(sed -n "s/.*dmesg 2>\/dev\/null | grep -i -E '\(.*\)' |\$/\1/p" "$INIT")
+OOM_LIB=$(sed -n "s/.*dmesg 2>\/dev\/null | grep -i -E '\(.*\)' |\$/\1/p" "$LIB")
+[ -n "$OOM_INIT" ] && [ "$OOM_INIT" = "$OOM_LIB" ] || fail "lib.sh's OOM pattern differs from guest/init's"
+echo "PASS: guest/lib.sh's dmesg patterns are guest/init's"
 
 # A guest that passed: guest/init's MEM line and DCFS-TEST-EXIT=0, around
 # whatever else is in $WORK/extra.
@@ -340,14 +351,28 @@ echo "PASS: --kill-on: the marker must be a line of its own"
 kill_run "TEST held FAIL (the daemon never blocked)" marker stay
 [ "$RC" -ne 0 ] || fail "a failed check before the marker passed boot 1"
 echo "PASS: --kill-on: a TEST FAIL before the marker fails boot 1"
-kill_run "[    3.2] WARNING: CPU: 1 PID: 77 at fs/fuse/dir.c:99 fuse_lookup+0x10/0x20" marker stay
-[ "$RC" -ne 0 ] || fail "a kernel warning before the marker passed boot 1"
-echo "PASS: --kill-on: a kernel failure before the marker fails boot 1"
+# What a real first boot can show: the console (loglevel 3) has an oops or a
+# BUG, and the guest prints the kernel log's failures and OOM-killer lines as
+# KERNEL-OOPS: and MEM-OOM: lines itself before the marker (a WARNING or the
+# OOM killer is not on the console).
+kill_run "KERNEL-OOPS: [    3.2] WARNING: CPU: 1 PID: 77 at fs/fuse/dir.c:99 fuse_lookup+0x10/0x20" marker stay
+[ "$RC" -ne 0 ] || fail "a kernel warning printed before the marker passed boot 1"
+echo "PASS: --kill-on: a KERNEL-OOPS: line before the marker fails boot 1"
+kill_run "[    3.2] BUG: kernel NULL pointer dereference, address: 0000000000000000" marker stay
+[ "$RC" -ne 0 ] || fail "a console oops before the marker passed boot 1"
+echo "PASS: --kill-on: a console oops before the marker fails boot 1"
+kill_run "MEM-OOM: Out of memory: Killed process 412 (dcfs) total-vm:9000kB" marker stay
+[ "$RC" -ne 0 ] || fail "an OOM-killer line before the marker passed boot 1"
+echo "PASS: --kill-on: a MEM-OOM: line before the marker fails boot 1"
 kill_run "DCFS-INVARIANT-VIOLATION tri-state: inode 5: attributes recorded as current with nlink 0" marker stay
 [ "$RC" -ne 0 ] || fail "an invariant violation before the marker passed boot 1"
 echo "PASS: --kill-on: an invariant violation before the marker fails boot 1"
-kill_run "TEST scenario PASS" marker go
+# A QEMU that ended on its own: the marker is the last line of more than a
+# pipe's worth of output, so the fake has written all of it and exited long
+# before the host reads the marker; the kill finds nothing to kill.
+kill_run "$(awk 'BEGIN { for (i = 0; i < 6000; i++) print "console line " i " of filler to fill the fifo" }')" marker go
 [ "$RC" -ne 0 ] || fail "a QEMU that ended on its own, not killed at the cut, passed"
+grep -q "had ended on its own" "$WORK/stdout" || fail "no message for a QEMU that ended on its own: $(tail -3 "$WORK/stdout")"
 echo "PASS: --kill-on: a QEMU that was not killed at the marker fails"
 FLAG=""
 echo "PASS: all checks passed"
