@@ -1,15 +1,15 @@
 /*
- * A stand-in for xfsprogs' <xfs/xfs.h>, written for this repository (the
- * real header is xfsprogs-dev's, which the guest build does not have). xfstests'
- * ltp/fsstress.c names the XFS ioctl structures and calls xfsctl()
- * (and fsx.c getopt_long, which the real header drags in) unconditionally; this declares just enough for it to compile. Every
- * XFS-specific ioctl then goes to the file system under test through
- * ioctl(2): dcfs answers none of them (FUSE has no ioctl for it) and fsstress
- * counts the failure, so the coverage lost is exactly fsstress's XFS-only
- * operations (bulkstat, resvsp/unresvsp, fsgetxattr project ids and extent
- * sizes, direct-I/O alignment query, XFS error injection), which never
- * reach a FUSE file system. Layouts follow the kernel's
- * <linux/fs.h>/<xfs/xfs_fs.h> only as far as the compiler needs; the
+ * A stand-in for xfsprogs' <xfs/xfs.h>, written for this repository (the real
+ * header is xfsprogs-dev's, which the guest build does not have).
+ * xfstests' ltp/fsstress.c names the XFS ioctl structures and calls xfsctl()
+ * unconditionally, and ltp/fsx.c gets getopt_long from the real header; this
+ * declares just enough for both to compile. Every XFS-specific ioctl then goes
+ * to the file system under test through ioctl(2): dcfs answers none of them
+ * (FUSE has no ioctl for it) and fsstress counts the failure, so the coverage
+ * lost is exactly fsstress's XFS-only operations (bulkstat, resvsp/unresvsp,
+ * project ids and extent sizes, the direct-I/O alignment query, XFS error
+ * injection), which never reach a FUSE file system. Layouts follow the
+ * kernel's <linux/fs.h>/<xfs/xfs_fs.h> only as far as the compiler needs; the
  * structures are never interpreted by anything here.
  */
 #ifndef DCFS_XFSTESTS_SHIM_XFS_H

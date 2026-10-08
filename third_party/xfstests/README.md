@@ -36,16 +36,29 @@ Declared in `MODULE.bazel` (`http_archive` `xfstests`).
   `git.kernel.org/pub/scm/fs/xfs/xfstests-dev.git`; the tag's commit is
   `ffc8bad17e5b2f56e48dbac43f7c5ae8ac368fe5`).
 - **URL** `https://github.com/kdave/xfstests/archive/refs/tags/v2026.05.17.tar.gz`
-- **Integrity** `sha256-N//K3TdsbZ4SBR1gX1LJqXPzczKHjvdv8+zmNpnbLI8=`; the hex
-  sha256 is `37ffcd8ae8f7a8ab788813708f67ae9fc5efccbcd93e0fb7ffb9e24b2d16e393`.
+- **Integrity** `sha256-N//Niuj3qKt4iBNwj2eun8XvzLzZPg+3/7niSy0W45M=` (as in
+  `MODULE.bazel`); the hex sha256 is
+  `37ffcd8ae8f7a8ab788813708f67ae9fc5efccbcd93e0fb7ffb9e24b2d16e393`.
+- **How the sha256 was obtained** `curl -L` of the URL above and `sha256sum`
+  of the file, on 2026-10-07 (step 11.2b); Bazel verifies it on every fetch.
+  GitHub's archives of a tag are not guaranteed byte-stable forever: if a
+  fetch fails the hash check, re-download, compare the extracted tree with
+  the tag's commit, and update the hash.
 
 ## Updating the pin
 
 1. Pick a newer tag (`git ls-remote --tags https://github.com/kdave/xfstests`)
-   and set `url` and `strip_prefix` in `MODULE.bazel`.
+   and set `url` and `strip_prefix` in `MODULE.bazel`, and the comment above
+   the `http_archive` there.
 2. Download the archive, hash it (`sha256sum`, then base64 for `integrity`)
    and set `integrity`.
-3. Build with `bazel build @xfstests//:fsstress @xfstests//:fsx`; a new tag
+3. In this file's "Pin" section, set the tag, the tag's commit id
+   (`git ls-remote` above, the `^{}` line), the URL, both forms of the hash
+   and the date.
+4. Build with `bazel build @xfstests//:fsstress @xfstests//:fsx`; a new tag
    may need more `HAVE_*` in `BUILD.xfstests`'s `config.h` or more
    declarations in the shim header.
-4. Run `//test/qemu:stress_short_test_ext4` and the large tier.
+5. Run `//test/qemu:stress_short_test_ext4` and the large tier; the set of
+   features fsx disables (`guest/stress.sh`) may change with the new tools.
+6. Update the version in `tools/sbom/pins.json` only if its extraction rule
+   needs it (it reads `strip_prefix`).

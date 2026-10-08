@@ -51,10 +51,12 @@ if [ "${DCFS_CI_KVM:-0}" != 1 ]; then
 fi
 
 # The `SIZE LABEL` lines of the tests this shard may run, before sharding.
+# Tests tagged `manual` run only when asked for by name (step 11.2b:
+# stress_random_test_*): `bazel test //...` skips them, and so must this.
 suite_tests() {
 	local size
 	for size in ${sizes//,/ }; do
-		bazel cquery "${config_args[@]}" "attr(size, '^${size}\$', tests(//...))" \
+		bazel cquery "${config_args[@]}" "attr(size, '^${size}\$', tests(//...)) except attr(tags, 'manual', tests(//...))" \
 			--output=starlark \
 			--starlark:expr="'' if 'IncompatiblePlatformProvider' in str(providers(target)) else str(target.label)" |
 			awk -v size="$size" 'NF { sub(/^@@/, "", $1); print size, $1 }'

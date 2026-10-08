@@ -8,14 +8,21 @@
 # truncate, fallocate, punch, mmap, xattrs, ...) from several processes
 # under $MNT/fsstress. fsx runs random reads, writes, truncates and mmap
 # operations on one file under $MNT, checking every byte it reads against
-# its own model (data, size and mmap correctness). After each,
-# the cache is compared with the backing filesystem: the tree seen through
-# dcfs (from its cache, warm) digests like the backing filesystem's own
-# (every name, type, mode, link count, owner, size, symlink target, xattr and
-# the md5 of every file); then dcfs restarts and the comparison is made again
-# over what recovery and the next lookups served. In the small and medium
-# tiers the daemon is the checking build, which aborts naming the invariant
-# it saw broken: the daemon's survival is a check too.
+# its own model (data, size and mmap correctness). After them, the tree seen
+# through dcfs digests like the backing filesystem's own (stress_lib.sh,
+# stress_digest: names, types, modes, link counts, owners, sizes, symlink
+# targets, xattrs, mtime and ctime, file contents; what it leaves out is
+# listed there), three times: right after the run (the kernel's FUSE caches,
+# with their one-hour timeouts, answer most of it), after drop_caches with
+# the same daemon running (dcfs's own cache answers), and after a restart
+# (recovery, then lookups the new daemon makes cold). In the small and
+# medium tiers the daemon is the checking build, which aborts naming the
+# invariant it saw broken: the daemon's survival is a check too.
+#
+# Not proved: fsstress exits 0 whatever its operations returned, so the test
+# prints the errno of every operation and requires successes of the main ones
+# and no EIO; the operations a FUSE mount cannot do are listed in README.md
+# ("Step 11.2b").
 #
 # The wrappers set the run's size: stress_short.sh, stress_long.sh (fixed
 # seeds) and stress_random.sh (a seed from the kernel's random pool,
@@ -60,6 +67,9 @@ trap cleanup EXIT
 
 echo "stress.sh: kernel $(uname -r)"
 
+# cmdline NAME: the value of NAME=VALUE on the kernel command line.
+cmdline() { sed -n "s/.*\b$1=\([^ ]*\).*/\1/p" /proc/cmdline; }
+
 case "${STRESS_MODE:-}" in
 short | long | random) ;;
 *)
@@ -88,11 +98,17 @@ long)
 	;;
 random)
 	PROCS=8
-	OPS=${STRESS_OPS:-5000}
-	FSX_OPS=${STRESS_FSX_OPS:-50000}
+	# Sizes and seeds can be set on the kernel command line (the target's
+	# `cmdline =`), e.g. to replay a failure with its printed seeds.
+	OPS=$(cmdline stress_ops)
+	OPS=${OPS:-5000}
+	FSX_OPS=$(cmdline stress_fsx_ops)
+	FSX_OPS=${FSX_OPS:-50000}
 	FSX_LEN=1048576
-	FSSTRESS_SEED=$(($(cut -c1-7 /proc/sys/kernel/random/uuid | sed 's/^/0x/')))
-	FSX_SEED=$(($(cut -c9-15 /proc/sys/kernel/random/uuid | sed 's/^/0x/')))
+	FSSTRESS_SEED=$(cmdline stress_seed)
+	FSSTRESS_SEED=${FSSTRESS_SEED:-$(stress_seed)}
+	FSX_SEED=$(cmdline stress_fsx_seed)
+	FSX_SEED=${FSX_SEED:-$(stress_seed)}
 	;;
 esac
 echo "stress.sh: mode $STRESS_MODE: fsstress -p $PROCS -n $OPS -s $FSSTRESS_SEED; fsx -N $FSX_OPS -l $FSX_LEN -S $FSX_SEED"
@@ -122,28 +138,29 @@ alive() {
 # --- fsstress ----------------------------------------------------------------
 
 mkdir "$MNT/fsstress"
-# The five operations that are XFS ioctls (bulkstat, resvsp) have no meaning
-# for a FUSE file system: no ioctl reaches the backing filesystem, they would
-# only count failures.
+# The four operations that are XFS ioctls (bulkstat, bulkstat1, resvsp,
+# unresvsp) have no meaning for a FUSE file system: no ioctl reaches the
+# backing filesystem, they would only count failures.
 t0=$(date +%s)
 "$FSSTRESS" -d "$MNT/fsstress" -p "$PROCS" -n "$OPS" -s "$FSSTRESS_SEED" -v \
 	-f bulkstat=0 -f bulkstat1=0 -f resvsp=0 -f unresvsp=0 \
 	>/tmp/fsstress.out 2>/tmp/fsstress.err
 rc=$?
 t1=$(date +%s)
-echo "stress.sh: fsstress exit $rc in $((t1 - t0))s; operations (from its -v log):"
-fsstress_ops /tmp/fsstress.out | tr '\n' ' '
-echo
+echo "stress.sh: fsstress exit $rc in $((t1 - t0))s; every operation by errno (op errno count; errno 0 succeeded):"
+fsstress_results /tmp/fsstress.out
 if [ "$rc" -eq 0 ]; then
 	pass fsstress-exit
 else
 	fail fsstress-exit "exit $rc"
 	head -20 /tmp/fsstress.err
 fi
-fsstress_verdict fsstress-ran /tmp/fsstress.out $((PROCS * OPS * 8 / 10))
+# Of the PROCS*OPS operations, 0.2% at least succeed as each of the main
+# kinds (creat, mkdir, link, symlink, rename, unlink, write).
+fsstress_verdict fsstress-operations-succeeded /tmp/fsstress.out $((PROCS * OPS / 500))
 if alive; then pass fsstress-daemon-alive; else fail fsstress-daemon-alive "the daemon died"; fi
 
-stress_same_tree fsstress-cache-matches-backing "$MNT/fsstress" "$SRC/fsstress"
+stress_same_tree fsstress-kernel-cache-matches-backing "$MNT/fsstress" "$SRC/fsstress"
 
 # --- fsx ---------------------------------------------------------------------
 
@@ -152,7 +169,28 @@ t0=$(date +%s)
 rc=$?
 t1=$(date +%s)
 echo "stress.sh: fsx exit $rc in $((t1 - t0))s: $(tail -1 /tmp/fsx.out)"
+echo "stress.sh: fsx disabled:"
+fsx_disabled /tmp/fsx.out
 fsx_verdict fsx-completed /tmp/fsx.out "$FSX_OPS"
+# What dcfs lacks today, measured on ext4, xfs and btrfs alike: fsx turns a
+# feature off when its first use fails with an error that says "not here".
+# No ioctl (clone and dedupe range, which fsx also finds the backing
+# filesystems have), no RWF_DONTCACHE, and only the fallocate modes dcfs
+# forwards (keep size, punch hole and zero range work; collapse, insert,
+# unshare and write-zeroes do not); atomic writes need O_DIRECT, which fsx
+# only uses with -Z. An entry leaving this list means dcfs gained the feature
+# and fsx now tests it.
+cat >/tmp/fsx-expected.txt <<'LIST'
+atomic writes need O_DIRECT (-Z)
+filesystem does not support clone range
+filesystem does not support dedupe range
+filesystem does not support dontcache IO
+filesystem does not support fallocate mode FALLOC_FL_COLLAPSE_RANGE
+filesystem does not support fallocate mode FALLOC_FL_INSERT_RANGE
+filesystem does not support fallocate mode FALLOC_FL_UNSHARE_RANGE
+filesystem does not support fallocate mode FALLOC_FL_WRITE_ZEROES
+LIST
+fsx_disabled_verdict fsx-disabled-features /tmp/fsx.out /tmp/fsx-expected.txt
 if alive; then pass fsx-daemon-alive; else fail fsx-daemon-alive "the daemon died"; fi
 if [ "$(md5sum <"$MNT/fsx.dat")" = "$(md5sum <"$SRC/fsx.dat")" ] &&
 	[ "$(stat -c %s "$MNT/fsx.dat")" = "$(stat -c %s "$SRC/fsx.dat")" ]; then
@@ -163,13 +201,18 @@ fi
 
 # --- the whole tree again, warm and after a restart --------------------------
 
-stress_same_tree both-cache-matches-backing "$MNT" "$SRC"
+stress_same_tree both-kernel-cache-matches-backing "$MNT" "$SRC"
 sync
+
+# The same daemon, the kernel's caches dropped: dcfs's own cache (its
+# database) answers now.
+drop_caches_quiesced
+stress_same_tree both-dcfs-cache-matches-backing "$MNT" "$SRC"
 
 # A restart: recovery of the dirty set (a clean stop leaves it empty), then
 # the same comparison over what the new daemon serves.
 if restart_daemon restart "$LOG2"; then
-	stress_same_tree restart-cache-matches-backing "$MNT" "$SRC"
+	stress_same_tree restart-matches-backing "$MNT" "$SRC"
 fi
 if alive; then pass daemon-alive-at-end; else fail daemon-alive-at-end "the daemon died"; fi
 

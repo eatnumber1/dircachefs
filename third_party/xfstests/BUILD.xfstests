@@ -61,12 +61,24 @@ cc_library(
     includes = ["."],
 )
 
+# xfstests' own headers (src/global.h, src/statx.h, include/*.h).
+cc_library(
+    name = "headers",
+    testonly = 1,
+    hdrs = glob([
+        "src/*.h",
+        "include/*.h",
+    ]),
+    includes = [
+        "include",
+        "src",
+    ],
+)
+
 _COMMON_COPTS = [
     "-D_GNU_SOURCE",
     "-DXFS",
     "-DFALLOCATE",
-    "-Iexternal/+http_archive+xfstests/src",
-    "-Iexternal/+http_archive+xfstests/include",
     # Third-party upstream code: not held to this project's -Werror.
     "-w",
 ]
@@ -89,10 +101,7 @@ _STATIC = select({
 cc_binary(
     name = "fsstress",
     testonly = 1,
-    srcs = ["ltp/fsstress.c"] + glob([
-        "src/*.h",
-        "include/*.h",
-    ]),
+    srcs = ["ltp/fsstress.c"],
     copts = _COMMON_COPTS + _NO_SAN,
     features = _STATIC,
     linkopts = ["-lm"],
@@ -100,6 +109,7 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":config",
+        ":headers",
         "@dircachefs//third_party/xfstests:xfs_shim",
     ],
 )
@@ -107,10 +117,7 @@ cc_binary(
 cc_binary(
     name = "fsx",
     testonly = 1,
-    srcs = ["ltp/fsx.c"] + glob([
-        "src/*.h",
-        "include/*.h",
-    ]),
+    srcs = ["ltp/fsx.c"],
     copts = _COMMON_COPTS + _NO_SAN,
     features = _STATIC,
     linkopts = ["-lm"],
@@ -118,6 +125,7 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":config",
+        ":headers",
         "@dircachefs//third_party/xfstests:xfs_shim",
     ],
 )

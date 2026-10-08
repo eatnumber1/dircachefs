@@ -208,7 +208,7 @@ and `qemu_cc_test` requires an explicit `size` and `timeout` (the macros
 |---|---|---|---|
 | small | `bazel test --config=fast //...` | unit tests, ext4 variant of each e2e matrix test, boot, cache_permissions, lifecycle | about 1 minute |
 | medium | `bazel test --config=presubmit //...` (small + medium) | xfs and btrfs variants, readdir_boundary, release_leak | a few minutes |
-| large / enormous | `bazel test //...` (everything; CI) | nfs_test (large), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes |
+| large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test (large), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes |
 
 `size` also sets Bazel's resource estimate (small assumes about 20 MB), so
 each QEMU test declares its real needs with tags: `cpu:2` (e2e, `-smp 2`) or
@@ -499,7 +499,7 @@ gate is disabled.
 | a power cut's first boot has a verdict (11.2) | `//test/qemu:run_qemu_verdict_test` (fake QEMUs: no marker, the marker only inside another line, a failed check, an oops on the console, a `KERNEL-OOPS:` or `MEM-OOM:` line (the guest prints the kernel log's failures and OOM-killer lines itself before the marker, from `guest/lib.sh`, whose patterns the test checks are `guest/init`'s), an invariant violation, a QEMU that ended on its own: each fails; QEMU must die of our SIGKILL, status 137) |
 | the kill-mode cut keeps what was synced and loses the rest (11.2) | `//test/qemu:fault_power_kill_test_ext4` and its xfs and btrfs variants (the `before` scenario: a file synced before the cut must survive it and a file written after must not) |
 | the ACE checker can fail (11.2) | `fault_ace_a_test`'s `fixtures` kind (a persistence point that was not made, and a name added behind dcfs's back, must each be reported) and `fault_power_test`'s `comparison-detects-*` checks (a name, a mode, a link count) and `snapshot-sees-contents` |
-| the fsstress/fsx test's checks (11.2b: tree and file digests, fsx's A-OK line, fsstress's operation count) | `//test/qemu:stress_checks_test` (the real `guest/stress_lib.sh` over trees differing in one byte, a mode, a name or a symlink target, empty trees, and fsx and fsstress logs that are bad, short or empty; with the tree comparison made to always pass, it fails on the one-byte tree) |
+| the fsstress/fsx test's checks (11.2b: tree digests, fsx's A-OK line and disabled set, fsstress's successes and EIO, the random seed) | `//test/qemu:stress_checks_test` (the real `guest/stress_lib.sh` under the guest's busybox over trees differing in one byte, a mode, a name, a symlink target, an mtime, an xattr or a file type, empty trees, and fsx and fsstress logs that are bad, short, empty, all-failed or EIO; with the success count made to count failures, it fails on the all-failed log) |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
@@ -825,34 +825,54 @@ bazel test //test/qemu:nfs_test
 xfstests' `fsstress` (four or eight processes of random namespace and data
 operations, fixed seeds) and `fsx` (random reads, writes, truncates and mmap
 operations checked against its own model) against dcfs, then compare the tree
-seen through dcfs (warm, from its cache) with the backing file system's own
-(every name, type, mode, link count, owner, size, symlink target, xattr and
-the md5 of every file), restart dcfs and compare again; in the small and
-medium tiers the daemon is the checking build, which aborts on a broken
-invariant, so its survival is a check. `stress_short_test_<fstype>` is
-medium on all three; `stress_long_test_<fstype>` is large; `stress_random_test_<fstype>` (manual: name it on the
-command line) seeds both tools from the kernel's random pool and prints the
-seeds, so a failure can be replayed by putting them in a fixed-seed mode
-(`STRESS_OPS` and `STRESS_FSX_OPS` are the sizes). What is not built (AIO,
-io_uring, btrfs subvolume operations, XFS ioctls) is in
+seen through dcfs with the backing file system's own (`stress_digest` in
+`guest/stress_lib.sh`) three times: right after the run (mostly the kernel's
+FUSE caches, with their one-hour timeouts, answer), after `drop_caches` with
+the same daemon running (dcfs's own cache answers), and after a restart
+(recovery, then cold lookups). In the small and medium tiers the daemon is
+the checking build, which aborts on a broken invariant, so its survival is a
+check. `stress_short_test_<fstype>` is medium on all three;
+`stress_long_test_<fstype>` is large (about 280 s); `stress_random_test_<fstype>`
+is `manual` (name it on the command line; CI's sharded `test.sh` skips it
+too) and seeds both tools from the kernel's random pool and prints the seeds.
+To resize or replay it, give the target `cmdline = "stress_ops=N
+stress_fsx_ops=N stress_seed=S stress_fsx_seed=S"` (any subset). What is not
+built (AIO, io_uring, btrfs subvolume operations, XFS ioctls) is in
 `third_party/xfstests/README.md`.
+
+What the comparison covers: names (sorted), type, mode, link count, owner,
+size, symlink target, device numbers, every xattr, mtime and ctime, and the
+md5 of every regular file. What it leaves out: atime, directory sizes,
+`st_blocks`, inode numbers and generations, and the records of absent names
+(they show only through a listing that lacks the name and through the
+lookups the run made, which fsstress does not check).
 
 Only the short run checks `require_no_reclaim`. The long and random runs
 write more file data than the guest has memory (page cache of 400+ MiB in
-512 MiB, about 1.5 M pages scanned), so reclaim and the FORGETs it sends are
-expected, and they assert nothing reclaim can invalidate: every comparison is
-against the backing file system, none counts held inodes or FORGETs.
+512 MiB, about 1.5 M pages scanned), so page-cache reclaim and the FORGETs it
+sends are expected, and they assert nothing reclaim can invalidate: every
+comparison is against the backing file system, none counts held inodes or
+FORGETs.
 
-What the run does not prove: fsstress does not count failed operations (it
-exits 0 whatever each operation's errno), and on a FUSE mount some fail every
-time: clonerange, deduperange and fiemap (ioctls dcfs does not implement),
-likely dread and dwrite (O_DIRECT), the XFS ioctls (bulkstat, resvsp; set to
-frequency 0), and whichever of copyrange, splice, the fallocate modes
-(collapse, insert, unshare, write_zeroes) and rename flags (whiteout,
-exchange) the kernel or backing file system refuses. The operation summary
-(from `-v`) counts operations started, not succeeded. What the run does prove
-is that whatever the operations did, dcfs and the backing file system agree
-afterwards, and that the daemon survived.
+What the run does not prove. fsstress exits 0 whatever its operations
+returned, so the test prints every operation with its errno (`op errno
+count`, errno 0 succeeded), requires at least 0.2% of the operations to
+succeed as each of creat, mkdir, link, symlink, rename, unlink and write, and
+fails on any EIO; the rest may fail. On a FUSE mount these fail every time or
+often: clonerange, deduperange and fiemap (ioctls dcfs does not implement,
+errno 95 or 25), dread and dwrite (O_DIRECT; the alignment query is an XFS
+ioctl), the XFS ioctls (bulkstat, resvsp; frequency 0), the fallocate modes
+dcfs does not forward (collapse, insert, unshare, write-zeroes), and
+whichever of copyrange, splice and the rename flags the kernel or backing
+file system refuses. fsx turns the same kinds of feature off at its first
+failure; the test lists what it disabled and requires exactly the expected
+set (measured on ext4, xfs and btrfs alike): clone range, dedupe range,
+RWF_DONTCACHE, and the fallocate modes collapse, insert, unshare and
+write-zeroes (atomic writes need O_DIRECT, which fsx only uses with `-Z`). A
+feature that starts working changes the set and fails the test until the
+expectation in `guest/stress.sh` moves. What the run does prove is that
+whatever the operations did, dcfs and the backing file system agree
+afterwards, that nothing returned EIO, and that the daemon survived.
 
 **Step 6.2: pjdfstest shards.** `pjdfstest_test_<fstype>` is a `test_suite`
 over three guests, `pjdfstest_{rename,chown,rest}_test_<fstype>`, each a

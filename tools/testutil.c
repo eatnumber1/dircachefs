@@ -230,6 +230,7 @@
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/sysmacros.h>
 #include <sys/xattr.h>
 #include <time.h>
 #include <unistd.h>
@@ -2089,14 +2090,21 @@ static void dump_tree(const char *path, const char *hexpath, int meta)
 			printf("%s LSTAT-ERR %d\n", hexchild, errno);
 			continue;
 		}
-		type = S_ISDIR(st.st_mode)   ? "dir"
-		       : S_ISREG(st.st_mode) ? "reg"
-		       : S_ISLNK(st.st_mode) ? "lnk"
-					     : "other";
+		type = S_ISDIR(st.st_mode)    ? "dir"
+		       : S_ISREG(st.st_mode)  ? "reg"
+		       : S_ISLNK(st.st_mode)  ? "lnk"
+		       : S_ISCHR(st.st_mode)  ? "chr"
+		       : S_ISBLK(st.st_mode)  ? "blk"
+		       : S_ISFIFO(st.st_mode) ? "fifo"
+		       : S_ISSOCK(st.st_mode) ? "sock"
+					      : "other";
 		printf("%s %s %o %lu %u %u %lld", hexchild, type,
 		       st.st_mode & 07777, (unsigned long) st.st_nlink,
 		       st.st_uid, st.st_gid,
 		       S_ISDIR(st.st_mode) ? 0LL : (long long) st.st_size);
+		if (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode))
+			printf(" rdev=%u:%u", major(st.st_rdev),
+			       minor(st.st_rdev));
 		if (S_ISLNK(st.st_mode)) {
 			ssize_t r = readlink(child, buf, sizeof(buf));
 
