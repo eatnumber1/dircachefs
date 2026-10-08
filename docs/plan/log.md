@@ -1898,3 +1898,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (init's coverage path reboots before the memory sampler). Decision: the gate fails on drops only
   and prints the suggested bump on a rise (8.1b); both to lane-3's queue after the 25.5 docs.
 - russ, 2026-10-08: failing on a coverage rise is not worth it; drops fail, rises are noted, the orchestrator bumps the baseline at push points (process.md).
+- russ, 2026-10-08: 26.14 quiet kernel in the guests (writeback/reclaim/timer spontaneity removed
+  by sysctls, one vCPU for non-stress tests, every kernel event a test needs forced explicitly) plus
+  a two-run coverage diff on one commit as the determinism measurement; QEMU -icount record/replay
+  kept in the back pocket (TCG only).

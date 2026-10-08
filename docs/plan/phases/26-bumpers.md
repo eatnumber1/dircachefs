@@ -205,3 +205,32 @@ testing papers (Petrović & Ivanković):
   its survivors per operator as the next 8.2x list, do not fix them in this
   step), and `changed` mode over a recent range stays under its budget.
 
+## 26.14 Quiet kernel in the guests; coverage determinism (russ, 2026-10-08)
+
+Goal: a test's behaviour and its coverage depend on nothing but the test.
+Under KVM the guest clock is wall time, so the kernel's spontaneous
+activity (writeback, reclaim, FORGET under pressure, timer-driven work)
+is the remaining source of run-to-run variation. Take the spontaneity
+away rather than the clock:
+- `guest/init` sets, before any test runs: `vm.dirty_writeback_centisecs=0`
+  and a large `vm.dirty_expire_centisecs` (writeback only on our `sync`/
+  `fsync`/sync points), `vm.laptop_mode=0`, `vm.vfs_cache_pressure` low
+  enough that dentries and inodes are reclaimed only by `drop_caches`
+  (reclaim is already asserted absent by `require_no_reclaim`),
+  `kernel.randomize_va_space` as it is (dcfs is PIE: say whether ASLR
+  affects anything observable), one vCPU for every non-stress test (the
+  matrix macros gain the knob; stress and cancel tests keep theirs); each
+  setting with a comment saying which kernel event it removes and which
+  explicit trigger replaces it (`drop_caches_quiesced`, `sync`, `fsfreeze`).
+- Measurement: run `bazel coverage --config=presubmit` twice on one
+  commit (CI reruns of the coverage job, or two local runs) and diff the
+  per-file line and branch counts; zero difference is the target; every
+  difference names a test with a kernel-timing dependence to pin to an
+  explicit event (or to document in `docs/coverage.md`). Record the
+  before/after diff in `notes/`.
+- Back pocket (russ): QEMU `-icount` with record/replay gives a fully
+  deterministic guest clock and device inputs but needs TCG (10-30x
+  slower, one vCPU); if ever needed for a replay tier, the tests
+  themselves have speed headroom to make up for it. Not now.
+Owner: dcfs-investigator; after the current dcfs/ branches land.
+
