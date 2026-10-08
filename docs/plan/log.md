@@ -1763,7 +1763,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   or runtime init under the 7.1b compiler-rt) -> lane-6 investigator; asan(0) cancel_test guest OOM
   at 384 MiB and cancel_inventory_test's dcfs dying (no `asan_mem` on the two 20k-entry cancel
   tests) -> lane-6. Next push point after 25.3b and the sanitizer fixes land.
-- Decision (russ, 2026-10-08): no full pre-push gate (plain + asan + ubsan + coverage + mutation
-  locally, 3-4 h at current load, is not worth it). Push points stay as they are: every merged branch
-  green on its tiers, CI catches the sanitizer-only, coverage and large-tier failures. The existing
-  rule stands: a step touching C++ runs its own targets under --config=asan.
+- Decision (russ, 2026-10-08): no full pre-push gate for now (plain + asan + ubsan + coverage +
+  mutation locally, 3-4 h at current load, is not worth it while development is this fast). Push
+  points stay as they are: every merged branch green on its tiers, CI catches the sanitizer-only,
+  coverage and large-tier failures. The existing rule stands: a step touching C++ runs its own
+  targets under --config=asan. **Once dcfs has launched and development slows, russ wants green
+  pushes:** then a push point becomes a sync point and the candidate gets the CI checks locally
+  first (a `tools/prepush.sh` calling the same `.github/ci/*.sh` scripts, result and SHA logged).

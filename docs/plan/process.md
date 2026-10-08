@@ -115,6 +115,13 @@ process (its waves and file ownership table) is in `history.md`.
 - From Phase 6: `--config=fast` while developing, `--config=presubmit`
   before review, everything (CI) before a phase is marked done.
 - From Phase 5, CI must be green on the merged commit.
+- Push points (russ, 2026-10-08): while development is fast, a push point
+  needs every merged branch green on its tiers and nothing more; CI catches
+  the sanitizer-only, coverage and large-tier failures. After launch, when
+  development slows, russ wants green pushes: a push point becomes a sync
+  point, and the candidate commit gets CI's checks locally first (plain
+  full suite, asan, ubsan, the coverage gate, the mutation tool's changed
+  mode) via one script that calls the same `.github/ci/*.sh` scripts.
 
 ## Sanitizer runs do not block steps (russ, 2026-10-06)
 
