@@ -352,11 +352,18 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
 // `mutation` is the create's (from cache::BeginCreate): the dentry is
 // linked only if it Owns(parent); the new row's own state is a fill (see
 // cache::CanFill).
+//
+// `probed` (if given) is set once the probe has found the object, before
+// anything is recorded: a failure with it set is a failure to record an
+// object that exists (DirCacheFS replies EEXIST then, step 11.4), one
+// without it is the probe's own (ENOENT: the name is gone; EIO: the backing
+// filesystem fails).
 absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
                                         const cache::Mutation &mutation,
                                         InodeId parent, int parent_fd,
                                         std::string_view name,
-                                        bool open_for_write = false);
+                                        bool open_for_write = false,
+                                        bool *probed = nullptr);
 
 // mkdirat(2)/mknodat(2)/symlinkat(2) of `name` inside the already-open
 // `parent_fd`, as `caller` (AsCaller): the new object is the caller's, with

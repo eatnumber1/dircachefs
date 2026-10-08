@@ -137,6 +137,12 @@ std::function<void()> &SyncfsHook() {
   return *hook;
 }
 
+// The errno the next name_to_handle_at fails with, once (0: none).
+int &NameToHandleFailure() {
+  static int err = 0;
+  return err;
+}
+
 // While set, every fstatvfs reports the filesystem read-only (ST_RDONLY):
 // a backing filesystem that went read-only by itself after an error.
 bool &StatvfsReadOnly() {
@@ -331,6 +337,10 @@ int __wrap_name_to_handle_at(int dirfd, const char *pathname,
   DCFS_INJECT("name_to_handle_at", -1)
   std::function<void()> hook = std::exchange(dcfs::NameToHandleHook(), {});
   if (hook) hook();
+  if (int err = std::exchange(dcfs::NameToHandleFailure(), 0); err != 0) {
+    errno = err;
+    return -1;
+  }
   return __real_name_to_handle_at(dirfd, pathname, handle, mount_id, flags);
 }
 int __real_statx(int dirfd, const char *path, int flags, unsigned int mask,
@@ -592,6 +602,7 @@ class DirCacheFSTest : public ::testing::Test {
     NameToHandleHook() = {};
     SyncfsHook() = {};
     StatvfsReadOnly() = false;
+    NameToHandleFailure() = 0;
     FakeInodeNumbers().clear();
     StatxFailure() = 0;
     StatxHook() = {};
@@ -821,6 +832,22 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
   // A mkdir of `name` in `parent`, and the new inode (0 on error).
+  // A request body's name: its bytes and a NUL.
+  static std::string NameBody(std::string_view name) {
+    std::string body(name);
+    body.push_back('\0');
+    return body;
+  }
+
+  // A FUSE_MKNOD body for a fifo `name`.
+  static std::string MknodBody(std::string_view name) {
+    struct fuse_mknod_in in = {};
+    in.mode = S_IFIFO | 0644;
+    std::string body;
+    AppendBytes(body, in);
+    return body + NameBody(name);
+  }
+
   std::pair<Reply, InodeId> Mkdir(InodeId parent, std::string_view name) {
     struct fuse_mkdir_in in = {};
     in.mode = 0755;
@@ -2132,13 +2159,75 @@ TEST_F(DirCacheFSTest, CreateThatCannotBeRecordedRepliesEexist) {
               IsOk());
   EXPECT_EQ(Create(kRootInode, "new", O_RDWR).reply.error, -EEXIST);
   EXPECT_EQ(Mkdir(kRootInode, "newdir").first.error, -EEXIST);
+  EXPECT_EQ(Send(FUSE_MKNOD, kRootInode, MknodBody("fifo")).error, -EEXIST);
+  EXPECT_EQ(Send(FUSE_SYMLINK, kRootInode, NameBody("link") + NameBody("t"))
+                .error,
+            -EEXIST);
   ASSERT_THAT(db_.Exec("DROP TRIGGER no_insert"), IsOk());
-  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("new")), IsOk());
-  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("newdir")), IsOk());
-  EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "new"),
-              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
-  EXPECT_NE(Lookup(kRootInode, "new").second.nodeid, 0u);
-  EXPECT_NE(Lookup(kRootInode, "newdir").second.nodeid, 0u);
+  for (const char *name : {"new", "newdir", "fifo", "link"}) {
+    EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path(name), AT_SYMLINK_NOFOLLOW),
+                IsOk())
+        << name;
+    EXPECT_THAT(cache::Lookup(ctx_, kRootInode, name),
+                IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)))
+        << name;
+    EXPECT_NE(Lookup(kRootInode, name).second.nodeid, 0u) << name;
+  }
+}
+
+// A create whose probe fails before it found the object replies the probe's
+// error, not EEXIST, which would not be known true (an EIO from a failing
+// backing filesystem here; ENOENT for a name gone again).
+TEST_F(DirCacheFSTest, CreateWhoseProbeFailsRepliesTheProbesError) {
+  Start();
+  NameToHandleFailure() = EIO;
+  EXPECT_EQ(Send(FUSE_MKNOD, kRootInode, MknodBody("fifo")).error, -EIO);
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("fifo"), AT_SYMLINK_NOFOLLOW),
+              IsOk());
+  EXPECT_NE(Lookup(kRootInode, "fifo").second.nodeid, 0u);
+}
+
+// A writable create whose phase 1 for the writes (BeginWriting) cannot be
+// recorded: the file exists and is recorded, so EEXIST.
+TEST_F(DirCacheFSTest, CreateWhoseWritesCannotBeginRepliesEexist) {
+  Start();
+  // BeginWriting is the only writer of an unknown xattr row here.
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_unknown BEFORE INSERT ON "
+                       "xattrs WHEN NEW.state = 'unknown' "
+                       "BEGIN SELECT RAISE(ABORT, 'cache full'); END"),
+              IsOk());
+  EXPECT_EQ(Create(kRootInode, "w", O_RDWR).reply.error, -EEXIST);
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_unknown"), IsOk());
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("w")), IsOk());
+  EXPECT_NE(Lookup(kRootInode, "w").second.nodeid, 0u);
+}
+
+// A create whose reply cannot refresh the new file's attributes (its last
+// statx fails) is replied as done, from the row's last attributes
+// (EntryAfterPhase2), not failed.
+TEST_F(DirCacheFSTest, CreateWhoseRefreshFailsIsRepliedFromTheRow) {
+  Start();
+  int calls = 0;
+  std::function<void()> count = [&] {
+    ++calls;
+    StatxHook() = count;
+  };
+  StatxHook() = count;
+  ASSERT_EQ(Create(kRootInode, "w1", O_RDWR).reply.error, 0);
+  StatxHook() = {};
+  ASSERT_GT(calls, 0);
+  int seen = 0;
+  std::function<void()> fail_last = [&] {
+    if (++seen == calls) {
+      StatxFailure() = EIO;
+    } else {
+      StatxHook() = fail_last;
+    }
+  };
+  StatxHook() = fail_last;
+  EXPECT_EQ(Create(kRootInode, "w2", O_RDWR).reply.error, 0);
+  EXPECT_EQ(seen, calls);
+  StatxHook() = {};
 }
 
 // The sweep of unnamed rows is best effort: if it fails, startup goes on

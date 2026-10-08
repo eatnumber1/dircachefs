@@ -736,13 +736,20 @@ leave the kernel's own dentries wrong.
 The one exception is a create (create, mknod, mkdir, symlink) whose new
 row cannot be recorded (or, for a create, whose open cannot be set up),
 for instance because the cache database's disk is full: its reply must
-name the object by a row. It is replied as `EEXIST`, which is true now
-(`CreatedButNotCompleted`, step 11.4). Any other error left the kernel
+name the object by a row. If its probe found the object, it is replied as
+`EEXIST`, which is true now (`CreatedButNotCompleted`, step 11.4); if the
+probe itself failed (the name gone again, `ENOENT`, or a failing backing
+filesystem, `EIO`), that error is replied. Any other error left the kernel
 with the negative entry of the `LOOKUP` it made before the create, which
 answered `ENOENT` for the new file for `--entry_timeout_sec`
 (`enospc_cache_test` showed it); on `EEXIST` the kernel drops it
 (`fuse_invalidate_entry`, `fs/fuse/dir.c`, Linux 6.6), so the next lookup
-asks dcfs, which resolves the name (unknown since phase 1). A create whose
+asks dcfs, which resolves the name (unknown since phase 1). A caller that
+retries on `EEXIST` with another name (`mkstemp`) can leave an empty
+object per retry on the backing filesystem while only phase 3 fails (the
+README's limitation); dcfs does not fail later creates in phase 1 for it,
+since a cache disk that cannot record phase 3 rarely lets the next
+phase 1's durable commit through, and that ends the loop with `ENOSPC`. A create whose
 row was recorded but whose attributes cannot be refreshed is replied as
 done, with the row's last attributes and a zero attribute timeout
 (`EntryAfterPhase2`), as a link is.
@@ -887,8 +894,10 @@ point, and never serves state the backing filesystem did not keep.
 cached (the backing filesystem's durable state, or a mutation it reported
 done, whose dirty row stays); every operation that reaches the backing
 filesystem fails with its error (`EIO` after a shutdown): mutations,
-including one already past phase 1 (its names stay unknown), opens of file
-contents, and fills. The clean shutdown's sync point fails, so the
+including one already past phase 1 whose syscall fails (its names stay
+unknown), a create whose syscall succeeded but whose probe of the new
+object fails (it replies the probe's error), opens of file contents, and
+fills. The clean shutdown's sync point fails, so the
 clean-shutdown flag stays 0 and the dirty set survives. A start over the
 crashed filesystem without a remount fails on xfs (the open of `--source`
 fails) and over a filesystem that went read-only by itself (below); after

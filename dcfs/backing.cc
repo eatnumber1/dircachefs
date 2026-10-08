@@ -1570,7 +1570,7 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
                                         const cache::Mutation &mutation,
                                         InodeId parent, int parent_fd,
                                         std::string_view name,
-                                        bool open_for_write) {
+                                        bool open_for_write, bool *probed) {
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   // Phase A: I/O -- probe the object just created, exactly like ProbeChild
   // does for an existing directory entry, minus the mount-boundary check
@@ -1596,6 +1596,7 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
   BackingCall(ctx, "ProbeObject");
   ABSL_ASSIGN_OR_RETURN(
       ChildRecord record, ProbeObject(**child_fd, name, parent_attr.device, stx));
+  if (probed != nullptr) *probed = true;
 
   // Phase B: one transaction, no syscalls.
   NewChild result;

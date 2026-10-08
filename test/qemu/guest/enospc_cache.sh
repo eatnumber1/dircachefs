@@ -13,7 +13,7 @@
 #    after a restart everything served matches the backing filesystem.
 # 2. During a create held in phase 2 (the backing filesystem frozen: phase 1
 #    is durable): phase 3 cannot record the outcome. The create happened, so
-#    it is replied as done or as EEXIST (which makes the kernel drop the
+#    it is replied as EEXIST (which makes the kernel drop the
 #    negative entry of its LOOKUP before the create: any other error left
 #    "no such file" cached for an hour, the bug this step fixed), and from
 #    then on the name is served, or the request fails with ENOSPC: never
@@ -224,13 +224,19 @@ wait "$BG_PID"
 rc=$?
 BG_PID=""
 echo "enospc_cache.sh: phase3: the create said: rc=$rc $(cat /tmp/p3.err)"
-# The create happened; it cannot be recorded, so it is replied as done or
-# as EEXIST (true now), never as another error: on any other error the
-# kernel keeps the negative entry of the LOOKUP before the create.
-if [ "$rc" -eq 0 ] || grep -q "File exists" /tmp/p3.err; then
-	pass phase3-create-done-or-eexist
+# The create happened; it cannot be recorded, so it is replied as EEXIST
+# (true now: the probe found it), never as another error: on any other
+# error the kernel keeps the negative entry of the LOOKUP before the
+# create.
+if [ "$rc" -ne 0 ] && grep -q "File exists" /tmp/p3.err; then
+	pass phase3-create-eexist
 else
-	fail phase3-create-done-or-eexist "the create that happened was replied: $(cat /tmp/p3.err)"
+	fail phase3-create-eexist "the create that happened but could not be recorded was replied: rc=$rc $(cat /tmp/p3.err)"
+fi
+if grep -q "could not complete the create" "$LOG"; then
+	pass phase3-create-logged
+else
+	fail phase3-create-logged "no WARNING that the create could not be completed"
 fi
 if [ -e "$SRC/d2/p3" ]; then
 	pass phase3-on-backing
@@ -274,7 +280,6 @@ fi
 drop_caches
 right_or_nospace phase3-name "$MNT/d2/p3 " ls -d "$MNT/d2/p3"
 right_or_nospace phase3-listing "keep2 p3 " ls "$MNT/d2"
-echo "enospc_cache.sh: phase3: the daemon's log: $(grep -i 'could not' "$LOG" | tail -2)"
 free_cache
 crash_and_restart phase3
 if [ "$(fd_recovered "$LOG")" -ge 1 ]; then

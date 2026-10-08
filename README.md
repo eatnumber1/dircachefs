@@ -788,8 +788,14 @@ recovery protocol, concurrency, and the test strategy.
   is cached already is still served. A create that reached the backing
   filesystem but could not be recorded fails with `EEXIST`: the file
   exists, and the kernel then asks dcfs about the name again instead of
-  remembering it as absent. Free space and everything works again; the
-  entries changed meanwhile are re-read after the next restart.
+  remembering it as absent. A program that creates names until one is
+  new (`mkstemp`, `mkdtemp`) takes `EEXIST` as "try another name", so
+  while the cache cannot record anything but its first write still
+  succeeds, each retry can leave a new empty file or directory behind on
+  the backing filesystem (in practice the next create's first, durable
+  write fails with `ENOSPC` first and ends the loop). Free space and
+  everything works again; the entries changed meanwhile are re-read after
+  the next restart.
 - **Power loss re-reads recent changes.** After a power loss or kernel
   crash, everything cached about entries changed in the last
   `--sync_interval_sec` seconds (or since the last `fsync`) is forgotten

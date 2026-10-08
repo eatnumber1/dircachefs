@@ -622,9 +622,17 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
   FileRequestEnd(frame, err);
   Close(ctx, frame, status, [&](const Req &req) -> std::string {
     if (err == 0) return "";
-    // The errors the model has: a create's EEXIST (or the name gone before
-    // its probe), an unlink's or rename's ENOENT from its syscall, and the
-    // EAGAIN of a readdir, unlink or rename that kept finding changes.
+    // The errors the model has: a create's EEXIST from its syscall (or the
+    // name gone before its probe), an unlink's or rename's ENOENT from its
+    // syscall, and the EAGAIN of a readdir, unlink or rename that kept
+    // finding changes. A create whose syscall succeeded and whose object
+    // could not be recorded replies EEXIST too (CreatedButNotCompleted,
+    // step 11.4), but a failed cache write is not modelled: that ends the
+    // trace.
+    if (IsCreate(req.kind) && err == EEXIST && req.syscall_ok) {
+      return "failed: a create whose object could not be recorded (a "
+             "cache write failure, which the model does not have)";
+    }
     if (IsCreate(req.kind) &&
         (err == EEXIST || (err == ENOENT && req.probe_absent))) {
       return "";

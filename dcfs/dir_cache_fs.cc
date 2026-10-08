@@ -121,10 +121,11 @@ std::pair<size_t, std::string> MaxHeldFds(const DirCacheFS::Options &opts) {
 }
 
 // The reply of a create (create, mknod, mkdir, symlink) whose backing
-// syscall succeeded but which cannot be completed: its new row could not be
-// recorded, or (Create) the open could not be set up, e.g. with the cache
-// database's disk full. The object exists, so the reply is EEXIST, which is
-// true now, whatever `why` was. Invariant: no reply may leave the kernel
+// syscall succeeded and whose probe found the object, but which cannot be
+// completed: its new row could not be recorded, or (Create) the open could
+// not be set up, e.g. with the cache database's disk full. The object
+// exists (the probe saw it), so the reply is EEXIST, which is true now.
+// Invariant: no reply may leave the kernel
 // believing a name absent that the backing filesystem has. Before a create
 // the kernel looked the name up and holds the negative answer for
 // --entry_timeout_sec; on a create's error it keeps it (it would answer
@@ -646,10 +647,21 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // failure to record it is the one phase-3 failure still replied: as
   // EEXIST (CreatedButNotCompleted; the name stays unknown, and the next
   // lookup finds the object).
+  bool probed = false;
   absl::StatusOr<backing::NewChild> child = backing::RecordNewChild(
-      ctx_, mutation, parent, *parent_fd, name, open_for_write);
+      ctx_, mutation, parent, *parent_fd, name, open_for_write, &probed);
   mutation.End();
-  if (!child.ok()) return CreatedButNotCompleted(parent, name, child.status());
+  if (!child.ok()) {
+    // The probe's own failure (ENOENT: the name is gone again; EIO: the
+    // backing filesystem fails) is replied as it is: EEXIST would not be
+    // true.
+    if (!probed) {
+      LOG(WARNING) << "created " << EscapeBytes(name) << " in directory "
+                   << parent << " but could not probe it: " << child.status();
+      return child.status();
+    }
+    return CreatedButNotCompleted(parent, name, child.status());
+  }
   // Creating `name` changed `parent` itself too (mtime/ctime always; nlink
   // as well, if `name` is a new subdirectory -- its own ".." bumps
   // parent's link count), so its cached attributes are now stale. `fd` is

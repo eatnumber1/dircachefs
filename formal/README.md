@@ -228,6 +228,11 @@ on the detail:
   `InvalidateInode` after `ESTALE`, refused boundaries, `ParentOf` of a
   non-root directory, `RENAME_EXCHANGE`/`RENAME_NOREPLACE`, and the
   periodic sync's timing (any request may be a sync point at any time).
+- Failed cache writes are not modelled: every `Commit` succeeds. A create
+  whose syscall succeeded but whose new row cannot be recorded replies
+  `EEXIST` (`CreatedButNotCompleted`, step 11.4), which the model's create
+  never does after a successful syscall; trace validation ends such a
+  trace ("failed").
 - A `syncfs` that succeeds without making anything durable is outside the
   model, whose sync makes the backing filesystem's current state the only
   one a crash may leave. A filesystem that went read-only by itself after
