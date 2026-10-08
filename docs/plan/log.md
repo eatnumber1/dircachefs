@@ -1612,3 +1612,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Also found: clang.cfg is not an input of sandboxed actions (fix in the same round). 11.2b review:
   fix first (random mode's seed derivation aborts; fsstress op successes not counted; failures not
   visible; "warm" comparison is the kernel's cache; digest without mtime/ctime), list sent.
+- 11.2b merged (0beb46e) after one review round (random seed derivation aborted; fsstress
+  successes now counted per op with floors and EIO fails; op/errno table and fsx disabled set
+  printed and pinned; a dcfs-cache comparison after drop_caches; digest with mtime/ctime/type/rdev;
+  README integrity string fixed; cc_library for headers; self-check under busybox; ops and seeds via
+  cmdline; test.sh --list excludes manual: it had listed stress_random). Short 24-35 s, long ext4
+  277 s, fast 185 + 2, presubmit test/qemu 111, names tests pass with the new names-dump. Initramfs
+  +0.99 MB. Lane-3 and lane-4 held until 7.1b merges (7.3/7.6/7.7 follow it) and the load drops.

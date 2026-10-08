@@ -28,8 +28,20 @@ what landed differs:
   partition. Neither drop-writes
   nor a kill loses writes the disk acknowledged without a flush, so
   FLUSH/FUA ordering stays untested (that is what dm-log-writes would add).
-- 11.2b fsstress and fsx: the original 11.2 text, its own step (needs
-  xfstests' sources as an external test-only dependency).
+- 11.2b fsstress and fsx (merged 2026-10-08, 0beb46e): xfstests tag
+  v2026.05.17 as an http_archive, only ltp/fsstress.c and ltp/fsx.c built
+  (static, testonly; AIO, io_uring, libbtrfsutil and the xfsprogs headers
+  disabled or shimmed), run in the guest on ext4/xfs/btrfs in short
+  (medium), long (large) and random (enormous, `manual`) modes. After
+  each tool the tree is compared against the backing three times: through
+  the kernel's cache, after drop_caches with the same daemon (dcfs's
+  cache) and after a restart (type, mode, uid/gid, size, nlink, mtime,
+  ctime, rdev, symlink target, md5; left out: directory sizes, st_blocks,
+  absent records only via listings). fsstress successes are counted per
+  op with floors, any EIO fails, fsx's disabled-feature set is pinned
+  (clone/dedupe range, atomic writes, dontcache, four fallocate modes).
+  `stress_checks_test` is the comparison's self-check under busybox.
+  Found on the way: `.github/ci/test.sh --list` included `manual` tests.
 
 **11.1 Real power-loss testing with dm-log-writes.** The kernel's
 `dm-log-writes` target (kernel config `DM_LOG_WRITES`) records every write,
