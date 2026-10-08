@@ -678,6 +678,76 @@ qemu_cc_test(
 )
 
 qemu_cc_test(
+    name = "remount_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["remount_test.cc"],
+    deps = [
+      ":remount",
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
+# Step 15.2: SessionLoop's FUSE_INIT callback, on forged requests.
+qemu_cc_test(
+    name = "session_loop_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["session_loop_test.cc"],
+    deps = [
+      ":session_loop",
+      ":syscalls",
+      ":syscalls_backing",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+      "@libfuse//:libfuse",
+    ],
+)
+
+# Step 15.2: CaptureBacking's failure paths; the wraps touch no other test.
+qemu_cc_test(
+    name = "backing_capture_fault_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["backing_capture_fault_test.cc"],
+    linkopts = [
+      "-Wl,--wrap=unshare",
+      "-Wl,--wrap=open_tree",
+      "-Wl,--wrap=execv",
+      "-Wl,--wrap=sendmsg",
+    ],
+    deps = [
+      ":backing_capture",
+      ":mount_dcfs",
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
+# Step 15.2: ForkDaemon's parent side; the wrap of setsid fails a detach.
+qemu_cc_test(
+    name = "startup_channel_fault_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["startup_channel_fault_test.cc"],
+    linkopts = ["-Wl,--wrap=setsid"],
+    deps = [
+      ":mount_dcfs",
+      ":startup_channel",
+      "@absl//absl/log:log_entry",
+      "@absl//absl/log:log_sink",
+      "@absl//absl/log:log_sink_registry",
+      "@absl//absl/status",
+      "@googletest//:gtest_main",
+    ],
+)
+
+qemu_cc_test(
     name = "mount_dcfs_test",
     size = "small",
     timeout = "short",

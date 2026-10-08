@@ -9,12 +9,16 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "absl/flags/flag.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+
+ABSL_FLAG(double, test_interval_sec, 5, "stands in for a dcfs flag");
 
 namespace dcfs {
 namespace {
@@ -221,6 +225,24 @@ TEST(SplitHelperOptionsTest, CacheDirIsNotYetSupported) {
                        HasSubstr("dcfs.cache_dir")));
 }
 
+// The underlying mount is made by mount(8) from the native options; a type
+// of none makes none, and a remount cannot change it: say so rather than
+// drop `ro` and mount read-write.
+TEST(SplitHelperOptionsTest, NoneRefusesNativeOptionsNamingThem) {
+  EXPECT_THAT(SplitHelperOptions(Strings{"ro", "noatime", "dcfs.fstype=none"}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       AllOf(HasSubstr("ro"), HasSubstr("noatime"),
+                             HasSubstr("dcfs.fstype=none"))));
+  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.fstype=none", "dcfs.ro"}),
+              IsOkAndHolds(Field(&HelperOptions::read_only, true)));
+}
+
+TEST(SplitHelperOptionsTest, RemountRefusesNativeRoPointingAtDcfsRo) {
+  EXPECT_THAT(SplitHelperOptions(Strings{"remount", "ro"}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("dcfs.ro")));
+}
+
 TEST(SplitHelperOptionsTest, RemountIsRecognizedAndNotPassedOn) {
   EXPECT_THAT(SplitHelperOptions(Strings{"remount", "dcfs.ro", "noatime"}),
               IsOkAndHolds(AllOf(
@@ -231,10 +253,18 @@ TEST(SplitHelperOptionsTest, RemountIsRecognizedAndNotPassedOn) {
 
 // --- exit statuses and the startup report ----------------------------------
 
-TEST(ExitStatusTest, DcfsFailuresExitOne) {
+// mount(8) takes a helper's status verbatim and 1 means "incorrect
+// invocation or permissions": 1 for usage and non-root, 32 for a failed start.
+TEST(ExitStatusTest, UsageAndPermissionExitOne) {
   EXPECT_EQ(ExitStatusFor(absl::InvalidArgumentError("x")), 1);
-  EXPECT_EQ(ExitStatusFor(absl::FailedPreconditionError("x")), 1);
-  EXPECT_EQ(ExitStatusFor(absl::InternalError("x")), 1);
+  EXPECT_EQ(ExitStatusFor(absl::PermissionDeniedError("x")), 1);
+  EXPECT_EQ(ExitStatusFor(absl::UnimplementedError("x")), 1);
+}
+
+TEST(ExitStatusTest, AFailedStartExits32) {
+  EXPECT_EQ(ExitStatusFor(absl::FailedPreconditionError("x")), 32);
+  EXPECT_EQ(ExitStatusFor(absl::InternalError("x")), 32);
+  EXPECT_EQ(ExitStatusFor(absl::NotFoundError("x")), 32);
 }
 
 TEST(ExitStatusTest, NativeMountFailureKeepsItsOwnStatus) {
@@ -285,16 +315,20 @@ constexpr char kMountinfo[] =
     "41 26 0:36 / /plain rw,nosuid,nodev - fuse.sshfs h:/x rw\n"
     "42 26 0:37 / /with\\040space rw - fuse.dcfs UUID=aaaa rw\n";
 
-TEST(IsDcfsMountTest, MatchesOnlyFuseDcfsAtThatMountpoint) {
-  EXPECT_TRUE(IsDcfsMount(kMountinfo, "/data"));
-  EXPECT_FALSE(IsDcfsMount(kMountinfo, "/plain"));
-  EXPECT_FALSE(IsDcfsMount(kMountinfo, "/"));
-  EXPECT_FALSE(IsDcfsMount(kMountinfo, "/nothing"));
-  EXPECT_FALSE(IsDcfsMount(kMountinfo, "/dat"));
+bool IsDcfsMount(std::string_view mountpoint) {
+  return RemountFlags(kMountinfo, mountpoint, false).has_value();
 }
 
-TEST(IsDcfsMountTest, DecodesEscapedMountpoints) {
-  EXPECT_TRUE(IsDcfsMount(kMountinfo, "/with space"));
+TEST(RemountFlagsTest, OnlyAFuseDcfsMountAtThatMountpointHasFlags) {
+  EXPECT_TRUE(IsDcfsMount("/data"));
+  EXPECT_FALSE(IsDcfsMount("/plain"));
+  EXPECT_FALSE(IsDcfsMount("/"));
+  EXPECT_FALSE(IsDcfsMount("/nothing"));
+  EXPECT_FALSE(IsDcfsMount("/dat"));
+}
+
+TEST(RemountFlagsTest, DecodesEscapedMountpoints) {
+  EXPECT_TRUE(IsDcfsMount("/with space"));
 }
 
 TEST(RemountFlagsTest, KeepsThePerMountFlagsAndTogglesReadOnly) {
@@ -312,6 +346,32 @@ TEST(RemountFlagsTest, KeepsThePerMountFlagsAndTogglesReadOnly) {
 TEST(RemountFlagsTest, NotADcfsMountHasNoFlags) {
   EXPECT_EQ(RemountFlags(kMountinfo, "/plain", true), std::nullopt);
   EXPECT_EQ(RemountFlags(kMountinfo, "/nothing", true), std::nullopt);
+}
+
+TEST(MountHelperNameTest, BothNamesMountHasIt) {
+  EXPECT_TRUE(IsMountHelperName("mount.dcfs"));
+  EXPECT_TRUE(IsMountHelperName("mount.fuse.dcfs"));
+  EXPECT_FALSE(IsMountHelperName("dcfs"));
+  EXPECT_FALSE(IsMountHelperName("fsck.dcfs"));
+  EXPECT_FALSE(IsMountHelperName(""));
+}
+
+// The flag options are Abseil flags of the binary (a stand-in is defined
+// here: the real ones are main.cc's).
+TEST(ApplyFlagOptionTest, SetsAKnownFlagAndRefusesABadValue) {
+  EXPECT_THAT(ApplyFlagOption("test_interval_sec", "7"),
+              absl_testing::IsOk());
+  EXPECT_EQ(absl::GetFlag(FLAGS_test_interval_sec), 7);
+  EXPECT_THAT(ApplyFlagOption("test_interval_sec", "soon"),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("dcfs.test_interval_sec=soon")));
+  EXPECT_EQ(absl::GetFlag(FLAGS_test_interval_sec), 7);
+}
+
+TEST(ApplyFlagOptionTest, AnUnknownFlagIsAnInternalError) {
+  EXPECT_THAT(ApplyFlagOption("no_such_flag", "1"),
+              StatusIs(absl::StatusCode::kInternal,
+                       HasSubstr("no_such_flag")));
 }
 
 TEST(ParseHelperArgsTest, SubtypeFlagTakesAnArgumentAndIsIgnored) {

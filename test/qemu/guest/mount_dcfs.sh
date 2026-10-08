@@ -125,6 +125,11 @@ only_one_daemon() {
 
 # Nothing of dcfs left: no mount at $1, no daemon.
 nothing_left() {
+	nl_i=0
+	while [ "$nl_i" -lt 50 ] && [ -n "$(daemons)" ]; do
+		sleep 0.1
+		nl_i=$((nl_i + 1))
+	done
 	[ "$(mount_count "$1")" -eq 0 ] && [ -z "$(daemons)" ]
 }
 
@@ -149,7 +154,7 @@ sleep 0.5 # the socket /dev/log appears
 testutil runas 1000 1000 - -- "$MOUNT_DCFS" \
 	-o "dcfs.fstype=none,dcfs.cache_db=$CACHE/nonroot.db" "$SRC" "$MNT" >"$OUT" 2>&1
 rc=$?
-if [ "$rc" -ne 0 ] && [ "$rc" -ne 127 ] && grep -q 'root' "$OUT" && grep -q 'CAP_SYS_ADMIN' "$OUT" &&
+if [ "$rc" -eq 1 ] && grep -q 'root' "$OUT" && grep -q 'CAP_SYS_ADMIN' "$OUT" &&
 	nothing_left "$MNT"; then
 	pass non-root-refused
 else
@@ -195,7 +200,7 @@ else
 fi
 
 # The same with dcfs.fstype absent: mount(8) finds the type.
-wrapper -o "dcfs.cache_db=$CACHE/auto.db" "$DEV" "$MNT"
+wrapper "$DEV" "$MNT" -n -o "dcfs.cache_db=$CACHE/auto.db"
 only_one_daemon
 if [ "$WRC" -eq 0 ] && [ "$(cat "$MNT/file_1.txt" 2>&1)" = "content 1" ]; then
 	pass capture-autodetect
@@ -291,7 +296,7 @@ fi
 
 # A dcfs. option dcfs does not know: refused, named, nothing mounted.
 wrapper -o "dcfs.bogus,dcfs.fstype=ext4,dcfs.cache_db=$CACHE/bogus.db" "$DEV" "$MNT"
-if refused && grep -q 'dcfs.bogus' "$OUT" && nothing_left "$MNT"; then
+if [ "$WRC" -eq 1 ] && grep -q 'dcfs.bogus' "$OUT" && nothing_left "$MNT"; then
 	pass option-unknown-dcfs-refused
 else
 	fail option-unknown-dcfs-refused "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
@@ -299,14 +304,19 @@ fi
 
 # A native mount that fails: its error text and non-zero status, nothing
 # mounted (a wrong type; a missing device).
+mkdir -p /tmp/native
+mount -t nosuchfs "$DEV" /tmp/native 2>/dev/null
+NATIVE_RC=$?
 wrapper -o "dcfs.fstype=nosuchfs,dcfs.cache_db=$CACHE/wrongtype.db" "$DEV" "$MNT"
-if refused && grep -qi 'no such device' "$OUT" && nothing_left "$MNT"; then
+if refused && [ "$WRC" -eq "$NATIVE_RC" ] && grep -qi 'no such device' "$OUT" && nothing_left "$MNT"; then
 	pass native-failure-wrong-type
 else
 	fail native-failure-wrong-type "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
 fi
+mount -t ext4 /dev/nonexistent /tmp/native 2>/dev/null
+NATIVE_RC=$?
 wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/nodev.db" /dev/nonexistent "$MNT"
-if refused && grep -qi 'no such file' "$OUT" && nothing_left "$MNT"; then
+if refused && [ "$WRC" -eq "$NATIVE_RC" ] && grep -qi 'no such file' "$OUT" && nothing_left "$MNT"; then
 	pass native-failure-missing-device
 else
 	fail native-failure-missing-device "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
@@ -386,7 +396,7 @@ umount "$SRC" 2>/dev/null
 
 # --- daemonization -------------------------------------------------------------
 
-wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/daemon.db" "$DEV" "$MNT"
+wrapper -o "dcfs.fstype=ext4,dcfs.stderrthreshold=0,dcfs.cache_db=$CACHE/daemon.db" "$DEV" "$MNT"
 only_one_daemon
 if [ -n "$DPID" ]; then
 	fds=$(ls -l "/proc/$DPID/fd/0" "/proc/$DPID/fd/1" "/proc/$DPID/fd/2" 2>&1 | awk '{ print $NF }' | tr '\n' ' ')
@@ -399,12 +409,26 @@ if [ -n "$DPID" ]; then
 	sid=$(awk '{ print $6 }' "/proc/$DPID/stat")
 	[ "$sid" = "$DPID" ] && pass daemon-leads-its-session || fail daemon-leads-its-session "session $sid, pid $DPID"
 	# Its log went to syslog, none of it to the (closed) stderr.
-	if logread | grep -q 'starting'; then
+	if logread | grep -q "dcfs\[$DPID\].*starting" && [ ! -s "$OUT" ]; then
 		pass daemon-logs-to-syslog
 	else
-		fail daemon-logs-to-syslog "no start line in: $(logread | tail -n 5)"
+		fail daemon-logs-to-syslog "no start line of pid $DPID in syslog, or output: $(cat "$OUT"); $(logread | tail -n 5)"
 	fi
 	unmount_check daemon-umount "$MNT"
+	# At the default threshold (WARNING) the INFO narrative stays out of
+	# syslog: the one knob, dcfs.stderrthreshold, governs it.
+	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/quiet.db" "$DEV" "$MNT"
+	only_one_daemon
+	if [ -n "$DPID" ]; then
+		if logread | grep -q "dcfs\[$DPID\]"; then
+			fail daemon-syslog-follows-threshold "INFO lines of pid $DPID reached syslog: $(logread | grep "dcfs\[$DPID\]")"
+		else
+			pass daemon-syslog-follows-threshold
+		fi
+		unmount_check daemon-quiet-umount "$MNT"
+	else
+		fail daemon-syslog-follows-threshold "no daemon: rc=$WRC out=$(cat "$OUT")"
+	fi
 else
 	fail daemon-stdio-is-dev-null "no daemon: rc=$WRC out=$(cat "$OUT")"
 fi
@@ -420,7 +444,7 @@ while [ "$i" -lt 50 ] && ! grep -q READY /tmp/lock.out; do
 	i=$((i + 1))
 done
 wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/locked.db" "$DEV" "$MNT"
-if refused && [ -s "$OUT" ] && nothing_left "$MNT"; then
+if [ "$WRC" -eq 32 ] && grep -qi 'locked' "$OUT" && nothing_left "$MNT"; then
 	pass daemon-late-failure-reported
 else
 	fail daemon-late-failure-reported "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
@@ -444,6 +468,11 @@ if [ "$(mount_count "$MNT")" -eq 1 ] && kill -0 "$FG" 2>/dev/null; then
 		pass foreground-logs-to-stderr
 	else
 		fail foreground-logs-to-stderr "stderr: $(cat "$OUT")"
+	fi
+	if logread | grep -q "dcfs\[$FG\]"; then
+		fail foreground-no-syslog "a foreground dcfs logged to syslog: $(logread | grep "dcfs\[$FG\]")"
+	else
+		pass foreground-no-syslog
 	fi
 	kill -TERM "$FG"
 	wait "$FG"
@@ -545,6 +574,73 @@ else
 	fail none-missing-source-refused "rc=$WRC out=$(cat "$OUT")"
 fi
 umount "$SRC" 2>/dev/null
+
+# --- relative paths: the daemon's chdir("/") must not change their meaning ---
+
+mount "$DEV" "$SRC"
+mkdir -p /tmp/rel_mnt
+(cd /tmp && "$MOUNT_DCFS" -o "dcfs.fstype=none,dcfs.cache_db=rel.db" ../src rel_mnt) >"$OUT" 2>&1
+WRC=$?
+only_one_daemon
+if [ "$WRC" -eq 0 ] && [ "$(cat /tmp/rel_mnt/file_0.txt 2>&1)" = "content 0" ] && [ -f /tmp/rel.db ]; then
+	pass relative-paths-in-daemon-mode
+else
+	fail relative-paths-in-daemon-mode "rc=$WRC out=$(cat "$OUT") db=$(ls /tmp/rel.db /rel.db 2>&1)"
+fi
+[ -n "$DPID" ] && unmount_check relative-paths-umount /tmp/rel_mnt
+umount "$SRC" 2>/dev/null
+
+# --- native options need a native mount (decision 6) ----------------------------
+
+mount "$DEV" "$SRC"
+wrapper -o "ro,dcfs.fstype=none,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
+if [ "$WRC" -eq 1 ] && grep -q 'ro' "$OUT" && grep -q 'dcfs.fstype=none' "$OUT" && nothing_left "$MNT"; then
+	pass none-refuses-native-options
+else
+	fail none-refuses-native-options "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
+fi
+# A remount cannot change the underlying mount either.
+wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/rm2.db" "$SRC" "$MNT"
+only_one_daemon
+wrapper -o remount,ro "$SRC" "$MNT"
+if [ "$WRC" -eq 1 ] && grep -q 'dcfs.ro' "$OUT" && touch "$MNT/after_remount_ro" 2>/dev/null; then
+	pass remount-refuses-native-ro
+else
+	fail remount-refuses-native-ro "rc=$WRC out=$(cat "$OUT")"
+fi
+[ -n "$DPID" ] && unmount_check remount-native-umount "$MNT"
+
+# ro with the bind form: the clone is read-only too.
+wrapper -o "ro,dcfs.fstype=bind,dcfs.cache_db=$CACHE/robind.db" "$SRC" "$MNT"
+only_one_daemon
+if [ "$WRC" -eq 0 ]; then
+	touch "$MNT/bind_ro" 2>"$OUT"
+	if grep -q 'Read-only file system' "$OUT"; then
+		pass bind-ro-erofs
+	else
+		fail bind-ro-erofs "touch said: $(cat "$OUT")"
+	fi
+	[ -n "$DPID" ] && unmount_check bind-ro-umount "$MNT"
+else
+	fail bind-ro-erofs "rc=$WRC out=$(cat "$OUT")"
+fi
+umount "$SRC" 2>/dev/null
+
+# --- the helper's other names and its usage ------------------------------------
+
+# libmount looks for mount.<type> with the type of the mountinfo line
+# (fuse.dcfs) on a remount.
+if [ -x /sbin/mount.fuse.dcfs ] && /sbin/mount.fuse.dcfs -V 2>&1 | grep -q '^mount.dcfs (dcfs '; then
+	pass mount-fuse-dcfs-name
+else
+	fail mount-fuse-dcfs-name "$(/sbin/mount.fuse.dcfs -V 2>&1)"
+fi
+"$MOUNT_DCFS" -x >"$OUT" 2>&1
+if [ "$?" -eq 1 ] && grep -q 'usage: mount.dcfs' "$OUT"; then
+	pass usage-exits-one
+else
+	fail usage-exits-one "$(cat "$OUT")"
+fi
 
 require_no_reclaim no-reclaim
 exit "$FAILED"

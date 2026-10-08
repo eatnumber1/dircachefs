@@ -637,6 +637,29 @@ else
 		fail ro-no-remount-refused "dcfs did not start, for another reason"
 	fi
 fi
+# The same refusal through the capture forms (step 15.2): the clone is not in
+# dcfs's own mountinfo, so the check runs on the staging mount in the capture
+# helper's namespace, where it is. A bind of the forced read-only mount, and a
+# native mount of its device (the same superblock).
+if [ "$FSTYPE" != xfs ] && [ "$forced" = yes ]; then
+	for form in bind native; do
+		if [ "$form" = bind ]; then
+			cap_src=$SRC
+			cap_type=bind
+		else
+			cap_src=$(fault_dev "$FD_BACK")
+			cap_type=$FSTYPE
+		fi
+		cap_out=$(timeout 60 /sbin/mount.dcfs -o "dcfs.fstype=$cap_type,dcfs.cache_db=$DB" "$cap_src" "$MNT" 2>&1)
+		cap_rc=$?
+		if [ "$cap_rc" -ne 0 ] && printf '%s' "$cap_out" | grep -q 'superblock is read-only under a read-write mount'; then
+			pass "ro-capture-$form-refused"
+		else
+			fail "ro-capture-$form-refused" "rc=$cap_rc out=$cap_out"
+			umount "$MNT" 2>/dev/null || true
+		fi
+	done
+fi
 remount_backing ro
 if start; then pass ro-restart; else
 	fail ro-restart "daemon did not mount within 10s"

@@ -48,6 +48,7 @@
 //dcfs:mount_fds_test_bin
 //dcfs:mounts_below_test_bin
 //dcfs:sqlite_test_bin
+//dcfs:session_loop_test_bin
 //dcfs:startup_channel_test_bin
 //dcfs:syscalls_process_test_bin
 //dcfs:syscalls_test_bin

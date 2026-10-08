@@ -15,5 +15,21 @@ TEST(SyslogPriorityTest, EachSeverityHasItsOwnPriority) {
   EXPECT_EQ(SyslogPriority(absl::LogSeverity::kFatal), LOG_CRIT);
 }
 
+// The one knob (dcfs.stderrthreshold) decides what reaches syslog.
+TEST(SyslogThresholdTest, OnlyMessagesAtOrAboveTheThresholdAreSent) {
+  EXPECT_FALSE(SyslogSink::Wants(absl::LogSeverityAtLeast::kWarning,
+                                 absl::LogSeverity::kInfo));
+  EXPECT_TRUE(SyslogSink::Wants(absl::LogSeverityAtLeast::kWarning,
+                                absl::LogSeverity::kWarning));
+  EXPECT_TRUE(SyslogSink::Wants(absl::LogSeverityAtLeast::kWarning,
+                                absl::LogSeverity::kError));
+  EXPECT_TRUE(SyslogSink::Wants(absl::LogSeverityAtLeast::kInfo,
+                                absl::LogSeverity::kInfo));
+  EXPECT_FALSE(SyslogSink::Wants(absl::LogSeverityAtLeast::kError,
+                                 absl::LogSeverity::kWarning));
+  EXPECT_FALSE(SyslogSink::Wants(absl::LogSeverityAtLeast::kInfinity,
+                                 absl::LogSeverity::kFatal));
+}
+
 }  // namespace
 }  // namespace dcfs
