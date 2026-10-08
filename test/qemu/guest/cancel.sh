@@ -102,7 +102,7 @@ mount "$slow_dev" "$SRC" || {
 	fail mount-slow "could not mount $slow_dev"
 	exit 1
 }
-if start_daemon "$LOG" --stderrthreshold=0; then
+if start_daemon "$LOG" --stderrthreshold=0 --v=2; then
 	pass mount
 else
 	fail mount "dcfs did not mount"
@@ -122,7 +122,9 @@ else
 	fail ls-interrupted "ls finished the listing within the 1 s timeout (rc 0)"
 fi
 within ls-sigint $((t1 - t0 - 1000))
-if grep -q "interrupted before" "$LOG"; then
+# An interrupted request is no error of dcfs's, so it is not logged at any
+# default level: --v=2 shows the request with its reply.
+if grep -q " -> .*Interrupted before" "$LOG"; then
 	pass checkpoint-logged
 else
 	fail checkpoint-logged "dcfs logged no interrupted request"
