@@ -1827,3 +1827,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   is still caught only by the harness tests (8.2); a per-file attribute trace would be 12.11b.
   Counts: small 936k -> 1.48M (timeouts to `long` requested), recovery 40k, liveness 147k,
   interrupt 281k; large/nolock unchanged. Short Opus review requested.
+- 11.5b merged (ff5e35b): refusal and EROFS messages cover a remount,ro of another mount of the
+  superblock (README/design.md), the "ro" check requires the guard's line and forced=yes, the
+  read-only-at-start exemption ends at the first writable fstatvfs, `probed` is set right after the
+  statx that saw the object (CreateWhoseObjectWasSeenRepliesEexist -5 -> -17 first), emergency_ro
+  dated 6.15. 11.3b reported (lane-2, 2263c86, under review): ESTALE from open_by_handle_at is
+  checked against one cached name through the parent's fd, comparing HANDLES (25.5's replacement
+  test caught an inode-number version); same handle or an unreadable parent -> EIO with the row
+  kept unknown; a readable parent's ENOENT or a different handle -> ESTALE as before; 18 xfs SKIP
+  cells became FAIL-then-PASS; the model cannot express a handle open, so a formal/README limitation
+  names 12.7b's reply_unknown_as_negative as the class.
