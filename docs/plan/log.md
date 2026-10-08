@@ -1916,3 +1916,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   inside Setattr's phase 3, which is the reason no checkpoint precedes the extra calls. 11.4c merged
   (f2faccc): asan_mem 832 for enospc_backing (btrfs peaks 486 MiB), 576 for enospc_cache and
   fault_shutdown. Lane-2 free: 26.14 quiet kernel to a new investigator.
+- russ, 2026-10-08: 6.5 test performance scrub (dedicated investigator, measure first, no weakening, before/after per change); first free lane.

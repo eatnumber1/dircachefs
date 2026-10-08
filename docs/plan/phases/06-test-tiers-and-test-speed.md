@@ -95,3 +95,32 @@ them), coverage ~40 and reproducible ~12 in parallel.
   `bazel query`, index modulo N) computed by `.github/ci/test.sh
   --shard=i/n`, unit-tested; explicit targets so the test-result cache
   still applies; expected wall for a push ~30-40 min instead of ~2.5 h.
+
+## 6.5 Test performance scrub (russ, 2026-10-08)
+
+A dedicated investigator profiles the whole suite and takes the
+low-hanging fruit, under the Phase 6 rule (same assertions, same
+coverage, one fresh guest per test; before/after timings for every
+change, each change its own commit):
+- Measure first: per-test wall and guest time for every tier from
+  `test.xml` and the serial logs (a quiet run of each tier in the lane,
+  plus CI run 37841442160's testlogs artifacts for the runner's numbers),
+  split into boot, setup, workload and checks; the ten biggest sinks per
+  tier and what dominates each.
+- Known candidates: guest scripts that create or stat thousands of files
+  from the shell (a fork plus a FUSE request each: `testutil mkfiles`
+  style batching, as 6.2 did for readdir_boundary); dcfs's own create
+  cost (~4.5 ms of daemon CPU each: the fsync per create, which 23.10
+  removes; measure, do not pre-empt); the ACE sequences (182 in ~10 min:
+  per-sequence setup that could be shared without sharing state); the
+  trace shards (~5 min each: how much is TLC startup per trace); TLC
+  configurations (symmetry, view, worker count); initramfs size and boot
+  time after 11.2b's two static binaries; `sleep`s and polling waits left
+  in guest scripts (`grep -n sleep test/qemu/guest`); guest memory sizes
+  that make boot slower than needed; pjdfstest shard balance; the strace
+  tests' per-test dcfs restarts.
+- Report: a table of before/after per changed test and per tier, and a
+  list of what was left (with the reason: would weaken a test, or needs
+  a protocol change).
+Owner: dcfs-investigator, in the first lane that frees.
+
