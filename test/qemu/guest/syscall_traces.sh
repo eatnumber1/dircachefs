@@ -305,8 +305,9 @@ EOT
 strace_budget budget-write write
 
 # FSYNC of a written file: the backing fsync, then the sync point that
-# follows it (syncfs on the mount fd), "Sync points run after the kernel's
-# FSYNC", between the open's and the release's reads.
+# follows it (syncfs on the mount fd, then fstatvfs: the source must still
+# be writable, step 11.5's read-only guard), "Sync points run after the
+# kernel's FSYNC", between the open's and the release's reads.
 strace_op fsync dd if=/dev/zero of="$MNT/wr" bs=4096 count=1 conv=notrunc,fsync
 strace_golden fsync fsync <<'EOT'
 open_by_handle_at(backing)
@@ -319,6 +320,7 @@ getxattr(procfd) !ENODATA
 statx(backing)
 fsync(backing)
 syncfs(backing)
+fstatfs(backing)
 statx(backing)
 statx(backing)
 getxattr(procfd) !ENODATA

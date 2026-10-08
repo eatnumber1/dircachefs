@@ -67,7 +67,7 @@ write sync 1
 write sql_stmts 66
 write sql_txns 6
 
-fsync backing 11
+fsync backing 12
 fsync procfd 3
 fsync sync 2
 fsync sql_stmts 76
