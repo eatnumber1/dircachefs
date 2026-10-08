@@ -1,4 +1,4 @@
-"""The pinned LLVM distribution with its own sysroot and runtime (step 7.1b).
+"""The pinned LLVM distribution with its own sysroot and runtime (7.1b).
 
     llvm_distribution(
         name = "dcfs_llvm",
@@ -7,7 +7,12 @@
         strip_prefix = "LLVM-22.1.8-Linux-X64",
         llvm_major_version = "22",
         sysroot_debs = {"https://snapshot.debian.org/...deb": "<sha256>"},
-        runtime_debs = {"https://snapshot.debian.org/...deb": ["<sha256>", "usr/lib/x86_64-linux-gnu"]},
+        runtime_debs = {
+            "https://snapshot.debian.org/...deb": [
+                "<sha256>",
+                "usr/lib/x86_64-linux-gnu",
+            ],
+        },
         patchelf = "@alpine_patchelf//:resolved.json",
     )
 
@@ -17,20 +22,25 @@ shell Bazel itself uses:
 
 - LLVM's own release tarball (clang, lld, libc++, compiler-rt, the tools),
   laid out as toolchains_llvm's `BUILD.llvm_repo` expects, so MODULE.bazel
-  hands the repository to toolchains_llvm as its `toolchain_root`. extract.py
-  leaves out the static libraries of LLVM, MLIR and flang, lldb and the tools
-  nothing here runs (9.7 of the 11.6 GB).
+  hands the repository to toolchains_llvm as its `toolchain_root`.
+  extract.py leaves out the static libraries of LLVM, MLIR and flang, lldb
+  and the tools nothing here runs (9.7 of the 11.6 GB).
 - `sysroot/`: the target's glibc headers and static libraries and the Linux
   UAPI headers, merged from pinned Debian packages (a package of its own with
   a `sysroot` filegroup, which is the shape toolchains_llvm's `sysroot` takes).
-  `bin/clang.cfg` makes it the default sysroot of every clang invocation, so
-  a configure script's probe (liburing's) sees the same headers as the build.
+  `bin/clang.cfg` makes it the default sysroot of every clang invocation, and
+  names the linker and the runtime libraries, so a configure script's probe
+  (liburing's) sees the same headers and links the same way as the build.
 - `lib/`: the shared libraries the release's binaries link besides libc
   (libstdc++, libgcc_s, zlib, libxml2 and what libxml2 loads: ICU and liblzma),
   from pinned Debian packages. The binaries' RUNPATH is `$ORIGIN/../lib`, so
   they find these before the host's. A RUNPATH applies to direct
   dependencies only, so the libraries that load others get `$ORIGIN` as their
   own RUNPATH (patchelf, from Alpine, run through musl's loader).
+
+The rule re-runs when any of its inputs changes: its attributes, this file,
+extract.py, the hermetic Python, the patchelf repository and the template of
+toolchains_llvm (README.md, "What triggers a refetch").
 
 See README.md for the pins and how to move them.
 """
@@ -39,42 +49,62 @@ _BUILD_TEMPLATE = Label("@toolchains_llvm//toolchain:BUILD.llvm_repo.tpl")
 _PYTHON = Label("@python_3_12_x86_64-unknown-linux-gnu//:bin/python3")
 _EXTRACT = Label("//third_party/llvm:extract.py")
 
-def _deb_data_member(rctx, deb, work):
-    rctx.extract(deb, output = work)
-    for member in rctx.path(work).readdir():
-        if member.basename.startswith("data.tar."):
-            return member
-    fail("%s: no data.tar.* member" % deb)
+# Flags for every clang the repository provides (clang.cfg; clang++.cfg adds
+# the C++ library). The link-only ones sit between the markers that stop
+# clang warning about an unused argument in a compile that does not link.
+_CONFIG = """\
+--sysroot=<CFGDIR>/../sysroot
+--start-no-unused-arguments
+-fuse-ld=lld
+--rtlib=compiler-rt
+--unwindlib=libunwind
+%s--end-no-unused-arguments
+"""
+
+def _python(rctx, args, what):
+    result = rctx.execute(
+        [rctx.path(_PYTHON), "-I", rctx.path(_EXTRACT)] + args,
+        timeout = 3600,
+    )
+    if result.return_code != 0:
+        fail("%s: %s" % (what, result.stderr.strip()))
 
 def _unpack_deb(rctx, url, sha256, index, output, strip_prefix = ""):
     deb = "debs/%d.deb" % index
     work = "debs/%d" % index
     rctx.download(url, deb, sha256 = sha256)
-    data = _deb_data_member(rctx, deb, work)
-    rctx.extract(data, output = output, strip_prefix = strip_prefix)
+    rctx.extract(deb, output = work)  # the ar archive: control and data
+    data = None
+    for member in rctx.path(work).readdir():
+        if member.basename.startswith("data.tar."):
+            data = member
+    if data == None:
+        fail("%s: no data.tar.* member" % url)
+    args = ["deb", data, output]
+    if strip_prefix:
+        args += ["--strip-prefix", strip_prefix]
+    _python(rctx, args, "unpacking %s" % url)
     rctx.delete(work)
     rctx.delete(deb)
 
 def _llvm_distribution_impl(rctx):
-    # extract.py leaves out what no build step uses (9.7 of the 11.6 GB).
-    rctx.download(rctx.attr.url, "llvm.tar.xz", sha256 = rctx.attr.sha256)
-    result = rctx.execute(
-        [
-            rctx.path(_PYTHON),
-            "-I",
-            rctx.path(_EXTRACT),
-            "llvm.tar.xz",
-            rctx.attr.strip_prefix,
-            ".",
-        ],
-        timeout = 3600,
-    )
-    if result.return_code != 0:
-        fail("extracting the LLVM release: " + result.stderr)
-    rctx.delete("llvm.tar.xz")
+    # A path of a label is not watched by itself: without these, editing the
+    # script (its skip list) or changing the interpreter or the patchelf
+    # package would not refetch the repository.
+    rctx.watch(_EXTRACT)
+    rctx.watch(_PYTHON)
+    rctx.watch(rctx.attr.patchelf)
+
     rctx.file("BUILD.bazel", rctx.read(_BUILD_TEMPLATE).format(
         LLVM_VERSION = rctx.attr.llvm_major_version,
     ))
+    rctx.download(rctx.attr.url, "llvm.tar.xz", sha256 = rctx.attr.sha256)
+    _python(
+        rctx,
+        ["llvm", "llvm.tar.xz", rctx.attr.strip_prefix, "."],
+        "extracting the LLVM release",
+    )
+    rctx.delete("llvm.tar.xz")
 
     # The target sysroot, merged in package order (a later package's file
     # replaces an earlier one's).
@@ -90,9 +120,9 @@ filegroup(
     for url, sha256 in rctx.attr.sysroot_debs.items():
         _unpack_deb(rctx, url, sha256, index, "sysroot")
         index += 1
-    rctx.file("bin/clang.cfg", "--sysroot=<CFGDIR>/../sysroot\n")
-    rctx.file("bin/clang++.cfg", "--sysroot=<CFGDIR>/../sysroot\n")
-    rctx.file("bin/clang-cpp.cfg", "--sysroot=<CFGDIR>/../sysroot\n")
+    rctx.file("bin/clang.cfg", _CONFIG % "")
+    rctx.file("bin/clang-cpp.cfg", _CONFIG % "")
+    rctx.file("bin/clang++.cfg", _CONFIG % "-stdlib=libc++\n")
 
     # The runtime libraries of the release's binaries, flattened into lib/.
     for url, spec in rctx.attr.runtime_debs.items():
@@ -101,19 +131,18 @@ filegroup(
     patchelf = rctx.path(rctx.attr.patchelf).dirname.get_child(
         "wrappers",
     ).get_child("patchelf")
+    runtime = rctx.path("runtime").realpath
     regular = []
-    moves = []
     for lib in rctx.path("runtime").readdir():
-        moves.append(lib)
-        if str(lib.realpath) == str(lib):
+        # A symlink's realpath is another file of the directory.
+        if str(lib.realpath) == str(runtime.get_child(lib.basename)):
             regular.append(str(lib))
-    if regular:
-        result = rctx.execute(
-            [patchelf, "--set-rpath", "$ORIGIN"] + regular,
-        )
-        if result.return_code != 0:
-            fail("patchelf: " + result.stderr)
-    for lib in moves:
+    if not regular:
+        fail("no regular file among the runtime libraries to patch")
+    result = rctx.execute([patchelf, "--set-rpath", "$ORIGIN"] + regular)
+    if result.return_code != 0:
+        fail("patchelf: " + result.stderr)
+    for lib in rctx.path("runtime").readdir():
         rctx.rename(lib, "lib/" + lib.basename)
     rctx.delete("runtime")
     rctx.delete("debs")

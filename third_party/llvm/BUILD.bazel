@@ -1,5 +1,28 @@
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
+
 # See README.md. The repository is @dcfs_llvm (llvm.bzl, MODULE.bazel).
 exports_files([
     "extract.py",
     "llvm.bzl",
 ])
+
+py_library(
+    name = "extract_lib",
+    srcs = ["extract.py"],
+    imports = ["."],
+)
+
+# The skip list of extract.py against what toolchains_llvm refers to, and no
+# dangling link (step 7.1b). Host-side: it needs neither root nor a kernel.
+py_test(
+    name = "extract_test",
+    size = "small",
+    srcs = ["extract_test.py"],
+    args = ["$(location @toolchains_llvm//toolchain:BUILD.llvm_repo.tpl)"],
+    data = ["@toolchains_llvm//toolchain:BUILD.llvm_repo.tpl"],
+    main = "extract_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":extract_lib"],
+)
