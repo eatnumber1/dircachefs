@@ -840,6 +840,57 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
   return fd;
 }
 
+namespace {
+
+// After open_by_handle_at failed with ESTALE for `id` (whose row says
+// `attr`): OK if the object is positively gone, so that the caller forgets
+// the row (ESTALE, as before); EIO, the row kept and its attributes made
+// unknown, if it may still exist. Invariant (tri-state): a record goes
+// absent only on evidence of absence. ESTALE is not that evidence on xfs
+// and btrfs, which also return it for an inode the device cannot read
+// (fault_recover_test); so the parent is asked by name, through its fd:
+// ENOENT from a readable parent, or the name now naming another object
+// (another handle), is a positive absence; the same handle, or any other
+// failure (the parent cannot be opened or read), is not. With no cached name to ask, ESTALE is
+// believed, as before.
+absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
+                               const FileHandle &handle) {
+  ABSL_ASSIGN_OR_RETURN(std::optional<cache::NamedIn> named,
+                        cache::AnyNameOf(ctx, id));
+  if (!named.has_value()) return absl::OkStatus();
+  absl::Status unreadable;
+  absl::StatusOr<FileDescriptor> parent =
+      OpenNode(ctx, named->parent, O_PATH | O_DIRECTORY);
+  if (!parent.ok()) {
+    const int err = ErrnoOf(parent.status());
+    if (err == ESTALE || err == ENOENT) return absl::OkStatus();
+    unreadable = parent.status();
+  } else {
+    // The name's handle, not its inode number: a number can be reused by a
+    // new object at once, the handle's generation cannot.
+    BackingCall(ctx, "FileHandle::FromDirEntry");
+    absl::StatusOr<FileHandle> now =
+        FileHandle::FromDirEntry(**parent, named->name);
+    if (!now.ok() && ErrnoOf(now.status()) == ENOENT) return absl::OkStatus();
+    if (now.ok() && !(*now == handle)) return absl::OkStatus();
+    unreadable = now.ok() ? absl::OkStatus() : now.status();
+  }
+  // Best effort: a row gone meanwhile has nothing to keep unknown.
+  if (absl::Status marked = cache::MarkAttrsUnknown(ctx, id);
+      !marked.ok() && !absl::IsNotFound(marked)) {
+    return marked;
+  }
+  absl::StatusBuilder error(dcfs::DcfsErrnoToStatus(
+      EIO, "Cannot open an object by handle (ESTALE), but its name is still "
+           "in its directory: the device cannot read it"));
+  error << "inode " << id << " (" << EscapeBytes(named->name)
+        << " in directory " << named->parent << ")";
+  if (!unreadable.ok()) error << ", after " << unreadable;
+  return error;
+}
+
+}  // namespace
+
 absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
   if (id == cache::kRootInode) return OpenRoot(ctx, flags);
   // ReconcileAttrs compares `attr` with a statx taken after the open's I/O.
@@ -851,6 +902,9 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
   absl::StatusOr<FileDescriptor> fd = handle.Open(ctx.mounts, flags);
   if (!fd.ok()) {
     if (ErrnoOf(fd.status()) == ESTALE) {
+      // xfs and btrfs answer ESTALE also for an inode the device cannot
+      // read (step 11.3b): only a positive absence forgets the row.
+      ABSL_RETURN_IF_ERROR(StaleOrUnreadable(ctx, id, handle));
       // Model: as in VerifyBackingIdentity (nothing was reached).
       ctx.events->IdentityResolved(
           ctx, id,

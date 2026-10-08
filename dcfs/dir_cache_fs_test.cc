@@ -120,6 +120,12 @@
 namespace dcfs {
 namespace {
 
+// The errno the next open_by_handle_at fails with, once (0: none).
+int &OpenByHandleFailure() {
+  static int err = 0;
+  return err;
+}
+
 // The hook the next open_by_handle_at runs (once).
 std::function<void()> &OpenByHandleHook() {
   static auto *hook = new std::function<void()>();
@@ -326,6 +332,10 @@ int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
   DCFS_INJECT("open_by_handle_at", -1)
   std::function<void()> hook = std::exchange(dcfs::OpenByHandleHook(), {});
   if (hook) hook();
+  if (int err = std::exchange(dcfs::OpenByHandleFailure(), 0); err != 0) {
+    errno = err;
+    return -1;
+  }
   return __real_open_by_handle_at(mount_fd, handle, flags);
 }
 int __real_name_to_handle_at(int dirfd, const char *pathname,
@@ -600,6 +610,7 @@ class DirCacheFSTest : public ::testing::Test {
       observers_->Remove(recorder_.get());
     }
     OpenByHandleHook() = {};
+    OpenByHandleFailure() = 0;
     NameToHandleHook() = {};
     SyncfsHook() = {};
     StatvfsReadOnly() = false;
@@ -2302,6 +2313,56 @@ TEST_F(DirCacheFSTest, CreateWhoseRefreshFailsIsRepliedFromTheRow) {
   EXPECT_EQ(Create(kRootInode, "w2", O_RDWR).reply.error, 0);
   EXPECT_EQ(seen, calls);
   StatxHook() = {};
+}
+
+// --- ESTALE from open_by_handle_at (step 11.3b) ------------------------------
+//
+// xfs and btrfs answer ESTALE also for an inode the device cannot read. dcfs
+// asks the parent by name: the same inode still there (or a failed check)
+// is EIO with the row kept and unknown; only a positive absence forgets it.
+
+TEST_F(DirCacheFSTest, EstaleWithTheNameStillThereRepliesEio) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  OpenByHandleFailure() = ESTALE;
+  EXPECT_EQ(Chmod(f, 0600).error, -EIO);
+  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());  // Kept.
+  EXPECT_EQ(Chmod(f, 0600).error, 0);  // The device reads again.
+}
+
+TEST_F(DirCacheFSTest, EstaleWithTheNameCheckFailingRepliesEio) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  OpenByHandleFailure() = ESTALE;
+  OpenByHandleHook() = [] { StatxFailure() = EIO; };  // The name check's.
+  EXPECT_EQ(Chmod(f, 0600).error, -EIO);
+  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());
+}
+
+TEST_F(DirCacheFSTest, EstaleWithTheNameGoneForgetsTheRow) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
+  OpenByHandleFailure() = ESTALE;
+  EXPECT_EQ(Chmod(f, 0600).error, -ESTALE);
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              StatusIs(absl::StatusCode::kNotFound));
+}
+
+TEST_F(DirCacheFSTest, EstaleWithTheNameReplacedForgetsTheRow) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(syscalls::renameat2(AT_FDCWD, Path("f"), AT_FDCWD, Path("g"), 0),
+              IsOk());
+  WriteFile(Path("f"));  // Another inode under the name.
+  OpenByHandleFailure() = ESTALE;
+  EXPECT_EQ(Chmod(f, 0600).error, -ESTALE);
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              StatusIs(absl::StatusCode::kNotFound));
 }
 
 // The sweep of unnamed rows is best effort: if it fails, startup goes on

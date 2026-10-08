@@ -233,6 +233,14 @@ on the detail:
   `InvalidateInode` after `ESTALE`, refused boundaries, `ParentOf` of a
   non-root directory, `RENAME_EXCHANGE`/`RENAME_NOREPLACE`, and the
   periodic sync's timing (any request may be a sync point at any time).
+- A handle that fails to open while its object exists is not modelled:
+  xfs and btrfs answer ESTALE for an inode the device cannot read, and
+  dcfs took every ESTALE as "gone" (forgetting the row and replying
+  ENOENT: an unknown answered as negative, the class of 12.7b's
+  `reply_unknown_as_negative`). The models' handle opens reach the object
+  or find it gone; the code guards the third case instead (step 11.3b:
+  OpenNode asks the parent by name and replies EIO unless the name is
+  positively gone or names another handle).
 - Failed cache writes are not modelled: every `Commit` succeeds. A create
   whose syscall succeeded but whose new row cannot be recorded replies
   `EEXIST` (`CreatedButNotCompleted`, step 11.4), which the model's create

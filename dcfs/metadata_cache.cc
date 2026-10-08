@@ -551,6 +551,22 @@ absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id) {
   return *std::move(handle);
 }
 
+absl::StatusOr<std::optional<NamedIn>> AnyNameOf(Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx,
+            "SELECT parent, name FROM dentries WHERE inode = ? AND "
+            "state = 'present' LIMIT 1",
+            id));
+  std::optional<NamedIn> named;
+  ABSL_RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
+                         named = NamedIn{.parent = row.Column<int64_t>(0),
+                                         .name = row.Column<std::string>(1)};
+                         return absl::OkStatus();
+                       }).status());
+  return named;
+}
+
 absl::StatusOr<std::optional<InodeId>> ParentOf(Context &ctx, InodeId dir) {
   if (dir == kRootInode) return kRootInode;
   // One statement for "is there such an inode" (NotFound if not, as

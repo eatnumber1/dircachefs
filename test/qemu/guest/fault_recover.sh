@@ -180,10 +180,11 @@ check_not() {
 }
 
 # gone_reply OUT: OUT says the object does not exist (ENOENT) or is stale
-# (ESTALE). On xfs and btrfs a cold inode the device cannot be read makes
-# open_by_handle_at fail with ESTALE; dcfs forgets the row and replies ESTALE or
-# ENOENT for a name that exists. That is the behaviour step 11.3b is to change
-# (EIO), so such a cell is a SKIP here, never a pass.
+# (ESTALE). Every object of a cell exists, so such a reply is wrong. On xfs
+# and btrfs a cold inode the device cannot read makes open_by_handle_at fail
+# with ESTALE; dcfs used to forget the row and reply ESTALE or ENOENT for a
+# name that exists. Since step 11.3b it asks the parent by name and replies
+# EIO (the row kept, unknown) unless the name is positively gone.
 gone_reply() {
 	case "$1" in
 	*"No such file"* | *ENOENT* | *ESTALE* | *"Stale file"*) return 0 ;;
@@ -195,7 +196,7 @@ gone_reply() {
 error_cell() {
 	echo "fault_recover: $MODE: $1: error (rc $2): $3"
 	if gone_reply "$3"; then
-		skip "$1" "dcfs replies ENOENT or ESTALE for an existing file: 11.3b"
+		fail "$1" "dcfs replied ENOENT or ESTALE for an existing file: $3"
 	else
 		pass "$1"
 	fi

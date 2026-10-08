@@ -228,6 +228,15 @@ absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id);
 // asks the backing filesystem); NotFound if there is no row for `dir`.
 absl::StatusOr<std::optional<InodeId>> ParentOf(Context &ctx, InodeId dir);
 
+// A present dentry pointing at `id`: its parent and name (any one, for a
+// file with several links), or nullopt if none is cached (step 11.3b:
+// OpenNode asks the parent by name when the handle fails with ESTALE).
+struct NamedIn {
+  InodeId parent = 0;
+  std::string name;
+};
+absl::StatusOr<std::optional<NamedIn>> AnyNameOf(Context &ctx, InodeId id);
+
 // All filesystems, in the order they were added.
 absl::StatusOr<std::vector<FilesystemRow>> ListFilesystems(Context &ctx);
 

@@ -239,6 +239,19 @@ the old node id never resolves to the new row, so `OpenNode`'s
 `VerifyBackingIdentity` rejects the mismatch whenever the kernel reaches
 dcfs for it.
 
+**`ESTALE` from `open_by_handle_at` is not proof of absence** (step
+11.3b). xfs and btrfs also return it for an inode the device cannot read,
+and dcfs used to forget the row and reply `ENOENT` for a name that
+exists: an unknown answered as negative. Now `OpenNode` asks the parent,
+through its own descriptor, for one cached name of the object
+(`cache::AnyNameOf`, `FileHandle::FromDirEntry`): if the name is gone
+(`ENOENT` from a readable parent) or names another handle, the object is
+gone, the row is forgotten and the reply is `ESTALE`, as before; if it
+names the same handle, or the parent cannot be opened or read, the reply
+is `EIO` and the row stays, its attributes unknown. With no cached name
+the `ESTALE` is believed. The check costs a parent open and a
+`name_to_handle_at`, on an error path only.
+
 ### Why handles survive restarts but not a cache wipe
 
 Rows persist in the database, so after a restart the same node id still

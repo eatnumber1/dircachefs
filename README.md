@@ -672,10 +672,10 @@ recovery protocol, concurrency, and the test strategy.
   EROFS once ext4's journal has aborted), nothing is recorded as having
   succeeded, and after the device recovers the same operations work
   (`//test/qemu:fault_recover_test`, `test/qemu/README.md`, "Fault
-  injection"). Two limits: on xfs and btrfs a read of an inode the device
-  cannot read comes back to the caller as ESTALE or ENOENT, not EIO, for a
-  name that exists (the cache keeps the name unknown, never absent; plan
-  step 11.3b changes the reply); and a write through passthrough whose
+  injection"). On xfs and btrfs an inode the device cannot read makes the
+  backing filesystem answer "stale handle"; dcfs then looks the name up
+  in its directory and replies EIO while the name is still there, keeping
+  what it cached (step 11.3b). One limit: a write through passthrough whose
   write-back later fails loses its pages in the backing filesystem, which
   then reports its old size once it re-reads the inode, while dcfs keeps
   serving the size it read earlier (the file's inode stays in the dirty set)

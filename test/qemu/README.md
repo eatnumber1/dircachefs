@@ -609,9 +609,8 @@ A cell has one of three outcomes, printed as the `TEST` line:
   mode must return an error (`<mode>-some-fill-fails`).
 - **skip**: a chmod, a setxattr, a fsync that worked and a writable open that
   worked needed no device I/O (SKIP "no failure was met"; the record checks
-  still run); and every reply of ENOENT or ESTALE for a name that exists is a
-  SKIP "dcfs replies ENOENT or ESTALE for an existing file: 11.3b", never a
-  pass. Step 11.3b is to make those EIO.
+  still run). Every reply of ENOENT or ESTALE for a name that exists is a
+  FAIL (step 11.3b; before it, xfs had 18 to 23 such cells, then SKIPs).
 
 After the recovery the same operations succeed, their effects are on the
 backing filesystem, the daemon lives (the checking build aborts on a broken
@@ -630,12 +629,12 @@ error-reads) a partial one, and 57 were gaps; all 60 now have checks (names
 |---|---|---|---|
 | lookup fill | `fault_backing:lookup-read-error-replied`, `lookup-after-heal-present` (error-reads only) | `lookup-fails`, `lookup-not-recorded-absent`, `lookup-after-recovery` | truth-only: pass on an error; SKIP if answered without a device read |
 | getattr fill | gap | `getattr-fails` (a stat of the chmod's target), `setattr-name-not-recorded-absent`, `getattr-after-recovery` | truth-only (it follows a chmod that may have worked) |
-| readdir fill | `fault_backing:listing-after-heal` (error-reads only, after the heal) | `readdir-fails`, `readdir-not-marked-complete`, `listed-names-not-recorded-absent`, `readdir-after-recovery` | truth-only; the first readdir after a failing read replies ESTALE: SKIP (11.3b) |
+| readdir fill | `fault_backing:listing-after-heal` (error-reads only, after the heal) | `readdir-fails`, `readdir-not-marked-complete`, `listed-names-not-recorded-absent`, `readdir-after-recovery` | truth-only; the first readdir after a failing read replies EIO (ESTALE before 11.3b) |
 | create | `fault_backing:create-error-replied`, `-name-not-present`, `-listing`, `restart-recovers-dirty` (error-writes only) | `create-fails`, `create-not-recorded-present`, `create-after-recovery` | asserted |
 | mkdir | gap | `mkdir-fails`, `mkdir-not-recorded-present`, `mkdir-after-recovery` | asserted |
 | unlink | gap | `unlink-fails`, `unlink-not-recorded-absent`, `unlink-after-recovery` | asserted |
 | rename | gap | `rename-fails`, `rename-source-not-recorded-absent`, `rename-target-not-recorded-present`, `rename-after-recovery` | asserted |
-| setattr | gap | `setattr`, `setattr-record-is-the-new-mode` or `setattr-new-mode-not-valid`, `setattr-after-recovery` | skip where it worked (ext4 before the abort); asserted records; SKIP (11.3b) on xfs/btrfs |
+| setattr | gap | `setattr`, `setattr-record-is-the-new-mode` or `setattr-new-mode-not-valid`, `setattr-after-recovery` | skip where it worked (ext4 before the abort); asserted records; EIO on xfs/btrfs (11.3b) |
 | setxattr | gap | `setxattr`, `setxattr-not-recorded-present` or `-succeeded-not-recorded-absent`, `setxattr-after-recovery` | as setattr |
 | link | gap | `link-fails`, `link-not-recorded-present`, `link-count-not-valid-as-2`, `link-after-recovery` | asserted |
 | symlink | gap | `symlink-fails`, `symlink-not-recorded-present`, `symlink-after-recovery` | asserted |
@@ -649,10 +648,11 @@ bitmap it refuses to allocate in that group with EUCLEAN until it is mounted
 again (`data-after-remount`). xfs and btrfs answer EIO to every change and
 stay failed once the device is back: every mode needs the remount, and only
 ext4's `error-reads` and `window` recover in place. A cold inode that xfs or
-btrfs cannot read makes `open_by_handle_at` fail with ESTALE: dcfs forgets
-the row (`ForgetStale`; its names become unknown, never absent) and the caller
-sees ESTALE (the first readdir) or ENOENT (a chmod, a stat or a setxattr of a
-name that exists): the SKIP cells above.
+btrfs cannot read makes `open_by_handle_at` fail with ESTALE. dcfs used to
+forget the row and reply ESTALE (the first readdir) or ENOENT (a chmod, a stat
+or a setxattr of a name that exists); since step 11.3b it looks the name up
+through the parent's descriptor and replies EIO, keeping the row (attributes
+unknown), unless the name is gone or names another handle.
 
 A btrfs inode read that fails warns in the kernel (`btrfs_destroy_inode`,
 `fs/btrfs/inode.c:8047`, from `btrfs_read_locked_inode`'s error path), and the
