@@ -1680,3 +1680,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   btrfs inode read WARNs in btrfs_destroy_inode, so the btrfs variant pins inodes. Also:
   readdir_boundary_test timed out at 240 s on this host on origin/main (CI passed it on fee154d):
   host load suspected, log requested.
+- 11.3 reviewed (Opus): fix first on the test side (cyclic flakey window never switched back and
+  timing-sensitive; 27 of 60 cells vacuous under a no-op injection: fills answered from the fs's
+  cache, setattr/setxattr "may succeed"; size-discrepancy exclusion; btrfs pinning hides the
+  cold-inode path; fault_window without a self-check). HIGH → new step 11.3b: ESTALE from
+  open_by_handle_at on an unreadable inode is answered as ENOENT for an existing file. Needs russ:
+  btrfs_destroy_inode WARNING on a failed inode read (kernel bug to report). readdir_boundary_test
+  hangs after `TEST mount PASS` on origin/main run alone (CI passed it on fee154d): bisect running
+  in lane-3; push on hold until it is understood.

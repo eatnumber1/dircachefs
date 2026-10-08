@@ -28,6 +28,21 @@ what landed differs:
   partition. Neither drop-writes
   nor a kill loses writes the disk acknowledged without a flush, so
   FLUSH/FUA ordering stays untested (that is what dm-log-writes would add).
+- 11.3 as a gap check (lane-6, 2026-10-08, in review fixes): 60 cells
+  (12 operation classes × error-reads / self-ending flakey window /
+  error-writes / error-io / dead) in `fault_recover_test`; the README table
+  marks each cell asserted, truth-only or skipped.
+- 11.3b (production, protocol tier, after 11.5 lands; test first): dcfs
+  treats every ESTALE from `open_by_handle_at` as "the object is gone"
+  (`backing.cc` OpenNode → ForgetStale), but xfs and btrfs also return
+  ESTALE for an inode the device cannot read, so chmod/stat/setxattr of an
+  existing file reply ENOENT: an unknown answered as negative (the class
+  of the model's `reply_unknown_as_negative`). Fix: on ESTALE check by name
+  through the parent's fd; same inode number or EIO on the check → reply
+  EIO and keep the row unknown; only a positive absence → ESTALE/ENOENT.
+  Needs russ (kernel): a failing btrfs inode read WARNs in
+  `btrfs_destroy_inode` (fs/btrfs/inode.c:8047 on 6.18); reproducer kept
+  with `kernel_failure = "expected"`.
 - 11.2b fsstress and fsx (merged 2026-10-08, 0beb46e): xfstests tag
   v2026.05.17 as an http_archive, only ltp/fsstress.c and ltp/fsx.c built
   (static, testonly; AIO, io_uring, libbtrfsutil and the xfsprogs headers
