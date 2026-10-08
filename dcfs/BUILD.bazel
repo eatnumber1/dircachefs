@@ -694,6 +694,9 @@ DIR_CACHE_FS_TEST_WRAPS = [
     "-Wl,--wrap=open_by_handle_at",
     "-Wl,--wrap=statx",
     "-Wl,--wrap=syncfs",
+    # Step 8.2c: the harness's fake kernel passthrough.
+    "-Wl,--wrap=fuse_passthrough_open",
+    "-Wl,--wrap=fuse_passthrough_close",
 ] + [
     # Step 26.2: the backstop under the invariant checks' hooks (see
     # NoTransactionAt in dir_cache_fs_test.cc).

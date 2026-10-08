@@ -142,6 +142,21 @@ std::function<void()> &StatxHook() {
   return *hook;
 }
 
+// A fake kernel passthrough (the harness's session has no FUSE device, so
+// libfuse's fuse_passthrough_open fails with ENOTTY and every open is a
+// fallback open): while `enabled`, an open is granted the next backing id and
+// a close is recorded, failing with EBADF if `close_fails`.
+struct FakePassthrough {
+  bool enabled = false;
+  bool close_fails = false;
+  int next_id = 100;
+  std::vector<int> closed;
+};
+FakePassthrough &Passthrough() {
+  static auto *fake = new FakePassthrough();
+  return *fake;
+}
+
 // Inode numbers every statx reports differently while set: a backing inode
 // number (the key) is reported as another (the value). For backing inode
 // numbers no supported filesystem hands out (>= 2^63).
@@ -271,6 +286,23 @@ int InjectedFault(const char *call) {
   }
 
 extern "C" {
+int __real_fuse_passthrough_open(fuse_req_t req, int fd);
+int __wrap_fuse_passthrough_open(fuse_req_t req, int fd) {
+  dcfs::FakePassthrough &fake = dcfs::Passthrough();
+  if (!fake.enabled) return __real_fuse_passthrough_open(req, fd);
+  return fake.next_id++;
+}
+int __real_fuse_passthrough_close(fuse_req_t req, int backing_id);
+int __wrap_fuse_passthrough_close(fuse_req_t req, int backing_id) {
+  dcfs::FakePassthrough &fake = dcfs::Passthrough();
+  if (!fake.enabled) return __real_fuse_passthrough_close(req, backing_id);
+  fake.closed.push_back(backing_id);
+  if (fake.close_fails) {
+    errno = EBADF;
+    return -1;
+  }
+  return 0;
+}
 int __real_open_by_handle_at(int mount_fd, struct file_handle *handle,
                              int flags);
 int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
@@ -547,6 +579,7 @@ class DirCacheFSTest : public ::testing::Test {
     FakeInodeNumbers().clear();
     StatxFailure() = 0;
     StatxHook() = {};
+    Passthrough() = FakePassthrough();
     for (const std::string &mount : mounts_below_) {
       syscalls::umount2(mount, MNT_DETACH).IgnoreError();
     }
@@ -4580,6 +4613,193 @@ TEST_F(DirCacheFSTest, ReleaseReportsWhetherTheOpenCouldWrite) {
     if (step == LifetimeStep::kReleased) released.push_back(arg);
   }
   EXPECT_THAT(released, ElementsAre(0u, 1u, 0u, 1u));
+}
+
+// --- 8.2c: survivors of the second mutation sweep ------------------------
+
+// A setattr's mutation, like a copy_file_range's, ends after its backing
+// syscalls and before its phase-3 refresh. Every statx of the request records
+// what is in flight: the refresh, the request's last, finds nothing.
+TEST_F(DirCacheFSTest, SetattrEndsItsMutationBeforeItsRefresh) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  std::vector<size_t> in_flight;
+  std::function<void()> observe = [&] {
+    in_flight.push_back(ctx_.fills.inflight.size());
+    StatxHook() = observe;
+  };
+  StatxHook() = observe;
+  EXPECT_EQ(Chmod(f, S_IFREG | 0600).error, 0);
+  ASSERT_FALSE(in_flight.empty()) << "the hook did not run";
+  EXPECT_EQ(in_flight.back(), 0u) << "the setattr's mutation was still in "
+                                     "flight when its phase-3 refresh began";
+}
+
+// The reconciliation at a written file's last FORGET reports nothing when it
+// goes well, and nothing when the row is already gone (invalidated meanwhile).
+TEST_F(DirCacheFSTest, ForgetReconciliationsAreQuiet) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start();
+  InodeId ids[2];
+  for (int i = 0; i < 2; ++i) {
+    auto [lookup, entry] = Lookup(kRootInode, i == 0 ? "f" : "g");
+    ASSERT_EQ(lookup.error, 0);
+    ids[i] = static_cast<InodeId>(entry.nodeid);
+    auto [open, fh] = Open(ids[i], O_RDWR);
+    ASSERT_EQ(open.error, 0);
+    ASSERT_EQ(Release(ids[i], fh).error, 0);
+  }
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+
+  // f's attributes changed behind the mapping: reconciled and recorded.
+  AppendToFile(Path("f"), "stored");
+  {
+    WarningCapture capture;
+    Forget(ids[0], 1);
+    EXPECT_THAT(capture.lines, testing::IsEmpty())
+        << absl::StrJoin(capture.lines, "\n");
+  }
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, ids[0]));
+  EXPECT_EQ(attr.st.st_size, 6);
+
+  // g's row went: "gone already", not worth a warning.
+  ASSERT_THAT(cache::DeleteInode(ctx_, ids[1]), IsOk());
+  {
+    WarningCapture capture;
+    Forget(ids[1], 1);
+    EXPECT_THAT(capture.lines, testing::IsEmpty())
+        << absl::StrJoin(capture.lines, "\n");
+  }
+}
+
+// The open's reply carries the passthrough backing id the kernel granted
+// (libfuse's fuse_reply_open), none when it refused; a second open of the
+// file shares it and the last release closes it, once.
+TEST_F(DirCacheFSTest, OpenRepliesWithTheGrantedBackingIdAndReleaseClosesIt) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto backing_id_of = [](const Reply &reply) {
+    struct fuse_open_out out {};
+    EXPECT_GE(reply.payload.size(), sizeof(out));
+    std::memcpy(&out, reply.payload.data(), sizeof(out));
+    return out.backing_id;
+  };
+
+  // Refused (the harness's own libfuse call fails): the fallback, no id.
+  auto [refused, refused_fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(refused.error, 0);
+  EXPECT_EQ(backing_id_of(refused), 0);
+  ASSERT_EQ(Release(f, refused_fh).error, 0);
+
+  Passthrough().enabled = true;
+  auto [first, first_fh] = Open(f, O_RDONLY);
+  auto [second, second_fh] = Open(f, O_RDWR);
+  ASSERT_EQ(first.error, 0);
+  ASSERT_EQ(second.error, 0);
+  const int id = backing_id_of(first);
+  EXPECT_GT(id, 0);
+  EXPECT_EQ(backing_id_of(second), id);  // The shared one.
+  ASSERT_EQ(Release(f, first_fh).error, 0);
+  EXPECT_THAT(Passthrough().closed, testing::IsEmpty());
+  ASSERT_EQ(Release(f, second_fh).error, 0);
+  EXPECT_THAT(Passthrough().closed, ElementsAre(id));
+}
+
+// A passthrough id that cannot be closed at the last release is reported;
+// one that closes is not.
+TEST_F(DirCacheFSTest, ReleaseReportsAFailedPassthroughClose) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  Passthrough().enabled = true;
+  for (bool fails : {false, true}) {
+    Passthrough().close_fails = fails;
+    auto [open, fh] = Open(f, O_RDONLY);
+    ASSERT_EQ(open.error, 0);
+    WarningCapture capture;
+    EXPECT_EQ(Release(f, fh).error, 0);
+    if (fails) {
+      EXPECT_THAT(capture.lines, ElementsAre(HasSubstr("Release: closing "
+                                                       "passthrough backing id")));
+    } else {
+      EXPECT_THAT(capture.lines, testing::IsEmpty())
+          << absl::StrJoin(capture.lines, "\n");
+    }
+  }
+}
+
+// An open that fails after the passthrough id was granted gives it back (a
+// cold open: nothing else uses it) and keeps it when the failing open is
+// one of several (a shared one: an earlier open still depends on it, and on
+// the BackingFile).
+TEST_F(DirCacheFSTest, FailedOpensGiveBackThePassthroughIdOnlyWhenTheyOwnIt) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  Passthrough().enabled = true;
+  int flags = 0;
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor raw_fd,
+      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  const int raw = *raw_fd;
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
+  const int immutable = flags | FS_IMMUTABLE_FL;
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &immutable), IsOk());
+  OutOfBand(f);
+
+  // Cold: the shared fd falls back to read-only, the writable check fails
+  // (EPERM), and the id granted for it is closed again.
+  EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
+  EXPECT_THAT(Passthrough().closed, ElementsAre(100));
+  EXPECT_FALSE(fs_->HasOpenFiles(f));
+
+  // Shared: a read-only open is outstanding; a failing writable one leaves
+  // its id and its BackingFile alone.
+  auto [ro, ro_fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(ro.error, 0);
+  EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM);
+  EXPECT_THAT(Passthrough().closed, ElementsAre(100));  // Still just the first.
+  EXPECT_TRUE(fs_->HasOpenFiles(f));
+  EXPECT_EQ(Release(f, ro_fh).error, 0);
+  EXPECT_THAT(Passthrough().closed, ElementsAre(100, 101));
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags), IsOk());
+  OutOfBand(f);
+}
+
+// A writable open whose phase 1 fails gives its passthrough id back too.
+TEST_F(DirCacheFSTest, WritableOpenWhosePhase1FailsClosesItsPassthroughId) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  Passthrough().enabled = true;
+  OpenByHandleHook() = [&] {
+    ASSERT_THAT(db_.Exec("PRAGMA query_only = 1"), IsOk());
+  };
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_THAT(db_.Exec("PRAGMA query_only = 0"), IsOk());
+  EXPECT_NE(open.error, 0);
+  EXPECT_THAT(Passthrough().closed, ElementsAre(100));
+  EXPECT_FALSE(fs_->HasOpenFiles(f));
+}
+
+// A setxattr the backing filesystem accepts is recorded in the cache as
+// stored, right away, with the attributes refreshed for its ctime: no
+// backing read is needed to answer for it.
+TEST_F(DirCacheFSTest, SetxattrRecordsWhatTheBackingFilesystemStored) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr before, cache::GetAttr(ctx_, f));
+  ASSERT_TRUE(before.valid);
+  ASSERT_EQ(Setxattr(f, "user.k", "v").error, 0);
+  EXPECT_THAT(cache::GetXattr(ctx_, f, "user.k"),
+              IsOkAndHolds(testing::Optional(std::string("v"))));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr after, cache::GetAttr(ctx_, f));
+  EXPECT_TRUE(after.valid);
+  EXPECT_THAT(Dirty(), Contains(f));  // Until a sync point covers it.
 }
 
 // The backstop under the hooks: a backing syscall made where no hook was
