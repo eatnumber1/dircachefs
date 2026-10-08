@@ -83,11 +83,14 @@ tlc_test(
 )
 
 # Without the kernel's directory lock (the coroutine future); a few
-# minutes.
+# minutes. Timeout: 8,224,822 distinct states since step 12.7b's reply
+# ghost (6,365,804 before it); the CI runner took 506 s for those 6,365,804
+# (about 80 us per state), so about 650-700 s now with ReplyObservable
+# checked on every step, too close to "long"'s 900 s.
 tlc_test(
     name = "nolock_test",
     size = "large",
-    timeout = "long",
+    timeout = "eternal",
     config = "MC_nolock.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
