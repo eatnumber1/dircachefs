@@ -1892,3 +1892,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   model's text; checker self-checks missing; HeldFdOf includes written_'s O_PATH fd (statx per
   GETATTR of written files); DropAtimeStamp before the syscall. Sent back to lane-4.
 - russ, 2026-10-08: the no-branching rule is "discouraged, sometimes necessary"; add the numeric-property technique (zero as absent, INT_MAX to turn a limit off) with its caveat.
+- CI on 4bf7182 (run 37841442160, in progress): subjects/osv/fast/presubmit/reproducible green;
+  coverage FAIL twice over: the ratchet fired on a RISE again (95.99/79.43 vs 95.97/79.22), and
+  names_random_test(_ext4) under the coverage config end with ALL-TESTS-PASSED but no MEM line
+  (init's coverage path reboots before the memory sampler). Decision: the gate fails on drops only
+  and prints the suggested bump on a rise (8.1b); both to lane-3's queue after the 25.5 docs.
