@@ -188,6 +188,9 @@ class Observers final : public ProtocolEvents {
   void RunStarted(Context &ctx) override {
     for (ProtocolEvents *o : observers_) o->RunStarted(ctx);
   }
+  void RecoveryDone(Context &ctx) override {
+    for (ProtocolEvents *o : observers_) o->RecoveryDone(ctx);
+  }
   void ShutdownBegin(Context &ctx) override {
     for (ProtocolEvents *o : observers_) o->ShutdownBegin(ctx);
   }
