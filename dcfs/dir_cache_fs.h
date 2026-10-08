@@ -78,13 +78,13 @@ class DirCacheFS {
     // raised it).
     std::optional<size_t> max_held_fds;
 
-    // The mount options dcfs gave libfuse (dcfs/mount_options.h). Init()
-    // refuses the mount (libfuse then refuses the INIT, and the daemon
-    // exits) unless they include default_permissions: without it the
-    // kernel would leave permission checks to dcfs, which makes none (see
-    // Access()).
-    std::vector<std::string> mount_options = {
-        std::string(kDefaultPermissions)};
+    // The mount options dcfs gave libfuse (BuildMountOptions in
+    // dcfs/mount_options.h). Init() refuses the mount (libfuse then refuses
+    // the INIT, and the daemon exits) unless they include
+    // default_permissions: without it the kernel would leave permission
+    // checks to dcfs, which makes none (see Access()). Empty by default, so
+    // a caller that forgets them is refused too.
+    std::vector<std::string> mount_options;
   };
 
   // The default Options::max_held_fds for a soft descriptor limit: what

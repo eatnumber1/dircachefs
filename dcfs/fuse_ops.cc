@@ -64,13 +64,16 @@ void Init(void *userdata, fuse_conn_info *conn) {
   absl::Status s = static_cast<DirCacheFS *>(userdata)->Init(*conn);
   if (s.ok()) return;
   LOG(ERROR) << s;
-  // libfuse gives init() no way to fail the INIT. A wanted flag the kernel
-  // did not offer is what it refuses (do_init's want_flags_valid): EPROTO
-  // to the kernel, the session ended, and SessionLoop::Run returns -EPROTO.
+  // libfuse gives init() no way to fail the INIT. A wanted flag not in
+  // capable_ext is what it refuses (do_init's want_flags_valid): EPROTO to
+  // the kernel, the session ended, and SessionLoop::Run returns -EPROTO.
+  // This is the only place dcfs refuses an INIT. capable_ext is libfuse's
+  // translation of the kernel's flags into FUSE_CAP_* bits, the highest of
+  // which libfuse 3.18.2 defines is bit 31, so the highest unoffered bit is
+  // bit 63; only a libfuse that defines it could make it offered, and
+  // MountWithoutDefaultPermissionsIsRefused would then fail.
   const uint64_t unoffered = ~conn->capable_ext;
-  if (unoffered == 0) {
-    LOG(FATAL) << "cannot refuse the INIT: the kernel offered every flag";
-  }
+  CHECK_NE(unoffered, 0u) << "cannot refuse the INIT: every flag is offered";
   conn->want_ext |= std::bit_floor(unoffered);
 }
 

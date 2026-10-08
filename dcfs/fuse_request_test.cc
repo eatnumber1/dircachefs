@@ -110,21 +110,5 @@ TEST(StatusToErrnoTest, PlainCodeStatusUsesFallbackMapping) {
   EXPECT_EQ(StatusToErrno(s), EPERM);
 }
 
-// A default-constructed FuseRequest holds no live request -- the same state
-// a real one is left in after any Reply* call. Exercising a Reply* on it
-// stands in for the "replied twice" bug the RET_CHECK in each Reply* method
-// is meant to catch, without needing a live mount.
-TEST(FuseRequestTest, ReplyOnASpentRequestFailsRatherThanCrashing) {
-  FuseRequest fr;
-  absl::Status s = fr.ReplyErrno(0);
-  EXPECT_EQ(s.code(), absl::StatusCode::kInternal);
-}
-
-TEST(FuseRequestTest, ReplyFailureRejectsAnOkStatus) {
-  FuseRequest fr;
-  absl::Status s = fr.ReplyFailure(absl::OkStatus());
-  EXPECT_EQ(s.code(), absl::StatusCode::kInternal);
-}
-
 }  // namespace
 }  // namespace dcfs

@@ -94,6 +94,7 @@
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
 #include "dcfs/mount_fds.h"
+#include "dcfs/mount_options.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/session_loop.h"
@@ -401,6 +402,7 @@ namespace {
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
+using ::testing::AllOf;
 using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
@@ -488,10 +490,19 @@ class DirCacheFSTest : public ::testing::Test {
 
     fs_ = std::make_unique<DirCacheFS>(ctx_, options_);
     ops_ = MakeFuseOps();
-    char arg0[] = "dir_cache_fs_test";
-    char *argv[] = {arg0};
-    struct fuse_args args = FUSE_ARGS_INIT(1, argv);
+    // As main.cc does: "-o" and the options joined.
+    std::string arg0 = "dir_cache_fs_test";
+    std::string dash_o = "-o";
+    std::string opts = absl::StrJoin(options_.mount_options, ",");
+    std::vector<char *> argv = {arg0.data()};
+    if (!opts.empty()) {
+      argv.push_back(dash_o.data());
+      argv.push_back(opts.data());
+    }
+    struct fuse_args args =
+        FUSE_ARGS_INIT(static_cast<int>(argv.size()), argv.data());
     se_ = fuse_session_new(&args, &ops_, sizeof(ops_), fs_.get());
+    fuse_opt_free_args(&args);
     ASSERT_NE(se_, nullptr);
     struct fuse_custom_io io = {};
     // Requests come in through Send(); a read is SessionLoop draining
@@ -650,6 +661,11 @@ class DirCacheFSTest : public ::testing::Test {
   // Processes one request and returns its reply (requests processed by a
   // hook meanwhile get their own).
   Reply Send(uint32_t opcode, uint64_t nodeid, std::string_view body) {
+    return SendOn(se_, opcode, nodeid, body);
+  }
+  // Send, to another session (NewSession's).
+  Reply SendOn(struct fuse_session *se, uint32_t opcode, uint64_t nodeid,
+               std::string_view body) {
     const uint64_t unique = next_unique_++;
     std::string buf;
     struct fuse_in_header hdr = {};
@@ -664,7 +680,7 @@ class DirCacheFSTest : public ::testing::Test {
     struct fuse_buf fbuf = {};
     fbuf.mem = buf.data();
     fbuf.size = buf.size();
-    fuse_session_process_buf(se_, &fbuf);
+    fuse_session_process_buf(se, &fbuf);
     auto it = replies_.find(unique);
     EXPECT_NE(it, replies_.end()) << "no reply to request " << unique;
     if (it == replies_.end()) return Reply{.error = -EIO};
@@ -1055,8 +1071,12 @@ class DirCacheFSTest : public ::testing::Test {
   // No periodic sync point in the middle of a test; held descriptors
   // (written_) up to a fixed cap, not the default derived from the test
   // process's descriptor limit (0 at the usual 1024).
-  DirCacheFS::Options options_{.sync_interval = absl::Hours(24),
-                               .max_held_fds = 64};
+  // The mount options are main.cc's for a plain command line, which
+  // Start() gives libfuse too.
+  DirCacheFS::Options options_{
+      .sync_interval = absl::Hours(24),
+      .max_held_fds = 64,
+      .mount_options = BuildMountOptions(false, {}).value().options};
   std::unique_ptr<DirCacheFS> fs_;
   std::unique_ptr<testonly::TraceRecorder> recorder_;
   std::unique_ptr<testonly::InvariantChecker> checker_;
@@ -1165,12 +1185,12 @@ class DirCacheFSTest : public ::testing::Test {
     return se;
   }
 
-  // Queues the FUSE_INIT the kernel sends when it mounts.
-  void QueueInit() {
+  // Queues the FUSE_INIT the kernel sends when it mounts, offering `flags`.
+  void QueueInit(uint32_t flags = FUSE_POSIX_ACL | FUSE_DONT_MASK) {
     struct fuse_init_in in = {};
     in.major = FUSE_KERNEL_VERSION;
     in.minor = FUSE_KERNEL_MINOR_VERSION;
-    in.flags = FUSE_POSIX_ACL | FUSE_DONT_MASK;
+    in.flags = flags;
     std::string msg;
     struct fuse_in_header hdr = {};
     hdr.len = static_cast<uint32_t>(sizeof(hdr) + sizeof(in));
@@ -4804,6 +4824,110 @@ TEST_F(DirCacheFSTest, MountWithoutDefaultPermissionsIsRefused) {
   fuse_session_destroy(se);
   EXPECT_THAT(capture.lines, Contains(HasSubstr("default_permissions")))
       << absl::StrJoin(capture.lines, "\n");
+}
+
+// A DirCacheFS made without mount options (a caller that forgot them) is
+// refused like one whose options lack default_permissions: a missing value
+// fails closed.
+TEST_F(DirCacheFSTest, DefaultOptionsAreRefused) {
+  Start();
+  MountFds mounts;
+  Context ctx{db_, mounts, bitgen_};
+  DirCacheFS other(ctx, DirCacheFS::Options{});
+  struct fuse_session *se = NewSession(&other, {});
+  ASSERT_NE(se, nullptr);
+  QueueInit();
+  {
+    SessionLoop loop(se);
+    EXPECT_EQ(loop.Run(), -EPROTO);
+  }
+  fuse_session_destroy(se);
+}
+
+// A kernel that does not offer FUSE_CAP_DONT_MASK (or FUSE_CAP_POSIX_ACL)
+// would check permissions differently from the backing filesystem: Init()
+// fails, naming it, and the INIT is refused.
+TEST_F(DirCacheFSTest, InitWithoutDontMaskIsRefused) {
+  Start();
+  MountFds mounts;
+  Context ctx{db_, mounts, bitgen_};
+  DirCacheFS other(ctx, options_);
+  struct fuse_session *se = NewSession(&other, {});
+  ASSERT_NE(se, nullptr);
+  WarningCapture capture;
+  QueueInit(FUSE_POSIX_ACL);
+  {
+    SessionLoop loop(se);
+    EXPECT_EQ(loop.Run(), -EPROTO);
+  }
+  fuse_session_destroy(se);
+  EXPECT_THAT(capture.lines,
+              Contains(AllOf(HasSubstr("FAILED_PRECONDITION"),
+                             HasSubstr("FUSE_CAP_DONT_MASK"))))
+      << absl::StrJoin(capture.lines, "\n");
+}
+
+// FuseRequest on live requests: a session of the test's own handlers, each
+// wrapping its request in a FuseRequest.
+struct LiveReplies {
+  absl::Status first;
+  absl::Status second;
+};
+LiveReplies &Live() {
+  static LiveReplies live;
+  return live;
+}
+
+class FuseRequestLiveTest : public DirCacheFSTest {
+ protected:
+  // A session whose GETATTR replies twice and whose STATFS first calls
+  // ReplyFailure with an OK status; it has seen FUSE_INIT.
+  struct fuse_session *LiveSession() {
+    ops_ = {};
+    ops_.getattr = [](fuse_req_t req, fuse_ino_t, fuse_file_info *) {
+      FuseRequest fr(req);
+      Live().first = fr.ReplyErrno(ENOENT);
+      Live().second = fr.ReplyErrno(0);
+    };
+    ops_.statfs = [](fuse_req_t req, fuse_ino_t) {
+      FuseRequest fr(req);
+      Live().first = fr.ReplyFailure(absl::OkStatus());
+      Live().second = fr.ReplyErrno(EPERM);
+    };
+    struct fuse_session *se = NewSession(fs_.get(), {});
+    if (se == nullptr) return nullptr;
+    QueueInit();
+    SessionLoop loop(se);
+    EXPECT_EQ(loop.Run(), -EAGAIN);  // INIT served, nothing more queued
+    return se;
+  }
+};
+
+// A request replied to twice: the first reply goes to the kernel, the second
+// is refused (Internal) instead of reaching libfuse with a freed request.
+TEST_F(FuseRequestLiveTest, ReplyOnASpentRequestFailsRatherThanCrashing) {
+  Start();
+  struct fuse_session *se = LiveSession();
+  ASSERT_NE(se, nullptr);
+  struct fuse_getattr_in in = {};
+  std::string body;
+  AppendBytes(body, in);
+  EXPECT_EQ(SendOn(se, FUSE_GETATTR, kRootInode, body).error, -ENOENT);
+  EXPECT_THAT(Live().first, IsOk());
+  EXPECT_EQ(Live().second.code(), absl::StatusCode::kInternal);
+  fuse_session_destroy(se);
+}
+
+// ReplyFailure with an OK status is refused without consuming the request,
+// which a later reply still answers.
+TEST_F(FuseRequestLiveTest, ReplyFailureRejectsAnOkStatus) {
+  Start();
+  struct fuse_session *se = LiveSession();
+  ASSERT_NE(se, nullptr);
+  EXPECT_EQ(SendOn(se, FUSE_STATFS, kRootInode, "").error, -EPERM);
+  EXPECT_EQ(Live().first.code(), absl::StatusCode::kInternal);
+  EXPECT_THAT(Live().second, IsOk());
+  fuse_session_destroy(se);
 }
 
 // The kernel sends ACCESS only when default_permissions is not in effect

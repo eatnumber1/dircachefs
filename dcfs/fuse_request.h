@@ -64,14 +64,12 @@ size_t AppendDirEntriesPlus(
 // RET_CHECK).
 class FuseRequest {
  public:
-  FuseRequest() = default;
-
   // Transfers responsibility to this FuseRequest for replying.
   explicit FuseRequest(fuse_req_t req);
   ~FuseRequest();
 
-  // Neither copied nor moved: each lives in the scope that serves its
-  // request (fuse_ops.cc's Serve), which is what makes "replied by the
+  // Neither copied nor moved: each lives in the libfuse callback that
+  // serves its request (fuse_ops.cc), which is what makes "replied by the
   // time it is destroyed" checkable.
   FuseRequest(FuseRequest &&) = delete;
   FuseRequest(const FuseRequest &) = delete;

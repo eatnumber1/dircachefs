@@ -250,16 +250,16 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // permissions differently from the backing filesystem. Every kernel
   // dcfs supports (Linux 6.9+, for FS_IOC_GETFSUUID and FUSE passthrough)
   // already has both (protocol 7.26 and 7.12); should one ever be missing,
-  // the flag is wanted anyway, which makes libfuse refuse the INIT
-  // (want_flags_valid: EPROTO) and dcfs exit, rather than serve the mount
-  // with the wrong permission checks.
+  // Init() fails, which refuses the INIT (fuse_ops.cc's Init) and makes
+  // dcfs exit, rather than serve the mount with the wrong permission
+  // checks.
   for (auto [flag, name] :
        {std::pair{FUSE_CAP_POSIX_ACL, "FUSE_CAP_POSIX_ACL"},
         std::pair{FUSE_CAP_DONT_MASK, "FUSE_CAP_DONT_MASK"}}) {
     if (!fuse_set_feature_flag(&conn, flag)) {
-      LOG(ERROR) << "the kernel does not offer " << name
-                 << ", which dcfs requires; refusing to mount";
-      conn.want_ext |= flag;
+      return FailedPreconditionErrorBuilder()
+             << "the kernel does not offer " << name
+             << ", which dcfs requires; refusing to mount";
     }
   }
 
@@ -2353,10 +2353,12 @@ absl::Status DirCacheFS::Access(FuseRequest &req, fuse_ino_t ino, int mask) {
   // kernel never sends ACCESS (fuse_permission, fs/fuse/dir.c). Should one
   // arrive anyway, deny it: dcfs checks nothing itself, and ENOSYS would
   // make the kernel allow every later access(2) without asking
-  // (fc->no_access).
-  LOG(ERROR) << "ACCESS received: default_permissions is not in effect; "
-                "denying (nodeid "
-             << ino << ", mask " << mask << ")";
+  // (fc->no_access). Logged at most once a minute: without
+  // default_permissions the kernel sends one per access(2) and chdir(2).
+  LOG_EVERY_N_SEC(ERROR, 60)
+      << "ACCESS received: default_permissions is not in effect; denying "
+         "(nodeid "
+      << ino << ", mask " << mask << ")";
   return req.ReplyErrno(EACCES);
 }
 

@@ -12,7 +12,7 @@
 namespace dcfs {
 
 // The mount option dcfs requires: the kernel checks permissions itself,
-// from the attributes dcfs reported (docs/design.md, "Permissions").
+// from the attributes dcfs reported (docs/design.md, "Caller credentials").
 inline constexpr std::string_view kDefaultPermissions = "default_permissions";
 
 // The mount options dcfs passes to libfuse as one "-o a,b,c".

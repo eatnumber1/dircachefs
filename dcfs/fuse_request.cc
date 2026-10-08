@@ -52,7 +52,6 @@ size_t AppendDirEntriesPlus(
 
 FuseRequest::FuseRequest(fuse_req_t req) : req_(std::move(req)) {}
 
-
 FuseRequest::~FuseRequest() {
   if (!req_) return;
   // Every op method is expected to reply before returning (see
