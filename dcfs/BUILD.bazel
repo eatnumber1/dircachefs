@@ -1,5 +1,6 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//formal:trace.bzl", "tla_trace_test")
+load("//test/qemu:guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
 load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 load("//tools/warnings:flags_test.bzl", "flags_test")
 
@@ -856,6 +857,7 @@ TRACE_GROUP_FILTERS = {
         ],
         outs = ["dir_cache_fs_trace_%s.cpio.gz" % group],
         cmd = " ".join([
+            GUEST_LIBS_ENV,
             "$(location //test/qemu:scripts/mkinitramfs.sh)",
             "--unit",
             "$@",
@@ -865,7 +867,7 @@ TRACE_GROUP_FILTERS = {
             "vdb",
             "'--gtest_filter=%s'" % filt,
         ]),
-        tools = ["//test/qemu:scripts/mkinitramfs.sh"],
+        tools = ["//test/qemu:scripts/mkinitramfs.sh"] + GUEST_LIBS_TOOLS,
     )
     for group, filt in TRACE_GROUP_FILTERS.items()
 ]
