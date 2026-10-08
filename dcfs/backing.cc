@@ -1603,13 +1603,15 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
   ABSL_ASSIGN_OR_RETURN(
       struct statx stx,
       syscalls::statx(**child_fd, "", AT_EMPTY_PATH, kAttrMask | kMountIdMask));
+  // The statx saw the object: from here on a failure is one to record an
+  // object that exists (step 11.5b).
+  if (probed != nullptr) *probed = true;
   // Model: CreateProbe (the read; the identity cannot change after it).
   ctx.events->NewChildProbed(ctx, parent, name, ProbeOf(stx));
   ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr, cache::GetAttr(ctx, parent));
   BackingCall(ctx, "ProbeObject");
   ABSL_ASSIGN_OR_RETURN(
       ChildRecord record, ProbeObject(**child_fd, name, parent_attr.device, stx));
-  if (probed != nullptr) *probed = true;
 
   // Phase B: one transaction, no syscalls.
   NewChild result;

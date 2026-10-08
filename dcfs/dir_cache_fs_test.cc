@@ -2218,16 +2218,44 @@ TEST_F(DirCacheFSTest, CreateThatCannotBeRecordedEndsItsTraceFailed) {
   EXPECT_THAT(root, Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
 }
 
-// A create whose probe fails before it found the object replies the probe's
-// error, not EEXIST, which would not be known true (an EIO from a failing
-// backing filesystem here; ENOENT for a name gone again).
-TEST_F(DirCacheFSTest, CreateWhoseProbeFailsRepliesTheProbesError) {
+// A create whose probe saw the object (its statx succeeded) but could not
+// finish probing it (here the handle) cannot record it: the object exists,
+// so EEXIST, which makes the kernel drop its negative entry.
+TEST_F(DirCacheFSTest, CreateWhoseObjectWasSeenRepliesEexist) {
   Start();
   NameToHandleFailure() = EIO;
-  EXPECT_EQ(Send(FUSE_MKNOD, kRootInode, MknodBody("fifo")).error, -EIO);
+  EXPECT_EQ(Send(FUSE_MKNOD, kRootInode, MknodBody("fifo")).error, -EEXIST);
   EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("fifo"), AT_SYMLINK_NOFOLLOW),
               IsOk());
   EXPECT_NE(Lookup(kRootInode, "fifo").second.nodeid, 0u);
+}
+
+// Unlinks `path` when the request's phase-2 syscall returns: the created
+// object is gone again before the probe looks at it.
+class UnlinkAfterSyscall : public ProtocolEvents {
+ public:
+  explicit UnlinkAfterSyscall(std::string path) : path_(std::move(path)) {}
+  void MutationSyscall(Context &, const absl::Status &status) override {
+    if (status.ok()) {
+      unlinked = syscalls::unlinkat(AT_FDCWD, path_, 0).ok();
+    }
+  }
+  bool unlinked = false;
+
+ private:
+  std::string path_;
+};
+
+// A create whose probe finds the name gone (ENOENT before any statx saw the
+// object) replies the probe's own error: EEXIST would not be true.
+TEST_F(DirCacheFSTest, CreateWhoseObjectIsGoneRepliesEnoent) {
+  Start();
+  UnlinkAfterSyscall remover(Path("fifo"));
+  observers_->Add(&remover);
+  const int error = Send(FUSE_MKNOD, kRootInode, MknodBody("fifo")).error;
+  observers_->Remove(&remover);
+  ASSERT_TRUE(remover.unlinked);
+  EXPECT_EQ(error, -ENOENT);
 }
 
 // A writable create whose phase 1 for the writes (BeginWriting) cannot be
