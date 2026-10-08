@@ -502,28 +502,38 @@ T_SyncClearDirty ==
 \* EINTR, ending a mutation past phase 1 without phase 3.
 T_Interrupt == Ev("interrupt") /\ Interrupt(P) /\ Matches(E, {})
 
-\* The errno the request's frame returned, as the reply line records it
-\* (Linux's numbers): an error the handler returned, which fuse_ops.cc
-\* replies; 0 when the handler replied itself, a success (a negative entry
-\* included) or the ENOENT that RemoveChild and Rename reply when the
-\* resolve of their (source) name found nothing (ReplyErrno). Any errno
+\* The errno of the request's reply, as the reply line records it (Linux's
+\* numbers): the one the FUSE request sent (ProtocolEvents::Replied), 0 for
+\* a reply that is not an error; for a frame inside a request (a getattr
+\* or lookup of its own), the errno of the status it returned. Any errno
 \* not listed here is one the model never replies: the recorder cuts the
 \* trace there instead of writing a reply line.
 ErrnoClass(n) ==
-    CASE n = 2 -> "ENOENT" [] n = 4 -> "EINTR" [] n = 11 -> "EAGAIN"
-      [] n = 17 -> "EEXIST" [] OTHER -> "other"
-\* The code's reply agrees with what the model's request replied (`rep`,
-\* step 12.7b): the same errno class, where the frame's status says it.
-ReplyErrnoOK(n, v) ==
-    IF n = 0 THEN v.e = "ok" \/ (v.e = "ENOENT" /\ v.a # {})
-    ELSE v.e = ErrnoClass(n)
+    CASE n = 0 -> "ok" [] n = 2 -> "ENOENT" [] n = 4 -> "EINTR"
+      [] n = 11 -> "EAGAIN" [] n = 17 -> "EEXIST" [] OTHER -> "other"
+\* The code's reply has the errno class of the model's reply (`rep`, step
+\* 12.7b) ...
+ReplyErrnoOK(n, v) == v.e = ErrnoClass(n)
+\* ... and a lookup's reply the same answer: its line carries what
+\* LookupOrPopulate answered ("ans": "neg", or the key of the object it
+\* found), which must be the model's reply's entry (the object's key is
+\* checked against the object map, ReplyPairs).
+EntryAnswers(v) == {x \in v.a : x.k \in {"found", "neg"}}
+ReplyAnswerOK(e, v) ==
+    (v.e = "ok" /\ EntryAnswers(v) # {}) =>
+        /\ Has(e, "ans")
+        /\ \A x \in EntryAnswers(v) : (x.k = "neg") = (e.ans = "neg")
+ReplyPairs(e, v) ==
+    IF Has(e, "ans") THEN {<<x.o, e.ans>> : x \in {y \in v.a : y.k = "found"}}
+    ELSE {}
 
 \* The request replied; the model's request had already (its last step),
-\* with the same errno class.
+\* with the same errno class and, for a lookup, the same answer.
 T_Reply ==
     /\ Ev("reply") /\ ps[P].pc = "idle"
     /\ ReplyErrnoOK(E.errno, ps[P].rep)
-    /\ Stutter /\ Matches(E, {})
+    /\ ReplyAnswerOK(E, ps[P].rep)
+    /\ Stutter /\ Matches(E, ReplyPairs(E, ps[P].rep))
 
 T_BeginShutdown == Ev("shutdown") /\ BeginShutdown /\ Matches(E, {})
 T_StopSync == Ev("stop_sync") /\ StopSync /\ Matches(E, {})

@@ -652,6 +652,76 @@ TEST_F(TraceRecorderTest, ReplyLineCarriesTheFramesErrno) {
               Contains(HasSubstr("\"ev\":\"reply\",\"p\":\"p1\",\"errno\":0")));
 }
 
+// A request's reply line carries the errno the request sent (Replied), not
+// only its frame's status: an unlink whose resolve found nothing replies
+// ENOENT itself and returns OK (step 12.7b).
+TEST_F(TraceRecorderTest, ReplyLineCarriesTheErrnoSent) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kUnlink, .ino = d, .name = "x"});
+    {
+      events::Scope lookup(*ctx_.events, ctx_, &ProtocolEvents::LookupBegin,
+                           &ProtocolEvents::LookupEnd, d,
+                           std::string_view("x"));
+      ctx_.events->LookupDecided(ctx_, d, "x",
+                                 events::LookupOutcome::kNegative, 0);
+      ctx_.events->LookupAnswered(ctx_, d, "x",
+                                  events::LookupOutcome::kNegative, 0);
+    }
+    ctx_.events->NameResolved(ctx_, d, "x", false);
+    ctx_.events->Replied(ctx_, ENOENT);
+  }
+  EXPECT_THAT(Lines(d), Contains(HasSubstr(
+                            "\"ev\":\"reply\",\"p\":\"p1\",\"errno\":2")));
+}
+
+// A create whose syscall succeeded but whose probe found the new name gone
+// replies ENOENT, which the model's guards make unreachable (only an
+// out-of-band change can do it): its trace is cut there, not ended with a
+// reply line that ReplyObservable would reject (step 12.7b).
+TEST_F(TraceRecorderTest, CreateWhoseNewNameVanishedIsCut) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kMkdir, .ino = d, .name = "y"});
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginCreate(ctx_, d, "y"));
+    ctx_.events->MutationSyscallStarting(ctx_);
+    ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
+    ctx_.events->NewChildProbed(ctx_, d, "y", events::Probe{});
+    mutation.End();
+    request.Finish(ErrnoToStatus(ENOENT, "vanished")).IgnoreError();
+  }
+  const std::vector<std::string> lines = Lines(d);
+  EXPECT_THAT(lines, Not(Contains(HasSubstr("\"ev\":\"reply\""))));
+  EXPECT_THAT(lines, Contains(AllOf(HasSubstr("\"ev\":\"cut\""),
+                                    HasSubstr("out-of-band: the new name"))));
+}
+
+// A lookup request's reply line carries what LookupOrPopulate answered
+// ("ans": "neg", or the object's key), which T_Reply compares with the
+// model's reply (step 12.7b).
+TEST_F(TraceRecorderTest, LookupReplyLineCarriesItsAnswer) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kLookup, .ino = d, .name = "x"});
+    events::Scope lookup(*ctx_.events, ctx_, &ProtocolEvents::LookupBegin,
+                         &ProtocolEvents::LookupEnd, d, std::string_view("x"));
+    ctx_.events->LookupDecided(ctx_, d, "x", events::LookupOutcome::kNegative,
+                               0);
+    ctx_.events->LookupAnswered(ctx_, d, "x", events::LookupOutcome::kNegative,
+                                0);
+  }
+  EXPECT_THAT(Lines(d),
+              Contains(AllOf(HasSubstr("\"ev\":\"reply\""),
+                             HasSubstr("\"errno\":0,\"ans\":\"neg\""))));
+}
+
 // --- Startup lines ---------------------------------------------------------
 
 // A start in the same process after a clean shutdown (FinishRun, then

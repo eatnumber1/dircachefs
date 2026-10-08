@@ -229,6 +229,11 @@ class ProtocolEvents {
   // what was replied (OK also for a reply sent by the handler itself).
   virtual void RequestBegin(Context &ctx, const events::Request &request) {}
   virtual void RequestEnd(Context &ctx, const absl::Status &status) {}
+  // The request's reply was sent (fuse_ops.cc's Serve, right after it,
+  // before RequestEnd): `errnum` is the errno it carried, 0 for a reply that
+  // is not an error. Model: the errno class of the request's reply
+  // (ReplyObservable, step 12.7b).
+  virtual void Replied(Context &ctx, int errnum) {}
 
   // DirCacheFS::FreshAttr: the attributes of `id` were read from the cache
   // and are `valid` (served) or not (refreshed: RefreshBegin follows).
@@ -243,6 +248,13 @@ class ProtocolEvents {
   virtual void LookupBegin(Context &ctx, events::Ino parent,
                            std::string_view name) {}
   virtual void LookupEnd(Context &ctx, const absl::Status &status) {}
+  // LookupOrPopulate answers `name`, just before it returns: kFound with
+  // the child, kNegative, or kRefused with the stub. Model: the answer the
+  // request's reply carries (ReplyObservable, step 12.7b).
+  virtual void LookupAnswered(Context &ctx, events::Ino parent,
+                              std::string_view name,
+                              events::LookupOutcome answer,
+                              events::Ino child) {}
 
   // backing::RefreshAttrs/RefreshAttrsFromFd of `id`, from its fill
   // snapshot (taken right after this call) to its end. Model: the statx and

@@ -298,10 +298,16 @@ void TraceRecorder::Close(
                                   ? ""
                                   : unmodelled_end(req);
       if (why.empty()) {
-        // The errno the frame returned, which T_Reply compares with the
-        // model's reply (step 12.7b): 0 when the handler replied itself.
+        // What T_Reply compares with the model's reply (step 12.7b): the
+        // errno the FUSE request sent (Replied), else the frame's status
+        // (a frame inside one, or no reply sent through fuse_ops); and a
+        // lookup's answer.
+        const int err = frame.sent_errno.value_or(ErrnoOf(status));
         Emit(ctx, dir, &req, "reply",
-             absl::StrCat(",\"errno\":", ErrnoOf(status)));
+             absl::StrCat(",\"errno\":", err,
+                          req.answer.empty() ? ""
+                                             : absl::StrCat(",\"ans\":",
+                                                            req.answer)));
       } else if (why.starts_with("unexplained: ")) {
         Unexplained(ctx, dir, why.substr(13));
       } else {
@@ -625,21 +631,23 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
   FileRequestEnd(frame, err);
   Close(ctx, frame, status, [&](const Req &req) -> std::string {
     if (err == 0) return "";
-    // The errors the model has: a create's EEXIST from its syscall (or the
-    // name gone before its probe), an unlink's or rename's ENOENT from its
-    // syscall, and the EAGAIN of a readdir, unlink or rename that kept
-    // finding changes. A create whose syscall succeeded and whose object
-    // could not be recorded replies EEXIST too (CreatedButNotCompleted,
-    // step 11.4), but a failed cache write is not modelled: that ends the
-    // trace.
+    // The errors the model has: a create's EEXIST from its syscall, an
+    // unlink's or rename's ENOENT from its syscall, and the EAGAIN of a
+    // readdir, unlink or rename that kept finding changes. A create whose
+    // syscall succeeded and whose object could not be recorded replies
+    // EEXIST too (CreatedButNotCompleted, step 11.4), but a failed cache
+    // write is not modelled: that ends the trace. A create whose new name
+    // was gone before its probe replies ENOENT after its syscall
+    // succeeded, which the model's guards make unreachable
+    // (ReplyObservable rejects it): only an out-of-band change can.
     if (IsCreate(req.kind) && err == EEXIST && req.syscall_ok) {
       return "failed: a create whose object could not be recorded (a "
              "cache write failure, which the model does not have)";
     }
-    if (IsCreate(req.kind) &&
-        (err == EEXIST || (err == ENOENT && req.probe_absent))) {
-      return "";
+    if (IsCreate(req.kind) && err == ENOENT && req.probe_absent) {
+      return "out-of-band: the new name vanished before its probe";
     }
+    if (IsCreate(req.kind) && err == EEXIST) return "";
     if ((req.kind == "unlink" || req.kind == "rename") &&
         ((err == ENOENT && req.syscall_seen && !req.syscall_ok) ||
          err == EAGAIN)) {
@@ -651,6 +659,12 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
     }
     return absl::StrCat("failed: the request failed: ", status.ToString());
   });
+  After(ctx);
+}
+
+void TraceRecorder::Replied(Context &ctx, int errnum) {
+  Enter("Replied");
+  if (Frame *rf = InnermostRequest(); rf != nullptr) rf->sent_errno = errnum;
   After(ctx);
 }
 
@@ -718,6 +732,30 @@ void TraceRecorder::LookupEnd(Context &ctx, const absl::Status &status) {
   frames_.pop_back();
   Close(ctx, frame, status,
         [&](const Req &) { return FrameEnd("a lookup", status); });
+  After(ctx);
+}
+
+void TraceRecorder::LookupAnswered(Context &ctx, Ino parent,
+                                   std::string_view name,
+                                   events::LookupOutcome answer, Ino child) {
+  Enter("LookupAnswered");
+  // A lookup request's answer, for its reply line (T_Reply compares it with
+  // the model's). An unlink's or rename's resolve answers nothing they
+  // reply but its ENOENT, which their errno says.
+  if (Req *req = Traced(parent) ? Find(parent) : nullptr;
+      req != nullptr && req->kind == "lookup") {
+    switch (answer) {
+      case events::LookupOutcome::kFound:
+        req->answer = JsonStr(KeyOf(ctx, child));
+        break;
+      case events::LookupOutcome::kNegative:
+        req->answer = JsonStr("neg");
+        break;
+      default:
+        req->answer = JsonStr("refused");
+        break;
+    }
+  }
   After(ctx);
 }
 

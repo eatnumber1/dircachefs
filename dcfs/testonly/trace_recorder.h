@@ -89,6 +89,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -119,11 +120,15 @@ class TraceRecorder final : public ProtocolEvents {
 
   void RequestBegin(Context &ctx, const events::Request &request) override;
   void RequestEnd(Context &ctx, const absl::Status &status) override;
+  void Replied(Context &ctx, int errnum) override;
   void GetattrBegin(Context &ctx, events::Ino id, bool valid) override;
   void GetattrEnd(Context &ctx, const absl::Status &status) override;
   void LookupBegin(Context &ctx, events::Ino parent,
                    std::string_view name) override;
   void LookupEnd(Context &ctx, const absl::Status &status) override;
+  void LookupAnswered(Context &ctx, events::Ino parent, std::string_view name,
+                      events::LookupOutcome answer,
+                      events::Ino child) override;
   void RefreshBegin(Context &ctx, events::Ino id) override;
   void RefreshEnd(Context &ctx, const absl::Status &status) override;
   void SyncBegin(Context &ctx) override;
@@ -221,6 +226,9 @@ class TraceRecorder final : public ProtocolEvents {
     bool probe_absent = false;     // a create's probe found nothing
     bool owned = false;            // Mutation::Owns at its End
     bool interrupted = false;      // a checkpoint found it interrupted
+    // A lookup's: what LookupOrPopulate answered (JSON: "neg", "refused" or
+    // the object's key), for its reply line.
+    std::string answer;
     // Why its trace ends at a point whose kind (a cut if the request fails,
     // "unexplained" if it replies OK) its end decides (Defer).
     std::string pending;
@@ -239,6 +247,8 @@ class TraceRecorder final : public ProtocolEvents {
     unsigned int flags = 0;
     int64_t offset = 0;
     int ioctl_arg = 0;
+    // kRequest: the errno its reply carried (Replied), once sent.
+    std::optional<int> sent_errno;
     // kGetattr, kRefresh: the inode; kLookup: the parent and the name.
     Ino id = 0;
     std::string lookup_name;
@@ -324,8 +334,9 @@ class TraceRecorder final : public ProtocolEvents {
   Req &Open(Frame &frame, Ino dir, std::string kind, std::string n = "",
             std::string m = "");
   // Closes `frame`: frees its slots and ends each of its requests with a
-  // "reply" line (with the errno `status` carries, 0 if OK), or with a
-  // cut if `unmodelled_end(req)` names a reason
+  // "reply" line (with the errno the request sent, or else the one
+  // `status` carries, 0 if OK, and a lookup's answer), or with a cut if
+  // `unmodelled_end(req)` names a reason
   // (an end the model does not have), or an "unexplained" line if the
   // reason starts with "unexplained: ".
   void Close(Context &ctx, Frame &frame, const absl::Status &status,

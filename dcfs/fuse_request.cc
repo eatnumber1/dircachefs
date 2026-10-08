@@ -196,6 +196,7 @@ absl::StatusOr<Credentials> FuseRequest::Caller() const {
 
 absl::Status FuseRequest::ReplyErrno(int errnum) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
+  errno_sent_ = errnum;
   absl::Status st =
     dcfs::ErrnoToStatus(-fuse_reply_err(*req_, errnum), "fuse_reply_err");
   req_ = std::nullopt;

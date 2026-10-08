@@ -137,6 +137,10 @@ class FuseRequest {
   // performing an operation that correctly produces an error code.
   absl::Status ReplyErrno(int errnum);
 
+  // The errno of the reply sent so far: what ReplyErrno (or ReplyFailure)
+  // sent, 0 if none was (a successful reply, or none yet).
+  int errno_sent() const { return errno_sent_; }
+
   // A true failure response, e.g. db connection lost. We failed to do what
   // the user asked for.
   //
@@ -161,6 +165,7 @@ class FuseRequest {
   absl::Status ReplyEntryParam(const fuse_entry_param &param);
 
   std::optional<fuse_req_t> req_;
+  int errno_sent_ = 0;
 };
 
 }  // namespace dcfs

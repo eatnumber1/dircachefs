@@ -1390,7 +1390,8 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::LookupBegin,
                       &ProtocolEvents::LookupEnd, parent, name);
   // The frame's result is its End's status.
-  return scope.Finish([&]() -> absl::StatusOr<cache::LookupResult> {
+  absl::StatusOr<cache::LookupResult> answer =
+      [&]() -> absl::StatusOr<cache::LookupResult> {
     ABSL_ASSIGN_OR_RETURN(cache::LookupResult result,
                           cache::Lookup(ctx, parent, name));
     // `name` is a persisted refusal (see ProbeChild/cache::SetRefused): it
@@ -1451,7 +1452,19 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
         << "name " << EscapeBytes(name) << " of directory " << parent
         << " still unknown after its listing was recorded";
     return result;
-  }());
+  }();
+  // Model: the answer the request's reply carries.
+  if (answer.ok()) {
+    ctx.events->LookupAnswered(
+        ctx, parent, name,
+        answer->kind == cache::LookupResult::Kind::kFound
+            ? events::LookupOutcome::kFound
+        : answer->kind == cache::LookupResult::Kind::kRefused
+            ? events::LookupOutcome::kRefused
+            : events::LookupOutcome::kNegative,
+        answer->id);
+  }
+  return scope.Finish(std::move(answer));
 }
 
 absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {

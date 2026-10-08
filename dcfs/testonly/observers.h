@@ -34,6 +34,9 @@ class Observers final : public ProtocolEvents {
   void RequestEnd(Context &ctx, const absl::Status &status) override {
     for (ProtocolEvents *o : observers_) o->RequestEnd(ctx, status);
   }
+  void Replied(Context &ctx, int errnum) override {
+    for (ProtocolEvents *o : observers_) o->Replied(ctx, errnum);
+  }
   void GetattrBegin(Context &ctx, events::Ino id, bool valid) override {
     for (ProtocolEvents *o : observers_) o->GetattrBegin(ctx, id, valid);
   }
@@ -46,6 +49,12 @@ class Observers final : public ProtocolEvents {
   }
   void LookupEnd(Context &ctx, const absl::Status &status) override {
     for (ProtocolEvents *o : observers_) o->LookupEnd(ctx, status);
+  }
+  void LookupAnswered(Context &ctx, events::Ino parent, std::string_view name,
+                      events::LookupOutcome answer,
+                      events::Ino child) override {
+    for (ProtocolEvents *o : observers_)
+      o->LookupAnswered(ctx, parent, name, answer, child);
   }
   void RefreshBegin(Context &ctx, events::Ino id) override {
     for (ProtocolEvents *o : observers_) o->RefreshBegin(ctx, id);

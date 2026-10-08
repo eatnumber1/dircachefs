@@ -82,11 +82,11 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
-# Without the kernel's directory lock (the coroutine future); a few
-# minutes. Timeout: 8,224,822 distinct states since step 12.7b's reply
-# ghost (6,365,804 before it); the CI runner took 506 s for those 6,365,804
-# (about 80 us per state), so about 650-700 s now with ReplyObservable
-# checked on every step, too close to "long"'s 900 s.
+# Without the kernel's directory lock (the coroutine future). Timeout:
+# 8,224,822 distinct states since step 12.7b's reply ghost (6,365,804
+# before it); the CI runner took 506 s for those 6,365,804 (about 80 us
+# per state), so about 650-700 s now with ReplyObservable checked on every
+# step, too close to "long"'s 900 s.
 tlc_test(
     name = "nolock_test",
     size = "large",
@@ -439,9 +439,16 @@ TRACE_TESTS = {
     # ... but a reply that says success (errno 0) after that failed
     # syscall is rejected at the reply.
     "reply_create_eexist_replied_ok": "\"ev\":\"reply\",\"p\":\"p1\",\"errno\":0",
-    # An unlink whose resolve found nothing: RemoveChild replies ENOENT
-    # itself, so its frame returns OK (errno 0): valid.
+    # An unlink whose resolve found nothing replies ENOENT (2, the errno it
+    # sent: RemoveChild replies it itself): valid.
     "reply_unlink_absent": None,
+    # ... but a reply of success (errno 0) there is rejected at the reply.
+    "reply_unlink_absent_replied_ok": "\"ev\":\"reply\",\"p\":\"p1\",\"errno\":0",
+    # A lookup's reply carries LookupOrPopulate's answer ("ans"): the
+    # object its resolve probed is valid ...
+    "reply_lookup_answer": None,
+    # ... a negative entry after that probe is rejected at the reply.
+    "reply_lookup_answer_wrong": "\"ev\":\"reply\",\"p\":\"p1\",\"errno\":0,\"ans\":\"neg\"",
 }
 
 [

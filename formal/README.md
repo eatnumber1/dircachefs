@@ -360,21 +360,36 @@ idle, or an idle slot flips `rb`: a request that arrived and replied at
 once):
 
 ```tla
+QK(x) == IF x.k \in {"found", "neg"} THEN "entry" ELSE x.k
+QueryKinds(k) ==
+    CASE k \in {"lookup", "unlink", "rename"} -> {"entry"}
+      [] k = "getattr" -> {"attr"}
+      [] k = "readdir" -> {"list"}
+      [] k = "readdirplus" -> {"list", "attr"}
+      [] OTHER -> {}
+
 ReplyWitnessed(r, v) ==
-    CASE v.e \in {"EAGAIN", "EINTR"} -> r.eff = None /\ v.a = {}
-      [] r.eff # None -> v = Rep(r.eff, {})
-      [] r.kind = "sync" -> v = Rep("ok", {})
+    CASE v.e \in {"EAGAIN", "EINTR"} -> r.eff # "ok" /\ v.a = {}
+      [] r.eff # None -> v.e = r.eff /\ v.a = {}
+      [] r.kind = "sync" -> v.e = "ok" /\ v.a = {}
       [] OTHER ->
            /\ v.a # {} /\ v.a \subseteq Window(r)
+           /\ {QK(x) : x \in v.a} = QueryKinds(r.kind)
            /\ IF r.kind \in {"unlink", "rename"}
               THEN v.e = "ENOENT" /\ \A x \in v.a : x.k = "neg"
               ELSE v.e = "ok"
+
+ImmediateWitnessed(v) ==
+    /\ v.e = "ok" /\ v.a # {} /\ \A x \in v.a : AnswerOK(x, bCur)
+    /\ {QK(x) : x \in v.a} = QueryKinds(v.k)
 ```
 
-where `r` is the slot's state before the reply step. A request that
-arrived and replied in the same step (an answer served from the cache at
-once) has one instant, the current one: `v.e = "ok"`, `v.a # {}`, and every
-answer in `v.a` agrees with `bCur` (`ImmediateWitnessed`). In words:
+where `r` is the slot's state before the reply step, and `v.k` the kind of
+the request that replied (`Reply` records it). A request that arrived and
+replied in the same step (an answer served from the cache at once,
+`ImmediateWitnessed`) has one instant, the current one. A reply carries
+every kind of answer its request replies and no other (`QueryKinds`): a
+readdirplus that replied only D's attributes is rejected. In words:
 
 - **A mutation that reached its syscall** replies what the backing
   filesystem answered there (`eff`, recorded by `CreateSyscall`,
@@ -400,7 +415,11 @@ answer in `v.a` agrees with `bCur` (`ImmediateWitnessed`). In words:
 - **A readdirplus's** listing and D's attributes are two answers, each
   checked on its own: the listing is taken from the cache before the statx
   of D, so without the kernel's lock they can come from different
-  instants, as from two requests.
+  instants, as from two requests. That weakening costs nothing a caller
+  sees: the kernel ignores the attributes of "." and ".." in a READDIRPLUS
+  reply (`fuse_direntplus_link` in `fs/fuse/readdir.c` returns before
+  linking either), so D's attributes there reach no cache, and the listing
+  is checked as strictly as a readdir's.
 - **`EAGAIN` and `EINTR`** report that nothing happened: they are allowed
   only from a request that had no effect point, that is no syscall that
   succeeded (a mutation interrupted before its syscall; an unlink, rename
@@ -415,8 +434,15 @@ answer in `v.a` agrees with `bCur` (`ImmediateWitnessed`). In words:
   under `EffectAtSyscall` either).
 
 What the reply leaves out: the create's entry (its object and attributes;
-the model's reply to a create is its errno class), and, in trace
-validation, attribute values, which traces do not compare (below). The
+the model's reply to a create is its errno class). Trace validation
+compares, for every request, the errno the code sent with the model's
+reply's class, and for a lookup the answer `LookupOrPopulate` returned
+with the model's reply's entry (below). Still uncompared there: the entry
+a lookup sends (its nodeid and attributes, built from that answer by
+`EntryFor`), the listing a readdir or readdirplus sends (the model's comes
+from the cache rows the trace checks at its `list_check`, the code's
+entries are not recorded), attribute values (traces compare none, as for
+fills), and an unlink's or rename's resolve answer beyond its `ENOENT`. The
 idle slots' `rep` and `rb` are merged by the `View` (`IdleView` in
 `MC.tla`): only the property, at the step that writes them, and trace
 validation (which has no `VIEW`) read them, so they cost no states where a
@@ -437,13 +463,13 @@ with the kernel's lock only a getattr can.
 
 | Configuration | Test (tier) | Bounds | States | Time |
 |---|---|---|---|---|
-| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants, the three effect-point properties (step 12.7; also in `MC_recovery.cfg`, `MC_liveness.cfg` and `MC_interrupt.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) and `ReplyObservable` (step 12.7b; also in `MC_recovery.cfg`, `MC_interrupt.cfg`, `MC_nolock.cfg`, `MC_interrupt_nolock.cfg` and `Trace.cfg`) | 935,825 | ~2 min (4 min at load 15, 2026-10-08) |
+| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants, the three effect-point properties (step 12.7; also in `MC_recovery.cfg`, `MC_liveness.cfg` and `MC_interrupt.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) and `ReplyObservable` (step 12.7b; also in `MC_recovery.cfg`, `MC_large.cfg`, `MC_nolock.cfg`, every `MC_interrupt*.cfg` and `Trace.cfg`) | 935,825 | ~2 min (4 min at load 15, 2026-10-08) |
 | `MC_recovery.cfg` | `recovery_test` (medium) | 1 name, 1 slot, 2 mutations, 2 crashes (one can come during the recovery of a dirty database: steps 12.6, 12.6b), all request kinds, all invariants and properties | 25,861 | ~10 s |
-| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates`. The reply ghost is off (`RecordReply <- ForgetReply`): without a VIEW the idle slot's last reply tripled the states (338,790), for no property checked here | 101,898 | ~20-45 s |
-| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 10,239,570 | ~8 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11, 2026-10-08) |
+| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates`. It checks the invariants, the three effect-point properties and `RecoveryTerminates` (TLC reads both of its `PROPERTIES` sections), but not `ReplyObservable`: the reply ghost is off (`RecordReply <- ForgetReply`), since without a VIEW the idle slot's last reply tripled the states (338,790) | 101,898 | ~20-45 s |
+| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes; `ReplyObservable` | 10,239,570 | ~8 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11, 2026-10-08) |
 | `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
 | `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 230,662 | ~30-70 s |
-| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one) | 892,708 | ~1-2.5 min |
+| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable` | 892,708 | ~1-2.5 min |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable` | 1,036,982 | ~1.5-4 min |
 
 `Interrupts` (Phase 22) is off in the first five: with it, `MC_small.cfg`
@@ -543,7 +569,8 @@ The pieces:
   that say which steps belong to one request. Production binaries call a
   no-op (`NoProtocolEvents()`; `main.cc` gets it from
   `MainProtocolEvents()`, defined in `dcfs/protocol_events_main.cc`). The
-  call sites are the only change to production code.
+  call sites are the only change to production code, with
+  `FuseRequest::errno_sent` (the errno a reply carried, for `Replied`).
 - `dcfs/testonly/trace_recorder.cc`: the recorder. The daemon's recording
   build, `//dcfs:main_static_traced` (testonly), links
   `dcfs/testonly/main_recorder.cc` instead of `protocol_events_main.cc`
@@ -600,7 +627,9 @@ right after the code the model's step stands for, with no backing syscall
 
 | Event (`ProtocolEvents::`) | Call site | Line | Model action (`Trace.tla`) | `docs/design.md` |
 |---|---|---|---|---|
-| `RequestBegin` / `RequestEnd` | `fuse_ops.cc` (`Serve`): dispatch, reply | `reply` (`errno`: the status the frame returned, 0 if OK) | which steps are one request; `T_Reply`: the model's request has replied, with the same errno class (step 12.7b) | Concurrency |
+| `RequestBegin` / `RequestEnd` | `fuse_ops.cc` (`Serve`): dispatch, reply | `reply` (`errno`, and a lookup's `ans`) | which steps are one request; `T_Reply`: the model's request has replied, with the same errno class and answer (step 12.7b) | Concurrency |
+| `Replied` | `fuse_ops.cc` (`Serve`), after the reply: the errno sent (`FuseRequest::errno_sent`) | the `reply` line's `errno` | the class of the model's reply | Concurrency |
+| `LookupAnswered` | `backing::LookupOrPopulate`, before it returns | the `reply` line's `ans` (a lookup's) | the entry the model's lookup replied | Population policy |
 | `GetattrBegin` / `GetattrEnd` | `DirCacheFS::FreshAttr` | `attr_check`, `rdp_attr_check` | `Arrive` of a getattr (`GAFrom`); for Readdirplus's ".", part of its `RDFrom` (`T_ReaddirplusAttrCheck`) | Population policy; Concurrency (fill guards) |
 | `LookupBegin` / `LookupEnd` | `backing::LookupOrPopulate` | | a LookupOrPopulate of a lookup, an unlink's or rename's resolve, or a failed mutation's re-resolve | Population policy |
 | `RefreshBegin` / `RefreshEnd` | `backing::RefreshAttrs`, `RefreshAttrsFromFd` (also the refresh that ends `DirCacheFS::ReconcileWritten`, step 23.1: a file's, never a directory's, so no directory's trace has a line for it) | `attr_check` (a refresh of unknown attributes that no request of the directory expects) | the statx and fill that end a getattr, readdirplus or mutation; otherwise a getattr of its own | The write-through protocol: Phase 3 |
@@ -797,16 +826,21 @@ ends the trace with a `failed` cut, unless the error is one the model's
 request replies (create's `EEXIST`, unlink's and rename's `ENOENT` from
 their syscall, `EAGAIN`, `EINTR`); otherwise it replies, and `T_Reply`
 requires its model request to have replied, so a frame that skipped a step
-is rejected there. The reply line carries the frame's errno (`errno`), and
+is rejected there. The reply line carries the errno the request sent
+(`errno`: `FuseRequest::ReplyErrno` keeps it and `fuse_ops.cc`'s `Serve`
+reports it, `Replied`; 0 for a reply that is not an error, so also for a
+negative entry; a frame inside a request, such as a getattr of its own,
+gives its status's errno instead), and a lookup's also LookupOrPopulate's
+answer (`ans`: `"neg"`, or the found object's key; `LookupAnswered`).
 `T_Reply` requires the model's reply (`rep`, see
-[Replies](#replies-what-replyobservable-quantifies-over)) to have its class
-(`ReplyErrnoOK`): an errno names the class (Linux's numbers: 2, 4, 11,
-17); 0 is a success, or the `ENOENT` that `RemoveChild` and `Rename` reply
-themselves (`ReplyErrno`, so their frame returns OK) when the resolve of
-their (source) name found nothing, which the model's reply marks by
-carrying that negative answer. A reply line's errno is the frame's status,
-not the bytes sent to the kernel; no recorder hook sees those. `Trace.cfg`
-also checks `ReplyObservable` on every recorded behavior. The
+[Replies](#replies-what-replyobservable-quantifies-over)) to have that
+errno's class (`ReplyErrnoOK`, Linux's numbers: 0, 2, 4, 11, 17) and a
+lookup's to carry that answer (`ReplyAnswerOK`, the key checked against
+the object map). So an unlink whose resolve found nothing must send
+`ENOENT` (`RemoveChild` replies it itself, returning OK), and a lookup
+that answers a negative entry after its resolve or listing read the name
+present is rejected at its reply. `Trace.cfg` also checks
+`ReplyObservable` on every recorded behavior. The
 guest tests also name the root directory's trace (`root`), which must have
 events and reach the end of the run, its last line the run's final event
 (`clean` or `stop_clear`, with no later line of the run but that step's
@@ -821,7 +855,7 @@ categories:
 | `link` | the model's objects never get a second name (an unnamed `O_TMPFILE` file's first one is a linkcreate, not a cut) | crash, rename, create |
 | `dir-attrs`, `dir-itself` | the model has no mutation of D's own attributes (a setattr, xattr change or flag-setting ioctl of D); `dir-itself`: D named as an object (removed, moved) by a request that resolved one of its names to D (else `unexplained`) | crash (both), rename, create (`dir-itself`) |
 | `boundary` | a refused mount or subvolume boundary is not modelled | rename, create |
-| `out-of-band` | not modelled (`ReconcileAttrs`) | create |
+| `out-of-band` | not modelled (`ReconcileAttrs`); also a create whose new name was gone before its probe (it replies `ENOENT` after its syscall succeeded, which the model's guards make unreachable and `ReplyObservable` rejects; only an out-of-band change can do it) | create |
 | `invalidated` | a forgotten inode's dentries became unknown (`InvalidateInode` after `ESTALE`) | none |
 | `failed` | a syscall error other than create's `EEXIST` and unlink's/rename's `ENOENT`, or a frame that returned an error: the model's syscalls fail only that way, and its requests always finish | the guest tests |
 | `overlapping-listings` | a listing of D during another listing's reads (the reordering of `populate_read` cannot place both) | none |
@@ -893,8 +927,10 @@ renames with flags and syscall failures.
   (`formal/trace_tests/`, no guest): the begin-line origins, how
   recovery may forget a clean directory's dentries, and the reply's errno
   (step 12.7b: a failed create's `EEXIST` is valid, a reply of success
-  after it is rejected at the reply line, and an unlink's `ENOENT` from its
-  resolve is valid with errno 0).
+  after it is rejected at the reply line; an unlink's `ENOENT` from its
+  resolve is valid, success there is rejected; a lookup's answer is the
+  object its resolve probed, and a negative entry after that probe is
+  rejected).
 
 A crash during recovery (steps 12.6, 12.6b):
 `//dcfs:trace_crash_during_recovery_test` runs the harness built so that
