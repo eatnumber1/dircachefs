@@ -121,10 +121,12 @@ hit when it tried a dcfs-over-dcfs test.
 - Tying the cache to the backing by UUID is not required: if the operator
   mounts a different filesystem under dcfs, that is garbage in, garbage
   out. No new identity marker (no xattr or file written into the backing).
-  Replace the UUID check by something cheap and always available, e.g.
-  the mount point (the source spec as written) plus `statfs` `f_fsid`,
-  recorded in `cache_state` and compared at start as a sanity check with a
-  clear error, never as a guarantee.
+  Use the filesystem UUID when the backing has one (as today); when
+  `FS_IOC_GETFSUUID` is unsupported, fall back to something cheap and
+  always available, the mount point (the source spec as written) plus
+  `statfs` `f_fsid`, recorded in `cache_state` and compared at start as a
+  sanity check with a clear error, never as a guarantee (russ, 2026-10-08:
+  "use the uuid if it is available").
 - The NFS export side (handle classes, generation, `ident.tla` from 12.5)
   is unchanged by this; it keys on the backing's handles, not the UUID.
 

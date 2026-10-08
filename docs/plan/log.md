@@ -1868,3 +1868,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   simplification: recorded as 23.10 (after 12.8 and 23.8 merge; protocol agent). glibc: bump the
   sysroot to Debian 13 (7.1c, next free lane; osv shipped-deb scan becomes gating with
   ignore-with-expiry for records no release fixes).
+- russ, 2026-10-08: identity uses the filesystem UUID when available; mount point + f_fsid only as the fallback.
