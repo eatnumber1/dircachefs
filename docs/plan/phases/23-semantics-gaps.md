@@ -295,3 +295,18 @@ Decision and alternatives: `notes/atime-alternatives-2026-10-08.md`.
   goldens and syscall budgets say so).
 Owner: dcfs-protocol.
 
+## 23.9 LINK of a removed object answers what the backing answers (russ, 2026-10-08)
+
+The README's "Removed objects that are still referenced cannot be linked
+back" overstates the limitation: Linux itself refuses to link an inode
+with no links (`vfs_link`: ENOENT unless `I_LINKABLE`, which only
+`O_TMPFILE` sets, and that case works through dcfs), and a directory can
+never be hard-linked (EPERM). The only difference is the errno: dcfs
+replies ESTALE for a LINK whose source row is a removed object. Make the
+behaviour identical: forward the backing's answer (`linkat` by the held
+descriptor with `AT_EMPTY_PATH`, which yields ENOENT for an unlinked
+regular file, EPERM for a directory, and succeeds for an O_TMPFILE file
+as today), test each against the same operation on the backing
+(`removed_test`), and rewrite the README and design.md paragraphs. After
+23.8, same agent. Owner: dcfs-protocol.
+

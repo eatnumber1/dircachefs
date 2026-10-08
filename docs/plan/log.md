@@ -1725,3 +1725,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   sync point. Directories and symlinks: stamped in the cache, never written to the backing (the
   only way to move a directory atime like a read is a read; utimensat bumps ctime). Alternatives
   in notes/atime-alternatives-2026-10-08.md. Dispatched to lane-4 (new protocol agent).
+- 23.9 (russ, 2026-10-08): LINK of a removed object must answer exactly what the backing answers
+  (ENOENT for an unlinked file, EPERM for a directory, success for O_TMPFILE), not ESTALE; README
+  paragraph rewritten. Queued after 23.8 in lane-4.
