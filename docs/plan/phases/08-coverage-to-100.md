@@ -89,3 +89,13 @@ validation reject: no model has an event for the end of an attribute
 change (a 12.x item). 8.2b, from the first per-push run: `Release`
 (`dir_cache_fs.cc:1704`, `writable` negated in a `?:`) and `Fallocate`
 (`:2370`, `mutation->End()` deleted: the #4 pattern).
+
+8.2b done 2026-10-08 (55d0128): `ReleaseReportsWhetherTheOpenCouldWrite`
+(kills mutants 211 and 224), `FallocateEndsItsMutationBeforeItsRefreshes`
+(250). 8.2c, from a 60-mutant sweep (51 killed, 7 survived, 2 invalid,
+211 s per mutant under load), all in `dcfs/dir_cache_fs.cc`:
+`Setattr:655` End deleted; `ReconcileWritten:762` `!IsNotFound` negated;
+`ReconcileWritten:832` `!refreshed.ok() && !IsNotFound` negated;
+`OpenInode:1488` `!shared` negated; `OpenInode:1525` `backing_id > 0`
+negated; `Release:1738` `!closed.ok()` negated; `Setxattr:2103`
+`!stored.ok()` negated.

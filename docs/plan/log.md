@@ -1543,3 +1543,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   sweep 49 sites / 111 iterations / 14.7 s, budgets unchanged, fast 176 + 2 skips, presubmit+
   formal 252 + 2, asan small 32 + 1; subjects ok); one more rebase over Phase 22 (checkpoints and
   the Interrupted event in the same files) handed to the agent; then merge.
+- 26.5c merged (1be6511): `mutation-changed` and `subjects` are their own jobs (a bad subject no
+  longer skips the tests); `cold: true` dispatch input skips the caches; timeouts carry cold
+  estimates (cold fetch of every repo 23.5 min under load; C++ ~20 min); accelerator.sh no-op
+  without testlogs; dir_cache_fs_trace_test split into a/b/c (132 valid traces, ~5 min each under
+  load). 8.2b merged (55d0128). 8.2c (seven survivors) dispatched to lane-4. Job list now:
+  subjects, fast, presubmit, coverage, reproducible, mutation-changed, full x3, asan x3, ubsan x3,
+  osv.
