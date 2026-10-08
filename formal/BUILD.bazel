@@ -69,11 +69,14 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
-# Larger bounds (about ten minutes on four cores).
+# Larger bounds (about ten minutes on four cores). Timeout: 9,164,576
+# distinct states since step 12.6b's daemon crash; the CI runner took 634 s
+# for the 7,238,097 before it (about 88 us per state), so about 800 s now,
+# too close to "long"'s 900 s.
 tlc_test(
     name = "large_test",
     size = "large",
-    timeout = "long",
+    timeout = "eternal",
     config = "MC_large.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
