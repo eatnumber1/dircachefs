@@ -1837,3 +1837,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   kept unknown; a readable parent's ENOENT or a different handle -> ESTALE as before; 18 xfs SKIP
   cells became FAIL-then-PASS; the model cannot express a handle open, so a formal/README limitation
   names 12.7b's reply_unknown_as_negative as the class.
+- 12.7c + 12.11 merged (e05b345, three commits) after a "merge" review (nits: cite the VFS lock
+  for leaving attrchange out of nolock or add it to MC_interrupt_nolock; GuardsBalanced overlaps
+  DbMatches). small_test and known_bug_rename_stale_source_test to `long`. Lane-1 free: 12.8 next.

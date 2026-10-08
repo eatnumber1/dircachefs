@@ -243,4 +243,14 @@ attribute change (copy_file_range, fallocate) is invisible to trace
 validation: no model has an event for the end of an attribute change, so
 the trace still validates. Add the event to dcfs.tla's attribute-change
 transitions (and the recorder), with a known-bug variant "End skipped"
+(done 2026-10-08, e05b345: `attrchange` request of D with phase 1,
+syscall, End, refresh fill and reply; `known_bugs/attr_change_end_skipped`
+violates GuardsBalanced; Trace.cfg checks GuardsBalanced; the recorder maps
+directory setattr/setxattr/removexattr/SETFLAGS/FSSETXATTR to it and the
+`dir-attrs` cut is gone; configs with `WithAttrChanges`: small 1.48M,
+recovery 40k, liveness 147k, interrupt 281k; large/nolock keep
+`AllRequests`. Limit: dcfs.tla models only D, so a skipped End after
+copy_file_range, fallocate or a file's setattr is caught only by the
+harness tests; 12.11b would be a per-file attribute trace. 12.7c in the
+same merge: a handler returning OK without replying is an unexplained line.)
 that validation rejects.
