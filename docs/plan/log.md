@@ -1882,3 +1882,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   had also broken the grep), coverage baseline 95.97 / 79.22 from the gate on this tree. Fast 201 +
   2; presubmit green before the last rebases, not rerun on the final tree. PUSH POINT. Lane-5 free:
   7.1c (sysroot to Debian 13) dispatched.
+- 23.8 + 23.9 reviewed (Opus): fix first for both. 23.9: LinkRemoved's success path is reachable
+  (a closed never-linked O_TMPFILE held by nodeid) and records the new row undirty with a new
+  nodeid and an interruptible re-resolve after the syscall. 23.8: a mutation row on a file held
+  read-only keeps sync points running until release; recovery probes every atime-only row (a
+  read-mostly workload pays for weeks of reads after a crash; the model's RecoverF only invalidates
+  attributes): atime-only rows older than the kernel's dirtytime expiry will drive a sync point;
+  concurrency configs missing; Destroy makes a shutdown with read-only opens clean against the
+  model's text; checker self-checks missing; HeldFdOf includes written_'s O_PATH fd (statx per
+  GETATTR of written files); DropAtimeStamp before the syscall. Sent back to lane-4.
