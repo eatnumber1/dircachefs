@@ -1752,3 +1752,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   a backing-errno record failure) plus idle-line placement/threshold, hot-path sync INFO on fsync,
   level inconsistencies, LOG_FIRST_N for failed recovered rows, IgnoreError refreshes, wording, a
   vacuous test, doc mismatches. All sent as 25.3b to lane-5 (same agent).
+- CI on f1a426d (run 37799862872, russ's push): subjects, osv (with the informational glibc scan),
+  fast 12 min, mutation-changed 19 min (first green run of the job), reproducible 19 min, presubmit
+  21 min green. Sharded jobs with restored caches: full 17-24 min, asan 23-26 min, ubsan 19-25 min
+  per shard (the 2-2.7 h asan estimate assumed cold caches; keep the 240 min limit for cold runs).
+  Four failures, none a protocol bug: coverage (dcfs lines 95.65 < baseline 95.82: 25.3's new code
+  partly uncovered; branches rose to 78.68) -> 25.3b; cancel_test on full/asan/ubsan
+  (`checkpoint-logged FAIL`: the guest script greps a log line 25.3 moved) -> 25.3b; ubsan(0)
+  syscall_traces_test cold-lookup with six extra pipe2/fcntl/write/close syscalls (a UBSan report
+  or runtime init under the 7.1b compiler-rt) -> lane-6 investigator; asan(0) cancel_test guest OOM
+  at 384 MiB and cancel_inventory_test's dcfs dying (no `asan_mem` on the two 20k-entry cancel
+  tests) -> lane-6. Next push point after 25.3b and the sanitizer fixes land.
