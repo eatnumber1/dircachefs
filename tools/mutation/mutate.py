@@ -327,6 +327,21 @@ def bazel(workspace, *args, check=True):
                           check=check)
 
 
+def prerequisites_args(target):
+    """The bazel command that builds what compiling the target's sources
+    needs and nothing else: generated headers (libfuse_config.h, ...) and
+    the external sources, not the objects."""
+    return ["build", "--output_groups=compilation_prerequisites_INTERNAL_", target]
+
+
+def build_prerequisites(workspace, target):
+    """Build the target's generated headers; a failure is a tooling error."""
+    p = bazel(workspace, *prerequisites_args(target), check=False)
+    if p.returncode != 0:
+        sys.stderr.write(p.stderr.decode(errors="replace")[-2000:])
+        raise SystemExit("bazel could not build the compile prerequisites of %s" % target)
+
+
 def compile_command(workspace, target, source):
     aq = bazel(workspace, "aquery", "--output=jsonproto",
                "mnemonic(CppCompile, %s)" % target).stdout
@@ -355,8 +370,9 @@ def generate(args):
         source_path = os.path.join(workspace, entry["file"])
         source = open(source_path, "rb").read().decode("latin-1")  # offsets are bytes
         base = compile_command(workspace, entry["target"], entry["file"])
-        # Make sure the sources and generated headers are in the execroot.
-        bazel(workspace, "build", "--check_up_to_date", entry["target"], check=False)
+        # The sources and generated headers must be in the execroot before
+        # clang runs (a cold checkout has none of them).
+        build_prerequisites(workspace, entry["target"])
         cmd = base + ["-fsyntax-only", "-Xclang", "-ast-dump=json",
                       "-Xclang", "-ast-dump-filter=dcfs::", "-x", "c++", entry["file"]]
         t = time.time()

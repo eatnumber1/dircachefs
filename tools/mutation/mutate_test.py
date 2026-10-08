@@ -111,6 +111,30 @@ class ChangedTest(unittest.TestCase):
         self.assertFalse(mutate.touches((1, 100), []))
 
 
+class PrerequisitesTest(unittest.TestCase):
+    """The AST dump needs the generated headers (libfuse_config.h) built first."""
+
+    def test_the_build_asks_for_the_compile_prerequisites_of_the_target(self):
+        self.assertEqual(mutate.prerequisites_args("//dcfs:dcfs_lib"),
+                         ["build", "--output_groups=compilation_prerequisites_INTERNAL_",
+                          "//dcfs:dcfs_lib"])
+
+    def test_a_failed_prerequisite_build_is_a_tooling_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            fake = os.path.join(d, "bazel")
+            with open(fake, "w") as f:
+                f.write("#!/bin/sh\necho boom >&2\nexit 1\n")
+            os.chmod(fake, 0o755)
+            old = os.environ["PATH"]
+            os.environ["PATH"] = d + os.pathsep + old
+            try:
+                with redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        mutate.build_prerequisites(d, "//x:y")
+            finally:
+                os.environ["PATH"] = old
+
+
 class ShardAndExitTest(unittest.TestCase):
 
     def test_shards_are_contiguous_disjoint_and_cover_everything(self):
