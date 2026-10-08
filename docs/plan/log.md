@@ -1809,3 +1809,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   under ~/.cache/bazel from scratch trees, SIGTERM skips cleanup; flaky kills and unrelated build
   failures misclassified; sampling before suppression; nth re-targeting; arid scan in comments;
   exit codes. All sent back with a cleanup of the leaked bases and a re-sweep.
+- 12.7b fix round reported (lane-1, tip aacb290 on 703e0fc): traces carry the lookup answer
+  (`LookupAnswered`, "ans") and the errno actually sent (`Replied`, `FuseRequest::errno_sent`),
+  `T_Reply` strict and shape-checked (`QueryKinds`), ReplyObservable in MC_large (10.24M states,
+  1 h 04 here, ~2000 s on the runner) and MC_interrupt_muts2, nolock eternal, the vanished-name
+  create cut as out-of-band behind 11.4's failed cut, two new rejected trace fixtures. 111 formal/
+  trace tests, fast 199 + 2. Short second review pass requested before merge. Note: small_test and
+  known_bug_rename_stale_source_test exceed 300 s on this host at load 13-15 (935k states).
