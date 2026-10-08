@@ -278,6 +278,32 @@ else
 	fail sigterm-mount "daemon did not mount within 10s"
 fi
 
+# --- info-lines: the default threshold hides the lifecycle narrative -------
+# (docs/design.md "Logging"): the SIGTERM run above ran at the default
+# --stderrthreshold (WARNING) and must show none of it; a run with
+# --stderrthreshold=0 shows the start line and the clean shutdown.
+
+if grep -q 'starting: source=' /tmp/sigterm.log || grep -q 'shutdown: clean' /tmp/sigterm.log; then
+	fail info-hidden-by-default "$(cat /tmp/sigterm.log)"
+else
+	pass info-hidden-by-default
+fi
+if start_daemon /tmp/info.log "$MNT" --stderrthreshold=0 --source="$SRC" --cache_db=/cache/info.db "$MNT"; then
+	stop_daemon
+	if grep -q 'starting: source=/src cache_db=/cache/info.db mountpoint=/mnt' /tmp/info.log; then
+		pass info-start-line
+	else
+		fail info-start-line "$(cat /tmp/info.log)"
+	fi
+	if grep -q 'shutdown: clean' /tmp/info.log; then
+		pass info-shutdown-clean
+	else
+		fail info-shutdown-clean "$(cat /tmp/info.log)"
+	fi
+else
+	fail info-mount "daemon did not mount within 10s"
+fi
+
 # --- mount-over-source: mountpoint IS --source ----------------------------
 
 BASE_SRC_COUNT=$(mount_count "$SRC") # 1: vdb, before any overmount.

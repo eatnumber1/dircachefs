@@ -2698,11 +2698,14 @@ TEST_F(DirCacheFSTest, VerboseLevelsShowRequestsAndTheirReplies) {
                             absl::StrCat("Getattr(ino=", f, ") -> OK")),
               1)
         << "--v=2\n" << capture.Dump();
-    EXPECT_EQ(Unlink(kRootInode, "nope").error, -ENOENT);
-    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
-                            "Unlink(ino=1, name=\"nope\") -> NOT_FOUND"),
+    EXPECT_EQ(Getattr(9999).first.error, -ESTALE);
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "Getattr(ino=9999) -> "),
               1)
         << capture.Dump();
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                            "Getattr(ino=9999) -> OK"),
+              0)
+        << "a failed reply shows its status\n" << capture.Dump();
   }
 }
 

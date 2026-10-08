@@ -980,6 +980,26 @@ TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
               IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
 }
 
+// docs/design.md "Logging": a start says how the last run ended and what
+// recovery did, a sync point says what it cleared, and a clean shutdown
+// says so, all at INFO and once.
+TEST_F(BackingTest, TheLifecycleIsLoggedAtInfo) {
+  absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+  EXPECT_CALL(log, Log(_, _, _)).Times(AnyNumber());
+  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, _,
+                       HasSubstr("recovery: the last run ended")))
+      .Times(1);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, _,
+                       HasSubstr("sync point: cleared ")))
+      .Times(1);
+  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, _,
+                       HasSubstr("shutdown: clean")))
+      .Times(1);
+  log.StartCapturingLogs();
+  ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
+  ASSERT_THAT(FinishRun(ctx_), IsOk());
+}
+
 TEST_F(BackingTest, FinishRunMarksACleanShutdown) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());

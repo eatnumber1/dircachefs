@@ -679,7 +679,6 @@ DIR_CACHE_FS_TEST_DEPS = [
     "//dcfs/testonly:trace_recorder",
     "@absl//absl/base:log_severity",
     "@absl//absl/container:flat_hash_set",
-    "@absl//absl/base:log_severity",
     "@absl//absl/log",
     "@absl//absl/log:globals",
     "@absl//absl/log:initialize",
