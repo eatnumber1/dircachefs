@@ -92,6 +92,11 @@
  *       (a child's exit, a builtin's redirection being undone), and on FUSE
  *       every such close sends a FLUSH -- this is how crash.sh gets writes
  *       the daemon has not been told about by any flush or release.
+ *   testutil sql <db-path> <query>
+ *       Opens dcfs's cache database read-only (a WAL reader: the daemon may
+ *       be running, even blocked in a syscall) and prints the rows of one
+ *       SELECT, columns separated by a tab, NULL as "NULL" (step 11.6: the
+ *       state of a dentry and the dirty set while a mutation is held).
  *   testutil sqlite-lock <db-path> <hold-seconds>
  *       Opens <db-path> (dcfs's own cache database, e.g. /cache/dcfs.db)
  *       directly via libsqlite3, runs "BEGIN IMMEDIATE" to take the single
@@ -599,6 +604,41 @@ static int cmd_writehold(
 	fflush(stdout);
 	for (;;)
 		pause();
+}
+
+static int cmd_sql(const char *db_path, const char *query)
+{
+	sqlite3 *db;
+	sqlite3_stmt *stmt;
+	int rc = sqlite3_open_v2(db_path, &db, SQLITE_OPEN_READONLY, NULL);
+	int cols, i, step;
+
+	if (rc != SQLITE_OK) {
+		fprintf(stderr, "testutil sql: open %s: %s\n", db_path,
+			sqlite3_errmsg(db));
+		sqlite3_close(db);
+		return 1;
+	}
+	rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
+	if (rc != SQLITE_OK) {
+		fprintf(stderr, "testutil sql: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+		return 1;
+	}
+	cols = sqlite3_column_count(stmt);
+	while ((step = sqlite3_step(stmt)) == SQLITE_ROW) {
+		for (i = 0; i < cols; i++) {
+			const unsigned char *text = sqlite3_column_text(stmt, i);
+
+			printf("%s%s", i ? "\t" : "", text ? (const char *) text : "NULL");
+		}
+		printf("\n");
+	}
+	if (step != SQLITE_DONE)
+		fprintf(stderr, "testutil sql: %s\n", sqlite3_errmsg(db));
+	sqlite3_finalize(stmt);
+	sqlite3_close(db);
+	return step == SQLITE_DONE ? 0 : 1;
 }
 
 static int cmd_sqlite_lock(const char *db_path, const char *seconds_str)
@@ -2416,6 +2456,8 @@ int main(int argc, char *argv[])
 		return cmd_fallocate(argv[2], argv[3], argv[4], argv[5]);
 	if (argc == 5 && strcmp(argv[1], "writehold") == 0)
 		return cmd_writehold(argv[2], argv[3], argv[4]);
+	if (argc == 4 && strcmp(argv[1], "sql") == 0)
+		return cmd_sql(argv[2], argv[3]);
 	if (argc == 4 && strcmp(argv[1], "sqlite-lock") == 0)
 		return cmd_sqlite_lock(argv[2], argv[3]);
 	if (argc >= 7 && strcmp(argv[1], "runas") == 0)
@@ -2501,6 +2543,7 @@ int main(int argc, char *argv[])
 		"       testutil fsfreeze <path> <freeze|thaw>\n"
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
 		"       testutil writehold <path> <append|create> <nbytes>\n"
+		"       testutil sql <db-path> <query>\n"
 		"       testutil sqlite-lock <db-path> <hold-seconds>\n"
 		"       testutil runas <uid> <gid> <gid,...|-> -- <cmd> [args...]\n"
 		"       testutil opath-unlink-stat <path>\n"

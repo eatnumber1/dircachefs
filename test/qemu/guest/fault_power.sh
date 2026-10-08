@@ -173,15 +173,17 @@ power_cut() {
 # --- the tree, and the scenarios, as setup (before the cut) and check -------
 
 make_tree() {
-	for d in d1 d2 d3 d4 d5; do
+	for d in d1 d2 d3 d4 d5 d6; do
 		mkdir "$SRC/$d"
 		echo keep >"$SRC/$d/keep"
 	done
+	echo u1 >"$SRC/d6/u1"
+	echo r1 >"$SRC/d6/r1"
 	sync
 }
 
 warm() {
-	ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5" >/dev/null
+	ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5" "$MNT/d6" >/dev/null
 }
 
 # before: a file synced to the backing filesystem survives the cut, and what
@@ -247,6 +249,73 @@ check_phase1() {
 		fail phase1-dirty-recovered "phase 1 was durable, yet no dirty row was recovered: $(grep -i cleanly "$LOG")"
 	fi
 	served_equals_backing phase1-served
+}
+
+# frozen_unlink, frozen_rename (step 11.6): a mutation held in phase 2 by a
+# frozen backing filesystem (the daemon is in the syscall, state D), the cut
+# while it is held. Neither the unlink nor the rename ever reached the backing
+# filesystem's disk; phase 1 (names unknown, dirty rows) was durable in the
+# cache. After the cut the backing filesystem holds the old names, and the
+# restart serves them, recovering the dirty rows.
+frozen_hold() {
+	# $1: the scenario; the rest: the command to hold
+	fh_name=$1
+	shift
+	ls "$MNT/d6" >/dev/null
+	fd_freeze back || fail "$fh_name-freeze" "FIFREEZE of the backing filesystem failed"
+	"$@" &
+	TOUCH_PID=$!
+	if fd_blocked "$DAEMON_PID" "$SRC"; then
+		echo "fault_power.sh: held: $(fd_where "$DAEMON_PID")"
+		pass "$fh_name-held"
+	else
+		fail "$fh_name-held" "the daemon never blocked on the frozen backing filesystem"
+	fi
+	fh_unknown=$("$TESTUTIL" sql "$DB" "SELECT CAST(name AS TEXT) FROM dentries WHERE state='unknown'" | tr '\n' ' ')
+	case "$fh_unknown" in
+	*u1* | *r1*) pass "$fh_name-record-unknown" ;;
+	*) fail "$fh_name-record-unknown" "no unknown name in the database while the mutation is held: '$fh_unknown'" ;;
+	esac
+}
+setup_frozen_unlink() { frozen_hold frozen_unlink rm "$MNT/d6/u1"; }
+cut_frozen_unlink() { power_cut back; }
+check_frozen_unlink() {
+	if [ -e "$SRC/d6/u1" ]; then
+		pass frozen_unlink-file-kept
+	else
+		fail frozen_unlink-file-kept "d6/u1 is gone: the unlink was held by the freeze and cut before it reached the disk"
+	fi
+	if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
+		pass frozen_unlink-dirty-recovered
+	else
+		fail frozen_unlink-dirty-recovered "no dirty row recovered: $(grep -i cleanly "$LOG")"
+	fi
+	served_equals_backing frozen_unlink-served
+	if [ -e "$MNT/d6/u1" ]; then
+		pass frozen_unlink-name-served
+	else
+		fail frozen_unlink-name-served "d6/u1 exists on the backing filesystem but is not served"
+	fi
+}
+setup_frozen_rename() { frozen_hold frozen_rename mv "$MNT/d6/r1" "$MNT/d6/r2"; }
+cut_frozen_rename() { power_cut back; }
+check_frozen_rename() {
+	if [ -e "$SRC/d6/r1" ] && [ ! -e "$SRC/d6/r2" ]; then
+		pass frozen_rename-old-name-kept
+	else
+		fail frozen_rename-old-name-kept "d6: $(ls "$SRC/d6" | tr '\n' ' ')"
+	fi
+	if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
+		pass frozen_rename-dirty-recovered
+	else
+		fail frozen_rename-dirty-recovered "no dirty row recovered: $(grep -i cleanly "$LOG")"
+	fi
+	served_equals_backing frozen_rename-served
+	if [ -e "$MNT/d6/r1" ] && [ ! -e "$MNT/d6/r2" ]; then
+		pass frozen_rename-names-served
+	else
+		fail frozen_rename-names-served "served d6: $(ls "$MNT/d6" 2>&1 | tr '\n' ' ')"
+	fi
 }
 
 # phase2: the create durable on the backing filesystem, phase 3 not.
@@ -414,7 +483,7 @@ setup_before
 after_cut before
 check_before
 
-for scenario in phase1 phase2 ahead; do
+for scenario in phase1 phase2 ahead frozen_unlink frozen_rename; do
 	"setup_$scenario"
 	"cut_$scenario"
 	after_cut "$scenario"

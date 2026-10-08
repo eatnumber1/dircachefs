@@ -556,6 +556,23 @@ syscall on a descriptor under the path given, three looks in a row: a
 | `fault_cache_test` | cache-disk write errors during a create's phase 1; the cache filesystem aborted, then a periodic sync point | the mutation never reaches the backing filesystem; the dirty set survives the failed clearing; after a restart everything served matches the backing filesystem and mutations work |
 | `fault_power_test`, `fault_power_kill_test` | a power cut (drop-writes, or a real kill of QEMU) before a create, between phases 1 and 2, between 2 and 3 (backing durable), after the cache has what the backing filesystem lost ("cache ahead"), and inside a sync point | after a restart every entry served matches the backing filesystem (type, size, mode, listings), and the recovery names the dirty rows that survived; a comparison that never differs would pass everything, so the last check adds a name behind dcfs's back and requires the comparison to fail |
 
+Step 11.6 (`fault_freeze_test`, `guest/fault_freeze.sh`, ext4 small, xfs and
+btrfs medium; `testutil fsfreeze` and, new, `testutil sql` for a read-only
+query of the cache database while the daemon is held) measured a frozen
+backing filesystem. The `freeze-table:` lines of its log are:
+
+| Request, backing filesystem frozen | Nothing held | A mutation held |
+|---|---|---|
+| stat of a cached name, readdir of a filled directory, lookup of an absent name, open for read or write, read through passthrough | answered | blocked behind it |
+| write through passthrough | blocks the client (the daemon is not involved); the daemon serves the rest | (n/a) |
+| create, mkdir, unlink, rename, chmod, setxattr, truncate | blocked in the backing syscall (the daemon in state D); record unknown and dirty meanwhile; complete after the thaw | (the held one) |
+| a sync point (`syncfs` of the frozen filesystem) | runs, returns at once, clears the dirty set | cannot run |
+| `SIGTERM` | the daemon exits within 100 ms, recorded clean | waits for the thaw; the clean flag is then left unset (the held create's file is still open) and the next start recovers its dirty entry |
+
+Each blocked check is "still running when the thaw happens, then completes".
+The cut while a rename or an unlink is held is `fault_power_kill_test`'s
+`frozen_rename` and `frozen_unlink` (and `fault_power_test`'s).
+
 Step 11.2 added three things:
 
 - **The tests over three backing filesystems.** `fault_backing_test`,

@@ -629,6 +629,23 @@ recovery protocol, concurrency, and the test strategy.
   escapes) does not exist yet: it arrives with the NFS export tooling
   (plan phase 15). The paths given on the command line (`--source`, the
   mount point, `--cache_db`) are not escaped in startup messages yet.
+- **A backing filesystem that stops taking writes holds the whole daemon.**
+  With the backing filesystem frozen (`fsfreeze -f`, an LVM or storage
+  snapshot, a hung network mount), a change through dcfs blocks in its
+  backing syscall, and since dcfs serves one request at a time, so does
+  every request behind it, a read of cached state included: nothing is
+  served until the thaw, and a signal to the waiting process cannot help (the
+  daemon is inside the syscall; the checkpoints before it have passed).
+  Measured (`//test/qemu:fault_freeze_test`, `test/qemu/README.md`): while
+  nothing is held, a frozen backing filesystem does not stop reads: stat,
+  listings of cached directories, lookups, opens and reads (including
+  passthrough reads) are answered, and a write through passthrough blocks
+  its client in the kernel, not the daemon. A change made during the freeze
+  completes after the thaw and what dcfs then serves is the backing
+  filesystem's. `SIGTERM` while frozen shuts the daemon down at once (its
+  last `syncfs` of a frozen filesystem returns immediately); with a change
+  held it waits behind it, and the next start recovers the change's dirty
+  entry. A periodic sync point during a freeze runs and clears the dirty set.
 - **Interrupting a request is prompt only between backing syscalls.** A
   signal to a process waiting on dcfs (Ctrl+C, `timeout`, even `kill -9`)
   ends the wait with `EINTR` at dcfs's next checkpoint, just before its

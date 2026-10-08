@@ -982,6 +982,48 @@ readdirs per directory.
 Within one thread, nothing can interleave with a request, so today every
 request sees the cache in a consistent state between its own steps.
 
+### A backing filesystem that is frozen or stalled
+
+One thread means one request at a time, so a request blocked in a backing
+syscall blocks the daemon, and with it every request behind it, a read of
+cached state included. Step 11.6 measured it with FIFREEZE
+(`guest/fault_freeze.sh`, `//test/qemu:fault_freeze_test`, ext4, xfs and
+btrfs alike):
+
+- **Nothing held:** a frozen filesystem refuses writes only. A request dcfs
+  answers from its cache or by reading the backing filesystem (stat, readdir
+  of a filled directory, a lookup of a present or absent name, the open of a
+  file for reading or writing, a passthrough read) is answered. A write
+  through passthrough blocks its client in the kernel (the daemon is not in
+  it), and the daemon serves what comes meanwhile.
+- **A mutation held:** create, mkdir, unlink, rename, chmod, setxattr and
+  truncate each block in their phase 2 syscall; the daemon is in state D in
+  it. Phase 1 has committed: the database shows the names (or the inode's
+  attributes) unknown and the dirty set holds the objects, which the checking
+  build's hook before the syscall verified. A request for a name the kernel
+  has not cached (a lookup the daemon would answer from its cache) waits
+  behind the held one, and nothing is served until the thaw; then the mutation
+  completes (phase 3 records the outcome: no name is left unknown) and what is
+  served equals the backing filesystem. A power cut while a rename or an
+  unlink is held leaves the old names on the disk and the dirty rows in the
+  cache: the next start recovers them (`fault_power_kill_test`, `frozen_unlink`
+  and `frozen_rename`).
+- **A sync point** during a freeze does not block: `syncfs(2)` of a frozen
+  filesystem returns at once (everything was flushed by the freeze), and the
+  dirty set is cleared. **Shutdown** by `SIGTERM` with nothing held completes
+  within a moment, the last sync point included, and is recorded as clean.
+  With a mutation held the signal waits behind it; after the thaw the mutation
+  completes, the loop ends before the client's `RELEASE` of the created file,
+  so the clean-shutdown flag is left unset ("a writable open is still
+  outstanding") and the next start recovers the dirty entry, which is correct
+  and only costs a re-read.
+
+For the cancellation phase (22): a checkpoint is before a backing syscall, so
+a request held inside one cannot be interrupted, and with one thread the whole
+daemon is held with it. Only running requests on more threads (coroutines
+with a thread per queue) would let the rest of the filesystem go on, and then
+only for requests that touch no inode the held one has unknown.
+
 ### Rules that hold now so that coroutines need no redesign
 
 The planned architecture (not built) runs requests as C++ coroutines over

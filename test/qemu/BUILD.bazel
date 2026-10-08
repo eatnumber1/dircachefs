@@ -188,6 +188,8 @@ qemu_test_matrix(
         "phase2",
         "ahead",
         "syncpoint",
+        "frozen_unlink",
+        "frozen_rename",
     ],
     size = "medium",
     other_size = "large",
@@ -249,6 +251,22 @@ qemu_test_matrix(
     size = "large",
     other_size = "large",
     timeout = "long",
+)
+
+# Step 11.6: the backing filesystem frozen (guest/fault_freeze.sh): what blocks
+# (a held mutation holds the single-threaded daemon, so every request behind it,
+# cached reads too), what does not, a sync point and SIGTERM during a freeze.
+qemu_test_matrix(
+    name = "fault_freeze_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_freeze.sh",
+    modules = ["dm_flakey"],
+    size = "small",
+    other_size = "medium",
+    timeout = "moderate",
 )
 
 # Step 2: the cache database (and its -wal/-shm files) is mode 0600, not
