@@ -149,14 +149,18 @@ the next sweep can be judged against the last). `--survivors-out` and
 ## Per push and on a schedule (step 26.5b)
 
 - **Per push** (`ci.yml`, the `mutation-changed` job): `mutate.py changed
-  --range BASE..TIP --fail-on-survivor` mutates only the functions of
+  --range BASE..TIP` mutates only the functions of
   `scope.txt` whose lines the range touches (the `git diff -U0` hunks, mapped
   to the AST's function ranges), one mutant per line, minus the suppressed
   ones, and runs at most `--max-mutants` of them, **30**: the budget. The
   selection is deterministic (the seeded hash order with the operators taking
-  turns), and the surplus is reported as "not run" in the output. It fails
-  the job when a mutant survives the small tier and trace validation: the
-  change to that function needs a test. A range that touches nothing in scope
+  turns), and the surplus is reported as "not run" in the output; `--time-budget`
+  (120 minutes) does the same for the wall clock. A mutant that survives the
+  small tier and trace validation is a finding, not a failure (the change to
+  that function needs a test): the job summary shows the table and the
+  survivors grouped by function (`mutate.py report`), the `mutation-changed`
+  artifact holds the results, and only a tooling error (exit status 2) fails
+  the job (`--fail-on-survivor` is there for local use). A range that touches nothing in scope
   runs nothing. A new branch's all-zero base means the tip against its parent.
 - **On a schedule** (`.github/workflows/mutation.yml`: weekly, and by
   `workflow_dispatch`): the sampled scope (about 340 mutants), split into six
