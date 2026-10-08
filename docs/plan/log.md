@@ -1789,3 +1789,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   write a new one (cost = boots and setup; debuggability = name + expectation message), EXPECT
   not ASSERT unless required, matchers for readable failures. Docs commit to lane-3; the 8.2e
   tests follow them; existing tests convert in 7.5/7.5b.
+- 25.4 merged (d5eb185): style.md tests section: extend vs new (cost model + debuggability limit,
+  examples ReleaseReportsWhetherTheOpenCouldWrite and write.sh's check_cold), EXPECT over ASSERT
+  with the two allowed ASSERT cases, matchers over booleans (status matchers already in use: IsOk
+  ~900, IsOkAndHolds ~460, StatusIs ~130; three EXPECT_TRUE(x.ok()) and the ASSERT_THAT balance
+  are 7.5's job).
