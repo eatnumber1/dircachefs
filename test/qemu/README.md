@@ -557,6 +557,7 @@ syscall on a descriptor under the path given, three looks in a row: a
 | `fault_selftest_test` | each mode on a plain filesystem | the mode does what it says |
 | `fault_backing_test` | backing read errors during a cold lookup; backing write errors until the journal aborts, then a create | the error goes back; nothing is recorded as present or absent (the lookup after healing answers the truth); the name is not served; the daemon lives; after a restart the dirty rows are recovered and the served tree matches the backing filesystem |
 | `fault_cache_test` | cache-disk write errors during a create's phase 1; the cache filesystem aborted, then a periodic sync point | the mutation never reaches the backing filesystem; the dirty set survives the failed clearing; after a restart everything served matches the backing filesystem and mutations work |
+| `fault_recover_test` | each failure mode (backing reads, writes, both, no device, a flakey window) over every operation class (11.3) | the error goes back, the database never says the operation succeeded, after the recovery the same operations work and the served tree is the backing filesystem's |
 | `fault_power_test`, `fault_power_kill_test` | a power cut (drop-writes, or a real kill of QEMU) before a create, between phases 1 and 2, between 2 and 3 (backing durable), after the cache has what the backing filesystem lost ("cache ahead"), and inside a sync point | after a restart every entry served matches the backing filesystem (type, size, mode, listings), and the recovery names the dirty rows that survived; a comparison that never differs would pass everything, so the last check adds a name behind dcfs's back and requires the comparison to fail |
 
 Step 11.6 (`fault_freeze_test`, `guest/fault_freeze.sh`, ext4 small, xfs and
@@ -575,6 +576,86 @@ backing filesystem. The `freeze-table:` lines of its log are:
 Each blocked check is "still running when the thaw happens, then completes".
 The cut while a rename or an unlink is held is `fault_power_kill_test`'s
 `frozen_rename` and `frozen_unlink` (and `fault_power_test`'s).
+
+Step 11.3 (`fault_recover_test`, `guest/fault_recover.sh`; ext4 medium, xfs and
+btrfs large, about 60 s each) closes the gap table below. Per failure mode it
+makes a tree of its own on the backing filesystem, primes dcfs's cache, drops
+the kernel's caches, injects the failure, runs every operation through dcfs,
+reads the cache database with `testutil sql` while the daemon is idle, lets the
+device recover and runs the same operations again:
+
+| Failure mode | What is injected | The device recovers by |
+|---|---|---|
+| `error-reads` | dm-flakey `error_reads` | the table back to healthy; a remount if the filesystem stayed failed |
+| `window` | dm-flakey, up 6 s then down 8 s, `error_reads` (the table is never switched back) | the window ending |
+| `error-writes` | `error_writes`, then a change and a `sync` so the journal meets it | healthy table, remount, restart |
+| `error-io` | both | the same |
+| `dead` | dm-error | the same |
+
+Each operation must return an error (a fill may answer the truth from a cache
+the filesystem still has; a chmod, a setxattr and a writable open may succeed
+when they need no device I/O, and then the record must be the new state or
+unknown); the database must never say it succeeded (a created name present,
+a removed or renamed name absent, a failed listing complete, the new mode valid,
+a link count of 2, an xattr present; no name that exists is recorded absent: a
+missing row in a directory not marked complete is the unknown record); the
+daemon lives (the checking build aborts on a broken invariant); after the
+recovery the same operations succeed, their effects are on the backing
+filesystem, and the tree dcfs serves equals the backing filesystem's. A
+writer holds a file open with a dirty page across the injection, so that
+`testutil fsync` meets the failure (and the record of an inode open for
+writing is unknown meanwhile).
+
+Gap table (12 operation classes by 5 failure modes = 60 cells; the "window"
+column of a write failure is the `error-writes` one: a shut-down filesystem
+does not recover by itself). Before 11.3 two cells had a check, one (readdir
+by error-reads) a partial one, and 57 were gaps; all 60 now have one (checks are named `<mode>-<name>`):
+
+| Operation | Covered before 11.3 | Checks of `fault_recover.sh` (all five modes) |
+|---|---|---|
+| lookup fill | `fault_backing:lookup-read-error-replied`, `lookup-after-heal-present` (error-reads only) | `lookup-fails`, `lookup-not-recorded-absent`, `lookup-after-recovery` |
+| getattr fill | gap | `getattr-fails` (a stat of the chmod's target: an error or the truth), `setattr-name-not-recorded-absent`, `getattr-after-recovery` |
+| readdir fill | `fault_backing:listing-after-heal` (error-reads only, after the heal) | `readdir-fails`, `readdir-not-marked-complete`, `listed-names-not-recorded-absent`, `readdir-after-recovery` |
+| create | `fault_backing:create-error-replied`, `-name-not-present`, `-listing`, `restart-recovers-dirty` (error-writes only) | `create-fails`, `create-not-recorded-present`, `create-after-recovery` |
+| mkdir | gap | `mkdir-fails`, `mkdir-not-recorded-present`, `mkdir-after-recovery` |
+| unlink | gap | `unlink-fails`, `unlink-not-recorded-absent`, `unlink-after-recovery` |
+| rename | gap | `rename-fails`, `rename-source-not-recorded-absent`, `rename-target-not-recorded-present`, `rename-after-recovery` |
+| setattr | gap | `setattr` (may succeed), `setattr-record-is-the-new-mode` or `setattr-new-mode-not-valid`, `setattr-after-recovery` |
+| setxattr | gap | `setxattr` (may succeed), `setxattr-not-recorded-present`, `setxattr-after-recovery` |
+| link | gap | `link-fails`, `link-not-recorded-present`, `link-count-not-valid-as-2`, `link-after-recovery` |
+| symlink | gap | `symlink-fails`, `symlink-not-recorded-present`, `symlink-after-recovery` |
+| write-through data | gap | `data-attributes-not-valid-while-open`, `data-fsync-fails` (write failures) or `data-fsync-answered`, `data-open`, `data-after-recovery`; `effects-on-backing` and `served-equals-backing` close every mode |
+
+What the filesystems answer (the `fault_recover:` lines of the logs):
+ext4 fails a read with EIO and, once its journal has aborted, answers every
+change with EROFS (an fsync through dcfs: EROFS; a chmod that only needs the
+journal may still work before the abort); after a read error on a block
+bitmap it refuses to allocate in that group with EUCLEAN until it is mounted
+again (`data-after-remount`). xfs and btrfs answer EIO to every change and
+stay failed once the device is back: every mode needs the remount, and only
+ext4's `error-reads` and `window` recover in place (`window-recovered-by-itself`). A cold inode
+that xfs or btrfs cannot read makes `open_by_handle_at` fail with ESTALE:
+dcfs forgets the row (`ForgetStale`; its names become unknown, never absent)
+and the caller sees ESTALE (the first readdir) or ENOENT (a chmod, a stat or a
+setxattr of a name that exists). A btrfs inode read that fails warns in the
+kernel (`btrfs_destroy_inode`, `fs/btrfs/inode.c:8047`, from
+`btrfs_read_locked_inode`'s error path) and the harness fails a boot on a
+WARNING, so on btrfs the test pins every inode of its tree (`O_PATH`
+descriptors on the files, working directories on the directories) and the
+failure meets metadata, never an inode read. Not covered: a failure
+that starts during a mutation (the freeze tests and the fault sweep of
+`//dcfs:dir_cache_fs_fault_sites_test` cover phases); `error-writes` as a
+window (the filesystem's shutdown does not end); after a failed write-back the
+size dcfs recorded from the filesystem's cached inode can differ from the
+size of the inode re-read from disk once it is evicted (the in-place
+comparison leaves that file out; the writer was told by its fsync, and the
+restart's recovery makes it equal).
+
+How these checks were shown to fail: with `inject` a no-op, 98 checks of the
+ext4 run fail (every mutation succeeds, and the database says `present`,
+`absent` and a link count of 2); inverting two record assertions fails them
+with the database's real answers (`''`, no row in a directory not marked
+complete, and `norow-incomplete`). The shipped script has neither change.
 
 Step 11.2 added three things:
 

@@ -270,6 +270,23 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 11.3: a failed backing operation (each failure mode of guest/fault_lib.sh
+# and a flakey window that ends by itself, each over every operation class)
+# leaves the record unknown, returns the error, and after the device recovers the
+# same operations work and the served tree is the backing filesystem's.
+qemu_test_matrix(
+    name = "fault_recover_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_recover.sh",
+    modules = ["dm_flakey"],
+    size = "medium",
+    other_size = "large",
+    timeout = "moderate",
+)
+
 # Step 2: the cache database (and its -wal/-shm files) is mode 0600, not
 # world-readable; a missing cache-database directory is created 0700, and
 # an existing group-/world-accessible one gets a WARNING -- see
