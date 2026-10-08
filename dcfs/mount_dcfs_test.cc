@@ -5,6 +5,9 @@
 // behavior as a program is test/qemu/guest/mount_dcfs.sh.
 #include "dcfs/mount_dcfs.h"
 
+#include <sys/mount.h>
+
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -292,6 +295,28 @@ TEST(IsDcfsMountTest, MatchesOnlyFuseDcfsAtThatMountpoint) {
 
 TEST(IsDcfsMountTest, DecodesEscapedMountpoints) {
   EXPECT_TRUE(IsDcfsMount(kMountinfo, "/with space"));
+}
+
+TEST(RemountFlagsTest, KeepsThePerMountFlagsAndTogglesReadOnly) {
+  constexpr char kInfo[] =
+      "40 26 0:35 / /data rw,nosuid,nodev,noatime shared:9 - fuse.dcfs "
+      "/dev/vdb rw\n";
+  std::optional<unsigned long> rw = RemountFlags(kInfo, "/data", false);
+  ASSERT_TRUE(rw.has_value());
+  EXPECT_EQ(*rw, MS_REMOUNT | MS_NOSUID | MS_NODEV | MS_NOATIME);
+  std::optional<unsigned long> ro = RemountFlags(kInfo, "/data", true);
+  ASSERT_TRUE(ro.has_value());
+  EXPECT_EQ(*ro, MS_REMOUNT | MS_NOSUID | MS_NODEV | MS_NOATIME | MS_RDONLY);
+}
+
+TEST(RemountFlagsTest, NotADcfsMountHasNoFlags) {
+  EXPECT_EQ(RemountFlags(kMountinfo, "/plain", true), std::nullopt);
+  EXPECT_EQ(RemountFlags(kMountinfo, "/nothing", true), std::nullopt);
+}
+
+TEST(ParseHelperArgsTest, SubtypeFlagTakesAnArgumentAndIsIgnored) {
+  EXPECT_THAT(ParseHelperArgs(Strings{"s", "m", "-t", "dcfs"}),
+              IsOkAndHolds(Field(&HelperArgs::source, "s")));
 }
 
 }  // namespace

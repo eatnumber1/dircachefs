@@ -638,6 +638,46 @@ cc_library(
 )
 
 qemu_cc_test(
+    name = "startup_channel_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["startup_channel_test.cc"],
+    deps = [
+      ":mount_dcfs",
+      ":startup_channel",
+      ":syscalls",
+      ":syscalls_backing",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
+qemu_cc_test(
+    name = "backing_capture_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["backing_capture_test.cc"],
+    deps = [
+      ":backing_capture",
+      "@googletest//:gtest_main",
+    ],
+)
+
+qemu_cc_test(
+    name = "syslog_sink_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["syslog_sink_test.cc"],
+    deps = [
+      ":syslog_sink",
+      "@absl//absl/base:log_severity",
+      "@googletest//:gtest_main",
+    ],
+)
+
+qemu_cc_test(
     name = "mount_dcfs_test",
     size = "small",
     timeout = "short",

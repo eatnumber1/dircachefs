@@ -3,9 +3,13 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>
+#include <sched.h>
+#include <sys/mount.h>
+#include <sys/socket.h>
 #include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <syslog.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -562,6 +566,94 @@ TEST(SyscallsCredentialsTest, SetfsuidReturnsPreviousAndReadsBack) {
   EXPECT_EQ(syscalls::setfsgid(kRead), 1000u);
   EXPECT_EQ(syscalls::setfsgid(0), 1000u);
   EXPECT_EQ(syscalls::setfsgid(kRead), 0u);
+}
+
+// --- The mount.dcfs wrapper's calls (phase 15) ----------------------------
+
+TEST(SyscallsWrapperTest, SocketpairCarriesBytesBothWays) {
+  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  const std::string_view hello = "hello";
+  EXPECT_THAT(syscalls::send(*pair.first, hello.data(), hello.size(),
+                             MSG_NOSIGNAL),
+              IsOkAndHolds(hello.size()));
+  char buf[16];
+  struct iovec iov = {.iov_base = buf, .iov_len = sizeof(buf)};
+  struct msghdr message = {};
+  message.msg_iov = &iov;
+  message.msg_iovlen = 1;
+  ASSERT_OK_AND_ASSIGN(size_t n, syscalls::recvmsg(*pair.second, message, 0));
+  EXPECT_EQ(std::string_view(buf, n), hello);
+}
+
+TEST(SyscallsWrapperTest, SendmsgPassesADescriptorThatIsCloseOnExec) {
+  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor root,
+                       syscalls::openat(AT_FDCWD, "/", O_RDONLY | O_DIRECTORY));
+  char byte = 'x';
+  char control[CMSG_SPACE(sizeof(int))] = {};
+  struct iovec iov = {.iov_base = &byte, .iov_len = 1};
+  struct msghdr out = {};
+  out.msg_iov = &iov;
+  out.msg_iovlen = 1;
+  out.msg_control = control;
+  out.msg_controllen = sizeof(control);
+  struct cmsghdr *cmsg = CMSG_FIRSTHDR(&out);
+  cmsg->cmsg_level = SOL_SOCKET;
+  cmsg->cmsg_type = SCM_RIGHTS;
+  cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+  const int fd = *root;
+  std::memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
+  ASSERT_THAT(syscalls::sendmsg(*pair.first, out, MSG_NOSIGNAL),
+              IsOkAndHolds(1u));
+
+  char in_control[CMSG_SPACE(sizeof(int))] = {};
+  struct msghdr in = {};
+  in.msg_iov = &iov;
+  in.msg_iovlen = 1;
+  in.msg_control = in_control;
+  in.msg_controllen = sizeof(in_control);
+  ASSERT_OK_AND_ASSIGN(size_t n, syscalls::recvmsg(*pair.second, in, 0));
+  EXPECT_EQ(n, 1u);
+  struct cmsghdr *got = CMSG_FIRSTHDR(&in);
+  ASSERT_NE(got, nullptr);
+  int received = -1;
+  std::memcpy(&received, CMSG_DATA(got), sizeof(received));
+  FileDescriptor owned(received);
+  ASSERT_OK_AND_ASSIGN(int flags, syscalls::fcntl(received, F_GETFD));
+  EXPECT_NE(flags & FD_CLOEXEC, 0);
+}
+
+TEST(SyscallsWrapperTest, SendOnAClosedPeerIsAStatusNotASignal) {
+  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_THAT(pair.second.Close(), IsOk());
+  EXPECT_EQ(
+      StatusToErrno(syscalls::send(*pair.first, "x", 1, MSG_NOSIGNAL).status()),
+      EPIPE);
+}
+
+TEST(SyscallsWrapperTest, ChdirAndGetuid) {
+  EXPECT_EQ(syscalls::getuid(), 0u);  // the guests run as root
+  EXPECT_THAT(syscalls::chdir("/"), IsOk());
+  EXPECT_EQ(StatusToErrno(syscalls::chdir("/no/such/directory")), ENOENT);
+}
+
+TEST(SyscallsWrapperTest, OpenTreeOfTheRoot) {
+  ASSERT_OK_AND_ASSIGN(FileDescriptor tree,
+                       syscalls::open_tree(AT_FDCWD, "/", OPEN_TREE_CLOEXEC));
+  EXPECT_TRUE(tree.valid());
+  EXPECT_EQ(StatusToErrno(syscalls::open_tree(AT_FDCWD, "/no/such/place",
+                                              OPEN_TREE_CLOEXEC)
+                              .status()),
+            ENOENT);
+}
+
+TEST(SyscallsWrapperTest, UnshareRefusesUnknownFlags) {
+  EXPECT_EQ(StatusToErrno(syscalls::unshare(~0)), EINVAL);
+}
+
+TEST(SyscallsWrapperTest, SyslogNeverFails) {
+  syscalls::openlog("dcfs-test", LOG_PID, LOG_DAEMON);
+  syscalls::syslog(LOG_INFO, "syscalls_test: a message with a %s in it");
 }
 
 }  // namespace
