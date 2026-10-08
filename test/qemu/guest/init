@@ -74,6 +74,12 @@ echo "boot: kernel $(uname -r)"
 DCFS_ACCEL=$(sed -n 's/.*\bdcfs_accel=\([^ ]*\).*/\1/p' /proc/cmdline)
 export DCFS_ACCEL
 
+# The sanitizer the build under test uses (asan or ubsan; empty for a plain
+# build), from qemu_test.bzl: guest/strace_lib.sh's reducer sets aside UBSan's
+# own syscalls only when this says ubsan.
+DCFS_SANITIZER=$(sed -n 's/.*\bdcfs_sanitizer=\([^ ]*\).*/\1/p' /proc/cmdline)
+export DCFS_SANITIZER
+
 # Guest memory sampler (step 6.2): one awk process, started below and killed
 # by mem_report, that every 0.1 s reads /proc/meminfo and every process's
 # /proc/<pid>/status and keeps the extremes, rewriting them to /dev/memstat

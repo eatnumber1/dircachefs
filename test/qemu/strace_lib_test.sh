@@ -93,7 +93,7 @@ ${want}"
 echo "PASS: backing, procfd and other lines are kept, cache/proc/fuse dropped"
 
 got=$(strace_reduce /src/t /cache <"${WORK}/raw" | strace_counts | tr '\n' ' ')
-[[ "${got}" == "backing 6 procfd 2 other 2 cache 3 proc 2 fuse 3 log 1 sync 2 " ]] ||
+[[ "${got}" == "backing 6 procfd 2 other 2 cache 3 proc 2 fuse 3 log 1 sanitizer 0 sync 2 " ]] ||
   fail "counts: got '${got}'"
 echo "PASS: counts per kind"
 
@@ -138,3 +138,76 @@ out=$(strace_budget_compare "${WORK}/tight" "${WORK}/counts" op) &&
 strace_budget_compare "${WORK}/budgets" "${WORK}/counts" nobudget >/dev/null &&
   fail "an operation without a budget passed"
 echo "PASS: budgets fail above, pass at or below"
+
+# (guest/lib.sh's fail, sourced above, replaced this file's own.)
+die() {
+  echo "FAIL: $*" >&2
+  exit 1
+}
+
+# Sanitizer runtime syscalls (step 7.4): UBSan's vptr check probes whether a
+# vtable prefix is readable by writing it to a pipe (compiler-rt's
+# IsAccessibleMemoryRange: pipe2, fcntl F_GETFL, fcntl F_SETFL O_NONBLOCK,
+# write of 16 bytes, close, close), once per new (static type, dynamic type)
+# pair. Under DCFS_SANITIZER=ubsan exactly that sequence is kind "sanitizer",
+# which the golden leaves out; without it, or for any other use of a pipe, the
+# lines stay "other" and fail a golden.
+cat >"${WORK}/probe" <<'EOT2'
+520   read(8</dev/fuse>, "/\0\0\0\1\0\0\0X\0\0"..., 1052672) = 44
+520   pipe2([11<pipe:[1358]>, 12<pipe:[1358]>], 0) = 0
+520   fcntl(12<pipe:[1358]>, F_GETFL)   = 0x1 (flags O_WRONLY)
+520   fcntl(12<pipe:[1358]>, F_SETFL, O_WRONLY|O_NONBLOCK) = 0
+520   write(12<pipe:[1358]>, "\0\0\0\0\0\0\0\0 xq\323\263U\0\0", 16) = 16
+520   close(11<pipe:[1358]>)            = 0
+520   close(12<pipe:[1358]>)            = 0
+520   openat(3</src/t>, "new", O_RDONLY) = 10</src/t/new>
+EOT2
+probe_want_plain='read(fuse)
+pipe2(other)
+fcntl(other)
+fcntl(other)
+write(other)
+close(other)
+close(other)
+openat(backing)'
+got=$(DCFS_SANITIZER= strace_reduce /src/t /cache <"${WORK}/probe")
+[[ "${got}" == "${probe_want_plain}" ]] || die "probe without a sanitizer: got
+${got}"
+got=$(DCFS_SANITIZER=asan strace_reduce /src/t /cache <"${WORK}/probe")
+[[ "${got}" == "${probe_want_plain}" ]] || die "probe under asan: got
+${got}"
+echo "PASS: the vptr probe is 'other' without UBSan"
+
+got=$(DCFS_SANITIZER=ubsan strace_reduce /src/t /cache <"${WORK}/probe")
+want='read(fuse)
+pipe2(sanitizer)
+fcntl(sanitizer)
+fcntl(sanitizer)
+write(sanitizer)
+close(sanitizer)
+close(sanitizer)
+openat(backing)'
+[[ "${got}" == "${want}" ]] || die "probe under ubsan: got
+${got}"
+got=$(DCFS_SANITIZER=ubsan strace_reduce /src/t /cache <"${WORK}/probe" | strace_backing)
+[[ "${got}" == "openat(backing)" ]] || die "probe in the golden lines under ubsan: got
+${got}"
+got=$(DCFS_SANITIZER=ubsan strace_reduce /src/t /cache <"${WORK}/probe" | strace_counts | tr '\n' ' ')
+[[ "${got}" == "backing 1 procfd 0 other 0 cache 0 proc 0 fuse 1 log 0 sanitizer 6 sync 0 " ]] ||
+  die "counts under ubsan: got '${got}'"
+echo "PASS: the vptr probe is 'sanitizer' under UBSan, left out of the golden, counted"
+
+# Any other use of a pipe, under UBSan too, is still "other": a daemon that
+# opens a pipe of its own, writes a different size, or leaves one open.
+cat >"${WORK}/mine" <<'EOT2'
+520   pipe2([11<pipe:[7]>, 12<pipe:[7]>], O_CLOEXEC) = 0
+520   write(12<pipe:[7]>, "abcdefgh", 8) = 8
+520   write(12<pipe:[7]>, "\0\0\0\0\0\0\0\0 xq\323\263U\0\0", 16) = 16
+520   read(11<pipe:[7]>, "abcdefgh", 4096) = 8
+520   fcntl(12<pipe:[7]>, F_SETFD, FD_CLOEXEC) = 0
+520   close(11<pipe:[7]>)               = 0
+EOT2
+got=$(DCFS_SANITIZER=ubsan strace_reduce /src/t /cache <"${WORK}/mine" | tr '\n' ' ')
+[[ "${got}" == "pipe2(other) write(other) write(other) read(other) fcntl(other) close(other) " ]] ||
+  die "a daemon's own pipe under ubsan: got '${got}'"
+echo "PASS: only the probe's exact sequence is 'sanitizer'; other pipe use stays 'other'"

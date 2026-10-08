@@ -66,6 +66,14 @@ def mem_args_for(mem, asan_mem):
         "//conditions:default": ["--mem", str(mem)],
     })
 
+def sanitizer_args():
+    """run-qemu.sh --cmdline dcfs_sanitizer=<asan|ubsan> (a select()); guest/init exports it as DCFS_SANITIZER."""
+    return select({
+        "//test/qemu:asan_build": ["--cmdline", "dcfs_sanitizer=asan"],
+        "//test/qemu:ubsan_build": ["--cmdline", "dcfs_sanitizer=ubsan"],
+        "//conditions:default": [],
+    })
+
 def resolve_mem(mem, asan_mem, default, asan_default):
     """The (plain, sanitizer) allowances; neither is ever below the other's floor."""
     if mem == None:
@@ -212,7 +220,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             initramfs,
             guest_script,
         ] + rootfs_data + coverage_data(cov_objects),
-        args = qemu_args + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + rootfs_args + mem_args + kernel_args + [
+        args = qemu_args + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + rootfs_args + mem_args + sanitizer_args() + kernel_args + [
             "$(location " + initramfs + ")",
             guest_script_basename,
         ] + disk_args,

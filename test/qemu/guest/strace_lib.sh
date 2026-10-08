@@ -25,6 +25,15 @@
 #     log       write to descriptor 2: the daemon's own log (--v=2 makes it
 #               log every SQLite statement, which strace_op counts)
 #     other     anything else: a finding, goldens never contain one
+#     sanitizer under DCFS_SANITIZER=ubsan only: the one sequence UBSan's
+#               vptr check makes the first time it sees a (static type,
+#               dynamic type) pair, a probe that the vtable prefix is
+#               readable (compiler-rt's IsAccessibleMemoryRange): pipe2,
+#               fcntl F_GETFL, fcntl F_SETFL O_NONBLOCK, write of 16 bytes,
+#               close, close, all on that pipe. Only that exact sequence,
+#               only under UBSan; any other pipe use stays "other", and
+#               goldens never contain "sanitizer" (strace_backing leaves it
+#               out); strace_counts counts it.
 #
 # The golden holds the backing, procfd and other lines in strace's order
 # (one thread, so the order of completion). The per-kind counts of the whole
@@ -39,8 +48,10 @@ STRACE_TRACE='%file,%desc,%fstat,%fstatfs,ioctl,getdents64,copy_file_range,fallo
 
 # strace_reduce SRC CACHEDIR: strace -f -y -qq output on stdin; one
 # name(kind)[ !ERRNO] line per syscall on stdout, every kind.
+# $DCFS_SANITIZER (the guest's init sets it from the kernel command line; ""
+# for a plain build) turns on the "sanitizer" kind when it is "ubsan".
 strace_reduce() {
-	awk -v src="$1" -v cache="$2" -v fdonly="^($STRACE_FD_ONLY)\$" '
+	awk -v src="$1" -v cache="$2" -v san="${DCFS_SANITIZER:-}" -v fdonly="^($STRACE_FD_ONLY)\$" '
 	function under(p, dir) {
 		return p == dir || substr(p, 1, length(dir) + 1) == dir "/"
 	}
@@ -52,6 +63,62 @@ strace_reduce() {
 		if (p ~ /^\/proc(\/|$)/) return "proc"
 		if (p == "/dev/fuse") return "fuse"
 		return "other"
+	}
+	# The UBSan vptr probe (see the header): a state machine that holds the
+	# lines of a probe in progress and prints them as "sanitizer" when the
+	# sequence completes exactly, as their own kind (other) otherwise.
+	function probe_step(name, line, err,    head) {
+		if (stage == 0) {
+			if (name == "pipe2" && err == "" &&
+			    match(line, /^pipe2\(\[[0-9]+<pipe:\[[0-9]+\]>, [0-9]+<pipe:\[[0-9]+\]>\], 0\) += 0$/)) {
+				head = line
+				sub(/^pipe2\(\[/, "", head)
+				pr = head; sub(/<.*/, "", pr)
+				sub(/^[0-9]+<pipe:\[[0-9]+\]>, /, "", head)
+				pw = head; sub(/<.*/, "", pw)
+				stage = 1
+				return 1
+			}
+			return 0
+		}
+		if (err != "") return 0
+		if (stage == 1 && name == "fcntl" && index(line, "fcntl(" pw "<pipe:[") == 1 && line ~ /, F_GETFL\) +=/) { stage = 2; return 1 }
+		if (stage == 2 && name == "fcntl" && index(line, "fcntl(" pw "<pipe:[") == 1 && line ~ /, F_SETFL, O_WRONLY\|O_NONBLOCK\) += 0$/) { stage = 3; return 1 }
+		if (stage == 3 && name == "write" && index(line, "write(" pw "<pipe:[") == 1 && line ~ /, 16\) += 16$/) { stage = 4; return 1 }
+		if (stage == 4 && name == "close" && index(line, "close(" pr "<pipe:[") == 1 && line ~ /\) += 0$/) { stage = 5; return 1 }
+		if (stage == 5 && name == "close" && index(line, "close(" pw "<pipe:[") == 1 && line ~ /\) += 0$/) { stage = 6; return 1 }
+		return 0
+	}
+	function emit(name, line, kind, err) {
+		out = name "(" kind ")" err
+		if (san == "ubsan") {
+			if (probe_step(name, line, err)) {
+				held[++nheld] = out
+				heldsan[nheld] = name "(sanitizer)"
+				if (stage == 6) {
+					for (i = 1; i <= nheld; i++) print heldsan[i]
+					nheld = 0
+					stage = 0
+				}
+				return
+			}
+			# Not the next line of a probe: what was held was no probe.
+			if (nheld > 0) {
+				for (i = 1; i <= nheld; i++) print held[i]
+				nheld = 0
+				stage = 0
+				# The line itself may start another.
+				if (probe_step(name, line, err)) {
+					held[++nheld] = out
+					heldsan[nheld] = name "(sanitizer)"
+					return
+				}
+			}
+		}
+		print out
+	}
+	END {
+		for (i = 1; i <= nheld; i++) print held[i]
 	}
 	{
 		line = $0
@@ -92,7 +159,7 @@ strace_reduce() {
 			err = substr(line, RSTART + 6, RLENGTH - 6)
 			err = " !" err
 		}
-		print name "(" kind ")" err
+		emit(name, line, kind, err)
 	}'
 }
 
@@ -111,8 +178,8 @@ strace_counts() {
 		if ($1 ~ /^(fsync|fdatasync|syncfs)\(/) sync++
 	}
 	END {
-		split("backing procfd other cache proc fuse log", kinds, " ")
-		for (i = 1; i <= 7; i++) print kinds[i], n[kinds[i]] + 0
+		split("backing procfd other cache proc fuse log sanitizer", kinds, " ")
+		for (i = 1; i <= 8; i++) print kinds[i], n[kinds[i]] + 0
 		print "sync", sync + 0
 	}'
 }

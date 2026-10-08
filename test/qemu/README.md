@@ -806,6 +806,19 @@ backing object through a descriptor), `proc`, `fuse` or `other`; `.trace`
 keeps `backing`, `procfd` and `other` (a golden never has `other`), and
 `.counts` the number of calls of each kind for step 26.4's ratchets.
 
+Under `--config=ubsan` there is one more kind, `sanitizer`: UBSan's vptr check
+(`-fsanitize=vptr`) probes whether a vtable prefix is readable the first time
+it sees a (static type, dynamic type) pair, in the daemon's own process, with
+`pipe2`, `fcntl` (`F_GETFL`, `F_SETFL O_NONBLOCK`), a 16-byte `write` and two
+`close`s (compiler-rt's `IsAccessibleMemoryRange`). No report is printed and
+nothing is wrong; the probe lands in whichever trace first reaches a new
+pair (`cold-lookup`, the daemon's first request). The reducer files exactly
+that sequence under `sanitizer`, and only when the guest's `DCFS_SANITIZER`
+(from `qemu_test.bzl`, through the kernel command line) says `ubsan`; `.trace`
+leaves it out and `.counts` counts it. Any other use of a pipe, and the probe
+in a plain or ASan guest, stays `other` and fails the golden
+(`strace_lib_test` checks all three).
+
 To update a golden, run the test, read the diff it prints (the full trace and
 raw strace output follow it), and replace the heredoc in
 `guest/syscall_traces.sh`. A golden change needs a sentence of
