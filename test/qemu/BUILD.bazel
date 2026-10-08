@@ -16,6 +16,13 @@ load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
 # thousands of objects grow to 430-520 MiB.
 ASAN_BIG_DCFS_MEM = 832  # names, names_random, readdir_boundary, idle, pjdfstest
 
+# The two cancellation tests list a cold 20,000-entry directory (step 22.1,
+# 22.2): under ASan their dcfs holds 480-490 MiB of anonymous memory, peak_used
+# 733 and 766 MiB at 1536 MiB with reclaim_scans=0, +62 MiB for the kernel's
+# reservation, times 1.5, rounded up to 64 MiB. The default 384 let the OOM
+# killer take dcfs (2026-10-08, CI run 37799862872).
+ASAN_CANCEL_MEM = 1216
+
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
 # and any other package with unit tests) to build each test's own initramfs.
 exports_files([
@@ -895,6 +902,8 @@ qemu_test(
     ],
     guest_script = "guest/cancel.sh",
     modules = ["dm_delay"],
+    mem = 384,  # at the default 256 the cold listing makes kswapd scan 18073 pages (peak_used 90 MiB); 0 at 384
+    asan_mem = ASAN_CANCEL_MEM,
     size = "large",
     timeout = "long",
 )
@@ -910,6 +919,7 @@ qemu_test(
     ],
     guest_script = "guest/cancel_inventory.sh",
     modules = ["dm_delay"],
+    asan_mem = ASAN_CANCEL_MEM,
     size = "enormous",
     timeout = "eternal",
 )

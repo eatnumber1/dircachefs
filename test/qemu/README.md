@@ -331,6 +331,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | memory (sized by `reclaim_scans=0`, see above) | 104-270 at 576 | 354-478 at 768 | 704 | 832 |
 | bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |
 | destroy (20000 files, step 6.4b) | 105 | 833 | 384 | 1344 |
+| cancel, cancel_inventory (cold 20000-entry listing, steps 22.1-22.2) | 89-93 (`reclaim_scans=0` at 384 for cancel; 256 scans 18073 pages) | 713-745 at 1216 (`reclaim_scans=0`) | 384 (cancel_inventory 256) | 1216 |
 | bench_readdir | 157 | 1432-1509 | 320 | 2304 |
 | bench_full | 569 | over 2001 (killed by the OOM killer at 2048; not measured further) | 896 | 3072 (a guess) |
 
