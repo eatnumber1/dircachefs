@@ -459,8 +459,10 @@ Crash ==
     /\ st' = [i \in AllIds |-> AfterReset(st[i])]
     /\ pend' = NoPend
     /\ run' = "down" /\ clean' = FALSE /\ crashes' = crashes + 1
-    \* A row still to be probed stays dirty (step 12.6b); otherwise the
-    \* removal this crash cut, if any.
+    \* A recovered row stays in cut (dirty) while the run serves, until
+    \* SyncPoint (step 12.6b); a crash with a removal pending overwrites it
+    \* with pend.id, which under-approximates: the code keeps both dirty and
+    \* probes a superset, and a probe deletes only rows of freed objects.
     /\ cut' = IF pend.id # 0 THEN pend.id ELSE cut
     /\ queued' = {}
     /\ UNCHANGED <<obj, nextId, stubVars, bName, forgetErr>>

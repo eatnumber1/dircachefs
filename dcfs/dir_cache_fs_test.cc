@@ -3806,6 +3806,8 @@ TEST_F(DirCacheFSTest, CrashDuringRecoveryRecoversAgain) {
               IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
   EXPECT_THAT(backing::LookupOrPopulate(ctx_, kRootInode, "g"),
               IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
+  EXPECT_THAT(cache::ListDirty(ctx_),
+              IsOkAndHolds(::testing::IsSupersetOf({kRootInode, f})));
   // The first sync point (syncfs, then ClearDirty) takes them out.
   ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
   EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
