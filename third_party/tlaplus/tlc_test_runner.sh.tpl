@@ -24,12 +24,18 @@ for f in "$spec" "$config" @@SRCS@@; do
 done
 cd "$work"
 
+# TLC writes temporary files (TLC.tla, ...) under java.io.tmpdir: keep them
+# in the test's own directory, since tests run concurrently and /tmp is shared.
+mkdir -p "$TEST_TMPDIR/tmp"
+export TMPDIR="$TEST_TMPDIR/tmp"
+
 module="$(basename "$spec" .tla)"
 log="$work/tlc.log"
 status=0
 # -workers auto: as many workers as cores. -cleanup: drop state files of
 # earlier runs. -metadir: keep state files out of the inputs' directory.
-"$java" -XX:+UseParallelGC -Xss4m -jar "$jar" \
+"$java" -XX:+UseParallelGC -Xss4m \
+  -Djava.io.tmpdir="$TEST_TMPDIR/tmp" -jar "$jar" \
   -workers auto -cleanup -metadir "$work/states" \
   -config "$(basename "$config")" @@TLC_ARGS@@ "$module" \
   >"$log" 2>&1 || status=$?
