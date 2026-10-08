@@ -572,7 +572,7 @@ def summarize(results, wall=None):
             "per_hour": round(len(ran) * 3600 / seconds, 1) if seconds else 0}
 
 
-def format_summary(summary, not_run=0):
+def format_summary(summary, not_run=0, not_run_time=0):
     """The summary as a Markdown table."""
     lines = ["| operator | " + " | ".join(STATUSES) + " | total |",
              "|---|" + "---:|" * (len(STATUSES) + 1)]
@@ -585,7 +585,9 @@ def format_summary(summary, not_run=0):
     lines.append("")
     lines.append("%d mutants ran in %ds: %.1f mutants per hour%s" % (
         summary["run"], summary["seconds"], summary["per_hour"],
-        "; %d not run (over the budget)" % not_run if not_run else ""))
+        ("; %d not run (over the budget)" % not_run if not_run else "")
+        + ("; %d not run (time budget)" % not_run_time
+           if not_run_time else "")))
     return "\n".join(lines)
 
 
@@ -678,8 +680,16 @@ def run(args):
                   file=sys.stderr)
             return 2
     started = time.time()
+    clock = getattr(args, "clock", time.time)
+    not_run_time = 0
     try:
         for i, m in enumerate(mutants, 1):
+            deadline = getattr(args, "deadline", None)
+            if deadline is not None and clock() >= deadline:
+                not_run_time = len(mutants) - i + 1
+                print("time budget spent: %d mutants not run" % not_run_time,
+                      file=sys.stderr)
+                break
             path = os.path.join(src, m["file"])
             original = open(path, "rb").read()
             text = original.decode("latin-1")
@@ -724,7 +734,8 @@ def run(args):
     if not mutants:
         json.dump(results, open(args.result, "w"), indent=1)
     summary = summarize(results, wall if mutants else None)
-    table = format_summary(summary, getattr(args, "not_run", 0))
+    table = format_summary(summary, getattr(args, "not_run", 0),
+                           not_run_time)
     print(table, file=sys.stderr)
     lines = format_survivors(results)
     print("\n".join(lines))
@@ -806,6 +817,10 @@ def main(argv=None):
     c.add_argument("--range", required=True, dest="changed")
     c.add_argument("--max-mutants", type=int, default=DEFAULT_BUDGET,
                    help="the per-push budget")
+    c.add_argument("--time-budget", type=int, default=120, metavar="MIN",
+                   help="wall-clock minutes (from the start, the cold build "
+                   "included) after which the remaining mutants are not run "
+                   "(0: none)")
     c.add_argument("--seed", type=int, default=DEFAULT_SEED)
     c.add_argument("--result", required=True)
     c.add_argument("--fail-on-survivor", action="store_true")
@@ -825,7 +840,10 @@ def main(argv=None):
     if a.cmd == "report":
         return report(a)
     if a.cmd == "changed":
-        print("seed %d, budget %d" % (a.seed, a.max_mutants), file=sys.stderr)
+        print("seed %d, budget %d mutants, %d minutes" % (
+            a.seed, a.max_mutants, a.time_budget), file=sys.stderr)
+        if a.time_budget:
+            a.deadline = time.time() + 60 * a.time_budget
         found = sample(candidates(a), a.seed)
         live, suppressed = split_suppressed(
             found, load_equivalent(a.equivalent))

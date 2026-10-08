@@ -363,7 +363,12 @@ class RunEndToEndTest(unittest.TestCase):
             json.dump(ms, f)
 
     def run_tool(self, *extra):
-        args = mutate.argparse.Namespace(
+        args = self.args(*extra)
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            return mutate.run(args)
+
+    def args(self, *extra):
+        return mutate.argparse.Namespace(
             workspace=self.repo, mutants=self.mutants, result=os.path.join(self.dir, "res.json"),
             sample=0, seed=1, only="", shard="", timeout=60, killers="//dcfs:x_test",
             fail_on_survivor="--fail-on-survivor" in extra, show_output=False,
@@ -371,8 +376,6 @@ class RunEndToEndTest(unittest.TestCase):
             bazel=self.bazel, equivalent=self.equivalent,
             baseline=True, baseline_timeout=60,
             summary_out=os.path.join(self.dir, "summary.md"))
-        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            return mutate.run(args)
 
     def test_a_survivor_is_a_finding_for_the_schedule_and_a_failure_per_push(self):
         self.write_mutants(["KILL", "ok", "KILL"])
@@ -410,6 +413,21 @@ class RunEndToEndTest(unittest.TestCase):
         self.assertEqual(suppressed["reason"], "never runs")
         summary = read_text(os.path.join(self.dir, "summary.md"))
         self.assertIn("| negate-if | 1 | 1 | 0 | 1 | 0 | 3 |", summary)
+
+    def test_the_time_budget_leaves_the_remaining_mutants_not_run(self):
+        self.write_mutants(["KILL", "KILL", "KILL", "KILL"])
+        ticks = iter(range(0, 1000, 10))  # a fake clock: 10 s per look
+        extra = {"deadline": 25, "clock": lambda: next(ticks)}
+        args = self.args()
+        for k, v in extra.items():
+            setattr(args, k, v)
+        with redirect_stdout(io.StringIO()), redirect_stderr(
+                io.StringIO()) as err:
+            code = mutate.run(args)
+        self.assertEqual(code, 0)  # not an error
+        results = read_json(os.path.join(self.dir, "res.json"))
+        self.assertEqual(len(results), 3)  # looks at 0, 10, 20; 30 > 25
+        self.assertIn("1 not run (time budget)", err.getvalue())
 
     def test_a_failing_baseline_is_a_tooling_error_and_runs_no_mutant(self):
         # The unmutated tree fails the killers: no verdict would mean
