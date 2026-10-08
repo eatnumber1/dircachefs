@@ -428,11 +428,49 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
 - **GoogleTest.** `TEST_F(<Subject>Test, ...)` with a fixture (220 of 299
   tests; plain `TEST` 79); a `PascalCase` sentence for the behavior
   (`RecycledInodeNumberGetsANewRow`). No `DISABLED_` (0 uses): fix or
-  delete. Check with `ASSERT_THAT(status, IsOk())`, `IsOkAndHolds`,
-  `StatusIs` (`absl/status/status_matchers.h`) and `ASSERT_OK_AND_ASSIGN`;
-  `ASSERT_*` when the test cannot continue, `EXPECT_*` otherwise.
+  delete. Check with matchers and `EXPECT_*` (the next three bullets).
   `GTEST_SKIP() << reason` when the guest filesystem lacks a capability (23
   uses).
+- **Extend an existing test or write a new one.** The cost model: a guest
+  boot plus setup is the expensive unit, an assertion is free, a harness
+  test without a fresh mount is cheap. So write a *new* test when the
+  behavior is new (an operation, a failure mode, an invariant) or the setup
+  differs (fixture state, fault injection, mount options, a guest image);
+  its name states the behavior. *Extend* an existing test when the gap is an
+  unasserted consequence of a scenario it already runs (most mutation
+  survivors are this): `ReleaseReportsWhetherTheOpenCouldWrite` checks the
+  `kReleased` argument of three releases in one scenario, and a fourth
+  consequence of those releases is another expectation there, not another
+  test. In a guest script that is another `TEST <name>` check of the same
+  scenario (`check_cold` in `write.sh` adds a `-mnt` check to a scenario
+  that is already mounted), never another boot. What limits extending is
+  debuggability: a failure must say what broke from the test's name plus the
+  expectation's message, so an added expectation carries a matcher or a
+  message that names the property, and unrelated scenarios never share a
+  test.
+- **`EXPECT_*`, not `ASSERT_*`**, unless continuing would use an invalid
+  value or make the later checks meaningless: `ASSERT_OK_AND_ASSIGN(InodeId
+  f, Id("f"))` for a value the test goes on to use, and `ASSERT_EQ(ro.error,
+  0)` on the opens whose handles every later line releases. Everything else
+  (`EXPECT_EQ(Release(f, ro_fh).error, 0)` and the lines after it) is
+  `EXPECT_*`, so that one failure does not hide the next. (Today
+  `ASSERT_THAT` is used about as often as `EXPECT_THAT` (854 and 860):
+  conversion of the existing tests is 7.5/7.5b.)
+- **Matchers over booleans.** `EXPECT_THAT(value, Matcher)` with gMock
+  (`Contains`, `ElementsAre`, `UnorderedElementsAre`, `HasSubstr`, `Field`,
+  `Property`, `Pointee`) and the status matchers `IsOk()`, `IsOkAndHolds(m)`
+  and `StatusIs(code, message_matcher)`, over `EXPECT_TRUE`/`EXPECT_EQ` on a
+  computed boolean or a hand-formatted string, because the failure prints
+  the whole value and the expectation: `EXPECT_THAT(LinkDentry(ctx_, dir,
+  "s", old.id), IsOk())` shows the status and its message,
+  `EXPECT_TRUE(s.ok())` shows `false`. The status matchers exist today:
+  `absl/status/status_matchers.h` (21 files include it; `IsOk()`,
+  `IsOkAndHolds` and `StatusIs` are used about 900, 460 and 130 times) and
+  `dcfs/testonly/assert_ok_and_assign.h`, which adds `ASSERT_OK_AND_ASSIGN`
+  (the pinned Abseil has none). Three `EXPECT_TRUE(x.ok())` remain, for 7.5
+  to convert. Shell guest tests do the same by hand: a FAIL line prints the
+  observed and the expected value (`fail "$1-mnt" "backing reads: vdb $b_vdb
+  -> $a_vdb"` in `check_cold`).
 - **A debug or log string is tested for its important fields, never
   against a hard-coded whole.** One substring (or regex) per field the
   reader of the string depends on: for a file handle's `ToString`, the
