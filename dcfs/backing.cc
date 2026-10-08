@@ -33,6 +33,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
+#include "absl/time/time.h"
 #include "absl/types/source_location.h"
 #include "dcfs/checkpoint.h"
 #include "dcfs/context.h"
@@ -78,6 +79,7 @@ int ErrnoOf(const absl::Status &status) {
 void BackingCall(
     Context &ctx, std::string_view what,
     absl::SourceLocation site = absl::SourceLocation::current()) {
+  ctx.NoteBackingCall(what);
   ctx.events->BackingCall(ctx, what, site);
 }
 
@@ -1870,6 +1872,7 @@ absl::Status StartupPurge(Context &ctx) {
 }
 
 absl::Status SyncBacking(Context &ctx) {
+  const absl::Time began = ctx.clock->TimeNow();
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::SyncBegin,
                       &ProtocolEvents::SyncEnd);
   // The frame's result is its End's status.
@@ -1890,9 +1893,13 @@ absl::Status SyncBacking(Context &ctx) {
     if (ctx.open_for_write != nullptr) {
       keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
     }
-    ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep));
+    int64_t cleared = 0;
+    ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep, &cleared));
     // Model: SyncClearDirty, or StopClear.
     ctx.events->SyncCleared(ctx);
+    LOG(INFO) << "sync point: cleared " << cleared << " of "
+              << synced.dirty.size() << " dirty rows in "
+              << absl::FormatDuration(ctx.clock->TimeNow() - began);
     return absl::OkStatus();
   }());
 }
@@ -1923,6 +1930,7 @@ namespace {
 // Best effort, as the sweep: a row left behind only costs a probe later.
 void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
   int64_t forgotten = 0;
+  int64_t failed = 0;
   for (InodeId id : dirty) {
     if (id == cache::kRootInode) continue;
     // Gone already (the sweep, or a cascade from its directory's row).
@@ -1946,11 +1954,16 @@ void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
                                   [] { return events::Lifetime{}; });
     }
     if (!status.ok()) {
-      LOG(WARNING) << "could not probe recovered inode " << id
+      ++failed;
+      LOG(ERROR) << "could not probe recovered inode " << id
                    << " (it stays dirty until the next sync point, and an "
                       "access finds it gone): "
                    << status;
     }
+  }
+  if (!dirty.empty()) {
+    LOG(INFO) << "recovery: probed " << dirty.size() << " recovered rows, "
+              << forgotten << " gone, " << failed << " could not be probed";
   }
   if (forgotten > 0) {
     LOG(WARNING) << "forgot " << forgotten
@@ -1990,6 +2003,11 @@ absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
                     "finds them gone): "
                  << forgotten.status();
   }
+  LOG(INFO) << "recovery: the last run ended "
+            << (unclean ? "uncleanly" : "cleanly") << "; " << recovered
+            << " dirty entries made unknown, "
+            << (forgotten.ok() ? *forgotten : 0)
+            << " rows of unnamed or unlinked files forgotten";
   if (unclean || recovered > 0) {
     const bool rebooted =
         last_boot_id.has_value() && *last_boot_id != boot_id;
@@ -2045,6 +2063,8 @@ absl::Status FinishRun(Context &ctx) {
       sqlite3::Durability::kSync));
   // Model: StopFlag.
   ctx.events->CleanShutdownRecorded(ctx);
+  LOG(INFO) << "shutdown: clean (the dirty set is empty and the "
+               "clean-shutdown flag is committed)";
   return absl::OkStatus();
 }
 

@@ -238,6 +238,10 @@ absl::StatusOr<bool> Statement::Step() {
     observer->SqliteStep(Sql());
   }
   int rc = sqlite3_step(stmt_);
+  VLOG(3) << "sqlite3_step: -> "
+          << (rc == SQLITE_ROW    ? "row"
+              : rc == SQLITE_DONE ? "done"
+                                  : sqlite3_errstr(rc));
   if (rc == SQLITE_ROW) return true;
   if (rc == SQLITE_DONE) return false;
   return StatusFromRc(rc);

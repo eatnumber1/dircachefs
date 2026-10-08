@@ -1596,7 +1596,8 @@ absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx) {
 }
 
 absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
-                        std::span<const InodeId> keep) {
+                        std::span<const InodeId> keep, int64_t *cleared) {
+  int64_t removed = 0;
   absl::flat_hash_set<InodeId> kept(keep.begin(), keep.end());
   // Open for writing when the syncfs began: the kernel may have written to
   // it after that (and released it since, which EndWrites also records in
@@ -1625,8 +1626,10 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
                              ctx.fills.inflight.empty();
   bool any = false;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    removed = 0;
     if (nothing_moved) {
       ABSL_RETURN_IF_ERROR(Execute(ctx, "DELETE FROM dirty").status());
+      removed = static_cast<int64_t>(synced.dirty.size());
       // Put back the kept rows that were there (and only those: a kept
       // inode that was not dirty must not become dirty).
       for (InodeId id : kept) {
@@ -1636,6 +1639,7 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
         }
         const InodeId row[] = {id};
         ABSL_RETURN_IF_ERROR(InsertDirty(ctx, row));
+        --removed;
       }
     } else {
       for (InodeId id : synced.dirty) {
@@ -1651,6 +1655,7 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
         if (!CanFill(ctx, synced.fills, id)) continue;
         ABSL_RETURN_IF_ERROR(
             Execute(ctx, "DELETE FROM dirty WHERE inode = ?", id).status());
+        ++removed;
       }
     }
     ABSL_ASSIGN_OR_RETURN(Statement * stmt,
@@ -1667,6 +1672,7 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   // costs a phase 1 a kSync commit it did not need.
   ctx.dirty.durable.clear();
   ctx.dirty.any = any;
+  if (cleared != nullptr) *cleared = removed;
   return absl::OkStatus();
 }
 

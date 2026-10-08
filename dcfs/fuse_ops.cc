@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <string>
 #include <string_view>
 #include <linux/fs.h>  // FS_IOC_SETFLAGS
 #include <sys/stat.h>
@@ -13,8 +14,10 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/strings/str_cat.h"
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
+#include "dcfs/escape.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/protocol_events.h"
 #include "fuse_lowlevel.h"
@@ -34,6 +37,82 @@ DirCacheFS &GetFS(fuse_req_t req) {
 
 events::Ino Ino(fuse_ino_t ino) { return static_cast<events::Ino>(ino); }
 
+std::string_view OpName(events::Op op) {
+  switch (op) {
+    case events::Op::kOther: return "Other";
+    case events::Op::kLookup: return "Lookup";
+    case events::Op::kGetattr: return "Getattr";
+    case events::Op::kSetattr: return "Setattr";
+    case events::Op::kReadlink: return "Readlink";
+    case events::Op::kMknod: return "Mknod";
+    case events::Op::kMkdir: return "Mkdir";
+    case events::Op::kUnlink: return "Unlink";
+    case events::Op::kRmdir: return "Rmdir";
+    case events::Op::kSymlink: return "Symlink";
+    case events::Op::kRename: return "Rename";
+    case events::Op::kLink: return "Link";
+    case events::Op::kOpen: return "Open";
+    case events::Op::kRead: return "Read";
+    case events::Op::kWrite: return "Write";
+    case events::Op::kFlush: return "Flush";
+    case events::Op::kRelease: return "Release";
+    case events::Op::kFsync: return "Fsync";
+    case events::Op::kOpendir: return "Opendir";
+    case events::Op::kReaddir: return "Readdir";
+    case events::Op::kReaddirplus: return "Readdirplus";
+    case events::Op::kReleasedir: return "Releasedir";
+    case events::Op::kFsyncdir: return "Fsyncdir";
+    case events::Op::kStatfs: return "Statfs";
+    case events::Op::kSetxattr: return "Setxattr";
+    case events::Op::kGetxattr: return "Getxattr";
+    case events::Op::kListxattr: return "Listxattr";
+    case events::Op::kRemovexattr: return "Removexattr";
+    case events::Op::kAccess: return "Access";
+    case events::Op::kCreate: return "Create";
+    case events::Op::kFallocate: return "Fallocate";
+    case events::Op::kCopyFileRange: return "CopyFileRange";
+    case events::Op::kIoctl: return "Ioctl";
+    case events::Op::kTmpfile: return "Tmpfile";
+    case events::Op::kLinkTmpfile: return "LinkTmpfile";
+    case events::Op::kForget: return "Forget";
+    case events::Op::kBatchForget: return "BatchForget";
+  }
+  return "Other";
+}
+
+// `Lookup(ino=1, name="a")`: the request as `--v=1` and `--v=2` show it. A
+// name is bytes: escaped.
+std::string DescribeRequest(const events::Request &request) {
+  std::string out =
+      absl::StrCat(OpName(request.op), "(ino=", request.ino);
+  if (!request.name.empty()) {
+    absl::StrAppend(&out, ", name=\"", EscapeBytes(request.name), "\"");
+  }
+  if (!request.newname.empty()) {
+    absl::StrAppend(&out, ", newparent=", request.newparent, ", newname=\"",
+                    EscapeBytes(request.newname), "\"");
+  }
+  absl::StrAppend(&out, ")");
+  return out;
+}
+
+// The request's log lines after its handler ran, before the reply (the
+// failure line, if any, is FuseRequest::ReplyFailureAndLogIfNotOk's).
+// `backing_calls`: how many times it reached the backing filesystem. The
+// idle line needs the clock, so it is read only for such a request.
+void LogRequest(DirCacheFS &fs, const events::Request &request,
+                const absl::Status &status, uint64_t backing_calls) {
+  if (backing_calls > 0) {
+    fs.NoteBackingAccess(fs.context().first_backing_call);
+    // VLOG evaluates its operands only when enabled.
+    VLOG(1) << DescribeRequest(request) << " reached the backing: "
+            << backing_calls << " calls, the first "
+            << fs.context().first_backing_call;
+  }
+  VLOG(2) << DescribeRequest(request) << " -> "
+          << (status.ok() ? std::string("OK") : status.ToString());
+}
+
 // Serves one request as one frame of the protocol events (see
 // dcfs/protocol_events.h): it begins after GetFS's periodic sync point,
 // which is a frame of its own, and ends after the reply. `handler(fs, fr)`
@@ -47,12 +126,16 @@ void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
   FuseRequest fr(req);
   DirCacheFS &fs = GetFS(req);
   Context &ctx = fs.context();
+  const uint64_t backing_before = ctx.backing_calls;
+  ctx.first_backing_call = {};
   ctx.events->CheckRequestBegin(ctx, fs, request);
   // The request checkpoints ask about (dcfs/interrupts.h).
   ctx.interrupts->Begin(req);
   {
     events::RequestScope scope(*ctx.events, ctx, request);
-    fr.ReplyFailureAndLogIfNotOk(scope.Finish(handler(fs, fr)));
+    absl::Status status = scope.Finish(handler(fs, fr));
+    LogRequest(fs, request, status, ctx.backing_calls - backing_before);
+    fr.ReplyFailureAndLogIfNotOk(status);
   }
   ctx.interrupts->End();
   ctx.events->CheckRequestEnd(ctx, fs, request);

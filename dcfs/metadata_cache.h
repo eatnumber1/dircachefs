@@ -650,8 +650,11 @@ absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx);
 //    its writable open ended since (!CanFill(ctx, synced.fills, id)).
 // Rows added after BeginSync (by a phase 1, or by MarkDirty in a phase 3)
 // are never in `synced.dirty`, so they stay too.
+// If `cleared` is not null, it receives the number of rows removed (for the
+// sync point's log line).
 absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
-                        std::span<const InodeId> keep);
+                        std::span<const InodeId> keep,
+                        int64_t *cleared = nullptr);
 
 // Startup recovery after an unclean shutdown, in one transaction: for every
 // inode in the dirty set, marks its attributes unknown, forgets its xattrs

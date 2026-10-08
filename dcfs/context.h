@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -119,6 +120,18 @@ struct Context {
   // absl::SimulatedClock in tests. Never null; not owned. Production code
   // reads the time nowhere else (tools/banned_symbols.txt).
   absl::Clock *clock = &absl::Clock::GetRealClock();
+  // How often a request reached the backing filesystem so far (each
+  // ProtocolEvents::BackingCall site), and the first such call since
+  // `first_backing_call` was last cleared. The request handler (fuse_ops.cc)
+  // reads the difference around a request for its `--v=1` line and for the
+  // INFO line about the first backing access after an idle period.
+  uint64_t backing_calls = 0;
+  std::string_view first_backing_call;
+  void NoteBackingCall(std::string_view what) {
+    if (backing_calls++ == 0 || first_backing_call.empty()) {
+      first_backing_call = what;
+    }
+  }
 };
 
 // Installs `events` (never null; not owned) as `ctx`'s observer: its

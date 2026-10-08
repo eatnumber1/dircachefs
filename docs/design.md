@@ -1719,18 +1719,21 @@ threshold shows, with an example of a line (the `I20261008 12:00:00.001234
 | `ERROR` (default) | the caller got an error dcfs produced, or dcfs refused its job | `E... fuse_request.cc] INTERNAL: RET_CHECK failure: Read on unknown handle 7` |
 | `WARNING` (default) | nothing failed for the caller, state is degraded or surprising | `W... backing.cc] inode 42: out-of-band change on the backing filesystem (unsupported): size 4096 -> 8192; adopting the new attributes` |
 | `INFO` (`--stderrthreshold=0`) | the lifecycle: start, recovery, sync points, shutdown, the first backing access after an idle period | `I... main.cc] dcfs 1.0 starting: source=/srv/media cache_db=/var/lib/dcfs/media.db mountpoint=/mnt/media allow_other=false attr_timeout_sec=3600 entry_timeout_sec=3600 sync_interval_sec=5 fuse_opt=` |
-| `--v=1` | one line per request that reached the backing filesystem, with the cache decisions behind it | `I... fuse_ops.cc] Lookup reached the backing: 3 calls, the first getdents64` |
-| `--v=2` | every request, with its reply | `I... fuse_ops.cc] Lookup(parent=1, name="a") -> OK` |
-| `--v=3` | SQL statements and step counts | `I... sqlite.cc] sqlite3_step: SELECT ...` |
+| `--v=1` | one line per request that reached the backing filesystem (the request, how many backing calls, the first), after the lines for the cache decisions behind it | `I... fuse_ops.cc] Lookup(ino=1, name="a") reached the backing: 3 calls, the first getdents64` |
+| `--v=2` | every request, with its reply | `I... fuse_ops.cc] Lookup(ino=1, name="a") -> OK` |
+| `--v=3` | SQL statements and one line per step | `I... sqlite.cc] sqlite3_step: SELECT ...`, then `sqlite3_step: -> row` |
 
 The INFO lines: the start line (source, cache database, mount point and
 options); the recovery summary (`recovery: the last run ended cleanly; 0
-dirty entries made unknown, 0 rows of unnamed files forgotten`, then
-`recovery: probed 12 rows, 3 gone`); each sync point (`sync point: cleared
-14 dirty rows, kept 2, in 3.2ms`); the shutdown (`shutdown: clean` or
-`shutdown: unclean, the next start will recover: <reason>`); and the first
-backing access after an idle period (`first backing access after 1m12s
-idle`). "Idle" is the longest gap between two requests that reached the
+dirty entries made unknown, 0 rows of unnamed or unlinked files
+forgotten`, then `recovery: probed 12 recovered rows, 3 gone, 0 could not
+be probed`); each sync point (`sync point: cleared 14 of 16 dirty rows in
+3.2ms`); the shutdown (`shutdown: clean (the dirty set is empty and the
+clean-shutdown flag is committed)`; one that could not be clean is a
+WARNING, `clean shutdown incomplete, the next start will recover the
+dirty set: <reason>`, because the next start has work to do); and the
+first backing access after an idle period (`first backing access after
+1m12s idle (getdents64)`, the first backing call of that request). "Idle" is the longest gap between two requests that reached the
 backing filesystem that the daemon treats as quiet: 12 times
 `--sync_interval_sec` (one minute by default). The sync point's own
 interval is the nearest existing notion, but a sync point only runs while

@@ -427,6 +427,8 @@ cc_library(
       "@absl//absl/log",
       "@absl//absl/log:check",
       "@absl//absl/status",
+      ":escape",
+      "@absl//absl/strings",
       "@libfuse//:libfuse",
     ],
 )
@@ -1305,6 +1307,7 @@ cc_library(
       "@libfuse//:libfuse",
       "@absl//absl/types:source_location",
     ],
+      "@absl//absl/time",
 )
 
 qemu_cc_test(

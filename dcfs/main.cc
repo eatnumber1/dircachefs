@@ -324,6 +324,14 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   absl::StatusOr<MountOptions> mount_opts = BuildMountOptions(
       absl::GetFlag(FLAGS_allow_other), absl::GetFlag(FLAGS_fuse_opt));
   if (!mount_opts.ok()) return UsageError(mount_opts.status().message());
+  LOG(INFO) << "dcfs " << kVersion
+            << " starting: source=" << absl::GetFlag(FLAGS_source)
+            << " cache_db=" << cache_db << " mountpoint=" << mountpoint
+            << " mount_options=" << absl::StrJoin(mount_opts->options, ",")
+            << " attr_timeout_sec=" << absl::GetFlag(FLAGS_attr_timeout_sec)
+            << " entry_timeout_sec=" << absl::GetFlag(FLAGS_entry_timeout_sec)
+            << " sync_interval_sec=" << absl::GetFlag(FLAGS_sync_interval_sec)
+            << " foreground=" << absl::GetFlag(FLAGS_foreground);
 
   // `source` (the --source path string) is scoped to this block alone: once
   // source_fd is open, every later use of the source filesystem goes

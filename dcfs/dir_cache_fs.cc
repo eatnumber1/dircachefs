@@ -549,6 +549,18 @@ void DirCacheFS::MaybeSyncBacking() {
   SyncBackingNow("periodic");
 }
 
+void DirCacheFS::NoteBackingAccess(std::string_view what) {
+  const absl::Time now = ctx_.clock->TimeNow();
+  const absl::Duration idle = now - last_backing_access_;
+  last_backing_access_ = now;
+  if (idle > kIdleSyncIntervals * opts_.sync_interval &&
+      idle != absl::InfiniteDuration()) {
+    LOG(INFO) << "first backing access after "
+              << absl::FormatDuration(absl::Trunc(idle, absl::Seconds(1)))
+              << " idle (" << what << ")";
+  }
+}
+
 void DirCacheFS::SyncBackingNow(std::string_view why) {
   if (!ctx_.dirty.any) return;
   last_sync_ = ctx_.clock->TimeNow();

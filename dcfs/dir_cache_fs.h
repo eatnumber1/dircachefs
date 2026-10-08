@@ -233,6 +233,13 @@ class DirCacheFS {
   // re-read after a crash larger.
   void MaybeSyncBacking();
 
+  // Called by the request handler after a request that reached the backing
+  // filesystem (fuse_ops.cc): logs at INFO if the one before it was more
+  // than kIdleSyncIntervals sync intervals ago ("idle": see docs/design.md,
+  // "Logging"). Reads the clock, once, through Context::clock.
+  void NoteBackingAccess(std::string_view what);
+  static constexpr int kIdleSyncIntervals = 12;
+
   // Whether any Open()/Create() handle for `id` is still outstanding (has
   // not gone through Release()). A file whose last link is removed keeps
   // its row while this is true (see SettleUnlinkedFile).
@@ -251,6 +258,7 @@ class DirCacheFS {
   void BackingCall(
       std::string_view what,
       absl::SourceLocation site = absl::SourceLocation::current()) const {
+    ctx_.NoteBackingCall(what);
     ctx_.events->BackingCall(ctx_, what, site);
   }
 
@@ -600,6 +608,9 @@ class DirCacheFS {
   absl::flat_hash_set<int64_t> open_for_write_;
   // When the last sync point ran (or was attempted); see MaybeSyncBacking.
   absl::Time last_sync_;
+  // When a request last reached the backing filesystem; InfinitePast before
+  // the first (the start's own reads are not requests).
+  absl::Time last_backing_access_ = absl::InfinitePast();
 
   // The kernel's lookup count (FUSE's nlookup) of every nodeid it holds:
   // +1 for each entry reply carrying it (lookup, mknod, mkdir, symlink,
