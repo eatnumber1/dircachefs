@@ -71,6 +71,9 @@
  *       Opens a file or a directory read-only and fsync(2)s it (through dcfs:
  *       FUSE FSYNC or FSYNCDIR, after which dcfs runs a sync point), then
  *       closes it; prints "ERR <errno-name>" on failure.
+ *   testutil syncfs <path>
+ *       syncfs(2) on the filesystem <path> is on (what a dcfs sync point does
+ *       to the backing filesystem); prints "ERR <errno-name>" on failure.
  *   testutil fsfreeze <path> <freeze|thaw>
  *       FIFREEZE/FITHAW on the filesystem <path> is on: while frozen, every
  *       write to it (a rename, say) blocks until it is thawed -- a way to
@@ -471,6 +474,23 @@ static int cmd_fsync(const char *path)
 		return 1;
 	}
 	if (fsync(fd) == -1) {
+		print_err(errno);
+		close(fd);
+		return 1;
+	}
+	close(fd);
+	return 0;
+}
+
+static int cmd_syncfs(const char *path)
+{
+	int fd = open(path, O_RDONLY | O_DIRECTORY);
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	if (syncfs(fd) == -1) {
 		print_err(errno);
 		close(fd);
 		return 1;
@@ -2380,6 +2400,8 @@ int main(int argc, char *argv[])
 		return cmd_mmapwrite(argv[2], argv[3], 1);
 	if (argc == 3 && strcmp(argv[1], "fsync") == 0)
 		return cmd_fsync(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "syncfs") == 0)
+		return cmd_syncfs(argv[2]);
 	if (argc == 4 && strcmp(argv[1], "fsfreeze") == 0)
 		return cmd_fsfreeze(argv[2], argv[3]);
 	if (argc == 6 && strcmp(argv[1], "fallocate") == 0)
@@ -2467,6 +2489,7 @@ int main(int argc, char *argv[])
 		"       testutil getxattrhex <path> <name>\n"
 		"       testutil mmapwrite <path> <delay-seconds>\n"
 		"       testutil fsync <path>\n"
+		"       testutil syncfs <path>\n"
 		"       testutil fsfreeze <path> <freeze|thaw>\n"
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
 		"       testutil writehold <path> <append|create> <nbytes>\n"

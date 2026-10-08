@@ -189,14 +189,20 @@ qemu_test_matrix(
     ],
     size = "medium",
     other_size = "large",
-    timeout = "moderate",
+    timeout = "long",  # run-qemu.sh gives each of its 2n boots an equal share
 )
 
 # Step 11.2: bounded sequences of operations with a power cut after them
 # (guest/fault_ace.sh, in the manner of ACE): served == backing after every
 # cut, and what an fsync through dcfs made durable is.
+# The persistence points through dcfs (a) and directly on the backing
+# filesystem (b), in two targets so that each fits its time limit. They boot
+# the checking build although they are large: recovery is what they exercise,
+# and an invariant broken on the way aborts the daemon.
 qemu_test(
-    name = "fault_ace_test",
+    name = "fault_ace_a_test",
+    cmdline = "dcfs_ace_kinds=one,pair,persist,split,fixtures",
+    checked_dcfs = True,
     disks = [
         ("vdb", "ext4", "128M"),
         ("vdc", "ext4", "64M"),
@@ -204,12 +210,28 @@ qemu_test(
     guest_script = "guest/fault_ace.sh",
     modules = ["dm_flakey"],
     size = "large",
-    timeout = "eternal",  # 180 sequences, 3 s each plain, more under a sanitizer
+    timeout = "eternal",  # 182 sequences, 3-4 s each
 )
 
-# The same on xfs and btrfs, over four of the operations (40 sequences).
+qemu_test(
+    name = "fault_ace_b_test",
+    cmdline = "dcfs_ace_kinds=direct,dsplit",
+    checked_dcfs = True,
+    disks = [
+        ("vdb", "ext4", "128M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_ace.sh",
+    modules = ["dm_flakey"],
+    size = "large",
+    timeout = "long",  # 90 sequences
+)
+
+# The same, all kinds, on xfs and btrfs over four of the operations (62
+# sequences each).
 qemu_test_matrix(
     name = "fault_ace_fs_test",
+    checked_dcfs = True,
     cmdline = "dcfs_ace_ops=create,unlink,rename,replace",
     disks = [
         ("vdb", "ext4", "320M"),

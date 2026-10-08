@@ -47,10 +47,14 @@ QEMU_OVERHEAD_MB = 100
 # the large and enormous tiers the plain build that ships (:initramfs).
 # //test/qemu:invariant_checks_on_test checks that a small test gets the
 # checked one.
-def initramfs_for(size, plain_dcfs = False):
+def initramfs_for(size, plain_dcfs = False, checked_dcfs = False):
     """The initramfs label a qemu_test of tier `size` boots."""
+    if plain_dcfs and checked_dcfs:
+        fail("plain_dcfs and checked_dcfs exclude each other")
     if plain_dcfs:
         return ":initramfs"
+    if checked_dcfs:
+        return ":initramfs_checked"
     return ":initramfs_checked" if size in ("small", "medium") else ":initramfs"
 
 def mem_args_for(mem, asan_mem):
@@ -72,7 +76,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = ""):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -121,6 +125,9 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             real power loss) and giving the second boot's verdict; the guest
             script reads dcfs_cut=kill, dcfs_scenario= and dcfs_boot= from
             its kernel command line (guest/fault_power.sh).
+        checked_dcfs: boot the checking build of dcfs (:initramfs_checked)
+            although the tier is large, for a large test that exercises what
+            the invariant checks watch (the ACE sequences' recoveries).
         cmdline: extra words for the guest's kernel command line (run-qemu.sh
             --cmdline), which the guest script reads from /proc/cmdline.
         size: required sh_test size, the test's tier: "small" (run
@@ -189,7 +196,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     mem_args = mem_args_for(mem, asan_mem)
     resource_tags = ["cpu:2", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)]
 
-    initramfs = initramfs_for(size, plain_dcfs)
+    initramfs = initramfs_for(size, plain_dcfs, checked_dcfs)
     # Under `bazel coverage`, the dcfs that wrote the profiles: the one this
     # guest boots.
     cov_objects = [
@@ -246,7 +253,8 @@ def qemu_test_matrix(
         fstypes = ["ext4", "xfs", "btrfs"],
         plain_dcfs = False,
         power_cut = [],
-        cmdline = ""):
+        cmdline = "",
+        checked_dcfs = False):
     """Declares one qemu_test per backing filesystem in `fstypes`.
 
     Args:
@@ -270,6 +278,7 @@ def qemu_test_matrix(
         plain_dcfs: same as qemu_test.
         power_cut: same as qemu_test.
         cmdline: same as qemu_test.
+        checked_dcfs: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
@@ -298,6 +307,7 @@ def qemu_test_matrix(
             plain_dcfs = plain_dcfs,
             power_cut = power_cut,
             cmdline = cmdline,
+            checked_dcfs = checked_dcfs,
         )
     native.alias(
         name = name,

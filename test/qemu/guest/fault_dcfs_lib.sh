@@ -36,14 +36,39 @@ FD_BACK_DEV=/dev/vdb
 FD_CACHE_DEV=/dev/vdc
 CACHE_DIR=/cache
 
-# FD_BACK_OPTS: mount options for the backing filesystem ("-o commit=600"),
-# dropped if the filesystem does not take them (xfs has no commit=).
-FD_BACK_OPTS=""
+# fd_fstype DEV: "ext4", "xfs" or "btrfs", from the superblock's magic bytes
+# (the disks were formatted by run-qemu.sh, and the guest has no blkid).
+fd_fstype() {
+	if [ "$(dd if="$1" bs=4 count=1 2>/dev/null)" = XFSB ]; then
+		echo xfs
+	elif [ "$(dd if="$1" bs=1 skip=65600 count=8 2>/dev/null)" = "_BHRfS_M" ]; then
+		echo btrfs
+	elif [ "$(dd if="$1" bs=1 skip=1080 count=2 2>/dev/null | md5sum)" = "$(printf '\123\357' | md5sum)" ]; then
+		echo ext4
+	else
+		echo unknown
+	fi
+}
+
+# FD_LONG_COMMIT=1: mount the backing filesystem with a journal commit interval
+# of 600 s (ext4 and btrfs: commit=600; xfs has no such option), so that what a
+# test does stays in the running transaction, uncommitted, until the cut.
+FD_LONG_COMMIT=0
 
 fd_mount_backing() {
-	# shellcheck disable=SC2086 # FD_BACK_OPTS is a list of words
-	{ [ -n "$FD_BACK_OPTS" ] && mount $FD_BACK_OPTS "$(fault_dev "$FD_BACK")" "$SRC" 2>/dev/null; } ||
-		mount "$(fault_dev "$FD_BACK")" "$SRC"
+	fmb_opts=""
+	if [ "$FD_LONG_COMMIT" = 1 ]; then
+		case "$(fd_fstype "$FD_BACK_DEV")" in
+		ext4 | btrfs) fmb_opts="-o commit=600" ;;
+		xfs) ;;
+		*)
+			echo "fault_dcfs_lib: $FD_BACK_DEV is not ext4, xfs or btrfs" >&2
+			return 1
+			;;
+		esac
+	fi
+	# shellcheck disable=SC2086 # fmb_opts is a list of words
+	mount $fmb_opts "$(fault_dev "$FD_BACK")" "$SRC"
 }
 
 fd_setup() {

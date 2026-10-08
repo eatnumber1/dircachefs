@@ -152,14 +152,19 @@ else
 fi
 # What dcfs lists is what the failed backing filesystem lists, whatever that
 # is (an error on xfs after its shutdown, nothing on btrfs after its
-# transaction aborted), and never the name whose create failed.
-via_backing=$(ls "$SRC/d2" 2>&1)
+# transaction aborted, the names on ext4), and never the name whose create
+# failed.
+via_backing=$(ls "$SRC/d2" 2>&1 | sed "s|$SRC|$MNT|g")
 via_dcfs=$(ls "$MNT/d2" 2>&1)
-echo "fault_backing.sh: after the failed create, d2 on the backing filesystem: $via_backing; through dcfs: $via_dcfs"
-case "$via_dcfs" in
-*new*) fail create-error-listing "ls d2 through dcfs shows the failed create: $via_dcfs" ;;
-*) pass create-error-listing ;;
-esac
+echo "fault_backing.sh: after the failed create, d2 through the backing filesystem: $via_backing; through dcfs: $via_dcfs"
+if [ "$via_dcfs" != "$via_backing" ]; then
+	fail create-error-listing "ls d2: dcfs says '$via_dcfs', the backing filesystem '$via_backing'"
+else
+	case "$via_dcfs" in
+	*new*) fail create-error-listing "ls d2 shows the failed create: $via_dcfs" ;;
+	*) pass create-error-listing ;;
+	esac
+fi
 if alive; then pass daemon-alive-after-write-error; else fail daemon-alive-after-write-error "the daemon died"; fi
 
 # The disk is healed, and the daemon restarted over the remounted backing

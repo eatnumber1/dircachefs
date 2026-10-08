@@ -19,8 +19,14 @@ fail() {
 mkdir "$WORK/bin" "$WORK/out"
 cat >"$WORK/bin/qemu" <<'E'
 #!/bin/sh
-[ "${1:-}" = --version ] && echo "fake qemu 0"
+if [ "${1:-}" = --version ]; then
+	echo "fake qemu 0"
+	exit 0
+fi
 cat "$(dirname "$0")/../canned"
+# A guest that goes on running after its last line, as one waiting for the
+# host to cut its power does (the kill-mode cases below).
+[ -f "$(dirname "$0")/../stay" ] && sleep 60
 exit 0
 E
 for t in mke2fs mkfs-xfs mkfs-btrfs; do
@@ -297,4 +303,51 @@ unit_timeout() {
 [ "$(unit_timeout TEST_TIMEOUT=300)" = 240 ] || fail "a moderate unit test did not get 240 s: $(cat "$WORK/stdout")"
 [ "$(unit_timeout X=1)" = 60 ] || fail "a unit test without TEST_TIMEOUT did not get 60 s"
 echo "PASS: a unit test gets 60 s, or TEST_TIMEOUT less 60 s when that is more"
+# --- --kill-on (step 11.2): a real power cut. The host reads the guest's console,
+# kills QEMU at the marker line and gives boot 1 no verdict of its own, so
+# every way for that boot to have gone wrong must still fail it: no marker, a
+# check that failed before the marker, a kernel failure or an invariant
+# violation before it, a QEMU that ended on its own (it was not killed at the
+# cut), a marker that is only words in another line.
+MARK=DCFS-POWER-CUT-NOW
+kill_run() {
+	# $1: the lines before the marker; $2: "marker" to print it on a line of
+	# its own, "words" to print it inside another line, "none"; $3: "stay"
+	# for a guest that keeps running (the host has to kill it).
+	printf '%s\n' "$1" >"$WORK/canned"
+	case "$2" in
+	marker) echo "$MARK" >>"$WORK/canned" ;;
+	words) echo "the guest prints $MARK when it is ready" >>"$WORK/canned" ;;
+	esac
+	rm -f "$WORK/stay"
+	[ "$3" = stay ] && : >"$WORK/stay"
+	FLAG="--kill-on $MARK"
+	run_e2e
+	rm -f "$WORK/stay"
+}
+kill_run "TEST scenario PASS" marker stay
+[ "$RC" -eq 0 ] || fail "a guest killed at the marker failed: $(cat "$WORK/stdout")"
+grep -q "QEMU killed at" "$WORK/stdout" || fail "no kill message: $(cat "$WORK/stdout")"
+echo "PASS: --kill-on: a clean boot 1, killed at the marker, passes"
+kill_run "TEST scenario PASS" none go
+[ "$RC" -ne 0 ] || fail "a boot 1 with no marker passed"
+echo "PASS: --kill-on: no marker fails"
+kill_run "TEST scenario PASS" words go
+rc_words=$RC
+rm -f "$WORK/stay"
+[ "$rc_words" -ne 0 ] || fail "the marker inside another line cut the power"
+echo "PASS: --kill-on: the marker must be a line of its own"
+kill_run "TEST held FAIL (the daemon never blocked)" marker stay
+[ "$RC" -ne 0 ] || fail "a failed check before the marker passed boot 1"
+echo "PASS: --kill-on: a TEST FAIL before the marker fails boot 1"
+kill_run "[    3.2] WARNING: CPU: 1 PID: 77 at fs/fuse/dir.c:99 fuse_lookup+0x10/0x20" marker stay
+[ "$RC" -ne 0 ] || fail "a kernel warning before the marker passed boot 1"
+echo "PASS: --kill-on: a kernel failure before the marker fails boot 1"
+kill_run "DCFS-INVARIANT-VIOLATION tri-state: inode 5: attributes recorded as current with nlink 0" marker stay
+[ "$RC" -ne 0 ] || fail "an invariant violation before the marker passed boot 1"
+echo "PASS: --kill-on: an invariant violation before the marker fails boot 1"
+kill_run "TEST scenario PASS" marker go
+[ "$RC" -ne 0 ] || fail "a QEMU that ended on its own, not killed at the cut, passed"
+echo "PASS: --kill-on: a QEMU that was not killed at the marker fails"
+FLAG=""
 echo "PASS: all checks passed"

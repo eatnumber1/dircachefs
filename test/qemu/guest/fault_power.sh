@@ -94,7 +94,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "fault_power.sh: kernel $(uname -r), cut $CUT_MODE${SCENARIO:+, scenario $SCENARIO boot $BOOT}"
-require_commands umount sync find stat
+require_commands umount sync find stat diff sort md5sum
 
 # start [flags]: a new run of dcfs, its log kept for the failure dump.
 start() {
@@ -102,12 +102,6 @@ start() {
 	LOG=/tmp/dcfs-$RUN.log
 	LOGS="$LOGS $LOG"
 	fd_start "$LOG" --sync_interval_sec=3600 "$@"
-}
-
-# snapshot DIR: one line per entry under DIR, "<path> <type> <size> <mode>".
-snapshot() {
-	(cd "$1" && find . -path ./lost+found -prune -o -print | sort |
-		while read -r p; do stat -c '%n %F %s %a' "$p"; done)
 }
 
 # same_as_backing: success if what the daemon serves is what the backing
@@ -158,10 +152,13 @@ wait_touch() {
 # kills QEMU when it reads the marker; nothing here runs afterwards.
 power_cut() {
 	if [ "$CUT_MODE" = kill ]; then
+		# Boot 1 has no verdict of its own on the host but this one: a check
+		# that failed on the way here (a freeze that did not hold, say) means
+		# the state is not the one the scenario names, so no cut is made.
+		[ "$FAILED" -eq 0 ] || exit "$FAILED"
 		echo "DCFS-POWER-CUT-NOW"
-		sleep 600
-		fail killed "QEMU was not killed at the cut"
-		exit "$FAILED"
+		# The host kills QEMU on that line; nothing runs after it.
+		exec sleep 600
 	fi
 	fd_cut || fail cut "fd_cut failed"
 	for fs in "$@"; do fd_thaw "$fs"; done
@@ -182,22 +179,40 @@ warm() {
 	ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5" >/dev/null
 }
 
-# before: the cut, then the create (in dm mode: the create runs on dropped
-# writes; in kill mode it never runs).
+# before: a file synced to the backing filesystem survives the cut, and what
+# was done after it without a sync (a file made on the backing filesystem, a
+# create through dcfs) does not: the witness that a cut, dropped or real, keeps
+# what was durable and loses the rest. In dm mode the cut comes before those
+# writes (they are dropped); in kill mode after them (they are still in the
+# journal's running transaction).
 setup_before() {
+	echo witness >"$SRC/w-synced"
+	"$TESTUTIL" fsync "$SRC/w-synced" && "$TESTUTIL" fsync "$SRC" ||
+		fail before-sync "fsync of the witness failed"
 	if [ "$CUT_MODE" != kill ]; then
 		fd_cut || fail before-cut "fd_cut failed"
-		touch "$MNT/d1/before"
 	fi
+	echo witness >"$SRC/w-unsynced"
+	touch "$MNT/d1/before"
 }
 cut_before() {
-	[ "$CUT_MODE" = kill ] && power_cut
+	if [ "$CUT_MODE" = kill ]; then power_cut; fi
 }
 check_before() {
+	if [ -e "$SRC/w-synced" ]; then
+		pass before-synced-kept
+	else
+		fail before-synced-kept "the file synced before the cut is gone"
+	fi
+	if [ ! -e "$SRC/w-unsynced" ]; then
+		pass before-unsynced-lost
+	else
+		fail before-unsynced-lost "a file written without a sync survived the cut"
+	fi
 	if [ ! -e "$SRC/d1/before" ]; then
 		pass before-lost
 	else
-		fail before-lost "d1/before survived a cut made before it"
+		fail before-lost "d1/before survived a cut made before it was durable"
 	fi
 	served_equals_backing before-served
 }
@@ -346,7 +361,7 @@ flags_for() {
 if [ "$CUT_MODE" = kill ]; then
 	# A long journal commit interval, where the filesystem has one, so that
 	# a create stays in the journal's running transaction until the cut.
-	FD_BACK_OPTS="-o commit=600"
+	FD_LONG_COMMIT=1
 	case "$BOOT" in
 	1)
 		fd_setup || {
@@ -416,17 +431,34 @@ cut_syncpoint
 after_cut syncpoint
 check_syncpoint
 
-# Self-check of the comparison: a name added behind dcfs's back, after it
-# listed the directory, makes it fail. A comparison that never differs would
-# make every check above pass for the wrong reason.
+# Self-check of the comparison: what it does not see, every check above passes
+# for the wrong reason. After dcfs listed and stat'ed d1, each of these changes
+# made behind its back must make it fail: a name, a mode, a link count. And on
+# two trees that differ only in a file's contents (same size, mode, links), the
+# snapshot differs.
 ls "$MNT/d1" >/dev/null
-touch "$SRC/d1/behind-its-back"
-if same_as_backing; then
-	fail comparison-detects-divergence "a name only the backing filesystem has went unnoticed"
+stat "$MNT/d1/keep" >/dev/null
+behind() {
+	# $1: the check's name; $2: the change; $3: the undo
+	eval "$2"
+	if same_as_backing; then
+		fail "comparison-detects-$1" "a change only the backing filesystem has went unnoticed"
+	else
+		pass "comparison-detects-$1"
+	fi
+	eval "$3"
+}
+behind name 'touch "$SRC/d1/behind-its-back"' 'rm "$SRC/d1/behind-its-back"'
+behind mode 'chmod 600 "$SRC/d1/keep"' 'chmod 644 "$SRC/d1/keep"'
+behind links 'ln "$SRC/d1/keep" "$SRC/d1/keep-link"' 'rm "$SRC/d1/keep-link"'
+mkdir /tmp/snap-a /tmp/snap-b
+echo aaaa >/tmp/snap-a/f
+echo bbbb >/tmp/snap-b/f
+if [ "$(snapshot /tmp/snap-a)" != "$(snapshot /tmp/snap-b)" ]; then
+	pass snapshot-sees-contents
 else
-	pass comparison-detects-divergence
+	fail snapshot-sees-contents "two files of one size and mode with other contents snapshot alike"
 fi
-rm "$SRC/d1/behind-its-back"
 
 require_no_reclaim no-reclaim
 exit "$FAILED"

@@ -50,6 +50,21 @@ require_no_reclaim() {
 	fi
 }
 
+# snapshot DIR: one line per entry under DIR (lost+found left out), sorted:
+# "<path> <type> <size> <mode> <links>" and, for a regular file, the md5sum of
+# its contents. What two trees must agree on to be the same tree: dcfs's served
+# one and the backing filesystem's (guest/fault_power.sh, guest/fault_ace.sh).
+snapshot() {
+	(cd "$1" && find . -path ./lost+found -prune -o -print | sort |
+		while IFS= read -r sn_p; do
+			sn_line=$(stat -c '%n %F %s %a %h' "$sn_p" 2>&1) || sn_line="$sn_p stat failed: $sn_line"
+			if [ -f "$sn_p" ] && [ ! -L "$sn_p" ]; then
+				sn_line="$sn_line $(md5sum "$sn_p" 2>&1 | cut -d' ' -f1)"
+			fi
+			echo "$sn_line"
+		done)
+}
+
 # The commands the guest scripts run, as busybox applets of the
 # initramfs (/bin/busybox), checked whenever a script sources this file
 # there. The

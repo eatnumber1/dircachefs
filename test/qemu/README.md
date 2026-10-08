@@ -495,6 +495,9 @@ gate is disabled.
 | the ASan build reports and dies (C++ runtime linked, 7.1) | `//dcfs:asan_runtime_test` (only under `--config=asan`: alloc-dealloc-mismatch must kill the process) |
 | the UBSan build reports and dies (7.4) | `//dcfs:ubsan_runtime_test` (only under `--config=ubsan`: a signed overflow, a misaligned load and a vptr misuse must each kill the process; the vptr one failed to die until `-fsanitize=vptr` was named) |
 | the fault-injection harness injects (11.1) | `//test/qemu:fault_selftest_test` (each mode of `guest/fault_lib.sh` on a filesystem over the wrapped disk; with `fault_table` answering `healthy` for every mode, 6 of its checks and the checks of all three failure tests below fail) |
+| a power cut's first boot has a verdict (11.2) | `//test/qemu:run_qemu_verdict_test` (fake QEMUs: no marker, the marker only inside another line, a failed check, a kernel failure or an invariant violation before the marker, a QEMU that ended on its own: each fails) |
+| the kill-mode cut keeps what was synced and loses the rest (11.2) | `//test/qemu:fault_power_kill_test_ext4` and its xfs and btrfs variants (the `before` scenario: a file synced before the cut must survive it and a file written after must not) |
+| the ACE checker can fail (11.2) | `fault_ace_a_test`'s `fixtures` kind (a persistence point that was not made, and a name added behind dcfs's back, must each be reported) and `fault_power_test`'s `comparison-detects-*` checks (a name, a mode, a link count) and `snapshot-sees-contents` |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
@@ -566,26 +569,47 @@ Step 11.2 added three things:
   (SIGKILL: no flush, no shutdown); the second, without formatting, runs the
   checks. A killed QEMU keeps every write the guest completed to a disk and
   loses the guest's page cache, which is the state `drop-writes` models, so
-  the two tests passing the same checks, on all three filesystems, validates
+  the two tests passing the same checks, on all three filesystems, shows that
+  the model and a real kill agree at these five points. Neither loses a write
+  the disk acknowledged without a flush, so what a missing FLUSH or FUA could
+  reorder is not tested. Boot 1 is held to the verdict rules of any boot (a
+  failed check, a kernel failure, an invariant violation, a guest out of
+  memory before the marker fail it, and QEMU must have been running at the
+  marker and been killed by us, not by the time limit), and the `before`
+  scenario is the witness that the kill keeps what the guest synced and loses
+  what it did not: a file fsynced on the backing filesystem must be there in
+  boot 2, one written afterwards must not. The 2n boots of a test share its
+  time limit equally. Coverage of each boot 2 is written under its own name.
   the model. The `ahead` scenario needs no drop on the backing disk here: the
   journal's commit interval is made long (`-o commit=600` where the
   filesystem takes it) so the creates are still in its running transaction.
-- **ACE-style sequences** (`fault_ace_test`, `fault_ace_fs_test`,
-  `guest/fault_ace.sh`): every sequence of one or two operations from `create
-  mkdir unlink rename replace link xrename chmod append` on a small tree, a
-  power cut (both disks drop writes) after it, a remount, a restart, and the
-  tree dcfs serves must equal the backing filesystem's; and with an fsync of
-  the directory through dcfs (`testutil fsync`) before the cut or between the
-  operations, the backing filesystem must be exactly what it was at the fsync.
-  180 sequences on ext4 (about 10 minutes on a busy host; `eternal`), 40 on
-  xfs and btrfs (`dcfs_ace_ops=` on the kernel command line picks the
-  operations). The durable check fails when the fsync is removed (all
-  `persist` and `split` sequences fail), which shows it can fail.
+- **ACE-style sequences** (`fault_ace_a_test`, `fault_ace_b_test`,
+  `fault_ace_fs_test`, `guest/fault_ace.sh`): sequences of one or two
+  operations from `create mkdir unlink rename replace link xrename chmod
+  append` on a small tree, a power cut (both disks drop writes) after them, a
+  remount, a restart, and then `served`: the tree dcfs serves equals the
+  backing filesystem's (type, size, mode, links, the md5 of every file); and,
+  for sequences with a persistence point, `durable`: the backing filesystem is
+  exactly what it was at that point. Two persistence points, because they leave
+  different states: an fsync through dcfs (`testutil fsync`; the backing
+  filesystem durable and the dirty set cleared, the cache possibly ahead by
+  what phase 1's fsync made durable) and a syncfs of the backing filesystem
+  itself behind dcfs (the backing filesystem durable, the cache's phase 3 not:
+  recovery has the dirty entries to forget; an fsync of the directory alone
+  persists no file data, which the first run showed on `append`). No sequence cuts inside a
+  mutation (`fault_power_test` does). `dcfs_ace_kinds=` and `dcfs_ace_ops=` on
+  the kernel command line pick the kinds (`one pair persist split direct dsplit
+  fixtures`) and the operations: target a runs 182 sequences (about 10
+  minutes, `eternal`), b 90, and the xfs and btrfs variants 62 over four
+  operations; all boot the checking build although they are large, since
+  recovery is what they exercise. The `fixtures` kind is the checker's negative
+  fixture: a persistence point that was not made, and a name added behind
+  dcfs's back, must each be reported.
 
 The small and medium ones run with the checking build of dcfs
 (`initramfs_checked`): an error path that leaves an invariant broken aborts
-the daemon and the test fails (the large ones run the plain build: ACE, and
-the xfs and btrfs variants of the kill test). Each uses the default guest
+the daemon and the test fails (the large ones run the plain build, except the ACE
+targets). Each uses the default guest
 memory (every MEM line shows `reclaim_scans=0`: peak 69 to 126 MiB plain, xfs
 the highest, and 158 MiB under ASan, of 256 and 384). The cache disk's I/O errors (`SQLITE_IOERR`, and `SQLITE_READONLY` from a cache
 filesystem that aborted its journal) reach the caller as EIO: `sqlite.cc` attaches

@@ -157,6 +157,23 @@ done
 if [ -n "$CUT_SCENARIOS" ]; then
 	cut_dir="${TEST_TMPDIR:-$(mktemp -d)}/cut-disks"
 	cut_rc=0
+	# The 2n boots share Bazel's time limit: each gets 1/(2n) of what each
+	# child would take alone (TEST_TIMEOUT less 60 s; the children work that out
+	# from TEST_TIMEOUT again, so the share is turned back into one).
+	cut_boots=$(($(echo "$CUT_SCENARIOS" | tr , ' ' | wc -w) * 2))
+	case "${TEST_TIMEOUT:-}" in
+	'' | *[!0-9]*) ;;
+	*)
+		cut_share=$(((TEST_TIMEOUT > 120 ? TEST_TIMEOUT - 60 : TEST_TIMEOUT / 2) / cut_boots))
+		if [ "$cut_share" -gt 60 ]; then
+			TEST_TIMEOUT=$((cut_share + 60))
+		else
+			TEST_TIMEOUT=$((cut_share * 2))
+		fi
+		export TEST_TIMEOUT
+		echo "run-qemu.sh: $cut_boots boots, $cut_share s each"
+		;;
+	esac
 	for cut_s in $(echo "$CUT_SCENARIOS" | tr , ' '); do
 		rm -rf "$cut_dir"
 		mkdir -p "$cut_dir"
@@ -224,7 +241,8 @@ while :; do
 		shift 2
 		;;
 	--cmdline)
-		EXTRA_APPEND=$2
+		# Repeatable: words accumulate (a test's own and the power cut's).
+		EXTRA_APPEND="${EXTRA_APPEND:+$EXTRA_APPEND }$2"
 		shift 2
 		;;
 	--cov-script)
@@ -549,13 +567,22 @@ case "$QBOOT" in
 	;;
 esac
 
+# What a kernel failure looks like on the console (see the verdict below, which
+# also reads the kernel log's lines from the end of the serial log), and the
+# other lines that fail a boot whatever else it did; the boot of a power cut
+# that is killed at its marker (below) is held to the same ones.
+KERNEL_FAIL_RE='^KERNEL-OOPS:|(^|[] ])(BUG:|Oops[: ]|kernel BUG at|WARNING: CPU:|Call Trace:|Kernel panic)'
+OOM_RE='^MEM-OOM:|System is deadlocked on memory|Out of memory and no killable'
 start=$(date +%s.%N)
 echo "run-qemu.sh: qemu start $start" >>"$LOG"
 # QEMU_WRAP, in kill mode, is a script that records its own pid and execs
-# QEMU, so that the pid is QEMU's (timeout's own child is the wrapper's exec).
+# QEMU, so that the pid is QEMU's; QEMU_TIMEOUT is `timeout N` in the normal
+# boot and nothing in kill mode, where a watchdog of our own kills QEMU at the
+# time limit and says so (`timeout` would hide who killed QEMU in its own exit
+# status).
 qemu_cmd() {
-	# shellcheck disable=SC2086 # drive_args is a deliberately unquoted list of flags, QEMU_WRAP a word or nothing
-	timeout "$TIMEOUT_SECS" $QEMU_WRAP "$QEMU_BIN" \
+	# shellcheck disable=SC2086 # drive_args is a deliberately unquoted list of flags, the others a word or nothing
+	$QEMU_TIMEOUT $QEMU_WRAP "$QEMU_BIN" \
 		-M microvm,x-option-roms=off,pit=$LEGACY_TIMERS,pic=$LEGACY_TIMERS,rtc=on,isa-serial=on,acpi=off \
 		-bios "$QBOOT" \
 		-nodefaults -no-user-config -nographic -no-reboot \
@@ -567,6 +594,7 @@ qemu_cmd() {
 		-append "$append" \
 		$drive_args
 }
+QEMU_TIMEOUT="timeout $TIMEOUT_SECS"
 QEMU_WRAP=""
 if [ -n "$KILL_ON" ]; then
 	# A real power cut (--power-cut): the guest prints the marker when it
@@ -578,28 +606,82 @@ if [ -n "$KILL_ON" ]; then
 	export PIDFILE
 	printf '#!/bin/sh\necho $$ >"$PIDFILE"\nexec "$@"\n' >"$QEMU_WRAP"
 	chmod +x "$QEMU_WRAP"
+	QEMU_TIMEOUT=""
 	fifo="$WORKDIR/serial-$$.fifo"
-	rm -f "$fifo"
+	rm -f "$fifo" "$WORKDIR/timed-out" "$PIDFILE"
 	mkfifo "$fifo"
 	qemu_cmd >"$fifo" 2>&1 &
 	qemu_job=$!
+	(
+		sleep "$TIMEOUT_SECS"
+		: >"$WORKDIR/timed-out"
+		kill -KILL "$(cat "$PIDFILE")" 2>/dev/null || true
+	) &
+	watchdog=$!
 	killed=0
+	alive_at_cut=0
+	cr=$(printf '\r')
 	while IFS= read -r line; do
 		printf '%s\n' "$line"
 		printf '%s\n' "$line" >>"$LOG"
-		case "$line" in
-		*"$KILL_ON"*)
+		# The marker is a line of its own, as the guest prints it (the console
+		# adds a carriage return), not the same words inside another line.
+		if [ "${line%"$cr"}" = "$KILL_ON" ]; then
 			killed=1
+			# A QEMU that is going to end on its own has by now; the cut must
+			# be ours.
+			sleep 0.1
+			if kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+				alive_at_cut=1
+			fi
 			kill -KILL "$(cat "$PIDFILE")" 2>/dev/null || true
 			break
-			;;
-		esac
+		fi
 	done <"$fifo"
 	wait "$qemu_job" 2>/dev/null || true
+	kill "$watchdog" 2>/dev/null || true
+	wait "$watchdog" 2>/dev/null || true
 	rm -f "$fifo"
 	end=$(date +%s.%N)
 	echo "run-qemu.sh: qemu end $end" >>"$LOG"
 	if [ "$killed" -eq 1 ]; then
+		# Boot 1 has no verdict of its own: held to the failures of any boot
+		# (a check that failed before the cut, the kernel's, dcfs's checking
+		# build's, memory), and QEMU must have been running at the cut and
+		# died of our SIGKILL, not of the time limit or by itself.
+		if grep -a -q "^TEST .* FAIL" "$LOG"; then
+			echo "run-qemu.sh: a check failed before the cut; the first:" >&2
+			grep -a -m 1 "^TEST .* FAIL" "$LOG" >&2
+			echo "== RESULT: FAIL (a check failed before the cut; see $LOG) =="
+			exit 1
+		fi
+		if grep -a -q -E "$KERNEL_FAIL_RE" "$LOG"; then
+			echo "run-qemu.sh: the guest kernel logged a failure before the cut; the first:" >&2
+			grep -a -m 1 -E "$KERNEL_FAIL_RE" "$LOG" >&2
+			echo "== RESULT: FAIL (kernel failure before the cut; see $LOG) =="
+			exit 1
+		fi
+		if grep -q -a "^DCFS-INVARIANT-VIOLATION " "$LOG"; then
+			echo "run-qemu.sh: dcfs found an invariant violated before the cut; the first:" >&2
+			grep -a -m 1 "^DCFS-INVARIANT-VIOLATION " "$LOG" >&2
+			echo "== RESULT: FAIL (dcfs invariant violated before the cut; see $LOG) =="
+			exit 1
+		fi
+		if grep -q -a -E "$OOM_RE" "$LOG"; then
+			echo "run-qemu.sh: the guest ran out of memory before the cut" >&2
+			echo "== RESULT: FAIL (guest out of memory before the cut; see $LOG) =="
+			exit 1
+		fi
+		if [ -e "$WORKDIR/timed-out" ]; then
+			echo "run-qemu.sh: the time limit ($TIMEOUT_SECS s) fired before the cut was read" >&2
+			echo "== RESULT: FAIL (timeout; see $LOG) =="
+			exit 1
+		fi
+		if [ "$alive_at_cut" -ne 1 ]; then
+			echo "run-qemu.sh: QEMU had ended on its own when its marker was read, so it was not cut" >&2
+			echo "== RESULT: FAIL (QEMU was not killed at the cut; see $LOG) =="
+			exit 1
+		fi
 		echo "run-qemu.sh: QEMU killed at '$KILL_ON'"
 		echo "== RESULT: PASS (killed at the cut) =="
 		exit 0
@@ -622,7 +704,7 @@ if [ "$COVERAGE" -eq 1 ]; then
 	rm -f "$COVDISK_IMG"
 	# shellcheck disable=SC2086 # COV_OBJECTS is a list of paths
 	"$COV_SCRIPT" "$COV_PROFDATA" "$COV_LLVM_COV" "$rawdir" \
-		"$COVERAGE_DIR/qemu-$(printf '%s' "${TEST_TARGET:-test}" | tr -c 'A-Za-z0-9_.-' _).dat" $COV_OBJECTS || {
+		"$COVERAGE_DIR/qemu-$(printf '%s' "${TEST_TARGET:-test}${LOG_NAME:+-${LOG_NAME%.log}}" | tr -c 'A-Za-z0-9_.-' _).dat" $COV_OBJECTS || {
 		echo "run-qemu.sh: ERROR: the profiles could not be turned into lcov; the test fails rather than report less coverage" >&2
 		exit 1
 	}
@@ -707,7 +789,7 @@ fi
 # says "WARNING: CPU:", and the other real kernel warnings (guest/init lists
 # them; hardware-vulnerability advisories are not among them) arrive as a
 # KERNEL-OOPS: line).
-KERNEL_FAIL='^KERNEL-OOPS:|(^|[] ])(BUG:|Oops[: ]|kernel BUG at|WARNING: CPU:|Call Trace:|Kernel panic)'
+KERNEL_FAIL=$KERNEL_FAIL_RE
 # A kernel failure under --expect-kernel-failure (step 23.7): the guest
 # script is a reproducer of a kernel bug (guest/casefold_tune_oops.sh, a
 # DISABLED_ check) and the oops is what it demonstrates. Tolerated only if
