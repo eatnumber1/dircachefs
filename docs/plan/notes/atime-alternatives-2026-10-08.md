@@ -68,3 +68,25 @@ open behind lsattr/chattr, for `chattr +A`, and after a power loss (README
   attribute cache is dropped after a read.
 - `utimensat` with an explicit time updates ctime; `getdents`/`readlinkat`
   update atime only.
+
+## Refinements while building 23.8 (orchestrator decisions, 2026-10-08)
+
+- **Cache ahead, beyond the held fill:** any attribute record of an inode
+  with an open read fd (a population's or resolve's probe, a phase-3
+  refresh) can capture an atime the backing has not written back. So every
+  attribute write for a held inode marks the row dirty (atime reason) and
+  touches the guard; a rejected or failed held fill marks it unknown and
+  dirty.
+- **Cache behind (crash while a file is open for reading, before the next
+  fstat):** closed rather than documented: a cold read-only open marks the
+  row dirty in one write transaction without fsync, and sync points keep
+  the rows of held inodes until their release records the truth. Residue:
+  a power loss that loses that WAL commit leaves the old atime.
+- **atime-only dirty rows do not drive sync points.** A sync point's
+  `syncfs` would force the backing's lazy atime write-back (with
+  `lazytime`, the write the operator deferred by a day). `ctx.dirty.any` is
+  driven by mutation-dirty rows only; atime-only rows are cleared by a sync
+  point that runs for another reason, by the clean shutdown's final sync,
+  or by recovery after a crash, and may stay dirty across restarts until
+  then. The model carries a reason bit on the dirty set.
+

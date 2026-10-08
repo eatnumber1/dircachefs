@@ -1740,3 +1740,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   green (the four absl flags are a list under the README table). Presubmit 293 + 2. PUSH POINT.
   Post-merge Opus review requested (the agent's own design of ProducedByDcfs). Lane-5 held until
   the dcfs/ editors (11.5/11.4, 23.8) land; then 7.3/7.6/7.7.
+- 23.8 (lane-4) found two gaps in the decided mechanism and got decisions (notes file updated):
+  mark every attribute record of a held inode dirty; close the behind window with a dirty mark at
+  each cold read-only open (no fsync) and sync points keeping held rows; atime-only dirty rows do
+  not drive sync points (lazytime). The agent stopped once on the classifier (a tracked-file
+  `git checkout`), resolved by hand-editing the merge markers; rule reinforced: commit WIP, never
+  stash across a rebase.
