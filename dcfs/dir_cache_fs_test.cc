@@ -2843,7 +2843,8 @@ TEST_F(DirCacheFSTest, VerboseLevelsShowRequestsAndTheirReplies) {
 // the handler that replies, and not again by the function below it. Here a
 // mkdir whose backing change succeeds but whose record fails (the old code
 // logged "created ... could not record it" at WARNING and the handler
-// logged the same status at ERROR).
+// logged the same status at ERROR). Since step 11.4 it replies EEXIST
+// (CreatedButNotCompleted), an errno dcfs chose.
 TEST_F(DirCacheFSTest, AnErrorDcfsProducedIsLoggedOnceAtError) {
   Start();
   ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_new_inodes BEFORE INSERT ON "
@@ -2852,10 +2853,14 @@ TEST_F(DirCacheFSTest, AnErrorDcfsProducedIsLoggedOnceAtError) {
   AllLogCapture capture;
   auto [reply, id] = Mkdir(kRootInode, "d");
   ASSERT_THAT(db_.Exec("DROP TRIGGER no_new_inodes"), IsOk());
-  EXPECT_NE(reply.error, 0);
+  EXPECT_EQ(reply.error, -EEXIST);
   EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 1) << capture.Dump();
-  EXPECT_EQ(capture.Count(absl::LogSeverity::kError, "while recording the "
-                                                     "created d"),
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError,
+                          "Could not complete a create that reached the "
+                          "backing filesystem"),
+            1)
+      << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError, "for d in directory 1"),
             1)
       << capture.Dump();
 }

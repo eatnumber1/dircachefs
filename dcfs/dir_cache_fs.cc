@@ -133,15 +133,18 @@ std::pair<size_t, std::string> MaxHeldFds(const DirCacheFS::Options &opts) {
 // (fuse_invalidate_entry, fs/fuse/dir.c, Linux 6.6). The next lookup then
 // asks dcfs, which resolves the name, unknown since phase 1, from the
 // backing filesystem (step 11.4).
+//
+// An errno dcfs chose (DcfsErrnoToStatus): the reply handler logs it at
+// ERROR, with `why`, once (docs/style.md 1.7).
 absl::Status CreatedButNotCompleted(InodeId parent, std::string_view name,
                                     const absl::Status &why) {
-  LOG(WARNING) << "created " << EscapeBytes(name) << " in directory "
-               << parent << " but could not complete the create (replying "
-               << "EEXIST, so that the kernel forgets the name's negative "
-               << "entry): " << why;
-  return absl::StatusBuilder(dcfs::ErrnoToStatus(
-             EEXIST, "created, but the create could not be completed"))
-         << EscapeBytes(name) << " in directory " << parent << ": " << why;
+  return absl::StatusBuilder(dcfs::DcfsErrnoToStatus(
+             EEXIST,
+             "Could not complete a create that reached the backing "
+             "filesystem (replying EEXIST, so that the kernel forgets the "
+             "name's negative entry)"))
+         << "for " << EscapeBytes(name) << " in directory " << parent
+         << ", after " << why;
 }
 
 }  // namespace
@@ -656,9 +659,9 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
     // backing filesystem fails) is replied as it is: EEXIST would not be
     // true.
     if (!probed) {
-      LOG(WARNING) << "created " << EscapeBytes(name) << " in directory "
-                   << parent << " but could not probe it: " << child.status();
-      return child.status();
+      return absl::StatusBuilder(child.status())
+             << "while probing the created " << EscapeBytes(name)
+             << " in directory " << parent;
     }
     return CreatedButNotCompleted(parent, name, child.status());
   }

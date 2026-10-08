@@ -233,10 +233,10 @@ if [ "$rc" -ne 0 ] && grep -q "File exists" /tmp/p3.err; then
 else
 	fail phase3-create-eexist "the create that happened but could not be recorded was replied: rc=$rc $(cat /tmp/p3.err)"
 fi
-if grep -q "could not complete the create" "$LOG"; then
+if grep -q "Could not complete a create that reached the backing" "$LOG"; then
 	pass phase3-create-logged
 else
-	fail phase3-create-logged "no WARNING that the create could not be completed"
+	fail phase3-create-logged "no ERROR that the create could not be completed"
 fi
 if [ -e "$SRC/d2/p3" ]; then
 	pass phase3-on-backing
