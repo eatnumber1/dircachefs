@@ -177,45 +177,42 @@ with a fake bazel.
 
 ## First sweep (2026-10-08, step 26.5d)
 
-`generate` (seed 1, `--per-function 2`) gave 340 mutants from 1566 candidates
-(1111 after one per line) over `dcfs/metadata_cache.cc`, `dir_cache_fs.cc` and
-`backing.cc`. A full run would take about 20 hours at this machine's load
-(load average 16), so `run --sample 40 --seed 1` ran 40 of them (12%, five per
-operator, the operators taking turns), after the baseline run (which passed):
+`generate` (seed 1, `--per-function 2`) gave 354 mutants (343 to run and 11
+suppressed) from 1582 candidates over `dcfs/metadata_cache.cc`,
+`dir_cache_fs.cc` and `backing.cc`. A full run would take about 30 hours at
+this machine's load, so `run --sample 30 --seed 1` ran 30 of the live ones
+(9%, the operators taking turns), after the baseline run (which passed). The
+11 suppressed (equivalent) mutants are counted but not run:
 
-| operator | killed | survived | invalid | suppressed | error | total |
-|---|---:|---:|---:|---:|---:|---:|
-| constant | 2 | 3 | 0 | 0 | 0 | 5 |
-| delete-statement | 2 | 3 | 0 | 0 | 0 | 5 |
-| enum-swap | 3 | 2 | 0 | 0 | 0 | 5 |
-| logical | 2 | 1 | 2 | 0 | 0 | 5 |
-| negate | 3 | 2 | 0 | 0 | 0 | 5 |
-| relational | 5 | 0 | 0 | 0 | 0 | 5 |
-| status-return | 3 | 2 | 0 | 0 | 0 | 5 |
-| swap-args | 4 | 1 | 0 | 0 | 0 | 5 |
-| **all** | 24 | 14 | 2 | 0 | 0 | 40 |
+| operator | killed | survived | invalid | suppressed | error | flaky | total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| constant | 3 | 0 | 0 | 0 | 0 | 1 | 4 |
+| delete-statement | 2 | 2 | 0 | 11 | 0 | 0 | 15 |
+| enum-swap | 2 | 1 | 0 | 0 | 0 | 0 | 3 |
+| logical | 1 | 0 | 3 | 0 | 0 | 0 | 4 |
+| negate | 3 | 1 | 0 | 0 | 0 | 0 | 4 |
+| relational | 3 | 1 | 0 | 0 | 0 | 0 | 4 |
+| status-return | 3 | 1 | 0 | 0 | 0 | 0 | 4 |
+| swap-args | 1 | 2 | 0 | 0 | 0 | 0 | 3 |
+| **all** | 18 | 8 | 3 | 11 | 0 | 1 | 41 |
 
-40 mutants ran in 7810 s: **18.4 mutants per hour** (195 s each) under load.
-The 14 survivors are the next 8.2x list (not fixed in this step), by function:
+30 mutants ran in 10003 s: **10.8 mutants per hour** (333 s each) under load
+(load average 16; a kill is also rerun once to rule out a flaky test). The
+8 survivors, the next 8.2x list (not fixed in this step), by function; one
+mutant was `flaky` (`Tmpfile`, `dir_cache_fs_test` failed once and passed on a
+rerun):
 
-- `dcfs/backing.cc:1827` `FsyncDirFd`: error->ok `FsyncFd(*dir, datasync)` -> `absl::OkStatus()`
-- `dcfs/backing.cc:652` `InitRoot`: delete-call BackingCall `BackingCall(ctx, "FileHandle::FromFd")` -> `(void)0`
-- `dcfs/backing.cc:669` `InitRoot`: negate-if `!inserted.ok() && !absl::IsAlreadyExists(inserted)` -> `!(!inserted.ok() && !absl::IsAlreadyExists(inserte`
-- `dcfs/backing.cc:591` `ProbeChild`: swap kAbsent/kPresent `events::Probe::Kind::kAbsent` -> `events::Probe::Kind::kPresent`
-- `dcfs/backing.cc:1936` `ProbeRecoveredRows`: delete-statement `gone = true` -> `(void)0`
-- `dcfs/backing.cc:733` `ReconcileAttrs`: nudge 1 `0` -> `1`
-- `dcfs/backing.cc:1583` `RecordNewChild`: swap kAbsent/kPresent `events::Probe::Kind::kAbsent` -> `events::Probe::Kind::kPresent`
-- `dcfs/backing.cc:1739` `RecordNewLink`: value->error `stx` -> `absl::InternalError("mutant")`
-- `dcfs/backing.cc:1997` `StartRun`: logical || `||` -> `&&`
-- `dcfs/backing.cc:1746` `UnlinkAt`: delete-call BackingCall `BackingCall(ctx, "unlinkat")` -> `(void)0`
-- `dcfs/backing.cc:934` `WriteFile`: nudge 1 `0` -> `1`
-- `dcfs/dir_cache_fs.cc:2458` `Fallocate`: negate-if `!removed` -> `!(!removed)`
-- `dcfs/dir_cache_fs.cc:2714` `Tmpfile`: nudge 1 `0` -> `1`
+- `dcfs/backing.cc:1831` `FsyncDirFd`: error->ok `FsyncFd(*dir, datasync)` -> `absl::OkStatus()`
+- `dcfs/backing.cc:672` `InitRoot`: negate-if `!inserted.ok() && !absl::IsAlreadyExists(inserted)` -> `!(!inserted.ok() && !absl::IsAlreadyExists(inserte`
+- `dcfs/backing.cc:1974` `ProbeRecoveredRows`: delete-statement `gone = true` -> `(void)0`
+- `dcfs/backing.cc:1999` `ProbeRecoveredRows`: relational > `>` -> `>=`
+- `dcfs/backing.cc:1586` `RecordNewChild`: swap kAbsent/kPresent `events::Probe::Kind::kAbsent` -> `events::Probe::Kind::kPresent`
+- `dcfs/backing.cc:510` `RefuseReservedIno`: swap-args `"Backing inode number ", stx.stx_ino` -> `stx.stx_ino, "Backing inode number "`
+- `dcfs/backing.cc:1750` `UnlinkAt`: delete-call BackingCall `BackingCall(ctx, "unlinkat")` -> `(void)0`
 - `dcfs/metadata_cache.cc:312` `WithStatx`: swap-args `stx.stx_rdev_major, stx.stx_rdev_minor` -> `stx.stx_rdev_minor, stx.stx_rdev_major`
 
-Some look like noise to triage with `equivalent.txt` or `arid.txt` (the
-`BackingCall` deletions are trace hooks; `nudge 1` on a `0` in a
-comparison may be an unreachable bound).
+The `BackingCall` deletion is a trace hook; others may be equivalent or arid
+(triage them into `equivalent.txt` or `arid.txt`).
 
 ## Reading survivors
 
