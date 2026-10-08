@@ -1713,3 +1713,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   --fail-on-survivor). 8.2d recorded: five survivors from the fee154d range. Push point = after
   25.3's code lands (flags_consistency_test). Lanes 4 and 6 held: 8.2d after 11.4 + 25.3, 11.3b
   after 11.5.
+- 6.2 merged (be59465): readdir_boundary.sh creates its 7,500 files with one `testutil mkfiles`
+  call (same names, N and assertions; two error-path checks); guest time on this loaded host 221-232
+  s -> 135 s, dcfs's own create (~4.5 ms of daemon CPU each) now dominates. Lane-3 free (held:
+  mutation-expansion step pending russ's decision).
