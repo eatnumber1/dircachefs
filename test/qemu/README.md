@@ -327,6 +327,8 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | unit tests (`qemu_cc_test`) | 22-35 | 52-612 (`dir_cache_fs_test` 612 under ASan, 383 without ReaddirWorkTest, `metadata_cache_test` 224, `backing_test` 187, the rest under 125) | 192 | 384 (`dir_cache_fs_test` 960) |
 | boot, cache_permissions, lifecycle, atime, removed, copy, boundary, credentials, create, crash, handles, power, readonly, rename, setattr, release_leak, nfs, passthrough (60-102 plain) | 52-102 | 145-190 (nfs 169) | 256 | 384 |
 | names, names_random, readdir_boundary, idle_short, idle_long, pjdfstest (3 shards) | 57-75 | 433-570 | 256 | 832 |
+| enospc_backing (step 11.4c; ASan measured at 1536, 2026-10-08) | 72-90 | 286-314 ext4/xfs, 486 btrfs (`reclaim_scans=0`; 384 ran out on btrfs in CI) | 256 | 832 |
+| enospc_cache, fault_shutdown (step 11.4c, the same way) | 69-88 | 284-312 | 256 | 576 |
 | write | 136-153 | 224-248 | 320 | 448 |
 | memory (sized by `reclaim_scans=0`, see above) | 104-270 at 576 | 354-478 at 768 | 704 | 832 |
 | bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |

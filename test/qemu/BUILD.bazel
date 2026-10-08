@@ -324,6 +324,7 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_shutdown.sh",
+    asan_mem = 576,  # step 11.4c: ASan peak 299-312 MiB
     modules = ["dm_flakey"],
     size = "small",
     other_size = "medium",
@@ -339,6 +340,8 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/enospc_backing.sh",
+    # Step 11.4c: ASan peak 486 MiB on btrfs, 286-314 on ext4/xfs.
+    asan_mem = 832,
     modules = ["dm_flakey"],
     size = "small",
     other_size = "medium",
@@ -354,6 +357,7 @@ qemu_test(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/enospc_cache.sh",
+    asan_mem = 576,  # step 11.4c: ASan peak 284 MiB
     modules = ["dm_flakey"],
     size = "small",
     timeout = "moderate",
