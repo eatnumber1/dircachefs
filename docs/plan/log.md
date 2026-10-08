@@ -1581,3 +1581,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (the destructor ends it) and listed. New harness piece: `--wrap` of fuse_passthrough_open/close
   gives the unit tier a fake kernel passthrough (backing ids visible in open replies). Fast 177 +
   2, subjects ok. Lane-4 freed and held (load); lane-2 takes 11.5 + 11.4 (new protocol agent).
+- 11.1b merged (461edcf): SQLITE_IOERR/READONLY carry errno EIO (status stays UNAVAILABLE; BUSY/LOCKED
+  EAGAIN, FULL ENOSPC); fault_cache's phase1-error-is-eio check. 11.2 fix round reported done
+  (boot 1 verdict, seven verdict-test cases, synced/unsynced witness, listing comparison, snapshot
+  with nlink+md5 in lib.sh, direct/dsplit persistence via `testutil syncfs`, negative fixtures kind,
+  ACE split a/b/fs on the checking build); sent for a second review pass; CI shard estimates still
+  open with the agent. Lane-2 dispatched: 11.5 instant backing crash then 11.4 out of space.
