@@ -2989,7 +2989,9 @@ TEST_F(DirCacheFSTest, ABackingErrnoWhileRecordingACreateIsLoggedAtError) {
   auto [reply, id] = Mkdir(kRootInode, "d");
   EXPECT_NE(reply.error, 0) << capture.Dump();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 1) << capture.Dump();
-  EXPECT_EQ(capture.Count(absl::LogSeverity::kError, "while recording"), 1)
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError,
+                          "while probing the new child"),
+            1)
       << capture.Dump();
 }
 
