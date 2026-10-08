@@ -1927,3 +1927,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   stale output bases expunged plus two /tmp dirs, ~15 GB freed (385G -> 370G used). Re-sweep: 30 of
   343 sampled, 18 killed / 8 survived / 3 invalid / 1 flaky -> 8.2e replaced. Lane-3 free: 6.5 test
   performance scrub dispatched (new investigator).
+- 15.1 + 15.2 reported (lane-6, 0f92881, six commits, +2958/-277, under Opus review): argv[0]
+  dispatch, `dcfs.` option split (fstype none/bind/native/autodetect, ro, foreground, cache_db,
+  fuse_opt, remount, the absl flags), capture of native/bind mounts in a private mount namespace via
+  /bin/mount + open_tree(OPEN_TREE_CLONE) handed back over a socketpair, own daemonisation with a
+  readiness report after the first FUSE_INIT, syslog sink for the daemon (stderr in foreground),
+  remount of the dcfs mount only, non-root and file-mountpoint refusals, `--source` removed from
+  every script and the bench; new syscalls:: wrappers; syscalls_process non-testonly with execv
+  allowed there only. `mount -t dcfs` through mount(8) is a SKIP in the busybox guest (15.6's
+  systemd/util-linux guest covers it). Deferred: 15.3 cache path/identity, 15.4 stubs, 15.5, 15.6,
+  15.7, allow_other default, kernel feature checks, -V revision.
