@@ -59,6 +59,9 @@ int SessionLoop::Run() {
       std::free(fbuf.mem);
       return -EPROTO;
     }
+    if (opcode == FUSE_INIT && on_init_) {
+      std::exchange(on_init_, nullptr)();
+    }
   }
   std::free(fbuf.mem);
   return res > 0 ? 0 : res;

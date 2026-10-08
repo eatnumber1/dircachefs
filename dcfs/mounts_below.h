@@ -31,6 +31,10 @@ namespace dcfs {
 absl::StatusOr<std::vector<std::string>> MountsBelow(
     std::string_view source_path);
 
+// `field` (a path field of /proc/self/mountinfo) with the kernel's octal
+// escapes decoded.
+std::string UnescapeMountinfoPath(std::string_view field);
+
 // The parsing half of MountsBelow, on the text of /proc/self/mountinfo and
 // an already canonical `source` (so it can be tested on canned input):
 // every mount point lying strictly below `source`, in file order, with the

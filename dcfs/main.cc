@@ -4,6 +4,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <sys/file.h>
@@ -16,10 +17,12 @@
 #include "absl/cleanup/cleanup.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
+#include "absl/flags/reflection.h"
 #include "absl/flags/usage_config.h"
 #include "absl/flags/usage.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
+#include "absl/log/log_sink_registry.h"
 #include "absl/log/log.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
@@ -31,13 +34,16 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_replace.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/ascii.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
+#include "dcfs/backing_capture.h"
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fd.h"
+#include "dcfs/mount_dcfs.h"
 #include "dcfs/mount_options.h"
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
@@ -47,20 +53,15 @@
 #include "dcfs/mounts_below.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/session_loop.h"
+#include "dcfs/startup_channel.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
+#include "dcfs/syslog_sink.h"
 #include "dcfs/version.h"
 #include "fuse_lowlevel.h"
 
-ABSL_FLAG(
-    std::string, source, "",
-    "Directory this filesystem caches. Required.");
-ABSL_FLAG(
-    std::string, cache_db, "",
-    "Path to the sqlite cache database (created if it doesn't exist). "
-    "Required.");
 ABSL_FLAG(
     double, attr_timeout_sec, 3600,
     "How long the kernel may cache an inode's attributes.");
@@ -74,33 +75,16 @@ ABSL_FLAG(
     "last sync point syncfs()es the backing filesystems and marks them "
     "clean. Bounds how much is re-read after a power loss or crash.");
 ABSL_FLAG(
-    bool, foreground, true,
-    "Stay in the foreground instead of daemonizing.");
-ABSL_FLAG(
     bool, allow_other, false,
     "Pass -o allow_other to the FUSE mount, letting users other than the "
-    "one running dcfs access the mountpoint.");
-ABSL_FLAG(
-    std::vector<std::string>, fuse_opt, {},
-    "Comma-separated FUSE/kernel mount options, passed through to libfuse "
-    "as \"-o <opts>\" (e.g. --fuse_opt=max_read=65536). Abseil has no "
-    "single-dash flag syntax, so -o is spelled --fuse_opt here; repeating "
-    "the flag replaces the previous value rather than accumulating "
-    "(ordinary Abseil vector<string> flag semantics), so combine several "
-    "options in one --fuse_opt=a,b instead of repeating the flag. Our own "
-    "default_permissions (and allow_other, when --allow_other is set) are "
-    "always added on top of these; naming default_permissions here is an "
-    "error.");
+    "one running dcfs access the mountpoint. (A mount option: "
+    "dcfs.allow_other.)");
 
 namespace dcfs {
 namespace {
 
-// Prints the usage message set by absl::SetProgramUsageMessage() and
-// returns an InvalidArgument status for `message`. Used for command-line
-// mistakes (a missing required flag, the wrong number of positional
-// arguments) -- as opposed to a valid-looking command line that fails once
-// we try to act on it (a bad --source, a foreign cache database, ...),
-// where printing the usage banner again would just be noise.
+// A command-line mistake of the plain `dcfs` binary (everything else is
+// started as mount.dcfs): the usage message, then the error.
 absl::Status UsageError(std::string_view message) {
   std::cerr << absl::ProgramUsageMessage() << "\n";
   return InvalidArgumentErrorBuilder() << message;
@@ -283,95 +267,101 @@ void RaiseFileLimit() {
   }
 }
 
-absl::StatusOr<int> Main(int argc, char *argv[]) {
-  // The backing create(2)-family syscalls (backing.h's MkdirAt/MknodAt/
-  // CreateAt) run with the caller's umask, switched to around each one
-  // (AsCaller; the kernel sends it with the request, see
-  // FUSE_CAP_DONT_MASK in DirCacheFS::Init). The daemon's own umask is set
-  // to 0 so that whatever it inherited from its launching shell (typically
-  // 022) can never alter a mode on the backing filesystem -- found via
-  // pjdfstest before the per-request umask existed (open/02.t, open/03.t:
-  // `open(..., 0642)` landing as 0640 on the backing file).
-  syscalls::umask(0);
-  InstallFlagsUsageConfig();
-  absl::SetProgramUsageMessage(
-      "--source=<dir> --cache_db=<path> [flags] mountpoint");
-  // WARNING and above go to stderr by default (Abseil's own default is
-  // ERROR), so that e.g. out-of-band changes to the backing filesystem
-  // (backing::ReconcileAttrs) are visible in the daemon's log. Set before
-  // parsing, so an explicit --stderrthreshold still wins.
-  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kWarning);
-  std::vector<char *> args = absl::ParseCommandLine(argc, argv);
-  absl::InitializeLog();
-  RaiseFileLimit();
+// Everything one mount needs, as the wrapper parsed it.
+struct MountRequest {
+  const HelperArgs &args;
+  const HelperOptions &options;
+  // Told when dcfs answers FUSE_INIT, or fails to start.
+  StartupReporter &reporter;
+};
 
-  if (absl::GetFlag(FLAGS_source).empty()) {
-    return UsageError("--source is required");
+// Opens the directory `path` for reading (a real descriptor, not O_PATH: it
+// ends up registered as the source filesystem's mount fd, see
+// backing::InitRoot, and open_by_handle_at's mount fd argument is resolved
+// as a regular file, which rejects O_PATH descriptors with EBADF).
+// O_DIRECTORY gives a clear ENOTDIR up front.
+absl::StatusOr<FileDescriptor> OpenSourceDirectory(const std::string &path) {
+  absl::StatusOr<FileDescriptor> opened =
+      syscalls::openat(AT_FDCWD, path, O_RDONLY | O_DIRECTORY);
+  if (!opened.ok()) {
+    return absl::StatusBuilder(opened.status()) << "SOURCE " << path;
   }
-  std::string cache_db = absl::GetFlag(FLAGS_cache_db);
-  if (cache_db.empty()) {
-    return UsageError("--cache_db is required");
-  }
+  return opened;
+}
 
-  // args[0] is the program name; exactly one positional argument (the
-  // mountpoint) should remain after flag parsing.
-  if (args.size() != 2) {
-    return UsageError(
-        absl::StrCat(
-          "expected exactly one mountpoint argument, got ", args.size() - 1));
+// The daemon: everything after the wrapper has parsed and forked. Returns
+// the exit status of a clean run, or why dcfs did not start or failed.
+absl::StatusOr<int> RunDaemon(const MountRequest &request) {
+  const HelperArgs &args = request.args;
+  const HelperOptions &options = request.options;
+  if (!options.cache_db.has_value()) {
+    // Step 15.3 derives a default from the instance identity.
+    return InvalidArgumentErrorBuilder()
+           << "dcfs.cache_db is required (the cache database's path)";
   }
-  const char *mountpoint = args[1];
-  absl::StatusOr<MountOptions> mount_opts = BuildMountOptions(
-      absl::GetFlag(FLAGS_allow_other), absl::GetFlag(FLAGS_fuse_opt));
-  if (!mount_opts.ok()) return UsageError(mount_opts.status().message());
+  const std::string cache_db = *options.cache_db;
+  const char *mountpoint = args.mountpoint.c_str();
+  absl::StatusOr<MountOptions> mount_opts =
+      BuildMountOptions(absl::GetFlag(FLAGS_allow_other), options.fuse_options);
+  if (!mount_opts.ok()) return mount_opts.status();
   LOG(INFO) << "dcfs " << kVersion
-            << " starting: source=" << absl::GetFlag(FLAGS_source)
+            << " starting: source=" << args.source
             << " cache_db=" << cache_db << " mountpoint=" << mountpoint
             << " mount_options=" << absl::StrJoin(mount_opts->options, ",")
             << " attr_timeout_sec=" << absl::GetFlag(FLAGS_attr_timeout_sec)
             << " entry_timeout_sec=" << absl::GetFlag(FLAGS_entry_timeout_sec)
             << " sync_interval_sec=" << absl::GetFlag(FLAGS_sync_interval_sec)
-            << " foreground=" << absl::GetFlag(FLAGS_foreground);
+            << " foreground=" << options.foreground;
 
-  // `source` (the --source path string) is scoped to this block alone: once
-  // source_fd is open, every later use of the source filesystem goes
-  // through that fd (or objects reopened from cached file handles), never
-  // through the path again -- that's what makes mounting dcfs back over
-  // --source itself (a supported configuration) safe.
+  // The backing tree is reached through `source_fd` alone from here on:
+  // never through a path again, which is what makes mounting dcfs back over
+  // SOURCE itself (a supported configuration) safe. In the captured forms
+  // it is the root of a private clone of the backing mount (`captured.tree`
+  // keeps the clone alive); for `none`, the directory SOURCE names in this
+  // namespace, opened before the FUSE mount covers it.
   FileDescriptor source_fd;
-  struct stat backing_root;  // the --source root directory, for the cache
+  CapturedTree captured;
+  struct stat backing_root;  // the source root directory, for the cache
                              // files' permission check
   {
-    std::string source = absl::GetFlag(FLAGS_source);
-    // A real (non-O_PATH) fd: this ends up registered as the source
-    // filesystem's mount fd (see backing::InitRoot), and open_by_handle_at's
-    // mount fd argument is resolved via the kernel's non-raw fd class
-    // (fs/fhandle.c get_path_from_fd()), which rejects O_PATH descriptors
-    // with EBADF. O_DIRECTORY also gives a clear ENOTDIR up front if
-    // --source isn't a directory.
-    absl::StatusOr<FileDescriptor> opened =
-        syscalls::openat(AT_FDCWD, source, O_RDONLY | O_DIRECTORY);
-    if (!opened.ok()) {
-      return absl::StatusBuilder(opened.status()) << "--source=" << source;
+    const bool captures = options.backing != HelperOptions::Backing::kNone;
+    if (captures) {
+      ABSL_ASSIGN_OR_RETURN(
+          captured,
+          CaptureBacking({.source = args.source,
+                          .native_type = options.native_type.value_or(""),
+                          .bind = options.backing ==
+                                  HelperOptions::Backing::kBind,
+                          .options = options.native_options,
+                          .sloppy = args.sloppy,
+                          .verbose = args.verbose > 0}));
+      source_fd = std::move(captured.root);
+    } else {
+      ABSL_ASSIGN_OR_RETURN(source_fd, OpenSourceDirectory(args.source));
     }
-    source_fd = *std::move(opened);
     ABSL_ASSIGN_OR_RETURN(backing_root, syscalls::fstat(*source_fd));
 
     // Amendment 12: dcfs requires exactly one backing filesystem below
-    // --source (backing inode numbers, shown to users as st_ino, are only
+    // SOURCE (backing inode numbers, shown to users as st_ino, are only
     // unambiguous within one st_dev), so refuse to start if anything is
     // already mounted below it. This is a policy check only -- identity
     // never depends on it -- so it uses the path string, not source_fd; a
     // boundary that appears later (a mount after startup, or a btrfs
     // subvolume, which this check cannot see) is instead refused at
-    // runtime (see backing::ProbeChild/PopulateDirectory).
-    ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below, MountsBelow(source));
-    if (!below.empty()) {
-      return FailedPreconditionErrorBuilder()
-             << "dcfs does not yet support filesystems mounted below --source: "
-                "their inode numbers would collide under one st_dev; unmount "
-                "them or point --source elsewhere. Mounted below "
-             << source << ": " << absl::StrJoin(below, ", ");
+    // runtime (see backing::ProbeChild/PopulateDirectory). A fresh native
+    // mount has nothing below it. Step 15.4 turns what is found here into
+    // stubs, and a file mount point stays refused.
+    if (options.backing != HelperOptions::Backing::kNative) {
+      ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below,
+                            MountsBelow(args.source));
+      if (!below.empty()) {
+        return FailedPreconditionErrorBuilder()
+               << "dcfs does not yet support filesystems mounted below "
+                  "SOURCE: their inode numbers would collide under one "
+                  "st_dev; unmount them or point SOURCE elsewhere. Mounted "
+                  "below "
+               << args.source << ": " << absl::StrJoin(below, ", ");
+      }
     }
     // Step 11.5: a source whose superblock went read-only by itself (an
     // error: ext4 errors=remount-ro, a btrfs transaction abort) under a
@@ -381,13 +371,13 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     ABSL_ASSIGN_OR_RETURN(bool forced_read_only, ForcedReadOnly(*source_fd));
     if (forced_read_only) {
       return FailedPreconditionErrorBuilder()
-             << "--source=" << source
+             << "SOURCE " << args.source
              << " is on a filesystem whose superblock is read-only under a "
                 "read-write mount: after an error, what it shows may not be "
                 "on its disk, or another mount of it was remounted "
                 "read-only; refusing to start: after an error, unmount it, "
                 "check it and mount it again; otherwise remount it "
-                "read-write, or mount --source read-only";
+                "read-write, or mount SOURCE read-only";
     }
   }
 
@@ -415,7 +405,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
         LOG(WARNING) << "cache database directory " << parent
                      << " is group- or world-accessible (mode "
                      << absl::StrFormat("0%o", st->st_mode & 07777)
-                     << "); it holds a cache as sensitive as --source and "
+                     << "); it holds a cache as sensitive as the source and "
                         "should be readable only by root (mode 0700)";
       }
     }
@@ -445,7 +435,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
                << " is in use by another dcfs process; two daemons cannot "
                   "share one cache database";
       }
-      return absl::StatusBuilder(locked) << "--cache_db=" << cache_db;
+      return absl::StatusBuilder(locked) << "dcfs.cache_db=" << cache_db;
     }
   }
 
@@ -497,7 +487,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   if (stored_device != root.device_id) {
     return FailedPreconditionErrorBuilder()
            << "Cache database " << cache_db << " was created for filesystem "
-           << stored_device.ToString() << ", but --source is on "
+           << stored_device.ToString() << ", but SOURCE is on "
            << root.device_id.ToString()
            << "; delete the database to start a cold cache";
   }
@@ -527,7 +517,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
              << "Cache database " << cache_db
              << " was created for a different source directory (inode "
              << stored_root.backing_ino << ", generation "
-             << stored_root.backing_gen << ") than --source (inode "
+             << stored_root.backing_gen << ") than SOURCE (inode "
              << root.backing_ino << ", generation " << root.backing_gen
              << "); delete the database to start a cold cache";
     }
@@ -548,8 +538,20 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   };
 
   DirCacheFS fs(ctx, opts);
-  std::vector<std::string> fuse_arg_strings = {
-      args[0], "-o", absl::StrJoin(opts.mount_options, ",")};
+  // What the kernel shows for the mount (mountinfo, df, findmnt): the spec
+  // as written, with the type fuse.dcfs. libfuse's own escape for a comma.
+  std::string fsname = absl::StrCat("fsname=", absl::StrReplaceAll(
+      args.source, {{"\\", "\\\\"}, {",", "\\,"}}));
+  std::vector<std::string> fuse_option_list = {
+      "-o", absl::StrJoin(opts.mount_options, ","), "-o", fsname, "-o",
+      "subtype=dcfs"};
+  if (options.read_only) {
+    fuse_option_list.push_back("-o");
+    fuse_option_list.push_back("ro");
+  }
+  std::vector<std::string> fuse_arg_strings = {std::string(kMountHelperName)};
+  fuse_arg_strings.insert(fuse_arg_strings.end(), fuse_option_list.begin(),
+                          fuse_option_list.end());
   std::vector<char *> fuse_arg_ptrs;
   fuse_arg_ptrs.reserve(fuse_arg_strings.size());
   for (std::string &arg : fuse_arg_strings) fuse_arg_ptrs.push_back(arg.data());
@@ -579,14 +581,12 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
            << "fuse_session_mount(" << mountpoint << ") failed";
   }
 
-  // Non-zero (the default) keeps this process in the foreground; zero
-  // forks to the background. Mounting has already happened by this point,
-  // so this is purely about who owns the controlling terminal from here on.
-  fuse_daemonize(absl::GetFlag(FLAGS_foreground) ? 1 : 0);
-
   // libfuse's loop, plus draining /dev/fuse at a checkpoint so that a
-  // request sees its own FUSE_INTERRUPT (dcfs/session_loop.h).
+  // request sees its own FUSE_INTERRUPT (dcfs/session_loop.h). The wrapper
+  // waiting for this daemon is told when the kernel's FUSE_INIT has been
+  // answered: from then on dcfs is serving.
   SessionLoop loop(session);
+  loop.SetOnInit([&request] { request.reporter.Ready(); });
   ctx.interrupts = &loop;
   int rc = loop.Run();
   ctx.interrupts = &NoInterrupts();
@@ -621,14 +621,186 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   return EXIT_SUCCESS;
 }
 
+// Sets the Abseil flag `name` (one of the dcfs.<flag> options) to `value`.
+absl::Status SetFlagFromOption(const std::string &name,
+                               const std::string &value) {
+  absl::CommandLineFlag *flag = absl::FindCommandLineFlag(name);
+  if (flag == nullptr) {
+    return InternalErrorBuilder() << "No flag " << name << " to set";
+  }
+  std::string error;
+  if (!flag->ParseFrom(value, &error)) {
+    return InvalidArgumentErrorBuilder()
+           << "Option dcfs." << name << "=" << value << ": " << error;
+  }
+  return absl::OkStatus();
+}
+
+// Why dcfs refuses to run as anyone but root (README, "Why root"; decision
+// 12): each of these needs a privilege no user has.
+absl::Status RequireRoot() {
+  if (syscalls::getuid() == 0) return absl::OkStatus();
+  return PermissionDeniedErrorBuilder()
+         << "mount.dcfs must run as root (fstab's user option does not "
+            "work): FUSE passthrough, the private mount namespace and "
+            "open_tree need CAP_SYS_ADMIN, open_by_handle_at needs "
+            "CAP_DAC_READ_SEARCH, and acting with each caller's credentials "
+            "needs setfsuid, setfsgid and setgroups";
+}
+
+// `mount -o remount`: changes only the dcfs mount (decision 10): its
+// read-only flag, from dcfs.ro. The underlying mount is not reachable; use
+// dcfs.fstype=none on a mount you manage to remount that.
+absl::Status RemountDcfs(const HelperArgs &args, const HelperOptions &options) {
+  ABSL_ASSIGN_OR_RETURN(std::string mountpoint,
+                        syscalls::realpath(args.mountpoint));
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor mountinfo,
+      syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
+  std::string contents;
+  char buf[65536];
+  while (true) {
+    ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::read(*mountinfo, buf, sizeof(buf)));
+    if (n == 0) break;
+    contents.append(buf, n);
+  }
+  std::optional<unsigned long> flags =
+      RemountFlags(contents, mountpoint, options.read_only);
+  if (!flags.has_value()) {
+    return FailedPreconditionErrorBuilder()
+           << "Cannot remount " << mountpoint << ": it is not a dcfs mount";
+  }
+  return syscalls::mount(nullptr, mountpoint, nullptr, *flags, nullptr);
+}
+
+// The wrapper: `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] [-o OPTIONS]`.
+// Returns its exit status.
+int MountHelperMain(int argc, char *argv[]) {
+  const std::vector<std::string> words(argv + 1, argv + argc);
+  absl::StatusOr<HelperArgs> args = ParseHelperArgs(words);
+  if (!args.ok()) {
+    LOG(ERROR) << args.status() << "; usage: mount.dcfs SOURCE MOUNTPOINT "
+               << "[-sfnv] [-N ns] [-o OPTIONS]";
+    return 1;
+  }
+  if (args->version) {
+    std::cout << "mount.dcfs (dcfs " << kVersion << ")" << std::endl;
+    return 0;
+  }
+  absl::StatusOr<HelperOptions> options = SplitHelperOptions(args->options);
+  absl::Status checked = options.status();
+  if (checked.ok()) checked = RequireRoot();
+  if (checked.ok() && args->mount_namespace.has_value()) {
+    checked = UnimplementedErrorBuilder()
+              << "Option -N is not supported: mount.dcfs mounts in its own "
+                 "namespace";
+  }
+  if (checked.ok()) {
+    for (const auto &[name, value] : options->flags) {
+      checked = SetFlagFromOption(name, value);
+      if (!checked.ok()) break;
+    }
+  }
+  if (checked.ok() && !options->remount) {
+    // A mount point that is not a directory (a file mount point is refused,
+    // decision 9).
+    absl::StatusOr<struct stat> st = syscalls::fstatat(AT_FDCWD, args->mountpoint);
+    if (!st.ok()) {
+      checked = absl::StatusBuilder(st.status())
+                << "MOUNTPOINT " << args->mountpoint;
+    } else if (!S_ISDIR(st->st_mode)) {
+      checked = InvalidArgumentErrorBuilder()
+                << "MOUNTPOINT " << args->mountpoint
+                << " is not a directory: a file cannot be a dcfs mount point";
+    }
+  }
+  if (!checked.ok()) {
+    LOG(ERROR) << checked;
+    return ExitStatusFor(checked);
+  }
+  if (args->fake) return 0;
+  if (options->remount) {
+    absl::Status remounted = RemountDcfs(*args, *options);
+    if (!remounted.ok()) LOG(ERROR) << remounted;
+    return remounted.ok() ? 0 : ExitStatusFor(remounted);
+  }
+
+  // Fork first, before the database, the mount or any thread: the daemon is
+  // the child; this process waits for its report and exits with it.
+  StartupReporter reporter;
+  if (!options->foreground) {
+    absl::StatusOr<DaemonFork> forked = ForkDaemon();
+    if (!forked.ok()) {
+      LOG(ERROR) << forked.status();
+      return 1;
+    }
+    if (forked->parent_exit_status.has_value()) {
+      return *forked->parent_exit_status;
+    }
+    reporter = std::move(forked->reporter);
+    // The daemon logs to syslog alone: stderr is /dev/null now.
+    absl::SetStderrThreshold(absl::LogSeverityAtLeast::kInfinity);
+  }
+  SyslogSink syslog_sink;
+  absl::AddLogSink(&syslog_sink);
+  absl::Cleanup remove_sink = [&syslog_sink] {
+    absl::RemoveLogSink(&syslog_sink);
+  };
+
+  absl::StatusOr<int> ran =
+      RunDaemon({.args = *args, .options = *options, .reporter = reporter});
+  if (ran.ok()) return *ran;
+  if (reporter.pending()) {
+    // Not started: the waiting wrapper prints it and exits with its status.
+    reporter.Fail(ran.status());
+  } else {
+    LOG(ERROR) << ran.status();
+  }
+  return ExitStatusFor(ran.status());
+}
+
+// The plain `dcfs` binary: --help and --version, and a pointer to the
+// wrapper (decision 8: dcfs is mounted as mount.dcfs; there is no --source).
+int PlainMain(int argc, char *argv[]) {
+  absl::SetProgramUsageMessage(
+      "dcfs is started by mount(8) as mount.dcfs: mount -t dcfs -o "
+      "dcfs.fstype=none,dcfs.cache_db=PATH SOURCE MOUNTPOINT (see README)");
+  std::vector<char *> args = absl::ParseCommandLine(argc, argv);
+  absl::Status usage = UsageError(
+      "dcfs mounts through its mount.dcfs name: run mount.dcfs SOURCE "
+      "MOUNTPOINT -o OPTIONS, or mount -t dcfs");
+  LOG(ERROR) << usage << (args.size() > 1 ? " (arguments ignored)" : "");
+  return 1;
+}
+
+int Main(int argc, char *argv[]) {
+  // The backing create(2)-family syscalls (backing.h's MkdirAt/MknodAt/
+  // CreateAt) run with the caller's umask, switched to around each one
+  // (AsCaller; the kernel sends it with the request, see
+  // FUSE_CAP_DONT_MASK in DirCacheFS::Init). The daemon's own umask is set
+  // to 0 so that whatever it inherited from its launching shell (typically
+  // 022) can never alter a mode on the backing filesystem -- found via
+  // pjdfstest before the per-request umask existed (open/02.t, open/03.t:
+  // `open(..., 0642)` landing as 0640 on the backing file).
+  syscalls::umask(0);
+  InstallFlagsUsageConfig();
+  // WARNING and above go to stderr by default (Abseil's own default is
+  // ERROR), so that e.g. out-of-band changes to the backing filesystem
+  // (backing::ReconcileAttrs) are visible in the daemon's log. Set before
+  // the options are applied, so an explicit dcfs.stderrthreshold wins.
+  absl::SetStderrThreshold(absl::LogSeverityAtLeast::kWarning);
+  absl::InitializeLog();
+  RaiseFileLimit();
+  // argv[0] dispatch (decision 5): mount(8) runs mount.dcfs.
+  const std::string_view program = argc > 0 ? argv[0] : "";
+  const size_t slash = program.rfind('/');
+  const std::string_view name =
+      slash == std::string_view::npos ? program : program.substr(slash + 1);
+  if (name == kMountHelperName) return MountHelperMain(argc, argv);
+  return PlainMain(argc, argv);
+}
+
 }  // namespace
 }  // namespace dcfs
 
-int main(int argc, char *argv[]) {
-  absl::StatusOr<int> ret = dcfs::Main(argc, argv);
-  if (!ret.ok()) {
-    std::cerr << ret.status() << std::endl;
-    return EXIT_FAILURE;
-  }
-  return *ret;
-}
+int main(int argc, char *argv[]) { return dcfs::Main(argc, argv); }

@@ -64,6 +64,10 @@ inline absl::StatusBuilder AbortedErrorBuilder(
     absl::SourceLocation loc = absl::SourceLocation::current()) {
   return absl::StatusBuilder(absl::StatusCode::kAborted, loc);
 }
+inline absl::StatusBuilder PermissionDeniedErrorBuilder(
+    absl::SourceLocation loc = absl::SourceLocation::current()) {
+  return absl::StatusBuilder(absl::StatusCode::kPermissionDenied, loc);
+}
 inline absl::StatusBuilder UnimplementedErrorBuilder(
     absl::SourceLocation loc = absl::SourceLocation::current()) {
   return absl::StatusBuilder(absl::StatusCode::kUnimplemented, loc);

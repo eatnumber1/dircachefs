@@ -24,21 +24,27 @@ MAIN_DEPS = [
     ":metadata_cache",
     ":migrate",
     ":mount_fds",
+    ":mount_dcfs",
     ":mount_options",
     ":mounts_below",
+    ":backing_capture",
     ":sqlite",
+    ":startup_channel",
     ":status",
     ":syscalls",
     ":syscalls_backing",
+    ":syslog_sink",
     "@absl//absl/base:log_severity",
     "@absl//absl/cleanup",
     "@absl//absl/flags:flag",
     "@absl//absl/flags:parse",
     "@absl//absl/flags:usage",
     "@absl//absl/log",
+    "@absl//absl/flags:reflection",
     "@absl//absl/log:flags",
     "@absl//absl/log:globals",
     "@absl//absl/log:initialize",
+    "@absl//absl/log:log_sink_registry",
     "@absl//absl/random",
     "@absl//absl/status",
     "@absl//absl/status:status_builder",
@@ -239,14 +245,18 @@ cc_library(
     ],
 )
 
-# Process-control wrappers for the benchmark driver (bench/); a library of
-# its own so the daemon never links fork/execv (tools/banned_symbols.txt).
+# Process-control wrappers (fork, execv, waitpid, dup2, _exit): the benchmark
+# driver (bench/) and, since step 15.2, the mount.dcfs wrapper, which forks the
+# daemon and runs mount(8). The daemon itself never serves from a process it
+# did not start: tools/banned_symbols.txt allows execv from this library only.
 cc_library(
     name = "syscalls_process",
-    testonly = 1,
     srcs = ["syscalls_process.cc"],
     hdrs = ["syscalls_process.h"],
-    visibility = ["//bench:__pkg__"],
+    visibility = [
+      "//bench:__pkg__",
+      "//dcfs/testonly:__pkg__",
+    ],
     deps = [
       ":status",
       "@absl//absl/status",
@@ -558,16 +568,72 @@ cc_library(
     ],
 )
 
-# Step 15.1: the mount.dcfs wrapper's pure parts (step 15.2 implements it).
+# Step 15.2: the mount.dcfs wrapper's pure parts: the helper command line,
+# the option split, exit statuses, the startup report, mountinfo questions.
 cc_library(
     name = "mount_dcfs",
     srcs = ["mount_dcfs.cc"],
     hdrs = ["mount_dcfs.h"],
     deps = [
+      ":mounts_below",
       ":status",
       "@absl//absl/status",
+      "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
+      "@absl//absl/strings:cord",
+    ],
+)
+
+# Step 15.2: how mount.dcfs daemonizes and learns that the daemon serves.
+cc_library(
+    name = "startup_channel",
+    srcs = ["startup_channel.cc"],
+    hdrs = ["startup_channel.h"],
+    deps = [
+      ":mount_dcfs",
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      ":syscalls_process",
+      "@absl//absl/log",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+# Step 15.2: capturing the backing tree in a private mount namespace.
+cc_library(
+    name = "backing_capture",
+    srcs = ["backing_capture.cc"],
+    hdrs = ["backing_capture.h"],
+    deps = [
+      ":escape",
+      ":mount_dcfs",
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      ":syscalls_process",
+      "@absl//absl/cleanup",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+# Step 15.2: the log sink of a daemonized dcfs.
+cc_library(
+    name = "syslog_sink",
+    srcs = ["syslog_sink.cc"],
+    hdrs = ["syslog_sink.h"],
+    deps = [
+      ":syscalls",
+      "@absl//absl/base:log_severity",
+      "@absl//absl/log:log_entry",
+      "@absl//absl/log:log_sink",
     ],
 )
 

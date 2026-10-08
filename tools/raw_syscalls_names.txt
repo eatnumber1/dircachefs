@@ -151,3 +151,12 @@ clock_gettime
 gettimeofday
 time
 poll
+open_tree
+socketpair
+sendmsg
+recvmsg
+send
+openlog
+syslog
+setsid
+getuid

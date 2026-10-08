@@ -187,6 +187,9 @@ else
 
 	cp "$BUSYBOX" "$ROOT/bin/busybox"
 	cp "$DCFS" "$ROOT/bin/dcfs"
+	# Step 15.2: dcfs is mounted as mount.dcfs (argv[0] dispatch).
+	mkdir -p "$ROOT/sbin"
+	ln -sf ../bin/dcfs "$ROOT/sbin/mount.dcfs"
 	cp "$FHTEST" "$ROOT/bin/fhtest"
 	cp "$TESTUTIL" "$ROOT/bin/testutil"
 	ln -sf busybox "$ROOT/bin/sh"

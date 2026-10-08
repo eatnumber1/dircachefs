@@ -34,6 +34,27 @@
 namespace dcfs {
 namespace {
 
+// Canonicalizes `path` (resolves "." / ".." / symlinks, relative to the
+// current working directory, exactly as the openat(AT_FDCWD, path, ...)
+// that opens --source does) so it can be compared byte-for-byte against
+// the already-canonical paths /proc/self/mountinfo reports.
+absl::StatusOr<std::string> Canonicalize(std::string_view path) {
+  return syscalls::realpath(path);
+}
+
+// The whole contents of `fd`, read from its current offset to EOF.
+absl::StatusOr<std::string> ReadAll(int fd) {
+  std::string contents;
+  char buf[65536];
+  while (true) {
+    ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buf, sizeof(buf)));
+    if (n == 0) return contents;
+    contents.append(buf, n);
+  }
+}
+
+}  // namespace
+
 // Un-escapes the octal sequences (\040 space, \011 tab, \134 backslash,
 // \012 newline) the kernel uses for the path fields (mount point, root) of
 // /proc/self/mountinfo, so that a mount point containing one of those
@@ -56,27 +77,6 @@ std::string UnescapeMountinfoPath(std::string_view field) {
   }
   return result;
 }
-
-// Canonicalizes `path` (resolves "." / ".." / symlinks, relative to the
-// current working directory, exactly as the openat(AT_FDCWD, path, ...)
-// that opens --source does) so it can be compared byte-for-byte against
-// the already-canonical paths /proc/self/mountinfo reports.
-absl::StatusOr<std::string> Canonicalize(std::string_view path) {
-  return syscalls::realpath(path);
-}
-
-// The whole contents of `fd`, read from its current offset to EOF.
-absl::StatusOr<std::string> ReadAll(int fd) {
-  std::string contents;
-  char buf[65536];
-  while (true) {
-    ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buf, sizeof(buf)));
-    if (n == 0) return contents;
-    contents.append(buf, n);
-  }
-}
-
-}  // namespace
 
 std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
                                           std::string_view source) {

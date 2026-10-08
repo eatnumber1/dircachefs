@@ -207,7 +207,7 @@ if [ -n "$DPID" ]; then
 fi
 
 # UUID= sources are resolved by the native mount (busybox's, here).
-UUID=$(blkid -o value -s UUID "$DEV" 2>/dev/null)
+UUID=$(blkid "$DEV" 2>/dev/null | sed -n 's/.*[ :]UUID="\([^"]*\)".*/\1/p')
 if [ -z "$UUID" ]; then
 	skip capture-uuid-source "blkid prints no UUID for $DEV"
 else
@@ -331,12 +331,17 @@ fi
 
 # --- mount -t dcfs: through mount(8) -------------------------------------------
 
+# This guest's busybox mount runs no mount.<type> helpers (it asks the kernel
+# for a filesystem named dcfs and gets ENODEV); util-linux's does, and step
+# 15.6 runs this through it in the Debian guest.
 mount -t dcfs -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/mount_t.db" "$DEV" "$MNT" 2>"$OUT"
 rc=$?
 only_one_daemon
 if [ "$rc" -eq 0 ] && [ -n "$DPID" ] && [ "$(cat "$MNT/file_4.txt" 2>&1)" = "content 4" ]; then
 	pass mount-t-dcfs
 	unmount_check mount-t-dcfs-umount "$MNT"
+elif [ "$rc" -ne 0 ] && grep -q 'No such device' "$OUT" && nothing_left "$MNT"; then
+	skip mount-t-dcfs "busybox mount has no mount.<type> helper support (step 15.6 uses util-linux's)"
 else
 	fail mount-t-dcfs "rc=$rc out=$(cat "$OUT") mounts=$(grep "$MNT" /proc/self/mountinfo)"
 fi

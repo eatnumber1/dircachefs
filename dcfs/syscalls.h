@@ -2,10 +2,12 @@
 #define DCFS_SYSCALLS_H_
 
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <time.h>
 
 #include <span>
+#include <utility>
 #include <string>
 #include <string_view>
 
@@ -77,6 +79,35 @@ absl::Status setrlimit(int resource, const struct rlimit &limit);
 absl::Status flock(int fd, int operation);
 // poll(2) of one descriptor: its revents (0 if `timeout_ms` passed).
 absl::StatusOr<short> poll(int fd, short events, int timeout_ms);
+
+// --- The mount.dcfs wrapper (phase 15): process, mount and socket calls ----
+
+// getuid(2) (never fails), setsid(2), chdir(2) and unshare(2).
+uid_t getuid();
+absl::StatusOr<pid_t> setsid();
+absl::Status chdir(std::string_view path);
+absl::Status unshare(int flags);
+
+// open_tree(2): a descriptor for `path` (with OPEN_TREE_CLONE, a detached
+// clone of the mount there). O_CLOEXEC is not added: pass OPEN_TREE_CLOEXEC.
+absl::StatusOr<FileDescriptor> open_tree(int dirfd, std::string_view path,
+                                         unsigned int flags);
+
+// socketpair(2) with SOCK_CLOEXEC added to `type`.
+absl::StatusOr<std::pair<FileDescriptor, FileDescriptor>> socketpair(
+    int domain, int type, int protocol);
+// sendmsg(2), recvmsg(2) (with MSG_CMSG_CLOEXEC added to `flags`) and send(2):
+// the bytes transferred. An unconnected peer's EPIPE is a status, never
+// SIGPIPE, if `flags` has MSG_NOSIGNAL.
+absl::StatusOr<size_t> sendmsg(int fd, const struct msghdr &message,
+                               int flags);
+absl::StatusOr<size_t> recvmsg(int fd, struct msghdr &message, int flags);
+absl::StatusOr<size_t> send(int fd, const void *buf, size_t count, int flags);
+
+// openlog(3) and syslog(3): `message` is logged verbatim (a "%s" format).
+// `ident` must outlive the process's logging (a literal).
+void openlog(const char *ident, int option, int facility);
+void syslog(int priority, std::string_view message);
 
 }  // namespace syscalls
 

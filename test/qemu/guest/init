@@ -94,7 +94,7 @@ export DCFS_SANITIZER
 #   peak_cached/peak_anon/peak_shmem/peak_slab
 #                the highest Cached, AnonPages, Shmem (tmpfs: /tmp and the
 #                like) and Slab, each on its own (they peak at different times)
-#   dcfs_hwm     highest VmHWM of any process named dcfs* (the kernel's own
+#   dcfs_hwm     highest VmHWM of any process named dcfs* or mount.dcfs (the kernel's own
 #                peak, so exact), 0 when none ran
 #   top          the process (name:pid) with the highest VmHWM, and that VmHWM
 #   samples      how many times the loop ran
@@ -137,7 +137,7 @@ start_mem_sampler() {
 				if (f[1] == "Name:") name = f[2]
 				else if (f[1] == "Pid:") pid = f[2]
 				else if (f[1] == "VmHWM:") {
-					if (name ~ /^dcfs/ && f[2] > dcfs) dcfs = f[2]
+					if (name ~ /^(mount\.)?dcfs/ && f[2] > dcfs) dcfs = f[2]
 					if (f[2] > top) { top = f[2]; topname = name ":" pid }
 				}
 			}
@@ -228,14 +228,14 @@ dump_profraw() {
 	# the rest to stop (SIGTERM is the daemon's normal shutdown) and wait
 	# for every instrumented process to be gone before the tar reads /cov.
 	waited=0
-	while pidof dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 30 ]; do
+	while pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 30 ]; do
 		sleep 0.1
 		waited=$((waited + 1))
 	done
-	if pidof dcfs fhtest testutil dcfs_bench >/dev/null 2>&1; then
-		killall -TERM dcfs fhtest testutil dcfs_bench 2>/dev/null
+	if pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1; then
+		killall -TERM dcfs mount.dcfs fhtest testutil dcfs_bench 2>/dev/null
 		waited=0
-		while pidof dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 100 ]; do
+		while pidof dcfs mount.dcfs fhtest testutil dcfs_bench >/dev/null 2>&1 && [ "$waited" -lt 100 ]; do
 			sleep 0.1
 			waited=$((waited + 1))
 		done
@@ -425,7 +425,17 @@ exec $loader --library-path /opt/dcfs-libs /usr/local/bin/$bin.real "\$@"
 EOF
 			chmod +x "/newroot/usr/local/bin/$bin"
 		done
+		# Step 15.2: dcfs dispatches on argv[0] (mount.dcfs), which the
+		# generic loop above would lose.
+		cat >/newroot/usr/local/bin/mount.dcfs <<EOF
+#!/bin/sh
+exec $loader --argv0 mount.dcfs --library-path /opt/dcfs-libs /usr/local/bin/dcfs.real "\$@"
+EOF
+		chmod +x /newroot/usr/local/bin/mount.dcfs
+	else
+		ln -sf dcfs /newroot/usr/local/bin/mount.dcfs
 	fi
+	ln -sf /usr/local/bin/mount.dcfs /newroot/sbin/mount.dcfs
 
 	ip link set lo up
 

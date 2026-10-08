@@ -5,8 +5,12 @@
 #include <sys/file.h>
 #include <sys/fsuid.h>
 #include <sys/stat.h>
+#include <sched.h>
+#include <sys/mount.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
+#include <syslog.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -139,6 +143,78 @@ absl::StatusOr<short> poll(int fd, short events, int timeout_ms) {
   const int n = ::poll(&pfd, 1, timeout_ms);
   if (n == -1) return ErrnoToStatus(errno, absl::StrCat("poll(", fd, ")"));
   return n == 0 ? static_cast<short>(0) : pfd.revents;
+}
+
+uid_t getuid() { return ::getuid(); }
+
+absl::StatusOr<pid_t> setsid() {
+  const pid_t group = ::setsid();
+  if (group == -1) return ErrnoToStatus(errno, "setsid");
+  return group;
+}
+
+absl::Status chdir(std::string_view path) {
+  const std::string path_str(path);
+  if (::chdir(path_str.c_str()) == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("chdir(", EscapeBytes(path), ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status unshare(int flags) {
+  if (::unshare(flags) == -1) {
+    return ErrnoToStatus(errno, absl::StrCat("unshare(", flags, ")"));
+  }
+  return absl::OkStatus();
+}
+
+absl::StatusOr<FileDescriptor> open_tree(int dirfd, std::string_view path,
+                                         unsigned int flags) {
+  const std::string path_str(path);
+  const int fd = ::open_tree(dirfd, path_str.c_str(), flags);
+  if (fd == -1) {
+    return ErrnoToStatus(
+        errno, absl::StrCat("open_tree(", dirfd, ", ", EscapeBytes(path), ")"));
+  }
+  return FileDescriptor(fd);
+}
+
+absl::StatusOr<std::pair<FileDescriptor, FileDescriptor>> socketpair(
+    int domain, int type, int protocol) {
+  int fds[2];
+  if (::socketpair(domain, type | SOCK_CLOEXEC, protocol, fds) == -1) {
+    return ErrnoToStatus(errno, "socketpair");
+  }
+  return std::make_pair(FileDescriptor(fds[0]), FileDescriptor(fds[1]));
+}
+
+absl::StatusOr<size_t> sendmsg(int fd, const struct msghdr &message,
+                               int flags) {
+  const ssize_t n = ::sendmsg(fd, &message, flags);
+  if (n == -1) return ErrnoToStatus(errno, absl::StrCat("sendmsg(", fd, ")"));
+  return static_cast<size_t>(n);
+}
+
+absl::StatusOr<size_t> recvmsg(int fd, struct msghdr &message, int flags) {
+  const ssize_t n = ::recvmsg(fd, &message, flags | MSG_CMSG_CLOEXEC);
+  if (n == -1) return ErrnoToStatus(errno, absl::StrCat("recvmsg(", fd, ")"));
+  return static_cast<size_t>(n);
+}
+
+absl::StatusOr<size_t> send(int fd, const void *buf, size_t count, int flags) {
+  const ssize_t n = ::send(fd, buf, count, flags);
+  if (n == -1) return ErrnoToStatus(errno, absl::StrCat("send(", fd, ")"));
+  return static_cast<size_t>(n);
+}
+
+void openlog(const char *ident, int option, int facility) {
+  ::openlog(ident, option, facility);
+}
+
+void syslog(int priority, std::string_view message) {
+  const std::string message_str(message);
+  ::syslog(priority, "%s", message_str.c_str());
 }
 
 }  // namespace syscalls

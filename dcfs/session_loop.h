@@ -23,6 +23,8 @@
 // thread, no wakeup while idle: draining happens only inside a request.
 
 #include <deque>
+#include <functional>
+#include <utility>
 #include <vector>
 
 #include "dcfs/interrupts.h"
@@ -42,6 +44,13 @@ class SessionLoop final : public Interrupts {
   // device.
   int Run();
 
+  // Called once, from Run, after the kernel's FUSE_INIT was answered and the
+  // session is still going: dcfs is serving. mount.dcfs's wrapper, waiting
+  // for that, is told here (dcfs/startup_channel.h).
+  void SetOnInit(std::function<void()> on_init) {
+    on_init_ = std::move(on_init);
+  }
+
   void Begin(fuse_req *req) override;
   void End() override;
   // Drains /dev/fuse (see the top of this file), then asks libfuse whether
@@ -52,6 +61,7 @@ class SessionLoop final : public Interrupts {
   void Drain();
 
   struct fuse_session *se_;
+  std::function<void()> on_init_;
   // The requests being served, innermost last (they nest only in tests).
   std::vector<fuse_req *> serving_;
   // Messages drained at a checkpoint, to serve after the current request.
