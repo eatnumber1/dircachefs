@@ -1746,3 +1746,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   not drive sync points (lazytime). The agent stopped once on the classifier (a tracked-file
   `git checkout`), resolved by hand-editing the merge markers; rule reinforced: commit WIP, never
   stash across a rebase.
+- 25.3 post-merge review (Opus): no invariant or crash-safety problem; three MEDIUM silences
+  (a failed success reply logged only at --v=1 and the real status lost behind "already replied";
+  process errnos EMFILE/ENFILE/ENOMEM/EBADF/EFAULT counted as forwarded; CreateChild's lost line for
+  a backing-errno record failure) plus idle-line placement/threshold, hot-path sync INFO on fsync,
+  level inconsistencies, LOG_FIRST_N for failed recovered rows, IgnoreError refreshes, wording, a
+  vacuous test, doc mismatches. All sent as 25.3b to lane-5 (same agent).
