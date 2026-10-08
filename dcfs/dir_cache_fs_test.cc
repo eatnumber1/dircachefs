@@ -72,6 +72,7 @@
 
 #include "absl/base/log_severity.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
 #include "absl/log/log_entry.h"
@@ -2556,6 +2557,183 @@ TEST_F(ClockTest, PeriodicSyncPointFollowsTheInjectedClock) {
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
   EXPECT_TRUE(attr.valid);
   EXPECT_EQ(attr.st.st_size, 5);
+}
+
+// Collects every log line, VLOG lines included, with its severity while it
+// lives (the lines a daemon would write to stderr at --stderrthreshold=0
+// --v=N).
+class AllLogCapture : public absl::LogSink {
+ public:
+  AllLogCapture() { absl::AddLogSink(this); }
+  ~AllLogCapture() override { absl::RemoveLogSink(this); }
+  void Send(const absl::LogEntry &entry) override {
+    lines.emplace_back(entry.log_severity(),
+                       std::string(entry.text_message()));
+  }
+  // How many lines at `min` or above contain `text` (all if empty).
+  int Count(absl::LogSeverity min, std::string_view text = "") const {
+    return static_cast<int>(std::count_if(
+        lines.begin(), lines.end(), [&](const auto &line) {
+          return line.first >= min && absl::StrContains(line.second, text);
+        }));
+  }
+  std::string Dump() const {
+    std::string out;
+    for (const auto &line : lines) {
+      absl::StrAppend(&out, absl::LogSeverityName(line.first), " ",
+                      line.second, "\n");
+    }
+    return out;
+  }
+  std::vector<std::pair<absl::LogSeverity, std::string>> lines;
+};
+
+// Sets the global verbosity (--v) for the test's scope.
+class ScopedVerbosity {
+ public:
+  explicit ScopedVerbosity(int level)
+      : saved_(absl::SetGlobalVLogLevel(level)) {}
+  ~ScopedVerbosity() { absl::SetGlobalVLogLevel(saved_); }
+
+ private:
+  int saved_;
+};
+
+// docs/design.md "Logging": each sync point is one INFO line with the rows
+// it cleared and its duration; none when nothing was dirty.
+TEST_F(ClockTest, ASyncPointIsLoggedAtInfoWithItsRows) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);  // written: dirty
+  ASSERT_THAT(Dirty(), Contains(f));
+  AllLogCapture capture;
+  Tick();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 0)
+      << "before the interval has elapsed\n" << capture.Dump();
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  ASSERT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 1)
+      << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point: cleared "
+                                                     "1 of 1 dirty rows in "),
+            1)
+      << capture.Dump();
+  Tick();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 1)
+      << "nothing dirty, no sync point\n" << capture.Dump();
+}
+
+// The first request to reach the backing after more than 12 sync
+// intervals (a minute here) says so at INFO; a shorter pause does not, and
+// neither does a request answered from the cache.
+TEST_F(ClockTest, TheFirstBackingAccessAfterAnIdlePeriodIsLoggedAtInfo) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  AllLogCapture capture;
+  auto reach_backing = [&] {
+    ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+    ASSERT_EQ(Getattr(f).first.error, 0);
+  };
+  reach_backing();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "idle"), 0)
+      << "the first access of the run\n" << capture.Dump();
+  clock_.AdvanceTime(absl::Seconds(30));
+  reach_backing();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "idle"), 0)
+      << "a short pause\n" << capture.Dump();
+  clock_.AdvanceTime(absl::Seconds(90));
+  EXPECT_EQ(Getattr(f).first.error, 0);  // from the cache: attributes valid
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "idle"), 0)
+      << "a request that did not reach the backing\n" << capture.Dump();
+  reach_backing();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                          "first backing access after 1m30s idle"),
+            1)
+      << capture.Dump();
+}
+
+// --v=1: one line per request that reached the backing filesystem; --v=2:
+// every request with its reply; nothing of either by default.
+TEST_F(DirCacheFSTest, VerboseLevelsShowRequestsAndTheirReplies) {
+  WriteFile(Path("f"));
+  Start();
+  {
+    AllLogCapture capture;
+    auto [lookup, entry] = Lookup(kRootInode, "f");
+    ASSERT_EQ(lookup.error, 0);
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "Lookup(ino="), 0)
+        << "--v=0\n" << capture.Dump();
+  }
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+  {
+    ScopedVerbosity v(1);
+    AllLogCapture capture;
+    ASSERT_EQ(Getattr(f).first.error, 0);
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                            absl::StrCat("Getattr(ino=", f,
+                                         ") reached the backing: ")),
+              1)
+        << "--v=1\n" << capture.Dump();
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, ") -> "), 0)
+        << "--v=1 shows no replies\n" << capture.Dump();
+    ASSERT_EQ(Getattr(f).first.error, 0);  // cached now
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "reached the backing"),
+              1)
+        << "a cached request is not shown at --v=1\n" << capture.Dump();
+  }
+  {
+    ScopedVerbosity v(2);
+    AllLogCapture capture;
+    ASSERT_EQ(Getattr(f).first.error, 0);
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                            absl::StrCat("Getattr(ino=", f, ") -> OK")),
+              1)
+        << "--v=2\n" << capture.Dump();
+    EXPECT_EQ(Unlink(kRootInode, "nope").error, -ENOENT);
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                            "Unlink(ino=1, name=\"nope\") -> NOT_FOUND"),
+              1)
+        << capture.Dump();
+  }
+}
+
+// docs/style.md 1.7: an error dcfs produced is logged once, at ERROR, by
+// the handler that replies, and not again by the function below it. Here a
+// mkdir whose backing change succeeds but whose record fails (the old code
+// logged "created ... could not record it" at WARNING and the handler
+// logged the same status at ERROR).
+TEST_F(DirCacheFSTest, AnErrorDcfsProducedIsLoggedOnceAtError) {
+  Start();
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_new_inodes BEFORE INSERT ON "
+                       "inodes BEGIN SELECT RAISE(ABORT, 'no inserts'); END"),
+              IsOk());
+  AllLogCapture capture;
+  auto [reply, id] = Mkdir(kRootInode, "d");
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_new_inodes"), IsOk());
+  EXPECT_NE(reply.error, 0);
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 1) << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError, "while recording the "
+                                                     "created d"),
+            1)
+      << capture.Dump();
+}
+
+// An errno the backing filesystem answered with is the answer, not a
+// failure of dcfs: no ERROR line.
+TEST_F(DirCacheFSTest, AnErrnoFromTheBackingIsNotLoggedAtError) {
+  Start();
+  AllLogCapture capture;
+  EXPECT_EQ(Unlink(kRootInode, "nope").error, -ENOENT);
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 0) << capture.Dump();
 }
 
 // A read open records the injected time as the atime when the relatime rule

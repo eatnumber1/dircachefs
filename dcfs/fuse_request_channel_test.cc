@@ -26,10 +26,14 @@
 #include <fcntl.h>
 #include <optional>
 #include <string>
+#include <vector>
 #include <sys/uio.h>
 #include <unistd.h>
 
+#include "absl/log/log_sink.h"
+#include "absl/log/log_sink_registry.h"
 #include "absl/status/status_matchers.h"
+#include "absl/strings/str_join.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/status.h"
@@ -37,6 +41,7 @@
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {
@@ -54,6 +59,9 @@ struct FakeChannel {
   // normally, as the FUSE_INIT reply must for the session to reach
   // got_init at all).
   int next_writev_errno = 0;
+  // If set, FakeGetattr replies with ReplyFailureAndLogIfNotOk(*fail_with),
+  // the way fuse_ops.cc's Serve() does, instead of ReplyErrno(ENOENT).
+  std::optional<absl::Status> fail_with;
 };
 
 // Never actually called: this test drives the session entirely via
@@ -87,6 +95,11 @@ void FakeGetattr(fuse_req_t req, fuse_ino_t, struct fuse_file_info *) {
   auto *channel =
       static_cast<FakeChannel *>(fuse_req_userdata(req));
   FuseRequest fr(req);
+  if (channel->fail_with.has_value()) {
+    fr.ReplyFailureAndLogIfNotOk(*channel->fail_with);
+    channel->reply_status = absl::OkStatus();
+    return;
+  }
   channel->reply_status = fr.ReplyErrno(ENOENT);
 }
 
@@ -96,9 +109,9 @@ void AppendBytes(std::string &out, const T &value) {
   out.append(reinterpret_cast<const char *>(&value), sizeof(value));
 }
 
-TEST(FuseRequestChannelTest, ReplyErrnoPreservesWriteFailureErrno) {
-  FakeChannel channel;
-
+// Runs one forged GETATTR through a session whose handler is FakeGetattr,
+// with `channel` as its state. The session is destroyed before returning.
+void RunGetattr(FakeChannel &channel) {
   struct fuse_lowlevel_ops ops = {};
   ops.getattr = FakeGetattr;
 
@@ -109,7 +122,7 @@ TEST(FuseRequestChannelTest, ReplyErrnoPreservesWriteFailureErrno) {
   struct fuse_args args = FUSE_ARGS_INIT(1, argv);
   struct fuse_session *se =
       fuse_session_new(&args, &ops, sizeof(ops), &channel);
-  ASSERT_NE(se, nullptr);
+  ASSERT_NE(se, nullptr) << "fuse_session_new failed";
 
   struct fuse_custom_io io = {};
   io.read = FakeReadNeverCalled;
@@ -119,9 +132,10 @@ TEST(FuseRequestChannelTest, ReplyErrnoPreservesWriteFailureErrno) {
   // goes through fuse_session_process_buf() with hand-built buffers
   // below, never through this fd); /dev/null is a harmless real fd to
   // satisfy that check. fuse_session_destroy() closes it.
-  ASSERT_OK_AND_ASSIGN(FileDescriptor dummy,
-                       syscalls::openat(AT_FDCWD, "/dev/null", O_RDWR));
-  const int dummy_fd = std::move(dummy).Release();  // the session owns it
+  absl::StatusOr<FileDescriptor> dummy =
+      syscalls::openat(AT_FDCWD, "/dev/null", O_RDWR);
+  ASSERT_THAT(dummy, IsOk());
+  const int dummy_fd = std::move(*dummy).Release();  // the session owns it
   ASSERT_EQ(fuse_session_custom_io(se, &io, sizeof(io), dummy_fd), 0);
 
   // FUSE_INIT: mandatory first request, and its reply must succeed (via
@@ -151,7 +165,7 @@ TEST(FuseRequestChannelTest, ReplyErrnoPreservesWriteFailureErrno) {
 
   // FUSE_GETATTR, with the next (and only) writev() call -- the GETATTR
   // reply itself -- forced to fail with EIO, simulating a broken channel.
-  channel.next_writev_errno = EIO;
+  channel.next_writev_errno = channel.fail_with.has_value() ? 0 : EIO;
   {
     std::string getattr_req;
     struct fuse_in_header hdr = {};
@@ -169,6 +183,12 @@ TEST(FuseRequestChannelTest, ReplyErrnoPreservesWriteFailureErrno) {
     fuse_session_process_buf(se, &buf);
   }
 
+  fuse_session_destroy(se);
+}
+
+TEST(FuseRequestChannelTest, ReplyErrnoPreservesWriteFailureErrno) {
+  FakeChannel channel;
+  RunGetattr(channel);
   ASSERT_TRUE(channel.reply_status.has_value())
       << "FUSE_GETATTR did not reach the .getattr op handler";
   EXPECT_FALSE(channel.reply_status->ok());
@@ -177,8 +197,31 @@ TEST(FuseRequestChannelTest, ReplyErrnoPreservesWriteFailureErrno) {
       << "ReplyErrno()'s failure Status carries no errno payload: "
       << *channel.reply_status;
   EXPECT_EQ(*errno_val, EIO);
+}
 
-  fuse_session_destroy(se);
+// Collects the log lines at ERROR and above while it lives.
+class ErrorCapture : public absl::LogSink {
+ public:
+  ErrorCapture() { absl::AddLogSink(this); }
+  ~ErrorCapture() override { absl::RemoveLogSink(this); }
+  void Send(const absl::LogEntry &entry) override {
+    if (entry.log_severity() >= absl::LogSeverity::kError) {
+      lines.emplace_back(entry.text_message());
+    }
+  }
+  std::vector<std::string> lines;
+};
+
+// docs/style.md 1.7: the handler that replies is the one place that logs a
+// request's failure, and an errno the backing filesystem answered with
+// (ENOENT from openat) is the answer, not a failure of dcfs.
+TEST(FuseRequestChannelTest, ABackingErrnoIsNotLoggedAtError) {
+  FakeChannel channel;
+  channel.fail_with = ErrnoToStatus(ENOENT, "openat(5, \"x\")");
+  ErrorCapture capture;
+  RunGetattr(channel);
+  EXPECT_THAT(capture.lines, testing::IsEmpty())
+      << absl::StrJoin(capture.lines, "\n");
 }
 
 }  // namespace
