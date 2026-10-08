@@ -107,6 +107,10 @@ struct Context {
   // The source filesystem's atime policy, from its mount options
   // (backing::InitRoot).
   AtimePolicy atime = AtimePolicy::kRelative;
+  // Whether the source filesystem was read-only when this run started
+  // (backing::InitRoot). If it was not, a sync point that finds it
+  // read-only fails (backing::SyncBacking, step 11.5).
+  bool source_read_only_at_start = false;
   // The protocol events (dcfs/protocol_events.h): records nothing in
   // production; trace validation's recorder in the testonly builds. Never
   // null; not owned.

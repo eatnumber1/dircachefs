@@ -373,6 +373,21 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
                 "them or point --source elsewhere. Mounted below "
              << source << ": " << absl::StrJoin(below, ", ");
     }
+    // Step 11.5: a source whose superblock went read-only by itself (an
+    // error: ext4 errors=remount-ro, a btrfs transaction abort) under a
+    // read-write mount. Its memory may still show changes its disk never
+    // got, which recovery and the fills would cache and a remount takes
+    // back, and its syncfs succeeds without making anything durable.
+    ABSL_ASSIGN_OR_RETURN(bool forced_read_only, ForcedReadOnly(*source_fd));
+    if (forced_read_only) {
+      return FailedPreconditionErrorBuilder()
+             << "--source=" << source
+             << " is on a filesystem that went read-only by itself (its "
+                "superblock is read-only under a read-write mount: after an "
+                "error); what it shows may not be on its disk, so dcfs "
+                "refuses to cache it: unmount it, check it and mount it "
+                "again";
+    }
   }
 
   // The cache database holds metadata as sensitive as the backing tree's --

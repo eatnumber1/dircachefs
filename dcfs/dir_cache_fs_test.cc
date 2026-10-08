@@ -137,6 +137,13 @@ std::function<void()> &SyncfsHook() {
   return *hook;
 }
 
+// While set, every fstatvfs reports the filesystem read-only (ST_RDONLY):
+// a backing filesystem that went read-only by itself after an error.
+bool &StatvfsReadOnly() {
+  static bool read_only = false;
+  return read_only;
+}
+
 // The hook the next statx runs (once).
 std::function<void()> &StatxHook() {
   static auto *hook = new std::function<void()>();
@@ -404,7 +411,14 @@ DCFS_BACKSTOP(int, removexattr, (const char *p, const char *n), (p, n))
 DCFS_BACKSTOP(int, fstatat64,
               (int d, const char *p, struct stat64 *b, int f), (d, p, b, f))
 DCFS_BACKSTOP(int, fstatfs64, (int d, struct statfs64 *b), (d, b))
-DCFS_BACKSTOP(int, fstatvfs64, (int d, struct statvfs64 *b), (d, b))
+int __real_fstatvfs64(int d, struct statvfs64 *b);
+int __wrap_fstatvfs64(int d, struct statvfs64 *b) {
+  dcfs::NoTransactionAt("fstatvfs64");
+  DCFS_INJECT("fstatvfs64", -1)
+  int ret = __real_fstatvfs64(d, b);
+  if (ret == 0 && dcfs::StatvfsReadOnly()) b->f_flag |= ST_RDONLY;
+  return ret;
+}
 DCFS_BACKSTOP(int, fallocate64, (int d, int m, off64_t o, off64_t l),
               (d, m, o, l))
 DCFS_BACKSTOP(ssize_t, copy_file_range,
@@ -577,6 +591,7 @@ class DirCacheFSTest : public ::testing::Test {
     OpenByHandleHook() = {};
     NameToHandleHook() = {};
     SyncfsHook() = {};
+    StatvfsReadOnly() = false;
     FakeInodeNumbers().clear();
     StatxFailure() = 0;
     StatxHook() = {};
@@ -4017,6 +4032,39 @@ TEST_F(DirCacheFSTest, CleanStartSweepsTheRowOfAFileOpenAtDestroy) {
   ASSERT_THAT(backing::StartRun(ctx_, "boot"), IsOk());
   EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
               ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+}
+
+// A backing filesystem that went read-only during the run (by itself, after
+// an error) answers syncfs with success without making anything durable: a
+// sync point must keep the dirty set, so the run does not end clean (step
+// 11.5, fault_shutdown_test's "ro"). Once it is writable again (in the
+// field: unmounted, checked and mounted again) a sync point clears it.
+TEST_F(DirCacheFSTest, SyncPointKeepsTheDirtySetIfTheBackingWentReadOnly) {
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  ASSERT_EQ(Mkdir(kRootInode, "new").first.error, 0);
+  ASSERT_THAT(Dirty(), Contains(kRootInode));
+  StatvfsReadOnly() = true;
+  absl::Status synced = backing::SyncBacking(ctx_);
+  EXPECT_THAT(GetErrnoFromStatus(synced), IsOkAndHolds(EROFS));
+  EXPECT_THAT(synced.message(), HasSubstr("read-only"));
+  EXPECT_THAT(Dirty(), Contains(kRootInode));
+  EXPECT_THAT(backing::FinishRun(ctx_), Not(IsOk()));
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(false));
+  StatvfsReadOnly() = false;
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
+}
+
+// A source read-only from the start never had a change to lose: its sync
+// points clear the dirty set (of failed mutations) as usual.
+TEST_F(DirCacheFSTest, SyncPointOfASourceReadOnlyFromTheStartClears) {
+  Start();
+  ASSERT_EQ(Mkdir(kRootInode, "new").first.error, 0);
+  ctx_.source_read_only_at_start = true;
+  StatvfsReadOnly() = true;
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
 }
 
 // An O_TMPFILE file left open by a crash: the next start (unclean) sweeps

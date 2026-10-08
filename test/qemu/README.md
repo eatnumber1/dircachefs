@@ -740,6 +740,15 @@ Step 11.2 added three things:
   dcfs's back, must each be reported.
 
 The small and medium ones run with the checking build of dcfs
+(`initramfs_checked`): an error path that leaves an invariant broken aborts
+the daemon and the test fails (the large ones run the plain build, except the ACE
+targets). Each uses the default guest
+memory (every MEM line shows `reclaim_scans=0`: peak 69 to 126 MiB plain, xfs
+the highest, and 158 MiB under ASan, of 256 and 384). The cache disk's I/O errors (`SQLITE_IOERR`, and `SQLITE_READONLY` from a cache
+filesystem that aborted its journal) reach the caller as EIO: `sqlite.cc` attaches
+the errno payload and keeps the status code `UNAVAILABLE`; `fault_cache_test`
+requires it (it first said EAGAIN, "Resource temporarily unavailable").
+
 `fault_shutdown_test` (step 11.5, `qemu_test_matrix`: ext4 small, xfs and
 btrfs medium) crashes the backing filesystem itself, under a running dcfs:
 `testutil shutdown <path> <default|logflush|nologflush>` is
@@ -755,17 +764,10 @@ freeze.
 
 | Test | What it injects | What must hold |
 |---|---|---|
-| `fault_shutdown_test` | per flavour: unsynced completed mutations (create and data, mkdir, rename, setxattr) and a create held in phase 1 when the backing filesystem crashes; a create held in phase 2; a crash while idle, then a start without a remount; a daemon crash and a restart (which re-reads the directory) before the crash; a crash with dirty rows, then a start without a remount | the held create, new mutations and reads of contents fail; nothing is served that was not served before; the clean shutdown keeps the dirty set; a start without a remount (refused on xfs, whose open of `--source` fails) serves nothing new and mutates nothing; after the remount everything served matches the backing filesystem, `nologflush` lost the unsynced create and `default`/`logflush` kept it, and the change the restart after a daemon crash re-read is not served once the crash lost it (12.6's dirty rows kept until a sync point; the pre-12.6 code failed this) |
+| `fault_shutdown_test` | per flavour: unsynced completed mutations (create and data, mkdir, rename, setxattr) and a create held in phase 1 when the backing filesystem crashes; a create held in phase 2; a crash while idle, then a start without a remount; a daemon crash and a restart (which re-reads the directory) before the crash; a crash with dirty rows, then a start without a remount; the backing disk's writes failing until the filesystem goes read-only by itself (btrfs's transaction abort, ext4's `emergency_ro`; xfs shuts down), with sync points every second | the held create, new mutations and reads of contents fail; nothing is served that was not served before; the clean shutdown keeps the dirty set (each restart recovers rows); a start without a remount (refused on xfs, whose open of `--source` fails, and over a filesystem that went read-only by itself) serves nothing new, and a create through it fails; no sync point over a filesystem that went read-only clears the dirty set (the bug step 11.5's review found: btrfs's second sync point did, and the lost directory was served after the remount); after the remount everything served matches the backing filesystem, `nologflush` lost the unsynced create and `default`/`logflush` kept it, and the change the restart after a daemon crash re-read is not served once the crash lost it (12.6's dirty rows kept until a sync point; the pre-12.6 code failed this) |
 
-These run in the small tier with the checking build of dcfs
-(`initramfs_checked`): an error path that leaves an invariant broken aborts
-the daemon and the test fails (the large ones run the plain build, except the ACE
-targets). Each uses the default guest
-memory (every MEM line shows `reclaim_scans=0`: peak 69 to 126 MiB plain, xfs
-the highest, and 158 MiB under ASan, of 256 and 384). The cache disk's I/O errors (`SQLITE_IOERR`, and `SQLITE_READONLY` from a cache
-filesystem that aborted its journal) reach the caller as EIO: `sqlite.cc` attaches
-the errno payload and keeps the status code `UNAVAILABLE`; `fault_cache_test`
-requires it (it first said EAGAIN, "Resource temporarily unavailable").
+`fault_shutdown_test` boots the checking build in all three variants (ext4
+small, xfs and btrfs medium) with the default guest memory.
 
 ## Syscall traces
 

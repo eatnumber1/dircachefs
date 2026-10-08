@@ -1,6 +1,7 @@
 #ifndef DCFS_MOUNTS_BELOW_H_
 #define DCFS_MOUNTS_BELOW_H_
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -38,6 +39,19 @@ absl::StatusOr<std::vector<std::string>> MountsBelow(
 // ignored, not an error.
 std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
                                           std::string_view source);
+
+// Whether, in the text of /proc/self/mountinfo, the mount `mount_id`
+// (field 1, statx's STATX_MNT_ID) is read-write while its superblock is
+// read-only (or, on ext4, marked "emergency_ro"): the filesystem went
+// read-only by itself, after an error (ext4 errors=remount-ro, a btrfs
+// transaction abort), not by a mount option. Its
+// memory may still show changes its disk never got, and it answers syncfs
+// with success from a descriptor opened after it went read-only (step
+// 11.5). False if the mount is not listed or the line is malformed.
+bool ForcedReadOnlyIn(std::string_view mountinfo, uint64_t mount_id);
+
+// ForcedReadOnlyIn for the mount `fd` is on.
+absl::StatusOr<bool> ForcedReadOnly(int fd);
 
 }  // namespace dcfs
 

@@ -771,6 +771,14 @@ recovery protocol, concurrency, and the test strategy.
   has to wait for a disk to spin up delays every other request, including
   ones the cache could answer. The coroutine and io_uring design that
   lifts this is future work.
+- **A backing filesystem that went read-only by itself is refused.** After
+  an error, ext4 (`errors=remount-ro`) and btrfs (a transaction abort) go
+  read-only while their mount stays read-write, and still show changes
+  their disk never got. dcfs keeps everything changed since that moment
+  dirty (its sync points fail, so the run does not end clean) and refuses
+  to start over such a filesystem until it is unmounted, checked and
+  mounted again; the next start then re-reads those entries. A filesystem
+  mounted read-only on purpose is fine.
 - **Power loss re-reads recent changes.** After a power loss or kernel
   crash, everything cached about entries changed in the last
   `--sync_interval_sec` seconds (or since the last `fsync`) is forgotten

@@ -9,6 +9,7 @@
 #include <linux/limits.h>  // NAME_MAX (255, the generic Linux VFS cap)
 #include <sys/stat.h>
 #include <sys/statfs.h>
+#include <sys/statvfs.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -666,6 +667,7 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
   ctx.atime = (vfs.f_flag & ST_NOATIME)    ? AtimePolicy::kNever
               : (vfs.f_flag & ST_RELATIME) ? AtimePolicy::kRelative
                                            : AtimePolicy::kStrict;
+  ctx.source_read_only_at_start = (vfs.f_flag & ST_RDONLY) != 0;
   absl::Status inserted = ctx.mounts.Insert(device, std::move(source_fd));
   if (!inserted.ok() && !absl::IsAlreadyExists(inserted)) return inserted;
   return absl::OkStatus();
@@ -1871,6 +1873,33 @@ absl::Status StartupPurge(Context &ctx) {
   return absl::OkStatus();
 }
 
+namespace {
+
+// After a sync point's syncfs succeeded on `fd`: the filesystem must not
+// have gone read-only since the run started. Invariant: a dirty row goes
+// only once a syncfs has made its mutation durable, and a syncfs that
+// succeeds says so only of a writable filesystem. One that went read-only
+// by itself (ext4 errors=remount-ro, a btrfs transaction abort) answers
+// syncfs with success at once (sync_filesystem skips a read-only
+// superblock), and reports the write error only once per open file, while
+// its disk never gets what it still shows from memory: the next sync point
+// would clear the dirty set of changes the remount loses, and the run
+// would end clean (step 11.5, fault_shutdown_test's "ro"). A source
+// read-only from the start never had a change to lose.
+absl::Status StillWritable(Context &ctx, int fd) {
+  if (ctx.source_read_only_at_start) return absl::OkStatus();
+  BackingCall(ctx, "fstatvfs");
+  ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(fd));
+  if ((vfs.f_flag & ST_RDONLY) == 0) return absl::OkStatus();
+  return dcfs::ErrnoToStatus(
+      EROFS,
+      "the backing filesystem went read-only during the run (after an "
+      "error?): its syncfs no longer makes anything durable, so the dirty "
+      "set is kept");
+}
+
+}  // namespace
+
 absl::Status SyncBacking(Context &ctx) {
   const absl::Time began = ctx.clock->TimeNow();
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::SyncBegin,
@@ -1887,6 +1916,7 @@ absl::Status SyncBacking(Context &ctx) {
     for (int fd : ctx.mounts.Fds()) {
       BackingCall(ctx, "syncfs");
       ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
+      ABSL_RETURN_IF_ERROR(StillWritable(ctx, fd));
     }
     ctx.events->SyncfsDone(ctx);
     std::vector<InodeId> keep;

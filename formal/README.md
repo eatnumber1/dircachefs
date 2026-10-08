@@ -228,6 +228,13 @@ on the detail:
   `InvalidateInode` after `ESTALE`, refused boundaries, `ParentOf` of a
   non-root directory, `RENAME_EXCHANGE`/`RENAME_NOREPLACE`, and the
   periodic sync's timing (any request may be a sync point at any time).
+- A `syncfs` that succeeds without making anything durable is outside the
+  model, whose sync makes the backing filesystem's current state the only
+  one a crash may leave. A filesystem that went read-only by itself after
+  an error does that (step 11.5); the code guards it instead: a sync point
+  fails when the source went read-only during the run, and dcfs refuses to
+  start over a superblock read-only under a read-write mount
+  (`docs/design.md`, "A filesystem that went read-only by itself").
 
 ## Variables
 

@@ -1,5 +1,6 @@
 #include "dcfs/mounts_below.h"
 
+#include <fcntl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
 
@@ -14,6 +15,7 @@
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "dcfs/fd.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
@@ -205,6 +207,54 @@ TEST_F(MountsBelowTest, TheRootSourceSeesTheGuestsMounts) {
   ASSERT_THAT(below, IsOk());
   EXPECT_THAT(*below, ::testing::Contains(Path("mnt")));
   EXPECT_THAT(*below, ::testing::Not(::testing::Contains("/")));
+}
+
+// --- ForcedReadOnly (step 11.5) ----------------------------------------------
+
+constexpr std::string_view kMountinfo =
+    "22 1 8:1 / / rw,relatime shared:1 - ext4 /dev/vda rw\n"
+    "30 22 253:0 / /src rw,relatime shared:5 - btrfs /dev/mapper/b "
+    "ro,space_cache=v2\n"
+    "31 22 253:1 / /ro rw,relatime - ext4 /dev/vdc rw,errors=remount-ro\n"
+    "32 22 253:2 / /both ro,relatime - xfs /dev/vdd ro,attr2\n"
+    "33 22 253:3 / /mntro ro,relatime - ext4 /dev/vde rw\n"
+    "34 22 0:5 / /broken rw\n"
+    "35 22 253:4 / /emerg rw,relatime - ext4 /dev/vdf "
+    "rw,errors=remount-ro,emergency_ro\n";
+
+TEST(ForcedReadOnlyInTest, AReadOnlySuperblockUnderAReadWriteMountIsForced) {
+  EXPECT_TRUE(ForcedReadOnlyIn(kMountinfo, 30));
+  EXPECT_TRUE(ForcedReadOnlyIn(kMountinfo, 35));  // ext4's emergency_ro.
+}
+
+TEST(ForcedReadOnlyInTest, AnythingElseIsNot) {
+  EXPECT_FALSE(ForcedReadOnlyIn(kMountinfo, 22));  // Read-write.
+  EXPECT_FALSE(ForcedReadOnlyIn(kMountinfo, 31));  // "ro" only in a name.
+  EXPECT_FALSE(ForcedReadOnlyIn(kMountinfo, 32));  // Mounted read-only.
+  EXPECT_FALSE(ForcedReadOnlyIn(kMountinfo, 33));  // A read-only bind.
+  EXPECT_FALSE(ForcedReadOnlyIn(kMountinfo, 34));  // No "-" separator.
+  EXPECT_FALSE(ForcedReadOnlyIn(kMountinfo, 99));  // Not listed.
+}
+
+// A tmpfs whose superblock is remounted read-only under a read-write bind
+// of it: what an error-forced read-only filesystem looks like.
+TEST_F(MountsBelowTest, ForcedReadOnlyReadsTheMountOfADescriptor) {
+  ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt"), "tmpfs", 0, nullptr),
+              IsOk());
+  mounted_ = true;
+  ASSERT_THAT(syscalls::mount(Path("mnt").c_str(), Path("plain"), nullptr, MS_BIND,
+                              nullptr),
+              IsOk());
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor bind,
+      syscalls::openat(AT_FDCWD, Path("plain"), O_RDONLY | O_DIRECTORY));
+  EXPECT_THAT(ForcedReadOnly(*bind), IsOkAndHolds(false));
+  ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt"), "tmpfs",
+                              MS_REMOUNT | MS_RDONLY, nullptr),
+              IsOk());
+  absl::StatusOr<bool> forced = ForcedReadOnly(*bind);
+  EXPECT_THAT(syscalls::umount2(Path("plain"), MNT_DETACH), IsOk());
+  EXPECT_THAT(forced, IsOkAndHolds(true));
 }
 
 }  // namespace

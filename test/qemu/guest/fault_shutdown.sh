@@ -31,7 +31,8 @@
 #    restart without remounting. The shutdown cannot sync the crashed
 #    filesystem, so the run does not end clean. Whether dcfs starts is
 #    recorded (no_remount_start: xfs fails the open of --source); if it does,
-#    it serves nothing new and mutates nothing. After the remount, everything
+#    it serves nothing new, and a create through it fails (the crashed
+#    filesystem refuses it). After the remount, everything
 #    served matches the backing.
 # 4. A daemon crash, a restart over the live backing, a listing, then the
 #    backing crashes (nologflush). Recovery forgets the dirty rows and the
@@ -132,7 +133,7 @@ stop() {
 # mount_backing: the backing filesystem on its dm device (ext4: commit=60).
 mount_backing() {
 	if [ "${FSTYPE:-}" = ext4 ]; then
-		mount -o commit=60 "$(fault_dev "$FD_BACK")" "$SRC"
+		mount -o commit=60,errors=remount-ro "$(fault_dev "$FD_BACK")" "$SRC"
 	else
 		mount "$(fault_dev "$FD_BACK")" "$SRC"
 	fi
@@ -254,7 +255,8 @@ read_fails_or_right() {
 # not remounted, after a run that could not shut down cleanly (its sync
 # point failed). xfs fails the open of --source, so dcfs refuses; ext4 and
 # an aborted btrfs let it start. Started, it must serve nothing new under
-# DIR and mutate nothing; its recovery keeps the dirty set until a sync
+# DIR (a create through it fails: the crashed filesystem refuses it); its
+# recovery keeps the dirty set until a sync
 # point that succeeds (step 12.6), so nothing it re-reads from the crashed
 # filesystem's memory outlives the remount (checked after it).
 no_remount_start() {
@@ -279,6 +281,16 @@ served_equals_backing() {
 		pass "$1"
 	else
 		fail "$1" "served (<) and backing (>) differ: $(tr '\n' '|' </tmp/snap.diff)"
+	fi
+}
+
+# dirty_set_survived NAME: the last start recovered dirty rows: the clean
+# shutdown over the crashed filesystem could not sync it, so it kept them.
+dirty_set_survived() {
+	if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
+		pass "$1-dirty-set-survived"
+	else
+		fail "$1-dirty-set-survived" "nothing recovered: $(grep -i cleanly "$LOG")"
 	fi
 }
 
@@ -347,6 +359,7 @@ flavour_run() {
 	if alive; then pass "$f-daemon-alive-2"; else fail "$f-daemon-alive-2" "the daemon died"; fi
 
 	restart_after_remount "$f"
+	dirty_set_survived "$f"
 	served_equals_backing "$f-served-equals-backing"
 	if [ ! -e "$t/c/p1" ] && [ ! -e "$t/c/after" ] && [ ! -e "$t/a/newdir" ]; then
 		pass "$f-failed-mutations-absent"
@@ -383,9 +396,10 @@ fd_setup || {
 FSTYPE=$(backing_fstype "$SRC")
 echo "fault_shutdown.sh: backing filesystem $FSTYPE"
 if [ "$FSTYPE" = ext4 ]; then
-	mount -o remount,commit=60 "$SRC" || fail setup-commit "remount with commit=60 failed"
+	mount -o remount,commit=60,errors=remount-ro "$SRC" ||
+		fail setup-commit "remount with commit=60,errors=remount-ro failed"
 fi
-for top in default logflush nologflush phase2 idle recrash dirty; do
+for top in default logflush nologflush phase2 idle recrash dirty ro; do
 	for d in a b c d; do
 		mkdir -p "$SRC/$top/$d"
 		echo keep >"$SRC/$top/$d/keep"
@@ -518,6 +532,7 @@ crash_backing nologflush || fail recrash-crash "the crash failed"
 settle_crash
 crashed recrash
 restart_after_remount recrash
+dirty_set_survived recrash
 if [ ! -e "$SRC/recrash/a/x" ]; then
 	pass recrash-unsynced-lost
 else
@@ -540,12 +555,91 @@ if start; then pass dirty-restart; else
 	fail dirty-restart "daemon did not mount within 10s"
 	exit "$FAILED"
 fi
+dirty_set_survived dirty
 if [ ! -e "$SRC/dirty/a/y" ]; then
 	pass dirty-unsynced-lost
 else
 	fail dirty-unsynced-lost "dirty/a/y survived a crash that commits nothing: the case was not exercised"
 fi
 served_equals_backing dirty-served-equals-backing
+
+# --- 6. a backing filesystem forced read-only by its own error ---------------
+
+# The backing disk's writes fail; the filesystem meets the error at a
+# syncfs and goes read-only by itself (ext4 errors=remount-ro, btrfs's
+# transaction abort; xfs shuts down instead). A read-only superblock makes
+# syncfs succeed (sync_filesystem returns at once) and the write error is
+# reported once per open file, so only the first sync point after it
+# fails: the next one must not clear the dirty set either.
+stop ro-before
+if start --sync_interval_sec=1; then pass ro-start; else
+	fail ro-start "daemon did not mount within 10s"
+	exit "$FAILED"
+fi
+ls "$MNT/ro/a" >/dev/null
+# A mkdir, not a create: a create's RELEASE reaches dcfs asynchronously and
+# could run a sync point (making z durable) before the disk fails.
+mkdir "$MNT/ro/a/z"
+fault_mode "$FD_BACK" error-writes || fail ro-inject "fault_mode failed"
+touch "$SRC/.ro-trigger" 2>/dev/null
+sync -f "$SRC" 2>/dev/null
+sleep 1
+echo "fault_shutdown.sh: ro: the backing mount is now: $(grep " $SRC " /proc/mounts)"
+crashed ro
+# Two requests, each past the interval: two sync points.
+sleep 1.5
+ls "$MNT/ro/a" >/dev/null 2>&1
+sleep 1.5
+ls "$MNT/ro/a" >/dev/null 2>&1
+echo "fault_shutdown.sh: ro: sync points: $(grep -c 'sync of the backing filesystems failed' "$LOG") failed"
+stop ro
+# Not remounted: a superblock read-only under a read-write mount went
+# read-only by itself; its memory may hold what its disk never gets, and
+# dcfs must refuse it (ext4 marks it "emergency_ro"; xfs shuts down
+# instead and fails the open of --source).
+forced=$(awk -v src="$SRC" '$5 == src {
+	for (i = 7; $i != "-"; i++) {}
+	print ($6 !~ /(^|,)ro(,|$)/ && $(i + 3) ~ /(^|,)(emergency_)?ro(,|$)/) ? "yes" : "no"
+}' /proc/self/mountinfo)
+echo "fault_shutdown.sh: ro: superblock forced read-only: $forced ($(grep " $SRC " /proc/self/mountinfo))"
+if start; then
+	if [ "$forced" = yes ]; then
+		fail ro-no-remount-refused "dcfs started over a backing filesystem forced read-only"
+	else
+		pass ro-no-remount-refused
+	fi
+	stop ro-no-remount
+else
+	DAEMON_PID=""
+	umount -l "$MNT" 2>/dev/null || true
+	echo "fault_shutdown.sh: ro: dcfs refused to start: $(grep -v -E '^(dcfs/|===| *$)' "$LOG" | tail -1)"
+	if [ "$forced" = no ] || grep -q "read-only" "$LOG"; then
+		pass ro-no-remount-refused
+	else
+		fail ro-no-remount-refused "dcfs did not start, for another reason"
+	fi
+fi
+remount_backing ro
+if start; then pass ro-restart; else
+	fail ro-restart "daemon did not mount within 10s"
+	exit "$FAILED"
+fi
+if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
+	pass ro-dirty-set-survived
+else
+	fail ro-dirty-set-survived "a sync point over the read-only filesystem cleared the dirty set: $(grep -i cleanly "$LOG")"
+fi
+if [ ! -e "$SRC/ro/a/z" ]; then
+	pass ro-unsynced-lost
+else
+	fail ro-unsynced-lost "ro/a/z survived: the case was not exercised"
+fi
+served_equals_backing ro-served-equals-backing
+if [ -e "$SRC/ro/a/z" ] || [ ! -e "$MNT/ro/a/z" ]; then
+	pass ro-lost-name-not-served
+else
+	fail ro-lost-name-not-served "ro/a/z is served, the backing filesystem lost it"
+fi
 
 # Self-check of the comparison: a name added behind dcfs's back, after it
 # listed the directory, makes it fail.

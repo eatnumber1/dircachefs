@@ -877,14 +877,34 @@ including one already past phase 1 (its names stay unknown), opens of file
 contents, and fills. The clean shutdown's sync point fails, so the
 clean-shutdown flag stays 0 and the dirty set survives. A start over the
 crashed filesystem without a remount fails on xfs (the open of `--source`
-fails) and succeeds on ext4 and an aborted btrfs; it serves nothing new and
-mutates nothing, and what it re-reads of a dirty directory stays dirty
-(recovery keeps the rows until a sync point succeeds). Once the backing
+fails) and over a filesystem that went read-only by itself (below); after
+an ext4 shutdown it succeeds, serves nothing new (a create through it
+fails: the filesystem refuses it), and what it re-reads of a dirty
+directory stays dirty (recovery keeps the rows until a sync point
+succeeds, and every `syncfs` fails). Once the backing
 filesystem is mounted again, the next start recovers and everything served
 matches the backing filesystem (`fault_shutdown_test`, ext4, xfs and btrfs,
 each flavour of the ioctl; on the pre-12.6 code its "recrash" scenario, a
 daemon crash and a re-read before a `nologflush` shutdown, served a name the
 backing filesystem had lost).
+
+**A filesystem that went read-only by itself** after an error (btrfs's
+transaction abort, ext4's `errors=remount-ro`, which Linux 6.17 marks
+`emergency_ro`) still shows changes its disk never got, and answers
+`syncfs` with success: `sync_filesystem` returns at once for a read-only
+superblock, and the write error reaches only the first `syncfs` of each
+open file. So a sync point after the first one cleared the dirty set of
+those changes and the clean shutdown recorded a clean run; after the
+operator's remount took the changes back, the next start had nothing to
+recover and served the lost objects as present (step 11.5's review;
+`fault_shutdown_test_btrfs`'s "ro" showed a lost directory served). Two
+guards (step 11.5): a sync point fails, keeping the dirty set, when
+`fstatvfs` reports the source read-only and it was writable when the run
+started (`StillWritable` in `backing::SyncBacking`); and dcfs refuses to
+start over a source whose superblock is read-only (or `emergency_ro`) under
+a read-write mount (`ForcedReadOnly`, `dcfs/mounts_below.h`), since its
+memory may show recovery and the fills what a remount takes back. A source
+mounted read-only on purpose is read-only in both, and is accepted.
 
 ### Sync points
 
@@ -1655,7 +1675,9 @@ WTF-8 form).
 2. Open `--source` (`O_RDONLY | O_DIRECTORY`). This is the only use of the
    path.
 3. Submount check: refuse to start if `/proc/self/mountinfo` shows any
-   mount point strictly below `--source`.
+   mount point strictly below `--source`; also refuse a source whose
+   superblock went read-only by itself under a read-write mount (see "A
+   filesystem that went read-only by itself").
 4. Cache database directory: create it mode 0700 if it does not exist; warn
    (but still start) if an existing one is group- or world-accessible. The
    cache holds metadata as sensitive as `--source`'s -- every cached name,
@@ -1990,18 +2012,6 @@ lists the user-visible ones.
 - **A residual "ahead" window depends on the backing filesystem.** The
   dirty-set argument assumes `syncfs` really makes earlier changes durable
   on the backing device.
-- **A filesystem that failed may report a successful `syncfs`.** btrfs
-  after a transaction abort (it goes read-only on its own) answers `syncfs`
-  with success on a descriptor opened after the abort (Linux 6.18;
-  `fault_shutdown_test_btrfs`, where a dead disk stands in for the shutdown
-  ioctl btrfs has only from 6.19), and so does any filesystem that went
-  read-only after an error (`sync_filesystem` skips a read-only
-  superblock). A dcfs started over such a filesystem, not remounted, can
-  therefore clear dirty rows whose changes the filesystem holds only in
-  memory. In the test its re-reads fail (`EIO`) and nothing wrong is
-  served; telling such a filesystem from one mounted read-only on purpose
-  would need the mount's own flags beside the superblock's
-  (`/proc/self/mountinfo`).
 
 ## Future work
 

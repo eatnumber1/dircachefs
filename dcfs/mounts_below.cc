@@ -11,8 +11,10 @@
 // interface over parsing a small text file.
 
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -112,6 +114,50 @@ absl::StatusOr<std::vector<std::string>> MountsBelow(
       syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
   ABSL_ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
   return MountPointsBelow(contents, source);
+}
+
+namespace {
+
+// Whether the comma-separated `options` include "ro", or, with
+// `emergency`, ext4's "emergency_ro" (Linux 6.17: an error made it
+// read-only without marking the superblock so).
+bool HasRo(std::string_view options, bool emergency = false) {
+  for (std::string_view option : absl::StrSplit(options, ',')) {
+    if (option == "ro" || (emergency && option == "emergency_ro")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+bool ForcedReadOnlyIn(std::string_view mountinfo, uint64_t mount_id) {
+  const std::string id = absl::StrCat(mount_id);
+  for (std::string_view line : absl::StrSplit(mountinfo, '\n')) {
+    // Fields: (1) mount id, ..., (6) mount options, (7...) optional fields,
+    // "-", fstype, mount source, super options.
+    std::vector<std::string_view> fields =
+        absl::StrSplit(line, ' ', absl::SkipEmpty());
+    if (fields.size() < 6 || fields[0] != id) continue;
+    for (size_t i = 6; i + 3 < fields.size(); ++i) {
+      if (fields[i] != "-") continue;
+      return !HasRo(fields[5]) && HasRo(fields[i + 3], /*emergency=*/true);
+    }
+    return false;
+  }
+  return false;
+}
+
+absl::StatusOr<bool> ForcedReadOnly(int fd) {
+  ABSL_ASSIGN_OR_RETURN(struct statx stx,
+                        syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MNT_ID));
+  if ((stx.stx_mask & STATX_MNT_ID) == 0) return false;
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor mountinfo,
+      syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
+  ABSL_ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
+  return ForcedReadOnlyIn(contents, stx.stx_mnt_id);
 }
 
 }  // namespace dcfs
