@@ -1115,12 +1115,27 @@ ext4, xfs and btrfs.
   test), 200 open/release cycles leak no fds, and all of this still works
   after killing and restarting the daemon against the same cache database.
 - `lifecycle_test` (`guest/lifecycle.sh`): step 3.5's daemon lifecycle and
-  CLI -- usage/flag validation, a missing or non-directory `--source`, a
+  CLI -- usage/option validation, a missing or non-directory SOURCE, a
   cache database refused because it belongs to a different filesystem,
-  `--fuse_opt` (good, bad and redundant options), a clean SIGTERM
+  `dcfs.fuse_opt` (good, bad and redundant options), a clean SIGTERM
   shutdown (exit 0, unmounted, WAL checkpointed), mounting dcfs back over
-  its own `--source`, and restarting against a previously-used cache
-  database.
+  its own SOURCE, and restarting against a previously-used cache
+  database. All of it through `mount.dcfs -o dcfs.fstype=none,...,
+  dcfs.foreground` (step 15.2: the plain `--source` command line is gone).
+- `mount_dcfs_test` (`guest/mount_dcfs.sh`): the `mount.dcfs` wrapper
+  (steps 15.1-15.2) on the ext4 image -- the capture of the backing
+  filesystem (`dcfs.fstype` absent or `ext4`: served, the FUSE mount's
+  source is the spec, no backing mount in the caller's namespace, `umount`
+  stops dcfs, SIGKILL releases the superblock), the option split (`ro` vs
+  `dcfs.ro`, `remount` touching only the dcfs mount, an unknown `dcfs.`
+  option and a failing native mount mount nothing and say why, `-f`, a file
+  as mount point), daemonization (stdio on `/dev/null`, own session, syslog
+  through busybox's `syslogd`, a failure after the fork reported by the
+  wrapper, `dcfs.foreground`), the `bind` and `none` forms, a file mounted
+  below the source refused, and a non-root caller. busybox's `mount` runs
+  no helpers, so `mount -t dcfs` is a SKIP here (step 15.6 runs it with
+  util-linux). Instance identity (15.3), stubs (15.4), fsck and exports
+  (15.5) and systemd (15.6) come later.
 - `handles_test` (`guest/handles.sh`): step 3.4b's NFS export handles
   (`FUSE_CAP_EXPORT_SUPPORT`, exercised with `//tools:fhtest`) -- a handle
   for a file on the source device opens and
