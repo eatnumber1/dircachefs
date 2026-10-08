@@ -551,20 +551,37 @@ absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id) {
   return *std::move(handle);
 }
 
-absl::StatusOr<std::optional<NamedIn>> AnyNameOf(Context &ctx, InodeId id) {
+absl::StatusOr<NamesToAsk> NamesToAskAbout(Context &ctx, InodeId id,
+                                           size_t limit) {
+  NamesToAsk result;
+  auto collect = [&](Statement &row) {
+    result.names.push_back(NamedIn{.parent = row.Column<int64_t>(0),
+                                   .name = row.Column<std::string>(1)});
+    return absl::OkStatus();
+  };
   ABSL_ASSIGN_OR_RETURN(
-      Statement * stmt,
+      Statement * present,
       Query(ctx,
             "SELECT parent, name FROM dentries WHERE inode = ? AND "
             "state = 'present' LIMIT 1",
             id));
-  std::optional<NamedIn> named;
-  ABSL_RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
-                         named = NamedIn{.parent = row.Column<int64_t>(0),
-                                         .name = row.Column<std::string>(1)};
-                         return absl::OkStatus();
-                       }).status());
-  return named;
+  ABSL_RETURN_IF_ERROR(present->ForEachRow(collect));
+  if (!result.names.empty()) {
+    result.present = true;
+    return result;
+  }
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * unknown,
+      Query(ctx,
+            "SELECT parent, name FROM dentries WHERE state = 'unknown' "
+            "LIMIT ?",
+            static_cast<int64_t>(limit) + 1));
+  ABSL_RETURN_IF_ERROR(unknown->ForEachRow(collect));
+  if (result.names.size() > limit) {
+    result.names.resize(limit);
+    result.more = true;
+  }
+  return result;
 }
 
 absl::StatusOr<std::optional<InodeId>> ParentOf(Context &ctx, InodeId dir) {

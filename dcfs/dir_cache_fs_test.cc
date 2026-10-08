@@ -120,10 +120,11 @@
 namespace dcfs {
 namespace {
 
-// The errno the next open_by_handle_at fails with, once (0: none).
-int &OpenByHandleFailure() {
-  static int err = 0;
-  return err;
+// The errnos the next open_by_handle_at calls fail with, one per call, in
+// order (0: that call is not failed).
+std::deque<int> &OpenByHandleFailures() {
+  static auto *errs = new std::deque<int>();
+  return *errs;
 }
 
 // The hook the next open_by_handle_at runs (once).
@@ -332,9 +333,13 @@ int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
   DCFS_INJECT("open_by_handle_at", -1)
   std::function<void()> hook = std::exchange(dcfs::OpenByHandleHook(), {});
   if (hook) hook();
-  if (int err = std::exchange(dcfs::OpenByHandleFailure(), 0); err != 0) {
-    errno = err;
-    return -1;
+  if (!dcfs::OpenByHandleFailures().empty()) {
+    const int err = dcfs::OpenByHandleFailures().front();
+    dcfs::OpenByHandleFailures().pop_front();
+    if (err != 0) {
+      errno = err;
+      return -1;
+    }
   }
   return __real_open_by_handle_at(mount_fd, handle, flags);
 }
@@ -610,7 +615,7 @@ class DirCacheFSTest : public ::testing::Test {
       observers_->Remove(recorder_.get());
     }
     OpenByHandleHook() = {};
-    OpenByHandleFailure() = 0;
+    OpenByHandleFailures().clear();
     NameToHandleHook() = {};
     SyncfsHook() = {};
     StatvfsReadOnly() = false;
@@ -2321,24 +2326,37 @@ TEST_F(DirCacheFSTest, CreateWhoseRefreshFailsIsRepliedFromTheRow) {
 // asks the parent by name: the same inode still there (or a failed check)
 // is EIO with the row kept and unknown; only a positive absence forgets it.
 
+// A getattr of `id` whose cached attributes are unknown: the request that
+// reopens it by handle (FreshAttr) and, failing, refreshes nothing.
+#define EXPECT_KEPT_UNKNOWN(id, dir, name)                                  \
+  do {                                                                      \
+    absl::StatusOr<cache::CachedAttr> kept = cache::GetAttr(ctx_, id);      \
+    EXPECT_THAT(kept, IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, \
+                                                  false)));                 \
+    EXPECT_THAT(cache::Lookup(ctx_, dir, name),                             \
+                IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));        \
+  } while (false)
+
 TEST_F(DirCacheFSTest, EstaleWithTheNameStillThereRepliesEio) {
   WriteFile(Path("f"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
-  OpenByHandleFailure() = ESTALE;
-  EXPECT_EQ(Chmod(f, 0600).error, -EIO);
-  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());  // Kept.
-  EXPECT_EQ(Chmod(f, 0600).error, 0);  // The device reads again.
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+  OpenByHandleFailures() = {ESTALE};
+  EXPECT_EQ(Getattr(f).first.error, -EIO);
+  EXPECT_KEPT_UNKNOWN(f, kRootInode, "f");
+  EXPECT_EQ(Getattr(f).first.error, 0);  // The device reads again.
 }
 
 TEST_F(DirCacheFSTest, EstaleWithTheNameCheckFailingRepliesEio) {
   WriteFile(Path("f"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
-  OpenByHandleFailure() = ESTALE;
-  OpenByHandleHook() = [] { StatxFailure() = EIO; };  // The name check's.
-  EXPECT_EQ(Chmod(f, 0600).error, -EIO);
-  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+  OpenByHandleFailures() = {ESTALE};
+  NameToHandleFailure() = EIO;  // The name check's handle read.
+  EXPECT_EQ(Getattr(f).first.error, -EIO);
+  EXPECT_KEPT_UNKNOWN(f, kRootInode, "f");
 }
 
 TEST_F(DirCacheFSTest, EstaleWithTheNameGoneForgetsTheRow) {
@@ -2346,7 +2364,7 @@ TEST_F(DirCacheFSTest, EstaleWithTheNameGoneForgetsTheRow) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
-  OpenByHandleFailure() = ESTALE;
+  OpenByHandleFailures() = {ESTALE};
   EXPECT_EQ(Chmod(f, 0600).error, -ESTALE);
   EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
               StatusIs(absl::StatusCode::kNotFound));
@@ -2358,11 +2376,109 @@ TEST_F(DirCacheFSTest, EstaleWithTheNameReplacedForgetsTheRow) {
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   ASSERT_THAT(syscalls::renameat2(AT_FDCWD, Path("f"), AT_FDCWD, Path("g"), 0),
               IsOk());
-  WriteFile(Path("f"));  // Another inode under the name.
-  OpenByHandleFailure() = ESTALE;
+  WriteFile(Path("f"));  // Another object under the name.
+  OpenByHandleFailures() = {ESTALE};
   EXPECT_EQ(Chmod(f, 0600).error, -ESTALE);
   EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
               StatusIs(absl::StatusCode::kNotFound));
+}
+
+// The parent branches, with d/f: the child's handle fails, then the
+// parent's (the check opens it by handle too).
+class EstaleParentTest : public DirCacheFSTest {
+ protected:
+  void SetUpTree() {
+    ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+    WriteFile(Path("d/f"));
+    Start();
+    ASSERT_OK_AND_ASSIGN(d_, Id("d"));
+    ASSERT_OK_AND_ASSIGN(f_, Id("f", d_));
+    ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f_), IsOk());
+  }
+  InodeId d_ = 0;
+  InodeId f_ = 0;
+};
+
+// The parent's handle fails too and its own name is gone: the child is gone
+// with it.
+TEST_F(EstaleParentTest, ParentGoneForgetsTheChild) {
+  SetUpTree();
+  ASSERT_THAT(syscalls::renameat2(AT_FDCWD, Path("d"), AT_FDCWD, Path("e"), 0),
+              IsOk());
+  OpenByHandleFailures() = {ESTALE, ESTALE};
+  EXPECT_EQ(Getattr(f_).first.error, -ESTALE);
+  EXPECT_THAT(cache::GetAttr(ctx_, f_).status(),
+              StatusIs(absl::StatusCode::kNotFound));
+}
+
+// The parent's handle fails but its name still holds it: the parent is
+// unreadable, so the child cannot be checked: EIO, both kept.
+TEST_F(EstaleParentTest, ParentStillThereRepliesEio) {
+  SetUpTree();
+  OpenByHandleFailures() = {ESTALE, ESTALE};
+  EXPECT_EQ(Getattr(f_).first.error, -EIO);
+  EXPECT_KEPT_UNKNOWN(f_, d_, "f");
+  EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "d"),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
+}
+
+// The parent's open fails with EIO: the child cannot be checked: EIO.
+TEST_F(EstaleParentTest, ParentUnreadableRepliesEio) {
+  SetUpTree();
+  OpenByHandleFailures() = {ESTALE, EIO};
+  EXPECT_EQ(Getattr(f_).first.error, -EIO);
+  EXPECT_KEPT_UNKNOWN(f_, d_, "f");
+}
+
+// An object whose only name a failed mutation left unknown (an unknown
+// dentry does not say which object it named): the unknown names are asked,
+// and the one that still names it keeps it: EIO, not ESTALE.
+TEST_F(DirCacheFSTest, EstaleWithTheNameUnknownRepliesEio) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+  ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'unknown', inode = NULL "
+                       "WHERE name = CAST('f' AS BLOB)"),
+              IsOk());
+  OpenByHandleFailures() = {ESTALE};
+  EXPECT_EQ(Getattr(f).first.error, -EIO);
+  EXPECT_THAT(cache::GetAttr(ctx_, f),
+              IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, false)));
+}
+
+// No name at all: the ESTALE is believed, as before.
+TEST_F(DirCacheFSTest, EstaleWithNoNameForgetsTheRow) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+  ASSERT_THAT(db_.Exec("DELETE FROM dentries WHERE name = CAST('f' AS BLOB)"),
+              IsOk());
+  OpenByHandleFailures() = {ESTALE};
+  EXPECT_EQ(Getattr(f).first.error, -ESTALE);
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              StatusIs(absl::StatusCode::kNotFound));
+}
+
+// More unknown names than are asked, none of them checked to be another
+// object's: not proof of absence: EIO.
+TEST_F(DirCacheFSTest, EstaleWithTooManyUnknownNamesRepliesEio) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
+  ASSERT_THAT(db_.Exec("DELETE FROM dentries WHERE name = CAST('f' AS BLOB)"),
+              IsOk());
+  for (int i = 0; i < 17; ++i) {
+    ASSERT_THAT(db_.Exec(absl::StrCat(
+                    "INSERT INTO dentries (parent, name, state) VALUES (1, "
+                    "CAST('u", i, "' AS BLOB), 'unknown')")),
+                IsOk());
+  }
+  OpenByHandleFailures() = {ESTALE};
+  EXPECT_EQ(Getattr(f).first.error, -EIO);
+  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());
 }
 
 // The sweep of unnamed rows is best effort: if it fails, startup goes on

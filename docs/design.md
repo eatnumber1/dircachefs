@@ -243,14 +243,24 @@ dcfs for it.
 11.3b). xfs and btrfs also return it for an inode the device cannot read,
 and dcfs used to forget the row and reply `ENOENT` for a name that
 exists: an unknown answered as negative. Now `OpenNode` asks the parent,
-through its own descriptor, for one cached name of the object
-(`cache::AnyNameOf`, `FileHandle::FromDirEntry`): if the name is gone
-(`ENOENT` from a readable parent) or names another handle, the object is
-gone, the row is forgotten and the reply is `ESTALE`, as before; if it
-names the same handle, or the parent cannot be opened or read, the reply
-is `EIO` and the row stays, its attributes unknown. With no cached name
-the `ESTALE` is believed. The check costs a parent open and a
-`name_to_handle_at`, on an error path only.
+through its own descriptor, about the object's name
+(`cache::NamesToAskAbout`, `FileHandle::FromDirEntry`): if its present name
+is gone (`ENOENT` from a readable parent) or names another handle, the
+object is gone, the row is forgotten and the reply is `ESTALE`, as before;
+if it names the same handle, or the parent cannot be opened or read, the
+reply is `EIO` and the row stays, its attributes unknown. An object whose
+names a failed mutation left unknown has no present name, and an unknown
+dentry does not say which object it named: the unknown names (at most 16)
+are asked instead, and one that names the same handle, one that cannot be
+checked, or more unknown names than that, is `EIO`. With no name at all
+the `ESTALE` is believed. The parent is opened with `OpenNode`, which may
+ask its own parent the same way: the recursion climbs the cached
+ancestors one level per call, so it is bounded by the depth, and ends at
+the root, which is opened through the mount fd (no handle). The checks
+cost a parent open and a `name_to_handle_at` per name, on an error path
+only, with no checkpoint before them: `OpenNode` also runs inside some
+mutations' phase 3 (Setattr's attribute refresh), where an interruption
+must not happen.
 
 ### Why handles survive restarts but not a cache wipe
 

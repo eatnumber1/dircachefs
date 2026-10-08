@@ -842,51 +842,94 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
 
 namespace {
 
-// After open_by_handle_at failed with ESTALE for `id` (whose row says
-// `attr`): OK if the object is positively gone, so that the caller forgets
-// the row (ESTALE, as before); EIO, the row kept and its attributes made
-// unknown, if it may still exist. Invariant (tri-state): a record goes
-// absent only on evidence of absence. ESTALE is not that evidence on xfs
-// and btrfs, which also return it for an inode the device cannot read
-// (fault_recover_test); so the parent is asked by name, through its fd:
-// ENOENT from a readable parent, or the name now naming another object
-// (another handle), is a positive absence; the same handle, or any other
-// failure (the parent cannot be opened or read), is not. With no cached name to ask, ESTALE is
-// believed, as before.
+// After open_by_handle_at failed with ESTALE for `id`: OK if the object is
+// positively gone, so that the caller forgets the row (ESTALE, as before);
+// EIO, the row kept and its attributes made unknown, if it may still
+// exist. Invariant (tri-state): a record goes absent only on evidence of
+// absence. ESTALE is not that evidence on xfs and btrfs, which also return
+// it for an inode the device cannot read (fault_recover_test, step 11.3b);
+// so the parent is asked by name, through its fd. For the object's present
+// name: ENOENT from a readable parent, or the name holding another handle
+// (not inode number: a number can be reused by a new object at once, the
+// handle's generation cannot), is a positive absence; the same handle, or a
+// parent that cannot be opened or read, is not. An object with no present
+// name (a failed mutation left its names unknown, and an unknown dentry does
+// not say which object it named) is looked for among the unknown names, at
+// most kUnknownNamesToAsk: found, or a name that cannot be checked (or more
+// unknown names than that), is EIO; none of them naming it, ESTALE is
+// believed, as it is for an object with no name at all.
+//
+// The parent is opened with OpenNode, which may land here again for it: the
+// recursion climbs the cached ancestors, one level per call, and ends at the
+// root, which OpenRoot opens through the mount fd (no handle, no ESTALE).
+//
+// No checkpoint (dcfs/checkpoint.h) before these backing calls: OpenNode
+// runs inside some mutations' phase 3 (Setattr's RefreshAttrs -> StatNode
+// records the outcome), where an interruption must not happen, and this is
+// an error path whose cost is a few opens.
+constexpr size_t kUnknownNamesToAsk = 16;
+
 absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
                                const FileHandle &handle) {
-  ABSL_ASSIGN_OR_RETURN(std::optional<cache::NamedIn> named,
-                        cache::AnyNameOf(ctx, id));
-  if (!named.has_value()) return absl::OkStatus();
-  absl::Status unreadable;
-  absl::StatusOr<FileDescriptor> parent =
-      OpenNode(ctx, named->parent, O_PATH | O_DIRECTORY);
-  if (!parent.ok()) {
-    const int err = ErrnoOf(parent.status());
-    if (err == ESTALE || err == ENOENT) return absl::OkStatus();
-    unreadable = parent.status();
-  } else {
-    // The name's handle, not its inode number: a number can be reused by a
-    // new object at once, the handle's generation cannot.
+  ABSL_ASSIGN_OR_RETURN(cache::NamesToAsk ask,
+                        cache::NamesToAskAbout(ctx, id, kUnknownNamesToAsk));
+  if (ask.names.empty() && !ask.more) return absl::OkStatus();
+  // The first name that still holds the object, or that could not be
+  // checked (with why).
+  const cache::NamedIn *still = nullptr;
+  const cache::NamedIn *unchecked = nullptr;
+  std::string why;
+  for (const cache::NamedIn &named : ask.names) {
+    absl::StatusOr<FileDescriptor> parent =
+        OpenNode(ctx, named.parent, O_PATH | O_DIRECTORY);
+    if (!parent.ok()) {
+      const int err = ErrnoOf(parent.status());
+      if (err == ESTALE || err == ENOENT) continue;  // Its directory is gone.
+      if (unchecked == nullptr) {
+        unchecked = &named;
+        why = absl::StrCat("opening its directory: ", parent.status().message());
+      }
+      continue;
+    }
     BackingCall(ctx, "FileHandle::FromDirEntry");
     absl::StatusOr<FileHandle> now =
-        FileHandle::FromDirEntry(**parent, named->name);
-    if (!now.ok() && ErrnoOf(now.status()) == ENOENT) return absl::OkStatus();
-    if (now.ok() && !(*now == handle)) return absl::OkStatus();
-    unreadable = now.ok() ? absl::OkStatus() : now.status();
+        FileHandle::FromDirEntry(**parent, named.name);
+    if (now.ok() && *now == handle) {
+      still = &named;
+      break;
+    }
+    if (!now.ok() && ErrnoOf(now.status()) != ENOENT && unchecked == nullptr) {
+      unchecked = &named;
+      why = absl::StrCat("reading its handle: ", now.status().message());
+    }
+  }
+  if (still == nullptr && unchecked == nullptr && !ask.more) {
+    return absl::OkStatus();
   }
   // Best effort: a row gone meanwhile has nothing to keep unknown.
   if (absl::Status marked = cache::MarkAttrsUnknown(ctx, id);
       !marked.ok() && !absl::IsNotFound(marked)) {
     return marked;
   }
-  absl::StatusBuilder error(dcfs::DcfsErrnoToStatus(
-      EIO, "Cannot open an object by handle (ESTALE), but its name is still "
-           "in its directory: the device cannot read it"));
-  error << "inode " << id << " (" << EscapeBytes(named->name)
-        << " in directory " << named->parent << ")";
-  if (!unreadable.ok()) error << ", after " << unreadable;
-  return error;
+  if (still != nullptr) {
+    return absl::StatusBuilder(dcfs::DcfsErrnoToStatus(
+               EIO, "open_by_handle_at returned ESTALE for an object its "
+                    "directory still names (the device cannot read it)"))
+           << "inode " << id << ", " << EscapeBytes(still->name)
+           << " in directory " << still->parent;
+  }
+  if (unchecked != nullptr) {
+    return absl::StatusBuilder(dcfs::DcfsErrnoToStatus(
+               EIO, "open_by_handle_at returned ESTALE, and the name that "
+                    "would show whether the object is gone could not be "
+                    "checked"))
+           << "inode " << id << ", " << EscapeBytes(unchecked->name)
+           << " in directory " << unchecked->parent << ", " << why;
+  }
+  return absl::StatusBuilder(dcfs::DcfsErrnoToStatus(
+             EIO, "open_by_handle_at returned ESTALE, and the object has no "
+                  "cached name and more unknown names than are asked"))
+         << "inode " << id;
 }
 
 }  // namespace
