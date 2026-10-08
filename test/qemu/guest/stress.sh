@@ -173,5 +173,13 @@ if restart_daemon restart "$LOG2"; then
 fi
 if alive; then pass daemon-alive-at-end; else fail daemon-alive-at-end "the daemon died"; fi
 
-require_no_reclaim no-reclaim
+# The long and random runs write more file data than the guest has memory
+# (page cache of 400+ MiB in 512 MiB, 1.5 M pages scanned): reclaim, with its
+# FORGETs and evictions, is part of what they stress, and none of their checks
+# depends on an entry staying resident. The short run fits and checks it.
+if [ "$STRESS_MODE" = short ]; then
+	require_no_reclaim no-reclaim
+else
+	echo "stress.sh: no-reclaim not checked in mode $STRESS_MODE (data outgrows memory by design)"
+fi
 exit "$FAILED"

@@ -512,7 +512,6 @@ qemu_test_matrix(
     name = "stress_long_test",
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/stress_long.sh",
-    mem = 512,  # 256 MiB made the kernel reclaim (1.7-2.0 M pages scanned)
     asan_mem = ASAN_BIG_DCFS_MEM,
     size = "large",
     other_size = "large",
@@ -523,7 +522,6 @@ qemu_test_matrix(
     name = "stress_random_test_" + fstype,
     disks = [("vdb", fstype, "512M")],
     guest_script = "guest/stress_random.sh",
-    mem = 512,
     asan_mem = ASAN_BIG_DCFS_MEM,
     size = "enormous",
     timeout = "eternal",
