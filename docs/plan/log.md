@@ -1872,3 +1872,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ, 2026-10-08: two style rules (25.5): one abstraction over variants (the identity's UUID /
   mount+fsid behind one object, never if-branched at use sites); avoid branching, inject
   dependencies and use fakes instead of test-only conditionals. Docs commit queued on lane-3.
+- 25.3b merged (b3355fc, four commits): the 13 review items (DcfsErrnoToStatus for failed success
+  replies and process errnos, MarkProducedByDcfs for CreateChild's probe failure, idle line at the
+  request's first backing call with kIdleThreshold 60 s, fsync/fsyncdir sync points at VLOG(1),
+  the duplicate VLOG deleted, level fixes, LOG_FIRST_N(ERROR, 10) for failed recovery probes,
+  NoteBestEffort for the best-effort refreshes, wording, the vacuous test replaced, six coverage
+  tests, docs) plus the LogPhase3Failure NotFound exclusion (confirmed: a row gone mid-Rename logged
+  ERROR); CI items: cancel.sh asserts the interrupted request through --v=2 (the 25.3 capitalisation
+  had also broken the grep), coverage baseline 95.97 / 79.22 from the gate on this tree. Fast 201 +
+  2; presubmit green before the last rebases, not rerun on the final tree. PUSH POINT. Lane-5 free:
+  7.1c (sysroot to Debian 13) dispatched.
