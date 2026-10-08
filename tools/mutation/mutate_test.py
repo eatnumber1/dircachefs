@@ -1,13 +1,18 @@
-"""Tests of the mutation tester's operators over small synthetic AST nodes."""
+"""Tests of the mutation tester (mutate.py): sampling, equivalents, reports,
+the per-push mode, `run` end to end with a fake bazel. The operators are
+tested on a real AST in operators_test.py."""
 
 import io
 import json
 import os
+import re
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from contextlib import redirect_stderr, redirect_stdout
 
 import mutate
@@ -220,6 +225,37 @@ class EquivalentTest(unittest.TestCase):
         self.assertEqual([m["reason"] for m in suppressed], ["why"])
 
 
+class PlanTest(unittest.TestCase):
+
+    def entries(self, **kw):
+        e = {"file": "dcfs/a.cc", "function": "f", "op": "relational",
+             "before": "<", "after": "<=", "reason": "r"}
+        e.update(kw)
+        return [e]
+
+    def test_equivalents_do_not_win_lines_or_slots(self):
+        eq = mutant(line=1)                       # the equivalent one
+        other = mutant(line=1, before=">", after=">=", op="relational")
+        entries = self.entries()
+        for seed in range(1, 40):                 # whichever ranks first
+            live, suppressed = mutate.plan([eq, other], entries, seed, 0)
+            self.assertEqual([m["before"] for m in live], [">"], seed)
+            self.assertEqual(len(suppressed), 1)
+
+    def test_an_entry_that_matches_nothing_or_several_is_warned_about(self):
+        a = mutant(line=1, nth=1)
+        b = mutant(line=2, nth=2)
+        b["key"] = a["key"]
+        ents = mutate.parse_equivalent("\n".join(
+            json.dumps(e) for e in
+            self.entries() + self.entries(function="gone")
+            + self.entries(nth=2)))
+        warnings = mutate.equivalent_warnings(ents, [a, b])
+        self.assertEqual(len(warnings), 2)
+        self.assertIn("matches 2 mutants", warnings[0])
+        self.assertIn("matches no mutant", warnings[1])
+
+
 class ReportTest(unittest.TestCase):
 
     def results(self):
@@ -250,9 +286,9 @@ class ReportTest(unittest.TestCase):
     def test_the_table_has_a_row_per_operator_and_the_rate(self):
         text = mutate.format_summary(mutate.summarize(self.results()),
                                      not_run=4)
-        self.assertIn("| relational | 1 | 2 | 0 | 0 | 0 | 3 |", text)
-        self.assertIn("| constant | 1 | 0 | 1 | 1 | 0 | 3 |", text)
-        self.assertIn("| **all** | 2 | 2 | 1 | 1 | 0 | 6 |", text)
+        self.assertIn("| relational | 1 | 2 | 0 | 0 | 0 | 0 | 3 |", text)
+        self.assertIn("| constant | 1 | 0 | 1 | 1 | 0 | 0 | 3 |", text)
+        self.assertIn("| **all** | 2 | 2 | 1 | 1 | 0 | 0 | 6 |", text)
         self.assertIn("60.0 mutants per hour", text)
         self.assertIn("4 not run", text)
 
@@ -283,7 +319,7 @@ class ReportTest(unittest.TestCase):
                 self.assertEqual(
                     mutate.report(mutate.argparse.Namespace(results=paths)),
                     0)
-        self.assertIn("| **all** | 2 | 2 | 1 | 1 | 0 | 6 |", out.getvalue())
+        self.assertIn("| **all** | 2 | 2 | 1 | 1 | 0 | 0 | 6 |", out.getvalue())
         self.assertIn("Survivors by function (2)", out.getvalue())
 
 
@@ -348,8 +384,9 @@ class PrerequisitesTest(unittest.TestCase):
             os.environ["PATH"] = d + os.pathsep + old
             try:
                 with redirect_stderr(io.StringIO()):
-                    with self.assertRaises(SystemExit):
+                    with self.assertRaises(SystemExit) as raised:
                         mutate.build_prerequisites(d, "//x:y")
+                self.assertEqual(raised.exception.code, 2)
             finally:
                 os.environ["PATH"] = old
 
@@ -367,7 +404,8 @@ class ShardAndExitTest(unittest.TestCase):
                              list(range(sh[0]["id"], sh[0]["id"] + len(sh))))
 
     def test_exit_codes(self):
-        killed, survived, error = ({"status": s} for s in ("killed", "survived", "error"))
+        killed, survived, error = ({"status": s} for s in (
+            "killed", "survived", "error"))
         self.assertEqual(mutate.exit_code([killed], False), 0)
         self.assertEqual(mutate.exit_code([killed, survived], False), 0)   # a finding
         self.assertEqual(mutate.exit_code([killed, survived], True), 1)    # per push
@@ -388,18 +426,35 @@ class RunEndToEndTest(unittest.TestCase):
         with open(os.path.join(self.repo, "dcfs/a.cc"), "w") as f:
             f.write("int f() { return XXXX; }\n")
         for cmd in (["init", "-q"], ["add", "."],
-                    ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"]):
+                    ["-c", "user.name=t", "-c", "user.email=t@t", "commit",
+                     "-qm", "x"]):
             subprocess.run(["git", *cmd], cwd=self.repo, check=True)
         self.bazel = os.path.join(self.dir, "fakebazel")
+        self.log = os.path.join(self.dir, "bazel.log")
         with open(self.bazel, "w") as f:
-            f.write("#!/bin/sh\n"
-                    "case \"$1\" in shutdown) exit 0;; esac\n"
-                    "if grep -q KILL dcfs/a.cc; then echo 'FAIL: //dcfs:x_test'; exit 3; fi\n"
-                    "if grep -q BAD dcfs/a.cc; then exit 2; fi\n"
-                    "exit 0\n")
+            f.write(
+                "#!/bin/sh\n"
+                "echo \"$@\" >> %s\n"
+                "while case \"$1\" in --*) true;; *) false;; esac; do "
+                "shift; done\n"
+                "case \"$1\" in shutdown|clean) exit 0;; esac\n"
+                "if grep -q KILL dcfs/a.cc; then "
+                "echo 'FAIL: //dcfs:x_test'; exit 3; fi\n"
+                "if grep -q FLAKY dcfs/a.cc; then "
+                "case \"$*\" in *--nocache_test_results*) exit 0;; esac; "
+                "echo 'FAIL: //dcfs:x_test'; exit 3; fi\n"
+                "if grep -q SLOW dcfs/a.cc; then sleep 5; fi\n"
+                "if grep -q INVALID dcfs/a.cc; then "
+                "echo 'dcfs/a.cc:1:20: error: expected expression'; "
+                "exit 1; fi\n"
+                "if grep -q BUILDFAIL dcfs/a.cc; then "
+                "echo 'other/b.cc:3:1: error: boom'; exit 1; fi\n"
+                "if grep -q BAD dcfs/a.cc; then exit 2; fi\n"
+                "exit 0\n" % self.log)
         os.chmod(self.bazel, os.stat(self.bazel).st_mode | stat.S_IXUSR)
         self.mutants = os.path.join(self.dir, "mutants.json")
         self.equivalent = ""
+        self.timeout = 60
 
     def write_mutants(self, replacements):
         ms = [{"id": i, "file": "dcfs/a.cc", "function": "f", "line": 1, "op": "negate-if",
@@ -415,22 +470,25 @@ class RunEndToEndTest(unittest.TestCase):
 
     def args(self, *extra):
         return mutate.argparse.Namespace(
-            workspace=self.repo, mutants=self.mutants, result=os.path.join(self.dir, "res.json"),
-            sample=0, seed=1, only="", shard="", timeout=60, killers="//dcfs:x_test",
+            workspace=self.repo, mutants=self.mutants,
+            result=os.path.join(self.dir, "res.json"),
+            sample=0, seed=1, only="", shard="", timeout=self.timeout,
+            killers="//dcfs:x_test",
             fail_on_survivor="--fail-on-survivor" in extra, show_output=False,
             survivors_out=os.path.join(self.dir, "survivors.txt"),
             bazel=self.bazel, equivalent=self.equivalent,
             baseline=True, baseline_timeout=60,
             summary_out=os.path.join(self.dir, "summary.md"))
 
-    def test_a_survivor_is_a_finding_for_the_schedule_and_a_failure_per_push(self):
+    def test_a_survivor_is_a_finding_on_the_schedule_a_failure_per_push(self):
         self.write_mutants(["KILL", "ok", "KILL"])
         self.assertEqual(self.run_tool(), 0)
         survivors = read_text(os.path.join(self.dir, "survivors.txt"))
         self.assertIn("SURVIVOR dcfs/a.cc:1 in f", survivors)
         self.assertEqual(survivors.count("SURVIVOR"), 1)
         results = read_json(os.path.join(self.dir, "res.json"))
-        self.assertEqual([r["status"] for r in results], ["killed", "survived", "killed"])
+        self.assertEqual([r["status"] for r in results],
+                         ["killed", "survived", "killed"])
         self.assertEqual(self.run_tool("--fail-on-survivor"), 1)
 
     def test_no_survivor_passes_per_push(self):
@@ -458,7 +516,7 @@ class RunEndToEndTest(unittest.TestCase):
         suppressed = [r for r in results if r["status"] == "suppressed"][0]
         self.assertEqual(suppressed["reason"], "never runs")
         summary = read_text(os.path.join(self.dir, "summary.md"))
-        self.assertIn("| negate-if | 1 | 1 | 0 | 1 | 0 | 3 |", summary)
+        self.assertIn("| negate-if | 1 | 1 | 0 | 1 | 0 | 0 | 3 |", summary)
 
     def test_the_time_budget_leaves_the_remaining_mutants_not_run(self):
         self.write_mutants(["KILL", "KILL", "KILL", "KILL"])
@@ -475,6 +533,68 @@ class RunEndToEndTest(unittest.TestCase):
         self.assertEqual(len(results), 3)  # looks at 0, 10, 20; 30 > 25
         self.assertIn("1 not run (time budget)", err.getvalue())
 
+    def statuses(self):
+        results = read_json(os.path.join(self.dir, "res.json"))
+        return [r["status"] for r in results]
+
+    def test_a_kill_that_passes_when_rerun_is_flaky(self):
+        self.write_mutants(["KILL", "FLAKY"])
+        self.assertEqual(self.run_tool("--fail-on-survivor"), 0)
+        self.assertEqual(self.statuses(), ["killed", "flaky"])
+        self.assertIn("--nocache_test_results", read_text(self.log))
+
+    def test_a_build_error_in_the_mutated_file_is_invalid(self):
+        self.write_mutants(["INVALID"])
+        self.assertEqual(self.run_tool(), 0)
+        self.assertEqual(self.statuses(), ["invalid"])
+
+    def test_a_build_error_elsewhere_is_a_tooling_error(self):
+        self.write_mutants(["BUILDFAIL"])
+        self.assertEqual(self.run_tool(), 2)
+        self.assertEqual(self.statuses(), ["error"])
+
+    def test_a_timeout_is_a_kill_and_is_not_rerun(self):
+        self.write_mutants(["SLOW"])
+        self.timeout = 1
+        self.assertEqual(self.run_tool(), 0)
+        self.assertEqual(self.statuses(), ["killed"])
+        self.assertNotIn("--nocache_test_results", read_text(self.log))
+
+    def test_the_output_base_and_scratch_tree_are_removed(self):
+        self.write_mutants(["KILL"])
+        self.run_tool()
+        log = read_text(self.log)
+        base = re.search(r"--output_base=(\S+)", log).group(1)
+        self.assertIn("clean --expunge", log)
+        self.assertFalse(os.path.exists(os.path.dirname(base)))
+
+    def test_a_failure_while_copying_still_removes_the_scratch_tree(self):
+        made = []
+        real = tempfile.mkdtemp
+
+        def mkdtemp(*a, **kw):
+            made.append(real(*a, **kw))
+            return made[-1]
+
+        def broken(workspace, dest):
+            raise OSError("disk full")
+        self.write_mutants(["KILL"])
+        with mock.patch.object(tempfile, "mkdtemp", mkdtemp), \
+                mock.patch.object(mutate, "copy_tree", broken):
+            with self.assertRaises(OSError):
+                self.run_tool()
+        self.assertTrue(made)
+        self.assertFalse(os.path.exists(made[0]))
+
+    def test_sigterm_becomes_an_exit_so_that_cleanup_runs(self):
+        old = signal.getsignal(signal.SIGTERM)
+        try:
+            mutate.install_sigterm()
+            with self.assertRaises(SystemExit):
+                signal.raise_signal(signal.SIGTERM)
+        finally:
+            signal.signal(signal.SIGTERM, old)
+
     def test_a_failing_baseline_is_a_tooling_error_and_runs_no_mutant(self):
         # The unmutated tree fails the killers: no verdict would mean
         # anything (every mutant would look killed).
@@ -486,7 +606,8 @@ class RunEndToEndTest(unittest.TestCase):
 
     def test_a_shard_runs_only_its_range(self):
         self.write_mutants(["ok", "ok", "ok", "ok"])
-        args_ids = [m["id"] for m in mutate.shard_of(read_json(self.mutants), 2, 2)]
+        args_ids = [m["id"] for m in mutate.shard_of(
+            read_json(self.mutants), 2, 2)]
         self.assertEqual(args_ids, [3, 4])
 
 

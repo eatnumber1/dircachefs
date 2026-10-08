@@ -4,6 +4,13 @@ Limited mutation testing of the protocol code: a mutant that no test kills is
 a missing test. It is a tool, not a test or a gate: running it takes hours and
 starts Bazel itself. (Its own tests are host tests: `//tools/mutation:all`.)
 
+Exceptions to "everything goes through Bazel", on purpose: the tool drives
+Bazel, so `generate` runs the pinned clang on the file's own compile command
+(from `bazel aquery`) outside the action graph for the AST dump, and the
+workflows run it with the runner's system `python3`, not a Bazel-built one
+(`bazel run //tools/mutation:mutate` works too). Its unit tests run the same
+pinned clang as a Bazel data dependency.
+
 ## What is mutated
 
 `scope.txt` names the files and, per file, the functions:
@@ -78,8 +85,13 @@ a refused Checkpoint (`if (interrupted) { mutation.End(); return interrupted;
 }`): the destructor ends the mutation at the return and nothing runs between
 the two. (The `End()` before phase-3 refreshes is not equivalent: see the
 `...EndsItsMutationBeforeItsRefreshes` tests.) To add one: copy the `SURVIVOR`
-line's function and text, find `nth` with `generate --all` if the same text
-occurs twice in the function, and write the reason.
+line's function and text, find `nth` with `generate --all` (always give it: an
+entry without `nth` suppresses every identical mutant, also ones added
+later), and write the reason. `nth` counts in source order, so editing the
+function can re-target an entry: `generate` warns about every entry that
+matches no mutant (its code went: delete or re-key it) or several (add `nth`),
+so re-key from `generate --all` when it does. Equivalents are split off
+before sampling, so they take no line or function slot from live mutants.
 
 ## Running it
 
@@ -92,8 +104,13 @@ bazel run //tools/mutation:mutate -- report /tmp/result.json
 
 `generate` takes about two minutes (three AST dumps of 150, 60 and 110 MB).
 `run` copies the tree (`git ls-files`, plus `user.bazelrc`) to a scratch
-directory, which gives it its own Bazel output base; the shared disk cache
-means only the mutated file's compile, the links and the tests cost anything.
+directory with its own Bazel output base inside it (`--output_base`); the
+shared disk cache means only the mutated file's compile, the links and the
+tests cost anything. The output base is `bazel clean --expunge`d and the
+scratch directory removed when `run` ends, also on an error or SIGTERM (which
+becomes an exit); only `kill -9` leaves them behind (`/tmp/dcfs-mutate.*`).
+It first runs the killers on the unmutated tree (the baseline: a failing tree
+is a tooling error, and the cold build is paid there, not by the first mutant).
 For each mutant it edits the file, runs
 
 ```
@@ -104,8 +121,11 @@ bazel test --notest_keep_going --test_output=errors //dcfs:dir_cache_fs_trace_te
 (two phases, the second only for a mutant the first did not kill: a size
 filter such as `--config=fast` applies to every target of an invocation and
 would drop the medium trace test; `--killers "phase;phase"` replaces them) and
-restores the file. Exit status 3 (a test failed or timed out) is `killed`, 0
-is `survived`, 1 is `invalid` (the mutant does not compile; not counted).
+restores the file. Exit status 3 (a test failed or timed out) is `killed`, but
+the killing target is rerun with `--nocache_test_results` and a pass makes it
+`flaky` (listed as `FLAKY`, not a kill); 0 is `survived`; 1 is `invalid` (the
+mutant does not compile; not counted) only when the compiler's error is in the
+mutated file, otherwise `error`, a tooling failure (exit 2).
 `--notest_keep_going` ends the mutant at its first failing test, so killed
 mutants are cheap and survivors cost the whole tier. The result file is
 rewritten after every mutant, so a long run can be read while it goes.

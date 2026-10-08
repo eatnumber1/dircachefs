@@ -51,6 +51,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -70,7 +71,14 @@ DEFAULT_SEED = 1
 # The scheduled sweep's per-function bound and the per-push budget.
 DEFAULT_PER_FUNCTION = 2
 DEFAULT_BUDGET = 30
-STATUSES = ("killed", "survived", "invalid", "suppressed", "error")
+STATUSES = ("killed", "survived", "invalid", "suppressed", "error", "flaky")
+
+
+def fail(message):
+    """A tooling error: say so and exit with status 2 (not 1, which is a
+    survivor under --fail-on-survivor)."""
+    print(message, file=sys.stderr)
+    raise SystemExit(2)
 
 
 # ---- scope -----------------------------------------------------------------
@@ -88,7 +96,7 @@ def read_scope(path):
         elif words[0] in ("all", "names", "calls"):
             files[-1]["rules"].append((words[0], words[1:]))
         else:
-            raise SystemExit("scope.txt: cannot read %r" % line)
+            fail("scope.txt: cannot read %r" % line)
     return files
 
 
@@ -362,16 +370,38 @@ def load_equivalent(path):
         return parse_equivalent(f.read())
 
 
+def entry_matches(e, m):
+    return (e["file"] == m["file"] and e["function"] == m["function"]
+            and e["op"] == m["op"]
+            and normalize(e["before"]) == normalize(m["before"])
+            and normalize(e["after"]) == normalize(m["replacement"])
+            and e.get("nth", m.get("nth", 1)) == m.get("nth", 1))
+
+
 def suppression(m, entries):
     """The reason a mutant is a known equivalent, or None."""
     for e in entries:
-        if (e["file"] == m["file"] and e["function"] == m["function"]
-                and e["op"] == m["op"]
-                and normalize(e["before"]) == normalize(m["before"])
-                and normalize(e["after"]) == normalize(m["replacement"])
-                and e.get("nth", m.get("nth", 1)) == m.get("nth", 1)):
+        if entry_matches(e, m):
             return e["reason"]
     return None
+
+
+def equivalent_warnings(entries, candidates):
+    """What to tell the maintainer about entries that no longer pin one
+    mutant: one that matches none (its code went) or several (it has no
+    `nth`, so it also suppresses any identical mutant added later)."""
+    warnings = []
+    for e in entries:
+        n = sum(1 for m in candidates if entry_matches(e, m))
+        where = "%s %s %s `%s`" % (e["file"], e["function"], e["op"],
+                                   one_line(e["before"], 40))
+        if n == 0:
+            warnings.append("equivalent.txt: %s matches no mutant: delete "
+                            "it or re-key it" % where)
+        elif n > 1:
+            warnings.append("equivalent.txt: %s matches %d mutants: add "
+                            "`nth`" % (where, n))
+    return warnings
 
 
 def split_suppressed(mutants, entries):
@@ -462,8 +492,7 @@ def build_prerequisites(workspace, target):
     p = bazel(workspace, *prerequisites_args(target), check=False)
     if p.returncode != 0:
         sys.stderr.write(p.stderr.decode(errors="replace")[-2000:])
-        raise SystemExit(
-            "bazel could not build the compile prerequisites of %s" % target)
+        fail("bazel could not build the compile prerequisites of %s" % target)
 
 
 def compile_command(workspace, target, source):
@@ -482,7 +511,7 @@ def compile_command(workspace, target, source):
                     out.append(args[i])
                     i += 1
             return out
-    raise SystemExit("no compile action for %s in %s" % (source, target))
+    fail("no compile action for %s in %s" % (source, target))
 
 
 def candidates(args):
@@ -506,7 +535,7 @@ def candidates(args):
                            cwd=execroot, capture_output=True)
         if p.returncode != 0:
             sys.stderr.write(p.stderr.decode()[-2000:])
-            raise SystemExit("clang failed on %s" % entry["file"])
+            fail("clang failed on %s" % entry["file"])
         print("%s: AST dump %d MB in %.0fs" % (
             entry["file"], len(p.stdout) >> 20, time.time() - t),
             file=sys.stderr)
@@ -518,6 +547,13 @@ def candidates(args):
         mutants.extend(collect_mutants(functions, source, entry["file"],
                                        entry["rules"], arid, hunks))
     return mutants
+
+
+def plan(found, entries, seed, per_function):
+    """(live, suppressed): the equivalent mutants split off first, so that
+    they take no line or function slot from the others, then the sample."""
+    live, suppressed = split_suppressed(found, entries)
+    return sample(live, seed, per_function), suppressed
 
 
 def number(mutants):
@@ -536,8 +572,18 @@ def generate(args):
     print("seed %d (--seed), per function %d (--per-function)" % (
         args.seed, args.per_function), file=sys.stderr)
     found = candidates(args)
-    mutants = number(found if args.all else sample(found, args.seed,
-                                                   args.per_function))
+    entries = load_equivalent(getattr(args, "equivalent", ""))
+    for warning in equivalent_warnings(entries, found):
+        print(warning, file=sys.stderr)
+    if args.all:
+        mutants = found
+    else:
+        live, suppressed = plan(found, entries, args.seed, args.per_function)
+        # The suppressed ones go along (without a slot), so that `run` can
+        # count them.
+        mutants = sorted(live + suppressed,
+                         key=lambda m: (m["file"], m["start"], m["end"]))
+    number(mutants)
     json.dump(mutants, open(args.out, "w"), indent=1)
     print("%d candidates, %d sampled: %s" % (
         len(found), len(mutants), count_by(mutants)), file=sys.stderr)
@@ -643,6 +689,10 @@ def format_survivors(results):
                 r["file"], r["line"], function, r["op"], one_line(old),
                 one_line(new)))
     for r in results:
+        if r["status"] == "flaky":
+            lines.append("FLAKY mutant %d %s:%d in %s: %s failed once and "
+                         "passed on a rerun" % (r["id"], r["file"], r["line"],
+                                                r["function"], r["killer"]))
         if r["status"] == "error":
             lines.append("ERROR mutant %d %s:%d: %s" % (
                 r["id"], r["file"], r["line"],
@@ -650,16 +700,44 @@ def format_survivors(results):
     return lines
 
 
-def run_phases(args, src, phases, timeout):
+def install_sigterm():
+    """SIGTERM raises SystemExit, so that `finally` removes the scratch
+    tree and its Bazel output base (a killed sweep once left 16 GB)."""
+    def handler(signum, frame):
+        raise SystemExit(128 + signum)
+    signal.signal(signal.SIGTERM, handler)
+
+
+def rmtree_force(path):
+    """Remove a tree even if Bazel left read-only directories in it."""
+    for root, dirs, _ in os.walk(path):
+        for d in dirs:
+            try:
+                os.chmod(os.path.join(root, d), 0o755)
+            except OSError:
+                pass
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def cleanup(args, src, startup, scratch):
+    """Expunge the scratch tree's Bazel output base and remove the tree."""
+    if os.path.isdir(src):
+        subprocess.run([args.bazel] + startup + ["clean", "--expunge"],
+                       cwd=src, capture_output=True)
+    rmtree_force(scratch)
+
+
+def run_phases(args, src, phases, timeout, startup=()):
     """(exit status, output) of the killer phases in order, stopping at the
     first that does not pass; a phase that times out is status 3 (a hang)."""
     rc, tail = 0, ""
     for killers in phases:
         try:
             p = subprocess.run(
-                [args.bazel, "test", "--notest_keep_going",
-                 "--test_output=errors", "--jobs=2", "--local_test_jobs=2"]
-                + killers, cwd=src, capture_output=True, timeout=timeout)
+                [args.bazel] + list(startup) + [
+                    "test", "--notest_keep_going", "--test_output=errors",
+                    "--jobs=2", "--local_test_jobs=2"] + killers,
+                cwd=src, capture_output=True, timeout=timeout)
             rc = p.returncode
             tail = (p.stdout + p.stderr).decode("utf-8", "replace")
         except subprocess.TimeoutExpired:
@@ -667,6 +745,37 @@ def run_phases(args, src, phases, timeout):
         if rc != 0:
             break
     return rc, tail
+
+
+def confirm_kill(args, src, startup, target, timeout):
+    """True when `target` fails again with its cached result ignored: a
+    test that failed once and passes now is flaky, not a kill."""
+    try:
+        p = subprocess.run(
+            [args.bazel] + list(startup) + [
+                "test", "--nocache_test_results", "--test_output=errors",
+                "--jobs=2", "--local_test_jobs=2", target],
+            cwd=src, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return True
+    return p.returncode != 0
+
+
+def judge(rc, tail, m):
+    """(status, killer) of one mutant from Bazel's exit status: 0 all
+    passed (survived), 3 a test failed or timed out (killed), 1 a build
+    error: invalid when the compiler's error is in the mutated file,
+    otherwise a tooling error (a broken build elsewhere would make every
+    mutant look invalid); 4 no test ran and the rest are errors."""
+    if rc == 0:
+        return "survived", ""
+    if rc == 3:
+        found = re.findall(r"^(?:FAIL|TIMEOUT):\s+(//\S+)", tail, re.M)
+        return "killed", found[0] if found else ""
+    if rc == 1 and re.search(re.escape(m["file"]) + r":\d+:\d+: error",
+                             tail):
+        return "invalid", ""
+    return "error", ""
 
 
 def run(args):
@@ -683,10 +792,7 @@ def run(args):
     if args.sample and args.sample < len(mutants):
         mutants = [m for m in take_turns(mutants, args.seed)][:args.sample]
         mutants.sort(key=lambda m: m["id"])
-    scratch = tempfile.mkdtemp(prefix="dcfs-mutate.")
-    src = os.path.join(scratch, "src")
-    os.makedirs(src)
-    copy_tree(workspace, src)
+    install_sigterm()
     # Phases, in order; a mutant that survives one goes on to the next. (A
     # size filter such as --config=fast applies to every target of its
     # invocation, so trace validation, a medium test, needs a phase of its
@@ -694,24 +800,30 @@ def run(args):
     phases = [ph.split() for ph in args.killers.split(";")]
     results = [dict(m, status="suppressed", seconds=0, killer="")
                for m in suppressed]
-    if mutants and getattr(args, "baseline", True):
-        # The unmutated tree must pass: otherwise every mutant would be
-        # "killed", and the first mutant would pay for the cold build and
-        # time out. This run warms the scratch tree's caches.
-        print("baseline: the killers on the unmutated tree", file=sys.stderr)
-        rc, tail = run_phases(args, src, phases, args.baseline_timeout)
-        if rc != 0:
-            subprocess.run([args.bazel, "shutdown"], cwd=src,
-                           capture_output=True)
-            shutil.rmtree(scratch, ignore_errors=True)
-            print("the killers fail on the unmutated tree (exit %d), so no "
-                  "mutant can be judged:\n%s" % (rc, tail[-1500:]),
-                  file=sys.stderr)
-            return 2
+    scratch = tempfile.mkdtemp(prefix="dcfs-mutate.")
+    src = os.path.join(scratch, "src")
+    # Its own output base, inside the scratch tree: removed with it.
+    startup = ["--output_base=" + os.path.join(scratch, "base")]
     started = time.time()
     clock = getattr(args, "clock", time.time)
     not_run_time = 0
     try:
+        os.makedirs(src)
+        copy_tree(workspace, src)
+        if mutants and getattr(args, "baseline", True):
+            # The unmutated tree must pass: otherwise every mutant would be
+            # "killed", and the first mutant would pay for the cold build
+            # and time out. This run warms the scratch tree's caches.
+            print("baseline: the killers on the unmutated tree",
+                  file=sys.stderr)
+            rc, tail = run_phases(args, src, phases, args.baseline_timeout,
+                                  startup)
+            if rc != 0:
+                print("the killers fail on the unmutated tree (exit %d), so "
+                      "no mutant can be judged:\n%s" % (rc, tail[-1500:]),
+                      file=sys.stderr)
+                return 2
+        started = time.time()
         for i, m in enumerate(mutants, 1):
             deadline = getattr(args, "deadline", None)
             if deadline is not None and clock() >= deadline:
@@ -720,26 +832,26 @@ def run(args):
                       file=sys.stderr)
                 break
             path = os.path.join(src, m["file"])
-            original = open(path, "rb").read()
+            with open(path, "rb") as f:
+                original = f.read()
             text = original.decode("latin-1")
             if text[m["start"]:m["end"]] != m["before"]:
-                raise SystemExit("mutant %d no longer matches %s "
-                                 "(regenerate)" % (m["id"], m["file"]))
+                fail("mutant %d no longer matches %s (regenerate)" % (
+                    m["id"], m["file"]))
             mutated = text[:m["start"]] + m["replacement"] + text[m["end"]:]
-            open(path, "wb").write(mutated.encode("latin-1"))
+            with open(path, "wb") as f:
+                f.write(mutated.encode("latin-1"))
             t = time.time()
             try:
-                rc, tail = run_phases(args, src, phases, args.timeout)
+                rc, tail = run_phases(args, src, phases, args.timeout,
+                                      startup)
+                status, killer = judge(rc, tail, m)
+                if status == "killed" and killer and not confirm_kill(
+                        args, src, startup, killer, args.timeout):
+                    status = "flaky"
             finally:
-                open(path, "wb").write(original)
-            # Bazel: 0 all passed, 3 a test failed or timed out, 1 a build
-            # error (the mutant does not compile), 4 no test ran.
-            status = {0: "survived", 3: "killed", 1: "invalid"}.get(
-                rc, "error")
-            killer = ""
-            if status == "killed":
-                f = re.findall(r"^(?:FAIL|TIMEOUT):\s+(//\S+)", tail, re.M)
-                killer = f[0] if f else ""
+                with open(path, "wb") as f:
+                    f.write(original)
             r = dict(m, status=status, seconds=round(time.time() - t, 1),
                      killer=killer)
             if status == "error":
@@ -755,13 +867,14 @@ def run(args):
                 i, len(mutants), m["id"], m["file"], m["line"], m["op"],
                 status, r["seconds"], " by " + killer if killer else ""),
                 file=sys.stderr)
-            json.dump(results, open(args.result, "w"), indent=1)
+            with open(args.result, "w") as f:
+                json.dump(results, f, indent=1)
     finally:
-        subprocess.run([args.bazel, "shutdown"], cwd=src, capture_output=True)
-        shutil.rmtree(scratch, ignore_errors=True)
+        cleanup(args, src, startup, scratch)
     wall = time.time() - started
     if not mutants:
-        json.dump(results, open(args.result, "w"), indent=1)
+        with open(args.result, "w") as f:
+            json.dump(results, f, indent=1)
     summary = summarize(results, wall if mutants else None)
     table = format_summary(summary, getattr(args, "not_run", 0),
                            not_run_time)
@@ -807,6 +920,7 @@ def main(argv=None):
     g.add_argument("--workspace", default=workspace)
     g.add_argument("--scope", default=scope)
     g.add_argument("--arid", default=arid)
+    g.add_argument("--equivalent", default=equivalent)
     g.add_argument("--out", required=True)
     g.add_argument("--seed", type=int, default=DEFAULT_SEED)
     g.add_argument("--per-function", type=int, default=DEFAULT_PER_FUNCTION,
@@ -873,9 +987,9 @@ def main(argv=None):
             a.seed, a.max_mutants, a.time_budget), file=sys.stderr)
         if a.time_budget:
             a.deadline = time.time() + 60 * a.time_budget
-        found = sample(candidates(a), a.seed)
-        live, suppressed = split_suppressed(
-            found, load_equivalent(a.equivalent))
+        found = candidates(a)
+        live, suppressed = plan(found, load_equivalent(a.equivalent),
+                                a.seed, 0)
         chosen, a.not_run = pick_budget(live, a.max_mutants, a.seed)
         print("%d mutants in the changed functions: %d suppressed, %d to "
               "run, %d not run" % (len(found), len(suppressed), len(chosen),
@@ -893,4 +1007,4 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
