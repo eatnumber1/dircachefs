@@ -66,7 +66,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "fault_freeze.sh: kernel $(uname -r)"
-require_commands umount sync find stat diff sort md5sum head cat
+require_commands umount sync find stat diff sort md5sum head cat dd tr grep touch mv cut rm mkdir ls sleep kill
 
 # start [flags]: a new run of dcfs.
 start() {
@@ -85,7 +85,7 @@ quiet() {
 }
 
 # probe NAME CMD...: CMD in the background; sets PROBE to answered (it ended
-# within 0.6 s) or blocked (it did not: its pid is PROBE_PID and goes to
+# within PROBE_WAIT tenths of a second) or blocked (it did not: its pid is PROBE_PID and goes to
 # PENDING), PROBE_RC to its status if it ended; prints the measurement.
 probe() {
 	pr_name=$1
@@ -93,7 +93,7 @@ probe() {
 	"$@" >/tmp/probe.out 2>&1 &
 	PROBE_PID=$!
 	pr_n=0
-	while [ "$pr_n" -lt 6 ]; do
+	while [ "$pr_n" -lt "$PROBE_WAIT" ]; do
 		kill -0 "$PROBE_PID" 2>/dev/null || break
 		sleep 0.1
 		pr_n=$((pr_n + 1))
@@ -110,20 +110,38 @@ probe() {
 	echo "freeze-table: $pr_name: $PROBE${PROBE_RC:+ (rc=$PROBE_RC)}; the daemon: $(grep '^State:' "/proc/$DAEMON_PID/status" | tr -s '\t ' ' ') $(fd_where "$DAEMON_PID")"
 }
 
+# PROBE_WAIT: tenths of a second a probe is given. A request that is going to be
+# answered is answered in milliseconds, but a loaded host or a sanitizer build
+# may take longer, and one that is held never returns before the thaw: so what
+# is expected to be answered gets 5 s, and what is expected to be held (that
+# only has to still be running when the thaw happens) 1 s.
+PROBE_WAIT=50
+
 # expect_answered NAME CMD...: a request the daemon can serve while frozen.
 expect_answered() {
 	ea_name=$1
+	PROBE_WAIT=50
 	probe "$@"
 	if [ "$PROBE" = answered ]; then
 		pass "$ea_name"
 	else
-		fail "$ea_name" "still blocked after 0.6 s on a frozen backing filesystem"
+		fail "$ea_name" "still blocked after 5 s on a frozen backing filesystem"
 	fi
 }
 
-# thaw_and_wait PID...: thaws the backing filesystem, and every PID must end
-# within 10 s (they were blocked: that they end is the check).
+# thaw_and_wait LABEL PID...: every PID was held by the freeze, so each must
+# still be running when the thaw happens (one that had already ended was never
+# held: a failure of LABEL), and must end within 10 s after it. Sets TW_ALIVE
+# to those that did not.
 thaw_and_wait() {
+	tw_label=$1
+	shift
+	TW_ALIVE=""
+	for tw_pid in "$@"; do
+		if ! kill -0 "$tw_pid" 2>/dev/null; then
+			fail "$tw_label-held-at-the-thaw" "pid $tw_pid had already ended before the thaw: it was not held by the freeze"
+		fi
+	done
 	fd_thaw back
 	for tw_pid in "$@"; do
 		tw_n=0
@@ -135,7 +153,6 @@ thaw_and_wait() {
 			TW_ALIVE="$TW_ALIVE $tw_pid"
 		else
 			wait "$tw_pid" 2>/dev/null
-			TW_RC="$TW_RC $?"
 		fi
 	done
 	PENDING=""
@@ -178,6 +195,17 @@ ls "$MNT/d1" "$MNT/d2" >/dev/null
 stat "$MNT/d1/a" "$MNT/d1/b" "$MNT/d2/c" "$MNT/d1/big" >/dev/null
 big_sum=$(md5sum <"$SRC/d1/big")
 
+# The query tool this test looks into the database with must not be able to
+# change it (and, being a WAL reader, must see the daemon's commits).
+before_dirty=$(sql 'SELECT count(*) FROM dirty')
+if "$TESTUTIL" sql "$DB" "DELETE FROM dirty" >/dev/null 2>&1; then
+	fail sql-refuses-a-write "testutil sql ran a DELETE"
+elif [ "$(sql 'SELECT count(*) FROM dirty')" = "$before_dirty" ]; then
+	pass sql-refuses-a-write
+else
+	fail sql-refuses-a-write "the DELETE changed the dirty set"
+fi
+
 # --- no mutation held: what the daemon answers while frozen -----------------
 
 quiet
@@ -196,6 +224,7 @@ expect_answered open-for-write sh -c "exec 3>>$MNT/d1/a; sleep 0.2"
 # A write through passthrough goes from the client to the backing file in the
 # kernel: the client blocks on the frozen filesystem, the daemon is not
 # involved, and what it serves meanwhile is not held.
+PROBE_WAIT=10
 probe write-through-passthrough sh -c "echo x >>$MNT/d1/a"
 write_pid=$PROBE_PID
 if [ "$PROBE" = blocked ]; then
@@ -203,11 +232,10 @@ if [ "$PROBE" = blocked ]; then
 else
 	fail write-through-passthrough-blocks-the-client "the write to a frozen filesystem returned"
 fi
-expect_answered stat-while-a-write-is-held stat "$MNT/d1/b"
+# Names the kernel has not looked up since quiet(), so that the daemon is asked.
+expect_answered stat-while-a-write-is-held stat "$MNT/d2/c"
 expect_answered readdir-while-a-write-is-held ls "$MNT/d2"
-TW_ALIVE=""
-TW_RC=""
-if [ "$PROBE" != blocked ] || [ -n "$write_pid" ]; then thaw_and_wait "$write_pid"; fi
+thaw_and_wait write-through-passthrough "$write_pid"
 if [ -z "$TW_ALIVE" ]; then
 	pass write-completes-after-thaw
 else
@@ -234,8 +262,10 @@ check_held() {
 	ch_cmd=$2
 	ch_query=$3
 	ch_want=$4
+	ch_exact=${5:-}
 	quiet
 	fd_freeze back || fail "$ch_name-freeze" "FIFREEZE failed"
+	PROBE_WAIT=10
 	probe "$ch_name" sh -c "$ch_cmd"
 	ch_pid=$PROBE_PID
 	# Held in a syscall on the backing filesystem: a descriptor under $SRC, or
@@ -250,16 +280,27 @@ check_held() {
 		fail "$ch_name-blocks" "the mutation did not block on a frozen filesystem ($PROBE; $(fd_where "$DAEMON_PID"))"
 	fi
 	ch_rows=$(sql "$ch_query")
-	case "$ch_rows" in
-	*"$ch_want"*) pass "$ch_name-record-unknown-while-held" ;;
-	*) fail "$ch_name-record-unknown-while-held" "the database says '$ch_rows', want '$ch_want'" ;;
-	esac
+	if [ -n "$ch_exact" ]; then
+		ch_ok=0
+		[ "$ch_rows" = "$ch_want" ] && ch_ok=1
+	else
+		ch_ok=0
+		case "$ch_rows" in
+		*"$ch_want"*) ch_ok=1 ;;
+		esac
+	fi
+	if [ "$ch_ok" -eq 1 ]; then
+		pass "$ch_name-record-unknown-while-held"
+	else
+		fail "$ch_name-record-unknown-while-held" "the database says '$ch_rows', want '$ch_want'"
+	fi
 	ch_dirty=$(sql 'SELECT count(*) FROM dirty')
 	if [ "${ch_dirty%;}" -ge 1 ]; then
 		pass "$ch_name-dirty-while-held"
 	else
 		fail "$ch_name-dirty-while-held" "the dirty set is empty while a mutation is held"
 	fi
+	PROBE_WAIT=10
 	probe "$ch_name-cached-read-behind-it" stat "$MNT/d2/d"
 	ch_read=$PROBE
 	ch_read_pid=$PROBE_PID
@@ -268,9 +309,7 @@ check_held() {
 	else
 		fail "$ch_name-nothing-served-while-held" "a request the daemon had to serve was answered while it was held in a syscall"
 	fi
-	TW_ALIVE=""
-	TW_RC=""
-	thaw_and_wait "$ch_pid" "$ch_read_pid"
+	thaw_and_wait "$ch_name" "$ch_pid" "$ch_read_pid"
 	if [ -z "$TW_ALIVE" ]; then
 		pass "$ch_name-completes-after-thaw"
 	else
@@ -284,9 +323,9 @@ check_held mkdir "mkdir $MNT/d2/m" "SELECT CAST(name AS TEXT), state FROM dentri
 check_held unlink "rm $MNT/d2/c" "SELECT CAST(name AS TEXT), state FROM dentries WHERE state='unknown'" "c	unknown"
 check_held rename "mv $MNT/d1/b $MNT/d1/b2" "SELECT CAST(name AS TEXT), state FROM dentries WHERE state='unknown'" "b	unknown"
 b_ino=$(stat -c %i "$SRC/d1/big")
-check_held chmod "chmod 600 $MNT/d1/big" "SELECT attrs_valid FROM inodes WHERE backing_ino=$b_ino" "0"
-check_held setxattr "$TESTUTIL setxattr $MNT/d1/big user.k v" "SELECT attrs_valid FROM inodes WHERE backing_ino=$b_ino" "0"
-check_held truncate "$TESTUTIL truncate $MNT/d1/big 10" "SELECT attrs_valid FROM inodes WHERE backing_ino=$b_ino" "0"
+check_held chmod "chmod 600 $MNT/d1/big" "SELECT attrs_valid FROM inodes WHERE backing_ino=$b_ino" "0;" exact
+check_held setxattr "$TESTUTIL setxattr $MNT/d1/big user.k v" "SELECT attrs_valid FROM inodes WHERE backing_ino=$b_ino" "0;" exact
+check_held truncate "$TESTUTIL truncate $MNT/d1/big 10" "SELECT attrs_valid FROM inodes WHERE backing_ino=$b_ino" "0;" exact
 # After the thaw the held records are known again.
 if [ -z "$(sql "SELECT 1 FROM dentries WHERE state='unknown' LIMIT 1")" ]; then
 	pass no-unknown-name-after-thaw
@@ -318,7 +357,7 @@ if [ "${dirty_before%;}" -ge 1 ] && [ "${dirty_after%;}" -lt "${dirty_before%;}"
 else
 	fail sync-point-ran-while-frozen "the dirty set did not shrink: ${dirty_before%;} -> ${dirty_after%;}"
 fi
-thaw_and_wait
+fd_thaw back
 served_equals_backing sync-point-served
 
 # --- SIGTERM during a freeze ---------------------------------------------------
@@ -345,7 +384,7 @@ fi
 wait "$DAEMON_PID" 2>/dev/null
 DAEMON_PID=""
 MOUNTED=0
-thaw_and_wait
+fd_thaw back
 if start; then pass term-restart; else
 	fail term-restart "daemon did not mount within 10s"
 	exit "$FAILED"
@@ -355,7 +394,11 @@ if grep -q "did not shut down cleanly" "$LOG"; then
 else
 	pass term-frozen-clean-shutdown
 fi
-[ -e "$MNT/d2/t1" ] && pass term-frozen-mutation-kept || fail term-frozen-mutation-kept "d2/t1 is gone"
+if [ -e "$MNT/d2/t1" ]; then
+	pass term-frozen-mutation-kept
+else
+	fail term-frozen-mutation-kept "d2/t1 is gone"
+fi
 served_equals_backing term-frozen-served
 
 # With a mutation held: SIGTERM waits behind it (the daemon is inside the
@@ -363,8 +406,10 @@ served_equals_backing term-frozen-served
 # having recorded what the backing filesystem holds.
 quiet
 fd_freeze back || fail term-held-freeze "FIFREEZE failed"
+PROBE_WAIT=10
 probe term-held-create touch "$MNT/d2/held"
 held_pid=$PROBE_PID
+held_log=$LOG
 kill -TERM "$DAEMON_PID"
 sleep 2
 if kill -0 "$DAEMON_PID" 2>/dev/null; then
@@ -372,8 +417,7 @@ if kill -0 "$DAEMON_PID" 2>/dev/null; then
 else
 	fail term-waits-behind-the-held-mutation "the daemon exited with a mutation held in its syscall"
 fi
-TW_ALIVE=""
-thaw_and_wait "$held_pid"
+thaw_and_wait term-held-create "$held_pid"
 term_n=0
 while kill -0 "$DAEMON_PID" 2>/dev/null && [ "$term_n" -lt 100 ]; do
 	sleep 0.1
@@ -387,6 +431,16 @@ fi
 wait "$DAEMON_PID" 2>/dev/null
 DAEMON_PID=""
 MOUNTED=0
+# The shutdown is clean, or says why it is not: a writable open of the created
+# file still outstanding when the loop ended (its RELEASE and the signal race,
+# so neither outcome alone is pinned).
+if ! grep -q "clean shutdown incomplete" "$held_log"; then
+	pass term-held-shutdown-clean-or-says-why
+elif grep "clean shutdown incomplete" "$held_log" | grep -q "dirty cache entries remain"; then
+	pass term-held-shutdown-clean-or-says-why
+else
+	fail term-held-shutdown-clean-or-says-why "an incomplete shutdown without the dirty-entries reason: $(grep 'clean shutdown incomplete' "$held_log")"
+fi
 if [ -e "$SRC/d2/held" ]; then
 	pass term-held-mutation-reached-backing
 else

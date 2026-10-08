@@ -258,9 +258,10 @@ check_phase1() {
 # cache. After the cut the backing filesystem holds the old names, and the
 # restart serves them, recovering the dirty rows.
 frozen_hold() {
-	# $1: the scenario; the rest: the command to hold
+	# $1: the scenario; $2: the name it holds (u1, r1); the rest: the command
 	fh_name=$1
-	shift
+	fh_held=$2
+	shift 2
 	ls "$MNT/d6" >/dev/null
 	fd_freeze back || fail "$fh_name-freeze" "FIFREEZE of the backing filesystem failed"
 	"$@" &
@@ -273,11 +274,11 @@ frozen_hold() {
 	fi
 	fh_unknown=$("$TESTUTIL" sql "$DB" "SELECT CAST(name AS TEXT) FROM dentries WHERE state='unknown'" | tr '\n' ' ')
 	case "$fh_unknown" in
-	*u1* | *r1*) pass "$fh_name-record-unknown" ;;
-	*) fail "$fh_name-record-unknown" "no unknown name in the database while the mutation is held: '$fh_unknown'" ;;
+	*"$fh_held"*) pass "$fh_name-record-unknown" ;;
+	*) fail "$fh_name-record-unknown" "$fh_held is not unknown in the database while the mutation is held: '$fh_unknown'" ;;
 	esac
 }
-setup_frozen_unlink() { frozen_hold frozen_unlink rm "$MNT/d6/u1"; }
+setup_frozen_unlink() { frozen_hold frozen_unlink u1 rm "$MNT/d6/u1"; }
 cut_frozen_unlink() { power_cut back; }
 check_frozen_unlink() {
 	if [ -e "$SRC/d6/u1" ]; then
@@ -297,7 +298,7 @@ check_frozen_unlink() {
 		fail frozen_unlink-name-served "d6/u1 exists on the backing filesystem but is not served"
 	fi
 }
-setup_frozen_rename() { frozen_hold frozen_rename mv "$MNT/d6/r1" "$MNT/d6/r2"; }
+setup_frozen_rename() { frozen_hold frozen_rename r1 mv "$MNT/d6/r1" "$MNT/d6/r2"; }
 cut_frozen_rename() { power_cut back; }
 check_frozen_rename() {
 	if [ -e "$SRC/d6/r1" ] && [ ! -e "$SRC/d6/r2" ]; then

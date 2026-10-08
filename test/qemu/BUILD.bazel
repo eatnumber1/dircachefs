@@ -264,8 +264,8 @@ qemu_test_matrix(
     ],
     guest_script = "guest/fault_freeze.sh",
     modules = ["dm_flakey"],
-    size = "small",
-    other_size = "medium",
+    size = "medium",  # about 40 s: more than the fast tier should carry
+    other_size = "large",
     timeout = "moderate",
 )
 

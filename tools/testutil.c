@@ -97,6 +97,13 @@
  *       be running, even blocked in a syscall) and prints the rows of one
  *       SELECT, columns separated by a tab, NULL as "NULL" (step 11.6: the
  *       state of a dentry and the dirty set while a mutation is held).
+ *       Refuses a statement that is not read-only. Not opened `immutable` or
+ *       with `nolock`: a reader must take part in the WAL's locking to see
+ *       what phase 1 committed, which the daemon has not checkpointed. A
+ *       reader that overlaps the daemon's sync point or its shutdown can make
+ *       the TRUNCATE checkpoint of FinishRun see SQLITE_BUSY, so ask only
+ *       while the daemon is held or idle; the busy timeout (2 s) covers a
+ *       writer's brief lock.
  *   testutil sqlite-lock <db-path> <hold-seconds>
  *       Opens <db-path> (dcfs's own cache database, e.g. /cache/dcfs.db)
  *       directly via libsqlite3, runs "BEGIN IMMEDIATE" to take the single
@@ -619,9 +626,16 @@ static int cmd_sql(const char *db_path, const char *query)
 		sqlite3_close(db);
 		return 1;
 	}
+	sqlite3_busy_timeout(db, 2000);
 	rc = sqlite3_prepare_v2(db, query, -1, &stmt, NULL);
 	if (rc != SQLITE_OK) {
 		fprintf(stderr, "testutil sql: %s\n", sqlite3_errmsg(db));
+		sqlite3_close(db);
+		return 1;
+	}
+	if (!sqlite3_stmt_readonly(stmt)) {
+		fprintf(stderr, "testutil sql: refusing a statement that writes\n");
+		sqlite3_finalize(stmt);
 		sqlite3_close(db);
 		return 1;
 	}
