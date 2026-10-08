@@ -682,7 +682,10 @@ recovery protocol, concurrency, and the test strategy.
   serving the size it read earlier (the file's inode stays in the dirty set)
   until the next start of the daemon recovers it. The writer is told by
   its `fsync` (EIO); a writer that never calls it is not told by anything,
-  as on any filesystem.
+  as on any filesystem. On btrfs the kernel itself warns when it cannot
+  read a cold inode (`DISABLED_BTRFS_FAILED_INODE_READ_WARNS`,
+  `//test/qemu:fault_recover_btrfs_unpinned_test`; a kernel bug, the test
+  tolerates exactly that warning).
 - **Interrupting a request is prompt only between backing syscalls.** A
   signal to a process waiting on dcfs (Ctrl+C, `timeout`, even `kill -9`)
   ends the wait with `EINTR` at dcfs's next checkpoint, just before its
