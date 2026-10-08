@@ -122,3 +122,20 @@ return at once are the known equivalent class):
 After 11.4 and 25.3 land (both edit dir_cache_fs.cc), so line numbers
 are re-derived with `mutate.py generate`.
 
+## 8.2e Survivors from the first expanded sweep (26.5d, 2026-10-08)
+
+A 12% sample (40 of 340 mutants, seed 1, 5 per operator) over
+`dir_cache_fs.cc`, `backing.cc` and `metadata_cache.cc`: 24 killed, 14
+survived, 2 invalid, 18 mutants/hour at host load 16. Each survivor gets
+a test or an `equivalent.txt` entry with a reason; the protocol ones
+first (an invariant a test should pin):
+- `backing.cc` `ProbeChild` swap kAbsent/kPresent; `RecordNewChild` swap
+  kAbsent/kPresent; `FsyncDirFd` error->ok; `StartRun` `||` to `&&`;
+  `ProbeRecoveredRows` delete `gone = true`; `RecordNewLink` value->error;
+  `InitRoot` delete BackingCall and negate-if; `UnlinkAt` delete
+  BackingCall; `ReconcileAttrs` nudge 0 to 1; `WriteFile` nudge 0 to 1.
+- `dir_cache_fs.cc` `Fallocate` negate `removed`; `Tmpfile` nudge 0 to 1.
+- `metadata_cache.cc` `WithStatx` swap `stx_rdev_major`/`stx_rdev_minor`.
+Line numbers are in the 26.5d README's "First sweep" table; re-derive
+with `mutate.py generate --all` after the dcfs/ branches in flight land.
+

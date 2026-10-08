@@ -1777,3 +1777,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Merge hazard carried to lane-1 (12.7b rewrites the same recorder closure and accepts a create's
   EEXIST unconditionally: 11.4's syscall_ok cut must stay ahead). Follow-ups 11.5b/11.4b (findings
   2-6) and then 11.3b to lane-2. Presubmit test/qemu+dcfs 169 + 2, fast 193 + 2.
+- 26.5d reported (lane-3): eight operator classes with 29 tests on a compiled fixture, arid rules,
+  one-per-line + per-function sampling with a seeded stable-id hash, `changed --max-mutants 30`,
+  equivalent.txt (11 End() deletions after a refused checkpoint), per-operator report + survivors by
+  function, weekly job seeded by run number with a job summary, a baseline run first; backing.cc
+  added to scope. Sample sweep: 14 survivors (8.2e), several protocol-level (ProbeChild and
+  RecordNewChild present/absent swaps, FsyncDirFd error->ok, StartRun || -> &&). Changed mode over a
+  real range: ~16 min per survivor at this load, so a `--time-budget` (120 min) is being added.
+  Under Opus review.
