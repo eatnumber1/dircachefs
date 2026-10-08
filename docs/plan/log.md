@@ -1563,3 +1563,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   of a filesystem UUID), 12.6b/12.7b. Needs russ: support sources without a filesystem UUID
   (FUSE)? (identity question, Phase 14). TLC large/nolock: timeouts unchanged (26/18 min only at
   host load 15; state counts equal main's).
+- 26.4b + 26.6 merged (b866c15) after a second rebase (first rebase had been onto 9563327; the
+  conflict was 26.5c's trace a/b/c split meeting the ASan trace line; group c's filter now excludes
+  FaultSitesTest/SlopeTest, which have their own targets). Fast 176 + 2 skips, traces a/b/c
+  167/215/195 s, cancel_test, subjects ok. Lane-3 freed: 11.2b fsstress/fsx dispatched (new
+  implementer).
