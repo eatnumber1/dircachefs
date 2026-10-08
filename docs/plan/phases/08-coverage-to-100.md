@@ -43,10 +43,17 @@ everything after it.
   only moves up (bumped in the commit that raised it); bench/ and tools/
   reported, not gated.
 - The non-passthrough data path is NOT dead: the kernel grants
-  passthrough per mount but refuses it per file past the backing stack
-  depth (a source on a FUSE mount), so READ/WRITE fall back to dcfs; it
-  gets an e2e variant with the source on a FUSE mount (dcfs over dcfs
-  in the guest) rather than deletion.
+  passthrough per mount but can refuse it per file (`fuse_backing_open`
+  returns ELOOP past the backing stack depth, and kernels without
+  CONFIG_FUSE_PASSTHROUGH never grant it), so READ/WRITE fall back to
+  dcfs. Corrected 2026-10-08 (8.4): the planned dcfs-over-dcfs guest
+  variant is impossible today, because dcfs refuses a source on a FUSE
+  mount at startup (FUSE has no filesystem UUID, `FS_IOC_GETFSUUID` is
+  UNIMPLEMENTED, and README requires a stable source identity). The
+  fallback is covered by a harness test instead (the harness's
+  passthrough_open fails with ENOTTY, so a forged READ reaches it).
+  Needs russ: whether sources without a filesystem UUID (FUSE, others)
+  should be supported, which needs another source identity (Phase 14).
 - `default_permissions` is REQUIRED (russ, 2026-10-08): `Init()` verifies
   the mount options dcfs built contain it and refuses to start otherwise
   (test); a `--fuse_opt` value naming `default_permissions` is rejected as

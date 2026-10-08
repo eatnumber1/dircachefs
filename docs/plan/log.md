@@ -1550,3 +1550,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   load). 8.2b merged (55d0128). 8.2c (seven survivors) dispatched to lane-4. Job list now:
   subjects, fast, presubmit, coverage, reproducible, mutation-changed, full x3, asan x3, ubsan x3,
   osv.
+- 2026-10-08, reports and reviews: lane-5 11.1b (EIO) + 11.2 done; lane-1 12.6b done; lane-2 8.4
+  done; lane-3 26.4b green but based on 9563327 (rebasing again). Three Opus reviews, all "fix
+  first": 11.2 (boot 1's verdict discarded in kill mode, no kill-mode self-check, weakened
+  fault_backing listing check, ACE compares too few fields and claims more than it tests, 596 s
+  ACE test unsharded); 8.4 (`mount_options` defaulted to default_permissions so the check could
+  pass by default and the harness never built options; LOG(FATAL) branch; per-request ERROR log);
+  12.6b (HIGH: recovery cleared probed rows from the dirty set without syncfs, pre-existing, model
+  blind to it because a daemon crash made backing writes durable; fault test could pass
+  vacuously). Fix lists sent to the lanes; plan corrected: Phase 11 status as built + 11.2b
+  (fsstress/fsx), Phase 8 decision (dcfs-over-dcfs impossible: FUSE sources are refused for lack
+  of a filesystem UUID), 12.6b/12.7b. Needs russ: support sources without a filesystem UUID
+  (FUSE)? (identity question, Phase 14). TLC large/nolock: timeouts unchanged (26/18 min only at
+  host load 15; state counts equal main's).

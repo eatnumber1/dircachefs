@@ -148,10 +148,23 @@ In this order, each with a known-bug variant and trace validation:
 - 12.6 Recovery idempotence (FSCQ): an invariant that from every state
   where recovery has partly run, the recovery precondition still holds;
   check `Crash` fires during `RecoverDirty`/`StartRun` (coverage). ~1 day.
+  12.6b (lane-1, 2026-10-08): the finding "recovery not idempotent" is
+  fixed by keeping dirty rows across StartRun until each is probed; the
+  review of that fix found a second, pre-existing hole: recovery cleared
+  probed rows from the dirty set with no `syncfs` since the crashed
+  run's backing syscalls (a power loss shortly after a daemon-crash
+  restart leaves dcfs ahead for good), unseen by the model because
+  `Crash` made every backing write durable even for a daemon-only crash.
+  Fix in the same step: recovery clears nothing (rows stay dirty until
+  the first sync point), a daemon crash keeps `bOpts`, plus a
+  `known_bugs/` variant.
 - 12.7 Effect-point property (SibylFS): each request is call, effect,
   reply; every reply equals what the backing would answer at some instant
   between call and reply (`Obs.tla`); covers mutation results, not only
-  served answers. 3-5 days.
+  served answers. 3-5 days. 12.7 as merged with 12.6 names the syscall
+  and commit actions in `EffectAtSyscall`/`CacheLearnsAtCommit`; 12.7b
+  (pending): the reply ghost, mutation results and errnos checked against
+  the backing states between call and reply.
 - 12.5 Identity (`ident.tla`), from the kernel's exporting.rst, RFC 8881
   §4/5.8.1.5 and RFC 1813: handle classes, recycling, durable vs volatile
   ids, cache wipe and restart; safety: a handle never resolves to a

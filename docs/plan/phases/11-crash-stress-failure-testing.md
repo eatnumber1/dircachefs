@@ -1,5 +1,29 @@
 # Phase 11 — Crash, stress and failure testing
 
+**Status as built (2026-10-08).** The steps below are the original plan;
+what landed differs:
+- 11.1 (merged ba7687d) is the dm-flakey/dm-error harness
+  (`test/qemu/guest/fault_lib.sh`: healthy, error-writes, drop-writes,
+  error-reads, error-io, dead) with `fault_backing`, `fault_cache` and
+  `fault_power` tests, not dm-log-writes: drop-writes plus the real
+  power cuts of 11.2 cover the same states without a replay tool. It also
+  covers most of 11.3 (error-reads/error-writes under the backing).
+- 11.1b (in review): a cache-disk I/O error reaches the caller as EIO,
+  not EAGAIN (russ, 2026-10-08).
+- 11.2 is restated as: the fault tests over ext4, xfs and btrfs
+  backings; real power cuts (`run-qemu.sh --power-cut` kills QEMU at the
+  guest's cut marker and boots a second time over the same images; five
+  cut points, three filesystems); ACE-style one- and two-operation
+  sequences with a cut, with and without an fsync through dcfs, remount
+  and restart (served tree equals the backing's; after an fsync the
+  backing is the fsynced state). First review 2026-10-08: fix first
+  (boot 1's verdict was discarded, no self-check for the kill mode, a
+  weakened listing check, too few fields compared). Neither drop-writes
+  nor a kill loses writes the disk acknowledged without a flush, so
+  FLUSH/FUA ordering stays untested (that is what dm-log-writes would add).
+- 11.2b fsstress and fsx: the original 11.2 text, its own step (needs
+  xfstests' sources as an external test-only dependency).
+
 **11.1 Real power-loss testing with dm-log-writes.** The kernel's
 `dm-log-writes` target (kernel config `DM_LOG_WRITES`) records every write,
 flush and FUA to a log device. Put the backing filesystem and the cache
