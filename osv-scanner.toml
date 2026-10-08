@@ -12,4 +12,116 @@
 # //tools/sbom:sbom_test) fails when an entry has no reason, no date, or a
 # date in the past, so an ignore always comes back for review.
 #
-# Currently no findings are ignored.
+#
+# The shipped glibc (Debian 13, trixie, 2.41-12+deb13u4; step 7.1c): OSV holds
+# 21 records against it (api.osv.dev, ecosystem Debian:13, package glibc,
+# queried 2026-10-08), none of them fixed in trixie. Each is ignored until
+# 2027-01-06 (90 days), when it comes back for review: bump the sysroot to a
+# trixie glibc that fixes it if one exists, and drop the entry. The reasons
+# say why dcfs's static binaries are not exposed; "fixed in forky" names the
+# Debian release (14) that has a fix, which trixie does not yet.
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2010-4756"
+ignoreUntil = 2027-01-06
+reason = "glob with crafted expressions burns CPU and memory for a caller that globs attacker-supplied patterns; dcfs never calls glob(3) and takes no pattern from a client. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2018-20796"
+ignoreUntil = 2027-01-06
+reason = "regexec recursion on crafted patterns (disputed by the glibc maintainers); dcfs compiles no regular expression in its own code and takes none from a client. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2019-1010022"
+ignoreUntil = 2027-01-06
+reason = "stack-guard bypass that needs a separate stack overflow first; glibc upstream treats it as a non-security bug. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2019-1010023"
+ignoreUntil = 2027-01-06
+reason = "concerns running ldd on a malicious ELF file; dcfs's binaries are static and never run ldd or load a library. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2019-1010024"
+ignoreUntil = 2027-01-06
+reason = "ASLR bypass through the thread-stack cache; upstream treats it as a non-security bug. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2019-1010025"
+ignoreUntil = 2027-01-06
+reason = "ASLR bypass (guessing a pthread_create thread's heap addresses); upstream does not consider it a vulnerability. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2019-9192"
+ignoreUntil = 2027-01-06
+reason = "regexec recursion on crafted patterns; disputed by the glibc maintainers, and dcfs uses no regular expressions on untrusted input. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-18374"
+ignoreUntil = 2027-01-06
+reason = "fopen with an attacker-controlled ',ccs=' mode string; dcfs's fopen modes are string literals. Fixed in Debian 14 (forky) with glibc 2.43-5, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-19499"
+ignoreUntil = 2027-01-06
+reason = "strfmon and strfmon_l with right-justified width padding; dcfs does not call either. Fixed in Debian 14 (forky) with glibc 2.43-5, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-19542"
+ignoreUntil = 2027-01-06
+reason = "tdelete on a very deep tree; dcfs does not use the tsearch family. Fixed in Debian 14 (forky) with glibc 2.43-4, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-5435"
+ignoreUntil = 2027-01-06
+reason = "the deprecated resolver printing functions ns_printrrf, ns_printrr and fp_nquery; dcfs does no DNS (its NSS and resolver functions are banned, tools/banned_symbols.txt). Fixed in Debian 14 (forky) with glibc 2.43-3, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-6238"
+ignoreUntil = 2027-01-06
+reason = "the deprecated resolver printing functions ns_printrrf, ns_printrr and fp_nquery on DNS responses; dcfs does no DNS (tools/banned_symbols.txt). Fixed in Debian 14 (forky) with glibc 2.43-3, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-6368"
+ignoreUntil = 2027-01-06
+reason = "wordexp with WRDE_APPEND; dcfs does not call wordexp. Fixed in Debian 14 (forky) with glibc 2.43-4, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-6791"
+ignoreUntil = 2027-01-06
+reason = "tilde expansion with a username (glob with GLOB_TILDE, wordexp); dcfs calls neither. Fixed in Debian 14 (forky) with glibc 2.43-3, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-77117"
+ignoreUntil = 2027-01-06
+reason = "iconv conversion of crafted SHIFT_JISX0213 input; dcfs does no character set conversion (iconv_open is banned, tools/banned_symbols.txt). Fixed in Debian 14 (forky) with glibc 2.43-5, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-80489"
+ignoreUntil = 2027-01-06
+reason = "iconv conversion of crafted EUC_JISX0213 input; dcfs does no character set conversion (iconv_open is banned, tools/banned_symbols.txt). Fixed in Debian 14 (forky) with glibc 2.43-5, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-8674"
+ignoreUntil = 2027-01-06
+reason = "the DNS stub resolver reading an /etc/resolv.conf search list; dcfs does no DNS (tools/banned_symbols.txt). Fixed in Debian 14 (forky) with glibc 2.43-6, not in trixie."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-86805"
+ignoreUntil = 2027-01-06
+reason = "the dynamic loader expanding $ORIGIN in DT_RPATH of a setuid/setgid program; dcfs's binaries are static, have no dynamic loader and are not setuid. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-89092"
+ignoreUntil = 2027-01-06
+reason = "the nscd daemon; dcfs does not run or contact nscd (NSS is banned, tools/banned_symbols.txt). No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-95818"
+ignoreUntil = 2027-01-06
+reason = "the dynamic loader overflowing on a DT_RPATH or DT_RUNPATH of a setuid/setgid program; dcfs's binaries are static, have no dynamic loader and are not setuid. No Debian release fixes it."
+
+[[IgnoredVulns]]
+id = "DEBIAN-CVE-2026-97399"
+ignoreUntil = 2027-01-06
+reason = "strncasecmp optimized for the Power8 architecture; dcfs builds for x86-64 only. No Debian release fixes it."

@@ -17,7 +17,7 @@
     "llvm-project": {"version": "22.1.8", "repo": "https://github.com/llvm/llvm-project", "tag": "llvmorg-22.1.8", "commit": "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1", "osv": "no-records"}
   },
   "shipped_debs": {
-    "libc6-dev": "glibc 2.36 of the sysroot (third_party/llvm): its libc.a and crt files are linked statically into main_static. The other packages of the sysroot and the runtime libraries run the toolchain or the sanitizer guests and are test-only"
+    "libc6-dev": "glibc 2.41 (Debian 13, trixie) of the sysroot (third_party/llvm): its libc.a and crt files are linked statically into main_static. The other packages of the sysroot and the runtime libraries run the toolchain or the sanitizer guests and are test-only"
   },
   "bazel_dep": {
     "googletest": {"purl": "pkg:github/google/googletest", "kind": "code"},

@@ -308,8 +308,8 @@ llvm_distribution(
     sha256 = "df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384",
     strip_prefix = "LLVM-22.1.8-Linux-X64",
     sysroot_debs = {
-        "https://snapshot.debian.org/archive/debian/20261006T082722Z/pool/main/g/glibc/libc6_2.36-9+deb12u14_amd64.deb": "ba4f88f73dbc3ae9055f3c20f4523bfdbaf1ad13ff95e258924f77d20b4fbedf",
-        "https://snapshot.debian.org/archive/debian/20261006T082722Z/pool/main/g/glibc/libc6-dev_2.36-9+deb12u14_amd64.deb": "0218fc2befcd784c1b0c6292c0a137ce89fad054efaa579ad083bee0f2c01aae",
+        "https://snapshot.debian.org/archive/debian/20261006T082722Z/pool/main/g/glibc/libc6_2.41-12+deb13u4_amd64.deb": "967aa62605721081c3eb2a17650611a792aa802d76a6511d1840242623d204c9",
+        "https://snapshot.debian.org/archive/debian/20261006T082722Z/pool/main/g/glibc/libc6-dev_2.41-12+deb13u4_amd64.deb": "1fda734dabcd80b77266a09ab62b0f1e3e16d8091db62899890b2200745632a2",
         # trixie's: dcfs needs UAPI headers of 6.8 or later (STATX_MNT_ID_UNIQUE);
         # bookworm's are 6.1. The UAPI headers do not depend on the libc.
         "https://snapshot.debian.org/archive/debian/20261006T082722Z/pool/main/l/linux/linux-libc-dev_6.12.107-1_all.deb": "dc68dd53c7356598d005866da0d19d7bd33af2a62971aced624cdf04492902b4",

@@ -117,3 +117,9 @@ allow <runtime> _ZN4dcfs8syscalls13clock_gettimeEi | the wrapper is linked with 
 allow dcfs/_objs/syscalls/* clock_gettime | the syscalls::clock_gettime wrapper itself, for the tests
 allow <runtime> execve | execle of the libfuse fusermount3 fallback
 allow <runtime> execvpe | posix_spawnp of the libfuse fusermount3 fallback
+# glibc 2.41's own libc.a members (step 7.1c): linked in by the C runtime, not
+# referenced by any scanned object; 2.36's linked none of them.
+allow <runtime> popen | a member of glibc 2.41's libc.a; no object of ours references it
+allow <runtime> posix_spawn_file_actions_adddup2 | popen's own spawn helper in glibc 2.41's libc.a
+allow <runtime> __fprintf_chk | a fortified call inside glibc 2.41's libc.a
+allow <runtime> __sprintf_chk | a fortified call inside glibc 2.41's libc.a

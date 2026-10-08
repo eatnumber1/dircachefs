@@ -87,12 +87,16 @@ The sha256s are the `SHA256` fields of the `Packages.xz` of the suite and
 snapshot named below (obtained 2026-10-07; `Packages.xz` is served over TLS by
 snapshot.debian.org, and Bazel's downloader checks each `.deb` against its
 hash). The snapshots are those of `third_party/debian`:
-`debian/20261006T082722Z` for bookworm and trixie,
-`debian-security/20261006T081244Z` for the security update.
+`debian/20261006T082722Z` for bookworm and trixie (one timestamp for every
+package of the sysroot), `debian-security/20261006T081244Z` for the security
+update. The sysroot's two glibc packages were moved from bookworm to trixie
+in step 7.1c (2026-10-08); their sha256s are the `SHA256` fields of that
+snapshot's trixie `Packages.xz` (fetched with curl over TLS into a scratch
+directory), and Bazel checks each `.deb` against them.
 
 | Package | Suite and snapshot | Why |
 |---|---|---|
-| `libc6`, `libc6-dev` 2.36-9+deb12u14 | bookworm | the sysroot's glibc: headers, `libc.a` and the other static libraries, `crt1.o`, `ld-linux`. `libc6-dev` is shipped (linked statically into the binaries) |
+| `libc6`, `libc6-dev` 2.41-12+deb13u4 | trixie | the sysroot's glibc: headers, `libc.a` and the other static libraries, `crt1.o`, `ld-linux`. `libc6-dev` is shipped (linked statically into the binaries). Trixie's layout is the one bookworm's had (the extraction and the skip list are unchanged); its glibc has fewer unfixed OSV records than bookworm's (README.md, "Dependency vulnerability scanning") |
 | `linux-libc-dev` 6.12.107-1 | trixie | the sysroot's Linux UAPI headers (`linux/openat2.h`, `btrfs.h`, `fs.h`, `statx.h`). dcfs needs 6.8 or later (`STATX_MNT_ID_UNIQUE`); bookworm's are 6.1. UAPI headers do not depend on the libc |
 | `libstdc++6`, `libgcc-s1` 12.2.0-14+deb12u1 | bookworm | run clang, lld and the other LLVM tools (`GLIBCXX_3.4.30`) |
 | `zlib1g`, `libxml2`, `libicu72` | bookworm | run `ld.lld` (libxml2, and what it loads) and the other tools |
@@ -155,7 +159,11 @@ Debian: pick a snapshot timestamp (a real run; the listing is
 each package look up its `Filename` and `SHA256` in
 `.../dists/<suite>/main/binary-amd64/Packages.xz` of that snapshot (the
 `debian-security` archive has its own timestamps) and put the URL and sha256
-in `MODULE.bazel`. Keep `libc6` and `libc6-dev` at one version. Keep
+in `MODULE.bazel`. Keep `libc6` and `libc6-dev` at one version, and use one snapshot timestamp
+for the sysroot's packages. Then update the shipped glibc's expectation in
+`tools/sbom/sbom_test.py`, list the OSV records of the new version
+(`api.osv.dev`, ecosystem `Debian:13`, package `glibc`) and update the
+ignores in `osv-scanner.toml`. Keep
 `libstdc++6`, `libgcc-s1` and the other runtime libraries at versions whose
 glibc requirement the build hosts meet (`objdump -T lib/*.so* | grep -o
 'GLIBC_[0-9.]*' | sort -uV | tail -1` in the unpacked repository). A new

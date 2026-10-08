@@ -134,6 +134,10 @@ filegroup(
     for url, sha256 in rctx.attr.sysroot_debs.items():
         _unpack_deb(rctx, url, sha256, index, "sysroot")
         index += 1
+
+    # Debian 13's packages are merged-usr: libc.so's linker script names
+    # /lib/x86_64-linux-gnu/libc.so.6 and /lib64/ld-linux-x86-64.so.2.
+    _python(rctx, ["usrmerge", "sysroot"], "merging the sysroot's /usr")
     rctx.file("bin/clang.cfg", _CONFIG % "")
     rctx.file("bin/clang-cpp.cfg", _CONFIG % "")
     rctx.file("bin/clang++.cfg", _CONFIG % "-stdlib=libc++\n")

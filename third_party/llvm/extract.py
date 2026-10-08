@@ -22,6 +22,9 @@ are written as relative links, so that the tree can be moved (the repository
 contents cache, vendoring, remote execution). With --strip-prefix only the
 files under that directory are unpacked, directly into OUT_DIR.
 
+`usrmerge` adds the `lib` and `lib64` links of a merged-usr tree (Debian 13)
+to the sysroot once its packages are unpacked.
+
 Both unpack with the `data` extraction filter (no absolute paths, no links out
 of OUT_DIR) and fail when nothing is written.
 """
@@ -158,6 +161,18 @@ def extract_deb(data, out, strip_prefix=""):
     return written
 
 
+def usrmerge(out):
+    """Links lib and lib64 to usr/lib and usr/lib64 where OUT has no such
+    directory: Debian 13's packages are merged-usr (libc.so's linker script
+    names /lib/x86_64-linux-gnu/libc.so.6 and /lib64/ld-linux-x86-64.so.2),
+    and the sysroot has no /lib of its own to hold the links."""
+    for name in ("lib", "lib64"):
+        path = os.path.join(out, name)
+        if os.path.isdir(os.path.join(out, "usr", name)) \
+                and not os.path.lexists(path):
+            os.symlink("usr/" + name, path)
+
+
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="mode", required=True)
@@ -169,6 +184,8 @@ def main(argv):
     deb.add_argument("archive")
     deb.add_argument("out")
     deb.add_argument("--strip-prefix", default="")
+    merge = sub.add_parser("usrmerge")
+    merge.add_argument("out")
     args = parser.parse_args(argv)
     try:
         if args.mode == "llvm":
@@ -176,6 +193,8 @@ def main(argv):
                                          args.out)
             print(f"extract.py: {kept} members written, {skipped >> 20} MiB"
                   " skipped")
+        elif args.mode == "usrmerge":
+            usrmerge(args.out)
         else:
             extract_deb(args.archive, args.out, args.strip_prefix)
     except ExtractError as e:

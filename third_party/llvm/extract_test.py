@@ -245,6 +245,34 @@ class ExtractDebTest(unittest.TestCase):
         with self.assertRaisesRegex(extract.ExtractError, "nothing"):
             extract.extract_deb(self.data, self.out, "usr/lib")
 
+    def test_usrmerge_links_lib_and_lib64_into_usr(self):
+        # Debian 13 ships merged-usr packages: libc.so's linker script names
+        # /lib/x86_64-linux-gnu/libc.so.6 and /lib64/ld-linux-x86-64.so.2,
+        # which a sysroot of the packages alone does not have (step 7.1c).
+        build_deb_data(self.data, [
+            ("./usr/lib/x86_64-linux-gnu/libc.so.6", "file", b"c"),
+            ("./usr/lib64/ld-linux-x86-64.so.2", "sym",
+             "../lib/x86_64-linux-gnu/ld-linux-x86-64.so.2"),
+            ("./usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2", "file", b"ld"),
+        ])
+        extract.extract_deb(self.data, self.out)
+        extract.usrmerge(self.out)
+        self.assertEqual("usr/lib", os.readlink(os.path.join(self.out, "lib")))
+        self.assertEqual(b"c", open(os.path.join(
+            self.out, "lib/x86_64-linux-gnu/libc.so.6"), "rb").read())
+        self.assertEqual(b"ld", open(os.path.join(
+            self.out, "lib64/ld-linux-x86-64.so.2"), "rb").read())
+
+    def test_usrmerge_keeps_a_real_lib_directory(self):
+        build_deb_data(self.data, [
+            ("./lib/x86_64-linux-gnu/libc.so.6", "file", b"c"),
+            ("./usr/lib/x86_64-linux-gnu/libc.a", "file", b"a"),
+        ])
+        extract.extract_deb(self.data, self.out)
+        extract.usrmerge(self.out)
+        self.assertFalse(os.path.islink(os.path.join(self.out, "lib")))
+        self.assertFalse(os.path.lexists(os.path.join(self.out, "lib64")))
+
 
 if __name__ == "__main__":
     with open(sys.argv.pop(1), encoding="utf-8") as f:

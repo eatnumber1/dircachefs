@@ -87,8 +87,10 @@ class RealPins(unittest.TestCase):
         debs = [c for c in comps if c["purl"].startswith("pkg:deb/debian/")]
         self.assertGreater(len(debs), 90)
         for c in debs:
-            # The toolchain's UAPI headers are trixie's (third_party/llvm).
-            distro = "trixie" if c["name"] == "linux" else "bookworm"
+            # The toolchain's UAPI headers and glibc are trixie's
+            # (third_party/llvm); the rootfs's glibc is bookworm's.
+            trixie = c["name"] == "linux" or "glibc@2.41" in c["purl"]
+            distro = "trixie" if trixie else "bookworm"
             self.assertTrue(c["purl"].endswith("?distro=" + distro), c["purl"])
             self.assertNotIn(":", c["purl"].split("@", 1)[1].split("?")[0])
         # A binary package is matched under its source package's name.
@@ -287,8 +289,8 @@ class Shipped(unittest.TestCase):
                  if c["name"] == "glibc"]
         self.assertEqual(1, len(glibc))
         self.assertRegex(glibc[0]["purl"],
-                         r"^pkg:deb/debian/glibc@2\.36-9\+deb12u\d+"
-                         r"\?distro=bookworm$")
+                         r"^pkg:deb/debian/glibc@2\.41-\d+(\.\d+)?\+deb13u\d+"
+                         r"\?distro=trixie$")
         self.assertIn(("dcfs:scope", "shipped"),
                       {(p["name"], p["value"]) for p in glibc[0]["properties"]})
         # The test-only document keeps the rest of the toolchain's packages
