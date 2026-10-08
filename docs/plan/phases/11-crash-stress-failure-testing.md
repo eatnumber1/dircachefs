@@ -28,7 +28,7 @@ what landed differs:
   partition. Neither drop-writes
   nor a kill loses writes the disk acknowledged without a flush, so
   FLUSH/FUA ordering stays untested (that is what dm-log-writes would add).
-- 11.3 as a gap check (lane-6, 2026-10-08, in review fixes): 60 cells
+- 11.3 as a gap check (merged 2026-10-08, 18c077a): 60 cells
   (12 operation classes × error-reads / self-ending flakey window /
   error-writes / error-io / dead) in `fault_recover_test`; the README table
   marks each cell asserted, truth-only or skipped.

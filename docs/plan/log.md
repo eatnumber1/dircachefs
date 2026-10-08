@@ -1688,3 +1688,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   btrfs_destroy_inode WARNING on a failed inode read (kernel bug to report). readdir_boundary_test
   hangs after `TEST mount PASS` on origin/main run alone (CI passed it on fee154d): bisect running
   in lane-3; push on hold until it is understood.
+- 11.3 merged (18c077a) after one review round: window mode up 6 s / down 20 s then healthy,
+  bounded by an uptime check; fills with no device reads and mutations that met no failure are
+  SKIPs, each read-failing mode needs one erroring fill, README table with a cell-outcome column;
+  the stale-size case asserts the inode stays dirty and is a README limitation; unpinned btrfs
+  reproducer (`fault_recover_btrfs_unpinned_test`, large, `kernel_failure = "expected"`; run-qemu.sh
+  tolerates exactly that WARNING only when the guest reports it, two verdict-test cases); the 23
+  ESTALE/ENOENT cells on xfs print SKIP pointing at 11.3b. ext4 97 s, xfs 110 s, btrfs 107 s.
+  Side effect of merging 25.3's docs first: `//man:flags_consistency_test` fails on main (README
+  lists --v/--stderrthreshold/--minloglevel/--vmodule before main.cc links absl's log flags), so the
+  25.3 code is part of the next push point. Lane-6 held for 11.3b (needs 11.5's backing.cc first).
