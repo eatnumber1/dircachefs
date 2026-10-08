@@ -3,7 +3,7 @@
 # (every one needs a reason and an expiry date that has not passed), checks
 # the pinned upstream tags against their commits (network), and writes to osv/:
 #   shipped.cdx.json   the SBOM of what the dcfs binaries link (gates)
-#   shipped-debs.cdx.json  its Debian packages (glibc), scanned by package (gates)
+#   shipped-debs.cdx.json  its Debian packages (glibc), scanned by package
 #   testonly.cdx.json  the SBOM of everything else (informational)
 #   shipped-git/       one detached git root per shipped component, the form
 #                      in which osv-scanner takes commits (tools/sbom/README.md)

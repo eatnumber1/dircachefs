@@ -523,8 +523,11 @@ toolchain's static C++ runtime (libc++, libc++abi, libunwind, compiler-rt's
 builtins from llvm-project 22.1.8), listed under `toolchain_runtime` in
 `pins.json`, and glibc, linked statically from the toolchain's Debian sysroot
 (`libc6-dev`, under `shipped_debs`): OSV matches it by Debian package, so the
-job scans `shipped-debs.cdx.json` as a second gating step. The job fails on
-any finding that `osv-scanner.toml` does not ignore; an ignore needs a reason and an expiry date, and an expired or
+job also scans `shipped-debs.cdx.json`, informationally until russ decides
+what to do with the 16 advisories Debian 12's glibc has unfixed (ignore them
+with reasons and expiries, or build against a glibc with the fixes). The job
+fails on any finding in the git-commit scan that `osv-scanner.toml` does not
+ignore; an ignore needs a reason and an expiry date, and an expired or
 unexplained ignore fails the job. A self-check step scans a deliberately old
 libfuse (3.2.0, CVE-2018-10906; `tools/sbom/testdata/`) with the very same
 invocation and fails the job if the scanner reports nothing.

@@ -9,7 +9,7 @@ static libraries of LLVM, clang, MLIR and flang, lldb and the tools of flang,
 MLIR and the clang tooling libraries: unpacking all of it took 12 to 17
 minutes of every pin change. The members matched by SKIP are not written, and
 neither is a link whose target is one of them (`bin/llvm-ml64 -> llvm-ml`
-would dangle). Everything the toolchain uses is kept: clang, lld, the llvm-*
+would dangle); a chain of links that still dangles afterwards is an error. Everything the toolchain uses is kept: clang, lld, the llvm-*
 binutils, llvm-profdata and llvm-cov, clang-tidy, clang-format and
 clang-query, the headers, libc++, libunwind and compiler-rt;
 //third_party/llvm:extract_test checks the list against what toolchains_llvm
@@ -72,6 +72,17 @@ def _link_target(name, linkname):
     return _normal(os.path.join(os.path.dirname(name), linkname))
 
 
+def _dangling_links(out):
+    """The symlinks under `out` whose target does not exist."""
+    found = []
+    for root, dirs, files in os.walk(out):
+        for entry in dirs + files:
+            path = os.path.join(root, entry)
+            if os.path.islink(path) and not os.path.exists(path):
+                found.append(os.path.relpath(path, out))
+    return sorted(found)
+
+
 def extract_llvm(archive, prefix, out):
     prefix = prefix.rstrip("/") + "/"
     kept = skipped = 0
@@ -83,9 +94,11 @@ def extract_llvm(archive, prefix, out):
             if not member.name:
                 continue
             if member.islnk():
-                target = _normal(member.linkname[len(prefix):]
-                                 if member.linkname.startswith(prefix)
-                                 else member.linkname)
+                if not member.linkname.startswith(prefix):
+                    raise ExtractError(
+                        f"{archive}: {member.name} is a hard link to"
+                        f" {member.linkname}, outside {prefix!r}")
+                target = _normal(member.linkname[len(prefix):])
                 member.linkname = target
             elif member.issym():
                 target = _link_target(member.name, member.linkname)
@@ -101,6 +114,11 @@ def extract_llvm(archive, prefix, out):
         raise ExtractError(
             f"{archive}: no member under {prefix!r} was written (wrong strip"
             " prefix?)")
+    # A link to a link to a skipped file passes the check above.
+    dangling = _dangling_links(out)
+    if dangling:
+        raise ExtractError(
+            "links to files the skip list leaves out: " + ", ".join(dangling))
     return kept, skipped
 
 

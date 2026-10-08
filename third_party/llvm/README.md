@@ -33,8 +33,13 @@ One repository (`llvm.bzl`, step 7.1b), handed to `toolchains_llvm` as its
   (`-fuse-ld=lld`), runtime (`--rtlib=compiler-rt`) and unwinder
   (`--unwindlib=libunwind`) as link-only flags, so a configure script's probe
   (liburing's) sees the same headers and links the same way as the build.
-  `clang++.cfg` adds `-stdlib=libc++`. `toolchain_hermetic_test` checks that
-  clang reads this file and no other.
+  `clang++.cfg` adds `-stdlib=libc++`. The files are inputs of compile and
+  link actions (the `clang_cfg` filegroup, given to `toolchains_llvm` as
+  `extra_compiler_files` and `extra_linker_files`), so sandboxed actions read
+  them like a raw `$(CC)` in a genrule does: a compile with `--copt=-v` prints
+  `Configuration file: external/+llvm_distribution+dcfs_llvm/bin/clang.cfg`.
+  `--unwindlib=libunwind` is in the file only; `toolchain_hermetic_test`
+  checks that clang reads this file and no other.
 - `lib/`: the shared libraries the release's binaries link besides libc:
   libstdc++, libgcc_s, zlib, libxml2 (which `ld.lld` needs) and what libxml2
   loads (ICU, liblzma). The binaries' RUNPATH is `$ORIGIN/../lib`, so they find

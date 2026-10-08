@@ -147,6 +147,29 @@ class ExtractLlvmTest(unittest.TestCase):
         for name, _ in DANGLING_LINKS:
             self.assertFalse(os.path.lexists(os.path.join(self.out, name)))
 
+    def test_a_chain_of_links_to_a_skipped_file_fails(self):
+        # bin/ml -> llvm-ml64 -> llvm-ml (skipped): llvm-ml64 is not skipped
+        # itself, so only the walk after the extraction sees the chain dangle.
+        chain = os.path.join(self.tmp.name, "chain.tar.xz")
+        build_release(chain, ["bin/clang-22", "bin/llvm-ml"],
+                      [("bin/llvm-ml64", "llvm-ml"),
+                       ("bin/ml", "llvm-ml64")])
+        with self.assertRaisesRegex(extract.ExtractError, "bin/ml"):
+            extract.extract_llvm(chain, PREFIX, self.out)
+
+    def test_a_hard_link_outside_the_prefix_fails(self):
+        hard = os.path.join(self.tmp.name, "hard.tar.xz")
+        with tarfile.open(hard, "w:xz") as tar:
+            info = tarfile.TarInfo(f"{PREFIX}/bin/clang-22")
+            info.size = 1
+            tar.addfile(info, io.BytesIO(b"x"))
+            info = tarfile.TarInfo(f"{PREFIX}/bin/clang")
+            info.type = tarfile.LNKTYPE
+            info.linkname = "OTHER/bin/clang-22"
+            tar.addfile(info)
+        with self.assertRaisesRegex(extract.ExtractError, "hard link"):
+            extract.extract_llvm(hard, PREFIX, self.out)
+
     def test_a_wrong_strip_prefix_fails(self):
         with self.assertRaisesRegex(extract.ExtractError, "no member"):
             extract.extract_llvm(self.archive, "LLVM-0-Linux-X64", self.out)

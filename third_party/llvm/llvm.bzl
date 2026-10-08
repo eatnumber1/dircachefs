@@ -61,6 +61,20 @@ _CONFIG = """\
 %s--end-no-unused-arguments
 """
 
+# The configuration files as inputs of compile and link actions
+# (llvm.extra_compiler_files and extra_linker_files in MODULE.bazel).
+_CFG_FILEGROUP = """
+filegroup(
+    name = "clang_cfg",
+    srcs = [
+        "bin/clang++.cfg",
+        "bin/clang-cpp.cfg",
+        "bin/clang.cfg",
+    ],
+    visibility = ["//visibility:public"],
+)
+"""
+
 def _python(rctx, args, what):
     result = rctx.execute(
         [rctx.path(_PYTHON), "-I", rctx.path(_EXTRACT)] + args,
@@ -97,7 +111,7 @@ def _llvm_distribution_impl(rctx):
 
     rctx.file("BUILD.bazel", rctx.read(_BUILD_TEMPLATE).format(
         LLVM_VERSION = rctx.attr.llvm_major_version,
-    ))
+    ) + _CFG_FILEGROUP)
     rctx.download(rctx.attr.url, "llvm.tar.xz", sha256 = rctx.attr.sha256)
     _python(
         rctx,
