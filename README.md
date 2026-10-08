@@ -779,6 +779,17 @@ recovery protocol, concurrency, and the test strategy.
   to start over such a filesystem until it is unmounted, checked and
   mounted again; the next start then re-reads those entries. A filesystem
   mounted read-only on purpose is fine.
+- **A full disk fails requests.** With the backing filesystem full, a
+  change that needs space fails with `ENOSPC`, as on the backing
+  filesystem itself, and nothing about it is cached (on btrfs, which
+  keeps metadata space apart, only writes of data may fail). With the
+  cache database's disk full, a request that has to record something in
+  the cache fails with `ENOSPC`, including reads that would fill it; what
+  is cached already is still served. A create that reached the backing
+  filesystem but could not be recorded fails with `EEXIST`: the file
+  exists, and the kernel then asks dcfs about the name again instead of
+  remembering it as absent. Free space and everything works again; the
+  entries changed meanwhile are re-read after the next restart.
 - **Power loss re-reads recent changes.** After a power loss or kernel
   crash, everything cached about entries changed in the last
   `--sync_interval_sec` seconds (or since the last `fsync`) is forgotten

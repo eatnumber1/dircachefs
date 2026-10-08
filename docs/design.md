@@ -733,6 +733,20 @@ phase-3 error is logged at WARNING and leaves what it did not record
 rename that happened would make the caller believe nothing changed and
 leave the kernel's own dentries wrong.
 
+The one exception is a create (create, mknod, mkdir, symlink) whose new
+row cannot be recorded (or, for a create, whose open cannot be set up),
+for instance because the cache database's disk is full: its reply must
+name the object by a row. It is replied as `EEXIST`, which is true now
+(`CreatedButNotCompleted`, step 11.4). Any other error left the kernel
+with the negative entry of the `LOOKUP` it made before the create, which
+answered `ENOENT` for the new file for `--entry_timeout_sec`
+(`enospc_cache_test` showed it); on `EEXIST` the kernel drops it
+(`fuse_invalidate_entry`, `fs/fuse/dir.c`, Linux 6.6), so the next lookup
+asks dcfs, which resolves the name (unknown since phase 1). A create whose
+row was recorded but whose attributes cannot be refreshed is replied as
+done, with the row's last attributes and a zero attribute timeout
+(`EntryAfterPhase2`), as a link is.
+
 **Phase 3 never removes dirty rows.** Only a sync point does.
 
 **Kernel caches after dcfs's own mutations** are kept right by the kernel
@@ -1970,6 +1984,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
+| `enospc_backing_test`, `enospc_cache_test` | Out of space (step 11.4): the backing filesystem full (create, write, mkdir, setxattr, rename through dcfs fail with `ENOSPC`, as on the backing filesystem, and nothing is served as done; btrfs reserves metadata apart, so only the write must fail there), and the cache database's filesystem full before a create's phase 1, during its phase 3 and a rename's, and before a sync point. Requests fail with `ENOSPC` or are replied as done; the kernel never answers "no such file" for a created file; the dirty set survives; after space is freed (and a restart) everything served matches the backing filesystem. |
 | `fault_shutdown_test` | An instant crash of the backing filesystem under a running dcfs (`FS_IOC_SHUTDOWN` in each flavour on ext4 and xfs; a dead disk on btrfs): completed unsynced mutations, a create held in phase 1 and in phase 2, an idle crash, a daemon crash before the backing crash, starts without a remount. Mutations and reads of contents fail, nothing new is served, the dirty set survives the failed clean shutdown, and after the remount everything served matches the backing filesystem. |
 | `fault_backing_test`, `fault_cache_test`, `fault_power_test` | Real disk failures through dm-flakey and dm-error (`test/qemu/README.md`, "Fault injection"): read and write errors on the backing disk, write errors on the cache disk, and power cuts (both disks drop writes at one instant) placed in a create's phases and in a sync point with fsfreeze. The error goes back to the caller, the mutation does not reach the backing filesystem when phase 1 failed, the dirty set survives a failed clearing, and after a restart everything served matches the backing filesystem. The power cuts also run as real ones (`fault_power_kill_test`: the host kills QEMU at the cut and a second boot checks), and as bounded sequences of operations with a cut after them (`fault_ace_a_test`, `fault_ace_b_test`, `fault_ace_fs_test`). |
 | `release_leak_test` | A failed attribute refresh on the last writable close (forced by holding the SQLite write lock) does not leak the backing descriptor or passthrough registration. |

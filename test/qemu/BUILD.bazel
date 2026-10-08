@@ -323,6 +323,35 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 11.4 (a): the backing filesystem out of space under dcfs (its disk in
+# a healthy dm device: guest/fault_dcfs_lib.sh). vdb is 320M for mkfs.xfs.
+qemu_test_matrix(
+    name = "enospc_backing_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/enospc_backing.sh",
+    modules = ["dm_flakey"],
+    size = "small",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
+# Step 11.4 (b): the cache database's filesystem out of space, before a
+# create's phase 1, during its phase 3 and before a sync point.
+qemu_test(
+    name = "enospc_cache_test",
+    disks = [
+        ("vdb", "ext4", "128M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/enospc_cache.sh",
+    modules = ["dm_flakey"],
+    size = "small",
+    timeout = "moderate",
+)
+
 # Step 2: the cache database (and its -wal/-shm files) is mode 0600, not
 # world-readable; a missing cache-database directory is created 0700, and
 # an existing group-/world-accessible one gets a WARNING -- see

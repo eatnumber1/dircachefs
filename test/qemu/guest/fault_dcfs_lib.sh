@@ -186,3 +186,31 @@ fd_same_as_backing() {
 	fd_snapshot "$MNT" >/tmp/served.snap 2>&1
 	command diff /tmp/served.snap /tmp/backing.snap >/tmp/snap.diff 2>&1
 }
+
+# fd_fill DIR: takes every free block of the filesystem DIR is on, with
+# files in DIR (an existing directory): fallocate, then blocks appended
+# until ENOSPC; as root, so ext4's reserved blocks go too (step 11.4).
+fd_fill() {
+	# Made first: a new file could fail for want of an inode later (xfs).
+	touch "$1/tail"
+	fl_n=0
+	fl_bs=$(stat -f -c %S "$1")
+	fl_len=$(($(stat -f -c %f "$1") * fl_bs))
+	while [ "$fl_len" -ge "$fl_bs" ] && [ "$fl_n" -lt 64 ]; do
+		touch "$1/f$fl_n" 2>/dev/null || break
+		if "$TESTUTIL" fallocate "$1/f$fl_n" 0 0 "$fl_len" >/dev/null; then
+			fl_n=$((fl_n + 1))
+		else
+			fl_len=$((fl_len / 2))
+		fi
+	done
+	# What fallocate could not take, a block at a time.
+	fl_n=0
+	while [ "$fl_n" -lt 4096 ] &&
+		dd if=/dev/zero of="$1/tail" bs="$fl_bs" count=1 seek="$fl_n" \
+			conv=notrunc 2>/dev/null; do
+		fl_n=$((fl_n + 1))
+	done
+	sync
+	echo "fd_fill: filled: $(stat -f -c '%f free blocks of %b, %d free inodes' "$1")"
+}

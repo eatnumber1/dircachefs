@@ -637,6 +637,7 @@ cc_library(
       "@absl//absl/log",
       "@absl//absl/log:check",
       "@absl//absl/status",
+      "@absl//absl/status:status_builder",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",

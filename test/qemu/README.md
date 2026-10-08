@@ -769,6 +769,18 @@ freeze.
 `fault_shutdown_test` boots the checking build in all three variants (ext4
 small, xfs and btrfs medium) with the default guest memory.
 
+Out of space (step 11.4): `fd_fill DIR` (`guest/fault_dcfs_lib.sh`) takes
+every free block of the filesystem DIR is on (fallocate, then blocks
+appended until `ENOSPC`, as root, so ext4's reserved blocks go too).
+
+| Test | What it injects | What must hold |
+|---|---|---|
+| `enospc_backing_test` (`qemu_test_matrix`: ext4 small, xfs and btrfs medium) | the backing filesystem full before dcfs starts; then through dcfs: creates until one fails, a 64 KiB write past a file's end, a mkdir, a 2000-byte xattr, a rename into the full directory | each that fails fails with `ENOSPC` and is not served as done (served tree and xattr equal the backing filesystem's); on ext4 and xfs every one fails, on btrfs (metadata reserved apart) only the write must; after the fill is removed through dcfs the same operations work, also after a restart |
+| `enospc_cache_test` (ext4, small) | the cache database's filesystem full: before a create (phase 1), while a create and then a rename are held in phase 2 (phase 3), before a periodic sync point | the create fails with `ENOSPC` and never reaches the backing filesystem; the held create is replied as done or `EEXIST` and the kernel never answers "no such file" for it (the bug this step fixed), the held rename is replied as done; reads fail with `ENOSPC` or answer right; the failed sync point keeps the dirty set; after space is freed and a restart, everything served matches the backing filesystem |
+
+Both boot the checking build in every variant (ext4 small, xfs and btrfs
+medium) with the default guest memory.
+
 ## Syscall traces
 
 `//test/qemu:syscall_traces_test` (step 26.3) pins the backing-filesystem

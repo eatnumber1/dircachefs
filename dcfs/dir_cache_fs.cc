@@ -21,6 +21,7 @@
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
+#include "absl/status/status_builder.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -117,6 +118,29 @@ std::pair<size_t, std::string> MaxHeldFds(const DirCacheFS::Options &opts) {
   }
   return {DirCacheFS::DefaultMaxHeldFds(limit->rlim_cur),
           absl::StrCat("the soft RLIMIT_NOFILE of ", limit->rlim_cur)};
+}
+
+// The reply of a create (create, mknod, mkdir, symlink) whose backing
+// syscall succeeded but which cannot be completed: its new row could not be
+// recorded, or (Create) the open could not be set up, e.g. with the cache
+// database's disk full. The object exists, so the reply is EEXIST, which is
+// true now, whatever `why` was. Invariant: no reply may leave the kernel
+// believing a name absent that the backing filesystem has. Before a create
+// the kernel looked the name up and holds the negative answer for
+// --entry_timeout_sec; on a create's error it keeps it (it would answer
+// ENOENT for the new file), except on EEXIST, where it drops it
+// (fuse_invalidate_entry, fs/fuse/dir.c, Linux 6.6). The next lookup then
+// asks dcfs, which resolves the name, unknown since phase 1, from the
+// backing filesystem (step 11.4).
+absl::Status CreatedButNotCompleted(InodeId parent, std::string_view name,
+                                    const absl::Status &why) {
+  LOG(WARNING) << "created " << EscapeBytes(name) << " in directory "
+               << parent << " but could not complete the create (replying "
+               << "EEXIST, so that the kernel forgets the name's negative "
+               << "entry): " << why;
+  return absl::StatusBuilder(dcfs::ErrnoToStatus(
+             EEXIST, "created, but the create could not be completed"))
+         << EscapeBytes(name) << " in directory " << parent << ": " << why;
 }
 
 }  // namespace
@@ -619,18 +643,13 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   // otherwise `name` stays unknown.
   //
   // The object now exists, but the reply must name it by a row, so a
-  // failure to record it is the one phase-3 failure still replied (the
-  // name stays unknown; the next lookup finds the object).
+  // failure to record it is the one phase-3 failure still replied: as
+  // EEXIST (CreatedButNotCompleted; the name stays unknown, and the next
+  // lookup finds the object).
   absl::StatusOr<backing::NewChild> child = backing::RecordNewChild(
       ctx_, mutation, parent, *parent_fd, name, open_for_write);
   mutation.End();
-  if (!child.ok()) {
-    // The create happened; the caller is told it failed, and the handler
-    // that replies logs why (docs/style.md 1.7).
-    return absl::StatusBuilder(child.status())
-           << "while recording the created " << EscapeBytes(name)
-           << " in directory " << parent;
-  }
+  if (!child.ok()) return CreatedButNotCompleted(parent, name, child.status());
   // Creating `name` changed `parent` itself too (mtime/ctime always; nlink
   // as well, if `name` is a new subdirectory -- its own ".." bumps
   // parent's link count), so its cached attributes are now stale. `fd` is
@@ -961,7 +980,9 @@ absl::Status DirCacheFS::Mknod(
       CreateChild(parent, name, [&](int parent_fd) {
         return backing::MknodAt(ctx_, caller, parent_fd, name, mode, rdev);
       }));
-  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
+  // The object exists: a refresh that fails falls back to the row's last
+  // attributes rather than failing the create (see CreatedButNotCompleted).
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(child.id));
   return ReplyEntry(req, entry);
 }
 
@@ -976,7 +997,9 @@ absl::Status DirCacheFS::Mkdir(
       CreateChild(parent, name, [&](int parent_fd) {
         return backing::MkdirAt(ctx_, caller, parent_fd, name, mode);
       }));
-  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
+  // The object exists: a refresh that fails falls back to the row's last
+  // attributes rather than failing the create (see CreatedButNotCompleted).
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(child.id));
   return ReplyEntry(req, entry);
 }
 
@@ -1113,7 +1136,9 @@ absl::Status DirCacheFS::Symlink(
       CreateChild(parent, name, [&](int parent_fd) {
         return backing::SymlinkAt(ctx_, caller, parent_fd, name, link);
       }));
-  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(child.id));
+  // The object exists: a refresh that fails falls back to the row's last
+  // attributes rather than failing the create (see CreatedButNotCompleted).
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(child.id));
   return ReplyEntry(req, entry);
 }
 
@@ -2415,7 +2440,9 @@ absl::Status DirCacheFS::Create(
                 .status();
           },
           writable));
-  ABSL_ASSIGN_OR_RETURN(BackingFile backing_file, MakeBackingFile(child.id, req));
+  absl::StatusOr<BackingFile> made = MakeBackingFile(child.id, req);
+  if (!made.ok()) return CreatedButNotCompleted(parent, name, made.status());
+  BackingFile backing_file = *std::move(made);
   backing_file.refs = 1;
   if (writable) backing_file.writable_refs = 1;
   int backing_id = backing_file.backing_id;
@@ -2432,15 +2459,16 @@ absl::Status DirCacheFS::Create(
   if (writable) {
     if (absl::Status status = BeginWriting(child.id); !status.ok()) {
       undo();
-      return status;
+      return CreatedButNotCompleted(parent, name, status);
     }
   }
   // After the BackingFile exists, so a writable create's still-unknown
-  // attributes are served from its fd (RefreshAttrsOf), not a reopen.
-  absl::StatusOr<fuse_entry_param> entry = EntryFor(child.id);
+  // attributes are served from its fd (RefreshAttrsOf), not a reopen; a
+  // refresh that fails falls back to the row's last attributes.
+  absl::StatusOr<fuse_entry_param> entry = EntryAfterPhase2(child.id);
   if (!entry.ok()) {
     undo();
-    return entry.status();
+    return CreatedButNotCompleted(parent, name, entry.status());
   }
 
   if (backing_id > 0) fi.backing_id = backing_id;

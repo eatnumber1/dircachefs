@@ -2115,6 +2115,32 @@ TEST_F(DirCacheFSTest, StartupAfterACrashForgetsUnnamedRows) {
   EXPECT_THAT(cache::GetAttr(ctx_, kRootInode), IsOk());
 }
 
+// A create whose backing syscall succeeded but whose new row cannot be
+// recorded (here a trigger; in the field a full or failing cache disk:
+// enospc_cache_test) cannot name the object in its reply. It replies EEXIST,
+// which is true now and makes the kernel drop the negative entry its
+// LOOKUP before the create left (fuse_invalidate_entry, Linux 6.6): any
+// other error left that entry answering ENOENT for a file that exists, for
+// --entry_timeout_sec (step 11.4). The name stays unknown, and once the
+// cache can record again a lookup finds the file.
+TEST_F(DirCacheFSTest, CreateThatCannotBeRecordedRepliesEexist) {
+  Start();
+  // A negative entry (nodeid 0), which the kernel would cache.
+  ASSERT_EQ(Lookup(kRootInode, "new").second.nodeid, 0u);
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_insert BEFORE INSERT ON inodes "
+                       "BEGIN SELECT RAISE(ABORT, 'cache full'); END"),
+              IsOk());
+  EXPECT_EQ(Create(kRootInode, "new", O_RDWR).reply.error, -EEXIST);
+  EXPECT_EQ(Mkdir(kRootInode, "newdir").first.error, -EEXIST);
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_insert"), IsOk());
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("new")), IsOk());
+  EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path("newdir")), IsOk());
+  EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "new"),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
+  EXPECT_NE(Lookup(kRootInode, "new").second.nodeid, 0u);
+  EXPECT_NE(Lookup(kRootInode, "newdir").second.nodeid, 0u);
+}
+
 // The sweep of unnamed rows is best effort: if it fails, startup goes on
 // (the rows cost only a re-probe), logged, not a failed mount.
 TEST_F(DirCacheFSTest, StartupGoesOnIfTheUnnamedRowSweepFails) {
