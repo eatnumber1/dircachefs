@@ -1770,3 +1770,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   targets under --config=asan. **Once dcfs has launched and development slows, russ wants green
   pushes:** then a push point becomes a sync point and the candidate gets the CI checks locally
   first (a `tools/prepush.sh` calling the same `.github/ci/*.sh` scripts, result and SHA logged).
+- 11.5 + 11.4 merged (9374050, seven commits) after two Opus rounds: read-only guard (sync point
+  fails EROFS after syncfs on ST_RDONLY for a source writable at start; start refuses a forced-ro
+  superblock via mountinfo, ext4 emergency_ro included; fsync golden/budget 11->12), EEXIST only when
+  the probe found the object, recorder cuts record-failure runs as failed, orphans documented.
+  Merge hazard carried to lane-1 (12.7b rewrites the same recorder closure and accepts a create's
+  EEXIST unconditionally: 11.4's syscall_ok cut must stay ahead). Follow-ups 11.5b/11.4b (findings
+  2-6) and then 11.3b to lane-2. Presubmit test/qemu+dcfs 169 + 2, fast 193 + 2.

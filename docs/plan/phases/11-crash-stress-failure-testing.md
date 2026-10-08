@@ -43,6 +43,34 @@ what landed differs:
   Needs russ (kernel): a failing btrfs inode read WARNs in
   `btrfs_destroy_inode` (fs/btrfs/inode.c:8047 on 6.18); reproducer kept
   with `kernel_failure = "expected"`.
+- 11.5 (merged 2026-10-08, 9374050): `fault_shutdown_test` over ext4/xfs/
+  btrfs (`testutil shutdown`, FS_IOC_SHUTDOWN default/logflush/nologflush;
+  btrfs has no ioctl before 6.19, so dm-error + a forced abort); held and
+  new mutations fail, nothing new is served, the dirty set survives, a
+  start without remount serves nothing new; after remount served equals
+  backing. FINDING fixed (reproduced on btrfs first): a backing forced
+  read-only answers `syncfs` with success on an already-open fd, so a
+  later sync point cleared dirty rows the filesystem had lost; now a sync
+  point fails with EROFS (fstatvfs after syncfs) and keeps the dirty set
+  when the source went read-only during the run, and start refuses a
+  read-only superblock under a read-write mount (ext4 6.15+ `emergency_ro`
+  included). Follow-ups (11.5b): a deliberate remount,ro of another mount
+  of the same superblock is refused with the wrong advice (document, reword);
+  the "ro" check must assert the guard's line and `forced=yes`; a source
+  read-only at start then remounted rw is never guarded; 6.17→6.15.
+- 11.4 (merged 2026-10-08, 9374050): `enospc_backing_test` (ext4/xfs/btrfs;
+  btrfs reserves metadata so only the write fails) and `enospc_cache_test`
+  (cache disk full before phase 1, during phase 3 of create/rename, before
+  a sync point; after freeing space and a restart served equals backing).
+  Bug fixed: a create that reached the backing but could not be recorded
+  replied the recording error and the kernel kept its negative dentry; now
+  it replies EEXIST when the phase-3 probe found the object (the kernel
+  drops the negative entry; row unknown and dirty), a failed probe replies
+  its own error; design.md's "nothing replied as a failure after phase 2"
+  carries this exception; the recorder cuts such runs as failed (cache-write
+  failures are not modelled). Follow-up (11.4b): set `probed` once the statx
+  saw the object so a later ProbeObject failure does not leave the negative
+  entry. mkstemp-style retry orphans documented, not latched.
 - 11.2b fsstress and fsx (merged 2026-10-08, 0beb46e): xfstests tag
   v2026.05.17 as an http_archive, only ltp/fsstress.c and ltp/fsx.c built
   (static, testonly; AIO, io_uring, libbtrfsutil and the xfsprogs headers
