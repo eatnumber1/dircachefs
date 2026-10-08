@@ -133,6 +133,14 @@ or a trace scenario can observe it. Equivalent mutants (a negated condition
 whose both branches do the same, a swap in a log line) are noise: list them
 here when found, with the reason, so they are skipped next time.
 
+Known equivalent mutants:
+- `Setattr`, `Setxattr`, `Fallocate`, `CopyFileRange` ... `mutation.End()` deleted
+  on a path that returns at once (`if (interrupted) { mutation.End(); return
+  interrupted; }`, the `dir_cache_fs.cc` checkpoint paths): the destructor
+  ends the mutation at the return, and nothing runs between the two. (The
+  `End()` before phase-3 refreshes is not equivalent: see the
+  `...EndsItsMutationBeforeItsRefreshes` tests.)
+
 ## Why not mull
 
 mull-project/mull has builds for LLVM 22 (0.34.1, `Mull-22-0.34.1-LLVM-22.1.2`,
