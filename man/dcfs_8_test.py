@@ -6,17 +6,19 @@ import unittest
 # Flags whose default the page must state, with the README's spelling.
 DEFAULTS = {
     "attr_timeout_sec": "3600", "entry_timeout_sec": "3600",
-    "sync_interval_sec": "5", "foreground": "true", "allow_other": "false",
+    "sync_interval_sec": "5", "allow_other": "false", "ro": "off",
+    "foreground": "off",
 }
 
-# The ABSL_FLAGs of dcfs/main.cc (man/flags_consistency_test.py keeps this
-# list and the README honest).
+# The ABSL_FLAGs of dcfs/main.cc and the options of the mount.dcfs wrapper,
+# each set as the mount option dcfs.<name> (man/flags_consistency_test.py
+# keeps this list and the README honest).
 FLAGS = [
-    "source", "cache_db", "attr_timeout_sec", "entry_timeout_sec",
-    "sync_interval_sec", "foreground", "allow_other", "fuse_opt",
+    "attr_timeout_sec", "entry_timeout_sec", "sync_interval_sec",
+    "allow_other", "fstype", "cache_db", "ro", "foreground", "fuse_opt",
 ]
 SECTIONS = [
-    "NAME", "SYNOPSIS", "FLAGS", "EXAMPLE",
+    "NAME", "SYNOPSIS", "OPTIONS", "FLAGS", "EXAMPLE",
     "MOUNTING OVER THE SOURCE DIRECTORY", "RUNNING UNDER SYSTEMD",
     "EXPORTING OVER NFS", "SHUTDOWN, CRASHES AND RESTARTS", "LIMITATIONS",
     "SEE ALSO",
@@ -35,12 +37,12 @@ class ManPageTest(unittest.TestCase):
 
     def test_flags(self):
         for f in FLAGS:
-            self.assertIn("--" + f, self.text)
+            self.assertIn("dcfs." + f, self.text)
 
     def test_defaults(self):
         for f, d in DEFAULTS.items():
-            self.assertIn("--%s (default: %s)" % (f, d), self.text)
-        self.assertIn("--source (required)", self.text)
+            self.assertIn("dcfs.%s (default: %s)" % (f, d), self.text)
+        self.assertIn("dcfs.cache_db (required)", self.text)
 
     def test_no_table(self):
         self.assertIsNone(re.search(r"^[-+─═ ]{10,}$", self.text, re.M))

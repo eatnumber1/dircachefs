@@ -63,8 +63,8 @@ def table_to_deflist(rows):
     out = []
     for cells in rows:
         term = cells[0]
-        term = "**%s**" % term.strip("`") if term.startswith("`--") \
-            else "**%s**" % term
+        term = "**%s**" % term.strip("`") \
+            if term.startswith(("`--", "`dcfs.")) else "**%s**" % term
         if len(cells) == 3:
             default, meaning = cells[1], cells[2]
             if default == "(required)":

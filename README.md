@@ -108,6 +108,7 @@ install on another machine:
 
 ```
 sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs
+sudo ln -s /usr/local/bin/dcfs /sbin/mount.dcfs    # mount -t dcfs runs this
 ```
 
 `bazel build //...` works without the test kernel: until it is built, the
@@ -124,32 +125,70 @@ installed) before sending them.
 ## Usage
 
 ```
-dcfs --source=<dir> --cache_db=<path> [flags] <mountpoint>
+mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] -o OPTIONS
 ```
+
+dcfs is the `mount.dcfs` mount helper (the dcfs binary installed under that
+name: it dispatches on its own name, and run as `dcfs` it only has `--help`
+and `--version`): `mount(8)` runs it for a mount of type `dcfs`, as in
+`mount -t dcfs -o dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/media.db
+/srv/media /mnt/media`. SOURCE is the directory, device or export to cache,
+as `mount` would take it; MOUNTPOINT is where dcfs appears (a directory: a
+file is refused). `mount.dcfs -V` prints the version. `-f` checks the
+options and mounts nothing; `-s` and `-v` are passed to the underlying
+mount; `-N` is not supported.
+
+`mount.dcfs` returns once dcfs answers the kernel's first request (it is
+serving) or with the failure's message on its standard error and a non-zero
+exit status. It must run as root: FUSE passthrough, the private mount
+namespace and `open_tree` need `CAP_SYS_ADMIN`, `open_by_handle_at` needs
+`CAP_DAC_READ_SEARCH`, and acting with each caller's credentials needs
+`setfsuid`, `setfsgid` and `setgroups`; so fstab's `user` option cannot work.
+
+A daemonized dcfs (the default) has no standard input or output and logs to
+syslog (the identity `dcfs`), so its messages reach the journal under
+systemd; without a syslog daemon they are dropped. With `dcfs.foreground`
+it stays in the foreground and also logs to standard error.
+
+### Options
+
+Options are not shared: every option goes to the underlying mount except
+those prefixed `dcfs.`, which go to dcfs (`ro` makes the underlying mount
+read-only; `dcfs.ro` makes the dcfs mount read-only). An unknown `dcfs.`
+option is an error. For a type of `none`, the underlying mount is the
+administrator's own.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `dcfs.fstype` | (autodetect) | How SOURCE is reached. `none`: SOURCE is a directory in the caller's mount namespace and dcfs serves it live (the administrator owns that mount; it stays in place and is kept busy). `bind`: SOURCE is captured with a non-recursive bind. Any other value, or none: the type of a native mount of SOURCE (`ext4`, `xfs`, `btrfs`, `nfs`, ...; absent: `mount(8)` autodetects it), made in a private mount namespace that exists only for the capture, so nothing is mounted in the caller's namespace and the backing filesystem is released when dcfs exits. The native error text and exit status pass through on failure and nothing is left mounted. |
+| `dcfs.cache_db` | (required) | The SQLite cache database. Created if missing, mode 0600 (its `-wal`/`-shm` files inherit that mode too), since it holds metadata as sensitive as the source's: every cached name, attribute, xattr and symlink target, including those of directories a reader cannot list. Its directory is created mode 0700 if missing; an existing one that is group- or world-accessible logs a warning but does not stop dcfs from starting. dcfs refuses to start if the database is a symlink or not a regular file, or if it (or an existing `-wal`/`-shm`) grants more access than the source's root directory does (owner not root or that directory's owner; group or other read/write that directory does not grant); the error names both sets of permissions. A database that passes but is looser than 0600 is tightened to 0600 with a warning. Put it on an SSD, not on the backing disks, on a local filesystem: dcfs refuses to start if SQLite cannot use WAL mode there. |
+| `dcfs.cache_dir` | (not yet) | Refused for now: a directory of cache databases named after the instance identity arrives with plan step 15.3; name the database with `dcfs.cache_db`. |
+| `dcfs.ro` | off | Mount dcfs read-only. `mount -o remount,dcfs.ro` toggles it, and `-o remount` alone makes it read-write again, without touching the underlying mount. |
+| `dcfs.foreground` | off | Stay in the foreground (debugging, tests). |
+| `dcfs.fuse_opt` | (empty) | An extra mount option passed to libfuse, e.g. `dcfs.fuse_opt=max_read=65536`; give the option once per libfuse option. `default_permissions` is always added, and required: dcfs makes no permission checks of its own and relies on the kernel's, from the attributes it caches (docs/design.md, "Caller credentials"), so naming it here is an error. |
+
+The FUSE mount's source, as `mount`, `df` and `findmnt` show it, is SOURCE as
+written, and its type is `fuse.dcfs`.
 
 ### Flags
 
-`dcfs --help` lists all flags and `dcfs --version` prints the version.
+`dcfs --help` lists the flags and `dcfs --version` prints the version. A
+flag is set as the option `dcfs.<flag>`, e.g. `dcfs.sync_interval_sec=2`.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--source` | (required) | The directory to cache. Opened once at startup; dcfs never uses the path again. |
-| `--cache_db` | (required) | The SQLite cache database. Created if missing, mode 0600 (its `-wal`/`-shm` files inherit that mode too), since it holds metadata as sensitive as `--source`'s: every cached name, attribute, xattr and symlink target, including those of directories a reader cannot list. Its directory is created mode 0700 if missing; an existing one that is group- or world-accessible logs a warning but does not stop dcfs from starting. dcfs refuses to start if the database is a symlink or not a regular file, or if it (or an existing `-wal`/`-shm`) grants more access than `--source`'s root directory does (owner not root or that directory's owner; group or other read/write that directory does not grant); the error names both sets of permissions. A database that passes but is looser than 0600 is tightened to 0600 with a warning. Put it on an SSD, not on the backing disks, on a local filesystem: dcfs refuses to start if SQLite cannot use WAL mode there. |
-| `<mountpoint>` | (required) | Where to mount dcfs. May be the same path as `--source`. |
-| `--allow_other` | `false` | Mount with `-o allow_other`, so users other than root can use the mount. Needed for almost any real deployment, and for NFS export. |
-| `--attr_timeout_sec` | `3600` | How long the kernel may cache an inode's attributes. Long by design, since dcfs has exclusive access. While a file is open for writing, its attributes are always returned with a timeout of 0. |
-| `--entry_timeout_sec` | `3600` | How long the kernel may cache a lookup result, including a negative one. |
-| `--sync_interval_sec` | `5` | While mutations have left dirty cache entries, the first request this many seconds after the last sync point runs a new one (`syncfs` of the backing filesystem, then the dirty set is cleared). Bounds how much is re-read after a power loss. |
-| `--foreground` | `true` | Stay in the foreground. With `false`, dcfs daemonizes after mounting and its standard error goes to `/dev/null`, so its log is lost. |
-| `--fuse_opt` | (empty) | Extra mount options passed to libfuse as `-o <opts>`, comma-separated, e.g. `--fuse_opt=max_read=65536`. Repeating the flag replaces the previous value, so combine options in one flag. `default_permissions` is always added, and required: dcfs makes no permission checks of its own and relies on the kernel's, from the attributes it caches (docs/design.md, "Caller credentials"), so naming it here is an error. |
+| `dcfs.allow_other` | `false` | Mount with `-o allow_other`, so users other than root can use the mount. Needed for almost any real deployment, and for NFS export. |
+| `dcfs.attr_timeout_sec` | `3600` | How long the kernel may cache an inode's attributes. Long by design, since dcfs has exclusive access. While a file is open for writing, its attributes are always returned with a timeout of 0. |
+| `dcfs.entry_timeout_sec` | `3600` | How long the kernel may cache a lookup result, including a negative one. |
+| `dcfs.sync_interval_sec` | `5` | While mutations have left dirty cache entries, the first request this many seconds after the last sync point runs a new one (`syncfs` of the backing filesystem, then the dirty set is cleared). Bounds how much is re-read after a power loss. |
 
-dcfs uses Abseil logging, so Abseil's logging flags work too, with Abseil's
-semantics:
+dcfs uses Abseil logging, so Abseil's logging flags work too, as options with
+Abseil's semantics:
 
-- `--stderrthreshold` (default `WARNING`): Log lines at this level or above go to standard error. `--stderrthreshold=0` (or `INFO`) adds the lifecycle lines: start with the source, cache and mount point, the recovery summary, each sync point with the rows it cleared and its duration, shutdown clean or unclean and why, and the first backing access after an idle period. `ERROR` hides warnings. (dcfs's default is `WARNING` where Abseil's is `ERROR`.)
-- `--minloglevel` (default `0`): Lines below this level (0 INFO, 1 WARNING, 2 ERROR, 3 FATAL) are dropped everywhere, whatever the threshold.
-- `--v` (default `0`): Enables verbose lines up to this level: `1` is one line per request that reached the backing filesystem, and why; `2` is every request with its reply; `3` adds the SQL statements. Verbose lines are INFO lines: also pass `--stderrthreshold=0`.
-- `--vmodule` (default (empty)): Per source file verbosity, e.g. `--vmodule=backing=2,sqlite=3`, overriding `--v` for those files.
+- `dcfs.stderrthreshold` (default `WARNING`): Log lines at this level or above go to standard error. `dcfs.stderrthreshold=0` (or `INFO`) adds the lifecycle lines: start with the source, cache and mount point, the recovery summary, each sync point with the rows it cleared and its duration, shutdown clean or unclean and why, and the first backing access after an idle period. `ERROR` hides warnings. (dcfs's default is `WARNING` where Abseil's is `ERROR`.)
+- `dcfs.minloglevel` (default `0`): Lines below this level (0 INFO, 1 WARNING, 2 ERROR, 3 FATAL) are dropped everywhere, whatever the threshold.
+- `dcfs.v` (default `0`): Enables verbose lines up to this level: `1` is one line per request that reached the backing filesystem, and why; `2` is every request with its reply; `3` adds the SQL statements. Verbose lines are INFO lines: also pass `dcfs.stderrthreshold=0`.
+- `dcfs.vmodule` (default (empty)): Per source file verbosity, e.g. `dcfs.vmodule=backing=2`, overriding `dcfs.v` for those files.
 
 At the default level the daemon only logs warnings and errors: errors are
 what dcfs itself failed at (a request that failed inside dcfs, such as its
@@ -158,17 +197,20 @@ record, a refused start, a failed recovery probe; an errno answer such as
 `ENOENT`, `ESTALE` or `EINTR` is not logged); warnings are what it noticed or survived (out-of-band changes,
 recovery after an unclean shutdown, a loose cache mode).
 
-libfuse mounts with `nosuid,nodev` by default. Pass `--fuse_opt=suid,dev`
-if setuid binaries or device nodes on the backing tree must work through
-the mount.
+libfuse mounts with `nosuid,nodev` by default. Pass `dcfs.fuse_opt=suid`
+and `dcfs.fuse_opt=dev` if setuid binaries or device nodes on the backing
+tree must work through the mount.
 
 ### Example
 
 ```
 sudo mkdir -p /var/lib/dcfs /mnt/media
-sudo dcfs --source=/srv/media --cache_db=/var/lib/dcfs/media.db \
-    --allow_other /mnt/media
+sudo mount -t dcfs -o dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/media.db,dcfs.allow_other \
+    /srv/media /mnt/media
 ```
+
+(Where `mount` does not run mount helpers, run `mount.dcfs` itself with the
+same arguments, e.g. `sudo mount.dcfs -o ... /srv/media /mnt/media`.)
 
 The first listing of each directory reads it from the backing disk and
 records everything about its entries (attributes, file handle, symlink
@@ -181,16 +223,17 @@ file for reading or writing does spin the disk up.
 Mounting dcfs on the directory it caches is supported:
 
 ```
-sudo dcfs --source=/srv/media --cache_db=/var/lib/dcfs/media.db \
-    --allow_other /srv/media
+sudo mount -t dcfs -o dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/media.db,dcfs.allow_other \
+    /srv/media /srv/media
 ```
 
-This works because dcfs opens `--source` before mounting and never uses a
+This works because dcfs opens SOURCE before mounting and never uses a
 path again: every later access goes through that descriptor or through
 file handles stored in the cache. Everything that used `/srv/media` before
 now goes through dcfs and cannot bypass it by accident, which makes this
 the easiest way to honour the exclusive-access requirement (see
-[Limitations](#limitations)).
+[Limitations](#limitations)). With `dcfs.fstype=bind` the same holds for a
+captured bind of the directory.
 
 ### Running under systemd
 
@@ -206,15 +249,16 @@ sudo systemctl enable --now dcfs
 ```
 
 The unit runs dcfs as root in the foreground and restarts it if it exits
-with an error. `EXTRA_ARGS` in the environment file holds further flags,
-split at whitespace; the example sets `--allow_other`, which users other
+with an error. `EXTRA_OPTIONS` in the environment file holds further `dcfs.`
+options, comma-separated,
+split at whitespace; the example sets `dcfs.allow_other`, which users other
 than root, and nfsd, need. Before each start the unit lazily unmounts a
 dead FUSE mount left on the mount point by a crash (see below), and
 leaves a mount point that can be accessed alone.
 
 ### Exporting over NFS
 
-nfsd needs `--allow_other`, and a FUSE filesystem needs an explicit `fsid=`
+nfsd needs `dcfs.allow_other`, and a FUSE filesystem needs an explicit `fsid=`
 in its export. An `/etc/exports` line:
 
 ```
@@ -652,8 +696,8 @@ recovery protocol, concurrency, and the test strategy.
   with a newline cannot forge a log line. The escaping of mount points and
   sources in `mountinfo`, `/etc/fstab` and `exports(5)` text (octal
   escapes) does not exist yet: it arrives with the NFS export tooling
-  (plan phase 15). The paths given on the command line (`--source`, the
-  mount point, `--cache_db`) are not escaped in startup messages yet.
+  (plan phase 15). The paths given on the command line (SOURCE, the
+  mount point, `dcfs.cache_db`) are not escaped in startup messages yet.
 - **A backing filesystem that stops taking writes holds the whole daemon.**
   With the backing filesystem frozen (`fsfreeze -f`, an LVM or storage
   snapshot, a hung network mount), a change through dcfs blocks in its
@@ -720,9 +764,9 @@ recovery protocol, concurrency, and the test strategy.
   inode numbers as `st_ino`, so two filesystems could produce colliding
   `(st_dev, st_ino)` pairs and confuse hard-link detection in `tar`,
   `rsync` and `cp -a`. dcfs refuses to start if anything is mounted below
-  `--source`, checked against `/proc/self/mountinfo` -- which, because a
+  SOURCE, checked against `/proc/self/mountinfo` -- which, because a
   btrfs subvolume is not a separate mount, cannot catch a subvolume that
-  already exists under `--source` before dcfs starts: this is a real gap,
+  already exists under SOURCE before dcfs starts: this is a real gap,
   not an oversight, and there is no way to detect it at startup short of
   walking the whole tree first (which dcfs deliberately never does; see
   "Coherence" below). What dcfs *does* catch, for a subvolume exactly as
@@ -787,9 +831,9 @@ recovery protocol, concurrency, and the test strategy.
   mounted read-only on purpose is fine. `mount -o remount,ro` of another
   mount of the same filesystem (a bind mount, another btrfs subvolume)
   looks the same to dcfs, since it makes the shared superblock read-only:
-  dcfs refuses to start over `--source` then, and a running dcfs keeps
+  dcfs refuses to start over SOURCE then, and a running dcfs keeps
   every change dirty (its sync points fail); remount it read-write, or
-  mount `--source` read-only too.
+  mount SOURCE read-only too.
 - **A full disk fails requests.** With the backing filesystem full, a
   change that needs space fails with `ENOSPC`, as on the backing
   filesystem itself, and nothing about it is cached (on btrfs, which
@@ -809,7 +853,7 @@ recovery protocol, concurrency, and the test strategy.
   the next restart.
 - **Power loss re-reads recent changes.** After a power loss or kernel
   crash, everything cached about entries changed in the last
-  `--sync_interval_sec` seconds (or since the last `fsync`) is forgotten
+  `dcfs.sync_interval_sec` seconds (or since the last `fsync`) is forgotten
   and re-read from the backing filesystem, which spins it up. An idle dcfs
   has no timer, so a dirty set left by the last burst of activity is only
   cleared by the next request, `fsync` or shutdown; that is safe but makes

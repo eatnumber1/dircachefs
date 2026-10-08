@@ -1202,6 +1202,7 @@ qemu_cc_test(
 
 exports_files([
     "main.cc",
+    "mount_dcfs.cc",  # man/flags_consistency_test.py
     "schema.sql",
     "shipped_deps.txt",  # the golden of //tools:shipped_deps_test (step 26.9)
     "version.h",

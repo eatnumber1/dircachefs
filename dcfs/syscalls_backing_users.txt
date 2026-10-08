@@ -12,6 +12,10 @@
 //dcfs:main_static_traced
 //dcfs:mounts_below
 
+# the mount.dcfs wrapper (step 15.2): the capture helper reads mount(8)'s output and sends the clone over a socket (read, openat, unlinkat), the startup channel reads the daemon's report
+//dcfs:backing_capture
+//dcfs:startup_channel
+
 # testonly code and benchmark driver (trace file, invariant-violation console line, fault wraps, test fixtures)
 //dcfs/testonly:checking_observers
 //dcfs/testonly:cost_counter

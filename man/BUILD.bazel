@@ -15,7 +15,7 @@ genrule(
     ],
     outs = ["dcfs.8.md"],
     cmd = "$(location //tools/man:extract_sections) $(location //:README.md) " +
-          "$(location //dcfs:version.h) Usage Flags Example " +
+          "$(location //dcfs:version.h) Usage Options Flags Example " +
           "'Mounting over the source directory' 'Running under systemd' " +
           "'Exporting over NFS' 'Shutdown, crashes and restarts' " +
           "Limitations > $@",
@@ -62,10 +62,12 @@ py_test(
     args = [
         "$(location //dcfs:main.cc)",
         "$(location //:README.md)",
+        "$(location //dcfs:mount_dcfs.cc)",
     ],
     data = [
         "//:README.md",
         "//dcfs:main.cc",
+        "//dcfs:mount_dcfs.cc",
     ],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )

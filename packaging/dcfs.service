@@ -13,9 +13,10 @@ EnvironmentFile=/etc/dcfs/dcfs.env
 # backing disk itself when MOUNTPOINT is SOURCE. The leading "-" ignores
 # failure (nothing to unmount).
 ExecStartPre=-/bin/sh -c '[ -e "$$MOUNTPOINT" ] || exec /bin/umount -l "$$MOUNTPOINT"'
-# EXTRA_ARGS (optional, in the environment file) is split at whitespace
-# into further flags, e.g. --allow_other.
-ExecStart=/usr/local/bin/dcfs --source=${SOURCE} --cache_db=${CACHE_DB} --foreground=true $EXTRA_ARGS ${MOUNTPOINT}
+# EXTRA_OPTIONS (optional, in the environment file) is a comma-separated
+# list of further dcfs. options, e.g. dcfs.allow_other. dcfs runs as
+# mount.dcfs (a link to the dcfs binary) in the foreground.
+ExecStart=/sbin/mount.dcfs -o dcfs.fstype=none,dcfs.foreground,dcfs.cache_db=${CACHE_DB},${EXTRA_OPTIONS} ${SOURCE} ${MOUNTPOINT}
 Restart=on-failure
 KillSignal=SIGTERM
 TimeoutStopSec=30

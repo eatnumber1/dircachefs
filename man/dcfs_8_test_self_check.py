@@ -17,15 +17,17 @@ GATE = None
 GOOD = """\
 NAME
 SYNOPSIS
+OPTIONS
+  dcfs.fstype (default: (autodetect))
+  dcfs.cache_db (required)
+  dcfs.ro (default: off)
+  dcfs.foreground (default: off)
+  dcfs.fuse_opt (default: (empty))
 FLAGS
-  --source (required)
-  --cache_db
-  --attr_timeout_sec (default: 3600)
-  --entry_timeout_sec (default: 3600)
-  --sync_interval_sec (default: 5)
-  --foreground (default: true)
-  --allow_other (default: false)
-  --fuse_opt
+  dcfs.allow_other (default: false)
+  dcfs.attr_timeout_sec (default: 3600)
+  dcfs.entry_timeout_sec (default: 3600)
+  dcfs.sync_interval_sec (default: 5)
 EXAMPLE
 MOUNTING OVER THE SOURCE DIRECTORY
 RUNNING UNDER SYSTEMD
@@ -58,11 +60,11 @@ class SelfCheck(unittest.TestCase):
         self.assertIn("'LIMITATIONS' not found in", result.stderr)
 
     def test_missing_flag_is_rejected(self):
-        result = run_gate(GOOD.replace('  --allow_other (default: false)\n',
+        result = run_gate(GOOD.replace('  dcfs.allow_other (default: false)\n',
                                        ''))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('FAIL: test_flags', result.stderr)
-        self.assertIn("'--allow_other' not found in", result.stderr)
+        self.assertIn("'dcfs.allow_other' not found in", result.stderr)
 
 
 if __name__ == '__main__':
