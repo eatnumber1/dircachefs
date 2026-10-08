@@ -1902,3 +1902,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   by sysctls, one vCPU for non-stress tests, every kernel event a test needs forced explicitly) plus
   a two-run coverage diff on one commit as the determinism measurement; QEMU -icount record/replay
   kept in the back pocket (TCG only).
+- CI on 4bf7182 (run 37841442160) finished: subjects, osv, fast, presubmit, reproducible green;
+  sharded jobs 17-27 min each with caches, eight of nine green. Failures: coverage (the rise ratchet
+  + names_random under coverage: both queued to lane-3 as 8.1b/6.2); mutation-changed exit 1 on 4
+  survivors of 30 (the job passes --fail-on-survivor: to be dropped in 26.5d, survivors to the job
+  summary; the four recorded as 8.2f); asan (0): enospc_backing_test_btrfs guest OOM at 384 MiB
+  (asan_mem to be measured and set by lane-2 after 11.3b).

@@ -143,3 +143,14 @@ first (an invariant a test should pin):
 Line numbers are in the 26.5d README's "First sweep" table; re-derive
 with `mutate.py generate --all` after the dcfs/ branches in flight land.
 
+## 8.2f Survivors from the per-push mutation job on 4bf7182 (2026-10-08)
+
+The first complete `mutation-changed` run (30 mutants over the push's
+touched functions, 26 killed, 1147 s): `dir_cache_fs.cc` `OpenInode:1608`
+negate-?: `(flags & FS_IMMUTABLE_FL)`; `Removexattr:2427` delete-call
+`mutation.End()`; `Fallocate:2542` negate-if `!removed`;
+`CreateChild:633` delete-call `mutation.End()`. The two `End()` deletions
+are candidates for the equivalent class (12.11 covers directories only;
+a file's End is caught by the harness tests or not at all). Join the
+8.2e list when the re-sweep replaces it.
+
