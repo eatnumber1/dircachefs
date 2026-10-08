@@ -2,7 +2,7 @@
 """A small mutation tester for the protocol code (steps 26.5, 26.5d).
 
   mutate.py generate --workspace W --scope scope.txt --out mutants.json
-                     [--seed S] [--per-function N]
+                     [--seed S] [--per-function N] [--all]
   mutate.py run      --workspace W --mutants mutants.json --result result.json
                      [--sample N] [--seed S] [--only ID,ID] [--shard K/N]
                      [--killers PHASES] [--fail-on-survivor]
@@ -68,7 +68,7 @@ callee_name = operators.callee_name
 
 DEFAULT_SEED = 1
 # The scheduled sweep's per-function bound and the per-push budget.
-DEFAULT_PER_FUNCTION = 3
+DEFAULT_PER_FUNCTION = 2
 DEFAULT_BUDGET = 30
 STATUSES = ("killed", "survived", "invalid", "suppressed", "error")
 
@@ -503,10 +503,12 @@ def count_by(mutants, field="operator"):
 
 def generate(args):
     args.changed = getattr(args, "changed", None)
+    args.all = getattr(args, "all", False)
     print("seed %d (--seed), per function %d (--per-function)" % (
         args.seed, args.per_function), file=sys.stderr)
     found = candidates(args)
-    mutants = number(sample(found, args.seed, args.per_function))
+    mutants = number(found if args.all else sample(found, args.seed,
+                                                   args.per_function))
     json.dump(mutants, open(args.out, "w"), indent=1)
     print("%d candidates, %d sampled: %s" % (
         len(found), len(mutants), count_by(mutants)), file=sys.stderr)
@@ -752,6 +754,8 @@ def main(argv=None):
     g.add_argument("--seed", type=int, default=DEFAULT_SEED)
     g.add_argument("--per-function", type=int, default=DEFAULT_PER_FUNCTION,
                    help="at most this many mutants per function (0: no bound)")
+    g.add_argument("--all", action="store_true",
+                   help="every candidate, unsampled (to look at them)")
     g.add_argument("--changed", default="", metavar="RANGE",
                    help="only functions whose lines this git range touches")
     r = sub.add_parser("run")

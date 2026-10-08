@@ -143,6 +143,10 @@ class StatementDeletionTest(Fixture):
         self.assertEqual({s.replacement for s in self.sites("Statements")},
                          {"(void)0"})
 
+    def test_a_void_call_without_braces_is_deleted(self):
+        self.assertEqual(self.pairs("Unbraced", "delete-statement"),
+                         [("m.End()", "(void)0")])
+
     def test_a_status_phase_call_used_as_a_value_becomes_ok(self):
         self.assertEqual(
             self.pairs("Marks", "delete-statement"),

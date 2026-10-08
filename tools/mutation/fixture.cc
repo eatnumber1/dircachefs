@@ -84,6 +84,10 @@ void Statements(Mutation& m, int a) {
   (void)m.Mark(a);
 }
 
+void Unbraced(Mutation& m, bool a) {
+  if (a) m.End();
+}
+
 absl::Status Marks(Mutation& m) {
   absl::Status status = m.Mark(1);
   absl::Status begun = BeginThing();

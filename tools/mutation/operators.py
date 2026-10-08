@@ -290,7 +290,9 @@ class StatementDeletion(Operator):
         kind = node.get("kind")
         parent = ctx.parents[-1] if ctx.parents else None
         in_block = parent is not None and parent.get("kind") == "CompoundStmt"
-        if in_block and self.is_statement(node):
+        # A void call is a statement wherever it is (`if (c) m->End();`).
+        void_call = kind in CALL_KINDS and qual_type(node) == "void"
+        if (in_block and self.is_statement(node)) or void_call:
             got = ctx.text(node)
             if not got:
                 return []
