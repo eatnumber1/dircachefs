@@ -75,7 +75,7 @@ start_daemon() {
 	log=$1
 	shift
 	LOGS="$LOGS $log"
-	"$DCFS" --source="$SRC" --cache_db="$DB" "$@" "$MNT" >"$log" 2>&1 &
+	"${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options "$@")" "$SRC" "$MNT" >"$log" 2>&1 &
 	DAEMON_PID=$!
 	MOUNTED=0
 	i=0

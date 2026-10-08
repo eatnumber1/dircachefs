@@ -11,7 +11,9 @@
 # dcfs_rootfs= Debian tree (guest/init copies /tests/ into the chroot too).
 #
 # Callers are expected to set FAILED=0 before using pass/fail, and
-# SRC/DB/MNT before using start_daemon/restart_daemon.
+# SRC/DB/MNT before using start_daemon/restart_daemon. dcfs is run as
+# $MOUNT_DCFS (default /sbin/mount.dcfs, a link to the dcfs binary: it
+# dispatches on argv[0]).
 
 pass() { echo "TEST $1 PASS"; }
 fail() { echo "TEST $1 FAIL ($2)"; FAILED=1; }
@@ -271,14 +273,26 @@ quiesce_daemon() {
 	done
 }
 
+# dcfs_options [--flag[=value]...]: the -o string of a foreground
+# dcfs.fstype=none mount of $DB, with each flag as the dcfs.<flag> option
+# (phase 15: the plain --source command line is gone).
+dcfs_options() {
+	do_opts="dcfs.fstype=none,dcfs.cache_db=$DB,dcfs.foreground"
+	for do_flag in "$@"; do
+		do_opts="$do_opts,dcfs.${do_flag#--}"
+	done
+	echo "$do_opts"
+}
+
 # start_daemon LOG [extra dcfs flags...]: starts dcfs against $SRC/$DB,
-# mounted at $MNT, with any extra flags inserted before $MNT; waits up to
-# 10s for the mount to appear. Sets DAEMON_PID and MOUNTED (1 if the mount
-# appeared, 0 if the wait timed out) and returns 0/1 to match.
+# mounted at $MNT, with each extra flag as a dcfs.<flag> mount option; waits
+# up to 10s for the mount to appear. Sets DAEMON_PID and MOUNTED (1 if the
+# mount appeared, 0 if the wait timed out) and returns 0/1 to match. The
+# daemon stays in the foreground (dcfs.foreground), so DAEMON_PID is dcfs.
 start_daemon() {
 	log=$1
 	shift
-	"$DCFS" --source="$SRC" --cache_db="$DB" "$@" "$MNT" >"$log" 2>&1 &
+	"${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options "$@")" "$SRC" "$MNT" >"$log" 2>&1 &
 	DAEMON_PID=$!
 	MOUNTED=0
 	i=0

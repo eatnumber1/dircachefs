@@ -5,7 +5,7 @@
 # opened before the cache database is touched, a foreign cache database is
 # refused with an actionable message), -o passthrough (spelled --fuse_opt),
 # clean SIGTERM shutdown (WAL checkpointed, mount gone, exit 0), mounting
-# dcfs back over its own --source, and restarting against a previously-used
+# dcfs back over its own SOURCE, and restarting against a previously-used
 # cache database.
 #
 # Uses only busybox applets/options (verified against the exact busybox
@@ -19,7 +19,7 @@
 FAILED=0
 . "$(dirname "$0")/lib.sh"
 
-DCFS=/bin/dcfs
+MOUNT_DCFS=/sbin/mount.dcfs
 SRC=/src
 MNT=/mnt
 
@@ -62,10 +62,27 @@ mount_count() {
 	awk -v mnt="$1" '$2 == mnt { n++ } END { print n + 0 }' /proc/mounts
 }
 
+# run_dcfs SOURCE DB MOUNTPOINT [--flag[=value]...]: the foreground
+# dcfs.fstype=none form of mount.dcfs (phase 15), each flag a dcfs.<flag>
+# option.
+run_dcfs() {
+	rd_source=$1
+	rd_db=$2
+	rd_mnt=$3
+	shift 3
+	rd_opts="dcfs.fstype=none,dcfs.cache_db=$rd_db,dcfs.foreground"
+	for rd_flag in "$@"; do
+		rd_opts="$rd_opts,dcfs.${rd_flag#--}"
+	done
+	# exec: always called in a subshell, which then is dcfs (so that
+	# $! of a backgrounded call is its pid).
+	exec "$MOUNT_DCFS" -o "$rd_opts" "$rd_source" "$rd_mnt"
+}
+
 # Starts the daemon in the background, logging its stderr to $1 and
 # waiting up to 10s for a new entry to appear in /proc/mounts for
-# mountpoint $2 (the remaining arguments are dcfs's own argv, i.e.
-# everything after the program name). Leaves DAEMON_PID set either way;
+# mountpoint $2 (the remaining arguments are run_dcfs's: SOURCE DB
+# MOUNTPOINT and flags). Leaves DAEMON_PID set either way;
 # returns nonzero (without waiting further) if the mount didn't appear and
 # the daemon has already exited.
 start_daemon() {
@@ -74,7 +91,7 @@ start_daemon() {
 	shift 2
 	before=$(mount_count "$target")
 	DAEMON_LOG="$log"
-	"$DCFS" "$@" >"$log" 2>&1 &
+	run_dcfs "$@" >"$log" 2>&1 &
 	DAEMON_PID=$!
 	i=0
 	while [ "$i" -lt 10 ]; do
@@ -130,19 +147,19 @@ stat_snapshot() {
 
 # --- usage: no arguments at all ------------------------------------------
 
-OUT=$("$DCFS" 2>&1)
+OUT=$("$MOUNT_DCFS" 2>&1)
 RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q -- '--source'; then
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'usage: mount.dcfs SOURCE MOUNTPOINT'; then
 	pass usage
 else
 	fail usage "rc=$RC out=$OUT"
 fi
 
-# --- missing-source: --source points nowhere ------------------------------
+# --- missing-source: SOURCE points nowhere ------------------------------
 
-OUT=$("$DCFS" --source=/nonexistent --cache_db=/cache/missing.db "$MNT" 2>&1)
+OUT=$(run_dcfs /nonexistent /cache/missing.db "$MNT" 2>&1)
 RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q -- '--source=/nonexistent'; then
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'SOURCE /nonexistent'; then
 	pass missing-source
 else
 	fail missing-source "rc=$RC out=$OUT"
@@ -154,12 +171,12 @@ else
 	umount "$MNT" 2>/dev/null || true
 fi
 
-# --- source-not-dir: --source is a regular file ----------------------------
+# --- source-not-dir: SOURCE is a regular file ----------------------------
 
 echo not-a-directory >/tmp/regular-file
-OUT=$("$DCFS" --source=/tmp/regular-file --cache_db=/cache/notdir.db "$MNT" 2>&1)
+OUT=$(run_dcfs /tmp/regular-file /cache/notdir.db "$MNT" 2>&1)
 RC=$?
-if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q -- '--source=/tmp/regular-file'; then
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'SOURCE /tmp/regular-file'; then
 	pass source-not-dir
 else
 	fail source-not-dir "rc=$RC out=$OUT"
@@ -174,7 +191,7 @@ fi
 # --- foreign-db: same cache db, source on a different filesystem ---------
 
 DB_FOREIGN=/cache/foreign.db
-if start_daemon /tmp/foreign1.log "$MNT" --source="$SRC" --cache_db="$DB_FOREIGN" "$MNT"; then
+if start_daemon /tmp/foreign1.log "$MNT" "$SRC" "$DB_FOREIGN" "$MNT"; then
 	pass foreign-db-first-mount
 	stop_daemon
 	if [ "$DAEMON_RC" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
@@ -183,7 +200,7 @@ if start_daemon /tmp/foreign1.log "$MNT" --source="$SRC" --cache_db="$DB_FOREIGN
 		fail foreign-db-first-stop "rc=$DAEMON_RC mount_count=$(mount_count "$MNT")"
 	fi
 
-	OUT=$("$DCFS" --source=/tmp/other --cache_db="$DB_FOREIGN" "$MNT" 2>&1)
+	OUT=$(run_dcfs /tmp/other "$DB_FOREIGN" "$MNT" 2>&1)
 	RC=$?
 	if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'created for filesystem'; then
 		pass foreign-db-refused
@@ -203,8 +220,8 @@ fi
 # --- fuse-opt: --fuse_opt passthrough, good and bad options ---------------
 
 DB_FUSEOPT=/cache/fuseopt.db
-if start_daemon /tmp/fuseopt-good.log "$MNT" --source="$SRC" --cache_db="$DB_FUSEOPT" \
-		--fuse_opt=max_read=65536 "$MNT"; then
+if start_daemon /tmp/fuseopt-good.log "$MNT" "$SRC" "$DB_FUSEOPT" "$MNT" \
+		--fuse_opt=max_read=65536; then
 	pass fuse-opt-good-mount
 	if awk -v mnt="$MNT" '$2 == mnt { print $4 }' /proc/mounts | grep -q 'max_read=65536'; then
 		pass fuse-opt-good-visible
@@ -220,8 +237,7 @@ fi
 # otherwise keep the command substitution waiting until the guest's timeout.
 # A refusal exits 1 (fuse_session_new failed); a run cut short by `timeout`
 # exits otherwise, and fails.
-OUT=$(timeout 10 "$DCFS" --source="$SRC" --cache_db="$DB_FUSEOPT" \
-	--fuse_opt=bogus_option_xyz "$MNT" 2>&1)
+OUT=$(timeout 10 "$MOUNT_DCFS" -o "dcfs.fstype=none,dcfs.cache_db=$DB_FUSEOPT,dcfs.foreground,dcfs.fuse_opt=bogus_option_xyz" "$SRC" "$MNT" 2>&1)
 RC=$?
 if [ "$RC" -eq 1 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
 	pass fuse-opt-bad-rejected
@@ -232,8 +248,7 @@ fi
 
 # default_permissions is dcfs's own and required: naming it is a usage
 # error (exit 1, before anything is opened), not passed through twice.
-OUT=$(timeout 10 "$DCFS" --source="$SRC" --cache_db="$DB_FUSEOPT" \
-	--fuse_opt=suid,default_permissions "$MNT" 2>&1)
+OUT=$(timeout 10 "$MOUNT_DCFS" -o "dcfs.fstype=none,dcfs.cache_db=$DB_FUSEOPT,dcfs.foreground,dcfs.fuse_opt=suid,dcfs.fuse_opt=default_permissions" "$SRC" "$MNT" 2>&1)
 RC=$?
 if [ "$RC" -eq 1 ] && [ "$(mount_count "$MNT")" -eq 0 ] &&
 	printf '%s\n' "$OUT" | grep -q "default_permissions is redundant"; then
@@ -246,7 +261,7 @@ fi
 # --- sigterm-clean: SIGTERM unmounts, exits 0, and checkpoints the WAL ---
 
 DB_SIGTERM=/cache/sigterm.db
-if start_daemon /tmp/sigterm.log "$MNT" --source="$SRC" --cache_db="$DB_SIGTERM" "$MNT"; then
+if start_daemon /tmp/sigterm.log "$MNT" "$SRC" "$DB_SIGTERM" "$MNT"; then
 	pass sigterm-mount
 	kill -TERM "$DAEMON_PID" 2>/dev/null || true
 	wait "$DAEMON_PID"
@@ -288,7 +303,7 @@ if grep -q 'starting: source=' /tmp/sigterm.log || grep -q 'shutdown: clean' /tm
 else
 	pass info-hidden-by-default
 fi
-if start_daemon /tmp/info.log "$MNT" --stderrthreshold=0 --source="$SRC" --cache_db=/cache/info.db "$MNT"; then
+if start_daemon /tmp/info.log "$MNT" "$SRC" /cache/info.db "$MNT" --stderrthreshold=0; then
 	stop_daemon
 	if grep -q 'starting: source=/src cache_db=/cache/info.db mountpoint=/mnt' /tmp/info.log; then
 		pass info-start-line
@@ -304,13 +319,13 @@ else
 	fail info-mount "daemon did not mount within 10s"
 fi
 
-# --- mount-over-source: mountpoint IS --source ----------------------------
+# --- mount-over-source: mountpoint IS SOURCE ----------------------------
 
 BASE_SRC_COUNT=$(mount_count "$SRC") # 1: vdb, before any overmount.
 stat_snapshot "$SRC" >/tmp/before_overmount.txt
 
 DB_OVER=/cache/overmount.db
-if start_daemon /tmp/overmount.log "$SRC" --source="$SRC" --cache_db="$DB_OVER" "$SRC"; then
+if start_daemon /tmp/overmount.log "$SRC" "$SRC" "$DB_OVER" "$SRC"; then
 	pass mount-over-source-mount
 
 	stat_snapshot "$SRC" >/tmp/after_overmount.txt
@@ -356,7 +371,7 @@ fi
 
 # --- restart-same-db: reuse the overmount test's cache db, mounted at /mnt
 
-if start_daemon /tmp/restart.log "$MNT" --source="$SRC" --cache_db="$DB_OVER" "$MNT"; then
+if start_daemon /tmp/restart.log "$MNT" "$SRC" "$DB_OVER" "$MNT"; then
 	pass restart-same-db-mount
 	if find "$MNT" -exec stat -c '%i %n' {} + >/dev/null 2>/tmp/restart-find.err; then
 		pass restart-same-db-listing
@@ -381,7 +396,7 @@ fi
 URING_PARAM=/sys/module/fuse/parameters/enable_uring
 if [ -w "$URING_PARAM" ] && echo Y >"$URING_PARAM" 2>/dev/null; then
 	export FUSE_URING_ENABLE=1
-	if start_daemon /tmp/uring.log "$MNT" --source="$SRC" --cache_db=/cache/uring.db "$MNT"; then
+	if start_daemon /tmp/uring.log "$MNT" "$SRC" /cache/uring.db "$MNT"; then
 		unset FUSE_URING_ENABLE
 		ls -l "$MNT" >/dev/null 2>&1
 		stat "$MNT/file_0.txt" >/dev/null 2>&1
@@ -401,20 +416,20 @@ else
 	skip io-uring-single-threaded "kernel has no fuse enable_uring parameter"
 fi
 
-# --- other-source-dir-refused: same filesystem, different --source dir ----
+# --- other-source-dir-refused: same filesystem, different SOURCE dir ----
 #
 # The cache database belongs to one source directory, not just one
-# filesystem (audit-crash F4): restarting it with --source pointing at
+# filesystem (audit-crash F4): restarting it with SOURCE pointing at
 # another directory on the same filesystem must be refused, not serve the
 # first directory's cached tree under the second's name.
 mkdir -p "$SRC/root_a" "$SRC/root_b"
 echo a >"$SRC/root_a/only_in_a"
 echo b >"$SRC/root_b/only_in_b"
 DB_ROOTS=/cache/roots.db
-if start_daemon /tmp/roots1.log "$MNT" --source="$SRC/root_a" --cache_db="$DB_ROOTS" "$MNT"; then
+if start_daemon /tmp/roots1.log "$MNT" "$SRC/root_a" "$DB_ROOTS" "$MNT"; then
 	ls "$MNT" >/dev/null
 	stop_daemon
-	if start_daemon /tmp/roots2.log "$MNT" --source="$SRC/root_b" --cache_db="$DB_ROOTS" "$MNT"; then
+	if start_daemon /tmp/roots2.log "$MNT" "$SRC/root_b" "$DB_ROOTS" "$MNT"; then
 		fail other-source-dir-refused "mounted; listing: $(ls "$MNT" 2>&1)"
 		stop_daemon
 	else
@@ -436,9 +451,9 @@ fi
 # daemon started on a database another one is using must refuse to start.
 DB_SHARED=/cache/shared.db
 mkdir -p /tmp/mnt2
-if start_daemon /tmp/shared1.log "$MNT" --source="$SRC" --cache_db="$DB_SHARED" "$MNT"; then
+if start_daemon /tmp/shared1.log "$MNT" "$SRC" "$DB_SHARED" "$MNT"; then
 	FIRST_PID=$DAEMON_PID
-	if start_daemon /tmp/shared2.log /tmp/mnt2 --source="$SRC" --cache_db="$DB_SHARED" /tmp/mnt2; then
+	if start_daemon /tmp/shared2.log /tmp/mnt2 "$SRC" "$DB_SHARED" /tmp/mnt2; then
 		fail db-in-use-refused "a second daemon mounted /tmp/mnt2 on the same database"
 		stop_daemon
 	else
@@ -452,7 +467,7 @@ if start_daemon /tmp/shared1.log "$MNT" --source="$SRC" --cache_db="$DB_SHARED" 
 	DAEMON_PID=$FIRST_PID
 	stop_daemon
 	# Once the first daemon is gone, the database is free again.
-	if start_daemon /tmp/shared3.log "$MNT" --source="$SRC" --cache_db="$DB_SHARED" "$MNT"; then
+	if start_daemon /tmp/shared3.log "$MNT" "$SRC" "$DB_SHARED" "$MNT"; then
 		pass db-free-after-exit
 		stop_daemon
 	else

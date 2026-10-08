@@ -13,7 +13,8 @@ namespace dcfs_bench {
 
 class DcfsProcess {
  public:
-  // Forks and execs `dcfs --source=src --cache_db=db <flags> mnt`. Does not
+  // Forks and execs `mount.dcfs -o dcfs.fstype=none,dcfs.cache_db=db,... src
+  // mnt` (each flag a dcfs.<flag> option). Does not
   // wait for the mount: see WaitMounted.
   bool Start(
       const std::string &dcfs, const std::string &src, const std::string &db,

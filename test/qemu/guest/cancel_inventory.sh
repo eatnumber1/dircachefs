@@ -71,8 +71,8 @@ timed() {
 # (polled every 100 ms: start_daemon polls every second).
 start_timed() {
 	t0=$(uptime_ms)
-	"$DCFS" --source="$SRC" --cache_db="$DB" --sync_interval_sec=1000000 \
-		"$MNT" >>"$LOG" 2>&1 &
+	"${MOUNT_DCFS:-/sbin/mount.dcfs}" \
+		-o "$(dcfs_options --sync_interval_sec=1000000)" "$SRC" "$MNT" >>"$LOG" 2>&1 &
 	DAEMON_PID=$!
 	i=0
 	while [ "$i" -lt 3000 ]; do

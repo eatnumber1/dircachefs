@@ -45,10 +45,13 @@ bool DcfsProcess::Start(
     const std::string &dcfs, const std::string &src, const std::string &db,
     const std::string &mnt, const std::vector<std::string> &flags) {
   mnt_ = mnt;
-  std::vector<std::string> args = {
-      dcfs, "--source=" + src, "--cache_db=" + db};
-  args.insert(args.end(), flags.begin(), flags.end());
-  args.push_back(mnt);
+  // dcfs dispatches on argv[0] (phase 15): it runs as mount.dcfs, in the
+  // foreground, with each flag as a dcfs.<flag> mount option.
+  std::string options = "dcfs.fstype=none,dcfs.foreground,dcfs.cache_db=" + db;
+  for (const std::string &flag : flags) {
+    options += ",dcfs." + (flag.starts_with("--") ? flag.substr(2) : flag);
+  }
+  std::vector<std::string> args = {"mount.dcfs", "-o", options, src, mnt};
   absl::StatusOr<pid_t> forked = dcfs::syscalls::fork();
   if (!forked.ok()) return false;
   pid_ = *forked;

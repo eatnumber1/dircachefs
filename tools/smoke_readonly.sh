@@ -22,6 +22,10 @@ SRC=$2
 MNT=$3
 DB=$4
 
+# dcfs dispatches on argv[0] (mount.dcfs, phase 15): run it through a link.
+HELPER="$DB.mount.dcfs"
+ln -sf "$DCFS" "$HELPER"
+
 DAEMON_LOG="$DB.daemon.log"
 STRACE_LOG="$DB.strace.log"
 
@@ -53,6 +57,7 @@ cleanup() {
     wait "$DAEMON_PID" 2>/dev/null
     DAEMON_PID=""
   fi
+  rm -f "$HELPER"
 }
 trap cleanup EXIT INT TERM
 
@@ -82,7 +87,7 @@ mkdir -p "$MNT"
 
 # --- Mount -------------------------------------------------------------------
 
-"$DCFS" --source="$SRC" --cache_db="$DB" --foreground=true "$MNT" \
+"$HELPER" -o "dcfs.fstype=none,dcfs.cache_db=$DB,dcfs.foreground" "$SRC" "$MNT" \
     > "$DAEMON_LOG" 2>&1 &
 DAEMON_PID=$!
 

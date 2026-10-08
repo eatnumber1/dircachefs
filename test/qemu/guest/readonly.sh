@@ -139,10 +139,10 @@ mount /dev/vdb /src
 mkdir -p /src/sub /src/d
 
 # --- startup-refuses-submount: dcfs must refuse to start at all with a ----
-# --- filesystem already mounted below --source (amendment 12) ------------
+# --- filesystem already mounted below SOURCE (amendment 12) ------------
 
 mount /dev/vdc /src/sub
-out=$("$DCFS" --source="$SRC" --cache_db="$DB" "$MNT" 2>&1)
+out=$("${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options)" "$SRC" "$MNT" 2>&1)
 rc=$?
 if [ "$rc" -eq 0 ]; then
 	fail startup-refuses-submount "dcfs unexpectedly started"
