@@ -1665,3 +1665,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   rule, accepted), two known_bugs (reply_after_failed_syscall, reply_unknown_as_negative), trace
   replies carry errno; no gap in the code; large 10.24M / nolock 8.22M states (nolock to eternal).
   Under Opus review.
+- 25.3 docs merged first (7d8fab7, russ: "the logging style guide looks good"): style.md 1.6 (Status
+  message rules) and 1.7 (levels, verbose levels, absl macros only, log-or-return), design.md
+  "Logging", README flags. The code (reclassification, INFO/VLOG lines, tests) follows on the
+  same branch; until it lands the docs describe behaviour slightly ahead of main.
