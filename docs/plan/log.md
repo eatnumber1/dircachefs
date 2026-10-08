@@ -1728,3 +1728,15 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 23.9 (russ, 2026-10-08): LINK of a removed object must answer exactly what the backing answers
   (ENOENT for an unlinked file, EPERM for a directory, success for O_TMPFILE), not ESTALE; README
   paragraph rewritten. Queued after 23.8 in lane-4.
+- 25.3 code merged (76ab735, five commits): reclassification (12 WARNING->ERROR, 1 ERROR->return,
+  1 WARNING->return with context, 1 INFO->WARNING, VLOG(2) SQL -> VLOG(3), 2 log-and-return pairs
+  removed, 45 first errors capitalised); new `ProducedByDcfs`/`DcfsErrnoToStatus` (dcfs-origin errno
+  payload) so the reply handler logs ERROR only for errors dcfs produced and a forwarded backing
+  errno goes to --v=1; INFO: start line, recovery and probe summaries, sync point rows/duration,
+  clean shutdown, first backing access after idle (idle = 12 x sync interval between
+  backing-reaching requests); --v=1 per backing-reaching request, --v=2 every request + reply;
+  tests in channel/dir_cache_fs/status/backing tests and lifecycle.sh (threshold); failing-first
+  via a tests-only branch on the old main; budgets and trace shards unchanged; flags_consistency
+  green (the four absl flags are a list under the README table). Presubmit 293 + 2. PUSH POINT.
+  Post-merge Opus review requested (the agent's own design of ProducedByDcfs). Lane-5 held until
+  the dcfs/ editors (11.5/11.4, 23.8) land; then 7.3/7.6/7.7.
