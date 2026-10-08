@@ -157,7 +157,15 @@ In this order, each with a known-bug variant and trace validation:
   `Crash` made every backing write durable even for a daemon-only crash.
   Fix in the same step: recovery clears nothing (rows stay dirty until
   the first sync point), a daemon crash keeps `bOpts`, plus a
-  `known_bugs/` variant.
+  `known_bugs/` variant. Merged 2026-10-08 (5776861) after two review
+  rounds: dcfs.tla `Crash` = `PowerLoss` | `DaemonCrash`, `ProbesDone`;
+  `known_bugs/recovery_clears_dirty` (CrashSafe) and
+  `known_bugs/lifetime_probe_list_in_memory` (RowsNameLiveObjects);
+  `MC_recovery`, `MC_lifetime_recovery`; the crash-during-recovery
+  harness binary with a `local_defines` flag so the faulted probe is
+  shown to fire; `RecoveryDone` recorder event. State counts: MC_small
+  871k, MC_large 9.16M (about 800 s on the runner, timeout eternal),
+  MC_nolock 6.37M.
 - 12.7 Effect-point property (SibylFS): each request is call, effect,
   reply; every reply equals what the backing would answer at some instant
   between call and reply (`Obs.tla`); covers mutation results, not only

@@ -1597,3 +1597,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   methods but nothing catches a missing one at compile time (RecoveryDone was caught only by
   trace_c) -> 26.4c idea: pure-virtual events with a null default, or a reflection test.
   Lane-5 (same agent) takes 11.6 fsfreeze.
+- 12.6 + 12.7 merged (5776861): ten commits (RecoveryIdempotent, crash during recovery, effect
+  points EffectAtSyscall/BackingAtSyscall/CacheLearnsAtCommit naming actions, 12.6b keeping the
+  dirty set through recovery, then the review's syncfs hole: recovery clears nothing, PowerLoss vs
+  DaemonCrash, ProbesDone, two known_bugs variants, Observers forwards RecoveryDone, large_test
+  eternal). Fast 181 + 2, formal 99/99 without large/nolock (run alone with 3600 s: pass), trace c
+  43 valid, subjects ok. Lane-1: new protocol agent on 12.7b (reply ghost).
