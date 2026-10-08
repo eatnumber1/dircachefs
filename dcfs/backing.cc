@@ -1891,11 +1891,11 @@ absl::Status StillWritable(Context &ctx, int fd) {
   BackingCall(ctx, "fstatvfs");
   ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(fd));
   if ((vfs.f_flag & ST_RDONLY) == 0) return absl::OkStatus();
-  return dcfs::ErrnoToStatus(
+  // An errno dcfs chose (its sync point refuses), not the backing's answer.
+  return dcfs::DcfsErrnoToStatus(
       EROFS,
-      "the backing filesystem went read-only during the run (after an "
-      "error?): its syncfs no longer makes anything durable, so the dirty "
-      "set is kept");
+      "Backing filesystem went read-only during the run (after an error?), "
+      "so its syncfs makes nothing durable; keeping the dirty set");
 }
 
 }  // namespace

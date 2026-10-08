@@ -384,9 +384,8 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
              << "--source=" << source
              << " is on a filesystem that went read-only by itself (its "
                 "superblock is read-only under a read-write mount: after an "
-                "error); what it shows may not be on its disk, so dcfs "
-                "refuses to cache it: unmount it, check it and mount it "
-                "again";
+                "error), and what it shows may not be on its disk; refusing "
+                "to start: unmount it, check it and mount it again";
     }
   }
 
