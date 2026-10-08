@@ -13,10 +13,17 @@ MODEL = [
 ]
 
 # The real model. MC_small: every request kind and invariant, today's
-# kernel locking (about a minute). MC_liveness: RecoveryTerminates.
+# kernel locking. MC_liveness: RecoveryTerminates. Timeout of small_test:
+# 1,479,307 distinct states since step 12.11's attribute change; at about
+# 80 us per state on the CI runner that is about 120 s, but 12 min alone
+# at load 13 on russ's machine, past "moderate"'s 300 s. The others stay
+# "moderate": recovery 39,635 states (about 3 s on the runner, 19 s at
+# load 13), liveness 146,504 (about 12 s; 104 s), interrupt 280,869 (about
+# 22 s; 136 s).
 tlc_test(
     name = "small_test",
     size = "medium",
+    timeout = "long",
     config = "MC_small.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
@@ -132,10 +139,16 @@ KNOWN_BUGS = {
     "attr_change_end_skipped": "Invariant GuardsBalanced is violated",
 }
 
+# rename_stale_source explores 993,559 distinct states before its
+# counterexample (about 80 s on the runner at 80 us per state, 5.5 min at
+# load 13): "long"; the others take seconds.
+KNOWN_BUG_TIMEOUTS = {"rename_stale_source": "long"}
+
 [
     tlc_test(
         name = "known_bug_%s_test" % bug,
         size = "medium",
+        timeout = KNOWN_BUG_TIMEOUTS.get(bug, "moderate"),
         config = "known_bugs/%s.cfg" % bug,
         expect_violation = violation,
         spec = "known_bugs/%s.tla" % bug,
