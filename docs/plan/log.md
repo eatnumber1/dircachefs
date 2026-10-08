@@ -1843,3 +1843,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 12.8 dispatched to lane-1 (new protocol agent): ordered backing-state sequence with a reordering
   regime constant (sequential / metadata-prefix / ext4-weak), directory-fsync switch, Ferrite litmus
   configurations; stop-and-report on any real gap.
+- russ, 2026-10-08: Phase 15 (mount.dcfs wrapper) may start out of phase order: 15.1 + 15.2 to
+  lane-6 (new implementer). Cleanup of the 16 stale Bazel output bases approved (lane-3 after its
+  re-sweep). Answers given: sources without a filesystem UUID stay with Phase 14 (need another
+  identity plus handle-free access from Phase 13; FUSE backings lack name_to_handle_at);
+  fsync-per-create explained (durable phase 1 per operation vs riding on the parent's dirty row:
+  a protocol change; ~1 ms per create on an SSD) and left to russ; glibc: proposed bumping the
+  sysroot to Debian 13 (glibc 2.41) with the OSV scan gating on fixable records and ignore-with-
+  expiry for the rest, awaiting russ's yes.
