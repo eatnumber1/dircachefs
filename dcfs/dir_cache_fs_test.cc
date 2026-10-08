@@ -1802,6 +1802,9 @@ TEST_F(DirCacheFSTest, CommonRequestsMatchTheModel) {
   EXPECT_EQ(Unlink(d, "b").error, 0);
   EXPECT_EQ(Unlink(d, "b").error, -ENOENT);
   EXPECT_EQ(Rename(d, "b", d, "f").error, -ENOENT);
+  // Changes of d's own attributes (the model's attrchange, step 12.11).
+  EXPECT_EQ(Chmod(d, 0750).error, 0);
+  EXPECT_EQ(Setxattr(d, "user.k", "v").error, 0);
   EXPECT_THAT(List(d, true),
               IsOkAndHolds(UnorderedElementsAre(".", "..", "c", "e")));
   EXPECT_EQ(Fsyncdir(d).error, 0);

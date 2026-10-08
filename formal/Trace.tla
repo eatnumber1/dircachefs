@@ -262,6 +262,11 @@ ArriveAs(p, k, n, m) ==
               /\ n # m
               /\ LKFrom(p, [NewReq("rename", n, m, "LK", n, "R0",
                                    KernelDirLock) EXCEPT !.rsnap = seq])
+         [] k = "attrchange" ->
+              /\ LockFree(KernelDirLock)
+              /\ muts < MaxMutations /\ muts' = muts + 1
+              /\ A1From(p, NewReq("attrchange", None, None, "A1", None, None,
+                                  KernelDirLock))
          [] k = "sync" ->
               /\ S1From(p, NewReq("sync", None, None, "S1", None, None, FALSE))
               /\ UNCHANGED muts
@@ -379,6 +384,7 @@ T_GetattrStat     == Ev("stat") /\ GetattrStat(P)     /\ Matches(E, {})
 T_CreateStat      == Ev("stat") /\ CreateStat(P)      /\ Matches(E, {})
 T_UnlinkStat      == Ev("stat") /\ UnlinkStat(P)      /\ Matches(E, {})
 T_RenameStat      == Ev("stat") /\ RenameStat(P)      /\ Matches(E, {})
+T_AttrChangeStat  == Ev("stat") /\ AttrChangeStat(P)  /\ Matches(E, {})
 
 FillOK == Ev("fill") /\ E.recorded = CanFill(ps[P].snap)
 T_ReaddirplusFill == FillOK /\ ReaddirplusFill(P) /\ Matches(E, {})
@@ -386,6 +392,7 @@ T_GetattrFill     == FillOK /\ GetattrFill(P)     /\ Matches(E, {})
 T_CreateFill      == FillOK /\ CreateFill(P)      /\ Matches(E, {})
 T_UnlinkFill      == FillOK /\ UnlinkFill(P)      /\ Matches(E, {})
 T_RenameFill      == FillOK /\ RenameFill(P)      /\ Matches(E, {})
+T_AttrChangeFill  == FillOK /\ AttrChangeFill(P)  /\ Matches(E, {})
 
 \* A fill of the directory's attributes outside its own requests (see
 \* GetattrWhole); `filled` is the code's own decision. Valid attributes
@@ -409,6 +416,14 @@ T_ArriveCreate ==
     /\ E.req.k \in {"create", "linkcreate"}
     /\ SyncedOK
     /\ ArriveAs(P, E.req.k, Req(E).n, None)
+    /\ Matches(E, {})
+
+\* An attribute change of D (step 12.11): its phase 1 is its Arrive.
+T_ArriveAttrChange ==
+    /\ Ev("phase1") /\ E.outcome = "begun" /\ ps[P].pc = "idle"
+    /\ E.req.k = "attrchange"
+    /\ SyncedOK
+    /\ ArriveAs(P, "attrchange", None, None)
     /\ Matches(E, {})
 
 T_UnlinkPhase1 ==
@@ -459,6 +474,12 @@ T_RenameSyscall ==
     /\ Ev("syscall") /\ RenameSyscall(P) /\ SyscallOK("R3")
     /\ Matches(E, {})
 
+\* (The model's attribute change never fails: its syscall line's errno is
+\* 0, a failed one being cut by the recorder.)
+T_AttrChangeSyscall ==
+    /\ Ev("syscall") /\ AttrChangeSyscall(P) /\ E.errno = 0
+    /\ Matches(E, {})
+
 T_CreateProbe ==
     /\ Ev("probe") /\ ps[P].pc = "C_probe" /\ ps[P].n = E.n
     /\ CreateProbe(P)
@@ -475,6 +496,9 @@ T_UnlinkPhase3 ==
     /\ Ev("end") /\ OwnedOK /\ UnlinkPhase3(P) /\ Matches(E, {})
 T_RenamePhase3 ==
     /\ Ev("end") /\ OwnedOK /\ RenamePhase3(P) /\ Matches(E, {})
+\* The end of an attribute change (its Mutation::End; no record of its
+\* own, so Owns is not asked).
+T_AttrChangePhase3 == Ev("end") /\ AttrChangePhase3(P) /\ Matches(E, {})
 T_CreateFailed == Ev("end") /\ CreateFailed(P) /\ Matches(E, {})
 T_UnlinkFailed == Ev("end") /\ UnlinkFailed(P) /\ Matches(E, {})
 T_RenameFailed == Ev("end") /\ RenameFailed(P) /\ Matches(E, {})
@@ -572,15 +596,17 @@ TraceNext ==
     \/ T_ArriveReaddir \/ T_ReaddirStep \/ T_ReaddirplusAttrCheck
     \/ T_ArriveGetattr
     \/ T_ReaddirplusStat \/ T_GetattrStat \/ T_CreateStat \/ T_UnlinkStat
-    \/ T_RenameStat
+    \/ T_RenameStat \/ T_AttrChangeStat
     \/ T_ReaddirplusFill \/ T_GetattrFill \/ T_CreateFill \/ T_UnlinkFill
-    \/ T_RenameFill
+    \/ T_RenameFill \/ T_AttrChangeFill
     \/ T_GetattrWhole
-    \/ T_ArriveCreate \/ T_UnlinkPhase1 \/ T_RenamePhase1
+    \/ T_ArriveCreate \/ T_UnlinkPhase1 \/ T_RenamePhase1 \/ T_ArriveAttrChange
     \/ T_UnlinkPhase1Absent \/ T_UnlinkResolved \/ T_RenameResolveDst
     \/ T_CreateSyscall \/ T_UnlinkSyscall \/ T_RenameSyscall
+    \/ T_AttrChangeSyscall
     \/ T_CreateProbe
     \/ T_CreatePhase3 \/ T_UnlinkPhase3 \/ T_RenamePhase3
+    \/ T_AttrChangePhase3
     \/ T_CreateFailed \/ T_UnlinkFailed \/ T_RenameFailed
     \/ T_RenameFailed2 \/ T_Reresolve
     \/ T_ArriveSync \/ T_Syncfs \/ T_SyncClearDirty

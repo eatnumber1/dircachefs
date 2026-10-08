@@ -993,7 +993,7 @@ genrule(
 TRACED_GUEST_SCRIPTS = {
     "crash": dict(
         disks = ["vdb:ext4:320M"],
-        cuts = ["cross-directory-rename", "link", "dir-attrs", "dir-itself", "failed"],
+        cuts = ["cross-directory-rename", "link", "dir-itself", "failed"],
         root_cuts = ["cross-directory-rename"],
     ),
     "power": dict(

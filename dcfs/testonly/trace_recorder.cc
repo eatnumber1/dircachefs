@@ -93,7 +93,8 @@ bool IsCreate(const std::string &kind) {
 }
 
 bool IsMutation(const std::string &kind) {
-  return IsCreate(kind) || kind == "unlink" || kind == "rename";
+  return IsCreate(kind) || kind == "unlink" || kind == "rename" ||
+         kind == "attrchange";
 }
 
 // Distinct ids, in order of first appearance.
@@ -195,19 +196,19 @@ TraceRecorder::Mapping TraceRecorder::Map(const Frame &r, Ino dir) {
       if (r.newparent == dir) request("linkcreate", EscapeBytes(r.newname));
       break;
     case Op::kIoctl:
-      // Only a set changes D (its flags and ctime); a read (lsattr's
-      // FS_IOC_GETFLAGS) is nothing to D, and its getattr a getattr.
+      // Only a set changes D (its flags and ctime): an attribute change; a
+      // read (lsattr's FS_IOC_GETFLAGS) is nothing to D, and its getattr a
+      // getattr.
       if (r.ino == dir &&
           (r.flags == FS_IOC_SETFLAGS || r.flags == FS_IOC_FSSETXATTR)) {
-        unmodelled("dir-attrs: an ioctl changing the directory's flags");
+        request("attrchange");
       }
       break;
     case Op::kSetattr:
-      if (r.ino == dir) unmodelled("dir-attrs: a setattr of the directory");
-      break;
     case Op::kSetxattr:
     case Op::kRemovexattr:
-      if (r.ino == dir) unmodelled("dir-attrs: an xattr change of the directory");
+      // A change of D's attributes (an xattr change changes its ctime).
+      if (r.ino == dir) request("attrchange");
       break;
     default:
       break;
@@ -1305,7 +1306,7 @@ void TraceRecorder::MutationSyscall(Context &ctx, const absl::Status &status) {
                      : Open(*rf, dir, m.req_kind, m.n, m.m);
       const bool modelled =
           err == 0 || (IsCreate(req.kind) && err == EEXIST) ||
-          (!IsCreate(req.kind) && err == ENOENT);
+          ((req.kind == "unlink" || req.kind == "rename") && err == ENOENT);
       if (!modelled) {
         // Whether the request then failed (the model's requests always
         // finish: a cut) or replied OK regardless (unexplained), its
@@ -1317,8 +1318,9 @@ void TraceRecorder::MutationSyscall(Context &ctx, const absl::Status &status) {
       }
       req.syscall_seen = true;
       req.syscall_ok = err == 0;
-      // The names whose backing state the syscall may have changed.
-      std::string names = JsonStr(req.n);
+      // The names whose backing state the syscall may have changed (none
+      // for an attribute change).
+      std::string names = req.n.empty() ? "" : JsonStr(req.n);
       if (!req.m.empty()) absl::StrAppend(&names, ",", JsonStr(req.m));
       Emit(ctx, dir, &req, "syscall",
            absl::StrCat(",\"errno\":", err, ",\"names\":[", names, "]"));

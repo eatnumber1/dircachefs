@@ -732,8 +732,11 @@ absl::Status DirCacheFS::Setattr(
   }
 
   // Phase 2: the syscall(s) themselves.
+  ctx_.events->MutationSyscallStarting(ctx_);
   absl::Status set_status =
       backing::SetAttr(ctx_, caller, id, *attr, to_set);
+  // Model: AttrChangeSyscall.
+  ctx_.events->MutationSyscall(ctx_, set_status);
   // Phase 3 is refreshes only, which run as ordinary fills.
   mutation.End();
   if (!set_status.ok()) {
@@ -2240,8 +2243,11 @@ absl::Status DirCacheFS::Setxattr(
   // (see the BackingFile map) if one is already open. XATTR_CREATE/
   // XATTR_REPLACE in `flags`, and EPERM for "user." on a symlink or
   // special file, pass straight through from the real syscall.
+  ctx_.events->MutationSyscallStarting(ctx_);
   absl::StatusOr<backing::XattrReadBack> stored =
       backing::SetXattr(ctx_, caller, id, name, value, flags, OpenFdOf(id));
+  // Model: AttrChangeSyscall.
+  ctx_.events->MutationSyscall(ctx_, stored.status());
   if (!stored.ok()) {
     mutation.End();
     // `name` stays unknown (the syscall may or may not have changed it),
@@ -2385,8 +2391,11 @@ absl::Status DirCacheFS::Removexattr(
 
   // Phase 2: ENODATA (already removed, or never existed) passes straight
   // through from the real syscall.
+  ctx_.events->MutationSyscallStarting(ctx_);
   absl::Status remove_status =
       backing::RemoveXattr(ctx_, caller, id, name, OpenFdOf(id));
+  // Model: AttrChangeSyscall.
+  ctx_.events->MutationSyscall(ctx_, remove_status);
   if (!remove_status.ok()) {
     mutation.End();
     // As Setxattr: `name` stays unknown.
@@ -2713,7 +2722,10 @@ absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,
     return interrupted;
   }
   BackingCall("IoctlFd");
+  if (mutation.has_value()) ctx_.events->MutationSyscallStarting(ctx_);
   absl::StatusOr<std::string> out = backing::IoctlFd(*fd, cmd, in, out_size);
+  // Model: AttrChangeSyscall (of a mutation; none for a removed object).
+  if (mutation.has_value()) ctx_.events->MutationSyscall(ctx_, out.status());
   if (mutation.has_value()) mutation->End();
   if (!removed) {
     // Phase 3 (or, after a failure, best effort): refreshes, as fills.

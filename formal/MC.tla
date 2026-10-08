@@ -10,10 +10,17 @@ EXTENDS dcfs
 \* Every request kind, and subsets of them: for known-bug configurations
 \* that leave out a request whose bug (when it was open) would otherwise
 \* have stopped TLC first.
-AllRequests == AllKinds
-AllButRename == AllKinds \ {"rename"}
-AllButReaddirplus == AllKinds \ {"readdirplus"}
-AllButRenameAndReaddirplus == AllKinds \ {"rename", "readdirplus"}
+\* The attribute change of D (step 12.11) is checked by the medium
+\* configurations (WithAttrChanges: MC_small, MC_recovery, MC_liveness,
+\* MC_interrupt) and trace validation; the large ones and the known bugs
+\* keep the request kinds they had (AllRequests), whose state spaces it
+\* would multiply for a request that interleaves only with getattrs and
+\* syncs under the kernel's lock.
+WithAttrChanges == AllKinds
+AllRequests == AllKinds \ {"attrchange"}
+AllButRename == AllRequests \ {"rename"}
+AllButReaddirplus == AllRequests \ {"readdirplus"}
+AllButRenameAndReaddirplus == AllRequests \ {"rename", "readdirplus"}
 
 (***************************************************************************)
 (* View: what TLC uses to tell states apart (the VIEW in a .cfg). Two      *)

@@ -446,9 +446,10 @@ TEST_F(TraceRecorderTest, DirectoryNamedByTheRequestsResolveIsCut) {
 // --- IOCTL of a directory (review of Phase 23, tests) --------------------
 
 // A read-only ioctl of D (lsattr's FS_IOC_GETFLAGS) changes nothing: its
-// getattr is the model's getattr, not a cut. Only a set (chattr) is a
-// mutation of D's attributes the model does not have.
-TEST_F(TraceRecorderTest, ReadOnlyIoctlOfADirectoryIsNoCut) {
+// getattr is the model's getattr, not a cut. A set (chattr) is the model's
+// attribute change of D (step 12.11): its phase 1, syscall (which names no
+// name) and End are lines of an "attrchange" request.
+TEST_F(TraceRecorderTest, IoctlOfADirectoryIsAGetattrOrAnAttributeChange) {
   ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
   StartTrace();
   {
@@ -463,11 +464,20 @@ TEST_F(TraceRecorderTest, ReadOnlyIoctlOfADirectoryIsNoCut) {
     events::RequestScope request(
         *ctx_.events, ctx_,
         {.op = events::Op::kIoctl, .ino = d, .flags = FS_IOC_SETFLAGS});
-    recorder_->GetattrBegin(ctx_, d, /*valid=*/true);
-    recorder_->GetattrEnd(ctx_, absl::OkStatus());
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginAttrChange(ctx_, d));
+    ctx_.events->MutationSyscallStarting(ctx_);
+    ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
+    mutation.End();
   }
-  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"cut\""),
-                                       HasSubstr("dir-attrs"))));
+  const std::vector<std::string> lines = Lines(d);
+  EXPECT_THAT(lines, Not(Contains(HasSubstr("\"ev\":\"cut\""))));
+  EXPECT_THAT(lines, Contains(AllOf(HasSubstr("\"ev\":\"phase1\""),
+                                    HasSubstr("\"k\":\"attrchange\""))));
+  EXPECT_THAT(lines, Contains(AllOf(HasSubstr("\"ev\":\"syscall\""),
+                                    HasSubstr("\"names\":[]"))));
+  EXPECT_THAT(lines, Contains(HasSubstr("\"ev\":\"end\"")))
+      << "the attribute change's End";
 }
 
 // --- Files' traces (formal/reval.tla) ------------------------------------

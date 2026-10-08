@@ -371,7 +371,8 @@ class ProtocolEvents {
   virtual void MutationSyscallStarting(Context &ctx) {}
 
   // The phase-2 syscall of the request's mutation returned. Model:
-  // CreateSyscall, UnlinkSyscall, RenameSyscall.
+  // CreateSyscall, UnlinkSyscall, RenameSyscall, AttrChangeSyscall (a
+  // Setattr, Setxattr, Removexattr or flag-setting Ioctl).
   virtual void MutationSyscall(Context &ctx, const absl::Status &status) {}
 
   // RecordNewChild probed the created name (right after its openat and

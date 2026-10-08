@@ -127,6 +127,9 @@ KNOWN_BUGS = {
     # negative entry, without the kernel's lock).
     "reply_after_failed_syscall": "Action property ReplyObservable is violated",
     "reply_unknown_as_negative": "Action property ReplyObservable is violated",
+    # Step 12.11: an attribute change whose Mutation::End is skipped (8.2's
+    # mutation survivors).
+    "attr_change_end_skipped": "Invariant GuardsBalanced is violated",
 }
 
 [
@@ -451,6 +454,12 @@ TRACE_TESTS = {
     "reply_lookup_answer": None,
     # ... a negative entry after that probe is rejected at the reply.
     "reply_lookup_answer_wrong": "\"ev\":\"reply\",\"p\":\"p1\",\"errno\":0,\"ans\":\"neg\"",
+    # Step 12.11: an attribute change of the directory, its End a line of
+    # its own: valid ...
+    "attr_change": None,
+    # ... and without its end line (a Mutation::End skipped) rejected at
+    # the refresh's statx that follows.
+    "attr_change_end_skipped": "\"ev\":\"stat\"",
 }
 
 [

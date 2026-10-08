@@ -50,7 +50,7 @@ CONSTANTS
     BugInterruptLeaksGuard      \* an interrupted mutation never Ends
 
 AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
-             "create", "linkcreate", "unlink", "rename", "sync"}
+             "create", "linkcreate", "unlink", "rename", "attrchange", "sync"}
 
 ASSUME /\ Names # {} /\ IsFiniteSet(Names)
        /\ Procs # {} /\ IsFiniteSet(Procs)
@@ -633,6 +633,45 @@ Fail(p, label, name, cont) ==
                              !.mseq = 0, !.was = FALSE])
     /\ UnchangedBacking /\ UnchangedDB /\ UNCHANGED <<servedWrong, stamp>>
 
+(* A change of D's own attributes (step 12.11): DirCacheFS::Setattr,      *)
+(* Setxattr and Removexattr (an xattr change changes D's ctime), and the   *)
+(* flag-setting Ioctl (FS_IOC_SETFLAGS, FS_IOC_FSSETXATTR) of D. Phase 1   *)
+(* marks D's attributes unknown and D dirty; the syscall changes them;     *)
+(* Mutation::End, with no record of its own ("phase 3 is refreshes        *)
+(* only"); then a refresh, as a fill. The model's attribute change never  *)
+(* fails (a trace with a failed one is cut there).                         *)
+
+\* Phase 1 (cache::BeginAttrChange, BeginXattrChange): D's attributes
+\* unknown, D dirty. Then the checkpoint and the syscall.
+A1From(p, r) ==
+    /\ BeginMutation({}, TRUE)
+    /\ Syscall(p, InFlight(r, "A_sys"))
+    /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
+
+\* Phase 2: chmod/utimensat/setxattr/ioctl...: D's attributes change.
+ASys(p) ==
+    /\ At(p, "A_sys")
+    /\ stamp' = stamp + 1
+    /\ MutSyscall(p, [ps[p] EXCEPT !.pc = "A3", !.eff = "ok"],
+                   [names |-> bCur.names, ver |-> stamp])
+    /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
+
+\* The end of an attribute change: Mutation::End (known_bugs/
+\* attr_change_end_skipped overrides it with AttrChangeEndSkipped).
+AttrChangeEnd == EndMutation
+\* Not the code: an attribute change that never Ends (8.2's mutation
+\* survivors: a deleted Mutation::End after copy_file_range, fallocate,
+\* setattr), its guard left raised.
+AttrChangeEndSkipped == UNCHANGED <<seq, inflight, durableD>>
+
+\* Mutation::End, then the refresh (RefreshAttrs, RefreshAttrsFromFd): its
+\* fill snapshot, taken right after the End, then OpenNode and statx.
+A3(p) ==
+    /\ At(p, "A3")
+    /\ AttrChangeEnd
+    /\ Syscall(p, [ps[p] EXCEPT !.pc = "A_stat", !.snap = seq', !.mseq = 0])
+    /\ UnchangedBacking /\ UnchangedDB /\ UNCHANGED <<servedWrong, stamp>>
+
 (* Unlink and Rmdir (DirCacheFS::RemoveChild). *)
 
 \* After resolving the name: ENOENT, or phase 1 (cache::BeginRemove: the
@@ -820,8 +859,9 @@ S2(p) ==
 (* interrupted mutation never Ends (its guard stays raised).              *)
 (***************************************************************************)
 
-InterruptPcs == {"RN_probe", "PD_read", "PD_commit", "C_sys", "U_sys", "R_sys"}
-AfterSyscallPcs == {"C_probe", "C_rec", "U3", "R3"}
+InterruptPcs == {"RN_probe", "PD_read", "PD_commit", "C_sys", "U_sys", "R_sys",
+                 "A_sys"}
+AfterSyscallPcs == {"C_probe", "C_rec", "U3", "R3", "A3"}
 
 \* Putting a rename's source name back (the only resolved name the model
 \* keeps past phase 1): what cancelling the mutation would do.
@@ -895,6 +935,10 @@ Arrive(p) ==
                /\ n # m
                /\ LKFrom(p, [NewReq("rename", n, m, "LK", n, "R0",
                                     KernelDirLock) EXCEPT !.rsnap = seq])
+       \/ /\ "attrchange" \in Requests /\ LockFree(KernelDirLock)
+          /\ muts < MaxMutations /\ muts' = muts + 1
+          /\ A1From(p, NewReq("attrchange", None, None, "A1", None, None,
+                              KernelDirLock))
        \/ /\ "sync" \in Requests
           /\ S1From(p, NewReq("sync", None, None, "S1", None, None, FALSE))
           /\ UNCHANGED muts
@@ -934,6 +978,10 @@ RenameStat(p)      == Stat(p, "R_stat", "R_fill") /\ F
 RenameFill(p)      == FillAttrsAndReply(p, "R_fill") /\ F
 RenameFailed(p)    == Fail(p, "R_fail", ps[p].n, "R_fail2") /\ F
 RenameFailed2(p)   == RFail2(p) /\ F
+AttrChangeSyscall(p) == ASys(p) /\ F
+AttrChangePhase3(p) == A3(p) /\ F
+AttrChangeStat(p)  == Stat(p, "A_stat", "A_fill") /\ F
+AttrChangeFill(p)  == FillAttrsAndReply(p, "A_fill") /\ F
 SyncClearDirty(p)  == S2(p) /\ F
 
 -----------------------------------------------------------------------------
@@ -1141,6 +1189,8 @@ Next ==
          \/ RenameResolveDst(p) \/ RenamePhase1(p) \/ RenameSyscall(p)
          \/ RenamePhase3(p) \/ RenameStat(p) \/ RenameFill(p)
          \/ RenameFailed(p) \/ RenameFailed2(p)
+         \/ AttrChangeSyscall(p) \/ AttrChangePhase3(p)
+         \/ AttrChangeStat(p) \/ AttrChangeFill(p)
          \/ SyncClearDirty(p)
          \/ Interrupt(p)
     \/ CrashServing \/ CrashRecovering \/ CrashStopping
@@ -1192,9 +1242,11 @@ MutatedNames(p) ==
       [] ps[p].pc \in {"U_sys", "U3", "U_fail"} -> {ps[p].n}
       [] ps[p].pc \in {"R_sys", "R3", "R_fail"} -> {ps[p].n, ps[p].m}
       [] OTHER -> {}
+\* ... and an attribute change's: D's attributes, until its End.
+AttrsMutated(p) == MutatedNames(p) # {} \/ ps[p].pc \in {"A_sys", "A3"}
 TriState ==
     mode = "up" =>
-        \A p \in Procs : MutatedNames(p) # {} =>
+        \A p \in Procs : AttrsMutated(p) =>
             /\ \A n \in MutatedNames(p) : ReadState(dbCur, n) = Unknown
             /\ ~dbCur.attrValid
 
@@ -1256,7 +1308,8 @@ Known(d) == [names |-> {n \in Names : ReadState(d, n) # Unknown},
 \* themselves, not merely a step from their pc (another step from there,
 \* such as an interrupt, is no effect point).
 SyscallStep == \E p \in Procs :
-                 CreateSyscall(p) \/ UnlinkSyscall(p) \/ RenameSyscall(p)
+                 \/ CreateSyscall(p) \/ UnlinkSyscall(p) \/ RenameSyscall(p)
+                 \/ AttrChangeSyscall(p)
 
 \* The fills the trace validation adds outside any request slot (a child's
 \* or parent's row, the root's attributes at InitRoot: Trace.tla's
@@ -1270,7 +1323,7 @@ CommitStep ==
          \/ ResolveCommit(p) \/ PopulateCommit(p) \/ ReaddirplusFill(p)
          \/ GetattrFill(p) \/ CreatePhase3(p) \/ CreateFill(p)
          \/ UnlinkPhase3(p) \/ UnlinkFill(p) \/ RenamePhase3(p)
-         \/ RenameFill(p)
+         \/ RenameFill(p) \/ AttrChangeFill(p)
     \/ OutOfSlotFill
 
 Serving == mode = "up" /\ mode' = "up"
