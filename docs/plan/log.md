@@ -1698,3 +1698,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Side effect of merging 25.3's docs first: `//man:flags_consistency_test` fails on main (README
   lists --v/--stderrthreshold/--minloglevel/--vmodule before main.cc links absl's log flags), so the
   25.3 code is part of the next push point. Lane-6 held for 11.3b (needs 11.5's backing.cc first).
+- readdir_boundary_test "hang" closed: not a regression. On this host (load 12-15, ~50% steal in
+  the guest) the test needs 215-230 s of guest time against the 240 s guest timeout; the serial log
+  shows the creation loop (a shell fork + FUSE create per file, ~35 files/s) taking ~200 s, dcfs
+  never in D state, dcfs CPU identical on fee154d and main (2960 vs 2973 ticks at the same point),
+  MemAvailable 136-148 MB of 222, no reclaim; the initramfs growth costs 1.6 MB. CI's quiet runner
+  passes it. names_test/names_random_test unaffected. Follow-up as 6.2 (lane-3): create the files
+  with one testutil call, same N and assertions. Push hold for this lifted.
