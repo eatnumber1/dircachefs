@@ -9,9 +9,10 @@
 # The outputs are //dcfs:main, //dcfs:main_static (the SBOM calls them the
 # shipped binaries) and //man:dcfs.8. Since step 7.1b the binaries link a
 # pinned glibc and Linux headers (the Debian sysroot of @dcfs_llvm) and the
-# compiler runs on pinned libraries, so nothing the host's packages provide
-# reaches the outputs and the comparison should hold across hosts too (only
-# the same host has been measured). A difference prints the
+# compiler runs on pinned libraries; what is left of the host is its glibc,
+# which runs clang and lld (their ELF interpreter), so the comparison should
+# hold across hosts that run them alike (only the same host has been
+# measured). A difference prints the
 # strings that differ (tools/repro_compare.py), which is where an embedded
 # path, host name or timestamp shows up. The gate's own self-check is
 # //tools:repro_compare_self_check_test.

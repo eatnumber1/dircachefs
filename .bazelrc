@@ -74,8 +74,8 @@ build:asan --linkopt -fsanitize=address
 build:asan --linkopt -fsanitize-link-c++-runtime
 # Read by test/qemu:asan_build (see test/qemu/qemu_cc_test.bzl): glibc
 # cannot be fully statically linked with ASan, so qemu_cc_test links
-# dynamically under this config instead and ships the ldd(1) closure in
-# the initramfs.
+# dynamically under this config instead and ships its libraries and loader,
+# from the toolchain's glibc sysroot, in the initramfs.
 build:asan --define=dcfs_sanitizer=asan
 
 build:ubsan --strip=never
