@@ -146,12 +146,10 @@ dcfs --source=<dir> --cache_db=<path> [flags] <mountpoint>
 dcfs uses Abseil logging, so Abseil's logging flags work too, with Abseil's
 semantics:
 
-| Flag | Default | Meaning |
-|---|---|---|
-| `--stderrthreshold` | `WARNING` | Log lines at this level or above go to standard error. `--stderrthreshold=0` (or `INFO`) adds the lifecycle lines: start with the source, cache and mount point, the recovery summary, each sync point with the rows it cleared and its duration, shutdown clean or unclean and why, and the first backing access after an idle period. `ERROR` hides warnings. (dcfs's default is `WARNING` where Abseil's is `ERROR`.) |
-| `--minloglevel` | `0` | Lines below this level (0 INFO, 1 WARNING, 2 ERROR, 3 FATAL) are dropped everywhere, whatever the threshold. |
-| `--v` | `0` | Enables verbose lines up to this level: `1` is one line per request that reached the backing filesystem, and why; `2` is every request with its reply; `3` adds the SQL statements. Verbose lines are INFO lines: also pass `--stderrthreshold=0`. |
-| `--vmodule` | (empty) | Per source file verbosity, e.g. `--vmodule=backing=2,sqlite=3`, overriding `--v` for those files. |
+- `--stderrthreshold` (default `WARNING`): Log lines at this level or above go to standard error. `--stderrthreshold=0` (or `INFO`) adds the lifecycle lines: start with the source, cache and mount point, the recovery summary, each sync point with the rows it cleared and its duration, shutdown clean or unclean and why, and the first backing access after an idle period. `ERROR` hides warnings. (dcfs's default is `WARNING` where Abseil's is `ERROR`.)
+- `--minloglevel` (default `0`): Lines below this level (0 INFO, 1 WARNING, 2 ERROR, 3 FATAL) are dropped everywhere, whatever the threshold.
+- `--v` (default `0`): Enables verbose lines up to this level: `1` is one line per request that reached the backing filesystem, and why; `2` is every request with its reply; `3` adds the SQL statements. Verbose lines are INFO lines: also pass `--stderrthreshold=0`.
+- `--vmodule` (default (empty)): Per source file verbosity, e.g. `--vmodule=backing=2,sqlite=3`, overriding `--v` for those files.
 
 At the default level the daemon only logs warnings and errors: errors are
 what dcfs itself failed at (a request answered with an error that did not
