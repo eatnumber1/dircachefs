@@ -365,7 +365,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
-    # Limit = 2x the cold estimate (only the cold part is measured (fetch 24 min + build 20 min = 45 min): a shard's warm test time is unmeasured here; lane-5's limit stays until a `cold` run measures it)
+    # Limit = 2x the cold estimate (the cold part is measured: fetch 24 min + build 20 min = 45 min; the tests are the serial sum of the shard's measured times (46, 52 and 55 min) divided by 1.5 for two guests at a time: 31-37 min, 80 min in all, step 11.2's ACE targets included; a `cold` run has not measured a shard)
     timeout-minutes: 180
     needs: presubmit
     steps:
@@ -432,8 +432,8 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
-    # Limit = 2x the cold estimate (as full: the sanitizer build is cold in every run; measured only fetch 24 min + build 20 min)
-    timeout-minutes: 180
+    # Limit = 1.5x the estimate (2026-10-08: the cold part is fetch 24 min + build 20 min = 45 min, measured; the tests are the serial sum of the shard's measured plain times (61, 62 and 46 min) times 2.5 to 3 for ASan, divided by 1.5 for two guests at a time: 100-120 min for shards 0 and 1, 77-92 for shard 2, so 145-170 min with the cold part; step 11.2's ACE targets are in those sums)
+    timeout-minutes: 240
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -499,7 +499,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
-    # Limit = 2x the cold estimate (as full: the sanitizer build is cold in every run; measured only fetch 24 min + build 20 min)
+    # Limit = 1.7x the estimate (cold part fetch 24 min + build 20 min = 45 min, measured; the tests about 1.5 times the plain serial sums, 61, 62 and 46 min, divided by 1.5: 60 min; 105 min in all)
     timeout-minutes: 180
     needs: presubmit
     steps:

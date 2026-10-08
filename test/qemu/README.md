@@ -387,7 +387,8 @@ re-measure after a change: run the tier with `--test_output=all` (or read
 `presubmit`, `full`) plus the sanitizer suites as two more, parallel to `full`
 (`asan`, `ubsan`; each of the three is a matrix of three shards, `test.sh
 --shard=I/3`; the top-level README's "Continuous integration"
-section has the whole story) with the same scripts and the same timeouts as
+section has the whole story, with the shard each large test lands in and the
+expected time per shard) with the same scripts and the same timeouts as
 a development machine:
 
 - `.github/ci/prepare.sh` makes `/dev/kvm` usable when the runner has it and

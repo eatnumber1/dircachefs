@@ -414,23 +414,38 @@ the two sanitizer suites:
 | `ubsan` | `bazel test --config=ubsan` over every tier, in 3 shards | `presubmit` |
 
 `full`, `asan` and `ubsan` run in parallel, nine runners in all, each with its
-own cache key and a 180-minute limit, so no suite's length bounds the others.
+own cache key and a time limit (180 minutes; `asan` 240), so no suite's length bounds the others.
 A shard is a deterministic partition of the suite's test targets
 (`.github/ci/test.sh --shard=I/N`, dealt out by `.github/ci/shard.sh` over
 the sorted list, size by size, so each shard gets its share of the slow
 tests; `//tools:shard_test`), passed to Bazel as explicit targets, so the
 test-result cache applies per shard. The sanitizer shards skip the host-only
-tests (`HOST_ONLY_COMPATIBLE`, `test/qemu/README.md`), which leaves 126 of
-the 226 test targets, 42 per shard. `full`'s 24 large and enormous targets
-are 8 per shard (small and medium are `presubmit`'s). Expected wall time per
-shard, from local runs on a shared 4-core machine at two test jobs: ubsan
-took 22 min for the small tier, 12 for medium and 52 for large and
-enormous (86 min, of which the build was about 10-15), so a shard is about
-35 min of tests plus the sanitizer build; the plain large and enormous
-tiers took 35 min on the first GitHub runs, so a `full` shard is about
-12 min plus the plain build (already cached by `presubmit`); `asan` was not
-measured, budget the ubsan figure and a half again. Each shard uploads
-`test-logs-<job>-<shard>` on failure.
+tests (`HOST_ONLY_COMPATIBLE`, `test/qemu/README.md`), which leaves 156 test
+targets, 52 per shard. `full`'s 34 large and enormous targets are 12, 11 and
+11 per shard (small and medium are `presubmit`'s). The targets of step 11.2
+fall as follows (`.github/ci/test.sh --shard=I/3 --list` prints a shard):
+
+| Shard | `full` (large, enormous) | `asan` (every tier) |
+|---|---|---|
+| 0 | `fault_ace_fs_test_btrfs`, `fault_power_kill_test_xfs`, destroy, nfs, pjdfstest on xfs | `fault_ace_a_test`, `fault_ace_fs_test_xfs`, the ext4/xfs/btrfs fault tests (some) |
+| 1 | `fault_ace_a_test`, `fault_ace_fs_test_xfs`, idle_long, pjdfstest on btrfs | `fault_ace_b_test`, `fault_power_kill_test_btrfs`, `fault_power_kill_test_ext4` |
+| 2 | `fault_ace_b_test`, `fault_power_kill_test_btrfs`, bench_full, formal large, pjdfstest on ext4 | `fault_ace_fs_test_btrfs`, `fault_power_kill_test_xfs` |
+
+Expected wall time per shard (2026-10-08: the serial sum of the targets'
+measured times on a shared 4-core machine at two test jobs, divided by 1.5 for
+the runner running two guests at a time; the sanitizer builds are cold in every
+run: fetch 24 min and build 20 min, measured on GitHub): `full` 46, 52 and
+55 min of tests serial, so 31, 35 and 37 min, 80 min with the cold part;
+`asan` 61, 62 and 46 min serial, 2.5 to 3 times under ASan, so 100 to 120 min
+for shards 0 and 1 and 77 to 92 for shard 2, 145 to 170 min with the cold part,
+against a limit of 240 min; `ubsan` about 1.5 times plain, 60 min and 105 with
+the cold part, limit 180. ACE target a (568 s plain, 182 sequences) is the
+longest single test of its shard after `bench_full` (761 s) and `idle_long`
+(691 s). Each shard uploads `test-logs-<job>-<shard>` on failure. Dealing by
+index modulo 3 balances the counts, not the time: a fourth `asan` shard would
+cut its wall to about 120 min at the price of another cold 45 min of runner
+time, but a cost-weighted deal (a file of measured times) would balance better
+than another shard; neither is done until a `cold` run measures the shards.
 
 - **Caches.** Bazel's disk cache, repository cache and Bazelisk's download
   are restored and saved with `actions/cache`, even when tests fail (the
