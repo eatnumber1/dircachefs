@@ -112,6 +112,17 @@ qemu_test(
     timeout = "moderate",
 )
 
+# Step 26.14: the quiet kernel: guest/init's sysctls (no periodic writeback,
+# no cache pressure), one vCPU by default, and that a dirty page waits for a
+# sync -- see guest/quiet_kernel.sh and README.md, "A quiet kernel".
+qemu_test(
+    name = "quiet_kernel_test",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/quiet_kernel.sh",
+    size = "small",
+    timeout = "moderate",
+)
+
 # Step 23: `dcfs --help` lists every flag and `dcfs --version` works under
 # the installed name -- see guest/help.sh.
 qemu_test(
