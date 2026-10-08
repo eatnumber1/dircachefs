@@ -313,7 +313,7 @@ absl::Status UpgradeSchema(sqlite3::Connection &db) {
     ABSL_ASSIGN_OR_RETURN(int version, ExistingSchemaVersion(db));
     if (version < 1 || version > kSchemaVersion) {
       return FailedPreconditionErrorBuilder()
-             << "Dcfs cache schema version mismatch: found " << version
+             << "dcfs cache schema version mismatch: found " << version
              << ", this build understands 1 through " << kSchemaVersion;
     }
     if (version == 1) {

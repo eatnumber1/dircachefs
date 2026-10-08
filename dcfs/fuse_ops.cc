@@ -103,7 +103,8 @@ std::string DescribeRequest(const events::Request &request) {
 void LogRequest(DirCacheFS &fs, const events::Request &request,
                 const absl::Status &status, uint64_t backing_calls) {
   if (backing_calls > 0) {
-    fs.NoteBackingAccess(fs.context().first_backing_call);
+    fs.NoteBackingAccess(fs.context().first_backing_call,
+                         fs.context().first_backing_at);
     // VLOG evaluates its operands only when enabled.
     VLOG(1) << DescribeRequest(request) << " reached the backing: "
             << backing_calls << " calls, the first "

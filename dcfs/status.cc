@@ -21,8 +21,28 @@ absl::Status DcfsErrnoToStatus(int error_number, std::string_view message) {
 
 bool ProducedByDcfs(const absl::Status &status) {
   if (status.ok()) return false;
-  return !status.GetPayload(kErrnoTypeUrl).has_value() ||
-         status.GetPayload(kOriginTypeUrl).has_value();
+  if (status.GetPayload(kOriginTypeUrl).has_value()) return true;
+  std::optional<absl::Cord> payload = status.GetPayload(kErrnoTypeUrl);
+  if (!payload.has_value()) return true;
+  // Errnos that describe dcfs's own process, not the backing filesystem's
+  // answer: running out of descriptors or memory, or a bug.
+  absl::StatusOr<int> err = ErrorNameToErrno(std::string(*payload));
+  if (!err.ok()) return true;
+  switch (*err) {
+    case EMFILE:
+    case ENFILE:
+    case ENOMEM:
+    case EBADF:
+    case EFAULT:
+      return true;
+    default:
+      return false;
+  }
+}
+
+absl::Status MarkProducedByDcfs(absl::Status status) {
+  if (!status.ok()) status.SetPayload(kOriginTypeUrl, absl::Cord("dcfs"));
+  return status;
 }
 
 absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status) {

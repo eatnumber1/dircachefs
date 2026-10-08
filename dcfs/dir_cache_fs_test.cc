@@ -2832,8 +2832,35 @@ TEST_F(ClockTest, ASyncPointIsLoggedAtInfoWithItsRows) {
       << "nothing dirty, no sync point\n" << capture.Dump();
 }
 
-// The first request to reach the backing after more than 12 sync
-// intervals (a minute here) says so at INFO; a shorter pause does not, and
+// An fsync's sync point is not announced at INFO (one per call), only at
+// --v=1.
+TEST_F(ClockTest, AnFsyncdirSyncPointIsLoggedOnlyAtVerbosityOne) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Release(f, fh).error, 0);  // written: dirty
+  {
+    AllLogCapture capture;
+    ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 0)
+        << capture.Dump();
+  }
+  auto [open2, fh2] = Open(f, O_RDWR);
+  ASSERT_EQ(open2.error, 0);
+  ASSERT_EQ(Release(f, fh2).error, 0);
+  ScopedVerbosity v(1);
+  AllLogCapture capture;
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point: cleared"), 1)
+      << capture.Dump();
+}
+
+// The first request to reach the backing after more than 60 seconds says so
+// at INFO; a shorter pause does not, and
 // neither does a request answered from the cache.
 TEST_F(ClockTest, TheFirstBackingAccessAfterAnIdlePeriodIsLoggedAtInfo) {
   WriteFile(Path("f"));
@@ -2940,11 +2967,164 @@ TEST_F(DirCacheFSTest, AnErrorDcfsProducedIsLoggedOnceAtError) {
 }
 
 // An errno the backing filesystem answered with is the answer, not a
-// failure of dcfs: no ERROR line.
+// failure of dcfs: no ERROR line. (A mkdir of an existing name fails in
+// mkdirat with EEXIST, which CreateChild returns as a Status.)
 TEST_F(DirCacheFSTest, AnErrnoFromTheBackingIsNotLoggedAtError) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("e"), 0755), IsOk());
   Start();
   AllLogCapture capture;
-  EXPECT_EQ(Unlink(kRootInode, "nope").error, -ENOENT);
+  EXPECT_EQ(Mkdir(kRootInode, "e").first.error, -EEXIST);
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 0) << capture.Dump();
+}
+
+// The create happened but recording it failed with an errno of the backing
+// filesystem: still dcfs's failure to record a backing change, so logged
+// once at ERROR, not dropped as a forwarded errno.
+TEST_F(DirCacheFSTest, ABackingErrnoWhileRecordingACreateIsLoggedAtError) {
+  Start();
+  // The first statx of the request is RecordNewChild's probe of the new
+  // directory.
+  StatxFailure() = EIO;
+  AllLogCapture capture;
+  auto [reply, id] = Mkdir(kRootInode, "d");
+  EXPECT_NE(reply.error, 0) << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 1) << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError, "while recording"), 1)
+      << capture.Dump();
+}
+
+// A DcfsErrnoToStatus status, through the whole request: one ERROR line, at
+// the handler (RefuseReservedIno no longer logs itself).
+TEST_F(DirCacheFSTest, ADcfsErrnoStatusIsLoggedOnceAtErrorByTheHandler) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(struct statx stx,
+                       syscalls::statx(AT_FDCWD, Path("f"), 0, STATX_INO));
+  FakeInodeNumbers()[stx.stx_ino] = uint64_t{1} << 63;
+  AllLogCapture capture;
+  EXPECT_EQ(Lookup(kRootInode, "f").first.error, -ENOTSUP) << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 1) << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError, "2^63"), 1)
+      << capture.Dump();
+}
+
+// A failed record of the access time leaves a stale atime present: ERROR.
+TEST_F(DirCacheFSTest, AFailedAtimeRecordIsLoggedAtError) {
+  WriteFile(Path("f"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId f = static_cast<InodeId>(entry.nodeid);
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_updates BEFORE UPDATE ON "
+                       "inodes BEGIN SELECT RAISE(ABORT, 'no updates'); END"),
+              IsOk());
+  AllLogCapture capture;
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_updates"), IsOk());
+  ASSERT_EQ(open.error, 0);
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError,
+                          "Open: could not record the access time"),
+            1)
+      << capture.Dump();
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// --v=3: the SQL statements, and one line per step with its outcome.
+TEST_F(DirCacheFSTest, VerbosityThreeShowsSqlAndSteps) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  {
+    AllLogCapture capture;
+    ASSERT_EQ(Getattr(f).first.error, 0);
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sqlite3_step"), 0)
+        << "--v=0\n" << capture.Dump();
+  }
+  ScopedVerbosity v(3);
+  AllLogCapture capture;
+  ASSERT_EQ(Getattr(f).first.error, 0);
+  EXPECT_GE(capture.Count(absl::LogSeverity::kInfo, "sqlite3_step: SELECT"), 1)
+      << capture.Dump();
+  EXPECT_GE(capture.Count(absl::LogSeverity::kInfo, "sqlite3_step: -> "), 1)
+      << capture.Dump();
+}
+
+// The missing-capability branch of Init: a kernel that does not offer
+// passthrough (the harness's INIT does not) is a WARNING, once.
+TEST_F(DirCacheFSTest, NoPassthroughIsAWarningAtInit) {
+  AllLogCapture capture;
+  Start();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning,
+                          "FUSE_CAP_PASSTHROUGH NOT granted"),
+            1)
+      << capture.Dump();
+}
+
+// Recovery says what it probed: the INFO summary counts the rows probed, the
+// ones gone and the ones that could not be probed.
+TEST_F(DirCacheFSTest, RecoveryLogsItsProbeSummary) {
+  WriteFile(Path("f"));
+  WriteFile(Path("kept"));
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_OK_AND_ASSIGN(InodeId kept, Id("kept"));
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
+  const InodeId dirty[] = {f, kept};
+  ASSERT_THAT(cache::MarkDirty(ctx_, dirty), IsOk());
+  AllLogCapture capture;
+  ASSERT_THAT(Restart("boot"), IsOk());
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                          "recovery: probed 2 recovered rows, 1 gone, 0 "
+                          "could not be probed"),
+            1)
+      << capture.Dump();
+}
+
+// A row that cannot be probed (here its deletion fails) is an ERROR of its
+// own and counts in the summary.
+TEST_F(DirCacheFSTest, RecoveryCountsTheRowsItCouldNotProbe) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
+  const InodeId dirty[] = {f};
+  ASSERT_THAT(cache::MarkDirty(ctx_, dirty), IsOk());
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_delete BEFORE DELETE ON inodes "
+                       "BEGIN SELECT RAISE(ABORT, 'no deletes'); END"),
+              IsOk());
+  AllLogCapture capture;
+  ASSERT_THAT(Restart("boot"), IsOk());
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_delete"), IsOk());
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError,
+                          "could not probe recovered inode"),
+            1)
+      << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                          "recovery: probed 1 recovered rows, 0 gone, 1 could "
+                          "not be probed"),
+            1)
+      << capture.Dump();
+  EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());  // Left for next time.
+  ASSERT_THAT(cache::DeleteInode(ctx_, f), IsOk());
+}
+
+// A row invalidated while a mutation's phase 3 refreshes it (NotFound: it is
+// gone, nothing to record) is not "a backing change that could not be
+// recorded".
+TEST_F(DirCacheFSTest, ARowGoneDuringPhase3IsNotLoggedAsAFailure) {
+  WriteFile(Path("a"));
+  Start();
+  auto [lookup, entry] = Lookup(kRootInode, "a");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId a = static_cast<InodeId>(entry.nodeid);
+  // The first statx after the rename is the root's refresh; the row of the
+  // renamed file goes then, before its own refresh.
+  StatxHook() = [&] { EXPECT_THAT(cache::DeleteInode(ctx_, a), IsOk()); };
+  AllLogCapture capture;
+  EXPECT_EQ(Rename(kRootInode, "a", kRootInode, "b").error, 0)
+      << capture.Dump();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 0) << capture.Dump();
 }
 

@@ -33,6 +33,10 @@ absl::Status DcfsErrnoToStatus(int error_number, std::string_view message);
 // False for an errno forwarded from a syscall (ErrnoToStatus), which is the
 // backing filesystem's answer.
 bool ProducedByDcfs(const absl::Status &status);
+// `status` marked as dcfs's own (a copy with the origin payload; OK stays
+// OK), for a failure that is dcfs's although its cause carries an errno of
+// the backing filesystem: a backing change that could not be recorded.
+absl::Status MarkProducedByDcfs(absl::Status status);
 // Builders for new errors that do not come from a syscall (docs/style.md
 // 1.6). Abseil has no absl::InternalErrorBuilder and the like. Each returns
 // an absl::StatusBuilder with the code, so the message is streamed:

@@ -66,7 +66,7 @@ FuseRequest::~FuseRequest() {
 
 absl::Status FuseRequest::ReplyEntryParam(const fuse_entry_param &param) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
-  absl::Status st = dcfs::ErrnoToStatus(
+  absl::Status st = dcfs::DcfsErrnoToStatus(
       -fuse_reply_entry(*req_, &param), "fuse_reply_entry");
   req_ = std::nullopt;
   return st;
@@ -95,7 +95,7 @@ absl::Status FuseRequest::ReplyNegativeEntry(absl::Duration entry_timeout) {
 absl::Status FuseRequest::ReplyAttr(
     const struct stat &attr, absl::Duration attr_timeout) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
-  absl::Status st = dcfs::ErrnoToStatus(
+  absl::Status st = dcfs::DcfsErrnoToStatus(
       -fuse_reply_attr(*req_, &attr, absl::ToDoubleSeconds(attr_timeout)),
       "fuse_reply_attr");
   req_ = std::nullopt;
@@ -107,7 +107,7 @@ absl::Status FuseRequest::ReplyReadlink(std::string_view target) {
   // fuse_reply_readlink() wants a NUL-terminated C string; `target` is not
   // guaranteed to be one.
   std::string target_str(target);
-  absl::Status st = dcfs::ErrnoToStatus(
+  absl::Status st = dcfs::DcfsErrnoToStatus(
       -fuse_reply_readlink(*req_, target_str.c_str()), "fuse_reply_readlink");
   req_ = std::nullopt;
   return st;
@@ -116,7 +116,7 @@ absl::Status FuseRequest::ReplyReadlink(std::string_view target) {
 absl::Status FuseRequest::ReplyOpen(const fuse_file_info &fi) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st =
-    dcfs::ErrnoToStatus(-fuse_reply_open(*req_, &fi), "fuse_reply_open");
+    dcfs::DcfsErrnoToStatus(-fuse_reply_open(*req_, &fi), "fuse_reply_open");
   req_ = std::nullopt;
   return st;
 }
@@ -124,7 +124,7 @@ absl::Status FuseRequest::ReplyOpen(const fuse_file_info &fi) {
 absl::Status FuseRequest::ReplyCreate(
     const fuse_entry_param &entry, const fuse_file_info &fi) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
-  absl::Status st = dcfs::ErrnoToStatus(
+  absl::Status st = dcfs::DcfsErrnoToStatus(
       -fuse_reply_create(*req_, &entry, &fi), "fuse_reply_create");
   req_ = std::nullopt;
   return st;
@@ -133,14 +133,14 @@ absl::Status FuseRequest::ReplyCreate(
 absl::Status FuseRequest::ReplyWrite(size_t count) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st =
-    dcfs::ErrnoToStatus(-fuse_reply_write(*req_, count), "fuse_reply_write");
+    dcfs::DcfsErrnoToStatus(-fuse_reply_write(*req_, count), "fuse_reply_write");
   req_ = std::nullopt;
   return st;
 }
 
 absl::Status FuseRequest::ReplyIoctl(int result, std::string_view buf) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
-  absl::Status st = dcfs::ErrnoToStatus(
+  absl::Status st = dcfs::DcfsErrnoToStatus(
       -fuse_reply_ioctl(*req_, result, buf.data(), buf.size()),
       "fuse_reply_ioctl");
   req_ = std::nullopt;
@@ -198,7 +198,7 @@ absl::Status FuseRequest::ReplyErrno(int errnum) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   errno_sent_ = errnum;
   absl::Status st =
-    dcfs::ErrnoToStatus(-fuse_reply_err(*req_, errnum), "fuse_reply_err");
+    dcfs::DcfsErrnoToStatus(-fuse_reply_err(*req_, errnum), "fuse_reply_err");
   req_ = std::nullopt;
   return st;
 }
@@ -218,13 +218,11 @@ void FuseRequest::ReplyFailureAndLogIfNotOk(const absl::Status &status) {
   // ERROR if dcfs produced the error; an errno forwarded from the backing
   // filesystem (ENOENT, EEXIST, ...) is the answer to the request, not a
   // failure of dcfs, and an interrupted request (dcfs/checkpoint.h) is no
-  // error either: `--v=2` shows both with the reply.
-  if (ProducedByDcfs(status)) {
-    LOG(ERROR) << status;
-  } else {
-    VLOG(1) << "replying with an error from the backing filesystem: "
-            << status;
-  }
+  // error either: `--v=2` shows the replies (Serve's LogRequest).
+  if (ProducedByDcfs(status)) LOG(ERROR) << status;
+  // A failed success reply used the request up (the status is the failure
+  // of that reply, logged above): there is nothing left to reply to.
+  if (!req_.has_value()) return;
   absl::Status reply_s = ReplyFailure(status);
   LOG_IF(ERROR, !reply_s.ok()) << "Failed to reply with failure: " << reply_s;
 }
@@ -232,7 +230,7 @@ void FuseRequest::ReplyFailureAndLogIfNotOk(const absl::Status &status) {
 absl::Status FuseRequest::ReplyBuf(std::string_view buf) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st =
-    dcfs::ErrnoToStatus(
+    dcfs::DcfsErrnoToStatus(
         -fuse_reply_buf(*req_, buf.data(), buf.size()),
         "fuse_reply_buf");
   req_ = std::nullopt;
@@ -242,7 +240,7 @@ absl::Status FuseRequest::ReplyBuf(std::string_view buf) {
 absl::Status FuseRequest::ReplyXattrSize(size_t size) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st =
-    dcfs::ErrnoToStatus(-fuse_reply_xattr(*req_, size), "fuse_reply_xattr");
+    dcfs::DcfsErrnoToStatus(-fuse_reply_xattr(*req_, size), "fuse_reply_xattr");
   req_ = std::nullopt;
   return st;
 }
@@ -266,7 +264,7 @@ absl::Status FuseRequest::ReplyDirsPlus(
 absl::Status FuseRequest::ReplyStatfs(const struct statvfs &stbuf) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st =
-    dcfs::ErrnoToStatus(
+    dcfs::DcfsErrnoToStatus(
         -fuse_reply_statfs(*req_, &stbuf),
         "fuse_reply_statfs");
   req_ = std::nullopt;

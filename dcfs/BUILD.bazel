@@ -411,6 +411,7 @@ qemu_cc_test(
       "@absl//absl/log:log_sink",
       "@absl//absl/log:log_sink_registry",
       "@absl//absl/strings",
+      "@absl//absl/time",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",

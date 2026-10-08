@@ -10,6 +10,7 @@
 #include "absl/random/bit_gen_ref.h"
 #include "absl/status/statusor.h"
 #include "absl/time/clock_interface.h"
+#include "absl/time/time.h"
 #include "dcfs/interrupts.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/protocol_events.h"
@@ -130,11 +131,17 @@ struct Context {
   // `first_backing_call` was last cleared. The request handler (fuse_ops.cc)
   // reads the difference around a request for its `--v=1` line and for the
   // INFO line about the first backing access after an idle period.
+  // `first_backing_call` is a view of the string literal each BackingCall
+  // site passes, so it is safe to keep. `first_backing_at` is the clock then
+  // (the idle line's time), read only for a request's first call.
   uint64_t backing_calls = 0;
   std::string_view first_backing_call;
+  absl::Time first_backing_at;
   void NoteBackingCall(std::string_view what) {
-    if (backing_calls++ == 0 || first_backing_call.empty()) {
+    ++backing_calls;
+    if (first_backing_call.empty()) {
       first_backing_call = what;
+      first_backing_at = clock->TimeNow();
     }
   }
 };

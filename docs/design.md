@@ -1790,7 +1790,7 @@ threshold shows, with an example of a line (the `I20261008 12:00:00.001234
 | `FATAL` | dcfs cannot continue safely | `F... check.cc] Check failed: fs != nullptr` |
 | `ERROR` (default) | the caller got an error dcfs produced, or dcfs refused its job | `E... fuse_request.cc] INTERNAL: RET_CHECK failure: Read on unknown handle 7` |
 | `WARNING` (default) | nothing failed for the caller, state is degraded or surprising | `W... backing.cc] inode 42: out-of-band change on the backing filesystem (unsupported): size 4096 -> 8192; adopting the new attributes` |
-| `INFO` (`--stderrthreshold=0`) | the lifecycle: start, recovery, sync points, shutdown, the first backing access after an idle period | `I... main.cc] dcfs 1.0 starting: source=/srv/media cache_db=/var/lib/dcfs/media.db mountpoint=/mnt/media allow_other=false attr_timeout_sec=3600 entry_timeout_sec=3600 sync_interval_sec=5 fuse_opt=` |
+| `INFO` (`--stderrthreshold=0`) | the lifecycle: start, recovery, sync points, shutdown, the first backing access after an idle period | `I... main.cc] dcfs 1.0 starting: source=/srv/media cache_db=/var/lib/dcfs/media.db mountpoint=/mnt/media mount_options=default_permissions attr_timeout_sec=3600 entry_timeout_sec=3600 sync_interval_sec=5 foreground=true` |
 | `--v=1` | one line per request that reached the backing filesystem (the request, how many backing calls, the first), after the lines for the cache decisions behind it | `I... fuse_ops.cc] Lookup(ino=1, name="a") reached the backing: 3 calls, the first getdents64` |
 | `--v=2` | every request, with its reply | `I... fuse_ops.cc] Lookup(ino=1, name="a") -> OK` |
 | `--v=3` | SQL statements and one line per step | `I... sqlite.cc] sqlite3_step: SELECT ...`, then `sqlite3_step: -> row` |
@@ -1799,25 +1799,33 @@ The INFO lines: the start line (source, cache database, mount point and
 options); the recovery summary (`recovery: the last run ended cleanly; 0
 dirty entries made unknown, 0 rows of unnamed or unlinked files
 forgotten`, then `recovery: probed 12 recovered rows, 3 gone, 0 could not
-be probed`); each sync point (`sync point: cleared 14 of 16 dirty rows in
-3.2ms`); the shutdown (`shutdown: clean (the dirty set is empty and the
+be probed`); each periodic sync point (`sync point: cleared 14 of 16 dirty rows in
+3.2ms`; an fsync's is shown at `--v=1` only); the shutdown (`shutdown: clean (the dirty set is empty and the
 clean-shutdown flag is committed)`; one that could not be clean is a
 WARNING, `clean shutdown incomplete, the next start will recover the
 dirty set: <reason>`, because the next start has work to do); and the
 first backing access after an idle period (`first backing access after
-1m12s idle (getdents64)`, the first backing call of that request). "Idle" is the longest gap between two requests that reached the
-backing filesystem that the daemon treats as quiet: 12 times
-`--sync_interval_sec` (one minute by default). The sync point's own
-interval is the nearest existing notion, but a sync point only runs while
+1m12s idle (getdents64)`, the first backing call of that request). "Idle"
+is a gap of more than 60 seconds (`DirCacheFS::kIdleThreshold`, a constant of
+its own: the sync interval is no good, since a sync point only runs while
 the dirty set is non-empty, so a read-only workload would log a line after
-every five-second pause; the multiple keeps the line to real pauses. It
-costs one clock read per request that reached the backing, through
-`Context::clock` like every other read of the time, and no syscall.
+every five-second pause) between two requests that reached the backing
+filesystem, measured from the clock at each request's first backing call
+(`Context::first_backing_at`, read once per such request through
+`Context::clock`, no syscall). Blind spot: only requests served through
+`Serve` (`fuse_ops.cc`) count. Reads and writes of an open file go through
+FUSE passthrough and never reach dcfs, and FORGET, the sync points and the
+start's own reads do not go through `Serve`, so a daemon whose only traffic
+is passthrough I/O logs the line at the next request that does reach the
+backing.
 
 A request's failure is logged once, by the FUSE handler that replies: at
-ERROR if dcfs produced the error (a status without an errno, or with
-`EIO`), and not at all (`--v=2` shows the reply) if the backing filesystem
-or the request itself answered with an errno such as `ENOENT`. The
+ERROR if dcfs produced the error (a status with no errno, one built by
+`DcfsErrnoToStatus`, one marked as dcfs's own by `MarkProducedByDcfs` (a
+backing change that could not be recorded), or an errno that describes
+dcfs's own process: `EMFILE`, `ENFILE`, `ENOMEM`, `EBADF`, `EFAULT`), and
+not at all (`--v=2` shows the reply) if the backing filesystem or the
+request itself answered with an errno such as `ENOENT`, `ESTALE` or `EINTR`. The
 functions below the handler return the status and log nothing
 (`docs/style.md` 1.7), so a failure carries one line with all the context
 the call chain added.

@@ -1660,7 +1660,9 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsWhatChangedDuringTheSync) {
   ASSERT_THAT(MarkDirty(ctx_, added_ids), IsOk());
 
   const InodeId keep[] = {kept};
-  ASSERT_THAT(ClearDirty(ctx_, synced, keep), IsOk());
+  int64_t cleared = -1;
+  ASSERT_THAT(ClearDirty(ctx_, synced, keep, &cleared), IsOk());
+  EXPECT_EQ(cleared, 1) << "the slow path counts the rows it deleted";
   // Only `done` was covered by the syncfs.
   EXPECT_THAT(ListDirty(ctx_),
               IsOkAndHolds(ElementsAre(across, ended, again, late, added,
@@ -1767,7 +1769,9 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsAMutationInFlightWhenNothingMoved) {
   ASSERT_OK_AND_ASSIGN(Mutation in_flight, BeginAttrChange(ctx_, m.id));
   ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
   ASSERT_EQ(ctx_.fills.seq, synced.fills.seq);
-  ASSERT_THAT(ClearDirty(ctx_, synced, {}), IsOk());
+  int64_t cleared = -1;
+  ASSERT_THAT(ClearDirty(ctx_, synced, {}, &cleared), IsOk());
+  EXPECT_EQ(cleared, 1) << "the fast path counts the rows it did not put back";
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(m.id)));
   in_flight.End();
   ASSERT_THAT(SyncClear(), IsOk());

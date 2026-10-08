@@ -92,6 +92,22 @@ TEST(ProducedByDcfsTest, OnlyAForwardedErrnoIsNotDcfsOwn) {
   EXPECT_TRUE(ProducedByDcfs(DcfsErrnoToStatus(EAGAIN, "kept changing")));
 }
 
+// An errno that describes dcfs's own process (it ran out of descriptors or
+// memory, or has a bug), not the backing filesystem's answer, is dcfs's.
+TEST(ProducedByDcfsTest, ErrnosOfDcfsOwnProcessAreDcfsOwn) {
+  for (int err : {EMFILE, ENFILE, ENOMEM, EBADF, EFAULT}) {
+    EXPECT_TRUE(ProducedByDcfs(ErrnoToStatus(err, "openat"))) << err;
+  }
+  EXPECT_FALSE(ProducedByDcfs(ErrnoToStatus(EEXIST, "mkdirat")));
+}
+
+TEST(ProducedByDcfsTest, MarkProducedByDcfsKeepsTheErrno) {
+  absl::Status marked = MarkProducedByDcfs(ErrnoToStatus(ENOENT, "openat"));
+  EXPECT_TRUE(ProducedByDcfs(marked));
+  EXPECT_EQ(StatusToErrno(marked), ENOENT);
+  EXPECT_TRUE(MarkProducedByDcfs(absl::OkStatus()).ok());
+}
+
 TEST(ProducedByDcfsTest, DcfsErrnoToStatusKeepsTheErrno) {
   absl::Status status = DcfsErrnoToStatus(ENOTSUP, "refused");
   EXPECT_THAT(GetErrnoFromStatus(status), IsOkAndHolds(ENOTSUP));

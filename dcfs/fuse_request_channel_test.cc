@@ -27,6 +27,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <sys/stat.h>
 #include <sys/uio.h>
 #include <unistd.h>
 
@@ -34,6 +35,7 @@
 #include "absl/log/log_sink_registry.h"
 #include "absl/status/status_matchers.h"
 #include "absl/strings/str_join.h"
+#include "absl/time/time.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/status.h"
@@ -62,6 +64,9 @@ struct FakeChannel {
   // If set, FakeGetattr replies with ReplyFailureAndLogIfNotOk(*fail_with),
   // the way fuse_ops.cc's Serve() does, instead of ReplyErrno(ENOENT).
   std::optional<absl::Status> fail_with;
+  // If set, FakeGetattr sends a success reply (which the channel fails with
+  // next_writev_errno) and hands its status to ReplyFailureAndLogIfNotOk.
+  bool reply_attr_then_fail = false;
 };
 
 // Never actually called: this test drives the session entirely via
@@ -95,6 +100,13 @@ void FakeGetattr(fuse_req_t req, fuse_ino_t, struct fuse_file_info *) {
   auto *channel =
       static_cast<FakeChannel *>(fuse_req_userdata(req));
   FuseRequest fr(req);
+  if (channel->reply_attr_then_fail) {
+    struct stat st = {};
+    absl::Status sent = fr.ReplyAttr(st, absl::Seconds(1));
+    fr.ReplyFailureAndLogIfNotOk(sent);
+    channel->reply_status = absl::OkStatus();
+    return;
+  }
   if (channel->fail_with.has_value()) {
     fr.ReplyFailureAndLogIfNotOk(*channel->fail_with);
     channel->reply_status = absl::OkStatus();
@@ -221,6 +233,19 @@ TEST(FuseRequestChannelTest, ABackingErrnoIsNotLoggedAtError) {
   ErrorCapture capture;
   RunGetattr(channel);
   EXPECT_THAT(capture.lines, testing::IsEmpty())
+      << absl::StrJoin(capture.lines, "\n");
+}
+
+// A success reply that fails (the request was aborted: the channel's write
+// fails) is a failure of dcfs, logged once at ERROR with what failed, and the
+// used request is not replied to a second time.
+TEST(FuseRequestChannelTest, AFailedSuccessReplyIsLoggedOnceAtError) {
+  FakeChannel channel;
+  channel.reply_attr_then_fail = true;
+  ErrorCapture capture;
+  RunGetattr(channel);
+  EXPECT_THAT(capture.lines, testing::ElementsAre(testing::HasSubstr(
+                                 "fuse_reply_attr")))
       << absl::StrJoin(capture.lines, "\n");
 }
 

@@ -368,7 +368,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below, MountsBelow(source));
     if (!below.empty()) {
       return FailedPreconditionErrorBuilder()
-             << "Dcfs does not yet support filesystems mounted below --source: "
+             << "dcfs does not yet support filesystems mounted below --source: "
                 "their inode numbers would collide under one st_dev; unmount "
                 "them or point --source elsewhere. Mounted below "
              << source << ": " << absl::StrJoin(below, ", ");

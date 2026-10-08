@@ -152,9 +152,10 @@ semantics:
 - `--vmodule` (default (empty)): Per source file verbosity, e.g. `--vmodule=backing=2,sqlite=3`, overriding `--v` for those files.
 
 At the default level the daemon only logs warnings and errors: errors are
-what dcfs itself failed at (a request answered with an error that did not
-come from the backing filesystem, a refused start, a failed recovery
-probe); warnings are what it noticed or survived (out-of-band changes,
+what dcfs itself failed at (a request that failed inside dcfs, such as its
+cache database or running out of descriptors, a backing change it could not
+record, a refused start, a failed recovery probe; an errno answer such as
+`ENOENT`, `ESTALE` or `EINTR` is not logged); warnings are what it noticed or survived (out-of-band changes,
 recovery after an unclean shutdown, a loose cache mode).
 
 libfuse mounts with `nosuid,nodev` by default. Pass `--fuse_opt=suid,dev`

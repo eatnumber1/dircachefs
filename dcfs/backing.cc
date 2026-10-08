@@ -1385,7 +1385,10 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   // fast path, which never touches the backing filesystem at all once a
   // directory is known complete.
   if (name.size() > NAME_MAX) {
-    return dcfs::ErrnoToStatus(ENAMETOOLONG, "Path component too long");
+    return dcfs::ErrnoToStatus(ENAMETOOLONG, absl::StrCat("Path component of ", name.size(),
+                                              " bytes is too long: ",
+                                              EscapeBytes(name.substr(0, 32)),
+                                              "..."));
   }
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::LookupBegin,
                       &ProtocolEvents::LookupEnd, parent, name);
@@ -1922,7 +1925,7 @@ absl::Status StillWritable(Context &ctx, int fd) {
 
 }  // namespace
 
-absl::Status SyncBacking(Context &ctx) {
+absl::Status SyncBacking(Context &ctx, bool announce) {
   const absl::Time began = ctx.clock->TimeNow();
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::SyncBegin,
                       &ProtocolEvents::SyncEnd);
@@ -1949,9 +1952,14 @@ absl::Status SyncBacking(Context &ctx) {
     ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep, &cleared));
     // Model: SyncClearDirty, or StopClear.
     ctx.events->SyncCleared(ctx);
-    LOG(INFO) << "sync point: cleared " << cleared << " of "
-              << synced.dirty.size() << " dirty rows in "
-              << absl::FormatDuration(ctx.clock->TimeNow() - began);
+    LOG_IF(INFO, announce)
+        << "sync point: cleared " << cleared << " of " << synced.dirty.size()
+        << " dirty rows in "
+        << absl::FormatDuration(ctx.clock->TimeNow() - began);
+    if (!announce) {
+      VLOG(1) << "sync point: cleared " << cleared << " of "
+              << synced.dirty.size() << " dirty rows";
+    }
     return absl::OkStatus();
   }());
 }
@@ -2007,10 +2015,12 @@ void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
     }
     if (!status.ok()) {
       ++failed;
-      LOG(ERROR) << "could not probe recovered inode " << id
-                   << " (it stays dirty until the next sync point, and an "
-                      "access finds it gone): "
-                   << status;
+      // The summary below counts them all; a few lines say why.
+      LOG_FIRST_N(ERROR, 10)
+          << "could not probe recovered inode " << id
+          << " (it stays dirty until the next sync point, and an access "
+             "finds it gone): "
+          << status;
     }
   }
   if (!dirty.empty()) {
@@ -2133,7 +2143,7 @@ namespace {
 // or chown by a non-owner (fuse_setattr), which the caller could not make.
 absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   if (S_ISLNK(type)) {
-    return dcfs::ErrnoToStatus(EOPNOTSUPP, "Chmod on a symlink");
+    return dcfs::ErrnoToStatus(EOPNOTSUPP, "chmod on a symlink");
   }
   if (S_ISREG(type) || S_ISDIR(type)) {
     ABSL_ASSIGN_OR_RETURN(
@@ -2151,11 +2161,11 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
 absl::Status ApplySize(const Credentials &caller, int opath_fd, mode_t type,
                        off_t size) {
   if (S_ISDIR(type)) {
-    return dcfs::ErrnoToStatus(EISDIR, "Truncate on a directory");
+    return dcfs::ErrnoToStatus(EISDIR, "truncate on a directory");
   }
   if (!S_ISREG(type)) {
     return dcfs::ErrnoToStatus(
-        EINVAL, "Truncate on a non-regular, non-directory file");
+        EINVAL, "truncate on a non-regular, non-directory file");
   }
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor fd, ReopenFd(opath_fd, O_WRONLY | O_CLOEXEC));

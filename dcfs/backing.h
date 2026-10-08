@@ -511,7 +511,9 @@ absl::Status StartupPurge(Context &ctx);
 // or writes the syncfs may not cover. On a syncfs failure nothing is
 // cleared (the dirty entries only cost a larger re-read after a crash) and
 // the error is returned.
-absl::Status SyncBacking(Context &ctx);
+// `announce`: log the sync point at INFO (the periodic ones and the
+// shutdown's), else at VLOG(1) (an fsync's, which comes once per call).
+absl::Status SyncBacking(Context &ctx, bool announce = true);
 
 // Startup, after Migrate() and before InitRoot()/StartupPurge(): if the
 // last run did not shut down cleanly (cache_state.clean_shutdown is 0), or

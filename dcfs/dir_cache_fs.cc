@@ -45,6 +45,15 @@ namespace dcfs {
 
 namespace {
 
+// A refresh made only on the way out of a failed operation, whose own error
+// is what gets replied: a failure of it is logged here, where it is consumed
+// (docs/style.md 1.7), at --v=1. NotFound: the row is gone, nothing to
+// record.
+void NoteBestEffort(std::string_view what, const absl::Status &status) {
+  if (status.ok() || absl::IsNotFound(status)) return;
+  VLOG(1) << what << " failed too: " << status;
+}
+
 // --- Side-effect xattrs ------------------------------------------------------
 //
 // The one place that lists the xattrs a backing filesystem changes as a
@@ -295,11 +304,11 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   LOG(LEVEL(passthrough ? absl::LogSeverity::kInfo
                         : absl::LogSeverity::kWarning))
       << "FUSE kernel protocol " << conn.proto_major << "."
-            << conn.proto_minor
-            << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted")
-            << "; FUSE_CAP_POSIX_ACL and FUSE_CAP_DONT_MASK requested"
-            << "; FUSE_CAP_ATOMIC_O_TRUNC, FUSE_CAP_OVER_IO_URING and "
-               "FUSE_CAP_SPLICE_READ intentionally not requested";
+      << conn.proto_minor << "; FUSE_CAP_PASSTHROUGH "
+      << (passthrough ? "granted" : "NOT granted")
+      << "; FUSE_CAP_POSIX_ACL and FUSE_CAP_DONT_MASK requested"
+      << "; FUSE_CAP_ATOMIC_O_TRUNC, FUSE_CAP_OVER_IO_URING and "
+         "FUSE_CAP_SPLICE_READ intentionally not requested";
   return absl::OkStatus();
 }
 
@@ -484,7 +493,8 @@ absl::Status DirCacheFS::RefreshAttrsOf(InodeId id, struct statx *fetched) {
 
 void DirCacheFS::LogPhase3Failure(std::string_view op,
                                   const absl::Status &status) {
-  if (status.ok()) return;
+  // NotFound: the row is gone (invalidated meanwhile); nothing to record.
+  if (status.ok() || absl::IsNotFound(status)) return;
   LOG(ERROR) << op << ": the backing change happened, but recording it "
              << "in the cache failed; leaving it unknown: " << status;
 }
@@ -577,12 +587,10 @@ void DirCacheFS::MaybeSyncBacking() {
   SyncBackingNow("periodic");
 }
 
-void DirCacheFS::NoteBackingAccess(std::string_view what) {
-  const absl::Time now = ctx_.clock->TimeNow();
-  const absl::Duration idle = now - last_backing_access_;
-  last_backing_access_ = now;
-  if (idle > kIdleSyncIntervals * opts_.sync_interval &&
-      idle != absl::InfiniteDuration()) {
+void DirCacheFS::NoteBackingAccess(std::string_view what, absl::Time at) {
+  const absl::Duration idle = at - last_backing_access_;
+  last_backing_access_ = at;
+  if (idle > kIdleThreshold && idle != absl::InfiniteDuration()) {
     LOG(INFO) << "first backing access after "
               << absl::FormatDuration(absl::Trunc(idle, absl::Seconds(1)))
               << " idle (" << what << ")";
@@ -592,7 +600,10 @@ void DirCacheFS::NoteBackingAccess(std::string_view what) {
 void DirCacheFS::SyncBackingNow(std::string_view why) {
   if (!ctx_.dirty.any) return;
   last_sync_ = ctx_.clock->TimeNow();
-  if (absl::Status status = backing::SyncBacking(ctx_); !status.ok()) {
+  // Only the periodic sync points are announced at INFO: an fsync runs one
+  // per call, while the dirty set is non-empty.
+  if (absl::Status status = backing::SyncBacking(ctx_, why == "periodic");
+      !status.ok()) {
     // Safe to carry on: the dirty entries stay, and only cost a larger
     // re-read after a crash. The next request past the interval retries.
     LOG(WARNING) << why << " sync of the backing filesystems failed, "
@@ -659,9 +670,11 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
     // backing filesystem fails) is replied as it is: EEXIST would not be
     // true.
     if (!probed) {
-      return absl::StatusBuilder(child.status())
-             << "while probing the created " << EscapeBytes(name)
-             << " in directory " << parent;
+      // An errno in it is the backing filesystem's (the probe), but not
+      // recording a backing change that happened is dcfs's failure: marked,
+      // so the handler logs it at ERROR.
+      return MarkProducedByDcfs(absl::StatusBuilder(child.status())
+                                << "while probing the new child");
     }
     return CreatedButNotCompleted(parent, name, child.status());
   }
@@ -745,7 +758,7 @@ absl::Status DirCacheFS::Setattr(
     // failure here must never shadow `set_status`, which is what actually
     // gets reported below.
     // (A side-effect xattr stays unknown, for its next reader.)
-    backing::RefreshAttrs(ctx_, id).IgnoreError();
+    NoteBestEffort("refresh after a failed set", backing::RefreshAttrs(ctx_, id));
     return set_status;
   }
 
@@ -846,9 +859,9 @@ void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
       // NotFound: gone already (invalidated, or deleted with its last
       // link).
       if (!absl::IsNotFound(cached.status())) {
-        LOG(WARNING) << "could not read the cached attributes of written "
-                     << "inode " << id << " to reconcile them: "
-                     << cached.status();
+        LOG(ERROR) << "could not read the cached attributes of written "
+                   << "inode " << id << " to reconcile them: "
+                   << cached.status();
       }
       continue;
     }
@@ -1446,8 +1459,9 @@ absl::Status DirCacheFS::Link(
     mutation.End();
     ABSL_RETURN_IF_ERROR(ReresolveAfterFailure(newparent, names));
     // Best effort, as Setattr: the op's own error is what gets replied.
-    RefreshAttrsOf(src).IgnoreError();
-    backing::RefreshAttrs(ctx_, newparent).IgnoreError();
+    NoteBestEffort("refresh after a failed link", RefreshAttrsOf(src));
+    NoteBestEffort("refresh after a failed link",
+                   backing::RefreshAttrs(ctx_, newparent));
     return status;
   }
 
@@ -1662,8 +1676,8 @@ absl::Status DirCacheFS::OpenInode(
     if (absl::StatusOr<bool> touched = cache::TouchAtime(
             ctx_, id, absl::ToTimespec(ctx_.clock->TimeNow()));
         !touched.ok()) {
-      LOG(WARNING) << "Open: could not record the access time of inode "
-                   << id << ": " << touched.status();
+      LOG(ERROR) << "Open: could not record the access time of inode " << id
+                 << ": " << touched.status();
     }
   }
 
@@ -1748,7 +1762,8 @@ void DirCacheFS::RecordWrittenAttrs(InodeId id, int fd, std::string_view op) {
   // A removed object has no row to record into (see Setattr).
   if (removed_.contains(id)) return;
   absl::Status status = backing::RefreshAttrsFromFd(ctx_, id, fd);
-  if (status.ok()) return;
+  // NotFound: the row is gone (invalidated meanwhile); nothing to record.
+  if (status.ok() || absl::IsNotFound(status)) return;
   // Never fatal to the op (see this method's declaration): the data is on
   // the backing filesystem regardless, and "unknown" attributes simply
   // repopulate on the next access. BeginWriting already marked them
@@ -1854,9 +1869,9 @@ absl::Status DirCacheFS::Release(
     if (refreshed.ok()) {
       delete_row = stx.stx_nlink == 0;
     } else {
-      LOG(ERROR) << "Release: could not refresh the attributes of inode "
-                 << id << " from its open fd, keeping its row: "
-                 << refreshed;
+      LOG(WARNING) << "Release: could not refresh the attributes of inode "
+                   << id << " from its open fd, keeping its row: "
+                   << refreshed;
     }
   }
   if (!attr.ok() && !absl::IsNotFound(attr.status())) {
@@ -2253,7 +2268,7 @@ absl::Status DirCacheFS::Setxattr(
     // `name` stays unknown (the syscall may or may not have changed it),
     // for the next reader to resolve; the attributes are refreshed as a
     // best effort, as Setattr does on its own phase-2 failure.
-    RefreshAttrsOf(id).IgnoreError();
+    NoteBestEffort("refresh after a failed setxattr", RefreshAttrsOf(id));
     return stored.status();
   }
 
@@ -2399,7 +2414,7 @@ absl::Status DirCacheFS::Removexattr(
   if (!remove_status.ok()) {
     mutation.End();
     // As Setxattr: `name` stays unknown.
-    RefreshAttrsOf(id).IgnoreError();
+    NoteBestEffort("refresh after a failed removexattr", RefreshAttrsOf(id));
     return remove_status;
   }
 
@@ -2551,7 +2566,8 @@ absl::Status DirCacheFS::Fallocate(
     return req.ReplyErrno(0);
   }
   if (!status.ok()) {
-    backing::RefreshAttrsFromFd(ctx_, id, fd).IgnoreError();
+    NoteBestEffort("refresh after a failed fallocate",
+                   backing::RefreshAttrsFromFd(ctx_, id, fd));
     return status;
   }
 
@@ -2613,7 +2629,8 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
     return req.ReplyWrite(*copied);
   }
   if (!copied.ok()) {
-    backing::RefreshAttrsFromFd(ctx_, out, out_fd).IgnoreError();
+    NoteBestEffort("refresh after a failed copy_file_range",
+                   backing::RefreshAttrsFromFd(ctx_, out, out_fd));
     return copied.status();
   }
   // Phase 3: refreshes, as fills. Failures are logged, never replied.

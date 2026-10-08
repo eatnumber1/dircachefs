@@ -235,10 +235,11 @@ class DirCacheFS {
 
   // Called by the request handler after a request that reached the backing
   // filesystem (fuse_ops.cc): logs at INFO if the one before it was more
-  // than kIdleSyncIntervals sync intervals ago ("idle": see docs/design.md,
-  // "Logging"). Reads the clock, once, through Context::clock.
-  void NoteBackingAccess(std::string_view what);
-  static constexpr int kIdleSyncIntervals = 12;
+  // than kIdleThreshold before `at`, when the request first reached the
+  // backing (Context::first_backing_at; "idle": see docs/design.md,
+  // "Logging").
+  void NoteBackingAccess(std::string_view what, absl::Time at);
+  static constexpr absl::Duration kIdleThreshold = absl::Seconds(60);
 
   // Whether any Open()/Create() handle for `id` is still outstanding (has
   // not gone through Release()). A file whose last link is removed keeps
