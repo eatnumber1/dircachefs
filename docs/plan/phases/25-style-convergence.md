@@ -102,3 +102,35 @@ rate limiting; no blanket rule; no `--log_dir`).
   return" pair, add the INFO lifecycle lines, document the flags; tests
   assert a line's level where behaviour depends on it.
 
+## 25.4 Test-writing rules (russ, 2026-10-08)
+
+Docs first (style.md's tests section), then the 8.2e tests follow them;
+the mechanical conversion of existing tests is 7.5/7.5b.
+- **Extend an existing test or write a new one.** A new test when the
+  behaviour is new (a new operation, failure mode or invariant) or when the
+  setup differs (fixture state, fault injection, mount options, a
+  different guest image); its name states the behaviour. Extend an
+  existing test when the gap is an unasserted consequence of a scenario
+  that test already runs (most mutation survivors are this): add the
+  expectation there, in the guest scripts as another `TEST name` check of
+  the same scenario rather than another boot. The cost model: a guest
+  boot plus setup is the expensive unit, an assertion is free, a harness
+  test without a fresh mount is cheap. The debuggability rule that limits
+  extending: a failure must say what broke from the test's name plus the
+  expectation's message, so an added expectation carries a matcher or a
+  message naming the property, and unrelated scenarios never share a test.
+- **EXPECT, not ASSERT**, unless continuing would use an invalid value or
+  make the later checks meaningless (`ASSERT_OK_AND_ASSIGN` for a value
+  the test goes on to use; an `ASSERT` on a precondition every later line
+  depends on). One failure must not hide the next.
+- **Matchers.** `EXPECT_THAT(value, Matcher)` with gMock and the status
+  matchers (`IsOk`, `IsOkAndHolds`, `StatusIs`, `Contains`,
+  `ElementsAre`, `UnorderedElementsAre`, `HasSubstr`, `Field`,
+  `Property`, `Pointee`) over `EXPECT_TRUE`/`EXPECT_EQ` on computed
+  booleans or hand-formatted strings, because the failure message shows
+  the whole value and the expectation. Shell guest tests print the
+  observed and expected values in the FAIL line for the same reason.
+- Owner: a docs commit by an implementer; 7.5/7.5b (matchers, ASSERT to
+  EXPECT across existing tests) stay as the conversion step at a quiet
+  point.
+

@@ -1785,3 +1785,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   RecordNewChild present/absent swaps, FsyncDirFd error->ok, StartRun || -> &&). Changed mode over a
   real range: ~16 min per survivor at this load, so a `--time-budget` (120 min) is being added.
   Under Opus review.
+- 25.4 (russ, 2026-10-08): test-writing rules into style.md: when to extend an existing test vs
+  write a new one (cost = boots and setup; debuggability = name + expectation message), EXPECT
+  not ASSERT unless required, matchers for readable failures. Docs commit to lane-3; the 8.2e
+  tests follow them; existing tests convert in 7.5/7.5b.
