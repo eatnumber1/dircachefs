@@ -1619,3 +1619,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   cmdline; test.sh --list excludes manual: it had listed stress_random). Short 24-35 s, long ext4
   277 s, fast 185 + 2, presubmit test/qemu 111, names tests pass with the new names-dump. Initramfs
   +0.99 MB. Lane-3 and lane-4 held until 7.1b merges (7.3/7.6/7.7 follow it) and the load drops.
+- 11.6 merged (5840bf0) after one review round (5 s answered bound, held-at-the-thaw assertion,
+  fresh names after quiet(), per-scenario names in the frozen cuts, read-only `testutil sql` with a
+  refused-DELETE check, exact attribute matches, ext4 medium). FINDING (design): a held mutation
+  blocks the whole daemon, cached reads included; documented as a limitation; the argument for
+  serving threads/coroutines (Phase 22's checkpoints cannot interrupt a syscall). Lane-5 held.

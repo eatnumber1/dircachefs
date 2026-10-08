@@ -92,6 +92,23 @@ cache that passes the checker. A fast complement to 11.1.
 block (reads of cached state keep working); after thaw they complete and
 the checker passes; dcfs's own sync points and shutdown do not deadlock
 while frozen (or are documented to wait).
+As built (merged 2026-10-08, 5840bf0; `fault_freeze_test`, ext4 medium,
+xfs/btrfs large; two frozen cut points in `fault_power_kill_test`):
+with nothing held, cached stat/readdir/negative lookups, opens and
+passthrough reads are answered while frozen and a passthrough write
+blocks only its client; each mutation blocks in its backing syscall
+(daemon in D) with the name or attributes unknown and the dirty set
+non-empty, and completes after the thaw; **while a mutation is held the
+whole single-threaded daemon is blocked, cached reads included**, so
+"reads of cached state keep working" above is false in that case
+(README limitations, design.md); a cancellation checkpoint cannot help
+inside a syscall: this is the case for serving threads or coroutines.
+`syncfs` of a frozen filesystem returns at once, so a sync point is no
+deadlock; SIGTERM behind a held create waits for the thaw and may end
+unclean (RELEASE vs shutdown race; the test accepts clean or the
+dirty-entries reason). A power cut with an unlink/rename held in phase 2
+recovers to the backing's state. `testutil sql` queries the live cache
+read-only (WAL reader; only while the daemon is held or idle).
 
 Owner: Opus for 11.1 and 11.3-11.5 (crash and failure invariants), Sonnet
 for 11.2 and 11.6. Every step uses the cache checker built in Phase 8.
