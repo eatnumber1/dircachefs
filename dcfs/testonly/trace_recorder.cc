@@ -298,7 +298,10 @@ void TraceRecorder::Close(
                                   ? ""
                                   : unmodelled_end(req);
       if (why.empty()) {
-        Emit(ctx, dir, &req, "reply");
+        // The errno the frame returned, which T_Reply compares with the
+        // model's reply (step 12.7b): 0 when the handler replied itself.
+        Emit(ctx, dir, &req, "reply",
+             absl::StrCat(",\"errno\":", ErrnoOf(status)));
       } else if (why.starts_with("unexplained: ")) {
         Unexplained(ctx, dir, why.substr(13));
       } else {

@@ -29,9 +29,19 @@ CrashImage(s) ==
     IF s.dirty THEN [RecoverDirty(s) EXCEPT !.dirty = TRUE, !.epoch = s.epoch]
     ELSE s
 
+(***************************************************************************)
+(* An idle slot keeps the reply of the last request that held it (`rep`,   *)
+(* `rb`: the reply ghost, step 12.7b). Only ReplyObservable, at the step   *)
+(* that writes it, and trace validation's T_Reply (no VIEW) read it, so    *)
+(* idle slots that differ only there are one state: no step's outcome      *)
+(* depends on them.                                                        *)
+(***************************************************************************)
+IdleView(r) == IF r.pc = "idle" THEN IdleProc ELSE r
+
 View == <<bCur, bOpts,
           IF mode \in {"down", "recover"} THEN CrashImage(dbCur) ELSE dbCur,
           {CrashImage(s) : s \in dbOpts},
-          mode, seq, inflight, durableD, running, ps, servedWrong, stamp,
+          mode, seq, inflight, durableD, running,
+          [q \in Procs |-> IdleView(ps[q])], servedWrong, stamp,
           muts, crashes>>
 =============================================================================

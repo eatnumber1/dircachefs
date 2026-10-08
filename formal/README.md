@@ -254,7 +254,7 @@ on the detail:
 | `inflight` | Mutations of D between phase 1 and their end | `FillGuards::inflight[D]` |
 | `durableD` | D's dirty row is known durable since the last sync point | `Context::dirty.durable` |
 | `running` | The request running code between two syscalls (others wait) | the thread itself |
-| `ps[p]` | Request slot `p`: program counter `pc`, request `kind` and names `n`/`m`, whether it holds the kernel's lock, and locals (see `IdleProc` in `dcfs.tla`) | a FUSE request being served |
+| `ps[p]` | Request slot `p`: program counter `pc`, request `kind` and names `n`/`m`, whether it holds the kernel's lock, and locals (see `IdleProc` in `dcfs.tla`); and the reply ghost (step 12.7b): `eff` (what the backing filesystem answered at the request's syscall), `win` (the answers its queries had at earlier instants since its call), and on an idle slot `rep` (the last request's reply) and `rb` (flipped at every reply) | a FUSE request being served (the ghost fields: checking only) |
 | `servedWrong` | History: an answer served from the cache was wrong when served | (checking only) |
 | `stamp` | The next fresh object identity / attribute stamp | (checking only) |
 | `muts`, `crashes` | How many mutations and crashes so far, for the bounds | (checking only) |
@@ -318,26 +318,133 @@ prints. A request's first step runs inside `Arrive`.
 | `EffectAtSyscall` | action property (`[][A]_vars`, step 12.7) | SibylFS's call, effect, return: what another request would see of D (`Observed`: each name and D's attributes from the cache where it knows them, else from the backing filesystem) changes only at a step that is a mutation's backing syscall, the actions `CreateSyscall`, `UnlinkSyscall` and `RenameSyscall` themselves (not merely a step from their pc: an interrupt there would be no effect point); never at a phase 1, a phase 3, a fill, or a step of a request with no syscall. A request takes its syscall at most once, so it has at most one effect point (a failed syscall has none). Checked on every transition: the observer reads D between any two steps. It follows from `CacheNeverWrong` and `BackingAtSyscall` (where the cache is correct, `Observed` is the backing filesystem); stated for what it says about requests, and for a change that breaks the cache's correctness at the wrong step |
 | `BackingAtSyscall` | action property | While serving, the backing filesystem changes only at a mutation's syscall (a crash may undo unsynced changes: no request's effect). It holds by construction (only the syscall actions write `bCur`); it is the statement the other two rest on |
 | `CacheLearnsAtCommit` | action property | The cache learns (a name it did not know, D's attributes) only at a commit of what a request read: a resolve's, a population's, an attribute fill's, a mutation's phase 3 (the actions), or, in trace validation, the fills the code makes outside a request slot (`OutOfSlotFill`, `Trace.cfg`: `GetattrWhole`). With `EffectAtSyscall`, a fill's effect is on the cache only and changes nothing anyone sees |
+| `ReplyObservable` | action property (step 12.7b) | SibylFS's observation: every reply is one the backing filesystem gave. A mutation that reached its syscall replies that syscall's result (success, `EEXIST`, `ENOENT`); an answer (a lookup's entry or negative entry, a listing, D's attributes, an unlink's or rename's `ENOENT` from its resolve) is what the backing filesystem answered at some instant between the request's call and its reply; `EAGAIN` and `EINTR` come only from a request that had no effect. See [Replies](#replies-what-replyobservable-quantifies-over) for the exact quantifier and the errno classes |
 | `RecoveryTerminates` | temporal | `(mode # "up") ~> (mode = "up")`: after any crash or shutdown, the daemon gets back to serving (recovery always terminates) |
+
+### Replies: what `ReplyObservable` quantifies over
+
+Each reply step records what the request replied (`Reply(p, v)` in
+`dcfs.tla`): `v.e`, an errno class, and `v.a`, the set of answers the reply
+carries (`FoundOrNeg`, `ListRes`, `AttrRes`: a lookup carries its entry or
+negative entry, a readdir its listing, a getattr D's attributes, a
+readdirplus its listing and D's attributes; a mutation, a sync or an error
+carries none). The idle slot keeps `v` in `rep` until its next request
+arrives, and flips `rb`, so that a reply is always a step that changes the
+state (two equal replies in a row would otherwise be a stutter, which an
+action property cannot see).
+
+The errno classes are the errnos the model's requests reply: `ok` (a
+negative entry is a successful reply, as `ReplyNegativeEntry` makes it),
+`ENOENT`, `EEXIST`, `EAGAIN` and `EINTR`. Every other errno (`ENOTEMPTY`,
+`EACCES`, `EIO`, ...) is one the model never replies: the model's syscalls
+fail only with create's `EEXIST` and unlink's and rename's `ENOENT`, and a
+trace whose request fails otherwise is cut there (`failed`, below). Adding
+`ENOTEMPTY` would need children of children.
+
+The instants of a request are the backing states from its call to its
+reply: the one at its call and each one a syscall made since (the backing
+filesystem changes at nothing else: `BackingAtSyscall`). Rather than keep
+those states, each request keeps only the answers its own queries had at
+them (`BAns`: a lookup's name, an unlink's or a rename's source name until
+its phase 1, D's attributes for a getattr, the listing for a readdir, both
+for a readdirplus): when a syscall changes D, every other request in
+flight adds to `win` the answers it had before and no longer has
+(`Remember`), so `Window(r) = r.win ∪ BAns(r, bCur)` is every answer the
+backing filesystem gave that request's queries since its call. With the
+kernel's lock no syscall comes during a lookup or a listing, so their `win`
+stays empty; a getattr, which does not take the lock, is the one request
+whose window can hold more than one instant there.
+
+The property is checked on every step at which a slot replies (it becomes
+idle, or an idle slot flips `rb`: a request that arrived and replied at
+once):
+
+```tla
+ReplyWitnessed(r, v) ==
+    CASE v.e \in {"EAGAIN", "EINTR"} -> r.eff = None /\ v.a = {}
+      [] r.eff # None -> v = Rep(r.eff, {})
+      [] r.kind = "sync" -> v = Rep("ok", {})
+      [] OTHER ->
+           /\ v.a # {} /\ v.a \subseteq Window(r)
+           /\ IF r.kind \in {"unlink", "rename"}
+              THEN v.e = "ENOENT" /\ \A x \in v.a : x.k = "neg"
+              ELSE v.e = "ok"
+```
+
+where `r` is the slot's state before the reply step. A request that
+arrived and replied in the same step (an answer served from the cache at
+once) has one instant, the current one: `v.e = "ok"`, `v.a # {}`, and every
+answer in `v.a` agrees with `bCur` (`ImmediateWitnessed`). In words:
+
+- **A mutation that reached its syscall** replies what the backing
+  filesystem answered there (`eff`, recorded by `CreateSyscall`,
+  `UnlinkSyscall`, `RenameSyscall`): its effect point, the only instant
+  that counts for it (`EffectAtSyscall`). A failed create replies `EEXIST`
+  even though its re-resolve then finds the name. A create whose phase 3
+  finds its new name gone replies `ENOENT`, which the property rejects (the
+  syscall succeeded); the fill guards make that unreachable in the model
+  (nothing can remove the name while the create is in flight), and in the
+  code only an out-of-band change can, which the model does not have.
+- **An answer** is in the request's window: the backing filesystem gave it
+  at some instant between the call and the reply. For an answer served
+  from the cache the quantifier is over the backing filesystem's states,
+  not over what the cache says: the protocol lets the cache know an answer
+  only while it is the backing's (`CacheNeverWrong`), so a served answer is
+  the backing's answer at the instant it is served, and a cache that is
+  wrong fails this property as well as `ServedFromCacheIsCurrent`. An
+  answer read from the backing filesystem (a probe, a listing, a statx) is
+  the backing's at the instant of the read, which is inside the window; a
+  reply built from something read before the call, or from the cache's
+  unknown row taken for an answer, is not
+  (`known_bugs/reply_unknown_as_negative`).
+- **A readdirplus's** listing and D's attributes are two answers, each
+  checked on its own: the listing is taken from the cache before the statx
+  of D, so without the kernel's lock they can come from different
+  instants, as from two requests.
+- **`EAGAIN` and `EINTR`** report that nothing happened: they are allowed
+  only from a request that had no effect point, that is no syscall that
+  succeeded (a mutation interrupted before its syscall; an unlink, rename
+  or readdir that gave up; a failed mutation interrupted in its re-resolve,
+  which replies `EINTR` rather than its syscall's error:
+  `ReresolveAfterFailure`, and the model's `Interrupt` at the re-resolve's
+  `RN_probe` or `PD_read`). An interrupt after a syscall that succeeded
+  (`BugInterruptAfterSyscall`) breaks this too. The first version of the
+  property allowed them only with no syscall at all; `MC_interrupt.cfg`
+  found the interrupted re-resolve, which is the code's intended reply (a
+  failed syscall changes nothing, and a failed syscall has no effect point
+  under `EffectAtSyscall` either).
+
+What the reply leaves out: the create's entry (its object and attributes;
+the model's reply to a create is its errno class), and, in trace
+validation, attribute values, which traces do not compare (below). The
+idle slots' `rep` and `rb` are merged by the `View` (`IdleView` in
+`MC.tla`): only the property, at the step that writes them, and trace
+validation (which has no `VIEW`) read them, so they cost no states where a
+`VIEW` is used.
 
 ## Configurations
 
 `MC.tla` is the root module every configuration checks: it extends `dcfs`
 and defines the request sets and the `View` the configurations use. Times
 are from russ's machine (4 cores, loaded); the state counts are what TLC
-reports as distinct states (since step 23.4's `linkcreate`, run of
-2026-10-07; 12.2b's `RecoverForgetting` had small at 687,731).
+reports as distinct states (since step 12.7b's reply ghost, run of
+2026-10-08; before it, from step 23.4's `linkcreate` on: small 871,017,
+recovery 25,861, liveness 101,898, large 9,164,576, nolock 6,365,804,
+interrupt 226,438, interrupt_muts2 840,476, interrupt_nolock 966,942;
+12.2b's `RecoverForgetting` had small at 687,731). The reply ghost's
+windows (`win`) add the states where a request spans another's syscall:
+with the kernel's lock only a getattr can.
 
 | Configuration | Test (tier) | Bounds | States | Time |
 |---|---|---|---|---|
-| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants and the three effect-point properties (step 12.7; also in `MC_recovery.cfg` and `MC_liveness.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) | 871,017 | ~1 min unloaded (4 min at load 15, 2026-10-08) |
+| `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants, the three effect-point properties (step 12.7; also in `MC_recovery.cfg`, `MC_liveness.cfg` and `MC_interrupt.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) and `ReplyObservable` (step 12.7b; also in `MC_recovery.cfg`, `MC_interrupt.cfg`, `MC_nolock.cfg`, `MC_interrupt_nolock.cfg` and `Trace.cfg`) | 935,825 | ~2 min (4 min at load 15, 2026-10-08) |
 | `MC_recovery.cfg` | `recovery_test` (medium) | 1 name, 1 slot, 2 mutations, 2 crashes (one can come during the recovery of a dirty database: steps 12.6, 12.6b), all request kinds, all invariants and properties | 25,861 | ~10 s |
-| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 101,898 | ~45 s |
-| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 9,164,576 | ~8 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 28 min alone at load 13) |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 6,365,804 | ~5 min unloaded (CI 506 s before step 12.6b's daemon crash; 16 min alone at load 13) |
-| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 226,438 | ~70 s |
-| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one) | 840,476 | ~2.5 min |
-| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation | 966,942 | ~4 min |
+| `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates`. The reply ghost is off (`RecordReply <- ForgetReply`): without a VIEW the idle slot's last reply tripled the states (338,790), for no property checked here | 101,898 | ~20-45 s |
+| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | LARGE_COUNT | ~8 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 28 min alone at load 13) |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; `ReplyObservable` (lookups and listings overlap mutations here) | NOLOCK_COUNT | ~5 min unloaded (CI 506 s before step 12.6b's daemon crash; 16 min alone at load 13) |
+| `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 230,662 | ~30-70 s |
+| `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one) | 892,708 | ~1-2.5 min |
+| `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable` | 1,036,982 | ~1.5-4 min |
 
 `Interrupts` (Phase 22) is off in the first five: with it, `MC_small.cfg`
 grows to 2,154,085 states (6 min), so the interrupts have configurations
@@ -365,6 +472,8 @@ FALSE in the real configurations.
 | `tristate_f4_restore_complete` | the restore-completeness lost update (tri-state F4); needs two mutations of D in flight, so without the kernel lock | `TriState` | an unlink's phase 1 deletes `a`'s row and clears completeness; its syscall; a create of `a` begins (phase 1); the unlink's phase 3 restores completeness, so `a` reads absent while its create is in flight |
 | `effect_before_syscall` | a phase 1 that records a removal's outcome (the names absent) instead of marking them unknown (step 12.7; `MarkUnknown <- MarkAbsentEarly`) | `EffectAtSyscall` | a lookup populates D (a present); an unlink of a runs phase 1: a reads absent while the backing filesystem still has it |
 | `effect_after_syscall` | crash F3 again (`BugCreateKeepsParentAttrs`), checked for its effect point (step 12.7) | `EffectAtSyscall` | a getattr records D's attributes; a create of a: phase 1 leaves them valid, so its syscall changes nothing others see; the refresh's fill does, after the syscall |
+| `reply_after_failed_syscall` | not historical (step 12.7b): a failed mutation that replies success after re-resolving its name (`FailedReply <- FailedReplyOK`) | `ReplyObservable` | a exists (o1); a create of a: phase 1, its syscall fails with `EEXIST`; it ends and re-resolves a (a listing); it replies success, while the backing filesystem answered `EEXIST` at its only effect point. Every record stays right, so no invariant sees it |
+| `reply_unknown_as_negative` | not historical (step 12.7b): a lookup whose population the guard refuses answers from the cache, its unknown row taken for a negative entry (the `kUnknown` that `LookupOrPopulate` must never return; `UnrecordedAnswer <- UnknownAsNegative`); without the kernel lock | `ReplyObservable` | a exists (o1); a lookup of a lists D (reads o1); a create of a runs phase 1 (a unknown); the listing cannot be recorded (a mutation in flight), and the lookup replies a negative entry: a existed at every instant between its call and its reply. The answer is not served from a known record and changes none, so no invariant sees it |
 | `recovery_clears_dirty` | the start takes the recovered rows out of the dirty set when its probe ends, with no syncfs since the crashed run's backing syscalls (step 12.6b's first version; `ProbesDone <- ProbesDoneClearing`) | `CrashSafe` | a lookup populates D; an unlink of a: phase 1, syscall; a daemon crash (the unlink not yet durable); the start, whose probe clears D's dirty row; a lookup records a absent: a power loss may now bring a back while D is not dirty |
 | `recover_clears_dirty_first` | `RecoverDirty` in two transactions, the first emptying the dirty set (step 12.6; put in by overriding `Recover` with `RecoverClearsDirtyFirst` from the configuration, no `VIEW`) | `RecoveryIdempotent` | a create of a: syscall, probe, phase 3 (a recorded present); a crash keeps that database and the backing filesystem before the create; the start's first transaction empties the dirty set: a crash may now keep a database that says a is present, with nothing left to make recovery forget it |
 | `sync_during_mutation` | a sync point cleared the dirty rows of mutations in flight (a [finding](#findings) of this model, fixed in plan step R4) | `CrashSafe` | a create of `b`: phase 1 (D dirty, kSync); a sync point: syncfs; the create's syscall, probe and phase 3 (`b` recorded), and its end; the sync point clears D's row. A crash may now keep that database and lose the unsynced create, and recovery has nothing to forget. (Keeping only the inodes in flight at `ClearDirty` would not help: the create had ended.) |
@@ -491,7 +600,7 @@ right after the code the model's step stands for, with no backing syscall
 
 | Event (`ProtocolEvents::`) | Call site | Line | Model action (`Trace.tla`) | `docs/design.md` |
 |---|---|---|---|---|
-| `RequestBegin` / `RequestEnd` | `fuse_ops.cc` (`Serve`): dispatch, reply | `reply` | which steps are one request; `T_Reply`: the model's request has replied | Concurrency |
+| `RequestBegin` / `RequestEnd` | `fuse_ops.cc` (`Serve`): dispatch, reply | `reply` (`errno`: the status the frame returned, 0 if OK) | which steps are one request; `T_Reply`: the model's request has replied, with the same errno class (step 12.7b) | Concurrency |
 | `GetattrBegin` / `GetattrEnd` | `DirCacheFS::FreshAttr` | `attr_check`, `rdp_attr_check` | `Arrive` of a getattr (`GAFrom`); for Readdirplus's ".", part of its `RDFrom` (`T_ReaddirplusAttrCheck`) | Population policy; Concurrency (fill guards) |
 | `LookupBegin` / `LookupEnd` | `backing::LookupOrPopulate` | | a LookupOrPopulate of a lookup, an unlink's or rename's resolve, or a failed mutation's re-resolve | Population policy |
 | `RefreshBegin` / `RefreshEnd` | `backing::RefreshAttrs`, `RefreshAttrsFromFd` (also the refresh that ends `DirCacheFS::ReconcileWritten`, step 23.1: a file's, never a directory's, so no directory's trace has a line for it) | `attr_check` (a refresh of unknown attributes that no request of the directory expects) | the statx and fill that end a getattr, readdirplus or mutation; otherwise a getattr of its own | The write-through protocol: Phase 3 |
@@ -684,9 +793,20 @@ before its syscall, a syscall error the model does not have, a listing
 whose reads never report), the trace ends there and the request's end
 decides: a `failed` cut if it failed, `unexplained` if it replied OK. A
 frame (request, getattr, lookup, refresh, sync point) that returns an error
-ends the trace with a `failed` cut; one that returns OK replies, and
-`T_Reply` requires its model request to have replied, so a frame that
-skipped a step is rejected there. The
+ends the trace with a `failed` cut, unless the error is one the model's
+request replies (create's `EEXIST`, unlink's and rename's `ENOENT` from
+their syscall, `EAGAIN`, `EINTR`); otherwise it replies, and `T_Reply`
+requires its model request to have replied, so a frame that skipped a step
+is rejected there. The reply line carries the frame's errno (`errno`), and
+`T_Reply` requires the model's reply (`rep`, see
+[Replies](#replies-what-replyobservable-quantifies-over)) to have its class
+(`ReplyErrnoOK`): an errno names the class (Linux's numbers: 2, 4, 11,
+17); 0 is a success, or the `ENOENT` that `RemoveChild` and `Rename` reply
+themselves (`ReplyErrno`, so their frame returns OK) when the resolve of
+their (source) name found nothing, which the model's reply marks by
+carrying that negative answer. A reply line's errno is the frame's status,
+not the bytes sent to the kernel; no recorder hook sees those. `Trace.cfg`
+also checks `ReplyObservable` on every recorded behavior. The
 guest tests also name the root directory's trace (`root`), which must have
 events and reach the end of the run, its last line the run's final event
 (`clean` or `stop_clear`, with no later line of the run but that step's
@@ -770,8 +890,11 @@ renames with flags and syscall failures.
   when a syscall started).
 
 - `//formal:trace_*_test` check `Trace.tla` itself on hand-written traces
-  (`formal/trace_tests/`, no guest): the begin-line origins, and how
-  recovery may forget a clean directory's dentries.
+  (`formal/trace_tests/`, no guest): the begin-line origins, how
+  recovery may forget a clean directory's dentries, and the reply's errno
+  (step 12.7b: a failed create's `EEXIST` is valid, a reply of success
+  after it is rejected at the reply line, and an unlink's `ENOENT` from its
+  resolve is valid with errno 0).
 
 A crash during recovery (steps 12.6, 12.6b):
 `//dcfs:trace_crash_during_recovery_test` runs the harness built so that
@@ -956,6 +1079,9 @@ model in the same change (AGENTS.md). In practice:
 - A new request kind: add it to `AllKinds`, an `Arrive` branch for its
   first step, one action per later step (listed in `Next` and in the
   action table above), and, if it mutates, its names in `MutatedNames`.
+  Every step that replies calls `Reply(p, v)` with what the code replies
+  (step 12.7b), and the request's queries go in `BAns`, so that
+  `ReplyObservable` can check the reply.
 - A bug fixed in the code that the model can express: add a `Bug*`
   constant that puts it back, and a `known_bugs/` variant whose test
   expects the counterexample.

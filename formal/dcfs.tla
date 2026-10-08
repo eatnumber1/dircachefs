@@ -103,6 +103,19 @@ DBStates == [dent : [Names -> DentVals],  \* dentries rows (parent = D)
 \* What a request answered: an entry (found/neg), a listing, attributes.
 NoRes == [k |-> "none", name |-> None, o |-> NoObj, s |-> {}, v |-> 0]
 
+(* What a request replies (the reply ghost, step 12.7b): an errno class    *)
+(* and the answers the reply carries, a set of answers as above (a         *)
+(* lookup's entry or negative entry; a listing; D's attributes; a          *)
+(* readdirplus carries a listing and D's attributes; a mutation, a sync    *)
+(* or an error carries none). The classes are the errnos the model's       *)
+(* requests reply: "ok" (a negative entry is a successful reply),          *)
+(* "ENOENT", "EEXIST", "EAGAIN" and "EINTR". Every other errno             *)
+(* (ENOTEMPTY, EACCES, EIO, ...) is one the model never replies; a trace   *)
+(* with one is cut there (README, "Trace validation").                     *)
+Errnos == {"ok", "ENOENT", "EEXIST", "EAGAIN", "EINTR"}
+Rep(e, a) == [e |-> e, a |-> a]
+NoRep == Rep(None, {})
+
 Modes == {"up", "down", "recover", "start", "probe",
           "stop_sync", "stop_clear", "stop_ckpt", "stop_flag"}
 
@@ -140,12 +153,22 @@ vars == <<bCur, bOpts, dbCur, dbOpts, mode, seq, inflight, durableD,
 \* stale; `was` the pre-phase-1
 \* completeness (BugRestoreComplete only). Fields are reset once used, so
 \* that slots doing the same thing are the same state.
+\*
+\* For ReplyObservable (step 12.7b; ghosts, which no step of the code
+\* reads): `eff` what the backing filesystem answered at the request's
+\* effect point, its mutation's syscall ("ok", "EEXIST", "ENOENT"; None
+\* before it); `win` the answers the backing gave to the request's queries
+\* (BAns) at earlier instants since its call, that it no longer gives
+\* (Remember); and, on an idle slot, `rep` the reply of the last request
+\* that held it, and `rb`, flipped at every reply. A readdirplus also keeps
+\* the listing it replies in `res` across its statx.
 IdleProc == [pc |-> "idle", kind |-> None, n |-> None, m |-> None,
              locked |-> FALSE, lk |-> None, cont |-> None, res |-> NoRes,
              snap |-> 0, esnap |-> 0, rdObj |-> NoObj,
              rdList |-> [x \in Names |-> NoObj], rdVer |-> 0,
              mseq |-> 0, src |-> NoObj, rsnap |-> 0, attempts |-> 0,
-             was |-> FALSE]
+             was |-> FALSE, eff |-> None, win |-> {}, rep |-> NoRep,
+             rb |-> FALSE]
 
 TypeOK ==
     /\ bCur \in BStates /\ bOpts \subseteq BStates /\ bCur \in bOpts
@@ -155,6 +178,8 @@ TypeOK ==
     /\ running \in Procs \cup {None}
     /\ \A p \in Procs : ps[p].locked \in BOOLEAN
     /\ Cardinality({p \in Procs : ps[p].locked}) <= 1
+    /\ \A p \in Procs : /\ ps[p].eff \in Errnos \cup {None}
+                       /\ ps[p].rep.e \in Errnos \cup {None}
     /\ servedWrong \in BOOLEAN
     /\ stamp \in 1..(MaxStamp + 1) /\ muts \in 0..MaxMutations
     /\ crashes \in 0..MaxCrashes
@@ -187,6 +212,24 @@ AnswerOK(r, b) ==
       [] r.k = "attr"  -> r.v = b.ver
       [] OTHER         -> TRUE
 
+\* The names backing state b has.
+BListing(b) == {x \in Names : b.names[x] # NoObj}
+
+\* The answers backing state b gives to the queries a request (slot state
+\* r) can still reply an answer to: a lookup's name; an unlink's or a
+\* rename's (source) name until its phase 1 or syscall (its reply is then
+\* the syscall's, or EAGAIN/EINTR); D's attributes for a getattr; the
+\* listing for a readdir; both for a readdirplus. None for a create or a
+\* sync, which reply no answer.
+BAns(r, b) ==
+    CASE r.kind = "lookup" -> {FoundOrNeg(r.n, b.names[r.n])}
+      [] r.kind \in {"unlink", "rename"} /\ r.mseq = 0 /\ r.eff = None ->
+           {FoundOrNeg(r.n, b.names[r.n])}
+      [] r.kind = "getattr" -> {AttrRes(b.ver)}
+      [] r.kind = "readdir" -> {ListRes(BListing(b))}
+      [] r.kind = "readdirplus" -> {ListRes(BListing(b)), AttrRes(b.ver)}
+      [] OTHER -> {}
+
 (* Writing: a commit appends to the WAL. A kSync commit (phase 1, startup,  *)
 (* shutdown) fsyncs it, so every earlier commit is durable too; a normal    *)
 (* commit may or may not survive a power loss.                              *)
@@ -196,6 +239,11 @@ Commit(new, sync) ==
 
 \* A backing syscall that changes D: durable only after a later syncfs.
 BWrite(new) == bCur' = new /\ bOpts' = bOpts \cup {new}
+
+\* The backing filesystem changes from bCur to b2: request r remembers the
+\* answers its queries had until now and no longer have (ReplyObservable:
+\* the answers its reply may carry are those, and the ones they have now).
+Remember(r, b2) == [r EXCEPT !.win = r.win \cup (BAns(r, bCur) \ BAns(r, b2))]
 
 (* The fill guard (cache::CanFill) and mutation ownership                    *)
 (* (cache::Mutation::Owns), for D. Every phase 1 and every end of a         *)
@@ -224,16 +272,43 @@ Owns(r) == inflight = 1 /\ seq = r.mseq
 Free(p) == running \in {None, p}
 At(p, label) == ps[p].pc = label /\ Free(p) /\ mode = "up"
 
-\* The request replies and is done (releasing the kernel's lock if held).
-Done(p) == ps' = [ps EXCEPT ![p] = IdleProc] /\ running' = None
+\* The idle slot after slot state r replied v: it keeps the reply (`rep`)
+\* and flips `rb`, so that a reply is always a step that changes the state
+\* (ReplyObservable checks it). (MC_liveness.cfg, which checks no reply
+\* property and has no VIEW to merge idle slots, turns the reply ghost off
+\* with ForgetReply.)
+RecordReply(r, v) == [IdleProc EXCEPT !.rep = v, !.rb = ~r.rb]
+ForgetReply(r, v) == IdleProc
+\* The request replies v and is done (releasing the kernel's lock if held).
+Reply(p, v) ==
+    /\ ps' = [ps EXCEPT ![p] = RecordReply(ps[p], v)]
+    /\ running' = None
+
+\* What a failed mutation replies, after re-resolving its names: the error
+\* its syscall returned. (known_bugs/reply_after_failed_syscall overrides
+\* it with FailedReplyOK.)
+FailedReply(r) == Rep(r.eff, {})
+\* Not the code: a failed mutation that replies success.
+FailedReplyOK(r) == Rep("ok", {})
+
+\* The reply at the end of a LookupOrPopulate whose continuation is the
+\* reply: a lookup's answer, or a failed mutation's error.
+ReplyAt(r) == IF r.kind = "lookup" THEN Rep("ok", {r.res}) ELSE FailedReply(r)
+
 \* More code follows directly (or the reply, if r.pc = "Reply").
 Then(p, r) ==
-    IF r.pc = "Reply" THEN Done(p)
+    IF r.pc = "Reply" THEN Reply(p, ReplyAt(r))
     ELSE ps' = [ps EXCEPT ![p] = r] /\ running' = p
 \* A syscall follows.
 Syscall(p, r) == ps' = [ps EXCEPT ![p] = r] /\ running' = None
 \* This step was a syscall.
 AfterSyscall(p, r) == ps' = [ps EXCEPT ![p] = r] /\ UNCHANGED running
+\* This step was a mutation's syscall, which changed D to b2; every other
+\* request in flight remembers what its queries answered before.
+MutSyscall(p, r, b2) ==
+    /\ BWrite(b2)
+    /\ ps' = [q \in Procs |-> IF q = p THEN r ELSE Remember(ps[q], b2)]
+    /\ UNCHANGED running
 
 \* Serving answer r from the cache: record whether it was wrong.
 Serve(r) == servedWrong' = (servedWrong \/ ~AnswerOK(r, bCur))
@@ -302,6 +377,15 @@ PDRead(p) ==
     /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards
     /\ UNCHANGED <<servedWrong, stamp>>
 
+\* What LookupOrPopulate answers for name n when its population could not
+\* be recorded: what the listing l read. (known_bugs/
+\* reply_unknown_as_negative overrides it with UnknownAsNegative.)
+UnrecordedAnswer(n, l) == FoundOrNeg(n, l[n])
+\* Not the code: the cache's answer instead, an unknown name taken for a
+\* negative one.
+UnknownAsNegative(n, l) ==
+    FoundOrNeg(n, IF dbCur.dent[n] \in Objs THEN dbCur.dent[n] ELSE NoObj)
+
 \* PopulateDirectory phase B: if CanFill(D) and the epoch did not move,
 \* link every listed child, prune every other row (PruneDentriesNotIn) and
 \* mark D complete, in one transaction. Then LookupOrPopulate answers from
@@ -330,7 +414,7 @@ PDCommit(p) ==
                                         !.lk = None, !.cont = None])
              ELSE /\ NoServe
                   /\ Then(p, [r2 EXCEPT !.pc = r.cont,
-                                        !.res = FoundOrNeg(n, l[n]),
+                                        !.res = UnrecordedAnswer(n, l),
                                         !.lk = None, !.cont = None])
     /\ UnchangedBacking /\ UnchangedGuards /\ UNCHANGED stamp
 
@@ -350,16 +434,20 @@ LK(p) == At(p, "LK") /\ LKFrom(p, ps[p])
 \* refresh, without checking again (finding readdirplus_unlocked).
 RDFrom(p, r) ==
     /\ IF DirListable(dbCur)
-       THEN IF r.kind = "readdir" \/ dbCur.attrValid
-            THEN Serve(ListRes(Listing(dbCur))) /\ Done(p)
-            ELSE /\ IF BugReaddirplusUnlocked THEN NoServe
-                    ELSE Serve(ListRes(Listing(dbCur)))
-                 /\ Syscall(p, [r EXCEPT !.pc = "RDP_stat", !.snap = seq])
+       THEN LET list == ListRes(Listing(dbCur)) IN
+            IF r.kind = "readdir" \/ dbCur.attrValid
+            THEN /\ Serve(list)
+                 /\ Reply(p, Rep("ok", IF r.kind = "readdir" THEN {list}
+                                       ELSE {list, AttrRes(dbCur.attr)}))
+            ELSE /\ IF BugReaddirplusUnlocked THEN NoServe ELSE Serve(list)
+                 /\ Syscall(p, [r EXCEPT !.pc = "RDP_stat", !.snap = seq,
+                                         !.res = IF BugReaddirplusUnlocked
+                                                 THEN NoRes ELSE list])
        ELSE /\ NoServe
             /\ IF r.attempts < 3
                THEN Syscall(p, [r EXCEPT !.pc = "PD_read",
                                          !.attempts = r.attempts + 1])
-               ELSE Done(p)  \* EAGAIN
+               ELSE Reply(p, Rep("EAGAIN", {}))
     /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED stamp
 
 RD(p) == At(p, "RD") /\ RDFrom(p, ps[p])
@@ -375,7 +463,9 @@ RDPFill(p) ==
        ELSE UnchangedDB
     /\ IF BugReaddirplusUnlocked THEN Serve(ListRes(Listing(dbCur)))
        ELSE NoServe
-    /\ Done(p)
+    /\ Reply(p, Rep("ok", {IF BugReaddirplusUnlocked
+                           THEN ListRes(Listing(dbCur)) ELSE ps[p].res,
+                           AttrRes(ps[p].rdVer)}))
     /\ UnchangedBacking /\ UnchangedGuards /\ UNCHANGED stamp
 
 (***************************************************************************)
@@ -387,7 +477,8 @@ RDPFill(p) ==
 \* BeginFill, then OpenNode and statx.
 GAFrom(p, r) ==
     /\ IF dbCur.attrValid
-       THEN Serve(AttrRes(dbCur.attr)) /\ Done(p)
+       THEN Serve(AttrRes(dbCur.attr))
+            /\ Reply(p, Rep("ok", {AttrRes(dbCur.attr)}))
        ELSE NoServe /\ Syscall(p, [r EXCEPT !.pc = "GA_stat", !.snap = seq])
     /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED stamp
 
@@ -399,14 +490,16 @@ Stat(p, label, next) ==
     /\ UNCHANGED <<servedWrong, stamp>>
 
 \* backing::FillAttrs(D) with the slot's snapshot, then the reply (for a
-\* getattr: what the statx read, not served from the cache).
+\* getattr: what the statx read, not served from the cache; for a
+\* mutation: success).
 FillAttrsAndReply(p, label) ==
     /\ At(p, label)
     /\ IF CanFill(ps[p].snap)
        THEN Commit([dbCur EXCEPT !.attrValid = TRUE, !.attr = ps[p].rdVer],
                    FALSE)
        ELSE UnchangedDB
-    /\ Done(p)
+    /\ Reply(p, IF ps[p].kind = "getattr"
+                THEN Rep("ok", {AttrRes(ps[p].rdVer)}) ELSE Rep("ok", {}))
     /\ UnchangedBacking /\ UnchangedGuards /\ UNCHANGED <<servedWrong, stamp>>
 
 (***************************************************************************)
@@ -487,15 +580,17 @@ CSys(p) ==
     /\ At(p, "C_sys")
     /\ LET n == ps[p].n IN
        IF bCur.names[n] = NoObj
-       THEN /\ BWrite([names |-> [bCur.names EXCEPT ![n] = Obj(stamp)],
-                       ver |-> stamp])
-            /\ stamp' = stamp + 1
-            /\ AfterSyscall(p,
+       THEN /\ stamp' = stamp + 1
+            /\ MutSyscall(p,
                    IF ps[p].kind = "linkcreate"
-                   THEN [ps[p] EXCEPT !.pc = "C_rec", !.rdObj = Obj(stamp)]
-                   ELSE [ps[p] EXCEPT !.pc = "C_probe"])
+                   THEN [ps[p] EXCEPT !.pc = "C_rec", !.rdObj = Obj(stamp),
+                                      !.eff = "ok"]
+                   ELSE [ps[p] EXCEPT !.pc = "C_probe", !.eff = "ok"],
+                   [names |-> [bCur.names EXCEPT ![n] = Obj(stamp)],
+                    ver |-> stamp])
        ELSE /\ UNCHANGED <<bCur, bOpts, stamp>>
-            /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "C_fail"])
+            /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "C_fail",
+                                             !.eff = "EEXIST"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
 
 \* Phase 3, backing::RecordNewChild: probe the new name.
@@ -516,7 +611,7 @@ CRec(p) ==
            n == r.n
            o == r.rdObj
        IN IF o = NoObj
-          THEN UnchangedDB /\ EndMutation /\ Done(p)
+          THEN UnchangedDB /\ EndMutation /\ Reply(p, Rep("ENOENT", {}))
           ELSE /\ Commit(Restore(r, IF Owns(r)
                                     THEN [dbCur EXCEPT !.dent[n] = o]
                                     ELSE dbCur), FALSE)
@@ -551,7 +646,7 @@ U1(p) ==
     /\ At(p, "U1")
     /\ LET r == ps[p] IN
        IF r.res.k = "neg"
-       THEN Done(p) /\ UnchangedDB /\ UnchangedGuards  \* ENOENT
+       THEN Reply(p, Rep("ENOENT", {r.res})) /\ UnchangedDB /\ UnchangedGuards
        ELSE IF inflight = 0 /\ seq <= r.rsnap
        THEN /\ BeginMutation({r.n}, TRUE)
             /\ Syscall(p, [InFlight(r, "U_sys") EXCEPT !.rsnap = 0,
@@ -561,7 +656,7 @@ U1(p) ==
                THEN Then(p, [r EXCEPT !.pc = "LK", !.lk = r.n, !.cont = "U1",
                                       !.rsnap = seq, !.res = NoRes,
                                       !.attempts = r.attempts + 1])
-               ELSE Done(p)  \* EAGAIN
+               ELSE Reply(p, Rep("EAGAIN", {}))
     /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
 
 \* Phase 2: unlinkat(D, name): ENOENT if the name is gone.
@@ -569,12 +664,13 @@ USys(p) ==
     /\ At(p, "U_sys")
     /\ LET n == ps[p].n IN
        IF bCur.names[n] # NoObj
-       THEN /\ BWrite([names |-> [bCur.names EXCEPT ![n] = NoObj],
-                       ver |-> stamp])
-            /\ stamp' = stamp + 1
-            /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "U3"])
+       THEN /\ stamp' = stamp + 1
+            /\ MutSyscall(p, [ps[p] EXCEPT !.pc = "U3", !.eff = "ok"],
+                           [names |-> [bCur.names EXCEPT ![n] = NoObj],
+                            ver |-> stamp])
        ELSE /\ UNCHANGED <<bCur, bOpts, stamp>>
-            /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "U_fail"])
+            /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "U_fail",
+                                             !.eff = "ENOENT"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
 
 \* Phase 3: the name absent (SetNegative) if Owns(D); End; RefreshAttrs(D)
@@ -596,7 +692,7 @@ U3(p) ==
 R0(p) ==
     /\ At(p, "R0")
     /\ IF ps[p].res.k = "neg"
-       THEN Done(p)  \* ENOENT
+       THEN Reply(p, Rep("ENOENT", {ps[p].res}))
        ELSE Then(p, [ps[p] EXCEPT !.pc = "LK", !.src = ps[p].res.o,
                                   !.res = NoRes, !.lk = ps[p].m,
                                   !.cont = "R1"])
@@ -624,7 +720,7 @@ R1(p) ==
                                       !.rsnap = seq, !.src = NoObj,
                                       !.res = NoRes,
                                       !.attempts = r.attempts + 1])
-               ELSE Done(p)  \* EAGAIN
+               ELSE Reply(p, Rep("EAGAIN", {}))
     /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
 
 \* Phase 2: renameat2(D, n, D, m): moves whatever n names now over m;
@@ -634,13 +730,14 @@ RSys(p) ==
     /\ LET n == ps[p].n
            m == ps[p].m
        IN IF bCur.names[n] # NoObj
-          THEN /\ BWrite([names |-> [bCur.names EXCEPT ![m] = bCur.names[n],
-                                                       ![n] = NoObj],
-                          ver |-> stamp])
-               /\ stamp' = stamp + 1
-               /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "R3"])
+          THEN /\ stamp' = stamp + 1
+               /\ MutSyscall(p, [ps[p] EXCEPT !.pc = "R3", !.eff = "ok"],
+                     [names |-> [bCur.names EXCEPT ![m] = bCur.names[n],
+                                                  ![n] = NoObj],
+                      ver |-> stamp])
           ELSE /\ UNCHANGED <<bCur, bOpts, stamp>>
-               /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "R_fail"])
+               /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "R_fail",
+                                                !.eff = "ENOENT"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
 
 \* Phase 3, one transaction if Owns(D): m -> the source (resolved before
@@ -694,7 +791,7 @@ S2(p) ==
        IN Commit([dbCur EXCEPT !.dirty = IF clear THEN FALSE ELSE dbCur.dirty],
                  FALSE)
     /\ durableD' = FALSE
-    /\ Done(p)
+    /\ Reply(p, Rep("ok", {}))
     /\ UnchangedBacking /\ UNCHANGED <<seq, inflight, servedWrong, stamp>>
 
 (***************************************************************************)
@@ -737,7 +834,7 @@ Interrupt(p) ==
        IN /\ IF mutating /\ ~BugInterruptLeaksGuard THEN EndMutation
              ELSE UnchangedGuards
           /\ IF undo THEN Commit(UndoRename(r, dbCur), FALSE) ELSE UnchangedDB
-    /\ Done(p)
+    /\ Reply(p, Rep("EINTR", {}))
     /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp, mode, muts, crashes>>
 
 (***************************************************************************)
@@ -1195,6 +1292,55 @@ CacheLearnsAtCommit ==
     [][(Serving /\ (Known(dbCur').names \ Known(dbCur).names # {}
                     \/ (Known(dbCur').attrs /\ ~Known(dbCur).attrs)))
          => CommitStep]_vars
+
+-----------------------------------------------------------------------------
+(* Replies (step 12.7b, SibylFS's observation: call, effect, return).      *)
+(* Every reply is one the backing filesystem gave: for a mutation that     *)
+(* reached its syscall, the result of that syscall, its effect point       *)
+(* (EffectAtSyscall); for an answer (a lookup's entry, a listing, D's      *)
+(* attributes, an unlink's or rename's ENOENT from its resolve), what the  *)
+(* backing filesystem answered at some instant between the request's call  *)
+(* and its reply; EAGAIN and EINTR, which report that nothing happened,    *)
+(* only from a request that had no effect (no syscall, or a failed one: a  *)
+(* failed mutation whose re-resolve is interrupted replies EINTR, not its  *)
+(* syscall's error, ReresolveAfterFailure). The instants are the backing   *)
+(* states while the request was in flight: the one at its call, and each   *)
+(* one a syscall made since (the backing changes at nothing else:          *)
+(* BackingAtSyscall). An answer served from the cache is checked against   *)
+(* the backing filesystem too, not against what the cache says: where the  *)
+(* protocol lets the cache know an answer (CacheNeverWrong), that is the   *)
+(* backing's answer at the instant it is served.                           *)
+
+\* The answers a request (slot state r) has had from the backing filesystem
+\* since its call: those it remembered (`win`) and those it has now.
+Window(r) == r.win \cup BAns(r, bCur)
+
+\* The reply v of request r (its slot state at the step that replied) is
+\* one the backing filesystem gave.
+ReplyWitnessed(r, v) ==
+    CASE v.e \in {"EAGAIN", "EINTR"} -> r.eff # "ok" /\ v.a = {}
+      [] r.eff # None -> v = Rep(r.eff, {})
+      [] r.kind = "sync" -> v = Rep("ok", {})
+      [] OTHER ->
+           /\ v.a # {} /\ v.a \subseteq Window(r)
+           /\ IF r.kind \in {"unlink", "rename"}
+              THEN v.e = "ENOENT" /\ \A x \in v.a : x.k = "neg"
+              ELSE v.e = "ok"
+
+\* A request that arrived and replied in one step (an answer served from
+\* the cache at once): its only instant is the current one.
+ImmediateWitnessed(v) ==
+    v.e = "ok" /\ v.a # {} /\ \A x \in v.a : AnswerOK(x, bCur)
+
+\* Every reply is one the backing filesystem gave (above). A reply is the
+\* step at which a slot becomes idle, or an idle slot flips `rb` (a request
+\* that arrived and replied at once).
+ReplyObservable ==
+    [][\A p \in Procs :
+         (Serving /\ ps'[p].pc = "idle"
+                  /\ (ps[p].pc # "idle" \/ ps'[p].rb # ps[p].rb))
+           => IF ps[p].pc = "idle" THEN ImmediateWitnessed(ps'[p].rep)
+              ELSE ReplyWitnessed(ps[p], ps'[p].rep)]_vars
 
 \* Recovery always terminates: the daemon always gets back to serving.
 RecoveryTerminates == (mode # "up") ~> (mode = "up")

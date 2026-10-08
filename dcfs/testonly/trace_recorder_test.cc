@@ -631,6 +631,25 @@ TEST_F(TraceRecorderTest, InterruptedRequestsReplyEintr) {
   // The mkdir's interrupt line is written after its End: no mutation in
   // flight.
   EXPECT_THAT(lines[5], HasSubstr("\"inflight\":0"));
+  // Each reply line carries the request's EINTR (step 12.7b).
+  EXPECT_THAT(lines[3], HasSubstr("\"ev\":\"reply\",\"p\":\"p1\",\"errno\":4"));
+  EXPECT_THAT(lines[6], HasSubstr("\"ev\":\"reply\",\"p\":\"p1\",\"errno\":4"));
+}
+
+// A reply line carries the errno its frame returned, for formal/Trace.tla's
+// T_Reply to compare with what the model's request replied (step 12.7b): 0
+// for a getattr answered from valid attributes.
+TEST_F(TraceRecorderTest, ReplyLineCarriesTheFramesErrno) {
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  StartTrace();
+  {
+    events::RequestScope request(*ctx_.events, ctx_,
+                                 {.op = events::Op::kGetattr, .ino = d});
+    events::Scope getattr(*ctx_.events, ctx_, &ProtocolEvents::GetattrBegin,
+                          &ProtocolEvents::GetattrEnd, d, true);
+  }
+  EXPECT_THAT(Lines(d),
+              Contains(HasSubstr("\"ev\":\"reply\",\"p\":\"p1\",\"errno\":0")));
 }
 
 // --- Startup lines ---------------------------------------------------------

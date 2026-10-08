@@ -2077,7 +2077,13 @@ interleave at every backing syscall, as they will under coroutines. The TLC
 model checker checks, within small bounds, that nothing served from the
 cache disagrees with the backing filesystem (also after a crash and
 recovery), that a mutation's records read unknown from phase 1 until phase 3,
-that completeness never hides a name, and that recovery terminates. Variants
+that completeness never hides a name, and that recovery terminates. It also
+checks what each request replies, in SibylFS's terms (call, effect,
+return): a mutation's effect is its backing syscall and nothing else, and
+it replies that syscall's result; an answer (an entry, a negative entry, a
+listing, attributes) is one the backing filesystem gave at some instant
+between the request's arrival and its reply; `EAGAIN` and `EINTR` come only
+from a request whose syscall, if any, did not succeed. Variants
 that put back the historical bugs (from the audits: crash F1 and F3,
 tri-state F1 and F4; found by the model: the gaps below, once fixed) must
 produce counterexamples. `bazel test //formal/...`

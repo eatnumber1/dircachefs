@@ -1,0 +1,21 @@
+-------------------- MODULE reply_unknown_as_negative --------------------
+(***************************************************************************)
+(* A stale negative (step 12.7b): a lookup whose population the fill guard *)
+(* refuses to record answers from the cache instead of from the listing it *)
+(* read, and takes the name's unknown row for a negative entry (the        *)
+(* LookupResult::kUnknown that LookupOrPopulate must never return). Put in *)
+(* by overriding UnrecordedAnswer with dcfs.tla's UnknownAsNegative from   *)
+(* the configuration. Without the kernel's lock (the coroutine future):    *)
+(* with it, no mutation overlaps a lookup and the guard never refuses. The *)
+(* answer is not served from a known record and changes none, so no        *)
+(* invariant sees it.                                                      *)
+(*                                                                         *)
+(* Expected: ReplyObservable is violated: a exists (o1); a lookup of a     *)
+(* finds nothing cached and lists D, reading o1; a create of a runs phase  *)
+(* 1 (a unknown; its syscall will fail with EEXIST); the listing cannot be *)
+(* recorded (a mutation is in flight), and the lookup replies a negative   *)
+(* entry from the unknown row: a existed at every instant between the      *)
+(* lookup's call and its reply.                                            *)
+(***************************************************************************)
+EXTENDS MC
+=============================================================================

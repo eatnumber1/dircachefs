@@ -1,0 +1,4 @@
+DCFS-TRACE t 2 {"i":1,"c":"BeginAll","ev":"begin","origin":"existing","db":{"dent":[["a","k:15.1791425945.75000000"]],"complete":true,"epoch":0,"valid":true,"dirty":false,"clean":true,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":2,"c":"LookupDecided","ev":"lookup","p":"p1","req":{"k":"unlink","n":"b","m":""},"n":"b","out":"neg"}
+DCFS-TRACE t 2 {"i":3,"c":"NameResolved","ev":"resolved","p":"p1","n":"b","found":false}
+DCFS-TRACE t 2 {"i":4,"c":"RequestEnd","ev":"reply","p":"p1","errno":0}

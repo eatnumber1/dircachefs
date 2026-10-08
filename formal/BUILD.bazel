@@ -117,6 +117,11 @@ KNOWN_BUGS = {
     "recovery_clears_dirty": "Invariant CrashSafe is violated",
     # Step 12.6: RecoverDirty split in two transactions (not idempotent).
     "recover_clears_dirty_first": "Invariant RecoveryIdempotent is violated",
+    # Step 12.7b: replies the backing filesystem never gave, a mutation's
+    # result (a failed create that replies success) and an answer (a stale
+    # negative entry, without the kernel's lock).
+    "reply_after_failed_syscall": "Action property ReplyObservable is violated",
+    "reply_unknown_as_negative": "Action property ReplyObservable is violated",
 }
 
 [
@@ -425,6 +430,15 @@ TRACE_TESTS = {
     "recover_forgets_dirty_child": None,
     # ... but not when that object was clean (only b's key was dirty).
     "recover_forgets_clean_child": "\"ev\":\"recover\"",
+    # Step 12.7b, the reply's errno (T_Reply): a create whose syscall
+    # failed with EEXIST replies EEXIST (17): valid.
+    "reply_create_eexist": None,
+    # ... but a reply that says success (errno 0) after that failed
+    # syscall is rejected at the reply.
+    "reply_create_eexist_replied_ok": "\"ev\":\"reply\",\"p\":\"p1\",\"errno\":0",
+    # An unlink whose resolve found nothing: RemoveChild replies ENOENT
+    # itself, so its frame returns OK (errno 0): valid.
+    "reply_unlink_absent": None,
 }
 
 [

@@ -502,9 +502,28 @@ T_SyncClearDirty ==
 \* EINTR, ending a mutation past phase 1 without phase 3.
 T_Interrupt == Ev("interrupt") /\ Interrupt(P) /\ Matches(E, {})
 
-\* The request replied; the model's request had already (its last step).
+\* The errno the request's frame returned, as the reply line records it
+\* (Linux's numbers): an error the handler returned, which fuse_ops.cc
+\* replies; 0 when the handler replied itself, a success (a negative entry
+\* included) or the ENOENT that RemoveChild and Rename reply when the
+\* resolve of their (source) name found nothing (ReplyErrno). Any errno
+\* not listed here is one the model never replies: the recorder cuts the
+\* trace there instead of writing a reply line.
+ErrnoClass(n) ==
+    CASE n = 2 -> "ENOENT" [] n = 4 -> "EINTR" [] n = 11 -> "EAGAIN"
+      [] n = 17 -> "EEXIST" [] OTHER -> "other"
+\* The code's reply agrees with what the model's request replied (`rep`,
+\* step 12.7b): the same errno class, where the frame's status says it.
+ReplyErrnoOK(n, v) ==
+    IF n = 0 THEN v.e = "ok" \/ (v.e = "ENOENT" /\ v.a # {})
+    ELSE v.e = ErrnoClass(n)
+
+\* The request replied; the model's request had already (its last step),
+\* with the same errno class.
 T_Reply ==
-    /\ Ev("reply") /\ ps[P].pc = "idle" /\ Stutter /\ Matches(E, {})
+    /\ Ev("reply") /\ ps[P].pc = "idle"
+    /\ ReplyErrnoOK(E.errno, ps[P].rep)
+    /\ Stutter /\ Matches(E, {})
 
 T_BeginShutdown == Ev("shutdown") /\ BeginShutdown /\ Matches(E, {})
 T_StopSync == Ev("stop_sync") /\ StopSync /\ Matches(E, {})

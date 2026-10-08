@@ -324,7 +324,8 @@ class TraceRecorder final : public ProtocolEvents {
   Req &Open(Frame &frame, Ino dir, std::string kind, std::string n = "",
             std::string m = "");
   // Closes `frame`: frees its slots and ends each of its requests with a
-  // "reply" line, or with a cut if `unmodelled_end(req)` names a reason
+  // "reply" line (with the errno `status` carries, 0 if OK), or with a
+  // cut if `unmodelled_end(req)` names a reason
   // (an end the model does not have), or an "unexplained" line if the
   // reason starts with "unexplained: ".
   void Close(Context &ctx, Frame &frame, const absl::Status &status,

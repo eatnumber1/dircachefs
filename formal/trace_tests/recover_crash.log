@@ -16,10 +16,10 @@ DCFS-TRACE t 1 {"i":15,"c":"RecoveryDone","ev":"recovery_done","db":{"dent":[],"
 DCFS-TRACE t 1 {"i":16,"c":"LookupDecided","ev":"lookup","p":"p1","req":{"k":"lookup","n":"f","m":""},"n":"f","out":"populate"}
 DCFS-TRACE t 1 {"i":17,"c":"PopulateRead","ev":"populate_read","p":"p1","listing":[["g","k:15.1791421296.1000000"]],"db":{"dent":[],"complete":false,"epoch":2,"valid":true,"dirty":true,"clean":false,"durable":false,"inflight":0}}
 DCFS-TRACE t 1 {"i":18,"c":"PopulateCommitted","ev":"populate_commit","p":"p1","recorded":true,"db":{"dent":[["g","k:15.1791421296.1000000"]],"complete":true,"epoch":2,"valid":true,"dirty":true,"clean":false,"durable":false,"inflight":0}}
-DCFS-TRACE t 1 {"i":19,"c":"LookupEnd","ev":"reply","p":"p1"}
+DCFS-TRACE t 1 {"i":19,"c":"LookupEnd","ev":"reply","p":"p1","errno":0}
 DCFS-TRACE t 1 {"i":20,"c":"LookupDecided","ev":"lookup","p":"p1","req":{"k":"lookup","n":"g","m":""},"n":"g","out":"found","key":"k:15.1791421296.1000000"}
-DCFS-TRACE t 1 {"i":21,"c":"LookupEnd","ev":"reply","p":"p1"}
+DCFS-TRACE t 1 {"i":21,"c":"LookupEnd","ev":"reply","p":"p1","errno":0}
 DCFS-TRACE t 1 {"i":22,"c":"SyncSnapshotTaken","ev":"sync_begin","p":"p1","req":{"k":"sync","n":"","m":""}}
 DCFS-TRACE t 1 {"i":23,"c":"SyncfsDone","ev":"syncfs","p":"p1"}
 DCFS-TRACE t 1 {"i":24,"c":"SyncCleared","ev":"sync_clear","p":"p1","db":{"dent":[["g","k:15.1791421296.1000000"]],"complete":true,"epoch":2,"valid":true,"dirty":false,"clean":false,"durable":false,"inflight":0}}
-DCFS-TRACE t 1 {"i":25,"c":"SyncEnd","ev":"reply","p":"p1"}
+DCFS-TRACE t 1 {"i":25,"c":"SyncEnd","ev":"reply","p":"p1","errno":0}
