@@ -310,3 +310,26 @@ as today), test each against the same operation on the backing
 (`removed_test`), and rewrite the README and design.md paragraphs. After
 23.8, same agent. Owner: dcfs-protocol.
 
+## 23.10 A directory-level dirty set (russ, 2026-10-08: "I do care about simplification")
+
+Replace per-row dirty marks with dirty **directories**: a mutation marks
+its parent directory dirty (both parents for rename and link; a write-open
+and a read-open mark the parent, the latter with the atime-only reason
+from 23.8), durably once per sync interval instead of once per operation
+(the fsync-per-create cost goes away); file rows are never dirty.
+Recovery re-lists every dirty directory against the backing and re-stats
+its children (names present/absent, attributes, written sizes, atimes),
+one procedure for every mutation class, instead of per-row probes by
+handle. Sync points syncfs then clear the directories as today;
+atime-only directories do not drive sync points. Cost: after a crash, a
+listing plus a statx per child for each directory touched since the last
+sync point. Protocol change: dcfs.tla's dirty set becomes a set over
+directories (it already reasons mostly about D), `RecoveryIdempotent`,
+`CrashSafe` and 12.7b's `ReplyObservable` must hold, known_bugs variants
+for "child not re-listed" and "sync point clears a directory with a
+mutation in flight"; schema v7; the checker's dirty rules; recovery
+tests (12.6b's crash-during-recovery binary, 11.x's power cuts and ACE
+sequences, 23.8's atime power cut) are the regression suite. Sequence:
+after 12.8 (crash sequences) and 23.8 (held-fd dirty reason) merge, since
+all three touch the dirty set. Owner: dcfs-protocol.
+

@@ -1864,3 +1864,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   runs and use mount point + statfs f_fsid as a sanity check instead of a guarantee; no new
   identity marker; backings whose root gives no handle are refused with a clear message. Recorded in
   phases/14. Cleanup of the stale output bases confirmed.
+- russ, 2026-10-08: 1 ms per create is irrelevant, but a directory-level dirty set is wanted as a
+  simplification: recorded as 23.10 (after 12.8 and 23.8 merge; protocol agent). glibc: bump the
+  sysroot to Debian 13 (7.1c, next free lane; osv shipped-deb scan becomes gating with
+  ignore-with-expiry for records no release fixes).

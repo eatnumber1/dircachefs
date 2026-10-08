@@ -99,3 +99,16 @@ Owner: Sonnet (7.1, 7.2), Opus review; findings from 7.4 by owner of
 the affected area. Order: right after the CI phase, before the benchmarks
 (so every later phase runs under UBSan and has coverage); within it,
 7.1 then 7.2 (coverage) first, then 7.3, 7.4, 7.5, 7.6 and 7.7.
+
+## 7.1c Sysroot to Debian 13 (russ, 2026-10-08)
+
+The shipped glibc 2.36-9+deb12u14 (bookworm) carries 16 unfixed Debian
+OSV records; russ chose to bump the sysroot to Debian 13 (trixie, glibc
+2.41). Update `third_party/llvm`'s Debian package pins (libc6, libc6-dev,
+linux-libc-dev already trixie, the runtime libs) to a trixie snapshot
+with new sha256s, `tools/sbom/debian_sources.tsv` and the SBOM pins, rerun
+the hermeticity gate and the reproducible-build gate, and make the osv
+step's shipped-deb scan gate on fixable records: an `osv-scanner.toml`
+ignore entry with reason and expiry for each record no Debian release
+fixes, so the step stops being `continue-on-error`. Owner: Sonnet.
+
