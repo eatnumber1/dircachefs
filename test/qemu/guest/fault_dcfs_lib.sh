@@ -169,3 +169,20 @@ fd_recovered() {
 	fr_n=$(sed -n 's/.*recovered \([0-9][0-9]*\) dirty.*/\1/p' "$1" | tail -1)
 	echo "${fr_n:-0}"
 }
+
+# fd_snapshot DIR: one line per entry under DIR, "<path> <type> <size>
+# <mode>", sorted (steps 11.4, 11.5; fault_power.sh has its own copy).
+fd_snapshot() {
+	(cd "$1" && find . -path ./lost+found -prune -o -print | sort |
+		while read -r fs_p; do stat -c '%n %F %s %a' "$fs_p"; done)
+}
+
+# fd_same_as_backing: success if what the daemon serves at $MNT is what the
+# backing filesystem holds at $SRC, entry by entry (the diff, served "<" and
+# backing ">", in /tmp/snap.diff if not).
+fd_same_as_backing() {
+	drop_caches
+	fd_snapshot "$SRC" >/tmp/backing.snap
+	fd_snapshot "$MNT" >/tmp/served.snap 2>&1
+	command diff /tmp/served.snap /tmp/backing.snap >/tmp/snap.diff 2>&1
+}

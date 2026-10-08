@@ -79,6 +79,16 @@
  *       write to it (a rename, say) blocks until it is thawed -- a way to
  *       hold a dcfs mutation inside its backing syscall (busybox has no
  *       fsfreeze applet).
+ *   testutil shutdown <path> <default|logflush|nologflush>
+ *       FS_IOC_SHUTDOWN (ext4's EXT4_IOC_SHUTDOWN, xfs's XFS_IOC_GOINGDOWN,
+ *       btrfs's BTRFS_IOC_SHUTDOWN: one number) on the filesystem <path> is
+ *       on, like xfstests' godown: from then on it fails every operation
+ *       that reaches it, until it is unmounted and mounted again. "default"
+ *       freezes it first (everything written so far is durable),
+ *       "logflush" commits the journal but not data, "nologflush" commits
+ *       nothing (what was not yet durable is lost, as in a power cut).
+ *       btrfs has it from Linux 6.19, behind CONFIG_BTRFS_EXPERIMENTAL;
+ *       elsewhere it fails with ENOTTY.
  *   testutil fallocate <path> <mode> <offset> <len>
  *       fallocate(2), where <mode> is "0", "keep_size" (FALLOC_FL_KEEP_SIZE)
  *       or "punch_hole" (FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE --
@@ -537,6 +547,46 @@ static int cmd_fsfreeze(const char *path, const char *how)
 		return 1;
 	}
 	if (ioctl(fd, request, 0) == -1) {
+		print_err(errno);
+		close(fd);
+		return 1;
+	}
+	close(fd);
+	return 0;
+}
+
+/* FS_IOC_SHUTDOWN and its flags, from the kernel's <linux/fs.h> UAPI
+ * header (Linux 7.1), defined here when the sysroot's header predates
+ * them; ext4 and xfs had the same number and flags under their own names
+ * since 4.x. */
+#ifndef FS_IOC_SHUTDOWN
+#define FS_IOC_SHUTDOWN _IOR('X', 125, uint32_t)
+#define FS_SHUTDOWN_FLAGS_DEFAULT 0x0
+#define FS_SHUTDOWN_FLAGS_LOGFLUSH 0x1
+#define FS_SHUTDOWN_FLAGS_NOLOGFLUSH 0x2
+#endif
+
+static int cmd_shutdown(const char *path, const char *how)
+{
+	uint32_t flags;
+	int fd;
+
+	if (strcmp(how, "default") == 0) {
+		flags = FS_SHUTDOWN_FLAGS_DEFAULT;
+	} else if (strcmp(how, "logflush") == 0) {
+		flags = FS_SHUTDOWN_FLAGS_LOGFLUSH;
+	} else if (strcmp(how, "nologflush") == 0) {
+		flags = FS_SHUTDOWN_FLAGS_NOLOGFLUSH;
+	} else {
+		fprintf(stderr, "testutil shutdown: bad mode '%s'\n", how);
+		return 2;
+	}
+	fd = open(path, O_RDONLY | O_DIRECTORY);
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	if (ioctl(fd, FS_IOC_SHUTDOWN, &flags) == -1) {
 		print_err(errno);
 		close(fd);
 		return 1;
@@ -2496,6 +2546,8 @@ int main(int argc, char *argv[])
 		return cmd_syncfs(argv[2]);
 	if (argc == 4 && strcmp(argv[1], "fsfreeze") == 0)
 		return cmd_fsfreeze(argv[2], argv[3]);
+	if (argc == 4 && strcmp(argv[1], "shutdown") == 0)
+		return cmd_shutdown(argv[2], argv[3]);
 	if (argc == 6 && strcmp(argv[1], "fallocate") == 0)
 		return cmd_fallocate(argv[2], argv[3], argv[4], argv[5]);
 	if (argc == 5 && strcmp(argv[1], "writehold") == 0)
@@ -2587,6 +2639,7 @@ int main(int argc, char *argv[])
 		"       testutil fsync <path>\n"
 		"       testutil syncfs <path>\n"
 		"       testutil fsfreeze <path> <freeze|thaw>\n"
+		"       testutil shutdown <path> <default|logflush|nologflush>\n"
 		"       testutil fallocate <path> <0|keep_size|punch_hole> <offset> <len>\n"
 		"       testutil writehold <path> <append|create> <nbytes>\n"
 		"       testutil sql <db-path> <query>\n"

@@ -740,6 +740,24 @@ Step 11.2 added three things:
   dcfs's back, must each be reported.
 
 The small and medium ones run with the checking build of dcfs
+`fault_shutdown_test` (step 11.5, `qemu_test_matrix`: ext4 small, xfs and
+btrfs medium) crashes the backing filesystem itself, under a running dcfs:
+`testutil shutdown <path> <default|logflush|nologflush>` is
+`FS_IOC_SHUTDOWN`, xfstests' `godown` (the filesystem fails every operation
+until it is unmounted and mounted again; `default` freezes first,
+`logflush` commits the journal, `nologflush` nothing). btrfs has the ioctl
+only from Linux 6.19, behind `CONFIG_BTRFS_EXPERIMENTAL`; there the test
+turns the disk into dm-error and makes btrfs abort its transaction (a
+direct create and a `syncfs`). ext4 is mounted `commit=60` so that "not yet
+durable" holds for the whole run. A shut-down xfs refuses `FITHAW` (EIO)
+and stays frozen, so its variant skips the create held in phase 2 by a
+freeze.
+
+| Test | What it injects | What must hold |
+|---|---|---|
+| `fault_shutdown_test` | per flavour: unsynced completed mutations (create and data, mkdir, rename, setxattr) and a create held in phase 1 when the backing filesystem crashes; a create held in phase 2; a crash while idle, then a start without a remount; a daemon crash and a restart (which re-reads the directory) before the crash; a crash with dirty rows, then a start without a remount | the held create, new mutations and reads of contents fail; nothing is served that was not served before; the clean shutdown keeps the dirty set; a start without a remount (refused on xfs, whose open of `--source` fails) serves nothing new and mutates nothing; after the remount everything served matches the backing filesystem, `nologflush` lost the unsynced create and `default`/`logflush` kept it, and the change the restart after a daemon crash re-read is not served once the crash lost it (12.6's dirty rows kept until a sync point; the pre-12.6 code failed this) |
+
+These run in the small tier with the checking build of dcfs
 (`initramfs_checked`): an error path that leaves an invariant broken aborts
 the daemon and the test fails (the large ones run the plain build, except the ACE
 targets). Each uses the default guest

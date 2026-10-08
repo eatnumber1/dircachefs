@@ -306,6 +306,23 @@ qemu_test(
     timeout = "moderate",
 )
 
+# Step 11.5: an instant crash of the backing filesystem (FS_IOC_SHUTDOWN, in
+# each flavour the filesystem has; on btrfs without it, the disk turned into
+# dm-error) under a running dcfs, then a remount and a restart. vdb is 320M
+# for mkfs.xfs (qemu_test_matrix).
+qemu_test_matrix(
+    name = "fault_shutdown_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_shutdown.sh",
+    modules = ["dm_flakey"],
+    size = "small",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
 # Step 2: the cache database (and its -wal/-shm files) is mode 0600, not
 # world-readable; a missing cache-database directory is created 0700, and
 # an existing group-/world-accessible one gets a WARNING -- see

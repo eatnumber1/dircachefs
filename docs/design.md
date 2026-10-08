@@ -868,6 +868,24 @@ emptied with recovery, and such a crash lost them:
 So a power loss costs re-reading the entries mutated since the last sync
 point, and never serves state the backing filesystem did not keep.
 
+**A crashed backing filesystem** (step 11.5: `FS_IOC_SHUTDOWN`, xfstests'
+`godown`, or a disk that fails every I/O): dcfs keeps serving what it has
+cached (the backing filesystem's durable state, or a mutation it reported
+done, whose dirty row stays); every operation that reaches the backing
+filesystem fails with its error (`EIO` after a shutdown): mutations,
+including one already past phase 1 (its names stay unknown), opens of file
+contents, and fills. The clean shutdown's sync point fails, so the
+clean-shutdown flag stays 0 and the dirty set survives. A start over the
+crashed filesystem without a remount fails on xfs (the open of `--source`
+fails) and succeeds on ext4 and an aborted btrfs; it serves nothing new and
+mutates nothing, and what it re-reads of a dirty directory stays dirty
+(recovery keeps the rows until a sync point succeeds). Once the backing
+filesystem is mounted again, the next start recovers and everything served
+matches the backing filesystem (`fault_shutdown_test`, ext4, xfs and btrfs,
+each flavour of the ioctl; on the pre-12.6 code its "recrash" scenario, a
+daemon crash and a re-read before a `nologflush` shutdown, served a name the
+backing filesystem had lost).
+
 ### Sync points
 
 `backing::SyncBacking`: `syncfs(2)` on every mount fd, then, if all
@@ -1930,6 +1948,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
 | `crash_test` | `SIGKILL` while files are open for writing with unflushed passthrough writes: after a restart, sizes and mtimes match the backing files (this failed before writable opens marked attributes unknown). An out-of-band change is noticed on open and logged exactly once; dcfs's own mutations log no false positive. |
 | `power_test` | The state a power loss leaves, produced deterministically: mutate through the mount, `SIGKILL`, undo each mutation directly on the backing filesystem, restart. Recovery logs a warning, every touched entry shows the backing filesystem's truth, untouched entries stay warm. With recovery disabled, the checks fail. A periodic sync point empties the dirty set. It cannot produce a real power loss, since a guest's page cache survives anything short of a reboot. |
+| `fault_shutdown_test` | An instant crash of the backing filesystem under a running dcfs (`FS_IOC_SHUTDOWN` in each flavour on ext4 and xfs; a dead disk on btrfs): completed unsynced mutations, a create held in phase 1 and in phase 2, an idle crash, a daemon crash before the backing crash, starts without a remount. Mutations and reads of contents fail, nothing new is served, the dirty set survives the failed clean shutdown, and after the remount everything served matches the backing filesystem. |
 | `fault_backing_test`, `fault_cache_test`, `fault_power_test` | Real disk failures through dm-flakey and dm-error (`test/qemu/README.md`, "Fault injection"): read and write errors on the backing disk, write errors on the cache disk, and power cuts (both disks drop writes at one instant) placed in a create's phases and in a sync point with fsfreeze. The error goes back to the caller, the mutation does not reach the backing filesystem when phase 1 failed, the dirty set survives a failed clearing, and after a restart everything served matches the backing filesystem. The power cuts also run as real ones (`fault_power_kill_test`: the host kills QEMU at the cut and a second boot checks), and as bounded sequences of operations with a cut after them (`fault_ace_a_test`, `fault_ace_b_test`, `fault_ace_fs_test`). |
 | `release_leak_test` | A failed attribute refresh on the last writable close (forced by holding the SQLite write lock) does not leak the backing descriptor or passthrough registration. |
 | `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on the backing filesystem instead of failing `ESTALE`, also when their rows and attributes were cached, including changing them (truncate, chmod, chown, utimes, xattrs, fsync, through an open descriptor, an `O_PATH` descriptor's magic link or a removed working directory) and reopening an unlinked file through `/proc/self/fd`; no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
@@ -1971,6 +1990,18 @@ lists the user-visible ones.
 - **A residual "ahead" window depends on the backing filesystem.** The
   dirty-set argument assumes `syncfs` really makes earlier changes durable
   on the backing device.
+- **A filesystem that failed may report a successful `syncfs`.** btrfs
+  after a transaction abort (it goes read-only on its own) answers `syncfs`
+  with success on a descriptor opened after the abort (Linux 6.18;
+  `fault_shutdown_test_btrfs`, where a dead disk stands in for the shutdown
+  ioctl btrfs has only from 6.19), and so does any filesystem that went
+  read-only after an error (`sync_filesystem` skips a read-only
+  superblock). A dcfs started over such a filesystem, not remounted, can
+  therefore clear dirty rows whose changes the filesystem holds only in
+  memory. In the test its re-reads fail (`EIO`) and nothing wrong is
+  served; telling such a filesystem from one mounted read-only on purpose
+  would need the mount's own flags beside the superblock's
+  (`/proc/self/mountinfo`).
 
 ## Future work
 
