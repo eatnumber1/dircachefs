@@ -1917,3 +1917,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (f2faccc): asan_mem 832 for enospc_backing (btrfs peaks 486 MiB), 576 for enospc_cache and
   fault_shutdown. Lane-2 free: 26.14 quiet kernel to a new investigator.
 - russ, 2026-10-08: 6.5 test performance scrub (dedicated investigator, measure first, no weakening, before/after per change); first free lane.
+- Lane-3's queue merged: 25.5 (2771f62, style.md 1.10), 8.1b (803ecab: the coverage gate fails on
+  drops only, a rise is a NOTE in the job summary; guest/init reads the MEM line before killing the
+  sampler, the inferred race behind names_random's missing MEM line under coverage: not reproduced
+  locally), 26.5d (0f73230, 11 commits: all ten review items, seeded operator order, header-macro
+  rejection, absl builder arid rule, scratch output base under the scratch dir with cleanup in
+  finally and SIGTERM handled, flaky reruns, exit 2 for tooling, time budget, equivalent.txt with
+  nth, the per-push job reports survivors in the step summary and never fails on them). Cleanup: 16
+  stale output bases expunged plus two /tmp dirs, ~15 GB freed (385G -> 370G used). Re-sweep: 30 of
+  343 sampled, 18 killed / 8 survived / 3 invalid / 1 flaky -> 8.2e replaced. Lane-3 free: 6.5 test
+  performance scrub dispatched (new investigator).

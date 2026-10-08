@@ -122,26 +122,26 @@ return at once are the known equivalent class):
 After 11.4 and 25.3 land (both edit dir_cache_fs.cc), so line numbers
 are re-derived with `mutate.py generate`.
 
-## 8.2e Survivors from the first expanded sweep (26.5d, 2026-10-08)
+## 8.2e Survivors from the unbiased sample sweep (26.5d, 2026-10-08)
 
-**Provisional:** the 26.5d review found the per-function sampler biased
-toward the alphabetically first operators, so this list is from a biased
-sample; the sweep is being rerun after the fix and the list replaced.
-
-A 12% sample (40 of 340 mutants, seed 1, 5 per operator) over
-`dir_cache_fs.cc`, `backing.cc` and `metadata_cache.cc`: 24 killed, 14
-survived, 2 invalid, 18 mutants/hour at host load 16. Each survivor gets
-a test or an `equivalent.txt` entry with a reason; the protocol ones
-first (an invariant a test should pin):
-- `backing.cc` `ProbeChild` swap kAbsent/kPresent; `RecordNewChild` swap
-  kAbsent/kPresent; `FsyncDirFd` error->ok; `StartRun` `||` to `&&`;
-  `ProbeRecoveredRows` delete `gone = true`; `RecordNewLink` value->error;
-  `InitRoot` delete BackingCall and negate-if; `UnlinkAt` delete
-  BackingCall; `ReconcileAttrs` nudge 0 to 1; `WriteFile` nudge 0 to 1.
-- `dir_cache_fs.cc` `Fallocate` negate `removed`; `Tmpfile` nudge 0 to 1.
-- `metadata_cache.cc` `WithStatx` swap `stx_rdev_major`/`stx_rdev_minor`.
-Line numbers are in the 26.5d README's "First sweep" table; re-derive
-with `mutate.py generate --all` after the dcfs/ branches in flight land.
+After the sampler fix: 354 mutants generated over `dir_cache_fs.cc`,
+`backing.cc` and `metadata_cache.cc` (343 to run, 11 suppressed as
+equivalent); a seeded sample of 30 ran in 10,003 s (10.8 mutants/hour at
+host load ~15): 18 killed, 8 survived, 3 invalid, 1 flaky
+(`dir_cache_fs.cc` `Tmpfile:2774`: dir_cache_fs_test failed once and
+passed on the rerun: a flake to chase). Each survivor gets a test (extend
+the scenario's existing test per 25.4) or an `equivalent.txt` entry:
+- `backing.cc` `FsyncDirFd:1831` error->ok
+- `backing.cc` `InitRoot:672` negate-if
+- `backing.cc` `ProbeRecoveredRows:1974` delete `gone = true`
+- `backing.cc` `ProbeRecoveredRows:1999` `>` to `>=`
+- `backing.cc` `RecordNewChild:1586` swap kAbsent/kPresent
+- `backing.cc` `RefuseReservedIno:510` swap-args
+- `backing.cc` `UnlinkAt:1750` delete `BackingCall` (a trace hook: likely
+  equivalent for the killers used; decide with the trace tests)
+- `metadata_cache.cc` `WithStatx:312` swap `stx_rdev_major`/`stx_rdev_minor`
+Line numbers from the README's "First sweep" table at 0f73230; re-derive
+after the dcfs/ branches in flight land. Together with 8.2f below.
 
 ## 8.2f Survivors from the per-push mutation job on 4bf7182 (2026-10-08)
 
