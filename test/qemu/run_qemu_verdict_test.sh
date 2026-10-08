@@ -392,5 +392,28 @@ kill_run "$(awk 'BEGIN { for (i = 0; i < 6000; i++) print "console line " i " of
 [ "$RC" -ne 0 ] || fail "a QEMU that ended on its own, not killed at the cut, passed"
 grep -q "had ended on its own" "$WORK/stdout" || fail "no message for a QEMU that ended on its own: $(tail -3 "$WORK/stdout")"
 echo "PASS: --kill-on: a QEMU that was not killed at the marker fails"
+# guest/init's mem_report must print its MEM line even when the sampler is
+# killed mid-write: the awk sampler truncates /dev/memstat each cycle before
+# it writes, so a kill that lands in that window leaves an empty file, and
+# the run failed with "no MEM line" (names_random under coverage, CI run
+# 37841442160). The harness runs the real function with a `kill` that
+# empties the file first, as that kill would find it.
+MEMSTAT_FILE=$WORK/memstat
+echo "MEM total=1 min_avail=1 peak_used=1 peak_cached=1 peak_anon=1 peak_shmem=1 peak_slab=1 dcfs_hwm=0 top=x:1:1 samples=1 up=1.00" >"$MEMSTAT_FILE"
+{
+	sed -n '/^reclaim_counters() {/,/^}/p' "$INIT"
+	sed -n '/^mem_report() {/,/^}/p' "$INIT"
+} >"$WORK/mem_report.sh"
+MEM_OUT=$(
+	MEMSTAT=$MEMSTAT_FILE RECLAIM_BASE="0 0" MEM_SAMPLER_PID=$$
+	# shellcheck disable=SC1091
+	. "$WORK/mem_report.sh"
+	kill() { : >"$MEMSTAT_FILE"; return 0; }
+	dmesg() { return 0; }
+	mem_report
+)
+echo "$MEM_OUT" | grep -q "^MEM total=" ||
+	fail "mem_report printed no MEM line when the sampler's file was emptied by the kill: '$MEM_OUT'"
+echo "PASS: guest/init's mem_report prints the MEM line when the kill finds /dev/memstat empty"
 FLAG=""
 echo "PASS: all checks passed"

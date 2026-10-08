@@ -108,10 +108,11 @@ export DCFS_SANITIZER
 # whose meaning depends on nothing being evicted.
 # The processes' status files are read through `cat ... 2>/dev/null` so one
 # that exits between the glob and the read cannot abort the loop.
+MEMSTAT=${MEMSTAT:-/dev/memstat}
 start_mem_sampler() {
 	RECLAIM_BASE=$(reclaim_counters)
 	export RECLAIM_BASE
-	awk -v out=/dev/memstat 'BEGIN {
+	awk -v out="$MEMSTAT" 'BEGIN {
 		minav = -1
 		for (;;) {
 			while ((getline l < "/proc/meminfo") > 0) {
@@ -163,18 +164,24 @@ reclaim_counters() {
 # sample), then any OOM-killer lines as MEM-OOM: lines and the kernel's oopses
 # and warnings as KERNEL-OOPS: lines.
 mem_report() {
-	# A test that ends within the first sample's time (a unit test of a
-	# few milliseconds on a slow-starting sampler) still gets its line:
-	# wait for the first sample, for up to two seconds.
+	# Read the sampler's last line while it still runs, then stop it: the
+	# awk truncates the file each cycle before it writes, and a kill that
+	# lands in that window leaves it empty (a run on a loaded runner lost
+	# its MEM line that way). A test that ends within the first sample's
+	# time (a unit test of a few milliseconds on a slow-starting sampler)
+	# still gets its line: wait for a sample, for up to two seconds.
 	waited=0
-	while [ ! -s /dev/memstat ] && [ "$waited" -lt 20 ]; do
+	memline=
+	while [ "$waited" -lt 20 ]; do
+		memline=$(cat "$MEMSTAT" 2>/dev/null)
+		[ -n "$memline" ] && break
 		sleep 0.1
 		waited=$((waited + 1))
 	done
 	[ -n "${MEM_SAMPLER_PID:-}" ] && kill "$MEM_SAMPLER_PID" 2>/dev/null
 	MEM_SAMPLER_PID=
-	if [ -s /dev/memstat ]; then
-		echo "$(cat /dev/memstat) $(awk -v now="$(reclaim_counters)" -v base="$RECLAIM_BASE" 'BEGIN {
+	if [ -n "$memline" ]; then
+		echo "$memline $(awk -v now="$(reclaim_counters)" -v base="$RECLAIM_BASE" 'BEGIN {
 			split(now, n, " ")
 			split(base, b, " ")
 			printf "reclaim_scans=%d slabs_scanned=%d", n[1] - b[1], n[2] - b[2]
