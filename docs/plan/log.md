@@ -1818,3 +1818,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   known_bug_rename_stale_source_test exceed 300 s on this host at load 13-15 (935k states).
 - 12.7b merged (5094b31, seven commits) after the second pass ("merge"; one nit -> 12.7c: ECOMM
   from ~FuseRequest recorded as errno 0). Lane-1 next: 12.7c + 12.11 (same agent).
+- 12.7c + 12.11 reported (lane-1, 161b85d): ECOMM sentinel (`kNotReplied` -> unexplained line);
+  `attrchange` request of D in dcfs.tla (phase 1, syscall, End as AttrChangePhase3, refresh fill,
+  reply; checkpoint before the syscall), known_bugs/attr_change_end_skipped (GuardsBalanced),
+  Trace.cfg checks GuardsBalanced, the recorder maps directory setattr/setxattr/removexattr/ioctl
+  to it (the `dir-attrs` cut is gone), four production call sites emit the mutation syscall events.
+  Limit: dcfs.tla models only D, so a skipped End after copy_file_range/fallocate/a file's setattr
+  is still caught only by the harness tests (8.2); a per-file attribute trace would be 12.11b.
+  Counts: small 936k -> 1.48M (timeouts to `long` requested), recovery 40k, liveness 147k,
+  interrupt 281k; large/nolock unchanged. Short Opus review requested.
