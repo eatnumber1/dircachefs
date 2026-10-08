@@ -1669,3 +1669,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   message rules) and 1.7 (levels, verbose levels, absl macros only, log-or-return), design.md
   "Logging", README flags. The code (reclassification, INFO/VLOG lines, tests) follows on the
   same branch; until it lands the docs describe behaviour slightly ahead of main.
+- 11.3 reported (lane-6, 68626cc, under review): gap table 12 operation classes × 5 failure modes
+  = 60 cells, 57 were gaps, all checked by `fault_recover_test` (ext4 medium ~70 s, xfs/btrfs
+  large); window mode = dm-flakey 6 s up / 8 s down. Findings, no production change yet: on
+  xfs/btrfs `open_by_handle_at` returns ESTALE for an inode the device cannot read, dcfs forgets
+  the row and callers then get ESTALE/ENOENT for a file that exists instead of EIO (cache stays
+  consistent; the reply is the question: reviewer asked for the minimal correct behaviour);
+  after a failed write-back dcfs's recorded size can differ from what the fs reports after
+  eviction (restart recovers it); ext4 EUCLEAN after a bitmap read error until remount; a failing
+  btrfs inode read WARNs in btrfs_destroy_inode, so the btrfs variant pins inodes. Also:
+  readdir_boundary_test timed out at 240 s on this host on origin/main (CI passed it on fee154d):
+  host load suspected, log requested.
