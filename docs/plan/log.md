@@ -1908,3 +1908,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   survivors of 30 (the job passes --fail-on-survivor: to be dropped in 26.5d, survivors to the job
   summary; the four recorded as 8.2f); asan (0): enospc_backing_test_btrfs guest OOM at 384 MiB
   (asan_mem to be measured and set by lane-2 after 11.3b).
+- 11.3b merged (2301c18): an ESTALE from open_by_handle_at is checked through the parent's fd by
+  one present name, else by up to 16 unknown names (a failed mutation leaves names unknown); same
+  handle, an uncheckable name, or an unreadable parent -> EIO with the row kept and attributes
+  unknown; a readable parent's ENOENT, a different handle, or no name at all -> ESTALE as before.
+  fault_recover xfs: 0 FAIL cells (was 18 ENOENT/ESTALE replies for existing files). OpenNode runs
+  inside Setattr's phase 3, which is the reason no checkpoint precedes the extra calls. 11.4c merged
+  (f2faccc): asan_mem 832 for enospc_backing (btrfs peaks 486 MiB), 576 for enospc_cache and
+  fault_shutdown. Lane-2 free: 26.14 quiet kernel to a new investigator.

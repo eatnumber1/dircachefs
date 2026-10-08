@@ -32,7 +32,7 @@ what landed differs:
   (12 operation classes × error-reads / self-ending flakey window /
   error-writes / error-io / dead) in `fault_recover_test`; the README table
   marks each cell asserted, truth-only or skipped.
-- 11.3b (production, protocol tier, after 11.5 lands; test first): dcfs
+- 11.3b (merged 2026-10-08, 2301c18, one review round): dcfs
   treats every ESTALE from `open_by_handle_at` as "the object is gone"
   (`backing.cc` OpenNode → ForgetStale), but xfs and btrfs also return
   ESTALE for an inode the device cannot read, so chmod/stat/setxattr of an
