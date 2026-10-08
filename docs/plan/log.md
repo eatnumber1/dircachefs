@@ -1568,3 +1568,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   FaultSitesTest/SlopeTest, which have their own targets). Fast 176 + 2 skips, traces a/b/c
   167/215/195 s, cancel_test, subjects ok. Lane-3 freed: 11.2b fsstress/fsx dispatched (new
   implementer).
+- 8.4 merged (1b2fb6d) after one review round (mount_options defaults to empty so a missing value
+  fails closed; the harness builds its options with BuildMountOptions and passes `-o`; the
+  POSIX_ACL/DONT_MASK refusal returns FailedPrecondition so fuse_ops.cc is the only INIT refusal;
+  ACCESS error log rate-limited; FuseRequest default constructor gone, the two reply-twice tests
+  live in the harness; lifecycle.sh refusal checks under `timeout 10` wanting exit 1). Fast 177 + 2
+  skips, traces a/b/c, lifecycle, subjects ok. Lane-2 idle: held until a lane frees (host at load
+  13-15 doubles every test time); next for it: 11.4 out of space + 11.5 instant backing crash.
