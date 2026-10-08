@@ -1518,8 +1518,8 @@ void TraceRecorder::RunStarted(Context &ctx) {
 
 void TraceRecorder::RecoveryDone(Context &ctx) {
   Enter("RecoveryDone");
-  // Every directory, as the start's other lines: the probed rows left the
-  // dirty set (dcfs.tla's ClearRecovered).
+  // Every directory, as the start's other lines: the probe ended
+  // (dcfs.tla's ProbesDone).
   for (Ino dir : AllDirs(ctx)) {
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"recovery_done\",\"db\":",

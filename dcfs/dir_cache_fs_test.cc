@@ -3751,15 +3751,16 @@ TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
 }
 
 // A crash during recovery (steps 12.6, 12.6b): recovery may stop anywhere
-// and run again. Here the start that follows a crash between an unlink's
-// syscall and its phase 3 dies in RecoverDirty, and the next one before it
-// probes the unlinked file's row, when the binary is built with those
-// crashes (//dcfs:dir_cache_fs_crash_during_recovery_test, whose traces
-// trace validation checks; trace_tests/recover_crash.log keeps the
-// root's). The row stays in the dirty set until a start has probed it, so
-// the third start does, and recovery ends as if nothing had happened: the
-// root's listing and names forgotten, the file's row gone, nothing dirty.
-// Without the crashes, the first start does all of it.
+// and run again, and what it recovered stays dirty until a sync point. The
+// start that follows a crash between an unlink's syscall and its phase 3
+// probes the unlinked file's row away; the recovered rows stay in the dirty
+// set (the crashed run's backing changes may not be durable yet: only a
+// sync point's syncfs makes them so), and the cache answers from the
+// backing filesystem meanwhile. Built with DCFS_CRASH_DURING_RECOVERY
+// (//dcfs:dir_cache_fs_crash_during_recovery_test, whose traces trace
+// validation checks; trace_tests/recover_crash.log keeps the root's), the
+// first start dies in RecoverDirty and the second's probe of the file's row
+// fails: the row stays dirty, unprobed, and the third start probes it.
 TEST_F(DirCacheFSTest, CrashDuringRecoveryRecoversAgain) {
   WriteFile(Path("f"));
   WriteFile(Path("g"));
@@ -3776,21 +3777,38 @@ TEST_F(DirCacheFSTest, CrashDuringRecoveryRecoversAgain) {
   ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
   StartTrace();
 
-  absl::Status first = Restart("boot");
-  if (!first.ok()) {
-    // The daemon died during recovery: nothing of it was recorded.
-    EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(Contains(kRootInode)));
-    ASSERT_THAT(Restart("boot"), IsOk());
-  }
-  // A start (the last one, or one that died before probing the file's row,
-  // whose row it left dirty) and another.
+#ifdef DCFS_CRASH_DURING_RECOVERY
+  // The daemon dies in RecoverDirty: nothing of it was recorded.
+  ASSERT_FALSE(Restart("boot").ok());
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(Contains(kRootInode)));
+  // The next start's probe of the file's row fails: the row stays, its
+  // attributes unknown, and dirty, for the next start.
   ASSERT_THAT(Restart("boot"), IsOk());
-  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
-  EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(attr.valid);
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(Contains(f)));
+#endif
+  ASSERT_THAT(Restart("boot"), IsOk());
   EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
               ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "g"),
               IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
+  // Still dirty until a sync point: the unlink may not be durable yet.
+  EXPECT_THAT(cache::ListDirty(ctx_),
+              IsOkAndHolds(::testing::IsSupersetOf({kRootInode, f})));
+  // Meanwhile the cache answers from the backing filesystem. (Through
+  // ctx_, given the memory the last start's process had: Restart's Context
+  // is gone, and ctx_'s is the crashed process's.)
+  ctx_.dirty.durable.clear();
+  ctx_.dirty.any = true;
+  EXPECT_THAT(backing::LookupOrPopulate(ctx_, kRootInode, "f"),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kNegative)));
+  EXPECT_THAT(backing::LookupOrPopulate(ctx_, kRootInode, "g"),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
+  // The first sync point (syncfs, then ClearDirty) takes them out.
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
 }
 
 // DESTROY while an unlinked file is still open for reading (SIGTERM, a
@@ -4456,9 +4474,11 @@ TEST_F(DirCacheFSDeathTest, OpenOlderThanTheRunIsLeftOutUntilReleased) {
   ASSERT_EQ(open.error, 0);
   ASSERT_OK_AND_ASSIGN(std::vector<InodeId> recovered,
                        backing::StartRun(ctx_, "boot"));
-  // Recovered (and, as Startup's probe would, taken out of the dirty set).
+  // Recovered; and taken out of the dirty set, as the first sync point
+  // after the start would (the old open is not one of this run's).
   ASSERT_THAT(recovered, Contains(f));
-  ASSERT_THAT(cache::ClearDirtyRows(ctx_, recovered), IsOk());
+  ASSERT_THAT(db_.Exec(absl::StrCat("DELETE FROM dirty WHERE inode = ", f)),
+              IsOk());
   ASSERT_THAT(Dirty(), Not(Contains(f)));
   EXPECT_EQ(Getattr(kRootInode).first.error, 0);  // Left out: no abort.
   ASSERT_EQ(Release(f, fh).error, 0);

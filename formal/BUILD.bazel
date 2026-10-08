@@ -109,6 +109,9 @@ KNOWN_BUGS = {
     # and too late (crash F3's create: the change shows at a later fill).
     "effect_before_syscall": "Action property EffectAtSyscall is violated",
     "effect_after_syscall": "Action property EffectAtSyscall is violated",
+    # Step 12.6b's first version: the start clears the recovered rows with
+    # no syncfs since the crashed run's backing syscalls.
+    "recovery_clears_dirty": "Invariant CrashSafe is violated",
     # Step 12.6: RecoverDirty split in two transactions (not idempotent).
     "recover_clears_dirty_first": "Invariant RecoveryIdempotent is violated",
 }

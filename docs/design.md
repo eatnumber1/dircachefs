@@ -853,14 +853,16 @@ to read. The probe is bounded by the dirty set and costs one
 boot) the inodes are in the backing filesystem's cache, about 10-20 µs each;
 after a power loss each is an inode-table read, which on a spinning disk
 can take seconds for thousands of dirty inodes. Start-up after a crash is
-slower by that much (`BM_Recovery`'s numbers move with it). After the probe
-one transaction (`cache::ClearDirtyRows`) takes the probed inodes out of the
-dirty set; an inode whose probe failed stays. Until then they are dirty, so
-recovery may crash and start again any number of times: a crash during the
-probe leaves the inodes not yet probed to the next start, which recovers
-them again (recovery forgets nothing twice that matters: the second pass
-finds them already unknown) and probes them (step 12.6b; before it the
-dirty set was emptied with recovery, and such a crash lost them:
+slower by that much (`BM_Recovery`'s numbers move with it). The probed
+inodes stay in the dirty set, as every recovered one does: after a daemon
+crash the crashed run's backing changes may be in the page cache only, and
+a power loss before the next `syncfs` could still undo them, so only the
+first sync point (`syncfs`, then `ClearDirty`; `ctx.dirty.any` makes one
+run) takes them out. Recovery may therefore crash and start again any
+number of times: a crash during the probe leaves the inodes not yet probed
+to the next start, which recovers them again (the second pass finds them
+already unknown) and probes them (step 12.6b; before it the dirty set was
+emptied with recovery, and such a crash lost them:
 `formal/known_bugs/lifetime_probe_list_in_memory`).
 
 So a power loss costs re-reading the entries mutated since the last sync

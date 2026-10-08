@@ -1838,8 +1838,8 @@ TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
   ASSERT_THAT(MarkDirty(ctx_, dirty), IsOk());
 
   EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(4));
-  // The dirty set stays until the start has probed its rows (step 12.6b):
-  // a crash before then leaves them to the next start.
+  // The dirty set stays until a sync point (step 12.6b): the crashed run's
+  // backing changes may not be durable yet.
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::UnorderedElementsAre(
                                    d, f.id, s.id, 999)));
   EXPECT_TRUE(ctx_.dirty.any);
@@ -1881,16 +1881,13 @@ TEST_F(MetadataCacheTest, RecoverDirtyForgetsExactlyTheDirtyEntries) {
   EXPECT_THAT(ListXattrs(ctx_, k.id),
               IsOkAndHolds(Optional(ElementsAre("user.b"))));
 
-  // Recovering again (a crash before the probe) finds the same rows and
-  // changes nothing more; once they are probed and cleared, nothing is
-  // dirty and there is nothing to do.
+  // Recovering again (a crash during recovery) finds the same rows and
+  // changes nothing more; after a sync point nothing is dirty and there is
+  // nothing to do.
   EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(4));
   EXPECT_THAT(IsDirComplete(ctx_, c), IsOkAndHolds(true));
-  const InodeId probed[] = {d, f.id, s.id};
-  ASSERT_THAT(ClearDirtyRows(ctx_, probed), IsOk());
-  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(999)));
-  const InodeId rest[] = {999};
-  ASSERT_THAT(ClearDirtyRows(ctx_, rest), IsOk());
+  ASSERT_THAT(SyncClear(), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
   EXPECT_THAT(RecoverDirty(ctx_), IsOkAndHolds(0));
 }
 

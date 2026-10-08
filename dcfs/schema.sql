@@ -252,7 +252,8 @@ CREATE TABLE xattrs (
 -- the backing syscall; phase 3 never removes rows. After an unclean
 -- shutdown, startup recovery (cache::RecoverDirty) treats everything cached
 -- about these inodes as unknown, which is exactly what a power loss may
--- have made disagree with the backing filesystems. No foreign key: a row
+-- have made disagree with the backing filesystems, and keeps the rows: only
+-- a sync point removes them. No foreign key: a row
 -- may outlive its inode (recovery skips it), and must not vanish with it.
 CREATE TABLE dirty (
   inode INTEGER PRIMARY KEY

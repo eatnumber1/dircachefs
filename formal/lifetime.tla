@@ -472,8 +472,8 @@ Crash ==
 \* shutdown, the rows recovery found dirty are listed for ProbeRecoveredRows
 \* (the row of a removal the crash cut; the code lists every dirty row,
 \* which changes nothing for the others). Since step 12.6b they stay in the
-\* dirty set until the start has probed them (ClearProbed takes them out),
-\* so a crash during the probe leaves them to the next start.
+\* dirty set until a sync point (SyncPoint), so a crash during the probe
+\* leaves them to the next start.
 RestartWith(forget) ==
     /\ run = "down"
     /\ LET q == IF clean \/ BugNoRecoveredProbe \/ cut = 0 THEN {} ELSE {cut}
@@ -503,12 +503,18 @@ ProbeRow(i) ==
     /\ UNCHANGED <<obj, nextId, stubVars, bName, bState, pend, run, clean,
                    crashes, cut, forgetErr>>
 
-\* ... then one transaction takes the probed rows out of the dirty set
-\* (cache::ClearDirtyRows), and the daemon serves.
-ClearProbed ==
+\* ... then the daemon serves; the probed rows stay dirty.
+ProbesDone ==
     /\ run = "probing" /\ queued = {}
-    /\ cut' = 0 /\ run' = "up"
+    /\ run' = "up"
     /\ UNCHANGED <<st, obj, nextId, stubVars, bName, bState, pend, clean,
+                   crashes, cut, queued, forgetErr>>
+
+\* A sync point (SyncBacking: syncfs, then ClearDirty) while serving takes
+\* the recovered row out of the dirty set.
+SyncPoint ==
+    /\ Up /\ cut # 0 /\ cut' = 0
+    /\ UNCHANGED <<st, obj, nextId, stubVars, bName, bState, pend, run, clean,
                    crashes, queued, forgetErr>>
 
 -----------------------------------------------------------------------------
@@ -569,7 +575,7 @@ Next ==
     \/ Crash
     \/ Restart
     \/ \E i \in Ids : ProbeRow(i)
-    \/ ClearProbed
+    \/ ProbesDone \/ SyncPoint
     \/ \E m \in Boundaries : Refuse(m) \/ LookupStub(m) \/ StubGone(m)
 
 Spec == Init /\ [][Next]_vars

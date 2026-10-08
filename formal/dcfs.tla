@@ -844,15 +844,20 @@ ResetMemory ==
     /\ seq' = 0 /\ inflight' = 0 /\ durableD' = FALSE /\ running' = None
     /\ ps' = [p \in Procs |-> IdleProc]
 
-\* A crash: a daemon crash, a kernel crash or a power loss, at any moment.
-\* Each disk independently keeps some prefix of its unsynced writes (a
-\* daemon crash alone keeps everything: dbCur and bCur are among the
-\* choices).
-Crash ==
-    /\ mode # "down" /\ crashes < MaxCrashes
+\* A crash at any moment. A kernel crash or a power loss: each disk
+\* independently keeps some prefix of its unsynced writes, and that is now
+\* all there is. A daemon crash: the disks keep everything (both are in the
+\* kernel's page cache), but nothing more is durable than before (step
+\* 12.6b): a later power loss may still lose what was not synced, so the
+\* crashed run's dirty rows must stay until a sync point.
+PowerLoss ==
     /\ \E s \in dbOpts, t \in bOpts :
          /\ dbCur' = s /\ dbOpts' = {s}
          /\ bCur' = t /\ bOpts' = {t}
+DaemonCrash == UNCHANGED <<bCur, bOpts, dbCur, dbOpts>>
+Crash ==
+    /\ mode # "down" /\ crashes < MaxCrashes
+    /\ PowerLoss \/ DaemonCrash
     /\ mode' = "down" /\ crashes' = crashes + 1
     /\ ResetMemory
     /\ UNCHANGED <<servedWrong, stamp, muts>>
@@ -865,7 +870,9 @@ Restart ==
 
 \* cache::RecoverDirty, one transaction at normal durability: for a dirty
 \* D, forget every dentry of it and mark its listing incomplete (epoch
-\* bump), mark its attributes unknown; then empty the dirty set. (Recover
+\* bump), mark its attributes unknown. As an image of what a recovery
+\* makes of a crash state it is also not dirty (the code keeps the dirty
+\* set until a sync point: Recover). (Recover
 \* below adds what it does to dentries pointing at dirty children.) (StartRun
 \* calls it whatever clean_shutdown says; with an empty dirty set it
 \* changes nothing.)
@@ -890,9 +897,9 @@ RecoverForgetting(d, forget) ==
         !.dent = [x \in Names |-> IF x \in forget THEN Unknown
                                  ELSE RecoverDirty(d).dent[x]]]
 
-\* The dirty set itself stays (step 12.6b): the start still has to probe its
-\* rows, and a crash before then must leave them to the next start
-\* (ClearRecovered takes them out).
+\* The dirty set itself stays until a sync point (step 12.6b): the crashed
+\* run's backing changes may not be durable yet, and the start still has to
+\* probe its rows.
 Recover ==
     /\ mode = "recover"
     /\ \E forget \in SUBSET PresentNames(RecoverDirty(dbCur)) :
@@ -903,7 +910,7 @@ Recover ==
                    servedWrong, stamp, muts, crashes>>
 
 \* StartRun's last transaction, kSync: clean_shutdown = 0 (and the boot id).
-\* Then backing::Startup's probe (ClearRecovered).
+\* Then backing::Startup's probe (ProbesDone).
 StartRun ==
     /\ mode = "start"
     /\ Commit([dbCur EXCEPT !.clean = FALSE], TRUE)
@@ -937,13 +944,20 @@ RecoverClearsDirtyFirst ==
                       servedWrong, stamp, muts, crashes>>
 
 \* backing::Startup, after InitRoot: the probe of the recovered rows
-\* (ProbeRecoveredRows), then one transaction (cache::ClearDirtyRows) takes
-\* the rows it probed out of the dirty set; one whose probe failed stays
-\* (keep). D's own probe is not modelled. Then the daemon serves.
-ClearRecovered ==
+\* (ProbeRecoveredRows, not modelled for D) ends; the rows stay dirty until
+\* a sync point. Then the daemon serves.
+ProbesDone ==
+    /\ mode = "probe" /\ mode' = "up"
+    /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts, seq, inflight, durableD,
+                   running, ps, servedWrong, stamp, muts, crashes>>
+
+\* Not the code (known_bugs/recovery_clears_dirty): the start takes the
+\* recovered rows out of the dirty set when its probe ends, with no syncfs
+\* since the crashed run's backing changes (step 12.6b's first version). A
+\* configuration puts it in with ProbesDone <- ProbesDoneClearing.
+ProbesDoneClearing ==
     /\ mode = "probe"
-    /\ \E keep \in BOOLEAN :
-         Commit([dbCur EXCEPT !.dirty = dbCur.dirty /\ keep], FALSE)
+    /\ Commit([dbCur EXCEPT !.dirty = FALSE], FALSE)
     /\ mode' = "up"
     /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, running, ps,
                    servedWrong, stamp, muts, crashes>>
@@ -1029,13 +1043,13 @@ Next ==
          \/ SyncClearDirty(p)
          \/ Interrupt(p)
     \/ CrashServing \/ CrashRecovering \/ CrashStopping
-    \/ Restart \/ Recover \/ StartRun \/ ClearRecovered
+    \/ Restart \/ Recover \/ StartRun \/ ProbesDone
     \/ BeginShutdown \/ StopSync \/ StopClear \/ StopCkpt \/ StopFlag
 
 \* Startup and shutdown steps are never postponed forever.
 Fairness ==
     /\ WF_vars(Restart) /\ WF_vars(Recover) /\ WF_vars(StartRun)
-    /\ WF_vars(ClearRecovered)
+    /\ WF_vars(ProbesDone)
     /\ WF_vars(StopSync) /\ WF_vars(StopClear) /\ WF_vars(StopCkpt)
     /\ WF_vars(StopFlag)
 
@@ -1089,7 +1103,7 @@ TriState ==
 CrashSafe == \A s \in dbOpts, t \in bOpts : Correct(RecoverDirty(s), t)
 
 \* Recovery may crash and start again (FSCQ's crash condition for
-\* recovery, step 12.6): while it runs (from a crash to ClearRecovered),
+\* recovery, step 12.6): while it runs (from a crash to ProbesDone),
 \* every database state a crash may leave recovers to a correct cache,
 \* whatever a crash left of the backing filesystem. It is CrashSafe in the
 \* recovery modes, named for what a crash during recovery relies on: that

@@ -1006,6 +1006,9 @@ qemu_cc_test(
     timeout = "short",
     srcs = ["dir_cache_fs_test.cc"],
     args = ["--gtest_filter=DirCacheFSTest.CrashDuringRecoveryRecoversAgain"],
+    # The test checks that the faults fired (BackingNlink is wrapped from
+    # within its own translation unit: only lld without inlining honors it).
+    local_defines = ["DCFS_CRASH_DURING_RECOVERY"],
     disks = [("vdb", "ext4", "32M")],
     linkopts = DIR_CACHE_FS_TEST_WRAPS + [
         "-Wl,--wrap=" + RECOVER_DIRTY,

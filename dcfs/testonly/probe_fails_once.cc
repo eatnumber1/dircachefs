@@ -1,7 +1,7 @@
-// A crash for trace validation and step 12.6b: the start's first probe of
-// a recovered row (backing::BackingNlink, from ProbeRecoveredRows) fails, as
-// if the daemon had died before probing it: the row must stay in the dirty
-// set for the next start. Linked, with -Wl,--wrap of BackingNlink (its
+// A fault for trace validation and step 12.6b: the start's first probe of a
+// recovered row (backing::BackingNlink, from ProbeRecoveredRows) fails, as
+// a crash before that probe would leave it: unprobed and in the dirty set,
+// for the next start. Linked, with -Wl,--wrap of BackingNlink (its
 // mangled name, see dcfs/BUILD.bazel), only into
 // //dcfs:dir_cache_fs_crash_during_recovery_test.
 
@@ -28,8 +28,7 @@ absl::StatusOr<std::optional<uint64_t>> WrapBackingNlink(Context &ctx,
   static bool crashed = false;
   if (!crashed) {
     crashed = true;
-    return absl::UnavailableError(
-        "testonly: the daemon died before probing this row");
+    return absl::UnavailableError("testonly: this probe fails once");
   }
   return RealBackingNlink(ctx, id);
 }

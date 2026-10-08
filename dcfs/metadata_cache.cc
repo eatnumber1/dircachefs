@@ -1567,19 +1567,6 @@ absl::StatusOr<Mutation> BeginXattrChange(Context &ctx, InodeId id,
   });
 }
 
-absl::Status ClearDirtyRows(Context &ctx, std::span<const InodeId> ids) {
-  return ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(
-        Statement * remove,
-        ctx.db.Prepared("DELETE FROM dirty WHERE inode = ?"));
-    for (InodeId id : ids) {
-      ABSL_RETURN_IF_ERROR(remove->Bind(1, id));
-      ABSL_RETURN_IF_ERROR(remove->ExecuteOnce());
-    }
-    return absl::OkStatus();
-  });
-}
-
 absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids) {
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&] { return InsertDirty(ctx, ids); }));
   ctx.dirty.any = true;
@@ -1623,10 +1610,9 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   //    added only by a phase 1 (BeginMutation, whose RegisterMutation then
   //    advances the clock with nothing in between) and by MarkDirty in a
   //    phase 3 (before its mutation's End, which advances it). Only
-  //    ClearDirty and RecoverDirty delete rows: RecoverDirty runs only at
-  //    startup, and another sync point's ClearDirty in between could only
-  //    have removed rows (then putting a kept one back below is merely
-  //    conservative).
+  //    ClearDirty deletes rows (RecoverDirty keeps them, step 12.6b), and
+  //    another sync point's ClearDirty in between could only have removed
+  //    rows (then putting a kept one back below is merely conservative).
   //  - CanFill(synced.fills, id) holds for every id: nothing was touched
   //    after the snapshot (every touch advances the clock), the floor is at
   //    most the clock (a prune sets it to a value of the clock, and also
@@ -1745,12 +1731,14 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
         Execute(ctx,
                 "DELETE FROM symlinks WHERE inode IN (SELECT inode FROM dirty)")
             .status());
-    // The dirty set itself stays until the start has probed its rows
-    // (backing::Startup, ClearDirtyRows): a crash before then leaves them
-    // to the next start (step 12.6b).
+    // The dirty set itself stays until a sync point's syncfs and ClearDirty
+    // (step 12.6b): the crashed run's backing changes may not be durable
+    // yet, and the start's probe (backing::Startup) reads the same rows.
     return absl::OkStatus();
   }));
   ctx.dirty.durable.clear();
+  // Rows left: the next sync point must run (FinishRun, the timer); only
+  // its ClearDirty, which recomputes `any`, takes them out.
   ctx.dirty.any = count > 0;
   return count;
 }

@@ -651,10 +651,9 @@ TEST_F(TraceRecorderTest, StartAfterACleanShutdownExplainsTheClearedFlag) {
   EXPECT_THAT(Lines(d), Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
 }
 
-// The end of the start's probe (step 12.6b): the probed rows leave the dirty
-// set (a directory's "dirty" changes), which is a line of every directory
-// (dcfs.tla's ClearRecovered), not an unexplained change.
-TEST_F(TraceRecorderTest, RecoveryDoneExplainsTheClearedDirtyRows) {
+// The end of the start's probe (step 12.6b): a line of every directory
+// (dcfs.tla's ProbesDone); the recovered rows stay dirty.
+TEST_F(TraceRecorderTest, RecoveryDoneIsALineOfEveryDirectory) {
   ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 74));
   const InodeId dirty[] = {d};
   ASSERT_THAT(cache::MarkDirty(ctx_, dirty), IsOk());
@@ -662,13 +661,12 @@ TEST_F(TraceRecorderTest, RecoveryDoneExplainsTheClearedDirtyRows) {
   recorder_->RunStarting(ctx_);
   recorder_->Recovered(ctx_);
   recorder_->RunStarted(ctx_);
-  ASSERT_THAT(cache::ClearDirtyRows(ctx_, dirty), IsOk());
   recorder_->RecoveryDone(ctx_);
   Tick();
   const std::vector<std::string> lines = Lines(d);
   ASSERT_THAT(lines, Not(::testing::IsEmpty()));
   EXPECT_THAT(lines.back(), AllOf(HasSubstr("\"ev\":\"recovery_done\""),
-                                  HasSubstr("\"dirty\":false")));
+                                  HasSubstr("\"dirty\":true")));
   EXPECT_THAT(lines, Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
 }
 
