@@ -106,3 +106,25 @@ attribute replies carry the generation and would close this kernel-side;
 the Phase 14 design should say which it relies on. The identity model's
 `IdentTrace.tla` encodes today's AUTOINCREMENT nodeids ("no reply after
 the row went") and `T_IdReply` needs relaxing when nodeid = inode number.
+
+## Decision: no filesystem-UUID requirement, handles stay (russ, 2026-10-08)
+
+Context: dcfs refuses a source without a filesystem UUID (FUSE mounts,
+tmpfs, NFS clients; `FS_IOC_GETFSUUID` is UNIMPLEMENTED there), which 8.4
+hit when it tried a dcfs-over-dcfs test.
+- dcfs keeps reaching objects **only by handle** (`name_to_handle_at` /
+  `open_by_handle_at`); a handle-free access path is a large complexity
+  increase and is not wanted. A backing whose root cannot give a handle is
+  refused at start with a message saying so (FUSE filesystems without
+  export support stay unsupported; NFS clients and tmpfs, which export
+  handles, become possible).
+- Tying the cache to the backing by UUID is not required: if the operator
+  mounts a different filesystem under dcfs, that is garbage in, garbage
+  out. No new identity marker (no xattr or file written into the backing).
+  Replace the UUID check by something cheap and always available, e.g.
+  the mount point (the source spec as written) plus `statfs` `f_fsid`,
+  recorded in `cache_state` and compared at start as a sanity check with a
+  clear error, never as a guarantee.
+- The NFS export side (handle classes, generation, `ident.tla` from 12.5)
+  is unchanged by this; it keys on the backing's handles, not the UUID.
+

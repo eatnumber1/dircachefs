@@ -1860,3 +1860,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   known_bugs, two limitations); checker rule `open-file`; snapshot with atime. BUG found and fixed
   by the guest tests: ClearDirty set the in-memory dirty flags inside a transaction that could roll
   back. 23.9: LINK of a removed object forwards linkat(AT_EMPTY_PATH)'s answer (ENOENT/EPERM/ok).
+- russ, 2026-10-08 (identity): keep handles only; drop the filesystem-UUID requirement when Phase 14
+  runs and use mount point + statfs f_fsid as a sanity check instead of a guarantee; no new
+  identity marker; backings whose root gives no handle are refused with a clear message. Recorded in
+  phases/14. Cleanup of the stale output bases confirmed.
