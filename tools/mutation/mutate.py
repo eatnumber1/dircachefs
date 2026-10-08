@@ -295,7 +295,7 @@ def pick_budget(mutants, budget, seed):
     return chosen, len(ordered) - len(chosen)
 
 
-# ---- equivalent mutants --------------------------------------------------------
+# ---- equivalent mutants ---------------------------------------------------
 
 class EquivalentError(Exception):
     """equivalent.txt is malformed."""
@@ -619,6 +619,25 @@ def format_survivors(results):
     return lines
 
 
+def run_phases(args, src, phases, timeout):
+    """(exit status, output) of the killer phases in order, stopping at the
+    first that does not pass; a phase that times out is status 3 (a hang)."""
+    rc, tail = 0, ""
+    for killers in phases:
+        try:
+            p = subprocess.run(
+                [args.bazel, "test", "--notest_keep_going",
+                 "--test_output=errors", "--jobs=2", "--local_test_jobs=2"]
+                + killers, cwd=src, capture_output=True, timeout=timeout)
+            rc = p.returncode
+            tail = (p.stdout + p.stderr).decode("utf-8", "replace")
+        except subprocess.TimeoutExpired:
+            rc, tail = 3, "run timed out (counted as killed: a hang)"
+        if rc != 0:
+            break
+    return rc, tail
+
+
 def run(args):
     workspace = os.path.abspath(args.workspace)
     mutants = json.load(open(args.mutants))
@@ -644,6 +663,20 @@ def run(args):
     phases = [ph.split() for ph in args.killers.split(";")]
     results = [dict(m, status="suppressed", seconds=0, killer="")
                for m in suppressed]
+    if mutants and getattr(args, "baseline", True):
+        # The unmutated tree must pass: otherwise every mutant would be
+        # "killed", and the first mutant would pay for the cold build and
+        # time out. This run warms the scratch tree's caches.
+        print("baseline: the killers on the unmutated tree", file=sys.stderr)
+        rc, tail = run_phases(args, src, phases, args.baseline_timeout)
+        if rc != 0:
+            subprocess.run([args.bazel, "shutdown"], cwd=src,
+                           capture_output=True)
+            shutil.rmtree(scratch, ignore_errors=True)
+            print("the killers fail on the unmutated tree (exit %d), so no "
+                  "mutant can be judged:\n%s" % (rc, tail[-1500:]),
+                  file=sys.stderr)
+            return 2
     started = time.time()
     try:
         for i, m in enumerate(mutants, 1):
@@ -656,24 +689,8 @@ def run(args):
             mutated = text[:m["start"]] + m["replacement"] + text[m["end"]:]
             open(path, "wb").write(mutated.encode("latin-1"))
             t = time.time()
-            rc, tail = 0, ""
             try:
-                for killers in phases:
-                    try:
-                        p = subprocess.run(
-                            [args.bazel, "test", "--notest_keep_going",
-                             "--test_output=errors", "--jobs=2",
-                             "--local_test_jobs=2"] + killers,
-                            cwd=src, capture_output=True,
-                            timeout=args.timeout)
-                        rc = p.returncode
-                        tail = (p.stdout + p.stderr).decode("utf-8",
-                                                            "replace")
-                    except subprocess.TimeoutExpired:
-                        rc, tail = 3, ("mutant run timed out (counted as "
-                                       "killed: a hang)")
-                    if rc != 0:
-                        break
+                rc, tail = run_phases(args, src, phases, args.timeout)
             finally:
                 open(path, "wb").write(original)
             # Bazel: 0 all passed, 3 a test failed or timed out, 1 a build
@@ -774,6 +791,9 @@ def main(argv=None):
     r.add_argument("--summary-out", default="")
     r.add_argument("--bazel", default="bazel")
     r.add_argument("--timeout", type=int, default=1800)
+    r.add_argument("--baseline-timeout", type=int, default=7200,
+                   help="the unmutated run that warms the caches first")
+    r.add_argument("--no-baseline", dest="baseline", action="store_false")
     r.add_argument("--show-output", action="store_true",
                    help="print the failing lines of the test that killed a "
                    "mutant")
@@ -792,6 +812,8 @@ def main(argv=None):
     c.add_argument("--survivors-out", default="")
     c.add_argument("--summary-out", default="")
     c.add_argument("--timeout", type=int, default=1800)
+    c.add_argument("--baseline-timeout", type=int, default=7200)
+    c.add_argument("--no-baseline", dest="baseline", action="store_false")
     c.add_argument("--bazel", default="bazel")
     c.add_argument("--killers", default=killers)
     p = sub.add_parser("report", help="merge result files")

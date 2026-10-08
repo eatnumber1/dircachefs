@@ -369,6 +369,7 @@ class RunEndToEndTest(unittest.TestCase):
             fail_on_survivor="--fail-on-survivor" in extra, show_output=False,
             survivors_out=os.path.join(self.dir, "survivors.txt"),
             bazel=self.bazel, equivalent=self.equivalent,
+            baseline=True, baseline_timeout=60,
             summary_out=os.path.join(self.dir, "summary.md"))
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return mutate.run(args)
@@ -409,6 +410,15 @@ class RunEndToEndTest(unittest.TestCase):
         self.assertEqual(suppressed["reason"], "never runs")
         summary = read_text(os.path.join(self.dir, "summary.md"))
         self.assertIn("| negate-if | 1 | 1 | 0 | 1 | 0 | 3 |", summary)
+
+    def test_a_failing_baseline_is_a_tooling_error_and_runs_no_mutant(self):
+        # The unmutated tree fails the killers: no verdict would mean
+        # anything (every mutant would look killed).
+        with open(os.path.join(self.repo, "dcfs/a.cc"), "w") as f:
+            f.write("int f() { return KILL; }\n")
+        self.write_mutants(["ok", "ok"])
+        self.assertEqual(self.run_tool(), 2)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "res.json")))
 
     def test_a_shard_runs_only_its_range(self):
         self.write_mutants(["ok", "ok", "ok", "ok"])

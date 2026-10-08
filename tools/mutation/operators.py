@@ -224,8 +224,8 @@ class EnumSwap(Operator):
 
 
 class ConstantNudge(Operator):
-    """An integer literal in a comparison or in + - * / % (also +=, -=...) becomes N+1, N-1
-    or 0 (a suffix is kept)."""
+    """An integer literal in a comparison or in + - * / % (also += and the
+    like) becomes N+1, N-1 or 0 (a suffix is kept)."""
 
     name = "constant"
     NUMBER = re.compile(r"(\d[\d']*)([uUlLzZ]*)")
