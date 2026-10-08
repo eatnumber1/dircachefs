@@ -189,6 +189,11 @@ else
 			cp "$f" "$dest"
 			;;
 		*/pjdfstest) cp "$f" "$ROOT/pjdfstest/pjdfstest" ;;
+		*xfstests*/fsstress | *xfstests*/fsx)
+			# step 11.2b: xfstests' fsstress and fsx (//third_party/xfstests).
+			cp "$f" "$ROOT/bin/$(basename "$f")"
+			copy_deps "$ROOT/bin/$(basename "$f")"
+			;;
 		*/bench/dcfs_bench)
 			# phase 10: the benchmark binary (//bench:dcfs_bench).
 			cp "$f" "$ROOT/bin/dcfs_bench"

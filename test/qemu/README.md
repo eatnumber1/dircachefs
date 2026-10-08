@@ -499,6 +499,7 @@ gate is disabled.
 | a power cut's first boot has a verdict (11.2) | `//test/qemu:run_qemu_verdict_test` (fake QEMUs: no marker, the marker only inside another line, a failed check, an oops on the console, a `KERNEL-OOPS:` or `MEM-OOM:` line (the guest prints the kernel log's failures and OOM-killer lines itself before the marker, from `guest/lib.sh`, whose patterns the test checks are `guest/init`'s), an invariant violation, a QEMU that ended on its own: each fails; QEMU must die of our SIGKILL, status 137) |
 | the kill-mode cut keeps what was synced and loses the rest (11.2) | `//test/qemu:fault_power_kill_test_ext4` and its xfs and btrfs variants (the `before` scenario: a file synced before the cut must survive it and a file written after must not) |
 | the ACE checker can fail (11.2) | `fault_ace_a_test`'s `fixtures` kind (a persistence point that was not made, and a name added behind dcfs's back, must each be reported) and `fault_power_test`'s `comparison-detects-*` checks (a name, a mode, a link count) and `snapshot-sees-contents` |
+| the fsstress/fsx test's checks (11.2b: tree and file digests, fsx's A-OK line, fsstress's operation count) | `//test/qemu:stress_checks_test` (the real `guest/stress_lib.sh` over trees differing in one byte, a mode, a name or a symlink target, empty trees, and fsx and fsstress logs that are bad, short or empty; with the tree comparison made to always pass, it fails on the one-byte tree) |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
@@ -819,6 +820,39 @@ bazel test //test/qemu:rename_test
 bazel test //test/qemu:write_test
 bazel test //test/qemu:nfs_test
 ```
+
+**Step 11.2b: fsstress and fsx.** `stress_{short,long}_test_<fstype>` run
+xfstests' `fsstress` (four or eight processes of random namespace and data
+operations, fixed seeds) and `fsx` (random reads, writes, truncates and mmap
+operations checked against its own model) against dcfs, then compare the tree
+seen through dcfs (warm, from its cache) with the backing file system's own
+(every name, type, mode, link count, owner, size, symlink target, xattr and
+the md5 of every file), restart dcfs and compare again; in the small and
+medium tiers the daemon is the checking build, which aborts on a broken
+invariant, so its survival is a check. `stress_short_test_<fstype>` is
+medium on all three; `stress_long_test_<fstype>` is large; `stress_random_test_<fstype>` (manual: name it on the
+command line) seeds both tools from the kernel's random pool and prints the
+seeds, so a failure can be replayed by putting them in a fixed-seed mode
+(`STRESS_OPS` and `STRESS_FSX_OPS` are the sizes). What is not built (AIO,
+io_uring, btrfs subvolume operations, XFS ioctls) is in
+`third_party/xfstests/README.md`.
+
+Only the short run checks `require_no_reclaim`. The long and random runs
+write more file data than the guest has memory (page cache of 400+ MiB in
+512 MiB, about 1.5 M pages scanned), so reclaim and the FORGETs it sends are
+expected, and they assert nothing reclaim can invalidate: every comparison is
+against the backing file system, none counts held inodes or FORGETs.
+
+What the run does not prove: fsstress does not count failed operations (it
+exits 0 whatever each operation's errno), and on a FUSE mount some fail every
+time: clonerange, deduperange and fiemap (ioctls dcfs does not implement),
+likely dread and dwrite (O_DIRECT), the XFS ioctls (bulkstat, resvsp; set to
+frequency 0), and whichever of copyrange, splice, the fallocate modes
+(collapse, insert, unshare, write_zeroes) and rename flags (whiteout,
+exchange) the kernel or backing file system refuses. The operation summary
+(from `-v`) counts operations started, not succeeded. What the run does prove
+is that whatever the operations did, dcfs and the backing file system agree
+afterwards, and that the daemon survived.
 
 **Step 6.2: pjdfstest shards.** `pjdfstest_test_<fstype>` is a `test_suite`
 over three guests, `pjdfstest_{rename,chown,rest}_test_<fstype>`, each a

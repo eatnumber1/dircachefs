@@ -76,7 +76,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False, tags = []):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -130,6 +130,8 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             the invariant checks watch (the ACE sequences' recoveries).
         cmdline: extra words for the guest's kernel command line (run-qemu.sh
             --cmdline), which the guest script reads from /proc/cmdline.
+        tags: extra sh_test tags, e.g. ["manual"] for a test that only runs
+            when asked for by name (step 11.2b: stress_random_test).
         size: required sh_test size, the test's tier: "small" (run
             constantly), "medium" (presubmit), "large"/"enormous" (CI).
             See README.md's "Test tiers".
@@ -218,7 +220,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             "e2e",
             "no-sandbox",
             "requires-kvm",
-        ] + resource_tags,
+        ] + resource_tags + tags,
         size = size,
         timeout = timeout,
     )

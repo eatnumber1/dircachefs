@@ -1,0 +1,13 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+exports_files(["BUILD.xfstests"])
+
+# What we write for xfstests' ltp/: the stand-in for xfsprogs' <xfs/xfs.h>
+# (see the header's comment). The overlay BUILD.xfstests depends on it.
+cc_library(
+    name = "xfs_shim",
+    testonly = 1,
+    hdrs = ["shim/xfs/xfs.h"],
+    includes = ["shim"],
+    visibility = ["//visibility:public"],
+)

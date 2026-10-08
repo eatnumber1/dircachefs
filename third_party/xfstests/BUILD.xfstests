@@ -1,0 +1,123 @@
+# BUILD file for @xfstests (see MODULE.bazel's http_archive and
+# third_party/xfstests/README.md): fsstress and fsx, the two programs of
+# xfstests' ltp/ directory, as test-only binaries for the QEMU guest. The
+# autoconf build is not used; config.h is written here for a Linux and glibc
+# host, the only target this project builds for.
+#
+# Turned off, and what that loses (README.md has the same list):
+#   - AIO and URING (libaio, liburing): fsstress's aio ops and fsx's -A and
+#     -U modes; neither library is in the guest and none is added.
+#   - libbtrfsutil: fsstress's btrfs subvolume and snapshot operations.
+#   - xfsprogs' headers: replaced by //third_party/xfstests:xfs_shim; the
+#     XFS-only ioctls fsstress issues fail on dcfs (it has no ioctl).
+#   - libattr: not needed (fsstress's xattr operations use <sys/xattr.h>).
+
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
+genrule(
+    name = "config_h",
+    testonly = 1,
+    outs = ["config.h"],
+    cmd = """cat > $@ <<'EOF'
+#ifndef XFSTESTS_CONFIG_H
+#define XFSTESTS_CONFIG_H
+#define STDC_HEADERS 1
+#define HAVE_XFS_XFS_H 1
+#define HAVE_SYS_TYPES_H 1
+#define HAVE_SYS_STAT_H 1
+#define HAVE_SYS_STATVFS_H 1
+#define HAVE_SYS_TIME_H 1
+#define HAVE_SYS_IOCTL_H 1
+#define HAVE_SYS_WAIT_H 1
+#define HAVE_SYS_FCNTL_H 1
+#define HAVE_SYS_PARAM_H 1
+#define HAVE_SYS_MMAN_H 1
+#define HAVE_SYS_PRCTL_H 1
+#define HAVE_MALLOC_H 1
+#define HAVE_DIRENT_H 1
+#define HAVE_STDLIB_H 1
+#define HAVE_UNISTD_H 1
+#define HAVE_ERRNO_H 1
+#define HAVE_ERR_H 1
+#define HAVE_STRING_H 1
+#define HAVE_STRINGS_H 1
+#define HAVE_TIME_H 1
+#define HAVE_WAIT_H 1
+#define HAVE_LIBGEN_H 1
+#define HAVE_ASSERT_H 1
+#define HAVE_LINUX_FALLOC_H 1
+#define HAVE_LINUX_FIEMAP_H 1
+#define HAVE_COPY_FILE_RANGE 1
+#define HAVE_RENAMEAT2 1
+#endif
+EOF
+""",
+)
+
+cc_library(
+    name = "config",
+    testonly = 1,
+    hdrs = [":config_h"],
+    includes = ["."],
+)
+
+_COMMON_COPTS = [
+    "-D_GNU_SOURCE",
+    "-DXFS",
+    "-DFALLOCATE",
+    "-Iexternal/+http_archive+xfstests/src",
+    "-Iexternal/+http_archive+xfstests/include",
+    # Third-party upstream code: not held to this project's -Werror.
+    "-w",
+]
+
+# The same sanitizer opt-out as pjdfstest (third_party/pjdfstest/
+# BUILD.pjdfstest has the reasoning): a separate guest process, never linked
+# into dcfs, so no ABI coupling.
+_NO_SAN = select({
+    "@dircachefs//test/qemu:asan_build": ["-fno-sanitize=address"],
+    "@dircachefs//test/qemu:ubsan_build": ["-fno-sanitize=undefined"],
+    "//conditions:default": [],
+})
+
+_STATIC = select({
+    "@dircachefs//test/qemu:asan_build": [],
+    "@dircachefs//test/qemu:ubsan_build": [],
+    "//conditions:default": ["fully_static_link"],
+})
+
+cc_binary(
+    name = "fsstress",
+    testonly = 1,
+    srcs = ["ltp/fsstress.c"] + glob([
+        "src/*.h",
+        "include/*.h",
+    ]),
+    copts = _COMMON_COPTS + _NO_SAN,
+    features = _STATIC,
+    linkopts = ["-lm"],
+    linkstatic = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":config",
+        "@dircachefs//third_party/xfstests:xfs_shim",
+    ],
+)
+
+cc_binary(
+    name = "fsx",
+    testonly = 1,
+    srcs = ["ltp/fsx.c"] + glob([
+        "src/*.h",
+        "include/*.h",
+    ]),
+    copts = _COMMON_COPTS + _NO_SAN,
+    features = _STATIC,
+    linkopts = ["-lm"],
+    linkstatic = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":config",
+        "@dircachefs//third_party/xfstests:xfs_shim",
+    ],
+)

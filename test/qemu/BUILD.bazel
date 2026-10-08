@@ -71,6 +71,8 @@ config_setting(
         "//bench:dcfs_bench",
         "@pjdfstest//:pjdfstest",
         "@pjdfstest//:tests",
+        "@xfstests//:fsstress",  # step 11.2b
+        "@xfstests//:fsx",
         "@alpine_busybox//:root/bin/busybox.static",
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "@alpine_dmsetup//:root",  # step 11.1: /sbin/dmsetup and libdevmapper
@@ -483,6 +485,50 @@ test_suite(
     name = "pjdfstest_test",
     tests = [":pjdfstest_test_ext4"],
 )
+
+# Step 11.2b: fsstress and fsx (xfstests' ltp/, built by
+# //third_party/xfstests) against dcfs on each backing filesystem, the cache
+# compared with the backing filesystem after each (guest/stress.sh,
+# guest/stress_lib.sh; self-check: stress_checks_test). stress_short is a
+# fixed-seed run (medium on all three), stress_long bigger
+# fixed seeds (large), stress_random seeds from the kernel's pool (manual:
+# bazel test //test/qemu:stress_random_test_ext4 --test_output=streamed).
+# Only stress_short checks require_no_reclaim: the long and random runs write
+# more file data than the guest has memory, so page-cache reclaim (and the
+# FORGETs it sends) is expected, and they assert nothing reclaim can
+# invalidate: every comparison is against the backing filesystem, none counts
+# held inodes or FORGETs.
+qemu_test_matrix(
+    name = "stress_short_test",
+    disks = [("vdb", "ext4", "512M")],
+    guest_script = "guest/stress_short.sh",
+    asan_mem = ASAN_BIG_DCFS_MEM,
+    size = "medium",
+    other_size = "medium",
+    timeout = "moderate",
+)
+
+qemu_test_matrix(
+    name = "stress_long_test",
+    disks = [("vdb", "ext4", "512M")],
+    guest_script = "guest/stress_long.sh",
+    mem = 512,  # 256 MiB made the kernel reclaim (1.7-2.0 M pages scanned)
+    asan_mem = ASAN_BIG_DCFS_MEM,
+    size = "large",
+    other_size = "large",
+    timeout = "long",
+)
+
+[qemu_test(
+    name = "stress_random_test_" + fstype,
+    disks = [("vdb", fstype, "512M")],
+    guest_script = "guest/stress_random.sh",
+    mem = 512,
+    asan_mem = ASAN_BIG_DCFS_MEM,
+    size = "enormous",
+    timeout = "eternal",
+    tags = ["manual"],
+) for fstype in ["ext4", "xfs", "btrfs"]]
 
 # Step 6.3 (audit F10): objects removed while still referenced (a removed
 # working directory, an O_PATH descriptor on an unlinked file) behave as on
@@ -914,6 +960,26 @@ sh_test(
     data = [
         "guest/lib.sh",
         "guest/pjdfstest_lib.sh",
+    ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 11.2b: self-check of the fsstress/fsx test's checks: the real
+# guest/stress_lib.sh functions over trees and logs damaged on purpose.
+sh_test(
+    name = "stress_checks_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["stress_checks_test.sh"],
+    args = [
+        "$(location guest/lib.sh)",
+        "$(location guest/stress_lib.sh)",
+        "$(location //tools:testutil)",
+    ],
+    data = [
+        "guest/lib.sh",
+        "guest/stress_lib.sh",
+        "//tools:testutil",
     ],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )

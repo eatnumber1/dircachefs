@@ -29,6 +29,19 @@ http_archive(
 )
 
 
+# xfstests (step 11.2b): github.com/kdave/xfstests (a mirror of xfstests-dev),
+# tag v2026.05.17. Only ltp/fsstress.c and ltp/fsx.c are built, as test-only
+# binaries; GPL-2.0, never copied into the repository. See
+# third_party/xfstests/README.md.
+http_archive(
+    name = "xfstests",
+    build_file = "//third_party/xfstests:BUILD.xfstests",
+    integrity = "sha256-N//Niuj3qKt4iBNwj2eun8XvzLzZPg+3/7niSy0W45M=",
+    strip_prefix = "xfstests-2026.05.17",
+    url = "https://github.com/kdave/xfstests/archive/refs/tags/v2026.05.17.tar.gz",
+)
+
+
 
 # Phase 4, part c (third_party/debian/): the Debian NFS-test rootfs image,
 # replacing test/qemu/scripts/mkrootfs-debian.sh's mmdebstrap run.
