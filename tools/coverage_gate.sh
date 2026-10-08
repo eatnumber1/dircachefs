@@ -8,9 +8,10 @@
 # committed baseline (dcfs/coverage_baseline.txt: `lines 92.40`, `branches
 # 73.30`):
 #   - below the baseline on either: FAIL with the numbers;
-#   - above it by 0.1 or more on either: FAIL too, with the values to put in
-#     the baseline in this commit (the baseline only moves up, in the commit
-#     that raised the coverage; 0.1 is the tolerance for noise);
+#   - above it by 0.1 or more on either: pass, with a NOTE (also appended to
+#     $GITHUB_STEP_SUMMARY when set) naming the values to put in the baseline
+#     in a later commit (the baseline only moves up; a rise is good news and
+#     must not turn a push red; 0.1 is the tolerance for noise);
 #   - otherwise pass.
 # Self-check: //tools:coverage_gate_self_check_test.
 set -eu
@@ -77,8 +78,11 @@ if [ "$(raised "$lines" "$base_lines")" -eq 1 ] || [ "$(raised "$branches" "$bas
 	new_branches=$base_branches
 	[ "$(raised "$lines" "$base_lines")" -eq 1 ] && new_lines=$(floor2 "$dcfs_lh" "$dcfs_lf")
 	[ "$(raised "$branches" "$base_branches")" -eq 1 ] && new_branches=$(floor2 "$dcfs_brh" "$dcfs_brf")
-	echo "coverage_gate.sh: FAIL: coverage rose (lines $lines, branches $branches; baseline $base_lines / $base_branches): raise dcfs/coverage_baseline.txt to $new_lines / $new_branches in this commit" >&2
-	fail=1
+	note="coverage_gate.sh: NOTE: coverage rose (lines $lines, branches $branches; baseline $base_lines / $base_branches): raise dcfs/coverage_baseline.txt to $new_lines / $new_branches"
+	echo "$note"
+	if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+		echo "$note" >>"$GITHUB_STEP_SUMMARY"
+	fi
 fi
 if [ "$fail" -eq 0 ]; then
 	echo "coverage_gate.sh: ok: lines $lines (baseline $base_lines), branches $branches (baseline $base_branches)"

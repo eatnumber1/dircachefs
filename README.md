@@ -398,15 +398,17 @@ of `dcfs/*.cc` 92.4% of lines and 73.3% of branches.
 
 The gate (step 8.1, `tools/coverage_gate.sh`, run by `.github/ci/coverage.sh`
 in the CI coverage job only, not in the local tiers): `dcfs/*.cc` line and
-branch coverage of the published report must equal the committed baseline
-`dcfs/coverage_baseline.txt` (`lines 92.40`, `branches 73.30`, two decimals).
-Below it on either, the job fails with the numbers. Above it by 0.1 or more on
-either, the job fails too and prints `raise dcfs/coverage_baseline.txt to X /
-Y in this commit`: the baseline only moves up, in the commit that raised the
-coverage (0.1 is the tolerance for noise). `bench/` and `tools/` (`fhtest.c`
+branch coverage of the published report must not fall below the committed
+baseline `dcfs/coverage_baseline.txt` (`lines 92.40`, `branches 73.30`, two
+decimals). Below it on either, the job fails with the numbers. Above it by 0.1
+or more on either, the job passes and prints (and adds to the job summary) a
+note, `raise dcfs/coverage_baseline.txt to X / Y`: the baseline only moves up,
+in a later commit, and a rise never turns a push red (0.1 is the tolerance for
+noise). `bench/` and `tools/` (`fhtest.c`
 and `testutil.c` are test helpers) are printed, not gated. Self-check:
 `//tools:coverage_gate_self_check_test` runs the gate over canned lcovs below,
-equal to, within tolerance of and above a canned baseline.
+equal to, within tolerance of and above a canned baseline (above passes with
+the note).
 
 ## Continuous integration
 
