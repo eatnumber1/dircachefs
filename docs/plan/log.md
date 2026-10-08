@@ -1891,3 +1891,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   concurrency configs missing; Destroy makes a shutdown with read-only opens clean against the
   model's text; checker self-checks missing; HeldFdOf includes written_'s O_PATH fd (statx per
   GETATTR of written files); DropAtimeStamp before the syscall. Sent back to lane-4.
+- russ, 2026-10-08: the no-branching rule is "discouraged, sometimes necessary"; add the numeric-property technique (zero as absent, INT_MAX to turn a limit off) with its caveat.

@@ -143,15 +143,23 @@ Docs commit to style.md (code section), then applied as code is touched:
   a kernel capability present or absent), build one object once from
   whichever applies and give the rest of the code a single interface;
   never branch on the variant at each use site.
-- **Avoid branching.** Every branch is another code path to understand
-  and to test separately. Prefer straight-line code with injected
-  dependencies and small fakes over conditionals: never `if (!in_test)
-  talk_to_db()`; inject the database and use an in-memory fake in the
-  test, so production has zero test-only branches (this restates
-  AGENTS.md's "fakes, not mocks" and "no code paths exist only so a test
-  can run outside the guest" as the general rule, with the cost stated:
-  each branch is tested on its own, or it is untested). Error handling
-  through `Status` returns and `RETURN_IF_ERROR` counts as the one
-  allowed shape of branch; table-driven code over if-chains where a
-  table fits.
+- **Branching is discouraged, not forbidden** (russ, 2026-10-08: the rule
+  must not come off too strong; sometimes a branch is necessary). Every
+  branch is another code path to understand and to test separately, so
+  look for the shape that needs none before writing one:
+  - inject dependencies and use small fakes instead of test-only
+    conditionals: never `if (!in_test) talk_to_db()`; inject the database
+    and use an in-memory fake in the test, so production has zero
+    test-only branches (AGENTS.md's "fakes, not mocks" and "no code paths
+    exist only so a test can run outside the guest");
+  - use the numeric or structural properties of values so the absent or
+    "off" case needs no test: `int num_foos = 0` rather than
+    `optional<int> num_foos` when zero is the right absent value (not
+    always: say when it is not), `options.quota = INT_MAX` to turn quotas
+    off with no `if` anywhere, an empty set that every loop handles for
+    free, a no-op implementation of an interface instead of a null check;
+  - one object built once over variants rather than an `if` per use (the
+    rule above); tables over if-chains where a table fits.
+  `Status` returns with `RETURN_IF_ERROR` are the normal shape of error
+  handling and are not what this rule is about.
 
