@@ -246,34 +246,113 @@ added`, so start it with words, not `;` or a space.
   table (`kInternal` becomes `ELIBBAD`, `kFailedPrecondition` `EBUSY`): a
   diagnostic, not an answer.
 
-**Messages.** Say what failed and with what, in lower case unless the
-first word is an identifier (`DeviceId::Parse: expected a 24-byte value`,
-`no cached inode 7`), no trailing period. A syscall failure names the call
-and the arguments that identify the object: `openat(%d, <name>)`
-(`syscalls.cc:39`); a bare name when every argument is a descriptor
-(`"fstat"`: 41 sites; call form 16). A name, symlink target or xattr name
-from the backing filesystem goes through `EscapeBytes` (`dcfs/escape.h`) in
-every message and log line (35 uses; `backing.cc:387`; `docs/design.md`,
-"File names are bytes"). Paths dcfs builds (`/proc/self/fd/N`) and flag
-values are text.
+**Messages (russ's rules for accumulating Status messages).** A status
+gathers text as it travels up the call chain, joined as `first; added;
+added`, so each function adds only what the reader above it cannot know.
+
+1. **The function that creates the error says what it was operating on,
+   not why.** `ErrnoToStatus(errno, "openat(5, <name>)")` or
+   `NotFoundErrorBuilder() << "No cached inode " << id`; never `"... while
+   reading the directory"`: the callers add that.
+2. **A function that passes a status through adds what it asked the
+   failed callee to do, not what it is itself doing.** Describe the call
+   (`"while opening the backing file"`), not the enclosing function (not
+   `"while in Release"`), and not the arguments it passed: the callee
+   names them if they matter. Describe an argument the function was given
+   only if it did not pass it to the callee that failed and naming it
+   makes the message easier to read.
+3. **No terminal punctuation**, so that a caller can append.
+4. **Capitalise the first error, not added context.** The first word of
+   the first error is capitalised (`No cached inode 7`) unless it is an
+   identifier: a syscall, function or flag name (`fstat`, `DeviceId::Parse:
+   expected a 24-byte value`, `--cache_db is a symlink`). Context added
+   later starts in lower case (`while opening the backing file`) and does
+   not begin with `;` or a space.
+5. **Not every function needs to add context**: a bare
+   `ABSL_RETURN_IF_ERROR(Foo())` is right when the callee's message
+   already says it. Do not add a line that repeats the callee's.
+
+A syscall failure names the call and the arguments that identify the
+object: `openat(%d, <name>)` (`syscalls.cc:39`); a bare name when every
+argument is a descriptor (`"fstat"`). A name, symlink target or xattr name
+from the backing filesystem goes through `EscapeBytes` (`dcfs/escape.h`)
+in every message and log line (`backing.cc:387`; `docs/design.md`, "File
+names are bytes"). Paths dcfs builds (`/proc/self/fd/N`) and flag values
+are text.
+
+Example, with the helpers of this tree (`Seek` and `ReadContents` are
+illustrative):
+
+```
+absl::StatusOr<std::string> Open(std::string_view path) {
+  return NotFoundErrorBuilder() << "Could not find " << EscapeBytes(path);
+}
+absl::StatusOr<std::string> ReadAtOffset(const BackingFile &file,
+                                         off_t offset) {
+  ABSL_RETURN_IF_ERROR(Seek(file, offset)) << "while seeking the file";
+  ABSL_ASSIGN_OR_RETURN(
+      std::string contents, ReadContents(file),
+      // `offset` is named because it was not passed to ReadContents
+      _ << "while reading the file contents at offset " << offset);
+  return contents;
+}
+```
+
+A failure of `Open` reads `NOT_FOUND: Could not find <path>` plus whatever
+its callers added; of `ReadContents`, `<callee's message>; while reading
+the file contents at offset 4096`. The text recurses readably without
+repeating itself, because each added piece says something new.
+
+**Return a failed status or log it, never both** (1.7).
 
 ### 1.7 Logging
 
-Abseil logging. `main.cc:240-246` sets the stderr threshold to WARNING
-before flag parsing. There is no syslog today (0 uses; a daemonised dcfs's
-stderr goes to `/dev/null`); phase 15 (the wrapper and daemonisation) adds
-it.
-- `LOG(ERROR)`: dcfs refuses something or the environment is unusable: a
-  kernel capability missing (`dir_cache_fs.cc:184`), an inode number
-  refused (`backing.cc:343`), a reply or close failed (`fuse_request.cc:222`,
-  `fd.cc:17`).
-- `LOG(WARNING)`: the cache survives but an operator should know: an
-  out-of-band change on the backing filesystem (`backing.cc:583`), the
-  backing change happened but recording it failed (`dir_cache_fs.cc:353`),
-  recovery after an unclean shutdown (`backing.cc:1683`), a loose cache
-  mode (`main.cc:202`).
-- `LOG(INFO)` (2 uses): startup facts. `VLOG(1)`: per-request decisions
-  (README: `--v=1`); `VLOG(2)`: SQL (`sqlite.cc:204`).
+Abseil logging, `absl/log/log.h` and `absl/log/check.h`, with Abseil's own
+semantics and flags and nothing on top: no wrapper macros, no `DLOG` (the
+shipped binary is the tested one), no `--log_dir`. `main.cc` sets the
+default stderr threshold to WARNING before flag parsing (russ: errors and
+warnings are visible by default); `--stderrthreshold=0` adds INFO,
+`--minloglevel` drops levels everywhere, `--v` and `--vmodule` turn on the
+verbose levels below. Rate-limit a site with `LOG_EVERY_N`,
+`LOG_EVERY_N_SEC` or `LOG_FIRST_N` where it can fire per request; there is
+no blanket rule. There is no syslog today (a daemonised dcfs's stderr goes
+to `/dev/null`); phase 15 adds it.
+
+**Levels (russ, 2026-10-08).**
+- `FATAL` (`CHECK`): dcfs cannot continue safely: a violated invariant, or
+  a cache whose schema or identity cannot be reconciled.
+- `ERROR`: the caller got an error that dcfs produced rather than one it
+  forwarded from the backing filesystem, or dcfs refused to do its job:
+  startup refusals, a failed reply or close, a cache-disk I/O error shown
+  as `EIO`, a backing change that could not be recorded, a failed recovery
+  probe.
+- `WARNING`: nothing failed for the caller but state is degraded or
+  surprising: an out-of-band change, recovery after an unclean shutdown, a
+  loose cache mode, a missing kernel capability with a fallback.
+- `INFO`: the lifecycle narrative: start (source, cache, mount point,
+  options), the recovery summary with counts, each sync point with rows
+  cleared and duration, shutdown clean or unclean with the reason, and the
+  first backing access after an idle period.
+- `VLOG(1)` (`--v=1`): one line per request that reached the backing
+  filesystem, and why. `VLOG(2)`: every request with its reply. `VLOG(3)`:
+  SQL statements and step counts. A message that builds strings is guarded
+  with `VLOG_IS_ON(n)`: the hot paths stay cheap at the default level.
+
+**Return a failed Status or log, never both.** A function that returns a
+non-OK status does not also log it: its caller, or that caller's caller,
+logs it with more context, so logging in both places prints the same
+failure twice, the inner line with less context. Two exceptions:
+1. The outermost caller of a request, the FUSE operation handler that
+   turns a status into an errno reply (`FuseRequest::ReplyFailure`), logs
+   `ERROR` for an error dcfs produced, and does not for one forwarded from
+   the backing filesystem (`ENOENT` from the backing is the answer, not a
+   dcfs failure; `--v=2` shows the reply).
+2. A fire-and-forget path with no caller to return to (a `Release` after
+   the reply, `main`'s shutdown, a destructor) logs what it could not do
+   and returns nothing.
+
+A status that is consumed (retried, turned into "unknown", or ignored on
+purpose) is logged where it is consumed, once.
 
 ### 1.8 The dcfs invariants as code rules
 

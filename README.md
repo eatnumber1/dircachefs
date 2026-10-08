@@ -143,11 +143,21 @@ dcfs --source=<dir> --cache_db=<path> [flags] <mountpoint>
 | `--foreground` | `true` | Stay in the foreground. With `false`, dcfs daemonizes after mounting and its standard error goes to `/dev/null`, so its log is lost. |
 | `--fuse_opt` | (empty) | Extra mount options passed to libfuse as `-o <opts>`, comma-separated, e.g. `--fuse_opt=max_read=65536`. Repeating the flag replaces the previous value, so combine options in one flag. `default_permissions` is always added, and required: dcfs makes no permission checks of its own and relies on the kernel's, from the attributes it caches (docs/design.md, "Caller credentials"), so naming it here is an error. |
 
-dcfs uses Abseil logging, so Abseil's logging flags work too: `--v=1`
-enables per-request debug logging, and `--stderrthreshold` (default
-`WARNING` in dcfs) controls what reaches standard error. At the default
-level the daemon only logs warnings and errors, such as out-of-band
-changes it noticed or recovery after an unclean shutdown.
+dcfs uses Abseil logging, so Abseil's logging flags work too, with Abseil's
+semantics:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--stderrthreshold` | `WARNING` | Log lines at this level or above go to standard error. `--stderrthreshold=0` (or `INFO`) adds the lifecycle lines: start with the source, cache and mount point, the recovery summary, each sync point with the rows it cleared and its duration, shutdown clean or unclean and why, and the first backing access after an idle period. `ERROR` hides warnings. (dcfs's default is `WARNING` where Abseil's is `ERROR`.) |
+| `--minloglevel` | `0` | Lines below this level (0 INFO, 1 WARNING, 2 ERROR, 3 FATAL) are dropped everywhere, whatever the threshold. |
+| `--v` | `0` | Enables verbose lines up to this level: `1` is one line per request that reached the backing filesystem, and why; `2` is every request with its reply; `3` adds the SQL statements. Verbose lines are INFO lines: also pass `--stderrthreshold=0`. |
+| `--vmodule` | (empty) | Per source file verbosity, e.g. `--vmodule=backing=2,sqlite=3`, overriding `--v` for those files. |
+
+At the default level the daemon only logs warnings and errors: errors are
+what dcfs itself failed at (a request answered with an error that did not
+come from the backing filesystem, a refused start, a failed recovery
+probe); warnings are what it noticed or survived (out-of-band changes,
+recovery after an unclean shutdown, a loose cache mode).
 
 libfuse mounts with `nosuid,nodev` by default. Pass `--fuse_opt=suid,dev`
 if setuid binaries or device nodes on the backing tree must work through
