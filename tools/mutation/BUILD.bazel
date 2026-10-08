@@ -10,6 +10,7 @@ exports_files([
     "arid.txt",
     "equivalent.txt",
     "fixture.cc",
+    "fixture_macros.h",
     "scope.txt",
 ])
 
@@ -56,6 +57,17 @@ py_test(
 # the test runs the pinned clang (the same command line mutate.py builds for
 # dcfs/, with no sysroot: the fixture includes nothing) on fixture.cc, so
 # the AST is the real thing and nothing is checked in but the source.
+# The fixture is test-only input of operators_test: C++ that is never built
+# or linked, only parsed.
+filegroup(
+    name = "operators_fixture",
+    testonly = True,
+    srcs = [
+        "fixture.cc",
+        "fixture_macros.h",
+    ],
+)
+
 py_test(
     name = "operators_test",
     size = "small",
@@ -69,6 +81,7 @@ py_test(
     data = [
         "arid.txt",
         "fixture.cc",
+        ":operators_fixture",
         "@dcfs_llvm//:clang",
     ],
     deps = [":mutate_lib"],

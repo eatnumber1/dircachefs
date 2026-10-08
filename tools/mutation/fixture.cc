@@ -26,6 +26,8 @@ class StatusOr {
 
 }  // namespace absl
 
+#include "fixture_macros.h"
+
 struct Stream {
   Stream& operator<<(int value);
   Stream& operator<<(const char* value);
@@ -121,6 +123,12 @@ void Logging(int a, int b) {
   CHECK(a == b) << "differ " << (a != b);
 }
 
+void LoggingMultiline(int a, int b) {
+  LOG(INFO) << "a is "
+            << (a < b);
+  a = a + 1;
+}
+
 struct Printable {
   int ToString() { return 4 + 1; }
   int DebugString() { return 6 * 2; }
@@ -128,12 +136,22 @@ struct Printable {
   int Other() { return 3 - 1; }
 };
 
-absl::Status ErrorBuilder(const char* message);
-Stream& Builder();
+// A temporary builder, as `NotFoundErrorBuilder() << "..."` is.
+struct MessageBuilder {
+  MessageBuilder& operator<<(int value);
+  MessageBuilder& operator<<(const char* value);
+  MessageBuilder& operator<<(bool value);
+  operator absl::Status() const;
+};
+MessageBuilder MakeBuilder();
 
-int Messages(int a) {
-  Builder() << "count " << (a < 3);
-  return a;
+absl::Status Messages(int a) {
+  return MakeBuilder() << "count " << (a < 3);
+}
+
+absl::Status FromMacro(Mutation& m) {
+  RETURN_IF_ERROR(BeginThing());
+  return absl::OkStatus();
 }
 
 }  // namespace dcfs

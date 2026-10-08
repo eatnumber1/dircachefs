@@ -44,6 +44,8 @@ def span(node):
             return None
         if b["expansionLoc"].get("offset") != e["expansionLoc"].get("offset"):
             return None
+        if not node.get("_spell", True):
+            return None  # spelled in a header: its offsets are not ours
         b, e = b["spellingLoc"], e["spellingLoc"]
     if "offset" not in b or "offset" not in e:
         return None

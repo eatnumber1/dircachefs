@@ -154,6 +154,23 @@ class StatementDeletionTest(Fixture):
              ("BeginThing()", "absl::OkStatus()")])
 
 
+class NegativeTest(Fixture):
+    """Each operator leaves alone a function it has nothing to do with."""
+
+    def test_operators_do_not_fire_without_their_construct(self):
+        none = [("Constants", "relational"), ("Constants", "logical"),
+                ("Constants", "negate"), ("Constants", "enum-swap"),
+                ("Relational", "logical"), ("Relational", "negate"),
+                ("Relational", "enum-swap"), ("Logical", "relational"),
+                ("Logical", "enum-swap"), ("Swaps", "relational"),
+                ("Swaps", "negate"), ("Swaps", "logical")]
+        for name, operator in none:
+            self.assertEqual(self.pairs(name, operator), [], (name, operator))
+
+    def test_a_comparison_of_a_literal_is_not_a_logical_mutant(self):
+        self.assertEqual(self.pairs("Negations", "logical"), [])
+
+
 class StatusReturnTest(Fixture):
 
     def test_an_error_return_becomes_ok(self):
@@ -213,9 +230,39 @@ class AridTest(Fixture):
             self.assertEqual(self.pairs(name, filter_arid=True), [], name)
         self.assertTrue(self.pairs("Other", filter_arid=True))
 
-    def test_an_error_builder_message_is_arid(self):
-        self.assertEqual(self.pairs("Messages", filter_arid=True), [])
-        self.assertTrue(self.pairs("Messages"))
+    def test_an_error_builder_message_is_arid_but_its_return_is_not(self):
+        # `return MakeBuilder() << ... << (a < 3);` (a temporary builder):
+        # the message's comparison is text, the returned error is code.
+        kept = self.pairs("Messages", filter_arid=True)
+        self.assertEqual([p[1] for p in kept], ["absl::OkStatus()"])
+        self.assertNotIn("<", [b for b, _ in kept])
+        self.assertIn("<", [b for b, _ in self.pairs("Messages")])
+
+    def test_a_multi_line_log_statement_is_arid(self):
+        kept = self.pairs("LoggingMultiline", filter_arid=True)
+        self.assertEqual(kept, [("a = a + 1", "(void)0"), ("1", "2"),
+                                ("1", "0")])
+
+    def test_a_macro_in_a_comment_or_string_is_not_a_log_statement(self):
+        src = ('void f() {\n  // LOG(INFO) << x;\n  s = "LOG(INFO) << y";\n'
+               '  a = a < b;\n  LOG(INFO) << z;\n}\n')
+        a = arid.Arid.parse("macro LOG | text\n")
+        spans = a.text_spans(src, {})
+        self.assertEqual([src[s:e] for s, e, _ in spans], ["LOG(INFO) << z"])
+
+    def test_nodes_of_a_header_macro_are_not_mutants(self):
+        # RETURN_IF_ERROR (fixture_macros.h): the `if (!status_.ok())` and
+        # `return status_` of its body spell in the header.
+        found = self.sites("FromMacro")
+        self.assertEqual([(s.op, s.before) for s in found],
+                         [("delete-call BeginThing", "BeginThing()"),
+                          ("ok->error", "absl::OkStatus()")])
+
+    def test_no_site_lies_outside_its_function(self):
+        for name, fn in self.functions.items():
+            lo, hi, _ = operators.span(fn)
+            for s in self.sites(name):
+                self.assertTrue(lo <= s.start and s.end <= hi, (name, s))
 
     def test_collect_mutants_applies_the_arid_rules(self):
         fns = list(self.functions.values())
@@ -226,7 +273,6 @@ class AridTest(Fixture):
         self.assertLess(len(pruned), len(plain))
         self.assertFalse([m for m in pruned if m["function"] in (
             "ToString", "DebugString", "AbslStringify")])
-        self.assertFalse([m for m in pruned if m["function"] == "Messages"])
 
     def test_every_rule_has_a_reason(self):
         with self.assertRaises(arid.AridError):

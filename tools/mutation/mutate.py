@@ -119,13 +119,28 @@ class Walker:
         return self.cur is not None and os.path.normpath(self.cur).endswith(
             os.path.normpath(self.main))
 
+    def spelling_in_main(self, loc):
+        """Notes a location; True when its tokens are spelled in the main
+        file (a macro argument is, a macro's body from a header is not)."""
+        if not isinstance(loc, dict):
+            return True
+        if "spellingLoc" in loc:
+            self.note(loc["spellingLoc"])
+            in_main = self.in_main()
+            self.note(loc["expansionLoc"])
+            return in_main
+        self.note(loc)
+        return self.in_main()
+
     def visit(self, node, out):
         self.note(node.get("loc"))
         rng = node.get("range")
         here = self.in_main()
+        node["_spell"] = True
         if rng:
-            self.note(rng.get("begin"))
-            self.note(rng.get("end"))
+            begin = self.spelling_in_main(rng.get("begin"))
+            end = self.spelling_in_main(rng.get("end"))
+            node["_spell"] = begin and end
         node["_main"] = here and self.in_main()
         if node.get("kind") in FUNCTION_KINDS:
             body = [c for c in node.get("inner", [])
@@ -220,7 +235,11 @@ def collect_mutants(functions, source, path, rules, arid=None, hunks=None):
                 continue
         arid_spans = arid.spans(fn, source) if arid else ()
         counts = collections.Counter()
+        fn_span = span(fn)
         for site in operators.sites_in(fn, source):
+            if fn_span and not (fn_span[0] <= site.start
+                                and site.end <= fn_span[1]):
+                continue  # not in the function: an offset of a header
             if arid_lib.overlaps(site, arid_spans):
                 continue
             ident = (path, site.start, site.end, site.replacement)
@@ -249,14 +268,24 @@ def rank(seed, m):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def operator_rank(seed, m):
+    """Where the mutant's operator stands in its function's turn order: a
+    hash of the seed, the function and the operator, so no operator is
+    always first."""
+    text = "%s:%s:%s:%s" % (seed, m["file"], m["function"], m["operator"])
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def take_turns(mutants, seed):
-    """The mutants in the seeded order with the operators taking turns, so
-    that a cut keeps every operator represented."""
+    """The mutants in the seeded order with the operators taking turns (the
+    operators in a seeded order of their own), so that a cut keeps several
+    operators represented and favors none."""
     groups = collections.defaultdict(list)
     for m in mutants:
         groups[m["operator"]].append(m)
     queues = [sorted(g, key=lambda m: rank(seed, m))
-              for _, g in sorted(groups.items())]
+              for g in sorted(groups.values(),
+                              key=lambda g: operator_rank(seed, g[0]))]
     ordered = []
     while any(queues):
         for q in queues:

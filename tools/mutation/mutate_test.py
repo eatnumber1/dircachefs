@@ -60,6 +60,39 @@ class ScopeTest(unittest.TestCase):
                          ("m.End()", "(void)0"))
 
 
+class MacroSpellingTest(unittest.TestCase):
+    """A node whose tokens spell in a header (a macro defined there) has
+    header offsets: it must have no span in the .cc."""
+
+    def doc(self, spelling_file):
+        def loc(off, spelling_file):
+            return {"spellingLoc": {"offset": off, "file": spelling_file,
+                                    "tokLen": 3},
+                    "expansionLoc": {"offset": 40, "file": "dcfs/a.cc",
+                                     "tokLen": 6}}
+        return {"kind": "FunctionDecl", "name": "f",
+                "loc": {"offset": 0, "file": "dcfs/a.cc", "tokLen": 1},
+                "range": {"begin": {"offset": 0, "tokLen": 1},
+                          "end": {"offset": 90, "tokLen": 1}},
+                "inner": [{"kind": "CompoundStmt", "inner": [
+                    {"kind": "ReturnStmt", "range": {
+                        "begin": loc(5, spelling_file),
+                        "end": loc(9, spelling_file)}}]}]}
+
+    def span_of_return(self, spelling_file):
+        out = []
+        doc = self.doc(spelling_file)
+        mutate.Walker("dcfs/a.cc").visit(doc, out)
+        ret = doc["inner"][0]["inner"][0]
+        return operators.span(ret)
+
+    def test_a_node_spelled_in_a_header_has_no_span(self):
+        self.assertIsNone(self.span_of_return("dcfs/h.h"))
+
+    def test_a_macro_argument_spelled_in_the_file_keeps_its_span(self):
+        self.assertIsNotNone(self.span_of_return("dcfs/a.cc"))
+
+
 class SamplingTest(unittest.TestCase):
 
     def mutants(self):
@@ -88,6 +121,19 @@ class SamplingTest(unittest.TestCase):
         # a cut of three takes one of each when each is available.
         by_operator = {m["operator"] for m in picked if m["function"] == "a"}
         self.assertGreaterEqual(len(by_operator), 2)
+
+    def test_different_seeds_pick_different_operators_per_function(self):
+        # One function with every operator: a cut of one must not always
+        # be the alphabetically first operator.
+        ms = [mutant(function="f", line=i, operator=op, before="b%d" % i,
+                     after=op)
+              for i, op in enumerate(
+                  ("constant", "enum-swap", "logical", "negate",
+                   "relational", "status-return", "swap-args"), 1)]
+        picked = {mutate.sample(ms, seed=s, per_function=1)[0]["operator"]
+                  for s in range(1, 30)}
+        self.assertGreaterEqual(len(picked), 4)
+        self.assertIn("status-return", picked)
 
     def test_the_same_seed_gives_the_same_sample_and_another_differs(self):
         a = mutate.sample(self.mutants(), seed=1, per_function=3)

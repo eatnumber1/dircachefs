@@ -16,6 +16,7 @@ The macro rules are a scan of the text (a macro's expansion has no AST
 nodes of its own that say where the macro was), the others read the AST.
 """
 
+import functools
 import re
 
 import operators
@@ -86,7 +87,7 @@ class Arid:
                 continue
             rx = re.compile(r"(?<![\w.:])(%s)\s*\(" % "|".join(
                 map(re.escape, sorted(names, key=len, reverse=True))))
-            for m in rx.finditer(source, lo, hi):
+            for m in rx.finditer(mask(source), lo, hi):
                 line_start = source.rfind("\n", 0, m.start()) + 1
                 if source[line_start:m.start()].lstrip().startswith("#"):
                     continue
@@ -106,31 +107,52 @@ class Arid:
         def walk(node):
             if node.get("kind") == "CXXOperatorCallExpr" and node.get(
                     "_main"):
-                reason = self.builder_reason(node)
+                found_head = self.builder_head(node)
                 sp = operators.span(node)
-                if reason and sp and operators.sane(sp, source):
-                    found.append((sp[0], sp[1], reason))
+                head = operators.span(found_head[0]) if found_head else None
+                if found_head and sp and head and operators.sane(sp, source):
+                    # After the head call: the builder's own code (and a
+                    # return of the whole expression) stays mutable.
+                    found.append((head[1], sp[1], found_head[1]))
             for child in node.get("inner", []):
                 walk(child)
 
         walk(fn)
         return found
 
-    def builder_reason(self, node):
-        """The reason of a `head << a << b` chain whose head is arid."""
-        names = []
+    def builder_head(self, node):
+        """(head call node, reason) of a `head << a << b` chain whose head
+        is arid, or None."""
         while node.get("kind") == "CXXOperatorCallExpr":
-            op = operators.callee_name(node)
-            if op != "operator<<" or len(node.get("inner", [])) < 3:
+            if operators.callee_name(node) != "operator<<" or len(
+                    node.get("inner", [])) < 3:
                 return None
-            node = operators.strip(node["inner"][1],
-                                   operators.StatementDeletion.WRAPPERS)
+            node = operators.strip(node["inner"][1])
         if node.get("kind") in operators.CALL_KINDS:
-            names.append(operators.callee_name(node) or "")
-        for rx, reason in self.stream_heads:
-            if any(rx.search(n) for n in names):
-                return reason
+            name = operators.callee_name(node) or ""
+            for rx, reason in self.stream_heads:
+                if rx.search(name):
+                    return node, reason
         return None
+
+
+@functools.lru_cache(maxsize=8)
+def mask(source):
+    """The source with the inside of comments, strings and character
+    literals blanked (same length, newlines kept), so a scan for macro
+    names does not see them."""
+    out = []
+    i = 0
+    while i < len(source):
+        j = _skip(source, i)
+        if j == i:
+            out.append(source[i])
+            i += 1
+        else:
+            out.append("".join(c if c == "\n" else " "
+                               for c in source[i:j]))
+            i = j
+    return "".join(out)
 
 
 def _skip(source, i):
@@ -191,8 +213,10 @@ def _statement_end(source, i):
 
 
 def overlaps(site, spans):
-    """The reason of the first arid span a Site overlaps, or None."""
+    """The reason of the first arid span that contains a Site, or None. (A
+    site that merely overlaps one, a return of a whole builder expression,
+    or the deletion of a CHECK, stays: it is code around the arid part.)"""
     for start, end, reason in spans:
-        if site.start < end and start < site.end:
+        if start <= site.start and site.end <= end:
             return reason
     return None
