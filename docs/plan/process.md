@@ -150,6 +150,15 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
 
 ## russ's machine
 
+- Since 7.1b (2026-10-08) the first Bazel command in an output base
+  extracts `@dcfs_llvm` (a streaming extract of the 11.6 GB LLVM release
+  to 1.9 GB): 4 CPU minutes, 10-15 minutes of wall on a loaded host. An
+  agent's foreground command limit (10 minutes) kills it, and an
+  interrupted repository fetch leaves the server wedged until `bazel
+  shutdown`, after which the extraction starts over. So the first command
+  in a lane after it rebases onto 7.1b is `bazel fetch --repo=@dcfs_llvm`
+  run as a background command (the Bash tool's `run_in_background`, not a
+  polling loop), and nothing else runs in that lane until it returns.
 - zsh with `noclobber`: overwrite files with `>|`. `make` and `diff` are
   broken shell functions on the command line: use `command make`,
   `command diff` (scripts with a shebang are unaffected).
