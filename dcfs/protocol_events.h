@@ -192,6 +192,10 @@ struct IdentityCheck {
   int64_t found_btime_nsec = 0;
 };
 
+// ProtocolEvents::Replied's errno for a request whose handler returned OK
+// without replying (no errno is negative).
+inline constexpr int kNotReplied = -1;
+
 // The decision LookupOrPopulate takes after reading the cache.
 enum class LookupOutcome {
   kFound,     // served from the cache: present
@@ -231,8 +235,9 @@ class ProtocolEvents {
   virtual void RequestEnd(Context &ctx, const absl::Status &status) {}
   // The request's reply was sent (fuse_ops.cc's Serve, right after it,
   // before RequestEnd): `errnum` is the errno it carried, 0 for a reply that
-  // is not an error. Model: the errno class of the request's reply
-  // (ReplyObservable, step 12.7b).
+  // is not an error, or events::kNotReplied if the handler returned OK
+  // without replying (~FuseRequest then sends ECOMM). Model: the errno class
+  // of the request's reply (ReplyObservable, step 12.7b).
   virtual void Replied(Context &ctx, int errnum) {}
 
   // DirCacheFS::FreshAttr: the attributes of `id` were read from the cache

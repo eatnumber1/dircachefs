@@ -297,7 +297,10 @@ void TraceRecorder::Close(
       const std::string why = req.interrupted && ErrnoOf(status) == EINTR
                                   ? ""
                                   : unmodelled_end(req);
-      if (why.empty()) {
+      if (why.empty() && frame.sent_errno == events::kNotReplied) {
+        // ~FuseRequest sends ECOMM, which no model request replies.
+        Unexplained(ctx, dir, "its request returned OK without replying");
+      } else if (why.empty()) {
         // What T_Reply compares with the model's reply (step 12.7b): the
         // errno the FUSE request sent (Replied), else the frame's status
         // (a frame inside one, or no reply sent through fuse_ops); and a

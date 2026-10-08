@@ -830,7 +830,9 @@ is rejected there. The reply line carries the errno the request sent
 (`errno`: `FuseRequest::ReplyErrno` keeps it and `fuse_ops.cc`'s `Serve`
 reports it, `Replied`; 0 for a reply that is not an error, so also for a
 negative entry; a frame inside a request, such as a getattr of its own,
-gives its status's errno instead), and a lookup's also LookupOrPopulate's
+gives its status's errno instead; a request whose handler returned OK
+without replying, for which `~FuseRequest` sends `ECOMM`, is `unexplained`
+there, step 12.7c), and a lookup's also LookupOrPopulate's
 answer (`ans`: `"neg"`, or the found object's key; `LookupAnswered`).
 `T_Reply` requires the model's reply (`rep`, see
 [Replies](#replies-what-replyobservable-quantifies-over)) to have that

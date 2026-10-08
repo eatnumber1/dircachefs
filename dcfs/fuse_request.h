@@ -138,8 +138,10 @@ class FuseRequest {
   absl::Status ReplyErrno(int errnum);
 
   // The errno of the reply sent so far: what ReplyErrno (or ReplyFailure)
-  // sent, 0 if none was (a successful reply, or none yet).
+  // sent, 0 if none was (a successful reply, or none yet: see replied()).
   int errno_sent() const { return errno_sent_; }
+  // Whether a Reply* method has been called.
+  bool replied() const { return !req_.has_value(); }
 
   // A true failure response, e.g. db connection lost. We failed to do what
   // the user asked for.

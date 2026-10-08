@@ -136,7 +136,8 @@ void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
     absl::Status status = scope.Finish(handler(fs, fr));
     LogRequest(fs, request, status, ctx.backing_calls - backing_before);
     fr.ReplyFailureAndLogIfNotOk(status);
-    ctx.events->Replied(ctx, fr.errno_sent());
+    ctx.events->Replied(ctx,
+                        fr.replied() ? fr.errno_sent() : events::kNotReplied);
   }
   ctx.interrupts->End();
   ctx.events->CheckRequestEnd(ctx, fs, request);

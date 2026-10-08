@@ -675,6 +675,20 @@ TEST_F(TraceRecorderTest, ReplyLineCarriesTheErrnoSent) {
   }
   EXPECT_THAT(Lines(d), Contains(HasSubstr(
                             "\"ev\":\"reply\",\"p\":\"p1\",\"errno\":2")));
+  // A handler that returns OK without replying (~FuseRequest then sends
+  // ECOMM, which no model request replies): unexplained, not a reply.
+  {
+    events::RequestScope request(
+        *ctx_.events, ctx_, {.op = events::Op::kGetattr, .ino = d});
+    events::Scope getattr(*ctx_.events, ctx_, &ProtocolEvents::GetattrBegin,
+                          &ProtocolEvents::GetattrEnd, d, true);
+    ctx_.events->Replied(ctx_, events::kNotReplied);
+  }
+  const std::vector<std::string> lines = Lines(d);
+  EXPECT_THAT(lines.back(), AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                                  HasSubstr("without replying")))
+      << "the getattr that sent no reply";
+  EXPECT_THAT(lines, Not(Contains(HasSubstr("\"errno\":-1"))));
 }
 
 // A create whose syscall succeeded but whose probe found the new name gone
