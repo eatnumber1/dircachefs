@@ -287,6 +287,25 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 11.3: guest/fault_recover.sh on btrfs WITHOUT pinning the inodes of its
+# trees (dcfs_pin=0): a cold inode the device cannot read. The kernel's
+# btrfs_destroy_inode warning is on record in a DISABLED_ check the script runs
+# then, and run-qemu.sh expects it (only that warning, only if the guest
+# reports it); dcfs's ESTALE and ENOENT replies are the SKIP lines of the log.
+qemu_test(
+    name = "fault_recover_btrfs_unpinned_test",
+    cmdline = "dcfs_pin=0",
+    disks = [
+        ("vdb", "btrfs", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_recover.sh",
+    kernel_failure = "expected",
+    modules = ["dm_flakey"],
+    size = "large",
+    timeout = "moderate",
+)
+
 # Step 2: the cache database (and its -wal/-shm files) is mode 0600, not
 # world-readable; a missing cache-database directory is created 0700, and
 # an existing group-/world-accessible one gets a WARNING -- see

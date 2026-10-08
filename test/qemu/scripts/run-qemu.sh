@@ -805,9 +805,12 @@ KERNEL_FAIL=$KERNEL_FAIL_RE
 # script is a reproducer of a kernel bug (guest/casefold_tune_oops.sh, a
 # DISABLED_ check) and the oops is what it demonstrates. Tolerated only if
 # the guest reported it itself ("would FAIL (kernel: ..."), and only an oops
-# (not a WARNING, a BUG at, or a panic); the verdict then follows the other
-# checks. A fixed kernel logs nothing and passes too.
-KERNEL_OOPS_ONLY='BUG: (kernel NULL pointer dereference|unable to handle)|Oops[: ]|Call Trace:|general protection fault'
+# or the one WARNING of btrfs's failed inode read (step 11.3,
+# guest/fault_recover.sh with dcfs_pin=0: btrfs_destroy_inode at fs/btrfs/inode.c,
+# with its "cut here" line), not another WARNING, a BUG at, or a panic; the
+# verdict then follows the other checks. A fixed kernel logs nothing and
+# passes too.
+KERNEL_OOPS_ONLY='BUG: (kernel NULL pointer dereference|unable to handle)|Oops[: ]|Call Trace:|general protection fault|WARNING: CPU: [0-9]+ PID: [0-9]+ at fs/btrfs/inode.c:[0-9]+ btrfs_destroy_inode|------------\[ cut here \]------------'
 if [ -n "$EXPECT_KERNEL_FAILURE" ] && grep -q -a -E "$KERNEL_FAIL" "$LOG"; then
 	unexpected=$(grep -a -E "$KERNEL_FAIL" "$LOG" | grep -a -v -E "$KERNEL_OOPS_ONLY" | head -n 1 || true)
 	if [ -z "$unexpected" ] && grep -q -a "would FAIL (kernel: " "$LOG"; then

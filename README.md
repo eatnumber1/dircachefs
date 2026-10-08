@@ -667,6 +667,22 @@ recovery protocol, concurrency, and the test strategy.
   last `syncfs` of a frozen filesystem returns immediately); with a change
   held it waits behind it, and the next start recovers the change's dirty
   entry. A periodic sync point during a freeze runs and clears the dirty set.
+- **A backing device that fails is met, not hidden, but a lost write can
+  leave a stale size until a restart.** When the backing device fails reads
+  or writes, a change through dcfs returns the filesystem's error (EIO, or
+  EROFS once ext4's journal has aborted), nothing is recorded as having
+  succeeded, and after the device recovers the same operations work
+  (`//test/qemu:fault_recover_test`, `test/qemu/README.md`, "Fault
+  injection"). Two limits: on xfs and btrfs a read of an inode the device
+  cannot read comes back to the caller as ESTALE or ENOENT, not EIO, for a
+  name that exists (the cache keeps the name unknown, never absent; plan
+  step 11.3b changes the reply); and a write through passthrough whose
+  write-back later fails loses its pages in the backing filesystem, which
+  then reports its old size once it re-reads the inode, while dcfs keeps
+  serving the size it read earlier (the file's inode stays in the dirty set)
+  until the next start of the daemon recovers it. The writer is told by
+  its `fsync` (EIO); a writer that never calls it is not told by anything,
+  as on any filesystem.
 - **Interrupting a request is prompt only between backing syscalls.** A
   signal to a process waiting on dcfs (Ctrl+C, `timeout`, even `kill -9`)
   ends the wait with `EINTR` at dcfs's next checkpoint, just before its

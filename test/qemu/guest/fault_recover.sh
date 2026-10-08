@@ -63,10 +63,14 @@ RUN=0
 LOGS=""
 WRITER_PID=""
 PIN_PIDS=""
+# dcfs_pin=0 on the kernel command line: btrfs unpinned (the reproducer of the
+# kernel warning, //test/qemu:fault_recover_btrfs_unpinned_test).
+PIN=1
+grep -q 'dcfs_pin=0' /proc/cmdline && PIN=0
 MODES="error-reads window error-writes error-io dead"
 # The window: up for UP seconds from the table switch, then down for DOWN.
 WINDOW_UP=6
-WINDOW_DOWN=8
+WINDOW_DOWN=20
 
 cleanup() {
 	rc=$?
@@ -90,7 +94,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "fault_recover.sh: kernel $(uname -r)"
-require_commands umount sync find stat diff sort md5sum head cat dd tr grep touch mv cut rm mkdir ln ls sleep kill awk timeout mkfifo
+require_commands umount sync find stat diff sort md5sum head cat dd tr grep touch mv cut rm mkdir ln ls sleep kill awk timeout
 
 alive() {
 	[ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null
@@ -175,52 +179,80 @@ check_not() {
 	pass "$cn_name"
 }
 
-# fails NAME CMD: CMD, through dcfs, must return an error.
-fails() {
-	f_name=$1
-	f_out=$(timeout 30 sh -c "$2" 2>&1)
-	f_rc=$?
-	if [ "$f_rc" -ne 0 ]; then
-		pass "$f_name"
-		echo "fault_recover: $MODE: $f_name: error (rc $f_rc): $f_out"
-		return 0
-	fi
-	fail "$f_name" "succeeded ($f_out) with the backing filesystem failing"
+# gone_reply OUT: OUT says the object does not exist (ENOENT) or is stale
+# (ESTALE). On xfs and btrfs a cold inode the device cannot be read makes
+# open_by_handle_at fail with ESTALE; dcfs forgets the row and replies ESTALE or
+# ENOENT for a name that exists. That is the behaviour step 11.3b is to change
+# (EIO), so such a cell is a SKIP here, never a pass.
+gone_reply() {
+	case "$1" in
+	*"No such file"* | *ENOENT* | *ESTALE* | *"Stale file"*) return 0 ;;
+	esac
 	return 1
 }
 
-# may_succeed NAME CMD: CMD, through dcfs, either fails (printed) or works;
-# returns 0 if it worked.
+# error_cell NAME RC OUT: the cell NAME got an error reply OUT.
+error_cell() {
+	echo "fault_recover: $MODE: $1: error (rc $2): $3"
+	if gone_reply "$3"; then
+		skip "$1" "dcfs replies ENOENT or ESTALE for an existing file: 11.3b"
+	else
+		pass "$1"
+	fi
+}
+
+# fails NAME CMD: CMD, through dcfs, must return an error.
+fails() {
+	f_out=$(timeout 30 sh -c "$2" 2>&1)
+	f_rc=$?
+	if [ "$f_rc" -ne 0 ]; then
+		error_cell "$1" "$f_rc" "$f_out"
+		return 0
+	fi
+	fail "$1" "succeeded ($f_out) with the backing filesystem failing"
+	return 1
+}
+
+# may_succeed NAME CMD: CMD, through dcfs, fails (a pass, or a skip for a gone
+# reply) or works (a skip: it needed no device I/O, so the failure was not
+# met; the record checks still run); returns 0 if it worked.
 may_succeed() {
 	ms_out=$(timeout 30 sh -c "$2" 2>&1)
 	ms_rc=$?
 	if [ "$ms_rc" -eq 0 ]; then
-		pass "$1-answered"
+		skip "$1" "succeeded: it needed no device I/O, so no failure was met"
 		echo "fault_recover: $MODE: $1: succeeded"
 		return 0
 	fi
-	pass "$1-answered"
-	echo "fault_recover: $MODE: $1: error (rc $ms_rc): $ms_out"
+	error_cell "$1" "$ms_rc" "$ms_out"
 	return 1
 }
 
-# fill_fails NAME CMD TRUTH: a fill (lookup, getattr, readdir) returns an error,
-# or answers TRUTH, what the backing filesystem holds (from a cache it still
-# has: xfs keeps an inode cluster, ext4 a directory block, after the caches
-# were dropped); an answer that is not the truth is a failure. Sets FILL_OK to
-# 1 if it answered.
+# fill_fails NAME CMD TRUTH: a fill (lookup, getattr, readdir) returns an error
+# (counted in FILL_ERRORS), or answers TRUTH, what the backing filesystem
+# holds, from a cache it still has: xfs keeps an inode cluster, ext4 a
+# directory block, after the caches were dropped. An answer with no read
+# reaching the device is a SKIP (no failure was met), one after a read that
+# did reach it a pass; an answer that is not the truth is a failure. Sets
+# FILL_OK to 1 if it answered.
 fill_fails() {
 	ff_name=$1
 	FILL_OK=0
+	ff_before=$(sectors_read "$DM_NAME")
 	ff_out=$(timeout 30 sh -c "$2" 2>&1)
 	ff_rc=$?
+	ff_after=$(sectors_read "$DM_NAME")
 	if [ "$ff_rc" -ne 0 ]; then
-		pass "$ff_name"
-		echo "fault_recover: $MODE: $ff_name: error (rc $ff_rc): $ff_out"
+		FILL_ERRORS=$((FILL_ERRORS + 1))
+		error_cell "$ff_name" "$ff_rc" "$ff_out"
 	elif [ "$ff_out" = "$3" ]; then
-		pass "$ff_name"
 		FILL_OK=1
 		echo "fault_recover: $MODE: $ff_name: answered the truth: $ff_out"
+		if [ "$ff_after" = "$ff_before" ]; then
+			skip "$ff_name" "answered from caches, no read reached the device"
+		else
+			pass "$ff_name"
+		fi
 	else
 		fail "$ff_name" "answered '$ff_out', the backing filesystem holds '$3'"
 	fi
@@ -250,7 +282,10 @@ answers() {
 # name_state NAME PARENT-INO: what the database says of NAME in the directory
 # whose backing inode is PARENT-INO: the dentry's state, else norow-complete
 # (no row, the directory complete: the name is recorded absent) or
-# norow-incomplete (no row, so unknown).
+# norow-incomplete (no row, so unknown). The dentry is found by NAME alone,
+# which is safe because every name of the test ends in the number of its mode
+# and no two directories of a tree share one; PARENT-INO is for the
+# completeness of the directory only.
 name_state() {
 	sql "SELECT COALESCE((SELECT state FROM dentries WHERE name = CAST('$1' AS BLOB)), (SELECT 'norow-complete' FROM directories WHERE inode = (SELECT id FROM inodes WHERE backing_ino = $2) AND children_complete = 1), 'norow-incomplete')"
 }
@@ -289,26 +324,10 @@ inject() {
 	error-io) fault_mode "$FD_BACK" error-io ;;
 	dead) fault_mode "$FD_BACK" dead ;;
 	window)
-		fault_window "$FD_BACK" "$WINDOW_UP" "$WINDOW_DOWN"
+		fault_window "$FD_BACK" "$WINDOW_UP" "$WINDOW_DOWN" &&
+			WINDOW_START=$FAULT_WINDOW_START
 		;;
 	esac
-}
-
-# fault_window NAME UP DOWN: a flakey table that is up for UP seconds from now,
-# then fails every read for DOWN seconds, then is up for UP, and so on. Sets
-# WINDOW_START to the uptime at the switch.
-fault_window() {
-	fwn_dev=$(fault_underlying "$1") || return 1
-	fwn_sectors=$(fault_sectors "$fwn_dev") || return 1
-	fwn_table="0 $fwn_sectors flakey $fwn_dev 0 $2 $3 1 error_reads"
-	"$DMSETUP" suspend --nolockfs --noudevsync "$1" || return 1
-	if "$DMSETUP" load "$1" --table "$fwn_table"; then
-		"$DMSETUP" resume --noudevsync "$1"
-		WINDOW_START=$(now)
-	else
-		"$DMSETUP" resume --noudevsync "$1"
-		return 1
-	fi
 }
 
 # pin_inodes: on btrfs, every inode of the mode's tree held in the backing
@@ -343,6 +362,16 @@ unpin_inodes() {
 	PIN_PIDS=""
 }
 
+# kernel_warns: fails, saying "kernel: <the warning>", if the kernel has logged
+# the btrfs_destroy_inode warning.
+kernel_warns() {
+	if dmesg | grep -q "WARNING: CPU.*btrfs_destroy_inode"; then
+		echo "kernel: $(dmesg | grep -m 1 'WARNING: CPU.*btrfs_destroy_inode' | sed 's/^[^]]*] //')"
+		return 1
+	fi
+	return 0
+}
+
 # remount_backing: the daemon killed, both filesystems mounted again on healthy
 # devices (the journals replay), the daemon started over them (it recovers the
 # dirty rows).
@@ -368,6 +397,8 @@ run_mode() {
 	M=$MNT/$R
 	FSTYPE=$(backing_fstype "$SRC")
 	WRITE_BYTES=4096
+	FILL_ERRORS=0
+	DATA_FSYNC_FAILED=0
 	# testutil readdir-ino, not ls or find: busybox ls ends a listing at a
 	# readdir error without saying so, and busybox find ignores ESTALE.
 	LISTRD="l=\$($TESTUTIL readdir-ino $M/rd) || { echo \"\$l\"; exit 1; }; echo \"\$l\" | cut -d' ' -f1 | grep -v '^[.][.]*\$' | sort"
@@ -395,7 +426,7 @@ run_mode() {
 		fail "$MODE-writer-open" "testutil writehold did not report READY: $(cat /tmp/writer.out)"
 	fi
 	# The writer's page stays dirty: the failure must meet it.
-	[ "$FSTYPE" = btrfs ] && pin_inodes
+	[ "$FSTYPE" = btrfs ] && [ "$PIN" = 1 ] && pin_inodes
 	quiet
 	# 2. inject. A mode that fails writes needs the filesystem's journal to
 	# meet the errors: a change and a sync (as guest/fault_backing.sh).
@@ -446,16 +477,37 @@ b$S"
 	# writable open of the file may work (the inode is held).
 	out=$("$TESTUTIL" fsync "$M/wd/data$S" 2>&1)
 	echo "fault_recover: $MODE: data fsync says: ${out:-ok}"
-	case "$MODE" in
-	error-reads | window) pass "$MODE-data-fsync-answered" ;;
+	case "$out" in
+	ERR*)
+		DATA_FSYNC_FAILED=1
+		error_cell "$MODE-data-fsync-fails" 1 "$out"
+		;;
 	*)
-		case "$out" in
-		ERR*) pass "$MODE-data-fsync-fails" ;;
+		case "$MODE" in
+		error-reads | window) skip "$MODE-data-fsync-fails" "the fsync worked: no write-back needed a read" ;;
 		*) fail "$MODE-data-fsync-fails" "fsync of the written file returned '${out:-ok}' on a failed filesystem" ;;
 		esac
 		;;
 	esac
 	may_succeed "$MODE-data-open" "echo y >>$M/wd/data$S"
+	# A mode that fails reads must be met by at least one fill (the rest may be
+	# answered from caches).
+	case "$MODE" in
+	error-reads | window | error-io | dead)
+		if [ "$FILL_ERRORS" -ge 1 ]; then
+			pass "$MODE-some-fill-fails"
+		else
+			fail "$MODE-some-fill-fails" "no lookup, getattr or readdir met the failing reads"
+		fi
+		;;
+	esac
+	if [ "$MODE" = window ]; then
+		if [ "$(awk -v n="$(now)" -v s="$WINDOW_START" -v u="$WINDOW_UP" -v d="$WINDOW_DOWN" 'BEGIN { print (n < s + u + d - 1) }')" = 1 ]; then
+			pass window-operations-inside-the-window
+		else
+			fail window-operations-inside-the-window "the down interval ended (uptime $(now), window $WINDOW_START + $WINDOW_UP + $WINDOW_DOWN) while the operations ran"
+		fi
+	fi
 	# 4. what the database says, while the daemon is idle.
 	quiesce_daemon "$DAEMON_PID"
 	daemon_ok "$MODE-daemon-alive-after-errors"
@@ -493,7 +545,7 @@ b$S"
 		fi
 	fi
 	if [ "$SETXATTR_OK" = 1 ]; then
-		pass "$MODE-setxattr-succeeded-so-recorded-or-unknown"
+		check_not "$MODE-setxattr-succeeded-not-recorded-absent" "$(sql "SELECT state FROM xattrs WHERE name = CAST('user.k' AS BLOB) AND inode = (SELECT id FROM inodes WHERE backing_ino = $ino_xa)")" '*absent*'
 	else
 		check_not "$MODE-setxattr-not-recorded-present" "$(sql "SELECT state FROM xattrs WHERE name = CAST('user.k' AS BLOB) AND inode = (SELECT id FROM inodes WHERE backing_ino = $ino_xa)")" '*present*'
 	fi
@@ -507,6 +559,9 @@ b$S"
 	case "$MODE" in
 	window)
 		sleep_until "$(awk -v s="$WINDOW_START" -v u="$WINDOW_UP" -v d="$WINDOW_DOWN" 'BEGIN { print s + u + d + 0.5 }')"
+		# The table cycles: the next down interval must not meet the rest of
+		# the run.
+		fault_mode "$FD_BACK" healthy || fail "$MODE-heal" "fault_mode failed"
 		;;
 	*)
 		fault_mode "$FD_BACK" healthy || fail "$MODE-heal" "fault_mode failed"
@@ -519,8 +574,20 @@ b$S"
 		echo "fault_recover: $MODE: the backing filesystem stays failed after the device recovered: remounting it"
 		remount_backing
 	fi
-	if [ "$MODE" = window ] && [ "$RECOVERED_IN_PLACE" = 1 ]; then
-		pass window-recovered-by-itself
+	if [ "$MODE" = window ]; then
+		if [ "$RECOVERED_IN_PLACE" = 1 ]; then
+			pass window-recovered-by-itself
+		elif [ "$FSTYPE" = ext4 ]; then
+			fail window-recovered-by-itself "ext4 needed a remount after the window ended"
+		else
+			skip window-recovered-by-itself "$FSTYPE stays failed after a read error: it needs a remount"
+		fi
+	fi
+	# A write-back that failed lost the file's pages: the inode must still be
+	# in the dirty set (no sync point cleared it), so that a restart's
+	# recovery refreshes what dcfs recorded.
+	if [ "$RECOVERED_IN_PLACE" = 1 ] && [ "$DATA_FSYNC_FAILED" = 1 ]; then
+		check_not "$MODE-failed-write-inode-still-dirty" "$(sql "SELECT count(*) FROM dirty WHERE inode = (SELECT id FROM inodes WHERE backing_ino = $ino_wd)")" '0;'
 	fi
 	daemon_ok "$MODE-daemon-alive-after-recovery"
 	# 6. the same operations, now.
@@ -573,12 +640,18 @@ b$S"
 	drop_caches
 	snapshot "$SRC/$R" >/tmp/backing.snap 2>&1
 	snapshot "$MNT/$R" >/tmp/served.snap 2>&1
-	# Without a restart (nothing recovered the dirty rows), the written file
-	# is left out: its pages were lost to the writeback error and the
-	# filesystem's own size reverts when the inode is evicted, while dcfs's
-	# record still holds the size the filesystem had when dcfs read it (the
-	# writer was told by its fsync). README.md, "Fault injection".
-	if [ "$RECOVERED_IN_PLACE" = 1 ]; then
+	# Without a restart (nothing recovered the dirty rows) after a failed
+	# write-back, the written file is compared on its own and its difference
+	# printed: its pages were lost, the filesystem's own size reverts when the
+	# inode is evicted, and dcfs serves the size it read until the restart's
+	# recovery (the inode is still dirty: checked above). README.md,
+	# "Limitations".
+	if [ "$RECOVERED_IN_PLACE" = 1 ] && [ "$DATA_FSYNC_FAILED" = 1 ]; then
+		grep "wd/data" /tmp/backing.snap >/tmp/backing.data
+		grep "wd/data" /tmp/served.snap >/tmp/served.data
+		if ! cmp -s /tmp/backing.data /tmp/served.data; then
+			echo "fault_recover: $MODE: the written file after the failed write-back: served $(cat /tmp/served.data) / backing $(cat /tmp/backing.data)"
+		fi
 		grep -v "wd/data" /tmp/backing.snap >/tmp/backing.snap2
 		grep -v "wd/data" /tmp/served.snap >/tmp/served.snap2
 		mv /tmp/backing.snap2 /tmp/backing.snap
@@ -598,6 +671,7 @@ main() {
 		fail setup "wrapping or mounting the disks failed"
 		exit "$FAILED"
 	}
+	DM_NAME=$(basename "$(readlink "/dev/mapper/$FD_BACK")")
 	# Thousands of files first, so that what a mode's tree needs lies in
 	# metadata that is not already in a page the filesystem reads whole (a
 	# small btrfs tree is one leaf): the trees are made after the padding.
@@ -622,6 +696,9 @@ main() {
 		n=$((n + 1))
 		run_mode "$n" "$mode"
 	done
+	if [ "$PIN" = 0 ]; then
+		disabled BTRFS_FAILED_INODE_READ_WARNS "btrfs's iget error path warns in btrfs_destroy_inode when a cold inode cannot be read (kernel 6.18)" kernel_warns
+	fi
 	require_no_reclaim no-reclaim
 	exit "$FAILED"
 }

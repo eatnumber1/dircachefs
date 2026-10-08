@@ -267,6 +267,24 @@ run_e2e
 [ "$RC" -ne 0 ] || fail "a WARNING passed under the flag"
 echo "PASS: --expect-kernel-failure: a warning or panic still fails the run"
 
+# The one WARNING tolerated (step 11.3, btrfs's failed inode read), reported by
+# the guest; any other still fails (above), and so does this one unreported.
+btrfs_warn="KERNEL-OOPS: [    1.8] ------------[ cut here ]------------
+KERNEL-OOPS: [    1.8] WARNING: CPU: 1 PID: 7 at fs/btrfs/inode.c:8047 btrfs_destroy_inode+0x224/0x290 [btrfs]
+KERNEL-OOPS: [    1.9] Call Trace:"
+btrfs_reported="TEST DISABLED_BTRFS_FAILED_INODE_READ_WARNS DISABLED (btrfs)
+  would FAIL (kernel: WARNING: CPU: 1 PID: 7 at fs/btrfs/inode.c:8047 btrfs_destroy_inode+0x224/0x290 [btrfs])"
+printf '%s\n' "$btrfs_reported" "$btrfs_warn" >"$WORK/extra"
+canned_e2e ALL-TESTS-PASSED
+run_e2e
+[ "$RC" -eq 0 ] || fail "the reported btrfs warning failed the run under the flag: $(cat "$WORK/stdout")"
+echo "PASS: --expect-kernel-failure: btrfs's failed-inode-read warning, reported by the guest, is tolerated"
+printf '%s\n' "$btrfs_warn" >"$WORK/extra"
+canned_e2e ALL-TESTS-PASSED
+run_e2e
+[ "$RC" -ne 0 ] || fail "the unreported btrfs warning passed under the flag"
+echo "PASS: --expect-kernel-failure: the same warning unreported fails the run"
+
 printf '%s\n' "$reported" >"$WORK/extra"
 canned_e2e ALL-TESTS-PASSED
 run_e2e

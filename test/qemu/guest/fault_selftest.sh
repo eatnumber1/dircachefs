@@ -125,6 +125,39 @@ else
 	fail error-reads-recovers "healed: $(cat "$MNT/healed" 2>&1)"
 fi
 
+# --- window: reads work, then fail for a while, then work again -----------
+
+# Up for 4 s from the switch, down for the next 4, up again: a read right
+# after the switch works, one in the middle of the window fails, one after it
+# works. The caches are dropped before each, so that each reaches the device.
+drop_caches
+fault_window "$NAME" 4 4 || fail mode-window "fault_window failed"
+echo 3 >/proc/sys/vm/drop_caches
+if [ "$(cat "$MNT/healed" 2>&1)" = three ]; then
+	pass window-works-before
+else
+	fail window-works-before "a read in the up interval failed: $(cat "$MNT/healed" 2>&1)"
+fi
+sleep_until_uptime() {
+	su_n=$(awk -v t="$1" -v n="$(cut -d' ' -f1 /proc/uptime)" 'BEGIN { d = t - n; if (d < 0) d = 0; print d }')
+	sleep "$su_n"
+}
+sleep_until_uptime "$(awk -v s="$FAULT_WINDOW_START" 'BEGIN { print s + 5 }')"
+echo 3 >/proc/sys/vm/drop_caches
+if cat "$MNT/healed" >/dev/null 2>&1; then
+	fail window-fails-inside "a read inside the down interval succeeded"
+else
+	pass window-fails-inside
+fi
+sleep_until_uptime "$(awk -v s="$FAULT_WINDOW_START" 'BEGIN { print s + 9.5 }')"
+echo 3 >/proc/sys/vm/drop_caches
+if [ "$(cat "$MNT/healed" 2>&1)" = three ]; then
+	pass window-works-after
+else
+	fail window-works-after "a read after the window failed: $(cat "$MNT/healed" 2>&1)"
+fi
+fault_mode "$NAME" healthy || fail mode-healthy-window "fault_mode healthy failed"
+
 # --- dead: nothing works, and the table switches back --------------------
 
 drop_caches

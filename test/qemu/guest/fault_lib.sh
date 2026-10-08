@@ -18,6 +18,11 @@
 #       error-io       reads and writes fail (dm-flakey error_reads and
 #                      error_writes)
 #       dead           every I/O fails: no DEV behind it (dm-error)
+#   fault_window NAME UP DOWN  a flakey table that works for UP seconds from the
+#       switch, then fails every read for DOWN seconds, then works for UP, and
+#       so on (dm-flakey error_reads): a failure that ends by itself. Sets
+#       FAULT_WINDOW_START to the uptime at the switch. The cycle repeats: the
+#       caller switches back to healthy once it has seen the window end.
 #   fault_unwrap NAME        removes the device (unmount it first)
 #
 # A flakey table is `flakey DEV 0 0 1 <n> <features>`: the up interval is 0,
@@ -100,4 +105,19 @@ fault_mode() {
 # fault_unwrap NAME
 fault_unwrap() {
 	"$DMSETUP" remove --noudevsync "$1"
+}
+
+# fault_window NAME UP DOWN
+fault_window() {
+	fwn_dev=$(fault_underlying "$1") || return 1
+	fwn_sectors=$(fault_sectors "$fwn_dev") || return 1
+	fwn_table="0 $fwn_sectors flakey $fwn_dev 0 $2 $3 1 error_reads"
+	"$DMSETUP" suspend --nolockfs --noudevsync "$1" || return 1
+	if "$DMSETUP" load "$1" --table "$fwn_table"; then
+		"$DMSETUP" resume --noudevsync "$1"
+		FAULT_WINDOW_START=$(cut -d' ' -f1 /proc/uptime)
+	else
+		"$DMSETUP" resume --noudevsync "$1"
+		return 1
+	fi
 }
