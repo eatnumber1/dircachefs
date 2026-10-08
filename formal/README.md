@@ -321,8 +321,8 @@ reports as distinct states (since step 23.4's `linkcreate`, run of
 | `MC_small.cfg` | `small_test` (medium) | 2 names, 2 slots, 2 mutations, 1 crash, kernel lock, all request kinds, all invariants and the three effect-point properties (step 12.7; also in `MC_recovery.cfg` and `MC_liveness.cfg`, and in `Trace.cfg`: every recorded trace is checked for them) | 871,017 | ~1 min unloaded (4 min at load 15, 2026-10-08) |
 | `MC_recovery.cfg` | `recovery_test` (medium) | 1 name, 1 slot, 2 mutations, 2 crashes (one can come during the recovery of a dirty database: steps 12.6, 12.6b), all request kinds, all invariants and properties | 25,861 | ~10 s |
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates` | 101,898 | ~45 s |
-| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 7,238,097 | ~8 min unloaded; 26 min alone at load 15 (2026-10-07: over the 900 s timeout) |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 6,036,816 | ~5 min unloaded; 18 min alone at load 15 (2026-10-07: over the 900 s timeout) |
+| `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes | 9,164,576 | ~8 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 28 min alone at load 13) |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock | 6,365,804 | ~5 min unloaded (CI 506 s before step 12.6b's daemon crash; 16 min alone at load 13) |
 | `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 226,438 | ~70 s |
 | `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one) | 840,476 | ~2.5 min |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation | 966,942 | ~4 min |
