@@ -165,3 +165,43 @@ gates passed vacuously in one week: pjdfstest's `tail -1`, the missing
 Order: 26.1 (+26.7, 26.8, 26.13) and 26.2 as lanes free up (no new
 tooling); 26.3 + 26.4 and 26.9 next; 26.10 before Phase 11; 26.5 after
 7.2; 26.12 after 7.1; 26.11 after 25.2; 26.6 after 26.2 (report its added runtime).
+
+## 26.5d Expand mutation testing with our own tooling (russ, 2026-10-08)
+
+Keep `tools/mutation/mutate.py` (clang AST-JSON, Bazel-run killers); no
+third-party framework (Mull lags our LLVM pin and runs outside Bazel;
+Dextool needs a D toolchain). Borrow the ideas from Google's mutation
+testing papers (Petrović & Ivanković):
+- Operators, each a small named class with a unit test on a fixture
+  file: relational replacement (`<`↔`<=`, `>`↔`>=`, `==`↔`!=`), logical
+  replacement (`&&`↔`||`), the existing negations, constant nudges
+  (`+1`/`-1`/`0` on integer literals in conditions and arithmetic),
+  statement deletion of a void call or an expression statement (the
+  write-through calls especially: `MarkDirty`, `ClearDirty`, `syncfs`,
+  phase-3 record calls, `End()`), return-value replacement for
+  `absl::Status`/`StatusOr` functions (an error path returning OK, an OK
+  path returning an error), and argument swap for two same-typed
+  arguments.
+- Arid nodes: no mutants inside logging and diagnostics (`LOG`, `VLOG`,
+  `PLOG`, `CHECK` message streams and their conditions' message parts,
+  `AbslStringify`, debug-string functions, `DCHECK`), inside testonly
+  hooks, or in `ToString`/`DebugString`; the list lives in a data file
+  with reasons and has a test.
+- Sampling: at most one mutant per source line and a bounded, seeded
+  sample per function (the seed printed and settable), so the weekly job's
+  cost stays flat as operators grow; the per-push `changed` mode keeps a
+  mutant budget per push (deterministic selection, surplus reported as
+  "not run").
+- Equivalent-mutant memory: a data file (`tools/mutation/equivalent.txt`
+  or similar) of suppressed mutants keyed by a stable id (file, function,
+  operator, before/after text, not line numbers) with a reason each;
+  `tools/mutation/README.md`'s prose list moves there; a test rejects an
+  entry without a reason.
+- Reporting: survivors grouped by function with the operator and the
+  one-token diff; the weekly job's summary carries killed/survived/invalid
+  per operator and mutants per hour, so the next sweep can be judged.
+- Done when: the operator set and suppressions are tested, one weekly-style
+  sweep over `dcfs/dir_cache_fs.cc` and `dcfs/backing.cc` has run (report
+  its survivors per operator as the next 8.2x list, do not fix them in this
+  step), and `changed` mode over a recent range stays under its budget.
+

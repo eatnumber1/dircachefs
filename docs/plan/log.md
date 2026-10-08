@@ -1717,3 +1717,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   call (same names, N and assertions; two error-path checks); guest time on this loaded host 221-232
   s -> 135 s, dcfs's own create (~4.5 ms of daemon CPU each) now dominates. Lane-3 free (held:
   mutation-expansion step pending russ's decision).
+- 26.5d (russ, 2026-10-08): expand mutation testing with our own tooling (operators from the
+  literature, arid-node suppression, sampling, an equivalent-mutant data file, per-operator
+  reporting); no Mull/Dextool. Dispatched to lane-3 (new implementer).
