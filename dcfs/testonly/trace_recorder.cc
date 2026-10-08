@@ -662,10 +662,11 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
   After(ctx);
 }
 
-void TraceRecorder::Replied(Context &ctx, int errnum) {
-  Enter("Replied");
+void TraceRecorder::Replied(Context & /*ctx*/, int errnum) {
+  // Only noted: no line, and no check of the directories (After), which
+  // RequestEnd, right after it, makes (a check here would see a state an
+  // interrupted population left for the next line to carry, as a change).
   if (Frame *rf = InnermostRequest(); rf != nullptr) rf->sent_errno = errnum;
-  After(ctx);
 }
 
 void TraceRecorder::GetattrBegin(Context &ctx, Ino id, bool valid) {
@@ -738,10 +739,10 @@ void TraceRecorder::LookupEnd(Context &ctx, const absl::Status &status) {
 void TraceRecorder::LookupAnswered(Context &ctx, Ino parent,
                                    std::string_view name,
                                    events::LookupOutcome answer, Ino child) {
-  Enter("LookupAnswered");
   // A lookup request's answer, for its reply line (T_Reply compares it with
   // the model's). An unlink's or rename's resolve answers nothing they
-  // reply but its ENOENT, which their errno says.
+  // reply but its ENOENT, which their errno says. Only noted, as Replied:
+  // LookupEnd follows at once and checks.
   if (Req *req = Traced(parent) ? Find(parent) : nullptr;
       req != nullptr && req->kind == "lookup") {
     switch (answer) {
@@ -756,7 +757,6 @@ void TraceRecorder::LookupAnswered(Context &ctx, Ino parent,
         break;
     }
   }
-  After(ctx);
 }
 
 void TraceRecorder::RefreshBegin(Context &ctx, Ino id) {
