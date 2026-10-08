@@ -1647,3 +1647,21 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   --log_dir; new style rule "return a failed Status or log, never both"; include russ's Status
   error-message guidelines (~/Style Guidelines for Accumulating absl__Status Error Messages.md),
   rewritten for our helpers. Dispatched to lane-5 (new implementer).
+- 11.5 + 11.4 reported (lane-2) and reviewed (Opus): fix first for both. FINDING (protocol, HIGH,
+  from kernel source): after a btrfs abort (or ext4 errors=remount-ro) the superblock is forced
+  read-only, `sync_filesystem` returns 0 for a read-only sb and `syncfs` reports the errseq error
+  once per open file, and SyncBacking reuses the fds opened at start: the first sync point after
+  the abort fails, the next succeeds and clears the dirty set; after the operator's remount (which
+  loses the unsynced mutations) and a restart the run ended clean and the lost objects are served
+  as present. The test hid it with --sync_interval_sec=3600. Fix in 11.5 (test first, btrfs with a
+  1 s sync interval + remount + restart): sync points fail on ST_RDONLY for a backing writable at
+  start; start refuses a read-only superblock under a read-write mount; formal/README limitation.
+  11.4's EEXIST reply narrowed to "the probe found the object" (ENOENT probe stays ENOENT); the
+  recorder cuts record-failure runs as failed; the model keeps "a succeeded create replies ok" (no
+  12.7b exception). Also from lane-2: 11.5 independently found and fixed the 12.6b syncfs hole on
+  its base (dropped in the rebase since 12.6b landed first).
+- 12.7b reported (lane-1): ReplyObservable (witness instants over the backing's states, errno
+  classes ok/ENOENT/EEXIST/EAGAIN/EINTR, EINTR/EAGAIN only without a successful syscall: Phase 22's
+  rule, accepted), two known_bugs (reply_after_failed_syscall, reply_unknown_as_negative), trace
+  replies carry errno; no gap in the code; large 10.24M / nolock 8.22M states (nolock to eternal).
+  Under Opus review.
