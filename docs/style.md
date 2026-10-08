@@ -416,6 +416,41 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
   the commit's).
 - `/* */` only for argument names (`/*is_dir=*/false`) and in `tools/*.c`.
 
+### 1.10 One abstraction over variants; branching is discouraged
+
+- **One abstraction over variants, not an `if` at every use.** When a value
+  can come from two sources or a behavior has two forms (a filesystem's UUID
+  or the mount-point-plus-fsid fallback; relatime or noatime; a kernel
+  capability present or absent), build one object once from whichever
+  applies and give the rest of the code a single interface; never branch on
+  the variant at each use site. In the tree: `Context::atime` is an
+  `AtimePolicy` chosen once from the mount options (`context.h`), and the
+  read path asks the policy, it does not re-read the options; the Phase 14
+  source identity will be one object built at start-up from the UUID or the
+  fallback.
+- **Branching is discouraged, not forbidden**: sometimes a branch is
+  necessary. Every branch is another path to understand and to test
+  separately, so look for the shape that needs none before writing one:
+  - **Inject dependencies and use small fakes** instead of test-only
+    conditionals: never `if (!in_test) talk_to_db()`. Production has zero
+    test-only branches (`AGENTS.md`: fakes, not mocks; no code path exists
+    only so a test can run outside the guest; the tests section, "Fakes, not
+    mocks" and the 25.4 rules). `Context::clock` is an `absl::Clock *`: the
+    real clock in production, a fake in a test, and no code asks which.
+  - **Use the numeric or structural properties of values** so the absent or
+    "off" case needs no test: `int num_foos = 0` rather than
+    `optional<int>` when zero is the right absent value (it is not always:
+    say so when zero means something else); `options.quota = INT_MAX` to turn
+    a quota off with no `if` anywhere; an empty set that every loop handles
+    for free; a no-op implementation of an interface instead of a null
+    check: `Context::events` is `&NoProtocolEvents()` (every method does
+    nothing) in production, so no call site tests it for null.
+  - **A table over an if-chain** where a table fits (the `SWAPS` and
+    `REPLACEMENTS` dictionaries of `tools/mutation/operators.py`), and one
+    object built once over variants (the first rule).
+- `Status` returns with `ABSL_RETURN_IF_ERROR` are the normal shape of error
+  handling and are not what this rule is about (section 1.6).
+
 ## 2. Tests
 
 - **Test first.** Write the test, run it on the unchanged code, quote the
