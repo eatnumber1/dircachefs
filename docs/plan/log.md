@@ -1624,3 +1624,21 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   refused-DELETE check, exact attribute matches, ext4 medium). FINDING (design): a held mutation
   blocks the whole daemon, cached reads included; documented as a limitation; the argument for
   serving threads/coroutines (Phase 22's checkpoints cannot interrupt a syscall). Lane-5 held.
+- 7.1b merged (508ad34, 15 commits) after two Opus reviews: @dcfs_llvm = LLVM release + Debian
+  bookworm sysroot (libc6 2.36, linux-libc-dev 6.12) + runtime libs; extract.py (hermetic Python,
+  skip list, `filter="data"`, relative symlinks for the debs, dangling-link and hard-link checks,
+  extract_test); rctx.watch on the script/python/patchelf; patchelf realpath fix; clang.cfg/clang++.cfg
+  with the link flags, delivered to sandboxed actions via extra_compiler_files/extra_linker_files;
+  toolchain_hermetic_test + self-check with four bad probes; mkinitramfs ELF-magic/readelf checks;
+  glibc 2.36-9+deb12u14 in the shipped SBOM with a separate osv step, `continue-on-error` until russ
+  picks the policy (Needs russ, see above); reproducibility wording names the host glibc. Fast 188 +
+  2, presubmit 262 + 2, ubsan build, asan small 34 + 1, blocked-host-paths build 605 s.
+- CI on fee154d (russ's push): subjects/fast/osv/reproducible green; coverage FAIL = the ratchet
+  asking for the baseline to rise to 95.82/78.51; presubmit FAIL = lifetime_test and
+  lifetime_recovery_test racing on a shared /tmp/TLC.tla (the plain TLC runner sets no
+  java.io.tmpdir; trace_validate.sh does); mutation-changed FAIL = mutate.py's clang invocation
+  lacks libfuse's generated libfuse_config.h include path. All three to lane-4 (step-ci-green).
+  The sharded full/asan/ubsan jobs were skipped, so the shard measurement is still pending.
+- Lane-6 freed: 11.3 gap check (new implementer). Logging plan proposed to russ (absl semantics,
+  no threshold override, ERROR visible by default, INFO lifecycle narrative, v=1 backing-reaching
+  requests, v=2 every request, v=3 SQL); step to be recorded on his word.
