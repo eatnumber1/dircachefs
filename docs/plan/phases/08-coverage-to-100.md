@@ -124,6 +124,10 @@ are re-derived with `mutate.py generate`.
 
 ## 8.2e Survivors from the first expanded sweep (26.5d, 2026-10-08)
 
+**Provisional:** the 26.5d review found the per-function sampler biased
+toward the alphabetically first operators, so this list is from a biased
+sample; the sweep is being rerun after the fix and the list replaced.
+
 A 12% sample (40 of 340 mutants, seed 1, 5 per operator) over
 `dir_cache_fs.cc`, `backing.cc` and `metadata_cache.cc`: 24 killed, 14
 survived, 2 invalid, 18 mutants/hour at host load 16. Each survivor gets
