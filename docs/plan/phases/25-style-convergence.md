@@ -62,3 +62,43 @@ its own test-first step.
 
 Done when: Appendix A of `docs/style.md` lists only the Phase 7 items,
 and the guide's "Derived from the tree at" line is updated.
+
+## 25.3 Logging levels and error messages (russ, 2026-10-08)
+
+Make `--stderrthreshold`, `--minloglevel` and `--v` useful, with Abseil's
+own semantics and nothing on top (`absl/log/log.h`; `LOG_EVERY_N`,
+`LOG_EVERY_N_SEC`, `LOG_FIRST_N` where the agent judges a site needs
+rate limiting; no blanket rule; no `--log_dir`).
+- Default stderr threshold WARNING (russ: errors and warnings visible by
+  default); `--stderrthreshold=0` adds INFO; `--minloglevel`, `--v=N`,
+  `--vmodule` documented in README "Flags" and the man page.
+- FATAL: dcfs cannot continue safely (invariant violation in the checking
+  build; a cache whose schema or identity cannot be reconciled).
+- ERROR: the caller got an error dcfs produced rather than forwarded from
+  the backing, or dcfs refused to do its job (startup refusals, failed
+  reply or close, cache-disk I/O error as EIO, a backing change that
+  could not be recorded, a failed recovery probe).
+- WARNING: nothing failed for the caller but state is degraded or
+  surprising (out-of-band change, unclean shutdown recovered, loose cache
+  mode, missing kernel capability with a fallback).
+- INFO: the lifecycle narrative (start with source/cache/mount/options,
+  recovery summary with counts, each sync point with rows cleared and
+  duration, shutdown clean/unclean with reason, first backing access
+  after an idle period).
+- `--v=1`: one line per request that reached the backing and why;
+  `--v=2`: every request with its reply; `--v=3`: SQL statements and step
+  counts (today's VLOG(2) SQL moves here).
+- Style rules (docs/style.md 1.6/1.7): **return a failed Status or log,
+  never both** (the caller or its caller logs, with more context;
+  logging too duplicates lines with less context); the Status
+  error-message rules from russ's "Style Guidelines for Accumulating
+  absl::Status Error Messages" (first error carries what was operated
+  on, not why; passing through adds what the callee was asked to do, not
+  what the enclosing function does; no terminal punctuation; capitalise
+  the first error, not added context; not every level adds context),
+  rewritten for this codebase's `StatusBuilder` helpers and `ErrnoToStatus`.
+- Delivery: style.md 1.6/1.7 and a design.md "Logging" subsection first;
+  then reclassify every existing site (about 63) and every "log and
+  return" pair, add the INFO lifecycle lines, document the flags; tests
+  assert a line's level where behaviour depends on it.
+

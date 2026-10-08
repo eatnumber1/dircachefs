@@ -1642,3 +1642,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Lane-6 freed: 11.3 gap check (new implementer). Logging plan proposed to russ (absl semantics,
   no threshold override, ERROR visible by default, INFO lifecycle narrative, v=1 backing-reaching
   requests, v=2 every request, v=3 SQL); step to be recorded on his word.
+- 25.3 logging (russ, 2026-10-08): plan approved with changes: WARNING visible by default too; no
+  blanket rate-limiting rule (absl's LOG_EVERY_N/LOG_EVERY_N_SEC at the agent's judgement); no
+  --log_dir; new style rule "return a failed Status or log, never both"; include russ's Status
+  error-message guidelines (~/Style Guidelines for Accumulating absl__Status Error Messages.md),
+  rewritten for our helpers. Dispatched to lane-5 (new implementer).
