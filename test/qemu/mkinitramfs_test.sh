@@ -34,7 +34,7 @@ fail() {
 
 # A PATH with the tools mkinitramfs.sh uses, and no cpio.
 mkdir "$WORK/tools"
-for t in mktemp rm mkdir cp ln chmod find gzip dirname basename cat sed; do
+for t in mktemp rm mkdir cp ln chmod find gzip dirname basename cat sed dd grep; do
 	p=$(command -v "$t") || fail "host has no $t"
 	ln -s "$p" "$WORK/tools/$t"
 done
@@ -118,4 +118,34 @@ cmp "$WORK/dyn/lib/x86_64-linux-gnu/libc.so.6" "$DCFS_SYSROOT/lib/x86_64-linux-g
 cmp "$WORK/dyn/lib64/ld-linux-x86-64.so.2" "$DCFS_SYSROOT/lib64/ld-linux-x86-64.so.2" ||
 	fail "the archive's interpreter is not the sysroot's"
 echo "PASS: a dynamic binary's libc and interpreter are the sysroot's"
+
+# --- a failing readelf is an error, not a static binary -----------------------
+printf '#!/bin/sh\necho "fake readelf: boom" >&2\nexit 3\n' >"$WORK/bad-readelf"
+chmod +x "$WORK/bad-readelf"
+rm -f "$WORK/bre.cpio.gz"
+rc=0
+(cd "$WORK" && cp "$BUSYBOX" busybox && DCFS_READELF="$WORK/bad-readelf" \
+	PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit bre.cpio.gz ./busybox \
+	"$WORK/init" "$DYNAMIC" - "") >"$WORK/bre.out" 2>&1 || rc=$?
+[ "$rc" -ne 0 ] || fail "a failing readelf passed: $(cat "$WORK/bre.out")"
+grep -q "readelf" "$WORK/bre.out" || fail "the failure does not name readelf: $(cat "$WORK/bre.out")"
+[ ! -s "$WORK/bre.cpio.gz" ] || fail "an initramfs was left behind after readelf failed"
+echo "PASS: a failing readelf fails the script"
+
+# --- a library missing from the sysroot is an error ---------------------------
+mkdir -p "$WORK/thin/lib/x86_64-linux-gnu" "$WORK/thin/lib64"
+ln -s "$DCFS_SYSROOT/lib/x86_64-linux-gnu/libc.so.6" "$WORK/thin/lib/x86_64-linux-gnu/"
+ln -s "$DCFS_SYSROOT/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2" \
+	"$WORK/thin/lib/x86_64-linux-gnu/"
+ln -s ../lib/x86_64-linux-gnu/ld-linux-x86-64.so.2 "$WORK/thin/lib64/"
+rm -f "$WORK/thin.cpio.gz"
+rc=0
+(cd "$WORK" && cp "$BUSYBOX" busybox && DCFS_SYSROOT="$WORK/thin" \
+	PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit thin.cpio.gz ./busybox \
+	"$WORK/init" "$DYNAMIC" - "") >"$WORK/thin.out" 2>&1 || rc=$?
+[ "$rc" -ne 0 ] || fail "a missing library passed: $(cat "$WORK/thin.out")"
+grep -q "needs libm.so.6, not in the sysroot" "$WORK/thin.out" ||
+	fail "the failure does not say what is missing: $(cat "$WORK/thin.out")"
+[ ! -s "$WORK/thin.cpio.gz" ] || fail "an initramfs was left behind after a library was missing"
+echo "PASS: a library missing from the sysroot fails the script"
 echo "PASS: all checks passed"

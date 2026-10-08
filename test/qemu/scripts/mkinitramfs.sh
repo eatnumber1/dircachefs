@@ -54,12 +54,22 @@ case "$DCFS_READELF" in
 *) DCFS_READELF="$(pwd)/$DCFS_READELF" ;;
 esac
 
-# Prints the DT_NEEDED sonames of the ELF file $1 (nothing for a static or
-# non-ELF file) and, after them, its interpreter prefixed with "interp:".
+# True for an ELF file (a script or data file has no libraries to copy).
+is_elf() {
+	[ "$(dd if="$1" bs=4 count=1 2>/dev/null | cat -v)" = "^?ELF" ]
+}
+
+# Prints the DT_NEEDED sonames of the ELF file $1 (nothing for a static
+# binary) and, after them, its interpreter prefixed with "interp:". A readelf
+# that fails is an error, not a binary without libraries.
 elf_needs() {
-	"$DCFS_READELF" --elf-output-style=GNU --dynamic "$1" 2>/dev/null |
-		sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p'
-	"$DCFS_READELF" --elf-output-style=GNU --program-headers "$1" 2>/dev/null |
+	is_elf "$1" || return 0
+	dynamic=$("$DCFS_READELF" --elf-output-style=GNU --dynamic "$1") ||
+		{ echo "mkinitramfs.sh: readelf failed on $1" >&2; exit 1; }
+	headers=$("$DCFS_READELF" --elf-output-style=GNU --program-headers "$1") ||
+		{ echo "mkinitramfs.sh: readelf failed on $1" >&2; exit 1; }
+	echo "$dynamic" | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p'
+	echo "$headers" |
 		sed -n 's/.*Requesting program interpreter: \(.*\)\]/interp:\1/p'
 }
 
@@ -75,7 +85,7 @@ install_from_sysroot() {
 # Copies the interpreter and the shared libraries of $1 (a binary already
 # installed in $ROOT), and of those libraries in turn, from the sysroot.
 copy_deps() {
-	pending=$(elf_needs "$1")
+	pending=$(elf_needs "$1") || exit 1
 	seen=""
 	while [ -n "$pending" ]; do
 		item=$(echo "$pending" | sed -n 1p)
@@ -93,8 +103,9 @@ copy_deps() {
 			for dir in /lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu; do
 				if [ -f "$DCFS_SYSROOT$dir/$item" ]; then
 					install_from_sysroot "$dir/$item"
+					deps=$(elf_needs "$DCFS_SYSROOT$dir/$item") || exit 1
 					pending="$pending
-$(elf_needs "$DCFS_SYSROOT$dir/$item" | sed '/^interp:/d')"
+$(echo "$deps" | sed '/^interp:/d')"
 					continue 2
 				fi
 			done
