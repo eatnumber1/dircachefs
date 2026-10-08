@@ -355,8 +355,9 @@ contents cache) and without a disk cache, and fails unless the outputs are
 byte-identical (it prints the strings that differ). CI runs it as the
 `reproducible` job. The binaries link a pinned glibc and Linux headers (the
 Debian sysroot of `@dcfs_llvm`, step 7.1b) and the compiler runs on pinned
-libraries, so nothing the host's packages provide reaches the outputs and the
-comparison should hold across hosts as well (only one host has been measured).
+libraries; the host's glibc, which runs clang and lld, is what is left of the
+host, so the comparison should hold across hosts as well (only one host has
+been measured).
 They are identical with nothing special: the
 toolchain redacts `__DATE__`/`__TIME__`, compiles with paths relative to the
 execroot, and the man page carries no date.
@@ -517,10 +518,13 @@ linked repository has no entry in `tools/sbom/pins.json` or a test-only one
 is linked): abseil-cpp, gloop (a dependency of abseil-cpp), SQLite, libfuse,
 liburing and numactl (libfuse's), each pinned with the upstream git commit of
 its release tag (`sbom.py verify-commits`, run by the job, checks the tag
-still points at that commit). The binaries also contain the pinned toolchain's static C++ runtime
-(libc++, libc++abi, libunwind, compiler-rt's builtins from llvm-project
-22.1.8), listed under `toolchain_runtime` in `pins.json`. The job fails on any finding that `osv-scanner.toml` does
-not ignore; an ignore needs a reason and an expiry date, and an expired or
+still points at that commit). The binaries also contain the pinned
+toolchain's static C++ runtime (libc++, libc++abi, libunwind, compiler-rt's
+builtins from llvm-project 22.1.8), listed under `toolchain_runtime` in
+`pins.json`, and glibc, linked statically from the toolchain's Debian sysroot
+(`libc6-dev`, under `shipped_debs`): OSV matches it by Debian package, so the
+job scans `shipped-debs.cdx.json` as a second gating step. The job fails on
+any finding that `osv-scanner.toml` does not ignore; an ignore needs a reason and an expiry date, and an expired or
 unexplained ignore fails the job. A self-check step scans a deliberately old
 libfuse (3.2.0, CVE-2018-10906; `tools/sbom/testdata/`) with the very same
 invocation and fails the job if the scanner reports nothing.
@@ -554,6 +558,7 @@ libfuse 3.18.2, the pinned one, is not. What OSV holds per project:
 | gloop 20260708.rc1 | git commit | none (the repository is new; the scan matches when an advisory appears) |
 | liburing 2.14 | git commit | none for `axboe/liburing` |
 | numactl 2.0.19 | git commit | none for `numactl/numactl` |
+| glibc 2.36-9+deb12u14 (static, from the sysroot) | Debian package `glibc`, release bookworm | the Debian tracker's advisories, fixed ones by the `+deb12uN` revision |
 
 Not covered, by construction: a vulnerability OSV does not hold with a `GIT`
 range (the scan reports what OSV holds; nothing is checked against NVD or

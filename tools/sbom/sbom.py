@@ -1,8 +1,10 @@
 """SBOMs and OSV ignore checks for dcfs (plan step 5.3).
 
 OSV-Scanner does not read MODULE.bazel.lock, so the pins are written out as
-two CycloneDX SBOMs: shipped.cdx.json (what the dcfs binaries link; gates the
-`osv` CI job) and testonly.cdx.json (everything else; informational).
+CycloneDX SBOMs: shipped.cdx.json (what the dcfs binaries link; gates the
+`osv` CI job), shipped-debs.cdx.json (the Debian packages in it, which OSV
+matches by package, not by commit) and testonly.cdx.json (everything else;
+informational).
 
 The shipped set is the external repositories of the Bazel dependency graph
 of //dcfs:main and //dcfs:main_static (//dcfs:linked_deps); each is a Bazel
@@ -303,6 +305,8 @@ def write_git_roots(sbom, out_dir):
     roots = []
     for c in sbom["components"]:
         props = {p["name"]: p["value"] for p in c.get("properties", [])}
+        if props.get("dcfs:purl-type") == "deb":
+            continue  # scanned from the SBOM itself (shipped-debs.cdx.json)
         commit = props.get("dcfs:commit")
         if not commit or not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise SbomError(f"{c['name']}: no dcfs:commit to write a git root for")
@@ -344,6 +348,31 @@ def verify_commits(shipped_pins, ls_remote=_git_ls_remote):
         elif got != pin["commit"]:
             problems.append(f"{module}: tag {tag} moved: upstream {got}, pins.json {pin['commit']}")
     return problems
+
+
+def deb_component(binary, source, full, source_version, distro,
+                  scope="testonly"):
+    """The SBOM entry of a Debian package. OSV's Debian advisories are per
+    source package, so the entry is the source package and its version (the
+    tsv column already carries the source's own epoch, or the binary's when
+    Source: names none)."""
+    sv = source_version
+    props = [
+        {"name": "dcfs:pin", "value": f"deb:{binary}"},
+        {"name": "dcfs:kind", "value": "code"},
+        {"name": "dcfs:osv-matchable", "value": "true"},
+        {"name": "dcfs:purl-type", "value": "deb"},
+    ]
+    if scope == "shipped":
+        props.append({"name": "dcfs:scope", "value": "shipped"})
+    return {
+        "type": "library",
+        "name": source,
+        "version": sv,
+        "purl": (f"pkg:deb/debian/{source}@{sv.replace(chr(58), '%3A')}"
+                 f"?distro={distro}"),
+        "properties": props,
+    }
 
 
 def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
@@ -415,26 +444,22 @@ def build(module_text, lock_text, graph_text, debs_lock, sources_tsv,
     add("bazelisk", parse_bazelisk(prepare_sh), pins["script"]["bazelisk"]["purl"],
         "script:bazelisk", "tool", False)
 
-    for binary, source, full, source_version, distro in (
-            parse_debs(debs_lock, sources_tsv) +
-            parse_debs(parse_toolchain_debs(module_text), sources_tsv)):
-        # OSV's Debian advisories are per source package, so the entry is
-        # the source package and its version (the tsv column already carries
-        # the source's own epoch, or the binary's when Source: names none).
-        sv = source_version
-        comps.append({
-            "type": "library",
-            "name": source,
-            "version": sv,
-            "purl": (f"pkg:deb/debian/{source}@{sv.replace(chr(58), '%3A')}"
-                     f"?distro={distro}"),
-            "properties": [
-                {"name": "dcfs:pin", "value": f"deb:{binary}"},
-                {"name": "dcfs:kind", "value": "code"},
-                {"name": "dcfs:osv-matchable", "value": "true"},
-                {"name": "dcfs:purl-type", "value": "deb"},
-            ],
-        })
+    toolchain_debs = parse_debs(parse_toolchain_debs(module_text), sources_tsv)
+    # The Debian packages whose files are linked into the binaries (glibc's
+    # libc.a, in libc6-dev, is in main_static) are shipped; the rest of the
+    # toolchain's packages, and the NFS rootfs, are test-only.
+    shipped_debs = pins.get("shipped_debs", {})
+    for binary in sorted(shipped_debs):
+        if not any(d[0] == binary for d in toolchain_debs):
+            raise SbomError(
+                f"pins.json lists {binary} as a shipped Debian package but"
+                " the llvm_distribution call in MODULE.bazel has none")
+    for deb in toolchain_debs:
+        if deb[0] in shipped_debs:
+            shipped.append(deb_component(*deb, scope="shipped"))
+    for deb in parse_debs(debs_lock, sources_tsv) + [
+            d for d in toolchain_debs if d[0] not in shipped_debs]:
+        comps.append(deb_component(*deb))
 
     comps += alpine_components(parse_alpine_repos(module_text), alpine or {})
 
@@ -497,7 +522,7 @@ def check_ignores(toml_text, today):
 def main(argv):
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    g = sub.add_parser("generate", help="write shipped.cdx.json and testonly.cdx.json")
+    g = sub.add_parser("generate", help="write shipped.cdx.json, shipped-debs.cdx.json and testonly.cdx.json")
     g.add_argument("--module", default="MODULE.bazel")
     g.add_argument("--lock", default="MODULE.bazel.lock")
     g.add_argument("--graph", default=None,
@@ -537,7 +562,10 @@ def main(argv):
                          read(a.debian_sources), read(a.prepare_sh),
                          json.loads(read(a.pins)), alpine=alpine)
             os.makedirs(a.out_dir, exist_ok=True)
-            for kind in ("shipped", "testonly"):
+            docs["shipped-debs"] = _doc("dcfs-shipped-debs", [
+                c for c in docs["shipped"]["components"]
+                if c["purl"].startswith("pkg:deb/")])
+            for kind in ("shipped", "testonly", "shipped-debs"):
                 path = os.path.join(a.out_dir, kind + ".cdx.json")
                 with open(path, "w", encoding="utf-8") as f:
                     json.dump(docs[kind], f, indent=2, sort_keys=True)

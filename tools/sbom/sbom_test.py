@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import unittest
 
 import sbom
@@ -232,7 +233,8 @@ class Shipped(unittest.TestCase):
 
     def test_shipped_sbom_has_every_shipped_repo_and_nothing_else(self):
         docs = build()
-        names = {c["name"] for c in docs["shipped"]["components"]}
+        names = {c["name"] for c in docs["shipped"]["components"]
+                 if not c["purl"].startswith("pkg:deb/")}
         expected = {r.rstrip("+") for r in sbom.graph_repos(read("graph"))
                     if r not in self.pins()["build_only"]}
         self.assertEqual({self.pins()["shipped"][m].get("name", m)
@@ -268,11 +270,48 @@ class Shipped(unittest.TestCase):
                   "+alpine_package+alpine_dmsetup",
                   "+alpine_package+alpine_strace"):
             self.assertNotIn(r, graph)
+        shipped_debs = set(json.loads(read("pins"))["shipped_debs"])
         for c in docs["shipped"]["components"]:
-            self.assertNotIn("deb:", "".join(
-                p["value"] for p in c["properties"] if p["name"] == "dcfs:pin"))
+            pins = [p["value"] for p in c["properties"]
+                    if p["name"] == "dcfs:pin"]
+            for pin in pins:
+                if pin.startswith("deb:"):
+                    self.assertIn(pin[4:], shipped_debs)
             self.assertIn(("dcfs:scope", "shipped"),
                           {(p["name"], p["value"]) for p in c["properties"]})
+
+    def test_the_sysroots_glibc_is_shipped(self):
+        # main_static links glibc statically (libc.a of libc6-dev).
+        docs = build()
+        glibc = [c for c in docs["shipped"]["components"]
+                 if c["name"] == "glibc"]
+        self.assertEqual(1, len(glibc))
+        self.assertRegex(glibc[0]["purl"],
+                         r"^pkg:deb/debian/glibc@2\.36-9\+deb12u\d+"
+                         r"\?distro=bookworm$")
+        self.assertIn(("dcfs:scope", "shipped"),
+                      {(p["name"], p["value"]) for p in glibc[0]["properties"]})
+        # The test-only document keeps the rest of the toolchain's packages
+        # and the rootfs's own glibc (libc6), but not the shipped pin.
+        self.assertNotIn("deb:libc6-dev",
+                         sbom.pins_covered(docs["testonly"]))
+        self.assertIn("deb:libc6", sbom.pins_covered(docs["testonly"]))
+        self.assertTrue(any(c["name"] == "icu"
+                            for c in docs["testonly"]["components"]))
+
+    def test_a_shipped_deb_the_module_does_not_have_fails(self):
+        pins = self.pins()
+        pins["shipped_debs"] = {"libnotthere-dev": "x"}
+        with self.assertRaisesRegex(sbom.SbomError, "libnotthere-dev"):
+            build(pins=pins)
+
+    def test_a_deb_is_not_given_a_git_root(self):
+        docs = build()
+        with tempfile.TemporaryDirectory() as out:
+            roots = sbom.write_git_roots(docs["shipped"], out)
+        self.assertEqual(len(roots), len(
+            [c for c in docs["shipped"]["components"]
+             if not c["purl"].startswith("pkg:deb/")]))
 
     def test_without_a_graph_every_shipped_pin_is_used(self):
         docs = sbom.build(read("module"), read("lock"), None, read("debs"),
@@ -293,6 +332,8 @@ class Shipped(unittest.TestCase):
 
     def test_shipped_entries_have_a_commit_and_a_github_purl(self):
         for c in build()["shipped"]["components"]:
+            if c["purl"].startswith("pkg:deb/"):
+                continue  # matched by package: test_the_sysroots_glibc_is_shipped
             props = {p["name"]: p["value"] for p in c["properties"]}
             self.assertRegex(props["dcfs:commit"], r"^[0-9a-f]{40}$")
             self.assertRegex(c["purl"], r"^pkg:github/[^/@]+/[^/@]+@" + props["dcfs:commit"] + "$")
@@ -335,12 +376,13 @@ class GitRoots(unittest.TestCase):
     """osv-scanner matches commits only through a git root (README.md)."""
 
     def test_writes_one_detached_git_root_per_component(self):
-        import tempfile
         doc = build()["shipped"]
         with tempfile.TemporaryDirectory() as out:
             roots = sbom.write_git_roots(doc, out)
-            self.assertEqual(len(roots), len(doc["components"]))
-            for c in doc["components"]:
+            commits = [c for c in doc["components"]
+                       if not c["purl"].startswith("pkg:deb/")]
+            self.assertEqual(len(roots), len(commits))
+            for c in commits:
                 commit = [p["value"] for p in c["properties"]
                           if p["name"] == "dcfs:commit"][0]
                 git = os.path.join(out, c["name"], ".git")
@@ -351,7 +393,6 @@ class GitRoots(unittest.TestCase):
                               open(os.path.join(git, "config")).read())
 
     def test_a_component_without_a_commit_fails(self):
-        import tempfile
         doc = {"components": [{"name": "x", "properties": []}]}
         with tempfile.TemporaryDirectory() as out:
             with self.assertRaisesRegex(sbom.SbomError, "x"):

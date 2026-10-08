@@ -619,6 +619,17 @@ jobs:
             --no-ignore
             -r
             osv/shipped-git
+      - name: Scan the shipped Debian packages (gates)
+        # glibc, linked statically from the toolchain's sysroot: OSV matches
+        # Debian packages by name and version, not by commit.
+        uses: google/osv-scanner-action/osv-scanner-action@a345acffa64b0eaede81a3d9aae6141214d9c8fc # v2.6.0
+        with:
+          scan-args: |-
+            scan
+            source
+            --config=osv-scanner.toml
+            -L
+            osv/shipped-debs.cdx.json
       - name: Scan the test-only dependencies (informational, never fails)
         id: testonly
         continue-on-error: true
