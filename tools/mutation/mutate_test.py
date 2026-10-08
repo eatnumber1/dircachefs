@@ -55,9 +55,9 @@ class ScopeTest(unittest.TestCase):
     def test_one_token_diff(self):
         self.assertEqual(operators.token_diff("a < b", "a <= b"),
                          ("<", "<="))
-        self.assertEqual(operators.token_diff("x", "!(x)"), ("x", "! ( x )"))
+        self.assertEqual(operators.token_diff("x", "!(x)"), ("x", "!(x)"))
         self.assertEqual(operators.token_diff("m.End()", "(void)0"),
-                         ("m . End ( )", "( void ) 0"))
+                         ("m.End()", "(void)0"))
 
 
 class SamplingTest(unittest.TestCase):

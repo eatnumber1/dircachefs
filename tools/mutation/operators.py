@@ -421,5 +421,15 @@ def token_diff(before, after):
     while (j < min(len(a), len(b)) - i
            and a[len(a) - 1 - j] == b[len(b) - 1 - j]):
         j += 1
-    cut = lambda t: " ".join(t[i:len(t) - j])
-    return cut(a), cut(b)
+    return _join(a[i:len(a) - j]), _join(b[i:len(b) - j])
+
+
+def _join(tokens):
+    """Tokens as text: a space only between two words."""
+    out = ""
+    for t in tokens:
+        if out and (out[-1].isalnum() or out[-1] == "_") and (
+                t[0].isalnum() or t[0] == "_"):
+            out += " "
+        out += t
+    return out
