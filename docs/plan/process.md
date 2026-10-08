@@ -115,6 +115,11 @@ process (its waves and file ownership table) is in `history.md`.
 - From Phase 6: `--config=fast` while developing, `--config=presubmit`
   before review, everything (CI) before a phase is marked done.
 - From Phase 5, CI must be green on the merged commit.
+- Coverage baseline (russ, 2026-10-08): the gate fails on drops only; a
+  rise prints the suggested bump. The orchestrator bumps
+  `dcfs/coverage_baseline.txt` to the last CI run's reported value as part
+  of declaring the next push point, so the floor stays within one push
+  cycle of reality without red runs.
 - Push points (russ, 2026-10-08): while development is fast, a push point
   needs every merged branch green on its tiers and nothing more; CI catches
   the sanitizer-only, coverage and large-tier failures. After launch, when

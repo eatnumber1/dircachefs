@@ -1897,3 +1897,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   names_random_test(_ext4) under the coverage config end with ALL-TESTS-PASSED but no MEM line
   (init's coverage path reboots before the memory sampler). Decision: the gate fails on drops only
   and prints the suggested bump on a rise (8.1b); both to lane-3's queue after the 25.5 docs.
+- russ, 2026-10-08: failing on a coverage rise is not worth it; drops fail, rises are noted, the orchestrator bumps the baseline at push points (process.md).
