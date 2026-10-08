@@ -15,7 +15,7 @@ kernel, exactly as qemu_test/qemu_cc_test run them
 load("@rules_java//java/common:java_common.bzl", "java_common")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load("//test/qemu:qemu_cc_test.bzl", "UNIT_ASAN_MEM", "UNIT_MEM")
-load("//test/qemu:qemu_test.bzl", "E2E_ASAN_MEM", "E2E_MEM", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
+load("//test/qemu:qemu_test.bzl", "E2E_ASAN_MEM", "E2E_CPUS", "E2E_MEM", "QEMU_OVERHEAD_MB", "mem_args_for", "resolve_mem")
 load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 
 def _tla_trace_test_impl(ctx):
@@ -29,6 +29,7 @@ def _tla_trace_test_impl(ctx):
     if ctx.attr.unit:
         qemu_args.append("--unit")
     qemu_args += ctx.attr.mem_args
+    qemu_args += ["--cpus", str(ctx.attr.cpus)]
     qemu_args += [
         "--mke2fs",
         sp(ctx.file._mke2fs),
@@ -150,6 +151,10 @@ _tla_trace_test = rule(
             doc = "run-qemu.sh's --mem flag; set by tla_trace_test from " +
                   "its mem/asan_mem (a select() on the sanitizer builds).",
         ),
+        "cpus": attr.int(
+            default = 1,
+            doc = "The guest's vCPUs (run-qemu.sh --cpus; step 26.14).",
+        ),
         "guest_script": attr.string(
             doc = "For an e2e initramfs: the guest/*.sh script to run.",
         ),
@@ -248,13 +253,14 @@ _tla_trace_test = rule(
     },
 )
 
-def tla_trace_test(name, tags = [], disks = [], modules = [], mem = None, asan_mem = None, **kwargs):
+def tla_trace_test(name, tags = [], disks = [], modules = [], mem = None, asan_mem = None, cpus = E2E_CPUS, **kwargs):
     """Declares a trace validation test (see _tla_trace_test's attributes).
 
     It boots a QEMU guest, so it carries qemu_test's tags (KVM, no sandbox,
     the guest's resources) on top of `tags`, and takes the same guest memory
     allowances (test/qemu/qemu_test.bzl; the unit or e2e defaults). `modules`
-    are the kernel modules beyond the defaults (qemu_test's).
+    are the kernel modules beyond the defaults (qemu_test's); `cpus` the
+    guest's vCPUs (step 26.14: qemu_test's, one unless concurrency is the point).
     """
     unit = kwargs.get("unit", False)
     mem, asan_mem = resolve_mem(
@@ -266,12 +272,13 @@ def tla_trace_test(name, tags = [], disks = [], modules = [], mem = None, asan_m
     _tla_trace_test(
         name = name,
         mem_args = mem_args_for(mem, asan_mem),
+        cpus = cpus,
         disks = disks,
         modules = modules_cpio(test_modules(
             [d.split(":") for d in disks],
             modules,
         )),
-        tags = ["e2e", "no-sandbox", "requires-kvm", "cpu:2", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
+        tags = ["e2e", "no-sandbox", "requires-kvm", "cpu:%d" % cpus, "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)] + tags,
         **kwargs
     )
 

@@ -24,6 +24,8 @@
 #       For qemu_test (test/qemu/qemu_test.bzl): boots the guest, which
 #       runs /tests/<dcfs_test-basename> (guest/init's e2e branch) and
 #       prints ALL-TESTS-PASSED or TEST-FAILED. Exit 0 iff the former.
+#       --cpus <n> (step 26.14): the vCPU count; qemu_test passes it, 1
+#       unless the test is a stress or cancellation test.
 #       --expect-kernel-failure <dcfs_test-basename> (step 23.7; e2e only,
 #       and the name must be the test's own): the one guest whose job is to
 #       reproduce a kernel bug (casefold_tune_oops_test). See "A kernel
@@ -113,6 +115,11 @@ ROOTFS=""
 # --test_env=DCFS_MEM=2048`) overrides both, to measure a test's real peak
 # with room to spare or to see how a too-small guest fails.
 MEM_OVERRIDE=""
+# --cpus <n>: the guest's vCPU count (-smp), overriding the default below (1
+# for --unit, 2 for an e2e test). qemu_test and tla_trace_test always pass it:
+# one vCPU unless the test is a stress or cancellation test (step 26.14:
+# test/qemu/qemu_test.bzl `cpus`, README.md "A quiet kernel").
+CPUS_OVERRIDE=""
 # --modules <cpio.gz>: the kernel modules this test declared (step 24.2),
 # appended to the initramfs given below (the kernel unpacks concatenated
 # archives into one).
@@ -218,6 +225,10 @@ while :; do
 		;;
 	--mem)
 		MEM_OVERRIDE=$2
+		shift 2
+		;;
+	--cpus)
+		CPUS_OVERRIDE=$2
 		shift 2
 		;;
 	--modules)
@@ -534,6 +545,7 @@ else
 	MEM="${DCFS_MEM:-${MEM_OVERRIDE:-256}}"
 	SMP=2
 fi
+SMP="${CPUS_OVERRIDE:-$SMP}"
 
 append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init dcfs_accel=$ACCEL"
 if [ "$UNIT" -eq 0 ]; then

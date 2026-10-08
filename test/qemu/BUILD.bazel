@@ -6,7 +6,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load(":guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
-load(":qemu_test.bzl", "qemu_test", "qemu_test_matrix")
+load(":qemu_test.bzl", "CONCURRENT_CPUS", "qemu_test", "qemu_test_matrix")
 
 # Guest memory classes (step 6.2), in MiB; the measurements behind each are in
 # README.md "Guest memory" (a test with neither mem= nor asan_mem= gets
@@ -602,6 +602,7 @@ PJDFSTEST_SHARDS = ["rename", "chown", "rest"]
 
 [qemu_test_matrix(
     name = "pjdfstest_%s_test" % shard,
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/pjdfstest_%s.sh" % shard,
     asan_mem = ASAN_BIG_DCFS_MEM,
@@ -634,6 +635,7 @@ test_suite(
 # held inodes or FORGETs.
 qemu_test_matrix(
     name = "stress_short_test",
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/stress_short.sh",
     asan_mem = ASAN_BIG_DCFS_MEM,
@@ -644,6 +646,7 @@ qemu_test_matrix(
 
 qemu_test_matrix(
     name = "stress_long_test",
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/stress_long.sh",
     asan_mem = ASAN_BIG_DCFS_MEM,
@@ -654,6 +657,7 @@ qemu_test_matrix(
 
 [qemu_test(
     name = "stress_random_test_" + fstype,
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [("vdb", fstype, "512M")],
     guest_script = "guest/stress_random.sh",
     asan_mem = ASAN_BIG_DCFS_MEM,
@@ -835,6 +839,7 @@ qemu_test_matrix(
 # default one inode per 16 KiB.
 qemu_test_matrix(
     name = "bench_smoke_test",
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [
         ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "320M"),
@@ -924,6 +929,7 @@ sh_test(
 # listing is then complete and right.
 qemu_test(
     name = "cancel_test",
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [
         ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "320M"),
@@ -941,6 +947,7 @@ qemu_test(
 # delayed (dm-delay); prints the numbers, passes if every step ran.
 qemu_test(
     name = "cancel_inventory_test",
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [
         ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "320M"),
@@ -954,6 +961,7 @@ qemu_test(
 
 qemu_test(
     name = "bench_full_test",
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [
         ("vdb", "ext4", "4G"),
         ("vdc", "ext4", "320M"),
@@ -974,6 +982,7 @@ qemu_test(
 # by name (large tier: CI only).
 qemu_test(
     name = "bench_readdir_test",
+    cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [
         ("vdb", "ext4", "1G"),
         ("vdc", "ext4", "320M"),

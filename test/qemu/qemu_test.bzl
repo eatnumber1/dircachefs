@@ -33,6 +33,15 @@ load("//test/qemu:modules.bzl", "modules_cpio", "test_modules")
 E2E_MEM = 256
 E2E_ASAN_MEM = 384
 
+# Step 26.14: guest vCPUs. One for every test that does not need more: with one
+# vCPU the kernel's concurrent activity (flusher threads, kswapd, the daemon
+# and the client running at once) cannot land at a different moment in each
+# run. A test whose point is concurrency keeps two: the stress tests
+# (fsstress -p), the cancellation tests (requests in flight while a signal
+# arrives) and the benchmarks (they measure the daemon's threads).
+E2E_CPUS = 1
+CONCURRENT_CPUS = 2
+
 # `size` also sets Bazel's default resource estimate (small assumes about 20
 # MB), which is wrong for a QEMU guest, so each test declares its real needs
 # as tags. Bazel's scheduling resources are a tag, which cannot depend on the build
@@ -84,7 +93,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False, tags = []):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False, tags = [], cpus = E2E_CPUS):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -106,6 +115,10 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             /tests in, and chroots into it to run guest_script with GNU
             userspace and nfs-utils available. See guest/init's
             dcfs_rootfs= branch and third_party/debian/README.md.
+        cpus: the guest's vCPUs (run-qemu.sh --cpus; step 26.14), also the
+            basis of the Bazel `cpu:` tag. Default E2E_CPUS (1); pass
+            CONCURRENT_CPUS for a test whose point is concurrency (stress,
+            cancellation, benchmarks).
         mem: guest RAM in MiB for the plain build (run-qemu.sh's --mem;
             default E2E_MEM), also the basis of the Bazel resource tag.
         asan_mem: guest RAM in MiB for --config=asan/ubsan builds (default:
@@ -204,7 +217,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
 
     mem, asan_mem = resolve_mem(mem, asan_mem, E2E_MEM, E2E_ASAN_MEM)
     mem_args = mem_args_for(mem, asan_mem)
-    resource_tags = ["cpu:2", "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)]
+    resource_tags = ["cpu:%d" % cpus, "resources:memory:%d" % (mem + QEMU_OVERHEAD_MB)]
 
     initramfs = initramfs_for(size, plain_dcfs, checked_dcfs)
     # Under `bazel coverage`, the dcfs that wrote the profiles: the one this
@@ -220,7 +233,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             initramfs,
             guest_script,
         ] + rootfs_data + coverage_data(cov_objects),
-        args = qemu_args + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + rootfs_args + mem_args + sanitizer_args() + kernel_args + [
+        args = qemu_args + ["--cpus", str(cpus)] + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + rootfs_args + mem_args + sanitizer_args() + kernel_args + [
             "$(location " + initramfs + ")",
             guest_script_basename,
         ] + disk_args,
@@ -264,7 +277,8 @@ def qemu_test_matrix(
         plain_dcfs = False,
         power_cut = [],
         cmdline = "",
-        checked_dcfs = False):
+        checked_dcfs = False,
+        cpus = E2E_CPUS):
     """Declares one qemu_test per backing filesystem in `fstypes`.
 
     Args:
@@ -289,6 +303,7 @@ def qemu_test_matrix(
         power_cut: same as qemu_test.
         cmdline: same as qemu_test.
         checked_dcfs: same as qemu_test.
+        cpus: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
@@ -318,6 +333,7 @@ def qemu_test_matrix(
             power_cut = power_cut,
             cmdline = cmdline,
             checked_dcfs = checked_dcfs,
+            cpus = cpus,
         )
     native.alias(
         name = name,

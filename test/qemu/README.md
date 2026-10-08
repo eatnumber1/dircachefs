@@ -105,8 +105,10 @@ direct kernel boot, and no legacy PC devices this guest doesn't need:
 -accel kvm -cpu host        # falls back to -accel tcg -cpu max, with a
                              # warning line in the log, if /dev/kvm isn't
                              # writable
--m <mem> -smp 1              # unit tests (-smp 2 for e2e tests); <mem> is the
-                             # test's allowance, see "Guest memory" below
+-m <mem> -smp 1              # unit tests and most e2e tests (-smp 2 for the stress,
+                             # cancellation, pjdfstest and benchmark tests: "A
+                             # quiet kernel" below); <mem> is the test's
+                             # allowance, see "Guest memory" below
 ```
 
 **`rtc=on`, deliberately not `rtc=off`.** This is the one deviation from
@@ -211,8 +213,8 @@ and `qemu_cc_test` requires an explicit `size` and `timeout` (the macros
 | large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test (large), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes |
 
 `size` also sets Bazel's resource estimate (small assumes about 20 MB), so
-each QEMU test declares its real needs with tags: `cpu:2` (e2e, `-smp 2`) or
-`cpu:1` (unit, `-smp 1`) and `resources:memory:<guest allowance + 100>`
+each QEMU test declares its real needs with tags: `cpu:<vCPUs>` (`-smp`: 1,
+or 2 for the tests that keep two, "A quiet kernel") and `resources:memory:<guest allowance + 100>`
 (see "Guest memory"). Bazel then schedules only as many guests as fit in the
 machine. Timeouts are explicit (`short` unit, `moderate` e2e, `long` nfs,
 `eternal` pjdfstest).
@@ -258,6 +260,43 @@ or "outside any request" for startup and the periodic sync point at a
 request's start. The daemon's own log has the same text after
 `invariant violated:`. A violation is a bug to fix (or a rule of the design
 to correct, with its reason), never a check to loosen.
+
+## A quiet kernel
+
+Step 26.14. Under KVM the guest clock is wall time, so what the kernel does on
+its own (writeback on a timer, reclaim of cached dentries and inodes, work on
+another CPU) happens at a different moment in every run: a test's behavior and
+its coverage should depend on nothing but the test. `guest/init` sets these
+before any test runs (the comments there say the event each removes):
+
+| Setting | Removes | Explicit trigger instead |
+|---|---|---|
+| `vm.dirty_writeback_centisecs=0` | the flusher threads' wakeup every 5 s | `sync`, `fsync`, `testutil syncfs`, dcfs's sync points, `fsfreeze`, unmount |
+| `vm.dirty_expire_centisecs=8640000` (a day) | writeback of dirty data once it is 30 s old | the same |
+| `vm.laptop_mode=0` (already the default) | writeback after reads that spin a disk up | the same |
+| `vm.vfs_cache_pressure=1` | reclaim of cached dentries and inodes at the normal rate (FORGETs nobody asked for) | `drop_caches` (`guest/lib.sh` `drop_caches_quiesced`), which ignores the setting; `require_no_reclaim` asserts nothing else reclaimed |
+| one vCPU (`qemu_test` `cpus`, default 1; `run-qemu.sh --cpus`) | the daemon, the client and the kernel's threads running at once | the test's own concurrency (`&` in a script) is preempted on one CPU instead |
+
+What stays: writeback driven by the amount of dirty memory (the test's own
+write volume against the guest's RAM), the filesystems' own timers (ext4's
+5 s journal commit, xfs's log worker, btrfs's 30 s transaction commit), and
+`kernel.randomize_va_space`, left at 2. dcfs is PIE and nothing it does
+depends on an address, except that Abseil seeds its hash tables with an
+address, so ASLR changes the iteration order of dcfs's `absl::flat_hash_*`
+members (`DirCacheFS::Destroy` reconciles the written files in that order);
+no test asserts that order.
+
+The tests that keep two vCPUs (`CONCURRENT_CPUS` in `qemu_test.bzl`) are those
+whose point is concurrency or its cost: the stress tests (`fsstress -p`),
+`cancel_test` and `cancel_inventory_test` (requests in flight while a signal
+arrives), pjdfstest, and the benchmarks. A new test gets one unless its script
+needs a second CPU to mean anything.
+
+`//test/qemu:quiet_kernel_test` reads the settings back, checks that the
+guest has one vCPU, and that a dirty page stays dirty for 10 s without a
+`sync` (`nr_dirty` in `/proc/vmstat`) and is written by one. The determinism of
+the coverage this buys is measured by `tools/coverage_diff.py` over two
+`bazel coverage` runs of one commit: `docs/plan/notes/coverage-determinism-2026-10-08.md`.
 
 ## Guest timeout
 
