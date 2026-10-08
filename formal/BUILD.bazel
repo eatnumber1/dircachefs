@@ -69,10 +69,10 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
-# Larger bounds (about ten minutes on four cores). Timeout: 9,164,576
-# distinct states since step 12.6b's daemon crash; the CI runner took 634 s
-# for the 7,238,097 before it (about 88 us per state), so about 800 s now,
-# too close to "long"'s 900 s.
+# Larger bounds (about ten minutes on four cores). Timeout: 10,239,570
+# distinct states since step 12.7b's reply ghost (9,164,576 before it); the
+# CI runner took 634 s for 7,238,097 (about 88 us per state), so about
+# 900 s now, past "long"'s 900 s.
 tlc_test(
     name = "large_test",
     size = "large",
