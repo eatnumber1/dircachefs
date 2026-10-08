@@ -94,19 +94,27 @@ fi
 # Created *through* dcfs (mkdir/touch), like create.sh, so the parent's
 # listing is already known-complete afterward and no full backing populate
 # happens during the timed pass below.
+#
+# One testutil call per directory, not one shell fork and one create per
+# file: the loop took about 200 s of a 240 s guest on a loaded host (step
+# 6.2). The names are file-00000-the-quick-brown-fox-jumped and so on.
 mkdir "$MNT/many"
-i=0
-while [ "$i" -lt "$N" ]; do
-	: >"$MNT/many/file-$(printf '%05d' "$i")-the-quick-brown-fox-jumped"
-	i=$((i + 1))
-done
+"$TESTUTIL" mkfiles "$MNT/many" file- -the-quick-brown-fox-jumped "$N"
 # A quarter of it, for the ratio below.
 mkdir "$MNT/quarter"
-i=0
-while [ "$i" -lt "$((N / 4))" ]; do
-	: >"$MNT/quarter/file-$(printf '%05d' "$i")-the-quick-brown-fox-jumped"
-	i=$((i + 1))
-done
+"$TESTUTIL" mkfiles "$MNT/quarter" file- -the-quick-brown-fox-jumped "$((N / 4))"
+# A failed create is reported, not skipped.
+if [ "$("$TESTUTIL" mkfiles "$MNT/no-such-dir" file- .x 1)" = "ERR ENOENT" ]; then
+	pass mkfiles-error
+else
+	fail mkfiles-error "creating in a missing directory did not print ERR ENOENT"
+fi
+longname=$(printf '%05000d' 0)
+if [ "$("$TESTUTIL" mkfiles "$MNT" "$longname" .x 1)" = "ERR ENAMETOOLONG" ]; then
+	pass mkfiles-name-too-long
+else
+	fail mkfiles-name-too-long "a path over PATH_MAX did not print ERR ENAMETOOLONG"
+fi
 
 # --- correctness: full listing matches the backing filesystem exactly ----
 

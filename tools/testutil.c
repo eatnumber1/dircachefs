@@ -208,6 +208,12 @@
  *       returns can be any entry in the directory, actively unsafe --
  *       EINVAL if that entry's record does not fit the request) off a
  *       plain directory.
+ *   testutil mkfiles <dir> <prefix> <suffix> <count>
+ *       creates <count> empty files in <dir>, named <prefix>, a five-digit
+ *       zero-padded index from 00000, then <suffix> (open(2) O_CREAT, mode
+ *       0666 less the umask, like `: >file`). One process instead of a
+ *       shell fork per file: guest/readdir_boundary.sh makes 7,500. Prints
+ *       "ERR <errno name>" and stops at the first failure.
  *   testutil btrfs-subvol-create <path>
  *       BTRFS_IOC_SUBVOL_CREATE: creates a btrfs subvolume at <path> (whose
  *       parent directory must already exist on a btrfs filesystem). Step
@@ -1265,6 +1271,30 @@ static int cmd_readdir_ino(const char *dir, int small_first)
 		want = sizeof(buf);
 	}
 	close(fd);
+	return 0;
+}
+
+static int cmd_mkfiles(const char *dir, const char *prefix, const char *suffix,
+		       const char *count_str)
+{
+	long long count = strtoll(count_str, NULL, 10);
+	char name[PATH_MAX];
+
+	for (long long i = 0; i < count; i++) {
+		int fd;
+
+		if (snprintf(name, sizeof(name), "%s/%s%05lld%s", dir, prefix,
+			     i, suffix) >= (int) sizeof(name)) {
+			print_err(ENAMETOOLONG);
+			return 1;
+		}
+		fd = open(name, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+		if (fd == -1) {
+			print_err(errno);
+			return 1;
+		}
+		close(fd);
+	}
 	return 0;
 }
 
@@ -2515,6 +2545,8 @@ int main(int argc, char *argv[])
 	if (argc == 4 && strcmp(argv[1], "readdir-ino") == 0 &&
 	    strcmp(argv[3], "small-first") == 0)
 		return cmd_readdir_ino(argv[2], 1);
+	if (argc == 6 && strcmp(argv[1], "mkfiles") == 0)
+		return cmd_mkfiles(argv[2], argv[3], argv[4], argv[5]);
 	if (argc == 3 && strcmp(argv[1], "btrfs-subvol-create") == 0)
 		return cmd_btrfs_subvol_create(argv[2]);
 
@@ -2563,6 +2595,7 @@ int main(int argc, char *argv[])
 		"       testutil opath-unlink-stat <path>\n"
 		"       testutil rmcwd <dir>\n"
 		"       testutil readdir-ino <dir> [small-first]\n"
+		"       testutil mkfiles <dir> <prefix> <suffix> <count>\n"
 		"       testutil btrfs-subvol-create <path>\n"
 		"       testutil names-{create,verify,remove,dump,errs,chain-create,chain-check} <root>\n"
 		"       testutil names-handles-{save,open} <root> <file>\n"
