@@ -134,3 +134,24 @@ the mechanical conversion of existing tests is 7.5/7.5b.
   EXPECT across existing tests) stay as the conversion step at a quiet
   point.
 
+## 25.5 Style rules: one abstraction over variants; avoid branching (russ, 2026-10-08)
+
+Docs commit to style.md (code section), then applied as code is touched:
+- **One abstraction over variants, not an `if` at every use.** When a
+  value can come from two sources or a behaviour has two forms (the
+  filesystem UUID or the mount-point+fsid fallback; relatime vs noatime;
+  a kernel capability present or absent), build one object once from
+  whichever applies and give the rest of the code a single interface;
+  never branch on the variant at each use site.
+- **Avoid branching.** Every branch is another code path to understand
+  and to test separately. Prefer straight-line code with injected
+  dependencies and small fakes over conditionals: never `if (!in_test)
+  talk_to_db()`; inject the database and use an in-memory fake in the
+  test, so production has zero test-only branches (this restates
+  AGENTS.md's "fakes, not mocks" and "no code paths exist only so a test
+  can run outside the guest" as the general rule, with the cost stated:
+  each branch is tested on its own, or it is untested). Error handling
+  through `Status` returns and `RETURN_IF_ERROR` counts as the one
+  allowed shape of branch; table-driven code over if-chains where a
+  table fits.
+

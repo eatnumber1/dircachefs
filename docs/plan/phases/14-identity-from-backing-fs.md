@@ -127,6 +127,10 @@ hit when it tried a dcfs-over-dcfs test.
   `statfs` `f_fsid`, recorded in `cache_state` and compared at start as a
   sanity check with a clear error, never as a guarantee (russ, 2026-10-08:
   "use the uuid if it is available").
+  One abstraction over the two (a `SourceIdentity` value built once at
+  start from whichever source is available, compared and printed through
+  one interface); the rest of the code never branches on "UUID or
+  fallback" (russ, 2026-10-08; style rule 25.5).
 - The NFS export side (handle classes, generation, `ident.tla` from 12.5)
   is unchanged by this; it keys on the backing's handles, not the UUID.
 

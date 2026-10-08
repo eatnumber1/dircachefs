@@ -1869,3 +1869,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   sysroot to Debian 13 (7.1c, next free lane; osv shipped-deb scan becomes gating with
   ignore-with-expiry for records no release fixes).
 - russ, 2026-10-08: identity uses the filesystem UUID when available; mount point + f_fsid only as the fallback.
+- russ, 2026-10-08: two style rules (25.5): one abstraction over variants (the identity's UUID /
+  mount+fsid behind one object, never if-branched at use sites); avoid branching, inject
+  dependencies and use fakes instead of test-only conditionals. Docs commit queued on lane-3.
