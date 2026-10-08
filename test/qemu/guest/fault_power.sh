@@ -35,6 +35,18 @@
 # backing filesystem (a name served that the backing filesystem lost) or behind
 # it (a name not served that it kept) fails.
 #
+# Two ways to cut, one script (step 11.2):
+#
+#   dm    (the default, one boot) the cut is both disks dropping writes, as
+#         above, and the five scenarios run one after the other;
+#   kill  (run-qemu.sh --power-cut, dcfs_cut=kill on the kernel command line)
+#         the cut is a real one: the host kills QEMU when the guest prints
+#         DCFS-POWER-CUT-NOW, and a second boot over the same disk images runs
+#         the checks. One scenario per pair of boots (dcfs_scenario=,
+#         dcfs_boot=1|2). A killed QEMU keeps every write the guest completed
+#         and loses its page cache: the state drop-writes models, so the
+#         same checks must pass on both, which validates the model.
+#
 # Run as /tests/fault_power.sh by guest/init when booted with
 # dcfs_test=fault_power.sh.
 FAILED=0
@@ -50,6 +62,14 @@ DB=$CACHE_DIR/dcfs.db
 LOGS=""
 RUN=0
 TOUCH_PID=""
+DAEMON_PID=""
+MOUNTED=0
+
+cmdline() { sed -n "s/.*\b$1=\([^ ]*\).*/\1/p" /proc/cmdline; }
+CUT_MODE=$(cmdline dcfs_cut)
+CUT_MODE=${CUT_MODE:-dm}
+SCENARIO=$(cmdline dcfs_scenario)
+BOOT=$(cmdline dcfs_boot)
 
 cleanup() {
 	rc=$?
@@ -73,11 +93,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "fault_power.sh: kernel $(uname -r)"
+echo "fault_power.sh: kernel $(uname -r), cut $CUT_MODE${SCENARIO:+, scenario $SCENARIO boot $BOOT}"
 require_commands umount sync find stat
-
-DAEMON_PID=""
-MOUNTED=0
 
 # start [flags]: a new run of dcfs, its log kept for the failure dump.
 start() {
@@ -112,10 +129,15 @@ served_equals_backing() {
 }
 
 # after_cut NAME: the daemon is killed, the filesystems remounted from what
-# the disks hold, and a new run started; leaves it running.
+# the disks hold, and a new run started; leaves it running. (In kill mode the
+# second boot has done all but the start.)
 after_cut() {
-	fd_crash
-	fd_restore || fail "$1-restore" "remounting after the cut failed"
+	if [ "$CUT_MODE" = kill ]; then
+		fd_setup || fail "$1-setup" "wrapping or mounting the disks failed"
+	else
+		fd_crash
+		fd_restore || fail "$1-restore" "remounting after the cut failed"
+	fi
 	if start; then
 		pass "$1-restart"
 	else
@@ -130,131 +152,256 @@ wait_touch() {
 	TOUCH_PID=""
 }
 
+# power_cut [thaw-after-cut...]: the power cut. dm: both disks drop writes, then
+# the filesystems named (back, cache) are thawed so the held daemon finishes
+# into the void, and the background request is waited for. kill: the host
+# kills QEMU when it reads the marker; nothing here runs afterwards.
+power_cut() {
+	if [ "$CUT_MODE" = kill ]; then
+		echo "DCFS-POWER-CUT-NOW"
+		sleep 600
+		fail killed "QEMU was not killed at the cut"
+		exit "$FAILED"
+	fi
+	fd_cut || fail cut "fd_cut failed"
+	for fs in "$@"; do fd_thaw "$fs"; done
+	[ -n "$TOUCH_PID" ] && wait_touch
+}
+
+# --- the tree, and the scenarios, as setup (before the cut) and check -------
+
+make_tree() {
+	for d in d1 d2 d3 d4 d5; do
+		mkdir "$SRC/$d"
+		echo keep >"$SRC/$d/keep"
+	done
+	sync
+}
+
+warm() {
+	ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5" >/dev/null
+}
+
+# before: the cut, then the create (in dm mode: the create runs on dropped
+# writes; in kill mode it never runs).
+setup_before() {
+	if [ "$CUT_MODE" != kill ]; then
+		fd_cut || fail before-cut "fd_cut failed"
+		touch "$MNT/d1/before"
+	fi
+}
+cut_before() {
+	[ "$CUT_MODE" = kill ] && power_cut
+}
+check_before() {
+	if [ ! -e "$SRC/d1/before" ]; then
+		pass before-lost
+	else
+		fail before-lost "d1/before survived a cut made before it"
+	fi
+	served_equals_backing before-served
+}
+
+# phase1: held in phase 2, phase 1 durable, then the cut.
+setup_phase1() {
+	fd_freeze back || fail phase1-freeze "FIFREEZE of the backing filesystem failed"
+	touch "$MNT/d2/p1" &
+	TOUCH_PID=$!
+	if fd_blocked "$DAEMON_PID" "$SRC"; then
+		echo "fault_power.sh: held: $(fd_where "$DAEMON_PID")"
+		pass phase1-held
+	else
+		fail phase1-held "the daemon never blocked on the frozen backing filesystem"
+	fi
+}
+cut_phase1() { power_cut back; }
+check_phase1() {
+	if [ ! -e "$SRC/d2/p1" ]; then
+		pass phase1-create-lost
+	else
+		fail phase1-create-lost "d2/p1 survived a cut before its create was durable"
+	fi
+	if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
+		pass phase1-dirty-recovered
+	else
+		fail phase1-dirty-recovered "phase 1 was durable, yet no dirty row was recovered: $(grep -i cleanly "$LOG")"
+	fi
+	served_equals_backing phase1-served
+}
+
+# phase2: the create durable on the backing filesystem, phase 3 not.
+setup_phase2() {
+	ls "$MNT/d3" >/dev/null
+	fd_freeze back || fail phase2-freeze "FIFREEZE of the backing filesystem failed"
+	touch "$MNT/d3/p2" &
+	TOUCH_PID=$!
+	fd_blocked "$DAEMON_PID" "$SRC" || fail phase2-held-1 "the daemon never blocked on the frozen backing filesystem"
+	fd_freeze cache || fail phase2-freeze-cache "FIFREEZE of the cache filesystem failed"
+	fd_thaw back
+	sleep 1
+	# The create ran (phase 2) and the daemon is held before phase 3.
+	if [ -e "$SRC/d3/p2" ] && kill -0 "$TOUCH_PID" 2>/dev/null; then
+		pass phase2-held
+	else
+		fail phase2-held "d3/p2 on the backing filesystem: $([ -e "$SRC/d3/p2" ] && echo yes || echo no); touch running: $(kill -0 "$TOUCH_PID" 2>/dev/null && echo yes || echo no)"
+	fi
+	# Make the create durable: a freeze flushes the backing filesystem's journal.
+	fd_freeze back && fd_thaw back
+}
+cut_phase2() { power_cut cache; }
+check_phase2() {
+	if [ -e "$SRC/d3/p2" ]; then
+		pass phase2-create-kept
+	else
+		fail phase2-create-kept "d3/p2 was synced yet is gone"
+	fi
+	if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
+		pass phase2-dirty-recovered
+	else
+		fail phase2-dirty-recovered "no dirty row recovered: $(grep -i cleanly "$LOG")"
+	fi
+	served_equals_backing phase2-served
+	if [ -e "$MNT/d3/p2" ] && [ "$(ls "$MNT/d3" | tr '\n' ' ')" = "keep p2 " ]; then
+		pass phase2-name-served
+	else
+		fail phase2-name-served "d3: $(ls "$MNT/d3" 2>&1)"
+	fi
+}
+
+# ahead: the cache has what the backing filesystem lost. dm: the backing
+# filesystem drops writes from the start. kill: it simply has not committed its
+# journal yet (the mount's commit interval is long).
+setup_ahead() {
+	ls "$MNT/d4" "$MNT/d5" >/dev/null
+	[ "$CUT_MODE" = kill ] || fault_mode "$FD_BACK" drop-writes || fail ahead-cut-backing "fault_mode failed"
+	touch "$MNT/d4/a1"
+	# d5's phase 1 is a durable commit (the directory is not yet dirty): the
+	# WAL fsync takes d4/a1's phase 3 to the cache disk with it.
+	touch "$MNT/d5/a2"
+}
+cut_ahead() {
+	if [ "$CUT_MODE" = kill ]; then
+		power_cut
+	else
+		fault_mode "$FD_CACHE" drop-writes || fail ahead-cut-cache "fault_mode failed"
+	fi
+}
+check_ahead() {
+	if [ ! -e "$SRC/d4/a1" ] && [ ! -e "$SRC/d5/a2" ]; then
+		pass ahead-creates-lost
+	else
+		fail ahead-creates-lost "the backing filesystem kept $(ls "$SRC/d4" "$SRC/d5" | tr '\n' ' ') (it was cut before)"
+	fi
+	if [ "$(fd_recovered "$LOG")" -ge 2 ]; then
+		pass ahead-dirty-recovered
+	else
+		fail ahead-dirty-recovered "recovered $(fd_recovered "$LOG") dirty rows, want at least the two parents: $(grep -i cleanly "$LOG")"
+	fi
+	served_equals_backing ahead-served
+	if [ ! -e "$MNT/d4/a1" ] && [ ! -e "$MNT/d5/a2" ]; then
+		pass ahead-names-not-served
+	else
+		fail ahead-names-not-served "a name the backing filesystem lost is served (cache ahead)"
+	fi
+}
+
+# syncpoint: held clearing the dirty set, the backing filesystem synced.
+setup_syncpoint() {
+	touch "$MNT/d1/s1"
+	sleep 3
+	fd_freeze cache || fail sync-freeze-cache "FIFREEZE of the cache filesystem failed"
+	ls "$MNT/d1" >/tmp/ls-sync.out 2>&1 &
+	TOUCH_PID=$!
+	if fd_blocked "$DAEMON_PID" "$CACHE_DIR"; then
+		echo "fault_power.sh: held: $(fd_where "$DAEMON_PID")"
+		pass sync-held
+	else
+		fail sync-held "the daemon was never held writing the cache database (or the request did not start a sync point)"
+	fi
+}
+cut_syncpoint() { power_cut cache; }
+check_syncpoint() {
+	if [ -e "$SRC/d1/s1" ]; then
+		pass sync-backing-kept
+	else
+		fail sync-backing-kept "d1/s1 was synced to the backing filesystem yet is gone"
+	fi
+	if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
+		pass sync-dirty-set-survived
+	else
+		fail sync-dirty-set-survived "the clearing of the dirty set was lost with the cut, yet no row was recovered: $(grep -i cleanly "$LOG")"
+	fi
+	served_equals_backing sync-served
+}
+
+# The flags dcfs runs the scenario with.
+flags_for() {
+	case "$1" in
+	syncpoint) echo --sync_interval_sec=2 ;;
+	esac
+}
+
+# --- kill mode: one scenario, two boots --------------------------------------
+
+if [ "$CUT_MODE" = kill ]; then
+	# A long journal commit interval, where the filesystem has one, so that
+	# a create stays in the journal's running transaction until the cut.
+	FD_BACK_OPTS="-o commit=600"
+	case "$BOOT" in
+	1)
+		fd_setup || {
+			fail setup "wrapping or mounting the disks failed"
+			exit "$FAILED"
+		}
+		make_tree
+		if start $(flags_for "$SCENARIO"); then pass mount; else
+			fail mount "daemon did not mount within 10s"
+			exit "$FAILED"
+		fi
+		warm
+		"setup_$SCENARIO"
+		"cut_$SCENARIO"
+		exit "$FAILED"
+		;;
+	2)
+		after_cut "$SCENARIO"
+		"check_$SCENARIO"
+		;;
+	*)
+		fail boot "dcfs_boot= must be 1 or 2 in kill mode"
+		exit "$FAILED"
+		;;
+	esac
+	require_no_reclaim no-reclaim
+	exit "$FAILED"
+fi
+
+# --- dm mode: all five scenarios in one boot ---------------------------------
+
 fd_setup || {
 	fail setup "wrapping or mounting the disks failed"
 	exit "$FAILED"
 }
-for d in d1 d2 d3 d4 d5; do
-	mkdir "$SRC/$d"
-	echo keep >"$SRC/$d/keep"
-done
-sync
-
+make_tree
 if start; then pass mount; else
 	fail mount "daemon did not mount within 10s"
 	exit "$FAILED"
 fi
-ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5" >/dev/null
-fault_mode "$FD_BACK" healthy
+warm
 
-# --- before: the cut, then the create ----------------------------------------
-
-fd_cut || fail before-cut "fd_cut failed"
-touch "$MNT/d1/before"
+# before: setup makes the cut and the create; no cut_ step in dm mode.
+setup_before
 after_cut before
-if [ ! -e "$SRC/d1/before" ]; then
-	pass before-lost
-else
-	fail before-lost "d1/before survived a cut made before it"
-fi
-served_equals_backing before-served
+check_before
 
-# --- phase1: held in phase 2, phase 1 durable, then the cut -----------------
+for scenario in phase1 phase2 ahead; do
+	"setup_$scenario"
+	"cut_$scenario"
+	after_cut "$scenario"
+	"check_$scenario"
+done
 
-ls "$MNT/d2" >/dev/null
-fd_freeze back || fail phase1-freeze "FIFREEZE of the backing filesystem failed"
-touch "$MNT/d2/p1" &
-TOUCH_PID=$!
-if fd_blocked "$DAEMON_PID" "$SRC"; then
-	echo "fault_power.sh: held: $(fd_where "$DAEMON_PID")"
-	pass phase1-held
-else
-	fail phase1-held "the daemon never blocked on the frozen backing filesystem"
-fi
-fd_cut || fail phase1-cut "fd_cut failed"
-fd_thaw back
-wait_touch
-after_cut phase1
-if [ ! -e "$SRC/d2/p1" ]; then
-	pass phase1-create-lost
-else
-	fail phase1-create-lost "d2/p1 survived a cut before its create was durable"
-fi
-if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
-	pass phase1-dirty-recovered
-else
-	fail phase1-dirty-recovered "phase 1 was durable, yet no dirty row was recovered: $(grep -i cleanly "$LOG")"
-fi
-served_equals_backing phase1-served
-
-# --- phase2: the create durable on the backing filesystem, phase 3 not ------
-
-ls "$MNT/d3" >/dev/null
-fd_freeze back || fail phase2-freeze "FIFREEZE of the backing filesystem failed"
-touch "$MNT/d3/p2" &
-TOUCH_PID=$!
-fd_blocked "$DAEMON_PID" "$SRC" || fail phase2-held-1 "the daemon never blocked on the frozen backing filesystem"
-fd_freeze cache || fail phase2-freeze-cache "FIFREEZE of the cache filesystem failed"
-fd_thaw back
-sleep 1
-# The create ran (phase 2) and the daemon is held before phase 3.
-if [ -e "$SRC/d3/p2" ] && kill -0 "$TOUCH_PID" 2>/dev/null; then
-	pass phase2-held
-else
-	fail phase2-held "d3/p2 on the backing filesystem: $([ -e "$SRC/d3/p2" ] && echo yes || echo no); touch running: $(kill -0 "$TOUCH_PID" 2>/dev/null && echo yes || echo no)"
-fi
-# Make the create durable: a freeze flushes the backing filesystem's journal.
-fd_freeze back && fd_thaw back
-fd_cut || fail phase2-cut "fd_cut failed"
-fd_thaw cache
-wait_touch
-after_cut phase2
-if [ -e "$SRC/d3/p2" ]; then
-	pass phase2-create-kept
-else
-	fail phase2-create-kept "d3/p2 was synced yet is gone"
-fi
-if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
-	pass phase2-dirty-recovered
-else
-	fail phase2-dirty-recovered "no dirty row recovered: $(grep -i cleanly "$LOG")"
-fi
-served_equals_backing phase2-served
-if [ -e "$MNT/d3/p2" ] && [ "$(ls "$MNT/d3" | tr '\n' ' ')" = "keep p2 " ]; then
-	pass phase2-name-served
-else
-	fail phase2-name-served "d3: $(ls "$MNT/d3" 2>&1)"
-fi
-
-# --- ahead: the cache has what the backing filesystem lost ------------------
-
-ls "$MNT/d4" "$MNT/d5" >/dev/null
-fault_mode "$FD_BACK" drop-writes || fail ahead-cut-backing "fault_mode failed"
-touch "$MNT/d4/a1"
-# d5's phase 1 is a durable commit (the directory is not yet dirty): the WAL
-# fsync takes d4/a1's phase 3 to the cache disk with it.
-touch "$MNT/d5/a2"
-fault_mode "$FD_CACHE" drop-writes || fail ahead-cut-cache "fault_mode failed"
-after_cut ahead
-if [ ! -e "$SRC/d4/a1" ] && [ ! -e "$SRC/d5/a2" ]; then
-	pass ahead-creates-lost
-else
-	fail ahead-creates-lost "the backing filesystem kept $(ls "$SRC/d4" "$SRC/d5" | tr '\n' ' ') (it was cut before)"
-fi
-if [ "$(fd_recovered "$LOG")" -ge 2 ]; then
-	pass ahead-dirty-recovered
-else
-	fail ahead-dirty-recovered "recovered $(fd_recovered "$LOG") dirty rows, want at least the two parents: $(grep -i cleanly "$LOG")"
-fi
-served_equals_backing ahead-served
-if [ ! -e "$MNT/d4/a1" ] && [ ! -e "$MNT/d5/a2" ]; then
-	pass ahead-names-not-served
-else
-	fail ahead-names-not-served "a name the backing filesystem lost is served (cache ahead)"
-fi
-
-# --- syncpoint: held clearing the dirty set, backing synced ------------------
-
+# The sync point runs under a daemon with a short sync interval.
 fd_crash
 fd_umount_disks
 mount "$(fault_dev "$FD_BACK")" "$SRC"
@@ -264,32 +411,10 @@ if start --sync_interval_sec=2; then pass sync-run-mount; else
 	exit "$FAILED"
 fi
 ls "$MNT/d1" "$MNT/d2" >/dev/null
-touch "$MNT/d1/s1"
-sleep 3
-fd_freeze cache || fail sync-freeze-cache "FIFREEZE of the cache filesystem failed"
-ls "$MNT/d1" >/tmp/ls-sync.out 2>&1 &
-TOUCH_PID=$!
-if fd_blocked "$DAEMON_PID" "$CACHE_DIR"; then
-	echo "fault_power.sh: held: $(fd_where "$DAEMON_PID")"
-	pass sync-held
-else
-	fail sync-held "the daemon was never held writing the cache database (or the request did not start a sync point)"
-fi
-fd_cut || fail sync-cut "fd_cut failed"
-fd_thaw cache
-wait_touch
+setup_syncpoint
+cut_syncpoint
 after_cut syncpoint
-if [ -e "$SRC/d1/s1" ]; then
-	pass sync-backing-kept
-else
-	fail sync-backing-kept "d1/s1 was synced to the backing filesystem yet is gone"
-fi
-if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
-	pass sync-dirty-set-survived
-else
-	fail sync-dirty-set-survived "the clearing of the dirty set was lost with the cut, yet no row was recovered: $(grep -i cleanly "$LOG")"
-fi
-served_equals_backing sync-served
+check_syncpoint
 
 # Self-check of the comparison: a name added behind dcfs's back, after it
 # listed the directory, makes it fail. A comparison that never differs would

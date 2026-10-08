@@ -549,13 +549,45 @@ syscall on a descriptor under the path given, three looks in a row: a
 | `fault_selftest_test` | each mode on a plain filesystem | the mode does what it says |
 | `fault_backing_test` | backing read errors during a cold lookup; backing write errors until the journal aborts, then a create | the error goes back; nothing is recorded as present or absent (the lookup after healing answers the truth); the name is not served; the daemon lives; after a restart the dirty rows are recovered and the served tree matches the backing filesystem |
 | `fault_cache_test` | cache-disk write errors during a create's phase 1; the cache filesystem aborted, then a periodic sync point | the mutation never reaches the backing filesystem; the dirty set survives the failed clearing; after a restart everything served matches the backing filesystem and mutations work |
-| `fault_power_test` | a power cut before a create, between phases 1 and 2, between 2 and 3 (backing durable), after the cache has what the backing filesystem lost ("cache ahead"), and inside a sync point | after a restart every entry served matches the backing filesystem (type, size, mode, listings), and the recovery names the dirty rows that survived; a comparison that never differs would pass everything, so the last check adds a name behind dcfs's back and requires the comparison to fail |
+| `fault_power_test`, `fault_power_kill_test` | a power cut (drop-writes, or a real kill of QEMU) before a create, between phases 1 and 2, between 2 and 3 (backing durable), after the cache has what the backing filesystem lost ("cache ahead"), and inside a sync point | after a restart every entry served matches the backing filesystem (type, size, mode, listings), and the recovery names the dirty rows that survived; a comparison that never differs would pass everything, so the last check adds a name behind dcfs's back and requires the comparison to fail |
 
-These run in the small tier with the checking build of dcfs
+Step 11.2 added three things:
+
+- **The tests over three backing filesystems.** `fault_backing_test`,
+  `fault_cache_test` and `fault_power_test` are `qemu_test_matrix` (ext4
+  small, xfs and btrfs medium); the cache disk stays ext4. A failed xfs
+  answers every access with EIO and a failed btrfs lists nothing, so
+  `fault_backing` requires that dcfs's listing equal the backing
+  filesystem's own and never show the failed create.
+- **Real power cuts** (`fault_power_kill_test`, `run-qemu.sh --power-cut`).
+  The same `guest/fault_power.sh` and checks as `fault_power_test`, with the
+  cut a real one: per scenario two boots over the same disk images, the first
+  until the guest prints `DCFS-POWER-CUT-NOW`, at which the host kills QEMU
+  (SIGKILL: no flush, no shutdown); the second, without formatting, runs the
+  checks. A killed QEMU keeps every write the guest completed to a disk and
+  loses the guest's page cache, which is the state `drop-writes` models, so
+  the two tests passing the same checks, on all three filesystems, validates
+  the model. The `ahead` scenario needs no drop on the backing disk here: the
+  journal's commit interval is made long (`-o commit=600` where the
+  filesystem takes it) so the creates are still in its running transaction.
+- **ACE-style sequences** (`fault_ace_test`, `fault_ace_fs_test`,
+  `guest/fault_ace.sh`): every sequence of one or two operations from `create
+  mkdir unlink rename replace link xrename chmod append` on a small tree, a
+  power cut (both disks drop writes) after it, a remount, a restart, and the
+  tree dcfs serves must equal the backing filesystem's; and with an fsync of
+  the directory through dcfs (`testutil fsync`) before the cut or between the
+  operations, the backing filesystem must be exactly what it was at the fsync.
+  180 sequences on ext4 (about 10 minutes on a busy host; `eternal`), 40 on
+  xfs and btrfs (`dcfs_ace_ops=` on the kernel command line picks the
+  operations). The durable check fails when the fsync is removed (all
+  `persist` and `split` sequences fail), which shows it can fail.
+
+The small and medium ones run with the checking build of dcfs
 (`initramfs_checked`): an error path that leaves an invariant broken aborts
-the daemon and the test fails. Each uses the default guest memory (the MEM
-line shows `reclaim_scans=0`: peak 72 MiB plain and 158 MiB under ASan, of
-256 and 384). The cache disk's I/O errors (`SQLITE_IOERR`, and `SQLITE_READONLY` from a cache
+the daemon and the test fails (the large ones run the plain build: ACE, and
+the xfs and btrfs variants of the kill test). Each uses the default guest
+memory (every MEM line shows `reclaim_scans=0`: peak 69 to 126 MiB plain, xfs
+the highest, and 158 MiB under ASan, of 256 and 384). The cache disk's I/O errors (`SQLITE_IOERR`, and `SQLITE_READONLY` from a cache
 filesystem that aborted its journal) reach the caller as EIO: `sqlite.cc` attaches
 the errno payload and keeps the status code `UNAVAILABLE`; `fault_cache_test`
 requires it (it first said EAGAIN, "Resource temporarily unavailable").

@@ -168,6 +168,64 @@ qemu_test_matrix(
     timeout = "moderate",
 )
 
+# Step 11.2: the same five power cuts as fault_power_test with a real one: the
+# host kills QEMU at the cut and a second boot over the same disk images runs
+# the checks (run-qemu.sh --power-cut), which validates drop-writes as a model of
+# a power loss. Two boots per scenario.
+qemu_test_matrix(
+    name = "fault_power_kill_test",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_power.sh",
+    modules = ["dm_flakey"],
+    power_cut = [
+        "before",
+        "phase1",
+        "phase2",
+        "ahead",
+        "syncpoint",
+    ],
+    size = "medium",
+    other_size = "large",
+    timeout = "moderate",
+)
+
+# Step 11.2: bounded sequences of operations with a power cut after them
+# (guest/fault_ace.sh, in the manner of ACE): served == backing after every
+# cut, and what an fsync through dcfs made durable is.
+qemu_test(
+    name = "fault_ace_test",
+    disks = [
+        ("vdb", "ext4", "128M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_ace.sh",
+    modules = ["dm_flakey"],
+    size = "large",
+    timeout = "eternal",  # 180 sequences, 3 s each plain, more under a sanitizer
+)
+
+# The same on xfs and btrfs, over four of the operations (40 sequences).
+qemu_test_matrix(
+    name = "fault_ace_fs_test",
+    cmdline = "dcfs_ace_ops=create,unlink,rename,replace",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    fstypes = [
+        "xfs",
+        "btrfs",
+    ],
+    guest_script = "guest/fault_ace.sh",
+    modules = ["dm_flakey"],
+    size = "large",
+    other_size = "large",
+    timeout = "long",
+)
+
 # Step 2: the cache database (and its -wal/-shm files) is mode 0600, not
 # world-readable; a missing cache-database directory is created 0700, and
 # an existing group-/world-accessible one gets a WARNING -- see

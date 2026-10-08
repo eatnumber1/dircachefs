@@ -29,6 +29,15 @@
 #       reproduce a kernel bug (casefold_tune_oops_test). See "A kernel
 #       failure" below.
 #
+#   --power-cut SCENARIO[,SCENARIO...] (step 11.2; e2e only): a real power cut
+#       per scenario. Each is two boots over the same disk images: the first
+#       (dcfs_cut=kill dcfs_scenario=<s> dcfs_boot=1 on the kernel command
+#       line) runs until the guest prints DCFS-POWER-CUT-NOW, and QEMU is
+#       killed (SIGKILL) as soon as that line is read; the second (dcfs_boot=2)
+#       boots the same images, without formatting them, and gives the verdict.
+#       Internally the child runs use --kill-on MARKER, --keep-disks DIR,
+#       --log-name NAME and --cmdline WORDS.
+#
 # Each disk-spec is <device>:<fstype>:<size>[:<mkfs options>], e.g.
 # vdb:ext4:256M, where <device> is a /dev/vd<letter> name. The optional
 # fourth field (ext4 only; step 23.7) is words handed to mke2fs after
@@ -122,6 +131,64 @@ COV_SCRIPT=""
 COV_PROFDATA=""
 COV_LLVM_COV=""
 COV_OBJECTS=""
+# --power-cut: this script again, twice per scenario (see the usage above),
+# over a fresh set of disk images each. The option is removed from the
+# arguments the children get; "$@" keeps their order and quoting.
+CUT_SCENARIOS=""
+cut_n=$#
+cut_i=0
+cut_prev=""
+while [ "$cut_i" -lt "$cut_n" ]; do
+	cut_a=$1
+	shift
+	cut_i=$((cut_i + 1))
+	if [ "$cut_prev" = --power-cut ]; then
+		CUT_SCENARIOS=$cut_a
+		cut_prev=""
+		continue
+	fi
+	if [ "$cut_a" = --power-cut ]; then
+		cut_prev=$cut_a
+		continue
+	fi
+	set -- "$@" "$cut_a"
+	cut_prev=""
+done
+if [ -n "$CUT_SCENARIOS" ]; then
+	cut_dir="${TEST_TMPDIR:-$(mktemp -d)}/cut-disks"
+	cut_rc=0
+	for cut_s in $(echo "$CUT_SCENARIOS" | tr , ' '); do
+		rm -rf "$cut_dir"
+		mkdir -p "$cut_dir"
+		echo "run-qemu.sh: power cut '$cut_s': boot 1, killed at the cut"
+		if "$0" --keep-disks "$cut_dir" --log-name "boot1-$cut_s.log" \
+			--kill-on DCFS-POWER-CUT-NOW \
+			--cmdline "dcfs_cut=kill dcfs_scenario=$cut_s dcfs_boot=1" "$@"; then
+			echo "run-qemu.sh: power cut '$cut_s': boot 2, the checks"
+			if "$0" --keep-disks "$cut_dir" --log-name "boot2-$cut_s.log" \
+				--cmdline "dcfs_cut=kill dcfs_scenario=$cut_s dcfs_boot=2" "$@"; then
+				echo "run-qemu.sh: power cut '$cut_s': PASS"
+			else
+				echo "run-qemu.sh: power cut '$cut_s': FAIL (the checks after the cut)"
+				cut_rc=1
+			fi
+		else
+			echo "run-qemu.sh: power cut '$cut_s': FAIL (boot 1 never reached the cut)"
+			cut_rc=1
+		fi
+	done
+	if [ "$cut_rc" -eq 0 ]; then
+		echo "== RESULT: PASS =="
+	else
+		echo "== RESULT: FAIL =="
+	fi
+	exit "$cut_rc"
+fi
+
+KILL_ON=""
+KEEP_DISKS=""
+LOG_NAME=""
+EXTRA_APPEND=""
 while :; do
 	case "${1:-}" in
 	--unit)
@@ -142,6 +209,22 @@ while :; do
 		;;
 	--expect-kernel-failure)
 		EXPECT_KERNEL_FAILURE=$2
+		shift 2
+		;;
+	--kill-on)
+		KILL_ON=$2
+		shift 2
+		;;
+	--keep-disks)
+		KEEP_DISKS=$2
+		shift 2
+		;;
+	--log-name)
+		LOG_NAME=$2
+		shift 2
+		;;
+	--cmdline)
+		EXTRA_APPEND=$2
 		shift 2
 		;;
 	--cov-script)
@@ -231,7 +314,7 @@ if [ -n "$EXPECT_KERNEL_FAILURE" ] &&
 fi
 
 WORKDIR="${TEST_TMPDIR:-$(mktemp -d)}"
-LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/serial.log"
+LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/${LOG_NAME:-serial.log}"
 
 if [ -n "$MODULES" ]; then
 	cat "$INITRD" "$MODULES" >"$WORKDIR/initramfs-with-modules.cpio.gz"
@@ -275,6 +358,8 @@ if [ -s "$specs_file" ]; then
 	max_index=$(cut -d: -f1 "$specs_file" | sort -n | tail -1)
 fi
 
+IMGDIR="${KEEP_DISKS:-$WORKDIR}"
+mkdir -p "$IMGDIR"
 drive_args=""
 idx=0
 while [ "$idx" -le "$max_index" ]; do
@@ -284,22 +369,27 @@ while [ "$idx" -le "$max_index" ]; do
 		fstype=$(echo "$line" | cut -d: -f3)
 		size=$(echo "$line" | cut -d: -f4)
 		opts=$(echo "$line" | cut -d: -f5-)
-		img="$WORKDIR/$dev.img"
-		truncate -s "$size" "$img"
-		case "$fstype" in
-		# shellcheck disable=SC2086 # opts is a deliberate list of words
-		ext4) MKE2FS_CONFIG="$MKE2FS_CONF" "$MKE2FS_BIN" -q -F -t ext4 $opts "$img" ;;
-		btrfs) "$MKFS_BTRFS_BIN" -q -f "$img" ;;
-		xfs) "$MKFS_XFS_BIN" -q -f "$img" ;;
-		*)
-			echo "run-qemu.sh: unknown fstype '$fstype'" >&2
-			exit 1
-			;;
-		esac
+		img="$IMGDIR/$dev.img"
+		# --keep-disks: the images of an earlier boot are used as they are.
+		if [ -n "$KEEP_DISKS" ] && [ -f "$img" ]; then
+			echo "run-qemu.sh: keeping $img"
+		else
+			truncate -s "$size" "$img"
+			case "$fstype" in
+			# shellcheck disable=SC2086 # opts is a deliberate list of words
+			ext4) MKE2FS_CONFIG="$MKE2FS_CONF" "$MKE2FS_BIN" -q -F -t ext4 $opts "$img" ;;
+			btrfs) "$MKFS_BTRFS_BIN" -q -f "$img" ;;
+			xfs) "$MKFS_XFS_BIN" -q -f "$img" ;;
+			*)
+				echo "run-qemu.sh: unknown fstype '$fstype'" >&2
+				exit 1
+				;;
+			esac
+		fi
 	else
 		dev="filler$idx"
-		img="$WORKDIR/filler-$idx.img"
-		truncate -s 1M "$img"
+		img="$IMGDIR/filler-$idx.img"
+		[ -n "$KEEP_DISKS" ] && [ -f "$img" ] || truncate -s 1M "$img"
 	fi
 	drive_args="$drive_args -drive id=$dev,file=$img,format=raw,if=none -device virtio-blk-device,drive=$dev"
 	idx=$((idx + 1))
@@ -431,7 +521,7 @@ append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init dcfs_accel=$ACCE
 if [ "$UNIT" -eq 0 ]; then
 	append="$append dcfs_test=$DCFS_TEST"
 fi
-append="$append$rootfs_append"
+append="$append$rootfs_append${EXTRA_APPEND:+ $EXTRA_APPEND}"
 COVERAGE=0
 if [ -n "$COVDISK_IMG" ]; then
 	COVERAGE=1
@@ -461,19 +551,64 @@ esac
 
 start=$(date +%s.%N)
 echo "run-qemu.sh: qemu start $start" >>"$LOG"
-# shellcheck disable=SC2086 # drive_args is a deliberately unquoted list of flags
-timeout "$TIMEOUT_SECS" "$QEMU_BIN" \
-	-M microvm,x-option-roms=off,pit=$LEGACY_TIMERS,pic=$LEGACY_TIMERS,rtc=on,isa-serial=on,acpi=off \
-	-bios "$QBOOT" \
-	-nodefaults -no-user-config -nographic -no-reboot \
-	-serial stdio \
-	-accel "$ACCEL" -cpu "$CPU" \
-	-m "$MEM" -smp "$SMP" \
-	-kernel "$KERNEL" \
-	-initrd "$INITRD" \
-	-append "$append" \
-	$drive_args \
-	2>&1 | tee -a "$LOG" || true
+# QEMU_WRAP, in kill mode, is a script that records its own pid and execs
+# QEMU, so that the pid is QEMU's (timeout's own child is the wrapper's exec).
+qemu_cmd() {
+	# shellcheck disable=SC2086 # drive_args is a deliberately unquoted list of flags, QEMU_WRAP a word or nothing
+	timeout "$TIMEOUT_SECS" $QEMU_WRAP "$QEMU_BIN" \
+		-M microvm,x-option-roms=off,pit=$LEGACY_TIMERS,pic=$LEGACY_TIMERS,rtc=on,isa-serial=on,acpi=off \
+		-bios "$QBOOT" \
+		-nodefaults -no-user-config -nographic -no-reboot \
+		-serial stdio \
+		-accel "$ACCEL" -cpu "$CPU" \
+		-m "$MEM" -smp "$SMP" \
+		-kernel "$KERNEL" \
+		-initrd "$INITRD" \
+		-append "$append" \
+		$drive_args
+}
+QEMU_WRAP=""
+if [ -n "$KILL_ON" ]; then
+	# A real power cut (--power-cut): the guest prints the marker when it
+	# has put the disks in the state to cut at, and QEMU is killed (SIGKILL:
+	# no flush, no shutdown) as soon as the line is read. What the guest had
+	# completed to the disks stays in the images; its page cache is gone.
+	QEMU_WRAP="$WORKDIR/exec-qemu.sh"
+	PIDFILE="$WORKDIR/qemu.pid"
+	export PIDFILE
+	printf '#!/bin/sh\necho $$ >"$PIDFILE"\nexec "$@"\n' >"$QEMU_WRAP"
+	chmod +x "$QEMU_WRAP"
+	fifo="$WORKDIR/serial-$$.fifo"
+	rm -f "$fifo"
+	mkfifo "$fifo"
+	qemu_cmd >"$fifo" 2>&1 &
+	qemu_job=$!
+	killed=0
+	while IFS= read -r line; do
+		printf '%s\n' "$line"
+		printf '%s\n' "$line" >>"$LOG"
+		case "$line" in
+		*"$KILL_ON"*)
+			killed=1
+			kill -KILL "$(cat "$PIDFILE")" 2>/dev/null || true
+			break
+			;;
+		esac
+	done <"$fifo"
+	wait "$qemu_job" 2>/dev/null || true
+	rm -f "$fifo"
+	end=$(date +%s.%N)
+	echo "run-qemu.sh: qemu end $end" >>"$LOG"
+	if [ "$killed" -eq 1 ]; then
+		echo "run-qemu.sh: QEMU killed at '$KILL_ON'"
+		echo "== RESULT: PASS (killed at the cut) =="
+		exit 0
+	fi
+	echo "run-qemu.sh: the guest ended without printing '$KILL_ON'" >&2
+	echo "== RESULT: FAIL (see $LOG) =="
+	exit 1
+fi
+qemu_cmd 2>&1 | tee -a "$LOG" || true
 end=$(date +%s.%N)
 echo "run-qemu.sh: qemu end $end" >>"$LOG"
 

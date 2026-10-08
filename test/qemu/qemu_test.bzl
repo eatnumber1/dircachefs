@@ -72,7 +72,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = ""):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -115,6 +115,14 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             binary's own costs: memory_test its RSS and
             readdir_boundary_test a listing's time, which the checking
             build's queries and bookkeeping would add to.
+        power_cut: list of scenario names (step 11.2): instead of one boot,
+            run-qemu.sh --power-cut boots the guest twice per scenario over
+            the same disk images, killing QEMU at the cut the first time (a
+            real power loss) and giving the second boot's verdict; the guest
+            script reads dcfs_cut=kill, dcfs_scenario= and dcfs_boot= from
+            its kernel command line (guest/fault_power.sh).
+        cmdline: extra words for the guest's kernel command line (run-qemu.sh
+            --cmdline), which the guest script reads from /proc/cmdline.
         size: required sh_test size, the test's tier: "small" (run
             constantly), "medium" (presubmit), "large"/"enormous" (CI).
             See README.md's "Test tiers".
@@ -133,6 +141,8 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     if kernel_failure not in (None, "expected"):
         fail("qemu_test(%s): kernel_failure must be None or \"expected\"" % name)
     kernel_failure_args = ["--expect-kernel-failure", guest_script.split("/")[-1]] if kernel_failure else []
+    power_cut_args = ["--power-cut", ",".join(power_cut)] if power_cut else []
+    power_cut_args += ["--cmdline", "'" + cmdline + "'"] if cmdline else []
 
     rootfs_data = [rootfs] if rootfs else []
     rootfs_args = ["--rootfs", "$(location " + rootfs + ")"] if rootfs else []
@@ -193,7 +203,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             initramfs,
             guest_script,
         ] + rootfs_data + coverage_data(cov_objects),
-        args = qemu_args + coverage_args(cov_objects) + kernel_failure_args + rootfs_args + mem_args + kernel_args + [
+        args = qemu_args + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + rootfs_args + mem_args + kernel_args + [
             "$(location " + initramfs + ")",
             guest_script_basename,
         ] + disk_args,
@@ -234,7 +244,9 @@ def qemu_test_matrix(
         asan_mem = None,
         modules = [],
         fstypes = ["ext4", "xfs", "btrfs"],
-        plain_dcfs = False):
+        plain_dcfs = False,
+        power_cut = [],
+        cmdline = ""):
     """Declares one qemu_test per backing filesystem in `fstypes`.
 
     Args:
@@ -256,6 +268,8 @@ def qemu_test_matrix(
         asan_mem: same as qemu_test.
         modules: same as qemu_test.
         plain_dcfs: same as qemu_test.
+        power_cut: same as qemu_test.
+        cmdline: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
@@ -282,6 +296,8 @@ def qemu_test_matrix(
             asan_mem = asan_mem,
             modules = modules,
             plain_dcfs = plain_dcfs,
+            power_cut = power_cut,
+            cmdline = cmdline,
         )
     native.alias(
         name = name,

@@ -36,11 +36,21 @@ FD_BACK_DEV=/dev/vdb
 FD_CACHE_DEV=/dev/vdc
 CACHE_DIR=/cache
 
+# FD_BACK_OPTS: mount options for the backing filesystem ("-o commit=600"),
+# dropped if the filesystem does not take them (xfs has no commit=).
+FD_BACK_OPTS=""
+
+fd_mount_backing() {
+	# shellcheck disable=SC2086 # FD_BACK_OPTS is a list of words
+	{ [ -n "$FD_BACK_OPTS" ] && mount $FD_BACK_OPTS "$(fault_dev "$FD_BACK")" "$SRC" 2>/dev/null; } ||
+		mount "$(fault_dev "$FD_BACK")" "$SRC"
+}
+
 fd_setup() {
 	fault_wrap "$FD_BACK" "$FD_BACK_DEV" || return 1
 	fault_wrap "$FD_CACHE" "$FD_CACHE_DEV" || return 1
 	mkdir -p "$SRC" "$CACHE_DIR" "$MNT"
-	mount "$(fault_dev "$FD_BACK")" "$SRC" || return 1
+	fd_mount_backing || return 1
 	mount "$(fault_dev "$FD_CACHE")" "$CACHE_DIR" || return 1
 }
 
@@ -74,7 +84,7 @@ fd_restore() {
 	fd_umount_disks
 	fault_mode "$FD_BACK" healthy || return 1
 	fault_mode "$FD_CACHE" healthy || return 1
-	mount "$(fault_dev "$FD_BACK")" "$SRC" || return 1
+	fd_mount_backing || return 1
 	mount "$(fault_dev "$FD_CACHE")" "$CACHE_DIR" || return 1
 }
 
