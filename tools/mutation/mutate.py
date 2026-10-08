@@ -1,25 +1,33 @@
 #!/usr/bin/env python3
-"""A small mutation tester for the protocol code (step 26.5).
+"""A small mutation tester for the protocol code (steps 26.5, 26.5d).
 
   mutate.py generate --workspace W --scope scope.txt --out mutants.json
+                     [--seed S] [--per-function N]
   mutate.py run      --workspace W --mutants mutants.json --result result.json
                      [--sample N] [--seed S] [--only ID,ID] [--shard K/N]
                      [--killers PHASES] [--fail-on-survivor]
-                     [--survivors-out FILE]
+                     [--survivors-out FILE] [--summary-out FILE]
   mutate.py changed  --range A..B [--max-mutants 30] --result result.json
                      [--fail-on-survivor] [--survivors-out FILE]
+  mutate.py report   RESULT.json...
 
 `generate` finds the places to mutate with clang's AST (-ast-dump=json, the
-pinned clang, the file's own compile command from `bazel aquery`): inside the
-functions scope.txt selects it negates the condition of an if/while/for/?:,
-deletes a call to a Begin*/End*/Mark* function that returns absl::Status or
-void, and swaps present/absent (kFound/kNegative, kPresent/kAbsent). `run`
-applies one mutant at a time in a scratch copy of the tree (its own Bazel
-output base; the disk cache makes unchanged actions free) and runs the
+pinned clang, the file's own compile command from `bazel aquery`). The
+operators (operators.py: relational and logical replacement, negation,
+constant nudges, statement deletion, status-return replacement, argument
+swap, enum swap) look at the functions scope.txt selects, minus the arid
+nodes of arid.txt (logging, diagnostics, testonly hooks; arid.py). Then it
+samples: at most one mutant per source line and at most --per-function per
+function, the choice a hash of --seed (printed) and the mutant's stable id,
+so a mutant keeps its fate when unrelated code changes.
+
+`run` applies one mutant at a time in a scratch copy of the tree (its own
+Bazel output base; the disk cache makes unchanged actions free) and runs the
 killers (the small tier of //dcfs/... and the trace validation) with the
 first failure ending the mutant. A mutant that does not compile is `invalid`,
 one a test fails or times out on is `killed`, the rest `survived`: a missing
-test. See README.md. Run it with `bazel run //tools/mutation:mutate`.
+test. A mutant listed in equivalent.txt (with its reason) is `suppressed`
+and not run. See README.md. Run it with `bazel run //tools/mutation:mutate`.
 
 Exit status of `run` and `changed`: 0 (survivors are findings, listed in the
 output and --survivors-out), 1 with --fail-on-survivor when one survived, 2 on
@@ -29,13 +37,18 @@ on 1 and 2.
 
 `changed` is the per-push mode: only the functions whose lines the commit
 range touches (git diff hunks mapped to the AST's functions) are mutated, at
-most --max-mutants of them (a sample with a fixed seed beyond that).
+most --max-mutants of them (deterministic selection by the same hash, the
+operators taking turns; the surplus is reported as "not run").
+
+`report` merges result files and prints the per-operator table and the
+survivors grouped by function (the scheduled job's summary).
 """
 
 import argparse
+import collections
+import hashlib
 import json
 import os
-import random
 import re
 import shutil
 import subprocess
@@ -43,13 +56,21 @@ import sys
 import tempfile
 import time
 
-FUNCTION_KINDS = {"FunctionDecl", "CXXMethodDecl", "CXXConstructorDecl",
-                  "CXXDestructorDecl"}
-LOOP_KINDS = {"IfStmt": "if", "WhileStmt": "while", "ForStmt": "for",
-              "ConditionalOperator": "?:"}
-PHASE_CALL = re.compile(r"^(Begin|End|Mark)[A-Za-z]*$")
-SWAPS = {"kFound": "kNegative", "kNegative": "kFound",
-         "kPresent": "kAbsent", "kAbsent": "kPresent"}
+import arid as arid_lib
+import operators
+
+FUNCTION_KINDS = operators.FUNCTION_KINDS
+PHASE_CALL = operators.PHASE_CALL
+TOKEN = operators.TOKEN
+span = operators.span
+sane = operators.sane
+callee_name = operators.callee_name
+
+DEFAULT_SEED = 1
+# The scheduled sweep's per-function bound and the per-push budget.
+DEFAULT_PER_FUNCTION = 3
+DEFAULT_BUDGET = 30
+STATUSES = ("killed", "survived", "invalid", "suppressed", "error")
 
 
 # ---- scope -----------------------------------------------------------------
@@ -83,7 +104,6 @@ class Walker:
     def __init__(self, main_file):
         self.main = main_file
         self.cur = None
-        self.functions = []  # (name, body node, in_main)
 
     def note(self, loc):
         if not isinstance(loc, dict):
@@ -108,7 +128,8 @@ class Walker:
             self.note(rng.get("end"))
         node["_main"] = here and self.in_main()
         if node.get("kind") in FUNCTION_KINDS:
-            body = [c for c in node.get("inner", []) if c.get("kind") == "CompoundStmt"]
+            body = [c for c in node.get("inner", [])
+                    if c.get("kind") == "CompoundStmt"]
             if body and node["_main"]:
                 out.append(node)
         for child in node.get("inner", []):
@@ -116,6 +137,7 @@ class Walker:
 
 
 def parse_stream(data, main_file):
+    """The function nodes (with bodies) of `main_file` in an AST dump."""
     walker = Walker(main_file)
     dec = json.JSONDecoder()
     pos = 0
@@ -128,61 +150,19 @@ def parse_stream(data, main_file):
             break
         doc, pos = dec.raw_decode(data, pos)
         walker.visit(doc, functions)
-        # Keep only what mutation needs: drop the other documents at once.
-        if not any(f is doc or _contains(doc, f) for f in functions[-1:]):
-            pass
     return functions
 
 
-def _contains(doc, node):
-    return False
-
-
-def span(node):
-    """(start, end) byte offsets of an expression in the main file, or None."""
-    rng = node.get("range")
-    if not rng:
-        return None
-    b, e = rng["begin"], rng["end"]
-    if "spellingLoc" in b or "spellingLoc" in e:
-        if "spellingLoc" not in b or "spellingLoc" not in e:
-            return None
-        if b["expansionLoc"].get("offset") != e["expansionLoc"].get("offset"):
-            return None
-        b, e = b["spellingLoc"], e["spellingLoc"]
-    if "offset" not in b or "offset" not in e:
-        return None
-    return b["offset"], e["offset"] + e.get("tokLen", 0), b.get("tokLen", 0)
-
-
-TOKEN = re.compile(r"""[A-Za-z_]\w*|\d[\w.']*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|::|->|&&|\|\||[-+*/%&|^!<>=]=?|.""", re.S)
-
-
-def sane(sp, source):
-    """True when the span starts at a token of the length clang says: the
-    AST dump omits a `file` that did not change, and a node of a header can
-    be taken for one of the main file; its offsets then land mid-text."""
-    start, end, toklen = sp
-    if start >= len(source) or source[start].isspace():
-        return False
-    m = TOKEN.match(source, start)
-    return bool(m) and len(m.group(0)) == toklen and end > start
-
-
-def callee_name(call):
-    node = call.get("inner", [None])[0]
-    while node is not None:
-        if node.get("kind") == "DeclRefExpr":
-            return node.get("referencedDecl", {}).get("name")
-        if node.get("kind") == "MemberExpr":
-            return node.get("name")
-        inner = node.get("inner")
-        node = inner[0] if inner else None
-    return None
+def ast_dump_command(base, source_file, name_filter="dcfs::"):
+    """The clang command that prints the AST of the functions whose name
+    starts with `name_filter` as JSON (production and the tests alike)."""
+    return base + ["-fsyntax-only", "-Xclang", "-ast-dump=json",
+                   "-Xclang", "-ast-dump-filter=" + name_filter,
+                   "-x", "c++", source_file]
 
 
 def collect_calls(node, acc):
-    if node.get("kind") in ("CallExpr", "CXXMemberCallExpr"):
+    if node.get("kind") in operators.CALL_KINDS:
         name = callee_name(node)
         if name:
             acc.append(name)
@@ -205,62 +185,177 @@ def selected(fn, rules):
     return False
 
 
-def mutants_in(fn, source):
-    """Yields mutant dicts for the body of function node fn."""
-    found = []
+# ---- the mutants of a file -------------------------------------------------
 
-    def walk(node):
-        kind = node.get("kind")
-        inner = node.get("inner", [])
-        if node.get("_main"):
-            if kind in LOOP_KINDS:
-                idx = 0
-                if kind == "IfStmt":
-                    idx = int(bool(node.get("hasInit"))) + int(bool(node.get("hasVar")))
-                    if node.get("hasVar"):
-                        idx = None
-                elif kind == "WhileStmt":
-                    idx = 0 if not node.get("hasVar") else None
-                elif kind == "ForStmt":
-                    idx = 1  # init, condvar, cond, inc, body (empty ones are null nodes)
-                    idx = 2 if len(inner) >= 3 else None
-                if idx is not None and idx < len(inner):
-                    cond = inner[idx]
-                    sp = span(cond)
-                    if sp and not sane(sp, source):
-                        sp = None
-                    if sp and cond.get("kind"):
-                        text = source[sp[0]:sp[1]]
-                        if kind == "ForStmt" and cond.get("kind") == "NullStmt":
-                            sp = None
-                        if sp:
-                            found.append(("negate-%s" % LOOP_KINDS[kind], sp[:2],
-                                          "!(" + text + ")", text))
-            elif kind in ("CallExpr", "CXXMemberCallExpr"):
-                name = callee_name(node)
-                qt = node.get("type", {}).get("qualType", "")
-                if name and PHASE_CALL.match(name) and qt in ("absl::Status", "void"):
-                    sp = span(node)
-                    if sp and sane(sp, source):
-                        found.append(("delete-call %s" % name, sp[:2],
-                                      "absl::OkStatus()" if qt == "absl::Status" else "(void)0",
-                                      source[sp[0]:sp[1]]))
-            elif kind == "DeclRefExpr":
-                ref = node.get("referencedDecl", {})
-                if ref.get("kind") == "EnumConstantDecl" and ref.get("name") in SWAPS:
-                    sp = span(node)
-                    if sp and sane(sp, source):
-                        text = source[sp[0]:sp[1]]
-                        if text.endswith(ref["name"]):
-                            found.append(("swap %s/%s" % (ref["name"], SWAPS[ref["name"]]), sp[:2],
-                                          text[:-len(ref["name"])] + SWAPS[ref["name"]], text))
-        for c in inner:
-            walk(c)
+def normalize(text):
+    """Whitespace runs collapsed: the form that goes into a stable id."""
+    return " ".join(text.split())
 
-    for c in fn.get("inner", []):
-        if c.get("kind") == "CompoundStmt":
-            walk(c)
-    return found
+
+def stable_key(m):
+    """The id of a mutant that survives edits elsewhere in the file: file,
+    function, operator, before and after text, never line numbers."""
+    return " | ".join([m["file"], m["function"] or "", m["op"],
+                       normalize(m["before"]), normalize(m["replacement"])])
+
+
+def collect_mutants(functions, source, path, rules, arid=None, hunks=None):
+    """Every mutant of the selected functions, before sampling.
+
+    `hunks` (the changed lines) restricts it to the functions they touch;
+    `arid` (arid.Arid) removes the sites in arid nodes and functions. A
+    mutant has `key` (stable_key) and `nth`, the order among the mutants of
+    its function with the same key (so equivalent.txt can name one of two
+    identical deletions).
+    """
+    mutants, seen = [], set()
+    for fn in functions:
+        if not selected(fn, rules):
+            continue
+        if arid and arid.function_reason(fn.get("name")):
+            continue
+        if hunks is not None:
+            lines = function_lines(fn, source)
+            if lines is None or not touches(lines, hunks):
+                continue
+        arid_spans = arid.spans(fn, source) if arid else ()
+        counts = collections.Counter()
+        for site in operators.sites_in(fn, source):
+            if arid_lib.overlaps(site, arid_spans):
+                continue
+            ident = (path, site.start, site.end, site.replacement)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            m = {"file": path, "function": fn.get("name"),
+                 "line": source.count("\n", 0, site.start) + 1,
+                 "operator": site.operator, "op": site.op,
+                 "start": site.start, "end": site.end,
+                 "replacement": site.replacement, "before": site.before}
+            m["key"] = stable_key(m)
+            counts[m["key"]] += 1
+            m["nth"] = counts[m["key"]]
+            mutants.append(m)
+    return mutants
+
+
+# ---- sampling ----------------------------------------------------------------
+
+def rank(seed, m):
+    """A mutant's place in the seeded order: a hash of the seed and the
+    mutant's stable id (and its `nth`), so it does not move when code
+    elsewhere changes."""
+    text = "%s:%s#%d" % (seed, m["key"], m.get("nth", 1))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def take_turns(mutants, seed):
+    """The mutants in the seeded order with the operators taking turns, so
+    that a cut keeps every operator represented."""
+    groups = collections.defaultdict(list)
+    for m in mutants:
+        groups[m["operator"]].append(m)
+    queues = [sorted(g, key=lambda m: rank(seed, m))
+              for _, g in sorted(groups.items())]
+    ordered = []
+    while any(queues):
+        for q in queues:
+            if q:
+                ordered.append(q.pop(0))
+    return ordered
+
+
+def one_per_line(mutants, seed):
+    """The lowest-ranked mutant of each source line."""
+    best = {}
+    for m in mutants:
+        k = (m["file"], m["line"])
+        if k not in best or rank(seed, m) < rank(seed, best[k]):
+            best[k] = m
+    return list(best.values())
+
+
+def sample(mutants, seed, per_function=0):
+    """At most one mutant per source line and `per_function` per function
+    (0: no bound), in source order."""
+    kept = one_per_line(mutants, seed)
+    if per_function:
+        by_function = collections.defaultdict(list)
+        for m in kept:
+            by_function[(m["file"], m["function"])].append(m)
+        kept = [m for g in by_function.values()
+                for m in take_turns(g, seed)[:per_function]]
+    return sorted(kept, key=lambda m: (m["file"], m["start"], m["end"]))
+
+
+def pick_budget(mutants, budget, seed):
+    """(chosen, not_run): the first `budget` mutants of the seeded order."""
+    ordered = take_turns(mutants, seed)
+    chosen = sorted(ordered[:budget], key=lambda m: (m["file"], m["start"]))
+    return chosen, len(ordered) - len(chosen)
+
+
+# ---- equivalent mutants --------------------------------------------------------
+
+class EquivalentError(Exception):
+    """equivalent.txt is malformed."""
+
+
+REQUIRED = ("file", "function", "op", "before", "after", "reason")
+
+
+def parse_equivalent(text):
+    """The entries of equivalent.txt: one JSON object per line (a `#` line
+    is a comment) with file, function, op, before, after and a reason, and
+    optionally `nth` (which of several identical mutants of the function)."""
+    entries = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError as e:
+            raise EquivalentError("equivalent.txt:%d: %s" % (number, e))
+        for field in REQUIRED:
+            if not isinstance(entry.get(field), str) or not entry[
+                    field].strip():
+                raise EquivalentError(
+                    "equivalent.txt:%d: %r needs a non-empty `%s`"
+                    % (number, line[:60], field))
+        entries.append(entry)
+    return entries
+
+
+def load_equivalent(path):
+    if not path or not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return parse_equivalent(f.read())
+
+
+def suppression(m, entries):
+    """The reason a mutant is a known equivalent, or None."""
+    for e in entries:
+        if (e["file"] == m["file"] and e["function"] == m["function"]
+                and e["op"] == m["op"]
+                and normalize(e["before"]) == normalize(m["before"])
+                and normalize(e["after"]) == normalize(m["replacement"])
+                and e.get("nth", m.get("nth", 1)) == m.get("nth", 1)):
+            return e["reason"]
+    return None
+
+
+def split_suppressed(mutants, entries):
+    """(live, suppressed): the mutants to run and those equivalent.txt
+    lists (each given its `reason`)."""
+    live, suppressed = [], []
+    for m in mutants:
+        reason = suppression(m, entries)
+        if reason:
+            suppressed.append(dict(m, reason=reason))
+        else:
+            live.append(m)
+    return live, suppressed
 
 
 # ---- changed code ---------------------------------------------------------
@@ -278,7 +373,8 @@ def parse_hunks(diff):
         first = int(m.group(1))
         count = 1 if m.group(2) is None else int(m.group(2))
         # A pure deletion (count 0) sits between lines first and first + 1.
-        ranges.append((first, first + count - 1) if count else (first, first + 1))
+        ranges.append((first, first + count - 1) if count
+                      else (first, first + 1))
     return ranges
 
 
@@ -303,8 +399,9 @@ def normalize_range(rev_range):
 
 def changed_hunks(workspace, rev_range, path):
     rev_range = normalize_range(rev_range)
-    diff = subprocess.run(["git", "diff", "-U0", "--no-color", rev_range, "--", path],
-                          cwd=workspace, capture_output=True, text=True, check=True).stdout
+    diff = subprocess.run(
+        ["git", "diff", "-U0", "--no-color", rev_range, "--", path],
+        cwd=workspace, capture_output=True, text=True, check=True).stdout
     return parse_hunks(diff)
 
 
@@ -318,20 +415,17 @@ def function_lines(fn, source):
 
 # ---- generate -------------------------------------------------------------
 
-def sh(cmd, cwd=None, check=True):
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, check=check)
-
-
 def bazel(workspace, *args, check=True):
-    return subprocess.run(["bazel", *args], cwd=workspace, capture_output=True,
-                          check=check)
+    return subprocess.run(["bazel", *args], cwd=workspace,
+                          capture_output=True, check=check)
 
 
 def prerequisites_args(target):
     """The bazel command that builds what compiling the target's sources
     needs and nothing else: generated headers (libfuse_config.h, ...) and
     the external sources, not the objects."""
-    return ["build", "--output_groups=compilation_prerequisites_INTERNAL_", target]
+    return ["build", "--output_groups=compilation_prerequisites_INTERNAL_",
+            target]
 
 
 def build_prerequisites(workspace, target):
@@ -339,7 +433,8 @@ def build_prerequisites(workspace, target):
     p = bazel(workspace, *prerequisites_args(target), check=False)
     if p.returncode != 0:
         sys.stderr.write(p.stderr.decode(errors="replace")[-2000:])
-        raise SystemExit("bazel could not build the compile prerequisites of %s" % target)
+        raise SystemExit(
+            "bazel could not build the compile prerequisites of %s" % target)
 
 
 def compile_command(workspace, target, source):
@@ -361,63 +456,71 @@ def compile_command(workspace, target, source):
     raise SystemExit("no compile action for %s in %s" % (source, target))
 
 
-def generate(args):
-    args.changed = getattr(args, "changed", None)
+def candidates(args):
+    """Every mutant of the scope, unsampled (restricted to the functions
+    the git range `args.changed` touches, if any)."""
     workspace = os.path.abspath(args.workspace)
-    execroot = bazel(workspace, "info", "execution_root").stdout.decode().strip()
+    execroot = bazel(workspace, "info",
+                     "execution_root").stdout.decode().strip()
+    arid = arid_lib.Arid.load(args.arid) if args.arid else None
     mutants = []
     for entry in read_scope(args.scope):
         source_path = os.path.join(workspace, entry["file"])
-        source = open(source_path, "rb").read().decode("latin-1")  # offsets are bytes
+        # Offsets are bytes.
+        source = open(source_path, "rb").read().decode("latin-1")
         base = compile_command(workspace, entry["target"], entry["file"])
         # The sources and generated headers must be in the execroot before
         # clang runs (a cold checkout has none of them).
         build_prerequisites(workspace, entry["target"])
-        cmd = base + ["-fsyntax-only", "-Xclang", "-ast-dump=json",
-                      "-Xclang", "-ast-dump-filter=dcfs::", "-x", "c++", entry["file"]]
         t = time.time()
-        p = subprocess.run(cmd, cwd=execroot, capture_output=True)
+        p = subprocess.run(ast_dump_command(base, entry["file"]),
+                           cwd=execroot, capture_output=True)
         if p.returncode != 0:
             sys.stderr.write(p.stderr.decode()[-2000:])
             raise SystemExit("clang failed on %s" % entry["file"])
-        print("%s: AST dump %d MB in %.0fs" % (entry["file"], len(p.stdout) >> 20,
-                                               time.time() - t), file=sys.stderr)
-        functions = parse_stream(p.stdout.decode("utf-8", "replace"), entry["file"])
-        seen = set()
+        print("%s: AST dump %d MB in %.0fs" % (
+            entry["file"], len(p.stdout) >> 20, time.time() - t),
+            file=sys.stderr)
+        functions = parse_stream(p.stdout.decode("utf-8", "replace"),
+                                 entry["file"])
         hunks = None
         if args.changed:
             hunks = changed_hunks(workspace, args.changed, entry["file"])
-        for fn in functions:
-            if not selected(fn, entry["rules"]):
-                continue
-            if hunks is not None:
-                lines = function_lines(fn, source)
-                if lines is None or not touches(lines, hunks):
-                    continue
-            for op, (s, e), repl, before in mutants_in(fn, source):
-                key = (entry["file"], s, e, repl)
-                if key in seen:
-                    continue
-                seen.add(key)
-                line = source.count("\n", 0, s) + 1
-                mutants.append({"id": len(mutants) + 1, "file": entry["file"],
-                                "function": fn.get("name"), "line": line, "op": op,
-                                "start": s, "end": e, "replacement": repl,
-                                "before": before})
+        mutants.extend(collect_mutants(functions, source, entry["file"],
+                                       entry["rules"], arid, hunks))
+    return mutants
+
+
+def number(mutants):
+    for i, m in enumerate(mutants, 1):
+        m["id"] = i
+    return mutants
+
+
+def count_by(mutants, field="operator"):
+    return dict(sorted(collections.Counter(m[field] for m in mutants).items()))
+
+
+def generate(args):
+    args.changed = getattr(args, "changed", None)
+    print("seed %d (--seed), per function %d (--per-function)" % (
+        args.seed, args.per_function), file=sys.stderr)
+    found = candidates(args)
+    mutants = number(sample(found, args.seed, args.per_function))
     json.dump(mutants, open(args.out, "w"), indent=1)
-    by = {}
-    for m in mutants:
-        by[m["op"].split()[0]] = by.get(m["op"].split()[0], 0) + 1
-    print("%d mutants: %s" % (len(mutants), by), file=sys.stderr)
+    print("%d candidates, %d sampled: %s" % (
+        len(found), len(mutants), count_by(mutants)), file=sys.stderr)
 
 
 # ---- run ------------------------------------------------------------------
 
 def copy_tree(workspace, dest):
-    files = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "-z"],
-                           cwd=workspace, capture_output=True, check=True).stdout
-    tar = subprocess.Popen(["tar", "--null", "-T", "-", "-cf", "-"], cwd=workspace,
-                           stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    files = subprocess.run(
+        ["git", "ls-files", "-co", "--exclude-standard", "-z"],
+        cwd=workspace, capture_output=True, check=True).stdout
+    tar = subprocess.Popen(["tar", "--null", "-T", "-", "-cf", "-"],
+                           cwd=workspace, stdin=subprocess.PIPE,
+                           stdout=subprocess.PIPE)
     ext = subprocess.Popen(["tar", "-x", "-C", dest], stdin=tar.stdout)
     tar.stdin.write(files)
     tar.stdin.close()
@@ -443,27 +546,102 @@ def exit_code(results, fail_on_survivor):
     return 0
 
 
+# ---- reporting ------------------------------------------------------------
+
+def operator_of(r):
+    return r.get("operator") or r["op"].split()[0]
+
+
+def summarize(results, wall=None):
+    """{operators: {name: {status: n}}, total: {status: n}, run, seconds,
+    per_hour}: `seconds` is the time spent on mutants that ran, and
+    `per_hour` mutants per hour of it (per runner, so a sharded sweep's
+    figure is one runner's)."""
+    per = collections.defaultdict(collections.Counter)
+    total = collections.Counter()
+    for r in results:
+        per[operator_of(r)][r["status"]] += 1
+        total[r["status"]] += 1
+    ran = [r for r in results if r["status"] != "suppressed"]
+    seconds = wall if wall else sum(r.get("seconds", 0) for r in ran)
+    return {"operators": {k: dict(v) for k, v in sorted(per.items())},
+            "total": dict(total), "run": len(ran),
+            "seconds": round(seconds),
+            "per_hour": round(len(ran) * 3600 / seconds, 1) if seconds else 0}
+
+
+def format_summary(summary, not_run=0):
+    """The summary as a Markdown table."""
+    lines = ["| operator | " + " | ".join(STATUSES) + " | total |",
+             "|---|" + "---:|" * (len(STATUSES) + 1)]
+    rows = list(summary["operators"].items()) + [("**all**",
+                                                  summary["total"])]
+    for name, counts in rows:
+        cells = [str(counts.get(s, 0)) for s in STATUSES]
+        lines.append("| %s | %s | %d |" % (
+            name, " | ".join(cells), sum(counts.values())))
+    lines.append("")
+    lines.append("%d mutants ran in %ds: %.1f mutants per hour%s" % (
+        summary["run"], summary["seconds"], summary["per_hour"],
+        "; %d not run (over the budget)" % not_run if not_run else ""))
+    return "\n".join(lines)
+
+
+def one_line(text, limit=70):
+    text = normalize(text)
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def format_survivors(results):
+    """Survivors (and errors) grouped by function: a header line per
+    function, then `SURVIVOR file:line in function: operator: diff` for each,
+    the diff being the tokens that changed."""
+    lines = []
+    groups = collections.defaultdict(list)
+    for r in results:
+        if r["status"] == "survived":
+            groups[(r["file"], r["function"])].append(r)
+    for (path, function), rs in sorted(groups.items()):
+        lines.append("== %s %s: %d survivor%s" % (
+            path, function, len(rs), "" if len(rs) == 1 else "s"))
+        for r in sorted(rs, key=lambda r: r["line"]):
+            old, new = operators.token_diff(r["before"], r["replacement"])
+            lines.append("SURVIVOR %s:%d in %s: %s: `%s` -> `%s`" % (
+                r["file"], r["line"], function, r["op"], one_line(old),
+                one_line(new)))
+    for r in results:
+        if r["status"] == "error":
+            lines.append("ERROR mutant %d %s:%d: %s" % (
+                r["id"], r["file"], r["line"],
+                r.get("tail", "")[-300:].replace("\n", " ")))
+    return lines
+
+
 def run(args):
     workspace = os.path.abspath(args.workspace)
     mutants = json.load(open(args.mutants))
     if args.only:
         wanted = {int(x) for x in args.only.split(",")}
         mutants = [m for m in mutants if m["id"] in wanted]
-    if args.sample and args.sample < len(mutants):
-        random.Random(args.seed).shuffle(mutants)
-        mutants = sorted(mutants[:args.sample], key=lambda m: m["id"])
     if args.shard:
         k, n = (int(x) for x in args.shard.split("/"))
         mutants = shard_of(mutants, k, n)
+    mutants, suppressed = split_suppressed(
+        mutants, load_equivalent(getattr(args, "equivalent", "")))
+    if args.sample and args.sample < len(mutants):
+        mutants = [m for m in take_turns(mutants, args.seed)][:args.sample]
+        mutants.sort(key=lambda m: m["id"])
     scratch = tempfile.mkdtemp(prefix="dcfs-mutate.")
     src = os.path.join(scratch, "src")
     os.makedirs(src)
     copy_tree(workspace, src)
     # Phases, in order; a mutant that survives one goes on to the next. (A
     # size filter such as --config=fast applies to every target of its
-    # invocation, so trace validation, a medium test, needs a phase of its own.)
+    # invocation, so trace validation, a medium test, needs a phase of its
+    # own.)
     phases = [ph.split() for ph in args.killers.split(";")]
-    results = []
+    results = [dict(m, status="suppressed", seconds=0, killer="")
+               for m in suppressed]
     started = time.time()
     try:
         for i, m in enumerate(mutants, 1):
@@ -471,7 +649,8 @@ def run(args):
             original = open(path, "rb").read()
             text = original.decode("latin-1")
             if text[m["start"]:m["end"]] != m["before"]:
-                raise SystemExit("mutant %d no longer matches %s (regenerate)" % (m["id"], m["file"]))
+                raise SystemExit("mutant %d no longer matches %s "
+                                 "(regenerate)" % (m["id"], m["file"]))
             mutated = text[:m["start"]] + m["replacement"] + text[m["end"]:]
             open(path, "wb").write(mutated.encode("latin-1"))
             t = time.time()
@@ -480,69 +659,99 @@ def run(args):
                 for killers in phases:
                     try:
                         p = subprocess.run(
-                            [args.bazel, "test", "--notest_keep_going", "--test_output=errors",
-                             "--jobs=2", "--local_test_jobs=2"] + killers,
-                            cwd=src, capture_output=True, timeout=args.timeout)
+                            [args.bazel, "test", "--notest_keep_going",
+                             "--test_output=errors", "--jobs=2",
+                             "--local_test_jobs=2"] + killers,
+                            cwd=src, capture_output=True,
+                            timeout=args.timeout)
                         rc = p.returncode
-                        tail = (p.stdout + p.stderr).decode("utf-8", "replace")
+                        tail = (p.stdout + p.stderr).decode("utf-8",
+                                                            "replace")
                     except subprocess.TimeoutExpired:
-                        rc, tail = 3, "mutant run timed out (counted as killed: a hang)"
+                        rc, tail = 3, ("mutant run timed out (counted as "
+                                       "killed: a hang)")
                     if rc != 0:
                         break
             finally:
                 open(path, "wb").write(original)
             # Bazel: 0 all passed, 3 a test failed or timed out, 1 a build
             # error (the mutant does not compile), 4 no test ran.
-            status = {0: "survived", 3: "killed", 1: "invalid"}.get(rc, "error")
+            status = {0: "survived", 3: "killed", 1: "invalid"}.get(
+                rc, "error")
             killer = ""
             if status == "killed":
                 f = re.findall(r"^(?:FAIL|TIMEOUT):\s+(//\S+)", tail, re.M)
                 killer = f[0] if f else ""
-            r = dict(m, status=status, seconds=round(time.time() - t, 1), killer=killer)
+            r = dict(m, status=status, seconds=round(time.time() - t, 1),
+                     killer=killer)
             if status == "error":
                 r["tail"] = tail[-1500:]
             if args.show_output and status == "killed":
                 failing = [l for l in tail.splitlines() if re.search(
-                    r"\[  FAILED  \]|Failure|Expected|Actual|Value of|FAIL|failed", l)]
-                print("\n".join("    | " + l[:200] for l in failing[:12]), file=sys.stderr)
+                    r"\[  FAILED  \]|Failure|Expected|Actual|Value of|FAIL"
+                    r"|failed", l)]
+                print("\n".join("    | " + l[:200] for l in failing[:12]),
+                      file=sys.stderr)
             results.append(r)
             print("[%d/%d] mutant %d %s:%d %s: %s (%.0fs)%s" % (
-                i, len(mutants), m["id"], m["file"], m["line"], m["op"], status,
-                r["seconds"], " by " + killer if killer else ""), file=sys.stderr)
+                i, len(mutants), m["id"], m["file"], m["line"], m["op"],
+                status, r["seconds"], " by " + killer if killer else ""),
+                file=sys.stderr)
             json.dump(results, open(args.result, "w"), indent=1)
     finally:
         subprocess.run([args.bazel, "shutdown"], cwd=src, capture_output=True)
         shutil.rmtree(scratch, ignore_errors=True)
     wall = time.time() - started
-    count = lambda s: sum(1 for r in results if r["status"] == s)
-    print("mutants %d: killed %d, survived %d, invalid %d, error %d; wall %.0fs (%.0fs each)" % (
-        len(results), count("killed"), count("survived"), count("invalid"), count("error"),
-        wall, wall / max(len(results), 1)), file=sys.stderr)
-    lines = []
-    for r in results:
-        if r["status"] == "survived":
-            lines.append("SURVIVOR %s:%d in %s: %s: `%s` -> `%s`" % (
-                r["file"], r["line"], r["function"], r["op"], r["before"][:70].replace("\n", " "),
-                r["replacement"][:70].replace("\n", " ")))
-        elif r["status"] == "error":
-            lines.append("ERROR mutant %d %s:%d: %s" % (r["id"], r["file"], r["line"],
-                                                      r.get("tail", "")[-300:].replace("\n", " ")))
+    if not mutants:
+        json.dump(results, open(args.result, "w"), indent=1)
+    summary = summarize(results, wall if mutants else None)
+    table = format_summary(summary, getattr(args, "not_run", 0))
+    print(table, file=sys.stderr)
+    lines = format_survivors(results)
     print("\n".join(lines))
     if args.survivors_out:
         with open(args.survivors_out, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + ("\n" if lines else ""))
+    if getattr(args, "summary_out", ""):
+        with open(args.summary_out, "w", encoding="utf-8") as f:
+            f.write(table + "\n")
     return exit_code(results, args.fail_on_survivor)
 
 
-def main():
+def report(args):
+    """Print the table and the grouped survivors of result files."""
+    results = []
+    for path in args.results:
+        with open(path, encoding="utf-8") as f:
+            results.extend(json.load(f))
+    print("## Mutation results\n")
+    print(format_summary(summarize(results)))
+    lines = format_survivors(results)
+    print("\n## Survivors by function (%d)\n" % sum(
+        1 for l in lines if l.startswith("SURVIVOR")))
+    print("```")
+    print("\n".join(lines))
+    print("```")
+    return 0
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
     workspace = os.environ.get("BUILD_WORKSPACE_DIRECTORY", ".")
-    scope = os.path.join(workspace, "tools/mutation/scope.txt")
+    here = os.path.join(workspace, "tools/mutation")
+    scope = os.path.join(here, "scope.txt")
+    arid = os.path.join(here, "arid.txt")
+    equivalent = os.path.join(here, "equivalent.txt")
+    killers = "--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test"
     g = sub.add_parser("generate")
     g.add_argument("--workspace", default=workspace)
     g.add_argument("--scope", default=scope)
+    g.add_argument("--arid", default=arid)
     g.add_argument("--out", required=True)
+    g.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    g.add_argument("--per-function", type=int, default=DEFAULT_PER_FUNCTION,
+                   help="at most this many mutants per function (0: no bound)")
     g.add_argument("--changed", default="", metavar="RANGE",
                    help="only functions whose lines this git range touches")
     r = sub.add_parser("run")
@@ -550,41 +759,61 @@ def main():
     r.add_argument("--mutants", required=True)
     r.add_argument("--result", required=True)
     r.add_argument("--sample", type=int, default=0)
-    r.add_argument("--seed", type=int, default=1)
+    r.add_argument("--seed", type=int, default=DEFAULT_SEED)
     r.add_argument("--only", default="")
     r.add_argument("--shard", default="", metavar="K/N",
-                   help="the K-th of N contiguous id ranges (the scheduled job's matrix)")
+                   help="the K-th of N contiguous id ranges (the scheduled "
+                   "job's matrix)")
+    r.add_argument("--equivalent", default=equivalent)
     r.add_argument("--fail-on-survivor", action="store_true")
     r.add_argument("--survivors-out", default="")
+    r.add_argument("--summary-out", default="")
     r.add_argument("--bazel", default="bazel")
     r.add_argument("--timeout", type=int, default=1800)
     r.add_argument("--show-output", action="store_true",
-                   help="print the failing lines of the test that killed a mutant")
-    r.add_argument("--killers", default="--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test")
+                   help="print the failing lines of the test that killed a "
+                   "mutant")
+    r.add_argument("--killers", default=killers)
     c = sub.add_parser("changed", help="per-push mode (see the docstring)")
     c.add_argument("--workspace", default=workspace)
     c.add_argument("--scope", default=scope)
+    c.add_argument("--arid", default=arid)
+    c.add_argument("--equivalent", default=equivalent)
     c.add_argument("--range", required=True, dest="changed")
-    c.add_argument("--max-mutants", type=int, default=30)
-    c.add_argument("--seed", type=int, default=1)
+    c.add_argument("--max-mutants", type=int, default=DEFAULT_BUDGET,
+                   help="the per-push budget")
+    c.add_argument("--seed", type=int, default=DEFAULT_SEED)
     c.add_argument("--result", required=True)
     c.add_argument("--fail-on-survivor", action="store_true")
     c.add_argument("--survivors-out", default="")
+    c.add_argument("--summary-out", default="")
     c.add_argument("--timeout", type=int, default=1800)
     c.add_argument("--bazel", default="bazel")
-    c.add_argument("--killers", default="--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test")
-    a = ap.parse_args()
+    c.add_argument("--killers", default=killers)
+    p = sub.add_parser("report", help="merge result files")
+    p.add_argument("results", nargs="+")
+    a = ap.parse_args(argv)
     if a.cmd == "generate":
         generate(a)
         return 0
+    if a.cmd == "report":
+        return report(a)
     if a.cmd == "changed":
-        a.out = a.result + ".mutants.json"
-        generate(a)
-        if not json.load(open(a.out)):
+        print("seed %d, budget %d" % (a.seed, a.max_mutants), file=sys.stderr)
+        found = sample(candidates(a), a.seed)
+        live, suppressed = split_suppressed(
+            found, load_equivalent(a.equivalent))
+        chosen, a.not_run = pick_budget(live, a.max_mutants, a.seed)
+        print("%d mutants in the changed functions: %d suppressed, %d to "
+              "run, %d not run" % (len(found), len(suppressed), len(chosen),
+                                   a.not_run), file=sys.stderr)
+        if not found:
             print("no mutants: the range touches no function in scope")
             return 0
+        a.out = a.result + ".mutants.json"
+        json.dump(number(chosen + suppressed), open(a.out, "w"), indent=1)
         a.mutants, a.only, a.shard = a.out, "", ""
-        a.sample = a.max_mutants
+        a.sample = 0
         a.show_output = False
         return run(a)
     return run(a)

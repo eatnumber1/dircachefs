@@ -11,61 +11,234 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 
 import mutate
+import operators
 
-SOURCE = "if (!ok) { Mark(1); x = Kind::kFound; } y = a ? b : c;"
-
-
-def expr(kind, start, text, **kw):
-    first = mutate.TOKEN.match(text).group(0)
-    last = mutate.TOKEN.findall(text)[-1]
-    node = {"kind": kind, "_main": True,
-            "range": {"begin": {"offset": start, "tokLen": len(first)},
-                      "end": {"offset": start + len(text) - len(last), "tokLen": len(last)}}}
-    node.update(kw)
-    return node
+ARGS = {}  # arid, equivalent: filled from the command line
 
 
-class OperatorsTest(unittest.TestCase):
+def read_text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
 
-    def function(self, *stmts):
-        return {"kind": "FunctionDecl", "name": "f", "_main": True,
-                "inner": [{"kind": "CompoundStmt", "_main": True, "inner": list(stmts)}]}
 
-    def test_negates_an_if_condition(self):
-        cond = expr("UnaryOperator", SOURCE.index("!ok"), "!ok")
-        found = mutate.mutants_in(self.function(
-            {"kind": "IfStmt", "_main": True, "inner": [cond]}), SOURCE)
-        self.assertEqual([(m[0], m[2], m[3]) for m in found],
-                         [("negate-if", "!(!ok)", "!ok")])
+def read_json(path):
+    return json.loads(read_text(path))
 
-    def test_deletes_a_status_phase_call_and_a_void_one(self):
-        def call(qt, name, start, text):
-            c = expr("CallExpr", start, text, type={"qualType": qt})
-            c["inner"] = [{"kind": "DeclRefExpr", "referencedDecl": {"name": name}}]
-            return c
-        found = mutate.mutants_in(self.function(
-            call("absl::Status", "MarkThing", SOURCE.index("Mark(1)"), "Mark(1)"),
-            call("void", "EndThing", SOURCE.index("Mark(1)"), "Mark(1)"),
-            call("absl::Status", "Other", SOURCE.index("Mark(1)"), "Mark(1)"),
-            call("absl::StatusOr<int>", "BeginThing", SOURCE.index("Mark(1)"), "Mark(1)")), SOURCE)
-        self.assertEqual([m[2] for m in found], ["absl::OkStatus()", "(void)0"])
 
-    def test_swaps_present_and_absent(self):
-        ref = expr("DeclRefExpr", SOURCE.index("Kind::kFound"), "Kind::kFound",
-                   referencedDecl={"kind": "EnumConstantDecl", "name": "kFound"})
-        found = mutate.mutants_in(self.function(ref), SOURCE)
-        self.assertEqual([m[2] for m in found], ["Kind::kNegative"])
+def mutant(function="f", line=1, operator="relational", before="<",
+           after="<=", nth=1, file="dcfs/a.cc", op=None, **kw):
+    m = {"file": file, "function": function, "line": line,
+         "operator": operator, "op": op or operator, "start": line * 10,
+         "end": line * 10 + len(before), "replacement": after,
+         "before": before, "nth": nth}
+    m["key"] = mutate.stable_key(m)
+    m.update(kw)
+    return m
 
-    def test_skips_a_span_that_does_not_start_at_a_token(self):
-        self.assertFalse(mutate.sane((2, 5, 1), "a  b c"))
-        self.assertTrue(mutate.sane((0, 1, 1), "a  b c"))
+
+class ScopeTest(unittest.TestCase):
 
     def test_scope_rules(self):
-        fn = self.function()
+        fn = {"kind": "FunctionDecl", "name": "f"}
         self.assertTrue(mutate.selected(fn, [("all", [])]))
         self.assertTrue(mutate.selected(fn, [("names", ["f", "g"])]))
         self.assertFalse(mutate.selected(fn, [("names", ["g"])]))
         self.assertFalse(mutate.selected(fn, [("calls", ["^Mark"])]))
+
+    def test_the_real_scope_reads_and_covers_the_swept_files(self):
+        here = os.path.dirname(ARGS["arid"])
+        files = [e["file"] for e in mutate.read_scope(
+            os.path.join(here, "scope.txt"))]
+        self.assertIn("dcfs/dir_cache_fs.cc", files)
+        self.assertIn("dcfs/backing.cc", files)
+
+    def test_one_token_diff(self):
+        self.assertEqual(operators.token_diff("a < b", "a <= b"),
+                         ("<", "<="))
+        self.assertEqual(operators.token_diff("x", "!(x)"), ("x", "! ( x )"))
+        self.assertEqual(operators.token_diff("m.End()", "(void)0"),
+                         ("m . End ( )", "( void ) 0"))
+
+
+class SamplingTest(unittest.TestCase):
+
+    def mutants(self):
+        out = []
+        for fn in "ab":
+            for line in range(1, 9):
+                for operator in ("relational", "constant", "negate"):
+                    out.append(mutant(function=fn, line=line,
+                                      operator=operator,
+                                      before="x%d" % line,
+                                      after=operator, file="dcfs/%s.cc" % fn))
+        return out
+
+    def test_at_most_one_mutant_per_source_line(self):
+        picked = mutate.sample(self.mutants(), seed=1)
+        lines = [(m["file"], m["line"]) for m in picked]
+        self.assertEqual(len(lines), len(set(lines)))
+        self.assertEqual(len(picked), 16)
+
+    def test_the_per_function_sample_is_bounded_and_covers_operators(self):
+        picked = mutate.sample(self.mutants(), seed=1, per_function=3)
+        for fn in "ab":
+            mine = [m for m in picked if m["function"] == fn]
+            self.assertEqual(len(mine), 3)
+        # The operators take turns: with the lines each holding one pick,
+        # a cut of three takes one of each when each is available.
+        by_operator = {m["operator"] for m in picked if m["function"] == "a"}
+        self.assertGreaterEqual(len(by_operator), 2)
+
+    def test_the_same_seed_gives_the_same_sample_and_another_differs(self):
+        a = mutate.sample(self.mutants(), seed=1, per_function=3)
+        b = mutate.sample(self.mutants(), seed=1, per_function=3)
+        c = mutate.sample(self.mutants(), seed=2, per_function=3)
+        self.assertEqual([m["key"] for m in a], [m["key"] for m in b])
+        self.assertNotEqual([m["key"] for m in a], [m["key"] for m in c])
+
+    def test_a_mutant_keeps_its_rank_when_code_elsewhere_moves(self):
+        m = mutant()
+        moved = dict(m, line=99, start=990, end=991)
+        self.assertEqual(mutate.rank(1, m), mutate.rank(1, moved))
+        self.assertNotEqual(mutate.rank(1, m), mutate.rank(2, m))
+
+    def test_the_budget_picks_deterministically_and_reports_the_surplus(self):
+        ms = mutate.sample(self.mutants(), seed=1)
+        chosen, not_run = mutate.pick_budget(ms, 5, seed=1)
+        again, _ = mutate.pick_budget(ms, 5, seed=1)
+        self.assertEqual(len(chosen), 5)
+        self.assertEqual(not_run, len(ms) - 5)
+        self.assertEqual(chosen, again)
+        self.assertGreaterEqual(len({m["operator"] for m in chosen}), 3)
+
+    def test_a_budget_larger_than_the_mutants_runs_them_all(self):
+        ms = mutate.sample(self.mutants(), seed=1)
+        chosen, not_run = mutate.pick_budget(ms, 1000, seed=1)
+        self.assertEqual((len(chosen), not_run), (len(ms), 0))
+
+
+class EquivalentTest(unittest.TestCase):
+
+    def entry(self, **kw):
+        e = {"file": "dcfs/a.cc", "function": "f", "op": "delete-call End",
+             "before": "m.End()", "after": "(void)0", "reason": "why"}
+        e.update(kw)
+        return json.dumps(e)
+
+    def test_an_entry_without_a_reason_is_rejected(self):
+        for bad in (self.entry(reason=""), self.entry(reason="  "),
+                    '{"file": "a", "function": "f", "op": "o", '
+                    '"before": "b", "after": "c"}'):
+            with self.assertRaises(mutate.EquivalentError):
+                mutate.parse_equivalent(bad)
+
+    def test_a_malformed_line_is_rejected(self):
+        with self.assertRaises(mutate.EquivalentError):
+            mutate.parse_equivalent("not json")
+
+    def test_comments_and_blank_lines_are_skipped(self):
+        self.assertEqual(
+            len(mutate.parse_equivalent("# c\n\n" + self.entry() + "\n")), 1)
+
+    def test_the_real_file_parses_and_every_entry_has_a_reason(self):
+        with open(ARGS["equivalent"], encoding="utf-8") as f:
+            entries = mutate.parse_equivalent(f.read())
+        for e in entries:
+            self.assertTrue(e["reason"].strip())
+
+    def test_a_mutant_is_matched_by_text_not_by_line(self):
+        entries = mutate.parse_equivalent(self.entry())
+        m = mutant(op="delete-call End", before="m.End()", after="(void)0",
+                   line=5)
+        self.assertEqual(mutate.suppression(m, entries), "why")
+        self.assertEqual(
+            mutate.suppression(dict(m, line=500), entries), "why")
+        self.assertIsNone(mutate.suppression(dict(m, function="g"), entries))
+        self.assertIsNone(mutate.suppression(dict(m, op="negate-if"),
+                                             entries))
+        self.assertIsNone(
+            mutate.suppression(dict(m, replacement="x"), entries))
+
+    def test_nth_names_one_of_several_identical_mutants(self):
+        entries = mutate.parse_equivalent(self.entry(nth=2))
+        m = mutant(op="delete-call End", before="m.End()", after="(void)0")
+        self.assertIsNone(mutate.suppression(dict(m, nth=1), entries))
+        self.assertEqual(mutate.suppression(dict(m, nth=2), entries), "why")
+
+    def test_split_suppressed(self):
+        entries = mutate.parse_equivalent(self.entry())
+        eq = mutant(op="delete-call End", before="m.End()", after="(void)0")
+        other = mutant()
+        live, suppressed = mutate.split_suppressed([eq, other], entries)
+        self.assertEqual(live, [other])
+        self.assertEqual([m["reason"] for m in suppressed], ["why"])
+
+
+class ReportTest(unittest.TestCase):
+
+    def results(self):
+        def r(status, operator, line=1, fn="f", seconds=60, before="a < b",
+              after="a <= b"):
+            return dict(mutant(function=fn, line=line, operator=operator,
+                               before=before, after=after, id=line),
+                        status=status, seconds=seconds, killer="")
+        return [r("killed", "relational", 1), r("survived", "relational", 2),
+                r("survived", "relational", 3, fn="g"),
+                r("invalid", "constant", 4), r("killed", "constant", 5),
+                r("suppressed", "constant", 6, seconds=0)]
+
+    def test_the_summary_counts_per_operator_and_per_hour(self):
+        s = mutate.summarize(self.results())
+        self.assertEqual(s["operators"]["relational"],
+                         {"killed": 1, "survived": 2})
+        self.assertEqual(s["operators"]["constant"],
+                         {"invalid": 1, "killed": 1, "suppressed": 1})
+        self.assertEqual(s["total"]["suppressed"], 1)
+        self.assertEqual(s["run"], 5)       # suppressed ones did not run
+        self.assertEqual(s["per_hour"], 60.0)  # 5 mutants in 300 s
+
+    def test_a_wall_time_replaces_the_sum_of_mutant_times(self):
+        s = mutate.summarize(self.results(), wall=600)
+        self.assertEqual(s["per_hour"], 30.0)
+
+    def test_the_table_has_a_row_per_operator_and_the_rate(self):
+        text = mutate.format_summary(mutate.summarize(self.results()),
+                                     not_run=4)
+        self.assertIn("| relational | 1 | 2 | 0 | 0 | 0 | 3 |", text)
+        self.assertIn("| constant | 1 | 0 | 1 | 1 | 0 | 3 |", text)
+        self.assertIn("| **all** | 2 | 2 | 1 | 1 | 0 | 6 |", text)
+        self.assertIn("60.0 mutants per hour", text)
+        self.assertIn("4 not run", text)
+
+    def test_survivors_are_grouped_by_function_with_a_one_token_diff(self):
+        lines = mutate.format_survivors(self.results())
+        self.assertEqual(lines, [
+            "== dcfs/a.cc f: 1 survivor",
+            "SURVIVOR dcfs/a.cc:2 in f: relational: `<` -> `<=`",
+            "== dcfs/a.cc g: 1 survivor",
+            "SURVIVOR dcfs/a.cc:3 in g: relational: `<` -> `<=`"])
+
+    def test_a_result_of_an_older_run_has_no_operator_field(self):
+        r = dict(self.results()[0])
+        del r["operator"]
+        r["op"] = "negate-if"
+        self.assertEqual(list(mutate.summarize([r])["operators"]),
+                         ["negate-if"])
+
+    def test_report_merges_result_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            paths = []
+            for i, rs in enumerate((self.results()[:3], self.results()[3:])):
+                paths.append(os.path.join(d, "r%d.json" % i))
+                with open(paths[-1], "w") as f:
+                    json.dump(rs, f)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(
+                    mutate.report(mutate.argparse.Namespace(results=paths)),
+                    0)
+        self.assertIn("| **all** | 2 | 2 | 1 | 1 | 0 | 6 |", out.getvalue())
+        self.assertIn("Survivors by function (2)", out.getvalue())
 
 
 DIFF = """diff --git a/dcfs/x.cc b/dcfs/x.cc
@@ -180,6 +353,7 @@ class RunEndToEndTest(unittest.TestCase):
                     "exit 0\n")
         os.chmod(self.bazel, os.stat(self.bazel).st_mode | stat.S_IXUSR)
         self.mutants = os.path.join(self.dir, "mutants.json")
+        self.equivalent = ""
 
     def write_mutants(self, replacements):
         ms = [{"id": i, "file": "dcfs/a.cc", "function": "f", "line": 1, "op": "negate-if",
@@ -193,35 +367,61 @@ class RunEndToEndTest(unittest.TestCase):
             workspace=self.repo, mutants=self.mutants, result=os.path.join(self.dir, "res.json"),
             sample=0, seed=1, only="", shard="", timeout=60, killers="//dcfs:x_test",
             fail_on_survivor="--fail-on-survivor" in extra, show_output=False,
-            survivors_out=os.path.join(self.dir, "survivors.txt"), bazel=self.bazel)
+            survivors_out=os.path.join(self.dir, "survivors.txt"),
+            bazel=self.bazel, equivalent=self.equivalent,
+            summary_out=os.path.join(self.dir, "summary.md"))
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             return mutate.run(args)
 
     def test_a_survivor_is_a_finding_for_the_schedule_and_a_failure_per_push(self):
         self.write_mutants(["KILL", "ok", "KILL"])
         self.assertEqual(self.run_tool(), 0)
-        survivors = open(os.path.join(self.dir, "survivors.txt")).read()
+        survivors = read_text(os.path.join(self.dir, "survivors.txt"))
         self.assertIn("SURVIVOR dcfs/a.cc:1 in f", survivors)
         self.assertEqual(survivors.count("SURVIVOR"), 1)
-        results = json.load(open(os.path.join(self.dir, "res.json")))
+        results = read_json(os.path.join(self.dir, "res.json"))
         self.assertEqual([r["status"] for r in results], ["killed", "survived", "killed"])
         self.assertEqual(self.run_tool("--fail-on-survivor"), 1)
 
     def test_no_survivor_passes_per_push(self):
         self.write_mutants(["KILL", "KILL"])
         self.assertEqual(self.run_tool("--fail-on-survivor"), 0)
-        self.assertEqual(open(os.path.join(self.dir, "survivors.txt")).read(), "")
+        self.assertEqual(read_text(os.path.join(self.dir, "survivors.txt")), "")
 
     def test_a_tooling_error_fails_both_modes(self):
         self.write_mutants(["KILL", "BAD"])
         self.assertEqual(self.run_tool(), 2)
         self.assertEqual(self.run_tool("--fail-on-survivor"), 2)
 
+    def test_a_suppressed_mutant_is_not_run_and_counted_apart(self):
+        self.write_mutants(["KILL", "ok", "BAD"])
+        path = os.path.join(self.dir, "equivalent.txt")
+        with open(path, "w") as f:
+            f.write(json.dumps({
+                "file": "dcfs/a.cc", "function": "f", "op": "negate-if",
+                "before": "XXXX", "after": "BAD", "reason": "never runs"}))
+        self.equivalent = path
+        self.assertEqual(self.run_tool("--fail-on-survivor"), 1)  # not 2
+        results = read_json(os.path.join(self.dir, "res.json"))
+        self.assertEqual(sorted(r["status"] for r in results),
+                         ["killed", "suppressed", "survived"])
+        suppressed = [r for r in results if r["status"] == "suppressed"][0]
+        self.assertEqual(suppressed["reason"], "never runs")
+        summary = read_text(os.path.join(self.dir, "summary.md"))
+        self.assertIn("| negate-if | 1 | 1 | 0 | 1 | 0 | 3 |", summary)
+
     def test_a_shard_runs_only_its_range(self):
         self.write_mutants(["ok", "ok", "ok", "ok"])
-        args_ids = [m["id"] for m in mutate.shard_of(json.load(open(self.mutants)), 2, 2)]
+        args_ids = [m["id"] for m in mutate.shard_of(read_json(self.mutants), 2, 2)]
         self.assertEqual(args_ids, [3, 4])
 
 
 if __name__ == "__main__":
-    unittest.main()
+    rest = []
+    for arg in sys.argv[1:]:
+        key, eq, value = arg.partition("=")
+        if eq and key in ("arid", "equivalent"):
+            ARGS[key] = value
+        else:
+            rest.append(arg)
+    unittest.main(argv=[sys.argv[0]] + rest)

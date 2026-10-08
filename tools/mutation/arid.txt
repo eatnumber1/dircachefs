@@ -1,0 +1,14 @@
+# Arid nodes (plan step 26.5d; arid.py says what each rule means): code in
+# which a mutant changes nothing a test can observe, so it could only ever
+# survive. A rule is `kind NAME... | reason`; every rule needs its reason
+# (arid_test.py checks).
+
+macro LOG VLOG PLOG DLOG LOG_IF LOG_EVERY_N LOG_EVERY_N_SEC LOG_FIRST_N LOG_EVERY_POW_2 DCHECK DCHECK_EQ DCHECK_NE DCHECK_LT DCHECK_LE DCHECK_GT DCHECK_GE | Logging and debug-only checks: the text of a log line is not behavior (the conditions of LOG_IF and friends only decide whether a line is written), and DCHECK does not exist in the optimized binary.
+
+macro-stream CHECK QCHECK CHECK_EQ CHECK_NE CHECK_LT CHECK_LE CHECK_GT CHECK_GE | The condition of a CHECK is behavior (it aborts) and is mutated; the message streamed after it is only text.
+
+function AbslStringify ToString DebugString | Diagnostic strings: tested for their fields (docs/style.md), not for their bytes, and no protocol decision reads them.
+
+function-regex ForTesting$|^TestOnly | Hooks for tests: a mutant there changes the test, not the protocol.
+
+stream-head Builder$ | The message streamed into an error builder (`NotFoundErrorBuilder() << "no filesystem " << x`) is text; the builder's code is the status, which the return mutants cover.

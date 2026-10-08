@@ -15,3 +15,8 @@ file dcfs/metadata_cache.cc //dcfs:metadata_cache
 file dcfs/dir_cache_fs.cc //dcfs:dir_cache_fs
   calls ^(Begin|End|Mark)[A-Za-z]*$
   names Forget ForgetRemoved Release ReconcileWritten SyncBackingNow MaybeSyncBacking HoldForRemoval RetireRemoved RefreshAttrsOf TakeWritten
+
+# Step 26.5d: the backing-filesystem layer (the mutations' syscalls and the
+# identity checks).
+file dcfs/backing.cc //dcfs:backing
+  all
