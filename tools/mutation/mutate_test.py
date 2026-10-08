@@ -337,14 +337,17 @@ class ChangedTest(unittest.TestCase):
 
     def test_hunks_are_new_file_line_ranges(self):
         # A pure deletion sits between its line and the next.
-        self.assertEqual(mutate.parse_hunks(DIFF), [(10, 12), (41, 41), (60, 61)])
+        self.assertEqual(mutate.parse_hunks(DIFF),
+                         [(10, 12), (41, 41), (60, 61)])
 
     def test_a_function_is_touched_when_a_hunk_overlaps_its_lines(self):
         hunks = mutate.parse_hunks(DIFF)
-        self.assertTrue(mutate.touches((1, 10), hunks))    # the first line of a hunk
+        # the first line of a hunk
+        self.assertTrue(mutate.touches((1, 10), hunks))
         self.assertTrue(mutate.touches((12, 30), hunks))   # the last
         self.assertTrue(mutate.touches((41, 41), hunks))
-        self.assertTrue(mutate.touches((55, 60), hunks))   # a deletion after line 60
+        # a deletion after line 60
+        self.assertTrue(mutate.touches((55, 60), hunks))
         self.assertFalse(mutate.touches((13, 40), hunks))  # between hunks
         self.assertFalse(mutate.touches((62, 90), hunks))
         self.assertFalse(mutate.touches((1, 9), hunks))
@@ -357,7 +360,8 @@ class ChangedTest(unittest.TestCase):
 
     def test_the_range_of_a_new_branch_is_its_tip_against_the_parent(self):
         tip = "abc123"
-        self.assertEqual(mutate.normalize_range("%s..%s" % ("0" * 40, tip)), "abc123~1..abc123")
+        self.assertEqual(mutate.normalize_range("%s..%s" % ("0" * 40, tip)),
+                         "abc123~1..abc123")
         self.assertEqual(mutate.normalize_range("..abc123"), "abc123~1..abc123")
         self.assertEqual(mutate.normalize_range("a..b"), "a..b")
 
@@ -367,11 +371,12 @@ class ChangedTest(unittest.TestCase):
 
 
 class PrerequisitesTest(unittest.TestCase):
-    """The AST dump needs the generated headers (libfuse_config.h) built first."""
+    """The AST dump needs the generated headers (libfuse_config.h) first."""
 
     def test_the_build_asks_for_the_compile_prerequisites_of_the_target(self):
         self.assertEqual(mutate.prerequisites_args("//dcfs:dcfs_lib"),
-                         ["build", "--output_groups=compilation_prerequisites_INTERNAL_",
+                         ["build",
+                          "--output_groups=compilation_prerequisites_INTERNAL_",
                           "//dcfs:dcfs_lib"])
 
     def test_a_failed_prerequisite_build_is_a_tooling_error(self):
@@ -407,9 +412,12 @@ class ShardAndExitTest(unittest.TestCase):
         killed, survived, error = ({"status": s} for s in (
             "killed", "survived", "error"))
         self.assertEqual(mutate.exit_code([killed], False), 0)
-        self.assertEqual(mutate.exit_code([killed, survived], False), 0)   # a finding
-        self.assertEqual(mutate.exit_code([killed, survived], True), 1)    # per push
-        self.assertEqual(mutate.exit_code([survived, error], False), 2)    # tooling
+        # a finding
+        self.assertEqual(mutate.exit_code([killed, survived], False), 0)
+        # per push
+        self.assertEqual(mutate.exit_code([killed, survived], True), 1)
+        # tooling
+        self.assertEqual(mutate.exit_code([survived, error], False), 2)
         self.assertEqual(mutate.exit_code([survived, error], True), 2)
         self.assertEqual(mutate.exit_code([], True), 0)
 
@@ -457,8 +465,9 @@ class RunEndToEndTest(unittest.TestCase):
         self.timeout = 60
 
     def write_mutants(self, replacements):
-        ms = [{"id": i, "file": "dcfs/a.cc", "function": "f", "line": 1, "op": "negate-if",
-               "start": 17, "end": 21, "replacement": r, "before": "XXXX"}
+        ms = [{"id": i, "file": "dcfs/a.cc", "function": "f", "line": 1,
+               "op": "negate-if", "start": 17, "end": 21, "replacement": r,
+               "before": "XXXX"}
               for i, r in enumerate(replacements, 1)]
         with open(self.mutants, "w") as f:
             json.dump(ms, f)
