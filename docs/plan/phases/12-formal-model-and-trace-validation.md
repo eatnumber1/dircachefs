@@ -171,8 +171,21 @@ In this order, each with a known-bug variant and trace validation:
   between call and reply (`Obs.tla`); covers mutation results, not only
   served answers. 3-5 days. 12.7 as merged with 12.6 names the syscall
   and commit actions in `EffectAtSyscall`/`CacheLearnsAtCommit`; 12.7b
-  (pending): the reply ghost, mutation results and errnos checked against
-  the backing states between call and reply.
+  merged 2026-10-08 (5094b31, two review rounds): `ReplyObservable` (a
+  witness instant between call and reply over the backing's states;
+  `Window(r)` = the answers the backing gave the request's own queries,
+  `Remember` adds what other requests lose at a syscall; errno classes
+  ok/ENOENT/EEXIST/EAGAIN/EINTR, EINTR/EAGAIN only without a successful
+  syscall; `QueryKinds` shape check), `known_bugs/reply_after_failed_syscall`
+  and `reply_unknown_as_negative`, trace reply lines carry the lookup's
+  answer and the errno actually sent (`LookupAnswered`, `Replied`),
+  `T_Reply` strict; MC_large and MC_interrupt_muts2 check it (large
+  10.24M states, ~1 h here, ~2000 s on the runner, eternal); a create whose
+  new name vanished before its probe is cut out-of-band. 12.7c (pending): a
+  handler that returns OK without replying records errno 0 while
+  `~FuseRequest` sends ECOMM; pass a sentinel so the recorder marks it
+  unexplained. Still uncompared: the nodeid and attributes a lookup sends,
+  readdir listings, attribute values.
 - 12.5 Identity (`ident.tla`), from the kernel's exporting.rst, RFC 8881
   §4/5.8.1.5 and RFC 1813: handle classes, recycling, durable vs volatile
   ids, cache wipe and restart; safety: a handle never resolves to a

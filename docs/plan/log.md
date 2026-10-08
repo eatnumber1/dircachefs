@@ -1816,3 +1816,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   create cut as out-of-band behind 11.4's failed cut, two new rejected trace fixtures. 111 formal/
   trace tests, fast 199 + 2. Short second review pass requested before merge. Note: small_test and
   known_bug_rename_stale_source_test exceed 300 s on this host at load 13-15 (935k states).
+- 12.7b merged (5094b31, seven commits) after the second pass ("merge"; one nit -> 12.7c: ECOMM
+  from ~FuseRequest recorded as errno 0). Lane-1 next: 12.7c + 12.11 (same agent).
