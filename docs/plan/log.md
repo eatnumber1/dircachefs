@@ -1840,3 +1840,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 12.7c + 12.11 merged (e05b345, three commits) after a "merge" review (nits: cite the VFS lock
   for leaving attrchange out of nolock or add it to MC_interrupt_nolock; GuardsBalanced overlaps
   DbMatches). small_test and known_bug_rename_stale_source_test to `long`. Lane-1 free: 12.8 next.
+- 12.8 dispatched to lane-1 (new protocol agent): ordered backing-state sequence with a reordering
+  regime constant (sequential / metadata-prefix / ext4-weak), directory-fsync switch, Ferrite litmus
+  configurations; stop-and-report on any real gap.
