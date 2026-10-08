@@ -912,22 +912,31 @@ daemon crash and a re-read before a `nologflush` shutdown, served a name the
 backing filesystem had lost).
 
 **A filesystem that went read-only by itself** after an error (btrfs's
-transaction abort, ext4's `errors=remount-ro`, which Linux 6.17 marks
-`emergency_ro`) still shows changes its disk never got, and answers
-`syncfs` with success: `sync_filesystem` returns at once for a read-only
-superblock, and the write error reaches only the first `syncfs` of each
-open file. So a sync point after the first one cleared the dirty set of
+transaction abort, ext4's `errors=remount-ro`, which Linux 6.15 marks
+`emergency_ro`) still shows changes its disk never got. btrfs, and ext4
+before 6.15, answer `syncfs` with success: `sync_filesystem` returns at
+once for a read-only superblock, and the write error reaches only the
+first `syncfs` of each open file (ext4 from 6.15 keeps failing it, as
+`fault_shutdown_test_ext4` shows). So a sync point after the first one cleared the dirty set of
 those changes and the clean shutdown recorded a clean run; after the
 operator's remount took the changes back, the next start had nothing to
 recover and served the lost objects as present (step 11.5's review;
 `fault_shutdown_test_btrfs`'s "ro" showed a lost directory served). Two
 guards (step 11.5): a sync point fails, keeping the dirty set, when
 `fstatvfs` reports the source read-only and it was writable when the run
-started (`StillWritable` in `backing::SyncBacking`); and dcfs refuses to
+started or at any sync point since (`StillWritable` in
+`backing::SyncBacking`; a source read-only at the start is exempt only until
+a sync point finds it writable, step 11.5b); and dcfs refuses to
 start over a source whose superblock is read-only (or `emergency_ro`) under
 a read-write mount (`ForcedReadOnly`, `dcfs/mounts_below.h`), since its
 memory may show recovery and the fills what a remount takes back. A source
-mounted read-only on purpose is read-only in both, and is accepted.
+mounted read-only on purpose is read-only in both, and is accepted. One
+case looks the same and is not an error: `mount -o remount,ro` of one
+mount of a superblock makes the superblock read-only while its other
+mounts (bind mounts, btrfs subvolumes) stay read-write. dcfs over such
+another mount refuses to start, and a running one fails every sync point
+(the dirty set stays, the run ends unclean): remount it read-write again,
+or mount `--source` read-only (step 11.5b).
 
 ### Sync points
 

@@ -108,8 +108,9 @@ struct Context {
   // (backing::InitRoot).
   AtimePolicy atime = AtimePolicy::kRelative;
   // Whether the source filesystem was read-only when this run started
-  // (backing::InitRoot). If it was not, a sync point that finds it
-  // read-only fails (backing::SyncBacking, step 11.5).
+  // (backing::InitRoot) and no sync point has found it writable since. If
+  // not, a sync point that finds it read-only fails (backing::SyncBacking,
+  // steps 11.5, 11.5b).
   bool source_read_only_at_start = false;
   // The protocol events (dcfs/protocol_events.h): records nothing in
   // production; trace validation's recorder in the testonly builds. Never

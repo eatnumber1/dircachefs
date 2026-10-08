@@ -382,10 +382,12 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     if (forced_read_only) {
       return FailedPreconditionErrorBuilder()
              << "--source=" << source
-             << " is on a filesystem that went read-only by itself (its "
-                "superblock is read-only under a read-write mount: after an "
-                "error), and what it shows may not be on its disk; refusing "
-                "to start: unmount it, check it and mount it again";
+             << " is on a filesystem whose superblock is read-only under a "
+                "read-write mount: after an error, what it shows may not be "
+                "on its disk, or another mount of it was remounted "
+                "read-only; refusing to start: after an error, unmount it, "
+                "check it and mount it again; otherwise remount it "
+                "read-write, or mount --source read-only";
     }
   }
 

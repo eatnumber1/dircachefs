@@ -1899,17 +1899,23 @@ namespace {
 // its disk never gets what it still shows from memory: the next sync point
 // would clear the dirty set of changes the remount loses, and the run
 // would end clean (step 11.5, fault_shutdown_test's "ro"). A source
-// read-only from the start never had a change to lose.
+// read-only from the start never had a change to lose, until it is
+// remounted read-write: the exemption ends at the first sync point that
+// finds it writable (step 11.5b).
 absl::Status StillWritable(Context &ctx, int fd) {
-  if (ctx.source_read_only_at_start) return absl::OkStatus();
   BackingCall(ctx, "fstatvfs");
   ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(fd));
-  if ((vfs.f_flag & ST_RDONLY) == 0) return absl::OkStatus();
+  if ((vfs.f_flag & ST_RDONLY) == 0) {
+    ctx.source_read_only_at_start = false;
+    return absl::OkStatus();
+  }
+  if (ctx.source_read_only_at_start) return absl::OkStatus();
   // An errno dcfs chose (its sync point refuses), not the backing's answer.
   return dcfs::DcfsErrnoToStatus(
       EROFS,
-      "Backing filesystem went read-only during the run (after an error?), "
-      "so its syncfs makes nothing durable; keeping the dirty set");
+      "Backing filesystem went read-only during the run (after an error, "
+      "or a remount of another mount of it), so its syncfs makes nothing "
+      "durable; keeping the dirty set");
 }
 
 }  // namespace

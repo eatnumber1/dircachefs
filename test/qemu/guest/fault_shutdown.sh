@@ -592,6 +592,16 @@ ls "$MNT/ro/a" >/dev/null 2>&1
 sleep 1.5
 ls "$MNT/ro/a" >/dev/null 2>&1
 echo "fault_shutdown.sh: ro: sync points: $(grep -c 'sync of the backing filesystems failed' "$LOG") failed"
+# On btrfs the second sync point is the guard's: syncfs itself succeeds
+# there (ext4 keeps failing it, xfs shuts down).
+guarded=$(grep -c "went read-only during the run" "$LOG")
+if [ "$FSTYPE" = btrfs ]; then
+	if [ "$guarded" -ge 1 ]; then
+		pass ro-guard-fired
+	else
+		fail ro-guard-fired "no sync point failed for the read-only filesystem: the case did not reach the guard"
+	fi
+fi
 stop ro
 # Not remounted: a superblock read-only under a read-write mount went
 # read-only by itself; its memory may hold what its disk never gets, and
@@ -602,6 +612,13 @@ forced=$(awk -v src="$SRC" '$5 == src {
 	print ($6 !~ /(^|,)ro(,|$)/ && $(i + 3) ~ /(^|,)(emergency_)?ro(,|$)/) ? "yes" : "no"
 }' /proc/self/mountinfo)
 echo "fault_shutdown.sh: ro: superblock forced read-only: $forced ($(grep " $SRC " /proc/self/mountinfo))"
+if [ "$FSTYPE" != xfs ]; then
+	if [ "$forced" = yes ]; then
+		pass ro-forced-read-only
+	else
+		fail ro-forced-read-only "$FSTYPE did not go read-only by itself: the case did not reach the start refusal"
+	fi
+fi
 if start; then
 	if [ "$forced" = yes ]; then
 		fail ro-no-remount-refused "dcfs started over a backing filesystem forced read-only"
@@ -613,7 +630,8 @@ else
 	DAEMON_PID=""
 	umount -l "$MNT" 2>/dev/null || true
 	echo "fault_shutdown.sh: ro: dcfs refused to start: $(grep -v -E '^(dcfs/|===| *$)' "$LOG" | tail -1)"
-	if [ "$forced" = no ] || grep -q "read-only" "$LOG"; then
+	if [ "$forced" = no ] ||
+		grep -q "superblock is read-only under a read-write mount" "$LOG"; then
 		pass ro-no-remount-refused
 	else
 		fail ro-no-remount-refused "dcfs did not start, for another reason"

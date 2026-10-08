@@ -119,7 +119,7 @@ absl::StatusOr<std::vector<std::string>> MountsBelow(
 namespace {
 
 // Whether the comma-separated `options` include "ro", or, with
-// `emergency`, ext4's "emergency_ro" (Linux 6.17: an error made it
+// `emergency`, ext4's "emergency_ro" (Linux 6.15: an error made it
 // read-only without marking the superblock so).
 bool HasRo(std::string_view options, bool emergency = false) {
   for (std::string_view option : absl::StrSplit(options, ',')) {

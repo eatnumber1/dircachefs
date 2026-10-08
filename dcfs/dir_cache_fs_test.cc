@@ -4219,6 +4219,20 @@ TEST_F(DirCacheFSTest, SyncPointKeepsTheDirtySetIfTheBackingWentReadOnly) {
   EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
 }
 
+// A source read-only at the start but remounted read-write during the run
+// can lose changes again: the exemption ends at the first sync point that
+// finds it writable, and a later one that finds it read-only fails.
+TEST_F(DirCacheFSTest, ReadOnlyAtStartExemptionEndsOnceWritable) {
+  Start();
+  ctx_.source_read_only_at_start = true;
+  EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());  // Found writable.
+  ASSERT_EQ(Mkdir(kRootInode, "new").first.error, 0);
+  StatvfsReadOnly() = true;
+  EXPECT_THAT(GetErrnoFromStatus(backing::SyncBacking(ctx_)),
+              IsOkAndHolds(EROFS));
+  EXPECT_THAT(Dirty(), Contains(kRootInode));
+}
+
 // A source read-only from the start never had a change to lose: its sync
 // points clear the dirty set (of failed mutations) as usual.
 TEST_F(DirCacheFSTest, SyncPointOfASourceReadOnlyFromTheStartClears) {

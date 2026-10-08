@@ -778,7 +778,12 @@ recovery protocol, concurrency, and the test strategy.
   dirty (its sync points fail, so the run does not end clean) and refuses
   to start over such a filesystem until it is unmounted, checked and
   mounted again; the next start then re-reads those entries. A filesystem
-  mounted read-only on purpose is fine.
+  mounted read-only on purpose is fine. `mount -o remount,ro` of another
+  mount of the same filesystem (a bind mount, another btrfs subvolume)
+  looks the same to dcfs, since it makes the shared superblock read-only:
+  dcfs refuses to start over `--source` then, and a running dcfs keeps
+  every change dirty (its sync points fail); remount it read-write, or
+  mount `--source` read-only too.
 - **A full disk fails requests.** With the backing filesystem full, a
   change that needs space fails with `ENOSPC`, as on the backing
   filesystem itself, and nothing about it is cached (on btrfs, which
