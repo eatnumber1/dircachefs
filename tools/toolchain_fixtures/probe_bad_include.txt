@@ -1,0 +1,22 @@
+== include
+ external/+llvm_distribution+dcfs_llvm/bin/../lib/clang/22/include
+ external/+llvm_distribution+dcfs_llvm/bin/../sysroot/usr/local/include
+ external/+llvm_distribution+dcfs_llvm/bin/../sysroot/usr/include/x86_64-linux-gnu
+ external/+llvm_distribution+dcfs_llvm/bin/../sysroot/usr/include
+ /usr/include
+== files
+libc.a=/work/external/+llvm_distribution+dcfs_llvm/bin/../sysroot/usr/lib/x86_64-linux-gnu/libc.a
+libm.a=/work/external/+llvm_distribution+dcfs_llvm/bin/../sysroot/usr/lib/x86_64-linux-gnu/libm.a
+crt1.o=/work/external/+llvm_distribution+dcfs_llvm/bin/../sysroot/usr/lib/x86_64-linux-gnu/crt1.o
+== config
+/work/external/+llvm_distribution+dcfs_llvm/bin/clang.cfg
+== loaded
+        56:	calling init: /lib/x86_64-linux-gnu/libtinfo.so.6
+        56:	calling init: /lib/x86_64-linux-gnu/libc.so.6
+        57:	calling init: /work/external/+llvm_distribution+dcfs_llvm/bin/../lib/libz.so.1
+        57:	calling init: /work/external/+llvm_distribution+dcfs_llvm/bin/../lib/libstdc++.so.6
+        57:	calling init: /lib/x86_64-linux-gnu/libm.so.6
+        58:	calling init: /work/external/+llvm_distribution+dcfs_llvm/bin/../lib/libxml2.so.2
+== link
+LINK-OK
+== end

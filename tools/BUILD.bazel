@@ -335,14 +335,17 @@ sh_test(
 
 # Step 7.1b: what the toolchain finds outside the workspace. The genrule asks
 # the toolchain's $(CC) where the C library files are, what its include search
-# list is, and which shared libraries the compiler and the linker load while
-# linking a program (ld.so's LD_DEBUG=libs); toolchain_hermetic_test
-# fails on anything of the host's but libc (third_party/llvm/README.md).
+# list is, which configuration file it reads, and which shared libraries the
+# compiler and the linker load while linking a program (ld.so's
+# LD_DEBUG=libs); toolchain_hermetic_test fails on anything of the host's but
+# glibc (third_party/llvm/README.md). The probe program lives in a temporary
+# directory: a genrule may write only its declared outputs.
 genrule(
     name = "cc_toolchain_probe",
     outs = ["cc_toolchain_probe.txt"],
     cmd = """
 set +e
+tmp=$$(mktemp -d)
 {
   echo '== include'
   $(CC) -E -v -x c++ /dev/null 2>&1 |
@@ -352,14 +355,18 @@ set +e
   for name in libc.a libm.a crt1.o crti.o crtn.o; do
     echo "$$name=$$($(CC) -print-file-name=$$name || true)"
   done
+  echo '== config'
+  $(CC) -v -x c++ -fsyntax-only /dev/null 2>&1 |
+    sed -n 's/^Configuration file: //p'
   echo '== loaded'
-  printf 'int main(void) { return 0; }\\n' > $(@D)/probe.c
-  LD_DEBUG=libs $(CC) -fuse-ld=lld -rtlib=compiler-rt $(@D)/probe.c \\
-    -o $(@D)/probe.out 2>&1 || true
+  printf 'int main(void) { return 0; }\\n' > $$tmp/probe.c
+  LD_DEBUG=libs $(CC) -fuse-ld=lld -rtlib=compiler-rt $$tmp/probe.c \\
+    -o $$tmp/probe.out 2>&1 || true
   echo '== link'
-  if [ -x $(@D)/probe.out ]; then echo LINK-OK; fi
+  if [ -x $$tmp/probe.out ]; then echo LINK-OK; fi
   echo '== end'
 } > $@
+rm -rf $$tmp
 """,
     toolchains = ["@bazel_tools//tools/cpp:current_cc_toolchain"],
 )
@@ -371,6 +378,23 @@ sh_test(
     srcs = ["toolchain_hermetic_test.sh"],
     args = ["$(location :cc_toolchain_probe)"],
     data = [":cc_toolchain_probe"],
+)
+
+# Self-check of toolchain_hermetic_test: the real checker over a good probe
+# and over one probe per leak (tools/toolchain_fixtures/probe_*.txt).
+sh_test(
+    name = "toolchain_hermetic_self_check_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["toolchain_hermetic_self_check_test.sh"],
+    args = [
+        "$(location :toolchain_hermetic_test.sh)",
+        "tools/toolchain_fixtures",
+    ],
+    data = [
+        "toolchain_hermetic_test.sh",
+    ] + glob(["toolchain_fixtures/probe_*.txt"]),
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Self-check of toolchain_test: it must reject a host gcc and a clang of
@@ -395,9 +419,9 @@ sh_test(
 # The gate itself is `bazel run //tools:reproducible_build` (CI runs it): it
 # builds //dcfs:main, //dcfs:main_static and //man:dcfs.8 in two output bases
 # and compares them with repro_compare.py. Since 7.1b the glibc, the headers
-# and the compiler's libraries are pinned (@dcfs_llvm), so the comparison no
-# longer depends on the host's packages (two hosts: not yet measured). It
-# cannot be a `bazel test` (it starts Bazel).
+# and the compiler's libraries are pinned (@dcfs_llvm); the host's glibc,
+# which runs clang and lld, is what is left of the host (two hosts: not yet
+# measured). It cannot be a `bazel test` (it starts Bazel).
 py_library(
     name = "repro_compare_lib",
     srcs = ["repro_compare.py"],
