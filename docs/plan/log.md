@@ -1587,3 +1587,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   with nlink+md5 in lib.sh, direct/dsplit persistence via `testutil syncfs`, negative fixtures kind,
   ACE split a/b/fs on the checking build); sent for a second review pass; CI shard estimates still
   open with the agent. Lane-2 dispatched: 11.5 instant backing crash then 11.4 out of space.
+- 11.2 merged (f3a2d2b) after the second pass (merge after A: boot 1's own dmesg scan; B: immediate
+  kill, status 137, the 141 was SIGPIPE from closing the fifo early; C: no stray sleeps; D: ACE xfs
+  under ASan 227 s vs 199-247 plain, `long` kept). Fast 180 + 2, ACE a 601 s, verdict test, ext4
+  fault + kill tests, subjects ok; xfs/btrfs variants last run on the previous commit. CI: asan
+  limit 180 -> 240 min (estimate 116-159 with the cold part), full ~80, ubsan ~105; shard table in
+  README. Open: measure a cold run before a fourth asan shard / time-weighted partition. 26.4b
+  follow-up noted by the 12.6b reviewer: testonly::Observers forwards all 62 ProtocolEvents
+  methods but nothing catches a missing one at compile time (RecoveryDone was caught only by
+  trace_c) -> 26.4c idea: pure-virtual events with a null default, or a reflection test.
+  Lane-5 (same agent) takes 11.6 fsfreeze.

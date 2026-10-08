@@ -16,9 +16,16 @@ what landed differs:
   cut points, three filesystems); ACE-style one- and two-operation
   sequences with a cut, with and without an fsync through dcfs, remount
   and restart (served tree equals the backing's; after an fsync the
-  backing is the fsynced state). First review 2026-10-08: fix first
-  (boot 1's verdict was discarded, no self-check for the kill mode, a
-  weakened listing check, too few fields compared). Neither drop-writes
+  backing is the fsynced state). Merged 2026-10-08 (f3a2d2b) after two
+  review rounds: boot 1 of a cut has a verdict (its own dmesg scan before
+  the marker; QEMU must die of our kill, status 137), seven fake-QEMU
+  self-checks, a synced/unsynced witness as the kill-mode "before"
+  scenario, snapshots with nlink + md5 shared in lib.sh, `direct`/`dsplit`
+  persistence points via `testutil syncfs`, a `fixtures` kind as the ACE
+  checker's negative fixture, ACE split a/b/fs on the checking build.
+  Open: a cold CI run to measure the asan shards (estimated 116-159 min;
+  limit raised to 240) before choosing a fourth shard or a time-weighted
+  partition. Neither drop-writes
   nor a kill loses writes the disk acknowledged without a flush, so
   FLUSH/FUA ordering stays untested (that is what dm-log-writes would add).
 - 11.2b fsstress and fsx: the original 11.2 text, its own step (needs
