@@ -1794,3 +1794,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   with the two allowed ASSERT cases, matchers over booleans (status matchers already in use: IsOk
   ~900, IsOkAndHolds ~460, StatusIs ~130; three EXPECT_TRUE(x.ok()) and the ASSERT_THAT balance
   are 7.5's job).
+- Sanitizer CI fixes merged (2b18ec7): the ubsan-only cold-lookup diff was UBSan's vptr check
+  probing a vtable prefix through a pipe (pipe2, fcntl x2, a 16-byte write, close x2; compiler-rt's
+  IsAccessibleMemoryRange; no report), now its own strace kind `sanitizer` under
+  `DCFS_SANITIZER=ubsan` only (strace_lib_test covers plain/asan/ubsan and a daemon's own pipe);
+  cancel_test and cancel_inventory_test get `asan_mem = 1216` (measured peak 733-766 MiB under
+  ASan at 1536; reclaim 0 at 1216) and plain cancel_test mem 256 -> 384 (kswapd scanned 18k pages
+  at 256). Remaining before the push point: 25.3b (coverage lines, cancel_test's grep). Lanes 3 and
+  6 held until the dcfs/ editors land.
