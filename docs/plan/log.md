@@ -1575,3 +1575,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   live in the harness; lifecycle.sh refusal checks under `timeout 10` wanting exit 1). Fast 177 + 2
   skips, traces a/b/c, lifecycle, subjects ok. Lane-2 idle: held until a lane frees (host at load
   13-15 doubles every test time); next for it: 11.4 out of space + 11.5 instant backing crash.
+- 8.2c merged (6757e55): nine of the sweep's survivors killed by new harness tests (Setattr End,
+  FORGET reconciliation warnings, passthrough id ownership on failed opens, Release close failure,
+  Setxattr phase-3 record); `mutation.End(); return` in Setattr's checkpoint path is equivalent
+  (the destructor ends it) and listed. New harness piece: `--wrap` of fuse_passthrough_open/close
+  gives the unit tier a fake kernel passthrough (backing ids visible in open replies). Fast 177 +
+  2, subjects ok. Lane-4 freed and held (load); lane-2 takes 11.5 + 11.4 (new protocol agent).
