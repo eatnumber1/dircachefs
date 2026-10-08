@@ -414,6 +414,16 @@ qemu_test(
     timeout = "moderate",
 )
 
+# Step 15.1: the mount.dcfs wrapper (phase 15): capture, option split,
+# daemonization, the bind and none forms, remount, refusals.
+qemu_test(
+    name = "mount_dcfs_test",
+    disks = [("vdb", "ext4", "128M")],
+    guest_script = "guest/mount_dcfs.sh",
+    size = "small",
+    timeout = "moderate",
+)
+
 qemu_test_matrix(
     name = "setattr_test",
     disks = [("vdb", "ext4", "320M")],

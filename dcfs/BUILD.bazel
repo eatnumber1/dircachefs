@@ -558,6 +558,32 @@ cc_library(
     ],
 )
 
+# Step 15.1: the mount.dcfs wrapper's pure parts (step 15.2 implements it).
+cc_library(
+    name = "mount_dcfs",
+    srcs = ["mount_dcfs.cc"],
+    hdrs = ["mount_dcfs.h"],
+    deps = [
+      ":status",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+    ],
+)
+
+qemu_cc_test(
+    name = "mount_dcfs_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["mount_dcfs_test.cc"],
+    deps = [
+      ":mount_dcfs",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@googletest//:gtest_main",
+    ],
+)
+
 qemu_cc_test(
     name = "mount_options_test",
     size = "small",
