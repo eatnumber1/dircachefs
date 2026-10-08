@@ -888,6 +888,10 @@ renames with flags and syscall failures.
   scenarios the
   fault builds break (`CreateMarksItsNameUnknown`, `TraceScenarioUnlink`,
   `TraceScenarioMkdirDuringSync`), whose traces must validate here.
+  `CreateThatCannotBeRecordedEndsItsTraceFailed` checks, on a recorder
+  of its own (the shards allow no cut), that a create whose syscall
+  succeeded but whose object could not be recorded (step 11.4's `EEXIST`)
+  ends its trace with a `failed` cut, not a reply `T_Reply` would reject.
   `//dcfs/testonly:trace_recorder_test` tests the recorder's own decisions
   (invalidations, fills over valid attributes) on an in-memory cache. The harness runs requests inside
   other requests' syscalls, so it is validated without the kernel's lock

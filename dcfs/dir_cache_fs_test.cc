@@ -86,6 +86,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_split.h"
 #include "absl/time/simulated_clock.h"
 #include "absl/time/time.h"
 #include "dcfs/backing.h"
@@ -2173,6 +2174,48 @@ TEST_F(DirCacheFSTest, CreateThatCannotBeRecordedRepliesEexist) {
         << name;
     EXPECT_NE(Lookup(kRootInode, name).second.nodeid, 0u) << name;
   }
+}
+
+// The trace of a create that cannot be recorded (its EEXIST after a
+// syscall that succeeded, above) ends with a "failed" cut, a step the model
+// does not have, not with a reply line T_Reply would reject (the model's
+// create replies success there; step 12.7b). The recorder writes to a file
+// of the test's own, not the harness's traces: the trace shards allow no
+// cut.
+TEST_F(DirCacheFSTest, CreateThatCannotBeRecordedEndsItsTraceFailed) {
+  Start();
+  const std::string path =
+      absl::StrCat(std::getenv("TEST_TMPDIR"), "/create_not_recorded.trace");
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor fd,
+      syscalls::openat(AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC, 0600));
+  recorder_ = std::make_unique<testonly::TraceRecorder>(
+      *fd, "selfcheck", /*files=*/false, /*lifetimes=*/false,
+      /*identities=*/false, /*directories=*/true);
+  observers_->Add(recorder_.get());
+  recorder_->BeginAll(ctx_);
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_insert BEFORE INSERT ON inodes "
+                       "BEGIN SELECT RAISE(ABORT, 'cache full'); END"),
+              IsOk());
+  EXPECT_EQ(Mkdir(kRootInode, "newdir").first.error, -EEXIST);
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_insert"), IsOk());
+  observers_->Remove(recorder_.get());
+  recorder_.reset();
+  std::vector<std::string> root;
+  for (std::string_view line :
+       absl::StrSplit(ReadWholeFile(path), '\n', absl::SkipEmpty())) {
+    if (absl::StartsWith(line, absl::StrCat("DCFS-TRACE selfcheck ",
+                                            kRootInode, " "))) {
+      root.emplace_back(line);
+    }
+  }
+  ASSERT_FALSE(root.empty());
+  EXPECT_THAT(root.back(),
+              AllOf(HasSubstr("\"ev\":\"cut\""),
+                    HasSubstr("failed: a create whose object could not be "
+                              "recorded")));
+  EXPECT_THAT(root, Not(Contains(HasSubstr("\"ev\":\"reply\""))));
+  EXPECT_THAT(root, Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
 }
 
 // A create whose probe fails before it found the object replies the probe's
