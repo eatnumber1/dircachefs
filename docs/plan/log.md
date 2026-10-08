@@ -1851,3 +1851,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   a protocol change; ~1 ms per create on an SSD) and left to russ; glibc: proposed bumping the
   sysroot to Debian 13 (glibc 2.41) with the OSV scan gating on fixable records and ignore-with-
   expiry for the rest, awaiting russ's yes.
+- 23.8 + 23.9 reported (lane-4, bfec268 / 80ed413, under Opus review): held fill (one statx of the
+  held fd at FLUSH/RELEASE/attribute replies while held) recording attributes and marking the row
+  dirty with the new atime-only reason (schema v6); any attribute record of an open file marks it
+  dirty; cold read-only opens mark dirty without fsync or guard touch; sync points keep open files'
+  rows; `dirty.atime` separate from `dirty.any`; directories/symlinks stamped cache-only with the
+  later stamp kept; model file F outside AllKinds (MC_atime 111k, MC_atime_concurrent 67k; three
+  known_bugs, two limitations); checker rule `open-file`; snapshot with atime. BUG found and fixed
+  by the guest tests: ClearDirty set the in-memory dirty flags inside a transaction that could roll
+  back. 23.9: LINK of a removed object forwards linkat(AT_EMPTY_PATH)'s answer (ENOENT/EPERM/ok).
