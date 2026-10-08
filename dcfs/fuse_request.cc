@@ -59,7 +59,7 @@ FuseRequest::~FuseRequest() {
   // only wraps the raw req_, not which op or inode it was for, so that
   // context can't be logged here -- replying ECOMM at least keeps the
   // kernel from waiting on a request that will never get a normal reply.
-  LOG(WARNING) << "Replying to FuseRequest in destructor";
+  LOG(ERROR) << "Replying to FuseRequest in destructor";
   absl::Status st = ReplyErrno(ECOMM);
   LOG_IF(ERROR, !st.ok()) << "Failed to send reply: " << st;
 }
@@ -181,10 +181,12 @@ absl::StatusOr<Credentials> FuseRequest::Caller() const {
     n = fuse_req_getgroups(*req_, groups.size(), groups.data());
   }
   if (n < 0 || n > static_cast<int>(groups.size())) {
-    VLOG(1) << "pid " << ctx->pid << ": supplementary groups unreadable ("
-            << (n < 0 ? ErrnoToStatus(-n, "fuse_req_getgroups").ToString()
-                      : std::string("list grew"))
-            << "); using none";
+    // Rate limited: one per request while it lasts.
+    LOG_EVERY_N_SEC(WARNING, 60)
+        << "pid " << ctx->pid << ": supplementary groups unreadable ("
+        << (n < 0 ? ErrnoToStatus(-n, "fuse_req_getgroups").ToString()
+                  : std::string("list grew"))
+        << "); using none";
     return caller;
   }
   groups.resize(n);
@@ -210,14 +212,20 @@ absl::Status FuseRequest::ReplyFailure(const absl::Status &status) {
 
 void FuseRequest::ReplyFailureAndLogIfNotOk(const absl::Status &status) {
   if (status.ok()) return;
-  // An interrupted request (dcfs/checkpoint.h) is no error of dcfs's.
-  if (StatusToErrno(status) == EINTR) {
-    LOG(INFO) << status;
-  } else {
+  // The outermost caller of a request: the one place that logs its failure
+  // (docs/style.md 1.7), with all the context the call chain added. At
+  // ERROR if dcfs produced the error; an errno forwarded from the backing
+  // filesystem (ENOENT, EEXIST, ...) is the answer to the request, not a
+  // failure of dcfs, and an interrupted request (dcfs/checkpoint.h) is no
+  // error either: `--v=2` shows both with the reply.
+  if (ProducedByDcfs(status)) {
     LOG(ERROR) << status;
+  } else {
+    VLOG(1) << "replying with an error from the backing filesystem: "
+            << status;
   }
   absl::Status reply_s = ReplyFailure(status);
-  LOG_IF(WARNING, !reply_s.ok()) << "Failed to reply with failure: " << reply_s;
+  LOG_IF(ERROR, !reply_s.ok()) << "Failed to reply with failure: " << reply_s;
 }
 
 absl::Status FuseRequest::ReplyBuf(std::string_view buf) {

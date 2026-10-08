@@ -13,13 +13,25 @@ absl::Status ErrnoToStatus(int error_number, std::string_view message) {
   return status;
 }
 
+absl::Status DcfsErrnoToStatus(int error_number, std::string_view message) {
+  absl::Status status = ErrnoToStatus(error_number, message);
+  status.SetPayload(kOriginTypeUrl, absl::Cord("dcfs"));
+  return status;
+}
+
+bool ProducedByDcfs(const absl::Status &status) {
+  if (status.ok()) return false;
+  return !status.GetPayload(kErrnoTypeUrl).has_value() ||
+         status.GetPayload(kOriginTypeUrl).has_value();
+}
+
 absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status) {
   if (status.ok()) return 0;
 
   std::optional<absl::Cord> payload = status.GetPayload(kErrnoTypeUrl);
   if (!payload) {
     return NotFoundErrorBuilder()
-           << "cannot get errno from Status: no payload in Status: " << status;
+           << "Cannot get errno from Status: no payload in Status: " << status;
   }
 
   return ErrorNameToErrno(std::string(*payload));

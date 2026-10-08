@@ -88,7 +88,7 @@ absl::StatusOr<bool> ReadOne(Statement &stmt,
 }
 
 absl::Status NoInode(InodeId id) {
-  return NotFoundErrorBuilder() << "no cached inode " << id;
+  return NotFoundErrorBuilder() << "No cached inode " << id;
 }
 
 // NotFound unless `id` has a row. Write paths check this up front so that a
@@ -298,7 +298,7 @@ absl::StatusOr<StubRow> GetStub(Context &ctx, InodeId id) {
         return absl::OkStatus();
       }));
   if (!found) {
-    return NotFoundErrorBuilder() << "no boundary stub " << id;
+    return NotFoundErrorBuilder() << "No boundary stub " << id;
   }
   return stub;
 }
@@ -440,7 +440,7 @@ absl::StatusOr<std::string> Readlink(Context &ctx, InodeId id) {
                           return absl::OkStatus();
                         }));
   if (!found) {
-    return NotFoundErrorBuilder() << "no cached symlink target for " << id;
+    return NotFoundErrorBuilder() << "No cached symlink target for " << id;
   }
   return target;
 }
@@ -508,7 +508,7 @@ absl::StatusOr<std::optional<std::string>> GetXattr(Context &ctx, InodeId id,
                        }).status());
   auto absent = [&] {
     return NotFoundErrorBuilder()
-           << "inode " << id << " has no xattr " << EscapeBytes(name);
+           << "Inode " << id << " has no xattr " << EscapeBytes(name);
   };
   if (state.has_value()) {
     if (*state == "present") {
@@ -546,7 +546,7 @@ absl::StatusOr<FileHandle> GetHandle(Context &ctx, InodeId id) {
       }));
   if (!found) return NoInode(id);
   if (!handle.has_value()) {
-    return NotFoundErrorBuilder() << "no cached handle for inode " << id;
+    return NotFoundErrorBuilder() << "No cached handle for inode " << id;
   }
   return *std::move(handle);
 }
@@ -610,7 +610,7 @@ absl::StatusOr<FilesystemRow> GetFilesystem(Context &ctx,
         return absl::OkStatus();
       }));
   if (!found) {
-    return NotFoundErrorBuilder() << "no filesystem " << device.ToString();
+    return NotFoundErrorBuilder() << "No filesystem " << device.ToString();
   }
   return *std::move(result);
 }
@@ -893,7 +893,7 @@ absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
                           }));
     RET_CHECK(has_state) << "the cache_state row is missing";
     if (highest.has_value() && *highest == -1) {
-      return ResourceExhaustedErrorBuilder() << "no boundary stub nodeid left";
+      return ResourceExhaustedErrorBuilder() << "No boundary stub nodeid left";
     }
     stub = highest.has_value() ? *highest + 1 : kFirstStubId;
     ABSL_RETURN_IF_ERROR(
@@ -928,7 +928,7 @@ absl::Status RenameDentry(Context &ctx, InodeId parent, std::string_view name,
     ABSL_ASSIGN_OR_RETURN(LookupResult source, Lookup(ctx, parent, name));
     if (source.kind != LookupResult::Kind::kFound) {
       return NotFoundErrorBuilder()
-             << "no cached positive dentry " << EscapeBytes(name) << " in "
+             << "No cached positive dentry " << EscapeBytes(name) << " in "
              << parent << " to rename";
     }
     if (parent == newparent && name == newname) return absl::OkStatus();
@@ -1228,7 +1228,7 @@ absl::Status AddFilesystem(Context &ctx, const DeviceId &device,
     absl::StatusOr<FilesystemRow> existing = GetFilesystem(ctx, device);
     if (existing.ok()) {
       return AlreadyExistsErrorBuilder()
-             << "filesystem " << device.ToString() << " already exists";
+             << "Filesystem " << device.ToString() << " already exists";
     }
     if (!absl::IsNotFound(existing.status())) return existing.status();
     if (parent.has_value()) {
@@ -1479,7 +1479,7 @@ absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent,
     for (InodeId id : ids) {
       if (!CanFill(ctx, resolved, id)) {
         return AbortedErrorBuilder()
-               << "removal of " << EscapeBytes(name) << " in " << parent
+               << "Removal of " << EscapeBytes(name) << " in " << parent
                << ": inode " << id << " changed since it was resolved";
       }
     }
@@ -1508,7 +1508,7 @@ absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent, std::string_v
     for (InodeId id : ids) {
       if (!CanFill(ctx, resolved, id)) {
         return AbortedErrorBuilder()
-               << "rename of " << EscapeBytes(name) << " in " << parent
+               << "Rename of " << EscapeBytes(name) << " in " << parent
                << ": inode " << id
                << " changed since its source and destination were resolved";
       }

@@ -111,7 +111,7 @@ absl::StatusOr<std::string> ReadLinkAt(int dirfd, std::string_view path) {
       return result;
     }
     if (bufsize >= PATH_MAX * 4) {
-      return dcfs::ErrnoToStatus(
+      return dcfs::DcfsErrnoToStatus(
           ENAMETOOLONG, "readlinkat: target longer than PATH_MAX*4");
     }
     bufsize *= 2;
@@ -168,7 +168,7 @@ absl::StatusOr<std::vector<std::string>> ListXattrOPath(int fd) {
     buf.resize(*nbytes);
     return SplitXattrList(buf);
   }
-  return dcfs::ErrnoToStatus(
+  return dcfs::DcfsErrnoToStatus(
       ERANGE, absl::StrCat("listxattr(", path, "): kept growing"));
 }
 
@@ -188,7 +188,7 @@ absl::StatusOr<std::string> GetXattrOPath(int fd, std::string_view name) {
     value.resize(*nbytes);
     return value;
   }
-  return dcfs::ErrnoToStatus(
+  return dcfs::DcfsErrnoToStatus(
       ERANGE, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name),
                            "): kept growing"));
 }
@@ -297,14 +297,14 @@ absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   absl::Status status;
   syscalls::setfsgid(caller.gid);
   if (FsGid() != caller.gid) {
-    status = dcfs::ErrnoToStatus(
+    status = dcfs::DcfsErrnoToStatus(
         EPERM, absl::StrCat("setfsgid(", caller.gid, ") did not take"));
   }
   if (status.ok()) status = syscalls::setgroups(caller.groups);
   if (status.ok()) {
     syscalls::setfsuid(caller.uid);
     if (FsUid() != caller.uid) {
-      status = dcfs::ErrnoToStatus(
+      status = dcfs::DcfsErrnoToStatus(
           EPERM, absl::StrCat("setfsuid(", caller.uid, ") did not take"));
     }
   }
@@ -499,15 +499,14 @@ struct ChildRecord {
 // a number could be confused with a stub. No supported filesystem hands
 // one out (ext4's are 32-bit, xfs's below 2^56, btrfs's objectids count up
 // from 256), so the object is refused, loudly, rather than served:
-// ENOTSUP for whatever operation reached it. `what` names it for the log.
+// ENOTSUP for whatever operation reached it. `what` names the object in the
+// status, which the request's handler logs at ERROR (docs/style.md 1.7).
 absl::Status RefuseReservedIno(const struct statx &stx, std::string_view what) {
   if (stx.stx_ino < cache::kFirstStubNodeid) return absl::OkStatus();
-  LOG(ERROR) << "refusing " << what << ": its backing inode number "
-             << stx.stx_ino << " is at or above 2^63, the range dcfs "
-                "reserves for boundary stubs";
-  return dcfs::ErrnoToStatus(
-      ENOTSUP, absl::StrCat("backing inode number ", stx.stx_ino,
-                            " is in the range reserved for boundary stubs"));
+  return dcfs::DcfsErrnoToStatus(
+      ENOTSUP, absl::StrCat("Backing inode number ", stx.stx_ino, " of ", what,
+                            " is at or above 2^63, the range reserved for "
+                            "boundary stubs"));
 }
 
 // Reads everything the cache stores about the object `fd` names -- already
@@ -623,7 +622,7 @@ absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
   ABSL_ASSIGN_OR_RETURN(probe.stx,
                         syscalls::statx(source_fd, "", AT_EMPTY_PATH, kAttrMask));
   if (!S_ISDIR(probe.stx.stx_mode)) {
-    return dcfs::ErrnoToStatus(ENOTDIR, "the source is not a directory");
+    return dcfs::ErrnoToStatus(ENOTDIR, "The source is not a directory");
   }
   ABSL_RETURN_IF_ERROR(RefuseReservedIno(probe.stx, "the source directory"));
   probe.identity.backing_ino = probe.stx.stx_ino;
@@ -645,7 +644,7 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
   ABSL_ASSIGN_OR_RETURN(DeviceId stored, GetSourceDeviceId(ctx.db));
   if (stored != device) {
     return FailedPreconditionErrorBuilder()
-           << "cache database belongs to a different filesystem ("
+           << "Cache database belongs to a different filesystem ("
            << stored.ToString() << ") than the source (" << device.ToString()
            << ")";
   }
@@ -830,7 +829,7 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
                  << "); forgetting it (ESTALE)";
     ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
     return dcfs::ErrnoToStatus(
-        ESTALE, absl::StrCat("inode ", id,
+        ESTALE, absl::StrCat("Inode ", id,
                              " was replaced on the backing filesystem"));
   }
   ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, id, attr, stx));
@@ -863,7 +862,7 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
       // open_by_handle_at needs CAP_DAC_READ_SEARCH; dcfs is required to
       // run as root (see the design doc), so this is a misconfiguration,
       // not a condition to work around.
-      return dcfs::ErrnoToStatus(
+      return dcfs::DcfsErrnoToStatus(
           EPERM, "open_by_handle_at: dcfs must run as root "
                  "(CAP_DAC_READ_SEARCH)");
     }
@@ -1357,8 +1356,8 @@ absl::StatusOr<cache::LookupResult> WithStub(cache::LookupResult result,
                                              InodeId parent,
                                              std::string_view name) {
   if (result.kind == cache::LookupResult::Kind::kRefused && result.id == 0) {
-    return dcfs::ErrnoToStatus(
-        EAGAIN, absl::StrCat("boundary ", EscapeBytes(name), " in ", parent,
+    return dcfs::DcfsErrnoToStatus(
+        EAGAIN, absl::StrCat("Boundary ", EscapeBytes(name), " in ", parent,
                              ": its stub could not be recorded"));
   }
   return result;
@@ -1382,7 +1381,7 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   // fast path, which never touches the backing filesystem at all once a
   // directory is known complete.
   if (name.size() > NAME_MAX) {
-    return dcfs::ErrnoToStatus(ENAMETOOLONG, "path component too long");
+    return dcfs::ErrnoToStatus(ENAMETOOLONG, "Path component too long");
   }
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::LookupBegin,
                       &ProtocolEvents::LookupEnd, parent, name);
@@ -1990,9 +1989,6 @@ absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
                     "files left by the last run (they stay until a probe "
                     "finds them gone): "
                  << forgotten.status();
-  } else if (*forgotten > 0) {
-    LOG(WARNING) << "forgot " << *forgotten
-                 << " rows of unnamed or unlinked files left by the last run";
   }
   if (unclean || recovered > 0) {
     const bool rebooted =
@@ -2041,7 +2037,7 @@ absl::Status FinishRun(Context &ctx) {
   ctx.events->Checkpointed(ctx);
   if (ctx.dirty.any) {
     return FailedPreconditionErrorBuilder()
-           << "dirty cache entries remain (a writable open is still "
+           << "Dirty cache entries remain (a writable open is still "
               "outstanding); leaving the clean-shutdown flag unset";
   }
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
@@ -2065,7 +2061,7 @@ namespace {
 // or chown by a non-owner (fuse_setattr), which the caller could not make.
 absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   if (S_ISLNK(type)) {
-    return dcfs::ErrnoToStatus(EOPNOTSUPP, "chmod on a symlink");
+    return dcfs::ErrnoToStatus(EOPNOTSUPP, "Chmod on a symlink");
   }
   if (S_ISREG(type) || S_ISDIR(type)) {
     ABSL_ASSIGN_OR_RETURN(
@@ -2083,11 +2079,11 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
 absl::Status ApplySize(const Credentials &caller, int opath_fd, mode_t type,
                        off_t size) {
   if (S_ISDIR(type)) {
-    return dcfs::ErrnoToStatus(EISDIR, "truncate on a directory");
+    return dcfs::ErrnoToStatus(EISDIR, "Truncate on a directory");
   }
   if (!S_ISREG(type)) {
     return dcfs::ErrnoToStatus(
-        EINVAL, "truncate on a non-regular, non-directory file");
+        EINVAL, "Truncate on a non-regular, non-directory file");
   }
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor fd, ReopenFd(opath_fd, O_WRONLY | O_CLOEXEC));

@@ -52,7 +52,7 @@ absl::StatusOr<T> ReadCacheState(sqlite3::Connection &db, std::string_view sql,
   if (!has_row) {
     ABSL_RETURN_IF_ERROR(stmt->Reset());
     return FailedPreconditionErrorBuilder()
-           << "corrupt cache: the cache_state row is missing";
+           << "Corrupt cache: the cache_state row is missing";
   }
   T value = read_row(*stmt);
   ABSL_RETURN_IF_ERROR(stmt->Reset());
@@ -73,7 +73,7 @@ absl::StatusOr<int> ExistingSchemaVersion(sqlite3::Connection &db) {
   int version = 0;
   if (!absl::SimpleAtoi(value, &version)) {
     return FailedPreconditionErrorBuilder()
-           << "corrupt cache: meta.schema_version is not an integer: '"
+           << "Corrupt cache: meta.schema_version is not an integer: '"
            << value << "'";
   }
   return version;
@@ -313,7 +313,7 @@ absl::Status UpgradeSchema(sqlite3::Connection &db) {
     ABSL_ASSIGN_OR_RETURN(int version, ExistingSchemaVersion(db));
     if (version < 1 || version > kSchemaVersion) {
       return FailedPreconditionErrorBuilder()
-             << "dcfs cache schema version mismatch: found " << version
+             << "Dcfs cache schema version mismatch: found " << version
              << ", this build understands 1 through " << kSchemaVersion;
     }
     if (version == 1) {
@@ -343,7 +343,7 @@ absl::Status ValidateExistingSchema(sqlite3::Connection &db) {
   ABSL_ASSIGN_OR_RETURN(bool root_exists, RootInodeExists(db));
   if (!root_exists) {
     return FailedPreconditionErrorBuilder()
-           << "corrupt cache: root inode (id 1) is missing";
+           << "Corrupt cache: root inode (id 1) is missing";
   }
 
   return absl::OkStatus();

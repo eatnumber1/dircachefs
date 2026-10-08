@@ -22,7 +22,7 @@ absl::Status MountFds::Insert(DeviceId id, FileDescriptor fd) {
 absl::StatusOr<int> MountFds::Get(const DeviceId &id) const {
   auto it = fds_.find(id);
   if (it == fds_.end()) {
-    return NotFoundErrorBuilder() << "no mount fd for " << id.ToString();
+    return NotFoundErrorBuilder() << "No mount fd for " << id.ToString();
   }
   return *it->second;
 }

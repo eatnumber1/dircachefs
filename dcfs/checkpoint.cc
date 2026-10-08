@@ -15,7 +15,7 @@ absl::Status Checkpoint(Context &ctx, std::string_view where) {
   if (!ctx.interrupts->Interrupted()) return absl::OkStatus();
   // Model: Interrupt.
   ctx.events->Interrupted(ctx);
-  return ErrnoToStatus(EINTR, absl::StrCat("interrupted before ", where));
+  return ErrnoToStatus(EINTR, absl::StrCat("Interrupted before ", where));
 }
 
 }  // namespace dcfs

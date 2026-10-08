@@ -360,7 +360,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
     ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below, MountsBelow(source));
     if (!below.empty()) {
       return FailedPreconditionErrorBuilder()
-             << "dcfs does not yet support filesystems mounted below --source: "
+             << "Dcfs does not yet support filesystems mounted below --source: "
                 "their inode numbers would collide under one st_dev; unmount "
                 "them or point --source elsewhere. Mounted below "
              << source << ": " << absl::StrJoin(below, ", ");
@@ -417,7 +417,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
         !locked.ok()) {
       if (StatusToErrno(locked) == EWOULDBLOCK) {
         return FailedPreconditionErrorBuilder()
-               << "cache database " << cache_db
+               << "Cache database " << cache_db
                << " is in use by another dcfs process; two daemons cannot "
                   "share one cache database";
       }
@@ -458,7 +458,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   ABSL_ASSIGN_OR_RETURN(DeviceId stored_device, GetSourceDeviceId(db));
   if (stored_device != root.device_id) {
     return FailedPreconditionErrorBuilder()
-           << "cache database " << cache_db << " was created for filesystem "
+           << "Cache database " << cache_db << " was created for filesystem "
            << stored_device.ToString() << ", but --source is on "
            << root.device_id.ToString()
            << "; delete the database to start a cold cache";
@@ -486,7 +486,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
         (!stored_handle.ok() || *stored_handle == handle);
     if (!same) {
       return FailedPreconditionErrorBuilder()
-             << "cache database " << cache_db
+             << "Cache database " << cache_db
              << " was created for a different source directory (inode "
              << stored_root.backing_ino << ", generation "
              << stored_root.backing_gen << ") than --source (inode "
@@ -570,7 +570,7 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   }
   absl::Status close_status = db.Close();
   if (!close_status.ok()) {
-    LOG(WARNING) << "closing cache database: " << close_status;
+    LOG(ERROR) << "closing cache database: " << close_status;
   }
 
   // SessionLoop::Run() returns 0 when the kernel connection was closed

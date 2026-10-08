@@ -160,7 +160,7 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // (fuse_ops.cc's Init) makes libfuse refuse the INIT on an error.
   if (!HasDefaultPermissions(opts_.mount_options)) {
     return FailedPreconditionErrorBuilder()
-           << "the mount options (" << absl::StrJoin(opts_.mount_options, ",")
+           << "The mount options (" << absl::StrJoin(opts_.mount_options, ",")
            << ") lack " << kDefaultPermissions
            << ", which dcfs requires: the kernel would leave permission "
               "checks to dcfs, which makes none; refusing to mount";
@@ -258,12 +258,15 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
         std::pair{FUSE_CAP_DONT_MASK, "FUSE_CAP_DONT_MASK"}}) {
     if (!fuse_set_feature_flag(&conn, flag)) {
       return FailedPreconditionErrorBuilder()
-             << "the kernel does not offer " << name
+             << "The kernel does not offer " << name
              << ", which dcfs requires; refusing to mount";
     }
   }
 
-  LOG(INFO) << "FUSE kernel protocol " << conn.proto_major << "."
+  // A kernel without passthrough is a missing capability with a fallback.
+  LOG(LEVEL(passthrough ? absl::LogSeverity::kInfo
+                        : absl::LogSeverity::kWarning))
+      << "FUSE kernel protocol " << conn.proto_major << "."
             << conn.proto_minor
             << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted")
             << "; FUSE_CAP_POSIX_ACL and FUSE_CAP_DONT_MASK requested"
@@ -302,7 +305,7 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
     absl::StatusOr<cache::StubRow> stub = cache::GetStub(ctx_, id);
     if (!stub.ok() && absl::IsNotFound(stub.status())) {
       return dcfs::ErrnoToStatus(
-          ESTALE, absl::StrCat("no boundary stub for nodeid ",
+          ESTALE, absl::StrCat("No boundary stub for nodeid ",
                                static_cast<uint64_t>(id)));
     }
     if (!stub.ok()) return stub.status();
@@ -318,7 +321,7 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
     // ESTALE and dropped the row -- a stale nodeid the kernel is about to
     // forget anyway): that is what ESTALE means to the kernel, not ENOENT.
     return dcfs::ErrnoToStatus(
-        ESTALE, absl::StrCat("no cached row for nodeid ", id));
+        ESTALE, absl::StrCat("No cached row for nodeid ", id));
   }
   return attr;
 }
@@ -454,8 +457,8 @@ absl::Status DirCacheFS::RefreshAttrsOf(InodeId id, struct statx *fetched) {
 void DirCacheFS::LogPhase3Failure(std::string_view op,
                                   const absl::Status &status) {
   if (status.ok()) return;
-  LOG(WARNING) << op << ": the backing change happened, but recording it "
-               << "in the cache failed; leaving it unknown: " << status;
+  LOG(ERROR) << op << ": the backing change happened, but recording it "
+             << "in the cache failed; leaving it unknown: " << status;
 }
 
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryAfterPhase2(
@@ -532,9 +535,9 @@ void DirCacheFS::ResolveSideEffectXattrs(
     absl::Status status = backing::RefreshXattr(ctx_, id, name, fd).status();
     // NotFound: the row is gone (invalidated meanwhile); nothing to record.
     if (!status.ok() && !absl::IsNotFound(status)) {
-      LOG(WARNING) << op << ": could not read xattr " << EscapeBytes(name)
-                   << " of inode "
-                   << id << " back, leaving it unknown: " << status;
+      LOG(ERROR) << op << ": could not read xattr " << EscapeBytes(name)
+                 << " of inode " << id << " back, leaving it unknown: "
+                 << status;
     }
   }
 }
@@ -610,9 +613,11 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
       ctx_, mutation, parent, *parent_fd, name, open_for_write);
   mutation.End();
   if (!child.ok()) {
-    LOG(WARNING) << "created " << EscapeBytes(name) << " in directory " << parent
-                 << " but could not record it: " << child.status();
-    return child.status();
+    // The create happened; the caller is told it failed, and the handler
+    // that replies logs why (docs/style.md 1.7).
+    return absl::StatusBuilder(child.status())
+           << "while recording the created " << EscapeBytes(name)
+           << " in directory " << parent;
   }
   // Creating `name` changed `parent` itself too (mtime/ctime always; nlink
   // as well, if `name` is a new subdirectory -- its own ".." bumps
@@ -850,10 +855,10 @@ void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
   absl::StatusOr<cache::Mutation> mutation =
       cache::BeginAttrChanges(ctx_, changed_ids);
   if (!mutation.ok()) {
-    LOG(WARNING) << "could not begin reconciling the attributes of "
-                 << changed.size() << " written inode(s) (the first "
-                 << changed.front().id << "), leaving them as they are: "
-                 << mutation.status();
+    LOG(ERROR) << "could not begin reconciling the attributes of "
+               << changed.size() << " written inode(s) (the first "
+               << changed.front().id << "), leaving them as they are: "
+               << mutation.status();
     return;
   }
   mutation->End();
@@ -862,9 +867,9 @@ void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
     if (absl::Status refreshed =
             backing::RefreshAttrsFromFd(ctx_, c.id, **c.held);
         !refreshed.ok() && !absl::IsNotFound(refreshed)) {
-      LOG(WARNING) << "could not record the reconciled attributes of "
-                   << "written inode " << c.id
-                   << ", leaving them unknown: " << refreshed;
+      LOG(ERROR) << "could not record the reconciled attributes of "
+                 << "written inode " << c.id
+                 << ", leaving them unknown: " << refreshed;
     }
   }
 }
@@ -1007,8 +1012,8 @@ absl::Status DirCacheFS::RemoveChild(
   std::vector<std::string> names = {std::string(name)};
   for (int attempt = 0; !begun.has_value(); ++attempt) {
     if (attempt == kAttempts) {
-      return dcfs::ErrnoToStatus(
-          EAGAIN, absl::StrCat("removal of ", EscapeBytes(name), " in ",
+      return dcfs::DcfsErrnoToStatus(
+          EAGAIN, absl::StrCat("Removal of ", EscapeBytes(name), " in ",
                                parent, ": it kept changing"));
     }
     const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
@@ -1139,8 +1144,8 @@ absl::Status DirCacheFS::Rename(
   std::vector<std::string> newnames = {std::string(newname)};
   for (int attempt = 0; !mutation.has_value(); ++attempt) {
     if (attempt == kAttempts) {
-      return dcfs::ErrnoToStatus(
-          EAGAIN, absl::StrCat("rename of ", EscapeBytes(name), " in ",
+      return dcfs::DcfsErrnoToStatus(
+          EAGAIN, absl::StrCat("Rename of ", EscapeBytes(name), " in ",
                                parent, ": its directories kept changing"));
     }
     const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
@@ -1529,7 +1534,7 @@ absl::Status DirCacheFS::OpenInode(
       if ((flags & FS_IMMUTABLE_FL) ||
           ((flags & FS_APPEND_FL) && !(fi.flags & O_APPEND))) {
         return dcfs::ErrnoToStatus(
-            EPERM, absl::StrCat("writable open of inode ", id,
+            EPERM, absl::StrCat("Writable open of inode ", id,
                                 ": the backing file is ",
                                 (flags & FS_IMMUTABLE_FL) ? "immutable"
                                                           : "append-only"));
@@ -1694,12 +1699,12 @@ void DirCacheFS::RecordWrittenAttrs(InodeId id, int fd, std::string_view op) {
   // repopulate on the next access. BeginWriting already marked them
   // unknown; marking again only matters if the failure came after a
   // partial write of the row, and is itself best effort.
-  LOG(WARNING) << op << ": could not refresh the attributes of inode " << id
-               << " from its open fd, leaving them unknown: " << status;
+  LOG(ERROR) << op << ": could not refresh the attributes of inode " << id
+             << " from its open fd, leaving them unknown: " << status;
   absl::Status marked = cache::MarkAttrsUnknown(ctx_, id);
   if (!marked.ok() && !absl::IsNotFound(marked)) {
-    LOG(WARNING) << op << ": could not mark the attributes of inode " << id
-                 << " unknown either: " << marked;
+    LOG(ERROR) << op << ": could not mark the attributes of inode " << id
+               << " unknown either: " << marked;
   }
 }
 
@@ -1794,9 +1799,9 @@ absl::Status DirCacheFS::Release(
     if (refreshed.ok()) {
       delete_row = stx.stx_nlink == 0;
     } else {
-      LOG(WARNING) << "Release: could not refresh the attributes of inode "
-                   << id << " from its open fd, keeping its row: "
-                   << refreshed;
+      LOG(ERROR) << "Release: could not refresh the attributes of inode "
+                 << id << " from its open fd, keeping its row: "
+                 << refreshed;
     }
   }
   if (!attr.ok() && !absl::IsNotFound(attr.status())) {
@@ -1807,9 +1812,9 @@ absl::Status DirCacheFS::Release(
   if (backing_file.backing_id > 0) {
     if (absl::Status closed = req.PassthroughClose(backing_file.backing_id);
         !closed.ok()) {
-      LOG(WARNING) << "Release: closing passthrough backing id "
-                   << backing_file.backing_id << " of inode " << id
-                   << " failed: " << closed;
+      LOG(ERROR) << "Release: closing passthrough backing id "
+                 << backing_file.backing_id << " of inode " << id
+                 << " failed: " << closed;
     }
   }
   // Erasing drops the BackingFile, whose FileDescriptor closes our own fd
@@ -2013,8 +2018,8 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
     // may vouch for the listing.
     ABSL_RETURN_IF_ERROR(backing::PopulateDirectory(ctx_, dir).status());
   }
-  return dcfs::ErrnoToStatus(
-      EAGAIN, absl::StrCat("directory ", dir,
+  return dcfs::DcfsErrnoToStatus(
+      EAGAIN, absl::StrCat("Directory ", dir,
                            " kept changing while being listed"));
 }
 
@@ -2201,9 +2206,9 @@ absl::Status DirCacheFS::Setxattr(
   // unknown for it, above). If the read-back failed, `name` stays unknown.
   // Also left unknown if another mutation of `id` overlapped this one.
   if (!stored->ok()) {
-    LOG(WARNING) << "Setxattr: could not read xattr " << EscapeBytes(name)
-                 << " of inode " << id << " back, leaving it unknown: "
-                 << stored->status();
+    LOG(ERROR) << "Setxattr: could not read xattr " << EscapeBytes(name)
+               << " of inode " << id << " back, leaving it unknown: "
+               << stored->status();
   } else if (!mutation.Owns(id)) {
     VLOG(1) << "Setxattr: inode " << id << " changed concurrently, leaving "
             << EscapeBytes(name) << " unknown";

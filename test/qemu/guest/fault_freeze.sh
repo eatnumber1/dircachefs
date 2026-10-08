@@ -436,7 +436,7 @@ MOUNTED=0
 # so neither outcome alone is pinned).
 if ! grep -q "clean shutdown incomplete" "$held_log"; then
 	pass term-held-shutdown-clean-or-says-why
-elif grep "clean shutdown incomplete" "$held_log" | grep -q "dirty cache entries remain"; then
+elif grep "clean shutdown incomplete" "$held_log" | grep -q "Dirty cache entries remain"; then
 	pass term-held-shutdown-clean-or-says-why
 else
 	fail term-held-shutdown-clean-or-says-why "an incomplete shutdown without the dirty-entries reason: $(grep 'clean shutdown incomplete' "$held_log")"

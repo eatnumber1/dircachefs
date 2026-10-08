@@ -181,7 +181,7 @@ class Statement {
 
   // https://www.sqlite.org/c3ref/expanded_sql.html
   std::string_view Sql() const;
-  // For logging only (VLOG(2)) -- expands bound parameter values into the
+  // For logging only (VLOG(3)) -- expands bound parameter values into the
   // SQL text, which is not cheap.
   std::string ExpandedSql() const;
 

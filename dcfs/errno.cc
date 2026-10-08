@@ -291,7 +291,7 @@ absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name) {
       NameToErrnoTable();
   auto it = names_to_errors.find(error_name);
   if (it == names_to_errors.end()) {
-    return NotFoundErrorBuilder() << "no such errno for " << error_name;
+    return NotFoundErrorBuilder() << "No such errno for " << error_name;
   }
   return it->second;
 }

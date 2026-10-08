@@ -43,6 +43,9 @@ absl::Status MakeSqliteStatus(int extended_code, std::string_view message) {
     case SQLITE_IOERR:
     case SQLITE_READONLY:
       status.SetPayload(kErrnoTypeUrl, absl::Cord(ErrnoToErrorName(EIO)));
+      // dcfs's own cache, not the backing filesystem: dcfs produced this
+      // EIO (ProducedByDcfs), so the request's handler logs it at ERROR.
+      status.SetPayload(kOriginTypeUrl, absl::Cord("dcfs"));
       break;
     default:
       break;
@@ -99,13 +102,13 @@ absl::StatusOr<int> GetSqliteCodeFromStatus(const absl::Status &status) {
   std::optional<absl::Cord> payload = status.GetPayload(kSqliteTypeUrl);
   if (!payload) {
     return NotFoundErrorBuilder()
-           << "cannot get sqlite code from Status: no payload in Status: "
+           << "Cannot get sqlite code from Status: no payload in Status: "
            << status;
   }
   int code = 0;
   if (!absl::SimpleAtoi(std::string(*payload), &code)) {
     return InternalErrorBuilder()
-           << "malformed sqlite status payload: " << *payload;
+           << "Malformed sqlite status payload: " << *payload;
   }
   return code;
 }
@@ -147,7 +150,7 @@ absl::StatusOr<Statement> Statement::Prepare(
     // Statement::Prepare only prepares a single SQL statement.
     sqlite3_finalize(stmt);
     return InvalidArgumentErrorBuilder()
-           << "extra SQL text after first statement: " << tail;
+           << "Extra SQL text after first statement: " << tail;
   }
   return Statement(*stmt);
 }
@@ -230,7 +233,7 @@ ProtocolEvents *ObserverOf(::sqlite3 *db) {
 }  // namespace
 
 absl::StatusOr<bool> Statement::Step() {
-  VLOG(2) << "sqlite3_step: " << ExpandedSql();
+  VLOG(3) << "sqlite3_step: " << ExpandedSql();
   if (ProtocolEvents *observer = ObserverOf(sqlite3_db_handle(stmt_))) {
     observer->SqliteStep(Sql());
   }
@@ -491,7 +494,7 @@ absl::Status ApplyOpenPragmas(Connection &conn) {
   const bool file_backed = filename != nullptr && filename[0] != '\0';
   if (file_backed && journal_mode != "wal") {
     return FailedPreconditionErrorBuilder()
-           << "cannot put " << filename
+           << "Cannot put " << filename
            << " in WAL mode (PRAGMA journal_mode=WAL left it in "
               "journal_mode="
            << journal_mode
