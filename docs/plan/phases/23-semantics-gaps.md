@@ -262,3 +262,36 @@ closed). Deviations from the text above, recorded per the reviewer:
 - Open: in destroy_test at 832 MiB about 1,000 of 100,010 held inodes
   still got FORGETs with no memory pressure (test tolerates >= 90%);
   undiagnosed, for an investigator.
+
+## 23.8 Access times from the held fd; directory atimes in the cache (russ, 2026-10-08)
+
+Decision and alternatives: `notes/atime-alternatives-2026-10-08.md`.
+- Regular files: remove atime prediction. While dcfs holds a backing fd
+  for an inode (passthrough open, written file's O_PATH fd), its attributes
+  come from `fstat` on that fd: at FLUSH, at RELEASE, and for a GETATTR
+  that arrives while it is held (no disk I/O: an open file pins its inode).
+  The row recorded from `fstat` is marked dirty with its own reason, so the
+  next sync point's `syncfs` makes the backing's lazy atime write-back
+  durable; recovery treats it like any dirty row. This is a new fill
+  source and a new dirty-set reason: the TLA+ model gets it in the same
+  change (a "held" fill that is always current, its guard, its dirty row).
+- Directories and symlinks: dcfs stamps the relatime-predicted atime in
+  the database on readdir/readlink (from the mount's atime flags, as
+  today) and never writes it to the backing; it survives restarts and is
+  lost on a cache wipe. `formal/limitations/` states that these two
+  attributes are cache-only; the checker and the comparisons in the fault
+  tests exclude directory and symlink atime from "served equals backing".
+- README "Limitations": the predicted-atime paragraph is replaced by the
+  new rule and the directory/symlink limitation; design.md gets the
+  mechanism and the kernel facts.
+- Tests first: an open that reads nothing leaves atime unchanged (fails
+  today); a read then stat shows the backing's atime exactly (compare with
+  a stat on the backing); `chattr +A` and `O_NOATIME` respected; mmap read
+  then close then stat; a long-held reader's GETATTR; `lsattr`'s private
+  open; power loss after a read: recovery leaves the backing's value;
+  directory atime advances on readdir under relatime rules and survives a
+  restart; the fault tests' comparisons updated. Budgets: one `fstat` per
+  FLUSH/RELEASE, no new syscall on the GETATTR-from-cache path (the strace
+  goldens and syscall budgets say so).
+Owner: dcfs-protocol.
+

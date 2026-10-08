@@ -1720,3 +1720,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 26.5d (russ, 2026-10-08): expand mutation testing with our own tooling (operators from the
   literature, arid-node suppression, sampling, an equivalent-mutant data file, per-operator
   reporting); no Mull/Dextool. Dispatched to lane-3 (new implementer).
+- 23.8 (russ, 2026-10-08): access times. Files: no prediction; `fstat` on the held backing fd at
+  FLUSH/RELEASE/GETATTR-while-held (an open file pins its inode: no disk I/O), row dirty until the
+  sync point. Directories and symlinks: stamped in the cache, never written to the backing (the
+  only way to move a directory atime like a read is a read; utimensat bumps ctime). Alternatives
+  in notes/atime-alternatives-2026-10-08.md. Dispatched to lane-4 (new protocol agent).
