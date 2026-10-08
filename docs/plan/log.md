@@ -1937,3 +1937,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   allowed there only. `mount -t dcfs` through mount(8) is a SKIP in the busybox guest (15.6's
   systemd/util-linux guest covers it). Deferred: 15.3 cache path/identity, 15.4 stubs, 15.5, 15.6,
   15.7, allow_other default, kernel feature checks, -V revision.
+- 15.1/15.2 reviewed (Opus): fix first (HIGH: ForcedReadOnly looks in dcfs's own mountinfo, which
+  never lists an OPEN_TREE_CLONE mount, so captured mounts skip the 11.5 refusal and then exempt
+  every sync point; relative paths after chdir; /tmp staging; untestable readiness; exit statuses;
+  INFO to syslog by default; plus coverage, guest-check and doc items). Sent to lane-6. Confirmed
+  for russ: all logging, syslog included, goes through Abseil (SyslogSink is an absl::LogSink).

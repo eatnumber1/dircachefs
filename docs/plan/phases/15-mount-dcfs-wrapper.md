@@ -343,3 +343,22 @@ the log messages mean),
 design.md (wrapper, daemonization, boundaries, instance identity); remove
 `packaging/dcfs.service`.
 Review each step against the race/crash/tri-state rules before merge.
+
+## Status 2026-10-08 (15.1/15.2 in review fixes)
+
+As built on the branch (lane-6): argv[0] dispatch; `dcfs.` option split;
+capture of native/bind mounts in a private namespace via mount(8) +
+`open_tree(OPEN_TREE_CLONE)` over a socketpair; own daemonisation with a
+readiness report after the first FUSE_INIT; `SyslogSink` as an
+`absl::LogSink`; remount of the dcfs mount only; `--source` gone. Review
+(Opus): fix first: the 11.5 forced-read-only refusal cannot see a captured
+mount (anonymous namespace: run it in the helper on the staging mount);
+relative paths after the daemon's chdir; staging in /tmp instead of a
+tmpfs in the private namespace; readiness untestable; exit statuses 1 for
+usage/non-root, 32 for a failed start, native status passed through; the
+syslog sink takes the configured threshold (one knob); also install as
+`mount.fuse.dcfs` for libmount's remount lookup. Drift to record:
+StartupPurge is not removed (15.2's text said it would be; decide in
+15.3 with the cache path), `LOG_PERROR` not used, the systemd unit kept
+until 15.7. design.md's `--source` text and startup section are 15.7's.
+
