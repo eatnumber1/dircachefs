@@ -1603,3 +1603,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   DaemonCrash, ProbesDone, two known_bugs variants, Observers forwards RecoveryDone, large_test
   eternal). Fast 181 + 2, formal 99/99 without large/nolock (run alone with 3600 s: pass), trace c
   43 valid, subjects ok. Lane-1: new protocol agent on 12.7b (reply ghost).
+- 7.1b second review: all fixes verified; one blocker turned into a decision for russ (Needs russ):
+  the shipped SBOM now lists the sysroot's glibc 2.36-9+deb12u14 and an OSV scan of it fails:
+  16 unfixed Debian records (notes/osv-scan-2026-10-07.txt:102-117, DEBIAN-CVE-2026-5450 at
+  CVSS 9.8). Policy options: ignore entries with reason + expiry; keep the deb scan informational;
+  or a glibc build carrying the fixes (static main_static links libc.a, so a newer glibc means a
+  newer sysroot pin, Debian 13's glibc 2.41). Until decided the step is `continue-on-error`.
+  Also found: clang.cfg is not an input of sandboxed actions (fix in the same round). 11.2b review:
+  fix first (random mode's seed derivation aborts; fsstress op successes not counted; failures not
+  visible; "warm" comparison is the kernel's cache; digest without mtime/ctime), list sent.
