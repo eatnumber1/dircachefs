@@ -216,10 +216,14 @@ else
 	fail fuse-opt-good-mount "daemon did not mount within 10s"
 fi
 
-OUT=$("$DCFS" --source="$SRC" --cache_db="$DB_FUSEOPT" \
+# Under `timeout`: should a regression mount, the foreground daemon would
+# otherwise keep the command substitution waiting until the guest's timeout.
+# A refusal exits 1 (fuse_session_new failed); a run cut short by `timeout`
+# exits otherwise, and fails.
+OUT=$(timeout 10 "$DCFS" --source="$SRC" --cache_db="$DB_FUSEOPT" \
 	--fuse_opt=bogus_option_xyz "$MNT" 2>&1)
 RC=$?
-if [ "$RC" -ne 0 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
+if [ "$RC" -eq 1 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
 	pass fuse-opt-bad-rejected
 else
 	fail fuse-opt-bad-rejected "rc=$RC mount_count=$(mount_count "$MNT") out=$OUT"
@@ -228,11 +232,11 @@ fi
 
 # default_permissions is dcfs's own and required: naming it is a usage
 # error (exit 1, before anything is opened), not passed through twice.
-OUT=$("$DCFS" --source="$SRC" --cache_db="$DB_FUSEOPT" \
+OUT=$(timeout 10 "$DCFS" --source="$SRC" --cache_db="$DB_FUSEOPT" \
 	--fuse_opt=suid,default_permissions "$MNT" 2>&1)
 RC=$?
 if [ "$RC" -eq 1 ] && [ "$(mount_count "$MNT")" -eq 0 ] &&
-	echo "$OUT" | grep -q "default_permissions is redundant"; then
+	printf '%s\n' "$OUT" | grep -q "default_permissions is redundant"; then
 	pass fuse-opt-default-permissions-rejected
 else
 	fail fuse-opt-default-permissions-rejected "rc=$RC mount_count=$(mount_count "$MNT") out=$OUT"
