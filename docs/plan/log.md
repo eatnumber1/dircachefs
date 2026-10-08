@@ -1705,3 +1705,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   MemAvailable 136-148 MB of 222, no reclaim; the initramfs growth costs 1.6 MB. CI's quiet runner
   passes it. names_test/names_random_test unaffected. Follow-up as 6.2 (lane-3): create the files
   with one testutil call, same N and assertions. Push hold for this lifted.
+- CI fixes merged (340f559): coverage baseline 95.82 / 78.51 (8.1, the ratchet's own request from
+  run 37725626313); TLC runner sets TMPDIR and -Djava.io.tmpdir under $TEST_TMPDIR (12.1; the race
+  did not reproduce locally in 3 runs at 4 jobs, strace shows no TLC file under /tmp after the fix);
+  mutate.py builds the target's compile prerequisites before the AST dump (26.5; reproduced by
+  deleting libfuse_config.h; PrerequisitesTest). Survivors are findings in that job (exit 0 without
+  --fail-on-survivor). 8.2d recorded: five survivors from the fee154d range. Push point = after
+  25.3's code lands (flags_consistency_test). Lanes 4 and 6 held: 8.2d after 11.4 + 25.3, 11.3b
+  after 11.5.

@@ -106,3 +106,19 @@ change (a 12.x item). 8.2b, from the first per-push run: `Release`
 `OpenInode:1488` `!shared` negated; `OpenInode:1525` `backing_id > 0`
 negated; `Release:1738` `!closed.ok()` negated; `Setxattr:2103`
 `!stored.ok()` negated.
+
+## 8.2d Survivors from the per-push mutation job (2026-10-08)
+
+The first `mutation-changed` run that got past its tooling error (local,
+range 38303ec..fee154d, 22 of 30 mutants run before the host load made it
+too slow): 17 killed, 5 survived, each to be killed by a test or listed
+as equivalent in `tools/mutation/README.md` (the `End()` deletions that
+return at once are the known equivalent class):
+- `dir_cache_fs.cc:989` negate-?:
+- `dir_cache_fs.cc:1604` negate-if
+- `dir_cache_fs.cc:1671` negate-if
+- `dir_cache_fs.cc:2178` delete-call End
+- `dir_cache_fs.cc:2189` delete-call End
+After 11.4 and 25.3 land (both edit dir_cache_fs.cc), so line numbers
+are re-derived with `mutate.py generate`.
+
