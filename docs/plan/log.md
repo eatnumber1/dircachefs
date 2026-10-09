@@ -2289,3 +2289,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (6.9 for FS_IOC_GETFSUUID, 6.13 for AT_HANDLE_CONNECTABLE; EINVAL fallback between). Opus review
   dispatched (identity safety of the derived handle, phase-3 context, error handling, tests,
   ident.tla, docs).
+- Phase 13 review (Opus): another round. H1 identity weakened for objects without a generation or
+  birth time (TLC: MC_ident_power with OutOfBand violates HeldResolvesToItsObject in 4 states on
+  the branch, none on main); the guard test uses a timer and a dentry-cache-dependent control; the
+  documented diagnostics benefit holds only for fstype=none (cloned mounts show clone-relative
+  paths; AppArmor treats them as disconnected); cost understated below the root. NEEDS RUSS:
+  orchestrator recommends shelving (keep the branch, merge the TLC config that found H1).
+- 26.14f merged (6d74ef5): ForkDaemon returned in both processes, shared continuous-mode counters
+  made llvm-cov's derived branch counts negative; ForkSplit primitive, per-test artifact check in
+  cov-lcov.sh, fork fixture in coverage_pipeline_test. Lane-5 free: 25.7 + 25.8 + 7.1d dispatched
+  as one implementer step (style rules, the no-test-only-knobs inventory and repo-shape check, the
+  Abseil tips precedence, the UAPI shims removed).

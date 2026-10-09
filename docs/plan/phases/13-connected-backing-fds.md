@@ -168,3 +168,35 @@ chmod 19->22, ...). Presubmit over dcfs/qemu/tools/formal 341 pass (two
 load timeouts passed on rerun); asan on backing and dir_cache_fs tests
 green.
 
+Opus review 2026-10-09: ANOTHER ROUND, and the cost-benefit now needs
+russ. H1 (HIGH): the connectable handle is derived from the current
+name, so the kernel's generation check never applies to the row's object
+and the only identity check left is the statx probe; for symlinks, FIFOs,
+sockets and devices `ReadGeneration` returns 0, and without a birth time
+the probe rests on the inode number alone. TLC-verified: `MC_ident_power`
+(Evidence {"handle_gen"}) with OutOfBand = TRUE passes on main (721,557
+states) and violates `HeldResolvesToItsObject` in 4 states on the branch
+(an out-of-band `rm s; ln -s x s` reusing the inode). No existing config
+combined generation-only evidence with out-of-band changes. Fix: keep the
+connectable fd only when a generation or birth time was actually
+compared, else the plain handle, plus the config and a known_bug. M1: the
+guard test decides "blocked" with a timer (30 x 100 ms) and its control
+depends on the dentry cache (`mnt_want_write` is taken in `lookup_open`
+on a miss, VFS-generic; btrfs "answered" because it was warm). M2: the
+experiment code sits in the hand-synced third-party copy tools/fhtest.c.
+M3: the documented benefits do not hold for the default capture forms:
+a cloned mount in no namespace shows paths relative to the clone, and
+AppArmor treats them as disconnected unless the profile allows it; only
+`fstype=none` gets real paths; fallbacks stay disconnected in every
+form. M4: inconsistent fallbacks, consumed statuses not logged,
+`return connectable.status()` for other errnos untested. M5: the kernel
+capability is rediscovered per open (probe once at startup, a policy in
+Context). M6: the cost is understated (below the root about +6 syscalls;
+a cold deep open runs the kernel's reconnect walk with a readdir per
+uncached ancestor; every named open also runs the parent's
+ReconcileAttrs). L1-L5 docs and tests. NEEDS RUSS (2026-10-09):
+orchestrator recommends shelving the phase (keep the branch and the
+experiment record; merge separately the TLC configuration that found H1)
+over another round for a feature that helps diagnostics only in the
+`none` form.
+

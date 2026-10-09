@@ -422,4 +422,24 @@ fix in the harness or the profile naming, never by widening the gate.
 Until then the coverage job is red on every push that runs mount_dcfs under
 coverage; the push rule (fast dev) tolerates it, the gate did its job.
 Owner: dcfs-investigator, next free lane after 15.6b.
+Done 2026-10-09, merged 6d74ef5 (lane-5, one commit). Cause: `ForkDaemon`
+returned in both the wrapper and the daemon; under continuous-mode
+profiling the two processes share one mapped profile, so the code after
+the fork counted twice per entry (function count 22, post-fork blocks
+44) and llvm-cov's flow-conservation derivation of a branch count went
+negative (2^32 - n); Bazel's lcov merger then added other tests' real
+counts on top, hence 2^32 + a few hundred, and 2*2^32 where two tests
+carried it. A 25-line fork program reproduces it. Not a corrupt profile:
+every raw file reads cleanly; `%p` cannot split a fork child in
+continuous mode (the mapping is inherited). Fix: `dcfs/fork_split.h`
+`ForkSplit(child, parent)`, the one function that returns twice, marked
+`no_profile_instrument_function`; `ForkDaemon` returns only in the child
+and the parent exits inside `AwaitReportAndExit`; behaviour unchanged.
+Guards: `scripts/cov-lcov.sh` fails a single test whose lcov has a count
+>= 2^31 (so it no longer hides in the sum), `coverage_pipeline_test` runs
+a fork fixture both ways (twice refused, split accepted with each side at
+1, failing first), `startup_channel_fault_test` forks a wrapper per case.
+Cost: nothing (profile +352 B). Left: `backing_capture.cc`'s two forks and
+`bench/process.cc` under-count the parent leg of their `child == 0`
+branch (never negative); a follow-up can use the same primitive.
 
