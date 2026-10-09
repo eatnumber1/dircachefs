@@ -589,12 +589,26 @@ cc_library(
     ],
 )
 
+# Step 26.14f: a fork whose two processes never return through the same code
+# (what continuous-mode coverage can count).
+cc_library(
+    name = "fork_split",
+    hdrs = ["fork_split.h"],
+    visibility = ["//test/qemu:__pkg__"],
+    deps = [
+      ":syscalls_process",
+      "@absl//absl/status",
+      "@absl//absl/status:statusor",
+    ],
+)
+
 # Step 15.2: how mount.dcfs daemonizes and learns that the daemon serves.
 cc_library(
     name = "startup_channel",
     srcs = ["startup_channel.cc"],
     hdrs = ["startup_channel.h"],
     deps = [
+      ":fork_split",
       ":mount_dcfs",
       ":status",
       ":syscalls",
@@ -761,11 +775,15 @@ qemu_cc_test(
     deps = [
       ":mount_dcfs",
       ":startup_channel",
+      ":syscalls",
+      ":syscalls_backing",
       ":syscalls_process",
       "@absl//absl/log:log_entry",
       "@absl//absl/log:log_sink",
       "@absl//absl/log:log_sink_registry",
       "@absl//absl/status",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
       "@googletest//:gtest_main",
     ],
 )

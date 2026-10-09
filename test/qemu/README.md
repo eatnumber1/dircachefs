@@ -514,6 +514,13 @@ source-based coverage and collects it from the guests:
   keeps each test's profiles under `test.outputs/profraw/`;
   `--test_env=DCFS_FORCE_CPUS=<n>` overrides the vCPU count.
 
+- A fork must not return in both processes (`dcfs/fork_split.h`): the two
+  processes share the counters, a function entered once and left twice breaks
+  the flow conservation llvm-cov derives counts from, and a branch gets a
+  negative count (4294967295 and its sums, `docs/coverage.md`, step 26.14f).
+  `scripts/cov-lcov.sh` fails a test whose lcov has a count of 2^31 or more,
+  naming the lines.
+
 Self-checks: `//test/qemu:coverage_pipeline_test` runs an instrumented
 fixture through the same `cov-lcov.sh` and requires the function that ran to
 have hits and the one that did not to appear with 0 hits (`check-lcov.sh

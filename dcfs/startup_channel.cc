@@ -5,7 +5,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <optional>
+#include <cstdlib>
 #include <string>
 #include <utility>
 
@@ -15,6 +15,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/fd.h"
+#include "dcfs/fork_split.h"
 #include "dcfs/mount_dcfs.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
@@ -86,28 +87,16 @@ void StartupReporter::Fail(const absl::Status &status) {
   channel_.Close().IgnoreError();
 }
 
-absl::StatusOr<DaemonFork> ForkDaemon() {
-  ABSL_ASSIGN_OR_RETURN(
-      auto channel, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
-  auto &[parent_end, child_end] = channel;
-  ABSL_ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
-  if (child == 0) {
-    parent_end.Close().IgnoreError();
-    StartupReporter reporter(std::move(child_end));
-    // A daemon that cannot detach says so through the channel, like any
-    // other failure to start.
-    if (absl::Status detached = DetachDaemon(); !detached.ok()) {
-      reporter.Fail(detached);
-      syscalls::_exit(ExitStatusFor(detached));
-    }
-    return DaemonFork{.reporter = std::move(reporter)};
-  }
+namespace {
 
-  child_end.Close().IgnoreError();
+// The wrapper's half of the fork: the daemon's report, then the wrapper's
+// exit (its message, if any, on stderr). Exits here rather than return: see
+// fork_split.h.
+[[noreturn]] void AwaitReportAndExit(FileDescriptor parent_end, pid_t child) {
   absl::StatusOr<std::string> bytes = ReadReport(*parent_end);
   if (!bytes.ok()) bytes = std::string();
   StartupReport report = DecodeStartupReport(*bytes);
-  if (report.ready) return DaemonFork{.parent_exit_status = 0};
+  if (report.ready) std::exit(0);
   if (bytes->empty()) {
     // Died without a word: say how.
     int wait_status = 0;
@@ -118,7 +107,37 @@ absl::StatusOr<DaemonFork> ForkDaemon() {
     }
   }
   LOG(ERROR) << report.message;
-  return DaemonFork{.parent_exit_status = report.exit_status};
+  std::exit(report.exit_status);
+}
+
+// The daemon's half: it holds the reporting end.
+StartupReporter BecomeDaemon(FileDescriptor parent_end,
+                             FileDescriptor child_end) {
+  parent_end.Close().IgnoreError();
+  StartupReporter reporter(std::move(child_end));
+  // A daemon that cannot detach says so through the channel, like any other
+  // failure to start.
+  if (absl::Status detached = DetachDaemon(); !detached.ok()) {
+    reporter.Fail(detached);
+    syscalls::_exit(ExitStatusFor(detached));
+  }
+  return reporter;
+}
+
+}  // namespace
+
+absl::StatusOr<StartupReporter> ForkDaemon() {
+  ABSL_ASSIGN_OR_RETURN(
+      auto channel, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  auto &[parent_end, child_end] = channel;
+  return ForkSplit(
+      [&] {
+        return BecomeDaemon(std::move(parent_end), std::move(child_end));
+      },
+      [&](pid_t child) {
+        child_end.Close().IgnoreError();
+        AwaitReportAndExit(std::move(parent_end), child);
+      });
 }
 
 }  // namespace dcfs

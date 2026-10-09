@@ -6,11 +6,9 @@
 // thread, the database or the mount exists. The child becomes the daemon
 // (new session, working directory "/", stdio on /dev/null) and holds the
 // reporting end of a socket pair; the parent waits on the other end for the
-// daemon's StartupReport and returns the exit status the wrapper exits with.
+// daemon's StartupReport and exits with the status the wrapper exits with.
 // So the wrapper returns only once dcfs answered FUSE_INIT ("ready") or a
 // failure, with its message, is known.
-
-#include <optional>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -38,16 +36,12 @@ class StartupReporter {
   FileDescriptor channel_;
 };
 
-struct DaemonFork {
-  // Set in the parent only: the wrapper's exit status, after the daemon's
-  // report (a failure's message is already on the wrapper's stderr).
-  std::optional<int> parent_exit_status;
-  // The daemon's (child's) reporter.
-  StartupReporter reporter;
-};
-
-// Forks; see the top of this file.
-[[nodiscard]] absl::StatusOr<DaemonFork> ForkDaemon();
+// Forks; see the top of this file. Returns the daemon's (child's) reporter,
+// in the child only: the parent exits with the wrapper's status once it has
+// the report and never returns (one process returns through the callers, see
+// fork_split.h). A failure to fork or to make the channel is returned, in the
+// one process there is.
+[[nodiscard]] absl::StatusOr<StartupReporter> ForkDaemon();
 
 }  // namespace dcfs
 

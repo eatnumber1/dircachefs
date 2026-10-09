@@ -7,7 +7,7 @@
 # or an empty one, or a truncated profile taken for good, would fail here.
 #
 #   coverage_pipeline_test.sh <cov-lcov.sh> <check-lcov.sh> <llvm-profdata>
-#       <llvm-cov> <fixture>
+#       <llvm-cov> <fixture> <fork-fixture>
 set -eu
 
 cov_lcov=$1
@@ -15,6 +15,7 @@ check=$2
 profdata=$3
 llvm_cov=$4
 fixture=$5
+fork_fixture=$6
 
 dir="${TEST_TMPDIR:-$(mktemp -d)}/prof"
 mkdir -p "$dir"
@@ -62,3 +63,36 @@ if ! grep -q "cut.profraw" "$bad/err"; then
 	cat "$bad/err" >&2
 	exit 1
 fi
+
+# Step 26.14f: a fork under continuous-mode profiling (the guests' mode: the
+# processes share the profile's counters). A function that returns in both
+# processes makes llvm-cov derive a negative count; cov-lcov.sh must refuse
+# the report and name the line, not hand an artifact on to the gate (a count
+# of 4294967295 would pass for a taken branch).
+fork="$dir/fork"
+mkdir -p "$fork"
+LLVM_PROFILE_FILE="$fork/%m%c.profraw" "$fork_fixture" twice
+if "$cov_lcov" "$profdata" "$llvm_cov" "$fork" "$fork/out.lcov" "$fork_fixture" 2>"$fork/err"; then
+	echo "FAIL: a report with a counter-underflow artifact was accepted" >&2
+	exit 1
+fi
+if ! grep -q "cov_fork_fixture.cc:" "$fork/err"; then
+	echo "FAIL: the error does not name the artifact's source line:" >&2
+	cat "$fork/err" >&2
+	exit 1
+fi
+
+# The same fork through dcfs::ForkSplit (which returns in the child only)
+# gives a report cov-lcov.sh accepts, and Parent() and Child() each ran once.
+split="$dir/split"
+mkdir -p "$split"
+LLVM_PROFILE_FILE="$split/%m%c.profraw" "$fork_fixture" split
+"$cov_lcov" "$profdata" "$llvm_cov" "$split" "$split/out.lcov" "$fork_fixture"
+for fn in Parent Child; do
+	hits=$(sed -n 's/^FNDA:\([0-9]*\),\(.*\)$/\1 \2/p' "$split/out.lcov" | awk -v f="$fn" 'index($2, f) { print $1; exit }')
+	if [ "${hits:-}" != 1 ]; then
+		echo "FAIL: $fn ran once but the lcov says ${hits:-nothing}:" >&2
+		cat "$split/out.lcov" >&2
+		exit 1
+	fi
+done

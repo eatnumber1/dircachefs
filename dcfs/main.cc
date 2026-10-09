@@ -658,15 +658,13 @@ int MountHelperMain(int argc, char *argv[]) {
   // the child; this process waits for its report and exits with it.
   StartupReporter reporter;
   if (!options->foreground) {
-    absl::StatusOr<DaemonFork> forked = ForkDaemon();
+    // Returns in the daemon (the child) only; the wrapper exits inside.
+    absl::StatusOr<StartupReporter> forked = ForkDaemon();
     if (!forked.ok()) {
       LOG(ERROR) << forked.status();
       return 1;
     }
-    if (forked->parent_exit_status.has_value()) {
-      return *forked->parent_exit_status;
-    }
-    reporter = std::move(forked->reporter);
+    reporter = *std::move(forked);
   }
   // A daemon logs to syslog alone (its stderr is /dev/null), and the one
   // knob, the stderr threshold, governs it; a foreground dcfs logs to stderr.

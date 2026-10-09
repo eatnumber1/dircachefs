@@ -48,3 +48,24 @@ done
 "$cov" export -format=lcov -instr-profile="$merged" \
 	-ignore-filename-regex='(^|/)external/|_test\.cc$|/testonly/' $objects "$first" |
 	sed 's|^SF:/proc/self/cwd/|SF:|' >"$out"
+
+# A count of 2^31 or more is not a count but a negative difference of region
+# counters (docs/coverage.md, "Known coverage artifacts"): a branch is printed
+# as 4294967295, a line as 2^64-1. Refuse such a test's report here, naming
+# the lines, instead of leaving it to be summed into the combined report
+# (where 2^32-1 plus a real count looks like a count; tools/coverage_gate.sh
+# is the last line of defence). Step 26.14f: a function that returns in two
+# processes (a fork) does this.
+artifacts=$(awk '
+	/^SF:/ { sf = substr($0, 4) }
+	/^DA:/ { split(substr($0, 4), f, ",")
+		if (f[2] + 0 >= 2147483648) print sf ":" f[1] " line count " f[2] }
+	/^BRDA:/ { split(substr($0, 6), f, ",")
+		if (f[4] != "-" && f[4] + 0 >= 2147483648)
+			print sf ":" f[1] " branch " f[2] "." f[3] " count " f[4] }
+' "$out")
+if [ -n "$artifacts" ]; then
+	echo "cov-lcov.sh: ERROR: counts that are counter-underflow artifacts, not counts (docs/coverage.md); the test fails rather than report them:" >&2
+	echo "$artifacts" >&2
+	exit 1
+fi

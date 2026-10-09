@@ -30,10 +30,13 @@ if [ -z "$base_lines" ] || [ -z "$base_branches" ]; then
 fi
 
 # A branch count of 2^31 or more is not a count: llvm-cov computes a branch's
-# count as a difference of region counters, and counters that lost an update
-# (docs/coverage.md, "Known coverage artifacts") give a negative difference,
-# which it prints as 4294967295. Such a branch would count as taken, so the
-# report cannot be trusted: name every one and fail.
+# count as a difference of region counters, and counters that lost an update,
+# or a function that returns in two processes after a fork
+# (docs/coverage.md, "Known coverage artifacts"), give a negative difference,
+# which it prints as 4294967295 (and the combined report sums those over the
+# tests: 4294967562). Such a branch would count as taken, so the report
+# cannot be trusted: name every one and fail. scripts/cov-lcov.sh refuses
+# these per test, so a failure here is a count that arrived another way.
 artifacts=$(awk '
 	/^SF:/ { sf = substr($0, 4) }
 	/^BRDA:/ { split(substr($0, 6), f, ",")

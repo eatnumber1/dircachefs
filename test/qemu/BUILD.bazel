@@ -1245,6 +1245,26 @@ cc_binary(
     linkopts = ["-fprofile-instr-generate"],
 )
 
+# Step 26.14f: forks under continuous-mode coverage (see docs/coverage.md,
+# "Known coverage artifacts"): a function that returns in both processes
+# gives a negative count, one built on dcfs::ForkSplit does not. The copts
+# are the coverage config's (.bazelrc) so the fixture counts the way the
+# guests' binaries do.
+cc_binary(
+    name = "cov_fork_fixture",
+    testonly = 1,
+    srcs = ["testdata/cov_fork_fixture.cc"],
+    deps = ["//dcfs:fork_split"],
+    copts = [
+        "-fprofile-instr-generate",
+        "-fcoverage-mapping",
+        "-fprofile-update=atomic",
+        "-mllvm",
+        "-runtime-counter-relocation",
+    ],
+    linkopts = ["-fprofile-instr-generate"],
+)
+
 sh_test(
     name = "coverage_pipeline_test",
     size = "small",
@@ -1256,9 +1276,11 @@ sh_test(
         "$(rootpath @dcfs_llvm//:bin/llvm-profdata)",
         "$(rootpath @dcfs_llvm//:bin/llvm-cov)",
         "$(rootpath :cov_fixture)",
+        "$(rootpath :cov_fork_fixture)",
     ],
     data = [
         ":cov_fixture",
+        ":cov_fork_fixture",
         "scripts/check-lcov.sh",
         "scripts/cov-lcov.sh",
         "@dcfs_llvm//:bin/llvm-cov",
