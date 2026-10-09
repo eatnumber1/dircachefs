@@ -137,4 +137,13 @@ grep for other `#ifndef <UAPI constant>` shims found none. Rule for
 style.md's includes section: no copies of UAPI definitions; the pinned
 sysroot's headers are the only source, and a missing definition means the
 pin is too old. Owner: dcfs-mechanical, any free lane after 26.16's P0.
+Also in 7.1d (russ, 2026-10-09: "Keep it. Mechanical invariant enforcement
+is more valuable."): style.md 1.5/1.8 state in one sentence why the
+syscall wrappers are three libraries: `syscalls_backing.h` is its own
+target so `//tools:syscalls_backing_users_test`'s golden list enforces
+"every backing-reaching syscall is made in backing.cc" in the build graph,
+which is what keeps the fault sweep and the trace recorder complete, since
+both hook backing.cc; `syscalls.h` is the process-local set anyone may
+call; `syscalls_process.h` exists so bench/ and the tools get wrappers
+without dcfs's libraries.
 

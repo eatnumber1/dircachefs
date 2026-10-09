@@ -2168,3 +2168,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   sysroot's linux/fs.h (6.12 defines fsuuid2 and FS_IOC_GETFSUUID); testutil.c's FS_IOC_SHUTDOWN
   shim is the same case. 7.1d queued (mechanical, after 26.16's P0), with a style rule: no copies
   of UAPI definitions.
+- russ (2026-10-09) on the syscalls.h / syscalls_backing.h split: "Keep it. Mechanical invariant
+  enforcement is more valuable." The reason goes into style.md with 7.1d.
