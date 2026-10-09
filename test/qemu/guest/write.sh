@@ -663,10 +663,10 @@ head -c 4096 /dev/zero >"$MNT/mm"
 touch -d "2001-09-09 01:46:40" "$MNT/mm"
 "$TESTUTIL" mmapwrite "$MNT/mm" usr1 >/tmp/mm.out 2>&1 &
 MM_PID=$!
-wait_for_line /tmp/mm.out MAPPED "$MM_PID" || true
+"$TESTUTIL" waitline /tmp/mm.out MAPPED "$MM_PID" || true
 stat -c %Y "$MNT/mm" >/dev/null  # the kernel caches the attributes now
 kill -USR1 "$MM_PID"
-wait_for_line /tmp/mm.out STORED "$MM_PID" || true
+"$TESTUTIL" waitline /tmp/mm.out STORED "$MM_PID" || true
 mm_src=$(stat -c %Y "$SRC/mm")
 mm_mnt=$(stat -c %Y "$MNT/mm")
 if [ "$mm_src" != 1000000000 ] && [ "$mm_mnt" = "$mm_src" ]; then
@@ -693,10 +693,10 @@ head -c 4096 /dev/zero >"$MNT/mm2"
 touch -d "2001-09-09 01:46:40" "$MNT/mm2"
 "$TESTUTIL" mmapwrite-closed "$MNT/mm2" usr1 >/tmp/mm2.out 2>&1 &
 MM_PID=$!
-wait_for_line /tmp/mm2.out MAPPED "$MM_PID" || true
+"$TESTUTIL" waitline /tmp/mm2.out MAPPED "$MM_PID" || true
 stat -c %Y "$MNT/mm2" >/dev/null
 kill -USR1 "$MM_PID"
-wait_for_line /tmp/mm2.out STORED "$MM_PID" || true
+"$TESTUTIL" waitline /tmp/mm2.out STORED "$MM_PID" || true
 kill "$MM_PID" 2>/dev/null || true
 wait "$MM_PID" 2>/dev/null || true
 echo 2 >/proc/sys/vm/drop_caches

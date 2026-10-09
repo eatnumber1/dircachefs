@@ -124,7 +124,7 @@ sleep 6
 stat "$MNT" >/dev/null
 "$TESTUTIL" opath-hold "$MNT/written" >/tmp/hold.out 2>&1 &
 HOLD_PID=$!
-wait_for_line /tmp/hold.out READY "$HOLD_PID" || true
+"$TESTUTIL" waitline /tmp/hold.out READY "$HOLD_PID" || true
 sync
 
 drop_caches_quiesced

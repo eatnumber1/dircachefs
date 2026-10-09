@@ -91,7 +91,7 @@ before_open=$(daemon_fd_count)
 # test is about, via a real writable Open().
 "$TESTUTIL" writehold "$MNT/leak-test" create 16 >/tmp/writehold.out 2>&1 &
 HOLD_PID=$!
-wait_for_line /tmp/writehold.out READY "$HOLD_PID" || true
+"$TESTUTIL" waitline /tmp/writehold.out READY "$HOLD_PID" || true
 if ! grep -q READY /tmp/writehold.out 2>/dev/null; then
 	fail writehold-ready "writehold did not get ready: $(cat /tmp/writehold.out)"
 	exit "$FAILED"
@@ -119,7 +119,7 @@ fi
 # event the long hold is for, instead of after the whole 30s.
 "$TESTUTIL" sqlite-lock "$DB" 30 >/tmp/sqlite-lock.out 2>&1 &
 LOCK_PID=$!
-wait_for_line /tmp/sqlite-lock.out READY "$LOCK_PID" || true
+"$TESTUTIL" waitline /tmp/sqlite-lock.out READY "$LOCK_PID" || true
 if ! grep -q READY /tmp/sqlite-lock.out 2>/dev/null; then
 	fail sqlite-lock-ready "sqlite-lock did not get ready: $(cat /tmp/sqlite-lock.out)"
 	exit "$FAILED"
@@ -137,7 +137,7 @@ HOLD_PID=""
 # lock (killed: the transaction it holds is rolled back, as its COMMIT of
 # nothing would have left it) and give the daemon a moment to finish
 # processing FLUSH/RELEASE.
-wait_for_line "$LOG" "Release: could not refresh the attributes" "" 40 || true
+"$TESTUTIL" waitline "$LOG" "Release: could not refresh the attributes" "$DAEMON_PID" || true
 kill "$LOCK_PID" 2>/dev/null || true
 wait "$LOCK_PID" 2>/dev/null || true
 LOCK_PID=""

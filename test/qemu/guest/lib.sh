@@ -305,27 +305,6 @@ start_daemon() {
 	return 1
 }
 
-# wait_for_line FILE PATTERN [PID [SECONDS]]: waits up to SECONDS (default
-# 10), looking every 0.1s, for a line of FILE matching PATTERN (grep -q);
-# returns 1 if the time runs out, or if PID (when given and not empty) is
-# gone and the line is still not there. For the READY/MAPPED/STORED lines of
-# testutil's holders and for a line of the daemon's log: a look every second
-# made each wait cost a whole second.
-wait_for_line() {
-	wfl_n=0
-	wfl_max=$((${4:-10} * 10))
-	while [ "$wfl_n" -lt "$wfl_max" ]; do
-		grep -q -- "$2" "$1" 2>/dev/null && return 0
-		if [ -n "${3:-}" ] && ! kill -0 "$3" 2>/dev/null; then
-			grep -q -- "$2" "$1" 2>/dev/null && return 0
-			return 1
-		fi
-		wfl_n=$((wfl_n + 1))
-		sleep 0.1
-	done
-	return 1
-}
-
 # restart_daemon NAME LOG: SIGTERMs the current daemon (DAEMON_PID), forces
 # an unmount if it didn't clean up $MNT itself, then start_daemon's it back
 # up with no extra flags; reports "$NAME-unmount"/"$NAME-mount".

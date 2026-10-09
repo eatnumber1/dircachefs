@@ -81,7 +81,7 @@ hold() {
 	"$TESTUTIL" writehold "$1" "$2" "$3" >"$out" 2>&1 &
 	HOLDER_PID=$!
 	HOLDERS="$HOLDERS $HOLDER_PID"
-	wait_for_line "$out" READY "$HOLDER_PID" && return 0
+	"$TESTUTIL" waitline "$out" READY "$HOLDER_PID" && return 0
 	echo "crash.sh: writehold $* did not get ready: $(cat "$out")"
 	return 1
 }
