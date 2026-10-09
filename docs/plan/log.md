@@ -2379,3 +2379,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Two changes only sped up polls (start_daemon 1 s to 0.1 s; wait_for_line 1 s to 0.13 s), against
   the no-timers rule that landed meanwhile: sent back to become events (poll() on /proc/self/mounts
   via testutil; READY lines through a fifo), then rebase, again after 15.6b for its sleep allowlist.
+- 15.6b review (Opus): not yet mergeable. libmount tries umount.fuse.dcfs FIRST (the agent's debug
+  reading missed it), and systemd unmounts with -c, so the dcfs-only name suffices: decided, ship
+  umount.fuse.dcfs by default, umount.fuse as an opt-in; russ's question is moot. Blocker: the
+  helper hangs when the unmount does not end the superblock (binds, other namespaces, umount -r);
+  fix via fusectl's connection directory nlink. High: device-number reuse can make an unrelated
+  daemon refuse to start; blocking lock with re-check or the unique mount id. Plus -N, process
+  setup before dispatch, a test that can hide a failed restart, the 90 s stop timeout documented,
+  coverage gaps, banned-symbols reasons. Sent back.

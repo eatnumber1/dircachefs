@@ -448,6 +448,44 @@ reboot); the busybox guest's umount lacks `-i`, so mount_dcfs.sh wraps it.
 Fast 231 + 2, presubmit dcfs+qemu 181 pass, asan on the wrapper tests
 green.
 
+Opus review 2026-10-09: not yet mergeable; the idea is sound. The libmount
+premise was half wrong: `mnt_context_prepare_helper` tries
+`umount.fuse.dcfs` FIRST and strips the subtype only if that is missing
+(the debug line prints after the strip); the subtype is absent only on
+the statfs shortcut (root, absolute directory target, none of -f -l -c -r
+-d, no utab entry); systemd always unmounts with `umount <where> -c`, the
+mountinfo path. DECISION (orchestrator, per the reviewer's
+recommendation; the question to russ is moot): ship `umount.fuse.dcfs` by
+default (covers systemd restart and reboot and `umount -c`), `umount.fuse`
+as a documented opt-in affecting every FUSE filesystem; the helper
+accepts both names. Blocker: the helper hangs forever when the unmount
+does not end the superblock (a bind of a dcfs subtree, an rbind, a copy
+in another mount namespace such as a container volume or an `unshare -m`
+shell, `umount -r` on a busy mount, which libmount answers 0 after a ro
+remount); under systemd a 90 s stop timeout then SIGTERMs a daemon still
+serving; fix: open `/sys/fs/fuse/connections/<minor>` before unmounting
+and wait only if its st_nlink is 0 after (fuse_ctl_remove_conn runs
+inside the umount). HIGH: anonymous device numbers are reallocated
+lowest-first during the umount, so `systemctl restart a.mount b.mount`
+can make a's new daemon open D_b's lock file, get EWOULDBLOCK and refuse
+(emergency mode); fix: a blocking LOCK_EX with the unlink-while-locked
+re-check, or key the lock by the unique mount id (6.8+). MEDIUM: `umount
+-N` rejected for every FUSE filesystem; `umask(0)` and RaiseFileLimit run
+before the argv[0] dispatch (an ordinary user's sshfs unmount logs a dcfs
+WARNING); the systemd test's `systemctl start` after a restart can hide a
+failed child restart; systemd's 90 s stop timeout now kills a long
+FinishRun (document x-systemd.mount-timeout, Ctrl-C, umount -l); coverage
+gaps in the helper's error paths. LOW: unlink order vs the db lock, /run
+creation, a needless realpath walk, NotFoundError as a sentinel, stale
+busy_timeout comments, banned_symbols reasons (sysinfo's nanosleep is TSC
+calibration; add AbslInternalSleepFor), repo_shape's sleep regex (per
+file, misses `sleep .5`, usleep, `timeout N`, `read -t`), no test of the
+one real busy_timeout change. Q3: the busy_timeout argument holds; the
+next start's recovery is cheap because SyncBacking has already emptied
+the dirty set. Q6: no model change; design.md's clean_shutdown text still
+matches. Sent back 2026-10-09 with items 1-8, 13, 14 required and the
+cheap LOWs.
+
 **15.7 Docs:** README (fstab with and without systemd, `dcfs.fstype`
 values, `_netdev`, fsck, trees, over-mounting, remount, NFS exports,
 administrator responsibilities, why root, the bind-form submount behavior,
