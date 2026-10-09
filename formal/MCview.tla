@@ -8,6 +8,10 @@
 (***************************************************************************)
 EXTENDS MC
 
+\* FSnapView's premise: no slot's snapshot of F's guard is ahead of it (so
+\* only whether it is current matters, and the clock can be zeroed).
+FSnapNotAhead == \A p \in Procs : ps[p].fsnap <= fm.seq
+
 \* Without FSnapView: the slots' snapshots of F's guard and the clock
 \* itself kept as they are.
 ViewNoFSnap == <<bCur, bSeq,
