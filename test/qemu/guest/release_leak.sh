@@ -91,13 +91,7 @@ before_open=$(daemon_fd_count)
 # test is about, via a real writable Open().
 "$TESTUTIL" writehold "$MNT/leak-test" create 16 >/tmp/writehold.out 2>&1 &
 HOLD_PID=$!
-i=0
-while [ "$i" -lt 10 ]; do
-	grep -q READY /tmp/writehold.out 2>/dev/null && break
-	kill -0 "$HOLD_PID" 2>/dev/null || break
-	i=$((i + 1))
-	sleep 1
-done
+wait_for_line /tmp/writehold.out READY "$HOLD_PID" || true
 if ! grep -q READY /tmp/writehold.out 2>/dev/null; then
 	fail writehold-ready "writehold did not get ready: $(cat /tmp/writehold.out)"
 	exit "$FAILED"
@@ -123,13 +117,7 @@ fi
 # back-to-back windows, ~20s worst case; 30s leaves ample margin.
 "$TESTUTIL" sqlite-lock "$DB" 30 >/tmp/sqlite-lock.out 2>&1 &
 LOCK_PID=$!
-i=0
-while [ "$i" -lt 10 ]; do
-	grep -q READY /tmp/sqlite-lock.out 2>/dev/null && break
-	kill -0 "$LOCK_PID" 2>/dev/null || break
-	i=$((i + 1))
-	sleep 1
-done
+wait_for_line /tmp/sqlite-lock.out READY "$LOCK_PID" || true
 if ! grep -q READY /tmp/sqlite-lock.out 2>/dev/null; then
 	fail sqlite-lock-ready "sqlite-lock did not get ready: $(cat /tmp/sqlite-lock.out)"
 	exit "$FAILED"

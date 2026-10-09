@@ -124,11 +124,7 @@ sleep 6
 stat "$MNT" >/dev/null
 "$TESTUTIL" opath-hold "$MNT/written" >/tmp/hold.out 2>&1 &
 HOLD_PID=$!
-i=0
-while [ "$i" -lt 10 ] && ! grep -q READY /tmp/hold.out; do
-	i=$((i + 1))
-	sleep 1
-done
+wait_for_line /tmp/hold.out READY "$HOLD_PID" || true
 sync
 
 drop_caches_quiesced

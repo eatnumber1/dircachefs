@@ -205,11 +205,7 @@ fi
 echo held >"$MNT/imm2"
 "$TESTUTIL" writehold "$MNT/imm2" append 0 >/tmp/hold.out 2>&1 &
 HOLD_PID=$!
-i=0
-while [ "$i" -lt 10 ] && ! grep -q READY /tmp/hold.out; do
-	i=$((i + 1))
-	sleep 1
-done
+wait_for_line /tmp/hold.out READY "$HOLD_PID" || true
 flags=$("$TESTUTIL" getflags "$MNT/imm2")
 "$TESTUTIL" setflags "$MNT/imm2" "$(printf '%x' $((0x$flags | 0x10)))"
 if sh -c "echo x >>$MNT/imm2" 2>/dev/null; then

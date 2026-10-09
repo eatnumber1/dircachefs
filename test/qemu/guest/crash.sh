@@ -81,13 +81,7 @@ hold() {
 	"$TESTUTIL" writehold "$1" "$2" "$3" >"$out" 2>&1 &
 	HOLDER_PID=$!
 	HOLDERS="$HOLDERS $HOLDER_PID"
-	i=0
-	while [ "$i" -lt 10 ]; do
-		grep -q READY "$out" 2>/dev/null && return 0
-		kill -0 "$HOLDER_PID" 2>/dev/null || break
-		i=$((i + 1))
-		sleep 1
-	done
+	wait_for_line "$out" READY "$HOLDER_PID" && return 0
 	echo "crash.sh: writehold $* did not get ready: $(cat "$out")"
 	return 1
 }

@@ -106,12 +106,12 @@ fi
 "$TESTUTIL" opath-hold-tree "$MNT" >/tmp/hold.out 2>&1 &
 HOLD_PID=$!
 i=0
-while [ "$i" -lt 300 ] && ! grep -q READY /tmp/hold.out; do
+while [ "$i" -lt 3000 ] && ! grep -q READY /tmp/hold.out; do
 	if ! kill -0 "$HOLD_PID" 2>/dev/null; then
 		break
 	fi
 	i=$((i + 1))
-	sleep 1
+	sleep 0.1
 done
 # mktree writes ENTRIES files and the one at the bottom of deep/.
 if grep -qx "READY $((ENTRIES + 1))" /tmp/hold.out; then

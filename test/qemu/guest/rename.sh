@@ -540,11 +540,7 @@ if "$TESTUTIL" fsfreeze "$SRC" freeze; then
 	sleep 1
 	"$TESTUTIL" sqlite-lock "$DB" 8 >/tmp/p3_lock.out 2>&1 &
 	LOCK_PID=$!
-	i=0
-	while [ "$i" -lt 10 ] && ! grep -q READY /tmp/p3_lock.out 2>/dev/null; do
-		i=$((i + 1))
-		sleep 1
-	done
+	wait_for_line /tmp/p3_lock.out READY "$LOCK_PID" || true
 	"$TESTUTIL" fsfreeze "$SRC" thaw
 	wait "$MV_PID"
 	mv_rc=$?
