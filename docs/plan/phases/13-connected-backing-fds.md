@@ -60,3 +60,44 @@ optionally print backing paths in warning log lines (diagnostics only).
 
 **Done when:** all 13.1 tests fail before and pass after, on ext4/xfs/btrfs;
 full suite and pjdfstest unchanged.
+
+## Status 2026-10-09: built, one conflict needs russ
+
+Branch step-13.1 in lane-2 (four commits: 13.1 tests, 13.2 code and
+goldens, 13.2 ident.tla, 13.3 design.md). As built: `cache::DentryOf`
+(one copy, `NamesToAskAbout` uses it); `OpenNode` tries `OpenByName`
+first (skips directories; the source root as parent uses the mount fd, so
+a root-level file costs no extra syscall; any other parent opens by
+handle, so the cost does not grow with depth: 6 announced calls instead of
+3 for a file below the root, 3 extra SQLite steps); ENOENT or an identity
+mismatch logs the out-of-band WARNING, marks the name unknown and falls
+back to the handle open; other openat errors are returned; no checkpoint
+before the named open (it runs inside phase 3); no parent-fd cache (the
+measurement does not call for one). ident.tla gains a present-dentry
+field, `NamedHit`, `NamedMismatch`, and known_bug
+`ident_named_open_no_fallback`; a finding while modelling: without durably
+clearing the dentry in phase 1 and in recovery, `ident_power` reaches a
+recycled inode through a rolled-back dentry (the code already clears it).
+Goldens and budgets updated with before/after; presubmit over dcfs, qemu,
+tools, formal: 337 pass, 2 fail, both `fault_freeze_test`.
+
+CONFLICT (needs russ): a by-name open with write access takes freeze
+protection (`mnt_want_write` in `path_openat`); `open_by_handle_at` does
+not. dcfs opens files O_RDWR even for a user's read-only open, so on a
+frozen backing every named open of a file now blocks the daemon, and six
+freeze checks fail (read through passthrough, read content, open for
+read, open for write, stat and readdir while a write is held). Options:
+(a) accept the blocking and change the test and the README freeze table
+(rejected by the quality rule unless russ says so); (b) named opens only
+for opens without write intent, writable fds stay disconnected by handle
+(half the feature: writable fds show `/` to lsof, path LSMs and audit);
+(c) a user's read-only open gets a read-only connected fd (never blocks
+under freeze) and only a writable open takes the writable fd, by name
+(blocks under freeze, as a write on the backing itself would) or by
+handle; an investigation of what (c) needs is running. Note that
+"open for write answered during a freeze" works today only because
+open_by_handle_at bypasses freeze protection, a kernel quirk; russ's
+"mirror a real filesystem" rule suggests a writable open should block as
+the backing's would, while the daemon-wide stall it causes is the 11.6
+finding, fixed by the concurrency design, not here.
+

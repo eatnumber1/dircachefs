@@ -2207,3 +2207,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   contain `sleep`. Both are 15.6b's to handle: the busy handler goes (one writer per database by
   design; a lock conflict is either the startup "in use" check or a bug, so an immediate clear
   error, with the reasoning in design.md), and the sleep sites are listed against 6.5.
+- Phase 13 built (lane-2): connected fds by name under the parent, handle fallback, ident.tla
+  extended with a known_bug, goldens/budgets updated. Blocker: a named open with write access takes
+  freeze protection, so fault_freeze_test fails six checks (dcfs opens O_RDWR for read-only user
+  opens). NEEDS RUSS: options (a) accept, (b) named opens for read-only only, (c) read-only opens
+  get a read-only connected fd and writable opens take the writable fd (blocking as the backing
+  would). Agent investigating (c)'s cost; no code change until russ decides.
