@@ -511,7 +511,7 @@ noisy_run() {
 	canned_e2e ALL-TESTS-PASSED
 	rm -f "$WORK/qemu-calls" "$WORK/out/serial.log"
 	RC=0
-	env -u DCFS_NOISY -u DCFS_FORCE_CPUS "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+	env -u DCFS_NOISY -u DCFS_SEED -u DCFS_FORCE_CPUS "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
 		sh "$RUN_QEMU" --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
 		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
 		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
@@ -534,6 +534,18 @@ grep -q -e '-smp 2 ' "$WORK/qemu-calls" || fail "DCFS_NOISY=1 lowered a two-vCPU
 NOISY_CPUS=1
 noisy_run DCFS_NOISY=1 DCFS_FORCE_CPUS=3
 grep -q -e '-smp 3 ' "$WORK/qemu-calls" || fail "DCFS_FORCE_CPUS no longer wins: $(cat "$WORK/qemu-calls")"
+noisy_run DCFS_SEED=42
+grep -q -e ' dcfs_seed=42' "$WORK/qemu-calls" || fail "DCFS_SEED=42 did not add dcfs_seed=42: $(cat "$WORK/qemu-calls")"
+noisy_run DCFS_SEED=42 DCFS_NOISY=1
+grep -q -e ' dcfs_seed=42 dcfs_noisy=1' "$WORK/qemu-calls" || fail "DCFS_SEED and DCFS_NOISY do not combine: $(cat "$WORK/qemu-calls")"
+RC=0
+env -u DCFS_NOISY DCFS_SEED=4x2 TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+	sh "$RUN_QEMU" --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
+	--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
+	--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
+	"$WORK/kernel" "$WORK/initrd" boot.sh >"$WORK/stdout" 2>&1 || RC=$?
+{ [ "$RC" -ne 0 ] && grep -q "is not a number" "$WORK/stdout"; } || fail "a DCFS_SEED that is not a number was accepted: $(cat "$WORK/stdout")"
+echo "PASS: DCFS_SEED=<n> is dcfs_seed=<n> on the kernel command line; a non-number is refused"
 echo "PASS: DCFS_NOISY=1 is dcfs_noisy=1 on the command line and two vCPUs; unset it is neither"
 echo "PASS: all checks passed"
 

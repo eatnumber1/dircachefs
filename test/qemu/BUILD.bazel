@@ -154,6 +154,18 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Step 26.14e: the identity oracle (guest/fault_lib.sh identity_take and
+# identity_check) over a fake fhtest, one injected violation at a time.
+sh_test(
+    name = "identity_oracle_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["identity_oracle_test.sh"],
+    args = ["$(location guest/fault_lib.sh)"],
+    data = ["guest/fault_lib.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
 # Step 23: `dcfs --help` lists every flag and `dcfs --version` works under
 # the installed name -- see guest/help.sh.
 qemu_test(
@@ -302,6 +314,45 @@ qemu_test_matrix(
     size = "large",
     other_size = "large",
     timeout = "long",
+)
+
+# Step 26.14e: mixed-fault sequences (guest/fault_ace.sh, kind mixed): one
+# operation and three events drawn from {daemon crash, power loss ahead, power
+# loss behind, a failed phase 3, lookup, listing, sync, handle taken}, judged by
+# the path oracle and the identity oracle (fault_lib.sh). The large tier runs a
+# fixed seeded sample (20 sequences per backing filesystem) and the oracles'
+# negative fixtures; the long tail, a bigger sample with the seed the noisy job
+# passes ($DCFS_SEED), is the manual fault_ace_mixed_long_test targets (cmdline
+# dcfs_ace_count; each sequence takes 3-4 s).
+qemu_test_matrix(
+    name = "fault_ace_mixed_test",
+    checked_dcfs = True,
+    cmdline = "dcfs_ace_kinds=mixedfixtures,mixed dcfs_ace_ops=create,unlink,rename,replace dcfs_ace_seed=1 dcfs_ace_count=20",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_ace.sh",
+    modules = ["dm_flakey"],
+    size = "large",
+    other_size = "large",
+    timeout = "long",
+)
+
+qemu_test_matrix(
+    name = "fault_ace_mixed_long_test",
+    checked_dcfs = True,
+    cmdline = "dcfs_ace_kinds=mixed dcfs_ace_seed=1 dcfs_ace_count=120",
+    disks = [
+        ("vdb", "ext4", "320M"),
+        ("vdc", "ext4", "64M"),
+    ],
+    guest_script = "guest/fault_ace.sh",
+    modules = ["dm_flakey"],
+    size = "large",
+    other_size = "large",
+    tags = ["manual"],
+    timeout = "eternal",  # 120 sequences, 5-6 s each: the noisy job's long tail
 )
 
 # Step 11.6: the backing filesystem frozen (guest/fault_freeze.sh): what blocks

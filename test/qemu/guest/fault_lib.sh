@@ -121,3 +121,95 @@ fault_window() {
 		return 1
 	fi
 }
+
+# The identity oracle (step 26.14e, the minimal form of 11.7's). Every crash
+# test's other oracle is path-shaped (walk and list after recovery); a row that
+# says an object exists when it does not (23.11: a clean row of a file the
+# backing filesystem no longer has) is reachable only through a nodeid or
+# handle held across the cut. So before a cut or a crash take the handle of
+# every object, and after the recovery require that each one opens to the same
+# object or fails ESTALE, never answers for something gone.
+#
+#   identity_take MNT DIR FILE   append a record to FILE for DIR and everything
+#                                under it (paths under the mount MNT): the
+#                                handle (name_to_handle_at, `fhtest handle`)
+#                                and what it opens now (`fhtest stat`: inode
+#                                number and mode)
+#   identity_check MNT SRC FILE  for every record of FILE, open the handle
+#                                again (open_by_handle_at on MNT) and print
+#                                one line per violation (nothing: the oracle
+#                                holds):
+#                                - the same object: the inode number and file
+#                                  type are the recorded ones, and the object
+#                                  has a name under MNT (find -inum) that the
+#                                  backing filesystem has too, at the same
+#                                  path under SRC;
+#                                - or ESTALE (the object may be gone, and the
+#                                  handle must say so);
+#                                - anything else is a violation, ENOENT and EIO
+#                                  included.
+#
+# Event-based: no waits; the file names are plain words (the tests' trees), as
+# the records are lines of space-separated words.
+FHTEST=${FHTEST:-/bin/fhtest}
+
+identity_take() {
+	it_mnt=$1
+	it_dir=$2
+	it_file=$3
+	find "$it_dir" | while IFS= read -r it_path; do
+		it_handle=$("$FHTEST" handle "$it_path") || continue
+		case "$it_handle" in ERR*) continue ;; esac
+		# shellcheck disable=SC2086 # "TYPE LEN HEX"
+		set -- $it_handle
+		it_type=$1
+		it_hex=$3
+		# shellcheck disable=SC2086 # "OK INO MODE PATH", or "ERR NAME"
+		set -- $("$FHTEST" stat "$it_mnt" "$it_type" "$it_hex")
+		case "$1" in
+		OK) echo "$it_path $2 $3 $it_type $it_hex" ;;
+		*) echo "$it_path ? ? $it_type $it_hex" ;;
+		esac
+	done >>"$it_file"
+}
+
+identity_check() {
+	ic_mnt=$1
+	ic_src=$2
+	sort -u "$3" | while IFS=' ' read -r ic_path ic_ino ic_mode ic_type ic_hex; do
+		ic_now=$("$FHTEST" stat "$ic_mnt" "$ic_type" "$ic_hex")
+		# shellcheck disable=SC2086 # "OK INO MODE PATH", or "ERR NAME"
+		set -- $ic_now
+		ic_rel=${ic_path#"$ic_mnt"/}
+		case "${1:-}" in
+		ERR)
+			[ "${2:-}" = ESTALE ] || echo "the handle of $ic_rel failed with ${2:-nothing}, want the same object or ESTALE"
+			;;
+		OK)
+			if [ "$ic_ino" != ? ] && [ "${2:-}" != "$ic_ino" ]; then
+				echo "the handle of $ic_rel opened a different object: inode ${2:-}, was $ic_ino"
+			elif [ "$ic_mode" != ? ] && [ $(((0${3:-0}) & 0170000)) != $(((0$ic_mode) & 0170000)) ]; then
+				echo "the handle of $ic_rel opened an object of another type: mode ${3:-}, was $ic_mode"
+			else
+				# What the handle opened must still be somewhere: a name under the
+				# mount with that inode number (the path `fhtest stat` prints is
+				# no help for a file: the kernel names a file's dentry only when
+				# it is connected), and that name must be on the backing
+				# filesystem too.
+				ic_name=$(find "$ic_mnt" -inum "${2:-0}" 2>/dev/null | head -n 1)
+				if [ -z "$ic_name" ]; then
+					echo "the handle of $ic_rel opened inode ${2:-}, which has no name under $ic_mnt (an answer for something gone)"
+				else
+					ic_at=${ic_name#"$ic_mnt"}
+					if [ ! -e "$ic_src$ic_at" ] && [ ! -L "$ic_src$ic_at" ]; then
+						echo "the handle of $ic_rel opened ${ic_name#"$ic_mnt"/}, which the backing filesystem does not have (an answer for something gone)"
+					fi
+				fi
+			fi
+			;;
+		*)
+			echo "the handle of $ic_rel answered '$ic_now', want the same object or ESTALE"
+			;;
+		esac
+	done
+}

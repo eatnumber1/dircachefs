@@ -673,8 +673,20 @@ SMP="${DCFS_FORCE_CPUS:-${CPUS_OVERRIDE:-$SMP}}"
 # wins). Bazel puts --test_env in the test action's key, so a result of one
 # mode is never served for the other. Unset or 0: the quiet default.
 NOISY_APPEND=""
+# DCFS_SEED=<n> (bazel test --test_env=DCFS_SEED=n): the seed of a seeded guest
+# test (guest/fault_ace.sh's mixed sample), as dcfs_seed=<n> on the kernel
+# command line; unset, the test uses the seed its target names. The scheduled
+# noisy job passes the run number, so each week draws a new sample.
+case "${DCFS_SEED:-}" in
+'') ;;
+*[!0-9]*)
+	echo "run-qemu.sh: DCFS_SEED='$DCFS_SEED' is not a number" >&2
+	exit 1
+	;;
+*) NOISY_APPEND=" dcfs_seed=$DCFS_SEED" ;;
+esac
 if [ "${DCFS_NOISY:-0}" = 1 ]; then
-	NOISY_APPEND=" dcfs_noisy=1"
+	NOISY_APPEND="$NOISY_APPEND dcfs_noisy=1"
 	if [ -z "${DCFS_FORCE_CPUS:-}" ] && [ "$SMP" -lt 2 ]; then
 		SMP=2
 	fi

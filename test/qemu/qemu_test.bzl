@@ -303,6 +303,7 @@ def qemu_test_matrix(
         power_cut = [],
         cmdline = "",
         checked_dcfs = False,
+        tags = [],
         cpus = E2E_CPUS):
     """Declares one qemu_test per backing filesystem in `fstypes`.
 
@@ -329,6 +330,7 @@ def qemu_test_matrix(
         cmdline: same as qemu_test.
         checked_dcfs: same as qemu_test.
         cpus: same as qemu_test.
+        tags: same as qemu_test.
         fstypes: filesystems to generate variants for, in order; the first
             is what plain "<name>" aliases to.
     """
@@ -358,6 +360,7 @@ def qemu_test_matrix(
             power_cut = power_cut,
             cmdline = cmdline,
             checked_dcfs = checked_dcfs,
+            tags = tags,
             cpus = cpus,
         )
     native.alias(
