@@ -2405,3 +2405,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (the first use of Fable for a subagent, per russ's 2026-10-09 allowance: crash safety across
   create, fill, recovery and sync is the hardest judgement of the day); the agent rebases onto
   main (25.7b's checker shape) meanwhile. large_test/nolock_test still unrun under load: CI.
+- 12.14 built (lane-2, 91172d3): the model's durability abstraction HOLDS on ext4/xfs/btrfs under
+  dm-log-writes replay (447/338/2026 crash states, FLUSH prefixes, FUA prefixes, ordinary-write
+  subsets, torn writes; the bound's margin reaches 0 on btrfs; real losses exercised; oracle
+  failing first with four checks). Own parsers for the log and WAL formats; loop devices over
+  tmpfs instead of a fifth virtio disk (IRQ 8 collides with the RTC). Opus review of the oracle's
+  soundness dispatched (fingerprint matching vs invisible commits, reference states across the WAL
+  restart, SQLite's own recovery vs the prefix property, reach of the reordered states, parser
+  checks against the real tools).

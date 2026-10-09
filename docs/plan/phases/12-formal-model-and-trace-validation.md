@@ -406,6 +406,45 @@ Order after 12.12's audit, which may reorder them with the approved
   later normal commit never survives an earlier lost one). A mismatch is a
   finding against the model's durability abstraction, not against SQLite.
   Owner: dcfs-protocol.
+  Built 2026-10-09 (lane-2, step-12.14, 91172d3; Opus review of the
+  oracle's soundness running). VERDICT: the abstraction HOLDS on ext4, xfs
+  and btrfs (cache filesystem), 0 violations; no model change. As built:
+  `test/qemu/crash_states.c` (our own parsers of dm-log-writes' log and
+  SQLite's WAL: list/apply whole or torn, WAL info/commits/truncate, a
+  forged "commit j lost, j+1 kept" WAL for the self-check, database
+  fingerprint); `guest/sqlite_durability.sh`: a WAL restart forced first
+  (44 creates until autocheckpoint, so later frames overwrite in place;
+  without it ext4's crash states within an epoch were all identical, new
+  WAL blocks invisible until the journal commits the file size), dcfs's
+  intent per operation from the checking build's `SqliteTransaction`
+  counter after a STATFS barrier, cross-checked with strace (one WAL fsync
+  right after each synced commit's frame: held), the log replayed
+  (CrashMonkey's method) onto dm-snapshots kept at each FLUSH: every
+  prefix before each FLUSH, the whole log, per epoch every FUA prefix,
+  all FUA plus ordinary-write subsets (exhaustive to 64 or the budget,
+  else each-lost/each-kept/seeded), torn multi-block writes at five cut
+  points; each state opened by SQLite (recovery + integrity_check),
+  fingerprinted, and required to equal some reference state (the final
+  database with the WAL cut after commit k) and to include the last
+  synced commit of every operation whose mark precedes the FLUSH. Results
+  (budget 1500, load 13-18): ext4 447 states 72 s, xfs 338 states 54 s,
+  btrfs 2026 states 209 s, short (medium) 199 states 30 s; 13-218 states
+  per run lost a finished operation's commit; the bound's smallest margin
+  0 on btrfs, 3 on ext4/xfs. Positive case: the whole log recovers the
+  final state and a restarted dcfs serves the backing. Failing first: the
+  oracle stubbed accepted a kept-after-lost commit and a lost synced one.
+  Not covered: partial FUA sets with ordinary writes, tears finer than 4
+  KiB, crashes inside a checkpoint or WAL restart, database creation,
+  FinishRun's final checkpoint. Observations: SQLite fsyncs the WAL header
+  at WAL start/restart even at synchronous=NORMAL (more durable than
+  modelled); many commits leave identical databases (204 commits, 138
+  states); a writable create is a second synced phase 1 (n creates, n+1
+  synced commits unless the directory is durably dirty; 23.11 changes
+  this). Deviations: loop devices over sparse tmpfs files instead of extra
+  virtio disks (the fifth virtio disk's IRQ 8 collides with the RTC);
+  targets declared by hand (the matrix macro varies the backing, not the
+  cache); `checked_dcfs` large targets; strace added; `replay-log` built
+  from the @xfstests pin here. Note: notes/sqlite-durability-2026-10-09.md.
 - 12.15 Runtime invariant checks derived from the model. The checking
   build's rules (docs/design.md "Runtime invariant checks": tri-state,
   dirty set vs unknown rows, held fds) are hand-written restatements of
