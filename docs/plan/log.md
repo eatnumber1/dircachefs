@@ -2251,3 +2251,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   conclusion is success; its only annotation is GitHub's Node 20 deprecation warning for the
   pinned upload-artifact action: bump that pin with the next CI housekeeping). First runner
   profiles are in each job's summary and artifacts for 26.16b's decision.
+- 15.6 rebased (40bed61, three commits; only qemu_test.bzl conflicted, 26.14's cpus kept beside
+  systemd_image/boots). Nothing in the Debian image resets the quiet-kernel sysctls (checked under
+  systemd). Of 15.7's nine systemd statements: six asserted, `x-systemd.requires-mounts-for` and
+  the fstab-generator "finished at helper exit" partly or not asserted, `systemctl restart`
+  contradicted and the README fixed. Two more findings for 15.6b: `umount` then `mount` at once
+  fails the same way, and after a reboot about half the daemons get systemd's SIGTERM while still
+  finishing after their unmount (nothing dirty, nothing lost; "shutdown: clean" missing). One more
+  round: the README's interim recipe used `flock -w 10` (a timeout, against today's rule) and the
+  leftover-daemon checks' wait needs to be event-based; then merge.
