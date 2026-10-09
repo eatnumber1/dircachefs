@@ -2242,3 +2242,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   counts of 2^32 (or 2*2^32) plus a few hundred in main.cc's daemonisation and startup_channel.cc,
   a different shape from 26.14c's -1 (a 32-bit wrap plus a real count, in the fork path under
   continuous profiling). 26.14f queued for an investigator. Five shards still running.
+- russ (2026-10-09): production-default fakes (the no-op ProtocolEvents) are the pattern 25.7 wants,
+  not a violation. And 25.8: all of https://abseil.io/tips/ adopted as design guidance, softer than
+  the style rules; agents cite a tip number in advisory findings; agent definitions updated by the
+  step.
