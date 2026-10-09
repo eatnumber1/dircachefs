@@ -2360,3 +2360,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   inside AsCaller (17.2), plus a one-line kernel fix worth sending upstream. 17.1b (Debian rootfs
   via rules_distroless, after 17.1) and 17.1c recorded; 17.3 gets daemon CPU per test. Sent to the
   agent together with the CI-placement round.
+- 25.7b merged (a10f58c): the DirCacheFS test peer is gone; the checker reads a read-only
+  `events::Bookkeeping` view that fuse_ops passes to the hooks; tests tamper a copy; repo_shape
+  refuses testonly friends. Lane-1 (23.11) warned: invariant_checker.{h,cc} and the checker tests
+  changed under it. Lane-5 free: 26.14e (noisy weekly job with mixed-fault sequences) dispatched
+  (new implementer).

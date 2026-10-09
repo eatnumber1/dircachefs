@@ -230,6 +230,21 @@ against the new feature and shown passing; the peer's header and the
 declares a `friend` from a `testonly` namespace or target (known-bad
 fixture). Owner: dcfs-implementer, next free lane; coordinate with 23.11
 (which adds a checker rule and may touch the same tests).
+Done 2026-10-09, merged a10f58c (lane-5, one commit). As built: a
+read-only view `events::Bookkeeping` in protocol_events.h beside the
+SharedFd and Lifetime reports; `DirCacheFS` implements it privately and
+exposes `bookkeeping()`, which fuse_ops.cc passes to the check hooks on
+every request (the production caller; the no-op observer never queries
+it); the invariant checker reads only the view (`Lookups`, `Written`,
+`HeldFdCount/Limit`, `OpenForWrite*`, `Removed*`, `SharedFileOf`); tests
+that break an invariant on purpose edit a copy (`testonly::FakeBookkeeping`,
+`InvariantChecker::TamperBookkeeping`), 17 tests rewritten; repo_shape
+`no_testonly_friends` (friend declarations naming `testonly::` in
+production sources; the "or a testonly target dependency" half is not
+checked: add it if a production target ever depends on one); style.md
+section 8 updated. Fast 233 + 2; asan on dir_cache_fs_test and
+trace_recorder_test green. 23.11's code half will conflict textually in
+invariant_checker.{h,cc} and the checker tests on its rebase.
 
 ## 25.8 Abseil's Tips of the Week as design guidance (russ, 2026-10-09)
 
