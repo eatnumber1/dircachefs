@@ -265,6 +265,21 @@ closed). Deviations from the text above, recorded per the reviewer:
 
 ## 23.8 Access times from the held fd; directory atimes in the cache (russ, 2026-10-08)
 
+Merged 2026-10-09 (8ea5743, two review rounds; details in
+`notes/atime-alternatives-2026-10-08.md` and the log): held fill at
+FLUSH/RELEASE/attribute replies while open; atime-only dirty reason
+(schema v6) that does not drive sync points until older than the kernel's
+dirtytime expiry; a mutation row on a held read-only file becomes
+atime-only once a syncfs covered it; recovery only invalidates atime-only
+rows' attributes; cold read-only opens mark dirty without fsync; directory
+and symlink atimes cache-only; model file F (MC_atime, MC_atime_concurrent,
+MC_atime_crash; known_bugs atime_held_fill_no_touch, atime_fill_no_touch,
+atime_sync_clears_held, atime_open_not_dirty; limitations
+atime_power_loss_while_open, dir_atime_cache_only); only open files are
+statx'd on attribute replies; a held fill that leaves a stale atime logs
+ERROR. Budgets: read sql_stmts 21, warm-readdir 14, one statx per
+FLUSH/RELEASE.
+
 Decision and alternatives: `notes/atime-alternatives-2026-10-08.md`.
 - Regular files: remove atime prediction. While dcfs holds a backing fd
   for an inode (passthrough open, written file's O_PATH fd), its attributes
@@ -296,6 +311,13 @@ Decision and alternatives: `notes/atime-alternatives-2026-10-08.md`.
 Owner: dcfs-protocol.
 
 ## 23.9 LINK of a removed object answers what the backing answers (russ, 2026-10-08)
+
+Merged 2026-10-09 (8ea5743): `linkat(held fd, "", parent, name,
+AT_EMPTY_PATH)`'s answer is forwarded (ENOENT for an unlinked file, EPERM
+for a directory, success for a closed never-linked O_TMPFILE, which is
+the one case that reaches dcfs: the VFS answers the others); a successful
+link reinstates the removed record's row and nodeid and marks it dirty in
+one transaction (`RecordRelinked`); README and design.md corrected.
 
 The README's "Removed objects that are still referenced cannot be linked
 back" overstates the limitation: Linux itself refuses to link an inode

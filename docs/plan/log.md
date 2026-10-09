@@ -1971,3 +1971,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   for none, native `ro` refused on remount, non-path native specs rewritten; plus exit-status
   classing, bind remount flags, LastErrorSink window, /proc/sys missing, nodiscard on new headers).
   Sent back; deviations recorded in phases/15.
+- 23.8 + 23.9 merged (8ea5743, five commits, rebased with commit messages recreated via
+  commit-tree to drop the stale claims; one extra commit: the held fill that leaves a stale atime
+  logs ERROR, keeping 25.3b's AFailedAtimeRecordIsLoggedAtError rule). Fast 204 + 2, trace shards,
+  atime/removed guests ok. Lane-4 free: 8.2e + 8.2f survivor tests dispatched (new implementer).
