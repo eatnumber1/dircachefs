@@ -2246,3 +2246,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   not a violation. And 25.8: all of https://abseil.io/tips/ adopted as design guidance, softer than
   the style rules; agents cite a tip number in advisory findings; agent definitions updated by the
   step.
+- CI run 37973594236 (bc7eee7) finished: every job green except coverage (26.14c's artifact gate
+  on the fork/daemonise path: 26.14f). The earlier "full (0)" entry was a false alarm (the job's
+  conclusion is success; its only annotation is GitHub's Node 20 deprecation warning for the
+  pinned upload-artifact action: bump that pin with the next CI housekeeping). First runner
+  profiles are in each job's summary and artifacts for 26.16b's decision.
