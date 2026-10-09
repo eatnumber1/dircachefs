@@ -2137,3 +2137,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   born-dirty create approved: model first, build if sound ("mirror the way a real filesystem
   works: files are created dirty until fsync or dirty_writeback"). 26.16 (bazel --profile per CI
   job) goes to the first lane that frees, ahead of everything: russ waits for it to push.
+- russ (2026-10-09): "I approved the kernel bug report commands". 26.15 resumes in lane-5 (its
+  branch step-26.15 and .scratch/kernel-src are there) once 26.14d, which is running in the same
+  lane, reports; 26.16 takes the next lane that frees after that.
