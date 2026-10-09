@@ -161,6 +161,23 @@
  *       this needs none, and sets the exact group list a test wants. Used
  *       by credentials.sh to act on the dcfs mount as an unprivileged user.
  *       On failure prints "ERR <errno-name>" and exits 127 (execvp) or 1.
+ *   testutil waitmount <mountpoint> <present|absent> [pid]
+ *       Waits, with no timeout and no polling interval, until /proc/self/mounts
+ *       has (present) or no longer has (absent) an entry for <mountpoint>:
+ *       the mount table is pollable (poll(2) reports POLLPRI|POLLERR when it
+ *       changes), so the wait is the kernel's own event. With [pid], also
+ *       watches that process through a pidfd and returns 1 when it has exited
+ *       and the mount table is still not what was asked for (a daemon that
+ *       refused to start). Exits 0 when the table is as asked; the caller
+ *       cancels it. busybox has no such wait (guest/lib.sh start_daemon).
+ *   testutil waitline <file> <text> [pid]
+ *       Waits, with no timeout and no polling interval, until <file> contains
+ *       <text> (a substring of what is written to it, e.g. a holder's
+ *       "READY" or a line of the daemon's log): an inotify watch on the file's
+ *       directory wakes it at each write, and the file is read again. With
+ *       [pid] it also watches that process through a pidfd and returns 1 when
+ *       it has exited without the text having appeared. The file need not
+ *       exist yet. Exits 0 when the text is there.
  *   testutil opath-hold <path>
  *       open(2)s <path> O_PATH, prints "READY", and sleeps forever with it
  *       open, until killed: on a dcfs mount the kernel then keeps the
@@ -278,8 +295,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <poll.h>
 #include <linux/fiemap.h>
 #include <linux/fs.h>
+#include <sys/inotify.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
@@ -651,6 +670,141 @@ static int cmd_heldstat(const char *path)
 	}
 	close(fd);
 	return 0;
+}
+
+/* The event source for a process: a pidfd, readable once it has exited.
+ * Returns -1 with *gone set when there is none to watch because it is already
+ * gone (or no pid was given: *gone stays 0). */
+static int watch_pid(const char *pid_str, int *gone)
+{
+	long pid = pid_str == NULL ? 0 : atol(pid_str);
+	int fd;
+
+	*gone = 0;
+	if (pid <= 0)
+		return -1;
+	fd = (int) syscall(SYS_pidfd_open, (pid_t) pid, 0);
+	if (fd == -1)
+		*gone = 1;
+	return fd;
+}
+
+/* Reads the whole of fd from its start into buf (NUL-terminated, truncated at
+ * size - 1) and returns the length. */
+static size_t slurp(int fd, char *buf, size_t size)
+{
+	size_t len = 0;
+
+	if (lseek(fd, 0, SEEK_SET) == -1)
+		return 0;
+	while (len < size - 1) {
+		ssize_t n = read(fd, buf + len, size - 1 - len);
+
+		if (n <= 0)
+			break;
+		len += (size_t) n;
+	}
+	buf[len] = '\0';
+	return len;
+}
+
+static int cmd_waitmount(const char *mountpoint, const char *mode,
+			 const char *pid_str)
+{
+	static char table[1 << 20];
+	char needle[PATH_MAX + 3];
+	int want, gone, mfd, pfd;
+
+	if (strcmp(mode, "present") == 0)
+		want = 1;
+	else if (strcmp(mode, "absent") == 0)
+		want = 0;
+	else {
+		fprintf(stderr, "testutil waitmount: mode is present or absent\n");
+		return 2;
+	}
+	if (snprintf(needle, sizeof(needle), " %s ", mountpoint) >=
+	    (int) sizeof(needle)) {
+		print_err(ENAMETOOLONG);
+		return 2;
+	}
+	mfd = open("/proc/self/mounts", O_RDONLY | O_CLOEXEC);
+	if (mfd == -1) {
+		print_err(errno);
+		return 2;
+	}
+	pfd = watch_pid(pid_str, &gone);
+	for (;;) {
+		struct pollfd fds[2];
+		nfds_t n = 1;
+
+		/* Read before polling: the read is what the kernel compares the
+		 * table's next change with, so nothing is missed in between. */
+		slurp(mfd, table, sizeof(table));
+		if ((strstr(table, needle) != NULL) == want)
+			return 0;
+		if (gone)
+			return 1;
+		fds[0] = (struct pollfd){ .fd = mfd, .events = POLLPRI | POLLERR };
+		if (pfd != -1)
+			fds[n++] = (struct pollfd){ .fd = pfd, .events = POLLIN };
+		if (poll(fds, n, -1) == -1 && errno != EINTR) {
+			print_err(errno);
+			return 2;
+		}
+		if (n == 2 && (fds[1].revents & POLLIN))
+			gone = 1;
+	}
+}
+
+static int cmd_waitline(const char *file, const char *text, const char *pid_str)
+{
+	static char contents[1 << 20];
+	char *dir_copy = strdup(file);
+	int ifd, gone, pfd;
+
+	if (dir_copy == NULL)
+		return 2;
+	ifd = inotify_init1(IN_CLOEXEC);
+	if (ifd == -1 ||
+	    inotify_add_watch(ifd, dirname(dir_copy),
+			      IN_MODIFY | IN_CLOSE_WRITE | IN_CREATE |
+				      IN_MOVED_TO) == -1) {
+		print_err(errno);
+		return 2;
+	}
+	pfd = watch_pid(pid_str, &gone);
+	for (;;) {
+		struct pollfd fds[2];
+		nfds_t n = 1;
+		int fd = open(file, O_RDONLY | O_CLOEXEC);
+
+		/* The watch is in place before the first read, so a write after
+		 * this read wakes the poll below. */
+		if (fd != -1) {
+			slurp(fd, contents, sizeof(contents));
+			close(fd);
+			if (strstr(contents, text) != NULL)
+				return 0;
+		}
+		if (gone)
+			return 1;
+		fds[0] = (struct pollfd){ .fd = ifd, .events = POLLIN };
+		if (pfd != -1)
+			fds[n++] = (struct pollfd){ .fd = pfd, .events = POLLIN };
+		if (poll(fds, n, -1) == -1 && errno != EINTR) {
+			print_err(errno);
+			return 2;
+		}
+		if (fds[0].revents & POLLIN) {
+			char ev[4096];
+
+			if (read(ifd, ev, sizeof(ev)) < 0 && errno != EINTR)
+				return 2;
+		}
+		if (n == 2 && (fds[1].revents & POLLIN))
+			gone = 1;
+	}
 }
 
 static int cmd_fsync(const char *path)
@@ -2709,6 +2863,10 @@ int main(int argc, char *argv[])
 		return cmd_removed_link(argv[2]);
 	if (argc == 4 && strcmp(argv[1], "tmpfile-link") == 0)
 		return cmd_tmpfile_link(argv[2], argv[3]);
+	if ((argc == 4 || argc == 5) && strcmp(argv[1], "waitmount") == 0)
+		return cmd_waitmount(argv[2], argv[3], argc == 5 ? argv[4] : NULL);
+	if ((argc == 4 || argc == 5) && strcmp(argv[1], "waitline") == 0)
+		return cmd_waitline(argv[2], argv[3], argc == 5 ? argv[4] : NULL);
 	if (argc == 3 && strcmp(argv[1], "fsync") == 0)
 		return cmd_fsync(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "syncfs") == 0)
@@ -2805,6 +2963,8 @@ int main(int argc, char *argv[])
 		"       testutil setxattrhex <path> <name> <hex>\n"
 		"       testutil getxattrhex <path> <name>\n"
 		"       testutil mmapwrite <path> <delay-seconds|usr1>\n"
+		"       testutil waitmount <mountpoint> <present|absent> [pid]\n"
+		"       testutil waitline <file> <text> [pid]\n"
 		"       testutil fsync <path>\n"
 		"       testutil syncfs <path>\n"
 		"       testutil fsfreeze <path> <freeze|thaw>\n"

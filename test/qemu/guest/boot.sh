@@ -132,4 +132,60 @@ else
 	fail vdb-mount "mount failed"
 fi
 
+# testutil's event waits (lib.sh's start_daemon and the holders' lines): no
+# timeout and no polling interval, so each check is run in whichever order
+# the waiter and the event happen to come; a hang is the failure.
+TESTUTIL=/bin/testutil
+mkdir -p /wait_mnt
+"$TESTUTIL" waitmount /wait_mnt present &
+WAITER=$!
+mount -t tmpfs tmpfs /wait_mnt
+if wait "$WAITER"; then
+	pass waitmount-present
+else
+	fail waitmount-present "waitmount did not return 0 for a mount made while it waited"
+fi
+"$TESTUTIL" waitmount /wait_mnt absent &
+WAITER=$!
+umount /wait_mnt
+if wait "$WAITER"; then
+	pass waitmount-absent
+else
+	fail waitmount-absent "waitmount did not return 0 for a mount removed while it waited"
+fi
+sleep 1000 &
+SLEEPER=$!
+"$TESTUTIL" waitmount /wait_mnt present "$SLEEPER" &
+WAITER=$!
+kill "$SLEEPER"
+wait "$SLEEPER" 2>/dev/null
+wait "$WAITER"
+RC=$?
+if [ "$RC" -eq 1 ]; then
+	pass waitmount-process-exits
+else
+	fail waitmount-process-exits "rc=$RC, want 1 (the process exited and there was no mount)"
+fi
+"$TESTUTIL" waitline /tmp/wait-line.out READY &
+WAITER=$!
+echo READY >/tmp/wait-line.out
+if wait "$WAITER"; then
+	pass waitline-text
+else
+	fail waitline-text "waitline did not return 0 for text written while it waited"
+fi
+sleep 1000 &
+SLEEPER=$!
+"$TESTUTIL" waitline /tmp/wait-line-never.out STORED "$SLEEPER" &
+WAITER=$!
+kill "$SLEEPER"
+wait "$SLEEPER" 2>/dev/null
+wait "$WAITER"
+RC=$?
+if [ "$RC" -eq 1 ]; then
+	pass waitline-process-exits
+else
+	fail waitline-process-exits "rc=$RC, want 1 (the process exited without the text)"
+fi
+
 exit "$FAILED"
