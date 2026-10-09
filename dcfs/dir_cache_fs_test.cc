@@ -3438,21 +3438,27 @@ TEST_F(DirCacheFSTest, ADcfsErrnoStatusIsLoggedOnceAtErrorByTheHandler) {
 }
 
 // A failed record of the access time leaves a stale atime present: ERROR.
+// (Step 23.8: the record is the held fill at FLUSH; when it cannot record,
+// and cannot mark the attributes unknown either.)
 TEST_F(DirCacheFSTest, AFailedAtimeRecordIsLoggedAtError) {
   WriteFile(Path("f"));
+  AppendToFile(Path("f"), "contents");
+  SetTimes(Path("f"), 2 * 86400, 3 * 86400);
   Start();
   auto [lookup, entry] = Lookup(kRootInode, "f");
   ASSERT_EQ(lookup.error, 0);
   const InodeId f = static_cast<InodeId>(entry.nodeid);
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ReadBacking(Path("f"));
   ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_updates BEFORE UPDATE ON "
                        "inodes BEGIN SELECT RAISE(ABORT, 'no updates'); END"),
               IsOk());
   AllLogCapture capture;
-  auto [open, fh] = Open(f, O_RDONLY);
+  EXPECT_EQ(Flush(f, fh).error, 0);
   ASSERT_THAT(db_.Exec("DROP TRIGGER no_updates"), IsOk());
-  ASSERT_EQ(open.error, 0);
   EXPECT_EQ(capture.Count(absl::LogSeverity::kError,
-                          "Open: could not record the access time"),
+                          "Flush: could not record the attributes"),
             1)
       << capture.Dump();
   EXPECT_EQ(Release(f, fh).error, 0);

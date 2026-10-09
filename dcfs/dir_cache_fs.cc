@@ -1841,12 +1841,22 @@ void DirCacheFS::RecordHeldAttrs(InodeId id, int fd, std::string_view op,
   if (removed_.contains(id)) return;
   absl::Status status = backing::FillHeldAttrs(ctx_, id, fd, fetched);
   if (status.ok()) return;
-  // FillHeldAttrs marked the attributes unknown and the row dirty; a later
-  // access re-reads them.
-  LOG(WARNING) << op << ": could not read the attributes of inode " << id
-               << " through its held descriptor, leaving them unknown: "
-               << status;
   if (fetched != nullptr) fetched->stx_mask = 0;
+  // FillHeldAttrs marks the attributes unknown after a failure (a later
+  // access re-reads them), but that is a cache write too: if it failed as
+  // well, the row still says the attributes from before the reads (a stale
+  // access time present), which is an ERROR.
+  absl::StatusOr<cache::CachedAttr> row = cache::GetAttr(ctx_, id);
+  if (row.ok() && row->valid) {
+    LOG(ERROR) << op << ": could not record the attributes of inode " << id
+               << " read through its held descriptor, and they stay cached "
+                  "as they were (a stale access time): "
+               << status;
+    return;
+  }
+  LOG(WARNING) << op << ": could not record the attributes of inode " << id
+               << " read through its held descriptor, leaving them unknown: "
+               << status;
 }
 
 void DirCacheFS::StampAtime(InodeId id) {
