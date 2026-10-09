@@ -250,6 +250,19 @@ daemon_fd_count() {
 	ls "/proc/${1:-$DAEMON_PID}/fd" 2>/dev/null | wc -l
 }
 
+# justified_sleep SECONDS REASON: the one sleep a guest script may use
+# (tools/repo_shape.py refuses every other: docs/style.md, "No timers"), for a
+# test whose subject is time itself (an interval that has to elapse, a
+# timestamp that must differ), never to wait for another process or the
+# kernel. REASON names what has to elapse and why no event says it has.
+justified_sleep() {
+	if [ "$#" -lt 2 ]; then
+		echo "justified_sleep: SECONDS and the REASON are required" >&2
+		return 1
+	fi
+	sleep "$1"
+}
+
 # quiesce_daemon PID: waits (up to 10s) until the daemon has had no wakeup
 # for 0.3s. drop_caches makes the kernel send a FORGET for every cached inode
 # and dentry, asynchronously and in batches, and opening a file makes dcfs

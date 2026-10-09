@@ -601,6 +601,9 @@ qemu_test(
     name = "mount_dcfs_test",
     disks = [("vdb", "ext4", "128M")],
     guest_script = "guest/mount_dcfs.sh",
+    # The unmount's wait for the daemon is checked on a backing device whose
+    # writes are slow (dm-delay).
+    modules = ["dm_delay"],
     size = "small",
     timeout = "moderate",
 )

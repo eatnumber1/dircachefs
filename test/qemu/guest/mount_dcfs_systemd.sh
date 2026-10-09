@@ -41,7 +41,7 @@ RAW=/srv/raw  # the bind form's
 MNT=/mnt/m    # for the command-line checks
 MISSING_UUID=0e0e0e0e-dead-4bee-8f00-000000000001
 
-require_commands blkid findmnt flock journalctl pgrep python3 systemctl systemd-escape umount mount awk
+require_commands blkid findmnt journalctl pgrep python3 systemctl systemd-escape umount mount awk
 
 # --- helpers -------------------------------------------------------------
 
@@ -65,11 +65,8 @@ mount_count() { findmnt -rn -M "$1" -o TARGET 2>/dev/null | wc -l; }
 
 # wait_exit PID...: blocks until each process has exited, on its pidfd
 # (python3 is in the image): an event, not a poll, and no timeout of its own;
-# a hung daemon is bounded by the test's timeout (Bazel's). A daemon outlives
-# its unmount for a moment (it syncs the backing filesystem and closes its
-# cache database; systemd already calls the unit stopped), so a start that
-# follows a stop at once may find the cache database in use: see
-# restart_check.
+# a hung daemon is bounded by the test's timeout (Bazel's). For what umount.
+# fuse.dcfs cannot wait for: a daemon that failed to start, or was killed.
 wait_exit() {
 	[ "$#" -eq 0 ] && return 0
 	python3 -I -c 'import os, select, sys
@@ -79,15 +76,6 @@ for pid in sys.argv[1:]:
     except ProcessLookupError:
         continue
     select.select([fd], [], [])' "$@"
-}
-
-# new_daemons PID...: the dcfs daemons running now that are not among the
-# PIDs (a snapshot of `daemons` taken before the instance was started).
-new_daemons() {
-	nd_old=" $* "
-	for nd_p in $(daemons); do
-		case "$nd_old" in *" $nd_p "*) ;; *) echo "$nd_p" ;; esac
-	done
 }
 
 # wait_no_daemons: until no dcfs daemon is left (for a test that has none
@@ -189,25 +177,15 @@ restart_check() {
 			echo "restart $rc_n failed: $(cat /tmp/restart.err); rp.mount is $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount); $(journalctl --no-pager -b -u rp.mount -o cat | grep -m 1 'in use')"
 			return 1
 		fi
+		# The restart returns when rp.mount's job is done; the child's
+		# restart is a job of the same transaction: start waits for it.
+		systemctl start rp-c.mount 2>/dev/null
 		if [ "$(systemctl is-active rp.mount)" != active ] || [ "$(systemctl is-active rp-c.mount)" != active ] ||
 			[ "$(cat /rp/c/rc.txt 2>&1)" != rc ] || [ "$(daemons | sort | tr '\n' ' ')" = "$rc_before" ]; then
 			echo "restart $rc_n left rp.mount $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount), rp/c: $(cat /rp/c/rc.txt 2>&1); daemons $rc_before -> $(daemons | sort | tr '\n' ' ')"
 			return 1
 		fi
 	done
-}
-
-# umount_mount_check: mount, umount and mount the same instance again at
-# once. Prints why not on failure.
-umount_mount_check() {
-	umc_opts="dcfs.fstype=none,dcfs.cache_db=$CACHE/at-once.db"
-	mount -t dcfs -o "$umc_opts" "$SRC" "$MNT" 2>&1 || return 1
-	umount "$MNT" 2>&1
-	umc_out=$(mount -t dcfs -o "$umc_opts" "$SRC" "$MNT" 2>&1) || {
-		echo "the second mount failed: $umc_out"
-		return 1
-	}
-	umount "$MNT"
 }
 
 # reboot_clean_check: the previous boot's daemons all logged a clean
@@ -267,7 +245,6 @@ boot1() {
 	# What libmount adds to a helper's options (rw, fstab's nofail and _netdev,
 	# defaults, noauto) is the helper's business, not an error.
 	umount "$MNT" 2>/dev/null
-	wait_no_daemons
 	mnt -t dcfs -o "rw,nofail,_netdev,defaults,dcfs.fstype=none,dcfs.cache_db=$CACHE/m2.db" "$SRC" "$MNT"
 	pid=$(only_daemon)
 	if [ "$MRC" -eq 0 ] && [ -n "$pid" ] && [ "$(cat "$MNT/live.txt" 2>&1)" = live ]; then
@@ -465,7 +442,6 @@ EOF
 	fi
 	umount /data/sub /mnt/live /mnt/xfs /mnt/btrfs /data 2>"$OUT"
 	urc=$?
-	wait_no_daemons
 	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 0 ]; then
 		pass fstab-umount-leaves-nothing
 	else
@@ -501,7 +477,6 @@ EOF
 	mnt /data/sub
 	umount -R /data 2>"$OUT"
 	urc=$?
-	wait_no_daemons
 	if [ "$urc" -eq 0 ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 0 ] && [ -z "$(daemons)" ]; then
 		pass umount-r-unmounts-the-tree
 	else
@@ -509,24 +484,18 @@ EOF
 		cleanup_mount /data/sub
 		cleanup_mount /data
 	fi
-	# Restarting one instance without systemd: umount, then mount once the
-	# daemon has let go of its database (the README's flock). At once, the new daemon finds the cache database in
-	# use (the same race as systemctl restart: README, Limitations).
+	# Restarting one instance without systemd: umount, then mount, at once.
+	# umount(8) runs umount.fuse.dcfs, which returns when the daemon has
+	# exited, so the new daemon finds the cache database free (step 15.6b).
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/again.db" "$SRC" "$MNT"
 	umount "$MNT"
-	flock "$CACHE/again.db" true # the README's wait: until the daemon lets go of its database
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/again.db" "$SRC" "$MNT"
 	if [ "$MRC" -eq 0 ] && [ "$(cat "$MNT/live.txt" 2>&1)" = live ]; then
-		pass umount-then-mount-restarts-an-instance
+		pass umount-then-mount-at-once
 	else
-		fail umount-then-mount-restarts-an-instance "rc=$MRC out=$(cat "$OUT")"
+		fail umount-then-mount-at-once "rc=$MRC out=$(cat "$OUT")"
 	fi
 	umount "$MNT"
-	wait_no_daemons
-	disabled umount-then-mount-at-once \
-		"dcfs bug, reported by step 15.6 (README, Limitations): the old daemon is still closing the cache database when the next mount starts" \
-		umount_mount_check
-	wait_no_daemons
 	# After a SIGKILL the mount is dead (ENOTCONN) until umount -l, and the
 	# instance then mounts again.
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/kill.db" "$SRC" "$MNT"
@@ -543,7 +512,6 @@ EOF
 		fail sigkill-umount-l-then-mount "dead mount said '$dead'; remount rc=$MRC out=$(cat "$OUT") mounts=$(mount_count "$MNT")"
 	fi
 	umount "$MNT"
-	wait_no_daemons
 
 	# --- systemd's mount units, generated from the same fstab ---
 	systemctl start data.mount data-sub.mount mnt-live.mount mnt-xfs.mount mnt-btrfs.mount 2>"$OUT"
@@ -595,7 +563,6 @@ EOF
 	fi
 	# Stopping the child leaves the parent; stopping the parent stops what is
 	# under it.
-	child_pid=$(only_daemon_of /data/sub)
 	systemctl stop data-sub.mount
 	if [ "$(systemctl is-active data-sub.mount)" != active ] && [ "$(systemctl is-active data.mount)" = active ] &&
 		[ "$(cat /data/file_1.txt 2>&1)" = "content 1" ]; then
@@ -603,11 +570,9 @@ EOF
 	else
 		fail systemd-stop-child-leaves-parent "$(systemctl is-active data-sub.mount data.mount)"
 	fi
-	wait_exit $child_pid
 	systemctl start data-sub.mount
 	both_up=0
 	[ "$(systemctl is-active data.mount)" = active ] && [ "$(systemctl is-active data-sub.mount)" = active ] && both_up=1
-	stopped_pids="$(only_daemon_of /data) $(only_daemon_of /data/sub)"
 	systemctl stop data.mount
 	if [ "$both_up" -eq 1 ] && [ "$(systemctl is-active data.mount)" != active ] && [ "$(systemctl is-active data-sub.mount)" != active ] &&
 		[ "$(mount_count /data)" -eq 0 ] && [ "$(mount_count /data/sub)" -eq 0 ]; then
@@ -615,23 +580,30 @@ EOF
 	else
 		fail systemd-stop-parent-stops-child "$(systemctl is-active data.mount data-sub.mount) $(findmnt -t fuse.dcfs)"
 	fi
-	wait_exit $stopped_pids
 	systemctl start data.mount data-sub.mount
 	# systemctl restart of a parent restarts its child (decision 4: restart
-	# one instance with systemctl restart). It is a pair of units of its own,
-	# nofail and noauto: nothing requires them, so a restart that fails does
-	# not take the machine to emergency.target, which it does for a mount
-	# that local-fs.target requires.
+	# one instance with systemctl restart): first on a pair of units of its
+	# own, nofail and noauto (nothing requires them, so a restart that failed
+	# would not take the machine to emergency.target), then on /data, which
+	# local-fs.target requires.
 	mkdir -p /srv/rp/c /srv/rc /rp
 	echo rc >/srv/rc/rc.txt
-	pre_rp=$(daemons)
 	systemctl start rp-c.mount
-	disabled systemd-restart-parent-restarts-child \
-		"dcfs bug, reported by step 15.6: systemd calls a mount stopped as soon as it is unmounted, while its daemon is still syncing and closing the cache database for up to two seconds; the restart's start finds 'Cache database is in use by another dcfs process' (exit 32). A fix: umount.dcfs waiting for the daemon, or the new daemon waiting for the cache lock" \
-		restart_check
+	if restart_why=$(restart_check); then
+		pass systemd-restart-parent-restarts-child
+	else
+		fail systemd-restart-parent-restarts-child "$restart_why"
+	fi
 	systemctl stop rp-c.mount rp.mount 2>/dev/null
-	systemctl reset-failed rp.mount rp-c.mount 2>/dev/null
-	wait_exit $(new_daemons $pre_rp)
+	systemctl restart data.mount 2>"$OUT"
+	rrc=$?
+	systemctl start data-sub.mount 2>/dev/null # waits for the child's restart
+	if [ "$rrc" -eq 0 ] && [ "$(systemctl is-active data.mount)" = active ] &&
+		[ "$(systemctl is-active data-sub.mount)" = active ] && [ "$(cat /data/sub/raw.txt 2>&1)" = raw ]; then
+		pass systemd-restart-required-mount
+	else
+		fail systemd-restart-required-mount "rc=$rrc $(systemctl is-active data.mount data-sub.mount) $(cat "$OUT")"
+	fi
 	# A start that fails marks the unit failed, with dcfs's message in the
 	# journal under the unit.
 	systemctl start mnt-fail.mount 2>"$OUT"
@@ -644,15 +616,12 @@ EOF
 	# At the default threshold (WARNING) the INFO narrative stays out of the
 	# journal (the fstab lines above set dcfs.stderrthreshold=0), and with the
 	# threshold set it is there.
-	pre_q=$(daemons)
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/quiet.db" "$SRC" "$MNT"
 	quiet_rc=$MRC
 	umount "$MNT"
-	wait_exit $(new_daemons $pre_q)
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/loud.db,dcfs.stderrthreshold=0" "$SRC" "$MNT"
 	loud_rc=$MRC
 	umount "$MNT"
-	wait_exit $(new_daemons $pre_q)
 	if [ "$quiet_rc" -eq 0 ] && [ "$loud_rc" -eq 0 ] && journal_has "cache_db=$CACHE/loud.db" -t dcfs &&
 		! journalctl --no-pager -b -t dcfs -o cat | grep -q "cache_db=$CACHE/quiet.db"; then
 		pass journal-follows-threshold
@@ -711,33 +680,20 @@ boot2() {
 	else
 		fail reboot-parent-mounted-before-child "data.mount at $parent_at, data-sub.mount at $child_at"
 	fi
-	# What the reboot did to the daemons of the previous boot. Each instance
-	# logs "shutdown: clean" when it has synced and closed its database and
-	# the next start says whether it found that. systemd calls a mount unit
-	# stopped as soon as it is unmounted and then sends SIGTERM to the
-	# processes left, which kills a daemon still finishing (libfuse has put
-	# the default action back by then): an instance can start "uncleanly" after
-	# an ordinary reboot (about half the runs, 2026-10-09). With nothing dirty
-	# that loses nothing, and that is what is checked: every instance
-	# recovered, none with dirty entries to re-read. Whether every one shut
-	# down cleanly is the disabled check below (README, Limitations).
-	recoveries=$(journalctl --no-pager -b 0 -t dcfs -o cat 2>/dev/null | grep -c 'recovery: the last run ended')
-	lossy=$(journalctl --no-pager -b 0 -t dcfs -o cat 2>/dev/null | grep 'recovery: the last run ended' | grep -vc '; 0 dirty entries made unknown')
-	if [ "$recoveries" -ge 5 ] && [ "$lossy" -eq 0 ]; then
-		pass reboot-recovery-finds-nothing-dirty
+	# The reboot stopped every daemon of the previous boot cleanly: each
+	# logged "shutdown: clean" and this boot's starts all found it clean. The
+	# unit stops through umount.fuse.dcfs, which returns when the daemon has
+	# exited, so systemd's last SIGTERM finds nothing left to kill (step 15.6b).
+	if rebooted_why=$(reboot_clean_check); then
+		pass reboot-every-daemon-shuts-down-cleanly
 	else
-		fail reboot-recovery-finds-nothing-dirty "$recoveries recoveries, $lossy with dirty entries: $(journalctl --no-pager -b 0 -t dcfs -o cat 2>&1 | grep 'recovery: the last run ended')"
+		fail reboot-every-daemon-shuts-down-cleanly "$rebooted_why"
 	fi
-	disabled reboot-every-daemon-shuts-down-cleanly \
-		"dcfs bug, reported by step 15.6 (README, Limitations): systemd's SIGTERM to the processes left after the units stopped kills a daemon that is still finishing its shutdown" \
-		reboot_clean_check
 	# The cache survived: a warm tree is answered without a read of the
 	# backing disk.
-	drop_caches
-	data_pid=$(only_daemon_of /data)
-	# drop_caches makes the kernel FORGET every cached inode, and the daemon
-	# answers: let it go quiet before the baseline (lib.sh).
-	[ -n "$data_pid" ] && quiesce_daemon "$data_pid"
+	# No drop_caches: a rebooted guest has nothing cached, so the lookups that
+	# follow reach dcfs, and what dcfs answers from its database it answers
+	# without the disk.
 	before=$(sectors_read "${DEV#/dev/}")
 	find /data -exec stat -c %n {} + >/dev/null 2>&1
 	after=$(sectors_read "${DEV#/dev/}")

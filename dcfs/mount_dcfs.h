@@ -31,6 +31,42 @@ inline constexpr std::string_view kMountFuseHelperName = "mount.fuse.dcfs";
 // Whether `name` (argv[0] without its directory) is one of the helper names.
 bool IsMountHelperName(std::string_view name);
 
+// umount(8) runs `umount.fuse` for a mount of type fuse.dcfs (or any FUSE
+// subtype: libmount drops the subtype when it looks for an unmount helper,
+// measured with LIBMOUNT_DEBUG on util-linux 2.41: it tries /sbin/umount.fuse,
+// never umount.fuse.dcfs or umount.dcfs). dcfs's binary is that helper where
+// the administrator installs it under that name (plan step 15.6b); for a
+// mount that is not dcfs's it runs `umount -i` (no helper) and nothing more.
+inline constexpr std::string_view kUmountHelperName = "umount.fuse";
+bool IsUmountHelperName(std::string_view name);
+
+// `umount.fuse TARGET [-nlfrvi] [-t type]`, as umount(8) runs it (-V
+// alone prints the version).
+struct UmountArgs {
+  std::string target;
+  bool lazy = false;     // -l: detach now, do not wait for the daemon
+  bool force = false;    // -f: aborts the FUSE connection
+  bool no_mtab = false;  // -n
+  bool read_only = false;  // -r: remount read-only if the unmount fails
+  bool verbose = false;  // -v
+  bool version = false;  // -V
+};
+
+// InvalidArgument (a usage error: exit status 1) names the mistake.
+[[nodiscard]] absl::StatusOr<UmountArgs> ParseUmountArgs(
+    std::span<const std::string> args);
+
+// The device number ("major:minor", mountinfo's third field) of the topmost
+// fuse.dcfs mount at `mountpoint`, in the text of /proc/self/mountinfo;
+// nullopt if there is none. The daemon holds a lock file named by it for as
+// long as it runs (DaemonLockPath).
+std::optional<std::string> DcfsMountDevice(std::string_view mountinfo,
+                                           std::string_view mountpoint);
+
+// Where the daemon of the mount on `device` ("major:minor") holds its
+// lock: /run/dcfs/<major>_<minor>.lock.
+std::string DaemonLockPath(std::string_view device);
+
 // `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] [-o OPTIONS]`, as mount(8)
 // runs it (-V alone prints the version).
 struct HelperArgs {

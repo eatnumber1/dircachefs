@@ -9,6 +9,12 @@ Each function takes the root of a source tree and returns a list of problems
   `init`, `systemd_install.sh` or `systemd_run.sh` (the last two are run
   by `init` and by the systemd guest's unit, not by a test target), or
   another guest script sources it (a helper library);
+- guest_sleeps: a bare `sleep` in a test/qemu/guest script waits for a
+  timer, not for the event it is after (docs/style.md, "No timers"): none
+  outside `justified_sleep` in lib.sh, except the known ones counted per file
+  in tools/repo_shape_sleeps.txt, a list that only shrinks (a count there
+  that is higher than the file's, or lower, is a problem: new sleeps are
+  refused, removed ones must be taken off);
 - disabled_checks_listed: every `disabled NAME ...` check of the guest
   scripts is named in README.md's Limitations section;
 - no_test_only_comments: no production source (dcfs/ and bench/, not
@@ -76,6 +82,71 @@ def guest_scripts_used(root):
             "test/qemu/guest/%s is used by no test in test/qemu/BUILD.bazel "
             "(a guest_script, or a library another guest script sources)"
             % name)
+    return problems
+
+
+SLEEPS_LIST = ("tools", "repo_shape_sleeps.txt")
+# `sleep` as a command with an argument (a number, or an expansion or a
+# quoted one), not the word in a list of commands or in a message.
+SLEEP_RE = re.compile(r'(^|[\s;&|(`])sleep\s+["$0-9]')
+
+
+def count_sleeps(text):
+    """The bare sleeps of a shell script: not comments, not justified_sleep."""
+    count = 0
+    in_helper = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("justified_sleep()"):
+            in_helper = True
+        elif in_helper and line.startswith("}"):
+            in_helper = False
+            continue
+        if in_helper or stripped.startswith("#"):
+            continue
+        if SLEEP_RE.search(line.split(" #", 1)[0]):
+            count += 1
+    return count
+
+
+def known_sleeps(root):
+    """{path: (count, reason)} from tools/repo_shape_sleeps.txt."""
+    known = {}
+    for line in read(root, *SLEEPS_LIST).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        head, _, reason = line.partition("|")
+        path, count = head.split()
+        known[path] = (int(count), reason.strip())
+    return known
+
+
+def guest_sleeps(root):
+    known = known_sleeps(root)
+    problems = []
+    guest = os.path.join(root, "test", "qemu", "guest")
+    actual = {}
+    for name in sorted(os.listdir(guest)):
+        if not (name.endswith(".sh") or name == "init"):
+            continue
+        path = "test/qemu/guest/" + name
+        count = count_sleeps(read(root, "test", "qemu", "guest", name))
+        if count:
+            actual[path] = count
+    for path, count in actual.items():
+        allowed = known.get(path, (0, ""))[0]
+        if count > allowed:
+            problems.append(
+                "%s has %d bare sleep(s), %d known: wait on the event "
+                "(a pidfd, a lock, a blocking read on a fifo, `wait`), not on "
+                "a timer (docs/style.md, \"No timers\")" % (path, count, allowed))
+    for path, (count, _) in known.items():
+        if actual.get(path, 0) < count:
+            problems.append(
+                "tools/repo_shape_sleeps.txt lists %d sleep(s) for %s, which "
+                "has %d: lower it (the list only shrinks)" %
+                (count, path, actual.get(path, 0)))
     return problems
 
 
@@ -213,5 +284,5 @@ def no_testonly_friends(root):
 
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
-            disabled_checks_listed(root) + no_test_only_comments(root) +
-            no_testonly_friends(root))
+            guest_sleeps(root) + disabled_checks_listed(root) +
+            no_test_only_comments(root) + no_testonly_friends(root))

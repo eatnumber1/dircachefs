@@ -1,7 +1,8 @@
 """Self-check of the repository-shape rules (plan steps 26.1 and 26.13).
 
-Fixture trees with a missing README, an unreferenced script and an unlisted
-DISABLED_ check: each rule must report it; a good tree reports nothing.
+Fixture trees with a missing README, an unreferenced script, an unlisted
+DISABLED_ check and a bare sleep: each rule must report it; a good tree
+reports nothing.
 """
 
 import os
@@ -22,8 +23,16 @@ def good_tree(root):
     write(root, "third_party/pin/README.md")
     write(root, "test/qemu/BUILD.bazel",
           'qemu_test(name = "a_test", guest_script = "guest/a.sh")\n'
-          'qemu_test(name = "s", guest_script = "guest/shard_%s.sh" % x)\n')
-    write(root, "test/qemu/guest/lib.sh", "disabled() { :; }\n")
+          'qemu_test(name = "s", guest_script = "guest/shard_%s.sh" % x)\n'
+          'qemu_test(name = "l", guest_script = "guest/legacy.sh")\n')
+    write(root, "test/qemu/guest/lib.sh",
+          'disabled() { :; }\n'
+          'justified_sleep() {\n\tsleep "$1"\n}\n'
+          '# a comment about sleep 5 is not a sleep\n'
+          'require_commands sleep sort\n')
+    write(root, "tools/repo_shape_sleeps.txt",
+          "# known\ntest/qemu/guest/legacy.sh 2 | polls a pid\n")
+    write(root, "test/qemu/guest/legacy.sh", "sleep 1\n\tsleep 0.1\n")
     write(root, "test/qemu/guest/init")
     write(root, "test/qemu/guest/a.sh",
           '. "$(dirname "$0")/helper.sh"\ndisabled kernel-bug "why" check\n')
@@ -71,6 +80,36 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         problems = repo_shape.disabled_checks_listed(self.root)
         self.assertEqual(1, len(problems), problems)
         self.assertIn("DISABLED_other-bug", problems[0])
+
+    def test_a_new_bare_sleep_is_reported(self):
+        write(self.root, "test/qemu/guest/a.sh",
+              '. "$(dirname "$0")/helper.sh"\ndisabled kernel-bug "why" check\n'
+              'sleep 1\n')
+        problems = repo_shape.guest_sleeps(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("a.sh has 1 bare sleep", problems[0])
+        self.assertIn("No timers", problems[0])
+
+    def test_more_sleeps_than_the_list_knows_are_reported(self):
+        write(self.root, "test/qemu/guest/legacy.sh",
+              "sleep 1\nsleep 2\nsleep \"$n\"\n")
+        problems = repo_shape.guest_sleeps(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("legacy.sh has 3 bare sleep(s), 2 known", problems[0])
+
+    def test_a_removed_sleep_must_come_off_the_list(self):
+        write(self.root, "test/qemu/guest/legacy.sh", "sleep 1\n")
+        problems = repo_shape.guest_sleeps(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("lower it", problems[0])
+
+    def test_sleep_as_a_word_a_comment_or_the_helper_is_not_a_sleep(self):
+        # lib.sh of the good tree has all three and reports nothing.
+        self.assertEqual([], repo_shape.guest_sleeps(self.root))
+        self.assertEqual(
+            0, repo_shape.count_sleeps(
+                'echo hi # sleep 2\nsleeping 5\n'
+                'grep "disk sleep)" f\n'))
 
     def test_name_outside_the_limitations_section_does_not_count(self):
         write(self.root, "README.md",

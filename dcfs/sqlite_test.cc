@@ -71,6 +71,29 @@ TEST(ConnectionTest, FileBackedReportsWalAndForeignKeys) {
   ASSERT_THAT(fk_stmt->Step(), IsOkAndHolds(false));
 }
 
+// Step 15.6b (no timers): a connection has no busy timeout, and no busy
+// handler, so a lock another connection holds is an error at once, not a retry
+// that waits for a timer. One daemon owns a cache database; a second writer is
+// a bug or an administrator's tool, and the error says so.
+TEST(ConnectionTest, ThereIsNoBusyTimeout) {
+  std::string path = TestTmpFile("no_busy_timeout.sqlite");
+  ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
+  ASSERT_OK_AND_ASSIGN(Statement * stmt, conn.Prepared("PRAGMA busy_timeout"));
+  ASSERT_THAT(stmt->Step(), IsOkAndHolds(true));
+  EXPECT_EQ(stmt->Column<int>(0), 0);
+}
+
+TEST(ConnectionTest, AWriterWhileAnotherHoldsTheLockFailsAtOnce) {
+  std::string path = TestTmpFile("writer_busy.sqlite");
+  ASSERT_OK_AND_ASSIGN(Connection a, ConnectionFactory{.path = path}.Open());
+  ASSERT_THAT(a.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
+  ASSERT_THAT(a.Exec("BEGIN IMMEDIATE"), IsOk());
+  ASSERT_OK_AND_ASSIGN(Connection b, ConnectionFactory{.path = path}.Open());
+  EXPECT_THAT(b.Exec("BEGIN IMMEDIATE"),
+              StatusIs(absl::StatusCode::kUnavailable));
+  ASSERT_THAT(a.Exec("ROLLBACK"), IsOk());
+}
+
 // Audit crash F9: a file-backed database that cannot run in WAL mode must
 // not open. SQLite answers `PRAGMA journal_mode=WAL` with the mode it
 // actually kept, not an error, when the VFS cannot provide WAL's shared
@@ -516,8 +539,8 @@ TEST(DurabilityTest, SyncInsideNormalTransactionIsRejected) {
 // read cursor open (a SHARED lock, in rollback-journal mode) while A runs a
 // Transaction() that writes a row; A's BEGIN IMMEDIATE succeeds (RESERVED is
 // compatible with B's SHARED), but its COMMIT needs an EXCLUSIVE lock, which
-// B's SHARED lock blocks -- with busy_timeout=0 on A, that COMMIT fails with
-// SQLITE_BUSY immediately. WAL mode's readers don't block a writer's commit,
+// B's SHARED lock blocks -- the connections have no busy timeout, so that
+// COMMIT fails with SQLITE_BUSY immediately. WAL mode's readers don't block a writer's commit,
 // so this needs the older rollback-journal mode instead.
 TEST(TransactionUnwindTest, FailedCommitUnwindsAndConnectionStaysUsable) {
   std::string path = TestTmpFile("commit_busy.sqlite");
@@ -526,8 +549,6 @@ TEST(TransactionUnwindTest, FailedCommitUnwindsAndConnectionStaysUsable) {
   ASSERT_THAT(a.Exec("PRAGMA journal_mode=DELETE"), IsOk());
   ASSERT_THAT(a.Exec("CREATE TABLE t (id INTEGER PRIMARY KEY)"), IsOk());
   ASSERT_THAT(a.Exec("INSERT INTO t (id) VALUES (1)"), IsOk());
-  // Fail fast instead of waiting out the (5s default) busy timeout.
-  ASSERT_THAT(a.Exec("PRAGMA busy_timeout=0"), IsOk());
 
   ASSERT_OK_AND_ASSIGN(Connection b, ConnectionFactory{.path = path}.Open());
   ASSERT_THAT(b.Exec("PRAGMA journal_mode=DELETE"), IsOk());

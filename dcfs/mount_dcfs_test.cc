@@ -25,6 +25,7 @@ namespace {
 
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
+using ::testing::AllOf;
 using ::testing::ElementsAre;
 using ::testing::Eq;
 using ::testing::Field;
@@ -421,6 +422,65 @@ TEST(ApplyFlagOptionTest, AnUnknownFlagIsAnInternalError) {
 TEST(ParseHelperArgsTest, SubtypeFlagTakesAnArgumentAndIsIgnored) {
   EXPECT_THAT(ParseHelperArgs(Strings{"s", "m", "-t", "dcfs"}),
               IsOkAndHolds(Field(&HelperArgs::source, "s")));
+}
+
+// Step 15.6b: umount.fuse.dcfs, the helper umount(8) runs for a mount whose
+// mountinfo type is fuse.dcfs.
+TEST(UmountHelperNameTest, TheNameLibmountLooksFor) {
+  EXPECT_TRUE(IsUmountHelperName("umount.fuse"));
+  EXPECT_FALSE(IsUmountHelperName("umount.fuse.dcfs"));
+  EXPECT_FALSE(IsUmountHelperName("umount.dcfs"));
+  EXPECT_FALSE(IsUmountHelperName("mount.dcfs"));
+  EXPECT_FALSE(IsUmountHelperName("umount"));
+  EXPECT_FALSE(IsUmountHelperName(""));
+}
+
+TEST(ParseUmountArgsTest, TheTargetAndTheFlagsUmountPasses) {
+  EXPECT_THAT(ParseUmountArgs(Strings{"/data"}),
+              IsOkAndHolds(AllOf(Field(&UmountArgs::target, "/data"),
+                                 Field(&UmountArgs::lazy, false),
+                                 Field(&UmountArgs::force, false))));
+  absl::StatusOr<UmountArgs> all =
+      ParseUmountArgs(Strings{"-n", "-l", "-f", "-r", "-v", "/data"});
+  ASSERT_THAT(all, absl_testing::IsOk());
+  EXPECT_TRUE(all->lazy);
+  EXPECT_TRUE(all->force);
+  EXPECT_EQ(all->target, "/data");
+  EXPECT_THAT(ParseUmountArgs(Strings{"-lf", "/data"}),
+              IsOkAndHolds(AllOf(Field(&UmountArgs::lazy, true),
+                                 Field(&UmountArgs::force, true))));
+  EXPECT_THAT(ParseUmountArgs(Strings{"/data", "-t", "fuse.dcfs", "-i"}),
+              IsOkAndHolds(Field(&UmountArgs::target, "/data")));
+}
+
+TEST(ParseUmountArgsTest, VersionNeedsNoTarget) {
+  EXPECT_THAT(ParseUmountArgs(Strings{"-V"}),
+              IsOkAndHolds(Field(&UmountArgs::version, true)));
+}
+
+TEST(ParseUmountArgsTest, MistakesAreUsageErrors) {
+  for (const Strings &bad : {Strings{}, Strings{"-x", "/data"},
+                             Strings{"/data", "/other"}, Strings{"-t"}}) {
+    absl::StatusOr<UmountArgs> parsed = ParseUmountArgs(bad);
+    ASSERT_FALSE(parsed.ok()) << bad.size();
+    EXPECT_EQ(ExitStatusFor(parsed.status()), 1);
+  }
+}
+
+TEST(DcfsMountDeviceTest, TheDeviceOfTheTopmostDcfsMountAtThePath) {
+  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/data"), "0:35");
+  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/with space"), "0:37");
+  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/plain"), std::nullopt);
+  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/"), std::nullopt);
+  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/nothing"), std::nullopt);
+  constexpr char kStacked[] =
+      "40 26 0:35 / /data rw - fuse.dcfs /dev/vdb rw\n"
+      "50 26 0:41 / /data rw - fuse.dcfs /dev/vdc rw\n";
+  EXPECT_EQ(DcfsMountDevice(kStacked, "/data"), "0:41");
+}
+
+TEST(DaemonLockPathTest, OneFilePerFuseDevice) {
+  EXPECT_EQ(DaemonLockPath("0:35"), "/run/dcfs/0_35.lock");
 }
 
 }  // namespace

@@ -32,6 +32,12 @@ class BannedSymbolsSelfCheckTest(unittest.TestCase):
             any("realpath" in p and "no paths after startup" in p
                 for p in problems), problems)
 
+    def test_program_that_sleeps_fails_naming_the_no_timers_rule(self):
+        problems = run_check(deny_text())
+        self.assertTrue(
+            any("sleep" in p and "no timers" in p for p in problems),
+            problems)
+
     def test_symbol_defined_in_binary_but_referenced_by_no_object_fails(self):
         problems = run_check(deny_text())
         self.assertTrue(

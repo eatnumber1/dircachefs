@@ -690,7 +690,7 @@ gate is disabled.
 | the noisy job's summary lists failed and flaky tests (26.14e) | `//tools:noisy_report_test` (canned build events: failures, flakes and timeouts listed, a clean run said clean, a damaged file an error, only findings' logs copied) |
 | coverage is the same in two runs of one commit (26.14: line and branch status per file, per test) | `//tools:coverage_diff_test` (the real `coverage_diff.py` over canned lcovs: identical pass; a line or branch covered in one run only, or missing, fails naming file and line; counts differ only under `--exact`; per test it names the test that differs) |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
-| repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
+| repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13), no bare `sleep` in a guest script beyond the shrinking list (15.6b) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |
 | commit subjects on the CI push range (26.13) | `//tools:commit_subjects_test` (canned subject lists through the real `.github/ci/commit_subjects.sh`) |
 | syscall-trace goldens and budgets (26.3, 26.4: the reducer, the golden comparison, the budget comparison) | `//test/qemu:strace_lib_test` (the real `guest/strace_lib.sh` over canned strace output, including a golden that differs and a checkpoint's `poll` of `/dev/fuse`) |
 | runtime invariant checks (26.2: each invariant the checker enforces) | `//dcfs:dir_cache_fs_test`'s `DirCacheFSDeathTest.*` (each breaks one invariant on purpose and expects the abort naming it) and `InvariantChecksReportAsAStatus` |
@@ -1632,8 +1632,10 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   and `remount,rw` reach the wrapper by the type `fuse.dcfs`
   (`mount.fuse.dcfs`) and toggle only the dcfs mount; a native option in a
   remount is ignored with the wrapper's WARNING on mount's stderr; `umount`
-  stops the daemon (the FUSE path: libmount finds no `umount.dcfs` and calls
-  `umount(2)`);
+  runs `umount.fuse` (libmount's helper for every FUSE subtype, step 15.6b),
+  which unmounts as `umount -i` and waits for the daemon, so `umount X &&
+  mount X`, `systemctl restart` of a mount (also of `/data`, which
+  `local-fs.target` requires) and a reboot work;
 - the README's recipes with util-linux: `mount /data` takes its fstab line's
   options, `mount -o remount,dcfs.ro /data` has libmount merge the line's
   options into the helper's (the native `noatime` is ignored with the
@@ -1666,11 +1668,11 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   options set (`dcfs.stderrthreshold=0` shows the INFO narrative; the
   default hides it);
 - after the reboot: the fstab mounts were made by systemd at boot, the
-  parent before the child; every instance recovered and none with dirty
-  entries (that every daemon shut down cleanly is
-  `DISABLED_reboot-every-daemon-shuts-down-cleanly`: in about half the runs
-  one daemon, killed by systemd's last SIGTERM while it was still finishing,
-  starts "uncleanly" after an ordinary reboot); a warm tree reads nothing from
+  parent before the child; the previous boot's daemons each logged a clean
+  shutdown and this boot's starts all found it clean (the reboot stops each
+  mount unit through `umount.fuse`, which returns when the daemon has exited,
+  so systemd's last SIGTERM finds nothing left to kill); a warm tree reads
+  nothing from
   the backing disk (`sectors_read`); a `nofail` mount of a missing device did
   not hold the boot (the script began while that mount's start job was still
   waiting, with its device timeout set to ten minutes).
@@ -1684,24 +1686,22 @@ What the real `mount(8)` path showed that the busybox guest could not:
   libmount does not resolve: `/srv/raw`, `nas:/export`). The test pins what
   happens; the wrapper cannot recover the tag.
 - the daemon lives in its mount unit's cgroup and its syslog lines carry the
-  unit, with no systemd-specific code, as designed. systemd calls the unit
-  stopped as soon as the mount is gone, while the daemon is still syncing the
-  backing filesystem and closing the cache database for up to two seconds
-  ("Unit process N (mount.dcfs) remains running after unit stopped"), so
-  **`systemctl restart` of a dcfs mount races the old daemon**: the new one
-  finds `Cache database ... is in use by another dcfs process` (exit 32) in
-  most restarts, and for a mount that `local-fs.target` requires (every fstab
-  line without `nofail`) the failed start sends the machine to
-  `emergency.target`. The test keeps the check as `DISABLED_systemd-restart-
-  parent-restarts-child` (`would FAIL` in the log, the way `lib.sh`'s
-  `disabled` keeps a kernel bug) on its own pair of `nofail,noauto` units and
-  waits for the old daemon to exit before the stop/start checks. The same
-  race hits `umount` followed at once by `mount` of the instance without
-  systemd (`DISABLED_umount-then-mount-at-once`); with the README's wait
-  (`flock <cache database> true` returns when the daemon has let go) it
-  works (`umount-then-mount-restarts-an-instance`). A fix is the new daemon
-  waiting for the cache lock, or a `umount.dcfs` that returns when the daemon
-  has exited (plan step 15.6b).
+  unit, with no systemd-specific code, as designed. The kernel does not wait
+  for the daemon of a plain FUSE mount, systemd called the unit stopped as
+  soon as the mount was gone ("Unit process N (mount.dcfs) remains running
+  after unit stopped"), and **`systemctl restart` of a dcfs mount raced the old
+  daemon**: the new one found `Cache database ... is in use by another dcfs
+  process` (exit 32) in most restarts, a mount `local-fs.target` requires sent
+  the machine to `emergency.target`, and a reboot left a daemon "unclean" in
+  about half the runs. Step 15.6 kept those checks disabled; step 15.6b made
+  them real with `umount.fuse` (below).
+- libmount looks for `umount.fuse`, not `umount.fuse.dcfs` or `umount.dcfs`:
+  `LIBMOUNT_DEBUG=all umount /mnt/m` on util-linux 2.41 logs `mountinfo
+  unnecessary [type=fuse]` and tries `/sbin/umount.fuse`,
+  `/sbin/fs.d/umount.fuse`, `/sbin/fs/umount.fuse`. dcfs's binary is installed
+  under that name (`install_dcfs_into`, `mkinitramfs.sh`); for a FUSE mount
+  that is not dcfs's it runs `umount -i`, and busybox's umount has no `-i`:
+  `mount_dcfs.sh` makes `/bin/umount` a script that drops it.
 - `mount -t nosuchfs` is `-t no` + `suchfs` to util-linux (the `no` prefix
   negates a type list); the test uses `bogusfs`.
 

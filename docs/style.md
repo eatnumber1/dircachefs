@@ -505,6 +505,38 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
 - `Status` returns with `ABSL_RETURN_IF_ERROR` are the normal shape of error
   handling and are not what this rule is about (section 1.6).
 
+### 1.11 No timers
+
+russ, 2026-10-09, on the restart race: "I don't like timers in our code.
+They're necessary sometimes ... Timers are inherently brittle. If things are
+slow, the system breaks. This system should work on everything ranging from an
+idle 256 core supercomputer to a 1 core raspberry pi under 40 loadavg."
+
+- **Wait on the event, and let the caller cancel.** To wait for another
+  process, the kernel or a filesystem, block on what signals the change: a
+  `pidfd` for a process's exit, a lock (`flock`, which the kernel releases
+  when its holder dies), a `read` or `poll` with no timeout, an inotify watch.
+  The wait ends when the thing happens or when the caller cancels it (a signal:
+  Ctrl-C, systemd killing the helper); it never ends because a number of
+  seconds went by. A slow machine then makes everything slower and nothing
+  wrong.
+- **A timeout is permitted only where the thing waited for cannot signal**, and
+  then it is named and justified in a comment: say what cannot signal and what
+  the duration is a bound on. In the daemon each use is an `allow` line of
+  `tools/banned_symbols.txt` that names it.
+- **Mechanically:** `tools/banned_symbols.txt` bans `sleep`, `usleep`,
+  `nanosleep`, `clock_nanosleep`, `alarm`, `timer_create`, `timerfd_create`,
+  `sqlite3_busy_timeout` and `sqlite3_busy_handler` in the shipped binary
+  (`//tools:banned_symbols_test`). A SQLite lock that is not free is an
+  immediate, clear error: one daemon owns a cache database (the `flock`
+  `main.cc` takes), so a conflict is that check or a bug, never something to
+  retry. `tools/repo_shape.py` refuses a bare `sleep` in a `test/qemu/guest`
+  script (`//tools:repo_shape_test`), except `justified_sleep` in `lib.sh`
+  for a test whose subject is time itself, and the ones still listed in
+  `tools/repo_shape_sleeps.txt`, a list that only shrinks (plan step 6.5
+  removes them). A guest script waits for a process with `wait`, a fifo read, a
+  lock (`flock FILE true`) or a pidfd, not a loop of `sleep 0.1`.
+
 ## 2. Tests
 
 - **Test first.** Write the test, run it on the unchanged code, quote the

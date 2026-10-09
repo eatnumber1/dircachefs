@@ -19,6 +19,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_join.h"
+#include "absl/strings/str_replace.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "dcfs/mounts_below.h"
@@ -82,6 +83,56 @@ std::optional<MountinfoLine> TopmostMountAt(std::string_view mountinfo,
 
 bool IsMountHelperName(std::string_view name) {
   return name == kMountHelperName || name == kMountFuseHelperName;
+}
+
+bool IsUmountHelperName(std::string_view name) {
+  return name == kUmountHelperName;
+}
+
+absl::StatusOr<UmountArgs> ParseUmountArgs(
+    std::span<const std::string> args) {
+  UmountArgs parsed;
+  std::vector<std::string> positionals;
+  for (size_t i = 0; i < args.size(); ++i) {
+    const std::string &arg = args[i];
+    if (arg.size() < 2 || arg[0] != '-') {
+      positionals.push_back(arg);
+      continue;
+    }
+    for (size_t j = 1; j < arg.size(); ++j) {
+      switch (arg[j]) {
+        case 'l': parsed.lazy = true; break;
+        case 'f': parsed.force = true; break;
+        case 'V': parsed.version = true; break;
+        // -i is umount(8)'s own (no helper), which the helper always adds.
+        case 'n': parsed.no_mtab = true; break;
+        case 'r': parsed.read_only = true; break;
+        case 'v': parsed.verbose = true; break;
+        case 'i': break;
+        case 't':
+          // The type, attached (-tfuse.dcfs) or as the next word.
+          if (j + 1 == arg.size()) {
+            if (++i == args.size()) {
+              return MarkUsageError(InvalidArgumentErrorBuilder()
+                                    << "Option -t needs an argument");
+            }
+          }
+          j = arg.size();
+          break;
+        default:
+          return MarkUsageError(InvalidArgumentErrorBuilder()
+                                << "Unknown option -" << arg[j]);
+      }
+    }
+  }
+  if (parsed.version) return parsed;
+  if (positionals.size() != 1) {
+    return MarkUsageError(InvalidArgumentErrorBuilder()
+                          << "Expected one mount point, got "
+                          << positionals.size());
+  }
+  parsed.target = positionals[0];
+  return parsed;
 }
 
 namespace {
@@ -332,6 +383,20 @@ StartupReport DecodeStartupReport(std::string_view bytes) {
   return {.ready = false,
           .exit_status = 32,
           .message = "dcfs sent an unintelligible startup report"};
+}
+
+std::optional<std::string> DcfsMountDevice(std::string_view mountinfo,
+                                           std::string_view mountpoint) {
+  std::optional<MountinfoLine> line = TopmostMountAt(mountinfo, mountpoint);
+  if (!line.has_value() || line->fields[line->dash + 1] != "fuse.dcfs") {
+    return std::nullopt;
+  }
+  return std::string(line->fields[2]);
+}
+
+std::string DaemonLockPath(std::string_view device) {
+  return absl::StrCat("/run/dcfs/", absl::StrReplaceAll(device, {{":", "_"}}),
+                      ".lock");
 }
 
 std::optional<unsigned long> RemountFlags(std::string_view mountinfo,

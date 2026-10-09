@@ -50,6 +50,24 @@ ban _ZN4dcfs8syscalls13clock_gettime* | the time comes from Context::clock (step
 # absl::Now, by its mangled name for the pinned Abseil (update with the pin).
 ban _ZN4absl12lts_202608173NowEv | the time comes from Context::clock (absl::Now reads the real clock)
 
+# "No timers" (step 15.6b; russ, 2026-10-09: "Timers are inherently brittle.
+# If things are slow, the system breaks. This system should work on everything
+# ranging from an idle 256 core supercomputer to a 1 core raspberry pi under 40
+# loadavg."): dcfs waits for another process or the kernel on the event (a
+# pidfd, a lock, a read that blocks) and lets the caller cancel. A timeout is
+# permitted only where the thing waited for cannot signal; each use below names
+# it. docs/style.md, "No timers".
+ban sleep | no timers: wait on the event
+ban usleep | no timers: wait on the event
+ban nanosleep | no timers: wait on the event
+ban clock_nanosleep | no timers: wait on the event
+ban _ZN4dcfs8syscalls9nanosleep* | no timers: wait on the event (the syscalls::nanosleep wrapper)
+ban alarm | no timers: wait on the event
+ban timer_create | no timers: wait on the event
+ban timerfd_create | no timers: wait on the event
+ban sqlite3_busy_timeout | no timers: a lock that is not free is an immediate, clear error (one daemon owns a cache database)
+ban sqlite3_busy_handler | no timers: a lock that is not free is an immediate, clear error (one daemon owns a cache database)
+
 # Statuses carry the message.
 ban strerror | statuses carry the message (use ErrnoToStatus)
 ban strerror_r | statuses carry the message (use ErrnoToStatus)
@@ -76,11 +94,14 @@ allow dcfs/_objs/syscalls/* realpath | the syscalls::realpath wrapper itself; it
 allow dcfs/_objs/absolute_paths/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper makes SOURCE, MOUNTPOINT and the cache database absolute before it detaches (it has no working directory after)
 allow dcfs/_objs/remount/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper's remount canonicalizes MOUNTPOINT once before acting on it
 allow dcfs/_objs/syscalls_process/* execv | the mount.dcfs wrapper's capture helper runs mount(8) (step 15.2); nothing else execs
+allow dcfs/_objs/umount_helper/* _ZN4dcfs8syscalls8realpath* | startup only: the daemon canonicalizes MOUNTPOINT once, before the mount, to find its mountinfo line (CanonicalMountpoint); the umount.fuse helper resolves its target once, as the mountinfo line of a mount it was not given a canonical path for
 allow dcfs/_objs/mounts_below/* _ZN4dcfs8syscalls8realpath* | startup only: mounts_below.cc canonicalizes --source once, from main.cc (MountsBelow), before the mount
 
 # Abseil: formatting and diagnostics internals.
 allow abseil-cpp+/* clock_gettime | Abseil's own clock, mutex timeouts and sysinfo
 allow abseil-cpp+/* _ZN4absl12lts_202608173NowEv | Abseil's own logging timestamps, Mutex and sampling
+allow abseil-cpp+/absl/base/_objs/base/sysinfo* nanosleep | Abseil's own SleepFor of its sysinfo (the spin-lock back-off of a contended absl::Mutex: dcfs is single-threaded, so nothing contends, and a contended mutex cannot signal); dcfs calls none
+allow abseil-cpp+/absl/time/_objs/time/clock* nanosleep | absl::SleepFor itself; dcfs never calls it (this rule)
 allow abseil-cpp+/* snprintf | Abseil's own number, float, stack-trace and Mutex-debug formatting
 allow abseil-cpp+/* strerror_r | absl::base_internal::StrError
 allow abseil-cpp+/absl/strings/_objs/str_format_internal/parser* fprintf | the `#if defined(__clang__)` debug dump in str_format/constexpr_parser.h (clang only)
@@ -89,6 +110,7 @@ allow abseil-cpp+/absl/strings/_objs/str_format_internal/parser* fprintf | the `
 allow sqlite3+/* gettimeofday | the unix VFS's xCurrentTime and randomness seeding
 allow sqlite3+/* time | the unix VFS's xCurrentTime and randomness seeding
 allow sqlite3+/* getcwd | unix VFS resolves a relative database name (startup, when the cache database is opened)
+allow sqlite3+/* nanosleep | the unix VFS's xSleep, which only a busy handler (none is set: step 15.6b removed busy_timeout) and the WAL's shared-memory recovery retry against another process's writer (one daemon owns the database) call
 allow sqlite3+/* dlopen | sqlite3_load_extension, never enabled by dcfs
 allow sqlite3+/* pthread_create | SQLite's optional sorter worker threads, off by default (SQLITE_MAX_WORKER_THREADS)
 
@@ -97,6 +119,7 @@ allow sqlite3+/* pthread_create | SQLite's optional sorter worker threads, off b
 # API) and its mount fallbacks.
 allow libfuse+/* clock_gettime | libfuse's cache timeouts of the high-level API and log timestamps
 allow libfuse+/* gettimeofday | libfuse's log timestamps
+allow libfuse+/_objs/libfuse/fuse.* sleep | fuse_prune_nodes of the high-level API's node cache (a background pruning thread's sleep(1)): dcfs uses the low-level session API and never starts it
 allow libfuse+/* iconv_open | the iconv fuse module of the high-level API, not used (goes with the io_uring decision)
 allow libfuse+/* dlopen | fuse_module loading of the high-level API, not used
 allow libfuse+/* *printf | usage text, debug output and mount option strings
@@ -115,6 +138,11 @@ allow numactl+/* strerror | libnuma's own messages
 # Pulled in by the C runtime for the allowed uses above.
 allow <runtime> _ZN4dcfs8syscalls13clock_gettimeEi | the wrapper is linked with syscalls.o for the tests; nothing in the daemon calls it (a caller is a violation)
 allow dcfs/_objs/syscalls/* clock_gettime | the syscalls::clock_gettime wrapper itself, for the tests
+allow <runtime> _ZN4dcfs8syscalls9nanosleepERK8timespec | the syscalls::nanosleep wrapper is linked with syscalls.o for the tests and the benchmarks; nothing in the daemon calls it (a caller is a violation)
+allow dcfs/_objs/syscalls/* nanosleep | the syscalls::nanosleep wrapper itself, for the tests and the benchmarks
+allow <runtime> clock_nanosleep | glibc's own nanosleep, which the allowed users above reach
+allow <runtime> sqlite3_busy_timeout | defined by the SQLite amalgamation (PRAGMA busy_timeout is built on it); dcfs sets none, and a reference from our code is a violation
+allow <runtime> sqlite3_busy_handler | defined by the SQLite amalgamation (sqlite3_busy_timeout is built on it); dcfs sets none, and a reference from our code is a violation
 allow <runtime> execve | execle of the libfuse fusermount3 fallback
 allow <runtime> execvpe | posix_spawnp of the libfuse fusermount3 fallback
 # glibc 2.41's own libc.a members (step 7.1c): linked in by the C runtime, not

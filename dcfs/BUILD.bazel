@@ -32,6 +32,7 @@ MAIN_DEPS = [
     ":remount",
     ":sqlite",
     ":startup_channel",
+    ":umount_helper",
     ":status",
     ":syscalls",
     ":syscalls_backing",
@@ -656,6 +657,26 @@ cc_library(
     ],
 )
 
+# Step 15.6b: umount.fuse.dcfs, and the lock the daemon holds for it to wait on.
+cc_library(
+    name = "umount_helper",
+    srcs = ["umount_helper.cc"],
+    hdrs = ["umount_helper.h"],
+    deps = [
+      ":escape",
+      ":mount_dcfs",
+      ":remount",
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      ":syscalls_process",
+      "@absl//absl/log",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+    ],
+)
+
 # Step 15.2: the log sink of a daemonized dcfs.
 cc_library(
     name = "syslog_sink",
@@ -705,6 +726,21 @@ qemu_cc_test(
     deps = [
       ":syslog_sink",
       "@absl//absl/base:log_severity",
+      "@googletest//:gtest_main",
+    ],
+)
+
+qemu_cc_test(
+    name = "umount_helper_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["umount_helper_test.cc"],
+    deps = [
+      ":status",
+      ":syscalls_backing",
+      ":umount_helper",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
     ],
 )

@@ -12,11 +12,12 @@
 //dcfs:main_static_traced
 //dcfs:mounts_below
 
-# the mount.dcfs wrapper (step 15.2): the capture helper reads mount(8)'s output and opens the staging mount and the clone's root (read, openat, mkdirat), remount reads mountinfo, the startup channel reads the daemon's report
+# the mount.dcfs wrapper (step 15.2): the capture helper reads mount(8)'s output and opens the staging mount and the clone's root (read, openat, mkdirat), remount reads mountinfo, the startup channel reads the daemon's report, umount_helper (step 15.6b) opens the daemon's lock file in /run/dcfs and the mount's lock (openat, mkdirat, unlinkat: tmpfs, no backing disk)
 //dcfs:absolute_paths
 //dcfs:backing_capture
 //dcfs:remount
 //dcfs:startup_channel
+//dcfs:umount_helper
 
 # testonly code and benchmark driver (trace file, invariant-violation console line, fault wraps, test fixtures)
 //dcfs/testonly:checking_observers
@@ -56,6 +57,7 @@
 //dcfs:startup_channel_test_bin
 //dcfs:syscalls_process_test_bin
 //dcfs:syscalls_test_bin
+//dcfs:umount_helper_test_bin
 
 # benchmark driver
 //bench:bench_lib

@@ -22,6 +22,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_every_guest_script_is_used_by_a_test(self):
         self.assertEqual([], repo_shape.guest_scripts_used(ROOT["root"]))
 
+    def test_no_guest_script_waits_on_a_timer(self):
+        self.assertEqual([], repo_shape.guest_sleeps(ROOT["root"]))
+
     def test_every_disabled_check_is_in_the_limitations(self):
         self.assertEqual([], repo_shape.disabled_checks_listed(ROOT["root"]))
 

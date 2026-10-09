@@ -335,7 +335,8 @@ struct ConnectionFactory {
   // journal_mode=WAL (required for a file-backed database: FailedPrecondition
   // if SQLite keeps it in another mode; an in-memory or temporary one stays
   // in "memory" mode), synchronous=NORMAL, foreign_keys=ON,
-  // busy_timeout=5000, temp_store=MEMORY.
+  // temp_store=MEMORY, and no busy timeout: a lock that is not free is an
+  // immediate SQLITE_BUSY (Unavailable).
   absl::StatusOr<Connection> Open() const;
 };
 

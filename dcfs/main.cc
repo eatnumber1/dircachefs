@@ -63,6 +63,7 @@
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/syslog_sink.h"
+#include "dcfs/umount_helper.h"
 #include "dcfs/version.h"
 #include "fuse_lowlevel.h"
 
@@ -523,11 +524,31 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   // Until the INIT is answered, the last ERROR is why a refused one failed.
   std::optional<LastErrorSink> last_error;
   last_error.emplace();
+  // How mountinfo will name the mount point, taken now: once the mount is
+  // there, resolving the path would ask this daemon, which is not serving yet.
+  absl::StatusOr<std::string> canonical = CanonicalMountpoint(mountpoint);
+  if (!canonical.ok()) {
+    fuse_remove_signal_handlers(session);
+    fuse_session_destroy(session);
+    return canonical.status();
+  }
   if (fuse_session_mount(session, mountpoint) != 0) {
     fuse_remove_signal_handlers(session);
     fuse_session_destroy(session);
     return InternalErrorBuilder()
            << "fuse_session_mount(" << mountpoint << ") failed";
+  }
+  // The lock umount.fuse waits on, held until this process exits
+  // (dcfs/umount_helper.h).
+  absl::StatusOr<DaemonLock> daemon_lock = [&]() -> absl::StatusOr<DaemonLock> {
+    ABSL_ASSIGN_OR_RETURN(std::string mountinfo, ReadMountinfo());
+    return HoldDaemonLock(mountinfo, *canonical);
+  }();
+  if (!daemon_lock.ok()) {
+    fuse_session_unmount(session);
+    fuse_remove_signal_handlers(session);
+    fuse_session_destroy(session);
+    return daemon_lock.status();
   }
 
   // libfuse's loop, plus draining /dev/fuse at a checkpoint so that a
@@ -562,6 +583,8 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   if (!close_status.ok()) {
     LOG(ERROR) << "closing cache database: " << close_status;
   }
+  // Last: the lock is still held, and goes with the process.
+  RemoveDaemonLockFile(*daemon_lock);
 
   // SessionLoop::Run() returns 0 when the kernel connection was closed
   // (e.g. the mount was unmounted externally) or a signal handler stopped
@@ -579,10 +602,10 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
 
 // Why dcfs refuses to run as anyone but root (README, "Why root"; decision
 // 12): each of these needs a privilege no user has.
-absl::Status RequireRoot() {
+absl::Status RequireRoot(std::string_view program) {
   if (syscalls::getuid() == 0) return absl::OkStatus();
   return MarkUsageError(PermissionDeniedErrorBuilder()
-         << "mount.dcfs must run as root (fstab's user option does not "
+         << program << " must run as root (fstab's user option does not "
             "work): FUSE passthrough, the private mount namespace and "
             "open_tree need CAP_SYS_ADMIN, open_by_handle_at needs "
             "CAP_DAC_READ_SEARCH, and acting with each caller's credentials "
@@ -605,7 +628,7 @@ int MountHelperMain(int argc, char *argv[]) {
   }
   absl::StatusOr<HelperOptions> options = SplitHelperOptions(args->options);
   absl::Status checked = options.status();
-  if (checked.ok()) checked = RequireRoot();
+  if (checked.ok()) checked = RequireRoot(kMountHelperName);
   if (checked.ok() && args->mount_namespace.has_value()) {
     checked = MarkUsageError(
         UnimplementedErrorBuilder()
@@ -690,6 +713,27 @@ int MountHelperMain(int argc, char *argv[]) {
   return ExitStatusFor(ran.status());
 }
 
+// umount.fuse: `umount.fuse TARGET [-nlfrvi] [-t type]`, as umount(8) runs it
+// for a FUSE mount. Unmounts (umount -i) and waits for the daemon of a dcfs
+// mount. Returns umount(8)'s exit status, or 1 for a usage mistake.
+int UmountHelperMain(int argc, char *argv[]) {
+  const std::vector<std::string> words(argv + 1, argv + argc);
+  absl::StatusOr<UmountArgs> args = ParseUmountArgs(words);
+  if (!args.ok()) {
+    LOG(ERROR) << args.status()
+               << "; usage: umount.fuse MOUNTPOINT [-nlfrvi] [-t type]";
+    return 1;
+  }
+  if (args->version) {
+    std::cout << "umount.fuse (dcfs " << kVersion << ")" << std::endl;
+    return 0;
+  }
+  absl::Status done = UmountAndWait(*args);
+  if (done.ok()) return 0;
+  if (!done.message().empty()) LOG(ERROR) << done;
+  return ExitStatusFor(done);
+}
+
 // The plain `dcfs` binary: --help and --version, and a pointer to the
 // wrapper (decision 8: dcfs is mounted as mount.dcfs; there is no --source).
 int PlainMain(int argc, char *argv[]) {
@@ -728,6 +772,7 @@ int Main(int argc, char *argv[]) {
   const std::string_view name =
       slash == std::string_view::npos ? program : program.substr(slash + 1);
   if (IsMountHelperName(name)) return MountHelperMain(argc, argv);
+  if (IsUmountHelperName(name)) return UmountHelperMain(argc, argv);
   return PlainMain(argc, argv);
 }
 

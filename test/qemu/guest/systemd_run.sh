@@ -17,7 +17,13 @@ TEST=$1
 RECLAIM_BASE=$(cat /dev/dcfs-reclaim-base 2>/dev/null)
 export RECLAIM_BASE
 rm -f /dev/memstat
-awk -v out=/dev/memstat -f /dev/memsampler.awk &
+# The sampler announces its first sample on stdout: a fifo opened for reading
+# and writing here (so that neither end waits for the other), which is read
+# below, when the test is done, instead of polling the file.
+rm -f /dev/memsampler.first
+mkfifo /dev/memsampler.first
+exec 3<>/dev/memsampler.first
+awk -v out=/dev/memstat -v announce=1 -f /dev/memsampler.awk >&3 &
 sampler=$!
 
 sh "/tests/$TEST"
@@ -28,12 +34,9 @@ rc=$?
 # which //test/qemu:run_qemu_verdict_test checks against guest/init's).
 . /tests/lib.sh
 # A test that ends within the sampler's first sample (it takes a moment to
-# start) waits for one, as guest/init's mem_report does.
-w=0
-while [ ! -s /dev/memstat ] && [ "$w" -lt 20 ]; do
-	sleep 0.1
-	w=$((w + 1))
-done
+# start) waits for one, as guest/init's mem_report does: for the line the
+# sampler announces.
+read -r first_sample <&3
 memline=$(cat /dev/memstat 2>/dev/null)
 kill "$sampler" 2>/dev/null
 if [ -n "$memline" ]; then
@@ -52,7 +55,7 @@ if [ "$rc" -eq 0 ]; then
 else
 	echo "TEST-FAILED"
 fi
-# The console drains slowly (guest/init's finish); the reboot must not cut off
-# the verdict.
-sleep 0.5
+# The reboot stops every unit, the dcfs mounts included (each unmount waits for
+# its daemon), before the machine restarts: that is long after the console has
+# drained the verdict, which guest/init's `reboot -f` has to sleep for.
 systemctl --no-block reboot

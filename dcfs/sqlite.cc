@@ -508,7 +508,11 @@ absl::Status ApplyOpenPragmas(Connection &conn) {
 
   ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA synchronous=NORMAL"));
   ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA foreign_keys=ON"));
-  ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA busy_timeout=5000"));
+  // No busy_timeout (SQLite's default is none): one daemon owns a cache
+  // database (the flock main.cc takes), so a lock that is not free is a
+  // reader that overlaps the shutdown checkpoint or a bug, and either gets an
+  // immediate, clear error, not a retry that waits out a timer (style guide,
+  // "no timers"). No busy handler is set anywhere else.
   ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA temp_store=MEMORY"));
   return absl::OkStatus();
 }
