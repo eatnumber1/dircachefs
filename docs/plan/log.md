@@ -2105,3 +2105,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   The 23.10 branch stays in lane-1 unmerged. 23.8b dispatched to the same agent: the view
   exactness bisection through Bazel targets (the reviewer was denied running TLC outside bazel
   test and stopped; the bisection is normal lane work).
+- 26.14c merged (8f0d3c2, one commit; clean rebase; tools and harness tests green). Cause: plain
+  profile-counter increments losing updates between the daemon's threads; fixed with
+  `-fprofile-update=atomic` under coverage, the gate rejects artifact counts, docs/coverage.md
+  exists now. Deviation noted by the agent: one early bazel coverage call was piped through tail
+  (not in an && chain). Lane-2 free.

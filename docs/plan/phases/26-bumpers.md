@@ -261,6 +261,19 @@ own step, none fixed in 26.14:
 - 26.14c (coverage): `dir_cache_fs.cc:817` branch 1.2 (`DropLookups`) reads
   4294967295 in one run of `bench_smoke_test_btrfs`: a counter underflow or
   a profile-merge bug; find which before trusting branch counts there.
+  Done 2026-10-09, merged 8f0d3c2: a negative difference of region counters.
+  The daemon's profile counters were plain increments shared by its threads
+  (and by the four daemons bench_smoke starts, one continuous-mode profile
+  per binary); lost updates left the entry counter at 12217 against 12220
+  runs, and llvm-cov's branch count 12216 - 12217 printed as 2^32-1. Runs:
+  1 of 3 plain runs at 2 vCPUs showed it (17 functions negative), 1 vCPU
+  lowers the rate (1 function), `-fprofile-update=atomic` removed every
+  negative count in 5 of 5. Fix: `coverage --copt=-fprofile-update=atomic`
+  in .bazelrc; the gate fails on any branch count >= 2^31, naming it, with
+  two self-check fixtures (failing first); `docs/coverage.md` created with
+  "Known coverage artifacts"; run-qemu.sh gains DCFS_KEEP_PROFRAW and
+  DCFS_FORCE_CPUS (off by default). Likely also part of 26.14's per-test
+  differences: 26.14b's rerun will tell.
 - 26.14d (flake): `dir_cache_fs_test` `ARowGoneDuringPhase3IsNotLoggedAsAFailure`
   failed once with the WARNING `supplementary groups unreadable ... pid 0`
   and passed 5 of 5 reruns; cause not established (a request with pid 0 is
