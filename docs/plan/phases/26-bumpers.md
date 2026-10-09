@@ -353,6 +353,38 @@ ahead, power loss behind, failed phase 3, lookup, listing, sync, handle
 taken}, judged by 11.7's identity oracle plus the path oracle; the long
 tail runs in this weekly job, a small fixed sample in the large tier.
 
+Status 2026-10-09: built (lane-5, three commits on 2c8a25c; Opus review
+running, focused on whether the generator can reach 23.11's state and on
+the identity oracle's soundness). As built: one knob, `--test_env=DCFS_NOISY=1`,
+which run-qemu.sh turns into the cmdline word `dcfs_noisy=1` (init skips
+the sysctl block) and at least two vCPUs (DCFS_FORCE_CPUS still wins); a
+`DCFS_SEED` knob for the weekly draw; `quiet_kernel_test` fails under the
+knob and the new manual `noisy_kernel_test` fails without it, both from a
+shared `kernel_mode_lib.sh` with a host-side canned-/proc test; the
+`noisy` job (weekly and workflow_dispatch, six runners: plain shards with
+small+medium x3 runs, large+enormous once and the mixed long tail per
+backing; ASan shards small+medium x3; noisy_kernel_test first; findings to
+the summary via tools/noisy_report.py, exit 0 on test failures; 95-145
+min per runner estimated, unmeasured, 300-minute limit). Mixed faults:
+`fault_ace.sh` kind `mixed` draws one operation plus three events from
+{crash, crash3 (kill with a create held in phase 3 by freezing both
+disks), cutahead (a create elsewhere first, so the cache is ahead, then
+cut), cutbehind, fail3 (ENOSPC on the cache), lookup, listing, sync,
+handle}; path and identity oracles after every restart and at the end
+(the identity oracle in its minimal form in fault_lib.sh: each recorded
+handle opens to the same inode and type with a name under the mount the
+backing also has, or ESTALE; a `stat` subcommand added to fhtest; 11.7's
+helper should replace it); `fault_ace_mixed_test` (large, 20 sequences
+per backing, ~150 s) and `fault_ace_mixed_long_test_<fs>` (manual, 120)
+for the tail; self-checks: a tampered handle record rejected, an
+`identity_oracle_test` over a fake fhtest with eight violations. No true
+positive on main in 150 + 70 + 39 targeted sequences; the agent's own
+caveat: in `create:crash3:handle:cutahead` the cutahead lost the create
+on the backing and the handle correctly gave ESTALE, so its timing may
+not match 23.11's (backing writes dropped from the freeze onward); the
+review decides. `fd_blocked` (a pre-existing 0.2 s poll) reused for "held
+by a freeze". Fast 236 + 2.
+
 26.14 made the default guests deterministic (writeback off, one vCPU),
 which also removed the noise that shakes out races: timer-driven writeback
 landing mid-operation, real parallelism between the daemon's threads and

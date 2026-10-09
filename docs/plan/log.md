@@ -2391,3 +2391,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   and effort levels should vary per task. CLAUDE.md's orchestration section updated. Planned uses:
   the final review of 23.11's code half (crash safety across create, fill and recovery), the
   refinement target's design (12.16); mechanical batches at low effort.
+- 26.14e built (lane-5, three commits): the DCFS_NOISY knob with self-checks both ways, the weekly
+  six-runner noisy job, the mixed-fault generator (one op + three events incl. crash3, fail3,
+  cutahead) with path and identity oracles and known-bad fixtures; 20 sequences per backing in the
+  large tier, 120 weekly. No true positive on main; the agent doubts its timing reaches 23.11's
+  state. Opus review dispatched: can the generator reach that state (what event is missing), is the
+  identity oracle sound (GETATTR vs open, recycled inodes, false positives), event fidelity, the
+  job's red-for-other-reasons risks, fhtest hygiene.
