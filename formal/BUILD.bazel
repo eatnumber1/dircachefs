@@ -173,9 +173,9 @@ tlc_test(
     for config, suffix in [
         ("seq", ""),
         ("ext4", "_ext4"),
-        ("metaprefix", "_metaprefix"),
         ("nolock", "_nolock"),
         ("nolock_ext4", "_nolock_ext4"),
+        ("recovery", "_recovery"),
     ]
 ]
 
@@ -256,12 +256,15 @@ KNOWN_BUGS = {
     "borndirty_parent_not_durable": "Invariant CrashSafe is violated",
     "borndirty_fill_unmarked": "Invariant CrashSafe is violated",
     "borndirty_fill_unmarked_after_crash": "Invariant CrashSafe is violated",
+    "borndirty_fill_unmarked_after_failed_phase3": "Invariant CrashSafe is violated",
     "borndirty_fill_rule_a": "Invariant CrashSafe is violated",
     "borndirty_fill_rule_b": "Invariant CrashSafe is violated",
     "borndirty_trusts_any_row": "Invariant CrashSafe is violated",
     "borndirty_sync_keeps_durable": "Invariant CrashSafe is violated",
     "borndirty_not_born_here": "Invariant CrashSafe is violated",
     "borndirty_recover_keeps_file": "Invariant CrashSafe is violated",
+    # The audit's G17: a skipped End of F's setattr leaves F's guard raised.
+    "file_setattr_end_skipped": "Invariant GuardsBalanced is violated",
 }
 
 # rename_stale_source explores 993,559 distinct states before its
@@ -280,6 +283,25 @@ KNOWN_BUG_TIMEOUTS = {"rename_stale_source": "long"}
         srcs = MODEL,
     )
     for bug, violation in KNOWN_BUGS.items()
+]
+
+# Step 23.11: the audit's two candidate rules for G5 on path B too (a
+# phase 3 that fails after its syscall, with the kernel's lock and no
+# crash): second configurations of their modules.
+[
+    tlc_test(
+        name = "known_bug_%s_failed_phase3_test" % bug,
+        size = "medium",
+        timeout = "moderate",
+        config = "known_bugs/%s_failed_phase3.cfg" % bug,
+        expect_violation = "Invariant CrashSafe is violated",
+        spec = "known_bugs/%s.tla" % bug,
+        srcs = MODEL,
+    )
+    for bug in [
+        "borndirty_fill_rule_a",
+        "borndirty_fill_rule_b",
+    ]
 ]
 
 # Step 23.11: BornDirty and LostRowProbed, and the dirty set's three
@@ -302,6 +324,20 @@ PREMISES = {
     "recovery_forgets_dirty": (
         "borndirty_recover_keeps_file",
         "Invariant RecoveryForgetsDirty is violated",
+    ),
+    # The other halves: BornDirty on a fill's row, the F clauses of (i) and
+    # (ii).
+    "born_dirty_fill": (
+        "borndirty_fill_unmarked_after_crash",
+        "Invariant BornDirty is violated",
+    ),
+    "dirty_before_change_file": (
+        "borndirty_trusts_any_row",
+        "Action property DirtyBeforeChange is violated",
+    ),
+    "clear_only_after_sync_file": (
+        "atime_sync_clears_held",
+        "Action property ClearOnlyAfterSync is violated",
     ),
 }
 

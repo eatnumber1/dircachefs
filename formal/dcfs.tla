@@ -1473,6 +1473,20 @@ FCMark(p) ==
     /\ UNCHANGED durableD
     /\ FReply(p, ps[p])
     /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
+\* Phase 3 fails after the create's syscall (the review of step 23.11, path
+\* B: RecordNewChild's transaction fails, e.g. a full cache disk): nothing
+\* is committed, Mutation::End, and the reply is EEXIST
+\* (CreatedButNotCompleted, step 11.4: true at the reply, and the kernel
+\* then drops its negative dentry, so the next lookup asks dcfs). F's name
+\* stays unknown and D dirty, as after a daemon crash at that point.
+\* Phase3CanFail enables it (the configurations of step 23.11).
+Phase3CanFail == FALSE
+FCRecFailed(p) ==
+    /\ Phase3CanFail /\ At(p, "FC_rec")
+    /\ EndMutation
+    /\ Reply(p, ps[p], Rep("EEXIST", {}))
+    /\ UnchangedBacking /\ UnchangedDB /\ UNCHANGED <<servedWrong, stamp>>
+
 \* A failed create: Mutation::End; the error is replied (the model leaves
 \* F's dentry unknown: no re-resolve).
 FCFail(p) ==
@@ -1700,6 +1714,7 @@ FileCreateProbe(p) == FCProbe(p) /\ F
 FileCreatePhase3(p) == FCRec(p) /\ F
 FileCreateMark(p)  == FCMark(p) /\ F
 FileCreateFailed(p) == FCFail(p) /\ F
+FileCreatePhase3Failed(p) == FCRecFailed(p) /\ F
 FileLookupCommit(p) == FLCommit(p) /\ F
 
 -----------------------------------------------------------------------------
@@ -1965,6 +1980,7 @@ Next ==
          \/ FileSetFill(p)
          \/ FileCreateSyscall(p) \/ FileCreateProbe(p) \/ FileCreatePhase3(p)
          \/ FileCreateMark(p) \/ FileCreateFailed(p) \/ FileLookupCommit(p)
+         \/ FileCreatePhase3Failed(p)
     \/ FRead \/ AtimeExpiry
     \/ CrashServing \/ CrashRecovering \/ CrashStopping
     \/ Restart \/ Recover \/ StartRun \/ ProbesDone
@@ -2297,7 +2313,12 @@ QueryKinds(k) ==
 \* one the backing filesystem gave.
 ReplyWitnessed(r, v) ==
     CASE r.kind \in FileKinds ->
-           v.a = {} /\ v.e = IF r.eff = None THEN "ok" ELSE r.eff
+           /\ v.a = {}
+           /\ \/ v.e = IF r.eff = None THEN "ok" ELSE r.eff
+              \* A create whose phase 3 failed replies EEXIST, which the
+              \* backing filesystem answers at the reply (step 11.4).
+              \/ r.kind = "fcreate" /\ r.eff = "ok" /\ v.e = "EEXIST"
+                 /\ bCur.fn
       [] v.e \in {"EAGAIN", "EINTR"} -> r.eff # "ok" /\ v.a = {}
       [] r.eff # None -> v.e = r.eff /\ v.a = {}
       [] r.kind \in SyncKinds -> v.e = "ok" /\ v.a = {}

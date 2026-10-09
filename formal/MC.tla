@@ -83,6 +83,8 @@ IdleView(r) == IF r.pc = "idle" THEN IdleProc ELSE r
 (* the candidate rules for a fill that inserts F's row (the audit's G5).   *)
 (***************************************************************************)
 NotYet == FALSE
+\* A create's phase 3 may fail after its syscall (Phase3CanFail).
+CanFail == TRUE
 \* Rule A: a child's attributes recorded only if its parent's fill is
 \* allowed too.
 ChildFilledIfDirOk(dirOk, childOk) == dirOk /\ childOk
