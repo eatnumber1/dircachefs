@@ -339,6 +339,14 @@ rpc.idmapd -f >/tmp/idmapd.log 2>&1 &
 IDMAPD_PID=$!
 sleep 1
 
+# NFSv4 grace and lease times (nfsd's defaults are 90 s each). A freshly
+# started nfsd answers NFS4ERR_GRACE to every OPEN for the grace period, so the first
+# open of the run, and the first after the bounce below, each waited 90 s
+# (103 s for the check; 180 of nfs_test's 218 s). 10 s of grace and 30 s of
+# lease keep the mechanism (the clients retry through the grace period, and
+# renew well inside the lease on loopback) without the wait.
+NFSD_TIMES="--grace-time 10 --lease-time 30"
+
 # Client recovery tracking: nfsd needs somewhere to persist NFSv4
 # client-recovery state. test/qemu/scripts/build-kernel.sh enables
 # CONFIG_NFSD_LEGACY_CLIENT_TRACKING for exactly this test, so nfsd
@@ -348,7 +356,8 @@ sleep 1
 # is what this guest had before that kernel config existed, and
 # rpc.mountd's handling of that legacy upcall segfaulted reproducibly on
 # the first client's SETCLIENTID, hanging the client's mount(2) forever.
-if rpc.nfsd --no-nfs-version 3 --nfs-version 4 8; then
+# shellcheck disable=SC2086 # NFSD_TIMES is a list of flags
+if rpc.nfsd $NFSD_TIMES --no-nfs-version 3 --nfs-version 4 8; then
 	pass nfsd-start
 else
 	fail nfsd-start "rpc.nfsd exited nonzero"
@@ -546,7 +555,8 @@ if start_daemon "$LOG3" --allow_other; then
 	# nfsd owns, forcing the next request to resolve fresh.
 	exportfs -f 2>/dev/null || true
 	rpc.nfsd 0
-	rpc.nfsd --no-nfs-version 3 --nfs-version 4 8
+	# shellcheck disable=SC2086 # NFSD_TIMES is a list of flags
+	rpc.nfsd $NFSD_TIMES --no-nfs-version 3 --nfs-version 4 8
 else
 	fail db-wipe-mount "daemon did not mount within 10s (cold cache)"
 fi
