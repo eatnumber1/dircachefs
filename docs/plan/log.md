@@ -2119,3 +2119,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 26.14d dispatched to lane-5 (new investigator): which requests carry pid 0 and whether a
   WARNING is right for them; reproduce with --runs_per_test=40; fix the credentials code (likely)
   or the test's assertion, failing first.
+- russ (2026-10-09, morning): quiet kernel questioned (slower? worse coverage?): measured faster
+  (fast tier 1701 -> 1282 s uncached); coverage concern accepted: 26.14e, a weekly noisy CI job
+  (default sysctls, two vCPUs, runs_per_test) whose failures become deterministic tests,
+  approved ("Yes to noisy job"). 26.16 (per-job Bazel profiles, one cold run) added as proposed,
+  since no cold-cache profile exists. Formal-methods expansion wanted: russ asks whether TLA+
+  coverage is thorough and the C++ is shown to follow it; answered with the known gaps (per-file
+  trace, cross-directory interleavings, directory streams, reachability direction) and proposed a
+  model-mutation step, 12.11b, 12.10 and modelling born-dirty first; a read-only audit to produce
+  the gap list. Born-dirty create explained (row and mark in one phase-3 transaction; cleared at
+  the next sync point like any dirty row; open-for-write rows held back). Decision on 23.10 still
+  open.

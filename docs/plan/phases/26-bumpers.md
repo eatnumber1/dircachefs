@@ -313,3 +313,43 @@ if it is a regression with a known-good version), with the maintainers and
 lists from the pinned tree's MAINTAINERS. No patches: russ decides whether
 to write one. Owner: dcfs-investigator, lane-5.
 
+## 26.14e Noisy run (russ, 2026-10-09: "Yes to noisy job")
+
+26.14 made the default guests deterministic (writeback off, one vCPU),
+which also removed the noise that shakes out races: timer-driven writeback
+landing mid-operation, real parallelism between the daemon's threads and
+the kernel. A scheduled CI job puts it back on purpose:
+- `noisy`, weekly (and on demand through `workflow_dispatch`): the plain
+  full suite plus the ASan small/medium tiers, with the quiet-kernel
+  sysctls left at the kernel's defaults, every guest at two vCPUs, and
+  `--runs_per_test=3` for the small and medium tiers (what the time allows;
+  sharded like the full suite). One knob in the harness selects it (a
+  `cmdline` word that `guest/init` reads, or an environment variable
+  run-qemu.sh passes through; one abstraction, no per-test flags), so the
+  same test targets run in both modes and the test-result cache stays
+  sound (the knob is part of the action key).
+- A failure there is a finding, not a red push: the job is not required
+  for the push gate, it reports like mutation-changed, and each failure
+  becomes a deterministic test (pin the interleaving with the harness's
+  holds or a fault point) before the fix, test first.
+- Self-check: a target that fails when the knob is on and passes when it
+  is off (the quiet_kernel_test inverted), so the mode is known to take
+  effect on the runner.
+Owner: dcfs-implementer, when a lane frees. Not to be confused with the
+soak test (Phase 19, manual).
+
+## 26.16 Where CI time goes (2026-10-09)
+
+No cold-run profile exists: `notes/build-speed-2026-10-07.md` predates the
+pinned LLVM toolchain, and the per-job wall times show nothing inside the
+Test step. Every CI job writes Bazel's `--profile` JSON (and `--execution_log`
+if it is small enough) and uploads it as an artifact; a tiny host-side
+tool (`tools/ci_profile.py`, unit-tested) sums the profile into fetch,
+`@dcfs_llvm` extraction, third-party builds, our compile, test execution,
+per job, and prints the table into the job summary. Then one deliberately
+cold run (`workflow_dispatch` input that skips the cache restores) for the
+full picture, recorded in a note. Check on the way whether the extracted
+`@dcfs_llvm` (the output base) is among the restored cache paths; if not,
+every job re-extracts it. Owner: dcfs-investigator, when a lane frees;
+data arrives with the next push.
+
