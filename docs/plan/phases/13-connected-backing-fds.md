@@ -101,3 +101,30 @@ open_by_handle_at bypasses freeze protection, a kernel quirk; russ's
 the backing's would, while the daemon-wide stall it causes is the 11.6
 finding, fixed by the concurrency design, not here.
 
+
+Investigation of (c) (2026-10-09): one `BackingFile` per inode (one fd, one
+passthrough `backing_id`; the kernel allows one backing_id per inode, EBUSY
+for a second, ETXTBSY for mixing cached and passthrough opens) is opened
+O_RDWR on purpose so later writers share it. Under (c) a writer after a
+reader would need a disconnected handle-opened write fd and a direct-IO
+reply with no passthrough, and writer-first fds stay disconnected: a poor
+trade. (b) alone leaves every long-lived fd disconnected (only the
+transient O_PATH opens become connected): almost none of the phase's value.
+
+## 13.4 Experiment (2026-10-09): connected AND freeze-safe
+
+Both candidates keep the writable fd on the handle path (`do_handle_open`
+takes no `mnt_want_write`, so no freeze blocking) and get a connected
+dentry another way: (e) a named `openat(parent, name, O_PATH)` first,
+which reconnects the dcache dentry, then the handle open: does
+`d_obtain_alias` then return the connected alias, also when a disconnected
+alias from an earlier handle fd is still alive? (f) `AT_HANDLE_CONNECTABLE`
+(Linux 6.13, the floor FS_IOC_GETFSUUID already imposes): a connectable
+handle taken from (parent fd, name), decoded through its parent to a
+connected dentry, handle-only (russ's preference), identity unaffected;
+questions: ext4/xfs/btrfs support, hard links, renamed parents, gone or
+replaced names, cost, stored next to the identity handle or computed per
+open. Running in lane-2 on a throwaway branch off step-13.1; a table per
+candidate and filesystem (connected, blocks under freeze, hard link, gone
+name) decides. "No AT_HANDLE_CONNECTABLE" in the design above dates from
+when the kernel floor was lower; revisit with the result.

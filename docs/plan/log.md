@@ -2213,3 +2213,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   opens). NEEDS RUSS: options (a) accept, (b) named opens for read-only only, (c) read-only opens
   get a read-only connected fd and writable opens take the writable fd (blocking as the backing
   would). Agent investigating (c)'s cost; no code change until russ decides.
+- Phase 13: (c) investigated and rejected (one passthrough backing_id per inode makes a writer
+  after a reader lose passthrough; writer-first stays disconnected). 13.4 experiment dispatched to
+  the same agent: (e) O_PATH-by-name to reconnect the dentry, then the handle open; (f)
+  AT_HANDLE_CONNECTABLE handles (6.13+, handle-only). Decision waits for its table.
