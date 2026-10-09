@@ -2189,3 +2189,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   qemu_test.bzl, MODULE.bazel, README conflicts expected), the README restart sentence from 15.7
   corrected, and a table of 15.7's nine unverified systemd statements (asserted / contradicted /
   unverified).
+- 26.16 merged (86a3775, three commits; lane-7 shut down and removed). Finding: CI caches neither
+  the repo contents cache nor the output base's external/, so every job re-extracts @dcfs_llvm
+  (about 14 times per push); 26.16b queued to cache it, decided on the push's numbers. Coverage
+  baseline bumped to 95.97 / 79.68 as run 37853130640's gate suggested. PUSH POINT at this
+  commit: since 9a67552 it carries 23.8/23.9, 15.1/15.2/15.7, 12.8, 8.2e/f, 7.1c, 26.14/c/d,
+  23.8b, 26.16 and the plan.
+- russ (2026-10-09) on 15.6b: no timers; a umount.fuse.dcfs that waits (no timeout) for the daemon
+  to exit, plus a style rule against timers as a way to wait ("from an idle 256 core supercomputer
+  to a 1 core raspberry pi under 40 loadavg"). Phase file updated.

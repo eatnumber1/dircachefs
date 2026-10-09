@@ -364,4 +364,23 @@ full picture, recorded in a note. Check on the way whether the extracted
 `@dcfs_llvm` (the output base) is among the restored cache paths; if not,
 every job re-extracts it. Owner: dcfs-investigator, when a lane frees;
 data arrives with the next push.
+Done 2026-10-09, merged 86a3775: seven jobs plus osv record profiles
+(`bazel-profile-<job>[-shard]` artifacts, with the compact execution log,
+0.9 MB warm), `.github/ci/profile.sh` + `tools/ci_profile.py` put the table
+(fetches, @dcfs_llvm, third-party builds, our compile, tests, critical
+path) in each job summary; the `cold` input already existed (26.5) and
+skips restores and saves. Answer to the cache question: NO, the extracted
+@dcfs_llvm (`--repo_contents_cache` at ~/.cache/bazel-repo-contents, and
+the output base's external/) is in no restored path, so every Bazel job
+re-extracts it: about 14 extractions per push; locally 31.6 min under load
+18-37 for a re-extraction from the repository cache, 54 min for the first
+fetch. Local fast tier: 486 s wall, repository fetches 82 s, third-party
+builds 148 s, our compile 76 s, tests 153 s, critical path 138 s
+(dir_cache_fs_test 121 s). The first runner numbers arrive with the push.
+- 26.16b Cache the extracted toolchain in CI (from 26.16): save and restore
+  `~/.cache/bazel-repo-contents` (or only its dcfs_llvm entry) keyed on
+  `MODULE.bazel.lock`, `third_party/llvm/*` and `.bazelversion`, saved on a
+  miss only; entries are named by a hash of the rule's inputs, so a stale
+  entry never matches. Cost: about 1 GB compressed (estimate) of the 10 GB
+  quota. Decide with the push's profile numbers. Owner: dcfs-implementer.
 

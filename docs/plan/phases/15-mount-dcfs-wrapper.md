@@ -370,12 +370,29 @@ database whose holder is a dcfs process that is exiting, which also
 covers `umount X && mount X` in scripts; (b) a `umount.fuse.dcfs` helper
 (util-linux calls `umount.<type>` for the mountinfo type) that unmounts and
 then waits for the daemon's exit, so "unmounted" means "stopped", which is
-what systemd assumes. Recommendation: (a) now, since it is small and
-general; (b) if 15.6's test shows systemd still orders a dependent start
-before the daemon is gone. Tests first in the systemd guest (the DISABLED_
-check becomes the test), the start-waits path also in mount_dcfs.sh.
-Owner: dcfs-implementer, lane-6 after 15.6 merges. Needs russ only if (b)
-is wanted instead of (a).
+what systemd assumes. Decision (russ, 2026-10-09): (b), not (a). "I don't like timers in our
+code. They're necessary sometimes, but for the restart race, make an
+umount.fuse.dcfs if that's a feasible alternative. Timers are inherently
+brittle. If things are slow, the system breaks. This system should work on
+everything ranging from an idle 256 core supercomputer to a 1 core
+raspberry pi under 40 loadavg." So: a `umount.fuse.dcfs` helper (the same
+binary, argv[0] dispatch like mount.dcfs; check which helper name
+util-linux looks for given the mountinfo type `fuse.dcfs`, and install
+`umount.dcfs` too if mount(8) ever records the type as `dcfs`) that
+performs the unmount and then waits, with no timeout, for the daemon that
+served that mount to exit (find it by the mount's FUSE connection or the
+pid the daemon records; wait on the pid with pidfd_open, not polling), so
+"unmounted" means "stopped" and systemd's restart starts the new daemon
+after the old one released the cache database. If the daemon is already
+gone (a crash), the helper returns at once. `umount -l` keeps working. Also
+a style rule in docs/style.md from this decision: no timers or timeouts
+in dcfs's own logic as a way to wait for another process or the kernel;
+wait on the event (pidfd, inotify, a read that blocks, a lock) and let the
+caller cancel; a timeout is permitted only where the thing waited for
+cannot signal, and then it is named and justified in a comment. Tests
+first in the systemd guest (the DISABLED_ restart check becomes the
+test) and in mount_dcfs.sh (umount helper waits; crash case returns at
+once). Owner: dcfs-implementer, lane-6 after 15.6 merges.
 
 **15.7 Docs:** README (fstab with and without systemd, `dcfs.fstype`
 values, `_netdev`, fsck, trees, over-mounting, remount, NFS exports,
