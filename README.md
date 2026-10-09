@@ -588,9 +588,11 @@ toolchain's static C++ runtime (libc++, libc++abi, libunwind, compiler-rt's
 builtins from llvm-project 22.1.8), listed under `toolchain_runtime` in
 `pins.json`, and glibc, linked statically from the toolchain's Debian sysroot
 (`libc6-dev`, under `shipped_debs`): OSV matches it by Debian package, so the
-job also scans `shipped-debs.cdx.json`, informationally until russ decides
-what to do with the 16 advisories Debian 12's glibc has unfixed (ignore them
-with reasons and expiries, or build against a glibc with the fixes). The job
+job also scans `shipped-debs.cdx.json`, and that scan gates too. The
+sysroot's glibc is Debian 13's (trixie, 2.41-12+deb13u4, step 7.1c); OSV holds
+21 records against it, none fixed in trixie (10 are fixed in Debian 14 only,
+11 in no release), and `osv-scanner.toml` ignores each with a reason and an
+expiry 90 days out (2027-01-06), so a new record fails the job. The job
 fails on any finding in the git-commit scan that `osv-scanner.toml` does not
 ignore; an ignore needs a reason and an expiry date, and an expired or
 unexplained ignore fails the job. A self-check step scans a deliberately old
@@ -626,7 +628,7 @@ libfuse 3.18.2, the pinned one, is not. What OSV holds per project:
 | gloop 20260708.rc1 | git commit | none (the repository is new; the scan matches when an advisory appears) |
 | liburing 2.14 | git commit | none for `axboe/liburing` |
 | numactl 2.0.19 | git commit | none for `numactl/numactl` |
-| glibc 2.36-9+deb12u14 (static, from the sysroot) | Debian package `glibc`, release bookworm | the Debian tracker's advisories, fixed ones by the `+deb12uN` revision |
+| glibc 2.41-12+deb13u4 (static, from the sysroot) | Debian package `glibc`, release trixie | the Debian tracker's advisories, fixed ones by the `+deb13uN` revision (21 today, all ignored with expiries) |
 
 Not covered, by construction: a vulnerability OSV does not hold with a `GIT`
 range (the scan reports what OSV holds; nothing is checked against NVD or
