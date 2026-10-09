@@ -128,3 +128,21 @@ open. Running in lane-2 on a throwaway branch off step-13.1; a table per
 candidate and filesystem (connected, blocks under freeze, hard link, gone
 name) decides. "No AT_HANDLE_CONNECTABLE" in the design above dates from
 when the kernel floor was lower; revisit with the result.
+
+13.4 result (2026-10-09, guest kernel 6.18.55, ext4/xfs/btrfs): both
+candidates give a connected fd and neither blocks on a frozen filesystem
+(the by-name O_RDWR control blocks on ext4 and xfs; btrfs answers it). (e)
+works because `__d_obtain_alias` returns the first alias and a name lookup
+puts a connected one at the head, so it depends on alias-list order and
+on the lookup happening first: fragile. (f) decodes deterministically
+through the encoded parent (`FILEID_IS_CONNECTABLE`, `reconnect_path`),
+survives a parent rename, gives some valid path for a hard link or a moved
+file, ESTALE for a freed or replaced object, costs one extra syscall
+(name_to_handle_at) over the handle open and 16-32 byte handles computed
+per open, never stored; identity stays on the plain handle. DECISION
+(orchestrator, 2026-10-09, under russ's handles-only preference; russ may
+veto): (f). The design's "no AT_HANDLE_CONNECTABLE" is withdrawn: the
+floor is 6.13 either way. Being implemented on step-13.1; the experiment
+becomes a permanent kernel-behaviour guard test (connected decode, no
+freeze blocking, by-name O_RDWR blocks on ext4/xfs).
+

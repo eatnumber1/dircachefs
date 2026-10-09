@@ -2217,3 +2217,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   after a reader lose passthrough; writer-first stays disconnected). 13.4 experiment dispatched to
   the same agent: (e) O_PATH-by-name to reconnect the dentry, then the handle open; (f)
   AT_HANDLE_CONNECTABLE handles (6.13+, handle-only). Decision waits for its table.
+- 13.4 experiment done: (f) AT_HANDLE_CONNECTABLE chosen (deterministic, no freeze blocking on
+  ext4/xfs/btrfs, one extra syscall, handle-only); (e) rejected as alias-order dependent. Agent
+  implementing it on step-13.1 with the experiment kept as a kernel-behaviour guard test;
+  fault_freeze_test stays unchanged. Russ informed; may veto.
