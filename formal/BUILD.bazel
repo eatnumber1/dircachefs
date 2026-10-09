@@ -878,6 +878,7 @@ tla_trace_log_test(
         "view",
         "nofsnap",
         "fsnaprawseq",
+        "onlyfsnap",
         "noidle",
         "noimage",
         "noview",

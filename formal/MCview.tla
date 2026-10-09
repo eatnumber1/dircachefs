@@ -37,6 +37,12 @@ ViewNoIdle == <<bCur, bSeq,
           [q \in Procs |-> FSnapView(ps[q])], servedWrong,
           [fm EXCEPT !.seq = 0], stamp, muts, crashes>>
 
+\* Only FSnapView and the zeroed clock: no IdleView, no CrashImage.
+ViewOnlyFSnap == <<bCur, bSeq, dbCur, dbOpts,
+          mode, seq, inflight, durableD, running,
+          [q \in Procs |-> FSnapView(ps[q])], servedWrong,
+          [fm EXCEPT !.seq = 0], stamp, muts, crashes>>
+
 \* Without CrashImage: the database states as they are.
 ViewNoImage == <<bCur, bSeq, dbCur, dbOpts,
           mode, seq, inflight, durableD, running,
