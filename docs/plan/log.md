@@ -2012,3 +2012,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   pass, trace shards pass, fast 217 + 2. Orchestrator rebased the last two commits (design.md only
   in common, clean) and merged on the agent's run: formal/ was untouched on main in between. Lane-1
   free: 23.10 directory-level dirty set dispatched (new dcfs-protocol).
+- 8.2e + 8.2f merged (fd8f607, one test-only commit; rebased by the agent onto 4b204d9 with no
+  conflicts, then by the orchestrator over 12.8, formal-only). Fast 214 + 2 on the agent's tip.
+  Lane-4 free.

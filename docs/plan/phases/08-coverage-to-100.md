@@ -142,6 +142,14 @@ the scenario's existing test per 25.4) or an `equivalent.txt` entry:
 - `metadata_cache.cc` `WithStatx:312` swap `stx_rdev_major`/`stx_rdev_minor`
 Line numbers from the README's "First sweep" table at 0f73230; re-derive
 after the dcfs/ branches in flight land. Together with 8.2f below.
+Status 2026-10-09: done, merged fd8f607 with 8.2f (test-only: new
+`InitRootTwiceKeepsTheFirstMountFd`, `FsyncDirFdReportsTheFsyncsFailure`
+(fsync on /proc fails EINVAL), `WithStatxTakesEachAttributeFromItsOwnField`,
+`RecoveryCountsARowWhoseObjectIsGone`; the sticky-bit, probe-summary,
+create-gone and reserved-ino tests extended; a `BackingCallNames` observer
+kills the UnlinkAt `BackingCall` deletion, so it is not equivalent). The
+`gone = true` deletion was already dead on today's tree and got its
+contract test anyway.
 
 ## 8.2f Survivors from the per-push mutation job on 4bf7182 (2026-10-08)
 
@@ -153,4 +161,10 @@ negate-?: `(flags & FS_IMMUTABLE_FL)`; `Removexattr:2427` delete-call
 are candidates for the equivalent class (12.11 covers directories only;
 a file's End is caught by the harness tests or not at all). Join the
 8.2e list when the re-sweep replaces it.
+Status 2026-10-09: done with 8.2e (fd8f607): new
+`RefusedWritableOpenNamesTheBackingFlag` (the -v=2 log names immutable or
+append-only), `RemovexattrEndsItsMutationBeforeItsRefreshes` (the last
+statx runs with no fill in flight), `RemovedFileCanBeChanged` extended
+with fallocate of an unlinked open file. `CreateChild:633` is the
+checkpoint-refusal path, already in `equivalent.txt`; nothing added.
 
