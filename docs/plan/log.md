@@ -1993,3 +1993,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `mount -a` and by systemd's units at boot, remount via mount.fuse.dcfs, exit statuses as mount(8)
   reports them, journald logging, a reboot with a warm cache, nofail on a missing backing. PUSH
   POINT at 6fc3064 (since 9a67552: 23.8/23.9 atime + LINK, 15.1/15.2 wrapper, plan).
+- 2026-10-09: 7.1c reported (lane-5, two commits): libc6/libc6-dev to trixie 2.41-12+deb13u4 from
+  the same snapshot, `extract.py usrmerge` adds the merged-usr lib/lib64 links (libc.so's linker
+  script names /lib/x86_64-linux-gnu/libc.so.6), four `<runtime>` banned-symbol allows for members
+  glibc 2.41's libc.a links in (popen, posix_spawn_file_actions_adddup2, __fprintf_chk,
+  __sprintf_chk), the shipped-debs OSV scan gates with 21 ignores expiring 2027-01-06 (none fixed in
+  trixie). Review passed; sent back for a rebase onto 4b204d9 and a fast-tier run, the wrapper's
+  first compile against the new glibc.
+- 8.2e/8.2f reported (lane-4, one commit, test-only): 11 of 12 survivors now die (the 12th,
+  CreateChild End, was already in equivalent.txt; 1751 was already dead on today's tree and got a
+  contract test anyway). Review passed under 25.4; sent back for a rebase over the atime/LINK test
+  additions and a fast-tier run. Not yet pushed: GitHub main is still 9a67552.
