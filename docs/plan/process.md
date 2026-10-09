@@ -168,7 +168,7 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   agent's foreground command limit (10 minutes) kills it, and an
   interrupted repository fetch leaves the server wedged until `bazel
   shutdown`, after which the extraction starts over. So the first command
-  in a lane after it rebases onto 7.1b is `bazel fetch --repo=@dcfs_llvm`
+  in a lane after it rebases onto 7.1b (and again onto 7.1c, whose sysroot change re-extracts it) is `bazel fetch --repo=@dcfs_llvm`
   run as a background command (the Bash tool's `run_in_background`, not a
   polling loop), and nothing else runs in that lane until it returns.
 - zsh with `noclobber`: overwrite files with `>|`. `make` and `diff` are

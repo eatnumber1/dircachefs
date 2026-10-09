@@ -2022,3 +2022,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   bugs it finds are findings for later steps, since 23.10 owns dcfs/ now. Told to stop early with a
   measurement if the busybox guest cannot carry xfstests (the alternative is 15.6's Debian guest).
   Chosen over Phase 13/16 (both need dcfs/ or the stubs) and 7.3-7.7 (tree-wide, not a quiet point).
+- 7.1c merged (dea789b, two commits; the agent rebased onto 4b204d9 with no conflicts, fast 214 + 2,
+  banned_symbols and hermetic gates pass, reproducible build byte-identical; the orchestrator
+  rebased over 12.8 and 8.2e/f, no overlap). Every lane's next rebase re-extracts @dcfs_llvm: the
+  background-fetch rule in process.md now names 7.1c too. Lane-5 free: 15.7 docs next.

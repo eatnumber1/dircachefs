@@ -111,4 +111,16 @@ the hermeticity gate and the reproducible-build gate, and make the osv
 step's shipped-deb scan gate on fixable records: an `osv-scanner.toml`
 ignore entry with reason and expiry for each record no Debian release
 fixes, so the step stops being `continue-on-error`. Owner: Sonnet.
+Status 2026-10-09: merged dea789b. As built: libc6 and libc6-dev to
+2.41-12+deb13u4 from snapshot 20261006T082722Z (the runtime libs stay
+bookworm: they only run clang); trixie is merged-usr, so `extract.py
+usrmerge` links lib and lib64 into usr/ (libc.so's linker script names
+/lib/x86_64-linux-gnu/libc.so.6; without the links liburing's configure
+probe failed); glibc 2.41's libc.a links in popen,
+posix_spawn_file_actions_adddup2, __fprintf_chk and __sprintf_chk, now
+`<runtime>` allows in tools/banned_symbols.txt; the OSV shipped-debs scan
+gates, with 21 ignores (none fixed in trixie: 10 only in forky, 11
+nowhere) expiring 2027-01-06, when they come back for review. The first
+Bazel command after rebasing onto this re-extracts @dcfs_llvm (about 25
+minutes on the loaded host): see process.md.
 
