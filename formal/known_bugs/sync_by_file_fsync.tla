@@ -1,0 +1,20 @@
+------------------------- MODULE sync_by_file_fsync -------------------------
+(***************************************************************************)
+(* Not the code, and not historical (step 12.8): a sync point after the    *)
+(* kernel's FSYNC that takes the file's fsync as its barrier instead of    *)
+(* running syncfs (SyncBarrier <- FsyncOnly), and clears the dirty set     *)
+(* after it, under the ext4 regime. Ferrite's Definition 7 orders before   *)
+(* an fsync of f only the updates of f: the create of f in D (its entry)   *)
+(* may still be lost.                                                      *)
+(*                                                                         *)
+(* Expected: CrashSafe is violated: create f (phase 1, syscall, phase 3:   *)
+(* f recorded present), write f, FSYNC of f: its fsync makes f's data      *)
+(* durable, ClearDirty takes D out of the dirty set; a power loss may now  *)
+(* keep that database and lose the create, and recovery has nothing to     *)
+(* forget: f would be served present. Under "seq" and "metaprefix" the     *)
+(* same sync point is safe (MC_litmus_fsync_file_direct_metaprefix.cfg):   *)
+(* there an fsync of a file makes all metadata before it durable. The      *)
+(* code's sync points run syncfs (docs/design.md, "Sync points").          *)
+(***************************************************************************)
+EXTENDS MClitmus
+=============================================================================

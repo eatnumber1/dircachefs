@@ -9,6 +9,7 @@ load("//third_party/tlaplus:tlc.bzl", "tlc_test")
 
 MODEL = [
     "MC.tla",
+    "MClitmus.tla",
     "dcfs.tla",
 ]
 
@@ -135,6 +136,52 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
+# The backing filesystem's crash consistency (step 12.8; README.md, "The
+# backing filesystem's crash consistency"): the protocol under the two
+# weaker regimes than the sequential one the configurations above use
+# (DFSCQ's metadata-prefix, Ferrite's ext4 over-approximated), every
+# invariant: 356,954 distinct states under ext4 (2.7 min alone on russ's
+# machine), 292,044 under metaprefix (1.4 min).
+[
+    tlc_test(
+        name = "crash_%s_test" % regime,
+        size = "medium",
+        timeout = "moderate",
+        config = "MC_crash_%s.cfg" % regime,
+        spec = "MC.tla",
+        srcs = ["dcfs.tla"],
+    )
+    for regime in [
+        "ext4",
+        "metaprefix",
+    ]
+]
+
+# Ferrite's litmus tests through dcfs (MClitmus.tla), the ones whose
+# surprising outcome must not be reachable (a few seconds each); the ones
+# where it is are limitations, below the known bugs.
+[
+    tlc_test(
+        name = "litmus_%s_test" % litmus,
+        size = "small",
+        timeout = "short",
+        config = "MC_litmus_%s.cfg" % litmus,
+        spec = "MClitmus.tla",
+        srcs = [
+            "MC.tla",
+            "dcfs.tla",
+        ],
+    )
+    for litmus in [
+        "replace_seq",
+        "create_seq",
+        "fsync_file_ext4",
+        "fsync_dir_ext4",
+        "fsync_file_direct_metaprefix",
+        "fsync_dir_direct_files_ext4",
+    ]
+]
+
 # Test first, for the model itself: each historical bug (from
 # docs/plan/audits/, or found by this model), re-introduced, must be found.
 KNOWN_BUGS = {
@@ -172,6 +219,9 @@ KNOWN_BUGS = {
     "atime_held_fill_no_touch": "Invariant CrashSafe is violated",
     "atime_sync_clears_held": "Invariant FileExact is violated",
     "atime_open_not_dirty": "Invariant FileExact is violated",
+    # Step 12.8, not historical: a sync point after FSYNC with the file's
+    # fsync as its only barrier, under the ext4 regime.
+    "sync_by_file_fsync": "Invariant CrashSafe is violated",
 }
 
 # rename_stale_source explores 993,559 distinct states before its
@@ -224,6 +274,33 @@ tlc_test(
     spec = "known_bugs/atime_fill_no_touch.tla",
     srcs = MODEL,
 )
+
+# What the backing filesystem's crash consistency leaves to the caller
+# (limitations/crash_litmus.tla): the litmus tests whose surprising outcome
+# is reachable, through dcfs (LitmusOK) or with the program's own fsync as
+# on the backing filesystem directly (LitmusBackingOK). Seconds each.
+CRASH_LIMITATIONS = {
+    "litmus_replace_metaprefix": "Invariant LitmusOK is violated",
+    "litmus_replace_ext4": "Invariant LitmusOK is violated",
+    "litmus_create_metaprefix": "Invariant LitmusOK is violated",
+    "litmus_create_ext4": "Invariant LitmusOK is violated",
+    "litmus_fsync_file_direct_ext4": "Invariant LitmusBackingOK is violated",
+    "litmus_fsync_dir_direct_ext4": "Invariant LitmusBackingOK is violated",
+    "litmus_fsync_dir_direct_metaprefix": "Invariant LitmusBackingOK is violated",
+}
+
+[
+    tlc_test(
+        name = "limitation_%s_test" % limitation,
+        size = "small",
+        timeout = "short",
+        config = "limitations/%s.cfg" % limitation,
+        expect_violation = violation,
+        spec = "limitations/crash_litmus.tla",
+        srcs = MODEL,
+    )
+    for limitation, violation in CRASH_LIMITATIONS.items()
+]
 
 # The revalidation model (reval.tla; README.md, "The revalidation model"):
 # what dcfs reuses across a change of the backing state. MC_reval: every

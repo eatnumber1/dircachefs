@@ -99,7 +99,13 @@ Non-goals:
 - **The backing filesystem keeps its promises.** `syncfs` makes earlier
   changes durable; file handles encode enough to reject a stale handle
   (ext4, xfs and btrfs encode the inode generation); inode numbers are
-  unique within one filesystem.
+  unique within one filesystem. Nothing is assumed about the order in which
+  changes not yet synced persist: a sync point's barrier is always
+  `syncfs`, never the fsync of one file or directory. Under Ferrite's
+  specification of ext4 a file's fsync may leave its new entry behind, and
+  on ext4 itself an fsync of the directory alone left a new file's data
+  behind (step 11.2's ACE tests; `formal/README.md`, "The backing
+  filesystem's crash consistency").
 
 ## Architecture and layering
 

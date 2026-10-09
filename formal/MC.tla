@@ -60,7 +60,7 @@ FSnapView(r) ==
 (***************************************************************************)
 IdleView(r) == IF r.pc = "idle" THEN IdleProc ELSE r
 
-View == <<bCur, bOpts,
+View == <<bCur, bSeq,
           IF mode \in {"down", "recover"} THEN CrashImage(dbCur) ELSE dbCur,
           {CrashImage(s) : s \in dbOpts},
           mode, seq, inflight, durableD, running,

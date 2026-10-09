@@ -141,7 +141,12 @@ whose names are the constant `Names`, and:
   object, `absent`, `unknown`, or no row), `children_complete` and its
   `epoch`, D's attributes and `attrs_valid`, D's row in the `dirty` table,
   and `clean_shutdown`;
-- for both disks, every state a crash may leave (see `bOpts`, `dbOpts`);
+- for both disks, every state a crash may leave: for the database the
+  states since its last fsync (`dbOpts`), for the backing filesystem the
+  sequence of its states since its last durable point (`bSeq`) and a
+  crash-consistency regime that says which states a power loss may make
+  of it (step 12.8: [The backing filesystem's crash
+  consistency](#the-backing-filesystems-crash-consistency));
 - the daemon's memory: the fill guards, `Context::dirty.durable`, and the
   requests in flight, each a small program counter with its local state;
 - requests: lookup, readdir, readdirplus, getattr of D, create, linkcreate
@@ -187,10 +192,12 @@ on the detail:
   whose read was already fresh.
 - `PopulateDirectory` reads the whole listing in one step (getdents64 and
   every probe).
-- A crash leaves each disk in any state since its last sync: SQLite's WAL
-  recovers a prefix of the commits; the backing filesystem's journal keeps
-  a prefix of its transactions (modelling every prefix of its operations
-  allows more than real journals do).
+- A crash leaves each disk in a state since its last sync: SQLite's WAL
+  recovers a prefix of the commits; the backing filesystem keeps what its
+  regime allows (`Reorder`): with `"seq"`, which every configuration but
+  those of step 12.8 uses, a prefix of its operations (more than real
+  journals allow, which commit whole transactions); with `"metaprefix"` or
+  `"ext4"` also reorderings of them.
 - `clean_shutdown` is modelled but changes nothing: `StartRun` runs
   `RecoverDirty` whatever it says, and `RecoverDirty` with an empty dirty
   set does nothing.
@@ -202,8 +209,8 @@ on the detail:
   directory and cannot be opened for writing, so modelling them needs a
   file object with its own attributes, `attrValid`, dirty row and durable
   flag, an open/released state, and writes that change its backing
-  attributes; and since `bOpts` and `dbOpts` are sets of whole disk
-  states, every one of those multiplies the sets a crash may leave. That is
+  attributes; and since `bSeq` and `dbOpts` hold whole disk states, every
+  one of those multiplies the states a crash may leave. That is
   a second inode's worth of state in every configuration, for a rule that
   is the same as for D's mutations (a phase 1 before, a guard event at the
   end, a sync point keeps what was in flight). The review of R4 (finding 1)
@@ -261,8 +268,8 @@ on the detail:
 
 | Variable | Meaning | In dcfs |
 |---|---|---|
-| `bCur` | The backing filesystem's D now: `names` (name -> object or `"-"`) and `ver` (D's attributes) | the real directory |
-| `bOpts` | Backing states a crash may leave: the state at the last `syncfs` and every later one | the backing filesystem's page cache and journal |
+| `bCur` | The backing filesystem now: D's `names` (name -> object or `"-"`), `ver` (D's attributes), `f` (F's attributes, step 23.8), and `data` (object -> its contents: 0 empty, else a stamp; only the `write` requests of step 12.8 change it) | the real directory and its files |
+| `bSeq` | The backing filesystem's states since its last durable point, in the order the syscalls made them: `bSeq[1]` is durable, the last is `bCur` (step 12.8). Which states a power loss may leave of them is the regime's (`BCrash`, `MetaCrash`) | the backing filesystem's page cache and journal |
 | `dbCur` | The cache database now (for D): `dent`, `complete`, `epoch`, `attrValid`, `attr`, `dirty`, `clean` | `dentries`, `directories.children_complete`/`epoch`, `inodes.attrs_valid` and attributes, `dirty`, `cache_state.clean_shutdown` |
 | `dbOpts` | Database states a crash may leave: the last fsynced commit and every later one | the WAL at `synchronous=NORMAL` |
 | `mode` | `"up"` (serving), `"down"`, `"recover"`/`"start"` (startup), `"stop_*"` (shutdown) | `main.cc`'s lifecycle |
@@ -314,10 +321,11 @@ prints. A request's first step runs inside `Arrive`.
 | `RenameSyscall` | renameat2: moves whatever the source name holds now | Phase 2 | `backing::RenameAt` |
 | `RenamePhase3` | If `Owns(D)`: destination -> the resolved (and verified) source, source name absent; `End` | Phase 3 | `Rename`'s phase-3 transaction |
 | `RenameStat`, `RenameFill`, `RenameFailed`, `RenameFailed2` | As for create (a failure re-resolves both names) | | `RefreshAfterRename`, `ReresolveAfterFailure` |
-| (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
+| (sync, first step) | Snapshot of the fill guards' clock, then syncfs: every backing write so far is durable (`SyncBarrier`; an FSYNCDIR's or FSYNC's own fsync comes first and adds nothing). A `fsync` request (step 12.8: the kernel's FSYNC of the file a name holds) is the same sync point | Sync points | `backing::SyncBacking`, `cache::BeginSync` |
 | `SyncClearDirty` | Clear D's dirty row (normal durability) unless a mutation of D began or ended since the snapshot or is in flight; forget `dirty.durable` | Sync points | `cache::ClearDirty` |
+| (write, first step), `WriteSyscall`, `WriteReply` | Step 12.8: a write of new contents to the file a name holds, through its writable open (passthrough; `ENOENT` if the name holds none), then the reply. It changes the file's data only, which no record of D's covers (the open's phase 1 and release are the file's, not modelled); it gives the crash regimes data to reorder | | `fuse_ops.cc` WRITE through passthrough |
 | `Interrupt` | With `Interrupts`: FUSE_INTERRUPT seen at a checkpoint, just before a backing syscall (`RN_probe`, `PD_read`, `PD_commit`: the population's reads abandoned; `C_sys`, `U_sys`, `R_sys`, `A_sys`): the request replies `EINTR`; a mutation past phase 1 `End`s without phase 3, its names and D's attributes left unknown, D dirty, the backing unchanged. Never between a syscall and its phase 3 | Cancellation | `Checkpoint` (`dcfs/checkpoint.h`), `SessionLoop` |
-| `Crash` | A kernel crash or power loss (`PowerLoss`: each disk keeps any of its possible states, and that is now all there is) or a daemon crash (`DaemonCrash`: the disks keep everything, but nothing more is durable than before, step 12.6b); memory is lost. `Next` takes it as `CrashServing`, `CrashRecovering` (from `Restart` to `ProbesDone`) and `CrashStopping`, so that coverage shows each fires. On `MC_small.cfg` (one crash, starting up) `CrashRecovering` can only follow a clean shutdown, an empty recovery; `MC_recovery.cfg` (two crashes) has a crash during the recovery of a dirty database (step 12.6) | Crashes, power loss and recovery | |
+| `Crash` | A kernel crash or power loss (`PowerLoss`: each disk keeps any of its possible states, the backing filesystem's from `BCrash` under its regime, and that is now all there is) or a daemon crash (`DaemonCrash`: the disks keep everything, but nothing more is durable than before, step 12.6b); memory is lost. `Next` takes it as `CrashServing`, `CrashRecovering` (from `Restart` to `ProbesDone`) and `CrashStopping`, so that coverage shows each fires. On `MC_small.cfg` (one crash, starting up) `CrashRecovering` can only follow a clean shutdown, an empty recovery; `MC_recovery.cfg` (two crashes) has a crash during the recovery of a dirty database (step 12.6) | Crashes, power loss and recovery | |
 | `Restart`, `Recover`, `StartRun`, `ProbesDone` | Start again: `RecoverDirty` (one transaction; it may also make unknown any present dentry, standing for those that point at dirty children, which the model does not track: `RecoverForgetting`; it keeps the dirty set, which only a sync point clears: step 12.6b), then `clean_shutdown = 0` with kSync, then (after `InitRoot`'s fill) the probe of the recovered rows ends | Recovery; Startup | `backing::StartRun`, `cache::RecoverDirty`, `backing::Startup` |
 | `BeginShutdown`, `StopSync`, `StopClear`, `StopCkpt`, `StopFlag` | Unmount, sync point, TRUNCATE checkpoint, `clean_shutdown = 1` with kSync, exit | Shutdown; What the clean-shutdown flag adds | `backing::FinishRun` |
 
@@ -329,7 +337,8 @@ prints. A request's first step runs inside `Arrive`.
 | `CompleteNeverHides` | invariant | A complete listing never makes a name absent that the backing filesystem has (part of the above, stated alone as in the plan) |
 | `ServedFromCacheIsCurrent` | invariant (over the history variable `servedWrong`) | Every answer served from the cache (lookup, listing, attributes) matched the backing filesystem at the moment it was served |
 | `TriState` | invariant | From a mutation's phase 1 until its phase 3 records the outcome (or it fails), its names read unknown and D's attributes are not valid (an attribute change's: D's attributes, until its End) |
-| `CrashSafe` | invariant | In every state, every combination of states the two disks could be left in recovers to a correct cache. It is checked without taking the crash, so it finds crash bugs early |
+| `CrashSafe` | invariant | In every state, every combination of states the two disks could be left in recovers to a correct cache (of the backing filesystem, every state of D's metadata its regime lets a power loss leave: `MetaCrash`). It is checked without taking the crash, so it finds crash bugs early |
+| `CrashRefines` | invariant (step 12.8) | Yggdrasil's crash refinement: whatever a power loss leaves of the two disks, what dcfs serves of D once recovery has run (`Observed` of the recovered cache over the backing state) is a state the backing filesystem itself may be left in: dcfs adds no crash outcome. It follows from `CrashSafe` (redundant, not vacuous: a dcfs that served a wrong state would fail it), and is weaker: it would accept dcfs serving a different admissible state than the one the backing filesystem was actually left in, which `CrashSafe` rules out; stated for what it says. Checked by `MC_recovery.cfg`, `MC_crash_*.cfg` and the litmus configurations |
 | `DurableSetSound` | invariant | If `Context::dirty.durable` has D, every database state a crash may leave has D dirty (the fast path's premise) |
 | `CleanMeansNoDirty` | invariant | `clean_shutdown = 1` is never durable together with a dirty row |
 | `GuardsBalanced` | invariant | `FillGuards::inflight` is the number of requests between their phase 1 and their `End` (an interrupted mutation releases its guard) |
@@ -391,7 +400,7 @@ QueryKinds(k) ==
 ReplyWitnessed(r, v) ==
     CASE v.e \in {"EAGAIN", "EINTR"} -> r.eff # "ok" /\ v.a = {}
       [] r.eff # None -> v.e = r.eff /\ v.a = {}
-      [] r.kind = "sync" -> v.e = "ok" /\ v.a = {}
+      [] r.kind \in SyncKinds -> v.e = "ok" /\ v.a = {}
       [] OTHER ->
            /\ v.a # {} /\ v.a \subseteq Window(r)
            /\ {QK(x) : x \in v.a} = QueryKinds(r.kind)
@@ -493,6 +502,169 @@ missing End stays visible only to the harness tests 8.2 added
 trace of each file's attributes against this model (a file as an inode
 with no names), not only of each directory's.
 
+### The backing filesystem's crash consistency
+
+Step 12.8 (Ferrite: Bornholt et al., "Specifying and checking file system
+crash-consistency models", ASPLOS 2016; DFSCQ: Chen et al., SOSP 2017).
+Until then the backing filesystem's crash states were a set, the state at
+the last `syncfs` and every one after it: a power loss kept a prefix of
+its writes, in order. Now `bSeq` is the sequence of those states, in the
+order the syscalls made them (DFSCQ's tree sequence: `bSeq[1]` is
+durable, each later state is one syscall's change more, the last is
+`bCur`), and a constant, `Reorder`, says which states a power loss may
+make of them (`BCrash`; `MetaCrash` is their part that D's records
+describe, its entries and attributes):
+
+| `Reorder` | A power loss leaves | After |
+|---|---|---|
+| `"seq"` | one state of the sequence: a prefix of the writes, in order | Ferrite's sequential crash consistency (SCC); what the model had before |
+| `"metaprefix"` | the metadata (D's entries and attributes, F's attributes) as in one state of the sequence; each file's contents any value they had in it (data writes reorder freely with metadata) | DFSCQ's metadata-prefix specification (a data write applies to every tree) |
+| `"ext4"` | each name of D with its changes up to some point, a rename kept for both its names or neither; D's attributes, and F's, each as in any state of the sequence; each file's contents any value they had | an over-approximation of Ferrite's ext4 model, its Definition 7 (data=ordered): exact for D's entries and files' data, looser for D's attributes |
+
+Ferrite's Definition 7 keeps two writes in program order only if (1)
+both change the same file's metadata, (2) both write the same block of a
+file, (3) both change the directory at overlapping names (`link`,
+`unlink`, `rename` with a common argument), or (4) a write comes before an
+extend of the same file. In the model, by (3) the changes of one name
+persist in order, and a create or unlink of `n` touches `{n}`, a rename
+of `n` over `m` touches `{n, m}`: D's entries follow the definition
+exactly. A file's contents are one block, written whole, so by (2) and
+(4) its writes persist in order, exactly too. D's attributes (its mtime,
+ctime and link count, the stamp `ver`) may come from any state of the
+sequence, independently of its entries: more than the definition allows
+(a create can persist without its own change of D's mtime, or D's
+attributes ahead of its entries), so the regime over-approximates it.
+F's attributes (its access time and setattrs, step 23.8) persist in order
+among themselves by (1), and from any state independently of D's.
+Everything else may persist in either order: changes of different names,
+any file's data against any entry. The changes are read off the sequence
+(`Touched(i)`: the names that differ between `bSeq[i-1]` and `bSeq[i]`).
+The paper's specification is itself weaker than ext4 as built, which
+journals all metadata in one stream of transactions, so that its
+directory changes persist in order as under `"metaprefix"`.
+
+**Barriers.** A completed barrier makes durable what it orders. Every
+sync point of dcfs runs `syncfs` (`SyncBarrier` = `Syncfs`: the sequence
+becomes `<<bCur>>`, in every regime), after the fsync that the kernel's
+`FSYNC` or `FSYNCDIR` asked for, which adds nothing to it. `FsyncOnly`,
+which is not the code, takes that fsync alone as the barrier (a
+configuration puts it in with `SyncBarrier <- FsyncOnly`): what a program
+running on the backing filesystem directly gets from its own fsync, and
+what a sync point relying on it would clear the dirty set on. Under
+`"seq"` any completed barrier makes everything before it durable (a crash
+that keeps it keeps every earlier write). Otherwise:
+
+- an fsync of D (`sync`) makes durable D's entries and attributes (DFSCQ:
+  an fsync of a directory flushes all pending metadata; Ferrite: every
+  update of D is ordered before it), and the files' data only with the
+  switch **`DirFsyncPersistsFiles`** (does an fsync of the directory
+  persist the files its entries name). FALSE is ext4 as step 11.2's ACE
+  tests found it: `fault_ace.sh`'s `direct` kind first used an fsync of
+  the directory as its persistence point and lost a file's appended
+  bytes;
+- an fsync of a file (`fsync`) makes durable its data, and under
+  `"metaprefix"` all metadata too (DFSCQ's fsync ends the tree sequence);
+  under `"ext4"` not D's entry for it (Definition 7 orders before an
+  fsync of f only the updates of f, and creating f is an update of D).
+
+**Why the protocol does not depend on the regime.** A database state
+that is not dirty for D can survive a power loss only together with a
+backing filesystem that has been synced since D's last change: dirty rows
+are cleared only by a sync point's `ClearDirty` after its `syncfs`, and
+only if no mutation of D began or ended since its snapshot, and every
+mutation's phase 1 makes D durably dirty before its syscall. So whatever a
+power loss may make of the unsynced writes, the database that could come
+with them is dirty, and recovery forgets D. `CrashSafe` holds under every
+regime and either value of the switch (`MC_crash_ext4.cfg`,
+`MC_crash_metaprefix.cfg`), and no regime exposes a reply or a cleared
+dirty row that depends on an ordering the backing filesystem does not
+promise. It does depend on the barrier being `syncfs`:
+`known_bugs/sync_by_file_fsync` clears the dirty set after a file's fsync
+alone, under `"ext4"`, and violates `CrashSafe` (the create of the file
+may still be lost while the database, no longer dirty, records it). Under
+`"seq"` and `"metaprefix"` the same sync point is safe
+(`MC_litmus_fsync_file_direct_metaprefix.cfg`), which is why the
+regimes are needed to see it.
+
+**Litmus tests** (`MClitmus.tla`): Ferrite's tests (section 3.4) and the
+directory fsync of step 11.2 as fixed programs run through dcfs (one
+request slot, `ArriveAllowed <- ScriptAllows`, the starting directory
+`InitPresent <- ...`), each with its surprising outcome (`LitmusBad`).
+`LitmusOK` asks whether a power loss now could leave dcfs serving it once
+recovery has run (D's names from the recovered cache where it knows them,
+else from the backing filesystem; contents from the backing file, which
+dcfs reaches by passthrough); `LitmusBackingOK` whether the backing
+filesystem itself could be left with it. By `CrashSafe` the first fails
+only where the second does: once recovery has run, what dcfs serves of D
+is the backing filesystem's own state (`CrashRefines` alone would not
+give it under `"seq"`, where names and data come from one state). A test that holds checks every invariant of
+dcfs besides; one that does not is a [limitation](#known-bugs-the-models-own-tests)
+(`limitations/crash_litmus.tla`) and its test expects the
+counterexample.
+
+| Test | Program | Surprising outcome | Regime | Barrier | Expected |
+|---|---|---|---|---|---|
+| `MC_litmus_replace_seq` | f has contents; create t, write t, rename t over f | f holds neither the old contents nor the new | seq | | holds |
+| `limitations/litmus_replace_metaprefix`, `_ext4` | same (Ferrite's atomic replace via rename) | same | metaprefix, ext4 | | `LitmusOK` violated: the rename persists, t's data not; dcfs serves f empty, as the backing has it |
+| `MC_litmus_create_seq` | create t, write t, rename t to f (new) | f exists without the data | seq | | holds |
+| `limitations/litmus_create_metaprefix`, `_ext4` | same (atomic create via rename) | same | metaprefix, ext4 | | `LitmusOK` violated |
+| `MC_litmus_fsync_file_ext4` | create f, write f, FSYNC f | the fsync returned and f is absent or empty | ext4 | syncfs (the code) | holds |
+| `limitations/litmus_fsync_file_direct_ext4` | same (implied directory fsync) | same | ext4 | f's fsync alone | `LitmusBackingOK` violated: the create of f is not ordered before f's fsync |
+| `MC_litmus_fsync_file_direct_metaprefix` | same | same | metaprefix | f's fsync alone | holds (an fsync ends the tree sequence) |
+| `MC_litmus_fsync_dir_ext4` | create f, write f, FSYNCDIR | the fsync returned and f is absent or empty | ext4, switch FALSE | syncfs (the code) | holds |
+| `limitations/litmus_fsync_dir_direct_ext4`, `_metaprefix` | same (step 11.2's directory fsync) | same | ext4, metaprefix, switch FALSE | D's fsync alone | `LitmusBackingOK` violated: f is there, empty |
+| `MC_litmus_fsync_dir_direct_files_ext4` | same | same | ext4, switch TRUE | D's fsync alone | holds |
+
+So through dcfs: an fsync (of a file or of a directory) gives the caller
+at least what the backing filesystem's own fsync gives, and more where the
+backing's fsync is weak, since dcfs follows it with `syncfs`; an atomic
+replace or create by rename without an fsync before the rename is as
+atomic as the backing filesystem makes it, no more (dcfs adds no
+atomicity, and no crash outcome either).
+
+**What the tests exercise of this** (Phase 11, "Status as built"): step
+11.2's power cuts and ACE-style sequences (one and two operations, with
+and without an fsync through dcfs or a `syncfs` behind it, over ext4, xfs
+and btrfs) check that after a real power cut what dcfs serves equals what
+the backing filesystem kept, and that a persistence point's state is
+kept. They exercise the orderings each filesystem actually produces when
+a disk drops every write after the cut; neither drop-writes nor a kill
+loses a write the disk acknowledged, so they cannot produce the
+reorderings these regimes allow (FLUSH/FUA ordering stays untested, as
+11.2 says). The model covers those instead.
+
+**Trace validation** needs nothing from the recorder: a trace records
+no backing state beyond what each request read, and a power cut
+(`trace_power_test`, `trace_crash_test`) is a `crash` line, which
+`T_Crash` explains with `Crash` and `Trace.cfg`'s `Reorder = "seq"`; a
+weaker regime only allows more crash outcomes, so a trace valid under
+`"seq"` stays valid under it. The recorder writes no `write` or `fsync`
+request (`Requests <- AllKinds` leaves them out): the data writes reach
+no record of D's.
+
+**State counts.** With `Reorder = "seq"` the sequence holds the same
+states as the set did, one-to-one (every change takes a fresh stamp, so
+the states since the last `syncfs` are distinct and ordered by `ver`), the
+files' data is a constant without the `write` requests, and
+`ArriveAllowed`/`InitPresent` default to everything: every configuration
+explores exactly the states it explored before (counts in the table
+below, unchanged). The regime configurations, against the same bounds
+under `"seq"` (runs of 2026-10-08 and 09):
+
+| Bounds (2 names, 1 slot, 3 mutations, 1 crash) | `"seq"` | `"metaprefix"` | `"ext4"` |
+|---|---|---|---|
+| lookup, getattr, create, unlink, rename, attrchange, sync (`MC_crash_*.cfg`) | 292,044 | 292,044 | 356,954 (2.7 min) |
+| lookup, create, unlink, rename, sync | 113,742 | 113,742 | 140,664 |
+| the same with write and FSYNC | 334,100 | 338,405 | 420,897 |
+| the same with getattr and readdir too | 743,553 | 756,047 | 1,052,064 |
+
+Without writes `"metaprefix"` leaves the states `"seq"` does (D's metadata
+is a prefix in both). `"ext4"` costs more per state than its count says:
+every state computes the name orders a power loss may leave
+(`NamePos`). The test configurations are the first row, with D's
+attribute changes and getattrs so that the regime's looser attributes are
+exercised; the others were run once by hand, every invariant holding.
+
 ## Configurations
 
 `MC.tla` is the root module every configuration checks: it extends `dcfs`
@@ -521,6 +693,8 @@ from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 | `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable` | 892,708 | ~1-2.5 min |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable` | 1,036,982 | ~1.5-4 min |
 | `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 263,848; 297,308; 29,950 | ~1.5 min; ~2.5 min; ~30 s (load 15) |
+| `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
+| `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and a sync point, 1 crash; every invariant and property besides | 679-1,475 each | seconds |
 
 `Interrupts` (Phase 22) is off in the first five: with it, `MC_small.cfg`
 grows to 2,154,085 states (6 min), so the interrupts have configurations
@@ -559,6 +733,7 @@ FALSE in the real configurations.
 | `interrupt_undo` | not historical: an interrupt before the syscall puts the resolved name back instead of leaving it unknown; without the kernel lock | `TriState` | a rename of `a` runs phase 1; a create of `a` runs phase 1 (in flight); the rename, interrupted before its syscall, puts `a` back while the create is in flight |
 | `interrupt_leaks_guard` | not historical: an interrupted mutation that never `End`s | `GuardsBalanced` | a create's phase 1; interrupted before its syscall, it replies without `End` |
 | `attr_change_end_skipped` | 8.2's mutation survivors (step 12.11): a deleted `Mutation::End` after an attribute change (`AttrChangeEnd <- AttrChangeEndSkipped`) | `GuardsBalanced` | an attribute change of D: phase 1, its syscall; its end leaves `FillGuards::inflight` raised with no request in flight (its refresh, and every later fill of D, is then refused) |
+| `sync_by_file_fsync` | not historical (step 12.8): a sync point after FSYNC whose only barrier is the file's fsync (`SyncBarrier <- FsyncOnly`), under the `"ext4"` regime (`MClitmus.tla`'s implied-directory-fsync program) | `CrashSafe` | create f: phase 1, its syscall, phase 3 (f recorded present); write f; FSYNC of f: its fsync makes f's data durable, not its entry in D (Ferrite's Definition 7), and `ClearDirty` takes D out of the dirty set: a power loss may now lose the create while the database says f is present and recovery has nothing to forget. Under `"seq"` the same configuration finds nothing |
 
 ## Findings
 

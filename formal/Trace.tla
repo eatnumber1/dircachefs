@@ -194,8 +194,8 @@ TraceInit ==
               /\ (v = "none" /\ HDB.complete) => x \notin present
          /\ bCur = [names |-> [x \in Names |-> IF x \in present
                                                 THEN InitObj(x) ELSE NoObj],
-                    ver |-> 0, f |-> 0]
-    /\ bOpts = {bCur}
+                    ver |-> 0, f |-> 0, data |-> InitData]
+    /\ bSeq = <<bCur>>
     /\ dbCur = [dent |-> [x \in Names |->
                             LET v == ObsVal(HDB, x) IN
                             CASE v = "none" -> NoRow
@@ -290,7 +290,7 @@ GetattrWhole ==
     /\ IF inflight = 0
        THEN Commit([dbCur EXCEPT !.attrValid = TRUE, !.attr = bCur.ver], FALSE)
        ELSE UnchangedDB
-    /\ UNCHANGED <<bCur, bOpts, mode, seq, inflight, durableD, fm, running,
+    /\ UNCHANGED <<bCur, bSeq, mode, seq, inflight, durableD, fm, running,
                    ps, servedWrong, stamp, muts, crashes>>
 
 -----------------------------------------------------------------------------

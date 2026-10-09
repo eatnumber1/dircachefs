@@ -10,8 +10,11 @@
 (* cache database's view of D (one dentry row per name, the completeness   *)
 (* flag and its epoch, D's cached attributes, D's row in the dirty set,    *)
 (* the clean-shutdown flag); for both disks, which of their states a crash *)
-(* may leave; and the daemon's in-memory state (fill guards, the durable   *)
-(* part of the dirty set, requests in flight).                             *)
+(* may leave (for the backing filesystem, the sequence of its states since *)
+(* its last durable point, and a crash-consistency regime that says which  *)
+(* states a power loss may make of it: step 12.8); and the daemon's        *)
+(* in-memory state (fill guards, the durable part of the dirty set,        *)
+(* requests in flight).                                                    *)
 (*                                                                         *)
 (* Requests run concurrently, interleaving at every backing syscall: the   *)
 (* coroutine architecture the design prepares for. A request's code        *)
@@ -37,6 +40,12 @@ CONSTANTS
     MaxCrashes,     \* bound: crashes over a whole behavior
     KernelDirLock,  \* the kernel serializes D's namespace ops, lookups, readdirs
     Interrupts,     \* FUSE_INTERRUPT is modelled (Phase 22: Interrupt)
+    \* The backing filesystem's crash consistency (step 12.8, Ferrite and
+    \* DFSCQ; see "The backing filesystem's crash consistency" below):
+    Reorder,        \* "seq", "metaprefix" or "ext4": which states a power
+                    \* loss may leave of the writes since the last syncfs
+    DirFsyncPersistsFiles,  \* an fsync of D also persists the data of the
+                            \* files D names (FALSE: only D's own metadata)
     BugPhase1NotDurable,        \* crash F1
     BugCreateKeepsParentAttrs,  \* crash F3
     BugUnguardedFills,          \* tri-state F1
@@ -55,10 +64,22 @@ AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
 \* below). Not in AllKinds: the configurations that leave them out keep
 \* F's state constant, and their state counts.
 FileKinds == {"fopen", "frelease", "fgetattr", "fset"}
+\* The requests that touch a file's data (step 12.8): a write to the file a
+\* name holds, through a writable open (passthrough), and the kernel's
+\* FSYNC of it. No record of D's changes at either; they exist so that the
+\* backing filesystem's crash regimes have data to reorder (the litmus
+\* configurations, MClitmus.tla). Not in AllKinds: the configurations
+\* without them keep their state spaces.
+DataKinds == {"write", "fsync"}
+\* The requests that are a sync point (an FSYNCDIR of D or the periodic
+\* sync; an FSYNC of a file).
+SyncKinds == {"sync", "fsync"}
+Regimes == {"seq", "metaprefix", "ext4"}
 
 ASSUME /\ Names # {} /\ IsFiniteSet(Names)
        /\ Procs # {} /\ IsFiniteSet(Procs)
-       /\ Requests \subseteq AllKinds \cup FileKinds
+       /\ Requests \subseteq AllKinds \cup FileKinds \cup DataKinds
+       /\ Reorder \in Regimes /\ DirFsyncPersistsFiles \in BOOLEAN
        /\ MaxMutations \in Nat /\ MaxCrashes \in Nat
        /\ \A b \in {KernelDirLock, Interrupts, BugPhase1NotDurable,
                     BugCreateKeepsParentAttrs, BugUnguardedFills,
@@ -92,10 +113,24 @@ DentVals == Objs \cup {NoRow, Unknown, Absent}
 
 \* A state of the backing filesystem: D's entries, and D's attributes
 \* (mtime/ctime/nlink), abstracted to the stamp of the last change to D;
-\* and F's attributes (its access time above all), the stamp of the last
-\* change to F (a read through passthrough, or a setattr).
+\* F's attributes (its access time above all), the stamp of the last
+\* change to F (a read through passthrough, or a setattr); and each named
+\* object's data (its contents: 0 empty, else the stamp of the write that
+\* wrote them, or the object's number for the contents an initial object
+\* starts with; one block, written whole by each write: step 12.8).
 BStates == [names : [Names -> Objs \cup {NoObj}], ver : 0..MaxStamp,
-            f : 0..MaxStamp]
+            f : 0..MaxStamp, data : [Objs -> 0..MaxStamp]]
+\* The contents objects start with: an initial object (o1..oN) has some
+\* (its number), a created one none. Only the write requests change them.
+InitData == [o \in Objs |-> IF \E i \in 1..NumNames : o = Obj(i)
+                            THEN CHOOSE i \in 1..NumNames : o = Obj(i)
+                            ELSE 0]
+\* The metadata of a backing state: D's entries and attributes, and F's
+\* attributes (what the cache's records describe; a crash state of the
+\* metadata, MetaCrash, is one of these).
+Meta(b) == [names |-> b.names, ver |-> b.ver, f |-> b.f]
+\* D's part of it (what Observed reads).
+DMeta(m) == [names |-> m.names, ver |-> m.ver]
 \* F's row in the `dirty` table: none, atime_only = 1, or a mutation's.
 FDirtyVals == {"no", "atime", "mut"}
 \* A state of the cache database, as far as D (and F) is concerned.
@@ -137,8 +172,10 @@ Modes == {"up", "down", "recover", "start", "probe",
 -----------------------------------------------------------------------------
 VARIABLES
     bCur,        \* the backing filesystem as the kernel sees it now
-    bOpts,       \* backing states a crash may leave: the last synced one and
-                 \* every later one (some prefix of the unsynced writes)
+    bSeq,        \* the backing filesystem's states since its last durable
+                 \* point, in order: bSeq[1] is durable, the last is bCur
+                 \* (step 12.8; which states a power loss may leave of them
+                 \* is the regime's: BCrash)
     dbCur,       \* the cache database as the daemon sees it now
     dbOpts,      \* database states a crash may leave: the last fsynced
                  \* commit and every later commit (a prefix of the WAL)
@@ -154,7 +191,7 @@ VARIABLES
     muts,        \* mutations started so far (for the MaxMutations bound)
     crashes      \* crashes so far (for the MaxCrashes bound)
 
-vars == <<bCur, bOpts, dbCur, dbOpts, mode, seq, inflight, durableD,
+vars == <<bCur, bSeq, dbCur, dbOpts, mode, seq, inflight, durableD,
           running, ps, servedWrong, fm, stamp, muts, crashes>>
 
 \* F (step 23.8): `opens`, the kernel's open files of F (only through one
@@ -201,7 +238,8 @@ IdleProc == [pc |-> "idle", kind |-> None, n |-> None, m |-> None,
              fdirty |-> FALSE]
 
 TypeOK ==
-    /\ bCur \in BStates /\ bOpts \subseteq BStates /\ bCur \in bOpts
+    /\ bCur \in BStates /\ bSeq \in Seq(BStates) /\ bSeq # <<>>
+    /\ bSeq[Len(bSeq)] = bCur
     /\ dbCur \in DBStates /\ dbOpts \subseteq DBStates /\ dbCur \in dbOpts
     /\ mode \in Modes
     /\ seq \in Nat /\ inflight \in Nat /\ durableD \in BOOLEAN
@@ -270,8 +308,138 @@ Commit(new, sync) ==
     /\ dbCur' = new
     /\ dbOpts' = IF sync THEN {new} ELSE dbOpts \cup {new}
 
-\* A backing syscall that changes D: durable only after a later syncfs.
-BWrite(new) == bCur' = new /\ bOpts' = bOpts \cup {new}
+(***************************************************************************)
+(* The backing filesystem's crash consistency (step 12.8; Ferrite:         *)
+(* Bornholt et al., "Specifying and checking file system crash-consistency *)
+(* models", ASPLOS 2016; DFSCQ: Chen et al., SOSP 2017). `bSeq` holds the  *)
+(* backing states since the last durable point in the order the syscalls   *)
+(* made them (DFSCQ's tree sequence): bSeq[1] is durable, each later one   *)
+(* is one syscall's change more. A power loss leaves a state made of them  *)
+(* (BCrash), and which ones is the regime, `Reorder`:                      *)
+(*                                                                         *)
+(*   "seq"         sequential crash consistency (Ferrite's SCC): one of    *)
+(*                 them, i.e. a prefix of the writes, in order;            *)
+(*   "metaprefix"  DFSCQ's metadata-prefix: the metadata (D's entries and  *)
+(*                 attributes, F's attributes) as in one of them, and each *)
+(*                 named file's data any *)
+(*                 value it had in them (DFSCQ applies a data write to     *)
+(*                 every tree, so data and metadata reorder freely);       *)
+(*   "ext4"        an over-approximation of Ferrite's ext4 model (its     *)
+(*                 Definition 7, data=ordered), which keeps two writes in  *)
+(*                 program order only if (1) both change the same file's   *)
+(*                 metadata, (2) both write the same block of a file, (3)  *)
+(*                 both change the directory at an overlapping name, or    *)
+(*                 (4) a write precedes an extend of the same file. D's    *)
+(*                 entries follow (3) exactly (a create or an unlink of n  *)
+(*                 touches {n}, a rename of n over m {n, m}); a file's     *)
+(*                 data, one block, follows (2) and (4); D's attributes    *)
+(*                 may come from any state of the sequence, more than the  *)
+(*                 definition allows (a create can persist without its own *)
+(*                 mtime change), and so may F's attributes (by (1) F's    *)
+(*                 setattrs and access times persist in order, against    *)
+(*                 nothing else). Anything else may persist in either      *)
+(*                 order: changes of different names of D, D's attributes *)
+(*                 against its entries, data against entries.              *)
+(*                                                                         *)
+(* A completed barrier makes what it orders durable: syncfs everything     *)
+(* (Syncfs, what every sync point of dcfs runs); an fsync less (FsyncOnly, *)
+(* which is not the code).                                                 *)
+(***************************************************************************)
+
+\* A backing syscall that changes D or a file's data: durable only after a
+\* later syncfs; until then it is one more state in the sequence.
+BWrite(new) == bCur' = new /\ bSeq' = Append(bSeq, new)
+
+\* The names the change from bSeq[i-1] to bSeq[i] touched.
+Touched(i) == {x \in Names : bSeq[i].names[x] # bSeq[i-1].names[x]}
+
+\* "metaprefix" and "ext4": the data of each file a power loss may leave,
+\* any value it had in the sequence (only the files whose data changed
+\* choose).
+DataOpts(o) == {bSeq[i].data[o] : i \in 1..Len(bSeq)}
+DataMoved == {o \in Objs : DataOpts(o) # {bCur.data[o]}}
+DataCrash ==
+    {[o \in Objs |-> IF o \in DataMoved THEN g[o] ELSE bCur.data[o]] :
+       g \in {g \in [DataMoved -> 0..MaxStamp] :
+                \A o \in DataMoved : g[o] \in DataOpts(o)}}
+
+\* "ext4": D's entries a power loss may leave. Each name x keeps its changes
+\* up to some point, pos[x], the last kept change of x (1: none), because
+\* rule (3) orders every change of x after the earlier ones; a change that
+\* touches two names (a rename) is kept for both or for neither. Then x
+\* holds what it held after its last kept change: every change it depends
+\* on (the earlier changes of the names it touched) is kept too.
+NamePos == {pos \in [Names -> 1..Len(bSeq)] :
+              /\ \A x \in Names : pos[x] = 1 \/ x \in Touched(pos[x])
+              /\ \A i \in 2..Len(bSeq) : \A x, y \in Touched(i) :
+                   (i <= pos[x]) = (i <= pos[y])}
+
+\* The states of the metadata a power loss may leave ("ext4": D's entries
+\* as rule (3) allows, D's attributes and F's each as in any state of the
+\* sequence; otherwise all as in one state of the sequence).
+MetaCrash ==
+    IF Reorder = "ext4"
+    THEN {[names |-> [x \in Names |-> bSeq[pos[x]].names[x]],
+           ver |-> bSeq[k].ver, f |-> bSeq[j].f] :
+            pos \in NamePos, k \in 1..Len(bSeq), j \in 1..Len(bSeq)}
+    ELSE {Meta(bSeq[k]) : k \in 1..Len(bSeq)}
+
+\* The backing states a power loss may leave.
+BCrash ==
+    IF Reorder = "seq" THEN {bSeq[k] : k \in 1..Len(bSeq)}
+    ELSE {[names |-> t.names, ver |-> t.ver, f |-> t.f, data |-> d] :
+            t \in MetaCrash, d \in DataCrash}
+
+\* syncfs(2): everything written is durable.
+Syncfs == <<bCur>>
+
+\* The sequence without repeated states (a barrier below can make two
+\* neighbours equal; a crash may leave the same states either way).
+Squash(s) ==
+    LET keep == {i \in 1..Len(s) : i = 1 \/ s[i] # s[i - 1]}
+        nth(j) == CHOOSE i \in keep : Cardinality({k \in keep : k <= i}) = j
+    IN [j \in 1..Cardinality(keep) |-> s[nth(j)]]
+
+\* A completed barrier that makes durable D's metadata (if `meta`), F's
+\* attributes (if `fmeta`) and the data of the files `objs`: every state
+\* of the sequence takes them from bCur, so a power loss leaves them as
+\* they are now. Under "seq" a completed barrier makes durable everything
+\* before it (the writes persist in order, so a crash that keeps it keeps
+\* them all).
+Force(meta, fmeta, objs) ==
+    IF Reorder = "seq" THEN <<bCur>>
+    ELSE Squash([i \in 1..Len(bSeq) |->
+                  [names |-> IF meta THEN bCur.names ELSE bSeq[i].names,
+                   ver |-> IF meta THEN bCur.ver ELSE bSeq[i].ver,
+                   f |-> IF fmeta THEN bCur.f ELSE bSeq[i].f,
+                   data |-> [o \in Objs |-> IF o \in objs THEN bCur.data[o]
+                                            ELSE bSeq[i].data[o]]]])
+
+\* The files D names now.
+NamedObjs == {bCur.names[x] : x \in Names} \ {NoObj}
+
+\* Not the code (FsyncOnly: limitations/crash_litmus.tla,
+\* known_bugs/sync_by_file_fsync): a sync point whose only barrier is the
+\* fsync that the kernel's FSYNCDIR or FSYNC asked for. An fsync of D
+\* ("sync") makes durable D's metadata (DFSCQ: an fsync of a directory
+\* flushes all pending metadata; Ferrite: every update of D is ordered
+\* before it) and, with DirFsyncPersistsFiles, the data of the files D
+\* names (and under "metaprefix" all metadata, F's attributes too). An
+\* fsync of a file ("fsync") makes durable its data, and under
+\* "metaprefix" all metadata too (DFSCQ's fsync ends the tree sequence);
+\* under "ext4" not D's entry for it (Definition 7 orders before an fsync
+\* of f only the updates of f, and creating f is an update of D).
+FsyncOnly(r) ==
+    LET all == Reorder = "metaprefix" IN
+    IF r.kind = "fsync"
+    THEN Force(all, all,
+               IF bCur.names[r.n] = NoObj THEN {} ELSE {bCur.names[r.n]})
+    ELSE Force(TRUE, all, IF DirFsyncPersistsFiles THEN NamedObjs ELSE {})
+
+\* The barrier of sync point r's request, before it clears the dirty set:
+\* syncfs, after the fsync the kernel asked for (backing::SyncBacking; the
+\* fsync makes nothing durable that syncfs does not).
+SyncBarrier(r) == Syncfs
 
 \* The backing filesystem changes from bCur to b2: request r remembers the
 \* answers its queries had until now and no longer have (ReplyObservable:
@@ -349,7 +517,7 @@ MutSyscall(p, r, b2) ==
 Serve(r) == servedWrong' = (servedWrong \/ ~AnswerOK(r, bCur))
 NoServe == UNCHANGED servedWrong
 
-UnchangedBacking == UNCHANGED <<bCur, bOpts>>
+UnchangedBacking == UNCHANGED <<bCur, bSeq>>
 UnchangedDB == UNCHANGED <<dbCur, dbOpts>>
 UnchangedGuards == UNCHANGED <<seq, inflight, durableD, fm>>
 
@@ -629,7 +797,7 @@ CSys(p) ==
                    ELSE [ps[p] EXCEPT !.pc = "C_probe", !.eff = "ok"],
                    [bCur EXCEPT !.names = [@ EXCEPT ![n] = Obj(stamp)],
                                !.ver = stamp])
-       ELSE /\ UNCHANGED <<bCur, bOpts, stamp>>
+       ELSE /\ UNCHANGED <<bCur, bSeq, stamp>>
             /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "C_fail",
                                              !.eff = "EEXIST"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
@@ -749,7 +917,7 @@ USys(p) ==
             /\ MutSyscall(p, [ps[p] EXCEPT !.pc = "U3", !.eff = "ok"],
                            [bCur EXCEPT !.names = [@ EXCEPT ![n] = NoObj],
                                        !.ver = stamp])
-       ELSE /\ UNCHANGED <<bCur, bOpts, stamp>>
+       ELSE /\ UNCHANGED <<bCur, bSeq, stamp>>
             /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "U_fail",
                                              !.eff = "ENOENT"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
@@ -816,7 +984,7 @@ RSys(p) ==
                      [bCur EXCEPT !.names = [@ EXCEPT ![m] = bCur.names[n],
                                                      ![n] = NoObj],
                                  !.ver = stamp])
-          ELSE /\ UNCHANGED <<bCur, bOpts, stamp>>
+          ELSE /\ UNCHANGED <<bCur, bSeq, stamp>>
                /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "R_fail",
                                                 !.eff = "ENOENT"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
@@ -853,9 +1021,10 @@ RFail2(p) ==
 \* cache::BeginSync (the guards' clock, in `snap`; D's row in the snapshot
 \* of the dirty set is implied: D only becomes dirty through a phase 1,
 \* which moves the clock), then syncfs(2): every backing write so far is
-\* durable.
+\* durable (SyncBarrier; an FSYNCDIR's or FSYNC's own fsync comes first and
+\* adds nothing to it). An FSYNC ("fsync") is the same sync point.
 S1From(p, r) ==
-    /\ bOpts' = {bCur}
+    /\ bSeq' = SyncBarrier(r)
     /\ Syscall(p, [r EXCEPT !.pc = "S2", !.snap = seq, !.fsnap = fm.seq,
                              !.fheld = fm.held > 0,
                              !.fdirty = dbCur.fDirty # "no"])
@@ -893,6 +1062,38 @@ S2(p) ==
     /\ fm' = [fm EXCEPT !.durable = FALSE, !.expired = FALSE]
     /\ Reply(p, ps[p], Rep("ok", {}))
     /\ UnchangedBacking /\ UNCHANGED <<seq, inflight, servedWrong, stamp>>
+
+(***************************************************************************)
+(* A write to the file a name of D holds (step 12.8): the kernel's WRITE   *)
+(* through the file's writable open, which reaches the backing file by     *)
+(* passthrough. It changes only the file's data, which no record of D's   *)
+(* covers (the open's phase 1, BeginWriting, and its release are the       *)
+(* file's, and files are not modelled: README, "abstractions"); it is      *)
+(* here so that the crash regimes have data to reorder against D's         *)
+(* entries (the litmus configurations, MClitmus.tla).                      *)
+(***************************************************************************)
+
+\* The write: the whole block (one write of new contents). The model
+\* writes the file the name holds when the write runs: ENOENT if none
+\* (the open by name failed).
+WSys(p) ==
+    /\ At(p, "W_sys")
+    /\ LET o == bCur.names[ps[p].n] IN
+       IF o # NoObj
+       THEN /\ stamp' = stamp + 1
+            /\ MutSyscall(p, [ps[p] EXCEPT !.pc = "W_reply", !.eff = "ok"],
+                          [bCur EXCEPT !.data[o] = stamp])
+       ELSE /\ UNCHANGED <<bCur, bSeq, stamp>>
+            /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "W_reply",
+                                             !.eff = "ENOENT"])
+    /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
+
+\* The reply: what the write returned.
+WReply(p) ==
+    /\ At(p, "W_reply")
+    /\ Reply(p, ps[p], Rep(ps[p].eff, {}))
+    /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards
+    /\ UNCHANGED <<servedWrong, stamp>>
 
 (***************************************************************************)
 (* FUSE_INTERRUPT (Phase 22; docs/design.md, "Cancellation"). dcfs serves  *)
@@ -968,7 +1169,7 @@ AtimeExpiry ==
     /\ mode = "up" /\ running = None
     /\ dbCur.fDirty = "atime" /\ ~fm.expired
     /\ fm' = [fm EXCEPT !.expired = TRUE]
-    /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts, mode, seq, inflight, durableD,
+    /\ UNCHANGED <<bCur, bSeq, dbCur, dbOpts, mode, seq, inflight, durableD,
                    running, ps, servedWrong, stamp, muts, crashes>>
 
 \* cache::CanFill for F.
@@ -1131,51 +1332,83 @@ NewReq(kind, n, m, pc, lk, cont, locked) ==
 \* The kernel's lock on D is free (if the request needs it).
 LockFree(locked) == locked => \A q \in Procs : ~ps[q].locked
 
+\* Whether a request of this kind and these names may arrive now: always
+\* (the litmus configurations put in a fixed program instead, step 12.8:
+\* ArriveAllowed <- ScriptAllows in MClitmus.tla).
+ArriveAllowed(kind, n, m) == TRUE
+\* The sets of names D may start with (Init): any (a litmus configuration
+\* fixes them: InitPresent <- ...).
+InitPresent == SUBSET Names
+
 Arrive(p) ==
     /\ ps[p].pc = "idle" /\ mode = "up" /\ running = None
     /\ \/ /\ "lookup" \in Requests /\ LockFree(KernelDirLock)
           /\ \E n \in Names :
-               LKFrom(p, NewReq("lookup", n, None, "LK", n, "Reply",
-                                KernelDirLock))
+               /\ ArriveAllowed("lookup", n, None)
+               /\ LKFrom(p, NewReq("lookup", n, None, "LK", n, "Reply",
+                                   KernelDirLock))
           /\ UNCHANGED muts
        \/ /\ "readdir" \in Requests /\ LockFree(KernelDirLock)
+          /\ ArriveAllowed("readdir", None, None)
           /\ RDFrom(p, NewReq("readdir", None, None, "RD", None, None,
                               KernelDirLock))
           /\ UNCHANGED muts
        \/ /\ "readdirplus" \in Requests /\ LockFree(KernelDirLock)
+          /\ ArriveAllowed("readdirplus", None, None)
           /\ RDFrom(p, NewReq("readdirplus", None, None, "RD", None, None,
                               KernelDirLock))
           /\ UNCHANGED muts
        \/ /\ "getattr" \in Requests
+          /\ ArriveAllowed("getattr", None, None)
           /\ GAFrom(p, NewReq("getattr", None, None, None, None, None, FALSE))
           /\ UNCHANGED muts
        \/ /\ "create" \in Requests /\ LockFree(KernelDirLock)
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n \in Names :
-               C1From(p, NewReq("create", n, None, "C1", None, None,
-                                KernelDirLock))
+               /\ ArriveAllowed("create", n, None)
+               /\ C1From(p, NewReq("create", n, None, "C1", None, None,
+                                   KernelDirLock))
        \/ /\ "linkcreate" \in Requests /\ LockFree(KernelDirLock)
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n \in Names :
-               C1From(p, NewReq("linkcreate", n, None, "C1", None, None,
-                                KernelDirLock))
+               /\ ArriveAllowed("linkcreate", n, None)
+               /\ C1From(p, NewReq("linkcreate", n, None, "C1", None, None,
+                                   KernelDirLock))
        \/ /\ "unlink" \in Requests /\ LockFree(KernelDirLock)
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n \in Names :
-               LKFrom(p, [NewReq("unlink", n, None, "LK", n, "U1",
-                                 KernelDirLock) EXCEPT !.rsnap = seq])
+               /\ ArriveAllowed("unlink", n, None)
+               /\ LKFrom(p, [NewReq("unlink", n, None, "LK", n, "U1",
+                                    KernelDirLock) EXCEPT !.rsnap = seq])
        \/ /\ "rename" \in Requests /\ LockFree(KernelDirLock)
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ \E n, m \in Names :
-               /\ n # m
+               /\ n # m /\ ArriveAllowed("rename", n, m)
                /\ LKFrom(p, [NewReq("rename", n, m, "LK", n, "R0",
                                     KernelDirLock) EXCEPT !.rsnap = seq])
        \/ /\ "attrchange" \in Requests /\ LockFree(KernelDirLock)
           /\ muts < MaxMutations /\ muts' = muts + 1
+          /\ ArriveAllowed("attrchange", None, None)
           /\ A1From(p, NewReq("attrchange", None, None, "A1", None, None,
                               KernelDirLock))
        \/ /\ "sync" \in Requests /\ SyncDriven
+          /\ ArriveAllowed("sync", None, None)
           /\ S1From(p, NewReq("sync", None, None, "S1", None, None, FALSE))
+          /\ UNCHANGED muts
+       \* Step 12.8: a write to the file n holds (not under D's lock), and
+       \* the kernel's FSYNC of it (its fsync, then a sync point).
+       \/ /\ "write" \in Requests
+          /\ muts < MaxMutations /\ muts' = muts + 1
+          /\ \E n \in Names :
+               /\ ArriveAllowed("write", n, None)
+               /\ Syscall(p, NewReq("write", n, None, "W_sys", None, None,
+                                    FALSE))
+          /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards
+          /\ UNCHANGED <<servedWrong, stamp>>
+       \/ /\ "fsync" \in Requests
+          /\ \E n \in Names :
+               /\ ArriveAllowed("fsync", n, None)
+               /\ S1From(p, NewReq("fsync", n, None, "S1", None, None, FALSE))
           /\ UNCHANGED muts
        \/ /\ "fopen" \in Requests /\ fm.opens < Cardinality(Procs)
           /\ FOpen(p, NewReq("fopen", None, None, None, None, None, FALSE))
@@ -1232,6 +1465,8 @@ AttrChangePhase3(p) == A3(p) /\ F
 AttrChangeStat(p)  == Stat(p, "A_stat", "A_fill") /\ F
 AttrChangeFill(p)  == FillAttrsAndReply(p, "A_fill") /\ F
 SyncClearDirty(p)  == S2(p) /\ F
+WriteSyscall(p)    == WSys(p) /\ F
+WriteReply(p)      == WReply(p) /\ F
 FileReleaseStat(p) == FStat(p, "FR_stat", "FR_fill") /\ F
 FileReleaseFill(p) == FRFill(p) /\ F
 FileGetattrStat(p) == FStat(p, "FG_stat", "FG_fill") /\ F
@@ -1253,8 +1488,9 @@ ResetMemory ==
     /\ ps' = [p \in Procs |-> IdleProc]
 
 \* A crash at any moment. A kernel crash or a power loss: each disk
-\* independently keeps some prefix of its unsynced writes, and that is now
-\* all there is. A daemon crash: the disks keep everything (both are in the
+\* independently keeps some of its unsynced writes, and that is now all
+\* there is: the database a prefix of its commits, the backing filesystem
+\* what its regime allows (BCrash; step 12.8). A daemon crash: the disks keep everything (both are in the
 \* kernel's page cache), but nothing more is durable than before (step
 \* 12.6b): a later power loss may still lose what was not synced, so the
 \* crashed run's dirty rows must stay until a sync point.
@@ -1266,12 +1502,12 @@ ResetMemory ==
 \* (RecoverDirty forgets F's attributes if its row is dirty.)
 FBehind(d, b) == d.fDirty = "no" /\ d.fValid /\ d.fAttr # b.f
 PowerLoss ==
-    /\ \E s \in dbOpts, t \in bOpts :
+    /\ \E s \in dbOpts, t \in BCrash :
          /\ dbCur' = s /\ dbOpts' = {s}
-         /\ bCur' = t /\ bOpts' = {t}
+         /\ bCur' = t /\ bSeq' = <<t>>
          /\ fm' = [NoF EXCEPT !.lost = fm.lost \/ FBehind(s, t)]
 DaemonCrash ==
-    /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts>>
+    /\ UNCHANGED <<bCur, bSeq, dbCur, dbOpts>>
     /\ fm' = [NoF EXCEPT !.lost = fm.lost]
 Crash ==
     /\ mode # "down" /\ crashes < MaxCrashes
@@ -1283,7 +1519,7 @@ Crash ==
 \* main.cc starts the daemon again.
 Restart ==
     /\ mode = "down" /\ mode' = "recover"
-    /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts, seq, inflight, durableD, fm,
+    /\ UNCHANGED <<bCur, bSeq, dbCur, dbOpts, seq, inflight, durableD, fm,
                    running, ps, servedWrong, stamp, muts, crashes>>
 
 \* cache::RecoverDirty, one transaction at normal durability: for a dirty
@@ -1331,7 +1567,7 @@ Recover ==
                     EXCEPT !.dirty = dbCur.dirty, !.fDirty = dbCur.fDirty],
                 FALSE)
     /\ mode' = "start"
-    /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, fm, running, ps,
+    /\ UNCHANGED <<bCur, bSeq, seq, inflight, durableD, fm, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
 \* StartRun's last transaction, kSync: clean_shutdown = 0 (and the boot id).
@@ -1340,7 +1576,7 @@ StartRun ==
     /\ mode = "start"
     /\ Commit([dbCur EXCEPT !.clean = FALSE], TRUE)
     /\ mode' = "probe"
-    /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, fm, running, ps,
+    /\ UNCHANGED <<bCur, bSeq, seq, inflight, durableD, fm, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
 \* Not the code (known_bugs/recover_clears_dirty_first, and trace
@@ -1354,18 +1590,18 @@ RecoverClearsDirtyFirst ==
     \/ /\ mode = "recover" /\ dbCur.dirty
        /\ Commit([dbCur EXCEPT !.dirty = FALSE], FALSE)
        /\ mode' = "recover2"
-       /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, fm, running, ps,
+       /\ UNCHANGED <<bCur, bSeq, seq, inflight, durableD, fm, running, ps,
                       servedWrong, stamp, muts, crashes>>
     \/ /\ mode = "recover" /\ ~dbCur.dirty
        /\ mode' = "start"
-       /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts, seq, inflight, durableD,
+       /\ UNCHANGED <<bCur, bSeq, dbCur, dbOpts, seq, inflight, durableD,
                       fm, running, ps, servedWrong, stamp, muts, crashes>>
     \/ /\ mode = "recover2"
        /\ LET d == [dbCur EXCEPT !.dirty = TRUE] IN
             \E forget \in SUBSET PresentNames(RecoverDirty(d)) :
               Commit(RecoverForgetting(d, forget), FALSE)
        /\ mode' = "start"
-       /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, fm, running, ps,
+       /\ UNCHANGED <<bCur, bSeq, seq, inflight, durableD, fm, running, ps,
                       servedWrong, stamp, muts, crashes>>
 
 \* backing::Startup, after InitRoot: the probe of the recovered rows
@@ -1373,7 +1609,7 @@ RecoverClearsDirtyFirst ==
 \* a sync point. Then the daemon serves.
 ProbesDone ==
     /\ mode = "probe" /\ mode' = "up"
-    /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts, seq, inflight, durableD, fm,
+    /\ UNCHANGED <<bCur, bSeq, dbCur, dbOpts, seq, inflight, durableD, fm,
                    running, ps, servedWrong, stamp, muts, crashes>>
 
 \* Not the code (known_bugs/recovery_clears_dirty): the start takes the
@@ -1384,7 +1620,7 @@ ProbesDoneClearing ==
     /\ mode = "probe"
     /\ Commit([dbCur EXCEPT !.dirty = FALSE], FALSE)
     /\ mode' = "up"
-    /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, fm, running, ps,
+    /\ UNCHANGED <<bCur, bSeq, seq, inflight, durableD, fm, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
 \* Unmount: the session loop has stopped, no request is in flight. (With F
@@ -1396,12 +1632,12 @@ BeginShutdown ==
     /\ mode = "up" /\ \A p \in Procs : ps[p].pc = "idle"
     /\ fm.held = 0
     /\ mode' = "stop_sync"
-    /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts, seq, inflight, durableD, fm,
+    /\ UNCHANGED <<bCur, bSeq, dbCur, dbOpts, seq, inflight, durableD, fm,
                    running, ps, servedWrong, stamp, muts, crashes>>
 
 \* FinishRun: a sync point (syncfs, then ClearDirty) ...
 StopSync ==
-    /\ mode = "stop_sync" /\ bOpts' = {bCur} /\ mode' = "stop_clear"
+    /\ mode = "stop_sync" /\ bSeq' = Syncfs /\ mode' = "stop_clear"
     /\ UNCHANGED <<bCur, dbCur, dbOpts, seq, inflight, durableD, fm, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
@@ -1410,13 +1646,13 @@ StopClear ==
     /\ Commit([dbCur EXCEPT !.dirty = FALSE, !.fDirty = "no"], FALSE)
     /\ durableD' = FALSE /\ mode' = "stop_ckpt"
     /\ fm' = [fm EXCEPT !.durable = FALSE]
-    /\ UNCHANGED <<bCur, bOpts, seq, inflight, running, ps, servedWrong,
+    /\ UNCHANGED <<bCur, bSeq, seq, inflight, running, ps, servedWrong,
                    stamp, muts, crashes>>
 
 \* ... a TRUNCATE checkpoint (everything committed is now durable) ...
 StopCkpt ==
     /\ mode = "stop_ckpt" /\ dbOpts' = {dbCur} /\ mode' = "stop_flag"
-    /\ UNCHANGED <<bCur, bOpts, dbCur, seq, inflight, durableD, fm, running, ps,
+    /\ UNCHANGED <<bCur, bSeq, dbCur, seq, inflight, durableD, fm, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
 \* ... and clean_shutdown = 1, kSync (the dirty set is empty: no writable
@@ -1427,17 +1663,17 @@ StopFlag ==
     /\ mode' = "down"
     /\ ResetMemory
     /\ fm' = [NoF EXCEPT !.lost = fm.lost]
-    /\ UNCHANGED <<bCur, bOpts, servedWrong, stamp, muts, crashes>>
+    /\ UNCHANGED <<bCur, bSeq, servedWrong, stamp, muts, crashes>>
 
 -----------------------------------------------------------------------------
 (* The specification. *)
 
 Init ==
-    /\ \E present \in SUBSET Names :
+    /\ \E present \in InitPresent :
          bCur = [names |-> [n \in Names |-> IF n \in present THEN InitObj(n)
                                             ELSE NoObj],
-                 ver |-> 0, f |-> 0]
-    /\ bOpts = {bCur}
+                 ver |-> 0, f |-> 0, data |-> InitData]
+    /\ bSeq = <<bCur>>
     \* A new database: nothing cached.
     /\ dbCur = [dent |-> [n \in Names |-> NoRow], complete |-> FALSE,
                 epoch |-> 0, attrValid |-> FALSE, attr |-> 0, dirty |-> FALSE,
@@ -1476,6 +1712,7 @@ Next ==
          \/ AttrChangeSyscall(p) \/ AttrChangePhase3(p)
          \/ AttrChangeStat(p) \/ AttrChangeFill(p)
          \/ SyncClearDirty(p)
+         \/ WriteSyscall(p) \/ WriteReply(p)
          \/ Interrupt(p)
          \/ FileReleaseStat(p) \/ FileReleaseFill(p)
          \/ FileGetattrStat(p) \/ FileGetattrFill(p)
@@ -1547,8 +1784,10 @@ TriState ==
 
 \* Whatever a crash leaves of the two disks right now, startup recovery
 \* turns it into a correct cache. (Stronger than CacheNeverWrong after an
-\* actual crash: it is checked in every state, for every possible crash.)
-CrashSafe == \A s \in dbOpts, t \in bOpts : Correct(RecoverDirty(s), t)
+\* actual crash: it is checked in every state, for every possible crash;
+\* of the backing filesystem, every state of the metadata the regime lets
+\* a power loss leave: MetaCrash.)
+CrashSafe == \A s \in dbOpts, t \in MetaCrash : Correct(RecoverDirty(s), t)
 
 \* Recovery may crash and start again (FSCQ's crash condition for
 \* recovery, step 12.6): while it runs (from a crash to ProbesDone),
@@ -1561,7 +1800,7 @@ CrashSafe == \A s \in dbOpts, t \in bOpts : Correct(RecoverDirty(s), t)
 RecoveryModes == Modes \ ({"up"} \cup StopModes)
 RecoveryIdempotent ==
     mode \in RecoveryModes =>
-        \A s \in dbOpts, t \in bOpts : Correct(RecoverDirty(s), t)
+        \A s \in dbOpts, t \in MetaCrash : Correct(RecoverDirty(s), t)
 
 \* The fast path's premise: if Context::dirty.durable has D, every database
 \* state a crash may leave has D dirty.
@@ -1610,17 +1849,36 @@ Observed(d, b) ==
                   ELSE IF r = Absent THEN NoObj ELSE r],
      ver |-> IF d.attrValid THEN d.attr ELSE b.ver]
 
+\* Crash refinement (Yggdrasil's, the top property of step 12.8): whatever
+\* a power loss leaves of the two disks, what dcfs serves of D once
+\* recovery has run (each name and D's attributes, from the recovered
+\* cache where it knows them, else from the backing filesystem; a file's
+\* contents always from the backing file) is a state the backing
+\* filesystem itself may be left in by that power loss, under the
+\* regime: dcfs adds no crash outcome. It follows from CrashSafe (a
+\* correct cache serves the backing's own state), so it is redundant but
+\* not vacuous, and weaker: it would accept dcfs serving another state the
+\* regime admits than the one the backing was actually left in, which
+\* CrashSafe rules out. Stated for what it says. It covers D only: F's
+\* cached attributes may be behind the backing filesystem's after a power
+\* loss (FileOK, FileExact's `lost`; limitations/atime_power_loss_while_open).
+CrashRefines ==
+    LET m == MetaCrash
+        dm == {DMeta(x) : x \in m}
+    IN \A s \in dbOpts, t \in m : Observed(RecoverDirty(s), t) \in dm
+
 \* What the cache knows: the names it answers without the backing
 \* filesystem, and whether D's attributes are valid.
 Known(d) == [names |-> {n \in Names : ReadState(d, n) # Unknown},
              attrs |-> d.attrValid]
 
-\* The step is a mutation's backing syscall: the actions CSys, USys, RSys
+\* The step is a mutation's backing syscall: the actions CSys, USys, RSys,
+\* ASys (and a file's write, WSys, which changes nothing of D's)
 \* themselves, not merely a step from their pc (another step from there,
 \* such as an interrupt, is no effect point).
 SyscallStep == \E p \in Procs :
                  \/ CreateSyscall(p) \/ UnlinkSyscall(p) \/ RenameSyscall(p)
-                 \/ AttrChangeSyscall(p)
+                 \/ AttrChangeSyscall(p) \/ WriteSyscall(p)
 
 \* The fills the trace validation adds outside any request slot (a child's
 \* or parent's row, the root's attributes at InitRoot: Trace.tla's
@@ -1702,7 +1960,7 @@ ReplyWitnessed(r, v) ==
     CASE r.kind \in FileKinds -> v.e = "ok" /\ v.a = {}
       [] v.e \in {"EAGAIN", "EINTR"} -> r.eff # "ok" /\ v.a = {}
       [] r.eff # None -> v.e = r.eff /\ v.a = {}
-      [] r.kind = "sync" -> v.e = "ok" /\ v.a = {}
+      [] r.kind \in SyncKinds -> v.e = "ok" /\ v.a = {}
       [] OTHER ->
            /\ v.a # {} /\ v.a \subseteq Window(r)
            /\ {QK(x) : x \in v.a} = QueryKinds(r.kind)
