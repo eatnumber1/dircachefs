@@ -324,6 +324,23 @@ the oops, the analysis, a suggested fix in prose, the `#regzbot` line only
 if it is a regression with a known-good version), with the maintainers and
 lists from the pinned tree's MAINTAINERS. No patches: russ decides whether
 to write one. Owner: dcfs-investigator, lane-5.
+Done 2026-10-09, merged badacf3 (lane-5, three commits; the first agent was
+blocked by the auto-mode check, a fresh one was not). Reproducers under
+`tools/kernel_bugs/{ext4_casefold_tune,btrfs_failed_inode_read}/`
+(POSIX sh + a static helper, no dcfs), installed into the initramfs under
+/kernel_bugs/ and proven by two manual guest targets (`kernel_bug_*_test`,
+`kernel_failure = "expected"`). btrfs cause proven: relatime from a listing
+updates the directory's inode item only in memory, `btrfs_fill_inode`'s
+fast path leaves `index_cnt = -1`, a failed on-disk read then goes through
+`iget_failed` -> `make_bad_inode` (S_IFREG), and `btrfs_destroy_inode`
+reads `index_cnt` as `csum_bytes` (shared storage since d9891ae28b0d,
+v6.11): spurious; an unanswered syzbot report (2024-09-12, 6.11-rc6) exists,
+so the draft is a reply. ext4 present in mainline af32da41b032 (7.3-rc6);
+no prior report found (lore 403 to the tool; mirror + web searched).
+Drafts with To/Cc from the pinned MAINTAINERS in
+`notes/kernel-bugs-2026-10-09.md`. NEEDS RUSS to send: search lore by hand
+(two queries in the note), fill in the syzbot Message-ID, decide on
+today's mainline reviewers, attach reproduce.sh and the helper.
 
 ## 26.14e Noisy run (russ, 2026-10-09: "Yes to noisy job")
 
