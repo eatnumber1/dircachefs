@@ -16,9 +16,13 @@ genrule(
     outs = ["dcfs.8.md"],
     cmd = "$(location //tools/man:extract_sections) $(location //:README.md) " +
           "$(location //dcfs:version.h) Usage Options Flags Example " +
-          "'Mounting over the source directory' 'Running under systemd' " +
-          "'Exporting over NFS' 'Shutdown, crashes and restarts' " +
-          "Limitations > $@",
+          "Remounting Logging 'Mounting over the source directory' " +
+          "'Instances, trees and boundaries' 'Running under systemd' " +
+          "'Responsibilities of the administrator' 'Exporting over NFS' " +
+          "'Shutdown, crashes and restarts' " +
+          "'Wiping the cache of one instance' " +
+          "'After an out-of-band change' 'Upgrading dcfs' " +
+          "'What the log messages mean' Limitations > $@",
     tools = ["//tools/man:extract_sections"],
 )
 

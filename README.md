@@ -505,7 +505,7 @@ a different source directory; delete it to start with a cold cache.
 
 ## Operations
 
-### Wiping one instance's cache
+### Wiping the cache of one instance
 
 Each instance has its own database, so wiping one touches nothing else.
 Unmount the instance (and anything mounted inside it: `umount -R /data/sub`),
