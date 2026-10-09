@@ -224,6 +224,14 @@ In this order, each with a known-bug variant and trace validation:
   the forged-request harness with `--wrap` holds forcing the model's
   interleavings (MongoDB's technique that worked; CCF's simulation
   driver). 1-2 weeks, after 12.4.
+  Also (russ, 2026-10-09, "I agree"): replay every known_bug counterexample
+  through the harness as a generated test (a TLC trace is a script of
+  requests, crashes and fills), starting with 23.11's ten-state ghost-row
+  trace, so the model-to-code direction is closed for each finding. And a
+  standing rule for formal/README.md "Changing the model" (added by 12.12a):
+  every table or column that mirrors the backing has its row lifecycle
+  (creation and deletion) under the crash prefixes in the model, not only
+  its contents; 12.13's sweep says whether the invariants about it bite.
   Approved (russ, 2026-10-09): not a spike. The generated tests are NOT
   checked in: a Bazel target runs TLC (or reads its dumped state graph),
   generates the test cases every build, and a test target runs them; the

@@ -155,3 +155,27 @@ read-only (WAL reader; only while the daemon is held or idle).
 
 Owner: Opus for 11.1 and 11.3-11.5 (crash and failure invariants), Sonnet
 for 11.2 and 11.6. Every step uses the cache checker built in Phase 8.
+
+## 11.7 Identity oracle after every crash; a row-durability checker rule (russ, 2026-10-09: "I agree")
+
+Why: 23.11's model found a latent bug (a daemon crash or a failed phase 3
+between a create's syscall and its recording, then a lookup, then a power
+loss leaves a clean row of a file that no longer exists) that no test
+caught, because every crash test's oracle is path-shaped (walk and list
+after recovery, which is correct here: the parent's durable mark makes
+recovery forget its entries) and the ghost is reachable only through a
+nodeid or handle held across the cut.
+- Identity oracle: one `lib.sh` helper (using `fhtest`) takes the handle
+  and nodeid of every object before each cut or crash; after recovery
+  every one must resolve to the same object (identity compared) or fail
+  ESTALE, never answer with attributes of something gone. Applied to
+  fault_power, the ACE sequences, fault_recover, and the harness `Restart`
+  fixtures in dir_cache_fs_test (a `HandlesOf` snapshot before, a check
+  after). Shown failing first on the 23.11 bug's sequence (the branch is
+  in lane-1; the test lands with or before the fix, failing first).
+- Checker rule (the checking build the small and medium tiers boot): a row
+  with valid attributes whose parent has a mutation mark is itself dirty
+  unless its create is known durable (the rule the 23.11 review asked for
+  at ChildRowRecorded), with its known-bad self-check.
+Owner: dcfs-protocol (the oracle's identity comparison is identity code),
+first free lane; coordinate with 23.11's code half (same tests).

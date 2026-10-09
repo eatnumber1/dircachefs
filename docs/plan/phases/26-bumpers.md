@@ -344,6 +344,15 @@ today's mainline reviewers, attach reproduce.sh and the helper.
 
 ## 26.14e Noisy run (russ, 2026-10-09: "Yes to noisy job")
 
+Also in this job (russ, 2026-10-09, "I agree"): mixed-fault sequences.
+The ACE generator today runs pairs of one fault kind; the 23.11 bug needs
+a daemon crash (or a failed phase 3 through the fault points), a lookup,
+then a power loss before the backing commits. Extend the generator to
+seeded sequences of three events drawn from {daemon crash, power loss
+ahead, power loss behind, failed phase 3, lookup, listing, sync, handle
+taken}, judged by 11.7's identity oracle plus the path oracle; the long
+tail runs in this weekly job, a small fixed sample in the large tier.
+
 26.14 made the default guests deterministic (writeback off, one vCPU),
 which also removed the noise that shakes out races: timer-driven writeback
 landing mid-operation, real parallelism between the daemon's threads and

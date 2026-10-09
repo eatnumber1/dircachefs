@@ -2300,3 +2300,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   cov-lcov.sh, fork fixture in coverage_pipeline_test. Lane-5 free: 25.7 + 25.8 + 7.1d dispatched
   as one implementer step (style rules, the no-test-only-knobs inventory and repo-shape check, the
   Abseil tips precedence, the UAPI shims removed).
+- russ (2026-10-09) asked why 23.11's latent bug escaped testing and agreed to the answer: path-
+  shaped crash oracles, no handles held across cuts, single-fault sequences, no row lifecycle in the
+  model. Queued: 11.7 (identity oracle after every crash + a row-durability checker rule, first
+  free lane, dcfs-protocol), mixed-fault three-event sequences folded into 26.14e, counterexample
+  replay into 12.10, and a "row lifecycles under crash prefixes" rule for formal/README via 12.12a.
