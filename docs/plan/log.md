@@ -2164,3 +2164,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   order: the first lane to report hands its checkout to 26.16 (fetch step-26.16 from lane-7, shut
   lane-7's server down, re-point the agent); no other dispatch takes a freed lane before 26.16 has
   one with an extracted toolchain.
+- russ (2026-10-09): fsuuid_compat.h unnecessary with hermetic headers. Confirmed against the
+  sysroot's linux/fs.h (6.12 defines fsuuid2 and FS_IOC_GETFSUUID); testutil.c's FS_IOC_SHUTDOWN
+  shim is the same case. 7.1d queued (mechanical, after 26.16's P0), with a style rule: no copies
+  of UAPI definitions.
