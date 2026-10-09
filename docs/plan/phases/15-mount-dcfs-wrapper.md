@@ -334,8 +334,15 @@ boot, since the microvm has no bootloader) (Debian rootfs booting systemd in the
 (its prerequisite, a root-owned Debian image, was done in Phase 4c:
 Bazel-built e2fsprogs builds the image from the root-owned package tar)
 and its tests. Owner: Sonnet.
-**15.6 status 2026-10-09:** reported (lane-6, two commits), review
-passed, rebasing over 26.14/26.14c/7.1c/15.7 for the merge. As built: Debian
+**15.6 status 2026-10-09:** merged 4fd3136 (lane-6, four commits; one
+conflict in qemu_test.bzl with 26.14's `cpus`; nothing in the image resets
+the quiet-kernel sysctls, a check asserts it under systemd; of 15.7's nine
+systemd statements six asserted, two partly, `systemctl restart`
+contradicted and the README fixed; the test's waits are event-based: a
+python3 pidfd `select` with no bound, `journalctl --sync`, a fifo; two
+polls left for 15.6b, lib.sh's `quiesce_daemon` and the sampler's
+first-line wait in systemd_run.sh; the README's interim restart recipe is
+`umount`, `flock <cache db> true` with no bound, `mount`). As built: Debian
 13 nocloud amd64 20261001-2618 as an `http_file` pinned by Debian's
 published SHA512; booted by the test kernel (6.18; the image's 6.12 lacks
 FS_IOC_GETFSUUID and the microvm has no bootloader) from a qcow2 overlay

@@ -2266,3 +2266,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   syscall and phase 3, restart, lookup records the child clean, power loss -> a clean row of a
   file that no longer exists, served by handle; neither swept nor probed at start. Opus review
   dispatched (is the bug real in C++, are the two rules minimal, fidelity, known_bugs, trace note).
+- 15.6 merged (4fd3136, four commits; the last makes every wait in the test and the README recipe
+  event-based: pidfd select, journalctl --sync, a fifo; `flock` with no bound). Lane-6 continues
+  with 15.6b (same agent: the umount.fuse.dcfs helper waiting on the daemon's pidfd, the
+  banned-symbols and repo-shape enforcement of the no-timers rule, busy_timeout=5000 removed, the
+  two remaining polls, style.md's rule).
