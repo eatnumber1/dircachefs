@@ -17,7 +17,8 @@
 #       genrule passes $(SRCS), which includes the named files above
 #       again. Step 26.3: the files of @alpine_strace//:root (matched by
 #       their "alpine_strace/root/" path) land at their Alpine paths; so
-#       (step 11.1) do dmsetup's, "alpine_dmsetup/root/".
+#       (step 11.1) do dmsetup's, "alpine_dmsetup/root/". xfstests' fsstress,
+#       fsx and replay-log and //test/qemu:crash_states go to /bin.
 #
 #   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <test-binary> \
 #       <disk0-device-or-'-'> <args> [name:path...]
@@ -267,8 +268,9 @@ else
 			cp "$f" "$dest"
 			;;
 		*/pjdfstest) cp "$f" "$ROOT/pjdfstest/pjdfstest" ;;
-		*xfstests*/fsstress | *xfstests*/fsx)
-			# step 11.2b: xfstests' fsstress and fsx (//third_party/xfstests).
+		*xfstests*/fsstress | *xfstests*/fsx | *xfstests*/replay-log | */test/qemu/crash_states)
+			# step 11.2b: xfstests' fsstress and fsx (//third_party/xfstests);
+			# step 12.14: its replay-log and our crash_states.
 			cp "$f" "$ROOT/bin/$(basename "$f")"
 			copy_deps "$ROOT/bin/$(basename "$f")"
 			;;

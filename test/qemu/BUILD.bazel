@@ -81,6 +81,8 @@ config_setting(
         "@pjdfstest//:tests",
         "@xfstests//:fsstress",  # step 11.2b
         "@xfstests//:fsx",
+        "@xfstests//:replay-log",  # step 12.14
+        ":crash_states",  # step 12.14
         "@alpine_busybox//:root/bin/busybox.static",
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "@alpine_dmsetup//:root",  # step 11.1: /sbin/dmsetup and libdevmapper
@@ -105,6 +107,23 @@ config_setting(
     ("initramfs", "//dcfs:main_static"),
     ("initramfs_checked", "//dcfs:main_static_checked"),
 ]]
+
+# Step 12.14: reads dm-log-writes logs, writes a chosen subset of a log's
+# entries to a device, cuts and forges SQLite WAL files and fingerprints the
+# database a WAL recovers to (guest/sqlite_durability.sh). Statically linked
+# like //tools:testutil, and for the same reason.
+cc_binary(
+    name = "crash_states",
+    testonly = 1,
+    srcs = ["crash_states.c"],
+    features = select({
+        ":asan_build": [],
+        ":ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
+    linkstatic = True,
+    deps = ["@sqlite//:sqlite3"],
+)
 
 qemu_test(
     name = "boot_test",
@@ -259,6 +278,67 @@ qemu_test_matrix(
     size = "medium",
     other_size = "large",
     timeout = "long",  # run-qemu.sh gives each of its 2n boots an equal share
+)
+
+# Step 12.14: the model's abstraction of the cache database's durability
+# (formal/dcfs.tla's Commit and dbOpts) against what SQLite leaves on a disk
+# that reorders writes: the cache filesystem on dm-log-writes, a scripted
+# run of dcfs, and every FLUSH prefix and FLUSH/FUA-respecting write subsets
+# of the log replayed, recovered and judged (guest/sqlite_durability.sh).
+# The matrix is over the CACHE filesystem (vdc), where the database lives;
+# the backing filesystem is ext4. The log, the replay disk and the
+# snapshots' store are loop devices over sparse tmpfs files (a fifth virtio
+# disk's interrupt is the RTC's). The checking build: the cost counter's
+# synced transactions ($DCFS_COUNTERS_FILE) are the test's record of dcfs's
+# intent. Measured 2026-10-09 (host load 13-18): ext4 72 s, xfs 54 s, btrfs
+# 209 s (2026 states); peak guest memory used 103-128 MiB of 384, the log
+# and the replay disk in tmpfs growing with the script.
+[qemu_test(
+    name = "sqlite_durability_test_" + fstype,
+    checked_dcfs = True,
+    disks = [
+        ("vdb", "ext4", "64M"),
+        ("vdc", fstype, "320M"),
+    ],
+    guest_script = "guest/sqlite_durability.sh",
+    mem = 384,
+    modules = [
+        "dm_log_writes",
+        "dm_snapshot",
+        "loop",
+    ],
+    size = "large",
+    timeout = "long",
+) for fstype in [
+    "ext4",
+    "xfs",
+    "btrfs",
+]]
+
+alias(
+    name = "sqlite_durability_test",
+    actual = ":sqlite_durability_test_ext4",
+)
+
+# The same on ext4 with a short script (seven operations) and a budget of 500
+# write subsets, for the presubmit tier: 30 s, 101 MiB used (2026-10-09).
+qemu_test(
+    name = "sqlite_durability_short_test",
+    checked_dcfs = True,
+    cmdline = "dcfs_sd_script=short dcfs_sd_budget=500",
+    disks = [
+        ("vdb", "ext4", "64M"),
+        ("vdc", "ext4", "320M"),
+    ],
+    guest_script = "guest/sqlite_durability.sh",
+    mem = 384,
+    modules = [
+        "dm_log_writes",
+        "dm_snapshot",
+        "loop",
+    ],
+    size = "medium",
+    timeout = "moderate",
 )
 
 # Step 11.2: bounded sequences of operations with a power cut after them

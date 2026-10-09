@@ -199,7 +199,12 @@ on the detail:
   regime allows (`Reorder`): with `"seq"`, which every configuration but
   those of step 12.8 uses, a prefix of its operations (more than real
   journals allow, which commit whole transactions); with `"metaprefix"` or
-  `"ext4"` also reorderings of them.
+  `"ext4"` also reorderings of them. The database half (a normal commit may
+  be lost, an acknowledged synced one may not, survivors are a prefix) is
+  checked against SQLite by `//test/qemu:sqlite_durability_test` (step
+  12.14: dm-log-writes replays of the cache disk to every FLUSH and to
+  FLUSH/FUA-respecting reorderings, on ext4, xfs and btrfs;
+  `test/qemu/guest/sqlite_durability.sh`).
 - `clean_shutdown` is modelled but changes nothing: `StartRun` runs
   `RecoverDirty` whatever it says, and `RecoverDirty` with an empty dirty
   set does nothing.

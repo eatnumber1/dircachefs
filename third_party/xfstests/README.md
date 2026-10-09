@@ -1,9 +1,13 @@
-# xfstests (pinned): fsstress and fsx
+# xfstests (pinned): fsstress, fsx and replay-log
 
 Why: `fsstress` (random concurrent namespace and data operations) and `fsx`
 (data, size and mmap correctness) are the standard file system stress tools;
 the `stress_*` QEMU tests run them against dcfs and compare the cache with the
 backing file system afterwards (`test/qemu/guest/stress.sh`, plan step 11.2b).
+`replay-log` (from `src/log-writes/`) replays a dm-log-writes log onto a
+device; `sqlite_durability_test` uses it to bring its replay device to each
+FLUSH of the cache disk's log (`test/qemu/guest/sqlite_durability.sh`, plan
+step 12.14).
 xfstests is GPL-2.0: it is fetched and built by Bazel as a test-only
 dependency and its code is never copied into this repository.
 
@@ -11,8 +15,9 @@ What is here:
 
 - `BUILD.xfstests`: the Bazel overlay for `@xfstests`. The autoconf build is
   not used; `config.h` is written by hand for Linux and glibc. Only
-  `ltp/fsstress.c` and `ltp/fsx.c` are built, statically linked (dynamically
-  under a sanitizer, like pjdfstest), both `testonly`.
+  `ltp/fsstress.c`, `ltp/fsx.c` and `src/log-writes/` (`replay-log`, which
+  needs nothing but libc) are built, statically linked (dynamically under a
+  sanitizer, like pjdfstest), all `testonly`.
 - `shim/xfs/xfs.h` (`//third_party/xfstests:xfs_shim`): our own stand-in for
   xfsprogs' `<xfs/xfs.h>`, which `fsstress.c` and `fsx.c` need for the XFS
   ioctl structures, `xfsctl()` and `getopt_long`.
@@ -55,10 +60,11 @@ Declared in `MODULE.bazel` (`http_archive` `xfstests`).
 3. In this file's "Pin" section, set the tag, the tag's commit id
    (`git ls-remote` above, the `^{}` line), the URL, both forms of the hash
    and the date.
-4. Build with `bazel build @xfstests//:fsstress @xfstests//:fsx`; a new tag
-   may need more `HAVE_*` in `BUILD.xfstests`'s `config.h` or more
-   declarations in the shim header.
+4. Build with `bazel build @xfstests//:fsstress @xfstests//:fsx
+   @xfstests//:replay-log`; a new tag may need more `HAVE_*` in
+   `BUILD.xfstests`'s `config.h` or more declarations in the shim header.
 5. Run `//test/qemu:stress_short_test_ext4` and the large tier; the set of
    features fsx disables (`guest/stress.sh`) may change with the new tools.
+   Run `//test/qemu:sqlite_durability_test` too (replay-log's options).
 6. Update the version in `tools/sbom/pins.json` only if its extraction rule
    needs it (it reads `strip_prefix`).

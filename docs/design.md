@@ -990,7 +990,15 @@ affected records read `unknown` and are re-read on demand.
 This is harder. SQLite runs in WAL mode at `synchronous=NORMAL`, so an
 ordinary commit is not fsynced, and the backing filesystem commits its
 journal on its own schedule. Each comes back as some prefix of what was
-written, independently. Without further measures the database could come
+written, independently. For the database that is the model's abstraction
+(`formal/README.md`, "Abstractions"): a normal commit may be lost, a
+`kSync` commit that returned may not, and the commits that survive are a
+prefix. `sqlite_durability_test` checks it on ext4, xfs and btrfs (step
+12.14): the cache disk under dm-log-writes, every FLUSH prefix of the log
+and FLUSH/FUA-respecting reorderings and torn writes of it replayed and
+recovered by the filesystem and by SQLite, each recovered database the
+state after some commit, never before the last acknowledged `kSync`
+commit (`test/qemu/guest/sqlite_durability.sh`). Without further measures the database could come
 back **behind** the backing filesystem (phase 1 lost, the syscall kept: a
 deleted file still cached as present) or **ahead** of it (phase 3 kept, the
 syscall lost: a created file cached as present, or an unlinked name cached

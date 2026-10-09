@@ -1,6 +1,7 @@
 # BUILD file for @xfstests (see MODULE.bazel's http_archive and
 # third_party/xfstests/README.md): fsstress and fsx, the two programs of
-# xfstests' ltp/ directory, as test-only binaries for the QEMU guest. The
+# xfstests' ltp/ directory, and replay-log (src/log-writes/, step 12.14), as
+# test-only binaries for the QEMU guest. The
 # autoconf build is not used; config.h is written here for a Linux and glibc
 # host, the only target this project builds for.
 #
@@ -128,4 +129,23 @@ cc_binary(
         ":headers",
         "@dircachefs//third_party/xfstests:xfs_shim",
     ],
+)
+
+# src/log-writes/replay-log (step 12.14): replays a dm-log-writes log onto a
+# device, entry by entry, to a mark or an entry count. The crash-state test
+# of the cache database (//test/qemu:sqlite_durability_test) uses it to move
+# its replay device from one FLUSH of the log to the next. Needs nothing but
+# libc and the kernel's UAPI headers.
+cc_binary(
+    name = "replay-log",
+    testonly = 1,
+    srcs = [
+        "src/log-writes/log-writes.c",
+        "src/log-writes/log-writes.h",
+        "src/log-writes/replay-log.c",
+    ],
+    copts = _COMMON_COPTS + _NO_SAN,
+    features = _STATIC,
+    linkstatic = True,
+    visibility = ["//visibility:public"],
 )
