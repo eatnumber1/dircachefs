@@ -114,7 +114,9 @@ fi
 # Flush's own RecordWrittenAttrs runs first (up to 10s), then Release's own
 # (up to 10s) -- for Release's refresh, the one 2a4f672 fixed, to be the
 # one that actually fails (not just Flush's), the lock must outlive both
-# back-to-back windows, ~20s worst case; 30s leaves ample margin.
+# back-to-back windows, ~20s worst case; 30s leaves ample margin. The lock is
+# let go as soon as the Release's failure is in the daemon's log (below), the
+# event the long hold is for, instead of after the whole 30s.
 "$TESTUTIL" sqlite-lock "$DB" 30 >/tmp/sqlite-lock.out 2>&1 &
 LOCK_PID=$!
 wait_for_line /tmp/sqlite-lock.out READY "$LOCK_PID" || true
@@ -130,8 +132,13 @@ kill -KILL "$HOLD_PID" 2>/dev/null || true
 wait "$HOLD_PID" 2>/dev/null || true
 HOLD_PID=""
 
-# Wait for sqlite-lock to actually release the lock (its 30s sleep) and
-# exit, then give the daemon a moment to finish processing FLUSH/RELEASE.
+# Wait for the Release's refresh to have failed under the lock (the warning
+# checked below; up to the 30s the lock is held for), then let go of the
+# lock (killed: the transaction it holds is rolled back, as its COMMIT of
+# nothing would have left it) and give the daemon a moment to finish
+# processing FLUSH/RELEASE.
+wait_for_line "$LOG" "Release: could not refresh the attributes" "" 40 || true
+kill "$LOCK_PID" 2>/dev/null || true
 wait "$LOCK_PID" 2>/dev/null || true
 LOCK_PID=""
 sleep 2

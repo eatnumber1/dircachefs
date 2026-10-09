@@ -312,14 +312,16 @@ start_daemon() {
 	return 1
 }
 
-# wait_for_line FILE PATTERN [PID]: waits up to 10s, looking every 0.1s, for
-# a line of FILE matching PATTERN (grep -q); returns 1 if the time runs out,
-# or if PID (when given) is gone and the line is still not there. For the
-# READY/MAPPED/STORED lines of testutil's holders: a look every second made
-# each wait cost a whole second.
+# wait_for_line FILE PATTERN [PID [SECONDS]]: waits up to SECONDS (default
+# 10), looking every 0.1s, for a line of FILE matching PATTERN (grep -q);
+# returns 1 if the time runs out, or if PID (when given and not empty) is
+# gone and the line is still not there. For the READY/MAPPED/STORED lines of
+# testutil's holders and for a line of the daemon's log: a look every second
+# made each wait cost a whole second.
 wait_for_line() {
 	wfl_n=0
-	while [ "$wfl_n" -lt 100 ]; do
+	wfl_max=$((${4:-10} * 10))
+	while [ "$wfl_n" -lt "$wfl_max" ]; do
 		grep -q -- "$2" "$1" 2>/dev/null && return 0
 		if [ -n "${3:-}" ] && ! kill -0 "$3" 2>/dev/null; then
 			grep -q -- "$2" "$1" 2>/dev/null && return 0
