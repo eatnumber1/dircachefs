@@ -286,9 +286,11 @@ dcfs_options() {
 
 # start_daemon LOG [extra dcfs flags...]: starts dcfs against $SRC/$DB,
 # mounted at $MNT, with each extra flag as a dcfs.<flag> mount option; waits
-# up to 10s for the mount to appear. Sets DAEMON_PID and MOUNTED (1 if the
-# mount appeared, 0 if the wait timed out) and returns 0/1 to match. The
-# daemon stays in the foreground (dcfs.foreground), so DAEMON_PID is dcfs.
+# up to 10s for the mount to appear (looking every 0.1s: a mount takes a
+# fraction of a second, and a look every second made every start cost a
+# whole second). Sets DAEMON_PID and MOUNTED (1 if the mount appeared, 0 if
+# the wait timed out) and returns 0/1 to match. The daemon stays in the
+# foreground (dcfs.foreground), so DAEMON_PID is dcfs.
 start_daemon() {
 	log=$1
 	shift
@@ -296,7 +298,7 @@ start_daemon() {
 	DAEMON_PID=$!
 	MOUNTED=0
 	i=0
-	while [ "$i" -lt 10 ]; do
+	while [ "$i" -lt 100 ]; do
 		if is_mounted "$MNT"; then
 			MOUNTED=1
 			return 0
@@ -305,7 +307,7 @@ start_daemon() {
 			return 1
 		fi
 		i=$((i + 1))
-		sleep 1
+		sleep 0.1
 	done
 	return 1
 }
