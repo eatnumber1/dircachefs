@@ -133,7 +133,12 @@ fsuuid2` and `FS_IOC_GETFSUUID` (lines 71 and 233), so the header's
 `#ifndef` never fires. Remove `dcfs/fsuuid_compat.h` (users: dcfs/BUILD.bazel,
 device_id.cc, device_id_fault_test.cc include `<linux/fs.h>` directly) and
 the `#ifndef FS_IOC_SHUTDOWN` shim in tools/testutil.c (same header). A
-grep for other `#ifndef <UAPI constant>` shims found none. Rule for
+grep for other `#ifndef <UAPI constant>` shims found none.
+Correction (2026-10-09, from the step): the sysroot's `linux/fs.h` does
+NOT define `FS_IOC_SHUTDOWN` or `FS_SHUTDOWN_*` (the orchestrator's claim
+was wrong), so that shim stays, recorded in style.md as the one remaining
+UAPI copy, to go when the pin is raised. Removed instead: `fsuuid_compat.h`
+and an `FS_CASEFOLD_FL` shim in tools/kernel_bugs (defined at fs.h:290). Rule for
 style.md's includes section: no copies of UAPI definitions; the pinned
 sysroot's headers are the only source, and a missing definition means the
 pin is too old. Owner: dcfs-mechanical, any free lane after 26.16's P0.

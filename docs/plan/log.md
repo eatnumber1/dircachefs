@@ -2310,3 +2310,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   opens with identity untouched) recorded verbatim in phases/13. The H1 TLC configuration
   (MC_ident_power + out-of-band) goes into main on its own as a 12.12a item (lane-2's agent, from
   its branch); lane-2 then takes 11.7.
+- 25.7 + 25.8 + 7.1d reported (lane-5, three commits): style.md sections (precedence and the Tips
+  of the Week; no test-only things, with the production-default fake as the pattern; no UAPI
+  copies; why three syscall libraries), repo_shape `no_test_only_comments` (seven sites reworded,
+  `ErrnoNameTable()` removed as the one real conversion), agent definitions name the tips;
+  fsuuid_compat.h and an FS_CASEFOLD_FL shim gone; FS_IOC_SHUTDOWN stays (the sysroot lacks it:
+  plan corrected). Fast tier: one failure that is main's, from 26.14f (the fault test's forked
+  wrapper binary missing from the syscalls_backing golden list): sent back as a `26.14f:` fix in
+  the same branch, then rebase. Needs russ (small): `DirCacheFS`'s `friend
+  testonly::DirCacheFSPeer` is a test-only seam in production code that the checker's tests use;
+  style.md records the option of exposing that bookkeeping through ProtocolEvents instead.
