@@ -1,7 +1,7 @@
 // The backing-reaching wrappers of dcfs::syscalls: every syscall that takes
 // a backing fd, file handle or name (docs/style.md 1.8), plus mount and
-// umount2 for the tests. Only backing.cc, its lower layers, startup and the
-// tests may depend on //dcfs:syscalls_backing: //tools:syscalls_backing_users_test
+// umount2 (staging, remount, bench). Only backing.cc, its lower layers,
+// startup and the tests may depend on //dcfs:syscalls_backing: //tools:syscalls_backing_users_test
 // compares the dependents with a golden list. The process-local wrappers are
 // in syscalls.h.
 #ifndef DCFS_SYSCALLS_BACKING_H_

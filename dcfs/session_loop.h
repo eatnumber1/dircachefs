@@ -62,7 +62,8 @@ class SessionLoop final : public Interrupts {
 
   struct fuse_session *se_;
   std::function<void()> on_init_;
-  // The requests being served, innermost last (they nest only in tests).
+  // The requests being served, innermost last (one at a time in the
+  // blocking loop; Begin and End pair like a stack).
   std::vector<fuse_req *> serving_;
   // Messages drained at a checkpoint, to serve after the current request.
   // Each buffer's memory is libfuse's malloc (fuse_session_receive_buf).

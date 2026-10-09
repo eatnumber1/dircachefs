@@ -220,8 +220,8 @@ absl::Status MigrateV2ToV3(sqlite3::Connection &db) {
 // a stub directory, whose nodeid and attributes live in `stubs`; an older
 // cache's refused dentries have none, so they become unknown (the
 // tri-state rule: never absent) and the next lookup or listing probes them
-// again and records their stubs. IF NOT EXISTS: a test that makes a v2 or v3
-// database from a fresh one undoes only what those steps add.
+// again and records their stubs. IF NOT EXISTS: the step undoes only what it
+// adds, so it is safe over a database that already has part of it.
 absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
   ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
     CREATE INDEX IF NOT EXISTS dentries_refused ON dentries (parent)
@@ -270,8 +270,8 @@ absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
 // there are (an id that went before cannot be known: one may come back
 // once, as it could before), the triggers that keep a forgotten refusal's
 // stub, and the partial index of rows with nlink 0 (the sweep at every
-// start). The column only if missing: a test that makes an older
-// database from a fresh one may keep it.
+// start). The column only if missing: a database that already
+// has it keeps it.
 absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
   ABSL_ASSIGN_OR_RETURN(
       sqlite3::Statement * column,

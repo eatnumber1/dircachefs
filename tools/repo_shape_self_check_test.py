@@ -29,6 +29,12 @@ def good_tree(root):
           '. "$(dirname "$0")/helper.sh"\ndisabled kernel-bug "why" check\n')
     write(root, "test/qemu/guest/helper.sh")
     write(root, "test/qemu/guest/shard_one.sh")
+    write(root, "dcfs/a.h",
+          "// A cache of names, bounded by max_entries.\n"
+          "// Unit tests set it themselves; the suite's own tools too.\n"
+          "int a;  // the tests for this are in a_test.cc\n")
+    write(root, "dcfs/a_test.cc", "// only in tests, for testing.\n")
+    write(root, "dcfs/testonly/b.h", "// test-only helper.\n")
     write(root, "README.md",
           "# x\n\n## Limitations\n\n- the `kernel-bug` check.\n\n## More\n")
 
@@ -70,6 +76,42 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         write(self.root, "README.md",
               "# x\n\nthe kernel-bug check\n\n## Limitations\n\n- none\n")
         self.assertEqual(1, len(repo_shape.disabled_checks_listed(self.root)))
+
+    def test_test_reasons_in_production_comments_are_reported(self):
+        write(self.root, "dcfs/c.h",
+              "int a;  // they nest only in tests\n"
+              "/* A knob\n * for tests of the command line. */\n"
+              "// test-only\n// for testing\n// ForTest\n"
+              "// so that a test can reach it\n"
+              "// IF NOT EXISTS: a test that makes a v2 database\n"
+              "void f_for_test();\n")
+        write(self.root, "bench/d.cc", "// only used by tests\n")
+        problems = repo_shape.no_test_only_comments(self.root)
+        self.assertEqual(9, len(problems), problems)
+        self.assertIn("dcfs/c.h:1:", problems[0])
+        self.assertIn("dcfs/c.h:3:", problems[1])
+        self.assertTrue(any("bench/d.cc:1:" in p for p in problems))
+
+    def test_tests_and_testonly_sources_are_not_scanned(self):
+        self.assertEqual([], repo_shape.no_test_only_comments(self.root))
+
+    def test_suite_sentences_are_not_reasons(self):
+        write(self.root, "dcfs/e.h",
+              "// Run for the test suite by CI.\n"
+              "// The testonly builds install the recorder.\n")
+        self.assertEqual([], repo_shape.no_test_only_comments(self.root))
+
+    def test_allowlist_entry_silences_one_comment(self):
+        write(self.root, "dcfs/f.h", "// only in tests\n// for testing\n")
+        allow = {("dcfs/f.h", "only in tests"): "a reason"}
+        problems = repo_shape.no_test_only_comments(self.root, allow)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/f.h:2:", problems[0])
+
+    def test_allowlist_entry_needs_a_reason(self):
+        with self.assertRaises(ValueError):
+            repo_shape.no_test_only_comments(
+                self.root, {("dcfs/f.h", "only in tests"): ""})
 
 
 if __name__ == "__main__":

@@ -684,6 +684,50 @@ protocol event (`dcfs/protocol_events.h`) and `Trace.tla` action;
   (history: Opus 5.5 x103, Sonnet 5 x90, Fable 5.1 x82, Sonnet 5.5 x34,
   Haiku 4.5 x5). Never push.
 
+## 8. No test-only things in production code
+
+russ, 2026-10-09: "don't add test-only things to prod code. If a test needs
+a knob in the prod code, make that knob a real feature of the class /
+method. There should be zero `// only use in tests` style comments." This is
+stronger than `AGENTS.md`'s "test-only code never lives in production
+files": a seam a test needs (an injected clock, an observer, a fault point,
+a size limit) is designed, named and documented as a feature of the class,
+with its production default, and nothing in production code says it exists
+for tests.
+
+- **The pattern.** Constructor injection of an interface that has a
+  production implementation (`Context::clock`, `Context::interrupts`,
+  `SessionLoop`'s callbacks); options with production defaults
+  (`FillGuards::max_touched`); observers such as `ProtocolEvents`, whose
+  default is a no-op that the daemon runs with and that the trace tests and
+  the formal-verification builds replace. russ: "Some fakes are meant to be
+  used in production (such as the no-op trace logger that we use in tests
+  for formal verification)." A no-op default that production runs is the
+  pattern, not a violation. Fault injection is link-time (`-Wl,--wrap`) and
+  needs no seam at all.
+- **The anti-pattern.** A method, flag, branch, accessor, friend or comment
+  whose only reason is a test: `ErrnoNameTable()` (only tests read it; step
+  25.7 removed it), a `...ForTest` or `..._for_test` name, "only in tests",
+  "so that a test can". Describe a seam by what it does in production
+  ("the bound trades memory against how often a prune happens"), never by
+  who calls it.
+- **Enforced** by `tools/repo_shape.py` (`no_test_only_comments`, run by
+  `//tools:repo_shape_test` over `dcfs/` and `bench/` minus `*_test.cc` and
+  `testonly/`): a comment that gives tests as the reason for code
+  (`only in/for/by tests`, `for (the) tests`, `test-only`, `for testing`,
+  `so (that) a test can`, `a test that`) or a `ForTest`/`_for_test` name
+  fails the build. Sentences about the suite itself ("the test suite", "the
+  testonly builds") pass. An allowlist entry (`TEST_REASON_ALLOWLIST`) needs
+  a reason; there are none. The check cannot see a seam with a neutral
+  name: the reviewer asks of every new knob "what does this do in
+  production?".
+- One known seam: `DirCacheFS` befriends `testonly::DirCacheFSPeer`, which
+  the runtime invariant checks read the in-memory bookkeeping through (see
+  `docs/design.md`, "Runtime invariant checks"). It serves
+  the testonly checking build rather than a single test, and is kept for
+  now; whether the bookkeeping should be exposed through `ProtocolEvents`
+  instead is open (step 25.7's report).
+
 ## Appendix A: Convergence
 
 Sites that break Google style or a rule above, as of e680508 plus step 25.1. Run each

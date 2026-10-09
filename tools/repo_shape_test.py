@@ -25,6 +25,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_every_disabled_check_is_in_the_limitations(self):
         self.assertEqual([], repo_shape.disabled_checks_listed(ROOT["root"]))
 
+    def test_no_production_comment_gives_tests_as_the_reason(self):
+        self.assertEqual([], repo_shape.no_test_only_comments(ROOT["root"]))
+
 
 def main():
     rest = []

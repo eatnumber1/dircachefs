@@ -77,8 +77,8 @@ struct FillGuards {
   absl::flat_hash_map<int64_t, uint64_t> touched;
   // The prune bound: memory for `touched` against how often a prune makes
   // the fills running at that moment skip caching (and a sync point
-  // running then keep every dirty row). A setting rather than a constant
-  // so that a test can reach a real prune cheaply.
+  // running then keep every dirty row). A setting rather than a constant:
+  // the bound trades memory against how often a prune happens.
   size_t max_touched = size_t{1} << 16;
 };
 

@@ -7297,10 +7297,7 @@ class FaultIteration : public DirCacheFSTest {
 
 // `err`'s name, for a finding.
 std::string ErrnoName(int err) {
-  for (const auto &[name, value] : ErrnoNameTable()) {
-    if (value == err) return name;
-  }
-  return absl::StrCat("errno ", err);
+  return ErrnoToErrorName(err);
 }
 
 // The errnos to fail `call` with: EIO, and those the code branches on for

@@ -21,9 +21,7 @@ std::string ErrnoToErrorName(int error_number) {
 
 namespace {
 
-// The reverse (name -> errno) side of the errno<->name mapping. Exposed via
-// ErrnoNameTable() so tests can exercise the round trip for every entry
-// without duplicating the list.
+// The reverse (name -> errno) side of the errno<->name mapping.
 const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {
   static const absl::NoDestructor<absl::flat_hash_map<std::string, int>>
       kNamesToErrors(absl::flat_hash_map<std::string, int>{
@@ -275,10 +273,6 @@ const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {
 }
 
 }  // namespace
-
-const absl::flat_hash_map<std::string, int> &ErrnoNameTable() {
-  return NameToErrnoTable();
-}
 
 absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name) {
   if (std::string_view en = error_name;

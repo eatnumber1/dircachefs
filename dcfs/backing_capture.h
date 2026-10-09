@@ -55,7 +55,7 @@ struct CapturedTree {
 [[nodiscard]] absl::StatusOr<CapturedTree> CaptureBacking(
     const CaptureRequest &request);
 
-// The argv of the mount(8) run on `staging`, for tests of the command line.
+// The argv of the mount(8) run on `staging`.
 std::vector<std::string> NativeMountCommand(const CaptureRequest &request,
                                             const std::string &staging);
 

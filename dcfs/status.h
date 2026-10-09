@@ -1,9 +1,9 @@
 #ifndef DCFS_STATUS_H_
 #define DCFS_STATUS_H_
 
+#include <string>
 #include <string_view>
 
-#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/status_builder.h"
 #include "absl/status/statusor.h"
@@ -85,10 +85,6 @@ absl::StatusOr<int> GetErrnoFromStatus(const absl::Status &status);
 
 absl::StatusOr<int> ErrorNameToErrno(std::string_view error_name);
 std::string ErrnoToErrorName(int error_number);
-
-// The full name -> errno table used by ErrorNameToErrno(), exposed for
-// tests that need to exercise the round trip for every known entry.
-const absl::flat_hash_map<std::string, int> &ErrnoNameTable();
 
 // Returns the errno corresponding to `status`: the errno payload
 // (kErrnoTypeUrl, as set by ErrnoToStatus) if present, otherwise a fixed
