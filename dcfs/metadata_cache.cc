@@ -804,6 +804,26 @@ absl::StatusOr<UpsertResult> InsertNewRow(Context &ctx,
 
 }  // namespace
 
+absl::Status ReinstateInode(Context &ctx, InodeId id, uint32_t fuse_gen,
+                            const FileHandle &handle, const struct statx &stx,
+                            uint64_t backing_gen) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * insert,
+      ctx.db.Prepared("INSERT INTO inodes (id, device_id, backing_ino, "
+                      "backing_gen, fuse_gen, handle_type, handle, "
+                      "attrs_valid, " DCFS_ATTR_COLUMNS
+                      ") VALUES (?, ?, ?, ?, ?, ?, ?, 1, "
+                      DCFS_ATTR_PLACEHOLDERS ")"));
+  const std::string device = handle.device.Serialize();
+  ABSL_RETURN_IF_ERROR(insert->BindAll(id, Blob(device),
+                                       static_cast<uint64_t>(stx.stx_ino),
+                                       backing_gen,
+                                       static_cast<int64_t>(fuse_gen)));
+  ABSL_RETURN_IF_ERROR(BindHandle(*insert, 6, handle));
+  ABSL_RETURN_IF_ERROR(BindAttrs(*insert, 8, stx));
+  return insert->ExecuteOnce();
+}
+
 absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
                                          const FileHandle &handle,
                                          const struct statx &stx,

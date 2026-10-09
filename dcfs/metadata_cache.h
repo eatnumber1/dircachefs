@@ -452,6 +452,16 @@ absl::Status InvalidateInode(Context &ctx, InodeId id);
 // FUSE layer's call sites say which situation they are handling.
 absl::Status DeleteInode(Context &ctx, InodeId id);
 
+// Step 23.9: puts back the row of a removed object (DeleteInode'd, its
+// nodeid `id` and FUSE generation `fuse_gen` still held by the kernel) that
+// was linked into a name again: the backing identity `handle`, `stx` and
+// `backing_gen`, attributes current. Inside the caller's transaction (the
+// caller links the name and marks the row dirty in it). A row already
+// there for `id` or for the same backing identity is a constraint error.
+absl::Status ReinstateInode(Context &ctx, InodeId id, uint32_t fuse_gen,
+                            const FileHandle &handle, const struct statx &stx,
+                            uint64_t backing_gen);
+
 // --- Fills vs. concurrent mutations (audit-tristate F1) --------------------
 //
 // A fill reads the backing filesystem and then records what it read as

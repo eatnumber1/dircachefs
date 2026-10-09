@@ -79,6 +79,12 @@
  *       removes it (unlink(2) or rmdir(2)), and links it back as
  *       <path>.back through /proc/self/fd/<n> (linkat AT_SYMLINK_FOLLOW);
  *       prints "link=ok" or "link=ERR <errno-name>" (step 23.9).
+ *   testutil tmpfile-link <dir> <name>
+ *       open(2)s an O_TMPFILE file in <dir>, holds it with an O_PATH
+ *       descriptor through /proc/self/fd, closes the file, and links it as
+ *       <dir>/<name> through the O_PATH descriptor's magic link (linkat
+ *       AT_SYMLINK_FOLLOW); prints "link=ok nlink=<n>" (the linked name's)
+ *       or "link=ERR <errno-name>" (step 23.9).
  *   testutil heldstat <path>
  *       open(2)s <path> O_RDONLY, reads one byte, stat(2)s <path> while it
  *       is open, then closes it: one OPEN, one GETATTR, one FLUSH and one
@@ -580,6 +586,38 @@ static int cmd_removed_link(const char *path)
 		printf("link=ok\n");
 	}
 	close(fd);
+	return 0;
+}
+
+static int cmd_tmpfile_link(const char *dir, const char *name)
+{
+	char proc[64], path[4096];
+	struct stat st;
+	const char *err;
+	int fd = open(dir, O_TMPFILE | O_RDWR, 0644), opath;
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	snprintf(proc, sizeof(proc), "/proc/self/fd/%d", fd);
+	opath = open(proc, O_PATH);
+	if (opath == -1 || close(fd) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	snprintf(proc, sizeof(proc), "/proc/self/fd/%d", opath);
+	snprintf(path, sizeof(path), "%s/%s", dir, name);
+	if (linkat(AT_FDCWD, proc, AT_FDCWD, path, AT_SYMLINK_FOLLOW) == -1) {
+		err = strerrorname_np(errno);
+		printf("link=ERR %s\n", err ? err : "UNKNOWN");
+	} else if (stat(path, &st) == -1) {
+		print_err(errno);
+		return 1;
+	} else {
+		printf("link=ok nlink=%lu\n", (unsigned long) st.st_nlink);
+	}
+	close(opath);
 	return 0;
 }
 
@@ -2651,6 +2689,8 @@ int main(int argc, char *argv[])
 		return cmd_heldstat(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "removed-link") == 0)
 		return cmd_removed_link(argv[2]);
+	if (argc == 4 && strcmp(argv[1], "tmpfile-link") == 0)
+		return cmd_tmpfile_link(argv[2], argv[3]);
 	if (argc == 3 && strcmp(argv[1], "fsync") == 0)
 		return cmd_fsync(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "syncfs") == 0)

@@ -531,9 +531,11 @@ class DirCacheFS {
       cache::LookupResult dst, bool dst_exists, bool same_inode,
       bool exchange, std::optional<FileDescriptor> held_dst);
 
-  // Step 23.9: LINK of a removed object (whose record holds `fd`) as
-  // (newparent, newname): the backing filesystem's answer.
-  absl::Status LinkRemoved(FuseRequest &req, int fd, InodeId newparent,
+  // Step 23.9: LINK of removed object `src` (its record holds a
+  // descriptor) as (newparent, newname): the backing filesystem's answer;
+  // a link that succeeds (a closed, unnamed O_TMPFILE file) gives the
+  // object its row back under its nodeid.
+  absl::Status LinkRemoved(FuseRequest &req, InodeId src, InodeId newparent,
                            std::string_view newname);
 
   // The fd of some outstanding open of `id`, if any.

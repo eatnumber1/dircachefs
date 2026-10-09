@@ -1052,6 +1052,18 @@ class DirCacheFSTest : public ::testing::Test {
     return Send(FUSE_OPENDIR, static_cast<uint64_t>(id), body);
   }
 
+  // A LINK, and the entry it returned (zeroed on error).
+  std::pair<Reply, struct fuse_entry_out> LinkEntry(InodeId id,
+                                                    InodeId newparent,
+                                                    std::string_view newname) {
+    Reply reply = Link(id, newparent, newname);
+    struct fuse_entry_out entry {};
+    if (reply.error == 0 && reply.payload.size() >= sizeof(entry)) {
+      std::memcpy(&entry, reply.payload.data(), sizeof(entry));
+    }
+    return {reply, entry};
+  }
+
   Reply Link(InodeId id, InodeId newparent, std::string_view newname) {
     struct fuse_link_in in = {};
     in.oldnodeid = static_cast<uint64_t>(id);
@@ -4509,6 +4521,45 @@ TEST_F(DirCacheFSTest, LinkOfARemovedObjectAnswersAsTheBacking) {
       << "a negative entry (nodeid 0)";
   EXPECT_EQ(Lookup(kRootInode, "d-link").second.nodeid, 0u)
       << "a negative entry (nodeid 0)";
+}
+
+// Step 23.9 (review): the one removed object Linux links back: an
+// O_TMPFILE file (not O_EXCL) that was closed without a name while the
+// kernel still holds it (an O_PATH descriptor through /proc/self/fd). Its
+// last release retired its row into a removed record; the LINK succeeds on
+// the backing filesystem as it does there, and is recorded as a create is:
+// the record's nodeid comes back with its row, the name links to it, and
+// the row is dirty (a power loss that loses the link must not leave it
+// valid).
+TEST_F(DirCacheFSTest, LinkOfAClosedTmpfileGivesItsNodeidAName) {
+  Start();
+  // The backing filesystem's own answer, for the same sequence.
+  ASSERT_OK_AND_ASSIGN(FileDescriptor ref,
+                       syscalls::openat(AT_FDCWD, Path(""),
+                                        O_TMPFILE | O_RDWR, 0644));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor ref_path,
+                       syscalls::openat(AT_FDCWD,
+                                        absl::StrCat("/proc/self/fd/", *ref),
+                                        O_PATH));
+  ref = FileDescriptor();
+  EXPECT_THAT(syscalls::linkat(*ref_path, "", AT_FDCWD, Path("ref"),
+                               AT_EMPTY_PATH),
+              IsOk())
+      << "the backing filesystem links it";
+
+  Created tmp = Tmpfile(kRootInode, O_RDWR);
+  ASSERT_EQ(tmp.reply.error, 0);
+  EXPECT_EQ(Release(tmp.id, tmp.fh).error, 0);  // Closed, no name: retired.
+  EXPECT_THAT(cache::GetAttr(ctx_, tmp.id).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  auto [reply, entry] = LinkEntry(tmp.id, kRootInode, "t");
+  ASSERT_EQ(reply.error, 0) << "as the backing filesystem";
+  EXPECT_EQ(entry.nodeid, static_cast<uint64_t>(tmp.id)) << "its own nodeid";
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, tmp.id));
+  EXPECT_EQ(attr.backing_ino, InoOf(Path("t")));
+  EXPECT_EQ(Cached(kRootInode, "t"),
+            std::make_pair(LookupResult::Kind::kFound, attr.backing_ino));
+  EXPECT_THAT(Dirty(), Contains(tmp.id)) << "a created row is dirty";
 }
 
 // --- Boundary stubs (step 23.5) -------------------------------------------

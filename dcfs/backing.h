@@ -432,6 +432,18 @@ absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
 absl::Status LinkFd(Context &ctx, int fd, InodeId newparent,
                     std::string_view newname);
 
+// Step 23.9, phase 3 of a LinkFd that succeeded: the removed object (its
+// record's descriptor `fd`) has a name again. Its row comes back with its
+// nodeid `id` and FUSE generation `fuse_gen` (cache::ReinstateInode, from a
+// statx and probe of `fd`), newname links to it if `mutation` still Owns
+// newparent, and the row is dirty, all in one transaction, as
+// RecordNewChild records a created object. Returns the statx.
+absl::StatusOr<struct statx> RecordRelinked(Context &ctx,
+                                            const cache::Mutation &mutation,
+                                            InodeId id, uint32_t fuse_gen,
+                                            int fd, InodeId newparent,
+                                            std::string_view newname);
+
 // After LinkAt(src, newparent, newname) has succeeded: re-statx's `src`
 // (I/O, no transaction -- its nlink just changed) and then, in one
 // transaction, LinkDentry(newparent, newname, src) followed by

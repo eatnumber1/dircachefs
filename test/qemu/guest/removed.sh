@@ -85,6 +85,9 @@ echo "ext4 link of an unlinked file: $ref_lfile"
 mkdir /src/ref_ldir
 ref_ldir=$("$TESTUTIL" removed-link /src/ref_ldir 2>&1)
 echo "ext4 link of a removed directory: $ref_ldir"
+mkdir /src/ref_tdir
+ref_tlink=$("$TESTUTIL" tmpfile-link /src/ref_tdir t 2>&1)
+echo "ext4 link of a closed O_TMPFILE file: $ref_tlink"
 sync
 
 # --- the same through dcfs --------------------------------------------------
@@ -106,6 +109,14 @@ expect_same removed-file-link "$ref_lfile" \
 mkdir "$MNT/ldir"
 expect_same removed-dir-link "$ref_ldir" \
 	"$("$TESTUTIL" removed-link "$MNT/ldir" 2>&1)"
+mkdir "$MNT/tdir"
+expect_same closed-tmpfile-link "$ref_tlink" \
+	"$("$TESTUTIL" tmpfile-link "$MNT/tdir" t 2>&1)"
+if [ "$(stat -c %i "$MNT/tdir/t" 2>&1)" = "$(stat -c %i "$SRC/tdir/t" 2>&1)" ]; then
+	pass closed-tmpfile-link-served
+else
+	fail closed-tmpfile-link-served "dcfs: $(stat -c %i "$MNT/tdir/t" 2>&1); backing: $(stat -c %i "$SRC/tdir/t" 2>&1)"
+fi
 
 echo data >"$MNT/file"
 expect_same unlinked-opath-file "$ref_file" \

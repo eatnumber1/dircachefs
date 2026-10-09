@@ -1928,6 +1928,34 @@ absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
   return syscalls::linkat(*src_fd, "", *newparent_fd, newname, AT_EMPTY_PATH);
 }
 
+absl::StatusOr<struct statx> RecordRelinked(Context &ctx,
+                                            const cache::Mutation &mutation,
+                                            InodeId id, uint32_t fuse_gen,
+                                            int fd, InodeId newparent,
+                                            std::string_view newname) {
+  BackingCall(ctx, "statx");
+  ABSL_ASSIGN_OR_RETURN(struct statx stx,
+                        syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
+  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr,
+                        cache::GetAttr(ctx, newparent));
+  BackingCall(ctx, "ProbeObject");
+  ABSL_ASSIGN_OR_RETURN(ChildRecord record,
+                        ProbeObject(fd, "", parent_attr.device, stx));
+  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ABSL_RETURN_IF_ERROR(cache::ReinstateInode(
+        ctx, id, fuse_gen, record.handle, record.stx, record.backing_gen));
+    ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, id, record.xattrs));
+    if (mutation.Owns(newparent)) {
+      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, id));
+    }
+    // Dirty as a created row is (RecordNewChild): a power loss that keeps
+    // this transaction and loses the link must not serve the row.
+    const InodeId ids[] = {id};
+    return cache::MarkDirty(ctx, ids);
+  }));
+  return record.stx;
+}
+
 absl::StatusOr<struct statx> RecordNewLink(Context &ctx,
                                            const cache::Mutation &mutation,
                                            InodeId src, InodeId newparent,
