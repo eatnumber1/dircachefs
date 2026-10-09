@@ -33,7 +33,7 @@ Three dependences account for the per-test differences (every range in the
 appendix belongs to one of them).
 
 1. **The daemon's clean shutdown sometimes does not run (the large
-   differences: 19 tests with 100-220 lines each, and the single
+   differences: 7 tests with 146-220 lines each, and the single
    `FinishRun` lines in many more).** `atime_test_{ext4,xfs,btrfs}`,
    `copy_test_{ext4,xfs,btrfs}`, `release_leak_test`, `crash_test_{ext4,btrfs}`,
    `fault_backing_test_btrfs`, `names_random_test_{ext4,xfs}`,
@@ -50,7 +50,10 @@ appendix belongs to one of them).
    filesystem, the checkpoint, the clean-shutdown flag), while the script's
    SIGTERM arrives; once libfuse's session loop has ended SIGTERM has its
    default action again (`guest/init`, `dump_profraw`), so the daemon dies
-   wherever it is. Who wins is scheduling, with one vCPU as with two.
+   wherever it is. Who wins is scheduling, with one vCPU as with two. (The lines that differ
+   are exactly the shutdown path; the race itself was inferred from the
+   scripts and `guest/init`, not observed, so treat it as the leading
+   hypothesis.)
    Pin it: wait for the daemon to exit after a successful `umount` and only
    then `kill`.
 2. **FORGET versus BATCH_FORGET (`dir_cache_fs.cc:850-851,939-974`,
@@ -75,9 +78,9 @@ appendix belongs to one of them).
    is the client and the daemon interleaving: two processes on one vCPU still
    interleave, at the scheduler's pace.
 
-The two combined-report lines are instances of 1 (`FinishRun`'s early return,
-`atime_test_btrfs`: the shutdown's `SyncBacking` reached a filesystem that was
-already being unmounted or killed) and of an unexplained rare condition
+The two combined-report lines are instances of 1 (`FinishRun`'s early return in
+`atime_test_btrfs`: its `SyncBacking` failed in one run and the lines after it
+ran in the other) and of an unexplained rare condition
 (`DropLookups`, `bench_smoke_test_btrfs`: a FORGET for more lookups than
 counted, whose branch counter reads 4294967295, a saturated count; it needs
 its own look, it may be a real accounting bug). Not fixed in this step.
