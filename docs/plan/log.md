@@ -2031,3 +2031,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   page as built (not the plan text where they differ), packaging/dcfs.service removed; 15.5 and
   15.3 items left out rather than promised; systemd behaviour only as far as the code and man page
   show it (15.6 confirms the rest).
+- 26.14 reported (lane-2, seven commits on 40d779d): quiet-kernel sysctls in guest/init with the
+  reasons, vfs_cache_pressure kept at 100 (at 1 drop_caches dropped 2 of 1091 dentries and three
+  tests lost their FORGETs: a finding worth the step by itself), ASLR left (Abseil hash seed order
+  only), `cpus` knob default 1 with CONCURRENT_CPUS=2 for stress/cancel/pjdfstest/bench, fast tier
+  1701 s to 1282 s uncached under load 11-13, coverage_diff.py + test, determinism note. Review
+  passed; sent back for the rebase onto 93384a9 (BUILD and trace.bzl conflicts expected), the llvm
+  refetch, fast tier plus the new main targets. Three follow-ups queued in phases/26 (26.14b
+  cleanup race in the test scripts after 6.5; 26.14c a 4294967295 branch count at
+  dir_cache_fs.cc:817; 26.14d the ARowGoneDuringPhase3 flake with a pid-0 WARNING).

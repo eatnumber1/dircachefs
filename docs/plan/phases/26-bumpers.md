@@ -234,3 +234,39 @@ away rather than the clock:
   themselves have speed headroom to make up for it. Not now.
 Owner: dcfs-investigator; after the current dcfs/ branches land.
 
+Status 2026-10-09: reported (lane-2, seven commits), review passed, rebasing
+onto 93384a9 for the merge. As built: `dirty_writeback_centisecs=0`,
+`dirty_expire_centisecs=8640000` (a day; larger overflows the kernel's
+centisecond product), `laptop_mode=0`; `vfs_cache_pressure` stays at 100
+(deviation: at 1 the slab shrinkers' counts are scaled down so `drop_caches`
+dropped 2 of 1091 dentries and request_counts/syscall_traces/write_test lost
+their FORGETs; `quiet_kernel_test` checks drop_caches still drops); ASLR left
+at 2 (the only observable effect: Abseil's hash seed changes the iteration
+order of `DirCacheFS::Destroy` and `MountFds::Fds`; no test asserts it);
+`cpus` on qemu_test/qemu_test_matrix/tla_trace_test, default 1, stress,
+cancel, pjdfstest and bench keep 2 via CONCURRENT_CPUS. Fast tier wall
+1701 s to 1282 s with `--nocache_test_results` (host load 11-13: noisy).
+Two presubmit coverage runs of one commit: the combined report differs in
+two branches only; per test 65 of 141 differ (2280 line/branch
+differences): `tools/coverage_diff.py` + `coverage_diff_test` is the check,
+`notes/coverage-determinism-2026-10-08.md` the list. Follow-ups, each its
+own step, none fixed in 26.14:
+- 26.14b (harness): the daemon's clean-shutdown path (`FinishRun`,
+  `main.cc` after the session loop, `mount_fds.cc`, the sqlite close) runs
+  in one run and not the other for seven tests (146-220 lines each): the
+  agent's hypothesis, inferred from the scripts and not observed, is the
+  cleanup's `umount; kill` racing the daemon's post-loop shutdown. Make the
+  cleanup wait for the daemon's exit after the unmount (or kill it before,
+  deterministically), then rerun the diff. After 6.5 merges (same scripts).
+- 26.14c (coverage): `dir_cache_fs.cc:817` branch 1.2 (`DropLookups`) reads
+  4294967295 in one run of `bench_smoke_test_btrfs`: a counter underflow or
+  a profile-merge bug; find which before trusting branch counts there.
+- 26.14d (flake): `dir_cache_fs_test` `ARowGoneDuringPhase3IsNotLoggedAsAFailure`
+  failed once with the WARNING `supplementary groups unreadable ... pid 0`
+  and passed 5 of 5 reruns; cause not established (a request with pid 0 is
+  the kernel's own, e.g. a FORGET or writeback; the test's expectation on
+  the WARNING count may be racing one).
+- FORGET vs BATCH_FORGET after `drop_caches` and the session loop's
+  read-ahead/`-EINTR` paths differ between runs: document in
+  `docs/coverage.md` or pin; part of 26.14b's rerun.
+
