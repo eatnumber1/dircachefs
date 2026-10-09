@@ -531,6 +531,11 @@ class DirCacheFS {
       cache::LookupResult dst, bool dst_exists, bool same_inode,
       bool exchange, std::optional<FileDescriptor> held_dst);
 
+  // Step 23.9: LINK of a removed object (whose record holds `fd`) as
+  // (newparent, newname): the backing filesystem's answer.
+  absl::Status LinkRemoved(FuseRequest &req, int fd, InodeId newparent,
+                           std::string_view newname);
+
   // The fd of some outstanding open of `id`, if any.
   std::optional<int> OpenFdOf(InodeId id) const;
   // `id`'s shared backing descriptor, for the protocol events.

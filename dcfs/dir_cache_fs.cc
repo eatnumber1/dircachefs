@@ -1469,6 +1469,50 @@ absl::Status DirCacheFS::SettleUnlinkedFile(
   return backing::RefreshAttrs(ctx_, id);
 }
 
+absl::Status DirCacheFS::LinkRemoved(FuseRequest &req, int fd,
+                                     InodeId newparent,
+                                     std::string_view newname) {
+  ABSL_RETURN_IF_ERROR(RequireAttr(newparent).status());
+  // Phase 1 as for a create of `newname` (BeginCreate: the name and
+  // newparent's attributes unknown, newparent dirty): if the link happens,
+  // the name holds an object the cache has no row for.
+  std::vector<std::string> names = {std::string(newname)};
+  ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
+                        cache::BeginCreate(ctx_, newparent, newname));
+  if (absl::Status interrupted = Checkpoint(ctx_, "a link's syscall");
+      !interrupted.ok()) {
+    mutation.End();
+    return interrupted;
+  }
+  // Phase 2. The backing filesystem's answer is the reply: vfs_link refuses
+  // an inode with no link left (ENOENT) unless O_TMPFILE made it linkable,
+  // which a removed object never is (an unnamed O_TMPFILE file has a row:
+  // Tmpfile), and refuses a directory (EPERM).
+  ctx_.events->MutationSyscallStarting(ctx_);
+  absl::Status linked = backing::LinkFd(ctx_, fd, newparent, newname);
+  ctx_.events->MutationSyscall(ctx_, linked);
+  mutation.End();
+  // Phase 3, failed or not, by resolving the name again (a new link's
+  // object gets its row from the probe, as any name found on the backing
+  // filesystem does) and refreshing newparent's attributes.
+  ABSL_RETURN_IF_ERROR(ReresolveAfterFailure(newparent, names));
+  if (!linked.ok()) {
+    backing::RefreshAttrs(ctx_, newparent).IgnoreError();
+    return linked;
+  }
+  LogPhase3Failure("Link", backing::RefreshAttrs(ctx_, newparent));
+  ABSL_ASSIGN_OR_RETURN(cache::LookupResult found,
+                        backing::LookupOrPopulate(ctx_, newparent, newname));
+  if (found.kind != cache::LookupResult::Kind::kFound) {
+    return DcfsErrnoToStatus(
+        EIO, absl::StrCat("the link of a removed object as ",
+                          EscapeBytes(newname), " in directory ", newparent,
+                          " succeeded, but the name was gone at once"));
+  }
+  ABSL_ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(found.id));
+  return ReplyEntry(req, entry);
+}
+
 absl::Status DirCacheFS::Link(
     FuseRequest &req, fuse_ino_t ino, fuse_ino_t newparent_ino,
     std::string_view newname) {
@@ -1479,6 +1523,9 @@ absl::Status DirCacheFS::Link(
   if (cache::IsStub(src)) return RefuseStub(req, src, "link", EXDEV);
   if (cache::IsStub(newparent)) {
     return RefuseStub(req, newparent, "link", EXDEV);
+  }
+  if (auto removed = removed_.find(src); removed != removed_.end()) {
+    return LinkRemoved(req, *removed->second.fd, newparent, newname);
   }
 
   // Missing row -> ESTALE for both ends; see RequireAttr().

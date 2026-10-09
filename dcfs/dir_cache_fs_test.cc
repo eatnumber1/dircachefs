@@ -4460,6 +4460,57 @@ TEST_F(DirCacheFSTest, RemovedDirectoryCanBeChanged) {
   EXPECT_EQ(Fsyncdir(d).error, 0);
 }
 
+// Step 23.9: LINK of a removed object answers what the backing filesystem
+// answers for the same object: a link of the descriptor dcfs holds
+// (linkat AT_EMPTY_PATH). An unlinked file: ENOENT (vfs_link refuses an
+// inode with no link that O_TMPFILE did not make linkable); a removed
+// directory: EPERM (no directory is hard-linked). Each is compared with the
+// same operation on the backing filesystem, through a descriptor the test
+// holds on the same object.
+TEST_F(DirCacheFSTest, LinkOfARemovedObjectAnswersAsTheBacking) {
+  WriteFile(Path("f"));
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  Start();
+  auto [lookup_f, entry_f] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup_f.error, 0);
+  auto [lookup_d, entry_d] = Lookup(kRootInode, "d");
+  ASSERT_EQ(lookup_d.error, 0);
+  ASSERT_OK_AND_ASSIGN(FileDescriptor f_fd,
+                       syscalls::openat(AT_FDCWD, Path("f"), O_PATH));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor d_fd,
+                       syscalls::openat(AT_FDCWD, Path("d"), O_PATH));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor root_fd,
+                       syscalls::openat(AT_FDCWD, Path(""), O_RDONLY));
+  ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
+  std::string rmdir_body = "d";
+  rmdir_body.push_back('\0');
+  ASSERT_EQ(Send(FUSE_RMDIR, kRootInode, rmdir_body).error, 0);
+
+  const int f_backing = ErrnoOf(
+      syscalls::linkat(*f_fd, "", *root_fd, "f-back", AT_EMPTY_PATH));
+  EXPECT_EQ(f_backing, ENOENT) << "the backing filesystem's answer";
+  EXPECT_EQ(Link(static_cast<InodeId>(entry_f.nodeid), kRootInode, "f-link")
+                .error,
+            -f_backing)
+      << "an unlinked file";
+  const int d_backing = ErrnoOf(
+      syscalls::linkat(*d_fd, "", *root_fd, "d-back", AT_EMPTY_PATH));
+  EXPECT_EQ(d_backing, EPERM) << "the backing filesystem's answer";
+  EXPECT_EQ(Link(static_cast<InodeId>(entry_d.nodeid), kRootInode, "d-link")
+                .error,
+            -d_backing)
+      << "a removed directory";
+  // Neither name appeared, and the cache says so after the failed links.
+  EXPECT_EQ(ErrnoOf(syscalls::fstatat(AT_FDCWD, Path("f-link"),
+                                     AT_SYMLINK_NOFOLLOW)
+                        .status()),
+            ENOENT);
+  EXPECT_EQ(Lookup(kRootInode, "f-link").second.nodeid, 0u)
+      << "a negative entry (nodeid 0)";
+  EXPECT_EQ(Lookup(kRootInode, "d-link").second.nodeid, 0u)
+      << "a negative entry (nodeid 0)";
+}
+
 // --- Boundary stubs (step 23.5) -------------------------------------------
 //
 // A mount point or subvolume boundary below the source is served as a stub

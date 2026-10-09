@@ -1908,6 +1908,15 @@ absl::StatusOr<NewChild> RecordTmpfile(Context &ctx, InodeId parent, int fd) {
   return result;
 }
 
+absl::Status LinkFd(Context &ctx, int fd, InodeId newparent,
+                    std::string_view newname) {
+  ABSL_ASSIGN_OR_RETURN(
+      FileDescriptor newparent_fd,
+      OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
+  BackingCall(ctx, "linkat");
+  return syscalls::linkat(fd, "", *newparent_fd, newname, AT_EMPTY_PATH);
+}
+
 absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
                     std::string_view newname) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor src_fd,

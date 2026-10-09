@@ -77,6 +77,14 @@ echo "ext4 changes through an unlinked file's O_PATH fd: $ref_omut"
 mkdir /src/ref_cmut
 ref_cmut=$("$TESTUTIL" rmcwd-mutate /src/ref_cmut 2>&1)
 echo "ext4 changes to a removed cwd: $ref_cmut"
+# Step 23.9: linking a removed object back (ENOENT for a file, EPERM for a
+# directory, on every Linux filesystem).
+echo data >/src/ref_lfile
+ref_lfile=$("$TESTUTIL" removed-link /src/ref_lfile 2>&1)
+echo "ext4 link of an unlinked file: $ref_lfile"
+mkdir /src/ref_ldir
+ref_ldir=$("$TESTUTIL" removed-link /src/ref_ldir 2>&1)
+echo "ext4 link of a removed directory: $ref_ldir"
 sync
 
 # --- the same through dcfs --------------------------------------------------
@@ -91,6 +99,13 @@ fi
 
 mkdir "$MNT/cwd"
 expect_same removed-cwd "$ref_cwd" "$("$TESTUTIL" rmcwd "$MNT/cwd" 2>&1)"
+
+echo data >"$MNT/lfile"
+expect_same removed-file-link "$ref_lfile" \
+	"$("$TESTUTIL" removed-link "$MNT/lfile" 2>&1)"
+mkdir "$MNT/ldir"
+expect_same removed-dir-link "$ref_ldir" \
+	"$("$TESTUTIL" removed-link "$MNT/ldir" 2>&1)"
 
 echo data >"$MNT/file"
 expect_same unlinked-opath-file "$ref_file" \

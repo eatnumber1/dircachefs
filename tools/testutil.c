@@ -74,6 +74,11 @@
  *       open(2)s <path> O_RDONLY, maps its first page MAP_PRIVATE, close(2)s
  *       the descriptor, reads one byte through the mapping and unmaps it: a
  *       read that is no read(2) (step 23.8).
+ *   testutil removed-link <path>
+ *       Holds <path> (a file or a directory) with an O_PATH descriptor,
+ *       removes it (unlink(2) or rmdir(2)), and links it back as
+ *       <path>.back through /proc/self/fd/<n> (linkat AT_SYMLINK_FOLLOW);
+ *       prints "link=ok" or "link=ERR <errno-name>" (step 23.9).
  *   testutil heldstat <path>
  *       open(2)s <path> O_RDONLY, reads one byte, stat(2)s <path> while it
  *       is open, then closes it: one OPEN, one GETATTR, one FLUSH and one
@@ -551,6 +556,30 @@ static int cmd_mmapread(const char *path)
 		return 1;
 	}
 	printf("%d\n", (int) c);
+	return 0;
+}
+
+static int cmd_removed_link(const char *path)
+{
+	char proc[64], back[4096];
+	struct stat st;
+	const char *name;
+	int fd = open(path, O_PATH | O_NOFOLLOW);
+
+	if (fd == -1 || fstat(fd, &st) == -1 ||
+	    (S_ISDIR(st.st_mode) ? rmdir(path) : unlink(path)) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	snprintf(proc, sizeof(proc), "/proc/self/fd/%d", fd);
+	snprintf(back, sizeof(back), "%s.back", path);
+	if (linkat(AT_FDCWD, proc, AT_FDCWD, back, AT_SYMLINK_FOLLOW) == -1) {
+		name = strerrorname_np(errno);
+		printf("link=ERR %s\n", name ? name : "UNKNOWN");
+	} else {
+		printf("link=ok\n");
+	}
+	close(fd);
 	return 0;
 }
 
@@ -2620,6 +2649,8 @@ int main(int argc, char *argv[])
 		return cmd_mmapread(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "heldstat") == 0)
 		return cmd_heldstat(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "removed-link") == 0)
+		return cmd_removed_link(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "fsync") == 0)
 		return cmd_fsync(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "syncfs") == 0)

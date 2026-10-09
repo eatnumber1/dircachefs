@@ -841,8 +841,14 @@ xattrs, a symlink's target) goes to the descriptor (a `statx` or
 access), so a change leaves nothing stale behind, and a crash loses only
 the record, which is in memory and which a new mount never needs. (The
 protocol model is unaffected: it has no child objects' attributes.)
-`LINK` of a removed object still fails with `ESTALE` (step 23.4's
-`O_TMPFILE` work covers linking an unnamed file).
+`LINK` of a removed object links the descriptor its record holds
+(`linkat` with `AT_EMPTY_PATH`, step 23.9: `DirCacheFS::LinkRemoved`), so
+the answer is the backing filesystem's own: `ENOENT` for a file with no link
+left (`vfs_link` refuses one unless `O_TMPFILE` made it linkable, and an
+unnamed `O_TMPFILE` file is no removed object: it has a row, step 23.4),
+`EPERM` for a directory. Its phase 1 is a create's (the name and the new
+parent's attributes unknown, the parent dirty: the object has no row a
+link could be recorded against), and phase 3 resolves the name again.
 
 An unlinked file that dcfs itself still has open keeps its row until the
 last release (above); changing it goes the ordinary way, by handle:
@@ -2180,7 +2186,8 @@ database. "Zero sectors" below means the backing device's read counter in
 | `fault_shutdown_test` | An instant crash of the backing filesystem under a running dcfs (`FS_IOC_SHUTDOWN` in each flavour on ext4 and xfs; a dead disk on btrfs): completed unsynced mutations, a create held in phase 1 and in phase 2, an idle crash, a daemon crash before the backing crash, starts without a remount. Mutations and reads of contents fail, nothing new is served, the dirty set survives the failed clean shutdown, and after the remount everything served matches the backing filesystem. |
 | `fault_backing_test`, `fault_cache_test`, `fault_power_test` | Real disk failures through dm-flakey and dm-error (`test/qemu/README.md`, "Fault injection"): read and write errors on the backing disk, write errors on the cache disk, and power cuts (both disks drop writes at one instant) placed in a create's phases and in a sync point with fsfreeze. The error goes back to the caller, the mutation does not reach the backing filesystem when phase 1 failed, the dirty set survives a failed clearing, and after a restart everything served matches the backing filesystem. The power cuts also run as real ones (`fault_power_kill_test`: the host kills QEMU at the cut and a second boot checks), and as bounded sequences of operations with a cut after them (`fault_ace_a_test`, `fault_ace_b_test`, `fault_ace_fs_test`). |
 | `release_leak_test` | A failed attribute refresh on the last writable close (forced by holding the SQLite write lock) does not leak the backing descriptor or passthrough registration. |
-| `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on the backing filesystem instead of failing `ESTALE`, also when their rows and attributes were cached, including changing them (truncate, chmod, chown, utimes, xattrs, fsync, through an open descriptor, an `O_PATH` descriptor's magic link or a removed working directory) and reopening an unlinked file through `/proc/self/fd`; no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
+| `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on the backing filesystem instead of failing `ESTALE`, also when their rows and attributes were cached, including changing them (truncate, chmod, chown, utimes, xattrs, fsync, through an open descriptor, an `O_PATH` descriptor's magic link or a removed working directory), reopening an unlinked file through `/proc/self/fd`, and linking a removed
+file or directory back (the backing filesystem's `ENOENT` and `EPERM`); no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
 | `readdir_boundary_test` | A directory too large for one READDIR or READDIRPLUS reply lists every entry exactly once across several replies, and in time linear in its size (the daemon's CPU ticks for 6000 entries against 1500, at most 8x). |
 | `names_test`, `names_random_test` | File names are bytes: about 60 names, one per hazard class (format delimiters, control and high-bit bytes, invalid UTF-8, the overlong "fake slash", NFC/NFD and other look-alike sets in the spirit of xfstests generic/453 and generic/454, path-walk specials, ordering and prefixes, 255-byte names), go through create, mkdir, symlink (including a 4095-byte target; 1023 on xfs), link, xattrs with NUL-containing values, a rename chain, handles, listing and removal, both created directly on the backing filesystem (dcfs populates from it) and created through dcfs, and are compared with the backing filesystem byte for byte; after a restart the same checks pass, the handles taken before it still open and a metadata pass reads zero sectors. Errors for `.`, `..` and 256-byte names match the backing filesystem's, a directory chain deeper than `PATH_MAX` works by descriptors and handles, and a newline in a logged name cannot forge a log line. The random test makes 1,000 seeded names of random bytes, half through dcfs and half on the backing filesystem, and compares the trees. |
 | `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; nothing behind a boundary is reachable even with `crossmnt` (the stub is listed). |
@@ -2196,9 +2203,6 @@ docs/conformance.md) now runs against ext4, xfs and btrfs, not just ext4.
 These are known and accepted for now; the README's Limitations section
 lists the user-visible ones.
 
-- **A removed object cannot be linked back.** `LINK` of a removed object
-  the kernel still references fails with `ESTALE` (see
-  [Row lifetime](#row-lifetime)).
 - **Access times of directories and symlinks are the cache's.** See
   [Access times](#access-times): stamped in the database only, lost with
   it; and a power loss while a file is open and has been read may leave its

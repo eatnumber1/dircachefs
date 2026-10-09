@@ -424,6 +424,14 @@ absl::StatusOr<FileDescriptor> CreateAt(Context &ctx, const Credentials &caller,
 absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
                     std::string_view newname);
 
+// Step 23.9: as LinkAt, for an object that has no row (a removed object:
+// DirCacheFS::removed_), through the descriptor `fd` its record holds:
+// linkat(fd, "", newparent, newname, AT_EMPTY_PATH), whose answer is the
+// backing filesystem's own (ENOENT for a file with no link left, EPERM for
+// a directory).
+absl::Status LinkFd(Context &ctx, int fd, InodeId newparent,
+                    std::string_view newname);
+
 // After LinkAt(src, newparent, newname) has succeeded: re-statx's `src`
 // (I/O, no transaction -- its nlink just changed) and then, in one
 // transaction, LinkDentry(newparent, newname, src) followed by

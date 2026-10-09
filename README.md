@@ -833,12 +833,15 @@ recovery protocol, concurrency, and the test strategy.
   and btrfs encode the generation in their handles, so this is covered
   there; on a filesystem whose handles carry no generation and which
   reports no birth time, a stale row could match a new object.
-- **Removed objects that are still referenced cannot be linked back.**
-  A process whose working directory was removed, or an `O_PATH`
-  descriptor on an unlinked file, sees and can change what a local
+- **Removed objects that are still referenced behave as on the backing
+  filesystem.** A process whose working directory was removed, or an
+  `O_PATH` descriptor on an unlinked file, sees and can change what a local
   filesystem allows (`stat` reports `nlink` 0, `chmod`, `truncate` and
   xattrs work, an unlinked file can be reopened through
-  `/proc/<pid>/fd/<n>`), but a hard link to it fails with `ESTALE`.
+  `/proc/<pid>/fd/<n>`), and linking one back gets the local filesystem's
+  answer: `ENOENT` for a file with no link left (Linux links such a file
+  only if `O_TMPFILE` made it, which works through dcfs), `EPERM` for a
+  directory.
 - **Access times of directories and symlinks are dcfs's own.** A regular
   file's access time is the backing filesystem's: reads go through
   passthrough and the backing filesystem stamps them by its mount's rule
