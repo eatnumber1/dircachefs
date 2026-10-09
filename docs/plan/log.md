@@ -2413,3 +2413,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   soundness dispatched (fingerprint matching vs invisible commits, reference states across the WAL
   restart, SQLite's own recovery vs the prefix property, reach of the reordered states, parser
   checks against the real tools).
+- 26.14e review (Opus): the generator could not reach 23.11's state at all; the oracle's own
+  content check after a restart marks the ghost-to-be atime-dirty and so hides it, and fail3's
+  global sync closes the other path. The clean runs were a false negative. Sent back with the
+  fixes (metadata-only mid-sequence checks, a dropahead event, automatic handles before every cut,
+  the two 23.11 sequences pinned and shown failing on pre-fix code, a real-ghost fixture, a
+  handle-based identity comparison, fhtest.c restored, noisy_report's artifact name).
+- russ (2026-10-09): 26.17 approved and queued (RAM-backed guest disks for the fault and ACE tests,
+  budgets in three deterministic parts, wall time only as the hang guard, a load-starvation flag,
+  17.3 attributing by CPU and I/O counts); after the 15.6b/17.1/6.5 rounds merge; Gantt at
+  dispatch.

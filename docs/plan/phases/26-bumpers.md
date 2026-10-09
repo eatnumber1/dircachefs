@@ -385,6 +385,36 @@ not match 23.11's (backing writes dropped from the freeze onward); the
 review decides. `fd_blocked` (a pre-existing 0.2 s poll) reused for "held
 by a freeze". Fast 236 + 2.
 
+Opus review 2026-10-09: the knob, its self-checks and the job are sound
+and could merge alone; the mixed-fault half needs another round because
+the generator CANNOT reach 23.11's state for any seed or count, so the
+clean runs were a false negative (main still has the bug: lane-1's `born`
+scenario fails on unchanged code). Why: after a mid-sequence restart the
+oracle's own content check (lib.sh `snapshot`, md5 of every file through
+dcfs) sends a cold read-only OPEN that marks the ghost-to-be atime-dirty;
+cutahead's kSync create makes the mark durable; RecoverDirty then
+invalidates the row and the handle's LOOKUP(".") correctly gets ESTALE:
+the check masks the bug. `fail3`'s trailing global `sync` commits the
+create on the backing and closes path B by construction. The grammar
+cannot say "backing drops writes from before the create" (every cut drops
+both disks at once). Required: metadata-only checks after mid-sequence
+restarts; `syncfs` of the cache only in fail3; a `dropahead` event;
+handles taken automatically before every cut and crash (today ~73% of
+sequences check no identity); the two 23.11 sequences pinned in the large
+tier and shown failing on pre-fix code; a real-ghost guest fixture for the
+oracle's "does not have" branch; event preconditions asserted (c3 held,
+EEXIST); the identity comparison strengthened from inode+type to a backing
+handle recorded at take time (recycled inode numbers defeat it) with the
+check run before any walk; `fhtest stat` moved to testutil (fhtest.c is a
+hand-synced third-party copy; merge with 23.11's handle-save/handle-stat);
+cutahead's own directory; noisy_report's artifact name and the missing
+`--runs_per_test_detects_flakes`. Verified: `fhtest stat` uses O_PATH, so
+its answer is LOOKUP(".") -> EntryFor, the bug's symptom path, not an
+open; crash3's hold is faithful (the backing create is not durable at the
+kill); the job cannot go red except by its own breakage; `-quiet-only` is
+last-wins if anything else sets `--test_tag_filters`. Sent back
+2026-10-09.
+
 26.14 made the default guests deterministic (writeback off, one vCPU),
 which also removed the noise that shakes out races: timer-driven writeback
 landing mid-operation, real parallelism between the daemon's threads and
@@ -407,6 +437,41 @@ the kernel. A scheduled CI job puts it back on purpose:
   effect on the runner.
 Owner: dcfs-implementer, when a lane frees. Not to be confused with the
 soak test (Phase 19, manual).
+
+## 26.17 RAM-backed guest disks, three-part budgets, load-starvation flag (russ, 2026-10-09, approved)
+
+1. RAM-backed virtual disks for the fault tests. The fault, ACE, freeze,
+   power-cut and recover tests get their failure semantics from
+   device-mapper (dm-flakey, dm-log-writes, dm-delay) and fsfreeze, not
+   from the physical disk; the host disk contributes only latency, which
+   is the noise we don't want. 12.14 already runs its log, replay and
+   snapshot devices as loop devices over sparse tmpfs inside the guest and
+   is sound. Add a harness option that backs a test's virtual disks with
+   guest RAM (brd or a tmpfs-backed loop device) with the dm target and
+   filesystem on top; default it on for the fault and ACE tests after
+   measuring their memory (expect 256 MB guests to grow toward 768 MB to
+   1 GB); keep dm-delay available where a test wants a known latency.
+   Only the manual real-hardware phase (21.1) keeps a real disk.
+2. Budgets in three deterministic parts, not wall time: daemon CPU
+   seconds with a stated tolerance, I/O operations by kind (reads,
+   writes, sectors, fsyncs and FLUSH/FUA from `/proc/<pid>/io`,
+   `/sys/block/vdX/stat` and the strace budgets), and the existing request
+   and syscall counts. I/O-count budgets are pinned per kernel pin like
+   the strace goldens: a kernel bump may re-baseline them in its own
+   commit with before/after, nothing else may.
+3. Wall time stays only as the hang guard, set generously from CPU plus
+   counted I/O times a pessimistic latency.
+4. A load-starvation flag: when a test's wall time exceeds its CPU time
+   by more than a few times, the harness marks the run "load-starved" in
+   the summary (diagnostic only), so a timeout can be told apart from a
+   hang.
+5. 17.3 uses this: attribute the slow xfstests cases by daemon CPU
+   seconds and fsync/write counts against the native run, not wall time.
+
+Owner: dcfs-investigator for the measurement and the disk option,
+dcfs-implementer for the budget files; after the current fix rounds
+(15.6b, 17.1, 6.5) merge, since all three touch the same guest harness
+files. The Gantt is updated when it is dispatched.
 
 ## 26.16 Where CI time goes (2026-10-09)
 
