@@ -371,3 +371,32 @@ directory in dcfs.tla: 23.10's model work starts there. Trap: replacing
 syncfs by per-directory fsyncs breaks under ext4
 (`known_bugs/sync_by_file_fsync`).
 
+Status 2026-10-09, model half reported (lane-1, d49aa87, 41 files under
+formal/ plus design.md; code half not started). Design consequence, NEEDS
+RUSS: "the parent" a file's change marks must be an explicit **home**
+directory stored in the file's row (schema v7; rename moves it to the new
+parent, rmdir to the removed directory's parent), because OPEN, SETATTR,
+GETATTR, FLUSH and RELEASE carry only the nodeid and an NFS handle names no
+parent; marking "the directories the cache has a dentry for the file in"
+fails in all three review cases (`known_bugs/dirset_{hardlink,handle,tmpfile}_known_parents`,
+CrashSafe violated in 9/6/14 steps). As modelled: D and a new E, each with a
+mutation or atime-only mark and a durable flag; F has names in D and E, a
+ghost of its last non-read change, a home; attribute changes mark the home,
+name changes the name's directory, link/unlink both, read-only open and held
+fill the home atime-only; RecoverDirty forgets all a mutation-dirty
+directory holds and the attributes of the files any dirty directory covers
+(homed, cached dentry, or listed by the backing); S2 clears per directory
+and needs the covered file's guard unmoved and the file not open. Named
+conditions `DirtyBeforeChange`, `ClearOnlyAfterSync`, `RecoveryForgetsDirty`
+with premise_* tests; nine MC_dirset_* configs (ViewExactF), five
+known_bugs; all of CrashSafe, RecoveryIdempotent, CrashRefines,
+ReplyObservable, FileExact hold under seq/metaprefix/ext4. Counts: existing
+configs unchanged except MC_atime 263,820 -> ~338,650 and atime_concurrent
+297,284 -> ~380,300; MC_small leaves RecoveryForgetsDirty out (12 vs 7
+min). Finding: 23.8's `FSnapView` is not an exact view (MC_atime's count
+depends on the worker count); under review. Trace: existing trace tests
+pass; a file request changing its home's `dirty` outside the directory's
+events will be `unexplained` unless the recorder excludes the mark or
+Trace.tla gains a mark event. Opus review dispatched 2026-10-09 with the
+simplification comparison (home design vs status quo vs hybrid) for russ.
+

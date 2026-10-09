@@ -2086,3 +2086,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   quiet init). Lane-2 free: 26.14c (the 4294967295 branch count) dispatched, a bounded investigation
   that touches no dcfs/ code. 26.14b waits for 6.5 (same scripts); 26.14d waits for 23.10's test
   changes to land (same test file).
+- 23.10 model half reported (lane-1, d49aa87): the simple rule ("mark the parents the cache knows")
+  is unsound in all three review cases; the sound rule needs a per-file home directory column,
+  which rename and rmdir maintain and recovery re-stats by. Three named conditions with premise
+  tests, nine MC_dirset configs, five known_bugs, all properties hold under the three regimes;
+  formal small+medium 146 pass. Finding: 23.8's FSnapView is not an exact view. Opus review
+  dispatched (soundness of the home design incl. rmdir/rename of the home, fidelity of S2, the ext4
+  tightening, FSnapView, the trace plan) with a candid comparison for russ: home design vs per-row
+  dirty status quo vs a hybrid. NEEDS RUSS: whether 23.10 with a home column is still the
+  simplification wanted. Code half on hold until both.
