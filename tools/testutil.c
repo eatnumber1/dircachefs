@@ -56,13 +56,16 @@
  *       As setxattr/getxattr, but the value is lowercase hex: for binary
  *       values such as a system.posix_acl_access ACL or a
  *       security.capability blob, which contain NUL bytes.
- *   testutil mmapwrite <path> <delay-seconds>
+ *   testutil mmapwrite <path> <delay-seconds|usr1>
  *       open(2)s <path> O_RDWR, maps its first page MAP_SHARED, prints
- *       "MAPPED", sleeps <delay-seconds>, stores one byte through the
- *       mapping, msync(2)s it, prints "STORED", and then sleeps forever
- *       WITHOUT closing the fd or unmapping, until killed: a store the
- *       kernel never tells dcfs about (no write(2), no FLUSH).
- *   testutil mmapwrite-closed <path> <delay-seconds>
+ *       "MAPPED", sleeps <delay-seconds> (or, for "usr1", waits for a
+ *       SIGUSR1: the caller does what it has to do between the mapping and
+ *       the store, then signals, instead of guessing how long that takes),
+ *       stores one byte through the mapping, msync(2)s it, prints "STORED",
+ *       and then sleeps forever WITHOUT closing the fd or unmapping, until
+ *       killed: a store the kernel never tells dcfs about (no write(2), no
+ *       FLUSH).
+ *   testutil mmapwrite-closed <path> <delay-seconds|usr1>
  *       As mmapwrite, but close(2)s the descriptor right after mmap(2),
  *       before printing "MAPPED": the store then comes after the last close
  *       (on dcfs, after the last RELEASE), through a mapping that holds only
@@ -269,6 +272,7 @@
 #include <fcntl.h>
 #include <ftw.h>
 #include <libgen.h>
+#include <signal.h>
 #include <sqlite3.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -503,9 +507,23 @@ static int cmd_mmapwrite(const char *path, const char *delay_str,
 		print_err(errno);
 		return 1;
 	}
-	printf("MAPPED\n");
-	fflush(stdout);
-	sleep((unsigned int) atoi(delay_str));
+	if (strcmp(delay_str, "usr1") == 0) {
+		/* Blocked before MAPPED is printed, so a SIGUSR1 sent as soon
+		 * as the caller has seen it cannot be lost. */
+		sigset_t set;
+		int sig;
+
+		sigemptyset(&set);
+		sigaddset(&set, SIGUSR1);
+		sigprocmask(SIG_BLOCK, &set, NULL);
+		printf("MAPPED\n");
+		fflush(stdout);
+		sigwait(&set, &sig);
+	} else {
+		printf("MAPPED\n");
+		fflush(stdout);
+		sleep((unsigned int) atoi(delay_str));
+	}
 	p[0] = (char) (p[0] + 1);
 	if (msync(p, 4096, MS_SYNC) == -1) {
 		print_err(errno);
@@ -2786,7 +2804,7 @@ int main(int argc, char *argv[])
 		"       testutil removexattr <path> <name>\n"
 		"       testutil setxattrhex <path> <name> <hex>\n"
 		"       testutil getxattrhex <path> <name>\n"
-		"       testutil mmapwrite <path> <delay-seconds>\n"
+		"       testutil mmapwrite <path> <delay-seconds|usr1>\n"
 		"       testutil fsync <path>\n"
 		"       testutil syncfs <path>\n"
 		"       testutil fsfreeze <path> <freeze|thaw>\n"
