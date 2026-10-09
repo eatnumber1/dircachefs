@@ -195,4 +195,24 @@ says it exists for tests. Do, in one step (dcfs-implementer):
   tests`, `for tests`, `test-only`, `for testing`, `ForTest`, `_for_test`),
   with the known-bad fixture self-check; allowlist entries need a reason.
 Owner: dcfs-implementer, next free lane after the P0 queue.
+Clarification (russ, 2026-10-09): "Some fakes are meant to be used in
+production (such as the no-op trace logger that we use in tests for
+formal verification)." A fake that is the production default (the no-op
+`ProtocolEvents` the daemon runs with, which the trace tests replace) is
+the pattern the rule wants, not a violation; style.md says so.
+
+## 25.8 Abseil's Tips of the Week as design guidance (russ, 2026-10-09)
+
+russ: "we adopt all of https://abseil.io/tips/. It's a 'rule', but not as
+strong of a rule as the Google style guide or other style rules I've
+established in the past. Coding and review agents should use it as design
+guidance rather than firm rules." So: docs/style.md gets a section near
+the top stating the precedence (AGENTS.md and style.md's own rules, then
+the Google C++ style guide, then the Tips of the Week as guidance); a
+review finding that rests on a tip cites its number (TotW #NNN) and is
+advisory unless it also breaks a rule; agents may read a tip online when
+a design question matches one (the index page lists titles). The agent
+definitions in .claude/agents/ (implementer, protocol, reviewer) name the
+tips as guidance in their instructions. No vendoring of the tips. Owner:
+dcfs-implementer, together with 25.7.
 
