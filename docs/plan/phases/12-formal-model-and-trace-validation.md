@@ -302,3 +302,46 @@ copy_file_range, fallocate or a file's setattr is caught only by the
 harness tests; 12.11b would be a per-file attribute trace. 12.7c in the
 same merge: a handler returning OK without replying is an unexplained line.)
 that validation rejects.
+
+## 12.14-12.17 Further formal work (russ, 2026-10-09: "Yes to all")
+
+Order after 12.12's audit, which may reorder them with the approved
+12.13/12.11b/12.11c/12.10/23.11.
+- 12.14 The model's assumption about SQLite, tested. dcfs.tla abstracts
+  durability as two levels (a normal commit, a synced commit) and crash
+  states as prefixes over them; nothing checks that abstraction against
+  SQLite's WAL. A guest test cuts power (the 11.x power-cut harness) at
+  several points inside and between transactions of each durability level
+  and checks the surviving database against the set of prefixes the model
+  allows (including: a normal commit may be lost, a synced one may not, a
+  later normal commit never survives an earlier lost one). A mismatch is a
+  finding against the model's durability abstraction, not against SQLite.
+  Owner: dcfs-protocol.
+- 12.15 Runtime invariant checks derived from the model. The checking
+  build's rules (docs/design.md "Runtime invariant checks": tri-state,
+  dirty set vs unknown rows, held fds) are hand-written restatements of
+  model invariants. Either generate them from `dcfs.tla` (a small
+  translator for the invariants that are state predicates over the
+  database and the held-fd table, with its own test), or at least pair
+  each rule with its model invariant and one known-bad fixture that fails
+  both, so a drift between the two is a test failure. Owner:
+  dcfs-protocol; the translator, if built, dcfs-implementer.
+- 12.16 A refinement target. A small ideal-filesystem specification
+  (SibylFS-style POSIX directory and file semantics, as observed through
+  the FUSE replies: lookup, create, unlink, rename, link, attributes,
+  listings) and a refinement mapping from dcfs.tla's observable replies to
+  it, checked by TLC (`INSTANCE` + `Spec => Ideal!Spec` under the view), so
+  "dcfs behaves like a plain filesystem" becomes a checked statement rather
+  than a set of invariants. Where the mapping needs a limitation (atime
+  lag, close-to-open), the limitation is a named weakening in the ideal
+  spec, as `formal/limitations/` does today. Owner: dcfs-protocol.
+- 12.17 The wrapper handoff modelled. `mount.dcfs`'s capture (the helper's
+  private namespace, the staging tmpfs, open_tree, the socketpair), the
+  fork and daemonisation, readiness after INIT and the exit statuses form
+  a state machine with crash points (helper dies before or after sending
+  the fd; parent dies before or after readiness; the kernel's INIT never
+  comes; a second mount races on the same cache). A small TLA+ module with
+  the property "no mount is left that nobody owns, and mount(8)'s exit
+  status is never 0 unless dcfs serves" and known_bugs for the cases the
+  three 15.2 review rounds found. Owner: dcfs-protocol (mount namespaces).
+

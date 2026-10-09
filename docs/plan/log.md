@@ -2140,3 +2140,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-09): "I approved the kernel bug report commands". 26.15 resumes in lane-5 (its
   branch step-26.15 and .scratch/kernel-src are there) once 26.14d, which is running in the same
   lane, reports; 26.16 takes the next lane that frees after that.
+- russ (2026-10-09): "Yes to all" on four more formal steps: 12.14 the model's SQLite durability
+  abstraction tested by power cuts, 12.15 runtime invariant checks derived from (or paired with)
+  the model, 12.16 a refinement target (ideal POSIX spec, checked by TLC), 12.17 the mount.dcfs
+  handoff modelled. Ordered after 12.12's audit, which may reorder the whole formal queue.
