@@ -13,34 +13,23 @@
 # page (tmpfs pages are not counted in nr_dirty).
 FAILED=0
 . "$(dirname "$0")/lib.sh"
-
-# check_sysctl NAME WANT: the sysctl NAME (vm.x, as /proc/sys/vm/x) reads WANT.
-check_sysctl() {
-	cs_got=$(cat "/proc/sys/$(echo "$1" | tr . /)" 2>&1)
-	if [ "$cs_got" = "$2" ]; then
-		pass "sysctl-$1"
-	else
-		fail "sysctl-$1" "reads '$cs_got', want '$2'"
-	fi
-}
+. "$(dirname "$0")/kernel_mode_lib.sh"
 
 nr_dirty() { awk '/^nr_dirty / { print $2 }' /proc/vmstat; }
 
-# Writeback only on sync/fsync/dcfs's sync points: no flusher wakeup every 5 s,
-# and nothing is old enough to be written for a day.
-check_sysctl vm.dirty_writeback_centisecs 0
-check_sysctl vm.dirty_expire_centisecs 8640000
-check_sysctl vm.laptop_mode 0
-# Not lowered: drop_caches reaches dentries and inodes through the same slab
-# shrinkers, whose object counts the setting scales (vfs_pressure_ratio), so a
-# low value makes `echo 3 >drop_caches` drop almost nothing (checked below).
-check_sysctl vm.vfs_cache_pressure 100
-
-cpus=$(grep -c '^processor' /proc/cpuinfo)
-if [ "$cpus" = 1 ]; then
-	pass one-vcpu
+# The quiet mode (guest/kernel_mode_lib.sh): writeback only on sync/fsync/dcfs's
+# sync points (no flusher wakeup every 5 s, nothing old enough to be written for
+# a day), laptop mode off, vfs_cache_pressure not lowered (drop_caches reaches
+# dentries and inodes through the same slab shrinkers, whose object counts the
+# setting scales (vfs_pressure_ratio), so a low value makes `echo 3
+# >drop_caches` drop almost nothing: checked below), and one vCPU. Under
+# DCFS_NOISY=1 (step 26.14e) this fails, by design: the noisy run excludes
+# this target (tag quiet-only) and noisy_kernel_test is its inverse.
+mode_problems=$(kernel_mode_problems quiet)
+if [ -z "$mode_problems" ]; then
+	pass kernel-mode-quiet
 else
-	fail one-vcpu "the guest has $cpus vCPUs, want 1 (qemu_test's cpus default)"
+	fail kernel-mode-quiet "$mode_problems"
 fi
 
 if ! mount -t ext4 /dev/vdb /src; then

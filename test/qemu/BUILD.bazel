@@ -116,12 +116,42 @@ qemu_test(
 # Step 26.14: the quiet kernel: guest/init's sysctls (no periodic writeback,
 # no cache pressure), one vCPU by default, and that a dirty page waits for a
 # sync -- see guest/quiet_kernel.sh and README.md, "A quiet kernel".
+# Tagged quiet-only: under DCFS_NOISY=1 (step 26.14e) it fails by design, so
+# the noisy job runs with --test_tag_filters=-quiet-only and noisy_kernel_test
+# is its inverse.
 qemu_test(
     name = "quiet_kernel_test",
     disks = [("vdb", "ext4", "64M")],
     guest_script = "guest/quiet_kernel.sh",
     size = "small",
+    tags = ["quiet-only"],
     timeout = "moderate",
+)
+
+# Step 26.14e: the inverse, the noisy run's self-check (guest/noisy_kernel.sh):
+# passes only under `bazel test --test_env=DCFS_NOISY=1`, fails without it.
+# manual: the push gate (the quiet default) must not run it; the noisy job
+# names it, and the failing direction is exercised by kernel_mode_test (canned
+# trees) and by running this target without the knob (README.md, "A noisy
+# run").
+qemu_test(
+    name = "noisy_kernel_test",
+    guest_script = "guest/noisy_kernel.sh",
+    size = "small",
+    tags = ["manual"],
+    timeout = "short",
+)
+
+# Step 26.14e: the check that tells a quiet guest from a noisy one
+# (guest/kernel_mode_lib.sh), over canned /proc trees in both directions.
+sh_test(
+    name = "kernel_mode_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["kernel_mode_test.sh"],
+    args = ["$(location guest/kernel_mode_lib.sh)"],
+    data = ["guest/kernel_mode_lib.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
 # Step 23: `dcfs --help` lists every flag and `dcfs --version` works under

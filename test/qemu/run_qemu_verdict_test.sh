@@ -501,5 +501,39 @@ sysd_run --systemd-image "$WORK/image.qcow2" --qemu-img /usr/bin/qemu-img
 sysd_run --systemd-image "$WORK/image.qcow2" --qemu-img "$WORK/bin/qemu-img" --rootfs "$WORK/image.qcow2"
 [ "$RC" -ne 0 ] || fail "--systemd-image with --rootfs was accepted"
 echo "PASS: --systemd-image needs the Bazel-built qemu-img and excludes --rootfs"
+# Step 26.14e: DCFS_NOISY=1 (bazel test --test_env) is the one knob of the noisy
+# run: run-qemu.sh turns it into the kernel command-line word guest/init reads
+# (dcfs_noisy=1) and two vCPUs (-smp 2) for a guest that would have had one, and
+# a guest that already has two keeps them. Unset, neither: the quiet default.
+# (The environment is cleared first: this test may itself run under the knob.)
+noisy_run() {
+	: >"$WORK/extra"
+	canned_e2e ALL-TESTS-PASSED
+	rm -f "$WORK/qemu-calls" "$WORK/out/serial.log"
+	RC=0
+	env -u DCFS_NOISY -u DCFS_FORCE_CPUS "$@" TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+		sh "$RUN_QEMU" --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
+		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
+		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
+		--cpus "$NOISY_CPUS" "$WORK/kernel" "$WORK/initrd" boot.sh >"$WORK/stdout" 2>&1 || RC=$?
+	[ "$RC" -eq 0 ] || fail "a run under '$*' failed: $(cat "$WORK/stdout")"
+}
+NOISY_CPUS=1
+noisy_run
+grep -q -e '-smp 1 ' "$WORK/qemu-calls" || fail "the quiet default is not one vCPU: $(cat "$WORK/qemu-calls")"
+if grep -q 'dcfs_noisy' "$WORK/qemu-calls"; then fail "the quiet default has the noisy word: $(cat "$WORK/qemu-calls")"; fi
+noisy_run DCFS_NOISY=1
+grep -q -e '-smp 2 ' "$WORK/qemu-calls" || fail "DCFS_NOISY=1 did not give two vCPUs: $(cat "$WORK/qemu-calls")"
+grep -q -e ' dcfs_noisy=1' "$WORK/qemu-calls" || fail "DCFS_NOISY=1 did not add dcfs_noisy=1: $(cat "$WORK/qemu-calls")"
+noisy_run DCFS_NOISY=0
+if grep -q 'dcfs_noisy' "$WORK/qemu-calls"; then fail "DCFS_NOISY=0 is noisy: $(cat "$WORK/qemu-calls")"; fi
+grep -q -e '-smp 1 ' "$WORK/qemu-calls" || fail "DCFS_NOISY=0 changed the vCPUs: $(cat "$WORK/qemu-calls")"
+NOISY_CPUS=2
+noisy_run DCFS_NOISY=1
+grep -q -e '-smp 2 ' "$WORK/qemu-calls" || fail "DCFS_NOISY=1 lowered a two-vCPU guest: $(cat "$WORK/qemu-calls")"
+NOISY_CPUS=1
+noisy_run DCFS_NOISY=1 DCFS_FORCE_CPUS=3
+grep -q -e '-smp 3 ' "$WORK/qemu-calls" || fail "DCFS_FORCE_CPUS no longer wins: $(cat "$WORK/qemu-calls")"
+echo "PASS: DCFS_NOISY=1 is dcfs_noisy=1 on the command line and two vCPUs; unset it is neither"
 echo "PASS: all checks passed"
 

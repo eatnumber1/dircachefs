@@ -138,7 +138,8 @@ MEM_OVERRIDE=""
 # --cpus <n>: the guest's vCPU count (-smp), overriding the default below (1
 # for --unit, 2 for an e2e test). qemu_test and tla_trace_test always pass it:
 # one vCPU unless the test is a stress or cancellation test (step 26.14:
-# test/qemu/qemu_test.bzl `cpus`, README.md "A quiet kernel").
+# test/qemu/qemu_test.bzl `cpus`, README.md "A quiet kernel"). $DCFS_NOISY=1
+# raises it to two (README.md, "A noisy run").
 CPUS_OVERRIDE=""
 # --modules <cpio.gz>: the kernel modules this test declared (step 24.2),
 # appended to the initramfs given below (the kernel unpacks concatenated
@@ -664,12 +665,26 @@ else
 fi
 # DCFS_FORCE_CPUS=<n> (bazel coverage --test_env): experiments, step 26.14c.
 SMP="${DCFS_FORCE_CPUS:-${CPUS_OVERRIDE:-$SMP}}"
+# DCFS_NOISY=1 (bazel test --test_env=DCFS_NOISY=1; step 26.14e): the noisy run,
+# the one knob that puts back what the quiet kernel (26.14) took away. It is
+# the kernel command-line word dcfs_noisy=1, which guest/init reads to leave
+# the quiet-kernel sysctls at the kernel's defaults, and at least two vCPUs for
+# every guest (a guest that already has more keeps them; DCFS_FORCE_CPUS still
+# wins). Bazel puts --test_env in the test action's key, so a result of one
+# mode is never served for the other. Unset or 0: the quiet default.
+NOISY_APPEND=""
+if [ "${DCFS_NOISY:-0}" = 1 ]; then
+	NOISY_APPEND=" dcfs_noisy=1"
+	if [ -z "${DCFS_FORCE_CPUS:-}" ] && [ "$SMP" -lt 2 ]; then
+		SMP=2
+	fi
+fi
 
 append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init dcfs_accel=$ACCEL"
 if [ "$UNIT" -eq 0 ]; then
 	append="$append dcfs_test=$DCFS_TEST"
 fi
-append="$append$rootfs_append$sysd_append${EXTRA_APPEND:+ $EXTRA_APPEND}"
+append="$append$rootfs_append$sysd_append${EXTRA_APPEND:+ $EXTRA_APPEND}$NOISY_APPEND"
 COVERAGE=0
 if [ -n "$COVDISK_IMG" ]; then
 	COVERAGE=1

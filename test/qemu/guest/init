@@ -39,45 +39,60 @@
 # set before anything runs; each line says the event it removes and what the
 # tests use instead. (The other half is one vCPU for every test that is not a
 # stress or cancellation test: qemu_test.bzl `cpus`, run-qemu.sh --cpus.)
-set_sysctl() {
-	if ! echo "$2" >"/proc/sys/vm/$1"; then
-		echo "init: could not set vm.$1 to $2"
-	fi
-}
-# The flusher threads' periodic wakeup (every 5 s) that writes back dirty
-# pages and inodes: off, so a dirty page stays dirty until `sync`, fsync,
-# syncfs (testutil syncfs, dcfs's sync points), fsfreeze or unmount writes it.
-# (Writeback driven by the amount of dirty memory still happens: that is the
-# test's own write volume against the guest's RAM, not time.)
-set_sysctl dirty_writeback_centisecs 0
-# How old a dirty page must be before a flusher writes it: a day (a larger
-# value overflows the kernel's unsigned centisecond-to-millisecond product),
-# so nothing expires within a test even where something wakes the flusher.
-set_sysctl dirty_expire_centisecs 8640000
-# Laptop mode (the kernel's default is off) writes everything dirty after any
-# read that spins the disk up: explicit, so it stays off.
-set_sysctl laptop_mode 0
-# Reclaim of cached dentries and inodes (FORGETs nobody asked for) happens only
-# under memory pressure, which the MEM line's reclaim_scans reports and
-# require_no_reclaim fails a test on, so there is no spontaneous event here to
-# remove; the setting stays at the kernel's default, explicitly. It is NOT
-# lowered: drop_caches, the tests' explicit trigger for dropping dentries and
-# inodes (guest/lib.sh drop_caches_quiesced, and `echo 3 >drop_caches`
-# elsewhere), reaches them through the same slab shrinkers, whose object counts
-# vfs_cache_pressure scales (vfs_pressure_ratio): at 1, `drop_caches` dropped
-# 2 of 1091 unused dentries, request_counts_test, syscall_traces_test and
-# write_test failed because no FORGET or LOOKUP followed, and at 0 the counts
-# are zero (quiet_kernel_test checks that drop_caches still works).
-set_sysctl vfs_cache_pressure 100
-# kernel.randomize_va_space is left at the kernel's default (2). dcfs is PIE
-# and no behavior of it depends on an address, with one observable exception:
-# Abseil seeds its hash tables with the address of a static, so ASLR changes
-# the iteration order of the absl::flat_hash_* members of DirCacheFS. Two
-# places iterate them (DirCacheFS::Destroy, the order in which the written
-# files still held at unmount are reconciled; MountFds::Fds), so the order of
-# those backing syscalls can differ between runs; no test asserts it, and the
-# result of each is the same. Setting it to 0 would remove even that; left as
-# it is so that the guests keep the daemon's production layout.
+# The noisy run (step 26.14e; run-qemu.sh turns DCFS_NOISY=1 into the
+# dcfs_noisy=1 word, and two vCPUs): the same suite with this spontaneity put
+# back on purpose, to shake out the races the quiet kernel hides. Nothing below
+# is set, so the kernel's defaults (writeback every 5 s of pages 30 s old) and
+# the guest's real parallelism apply. DCFS_NOISY is exported for guest scripts.
+case " $(cat /proc/cmdline) " in
+*" dcfs_noisy=1 "*)
+	DCFS_NOISY=1
+	echo "init: noisy kernel (dcfs_noisy=1): the quiet-kernel sysctls are left at the kernel's defaults"
+	;;
+*) DCFS_NOISY=0 ;;
+esac
+export DCFS_NOISY
+if [ "$DCFS_NOISY" = 0 ]; then
+	set_sysctl() {
+		if ! echo "$2" >"/proc/sys/vm/$1"; then
+			echo "init: could not set vm.$1 to $2"
+		fi
+	}
+	# The flusher threads' periodic wakeup (every 5 s) that writes back dirty
+	# pages and inodes: off, so a dirty page stays dirty until `sync`, fsync,
+	# syncfs (testutil syncfs, dcfs's sync points), fsfreeze or unmount writes it.
+	# (Writeback driven by the amount of dirty memory still happens: that is the
+	# test's own write volume against the guest's RAM, not time.)
+	set_sysctl dirty_writeback_centisecs 0
+	# How old a dirty page must be before a flusher writes it: a day (a larger
+	# value overflows the kernel's unsigned centisecond-to-millisecond product),
+	# so nothing expires within a test even where something wakes the flusher.
+	set_sysctl dirty_expire_centisecs 8640000
+	# Laptop mode (the kernel's default is off) writes everything dirty after any
+	# read that spins the disk up: explicit, so it stays off.
+	set_sysctl laptop_mode 0
+	# Reclaim of cached dentries and inodes (FORGETs nobody asked for) happens only
+	# under memory pressure, which the MEM line's reclaim_scans reports and
+	# require_no_reclaim fails a test on, so there is no spontaneous event here to
+	# remove; the setting stays at the kernel's default, explicitly. It is NOT
+	# lowered: drop_caches, the tests' explicit trigger for dropping dentries and
+	# inodes (guest/lib.sh drop_caches_quiesced, and `echo 3 >drop_caches`
+	# elsewhere), reaches them through the same slab shrinkers, whose object counts
+	# vfs_cache_pressure scales (vfs_pressure_ratio): at 1, `drop_caches` dropped
+	# 2 of 1091 unused dentries, request_counts_test, syscall_traces_test and
+	# write_test failed because no FORGET or LOOKUP followed, and at 0 the counts
+	# are zero (quiet_kernel_test checks that drop_caches still works).
+	set_sysctl vfs_cache_pressure 100
+	# kernel.randomize_va_space is left at the kernel's default (2). dcfs is PIE
+	# and no behavior of it depends on an address, with one observable exception:
+	# Abseil seeds its hash tables with the address of a static, so ASLR changes
+	# the iteration order of the absl::flat_hash_* members of DirCacheFS. Two
+	# places iterate them (DirCacheFS::Destroy, the order in which the written
+	# files still held at unmount are reconciled; MountFds::Fds), so the order of
+	# those backing syscalls can differ between runs; no test asserts it, and the
+	# result of each is the same. Setting it to 0 would remove even that; left as
+	# it is so that the guests keep the daemon's production layout.
+fi
 
 # Kernel modules (step 24.2). The kernel is Alpine's linux-virt, whose
 # drivers are mostly modules: run-qemu.sh appended an archive holding the
