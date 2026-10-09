@@ -609,3 +609,48 @@ specified (path B with the no_new_inodes trigger, path A with the
 crash-between pattern, rule 1 via NameToHandleHook, a fault_power
 scenario with a saved handle getting ESTALE).
 
+Code half built 2026-10-09 (lane-1, step-23.11 tip 773ca36: model round
+c694ab3/e280411, tests 9461b77, code 0252499, presubmit fixes 773ca36; 28
+files, +703/-85; Fable review running, rebase onto main in progress). Model
+round: `FileCreatePhase3Failed` (`Phase3CanFail` on in the born-dirty
+configs) with `borndirty_fill_unmarked_after_failed_phase3` and the
+rule-A/B `_failed_phase3` variants; MC_borndirty_metaprefix dropped (no
+data writes: identical to seq); the optional premises (BornDirty,
+DirtyBeforeChange, ClearOnlyAfterSync on the other half; G17's
+`file_setattr_end_skipped`) and `MC_borndirty_recovery` (2 crashes) added;
+counts: borndirty seq 275,962, ext4 382,710, nolock 89,998, nolock_ext4
+108,724, recovery 3,054; large_test and nolock_test timed out at 3,600 s
+three times under load 26-28 (CI's large tier is the check). Code: rule 1
+in `RecordNewChild` (the row joins `ctx.dirty.durable` after commit only
+when `UpsertResult::created`); rule 2 in `RecordChild` (`cache::HasMutationMark`
+read once per transaction into a caller-owned optional, the mark in the
+same transaction before `ChildRowRecorded`; fill-born rows do not join
+`durable`, so BeginWriting on them still syncs); `ParentOf` marks every
+row it inserts (conservative, argued in a comment); `InsertDirty` counts
+(G15 closed); checker rule in `InvariantChecker::ChildRowRecorded`
+(`created` and a marked parent imply a marked child; an abort observed
+with the rule disabled); recorder begin line carries `parent_marked` and,
+after presubmit found trace shards b/c rejecting a mkdir during a sync
+point (rule 1 makes it durable and the earlier sync point's clear had no
+explaining step), `sync_p`, with `TraceInit` placing that process at S2;
+two-sided `OriginOK`; six hand trace logs. Budgets: create `sync` 2 -> 1,
+sql_stmts 119 -> 116; cold-lookup sql_stmts 37 -> 38 (one read of the
+directory's mark per listing); create slope WAL fsyncs 1n+1 -> 0n+1 (100
+creates: 101 -> 1), steps 82n -> 79n. Tests failing first: A1 (failed
+phase 3), A2 (crash before phase 3), A3 (the naive rule 1 breaks
+BeginWriting's sync), the fault_power `born` scenario (`born-handle-stale
+FAIL: the saved handle of d9/b, which the cut lost: OK`), the G15 test,
+the slope, the trace logs, the checker death test; `testutil handle-save`
+/`handle-stat` added; the btrfs `born` ordering fixed (drop-writes set
+while the backing is frozen and clean). Invariants stated: I1 same-
+transaction mark present in every state with the row; I2 ClearDirty
+empties `durable` at every sync point; I3 a directory holding a losable
+create keeps its mark; I4 a directory's mark cannot change inside the
+fill's transaction; I5 every dirty insert counts. Runs: fast 240 + 2 (after
+the cold-lookup budget edit), presubmit dcfs+qemu+tools 204 pass with one
+unrelated `enospc_cache_test` flake (6 of 6 on rerun; busybox ls dropping
+a READDIR ENOSPC, to chase), trace shards, fault_power x3, fault_ace x5,
+asan x3, formal small+medium 162 pass. One edited test
+(`DurableDirtyRowTruncatedAway` accepts inode 1 or the mkdir'd row, which
+is durable too; still requires the violation): the review judges it.
+

@@ -2398,3 +2398,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   state. Opus review dispatched: can the generator reach that state (what event is missing), is the
   identity oracle sound (GETATTR vs open, recycled inodes, false positives), event fidelity, the
   job's red-for-other-reasons risks, fhtest hygiene.
+- 23.11 code half built (lane-1, 773ca36): rules 1 and 2, the ghost-row fix with A1/A2/A3 and the
+  fault_power `born` scenario failing first, the checker rule, two-sided OriginOK with `sync_p`,
+  create fsyncs 1n+1 -> 0n+1, budgets with before/after; presubmit found and fixed two things
+  (trace shards vs a mkdir during a sync point; the btrfs born ordering). FABLE REVIEW dispatched
+  (the first use of Fable for a subagent, per russ's 2026-10-09 allowance: crash safety across
+  create, fill, recovery and sync is the hardest judgement of the day); the agent rebases onto
+  main (25.7b's checker shape) meanwhile. large_test/nolock_test still unrun under load: CI.
