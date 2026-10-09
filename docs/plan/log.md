@@ -2095,3 +2095,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   tightening, FSnapView, the trace plan) with a candid comparison for russ: home design vs per-row
   dirty status quo vs a hybrid. NEEDS RUSS: whether 23.10 with a home column is still the
   simplification wanted. Code half on hold until both.
+- 23.10 review (Opus): not ready for code; nine findings in phases/23 (home movement unmodelled and
+  the rmdir re-home rule unsafe as written, a concrete power-loss trace; one dirty reason discards
+  a directory's listing on any file write; recovery scope undecided and design.md overstates it;
+  FSnapView exactness to bisect). Reviewer's answer to russ's question: directory-only dirty bits
+  are not available as stated; recommends the status quo plus a born-dirty create (no fsync per
+  create, no schema change, precise recovery) over the home design. NEEDS RUSS: (a) home design
+  after findings 1-4, (b) status quo and close 23.10 as investigated, or (c) born-dirty create.
+  The 23.10 branch stays in lane-1 unmerged. 23.8b dispatched to the same agent: the view
+  exactness bisection through Bazel targets (the reviewer was denied running TLC outside bazel
+  test and stopped; the bisection is normal lane work).

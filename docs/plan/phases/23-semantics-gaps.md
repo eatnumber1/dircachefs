@@ -400,3 +400,70 @@ events will be `unexplained` unless the recorder excludes the mark or
 Trace.tla gains a mark event. Opus review dispatched 2026-10-09 with the
 simplification comparison (home design vs status quo vs hybrid) for russ.
 
+Opus review 2026-10-09 (findings by severity; verdict: constant-home core
+sound within its bounds, NOT ready for the code half):
+1. HIGH: home movement is not modelled (`FHome` is a constant) and the
+   re-home rule in the README/design.md is unsafe for rmdir: a home column
+   is a normal-durability commit a crash can drop; after `rmdir P/h` sets
+   F's home to P and a chmod of F marks P through the fast path, a power
+   loss keeps the chmod, loses both normal commits, and recovery finds F's
+   home still H (clean) with no dentry or listing in P: stale attributes
+   (`FileOK` fails), any regime. Rename has the same window for a hard
+   link. Fix: model the home as a DBStates field with re-home steps and the
+   rule that a re-homing mutation's phase 1 durably marks old AND new home
+   (plus a known_bug), or decide homes never move.
+2. HIGH cost: one "mut" reason makes a file write forget its home's whole
+   listing at recovery (a write in a 100k-entry directory throws the listing
+   away): needs a third reason ("files") or an explicit cost statement.
+3. MEDIUM: marking obligations the model assumes and the docs omit: rename
+   marks the moved and replaced files' homes; rmdir marks the removed
+   directory; TMPFILE is a phase 1 on its home (`FInitMarks` assumes it);
+   every row needs a home at creation (handle/identity paths need a
+   fallback); the v6->v7 migration must assign homes and convert v6 dirty
+   file rows; xattrs of homed files are forgotten with their attributes.
+4. MEDIUM: recovery scope undecided and overstated: `RecoveredFile` has
+   three disjuncts (home, cached dentry, backing listing); home-only
+   recovery probably passes CrashSafe (not run); `RecoveryForgetsDirty`
+   restates `RecoveredFile` and would fail a correct home-only recovery;
+   design.md's "instead of per-row probes by handle" is wrong: homed files
+   with no name there are reachable only by handle, and the v7 probe list
+   can be every file in a big directory; `lifetime.tla`'s cut changes
+   meaning.
+5. MEDIUM: FSnapView looks exact by inspection; if the worker-count
+   variation is real the view is unsound (skips reachable states), and the
+   culprit may be IdleView or CrashImage, which would put every VIEW config
+   (ViewExactF included) in doubt; expected counterexamples are not in
+   doubt. Bisect before citing 23.8/23.10 results (23.8b below).
+6. LOW-MEDIUM test quality: premises bite only on D's half; the tmpfile
+   known_bug is really the handle case; the "marks nothing while unnamed"
+   claim is a hand run; add a home-disjunct-only known_bug.
+7. LOW: S2 faithful with conditions: v7 ClearDirty must hold back the homes
+   of `open_for_write` files and of files touched since the snapshot, make
+   open files' homes atime-only, read homes inside the clearing transaction.
+8. LOW coverage gaps (FHome = D with D's name mutations; two slots with a
+   held F; `GuardsBalanced` lacks `fm.inflight`, pre-existing).
+9. LOW drift: design.md says "schema v7, decided"; the phase text's
+   "instead of per-row probes by handle" is contradicted by the model.
+Question 3: the ext4 tightening is faithful (name changes change F's
+metadata, one ordered history), CrashRefines still means what 12.8 said.
+Question 6: emit mark events and add T_ actions (a `mark` event at minimum)
+rather than blind the recorder. The reviewer hit a permission denial running
+TLC outside `bazel test` (3-worker runs) and stopped; the wanted runs
+(home-only/listing-only RecoveredFile; View vs ViewExactF at 1 and 4
+workers) go through Bazel targets if pursued.
+Question 5 (for russ): "dirty bits only on directories, never files" cannot
+be met as stated; every file needs a home pointer and recovery needs it.
+(a) home design: schema v7, rename/rmdir/TMPFILE marking rules, ClearDirty
+mapping touched/open files to homes, recovery by home, bigger probe list,
+trace recorder changes; recovery loses every homed file's attributes (and
+the listing, with one reason); one WAL fsync per directory per interval.
+(b) status quo: nothing new, precise recovery, one fsync per writable create
+and one per existing file written per interval. (c) hybrid: as stated it is
+the status quo; with a "born dirty" rule (the create's phase 3 inserts the
+row and its mark in one transaction, so every crash state with the row has
+it dirty) the create fsync goes away with a small model change and no
+schema change; writes to existing files still cost one fsync per file per
+interval. Reviewer would build (c) with born-dirty now, measure the
+per-file fsync on real workloads, and build (a) only if the numbers demand
+it, after findings 1-4.
+
