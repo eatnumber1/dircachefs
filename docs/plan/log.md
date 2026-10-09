@@ -2235,3 +2235,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 26.15 merged (badacf3, three commits). Needs russ: send the two mails after the pre-send checks
   in the note. Lane-5 free: 12.13 (model mutation tool) dispatched (new implementer); the first
   sweep waits for 23.11's model to land so it runs against one model, not two.
+- russ (2026-10-09): style rule, no test-only things in production code; a knob a test needs is a
+  real feature; zero "only use in tests" comments. 25.7 queued with a repo-shape check.
+- CI run 37973594236 (bc7eee7): fast, presubmit, reproducible, mutation-changed, osv, subjects,
+  full(2), ubsan(1,2), asan(2) green; coverage FAILED on 26.14c's new artifact gate: six branch
+  counts of 2^32 (or 2*2^32) plus a few hundred in main.cc's daemonisation and startup_channel.cc,
+  a different shape from 26.14c's -1 (a 32-bit wrap plus a real count, in the fork path under
+  continuous profiling). 26.14f queued for an investigator. Five shards still running.

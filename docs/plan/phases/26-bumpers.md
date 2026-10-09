@@ -401,3 +401,25 @@ builds 148 s, our compile 76 s, tests 153 s, critical path 138 s
   entry never matches. Cost: about 1 GB compressed (estimate) of the 10 GB
   quota. Decide with the push's profile numbers. Owner: dcfs-implementer.
 
+## 26.14f Coverage artifacts in the daemonisation path (CI run 37973594236, 2026-10-09)
+
+The first coverage run after 26.14c's gate flagged six branch counts as
+artifacts and failed the job: dcfs/main.cc:674, 685, 686, 690 (counts
+4294967562, 4294967430, 4294967421, 4294967546: 2^32 + a few hundred) and
+dcfs/startup_channel.cc:110, 111 (8589934575, 8589934574: 2*2^32 + a few
+hundred). Not the -1 underflow 26.14c saw: these are a 32-bit wrap plus a
+real count, in the code that forks and daemonises (15.2), under
+continuous-mode profiling with `-runtime-counter-relocation` and atomic
+counters. Hypotheses: the parent and the forked child both own the mmapped
+profile and one re-initialises the counter relocation bias; the helper
+that execs /bin/mount in the private mount namespace writes the same
+profile; a profile written by a process that exits through `_exit` after
+fork without the runtime's own flush; two processes of one binary
+merging with inconsistent region counters. Investigate as 26.14c was
+(reproduce on `mount_dcfs_test` under coverage with DCFS_KEEP_PROFRAW,
+per-process profiles with `%p` to see which process contributes the wrap),
+fix in the harness or the profile naming, never by widening the gate.
+Until then the coverage job is red on every push that runs mount_dcfs under
+coverage; the push rule (fast dev) tolerates it, the gate did its job.
+Owner: dcfs-investigator, next free lane after 15.6b.
+

@@ -167,3 +167,32 @@ Docs commit to style.md (code section), then applied as code is touched:
   StatusOr, an fd wrapper). Written into style.md by lane-6 with the 15.x
   fix round.
 
+## 25.7 No test-only things in production code (russ, 2026-10-09)
+
+russ: "Style rule: don't add test-only things to prod code. If a test needs
+a knob in the prod code, make that knob a real feature of the class /
+method. There should be zero `// only use in tests` style comments."
+Stronger than AGENTS.md's "test-only code never lives in production
+files": a seam a test needs (an injected clock, an observer, a fault
+point, a size limit) is designed, named and documented as a feature of
+the class, with its production default, and nothing in production code
+says it exists for tests. Do, in one step (dcfs-implementer):
+- docs/style.md: the rule, with the pattern (constructor injection of an
+  interface with a production implementation; options with production
+  defaults; observers such as ProtocolEvents, which are the model) and
+  the anti-pattern (a method, flag, comment or branch whose only reason is
+  a test).
+- Inventory: every seam production code exposes that tests use (the
+  ProtocolEvents observer and its hooks such as `SqliteTransaction`, the
+  `--wrap` fault points, `Checkpoint`, any `*_for_test`, `Hook`, `ForTest`
+  name, any comment mentioning tests in dcfs/, bench/, tools/*.c; a first
+  grep found one comment, session_loop.h:65 "they nest only in tests", and
+  no `Hook`/`ForTest` names in headers); for each, either it is already a
+  feature (keep; make the comment say what it is for in production terms)
+  or convert it, or move it to testonly/ injection.
+- Mechanical enforcement: `tools/repo_shape.py` refuses, in production
+  sources, comments that mention tests as the reason for code (`only in
+  tests`, `for tests`, `test-only`, `for testing`, `ForTest`, `_for_test`),
+  with the known-bad fixture self-check; allowlist entries need a reason.
+Owner: dcfs-implementer, next free lane after the P0 queue.
+
