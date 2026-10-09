@@ -206,6 +206,17 @@ In this order, each with a known-bug variant and trace validation:
   implied-directory-fsync) as TLC configs: the bad outcome must be
   reachable through dcfs only if reachable on the backing directly
   (`CrashRefines`). Before any multi-directory model. 1-2 weeks.
+  Status 2026-10-09: merged (638590d). As built: `bSeq` replaces the crash
+  set; `Reorder` in {seq, metaprefix, ext4}, the ext4 regime stated as an
+  over-approximation; directory fsync as a switch; litmus tests under
+  `formal/limitations/crash_litmus.tla` (the bad outcome reachable on the
+  backing directly) and `MClitmus.tla` (not reachable through dcfs);
+  `CrashRefines` follows from `CrashSafe` and covers D only, since 23.8's
+  F keeps cached attributes that can lag the backing after a power loss;
+  F's attribute stamp crashes with D's metadata from one state under seq
+  and metaprefix, from any state under ext4. The 23.8 configs bind
+  `Reorder = "seq"`. design.md cites Ferrite's specification. The
+  condition 23.10 must meet is recorded in phases/23 (23.10).
 - 12.9 Directory streams (SibylFS must/may): opendir, cookie-based
   chunks, concurrent mutation and refill between chunks; untouched
   entries returned exactly once; cookies stable across a refill. ~1 week.

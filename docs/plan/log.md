@@ -2004,3 +2004,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   CreateChild End, was already in equivalent.txt; 1751 was already dead on today's tree and got a
   contract test anyway). Review passed under 25.4; sent back for a rebase over the atime/LINK test
   additions and a fast-tier run. Not yet pushed: GitHub main is still 9a67552.
+- 12.8 merged (638590d, one squashed commit; pre-rebase tip kept in lane-1 as step-12.8-pre-23.8).
+  Rebase over 23.8's model F done by the lane agent (dcfs.tla re-applied by script; Trace.tla,
+  BUILD.bazel, README kept both sides); F now stamps from bSeq; CrashRefines covers D only. Counts
+  under seq match main exactly with one worker; with two workers MC_atime varies by tens of states
+  (23.8's VIEW keeps whichever representative a worker reaches first). formal minus large/nolock 132
+  pass, trace shards pass, fast 217 + 2. Orchestrator rebased the last two commits (design.md only
+  in common, clean) and merged on the agent's run: formal/ was untouched on main in between. Lane-1
+  free: 23.10 directory-level dirty set dispatched (new dcfs-protocol).
