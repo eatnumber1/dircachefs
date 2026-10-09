@@ -698,7 +698,8 @@ from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 | `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 280,869 | ~1-2 min |
 | `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable` | 892,708 | ~1-2.5 min |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable` | 1,036,982 | ~1.5-4 min |
-| `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 260,871; 292,824; 29,322 (step 23.8b's corrected `View`; before it 263,848, 297,308, 29,950, the first two depending on TLC's workers) | ~1.5 min; ~1.5 min; ~20 s (load 10-15, 2026-10-09) |
+| `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 334,826; 373,534; 29,322 (step 23.11: F's setattrs also move the ghost `fs`; 260,871, 292,824, 29,322 at step 23.8b's corrected `View`; before it 263,848, 297,308, 29,950, the first two depending on TLC's workers) | ~2.5 min; ~3.5 min; ~15 s (load 10-17, 2026-10-09) |
+| `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
 | `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and a sync point, 1 crash; every invariant and property besides | 679-1,475 each | seconds |
 
@@ -1422,8 +1423,8 @@ restart that file's access time can be behind with no power loss (README
 
 | Configuration or variant | Test | Expected | |
 |---|---|---|---|
-| `MC_atime.cfg` | `atime_test` (medium) | no error | 1 name, 1 slot, 3 changes (reads, setattrs, D's create), 1 crash; every invariant, `FileExact`, `ReplyObservable`. 260,871 distinct states (step 23.8b; 1,457,405 with no `VIEW`), ~1.5 min at load 15 (2026-10-09) |
-| `MC_atime_concurrent.cfg` | `atime_concurrent_test` (medium) | no error | 2 slots, 2 changes, no crash: F's requests and sync points interleaving. 292,824 distinct states (step 23.8b), ~1.5 min. (2 slots with the crash and D's create passed a million states without finishing) |
+| `MC_atime.cfg` | `atime_test` (medium) | no error | 1 name, 1 slot, 3 changes (reads, setattrs, D's create), 1 crash; every invariant, `FileExact`, `ReplyObservable`, and step 23.11's three conditions per inode. 334,826 distinct states (260,871 at step 23.8b, before the ghost `fs`; 1,457,405 with no `VIEW` then), ~2.5 min at load 15 (2026-10-09) |
+| `MC_atime_concurrent.cfg` | `atime_concurrent_test` (medium) | no error | 2 slots, 2 changes, no crash: F's requests and sync points interleaving. 373,534 distinct states (292,824 at step 23.8b), ~3.5 min. (2 slots with the crash and D's create passed a million states without finishing) |
 | `MC_atime_crash.cfg` | `atime_crash_test` (medium) | no error | `atime_held_fill_no_touch`'s bounds: 2 slots, opens, releases and sync points, 1 read, 1 crash. 29,322 distinct states (step 23.8b) |
 | `known_bugs/atime_held_fill_no_touch` | `known_bug_atime_held_fill_no_touch_test` | `CrashSafe` | the held fill records and marks the row dirty, but does not touch F's guard (`HeldFillMark <- HeldFillMarkNoTouch`): a sync point that took its snapshot before the release clears the row |
 | `known_bugs/atime_fill_no_touch` | `known_bug_atime_fill_no_touch_test` (large: 634,354 states, ~7 min) | `CrashSafe` | a refresh that records an open F's attributes marks the row but does not touch the guard (`FillF <- FillFNoTouch`): open, a read, the refresh, a release with nothing new to record, and the sync point clears the row |
@@ -1492,9 +1493,8 @@ the audit's G17):
 outside the create's mutation (`BeginCreate` names the parent only), so a
 lookup or a listing of D can insert it before phase 3, and
 `RecordChild` records it with valid attributes and no mark (its guard was
-never touched). The model shows two ways this leaves a clean row with the
-attributes of an object a power loss may still erase, served by nodeid (an
-NFS handle's `LOOKUP(".")`, a `GETATTR`) until an open finds it gone:
+never touched). The model shows three ways this leaves a clean row with
+valid attributes while a power loss may still erase the object:
 
 - without the kernel's lock (the audit's case): the lookup between the
   create's syscall and its phase 3 (`known_bugs/borndirty_fill_unmarked`,
@@ -1502,17 +1502,36 @@ NFS handle's `LOOKUP(".")`, a `GETATTR`) until an open finds it gone:
 - with the lock, after a daemon crash between the create's syscall and its
   phase 3: the restart keeps D dirty, nothing is in flight, and the first
   lookup of the name records the row clean, while the create is still not
-  durable (`borndirty_fill_unmarked_after_crash`, 10 states). This one is
-  reachable in today's code, with today's locking; the start neither
-  sweeps that row (`ForgetUnnamedRows` takes rows with `nlink` 0) nor
-  probes it (it is not dirty).
+  durable (`borndirty_fill_unmarked_after_crash`, 10 states);
+- with the lock and no crash, after a phase 3 that fails after the create's
+  syscall (the review's path B: `RecordNewChild`'s transaction fails, the
+  reply is `EEXIST`, `CreatedButNotCompleted`, and the kernel drops its
+  negative dentry; the name stays unknown and D dirty): the next lookup
+  records the row clean exactly as after a daemon crash
+  (`borndirty_fill_unmarked_after_failed_phase3`, 7 states;
+  `FileCreatePhase3Failed`, enabled by `Phase3CanFail`).
 
-The audit's two candidate rules miss the second case: recording the
+The last two are reachable in today's code, with today's locking (the
+review confirmed both in the C++). The exposure: by nodeid only (an NFS
+client's or a saved handle: `LOOKUP(".")` and `GETATTR` serve the valid
+attributes of an object that is gone, until an open or a readdir of it
+gets `ESTALE`); lookups by path and listings stay correct, because D's
+mark is durable and recovery forgets D's names; the row is never swept
+(`ForgetUnnamedRows` takes rows with `nlink` 0) nor probed (it is not
+dirty); the window is a power loss before the backing filesystem commits
+the create and before the next sync point. The model checks the exposure
+as a state property only (`CrashSafe`'s `FileOK`: valid attributes of a
+row require F to exist): no request is ever sent to a lost F (its
+requests need F's row and F), so no step serves those attributes.
+
+The audit's two candidate rules miss the last two cases: recording the
 child's attributes only when the parent's fill is allowed
-(`borndirty_fill_rule_a`; without a crash it keeps `CrashSafe` but not
-`BornDirty`: the row exists clean, its attributes unknown), and marking the
-row only when the parent's fill is refused (`borndirty_fill_rule_b`): after
-the restart the parent is neither in flight nor touched. The rule the
+(`borndirty_fill_rule_a`, and `_failed_phase3`; without a crash it keeps
+`CrashSafe` but not `BornDirty`: the row exists clean, its attributes
+unknown), and marking the row only when the parent's fill is refused
+(`borndirty_fill_rule_b`, and `_failed_phase3`): after the restart, or
+after the failed phase 3's End, the parent is neither in flight nor
+touched since the fill's snapshot. The rule the
 model takes (`FillMarks` in `dcfs.tla`): **a row that a fill inserts while
 its parent is in the dirty set is born dirty**, in the fill's transaction.
 A parent with a create in it that a crash may still lose is always dirty
@@ -1539,27 +1558,37 @@ reports it).
 | `borndirty_parent_not_durable` | the create's phase 1 not durable (crash F1 for F's create): a negative dentry of F survives a create that a power loss keeps | 5 |
 | `borndirty_fill_unmarked` | G5, today's rule, without the lock | 5 |
 | `borndirty_fill_unmarked_after_crash` | G5, today's rule, with the lock, after a daemon crash | 10 |
-| `borndirty_fill_rule_a`, `_rule_b` | the audit's candidate rules | 10 each |
+| `borndirty_fill_unmarked_after_failed_phase3` | G5, today's rule, with the lock, no crash, after a failed phase 3 (path B) | 7 |
+| `borndirty_fill_rule_a`, `_rule_b` | the audit's candidate rules, after a daemon crash; `_failed_phase3`: after a failed phase 3 | 10 each; 7 each |
 | `borndirty_trusts_any_row` | `BeginWriting`'s fast path for any existing row (`FSetSync`): a write's phase 1 lost, the cache behind | 6 |
 | `borndirty_sync_keeps_durable` | a sync point clears the born-dirty mark but keeps F durably dirty (the audit's fourth) | 9 |
 | `borndirty_not_born_here` | phase 3 takes F as durably dirty although a fill inserted the row before (without the lock) | 11 |
 | `borndirty_recover_keeps_file` | recovery keeps a dirty file's attributes (for the premise test of `RecoveryForgetsDirty`; no `VIEW`) | 5 |
+| `file_setattr_end_skipped` | the audit's G17: F's setattr skips its `End` (`GuardsBalanced`) | 4 |
 
 `premise_*_test` (small) checks that each new property bites:
-`BornDirty` and `LostRowProbed` on `borndirty_two_commits`,
-`DirtyBeforeChange` on crash F1, `ClearOnlyAfterSync` on
-`sync_during_mutation`, `RecoveryForgetsDirty` on
-`borndirty_recover_keeps_file`. Not modelled: the audit's G15
+`BornDirty` and `LostRowProbed` on `borndirty_two_commits`, and
+`BornDirty` on `borndirty_fill_unmarked_after_crash` (a fill's row);
+`DirtyBeforeChange` on crash F1 (D's clause) and on
+`borndirty_trusts_any_row` (F's); `ClearOnlyAfterSync` on
+`sync_during_mutation` (D's) and on `atime_sync_clears_held` (F's);
+`RecoveryForgetsDirty` on `borndirty_recover_keeps_file`. Not modelled: the audit's G15
 (`RecordTmpfile`'s mark against `ClearDirty`'s fast path; the model has no
 `O_TMPFILE` and only the per-row clear).
 
-**Configurations** (alone on russ's machine, 2026-10-09; counts and times
-in the configurations table above):
+**Configurations** (counts and times in
+[Configurations](#configurations)). Every one lets a phase 3 fail after
+its syscall (`Phase3CanFail`). There is no `"metaprefix"` configuration:
+without data writes (the `write` requests, which touch only D's names'
+objects) that regime leaves exactly the states `"seq"` does, as
+`MC_crash_metaprefix.cfg` already shows for D (a first version had one:
+the same 261,688 states as `"seq"`).
 
 | Configuration | Test (tier) | Bounds |
 |---|---|---|
-| `MC_borndirty.cfg`, `_ext4`, `_metaprefix` | `borndirty_seq_test`, `borndirty_ext4_test`, `borndirty_metaprefix_test` (medium) | F not yet created; its create, lookups, setattrs and writes, getattrs, opens, releases and reads, sync points; 1 slot, the kernel's lock, 3 changes, 1 crash |
+| `MC_borndirty.cfg`, `_ext4` | `borndirty_seq_test`, `borndirty_ext4_test` (medium) | F not yet created; its create, lookups, setattrs and writes, getattrs, opens, releases and reads, sync points; 1 slot, the kernel's lock, 3 changes, 1 crash |
 | `MC_borndirty_nolock.cfg`, `_nolock_ext4` | `borndirty_nolock_test`, `borndirty_nolock_ext4_test` (medium) | the same without opens, 2 slots, no kernel lock, 2 changes, 1 crash |
+| `MC_borndirty_recovery.cfg` | `borndirty_recovery_test` (medium) | create, lookups, getattrs, sync points; 1 slot, the lock, 1 change, 2 crashes (a fill after a daemon crash, then a power loss and the start's probe; a crash during recovery) |
 
 **Abstractions.** F's create is a plain create (a writable create is that
 create and then `fset`); F's name is never renamed or unlinked; a create of

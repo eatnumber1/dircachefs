@@ -844,16 +844,24 @@ by the model (`formal/README.md`, "Born-dirty create"):
   NFS handle's `LOOKUP(".")`, a `GETATTR`) until an open finds it gone:
   without the kernel's directory lock between a create's syscall and its
   phase 3 (the 12.12 audit's G5), and with it, today, after a daemon crash
-  between a create's syscall and its phase 3 followed by a lookup of the
-  name before the next sync point (the parent stays dirty across the
-  restart; nothing is in flight; the start neither sweeps the row, whose
-  `nlink` is not 0, nor probes it). A parent with a create in it that a
-  crash may still lose is always in the dirty set, so the rule catches
-  every such row; its cost is one dirty row, and at a crash's start one
-  probe, per child first recorded in a directory changed since the last
-  sync point. The two rules the audit proposed (record a child's
-  attributes only when the parent's fill is allowed; mark the row only
-  when it is refused) both miss the daemon-crash case.
+  between a create's syscall and its phase 3 **or** after a phase 3 that
+  fails after the syscall (`CreatedButNotCompleted` replies `EEXIST` and
+  the kernel drops its negative dentry), followed by a lookup of the name
+  before the next sync point (the parent stays dirty; nothing is in
+  flight). The exposure is by nodeid only: an NFS client's or a saved
+  handle's `LOOKUP(".")` and `GETATTR` serve the valid attributes of an
+  object that is gone until an open or a readdir of it gets `ESTALE`;
+  lookups by path and listings stay correct, since the parent's mark is
+  durable and recovery forgets its names; the row is never swept (its
+  `nlink` is not 0) nor probed (it is not dirty); the window is a power
+  loss before the backing filesystem commits the create and before the
+  next sync point. A parent with a create in it that a crash may still
+  lose is always in the dirty set, so the rule catches every such row; its
+  cost is one dirty row, and at a crash's start one probe, per child first
+  recorded in a directory changed since the last sync point. The two rules
+  the audit proposed (record a child's attributes only when the parent's
+  fill is allowed; mark the row only when it is refused) both miss the
+  daemon-crash and failed-phase-3 cases.
 
 **Kernel caches after dcfs's own mutations** are kept right by the kernel
 itself: it invalidates the parent's attributes and dentries for the
