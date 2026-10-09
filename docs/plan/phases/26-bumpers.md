@@ -409,6 +409,30 @@ builds 148 s, our compile 76 s, tests 153 s, critical path 138 s
   miss only; entries are named by a hash of the rule's inputs, so a stale
   entry never matches. Cost: about 1 GB compressed (estimate) of the 10 GB
   quota. Decide with the push's profile numbers. Owner: dcfs-implementer.
+  Done 2026-10-09, merged 4e21a50 (lane-2, one commit). The premise was
+  wrong: Bazel's repo contents cache holds only http_archive/http_file
+  repositories; `@dcfs_llvm`, the alpine_* repos, kernel_image and qemu
+  are real directories in the output base. Cached instead: the output
+  base's `external/+llvm_distribution+dcfs_llvm` plus its marker (the
+  smallest unit, LLVM only; Bazel reuses a restored directory only when the
+  marker's inputs match, so a stale entry costs a refetch, never a wrong
+  build; verified locally with a sentinel file in a fresh output base).
+  Key: hash of MODULE.bazel, MODULE.bazel.lock, .bazelversion and
+  third_party/llvm/*, no restore-keys, saved on a miss, skipped under
+  `cold`; prepare.sh exports `DCFS_BAZEL_EXTERNAL` (output base from
+  md5 of the workspace path). Measured from the bc7eee7 profiles: the
+  extraction is 199 s in fast, 456 s in presubmit, 263 s in coverage, 276 s
+  in each reproducible build, and about 253 s hidden in each shard's
+  `cquery` (unprofiled): about an hour of runner time per push, 7.6 min
+  on the critical path plus about 4 min per shard. Size 0.58 GB zstd.
+  `reproducible` (own output bases) and `osv` left out. Caveat: Alpine pins
+  by branch, so an upstream change to a package the extraction uses makes
+  the marker mismatch and the stale entry stays (slow, not wrong); a date
+  component in the key if the profiles show it. Check on the second push
+  after the merge: the `@dcfs_llvm` row near 0 in fast/presubmit/coverage,
+  shard cquery seconds instead of 253 s, restore hit, save about 0.58 GB;
+  a "Path Validation Error" would mean the `+`/`@` in the paths broke
+  actions/cache's globbing (the one thing not verifiable locally).
 
 ## 26.14f Coverage artifacts in the daemonisation path (CI run 37973594236, 2026-10-09)
 

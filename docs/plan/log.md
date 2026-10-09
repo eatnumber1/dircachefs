@@ -2344,3 +2344,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   dispatched; the agent asked for a dedicated CI job and sanitizer handling.
 - 26.16b dispatched to lane-2 (new implementer): cache the extracted toolchain in CI, sized from
   the bc7eee7 run's profiles.
+- 26.16b merged (4e21a50): the repo contents cache cannot hold @dcfs_llvm (only http_archive/
+  http_file repos live there), so the output base's extracted tree plus marker is cached by pin
+  hash (0.58 GB zstd). The profiles put the extraction at about an hour of runner time per push
+  (199 s fast, 456 s presubmit, 263 s coverage, 276 s per reproducible build, about 253 s hidden
+  in each shard's unprofiled cquery). Verify on the second push after this lands. Lane-2 free:
+  12.14 (the model's SQLite durability abstraction tested by power cuts with dm-log-writes
+  replay) dispatched (new dcfs-protocol).
