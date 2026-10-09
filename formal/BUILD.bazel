@@ -877,6 +877,7 @@ tla_trace_log_test(
     for variant in [
         "view",
         "nofsnap",
+        "fsnaprawseq",
         "noidle",
         "noimage",
         "noview",

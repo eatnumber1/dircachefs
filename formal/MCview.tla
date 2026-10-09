@@ -17,6 +17,14 @@ ViewNoFSnap == <<bCur, bSeq,
           [q \in Procs |-> IdleView(ps[q])], servedWrong,
           fm, stamp, muts, crashes>>
 
+\* FSnapView, but F's guard clock itself kept (not zeroed).
+ViewFSnapRawSeq == <<bCur, bSeq,
+          IF mode \in {"down", "recover"} THEN CrashImage(dbCur) ELSE dbCur,
+          {CrashImage(s) : s \in dbOpts},
+          mode, seq, inflight, durableD, running,
+          [q \in Procs |-> IdleView(FSnapView(ps[q]))], servedWrong,
+          fm, stamp, muts, crashes>>
+
 \* Without IdleView: idle slots keep their last reply.
 ViewNoIdle == <<bCur, bSeq,
           IF mode \in {"down", "recover"} THEN CrashImage(dbCur) ELSE dbCur,
