@@ -2152,3 +2152,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   are only checked in the large tier; G11/G12 traces check few properties and cover four scripts,
   cut at the first link or cross-directory rename. The audit's order replaces the earlier plan
   order (phases/12). G16 sent to the Phase 13 agent: ident.tla in the same change.
+- russ (2026-10-09): "Start an additional temporary lane for the bazel --profile change." lane-7
+  created (a clone like the others, user.bazelrc copied from lane-1, .scratch/ excluded); 26.16
+  dispatched there (new investigator): --profile per CI job uploaded as artifacts, tools/ci_profile.py
+  with a fixture test summarising fetch/@dcfs_llvm/third-party/our compile/tests into the job
+  summary, a workflow_dispatch `cold` input skipping the cache restores, the question whether the
+  extracted @dcfs_llvm is cached at all (answer only, no fix), one local fast-tier table. lane-7 is
+  removed after the merge (its Bazel server shut down first).
