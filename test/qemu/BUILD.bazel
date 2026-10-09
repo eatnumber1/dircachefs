@@ -617,7 +617,7 @@ qemu_test(
 #
 # Step 6.2: one guest per shard, by test directory (guest/pjdfstest_<shard>.sh
 # set PJD_SHARD and source guest/pjdfstest.sh, which fixes the assignment in
-# shard_of()): rename (rename/), chown (chown/, chmod/) and rest (every
+# shard_of()): rename (rename/, chmod/), chown (chown/) and rest (every
 # other directory). In one guest the suite took 14-16 minutes on a loaded
 # host (ext4 989 s, btrfs 755 s, xfs 685 s, all three at once); the shards
 # take 3-4 minutes each (docs/plan/log.md, step 6.2). The tier stays

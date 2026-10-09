@@ -1142,7 +1142,8 @@ afterwards, that nothing returned EIO, and that the daemon survived.
 over three guests, `pjdfstest_{rename,chown,rest}_test_<fstype>`, each a
 three-line wrapper (`guest/pjdfstest_<shard>.sh`) that sets `PJD_SHARD` and
 sources `guest/pjdfstest.sh`. The assignment is by test directory and fixed
-in `shard_of()` there (`rename/`; `chown/` and `chmod/`; every other
+in `shard_of()` there (`rename/` and `chmod/` (moved from the chown shard in step
+6.5, which was the longest by far); `chown/`; every other
 directory, including any pjdfstest adds later), so it does not depend on
 file order. Each shard runs the same two-run comparison on its own
 directories and applies only the part of

@@ -45,13 +45,15 @@
 # sets PJD_SHARD and sources this file (pjdfstest_rename.sh,
 # pjdfstest_chown.sh, pjdfstest_rest.sh; same pattern as idle_short.sh):
 #
-#   rename: rename/
-#   chown:  chown/ chmod/
+#   rename: rename/ chmod/
+#   chown:  chown/
 #   rest:   every other directory (open, unlink, link, truncate, ...)
 #
 # Assignment is by test directory, fixed in shard_of() below, so it never
 # depends on the order or number of files; a directory that is not named
-# there lands in "rest", so no check can fall out of every shard. With
+# there lands in "rest", so no check can fall out of every shard. (Step 6.5:
+# chmod/ is with rename/, not chown/: on the CI runner chown alone took 185-211 s
+# and rename 60 s, and chmod/ is about a fifth of chown's shard.) With
 # PJD_SHARD unset the script refuses to run. Each
 # shard runs the same two-run comparison on its own directories and uses the
 # part of the expected_failures baseline that names them.
@@ -99,8 +101,8 @@ echo "pjdfstest.sh: kernel $(uname -r)"
 # shard_of DIR: the shard that runs tests/DIR/.
 shard_of() {
 	case "$1" in
-	rename) echo rename ;;
-	chown | chmod) echo chown ;;
+	rename | chmod) echo rename ;;
+	chown) echo chown ;;
 	*) echo rest ;;
 	esac
 }
