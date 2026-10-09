@@ -2047,3 +2047,38 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   upstream code path, a lore search for existing reports, and draft mails for the ext4 casefold
   tune oops and the btrfs_destroy_inode WARNING, for russ to send. Chosen for the free lane because
   15.3/Phase 14 (schema, startup) would collide with 23.10's code half, and 12.9 with its model.
+- 26.15 BLOCKED (lane-5, no commits, branch step-26.15 at fdd1d99): the agent's first write (a
+  heredoc creating tools/kernel_bugs/ext4_casefold_tune/*.c and a BUILD file) was refused by the
+  auto-mode safety check ("Auto mode could not evaluate this action ... because of earlier
+  conversation content"), and every later Bash call in that agent, read-only ones included, got the
+  same refusal. It stopped and reported, per the standing rule; not re-dispatched (a fresh agent
+  with a reworded prompt would be a workaround of a permission denial). Needs russ: run 26.15 in a
+  session or mode where writing a kernel-oops reproducer is allowed, or do the reproducers by hand
+  from the design below. Read-only findings worth keeping:
+  - ext4: on 6.18.55-0-virt the oops is `BUG: kernel NULL pointer dereference, address: 0x18`,
+    `RIP: utf8nlookup+0x14/0x240`, task `ls`, chain utf8nlookup <- utf8byte <- utf8_casefold <-
+    ext4fs_dirhash <- htree_dirblock_to_tree <- ext4_htree_fill_tree <- ext4_readdir <- iterate_dir.
+    Source at v6.18 and at ~/Sources/linux HEAD (d530980dfbb7, v7.3-rc4-607 + the fuse patch):
+    ext4_ioctl_set_tune_sb defaults the encoding to UTF8_12_1 when it enables casefold, but
+    ext4_sb_setparams writes the feature bit and encoding only to the on-disk superblock;
+    ext4_encoding_init (super.c) is called only at mount; ext4_ioctl_setflags's +F check tests only
+    the feature bit; ext4fs_dirhash (hash.c:318-329) dereferences sb->s_encoding with no NULL
+    check. Still present at that HEAD by source reading; lore not yet searched. Fix ideas (prose):
+    refuse the casefold part of the tune ioctl on a mounted fs, or load the encoding after the
+    ioctl, or test s_encoding instead of the feature bit in setflags/dirhash.
+  - btrfs: the WARNING is `fs/btrfs/inode.c:8047 btrfs_destroy_inode+0x224/0x290`, seven times
+    within 80 ms; at v6.18.55 line 8047 is `WARN_ON(inode->csum_bytes)` (delalloc_bytes and
+    new_delalloc_bytes at 8045/8046 did not fire). The tree's attribution to
+    btrfs_read_locked_inode's error path (fault_recover.sh's pin_inodes comment, log) is UNPROVEN:
+    csum_bytes is not normally non-zero for an inode whose read failed; candidates are an inode
+    evicted with csum accounting left after failed writes (the writer in the error-writes/error-io/
+    dead modes) or the iget_failed path (inode.c 4180-4190). run-qemu.sh keeps only the cut-here,
+    WARNING and Call Trace header lines, so the reproducer must print dmesg itself.
+  - Design for whoever resumes: tools/kernel_bugs/{ext4_casefold_tune,btrfs_failed_inode_read}/
+    with reproduce.sh (POSIX sh, scratch device, MKFS=0 to skip mkfs), README, a small static
+    helper (ext4: `enable <mountpoint>`, `mark <dir>`; btrfs: name_to_handle_at/open_by_handle_at)
+    and BUILD; mkinitramfs.sh needs an additive case installing tools/kernel_bugs/* under
+    /kernel_bugs/ (outside the prompt's file list: flagged); a generic guest/kernel_bug_repro.sh
+    using lib.sh's `disabled` helper; two manual qemu_test targets with kernel_failure="expected"
+    (ext4 vdb 64M; btrfs vdb 320M + dm_flakey, padded with ~6000 files). .scratch/kernel-src/ in
+    lane-5 holds read-only copies of the v6.18, v6.18.55 and HEAD files read.
