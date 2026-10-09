@@ -31,7 +31,10 @@ nr_dirty() { awk '/^nr_dirty / { print $2 }' /proc/vmstat; }
 check_sysctl vm.dirty_writeback_centisecs 0
 check_sysctl vm.dirty_expire_centisecs 8640000
 check_sysctl vm.laptop_mode 0
-check_sysctl vm.vfs_cache_pressure 1
+# Not lowered: drop_caches reaches dentries and inodes through the same slab
+# shrinkers, whose object counts the setting scales (vfs_pressure_ratio), so a
+# low value makes `echo 3 >drop_caches` drop almost nothing (checked below).
+check_sysctl vm.vfs_cache_pressure 100
 
 cpus=$(grep -c '^processor' /proc/cpuinfo)
 if [ "$cpus" = 1 ]; then
@@ -68,6 +71,25 @@ if [ "$synced" -le $((base + 20)) ]; then
 	pass sync-writes-back
 else
 	fail sync-writes-back "nr_dirty is $synced after sync (was $base before the write): sync did not write the page back"
+fi
+
+# The explicit trigger for reclaiming dentries and inodes: drop_caches must
+# still drop them (the kernel's unused dentries, field 2 of dentry-state).
+mkdir /src/many
+i=0
+while [ "$i" -lt 300 ]; do
+	: >"/src/many/f$i"
+	i=$((i + 1))
+done
+ls -l /src/many >/dev/null
+unused_before=$(awk '{ print $2 }' /proc/sys/fs/dentry-state)
+sync
+echo 3 >/proc/sys/vm/drop_caches
+unused_after=$(awk '{ print $2 }' /proc/sys/fs/dentry-state)
+if [ "$unused_after" -lt $((unused_before / 2)) ]; then
+	pass drop-caches-drops-dentries
+else
+	fail drop-caches-drops-dentries "unused dentries: $unused_before before, $unused_after after drop_caches (want under half)"
 fi
 umount /src
 

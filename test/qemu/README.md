@@ -274,8 +274,15 @@ before any test runs (the comments there say the event each removes):
 | `vm.dirty_writeback_centisecs=0` | the flusher threads' wakeup every 5 s | `sync`, `fsync`, `testutil syncfs`, dcfs's sync points, `fsfreeze`, unmount |
 | `vm.dirty_expire_centisecs=8640000` (a day) | writeback of dirty data once it is 30 s old | the same |
 | `vm.laptop_mode=0` (already the default) | writeback after reads that spin a disk up | the same |
-| `vm.vfs_cache_pressure=1` | reclaim of cached dentries and inodes at the normal rate (FORGETs nobody asked for) | `drop_caches` (`guest/lib.sh` `drop_caches_quiesced`), which ignores the setting; `require_no_reclaim` asserts nothing else reclaimed |
+| `vm.vfs_cache_pressure=100` (the default, set explicitly; **not lowered**) | nothing: reclaim of cached dentries and inodes happens only under memory pressure, which `require_no_reclaim` fails on | `drop_caches` (`guest/lib.sh` `drop_caches_quiesced`) |
 | one vCPU (`qemu_test` `cpus`, default 1; `run-qemu.sh --cpus`) | the daemon, the client and the kernel's threads running at once | the test's own concurrency (`&` in a script) is preempted on one CPU instead |
+
+`vfs_cache_pressure` is not lowered because `drop_caches` reaches dentries and
+inodes through the same slab shrinkers, whose counts it scales: at 1 a
+`drop_caches` dropped 2 of 1091 unused dentries and `request_counts_test`,
+`syscall_traces_test` and `write_test` failed (no LOOKUP or FORGET followed the
+drop); at 0 the shrinkers' counts are zero. `quiet_kernel_test` checks that
+`drop_caches` still drops dentries.
 
 What stays: writeback driven by the amount of dirty memory (the test's own
 write volume against the guest's RAM), the filesystems' own timers (ext4's

@@ -57,13 +57,18 @@ set_sysctl dirty_expire_centisecs 8640000
 # Laptop mode (the kernel's default is off) writes everything dirty after any
 # read that spins the disk up: explicit, so it stays off.
 set_sysctl laptop_mode 0
-# Reclaim of cached dentries and inodes under memory pressure, which sends
-# dcfs FORGETs nobody asked for, at 1% of the normal rate. (0 would never
-# reclaim them, and an OOM is better than a hang only if it is not ours.) The
-# tests drop them on purpose with `drop_caches` (guest/lib.sh
-# drop_caches_quiesced), which ignores this setting; require_no_reclaim
-# asserts that none were reclaimed otherwise.
-set_sysctl vfs_cache_pressure 1
+# Reclaim of cached dentries and inodes (FORGETs nobody asked for) happens only
+# under memory pressure, which the MEM line's reclaim_scans reports and
+# require_no_reclaim fails a test on, so there is no spontaneous event here to
+# remove; the setting stays at the kernel's default, explicitly. It is NOT
+# lowered: drop_caches, the tests' explicit trigger for dropping dentries and
+# inodes (guest/lib.sh drop_caches_quiesced, and `echo 3 >drop_caches`
+# elsewhere), reaches them through the same slab shrinkers, whose object counts
+# vfs_cache_pressure scales (vfs_pressure_ratio): at 1, `drop_caches` dropped
+# 2 of 1091 unused dentries, request_counts_test, syscall_traces_test and
+# write_test failed because no FORGET or LOOKUP followed, and at 0 the counts
+# are zero (quiet_kernel_test checks that drop_caches still works).
+set_sysctl vfs_cache_pressure 100
 # kernel.randomize_va_space is left at the kernel's default (2). dcfs is PIE
 # and no behavior of it depends on an address, with one observable exception:
 # Abseil seeds its hash tables with the address of a static, so ASLR changes
