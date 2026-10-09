@@ -2320,3 +2320,27 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the same branch, then rebase. Needs russ (small): `DirCacheFS`'s `friend
   testonly::DirCacheFSPeer` is a test-only seam in production code that the checker's tests use;
   style.md records the option of exposing that bookkeeping through ProtocolEvents instead.
+- 12.12a's first item merged (71c8059): `MC_ident_power_oob` (generation-only evidence, out-of-band
+  changes), medium, 721,557 distinct states, passes on main; no known_bug variant possible on
+  main's ident.tla (no inode-only switch). Lane-2 free.
+- 25.7 + 25.8 + 7.1d merged (704f11e, four commits incl. the 26.14f golden-list fix that had left
+  the fast tier red on main; fast 233 + 2 on the rebased tip). russ on the DirCacheFSPeer friend:
+  "This is exactly the thing I want to get rid of. A test peer allows test code to reach into the
+  private internals of a class. Don't do that." 25.7b queued: remove the peer, expose the
+  bookkeeping as a real feature, a repo-shape check against testonly friends.
+- 17.1 reported (lane-4, three commits, 27 files): xfstests' generic group runs against dcfs on
+  ext4/xfs/btrfs through the real mount(8) (an Alpine tools repo, ~125 helper programs built
+  static, a musl-strerror LD_PRELOAD shim, a guest patch to `check`, a mount wrapper giving each
+  FUSE mount its cache_db, an umount wrapper that waits for the daemon), 150 pass / 14 listed /
+  572 not run per backing (reflink 173, dmsetup 76, godown 32, quota 31), 48 excluded with reasons,
+  a 14-fixture gate self-check failing first, six eternal shards per backing (11-21 min each at
+  load 9-19), 1024 MiB guests. Findings: (a) dcfs keeps S_ISGID after an unprivileged write where
+  the backing clears it (generic/683-685; minimal repro in the report) -> 17.2; (a) 29 metadata-
+  heavy tests 20-50x slower through dcfs, daemon CPU-bound, one in a SQLite fsync until /cache
+  moved to tmpfs -> 17.3 remeasure on a quiet host (born-dirty removes that fsync); (b) remount,ro
+  ignored, shared-mmap mtime late, chattr attributes not in statx, a second mount of one source
+  refused (README bullet added); the umount race seen again (15.6b). Not settled: CI placement
+  (18 eternal shards would land in the full/asan/ubsan matrix) and sanitizer memory. Opus review
+  dispatched; the agent asked for a dedicated CI job and sanitizer handling.
+- 26.16b dispatched to lane-2 (new implementer): cache the extracted toolchain in CI, sized from
+  the bc7eee7 run's profiles.

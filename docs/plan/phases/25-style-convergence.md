@@ -201,6 +201,36 @@ formal verification)." A fake that is the production default (the no-op
 `ProtocolEvents` the daemon runs with, which the trace tests replace) is
 the pattern the rule wants, not a violation; style.md says so.
 
+Status 2026-10-09: 25.7 merged 704f11e (with 25.8 and 7.1d; lane-5). As
+built: style.md section 8 (the rule in russ's words, the pattern, the
+anti-pattern, the production-default fake as the pattern); repo_shape
+`no_test_only_comments` over dcfs/ and bench/ production sources (comments
+giving tests as the reason, `ForTest`/`_for_test` names; `tools/*.c` are
+the suite's own tools and are not scanned; empty allowlist, a reason per
+entry, known-bad self-check failing first); seven comments reworded; one
+conversion, `ErrnoNameTable()` removed (the test uses `ErrnoToErrorName`);
+inventory verdicts in the commit message (ProtocolEvents and its hooks,
+Context::events/clock/interrupts, Checkpoint, FillGuards::max_touched are
+features; the `--wrap` fault points are link-time, no seam).
+
+## 25.7b Remove the test peer (russ, 2026-10-09)
+
+The inventory flagged `DirCacheFS`'s `friend testonly::DirCacheFSPeer`,
+which the runtime checker's tests use to read the daemon's bookkeeping.
+russ: "This is exactly the thing I want to get rid of. A test peer allows
+test code to reach into the private internals of a class. Don't do that."
+So: remove the friend declaration and the peer. What the checker's tests
+read through it becomes observable through a real feature: the
+`ProtocolEvents` observer (events carrying the bookkeeping the tests
+assert on) or a documented query on `DirCacheFS` with a production use
+(statistics, Phase 20, or the idle INFO line), never a getter whose only
+caller is a test. Tests first: each test that used the peer is rewritten
+against the new feature and shown passing; the peer's header and the
+`testonly` target go; repo_shape gains a check that no production class
+declares a `friend` from a `testonly` namespace or target (known-bad
+fixture). Owner: dcfs-implementer, next free lane; coordinate with 23.11
+(which adds a checker rule and may touch the same tests).
+
 ## 25.8 Abseil's Tips of the Week as design guidance (russ, 2026-10-09)
 
 russ: "we adopt all of https://abseil.io/tips/. It's a 'rule', but not as
