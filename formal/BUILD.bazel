@@ -497,6 +497,7 @@ IDENT = [
         "",
         "_oob",
         "_power",
+        "_power_oob",
         "_btime",
         "_stubs",
         "_target",

@@ -2061,6 +2061,7 @@ workers, other lanes running).
 | `MC_ident.cfg` | `ident_test` (medium) | today's identity, ext4's evidence, names a, b (o1, o2), o3 recycling o1's inode number, 3 row ids, 2 handles, 1 crash; every property | 11,351 | ~15 s |
 | `MC_ident_oob.cfg` | `ident_oob_test` (medium) | as above with changes behind dcfs's back; every property | 49,833 | ~35 s |
 | `MC_ident_power.cfg` | `ident_power_test` (medium) | a power loss and a crash, the handle's generation the only evidence; every property but `ServedWhileLive` | 193,781 | ~70 s |
+| `MC_ident_power_oob.cfg` | `ident_power_oob_test` (medium) | identity resolution under out-of-band changes with generation-only evidence (`MC_ident_power.cfg` with `OutOfBand`); every property but `ServedWhileLive`. Added when a named-open design was shown to break it (Phase 13 review, 2026-10-09) | 721,557 | ~100 s |
 | `MC_ident_btime.cfg` | `ident_btime_test` (medium) | the birth time the only evidence, changes behind dcfs's back; every property | 49,833 | ~25 s |
 | `MC_ident_stubs.cfg` | `ident_stubs_test` (medium) | filesystems mounted at a and b, 2 stub ids, mounts and unmounts behind dcfs's back, a power loss; every property but `ServedWhileLive` | 217,366 | ~70 s |
 | `MC_ident_target.cfg` | `ident_target_test` (medium) | Phase 14's identity, a crash, a power loss and a cache wipe; every property | 145,136 | ~60 s |
