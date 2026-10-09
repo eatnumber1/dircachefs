@@ -1980,3 +1980,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   metaprefix gain getattr + attrchange: 357k / 292k states). The rebase onto b845249 conflicts in
   dcfs.tla with 23.8's model F (two model changes touching the backing state and crashes): handed to
   the lane agent to merge F's crash behaviour onto bSeq; orchestrator's attempt aborted cleanly.
+- 15.1 + 15.2 merged (106e16e, eleven commits, three Opus rounds). Third round: `none` accepts the
+  libmount options (rw, defaults, nofail, _netdev, noauto, user...), a remount ignores native options
+  with a WARNING, native specs are rewritten only when they exist relative to the cwd and the fsname
+  keeps the spec as written, exit 1 only for usage/non-root (MarkUsageError) and 32 otherwise, the
+  bind ro remount keeps nosuid/nodev/noexec, LastErrorSink only until INIT, a clear error without
+  /proc/sys, [[nodiscard]] on the new headers and syscalls.h wrappers. Fast 214 + 2. Note: the
+  tests-first commit 304cf9e does not build on its own (quoted failures in its message). The real
+  mount(8)/libmount path is untested until 15.6. Lane-6 free.
