@@ -2110,3 +2110,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `-fprofile-update=atomic` under coverage, the gate rejects artifact counts, docs/coverage.md
   exists now. Deviation noted by the agent: one early bazel coverage call was piped through tail
   (not in an && chain). Lane-2 free.
+- Phase 13 (13.1-13.3, connected backing fds) dispatched to lane-2 (new implementer; the phase
+  says Opus not needed): OpenNode chooses by cache state, present dentry -> openat under the
+  connected parent, else handle; out-of-band mismatch WARNING + name unknown + handle fallback;
+  strace goldens/budgets updated deliberately with before/after; told to keep off the dirty set,
+  sync points, recovery and formal/. Started because 23.10's hold frees OpenNode; Phase 14 follows
+  it per the phase order.
+- 26.14d dispatched to lane-5 (new investigator): which requests carry pid 0 and whether a
+  WARNING is right for them; reproduce with --runs_per_test=40; fix the credentials code (likely)
+  or the test's assertion, failing first.
