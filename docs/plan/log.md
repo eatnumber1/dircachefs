@@ -2159,3 +2159,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   summary, a workflow_dispatch `cold` input skipping the cache restores, the question whether the
   extracted @dcfs_llvm is cached at all (answer only, no fix), one local fast-tier table. lane-7 is
   removed after the merge (its Bazel server shut down first).
+- russ (2026-10-09): "If another lane frees up first, cancel lane-7 and do the --profile change
+  there. Don't interrupt any current work, but the --profile change is P0 max priority." Standing
+  order: the first lane to report hands its checkout to 26.16 (fetch step-26.16 from lane-7, shut
+  lane-7's server down, re-point the agent); no other dispatch takes a freed lane before 26.16 has
+  one with an extracted toolchain.
