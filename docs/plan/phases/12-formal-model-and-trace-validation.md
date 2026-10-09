@@ -224,6 +224,43 @@ In this order, each with a known-bug variant and trace validation:
   the forged-request harness with `--wrap` holds forcing the model's
   interleavings (MongoDB's technique that worked; CCF's simulation
   driver). 1-2 weeks, after 12.4.
+  Approved (russ, 2026-10-09): not a spike. The generated tests are NOT
+  checked in: a Bazel target runs TLC (or reads its dumped state graph),
+  generates the test cases every build, and a test target runs them; the
+  generator itself is tested with a fixed small graph. Order: after 12.12
+  and 12.11b/c.
+- 12.11b Per-file trace validation (approved, russ, 2026-10-09): the
+  recorder emits a file's events (attribute change, writable open and
+  release, held fill, the atime-only mark) and Trace.tla takes them, so
+  file-level protocol is checked against the model rather than by harness
+  tests alone. 12.11c Cross-directory trace: one trace covering the
+  interleaving of two directories' events (rename and link across them,
+  sync points clearing each), the gap the 23.10 review named. Owner:
+  dcfs-protocol; after 12.12.
+- 12.12 Read-only audit, model against code and tests (approved, russ,
+  2026-10-09; Opus reviewer): what dcfs.tla, lifetime.tla, reval.tla and
+  ident.tla cover versus what the C++ does (every mutation class, fill,
+  guard, sync and recovery path, cancellation, identity, writable opens,
+  xattrs, directory streams); what trace validation actually checks per
+  event; which properties bite (have a known_bug or a premise); which code
+  paths have no model and no harness test; what of the unmerged
+  `step-23.10` model (second directory, file names, hard links, the three
+  "known parents" counterexamples) is worth merging on its own. Output: a
+  gap list in `notes/formal-coverage-audit-2026-10-09.md` ranked by risk,
+  each gap with the proposed step (a model extension, a trace event, a
+  harness test, or "accepted, documented"), and the order for 12.13,
+  12.11b/c, 12.10 and 23.11. No code changes.
+- 12.13 Mutating the model (approved, russ, 2026-10-09): extend
+  `tools/mutation/` with TLA+ operators (negate a conjunct, drop a
+  conjunct, swap `/\`/`\/`, `<=`/`<`, drop a guard from an action, drop a
+  step from a sequence, swap two steps, replace a durability level); a
+  mutant survives when every `//formal` test still passes (known_bugs
+  must still produce their counterexamples, so a mutant that silences one
+  is killed by that test). Survivors are under-specified properties:
+  each gets a property or a config, or an `equivalent.txt` entry with the
+  reason. Bespoke, in-tree, same report shape as the C++ mutation job;
+  a weekly CI job after the first sweep. Owner: dcfs-implementer for the
+  tool, dcfs-protocol for the survivors. After 12.12.
 Phase 11 gains ACE's crash workloads (Apache-2.0) as inputs to the
 dm-log-writes replay, oracle "dcfs view equals the backing after
 recovery"; SibylFS's scripts (ISC) as a differential trace diff of dcfs

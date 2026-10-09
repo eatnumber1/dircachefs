@@ -467,3 +467,42 @@ interval. Reviewer would build (c) with born-dirty now, measure the
 per-file fsync on real workloads, and build (a) only if the numbers demand
 it, after findings 1-4.
 
+Decision (russ, 2026-10-09): 23.10 closes as investigated. "Dirty bits
+only on directories" is unsound as stated (the three known_bugs on the
+branch); the home design is not the simplification wanted. The branch
+`step-23.10` stays in lane-1 unmerged; 12.12's audit says what of it (the
+second directory, file names and hard links, the "known parents"
+counterexamples as findings) is worth merging into the model on its own.
+
+## 23.11 Born-dirty create (russ, 2026-10-09)
+
+russ: "Even though fsync to an SSD is minor, I still prefer mirroring the
+way a real filesystem works as much as possible (files are created dirty
+until fsync or dirty_writeback)." The rule (from the 23.10 review): a
+create's phase 3 inserts the row and its dirty mark in one transaction at
+normal durability, so every crash state either has the row with its mark
+or no row at all; with no row the cache claims nothing about the file and
+the parent's name is covered by the parent's own durable mark from phase
+1. The row then counts as durably dirty and `BeginWriting` on a new row
+needs no fsync; later writes in the interval need none either. It stops
+being dirty as any dirty row does: at the next sync point, after the
+syncfs, if its guard has not moved since the sync began and it is not open
+for write; after a crash a present dirty row is probed at start and
+cleared only after the next completed sync.
+- Model first (dcfs.tla: row existence for F as a crash-prefix-able
+  commit; the new invariant "no crash state holds the row without its
+  mark"; `CrashSafe`, `RecoveryIdempotent`, `CrashRefines`,
+  `ReplyObservable` under seq, metaprefix and ext4; a known_bug where the
+  row and the mark are two commits, whose counterexample is the lost mark;
+  a known_bug where the parent's phase-1 mark is not durable). If the model
+  finds it unsound, stop and report; the status quo stays.
+- Then the code: the create's phase 3 transaction, `BeginWriting`'s durable
+  requirement satisfied by construction for a born-dirty row (one
+  abstraction: the row knows it is born dirty, no branch at every caller),
+  the checker's rule, the trace event, tests first (the fsync count per
+  create in the syscall budgets drops: before/after in the commit), the
+  existing power-cut and ACE sequences as the regression suite, 26.4b's
+  create slope.
+Owner: dcfs-protocol (the lane-1 agent, after 23.8b). After 12.12's audit
+if it lands first, so the model work goes in one direction.
+

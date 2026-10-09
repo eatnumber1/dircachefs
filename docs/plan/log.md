@@ -2130,3 +2130,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the gap list. Born-dirty create explained (row and mark in one phase-3 transaction; cleared at
   the next sync point like any dirty row; open-for-write rows held back). Decision on 23.10 still
   open.
+- russ (2026-10-09): approved the formal expansion: 12.12 read-only audit (dispatched now, reads
+  main at c1b1142, no lane, no Bazel), 12.13 model mutation, 12.11b per-file and 12.11c
+  cross-directory trace validation, 12.10 test generation from TLC's state graph as a Bazel target
+  that generates the tests every build (never checked in). 23.10 closed as investigated; 23.11
+  born-dirty create approved: model first, build if sound ("mirror the way a real filesystem
+  works: files are created dirty until fsync or dirty_writeback"). 26.16 (bazel --profile per CI
+  job) goes to the first lane that frees, ahead of everything: russ waits for it to push.
