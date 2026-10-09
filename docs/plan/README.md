@@ -50,7 +50,7 @@ phase's file; `log.md` says where things stand.
 | 14 | [Identity from the backing filesystem](phases/14-identity-from-backing-fs.md) | planned |
 | 15 | [The `mount.dcfs` wrapper](phases/15-mount-dcfs-wrapper.md) | 15.0 man page done 2026-10-07; 15.1 + 15.2 merged 2026-10-09 106e16e (mount.dcfs with argv dispatch, dcfs. option split, private-namespace capture via open_tree, own daemonisation with readiness after INIT, syslog sink behind absl, exit 1/32/native, --source gone; three review rounds; util-linux paths untested until 15.6's guest); 15.3 identity/cache path next (Opus); 15.4 stubs after Phase 14 |
 | 16 | [Reject case-insensitive and encrypted directories](phases/16-reject-casefold-and-encrypted-dirs.md) | planned |
-| 17 | [xfstests subset](phases/17-xfstests-subset.md) | planned |
+| 17 | [xfstests subset](phases/17-xfstests-subset.md) | 17.1 running, lane-4 (dispatched 2026-10-09, investigator): generic group through the real mount.dcfs, per-backing expected-failure lists, triage only (no dcfs/ fixes while 23.10 is in flight) |
 | 18 | [Disk quota (EDQUOT)](phases/18-disk-quota-edquot.md) | planned (just before 19) |
 | 19 | [Soak test (manual)](phases/19-soak-test.md) | planned (last automated phase) |
 | 20 | [Statistics](phases/20-statistics.md) | design to be discussed first |

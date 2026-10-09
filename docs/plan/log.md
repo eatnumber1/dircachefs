@@ -2015,3 +2015,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 8.2e + 8.2f merged (fd8f607, one test-only commit; rebased by the agent onto 4b204d9 with no
   conflicts, then by the orchestrator over 12.8, formal-only). Fast 214 + 2 on the agent's tip.
   Lane-4 free.
+- 17.1 dispatched to lane-4 (new investigator): xfstests' generic group against dcfs through the
+  real mount.dcfs (its prerequisite from Phase 15 is the wrapper, merged), runtime pinned through
+  Bazel (Alpine packages for bash and the tools, BUILD.xfstests extended), per-backing expected-
+  failure lists with a known-bad self-check, large tier sharded like pjdfstest. Test-only: dcfs
+  bugs it finds are findings for later steps, since 23.10 owns dcfs/ now. Told to stop early with a
+  measurement if the busybox guest cannot carry xfstests (the alternative is 15.6's Debian guest).
+  Chosen over Phase 13/16 (both need dcfs/ or the stubs) and 7.3-7.7 (tree-wide, not a quiet point).
