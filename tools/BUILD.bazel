@@ -488,3 +488,29 @@ sh_test(
         "coverage_gate.sh",
     ] + glob(["coverage_gate_fixtures/*"]),
 )
+
+# ---- Step 26.14: coverage determinism ----------------------------------
+
+# Compares two coverage reports of one commit (or, per test, two copies of
+# bazel-testlogs): `bazel run //tools:coverage_diff -- A.dat B.dat`. Zero
+# differences is the target (docs/plan/notes/coverage-determinism-2026-10-08.md).
+py_library(
+    name = "coverage_diff_lib",
+    srcs = ["coverage_diff.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "coverage_diff",
+    srcs = ["coverage_diff.py"],
+    main = "coverage_diff.py",
+)
+
+py_test(
+    name = "coverage_diff_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["coverage_diff_test.py"],
+    deps = [":coverage_diff_lib"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
