@@ -2202,3 +2202,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   sleep/timer family and sqlite3_busy_timeout, a repo-shape check against bare `sleep` in guest
   scripts, a SQLite busy-handler check, all in 15.6b; 11.3c (event-driven fault window) queued;
   the backing stall stays a concurrency-design fix, never a watchdog.
+- Found while recording the above: dcfs/sqlite.cc:511 sets `PRAGMA busy_timeout=5000` on every
+  connection (a 5 s timer in disguise; sqlite.h:338 documents it), and 29 guest scripts still
+  contain `sleep`. Both are 15.6b's to handle: the busy handler goes (one writer per database by
+  design; a lock conflict is either the startup "in use" check or a bug, so an immediate clear
+  error, with the reasoning in design.md), and the sleep sites are listed against 6.5.
