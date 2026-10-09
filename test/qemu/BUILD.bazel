@@ -436,6 +436,31 @@ qemu_test(
     timeout = "moderate",
 )
 
+# Step 15.6: mount.dcfs through util-linux's mount(8), fstab and systemd. A
+# released Debian cloud image (//third_party/debian_cloud) boots with systemd as
+# PID 1 under the test kernel; dcfs is installed in it and guest/systemd_run.sh
+# runs the guest script from a oneshot unit. Two boots over the same disks: the
+# script reboots the guest, and the second boot checks what a reboot leaves (the
+# fstab mounts coming back, the cache surviving). See README.md, "The systemd
+# guest".
+qemu_test(
+    name = "mount_dcfs_systemd_test",
+    boots = 2,
+    disks = [
+        ("vda", "ext4", "128M"),
+        ("vdb", "xfs", "320M"),
+        ("vdc", "btrfs", "320M"),
+    ],
+    guest_script = "guest/mount_dcfs_systemd.sh",
+    # peak_used 61-81 MiB plain (the default 256 MiB), 368-457 MiB under ASan
+    # (five daemons through the sanitizer's loader, step 15.6, 2026-10-09):
+    # 457 + 53 reserved, times 1.5, rounded up to 64.
+    asan_mem = 768,
+    systemd_image = "//third_party/debian_cloud:image",
+    size = "large",
+    timeout = "long",
+)
+
 qemu_test_matrix(
     name = "setattr_test",
     disks = [("vdb", "ext4", "320M")],

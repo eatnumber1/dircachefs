@@ -1,0 +1,632 @@
+#!/bin/sh
+# dcfs step 15.6 acceptance test: mount.dcfs through util-linux's mount(8),
+# fstab and systemd (phase 15, decision 14).
+#
+# The busybox guest of mount_dcfs.sh runs the wrapper directly (its mount
+# runs no mount.<type> helpers). This one is a released Debian cloud image
+# with systemd as PID 1 (README.md, "The systemd guest"): util-linux's
+# mount(8) and umount(8), libmount's option passing, the mount units systemd
+# generates from /etc/fstab, journald. The daemons live in their mount units'
+# cgroups here, as they do on a real machine.
+#
+# Two boots over the same disks (run-qemu.sh --boots 2). Boot 1 checks the
+# command line (mount -t dcfs, remount, umount, exit statuses), fstab
+# (mount -a, then the units systemd generates from it: start, status,
+# restart, stop, failure) and what the daemons log to the journal; it leaves
+# the fstab mounts up and reboots (guest/systemd_run.sh). Boot 2 checks what a
+# reboot leaves: the mounts were made by systemd at boot, in order, with the
+# cache from boot 1 (a warm tree reads nothing from the backing disk), the
+# previous boot's daemons shut down cleanly, and a nofail mount of a device
+# that is missing did not hold the boot.
+#
+# Run as /tests/mount_dcfs_systemd.sh by guest/systemd_run.sh, from the
+# oneshot unit dcfs-test.service; one "TEST ... PASS/FAIL/SKIP" line per
+# check.
+FAILED=0
+. "$(dirname "$0")/lib.sh"
+
+BOOT=$(sed -n 's/.*\bdcfs_boot=\([^ ]*\).*/\1/p' /proc/cmdline)
+BOOT=${BOOT:-1}
+# The backing disks start at vda: a microvm guest sees at most four virtio
+# disks (a fifth is not probed, measured 2026-10-09), and the image is the
+# fourth. The kernel mounts the xfs and the btrfs: the image has no mkfs
+# tools, run-qemu.sh made them.
+DEV=/dev/vda # ext4
+DEV_XFS=/dev/vdb
+DEV_BTRFS=/dev/vdc
+CACHE=/var/cache/dcfs
+OUT=/tmp/out
+SRC=/srv/live # the none form's directory
+RAW=/srv/raw  # the bind form's
+MNT=/mnt/m    # for the command-line checks
+MISSING_UUID=0e0e0e0e-dead-4bee-8f00-000000000001
+
+require_commands blkid findmnt journalctl pgrep systemctl systemd-escape timeout umount mount awk
+
+# --- helpers -------------------------------------------------------------
+
+# The pids of the running dcfs daemons: the processes started as mount.dcfs
+# (libmount runs /sbin/mount.dcfs; a sanitizer build runs dcfs.real through
+# its loader, guest/init). One pgrep, not a walk of /proc in shell: the checks
+# poll this on a slow host.
+daemons() { pgrep -f '(^|/)(mount\.dcfs|dcfs\.real) ' 2>/dev/null; }
+
+# The pid of the daemon when there is just the one, else nothing.
+only_daemon() {
+	set -- $(daemons)
+	if [ "$#" -eq 1 ]; then echo "$1"; fi
+}
+
+# fs_of MOUNTPOINT: "FSTYPE SOURCE" of the topmost mount there.
+fs_of() { findmnt -n -o FSTYPE,SOURCE -M "$1" 2>/dev/null | tail -n 1; }
+
+# mount_count MOUNTPOINT: how many mounts there are exactly at it.
+mount_count() { findmnt -rn -M "$1" -o TARGET 2>/dev/null | wc -l; }
+
+# wait_gone PID: up to 10 s for the process to exit.
+wait_gone() {
+	w_i=0
+	while [ "$w_i" -lt 100 ] && [ -d "/proc/$1" ]; do
+		sleep 0.1
+		w_i=$((w_i + 1))
+	done
+	[ ! -d "/proc/$1" ]
+}
+
+# wait_daemons N: up to 10 s for no more than N dcfs daemons to be running.
+# A daemon outlives its unmount for a moment (it syncs the backing filesystem
+# and closes its cache database; systemd already calls the unit stopped), so
+# a start that follows a stop at once may find the cache database in use: see
+# restart_check.
+wait_daemons() {
+	w_i=0
+	while [ "$w_i" -lt 100 ] && [ "$(daemons | wc -l)" -gt "$1" ]; do
+		sleep 0.1
+		w_i=$((w_i + 1))
+	done
+	[ "$(daemons | wc -l)" -le "$1" ]
+}
+
+# journal_has PATTERN JOURNALCTL-ARGS...: the journal has a line matching the
+# grep pattern (waits up to 5 s: journald takes the daemon's datagram
+# asynchronously).
+journal_has() {
+	j_pat=$1
+	shift
+	j_i=0
+	while [ "$j_i" -lt 50 ]; do
+		journalctl --no-pager -o cat "$@" 2>/dev/null | grep -q -e "$j_pat" && return 0
+		sleep 0.1
+		j_i=$((j_i + 1))
+	done
+	return 1
+}
+
+# mnt ARGS...: mount(8), output in $OUT, status in MRC.
+mnt() {
+	timeout 120 mount "$@" >"$OUT" 2>&1
+	MRC=$?
+}
+
+# cleanup_mount MOUNTPOINT: unmounts whatever a failed check left there.
+cleanup_mount() {
+	umount "$1" 2>/dev/null || umount -l "$1" 2>/dev/null || true
+}
+
+dump_state() {
+	echo "--- state ---"
+	findmnt -t fuse.dcfs 2>&1
+	systemctl --no-pager --failed 2>&1 | head -n 20
+	journalctl --no-pager -b -t dcfs 2>&1 | tail -n 30
+}
+
+# --- the guest ------------------------------------------------------------
+
+echo "systemd guest: boot $BOOT, kernel $(uname -r), $(mount --version | head -n 1)"
+# What the boot looked like when this script began (boot 2's nofail check
+# reads them: the checks before it take a while).
+START_UP=$(cut -d. -f1 /proc/uptime)
+START_JOBS=$(systemctl list-jobs --no-pager 2>/dev/null)
+START_MISSING=$(systemctl is-active mnt-missing.mount)
+echo "up $START_UP s at the start of the script"
+
+pid1=$(readlink /proc/1/exe)
+case "$pid1" in
+*/systemd) pass systemd-is-pid1 ;;
+*) fail systemd-is-pid1 "pid 1 is $pid1" ;;
+esac
+mount --version | grep -q 'util-linux' && pass util-linux-mount || fail util-linux-mount "$(mount --version)"
+
+# Nobody can log in on the console: the nocloud image logs root in on the
+# serial console without a password; the getty templates are masked
+# (guest/systemd_install.sh) and root's password is locked.
+getty_state=$(systemctl is-enabled serial-getty@ttyS0.service 2>&1)
+gettys=""
+for g_c in /proc/[0-9]*/comm; do
+	case "$(cat "$g_c" 2>/dev/null)" in agetty | login | getty) gettys="$gettys ${g_c#/proc/}" ;; esac
+done
+root_pw=$(getent shadow root | cut -d: -f2)
+case "$root_pw" in
+'!'* | '*'*) pw_locked=1 ;;
+*) pw_locked=0 ;;
+esac
+if [ "$getty_state" = masked ] && [ -z "$gettys" ] && [ "$pw_locked" -eq 1 ]; then
+	pass console-login-disabled
+else
+	fail console-login-disabled "serial-getty is $getty_state, login processes:$gettys, root password locked: $pw_locked"
+fi
+
+[ -x /sbin/mount.dcfs ] && [ -x /sbin/mount.fuse.dcfs ] ||
+	fail wrapper-installed "/sbin/mount.dcfs and /sbin/mount.fuse.dcfs are not both executable"
+
+mkdir -p -m 0700 "$CACHE"
+mkdir -p "$SRC" "$RAW" "$MNT" /data /mnt/live /mnt/missing /mnt/fail /mnt/xfs /mnt/btrfs /tmp/other
+
+# restart_check: systemctl restart rp.mount, three times: both units are
+# active again with new daemons, and the child's tree is served. Prints why
+# not on failure.
+restart_check() {
+	rc_n=0
+	while [ "$rc_n" -lt 3 ]; do
+		rc_n=$((rc_n + 1))
+		rc_before=$(daemons | sort | tr '\n' ' ')
+		if ! systemctl restart rp.mount 2>/tmp/restart.err; then
+			echo "restart $rc_n failed: $(cat /tmp/restart.err); rp.mount is $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount); $(journalctl --no-pager -b -u rp.mount -o cat | grep -m 1 'in use')"
+			return 1
+		fi
+		if [ "$(systemctl is-active rp.mount)" != active ] || [ "$(systemctl is-active rp-c.mount)" != active ] ||
+			[ "$(cat /rp/c/rc.txt 2>&1)" != rc ] || [ "$(daemons | sort | tr '\n' ' ')" = "$rc_before" ]; then
+			echo "restart $rc_n left rp.mount $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount), rp/c: $(cat /rp/c/rc.txt 2>&1); daemons $rc_before -> $(daemons | sort | tr '\n' ' ')"
+			return 1
+		fi
+	done
+}
+
+# --- boot 1 ---------------------------------------------------------------
+
+boot1() {
+	# The fixtures: an ext4 on vda (a virtio disk, as a real machine's
+	# data disk) with a directory for the nested mount, a directory for the
+	# none form, one for the bind form.
+	mount "$DEV" /mnt/m || fail fixture-mount "cannot mount $DEV"
+	i=0
+	while [ "$i" -lt 5 ]; do
+		echo "content $i" >"/mnt/m/file_$i.txt"
+		i=$((i + 1))
+	done
+	mkdir -p /mnt/m/d1/d2 /mnt/m/sub
+	echo deep >/mnt/m/d1/d2/deep.txt
+	echo "under the mount point" >/mnt/m/sub/covered.txt
+	umount /mnt/m
+	for fixture in "xfs:$DEV_XFS" "btrfs:$DEV_BTRFS"; do
+		fname=${fixture%%:*}
+		fdev=${fixture#*:}
+		mount "$fdev" /mnt/m || fail "fixture-mount-$fname" "cannot mount $fdev"
+		echo "$fname content" >"/mnt/m/$fname.txt"
+		umount /mnt/m
+	done
+	XFS_UUID=$(blkid -s UUID -o value "$DEV_XFS")
+	BTRFS_UUID=$(blkid -s UUID -o value "$DEV_BTRFS")
+	UUID=$(blkid -s UUID -o value "$DEV")
+	echo live >"$SRC/live.txt"
+	echo raw >"$RAW/raw.txt"
+	if [ -z "$UUID" ] || [ -z "$XFS_UUID" ] || [ -z "$BTRFS_UUID" ]; then
+		fail fixture-uuid "blkid prints no UUID for $DEV ($UUID), $DEV_XFS ($XFS_UUID) or $DEV_BTRFS ($BTRFS_UUID)"
+		return
+	fi
+
+	# --- mount -t dcfs through mount(8) (the helper dispatch) ---
+	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/m1.db" "$SRC" "$MNT"
+	pid=$(only_daemon)
+	set -- $(fs_of "$MNT")
+	if [ "$MRC" -eq 0 ] && [ -n "$pid" ] && [ "$1" = fuse.dcfs ] && [ "$2" = "$SRC" ] &&
+		[ "$(cat "$MNT/live.txt" 2>&1)" = live ]; then
+		pass mount-t-dcfs
+	else
+		fail mount-t-dcfs "rc=$MRC type=$1 source=$2 daemons=$(daemons) out=$(cat "$OUT")"
+	fi
+	# What libmount adds to a helper's options (rw, fstab's nofail and _netdev,
+	# defaults, noauto) is the helper's business, not an error.
+	umount "$MNT" 2>/dev/null
+	wait_daemons 0
+	mnt -t dcfs -o "rw,nofail,_netdev,defaults,dcfs.fstype=none,dcfs.cache_db=$CACHE/m2.db" "$SRC" "$MNT"
+	pid=$(only_daemon)
+	if [ "$MRC" -eq 0 ] && [ -n "$pid" ] && [ "$(cat "$MNT/live.txt" 2>&1)" = live ]; then
+		pass mount-passes-libmount-options
+	else
+		fail mount-passes-libmount-options "rc=$MRC out=$(cat "$OUT")"
+	fi
+
+	# --- remount through mount(8): mount.fuse.dcfs, only the dcfs mount ---
+	mnt -o remount,dcfs.ro "$MNT"
+	rc_ro=$MRC
+	out_ro=$(cat "$OUT")
+	touch "$MNT/after_ro" 2>"$OUT"
+	if [ "$rc_ro" -eq 0 ] && grep -q 'Read-only file system' "$OUT" &&
+		findmnt -n -o OPTIONS -M "$MNT" | grep -q -w ro; then
+		pass remount-dcfs-ro
+	else
+		fail remount-dcfs-ro "rc=$rc_ro out=$out_ro touch: $(cat "$OUT") options: $(findmnt -n -o OPTIONS -M "$MNT")"
+	fi
+	if [ "$rc_ro" -eq 0 ] && findmnt -n -o OPTIONS -M "$MNT" | grep -q -w ro && touch "$SRC/backing_still_rw" 2>/dev/null; then
+		pass remount-leaves-backing-rw
+	else
+		fail remount-leaves-backing-rw "rc=$rc_ro, the dcfs mount is $(findmnt -n -o OPTIONS -M "$MNT"), or the backing is read-only"
+	fi
+	mnt -o remount,rw "$MNT"
+	if [ "$MRC" -eq 0 ] && touch "$MNT/after_rw" 2>"$OUT"; then
+		pass remount-back-to-rw
+	else
+		fail remount-back-to-rw "rc=$MRC out=$(cat "$OUT") touch: $(cat "$OUT")"
+	fi
+	# A native option in a remount is ignored, with a WARNING mount(8) shows
+	# on its stderr: the underlying mount is not reachable from here.
+	mnt -o remount,dcfs.ro,noatime "$MNT"
+	if [ "$MRC" -eq 0 ] && grep -q '^W[0-9]' "$OUT" && grep -q 'noatime' "$OUT" &&
+		findmnt -n -o OPTIONS -M "$MNT" | grep -q -w ro; then
+		pass remount-warns-about-native-options
+	else
+		fail remount-warns-about-native-options "rc=$MRC out=$(cat "$OUT")"
+	fi
+	mnt -o remount,rw "$MNT"
+
+	# --- umount ---
+	umount "$MNT" 2>"$OUT"
+	urc=$?
+	if [ "$urc" -eq 0 ] && wait_gone "$pid" && [ "$(mount_count "$MNT")" -eq 0 ]; then
+		pass umount-stops-dcfs
+	else
+		fail umount-stops-dcfs "umount rc=$urc daemon $pid: $(cat "$OUT") $(fs_of "$MNT")"
+		kill -KILL "$pid" 2>/dev/null
+		cleanup_mount "$MNT"
+	fi
+
+	# --- exit statuses, as mount(8) reports them ---
+	# A usage error: the wrapper exits 1, with its one ERROR line on the
+	# stderr mount(8) passes through.
+	mnt -t dcfs -o "dcfs.bogus,dcfs.fstype=none,dcfs.cache_db=$CACHE/bogus.db" "$SRC" "$MNT"
+	errors=$(grep -c '^E[0-9]' "$OUT")
+	if [ "$MRC" -eq 1 ] && [ "$errors" -eq 1 ] && grep -q 'dcfs.bogus' "$OUT" && [ -z "$(daemons)" ] &&
+		[ "$(mount_count "$MNT")" -eq 0 ]; then
+		pass exit-status-usage-error
+	else
+		fail exit-status-usage-error "rc=$MRC, $errors ERROR lines, out=$(cat "$OUT")"
+	fi
+	# A failed start after the fork (the cache database's writer lock is
+	# held): 32, mount failure, and dcfs's message.
+	: >"$CACHE/locked.db"
+	testutil sqlite-lock "$CACHE/locked.db" 30 >/tmp/lock.out 2>&1 &
+	locker=$!
+	i=0
+	while [ "$i" -lt 50 ] && ! grep -q READY /tmp/lock.out; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/locked.db" "$SRC" "$MNT"
+	errors=$(grep -c '^E[0-9]' "$OUT")
+	if [ "$MRC" -eq 32 ] && [ "$errors" -eq 1 ] && grep -qi 'locked' "$OUT" && [ -z "$(daemons)" ] &&
+		[ "$(mount_count "$MNT")" -eq 0 ]; then
+		pass exit-status-failed-start
+	else
+		fail exit-status-failed-start "rc=$MRC, $errors ERROR lines, out=$(cat "$OUT") daemons=$(daemons)"
+	fi
+	kill "$locker" 2>/dev/null
+	wait "$locker" 2>/dev/null
+	# A native mount that fails: its error text and its own exit status,
+	# nothing mounted (a wrong type; a device that is not there).
+	mount -t bogusfs "$DEV" /tmp/other >/dev/null 2>&1
+	native_rc=$?
+	mnt -t dcfs -o "dcfs.fstype=bogusfs,dcfs.cache_db=$CACHE/wrongtype.db" "$DEV" "$MNT"
+	if [ "$native_rc" -ne 0 ] && [ "$MRC" -eq "$native_rc" ] && grep -q "unknown filesystem type 'bogusfs'" "$OUT" &&
+		[ -z "$(daemons)" ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
+		pass exit-status-native-wrong-type
+	else
+		fail exit-status-native-wrong-type "native rc=$native_rc, rc=$MRC, out=$(cat "$OUT")"
+	fi
+	mount -t ext4 /dev/nonexistent /tmp/other >/dev/null 2>&1
+	native_rc=$?
+	mnt -t dcfs -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/nodev.db" /dev/nonexistent "$MNT"
+	if [ "$native_rc" -ne 0 ] && [ "$MRC" -eq "$native_rc" ] && grep -qi 'nonexistent' "$OUT" &&
+		[ -z "$(daemons)" ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
+		pass exit-status-native-missing-device
+	else
+		fail exit-status-native-missing-device "native rc=$native_rc, rc=$MRC, out=$(cat "$OUT")"
+	fi
+	# A native option the none form cannot honor (ro) is a usage error.
+	mnt -t dcfs -o "ro,dcfs.fstype=none,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
+	if [ "$MRC" -eq 1 ] && grep -q 'dcfs.fstype=none' "$OUT" && [ -z "$(daemons)" ]; then
+		pass exit-status-none-refuses-ro
+	else
+		fail exit-status-none-refuses-ro "rc=$MRC out=$(cat "$OUT")"
+	fi
+
+	# --- fstab, mount -a ---
+	# One line of each kind the guest can host: a native ext4 by UUID (the type
+	# autodetected) with a native option, a bind nested under it, the none form
+	# with _netdev, an xfs (the type named) and a btrfs (autodetected) by UUID
+	# (the kernel mounts them: the image has no xfsprogs or btrfs-progs), a
+	# nofail mount of a device that is not there, and (noauto) one that fails to
+	# start.
+	cat >/etc/fstab <<EOF
+UUID=$UUID /data dcfs noatime,dcfs.cache_db=$CACHE/data.db,dcfs.stderrthreshold=0 0 0
+$RAW /data/sub dcfs dcfs.fstype=bind,dcfs.ro,dcfs.cache_db=$CACHE/sub.db,dcfs.stderrthreshold=0 0 0
+$SRC /mnt/live dcfs dcfs.fstype=none,_netdev,dcfs.cache_db=$CACHE/live.db,dcfs.stderrthreshold=0 0 0
+UUID=$XFS_UUID /mnt/xfs dcfs dcfs.fstype=xfs,dcfs.cache_db=$CACHE/xfs.db,dcfs.stderrthreshold=0 0 0
+UUID=$BTRFS_UUID /mnt/btrfs dcfs dcfs.cache_db=$CACHE/btrfs.db,dcfs.stderrthreshold=0 0 0
+UUID=$MISSING_UUID /mnt/missing dcfs nofail,x-systemd.device-timeout=10min,dcfs.fstype=ext4,dcfs.cache_db=$CACHE/missing.db 0 0
+$SRC /mnt/fail dcfs noauto,dcfs.fstype=none,dcfs.bogus,dcfs.cache_db=$CACHE/fail.db 0 0
+/srv/rp /rp dcfs noauto,nofail,dcfs.fstype=bind,dcfs.cache_db=$CACHE/rp.db 0 0
+/srv/rc /rp/c dcfs noauto,nofail,dcfs.fstype=bind,dcfs.cache_db=$CACHE/rc.db 0 0
+EOF
+	systemctl daemon-reload
+	mnt -a -t dcfs
+	mount_a_rc=$MRC
+	if [ "$MRC" -eq 0 ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 5 ]; then
+		pass mount-a
+	else
+		fail mount-a "rc=$MRC, $(findmnt -rn -t fuse.dcfs | wc -l) dcfs mounts, out=$(cat "$OUT")"
+	fi
+	set -- $(fs_of /data)
+	if [ "$1" = fuse.dcfs ] && [ "$2" = "$DEV" ] && [ "$(cat /data/file_3.txt 2>&1)" = "content 3" ]; then
+		pass fstab-native-uuid-served
+	else
+		fail fstab-native-uuid-served "type=$1 source=$2"
+	fi
+	set -- $(fs_of /data/sub)
+	if [ "$1" = fuse.dcfs ] && [ "$2" = "$RAW" ] && [ "$(cat /data/sub/raw.txt 2>&1)" = raw ]; then
+		pass fstab-bind-nested-served
+	else
+		fail fstab-bind-nested-served "type=$1 source=$2 $(ls -l /data/sub 2>&1)"
+	fi
+	touch /data/sub/x 2>"$OUT"
+	if grep -q 'Read-only file system' "$OUT"; then
+		pass fstab-bind-dcfs-ro
+	else
+		fail fstab-bind-dcfs-ro "touch said: $(cat "$OUT")"
+	fi
+	set -- $(fs_of /mnt/live)
+	if [ "$1" = fuse.dcfs ] && [ "$2" = "$SRC" ] && [ "$(cat /mnt/live/live.txt 2>&1)" = live ]; then
+		pass fstab-none-served
+	else
+		fail fstab-none-served "type=$1 source=$2"
+	fi
+	set -- $(fs_of /mnt/xfs)
+	if [ "$1" = fuse.dcfs ] && [ "$2" = "$DEV_XFS" ] && [ "$(cat /mnt/xfs/xfs.txt 2>&1)" = "xfs content" ]; then
+		pass fstab-xfs-served
+	else
+		fail fstab-xfs-served "type=$1 source=$2 $(ls /mnt/xfs 2>&1)"
+	fi
+	set -- $(fs_of /mnt/btrfs)
+	if [ "$1" = fuse.dcfs ] && [ "$2" = "$DEV_BTRFS" ] && [ "$(cat /mnt/btrfs/btrfs.txt 2>&1)" = "btrfs content" ]; then
+		pass fstab-btrfs-served
+	else
+		fail fstab-btrfs-served "type=$1 source=$2 $(ls /mnt/btrfs 2>&1)"
+	fi
+	n=$(daemons | wc -l)
+	dbs=$(ls "$CACHE"/data.db "$CACHE"/sub.db "$CACHE"/live.db "$CACHE"/xfs.db "$CACHE"/btrfs.db 2>/dev/null | wc -l)
+	if [ "$n" -eq 5 ] && [ "$dbs" -eq 5 ]; then
+		pass fstab-one-instance-each
+	else
+		fail fstab-one-instance-each "$n daemons, $dbs cache databases: $(daemons)"
+	fi
+	# Not mounted: the missing device (nofail) -- it was not an error.
+	if [ "$mount_a_rc" -eq 0 ] && [ "$(mount_count /data)" -eq 1 ] && [ "$(mount_count /mnt/missing)" -eq 0 ]; then
+		pass fstab-nofail-missing-skipped
+	else
+		fail fstab-nofail-missing-skipped "mount -a rc=$mount_a_rc, /data mounted ($(mount_count /data)), /mnt/missing mounted ($(mount_count /mnt/missing))"
+	fi
+	umount /data/sub /mnt/live /mnt/xfs /mnt/btrfs /data 2>"$OUT"
+	urc=$?
+	wait_daemons 0
+	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 0 ]; then
+		pass fstab-umount-leaves-nothing
+	else
+		fail fstab-umount-leaves-nothing "rc=$urc $(cat "$OUT") $(findmnt -rn -t fuse.dcfs) $(daemons)"
+		cleanup_mount /data/sub
+		cleanup_mount /mnt/live
+		cleanup_mount /mnt/xfs
+		cleanup_mount /mnt/btrfs
+		cleanup_mount /data
+	fi
+
+	# --- systemd's mount units, generated from the same fstab ---
+	systemctl start data.mount data-sub.mount mnt-live.mount mnt-xfs.mount mnt-btrfs.mount 2>"$OUT"
+	src=$?
+	units_active=1
+	for u in data.mount data-sub.mount mnt-live.mount mnt-xfs.mount mnt-btrfs.mount; do
+		[ "$(systemctl is-active $u)" = active ] || units_active=0
+	done
+	status=$(systemctl status data.mount --no-pager 2>&1)
+	if [ "$src" -eq 0 ] && [ "$units_active" -eq 1 ] && echo "$status" | grep -q 'active (mounted)' &&
+		echo "$status" | grep -q "What: $DEV" && echo "$status" | grep -q 'Where: /data'; then
+		pass systemd-mount-units-start
+	else
+		fail systemd-mount-units-start "rc=$src $(cat "$OUT") $status"
+	fi
+	set -- $(fs_of /data)
+	if [ "$1" = fuse.dcfs ] && [ "$2" = "$DEV" ] && [ "$(cat /data/file_4.txt 2>&1)" = "content 4" ]; then
+		pass systemd-findmnt-spec-as-written
+	else
+		fail systemd-findmnt-spec-as-written "type=$1 source=$2"
+	fi
+	# Mount units under a path require and order after the one above.
+	if systemctl show -p Requires -p After data-sub.mount | grep -q 'data.mount' &&
+		[ "$(systemctl is-active data-sub.mount)" = active ]; then
+		pass systemd-child-requires-parent
+	else
+		fail systemd-child-requires-parent "$(systemctl show -p Requires -p After data-sub.mount)"
+	fi
+	# The daemon's log is in the journal, attributed to its mount unit, at the
+	# threshold the options set (dcfs.stderrthreshold=0: INFO).
+	if journal_has "starting: source=$DEV " -t dcfs _SYSTEMD_UNIT=data.mount &&
+		journal_has "starting: source=$RAW" -t dcfs _SYSTEMD_UNIT=data-sub.mount; then
+		pass journal-daemon-log-by-unit
+	else
+		fail journal-daemon-log-by-unit "$(journalctl --no-pager -b -t dcfs -o short-full _SYSTEMD_UNIT=data.mount 2>&1 | tail -n 5; journalctl --no-pager -b -t dcfs 2>&1 | tail -n 8)"
+	fi
+	if journalctl --no-pager -b -u data.mount -o cat 2>/dev/null | grep -q "starting: source=$DEV "; then
+		pass journal-u-unit-shows-daemon
+	else
+		fail journal-u-unit-shows-daemon "$(journalctl --no-pager -b -u data.mount 2>&1 | tail -n 10)"
+	fi
+	# Stopping the child leaves the parent; stopping the parent stops what is
+	# under it.
+	systemctl stop data-sub.mount
+	if [ "$(systemctl is-active data-sub.mount)" != active ] && [ "$(systemctl is-active data.mount)" = active ] &&
+		[ "$(cat /data/file_1.txt 2>&1)" = "content 1" ]; then
+		pass systemd-stop-child-leaves-parent
+	else
+		fail systemd-stop-child-leaves-parent "$(systemctl is-active data-sub.mount data.mount)"
+	fi
+	wait_daemons 4
+	systemctl start data-sub.mount
+	both_up=0
+	[ "$(systemctl is-active data.mount)" = active ] && [ "$(systemctl is-active data-sub.mount)" = active ] && both_up=1
+	systemctl stop data.mount
+	if [ "$both_up" -eq 1 ] && [ "$(systemctl is-active data.mount)" != active ] && [ "$(systemctl is-active data-sub.mount)" != active ] &&
+		[ "$(mount_count /data)" -eq 0 ] && [ "$(mount_count /data/sub)" -eq 0 ]; then
+		pass systemd-stop-parent-stops-child
+	else
+		fail systemd-stop-parent-stops-child "$(systemctl is-active data.mount data-sub.mount) $(findmnt -t fuse.dcfs)"
+	fi
+	wait_daemons 3
+	systemctl start data.mount data-sub.mount
+	# systemctl restart of a parent restarts its child (decision 4: restart
+	# one instance with systemctl restart). It is a pair of units of its own,
+	# nofail and noauto: nothing requires them, so a restart that fails does
+	# not take the machine to emergency.target, which it does for a mount
+	# that local-fs.target requires.
+	mkdir -p /srv/rp/c /srv/rc /rp
+	echo rc >/srv/rc/rc.txt
+	systemctl start rp-c.mount
+	disabled systemd-restart-parent-restarts-child \
+		"dcfs bug, reported by step 15.6: systemd calls a mount stopped as soon as it is unmounted, while its daemon is still syncing and closing the cache database for up to two seconds; the restart's start finds 'Cache database is in use by another dcfs process' (exit 32). A fix: umount.dcfs waiting for the daemon, or the new daemon waiting for the cache lock" \
+		restart_check
+	systemctl stop rp-c.mount rp.mount 2>/dev/null
+	systemctl reset-failed rp.mount rp-c.mount 2>/dev/null
+	wait_daemons 5
+	# A start that fails marks the unit failed, with dcfs's message in the
+	# journal under the unit.
+	systemctl start mnt-fail.mount 2>"$OUT"
+	frc=$?
+	if [ "$frc" -ne 0 ] && [ "$(systemctl is-active mnt-fail.mount)" = failed ] && journal_has 'dcfs.bogus' -u mnt-fail.mount; then
+		pass systemd-failed-start-marks-unit-failed
+	else
+		fail systemd-failed-start-marks-unit-failed "rc=$frc state=$(systemctl is-active mnt-fail.mount) $(journalctl --no-pager -b -u mnt-fail.mount 2>&1 | tail -n 8)"
+	fi
+	# At the default threshold (WARNING) the INFO narrative stays out of the
+	# journal (the fstab lines above set dcfs.stderrthreshold=0), and with the
+	# threshold set it is there.
+	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/quiet.db" "$SRC" "$MNT"
+	quiet_rc=$MRC
+	umount "$MNT"
+	wait_daemons 5
+	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/loud.db,dcfs.stderrthreshold=0" "$SRC" "$MNT"
+	loud_rc=$MRC
+	umount "$MNT"
+	wait_daemons 5
+	if [ "$quiet_rc" -eq 0 ] && [ "$loud_rc" -eq 0 ] && journal_has "cache_db=$CACHE/loud.db" -t dcfs &&
+		! journalctl --no-pager -b -t dcfs -o cat | grep -q "cache_db=$CACHE/quiet.db"; then
+		pass journal-follows-threshold
+	else
+		fail journal-follows-threshold "mounts rc=$quiet_rc/$loud_rc; $(journalctl --no-pager -b -t dcfs -o cat | grep -c "cache_db=$CACHE/quiet.db") INFO lines of the default-threshold daemon, $(journalctl --no-pager -b -t dcfs -o cat | grep -c "cache_db=$CACHE/loud.db") of the other"
+	fi
+
+	# The fstab mounts stay up: the reboot at the end of this boot stops them
+	# through systemd, and boot 2 finds them mounted at boot. Walk the trees so
+	# the cache is warm for boot 2.
+	find /data /mnt/live -exec stat -c %n {} + >/dev/null
+	sync
+	mkdir -p /var/lib/dcfs-test
+	echo "boot1 done" >/var/lib/dcfs-test/boot1
+}
+
+# only_daemon_of MOUNTPOINT: the pids of the dcfs daemons in the cgroup of
+# the mount unit of MOUNTPOINT.
+only_daemon_of() {
+	od_unit=$(systemd-escape -p --suffix=mount "$1")
+	od_cg=$(systemctl show -p ControlGroup --value "$od_unit")
+	[ -n "$od_cg" ] || return 0
+	od_all=" $(daemons | tr '\n' ' ') "
+	for od_pid in $(cat "/sys/fs/cgroup$od_cg/cgroup.procs" 2>/dev/null); do
+		case "$od_all" in *" $od_pid "*) echo "$od_pid" ;; esac
+	done
+}
+
+# --- boot 2 ---------------------------------------------------------------
+
+boot2() {
+	[ -f /var/lib/dcfs-test/boot1 ] || fail boot1-state "boot 1 left no state: the disks were not kept"
+	# The fstab mounts were made by systemd at boot, not by this script.
+	ok=1
+	for pair in "data.mount /data" "data-sub.mount /data/sub" "mnt-live.mount /mnt/live" "mnt-xfs.mount /mnt/xfs" "mnt-btrfs.mount /mnt/btrfs"; do
+		set -- $pair
+		[ "$(systemctl is-active "$1")" = active ] || ok=0
+		[ "$(fs_of "$2" | cut -d' ' -f1)" = fuse.dcfs ] || ok=0
+	done
+	if [ "$ok" -eq 1 ]; then
+		pass reboot-fstab-mounts-came-back
+	else
+		fail reboot-fstab-mounts-came-back "$(systemctl is-active data.mount data-sub.mount mnt-live.mount mnt-xfs.mount mnt-btrfs.mount) $(findmnt -t fuse.dcfs)"
+	fi
+	set -- $(fs_of /data)
+	if [ "$2" = "$DEV" ] && [ "$(cat /data/file_2.txt 2>&1)" = "content 2" ]; then
+		pass reboot-spec-as-written
+	else
+		fail reboot-spec-as-written "type=$1 source=$2"
+	fi
+	# In order: the parent became active before the child.
+	parent_at=$(systemctl show -p ActiveEnterTimestampMonotonic --value data.mount)
+	child_at=$(systemctl show -p ActiveEnterTimestampMonotonic --value data-sub.mount)
+	if [ "${parent_at:-0}" -gt 0 ] && [ "${child_at:-0}" -gt "${parent_at:-0}" ]; then
+		pass reboot-parent-mounted-before-child
+	else
+		fail reboot-parent-mounted-before-child "data.mount at $parent_at, data-sub.mount at $child_at"
+	fi
+	# The previous boot's daemons were stopped cleanly by the reboot, and this
+	# boot's found the shutdown clean (no dirty-set recovery).
+	clean_before=$(journalctl --no-pager -b -1 -t dcfs -o cat 2>/dev/null | grep -c 'shutdown: clean')
+	clean_now=$(journalctl --no-pager -b 0 -t dcfs -o cat 2>/dev/null | grep -c 'recovery: the last run ended cleanly')
+	unclean=$(journalctl --no-pager -b 0 -t dcfs -o cat 2>/dev/null | grep -c 'did not shut down cleanly')
+	if [ "$clean_before" -ge 5 ] && [ "$clean_now" -ge 5 ] && [ "$unclean" -eq 0 ]; then
+		pass reboot-clean-shutdown
+	else
+		fail reboot-clean-shutdown "previous boot: $clean_before clean shutdowns; this boot: $clean_now clean starts, $unclean unclean; $(journalctl --no-pager -b -1 -t dcfs -o cat 2>&1 | tail -n 6)"
+	fi
+	# The cache survived: a warm tree is answered without a read of the
+	# backing disk.
+	drop_caches
+	data_pid=$(only_daemon_of /data)
+	# drop_caches makes the kernel FORGET every cached inode, and the daemon
+	# answers: let it go quiet before the baseline (lib.sh).
+	[ -n "$data_pid" ] && quiesce_daemon "$data_pid"
+	before=$(sectors_read "${DEV#/dev/}")
+	find /data -exec stat -c %n {} + >/dev/null 2>&1
+	after=$(sectors_read "${DEV#/dev/}")
+	if [ "$after" -eq "$before" ]; then
+		pass reboot-cache-survives
+	else
+		fail reboot-cache-survives "the backing disk was read: $((after - before)) sectors"
+	fi
+	# nofail on a missing backing did not block the boot: this script, which
+	# starts after multi-user.target, began while the mount's start job was
+	# still waiting for the device (its timeout is ten minutes, so a slow host
+	# does not end the wait first).
+	up=$START_UP
+	state=$START_MISSING
+	job=$(echo "$START_JOBS" | grep 'mnt-missing.mount')
+	if [ -n "$job" ] && [ "$state" != active ] && [ "$(mount_count /mnt/missing)" -eq 0 ]; then
+		pass nofail-missing-backing-does-not-block-boot
+	else
+		fail nofail-missing-backing-does-not-block-boot "up $up s, mnt-missing.mount is $state, jobs: $START_JOBS"
+	fi
+	echo "nofail: up $up s, mnt-missing.mount $state, job: $job"
+}
+
+if [ "$BOOT" -eq 1 ]; then
+	boot1
+else
+	boot2
+fi
+[ "$FAILED" -ne 0 ] && dump_state
+exit "$FAILED"

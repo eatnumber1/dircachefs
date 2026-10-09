@@ -177,7 +177,11 @@ administrator's own.
 | `dcfs.fuse_opt` | (empty) | An extra mount option passed to libfuse, e.g. `dcfs.fuse_opt=max_read=65536`; give the option once per libfuse option. `default_permissions` is always added, and required: dcfs makes no permission checks of its own and relies on the kernel's, from the attributes it caches (docs/design.md, "Caller credentials"), so naming it here is an error. |
 
 The FUSE mount's source, as `mount`, `df` and `findmnt` show it, is SOURCE as
-written, and its type is `fuse.dcfs`.
+`mount.dcfs` receives it, and its type is `fuse.dcfs`. That is SOURCE as
+written (`/srv/media`, `nas:/export`), except that `mount(8)` resolves a
+`UUID=` or `LABEL=` source to the device before it runs a helper: an fstab
+line `UUID=aaaa /data dcfs ...` shows `/dev/vdb` (what step 15.6's systemd
+guest observed), not `UUID=aaaa`.
 
 ### Flags
 
@@ -995,6 +999,21 @@ recovery protocol, concurrency, and the test strategy.
 
 ## Limitations
 
+- **`systemctl restart` of a dcfs mount can fail, and for a required mount
+  can end in emergency mode.** `systemd` calls a mount unit stopped as soon
+  as the mount is gone, while the daemon is still finishing (syncing the
+  backing filesystem, closing the cache database: up to two seconds), so the
+  start that a restart follows with finds the cache database in use by the
+  old daemon and fails with `Cache database ... is in use by another dcfs
+  process` (exit status 32). For a mount that `local-fs.target` requires
+  (any fstab line without `nofail`) that failure sends the machine to
+  `emergency.target`. Stop the unit, wait for the daemon to be gone, then
+  start it (`pidof mount.dcfs` shows the daemons). Found by
+  step 15.6's systemd guest, which keeps the failing check as
+  `DISABLED_systemd-restart-parent-restarts-child`
+  (`test/qemu/README.md`, "The systemd guest"); a fix is a start that waits
+  for the cache lock, or a `umount.dcfs` that returns when the daemon has
+  exited.
 - **File names are bytes, but only the logs show them escaped.** dcfs
   treats names, symlink targets and xattr names as unmodified bytes (any
   byte but NUL, and `/` in a name; no normalization, no case folding, no

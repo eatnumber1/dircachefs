@@ -40,6 +40,10 @@ wrappers the repository rule writes (`@alpine_qemu//:qemu_system_x86_64`,
   `//third_party/debian:rootfs` -- see "NFS test and the Debian rootfs"
   below and `third_party/debian/README.md`. The test itself is fully offline
   (loopback only).
+- For `mount_dcfs_systemd_test` only: network access (to
+  `cloud.debian.org`) is needed once per pin, to fetch the 388 MiB Debian cloud
+  image -- see "The systemd guest" below and `third_party/debian_cloud/README.md`.
+  The test itself is fully offline.
 
 ## The test kernel
 
@@ -210,7 +214,7 @@ and `qemu_cc_test` requires an explicit `size` and `timeout` (the macros
 |---|---|---|---|
 | small | `bazel test --config=fast //...` | unit tests, ext4 variant of each e2e matrix test, boot, cache_permissions, lifecycle | about 1 minute |
 | medium | `bazel test --config=presubmit //...` (small + medium) | xfs and btrfs variants, readdir_boundary, release_leak | a few minutes |
-| large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test (large), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes |
+| large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test and mount_dcfs_systemd_test (large), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes |
 
 `size` also sets Bazel's resource estimate (small assumes about 20 MB), so
 each QEMU test declares its real needs with tags: `cpu:<vCPUs>` (`-smp`: 1,
@@ -377,6 +381,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | enospc_cache, fault_shutdown (step 11.4c, the same way) | 69-88 | 284-312 | 256 | 576 |
 | write | 136-153 | 224-248 | 320 | 448 |
 | memory (sized by `reclaim_scans=0`, see above) | 104-270 at 576 | 354-478 at 768 | 704 | 832 |
+| mount_dcfs_systemd (a Debian cloud image booted by systemd, 5 daemons, step 15.6) | 61-81 | 368-457 | 256 | 768 |
 | bench_smoke | 79-87 | 1169-1178 | 256 | 1856 |
 | destroy (20000 files, step 6.4b) | 105 | 833 | 384 | 1344 |
 | cancel, cancel_inventory (cold 20000-entry listing, steps 22.1-22.2) | 89-93 (`reclaim_scans=0` at 384 for cancel; 256 scans 18073 pages) | 713-745 at 1216 (`reclaim_scans=0`) | 384 (cancel_inventory 256) | 1216 |
@@ -532,6 +537,7 @@ gate is disabled.
 | run-qemu.sh boot failure detection | `//test/qemu:run_qemu_verdict_test` |
 | run-qemu.sh kernel failure detection | `//test/qemu:run_qemu_verdict_test` |
 | run-qemu.sh mkfs tool path validation | `//test/qemu:run_qemu_mkfs_test` |
+| run-qemu.sh `--boots` (every boot a full run, the first failure stops) and `--systemd-image` (overlay, root partition, Bazel-built qemu-img) | `//test/qemu:run_qemu_verdict_test` |
 | run-qemu.sh disk-spec fourth field (ext4 only) | `//test/qemu:run_qemu_mkfs_test` |
 | require_commands (missing applets in guest) | `//test/qemu:require_commands_test` (sources the real `guest/lib.sh`) |
 | pjdfstest-suite-sane (tooling health, tail -1 lesson) | `//test/qemu:pjdfstest_suite_sane_test` (sources the real `guest/pjdfstest_lib.sh`, which `pjdfstest.sh` calls) |
@@ -977,6 +983,16 @@ the test. Currently used by `backing_test`, `syscalls_test`,
 `file_handle_test`, and `device_id_test` (see the comment next to each in
 `dcfs/BUILD.bazel` for what specifically needs it).
 
+**At most four virtio disks.** A guest sees four of the disks it is given
+and no more: with five `-device virtio-blk-device` drives (a `vda` filler, the
+test's `vdb`, `vdc`, `vdd` and a fifth) the kernel's command line has five
+`virtio_mmio.device=` entries and `/proc/partitions` four disks (measured
+2026-10-09, step 15.6). A disk-spec that starts at `vdb` makes `vda` a filler
+that takes a slot, the Debian rootfs, the systemd image and the coverage disk
+come after the last spec: a test that needs the most starts its specs at
+`vda` (`mount_dcfs_systemd_test`: ext4 `vda`, xfs `vdb`, btrfs `vdc`, the
+image `vdd`).
+
 ### Sanitizers
 
 ```
@@ -1373,6 +1389,130 @@ branch (most don't: see the "Step 5.2" paragraph above).
 parameter (the macro fills this in from `guest_script`'s basename) via
 `sh`, then reports `ALL-TESTS-PASSED` or `TEST-FAILED` based on its exit
 status.
+
+## The systemd guest (step 15.6)
+
+`mount_dcfs_systemd_test` runs `mount.dcfs` the way a machine runs it: through
+util-linux's `mount(8)`, `/etc/fstab` and systemd's mount units, in a
+released Debian cloud image booted with systemd as PID 1. The busybox guest
+of `mount_dcfs_test` calls the wrapper directly (busybox `mount` runs no
+`mount.<type>` helpers), so it cannot show what libmount adds to the helper's
+options, how a remount finds `mount.fuse.dcfs`, which source libmount hands
+over, what status `mount(8)` returns, or what systemd does with the daemon
+(`third_party/debian_cloud/README.md` has the image, its pin and how to move
+it).
+
+How it boots, in `qemu_test(systemd_image = ..., boots = 2)`:
+
+1. `run-qemu.sh --systemd-image IMAGE --qemu-img QEMU_IMG` makes a qcow2
+   overlay on the pinned image (the image itself is never written) and
+   attaches it as the next virtio disk after the test's `disks` (`vdc` when
+   the test has `vdb`). The kernel is the project's test kernel, the
+   initramfs the usual one with the modules for `ext4`, `fuse` and
+   `virtio_blk`; `dcfs_systemd=/dev/vdc1` (the image's root partition) is on
+   the command line.
+2. `guest/init` mounts that partition, installs dcfs, `testutil`, `fhtest`
+   and `/tests` in it (`install_dcfs_into`, the same function the NFS test's
+   chroot uses), runs `guest/systemd_install.sh` (the oneshot unit, the
+   masked getty templates and network services, an empty `/etc/fstab`), moves
+   `/proc`, `/sys` and `/dev` over and `exec switch_root`s into systemd.
+3. `dcfs-test.service` (after `multi-user.target`) runs
+   `guest/systemd_run.sh`: it starts the memory sampler again (the one
+   `guest/init` started lives in the old root; the program is the file
+   `/dev/memsampler.awk` they share), runs `guest/mount_dcfs_systemd.sh`,
+   prints the `MEM` line, the kernel's failures and `ALL-TESTS-PASSED` or
+   `TEST-FAILED` on the serial console like every other guest, and runs
+   `systemctl reboot`. The reboot stops the mount units and ends QEMU (no
+   ACPI, `-no-reboot`).
+4. `--boots 2` boots the same disks again for the checks that need a reboot,
+   each boot a full run with its own `MEM` line and verdict
+   (`boot1.log`, `boot2.log` in the test's outputs); the script reads
+   `dcfs_boot=` from the command line.
+
+A guest that goes wrong before the script (a unit that fails, emergency mode)
+shows nothing of why: `ShowStatus=no` keeps systemd's own lines off the
+console so that they do not split the `TEST` lines. Add `cmdline =
+"systemd.log_level=info systemd.log_target=console"` to the test target for
+the length of the investigation, and read `boot1.log` in the test's outputs.
+
+Root login is disabled: the nocloud image logs root in on the serial console
+without a password, so the getty templates are masked and the test checks
+that nothing listens (`console-login-disabled`). No network, no cloud-init.
+
+What it checks (every check of dcfs fails in a guest without the wrapper
+installed and in one whose `mount.dcfs` exits 0 and mounts nothing, which the
+step's commit message quotes; the guest's own checks, pid 1, util-linux, the
+disabled console login and the `nofail` boot, do not depend on the wrapper):
+
+- through `mount(8)`: `mount -t dcfs` reaches the helper; libmount's `rw`,
+  `nofail`, `_netdev`, `defaults` are not errors; `mount -o remount,dcfs.ro`
+  and `remount,rw` reach the wrapper by the type `fuse.dcfs`
+  (`mount.fuse.dcfs`) and toggle only the dcfs mount; a native option in a
+  remount is ignored with the wrapper's WARNING on mount's stderr; `umount`
+  stops the daemon (the FUSE path: libmount finds no `umount.dcfs` and calls
+  `umount(2)`);
+- the exit statuses `mount(8)` returns: a usage error 1, a failed start 32
+  (cache database locked), a native failure its own (`mount -t bogusfs`, a
+  missing device), each with dcfs's one `E...` ERROR line on mount's stderr
+  and nothing mounted;
+- fstab: a native ext4 by `UUID=` (type autodetected, `noatime` passed to the
+  native mount), an xfs (`dcfs.fstype=xfs`) and a btrfs (autodetected) by
+  `UUID=` (the kernel mounts them; the image has no xfsprogs or btrfs-progs,
+  `run-qemu.sh` made the filesystems), a nested bind (`dcfs.ro`), the `none`
+  form with `_netdev` and a `nofail` mount of a device that is not there,
+  mounted by `mount -a` and then by the units systemd generates from them
+  (`systemctl start`, `status`, `findmnt`), with one daemon and one cache
+  database each (not hosted: `dcfs.fstype=nfs`, the image has no NFS client
+  and the guest no network; `nfs_test` covers NFS on the other side); a child
+  requires its parent; stopping the child leaves the parent and stopping the
+  parent stops the child; a start that fails marks the unit failed with
+  dcfs's message in the journal;
+- the journal: the daemon's syslog lines are attributed to its mount unit
+  (`journalctl -u data.mount`, `_SYSTEMD_UNIT=`) at the threshold the
+  options set (`dcfs.stderrthreshold=0` shows the INFO narrative; the
+  default hides it);
+- after the reboot: the fstab mounts were made by systemd at boot, the
+  parent before the child; the previous boot's daemons each logged a clean
+  shutdown and this boot's found it clean; a warm tree reads nothing from the
+  backing disk (`sectors_read`); a `nofail` mount of a missing device did not
+  hold the boot (the script runs about nine seconds after boot, long before
+  the 90 s device timeout, with that mount's start job still waiting).
+
+What the real `mount(8)` path showed that the busybox guest could not:
+
+- libmount resolves a `UUID=`/`LABEL=` source to the device path before it
+  calls the helper (`mount.dcfs /dev/vdb /data -o ...`, also from systemd's
+  mount unit), so the FUSE mount's source, and `findmnt`'s, is `/dev/vdb`,
+  not the spec as written in fstab (plan decision 11 holds for sources
+  libmount does not resolve: `/srv/raw`, `nas:/export`). The test pins what
+  happens; the wrapper cannot recover the tag.
+- the daemon lives in its mount unit's cgroup and its syslog lines carry the
+  unit, with no systemd-specific code, as designed. systemd calls the unit
+  stopped as soon as the mount is gone, while the daemon is still syncing the
+  backing filesystem and closing the cache database for up to two seconds
+  ("Unit process N (mount.dcfs) remains running after unit stopped"), so
+  **`systemctl restart` of a dcfs mount races the old daemon**: the new one
+  finds `Cache database ... is in use by another dcfs process` (exit 32) in
+  most restarts, and for a mount that `local-fs.target` requires (every fstab
+  line without `nofail`) the failed start sends the machine to
+  `emergency.target`. The test keeps the check as `DISABLED_systemd-restart-
+  parent-restarts-child` (`would FAIL` in the log, the way `lib.sh`'s
+  `disabled` keeps a kernel bug) on its own pair of `nofail,noauto` units and
+  waits for the old daemon to exit before the stop/start checks. A fix is the
+  new daemon waiting for the cache lock, or a `umount.dcfs` that returns when
+  the daemon has exited.
+- `mount -t nosuchfs` is `-t no` + `suchfs` to util-linux (the `no` prefix
+  negates a type list); the test uses `bogusfs`.
+
+Cost (2026-10-09, KVM, a 4-core host shared with other work): a 388 MiB image
+download once; the whole test about 60 s, systemd taking 7 to 11 s to reach
+the script on each boot; the default 256 MiB guest (`peak_used` 61 MiB,
+`reclaim_scans=0`, dcfs 7 MiB per daemon); tier large, timeout long (the two
+boots share it: 420 s each). Run it with
+`bazel test //test/qemu:mount_dcfs_systemd_test`; `--test_output=all` prints
+both boots. Coverage is not collected from this guest (the daemons are not
+started from `guest/init`'s environment).
+
 
 ## NFS test and the Debian rootfs
 
