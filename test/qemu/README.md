@@ -712,7 +712,12 @@ through the parent's descriptor and replies EIO, keeping the row (attributes
 unknown), unless the name is gone or names another handle.
 
 A btrfs inode read that fails warns in the kernel (`btrfs_destroy_inode`,
-`fs/btrfs/inode.c:8047`, from `btrfs_read_locked_inode`'s error path), and the
+`fs/btrfs/inode.c:8047`): a directory whose inode item was updated only in
+memory (a relatime atime update from a listing) takes `btrfs_fill_inode`'s fast
+path with `index_cnt = -1`, and when the on-disk read then fails
+`iget_failed`'s `make_bad_inode` makes it `S_IFREG` and `btrfs_destroy_inode`
+reads `index_cnt` as `csum_bytes` (shared storage since v6.11): a spurious
+warning, not a data bug (`docs/plan/notes/kernel-bugs-2026-10-09.md`). The
 harness fails a boot on a WARNING. `fault_recover_test_btrfs` therefore pins
 every inode of its tree (`O_PATH` descriptors on the files, working directories
 on the directories), and its failures meet metadata, never an inode read, so

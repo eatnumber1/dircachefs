@@ -334,10 +334,17 @@ inject() {
 # pin_inodes: on btrfs, every inode of the mode's tree held in the backing
 # filesystem's cache (O_PATH descriptors on the files, working directories for
 # the directories) so that the failure meets metadata it must read, never the
-# read of an inode: a failed inode read warns in btrfs_destroy_inode
-# (fs/btrfs/inode.c:8047, from btrfs_read_locked_inode's error path, here
-# through dcfs's open_by_handle_at), and the harness fails a boot on a kernel
-# WARNING. The other filesystems do not.
+# read of an inode, which warns in btrfs_destroy_inode (fs/btrfs/inode.c:8047)
+# and the harness fails a boot on a kernel WARNING. The other filesystems do
+# not. Cause (proven by tools/kernel_bugs/btrfs_failed_inode_read, analysis in
+# docs/plan/notes/kernel-bugs-2026-10-09.md): a directory whose inode item was
+# updated only in memory (a relatime atime update from a listing, here dcfs's
+# `ls` of the parents) takes btrfs_fill_inode's fast path, which sets
+# index_cnt = -1; when the on-disk read then fails (here through dcfs's
+# open_by_handle_at), iget_failed's make_bad_inode sets i_mode = S_IFREG and
+# btrfs_destroy_inode reads index_cnt as csum_bytes (shared storage since
+# d9891ae28b0d, v6.11). A spurious warning on an expected error path, not a
+# data bug.
 pin_inodes() {
 	: >/tmp/pin.out
 	"$TESTUTIL" opath-hold-tree "$SRC/$R" >/tmp/pin.out 2>&1 &
