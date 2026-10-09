@@ -250,6 +250,58 @@ In this order, each with a known-bug variant and trace validation:
   each gap with the proposed step (a model extension, a trace event, a
   harness test, or "accepted, documented"), and the order for 12.13,
   12.11b/c, 12.10 and 23.11. No code changes.
+  Done 2026-10-09: `notes/formal-coverage-audit-2026-10-09.md` (G1-G24,
+  the matrix, what traces check, 22 properties with no failing variant,
+  unmodelled code paths, what to merge from step-23.10, the order below).
+  Headline gaps: G1 writable opens have no model and no trace (Write,
+  Fallocate, CopyFileRange emit no mutation events); G2 the database
+  durability abstraction is never tested where writes reorder; G4 the
+  concurrency guards only bite in the large tier (under the kernel lock
+  `Owns` is always true; MC_nolock checks ReplyObservable only); G5 a
+  LATENT CRASH GAP: a created object's row is outside the create's mutation,
+  so a listing of the parent between the create's syscall and RecordNewChild
+  upserts a clean valid row at normal durability, and the crash state
+  "listing committed, phase 3 lost, create lost on the backing" serves a
+  nonexistent object by nodeid (unreachable today: one thread plus the
+  kernel's directory lock; reachable in the harness and under parallel
+  dirops; it breaks 23.11's premise and must be modelled there); G11
+  Trace.cfg checks GuardsBalanced and four action properties only, while
+  traces exceed the model-checking bounds; G12 only four guest scripts are
+  traced and three of their root traces end at the first link or
+  cross-directory rename; G15 ClearDirty's fast path assumes every dirty
+  row came through a mutation, which RecordTmpfile's MarkDirty does not
+  (latent); G16 Phase 13's OpenNode change needs ident.tla updated in the
+  same change.
+- 12.12a Oracle hygiene (from the audit; small, dcfs-protocol): premise
+  configurations for the 22 properties with no failing variant (section
+  3 of the note, reusing existing variants); `TriState`, `CacheNeverWrong`,
+  `CrashSafe`, `DurableSetSound`, `CleanMeansNoDirty` added to Trace.cfg;
+  a medium-tier `MC_nolock_small` and the three effect-point action
+  properties added to MC_nolock; `GuardsBalanced` over F's guard with a
+  known_bug `file_setattr_end_skipped`; hand-edited negative trace logs
+  for the guard-decision checks; a TLC coverage report via `tlc_args`
+  (`-coverage`); a two-name crash_f1 variant checking only CrashRefines.
+
+Order from the audit (2026-10-09), replacing earlier guesses: (1) now, in
+parallel as lanes free: 12.13's tool, 12.12a, 12.14 (with dm-log-writes
+replay, CrashMonkey's method, plus a harness facility that copies the WAL
+at each transaction), 12.17; (2) 12.13's first sweep once 23.8b is settled
+(Trace*.tla in scope, MC_nolock_small in each mutant's test set); (3) 23.11's
+model with F's row existence and G5 among its known_bugs, reusing 23.10's
+F names; (4) 12.11b, first modelling writable opens the code's way (a
+`wopen` count, not an in-flight mutation), then the missing events; (5)
+12.11c first half: per-directory projection of cross-directory steps onto
+the one-directory model plus "a syscall that fails without changing
+anything", then traced fault_power and a short seeded fsstress; (6) 12.15
+with the rule "in flight implies attributes unknown at every backing
+call"; (7) 12.10: crash-point replay first, then known-bug counterexample
+replay, then the concurrency branches; (8) 12.9, 12.11c's joint trace if
+still needed, 12.16 last. From step-23.10, merge on their own: F's names
+and hard link, the ghost of F's last change (two-sided FileOK), the ext4
+item ordering, GuardsBalanced per guard, the three named conditions with
+premise tests re-expressed per inode, the three "known parents"
+counterexamples; not the home, directory marks, the three-way
+RecoveredFile or the MC_dirset configs.
 - 12.13 Mutating the model (approved, russ, 2026-10-09): extend
   `tools/mutation/` with TLA+ operators (negate a conjunct, drop a
   conjunct, swap `/\`/`\/`, `<=`/`<`, drop a guard from an action, drop a

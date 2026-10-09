@@ -2144,3 +2144,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   abstraction tested by power cuts, 12.15 runtime invariant checks derived from (or paired with)
   the model, 12.16 a refinement target (ideal POSIX spec, checked by TLC), 12.17 the mount.dcfs
   handoff modelled. Ordered after 12.12's audit, which may reorder the whole formal queue.
+- 12.12 audit done (Opus, read-only, no Bazel): 24 ranked gaps in notes/formal-coverage-audit-
+  2026-10-09.md. Worth russ's eye: G5, a latent crash-safety gap (a parent fill between a create's
+  syscall and its phase 3 records the child clean; unreachable today under the kernel's directory
+  lock and one thread, reachable in the harness and with parallel dirops; it bears directly on
+  born-dirty); G1 writable opens have no model and emit no trace events; G4 the concurrency guards
+  are only checked in the large tier; G11/G12 traces check few properties and cover four scripts,
+  cut at the first link or cross-directory rename. The audit's order replaces the earlier plan
+  order (phases/12). G16 sent to the Phase 13 agent: ident.tla in the same change.

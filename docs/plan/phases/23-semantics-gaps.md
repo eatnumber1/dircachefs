@@ -505,4 +505,12 @@ cleared only after the next completed sync.
   create slope.
 Owner: dcfs-protocol (the lane-1 agent, after 23.8b). After 12.12's audit
 if it lands first, so the model work goes in one direction.
+From the audit (G5): the created object's row is outside the create's
+mutation, so a fill of the parent between the syscall and phase 3 can
+record the new row clean and valid at normal durability; born-dirty's
+argument ("every crash state with the row has its mark") must cover a row
+created by a fill, not only by phase 3: model it (nolock) with its
+known_bug, and in the code either RecordChild records a child's attributes
+only when the parent is not in flight, or the row it inserts is born dirty
+too.
 
