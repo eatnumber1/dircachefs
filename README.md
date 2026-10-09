@@ -398,8 +398,8 @@ boot without, and `noauto` to one that should not mount at boot.
 **Without systemd**, `mount -a` (from the init scripts, or by hand) mounts
 the lines in file order, so put parents before the children mounted inside
 them. Restart one instance with `umount /data/sub`, then
-`flock -w 10 <its cache database> true` (it returns when the daemon has let
-go of the database: the daemon outlives the unmount for up to two seconds,
+`flock <its cache database> true` (it blocks until the daemon has let
+go of the database, and Ctrl-C ends the wait: the daemon outlives the unmount for up to two seconds,
 and a `mount` that follows at once fails with "Cache database ... is in
 use"; see [Limitations](#limitations)), then `mount /data/sub`; unmount a
 tree with `umount -R /data`.
@@ -416,7 +416,7 @@ mount point: a `none` or `bind` SOURCE that is itself a mount, and a cache
 database on another filesystem, need `x-systemd.requires-mounts-for=` on the
 line (for example `x-systemd.requires-mounts-for=/var/lib/dcfs`).
 Restart one instance by stopping it and starting it again once its daemon
-is gone: `systemctl stop data-sub.mount`, `flock -w 10 <its cache
+is gone: `systemctl stop data-sub.mount`, `flock <its cache
 database> true`, `systemctl start data-sub.mount`.
 `systemctl restart` does not work today: systemd calls the unit stopped when
 the mount is gone, the old daemon is still closing the cache database, and
@@ -527,7 +527,7 @@ delete the database with its `-wal` and `-shm` files, and mount it again:
 
 ```bash
 sudo umount -R /data/sub
-sudo flock -w 10 /var/lib/dcfs/sub.db true   # the daemon outlives the unmount
+sudo flock /var/lib/dcfs/sub.db true   # the daemon outlives the unmount
 sudo rm -f /var/lib/dcfs/sub.db{,-wal,-shm}
 sudo mount /data/sub
 ```
@@ -567,8 +567,8 @@ state (see [Remounting](#remounting)) and leaves the daemon in place.
 sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs.new
 sudo mv /usr/local/bin/dcfs.new /usr/local/bin/dcfs
 sudo umount -R /data
-sudo flock -w 10 /var/lib/dcfs/data.db true   # returns when the daemon has let go of its
-sudo flock -w 10 /var/lib/dcfs/sub.db true    # cache database (it outlives the unmount)
+sudo flock /var/lib/dcfs/data.db true   # returns when the daemon has let go of its
+sudo flock /var/lib/dcfs/sub.db true    # cache database (it outlives the unmount)
 sudo mount -a                                 # or per instance, parents first
 ```
 
@@ -1022,7 +1022,7 @@ recovery protocol, concurrency, and the test strategy.
   database in use by the old daemon and fails with `Cache database ... is in
   use by another dcfs process` (exit status 32). For a mount that `local-fs.target` requires
   (any fstab line without `nofail`) that failure sends the machine to
-  `emergency.target`. Unmount, wait until `flock -w 10 <the cache database>
+  `emergency.target`. Unmount, wait until `flock <the cache database>
   true` returns (the daemon has let go of it), then mount. Found by
   step 15.6's systemd guest, which keeps the failing check as
   `DISABLED_systemd-restart-parent-restarts-child` and

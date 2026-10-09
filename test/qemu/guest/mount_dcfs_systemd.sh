@@ -41,7 +41,7 @@ RAW=/srv/raw  # the bind form's
 MNT=/mnt/m    # for the command-line checks
 MISSING_UUID=0e0e0e0e-dead-4bee-8f00-000000000001
 
-require_commands blkid findmnt flock journalctl pgrep systemctl systemd-escape timeout umount mount awk
+require_commands blkid findmnt flock journalctl pgrep python3 systemctl systemd-escape umount mount awk
 
 # --- helpers -------------------------------------------------------------
 
@@ -63,52 +63,52 @@ fs_of() { findmnt -n -o FSTYPE,SOURCE -M "$1" 2>/dev/null | tail -n 1; }
 # mount_count MOUNTPOINT: how many mounts there are exactly at it.
 mount_count() { findmnt -rn -M "$1" -o TARGET 2>/dev/null | wc -l; }
 
-# wait_gone PID: up to 10 s for the process to exit.
-wait_gone() {
-	w_i=0
-	while [ "$w_i" -lt 100 ] && [ -d "/proc/$1" ]; do
-		sleep 0.1
-		w_i=$((w_i + 1))
-	done
-	[ ! -d "/proc/$1" ]
+# wait_exit PID...: blocks until each process has exited, on its pidfd
+# (python3 is in the image): an event, not a poll, and no timeout of its own;
+# a hung daemon is bounded by the test's timeout (Bazel's). A daemon outlives
+# its unmount for a moment (it syncs the backing filesystem and closes its
+# cache database; systemd already calls the unit stopped), so a start that
+# follows a stop at once may find the cache database in use: see
+# restart_check.
+wait_exit() {
+	[ "$#" -eq 0 ] && return 0
+	python3 -I -c 'import os, select, sys
+for pid in sys.argv[1:]:
+    try:
+        fd = os.pidfd_open(int(pid))
+    except ProcessLookupError:
+        continue
+    select.select([fd], [], [])' "$@"
 }
 
-# wait_daemons N: up to 10 s for no more than N dcfs daemons to be running.
-# A daemon outlives its unmount for a moment (it syncs the backing filesystem
-# and closes its cache database; systemd already calls the unit stopped), so
-# a start that follows a stop at once may find the cache database in use: see
-# restart_check.
-wait_daemons() {
-	w_i=0
-	while [ "$w_i" -lt 100 ] && [ "$(daemons | wc -l)" -gt "$1" ]; do
-		sleep 0.1
-		w_i=$((w_i + 1))
+# new_daemons PID...: the dcfs daemons running now that are not among the
+# PIDs (a snapshot of `daemons` taken before the instance was started).
+new_daemons() {
+	nd_old=" $* "
+	for nd_p in $(daemons); do
+		case "$nd_old" in *" $nd_p "*) ;; *) echo "$nd_p" ;; esac
 	done
-	[ "$(daemons | wc -l)" -le "$1" ]
 }
+
+# wait_no_daemons: until no dcfs daemon is left (for a test that has none
+# running otherwise).
+wait_no_daemons() { wait_exit $(daemons); }
 
 # journal_has PATTERN JOURNALCTL-ARGS...: the journal has a line matching the
-# grep pattern (waits up to 5 s: journald takes the daemon's datagram
-# asynchronously).
+# grep pattern. journald takes the daemon's datagram asynchronously:
+# `journalctl --sync` returns when everything it has received is written.
 journal_has() {
 	j_pat=$1
 	shift
-	j_i=0
-	while [ "$j_i" -lt 50 ]; do
-		journalctl --no-pager -o cat "$@" 2>/dev/null | grep -q -e "$j_pat" && return 0
-		sleep 0.1
-		j_i=$((j_i + 1))
-	done
-	return 1
+	journalctl --sync 2>/dev/null
+	journalctl --no-pager -o cat "$@" 2>/dev/null | grep -q -e "$j_pat"
 }
 
-# mnt ARGS...: mount(8), output in $OUT, status in MRC.
+# mnt ARGS...: mount(8), output in $OUT, status in MRC (the test's own
+# timeout bounds a hung mount).
 mnt() {
-	timeout 120 mount "$@" >"$OUT" 2>&1
+	mount "$@" >"$OUT" 2>&1
 	MRC=$?
-	# A start that failed after the fork leaves its daemon exiting for a
-	# moment: the checks that follow ask whether anything is left.
-	[ "$MRC" -eq 0 ] || wait_daemons 0
 }
 
 # cleanup_mount MOUNTPOINT: unmounts whatever a failed check left there.
@@ -267,7 +267,7 @@ boot1() {
 	# What libmount adds to a helper's options (rw, fstab's nofail and _netdev,
 	# defaults, noauto) is the helper's business, not an error.
 	umount "$MNT" 2>/dev/null
-	wait_daemons 0
+	wait_no_daemons
 	mnt -t dcfs -o "rw,nofail,_netdev,defaults,dcfs.fstype=none,dcfs.cache_db=$CACHE/m2.db" "$SRC" "$MNT"
 	pid=$(only_daemon)
 	if [ "$MRC" -eq 0 ] && [ -n "$pid" ] && [ "$(cat "$MNT/live.txt" 2>&1)" = live ]; then
@@ -312,7 +312,7 @@ boot1() {
 	# --- umount ---
 	umount "$MNT" 2>"$OUT"
 	urc=$?
-	if [ "$urc" -eq 0 ] && wait_gone "$pid" && [ "$(mount_count "$MNT")" -eq 0 ]; then
+	if [ "$urc" -eq 0 ] && wait_exit "$pid" && [ "$(mount_count "$MNT")" -eq 0 ]; then
 		pass umount-stops-dcfs
 	else
 		fail umount-stops-dcfs "umount rc=$urc daemon $pid: $(cat "$OUT") $(fs_of "$MNT")"
@@ -324,6 +324,8 @@ boot1() {
 	# A usage error: the wrapper exits 1, with its one ERROR line on the
 	# stderr mount(8) passes through.
 	mnt -t dcfs -o "dcfs.bogus,dcfs.fstype=none,dcfs.cache_db=$CACHE/bogus.db" "$SRC" "$MNT"
+	# A start that failed after the fork leaves its daemon exiting for a moment.
+	wait_no_daemons
 	errors=$(grep -c '^E[0-9]' "$OUT")
 	if [ "$MRC" -eq 1 ] && [ "$errors" -eq 1 ] && grep -q 'dcfs.bogus' "$OUT" && [ -z "$(daemons)" ] &&
 		[ "$(mount_count "$MNT")" -eq 0 ]; then
@@ -334,14 +336,15 @@ boot1() {
 	# A failed start after the fork (the cache database's writer lock is
 	# held): 32, mount failure, and dcfs's message.
 	: >"$CACHE/locked.db"
-	testutil sqlite-lock "$CACHE/locked.db" 30 >/tmp/lock.out 2>&1 &
+	# The locker says READY on a fifo once it holds the lock: reading it is the
+	# wait.
+	mkfifo /tmp/lock.fifo
+	testutil sqlite-lock "$CACHE/locked.db" 30 >/tmp/lock.fifo 2>&1 &
 	locker=$!
-	i=0
-	while [ "$i" -lt 50 ] && ! grep -q READY /tmp/lock.out; do
-		sleep 0.1
-		i=$((i + 1))
-	done
+	read -r locker_says </tmp/lock.fifo
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/locked.db" "$SRC" "$MNT"
+	# A start that failed after the fork leaves its daemon exiting for a moment.
+	wait_no_daemons
 	errors=$(grep -c '^E[0-9]' "$OUT")
 	if [ "$MRC" -eq 32 ] && [ "$errors" -eq 1 ] && grep -qi 'locked' "$OUT" && [ -z "$(daemons)" ] &&
 		[ "$(mount_count "$MNT")" -eq 0 ]; then
@@ -356,6 +359,8 @@ boot1() {
 	mount -t bogusfs "$DEV" /tmp/other >/dev/null 2>&1
 	native_rc=$?
 	mnt -t dcfs -o "dcfs.fstype=bogusfs,dcfs.cache_db=$CACHE/wrongtype.db" "$DEV" "$MNT"
+	# A start that failed after the fork leaves its daemon exiting for a moment.
+	wait_no_daemons
 	if [ "$native_rc" -ne 0 ] && [ "$MRC" -eq "$native_rc" ] && grep -q "unknown filesystem type 'bogusfs'" "$OUT" &&
 		[ -z "$(daemons)" ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
 		pass exit-status-native-wrong-type
@@ -365,6 +370,8 @@ boot1() {
 	mount -t ext4 /dev/nonexistent /tmp/other >/dev/null 2>&1
 	native_rc=$?
 	mnt -t dcfs -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/nodev.db" /dev/nonexistent "$MNT"
+	# A start that failed after the fork leaves its daemon exiting for a moment.
+	wait_no_daemons
 	if [ "$native_rc" -ne 0 ] && [ "$MRC" -eq "$native_rc" ] && grep -qi 'nonexistent' "$OUT" &&
 		[ -z "$(daemons)" ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
 		pass exit-status-native-missing-device
@@ -373,6 +380,8 @@ boot1() {
 	fi
 	# A native option the none form cannot honor (ro) is a usage error.
 	mnt -t dcfs -o "ro,dcfs.fstype=none,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
+	# A start that failed after the fork leaves its daemon exiting for a moment.
+	wait_no_daemons
 	if [ "$MRC" -eq 1 ] && grep -q 'dcfs.fstype=none' "$OUT" && [ -z "$(daemons)" ]; then
 		pass exit-status-none-refuses-ro
 	else
@@ -456,7 +465,7 @@ EOF
 	fi
 	umount /data/sub /mnt/live /mnt/xfs /mnt/btrfs /data 2>"$OUT"
 	urc=$?
-	wait_daemons 0
+	wait_no_daemons
 	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 0 ]; then
 		pass fstab-umount-leaves-nothing
 	else
@@ -492,7 +501,7 @@ EOF
 	mnt /data/sub
 	umount -R /data 2>"$OUT"
 	urc=$?
-	wait_daemons 0
+	wait_no_daemons
 	if [ "$urc" -eq 0 ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 0 ] && [ -z "$(daemons)" ]; then
 		pass umount-r-unmounts-the-tree
 	else
@@ -505,7 +514,7 @@ EOF
 	# use (the same race as systemctl restart: README, Limitations).
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/again.db" "$SRC" "$MNT"
 	umount "$MNT"
-	flock -w 10 "$CACHE/again.db" true # the README's wait: until the daemon lets go of its database
+	flock "$CACHE/again.db" true # the README's wait: until the daemon lets go of its database
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/again.db" "$SRC" "$MNT"
 	if [ "$MRC" -eq 0 ] && [ "$(cat "$MNT/live.txt" 2>&1)" = live ]; then
 		pass umount-then-mount-restarts-an-instance
@@ -513,17 +522,17 @@ EOF
 		fail umount-then-mount-restarts-an-instance "rc=$MRC out=$(cat "$OUT")"
 	fi
 	umount "$MNT"
-	wait_daemons 0
+	wait_no_daemons
 	disabled umount-then-mount-at-once \
 		"dcfs bug, reported by step 15.6 (README, Limitations): the old daemon is still closing the cache database when the next mount starts" \
 		umount_mount_check
-	wait_daemons 0
+	wait_no_daemons
 	# After a SIGKILL the mount is dead (ENOTCONN) until umount -l, and the
 	# instance then mounts again.
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/kill.db" "$SRC" "$MNT"
 	pid=$(only_daemon)
 	kill -KILL "$pid"
-	wait_gone "$pid"
+	wait_exit "$pid"
 	dead=$(ls "$MNT" 2>&1)
 	umount -l "$MNT" 2>/dev/null
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/kill.db" "$SRC" "$MNT"
@@ -534,7 +543,7 @@ EOF
 		fail sigkill-umount-l-then-mount "dead mount said '$dead'; remount rc=$MRC out=$(cat "$OUT") mounts=$(mount_count "$MNT")"
 	fi
 	umount "$MNT"
-	wait_daemons 0
+	wait_no_daemons
 
 	# --- systemd's mount units, generated from the same fstab ---
 	systemctl start data.mount data-sub.mount mnt-live.mount mnt-xfs.mount mnt-btrfs.mount 2>"$OUT"
@@ -586,6 +595,7 @@ EOF
 	fi
 	# Stopping the child leaves the parent; stopping the parent stops what is
 	# under it.
+	child_pid=$(only_daemon_of /data/sub)
 	systemctl stop data-sub.mount
 	if [ "$(systemctl is-active data-sub.mount)" != active ] && [ "$(systemctl is-active data.mount)" = active ] &&
 		[ "$(cat /data/file_1.txt 2>&1)" = "content 1" ]; then
@@ -593,10 +603,11 @@ EOF
 	else
 		fail systemd-stop-child-leaves-parent "$(systemctl is-active data-sub.mount data.mount)"
 	fi
-	wait_daemons 4
+	wait_exit $child_pid
 	systemctl start data-sub.mount
 	both_up=0
 	[ "$(systemctl is-active data.mount)" = active ] && [ "$(systemctl is-active data-sub.mount)" = active ] && both_up=1
+	stopped_pids="$(only_daemon_of /data) $(only_daemon_of /data/sub)"
 	systemctl stop data.mount
 	if [ "$both_up" -eq 1 ] && [ "$(systemctl is-active data.mount)" != active ] && [ "$(systemctl is-active data-sub.mount)" != active ] &&
 		[ "$(mount_count /data)" -eq 0 ] && [ "$(mount_count /data/sub)" -eq 0 ]; then
@@ -604,7 +615,7 @@ EOF
 	else
 		fail systemd-stop-parent-stops-child "$(systemctl is-active data.mount data-sub.mount) $(findmnt -t fuse.dcfs)"
 	fi
-	wait_daemons 3
+	wait_exit $stopped_pids
 	systemctl start data.mount data-sub.mount
 	# systemctl restart of a parent restarts its child (decision 4: restart
 	# one instance with systemctl restart). It is a pair of units of its own,
@@ -613,13 +624,14 @@ EOF
 	# that local-fs.target requires.
 	mkdir -p /srv/rp/c /srv/rc /rp
 	echo rc >/srv/rc/rc.txt
+	pre_rp=$(daemons)
 	systemctl start rp-c.mount
 	disabled systemd-restart-parent-restarts-child \
 		"dcfs bug, reported by step 15.6: systemd calls a mount stopped as soon as it is unmounted, while its daemon is still syncing and closing the cache database for up to two seconds; the restart's start finds 'Cache database is in use by another dcfs process' (exit 32). A fix: umount.dcfs waiting for the daemon, or the new daemon waiting for the cache lock" \
 		restart_check
 	systemctl stop rp-c.mount rp.mount 2>/dev/null
 	systemctl reset-failed rp.mount rp-c.mount 2>/dev/null
-	wait_daemons 5
+	wait_exit $(new_daemons $pre_rp)
 	# A start that fails marks the unit failed, with dcfs's message in the
 	# journal under the unit.
 	systemctl start mnt-fail.mount 2>"$OUT"
@@ -632,14 +644,15 @@ EOF
 	# At the default threshold (WARNING) the INFO narrative stays out of the
 	# journal (the fstab lines above set dcfs.stderrthreshold=0), and with the
 	# threshold set it is there.
+	pre_q=$(daemons)
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/quiet.db" "$SRC" "$MNT"
 	quiet_rc=$MRC
 	umount "$MNT"
-	wait_daemons 5
+	wait_exit $(new_daemons $pre_q)
 	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/loud.db,dcfs.stderrthreshold=0" "$SRC" "$MNT"
 	loud_rc=$MRC
 	umount "$MNT"
-	wait_daemons 5
+	wait_exit $(new_daemons $pre_q)
 	if [ "$quiet_rc" -eq 0 ] && [ "$loud_rc" -eq 0 ] && journal_has "cache_db=$CACHE/loud.db" -t dcfs &&
 		! journalctl --no-pager -b -t dcfs -o cat | grep -q "cache_db=$CACHE/quiet.db"; then
 		pass journal-follows-threshold

@@ -1515,7 +1515,7 @@ What the real `mount(8)` path showed that the busybox guest could not:
   waits for the old daemon to exit before the stop/start checks. The same
   race hits `umount` followed at once by `mount` of the instance without
   systemd (`DISABLED_umount-then-mount-at-once`); with the README's wait
-  (`flock -w 10 <cache database> true` returns when the daemon has let go) it
+  (`flock <cache database> true` returns when the daemon has let go) it
   works (`umount-then-mount-restarts-an-instance`). A fix is the new daemon
   waiting for the cache lock, or a `umount.dcfs` that returns when the daemon
   has exited (plan step 15.6b).
