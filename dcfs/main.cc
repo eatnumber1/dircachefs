@@ -472,6 +472,20 @@ absl::StatusOr<int> Main(int argc, char *argv[]) {
   // Observes nothing, except in the testonly checking and recording builds
   // (see dcfs/protocol_events.h).
   Observe(ctx, &MainProtocolEvents());
+  // How long the kernel lets a lazytime access time stay in memory (step
+  // 23.8): atime-only dirty rows drive a sync point once that old.
+  if (absl::StatusOr<std::string> value =
+          ReadProcValue("/proc/sys/vm/dirtytime_expire_seconds");
+      value.ok()) {
+    int64_t seconds = 0;
+    if (absl::SimpleAtoi(*value, &seconds) && seconds > 0) {
+      ctx.dirty.atime_expiry = absl::Seconds(seconds);
+    }
+  } else {
+    LOG(WARNING) << "vm.dirtytime_expire_seconds: " << value.status()
+                 << "; atime-only dirty rows drive a sync point after "
+                 << absl::FormatDuration(ctx.dirty.atime_expiry);
+  }
 
   ABSL_ASSIGN_OR_RETURN(RootIdentity root, backing::ProbeRoot(ctx, *source_fd));
   ABSL_RETURN_IF_ERROR(Migrate(db, root));

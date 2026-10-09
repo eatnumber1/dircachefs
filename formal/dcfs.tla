@@ -162,11 +162,13 @@ vars == <<bCur, bOpts, dbCur, dbOpts, mode, seq, inflight, durableD,
 \* F's backing descriptor while it is above 0; the kernel's RELEASE comes
 \* once its file is gone, so `opens` drops first); `seq`/`inflight`,
 \* FillGuards::touched[F] and inflight[F]; `durable`, F in
-\* Context::dirty.durable; `lost`, history: a power loss left F's cached
+\* Context::dirty.durable; `expired`, F's atime-only row is older than the
+\* kernel's dirtytime expiry (Context::dirty.atime_since and atime_expiry:
+\* it drives a sync point then); `lost`, history: a power loss left F's cached
 \* attributes behind the backing filesystem's (README: "Access times of a
 \* file"), until the next record of them.
 NoF == [opens |-> 0, held |-> 0, seq |-> 0, inflight |-> 0,
-         durable |-> FALSE, lost |-> FALSE]
+         durable |-> FALSE, lost |-> FALSE, expired |-> FALSE]
 
 \* A request slot's local state. `pc` is where its code is; `locked` whether
 \* it holds the kernel's lock on D; `lk`/`cont` are the name and the
@@ -210,7 +212,7 @@ TypeOK ==
                        /\ ps[p].rep.e \in Errnos \cup {None}
     /\ servedWrong \in BOOLEAN
     /\ fm \in [opens : Nat, held : Nat, seq : Nat, inflight : Nat,
-              durable : BOOLEAN, lost : BOOLEAN]
+              durable : BOOLEAN, lost : BOOLEAN, expired : BOOLEAN]
     /\ fm.opens <= fm.held
     /\ stamp \in 1..(MaxStamp + 1) /\ muts \in 0..MaxMutations
     /\ crashes \in 0..MaxCrashes
@@ -866,26 +868,29 @@ S1From(p, r) ==
 \* syncfs started. Context::dirty.durable is cleared either way.
 \* BugSyncIgnoresMutations: the old ClearDirty, which kept only writable
 \* opens (finding sync_during_mutation).
-\* F's row (step 23.8) goes on the same terms (it was in BeginSync's
+\* F's row (step 23.8) is covered on the same terms (it was in BeginSync's
 \* snapshot of the dirty set: `fdirty`; a cold open's mark moves no clock),
-\* and only if F was not open
-\* (dcfs held no descriptor for it) at BeginSync nor now
-\* (cache::SyncSnapshot::open_files, Context::open_files): the kernel may
-\* have read it after the syncfs began. SyncKeepsHeld(r) is that test;
-\* known_bugs/atime_sync_clears_held overrides it.
+\* and goes only if F was not open (dcfs held no descriptor for it) at
+\* BeginSync nor now (cache::SyncSnapshot::open_files, Context::open_files):
+\* the kernel may have read it after the syncfs began. A covered row of an
+\* open F stays as atime-only (the syncfs covered the mutation it stood
+\* for: it must not drive further sync points). SyncKeepsHeld(r) is the
+\* test; known_bugs/atime_sync_clears_held overrides it.
 SyncKeepsHeld(r) == r.fheld \/ fm.held > 0
 S2(p) ==
     /\ At(p, "S2")
     /\ LET r == ps[p]
            clear == BugSyncIgnoresMutations \/ (inflight = 0 /\ seq <= r.snap)
-           clearF == /\ r.fdirty
-                     /\ fm.inflight = 0 /\ fm.seq <= r.fsnap
-                     /\ ~SyncKeepsHeld(r)
+           coveredF == r.fdirty /\ fm.inflight = 0 /\ fm.seq <= r.fsnap
+           fd == dbCur.fDirty
        IN Commit([dbCur EXCEPT !.dirty = IF clear THEN FALSE ELSE dbCur.dirty,
-                               !.fDirty = IF clearF THEN "no" ELSE dbCur.fDirty],
+                               !.fDirty =
+                                 IF ~coveredF THEN fd
+                                 ELSE IF ~SyncKeepsHeld(r) THEN "no"
+                                 ELSE IF fd = "mut" THEN "atime" ELSE fd],
                  FALSE)
     /\ durableD' = FALSE
-    /\ fm' = [fm EXCEPT !.durable = FALSE]
+    /\ fm' = [fm EXCEPT !.durable = FALSE, !.expired = FALSE]
     /\ Reply(p, ps[p], Rep("ok", {}))
     /\ UnchangedBacking /\ UNCHANGED <<seq, inflight, servedWrong, stamp>>
 
@@ -952,9 +957,19 @@ Interrupt(p) ==
 (***************************************************************************)
 
 \* A sync point runs only for a row that is not atime-only (Context::
-\* dirty.any): one of D's, or F's mutation row. (With no row at all the
-\* model lets one run, as it always did: it changes nothing then.)
-SyncDriven == dbCur.dirty \/ dbCur.fDirty # "atime"
+\* dirty.any): one of D's, or F's mutation row; or for F's atime-only row
+\* once it is older than the dirtytime expiry (`expired`: the kernel writes
+\* it back by then anyway). (With no row at all the model lets one run, as
+\* it always did: it changes nothing then.)
+SyncDriven == dbCur.dirty \/ dbCur.fDirty # "atime" \/ fm.expired
+
+\* Time passes: F's atime-only row reaches the dirtytime expiry.
+AtimeExpiry ==
+    /\ mode = "up" /\ running = None
+    /\ dbCur.fDirty = "atime" /\ ~fm.expired
+    /\ fm' = [fm EXCEPT !.expired = TRUE]
+    /\ UNCHANGED <<bCur, bOpts, dbCur, dbOpts, mode, seq, inflight, durableD,
+                   running, ps, servedWrong, stamp, muts, crashes>>
 
 \* cache::CanFill for F.
 CanFillF(s) == fm.inflight = 0 /\ fm.seq <= s
@@ -1372,9 +1387,11 @@ ProbesDoneClearing ==
     /\ UNCHANGED <<bCur, bOpts, seq, inflight, durableD, fm, running, ps,
                    servedWrong, stamp, muts, crashes>>
 
-\* Unmount: the session loop has stopped, no request is in flight.
-\* (With F open dcfs's last sync point keeps F's row, so the shutdown is not
-\* clean: as a daemon crash, not modelled apart.)
+\* Unmount: the session loop has stopped, no request is in flight. (With F
+\* still open, DirCacheFS::Destroy makes a last held fill of it and stops
+\* counting it as open, so that the shutdown is clean; not modelled apart:
+\* BeginShutdown waits for F's release. A read the kernel makes through F
+\* after the daemon is gone is not seen: README "Limitations".)
 BeginShutdown ==
     /\ mode = "up" /\ \A p \in Procs : ps[p].pc = "idle"
     /\ fm.held = 0
@@ -1465,7 +1482,7 @@ Next ==
          \/ FileRefreshStat(p) \/ FileRefreshFill(p)
          \/ FileSetSyscall(p) \/ FileSetEnd(p) \/ FileSetStat(p)
          \/ FileSetFill(p)
-    \/ FRead
+    \/ FRead \/ AtimeExpiry
     \/ CrashServing \/ CrashRecovering \/ CrashStopping
     \/ Restart \/ Recover \/ StartRun \/ ProbesDone
     \/ BeginShutdown \/ StopSync \/ StopClear \/ StopCkpt \/ StopFlag

@@ -555,7 +555,7 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
     // Not while open for writing: then the row is kept unknown and the
     // refresh below reads the same descriptor. Not for a removed object,
     // which has no row (RequireAttrOrRemoved answered it).
-    if (std::optional<int> held = reply ? HeldFdOf(id) : std::nullopt;
+    if (std::optional<int> held = reply ? OpenFdOf(id) : std::nullopt;
         held.has_value() && !open_for_write_.contains(id) &&
         !removed_.contains(id)) {
       struct statx stx {};
@@ -607,9 +607,18 @@ void DirCacheFS::ResolveSideEffectXattrs(
   }
 }
 
+bool DirCacheFS::SyncDue(absl::Time now) const {
+  // A mutation's row; or atime-only rows (step 23.8) once older than the
+  // kernel's dirtytime expiry, by which it writes access times back anyway:
+  // before that a syncfs would force the write-back lazytime defers.
+  return ctx_.dirty.any ||
+         (ctx_.dirty.atime &&
+          now - ctx_.dirty.atime_since >= ctx_.dirty.atime_expiry);
+}
+
 void DirCacheFS::MaybeSyncBacking() {
-  if (!ctx_.dirty.any) return;
   absl::Time now = ctx_.clock->TimeNow();
+  if (!SyncDue(now)) return;
   if (now - last_sync_ < opts_.sync_interval) return;
   SyncBackingNow("periodic");
 }
@@ -625,7 +634,7 @@ void DirCacheFS::NoteBackingAccess(std::string_view what, absl::Time at) {
 }
 
 void DirCacheFS::SyncBackingNow(std::string_view why) {
-  if (!ctx_.dirty.any) return;
+  if (!SyncDue(ctx_.clock->TimeNow())) return;
   last_sync_ = ctx_.clock->TimeNow();
   // Only the periodic sync points are announced at INFO: an fsync runs one
   // per call, while the dirty set is non-empty.
@@ -766,13 +775,6 @@ absl::Status DirCacheFS::Setattr(
   // An explicit access time on a directory or symlink replaces the stamp
   // dcfs keeps in the cache for it (step 23.8), earlier or not: drop it, so
   // the refresh below records the backing filesystem's.
-  if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_ATIME_NOW)) {
-    if (absl::Status dropped = cache::DropAtimeStamp(ctx_, id);
-        !dropped.ok()) {
-      mutation.End();
-      return dropped;
-    }
-  }
   // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
   // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
   if (absl::Status interrupted = Checkpoint(ctx_, "a setattr's syscall");
@@ -802,6 +804,13 @@ absl::Status DirCacheFS::Setattr(
   // Phase 3: write the new state, then reply with it. The change has
   // happened: a failure from here on is logged, never replied
   // (audit-races F7).
+  // An explicit access time on a directory or symlink replaces the stamp
+  // dcfs keeps in the cache for it (step 23.8), earlier or not: dropped,
+  // now that the backing filesystem took it, so that the refresh below
+  // records the backing filesystem's (the row is unknown since phase 1).
+  if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_ATIME_NOW)) {
+    LogPhase3Failure("Setattr", cache::DropAtimeStamp(ctx_, id));
+  }
   struct statx stx {};
   LogPhase3Failure("Setattr", backing::RefreshAttrs(ctx_, id, &stx));
   ResolveSideEffectXattrs(id, side_effects, OpenFdOf(id), "Setattr");
@@ -1619,10 +1628,14 @@ absl::Status DirCacheFS::OpenInode(
     // file is open. A writable open's phase 1 (BeginWriting) makes it dirty
     // anyway, and a removed object has no row.
     if (!writable && !removed_.contains(id)) {
-      ABSL_RETURN_IF_ERROR(ctx_.db.Transaction(
-          [&] {
-            return cache::MarkAtimeDirty(ctx_, id, cache::GuardTouch::kNone);
-          }));
+      // A read first: a row that is dirty already (a read since the last
+      // sync point, a mutation) needs no write transaction.
+      ABSL_ASSIGN_OR_RETURN(bool dirty, cache::IsDirty(ctx_, id));
+      if (!dirty) {
+        ABSL_RETURN_IF_ERROR(ctx_.db.Transaction([&] {
+          return cache::MarkAtimeDirty(ctx_, id, cache::GuardTouch::kNone);
+        }));
+      }
     }
     ABSL_ASSIGN_OR_RETURN(BackingFile backing_file, MakeBackingFile(id, req));
     backing_id = backing_file.backing_id;
@@ -2936,13 +2949,6 @@ std::optional<int> DirCacheFS::OpenFdOf(InodeId id) const {
   auto it = backing_files_.find(id);
   if (it == backing_files_.end()) return std::nullopt;
   return *it->second.fd;
-}
-
-std::optional<int> DirCacheFS::HeldFdOf(InodeId id) const {
-  if (std::optional<int> fd = OpenFdOf(id); fd.has_value()) return fd;
-  auto it = written_.find(id);
-  if (it == written_.end() || !it->second.has_value()) return std::nullopt;
-  return **it->second;
 }
 
 events::SharedFd DirCacheFS::SharedFdOf(InodeId id) const {

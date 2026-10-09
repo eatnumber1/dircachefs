@@ -232,6 +232,8 @@ class DirCacheFS {
   // next fsync, or a clean shutdown. That is safe; it only makes the
   // re-read after a crash larger.
   void MaybeSyncBacking();
+  // Whether a sync point has a reason to run now (see SyncBackingNow).
+  bool SyncDue(absl::Time now) const;
 
   // Called by the request handler after a request that reached the backing
   // filesystem (fuse_ops.cc): logs at INFO if the one before it was more
@@ -378,7 +380,9 @@ class DirCacheFS {
   // `attr` (id's row) if valid, else refreshed (RefreshAttrsOf) and answered
   // from the fresh statx itself, whether or not the cache recorded it (see
   // cache::CanFill). Step 23.8: while dcfs holds a descriptor for `id`
-  // (HeldFdOf) and no writable open is outstanding, an attribute reply
+  // (OpenFdOf: an open file; a written file's O_PATH descriptor is no
+  // reason, as no read can move its access time) and no writable open is
+  // outstanding, an attribute reply
   // (`reply`: GETATTR, LOOKUP, READDIRPLUS entries...) is always a held
   // fill of it (backing::FillHeldAttrs), answered from its statx: the
   // kernel's reads since the last record moved the access time.
@@ -529,10 +533,6 @@ class DirCacheFS {
 
   // The fd of some outstanding open of `id`, if any.
   std::optional<int> OpenFdOf(InodeId id) const;
-  // A descriptor dcfs holds for `id`: the shared backing fd of an
-  // outstanding open, else the O_PATH one a written file keeps until its
-  // last FORGET (written_), if any.
-  std::optional<int> HeldFdOf(InodeId id) const;
   // `id`'s shared backing descriptor, for the protocol events.
   events::SharedFd SharedFdOf(InodeId id) const;
   // What dcfs keeps for nodeid `id` (lookups_, removed_, written_, open

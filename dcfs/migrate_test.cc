@@ -23,6 +23,7 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
+using ::testing::Not;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 
@@ -281,7 +282,7 @@ TEST_F(MigrateTest, V5DatabaseGainsTheDirtyRowsReason) {
   EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
   EXPECT_THAT(CountRows(db_, "dirty WHERE inode = 1 AND atime_only = 0"),
               IsOkAndHolds(1));
-  EXPECT_FALSE(db_.Exec("UPDATE dirty SET atime_only = 2").ok());
+  EXPECT_THAT(db_.Exec("UPDATE dirty SET atime_only = 2"), Not(IsOk()));
   EXPECT_THAT(Migrate(db_, root), IsOk());
   EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
 }

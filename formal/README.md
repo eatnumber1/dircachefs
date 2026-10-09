@@ -520,7 +520,7 @@ from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 | `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 280,869 | ~1-2 min |
 | `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable` | 892,708 | ~1-2.5 min |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable` | 1,036,982 | ~1.5-4 min |
-| `MC_atime.cfg`, `MC_atime_concurrent.cfg` | `atime_test`, `atime_concurrent_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 110,672; 66,682 | ~50 s; ~30 s |
+| `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 263,848; 297,308; 29,950 | ~1.5 min; ~2.5 min; ~30 s (load 15) |
 
 `Interrupts` (Phase 22) is off in the first five: with it, `MC_small.cfg`
 grows to 2,154,085 states (6 min), so the interrupts have configurations
@@ -1168,7 +1168,8 @@ to step through the counterexample, but the log is enough.
 (`docs/design.md`, "Access times"). Its requests (`FileKinds`: `fopen`,
 `frelease`, `fgetattr`, `fset`) are not in `AllKinds`, so the
 configurations that leave them out keep F's state constant and their state
-counts unchanged; `MC_atime.cfg` and `MC_atime_concurrent.cfg` put them in
+counts unchanged; `MC_atime.cfg`, `MC_atime_concurrent.cfg` and
+`MC_atime_crash.cfg` put them in
 (with a create in D and sync points).
 
 | Variable or field | Meaning | In dcfs |
@@ -1189,8 +1190,9 @@ counts unchanged; `MC_atime.cfg` and `MC_atime_concurrent.cfg` put them in
 | `frelease` (`Arrive`), `FileReleaseStat`, `FileReleaseFill` | The kernel's file is gone; the held fill: `statx` of the held descriptor, then nothing if the row has that, else in one transaction the attributes (if F's guard allows; else unknown) and the row dirty, atime only, and F's guard touched (`HeldFillMark`); the hold ends | `DirCacheFS::Release`, `backing::FillHeldAttrs` |
 | `fgetattr` (`Arrive`), `FileGetattrStat`, `FileGetattrFill`, `FileRefreshStat`, `FileRefreshFill` | While held, the held fill, answered from its `statx`; else served from the cache if valid, else a refresh by handle (a fill, which, if F is held by then, also marks the row dirty and touches the guard) | `DirCacheFS::FreshAttr`, `cache::UpdateAttr`'s `MarkIfOpen` |
 | `fset` (`Arrive`), `FileSetSyscall`, `FileSetEnd`, `FileSetStat`, `FileSetFill` | A setattr of F: phase 1 (unknown, a mutation's row, kSync unless durable), the syscall, `End`, the refresh as a fill | `DirCacheFS::Setattr` |
-| `SyncClearDirty` | Also clears F's row if it was in the snapshot (`fdirty`: a cold open's mark moves no clock), on the same terms as D's, and only if F was held neither at the snapshot nor now (`SyncKeepsHeld`) | `cache::ClearDirty`, `SyncSnapshot::open_files` |
-| (sync, first step) | Enabled only if D's row or a mutation row of F may exist (`SyncDriven`): an atime-only row does not drive a sync point | `Context::dirty.any`, `MaybeSyncBacking` |
+| `SyncClearDirty` | Also clears F's row if it was in the snapshot (`fdirty`: a cold open's mark moves no clock), on the same terms as D's, and only if F was held neither at the snapshot nor now (`SyncKeepsHeld`); a covered row of a held F stays, as atime-only (the syncfs covered the mutation it stood for) | `cache::ClearDirty`, `SyncSnapshot::open_files` |
+| `AtimeExpiry` | Time passes: F's atime-only row reaches the kernel's dirtytime expiry (`fm.expired`), after which it drives a sync point too | `Context::dirty.atime_since`, `atime_expiry`, `DirCacheFS::SyncDue` |
+| (sync, first step) | Enabled only if D's row or a mutation row of F may exist, or F's atime-only row has expired (`SyncDriven`): an atime-only row does not drive a sync point before that | `Context::dirty.any`, `MaybeSyncBacking` |
 
 Properties: `Correct` (so `CacheNeverWrong` and `CrashSafe`) also says
 F's cached attributes are never ahead of the backing filesystem's
@@ -1209,14 +1211,20 @@ made the state space infinite.
 Abstractions: F has no names; reads and setattrs both count against
 `MaxMutations` and take their stamps from `stamp`; writable opens of F are
 still not modelled (see above); a shutdown with F open is not modelled
-(`BeginShutdown` waits for F's release: dcfs's last sync point keeps F's
-row, so such a shutdown is not clean, as a daemon crash).
+(`BeginShutdown` waits for F's release). In the code, DESTROY makes a last
+held fill of each file still open for reading and stops counting it as
+open, so the shutdown is clean; a read the kernel makes through it after
+the daemon is gone (passthrough reads go on) is not seen, and after the
+restart that file's access time can be behind with no power loss (README
+"Limitations"). The model's `FileExact` would have to allow that too.
 
 | Configuration or variant | Test | Expected | |
 |---|---|---|---|
-| `MC_atime.cfg` | `atime_test` (medium) | no error | 1 name, 1 slot, 3 changes (reads, setattrs, D's create), 1 crash; every invariant, `FileExact`. 110,672 distinct states, ~50 s at load 15 (2026-10-08) |
-| `MC_atime_concurrent.cfg` | `atime_concurrent_test` (medium) | no error | 2 slots, 2 changes, no crash: F's requests and sync points interleaving. 66,682 distinct states, ~30 s. (2 slots with the crash and D's create passed a million states without finishing) |
-| `known_bugs/atime_held_fill_not_dirty` | `known_bug_atime_held_fill_not_dirty_test` | `CrashSafe` | the held fill records without the dirty mark and the touch (`HeldFillMark <- HeldFillMarkNotDirty`) |
+| `MC_atime.cfg` | `atime_test` (medium) | no error | 1 name, 1 slot, 3 changes (reads, setattrs, D's create), 1 crash; every invariant, `FileExact`, `ReplyObservable`. 263,848 distinct states, ~1.5 min at load 15 (2026-10-08) |
+| `MC_atime_concurrent.cfg` | `atime_concurrent_test` (medium) | no error | 2 slots, 2 changes, no crash: F's requests and sync points interleaving. 297,308 distinct states, ~2.5 min. (2 slots with the crash and D's create passed a million states without finishing) |
+| `MC_atime_crash.cfg` | `atime_crash_test` (medium) | no error | `atime_held_fill_no_touch`'s bounds: 2 slots, opens, releases and sync points, 1 read, 1 crash. 29,950 distinct states |
+| `known_bugs/atime_held_fill_no_touch` | `known_bug_atime_held_fill_no_touch_test` | `CrashSafe` | the held fill records and marks the row dirty, but does not touch F's guard (`HeldFillMark <- HeldFillMarkNoTouch`): a sync point that took its snapshot before the release clears the row |
+| `known_bugs/atime_fill_no_touch` | `known_bug_atime_fill_no_touch_test` (large: 634,354 states, ~7 min) | `CrashSafe` | a refresh that records an open F's attributes marks the row but does not touch the guard (`FillF <- FillFNoTouch`): open, a read, the refresh, a release with nothing new to record, and the sync point clears the row |
 | `known_bugs/atime_sync_clears_held` | `known_bug_atime_sync_clears_held_test` | `FileExact` | a sync point clears a held file's row (`SyncKeepsHeld <- SyncKeepsNotHeld`): a read, then a daemon crash before any held fill, and the restart serves the old access time |
 | `known_bugs/atime_open_not_dirty` | `known_bug_atime_open_not_dirty_test` | `FileExact` | a cold open marks nothing (`OpenMark <- OpenMarkNotDirty`): the same with no sync point at all |
 | `limitations/atime_power_loss_while_open` | `limitation_atime_power_loss_while_open_test` (small) | `FileExactStrict` | a power loss that loses the open's commit and keeps a read's access time: the residue the README states |

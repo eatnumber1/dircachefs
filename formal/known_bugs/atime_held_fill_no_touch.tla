@@ -1,11 +1,13 @@
---------------------- MODULE atime_held_fill_not_dirty ---------------------
+--------------------- MODULE atime_held_fill_no_touch ----------------------
 (***************************************************************************)
 (* Not the code (step 23.8): the held fill (backing::FillHeldAttrs)       *)
-(* records what its statx read without marking F's row dirty and without  *)
-(* advancing F's guard. The backing filesystem writes a read's access     *)
-(* time back lazily; only a later syncfs makes it durable.                 *)
+(* records what its statx read, and marks the row dirty, but does not      *)
+(* advance F's guard (cache::MarkAtimeDirty's touch). The backing          *)
+(* filesystem writes a read's access time back lazily; only a later        *)
+(* syncfs makes it durable, and the touch is what keeps a row recorded     *)
+(* after a sync point's snapshot from being cleared by it.                *)
 (*                                                                         *)
-(* Put in by HeldFillMark <- HeldFillMarkNotDirty. Expected: CrashSafe is  *)
+(* Put in by HeldFillMark <- HeldFillMarkNoTouch. Expected: CrashSafe is  *)
 (* violated: F's row is dirty (here: a crash while F was open, which the   *)
 (* start recovers and keeps dirty); a sync point takes its snapshot with   *)
 (* F not open; F is opened (warm: the row is dirty already), read, and     *)
@@ -17,8 +19,9 @@
 (***************************************************************************)
 EXTENDS MC
 
-HeldFillMarkNotDirty(r, ok) ==
+HeldFillMarkNoTouch(r, ok) ==
     /\ Commit([dbCur EXCEPT !.fValid = ok,
-                            !.fAttr = IF ok THEN r.rdVer ELSE 0], FALSE)
+                            !.fAttr = IF ok THEN r.rdVer ELSE 0,
+                            !.fDirty = AtimeDirty(dbCur)], FALSE)
     /\ fm' = [fm EXCEPT !.held = @ - r.frel, !.lost = FALSE]
 =============================================================================

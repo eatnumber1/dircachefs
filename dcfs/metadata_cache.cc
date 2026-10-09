@@ -1387,6 +1387,9 @@ absl::Status MarkAtimeDirty(Context &ctx, InodeId id, GuardTouch touch) {
                            .status());
   ctx.dirty.atime = true;
   ++ctx.dirty.inserts;
+  if (ctx.dirty.atime_since == absl::InfiniteFuture()) {
+    ctx.dirty.atime_since = ctx.clock->TimeNow();
+  }
   // A sync point whose BeginSync came before this record keeps the row
   // (ClearDirty: CanFill fails): the access time recorded may come from a
   // read after its syncfs began. A mutation of `id` in flight touches it at
@@ -1696,10 +1699,20 @@ absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids) {
   return absl::OkStatus();
 }
 
-absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx) {
+absl::StatusOr<bool> IsDirty(Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt, Query(ctx, "SELECT 1 FROM dirty WHERE inode = ?", id));
+  return ReadOne(*stmt, [](Statement &) { return absl::OkStatus(); });
+}
+
+absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx,
+                                               bool mutations_only) {
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
-      Query(ctx, "SELECT inode FROM dirty ORDER BY inode"));
+      mutations_only
+          ? Query(ctx,
+                  "SELECT inode FROM dirty WHERE atime_only = 0 ORDER BY inode")
+          : Query(ctx, "SELECT inode FROM dirty ORDER BY inode"));
   std::vector<InodeId> ids;
   ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](Statement &row) {
     ids.push_back(row.Column<int64_t>(0));
@@ -1765,10 +1778,18 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   // it after that (and released it since, which EndWrites also records in
   // the guards; this does not depend on it).
   kept.insert(synced.open_for_write.begin(), synced.open_for_write.end());
-  // Open at all when it began (step 23.8): the kernel may have read it after
-  // that, and the access time those reads gave is not covered either; its
-  // last release records it (a held fill, which touches it).
-  kept.insert(synced.open_files.begin(), synced.open_files.end());
+  // Open at all when it began, or now (step 23.8): the kernel may have read
+  // it after the syncfs began, and the access time those reads gave is not
+  // covered; its last release records it (a held fill, which touches it).
+  // What the syncfs did cover is everything else the row stood for, so such
+  // a row stays as atime-only (a mutation's row of a file held open would
+  // otherwise drive every sync point until the release, each clearing
+  // nothing).
+  absl::flat_hash_set<InodeId> kept_open(synced.open_files.begin(),
+                                         synced.open_files.end());
+  if (ctx.open_files != nullptr) {
+    kept_open.insert(ctx.open_files->begin(), ctx.open_files->end());
+  }
   // The fast path: if the clock has not moved since BeginSync and no
   // mutation is in flight, then the per-row loop below would delete exactly
   // the rows of the table that are not kept, and one bulk delete does it.
@@ -1801,15 +1822,19 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
       removed = static_cast<int64_t>(synced.dirty.size());
       // Put back the kept rows that were there (and only those: a kept
       // inode that was not dirty must not become dirty), each with its
-      // reason (nothing moved: the snapshot's is the row's).
-      for (InodeId id : kept) {
+      // reason (nothing moved: the snapshot's is the row's), or atime-only
+      // if only being open keeps it (see above).
+      absl::flat_hash_set<InodeId> put_back = kept;
+      put_back.insert(kept_open.begin(), kept_open.end());
+      for (InodeId id : put_back) {
         if (!std::binary_search(synced.dirty.begin(), synced.dirty.end(),
                                 id)) {
           continue;
         }
         const int64_t atime_only =
-            std::binary_search(synced.atime_only.begin(),
-                               synced.atime_only.end(), id)
+            !kept.contains(id) ||
+                    std::binary_search(synced.atime_only.begin(),
+                                       synced.atime_only.end(), id)
                 ? 1
                 : 0;
         ABSL_RETURN_IF_ERROR(
@@ -1831,6 +1856,13 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
         // in flight"; a snapshot older than the guards' floor keeps every
         // row.)
         if (!CanFill(ctx, synced.fills, id)) continue;
+        if (kept_open.contains(id)) {
+          ABSL_RETURN_IF_ERROR(
+              Execute(ctx, "UPDATE dirty SET atime_only = 1 WHERE inode = ?",
+                      id)
+                  .status());
+          continue;
+        }
         ABSL_RETURN_IF_ERROR(
             Execute(ctx, "DELETE FROM dirty WHERE inode = ?", id).status());
         ++removed;
@@ -1847,6 +1879,10 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   ctx.dirty.durable.clear();
   ctx.dirty.any = flags.any;
   ctx.dirty.atime = flags.atime;
+  // The atime-only rows left are open files' (kept) or recorded since the
+  // snapshot: their age counts from now.
+  ctx.dirty.atime_since =
+      flags.atime ? ctx.clock->TimeNow() : absl::InfiniteFuture();
   if (cleared != nullptr) *cleared = removed;
   return absl::OkStatus();
 }
@@ -1884,33 +1920,44 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
         Execute(ctx,
                 "UPDATE directories SET children_complete = 0, "
                 "epoch = epoch + 1 "
-                "WHERE inode IN (SELECT inode FROM dirty)")
+                "WHERE inode IN (SELECT inode FROM dirty WHERE atime_only = 0)")
             .status());
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "DELETE FROM dentries WHERE parent IN (SELECT inode FROM dirty)")
+                "DELETE FROM dentries WHERE parent IN "
+                "(SELECT inode FROM dirty WHERE atime_only = 0)")
             .status());
     // A dirty inode's own names elsewhere (it may have been renamed or
     // unlinked): unknown.
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
                 "UPDATE dentries SET state = 'unknown', inode = NULL "
-                "WHERE inode IN (SELECT inode FROM dirty)")
+                "WHERE inode IN (SELECT inode FROM dirty WHERE atime_only = 0)")
             .status());
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
                 "UPDATE inodes SET attrs_valid = 0, xattrs_complete = 0 "
-                "WHERE id IN (SELECT inode FROM dirty)")
+                "WHERE id IN (SELECT inode FROM dirty WHERE atime_only = 0)")
+            .status());
+    // An atime-only row (step 23.8: a file that was only read, or held open
+    // while recorded) stands for its attributes alone (the access time the
+    // backing filesystem may have lost or kept): nothing else is forgotten.
+    ABSL_RETURN_IF_ERROR(
+        Execute(ctx,
+                "UPDATE inodes SET attrs_valid = 0 "
+                "WHERE id IN (SELECT inode FROM dirty WHERE atime_only = 1)")
             .status());
     // GetXattr serves a present or absent row even when the set is
     // incomplete, so the rows must go, not just the completeness flag.
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "DELETE FROM xattrs WHERE inode IN (SELECT inode FROM dirty)")
+                "DELETE FROM xattrs WHERE inode IN "
+                "(SELECT inode FROM dirty WHERE atime_only = 0)")
             .status());
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "DELETE FROM symlinks WHERE inode IN (SELECT inode FROM dirty)")
+                "DELETE FROM symlinks WHERE inode IN "
+                "(SELECT inode FROM dirty WHERE atime_only = 0)")
             .status());
     // The dirty set itself stays until a sync point's syncfs and ClearDirty
     // (step 12.6b): the crashed run's backing changes may not be durable
@@ -1924,6 +1971,8 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
   ABSL_ASSIGN_OR_RETURN(const DirtyFlags flags, CountDirty(ctx));
   ctx.dirty.any = flags.any;
   ctx.dirty.atime = flags.atime;
+  ctx.dirty.atime_since =
+      flags.atime ? ctx.clock->TimeNow() : absl::InfiniteFuture();
   return count;
 }
 

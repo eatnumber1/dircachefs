@@ -82,7 +82,7 @@ chmod sql_txns 3
 read backing 7
 read procfd 1
 read sync 0
-read sql_stmts 20
+read sql_stmts 21
 read sql_txns 2
 
 held-stat backing 8

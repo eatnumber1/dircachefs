@@ -1057,7 +1057,7 @@ absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
       return absl::OkStatus();
     }
     bool recorded = false;
-    ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    absl::Status committed = ctx.db.Transaction([&]() -> absl::Status {
       if (cache::CanFill(ctx, snapshot, id)) {
         recorded = true;
         ABSL_RETURN_IF_ERROR(WriteAttrs(ctx, id, *stx));
@@ -1071,7 +1071,15 @@ absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
                  "concurrently with a mutation of it";
       ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
       return cache::MarkAtimeDirty(ctx, id, cache::GuardTouch::kAlways);
-    }));
+    });
+    if (!committed.ok()) {
+      // Rolled back: the row would stay valid with the access time from
+      // before the reads just seen. Unknown instead (best effort: the
+      // record's own failure is what is returned); the row is dirty since
+      // the cold open, which is what makes a crash forget it anyway.
+      cache::MarkAttrsUnknown(ctx, id).IgnoreError();
+      return committed;
+    }
     // Model: the held fill's commit (FR_fill, FG_fill).
     ctx.events->AttrsFilled(ctx, id, recorded);
     return absl::OkStatus();
@@ -2109,13 +2117,11 @@ absl::Status SyncBacking(Context &ctx, bool announce) {
       ABSL_RETURN_IF_ERROR(StillWritable(ctx, fd));
     }
     ctx.events->SyncfsDone(ctx);
-    // Open now (written to, or read: step 23.8): see cache::ClearDirty.
+    // Open for writing now. (Open at all now, step 23.8: ClearDirty reads
+    // Context::open_files itself, keeping such rows as atime-only.)
     std::vector<InodeId> keep;
     if (ctx.open_for_write != nullptr) {
       keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
-    }
-    if (ctx.open_files != nullptr) {
-      keep.insert(keep.end(), ctx.open_files->begin(), ctx.open_files->end());
     }
     int64_t cleared = 0;
     ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep, &cleared));
@@ -2215,8 +2221,10 @@ absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
   ABSL_ASSIGN_OR_RETURN(std::optional<std::string> last_boot_id,
                         GetBootId(ctx.db));
   const bool unclean = !clean;
-  // The rows ProbeRecoveredRows probes (RecoverDirty keeps them dirty).
-  ABSL_ASSIGN_OR_RETURN(std::vector<InodeId> dirty, cache::ListDirty(ctx));
+  // The rows ProbeRecoveredRows probes (RecoverDirty keeps them dirty): not
+  // the atime-only ones (step 23.8), whose names RecoverDirty keeps.
+  ABSL_ASSIGN_OR_RETURN(std::vector<InodeId> dirty,
+                        cache::ListDirty(ctx, /*mutations_only=*/true));
   ABSL_ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
   // Model: Recover.
   ctx.events->Recovered(ctx);

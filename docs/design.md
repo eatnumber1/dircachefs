@@ -1030,14 +1030,18 @@ Sync points run:
 - at clean shutdown (`backing::FinishRun`), which is clean only if no row
   of either kind is left.
 
-An `atime_only` row never makes a sync point run on its own, after an
-`FSYNC` either: the sync point's `syncfs` would force the backing
-filesystem's lazy write-back of access times, which an operator who mounts
-it `lazytime` deferred on purpose (for a day), and a spin-up for an access
+An `atime_only` row does not make a sync point run on its own, after an
+`FSYNC` either, until it is older than the kernel's dirtytime expiry: the
+sync point's `syncfs` would force the backing filesystem's lazy write-back
+of access times, which an operator who mounts it `lazytime` deferred on
+purpose (the kernel writes them back after
+`/proc/sys/vm/dirtytime_expire_seconds`, 12 hours by default, and dcfs
+lets them drive a sync point from then on), and a spin-up for an access
 time is what dcfs exists to avoid. Such rows are cleared by whichever sync
-point runs for another reason (a mutation's row, an `FSYNC` with one, the
-timer with one), by the clean shutdown's, or, after a crash, they are
-recovered like any row (and stay dirty across the restart until then).
+point runs (for a mutation's row, an `FSYNC` with one, the timer with one,
+or their expiry), by the clean shutdown's, or, after a crash, recovered
+(their attributes only: [Access times](#access-times)), staying dirty
+across the restart until then.
 
 **The clock.** dcfs reads the time only through `Context::clock`, an
 `absl::Clock`: the real clock in production, an `absl::SimulatedClock` in
@@ -1374,10 +1378,10 @@ passthrough, so dcfs never sees them, and the backing filesystem stamps the
 access time itself, by its mount's rule and the file's own flags
 (`FS_NOATIME_FL`; the kernel opens a passthrough open's backing file with
 the open's own flags, so `O_NOATIME` holds too). dcfs predicts nothing. While
-it holds a descriptor for a file (the shared backing descriptor of a
-passthrough open, or the `O_PATH` one a written file keeps until its last
-`FORGET`, see below), the file's attributes come from a `statx` of that
-descriptor, a *held fill* (`backing::FillHeldAttrs`): at every `FLUSH`, at
+a file is open (dcfs holds the shared backing descriptor of its passthrough
+opens; the `O_PATH` one a written file keeps until its last `FORGET`, see
+below, is no reason: no read can move its access time), the file's
+attributes come from a `statx` of that descriptor, a *held fill* (`backing::FillHeldAttrs`): at every `FLUSH`, at
 every `RELEASE`, and for every attribute reply while it is held (`GETATTR`,
 `LOOKUP`: `DirCacheFS::FreshAttr`), unless a writable open is outstanding
 (then the attributes are kept unknown as above, and served from the same
@@ -1411,8 +1415,11 @@ file", `formal/dcfs.tla`):
   filesystem's write-back then finds the row dirty, and recovery forgets
   it: the cache is never ahead.
 - A cold read-only open marks the row dirty (`atime_only`, one write
-  transaction, no `fsync`) before the reply, from which on the kernel may
-  read; sync points keep the row while the file is open
+  transaction, no `fsync`, only if it is not dirty already: a read first)
+  before the reply, from which on the kernel may read; sync points keep
+  the row while the file is open (one whose `syncfs` covered everything
+  else the row stood for, a mutation of the open file, keeps it as
+  `atime_only`, so that it drives no further sync point)
   ([Sync points](#sync-points)). A daemon crash while the file is open and
   has been read, before any held fill, then finds the row dirty too, and the
   restart reads the attributes again: never behind either. The residue: a
@@ -1428,13 +1435,26 @@ file", `formal/dcfs.tla`):
   so that the mutation's phase 3 does not record attributes read before the
   reads the fill saw. A failed `statx` likewise leaves them unknown and the
   row dirty.
-- An `atime_only` row does not make a sync point run (see there).
+- An `atime_only` row does not make a sync point run (see there) until it
+  is older than the kernel's dirtytime expiry
+  (`/proc/sys/vm/dirtytime_expire_seconds`, read at startup, 12 hours by
+  default: `Context::dirty.atime_since`, `atime_expiry`), by which time the
+  kernel writes access times back anyway.
+- Recovery after a crash makes an `atime_only` row's attributes unknown and
+  nothing else: its names, xattrs, symlink target and the listing it is in
+  stay, and the start does not probe it (`ListDirty(mutations_only)`). A
+  read-mostly workload thus costs, after a crash, one `statx` per file read
+  since the last sync point, when it is next looked at.
 - At `DESTROY` with files still open for reading (a `SIGTERM`, a lazy
   unmount), the kernel sends no more requests: dcfs makes a last held fill
   of each and stops counting them as open, so that the shutdown's sync
   point clears their rows and the shutdown is clean (the lifetime model's
-  `DestroyWithOpens`). A read the kernel still makes after that is not
-  seen, as a write through a mapping after the unmount is not.
+  `DestroyWithOpens`). Passthrough reads go on without the daemon, so a
+  read the kernel still makes after that is not seen, as a write through a
+  mapping after the unmount is not: after the restart dcfs may serve that
+  file's access time from before it, until its next open and close (README
+  "Limitations"). Not modelled (`dcfs.tla`'s `BeginShutdown` waits for the
+  release).
 
 **Directories and symlinks: stamped in the cache only.** A listing and a
 symlink's target are served from the cache, so the backing filesystem's

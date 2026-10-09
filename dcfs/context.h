@@ -36,6 +36,14 @@ struct DirtyState {
   // point's ClearDirty takes its fast path only if none was made since its
   // BeginSync (a cold open's insert advances no fill guard).
   uint64_t inserts = 0;
+  // How old an atime-only row may grow before it drives a sync point after
+  // all: the kernel's dirtytime expiry (/proc/sys/vm/dirtytime_expire_seconds,
+  // read at startup), after which it writes access times back anyway.
+  absl::Duration atime_expiry = absl::Hours(12);
+  // When the oldest atime-only row may have been added (InfiniteFuture: none
+  // since a sync point or recovery left none): with atime_expiry, when they
+  // drive a sync point (DirCacheFS::MaybeSyncBacking).
+  absl::Time atime_since = absl::InfiniteFuture();
   // Inodes whose dirty row is known to be durable: committed with
   // sqlite3::Durability::kSync since the table was last cleared. A phase 1
   // touching only these needs no WAL fsync of its own, since startup

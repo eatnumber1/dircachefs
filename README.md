@@ -619,10 +619,13 @@ dirty set, committed with an fsync of the WAL; (2) performs the backing
 syscall, as the calling user where that matters; (3) records the new
 state. A crash at any point leaves at worst unknown entries, which are
 re-read on demand. Sync points (`syncfs`, then clearing the dirty set) run
-on `fsync`, every few seconds while there is dirty state, and at shutdown;
-after an unclean shutdown, everything still in the dirty set is forgotten.
-This bounds what a power loss costs to re-reading the entries changed in
-the last few seconds.
+on `fsync`, every few seconds while a mutation has left dirty state, and at
+shutdown; after an unclean shutdown, everything still in the dirty set is
+forgotten. This bounds what a power loss costs to re-reading the entries
+changed in the last few seconds. A file that was only read is in the dirty
+set too, for its access time only: that alone makes no sync point run
+until the kernel's own dirtytime expiry (12 hours by default), and after a
+crash it costs only that file's attributes.
 
 **File contents** go through FUSE passthrough on one shared backing file
 per inode. While a file is open for writing, its cached attributes stay
@@ -852,10 +855,13 @@ recovery protocol, concurrency, and the test strategy.
   file was open and had been read, dcfs may serve the access time from
   before those reads until the file is next opened and closed (the open's
   record of it may not have reached the cache's disk, as with the handles
-  recorded since the database's last durable commit). `st_blocks` can lag
-  behind delayed allocation until the file's attributes are next refreshed
-  (not while dcfs holds the file: a written file is held until the kernel
-  forgets it).
+  recorded since the database's last durable commit). Reads the kernel
+  still makes through a file that was open when dcfs stopped (passthrough
+  reads go on without the daemon) are not seen: after a clean shutdown and
+  restart dcfs may serve that file's access time from before them, until
+  it is next opened and closed. `st_blocks` can lag behind delayed
+  allocation until the file's attributes are next refreshed (not while the
+  file is open).
 - **Reflinks fail with `EOPNOTSUPP`; most ioctls with `ENOTTY`.** The
   kernel answers `FICLONE`, `FICLONERANGE` and `FIDEDUPERANGE` itself and
   FUSE has no way to forward them, so `cp --reflink=always` fails on every

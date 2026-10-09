@@ -82,8 +82,17 @@ tlc_test(
 tlc_test(
     name = "atime_test",
     size = "medium",
-    timeout = "moderate",
+    timeout = "long",
     config = "MC_atime.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+tlc_test(
+    name = "atime_crash_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_atime_crash.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
 )
@@ -91,7 +100,7 @@ tlc_test(
 tlc_test(
     name = "atime_concurrent_test",
     size = "medium",
-    timeout = "moderate",
+    timeout = "long",
     config = "MC_atime_concurrent.cfg",
     spec = "MC.tla",
     srcs = ["dcfs.tla"],
@@ -160,7 +169,7 @@ KNOWN_BUGS = {
     "attr_change_end_skipped": "Invariant GuardsBalanced is violated",
     # Step 23.8 (not historical): what each protection of a held file's
     # access time is for.
-    "atime_held_fill_not_dirty": "Invariant CrashSafe is violated",
+    "atime_held_fill_no_touch": "Invariant CrashSafe is violated",
     "atime_sync_clears_held": "Invariant FileExact is violated",
     "atime_open_not_dirty": "Invariant FileExact is violated",
 }
@@ -201,6 +210,20 @@ ATIME_LIMITATIONS = {
     )
     for limitation, violation in ATIME_LIMITATIONS.items()
 ]
+
+# Step 23.8: a record of an open file's attributes by a refresh that does not
+# touch its guard. Its counterexample needs three slots (a sync point, a
+# getattr's refresh and an open in flight together) and a crash: 634,354
+# distinct states, about 7 min at load 15 (2026-10-08), so large.
+tlc_test(
+    name = "known_bug_atime_fill_no_touch_test",
+    size = "large",
+    timeout = "long",
+    config = "known_bugs/atime_fill_no_touch.cfg",
+    expect_violation = "Invariant CrashSafe is violated",
+    spec = "known_bugs/atime_fill_no_touch.tla",
+    srcs = MODEL,
+)
 
 # The revalidation model (reval.tla; README.md, "The revalidation model"):
 # what dcfs reuses across a change of the backing state. MC_reval: every

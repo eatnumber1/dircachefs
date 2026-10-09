@@ -2864,6 +2864,16 @@ TEST_F(AtimeTest, OneStatxPerFlushReleaseAndHeldGetattr) {
   ASSERT_EQ(Getattr(f).first.error, 0);
   EXPECT_EQ(counter_.counts().backing_calls, 0) << "a GETATTR from the cache";
   EXPECT_EQ(counter_.counts().transactions, 0) << "a GETATTR from the cache";
+  // A written file, closed: dcfs keeps an O_PATH descriptor of it until its
+  // last FORGET, but no read can move its access time: from the cache too.
+  Created w = Create(kRootInode, "w", O_WRONLY);
+  ASSERT_EQ(w.reply.error, 0);
+  EXPECT_EQ(Release(w.id, w.fh).error, 0);
+  ASSERT_EQ(Getattr(w.id).first.error, 0);
+  counter_.Reset();
+  EXPECT_EQ(Getattr(w.id).first.error, 0);
+  EXPECT_EQ(counter_.counts().backing_calls, 0)
+      << "a GETATTR of a written, closed file";
 }
 
 // Any record of a held file's attributes may capture an access time the
@@ -2909,11 +2919,9 @@ TEST_F(AtimeTest, PowerLossAfterAReadServesTheBackingsAtime) {
 
   ASSERT_THAT(Restart("boot"), IsOk());
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
-  // Unknown (recovered), or current and the backing filesystem's.
-  if (attr.valid) {
-    EXPECT_EQ(absl::TimeFromTimespec(attr.st.st_atim), before)
-        << "the access time the restart serves as current";
-  }
+  EXPECT_FALSE(attr.valid)
+      << "recovered: to be read again from the backing filesystem, which has "
+      << before << "; the row says " << absl::TimeFromTimespec(attr.st.st_atim);
 }
 
 // A held fill that cannot record: its statx fails (the FLUSH still
@@ -2948,6 +2956,52 @@ TEST_F(AtimeTest, AHeldFillThatCannotRecordLeavesTheAttributesUnknown) {
   EXPECT_EQ(reply.error, 0);
   EXPECT_EQ(attr.mode & 07777, 0600u) << "the next reply re-reads";
   EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// A held fill whose record fails (its transaction rolls back: here the
+// dirty insert is refused) leaves the attributes unknown, not the row
+// valid with the access time from before the read.
+TEST_F(AtimeTest, AHeldFillWhoseRecordFailsLeavesTheAttributesUnknown) {
+  MakeOldFile();
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ReadBacking(Path("f"));
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER refuse_dirty BEFORE INSERT ON "
+                       "dirty BEGIN SELECT RAISE(FAIL, 'refused'); END"),
+              IsOk());
+  EXPECT_EQ(Flush(f, fh).error, 0) << "a close does not fail over it";
+  ASSERT_THAT(db_.Exec("DROP TRIGGER refuse_dirty"), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(attr.valid) << "after a held fill that could not record";
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// After a crash, an atime-only row (a file only read) makes its attributes
+// unknown and nothing else: its names, xattrs and the listing it is in
+// stay, and the start does not probe it.
+TEST_F(AtimeTest, RecoveryOfAnAtimeOnlyRowForgetsOnlyItsAttributes) {
+  MakeOldFile();
+  const uint8_t v[] = {'v'};
+  ASSERT_THAT(syscalls::setxattr(Path("f"), "user.k", v, 0), IsOk());
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_EQ(Getxattr(f, "user.k").error, 0);
+  OpenAndRelease(f, O_RDONLY);
+  ASSERT_THAT(Dirty(), ElementsAre(f));
+  ASSERT_THAT(Restart("boot"), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(attr.valid);
+  EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "f"),
+              IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)))
+      << "its name";
+  EXPECT_THAT(cache::IsDirComplete(ctx_, kRootInode), IsOkAndHolds(true))
+      << "the listing it is in";
+  EXPECT_THAT(cache::GetXattr(ctx_, f, "user.k"),
+              IsOkAndHolds(::testing::Optional(::testing::Eq("v"))))
+      << "its xattrs";
 }
 
 // On a noatime mount a listing stamps nothing.
@@ -3614,6 +3668,105 @@ TEST_F(ClockTest, AtimeOnlyDirtyRowsDoNotDriveSyncPoints) {
   EXPECT_THAT(Dirty(), Contains(h)) << "recorded at the release";
 }
 
+// Step 23.8 (review): a mutation of a file held open read-only leaves a
+// row the sync point must keep (the file is open), but its syncfs covered
+// the mutation: the row stays as atime-only, and drives no further sync
+// point.
+TEST_F(ClockTest, AMutationOfAnOpenFileDrivesOneSyncPoint) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  ASSERT_THAT(Dirty(), ::testing::IsEmpty());
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  EXPECT_EQ(Chmod(f, 0600).error, 0);
+  int syncs = 0;
+  SyncfsHook() = [&] { ++syncs; };
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  EXPECT_EQ(syncs, 1) << "the chmod's";
+  SyncfsHook() = [&] { ++syncs; };
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  EXPECT_EQ(syncs, 1) << "none for the row kept only because f is open";
+  EXPECT_THAT(Dirty(), Contains(f));
+  EXPECT_EQ(Release(f, fh).error, 0);
+  SyncfsHook() = {};
+}
+
+// Step 23.8 (review): atime-only rows do drive a sync point once they are
+// older than the kernel's dirtytime expiry (by then it writes the access
+// times back anyway).
+TEST_F(ClockTest, AtimeOnlyRowsDriveASyncPointAfterTheDirtytimeExpiry) {
+  ctx_.dirty.atime_expiry = absl::Seconds(30);
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  ASSERT_THAT(Dirty(), ::testing::IsEmpty());
+  {
+    auto [open, fh] = Open(f, O_RDONLY);
+    ASSERT_EQ(open.error, 0);
+    ASSERT_EQ(Release(f, fh).error, 0);
+  }
+  ASSERT_THAT(Dirty(), Contains(f));
+  int syncs = 0;
+  SyncfsHook() = [&] { ++syncs; };
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  EXPECT_EQ(syncs, 0) << "within the expiry";
+  clock_.AdvanceTime(absl::Seconds(30));
+  Tick();
+  EXPECT_EQ(syncs, 1) << "past it";
+  EXPECT_THAT(Dirty(), ::testing::IsEmpty());
+  SyncfsHook() = {};
+}
+
+// Step 23.8 (review): a cold open during a sync point's syncfs adds a row
+// that moves no fill guard; ClearDirty's one-statement fast path must not
+// delete it (Context::dirty.inserts).
+TEST_F(ClockTest, ASyncPointKeepsARowAddedDuringItsSyncfs) {
+  WriteFile(Path("f"));
+  WriteFile(Path("g"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_OK_AND_ASSIGN(InodeId g, Id("g"));
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  ASSERT_THAT(Dirty(), ::testing::IsEmpty());
+  EXPECT_EQ(Chmod(g, 0600).error, 0);  // What drives the sync point.
+  uint64_t fh = 0;
+  SyncfsHook() = [&] { fh = Open(f, O_RDONLY).second; };
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  ASSERT_NE(fh, 0u) << "the open during the syncfs";
+  EXPECT_THAT(Dirty(), Contains(f));
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// Step 23.8 (review): an explicit access time that the backing filesystem
+// refuses (an immutable directory: EPERM) leaves the cached stamp.
+TEST_F(ClockTest, AFailedAtimeSetKeepsTheStamp) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(List(d, false), IsOk());
+  const absl::Time stamp = RowAtime(d);
+  ASSERT_EQ(stamp, clock_.TimeNow());
+  ASSERT_OK_AND_ASSIGN(FileDescriptor fd,
+                       syscalls::openat(AT_FDCWD, Path("d"), O_RDONLY));
+  int flags = 0;
+  ASSERT_THAT(syscalls::ioctl(*fd, FS_IOC_GETFLAGS, &flags), IsOk());
+  const int immutable = flags | FS_IMMUTABLE_FL;
+  ASSERT_THAT(syscalls::ioctl(*fd, FS_IOC_SETFLAGS, &immutable), IsOk());
+  EXPECT_EQ(SetAtime(d, absl::FromUnixSeconds(1'000'000'000)).error, -EPERM);
+  EXPECT_EQ(RowAtime(d), stamp);
+  ASSERT_THAT(syscalls::ioctl(*fd, FS_IOC_SETFLAGS, &flags), IsOk());
+}
+
 // Step 23.8: a crash while a file is open and has been read, before dcfs
 // looked at it again: the cold open's dirty row makes the restart forget the
 // access time it had before the read.
@@ -3634,11 +3787,9 @@ TEST_F(DirCacheFSTest, CrashWhileAFileIsReadForgetsItsAtime) {
   // The daemon dies with the file open.
   ASSERT_THAT(Restart("boot"), IsOk());
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
-  // Unknown (recovered), or current and the backing filesystem's.
-  if (attr.valid) {
-    EXPECT_EQ(absl::TimeFromTimespec(attr.st.st_atim), read)
-        << "the access time the restart serves as current";
-  }
+  EXPECT_FALSE(attr.valid)
+      << "recovered: to be read again from the backing filesystem, which has "
+      << read << "; the row says " << absl::TimeFromTimespec(attr.st.st_atim);
 }
 
 // copy_file_range into, and ioctls of, a removed object (no row: no
@@ -5069,6 +5220,42 @@ TEST_F(DirCacheFSDeathTest, DirtySetSaidEmptyButIsNot) {
       "invariant violated: dirty-set: Context::dirty.any is false "
       "but the dirty table has rows.*" +
           InRequest("GETATTR", kRootInode));
+}
+
+// Step 23.8: the atime-only half of dirty-set, and open-file.
+TEST_F(DirCacheFSDeathTest, DirtyAtimeSaidEmptyButIsNot) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);  // A cold open: an atime-only row.
+  ASSERT_EQ(open.error, 0);
+  ASSERT_THAT(Dirty(), Contains(f));
+  EXPECT_DEATH(
+      {
+        ctx_.dirty.atime = false;
+        Getattr(kRootInode);
+      },
+      "invariant violated: dirty-set: Context::dirty.atime is false "
+      "but the dirty table has atime-only rows.*" +
+          InRequest("GETATTR", kRootInode));
+}
+
+TEST_F(DirCacheFSDeathTest, OpenFileWithoutADirtyRow) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  EXPECT_DEATH(
+      {
+        ASSERT_THAT(
+            db_.Exec(absl::StrCat("DELETE FROM dirty WHERE inode = ", f)),
+            IsOk());
+        Getattr(f);
+      },
+      absl::StrCat("invariant violated: open-file: inode ", f,
+                   " has an open backing file but no dirty row.*") +
+          InRequest("GETATTR", f));
 }
 
 TEST_F(DirCacheFSDeathTest, AttributesCurrentWithNoLinks) {

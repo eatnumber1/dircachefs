@@ -663,8 +663,13 @@ enum class GuardTouch { kNone, kUnlessInFlight, kAlways };
 absl::Status MarkAtimeDirty(Context &ctx, InodeId id,
                             GuardTouch touch = GuardTouch::kUnlessInFlight);
 
-// The dirty set, sorted.
-absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx);
+// Whether `id` is in the dirty set (either reason).
+absl::StatusOr<bool> IsDirty(Context &ctx, InodeId id);
+
+// The dirty set, sorted; with `mutations_only`, only its rows that are not
+// atime-only.
+absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx,
+                                               bool mutations_only = false);
 
 // A sync point (backing::SyncBacking) in two halves, around its syncfs(2)
 // calls. The rule it keeps (formal/ finding sync_during_mutation): a dirty
@@ -727,7 +732,8 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
 // (rows deleted, set incomplete) and symlink target, forgets every dentry
 // in it and marks its listing incomplete if it is a directory (a lost
 // backing change may have added names nothing cached), and marks every
-// dentry pointing at it unknown (its name may have changed). Inode rows are
+// dentry pointing at it unknown (its name may have changed); for an
+// atime-only row (step 23.8), only its attributes unknown. Inode rows are
 // kept, so NFS handles still resolve (and are verified when next opened).
 // The dirty set is kept until a sync point's syncfs and ClearDirty (step
 // 12.6b): the crashed run's backing changes may not be durable yet, and the
