@@ -109,6 +109,7 @@ install on another machine:
 ```
 sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs
 sudo ln -s /usr/local/bin/dcfs /sbin/mount.dcfs    # mount -t dcfs runs this
+sudo ln -s /usr/local/bin/dcfs /sbin/mount.fuse.dcfs    # and this, on a remount
 ```
 
 `bazel build //...` works without the test kernel: until it is built, the
@@ -140,15 +141,25 @@ mount; `-N` is not supported.
 
 `mount.dcfs` returns once dcfs answers the kernel's first request (it is
 serving) or with the failure's message on its standard error and a non-zero
-exit status. It must run as root: FUSE passthrough, the private mount
+exit status, in `mount(8)`'s terms: 1 for a usage mistake or a refusal to run
+(an unknown option, not root), 32 for a start that failed, and the native
+mount's own status when mounting SOURCE failed. Relative paths (SOURCE,
+MOUNTPOINT, `dcfs.cache_db`) are resolved against the working directory at
+that moment. It must run as root: FUSE passthrough, the private mount
 namespace and `open_tree` need `CAP_SYS_ADMIN`, `open_by_handle_at` needs
 `CAP_DAC_READ_SEARCH`, and acting with each caller's credentials needs
 `setfsuid`, `setfsgid` and `setgroups`; so fstab's `user` option cannot work.
 
 A daemonized dcfs (the default) has no standard input or output and logs to
 syslog (the identity `dcfs`), so its messages reach the journal under
-systemd; without a syslog daemon they are dropped. With `dcfs.foreground`
-it stays in the foreground and also logs to standard error.
+systemd; without a syslog daemon they are dropped. In a daemon
+`dcfs.stderrthreshold` (default `WARNING`) is the threshold of what goes to
+syslog: `dcfs.stderrthreshold=0` adds the INFO narrative. With
+`dcfs.foreground` dcfs stays in the foreground and logs to standard error
+only. A comma ends an option, so values of `dcfs.fuse_opt` and
+`dcfs.vmodule` cannot contain one (give `dcfs.fuse_opt` once per libfuse
+option). `mount.dcfs` is also installed as `mount.fuse.dcfs`, the name
+`mount(8)` looks for when it remounts a mount of type `fuse.dcfs`.
 
 ### Options
 
@@ -185,7 +196,7 @@ flag is set as the option `dcfs.<flag>`, e.g. `dcfs.sync_interval_sec=2`.
 dcfs uses Abseil logging, so Abseil's logging flags work too, as options with
 Abseil's semantics:
 
-- `dcfs.stderrthreshold` (default `WARNING`): Log lines at this level or above go to standard error. `dcfs.stderrthreshold=0` (or `INFO`) adds the lifecycle lines: start with the source, cache and mount point, the recovery summary, each sync point with the rows it cleared and its duration, shutdown clean or unclean and why, and the first backing access after an idle period. `ERROR` hides warnings. (dcfs's default is `WARNING` where Abseil's is `ERROR`.)
+- `dcfs.stderrthreshold` (default `WARNING`): Log lines at this level or above go to standard error (in a daemon: to syslog). `dcfs.stderrthreshold=0` (or `INFO`) adds the lifecycle lines: start with the source, cache and mount point, the recovery summary, each sync point with the rows it cleared and its duration, shutdown clean or unclean and why, and the first backing access after an idle period. `ERROR` hides warnings. (dcfs's default is `WARNING` where Abseil's is `ERROR`.)
 - `dcfs.minloglevel` (default `0`): Lines below this level (0 INFO, 1 WARNING, 2 ERROR, 3 FATAL) are dropped everywhere, whatever the threshold.
 - `dcfs.v` (default `0`): Enables verbose lines up to this level: `1` is one line per request that reached the backing filesystem, and why; `2` is every request with its reply; `3` adds the SQL statements. Verbose lines are INFO lines: also pass `dcfs.stderrthreshold=0`.
 - `dcfs.vmodule` (default (empty)): Per source file verbosity, e.g. `dcfs.vmodule=backing=2`, overriding `dcfs.v` for those files.
@@ -243,16 +254,15 @@ its environment file:
 ```
 sudo install -m 0644 packaging/dcfs.service /etc/systemd/system/
 sudo install -D -m 0644 packaging/dcfs.env.example /etc/dcfs/dcfs.env
-sudoedit /etc/dcfs/dcfs.env    # set SOURCE, CACHE_DB, MOUNTPOINT, EXTRA_ARGS
+sudoedit /etc/dcfs/dcfs.env    # set SOURCE, CACHE_DB, MOUNTPOINT, EXTRA_OPTIONS
 sudo systemctl daemon-reload
 sudo systemctl enable --now dcfs
 ```
 
 The unit runs dcfs as root in the foreground and restarts it if it exits
 with an error. `EXTRA_OPTIONS` in the environment file holds further `dcfs.`
-options, comma-separated,
-split at whitespace; the example sets `dcfs.allow_other`, which users other
-than root, and nfsd, need. Before each start the unit lazily unmounts a
+options, comma-separated; the example sets `dcfs.allow_other`, which users
+other than root, and nfsd, need. Before each start the unit lazily unmounts a
 dead FUSE mount left on the mount point by a crash (see below), and
 leaves a mount point that can be accessed alone.
 

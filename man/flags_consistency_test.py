@@ -22,7 +22,11 @@ class FlagsTest(unittest.TestCase):
         with open(sys.argv[3]) as f:
             wrapper = f.read()
         options = set(re.findall(r'name == "(\w+)"', wrapper))
-        options |= set(re.findall(r'\{"(\w+)", (?:true|false)\}', wrapper))
+        settable = set(re.findall(r'\{"(\w+)", (?:true|false)\}', wrapper))
+        options |= settable
+        # An ABSL_FLAG the wrapper cannot set as dcfs.<flag> is unreachable.
+        self.assertEqual(code - settable, set(),
+                         "ABSL_FLAG in main.cc, not settable in mount_dcfs.cc")
         o = re.search(r"^### Options\n(.*?)^#{1,3} ", readme, re.S | re.M)
         self.assertTrue(o, "README has no Options section")
         documented = table | set(

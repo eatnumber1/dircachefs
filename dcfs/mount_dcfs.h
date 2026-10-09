@@ -24,6 +24,12 @@ namespace dcfs {
 // The name the dcfs binary is installed under for mount(8) (argv[0]
 // dispatch); fsck.dcfs follows in step 15.5.
 inline constexpr std::string_view kMountHelperName = "mount.dcfs";
+// libmount looks for mount.<type> with the type of the mountinfo line
+// (fuse.dcfs) when it remounts, so that name reaches the helper too.
+inline constexpr std::string_view kMountFuseHelperName = "mount.fuse.dcfs";
+
+// Whether `name` (argv[0] without its directory) is one of the helper names.
+bool IsMountHelperName(std::string_view name);
 
 // `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] [-o OPTIONS]`, as mount(8)
 // runs it (-V alone prints the version).
@@ -69,7 +75,9 @@ struct HelperOptions {
   std::vector<std::pair<std::string, std::string>> flags;
 };
 
-// InvalidArgument for an unknown `dcfs.` option, a missing or bad value;
+// InvalidArgument for an unknown `dcfs.` option, a missing or bad value, and
+// for native options the mount cannot honor (dcfs.fstype=none makes no
+// underlying mount, a remount does not change it: `ro` there is `dcfs.ro`);
 // Unimplemented for dcfs.cache_dir (step 15.3).
 absl::StatusOr<HelperOptions> SplitHelperOptions(
     std::span<const std::string> options);
@@ -83,10 +91,18 @@ inline constexpr std::string_view kMountExitStatusTypeUrl =
 // text).
 absl::Status NativeMountError(int exit_status, std::string_view message);
 
-// The wrapper's exit status for a failed start: the native mount's own for
-// a NativeMountError, else 1 (mount(8) turns any helper failure into its
-// own 32).
+// The wrapper's exit status, in mount(8)'s terms (it returns a helper's
+// verbatim, and 1 is "incorrect invocation or permissions"): 1 for a usage
+// mistake or a refusal to run (InvalidArgument, PermissionDenied,
+// Unimplemented), the native mount's own for a NativeMountError, 32 (mount
+// failure) for any other failed start.
 int ExitStatusFor(const absl::Status &status);
+
+// Sets the Abseil flag `name` (one of the dcfs.<flag> options) from `value`.
+// InvalidArgument for a value the flag does not parse, Internal for a name
+// that is no flag.
+absl::Status ApplyFlagOption(const std::string &name,
+                             const std::string &value);
 
 // What the daemon tells the wrapper over the startup channel: "ready" once
 // it answers FUSE_INIT, or the failure's exit status and message.
@@ -99,11 +115,6 @@ std::string EncodeStartupReport(const StartupReport &report);
 // "" (the daemon died before reporting) and unintelligible bytes are
 // failures with a message saying so.
 StartupReport DecodeStartupReport(std::string_view bytes);
-
-// Whether the topmost mount at `mountpoint` in the text of
-// /proc/self/mountinfo is a dcfs mount (type fuse.dcfs). `mountpoint` is
-// canonical.
-bool IsDcfsMount(std::string_view mountinfo, std::string_view mountpoint);
 
 // The mount(2) flags for remounting the dcfs mount at `mountpoint`: the
 // per-mount flags it has now (nosuid, nodev, noexec, noatime, nodiratime)

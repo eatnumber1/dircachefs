@@ -160,3 +160,4 @@ openlog
 syslog
 setsid
 getuid
+close_range

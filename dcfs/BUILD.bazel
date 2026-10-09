@@ -28,6 +28,7 @@ MAIN_DEPS = [
     ":mount_options",
     ":mounts_below",
     ":backing_capture",
+    ":remount",
     ":sqlite",
     ":startup_channel",
     ":status",
@@ -577,6 +578,7 @@ cc_library(
     deps = [
       ":mounts_below",
       ":status",
+      "@absl//absl/flags:reflection",
       "@absl//absl/status",
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
@@ -621,6 +623,23 @@ cc_library(
       "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
+    ],
+)
+
+# Step 15.2: remounting the dcfs mount (mount -o remount,dcfs.ro).
+cc_library(
+    name = "remount",
+    srcs = ["remount.cc"],
+    hdrs = ["remount.h"],
+    deps = [
+      ":escape",
+      ":mount_dcfs",
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
     ],
 )
 
@@ -723,6 +742,7 @@ qemu_cc_test(
       ":backing_capture",
       ":mount_dcfs",
       ":status",
+      ":syscalls_process",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
@@ -739,6 +759,7 @@ qemu_cc_test(
     deps = [
       ":mount_dcfs",
       ":startup_channel",
+      ":syscalls_process",
       "@absl//absl/log:log_entry",
       "@absl//absl/log:log_sink",
       "@absl//absl/log:log_sink_registry",
@@ -754,6 +775,7 @@ qemu_cc_test(
     srcs = ["mount_dcfs_test.cc"],
     deps = [
       ":mount_dcfs",
+      "@absl//absl/flags:flag",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",

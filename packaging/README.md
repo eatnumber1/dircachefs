@@ -2,8 +2,8 @@
 
 Install `dcfs.service` to `/etc/systemd/system/`, copy `dcfs.env.example`
 to `/etc/dcfs/dcfs.env` and fill in `SOURCE`/`CACHE_DB`/`MOUNTPOINT` (and
-`EXTRA_ARGS`, further dcfs flags split at whitespace; the example sets
-`--allow_other`, which users other than root and nfsd need), then:
+`EXTRA_OPTIONS`, further `dcfs.` options, comma-separated; the example sets
+`dcfs.allow_other`, which users other than root and nfsd need), then:
 
 ```
 systemctl daemon-reload

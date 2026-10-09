@@ -35,6 +35,11 @@ absl::StatusOr<std::vector<std::string>> MountsBelow(
 // escapes decoded.
 std::string UnescapeMountinfoPath(std::string_view field);
 
+// FailedPrecondition naming the mount points if anything is mounted below
+// `source_path` (amendment 12: dcfs serves one backing filesystem; step 15.4
+// turns directory mounts into stubs), OK otherwise.
+absl::Status RefuseMountsBelow(std::string_view source_path);
+
 // The parsing half of MountsBelow, on the text of /proc/self/mountinfo and
 // an already canonical `source` (so it can be tested on canned input):
 // every mount point lying strictly below `source`, in file order, with the
@@ -54,8 +59,14 @@ std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
 // 11.5). False if the mount is not listed or the line is malformed.
 bool ForcedReadOnlyIn(std::string_view mountinfo, uint64_t mount_id);
 
-// ForcedReadOnlyIn for the mount `fd` is on.
+// ForcedReadOnlyIn for the mount `fd` is on, in this process's mount
+// namespace: a clone made by open_tree is in no namespace, so the capture
+// helper (dcfs/backing_capture.h) asks on its staging mount instead.
 absl::StatusOr<bool> ForcedReadOnly(int fd);
+
+// FailedPrecondition, with the reason and what to do, if ForcedReadOnly says
+// so for `fd`; OK otherwise. `source` is the user's SOURCE, for the message.
+absl::Status RefuseIfForcedReadOnly(int fd, std::string_view source);
 
 }  // namespace dcfs
 

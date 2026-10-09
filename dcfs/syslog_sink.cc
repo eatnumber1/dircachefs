@@ -8,9 +8,18 @@
 
 namespace dcfs {
 
-SyslogSink::SyslogSink() { syscalls::openlog("dcfs", LOG_PID, LOG_DAEMON); }
+SyslogSink::SyslogSink(absl::LogSeverityAtLeast threshold)
+    : threshold_(threshold) {
+  syscalls::openlog("dcfs", LOG_PID, LOG_DAEMON);
+}
+
+bool SyslogSink::Wants(absl::LogSeverityAtLeast threshold,
+                       absl::LogSeverity severity) {
+  return static_cast<int>(severity) >= static_cast<int>(threshold);
+}
 
 void SyslogSink::Send(const absl::LogEntry &entry) {
+  if (!Wants(threshold_, entry.log_severity())) return;
   syscalls::syslog(SyslogPriority(entry.log_severity()),
                    entry.text_message());
 }

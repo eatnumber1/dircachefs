@@ -18,6 +18,7 @@
 #include "dcfs/backing_capture.h"
 #include "dcfs/mount_dcfs.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls_process.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -123,7 +124,9 @@ int __wrap_unshare(int flags) {
 }
 
 int __wrap_open_tree(int dirfd, const char *path, unsigned int flags) {
-  if (dcfs::g_fault == dcfs::Fault::kOpenTreeDies) _exit(3);
+  if (dcfs::g_fault == dcfs::Fault::kOpenTreeDies) {
+    dcfs::syscalls::_exit(3);
+  }
   return __real_open_tree(dirfd, path, flags);
 }
 

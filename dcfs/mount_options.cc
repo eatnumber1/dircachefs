@@ -20,7 +20,7 @@ absl::StatusOr<MountOptions> BuildMountOptions(
   for (const std::string &opt : fuse_opt) {
     if (HasDefaultPermissions(std::span<const std::string>(&opt, 1))) {
       return InvalidArgumentErrorBuilder()
-             << "--fuse_opt=" << opt
+             << "dcfs.fuse_opt=" << opt
              << ": default_permissions is redundant, dcfs always mounts "
                 "with it";
     }

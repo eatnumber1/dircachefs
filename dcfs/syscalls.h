@@ -88,6 +88,9 @@ absl::StatusOr<pid_t> setsid();
 absl::Status chdir(std::string_view path);
 absl::Status unshare(int flags);
 
+// close_range(2): closes the descriptors first..last.
+absl::Status close_range(unsigned int first, unsigned int last, int flags);
+
 // open_tree(2): a descriptor for `path` (with OPEN_TREE_CLONE, a detached
 // clone of the mount there). O_CLOEXEC is not added: pass OPEN_TREE_CLOEXEC.
 absl::StatusOr<FileDescriptor> open_tree(int dirfd, std::string_view path,

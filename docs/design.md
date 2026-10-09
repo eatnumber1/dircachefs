@@ -1951,6 +1951,36 @@ handlers), as does an external unmount. Then, in order:
 After a crash the dead FUSE mount stays in place and must be unmounted
 before dcfs can start again.
 
+### Daemonization (mount.dcfs)
+
+The dcfs binary is the mount helper `mount.dcfs` (argv[0] dispatch). It
+forks first, before any thread, the database or the mount exists, so the
+daemon is a plain child (setsid, working directory `/`, stdio on
+`/dev/null`) and the wrapper can wait for it: not `fuse_daemonize`, which
+only forks, waits for the child's detach and always exits 0. SOURCE,
+MOUNTPOINT and the cache database are made absolute before the fork, since
+the daemon has no working directory to resolve them against.
+
+The daemon reports once over a socket pair (`dcfs/startup_channel.h`):
+"ready" from `SessionLoop` after the kernel's FUSE_INIT was answered and the
+session continues (so ready means serving, and a refused INIT is a failure
+whose reason the wrapper prints), or the failure's text and exit status. The
+wrapper prints a failure as one ERROR line on its own standard error and
+exits with the status; a daemon that dies without a word is reported with how
+it died. The exit statuses are `mount(8)`'s: 1 for a usage mistake or a
+refusal to run, 32 for a failed start, and the native mount's own status
+when mounting SOURCE failed. The helper's own namespace and the tmpfs it
+stages in exist only for the capture (`dcfs/backing_capture.h`), so a crash
+leaves nothing behind.
+
+A daemon logs to syslog alone, at or above the configured
+`stderrthreshold` (one knob for both destinations; stderr is `/dev/null`
+there), with the identity `dcfs` and its pid, so under systemd the journal
+attributes the lines to the mount unit. A foreground dcfs (`dcfs.foreground`,
+for debugging and the tests) does not register the sink and logs to stderr
+only: glibc's syslog would otherwise open and close a socket per line when
+there is no `/dev/log`.
+
 ### Logging
 
 dcfs uses Abseil logging with Abseil's own flags and semantics

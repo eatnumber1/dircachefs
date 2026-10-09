@@ -69,8 +69,13 @@ drift. Each rule is what most of the code does, or is in `AGENTS.md`,
   what it is for and which layering rule it obeys (`dcfs/backing.h:27-52`).
 - **ASCII only** in code and prose (one micro sign in `docs/design.md`); a
   comment's dash is ` -- ` (219 uses).
-- **No exceptions** (0 `throw`/`catch`); no `[[nodiscard]]` (`Status` is
-  must-use already); a status dropped on purpose is `.IgnoreError()` (15).
+- **No exceptions** (0 `throw`/`catch`); a status dropped on purpose is
+  `.IgnoreError()` (15).
+- **`[[nodiscard]]` is permitted (russ), and expected on a function whose
+  return value is the result the caller must handle**: a `Status`, a
+  `StatusOr`, a `FileDescriptor` (an owned descriptor dropped is a leak or
+  a lost error). A `Status` is must-use already; the attribute adds the same
+  check to the functions of a type that is not (see 1.6).
 - **Integers**: `int64_t` row ids (`using InodeId = int64_t;`,
   `metadata_cache.h:56`), `uint64_t` node ids, generations and backing
   inode numbers, `size_t` sizes, `off_t` offsets, `int` for descriptors,
@@ -131,8 +136,9 @@ hidden friend at `dcfs` scope. Two documented irregulars: `dup` is
 and `linux_dirent64` is a type (glibc has no `struct linux_dirent64`; the
 layout is from `man 2 getdents`), not a wrapper. The process-control wrappers
 (`fork`, `execv`, `waitpid`, `kill`, `dup2`, `_exit`) are in
-`dcfs/syscalls_process.h`, a separate testonly library for `bench/`, so the
-daemon never links `fork` or `execv` (`tools/banned_symbols.txt`).
+`dcfs/syscalls_process.h`, a separate library for `bench/` and the
+`mount.dcfs` wrapper (its daemon fork and the capture helper's mount(8)),
+the only one `tools/banned_symbols.txt` lets reference `execv`.
 
 **No raw syscalls anywhere** (russ, 2026-10-07: a firm rule). Syscalls go
 through `dcfs/syscalls.h` and `dcfs/syscalls_backing.h`, where the failure
@@ -166,6 +172,9 @@ calls are `unlink` and `unlinkat`).
 **`absl::Status`/`StatusOr<T>` are the only error channel**: no error
 codes, no `errno` outside the syscall wrappers. `std::optional<T>` means
 "absent is normal"; `StatusOr<std::optional<T>>` when it can also fail.
+
+A function returning a `Status`, `StatusOr` or owned descriptor carries
+`[[nodiscard]]` (1.2).
 
 **Propagate with Abseil's macros** (`absl/status/status_macros.h`):
 `ABSL_RETURN_IF_ERROR` (260 uses) and `ABSL_ASSIGN_OR_RETURN` (317). The
@@ -315,8 +324,9 @@ warnings are visible by default); `--stderrthreshold=0` adds INFO,
 `--minloglevel` drops levels everywhere, `--v` and `--vmodule` turn on the
 verbose levels below. Rate-limit a site with `LOG_EVERY_N`,
 `LOG_EVERY_N_SEC` or `LOG_FIRST_N` where it can fire per request; there is
-no blanket rule. There is no syslog today (a daemonised dcfs's stderr goes
-to `/dev/null`); phase 15 adds it.
+no blanket rule. A daemonised dcfs's stderr is `/dev/null`: it logs to
+syslog, at or above the same `stderrthreshold` (docs/design.md,
+"Daemonization").
 
 **Levels (russ, 2026-10-08).**
 - `FATAL` (`CHECK`): dcfs cannot continue safely: a violated invariant, or
@@ -383,7 +393,12 @@ each.
   the former with `dcfs/syscalls_backing_users.txt` (a new dependent is a
   reviewed edit; `dir_cache_fs` and `metadata_cache` are not on the list).
   `mounts_below` is on it for its two `/proc/self/mountinfo` reads (`openat`,
-  `read`: procfs, no backing disk). Only the three wrapper files call libc
+  `read`: procfs, no backing disk). The mount.dcfs wrapper's modules are on
+  it too: `backing_capture` calls `openat(tree, ".")` once, in
+  `CaptureBacking`, to get a real directory descriptor on the root of the
+  filesystem it just captured (startup, before dcfs serves anything, like
+  `main.cc`'s open of SOURCE); `remount` and `startup_channel` read procfs
+  and a socket. Only the three wrapper files call libc
   directly. `cache::` is pure SQLite: it never sees a descriptor.
 - **No transaction spans a backing syscall.** Backing I/O first, then one
   short synchronous transaction (`ctx.db.Transaction(...)`); no statement

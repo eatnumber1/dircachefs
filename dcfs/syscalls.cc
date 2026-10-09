@@ -169,6 +169,14 @@ absl::Status unshare(int flags) {
   return absl::OkStatus();
 }
 
+absl::Status close_range(unsigned int first, unsigned int last, int flags) {
+  if (::close_range(first, last, static_cast<unsigned int>(flags)) == -1) {
+    return ErrnoToStatus(errno,
+                         absl::StrCat("close_range(", first, ", ", last, ")"));
+  }
+  return absl::OkStatus();
+}
+
 absl::StatusOr<FileDescriptor> open_tree(int dirfd, std::string_view path,
                                          unsigned int flags) {
   const std::string path_str(path);

@@ -420,7 +420,7 @@ if [ -n "$DPID" ]; then
 	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/quiet.db" "$DEV" "$MNT"
 	only_one_daemon
 	if [ -n "$DPID" ]; then
-		if logread | grep -q "dcfs\[$DPID\]"; then
+		if logread | grep -q "dcfs\[$DPID\].*starting"; then
 			fail daemon-syslog-follows-threshold "INFO lines of pid $DPID reached syslog: $(logread | grep "dcfs\[$DPID\]")"
 		else
 			pass daemon-syslog-follows-threshold

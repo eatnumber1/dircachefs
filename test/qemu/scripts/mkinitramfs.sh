@@ -190,6 +190,9 @@ else
 	# Step 15.2: dcfs is mounted as mount.dcfs (argv[0] dispatch).
 	mkdir -p "$ROOT/sbin"
 	ln -sf ../bin/dcfs "$ROOT/sbin/mount.dcfs"
+	# libmount runs mount.<type> with the type of the mountinfo line
+	# (fuse.dcfs) for a remount.
+	ln -sf ../bin/dcfs "$ROOT/sbin/mount.fuse.dcfs"
 	cp "$FHTEST" "$ROOT/bin/fhtest"
 	cp "$TESTUTIL" "$ROOT/bin/testutil"
 	ln -sf busybox "$ROOT/bin/sh"

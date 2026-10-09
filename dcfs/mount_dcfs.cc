@@ -10,12 +10,14 @@
 #include <utility>
 #include <vector>
 
+#include "absl/flags/reflection.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "dcfs/mounts_below.h"
@@ -76,6 +78,10 @@ std::optional<MountinfoLine> TopmostMountAt(std::string_view mountinfo,
 }
 
 }  // namespace
+
+bool IsMountHelperName(std::string_view name) {
+  return name == kMountHelperName || name == kMountFuseHelperName;
+}
 
 absl::StatusOr<HelperArgs> ParseHelperArgs(std::span<const std::string> args) {
   HelperArgs parsed;
@@ -213,7 +219,39 @@ absl::StatusOr<HelperOptions> SplitHelperOptions(
       split.flags.emplace_back(std::string(name), std::string(*value));
     }
   }
+  if (split.backing == HelperOptions::Backing::kNone && !split.remount &&
+      !split.native_options.empty()) {
+    return InvalidArgumentErrorBuilder()
+           << "Options " << absl::StrJoin(split.native_options, ", ")
+           << " are for the underlying mount, which dcfs.fstype=none does "
+              "not make: remove them, or remount the filesystem yourself "
+              "(dcfs.ro makes the dcfs mount read-only)";
+  }
+  if (split.remount) {
+    for (const std::string &option : split.native_options) {
+      if (option == "ro") {
+        return InvalidArgumentErrorBuilder()
+               << "Option ro would change the underlying mount, which a "
+                  "remount of dcfs does not touch: use dcfs.ro for the dcfs "
+                  "mount";
+      }
+    }
+  }
   return split;
+}
+
+absl::Status ApplyFlagOption(const std::string &name,
+                             const std::string &value) {
+  absl::CommandLineFlag *flag = absl::FindCommandLineFlag(name);
+  if (flag == nullptr) {
+    return InternalErrorBuilder() << "No flag " << name << " to set";
+  }
+  std::string error;
+  if (!flag->ParseFrom(value, &error)) {
+    return InvalidArgumentErrorBuilder()
+           << "Option dcfs." << name << "=" << value << ": " << error;
+  }
+  return absl::OkStatus();
 }
 
 absl::Status NativeMountError(int exit_status, std::string_view message) {
@@ -231,7 +269,14 @@ int ExitStatusFor(const absl::Status &status) {
       return exit_status;
     }
   }
-  return 1;
+  switch (status.code()) {
+    case absl::StatusCode::kInvalidArgument:
+    case absl::StatusCode::kPermissionDenied:
+    case absl::StatusCode::kUnimplemented:
+      return 1;
+    default:
+      return 32;
+  }
 }
 
 std::string EncodeStartupReport(const StartupReport &report) {
@@ -257,11 +302,6 @@ StartupReport DecodeStartupReport(std::string_view bytes) {
   return {.ready = false,
           .exit_status = 1,
           .message = "dcfs sent an unintelligible startup report"};
-}
-
-bool IsDcfsMount(std::string_view mountinfo, std::string_view mountpoint) {
-  std::optional<MountinfoLine> line = TopmostMountAt(mountinfo, mountpoint);
-  return line.has_value() && line->fields[line->dash + 1] == "fuse.dcfs";
 }
 
 std::optional<unsigned long> RemountFlags(std::string_view mountinfo,

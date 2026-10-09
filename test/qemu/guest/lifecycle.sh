@@ -235,11 +235,11 @@ fi
 
 # Under `timeout`: should a regression mount, the foreground daemon would
 # otherwise keep the command substitution waiting until the guest's timeout.
-# A refusal exits 1 (fuse_session_new failed); a run cut short by `timeout`
-# exits otherwise, and fails.
+# A failed start exits 32 (fuse_session_new failed); a run cut short by
+# `timeout` exits otherwise, and fails.
 OUT=$(timeout 10 "$MOUNT_DCFS" -o "dcfs.fstype=none,dcfs.cache_db=$DB_FUSEOPT,dcfs.foreground,dcfs.fuse_opt=bogus_option_xyz" "$SRC" "$MNT" 2>&1)
 RC=$?
-if [ "$RC" -eq 1 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
+if [ "$RC" -eq 32 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
 	pass fuse-opt-bad-rejected
 else
 	fail fuse-opt-bad-rejected "rc=$RC mount_count=$(mount_count "$MNT") out=$OUT"

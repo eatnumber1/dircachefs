@@ -17,6 +17,7 @@
 #include "absl/status/status.h"
 #include "dcfs/mount_dcfs.h"
 #include "dcfs/startup_channel.h"
+#include "dcfs/syscalls_process.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -50,7 +51,7 @@ int RunDaemon(const std::function<void(StartupReporter &)> &body,
   EXPECT_TRUE(forked.ok()) << forked.status();
   if (!forked->parent_exit_status.has_value()) {
     body(forked->reporter);
-    _exit(child_exit);
+    syscalls::_exit(child_exit);
   }
   return *forked->parent_exit_status;
 }
@@ -81,7 +82,7 @@ TEST(ForkDaemonTest, ADaemonThatDiesSilentlyIsReportedWithHow) {
 TEST(ForkDaemonTest, ADaemonThatCannotDetachReportsWhy) {
   ErrorLines errors;
   g_setsid_fails = true;
-  const int status = RunDaemon([](StartupReporter &) { _exit(99); });
+  const int status = RunDaemon([](StartupReporter &) { syscalls::_exit(99); });
   g_setsid_fails = false;
   EXPECT_NE(status, 0);
   EXPECT_THAT(errors.lines, ElementsAre(HasSubstr("setsid")));

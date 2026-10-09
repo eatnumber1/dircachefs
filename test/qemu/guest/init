@@ -436,6 +436,7 @@ EOF
 		ln -sf dcfs /newroot/usr/local/bin/mount.dcfs
 	fi
 	ln -sf /usr/local/bin/mount.dcfs /newroot/sbin/mount.dcfs
+	ln -sf /usr/local/bin/mount.dcfs /newroot/sbin/mount.fuse.dcfs
 
 	ip link set lo up
 

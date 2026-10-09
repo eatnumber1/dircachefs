@@ -24,6 +24,7 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "dcfs/escape.h"
 #include "dcfs/fd.h"
@@ -158,6 +159,30 @@ absl::StatusOr<bool> ForcedReadOnly(int fd) {
       syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
   ABSL_ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
   return ForcedReadOnlyIn(contents, stx.stx_mnt_id);
+}
+
+absl::Status RefuseMountsBelow(std::string_view source_path) {
+  ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below,
+                        MountsBelow(source_path));
+  if (below.empty()) return absl::OkStatus();
+  return FailedPreconditionErrorBuilder()
+         << "dcfs does not yet support filesystems mounted below SOURCE: "
+            "their inode numbers would collide under one st_dev; unmount "
+            "them or point SOURCE elsewhere. Mounted below "
+         << source_path << ": " << absl::StrJoin(below, ", ");
+}
+
+absl::Status RefuseIfForcedReadOnly(int fd, std::string_view source) {
+  ABSL_ASSIGN_OR_RETURN(bool forced_read_only, ForcedReadOnly(fd));
+  if (!forced_read_only) return absl::OkStatus();
+  return FailedPreconditionErrorBuilder()
+         << "SOURCE " << source
+         << " is on a filesystem whose superblock is read-only under a "
+            "read-write mount: after an error, what it shows may not be on "
+            "its disk, or another mount of it was remounted read-only; "
+            "refusing to start: after an error, unmount it, check it and "
+            "mount it again; otherwise remount it read-write, or mount "
+            "SOURCE read-only";
 }
 
 }  // namespace dcfs
