@@ -639,8 +639,8 @@ b$S"
 		fail "$MODE-effects-on-backing" "the operations after recovery did not all reach the backing filesystem"
 	fi
 	drop_caches
-	snapshot "$SRC/$R" >/tmp/backing.snap 2>&1
-	snapshot "$MNT/$R" >/tmp/served.snap 2>&1
+	snapshot "$SRC/$R" atime >/tmp/backing.snap 2>&1
+	snapshot "$MNT/$R" atime >/tmp/served.snap 2>&1
 	# Without a restart (nothing recovered the dirty rows) after a failed
 	# write-back, the written file is compared on its own and its difference
 	# printed: its pages were lost, the filesystem's own size reverts when the

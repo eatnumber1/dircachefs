@@ -76,6 +76,27 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
+# Step 23.8: access times of a file (the held fill, the cold open's and the
+# held records' atime-only dirty rows, sync points keeping a held file's row
+# and not run for atime-only rows).
+tlc_test(
+    name = "atime_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_atime.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
+tlc_test(
+    name = "atime_concurrent_test",
+    size = "medium",
+    timeout = "moderate",
+    config = "MC_atime_concurrent.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
 # Larger bounds. Timeout: 10,239,570 distinct states since step 12.7b's
 # reply ghost (9,164,576 before it); the CI runner took 634 s for
 # 7,238,097 (about 88 us per state), so about 900 s for the states alone,
@@ -137,6 +158,11 @@ KNOWN_BUGS = {
     # Step 12.11: an attribute change whose Mutation::End is skipped (8.2's
     # mutation survivors).
     "attr_change_end_skipped": "Invariant GuardsBalanced is violated",
+    # Step 23.8 (not historical): what each protection of a held file's
+    # access time is for.
+    "atime_held_fill_not_dirty": "Invariant CrashSafe is violated",
+    "atime_sync_clears_held": "Invariant FileExact is violated",
+    "atime_open_not_dirty": "Invariant FileExact is violated",
 }
 
 # rename_stale_source explores 993,559 distinct states before its
@@ -155,6 +181,25 @@ KNOWN_BUG_TIMEOUTS = {"rename_stale_source": "long"}
         srcs = MODEL,
     )
     for bug, violation in KNOWN_BUGS.items()
+]
+
+# What step 23.8 does not deliver (limitations/atime_limits.tla).
+ATIME_LIMITATIONS = {
+    "atime_power_loss_while_open": "Invariant FileExactStrict is violated",
+    "dir_atime_cache_only": "Invariant CacheNeverWrong is violated",
+}
+
+[
+    tlc_test(
+        name = "limitation_%s_test" % limitation,
+        size = "small",
+        timeout = "short",
+        config = "limitations/%s.cfg" % limitation,
+        expect_violation = violation,
+        spec = "limitations/atime_limits.tla",
+        srcs = MODEL,
+    )
+    for limitation, violation in ATIME_LIMITATIONS.items()
 ]
 
 # The revalidation model (reval.tla; README.md, "The revalidation model"):

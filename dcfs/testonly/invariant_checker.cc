@@ -6,6 +6,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -42,6 +43,7 @@ constexpr std::string_view kTriState = "tri-state";
 constexpr std::string_view kIdentity = "identity";
 constexpr std::string_view kDirtySet = "dirty-set";
 constexpr std::string_view kWritableOpen = "writable-open";
+constexpr std::string_view kOpenFile = "open-file";
 constexpr std::string_view kLookupCount = "lookup-count";
 constexpr std::string_view kHeldFds = "held-fds";
 constexpr std::string_view kRemovedRecord = "removed-record";
@@ -104,20 +106,30 @@ absl::Status InFlightAreDirty(Context &ctx) {
   return absl::OkStatus();
 }
 
-// dirty-set: Context::dirty.any false means the table is empty.
+// dirty-set: Context::dirty.any false means the table has no row that is
+// not atime_only, and Context::dirty.atime false that it has no atime_only
+// row (step 23.8).
 absl::Status NoneDirtyUnlessAny(Context &ctx) {
-  if (ctx.dirty.any) return absl::OkStatus();
-  ABSL_ASSIGN_OR_RETURN(
-      sqlite3::Statement * stmt,
-      ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT 1 FROM dirty LIMIT 1"));
-  bool found = false;
-  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
-    found = true;
-    return absl::OkStatus();
-  }));
-  if (!found) return absl::OkStatus();
-  return Violation(kDirtySet,
-                   "Context::dirty.any is false but the dirty table has rows");
+  for (const auto &[flag, atime_only, what] :
+       {std::tuple{ctx.dirty.any, 0, "any is false but the dirty table has rows"},
+        std::tuple{ctx.dirty.atime, 1,
+                   "atime is false but the dirty table has atime-only rows"}}) {
+    if (flag) continue;
+    ABSL_ASSIGN_OR_RETURN(
+        sqlite3::Statement * stmt,
+        ctx.db.Prepared(DCFS_CHECKER_SQL
+                        "SELECT 1 FROM dirty WHERE atime_only = ? LIMIT 1"));
+    ABSL_RETURN_IF_ERROR(stmt->Bind(1, atime_only));
+    bool found = false;
+    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
+      found = true;
+      return absl::OkStatus();
+    }));
+    if (found) {
+      return Violation(kDirtySet, "Context::dirty.", what);
+    }
+  }
+  return absl::OkStatus();
 }
 
 }  // namespace
@@ -334,6 +346,9 @@ void InvariantChecker::CheckRunStarting(Context &ctx) {
   if (ctx.open_for_write != nullptr) {
     for (InodeId id : *ctx.open_for_write) stale_opens_.insert(id);
   }
+  if (ctx.open_files != nullptr) {
+    for (InodeId id : *ctx.open_files) stale_opens_.insert(id);
+  }
 }
 
 void InvariantChecker::CheckRunStarted(Context &ctx) {
@@ -350,7 +365,9 @@ bool InvariantChecker::OpenForWrite(const Context &ctx, InodeId id) const {
 
 void InvariantChecker::ForgetReleasedStaleOpens(const Context &ctx) {
   absl::erase_if(stale_opens_, [&](InodeId id) {
-    return ctx.open_for_write == nullptr || !ctx.open_for_write->contains(id);
+    return (ctx.open_for_write == nullptr ||
+            !ctx.open_for_write->contains(id)) &&
+           (ctx.open_files == nullptr || !ctx.open_files->contains(id));
   });
 }
 
@@ -529,7 +546,9 @@ absl::Status InvariantChecker::CheckInode(Context &ctx, const DirCacheFS *fs,
   // (the update hook saw it, or the full check reads it); what else needs
   // the row is being open for writing.
   bool exists = false;
-  if (row_changed || OpenForWrite(ctx, id)) {
+  const bool open = ctx.open_files != nullptr &&
+                    ctx.open_files->contains(id) && !stale_opens_.contains(id);
+  if (row_changed || OpenForWrite(ctx, id) || open) {
     ABSL_ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
@@ -551,6 +570,17 @@ absl::Status InvariantChecker::CheckInode(Context &ctx, const DirCacheFS *fs,
     if (!dirty) {
       return Violation(kWritableOpen, "inode ", id,
                        " is open for writing but has no dirty row");
+    }
+  }
+  // open-file (step 23.8): the kernel may read an open file at any moment,
+  // which moves its access time on the backing filesystem only; its row is
+  // dirty from its cold open (or creation) until a sync point after its
+  // last release.
+  if (exists && !removed && open) {
+    ABSL_ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
+    if (!dirty) {
+      return Violation(kOpenFile, "inode ", id,
+                       " has an open backing file but no dirty row");
     }
   }
   if (ctx.dirty.durable.contains(id)) {

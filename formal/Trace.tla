@@ -194,7 +194,7 @@ TraceInit ==
               /\ (v = "none" /\ HDB.complete) => x \notin present
          /\ bCur = [names |-> [x \in Names |-> IF x \in present
                                                 THEN InitObj(x) ELSE NoObj],
-                    ver |-> 0]
+                    ver |-> 0, f |-> 0]
     /\ bOpts = {bCur}
     /\ dbCur = [dent |-> [x \in Names |->
                             LET v == ObsVal(HDB, x) IN
@@ -204,7 +204,9 @@ TraceInit ==
                               [] OTHER -> InitObj(x)],
                 complete |-> HDB.complete, epoch |-> HDB.epoch,
                 attrValid |-> HDB.valid, attr |-> 0, dirty |-> HDB.dirty,
-                clean |-> HDB.clean]
+                clean |-> HDB.clean,
+                \* The file F of the model (step 23.8) is no directory's.
+                fValid |-> FALSE, fAttr |-> 0, fDirty |-> "no"]
     /\ dbOpts = {dbCur}
     /\ okey = [o \in {InitObj(x) : x \in {y \in Names : IsKey(ObsVal(HDB, y))}}
                  |-> ObsVal(HDB, CHOOSE x \in Names : InitObj(x) = o)]
@@ -214,6 +216,7 @@ TraceInit ==
     /\ seq = 0 /\ inflight = 0 /\ durableD = HDB.durable /\ running = None
     /\ ps = [p \in Procs |-> IdleProc]
     /\ servedWrong = FALSE
+    /\ fm = NoF
     /\ stamp = NumNames + 1 /\ muts = 0 /\ crashes = 0
 
 -----------------------------------------------------------------------------
@@ -287,8 +290,8 @@ GetattrWhole ==
     /\ IF inflight = 0
        THEN Commit([dbCur EXCEPT !.attrValid = TRUE, !.attr = bCur.ver], FALSE)
        ELSE UnchangedDB
-    /\ UNCHANGED <<bCur, bOpts, mode, seq, inflight, durableD, running, ps,
-                   servedWrong, stamp, muts, crashes>>
+    /\ UNCHANGED <<bCur, bOpts, mode, seq, inflight, durableD, fm, running,
+                   ps, servedWrong, stamp, muts, crashes>>
 
 -----------------------------------------------------------------------------
 (* One action per kind of event (and model action it can be), named T_<the *)

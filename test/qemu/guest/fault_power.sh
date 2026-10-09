@@ -28,6 +28,10 @@
 #              periodic sync point: the backing filesystem is synced, and the
 #              daemon is held clearing the dirty set: cut there, the cache
 #              keeps the dirty rows of a backing change that did survive
+#   atime      (step 23.8) a read through dcfs whose access time the
+#              backing filesystem loses (dropped, or not yet in its journal),
+#              recorded by dcfs at the release and made durable by a later
+#              commit: the cache has it, in a dirty row
 #
 # After each, the invariant: every entry dcfs serves matches the backing
 # filesystem exactly (type, size, mode, and the listing of every directory),
@@ -108,8 +112,8 @@ start() {
 # filesystem holds, entry by entry (the diff in /tmp/snap.diff if not).
 same_as_backing() {
 	drop_caches
-	snapshot "$SRC" >/tmp/backing.snap
-	snapshot "$MNT" >/tmp/served.snap 2>&1
+	snapshot "$SRC" atime >/tmp/backing.snap
+	snapshot "$MNT" atime >/tmp/served.snap 2>&1
 	command diff /tmp/served.snap /tmp/backing.snap >/tmp/snap.diff 2>&1
 }
 
@@ -173,17 +177,19 @@ power_cut() {
 # --- the tree, and the scenarios, as setup (before the cut) and check -------
 
 make_tree() {
-	for d in d1 d2 d3 d4 d5 d6; do
+	for d in d1 d2 d3 d4 d5 d6 d7 d8; do
 		mkdir "$SRC/$d"
 		echo keep >"$SRC/$d/keep"
 	done
 	echo u1 >"$SRC/d6/u1"
 	echo r1 >"$SRC/d6/r1"
+	echo r >"$SRC/d7/r"
 	sync
 }
 
 warm() {
-	ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5" "$MNT/d6" >/dev/null
+	ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5" "$MNT/d6" \
+		"$MNT/d7" "$MNT/d8" >/dev/null
 }
 
 # before: a file synced to the backing filesystem survives the cut, and what
@@ -395,6 +401,60 @@ check_ahead() {
 	fi
 }
 
+# atime (step 23.8): a read's access time, recorded by dcfs at the release
+# from its held descriptor, which the backing filesystem then loses: it
+# writes atime back lazily and nothing synced it. d7/r's atime is set two
+# days back through dcfs and made durable (an fsync through dcfs, whose sync
+# point empties the dirty set), so the read moves it. dm: the backing
+# filesystem drops writes from then on; kill: its journal has not committed
+# the read's update. A create through dcfs in another directory (d8, so
+# that d7's own recovery does not forget d7/r's name) then makes a durable
+# commit, and the WAL fsync takes the release's record to the cache disk with
+# it: the cache has an access time the backing filesystem lost, in a row that
+# is dirty, so the restart forgets it and serves the backing filesystem's.
+setup_atime() {
+	now=$(date +%s)
+	"$TESTUTIL" utimes2 "$MNT/d7/r" $((now - 172800)) $((now - 259200))
+	"$TESTUTIL" fsync "$MNT/d7/r" || fail atime-sync "fsync through dcfs failed"
+	ATIME_OLD=$(stat -c %x "$SRC/d7/r")
+	[ "$CUT_MODE" = kill ] || fault_mode "$FD_BACK" drop-writes || fail atime-cut-backing "fault_mode failed"
+	cat "$MNT/d7/r" >/dev/null
+	if [ "$(stat -c %x "$MNT/d7/r")" != "$ATIME_OLD" ]; then
+		pass atime-read-recorded
+	else
+		fail atime-read-recorded "the read did not move d7/r's access time ($ATIME_OLD)"
+	fi
+	touch "$MNT/d8/w"
+}
+cut_atime() {
+	if [ "$CUT_MODE" = kill ]; then
+		power_cut
+	else
+		fault_mode "$FD_CACHE" drop-writes || fail atime-cut-cache "fault_mode failed"
+	fi
+}
+check_atime() {
+	# Still the one set two days back (a day old at least): the read's is
+	# gone.
+	if [ "$(stat -c %X "$SRC/d7/r")" -lt $(($(date +%s) - 86400)) ]; then
+		pass atime-backing-lost-it
+	else
+		fail atime-backing-lost-it "d7/r's access time is $(stat -c %x "$SRC/d7/r"): the backing filesystem kept the read's"
+	fi
+	if [ "$(fd_recovered "$LOG")" -ge 1 ]; then
+		pass atime-dirty-recovered
+	else
+		fail atime-dirty-recovered "no dirty row recovered: $(grep -i cleanly "$LOG")"
+	fi
+	ca_served=$(stat -c %x "$MNT/d7/r")
+	if [ "$ca_served" = "$(stat -c %x "$SRC/d7/r")" ]; then
+		pass atime-served
+	else
+		fail atime-served "dcfs serves $ca_served, the backing filesystem has $(stat -c %x "$SRC/d7/r") (cache ahead)"
+	fi
+	served_equals_backing atime-served-tree
+}
+
 # syncpoint: held clearing the dirty set, the backing filesystem synced.
 setup_syncpoint() {
 	touch "$MNT/d1/s1"
@@ -484,7 +544,7 @@ setup_before
 after_cut before
 check_before
 
-for scenario in phase1 phase2 ahead frozen_unlink frozen_rename; do
+for scenario in phase1 phase2 ahead frozen_unlink frozen_rename atime; do
 	"setup_$scenario"
 	"cut_$scenario"
 	after_cut "$scenario"

@@ -32,9 +32,24 @@ AllButRenameAndReaddirplus == AllRequests \ {"rename", "readdirplus"}
 (* behavior; it cuts the state space severalfold. Not used with liveness   *)
 (* checking (TLC does not support a VIEW there).                           *)
 (***************************************************************************)
-CrashImage(s) ==
-    IF s.dirty THEN [RecoverDirty(s) EXCEPT !.dirty = TRUE, !.epoch = s.epoch]
+CrashImageD(s) ==
+    IF s.dirty THEN [RecoverD(s) EXCEPT !.dirty = TRUE, !.epoch = s.epoch]
     ELSE s
+\* F's attributes likewise, when its row is dirty (whatever the reason,
+\* which is kept: PowerLoss and the invariants read it).
+CrashImage(s) ==
+    IF s.fDirty # "no"
+    THEN [CrashImageD(s) EXCEPT !.fValid = FALSE, !.fAttr = 0]
+    ELSE CrashImageD(s)
+
+\* F's guard clock (step 23.8) is compared only with the snapshots the
+\* slots took of it (CanFillF, S2), and a snapshot is never above it, so
+\* all the view keeps of it is which snapshots are still current: F's
+\* concurrent held fills can touch it without bound (each one that finds
+\* another's touch marks the attributes unknown and touches in turn), and
+\* its raw value would make the state space infinite.
+FSnapView(r) ==
+    [r EXCEPT !.fsnap = IF r.fsnap = fm.seq THEN 1 ELSE 2]
 
 (***************************************************************************)
 (* An idle slot keeps the reply of the last request that held it (`rep`,   *)
@@ -49,6 +64,6 @@ View == <<bCur, bOpts,
           IF mode \in {"down", "recover"} THEN CrashImage(dbCur) ELSE dbCur,
           {CrashImage(s) : s \in dbOpts},
           mode, seq, inflight, durableD, running,
-          [q \in Procs |-> IdleView(ps[q])], servedWrong, stamp,
-          muts, crashes>>
+          [q \in Procs |-> IdleView(FSnapView(ps[q]))], servedWrong,
+          [fm EXCEPT !.seq = 0], stamp, muts, crashes>>
 =============================================================================

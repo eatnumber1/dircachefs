@@ -198,6 +198,7 @@ qemu_test_matrix(
         "syncpoint",
         "frozen_unlink",
         "frozen_rename",
+        "atime",
     ],
     size = "medium",
     other_size = "large",
@@ -700,9 +701,11 @@ qemu_test(
     timeout = "short",
 )
 
-# Step 23.3: a read open records the access time the backing mount's
-# relatime rule gives, from the cache, matching the backing file -- see
-# guest/atime.sh.
+# Step 23.8: access times are the backing filesystem's own (from dcfs's held
+# descriptor at FLUSH, RELEASE and a stat while open: no read, a read, a
+# held reader, chattr +A, O_NOATIME, mmap, lsattr's private open), and
+# directories' and symlinks' are stamped in the cache only and survive a
+# restart -- see guest/atime.sh. (The power cut: fault_power's atime.)
 qemu_test_matrix(
     name = "atime_test",
     disks = [("vdb", "ext4", "320M")],

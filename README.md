@@ -836,19 +836,26 @@ recovery protocol, concurrency, and the test strategy.
   filesystem allows (`stat` reports `nlink` 0, `chmod`, `truncate` and
   xattrs work, an unlinked file can be reopened through
   `/proc/<pid>/fd/<n>`), but a hard link to it fails with `ESTALE`.
-- **Access times are predicted.** Reads go through passthrough, so dcfs
-  never sees them: when a file is opened for reading it records the access
-  time the backing filesystem's mount option gives a read (relatime, the
-  default: if the old one is not after the modification or change time,
-  or is a day old; strictatime: always; noatime: never), without touching
-  the disk. The backing filesystem stamps the read itself, so the two can
-  differ by the moment between the open and the read, and an open that
-  reads nothing still moves dcfs's (so does the private open behind
-  `lsattr` and `chattr`). A file's own `noatime` flag (`chattr +A`) is not
-  taken into account, and after a power loss dcfs may keep an access time
-  the backing filesystem lost. Directories' access times are not
-  maintained. `st_blocks` can lag behind delayed allocation until the
-  file's attributes are next refreshed.
+- **Access times of directories and symlinks are dcfs's own.** A regular
+  file's access time is the backing filesystem's: reads go through
+  passthrough and the backing filesystem stamps them by its mount's rule
+  (relatime, strictatime, noatime) and the file's own flags (`chattr +A`,
+  `O_NOATIME`), and while dcfs has the file open it reads that back from
+  the open descriptor (at each close, and for a stat while the file is
+  open), so a stat shows exactly what the backing filesystem has. A
+  directory's listing and a symlink's target are served from the cache and
+  never read on the backing filesystem, so dcfs stamps the access time the
+  backing mount's rule gives in its own database, never on the backing
+  filesystem: it survives a restart of dcfs and is lost when the cache is
+  wiped (the backing filesystem's older one comes back), and a directory's
+  own `noatime` flag is not taken into account. After a power loss while a
+  file was open and had been read, dcfs may serve the access time from
+  before those reads until the file is next opened and closed (the open's
+  record of it may not have reached the cache's disk, as with the handles
+  recorded since the database's last durable commit). `st_blocks` can lag
+  behind delayed allocation until the file's attributes are next refreshed
+  (not while dcfs holds the file: a written file is held until the kernel
+  forgets it).
 - **Reflinks fail with `EOPNOTSUPP`; most ioctls with `ENOTTY`.** The
   kernel answers `FICLONE`, `FICLONERANGE` and `FIDEDUPERANGE` itself and
   FUSE has no way to forward them, so `cp --reflink=always` fails on every

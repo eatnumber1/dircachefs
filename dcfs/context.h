@@ -22,11 +22,20 @@ namespace dcfs {
 // schema.sql and the README's "Crash robustness"). Only cache::BeginMutation,
 // cache::MarkDirty, cache::ClearDirty and cache::RecoverDirty change it.
 struct DirtyState {
-  // Whether the dirty table may be non-empty. Conservatively true until
-  // startup recovery or a sync point has emptied it; lets the periodic
-  // sync (DirCacheFS::MaybeSyncBacking) skip idle periods without a query
-  // per request.
+  // Whether the dirty table may hold a row that is not atime_only (a
+  // mutation's). Conservatively true until startup recovery or a sync point
+  // has emptied it; lets the periodic sync (DirCacheFS::MaybeSyncBacking)
+  // skip idle periods without a query per request. Only these rows make a
+  // sync point run (step 23.8): an atime_only row waits for one that runs
+  // for another reason, for the clean shutdown's, or for recovery.
   bool any = true;
+  // Whether it may hold an atime_only row (cache::MarkAtimeDirty), likewise
+  // conservative: a clean shutdown needs both false.
+  bool atime = true;
+  // How many atime-only inserts (cache::MarkAtimeDirty) were made: a sync
+  // point's ClearDirty takes its fast path only if none was made since its
+  // BeginSync (a cold open's insert advances no fill guard).
+  uint64_t inserts = 0;
   // Inodes whose dirty row is known to be durable: committed with
   // sqlite3::Durability::kSync since the table was last cleared. A phase 1
   // touching only these needs no WAL fsync of its own, since startup
@@ -65,11 +74,13 @@ struct FillGuards {
   size_t max_touched = size_t{1} << 16;
 };
 
-// When the backing filesystem updates a file's access time on a read (its
-// mount's atime option: statvfs's ST_NOATIME and ST_RELATIME), which dcfs
-// mirrors in the cache when a file is opened for reading (step 23.3;
-// cache::TouchAtime): reads go through passthrough, so dcfs never sees
-// them.
+// When the backing filesystem updates an access time on a read (its
+// mount's atime option: statvfs's ST_NOATIME and ST_RELATIME). dcfs applies
+// it to the reads it serves from the cache itself, a directory's listing and
+// a symlink's target (step 23.8; cache::TouchAtime), and records the result
+// in the cache only. A regular file's reads go through passthrough and the
+// backing filesystem stamps them; dcfs reads that back (DirCacheFS's held
+// fills) and predicts nothing.
 enum class AtimePolicy {
   kRelative,  // relatime (the default): if older than mtime or ctime, or
               // more than a day old
@@ -101,6 +112,14 @@ struct Context {
   // attributes marked unknown whenever it records fresh ones (see
   // backing::RefreshAttrsFromFd and the README's "Crash robustness").
   const absl::flat_hash_set<int64_t> *open_for_write = nullptr;
+  // The inode ids that currently have an open backing file (a passthrough
+  // open, read-only or not: DirCacheFS::backing_files_), owned by DirCacheFS
+  // likewise; null means none. The kernel may read such a file at any
+  // moment, and the backing filesystem then changes its access time in
+  // memory and writes it back lazily, so (step 23.8) any record of its
+  // attributes marks its row dirty, atime only (cache::MarkAtimeDirty), and
+  // a sync point keeps its dirty row (backing::SyncBacking).
+  const absl::flat_hash_set<int64_t> *open_files = nullptr;
   // Owned here (unlike the members above): per-connection state that must
   // stay in step with ctx.db's dirty table.
   DirtyState dirty;
@@ -122,7 +141,7 @@ struct Context {
   // Never null; not owned.
   Interrupts *interrupts = &NoInterrupts();
   // The clock every time-based decision reads (the periodic sync point,
-  // relatime at read-open): the real clock in production, an
+  // relatime at a listing or readlink): the real clock in production, an
   // absl::SimulatedClock in tests. Never null; not owned. Production code
   // reads the time nowhere else (tools/banned_symbols.txt).
   absl::Clock *clock = &absl::Clock::GetRealClock();

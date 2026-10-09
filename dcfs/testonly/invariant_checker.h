@@ -209,7 +209,8 @@ class InvariantChecker final : public ProtocolEvents {
   // checks see it: not if the open is older than the run (see
   // RunStarted).
   bool OpenForWrite(const Context &ctx, InodeId id) const;
-  // Drops from stale_opens_ what is no longer open for writing.
+  // Drops from stale_opens_ what is no longer open (for writing, or at
+  // all: Context::open_files).
   void ForgetReleasedStaleOpens(const Context &ctx);
 
   // Gives main.dirty a no-op TEMP trigger once it exists: a table with a
@@ -238,7 +239,8 @@ class InvariantChecker final : public ProtocolEvents {
   std::vector<std::string> violations_;
   // The TEMP trigger is in place (SeeEveryDirtyDelete).
   bool no_truncate_ = false;
-  // The inodes open for writing when the run started (see RunStarted).
+  // The inodes open (for writing or not) when the run started (see
+  // CheckRunStarting).
   absl::flat_hash_set<InodeId> stale_opens_;
   // The rows changed since the last check, by table (rowids; an inode's,
   // a stub's and a dirty row's rowid is its id).

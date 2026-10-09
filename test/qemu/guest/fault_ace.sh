@@ -161,12 +161,15 @@ cut_and_restart() {
 # text (empty: nothing): served against the backing filesystem and, if a
 # snapshot is given, the backing filesystem against it.
 problems() {
-	snapshot "$SRC" >/tmp/backing.snap
-	snapshot "$MNT" >/tmp/served.snap 2>&1
+	snapshot "$SRC" atime >/tmp/backing.snap
+	snapshot "$MNT" atime >/tmp/served.snap 2>&1
 	if ! command diff /tmp/served.snap /tmp/backing.snap >/tmp/snap.diff 2>&1; then
 		echo "served (<) and backing (>) differ: $(tr '\n' '|' </tmp/snap.diff)"
 	fi
-	if [ -n "${1:-}" ] && ! command diff "$1" /tmp/backing.snap >/tmp/durable.diff 2>&1; then
+	# Without access times: the persistence point's own snapshot read the
+	# files, and the cut may have lost those reads' access times.
+	[ -n "${1:-}" ] && snapshot "$SRC" >/tmp/backing-durable.snap
+	if [ -n "${1:-}" ] && ! command diff "$1" /tmp/backing-durable.snap >/tmp/durable.diff 2>&1; then
 		echo "the backing filesystem after the cut (>) is not what it was at the persistence point (<): $(tr '\n' '|' </tmp/durable.diff)"
 	fi
 }

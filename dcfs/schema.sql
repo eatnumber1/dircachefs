@@ -255,6 +255,17 @@ CREATE TABLE xattrs (
 -- have made disagree with the backing filesystems, and keeps the rows: only
 -- a sync point removes them. No foreign key: a row
 -- may outlive its inode (recovery skips it), and must not vanish with it.
+--
+-- atime_only (step 23.8): 1 for a row that stands only for a regular
+-- file's access time, which the backing filesystem changes on its own
+-- reads and writes back lazily: a cold read-only open's row (the reads it
+-- allows), and any record of the attributes of a file dcfs holds open
+-- (they may carry an access time not written back yet). Such rows are
+-- recovered like any other but do not by themselves make a sync point run
+-- (Context::dirty.any counts the other rows only): its syncfs would force
+-- the write-back the backing mount defers (lazytime: by a day). A mutation's
+-- phase 1 makes a row 0 whatever it was.
 CREATE TABLE dirty (
-  inode INTEGER PRIMARY KEY
+  inode INTEGER PRIMARY KEY,
+  atime_only INTEGER NOT NULL DEFAULT 0 CHECK (atime_only IN (0, 1))
 ) STRICT;

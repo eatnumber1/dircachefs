@@ -623,6 +623,11 @@ changed since the backing filesystem was last synced. See
 foreign key, because a row may outlive its inode (recovery skips it) and
 must not vanish with it.
 
+`atime_only` (step 23.8, schema v6): 1 for a row that stands only for a
+regular file's access time, which the backing filesystem changes on its own
+reads (see [Access times](#access-times)); a mutation's phase 1 sets it to
+0. Recovery treats both alike; only rows with 0 make a sync point run.
+
 ### Completeness flags, summarized
 
 Both aggregate flags have exactly one meaning: **names without a row are
@@ -964,10 +969,10 @@ or mount `--source` read-only (step 11.5b).
 ### Sync points
 
 `backing::SyncBacking`: `syncfs(2)` on every mount fd, then, if all
-succeeded, empty the dirty set in one transaction, except inodes with a
-writable open outstanding (the kernel may still be writing to them through
-passthrough) and rows the `syncfs` may not cover. On a `syncfs` failure
-nothing is cleared.
+succeeded, empty the dirty set in one transaction, except inodes with an
+open outstanding (the kernel may still be writing to them, or reading them,
+through passthrough) and rows the `syncfs` may not cover. On a `syncfs`
+failure nothing is cleared.
 
 A dirty row may go only once a `syncfs` that began after its mutation's
 backing syscall has returned. So the sync point first takes a snapshot
@@ -997,6 +1002,16 @@ the attributes the release recorded and lose the writes. The snapshot of
 the writable opens is a backstop: the guard event alone covers a release
 after the snapshot.
 
+Reads count the same way (step 23.8): the backing filesystem stamps a
+read's access time in memory and writes it back lazily, and dcfs records it
+only at the next held fill ([Access times](#access-times)). So a row also
+stays if its inode was open at all at the snapshot
+(`SyncSnapshot::open_files`) or at the clear (`Context::open_files`), and
+every record of an open file's attributes touches the inode
+(`cache::MarkAtimeDirty`), so that a row recorded after the snapshot stays
+too. A file's row is therefore dirty from its cold open until the first
+sync point after its last release.
+
 When nothing moved during the sync point (the guards' clock is where the
 snapshot left it and no mutation is in flight, which is every sync point
 today), `ClearDirty` empties the table in one statement and puts back the
@@ -1009,15 +1024,27 @@ Sync points run:
   because the caller asked for what it did to be durable, and that
   includes what dcfs cached about it;
 - at the start of the first request `--sync_interval_sec` (default 5)
-  after the previous sync point, while the dirty set may be non-empty
-  (`DirCacheFS::MaybeSyncBacking`, called from `fuse_ops.cc`);
-- at clean shutdown (`backing::FinishRun`).
+  after the previous sync point, while the dirty set may hold a row that
+  is not `atime_only` (`Context::dirty.any`; `DirCacheFS::MaybeSyncBacking`,
+  called from `fuse_ops.cc`);
+- at clean shutdown (`backing::FinishRun`), which is clean only if no row
+  of either kind is left.
+
+An `atime_only` row never makes a sync point run on its own, after an
+`FSYNC` either: the sync point's `syncfs` would force the backing
+filesystem's lazy write-back of access times, which an operator who mounts
+it `lazytime` deferred on purpose (for a day), and a spin-up for an access
+time is what dcfs exists to avoid. Such rows are cleared by whichever sync
+point runs for another reason (a mutation's row, an `FSYNC` with one, the
+timer with one), by the clean shutdown's, or, after a crash, they are
+recovered like any row (and stay dirty across the restart until then).
 
 **The clock.** dcfs reads the time only through `Context::clock`, an
 `absl::Clock`: the real clock in production, an `absl::SimulatedClock` in
 the tests (step 26.10). There are two readers: the periodic sync point
 (`DirCacheFS::MaybeSyncBacking`, `--sync_interval_sec`) and the relatime
-prediction at a read open (below). `absl::Now`, `clock_gettime`, `time` and
+stamp of a directory's or symlink's access time
+([Access times](#access-times)). `absl::Now`, `clock_gettime`, `time` and
 `gettimeofday` are banned from the shipped binary (`tools/banned_symbols.txt`)
 and from the sources (`//tools:raw_syscalls_test`). The kernel's own clock is
 not ours: the times a backing filesystem stamps (including `UTIME_NOW` in
@@ -1336,6 +1363,99 @@ whose `syncfs` began before the last writes keeps the dirty row (see
 reply: the new row is dirty from phase 3's `MarkDirty`, which no guard
 sees, so a sync point while the create waits on a later syscall could clear
 it, and the writes after the reply would have no dirty row.
+
+### Access times
+
+(Step 23.8; the decision and the alternatives considered are in
+`docs/plan/notes/atime-alternatives-2026-10-08.md`.)
+
+**Regular files: from the held descriptor.** Reads go through
+passthrough, so dcfs never sees them, and the backing filesystem stamps the
+access time itself, by its mount's rule and the file's own flags
+(`FS_NOATIME_FL`; the kernel opens a passthrough open's backing file with
+the open's own flags, so `O_NOATIME` holds too). dcfs predicts nothing. While
+it holds a descriptor for a file (the shared backing descriptor of a
+passthrough open, or the `O_PATH` one a written file keeps until its last
+`FORGET`, see below), the file's attributes come from a `statx` of that
+descriptor, a *held fill* (`backing::FillHeldAttrs`): at every `FLUSH`, at
+every `RELEASE`, and for every attribute reply while it is held (`GETATTR`,
+`LOOKUP`: `DirCacheFS::FreshAttr`), unless a writable open is outstanding
+(then the attributes are kept unknown as above, and served from the same
+descriptor). It costs one `statx` per `FLUSH`, per `RELEASE` and per held
+attribute reply, and no transaction when nothing changed since the last
+record (the common case: a stat of an open file nobody read since). It is
+always current, and needs no disk access:
+
+- an open file pins its dentry and inode (reference counts, not an LRU), so
+  the inode cannot be evicted under memory pressure, and ext4, xfs and btrfs
+  answer `getattr` from the in-core inode, where `touch_atime` put the read's
+  access time;
+- every access-time update of a regular file goes through an open file
+  description (the read family, `mmap` at map time, `splice`, `sendfile`,
+  `copy_file_range`, `execve`, nfsd, io_uring), so there is always a held
+  descriptor to ask, and after the last `RELEASE` no read can come until the
+  next open: the release's held fill is the truth until then;
+- FUSE passthrough reads and mmaps call `fuse_invalidate_atime`, so the
+  kernel drops its cached access time and the next `stat` reaches dcfs.
+
+The protocol around it, for the crash cases (the model's "Access times of a
+file", `formal/dcfs.tla`):
+
+- The backing filesystem writes the access time back lazily, and only a
+  `syncfs` makes it durable. So every record of the attributes of a file
+  dcfs holds open (`Context::open_files`), by the held fill or by any other
+  path (a population's probe, a mutation's refresh: `cache::UpdateAttr` and
+  `UpsertInode` call `cache::MarkAtimeDirty`), marks its row dirty with the
+  reason `atime_only` and touches the inode's fill guard in the same
+  transaction. A power loss that keeps the record and loses the backing
+  filesystem's write-back then finds the row dirty, and recovery forgets
+  it: the cache is never ahead.
+- A cold read-only open marks the row dirty (`atime_only`, one write
+  transaction, no `fsync`) before the reply, from which on the kernel may
+  read; sync points keep the row while the file is open
+  ([Sync points](#sync-points)). A daemon crash while the file is open and
+  has been read, before any held fill, then finds the row dirty too, and the
+  restart reads the attributes again: never behind either. The residue: a
+  power loss that loses the open's commit (normal durability: the WAL may
+  not have reached the disk) while the backing filesystem's journal kept a
+  read's access time leaves the old access time, until the file is next
+  opened and closed (`formal/limitations/`, `atime_power_loss_while_open`;
+  README "Limitations"). A `fsync` per open would close it, at the cost of
+  a cache-disk flush per cold open.
+- A held fill whose guard fails (a mutation of the file began or ended
+  since its snapshot, or is in flight) records nothing and marks the
+  attributes unknown; it touches the inode even with a mutation in flight,
+  so that the mutation's phase 3 does not record attributes read before the
+  reads the fill saw. A failed `statx` likewise leaves them unknown and the
+  row dirty.
+- An `atime_only` row does not make a sync point run (see there).
+- At `DESTROY` with files still open for reading (a `SIGTERM`, a lazy
+  unmount), the kernel sends no more requests: dcfs makes a last held fill
+  of each and stops counting them as open, so that the shutdown's sync
+  point clears their rows and the shutdown is clean (the lifetime model's
+  `DestroyWithOpens`). A read the kernel still makes after that is not
+  seen, as a write through a mapping after the unmount is not.
+
+**Directories and symlinks: stamped in the cache only.** A listing and a
+symlink's target are served from the cache, so the backing filesystem's
+access time genuinely does not move (except at dcfs's own population, which
+reads the directory). dcfs applies the backing mount's rule
+(`Context::atime`, from its `statvfs` flags at startup: relatime, the
+default: if the cached access time is not after the modification or change
+time, or is a day old; strictatime: always; noatime: never) at every
+`READDIR`, `READDIRPLUS` and `READLINK` it serves, with the injected clock,
+and records the result in the database only (`cache::TouchAtime`: a read,
+and a write transaction only when the time changes). Every later record of
+the row's attributes keeps the cached access time when it is the later one,
+so a refresh from the backing filesystem does not take it back; an explicit
+access time (`SETATTR` with `ATIME` or `ATIME_NOW`) drops the stamp first
+(`cache::DropAtimeStamp`), so the backing filesystem's value wins, earlier
+or not. The stamp survives restarts and is lost with the cache. It is never
+written to the backing filesystem: `utimensat` would bump the change time,
+which a real read never does (alternative 4 of the note). The fault tests'
+"served equals backing" comparisons therefore leave directories' and
+symlinks' access times out, and only those (`guest/lib.sh`'s `snapshot
+DIR atime`).
 
 ### mmap after close (held-fd workaround)
 
@@ -1943,7 +2063,10 @@ The checking build (`//dcfs:main_static_checked`, linking
   0, and a dentry is `refused` only with its stub and a stub's dentry is
   `refused` or `unknown` (`tri-state`); only the root has FUSE generation
   0 (`identity`); an inode in `Context::dirty.durable` has
-  its dirty row, and `dirty.any` false means an empty table (`dirty-set`);
+  its dirty row, `dirty.any` false means no row that is not `atime_only`
+  and `dirty.atime` false no `atime_only` row (`dirty-set`); an inode with
+  an open backing file has its dirty row unless it is a removed object
+  (`open-file`, step 23.8);
   an inode open for writing has its attributes unknown, its dirty row, and
   a `written_` entry unless it is a removed object, and a `BackingFile`
   with writable opens is open for writing (`writable-open`); lookup counts
@@ -2027,7 +2150,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `setattr_test` | chmod (file, directory, FIFO; `EOPNOTSUPP` on a symlink), chown, truncate and utimes land on the backing filesystem and are then served from the cache with zero sectors, also after a restart. |
 | `create_test` | mkdir, create, mknod, symlink and link, including error cases; the whole tree's listing agrees with the backing filesystem; zero sectors for a full metadata pass over everything created; `EEXIST` for a boundary stub's name and `ENOTSUP` inside it. |
 | `rename_test` | unlink (including of an open file, whose row and handle live until the last close), rmdir, and every rename variant (across directories, over an existing file, `RENAME_NOREPLACE`, `RENAME_EXCHANGE`, a directory with its cached subtree); negative entries and completeness are recorded, not re-read. |
-| `atime_test` | After a read, `stat` through dcfs reports the access time the backing filesystem gave it (relatime: a two-day-old atime becomes now, one after mtime and within the day stays) without a backing read, and a second read within the day changes neither. |
+| `atime_test` | A `stat` through dcfs reports exactly the access time the backing filesystem has: after an open that reads nothing (unchanged), a read, a read while the file stays open (a stat while held), `chattr +A` and `O_NOATIME` (unchanged), an mmap read, lsattr's private open (unchanged), and from the cache with no backing read once closed; a directory listing and a readlink stamp the relatime "now" in the cache only (the backing filesystem's stays), a second within the day changes nothing, and all of it survives a restart of dcfs. (The power cut after a read: `fault_power_test`'s `atime` scenario.) |
 | `copy_test` | `copy_file_range` through dcfs shares extents on btrfs and xfs as natively and leaves the copy's attributes cached; `FICLONE` fails `EOPNOTSUPP` (the VFS's answer); `lsattr`/`chattr` (`FS_IOC_GETFLAGS`/`SETFLAGS`, `FSGETXATTR`) and `FS_IOC_GETVERSION` match the backing file, `chattr +i` is enforced (also for a file already open for writing), other ioctls get `ENOTTY`; `O_TMPFILE` linked by `AT_EMPTY_PATH` and through `/proc/self/fd`, `O_EXCL` and never linked, each as on the backing filesystem; a warm metadata pass reads nothing. |
 | `write_test` | Writes, appends, `O_TRUNC`, a 64 MiB passthrough write, concurrent opens of one file (the one-backing-file rule), fsync, fallocate, xattrs on files, directories and symlinks, ACL read-back after setxattr and chmod, `security.capability` removal on chown, truncate and write; a store through a shared mapping after the last close is reconciled at the inode's last `FORGET` (no out-of-band warning); served from the cache after a restart. |
 | `credentials_test` | As two unprivileged users: ownership of every create, setgid inheritance, supplementary groups, chown and chgrp rules, sticky directories, truncate, utimes, chmod and user xattrs, allowed and denied, agree with the backing filesystem; POSIX ACLs (named entries denying and granting access, default ACL inheritance and the umask) are enforced as on the backing filesystem; the daemon is back to root afterwards. |
@@ -2056,23 +2179,12 @@ lists the user-visible ones.
 - **A removed object cannot be linked back.** `LINK` of a removed object
   the kernel still references fails with `ESTALE` (see
   [Row lifetime](#row-lifetime)).
-- **atime is predicted, not read.** Reads go through passthrough, so dcfs
-  records at a read open the access time the backing mount's rule gives
-  (`cache::TouchAtime`, step 23.3: relatime, the default: if the cached
-  atime is not after mtime or ctime, or is a day old; strictatime: always;
-  noatime: never; read from the mount's `statvfs` flags at startup), with
-  no backing I/O. The backing filesystem stamps the read's time, so the two
-  can differ by the time between the open and the read, and an open that
-  never reads still moves the cached atime (the private open the kernel
-  makes for `lsattr`/`chattr` too). atime is therefore exempt from the
-  rule that the cache mirrors the backing filesystem (review L6): a file's
-  `FS_NOATIME_FL` (`chattr +A`) is ignored, and the prediction is not a
-  mutation (no phase 1, no dirty row), so after a power loss a predicted
-  atime can survive while the backing filesystem lost its own update;
-  recovery does not revisit it. Directories' atimes (which dcfs's own
-  listing of a directory moves on the backing filesystem) are not
-  predicted. `st_blocks` may lag behind delayed allocation until the
-  next attribute refresh.
+- **Access times of directories and symlinks are the cache's.** See
+  [Access times](#access-times): stamped in the database only, lost with
+  it; and a power loss while a file is open and has been read may leave its
+  access time behind until its next open and close.
+  `st_blocks` may lag behind delayed allocation until the next attribute
+  refresh, when dcfs no longer holds the file.
 - **A residual "ahead" window depends on the backing filesystem.** The
   dirty-set argument assumes `syncfs` really makes earlier changes durable
   on the backing device.

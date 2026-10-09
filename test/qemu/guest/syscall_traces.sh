@@ -362,6 +362,45 @@ close(backing)
 EOT
 strace_budget budget-chmod chmod
 
+# READ (step 23.8): cat opens, reads and closes. The open reopens the file by
+# handle (open_by_handle_at O_RDWR, the identity check: statx, generation)
+# and marks its row dirty for the access time (a cache write, no backing
+# call); the read goes through passthrough (no line); the FLUSH and the
+# RELEASE each read the attributes through the held descriptor (statx), the
+# access time the read gave included ("Access times"); the release closes
+# the descriptor.
+strace_op read cat "$MNT/known"
+strace_golden read read <<'EOT'
+open_by_handle_at(backing)
+statx(backing)
+openat(procfd)
+ioctl(backing)
+close(backing)
+statx(backing)
+statx(backing)
+close(backing)
+EOT
+strace_budget budget-read read
+
+# A stat while the file is open, after a read through it (which drops the
+# kernel's cached access time): answered by a statx of the held descriptor,
+# then the FLUSH's and the RELEASE's. (testutil, not a shell: each close of
+# a dup of the descriptor is a FLUSH, each with its statx.) A cold open
+# too, of another file than read's.
+strace_op held-stat "$TESTUTIL" heldstat "$MNT/chm"
+strace_golden held-stat held-stat <<'EOT'
+open_by_handle_at(backing)
+statx(backing)
+openat(procfd)
+ioctl(backing)
+close(backing)
+statx(backing)
+statx(backing)
+statx(backing)
+close(backing)
+EOT
+strace_budget budget-held-stat held-stat
+
 require_no_reclaim no-reclaim
 
 exit "$FAILED"

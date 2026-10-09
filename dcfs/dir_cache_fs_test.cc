@@ -889,6 +889,27 @@ class DirCacheFSTest : public ::testing::Test {
     return Send(FUSE_RELEASE, static_cast<uint64_t>(id), body);
   }
 
+  // A FLUSH of the open `fh` of `id` (a close(2) of one of its descriptors).
+  Reply Flush(InodeId id, uint64_t fh) {
+    struct fuse_flush_in in = {};
+    in.fh = fh;
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_FLUSH, static_cast<uint64_t>(id), body);
+  }
+
+  // A SETATTR of `id`'s access time to `atime` (as utimensat(2) sends it).
+  Reply SetAtime(InodeId id, absl::Time atime) {
+    struct fuse_setattr_in in = {};
+    in.valid = FATTR_ATIME;
+    const struct timespec ts = absl::ToTimespec(atime);
+    in.atime = static_cast<uint64_t>(ts.tv_sec);
+    in.atimensec = static_cast<uint32_t>(ts.tv_nsec);
+    std::string body;
+    AppendBytes(body, in);
+    return Send(FUSE_SETATTR, static_cast<uint64_t>(id), body);
+  }
+
   // A LOOKUP of `name` in `parent`, and the entry it returned (zeroed on
   // error).
   std::pair<Reply, struct fuse_entry_out> Lookup(InodeId parent,
@@ -2636,11 +2657,16 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
             -EOPNOTSUPP);
 }
 
-// --- relatime (step 23.3) ---------------------------------------------------
+// --- access times (step 23.8) -----------------------------------------------
 //
-// Reads go through passthrough: dcfs never sees them, the backing
-// filesystem updates the access time by its mount's rule. A read open
-// records in the cache what that rule gives, with no backing I/O.
+// Reads go through passthrough: dcfs never sees them, and the backing
+// filesystem stamps the access time itself. While dcfs holds a backing
+// descriptor for a file (its passthrough opens), the attributes it serves
+// come from a statx of that descriptor: at FLUSH, at RELEASE, and for an
+// attribute request while it is held. Nothing is predicted. The harness has
+// no kernel passthrough: a test reads the backing file through a descriptor
+// of its own, which moves the same inode's access time as a passthrough read
+// would.
 
 // Sets path's atime and mtime (seconds before now).
 void SetTimes(const std::string &path, int64_t atime_ago, int64_t mtime_ago) {
@@ -2653,15 +2679,50 @@ void SetTimes(const std::string &path, int64_t atime_ago, int64_t mtime_ago) {
   ASSERT_THAT(syscalls::utimensat(AT_FDCWD, path, times, 0), IsOk()) << path;
 }
 
-class RelatimeTest : public DirCacheFSTest {
+// The access time of `path` on the backing filesystem (a symlink's own).
+absl::Time BackingAtime(const std::string &path) {
+  absl::StatusOr<struct statx> stx =
+      syscalls::statx(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW, STATX_ATIME);
+  EXPECT_THAT(stx, IsOk()) << path;
+  if (!stx.ok()) return absl::InfinitePast();
+  return absl::FromUnixSeconds(stx->stx_atime.tv_sec) +
+         absl::Nanoseconds(stx->stx_atime.tv_nsec);
+}
+
+// Reads a byte of `path` through a descriptor of its own opened with
+// `flags`: what a passthrough read does to the backing inode.
+void ReadBacking(const std::string &path, int flags = O_RDONLY) {
+  ASSERT_OK_AND_ASSIGN(FileDescriptor fd,
+                       syscalls::openat(AT_FDCWD, path, flags));
+  char c = 0;
+  ASSERT_THAT(syscalls::read(*fd, &c, 1), IsOkAndHolds(1)) << path;
+}
+
+class AtimeTest : public DirCacheFSTest {
  protected:
-  // The cached atime of `id` (seconds), which must be current.
-  int64_t CachedAtime(InodeId id) {
+  // A file "f" with contents, its atime two days old and its mtime three:
+  // any read moves the atime under relatime.
+  void MakeOldFile() {
+    WriteFile(Path("f"));
+    AppendToFile(Path("f"), "contents");
+    SetTimes(Path("f"), 2 * 86400, 3 * 86400);
+  }
+
+  // The access time a GETATTR of `id` replies.
+  absl::Time ServedAtime(InodeId id) {
+    auto [reply, attr] = Getattr(id);
+    EXPECT_EQ(reply.error, 0);
+    return absl::FromUnixSeconds(static_cast<int64_t>(attr.atime)) +
+           absl::Nanoseconds(attr.atimensec);
+  }
+
+  // The access time in `id`'s row, which must be current.
+  absl::Time CachedAtime(InodeId id) {
     absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
     EXPECT_THAT(attr, IsOk());
-    if (!attr.ok()) return -1;
+    if (!attr.ok()) return absl::InfinitePast();
     EXPECT_TRUE(attr->valid);
-    return attr->st.st_atim.tv_sec;
+    return absl::TimeFromTimespec(attr->st.st_atim);
   }
 
   // Opens `id` with `flags` and releases it.
@@ -2693,73 +2754,213 @@ class RelatimeTest : public DirCacheFSTest {
   bool remounted_ = false;
 };
 
-TEST_F(RelatimeTest, ReadOpenFollowsTheRelatimeRule) {
-  // Setting the times makes the ctime now, and an atime not after the
-  // ctime is updated too: "recent" needs one after it (in the future), and
-  // within the day.
-  WriteFile(Path("old"));     // atime 2 days ago, mtime 3 days ago
-  WriteFile(Path("recent"));  // atime in an hour, mtime 2 hours ago
-  WriteFile(Path("stale"));   // atime 2 hours ago, mtime 1 hour ago
-  SetTimes(Path("old"), 2 * 86400, 3 * 86400);
-  SetTimes(Path("recent"), -3600, 7200);
-  SetTimes(Path("stale"), 7200, 3600);
-  Start();
-  ASSERT_OK_AND_ASSIGN(InodeId old, Id("old"));
-  ASSERT_OK_AND_ASSIGN(InodeId recent, Id("recent"));
-  ASSERT_OK_AND_ASSIGN(InodeId stale, Id("stale"));
-  const int64_t recent_before = CachedAtime(recent);
-  ASSERT_OK_AND_ASSIGN(struct timespec now,
-                       syscalls::clock_gettime(CLOCK_REALTIME));
-
-  OpenAndRelease(old, O_RDONLY);
-  OpenAndRelease(recent, O_RDONLY);
-  OpenAndRelease(stale, O_RDONLY);
-  EXPECT_GE(CachedAtime(old), now.tv_sec);        // A day old.
-  EXPECT_EQ(CachedAtime(recent), recent_before);  // After m/ctime, recent.
-  EXPECT_GE(CachedAtime(stale), now.tv_sec);      // Not after mtime.
-
-  // Once updated, a second open within the day changes nothing.
-  const int64_t first = CachedAtime(old);
-  OpenAndRelease(old, O_RDONLY);
-  EXPECT_EQ(CachedAtime(old), first);
-}
-
-// O_NOATIME, and a writable open (its attributes are unknown until its
-// last release, which re-reads them, atime included), record nothing.
-TEST_F(RelatimeTest, NoatimeAndWritableOpensLeaveTheAtime) {
-  WriteFile(Path("f"));
-  SetTimes(Path("f"), 2 * 86400, 3 * 86400);
+// An open that reads nothing (a shell's `: <file`, lsattr's private open)
+// leaves the access time where the backing filesystem has it.
+TEST_F(AtimeTest, OpenThatReadsNothingLeavesTheAtime) {
+  MakeOldFile();
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
-  const int64_t before = CachedAtime(f);
-  OpenAndRelease(f, O_RDONLY | O_NOATIME);
-  EXPECT_EQ(CachedAtime(f), before);
-  OpenAndRelease(f, O_WRONLY);
-  EXPECT_EQ(CachedAtime(f), before);  // The backing's, re-read at release.
-}
-
-TEST_F(RelatimeTest, StrictatimeUpdatesOnEveryReadOpen) {
-  WriteFile(Path("f"));
-  SetTimes(Path("f"), 60, 3600);
-  RemountSource(MS_STRICTATIME);
-  Start();
-  ASSERT_EQ(ctx_.atime, AtimePolicy::kStrict);
-  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
-  const int64_t before = CachedAtime(f);
+  const absl::Time before = BackingAtime(Path("f"));
   OpenAndRelease(f, O_RDONLY);
-  EXPECT_GT(CachedAtime(f), before);
+  EXPECT_EQ(BackingAtime(Path("f")), before);
+  EXPECT_EQ(ServedAtime(f), before);
 }
 
-TEST_F(RelatimeTest, NoatimeBackingNeverUpdates) {
-  WriteFile(Path("f"));
-  SetTimes(Path("f"), 2 * 86400, 3 * 86400);
+// After a read, a stat shows exactly what the backing filesystem stamped,
+// recorded at the release from the held descriptor, and the row is dirty:
+// the backing filesystem writes the atime back lazily, and only the next
+// sync point's syncfs makes it durable.
+TEST_F(AtimeTest, ReadThenStatServesTheBackingsAtimeExactly) {
+  MakeOldFile();
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const absl::Time before = BackingAtime(Path("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ReadBacking(Path("f"));
+  const absl::Time read = BackingAtime(Path("f"));
+  ASSERT_GT(read, before);
+  ASSERT_EQ(Release(f, fh).error, 0);
+  EXPECT_EQ(CachedAtime(f), read);
+  EXPECT_EQ(ServedAtime(f), read);
+  EXPECT_THAT(Dirty(), Contains(f));
+}
+
+// A GETATTR while the file is open is answered from the held descriptor:
+// it shows a read made since the open.
+TEST_F(AtimeTest, GetattrWhileHeldServesTheRead) {
+  MakeOldFile();
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const absl::Time before = BackingAtime(Path("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  EXPECT_EQ(ServedAtime(f), before);
+  ReadBacking(Path("f"));
+  EXPECT_EQ(ServedAtime(f), BackingAtime(Path("f")));
+  EXPECT_THAT(Dirty(), Contains(f));
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// A file's own noatime flag (chattr +A): its reads leave the atime, and so
+// does dcfs.
+TEST_F(AtimeTest, NoatimeFlagIsRespected) {
+  MakeOldFile();
+  {
+    ASSERT_OK_AND_ASSIGN(FileDescriptor fd,
+                         syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+    int flags = 0;
+    ASSERT_THAT(syscalls::ioctl(*fd, FS_IOC_GETFLAGS, &flags), IsOk());
+    flags |= FS_NOATIME_FL;
+    ASSERT_THAT(syscalls::ioctl(*fd, FS_IOC_SETFLAGS, &flags), IsOk());
+  }
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const absl::Time before = BackingAtime(Path("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ReadBacking(Path("f"));
+  ASSERT_EQ(Release(f, fh).error, 0);
+  EXPECT_EQ(BackingAtime(Path("f")), before);
+  EXPECT_EQ(ServedAtime(f), before);
+}
+
+// O_NOATIME (the kernel passes the open's flags to the backing file a
+// passthrough read goes through): the atime stays, and dcfs serves it.
+TEST_F(AtimeTest, ONoatimeOpenServesTheUnchangedAtime) {
+  MakeOldFile();
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const absl::Time before = BackingAtime(Path("f"));
+  auto [open, fh] = Open(f, O_RDONLY | O_NOATIME);
+  ASSERT_EQ(open.error, 0);
+  ReadBacking(Path("f"), O_RDONLY | O_NOATIME);
+  ASSERT_EQ(Release(f, fh).error, 0);
+  EXPECT_EQ(BackingAtime(Path("f")), before);
+  EXPECT_EQ(ServedAtime(f), before);
+}
+
+// The costs: one statx of the held descriptor per FLUSH and per RELEASE, one
+// per attribute request while held (and no transaction when nothing
+// changed), and nothing new for an attribute request served from the cache.
+TEST_F(AtimeTest, OneStatxPerFlushReleaseAndHeldGetattr) {
+  MakeOldFile();
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Getattr(f).first.error, 0);
+  counter_.Reset();
+  ASSERT_EQ(Getattr(f).first.error, 0);
+  EXPECT_EQ(counter_.counts().backing_calls, 1) << "a GETATTR while held";
+  EXPECT_EQ(counter_.counts().transactions, 0) << "nothing changed";
+  counter_.Reset();
+  ASSERT_EQ(Flush(f, fh).error, 0);
+  EXPECT_EQ(counter_.counts().backing_calls, 1) << "a FLUSH";
+  counter_.Reset();
+  ASSERT_EQ(Release(f, fh).error, 0);
+  EXPECT_EQ(counter_.counts().backing_calls, 1) << "a RELEASE";
+  counter_.Reset();
+  ASSERT_EQ(Getattr(f).first.error, 0);
+  EXPECT_EQ(counter_.counts().backing_calls, 0) << "a GETATTR from the cache";
+  EXPECT_EQ(counter_.counts().transactions, 0) << "a GETATTR from the cache";
+}
+
+// Any record of a held file's attributes may capture an access time the
+// backing filesystem has not written back yet, so it marks the row dirty,
+// whichever path records it (here a refresh by handle, as a mutation's
+// phase 3 or a population's probe records it).
+TEST_F(AtimeTest, AnyFillOfAHeldFileMarksItDirty) {
+  MakeOldFile();
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  // Dirty since the cold open; taken out here (no request comes before the
+  // record below puts it back), to see the record's own mark.
+  ASSERT_THAT(Dirty(), Contains(f));
+  ASSERT_THAT(db_.Exec(absl::StrCat("DELETE FROM dirty WHERE inode = ", f)),
+              IsOk());
+  ReadBacking(Path("f"));
+  ASSERT_THAT(backing::RefreshAttrs(ctx_, f), IsOk());
+  EXPECT_EQ(CachedAtime(f), BackingAtime(Path("f")));
+  EXPECT_THAT(Dirty(), Contains(f));
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// A power loss after a read and its release: the cache recorded the new
+// access time, the backing filesystem lost its lazy write-back of it (put
+// back here by hand, as the disk would have it). The recorded row is dirty,
+// so the restart forgets it and serves the backing filesystem's value.
+TEST_F(AtimeTest, PowerLossAfterAReadServesTheBackingsAtime) {
+  MakeOldFile();
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const absl::Time before = BackingAtime(Path("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ReadBacking(Path("f"));
+  ASSERT_EQ(Release(f, fh).error, 0);
+  ASSERT_GT(CachedAtime(f), before);
+  const struct timespec times[2] = {absl::ToTimespec(before),
+                                    {.tv_sec = 0, .tv_nsec = UTIME_OMIT}};
+  ASSERT_THAT(syscalls::utimensat(AT_FDCWD, Path("f"), times, 0), IsOk());
+
+  ASSERT_THAT(Restart("boot"), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  // Unknown (recovered), or current and the backing filesystem's.
+  if (attr.valid) {
+    EXPECT_EQ(absl::TimeFromTimespec(attr.st.st_atim), before)
+        << "the access time the restart serves as current";
+  }
+}
+
+// A held fill that cannot record: its statx fails (the FLUSH still
+// succeeds), or a mutation of the file ran while it read (a chmod run
+// inside the statx, as under coroutines). Either leaves the attributes
+// unknown, the row dirty, and the next attribute reply re-reads them.
+TEST_F(AtimeTest, AHeldFillThatCannotRecordLeavesTheAttributesUnknown) {
+  MakeOldFile();
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  StatxFailure() = EIO;
+  EXPECT_EQ(Flush(f, fh).error, 0) << "a close does not fail over it";
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr failed, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(failed.valid) << "after a failed statx";
+  EXPECT_THAT(Dirty(), Contains(f));
+  EXPECT_EQ(ServedAtime(f), BackingAtime(Path("f")));
+
+  // The chmod's own refresh records its attributes; a read after it moves
+  // the access time again, so the held fill reads something else and has
+  // to decide (with nothing moved since, it would skip the write).
+  StatxHook() = [&] {
+    EXPECT_EQ(Chmod(f, 0600).error, 0);
+    ReadBacking(Path("f"));
+  };
+  EXPECT_EQ(Getattr(f).first.error, 0);
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr raced, cache::GetAttr(ctx_, f));
+  EXPECT_FALSE(raced.valid) << "after a chmod during the statx";
+  EXPECT_THAT(Dirty(), Contains(f));
+  auto [reply, attr] = Getattr(f);
+  EXPECT_EQ(reply.error, 0);
+  EXPECT_EQ(attr.mode & 07777, 0600u) << "the next reply re-reads";
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
+// On a noatime mount a listing stamps nothing.
+TEST_F(AtimeTest, ReaddirOnANoatimeMountStampsNothing) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
   RemountSource(MS_NOATIME);
   Start();
   ASSERT_EQ(ctx_.atime, AtimePolicy::kNever);
-  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
-  const int64_t before = CachedAtime(f);
-  OpenAndRelease(f, O_RDONLY);
-  EXPECT_EQ(CachedAtime(f), before);
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_THAT(List(d, false), IsOk());
+  const absl::Time listed = CachedAtime(d);
+  ASSERT_THAT(List(d, false), IsOk());
+  EXPECT_EQ(CachedAtime(d), listed);
 }
 
 // Today's numbers (steps per entry, and per listing), measured with
@@ -2885,18 +3086,13 @@ class ClockTest : public DirCacheFSTest {
               0);
   }
 
-  int64_t CachedAtime(InodeId id) {
+  // The access time in `id`'s row, current or not (a recovered row keeps
+  // its last one as a hint).
+  absl::Time RowAtime(InodeId id) {
     absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
     EXPECT_THAT(attr, IsOk());
-    if (!attr.ok()) return -1;
-    EXPECT_TRUE(attr->valid);
-    return attr->st.st_atim.tv_sec;
-  }
-
-  void OpenAndRelease(InodeId id, int flags) {
-    auto [open, fh] = Open(id, flags);
-    ASSERT_EQ(open.error, 0);
-    ASSERT_EQ(Release(id, fh).error, 0);
+    if (!attr.ok()) return absl::InfinitePast();
+    return absl::TimeFromTimespec(attr->st.st_atim);
   }
 
   absl::SimulatedClock clock_{absl::FromUnixSeconds(1'800'000'000)};
@@ -3307,31 +3503,142 @@ TEST_F(DirCacheFSTest, ARowGoneDuringPhase3IsNotLoggedAsAFailure) {
   EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 0) << capture.Dump();
 }
 
-// A read open records the injected time as the atime when the relatime rule
-// says to update it, and applies the 24 h rule to that time.
-TEST_F(ClockTest, ReadOpenRecordsTheInjectedTimeAndAppliesTheDayRule) {
-  ASSERT_OK_AND_ASSIGN(struct timespec real,
-                       syscalls::clock_gettime(CLOCK_REALTIME));
+// Step 23.8: a listing stamps the access time the backing mount's rule
+// gives (relatime: if the cached one is not after the modification or
+// change time, or is a day old) in the cache, from the injected clock, and
+// never on the backing filesystem, whose listing was dcfs's own population.
+// A later refresh from the backing filesystem keeps the later stamp, an
+// explicit SETATTR replaces it, and it survives a restart.
+TEST_F(ClockTest, ReaddirStampsTheAtimeInTheCacheOnly) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
+  WriteFile(Path("d/f"));
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
+  ASSERT_OK_AND_ASSIGN(std::vector<std::string> names, List(d, false));
+  ASSERT_THAT(names, Contains("f"));
+  const absl::Time backing = BackingAtime(Path("d"));
+  // The simulated clock is months after the directory's times.
+  const absl::Time first = clock_.TimeNow();
+  EXPECT_EQ(RowAtime(d), first);
+  // Within the day: unchanged, by either kind of listing.
+  clock_.AdvanceTime(absl::Hours(2));
+  ASSERT_THAT(List(d, true), IsOk());
+  EXPECT_EQ(RowAtime(d), first);
+  // A day later: the new time.
+  clock_.AdvanceTime(absl::Hours(23));
+  ASSERT_THAT(List(d, false), IsOk());
+  const absl::Time second = clock_.TimeNow();
+  EXPECT_EQ(RowAtime(d), second);
+  EXPECT_EQ(BackingAtime(Path("d")), backing) << "written to the backing";
+
+  // A create in d: phase 3 re-reads d's attributes from the backing
+  // filesystem, whose atime is older; the stamp stays.
+  Created g = Create(d, "g", O_WRONLY);
+  ASSERT_EQ(g.reply.error, 0);
+  ASSERT_EQ(Release(g.id, g.fh).error, 0);
+  EXPECT_EQ(RowAtime(d), second);
+
+  // An explicit access time replaces it, older or not.
+  const absl::Time set = absl::FromUnixSeconds(1'000'000'000);
+  ASSERT_EQ(SetAtime(d, set).error, 0);
+  EXPECT_EQ(BackingAtime(Path("d")), set);
+  EXPECT_EQ(RowAtime(d), set);
+  // Then a listing stamps again (not after mtime).
+  ASSERT_THAT(List(d, false), IsOk());
+  EXPECT_EQ(RowAtime(d), second);
+
+  // The next process finds the stamp in the row.
+  ASSERT_THAT(Restart("boot"), IsOk());
+  EXPECT_EQ(RowAtime(d), second);
+}
+
+// Step 23.8: so does a READLINK of a symlink, whose target the cache serves.
+TEST_F(ClockTest, ReadlinkStampsTheAtimeInTheCacheOnly) {
+  ASSERT_THAT(syscalls::symlinkat("target", AT_FDCWD, Path("s")), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId s, Id("s"));
+  ASSERT_EQ(Send(FUSE_READLINK, static_cast<uint64_t>(s), "").error, 0);
+  const absl::Time backing = BackingAtime(Path("s"));
+  clock_.AdvanceTime(absl::Hours(48));
+  ASSERT_EQ(Send(FUSE_READLINK, static_cast<uint64_t>(s), "").error, 0);
+  EXPECT_EQ(RowAtime(s), clock_.TimeNow());
+  EXPECT_EQ(BackingAtime(Path("s")), backing) << "written to the backing";
+}
+
+// Step 23.8: the atime-only dirty rows (a cold read-only open's, a held
+// fill's) do not drive the periodic sync point (its syncfs would force the
+// backing filesystem's lazy atime write-back, which lazytime defers by a
+// day); one that runs for a mutation clears them, but keeps the row of a
+// file still held, until its release records the truth.
+TEST_F(ClockTest, AtimeOnlyDirtyRowsDoNotDriveSyncPoints) {
   WriteFile(Path("f"));
-  // atime after mtime and ctime, and recent: relatime leaves it.
-  const struct timespec times[2] = {{.tv_sec = real.tv_sec + 3600, .tv_nsec = 0},
-                                    {.tv_sec = real.tv_sec - 7200, .tv_nsec = 0}};
-  ASSERT_THAT(syscalls::utimensat(AT_FDCWD, Path("f"), times, 0), IsOk());
+  AppendToFile(Path("f"), "contents");
+  WriteFile(Path("g"));
+  WriteFile(Path("h"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
-  const int64_t atime = real.tv_sec + 3600;
-  ASSERT_EQ(CachedAtime(f), atime);
+  ASSERT_OK_AND_ASSIGN(InodeId g, Id("g"));
+  ASSERT_OK_AND_ASSIGN(InodeId h, Id("h"));
+  // A first sync point settles Context::dirty.any (conservatively true
+  // until one has run).
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  ASSERT_THAT(Dirty(), ::testing::IsEmpty());
+  int syncs = 0;
+  SyncfsHook() = [&] { ++syncs; };  // (Once.)
+  // A cold read-only open marks the row dirty, atime only.
+  {
+    auto [open, fh] = Open(f, O_RDONLY);
+    ASSERT_EQ(open.error, 0);
+    EXPECT_THAT(Dirty(), Contains(f));
+    ASSERT_EQ(Release(f, fh).error, 0);
+  }
+  EXPECT_THAT(Dirty(), Contains(f));
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  EXPECT_EQ(syncs, 0) << "a sync point for atime-only rows";
+  EXPECT_THAT(Dirty(), Contains(f));
 
-  // The simulated clock is two hours after the atime: within the day, no
-  // update.
-  clock_.SetTime(absl::FromUnixSeconds(atime + 7200));
-  OpenAndRelease(f, O_RDONLY);
-  EXPECT_EQ(CachedAtime(f), atime);
+  // h held across a sync point that a mutation (g's chmod) drives.
+  auto [open, fh] = Open(h, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ASSERT_EQ(Chmod(g, 0600).error, 0);
+  clock_.AdvanceTime(absl::Seconds(6));
+  Tick();
+  EXPECT_EQ(syncs, 1);
+  EXPECT_THAT(Dirty(), Not(Contains(f))) << "released: cleared";
+  EXPECT_THAT(Dirty(), Not(Contains(g)));
+  EXPECT_THAT(Dirty(), Contains(h)) << "held: kept";
+  EXPECT_EQ(Release(h, fh).error, 0);
+  EXPECT_THAT(Dirty(), Contains(h)) << "recorded at the release";
+}
 
-  // Past the day: updated, to the simulated time (not the wall clock).
-  clock_.SetTime(absl::FromUnixSeconds(atime + 86400 + 5));
-  OpenAndRelease(f, O_RDONLY);
-  EXPECT_EQ(CachedAtime(f), atime + 86400 + 5);
+// Step 23.8: a crash while a file is open and has been read, before dcfs
+// looked at it again: the cold open's dirty row makes the restart forget the
+// access time it had before the read.
+TEST_F(DirCacheFSTest, CrashWhileAFileIsReadForgetsItsAtime) {
+  WriteFile(Path("f"));
+  AppendToFile(Path("f"), "contents");
+  const struct timespec old[2] = {{.tv_sec = 1'000'000'000, .tv_nsec = 0},
+                                  {.tv_sec = 999'000'000, .tv_nsec = 0}};
+  ASSERT_THAT(syscalls::utimensat(AT_FDCWD, Path("f"), old, 0), IsOk());
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDONLY);
+  ASSERT_EQ(open.error, 0);
+  ReadBacking(Path("f"));
+  const absl::Time read = BackingAtime(Path("f"));
+  ASSERT_GT(read, absl::FromUnixSeconds(1'000'000'000));
+  // The daemon dies with the file open.
+  ASSERT_THAT(Restart("boot"), IsOk());
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
+  // Unknown (recovered), or current and the backing filesystem's.
+  if (attr.valid) {
+    EXPECT_EQ(absl::TimeFromTimespec(attr.st.st_atim), read)
+        << "the access time the restart serves as current";
+  }
 }
 
 // copy_file_range into, and ioctls of, a removed object (no row: no

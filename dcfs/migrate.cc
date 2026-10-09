@@ -306,6 +306,28 @@ absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
   return absl::OkStatus();
 }
 
+// v5 -> v6 (step 23.8): the dirty set's atime_only column, 0 for every row
+// there is (each stands for a mutation). The column only if missing, as
+// above.
+absl::Status MigrateV5ToV6(sqlite3::Connection &db) {
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * column,
+      db.Prepared("SELECT 1 FROM pragma_table_info('dirty') "
+                  "WHERE name = 'atime_only'"));
+  ABSL_ASSIGN_OR_RETURN(bool has_column, column->Step());
+  ABSL_RETURN_IF_ERROR(column->Reset());
+  if (!has_column) {
+    ABSL_RETURN_IF_ERROR(
+        db.Exec("ALTER TABLE dirty ADD COLUMN atime_only INTEGER NOT NULL "
+                "DEFAULT 0 CHECK (atime_only IN (0, 1))"));
+  }
+  ABSL_RETURN_IF_ERROR(
+      db.Exec("UPDATE cache_state SET schema_version = 6 WHERE id = 1"));
+  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  RET_CHECK_EQ(version, 6);
+  return absl::OkStatus();
+}
+
 // Upgrades an existing database, one version at a time, to kSchemaVersion,
 // in one transaction. A version newer than this build's is refused.
 absl::Status UpgradeSchema(sqlite3::Connection &db) {
@@ -331,6 +353,10 @@ absl::Status UpgradeSchema(sqlite3::Connection &db) {
     if (version == 4) {
       ABSL_RETURN_IF_ERROR(MigrateV4ToV5(db));
       version = 5;
+    }
+    if (version == 5) {
+      ABSL_RETURN_IF_ERROR(MigrateV5ToV6(db));
+      version = 6;
     }
     RET_CHECK_EQ(version, kSchemaVersion);
     return absl::OkStatus();

@@ -161,8 +161,8 @@ thaw_and_wait() {
 # same_as_backing: success if what dcfs serves is what the backing filesystem holds.
 same_as_backing() {
 	drop_caches
-	snapshot "$SRC" >/tmp/backing.snap
-	snapshot "$MNT" >/tmp/served.snap 2>&1
+	snapshot "$SRC" atime >/tmp/backing.snap
+	snapshot "$MNT" atime >/tmp/served.snap 2>&1
 	command diff /tmp/served.snap /tmp/backing.snap >/tmp/snap.diff 2>&1
 }
 served_equals_backing() {

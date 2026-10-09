@@ -34,7 +34,9 @@ namespace dcfs {
 //     12.4b: a stub's nodeid is never handed out again), stubs kept while
 //     their dentry is only forgotten (the triggers), and the partial index
 //     inodes_unlinked (the sweep of unnamed rows at every start).
-inline constexpr int kSchemaVersion = 5;
+// v6: dirty.atime_only (step 23.8): rows that stand for an access time only
+//     and do not drive sync points.
+inline constexpr int kSchemaVersion = 6;
 
 // Identifies the root of the cache: the backing filesystem being cached,
 // and the backing (ino, generation) of its root directory. Only consulted

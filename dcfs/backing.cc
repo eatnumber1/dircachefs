@@ -1010,6 +1010,74 @@ absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd,
   }());
 }
 
+absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
+                           struct statx *fetched) {
+  events::Scope scope(*ctx.events, ctx, &ProtocolEvents::RefreshBegin,
+                      &ProtocolEvents::RefreshEnd, id);
+  // The frame's result is its End's status.
+  return scope.Finish([&]() -> absl::Status {
+    const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
+    // A statx of a descriptor dcfs holds: the inode is pinned in memory, so
+    // the filesystem answers it without a disk access. The checks' hook
+    // runs (no transaction may be open across it), but it is not noted as
+    // a request reaching the backing filesystem (Context::NoteBackingCall:
+    // the --v=1 line, the INFO line about the first access after an idle
+    // period, which stand for disk accesses).
+    ctx.events->BackingCall(ctx, "statx", absl::SourceLocation::current());
+    absl::StatusOr<struct statx> stx =
+        syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask);
+    if (!stx.ok()) {
+      // What the reads since the last record gave is unknown now: so are
+      // the attributes, and the row stays dirty (atime only) so that a
+      // record of them by another path waits for a sync point.
+      ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+        absl::Status unknown = cache::MarkAttrsUnknown(ctx, id);
+        if (absl::IsNotFound(unknown)) return absl::OkStatus();
+        ABSL_RETURN_IF_ERROR(unknown);
+        return cache::MarkAtimeDirty(ctx, id, cache::GuardTouch::kAlways);
+      }));
+      return stx.status();
+    }
+    // Model: the held fill's statx (FR_stat, FG_stat).
+    ctx.events->AttrsStatted(ctx, id);
+    if (fetched != nullptr) *fetched = *stx;
+    // Nothing changed since the last record (the common case: a stat of an
+    // open file nobody read since, lsattr's private open): no transaction.
+    // The row's dirty mark, if it needs one, was made with that record.
+    absl::StatusOr<cache::CachedAttr> row = cache::GetAttr(ctx, id);
+    if (absl::IsNotFound(row.status())) {
+      ctx.events->AttrsFilled(ctx, id, false);
+      return absl::OkStatus();
+    }
+    ABSL_RETURN_IF_ERROR(row.status());
+    const bool open_for_write = OpenForWrite(ctx, id);
+    if (row->valid && !open_for_write && stx->stx_nlink != 0 &&
+        cache::SameAttrs(*row, *stx)) {
+      ctx.events->AttrsFilled(ctx, id, false);
+      return absl::OkStatus();
+    }
+    bool recorded = false;
+    ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+      if (cache::CanFill(ctx, snapshot, id)) {
+        recorded = true;
+        ABSL_RETURN_IF_ERROR(WriteAttrs(ctx, id, *stx));
+        return cache::MarkAtimeDirty(ctx, id);
+      }
+      // A mutation of `id` began or ended since the snapshot, or is in
+      // flight: what was read may predate it, and its own record may
+      // predate the reads seen here. Neither is recorded as current.
+      VLOG(1) << "inode " << id
+              << ": not caching attributes read through a held descriptor "
+                 "concurrently with a mutation of it";
+      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
+      return cache::MarkAtimeDirty(ctx, id, cache::GuardTouch::kAlways);
+    }));
+    // Model: the held fill's commit (FR_fill, FG_fill).
+    ctx.events->AttrsFilled(ctx, id, recorded);
+    return absl::OkStatus();
+  }());
+}
+
 absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
   std::string buf(size, '\0');
   size_t total = 0;
@@ -2041,9 +2109,13 @@ absl::Status SyncBacking(Context &ctx, bool announce) {
       ABSL_RETURN_IF_ERROR(StillWritable(ctx, fd));
     }
     ctx.events->SyncfsDone(ctx);
+    // Open now (written to, or read: step 23.8): see cache::ClearDirty.
     std::vector<InodeId> keep;
     if (ctx.open_for_write != nullptr) {
       keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
+    }
+    if (ctx.open_files != nullptr) {
+      keep.insert(keep.end(), ctx.open_files->begin(), ctx.open_files->end());
     }
     int64_t cleared = 0;
     ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep, &cleared));
@@ -2212,10 +2284,10 @@ absl::Status FinishRun(Context &ctx) {
   ABSL_RETURN_IF_ERROR(ctx.db.Checkpoint());
   // Model: StopCkpt.
   ctx.events->Checkpointed(ctx);
-  if (ctx.dirty.any) {
+  if (ctx.dirty.any || ctx.dirty.atime) {
     return FailedPreconditionErrorBuilder()
-           << "Dirty cache entries remain (a writable open is still "
-              "outstanding); leaving the clean-shutdown flag unset";
+           << "Dirty cache entries remain (a file is still open); leaving "
+              "the clean-shutdown flag unset";
   }
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
       [&] { return SetCleanShutdown(ctx.db, true); },

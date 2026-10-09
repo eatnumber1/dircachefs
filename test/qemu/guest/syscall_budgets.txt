@@ -28,7 +28,7 @@ cached-stat sql_txns 0
 warm-readdir backing 0
 warm-readdir procfd 0
 warm-readdir sync 0
-warm-readdir sql_stmts 13
+warm-readdir sql_stmts 14
 warm-readdir sql_txns 0
 
 create backing 21
@@ -78,3 +78,15 @@ chmod procfd 5
 chmod sync 1
 chmod sql_stmts 35
 chmod sql_txns 3
+
+read backing 7
+read procfd 1
+read sync 0
+read sql_stmts 20
+read sql_txns 2
+
+held-stat backing 8
+held-stat procfd 1
+held-stat sync 0
+held-stat sql_stmts 21
+held-stat sql_txns 2

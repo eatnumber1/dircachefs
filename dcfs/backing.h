@@ -137,6 +137,24 @@ absl::Status RefreshAttrs(Context &ctx, InodeId id,
 absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd,
                                 struct statx *fetched = nullptr);
 
+// Step 23.8, a held fill: `id`'s attributes from `fd`, a descriptor dcfs
+// holds for it (a passthrough open's shared backing fd, or a written file's
+// O_PATH one), at FLUSH, at RELEASE and for an attribute request while it
+// is held. The inode is pinned, so the statx needs no disk access; it sees
+// every read the kernel made through passthrough, the access time those
+// gave included. If the row already holds exactly that, nothing is written.
+// Otherwise, in one transaction: the attributes (as WriteAttrs: kept unknown
+// while open for writing) if CanFill holds for the snapshot taken before
+// the statx, else the attributes marked unknown; and the row dirty, atime
+// only (cache::MarkAtimeDirty: the backing filesystem writes the access time
+// back lazily, so only a later sync point's syncfs makes it durable, and
+// recovery forgets it after a crash before then). A failed statx also marks
+// the attributes unknown and the row dirty, then returns the error.
+// `fetched`, if given, receives the statx. No row (a removed object, or one
+// invalidated meanwhile): nothing recorded.
+absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
+                           struct statx *fetched = nullptr);
+
 // Reads up to `size` bytes at `offset` from `fd` (a real, non-O_PATH fd
 // already open on the node -- see DirCacheFS::Open's OpenNode call),
 // looping over short reads until `size` bytes have been read or EOF. The

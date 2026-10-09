@@ -67,6 +67,18 @@
  *       before printing "MAPPED": the store then comes after the last close
  *       (on dcfs, after the last RELEASE), through a mapping that holds only
  *       the backing file (step 23.1).
+ *   testutil readnoatime <path>
+ *       open(2)s <path> O_RDONLY | O_NOATIME, reads it to the end and closes
+ *       it (busybox cannot ask for O_NOATIME).
+ *   testutil mmapread <path>
+ *       open(2)s <path> O_RDONLY, maps its first page MAP_PRIVATE, close(2)s
+ *       the descriptor, reads one byte through the mapping and unmaps it: a
+ *       read that is no read(2) (step 23.8).
+ *   testutil heldstat <path>
+ *       open(2)s <path> O_RDONLY, reads one byte, stat(2)s <path> while it
+ *       is open, then closes it: one OPEN, one GETATTR, one FLUSH and one
+ *       RELEASE through dcfs (a shell's redirections dup and close the
+ *       descriptor several times, each close a FLUSH).
  *   testutil fsync <path>
  *       Opens a file or a directory read-only and fsync(2)s it (through dcfs:
  *       FUSE FSYNC or FSYNCDIR, after which dcfs runs a sync point), then
@@ -492,6 +504,68 @@ static int cmd_mmapwrite(const char *path, const char *delay_str,
 	fflush(stdout);
 	for (;;)
 		pause();
+}
+
+static int cmd_readnoatime(const char *path)
+{
+	char buf[4096];
+	ssize_t n;
+	int fd = open(path, O_RDONLY | O_NOATIME);
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	while ((n = read(fd, buf, sizeof(buf))) > 0)
+		;
+	if (n == -1) {
+		print_err(errno);
+		return 1;
+	}
+	close(fd);
+	return 0;
+}
+
+static int cmd_mmapread(const char *path)
+{
+	volatile char *p;
+	char c;
+	int fd = open(path, O_RDONLY);
+
+	if (fd == -1) {
+		print_err(errno);
+		return 1;
+	}
+	p = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (p == MAP_FAILED) {
+		print_err(errno);
+		return 1;
+	}
+	if (close(fd) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	c = p[0];
+	if (munmap((void *) p, 4096) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	printf("%d\n", (int) c);
+	return 0;
+}
+
+static int cmd_heldstat(const char *path)
+{
+	struct stat st;
+	char c;
+	int fd = open(path, O_RDONLY);
+
+	if (fd == -1 || read(fd, &c, 1) == -1 || stat(path, &st) == -1) {
+		print_err(errno);
+		return 1;
+	}
+	close(fd);
+	return 0;
 }
 
 static int cmd_fsync(const char *path)
@@ -2540,6 +2614,12 @@ int main(int argc, char *argv[])
 		return cmd_mmapwrite(argv[2], argv[3], 0);
 	if (argc == 4 && strcmp(argv[1], "mmapwrite-closed") == 0)
 		return cmd_mmapwrite(argv[2], argv[3], 1);
+	if (argc == 3 && strcmp(argv[1], "readnoatime") == 0)
+		return cmd_readnoatime(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "mmapread") == 0)
+		return cmd_mmapread(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "heldstat") == 0)
+		return cmd_heldstat(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "fsync") == 0)
 		return cmd_fsync(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "syncfs") == 0)

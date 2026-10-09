@@ -161,6 +161,7 @@ absl::Status CreatedButNotCompleted(InodeId parent, std::string_view name,
 DirCacheFS::DirCacheFS(Context &ctx, Options opts)
     : ctx_(ctx), opts_(opts), last_sync_(ctx.clock->TimeNow()) {
   ctx_.open_for_write = &open_for_write_;
+  ctx_.open_files = &open_files_held_;
   std::string source;
   std::tie(max_held_fds_, source) = MaxHeldFds(opts);
   if (max_held_fds_ == 0) {
@@ -188,6 +189,7 @@ std::optional<FileDescriptor> DirCacheFS::TakeWritten(InodeId id) {
 
 DirCacheFS::~DirCacheFS() {
   if (ctx_.open_for_write == &open_for_write_) ctx_.open_for_write = nullptr;
+  if (ctx_.open_files == &open_files_held_) ctx_.open_files = nullptr;
 }
 
 absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
@@ -313,6 +315,17 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
 }
 
 absl::Status DirCacheFS::Destroy() {
+  // Step 23.8: files still open for reading (a DESTROY with opens: SIGTERM,
+  // a lazy unmount). The kernel sends no more requests, so this is dcfs's
+  // last look: record their access times now (held fills), and let the
+  // sync point after this clear their rows, so that the shutdown is clean.
+  // A read the kernel still makes afterwards is not seen, as a write
+  // through a mapping after unmount is not (README "Limitations").
+  for (const auto &[id, backing_file] : backing_files_) {
+    if (backing_file.writable_refs > 0) continue;
+    RecordHeldAttrs(id, *backing_file.fd, "Destroy");
+    open_files_held_.erase(id);
+  }
   // The kernel has let go of every nodeid (it sends no FORGETs at
   // unmount): reconcile the written files it still held (see
   // ReconcileWritten), before FinishRun's sync point.
@@ -460,7 +473,7 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
 
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryForAttr(
     InodeId id, cache::CachedAttr attr) {
-  ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
+  ABSL_ASSIGN_OR_RETURN(attr, FreshAttr(id, attr, /*reply=*/true));
 
   fuse_entry_param entry{};
   entry.ino = static_cast<fuse_ino_t>(id);
@@ -529,13 +542,27 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryAfterPhase2(
 }
 
 absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
-    InodeId id, cache::CachedAttr attr) {
+    InodeId id, cache::CachedAttr attr, bool reply) {
   // Model: a getattr's first step (GAFrom), served or refreshed. Every
   // caller read `attr` from the cache with no syscall since.
   events::Scope scope(*ctx_.events, ctx_, &ProtocolEvents::GetattrBegin,
                       &ProtocolEvents::GetattrEnd, id, attr.valid);
   // The frame's result is its End's status.
   return scope.Finish([&]() -> absl::StatusOr<cache::CachedAttr> {
+    // A held fill (step 23.8), served from its statx whatever the row says,
+    // for an attribute reply (the type checks of an open, an opendir or a
+    // readlink need no fresh access time).
+    // Not while open for writing: then the row is kept unknown and the
+    // refresh below reads the same descriptor. Not for a removed object,
+    // which has no row (RequireAttrOrRemoved answered it).
+    if (std::optional<int> held = reply ? HeldFdOf(id) : std::nullopt;
+        held.has_value() && !open_for_write_.contains(id) &&
+        !removed_.contains(id)) {
+      struct statx stx {};
+      ABSL_RETURN_IF_ERROR(backing::FillHeldAttrs(ctx_, id, *held, &stx));
+      ABSL_ASSIGN_OR_RETURN(attr, RequireAttr(id));
+      return cache::WithStatx(attr, stx);
+    }
     if (attr.valid) return attr;
     struct statx stx {};
     ABSL_RETURN_IF_ERROR(RefreshAttrsOf(id, &stx));
@@ -736,6 +763,16 @@ absl::Status DirCacheFS::Setattr(
       XattrsChangedBySetattr(to_set);
   ABSL_ASSIGN_OR_RETURN(cache::Mutation mutation,
                         cache::BeginAttrChange(ctx_, id, side_effects));
+  // An explicit access time on a directory or symlink replaces the stamp
+  // dcfs keeps in the cache for it (step 23.8), earlier or not: drop it, so
+  // the refresh below records the backing filesystem's.
+  if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_ATIME_NOW)) {
+    if (absl::Status dropped = cache::DropAtimeStamp(ctx_, id);
+        !dropped.ok()) {
+      mutation.End();
+      return dropped;
+    }
+  }
   // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
   // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
   if (absl::Status interrupted = Checkpoint(ctx_, "a setattr's syscall");
@@ -983,7 +1020,11 @@ absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
     return req.ReplyReadlink(target);
   }
   absl::StatusOr<std::string> target = cache::Readlink(ctx_, id);
-  if (target.ok()) return req.ReplyReadlink(*target);
+  if (target.ok()) {
+    // Served from the cache: the access time is stamped there (step 23.8).
+    StampAtime(id);
+    return req.ReplyReadlink(*target);
+  }
   if (!absl::IsNotFound(target.status())) return target.status();
 
   // Not cached yet. Confirm this really is a symlink (rather than, say, a
@@ -1569,9 +1610,24 @@ absl::Status DirCacheFS::OpenInode(
   if (!shared) {
     // A cold open reopens the object by handle (dcfs/checkpoint.h).
     ABSL_RETURN_IF_ERROR(Checkpoint(ctx_, "an open"));
+    // Step 23.8: from the reply on, the kernel may read the file through
+    // passthrough, and the backing filesystem then changes its access time
+    // in memory and writes it back lazily. Its row is dirty (atime only)
+    // before that, so that a crash before dcfs reads the attributes back
+    // (FLUSH, RELEASE, a stat while open: the held fills) makes the restart
+    // forget the access time it has; sync points keep the row while the
+    // file is open. A writable open's phase 1 (BeginWriting) makes it dirty
+    // anyway, and a removed object has no row.
+    if (!writable && !removed_.contains(id)) {
+      ABSL_RETURN_IF_ERROR(ctx_.db.Transaction(
+          [&] {
+            return cache::MarkAtimeDirty(ctx_, id, cache::GuardTouch::kNone);
+          }));
+    }
     ABSL_ASSIGN_OR_RETURN(BackingFile backing_file, MakeBackingFile(id, req));
     backing_id = backing_file.backing_id;
     backing_it = backing_files_.emplace(id, std::move(backing_file)).first;
+    open_files_held_.insert(id);
   } else {
     backing_id = backing_it->second.backing_id;
   }
@@ -1626,6 +1682,7 @@ absl::Status DirCacheFS::OpenInode(
       if (!shared) {
         if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
         backing_files_.erase(backing_it);
+        open_files_held_.erase(id);
       }
       return allowed.status();
     }
@@ -1662,22 +1719,9 @@ absl::Status DirCacheFS::OpenInode(
       if (--backing_it->second.refs == 0) {
         if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
         backing_files_.erase(backing_it);
+        open_files_held_.erase(id);
       }
       return status;
-    }
-  }
-
-  // Step 23.3: the reads this open makes go through passthrough, and the
-  // backing filesystem updates the file's access time for them by its
-  // mount's rule; record now what it will (a cache write only, no backing
-  // I/O). A writable open's attributes are unknown until its last release
-  // (and re-read then, atime included), and O_NOATIME asks for none.
-  if (!writable && !(fi.flags & O_NOATIME) && !removed_.contains(id)) {
-    if (absl::StatusOr<bool> touched = cache::TouchAtime(
-            ctx_, id, absl::ToTimespec(ctx_.clock->TimeNow()));
-        !touched.ok()) {
-      LOG(ERROR) << "Open: could not record the access time of inode " << id
-                 << ": " << touched.status();
     }
   }
 
@@ -1778,11 +1822,45 @@ void DirCacheFS::RecordWrittenAttrs(InodeId id, int fd, std::string_view op) {
   }
 }
 
+void DirCacheFS::RecordHeldAttrs(InodeId id, int fd, std::string_view op,
+                                 struct statx *fetched) {
+  if (fetched != nullptr) fetched->stx_mask = 0;
+  if (removed_.contains(id)) return;
+  absl::Status status = backing::FillHeldAttrs(ctx_, id, fd, fetched);
+  if (status.ok()) return;
+  // FillHeldAttrs marked the attributes unknown and the row dirty; a later
+  // access re-reads them.
+  LOG(WARNING) << op << ": could not read the attributes of inode " << id
+               << " through its held descriptor, leaving them unknown: "
+               << status;
+  if (fetched != nullptr) fetched->stx_mask = 0;
+}
+
+void DirCacheFS::StampAtime(InodeId id) {
+  absl::StatusOr<bool> stamped =
+      cache::TouchAtime(ctx_, id, absl::ToTimespec(ctx_.clock->TimeNow()));
+  // NotFound: the row is gone (invalidated meanwhile); nothing to stamp.
+  if (!stamped.ok() && !absl::IsNotFound(stamped.status())) {
+    LOG(WARNING) << "Could not record the access time of inode " << id
+                 << " in the cache: " << stamped.status();
+  }
+}
+
 absl::Status DirCacheFS::Flush(
     FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
   auto it = open_files_.find(fi.fh);
   RET_CHECK(it != open_files_.end()) << "Flush on unknown handle " << fi.fh;
-  if (it->second.writable) {
+  if (!it->second.writable) {
+    // Step 23.8: the reads this open made went through passthrough, and the
+    // backing filesystem stamped their access time: read it back from the
+    // held descriptor (a held fill; the close's other descriptors may read
+    // on, and the RELEASE reads it again).
+    InodeId id = it->second.ino;
+    auto backing_it = backing_files_.find(id);
+    RET_CHECK(backing_it != backing_files_.end())
+        << "Flush on inode " << id << " with no BackingFile";
+    RecordHeldAttrs(id, *backing_it->second.fd, "Flush");
+  } else {
     // The passthrough (or fallback Write()) writes this open may have made
     // are invisible to the cache until now; record their effect on
     // size/mtime/ctime/etc. right away. The attributes nevertheless stay
@@ -1835,7 +1913,15 @@ absl::Status DirCacheFS::Release(
     // point whose syncfs began before them must not clear the dirty row.
     // The refresh below takes its snapshot after it.
     EndWriting(id);
+    // Not an open file for this record (Context::open_files): its row is
+    // dirty since BeginWriting's phase 1 and stays so (sync points keep an
+    // open file's row, and EndWrites touched it), so the atime-only mark
+    // every other record of an open file makes (cache::UpdateAttr) would
+    // only cost a statement. The reads of a remaining read-only open are
+    // recorded by its own release.
+    open_files_held_.erase(id);
     RecordWrittenAttrs(id, *backing_file.fd, "Release");
+    open_files_held_.insert(id);
     if (!removed_.contains(id)) {
       ResolveSideEffectXattrs(id, kXattrsChangedByWrite, *backing_file.fd,
                               "Release");
@@ -1843,6 +1929,15 @@ absl::Status DirCacheFS::Release(
     // No writer is left to write through it (review L-a); a readers'
     // shared fd stays.
     backing_file.DropWriteFd();
+  }
+  // Step 23.8: a read-only open's reads went through passthrough; read back
+  // the access time they gave (a held fill), whether other opens remain or
+  // not. After the last release no read can come (the kernel sends it once
+  // nothing holds the file), so this record is the truth until the next
+  // open.
+  struct statx released {};
+  if (!writable) {
+    RecordHeldAttrs(id, *backing_file.fd, "Release", &released);
   }
   if (backing_file.refs > 0) {
     // The revalidation model's ReleaseF (formal/reval.tla).
@@ -1862,7 +1957,10 @@ absl::Status DirCacheFS::Release(
   // meanwhile) has nothing left to delete.
   bool delete_row = false;
   absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx_, id);
-  if (attr.ok() && !attr->valid) {
+  if (attr.ok() && !attr->valid && released.stx_mask != 0) {
+    // The held fill just read it.
+    delete_row = released.stx_nlink == 0;
+  } else if (attr.ok() && !attr->valid) {
     struct statx stx {};
     absl::Status refreshed =
         backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd, &stx);
@@ -1930,6 +2028,7 @@ absl::Status DirCacheFS::Release(
     }
   }
   backing_files_.erase(backing_it);
+  open_files_held_.erase(id);
   ctx_.events->FileReleased(ctx_, id, writable, SharedFdOf(id));
   if (delete_row) {
     if (absl::Status retired = RetireRemoved(id, std::move(held));
@@ -2106,6 +2205,10 @@ absl::Status DirCacheFS::Readdir(
       std::vector<Listed> listed,
       ListCached(dir, CursorFromOffset(off), size > used ? size - used : 0,
                  DirEntrySize));
+  // Served from the cache: the access time is stamped there (step 23.8),
+  // once per listing (at its first reply; relatime would make the later
+  // ones no-ops anyway).
+  if (off == 0) StampAtime(dir);
 
   std::vector<FuseDirEntry> entries;
   if (off < 1) {
@@ -2147,6 +2250,9 @@ absl::Status DirCacheFS::Readdirplus(
       std::vector<Listed> listed,
       ListCached(dir, CursorFromOffset(off), size > used ? size - used : 0,
                  DirEntryPlusSize));
+  // Served from the cache: the access time is stamped there (step 23.8),
+  // once per listing, as for Readdir.
+  if (off == 0) StampAtime(dir);
 
   std::vector<FuseDirEntryPlus> entries;
   if (off < 1) {
@@ -2486,12 +2592,14 @@ absl::Status DirCacheFS::Create(
   if (writable) backing_file.writable_refs = 1;
   int backing_id = backing_file.backing_id;
   backing_files_.emplace(child.id, std::move(backing_file));
+  open_files_held_.insert(child.id);
   // The create is failing after this point, so no Release will ever come
   // for this open.
   auto undo = [&] {
     if (writable) EndWriting(child.id);
     if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
     backing_files_.erase(child.id);
+    open_files_held_.erase(child.id);
   };
   // Phase 1 for every write the kernel will make through the passthrough
   // fd, as in Open(), right after the BackingFile is registered.
@@ -2777,11 +2885,13 @@ absl::Status DirCacheFS::Tmpfile(FuseRequest &req, fuse_ino_t parent_ino,
                                                .writable = true,
                                                .writable_refs = writable ? 1 : 0,
                                                .refs = 1});
+  open_files_held_.insert(child.id);
   tmpfiles_.insert(child.id);
   auto undo = [&] {
     if (writable) EndWriting(child.id);
     if (backing_id > 0) req.PassthroughClose(backing_id).IgnoreError();
     backing_files_.erase(child.id);
+    open_files_held_.erase(child.id);
     tmpfiles_.erase(child.id);
     TakeWritten(child.id);
     // The file goes with its only descriptor; so does its row (review L5).
@@ -2826,6 +2936,13 @@ std::optional<int> DirCacheFS::OpenFdOf(InodeId id) const {
   auto it = backing_files_.find(id);
   if (it == backing_files_.end()) return std::nullopt;
   return *it->second.fd;
+}
+
+std::optional<int> DirCacheFS::HeldFdOf(InodeId id) const {
+  if (std::optional<int> fd = OpenFdOf(id); fd.has_value()) return fd;
+  auto it = written_.find(id);
+  if (it == written_.end() || !it->second.has_value()) return std::nullopt;
+  return **it->second;
 }
 
 events::SharedFd DirCacheFS::SharedFdOf(InodeId id) const {

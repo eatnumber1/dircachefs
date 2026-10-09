@@ -7,6 +7,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -119,7 +120,27 @@ absl::Status MarkIncomplete(Context &ctx, InodeId dir) {
   "size = ?, blocks = ?, blksize = ?, atime_s = ?, atime_ns = ?, "         \
   "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, "    \
   "btime_ns = ?"
-#define DCFS_ATTR_ASSIGNMENTS "attrs_valid = 1, " DCFS_ATTR_VALUES
+// An inode row's: DCFS_ATTR_VALUES, except that (step 23.8) a directory's
+// or a symlink's cached access time is kept when it is the later one: the
+// stamp TouchAtime makes (a listing, a readlink) never reaches the backing
+// filesystem, so a record from it must not take the stamp back (an explicit
+// atime set first drops it: DropAtimeStamp). The CASE reads the row's old
+// values (SQLite evaluates every SET expression against the row before the
+// update); the named parameters take the positions DCFS_ATTR_VALUES's ?s
+// had (a ? is numbered one past the largest number before it), so BindAttrs
+// binds them unchanged.
+#define DCFS_KEEP_STAMP                                                      \
+  "(mode & 61440) IN (16384, 40960) AND (mode & 61440) = (:mode & 61440) "   \
+  "AND (atime_s > :atime_s OR (atime_s = :atime_s AND atime_ns > :atime_ns))"
+#define DCFS_ATTR_ASSIGNMENTS                                                \
+  "attrs_valid = 1, "                                                        \
+  "mode = :mode, nlink = ?, uid = ?, gid = ?, rdev = ?, "                    \
+  "size = ?, blocks = ?, blksize = ?, "                                      \
+  "atime_s = CASE WHEN " DCFS_KEEP_STAMP " THEN atime_s ELSE :atime_s END, " \
+  "atime_ns = CASE WHEN " DCFS_KEEP_STAMP " THEN atime_ns ELSE :atime_ns "  \
+  "END, "                                                                    \
+  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, "      \
+  "btime_ns = ?"
 #define DCFS_ATTR_COLUMNS                                                  \
   "mode, nlink, uid, gid, rdev, size, blocks, blksize, atime_s, atime_ns, " \
   "mtime_s, mtime_ns, ctime_s, ctime_ns, btime_s, btime_ns"
@@ -160,6 +181,10 @@ absl::Status BindAttrs(Statement &stmt, int first, const struct statx &stx) {
   }
   return absl::OkStatus();
 }
+
+// Defined with the fill guards below: the atime-only dirty mark of a record
+// of the attributes of an inode open for reading (Context::open_files).
+absl::Status MarkIfOpen(Context &ctx, InodeId id);
 
 absl::Status BindHandle(Statement &stmt, int first, const FileHandle &handle) {
   ABSL_RETURN_IF_ERROR(stmt.Bind(first, handle.handle_type));
@@ -318,6 +343,21 @@ CachedAttr WithStatx(CachedAttr attr, const struct statx &stx) {
   st.st_ctim = {stx.stx_ctime.tv_sec, stx.stx_ctime.tv_nsec};
   attr.btime = {stx.stx_btime.tv_sec, stx.stx_btime.tv_nsec};
   return attr;
+}
+
+bool SameAttrs(const CachedAttr &attr, const struct statx &stx) {
+  const CachedAttr fresh = WithStatx(attr, stx);
+  auto same_time = [](const struct timespec &a, const struct timespec &b) {
+    return a.tv_sec == b.tv_sec && a.tv_nsec == b.tv_nsec;
+  };
+  const struct stat &a = attr.st;
+  const struct stat &b = fresh.st;
+  return a.st_mode == b.st_mode && a.st_nlink == b.st_nlink &&
+         a.st_uid == b.st_uid && a.st_gid == b.st_gid &&
+         a.st_rdev == b.st_rdev && a.st_size == b.st_size &&
+         a.st_blocks == b.st_blocks && a.st_blksize == b.st_blksize &&
+         same_time(a.st_atim, b.st_atim) && same_time(a.st_mtim, b.st_mtim) &&
+         same_time(a.st_ctim, b.st_ctim) && same_time(attr.btime, fresh.btime);
 }
 
 absl::StatusOr<uint32_t> GetGeneration(Context &ctx, InodeId id) {
@@ -732,7 +772,8 @@ absl::Status UpdateMatchingRow(Context &ctx, InodeId id,
   ABSL_RETURN_IF_ERROR(BindHandle(*update, 1, handle));
   ABSL_RETURN_IF_ERROR(BindAttrs(*update, 3, stx));
   ABSL_RETURN_IF_ERROR(update->Bind(3 + kNumAttrColumns, id));
-  return update->ExecuteOnce();
+  ABSL_RETURN_IF_ERROR(update->ExecuteOnce());
+  return MarkIfOpen(ctx, id);
 }
 
 // No existing row matched: insert a fresh one with a new random fuse_gen.
@@ -1087,15 +1128,25 @@ absl::Status UpdateAttr(Context &ctx, InodeId id, const struct statx &stx) {
     ABSL_RETURN_IF_ERROR(update->Bind(1 + kNumAttrColumns, id));
     ABSL_RETURN_IF_ERROR(update->ExecuteOnce());
     if (ctx.db.Changes() == 0) return NoInode(id);
-    return absl::OkStatus();
+    return MarkIfOpen(ctx, id);
   });
+}
+
+absl::Status DropAtimeStamp(Context &ctx, InodeId id) {
+  return Execute(ctx,
+                 "UPDATE inodes SET atime_s = ?, atime_ns = 0 "
+                 "WHERE id = ? AND attrs_valid = 0 AND (mode & ?) IN (?, ?)",
+                 std::numeric_limits<int64_t>::min(), id,
+                 static_cast<int64_t>(S_IFMT), static_cast<int64_t>(S_IFDIR),
+                 static_cast<int64_t>(S_IFLNK))
+      .status();
 }
 
 absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
                                 const struct timespec &now) {
-  // Read first, outside any transaction: almost every read OPEN finds the
-  // atime recent (relatime), and a write transaction per open would take
-  // the database's write lock for nothing (review L7).
+  // Read first, outside any transaction: almost every listing or readlink
+  // finds the atime recent (relatime), and a write transaction for each
+  // would take the database's write lock for nothing (review L7).
   ABSL_ASSIGN_OR_RETURN(
       Statement * stmt,
       Query(ctx,
@@ -1327,6 +1378,45 @@ void RegisterMutation(Context &ctx, std::span<const InodeId> ids,
 
 }  // namespace
 
+absl::Status MarkAtimeDirty(Context &ctx, InodeId id, GuardTouch touch) {
+  // A mutation's row stays one (its reason is the stronger).
+  ABSL_RETURN_IF_ERROR(Execute(ctx,
+                               "INSERT INTO dirty (inode, atime_only) "
+                               "VALUES (?, 1) ON CONFLICT (inode) DO NOTHING",
+                               id)
+                           .status());
+  ctx.dirty.atime = true;
+  ++ctx.dirty.inserts;
+  // A sync point whose BeginSync came before this record keeps the row
+  // (ClearDirty: CanFill fails): the access time recorded may come from a
+  // read after its syncfs began. A mutation of `id` in flight touches it at
+  // its end anyway, and its phase 3 must still see that it Owns `id`,
+  // unless the caller is a held fill that could not record (see the
+  // declaration).
+  if (touch == GuardTouch::kAlways ||
+      (touch == GuardTouch::kUnlessInFlight &&
+       !ctx.fills.inflight.contains(id))) {
+    Touch(ctx.fills, id);
+  }
+  return absl::OkStatus();
+}
+
+namespace {
+
+absl::Status MarkIfOpen(Context &ctx, InodeId id) {
+  if (ctx.open_files == nullptr || !ctx.open_files->contains(id)) {
+    return absl::OkStatus();
+  }
+  // A file open for writing is dirty since its phase 1, its attributes are
+  // kept unknown, and its last release ends its writes (EndWrites).
+  if (ctx.open_for_write != nullptr && ctx.open_for_write->contains(id)) {
+    return absl::OkStatus();
+  }
+  return MarkAtimeDirty(ctx, id);
+}
+
+}  // namespace
+
 FillSnapshot BeginFill(const Context &ctx) { return {.seq = ctx.fills.seq}; }
 
 void EndWrites(Context &ctx, InodeId id) {
@@ -1447,8 +1537,8 @@ absl::Status InsertDirty(Context &ctx, std::span<const InodeId> ids) {
   for (InodeId id : ids) {
     ABSL_RETURN_IF_ERROR(
         Execute(ctx,
-                "INSERT INTO dirty (inode) VALUES (?) "
-                "ON CONFLICT (inode) DO NOTHING",
+                "INSERT INTO dirty (inode, atime_only) VALUES (?, 0) "
+                "ON CONFLICT (inode) DO UPDATE SET atime_only = 0",
                 id)
             .status());
   }
@@ -1620,13 +1710,52 @@ absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx) {
 
 absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx) {
   SyncSnapshot snapshot{.fills = BeginFill(ctx)};
-  ABSL_ASSIGN_OR_RETURN(snapshot.dirty, ListDirty(ctx));
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * rows,
+      Query(ctx, "SELECT inode, atime_only FROM dirty ORDER BY inode"));
+  ABSL_RETURN_IF_ERROR(rows->ForEachRow([&](Statement &row) {
+    const InodeId id = row.Column<int64_t>(0);
+    snapshot.dirty.push_back(id);
+    if (row.Column<int64_t>(1) != 0) snapshot.atime_only.push_back(id);
+    return absl::OkStatus();
+  }));
   if (ctx.open_for_write != nullptr) {
     snapshot.open_for_write.assign(ctx.open_for_write->begin(),
                                    ctx.open_for_write->end());
   }
+  if (ctx.open_files != nullptr) {
+    snapshot.open_files.assign(ctx.open_files->begin(),
+                               ctx.open_files->end());
+  }
+  snapshot.inserts = ctx.dirty.inserts;
   return snapshot;
 }
+
+namespace {
+
+// What Context::dirty.any and .atime are for the table as it is now (in
+// the caller's transaction, if any: assign them only once it committed, so
+// that a rollback cannot leave them false over rows that came back).
+struct DirtyFlags {
+  bool any = true;
+  bool atime = true;
+};
+absl::StatusOr<DirtyFlags> CountDirty(Context &ctx) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx,
+            "SELECT EXISTS (SELECT 1 FROM dirty WHERE atime_only = 0), "
+            "EXISTS (SELECT 1 FROM dirty WHERE atime_only = 1)"));
+  DirtyFlags flags;
+  ABSL_RETURN_IF_ERROR(ReadOne(*stmt, [&](Statement &row) {
+                         flags.any = row.Column<int64_t>(0) != 0;
+                         flags.atime = row.Column<int64_t>(1) != 0;
+                         return absl::OkStatus();
+                       }).status());
+  return flags;
+}
+
+}  // namespace
 
 absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
                         std::span<const InodeId> keep, int64_t *cleared) {
@@ -1636,6 +1765,10 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   // it after that (and released it since, which EndWrites also records in
   // the guards; this does not depend on it).
   kept.insert(synced.open_for_write.begin(), synced.open_for_write.end());
+  // Open at all when it began (step 23.8): the kernel may have read it after
+  // that, and the access time those reads gave is not covered either; its
+  // last release records it (a held fill, which touches it).
+  kept.insert(synced.open_files.begin(), synced.open_files.end());
   // The fast path: if the clock has not moved since BeginSync and no
   // mutation is in flight, then the per-row loop below would delete exactly
   // the rows of the table that are not kept, and one bulk delete does it.
@@ -1643,7 +1776,9 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   //  - The table holds no row that is not in `synced.dirty`. Rows are
   //    added only by a phase 1 (BeginMutation, whose RegisterMutation then
   //    advances the clock with nothing in between) and by MarkDirty in a
-  //    phase 3 (before its mutation's End, which advances it). Only
+  //    phase 3 (before its mutation's End, which advances it), and by
+  //    MarkAtimeDirty, which counts itself in Context::dirty.inserts (a
+  //    cold open's advances no clock). Only
   //    ClearDirty deletes rows (RecoverDirty keeps them, step 12.6b), and
   //    another sync point's ClearDirty in between could only have removed
   //    rows (then putting a kept one back below is merely conservative).
@@ -1656,22 +1791,32 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   // lookup in `kept`), and the case of every sync point under today's
   // single thread, since nothing can run during one.
   const bool nothing_moved = ctx.fills.seq == synced.fills.seq &&
-                             ctx.fills.inflight.empty();
-  bool any = false;
+                             ctx.fills.inflight.empty() &&
+                             ctx.dirty.inserts == synced.inserts;
+  DirtyFlags flags;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     removed = 0;
     if (nothing_moved) {
       ABSL_RETURN_IF_ERROR(Execute(ctx, "DELETE FROM dirty").status());
       removed = static_cast<int64_t>(synced.dirty.size());
       // Put back the kept rows that were there (and only those: a kept
-      // inode that was not dirty must not become dirty).
+      // inode that was not dirty must not become dirty), each with its
+      // reason (nothing moved: the snapshot's is the row's).
       for (InodeId id : kept) {
         if (!std::binary_search(synced.dirty.begin(), synced.dirty.end(),
                                 id)) {
           continue;
         }
-        const InodeId row[] = {id};
-        ABSL_RETURN_IF_ERROR(InsertDirty(ctx, row));
+        const int64_t atime_only =
+            std::binary_search(synced.atime_only.begin(),
+                               synced.atime_only.end(), id)
+                ? 1
+                : 0;
+        ABSL_RETURN_IF_ERROR(
+            Execute(ctx,
+                    "INSERT INTO dirty (inode, atime_only) VALUES (?, ?)", id,
+                    atime_only)
+                .status());
         --removed;
       }
     } else {
@@ -1691,12 +1836,8 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
         ++removed;
       }
     }
-    ABSL_ASSIGN_OR_RETURN(Statement * stmt,
-                          Query(ctx, "SELECT EXISTS (SELECT 1 FROM dirty)"));
-    return ReadOne(*stmt, [&](Statement &row) {
-             any = row.Column<int64_t>(0) != 0;
-             return absl::OkStatus();
-           }).status();
+    ABSL_ASSIGN_OR_RETURN(flags, CountDirty(ctx));
+    return absl::OkStatus();
   }));
   // This transaction only deleted rows (the fast path deletes and puts
   // back kept rows in one transaction, which a crash keeps whole or not at
@@ -1704,7 +1845,8 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   // is not tracked per row across a clear: start over, which at worst
   // costs a phase 1 a kSync commit it did not need.
   ctx.dirty.durable.clear();
-  ctx.dirty.any = any;
+  ctx.dirty.any = flags.any;
+  ctx.dirty.atime = flags.atime;
   if (cleared != nullptr) *cleared = removed;
   return absl::OkStatus();
 }
@@ -1776,13 +1918,17 @@ absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {
     return absl::OkStatus();
   }));
   ctx.dirty.durable.clear();
-  // Rows left: the next sync point must run (FinishRun, the timer); only
-  // its ClearDirty, which recomputes `any`, takes them out.
-  ctx.dirty.any = count > 0;
+  // Rows left: the next sync point must run (FinishRun, the timer, for a
+  // mutation's; an atime-only row waits for one: step 23.8); only its
+  // ClearDirty, which recomputes the flags, takes them out.
+  ABSL_ASSIGN_OR_RETURN(const DirtyFlags flags, CountDirty(ctx));
+  ctx.dirty.any = flags.any;
+  ctx.dirty.atime = flags.atime;
   return count;
 }
 
 #undef DCFS_ATTR_ASSIGNMENTS
+#undef DCFS_KEEP_STAMP
 #undef DCFS_ATTR_VALUES
 #undef DCFS_ATTR_COLUMNS
 #undef DCFS_ATTR_PLACEHOLDERS

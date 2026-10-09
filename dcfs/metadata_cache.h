@@ -88,6 +88,10 @@ struct CachedAttr {
 // it read even when the cache did not record it.
 CachedAttr WithStatx(CachedAttr attr, const struct statx &stx);
 
+// Whether `attr`'s attributes (st and btime) are what WithStatx(attr, stx)
+// would make them: recording `stx` would change nothing.
+bool SameAttrs(const CachedAttr &attr, const struct statx &stx);
+
 struct LookupResult {
   enum class Kind {
     kFound,     // A positive dentry; `id` is its inode.
@@ -376,20 +380,32 @@ absl::Status ForgetNegativeDentries(Context &ctx, InodeId dir);
 absl::Status MarkAttrsUnknown(Context &ctx, InodeId id);
 
 // Replaces `id`'s cached attributes with `stx` and marks them current.
-// NotFound if no row.
+// NotFound if no row. Every record of attributes (this, UpsertInode's,
+// UpsertRoot's) keeps a directory's or symlink's cached atime when it is
+// later than `stx`'s (step 23.8: the stamp TouchAtime makes, which the
+// backing filesystem never gets), and marks the row of an inode open for
+// reading (Context::open_files, not open for writing) dirty, atime only
+// (MarkAtimeDirty): what it records may carry an access time the backing
+// filesystem has not written back yet.
 absl::Status UpdateAttr(Context &ctx, InodeId id, const struct statx &stx);
 
-// Step 23.3: `id` is being opened for reading at `now`. Reads go through
-// passthrough, so the backing filesystem updates the file's access time
-// without dcfs seeing it; this records in the cache, in one transaction
-// with no syscall, the access time the backing filesystem gives the file
-// for a read now, by ctx.atime (the kernel's rule for relatime: if the
-// cached atime is not after mtime or ctime, or is a day old or more).
-// Only current attributes are touched (unknown ones are re-read anyway,
-// atime included); a fill's guard is not needed, since nothing is read
-// from the backing filesystem. It reads first and takes a write
-// transaction only when the atime changes (a compare-and-set on the atime
-// it read). Returns whether it changed the atime. NotFound if no row.
+// For an explicit access time set on a directory or symlink (a SETATTR,
+// after its phase 1, which made the attributes unknown): drops the cached
+// stamp, so that the refresh that follows records the backing filesystem's
+// value even if it is the earlier one. No-op for any other row.
+absl::Status DropAtimeStamp(Context &ctx, InodeId id);
+
+// Step 23.8: directory or symlink `id` is read from the cache at `now` (a
+// READDIR, READDIRPLUS or READLINK). This records in the cache, in one
+// transaction with no syscall, the access time a read on the backing
+// filesystem would give it now, by ctx.atime (the kernel's rule for
+// relatime: if the cached atime is not after mtime or ctime, or is a day
+// old or more), and never writes it to the backing filesystem (UpdateAttr
+// keeps it). Only current attributes are touched (unknown ones are re-read
+// anyway); a fill's guard is not needed, since nothing is read from the
+// backing filesystem. It reads first and takes a write transaction only
+// when the atime changes (a compare-and-set on the atime it read). Returns
+// whether it changed the atime. NotFound if no row.
 absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
                                 const struct timespec &now);
 
@@ -626,6 +642,27 @@ absl::StatusOr<Mutation> BeginXattrChange(Context &ctx, InodeId id,
 // where this insert does not). Does not add to ctx.dirty.durable.
 absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids);
 
+// Step 23.8: adds `id` to the dirty set as an atime-only row (a row that
+// stands for a regular file's access time, which the backing filesystem
+// changes on its own reads and writes back lazily: schema.sql), unless it is
+// there already (a mutation's stays one), at the default durability, inside
+// the caller's transaction if any. Context::dirty.atime becomes true, .any
+// does not: such a row does not make a sync point run. Then, as `touch`
+// says, advances the fill guards for `id`, so that a sync point that began
+// before this record keeps the row (ClearDirty): kUnlessInFlight for a
+// record of attributes (unless a mutation of `id` is in flight, whose end
+// does it and whose phase 3 must still Own `id`); kAlways for a held fill
+// that could not record what it read (so that such a phase 3 does not
+// record attributes read before the reads the held fill saw); kNone for a
+// cold open, which records nothing (a sync point keeps an open file's row
+// anyway, and ClearDirty's fast path sees the insert: DirtyState::inserts).
+// Callers: a cold read-only open, every record of the attributes of an
+// inode open for reading (UpdateAttr, UpsertInode), and DirCacheFS's held
+// fills.
+enum class GuardTouch { kNone, kUnlessInFlight, kAlways };
+absl::Status MarkAtimeDirty(Context &ctx, InodeId id,
+                            GuardTouch touch = GuardTouch::kUnlessInFlight);
+
 // The dirty set, sorted.
 absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx);
 
@@ -646,27 +683,39 @@ absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx);
 // writable release (EndWrites), so an inode open for writing at any moment
 // between the start of the syncfs and the clear keeps its row too.
 //
+// So too for the reads the kernel makes through any open (step 23.8): the
+// backing filesystem changes the access time for them in memory, so an
+// inode open at all at BeginSync or at the clear keeps its row too; the
+// held fill of its last release records the access time and touches it.
+//
 // BeginSync, just before the first syncfs: the fill guards' clock, the
-// dirty set as it is now, and the inodes open for writing now
-// (ctx.open_for_write).
+// dirty set as it is now, the inodes open for writing now
+// (ctx.open_for_write) and the inodes open at all now (ctx.open_files).
 struct SyncSnapshot {
   FillSnapshot fills;
-  std::vector<InodeId> dirty;  // Sorted.
+  std::vector<InodeId> dirty;       // Sorted.
+  std::vector<InodeId> atime_only;  // Those of them atime_only; sorted.
+  uint64_t inserts = 0;             // Context::dirty.inserts then.
   std::vector<InodeId> open_for_write;
+  std::vector<InodeId> open_files;
 };
 absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx);
 
 // ClearDirty, once every syncfs succeeded: removes, in one transaction, each
 // row of `synced.dirty` unless its inode
-//  - is in `keep` (the inodes open for writing now, which the kernel may
-//    still be changing: see backing::SyncBacking),
+//  - is in `keep` (the inodes open now, which the kernel may still be
+//    changing, by writes or by reads' access times: see
+//    backing::SyncBacking),
 //  - or was open for writing at BeginSync (synced.open_for_write: its last
 //    writes may have come after the syncfs began; with EndWrites this is a
 //    backstop, since a release after BeginSync also fails the next test),
+//  - or was open at all at BeginSync (synced.open_files: reads, step 23.8),
 //  - or a mutation of it began or ended since BeginSync or is in flight, or
-//    its writable open ended since (!CanFill(ctx, synced.fills, id)).
-// Rows added after BeginSync (by a phase 1, or by MarkDirty in a phase 3)
-// are never in `synced.dirty`, so they stay too.
+//    its writable open ended since, or its attributes were recorded since
+//    while it was open (MarkAtimeDirty) (!CanFill(ctx, synced.fills, id)).
+// Rows added after BeginSync (by a phase 1, by MarkDirty in a phase 3, by
+// MarkAtimeDirty) are never in `synced.dirty`, so they stay too. A kept
+// row keeps its reason. Recomputes Context::dirty.any and .atime.
 // If `cleared` is not null, it receives the number of rows removed (for the
 // sync point's log line).
 absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,

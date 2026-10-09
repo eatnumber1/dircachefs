@@ -265,6 +265,27 @@ TEST_F(MigrateTest, V4DatabaseGainsTheStubHighWaterMark) {
   EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
 }
 
+// Step 23.8: a v5 cache's dirty rows all stand for mutations: they gain
+// atime_only = 0, and the column refuses anything but 0 and 1.
+TEST_F(MigrateTest, V5DatabaseGainsTheDirtyRowsReason) {
+  RootIdentity root = TestRoot();
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  ASSERT_THAT(db_.ExecScript(R"sql(
+    ALTER TABLE dirty DROP COLUMN atime_only;
+    INSERT INTO dirty (inode) VALUES (1);
+    UPDATE cache_state SET schema_version = 5;
+  )sql"),
+              IsOk());
+
+  ASSERT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
+  EXPECT_THAT(CountRows(db_, "dirty WHERE inode = 1 AND atime_only = 0"),
+              IsOkAndHolds(1));
+  EXPECT_FALSE(db_.Exec("UPDATE dirty SET atime_only = 2").ok());
+  EXPECT_THAT(Migrate(db_, root), IsOk());
+  EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
+}
+
 TEST_F(MigrateTest, WrongSchemaVersionFailsPrecondition) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());

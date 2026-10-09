@@ -67,18 +67,36 @@ dmesg_kernel_failures() {
 		head -n 20 | sed 's/^/KERNEL-OOPS: /'
 }
 
-# snapshot DIR: one line per entry under DIR (lost+found left out), sorted:
-# "<path> <type> <size> <mode> <links>" and, for a regular file, the md5sum of
-# its contents. What two trees must agree on to be the same tree: dcfs's served
-# one and the backing filesystem's (guest/fault_power.sh, guest/fault_ace.sh).
+# snapshot DIR [atime]: one line per entry under DIR (lost+found left out),
+# sorted: "<path> <type> <size> <mode> <links>" and, for a regular file, the
+# md5sum of its contents. What two trees must agree on to be the same tree:
+# dcfs's served one and the backing filesystem's (guest/fault_power.sh,
+# guest/fault_ace.sh, guest/fault_freeze.sh, guest/fault_recover.sh).
+#
+# With "atime" (step 23.8), also every entry's access time to the nanosecond,
+# except a directory's or a symlink's: dcfs serves files' from the backing
+# filesystem, and stamps directories' and symlinks' in its own database only
+# (README "Limitations"), so those are the only two left out of "served
+# equals backing". The access time is read after the file's md5sum, so that
+# it is the one that read gave: the snapshot of the backing tree, taken
+# first, makes the relatime update, and the served tree's read of the same
+# file then changes nothing. (The other columns come first, before any read:
+# a read through dcfs reopens the file and so re-reads its attributes, which
+# would hide an out-of-band change the comparison's self-checks make.) Not
+# for a snapshot compared across a power cut: its own reads move access times
+# the cut may then lose.
 snapshot() {
 	(cd "$1" && find . -path ./lost+found -prune -o -print | sort |
 		while IFS= read -r sn_p; do
 			sn_line=$(stat -c '%n %F %s %a %h' "$sn_p" 2>&1) || sn_line="$sn_p stat failed: $sn_line"
+			sn_md5=""
 			if [ -f "$sn_p" ] && [ ! -L "$sn_p" ]; then
-				sn_line="$sn_line $(md5sum "$sn_p" 2>&1 | cut -d' ' -f1)"
+				sn_md5=" $(md5sum "$sn_p" 2>&1 | cut -d' ' -f1)"
 			fi
-			echo "$sn_line"
+			if [ "$2" = atime ] && [ ! -L "$sn_p" ] && [ ! -d "$sn_p" ]; then
+				sn_line="$sn_line atime=$(stat -c %x "$sn_p" 2>&1)"
+			fi
+			echo "$sn_line$sn_md5"
 		done)
 }
 

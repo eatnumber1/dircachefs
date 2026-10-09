@@ -377,9 +377,26 @@ class DirCacheFS {
 
   // `attr` (id's row) if valid, else refreshed (RefreshAttrsOf) and answered
   // from the fresh statx itself, whether or not the cache recorded it (see
-  // cache::CanFill).
+  // cache::CanFill). Step 23.8: while dcfs holds a descriptor for `id`
+  // (HeldFdOf) and no writable open is outstanding, an attribute reply
+  // (`reply`: GETATTR, LOOKUP, READDIRPLUS entries...) is always a held
+  // fill of it (backing::FillHeldAttrs), answered from its statx: the
+  // kernel's reads since the last record moved the access time.
   absl::StatusOr<cache::CachedAttr> FreshAttr(InodeId id,
-                                              cache::CachedAttr attr);
+                                              cache::CachedAttr attr,
+                                              bool reply = false);
+
+  // Step 23.8: a held fill of `id` through `fd` at a FLUSH or RELEASE (`op`,
+  // for the log), whose failure is logged, never replied: the close must
+  // not fail over it. Into `fetched`, if given, the statx (its stx_mask is
+  // 0 if there was none). No-op for a removed object.
+  void RecordHeldAttrs(InodeId id, int fd, std::string_view op,
+                       struct statx *fetched = nullptr);
+
+  // Step 23.8: directory or symlink `id` was read from the cache (READDIR,
+  // READDIRPLUS, READLINK): the access time a backing read would have given
+  // it, recorded in the cache only (cache::TouchAtime). A failure is logged.
+  void StampAtime(InodeId id);
 
   // Phase 3 for writes made through the shared backing fd `fd` of `id`
   // (Flush/Fsync/Release): backing::RefreshAttrsFromFd. A failure is logged
@@ -512,6 +529,10 @@ class DirCacheFS {
 
   // The fd of some outstanding open of `id`, if any.
   std::optional<int> OpenFdOf(InodeId id) const;
+  // A descriptor dcfs holds for `id`: the shared backing fd of an
+  // outstanding open, else the O_PATH one a written file keeps until its
+  // last FORGET (written_), if any.
+  std::optional<int> HeldFdOf(InodeId id) const;
   // `id`'s shared backing descriptor, for the protocol events.
   events::SharedFd SharedFdOf(InodeId id) const;
   // What dcfs keeps for nodeid `id` (lookups_, removed_, written_, open
@@ -607,6 +628,10 @@ class DirCacheFS {
   // The inodes whose BackingFile has writable_refs > 0; ctx_.open_for_write
   // points here (see Context::open_for_write).
   absl::flat_hash_set<int64_t> open_for_write_;
+  // The keys of backing_files_, but for the read-only ones Destroy drops
+  // (step 23.8); ctx_.open_files points here (see
+  // Context::open_files).
+  absl::flat_hash_set<int64_t> open_files_held_;
   // When the last sync point ran (or was attempted); see MaybeSyncBacking.
   absl::Time last_sync_;
   // When a request last reached the backing filesystem; InfinitePast before
