@@ -416,6 +416,38 @@ count or the test driving dm-flakey's state), as the 11.3 review asked
 (11.3c); the 11.6 backing-stall finding is fixed by the concurrency
 design, never by a watchdog.
 
+Status 2026-10-09: built (lane-6, one commit 7e3e42a; Opus review
+running). DEVIATION NEEDING RUSS: the helper is `umount.fuse`, not
+`umount.fuse.dcfs`: libmount drops the subtype when it looks for an
+unmount helper (LIBMOUNT_DEBUG on util-linux 2.41 tries /sbin/umount.fuse,
+fs.d/umount.fuse, fs/umount.fuse and nothing else), so dcfs's helper runs
+for EVERY FUSE mount on the system and the administrator installs it as a
+link to the dcfs binary. For any FUSE mount it runs `umount -i` as a child
+with the same flags (umount(8)'s messages and exit status); for a dcfs
+mount, unless lazy, it then waits on a lock: the daemon holds an exclusive
+flock on `/run/dcfs/<major>_<minor>.lock` (the FUSE mount's device number)
+from right after mounting to exit and removes the file as its last act
+still holding it; the helper opens the file before unmounting (so never
+waits for a later daemon reusing the number) and takes a shared lock
+after `umount -i`, which it gets when the daemon is gone; a crashed daemon
+releases it through the kernel; no pid file. `umount -l` detaches and does
+not wait (documented, tested). FUSE_DESTROY was tried and dropped (none
+for a plain FUSE mount). busy_timeout removed: only FinishRun's shutdown
+checkpoint relied on it (an administrator's concurrent reader); it now
+sees SQLITE_BUSY at once, logs "clean shutdown incomplete", and the next
+start recovers. Enforcement: banned_symbols bans the sleep/timer family
+and sqlite3_busy_timeout (allows: nanosleep from Abseil, SQLite, libfuse;
+sleep from libfuse); repo_shape refuses bare `sleep` in guest scripts
+outside `tools/repo_shape_sleeps.txt` (77 sites with reasons, only
+shrinks); style.md 1.11 has the rule in russ's words. `quiesce_daemon`
+and memory.sh's settle still poll (no userspace event for the FORGET
+queue); the init sampler's cadence is its definition. The three DISABLED_
+systemd checks are real and pass (restart of a parent, of a
+local-fs.target mount, umount-then-mount at once, every daemon clean after
+reboot); the busybox guest's umount lacks `-i`, so mount_dcfs.sh wraps it.
+Fast 231 + 2, presubmit dcfs+qemu 181 pass, asan on the wrapper tests
+green.
+
 **15.7 Docs:** README (fstab with and without systemd, `dcfs.fstype`
 values, `_netdev`, fsck, trees, over-mounting, remount, NFS exports,
 administrator responsibilities, why root, the bind-form submount behavior,

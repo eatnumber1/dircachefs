@@ -2365,3 +2365,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   refuses testonly friends. Lane-1 (23.11) warned: invariant_checker.{h,cc} and the checker tests
   changed under it. Lane-5 free: 26.14e (noisy weekly job with mixed-fault sequences) dispatched
   (new implementer).
+- 15.6b built (lane-6, 7e3e42a): the helper must be `umount.fuse` (libmount drops the subtype), so
+  it runs for every FUSE mount and the administrator links it; it waits on a per-mount flock in
+  /run/dcfs the daemon holds to exit (no pid file, crash-safe through the kernel); `umount -l`
+  does not wait; busy_timeout gone (only FinishRun's reader case relied on it); no-timers
+  enforcement (banned symbols, repo_shape sleep allowlist of 77 sites with reasons, style.md
+  1.11); the three disabled systemd checks are real and green. NEEDS RUSS: owning `umount.fuse`
+  system-wide. Opus review dispatched (lock races, device numbers across namespaces, non-dcfs FUSE
+  mounts and user mounts, SQLITE_BUSY paths, the allows, shutdown-model fidelity).
