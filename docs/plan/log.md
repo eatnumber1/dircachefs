@@ -2351,3 +2351,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   in each shard's unprofiled cquery). Verify on the second push after this lands. Lane-2 free:
   12.14 (the model's SQLite durability abstraction tested by power cuts with dm-log-writes
   replay) dispatched (new dcfs-protocol).
+- 17.1 review (Opus): one more round. Required: the gate accepts a pass turning into "not run"
+  (a per-backing notrun list; listed timeouts fail), two new sleep-and-poll waits (flock on the
+  database; read -t on a fifo), the sanitizer configs break the guest (incompatible under
+  asan/ubsan for now; 17.1c later), vacuous gates, mkfs failures discarded, doc/code mismatches,
+  exclusion reasons (musl getopt, raw-device tests, per-backing). The setgid finding diagnosed:
+  fuse_setattr's legacy rule plus dcfs's root-credential fallocate/write/copy paths; fix = run them
+  inside AsCaller (17.2), plus a one-line kernel fix worth sending upstream. 17.1b (Debian rootfs
+  via rules_distroless, after 17.1) and 17.1c recorded; 17.3 gets daemon CPU per test. Sent to the
+  agent together with the CI-placement round.
