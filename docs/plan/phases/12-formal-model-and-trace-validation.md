@@ -313,6 +313,35 @@ RecoveredFile or the MC_dirset configs.
   reason. Bespoke, in-tree, same report shape as the C++ mutation job;
   a weekly CI job after the first sweep. Owner: dcfs-implementer for the
   tool, dcfs-protocol for the survivors. After 12.12.
+  Tool half done 2026-10-09, merged 9f5d17f (lane-5, three commits). As
+  built: `mutate.py --lang tla` with a conjunct-aware token scanner (not a
+  parser; masks comments, finds column-0 definitions, bulleted and inline
+  `/\\`/`\\/` chains, LET, quantifiers, IF; never drops or negates an
+  effect or frame conjunct); operators negate, drop-guard/conjunct,
+  drop-disjunct (incl. Next), swap-junction (a whole chain at once: a
+  partial swap is a SANY error), relational, constant (numbers, booleans,
+  neighbours in `tla_sets.txt`), durability (Commit's second argument),
+  drop-step, swap-step; arid: VIEW definitions, `tla_arid.txt` regexes with
+  reasons, `\\* mutation: arid` markers; a mutant is the mutated module in
+  a tree copy (known_bugs-style overrides cannot express an arbitrary
+  conjunct change); killed = any `//formal` test fails (a silenced known_bug
+  counts), survived = all pass, INVALID = TLC itself failed; scope file
+  lists dcfs, ident, lifetime, reval and the four Trace modules; unreachable:
+  mixed-precedence chains, non-column-0 definitions, cfg-only values. CI:
+  `mutation-tla` weekly (90 mutants, 3 shards, small+medium) and a TLA+
+  step in `mutation-changed` scoped to the definitions a push touches
+  (small tier, 10 mutants). First run (20 mutants of dcfs.tla, seed 1,
+  small tier only, 62 min of mutant time): 11 killed, 9 survived, 0
+  invalid. Survivors for the sweep step: TypeOK swap-junction (241), Serve
+  swap-junction (517), RDFromCode drop-step PD_read->PD_commit (651), S2
+  durability FALSE->TRUE (1060), FBehind drop-conjunct `d.fAttr # b.f`
+  (1503), Recover durability FALSE->TRUE (1568), Next drop-disjunct
+  UnlinkSyscall (1707) and AttrChangeSyscall (1712), FileExactStrict
+  drop-conjunct `mode = "up"` (1826). The durability survivors (a stronger
+  commit is unobservable) are likely equivalent; a Next disjunct
+  surviving the small tier says the small tier never needs that step. The
+  first full sweep (small+medium, Trace*.tla in scope) runs after 23.11's
+  model merges.
 Phase 11 gains ACE's crash workloads (Apache-2.0) as inputs to the
 dm-log-writes replay, oracle "dcfs view equals the backing after
 recovery"; SibylFS's scripts (ISC) as a differential trace diff of dcfs

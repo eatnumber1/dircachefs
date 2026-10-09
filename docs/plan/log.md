@@ -2277,3 +2277,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   items (model the failed phase 3, drop or fix the vacuous metaprefix config, README table,
   large/nolock green), with the reviewer's four failing-first tests, two-sided OriginOK plus a
   negative log, InsertDirty counting (closes G15), and 26.4b to measure rule 2's cost.
+- 12.13 tool merged (9f5d17f, three commits; tools fast 29 pass, mutation presubmit 6 pass incl. an
+  end-to-end run of real TLC on a tiny fixture with one kill, one survivor, one invalid). First
+  run on dcfs.tla: 11 killed / 9 survived of 20, small tier; survivors listed in phases/12 for the
+  sweep after 23.11. Lane-5 free: 26.14f (coverage artifacts in the fork path; the coverage job is
+  red on every push until it is understood) dispatched (new investigator).
