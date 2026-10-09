@@ -643,6 +643,12 @@ fi
 # native mount of its device (the same superblock).
 if [ "$FSTYPE" != xfs ] && [ "$forced" = yes ]; then
 	for form in bind native; do
+		# btrfs refuses a second mount of a device in this state by itself
+		# (EINVAL from mount(8)): there is no capture to check.
+		if [ "$form" = native ] && [ "$FSTYPE" = btrfs ]; then
+			skip ro-capture-native-refused "btrfs refuses the second mount itself"
+			continue
+		fi
 		if [ "$form" = bind ]; then
 			cap_src=$SRC
 			cap_type=bind
