@@ -40,6 +40,22 @@
 #       Internally the child runs use --kill-on MARKER, --keep-disks DIR,
 #       --log-name NAME and --cmdline WORDS.
 #
+#   --systemd-image <debian.qcow2> --qemu-img <qemu-img> (step 15.6; e2e only):
+#       boots a released Debian cloud image with systemd as PID 1 (guest/init's
+#       dcfs_systemd= branch). The image is never written: an overlay qcow2 on
+#       top of it, made by qemu-img in the test's directory, is the guest's disk
+#       (the next /dev/vd<letter> after the disk-specs), and dcfs_systemd=
+#       <that disk>1, its root partition, goes on the kernel command line.
+#
+#   --boots N (step 15.6; e2e only): N boots of the same guest over the same
+#       disk images, one after the other, each a complete run with a verdict of
+#       its own (dcfs_boot=<k> dcfs_boots=N on the kernel command line). The
+#       systemd guest reboots itself between them (`systemctl reboot`: the
+#       microvm's reset ends QEMU under -no-reboot), so the second boot sees
+#       what a real reboot leaves: the fstab mounts coming back, the cache on
+#       the root disk. Internally the child runs use --keep-disks, --log-name
+#       and --cmdline like --power-cut's, and the two options exclude each other.
+#
 # Each disk-spec is <device>:<fstype>:<size>[:<mkfs options>], e.g.
 # vdb:ext4:256M, where <device> is a /dev/vd<letter> name. The optional
 # fourth field (ext4 only; step 23.7) is words handed to mke2fs after
@@ -109,6 +125,10 @@ MKFS_BTRFS_BIN=""
 
 UNIT=0
 ROOTFS=""
+# --systemd-image / --qemu-img (step 15.6): see the usage comment above.
+SYSTEMD_IMAGE=""
+QEMU_IMG=""
+BOOTS=1
 # --mem <MiB>: guest RAM, overriding the default below. qemu_test and
 # qemu_cc_test always pass it (the per-test allowance, larger for the
 # sanitizer builds; see test/qemu/qemu_test.bzl). $DCFS_MEM (e.g. `bazel test
@@ -154,13 +174,62 @@ while [ "$cut_i" -lt "$cut_n" ]; do
 		cut_prev=""
 		continue
 	fi
-	if [ "$cut_a" = --power-cut ]; then
+	if [ "$cut_prev" = --boots ]; then
+		BOOTS=$cut_a
+		cut_prev=""
+		continue
+	fi
+	if [ "$cut_a" = --power-cut ] || [ "$cut_a" = --boots ]; then
 		cut_prev=$cut_a
 		continue
 	fi
 	set -- "$@" "$cut_a"
 	cut_prev=""
 done
+case "$BOOTS" in
+'' | *[!0-9]* | 0)
+	echo "run-qemu.sh: --boots takes a number of boots, 1 or more (got '$BOOTS')" >&2
+	exit 1
+	;;
+esac
+if [ "$BOOTS" -gt 1 ] && [ -n "$CUT_SCENARIOS" ]; then
+	echo "run-qemu.sh: --boots and --power-cut exclude each other" >&2
+	exit 1
+fi
+if [ "$BOOTS" -gt 1 ]; then
+	# N boots over one set of disk images (see the usage above). Each child
+	# is a complete run, so each has the verdict, memory and kernel checks
+	# of any boot; the N boots share Bazel's time limit like a power cut's.
+	boots_dir="${TEST_TMPDIR:-$(mktemp -d)}/boots-disks"
+	rm -rf "$boots_dir"
+	mkdir -p "$boots_dir"
+	case "${TEST_TIMEOUT:-}" in
+	'' | *[!0-9]*) ;;
+	*)
+		boots_share=$(((TEST_TIMEOUT > 120 ? TEST_TIMEOUT - 60 : TEST_TIMEOUT / 2) / BOOTS))
+		if [ "$boots_share" -gt 60 ]; then
+			TEST_TIMEOUT=$((boots_share + 60))
+		else
+			TEST_TIMEOUT=$((boots_share * 2))
+		fi
+		export TEST_TIMEOUT
+		echo "run-qemu.sh: $BOOTS boots, $boots_share s each"
+		;;
+	esac
+	boots_k=1
+	while [ "$boots_k" -le "$BOOTS" ]; do
+		echo "run-qemu.sh: boot $boots_k of $BOOTS"
+		if ! "$0" --keep-disks "$boots_dir" --log-name "boot$boots_k.log" \
+			--cmdline "dcfs_boot=$boots_k dcfs_boots=$BOOTS" "$@"; then
+			echo "run-qemu.sh: boot $boots_k of $BOOTS: FAIL"
+			echo "== RESULT: FAIL (boot $boots_k of $BOOTS) =="
+			exit 1
+		fi
+		boots_k=$((boots_k + 1))
+	done
+	echo "== RESULT: PASS =="
+	exit 0
+fi
 if [ -n "$CUT_SCENARIOS" ]; then
 	cut_dir="${TEST_TMPDIR:-$(mktemp -d)}/cut-disks"
 	cut_rc=0
@@ -221,6 +290,14 @@ while :; do
 		;;
 	--rootfs)
 		ROOTFS=$2
+		shift 2
+		;;
+	--systemd-image)
+		SYSTEMD_IMAGE=$2
+		shift 2
+		;;
+	--qemu-img)
+		QEMU_IMG=$2
 		shift 2
 		;;
 	--mem)
@@ -446,6 +523,46 @@ if [ -n "$ROOTFS" ]; then
 	rootfs_append=" dcfs_rootfs=/dev/$rootfs_dev"
 fi
 
+# --- optional systemd image (step 15.6): a released Debian cloud image the
+# guest boots with systemd as PID 1. It is never written: the disk is a qcow2
+# overlay on top of it, in the image directory (so that --boots keeps it
+# across the boots, a reboot's disk), and the image's root partition (the
+# first) is named on the kernel command line for guest/init. The letter is the
+# next after the last disk-spec and the rootfs, which a test does not have
+# both of. ---------------------------------------------------------------------
+sysd_append=""
+if [ -n "$SYSTEMD_IMAGE" ]; then
+	if [ -z "$QEMU_IMG" ] || [ -n "$ROOTFS" ]; then
+		echo "run-qemu.sh: --systemd-image needs --qemu-img, and excludes --rootfs" >&2
+		exit 1
+	fi
+	case "$QEMU_IMG" in
+	/usr/* | /bin/* | /sbin/*)
+		echo "run-qemu.sh: ERROR: '$QEMU_IMG' looks like a host path," \
+			"not the Bazel-built @alpine_qemu_img target" >&2
+		exit 1
+		;;
+	esac
+	sysd_index=$((max_index + 1))
+	sysd_letter=$(awk -v i="$sysd_index" 'BEGIN{printf "%c", 97+i}')
+	sysd_overlay="$IMGDIR/systemd.qcow2"
+	if [ -n "$KEEP_DISKS" ] && [ -f "$sysd_overlay" ]; then
+		echo "run-qemu.sh: keeping $sysd_overlay"
+	else
+		# The backing file is named by an absolute path: the overlay is read
+		# from wherever QEMU runs.
+		sysd_image_abs=$(cd "$(dirname "$SYSTEMD_IMAGE")" && pwd)/$(basename "$SYSTEMD_IMAGE")
+		"$QEMU_IMG" create -q -f qcow2 -b "$sysd_image_abs" -F qcow2 "$sysd_overlay" ||
+			{
+				echo "run-qemu.sh: qemu-img could not make an overlay on $SYSTEMD_IMAGE" >&2
+				exit 1
+			}
+	fi
+	drive_args="$drive_args -drive id=sysd,file=$sysd_overlay,format=qcow2,if=none -device virtio-blk-device,drive=sysd"
+	sysd_append=" dcfs_systemd=/dev/vd${sysd_letter}1"
+	echo "run-qemu.sh: systemd image: $SYSTEMD_IMAGE (overlay $sysd_overlay)" >>"$LOG"
+fi
+
 # --- optional coverage disk (step 7.2): the next letter after the last disk
 # and the rootfs; a raw file the guest writes a tar of its profiles to
 # (guest/init, dump_profraw: the serial console moves about 8 KB/s, too slow
@@ -455,7 +572,7 @@ cov_append=""
 if [ -n "${COVERAGE_DIR:-}" ] && [ -n "$COV_OBJECTS" ] &&
 	[ -n "$COV_PROFDATA" ] && [ -n "$COV_LLVM_COV" ] && [ -n "$COV_SCRIPT" ]; then
 	cov_index=$((max_index + 1))
-	if [ -n "$ROOTFS" ]; then
+	if [ -n "$ROOTFS" ] || [ -n "$SYSTEMD_IMAGE" ]; then
 		cov_index=$((cov_index + 1))
 	fi
 	cov_letter=$(awk -v i="$cov_index" 'BEGIN{printf "%c", 97+i}')
@@ -552,7 +669,7 @@ append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init dcfs_accel=$ACCE
 if [ "$UNIT" -eq 0 ]; then
 	append="$append dcfs_test=$DCFS_TEST"
 fi
-append="$append$rootfs_append${EXTRA_APPEND:+ $EXTRA_APPEND}"
+append="$append$rootfs_append$sysd_append${EXTRA_APPEND:+ $EXTRA_APPEND}"
 COVERAGE=0
 if [ -n "$COVDISK_IMG" ]; then
 	COVERAGE=1

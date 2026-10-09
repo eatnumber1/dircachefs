@@ -47,6 +47,7 @@ py_test(
         "alpine_linux_virt=$(location @alpine_linux_virt//:resolved.json)",
         "alpine_patchelf=$(location @alpine_patchelf//:resolved.json)",
         "alpine_qemu=$(location @alpine_qemu//:resolved.json)",
+        "alpine_qemu_img=$(location @alpine_qemu_img//:resolved.json)",
         "alpine_strace=$(location @alpine_strace//:resolved.json)",
     ],
     data = [
@@ -65,6 +66,7 @@ py_test(
         "@alpine_linux_virt//:resolved.json",
         "@alpine_patchelf//:resolved.json",
         "@alpine_qemu//:resolved.json",
+        "@alpine_qemu_img//:resolved.json",
         "@alpine_strace//:resolved.json",
     ],
     deps = [":sbom_lib"],

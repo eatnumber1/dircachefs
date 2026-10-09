@@ -1,0 +1,9 @@
+# Step 15.6: the released Debian cloud image the systemd guest boots
+# (test/qemu:mount_dcfs_systemd_test). The pin and how to move it are in
+# README.md; the download itself is the http_file in MODULE.bazel.
+alias(
+    name = "image",
+    actual = "@debian_cloud_image//file",
+    testonly = 1,
+    visibility = ["//test/qemu:__pkg__"],
+)

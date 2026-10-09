@@ -267,6 +267,7 @@ class Shipped(unittest.TestCase):
         for r in ("googletest+", "google_benchmark+", "pjdfstest", "tla2tools",
                   "act", "rules_python+", "+alpine_package+alpine_linux_virt",
                   "+alpine_package+alpine_qemu",
+                  "+alpine_package+alpine_qemu_img",
                   "+alpine_package+alpine_fstools",
                   "+alpine_package+alpine_busybox",
                   "+alpine_package+alpine_dmsetup",

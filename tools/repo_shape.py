@@ -5,8 +5,10 @@ Each function takes the root of a source tree and returns a list of problems
 
 - third_party_readmes: every third_party/<name>/ directory has a README.md;
 - guest_scripts_used: every test/qemu/guest/*.sh is used by a test in
-  test/qemu/BUILD.bazel, unless it is `lib.sh`, `pjdfstest_lib.sh` or
-  `init`, or another guest script sources it (a helper library);
+  test/qemu/BUILD.bazel, unless it is `lib.sh`, `pjdfstest_lib.sh`,
+  `init`, `systemd_install.sh` or `systemd_run.sh` (the last two are run
+  by `init` and by the systemd guest's unit, not by a test target), or
+  another guest script sources it (a helper library);
 - disabled_checks_listed: every `disabled NAME ...` check of the guest
   scripts is named in README.md's Limitations section.
 
@@ -16,7 +18,10 @@ Each function takes the root of a source tree and returns a list of problems
 import os
 import re
 
-NOT_TESTS = frozenset({"lib.sh", "pjdfstest_lib.sh", "init"})
+NOT_TESTS = frozenset({
+    "lib.sh", "pjdfstest_lib.sh", "init", "systemd_install.sh",
+    "systemd_run.sh"
+})
 
 
 def read(root, *parts):

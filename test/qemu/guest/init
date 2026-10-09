@@ -159,46 +159,52 @@ MEMSTAT=${MEMSTAT:-/dev/memstat}
 start_mem_sampler() {
 	RECLAIM_BASE=$(reclaim_counters)
 	export RECLAIM_BASE
-	awk -v out="$MEMSTAT" 'BEGIN {
-		minav = -1
-		for (;;) {
-			while ((getline l < "/proc/meminfo") > 0) {
-				split(l, a, " ")
-				m[a[1]] = a[2]
-			}
-			close("/proc/meminfo")
-			getline up < "/proc/uptime"
-			close("/proc/uptime")
-			split(up, u, " ")
-			total = m["MemTotal:"]
-			avail = m["MemAvailable:"]
-			if (minav < 0 || avail < minav) minav = avail
-			if (total - avail > pused) pused = total - avail
-			if (m["Cached:"] > pcached) pcached = m["Cached:"]
-			if (m["AnonPages:"] > panon) panon = m["AnonPages:"]
-			if (m["Shmem:"] > pshmem) pshmem = m["Shmem:"]
-			if (m["Slab:"] > pslab) pslab = m["Slab:"]
-			cmd = "cat /proc/[0-9]*/status 2>/dev/null"
-			while ((cmd | getline l) > 0) {
-				split(l, f, " ")
-				if (f[1] == "Name:") name = f[2]
-				else if (f[1] == "Pid:") pid = f[2]
-				else if (f[1] == "VmHWM:") {
-					if (name ~ /^(mount\.)?dcfs/ && f[2] > dcfs) dcfs = f[2]
-					if (f[2] > top) { top = f[2]; topname = name ":" pid }
-				}
-			}
-			close(cmd)
-			n++
-			printf "MEM total=%d min_avail=%d peak_used=%d peak_cached=%d peak_anon=%d peak_shmem=%d peak_slab=%d dcfs_hwm=%d top=%s:%d samples=%d up=%s\n", total, minav, pused, pcached, panon, pshmem, pslab, dcfs, topname, top, n, u[1] > out
-			close(out)
-			# Not system("sleep 0.1"): in busybox awk system() returns
-			# at once without waiting, which made this a busy loop.
-			nap = "sleep 0.1"
-			nap | getline
-			close(nap)
+	# The program is a file so that the systemd guest (guest/systemd_run.sh),
+	# which switches root and so cannot go on with this process, can run the
+	# same one: /dev is a devtmpfs, which moves with the switch.
+	cat >/dev/memsampler.awk <<'EOF_SAMPLER'
+BEGIN {
+	minav = -1
+	for (;;) {
+		while ((getline l < "/proc/meminfo") > 0) {
+			split(l, a, " ")
+			m[a[1]] = a[2]
 		}
-	}' &
+		close("/proc/meminfo")
+		getline up < "/proc/uptime"
+		close("/proc/uptime")
+		split(up, u, " ")
+		total = m["MemTotal:"]
+		avail = m["MemAvailable:"]
+		if (minav < 0 || avail < minav) minav = avail
+		if (total - avail > pused) pused = total - avail
+		if (m["Cached:"] > pcached) pcached = m["Cached:"]
+		if (m["AnonPages:"] > panon) panon = m["AnonPages:"]
+		if (m["Shmem:"] > pshmem) pshmem = m["Shmem:"]
+		if (m["Slab:"] > pslab) pslab = m["Slab:"]
+		cmd = "cat /proc/[0-9]*/status 2>/dev/null"
+		while ((cmd | getline l) > 0) {
+			split(l, f, " ")
+			if (f[1] == "Name:") name = f[2]
+			else if (f[1] == "Pid:") pid = f[2]
+			else if (f[1] == "VmHWM:") {
+				if (name ~ /^(mount\.)?dcfs/ && f[2] > dcfs) dcfs = f[2]
+				if (f[2] > top) { top = f[2]; topname = name ":" pid }
+			}
+		}
+		close(cmd)
+		n++
+		printf "MEM total=%d min_avail=%d peak_used=%d peak_cached=%d peak_anon=%d peak_shmem=%d peak_slab=%d dcfs_hwm=%d top=%s:%d samples=%d up=%s\n", total, minav, pused, pcached, panon, pshmem, pslab, dcfs, topname, top, n, u[1] > out
+		close(out)
+		# Not system("sleep 0.1"): in busybox awk system() returns
+		# at once without waiting, which made this a busy loop.
+		nap = "sleep 0.1"
+		nap | getline
+		close(nap)
+	}
+}
+EOF_SAMPLER
+	awk -v out="$MEMSTAT" -f /dev/memsampler.awk &
 	MEM_SAMPLER_PID=$!
 }
 
@@ -394,32 +400,17 @@ fi
 export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
 export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
 
-# qemu_test's optional rootfs= attribute (test/qemu/qemu_test.bzl) attaches
-# a Debian rootfs image (test/qemu/scripts/mkrootfs-debian.sh) as an extra
-# virtio-blk disk and names it here. When present, run guest_script chrooted
-# into that Debian tree instead of directly from the initramfs, so it has
-# GNU userspace and nfs-utils (rpc.nfsd/rpc.mountd/exportfs/mount.nfs4)
-# available -- none of which fit in the busybox-only initramfs. Networking
-# (loopback) is brought up in the initramfs's own network namespace before
-# the chroot, since it's process/namespace, not filesystem, state, and
-# chroot(2) doesn't touch it.
-ROOTFS=$(sed -n 's/.*\bdcfs_rootfs=\([^ ]*\).*/\1/p' /proc/cmdline)
-if [ -n "$ROOTFS" ]; then
-	mkdir -p /newroot
-	if ! mount -t ext4 "$ROOTFS" /newroot; then
-		echo "init: failed to mount $ROOTFS on /newroot"
-		echo "TEST-FAILED"
-		finish
-		exit 1
-	fi
-	mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/tests
-	mount -o bind /proc /newroot/proc
-	mount -o bind /sys /newroot/sys
-	mount -o bind /dev /newroot/dev
-	# Coverage: the chrooted processes write their profiles to /cov too.
-	[ -n "$COV" ] && mkdir -p /newroot/cov && mount -o bind /cov /newroot/cov
-	cp /bin/dcfs /bin/fhtest /bin/testutil /newroot/usr/local/bin/
-	cp -a /tests/. /newroot/tests/
+# install_dcfs_into ROOT: dcfs, fhtest and testutil into ROOT/usr/local/bin and
+# the mount helper names (mount.dcfs, mount.fuse.dcfs) into ROOT/sbin, for the
+# two guests with a Debian userland: the chroot of the dcfs_rootfs= branch
+# below and the systemd guest of dcfs_systemd=. The Debian tree's own
+# dynamic-linking resolution is never touched (see the sanitizer notes in
+# the body).
+install_dcfs_into() {
+	root=$1
+	mkdir -p $root/usr/local/bin $root/sbin $root/tests
+	cp /bin/dcfs /bin/fhtest /bin/testutil $root/usr/local/bin/
+	cp -a /tests/. $root/tests/
 
 	# Under --config=asan/--config=ubsan, dcfs/fhtest/testutil above are
 	# dynamically linked (see dcfs/BUILD.bazel's main_static select()),
@@ -455,35 +446,117 @@ if [ -n "$ROOTFS" ]; then
 	# dynamic-linking resolution a bare exec would use. A no-op for a
 	# normal (non-sanitizer) build: mkinitramfs.sh creates no /lib or
 	# /lib64 at all when every binary is fully static, so $interp stays
-	# empty and this block never runs.
+	# empty and this block never runs. (Step 15.6: nor in a plain build with
+	# the initramfs holding a glibc loader for some other program, a
+	# benchmark: the sanitizer the build uses, from the kernel command line,
+	# is what says dcfs is dynamic. A static dcfs runs as it ships, which
+	# the systemd guest's process names and exec paths need.)
 	interp=$(find /lib64 /lib -name 'ld-linux*.so*' 2>/dev/null | head -1)
-	if [ -n "$interp" ]; then
-		mkdir -p /newroot/opt/dcfs-libs
+	if [ -n "$interp" ] && [ -n "$DCFS_SANITIZER" ]; then
+		mkdir -p $root/opt/dcfs-libs
 		for f in $(find /lib /lib64 -type f 2>/dev/null); do
-			cp "$f" "/newroot/opt/dcfs-libs/$(basename "$f")"
+			cp "$f" "$root/opt/dcfs-libs/$(basename "$f")"
 		done
 		loader="/opt/dcfs-libs/$(basename "$interp")"
 		for bin in dcfs fhtest testutil; do
-			mv "/newroot/usr/local/bin/$bin" \
-				"/newroot/usr/local/bin/$bin.real"
-			cat >"/newroot/usr/local/bin/$bin" <<EOF
+			mv "$root/usr/local/bin/$bin" \
+				"$root/usr/local/bin/$bin.real"
+			cat >"$root/usr/local/bin/$bin" <<EOF
 #!/bin/sh
 exec $loader --library-path /opt/dcfs-libs /usr/local/bin/$bin.real "\$@"
 EOF
-			chmod +x "/newroot/usr/local/bin/$bin"
+			chmod +x "$root/usr/local/bin/$bin"
 		done
 		# Step 15.2: dcfs dispatches on argv[0] (mount.dcfs), which the
 		# generic loop above would lose.
-		cat >/newroot/usr/local/bin/mount.dcfs <<EOF
+		cat >$root/usr/local/bin/mount.dcfs <<EOF
 #!/bin/sh
 exec $loader --argv0 mount.dcfs --library-path /opt/dcfs-libs /usr/local/bin/dcfs.real "\$@"
 EOF
-		chmod +x /newroot/usr/local/bin/mount.dcfs
+		chmod +x $root/usr/local/bin/mount.dcfs
 	else
-		ln -sf dcfs /newroot/usr/local/bin/mount.dcfs
+		ln -sf dcfs $root/usr/local/bin/mount.dcfs
 	fi
-	ln -sf /usr/local/bin/mount.dcfs /newroot/sbin/mount.dcfs
-	ln -sf /usr/local/bin/mount.dcfs /newroot/sbin/mount.fuse.dcfs
+	ln -sf /usr/local/bin/mount.dcfs $root/sbin/mount.dcfs
+	ln -sf /usr/local/bin/mount.dcfs $root/sbin/mount.fuse.dcfs
+}
+
+# qemu_test's systemd_image= attribute (step 15.6): run-qemu.sh attaches an
+# overlay of a released Debian cloud image and names its root partition here.
+# The guest script runs inside that image booted with systemd as PID 1, from
+# a oneshot unit (guest/systemd_install.sh sets it up, guest/systemd_run.sh
+# is what the unit runs), not from this init: so install dcfs, the tests and
+# the unit into the image's root, move the pseudo filesystems over, and
+# switch_root into systemd. The memory sampler is started again there by the
+# unit (guest/systemd_run.sh), which also stands in for this init's mem_report
+# and verdict.
+SYSTEMD_ROOT=$(sed -n 's/.*\bdcfs_systemd=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$SYSTEMD_ROOT" ]; then
+	mkdir -p /newroot
+	# The kernel finds the disk's partitions after the disk itself (it reads
+	# the partition table), and virtio probes the disks as they come: wait
+	# for the root partition's node.
+	i=0
+	while [ ! -b "$SYSTEMD_ROOT" ] && [ "$i" -lt 100 ]; do
+		sleep 0.1
+		i=$((i + 1))
+	done
+	if ! mount -t ext4 "$SYSTEMD_ROOT" /newroot; then
+		echo "init: failed to mount $SYSTEMD_ROOT on /newroot"
+		cat /proc/partitions
+		echo "TEST-FAILED"
+		finish
+		exit 1
+	fi
+	install_dcfs_into /newroot
+	if ! sh /tests/systemd_install.sh /newroot "$TEST"; then
+		echo "init: guest/systemd_install.sh failed"
+		echo "TEST-FAILED"
+		finish
+		exit 1
+	fi
+	# The sampler lives in the old root (its /proc is gone with the switch):
+	# stop it, and leave the counters it began with for the unit's own.
+	echo "$RECLAIM_BASE" >/dev/dcfs-reclaim-base
+	kill "$MEM_SAMPLER_PID" 2>/dev/null
+	MEM_SAMPLER_PID=
+	mkdir -p /newroot/proc /newroot/sys /newroot/dev
+	mount --move /proc /newroot/proc
+	mount --move /sys /newroot/sys
+	mount --move /dev /newroot/dev
+	umount /tmp
+	exec switch_root /newroot /lib/systemd/systemd
+	echo "init: switch_root into $SYSTEMD_ROOT failed"
+	echo "TEST-FAILED"
+	finish
+	exit 1
+fi
+
+# qemu_test's optional rootfs= attribute (test/qemu/qemu_test.bzl) attaches
+# a Debian rootfs image (test/qemu/scripts/mkrootfs-debian.sh) as an extra
+# virtio-blk disk and names it here. When present, run guest_script chrooted
+# into that Debian tree instead of directly from the initramfs, so it has
+# GNU userspace and nfs-utils (rpc.nfsd/rpc.mountd/exportfs/mount.nfs4)
+# available -- none of which fit in the busybox-only initramfs. Networking
+# (loopback) is brought up in the initramfs's own network namespace before
+# the chroot, since it's process/namespace, not filesystem, state, and
+# chroot(2) doesn't touch it.
+ROOTFS=$(sed -n 's/.*\bdcfs_rootfs=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$ROOTFS" ]; then
+	mkdir -p /newroot
+	if ! mount -t ext4 "$ROOTFS" /newroot; then
+		echo "init: failed to mount $ROOTFS on /newroot"
+		echo "TEST-FAILED"
+		finish
+		exit 1
+	fi
+	mkdir -p /newroot/proc /newroot/sys /newroot/dev /newroot/tests
+	mount -o bind /proc /newroot/proc
+	mount -o bind /sys /newroot/sys
+	mount -o bind /dev /newroot/dev
+	# Coverage: the chrooted processes write their profiles to /cov too.
+	[ -n "$COV" ] && mkdir -p /newroot/cov && mount -o bind /cov /newroot/cov
+	install_dcfs_into /newroot
 
 	ip link set lo up
 

@@ -159,6 +159,18 @@ http_archive(
     urls = ["https://github.com/jgm/pandoc/releases/download/3.12/pandoc-3.12-linux-amd64.tar.gz"],
 )
 
+# Step 15.6: a RELEASED Debian cloud image, the guest that boots systemd as
+# PID 1 (test/qemu:mount_dcfs_systemd_test). The nocloud flavor of the current
+# stable release (Debian 13, trixie), pinned by the SHA512 that cloud.debian.org
+# publishes in SHA512SUMS beside it. See third_party/debian_cloud/README.md for
+# why this flavor, why the test kernel boots it, and how to move the pin.
+http_file(
+    name = "debian_cloud_image",
+    downloaded_file_path = "debian-13-nocloud-amd64.qcow2",
+    integrity = "sha512-RW8kT2a9+tRb6ME3hjDv+sDqKmfoJsmcKA7bikC3R7c6pnBX+jkTCqzVPfgqZiaD4GI4Zn/R8Vu9pYHAI4PrRg==",
+    urls = ["https://cloud.debian.org/images/cloud/trixie/20261001-2618/debian-13-nocloud-amd64-20261001-2618.qcow2"],
+)
+
 # Phase 5.3: Python for tools/sbom/ (the SBOM generator and its test), a
 # hermetic interpreter from rules_python so that no host python is needed
 # by `bazel test`. See tools/sbom/README.md.
@@ -207,6 +219,18 @@ alpine_package(
     index = "@alpine_index//:index.json",
     packages = ["qemu-system-x86_64"],
     tools = {"qemu_system_x86_64": "usr/bin/qemu-system-x86_64"},
+)
+
+# qemu-img, for the overlay disk over the pinned Debian cloud image that the
+# systemd guest boots (step 15.6; test/qemu/scripts/run-qemu.sh). A repository
+# of its own because alpine_qemu's `args` (-L, QEMU's data directory) are for
+# qemu-system only.
+alpine_package(
+    name = "alpine_qemu_img",
+    closure = True,
+    index = "@alpine_index//:index.json",
+    packages = ["qemu-img"],
+    tools = {"qemu_img": "usr/bin/qemu-img"},
 )
 
 alpine_package(

@@ -93,7 +93,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False, tags = [], cpus = E2E_CPUS):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False, tags = [], cpus = E2E_CPUS, systemd_image = None, boots = 1):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -151,6 +151,18 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             the invariant checks watch (the ACE sequences' recoveries).
         cmdline: extra words for the guest's kernel command line (run-qemu.sh
             --cmdline), which the guest script reads from /proc/cmdline.
+        systemd_image: optional label of a released Debian cloud image
+            (normally "//third_party/debian_cloud:image", step 15.6) to boot
+            with systemd as PID 1: run-qemu.sh --systemd-image puts an
+            overlay of it on a virtio disk and names its root partition as
+            dcfs_systemd= on the kernel command line, and guest/init
+            switches into it, with dcfs and the test installed, instead of
+            running the guest script itself (the script runs from a oneshot
+            unit). See third_party/debian_cloud/README.md.
+        boots: how many times the guest boots over the same disks
+            (run-qemu.sh --boots; the guest script reads dcfs_boot= and
+            dcfs_boots= from its kernel command line and reboots itself
+            between the boots). Default 1.
         tags: extra sh_test tags, e.g. ["manual"] for a test that only runs
             when asked for by name (step 11.2b: stress_random_test).
         size: required sh_test size, the test's tier: "small" (run
@@ -174,13 +186,26 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     power_cut_args = ["--power-cut", ",".join(power_cut)] if power_cut else []
     power_cut_args += ["--cmdline", "'" + cmdline + "'"] if cmdline else []
 
+    if systemd_image and rootfs:
+        fail("qemu_test(%s): systemd_image and rootfs exclude each other" % name)
+    if boots < 1 or (boots > 1 and power_cut):
+        fail("qemu_test(%s): boots is 1 or more, and excludes power_cut" % name)
+    systemd_data = [systemd_image, "@alpine_qemu_img//:qemu_img"] if systemd_image else []
+    systemd_args = [
+        "--systemd-image",
+        "$(location " + systemd_image + ")",
+        "--qemu-img",
+        "$(location @alpine_qemu_img//:qemu_img)",
+    ] if systemd_image else []
+    boots_args = ["--boots", str(boots)] if boots > 1 else []
+
     rootfs_data = [rootfs] if rootfs else []
     rootfs_args = ["--rootfs", "$(location " + rootfs + ")"] if rootfs else []
 
     # The test kernel is Alpine's linux-virt (step 24.2): //third_party/linux:
     # vmlinuz. Its drivers are modules; the initramfs gets the archive of the
     # ones this test needs (modules.bzl), which run-qemu.sh appends.
-    modules_archive = modules_cpio(test_modules(disks, modules, rootfs != None))
+    modules_archive = modules_cpio(test_modules(disks, modules, rootfs != None or systemd_image != None))
     kernel_data = ["//third_party/linux:vmlinuz", modules_archive]
     kernel_args = [
         "--modules",
@@ -232,8 +257,8 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         data = kernel_data + qemu_data + [
             initramfs,
             guest_script,
-        ] + rootfs_data + coverage_data(cov_objects),
-        args = qemu_args + ["--cpus", str(cpus)] + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + rootfs_args + mem_args + sanitizer_args() + kernel_args + [
+        ] + rootfs_data + systemd_data + coverage_data(cov_objects),
+        args = qemu_args + ["--cpus", str(cpus)] + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + boots_args + rootfs_args + systemd_args + mem_args + sanitizer_args() + kernel_args + [
             "$(location " + initramfs + ")",
             guest_script_basename,
         ] + disk_args,

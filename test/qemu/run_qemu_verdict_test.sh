@@ -23,12 +23,21 @@ if [ "${1:-}" = --version ]; then
 	echo "fake qemu 0"
 	exit 0
 fi
+# Step 15.6: the boots (--boots) and the disks (--systemd-image) a run made.
+echo "$*" >>"$(dirname "$0")/../qemu-calls"
 cat "$(dirname "$0")/../canned"
 # A guest that goes on running after its last line, as one waiting for the
 # host to cut its power does (the kill-mode cases below).
 [ -f "$(dirname "$0")/../stay" ] && exec sleep 60
 exit 0
 E
+# create -q -f qcow2 -b BACKING -F qcow2 FILE: records its arguments and makes FILE.
+cat >"$WORK/bin/qemu-img" <<'E_IMG'
+#!/bin/sh
+echo "$*" >>"$(dirname "$0")/../qemu-img-calls"
+for last in "$@"; do :; done
+: >"$last"
+E_IMG
 for t in mke2fs mkfs-xfs mkfs-btrfs; do
 	printf '#!/bin/sh\nexit 0\n' >"$WORK/bin/$t"
 done
@@ -416,4 +425,81 @@ echo "$MEM_OUT" | grep -q "^MEM total=" ||
 	fail "mem_report printed no MEM line when the sampler's file was emptied by the kill: '$MEM_OUT'"
 echo "PASS: guest/init's mem_report prints the MEM line when the kill finds /dev/memstat empty"
 FLAG=""
+
+# --- --boots (step 15.6): the same guest N times over one set of disk images,
+# each boot a complete run with a verdict of its own, stopping at the first
+# that fails.
+boots_run() {
+	# $1: the boots; the rest: more flags before the kernel.
+	rm -f "$WORK/qemu-calls" "$WORK/out/boot"*.log
+	boots=$1
+	shift
+	RC=0
+	TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+		sh "$RUN_QEMU" --boots "$boots" "$@" --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
+		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
+		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
+		"$WORK/kernel" "$WORK/initrd" mount_dcfs_systemd.sh vdb:ext4:8M >"$WORK/stdout" 2>&1 || RC=$?
+}
+: >"$WORK/extra"
+canned_e2e ALL-TESTS-PASSED
+boots_run 2
+[ "$RC" -eq 0 ] || fail "two good boots failed: $(cat "$WORK/stdout")"
+[ "$(wc -l <"$WORK/qemu-calls")" -eq 2 ] || fail "--boots 2 booted $(wc -l <"$WORK/qemu-calls") times"
+sed -n 1p "$WORK/qemu-calls" | grep -q 'dcfs_boot=1 dcfs_boots=2' || fail "boot 1 has no dcfs_boot=1 dcfs_boots=2: $(sed -n 1p "$WORK/qemu-calls")"
+sed -n 2p "$WORK/qemu-calls" | grep -q 'dcfs_boot=2 dcfs_boots=2' || fail "boot 2 has no dcfs_boot=2 dcfs_boots=2: $(sed -n 2p "$WORK/qemu-calls")"
+[ -f "$WORK/out/boot1.log" ] && [ -f "$WORK/out/boot2.log" ] || fail "a boot has no log of its own"
+# Both boots are over the same image: the second keeps what the first made.
+grep -q 'keeping .*vdb.img' "$WORK/stdout" || fail "boot 2 did not keep the disk images: $(cat "$WORK/stdout")"
+echo "PASS: --boots 2 boots twice over the same disks, saying which boot each is"
+canned_e2e TEST-FAILED
+boots_run 2
+[ "$RC" -ne 0 ] || fail "a failing boot 1 passed the run"
+[ "$(wc -l <"$WORK/qemu-calls")" -eq 1 ] || fail "boot 2 ran after a failed boot 1 ($(wc -l <"$WORK/qemu-calls") boots)"
+grep -q "== RESULT: FAIL (boot 1 of 2)" "$WORK/stdout" || fail "no FAIL naming boot 1: $(cat "$WORK/stdout")"
+echo "PASS: --boots stops at the first boot that fails, and says which"
+# A boot without the memory line cannot pass either (each boot is a complete run).
+printf '%s\n' "ALL-TESTS-PASSED" >"$WORK/canned"
+boots_run 2
+[ "$RC" -ne 0 ] || fail "a boot with no MEM line passed"
+echo "PASS: --boots: every boot needs its MEM line and verdict"
+canned_e2e ALL-TESTS-PASSED
+for bad in 0 x ""; do
+	boots_run "$bad"
+	[ "$RC" -ne 0 ] || fail "--boots '$bad' was accepted"
+done
+boots_run 2 --power-cut a
+{ [ "$RC" -ne 0 ] && grep -q 'exclude each other' "$WORK/stdout"; } || fail "--boots with --power-cut was accepted: $(cat "$WORK/stdout")"
+echo "PASS: --boots takes a positive number and excludes --power-cut"
+
+# --- --systemd-image (step 15.6): an overlay on the image is the next disk
+# after the disk-specs, its first partition the root.
+: >"$WORK/image.qcow2"
+sysd_run() {
+	rm -f "$WORK/qemu-calls" "$WORK/qemu-img-calls" "$WORK/systemd.qcow2"
+	RC=0
+	TEST_TMPDIR="$WORK" TEST_UNDECLARED_OUTPUTS_DIR="$WORK/out" \
+		sh "$RUN_QEMU" "$@" --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
+		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
+		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
+		"$WORK/kernel" "$WORK/initrd" mount_dcfs_systemd.sh vdb:ext4:8M >"$WORK/stdout" 2>&1 || RC=$?
+}
+canned_e2e ALL-TESTS-PASSED
+sysd_run --systemd-image "$WORK/image.qcow2" --qemu-img "$WORK/bin/qemu-img"
+[ "$RC" -eq 0 ] || fail "a systemd-image run failed: $(cat "$WORK/stdout")"
+grep -q -e "-b $WORK/image.qcow2 -F qcow2 .*systemd.qcow2" "$WORK/qemu-img-calls" ||
+	fail "no overlay on the image: $(cat "$WORK/qemu-img-calls")"
+grep -q 'dcfs_systemd=/dev/vdc1' "$WORK/qemu-calls" ||
+	fail "the root partition is not the first of the disk after vdb: $(cat "$WORK/qemu-calls")"
+grep -q 'file=.*systemd.qcow2,format=qcow2' "$WORK/qemu-calls" ||
+	fail "the overlay is not attached as a qcow2 drive: $(cat "$WORK/qemu-calls")"
+echo "PASS: --systemd-image attaches a qcow2 overlay of the image after the disk-specs and names its root partition"
+sysd_run --systemd-image "$WORK/image.qcow2"
+{ [ "$RC" -ne 0 ] && grep -q 'needs --qemu-img' "$WORK/stdout"; } || fail "--systemd-image without --qemu-img was accepted: $(cat "$WORK/stdout")"
+sysd_run --systemd-image "$WORK/image.qcow2" --qemu-img /usr/bin/qemu-img
+{ [ "$RC" -ne 0 ] && grep -q 'looks like a host path' "$WORK/stdout"; } || fail "a host qemu-img was accepted: $(cat "$WORK/stdout")"
+sysd_run --systemd-image "$WORK/image.qcow2" --qemu-img "$WORK/bin/qemu-img" --rootfs "$WORK/image.qcow2"
+[ "$RC" -ne 0 ] || fail "--systemd-image with --rootfs was accepted"
+echo "PASS: --systemd-image needs the Bazel-built qemu-img and excludes --rootfs"
 echo "PASS: all checks passed"
+
