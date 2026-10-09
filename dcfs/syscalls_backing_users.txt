@@ -13,6 +13,7 @@
 //dcfs:mounts_below
 
 # the mount.dcfs wrapper (step 15.2): the capture helper reads mount(8)'s output and opens the staging mount and the clone's root (read, openat, mkdirat), remount reads mountinfo, the startup channel reads the daemon's report
+//dcfs:absolute_paths
 //dcfs:backing_capture
 //dcfs:remount
 //dcfs:startup_channel
@@ -49,6 +50,7 @@
 //dcfs:mount_fds_test_bin
 //dcfs:mounts_below_test_bin
 //dcfs:sqlite_test_bin
+//dcfs:absolute_paths_test_bin
 //dcfs:session_loop_test_bin
 //dcfs:startup_channel_test_bin
 //dcfs:syscalls_process_test_bin

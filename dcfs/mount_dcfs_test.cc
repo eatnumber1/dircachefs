@@ -30,6 +30,7 @@ using ::testing::Eq;
 using ::testing::Field;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
+using ::testing::Not;
 using ::testing::Optional;
 using ::testing::Pair;
 
@@ -237,10 +238,43 @@ TEST(SplitHelperOptionsTest, NoneRefusesNativeOptionsNamingThem) {
               IsOkAndHolds(Field(&HelperOptions::read_only, true)));
 }
 
-TEST(SplitHelperOptionsTest, RemountRefusesNativeRoPointingAtDcfsRo) {
-  EXPECT_THAT(SplitHelperOptions(Strings{"remount", "ro"}),
+// libmount hands a helper rw or ro, and what fstab said (nofail, _netdev,
+// noauto, defaults, user options, x-systemd.*): the none form takes those
+// silently, so an fstab line for it and the README's example work.
+TEST(SplitHelperOptionsTest, NoneAcceptsWhatLibmountAdds) {
+  EXPECT_THAT(
+      SplitHelperOptions(Strings{
+          "rw", "defaults", "nofail", "_netdev", "noauto", "auto", "user",
+          "users", "owner", "group", "nouser", "x-systemd.requires=/mnt/a",
+          "dcfs.fstype=none", "dcfs.cache_db=/c.db"}),
+      IsOkAndHolds(Field(&HelperOptions::backing,
+                         HelperOptions::Backing::kNone)));
+}
+
+TEST(SplitHelperOptionsTest, NoneStillRefusesOthersByName) {
+  EXPECT_THAT(SplitHelperOptions(Strings{"rw", "ro", "nofail", "noatime",
+                                         "dcfs.fstype=none"}),
               StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("dcfs.ro")));
+                       AllOf(HasSubstr("ro, noatime"),
+                             Not(HasSubstr("nofail")),
+                             Not(HasSubstr("rw")))));
+}
+
+// libmount merges fstab's options into a remount, so a native ro there is
+// what the line always had, not a request: ignored (main.cc logs a warning
+// naming UnhonoredNativeOptions).
+TEST(SplitHelperOptionsTest, RemountAcceptsNativeOptions) {
+  absl::StatusOr<HelperOptions> options = SplitHelperOptions(
+      Strings{"remount", "ro", "noatime", "nofail", "dcfs.fstype=none"});
+  ASSERT_THAT(options, absl_testing::IsOk());
+  EXPECT_THAT(UnhonoredNativeOptions(*options), ElementsAre("ro", "noatime"));
+}
+
+TEST(UnhonoredNativeOptionsTest, ANativeMountHonorsEverything) {
+  absl::StatusOr<HelperOptions> options =
+      SplitHelperOptions(Strings{"ro", "noatime", "dcfs.fstype=ext4"});
+  ASSERT_THAT(options, absl_testing::IsOk());
+  EXPECT_THAT(UnhonoredNativeOptions(*options), testing::IsEmpty());
 }
 
 TEST(SplitHelperOptionsTest, RemountIsRecognizedAndNotPassedOn) {
@@ -255,16 +289,26 @@ TEST(SplitHelperOptionsTest, RemountIsRecognizedAndNotPassedOn) {
 
 // mount(8) takes a helper's status verbatim and 1 means "incorrect
 // invocation or permissions": 1 for usage and non-root, 32 for a failed start.
-TEST(ExitStatusTest, UsageAndPermissionExitOne) {
-  EXPECT_EQ(ExitStatusFor(absl::InvalidArgumentError("x")), 1);
-  EXPECT_EQ(ExitStatusFor(absl::PermissionDeniedError("x")), 1);
-  EXPECT_EQ(ExitStatusFor(absl::UnimplementedError("x")), 1);
+TEST(ExitStatusTest, UsageAndPermissionRefusalsExitOne) {
+  EXPECT_EQ(ExitStatusFor(MarkUsageError(absl::InvalidArgumentError("x"))), 1);
+  EXPECT_EQ(ExitStatusFor(MarkUsageError(absl::PermissionDeniedError("x"))), 1);
+  EXPECT_EQ(ExitStatusFor(ParseHelperArgs(Strings{"only-source"}).status()),
+            1);
+  EXPECT_EQ(ExitStatusFor(SplitHelperOptions(Strings{"dcfs.bogus"}).status()),
+            1);
+  EXPECT_EQ(ExitStatusFor(ApplyFlagOption("test_interval_sec", "soon")), 1);
 }
 
-TEST(ExitStatusTest, AFailedStartExits32) {
+// By origin, not by code: a failed start whose cause is an errno that maps to
+// InvalidArgument, PermissionDenied or Unimplemented (EINVAL from mount(2),
+// EACCES, ENOSYS from open_tree) is still a failed start.
+TEST(ExitStatusTest, AFailedStartExits32WhateverItsCode) {
   EXPECT_EQ(ExitStatusFor(absl::FailedPreconditionError("x")), 32);
   EXPECT_EQ(ExitStatusFor(absl::InternalError("x")), 32);
   EXPECT_EQ(ExitStatusFor(absl::NotFoundError("x")), 32);
+  EXPECT_EQ(ExitStatusFor(absl::InvalidArgumentError("EINVAL from mount")), 32);
+  EXPECT_EQ(ExitStatusFor(absl::PermissionDeniedError("EACCES")), 32);
+  EXPECT_EQ(ExitStatusFor(absl::UnimplementedError("ENOSYS")), 32);
 }
 
 TEST(ExitStatusTest, NativeMountFailureKeepsItsOwnStatus) {
@@ -296,14 +340,14 @@ TEST(StartupReportTest, FailureCarriesStatusAndMessage) {
 TEST(StartupReportTest, NothingReceivedIsAFailure) {
   StartupReport report = DecodeStartupReport("");
   EXPECT_FALSE(report.ready);
-  EXPECT_NE(report.exit_status, 0);
+  EXPECT_EQ(report.exit_status, 32);
   EXPECT_THAT(report.message, HasSubstr("before it was ready"));
 }
 
 TEST(StartupReportTest, GarbageIsAFailureNotAReady) {
   StartupReport report = DecodeStartupReport("Z");
   EXPECT_FALSE(report.ready);
-  EXPECT_NE(report.exit_status, 0);
+  EXPECT_EQ(report.exit_status, 32);
 }
 
 // --- remount ---------------------------------------------------------------

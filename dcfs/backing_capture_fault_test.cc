@@ -62,6 +62,16 @@ TEST_F(CaptureFaultTest, TheHelperRunsMountAndCapturesTheStagingTree) {
   EXPECT_TRUE(tree->tree.valid());
 }
 
+// procfs mounted without /proc/sys (ProcSubset=pid): say what is missing.
+TEST_F(CaptureFaultTest, AMissingStagingRootNamesWhatDcfsNeeds) {
+  CaptureRequest request = Request();
+  request.staging_root = "/no/such/root";
+  EXPECT_THAT(CaptureBacking(request).status(),
+              StatusIs(absl::StatusCode::kFailedPrecondition,
+                       AllOf(HasSubstr("/no/such/root"),
+                             HasSubstr("/proc"))));
+}
+
 TEST_F(CaptureFaultTest, AHelperFailureKeepsItsCodeMessageAndErrno) {
   g_fault = Fault::kUnshare;
   absl::StatusOr<CapturedTree> tree = CaptureBacking(Request());

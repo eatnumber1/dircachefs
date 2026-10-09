@@ -599,14 +599,23 @@ if [ "$WRC" -eq 1 ] && grep -q 'ro' "$OUT" && grep -q 'dcfs.fstype=none' "$OUT" 
 else
 	fail none-refuses-native-options "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
 fi
-# A remount cannot change the underlying mount either.
-wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/rm2.db" "$SRC" "$MNT"
+# What libmount adds to a helper's options (rw or ro, fstab's nofail, _netdev,
+# ...) is not an error for the none form.
+wrapper -o "rw,nofail,_netdev,noauto,defaults,dcfs.fstype=none,dcfs.cache_db=$CACHE/rm2.db" "$SRC" "$MNT"
 only_one_daemon
-wrapper -o remount,ro "$SRC" "$MNT"
-if [ "$WRC" -eq 1 ] && grep -q 'dcfs.ro' "$OUT" && touch "$MNT/after_remount_ro" 2>/dev/null; then
-	pass remount-refuses-native-ro
+if [ "$WRC" -eq 0 ]; then
+	pass none-accepts-libmount-options
 else
-	fail remount-refuses-native-ro "rc=$WRC out=$(cat "$OUT")"
+	fail none-accepts-libmount-options "rc=$WRC out=$(cat "$OUT")"
+fi
+# A remount cannot change the underlying mount: a native ro that libmount
+# merged in from fstab is ignored, with a warning naming it, and the dcfs
+# mount stays as it was.
+wrapper -o remount,ro,noatime,nofail "$SRC" "$MNT"
+if [ "$WRC" -eq 0 ] && grep -q 'ro, noatime' "$OUT" && touch "$MNT/after_remount_ro" 2>/dev/null; then
+	pass remount-ignores-native-options
+else
+	fail remount-ignores-native-options "rc=$WRC out=$(cat "$OUT")"
 fi
 [ -n "$DPID" ] && unmount_check remount-native-umount "$MNT"
 

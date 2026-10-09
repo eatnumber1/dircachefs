@@ -24,6 +24,7 @@ MAIN_DEPS = [
     ":metadata_cache",
     ":migrate",
     ":mount_fds",
+    ":absolute_paths",
     ":mount_dcfs",
     ":mount_options",
     ":mounts_below",
@@ -764,6 +765,37 @@ qemu_cc_test(
       "@absl//absl/log:log_sink",
       "@absl//absl/log:log_sink_registry",
       "@absl//absl/status",
+      "@googletest//:gtest_main",
+    ],
+)
+
+# Step 15.2: SOURCE, MOUNTPOINT and the cache database as absolute paths.
+cc_library(
+    name = "absolute_paths",
+    srcs = ["absolute_paths.cc"],
+    hdrs = ["absolute_paths.h"],
+    deps = [
+      ":mount_dcfs",
+      ":syscalls",
+      ":syscalls_backing",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/strings",
+    ],
+)
+
+qemu_cc_test(
+    name = "absolute_paths_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["absolute_paths_test.cc"],
+    deps = [
+      ":absolute_paths",
+      ":mount_dcfs",
+      ":syscalls",
+      ":syscalls_backing",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "@absl//absl/status:status_matchers",
       "@googletest//:gtest_main",
     ],
 )
