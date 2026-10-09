@@ -39,7 +39,9 @@ CrashImageD(s) ==
 \* which is kept: PowerLoss and the invariants read it).
 CrashImage(s) ==
     IF s.fDirty # "no"
-    THEN [CrashImageD(s) EXCEPT !.fValid = FALSE, !.fAttr = 0]
+    THEN [CrashImageD(s) EXCEPT !.fValid = FALSE, !.fAttr = 0,
+                                !.fDent = IF @ = "present" THEN "unknown"
+                                          ELSE @]
     ELSE CrashImageD(s)
 
 \* F's guard clock (step 23.8) is compared only with the snapshots the
@@ -61,7 +63,8 @@ CrashImage(s) ==
 \* of those successors TLC reached depended on which state it had kept,
 \* and the distinct-state count on the number of workers (MC_atime.cfg:
 \* 263,723 with one worker, 263,890, 263,796 and 263,848 with four).
-FSnapPcs == {"S2", "FR_fill", "FG_fill", "FG_rfill", "FS_fill"}
+FSnapPcs == {"S2", "FR_fill", "FG_fill", "FG_rfill", "FS_fill",
+             "FC_rec", "FL_commit"}
 FSnapView(r) ==
     [r EXCEPT !.fsnap = IF r.pc \notin FSnapPcs THEN 0
                         ELSE IF r.fsnap = fm.seq THEN 1 ELSE 2]
@@ -74,6 +77,18 @@ FSnapView(r) ==
 (* depends on them.                                                        *)
 (***************************************************************************)
 IdleView(r) == IF r.pc = "idle" THEN IdleProc ELSE r
+
+(***************************************************************************)
+(* Step 23.11's configurations (born-dirty create): F not yet created, and *)
+(* the candidate rules for a fill that inserts F's row (the audit's G5).   *)
+(***************************************************************************)
+NotYet == FALSE
+\* Rule A: a child's attributes recorded only if its parent's fill is
+\* allowed too.
+ChildFilledIfDirOk(dirOk, childOk) == dirOk /\ childOk
+\* Rule B: a row a fill inserts is born dirty when its parent's fill is
+\* refused (the parent is in flight, or was touched since the snapshot).
+FillMarksIfDirNotOk(newRow, dirOk) == newRow /\ ~dirOk
 
 View == <<bCur, bSeq,
           IF mode \in {"down", "recover"} THEN CrashImage(dbCur) ELSE dbCur,

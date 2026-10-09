@@ -157,6 +157,28 @@ tlc_test(
     ]
 ]
 
+# Step 23.11, born-dirty create (README.md, "Born-dirty create"): F's
+# create, the fills of its name, its writes, under each regime with the
+# kernel's lock and without it (the audit's G5). Every invariant and
+# property, BornDirty and LostRowProbed among them.
+[
+    tlc_test(
+        name = "borndirty_%s_test" % config,
+        size = "medium",
+        timeout = "moderate",
+        config = "MC_borndirty%s.cfg" % suffix,
+        spec = "MC.tla",
+        srcs = ["dcfs.tla"],
+    )
+    for config, suffix in [
+        ("seq", ""),
+        ("ext4", "_ext4"),
+        ("metaprefix", "_metaprefix"),
+        ("nolock", "_nolock"),
+        ("nolock_ext4", "_nolock_ext4"),
+    ]
+]
+
 # Ferrite's litmus tests through dcfs (MClitmus.tla), the ones whose
 # surprising outcome must not be reachable (a few seconds each); the ones
 # where it is are limitations, below the known bugs.
@@ -222,6 +244,24 @@ KNOWN_BUGS = {
     # Step 12.8, not historical: a sync point after FSYNC with the file's
     # fsync as its only barrier, under the ext4 regime.
     "sync_by_file_fsync": "Invariant CrashSafe is violated",
+    # Step 23.11 (not historical): born-dirty create. The row and its mark
+    # in two transactions; the parent's phase 1 not durable; the audit's G5,
+    # a fill that inserts the row clean, as the code does today (without
+    # the kernel's lock, and with it after a daemon crash), and the audit's
+    # two candidate fixes, which miss the second case; BeginWriting's fast
+    # path for a row not born dirty, for a mark a sync point cleared, and
+    # for a row a fill inserted before phase 3; recovery that keeps a dirty
+    # file's attributes.
+    "borndirty_two_commits": "Invariant CrashSafe is violated",
+    "borndirty_parent_not_durable": "Invariant CrashSafe is violated",
+    "borndirty_fill_unmarked": "Invariant CrashSafe is violated",
+    "borndirty_fill_unmarked_after_crash": "Invariant CrashSafe is violated",
+    "borndirty_fill_rule_a": "Invariant CrashSafe is violated",
+    "borndirty_fill_rule_b": "Invariant CrashSafe is violated",
+    "borndirty_trusts_any_row": "Invariant CrashSafe is violated",
+    "borndirty_sync_keeps_durable": "Invariant CrashSafe is violated",
+    "borndirty_not_born_here": "Invariant CrashSafe is violated",
+    "borndirty_recover_keeps_file": "Invariant CrashSafe is violated",
 }
 
 # rename_stale_source explores 993,559 distinct states before its
@@ -240,6 +280,42 @@ KNOWN_BUG_TIMEOUTS = {"rename_stale_source": "long"}
         srcs = MODEL,
     )
     for bug, violation in KNOWN_BUGS.items()
+]
+
+# Step 23.11: BornDirty and LostRowProbed, and the dirty set's three
+# conditions per inode, each violated by the known bug that breaks it (a
+# configuration of that bug's module that checks only the property).
+PREMISES = {
+    "born_dirty": ("borndirty_two_commits", "Invariant BornDirty is violated"),
+    "lost_row_probed": (
+        "borndirty_two_commits",
+        "Invariant LostRowProbed is violated",
+    ),
+    "dirty_before_change": (
+        "crash_f1_phase1_not_durable",
+        "Action property DirtyBeforeChange is violated",
+    ),
+    "clear_only_after_sync": (
+        "sync_during_mutation",
+        "Action property ClearOnlyAfterSync is violated",
+    ),
+    "recovery_forgets_dirty": (
+        "borndirty_recover_keeps_file",
+        "Invariant RecoveryForgetsDirty is violated",
+    ),
+}
+
+[
+    tlc_test(
+        name = "premise_%s_test" % premise,
+        size = "small",
+        timeout = "short",
+        config = "known_bugs/premise_%s.cfg" % premise,
+        expect_violation = violation,
+        spec = "known_bugs/%s.tla" % bug,
+        srcs = MODEL,
+    )
+    for premise, (bug, violation) in PREMISES.items()
 ]
 
 # What step 23.8 does not deliver (limitations/atime_limits.tla).

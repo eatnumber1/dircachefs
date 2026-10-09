@@ -63,7 +63,9 @@ AllKinds == {"lookup", "readdir", "readdirplus", "getattr",
 \* The requests of a regular file F (step 23.8; "Access times of a file"
 \* below). Not in AllKinds: the configurations that leave them out keep
 \* F's state constant, and their state counts.
-FileKinds == {"fopen", "frelease", "fgetattr", "fset"}
+FileKinds == {"fopen", "frelease", "fgetattr", "fset", "fcreate", "flookup"}
+\* (Step 23.11: "fcreate", the create of F under its name in D, and
+\* "flookup", a lookup of that name: "Born-dirty create" below.)
 \* The requests that touch a file's data (step 12.8): a write to the file a
 \* name holds, through a writable open (passthrough), and the kernel's
 \* FSYNC of it. No record of D's changes at either; they exist so that the
@@ -76,7 +78,7 @@ DataKinds == {"write", "fsync"}
 SyncKinds == {"sync", "fsync"}
 Regimes == {"seq", "metaprefix", "ext4"}
 
-ASSUME /\ Names # {} /\ IsFiniteSet(Names)
+ASSUME /\ Names # {} /\ IsFiniteSet(Names) /\ Names \cap {"F@D", "F#"} = {}
        /\ Procs # {} /\ IsFiniteSet(Procs)
        /\ Requests \subseteq AllKinds \cup FileKinds \cup DataKinds
        /\ Reorder \in Regimes /\ DirFsyncPersistsFiles \in BOOLEAN
@@ -114,12 +116,18 @@ DentVals == Objs \cup {NoRow, Unknown, Absent}
 \* A state of the backing filesystem: D's entries, and D's attributes
 \* (mtime/ctime/nlink), abstracted to the stamp of the last change to D;
 \* F's attributes (its access time above all), the stamp of the last
-\* change to F (a read through passthrough, or a setattr); and each named
+\* change to F (a read through passthrough, a setattr, its create); `fs`,
+\* the stamp of the last of those that was not a read (step 23.11, from
+\* step 23.10: a ghost, so that F's cached attributes can be checked for
+\* being behind as well as ahead, all but the access time); `fn`, whether
+\* F exists, under its name in D (step 23.11: F may be created; a name
+\* apart from Names, like 23.10's); and each named
 \* object's data (its contents: 0 empty, else the stamp of the write that
 \* wrote them, or the object's number for the contents an initial object
 \* starts with; one block, written whole by each write: step 12.8).
 BStates == [names : [Names -> Objs \cup {NoObj}], ver : 0..MaxStamp,
-            f : 0..MaxStamp, data : [Objs -> 0..MaxStamp]]
+            f : 0..MaxStamp, fs : 0..MaxStamp, fn : BOOLEAN,
+            data : [Objs -> 0..MaxStamp]]
 \* The contents objects start with: an initial object (o1..oN) has some
 \* (its number), a created one none. Only the write requests change them.
 InitData == [o \in Objs |-> IF \E i \in 1..NumNames : o = Obj(i)
@@ -128,9 +136,12 @@ InitData == [o \in Objs |-> IF \E i \in 1..NumNames : o = Obj(i)
 \* The metadata of a backing state: D's entries and attributes, and F's
 \* attributes (what the cache's records describe; a crash state of the
 \* metadata, MetaCrash, is one of these).
-Meta(b) == [names |-> b.names, ver |-> b.ver, f |-> b.f]
-\* D's part of it (what Observed reads).
-DMeta(m) == [names |-> m.names, ver |-> m.ver]
+Meta(b) == [names |-> b.names, ver |-> b.ver, f |-> b.f, fs |-> b.fs,
+            fn |-> b.fn]
+\* D's part of it (what Observed reads): its entries, F's name with them.
+DMeta(m) == [names |-> m.names, ver |-> m.ver, fn |-> m.fn]
+\* A cached dentry of F's name in D: present, absent, or unknown (no row).
+FDentVals == {"present", "absent", "unknown"}
 \* F's row in the `dirty` table: none, atime_only = 1, or a mutation's.
 FDirtyVals == {"no", "atime", "mut"}
 \* A state of the cache database, as far as D (and F) is concerned.
@@ -143,6 +154,8 @@ DBStates == [dent : [Names -> DentVals],  \* dentries rows (parent = D)
                                           \* keeps is never served)
              dirty : BOOLEAN,             \* D is in the `dirty` table
              clean : BOOLEAN,             \* cache_state.clean_shutdown
+             fRow : BOOLEAN,              \* F has a row in `inodes` (23.11)
+             fDent : FDentVals,           \* F's dentry in D (23.11)
              fValid : BOOLEAN,            \* F's inodes.attrs_valid
              fAttr : 0..MaxStamp,         \* F's cached attributes (0 while
                                           \* unknown)
@@ -235,7 +248,7 @@ IdleProc == [pc |-> "idle", kind |-> None, n |-> None, m |-> None,
              mseq |-> 0, src |-> NoObj, rsnap |-> 0, attempts |-> 0,
              was |-> FALSE, eff |-> None, win |-> {}, rep |-> NoRep,
              rb |-> FALSE, fsnap |-> 0, fheld |-> FALSE, frel |-> 0,
-             fdirty |-> FALSE]
+             fdirty |-> FALSE, rdLink |-> FALSE]
 
 TypeOK ==
     /\ bCur \in BStates /\ bSeq \in Seq(BStates) /\ bSeq # <<>>
@@ -351,7 +364,14 @@ Commit(new, sync) ==
 BWrite(new) == bCur' = new /\ bSeq' = Append(bSeq, new)
 
 \* The names the change from bSeq[i-1] to bSeq[i] touched.
-Touched(i) == {x \in Names : bSeq[i].names[x] # bSeq[i-1].names[x]}
+\* (Step 23.11: and F's name in D, "F@D", and F's attributes, "F#", as
+\* items of their own: Items.)
+Touched(i) ==
+    {x \in Names : bSeq[i].names[x] # bSeq[i-1].names[x]}
+    \cup (IF bSeq[i].fn # bSeq[i-1].fn THEN {"F@D"} ELSE {})
+    \cup (IF bSeq[i].f # bSeq[i-1].f \/ bSeq[i].fs # bSeq[i-1].fs
+          THEN {"F#"} ELSE {})
+Items == Names \cup {"F@D", "F#"}
 
 \* "metaprefix" and "ext4": the data of each file a power loss may leave,
 \* any value it had in the sequence (only the files whose data changed
@@ -369,25 +389,42 @@ DataCrash ==
 \* touches two names (a rename) is kept for both or for neither. Then x
 \* holds what it held after its last kept change: every change it depends
 \* on (the earlier changes of the names it touched) is kept too.
-NamePos == {pos \in [Names -> 1..Len(bSeq)] :
-              /\ \A x \in Names : pos[x] = 1 \/ x \in Touched(pos[x])
-              /\ \A i \in 2..Len(bSeq) : \A x, y \in Touched(i) :
-                   (i <= pos[x]) = (i <= pos[y])}
+\* (Step 23.11, from step 23.10: each item's points are chosen among its
+\* own changes, PosOpts, item by item, so that TLC enumerates only those:
+\* the same set as all functions from the items to 1..Len(bSeq) restricted
+\* to them, which it would enumerate whole. F's attributes persist in order
+\* by rule (1) and F's name by rule (3); its create changes both, so it is
+\* kept for both or for neither. Before step 23.11 F had no name, and its
+\* attributes came from any state of the sequence.)
+PosOpts(x) == {1} \cup {i \in 2..Len(bSeq) : x \in Touched(i)}
+RECURSIVE Choices(_)
+Choices(S) ==
+    IF S = {} THEN {[x \in {} |-> 1]}
+    ELSE LET x == CHOOSE y \in S : TRUE
+         IN {[y \in S |-> IF y = x THEN i ELSE g[y]] :
+               i \in PosOpts(x), g \in Choices(S \ {x})}
+NamePos == {pos \in Choices(Items) :
+              \A i \in 2..Len(bSeq) : \A x, y \in Touched(i) :
+                (i <= pos[x]) = (i <= pos[y])}
 
-\* The states of the metadata a power loss may leave ("ext4": D's entries
-\* as rule (3) allows, D's attributes and F's each as in any state of the
-\* sequence; otherwise all as in one state of the sequence).
+\* The states of the metadata a power loss may leave ("ext4": D's entries,
+\* F's name and F's attributes as rules (1) and (3) allow, D's attributes
+\* as in any state of the sequence; otherwise all as in one state of the
+\* sequence).
 MetaCrash ==
     IF Reorder = "ext4"
     THEN {[names |-> [x \in Names |-> bSeq[pos[x]].names[x]],
-           ver |-> bSeq[k].ver, f |-> bSeq[j].f] :
-            pos \in NamePos, k \in 1..Len(bSeq), j \in 1..Len(bSeq)}
+           ver |-> bSeq[k].ver,
+           f |-> bSeq[pos["F#"]].f, fs |-> bSeq[pos["F#"]].fs,
+           fn |-> bSeq[pos["F@D"]].fn] :
+            pos \in NamePos, k \in 1..Len(bSeq)}
     ELSE {Meta(bSeq[k]) : k \in 1..Len(bSeq)}
 
 \* The backing states a power loss may leave.
 BCrash ==
     IF Reorder = "seq" THEN {bSeq[k] : k \in 1..Len(bSeq)}
-    ELSE {[names |-> t.names, ver |-> t.ver, f |-> t.f, data |-> d] :
+    ELSE {[names |-> t.names, ver |-> t.ver, f |-> t.f, fs |-> t.fs,
+           fn |-> t.fn, data |-> d] :
             t \in MetaCrash, d \in DataCrash}
 
 \* syncfs(2): everything written is durable.
@@ -412,6 +449,8 @@ Force(meta, fmeta, objs) ==
                   [names |-> IF meta THEN bCur.names ELSE bSeq[i].names,
                    ver |-> IF meta THEN bCur.ver ELSE bSeq[i].ver,
                    f |-> IF fmeta THEN bCur.f ELSE bSeq[i].f,
+                   fs |-> IF fmeta THEN bCur.fs ELSE bSeq[i].fs,
+                   fn |-> IF meta THEN bCur.fn ELSE bSeq[i].fn,
                    data |-> [o \in Objs |-> IF o \in objs THEN bCur.data[o]
                                             ELSE bSeq[i].data[o]]]])
 
@@ -1046,6 +1085,9 @@ S1From(p, r) ==
 \* for: it must not drive further sync points). SyncKeepsHeld(r) is the
 \* test; known_bugs/atime_sync_clears_held overrides it.
 SyncKeepsHeld(r) == r.fheld \/ fm.held > 0
+\* Context::dirty.durable is cleared at every sync point (step 23.11:
+\* known_bugs/borndirty_sync_keeps_durable overrides it with TRUE).
+SyncKeepsDurable == FALSE
 S2(p) ==
     /\ At(p, "S2")
     /\ LET r == ps[p]
@@ -1059,7 +1101,7 @@ S2(p) ==
                                  ELSE IF fd = "mut" THEN "atime" ELSE fd],
                  FALSE)
     /\ durableD' = FALSE
-    /\ fm' = [fm EXCEPT !.durable = FALSE, !.expired = FALSE]
+    /\ fm' = [fm EXCEPT !.durable = SyncKeepsDurable /\ @, !.expired = FALSE]
     /\ Reply(p, ps[p], Rep("ok", {}))
     /\ UnchangedBacking /\ UNCHANGED <<seq, inflight, servedWrong, stamp>>
 
@@ -1181,14 +1223,15 @@ AtimeDirty(d) == IF d.fDirty = "no" THEN "atime" ELSE d.fDirty
 \* Serving F's attributes from the cache: wrong if ahead of the backing
 \* filesystem, or behind it with no power loss to explain it.
 ServeF(v) ==
-    servedWrong' = (servedWrong \/ v > bCur.f \/ (v # bCur.f /\ ~fm.lost))
+    servedWrong' = (servedWrong \/ v > bCur.f \/ v < bCur.fs \/ ~bCur.fn
+                                \/ (v # bCur.f /\ ~fm.lost))
 
 UnchangedD == UNCHANGED <<seq, inflight, durableD>>
 
 \* An F request (slot state r) replies. Its answer (F's attributes) is not
 \* one of the reply ghost's (ReplyObservable checks D's); ServeF and
 \* FileExact check what F's attributes are served as.
-FReply(p, r) == Reply(p, r, Rep("ok", {}))
+FReply(p, r) == Reply(p, r, Rep(IF r.eff = None THEN "ok" ELSE r.eff, {}))
 
 \* DirCacheFS::Open of F. A cold one (dcfs holds nothing) marks F's row
 \* dirty, atime only, at normal durability, before the reply: from then on
@@ -1291,8 +1334,12 @@ FGRFill(p) ==
 \* attributes unknown, its row a mutation's, committed kSync unless F is
 \* durably dirty), the syscall, Mutation::End, then the refresh by handle
 \* as an ordinary fill.
+\* (Step 23.11: F counts as durably dirty also from its born-dirty create
+\* on, fm.durable; FSetSync is the rule, which
+\* known_bugs/borndirty_trusts_any_row overrides.)
+FSetSync == ~fm.durable
 FSetFrom(p, r) ==
-    /\ LET sync == ~fm.durable
+    /\ LET sync == FSetSync
        IN /\ Commit([dbCur EXCEPT !.fValid = FALSE, !.fAttr = 0,
                                   !.fDirty = "mut"], sync)
           /\ fm' = [fm EXCEPT !.durable = @ \/ sync, !.seq = @ + 1,
@@ -1301,7 +1348,7 @@ FSetFrom(p, r) ==
     /\ UnchangedBacking /\ UnchangedD /\ UNCHANGED <<servedWrong, stamp>>
 FSSys(p) ==
     /\ At(p, "FS_sys")
-    /\ BWrite([bCur EXCEPT !.f = stamp])
+    /\ BWrite([bCur EXCEPT !.f = stamp, !.fs = stamp])
     /\ stamp' = stamp + 1
     /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "FS_end"])
     /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
@@ -1315,6 +1362,162 @@ FSFill(p) ==
     /\ At(p, "FS_fill")
     /\ FillF(ps[p])
     /\ FReply(p, ps[p])
+    /\ UnchangedBacking /\ UnchangedD /\ UNCHANGED <<servedWrong, stamp>>
+
+(***************************************************************************)
+(* Born-dirty create (step 23.11; docs/design.md, "Phase 3"). F may not   *)
+(* exist yet: `fcreate` creates it under its name in D. Its phase 1 is    *)
+(* D's (cache::BeginCreate: F's name and D's attributes unknown, D dirty, *)
+(* kSync unless D is durably dirty); then the syscall; then              *)
+(* backing::RecordNewChild: a probe, and phase 3, ONE transaction at      *)
+(* normal durability inserting F's row (its attributes, if F's guard      *)
+(* allows), F's dentry in D (if the mutation Owns D) and F's dirty mark.  *)
+(* So every database state a crash may leave has F's row with its mark,  *)
+(* or no row: F's row is born dirty, and counts as durably dirty from     *)
+(* then on (fm.durable: Context::dirty.durable), so that BeginWriting (the *)
+(* model's fset) needs no fsync. `flookup`, a lookup of F's name          *)
+(* (backing::ResolveName, RecordChild; it stands for a listing of D too), *)
+(* is the fill of the audit's gap G5: between the create's syscall and   *)
+(* its phase 3 it may insert F's row first. Which marks it gets is        *)
+(* FillMarks.                                                             *)
+(***************************************************************************)
+
+\* Where F starts: existing, with its row (the configurations of step
+\* 23.8), or not yet created (FALSE: the configurations of step 23.11).
+FInitExists == TRUE
+\* Phase 3 is one transaction (known_bugs/borndirty_two_commits: two, the
+\* row then the mark).
+Phase3Split == FALSE
+\* Phase 3 makes F durably dirty (the code half adds the born-dirty row to
+\* Context::dirty.durable).
+BornDurable == TRUE
+
+\* RecordChild's rules for the row of a child a fill records (dirOk: the
+\* parent's CanFill; childOk: the child's). ChildFilled: whether its
+\* attributes are recorded (the code: childOk; MC.tla's
+\* ChildFilledIfDirOk, the audit's rule A: only if dirOk too). FillMarks:
+\* whether a row the fill inserts is born dirty (the rule chosen: when its
+\* parent is dirty, i.e. a create in it may not be durable yet;
+\* known_bugs/borndirty_fill_unmarked: never, the code today; MC.tla's
+\* FillMarksIfDirNotOk, the audit's rule B: when the parent's fill is
+\* refused).
+ChildFilled(dirOk, childOk) == childOk
+FillMarks(newRow, dirOk) == newRow /\ dbCur.dirty
+
+\* Phase 1, then the syscall.
+FCreateFrom(p, r) ==
+    LET sync == ~durableD /\ ~BugPhase1NotDurable
+    IN /\ Commit([MarkUnknown(dbCur, {}, TRUE) EXCEPT !.fDent = "unknown"],
+                 sync)
+       /\ durableD' = (durableD \/ sync)
+       /\ seq' = seq + 1 /\ inflight' = inflight + 1
+       /\ UNCHANGED fm
+       /\ Syscall(p, InFlight(r, "FC_sys"))
+       /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
+
+\* Phase 2: the create (openat O_CREAT|O_EXCL, mknodat, ...): EEXIST if F
+\* exists. F's attributes are new; D's change.
+FCSys(p) ==
+    /\ At(p, "FC_sys")
+    /\ IF ~bCur.fn
+       THEN /\ stamp' = stamp + 1
+            /\ MutSyscall(p, [ps[p] EXCEPT !.pc = "FC_probe", !.eff = "ok"],
+                          [bCur EXCEPT !.fn = TRUE, !.f = stamp,
+                                       !.fs = stamp, !.ver = stamp])
+       ELSE /\ UNCHANGED <<bCur, bSeq, stamp>>
+            /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "FC_fail",
+                                             !.eff = "EEXIST"])
+    /\ UnchangedDB /\ UnchangedGuards /\ UNCHANGED servedWrong
+
+\* RecordNewChild's snapshot and probe (one step, as ResolveProbe).
+FCProbe(p) ==
+    /\ At(p, "FC_probe")
+    /\ AfterSyscall(p, [ps[p] EXCEPT !.pc = "FC_rec", !.fsnap = fm.seq,
+                                     !.rdVer = bCur.f])
+    /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards
+    /\ UNCHANGED <<servedWrong, stamp>>
+
+\* Phase 3 (RecordNewChild's transaction): the row (upserted: a fill may
+\* have inserted it), its attributes if F's guard allows, the dentry if
+\* Owns(D), and the mark; then Mutation::End. F is durably dirty from then
+\* on only if this transaction inserted the row (BornHere: UpsertInode
+\* says so): a row a fill inserted before may have had its mark cleared by
+\* a sync point meanwhile, and a crash may still leave it so, clean.
+\* With Phase3Split, the mark is a second transaction (FC_mark).
+BornHere(r) == ~dbCur.fRow
+FCRec(p) ==
+    /\ At(p, "FC_rec")
+    /\ LET r == ps[p]
+           ok == CanFillF(r.fsnap)
+           row == [dbCur EXCEPT !.fRow = TRUE, !.fValid = ok,
+                                !.fAttr = IF ok THEN r.rdVer ELSE 0,
+                                !.fDent = IF Owns(r) THEN "present" ELSE @]
+       IN IF Phase3Split
+          THEN /\ Commit(row, FALSE)
+               /\ Then(p, [r EXCEPT !.pc = "FC_mark",
+                                     !.fheld = BornHere(r)])
+               /\ UNCHANGED <<seq, inflight, durableD, fm>>
+          ELSE /\ Commit([row EXCEPT !.fDirty = "mut"], FALSE)
+               /\ seq' = seq + 1 /\ inflight' = inflight - 1
+               /\ fm' = [fm EXCEPT !.durable = @ \/ (BornDurable
+                                                     /\ BornHere(r))]
+               /\ UNCHANGED durableD
+               /\ FReply(p, r)
+    /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
+FCMark(p) ==
+    /\ At(p, "FC_mark")
+    /\ Commit([dbCur EXCEPT !.fDirty = "mut"], FALSE)
+    /\ seq' = seq + 1 /\ inflight' = inflight - 1
+    \* (`fheld` carries BornHere from the first transaction.)
+    /\ fm' = [fm EXCEPT !.durable = @ \/ (BornDurable /\ ps[p].fheld)]
+    /\ UNCHANGED durableD
+    /\ FReply(p, ps[p])
+    /\ UnchangedBacking /\ UNCHANGED <<servedWrong, stamp>>
+\* A failed create: Mutation::End; the error is replied (the model leaves
+\* F's dentry unknown: no re-resolve).
+FCFail(p) ==
+    /\ At(p, "FC_fail")
+    /\ EndMutation
+    /\ FReply(p, ps[p])
+    /\ UnchangedBacking /\ UnchangedDB /\ UNCHANGED <<servedWrong, stamp>>
+
+\* The lookup of F's name: the fill snapshot and the probe (one step), ...
+FLookupFrom(p, r) ==
+    /\ ps' = [ps EXCEPT ![p] = [r EXCEPT !.pc = "FL_commit", !.snap = seq,
+                                         !.fsnap = fm.seq,
+                                         !.rdLink = bCur.fn,
+                                         !.rdVer = bCur.f]]
+    /\ UNCHANGED running
+    /\ UnchangedBacking /\ UnchangedDB /\ UnchangedGuards
+    /\ UNCHANGED <<servedWrong, stamp>>
+\* ... then ResolveName's transaction: if F is absent, a negative dentry
+\* (if D's guard allows); else RecordChild: F's row upserted, its
+\* attributes recorded or unknown (ChildFilled), born dirty if new and
+\* FillMarks says so (else, if F is held, atime-only and its guard touched,
+\* cache::UpsertInode's MarkAtimeDirty), and the dentry if D's guard
+\* allows.
+FLCommit(p) ==
+    /\ At(p, "FL_commit")
+    /\ LET r == ps[p]
+           dirOk == CanFill(r.snap)
+           filled == ChildFilled(dirOk, CanFillF(r.fsnap))
+           held == filled /\ fm.held > 0
+           mark == IF FillMarks(~dbCur.fRow, dirOk) THEN "mut"
+                   ELSE IF held THEN AtimeDirty(dbCur) ELSE dbCur.fDirty
+       IN /\ IF ~r.rdLink
+             THEN /\ IF dirOk THEN Commit([dbCur EXCEPT !.fDent = "absent"],
+                                          FALSE)
+                     ELSE UnchangedDB
+                  /\ UNCHANGED fm
+             ELSE /\ Commit([dbCur EXCEPT !.fRow = TRUE, !.fValid = filled,
+                                          !.fAttr = IF filled THEN r.rdVer
+                                                    ELSE 0,
+                                          !.fDirty = mark,
+                                          !.fDent = IF dirOk THEN "present"
+                                                    ELSE @], FALSE)
+                  /\ fm' = [fm EXCEPT !.seq = IF held THEN @ + 1 ELSE @,
+                                      !.lost = IF filled THEN FALSE ELSE @]
+          /\ FReply(p, r)
     /\ UnchangedBacking /\ UnchangedD /\ UNCHANGED <<servedWrong, stamp>>
 
 (***************************************************************************)
@@ -1410,20 +1613,35 @@ Arrive(p) ==
                /\ ArriveAllowed("fsync", n, None)
                /\ S1From(p, NewReq("fsync", n, None, "S1", None, None, FALSE))
           /\ UNCHANGED muts
+       \* F's requests by nodeid need F's row and F (step 23.11: the kernel
+       \* holds a nodeid of F only once dcfs replied an entry for it).
        \/ /\ "fopen" \in Requests /\ fm.opens < Cardinality(Procs)
+          /\ dbCur.fRow /\ bCur.fn
           /\ FOpen(p, NewReq("fopen", None, None, None, None, None, FALSE))
           /\ UNCHANGED muts
        \/ /\ "frelease" \in Requests /\ fm.opens > 0
           /\ FReleaseFrom(p, NewReq("frelease", None, None, None, None, None,
                                     FALSE))
           /\ UNCHANGED muts
-       \/ /\ "fgetattr" \in Requests
+       \/ /\ "fgetattr" \in Requests /\ dbCur.fRow /\ bCur.fn
           /\ FGetattrFrom(p, NewReq("fgetattr", None, None, None, None, None,
                                     FALSE))
           /\ UNCHANGED muts
-       \/ /\ "fset" \in Requests
+       \/ /\ "fset" \in Requests /\ dbCur.fRow /\ bCur.fn
           /\ muts < MaxMutations /\ muts' = muts + 1
           /\ FSetFrom(p, NewReq("fset", None, None, None, None, None, FALSE))
+       \* Step 23.11: the create and the lookup of F's name, in D (under D's
+       \* lock).
+       \/ /\ "fcreate" \in Requests /\ LockFree(KernelDirLock)
+          /\ muts < MaxMutations /\ muts' = muts + 1
+          /\ ArriveAllowed("fcreate", None, None)
+          /\ FCreateFrom(p, NewReq("fcreate", None, None, None, None, None,
+                                   KernelDirLock))
+       \/ /\ "flookup" \in Requests /\ LockFree(KernelDirLock)
+          /\ ArriveAllowed("flookup", None, None)
+          /\ FLookupFrom(p, NewReq("flookup", None, None, None, None, None,
+                                   KernelDirLock))
+          /\ UNCHANGED muts
     /\ UNCHANGED <<mode, crashes>>
 
 \* The request steps by name, each with the frame for the variables only
@@ -1477,6 +1695,12 @@ FileSetSyscall(p)  == FSSys(p) /\ F
 FileSetEnd(p)      == FSEnd(p) /\ F
 FileSetStat(p)     == FStat(p, "FS_stat", "FS_fill") /\ F
 FileSetFill(p)     == FSFill(p) /\ F
+FileCreateSyscall(p) == FCSys(p) /\ F
+FileCreateProbe(p) == FCProbe(p) /\ F
+FileCreatePhase3(p) == FCRec(p) /\ F
+FileCreateMark(p)  == FCMark(p) /\ F
+FileCreateFailed(p) == FCFail(p) /\ F
+FileLookupCommit(p) == FLCommit(p) /\ F
 
 -----------------------------------------------------------------------------
 (* Crashes, startup recovery (backing::StartRun) and clean shutdown        *)
@@ -1535,11 +1759,14 @@ RecoverD(d) ==
     IF d.dirty
     THEN [d EXCEPT !.dent = [x \in Names |-> NoRow], !.complete = FALSE,
                    !.epoch = d.epoch + 1, !.attrValid = FALSE, !.attr = 0,
-                   !.dirty = FALSE]
+                   !.dirty = FALSE, !.fDent = "unknown"]
     ELSE d
+\* (Step 23.11: and every dentry pointing at a dirty F, its name in D,
+\* becomes unknown.)
 RecoverF(d) ==
     IF d.fDirty # "no"
-    THEN [d EXCEPT !.fValid = FALSE, !.fAttr = 0, !.fDirty = "no"]
+    THEN [d EXCEPT !.fValid = FALSE, !.fAttr = 0, !.fDirty = "no",
+                   !.fDent = IF @ = "present" THEN "unknown" ELSE @]
     ELSE d
 RecoverDirty(d) == RecoverF(RecoverD(d))
 
@@ -1607,9 +1834,23 @@ RecoverClearsDirtyFirst ==
 \* backing::Startup, after InitRoot: the probe of the recovered rows
 \* (ProbeRecoveredRows, not modelled for D) ends; the rows stay dirty until
 \* a sync point. Then the daemon serves.
+\* Step 23.11: for F, ProbeRecoveredRows is modelled: a row in the dirty
+\* set for a mutation (ListDirty's mutations_only) whose object is gone
+\* (open_by_handle_at's ESTALE) is deleted (and the dentries pointing at
+\* it become unknown: the inode-delete trigger). In the code its dirty row
+\* stays until a sync point (it has no foreign key) and covers nothing any
+\* more; the model drops it with the row, since an F created again after
+\* this stands for a new inode (in the code, a new row id whose dirty row
+\* is its own: a sync point whose snapshot came before it keeps it).
 ProbesDone ==
     /\ mode = "probe" /\ mode' = "up"
-    /\ UNCHANGED <<bCur, bSeq, dbCur, dbOpts, seq, inflight, durableD, fm,
+    /\ IF dbCur.fRow /\ dbCur.fDirty = "mut" /\ ~bCur.fn
+       THEN Commit([dbCur EXCEPT !.fRow = FALSE, !.fValid = FALSE, !.fAttr = 0,
+                                 !.fDirty = "no",
+                                 !.fDent = IF @ = "present" THEN "unknown"
+                                           ELSE @], FALSE)
+       ELSE UnchangedDB
+    /\ UNCHANGED <<bCur, bSeq, seq, inflight, durableD, fm,
                    running, ps, servedWrong, stamp, muts, crashes>>
 
 \* Not the code (known_bugs/recovery_clears_dirty): the start takes the
@@ -1672,12 +1913,15 @@ Init ==
     /\ \E present \in InitPresent :
          bCur = [names |-> [n \in Names |-> IF n \in present THEN InitObj(n)
                                             ELSE NoObj],
-                 ver |-> 0, f |-> 0, data |-> InitData]
+                 ver |-> 0, f |-> 0, fs |-> 0, fn |-> FInitExists,
+                 data |-> InitData]
     /\ bSeq = <<bCur>>
-    \* A new database: nothing cached.
+    \* A new database: nothing cached (F's row, if F exists, with nothing
+    \* known of it).
     /\ dbCur = [dent |-> [n \in Names |-> NoRow], complete |-> FALSE,
                 epoch |-> 0, attrValid |-> FALSE, attr |-> 0, dirty |-> FALSE,
-                clean |-> FALSE, fValid |-> FALSE, fAttr |-> 0, fDirty |-> "no"]
+                clean |-> FALSE, fRow |-> FInitExists, fDent |-> "unknown",
+                fValid |-> FALSE, fAttr |-> 0, fDirty |-> "no"]
     /\ dbOpts = {dbCur}
     /\ mode = "up"
     /\ seq = 0 /\ inflight = 0 /\ durableD = FALSE /\ running = None
@@ -1719,6 +1963,8 @@ Next ==
          \/ FileRefreshStat(p) \/ FileRefreshFill(p)
          \/ FileSetSyscall(p) \/ FileSetEnd(p) \/ FileSetStat(p)
          \/ FileSetFill(p)
+         \/ FileCreateSyscall(p) \/ FileCreateProbe(p) \/ FileCreatePhase3(p)
+         \/ FileCreateMark(p) \/ FileCreateFailed(p) \/ FileLookupCommit(p)
     \/ FRead \/ AtimeExpiry
     \/ CrashServing \/ CrashRecovering \/ CrashStopping
     \/ Restart \/ Recover \/ StartRun \/ ProbesDone
@@ -1747,9 +1993,18 @@ AttrOK(d, b) == d.attrValid => d.attr = b.ver
 \* F's cached attributes are never ahead of the backing filesystem's: a
 \* value it has had (stamps only grow, and a power loss takes the backing
 \* filesystem back to an earlier one). Exactness is FileExact's.
-FileOK(d, b) == d.fValid => d.fAttr <= b.f
+\* Step 23.11: F's attributes are recorded valid only while F exists (a
+\* row of a lost object is answered by nodeid: an NFS handle's
+\* LOOKUP("."), a GETATTR), and never behind it but for the access time
+\* (the ghost `fs`, from step 23.10); F's dentry in D likewise.
+FileOK(d, b) ==
+    d.fRow /\ d.fValid => b.fn /\ b.fs <= d.fAttr /\ d.fAttr <= b.f
+FDentOK(d, b) ==
+    /\ d.fDent = "present" => b.fn /\ d.fRow
+    /\ d.fDent = "absent" => ~b.fn
 Correct(d, b) ==
-    (\A n \in Names : NameOK(d, b, n)) /\ AttrOK(d, b) /\ FileOK(d, b)
+    /\ \A n \in Names : NameOK(d, b, n)
+    /\ AttrOK(d, b) /\ FileOK(d, b) /\ FDentOK(d, b)
 
 \* "No cache ahead (or behind)": while the daemon serves, everything the
 \* cache could serve agrees with the backing filesystem right now --
@@ -1776,11 +2031,17 @@ MutatedNames(p) ==
       [] OTHER -> {}
 \* ... and an attribute change's: D's attributes, until its End.
 AttrsMutated(p) == MutatedNames(p) # {} \/ ps[p].pc \in {"A_sys", "A3"}
+\* ... and F's (step 23.11): its setattr's, F's attributes until its End;
+\* its create's, F's name in D and D's attributes until its phase 3.
 TriState ==
     mode = "up" =>
-        \A p \in Procs : AttrsMutated(p) =>
-            /\ \A n \in MutatedNames(p) : ReadState(dbCur, n) = Unknown
-            /\ ~dbCur.attrValid
+        \A p \in Procs :
+            /\ AttrsMutated(p) =>
+                 /\ \A n \in MutatedNames(p) : ReadState(dbCur, n) = Unknown
+                 /\ ~dbCur.attrValid
+            /\ ps[p].pc \in {"FS_sys", "FS_end"} => ~dbCur.fValid
+            /\ ps[p].pc \in {"FC_sys", "FC_probe", "FC_rec", "FC_fail"} =>
+                 dbCur.fDent = "unknown" /\ ~dbCur.attrValid
 
 \* Whatever a crash leaves of the two disks right now, startup recovery
 \* turns it into a correct cache. (Stronger than CacheNeverWrong after an
@@ -1804,9 +2065,11 @@ RecoveryIdempotent ==
 
 \* The fast path's premise: if Context::dirty.durable has D, every database
 \* state a crash may leave has D dirty.
+\* (Step 23.11: for F, or a crash state with no row of F: a born-dirty row
+\* is durably dirty in that sense.)
 DurableSetSound ==
     /\ durableD => \A s \in dbOpts : s.dirty
-    /\ fm.durable => \A s \in dbOpts : s.fDirty = "mut"
+    /\ fm.durable => \A s \in dbOpts : ~s.fRow \/ s.fDirty = "mut"
 
 \* clean_shutdown = 1 is only ever durable with an empty dirty set.
 CleanMeansNoDirty ==
@@ -1829,7 +2092,80 @@ FileExactStrict ==
 \* exactly while some request is between its phase 1 and its End
 \* (Mutation::End releases it on every path, an interrupt's included).
 GuardsBalanced ==
-    inflight = Cardinality({p \in Procs : ps[p].mseq # 0})
+    /\ inflight = Cardinality({p \in Procs : ps[p].mseq # 0})
+    \* F's guard (step 23.11: the audit's G17), its setattrs'.
+    /\ fm.inflight = Cardinality({p \in Procs :
+                                     ps[p].pc \in {"FS_sys", "FS_end"}})
+
+-----------------------------------------------------------------------------
+(***************************************************************************)
+(* Step 23.11: born dirty, and the dirty set's three conditions per inode  *)
+(* (from step 23.10, re-expressed for D's row and F's).                     *)
+(***************************************************************************)
+
+\* F's create may still be lost: some state of the backing filesystem's
+\* sequence since its last durable point has no F.
+FCreateUnsynced == \E i \in 1..Len(bSeq) : ~bSeq[i].fn
+
+\* The rule of step 23.11: no database state a crash may leave holds F's
+\* row without its mark while F's create may still be lost.
+BornDirty ==
+    FCreateUnsynced => \A s \in dbOpts : s.fRow => s.fDirty = "mut"
+
+\* Its consequence: whatever a crash leaves, a row of F whose object the
+\* crash may have lost is in the dirty set for a mutation, so the start's
+\* ProbeRecoveredRows (ListDirty's mutations_only) probes it and deletes
+\* it.
+LostRowProbed ==
+    \A s \in dbOpts, t \in MetaCrash : s.fRow /\ ~t.fn => s.fDirty = "mut"
+
+\* What each inode's mark covers of a backing state: D's, its entries, its
+\* attributes and F's name; F's, its attributes but its access time, which
+\* a mark at normal durability covers (AtimePartF).
+CoverPartD(b) == <<b.names, b.ver, b.fn>>
+CoverPartF(b) == b.fs
+AtimePartF(b) == b.f
+
+CrashStep == crashes' # crashes
+
+\* (i) Every change of the backing filesystem a mark covers comes when every
+\* database state a crash may leave has that inode dirty for a mutation
+\* (F: or no row of F); an access time when F's mark is at least committed.
+DirtyBeforeChange ==
+    [][~CrashStep =>
+         /\ CoverPartD(bCur') # CoverPartD(bCur) => \A s \in dbOpts : s.dirty
+         /\ CoverPartF(bCur') # CoverPartF(bCur) =>
+              \A s \in dbOpts : ~s.fRow \/ s.fDirty = "mut"
+         /\ AtimePartF(bCur') # AtimePartF(bCur) =>
+              ~dbCur.fRow \/ dbCur.fDirty # "no"
+      ]_vars
+
+\* (ii) A mark goes (or F's mutation mark becomes atime-only) only when
+\* nothing it covers is unsynced and nothing of the inode is in flight;
+\* F's whole mark only when its access time is synced too and F is not
+\* open. (F's clauses while F has a row: the mark of a row the start's
+\* probe deleted covers nothing, and a create of F after that is, in the
+\* code, a new inode with a row of its own; the model reuses F.)
+UnsyncedPart(part(_)) == \E i \in 1..Len(bSeq) : part(bSeq[i]) # part(bCur)
+ClearOnlyAfterSync ==
+    [][~CrashStep =>
+         /\ dbCur.dirty /\ ~dbCur'.dirty =>
+              ~UnsyncedPart(CoverPartD) /\ inflight = 0
+         /\ dbCur.fRow /\ dbCur.fDirty = "mut" /\ dbCur'.fDirty # "mut" =>
+              ~UnsyncedPart(CoverPartF) /\ fm.inflight = 0
+         /\ dbCur.fRow /\ dbCur.fDirty # "no" /\ dbCur'.fDirty = "no" =>
+              /\ ~UnsyncedPart(CoverPartF) /\ ~UnsyncedPart(AtimePartF)
+              /\ fm.inflight = 0 /\ fm.held = 0
+      ]_vars
+
+\* (iii) Recovery forgets everything a dirty inode's records hold: D's
+\* names, F's name, D's attributes; F's attributes and its dentry.
+RecoveryForgetsDirty ==
+    \A s \in dbOpts :
+        LET r == RecoverDirty(s) IN
+        /\ s.dirty => /\ \A n \in Names : ReadState(r, n) = Unknown
+                      /\ ~r.attrValid /\ r.fDent = "unknown"
+        /\ s.fDirty # "no" => ~r.fValid /\ r.fDent # "present"
 
 -----------------------------------------------------------------------------
 (* Effect points (step 12.7, SibylFS's call, effect, return): each request *)
@@ -1847,7 +2183,9 @@ Observed(d, b) ==
                   LET r == ReadState(d, n) IN
                   IF r = Unknown THEN b.names[n]
                   ELSE IF r = Absent THEN NoObj ELSE r],
-     ver |-> IF d.attrValid THEN d.attr ELSE b.ver]
+     ver |-> IF d.attrValid THEN d.attr ELSE b.ver,
+     \* F's name in D (step 23.11), likewise.
+     fn |-> IF d.fDent = "unknown" THEN b.fn ELSE d.fDent = "present"]
 
 \* Crash refinement (Yggdrasil's, the top property of step 12.8): whatever
 \* a power loss leaves of the two disks, what dcfs serves of D once
@@ -1879,6 +2217,7 @@ Known(d) == [names |-> {n \in Names : ReadState(d, n) # Unknown},
 SyscallStep == \E p \in Procs :
                  \/ CreateSyscall(p) \/ UnlinkSyscall(p) \/ RenameSyscall(p)
                  \/ AttrChangeSyscall(p) \/ WriteSyscall(p)
+                 \/ FileCreateSyscall(p)
 
 \* The fills the trace validation adds outside any request slot (a child's
 \* or parent's row, the root's attributes at InitRoot: Trace.tla's
@@ -1957,7 +2296,8 @@ QueryKinds(k) ==
 \* The reply v of request r (its slot state at the step that replied) is
 \* one the backing filesystem gave.
 ReplyWitnessed(r, v) ==
-    CASE r.kind \in FileKinds -> v.e = "ok" /\ v.a = {}
+    CASE r.kind \in FileKinds ->
+           v.a = {} /\ v.e = IF r.eff = None THEN "ok" ELSE r.eff
       [] v.e \in {"EAGAIN", "EINTR"} -> r.eff # "ok" /\ v.a = {}
       [] r.eff # None -> v.e = r.eff /\ v.a = {}
       [] r.kind \in SyncKinds -> v.e = "ok" /\ v.a = {}

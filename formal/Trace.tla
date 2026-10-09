@@ -194,7 +194,8 @@ TraceInit ==
               /\ (v = "none" /\ HDB.complete) => x \notin present
          /\ bCur = [names |-> [x \in Names |-> IF x \in present
                                                 THEN InitObj(x) ELSE NoObj],
-                    ver |-> 0, f |-> 0, data |-> InitData]
+                    ver |-> 0, f |-> 0, fs |-> 0, fn |-> FInitExists,
+                    data |-> InitData]
     /\ bSeq = <<bCur>>
     /\ dbCur = [dent |-> [x \in Names |->
                             LET v == ObsVal(HDB, x) IN
@@ -205,7 +206,10 @@ TraceInit ==
                 complete |-> HDB.complete, epoch |-> HDB.epoch,
                 attrValid |-> HDB.valid, attr |-> 0, dirty |-> HDB.dirty,
                 clean |-> HDB.clean,
-                \* The file F of the model (step 23.8) is no directory's.
+                \* The file F of the model (steps 23.8, 23.11) is no
+                \* directory's: it exists, with a row nothing is known of,
+                \* and no traced request reaches it.
+                fRow |-> FInitExists, fDent |-> "unknown",
                 fValid |-> FALSE, fAttr |-> 0, fDirty |-> "no"]
     /\ dbOpts = {dbCur}
     /\ okey = [o \in {InitObj(x) : x \in {y \in Names : IsKey(ObsVal(HDB, y))}}
