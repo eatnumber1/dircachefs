@@ -1436,6 +1436,17 @@ recovery protocol, concurrency, and the test strategy.
   `immutable-ctime` (`DISABLED_immutable-ctime`) reproduces it and is kept
   disabled until the kernel changes. `O_TMPFILE`, and linking such a file into a name, work. File
   locks are handled by the kernel, locally within the mount.
+- **`mount -o remount,ro` does not make a dcfs mount read-only, and
+  `statx(2)` does not report the `chattr` attributes.** A remount changes only
+  the dcfs mount (`dcfs.ro`): the underlying mount's `ro` is ignored, with a
+  warning, so a program that remounts read-only (xfstests' generic/003, 294,
+  306) still writes. `chattr +a +i +d` reaches the backing file, but the
+  attributes (`STATX_ATTR_APPEND`, `_IMMUTABLE`, `_NODUMP`, `_COMPRESSED`) are
+  not in `statx(2)`'s answer through dcfs: FUSE has no way to carry them
+  (generic/424). A
+  second dcfs over a source another dcfs already serves needs its own cache
+  database, and then sees the other's changes as out-of-band (xfstests mounts
+  its scratch device several times at once in generic/411, 589 and 732).
 - **A Linux bug can oops the kernel when casefold is enabled online.**
   `EXT4_IOC_SET_TUNE_SB_PARAM` turns the casefold feature on under a
   mounted ext4 without loading the filesystem's encoding, so the next
