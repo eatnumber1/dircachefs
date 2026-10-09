@@ -392,7 +392,22 @@ caller cancel; a timeout is permitted only where the thing waited for
 cannot signal, and then it is named and justified in a comment. Tests
 first in the systemd guest (the DISABLED_ restart check becomes the
 test) and in mount_dcfs.sh (umount helper waits; crash case returns at
-once). Owner: dcfs-implementer, lane-6 after 15.6 merges.
+once). Owner: dcfs-implementer, lane-6 after 15.6 merges. Russ (2026-10-09,
+"Agreed with all") on the rule's mechanical side, in the same step:
+`tools/banned_symbols.txt` bans `sleep`, `usleep`, `nanosleep`, `alarm`,
+`timer_create`, `timerfd_create` and `sqlite3_busy_timeout` in the daemon
+(allow-with-reason for the legitimate exceptions, each naming the event
+that cannot signal); `tools/repo_shape.py` refuses a bare `sleep` in
+test/qemu/guest scripts outside one justified helper in lib.sh (the 6.5
+scrub is removing the rest: coordinate by rebasing after it merges, or
+list the remaining call sites as findings for 6.5 if it has not). Also
+check whether the daemon sets SQLite's busy handler anywhere (a timer in
+disguise: a blocking lock or an immediate clear error instead) and say
+what it found. Follow-ups, not this step: the I/O-error fault window
+(fault_lib.sh "up 6 s / down 20 s") becomes event-driven (an operation
+count or the test driving dm-flakey's state), as the 11.3 review asked
+(11.3c); the 11.6 backing-stall finding is fixed by the concurrency
+design, never by a watchdog.
 
 **15.7 Docs:** README (fstab with and without systemd, `dcfs.fstype`
 values, `_netdev`, fsck, trees, over-mounting, remount, NFS exports,

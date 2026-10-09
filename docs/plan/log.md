@@ -2198,3 +2198,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-09) on 15.6b: no timers; a umount.fuse.dcfs that waits (no timeout) for the daemon
   to exit, plus a style rule against timers as a way to wait ("from an idle 256 core supercomputer
   to a 1 core raspberry pi under 40 loadavg"). Phase file updated.
+- russ (2026-10-09): "Agreed with all" on the no-timers discussion: banned-symbols entries for the
+  sleep/timer family and sqlite3_busy_timeout, a repo-shape check against bare `sleep` in guest
+  scripts, a SQLite busy-handler check, all in 15.6b; 11.3c (event-driven fault window) queued;
+  the backing stall stays a concurrency-design fix, never a watchdog.
