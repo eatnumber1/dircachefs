@@ -309,6 +309,83 @@ guest has one vCPU, and that a dirty page stays dirty for 10 s without a
 the coverage this buys is measured by `tools/coverage_diff.py` over two
 `bazel coverage` runs of one commit: `docs/plan/notes/coverage-determinism-2026-10-08.md`.
 
+## A noisy run
+
+Step 26.14e. The quiet kernel removes the nondeterminism that shakes out
+races: a flusher thread writing a page mid-operation, the daemon's threads
+and the kernel running at the same time. The `noisy` job of
+`.github/workflows/ci.yml` (weekly, and `workflow_dispatch` with `noisy`)
+puts it back on purpose, with **one knob**:
+
+    bazel test --test_env=DCFS_NOISY=1 ...
+
+`run-qemu.sh` turns `DCFS_NOISY=1` into `dcfs_noisy=1` on the guest's kernel
+command line, which `guest/init` reads to leave the quiet-kernel sysctls
+alone (writeback every 5 s of pages 30 s old, the kernel's defaults), and
+into at least two vCPUs for every guest (`DCFS_FORCE_CPUS` still wins; a guest
+with more keeps them). There is no per-test flag: the same targets run in
+both modes. Bazel puts `--test_env` in the test action's key, so a quiet
+result is never served for a noisy run or the other way round.
+`DCFS_SEED=<n>` is the neighbouring knob for the seeded tests (the mixed-fault
+sample below): `dcfs_seed=<n>` on the command line; the noisy job passes the
+run number.
+
+Self-check, in both directions (the gate style of the table below):
+
+- `noisy_kernel_test` (manual: the push gate runs the quiet default and must
+  not see it) passes only when the guest is noisy and fails without the
+  knob; its inverse `quiet_kernel_test` (tag `quiet-only`, which the noisy job
+  leaves out with `--test_tag_filters=-quiet-only`) passes only when it is
+  quiet and fails under the knob. The noisy job runs `noisy_kernel_test`
+  first on every runner and fails if it does not pass: a noisy run whose
+  guests were quiet would mean nothing.
+- `kernel_mode_test` runs the shared check (`guest/kernel_mode_lib.sh`) over
+  canned `/proc` trees: each mode accepts a guest in it and rejects one in the
+  other, and each departure (a sysctl, the vCPU count, the command-line word)
+  alone is caught. `run_qemu_verdict_test` checks the command-line word and
+  `-smp` for `DCFS_NOISY` set, unset and `0`, `DCFS_FORCE_CPUS` winning, and a
+  non-numeric `DCFS_SEED` being refused.
+- Both ways by hand: `bazel test //test/qemu:quiet_kernel_test
+  //test/qemu:noisy_kernel_test` (quiet passes, noisy fails), then the same
+  with `--test_env=DCFS_NOISY=1` (noisy passes, quiet fails).
+
+What the job runs (`.github/ci/noisy.sh`; two guests at a time):
+the plain suite's third of the small and medium tiers with
+`--runs_per_test=3`, its large and enormous tests once, and the long tail of
+the mixed-fault sequences (below); the ASan share of the small and medium
+tiers, three runs each; six runners, about two hours (the estimates and how
+they were made are in the job's comment in `ci.yml`). A failure is a finding,
+not a red push: nothing needs the job, `noisy.sh` exits 0 when tests failed,
+and `tools/noisy_report.py` puts a table of the failed and flaky tests in the
+job summary and their logs in the `noisy-report-<suite>-<shard>` artifact. Each
+finding becomes a deterministic test first (pin the interleaving with the
+harness's holds or a fault point), then the fix.
+
+### Mixed-fault sequences
+
+`guest/fault_ace.sh`'s `mixed` kind draws, from a seed, one operation (of
+`dcfs_ace_ops`) and three events from {`crash`, `crash3`, `cutahead`,
+`cutbehind`, `fail3`, `lookup`, `listing`, `sync`, `handle`} and runs them in
+order, then a power cut unless the third was one (the kind's comment in the
+script says what each does: `crash3` kills the daemon with a create held in
+phase 3, `fail3` fails a create's phase 3 by filling the cache filesystem,
+`cutahead` makes the cache durable ahead of the backing filesystem and cuts,
+`cutbehind` syncs the backing filesystem and cuts). After every restart and
+at the end two oracles judge the state: the path oracle (served == backing)
+and the identity oracle (`guest/fault_lib.sh` `identity_take` and
+`identity_check`, the minimal form of 11.7's: the handle of every object taken
+by `handle` must open, after the recovery, to the same object, with a name on
+the backing filesystem, or fail `ESTALE`; never answer for something gone).
+`fault_ace_mixed_test` (large; 20 sequences per backing filesystem, seed 1)
+runs the oracles' fixtures first (`mixedfixtures`: the same sequence passes
+untouched and is rejected when its handle record is tampered with) and the
+sample; `fault_ace_mixed_long_test_<fs>` (manual; 120 sequences seeded by
+`DCFS_SEED`) is the noisy job's tail. A failing sequence is printed; replay it
+with `dcfs_ace_sequences=op:e1:e2:e3` in the target's `cmdline`.
+`identity_oracle_test` checks the oracle over a fake `fhtest` (an injected
+different object, a ghost, a wrong type, ENOENT, EIO, garbage). 11.7's own
+helper, when it lands, replaces `identity_*` here.
+
 ## Guest timeout
 
 `run-qemu.sh` stops the guest (`timeout`) after `TEST_TIMEOUT` less 60 s,
@@ -573,6 +650,9 @@ gate is disabled.
 | the kill-mode cut keeps what was synced and loses the rest (11.2) | `//test/qemu:fault_power_kill_test_ext4` and its xfs and btrfs variants (the `before` scenario: a file synced before the cut must survive it and a file written after must not) |
 | the ACE checker can fail (11.2) | `fault_ace_a_test`'s `fixtures` kind (a persistence point that was not made, and a name added behind dcfs's back, must each be reported) and `fault_power_test`'s `comparison-detects-*` checks (a name, a mode, a link count) and `snapshot-sees-contents` |
 | the fsstress/fsx test's checks (11.2b: tree digests, fsx's A-OK line and disabled set, fsstress's successes and EIO, the random seed) | `//test/qemu:stress_checks_test` (the real `guest/stress_lib.sh` under the guest's busybox over trees differing in one byte, a mode, a name, a symlink target, an mtime, an xattr or a file type, empty trees, and fsx and fsstress logs that are bad, short, empty, all-failed or EIO; with the success count made to count failures, it fails on the all-failed log) |
+| the noisy run's knob takes effect (26.14e: sysctls, vCPUs, command-line word) | `//test/qemu:kernel_mode_test` (the real `guest/kernel_mode_lib.sh` over canned `/proc` trees: each mode rejects a guest of the other and every single departure), `//test/qemu:run_qemu_verdict_test` (`DCFS_NOISY` to `-smp` and `dcfs_noisy=1`), and the pair `quiet_kernel_test` / `noisy_kernel_test`, each failing under the other mode (the noisy job runs the second first) |
+| the identity oracle (26.14e: same object or ESTALE, never something gone) | `//test/qemu:identity_oracle_test` (the real `identity_check` over a fake `fhtest`: a different object, another type, a ghost, no name, ENOENT, EIO, garbage and an empty answer are each rejected; ESTALE and a rename on both sides pass) and `fault_ace_mixed_test`'s `mixedfixtures` kind (a tampered handle record must be rejected by the real oracle) |
+| the noisy job's summary lists failed and flaky tests (26.14e) | `//tools:noisy_report_test` (canned build events: failures, flakes and timeouts listed, a clean run said clean, a damaged file an error, only findings' logs copied) |
 | coverage is the same in two runs of one commit (26.14: line and branch status per file, per test) | `//tools:coverage_diff_test` (the real `coverage_diff.py` over canned lcovs: identical pass; a line or branch covered in one run only, or missing, fails naming file and line; counts differ only under `--exact`; per test it names the test that differs) |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
 | repository shape: third_party READMEs, guest scripts used, DISABLED_ checks listed (26.13) | `//tools:repo_shape_self_check_test` (fixture trees with a missing README, an unreferenced script, an unlisted check) |

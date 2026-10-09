@@ -549,3 +549,21 @@ py_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
     deps = [":ci_profile_lib"],
 )
+
+# Step 26.14e: the summary of the noisy CI job (.github/ci/noisy.sh): the tests
+# that failed or were flaky in a run of `--runs_per_test=3` under the noisy
+# kernel, from Bazel's build event file; findings, not failures.
+py_library(
+    name = "noisy_report_lib",
+    srcs = ["noisy_report.py"],
+    imports = ["."],
+)
+
+py_test(
+    name = "noisy_report_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["noisy_report_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":noisy_report_lib"],
+)

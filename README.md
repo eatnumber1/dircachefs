@@ -782,6 +782,7 @@ the two sanitizer suites:
 | `full` | the large and enormous tests (pjdfstest on all three filesystems), in 3 shards | `presubmit` |
 | `asan` | `bazel test --config=asan` over every tier, in 3 shards | `presubmit` |
 | `ubsan` | `bazel test --config=ubsan` over every tier, in 3 shards | `presubmit` |
+| `noisy` | weekly (and `workflow_dispatch` with `noisy`): the suite with the quiet kernel's sysctls at the kernel's defaults and two vCPUs per guest, small and medium tests three times each, plus the mixed-fault sequences' long tail; failures are findings in the job summary, not a red run (`test/qemu/README.md`, "A noisy run") | |
 
 `full`, `asan` and `ubsan` run in parallel, nine runners in all, each with its
 own cache key and a time limit (180 minutes; `asan` 240), so no suite's length bounds the others.

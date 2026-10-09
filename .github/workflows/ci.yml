@@ -69,6 +69,14 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      noisy:
+        description: >-
+          Also run the `noisy` job (step 26.14e), which a schedule always
+          runs: the suite with the quiet kernel's sysctls at the kernel's
+          defaults and two vCPUs per guest, three runs of each small and
+          medium test. About two hours on six runners.
+        type: boolean
+        default: false
       cold:
         description: >-
           Run every job with no cache restored and none saved: the cold path
@@ -80,7 +88,8 @@ on:
         type: boolean
         default: false
   # The schedule exists only for what changes without a commit: OSV
-  # advisories. The test jobs are skipped on it.
+  # advisories, and the noisy run (step 26.14e: a weekly search for races, which
+  # needs no commit either). The push gate's test jobs are skipped on it.
   schedule:
     - cron: "17 5 * * 1"
 
@@ -940,3 +949,144 @@ jobs:
           else
             echo "test-only dependencies: findings listed in the step above (informational, not gating)"
           fi
+
+  noisy:
+    # Step 26.14e, weekly (the schedule) and on demand (workflow_dispatch with
+    # `noisy`): the suite with the nondeterminism the quiet kernel (step 26.14)
+    # removed put back on purpose, to shake out the races it hides: the
+    # quiet-kernel sysctls at the kernel's defaults (writeback every 5 s,
+    # landing mid-operation) and every guest at two vCPUs (real parallelism
+    # between the daemon's threads and the kernel). One knob does it,
+    # `--test_env=DCFS_NOISY=1` (run-qemu.sh; test/qemu/README.md, "A noisy
+    # run"), so the same test targets run in both modes and the test-result
+    # cache keeps the two apart. Per runner: the plain suite's share of the
+    # small and medium tiers, three runs of each test (`--runs_per_test=3`), then
+    # its large and enormous tests once, then a seeded long tail of the
+    # mixed-fault sequences (fault_ace_mixed_long_test_<fs>, seeded with the
+    # run number so each week draws another sample); or the ASan share of the
+    # small and medium tiers, three runs each. Sharded like the full suite
+    # (.github/ci/test.sh --shard=I/3).
+    #
+    # A failure here is a finding, not a red push: nothing `needs` this job, it
+    # is not part of the push gate, and .github/ci/noisy.sh exits 0 when tests
+    # failed. It reports like mutation-changed: a table of the failed and flaky
+    # tests in the job summary (tools/noisy_report.py) and the artifact
+    # `noisy-report-<suite>-<shard>` holding their logs and guest consoles.
+    # The job fails only when it itself broke: the setup, a build, or the
+    # self-check, which requires that a guest really is noisy under the knob
+    # (noisy_kernel_test fails otherwise; quiet_kernel_test, the same check
+    # for the quiet default, fails under it and is left out by its quiet-only
+    # tag).
+    #
+    # Time (estimates from the 26.16 profiles and the limits of `full` and
+    # `asan`; no noisy run has happened yet, so the first one corrects them):
+    # the small and medium tiers are about 40% of the suite's serial test time
+    # (3 shards of 46-62 minutes each, serial), so three runs of a third of
+    # them are about 65 minutes serial, 43 at two guests at a time; the shard's
+    # large and enormous tests 31-41; the mixed long tail 11 (ext4) to 14
+    # minutes; and a warm start (restored caches, extracted toolchain) about
+    # 5 and a cold one about 25: about 95-110 minutes per plain runner. The
+    # ASan share is the same 65 minutes times 2.5-3 for ASan, 119 at two
+    # guests at a time, plus the start: about 125-145 minutes per ASan runner.
+    # Limit 300 (about 2x), under the 360-minute job limit. Six runners.
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.noisy) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {suite: plain, shard: 0, fs: ext4}
+          - {suite: plain, shard: 1, fs: xfs}
+          - {suite: plain, shard: 2, fs: btrfs}
+          - {suite: asan, shard: 0, fs: ext4}
+          - {suite: asan, shard: 1, fs: ext4}
+          - {suite: asan, shard: 2, fs: ext4}
+    env:
+      # Step 26.16: noisy.sh gives each invocation its own file beside this one.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/noisy-${{ matrix.suite }}-${{ matrix.shard }}.json.gz
+      # The ASan runners build with --config=asan; the plain ones with none.
+      DCFS_NOISY_CONFIG: ${{ matrix.suite == 'asan' && '--config=asan' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      # Step 26.16b: the extracted @dcfs_llvm (see the top of this file).
+      - name: Restore the extracted LLVM toolchain
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
+      - name: Restore Bazel caches (the same shard's of `full` or `asan`, read-only)
+        # The builds are the ones those jobs made (the knob changes the test
+        # environment, not an action's inputs), so their disk caches hold
+        # everything but the test results. Nothing is saved: six more copies of
+        # 4 GB would not fit the quota, and the next run restores the same
+        # entry.
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-noisy-restore-only-${{ matrix.suite }}-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: |
+            bazel-${{ matrix.suite == 'asan' && 'asan' || 'full' }}-${{ matrix.shard }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-${{ matrix.suite == 'asan' && 'asan' || 'full' }}-${{ matrix.shard }}-
+            bazel-
+      - name: Self-check, the guests are noisy (fails if the knob did not take effect)
+        # A noisy run whose guests were quiet would report nothing and mean
+        # nothing: this target passes only when the guest has two vCPUs, the
+        # kernel's own writeback sysctls and dcfs_noisy=1 on its command line
+        # (test/qemu/guest/noisy_kernel.sh).
+        run: >-
+          bazel test $DCFS_NOISY_CONFIG --test_env=DCFS_NOISY=1
+          --test_output=errors --nocache_test_results
+          //test/qemu:noisy_kernel_test
+      - name: Small and medium tests, three runs each (shard ${{ matrix.shard }} of 3)
+        run: >-
+          ./.github/ci/noisy.sh ${{ matrix.suite }}-small-medium-${{ matrix.shard }}
+          $DCFS_NOISY_CONFIG --sizes=small,medium --shard=${{ matrix.shard }}/3
+          --runs_per_test=3
+      - name: Large and enormous tests, once (shard ${{ matrix.shard }} of 3)
+        if: ${{ matrix.suite == 'plain' }}
+        run: >-
+          ./.github/ci/noisy.sh plain-large-${{ matrix.shard }}
+          --sizes=large,enormous --shard=${{ matrix.shard }}/3
+      - name: Mixed-fault long tail on ${{ matrix.fs }} (seed ${{ github.run_number }})
+        if: ${{ matrix.suite == 'plain' }}
+        run: >-
+          ./.github/ci/noisy.sh plain-mixed-${{ matrix.shard }}
+          --targets=//test/qemu:fault_ace_mixed_long_test_${{ matrix.fs }}
+          --test_env=DCFS_SEED=${{ github.run_number }}
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-noisy-${{ matrix.suite }}-${{ matrix.shard }}
+          path: ci-profile
+          if-no-files-found: ignore
+      - name: Upload the findings (logs and guest consoles of the failed and flaky tests)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: noisy-report-${{ matrix.suite }}-${{ matrix.shard }}
+          path: noisy-report
+          if-no-files-found: ignore
