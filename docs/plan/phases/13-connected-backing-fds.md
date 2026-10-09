@@ -200,3 +200,96 @@ experiment record; merge separately the TLC configuration that found H1)
 over another round for a feature that helps diagnostics only in the
 `none` form.
 
+DECISION (russ, 2026-10-09): "Agreed, we're shelving it." Branches
+step-13.1 and step-13.4 stay in lane-2 as the record. Merged on its own:
+the `MC_ident_power` + out-of-band TLC configuration that found H1, as a
+standing identity check (it passes on main). Revisit as 13.5, below, when
+a kernel with the dcache preference ships.
+
+## 13.5 Nice-to-have, much later: connected handle opens via a kernel dcache patch (russ, 2026-10-09)
+
+Problem. Phase 13 (connected backing fds) was shelved. Its by-name open
+design blocked under filesystem freeze (write-intent path opens take
+freeze protection; `open_by_handle_at` does not), and its replacement,
+connectable handles built from the current name, weakened identity: the
+handle being opened was derived from whatever is at the name now, so the
+kernel's generation check no longer applied to the object the cache row
+describes, and for symlinks, FIFOs, sockets and devices on filesystems
+without birth times nothing was left to compare but the inode number
+(TLC-verified: `MC_ident_power` with out-of-band changes violated
+`HeldResolvesToItsObject` on the branch, passed on `main`). The review
+also found the benefit holds only for the `fstype=none` form: the native
+and bind capture forms reach the backing through a cloned mount in no
+namespace, so paths are clone-relative and AppArmor treats them as
+disconnected anyway.
+
+The 13.4 experiment's observation. `open_by_handle_at` ends in
+`__d_obtain_alias`, which returns the first alias in the inode's alias
+list and allocates an anonymous (disconnected) dentry only if there is
+none. A prior name lookup adds a connected alias at the head of that
+list, so a handle open that follows a lookup comes out connected. That
+worked on ext4, xfs and btrfs in the experiment but is fragile: it
+depends on alias-list order, and a disconnected alias kept alive by an
+earlier handle fd stays disconnected.
+
+The patch. Make `__d_obtain_alias` prefer a connected alias when one
+exists, skipping `DCACHE_DISCONNECTED` aliases the way `d_find_alias`
+already does, and allocate an anonymous dentry only when no connected
+alias is present. A few lines in fs/dcache.c, no new ABI, no flag. It is
+a generalisation of an existing kernel preference and reads as a bug fix;
+nfsd and audit paths benefit too. exportfs territory (Amir Goldstein's
+area). The exact current text of `__d_obtain_alias` should be read before
+writing it; the description above is from memory plus the observed
+behaviour, not from the source.
+
+How dcfs would use it. In `OpenNode`, when the object has a cached
+present dentry: an `openat(parent_fd, name, O_PATH | O_NOFOLLOW)` first
+(no write intent, so no freeze protection; its only purpose is to populate
+the dcache), close it, then the normal `open_by_handle_at` of the stored
+handle exactly as today. Identity stays with the stored handle's (ino,
+generation): if the name still points at the same inode, the open is
+connected; if the name now points elsewhere, the stored handle still
+resolves to the right object by generation (or ESTALE), and dcfs gets
+today's disconnected fd. No file is ever created, no other inode can be
+attached, no dcfs identity code changes, the H1 hole cannot open, and the
+freeze property is kept because the open stays on the `dentry_open`
+route.
+
+Why it is sound. The name is never evidence of identity; it only supplies
+a connected dentry for an inode the kernel has already resolved from the
+handle. Hard links give whichever connected alias is first (fine for
+diagnostics). A replaced name populates some other inode's alias and has
+no effect on the handle open.
+
+Cost and limits.
+- Two syscalls per open of a named object instead of one (the O_PATH
+  lookup plus the handle open), plus the parent open below the root as in
+  the shelved design.
+- Best-effort connectivity: memory pressure between the two calls, or a
+  name that moved, gives a disconnected fd with no error; dcfs cannot tell
+  which it got without reading `/proc/self/fd`.
+- Benefit limited to the `fstype=none` form (M3 from the Phase 13 review);
+  native and bind captures still show clone-relative paths, and a
+  path-LSM profile must still allow disconnected paths for the fallback
+  cases (recovery-unknown names, unlinked-but-open files, older kernels).
+- Long horizon: no effect until the patch is in a released kernel;
+  everywhere else dcfs keeps today's behaviour. Same shape as the pending
+  FUSE generation patch.
+
+What exists to reuse. The `step-13.1` and `step-13.4` branches in lane-2
+(the `OpenByName` structure, the parent-fd handling, the fallbacks, the
+kernel-behaviour guard test `connectable_handles_test`, the
+`/proc/self/fd` readlink oracle in `connected_fds_test`); the
+`MC_ident_power` + out-of-band TLC configuration that found H1, which
+should be merged on its own regardless as a standing identity check; the
+review's M1 note that any "blocked under freeze" assertion must be
+event-based, not a timer.
+
+Plan: Phase 13 "shelved; revisit as 13.5 when a kernel with the
+`__d_obtain_alias` preference ships": (1) draft and send the dcache patch
+(russ sends); (2) once released, the O_PATH-then-handle open in `OpenNode`
+behind the existing handle-open abstraction, identity code untouched;
+(3) the `fstype=none`-only benefit and the LSM requirement documented
+honestly in README and design.md; (4) `connected_fds_test` and the guard
+test revived, with the freeze assertion made event-based.
+

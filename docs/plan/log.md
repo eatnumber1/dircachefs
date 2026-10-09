@@ -2305,3 +2305,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   model. Queued: 11.7 (identity oracle after every crash + a row-durability checker rule, first
   free lane, dcfs-protocol), mixed-fault three-event sequences folded into 26.14e, counterexample
   replay into 12.10, and a "row lifecycles under crash prefixes" rule for formal/README via 12.12a.
+- russ (2026-10-09): Phase 13 SHELVED ("Agreed, we're shelving it"); his design note for a much-later
+  13.5 (a dcache patch making `__d_obtain_alias` prefer a connected alias, then O_PATH-then-handle
+  opens with identity untouched) recorded verbatim in phases/13. The H1 TLC configuration
+  (MC_ident_power + out-of-band) goes into main on its own as a 12.12a item (lane-2's agent, from
+  its branch); lane-2 then takes 11.7.
