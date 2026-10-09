@@ -514,3 +514,38 @@ py_test(
     deps = [":coverage_diff_lib"],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
+
+# Step 26.16: where a CI job's time went. Sums Bazel's JSON trace profile
+# (`--profile`) into fetch, @dcfs_llvm, third-party builds, our build, tests
+# and the critical path; .github/ci/profile.sh runs it (`bazel run
+# //tools:ci_profile -- ci-profile/*.json.gz`) into each job's summary.
+py_library(
+    name = "ci_profile_lib",
+    srcs = ["ci_profile.py"],
+    imports = ["."],
+)
+
+py_binary(
+    name = "ci_profile",
+    srcs = ["ci_profile.py"],
+    main = "ci_profile.py",
+)
+
+# The fixture is a trimmed real profile (scrubbed of paths outside the
+# repository); expected.md was added up by hand from its events.
+py_test(
+    name = "ci_profile_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["ci_profile_test.py"],
+    args = [
+        "fixture=$(location ci_profile_testdata/fast_profile.json)",
+        "expected=$(location ci_profile_testdata/expected.md)",
+    ],
+    data = [
+        "ci_profile_testdata/expected.md",
+        "ci_profile_testdata/fast_profile.json",
+    ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":ci_profile_lib"],
+)

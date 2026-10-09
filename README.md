@@ -815,6 +815,20 @@ than another shard; neither is done until a `cold` run measures the shards.
   date beside each. `workflow_dispatch` has a `cold` input: with it every
   job restores and saves no cache, to run the cold path on purpose (the
   `mutation-changed` job, which needs a push range, is skipped on dispatch).
+- **Where the time goes.** Every job that runs Bazel at length writes its JSON
+  trace profile (`--profile`) and uploads it, success or failure, as the
+  `bazel-profile-<job>[-<shard>]` artifact: `fast`, `presubmit`, `coverage`,
+  `osv` (its fetch), `reproducible` (one profile per build) and each shard of
+  `full`, `asan` and `ubsan`. The test jobs add Bazel's compact execution log
+  (`<job>.execlog.zst`; 0.9 MB for a warm fast-tier run, not measured cold).
+  `mutation-changed` and the weekly mutation run start a Bazel per mutant and
+  write none. `tools/ci_profile.py` (`bazel run //tools:ci_profile --
+  <profiles>`; unit tested) sums a profile into total wall, repository
+  fetches, the `@dcfs_llvm` extraction, third-party builds, our compile and
+  link, test execution and the critical path, and `.github/ci/profile.sh`
+  appends that table to the job's summary, so a run shows the breakdown
+  without a download. To measure the cold path, dispatch the workflow with
+  `cold` set (above) and read the tables.
 - **KVM.** `.github/ci/prepare.sh` makes `/dev/kvm` usable if the runner has
   one (public repositories' standard Linux runners do; private ones do
   not) and the tests log which accelerator they used. Without KVM the tests

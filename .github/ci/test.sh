@@ -24,6 +24,12 @@
 #                    job's shards take large and enormous, small and medium
 #                    having run in `presubmit`.
 # Both are consumed here; every other argument goes to Bazel.
+#
+# Profile (step 26.16): with DCFS_CI_PROFILE set (the workflow does, one file
+# per job and shard), `bazel test` writes its JSON trace profile there
+# (gzipped by its .gz suffix) and the compact execution log beside it;
+# tools/ci_profile.py sums the profile into the job summary and the workflow
+# uploads both.
 set -euo pipefail
 
 shard=""
@@ -83,8 +89,19 @@ if [ "$list" = 1 ]; then
 	printf '%s\n' "${targets[@]}"
 	exit 0
 fi
+profile_args=()
+if [ -n "${DCFS_CI_PROFILE:-}" ]; then
+	mkdir -p "$(dirname "$DCFS_CI_PROFILE")"
+	# The label and primary output let tools/ci_profile.py tell a third-party
+	# action from ours. The compact execution log (zstd; 0.9 MB for a fast-tier
+	# run) shows what each spawn ran and whether it hit the cache.
+	profile_args=("--profile=$DCFS_CI_PROFILE" --generate_json_trace_profile
+		--experimental_profile_include_target_label
+		--experimental_profile_include_primary_output
+		"--execution_log_compact_file=${DCFS_CI_PROFILE%.json.gz}.execlog.zst")
+fi
 status=0
-bazel test --keep_going "${bazel_args[@]}" -- "${targets[@]}" || status=$?
+bazel test --keep_going "${profile_args[@]}" "${bazel_args[@]}" -- "${targets[@]}" || status=$?
 if [ "$status" != 0 ]; then
 	# Keep the logs of this invocation (the next one may use another
 	# configuration, and bazel-testlogs only follows the latest).

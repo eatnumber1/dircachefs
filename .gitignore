@@ -11,3 +11,5 @@
 /osv/
 # Python bytecode (hermetic Python and host runs alike).
 __pycache__/
+# CI Bazel profiles (.github/ci/profile.sh).
+/ci-profile/

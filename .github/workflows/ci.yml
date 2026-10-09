@@ -7,6 +7,12 @@
 # (.github/ci/prepare.sh, .github/ci/test.sh). Bazel builds everything the
 # tests need: the kernel, QEMU, busybox, the mkfs tools and the Debian image.
 #
+# Profiles (step 26.16): every job that runs Bazel writes its JSON trace profile
+# (DCFS_CI_PROFILE, set per job below) and uploads it as the artifact
+# `bazel-profile-<job>[-<shard>]`; .github/ci/profile.sh puts the table of
+# tools/ci_profile.py (fetch, @dcfs_llvm, third-party builds, our build, tests,
+# critical path) in the job summary.
+#
 # Developed with nektos/act before publication: see "CI" in README.md and
 # third_party/act/README.md (`bazel run //third_party/act -- -j fast`).
 #
@@ -49,7 +55,11 @@ on:
       cold:
         description: >-
           Run every job with no cache restored and none saved: the cold path
-          (an evicted cache, a changed lock file), to check the timeouts.
+          (an evicted cache, a changed lock file), to check the timeouts and
+          read the profile tables. Nothing is saved because the caches are
+          content addressed and keyed by commit: skipping the save leaves the
+          warm entries and the 10 GB quota as they were, and the next warm
+          run restores them unchanged (a save would only add a copy).
         type: boolean
         default: false
   # The schedule exists only for what changes without a commit: OSV
@@ -90,6 +100,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Limit = 2x the cold estimate (2026-10-07, measured here under load 18 on 4 cores: fetch of every repository with empty caches 24 min, our C++ build about 20 min, tests 3 min: about 50 min)
     timeout-minutes: 120
+    env:
+      # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
+      # tools/reproducible_build.sh); the steps below summarize and upload it.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/fast.json.gz
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
@@ -121,6 +135,16 @@ jobs:
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-fast
+          path: ci-profile
+          if-no-files-found: ignore
       - name: Upload test logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -148,6 +172,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Limit = 2x the cold estimate (2026-10-07: fetch 24 min + build 20 min + small and medium tests about 30 min: about 75 min)
     timeout-minutes: 150
+    env:
+      # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
+      # tools/reproducible_build.sh); the steps below summarize and upload it.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/presubmit.json.gz
     needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,6 +208,16 @@ jobs:
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-presubmit
+          path: ci-profile
+          if-no-files-found: ignore
       - name: Upload test logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -208,6 +246,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Limit = 2x the cold estimate (2026-10-07: fetch 24 min + instrumented build and the small and medium tests about 50 min (a coverage run took 37 min with warm externals): about 75 min)
     timeout-minutes: 150
+    env:
+      # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
+      # tools/reproducible_build.sh); the steps below summarize and upload it.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/coverage.json.gz
     needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -251,6 +293,16 @@ jobs:
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-coverage
+          path: ci-profile
+          if-no-files-found: ignore
       - name: Upload test logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -273,6 +325,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Limit = 2x the cold estimate (2026-10-07: fetch 24 min, two cold builds of 6 to 12 min, and the second build's own contents cache (a second 13 GB extraction, about 10 min): about 60 min)
     timeout-minutes: 120
+    env:
+      # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
+      # tools/reproducible_build.sh); the steps below summarize and upload it.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/reproducible.json.gz
     needs: fast
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -289,6 +345,19 @@ jobs:
             bazel-repo-
       - name: Reproducible build
         run: bazel run //tools:reproducible_build
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        # The job starts no Bazel of its own at the repository root (the
+        # builds are inside the script, in two output bases): the host's
+        # python3 runs the tool instead of `bazel run`.
+        run: ./.github/ci/profile.sh --python3
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-reproducible
+          path: ci-profile
+          if-no-files-found: ignore
       - name: Save the repository cache
         if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -376,6 +445,10 @@ jobs:
         shard: [0, 1, 2]
     # Limit = 2x the cold estimate (the cold part is measured: fetch 24 min + build 20 min = 45 min; the tests are the serial sum of the shard's measured times (46, 52 and 55 min) divided by 1.5 for two guests at a time: 31-37 min, 80 min in all, step 11.2's ACE targets included; a `cold` run has not measured a shard)
     timeout-minutes: 180
+    env:
+      # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
+      # tools/reproducible_build.sh); the steps below summarize and upload it.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/full-${{ matrix.shard }}.json.gz
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -409,6 +482,16 @@ jobs:
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-full-${{ matrix.shard }}
+          path: ci-profile
+          if-no-files-found: ignore
       - name: Upload test logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -443,6 +526,10 @@ jobs:
         shard: [0, 1, 2]
     # Limit = 1.5x the estimate (2026-10-08: the cold part is fetch 24 min + build 20 min = 45 min, measured; the tests are the serial sum of the shard's measured plain times (61, 62 and 46 min) times 2.5 to 3 for ASan, except step 11.2's ACE and kill tests, which measured the same under ASan as plain (fault_ace_fs_test_xfs 227 s under ASan, 199-247 s plain: their time is VM boots and mounts, not dcfs), divided by 1.5 for two guests at a time: 89-105, 96-114 and 71-84 min, so 116-159 min with the cold part; the limit keeps the margin of a noisy runner)
     timeout-minutes: 240
+    env:
+      # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
+      # tools/reproducible_build.sh); the steps below summarize and upload it.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/asan-${{ matrix.shard }}.json.gz
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -476,6 +563,16 @@ jobs:
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-asan-${{ matrix.shard }}
+          path: ci-profile
+          if-no-files-found: ignore
       - name: Upload test logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -510,6 +607,10 @@ jobs:
         shard: [0, 1, 2]
     # Limit = 1.7x the estimate (cold part fetch 24 min + build 20 min = 45 min, measured; the tests about 1.5 times the plain serial sums, 61, 62 and 46 min, divided by 1.5: 60 min; 105 min in all)
     timeout-minutes: 180
+    env:
+      # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
+      # tools/reproducible_build.sh); the steps below summarize and upload it.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/ubsan-${{ matrix.shard }}.json.gz
     needs: presubmit
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -543,6 +644,16 @@ jobs:
       - name: Report the accelerator
         if: ${{ !cancelled() }}
         run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-ubsan-${{ matrix.shard }}
+          path: ci-profile
+          if-no-files-found: ignore
       - name: Upload test logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -585,6 +696,8 @@ jobs:
     # cancelled at the former 20).
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/osv.json.gz
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Prepare the runner (Bazelisk, which fetches the Alpine packages)
@@ -599,6 +712,18 @@ jobs:
             bazel-repo-
       - name: Check ignores and pinned commits, generate the SBOMs and git roots
         run: ./.github/ci/osv.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        # Only the host's python3: the job runs no Bazel target that needs
+        # the hermetic interpreter, and fetching it costs more than the table.
+        run: ./.github/ci/profile.sh --python3
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-osv
+          path: ci-profile
+          if-no-files-found: ignore
       - name: Scanner self-check (libfuse 3.2.0 must be found, CVE-2018-10906)
         id: seeded
         continue-on-error: true

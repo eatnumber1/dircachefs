@@ -11,8 +11,20 @@ targets=(//...)
 if [ "${DCFS_CI_KVM:-0}" != 1 ]; then
 	targets+=(-//test/qemu:pjdfstest_test_xfs -//test/qemu:pjdfstest_test_btrfs)
 fi
+# Step 26.16: the JSON trace profile, as in test.sh.
+profile_args=()
+if [ -n "${DCFS_CI_PROFILE:-}" ]; then
+	mkdir -p "$(dirname "$DCFS_CI_PROFILE")"
+	# The label and primary output let tools/ci_profile.py tell a third-party
+	# action from ours. The compact execution log (zstd; 0.9 MB for a fast-tier
+	# run) shows what each spawn ran and whether it hit the cache.
+	profile_args=("--profile=$DCFS_CI_PROFILE" --generate_json_trace_profile
+		--experimental_profile_include_target_label
+		--experimental_profile_include_primary_output
+		"--execution_log_compact_file=${DCFS_CI_PROFILE%.json.gz}.execlog.zst")
+fi
 status=0
-bazel coverage --keep_going "$@" -- "${targets[@]}" || status=$?
+bazel coverage --keep_going "${profile_args[@]}" "$@" -- "${targets[@]}" || status=$?
 report="$(bazel info output_path)/_coverage/_coverage_report.dat"
 mkdir -p ci-coverage
 if [ -s "$report" ]; then

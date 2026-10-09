@@ -20,8 +20,17 @@ rm -rf osv
 mkdir -p osv
 alpine=()
 output_base=$(bazel info output_base)
-for repo in $(python3 tools/sbom/sbom.py alpine-repos); do
-  bazel fetch "--repo=@${repo}"
+# One fetch of every Alpine repository (step 26.16: a profile of it when
+# DCFS_CI_PROFILE is set, as in test.sh; the job summary shows the table).
+fetch=()
+if [[ -n ${DCFS_CI_PROFILE:-} ]]; then
+  mkdir -p "$(dirname "$DCFS_CI_PROFILE")"
+  fetch=("--profile=$DCFS_CI_PROFILE" --generate_json_trace_profile
+    --experimental_profile_include_target_label)
+fi
+repos=$(python3 tools/sbom/sbom.py alpine-repos)
+bazel fetch "${fetch[@]}" $(printf -- '--repo=@%s ' $repos)
+for repo in $repos; do
   # cquery prints the file's path relative to the output base, whatever the
   # repository's canonical name is.
   file=$(bazel cquery --output=files "@${repo}//:resolved.json" 2>/dev/null)

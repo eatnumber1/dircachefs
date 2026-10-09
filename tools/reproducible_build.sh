@@ -60,7 +60,14 @@ for x in a b; do
 		if [ "$x" = b ]; then
 			contents=(--repo_contents_cache="$tmp/contents_b")
 		fi
-		bazel --output_base="$tmp/ob_$x" build --disk_cache= "${contents[@]}" "$@" "${targets[@]}"
+		# Step 26.16: with DCFS_CI_PROFILE (CI sets it, ending in .json.gz)
+		# each build writes its trace profile beside it, as <name>-a and -b.
+		profile=()
+		if [ -n "${DCFS_CI_PROFILE:-}" ]; then
+			mkdir -p "$(dirname "$DCFS_CI_PROFILE")"
+			profile=("--profile=${DCFS_CI_PROFILE%.json.gz}-$x.json.gz")
+		fi
+		bazel --output_base="$tmp/ob_$x" build --disk_cache= "${contents[@]}" "${profile[@]}" "$@" "${targets[@]}"
 		mkdir -p "$tmp/out_$x"
 		for o in "${outputs[@]}"; do
 			mkdir -p "$tmp/out_$x/$(dirname "$o")"
