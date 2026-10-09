@@ -333,3 +333,19 @@ sequences, 23.8's atime power cut) are the regression suite. Sequence:
 after 12.8 (crash sequences) and 23.8 (held-fd dirty reason) merge, since
 all three touch the dirty set. Owner: dcfs-protocol.
 
+From the 12.8 review (2026-10-09), the condition the model must be able
+to judge before 23.10 is called correct: the no-gap argument needs only
+(i) D durably dirty before its first unsynced change in an interval,
+(ii) the mark cleared only after a completed syncfs with no mutation of D
+since the sync began, (iii) recovery forgetting all of a dirty D; 23.10
+keeps all three for directories under every regime. What it changes is
+that file rows are never dirty, so under every regime a power loss can
+revert a file's size or mtime from unsynced writes, and 23.10 is correct
+only if every written file has a dirty parent that recovery re-lists and
+re-stats, **including hard links named in other directories, files opened
+by NFS handle with no parent dentry, and an unlinked O_TMPFILE**. Judging
+that needs a file inode (attributes, data, link count) and a second
+directory in dcfs.tla: 23.10's model work starts there. Trap: replacing
+syncfs by per-directory fsyncs breaks under ext4
+(`known_bugs/sync_by_file_fsync`).
+

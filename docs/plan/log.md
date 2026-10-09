@@ -1962,3 +1962,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   ext4; expected violations as limitations; known_bugs/sync_by_file_fsync). No gap: a non-dirty
   database survives a power loss only with a backing synced since D's last change (durable phase 1
   + clear-after-syncfs): the property 23.10 must keep. Existing counts unchanged under seq.
+- 12.8 reviewed (Opus): merge after wording (ext4 regime is an over-approximation of Definition 7;
+  CrashRefines follows from CrashSafe; litmus wording). The review states the exact condition for
+  23.10 (file rows never dirty: every written file needs a dirty parent recovery re-lists, incl.
+  hard links elsewhere, NFS-handle opens without a parent dentry, unlinked tmpfiles; the model needs
+  a file inode and a second directory): written into 23.10.
