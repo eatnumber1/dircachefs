@@ -1,0 +1,28 @@
+# Step 26.15: the standalone reproducer of the ext4 casefold tune oops (see
+# README.md). No dcfs in it; //test/qemu installs the files in the guest
+# under /kernel_bugs/ext4_casefold_tune/ (scripts/mkinitramfs.sh) for
+# //test/qemu:kernel_bug_ext4_casefold_tune_test.
+
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "casefold_helper",
+    srcs = ["casefold_helper.c"],
+    features = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
+    linkstatic = True,
+    visibility = ["//visibility:private"],
+)
+
+filegroup(
+    name = "guest_files",
+    testonly = True,
+    srcs = [
+        "casefold_helper",
+        "reproduce.sh",
+    ],
+    visibility = ["//tools/kernel_bugs:__pkg__"],
+)

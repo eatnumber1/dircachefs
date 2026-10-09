@@ -1,0 +1,13 @@
+# Step 26.15: standalone reproducers of Linux kernel bugs the test suite
+# found, for bug reports (docs/plan/notes/kernel-bugs-2026-10-09.md). Each
+# directory is self-contained and has no dcfs in it.
+
+filegroup(
+    name = "guest_files",
+    testonly = True,
+    srcs = [
+        "//tools/kernel_bugs/btrfs_failed_inode_read:guest_files",
+        "//tools/kernel_bugs/ext4_casefold_tune:guest_files",
+    ],
+    visibility = ["//test/qemu:__pkg__"],
+)

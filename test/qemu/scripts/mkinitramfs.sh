@@ -247,6 +247,19 @@ else
 				;;
 			esac
 			;;
+		*tools/kernel_bugs/*)
+			# step 26.15: the standalone reproducers of kernel bugs
+			# (//tools/kernel_bugs:guest_files), installed beside their helper
+			# binaries under /kernel_bugs/<dir>/ (guest/kernel_bug_repro.sh);
+			# checked before the generic *.sh pattern below, which would put
+			# reproduce.sh in /tests.
+			rel=${f#*tools/kernel_bugs/}
+			dest="$ROOT/kernel_bugs/$rel"
+			mkdir -p "$(dirname "$dest")"
+			cp "$f" "$dest"
+			copy_deps "$dest"
+			chmod +x "$dest"
+			;;
 		*/tests/*)
 			rel=${f#*/tests/}
 			dest="$ROOT/pjdfstest/tests/$rel"

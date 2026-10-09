@@ -84,6 +84,7 @@ config_setting(
         "@alpine_busybox//:root/bin/busybox.static",
         "@alpine_strace//:root",  # step 26.3: /usr/bin/strace and musl
         "@alpine_dmsetup//:root",  # step 11.1: /sbin/dmsetup and libdevmapper
+        "//tools/kernel_bugs:guest_files",  # step 26.15: /kernel_bugs/
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + [
         "guest/request_budgets.txt",
@@ -724,6 +725,36 @@ qemu_test(
     kernel_failure = "expected",
     size = "small",
     timeout = "short",
+)
+
+# Step 26.15: the standalone reproducers of two kernel bugs
+# (tools/kernel_bugs/<name>/, each with a README; the bug reports' drafts are
+# docs/plan/notes/kernel-bugs-2026-10-09.md), run as DISABLED_ checks by
+# guest/kernel_bug_repro.sh, the bug named by the cmdline. Manual: they only
+# demonstrate the bugs, and each runs the same script, on the same pinned
+# kernel, that the bug report points to. Kernel only, no dcfs; expected kernel
+# failures (run-qemu.sh).
+qemu_test(
+    name = "kernel_bug_ext4_casefold_tune_test",
+    cmdline = "dcfs_kernel_bug=ext4_casefold_tune",
+    disks = [("vdb", "ext4", "64M")],
+    guest_script = "guest/kernel_bug_repro.sh",
+    kernel_failure = "expected",
+    size = "small",
+    tags = ["manual"],
+    timeout = "short",
+)
+
+qemu_test(
+    name = "kernel_bug_btrfs_failed_inode_read_test",
+    cmdline = "dcfs_kernel_bug=btrfs_failed_inode_read",
+    disks = [("vdb", "btrfs", "320M")],
+    guest_script = "guest/kernel_bug_repro.sh",
+    kernel_failure = "expected",
+    modules = ["dm_flakey"],
+    size = "small",
+    tags = ["manual"],
+    timeout = "moderate",
 )
 
 # Step 23.8: access times are the backing filesystem's own (from dcfs's held

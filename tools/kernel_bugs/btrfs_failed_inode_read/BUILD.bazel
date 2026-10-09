@@ -1,0 +1,29 @@
+# Step 26.15: the standalone reproducer of the btrfs_destroy_inode WARNING
+# after a failed inode read (see README.md). No dcfs in it; //test/qemu
+# installs the files in the guest under /kernel_bugs/btrfs_failed_inode_read/
+# (scripts/mkinitramfs.sh) for
+# //test/qemu:kernel_bug_btrfs_failed_inode_read_test.
+
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+
+cc_binary(
+    name = "handle_helper",
+    srcs = ["handle_helper.c"],
+    features = select({
+        "//test/qemu:asan_build": [],
+        "//test/qemu:ubsan_build": [],
+        "//conditions:default": ["fully_static_link"],
+    }),
+    linkstatic = True,
+    visibility = ["//visibility:private"],
+)
+
+filegroup(
+    name = "guest_files",
+    testonly = True,
+    srcs = [
+        "handle_helper",
+        "reproduce.sh",
+    ],
+    visibility = ["//tools/kernel_bugs:__pkg__"],
+)
