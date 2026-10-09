@@ -386,7 +386,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | destroy (20000 files, step 6.4b) | 105 | 833 | 384 | 1344 |
 | cancel, cancel_inventory (cold 20000-entry listing, steps 22.1-22.2) | 89-93 (`reclaim_scans=0` at 384 for cancel; 256 scans 18073 pages) | 713-745 at 1216 (`reclaim_scans=0`) | 384 (cancel_inventory 256) | 1216 |
 | bench_readdir | 157 | 1432-1509 | 320 | 2304 |
-| bench_full | 569 | over 2001 (killed by the OOM killer at 2048; not measured further) | 896 | 3072 (a guess) |
+| bench_full | 569 | 2697 at 4096 (`reclaim_scans=0`; 3072 was killed by the OOM killer in CI; `dcfs_hwm` 625, five daemons at 410-625 each, see `BUILD.bazel`) | 896 | 4352 |
 
 What fills the memory, in the plain guests: the initramfs (22 MiB of
 tmpfs, always), the kernel (about 30 MiB at 1024), the page cache of the

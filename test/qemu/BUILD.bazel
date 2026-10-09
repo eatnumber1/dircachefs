@@ -1024,10 +1024,14 @@ qemu_test(
     ],
     guest_script = "guest/bench_full.sh",
     mem = 896,  # peak 569 MiB (slab 426)
-    # Not measured: the ASan run is killed by the OOM killer at 2048 MiB with
-    # 1818 MiB of anonymous memory in use, and the host cannot spare a bigger
-    # guest while measuring. 3072 is a guess; run it and read the MEM line.
-    asan_mem = 3072,
+    # Measured 2026-10-09 (step 6.5) at 4096 and 8192 MiB: peak_used 2697 and
+    # 2592 MiB, 2867 with the kernel's reservation at 4096, reclaim_scans=0.
+    # What fills it is five ASan daemons at once (the four fixtures' live the
+    # whole run at 410-625 MiB of VmHWM each, against 10-21 MiB plain, and
+    # the Startup, Recovery and Memory benchmarks start one more) and the
+    # benchmark process (170 MiB). 3072 died of the OOM killer in CI. The
+    # rule: (2697 + 170) * 1.5, up to 64 MiB.
+    asan_mem = 4352,
     modules = ["dm_delay"],
     size = "enormous",
     timeout = "eternal",
