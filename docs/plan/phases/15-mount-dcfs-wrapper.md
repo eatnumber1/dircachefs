@@ -342,6 +342,25 @@ an accidental out-of-band change, upgrading dcfs (needs a remount), what
 the log messages mean),
 design.md (wrapper, daemonization, boundaries, instance identity); remove
 `packaging/dcfs.service`.
+Status 2026-10-09: done, merged 50fee50 (two commits, docs only). README:
+fstab with and without systemd, `dcfs.fstype` values, options not shared,
+pass 0 (no fsck.dcfs yet), Remounting, Logging, Instances/trees/boundaries,
+Responsibilities of the administrator, an Operations chapter (wiping the
+cache of one instance, after an out-of-band change, upgrading, what the
+log messages mean); design.md: the wrapper, Startup as built (StartupPurge
+until 15.3), daemonization, SyslogSink, boundaries as they stand, `--source`
+gone; `packaging/` removed; dcfs.8 carries the new sections (a `##` section
+contributes nothing of its own to extract_sections: its `###` children are
+listed one by one). Left out as not built: 15.5 (fsck.dcfs, `dcfs exports`),
+15.3 (default cache path, `dcfs.cache_dir`), 15.4 (stubs: `none` and
+`bind` refuse a mount below SOURCE today). Stated from standard behaviour,
+not verified in the tree, for 15.6 to assert: fstab-generator units finish
+when mount.dcfs exits; parent/child mount-unit ordering; `_netdev`,
+`nofail`, `noauto`; `x-systemd.requires-mounts-for=` for none/bind sources
+and the cache's filesystem; `journalctl -t dcfs` finds the daemon's lines;
+`systemctl restart <unit>.mount`; libmount merging fstab options into a
+remount and `mount /data` taking the line's options; `umount -R` order;
+after SIGKILL `umount -l` before remounting.
 Review each step against the race/crash/tri-state rules before merge.
 
 ## Status 2026-10-08 (15.1/15.2 in review fixes)

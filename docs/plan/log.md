@@ -2040,3 +2040,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   refetch, fast tier plus the new main targets. Three follow-ups queued in phases/26 (26.14b
   cleanup race in the test scripts after 6.5; 26.14c a 4294967295 branch count at
   dir_cache_fs.cc:817; 26.14d the ARowGoneDuringPhase3 flake with a pid-0 WARNING).
+- 15.7 merged (50fee50, two commits, docs only; fast 227 + 2, man tests green). Every claim checked
+  against the code or man page by the agent; the systemd/util-linux statements it could not verify
+  are listed in phases/15 for 15.6 to assert. Lane-5 free.
