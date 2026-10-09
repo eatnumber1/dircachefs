@@ -48,8 +48,23 @@ CrashImage(s) ==
 \* concurrent held fills can touch it without bound (each one that finds
 \* another's touch marks the attributes unknown and touches in turn), and
 \* its raw value would make the state space infinite.
+\*
+\* Only at the steps that read a snapshot (FSnapPcs: S1 and FStat write it
+\* first) is it current (1) or stale (2); everywhere else the view keeps 0.
+\* Step 23.8b: the first version normalized every slot's `fsnap`,
+\* including the 0 of a slot that has taken no snapshot, which read as
+\* current exactly while the clock was 0. With the clock zeroed in the
+\* view, a state at clock 0 and one at clock k (otherwise equal, and with
+\* the same future: nothing but the guards reads the clock or a
+\* snapshot) were one state, but a request arriving in either got
+\* different views ("1" and "2"), so the view was not a congruence: which
+\* of those successors TLC reached depended on which state it had kept,
+\* and the distinct-state count on the number of workers (MC_atime.cfg:
+\* 263,723 with one worker, 263,890, 263,796 and 263,848 with four).
+FSnapPcs == {"S2", "FR_fill", "FG_fill", "FG_rfill", "FS_fill"}
 FSnapView(r) ==
-    [r EXCEPT !.fsnap = IF r.fsnap = fm.seq THEN 1 ELSE 2]
+    [r EXCEPT !.fsnap = IF r.pc \notin FSnapPcs THEN 0
+                        ELSE IF r.fsnap = fm.seq THEN 1 ELSE 2]
 
 (***************************************************************************)
 (* An idle slot keeps the reply of the last request that held it (`rep`,   *)
