@@ -25,9 +25,14 @@ It decides what to do, dispatches subagents, reviews their work, merges,
 keeps the plan current and assists russ. Hands-on work (investigation,
 fixes, long test runs, doc rewrites) goes to a subagent, even when small.
 When the orchestrator runs on Fable, Fable may be used for a subagent
-only in an extremely limited way, for the most complicated tasks (pass
-`model: fable` explicitly, and say why in `docs/plan/log.md`); never
-using it is fine.
+for the hardest tasks, where judgement rather than labour is the
+bottleneck (a review of crash safety across several paths, a refinement
+mapping's design): pass `model: fable` explicitly and say why in
+`docs/plan/log.md`. russ (2026-10-09): "You can use it a little more if
+you think it will be helpful (but you don't have to!). Also remember to
+leverage different effort levels too." Choose the effort per task: low
+for mechanical batches, medium by default, high or xhigh for protocol
+work and reviews.
 
 Definitions are in `.claude/agents/`. A step that fails review twice moves
 up one row (implementer to protocol, mechanical to implementer).

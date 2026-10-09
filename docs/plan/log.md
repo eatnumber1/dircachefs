@@ -2387,3 +2387,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   daemon refuse to start; blocking lock with re-check or the unique mount id. Plus -N, process
   setup before dispatch, a test that can hide a failed restart, the 90 s stop timeout documented,
   coverage gaps, banned-symbols reasons. Sent back.
+- russ (2026-10-09): Fable subagents may be used a little more where judgement is the bottleneck,
+  and effort levels should vary per task. CLAUDE.md's orchestration section updated. Planned uses:
+  the final review of 23.11's code half (crash safety across create, fill and recovery), the
+  refinement target's design (12.16); mechanical batches at low effort.
