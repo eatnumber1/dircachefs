@@ -2271,3 +2271,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   with 15.6b (same agent: the umount.fuse.dcfs helper waiting on the daemon's pidfd, the
   banned-symbols and repo-shape enforcement of the no-timers rule, busy_timeout=5000 removed, the
   two remaining polls, style.md's rule).
+- 23.11 review (Opus): sound; the latent bug CONFIRMED in the C++ and a second path found that
+  needs no crash (a create whose phase 3 fails after its syscall, answered EEXIST). Exposure by
+  nodeid only (NFS/saved handles), never swept. Code half dispatched to lane-1 after four model
+  items (model the failed phase 3, drop or fix the vacuous metaprefix config, README table,
+  large/nolock green), with the reviewer's four failing-first tests, two-sided OriginOK plus a
+  negative log, InsertDirty counting (closes G15), and 26.4b to measure rule 2's cost.

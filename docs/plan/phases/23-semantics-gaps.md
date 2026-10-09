@@ -571,3 +571,41 @@ timed out under load 28-33 (configs untouched, dcfs.tla changed under
 them). Cost of rule 2: one dirty row and one probe at a crash's start per
 child first recorded in a directory changed since the last sync point.
 
+Opus review 2026-10-09: sound within its bounds; the code half may start
+after four model items (M1, L2, L3, L6). The latent bug is REAL in the
+C++ (walked: BeginCreate kSync, openat, crash before RecordNewChild;
+restart keeps D dirty and probes only D; ResolveName's RecordChild inserts
+the row with attrs_valid at normal durability, `child_ok` true because
+CanFill is true for a never-touched id; ForgetUnnamedRows takes nlink 0
+only; ProbeRecoveredRows probes dirty rows only), and there is a SECOND
+PATH with no crash: a create whose phase 3 fails after its syscall
+(RecordNewChild or its probe fails; reply EEXIST via CreatedButNotCompleted
+or the error; the kernel drops its negative dentry; the next lookup
+records the row clean). Exposure by nodeid only (NFS or saved handles:
+LOOKUP(".") and GETATTR serve valid attributes of a gone object until an
+open or readdir gets ESTALE); path lookups and listings stay correct (D's
+durable mark); the row is never swept; window: before the backing commits
+the create and before the next sync point. Rule 2 is right and complete
+(RecordChild serves lookups and listings; ParentOf argued unreachable for
+a not-yet-durable create); rule 1 costs nothing (`UpsertResult.created`
+exists). Findings: M1 model the failed-phase-3 step and its known_bug,
+fix the docs' exposure text; M2 the trace note is not enough: `OriginOK`
+must become two-sided (dirty exactly when the row is new and the parent
+has a mutation mark) with a negative log, and a checker rule at
+ChildRowRecorded guards files until 12.11b; M3 rule 2 is a fourth way into
+the dirty table, so `InsertDirty` must count in `ctx.dirty.inserts`
+(closes G15); L1 premises bite on one half each; L2 MC_borndirty_metaprefix
+equals seq (no write); L3 README table drift; L4 requests never reach a
+lost F (state property only); L5 one-crash configs only; L6 large/nolock
+not yet run on this dcfs.tla; L7 the condition is "parent has a mutation
+mark", read once inside the fill's transaction. Cost: rule 2 fires only
+on rows a fill inserts under a mutation-marked parent (a cold listing of N
+children after a create: N dirty inserts, one DELETE at the sync point, N
+probes if a crash comes first); a cheaper sound condition exists (three
+in-memory mechanisms) but is not worth it before 26.4b measures; a
+per-directory probe would need a column: not before measurement. The
+code half dispatched 2026-10-09 with the four harness tests the reviewer
+specified (path B with the no_new_inodes trigger, path A with the
+crash-between pattern, rule 1 via NameToHandleHook, a fault_power
+scenario with a saved handle getting ESTALE).
+
