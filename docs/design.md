@@ -1791,7 +1791,17 @@ and nfsd take:
   would perform later operations as the wrong user.
 
 Caller identity comes from the FUSE request (`fuse_req_ctx`) and the
-supplementary groups from `fuse_req_getgroups`.
+supplementary groups from `fuse_req_getgroups`, which reads
+`/proc/<pid>/task/<pid>/status` for the request's pid. Only requests a
+process makes (the mutations above) read them; the kernel's own requests
+(`FORGET`, `BATCH_FORGET`, `INTERRUPT`) carry no caller and never do. A
+pid of 0 reaches the reader only for a caller outside the daemon's pid
+namespace (the kernel sends `pid_nr_ns` of the caller in the mount's
+namespace, 0 if it has none there): its uid and gid are real, its groups
+are unreadable, and the request runs with none, with a WARNING (at most
+one per minute for the daemon) for the administrator, who can run the
+daemon in the callers' pid namespace. The unit tests forge requests with
+their own pid, so they read real groups and log nothing.
 
 **Run as the caller:** `mkdirat`, `mknodat`, `symlinkat`,
 `openat(O_CREAT)`, `unlinkat`, `renameat2`, the chown (including the

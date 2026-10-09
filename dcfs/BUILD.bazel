@@ -415,6 +415,7 @@ qemu_cc_test(
     timeout = "short",
     srcs = ["fuse_request_channel_test.cc"],
     deps = [
+      ":credentials",
       ":fuse_request",
       ":status",
       ":syscalls",

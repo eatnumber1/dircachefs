@@ -750,8 +750,13 @@ class DirCacheFSTest : public ::testing::Test {
     hdr.opcode = opcode;
     hdr.unique = unique;
     hdr.nodeid = nodeid;
-    // Root, from pid 0 (whose groups cannot be read: none, see
-    // FuseRequest::Caller).
+    // Root, from this process: the pid whose /proc/<pid>/task/<pid>/status
+    // FuseRequest::Caller reads the supplementary groups from. pid 0 (what
+    // the kernel sends for a caller outside the daemon's pid namespace)
+    // has none to read, and Caller logs a WARNING for it, rate limited to
+    // one per 60 s for the whole process, so whichever test first
+    // mutated after the window lapsed saw an unrelated WARNING (step 26.14d).
+    hdr.pid = static_cast<uint32_t>(syscalls::getpid());
     AppendBytes(buf, hdr);
     buf.append(body);
     struct fuse_buf fbuf = {};

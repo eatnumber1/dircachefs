@@ -36,9 +36,11 @@
 #include "absl/status/status_matchers.h"
 #include "absl/strings/str_join.h"
 #include "absl/time/time.h"
+#include "dcfs/credentials.h"
 #include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "fuse_kernel.h"
@@ -67,6 +69,13 @@ struct FakeChannel {
   // If set, FakeGetattr sends a success reply (which the channel fails with
   // next_writev_errno) and hands its status to ReplyFailureAndLogIfNotOk.
   bool reply_attr_then_fail = false;
+  // The pid, uid and gid the forged GETATTR carries.
+  uint32_t request_pid = 0;
+  uint32_t request_uid = 0;
+  uint32_t request_gid = 0;
+  // If set, FakeGetattr stores FuseRequest::Caller()'s result in `caller`.
+  bool read_caller = false;
+  std::optional<absl::StatusOr<Credentials>> caller;
 };
 
 // Never actually called: this test drives the session entirely via
@@ -100,6 +109,7 @@ void FakeGetattr(fuse_req_t req, fuse_ino_t, struct fuse_file_info *) {
   auto *channel =
       static_cast<FakeChannel *>(fuse_req_userdata(req));
   FuseRequest fr(req);
+  if (channel->read_caller) channel->caller = fr.Caller();
   if (channel->reply_attr_then_fail) {
     struct stat st = {};
     absl::Status sent = fr.ReplyAttr(st, absl::Seconds(1));
@@ -185,6 +195,9 @@ void RunGetattr(FakeChannel &channel) {
     hdr.opcode = FUSE_GETATTR;
     hdr.unique = 2;
     hdr.nodeid = 1;  // root; FakeGetattr ignores it.
+    hdr.pid = channel.request_pid;
+    hdr.uid = channel.request_uid;
+    hdr.gid = channel.request_gid;
     hdr.len = static_cast<uint32_t>(sizeof(hdr) + sizeof(getattr_in));
     AppendBytes(getattr_req, hdr);
     AppendBytes(getattr_req, getattr_in);
@@ -223,6 +236,74 @@ class ErrorCapture : public absl::LogSink {
   }
   std::vector<std::string> lines;
 };
+
+// Collects the log lines at WARNING and above while it lives.
+class WarningCapture : public absl::LogSink {
+ public:
+  WarningCapture() { absl::AddLogSink(this); }
+  ~WarningCapture() override { absl::RemoveLogSink(this); }
+  void Send(const absl::LogEntry &entry) override {
+    if (entry.log_severity() >= absl::LogSeverity::kWarning) {
+      lines.emplace_back(entry.text_message());
+    }
+  }
+  std::vector<std::string> lines;
+};
+
+// Step 26.14d: Caller() reads the supplementary groups of the request's pid
+// (libfuse's fuse_req_getgroups: /proc/<pid>/task/<pid>/status), takes the
+// ids from the header, and logs nothing when it can read them.
+TEST(FuseRequestChannelTest, CallerHasTheGroupsOfTheRequestsPid) {
+  // The guest's root, on the main thread, whose /proc entry
+  // (/proc/<pid>/task/<pid>) is the one libfuse reads.
+  std::vector<gid_t> before(64);
+  ASSERT_OK_AND_ASSIGN(int n,
+                       syscalls::getgroups(static_cast<int>(before.size()),
+                                           before.data()));
+  before.resize(static_cast<size_t>(n));
+  const gid_t mine[] = {4242, 4343};
+  ASSERT_THAT(syscalls::setgroups(mine), IsOk());
+  FakeChannel channel;
+  channel.read_caller = true;
+  channel.request_pid = static_cast<uint32_t>(syscalls::getpid());
+  channel.request_uid = 1000;
+  channel.request_gid = 2000;
+  WarningCapture capture;
+  RunGetattr(channel);
+  ASSERT_THAT(syscalls::setgroups(before), IsOk());
+  ASSERT_TRUE(channel.caller.has_value());
+  ASSERT_THAT(*channel.caller, IsOk());
+  EXPECT_EQ((*channel.caller)->uid, 1000u);
+  EXPECT_EQ((*channel.caller)->gid, 2000u);
+  EXPECT_THAT((*channel.caller)->groups,
+              testing::UnorderedElementsAre(4242u, 4343u));
+  EXPECT_THAT(capture.lines, testing::IsEmpty())
+      << absl::StrJoin(capture.lines, "\n");
+}
+
+// A request with pid 0 -- the kernel sends it for a caller outside the
+// daemon's pid namespace -- has no /proc entry to read the groups from:
+// the caller is served with its ids and no groups, and the administrator is
+// told (logged once per 60 s for the process, so no other test in this
+// binary may send a pid-0 request that reads its caller).
+TEST(FuseRequestChannelTest, CallerOfPidZeroHasNoGroupsAndIsWarnedAbout) {
+  FakeChannel channel;
+  channel.read_caller = true;
+  channel.request_pid = 0;
+  channel.request_uid = 1000;
+  channel.request_gid = 2000;
+  WarningCapture capture;
+  RunGetattr(channel);
+  ASSERT_TRUE(channel.caller.has_value());
+  ASSERT_THAT(*channel.caller, IsOk());
+  EXPECT_EQ((*channel.caller)->uid, 1000u);
+  EXPECT_EQ((*channel.caller)->gid, 2000u);
+  EXPECT_THAT((*channel.caller)->groups, testing::IsEmpty());
+  EXPECT_THAT(capture.lines,
+              testing::ElementsAre(testing::HasSubstr(
+                  "pid 0: supplementary groups unreadable")))
+      << absl::StrJoin(capture.lines, "\n");
+}
 
 // docs/style.md 1.7: the handler that replies is the one place that logs a
 // request's failure, and an errno the backing filesystem answered with
