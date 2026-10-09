@@ -67,9 +67,6 @@ struct ext4_tune_sb_params {
 #define EXT4_IOC_SET_TUNE_SB_PARAM(size) _IOC(_IOC_WRITE, 'f', 46, size)
 #define EXT4_TUNE_FL_EDIT_FEATURES 0x00004000
 #define EXT4_FEATURE_INCOMPAT_CASEFOLD 0x20000
-#ifndef FS_CASEFOLD_FL
-#define FS_CASEFOLD_FL 0x40000000
-#endif
 
 /* Prints the error as "<what>: <message> (errno N)" and returns the exit
  * status for it. */

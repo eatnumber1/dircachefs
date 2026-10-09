@@ -57,6 +57,16 @@ use it as design guidance rather than firm rules."
   finds missing and unused includes, both with phase 7's clang toolchain
   (F6). Until then, state each direct dep in BUILD and add no include that
   nothing uses.
+- **No copies of UAPI definitions.** The pinned sysroot's kernel headers
+  (`<linux/fs.h>` and the rest of trixie's linux-libc-dev, step 7.1b) are
+  the only source of a kernel constant, struct or ioctl number: no
+  `#ifndef FS_IOC_...` shim, no local `struct` mirroring a UAPI one. A
+  definition that is missing means the pin is too old: raise the pin, do
+  not paste the definition (step 7.1d removed `dcfs/fsuuid_compat.h` and the
+  `FS_CASEFOLD_FL` shim of `casefold_helper.c`). One shim remains: the
+  `FS_IOC_SHUTDOWN` definition in `tools/testutil.c`, because the pinned
+  sysroot's `<linux/fs.h>` (6.12) predates it; it goes when the pin is
+  raised.
 - Include blocks are what clang-format's Google style produces: own header,
   C headers, C++ headers, then every other header in one sorted block
   (`"absl/..."`, `"dcfs/..."`, `"fuse_lowlevel.h"`).
@@ -155,7 +165,14 @@ layout is from `man 2 getdents`), not a wrapper. The process-control wrappers
 (`fork`, `execv`, `waitpid`, `kill`, `dup2`, `_exit`) are in
 `dcfs/syscalls_process.h`, a separate library for `bench/` and the
 `mount.dcfs` wrapper (its daemon fork and the capture helper's mount(8)),
-the only one `tools/banned_symbols.txt` lets reference `execv`.
+the only one `tools/banned_symbols.txt` lets reference `execv`. Why three
+libraries: `syscalls_backing.h` is its own target so that
+`//tools:syscalls_backing_users_test`'s golden list enforces, in the build
+graph, that every backing-reaching syscall is made in `backing.cc`, which
+keeps the fault sweep and the trace recorder complete, since both hook
+`backing.cc`; `syscalls.h` is the process-local set anyone may call; and
+`syscalls_process.h` exists so that `bench/` and the tools get wrappers
+without dcfs's libraries.
 
 **No raw syscalls anywhere** (russ, 2026-10-07: a firm rule). Syscalls go
 through `dcfs/syscalls.h` and `dcfs/syscalls_backing.h`, where the failure
@@ -409,6 +426,9 @@ each.
   `//tools:syscalls_backing_users_test` compares the targets that depend on
   the former with `dcfs/syscalls_backing_users.txt` (a new dependent is a
   reviewed edit; `dir_cache_fs` and `metadata_cache` are not on the list).
+  That is why the wrappers are three libraries (section 1.5): the split
+  makes the invariant a property of the build graph, which keeps the fault
+  sweep and the trace recorder, both hooked at `backing.cc`, complete.
   `mounts_below` is on it for its two `/proc/self/mountinfo` reads (`openat`,
   `read`: procfs, no backing disk). The mount.dcfs wrapper's modules are on
   it too: `OpenBacking` (`backing_capture.cc`) opens SOURCE for the `none`

@@ -30,7 +30,6 @@
 #include "absl/status/statusor.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
-#include "dcfs/fsuuid_compat.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
 #include "gmock/gmock.h"

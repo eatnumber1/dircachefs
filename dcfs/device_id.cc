@@ -10,8 +10,6 @@
 #include <string>
 #include <string_view>
 
-// Pulls in the real FS_IOC_GETFSUUID definition when the host's UAPI
-// headers are new enough (Linux 6.9+).
 #include <linux/btrfs.h>
 #include <linux/fs.h>
 #include <linux/magic.h>
@@ -23,7 +21,6 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
-#include "dcfs/fsuuid_compat.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
 
