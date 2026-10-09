@@ -270,3 +270,33 @@ own step, none fixed in 26.14:
   read-ahead/`-EINTR` paths differ between runs: document in
   `docs/coverage.md` or pin; part of 26.14b's rerun.
 
+## 26.15 Kernel bug reports: reproducers and drafts (2026-10-09)
+
+The suite found two kernel bugs that russ wants reported upstream (log.md
+"Needs russ"); russ sends the mail, the step prepares everything else:
+- ext4: `EXT4_IOC_SET_TUNE_SB_PARAM` (6.18+) switches the casefold feature
+  on under a mounted filesystem without loading `sb->s_encoding`; `chattr +F`
+  checks only the feature bit; the next readdir of that directory
+  dereferences NULL in `utf8byte` (`ext4fs_dirhash <- ext4_readdir`).
+  Reproducer in the tree: `guest/casefold_tune_oops.sh`
+  (`casefold_tune_oops_test`, a DISABLED_ check with `kernel_failure =
+  "expected"`).
+- btrfs: a failing inode read (dm-flakey under the device) WARNs in
+  `btrfs_destroy_inode`; found by 11.3's fault sweep, pinned around by the
+  btrfs variant (`fault_recover_btrfs_unpinned_test`, `kernel_failure =
+  "expected"`, run-qemu.sh tolerates exactly that WARNING when the guest
+  reports it).
+For each: a standalone reproducer with no dcfs in it (a shell script that
+needs only a scratch block device or a loop file, the pinned kernel's
+version and config fragment); the oops/WARNING text and the call chain from
+the serial log; the code path in the upstream source (read-only; the
+current mainline, to say whether the bug is still there and where); a
+search of lore.kernel.org for an existing report or fix (do not draft a
+duplicate: link it instead and say whether the pinned kernel lacks the fix);
+a draft report per bug in `notes/kernel-bugs-2026-10-09.md` in the form
+the lists expect (subject with the subsystem prefix, kernel version, steps,
+the oops, the analysis, a suggested fix in prose, the `#regzbot` line only
+if it is a regression with a known-good version), with the maintainers and
+lists from the pinned tree's MAINTAINERS. No patches: russ decides whether
+to write one. Owner: dcfs-investigator, lane-5.
+

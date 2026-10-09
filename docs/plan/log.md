@@ -2043,3 +2043,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 15.7 merged (50fee50, two commits, docs only; fast 227 + 2, man tests green). Every claim checked
   against the code or man page by the agent; the systemd/util-linux statements it could not verify
   are listed in phases/15 for 15.6 to assert. Lane-5 free.
+- 26.15 added and dispatched to lane-5 (new investigator): standalone dcfs-free reproducers, the
+  upstream code path, a lore search for existing reports, and draft mails for the ext4 casefold
+  tune oops and the btrfs_destroy_inode WARNING, for russ to send. Chosen for the free lane because
+  15.3/Phase 14 (schema, startup) would collide with 23.10's code half, and 12.9 with its model.
