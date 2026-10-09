@@ -854,3 +854,35 @@ tla_trace_log_test(
     log = "trace_tests/recover_crash.log",
     trace_cfg = "trace_tests/recover_clears_dirty_first.cfg",
 )
+
+# Step 23.8b: which component of MC.tla's View merges states that are not
+# equivalent. MC_atime.cfg with the View as it is, without FSnapView,
+# without IdleView, without CrashImage, and with no VIEW (the ground truth
+# for the distinct-state count), each at 1 and 4 TLC workers. Manual: run
+# them by name, with --runs_per_test=3 --nocache_test_results.
+[
+    tlc_test(
+        name = "atime_view_%s_w%s_test" % (variant, workers),
+        size = "large",
+        timeout = "eternal",
+        config = "view_bisect/MC_atime_%s.cfg" % variant,
+        spec = "MCview.tla",
+        srcs = [
+            "MC.tla",
+            "dcfs.tla",
+        ],
+        tags = ["manual"],
+        workers = workers,
+    )
+    for variant in [
+        "view",
+        "nofsnap",
+        "noidle",
+        "noimage",
+        "noview",
+    ]
+    for workers in [
+        "1",
+        "4",
+    ]
+]

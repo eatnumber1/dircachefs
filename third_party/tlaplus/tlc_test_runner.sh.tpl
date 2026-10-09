@@ -32,11 +32,12 @@ export TMPDIR="$TEST_TMPDIR/tmp"
 module="$(basename "$spec" .tla)"
 log="$work/tlc.log"
 status=0
-# -workers auto: as many workers as cores. -cleanup: drop state files of
-# earlier runs. -metadir: keep state files out of the inputs' directory.
+# -workers: the test's `workers` attribute (auto: as many workers as
+# cores). -cleanup: drop state files of earlier runs. -metadir: keep state
+# files out of the inputs' directory.
 "$java" -XX:+UseParallelGC -Xss4m \
   -Djava.io.tmpdir="$TEST_TMPDIR/tmp" -jar "$jar" \
-  -workers auto -cleanup -metadir "$work/states" \
+  -workers @@WORKERS@@ -cleanup -metadir "$work/states" \
   -config "$(basename "$config")" @@TLC_ARGS@@ "$module" \
   >"$log" 2>&1 || status=$?
 cat "$log"

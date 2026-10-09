@@ -31,6 +31,7 @@ def _tlc_test_impl(ctx):
             "@@SRCS@@": " ".join([f.short_path for f in srcs]),
             "@@EXPECT@@": ctx.attr.expect_violation,
             "@@TLC_ARGS@@": " ".join(ctx.attr.tlc_args),
+            "@@WORKERS@@": ctx.attr.workers,
         },
     )
     runfiles = ctx.runfiles(
@@ -66,6 +67,13 @@ _tlc_test = rule(
         ),
         "tlc_args": attr.string_list(
             doc = "Extra TLC command-line arguments.",
+        ),
+        "workers": attr.string(
+            default = "auto",
+            doc = "TLC's -workers: \"auto\" (one per core, the default) " +
+                  "or a number. A VIEW that merges only equivalent states " +
+                  "gives the same distinct-state count whatever the " +
+                  "number (step 23.8b).",
         ),
         "_jar": attr.label(
             default = "@tla2tools//file",
