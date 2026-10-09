@@ -1,4 +1,4 @@
-# Mutation testing (steps 26.5, 26.5d)
+# Mutation testing (steps 26.5, 26.5d, 12.13)
 
 Limited mutation testing of the protocol code: a mutant that no test kills is
 a missing test. It is a tool, not a test or a gate: running it takes hours and
@@ -217,6 +217,148 @@ rerun):
 
 The `BackingCall` deletion is a trace hook; others may be equivalent or arid
 (triage them into `equivalent.txt` or `arid.txt`).
+
+## TLA+ mode (step 12.13)
+
+`mutate.py --lang tla` mutates the TLA+ model (`formal/dcfs.tla` and the
+modules of `tla_scope.txt`: `ident`, `lifetime`, `reval` and the `Trace*`
+modules; not the `MC*` harnesses, whose mutants would change a test, nor the
+`known_bugs/` and `limitations/` variants) and asks which mutants no `//formal`
+test tells from the real model. A survivor is an under-specified property:
+the model, with that step changed, still passes every test, including that
+every known-bug and limitation test still finds its counterexample (a mutant
+that silences a known bug is killed by that test). It is one tool and one
+report: the same `generate`, `run`, `changed` and `report`, the same sampling
+(one mutant per line, `--per-function`, the seeded hash order), the same
+`equivalent.txt` (an entry for a `.tla` file is matched only in this mode),
+the same table and `SURVIVOR` lines.
+
+```
+bazel run //tools/mutation:mutate -- generate --lang tla \
+    --module formal/dcfs.tla --seed 1 --max-mutants 20 --out /tmp/tla.json
+bazel run //tools/mutation:mutate -- run --mutants /tmp/tla.json \
+    --result /tmp/tla-result.json --tier small [--time-budget 90]
+bazel run //tools/mutation:mutate -- changed --lang tla --tier small \
+    --range BASE..TIP --max-mutants 10 --result /tmp/tla-changed.json
+```
+
+`generate --lang tla` needs neither Bazel nor clang (about half a second for
+`dcfs.tla`: 1,350 candidates). `run` takes the language from the mutants file.
+`--max-mutants N` keeps N of the sample (seeded, operators in turn);
+`--time-budget MIN` stops `run` from starting a mutant after MIN minutes (the
+remaining ones are "not run"); `--module PATH` (repeatable) replaces the scope
+file. `run` copies the tree as before, writes the mutated module into the
+copy and runs, with one Bazel invocation per phase,
+
+```
+bazel test --notest_keep_going --test_output=errors --config=fast //formal/...
+bazel test --notest_keep_going --test_output=errors --config=presubmit //formal/...
+```
+
+(the small tier, then the small and medium tiers: the small results are
+cached, so the second phase costs only the medium tests; `--tier small` stops
+after the first, as the per-push job does; a medium `MC_nolock_small` joins the
+second phase when 12.12a adds it, with no change here). The `//formal/...`
+targets include the TLC tests and the trace validation of hand-written logs;
+the guest traces (`tla_trace_test` in `//dcfs` and `//test/qemu`) are not
+in the set. A baseline run of the same phases on the unmutated tree comes first.
+
+### Outcomes
+
+- **killed**: a test failed (Bazel exit 3), which includes a known-bug test
+  that no longer finds its counterexample and a test that timed out (a mutant
+  can blow the state space up). TLC is deterministic, so a kill is rerun
+  (`--nocache_test_results`) only after a timeout (load can cause one): a rerun
+  that passes makes it `flaky`.
+- **survived**: every test passed. A finding.
+- **invalid**: TLC itself failed rather than finding a violation: its exit
+  status is not 0, 11 (deadlock), 12 or 13 (a violation) in the `tlc_test`
+  runner's status line, or, for a test without that line (trace validation),
+  the output holds a parse error (`Fatal errors while parsing`, `Semantic
+  errors`) or an `Error:` line that is not a violation. Not counted as a kill
+  or as a survivor; listed as `INVALID file:line in def: operator: first
+  error` after the survivors, and in the table's `invalid` column.
+
+### Operators
+
+There is no parser. A conjunct-aware token scanner (`tla_operators.py`)
+masks the comments and strings (offsets kept), tokenizes with line, column and
+bracket depth, finds the definitions (a token at column 0 followed by `==`),
+the bulleted `/\` and `\/` lists (the first bullet at the start of a line or
+after `IN`, `THEN`, `ELSE`, `:`, `==` ...; the others at the same column and
+depth; nested lists, `LET`/`IN`, `\A`/`\E` and `IF` inside items work), the
+inline chains `a /\ b /\ c`, and which definitions and items are *effectful*
+(a primed variable, `UNCHANGED`, or a definition that has one, transitively
+and through the modules a module extends). The unit tests
+(`tla_operators_test`) run on `testdata/snippets.tla`, constructs copied from
+`dcfs.tla` (bulleted lists, nested indentation, `LET`, `\A`, `\E`, `EXCEPT`,
+primes, `UNCHANGED`, tuples, `Commit` calls), and on `dcfs.tla` itself
+(brackets stay balanced, no site in a comment, ids stable under a move).
+
+| operator | what it does |
+|---|---|
+| `negate` | a pure conjunct or disjunct `X` becomes `~(X)` (`negate-conjunct`, `negate-disjunct`); the condition of an `IF` (`negate-if`) |
+| `drop-guard` | a pure conjunct of an action becomes `TRUE` (`drop-conjunct` in a predicate); an effect or a frame (`x' = e`, `UNCHANGED`, `Unchanged...`) is never dropped |
+| `drop-disjunct` | a disjunct becomes `FALSE`: an item of the next-state relation (each name of `Next`, or a nested list) or of a predicate |
+| `swap-junction` | `/\` and `\/` exchanged: all the bullets of a pure list, or all the operators of a pure inline chain at once (TLA+ has no precedence between them) |
+| `relational` | `<` and `<=`, `>` and `>=`, `=` and `#`; not an assignment (`x' = e`) or an `EXCEPT` path (`!.f[k] = v`) |
+| `constant` | a number to N+1 and N-1 (not a range bound or an index), `TRUE` and `FALSE`, a member of a set in `tla_sets.txt` (the regimes `"seq"`/`"metaprefix"`/`"ext4"`, a row's `Unknown`/`Absent`/`NoRow`, F's `"no"`/`"atime"`/`"mut"`) to its neighbours |
+| `durability` | the second argument of a `Commit(row, sync)` call (the model's commit kinds: a normal commit, a synced one) goes to the other level, an expression to `FALSE` |
+| `drop-step` | a `!.pc = "X"` becomes the label step X itself moves to (the step is skipped); an element of a tuple or sequence literal (none outside `UNCHANGED` in `dcfs.tla` today) |
+| `swap-step` | two adjacent elements of a tuple or sequence literal |
+
+What it cannot reach: operands of an infix chain mixed with a looser operator
+(`a /\ b \/ c`, `\E x : P /\ Q`: where an operand ends needs the grammar, so
+the chain is left alone), definitions not at column 0 and `a (+) b ==`
+definitions, the order of two conjuncts (TLA+ conjunction commutes, so swapping
+"two steps" means the elements of a sequence and the `pc` chain, which is where
+this model sequences), operators or constants only the cfg decides (the
+`Bug*` flags, the bounds), and the `Trace*.tla` event guards beyond what the
+same operators find in them. A mutant TLC rejects is `invalid`, not a bug of the
+tool: the scanner does not type-check.
+
+### Arid
+
+Comments (masked, so never mutated); a definition named by a `VIEW` line of any
+`.cfg` beside the module (a mutated view hides or splits states; it is not an
+under-specified property); the `def-regex` rules of `tla_arid.txt` (each with
+its reason: the `View*` and `CrashImage*` definitions); and source marked in
+the module itself:
+
+```
+\* mutation: arid begin the reason
+...
+\* mutation: arid end
+x' = y   \* mutation: arid the reason (this line only)
+```
+
+A marker without a reason, an `end` without a `begin` or a `begin` never
+closed is a tooling error. `tla_operators_test` (`AridTest`) covers each.
+
+### Survivor workflow
+
+Same as the C++ one: a `SURVIVOR` is a missing property or configuration. Look
+at the definition and ask which behavior the mutant changes and which test
+should have seen it: a guard no configuration exercises (`Requests` without
+the request kind, a bound too small to reach it) needs a configuration; a
+conjunct of an invariant that nothing falsifies needs a known-bug variant that
+violates exactly it. An equivalent mutant (a guard implied by another, a state
+the model cannot reach) goes in `equivalent.txt` with the reason, keyed by the
+`.tla` file, definition, operator and text (`nth` as for C++); an arid place
+in `tla_arid.txt` or with a marker. Do not add to `equivalent.txt` to make a
+sweep pass: a survivor is the next step's finding.
+
+### On a schedule and per push
+
+- **Per push** (`ci.yml`, `mutation-changed`, a second step): `changed --lang
+  tla --tier small --max-mutants 10 --time-budget 45` mutates only the
+  definitions of the scope's modules whose lines the range touches (finer
+  than "the modules": a push that touches a comment or a cfg runs nothing, and
+  with no Bazel). Survivors are findings in the job summary and the
+  `mutation-changed` artifact; only a tooling error (exit 2) fails the job.
+- **Weekly** (`mutation.yml`, `mutation-tla` and `report-tla`): the sample of
+  90 (seeded with the run number), three shards, the small and medium tiers
+  per mutant, 300 minutes of time budget each.
 
 ## Reading survivors
 

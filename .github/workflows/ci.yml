@@ -373,15 +373,21 @@ jobs:
     # validation is a finding, not a failure (russ, 2026-10-08): the job
     # summary lists the survivors and the artifact holds the results; only a
     # tooling error (exit status 2) fails the job. Survivors elsewhere are the
-    # weekly job's (mutation.yml). A job of
+    # weekly job's (mutation.yml). A second step (step 12.13) does the same
+    # for the TLA+ model (formal/*.tla: the definitions the range touches).
+    # A job of
     # its own, once per push: not inside the shards of `full`. It saves no
     # cache (the mutants' compiles are one-off): the repository cache and
     # presubmit's disk cache are only restored.
     if: ${{ github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' }}
     runs-on: ubuntu-24.04
-    # Limit = 2x the cold estimate (2026-10-07: fetch 24 min + build 15 min, then up to 30 mutants of 1.5 min (killed by the small tier) to 11 min (survivors): 40 min + a bound of about 2 h, the usual push touches a handful of functions)
-    timeout-minutes: 180
+    # Limit = 2x the cold estimate (2026-10-07: fetch 24 min + build 15 min, then up to 30 mutants of 1.5 min (killed by the small tier) to 11 min (survivors): 40 min + a bound of about 2 h, the usual push touches a handful of functions); step 12.13 adds the TLA+ step (45 minutes at most, nothing when formal/ is not touched): 240.
+    timeout-minutes: 240
     needs: fast
+    env:
+      MUTATION_RANGE: ${{ github.event_name == 'pull_request'
+        && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
+        || format('{0}..{1}', github.event.before, github.sha) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -411,18 +417,28 @@ jobs:
       - name: Mutation testing of the protocol code this push touched
         run: >
           python3 tools/mutation/mutate.py changed
-          --range "${{ github.event_name == 'pull_request'
-          && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha)
-          || format('{0}..{1}', github.event.before, github.sha) }}"
+          --range "$MUTATION_RANGE"
           --result mutation-changed.json
           --survivors-out mutation-changed-survivors.txt
+      - name: Mutation testing of the TLA+ model this push touched
+        # Step 12.13: the definitions of formal/*.tla the range touches (none:
+        # nothing runs, no Bazel), at most 10 mutants, the small //formal
+        # tier only (the medium tier is the weekly job's), 45 minutes.
+        # Survivors are findings, as above.
+        run: >
+          python3 tools/mutation/mutate.py changed --lang tla --tier small
+          --range "$MUTATION_RANGE" --max-mutants 10 --time-budget 45
+          --result mutation-changed-tla.json
+          --survivors-out mutation-changed-tla-survivors.txt
       - name: Put the survivors in the job summary
         if: ${{ !cancelled() }}
         run: |
-          if [ -f mutation-changed.json ]; then
-            python3 tools/mutation/mutate.py report mutation-changed.json \
-              >>"$GITHUB_STEP_SUMMARY"
-          fi
+          for f in mutation-changed.json mutation-changed-tla.json; do
+            if [ -f "$f" ]; then
+              python3 tools/mutation/mutate.py report "$f" \
+                >>"$GITHUB_STEP_SUMMARY"
+            fi
+          done
       - name: Upload the mutation results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -431,6 +447,8 @@ jobs:
           path: |
             mutation-changed.json
             mutation-changed-survivors.txt
+            mutation-changed-tla.json
+            mutation-changed-tla-survivors.txt
           if-no-files-found: ignore
 
   full:

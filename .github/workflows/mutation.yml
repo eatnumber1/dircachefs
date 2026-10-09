@@ -15,6 +15,14 @@
 # hour, survivors grouped by function) and the survivors are one artifact,
 # `mutation-survivors`. No cache is saved (the mutants' compiles are a week's
 # worth of one-off actions): the repository and disk caches are only restored.
+#
+# Step 12.13 adds `mutation-tla` and `report-tla`: the same sweep over the
+# TLA+ model (tools/mutation/README.md, "TLA+ mode"). `generate --lang tla`
+# samples (seeded with the run number) 90 mutants of the modules of
+# tla_scope.txt, split into three shards; a mutant is killed by the small and
+# then the medium //formal tests (about 2 minutes for a kill by the small
+# tier, 15 to 25 more for a survivor that goes on to the medium tier).
+# Survivors are findings, as above.
 
 name: Mutation testing
 
@@ -104,3 +112,82 @@ jobs:
         with:
           name: mutation-survivors
           path: survivors.txt
+
+  mutation-tla:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Restore the disk cache (read-only)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-mutation-tla-restore-only-${{ github.sha }}
+          restore-keys: |
+            bazel-presubmit-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-presubmit-
+            bazel-
+      - name: Generate the TLA+ mutants
+        run: >
+          python3 tools/mutation/mutate.py generate --lang tla
+          --out mutants-tla.json --seed ${{ github.run_number }}
+          --max-mutants 90
+      - name: Run shard ${{ matrix.shard }} of 3
+        # The time budget (in minutes, from the start, the cold build
+        # included) leaves the rest "not run" rather than losing the shard
+        # to the job limit.
+        run: >
+          python3 tools/mutation/mutate.py run --mutants mutants-tla.json
+          --shard ${{ matrix.shard }}/3 --time-budget 300
+          --result result-tla-${{ matrix.shard }}.json
+          --survivors-out survivors-tla-${{ matrix.shard }}.txt
+          --summary-out summary-tla-${{ matrix.shard }}.md
+      - name: Upload the shard's result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-tla-shard-${{ matrix.shard }}
+          path: |
+            result-tla-${{ matrix.shard }}.json
+            survivors-tla-${{ matrix.shard }}.txt
+            summary-tla-${{ matrix.shard }}.md
+          if-no-files-found: ignore
+
+  report-tla:
+    # The TLA+ survivors of all shards in one file, also in the job summary.
+    runs-on: ubuntu-24.04
+    needs: mutation-tla
+    if: ${{ !cancelled() }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: mutation-tla-shard-*
+          merge-multiple: true
+      - name: Collect the survivors and the summary
+        run: |
+          ls
+          cat survivors-tla-*.txt > survivors-tla.txt
+          python3 src/tools/mutation/mutate.py report result-tla-*.json \
+            >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mutation-tla-survivors
+          path: survivors-tla.txt

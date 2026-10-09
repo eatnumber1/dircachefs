@@ -201,14 +201,26 @@ class JunctionTest(unittest.TestCase):
         # BeginMutation's list has effects; only the pure `(durableD \/
         # sync)` inside one of them swaps.
         ms = where(mutants(), "BeginMutation", "swap-junction")
-        self.assertEqual([m["before"] for m in ms], ["\\/"])
+        self.assertEqual([m["before"] for m in ms], ["durableD \\/ sync"])
 
-    def test_an_inline_operator_swaps_alone(self):
+    def test_an_inline_chain_swaps_all_its_operators_at_once(self):
+        # `a /\ b /\ c` -> `a \/ b \/ c`, never `a \/ b /\ c` (SANY:
+        # no precedence between them).
+        src = "Z == a /\\ b /\\ c\nY == a \\/ b\n"
+        ms = [m for m in tla.mutants_of(src, "z.tla")
+              if m["operator"] == "swap-junction"]
+        self.assertEqual(sorted(apply(src, m).split("\n")[0] if
+                                m["function"] == "Z" else
+                                apply(src, m).split("\n")[1] for m in ms),
+                         ["Y == a /\\ b", "Z == a \\/ b \\/ c"])
         ms = where(mutants(), "Owns", "swap-junction")
-        self.assertEqual([m["replacement"] for m in ms], ["\\/"])
+        self.assertEqual([m["replacement"] for m in ms],
+                         ["inflight = 1 \\/ seq = r.mseq"])
+        # CanFill == a \/ (b /\ c): two chains, the inner one in parentheses.
         ms = where(mutants(), "CanFill", "swap-junction")
         self.assertEqual(sorted(m["replacement"] for m in ms),
-                         ["/\\", "\\/"])
+                         ["BugUnguardedFills /\\ (inflight = 0 /\\ seq <= s)",
+                          "inflight = 0 \\/ seq <= s"])
 
     def test_a_disjunction_of_the_next_state_relation_is_left_alone(self):
         # An effectful disjunction (a step of the model) is never swapped.

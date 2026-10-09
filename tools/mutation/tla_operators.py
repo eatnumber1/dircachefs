@@ -483,23 +483,20 @@ def group_sites(ctx, groups):
                 ctx.add("drop-disjunct", "drop-disjunct", a, b, "FALSE")
         other = "\\/" if conj else "/\\"
         if pure_all and ctx.pure(*scope):
-            if bulleted:
-                first, last = mod.toks[idx[0]].start, pieces[-1][1]
-                new, pos = [], first
-                for s in idx:
-                    t = mod.toks[s]
-                    new.append(mod.src[pos:t.start] + other)
-                    pos = t.end
-                new.append(mod.src[pos:last])
-                ctx.add("swap-junction",
-                        "swap-junction %s -> %s" % (op, other), first, last,
-                        "".join(new))
-            else:
-                for s in idx:
-                    t = mod.toks[s]
-                    ctx.add("swap-junction",
-                            "swap-junction %s -> %s" % (op, other),
-                            t.start, t.end, other)
+            # All the operators of the chain or the list at once: TLA+ does
+            # not let `a /\\ b \\/ c` stand without parentheses.
+            first, last = mod.toks[idx[0]].start, pieces[-1][1]
+            if not bulleted:
+                first = pieces[0][0]
+            new, pos = [], first
+            for s in idx:
+                t = mod.toks[s]
+                new.append(mod.src[pos:t.start] + other)
+                pos = t.end
+            new.append(mod.src[pos:last])
+            ctx.add("swap-junction",
+                    "swap-junction %s -> %s" % (op, other), first, last,
+                    "".join(new))
 
 
 def if_sites(ctx):
