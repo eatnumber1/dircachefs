@@ -1,0 +1,8 @@
+# Arid TLA+ definitions (plan step 12.13; README.md, "TLA+ mode"): where a
+# mutant is noise, none is generated. A rule is `def-regex REGEX | reason`
+# (a definition whose name matches). Also arid without a rule here: comments;
+# a definition a cfg next to the module names in a `VIEW` line; source
+# between `\* mutation: arid begin REASON` and `\* mutation: arid end`, or a
+# line ending in `\* mutation: arid REASON`.
+
+def-regex ^(View|CrashImage|CrashImageD|FSnapView|IdleView|View[A-Z]\w*)$ | A mutated VIEW hides or splits states in TLC's state space; that is a different question from an under-specified property (formal/view_bisect/ compares views).

@@ -42,6 +42,17 @@ operators taking turns; the surplus is reported as "not run").
 
 `report` merges result files and prints the per-operator table and the
 survivors grouped by function (the scheduled job's summary).
+
+`--lang tla` (step 12.13) mutates the TLA+ model instead: `generate` and
+`changed` read tla_scope.txt (or one `--module`), the operators are
+tla_operators.py's, the mutants carry `lang: tla` and `run` judges them by
+the `//formal` tests (small, then medium: `--tier small` stops at the first)
+with the mutated module in the scratch tree. A mutant survives when every
+test still passes (a known_bug test still finds its counterexample); one that
+makes TLC fail with an error (a parse or evaluation error, not a violation)
+is `invalid`. `generate --max-mutants N` takes N of the sample (seeded, the
+operators in turn), `run --time-budget MIN` stops starting mutants after MIN
+minutes; `changed --lang tla` mutates the definitions a git range touches.
 """
 
 import argparse
@@ -59,6 +70,7 @@ import time
 
 import arid as arid_lib
 import operators
+import tla_operators as tla
 
 FUNCTION_KINDS = operators.FUNCTION_KINDS
 PHASE_CALL = operators.PHASE_CALL
@@ -98,6 +110,33 @@ def read_scope(path):
         else:
             fail("scope.txt: cannot read %r" % line)
     return files
+
+
+def read_tla_scope(path):
+    """The module paths of tla_scope.txt (`module PATH` lines)."""
+    modules = []
+    with open(path, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    for line in lines:
+        words = line.split("#", 1)[0].split()
+        if not words:
+            continue
+        if len(words) != 2 or words[0] != "module":
+            fail("tla_scope.txt: cannot read %r" % line.strip())
+        modules.append(words[1])
+    return modules
+
+
+def default_killers(lang, tier):
+    """The killer phases of a language: the C++ tests of //dcfs, or the
+    `//formal` tests of the small tier and then (unless `--tier small`) the
+    medium tier (a size filter applies to a whole invocation, so two)."""
+    if lang != "tla":
+        return "--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test"
+    small = "--config=fast //formal/..."
+    if tier == "small":
+        return small
+    return small + ";--config=presubmit //formal/..."
 
 
 # ---- AST ------------------------------------------------------------------
@@ -514,9 +553,71 @@ def compile_command(workspace, target, source):
     fail("no compile action for %s in %s" % (source, target))
 
 
+def extended_sources(directory, src, seen=None):
+    """The sources of the modules `src` extends (and theirs) found in
+    `directory`: what their definitions do to the state tells a guard from
+    an effect."""
+    seen = set() if seen is None else seen
+    out = []
+    for name in tla.extends_of(src):
+        path = os.path.join(directory, name + ".tla")
+        if name in seen or not os.path.exists(path):
+            continue
+        seen.add(name)
+        text = open(path, "rb").read().decode("latin-1")
+        out.append(text)
+        out.extend(extended_sources(directory, text, seen))
+    return out
+
+
+def tla_candidates(args):
+    """Every mutant of the TLA+ modules of the scope (or of `args.module`),
+    unsampled; with `args.changed`, only those of the definitions the git
+    range touches. No Bazel and no clang: the scanner reads the source."""
+    workspace = os.path.abspath(args.workspace)
+    modules = read_tla_scope(args.scope)
+    for wanted in getattr(args, "module", None) or []:
+        if not os.path.exists(os.path.join(workspace, wanted)):
+            fail("no module %s in %s" % (wanted, workspace))
+    if getattr(args, "module", None):
+        modules = list(args.module)
+    try:
+        arid = tla.TlaArid.parse(open(args.arid, encoding="utf-8").read())
+        sets = tla.parse_sets(open(args.sets, encoding="utf-8").read())
+    except tla.TlaError as e:
+        fail(str(e))
+    mutants = []
+    for path in modules:
+        full = os.path.join(workspace, path)
+        if not os.path.exists(full):
+            print("%s: not in this tree, skipped" % path, file=sys.stderr)
+            continue
+        directory = os.path.dirname(full)
+        src = open(full, "rb").read().decode("latin-1")
+        views = set()
+        for name in sorted(os.listdir(directory)):
+            if name.endswith(".cfg"):
+                with open(os.path.join(directory, name), "rb") as f:
+                    views |= tla.view_names_in(f.read().decode("latin-1"))
+        hunks = None
+        if args.changed:
+            hunks = changed_hunks(workspace, args.changed, path)
+            if not hunks:
+                continue
+        try:
+            mutants.extend(tla.mutants_of(
+                src, path, arid=arid, view_names=views, hunks=hunks,
+                sets=sets, extended=extended_sources(directory, src)))
+        except tla.TlaError as e:
+            fail("%s: %s" % (path, e))
+    return mutants
+
+
 def candidates(args):
     """Every mutant of the scope, unsampled (restricted to the functions
     the git range `args.changed` touches, if any)."""
+    if getattr(args, "lang", "cpp") == "tla":
+        return tla_candidates(args)
     workspace = os.path.abspath(args.workspace)
     execroot = bazel(workspace, "info",
                      "execution_root").stdout.decode().strip()
@@ -573,12 +674,18 @@ def generate(args):
         args.seed, args.per_function), file=sys.stderr)
     found = candidates(args)
     entries = load_equivalent(getattr(args, "equivalent", ""))
+    # One equivalent.txt for both languages: an entry is for the mutants of
+    # its file's language.
+    is_tla = getattr(args, "lang", "cpp") == "tla"
+    entries = [e for e in entries if e["file"].endswith(".tla") == is_tla]
     for warning in equivalent_warnings(entries, found):
         print(warning, file=sys.stderr)
     if args.all:
         mutants = found
     else:
         live, suppressed = plan(found, entries, args.seed, args.per_function)
+        if getattr(args, "max_mutants", 0):
+            live, _ = pick_budget(live, args.max_mutants, args.seed)
         # The suppressed ones go along (without a slot), so that `run` can
         # count them.
         mutants = sorted(live + suppressed,
@@ -684,11 +791,17 @@ def format_survivors(results):
         lines.append("== %s %s: %d survivor%s" % (
             path, function, len(rs), "" if len(rs) == 1 else "s"))
         for r in sorted(rs, key=lambda r: r["line"]):
-            old, new = operators.token_diff(r["before"], r["replacement"])
+            diff = tla.token_diff if r.get("lang") == "tla" \
+                else operators.token_diff
+            old, new = diff(r["before"], r["replacement"])
             lines.append("SURVIVOR %s:%d in %s: %s: `%s` -> `%s`" % (
                 r["file"], r["line"], function, r["op"], one_line(old),
                 one_line(new)))
     for r in results:
+        if r["status"] == "invalid" and r.get("lang") == "tla":
+            lines.append("INVALID %s:%d in %s: %s: %s" % (
+                r["file"], r["line"], r["function"], r["op"],
+                one_line(r.get("detail", ""), 100)))
         if r["status"] == "flaky":
             lines.append("FLAKY mutant %d %s:%d in %s: %s failed once and "
                          "passed on a rerun" % (r["id"], r["file"], r["line"],
@@ -778,6 +891,75 @@ def judge(rc, tail, m):
     return "error", ""
 
 
+SEMANTIC_STATUS = {0, 11, 12, 13}  # none, deadlock, safety, liveness
+VIOLATION = re.compile(
+    r"^Error: (Invariant .* is violated|Action property .* is violated"
+    r"|Temporal propert\w+ (were|was) violated|Deadlock reached"
+    r"|The behavior up to this point|The following behavior constitutes"
+    r"|Model checking completed)")
+TLC_ERROR_MARKERS = re.compile(
+    r"Fatal errors while parsing|Parsing or semantic analysis failed"
+    r"|Semantic errors:|Lexical errors")
+
+
+def first_failure(tail):
+    """(target, is_timeout) of the first failed test in Bazel's output."""
+    m = re.search(r"^(FAIL|TIMEOUT):\s+(//\S+)", tail, re.M)
+    return (m.group(2), m.group(1) == "TIMEOUT") if m else ("", False)
+
+
+def failure_block(tail, target):
+    """The output Bazel printed for one failed test (`--test_output=errors`),
+    or the whole tail when it is not found."""
+    marker = "Test output for %s:" % target
+    at = tail.find(marker) if target else -1
+    if at < 0:
+        return tail
+    rest = tail[at + len(marker):]
+    nxt = rest.find("Test output for //")
+    return rest if nxt < 0 else rest[:nxt]
+
+
+def tla_error_line(block):
+    """The first line of a failed test's output that says TLC itself failed
+    (as opposed to finding a violation), or None."""
+    status = re.findall(r"tlc_test: TLC exited with status (\d+)", block)
+    lines = block.splitlines()
+    first = next((l for l in lines if TLC_ERROR_MARKERS.search(l)
+                  or (l.startswith("Error:") and not VIOLATION.match(l))),
+                 None)
+    if status:
+        if int(status[-1]) in SEMANTIC_STATUS:
+            return None
+        return first or "TLC exited with status %s" % status[-1]
+    return first
+
+
+def judge_tla(rc, tail, m):
+    """(status, killer) of one TLA+ mutant from Bazel's exit status: 0
+    survived; 3 a test failed or timed out: `killed` (also a known_bug test
+    that no longer finds its counterexample), unless TLC itself failed with
+    an error rather than a violation (`invalid`: a parse, type or
+    evaluation error of the mutant); anything else is a tooling error."""
+    if rc == 0:
+        return "survived", ""
+    if rc != 3:
+        return "error", ""
+    target, _ = first_failure(tail)
+    if tla_error_line(failure_block(tail, target)):
+        return "invalid", ""
+    return "killed", target
+
+
+def needs_confirm(lang, tail):
+    """Whether a kill is rerun with its cached result ignored: a C++ test
+    may be flaky; TLC is deterministic, so a TLA+ kill is rerun only when
+    it was a timeout (load can cause one)."""
+    if lang != "tla":
+        return True
+    return first_failure(tail)[1]
+
+
 def run(args):
     workspace = os.path.abspath(args.workspace)
     mutants = json.load(open(args.mutants))
@@ -793,11 +975,19 @@ def run(args):
         mutants = [m for m in take_turns(mutants, args.seed)][:args.sample]
         mutants.sort(key=lambda m: m["id"])
     install_sigterm()
+    lang = mutants[0].get("lang", "cpp") if mutants else (
+        suppressed[0].get("lang", "cpp") if suppressed else "cpp")
+    judge_one = judge_tla if lang == "tla" else judge
+    if getattr(args, "time_budget", 0) and not getattr(args, "deadline",
+                                                      None):
+        args.deadline = time.time() + 60 * args.time_budget
     # Phases, in order; a mutant that survives one goes on to the next. (A
     # size filter such as --config=fast applies to every target of its
     # invocation, so trace validation, a medium test, needs a phase of its
     # own.)
-    phases = [ph.split() for ph in args.killers.split(";")]
+    killers = args.killers or default_killers(
+        lang, getattr(args, "tier", "medium"))
+    phases = [ph.split() for ph in killers.split(";")]
     results = [dict(m, status="suppressed", seconds=0, killer="")
                for m in suppressed]
     scratch = tempfile.mkdtemp(prefix="dcfs-mutate.")
@@ -845,9 +1035,11 @@ def run(args):
             try:
                 rc, tail = run_phases(args, src, phases, args.timeout,
                                       startup)
-                status, killer = judge(rc, tail, m)
-                if status == "killed" and killer and not confirm_kill(
-                        args, src, startup, killer, args.timeout):
+                status, killer = judge_one(rc, tail, m)
+                if (status == "killed" and killer
+                        and needs_confirm(lang, tail)
+                        and not confirm_kill(args, src, startup, killer,
+                                             args.timeout)):
                     status = "flaky"
             finally:
                 with open(path, "wb") as f:
@@ -856,6 +1048,9 @@ def run(args):
                      killer=killer)
             if status == "error":
                 r["tail"] = tail[-1500:]
+            if status == "invalid" and lang == "tla":
+                r["detail"] = (tla_error_line(failure_block(
+                    tail, first_failure(tail)[0])) or "")[:200]
             if args.show_output and status == "killed":
                 failing = [l for l in tail.splitlines() if re.search(
                     r"\[  FAILED  \]|Failure|Expected|Actual|Value of|FAIL"
@@ -915,11 +1110,37 @@ def main(argv=None):
     scope = os.path.join(here, "scope.txt")
     arid = os.path.join(here, "arid.txt")
     equivalent = os.path.join(here, "equivalent.txt")
-    killers = "--config=fast //dcfs/...;//dcfs:dir_cache_fs_trace_test"
+    tla_scope = os.path.join(here, "tla_scope.txt")
+    tla_arid = os.path.join(here, "tla_arid.txt")
+    tla_sets = os.path.join(here, "tla_sets.txt")
+    # None: the language's default (default_killers).
+    killers = None
+
+    def add_lang(p):
+        p.add_argument("--lang", choices=("cpp", "tla"), default="cpp",
+                       help="what to mutate: the C++ of scope.txt (default) "
+                       "or the TLA+ modules of tla_scope.txt")
+        p.add_argument("--module", action="append", default=[],
+                       metavar="PATH", help="with --lang tla: only this "
+                       "module (repeatable), instead of tla_scope.txt")
+        p.add_argument("--sets", default=tla_sets,
+                       help="with --lang tla: the sets of constants that "
+                       "stand for each other")
+
+    def add_tier(p):
+        p.add_argument("--tier", choices=("small", "medium"),
+                       default="medium",
+                       help="with --lang tla: the //formal tiers that kill "
+                       "a mutant (small: the small tier only)")
+
     g = sub.add_parser("generate")
+    add_lang(g)
     g.add_argument("--workspace", default=workspace)
-    g.add_argument("--scope", default=scope)
-    g.add_argument("--arid", default=arid)
+    g.add_argument("--scope", default=None)
+    g.add_argument("--arid", default=None)
+    g.add_argument("--max-mutants", type=int, default=0,
+                   help="keep this many of the sample (seeded, the operators "
+                   "in turn; 0: all)")
     g.add_argument("--equivalent", default=equivalent)
     g.add_argument("--out", required=True)
     g.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -952,10 +1173,16 @@ def main(argv=None):
                    help="print the failing lines of the test that killed a "
                    "mutant")
     r.add_argument("--killers", default=killers)
+    add_tier(r)
+    r.add_argument("--time-budget", type=int, default=0, metavar="MIN",
+                   help="wall-clock minutes after which no further mutant "
+                   "is started (0: none)")
     c = sub.add_parser("changed", help="per-push mode (see the docstring)")
+    add_lang(c)
+    add_tier(c)
     c.add_argument("--workspace", default=workspace)
-    c.add_argument("--scope", default=scope)
-    c.add_argument("--arid", default=arid)
+    c.add_argument("--scope", default=None)
+    c.add_argument("--arid", default=None)
     c.add_argument("--equivalent", default=equivalent)
     c.add_argument("--range", required=True, dest="changed")
     c.add_argument("--max-mutants", type=int, default=DEFAULT_BUDGET,
@@ -977,6 +1204,9 @@ def main(argv=None):
     p = sub.add_parser("report", help="merge result files")
     p.add_argument("results", nargs="+")
     a = ap.parse_args(argv)
+    if a.cmd in ("generate", "changed"):
+        a.scope = a.scope or (tla_scope if a.lang == "tla" else scope)
+        a.arid = a.arid or (tla_arid if a.lang == "tla" else arid)
     if a.cmd == "generate":
         generate(a)
         return 0

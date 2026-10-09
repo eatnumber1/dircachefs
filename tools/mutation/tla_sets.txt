@@ -1,0 +1,8 @@
+# Small sets of constants that stand for each other (plan step 12.13;
+# README.md, "TLA+ mode"): the `constant` operator replaces a member by its
+# neighbours in its line. One set per line: `name: member member ...`; a
+# member is one token of the source (a string with its quotes, a name).
+
+regime: "seq" "metaprefix" "ext4"
+dentry-row: Unknown Absent NoRow
+file-dirty-row: "no" "atime" "mut"

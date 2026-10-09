@@ -1,6 +1,7 @@
 load("@rules_python//python:py_binary.bzl", "py_binary")
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
+load("//third_party/tlaplus:tlc.bzl", "tlc_test")
 
 # Steps 26.5 and 26.5d: the mutation tester (README.md). `bazel run
 # //tools/mutation:mutate -- generate --out mutants.json`, then `-- run
@@ -12,6 +13,11 @@ exports_files([
     "fixture.cc",
     "fixture_macros.h",
     "scope.txt",
+    "tla_arid.txt",
+    "tla_scope.txt",
+    "tla_sets.txt",
+    "testdata/tiny.cfg",
+    "testdata/tiny.tla",
 ])
 
 py_binary(
@@ -21,6 +27,9 @@ py_binary(
         "arid.txt",
         "equivalent.txt",
         "scope.txt",
+        "tla_arid.txt",
+        "tla_scope.txt",
+        "tla_sets.txt",
     ],
     main = "mutate.py",
     deps = [":mutate_lib"],
@@ -32,6 +41,7 @@ py_library(
         "arid.py",
         "mutate.py",
         "operators.py",
+        "tla_operators.py",
     ],
     imports = ["."],
 )
@@ -83,6 +93,96 @@ py_test(
         "fixture.cc",
         ":operators_fixture",
         "@dcfs_llvm//:clang",
+    ],
+    deps = [":mutate_lib"],
+)
+
+# Step 12.13: the TLA+ operators, on constructs copied from formal/dcfs.tla
+# (testdata/snippets.tla) and on the real model.
+py_test(
+    name = "tla_operators_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["tla_operators_test.py"],
+    args = [
+        "snippets=$(rootpath testdata/snippets.tla)",
+        "dcfs=$(rootpath //formal:dcfs.tla)",
+        "arid=$(rootpath tla_arid.txt)",
+        "sets=$(rootpath tla_sets.txt)",
+    ],
+    data = [
+        "tla_arid.txt",
+        "tla_sets.txt",
+        "testdata/snippets.tla",
+        "//formal:dcfs.tla",
+    ],
+    deps = [":mutate_lib"],
+)
+
+# The tiny module of the end-to-end test of the TLA+ mode: a counter whose
+# invariant bounds it. Checked here on its own (it must pass unmutated: the
+# fake bazel of mutate_tla_test runs the same TLC on mutated copies).
+tlc_test(
+    name = "tiny_test",
+    size = "small",
+    timeout = "short",
+    config = "testdata/tiny.cfg",
+    spec = "testdata/tiny.tla",
+)
+
+py_test(
+    name = "mutate_tla_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["mutate_tla_test.py"],
+    args = [
+        "scope=$(rootpath tla_scope.txt)",
+        "arid=$(rootpath tla_arid.txt)",
+        "sets=$(rootpath tla_sets.txt)",
+        "tiny=$(rootpath testdata/tiny.tla)",
+        "tiny_cfg=$(rootpath testdata/tiny.cfg)",
+        "java_files=$(rootpaths @remotejdk21_linux//:jdk)",
+        "jar=$(rootpath @tla2tools//file)",
+        "e2e=none",
+    ],
+    data = [
+        "tla_arid.txt",
+        "tla_scope.txt",
+        "tla_sets.txt",
+        "testdata/tiny.cfg",
+        "testdata/tiny.tla",
+        "@remotejdk21_linux//:jdk",
+        "@tla2tools//file",
+    ],
+    deps = [":mutate_lib"],
+)
+
+# The same file's real-TLC end-to-end class: a killed, a surviving and an
+# invalid mutant of testdata/tiny.tla, one JVM and TLC run each.
+py_test(
+    name = "mutate_tla_e2e_test",
+    size = "medium",
+    timeout = "moderate",
+    srcs = ["mutate_tla_test.py"],
+    main = "mutate_tla_test.py",
+    args = [
+        "scope=$(rootpath tla_scope.txt)",
+        "arid=$(rootpath tla_arid.txt)",
+        "sets=$(rootpath tla_sets.txt)",
+        "tiny=$(rootpath testdata/tiny.tla)",
+        "tiny_cfg=$(rootpath testdata/tiny.cfg)",
+        "java_files=$(rootpaths @remotejdk21_linux//:jdk)",
+        "jar=$(rootpath @tla2tools//file)",
+        "e2e=only",
+    ],
+    data = [
+        "tla_arid.txt",
+        "tla_scope.txt",
+        "tla_sets.txt",
+        "testdata/tiny.cfg",
+        "testdata/tiny.tla",
+        "@remotejdk21_linux//:jdk",
+        "@tla2tools//file",
     ],
     deps = [":mutate_lib"],
 )

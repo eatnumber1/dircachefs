@@ -1,0 +1,13 @@
+# The TLA+ modules the mutation tester mutates (plan step 12.13). The MC*
+# harness modules and the known_bugs/limitations variants are not listed: a
+# mutant there changes a test, not the model. `mutate.py generate --lang tla
+# --module PATH` takes one.
+
+module formal/dcfs.tla
+module formal/ident.tla
+module formal/lifetime.tla
+module formal/reval.tla
+module formal/Trace.tla
+module formal/IdentTrace.tla
+module formal/LifetimeTrace.tla
+module formal/RevalTrace.tla
