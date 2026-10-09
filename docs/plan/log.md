@@ -2282,3 +2282,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   run on dcfs.tla: 11 killed / 9 survived of 20, small tier; survivors listed in phases/12 for the
   sweep after 23.11. Lane-5 free: 26.14f (coverage artifacts in the fork path; the coverage job is
   red on every push until it is understood) dispatched (new investigator).
+- Phase 13 built on connectable handles (lane-2, step-13.1 rebuilt as four commits): per-open
+  connectable handle through the one handle-open abstraction, fallbacks to the plain handle,
+  fault_freeze_test unchanged and green on ext4/xfs/btrfs, a kernel-behaviour guard test, goldens
+  +1 call per named open. Correction to the orchestrator's earlier claim: the kernel floors differ
+  (6.9 for FS_IOC_GETFSUUID, 6.13 for AT_HANDLE_CONNECTABLE; EINVAL fallback between). Opus review
+  dispatched (identity safety of the derived handle, phase-3 context, error handling, tests,
+  ident.tla, docs).

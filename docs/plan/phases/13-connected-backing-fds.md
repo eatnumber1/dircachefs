@@ -146,3 +146,25 @@ floor is 6.13 either way. Being implemented on step-13.1; the experiment
 becomes a permanent kernel-behaviour guard test (connected decode, no
 freeze blocking, by-name O_RDWR blocks on ext4/xfs).
 
+Correction (2026-10-09): the floors do NOT coincide. README's kernel
+floor is 6.9 (FS_IOC_GETFSUUID); AT_HANDLE_CONNECTABLE needs 6.13. On 6.9
+to 6.12 `name_to_handle_at` returns EINVAL and dcfs falls back to the
+plain handle (disconnected fds, `/` paths), one INFO line per run.
+
+Built 2026-10-09 (step-13.1 rebuilt as four commits: 64a479e tests,
+9d9b9dd backing, 3afdb49 formal, d0debf7 docs; Opus review running). As
+built: `FileHandle::ConnectableFromDirEntry(dirfd, name, device)`;
+`OpenByName` computes the connectable handle per open and opens it through
+the one existing handle-open abstraction, identity statx after; parent =
+mount fd for the root, else `OpenNode` (directories by handle, cost
+constant with depth); fallbacks all to the plain handle (parent unopenable:
+silent; ENOENT or identity mismatch: out-of-band WARNING + name unknown;
+EOPNOTSUPP/EINVAL: one INFO via LOG_FIRST_N; any connectable-open error:
+plain handle reports the real error). `connectable_handles_test` (medium,
+ext4/xfs/btrfs) guards the kernel behaviour relied on. fault_freeze_test
+unchanged, green on all three. Goldens: `name_to_handle_at` +
+`open_by_handle_at` per named open; backing budgets +1 (create 21->22,
+chmod 19->22, ...). Presubmit over dcfs/qemu/tools/formal 341 pass (two
+load timeouts passed on rerun); asan on backing and dir_cache_fs tests
+green.
+
