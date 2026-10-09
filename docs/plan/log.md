@@ -2373,3 +2373,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   1.11); the three disabled systemd checks are real and green. NEEDS RUSS: owning `umount.fuse`
   system-wide. Opus review dispatched (lock races, device numbers across namespaces, non-dcfs FUSE
   mounts and user mounts, SQLITE_BUSY paths, the allows, shutdown-model fidelity).
+- 6.5 reported (lane-3, eight commits): real wins (nfs_test 221 s to 48 s via nfsd grace/lease,
+  mmapwrite usr1, release_leak on the warning, the ASan bench OOM explained: five ASan daemons at
+  410-625 MiB, asan_mem 4352), tier walls not comparable (load 10-35), per-guest fixed cost 4.5-6 s.
+  Two changes only sped up polls (start_daemon 1 s to 0.1 s; wait_for_line 1 s to 0.13 s), against
+  the no-timers rule that landed meanwhile: sent back to become events (poll() on /proc/self/mounts
+  via testutil; READY lines through a fifo), then rebase, again after 15.6b for its sleep allowlist.

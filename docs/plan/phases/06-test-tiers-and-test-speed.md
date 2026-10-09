@@ -124,3 +124,38 @@ change, each change its own commit):
   a protocol change).
 Owner: dcfs-investigator, in the first lane that frees.
 
+Status 2026-10-09: reported (lane-3, eight commits; note
+`notes/test-speed-scrub-2026-10-08.md`); one round before merge. The host
+was never quiet (load 10-35), so tier walls are bounds, not pairs: fast
+1,699 s baseline to 791 s at load 11 (host-only tests also 56% down on
+the same code, so the tier effect is inside the noise); from the guests'
+own markers about 5% of fast-tier guest time, 4% of medium, 10-20% of the
+ACE tests, 75% of nfs_test. Fixed cost per guest 4.5-6 s under load: 282
+of the fast tier's 890 guest seconds (boot and initramfs: zstd or raw cpio
+saves 0.3-0.6 s per boot but needs a pinned zstd or 400 MB more cache;
+stripping dcfs loses crash backtraces: left). Changes: nfsd started with
+`--grace-time 10 --lease-time 30` (nfs_test 221 s to 48 s); `mmapwrite
+usr1`, a SIGUSR1 after the stat instead of fixed delays (3.15 s to 0.31
+s); release_leak lets go of the lock when the warning appears (36.9 s to
+22.1 s); pjdfstest `chmod/` moved to the rename shard (CI decides: here
+rename+chmod exceeds chown, on the runner chown is longest); bench_full
+under ASan is not a leak (five ASan daemons at 410-625 MiB VmHWM against
+10-21 MiB plain): asan_mem 4352. Two changes made polls faster (start_daemon
+1 s to 0.1 s: cache_permissions 18.2 s to 7.2 s, ACE 3.3 s to 1.9 s per
+sequence; `wait_for_line` for the holders' READY lines 1.03 s to 0.13 s
+in seven scripts): against russ's no-timers rule (2026-10-09), sent back
+to become events (`testutil` waiting on /proc/self/mounts with poll(),
+which reports mount-table changes; the holders writing their READY line
+to a fifo the script reads). Left with reasons: dcfs's create cost
+(readdir_boundary 82 s, destroy 253 s; 23.11), TLC (about 4.4 s of CPU per
+run; no GC or AppCDS gain; batching needs the specs to change; MC_large
+and MC_nolock have a VIEW but no SYMMETRY), the by-design waits (idle
+windows, sync intervals, timestamp settles, flakey windows,
+quiesce_daemon), rename.sh's 8 s lock (tried, no gain). Ten biggest
+fast-tier sinks here vs the runner: dir_cache_fs_test 129/7 s (CPU),
+fault_shutdown 54/27 (13 daemon starts), bench_smoke 43/6, fault_power
+40/18, write 36/15 (fixed mmap delays, now gone), rename 33/18, fault_sites
+32/3, syscall_traces 27/13 (quiesce waits), two TLC known_bug tests 25/9 and
+23/5 (one JVM each). Final tree: fast 230 + 2, presubmit qemu 126, large
+40 of 43 with three stress_long load timeouts that passed on rerun.
+
