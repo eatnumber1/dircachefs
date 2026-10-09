@@ -162,4 +162,8 @@ Docs commit to style.md (code section), then applied as code is touched:
     rule above); tables over if-chains where a table fits.
   `Status` returns with `RETURN_IF_ERROR` are the normal shape of error
   handling and are not what this rule is about.
+- `[[nodiscard]]` is permitted (russ, 2026-10-09): expected on functions
+  whose return value is the result the caller must handle (a Status, a
+  StatusOr, an fd wrapper). Written into style.md by lane-6 with the 15.x
+  fix round.
 

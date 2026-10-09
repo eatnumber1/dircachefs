@@ -1942,3 +1942,16 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   every sync point; relative paths after chdir; /tmp staging; untestable readiness; exit statuses;
   INFO to syslog by default; plus coverage, guest-check and doc items). Sent to lane-6. Confirmed
   for russ: all logging, syslog included, goes through Abseil (SyslogSink is an absl::LogSink).
+- CI on 9a67552 (run 37853130640): everything green (coverage, mutation-changed with survivors in
+  the summary, presubmit, reproducible, full x3, ubsan x3, asan 0 and 2) except asan (1):
+  bench_full_test's guest out of memory at -m 3072 MiB after 181 s: to the 6.5 scrub (measure dcfs's
+  VmHWM under ASan vs plain; size or finding).
+- 23.8 + 23.9 fix round reported (lane-4, 9220139 / d18df06): all ten items done (RecordRelinked
+  reinstates the row and nodeid for a linked tmpfile; held-only mutation rows become atime-only
+  after the syncfs; recovery only unknowns atime-only rows' attributes and skips their probe;
+  atime-only rows older than dirtytime_expire_seconds drive a sync point; MC_atime_crash passes on
+  the real model, atime_fill_no_touch is a large target; death tests for the checker rules;
+  OpenFdOf only; DropAtimeStamp after the syscall; failed held fill -> unknown; read budget 20 -> 21
+  for the cold open's read-before-write). Rebase onto 40d779d requested, then merge. The spend
+  limit stopped every agent at ~23:15 and was reset by russ; all six resumed 2026-10-09.
+- russ, 2026-10-09: `[[nodiscard]]` is permitted (style rule added to 25.5).
