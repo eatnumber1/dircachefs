@@ -2,6 +2,7 @@
 
 #include <sys/mount.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -83,7 +84,10 @@ bool IsMountHelperName(std::string_view name) {
   return name == kMountHelperName || name == kMountFuseHelperName;
 }
 
-absl::StatusOr<HelperArgs> ParseHelperArgs(std::span<const std::string> args) {
+namespace {
+
+absl::StatusOr<HelperArgs> ParseHelperArgsImpl(
+    std::span<const std::string> args) {
   HelperArgs parsed;
   std::vector<std::string> positionals;
   auto add_options = [&parsed](std::string_view list) {
@@ -142,12 +146,13 @@ absl::StatusOr<HelperArgs> ParseHelperArgs(std::span<const std::string> args) {
     return InvalidArgumentErrorBuilder()
            << "Unexpected argument " << positionals[2];
   }
+  parsed.spec = positionals[0];
   parsed.source = std::move(positionals[0]);
   parsed.mountpoint = std::move(positionals[1]);
   return parsed;
 }
 
-absl::StatusOr<HelperOptions> SplitHelperOptions(
+absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
     std::span<const std::string> options) {
   HelperOptions split;
   for (const std::string &option : options) {
@@ -219,25 +224,56 @@ absl::StatusOr<HelperOptions> SplitHelperOptions(
       split.flags.emplace_back(std::string(name), std::string(*value));
     }
   }
-  if (split.backing == HelperOptions::Backing::kNone && !split.remount &&
-      !split.native_options.empty()) {
-    return InvalidArgumentErrorBuilder()
-           << "Options " << absl::StrJoin(split.native_options, ", ")
-           << " are for the underlying mount, which dcfs.fstype=none does "
-              "not make: remove them, or remount the filesystem yourself "
-              "(dcfs.ro makes the dcfs mount read-only)";
-  }
-  if (split.remount) {
-    for (const std::string &option : split.native_options) {
-      if (option == "ro") {
-        return InvalidArgumentErrorBuilder()
-               << "Option ro would change the underlying mount, which a "
-                  "remount of dcfs does not touch: use dcfs.ro for the dcfs "
-                  "mount";
-      }
+  if (split.backing == HelperOptions::Backing::kNone && !split.remount) {
+    const std::vector<std::string> unhonored = UnhonoredNativeOptions(split);
+    if (!unhonored.empty()) {
+      return InvalidArgumentErrorBuilder()
+             << "Options " << absl::StrJoin(unhonored, ", ")
+             << " are for the underlying mount, which dcfs.fstype=none does "
+                "not make: remove them, or remount the filesystem yourself "
+                "(dcfs.ro makes the dcfs mount read-only)";
     }
   }
   return split;
+}
+
+}  // namespace
+
+absl::StatusOr<HelperArgs> ParseHelperArgs(std::span<const std::string> args) {
+  absl::StatusOr<HelperArgs> parsed = ParseHelperArgsImpl(args);
+  if (!parsed.ok()) return MarkUsageError(parsed.status());
+  return parsed;
+}
+
+absl::StatusOr<HelperOptions> SplitHelperOptions(
+    std::span<const std::string> options) {
+  absl::StatusOr<HelperOptions> split = SplitHelperOptionsImpl(options);
+  if (!split.ok()) return MarkUsageError(split.status());
+  return split;
+}
+
+std::vector<std::string> UnhonoredNativeOptions(const HelperOptions &options) {
+  std::vector<std::string> unhonored;
+  if (options.backing != HelperOptions::Backing::kNone && !options.remount) {
+    return unhonored;
+  }
+  for (const std::string &option : options.native_options) {
+    static constexpr std::string_view kMountOwn[] = {
+        "rw",   "defaults", "nofail", "_netdev", "noauto", "auto",
+        "user", "users",    "owner",  "group",   "nouser"};
+    if (absl::StartsWith(option, "x-") ||
+        std::find(std::begin(kMountOwn), std::end(kMountOwn), option) !=
+            std::end(kMountOwn)) {
+      continue;
+    }
+    unhonored.push_back(option);
+  }
+  return unhonored;
+}
+
+absl::Status MarkUsageError(absl::Status status) {
+  if (!status.ok()) status.SetPayload(kUsageTypeUrl, absl::Cord("usage"));
+  return status;
 }
 
 absl::Status ApplyFlagOption(const std::string &name,
@@ -248,8 +284,9 @@ absl::Status ApplyFlagOption(const std::string &name,
   }
   std::string error;
   if (!flag->ParseFrom(value, &error)) {
-    return InvalidArgumentErrorBuilder()
-           << "Option dcfs." << name << "=" << value << ": " << error;
+    return MarkUsageError(InvalidArgumentErrorBuilder()
+                          << "Option dcfs." << name << "=" << value << ": "
+                          << error);
   }
   return absl::OkStatus();
 }
@@ -269,14 +306,7 @@ int ExitStatusFor(const absl::Status &status) {
       return exit_status;
     }
   }
-  switch (status.code()) {
-    case absl::StatusCode::kInvalidArgument:
-    case absl::StatusCode::kPermissionDenied:
-    case absl::StatusCode::kUnimplemented:
-      return 1;
-    default:
-      return 32;
-  }
+  return status.GetPayload(kUsageTypeUrl).has_value() ? 1 : 32;
 }
 
 std::string EncodeStartupReport(const StartupReport &report) {
@@ -290,7 +320,7 @@ std::string EncodeStartupReport(const StartupReport &report) {
 StartupReport DecodeStartupReport(std::string_view bytes) {
   if (bytes.empty()) {
     return {.ready = false,
-            .exit_status = 1,
+            .exit_status = 32,
             .message = "dcfs exited before it was ready"};
   }
   if (bytes[0] == 'R') return {.ready = true};
@@ -300,7 +330,7 @@ StartupReport DecodeStartupReport(std::string_view bytes) {
             .message = std::string(bytes.substr(2))};
   }
   return {.ready = false,
-          .exit_status = 1,
+          .exit_status = 32,
           .message = "dcfs sent an unintelligible startup report"};
 }
 

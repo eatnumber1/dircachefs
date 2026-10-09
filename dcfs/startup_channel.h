@@ -47,7 +47,7 @@ struct DaemonFork {
 };
 
 // Forks; see the top of this file.
-absl::StatusOr<DaemonFork> ForkDaemon();
+[[nodiscard]] absl::StatusOr<DaemonFork> ForkDaemon();
 
 }  // namespace dcfs
 

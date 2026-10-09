@@ -35,6 +35,10 @@ struct CaptureRequest {
   std::vector<std::string> options;
   bool sloppy = false;   // -s
   bool verbose = false;  // -v
+  // A directory of the helper's namespace to mount its staging tmpfs over:
+  // a procfs one, which exists wherever dcfs can run and is no filesystem
+  // anyone serves (a SOURCE under it would be hidden).
+  std::string staging_root = "/proc/sys/vm";
 };
 
 struct CapturedTree {
@@ -48,7 +52,8 @@ struct CapturedTree {
 
 // The failure of the native mount carries its mount(8) exit status
 // (NativeMountError) and its own error text.
-absl::StatusOr<CapturedTree> CaptureBacking(const CaptureRequest &request);
+[[nodiscard]] absl::StatusOr<CapturedTree> CaptureBacking(
+    const CaptureRequest &request);
 
 // The argv of the mount(8) run on `staging`, for tests of the command line.
 std::vector<std::string> NativeMountCommand(const CaptureRequest &request,
@@ -68,8 +73,13 @@ struct OpenedBacking {
 // `none` and `bind`, and no filesystem that went read-only by itself.
 // `args.source` must be absolute for `none` and `bind` (the daemon has no
 // working directory to resolve against).
-absl::StatusOr<OpenedBacking> OpenBacking(const HelperArgs &args,
-                                          const HelperOptions &options);
+[[nodiscard]] absl::StatusOr<OpenedBacking> OpenBacking(
+    const HelperArgs &args, const HelperOptions &options);
+
+// The mount(2) flags (MS_NOSUID, ...) that correspond to the f_flag of a
+// statvfs (ST_NOSUID, ...) of the mount: what a remount of it must keep.
+// ST_RDONLY maps to MS_RDONLY; ST_RELATIME has no flag (it is the default).
+unsigned long MountFlagsFromStatvfs(unsigned long f_flag);
 
 }  // namespace dcfs
 

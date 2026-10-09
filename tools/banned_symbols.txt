@@ -73,7 +73,7 @@ ban __snprintf_chk | Abseil only
 
 # First party, startup only: "no paths after startup" permits these.
 allow dcfs/_objs/syscalls/* realpath | the syscalls::realpath wrapper itself; its callers are gated by the wrapper's own ban
-allow dcfs/_objs/main_static/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper makes SOURCE, MOUNTPOINT and the cache database absolute before it detaches (it has no working directory after)
+allow dcfs/_objs/absolute_paths/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper makes SOURCE, MOUNTPOINT and the cache database absolute before it detaches (it has no working directory after)
 allow dcfs/_objs/remount/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper's remount canonicalizes MOUNTPOINT once before acting on it
 allow dcfs/_objs/syscalls_process/* execv | the mount.dcfs wrapper's capture helper runs mount(8) (step 15.2); nothing else execs
 allow dcfs/_objs/mounts_below/* _ZN4dcfs8syscalls8realpath* | startup only: mounts_below.cc canonicalizes --source once, from main.cc (MountsBelow), before the mount

@@ -394,11 +394,13 @@ each.
   reviewed edit; `dir_cache_fs` and `metadata_cache` are not on the list).
   `mounts_below` is on it for its two `/proc/self/mountinfo` reads (`openat`,
   `read`: procfs, no backing disk). The mount.dcfs wrapper's modules are on
-  it too: `backing_capture` calls `openat(tree, ".")` once, in
-  `CaptureBacking`, to get a real directory descriptor on the root of the
-  filesystem it just captured (startup, before dcfs serves anything, like
-  `main.cc`'s open of SOURCE); `remount` and `startup_channel` read procfs
-  and a socket. Only the three wrapper files call libc
+  it too: `OpenBacking` (`backing_capture.cc`) opens SOURCE for the `none`
+  form and, in `CaptureBacking`, calls `openat(tree, ".")` for a real
+  directory descriptor on the root of the filesystem it just captured, both
+  once at startup before dcfs serves anything (what `main.cc` did before);
+  `absolute_paths`, `remount` and `startup_channel` read procfs and a
+  socket.
+  Only the three wrapper files call libc
   directly. `cache::` is pure SQLite: it never sees a descriptor.
 - **No transaction spans a backing syscall.** Backing I/O first, then one
   short synchronous transaction (`ctx.db.Transaction(...)`); no statement

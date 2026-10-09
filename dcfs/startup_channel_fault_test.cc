@@ -73,7 +73,7 @@ TEST(ForkDaemonTest, AFailureIsPrintedAndItsStatusReturned) {
 
 TEST(ForkDaemonTest, ADaemonThatDiesSilentlyIsReportedWithHow) {
   ErrorLines errors;
-  EXPECT_EQ(RunDaemon([](StartupReporter &) {}, /*child_exit=*/7), 1);
+  EXPECT_EQ(RunDaemon([](StartupReporter &) {}, /*child_exit=*/7), 32);
   EXPECT_THAT(errors.lines,
               ElementsAre(AllOf(HasSubstr("before it was ready"),
                                 HasSubstr("exit status 7"))));

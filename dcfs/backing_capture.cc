@@ -4,6 +4,7 @@
 #include <sched.h>
 #include <sys/mount.h>
 #include <sys/socket.h>
+#include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -32,13 +33,12 @@
 namespace dcfs {
 namespace {
 
-// Where the helper mounts its private tmpfs, and the staging directory in
-// it. A procfs directory: it exists wherever dcfs can run (it reads
-// /proc/self/mountinfo), is no filesystem anyone serves (a SOURCE under it
-// would be hidden), and the tmpfs vanishes with the helper's namespace, so
-// nothing is created in the caller's filesystems and nothing leaks.
-constexpr char kStagingRoot[] = "/proc/sys/vm";
-constexpr char kStagingDir[] = "/proc/sys/vm/staging";
+// The staging directory in the private tmpfs the helper mounts over the
+// request's staging_root (a procfs directory: it exists wherever dcfs can
+// run, is no filesystem anyone serves, and the tmpfs vanishes with the
+// helper's namespace, so nothing is created in the caller's filesystems and
+// nothing leaks).
+constexpr char kStagingName[] = "staging";
 // mount(8) is run by this path (no PATH lookup of the daemon's: the wrapper
 // runs as root); /bin is a symlink to /usr/bin on merged-usr systems.
 constexpr char kMountProgram[] = "/bin/mount";
@@ -125,20 +125,35 @@ absl::StatusOr<FileDescriptor> MountAndClone(const CaptureRequest &request) {
   // Nothing mounted here may propagate out.
   ABSL_RETURN_IF_ERROR(
       syscalls::mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr));
-  ABSL_RETURN_IF_ERROR(syscalls::mount("dcfs-staging", kStagingRoot, "tmpfs",
+  if (!syscalls::fstatat(AT_FDCWD, request.staging_root).ok()) {
+    return FailedPreconditionErrorBuilder()
+           << request.staging_root
+           << " does not exist: dcfs stages its mount there and needs /proc "
+              "with /proc/sys (not mounted with subset=pid)";
+  }
+  const std::string staging_dir =
+      absl::StrCat(request.staging_root, "/", kStagingName);
+  ABSL_RETURN_IF_ERROR(syscalls::mount("dcfs-staging", request.staging_root,
+                                       "tmpfs",
                                        MS_NOSUID | MS_NODEV | MS_NOEXEC,
                                        "mode=0700"));
-  ABSL_RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, kStagingDir, 0700));
+  ABSL_RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, staging_dir, 0700));
   ABSL_RETURN_IF_ERROR(
-      RunNativeMount(NativeMountCommand(request, kStagingDir), request));
+      RunNativeMount(NativeMountCommand(request, staging_dir), request));
   // `ro` makes a bind read-only too, whether or not this mount(8) remounts a
   // bind (busybox's does not; util-linux's does).
   if (request.bind &&
       std::find(request.options.begin(), request.options.end(), "ro") !=
           request.options.end()) {
-    ABSL_RETURN_IF_ERROR(syscalls::mount(nullptr, kStagingDir, nullptr,
-                                         MS_REMOUNT | MS_BIND | MS_RDONLY,
-                                         nullptr));
+    // MS_REMOUNT resets the per-mount flags, so keep the mount's own.
+    ABSL_ASSIGN_OR_RETURN(
+        FileDescriptor bound,
+        syscalls::openat(AT_FDCWD, staging_dir, O_RDONLY | O_DIRECTORY));
+    ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(*bound));
+    ABSL_RETURN_IF_ERROR(syscalls::mount(
+        nullptr, staging_dir, nullptr,
+        MS_REMOUNT | MS_BIND | MS_RDONLY | MountFlagsFromStatvfs(vfs.f_flag),
+        nullptr));
   }
   // The clone is in no namespace, so dcfs's own mountinfo never lists it: the
   // staging mount, in this namespace, is where a superblock that went
@@ -146,10 +161,10 @@ absl::StatusOr<FileDescriptor> MountAndClone(const CaptureRequest &request) {
   {
     ABSL_ASSIGN_OR_RETURN(
         FileDescriptor staged,
-        syscalls::openat(AT_FDCWD, kStagingDir, O_RDONLY | O_DIRECTORY));
+        syscalls::openat(AT_FDCWD, staging_dir, O_RDONLY | O_DIRECTORY));
     ABSL_RETURN_IF_ERROR(RefuseIfForcedReadOnly(*staged, request.source));
   }
-  return syscalls::open_tree(AT_FDCWD, kStagingDir,
+  return syscalls::open_tree(AT_FDCWD, staging_dir,
                              OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
 }
 
@@ -249,6 +264,23 @@ CaptureRequest RequestFor(const HelperArgs &args,
 }
 
 }  // namespace
+
+unsigned long MountFlagsFromStatvfs(unsigned long f_flag) {
+  struct Mapping {
+    unsigned long st;
+    unsigned long ms;
+  };
+  static constexpr Mapping kMappings[] = {
+      {ST_RDONLY, MS_RDONLY},     {ST_NOSUID, MS_NOSUID},
+      {ST_NODEV, MS_NODEV},       {ST_NOEXEC, MS_NOEXEC},
+      {ST_NOATIME, MS_NOATIME},   {ST_NODIRATIME, MS_NODIRATIME},
+  };
+  unsigned long flags = 0;
+  for (const Mapping &mapping : kMappings) {
+    if ((f_flag & mapping.st) != 0) flags |= mapping.ms;
+  }
+  return flags;
+}
 
 std::vector<std::string> NativeMountCommand(const CaptureRequest &request,
                                             const std::string &staging) {

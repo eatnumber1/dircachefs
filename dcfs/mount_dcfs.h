@@ -44,10 +44,15 @@ struct HelperArgs {
   std::optional<std::string> mount_namespace;  // -N
   // Every -o, split at commas, in order.
   std::vector<std::string> options;
+  // SOURCE as written, which the FUSE mount shows as its source (decision
+  // 11) whatever is done to `source` (made absolute).
+  std::string spec;
 };
 
-// Parses the arguments after argv[0]. InvalidArgument names the mistake.
-absl::StatusOr<HelperArgs> ParseHelperArgs(std::span<const std::string> args);
+// Parses the arguments after argv[0]. InvalidArgument names the mistake (a
+// usage error: MarkUsageError).
+[[nodiscard]] absl::StatusOr<HelperArgs> ParseHelperArgs(
+    std::span<const std::string> args);
 
 // The options of a mount, split. Everything not prefixed `dcfs.` is for the
 // underlying mount, verbatim, in order.
@@ -79,8 +84,23 @@ struct HelperOptions {
 // for native options the mount cannot honor (dcfs.fstype=none makes no
 // underlying mount, a remount does not change it: `ro` there is `dcfs.ro`);
 // Unimplemented for dcfs.cache_dir (step 15.3).
-absl::StatusOr<HelperOptions> SplitHelperOptions(
+[[nodiscard]] absl::StatusOr<HelperOptions> SplitHelperOptions(
     std::span<const std::string> options);
+
+// The native options of a mount that makes no native mount of its own (a
+// `dcfs.fstype=none`, or a remount) that dcfs does not honor: all but what
+// libmount adds to a helper's options or fstab says for mount(8) itself
+// (rw, defaults, nofail, _netdev, noauto, auto, the user options, x-*).
+// Empty for a native or bind mount, which hands them to mount(8).
+std::vector<std::string> UnhonoredNativeOptions(const HelperOptions &options);
+
+// The payload that marks a status as a usage mistake or a refusal to run
+// (an unknown option, not root): those exit 1, every other failure 32.
+inline constexpr std::string_view kUsageTypeUrl =
+    "rus.har.mn/dcfs/status/usage";
+
+// `status` marked as a usage mistake or refusal (OK stays OK).
+absl::Status MarkUsageError(absl::Status status);
 
 // The payload of a NativeMountError: mount(8)'s exit status, in decimal.
 inline constexpr std::string_view kMountExitStatusTypeUrl =
@@ -89,20 +109,21 @@ inline constexpr std::string_view kMountExitStatusTypeUrl =
 // The status of a failed native mount(8) that keeps its exit status, which
 // the wrapper then exits with (FailedPrecondition, `message` is mount's own
 // text).
-absl::Status NativeMountError(int exit_status, std::string_view message);
+[[nodiscard]] absl::Status NativeMountError(int exit_status,
+                                            std::string_view message);
 
 // The wrapper's exit status, in mount(8)'s terms (it returns a helper's
-// verbatim, and 1 is "incorrect invocation or permissions"): 1 for a usage
-// mistake or a refusal to run (InvalidArgument, PermissionDenied,
-// Unimplemented), the native mount's own for a NativeMountError, 32 (mount
-// failure) for any other failed start.
+// verbatim, and 1 is "incorrect invocation or permissions"): 1 for a status
+// marked by MarkUsageError, the native mount's own for a NativeMountError,
+// 32 (mount failure) for any other failed start, whatever its code (an
+// errno-derived InvalidArgument from mount(2) is a failed start).
 int ExitStatusFor(const absl::Status &status);
 
 // Sets the Abseil flag `name` (one of the dcfs.<flag> options) from `value`.
 // InvalidArgument for a value the flag does not parse, Internal for a name
 // that is no flag.
-absl::Status ApplyFlagOption(const std::string &name,
-                             const std::string &value);
+[[nodiscard]] absl::Status ApplyFlagOption(const std::string &name,
+                                            const std::string &value);
 
 // What the daemon tells the wrapper over the startup channel: "ready" once
 // it answers FUSE_INIT, or the failure's exit status and message.
