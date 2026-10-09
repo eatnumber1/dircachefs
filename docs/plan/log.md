@@ -1975,3 +1975,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   commit-tree to drop the stale claims; one extra commit: the held fill that leaves a stale atime
   logs ERROR, keeping 25.3b's AFailedAtimeRecordIsLoggedAtError rule). Fast 204 + 2, trace shards,
   atime/removed guests ok. Lane-4 free: 8.2e + 8.2f survivor tests dispatched (new implementer).
+- 12.8 wording round done (12ee27e: ext4 regime stated as an over-approximation, CrashRefines
+  follows from CrashSafe, litmus wording, design.md cites Ferrite's specification; MC_crash_ext4 /
+  metaprefix gain getattr + attrchange: 357k / 292k states). The rebase onto b845249 conflicts in
+  dcfs.tla with 23.8's model F (two model changes touching the backing state and crashes): handed to
+  the lane agent to merge F's crash behaviour onto bSeq; orchestrator's attempt aborted cleanly.
