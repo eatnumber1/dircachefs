@@ -1955,3 +1955,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   for the cold open's read-before-write). Rebase onto 40d779d requested, then merge. The spend
   limit stopped every agent at ~23:15 and was reset by russ; all six resumed 2026-10-09.
 - russ, 2026-10-09: `[[nodiscard]]` is permitted (style rule added to 25.5).
+- 12.8 reported (lane-1, 15f5ad1, under review): bSeq (ordered backing states since the last
+  durable point) replaces bOpts; Reorder ∈ {seq, metaprefix, ext4 (Ferrite Def. 7)};
+  DirFsyncPersistsFiles switch; write/fsync kinds in the new configs; CrashRefines; Ferrite litmus
+  programs (holds: atomic replace/create-via-rename under seq, directory fsync through dcfs under
+  ext4; expected violations as limitations; known_bugs/sync_by_file_fsync). No gap: a non-dirty
+  database survives a power loss only with a backing synced since D's last change (durable phase 1
+  + clear-after-syncfs): the property 23.10 must keep. Existing counts unchanged under seq.
