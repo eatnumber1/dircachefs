@@ -32,6 +32,10 @@
 #              backing filesystem loses (dropped, or not yet in its journal),
 #              recorded by dcfs at the release and made durable by a later
 #              commit: the cache has it, in a dirty row
+#   born       (step 23.11) a create held in phase 3 and the daemon killed
+#              there; the restart's lookup records the new row, which must
+#              be born dirty: after a cut that loses the create, a handle of
+#              it saved before gets ESTALE
 #
 # After each, the invariant: every entry dcfs serves matches the backing
 # filesystem exactly (type, size, mode, and the listing of every directory),
@@ -177,7 +181,7 @@ power_cut() {
 # --- the tree, and the scenarios, as setup (before the cut) and check -------
 
 make_tree() {
-	for d in d1 d2 d3 d4 d5 d6 d7 d8; do
+	for d in d1 d2 d3 d4 d5 d6 d7 d8 d9 d10; do
 		mkdir "$SRC/$d"
 		echo keep >"$SRC/$d/keep"
 	done
@@ -189,7 +193,7 @@ make_tree() {
 
 warm() {
 	ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5" "$MNT/d6" \
-		"$MNT/d7" "$MNT/d8" >/dev/null
+		"$MNT/d7" "$MNT/d8" "$MNT/d9" "$MNT/d10" >/dev/null
 }
 
 # before: a file synced to the backing filesystem survives the cut, and what
@@ -455,6 +459,77 @@ check_atime() {
 	served_equals_backing atime-served-tree
 }
 
+# born (step 23.11, the review's path A on real disks): the backing
+# filesystem drops writes from the start (dm; kill: its journal has not
+# committed the create). A create in d9 is held in phase 3 (as phase2: the
+# backing filesystem frozen in its syscall, then the cache filesystem frozen
+# and the backing one thawed), and the daemon killed there: phase 3 never
+# commits. (Killed first and thawed after: held by the freeze it is in
+# uninterruptible sleep, and dies when its write returns, before phase 3's
+# commit frame.) The restarted daemon keeps d9 dirty (its phase 1 was
+# durable); a stat of the new name lists d9 and records the new row, and its
+# handle is saved; a create in d10 makes a durable commit (its phase 1),
+# which takes that record to the cache disk. After the cut the create is
+# gone. A row recorded clean (before step 23.11) survives the start (it is
+# neither dirty, so not probed, nor unnamed with nlink 0, so not swept), and
+# the saved handle reopens it and its fstat serves the attributes of an
+# object that is gone; born dirty, the start probes it away, and the handle
+# gets ESTALE.
+setup_born() {
+	ls "$MNT/d9" "$MNT/d10" >/dev/null
+	[ "$CUT_MODE" = kill ] || fault_mode "$FD_BACK" drop-writes || fail born-cut-backing "fault_mode failed"
+	fd_freeze back || fail born-freeze "FIFREEZE of the backing filesystem failed"
+	touch "$MNT/d9/b" &
+	TOUCH_PID=$!
+	fd_blocked "$DAEMON_PID" "$SRC" || fail born-held-1 "the daemon never blocked on the frozen backing filesystem"
+	fd_freeze cache || fail born-freeze-cache "FIFREEZE of the cache filesystem failed"
+	fd_thaw back
+	sleep 1
+	if [ -e "$SRC/d9/b" ] && kill -0 "$TOUCH_PID" 2>/dev/null; then
+		pass born-held
+	else
+		fail born-held "d9/b on the backing filesystem: $([ -e "$SRC/d9/b" ] && echo yes || echo no); touch running: $(kill -0 "$TOUCH_PID" 2>/dev/null && echo yes || echo no)"
+	fi
+	kill -KILL "$DAEMON_PID" 2>/dev/null || true
+	fd_thaw cache
+	fd_crash
+	wait_touch
+	if start; then
+		pass born-killed-restart
+	else
+		fail born-killed-restart "daemon did not mount within 10s"
+		exit "$FAILED"
+	fi
+	stat "$MNT/d9/b" >/dev/null || fail born-stat "d9/b is not served after the restart"
+	# Kept on the cache disk, synced before the cut: a kill-mode cut is a
+	# new boot.
+	bs_out=$("$TESTUTIL" handle-save "$MNT/d9/b" "$CACHE_DIR/born.handle" &&
+		"$TESTUTIL" fsync "$CACHE_DIR/born.handle" &&
+		"$TESTUTIL" fsync "$CACHE_DIR") || fail born-handle-save "$bs_out"
+	touch "$MNT/d10/x"
+}
+cut_born() {
+	if [ "$CUT_MODE" = kill ]; then
+		power_cut
+	else
+		fault_mode "$FD_CACHE" drop-writes || fail born-cut-cache "fault_mode failed"
+	fi
+}
+check_born() {
+	if [ ! -e "$SRC/d9/b" ]; then
+		pass born-create-lost
+	else
+		fail born-create-lost "d9/b survived the cut (the backing filesystem was cut before it)"
+	fi
+	bh_out=$("$TESTUTIL" handle-stat "$MNT" "$CACHE_DIR/born.handle")
+	if [ "$bh_out" = "ERR ESTALE" ]; then
+		pass born-handle-stale
+	else
+		fail born-handle-stale "the saved handle of d9/b, which the cut lost: $bh_out (a row recorded clean serves a gone object by nodeid)"
+	fi
+	served_equals_backing born-served
+}
+
 # syncpoint: held clearing the dirty set, the backing filesystem synced.
 setup_syncpoint() {
 	touch "$MNT/d1/s1"
@@ -544,7 +619,7 @@ setup_before
 after_cut before
 check_before
 
-for scenario in phase1 phase2 ahead frozen_unlink frozen_rename atime; do
+for scenario in phase1 phase2 ahead frozen_unlink frozen_rename atime born; do
 	"setup_$scenario"
 	"cut_$scenario"
 	after_cut "$scenario"

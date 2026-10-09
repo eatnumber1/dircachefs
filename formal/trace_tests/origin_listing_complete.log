@@ -1,2 +1,2 @@
-DCFS-TRACE t 2 {"i":1,"c":"PopulateCommitted","ev":"begin","origin":"listing","db":{"dent":[],"complete":true,"dirty":false,"epoch":0,"valid":true,"clean":true,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":1,"c":"PopulateCommitted","ev":"begin","origin":"listing","parent_marked":false,"db":{"dent":[],"complete":true,"dirty":false,"epoch":0,"valid":true,"clean":true,"durable":false,"inflight":0}}
 DCFS-TRACE t 2 {"i":2,"c":"GetattrBegin","ev":"attr_check","p":"p1","req":{"k":"getattr","n":"","m":""},"valid":true}

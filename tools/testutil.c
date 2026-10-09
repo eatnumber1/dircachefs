@@ -274,9 +274,7 @@
  *       mount <dir> is on, then fstat: prints "OK <size> <inode> <mode in
  *       octal>" or "ERR <errno name>" of whichever failed. guest/fault_lib.sh's
  *       identity oracle (step 26.14e) and guest/fault_power.sh's "born"
- *       scenario (step 23.11) reopen saved handles with it. (Same names and
- *       code as 23.11's; its output is "OK <size>", this adds the inode and the
- *       mode: whichever lands second adapts.)
+ *       scenario (step 23.11) reopen saved handles with it.
  *   testutil btrfs-subvol-create <path>
  *       BTRFS_IOC_SUBVOL_CREATE: creates a btrfs subvolume at <path> (whose
  *       parent directory must already exist on a btrfs filesystem). Step

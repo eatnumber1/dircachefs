@@ -5176,6 +5176,116 @@ TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
   EXPECT_THAT(InodeRows(db_), IsOkAndHolds(before - 2));
 }
 
+// Step 23.11, born-dirty create, path B (the review of its model half): a
+// create whose phase 3 cannot record the new row (here no row can be
+// inserted) replies EEXIST (CreatedButNotCompleted) and leaves the name
+// unknown and the parent dirty; the kernel drops its negative dentry, and
+// the next lookup's fill inserts the row. While the create may still be
+// lost (no sync point since), that row must be born dirty: otherwise a
+// power loss that loses the create leaves a clean row with the attributes
+// of an object that is gone, answered by nodeid (formal/known_bugs/
+// borndirty_fill_unmarked_after_failed_phase3). The power loss is the
+// object's removal on the backing filesystem, then a start with another
+// boot id: the start's probe deletes a dirty row whose object is gone.
+TEST_F(DirCacheFSTest, ARowAFillInsertsAfterAFailedPhase3IsBornDirty) {
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  ASSERT_THAT(db_.Exec("CREATE TEMP TRIGGER no_new_inodes BEFORE INSERT ON "
+                       "inodes BEGIN SELECT RAISE(ABORT, 'no inserts'); END"),
+              IsOk());
+  EXPECT_EQ(Mkdir(kRootInode, "f").first.error, -EEXIST);
+  ASSERT_THAT(db_.Exec("DROP TRIGGER no_new_inodes"), IsOk());
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId id = static_cast<InodeId>(entry.nodeid);
+  EXPECT_THAT(cache::ListDirty(ctx_, /*mutations_only=*/true),
+              IsOkAndHolds(Contains(id)));
+
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), AT_REMOVEDIR), IsOk());
+  ASSERT_THAT(Restart("another boot"), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, id).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_EQ(Getattr(id).first.error, -ESTALE);
+}
+
+// Step 23.11, path A: as above, but the create's phase 3 never ran (the
+// daemon died between its syscall and its phase 3; the same boot). The
+// start keeps the parent dirty (its phase 1 was durable), and the first
+// lookup of the name after it inserts the row, which must be born dirty
+// (formal/known_bugs/borndirty_fill_unmarked_after_crash).
+TEST_F(DirCacheFSTest, ARowAFillInsertsAfterACrashBeforePhase3IsBornDirty) {
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());  // A running daemon.
+  {
+    ASSERT_OK_AND_ASSIGN(cache::Mutation phase1,
+                         cache::BeginCreate(ctx_, kRootInode, "f"));
+    phase1.End();  // In memory only: the database keeps phase 1 alone.
+  }
+  WriteFile(Path("f"));  // The create's syscall.
+  ASSERT_THAT(Restart("boot"), IsOk());  // A daemon crash: the same boot.
+  // From here ctx_ stands for the restarted process's memory (as in
+  // CrashDuringRecoveryRecoversAgain): nothing is durably dirty in it.
+  ctx_.dirty.durable.clear();
+  auto [lookup, entry] = Lookup(kRootInode, "f");
+  ASSERT_EQ(lookup.error, 0);
+  const InodeId id = static_cast<InodeId>(entry.nodeid);
+  EXPECT_THAT(cache::ListDirty(ctx_, /*mutations_only=*/true),
+              IsOkAndHolds(Contains(id)));
+
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("f"), 0), IsOk());
+  ASSERT_THAT(Restart("another boot"), IsOk());
+  EXPECT_THAT(cache::GetAttr(ctx_, id).status(),
+              ::absl_testing::StatusIs(absl::StatusCode::kNotFound));
+}
+
+// Step 23.11, rule 1: only a row that the create's phase 3 itself inserts
+// is born dirty, durably (Context::dirty.durable), so that BeginWriting on
+// it needs no WAL fsync. Here a lookup of the new name (inside the
+// create's probe) inserts the row first, born dirty, and a sync point then
+// covers the create and clears that row's mark; a crash may still leave
+// the row clean, so the writable create's BeginWriting must commit with a
+// WAL fsync of its own (formal/known_bugs/borndirty_not_born_here): two in
+// all, its phase 1's and BeginWriting's.
+TEST_F(DirCacheFSTest, AWritableCreateWhoseRowAFillInsertedSyncsBeginWriting) {
+  Start();
+  NameToHandleHook() = [&] {
+    EXPECT_EQ(Lookup(kRootInode, "f").first.error, 0);
+    EXPECT_THAT(backing::SyncBacking(ctx_), IsOk());
+  };
+  counter_.Reset();
+  Created c = Create(kRootInode, "f", O_WRONLY);
+  ASSERT_EQ(c.reply.error, 0);
+  EXPECT_EQ(counter_.counts().durable_transactions, 2);
+  Release(c.id, c.fh);
+}
+
+// Step 23.11, the fill rule over a listing: a mkdir leaves d dirty, and a
+// file put in d out of band is first recorded by d's listing, which
+// inserts its row under a directory with a mutation's mark: born dirty.
+// After a sync point (d clean) a row a listing inserts is clean: the rule
+// costs a mark only while the directory may hold a create that is not yet
+// durable.
+TEST_F(DirCacheFSTest, AListedRowIsBornDirtyOnlyUnderAMarkedDirectory) {
+  Start();
+  auto [mkdir, d] = Mkdir(kRootInode, "d");
+  ASSERT_EQ(mkdir.error, 0);
+  WriteFile(Path("d/g"));
+  // The mkdir recorded d's listing complete (and empty); g is out of band.
+  ASSERT_THAT(cache::MarkDirComplete(ctx_, d, false), IsOk());
+  ASSERT_THAT(List(d, /*plus=*/true), IsOkAndHolds(Contains("g")));
+  ASSERT_OK_AND_ASSIGN(InodeId g, Id("g", d));
+  EXPECT_THAT(cache::ListDirty(ctx_, /*mutations_only=*/true),
+              IsOkAndHolds(Contains(g)));
+
+  ASSERT_THAT(backing::SyncBacking(ctx_), IsOk());
+  ASSERT_THAT(Dirty(), ::testing::IsEmpty());
+  WriteFile(Path("d/h"));
+  ASSERT_THAT(cache::MarkDirComplete(ctx_, d, false), IsOk());
+  ASSERT_THAT(List(d, /*plus=*/true), IsOkAndHolds(Contains("h")));
+  ASSERT_OK_AND_ASSIGN(InodeId h, Id("h", d));
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(Not(Contains(h))));
+}
+
 // A crash during recovery (steps 12.6, 12.6b): recovery may stop anywhere
 // and run again, and what it recovered stays dirty until a sync point. The
 // start that follows a crash between an unlink's syscall and its phase 3
@@ -7529,15 +7639,16 @@ class SlopeRun : public DirCacheFSTest {
 // fsyncs and backing syscalls; today's numbers exactly (the counts are
 // deterministic). Raising one is a deliberate edit whose commit says why.
 //
-// The fsyncs: a create (O_WRONLY, as creat(2) and every shell redirection
-// open), an unlink, a rename and a setattr each cost one WAL fsync, every
-// time, in one directory: the phase 1 of an inode that is not yet durably
-// dirty is durable, and each of those names a new one (a create's writable
-// open, its new file; an unlink or a rename, the object it removes or
-// moves; a setattr, its inode). Only the directory's own dirty row is
-// durable once per sync interval (mkdir: one fsync for N). docs/design.md's
-// "a burst of creates in one directory costs one WAL fsync" holds for
-// mkdir, not for create.
+// The fsyncs: an unlink, a rename and a setattr each cost one WAL fsync,
+// every time, in one directory: the phase 1 of an inode that is not yet
+// durably dirty is durable, and each of those names a new one (an unlink or
+// a rename, the object it removes or moves; a setattr, its inode). Only the
+// directory's own dirty row is durable once per sync interval (mkdir: one
+// fsync for N). Since step 23.11 a create (O_WRONLY, as creat(2) and every
+// shell redirection open) is one too: its new row is born dirty (its
+// phase 3 inserts the row and its mark in one transaction), so its
+// writable open's phase 1 (BeginWriting) needs no fsync; before, each
+// create cost one (100 creates: 101 WAL fsyncs, now 1).
 struct SlopeBound {
   const char *op;
   int64_t steps_a, steps_b;
@@ -7546,7 +7657,7 @@ struct SlopeBound {
   int64_t backing_a, backing_b;
 };
 constexpr SlopeBound kSlopeBounds[] = {
-    {"create", 82, 3, 7, 0, 1, 1, 14, 64},
+    {"create", 82, 3, 7, 0, 0, 1, 14, 64},
     {"mkdir", 48, 3, 3, 0, 0, 1, 8, 0},
     {"unlink", 38, 0, 4, 0, 1, 0, 8, 0},
     {"rename", 59, 0, 4, 0, 1, 0, 9, 0},

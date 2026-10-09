@@ -704,6 +704,17 @@ TRACE_TESTS = {
     # incomplete listing of its own (EnsureDirectory): one that says
     # complete is rejected.
     "origin_listing_complete": "\"ev\":\"begin\",\"origin\":\"listing\"",
+    # Step 23.11, born dirty: a row a listing inserts is dirty iff its
+    # parent has a mutation's mark (the begin line's "parent_marked"):
+    # dirty under a marked parent is valid ...
+    "origin_listing_dirty_under_dirty_parent": None,
+    # ... clean there is rejected (formal/known_bugs/borndirty_fill_unmarked).
+    "origin_listing_clean_under_dirty_parent": "\"ev\":\"begin\",\"origin\":\"listing\"",
+    # A row ParentOf inserts is always born dirty (backing::ParentOf): valid
+    # ...
+    "origin_parent_born_dirty": None,
+    # ... and clean, rejected.
+    "origin_parent_clean": "\"ev\":\"begin\",\"origin\":\"parent\"",
     # Recovery makes a clean directory's dentry unknown when the object it
     # points at was dirty (a, whose key is among the dirty inodes'): valid.
     "recover_forgets_dirty_child": None,

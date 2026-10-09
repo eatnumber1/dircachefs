@@ -1810,6 +1810,24 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsAMutationInFlightWhenNothingMoved) {
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsEmpty()));
 }
 
+// Step 23.11 (the 12.12 audit's G15): a row MarkDirty inserts during a
+// sync point with no mutation and no clock movement (RecordTmpfile's mark,
+// a fill's born-dirty row) was not in BeginSync's snapshot, so the per-row
+// rule keeps it; the fast path must too: every insert counts in
+// Context::dirty.inserts.
+TEST_F(MetadataCacheTest, ClearDirtyKeepsARowMarkedAfterTheSnapshot) {
+  ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(30));
+  ASSERT_OK_AND_ASSIGN(UpsertResult n, Make(31));
+  ASSERT_THAT(SyncClear(), IsOk());
+  ASSERT_THAT(BeginAttrChange(ctx_, f.id), IsOk());  // Ends at once.
+  ASSERT_OK_AND_ASSIGN(SyncSnapshot synced, BeginSync(ctx_));
+  const InodeId marked[] = {n.id};
+  ASSERT_THAT(MarkDirty(ctx_, marked), IsOk());
+  ASSERT_EQ(ctx_.fills.seq, synced.fills.seq);
+  ASSERT_THAT(ClearDirty(ctx_, synced, {}), IsOk());
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(n.id)));
+}
+
 // If the fill guards forgot which inodes were mutated since BeginSync
 // (FillGuards::touched was pruned, raising the floor past the snapshot),
 // a sync point cannot tell which rows its syncfs covers, and keeps them
