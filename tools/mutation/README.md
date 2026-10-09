@@ -360,6 +360,55 @@ sweep pass: a survivor is the next step's finding.
   90 (seeded with the run number), three shards, the small and medium tiers
   per mutant, 300 minutes of time budget each.
 
+### First TLA+ run (2026-10-09, step 12.13)
+
+A proving run of the tool, not a sweep: `generate --lang tla --module
+formal/dcfs.tla --seed 1 --per-function 2 --max-mutants 20` (1,351 candidates,
+20 sampled, the operators in turn), `run --tier small`: the killers are the
+small tier of `//formal/...` only (the medium tier, with the known bugs, would
+turn most survivors into kills or into the same survivors at ten times the
+cost). Run on a loaded 4-core machine in five invocations (a tool call lasts
+ten minutes) with the baseline run once; an earlier sample of the same seed
+contained a `swap-junction` of one inline operator of a three-operand chain,
+which TLA+ rejects (`a /\ b \/ c` has no precedence: SANY's parse error,
+INVALID: the tool now swaps all the operators of a chain at once), and the
+seven mutants that sample shared with the final one were not rerun (same
+text, same module). Nothing was added to `equivalent.txt`: the survivors are
+the next step's findings.
+
+| operator | killed | survived | invalid | suppressed | error | flaky | total |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| constant | 2 | 0 | 0 | 0 | 0 | 0 | 2 |
+| drop-conjunct | 0 | 2 | 0 | 0 | 0 | 0 | 2 |
+| drop-disjunct | 0 | 2 | 0 | 0 | 0 | 0 | 2 |
+| drop-guard | 2 | 0 | 0 | 0 | 0 | 0 | 2 |
+| drop-step | 1 | 1 | 0 | 0 | 0 | 0 | 2 |
+| durability | 1 | 2 | 0 | 0 | 0 | 0 | 3 |
+| negate | 2 | 0 | 0 | 0 | 0 | 0 | 2 |
+| relational | 3 | 0 | 0 | 0 | 0 | 0 | 3 |
+| swap-junction | 0 | 2 | 0 | 0 | 0 | 0 | 2 |
+| **all** | 11 | 9 | 0 | 0 | 0 | 0 | 20 |
+
+20 mutants, 3,657 s of mutant time: 19.7 per hour (a kill costs 11 to 313 s,
+a survivor 123 to 560 s, which is the whole small tier). The 9 survivors (small
+tier only; the medium tier may kill some):
+
+- `dcfs.tla:241` `TypeOK`: swap-junction `/\` -> `\/` (the list of type conjuncts)
+- `dcfs.tla:517` `Serve`: swap-junction `\/` -> `/\`
+- `dcfs.tla:651` `RDFromCode`: drop-step `"PD_read"` -> `"PD_commit"` (the retry skips a populate)
+- `dcfs.tla:1060` `S2`: durability `FALSE` -> `TRUE` (the sync point's commit made synced)
+- `dcfs.tla:1503` `FBehind`: drop-conjunct `d.fAttr # b.f` -> `TRUE`
+- `dcfs.tla:1568` `Recover`: durability `FALSE` -> `TRUE`
+- `dcfs.tla:1707` `Next`: drop-disjunct `UnlinkSyscall(p)` -> `FALSE`
+- `dcfs.tla:1712` `Next`: drop-disjunct `AttrChangeSyscall(p)` -> `FALSE`
+- `dcfs.tla:1826` `FileExactStrict`: drop-conjunct `mode = "up"` -> `TRUE`
+
+The 11 killed ones were killed by `trace_*`, `litmus_*` and `limitation_*`
+tests of the small tier. The `Next` survivors say that no small-tier
+configuration needs the unlink or attribute-change syscall step (the medium
+tier's `MC_small` does); `TypeOK` is checked only by the medium and large
+configurations.
+
 ## Reading survivors
 
 `SURVIVOR file:line in function: operator: diff` is one missing test: the
