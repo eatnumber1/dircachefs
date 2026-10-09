@@ -1967,3 +1967,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   23.10 (file rows never dirty: every written file needs a dirty parent recovery re-lists, incl.
   hard links elsewhere, NFS-handle opens without a parent dentry, unlinked tmpfiles; the model needs
   a file inode and a second directory): written into 23.10.
+- 15.1/15.2 second pass: fix first (three util-linux breakers introduced by the fixes: `rw` refused
+  for none, native `ro` refused on remount, non-path native specs rewritten; plus exit-status
+  classing, bind remount flags, LastErrorSink window, /proc/sys missing, nodiscard on new headers).
+  Sent back; deviations recorded in phases/15.

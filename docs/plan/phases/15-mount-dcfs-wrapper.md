@@ -361,4 +361,15 @@ syslog sink takes the configured threshold (one knob); also install as
 StartupPurge is not removed (15.2's text said it would be; decide in
 15.3 with the cache path), `LOG_PERROR` not used, the systemd unit kept
 until 15.7. design.md's `--source` text and startup section are 15.7's.
+Second pass (2026-10-09): the fixes introduced three util-linux breakers
+the busybox guest cannot show (the `none` form refused the `rw` libmount
+always passes; a remount refused a native `ro` merged in from fstab; the
+absolute-path fix rewrote non-path native specs such as ZFS datasets and
+virtiofs tags): one more round. Deviations recorded: the capture's
+staging is a tmpfs over `/proc/sys/vm` inside the helper's private
+namespace (harmless there; a tmpfs over /run or /tmp could hide SOURCE,
+an mkdtemp'd directory leaks on SIGKILL); foreground runs keep stderr
+without a syslog sink instead of `LOG_PERROR`; `StartupPurge` stays
+until 15.3 decides the cache path. 15.6's util-linux guest is where the
+helper protocol gets its real test.
 
