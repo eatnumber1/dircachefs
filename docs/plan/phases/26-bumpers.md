@@ -279,6 +279,18 @@ own step, none fixed in 26.14:
   and passed 5 of 5 reruns; cause not established (a request with pid 0 is
   the kernel's own, e.g. a FORGET or writeback; the test's expectation on
   the WARNING count may be racing one).
+  Done 2026-10-09, merged dae95e1: a fixture bug, not a daemon bug. The
+  harness forged every request with pid 0, so every mutation hit
+  `FuseRequest::Caller`'s "supplementary groups unreadable" WARNING, which
+  is `LOG_EVERY_N_SEC(WARNING, 60)` per process: whichever WARNING-counting
+  test ran first after a 60 s window saw it (1 of 40 runs, a different
+  test). Fix: forged requests carry the test's pid (FORGET, BATCH_FORGET,
+  INIT and INTERRUPT keep 0, as the kernel sends them); two new
+  fuse_request_channel tests pin the groups path and the pid-0 WARNING
+  (which stays: a real caller outside the daemon's pid namespace loses its
+  groups, and the administrator can fix that); design.md "Caller
+  credentials" says which requests read groups. 20 of 20 reruns, fast 229 +
+  2, pjdfstest three shards green.
 - FORGET vs BATCH_FORGET after `drop_caches` and the session loop's
   read-ahead/`-EINTR` paths differ between runs: document in
   `docs/coverage.md` or pin; part of 26.14b's rerun.

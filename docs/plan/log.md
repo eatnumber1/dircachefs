@@ -2170,3 +2170,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   of UAPI definitions.
 - russ (2026-10-09) on the syscalls.h / syscalls_backing.h split: "Keep it. Mechanical invariant
   enforcement is more valuable." The reason goes into style.md with 7.1d.
+- 26.14d merged (dae95e1): the flake was the fixture forging pid 0 on every request; the daemon is
+  unchanged. Lane-5 freed. P0 rule considered: lane-7's @dcfs_llvm extraction completed at 10:31
+  (marker present, 2.1 GB), so 26.16 is productive there and moving it to lane-5 would cost more
+  than it saves; 26.16 stays in lane-7. Lane-5 resumes 26.15 (russ approved its commands).
