@@ -545,7 +545,8 @@ else
 	MEM="${DCFS_MEM:-${MEM_OVERRIDE:-256}}"
 	SMP=2
 fi
-SMP="${CPUS_OVERRIDE:-$SMP}"
+# DCFS_FORCE_CPUS=<n> (bazel coverage --test_env): experiments, step 26.14c.
+SMP="${DCFS_FORCE_CPUS:-${CPUS_OVERRIDE:-$SMP}}"
 
 append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init dcfs_accel=$ACCEL"
 if [ "$UNIT" -eq 0 ]; then
@@ -731,6 +732,13 @@ if [ "$COVERAGE" -eq 1 ]; then
 		echo "run-qemu.sh: ERROR: the profiles could not be turned into lcov; the test fails rather than report less coverage" >&2
 		exit 1
 	}
+	# DCFS_KEEP_PROFRAW=1 (bazel coverage --test_env=DCFS_KEEP_PROFRAW=1):
+	# the raw profiles and the merged one are kept as undeclared outputs, for
+	# looking at counters with llvm-profdata/llvm-cov (step 26.14c).
+	if [ "${DCFS_KEEP_PROFRAW:-}" = 1 ] && [ -n "${TEST_UNDECLARED_OUTPUTS_DIR:-}" ]; then
+		mkdir -p "$TEST_UNDECLARED_OUTPUTS_DIR/profraw" &&
+			cp "$rawdir"/* "$TEST_UNDECLARED_OUTPUTS_DIR/profraw/" || true
+	fi
 	# The test's own lcov, kept beside the serial log for inspection.
 	cp "$COVERAGE_DIR"/qemu-*.dat "${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/" 2>/dev/null || true
 fi

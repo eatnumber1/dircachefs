@@ -115,6 +115,13 @@ coverage --combined_report=lcov
 # still leaves a complete profile. Linux needs the counters relocatable.
 coverage --copt=-mllvm
 coverage --copt=-runtime-counter-relocation
+# Counter increments are atomic (step 26.14c): the counters of a function are
+# shared by every process of one binary (continuous mode maps one profile
+# file per binary, %m) and by its threads; a plain increment loses updates
+# when two of them run the same code at once (the bench smoke test mounts
+# four dcfs daemons at once), and a function's counters then disagree, which
+# llvm-cov shows as a branch count of 2^32-1 (a negative difference).
+coverage --copt=-fprofile-update=atomic
 
 # Per-checkout settings that are not committed (e.g. the agent lane
 # clones' `startup --max_idle_secs=...`). See docs/plan/process.md.

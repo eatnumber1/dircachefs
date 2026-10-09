@@ -501,6 +501,14 @@ source-based coverage and collects it from the guests:
   such a file, and the test fails). Only a guest that is cut off as a whole loses
   its processes' profiles.
 
+- Counter increments are atomic (`-fprofile-update=atomic` in `.bazelrc`): all
+  the daemons of one test share one profile file per binary, so a plain
+  increment loses updates and llvm-cov then prints a branch count of 4294967295
+  (`docs/coverage.md`, "Known coverage artifacts"; `tools/coverage_gate.sh`
+  fails on such a count). `bazel coverage --test_env=DCFS_KEEP_PROFRAW=1`
+  keeps each test's profiles under `test.outputs/profraw/`;
+  `--test_env=DCFS_FORCE_CPUS=<n>` overrides the vCPU count.
+
 Self-checks: `//test/qemu:coverage_pipeline_test` runs an instrumented
 fixture through the same `cov-lcov.sh` and requires the function that ran to
 have hits and the one that did not to appear with 0 hits (`check-lcov.sh

@@ -29,6 +29,23 @@ if [ -z "$base_lines" ] || [ -z "$base_branches" ]; then
 	exit 2
 fi
 
+# A branch count of 2^31 or more is not a count: llvm-cov computes a branch's
+# count as a difference of region counters, and counters that lost an update
+# (docs/coverage.md, "Known coverage artifacts") give a negative difference,
+# which it prints as 4294967295. Such a branch would count as taken, so the
+# report cannot be trusted: name every one and fail.
+artifacts=$(awk '
+	/^SF:/ { sf = substr($0, 4) }
+	/^BRDA:/ { split(substr($0, 6), f, ",")
+		if (f[4] != "-" && f[4] + 0 >= 2147483648)
+			print sf ":" f[1] " branch " f[2] "." f[3] " count " f[4] }
+' "$lcov")
+if [ -n "$artifacts" ]; then
+	echo "coverage_gate.sh: FAIL: branch counts that are counter-underflow artifacts, not counts (docs/coverage.md); rerun the coverage job:" >&2
+	echo "$artifacts" >&2
+	exit 1
+fi
+
 # "<scope> <LH> <LF> <BRH> <BRF>" per scope: the sums over the records whose
 # SF: is under the scope's prefix (dcfs/*.cc only for the gated one).
 totals=$(awk '

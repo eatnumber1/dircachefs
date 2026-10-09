@@ -44,6 +44,12 @@ if ! grep -q "to 80.10 / 50.00" "$summary"; then
 	exit 1
 fi
 rm -f "$summary"
+# A branch count of 2^32-1 is llvm-cov's reading of a negative difference of
+# two counters (step 26.14c, docs/coverage.md), not a count: the gate fails
+# naming the branch instead of counting it as taken; a large real count below
+# 2^31 is a count.
+expect fail artifact_count.lcov "dcfs/a.cc:863 branch 1.2 count 4294967295"
+expect pass large_count.lcov "ok: lines 80.00"
 # bench/ and tools/ are reported, not gated; dcfs headers do not count.
 expect pass equal.lcov "bench: lines 1/100"
 expect pass equal.lcov "tools: lines 2/100"
