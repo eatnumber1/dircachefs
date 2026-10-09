@@ -537,3 +537,37 @@ known_bug, and in the code either RecordChild records a child's attributes
 only when the parent is not in flight, or the row it inserts is born dirty
 too.
 
+Status 2026-10-09, model half reported (lane-1, step-23.11, 69d88a7 +
+1df8e32, 42 files under formal/ plus design.md; code half not started;
+Opus review running). Born-dirty HOLDS under seq, metaprefix and ext4,
+with and without the kernel lock, given two code rules: (1) only a row
+phase 3 itself inserts counts as durably dirty (`UpsertInode` reports
+whether it inserted; otherwise a lookup can insert F's row first, a sync
+point clears its mark, and a later write takes the fast path with no
+durable mark); (2) a row a fill (`RecordChild`, lookup or listing) inserts
+while its parent is in the dirty set is born dirty in the fill's own
+transaction. G5 as modelled: today's rule fails without the kernel lock
+(`known_bugs/borndirty_fill_unmarked`, 5 states) AND with it, in today's
+code (`borndirty_fill_unmarked_after_crash`, 10 states): a daemon crash
+between the create's syscall and phase 3, a restart (D stays dirty), a
+lookup records F's row clean while the create is not durable, then a power
+loss leaves a clean valid row of a file that no longer exists, served by
+NFS handle until an open gets ESTALE; the start neither sweeps it
+(`ForgetUnnamedRows` takes nlink 0 only) nor probes it. Both audit
+candidate rules miss that case (`borndirty_fill_rule_a/_b`). New
+invariants `BornDirty` and `LostRowProbed`; `DurableSetSound` for F reads
+"F's mark, or no row"; `FileOK` two-sided via the `fs` ghost; `FDentOK`;
+`GuardsBalanced` over F's guard (G17); the three conditions per inode.
+Ten known_bugs and five premise tests, each with its counterexample.
+Counts: unchanged configs unchanged; atime 260,871 -> 334,826 and
+atime_concurrent 292,824 -> 373,534 from the ghost; five borndirty configs
+(seq 261,688; ext4 368,242; metaprefix 261,688; nolock 59,542; nolock ext4
+78,100). Trace: no new events; a fill-inserted born-dirty row is flagged
+in its `begin` line and `OriginOK` accepts it; file marks wait for 12.11b.
+Deviations: only F's name in D taken from 23.10 (no E, no hard link); F is
+never renamed or unlinked; a recreate reuses F's identity; G15 not
+modelled; MC_small without the new properties. large_test and nolock_test
+timed out under load 28-33 (configs untouched, dcfs.tla changed under
+them). Cost of rule 2: one dirty row and one probe at a crash's start per
+child first recorded in a directory changed since the last sync point.
+

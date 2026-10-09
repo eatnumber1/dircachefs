@@ -2260,3 +2260,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   finishing after their unmount (nothing dirty, nothing lost; "shutdown: clean" missing). One more
   round: the README's interim recipe used `flock -w 10` (a timeout, against today's rule) and the
   leftover-daemon checks' wait needs to be event-based; then merge.
+- 23.11 model half reported (lane-1, step-23.11): born-dirty sound under all regimes with two code
+  rules (phase-3-inserted rows only count as born dirty; a fill-inserted row under a dirty parent
+  is born dirty). A LATENT BUG in today's code found on the way: daemon crash between a create's
+  syscall and phase 3, restart, lookup records the child clean, power loss -> a clean row of a
+  file that no longer exists, served by handle; neither swept nor probed at start. Opus review
+  dispatched (is the bug real in C++, are the two rules minimal, fidelity, known_bugs, trace note).
