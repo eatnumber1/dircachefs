@@ -2026,3 +2026,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   banned_symbols and hermetic gates pass, reproducible build byte-identical; the orchestrator
   rebased over 12.8 and 8.2e/f, no overlap). Every lane's next rebase re-extracts @dcfs_llvm: the
   background-fetch rule in process.md now names 7.1c too. Lane-5 free: 15.7 docs next.
+- 15.7 dispatched to lane-5 (new implementer): README usage/fstab/remount/exit statuses/daemon
+  logging/operations/log-message sections and design.md's wrapper section from the code and man
+  page as built (not the plan text where they differ), packaging/dcfs.service removed; 15.5 and
+  15.3 items left out rather than promised; systemd behaviour only as far as the code and man page
+  show it (15.6 confirms the rest).
