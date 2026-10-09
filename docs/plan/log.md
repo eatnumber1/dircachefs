@@ -2082,3 +2082,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
     using lib.sh's `disabled` helper; two manual qemu_test targets with kernel_failure="expected"
     (ext4 vdb 64M; btrfs vdb 320M + dm_flakey, padded with ~6000 files). .scratch/kernel-src/ in
     lane-5 holds read-only copies of the v6.18, v6.18.55 and HEAD files read.
+- 26.14 merged (b0d57de, seven commits; clean rebase, fast 229 + 2, new main targets green under the
+  quiet init). Lane-2 free: 26.14c (the 4294967295 branch count) dispatched, a bounded investigation
+  that touches no dcfs/ code. 26.14b waits for 6.5 (same scripts); 26.14d waits for 23.10's test
+  changes to land (same test file).

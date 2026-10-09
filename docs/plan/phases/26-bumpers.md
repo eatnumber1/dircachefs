@@ -234,8 +234,8 @@ away rather than the clock:
   themselves have speed headroom to make up for it. Not now.
 Owner: dcfs-investigator; after the current dcfs/ branches land.
 
-Status 2026-10-09: reported (lane-2, seven commits), review passed, rebasing
-onto 93384a9 for the merge. As built: `dirty_writeback_centisecs=0`,
+Status 2026-10-09: merged b0d57de (lane-2, seven commits; rebased cleanly,
+fast 229 + 2, quiet_kernel/mount_dcfs/atime targets green under the new init). As built: `dirty_writeback_centisecs=0`,
 `dirty_expire_centisecs=8640000` (a day; larger overflows the kernel's
 centisecond product), `laptop_mode=0`; `vfs_cache_pressure` stays at 100
 (deviation: at 1 the slab shrinkers' counts are scaled down so `drop_caches`
