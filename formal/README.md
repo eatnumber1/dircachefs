@@ -43,10 +43,12 @@ Contents:
 9. [Findings](#findings)
 10. [Trace validation](#trace-validation)
 11. [Reading a counterexample](#reading-a-counterexample)
-12. [Changing the model](#changing-the-model)
-13. [The revalidation model](#the-revalidation-model)
-14. [The lifetime model](#the-lifetime-model)
-15. [The identity model](#the-identity-model)
+12. [Access times of a file (step 23.8)](#access-times-of-a-file-step-238)
+13. [Born-dirty create (step 23.11)](#born-dirty-create-step-2311)
+14. [Changing the model](#changing-the-model)
+15. [The revalidation model](#the-revalidation-model)
+16. [The lifetime model](#the-lifetime-model)
+17. [The identity model](#the-identity-model)
 
 ## Running it
 
@@ -268,9 +270,9 @@ on the detail:
 
 | Variable | Meaning | In dcfs |
 |---|---|---|
-| `bCur` | The backing filesystem now: D's `names` (name -> object or `"-"`), `ver` (D's attributes), `f` (F's attributes, step 23.8), and `data` (object -> its contents: 0 empty, else a stamp; only the `write` requests of step 12.8 change it) | the real directory and its files |
+| `bCur` | The backing filesystem now: D's `names` (name -> object or `"-"`), `ver` (D's attributes), `f` (F's attributes, step 23.8), `fs` (F's last change that was not a read, a ghost) and `fn` (F exists, under its name in D; step 23.11), and `data` (object -> its contents: 0 empty, else a stamp; only the `write` requests of step 12.8 change it) | the real directory and its files |
 | `bSeq` | The backing filesystem's states since its last durable point, in the order the syscalls made them: `bSeq[1]` is durable, the last is `bCur` (step 12.8). Which states a power loss may leave of them is the regime's (`BCrash`, `MetaCrash`) | the backing filesystem's page cache and journal |
-| `dbCur` | The cache database now (for D): `dent`, `complete`, `epoch`, `attrValid`, `attr`, `dirty`, `clean` | `dentries`, `directories.children_complete`/`epoch`, `inodes.attrs_valid` and attributes, `dirty`, `cache_state.clean_shutdown` |
+| `dbCur` | The cache database now (for D): `dent`, `complete`, `epoch`, `attrValid`, `attr`, `dirty`, `clean`; for F (steps 23.8, 23.11): `fRow` (its row exists), `fDent` (its dentry in D), `fValid`, `fAttr`, `fDirty` | `dentries`, `directories.children_complete`/`epoch`, `inodes.attrs_valid` and attributes, `dirty`, `cache_state.clean_shutdown` |
 | `dbOpts` | Database states a crash may leave: the last fsynced commit and every later one | the WAL at `synchronous=NORMAL` |
 | `mode` | `"up"` (serving), `"down"`, `"recover"`/`"start"` (startup), `"stop_*"` (shutdown) | `main.cc`'s lifecycle |
 | `seq` | The fill guards' logical clock | `FillGuards::seq` |
@@ -339,7 +341,8 @@ prints. A request's first step runs inside `Arrive`.
 | `TriState` | invariant | From a mutation's phase 1 until its phase 3 records the outcome (or it fails), its names read unknown and D's attributes are not valid (an attribute change's: D's attributes, until its End) |
 | `CrashSafe` | invariant | In every state, every combination of states the two disks could be left in recovers to a correct cache (of the backing filesystem, every state of D's metadata its regime lets a power loss leave: `MetaCrash`). It is checked without taking the crash, so it finds crash bugs early |
 | `CrashRefines` | invariant (step 12.8) | Yggdrasil's crash refinement: whatever a power loss leaves of the two disks, what dcfs serves of D once recovery has run (`Observed` of the recovered cache over the backing state) is a state the backing filesystem itself may be left in: dcfs adds no crash outcome. It follows from `CrashSafe` (redundant, not vacuous: a dcfs that served a wrong state would fail it), and is weaker: it would accept dcfs serving a different admissible state than the one the backing filesystem was actually left in, which `CrashSafe` rules out; stated for what it says. Checked by `MC_recovery.cfg`, `MC_crash_*.cfg` and the litmus configurations |
-| `DurableSetSound` | invariant | If `Context::dirty.durable` has D, every database state a crash may leave has D dirty (the fast path's premise) |
+| `DurableSetSound` | invariant | If `Context::dirty.durable` has D, every database state a crash may leave has D dirty (the fast path's premise); for F, its mark or no row of F (step 23.11: a born-dirty row) |
+| `BornDirty`, `LostRowProbed`, `DirtyBeforeChange`, `ClearOnlyAfterSync`, `RecoveryForgetsDirty` | invariants and action properties (step 23.11) | See [Born-dirty create](#born-dirty-create-step-2311) |
 | `CleanMeansNoDirty` | invariant | `clean_shutdown = 1` is never durable together with a dirty row |
 | `GuardsBalanced` | invariant | `FillGuards::inflight` is the number of requests between their phase 1 and their `End` (an interrupted mutation releases its guard) |
 | `RecoveryIdempotent` | invariant | Recovery may crash and start again (FSCQ's crash condition for recovery, step 12.6): while it runs (from a crash to `ProbesDone`), every database state a crash may leave recovers to a correct cache whatever a crash left of the backing filesystem. It is `CrashSafe` restricted to the recovery modes, named for what a crash during recovery relies on (recovery's own commits never leave a state it cannot start from again: `known_bugs/recover_clears_dirty_first`). Checked by `MC_small.cfg` and `MC_recovery.cfg` (in the large configurations `CrashSafe` already covers it) |
@@ -535,7 +538,10 @@ sequence, independently of its entries: more than the definition allows
 (a create can persist without its own change of D's mtime, or D's
 attributes ahead of its entries), so the regime over-approximates it.
 F's attributes (its access time and setattrs, step 23.8) persist in order
-among themselves by (1), and from any state independently of D's.
+among themselves by (1), and F's name in D (step 23.11) by (3); F's
+create changes both, so it is kept for both or neither (items `F#` and
+`F@D`; before step 23.11 F had no name, and its attributes came from any
+state of the sequence).
 Everything else may persist in either order: changes of different names,
 any file's data against any entry. The changes are read off the sequence
 (`Touched(i)`: the names that differ between `bSeq[i-1]` and `bSeq[i]`).
@@ -733,6 +739,7 @@ FALSE in the real configurations.
 | `interrupt_undo` | not historical: an interrupt before the syscall puts the resolved name back instead of leaving it unknown; without the kernel lock | `TriState` | a rename of `a` runs phase 1; a create of `a` runs phase 1 (in flight); the rename, interrupted before its syscall, puts `a` back while the create is in flight |
 | `interrupt_leaks_guard` | not historical: an interrupted mutation that never `End`s | `GuardsBalanced` | a create's phase 1; interrupted before its syscall, it replies without `End` |
 | `attr_change_end_skipped` | 8.2's mutation survivors (step 12.11): a deleted `Mutation::End` after an attribute change (`AttrChangeEnd <- AttrChangeEndSkipped`) | `GuardsBalanced` | an attribute change of D: phase 1, its syscall; its end leaves `FillGuards::inflight` raised with no request in flight (its refresh, and every later fill of D, is then refused) |
+| `borndirty_*` | step 23.11 | `CrashSafe` | see [Born-dirty create](#born-dirty-create-step-2311) |
 | `sync_by_file_fsync` | not historical (step 12.8): a sync point after FSYNC whose only barrier is the file's fsync (`SyncBarrier <- FsyncOnly`), under the `"ext4"` regime (`MClitmus.tla`'s implied-directory-fsync program) | `CrashSafe` | create f: phase 1, its syscall, phase 3 (f recorded present); write f; FSYNC of f: its fsync makes f's data durable, not its entry in D (Ferrite's Definition 7), and `ClearDirty` takes D out of the dirty set: a power loss may now lose the create while the database says f is present and recovery has nothing to forget. Under `"seq"` the same configuration finds nothing |
 
 ## Findings
@@ -1428,6 +1435,151 @@ restart that file's access time can be behind with no power loss (README
 Trace validation is unchanged: the recorder traces directories, and a
 held fill is only ever of a file (it reuses the refresh events, which
 `Trace.tla` reads for the traced directory only).
+
+## Born-dirty create (step 23.11)
+
+russ's decision (2026-10-09): "mirror the way a real filesystem works
+(files are created dirty until fsync or dirty_writeback)". A create's phase
+3 inserts the new row and its dirty mark in one transaction at normal
+durability, so every state a crash may leave holds the row with its mark,
+or no row (and with no row the cache claims nothing about the file; its
+name is covered by the parent's mark, durable since phase 1). The row then
+counts as durably dirty, and `BeginWriting` on it needs no fsync. The code
+already puts the row and its mark in one transaction (`RecordNewChild`);
+what the model adds is the rule that this makes the row durably dirty, and
+what that rule needs. (`docs/design.md`, "Born-dirty create".)
+
+**What the model has.** F may not exist yet (`FInitExists`: the
+configurations of step 23.8 start with F and its row, those of step 23.11
+without). `bCur.fn` says whether F exists, under its name in D (a name
+apart from `Names`, as step 23.10's); `bCur.fs` is the stamp of F's last
+change that was not a read (step 23.10's ghost), so that F's cached
+attributes can be checked for being behind too. The database has F's row
+(`fRow`) as a field a crash's prefix may drop, and F's dentry in D
+(`fDent`). Requests:
+
+| Action | What it does | dcfs |
+|---|---|---|
+| `fcreate` (`Arrive`) | Phase 1 on D (F's name and D's attributes unknown, D dirty, kSync unless D is durably dirty), under D's lock | `DirCacheFS::CreateChild`, `cache::BeginCreate` |
+| `FileCreateSyscall` | The create: F exists, with new attributes; D changes; `EEXIST` if F exists | `backing::MkdirAt`, ... |
+| `FileCreateProbe` | `RecordNewChild`'s snapshot and probe | `backing::RecordNewChild` phase A |
+| `FileCreatePhase3` | One transaction: F's row (attributes if F's guard allows), its dentry if `Owns(D)`, its mark; `Mutation::End`; F durably dirty if this transaction inserted the row (`BornHere`) | `RecordNewChild` phase B |
+| `FileCreateMark` | Only with `Phase3Split` (a known bug): the mark as a second transaction | |
+| `FileCreateFailed` | `EEXIST`: `End`, the reply | |
+| `flookup` (`Arrive`), `FileLookupCommit` | A lookup of F's name (it stands for a listing of D too): the snapshots and the probe, then the record: a negative dentry, or F's row upserted with its attributes (`ChildFilled`), born dirty if new and `FillMarks` says so, and the dentry if D's guard allows | `backing::ResolveName`, `RecordChild` |
+| `ProbesDone` | Also deletes F's row if it is in the dirty set for a mutation and F is gone (and drops its mark, which covers nothing then) | `backing::ProbeRecoveredRows` |
+
+`fset` (a setattr, or a writable open with its writes and its last
+release, as in step 23.10) commits its phase 1 at normal durability when F
+is durably dirty (`FSetSync`): right after a born-dirty create it needs no
+fsync.
+
+**Properties.** Besides the existing ones (`FileOK` now says that F's
+attributes are recorded valid only while F exists, and are behind it only
+in the access time; `FDentOK` checks F's dentry; `DurableSetSound` for F
+reads "F's mark, or no row of F"; `GuardsBalanced` counts F's guard too,
+the audit's G17):
+
+| Property | Kind | Says |
+|---|---|---|
+| `BornDirty` | invariant | While F's create may still be lost (some state of `bSeq` has no F), no database state a crash may leave holds F's row without its mark |
+| `LostRowProbed` | invariant | Its consequence: whatever a crash leaves, a row of F whose object the crash may have lost is in the dirty set for a mutation, so the start's probe (`ListDirty`'s mutations only) finds it and deletes it |
+| `DirtyBeforeChange` | action property | The dirty set's condition (i) per inode (step 23.10's, re-expressed): every change of the backing filesystem that D's records (its names, its attributes, F's name) or F's (its attributes but the access time) cover comes when every database state a crash may leave has that inode dirty for a mutation, or (for F) no row; an access time when F's mark is committed |
+| `ClearOnlyAfterSync` | action property | Condition (ii): a mark goes (or F's becomes atime-only) only when nothing it covers is unsynced and nothing of the inode is in flight; F's whole mark only when F is not open either |
+| `RecoveryForgetsDirty` | invariant | Condition (iii): recovery forgets D's names, F's name and D's attributes for a dirty D, F's attributes and dentry for a dirty F |
+
+**G5: a fill that inserts the row first.** The created object's row is
+outside the create's mutation (`BeginCreate` names the parent only), so a
+lookup or a listing of D can insert it before phase 3, and
+`RecordChild` records it with valid attributes and no mark (its guard was
+never touched). The model shows two ways this leaves a clean row with the
+attributes of an object a power loss may still erase, served by nodeid (an
+NFS handle's `LOOKUP(".")`, a `GETATTR`) until an open finds it gone:
+
+- without the kernel's lock (the audit's case): the lookup between the
+  create's syscall and its phase 3 (`known_bugs/borndirty_fill_unmarked`,
+  5 states);
+- with the lock, after a daemon crash between the create's syscall and its
+  phase 3: the restart keeps D dirty, nothing is in flight, and the first
+  lookup of the name records the row clean, while the create is still not
+  durable (`borndirty_fill_unmarked_after_crash`, 10 states). This one is
+  reachable in today's code, with today's locking; the start neither
+  sweeps that row (`ForgetUnnamedRows` takes rows with `nlink` 0) nor
+  probes it (it is not dirty).
+
+The audit's two candidate rules miss the second case: recording the
+child's attributes only when the parent's fill is allowed
+(`borndirty_fill_rule_a`; without a crash it keeps `CrashSafe` but not
+`BornDirty`: the row exists clean, its attributes unknown), and marking the
+row only when the parent's fill is refused (`borndirty_fill_rule_b`): after
+the restart the parent is neither in flight nor touched. The rule the
+model takes (`FillMarks` in `dcfs.tla`): **a row that a fill inserts while
+its parent is in the dirty set is born dirty**, in the fill's transaction.
+A parent with a create in it that a crash may still lose is always dirty
+(its phase 1 marks it durably, and only a sync point whose `syncfs`
+covered the create clears it), so every such row is marked. Cost: one
+dirty row, and at a crash's start one probe, per child first recorded by a
+lookup or listing of a directory changed since the last sync point; the
+next sync point clears them.
+
+**A row a fill inserted is not born at phase 3.** If a fill inserted F's
+row (born dirty) between the create's syscall and its phase 3, and a sync
+point then cleared that mark (its `syncfs` covered the create), a crash may
+still leave the row clean; phase 3 must not then take F as durably dirty
+(`known_bugs/borndirty_not_born_here`: the fast path that follows loses a
+write's phase 1, 11 states). So F is durably dirty only if phase 3's
+transaction inserted the row (`BornHere`; in the code, `UpsertInode`
+reports it).
+
+**Known bugs** (each `CrashSafe`; counterexample length in states):
+
+| Variant | What it does | States |
+|---|---|---|
+| `borndirty_two_commits` | phase 3's row and mark in two transactions (`Phase3Split`): the lost mark | 5 |
+| `borndirty_parent_not_durable` | the create's phase 1 not durable (crash F1 for F's create): a negative dentry of F survives a create that a power loss keeps | 5 |
+| `borndirty_fill_unmarked` | G5, today's rule, without the lock | 5 |
+| `borndirty_fill_unmarked_after_crash` | G5, today's rule, with the lock, after a daemon crash | 10 |
+| `borndirty_fill_rule_a`, `_rule_b` | the audit's candidate rules | 10 each |
+| `borndirty_trusts_any_row` | `BeginWriting`'s fast path for any existing row (`FSetSync`): a write's phase 1 lost, the cache behind | 6 |
+| `borndirty_sync_keeps_durable` | a sync point clears the born-dirty mark but keeps F durably dirty (the audit's fourth) | 9 |
+| `borndirty_not_born_here` | phase 3 takes F as durably dirty although a fill inserted the row before (without the lock) | 11 |
+| `borndirty_recover_keeps_file` | recovery keeps a dirty file's attributes (for the premise test of `RecoveryForgetsDirty`; no `VIEW`) | 5 |
+
+`premise_*_test` (small) checks that each new property bites:
+`BornDirty` and `LostRowProbed` on `borndirty_two_commits`,
+`DirtyBeforeChange` on crash F1, `ClearOnlyAfterSync` on
+`sync_during_mutation`, `RecoveryForgetsDirty` on
+`borndirty_recover_keeps_file`. Not modelled: the audit's G15
+(`RecordTmpfile`'s mark against `ClearDirty`'s fast path; the model has no
+`O_TMPFILE` and only the per-row clear).
+
+**Configurations** (alone on russ's machine, 2026-10-09; counts and times
+in the configurations table above):
+
+| Configuration | Test (tier) | Bounds |
+|---|---|---|
+| `MC_borndirty.cfg`, `_ext4`, `_metaprefix` | `borndirty_seq_test`, `borndirty_ext4_test`, `borndirty_metaprefix_test` (medium) | F not yet created; its create, lookups, setattrs and writes, getattrs, opens, releases and reads, sync points; 1 slot, the kernel's lock, 3 changes, 1 crash |
+| `MC_borndirty_nolock.cfg`, `_nolock_ext4` | `borndirty_nolock_test`, `borndirty_nolock_ext4_test` (medium) | the same without opens, 2 slots, no kernel lock, 2 changes, 1 crash |
+
+**Abstractions.** F's create is a plain create (a writable create is that
+create and then `fset`); F's name is never renamed or unlinked; a create of
+F after a power loss lost it reuses F's identity (in the code, a new row
+id), so the probe's deletion drops F's mark with the row. The fill is one
+lookup; a listing of D records F's row the same way (`RecordChild`).
+
+**Trace validation.** Directory traces are unchanged: the create's events
+in D's trace are a create's (`phase1`, `syscall`, `probe`, `end`), and F's
+row and its mark are no directory's state. What the code half emits: a row
+born dirty at phase 3 needs no new event for D's trace (`MutationEnded`
+already marks phase 3); for a directory created by a mkdir its trace
+already begins with `origin` `mkdir` and its dirty row (Trace.tla's
+`OriginOK` requires it). A row a fill inserts born dirty is new for a
+directory child: its trace begins with `origin` `listing` or `parent`,
+which `OriginOK` requires clean today; the code half must give that line
+its dirty flag, and `Trace.tla`'s `OriginOK` must accept a dirty `listing`
+row when the parent was dirty (the recorder knows: the parent's line before
+it says so), a one-line change, no new action. File rows' marks wait for
+12.11b's file traces.
 
 ## Changing the model
 

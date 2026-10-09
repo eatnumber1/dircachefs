@@ -817,6 +817,44 @@ done, with the row's last attributes and a zero attribute timeout
 
 **Phase 3 never removes dirty rows.** Only a sync point does.
 
+**Born-dirty create** (step 23.11; russ, 2026-10-09: "mirror the way a
+real filesystem works as much as possible (files are created dirty until
+fsync or dirty_writeback)"; decided and checked in the model, the code
+follows in the step's second half). A create's phase 3 already inserts the
+new row and its dirty mark in one transaction at normal durability
+(`RecordNewChild`), so every state a crash may leave holds the row with its
+mark, or no row, and with no row the cache claims nothing about the object
+(its name is covered by the parent's mark, durable since phase 1). Such a
+row therefore counts as durably dirty (`Context::dirty.durable`), and a
+`BeginWriting` right after the create (a writable create, `O_CREAT` with
+writes) needs no WAL fsync of its own. It stops being dirty as any row
+does, at a sync point that covered it. Two rules come with it, both found
+by the model (`formal/README.md`, "Born-dirty create"):
+
+- Only a row that phase 3's own transaction inserted is born dirty in that
+  sense (`UpsertInode` says whether it inserted). A lookup or a listing of
+  the parent may have inserted the row first, and a sync point may have
+  cleared that row's mark since; a crash may still leave it clean.
+- A row that a fill (`RecordChild`, for a lookup or a listing) inserts
+  while its parent is in the dirty set is born dirty too, in the fill's
+  transaction. Without it the fill records the new object's row clean and
+  valid (its fill guard was never touched), and a power loss that loses
+  the create, which no `syncfs` has covered yet, leaves a clean row with
+  the attributes of an object that does not exist, answered by nodeid (an
+  NFS handle's `LOOKUP(".")`, a `GETATTR`) until an open finds it gone:
+  without the kernel's directory lock between a create's syscall and its
+  phase 3 (the 12.12 audit's G5), and with it, today, after a daemon crash
+  between a create's syscall and its phase 3 followed by a lookup of the
+  name before the next sync point (the parent stays dirty across the
+  restart; nothing is in flight; the start neither sweeps the row, whose
+  `nlink` is not 0, nor probes it). A parent with a create in it that a
+  crash may still lose is always in the dirty set, so the rule catches
+  every such row; its cost is one dirty row, and at a crash's start one
+  probe, per child first recorded in a directory changed since the last
+  sync point. The two rules the audit proposed (record a child's
+  attributes only when the parent's fill is allowed; mark the row only
+  when it is refused) both miss the daemon-crash case.
+
 **Kernel caches after dcfs's own mutations** are kept right by the kernel
 itself: it invalidates the parent's attributes and dentries for the
 operations it forwards (`fuse_dir_changed`, `fuse_update_ctime`,
