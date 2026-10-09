@@ -19,6 +19,23 @@ code (`dcfs/`, `bench/`, no tests) unless stated. File:line references
 drift. Each rule is what most of the code does, or is in `AGENTS.md`,
 `docs/design.md` or `docs/plan/process.md`, or is russ's decision.
 
+## Precedence, and the Abseil Tips of the Week
+
+When rules disagree, the first applies: (1) `AGENTS.md` and this guide's own
+rules; (2) the Google C++ style guide (and Google's other style guides, as
+above); (3) Abseil's Tips of the Week (https://abseil.io/tips/) as design
+guidance. russ, 2026-10-09: "we adopt all of https://abseil.io/tips/. It's
+a 'rule', but not as strong of a rule as the Google style guide or other
+style rules I've established in the past. Coding and review agents should
+use it as design guidance rather than firm rules."
+
+- Coding and review agents use a tip when a design question matches one (the
+  index page lists the titles; read the tip online). Nothing here vendors the
+  tips.
+- A review finding that rests on a tip cites its number (`TotW #NNN`) and is
+  **advisory** unless it also breaks a rule above; the author may decline it
+  with a reason.
+
 ## 1. C++
 
 ### 1.1 Enforced mechanically

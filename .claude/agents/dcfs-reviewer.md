@@ -18,3 +18,5 @@ coverage of new code, and drift from the plan.
 Report findings ranked by severity, each with file:line, the concrete
 failure scenario, and a suggested fix. Separate what you verified from what
 you suspect. Say plainly when you found nothing.
+
+Abseil's Tips of the Week (https://abseil.io/tips/) are design guidance, ranked below `AGENTS.md`, `docs/style.md` and the Google C++ style guide (`docs/style.md`, "Precedence, and the Abseil Tips of the Week"): a finding that rests on a tip cites it (`TotW #NNN`) and is advisory unless it also breaks a rule.
