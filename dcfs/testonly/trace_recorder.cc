@@ -235,6 +235,16 @@ TraceRecorder::Req *TraceRecorder::Find(Ino dir, Frame **owner) {
   return nullptr;
 }
 
+TraceRecorder::Frame *TraceRecorder::SyncPastSnapshot() {
+  if (shutdown_) return nullptr;
+  for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+    if (it->kind == Frame::Kind::kSync) {
+      return it->snapshot_at >= 0 ? &*it : nullptr;
+    }
+  }
+  return nullptr;
+}
+
 TraceRecorder::Req *TraceRecorder::RequestReq(Ino dir) {
   Frame *rf = InnermostRequest();
   if (rf == nullptr) return nullptr;
@@ -574,9 +584,22 @@ void TraceRecorder::After(Context &ctx) {
       CHECK_OK(parent_marked.status());
       marked = absl::StrCat(",\"parent_marked\":", Bool(*parent_marked));
     }
+    // A row that appears while a sync point is between its snapshot and its
+    // clear (a mkdir during its syncfs): that sync point's clear empties
+    // Context::dirty.durable, which a born-dirty row is in (step 23.11), and
+    // keeps the row's mark (it is not in the snapshot). Its trace begins
+    // with that sync point in flight, past its snapshot ("sync_p": its
+    // slot; Trace.tla's TraceInit), and gets its syncfs and clear lines.
+    std::string in_sync;
+    if (Frame *sync = SyncPastSnapshot(); sync != nullptr) {
+      Req &req = Open(*sync, dir, "sync");
+      req.arrived = true;
+      in_sync = absl::StrCat(",\"sync_p\":\"p", req.slot, "\"");
+    }
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"begin\",\"origin\":",
-                            JsonStr(origin), marked, ",\"db\":", db, "}"));
+                            JsonStr(origin), marked, in_sync, ",\"db\":", db,
+                            "}"));
     dirs_[dir].last = db;
     dirs_[dir].last_state = std::move(now);
     covered_.insert(dir);

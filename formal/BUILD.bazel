@@ -715,6 +715,13 @@ TRACE_TESTS = {
     "origin_parent_born_dirty": None,
     # ... and clean, rejected.
     "origin_parent_clean": "\"ev\":\"begin\",\"origin\":\"parent\"",
+    # A mkdir during a sync point's syncfs: the new row is born durably
+    # dirty after the sync point's snapshot, so the trace begins with that
+    # sync point in flight ("sync_p"), whose clear keeps the row's mark and
+    # empties Context::dirty.durable: valid ...
+    "origin_mkdir_during_sync": None,
+    # ... a clear that drops the mark is rejected.
+    "origin_mkdir_during_sync_cleared": "\"ev\":\"sync_clear\"",
     # Recovery makes a clean directory's dentry unknown when the object it
     # points at was dirty (a, whose key is among the dirty inodes'): valid.
     "recover_forgets_dirty_child": None,

@@ -330,6 +330,9 @@ class TraceRecorder final : public ProtocolEvents {
   // The request of `dir`'s trace that the innermost FUSE request owns, or
   // null.
   Req *RequestReq(Ino dir);
+  // The innermost sync point's frame if it took its snapshot (and has not
+  // ended), outside a shutdown; null otherwise.
+  Frame *SyncPastSnapshot();
   // Opens a request of `dir`'s trace owned by `frame`.
   Req &Open(Frame &frame, Ino dir, std::string kind, std::string n = "",
             std::string m = "");

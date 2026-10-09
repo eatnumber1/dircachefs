@@ -61,6 +61,7 @@ TraceNames == IF AllNames = {} THEN {"~"} ELSE AllNames
 \* whole getattr (GetattrWhole) runs in.
 SlotOf(e) == IF Has(e, "p") THEN {e.p} ELSE {}
 TraceProcs == {"p0"} \cup UNION {SlotOf(Events[i]) : i \in DOMAIN Events}
+                     \cup (IF Has(Header, "sync_p") THEN {Header.sync_p} ELSE {})
 
 \* Upper bounds the trace cannot exceed (the model's MaxMutations,
 \* MaxCrashes).
@@ -192,6 +193,8 @@ OriginOK ==
       [] Origin = "existing" -> TRUE
       [] OTHER -> FALSE
 
+InSync == Has(Header, "sync_p")
+
 TraceInit ==
     /\ l = 1
     /\ HDB.inflight = 0
@@ -229,8 +232,17 @@ TraceInit ==
     \* A daemon's recorder begins the traces when StartRun has committed,
     \* before backing::Startup's probe ends (ProbesDone): "probe" then.
     /\ mode \in {"up", "probe"}
-    /\ seq = 0 /\ inflight = 0 /\ durableD = HDB.durable /\ running = None
-    /\ ps = [p \in Procs |-> IdleProc]
+    \* A row that appears while a sync point is past its snapshot (a mkdir
+    \* during its syncfs; the begin line's "sync_p", step 23.11): that sync
+    \* point is in flight at S2, and its snapshot predates the row (the
+    \* clock moved since: seq 1, snap 0), so its clear keeps the row's mark
+    \* and empties Context::dirty.durable.
+    /\ seq = (IF InSync THEN 1 ELSE 0)
+    /\ inflight = 0 /\ durableD = HDB.durable /\ running = None
+    /\ ps = [p \in Procs |->
+               IF InSync /\ p = Header.sync_p
+               THEN NewReq("sync", None, None, "S2", None, None, FALSE)
+               ELSE IdleProc]
     /\ servedWrong = FALSE
     /\ fm = NoF
     /\ stamp = NumNames + 1 /\ muts = 0 /\ crashes = 0

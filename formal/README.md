@@ -1615,7 +1615,13 @@ the parent has a mutation's mark, read from the parent's row after the
 fill's commit), and `OriginOK` requires the row dirty iff it is set
 (`trace_tests/origin_listing_clean_under_dirty_parent` is the rejected
 case); a `parent` row (`ParentOf`, which marks every row it inserts) must
-be dirty. No new action. File rows' marks wait for 12.11b's file traces;
+be dirty. No new action. A row born durably dirty while a sync point is
+past its snapshot (a mkdir during its syncfs) begins its trace with that
+sync point in flight at `S2` (the begin line's `sync_p`; `TraceInit` puts
+the clock past the sync point's snapshot), so that the clear, which keeps
+the row's mark and empties `Context::dirty.durable`, is its `sync_clear`
+step (`trace_tests/origin_mkdir_during_sync`, and `..._cleared`, a clear
+that drops the mark, rejected). File rows' marks wait for 12.11b's file traces;
 the harness's invariant checker checks them at `ChildRowRecorded`.
 
 ## Changing the model

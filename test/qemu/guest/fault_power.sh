@@ -460,7 +460,7 @@ check_atime() {
 }
 
 # born (step 23.11, the review's path A on real disks): the backing
-# filesystem drops writes from the start (dm; kill: its journal has not
+# filesystem drops the create's writes (dm; kill: its journal has not
 # committed the create). A create in d9 is held in phase 3 (as phase2: the
 # backing filesystem frozen in its syscall, then the cache filesystem frozen
 # and the backing one thawed), and the daemon killed there: phase 3 never
@@ -477,12 +477,16 @@ check_atime() {
 # gets ESTALE.
 setup_born() {
 	ls "$MNT/d9" "$MNT/d10" >/dev/null
-	[ "$CUT_MODE" = kill ] || fault_mode "$FD_BACK" drop-writes || fail born-cut-backing "fault_mode failed"
 	fd_freeze back || fail born-freeze "FIFREEZE of the backing filesystem failed"
 	touch "$MNT/d9/b" &
 	TOUCH_PID=$!
 	fd_blocked "$DAEMON_PID" "$SRC" || fail born-held-1 "the daemon never blocked on the frozen backing filesystem"
 	fd_freeze cache || fail born-freeze-cache "FIFREEZE of the cache filesystem failed"
+	# The backing filesystem drops writes from here (dm), frozen and clean:
+	# the create, which runs at the thaw, never reaches its disk. (Not from
+	# the start: a freeze of a btrfs whose writes are dropped turns it
+	# read-only.)
+	[ "$CUT_MODE" = kill ] || fault_mode "$FD_BACK" drop-writes || fail born-cut-backing "fault_mode failed"
 	fd_thaw back
 	sleep 1
 	if [ -e "$SRC/d9/b" ] && kill -0 "$TOUCH_PID" 2>/dev/null; then
