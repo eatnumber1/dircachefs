@@ -692,7 +692,7 @@ from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 | `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 280,869 | ~1-2 min |
 | `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable` | 892,708 | ~1-2.5 min |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable` | 1,036,982 | ~1.5-4 min |
-| `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 263,848; 297,308; 29,950 | ~1.5 min; ~2.5 min; ~30 s (load 15) |
+| `MC_atime.cfg`, `MC_atime_concurrent.cfg`, `MC_atime_crash.cfg` | `atime_test`, `atime_concurrent_test`, `atime_crash_test` (medium) | the file F (step 23.8; [Access times of a file](#access-times-of-a-file-step-238)) | 260,871; 292,824; 29,322 (step 23.8b's corrected `View`; before it 263,848, 297,308, 29,950, the first two depending on TLC's workers) | ~1.5 min; ~1.5 min; ~20 s (load 10-15, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
 | `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and a sync point, 1 crash; every invariant and property besides | 679-1,475 each | seconds |
 
@@ -1383,6 +1383,26 @@ without bound (one that finds another's touch marks the attributes unknown
 and touches in turn: wasted work, never a wrong record), and its raw value
 made the state space infinite.
 
+Step 23.8b corrected that normalization (`FSnapView`). A `VIEW` that
+merges only equivalent states gives the same number of distinct states
+whatever the number of TLC's workers; the first `FSnapView` did not
+(`MC_atime.cfg`: 263,723 with one worker, 263,890, 263,796 and 263,848 with
+four, 2026-10-09). It normalized every slot's snapshot, including the 0 of
+a slot that has taken none, which read as current exactly while the clock
+was 0; with the clock zeroed in the view, a state at clock 0 and one at
+clock k were one state, but a request arriving in either got a different
+view, so the view was not a congruence and the states TLC reached depended
+on which one it kept. Nothing an invariant or property reads tells those
+states apart (only the guards read the clock or a snapshot, and only by
+comparing them), so no violation could hide there: the run of `MC_atime.cfg`
+with no `VIEW` (1,457,405 states) finds none. Now a snapshot is current or
+stale only at the steps that read it (`FSnapPcs`), and 0 elsewhere. The
+bisection is in `MCview.tla` and `view_bisect/` (manual targets
+`atime_view_*_test`, at 1 and 4 workers through `tlc_test`'s `workers`
+attribute): only the views with the first `FSnapView` varied; without it,
+or with the corrected one, every count was the same at 1 and 4 workers
+over three runs each.
+
 Abstractions: F has no names; reads and setattrs both count against
 `MaxMutations` and take their stamps from `stamp`; writable opens of F are
 still not modelled (see above); a shutdown with F open is not modelled
@@ -1395,9 +1415,9 @@ restart that file's access time can be behind with no power loss (README
 
 | Configuration or variant | Test | Expected | |
 |---|---|---|---|
-| `MC_atime.cfg` | `atime_test` (medium) | no error | 1 name, 1 slot, 3 changes (reads, setattrs, D's create), 1 crash; every invariant, `FileExact`, `ReplyObservable`. 263,848 distinct states, ~1.5 min at load 15 (2026-10-08) |
-| `MC_atime_concurrent.cfg` | `atime_concurrent_test` (medium) | no error | 2 slots, 2 changes, no crash: F's requests and sync points interleaving. 297,308 distinct states, ~2.5 min. (2 slots with the crash and D's create passed a million states without finishing) |
-| `MC_atime_crash.cfg` | `atime_crash_test` (medium) | no error | `atime_held_fill_no_touch`'s bounds: 2 slots, opens, releases and sync points, 1 read, 1 crash. 29,950 distinct states |
+| `MC_atime.cfg` | `atime_test` (medium) | no error | 1 name, 1 slot, 3 changes (reads, setattrs, D's create), 1 crash; every invariant, `FileExact`, `ReplyObservable`. 260,871 distinct states (step 23.8b; 1,457,405 with no `VIEW`), ~1.5 min at load 15 (2026-10-09) |
+| `MC_atime_concurrent.cfg` | `atime_concurrent_test` (medium) | no error | 2 slots, 2 changes, no crash: F's requests and sync points interleaving. 292,824 distinct states (step 23.8b), ~1.5 min. (2 slots with the crash and D's create passed a million states without finishing) |
+| `MC_atime_crash.cfg` | `atime_crash_test` (medium) | no error | `atime_held_fill_no_touch`'s bounds: 2 slots, opens, releases and sync points, 1 read, 1 crash. 29,322 distinct states (step 23.8b) |
 | `known_bugs/atime_held_fill_no_touch` | `known_bug_atime_held_fill_no_touch_test` | `CrashSafe` | the held fill records and marks the row dirty, but does not touch F's guard (`HeldFillMark <- HeldFillMarkNoTouch`): a sync point that took its snapshot before the release clears the row |
 | `known_bugs/atime_fill_no_touch` | `known_bug_atime_fill_no_touch_test` (large: 634,354 states, ~7 min) | `CrashSafe` | a refresh that records an open F's attributes marks the row but does not touch the guard (`FillF <- FillFNoTouch`): open, a read, the refresh, a release with nothing new to record, and the sync point clears the row |
 | `known_bugs/atime_sync_clears_held` | `known_bug_atime_sync_clears_held_test` | `FileExact` | a sync point clears a held file's row (`SyncKeepsHeld <- SyncKeepsNotHeld`): a read, then a daemon crash before any held fill, and the restart serves the old access time |
