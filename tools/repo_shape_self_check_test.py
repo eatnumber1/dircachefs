@@ -113,6 +113,24 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
             repo_shape.no_test_only_comments(
                 self.root, {("dcfs/f.h", "only in tests"): ""})
 
+    def test_friend_of_a_testonly_class_is_reported(self):
+        write(self.root, "dcfs/g.h",
+              "class G {\n  friend struct testonly::GPeer;\n"
+              "  friend class ::dcfs::testonly::Other;\n"
+              "  friend class H;\n};\n"
+              "// friend testonly::NotCode is only a comment.\n")
+        write(self.root, "dcfs/testonly/p.h",
+              "struct P { friend struct testonly::Q; };\n")
+        write(self.root, "dcfs/g_test.cc",
+              "struct T { friend struct testonly::Q; };\n")
+        problems = repo_shape.no_testonly_friends(self.root)
+        self.assertEqual(2, len(problems), problems)
+        self.assertIn("dcfs/g.h:2:", problems[0])
+        self.assertIn("dcfs/g.h:3:", problems[1])
+
+    def test_good_tree_has_no_testonly_friends(self):
+        self.assertEqual([], repo_shape.no_testonly_friends(self.root))
+
 
 if __name__ == "__main__":
     unittest.main()

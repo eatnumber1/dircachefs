@@ -104,7 +104,7 @@
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
-#include "dcfs/testonly/dir_cache_fs_peer.h"
+#include "dcfs/testonly/fake_bookkeeping.h"
 #include "dcfs/testonly/files.h"
 #include "dcfs/testonly/cost_counter.h"
 #include "dcfs/testonly/invariant_checker.h"
@@ -1209,6 +1209,10 @@ class DirCacheFSTest : public ::testing::Test {
       .max_held_fds = 64,
       .mount_options = BuildMountOptions(false, {}).value().options};
   std::unique_ptr<DirCacheFS> fs_;
+  // The bookkeeping the checker checks (null before Start).
+  const events::Bookkeeping *Book() const {
+    return fs_ == nullptr ? nullptr : &fs_->bookkeeping();
+  }
   std::unique_ptr<testonly::TraceRecorder> recorder_;
   std::unique_ptr<testonly::InvariantChecker> checker_;
   // The cost counters (step 26.4b), and the one observer Context::events
@@ -5328,12 +5332,13 @@ TEST_F(DirCacheFSTest, TmpfileRowGoesAtTheStartAfterACrash) {
 // fixture installs (dcfs/testonly/invariant_checker.h) to abort, naming the
 // invariant and the request. What breaks it is the test's own doing (a
 // transaction it opens, a row it rewrites, DirCacheFS bookkeeping it
-// changes through the testonly peer), inside the death test's child, so
-// that the fixture's own checks at DESTROY still pass: no production code
-// is faulted.
+// shows the checker through InvariantChecker::TamperBookkeeping, a copy of
+// the bookkeeping DirCacheFS reports with one entry changed), inside the
+// death test's child, so that the fixture's own checks at DESTROY still
+// pass: no production code is faulted.
 
 using DirCacheFSDeathTest = DirCacheFSTest;
-using testonly::DirCacheFSPeer;
+using testonly::FakeBookkeeping;
 
 // A regex for "in request <op> nodeid <id>" in a violation's message.
 std::string InRequest(std::string_view op, InodeId id) {
@@ -5569,7 +5574,8 @@ TEST_F(DirCacheFSDeathTest, OpenForWritingButNotInWritten) {
   ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
   EXPECT_DEATH(
       {
-        DirCacheFSPeer::MutableWritten(*fs_).erase(f);
+        checker_->TamperBookkeeping(
+            [&](FakeBookkeeping &book) { book.written.erase(f); });
         Getattr(f);
       },
       absl::StrCat("invariant violated: writable-open: inode ", f,
@@ -5610,7 +5616,8 @@ TEST_F(DirCacheFSDeathTest, ZeroLookupCountKept) {
   const InodeId f = static_cast<InodeId>(entry.nodeid);
   EXPECT_DEATH(
       {
-        DirCacheFSPeer::MutableLookups(*fs_)[f] = 0;
+        checker_->TamperBookkeeping(
+            [&](FakeBookkeeping &book) { book.lookups[f] = 0; });
         Getattr(f);
       },
       absl::StrCat("invariant violated: lookup-count: nodeid ", f,
@@ -5623,10 +5630,11 @@ TEST_F(DirCacheFSDeathTest, HeldDescriptorDroppedBehindTheCount) {
   Created f = Create(kRootInode, "f", O_RDWR);
   ASSERT_EQ(f.reply.error, 0);
   ASSERT_EQ(Release(f.id, f.fh).error, 0);
-  ASSERT_TRUE(DirCacheFSPeer::Written(*fs_).at(f.id).has_value());
+  ASSERT_TRUE(FakeBookkeeping::CopyOf(fs_->bookkeeping()).written.at(f.id));
   EXPECT_DEATH(
       {
-        DirCacheFSPeer::MutableWritten(*fs_)[f.id].reset();
+        checker_->TamperBookkeeping(
+            [&](FakeBookkeeping &book) { book.written[f.id] = false; });
         Getattr(kRootInode);
       },
       "invariant violated: held-fds: held_fds_ is 1 but 0 entries "
@@ -5635,15 +5643,11 @@ TEST_F(DirCacheFSDeathTest, HeldDescriptorDroppedBehindTheCount) {
 
 TEST_F(DirCacheFSDeathTest, RemovedRecordWithoutALookup) {
   Start();
-  ASSERT_OK_AND_ASSIGN(cache::CachedAttr root,
-                       cache::GetAttr(ctx_, kRootInode));
   constexpr InodeId kGone = 12345;
   EXPECT_DEATH(
       {
-        absl::StatusOr<FileDescriptor> fd =
-            syscalls::openat(AT_FDCWD, source_, O_PATH);
-        ASSERT_THAT(fd, IsOk());
-        DirCacheFSPeer::AddRemoved(*fs_, kGone, root, *std::move(fd));
+        checker_->TamperBookkeeping(
+            [&](FakeBookkeeping &book) { book.removed.insert(kGone); });
         Getattr(kRootInode);
       },
       "invariant violated: removed-record: nodeid 12345 has a "
@@ -5669,7 +5673,7 @@ TEST_F(DirCacheFSTest, CostCounterCountsRequestsStepsAndTransactions) {
   EXPECT_GE(counts.durable_transactions, 1);
   EXPECT_GT(counts.backing_calls, 0);
   // The checker's statements are left out.
-  ASSERT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
+  ASSERT_THAT(checker_->CheckAll(ctx_, Book()), IsOk());
   EXPECT_EQ(counter_.counts().steps, counts.steps);
 }
 
@@ -5680,14 +5684,15 @@ TEST_F(DirCacheFSTest, InvariantChecksReportAsAStatus) {
   auto [lookup, entry] = Lookup(kRootInode, "f");
   ASSERT_EQ(lookup.error, 0);
   const InodeId f = static_cast<InodeId>(entry.nodeid);
-  EXPECT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
+  EXPECT_THAT(checker_->CheckAll(ctx_, Book()), IsOk());
   EXPECT_THAT(checker_->CheckBackingCall(ctx_), IsOk());
-  DirCacheFSPeer::MutableLookups(*fs_)[f] = 0;
-  absl::Status all = checker_->CheckAll(ctx_, fs_.get());
+  FakeBookkeeping book = FakeBookkeeping::CopyOf(*Book());
+  book.lookups[f] = 0;
+  absl::Status all = checker_->CheckAll(ctx_, &book);
   EXPECT_EQ(all.code(), absl::StatusCode::kFailedPrecondition);
   EXPECT_THAT(all.message(), ::testing::StartsWith("lookup-count: "));
-  DirCacheFSPeer::MutableLookups(*fs_)[f] = 1;
-  EXPECT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
+  book.lookups[f] = 1;
+  EXPECT_THAT(checker_->CheckAll(ctx_, &book), IsOk());
 }
 
 // A sync point's one-statement clear, DELETE FROM dirty with no WHERE
@@ -5806,7 +5811,8 @@ TEST_F(DirCacheFSDeathTest, HeldDescriptorsAboveTheCap) {
   Start();
   EXPECT_DEATH(
       {
-        DirCacheFSPeer::MutableHeldFds(*fs_) = 65;
+        checker_->TamperBookkeeping(
+            [](FakeBookkeeping &book) { book.held_fds = 65; });
         Getattr(kRootInode);
       },
       "invariant violated: held-fds: held_fds_ is 65, above max_held_fds_ "
@@ -5822,7 +5828,8 @@ TEST_F(DirCacheFSDeathTest, SharedFileWithNoRefs) {
   ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
   EXPECT_DEATH(
       {
-        DirCacheFSPeer::MutableRefs(*fs_, f) = 0;
+        checker_->TamperBookkeeping(
+            [&](FakeBookkeeping &book) { book.shared.at(f).refs = 0; });
         Getattr(f);
       },
       absl::StrCat("invariant violated: writable-open: inode ", f,
@@ -5838,7 +5845,9 @@ TEST_F(DirCacheFSDeathTest, SharedFileWithMoreWritableRefsThanRefs) {
   ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
   EXPECT_DEATH(
       {
-        DirCacheFSPeer::MutableWritableRefs(*fs_, f) = 2;
+        checker_->TamperBookkeeping([&](FakeBookkeeping &book) {
+          book.shared.at(f).writable_refs = 2;
+        });
         Getattr(f);
       },
       absl::StrCat("invariant violated: writable-open: inode ", f,
@@ -5854,7 +5863,8 @@ TEST_F(DirCacheFSDeathTest, WritableSharedFileNotOpenForWriting) {
   ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
   EXPECT_DEATH(
       {
-        DirCacheFSPeer::MutableOpenForWrite(*fs_).erase(f);
+        checker_->TamperBookkeeping(
+            [&](FakeBookkeeping &book) { book.open_for_write.erase(f); });
         Getattr(f);
       },
       absl::StrCat("invariant violated: writable-open: inode ", f,
@@ -5879,14 +5889,12 @@ TEST_F(DirCacheFSDeathTest, RemovedRecordBesideAWrittenEntry) {
   auto [lookup, entry] = Lookup(kRootInode, "f");
   ASSERT_EQ(lookup.error, 0);
   const InodeId f = static_cast<InodeId>(entry.nodeid);
-  ASSERT_OK_AND_ASSIGN(cache::CachedAttr row, cache::GetAttr(ctx_, f));
   EXPECT_DEATH(
       {
-        absl::StatusOr<FileDescriptor> fd =
-            syscalls::openat(AT_FDCWD, Path("f"), O_PATH);
-        ASSERT_THAT(fd, IsOk());
-        DirCacheFSPeer::AddRemoved(*fs_, f, row, *std::move(fd));
-        DirCacheFSPeer::MutableWritten(*fs_)[f];
+        checker_->TamperBookkeeping([&](FakeBookkeeping &book) {
+          book.removed.insert(f);
+          book.written[f] = false;
+        });
         Getattr(kRootInode);
       },
       absl::StrCat("invariant violated: removed-record: nodeid ", f,
@@ -5925,8 +5933,8 @@ TEST_F(DirCacheFSTest, StubOfAnUnknownDentryIsLegal) {
   ASSERT_THAT(db_.Exec("INSERT INTO dentries (parent, name, state) "
                        "VALUES (1, CAST('u' AS BLOB), 'unknown')"),
               IsOk());
-  EXPECT_THAT(checker_->CheckChanged(ctx_, fs_.get(), {}), IsOk());
-  EXPECT_THAT(checker_->CheckAll(ctx_, fs_.get()), IsOk());
+  EXPECT_THAT(checker_->CheckChanged(ctx_, Book(), {}), IsOk());
+  EXPECT_THAT(checker_->CheckAll(ctx_, Book()), IsOk());
   ASSERT_THAT(db_.Exec("DELETE FROM stubs WHERE id = -5"), IsOk());
   ASSERT_THAT(db_.Exec("DELETE FROM dentries WHERE name = CAST('u' AS BLOB)"),
               IsOk());
@@ -5965,7 +5973,7 @@ TEST_F(DirCacheFSTest, DestroyWithAFileStillOpenForWriting) {
   ASSERT_EQ(Open(f, O_RDWR).first.error, 0);
   fuse_session_destroy(se_);  // Would abort on a violation.
   se_ = nullptr;
-  EXPECT_TRUE(DirCacheFSPeer::Written(*fs_).empty());
+  EXPECT_EQ(fs_->bookkeeping().WrittenEntries(), 0u);
 }
 
 // An open older than the run (the harness standing for a crash: StartRun
@@ -6006,20 +6014,20 @@ TEST_F(DirCacheFSDeathTest, OpenOlderThanTheRunIsLeftOutUntilReleased) {
 // held_fds_ (only the full check does); at or below it, it does.
 TEST_F(DirCacheFSTest, InvariantChecksRecountOnlyBelowTheLimit) {
   Start();
-  auto &written = DirCacheFSPeer::MutableWritten(*fs_);
+  FakeBookkeeping book = FakeBookkeeping::CopyOf(*Book());
   for (InodeId id = 1'000'000;
-       written.size() <= testonly::InvariantChecker::kRecountLimit; ++id) {
-    written[id];  // An entry holding no descriptor.
+       book.written.size() <= testonly::InvariantChecker::kRecountLimit; ++id) {
+    book.written[id] = false;  // An entry holding no descriptor.
   }
-  ++DirCacheFSPeer::MutableHeldFds(*fs_);  // Says one does.
-  EXPECT_THAT(checker_->CheckChanged(ctx_, fs_.get(), {}), IsOk());
-  absl::Status all = checker_->CheckAll(ctx_, fs_.get());
+  ++book.held_fds;  // Says one does.
+  EXPECT_THAT(checker_->CheckChanged(ctx_, &book, {}), IsOk());
+  absl::Status all = checker_->CheckAll(ctx_, &book);
   EXPECT_THAT(all.message(), ::testing::StartsWith("held-fds: "));
-  written.clear();
-  absl::Status changed = checker_->CheckChanged(ctx_, fs_.get(), {});
+  book.written.clear();
+  absl::Status changed = checker_->CheckChanged(ctx_, &book, {});
   EXPECT_THAT(changed.message(), ::testing::StartsWith("held-fds: "));
-  --DirCacheFSPeer::MutableHeldFds(*fs_);
-  EXPECT_THAT(checker_->CheckChanged(ctx_, fs_.get(), {}), IsOk());
+  --book.held_fds;
+  EXPECT_THAT(checker_->CheckChanged(ctx_, &book, {}), IsOk());
 }
 
 // --- 8.2: survivors of the first mutation run (tools/mutation) -----------
@@ -7268,7 +7276,7 @@ class FaultIteration : public DirCacheFSTest {
   // violation, as found.
   std::vector<std::string> CheckAndRecover() {
     std::vector<std::string> found;
-    if (absl::Status s = checker_->CheckAll(ctx_, fs_.get()); !s.ok()) {
+    if (absl::Status s = checker_->CheckAll(ctx_, Book()); !s.ok()) {
       found.push_back(absl::StrCat("after the workload: ", s.message()));
     }
     MountFds mounts;

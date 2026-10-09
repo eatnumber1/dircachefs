@@ -33,16 +33,12 @@ namespace dcfs {
 
 using cache::InodeId;
 
-namespace testonly {
-struct DirCacheFSPeer;
-}  // namespace testonly
-
 // DirCacheFS is the low-level FUSE filesystem: every op below reads and
 // writes through cache::/backing:: against `ctx_`, never touching the
 // backing filesystem or ctx_.mounts directly itself -- that is backing.cc's
 // job. Every op has its own DirCacheFS method and an entry in the ops table
 // (see fuse_ops.h); none reply ENOSYS any more as of step 4.4.
-class DirCacheFS {
+class DirCacheFS : private events::Bookkeeping {
  public:
   // dcfs has exclusive access to the backing tree (nothing else is supposed
   // to modify it out from under the cache), so these default to long: the
@@ -248,12 +244,47 @@ class DirCacheFS {
   // its row while this is true (see SettleUnlinkedFile).
   bool HasOpenFiles(InodeId id) const;
 
+  // The in-memory bookkeeping (lookup counts, written files, held
+  // descriptors, removed records, shared backing files) as a read-only
+  // view: what fuse_ops.cc hands the runtime invariant checks' hooks
+  // (ProtocolEvents::CheckRequestEnd and the others; docs/design.md,
+  // "Runtime invariant checks").
+  const events::Bookkeeping &bookkeeping() const { return *this; }
+
  private:
-  // The runtime invariant checks (docs/design.md, "Runtime invariant
-  // checks") read the in-memory bookkeeping below through this testonly
-  // peer, and their tests break it on purpose through it; nothing else
-  // does.
-  friend struct testonly::DirCacheFSPeer;
+  // events::Bookkeeping, over the members below.
+  std::optional<uint64_t> Lookups(events::Ino id) const override;
+  size_t LookupEntries() const override { return lookups_.size(); }
+  void ForEachLookup(
+      absl::FunctionRef<void(events::Ino, uint64_t)> each) const override;
+  bool IsWritten(events::Ino id) const override {
+    return written_.contains(id);
+  }
+  size_t WrittenEntries() const override { return written_.size(); }
+  void ForEachWritten(absl::FunctionRef<void(events::Ino, bool)> each)
+      const override;
+  size_t HeldFdCount() const override { return held_fds_; }
+  size_t HeldFdLimit() const override { return max_held_fds_; }
+  bool IsOpenForWrite(events::Ino id) const override {
+    return open_for_write_.contains(id);
+  }
+  size_t OpenForWriteEntries() const override {
+    return open_for_write_.size();
+  }
+  void ForEachOpenForWrite(
+      absl::FunctionRef<void(events::Ino)> each) const override;
+  const void *OpenForWriteSet() const override { return &open_for_write_; }
+  bool IsRemoved(events::Ino id) const override {
+    return removed_.contains(id);
+  }
+  size_t RemovedEntries() const override { return removed_.size(); }
+  void ForEachRemoved(
+      absl::FunctionRef<void(events::Ino)> each) const override;
+  std::optional<events::Bookkeeping::SharedFile> SharedFileOf(
+      events::Ino id) const override;
+  void ForEachSharedFile(
+      absl::FunctionRef<void(events::Ino, const events::Bookkeeping::SharedFile &)>
+          each) const override;
 
   // The runtime invariant checks' hook (ProtocolEvents::BackingCall), called
   // right before each backing:: helper that takes only a descriptor

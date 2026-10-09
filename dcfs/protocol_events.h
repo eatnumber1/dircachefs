@@ -39,7 +39,9 @@
 // counter together (dcfs/testonly/observers.h fans one call out to each);
 // production pays one call to an empty function per hook.
 
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 #include "absl/functional/function_ref.h"
@@ -50,7 +52,6 @@
 namespace dcfs {
 
 struct Context;
-class DirCacheFS;
 
 namespace events {
 
@@ -152,6 +153,59 @@ struct Lifetime {
   int refs = 0;           // its open files (BackingFile::refs)
 };
 using LifetimeFn = absl::FunctionRef<Lifetime()>;
+
+// DirCacheFS's in-memory bookkeeping, read-only, as the runtime invariant
+// checks' hooks (ProtocolEvents::CheckRequestEnd and the others) see it at a
+// moment the daemon is between two steps. DirCacheFS implements it
+// (DirCacheFS::bookkeeping(), which fuse_ops.cc passes to the hooks); the
+// no-op observer never calls it, so production pays nothing. What the
+// observer sees is a view, never the maps: an observer checks it, a fake
+// can stand in for it.
+class Bookkeeping {
+ public:
+  // The counts of a nodeid's shared backing file (DirCacheFS::BackingFile).
+  struct SharedFile {
+    int refs = 0;           // its outstanding opens
+    int writable_refs = 0;  // ... that may write
+  };
+
+  virtual ~Bookkeeping() = default;
+
+  // The kernel's lookups dcfs counted for `id` (DirCacheFS::lookups_);
+  // nullopt: no entry.
+  virtual std::optional<uint64_t> Lookups(Ino id) const = 0;
+  virtual size_t LookupEntries() const = 0;
+  virtual void ForEachLookup(
+      absl::FunctionRef<void(Ino, uint64_t)> each) const = 0;
+
+  // The inodes that had a writable open during the run (written_): whether
+  // `id` has an entry, and for each entry whether it holds a descriptor.
+  virtual bool IsWritten(Ino id) const = 0;
+  virtual size_t WrittenEntries() const = 0;
+  virtual void ForEachWritten(
+      absl::FunctionRef<void(Ino, bool holds_descriptor)> each) const = 0;
+  // The descriptors written_ holds (held_fds_) and the most it may hold.
+  virtual size_t HeldFdCount() const = 0;
+  virtual size_t HeldFdLimit() const = 0;
+
+  // The inodes with a writable open outstanding (open_for_write_).
+  // `OpenForWriteSet` identifies the set Context::open_for_write must
+  // point at.
+  virtual bool IsOpenForWrite(Ino id) const = 0;
+  virtual size_t OpenForWriteEntries() const = 0;
+  virtual void ForEachOpenForWrite(absl::FunctionRef<void(Ino)> each) const = 0;
+  virtual const void *OpenForWriteSet() const = 0;
+
+  // The objects removed while the kernel holds their nodeid (removed_).
+  virtual bool IsRemoved(Ino id) const = 0;
+  virtual size_t RemovedEntries() const = 0;
+  virtual void ForEachRemoved(absl::FunctionRef<void(Ino)> each) const = 0;
+
+  // The shared backing files of the open inodes (backing_files_).
+  virtual std::optional<SharedFile> SharedFileOf(Ino id) const = 0;
+  virtual void ForEachSharedFile(
+      absl::FunctionRef<void(Ino, const SharedFile &)> each) const = 0;
+};
 
 // A step of a nodeid's lifetime (ProtocolEvents::LifetimeChanged).
 enum class LifetimeStep {
@@ -516,6 +570,8 @@ class ProtocolEvents {
   // --- The runtime invariant checks' hooks (step 26.2) ------------------
   //
   // dcfs/testonly/invariant_checker.h checks at each; nothing records them.
+  // The hooks that look at DirCacheFS's own state get its events::Bookkeeping
+  // view (DirCacheFS::bookkeeping()).
 
   // A syscall that can reach the backing filesystem, or a call into code
   // without a Context that makes such syscalls, named `what`, is about to
@@ -534,15 +590,15 @@ class ProtocolEvents {
   // BATCH_FORGET included. Requests nest when one runs inside another's
   // backing syscall (the forged-request harness does that today,
   // coroutines will).
-  virtual void CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+  virtual void CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
                                  const events::Request &request) {}
-  virtual void CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+  virtual void CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,
                                const events::Request &request) {}
 
   // fuse_ops.cc, inside a FORGET's or BATCH_FORGET's frame: the kernel is
   // about to drop `nlookup` of its lookups of nodeid `ino` (before
   // DirCacheFS counts them down).
-  virtual void CheckForgetting(Context &ctx, const DirCacheFS &fs,
+  virtual void CheckForgetting(Context &ctx, const events::Bookkeeping &fs,
                                uint64_t ino, uint64_t nlookup) {}
 
   // backing::StartRun has recovered the dirty set and started the run
@@ -556,7 +612,7 @@ class ProtocolEvents {
 
   // fuse_ops.cc: DESTROY's DirCacheFS::Destroy has returned (the kernel
   // holds no nodeid any more).
-  virtual void CheckDestroyed(Context &ctx, const DirCacheFS &fs) {}
+  virtual void CheckDestroyed(Context &ctx, const events::Bookkeeping &fs) {}
 
   // --- Cost counters (step 26.4b) -----------------------------------------
   //

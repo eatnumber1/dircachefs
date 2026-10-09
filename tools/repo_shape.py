@@ -191,6 +191,27 @@ def no_test_only_comments(root, allowlist=None):
     return problems
 
 
+FRIEND_OF_TESTONLY = re.compile(
+    r"\bfriend\b[^;{]*\btestonly\s*::")
+
+
+def no_testonly_friends(root):
+    problems = []
+    for rel, full in production_sources(root):
+        with open(full, encoding="utf-8") as f:
+            for number, line in enumerate(f, 1):
+                code = line.split("//", 1)[0]
+                if FRIEND_OF_TESTONLY.search(code):
+                    problems.append(
+                        "%s:%d: a production class names a testonly class as "
+                        "a friend (docs/style.md, \"No test-only things in "
+                        "production code\": expose what the test reads "
+                        "through a real feature, such as a ProtocolEvents "
+                        "hook)" % (rel, number))
+    return problems
+
+
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
-            disabled_checks_listed(root) + no_test_only_comments(root))
+            disabled_checks_listed(root) + no_test_only_comments(root) +
+            no_testonly_friends(root))

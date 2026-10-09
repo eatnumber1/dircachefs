@@ -49,9 +49,9 @@ class CostCounter final : public ProtocolEvents {
   void SqliteTransaction(bool durable) override;
   void BackingCall(Context &ctx, std::string_view what,
                    absl::SourceLocation site) override;
-  void CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+  void CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
                          const events::Request &request) override;
-  void CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+  void CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,
                        const events::Request &request) override;
   // Startup's end: the counts are written then too, so that the first
   // request's are not mixed with the start's.

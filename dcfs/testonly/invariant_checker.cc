@@ -17,14 +17,12 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/context.h"
-#include "dcfs/dir_cache_fs.h"
 #include "dcfs/escape.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
-#include "dcfs/testonly/dir_cache_fs_peer.h"
 #include "sqlite3.h"
 
 namespace dcfs::testonly {
@@ -297,7 +295,15 @@ void InvariantChecker::BackingCall(Context &ctx, std::string_view what,
   if (on_backing_call_) on_backing_call_(site);
 }
 
-void InvariantChecker::CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+const events::Bookkeeping &InvariantChecker::Seen(
+    const events::Bookkeeping &real, std::optional<FakeBookkeeping> &storage) {
+  if (!tamper_) return real;
+  storage.emplace(FakeBookkeeping::CopyOf(real));
+  tamper_(*storage);
+  return *storage;
+}
+
+void InvariantChecker::CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
                                          const events::Request &request) {
   Attach(ctx);
   Frame frame{.op = request.op, .nodeid = static_cast<uint64_t>(request.ino)};
@@ -306,14 +312,15 @@ void InvariantChecker::CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
   frames_.push_back(std::move(frame));
 }
 
-void InvariantChecker::CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+void InvariantChecker::CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,
                                        const events::Request &request) {
   Attach(ctx);
-  FailIfNotOk(CheckChanged(ctx, &fs, frames_.back().ids));
+  std::optional<FakeBookkeeping> tampered;
+  FailIfNotOk(CheckChanged(ctx, &Seen(fs, tampered), frames_.back().ids));
   frames_.pop_back();
 }
 
-void InvariantChecker::CheckForgetting(Context &ctx, const DirCacheFS &fs,
+void InvariantChecker::CheckForgetting(Context &ctx, const events::Bookkeeping &fs,
                                        uint64_t ino, uint64_t nlookup) {
   Attach(ctx);
   const InodeId id = static_cast<InodeId>(ino);
@@ -327,9 +334,8 @@ void InvariantChecker::CheckForgetting(Context &ctx, const DirCacheFS &fs,
   // lookup-count: the count never goes below 0. DirCacheFS logs such a
   // FORGET and drops the count (DropLookups); here it is a violation: some
   // reply that handed out the nodeid was not counted.
-  const auto &lookups = DirCacheFSPeer::Lookups(fs);
-  auto it = lookups.find(id);
-  const uint64_t counted = it == lookups.end() ? 0 : it->second;
+  std::optional<FakeBookkeeping> tampered;
+  const uint64_t counted = Seen(fs, tampered).Lookups(id).value_or(0);
   if (counted < forgotten) {
     Fail(Violation(kLookupCount, "FORGET of ", forgotten, " lookups of nodeid ",
                    ino, ", but ", counted, " counted"));
@@ -371,10 +377,11 @@ void InvariantChecker::ForgetReleasedStaleOpens(const Context &ctx) {
   });
 }
 
-void InvariantChecker::CheckDestroyed(Context &ctx, const DirCacheFS &fs) {
+void InvariantChecker::CheckDestroyed(Context &ctx, const events::Bookkeeping &fs) {
   Attach(ctx);
   frames_.push_back(Frame{.label = "DESTROY"});
-  FailIfNotOk(CheckEverything(ctx, &fs, /*destroyed=*/true));
+  std::optional<FakeBookkeeping> tampered;
+  FailIfNotOk(CheckEverything(ctx, &Seen(fs, tampered), /*destroyed=*/true));
   frames_.pop_back();
 }
 
@@ -405,7 +412,7 @@ absl::Status InvariantChecker::CheckBackingCall(Context &ctx) {
   return InFlightAreDirty(ctx);
 }
 
-absl::Status InvariantChecker::CheckChanged(Context &ctx, const DirCacheFS *fs,
+absl::Status InvariantChecker::CheckChanged(Context &ctx, const events::Bookkeeping *fs,
                                             std::span<const InodeId> ids) {
   ABSL_RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
   ABSL_RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
@@ -456,12 +463,12 @@ absl::Status InvariantChecker::CheckChanged(Context &ctx, const DirCacheFS *fs,
   return absl::OkStatus();
 }
 
-absl::Status InvariantChecker::CheckAll(Context &ctx, const DirCacheFS *fs) {
+absl::Status InvariantChecker::CheckAll(Context &ctx, const events::Bookkeeping *fs) {
   return CheckEverything(ctx, fs, /*destroyed=*/false);
 }
 
 absl::Status InvariantChecker::CheckEverything(Context &ctx,
-                                               const DirCacheFS *fs,
+                                               const events::Bookkeeping *fs,
                                                bool destroyed) {
   ABSL_RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
   ABSL_RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
@@ -540,7 +547,7 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
   return absl::OkStatus();
 }
 
-absl::Status InvariantChecker::CheckInode(Context &ctx, const DirCacheFS *fs,
+absl::Status InvariantChecker::CheckInode(Context &ctx, const events::Bookkeeping *fs,
                                           InodeId id, bool row_changed) {
   // A row's own columns can only have broken their rules when it changed
   // (the update hook saw it, or the full check reads it); what else needs
@@ -564,7 +571,7 @@ absl::Status InvariantChecker::CheckInode(Context &ctx, const DirCacheFS *fs,
     }));
     ABSL_RETURN_IF_ERROR(found);
   }
-  const bool removed = fs != nullptr && DirCacheFSPeer::IsRemoved(*fs, id);
+  const bool removed = fs != nullptr && fs->IsRemoved(id);
   if (exists && !removed && OpenForWrite(ctx, id)) {
     ABSL_ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
     if (!dirty) {
@@ -594,7 +601,7 @@ absl::Status InvariantChecker::CheckInode(Context &ctx, const DirCacheFS *fs,
 }
 
 absl::Status InvariantChecker::CheckInodeRow(const Context &ctx,
-                                             const DirCacheFS *fs,
+                                             const events::Bookkeeping *fs,
                                              sqlite3::Statement &row) {
   const InodeId id = row.Column<int64_t>(0);
   const bool valid = row.Column<bool>(1);
@@ -615,7 +622,7 @@ absl::Status InvariantChecker::CheckInodeRow(const Context &ctx,
                      " (only the root's is 0; others are 1 to "
                      "2^32-1)");
   }
-  const bool removed = fs != nullptr && DirCacheFSPeer::IsRemoved(*fs, id);
+  const bool removed = fs != nullptr && fs->IsRemoved(id);
   if (valid && !removed && OpenForWrite(ctx, id)) {
     return Violation(kWritableOpen, "inode ", id,
                      " is open for writing but its attributes are recorded "
@@ -683,28 +690,23 @@ absl::Status InvariantChecker::CheckStub(Context &ctx, int64_t id) {
 }
 
 absl::Status InvariantChecker::CheckBookkeeping(
-    const Context &ctx, const DirCacheFS &fs,
+    const Context &ctx, const events::Bookkeeping &fs,
     const absl::flat_hash_set<InodeId> *interest, bool destroyed) {
-  using Peer = DirCacheFSPeer;
-  const auto &lookups = Peer::Lookups(fs);
-  const auto &written = Peer::Written(fs);
-  const auto &open_for_write = Peer::OpenForWrite(fs);
-  // Calls `each` for every id of `all` (a map or set keyed by inode id)
-  // that is to be looked at: all of them, or those in `interest`.
-  auto for_each_id = [&](const auto &all, size_t limit,
-                         auto each) -> absl::Status {
-    if (interest == nullptr || all.size() <= limit) {
-      for (const auto &entry : all) {
-        if constexpr (requires { entry.first; }) {
-          ABSL_RETURN_IF_ERROR(each(entry.first));
-        } else {
-          ABSL_RETURN_IF_ERROR(each(entry));
-        }
-      }
-      return absl::OkStatus();
+  // Calls `each` for every id of a collection that is to be looked at: all
+  // of them if there are at most `limit` entries (or nothing is of
+  // interest), else those in `interest` that `contains` says it has.
+  // `for_all` calls its argument with each id.
+  auto for_each_id = [&](size_t entries, size_t limit, auto for_all,
+                         auto contains, auto each) -> absl::Status {
+    absl::Status found;
+    if (interest == nullptr || entries <= limit) {
+      for_all([&](InodeId id) {
+        if (found.ok()) found = each(id);
+      });
+      return found;
     }
     for (InodeId id : *interest) {
-      if (all.contains(id)) {
+      if (contains(id)) {
         ABSL_RETURN_IF_ERROR(each(id));
       }
     }
@@ -712,21 +714,27 @@ absl::Status InvariantChecker::CheckBookkeeping(
   };
 
   // lookup-count: a count of 0 is erased (DropLookups), never kept.
-  ABSL_RETURN_IF_ERROR(for_each_id(lookups, 0, [&](InodeId id) {
-    if (lookups.at(id) > 0) return absl::OkStatus();
-    return Violation(kLookupCount, "nodeid ", static_cast<uint64_t>(id),
-                     " has a lookup count of 0");
-  }));
+  ABSL_RETURN_IF_ERROR(for_each_id(
+      fs.LookupEntries(), 0,
+      [&](auto each) {
+        fs.ForEachLookup([&](events::Ino id, uint64_t) { each(id); });
+      },
+      [&](InodeId id) { return fs.Lookups(id).has_value(); },
+      [&](InodeId id) {
+        if (fs.Lookups(id).value_or(0) > 0) return absl::OkStatus();
+        return Violation(kLookupCount, "nodeid ", static_cast<uint64_t>(id),
+                         " has a lookup count of 0");
+      }));
 
   // held-fds.
-  const size_t held = Peer::HeldFds(fs);
-  if (held > Peer::MaxHeldFds(fs)) {
+  const size_t held = fs.HeldFdCount();
+  if (held > fs.HeldFdLimit()) {
     return Violation(kHeldFds, "held_fds_ is ", held, ", above max_held_fds_ ",
-                     Peer::MaxHeldFds(fs));
+                     fs.HeldFdLimit());
   }
-  if (interest == nullptr || written.size() <= kRecountLimit) {
+  if (interest == nullptr || fs.WrittenEntries() <= kRecountLimit) {
     size_t holding = 0;
-    for (const auto &[id, fd] : written) holding += fd.has_value() ? 1 : 0;
+    fs.ForEachWritten([&](events::Ino, bool holds) { holding += holds ? 1 : 0; });
     if (holding != held) {
       return Violation(kHeldFds, "held_fds_ is ", held, " but ", holding,
                        " entries of written_ hold a descriptor");
@@ -734,37 +742,41 @@ absl::Status InvariantChecker::CheckBookkeeping(
   }
 
   // removed-record.
-  if (interest == nullptr || Peer::RemovedCount(fs) <= kRecountLimit) {
+  if (interest == nullptr || fs.RemovedEntries() <= kRecountLimit) {
     absl::Status found;
-    Peer::ForEachRemoved(fs, [&](InodeId id) {
+    fs.ForEachRemoved([&](InodeId id) {
       if (found.ok()) found = CheckRemoved(fs, id);
     });
     ABSL_RETURN_IF_ERROR(found);
   } else {
     for (InodeId id : *interest) {
-      if (Peer::IsRemoved(fs, id)) {
+      if (fs.IsRemoved(id)) {
         ABSL_RETURN_IF_ERROR(CheckRemoved(fs, id));
       }
     }
   }
 
   // writable-open.
-  if (ctx.open_for_write != &open_for_write) {
+  if (static_cast<const void *>(ctx.open_for_write) != fs.OpenForWriteSet()) {
     return Violation(kWritableOpen,
                      "Context::open_for_write is not DirCacheFS's set");
   }
-  ABSL_RETURN_IF_ERROR(
-      for_each_id(open_for_write, kRecountLimit, [&](InodeId id) {
+  ABSL_RETURN_IF_ERROR(for_each_id(
+      fs.OpenForWriteEntries(), kRecountLimit,
+      [&](auto each) { fs.ForEachOpenForWrite([&](events::Ino id) { each(id); }); },
+      [&](InodeId id) { return fs.IsOpenForWrite(id); },
+      [&](InodeId id) {
         // DirCacheFS::Destroy reconciles and empties written_ (no FORGET
         // follows), also of a file still open (after a lazy unmount).
-        if (destroyed || Peer::IsRemoved(fs, id) || written.contains(id)) {
+        if (destroyed || fs.IsRemoved(id) || fs.IsWritten(id)) {
           return absl::OkStatus();
         }
         return Violation(kWritableOpen, "inode ", id,
                          " is open for writing but not in written_");
       }));
   auto check_shared = [&](InodeId id) -> absl::Status {
-    std::optional<Peer::Shared> shared = Peer::SharedFile(fs, id);
+    std::optional<events::Bookkeeping::SharedFile> shared =
+        fs.SharedFileOf(id);
     if (!shared.has_value()) return absl::OkStatus();
     if (shared->refs <= 0 || shared->writable_refs < 0 ||
         shared->writable_refs > shared->refs) {
@@ -772,7 +784,7 @@ absl::Status InvariantChecker::CheckBookkeeping(
                        "'s shared backing file has refs ", shared->refs,
                        " and writable_refs ", shared->writable_refs);
     }
-    if (shared->writable_refs > 0 && !open_for_write.contains(id)) {
+    if (shared->writable_refs > 0 && !fs.IsOpenForWrite(id)) {
       return Violation(kWritableOpen, "inode ", id,
                        " has writable opens but is not open for writing");
     }
@@ -780,7 +792,7 @@ absl::Status InvariantChecker::CheckBookkeeping(
   };
   if (interest == nullptr) {
     absl::Status found;
-    Peer::ForEachSharedFile(fs, [&](InodeId id, const Peer::Shared &) {
+    fs.ForEachSharedFile([&](InodeId id, const events::Bookkeeping::SharedFile &) {
       if (found.ok()) found = check_shared(id);
     });
     ABSL_RETURN_IF_ERROR(found);
@@ -790,15 +802,13 @@ absl::Status InvariantChecker::CheckBookkeeping(
   return absl::OkStatus();
 }
 
-absl::Status InvariantChecker::CheckRemoved(const DirCacheFS &fs, InodeId id) {
-  const auto &lookups = DirCacheFSPeer::Lookups(fs);
-  auto it = lookups.find(id);
-  if (it == lookups.end() || it->second == 0) {
+absl::Status InvariantChecker::CheckRemoved(const events::Bookkeeping &fs, InodeId id) {
+  if (fs.Lookups(id).value_or(0) == 0) {
     return Violation(kRemovedRecord, "nodeid ", static_cast<uint64_t>(id),
                      " has a removed record but the kernel holds no lookup "
                      "of it");
   }
-  if (DirCacheFSPeer::Written(fs).contains(id)) {
+  if (fs.IsWritten(id)) {
     return Violation(kRemovedRecord, "nodeid ", static_cast<uint64_t>(id),
                      " has both a removed record and a written_ entry");
   }

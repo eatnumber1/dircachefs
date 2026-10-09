@@ -758,12 +758,16 @@ for tests.
   a reason; there are none. The check cannot see a seam with a neutral
   name: the reviewer asks of every new knob "what does this do in
   production?".
-- One known seam: `DirCacheFS` befriends `testonly::DirCacheFSPeer`, which
-  the runtime invariant checks read the in-memory bookkeeping through (see
-  `docs/design.md`, "Runtime invariant checks"). It serves
-  the testonly checking build rather than a single test, and is kept for
-  now; whether the bookkeeping should be exposed through `ProtocolEvents`
-  instead is open (step 25.7's report).
+- **No test peers** (russ, 2026-10-09: "A test peer allows test code to
+  reach into the private internals of a class. Don't do that."): no
+  production class declares a `friend` of anything in a `testonly`
+  namespace, and a test never reaches a private member. What a check or a
+  test reads is a feature of the class: `DirCacheFS::bookkeeping()` hands
+  the invariant checks' hooks an `events::Bookkeeping` view
+  (`protocol_events.h`), and a test that needs a state the class never
+  reaches edits a copy (`testonly::FakeBookkeeping`,
+  `InvariantChecker::TamperBookkeeping`). `tools/repo_shape.py`
+  (`no_testonly_friends`) fails the build on such a `friend`.
 
 ## Appendix A: Convergence
 

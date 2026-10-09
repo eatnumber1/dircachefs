@@ -78,16 +78,13 @@ cc_library(
     ],
 )
 
-# DirCacheFS's in-memory bookkeeping, for the invariant checker and its
-# tests (DirCacheFS names the peer as a friend).
+# A plain-data events::Bookkeeping that the invariant checker's tests edit.
 cc_library(
-    name = "dir_cache_fs_peer",
-    hdrs = ["dir_cache_fs_peer.h"],
+    name = "fake_bookkeeping",
+    hdrs = ["fake_bookkeeping.h"],
     visibility = ["//dcfs:__pkg__"],
     deps = [
-        "//dcfs:dir_cache_fs",
-        "//dcfs:metadata_cache",
-        "//dcfs:syscalls",
+        "//dcfs:protocol_events",
         "@absl//absl/container:flat_hash_map",
         "@absl//absl/container:flat_hash_set",
         "@absl//absl/functional:function_ref",
@@ -102,9 +99,8 @@ cc_library(
     hdrs = ["invariant_checker.h"],
     visibility = ["//dcfs:__pkg__"],
     deps = [
-        ":dir_cache_fs_peer",
+        ":fake_bookkeeping",
         "//dcfs:context",
-        "//dcfs:dir_cache_fs",
         "//dcfs:escape",
         "//dcfs:metadata_cache",
         "//dcfs:protocol_events",

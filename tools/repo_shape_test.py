@@ -28,6 +28,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_no_production_comment_gives_tests_as_the_reason(self):
         self.assertEqual([], repo_shape.no_test_only_comments(ROOT["root"]))
 
+    def test_no_production_class_befriends_a_testonly_class(self):
+        self.assertEqual([], repo_shape.no_testonly_friends(ROOT["root"]))
+
 
 def main():
     rest = []

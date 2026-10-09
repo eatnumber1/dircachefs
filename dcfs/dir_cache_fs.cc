@@ -3061,4 +3061,47 @@ void DirCacheFS::NoteLifetime(InodeId id, events::LifetimeStep step,
                                [&] { return LifetimeOf(id); });
 }
 
+std::optional<uint64_t> DirCacheFS::Lookups(events::Ino id) const {
+  auto it = lookups_.find(id);
+  if (it == lookups_.end()) return std::nullopt;
+  return it->second;
+}
+
+void DirCacheFS::ForEachLookup(
+    absl::FunctionRef<void(events::Ino, uint64_t)> each) const {
+  for (const auto &[id, count] : lookups_) each(id, count);
+}
+
+void DirCacheFS::ForEachWritten(
+    absl::FunctionRef<void(events::Ino, bool)> each) const {
+  for (const auto &[id, fd] : written_) each(id, fd.has_value());
+}
+
+void DirCacheFS::ForEachOpenForWrite(
+    absl::FunctionRef<void(events::Ino)> each) const {
+  for (int64_t id : open_for_write_) each(id);
+}
+
+void DirCacheFS::ForEachRemoved(
+    absl::FunctionRef<void(events::Ino)> each) const {
+  for (const auto &[id, removed] : removed_) each(id);
+}
+
+std::optional<events::Bookkeeping::SharedFile> DirCacheFS::SharedFileOf(
+    events::Ino id) const {
+  auto it = backing_files_.find(id);
+  if (it == backing_files_.end()) return std::nullopt;
+  return events::Bookkeeping::SharedFile{
+      .refs = it->second.refs, .writable_refs = it->second.writable_refs};
+}
+
+void DirCacheFS::ForEachSharedFile(
+    absl::FunctionRef<void(events::Ino, const events::Bookkeeping::SharedFile &)>
+        each) const {
+  for (const auto &[id, file] : backing_files_) {
+    each(id, events::Bookkeeping::SharedFile{
+                 .refs = file.refs, .writable_refs = file.writable_refs});
+  }
+}
+
 }  // namespace dcfs

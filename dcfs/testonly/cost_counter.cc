@@ -24,12 +24,12 @@ void CostCounter::BackingCall(Context &ctx, std::string_view what,
   ++counts_.backing_calls;
 }
 
-void CostCounter::CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+void CostCounter::CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
                                     const events::Request &request) {
   ++counts_.requests[std::string(OpName(request.op))];
 }
 
-void CostCounter::CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+void CostCounter::CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,
                                   const events::Request &request) {
   Write();
 }

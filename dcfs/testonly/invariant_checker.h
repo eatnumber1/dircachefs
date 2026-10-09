@@ -81,6 +81,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -92,13 +93,15 @@
 #include "absl/status/status.h"
 #include "absl/types/source_location.h"
 #include "dcfs/context.h"
-#include "dcfs/dir_cache_fs.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/sqlite.h"
+#include "dcfs/testonly/fake_bookkeeping.h"
 #include "sqlite3.h"
 
 namespace dcfs::testonly {
+
+using cache::InodeId;
 
 // The FUSE opcode name of `op` ("LOOKUP", "BATCH_FORGET", ...).
 std::string_view OpName(events::Op op);
@@ -121,15 +124,15 @@ class InvariantChecker final : public ProtocolEvents {
   // The ProtocolEvents check hooks: each aborts on a violation.
   void BackingCall(Context &ctx, std::string_view what,
                    absl::SourceLocation site) override;
-  void CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+  void CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
                          const events::Request &request) override;
-  void CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+  void CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,
                        const events::Request &request) override;
-  void CheckForgetting(Context &ctx, const DirCacheFS &fs, uint64_t ino,
+  void CheckForgetting(Context &ctx, const events::Bookkeeping &fs, uint64_t ino,
                        uint64_t nlookup) override;
   void CheckRunStarting(Context &ctx) override;
   void CheckRunStarted(Context &ctx) override;
-  void CheckDestroyed(Context &ctx, const DirCacheFS &fs) override;
+  void CheckDestroyed(Context &ctx, const events::Bookkeeping &fs) override;
 
   // Every statement the checker runs starts with this comment, so that the
   // cost counter (testonly/cost_counter.h) leaves the checker's own steps
@@ -146,11 +149,11 @@ class InvariantChecker final : public ProtocolEvents {
   absl::Status CheckBackingCall(Context &ctx);
   // What RequestEnd checks: the rows changed since the last check, and the
   // inodes `ids`; forgets those rows.
-  absl::Status CheckChanged(Context &ctx, const DirCacheFS *fs,
+  absl::Status CheckChanged(Context &ctx, const events::Bookkeeping *fs,
                             std::span<const InodeId> ids);
   // What RunStarted and Destroyed check: everything; forgets the changed
   // rows.
-  absl::Status CheckAll(Context &ctx, const DirCacheFS *fs);
+  absl::Status CheckAll(Context &ctx, const events::Bookkeeping *fs);
 
   // For the step 26.6 fault sweep (dcfs/dir_cache_fs_test.cc,
   // FaultSitesTest). `observer` is called with each backing call's site,
@@ -161,6 +164,13 @@ class InvariantChecker final : public ProtocolEvents {
     on_backing_call_ = std::move(observer);
   }
   void RecordViolations(bool record) { recording_ = record; }
+  // For the tests of the checks themselves: the hooks check a copy of the
+  // bookkeeping that `edit` has changed (a FakeBookkeeping), not the real
+  // one; empty: the real one. The edit runs at every hook, so it is
+  // idempotent.
+  void TamperBookkeeping(std::function<void(FakeBookkeeping &)> edit) {
+    tamper_ = std::move(edit);
+  }
   const std::vector<std::string> &violations() const { return violations_; }
 
  private:
@@ -179,11 +189,11 @@ class InvariantChecker final : public ProtocolEvents {
 
   // The per-inode checks of `id`: its row's columns if `row_changed`, and
   // what being open for writing or durably dirty requires.
-  absl::Status CheckInode(Context &ctx, const DirCacheFS *fs, InodeId id,
+  absl::Status CheckInode(Context &ctx, const events::Bookkeeping *fs, InodeId id,
                           bool row_changed);
   // The checks of an inodes row's own columns: `row` is (id, attrs_valid,
   // fuse_gen, nlink, whether an attribute column is NULL).
-  absl::Status CheckInodeRow(const Context &ctx, const DirCacheFS *fs,
+  absl::Status CheckInodeRow(const Context &ctx, const events::Bookkeeping *fs,
                              sqlite3::Statement &row);
   // The dentry with rowid `rowid`, if it still exists: refused only with
   // a stub, present or absent only without one. Adds its parent and child
@@ -195,15 +205,15 @@ class InvariantChecker final : public ProtocolEvents {
   // CheckAll; `destroyed`: after DirCacheFS::Destroy, which empties
   // written_ by design (an inode still open for writing then is not in
   // it).
-  absl::Status CheckEverything(Context &ctx, const DirCacheFS *fs,
+  absl::Status CheckEverything(Context &ctx, const events::Bookkeeping *fs,
                                bool destroyed);
   // DirCacheFS's bookkeeping: for the inodes in `interest` (and the
   // recounts below kRecountLimit), or everything if it is null.
-  absl::Status CheckBookkeeping(const Context &ctx, const DirCacheFS &fs,
+  absl::Status CheckBookkeeping(const Context &ctx, const events::Bookkeeping &fs,
                                 const absl::flat_hash_set<InodeId> *interest,
                                 bool destroyed);
   // removed-record, for the removed record of `id`.
-  absl::Status CheckRemoved(const DirCacheFS &fs, InodeId id);
+  absl::Status CheckRemoved(const events::Bookkeeping &fs, InodeId id);
 
   // Whether `id` is open for writing (Context::open_for_write), as the
   // checks see it: not if the open is older than the run (see
@@ -231,7 +241,13 @@ class InvariantChecker final : public ProtocolEvents {
     if (!status.ok()) Fail(status);
   }
 
+  // The bookkeeping a hook checks: `real`, or a copy of it with tamper_
+  // applied, kept in `storage`.
+  const events::Bookkeeping &Seen(const events::Bookkeeping &real,
+                                  std::optional<FakeBookkeeping> &storage);
+
   int console_fd_;
+  std::function<void(FakeBookkeeping &)> tamper_;
   ::sqlite3 *db_ = nullptr;
   std::vector<Frame> frames_;
   std::function<void(absl::SourceLocation)> on_backing_call_;

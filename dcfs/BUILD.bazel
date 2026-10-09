@@ -945,7 +945,7 @@ DIR_CACHE_FS_TEST_DEPS = [
     ":syscalls",
     ":syscalls_backing",
     "//dcfs/testonly:assert_ok_and_assign",
-    "//dcfs/testonly:dir_cache_fs_peer",
+    "//dcfs/testonly:fake_bookkeeping",
     "//dcfs/testonly:files",
     "//dcfs/testonly:cost_counter",
     "//dcfs/testonly:invariant_checker",

@@ -129,7 +129,7 @@ void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
   Context &ctx = fs.context();
   const uint64_t backing_before = ctx.backing_calls;
   ctx.first_backing_call = {};
-  ctx.events->CheckRequestBegin(ctx, fs, request);
+  ctx.events->CheckRequestBegin(ctx, fs.bookkeeping(), request);
   // The request checkpoints ask about (dcfs/interrupts.h).
   ctx.interrupts->Begin(req);
   {
@@ -141,7 +141,7 @@ void Serve(fuse_req_t req, const events::Request &request, Handler handler) {
                         fr.replied() ? fr.errno_sent() : events::kNotReplied);
   }
   ctx.interrupts->End();
-  ctx.events->CheckRequestEnd(ctx, fs, request);
+  ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
 }
 
 void Init(void *userdata, fuse_conn_info *conn) {
@@ -168,7 +168,8 @@ void Destroy(void *userdata) {
   auto *fs = static_cast<DirCacheFS *>(userdata);
   absl::Status s = fs->Destroy();
   LOG_IF(ERROR, !s.ok()) << s;
-  fs->context().events->CheckDestroyed(fs->context(), *fs);
+  fs->context().events->CheckDestroyed(fs->context(),
+                                              fs->bookkeeping());
 }
 
 void Lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
@@ -185,10 +186,10 @@ void Forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
   DirCacheFS &fs = GetFS(req);
   Context &ctx = fs.context();
   const events::Request request{.op = events::Op::kForget, .ino = Ino(ino)};
-  ctx.events->CheckRequestBegin(ctx, fs, request);
-  ctx.events->CheckForgetting(ctx, fs, ino, nlookup);
+  ctx.events->CheckRequestBegin(ctx, fs.bookkeeping(), request);
+  ctx.events->CheckForgetting(ctx, fs.bookkeeping(), ino, nlookup);
   fs.Forget(fr, ino, nlookup);
-  ctx.events->CheckRequestEnd(ctx, fs, request);
+  ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
 }
 
 void ForgetMulti(fuse_req_t req, size_t count, fuse_forget_data *forgets) {
@@ -199,12 +200,12 @@ void ForgetMulti(fuse_req_t req, size_t count, fuse_forget_data *forgets) {
   const events::Request request{
       .op = events::Op::kBatchForget,
       .ino = count > 0 ? Ino(forgets[0].ino) : 0};
-  ctx.events->CheckRequestBegin(ctx, fs, request);
+  ctx.events->CheckRequestBegin(ctx, fs.bookkeeping(), request);
   for (size_t i = 0; i < count; ++i) {
-    ctx.events->CheckForgetting(ctx, fs, forgets[i].ino, forgets[i].nlookup);
+    ctx.events->CheckForgetting(ctx, fs.bookkeeping(), forgets[i].ino, forgets[i].nlookup);
   }
   fs.ForgetMulti(fr, std::span<const fuse_forget_data>(forgets, count));
-  ctx.events->CheckRequestEnd(ctx, fs, request);
+  ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
 }
 
 void Getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {

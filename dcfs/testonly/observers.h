@@ -222,15 +222,15 @@ class Observers final : public ProtocolEvents {
                    absl::SourceLocation site) override {
     for (ProtocolEvents *o : observers_) o->BackingCall(ctx, what, site);
   }
-  void CheckRequestBegin(Context &ctx, const DirCacheFS &fs,
+  void CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
                          const events::Request &request) override {
     for (ProtocolEvents *o : observers_) o->CheckRequestBegin(ctx, fs, request);
   }
-  void CheckRequestEnd(Context &ctx, const DirCacheFS &fs,
+  void CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,
                        const events::Request &request) override {
     for (ProtocolEvents *o : observers_) o->CheckRequestEnd(ctx, fs, request);
   }
-  void CheckForgetting(Context &ctx, const DirCacheFS &fs, uint64_t ino,
+  void CheckForgetting(Context &ctx, const events::Bookkeeping &fs, uint64_t ino,
                        uint64_t nlookup) override {
     for (ProtocolEvents *o : observers_)
       o->CheckForgetting(ctx, fs, ino, nlookup);
@@ -241,7 +241,7 @@ class Observers final : public ProtocolEvents {
   void CheckRunStarted(Context &ctx) override {
     for (ProtocolEvents *o : observers_) o->CheckRunStarted(ctx);
   }
-  void CheckDestroyed(Context &ctx, const DirCacheFS &fs) override {
+  void CheckDestroyed(Context &ctx, const events::Bookkeeping &fs) override {
     for (ProtocolEvents *o : observers_) o->CheckDestroyed(ctx, fs);
   }
   void SqliteStep(std::string_view sql) override {
