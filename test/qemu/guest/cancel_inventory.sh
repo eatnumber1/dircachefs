@@ -67,28 +67,20 @@ timed() {
 	fi
 }
 
-# start_timed NAME: starts dcfs and prints the time until it is mounted
-# (polled every 100 ms: start_daemon polls every second).
+# start_timed NAME: starts dcfs and prints the time until it is mounted (the
+# same event wait as start_daemon's: testutil waitmount).
 start_timed() {
 	t0=$(uptime_ms)
 	"${MOUNT_DCFS:-/sbin/mount.dcfs}" \
 		-o "$(dcfs_options --sync_interval_sec=1000000)" "$SRC" "$MNT" >>"$LOG" 2>&1 &
 	DAEMON_PID=$!
-	i=0
-	while [ "$i" -lt 3000 ]; do
-		if is_mounted "$MNT"; then
-			t1=$(uptime_ms)
-			MOUNTED=1
-			echo "inventory: $1 $((t1 - t0)) ms"
-			pass "$1"
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			break
-		fi
-		i=$((i + 1))
-		sleep 0.1
-	done
+	if "${TESTUTIL:-/bin/testutil}" waitmount "$MNT" present "$DAEMON_PID"; then
+		t1=$(uptime_ms)
+		MOUNTED=1
+		echo "inventory: $1 $((t1 - t0)) ms"
+		pass "$1"
+		return 0
+	fi
 	fail "$1" "dcfs did not mount"
 	return 1
 }

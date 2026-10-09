@@ -68,6 +68,7 @@ require_commands awk basename cat date dd diff dirname dmesg find grep ls \
 	uname wc rpcbind rpc.idmapd rpc.nfsd rpc.mountd exportfs pkill
 
 DCFS=/usr/local/bin/dcfs
+TESTUTIL=/usr/local/bin/testutil
 
 SRC=/src
 MNT=/mnt

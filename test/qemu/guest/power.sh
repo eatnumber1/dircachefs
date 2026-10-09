@@ -78,18 +78,10 @@ start_daemon() {
 	"${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options "$@")" "$SRC" "$MNT" >"$log" 2>&1 &
 	DAEMON_PID=$!
 	MOUNTED=0
-	i=0
-	while [ "$i" -lt 100 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 0.1
-	done
+	if "${TESTUTIL:-/bin/testutil}" waitmount "$MNT" present "$DAEMON_PID"; then
+		MOUNTED=1
+		return 0
+	fi
 	return 1
 }
 

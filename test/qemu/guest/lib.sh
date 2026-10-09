@@ -286,29 +286,22 @@ dcfs_options() {
 
 # start_daemon LOG [extra dcfs flags...]: starts dcfs against $SRC/$DB,
 # mounted at $MNT, with each extra flag as a dcfs.<flag> mount option; waits
-# up to 10s for the mount to appear (looking every 0.1s: a mount takes a
-# fraction of a second, and a look every second made every start cost a
-# whole second). Sets DAEMON_PID and MOUNTED (1 if the mount appeared, 0 if
-# the wait timed out) and returns 0/1 to match. The daemon stays in the
-# foreground (dcfs.foreground), so DAEMON_PID is dcfs.
+# for the mount to appear: `testutil waitmount` polls the kernel's mount table
+# (no interval, no timeout: the caller cancels) and watches the daemon, so a
+# daemon that exits without mounting ends the wait at once. Sets DAEMON_PID
+# and MOUNTED (1 if the mount appeared, 0 if the daemon exited first) and
+# returns 0/1 to match. The daemon stays in the foreground
+# (dcfs.foreground), so DAEMON_PID is dcfs.
 start_daemon() {
 	log=$1
 	shift
 	"${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options "$@")" "$SRC" "$MNT" >"$log" 2>&1 &
 	DAEMON_PID=$!
 	MOUNTED=0
-	i=0
-	while [ "$i" -lt 100 ]; do
-		if is_mounted "$MNT"; then
-			MOUNTED=1
-			return 0
-		fi
-		if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
-			return 1
-		fi
-		i=$((i + 1))
-		sleep 0.1
-	done
+	if "${TESTUTIL:-/bin/testutil}" waitmount "$MNT" present "$DAEMON_PID"; then
+		MOUNTED=1
+		return 0
+	fi
 	return 1
 }
 
