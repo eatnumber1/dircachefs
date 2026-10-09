@@ -1,7 +1,7 @@
 # Coverage determinism, 2026-10-08 (step 26.14)
 
 Two runs of `bazel coverage --config=presubmit --jobs=2 --local_test_jobs=1
-//...` on one commit (3489ec1, the quiet-kernel commits and
+//...` on one commit (c089568, rebased from 3489ec1 with the same tree: the quiet-kernel commits and
 `tools/coverage_diff.py` applied), the second with `--nocache_test_results`
 so that every test reran (169 of 317 tests executed in the second run, all
 passed, the rest are the tiers above presubmit; 157 in the first, the others
