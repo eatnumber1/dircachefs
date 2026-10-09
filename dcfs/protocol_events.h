@@ -354,12 +354,14 @@ class ProtocolEvents {
                                 bool recorded) {}
 
   // Inside a listing's or a resolve's transaction (RecordChild): the row of
-  // `child`, an entry of `dir`, was upserted, its attributes recorded as
-  // current iff `filled` (the code's own decision: CanFill, and not open
-  // for writing). PopulateCommitted or ResolveCommitted follows once the
-  // transaction committed. Model: a whole getattr fill of `child`.
+  // `child`, an entry of `dir`, was upserted (inserted iff `created`; then
+  // born dirty if `dir` has a mutation's mark, step 23.11), its attributes
+  // recorded as current iff `filled` (the code's own decision: CanFill, and
+  // not open for writing). PopulateCommitted or ResolveCommitted follows
+  // once the transaction committed. Model: a whole getattr fill of `child`
+  // (and, for an inserted row, FLCommit's FillMarks).
   virtual void ChildRowRecorded(Context &ctx, events::Ino dir,
-                                events::Ino child, bool filled) {}
+                                events::Ino child, bool filled, bool created) {}
 
   // PopulateDirectory took its fill snapshot and the directory's epoch;
   // its reads (getdents64, then a probe of every name) follow. Model: where

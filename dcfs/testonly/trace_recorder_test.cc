@@ -53,6 +53,7 @@ namespace dcfs::testonly {
 namespace {
 
 using ::absl_testing::IsOk;
+using ::absl_testing::IsOkAndHolds;
 using ::testing::AllOf;
 using ::testing::Contains;
 using ::testing::HasSubstr;
@@ -295,7 +296,8 @@ TEST_F(TraceRecorderTest, ChildRowFilledAgainstTheGuardIsUnexplained) {
     mutation.End();
   }
   // The root's listing records d's row as filled anyway.
-  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true);
+  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true,
+                              /*created=*/false);
   recorder_->PopulateCommitted(ctx_, cache::kRootInode, snapshot.seq,
                                /*recorded=*/false);
   EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
@@ -323,7 +325,8 @@ TEST_F(TraceRecorderTest, ChildRowFilledWithALateSnapshotIsUnexplained) {
   }
   // The code's snapshot, taken only now.
   const cache::FillSnapshot late = cache::BeginFill(ctx_);
-  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true);
+  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true,
+                              /*created=*/false);
   recorder_->PopulateCommitted(ctx_, cache::kRootInode, late.seq,
                                /*recorded=*/false);
   EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
@@ -337,7 +340,8 @@ TEST_F(TraceRecorderTest, ChildRowFilledWithoutItsSnapshotEventIsUnexplained) {
   StartTrace();
 
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
-  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true);
+  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true,
+                              /*created=*/false);
   recorder_->PopulateCommitted(ctx_, cache::kRootInode, snapshot.seq,
                                /*recorded=*/false);
   EXPECT_THAT(Lines(d),
@@ -395,6 +399,32 @@ TEST_F(TraceRecorderTest, ParentRowFilledOverAMutationInFlightIsUnexplained) {
   ctx_.events->MutationSyscallStarting(ctx_);
   ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
   mutation.End();
+}
+
+// Step 23.11: the begin line of a row a listing inserts says whether its
+// parent had a mutation's mark ("parent_marked"), read from the parent's
+// row, which Trace.tla's OriginOK compares with the row's own mark.
+TEST_F(TraceRecorderTest, AListedRowsBeginLineSaysWhetherItsParentWasMarked) {
+  StartTrace();
+  ASSERT_THAT(cache::HasMutationMark(ctx_, cache::kRootInode),
+              IsOkAndHolds(false));
+  ASSERT_OK_AND_ASSIGN(InodeId d, MakeDir(cache::kRootInode, "d", 10));
+  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, d, /*filled=*/true,
+                              /*created=*/true);
+  recorder_->PopulateCommitted(ctx_, cache::kRootInode,
+                               cache::BeginFill(ctx_).seq, /*recorded=*/false);
+  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"origin\":\"listing\""),
+                                       HasSubstr("\"parent_marked\":false"))));
+
+  const InodeId root[] = {cache::kRootInode};
+  ASSERT_THAT(cache::MarkDirty(ctx_, root), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId e, MakeDir(cache::kRootInode, "e", 11));
+  recorder_->ChildRowRecorded(ctx_, cache::kRootInode, e, /*filled=*/true,
+                              /*created=*/true);
+  recorder_->PopulateCommitted(ctx_, cache::kRootInode,
+                               cache::BeginFill(ctx_).seq, /*recorded=*/false);
+  EXPECT_THAT(Lines(e), Contains(AllOf(HasSubstr("\"origin\":\"listing\""),
+                                       HasSubstr("\"parent_marked\":true"))));
 }
 
 // --- A directory named as an object (re-review of 2026-10-07, finding 3) --

@@ -85,9 +85,9 @@ class Observers final : public ProtocolEvents {
       o->ResolveCommitted(ctx, parent, name, snapshot, recorded);
   }
   void ChildRowRecorded(Context &ctx, events::Ino dir, events::Ino child,
-                        bool filled) override {
+                        bool filled, bool created) override {
     for (ProtocolEvents *o : observers_)
-      o->ChildRowRecorded(ctx, dir, child, filled);
+      o->ChildRowRecorded(ctx, dir, child, filled, created);
   }
   void PopulateStarted(Context &ctx, events::Ino dir) override {
     for (ProtocolEvents *o : observers_) o->PopulateStarted(ctx, dir);

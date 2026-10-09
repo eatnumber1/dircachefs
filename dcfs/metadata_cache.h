@@ -647,9 +647,15 @@ absl::StatusOr<Mutation> BeginXattrChange(Context &ctx, InodeId id,
                                           std::string_view name);
 
 // Adds `ids` to the dirty set at the default durability, inside the
-// caller's transaction if any. For phase 3 of a mutation that creates a row
-// (the new row is dirty too, and cannot exist in any state of the database
-// where this insert does not). Does not add to ctx.dirty.durable.
+// caller's transaction if any, and counts the insert in
+// Context::dirty.inserts (ClearDirty's fast path: a row added after
+// BeginSync advances no fill guard). For phase 3 of a mutation that creates
+// a row (the new row is dirty too, and cannot exist in any state of the
+// database where this insert does not), and for a fill that inserts a row
+// under a directory with a mutation's mark (step 23.11: born dirty, see
+// backing::RecordChild). Does not add to ctx.dirty.durable: a caller that
+// knows the mark is durable whenever the row is (backing::RecordNewChild,
+// for a row its own transaction inserted) adds it there itself.
 absl::Status MarkDirty(Context &ctx, std::span<const InodeId> ids);
 
 // Step 23.8: adds `id` to the dirty set as an atime-only row (a row that
@@ -675,6 +681,9 @@ absl::Status MarkAtimeDirty(Context &ctx, InodeId id,
 
 // Whether `id` is in the dirty set (either reason).
 absl::StatusOr<bool> IsDirty(Context &ctx, InodeId id);
+// Whether `id` is in the dirty set for a mutation (a row that is not
+// atime-only). Inside the caller's transaction if any.
+absl::StatusOr<bool> HasMutationMark(Context &ctx, InodeId id);
 
 // The dirty set, sorted; with `mutations_only`, only its rows that are not
 // atime-only.

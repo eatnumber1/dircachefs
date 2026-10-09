@@ -1014,8 +1014,11 @@ What a trace observes and what it leaves free:
   begin line's `origin`): a directory created by a mkdir starts with an
   empty backing directory, no cached entries, its dirty row and epoch 0;
   one first seen in its parent's listing or by `ParentOf` with no entries,
-  an incomplete listing, epoch 0 and no dirty row; a row that appears at
-  any other step is `unexplained`. Only a directory already in the cache
+  an incomplete listing and epoch 0, and (step 23.11, born dirty) for a
+  listing's row a dirty row iff its parent had a mutation's mark (the
+  begin line's `parent_marked`, which the recorder reads from the parent's
+  row: both ways), for `ParentOf`'s always; a row that appears at any other
+  step is `unexplained`. Only a directory already in the cache
   when the trace began (`existing`: at the harness's `StartTrace`, or a
   guest's first start) is assumed correct (and durable).
 - Attribute values (the model's stamp), the guards' absolute clock, and
@@ -1573,8 +1576,11 @@ reports it).
 `borndirty_trusts_any_row` (F's); `ClearOnlyAfterSync` on
 `sync_during_mutation` (D's) and on `atime_sync_clears_held` (F's);
 `RecoveryForgetsDirty` on `borndirty_recover_keeps_file`. Not modelled: the audit's G15
-(`RecordTmpfile`'s mark against `ClearDirty`'s fast path; the model has no
-`O_TMPFILE` and only the per-row clear).
+(`RecordTmpfile`'s mark, and now a fill's born-dirty mark, against
+`ClearDirty`'s fast path; the model has no `O_TMPFILE` and only the per-row
+clear). The code closes it: every insert into the dirty table counts in
+`Context::dirty.inserts`, which the fast path compares
+(`metadata_cache_test`'s `ClearDirtyKeepsARowMarkedAfterTheSnapshot`).
 
 **Configurations** (counts and times in
 [Configurations](#configurations)). Every one lets a phase 3 fail after
@@ -1603,12 +1609,14 @@ born dirty at phase 3 needs no new event for D's trace (`MutationEnded`
 already marks phase 3); for a directory created by a mkdir its trace
 already begins with `origin` `mkdir` and its dirty row (Trace.tla's
 `OriginOK` requires it). A row a fill inserts born dirty is new for a
-directory child: its trace begins with `origin` `listing` or `parent`,
-which `OriginOK` requires clean today; the code half must give that line
-its dirty flag, and `Trace.tla`'s `OriginOK` must accept a dirty `listing`
-row when the parent was dirty (the recorder knows: the parent's line before
-it says so), a one-line change, no new action. File rows' marks wait for
-12.11b's file traces.
+directory child: its trace begins with `origin` `listing` or `parent`. The
+recorder's begin line of a `listing` row carries `parent_marked` (whether
+the parent has a mutation's mark, read from the parent's row after the
+fill's commit), and `OriginOK` requires the row dirty iff it is set
+(`trace_tests/origin_listing_clean_under_dirty_parent` is the rejected
+case); a `parent` row (`ParentOf`, which marks every row it inserts) must
+be dirty. No new action. File rows' marks wait for 12.11b's file traces;
+the harness's invariant checker checks them at `ChildRowRecorded`.
 
 ## Changing the model
 

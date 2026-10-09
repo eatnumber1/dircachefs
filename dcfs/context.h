@@ -32,9 +32,10 @@ struct DirtyState {
   // Whether it may hold an atime_only row (cache::MarkAtimeDirty), likewise
   // conservative: a clean shutdown needs both false.
   bool atime = true;
-  // How many atime-only inserts (cache::MarkAtimeDirty) were made: a sync
-  // point's ClearDirty takes its fast path only if none was made since its
-  // BeginSync (a cold open's insert advances no fill guard).
+  // How many inserts into the dirty table were made (cache::MarkAtimeDirty,
+  // and every mutation's mark: BeginMutation, MarkDirty): a sync point's
+  // ClearDirty takes its fast path only if none was made since its
+  // BeginSync (a cold open's or a fill's insert advances no fill guard).
   uint64_t inserts = 0;
   // How old an atime-only row may grow before it drives a sync point after
   // all: the kernel's dirtytime expiry (/proc/sys/vm/dirtytime_expire_seconds,

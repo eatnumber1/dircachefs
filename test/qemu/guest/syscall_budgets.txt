@@ -10,7 +10,9 @@
 cold-lookup backing 11
 cold-lookup procfd 2
 cold-lookup sync 0
-cold-lookup sql_stmts 37
+# Step 23.11: 37 before; the read of the directory's mutation mark at the
+# listing's first inserted row (born dirty under a marked directory).
+cold-lookup sql_stmts 38
 cold-lookup sql_txns 1
 
 warm-lookup backing 0
@@ -33,8 +35,11 @@ warm-readdir sql_txns 0
 
 create backing 21
 create procfd 5
-create sync 2
-create sql_stmts 119
+# Step 23.11: sync 2 and sql_stmts 119 before; the new row is born durably
+# dirty, so BeginWriting's phase 1 commits without a WAL fsync (and without
+# its insert and the synced commit's two PRAGMAs).
+create sync 1
+create sql_stmts 116
 create sql_txns 10
 
 forget-written backing 2

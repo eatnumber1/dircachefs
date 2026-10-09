@@ -168,15 +168,27 @@ DetPresent == {x \in Determined : ObservedPresent(x, FirstObs(x))}
 \* a mkdir (its backing directory is empty, its cached state has no
 \* entries and its dirty row from the create's phase 3), first seen in its
 \* parent's listing or by ParentOf (a new directories row: no entries, an
-\* incomplete listing, epoch 0, not dirty), or already there when the
-\* trace began ("existing": the assumption that it was correct).
+\* incomplete listing, epoch 0), or already there when the trace began
+\* ("existing": the assumption that it was correct).
+\*
+\* Born dirty (step 23.11): a row a listing or resolve inserts is dirty iff
+\* its parent has a mutation's mark (the model's FillMarks, which the begin
+\* line's "parent_marked" reports from the parent's row), both ways: a
+\* clean row under a marked parent is formal/known_bugs/
+\* borndirty_fill_unmarked, and a dirty one under a clean parent is a
+\* mark the model does not make. A row ParentOf inserts is always dirty
+\* (backing::ParentOf: its rule cannot see the grandparent's mark).
 Origin == IF Has(Header, "origin") THEN Header.origin ELSE "existing"
 OriginOK ==
     CASE Origin = "mkdir" ->
            /\ HDB.dent = <<>> /\ HDB.dirty /\ HDB.epoch = 0
-      [] Origin \in {"listing", "parent"} ->
+      [] Origin = "listing" ->
            /\ HDB.dent = <<>> /\ ~HDB.complete /\ HDB.epoch = 0
-           /\ ~HDB.dirty
+           /\ Has(Header, "parent_marked")
+           /\ HDB.dirty = Header.parent_marked
+      [] Origin = "parent" ->
+           /\ HDB.dent = <<>> /\ ~HDB.complete /\ HDB.epoch = 0
+           /\ HDB.dirty
       [] Origin = "existing" -> TRUE
       [] OTHER -> FALSE
 

@@ -5538,6 +5538,22 @@ TEST_F(DirCacheFSDeathTest, DurablyDirtyWithoutADirtyRow) {
                    InRequest("GETATTR", f)));
 }
 
+// Step 23.11, the fill rule (backing::RecordChild): a row a fill inserts
+// under a directory with a mutation's mark must be born with one too.
+TEST_F(DirCacheFSDeathTest, AFillInsertsAnUnmarkedRowUnderAMarkedDirectory) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_THAT(Dirty(), Not(Contains(f)));
+  const InodeId root[] = {kRootInode};
+  ASSERT_THAT(cache::MarkDirty(ctx_, root), IsOk());
+  EXPECT_DEATH(ctx_.events->ChildRowRecorded(ctx_, kRootInode, f,
+                                             /*filled=*/true, /*created=*/true),
+               absl::StrCat("invariant violated: dirty-set: inode ", f,
+                            " was inserted by a fill of directory 1, which "
+                            "has a mutation's dirty row, but has none"));
+}
+
 TEST_F(DirCacheFSDeathTest, DirtySetSaidEmptyButIsNot) {
   Start();
   ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
@@ -5834,16 +5850,20 @@ TEST_F(DirCacheFSDeathTest, DurableDirtyRowTruncatedAway) {
   auto [lookup, entry] = Lookup(kRootInode, "f");
   ASSERT_EQ(lookup.error, 0);
   const InodeId f = static_cast<InodeId>(entry.nodeid);
-  ASSERT_EQ(Mkdir(kRootInode, "d").first.error, 0);
+  auto [mkdir, d] = Mkdir(kRootInode, "d");
+  ASSERT_EQ(mkdir.error, 0);
   ASSERT_TRUE(ctx_.dirty.durable.contains(kRootInode));
+  // Step 23.11: the new row is born durably dirty too; the checker names
+  // whichever of the two it looks at first.
+  ASSERT_TRUE(ctx_.dirty.durable.contains(d));
   EXPECT_DEATH(
       {
         ASSERT_THAT(db_.Exec("DELETE FROM dirty"), IsOk());
         Getattr(f);
       },
-      "invariant violated: dirty-set: inode 1 is in Context::dirty.durable "
-      "but has no dirty row.*" +
-          InRequest("GETATTR", f));
+      absl::StrCat("invariant violated: dirty-set: inode (1|", d,
+                   ") is in Context::dirty.durable but has no dirty row.*",
+                   InRequest("GETATTR", f)));
 }
 
 constexpr std::string_view kInsertStub =
@@ -7648,7 +7668,14 @@ class SlopeRun : public DirCacheFSTest {
 // shell redirection open) is one too: its new row is born dirty (its
 // phase 3 inserts the row and its mark in one transaction), so its
 // writable open's phase 1 (BeginWriting) needs no fsync; before, each
-// create cost one (100 creates: 101 WAL fsyncs, now 1).
+// create cost one (100 creates: 101 WAL fsyncs, now 1). That phase 1 also
+// skips its insert into the dirty table and the synced commit's two
+// PRAGMA synchronous statements: 3 steps fewer per create (82 before).
+//
+// The steps of a cold lookup's listing: one more per listing since step
+// 23.11 (b 16, now 17), the read of the directory's mutation mark that
+// decides whether the rows it inserts are born dirty (once per transaction,
+// at its first insert); under a clean directory (as here) nothing else.
 struct SlopeBound {
   const char *op;
   int64_t steps_a, steps_b;
@@ -7657,11 +7684,11 @@ struct SlopeBound {
   int64_t backing_a, backing_b;
 };
 constexpr SlopeBound kSlopeBounds[] = {
-    {"create", 82, 3, 7, 0, 0, 1, 14, 64},
+    {"create", 79, 3, 7, 0, 0, 1, 14, 64},
     {"mkdir", 48, 3, 3, 0, 0, 1, 8, 0},
     {"unlink", 38, 0, 4, 0, 1, 0, 8, 0},
     {"rename", 59, 0, 4, 0, 1, 0, 9, 0},
-    {"cold-lookup", 20, 16, 0, 1, 0, 0, 5, 2},
+    {"cold-lookup", 20, 17, 0, 1, 0, 0, 5, 2},
     {"setattr", 35, 0, 3, 0, 1, 0, 13, 0},
 };
 
@@ -7700,7 +7727,7 @@ TEST(SlopeTest, AnExtraCostPerOperationIsCaught) {
                               [](SlopeRun &r) { r.ExtraStep(); });
   bool within = true;
   EXPECT_NONFATAL_FAILURE(within = WithinBounds(kSlopeBounds[0], 100, s),
-                          "create n=100: steps 8403 > 82 * n + 3");
+                          "create n=100: steps 8103 > 79 * n + 3");
   EXPECT_FALSE(within);
 }
 

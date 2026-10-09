@@ -1565,6 +1565,12 @@ absl::Status InsertDirty(Context &ctx, std::span<const InodeId> ids) {
                 id)
             .status());
   }
+  // ClearDirty's fast path (the 12.12 audit's G15): a phase 1's insert
+  // advances the clock anyway (RegisterMutation), but MarkDirty's does not
+  // (RecordTmpfile's, a fill's born-dirty row), and a row added after
+  // BeginSync must stay. Counted even if the transaction then rolls back:
+  // a fast path missed is only slower.
+  ++ctx.dirty.inserts;
   return absl::OkStatus();
 }
 
@@ -1725,6 +1731,13 @@ absl::StatusOr<bool> IsDirty(Context &ctx, InodeId id) {
   return ReadOne(*stmt, [](Statement &) { return absl::OkStatus(); });
 }
 
+absl::StatusOr<bool> HasMutationMark(Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(
+      Statement * stmt,
+      Query(ctx, "SELECT 1 FROM dirty WHERE inode = ? AND atime_only = 0", id));
+  return ReadOne(*stmt, [](Statement &) { return absl::OkStatus(); });
+}
+
 absl::StatusOr<std::vector<InodeId>> ListDirty(Context &ctx,
                                                bool mutations_only) {
   ABSL_ASSIGN_OR_RETURN(
@@ -1816,10 +1829,11 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
   // Why that is exact:
   //  - The table holds no row that is not in `synced.dirty`. Rows are
   //    added only by a phase 1 (BeginMutation, whose RegisterMutation then
-  //    advances the clock with nothing in between) and by MarkDirty in a
-  //    phase 3 (before its mutation's End, which advances it), and by
-  //    MarkAtimeDirty, which counts itself in Context::dirty.inserts (a
-  //    cold open's advances no clock). Only
+  //    advances the clock with nothing in between), by MarkDirty (in a
+  //    phase 3, in RecordTmpfile, and in a fill that inserts a born-dirty
+  //    row, step 23.11) and by MarkAtimeDirty, and each insert counts
+  //    itself in Context::dirty.inserts (a cold open's and a fill's advance
+  //    no clock: the 12.12 audit's G15). Only
   //    ClearDirty deletes rows (RecoverDirty keeps them, step 12.6b), and
   //    another sync point's ClearDirty in between could only have removed
   //    rows (then putting a kept one back below is merely conservative).

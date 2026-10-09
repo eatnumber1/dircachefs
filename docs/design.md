@@ -768,7 +768,9 @@ dirty since the last sync point (tracked in memory in
 `Context::dirty.durable`), the transaction commits at normal durability:
 recovery after a crash will forget all of those inodes' state anyway, so
 nothing this phase 1 writes needs to survive a power loss. A burst of
-creates in one directory costs one WAL fsync, not one per file.
+creates in one directory costs one WAL fsync, not one per file, writable
+creates included since step 23.11 (their new rows are born durably dirty:
+"Born-dirty create" below).
 
 ### Phase 2
 
@@ -819,22 +821,24 @@ done, with the row's last attributes and a zero attribute timeout
 
 **Born-dirty create** (step 23.11; russ, 2026-10-09: "mirror the way a
 real filesystem works as much as possible (files are created dirty until
-fsync or dirty_writeback)"; decided and checked in the model, the code
-follows in the step's second half). A create's phase 3 already inserts the
-new row and its dirty mark in one transaction at normal durability
-(`RecordNewChild`), so every state a crash may leave holds the row with its
-mark, or no row, and with no row the cache claims nothing about the object
-(its name is covered by the parent's mark, durable since phase 1). Such a
-row therefore counts as durably dirty (`Context::dirty.durable`), and a
-`BeginWriting` right after the create (a writable create, `O_CREAT` with
-writes) needs no WAL fsync of its own. It stops being dirty as any row
+fsync or dirty_writeback)"; checked in the model first). A create's phase
+3 inserts the new row and its dirty mark in one transaction at normal
+durability (`backing::RecordNewChild`), so every state a crash may leave
+holds the row with its mark, or no row, and with no row the cache claims
+nothing about the object (its name is covered by the parent's mark,
+durable since phase 1). Such a row therefore counts as durably dirty
+(`Context::dirty.durable`), and a `BeginWriting` right after the create (a
+writable create, `O_CREAT` with writes) needs no WAL fsync of its own: a
+burst of N writable creates in one directory costs one WAL fsync, not
+N + 1 (the slope test's create bound). The row stops being dirty as any row
 does, at a sync point that covered it. Two rules come with it, both found
 by the model (`formal/README.md`, "Born-dirty create"):
 
 - Only a row that phase 3's own transaction inserted is born dirty in that
-  sense (`UpsertInode` says whether it inserted). A lookup or a listing of
-  the parent may have inserted the row first, and a sync point may have
-  cleared that row's mark since; a crash may still leave it clean.
+  sense (`UpsertResult::created`; the model's `BornHere`). A lookup or a
+  listing of the parent may have inserted the row first, and a sync point
+  may have cleared that row's mark since; a crash may still leave it
+  clean, so `BeginWriting` then commits with a WAL fsync as before.
 - A row that a fill (`RecordChild`, for a lookup or a listing) inserts
   while its parent is in the dirty set is born dirty too, in the fill's
   transaction. Without it the fill records the new object's row clean and
@@ -858,10 +862,29 @@ by the model (`formal/README.md`, "Born-dirty create"):
   next sync point. A parent with a create in it that a crash may still
   lose is always in the dirty set, so the rule catches every such row; its
   cost is one dirty row, and at a crash's start one probe, per child first
-  recorded in a directory changed since the last sync point. The two rules
-  the audit proposed (record a child's attributes only when the parent's
-  fill is allowed; mark the row only when it is refused) both miss the
-  daemon-crash and failed-phase-3 cases.
+  recorded in a directory changed since the last sync point (the
+  directory's mark is read once per fill transaction, and only when the
+  fill inserts a row); step 26.4b measures it as "create, then a cold
+  listing of a 100k directory, then a crash". Only a mutation's mark
+  counts (an atime-only row says nothing about creates). A row a fill
+  inserts is not durably dirty (its mark commits at normal durability,
+  and nothing makes it durable before a writable open's phase 1, which
+  therefore still syncs): the case is rare, and the model has no such
+  rule. The two rules the audit proposed (record a child's attributes
+  only when the parent's fill is allowed; mark the row only when it is
+  refused) both miss the daemon-crash and failed-phase-3 cases.
+- `ParentOf`, the other fill that inserts a row (a directory's parent,
+  read through `..`, when its dentry is unknown), cannot see the
+  grandparent's mark, and marks every row it inserts. Through dcfs no
+  such row can be of a create that is not durable yet (a directory is
+  created in, or renamed into, a directory by its nodeid, so that one's
+  row exists first); an out-of-band move into a directory whose create's
+  phase 3 never ran can, and the mark is cheap next to the exposure.
+- Every insert into the dirty table counts in `Context::dirty.inserts`, so
+  that a sync point's fast path (`ClearDirty`, which deletes the whole
+  table when nothing moved since `BeginSync`) keeps a mark that a fill or
+  `RecordTmpfile` added after its snapshot without moving a fill guard
+  (the 12.12 audit's G15).
 
 **Kernel caches after dcfs's own mutations** are kept right by the kernel
 itself: it invalidates the parent's attributes and dentries for the

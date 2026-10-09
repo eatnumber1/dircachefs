@@ -75,6 +75,36 @@ absl::StatusOr<bool> HasDirtyRow(Context &ctx, InodeId id) {
   return found;
 }
 
+// Whether `id` has a mutation's dirty row (not atime-only).
+absl::StatusOr<bool> HasMutationRow(Context &ctx, InodeId id) {
+  ABSL_ASSIGN_OR_RETURN(
+      sqlite3::Statement * stmt,
+      ctx.db.Prepared(DCFS_CHECKER_SQL
+                      "SELECT 1 FROM dirty "
+                      "WHERE inode = ? AND atime_only = 0"));
+  ABSL_RETURN_IF_ERROR(stmt->Bind(1, id));
+  bool found = false;
+  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
+    found = true;
+    return absl::OkStatus();
+  }));
+  return found;
+}
+
+// dirty-set (step 23.11): a row a fill inserted under a directory with a
+// mutation's mark was born dirty.
+absl::Status FillBornDirty(Context &ctx, InodeId dir, InodeId child) {
+  ABSL_ASSIGN_OR_RETURN(bool dir_marked, HasMutationRow(ctx, dir));
+  if (!dir_marked) return absl::OkStatus();
+  ABSL_ASSIGN_OR_RETURN(bool child_marked, HasMutationRow(ctx, child));
+  if (!child_marked) {
+    return Violation(kDirtySet, "inode ", child,
+                     " was inserted by a fill of directory ", dir,
+                     ", which has a mutation's dirty row, but has none");
+  }
+  return absl::OkStatus();
+}
+
 // No transaction open, and no statement part way through its rows (a read
 // cursor holds a read transaction: a snapshot of the database).
 absl::Status NoTransaction(Context &ctx, std::string_view invariant) {
@@ -340,6 +370,15 @@ void InvariantChecker::CheckForgetting(Context &ctx, const events::Bookkeeping &
     Fail(Violation(kLookupCount, "FORGET of ", forgotten, " lookups of nodeid ",
                    ino, ", but ", counted, " counted"));
   }
+}
+
+void InvariantChecker::ChildRowRecorded(Context &ctx, events::Ino dir,
+                                        events::Ino child, bool /*filled*/,
+                                        bool created) {
+  if (!created) return;
+  Attach(ctx);
+  absl::Status status = FillBornDirty(ctx, dir, child);
+  if (!status.ok()) Fail(status);
 }
 
 void InvariantChecker::CheckRunStarting(Context &ctx) {

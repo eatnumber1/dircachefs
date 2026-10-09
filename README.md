@@ -1002,7 +1002,11 @@ forgotten. This bounds what a power loss costs to re-reading the entries
 changed in the last few seconds. A file that was only read is in the dirty
 set too, for its access time only: that alone makes no sync point run
 until the kernel's own dirtytime expiry (12 hours by default), and after a
-crash it costs only that file's attributes.
+crash it costs only that file's attributes. A new file or directory is
+created dirty until the next sync point, like a real filesystem's: a crash
+before then re-checks it at the next start (and forgets it if the backing
+filesystem lost it), and writing to a file just created costs no extra
+fsync of the cache's WAL.
 
 **File contents** go through FUSE passthrough on one shared backing file
 per inode. While a file is open for writing, its cached attributes stay

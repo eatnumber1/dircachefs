@@ -143,7 +143,7 @@ class TraceRecorder final : public ProtocolEvents {
                         std::string_view name, uint64_t snapshot,
                         bool recorded) override;
   void ChildRowRecorded(Context &ctx, events::Ino dir, events::Ino child,
-                        bool filled) override;
+                        bool filled, bool created) override;
   void PopulateStarted(Context &ctx, events::Ino dir) override;
   void PopulateRead(Context &ctx, events::Ino dir,
                     events::ListingFn listing) override;
@@ -402,6 +402,10 @@ class TraceRecorder final : public ProtocolEvents {
   // kResolve), by that directory; of ParentOf(dir), by dir.
   std::map<Ino, int64_t> listing_marks_;
   std::map<Ino, int64_t> parent_marks_;
+  // The directory whose listing or resolve just committed (0 otherwise),
+  // while After() writes the begin lines of the rows it inserted: their
+  // "parent_marked" (step 23.11).
+  Ino filling_dir_ = 0;
   // Writes the child_fill lines of `dir`'s listing or resolve that took
   // `snapshot`.
   void ChildFills(Context &ctx, Ino dir);

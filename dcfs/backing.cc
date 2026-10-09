@@ -1353,9 +1353,26 @@ namespace {
 // attributes, symlink target and xattrs only if it may be filled (see
 // cache::CanFill; otherwise its attributes are left unknown), and links it
 // into `dir` if `dir_ok`. Returns the child's row.
+//
+// Born dirty (step 23.11, the fill rule; formal/README.md, "Born-dirty
+// create"): a row this inserts while `dir` has a mutation's mark gets its
+// own mark, in the same transaction. The object may be one a create made
+// whose phase 3 never recorded it (the daemon died between the syscall and
+// phase 3, or phase 3 failed and replied EEXIST: CreatedButNotCompleted),
+// and that create is durable only once a sync point covered it, which is
+// what clears `dir`'s mark (the create's phase 1 made it durable before the
+// syscall, and a start keeps it). A clean row of an object a power loss
+// then takes would be served by nodeid (an NFS handle, a saved file
+// handle) with the attributes of an object that is gone; a dirty one is
+// probed away by the next start. `dir_marked` is whether `dir` has that
+// mark, read once per transaction (the first time a row is inserted) and
+// left in the caller's std::optional for the next child: the mark cannot
+// change inside the transaction. Only an insert is marked: a row that was
+// already there was recorded before, and keeps whatever mark it has.
 absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
                                     InodeId dir, const ChildRecord &child,
-                                    bool dir_ok) {
+                                    bool dir_ok,
+                                    std::optional<bool> &dir_marked) {
   // The probe's statx is free out-of-band detection for a child whose
   // row is already cached (under this name, and still the same object):
   // see ReconcileAttrs. A row adopted fresh by OpenNode just before
@@ -1386,9 +1403,19 @@ absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
   if (!filled) {
     ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
   }
+  if (row.created) {
+    if (!dir_marked.has_value()) {
+      ABSL_ASSIGN_OR_RETURN(dir_marked, cache::HasMutationMark(ctx, dir));
+    }
+    if (*dir_marked) {
+      // Model: FillMarks (the fill's commit, FLCommit).
+      const InodeId born[] = {row.id};
+      ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, born));
+    }
+  }
   // Model: a whole getattr fill of the child (its line once the caller's
   // transaction committed).
-  ctx.events->ChildRowRecorded(ctx, dir, row.id, filled);
+  ctx.events->ChildRowRecorded(ctx, dir, row.id, filled, row.created);
   if (S_ISDIR(child.stx.stx_mode)) {
     ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
   }
@@ -1486,11 +1513,12 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     ABSL_ASSIGN_OR_RETURN(int64_t epoch_now, cache::DirEpoch(ctx, dir));
     const bool dir_ok =
         cache::CanFill(ctx, snapshot, dir) && epoch_now == dir_epoch;
+    std::optional<bool> dir_marked;  // Read by the first insert, if any.
     std::vector<std::string> seen;
     seen.reserve(children.size() + refused_names.size());
     for (const ChildRecord &child : children) {
-      ABSL_ASSIGN_OR_RETURN(InodeId id,
-                            RecordChild(ctx, snapshot, dir, child, dir_ok));
+      ABSL_ASSIGN_OR_RETURN(InodeId id, RecordChild(ctx, snapshot, dir, child,
+                                                    dir_ok, dir_marked));
       result.entries[child.name] = cache::LookupResult{
           .kind = cache::LookupResult::Kind::kFound, .id = id};
       seen.push_back(child.name);
@@ -1687,6 +1715,22 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
     if (!filled) {
       ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
     }
+    // Step 23.11: a row inserted here is born dirty, whatever its parent's
+    // mark (which this does not know: RecordChild's rule needs the
+    // grandparent). Through dcfs a directory whose create is not yet
+    // durable cannot get here: `dir` is in it, so `dir` was created in it
+    // or moved into it, and either needs its row first (a mkdir or rename
+    // names it by nodeid), and the only fill that inserts a row in a
+    // directory is RecordChild, which marks it. What is left is an
+    // out-of-band move of `dir` into a directory dcfs created whose phase 3
+    // never recorded it (path A or B of formal/README.md's "Born-dirty
+    // create"): rare, and the mark costs one dirty row and the next sync
+    // point, against a clean row of a directory a power loss may take,
+    // served by nodeid.
+    if (row.created) {
+      const InodeId born[] = {row.id};
+      ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, born));
+    }
     ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
     parent = row.id;
     return absl::OkStatus();
@@ -1728,8 +1772,10 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
     const bool dir_ok = cache::CanFill(ctx, snapshot, parent);
     recorded = dir_ok;
     if (child.has_value()) {
+      std::optional<bool> parent_marked;
       ABSL_ASSIGN_OR_RETURN(InodeId id,
-                            RecordChild(ctx, snapshot, parent, *child, dir_ok));
+                            RecordChild(ctx, snapshot, parent, *child, dir_ok,
+                                        parent_marked));
       result = {cache::LookupResult::Kind::kFound, id};
     } else if (refused.has_value()) {
       InodeId stub = 0;  // None unless recorded (see LookupOrPopulate).
@@ -1791,10 +1837,12 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
 
   // Phase B: one transaction, no syscalls.
   NewChild result;
+  bool created = false;
   ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     ABSL_ASSIGN_OR_RETURN(
         cache::UpsertResult row,
         cache::UpsertInode(ctx, record.handle, record.stx, record.backing_gen));
+    created = row.created;
     // The new object is a fill (another request may already have reached
     // it, e.g. by listing `parent`); its dentry in `parent` is this
     // mutation's own phase-3 write.
@@ -1834,6 +1882,19 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
     result = NewChild{.id = row.id, .fuse_gen = row.fuse_gen, .stx = record.stx};
     return absl::OkStatus();
   }));
+  // Born dirty (step 23.11, rule 1; the model's BornHere): a row this
+  // transaction inserted is durably dirty, although the commit was not
+  // synced. The row and its mark are one commit, which a later commit
+  // (BeginWriting's) cannot outlive, the WAL being ordered: in every state
+  // of the database that has the row, it has the mark too, until a sync
+  // point clears it, and a sync point empties ctx.dirty.durable. So the
+  // writable open of a create needs no WAL fsync of its own (BeginMutation's
+  // fast path). Only a row inserted here: one that a fill inserted first
+  // (another request reached the object between the syscall and this
+  // transaction, e.g. by a lookup) may have had its mark cleared by a sync
+  // point since, and a mark this transaction writes again is not durable
+  // until a later synced commit (formal/known_bugs/borndirty_not_born_here).
+  if (created) ctx.dirty.durable.insert(result.id);
   return result;
 }
 

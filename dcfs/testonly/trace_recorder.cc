@@ -562,9 +562,21 @@ void TraceRecorder::After(Context &ctx) {
     State now = SnapshotState(ctx, dir);
     const std::string db = now.Json();
     const std::string origin = Origin();
+    // A row a listing or resolve inserted is born dirty iff its parent has
+    // a mutation's mark (step 23.11, RecordChild): whether it has, read
+    // from the parent's own row (the mark cannot have changed since the
+    // fill's transaction), for Trace.tla's OriginOK to compare with the
+    // row's.
+    std::string marked;
+    if (origin == "listing") {
+      absl::StatusOr<bool> parent_marked =
+          cache::HasMutationMark(ctx, filling_dir_);
+      CHECK_OK(parent_marked.status());
+      marked = absl::StrCat(",\"parent_marked\":", Bool(*parent_marked));
+    }
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                             ",\"ev\":\"begin\",\"origin\":",
-                            JsonStr(origin), ",\"db\":", db, "}"));
+                            JsonStr(origin), marked, ",\"db\":", db, "}"));
     dirs_[dir].last = db;
     dirs_[dir].last_state = std::move(now);
     covered_.insert(dir);
@@ -934,11 +946,13 @@ void TraceRecorder::ResolveCommitted(Context &ctx, Ino parent,
     }
   }
   ChildFills(ctx, parent);
+  filling_dir_ = parent;
   After(ctx);
+  filling_dir_ = 0;
 }
 
 void TraceRecorder::ChildRowRecorded(Context &ctx, Ino dir, Ino child,
-                                     bool filled) {
+                                     bool filled, bool /*created*/) {
   Enter("ChildRowRecorded");
   // Inside the caller's transaction: its line once that committed.
   child_rows_[dir].emplace_back(child, filled);
@@ -1072,7 +1086,9 @@ void TraceRecorder::PopulateCommitted(Context &ctx, Ino dir,
     }
   }
   ChildFills(ctx, dir);
+  filling_dir_ = dir;
   After(ctx);
+  filling_dir_ = 0;
 }
 
 void TraceRecorder::ListChecked(Context &ctx, Ino dir, bool complete) {

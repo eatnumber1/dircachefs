@@ -20,6 +20,12 @@
 //       it before the syscall, and a sync point keeps it while the mutation
 //       is in flight.
 //
+//  At a listing's or a resolve's insert of a row (ChildRowRecorded, inside
+//  its transaction, which the queries see):
+//   dirty-set  (step 23.11, backing::RecordChild's fill rule) a row a fill
+//       inserts under a directory with a mutation's mark has a mutation's
+//       mark of its own: born dirty.
+//
 //  At the end of every request, after its reply (RequestEnd), for the rows
 //  the request changed (SQLite's update hook tells which, so the work is
 //  proportional to them, not to the database) and the inodes it named. A
@@ -133,6 +139,8 @@ class InvariantChecker final : public ProtocolEvents {
   void CheckRunStarting(Context &ctx) override;
   void CheckRunStarted(Context &ctx) override;
   void CheckDestroyed(Context &ctx, const events::Bookkeeping &fs) override;
+  void ChildRowRecorded(Context &ctx, events::Ino dir, events::Ino child,
+                        bool filled, bool created) override;
 
   // Every statement the checker runs starts with this comment, so that the
   // cost counter (testonly/cost_counter.h) leaves the checker's own steps
