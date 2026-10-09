@@ -86,7 +86,8 @@ echo "$HOME/.local/bin" >>"$GITHUB_PATH"
 	# under the repository cache by default: 37 GB locally, about 12 GB of it
 	# the unpacked LLVM. Put it beside the repository cache, not in it, so
 	# that the saved cache (the downloaded archives, a few GB) stays inside
-	# GitHub's 10 GB quota; every job extracts what it needs again.
+	# GitHub's 10 GB quota. Only http_archive repositories land in it; the
+	# extracted @dcfs_llvm is cached by ci.yml (section 4 below).
 	echo "build --repo_contents_cache=$HOME/.cache/bazel-repo-contents"
 	# GitHub's repository-wide cache quota is 10 GB for everything; keep the
 	# disk cache well inside it.
@@ -109,3 +110,14 @@ echo "$HOME/.local/bin" >>"$GITHUB_PATH"
 	fi
 } >user.bazelrc
 cat user.bazelrc
+
+# --- 4. Where Bazel will put the extracted repositories ----------------------
+# Step 26.16b: the workflow caches the output base's external/dcfs_llvm (and
+# its marker) across jobs, because Bazel's repo contents cache does not hold
+# it (measured: only http_archive repositories become entries there; every
+# repository of a rule of ours that runs commands stays in the output base).
+# The output base is <user root>/<md5 of the workspace path>, known before
+# Bazel starts.
+workspace=$(pwd -P)
+base="$HOME/.cache/bazel/_bazel_$(id -un)/$(printf %s "$workspace" | md5sum | cut -d' ' -f1)"
+echo "DCFS_BAZEL_EXTERNAL=$base/external" >>"$GITHUB_ENV"

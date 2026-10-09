@@ -821,7 +821,12 @@ than another shard; neither is done until a `cold` run measures the shards.
   a pin change invalidates only the actions whose inputs changed; the keys
   end in the commit and fall back to the newest entry of the same job. The
   repository cache (the downloaded archives) has its own key, the hash of
-  `MODULE.bazel.lock`; the extracted repositories (13 GB) are never saved.
+  `MODULE.bazel.lock`; the extracted repositories (13 GB) are never saved,
+  except the extracted LLVM toolchain (`@dcfs_llvm`, 0.58 GB compressed),
+  whose unpacking took 3 to 8 minutes per job: it has its own key (the hash
+  of `MODULE.bazel`, the lock file, `.bazelversion` and `third_party/llvm/*`),
+  is saved on a miss only, and a stale entry is refetched, never trusted
+  (Bazel checks the repository's marker).
   The coverage, reproducible and mutation jobs save no disk cache.
 - **Cold runs.** Caches are evicted (10 GB per repository, seven days idle)
   and a lock-file change starts from nothing, so every job's limit covers

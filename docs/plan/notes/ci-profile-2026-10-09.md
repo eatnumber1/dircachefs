@@ -111,3 +111,56 @@ and the run's own results already record each mutant's time. The jobs
 that are not Bazel (`subjects`) have none. The fast job was not run under
 `act` (an empty output base there would fetch and extract everything, about
 an hour here).
+
+## Addendum (step 26.16b): the numbers of run 37973594236 (bc7eee7)
+
+Read from the uploaded `bazel-profile-*` artifacts with `tools/ci_profile.py`
+(the job summaries are not in the logs). The `@dcfs_llvm fetch and
+extraction` row, and the job's total wall (the profiled invocation only):
+
+| Job | Total wall (s) | `@dcfs_llvm` row (s) | Note |
+|---|---:|---:|---|
+| fast | 433.0 | 199.0 | |
+| presubmit | 733.4 | 455.6 | |
+| coverage | 930.4 | 262.7 | |
+| reproducible (a / b) | 376.2 / 380.2 | 275.5 / 275.9 | two output bases |
+| osv | 13.1 | 0.0 | no toolchain |
+| full 0, 1, 2 | 1032.7, 982.8, 562.1 | 0.0 | extracted earlier, see below |
+| asan 0, 1, 2 | 1067.5, 954.2, 878.7 | 0.0 | same |
+| ubsan 0, 1, 2 | 996.2, 711.7, 833.8 | 0.0 | same |
+
+The shards show 0 because `test.sh --shard` runs `bazel cquery` first, in an
+invocation with no profile; that is where they extract. Full shard 0's log:
+the cquery step took 253.2 s (`Elapsed time: 253.169s`, 18:54:01 to
+18:58:11) before the profiled `bazel test` began, and the shard's other
+cquery invocations were 0.5 s. So about 4 minutes per shard (fetch of the
+other repositories included, which a restored cache does not remove).
+
+Total: about 3.3 + 7.6 + 4.4 + 2 x 4.6 + 9 x ~4.2 = roughly 60 minutes of
+runner time per push in 14 invocations, on the critical path 7.6 minutes in
+`presubmit` (full, asan and ubsan wait for it) and about 4 more in each
+shard. Minutes, not seconds: worth caching.
+
+Measured for the plan's question (local lane, Bazel 9.2.0):
+
+- The tree is 2.1 GB; `tar | zstd -3` of it is 577,814,332 bytes (0.58 GB,
+  23 s on this machine), not the 1 GB guessed.
+- Bazel's repo contents cache cannot hold it. Of the lane's external
+  repositories only the `http_archive` / `http_file` ones are symlinks into
+  `cache/repos/v1/contents`; `@dcfs_llvm`, every `alpine_*`, `kernel_image`
+  and `qemu` are real directories in the output base, and no entry of the
+  contents cache records `third_party/llvm/extract.py`. Removing
+  `+alpine_package+alpine_patchelf` and fetching it again without `--force`
+  made a directory again, not an entry (111 entries before and after). So
+  the plan's premise (`~/.cache/bazel-repo-contents` holds the extracted
+  tree) is wrong, and `--repo_contents_cache` is no help for it (it still
+  matters for the http_archive repositories, which are in it).
+- What does work: restoring `external/+llvm_distribution+dcfs_llvm` and
+  `external/@+llvm_distribution+dcfs_llvm.marker` into a fresh output base.
+  Test: copied both into `<lane>/.obtest/external`, added a `SENTINEL` file
+  to the tree, ran `bazel --output_base=<lane>/.obtest fetch
+  --repo=@@+llvm_distribution+dcfs_llvm`: 30 s (server start and module
+  resolution), the sentinel survived, so Bazel took the directory as up to
+  date. Not tested here: that a changed input makes it refetch (Bazel's
+  documented marker comparison; a negative test costs a 30 minute
+  extraction here).

@@ -43,6 +43,23 @@
 # repository, and saving it with the per-commit disk cache would store a copy
 # of the archives for every commit. A lock-file change misses once, restores
 # the newest older copy (restore-keys) and saves the new one.
+#
+# The extracted toolchain (step 26.16b): unpacking @dcfs_llvm took 3 to 8
+# minutes in every Bazel job of run 37973594236 (fast 199 s, presubmit 456 s,
+# coverage 263 s, about 250 s in each shard's `cquery`, 9 shards; see
+# docs/plan/notes/ci-profile-2026-10-09.md). Bazel's repo contents cache
+# cannot hold it (only http_archive repositories become entries there), so the
+# jobs cache the output base's external/+llvm_distribution+dcfs_llvm and its
+# marker, which prepare.sh locates (DCFS_BAZEL_EXTERNAL; the output base is
+# named by the workspace path, the same on every GitHub runner). Bazel reuses
+# a restored directory only when the marker's recorded inputs match, so a
+# stale entry costs a refetch, never a wrong build. 2.1 GB on disk, 0.58 GB
+# compressed (zstd -3, measured): one entry per key, shared by all jobs, of
+# the 10 GB quota. The key is the hash of MODULE.bazel, its lock,
+# .bazelversion and third_party/llvm/*, no restore-keys (an older entry never
+# matches); saved on a miss only; `cold` neither restores nor saves, so it
+# still extracts. `reproducible` (two builds in output bases of their own)
+# and `osv` do not use it.
 
 name: CI
 
@@ -117,6 +134,16 @@ jobs:
           key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
           restore-keys: |
             bazel-repo-
+      # Step 26.16b: the extracted @dcfs_llvm (see the top of this file).
+      - name: Restore the extracted LLVM toolchain
+        id: llvmcache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
       - name: Restore Bazel caches
         id: cache
         if: ${{ inputs.cold != true }}
@@ -158,6 +185,14 @@ jobs:
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
+      - name: Save the extracted LLVM toolchain
+        if: ${{ !cancelled() && inputs.cold != true && steps.llvmcache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: ${{ steps.llvmcache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -190,6 +225,16 @@ jobs:
           key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
           restore-keys: |
             bazel-repo-
+      # Step 26.16b: the extracted @dcfs_llvm (see the top of this file).
+      - name: Restore the extracted LLVM toolchain
+        id: llvmcache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
       - name: Restore Bazel caches
         id: cache
         if: ${{ inputs.cold != true }}
@@ -231,6 +276,14 @@ jobs:
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
+      - name: Save the extracted LLVM toolchain
+        if: ${{ !cancelled() && inputs.cold != true && steps.llvmcache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: ${{ steps.llvmcache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -268,6 +321,16 @@ jobs:
       # job saves nothing (four jobs saving up to 4 GB each per commit do not
       # fit GitHub's 10 GB quota); it starts from presubmit's tools and
       # externals and compiles our code again.
+      # Step 26.16b: the extracted @dcfs_llvm (see the top of this file).
+      - name: Restore the extracted LLVM toolchain
+        id: llvmcache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
       - name: Restore Bazel caches (presubmit's, read-only)
         id: cache
         if: ${{ inputs.cold != true }}
@@ -317,6 +380,14 @@ jobs:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
 
+      - name: Save the extracted LLVM toolchain
+        if: ${{ !cancelled() && inputs.cold != true && steps.llvmcache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: ${{ steps.llvmcache.outputs.cache-primary-key }}
   reproducible:
     # Step 26.12: two builds of main_static and dcfs.8 from two copies of the
     # repository at different paths, in two output bases, with no disk cache,
@@ -402,6 +473,16 @@ jobs:
           key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
           restore-keys: |
             bazel-repo-
+      # Step 26.16b: the extracted @dcfs_llvm (see the top of this file).
+      - name: Restore the extracted LLVM toolchain
+        id: llvmcache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
       - name: Restore Bazel caches (presubmit's, read-only)
         if: ${{ inputs.cold != true }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -481,6 +562,16 @@ jobs:
           key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
           restore-keys: |
             bazel-repo-
+      # Step 26.16b: the extracted @dcfs_llvm (see the top of this file).
+      - name: Restore the extracted LLVM toolchain
+        id: llvmcache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
       - name: Restore Bazel caches
         id: cache
         if: ${{ inputs.cold != true }}
@@ -523,6 +614,14 @@ jobs:
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
+      - name: Save the extracted LLVM toolchain
+        if: ${{ !cancelled() && inputs.cold != true && steps.llvmcache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: ${{ steps.llvmcache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -562,6 +661,16 @@ jobs:
           key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
           restore-keys: |
             bazel-repo-
+      # Step 26.16b: the extracted @dcfs_llvm (see the top of this file).
+      - name: Restore the extracted LLVM toolchain
+        id: llvmcache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
       - name: Restore Bazel caches
         id: cache
         if: ${{ inputs.cold != true }}
@@ -604,6 +713,14 @@ jobs:
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
+      - name: Save the extracted LLVM toolchain
+        if: ${{ !cancelled() && inputs.cold != true && steps.llvmcache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: ${{ steps.llvmcache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -643,6 +760,16 @@ jobs:
           key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
           restore-keys: |
             bazel-repo-
+      # Step 26.16b: the extracted @dcfs_llvm (see the top of this file).
+      - name: Restore the extracted LLVM toolchain
+        id: llvmcache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: bazel-llvm-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion', 'third_party/llvm/*') }}
       - name: Restore Bazel caches
         id: cache
         if: ${{ inputs.cold != true }}
@@ -685,6 +812,14 @@ jobs:
         with:
           path: ~/.cache/bazel-repo-cache
           key: ${{ steps.repocache.outputs.cache-primary-key }}
+      - name: Save the extracted LLVM toolchain
+        if: ${{ !cancelled() && inputs.cold != true && steps.llvmcache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
+            ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
+          key: ${{ steps.llvmcache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
