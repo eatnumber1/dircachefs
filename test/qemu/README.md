@@ -1451,6 +1451,17 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   remount is ignored with the wrapper's WARNING on mount's stderr; `umount`
   stops the daemon (the FUSE path: libmount finds no `umount.dcfs` and calls
   `umount(2)`);
+- the README's recipes with util-linux: `mount /data` takes its fstab line's
+  options, `mount -o remount,dcfs.ro /data` has libmount merge the line's
+  options into the helper's (the native `noatime` is ignored with the
+  WARNING), `umount -R /data` unmounts a tree, a SIGKILLed daemon leaves a
+  dead mount that `umount -l` clears before the instance mounts again,
+  `x-systemd.requires-mounts-for=` is accepted and recorded;
+- the quiet kernel (`guest/init`, step 26.14) is still in force under
+  systemd: nothing in the image changes it (`/usr/lib/sysctl.d` of Debian 13
+  has `kernel.sysrq`, `fs.protected_*`, `vm.max_map_count`, `net.ipv4.*`, the
+  pid limit and the core pattern, no `vm.dirty_*`, `laptop_mode` or
+  `vfs_cache_pressure`), and the test reads the four values back;
 - the exit statuses `mount(8)` returns: a usage error 1, a failed start 32
   (cache database locked), a native failure its own (`mount -t bogusfs`, a
   missing device), each with dcfs's one `E...` ERROR line on mount's stderr
@@ -1472,11 +1483,14 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   options set (`dcfs.stderrthreshold=0` shows the INFO narrative; the
   default hides it);
 - after the reboot: the fstab mounts were made by systemd at boot, the
-  parent before the child; the previous boot's daemons each logged a clean
-  shutdown and this boot's found it clean; a warm tree reads nothing from the
-  backing disk (`sectors_read`); a `nofail` mount of a missing device did not
-  hold the boot (the script runs about nine seconds after boot, long before
-  the 90 s device timeout, with that mount's start job still waiting).
+  parent before the child; every instance recovered and none with dirty
+  entries (that every daemon shut down cleanly is
+  `DISABLED_reboot-every-daemon-shuts-down-cleanly`: in about half the runs
+  one daemon, killed by systemd's last SIGTERM while it was still finishing,
+  starts "uncleanly" after an ordinary reboot); a warm tree reads nothing from
+  the backing disk (`sectors_read`); a `nofail` mount of a missing device did
+  not hold the boot (the script began while that mount's start job was still
+  waiting, with its device timeout set to ten minutes).
 
 What the real `mount(8)` path showed that the busybox guest could not:
 
@@ -1498,9 +1512,13 @@ What the real `mount(8)` path showed that the busybox guest could not:
   `emergency.target`. The test keeps the check as `DISABLED_systemd-restart-
   parent-restarts-child` (`would FAIL` in the log, the way `lib.sh`'s
   `disabled` keeps a kernel bug) on its own pair of `nofail,noauto` units and
-  waits for the old daemon to exit before the stop/start checks. A fix is the
-  new daemon waiting for the cache lock, or a `umount.dcfs` that returns when
-  the daemon has exited.
+  waits for the old daemon to exit before the stop/start checks. The same
+  race hits `umount` followed at once by `mount` of the instance without
+  systemd (`DISABLED_umount-then-mount-at-once`); with the README's wait
+  (`flock -w 10 <cache database> true` returns when the daemon has let go) it
+  works (`umount-then-mount-restarts-an-instance`). A fix is the new daemon
+  waiting for the cache lock, or a `umount.dcfs` that returns when the daemon
+  has exited (plan step 15.6b).
 - `mount -t nosuchfs` is `-t no` + `suchfs` to util-linux (the `no` prefix
   negates a type list); the test uses `bogusfs`.
 

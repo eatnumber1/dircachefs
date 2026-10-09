@@ -397,8 +397,12 @@ boot without, and `noauto` to one that should not mount at boot.
 
 **Without systemd**, `mount -a` (from the init scripts, or by hand) mounts
 the lines in file order, so put parents before the children mounted inside
-them. Restart one instance with `umount /data/sub && mount /data/sub`, and
-unmount a tree with `umount -R /data`.
+them. Restart one instance with `umount /data/sub`, then
+`flock -w 10 <its cache database> true` (it returns when the daemon has let
+go of the database: the daemon outlives the unmount for up to two seconds,
+and a `mount` that follows at once fails with "Cache database ... is in
+use"; see [Limitations](#limitations)), then `mount /data/sub`; unmount a
+tree with `umount -R /data`.
 
 **With systemd**, `systemd-fstab-generator` turns each line into a mount
 unit at boot and at `systemctl daemon-reload`; `systemd-escape -p
@@ -411,7 +415,13 @@ parent stops its children. systemd does not see what a line needs besides its
 mount point: a `none` or `bind` SOURCE that is itself a mount, and a cache
 database on another filesystem, need `x-systemd.requires-mounts-for=` on the
 line (for example `x-systemd.requires-mounts-for=/var/lib/dcfs`).
-Restart one instance with `systemctl restart data-sub.mount`.
+Restart one instance by stopping it and starting it again once its daemon
+is gone: `systemctl stop data-sub.mount`, `flock -w 10 <its cache
+database> true`, `systemctl start data-sub.mount`.
+`systemctl restart` does not work today: systemd calls the unit stopped when
+the mount is gone, the old daemon is still closing the cache database, and
+the start finds it in use (a mount without `nofail` then sends the machine to
+emergency mode; see [Limitations](#limitations)).
 
 A mount that fails prints its message on the standard error of whatever ran
 `mount` (the journal, under systemd) and exits with a status from the list
@@ -517,6 +527,7 @@ delete the database with its `-wal` and `-shm` files, and mount it again:
 
 ```bash
 sudo umount -R /data/sub
+sudo flock -w 10 /var/lib/dcfs/sub.db true   # the daemon outlives the unmount
 sudo rm -f /var/lib/dcfs/sub.db{,-wal,-shm}
 sudo mount /data/sub
 ```
@@ -555,7 +566,10 @@ state (see [Remounting](#remounting)) and leaves the daemon in place.
 ```bash
 sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs.new
 sudo mv /usr/local/bin/dcfs.new /usr/local/bin/dcfs
-sudo umount -R /data && sudo mount -a      # or per instance, parents first
+sudo umount -R /data
+sudo flock -w 10 /var/lib/dcfs/data.db true   # returns when the daemon has let go of its
+sudo flock -w 10 /var/lib/dcfs/sub.db true    # cache database (it outlives the unmount)
+sudo mount -a                                 # or per instance, parents first
 ```
 
 `/sbin/mount.dcfs` and `/sbin/mount.fuse.dcfs` are symbolic links to the
@@ -999,21 +1013,28 @@ recovery protocol, concurrency, and the test strategy.
 
 ## Limitations
 
-- **`systemctl restart` of a dcfs mount can fail, and for a required mount
-  can end in emergency mode.** `systemd` calls a mount unit stopped as soon
-  as the mount is gone, while the daemon is still finishing (syncing the
-  backing filesystem, closing the cache database: up to two seconds), so the
-  start that a restart follows with finds the cache database in use by the
-  old daemon and fails with `Cache database ... is in use by another dcfs
-  process` (exit status 32). For a mount that `local-fs.target` requires
+- **Restarting an instance at once (`systemctl restart`, or `umount` and
+  `mount` one after the other) can fail, and under systemd for a required
+  mount can end in emergency mode.** The mount is gone when `umount`
+  returns, and `systemd` calls the unit stopped then, but the daemon is
+  still finishing (syncing the backing filesystem, closing the cache
+  database: up to two seconds), so the start that follows finds the cache
+  database in use by the old daemon and fails with `Cache database ... is in
+  use by another dcfs process` (exit status 32). For a mount that `local-fs.target` requires
   (any fstab line without `nofail`) that failure sends the machine to
-  `emergency.target`. Stop the unit, wait for the daemon to be gone, then
-  start it (`pidof mount.dcfs` shows the daemons). Found by
+  `emergency.target`. Unmount, wait until `flock -w 10 <the cache database>
+  true` returns (the daemon has let go of it), then mount. Found by
   step 15.6's systemd guest, which keeps the failing check as
-  `DISABLED_systemd-restart-parent-restarts-child`
-  (`test/qemu/README.md`, "The systemd guest"); a fix is a start that waits
+  `DISABLED_systemd-restart-parent-restarts-child` and
+  `DISABLED_umount-then-mount-at-once` (`test/qemu/README.md`, "The systemd
+  guest"); a fix is a start that waits
   for the cache lock, or a `umount.dcfs` that returns when the daemon has
-  exited.
+  exited. The same early "stopped" also lets systemd's last SIGTERM to the
+  processes left at a reboot kill a daemon still finishing: in about half of
+  the runs of that guest one instance found the next boot "did not shut down
+  cleanly" (`DISABLED_reboot-every-daemon-shuts-down-cleanly`). With nothing
+  dirty the recovery re-reads nothing; with dirty entries it makes them
+  unknown, as after a crash.
 - **File names are bytes, but only the logs show them escaped.** dcfs
   treats names, symlink targets and xattr names as unmodified bytes (any
   byte but NUL, and `/` in a name; no normalization, no case folding, no
