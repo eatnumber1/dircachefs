@@ -2174,3 +2174,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   unchanged. Lane-5 freed. P0 rule considered: lane-7's @dcfs_llvm extraction completed at 10:31
   (marker present, 2.1 GB), so 26.16 is productive there and moving it to lane-5 would cost more
   than it saves; 26.16 stays in lane-7. Lane-5 resumes 26.15 (russ approved its commands).
+- 23.8b merged (162fd19, six commits, clean rebase): FSnapView was the inexact view (a never-taken
+  snapshot's default 0 read as "current" at clock 0, which the view also zeroed: not a congruence);
+  fixed to normalise only where read; a no-VIEW run of all 1,457,405 states passes every property,
+  so 23.8's results stand; bisection targets and a `workers` attribute on tlc_test are committed.
+  large_test/nolock_test did not finish under load 30-35 (view field constant there; CI confirms).
+  Audit G3 closed. Lane-1: 23.11 born-dirty model dispatched to the same protocol agent.

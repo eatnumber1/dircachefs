@@ -332,6 +332,29 @@ as today), test each against the same operation on the backing
 (`removed_test`), and rewrite the README and design.md paragraphs. After
 23.8, same agent. Owner: dcfs-protocol.
 
+## 23.8b The atime view made exact (2026-10-09)
+
+Merged 162fd19 (lane-1, six commits). 23.10's finding that MC_atime's
+distinct-state count depended on TLC's worker count was real and the
+culprit was 23.8's `FSnapView`: it normalised every slot's snapshot,
+including the default 0 of a slot that had taken none, which reads as
+"current" exactly while the clock is 0; with the clock also zeroed by the
+view, a state at clock 0 and an otherwise equal state at clock k merged,
+and a request arriving in either got a different view. Not a congruence,
+so successors depended on the kept representative. Fix: the snapshot is
+normalised only at the steps that read it (`FSnapPcs`: S2 and the four
+fills), 0 elsewhere. Bisection through committed manual targets
+(`formal/view_bisect/`, a `workers` attribute on tlc_test): every view with
+the old FSnapView varied at 4 workers, every one without it or with the
+fix was stable over three runs; the no-VIEW ground truth (1,457,405
+states) passes every property, so nothing in 23.8 was hidden. Counts:
+atime 263,820 -> 260,871, atime_concurrent 297,284 -> 292,824, atime_crash
+29,950 -> 29,322; every configuration without F unchanged; every known_bug
+and limitation still fails as expected. large_test and nolock_test timed
+out at 3,600 s under load 30-35 (no violation before the timeout); in
+both the view's snapshot field is a constant, so their counts are
+unchanged by construction; CI's large tier confirms. Audit gap G3 closed.
+
 ## 23.10 A directory-level dirty set (russ, 2026-10-08: "I do care about simplification")
 
 Replace per-row dirty marks with dirty **directories**: a mutation marks
