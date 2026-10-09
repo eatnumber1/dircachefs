@@ -1988,3 +1988,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   /proc/sys, [[nodiscard]] on the new headers and syscalls.h wrappers. Fast 214 + 2. Note: the
   tests-first commit 304cf9e does not build on its own (quoted failures in its message). The real
   mount(8)/libmount path is untested until 15.6. Lane-6 free.
+- 15.6 dispatched to lane-6 (new investigator): a released Debian cloud image pinned through
+  Bazel, systemd as PID 1, mount.dcfs through real mount(8)/libmount, fstab lines mounted by
+  `mount -a` and by systemd's units at boot, remount via mount.fuse.dcfs, exit statuses as mount(8)
+  reports them, journald logging, a reboot with a warm cache, nofail on a missing backing. PUSH
+  POINT at 6fc3064 (since 9a67552: 23.8/23.9 atime + LINK, 15.1/15.2 wrapper, plan).
