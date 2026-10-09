@@ -8,7 +8,10 @@ it says so.
 File and function names refer to the source tree: `dcfs/schema.sql`,
 `dcfs/metadata_cache.{h,cc}` (namespace `cache::`), `dcfs/backing.{h,cc}`
 (namespace `backing::`), `dcfs/dir_cache_fs.{h,cc}` (class `DirCacheFS`),
-`dcfs/main.cc`.
+`dcfs/main.cc`. The `mount.dcfs` wrapper is `dcfs/mount_dcfs.{h,cc}` (options,
+statuses), `dcfs/backing_capture.{h,cc}` (the capture),
+`dcfs/startup_channel.{h,cc}` (daemonization), `dcfs/syslog_sink.{h,cc}`
+and `dcfs/remount.{h,cc}`.
 
 Contents:
 
@@ -141,7 +144,8 @@ Rules that keep the layering honest:
   `backing.cc`** (anything given a backing fd, file handle or name), where
   the idle guarantees are reasoned about, and in the lower-level modules it
   is built from and that only it calls (`file_handle.cc`, `device_id.cc`,
-  `fd.cc`); `main.cc` opens `--source` once at startup. Process-local
+  `fd.cc`); `main.cc` opens SOURCE once at startup
+  (`OpenBacking`). Process-local
   syscalls (resource limits, credentials, `/proc` reads, the cache
   database file, mount tables) may call the `syscalls::` wrappers from any
   file. The point is that the io_uring rewrite replaces one module.
@@ -299,8 +303,9 @@ After startup the daemon holds no path strings. This is what makes
 mounting dcfs over the directory it caches a supported configuration: once
 the mount covers the path, the path leads back into dcfs.
 
-1. At startup, before mounting, `--source` and `--cache_db` are opened by
-   path once. The submount check reads `--source`'s path and
+1. At startup, before mounting, SOURCE (for `dcfs.fstype=none`; the other
+   forms receive the captured tree as a descriptor) and `dcfs.cache_db` are
+   opened by path once. The submount check reads SOURCE's path and
    `/proc/self/mountinfo` in the same window; it is a policy decision that
    identity never depends on. `/proc/sys/kernel/random/boot_id` is read
    once too.
@@ -310,7 +315,7 @@ the mount covers the path, the path leads back into dcfs.
    argument through the kernel's non-raw fd lookup (`fs/fhandle.c`,
    `get_path_from_fd()`), which rejects `O_PATH` descriptors with `EBADF`.
    The source's mount fd is the descriptor `main.cc` opened on
-   `--source`.
+   SOURCE.
 3. Objects are reopened from their stored handles with
    `open_by_handle_at(mount_fd, handle, flags)` (`FileHandle::Open`,
    wrapped by `backing::OpenNode`, which also verifies identity). The root
@@ -347,7 +352,7 @@ stable across reboots on ext4, xfs and btrfs. There is no fallback to
 refused at startup with `Unimplemented`.
 
 The database records the source filesystem's device id when it is created
-(`cache_state.source_device_id`), and startup refuses a `--source` on a
+(`cache_state.source_device_id`), and startup refuses a SOURCE on a
 different filesystem. It also refuses a different source directory on the
 same filesystem, by comparing the root row's backing inode number,
 generation and handle with the directory being opened: otherwise the old
@@ -370,8 +375,9 @@ So (amendment 12 of the plan):
 
 - At startup, before mounting, `MountsBelow()` (`dcfs/mounts_below.h`)
   reads `/proc/self/mountinfo` and dcfs refuses to start if any mount
-  point lies strictly below `--source`, naming them. A mount on `--source`
-  itself is fine.
+  point lies strictly below SOURCE, naming them (for `none` and `bind`; a
+  native capture is a fresh mount with nothing below it). A mount on
+  SOURCE itself is fine.
 - A boundary that appears at runtime, which the startup check cannot see
   (a filesystem mounted later, or a btrfs subvolume, which is not a mount),
   is detected when its parent is listed or the name is probed:
@@ -379,6 +385,27 @@ So (amendment 12 of the plan):
   mount id (`STATX_MNT_ID_UNIQUE`) with its parent's. The name is
   recorded as a `refused` dentry and logged at ERROR, and served as a
   stub directory (below). It is never reported as absent.
+- **One instance per filesystem** (plan phase 15, decision 1, russ
+  2026-10-04). Submounts and btrfs subvolumes are boundaries
+  (`IsBoundary`: a different `st_dev` or mount id), and each filesystem
+  gets its own dcfs, so one cache can be wiped, or one daemon restarted,
+  without touching the others. Each instance needs exclusive access to what
+  it serves, and keeping it so is the administrator's job: dcfs does not try
+  to detect overlapping instances (it only keeps two daemons off one cache
+  database, by `flock`).
+- **Trees need no cooperation.** A native capture is a private mount that
+  only the daemon holds, so a child instance mounted on a directory of the
+  parent's FUSE mount is invisible to the parent: nothing is mounted below
+  its source, and the parent lists the directory as the plain directory it
+  is on its filesystem. Mount order (parents first) and unmount order
+  (children first, `umount -R`) are the administrator's, expressed by fstab
+  order or, under systemd, by the path-prefix dependencies of mount units.
+  The `none` and `bind` forms serve a directory of the caller's namespace
+  and so meet real mounts below it: they refuse, as above. The plan's stub
+  records for the submounts present at start of a `bind` instance, the
+  rule that a child whose SOURCE a parent's dcfs covers must use a native
+  type, and the rest of step 15.4 are not built; the only stubs today are
+  the runtime ones.
 
 ### Boundary stubs
 
@@ -947,7 +974,7 @@ unknown), a create whose syscall succeeded but whose probe of the new
 object fails (it replies the probe's error), opens of file contents, and
 fills. The clean shutdown's sync point fails, so the
 clean-shutdown flag stays 0 and the dirty set survives. A start over the
-crashed filesystem without a remount fails on xfs (the open of `--source`
+crashed filesystem without a remount fails on xfs (the open of SOURCE
 fails) and over a filesystem that went read-only by itself (below); after
 an ext4 shutdown it succeeds, serves nothing new (a create through it
 fails: the filesystem refuses it), and what it re-reads of a dirty
@@ -984,7 +1011,7 @@ mount of a superblock makes the superblock read-only while its other
 mounts (bind mounts, btrfs subvolumes) stay read-write. dcfs over such
 another mount refuses to start, and a running one fails every sync point
 (the dirty set stays, the run ends unclean): remount it read-write again,
-or mount `--source` read-only (step 11.5b).
+or mount SOURCE read-only (step 11.5b).
 
 ### Sync points
 
@@ -1791,7 +1818,7 @@ request is sent, which costs no backing I/O; the alternative, an `ACCESS`
 request per permission decision, would be a backing syscall per check or
 no more faithful than the kernel's own. `DirCacheFS::Init` refuses a mount
 whose options lack it (libfuse then refuses the `INIT` and the daemon
-exits non-zero), and `--fuse_opt=default_permissions` is rejected as
+exits non-zero), and `dcfs.fuse_opt=default_permissions` is rejected as
 redundant. Under it the kernel never sends `ACCESS`; `Access` stays as a
 fail-closed path: it replies `EACCES` and logs "ACCESS received:
 default_permissions is not in effect". `ENOSYS` would be wrong there: the
@@ -1884,25 +1911,165 @@ WTF-8 form).
 
 ## Startup and shutdown
 
-### Startup (`main.cc`)
+### The wrapper (`mount.dcfs`)
 
-1. `umask(0)`; parse flags.
-2. Open `--source` (`O_RDONLY | O_DIRECTORY`). This is the only use of the
-   path.
-3. Submount check: refuse to start if `/proc/self/mountinfo` shows any
-   mount point strictly below `--source`; also refuse a source whose
-   superblock went read-only by itself under a read-write mount (see "A
-   filesystem that went read-only by itself").
-4. Cache database directory: create it mode 0700 if it does not exist; warn
+dcfs is mounted by `mount(8)`, from fstab or the command line, the same way
+(plan decision 5, russ 2026-10-04), so the binary is a mount helper. The
+plain `dcfs --source=DIR` command line is gone (decision 8): its job is the
+`dcfs.fstype=none` form, and every test mounts that way. Run as `dcfs`, the
+binary has only `--help` and `--version`.
+
+**Dispatch.** `main()` looks at the basename of `argv[0]`: `mount.dcfs` and
+`mount.fuse.dcfs` (`IsMountHelperName`) are the wrapper. mount(8) runs
+`mount.<type>` for a type `dcfs`; the second name exists because the FUSE
+mount's filesystem type is `fuse.dcfs` (the `subtype=dcfs` it is mounted
+with), and libmount looks for a helper by the mountinfo type when it
+remounts. Both are symbolic links to the one binary, so an upgrade replaces
+one file.
+
+**Option split** (decision 6; `dcfs/mount_dcfs.{h,cc}`, pure functions with
+unit tests). Options are not shared: each belongs to the layer it
+configures. `dcfs.<name>` is dcfs's, everything else is the underlying
+mount's, verbatim and in order. dcfs's own are the wrapper's options
+(`fstype`, `ro`, `foreground`, `cache_db`, `fuse_opt`; `cache_dir` is
+refused until the instance identity exists) and the settable Abseil flags
+(`kSettableFlags`: dcfs's flags and the logging ones). An unknown `dcfs.`
+option is an error that lists the known ones, because a typo that is
+silently passed on to the native mount would be dropped or fail there
+with a message about the wrong thing. `ro` (the underlying mount) and
+`dcfs.ro` (the FUSE mount) differ on purpose: the first is what the backing
+filesystem does, the second is whether dcfs accepts writes, and a captured
+filesystem the administrator cannot reach afterwards needs both (decision 10).
+`flags_consistency_test` keeps the settable flags and the README's tables
+equal.
+
+For `dcfs.fstype=none` there is no underlying mount to give native options
+to, so they are refused (exit 1) rather than ignored: a silent `noatime` on
+a `none` line would claim a behavior nothing provides. What libmount adds
+to a helper's options or fstab says for `mount(8)` itself is not native:
+`rw`, `defaults`, `nofail`, `_netdev`, `noauto`, `auto`, the `user` family
+and `x-*` (`UnhonoredNativeOptions`). Without that list the `rw` libmount
+always passes would make the form unusable under real util-linux.
+
+**Exit statuses** are mount(8)'s, which returns a helper's status verbatim:
+1 for a usage mistake or a refusal to run (an unknown option, not root: a
+status marked by `MarkUsageError`), 32 for a failed start whatever its
+status code (an errno-derived `InvalidArgument` from `mount(2)` is a failed
+start, not a usage mistake), and for a failed native mount its own status
+(`NativeMountError` carries it as a payload). The marks are payloads on
+`absl::Status` rather than codes because the code says what failed and the
+exit status says who is to blame.
+
+**Capturing the backing tree** (`dcfs/backing_capture.{h,cc}`; every form
+but `none`). dcfs reaches the filesystem without mounting it anywhere the
+caller can see:
+
+1. A helper process, forked by the daemon, calls `unshare(CLONE_NEWNS)` and
+   makes every mount private (`MS_REC | MS_PRIVATE`), so nothing it mounts
+   propagates out, and everything goes with its namespace if it dies at any
+   point. Doing this in the daemon itself would put dcfs, which later mounts
+   FUSE and is seen by everyone, in another namespace.
+2. In the namespace it runs `/bin/mount -n [-s] [-v] [-t TYPE] [-o OPTIONS]
+   SOURCE STAGING` (`-o bind` for `bind`), so mount(8) and the
+   type's own helper (`mount.nfs`, `mount.cifs`, sshfs) do tag resolution
+   (`UUID=`), type probing, flags and credentials: dcfs has no per-type code
+   and no libmount. Its output and exit status are collected (the text up to
+   3000 bytes) and become the error of a failed start unchanged. mount is run
+   by absolute path, not looked up in the daemon's `PATH`.
+3. The helper checks, on the staging mount, that the superblock did not go
+   read-only by itself under a read-write mount (the step 11.5 refusal,
+   `RefuseIfForcedReadOnly`). It has to be here: the clone of step 4 is in
+   no namespace, so the daemon's own mountinfo never lists it and the check
+   could not see it there. For `bind` with `ro`, the clone is also remounted
+   read-only with the mount's own per-mount flags kept (`MS_REMOUNT` resets
+   the ones it is not given), whether or not this mount(8) remounts a bind
+   read-only itself (busybox's does not, util-linux's does).
+4. It clones the mount with `open_tree(OPEN_TREE_CLONE)` (not recursive: a
+   submount of SOURCE, if any, stays out) and sends the descriptor to the
+   daemon over a socket pair with `SCM_RIGHTS`, then exits. The clone is an
+   anonymous mount in no namespace, kept alive only by descriptors: dcfs
+   keeps the `open_tree` one, and the superblock is released when dcfs exits,
+   however it exits (a SIGKILLed dcfs leaves nothing to unmount, and the test
+   shows the filesystem's superblock go away). Before running, the helper
+   closes every descriptor it inherited but its end of the channel: a copy of
+   the daemon's startup channel in the helper would keep the waiting wrapper
+   from seeing the end of the report.
+5. The daemon turns the clone into a real directory descriptor
+   (`openat(tree, ".", O_RDONLY | O_DIRECTORY)`): `open_by_handle_at`
+   resolves its mount descriptor as a regular file, which rejects `O_PATH`
+   (see "File descriptors and handles, never paths"). dcfs walks and decodes
+   handles through that descriptor; root has `CAP_DAC_READ_SEARCH`, which is
+   what `open_by_handle_at` asks for (`may_decode_fh`).
+
+The staging directory is made in a **tmpfs mounted over `/proc/sys/vm`**
+inside the helper's namespace. It needs a directory that is not visible to
+anyone else, that exists, and whose being covered hides nothing that
+matters. A directory made with `mkdtemp` in `/tmp` or `/run` lives in the
+caller's filesystem and leaks if the helper is SIGKILLed, and a tmpfs over
+`/run` or `/tmp` could hide SOURCE (a bind source under `/tmp`, say). A
+procfs directory exists wherever dcfs can run (the daemon reads
+`/proc/sys/vm/dirtytime_expire_seconds`, and `/proc/sys` is absent only if
+`/proc` was mounted `subset=pid`, which is a clear error), is not a place
+anyone serves from, and the tmpfs covering it exists only in the helper's
+namespace.
+
+`none` opens SOURCE as a path in the caller's namespace (`openat`, the one
+use of a path) and applies the same start checks: nothing mounted below it
+and no forced-read-only superblock. `bind` captures with a non-recursive
+bind, so a mount below SOURCE would be dropped from the clone and the
+covered directory served in its place; it is therefore refused like `none`
+(`RefuseMountsBelow`, naming the mount points) rather than served wrongly.
+
+**Paths** (SOURCE of `none` and `bind`, MOUNTPOINT, `dcfs.cache_db`) are made
+absolute against the working directory before the fork
+(`MakePathsAbsolute`), since the daemon has none. A native SOURCE is made
+absolute only if it names an existing relative path: ZFS datasets, virtiofs
+tags and the like are not paths and are passed as written. The mount point
+must be a directory; a file mount point is refused (decision 9, russ
+2026-10-04).
+
+**The FUSE mount's source** is SOURCE as written (decision 11): the wrapper
+passes `fsname=<spec>` (with libfuse's escaping of `\` and `,`) and
+`subtype=dcfs`, so mountinfo, `df` and `findmnt` show `fuse.dcfs` and
+`UUID=aaaa` or `nas:/export`, not a path of a namespace nobody sees.
+
+**Remount** (decision 10). `mount -o remount` reaches the wrapper through
+`mount.fuse.dcfs` with `remount` among the options. It never touches the
+underlying filesystem, which dcfs cannot reach (it is a clone in no
+namespace) and which the administrator owns for `none`. `RemountDcfs` finds
+the topmost mount at the mount point in `/proc/self/mountinfo`, requires its
+type to be `fuse.dcfs`, and calls `mount(2)` with `MS_REMOUNT`, the
+per-mount flags it already has (`MS_REMOUNT` resets what it is not given) and
+`MS_RDONLY` if `dcfs.ro` was given, so `dcfs.ro` is a toggle and its absence
+is read-write. libmount merges the options of the fstab line into a
+remount, so native options turn up in it: they are ignored with a WARNING
+naming them, except the ones that are mount(8)'s own (above). The other
+`dcfs.` options are validated and not applied: the running daemon's
+configuration is fixed at its start.
+
+### Startup (the daemon)
+
+What the daemon does after the wrapper has parsed, validated and forked
+(`RunDaemon`, `main.cc`; a foreground run is the same code without the
+fork):
+
+1. `umask(0)`, logging set up (`WARNING` and above to standard error until
+   the syslog sink replaces it), the open-file limit raised.
+2. Open the backing tree (`OpenBacking`: a capture, or a path for `none`)
+   with the start checks of the form: nothing mounted below SOURCE, no
+   superblock that went read-only by itself (see "A filesystem that went
+   read-only by itself"). After this the daemon holds the tree by
+   descriptor only.
+3. Cache database directory: create it mode 0700 if it does not exist; warn
    (but still start) if an existing one is group- or world-accessible. The
-   cache holds metadata as sensitive as `--source`'s -- every cached name,
+   cache holds metadata as sensitive as SOURCE's -- every cached name,
    attribute, xattr and symlink target, including those of directories a
    reader cannot list -- so it must not be readable by anyone but root.
-5. Open `--cache_db` (and check any existing `-wal`/`-shm`) with
+4. Open `dcfs.cache_db` (and check any existing `-wal`/`-shm`) with
    `O_NOFOLLOW`, creating the database mode 0600 (SQLite gives the
    `-wal`/`-shm` files it creates the same mode). Refuse to start if the
    path is a symlink or not a regular file. Refuse if the file grants
-   more access than `--source`'s root directory does: its owner must be
+   more access than SOURCE's root directory does: its owner must be
    root or that directory's owner; group read/write only if its group is
    the directory's group and the directory grants the group the same;
    other read/write only if the directory grants others the same. The
@@ -1912,34 +2079,38 @@ WTF-8 form).
    hostile cache directory: the directory is not treated as a trust
    boundary (decision 2026-10-06). Then take an exclusive, non-blocking
    `flock`; refuse to start if another process holds it.
-6. Open the SQLite connection: WAL, `synchronous=NORMAL`, foreign keys on,
+5. Open the SQLite connection: WAL, `synchronous=NORMAL`, foreign keys on,
    `busy_timeout=5000`, `temp_store=MEMORY`. dcfs refuses to start if
    SQLite cannot put the database in WAL mode (a filesystem without the
    shared memory WAL needs): in rollback-journal mode a `NORMAL` commit
    is not durable.
-7. Probe the root: its device id (`FS_IOC_GETFSUUID`, or `BTRFS_IOC_FS_INFO`
+6. Probe the root: its device id (`FS_IOC_GETFSUUID`, or `BTRFS_IOC_FS_INFO`
    on btrfs -- see "Device ids" above), filesystem type,
    inode number and generation.
-8. `Migrate()`: create the schema and seed the `cache_state` row, the
+7. `Migrate()`: create the schema and seed the `cache_state` row, the
    source's `filesystems` row and the root row, or upgrade an older
-   schema, then check that the root row exists.
-9. Refuse a database built for a different filesystem
+   schema (a schema newer than the build is refused), then check that the
+   root row exists.
+8. Refuse a database built for a different filesystem
    (`source_device_id`), or for a different directory on the same one (the
    root row's inode number, generation and handle).
-10. Read the boot id; `backing::StartRun`: recover the dirty set if the last
-    run was not clean or anything is dirty, then durably record
-    `clean_shutdown = 0` and the boot id.
-11. `backing::InitRoot`: refresh the root row's handle and attributes and
+9. Read the boot id; `backing::StartRun`: recover the dirty set if the last
+   run was not clean or anything is dirty, then durably record
+   `clean_shutdown = 0` and the boot id.
+10. `backing::InitRoot`: refresh the root row's handle and attributes and
     register the source descriptor as the source filesystem's mount fd.
-12. `backing::StartupPurge`: forget any non-source `filesystems` row (left
-    by databases built before submounts were refused).
-13. Mount with `default_permissions`, plus `allow_other` if requested,
-    plus `--fuse_opt`; install libfuse's signal handlers; daemonize if
-    asked; run the session loop. `Init` requests export support,
-    readdirplus, symlink caching and passthrough; requires POSIX ACLs and
-    `FUSE_CAP_DONT_MASK` (refusing the mount without them); turns off
-    atomic `O_TRUNC` and FUSE-over-io_uring; and logs whether the kernel
-    granted passthrough.
+11. `backing::StartupPurge`: forget any non-source `filesystems` row (left
+    by databases built before submounts were refused). The plan said this
+    would go with `--source`; it stays until the cache path and instance
+    identity (step 15.3) decide what a database may be reused for.
+12. Mount FUSE with `default_permissions`, plus `allow_other` if requested,
+    plus `dcfs.fuse_opt`, `fsname`, `subtype=dcfs` and `ro` if `dcfs.ro`;
+    install libfuse's signal handlers; run the session loop. `Init` requests
+    export support, readdirplus, symlink caching and passthrough; requires
+    POSIX ACLs and `FUSE_CAP_DONT_MASK` (refusing the mount without them);
+    turns off atomic `O_TRUNC` and FUSE-over-io_uring; and logs whether the
+    kernel granted passthrough. The first answered `FUSE_INIT` is the
+    "ready" the wrapper waits for (below).
 
 ### Shutdown
 
@@ -1959,39 +2130,62 @@ before dcfs can start again.
 
 ### Daemonization (mount.dcfs)
 
-The dcfs binary is the mount helper `mount.dcfs` (argv[0] dispatch). It
-forks first, before any thread, the database or the mount exists, so the
-daemon is a plain child (setsid, working directory `/`, stdio on
-`/dev/null`) and the wrapper can wait for it: not `fuse_daemonize`, which
-only forks, waits for the child's detach and always exits 0. SOURCE,
-MOUNTPOINT and the cache database are made absolute before the fork, since
-the daemon has no working directory to resolve them against.
+`mount.dcfs` forks first, before any thread, the database or the mount
+exists, so the daemon is a plain child (setsid, working directory `/`, stdio
+on `/dev/null`) and the wrapper can wait for it. Not `fuse_daemonize`
+(decision 13): it only forks, waits for the child's setsid/chdir/stdio
+redirect and always exits 0, so a mount that fails after the fork would
+look like a success to mount(8), fstab and systemd. Forking first
+also keeps fork out of a threaded process: no thread, SQLite connection or
+libfuse state exists yet to be inherited.
 
-The daemon reports once over a socket pair (`dcfs/startup_channel.h`):
-"ready" from `SessionLoop` after the kernel's FUSE_INIT was answered and the
-session continues (so ready means serving, and a refused INIT is a failure
-whose reason the wrapper prints), or the failure's text and exit status. The
-wrapper prints a failure as one ERROR line on its own standard error and
-exits with the status; a daemon that dies without a word is reported with how
-it died. The exit statuses are `mount(8)`'s: 1 for a usage mistake or a
-refusal to run, 32 for a failed start, and the native mount's own status
-when mounting SOURCE failed. The helper's own namespace and the tmpfs it
-stages in exist only for the capture (`dcfs/backing_capture.h`), so a crash
-leaves nothing behind.
+The daemon reports once over a socket pair (`dcfs/startup_channel.h`): "ready"
+from `SessionLoop` (`SetOnInit`) after the kernel's FUSE_INIT was answered
+and the session continues (so ready means serving, and a refused INIT is a
+failure whose reason the wrapper prints), or the failure's text and exit
+status (`StartupReport`: `R`, or `E`, the status byte and the message). A
+refused INIT is the case where libfuse gives `init()` no way to say why, so
+`LastErrorSink` (an `absl::LogSink` that lives until the first INIT) keeps
+the text of the last ERROR logged, and the report uses it instead of
+"fuse_session_loop: -71". The wrapper prints a failure as one ERROR line on
+its own standard error and exits with the status; a daemon that dies without
+a word is reported with how it died (`waitpid`'s status). The reporter
+closes its end after the one report, so the wrapper sees the end of it, and
+a failure after "ready" is the daemon's own to log. The exit statuses are
+described under "The wrapper".
 
-A daemon logs to syslog alone, at or above the configured
-`stderrthreshold` (one knob for both destinations; stderr is `/dev/null`
-there), with the identity `dcfs` and its pid, so under systemd the journal
-attributes the lines to the mount unit. A foreground dcfs (`dcfs.foreground`,
-for debugging and the tests) does not register the sink and logs to stderr
-only: glibc's syslog would otherwise open and close a socket per line when
-there is no `/dev/log`.
+Readiness is the pipe, not `sd_notify`: systemd mount units do not use
+`NOTIFY_SOCKET` for mount helpers; a mount unit is finished when the helper
+exits, which the report makes accurate.
+
+**Logging.** A daemon logs to syslog alone, as gocryptfs, s3fs and ntfs-3g
+do once they are in the background. `SyslogSink` (`dcfs/syslog_sink.h`) is an
+`absl::LogSink` registered after `absl::InitializeLog`: it opens syslog with
+the identity `dcfs` and the pid (`LOG_PID`, `LOG_DAEMON`) and sends every
+entry's text message at or above its threshold, with the priority from the
+severity (`SyslogPriority`). Abseil's own stderr output is silenced
+(`SetStderrThreshold(kInfinity)`) because stderr is `/dev/null` there. The
+sink takes the configured `stderrthreshold` when it is made (after the
+`dcfs.` options were applied), so the one existing knob governs both
+destinations and `--v`'s INFO lines need it lowered, as on a terminal. The
+syslog calls go through the `syscalls` wrappers like every other syscall.
+
+A foreground dcfs (`dcfs.foreground`, for debugging and the tests) does not
+register the sink and logs to stderr only. The plan had it use `LOG_PERROR`,
+which copies each message to stderr: glibc's syslog opens and closes a socket
+for every line when there is no `/dev/log`, so a foreground run in a test
+guest would pay that on every message for nothing.
+
+Under systemd, journald owns `/dev/log` and records the identity, so
+`journalctl -t dcfs` finds the lines with no systemd-specific code.
 
 ### Logging
 
 dcfs uses Abseil logging with Abseil's own flags and semantics
-(`docs/style.md` 1.7 has the rules for code). A line goes to standard
-error when its level is at least `--stderrthreshold` (dcfs defaults it to
+(`docs/style.md` 1.7 has the rules for code). (The flags are
+written `--x` here, and set as `dcfs.x` options of the mount.) A line goes to
+standard error (in a daemon: to syslog, see "Daemonization") when its level is
+at least `--stderrthreshold` (dcfs defaults it to
 WARNING, so an operator sees problems and nothing else) and is dropped
 everywhere when it is below `--minloglevel`. `--v=N` turns on `VLOG(n)`
 for `n <= N`; `--vmodule=file=N` does so per source file. What each
@@ -2098,7 +2292,7 @@ backing descriptor by a `FileDescriptor` destructor (a scope's end, in code
 that holds no transaction body open: a body that held one across a close
 would also hold it across the syscalls before it, which are hooked);
 `main.cc`'s startup `open`, `fstat` and `FileHandle::FromFd` of
-`--source`, which run before anything opens a transaction and outside any
+SOURCE, which run before anything opens a transaction and outside any
 request; and `fuse_passthrough_open`/`close` (`FuseRequest`), an `ioctl`
 on `/dev/fuse` that never reaches the backing filesystem. The harness also
 holds the hooks in place from below: it wraps, with `-Wl,--wrap`, every
@@ -2212,10 +2406,11 @@ database. "Zero sectors" below means the backing device's read counter in
 | Test | What it proves |
 |---|---|
 | `boot_test` | The guest environment works: dcfs and helpers are present, disks mount. |
-| `readonly_test` | Read-only operations are served from the cache with backing inode numbers; a warm metadata pass reads zero sectors, also after a restart; startup refuses a mount below `--source`, and a boundary that appears at runtime is refused rather than cached (a stub). |
+| `mount_dcfs_test` | The `mount.dcfs` wrapper, run as mount(8) runs it, on an ext4 disk: capture by type, by autodetection and by `UUID=` (the FUSE source is the spec as written, no backing mount is left in the caller's namespace, unmount stops dcfs, a SIGKILLed dcfs releases the superblock); the option split (`ro` and `dcfs.ro`, unknown `dcfs.` options and failing native mounts mount nothing and say why, native options refused for `none`, libmount's own accepted); remount changes only the dcfs mount and ignores native options with a warning; daemonization (returns when dcfs serves, stdio on `/dev/null`, session leader, cwd `/`, syslog follows the threshold, a late failure is the exit status 32, `dcfs.foreground` stays and logs to stderr); the `bind` and `none` forms, also over the same path; relative paths; a file mounted below SOURCE refused; non-root refused with the reason; `mount.fuse.dcfs`. It runs under busybox's `mount`, which runs no `mount.<type>` helpers, so step 15.6 runs the util-linux path. |
+| `readonly_test` | Read-only operations are served from the cache with backing inode numbers; a warm metadata pass reads zero sectors, also after a restart; startup refuses a mount below `SOURCE`, and a boundary that appears at runtime is refused rather than cached (a stub). |
 | `boundary_test` | A mount (every filesystem) and a btrfs subvolume appearing below the source are stub directories: listed, a directory with the boundary root's mode and owner and an inode number at or above 2^63 (`d_ino` agrees), `ENOTSUP` for everything inside (logged once per stub), `EXDEV` for renaming the stub, nothing reaching either side; the same inode numbers after a restart. |
 | `passthrough_test` | File contents go through passthrough: reads match, move the backing read counter, and cost the daemon almost no CPU for 64 MiB; opens do not leak descriptors; all of it survives a restart. |
-| `lifecycle_test` | Option validation, a bad SOURCE, a database for another filesystem refused, `--fuse_opt`, clean `SIGTERM` shutdown (exit 0, unmounted, WAL checkpointed), mounting over the source, restarting against a used database. |
+| `lifecycle_test` | Option validation, a bad SOURCE, a database for another filesystem refused, `dcfs.fuse_opt`, clean `SIGTERM` shutdown (exit 0, unmounted, WAL checkpointed), mounting over the source, restarting against a used database. |
 | `handles_test` | NFS-style handles via `name_to_handle_at`/`open_by_handle_at`: generation 0 for the root and nonzero and stable otherwise; handles survive a restart; a doctored generation, a recycled inode number and a wiped database each give `ESTALE`; no handle can be made behind a boundary, and the stub's own handle decodes to the stub. |
 | `setattr_test` | chmod (file, directory, FIFO; `EOPNOTSUPP` on a symlink), chown, truncate and utimes land on the backing filesystem and are then served from the cache with zero sectors, also after a restart. |
 | `create_test` | mkdir, create, mknod, symlink and link, including error cases; the whole tree's listing agrees with the backing filesystem; zero sectors for a full metadata pass over everything created; `EEXIST` for a boundary stub's name and `ENOTSUP` inside it. |

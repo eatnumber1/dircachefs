@@ -30,6 +30,7 @@ Contents:
 - [Requirements](#requirements)
 - [Building](#building)
 - [Usage](#usage)
+- [Operations](#operations)
 - [Testing](#testing)
 - [Design overview](#design-overview)
 - [Limitations](#limitations)
@@ -53,7 +54,8 @@ The repository carries forward the history of a 2023 experiment called
 - **Root.** dcfs reopens cached objects with `open_by_handle_at(2)`
   (`CAP_DAC_READ_SEARCH`), mounts FUSE and registers passthrough files
   (`CAP_SYS_ADMIN`), and switches to each caller's filesystem credentials.
-  There is no unprivileged mode.
+  There is no unprivileged mode: `mount.dcfs` refuses to run as another user
+  and says why (see [Responsibilities](#responsibilities-of-the-administrator)).
 - **Linux 6.9 or later** for `FS_IOC_GETFSUUID` (filesystem identity) and
   FUSE passthrough (`CONFIG_FUSE_PASSTHROUGH`).
 - **A backing filesystem that supports file handles
@@ -150,11 +152,7 @@ namespace and `open_tree` need `CAP_SYS_ADMIN`, `open_by_handle_at` needs
 `CAP_DAC_READ_SEARCH`, and acting with each caller's credentials needs
 `setfsuid`, `setfsgid` and `setgroups`; so fstab's `user` option cannot work.
 
-A daemonized dcfs (the default) has no standard input or output and logs to
-syslog (the identity `dcfs`), so its messages reach the journal under
-systemd; without a syslog daemon they are dropped. In a daemon
-`dcfs.stderrthreshold` (default `WARNING`) is the threshold of what goes to
-syslog: `dcfs.stderrthreshold=0` adds the INFO narrative. With
+A daemonized dcfs (the default) logs to syslog; see [Logging](#logging). With
 `dcfs.foreground` dcfs stays in the foreground and logs to standard error
 only. A comma ends an option, so values of `dcfs.fuse_opt` and
 `dcfs.vmodule` cannot contain one (give `dcfs.fuse_opt` once per libfuse
@@ -229,9 +227,61 @@ target, xattrs). After that, `find /mnt/media -ls` or `ls -lR` reads
 nothing from the backing disk, also after dcfs is restarted. Opening a
 file for reading or writing does spin the disk up.
 
+### Remounting
+
+`mount -o remount,dcfs.ro /data` makes the dcfs mount read-only, and a
+remount without `dcfs.ro` makes it read-write again. That is all a remount
+does: it never reaches the underlying filesystem and it does not restart or
+reconfigure the daemon, so it keeps the mount's `nosuid`, `nodev`, `noexec`,
+`noatime` and `nodiratime` as they are and ignores the rest.
+
+- Native options in a remount (`ro`, `noatime`, `vers=4.2`, ...) are
+  ignored with a WARNING that names them (`a remount of dcfs changes only the
+  dcfs mount (dcfs.ro); ignoring the underlying mount's options ro,
+  noatime`), because mount(8) may merge the options of the matching fstab
+  line into the ones you gave. What mount(8) itself consumes (`rw`,
+  `defaults`, `nofail`, `_netdev`, `noauto`, `auto`, the `user` family and
+  `x-*` options) is not reported.
+- The other `dcfs.` options (`dcfs.allow_other`, `dcfs.cache_db`, the
+  timeouts) are checked and ignored without a message: to change them,
+  unmount and mount again.
+- A mount point that is not a dcfs mount is refused with an error and left
+  alone.
+
+To change the underlying filesystem's options, unmount and mount again with
+the new options. With `dcfs.fstype=none` the underlying mount is the
+administrator's own and can be remounted directly (`mount -o remount,ro
+/srv/media`): dcfs then sees the filesystem go read-only and its writes fail
+with `EROFS`. That needs a mount that is not over-mounted by dcfs itself, so
+that it stays reachable.
+
+### Logging
+
+A daemonized dcfs has no standard input, output or error (all `/dev/null`)
+and logs to syslog under the identity `dcfs`, facility `daemon`, with its
+pid. Abseil's severities map to syslog's `info`, `warning`, `err` and
+`crit`. Without a syslog daemon the messages are dropped. Under systemd the
+journal collects them: `journalctl -t dcfs` shows them.
+
+`dcfs.stderrthreshold` is the one knob for both destinations: in a daemon it
+is the level at or above which a message goes to syslog (default `WARNING`,
+so only warnings and errors), and `dcfs.stderrthreshold=0` adds the INFO
+lifecycle lines. `dcfs.minloglevel` still drops everything below its level.
+`dcfs.v` and `dcfs.vmodule` only enable verbose lines, which are INFO lines,
+so they need `dcfs.stderrthreshold=0` too to be seen; at `dcfs.v=2` or more
+the volume is that of every request, which is a lot for syslog.
+
+Mistakes found before the daemon forks (a bad option, not root) and a
+failure to start after it are printed by `mount.dcfs` itself on its standard
+error, in the terminal or in the journal of whatever ran `mount`, and
+reported in its exit status; they are not repeated in syslog. With
+`dcfs.foreground` there is no syslog at all: the messages go to standard
+error.
+
 ### Mounting over the source directory
 
-Mounting dcfs on the directory it caches is supported:
+Mounting dcfs on the directory it caches is supported, with `none` and with
+`bind`:
 
 ```
 sudo mount -t dcfs -o dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/media.db,dcfs.allow_other \
@@ -244,39 +294,167 @@ file handles stored in the cache. Everything that used `/srv/media` before
 now goes through dcfs and cannot bypass it by accident, which makes this
 the easiest way to honour the exclusive-access requirement (see
 [Limitations](#limitations)). With `dcfs.fstype=bind` the same holds for a
-captured bind of the directory.
+captured bind of the directory. Unmounting dcfs brings the original
+directory back, and from then on it is reachable without dcfs.
+
+With `none`, the mount that holds SOURCE belongs to the administrator and
+dcfs keeps it busy: it cannot be unmounted until dcfs is.
+
+With a native type (`UUID=...`, `nas:/export`, a device) there is nothing to
+cover: the filesystem is mounted in a private mount namespace that exists
+only while dcfs starts, so it never appears at any path in the caller's
+namespace, and the dcfs mount point can be where you would otherwise have
+mounted the filesystem itself. The filesystem is released when dcfs exits,
+however it exits.
+
+### Instances, trees and boundaries
+
+Run one dcfs per backing filesystem: each ext4 or xfs filesystem, each
+btrfs subvolume, each NFS export. One filesystem's cache can then be wiped,
+or its daemon restarted, without touching the others. There is no recursive
+bind and no instance that serves a second filesystem under its source.
+
+A tree is a set of instances mounted over each other's directories: mount
+the parent, then mount the child on an (empty) directory inside the
+parent's mount, naming the child's own device or export, not a path inside
+the parent:
+
+```text
+UUID=aaaa  /data      dcfs  dcfs.cache_db=/var/lib/dcfs/data.db      0 0
+UUID=bbbb  /data/sub  dcfs  dcfs.cache_db=/var/lib/dcfs/data-sub.db  0 0
+```
+
+The parent never sees the child, because the filesystem it serves is a
+private mount of its own. The parent must be mounted before the child (an
+earlier fstab line does that for `mount -a`; systemd orders mount units by
+path) and `umount -R /data` unmounts the child first.
+
+`dcfs.fstype=none` and `dcfs.fstype=bind` serve a directory of the caller's
+mount namespace, so a filesystem mounted below SOURCE would put two
+filesystems under one `st_dev`. dcfs refuses to start in that case, whether
+the mount is a directory or a file, and the error names the mount points
+found: unmount them, or choose a SOURCE below them.
+
+A mount or btrfs subvolume that appears below SOURCE after dcfs started is
+a **boundary**: dcfs shows it as an empty stub directory, usable as a mount
+point, logs an ERROR once for it, and answers anything inside it with
+`ENOTSUP` (rename or link across it with `EXDEV`). See
+[Limitations](#limitations).
 
 ### Running under systemd
 
-`packaging/dcfs.service` and `packaging/dcfs.env.example` are a unit and
-its environment file:
+dcfs mounts from `/etc/fstab` like any other filesystem, with or without
+systemd: the filesystem type is `dcfs`, SOURCE is the first field, and the
+options are mount options. There is no unit file to install and no service
+that runs dcfs in the foreground; the daemon forks away from `mount.dcfs`
+and `umount` ends it.
 
-```
-sudo install -m 0644 packaging/dcfs.service /etc/systemd/system/
-sudo install -D -m 0644 packaging/dcfs.env.example /etc/dcfs/dcfs.env
-sudoedit /etc/dcfs/dcfs.env    # set SOURCE, CACHE_DB, MOUNTPOINT, EXTRA_OPTIONS
-sudo systemctl daemon-reload
-sudo systemctl enable --now dcfs
+```text
+# SOURCE        MOUNTPOINT  TYPE  OPTIONS                                    DUMP PASS
+UUID=aaaa-aaaa  /data       dcfs  noatime,dcfs.cache_db=/var/lib/dcfs/data.db,dcfs.allow_other                   0 0
+UUID=bbbb-bbbb  /data/sub   dcfs  dcfs.fstype=xfs,dcfs.cache_db=/var/lib/dcfs/sub.db,dcfs.allow_other            0 0
+UUID=cccc-cccc  /data/vol   dcfs  dcfs.fstype=btrfs,subvol=vol,dcfs.cache_db=/var/lib/dcfs/vol.db                0 0
+nas:/export     /srv/nas    dcfs  dcfs.fstype=nfs,vers=4.2,_netdev,nofail,dcfs.cache_db=/var/lib/dcfs/nas.db     0 0
+/srv/raw        /cache/raw  dcfs  dcfs.fstype=bind,dcfs.ro,dcfs.cache_db=/var/lib/dcfs/raw.db                    0 0
+/mnt/disk       /mnt/fast   dcfs  dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/fast.db                           0 0
 ```
 
-The unit runs dcfs as root in the foreground and restarts it if it exits
-with an error. `EXTRA_OPTIONS` in the environment file holds further `dcfs.`
-options, comma-separated; the example sets `dcfs.allow_other`, which users
-other than root, and nfsd, need. Before each start the unit lazily unmounts a
-dead FUSE mount left on the mount point by a crash (see below), and
-leaves a mount point that can be accessed alone.
+- **`dcfs.fstype`** says how SOURCE is reached. Absent: `mount(8)` finds the
+  type of the device itself, as it does for a plain `mount`. A native type
+  (`ext4`, `xfs`, `btrfs`, `nfs`, `fuse.sshfs`, ...): that type, with the
+  other options handed to the native mount (`subvol=vol`, `vers=4.2`).
+  `bind`: SOURCE is a directory of the running system, captured with a
+  non-recursive bind. `none`: SOURCE is a directory dcfs serves live,
+  usually the mount point of a filesystem mounted by an earlier fstab line.
+  See the [Options](#options) table.
+- **`dcfs.cache_db` is required** on every line, one database per mount
+  (never shared: dcfs refuses a second instance on a database that is in
+  use). The database's directory is created mode 0700 if it does not exist,
+  but only that one level, and on whatever filesystem holds it at that
+  moment: if the cache lives on a filesystem of its own, mount that first.
+- **Options are not shared**: everything not prefixed `dcfs.` goes to the
+  underlying mount (`noatime`, `subvol=vol`, `vers=4.2`), and `ro` makes
+  that mount read-only while `dcfs.ro` makes the dcfs mount read-only.
+  `defaults`, `rw`, `noauto`, `nofail`, `_netdev` and `x-*` options are
+  accepted on every form, `none` included, since mount(8) adds or reads them
+  itself; any other native option on a `none` line is an error, because dcfs
+  makes no underlying mount to give it to.
+- **The sixth field** (the fsck pass) is `0`: dcfs provides no `fsck.dcfs`,
+  so nothing checks the filesystem at boot. To check the filesystem under a
+  dcfs mount, run `fsck` on its device while it is unmounted.
+- **A line is a mount**: `mount /data`, `umount /data`, `mount -a` and
+  `umount -R /data` work as for any fstab entry, and `mount /data` takes
+  the line's options. Write absolute paths in the line.
+
+Network backings need `_netdev`. systemd does not know that a `dcfs` mount
+of an NFS export is a network mount: `_netdev` makes it wait for the network
+and keeps it out of local-fs.target. Add `nofail` to a mount the machine can
+boot without, and `noauto` to one that should not mount at boot.
+
+**Without systemd**, `mount -a` (from the init scripts, or by hand) mounts
+the lines in file order, so put parents before the children mounted inside
+them. Restart one instance with `umount /data/sub && mount /data/sub`, and
+unmount a tree with `umount -R /data`.
+
+**With systemd**, `systemd-fstab-generator` turns each line into a mount
+unit at boot and at `systemctl daemon-reload`; `systemd-escape -p
+--suffix=mount /data/sub` prints a unit's name (`data-sub.mount`). The unit
+is finished when `mount.dcfs` exits, which it does once dcfs answers the
+kernel's first request, so units that depend on the mount start when dcfs is
+serving. A mount unit requires and orders after the mount units of the
+directories above its mount point, so parents mount first and stopping a
+parent stops its children. systemd does not see what a line needs besides its
+mount point: a `none` or `bind` SOURCE that is itself a mount, and a cache
+database on another filesystem, need `x-systemd.requires-mounts-for=` on the
+line (for example `x-systemd.requires-mounts-for=/var/lib/dcfs`).
+Restart one instance with `systemctl restart data-sub.mount`.
+
+A mount that fails prints its message on the standard error of whatever ran
+`mount` (the journal, under systemd) and exits with a status from the list
+under [Usage](#usage); the mount unit then fails with it, and nothing is left
+mounted.
+
+### Responsibilities of the administrator
+
+dcfs trusts what it has cached, so the setup has to keep it true.
+
+- **Each instance has exclusive access to what it serves.** Nothing else
+  writes to the backing tree: no other writer on the machine, nothing writing
+  to a network export from elsewhere, and no second dcfs over the same
+  objects (instances on different filesystems are fine; two on one
+  directory, or on overlapping directories of one filesystem, are not).
+  dcfs does not try to detect overlapping instances, except that it will
+  not open a cache database that another dcfs holds. Mounting dcfs over its
+  source (see above) keeps local writers honest.
+- **Out-of-band changes are unsupported.** If one happens anyway, see
+  [Operations](#operations).
+- **The cache database is yours to place and protect**: on a local SSD
+  filesystem that supports SQLite's WAL mode, not on the backing disks, with
+  a directory only root can read (dcfs checks the permissions and warns).
+  A database belongs to one instance: dcfs refuses one built for a different
+  filesystem or source directory.
+- **Mount order and dependencies**: parents before children, the cache's
+  filesystem before the instance (above).
+- **Why dcfs runs as root and refuses otherwise**: FUSE passthrough, the
+  private mount namespace, `open_tree` and the filesystem-identity ioctls
+  need `CAP_SYS_ADMIN`, `open_by_handle_at` needs `CAP_DAC_READ_SEARCH`, and
+  serving each caller with that caller's credentials needs `setfsuid`,
+  `setfsgid` and `setgroups`. `mount.dcfs` as a normal user exits with
+  status 1 and says so; fstab's `user` option cannot work.
+- **NFS**: see [Exporting over NFS](#exporting-over-nfs).
 
 ### Exporting over NFS
 
 nfsd needs `dcfs.allow_other`, and a FUSE filesystem needs an explicit `fsid=`
-in its export. An `/etc/exports` line:
+in its export; each exported dcfs mount needs its own. An `/etc/exports`
+line:
 
 ```
 /mnt/media  192.168.1.0/24(rw,fsid=1,no_subtree_check)
 ```
 
-NFS clients keep their handles across dcfs restarts. After restarting
-dcfs, though, run
+NFS clients keep their handles across dcfs restarts. After restarting an
+instance (unmounting and mounting it again), though, run
 
 ```
 sudo exportfs -f
@@ -291,7 +469,8 @@ If the cache database is deleted, handles held by NFS clients become stale
 
 ### Shutdown, crashes and restarts
 
-`SIGTERM`, `SIGINT` or `SIGHUP` (and so `systemctl stop`) shut dcfs down
+`SIGTERM`, `SIGINT` or `SIGHUP`, and an unmount of its mount point (so
+`umount` and `systemctl stop` of its mount unit), shut dcfs down
 cleanly: it unmounts, syncs the backing filesystem, empties the dirty set,
 checkpoints the SQLite WAL, records a clean shutdown and exits 0. If a
 file was still open for writing (possible after a lazy unmount), dcfs
@@ -312,15 +491,119 @@ fresh random generation, so an old handle resolves to a different file
 only with probability 2^-32 (docs/design.md, "Generations").
 
 After a crash the dead FUSE mount stays in place, and accessing it fails
-with `ENOTCONN`. Unmount it (`umount -l <mountpoint>`) before starting dcfs
-again (the systemd unit does this itself). When dcfs is mounted over its
-own source this is mandatory, since dcfs would otherwise try to open the
-dead mount as its source.
+with `ENOTCONN`. Unmount it (`umount -l <mountpoint>`) before mounting dcfs
+there again; `mount.dcfs` does not do this for you. When dcfs is mounted over
+its own source this is mandatory, since dcfs would otherwise try to open the
+dead mount as its source. A filesystem that dcfs captured itself (any
+`dcfs.fstype` but `none`) needs no cleanup: it is released when the daemon
+dies, however it dies.
 
 Only one dcfs may use a cache database at a time: dcfs takes an exclusive
 lock on it at startup and refuses to start if another process holds it.
 dcfs also refuses a database that was built for a different filesystem or
 a different source directory; delete it to start with a cold cache.
+
+## Operations
+
+### Wiping one instance's cache
+
+Each instance has its own database, so wiping one touches nothing else.
+Unmount the instance (and anything mounted inside it: `umount -R /data/sub`),
+delete the database with its `-wal` and `-shm` files, and mount it again:
+
+```bash
+sudo umount -R /data/sub
+sudo rm -f /var/lib/dcfs/sub.db{,-wal,-shm}
+sudo mount /data/sub
+```
+
+The next start has a cold cache: the first listing of each directory reads
+the backing disk again. Nothing is lost on the backing filesystem. NFS
+clients holding handles from before the wipe get `ESTALE`, never a
+different file; after the mount run `sudo exportfs -f` if the instance is
+exported. A running instance holds its database open and locked, so wipe it
+only while it is unmounted.
+
+### After an out-of-band change
+
+dcfs assumes nothing else changes the backing tree. If something did (a
+restore, an administrator working on the raw filesystem, another machine
+writing to an NFS export), dcfs notices only what a request it makes anyway
+reveals, logs a WARNING saying `out-of-band change on the backing filesystem
+(unsupported)` and adopts what it sees. Anything it answers from the cache
+alone stays stale, and the kernel keeps serving the attributes and names it
+already holds until their timeouts (an hour by default) expire. A restart
+does not make dcfs re-read: a cleanly stopped instance trusts its database.
+
+To be sure, stop the change from recurring, then wipe that instance's cache
+as above. Unmounting also drops the kernel's caches for it. If the change
+was one you can name (a few files), the warnings in the log list the inodes
+dcfs adopted; wiping is still the only way to know that it saw everything.
+
+### Upgrading dcfs
+
+A running dcfs keeps running the binary it started from, so installing a
+new one changes nothing for the mounts that exist: the upgrade takes effect
+for an instance when that instance is unmounted and mounted again.
+`mount -o remount` is not that: it only toggles the dcfs mount's read-only
+state (see [Remounting](#remounting)) and leaves the daemon in place.
+
+```bash
+sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs.new
+sudo mv /usr/local/bin/dcfs.new /usr/local/bin/dcfs
+sudo umount -R /data && sudo mount -a      # or per instance, parents first
+```
+
+`/sbin/mount.dcfs` and `/sbin/mount.fuse.dcfs` are symbolic links to the
+binary (see [Building](#building)) and need no change. Unmounting shuts the
+daemon down cleanly (see "Shutdown, crashes and restarts"), so the cache is
+kept; a new version upgrades the database's schema at its first start, and
+refuses a database whose schema is newer than it knows (after a downgrade,
+delete the database). Exported instances need `sudo exportfs
+-f` afterwards (see "Exporting over NFS"). Programs using the mount have to
+be stopped, or the unmount fails with `EBUSY`.
+
+### What the log messages mean
+
+The messages an administrator can see at the default level
+(`dcfs.stderrthreshold=WARNING`), by their opening words. Errors are what
+dcfs itself failed at; warnings are what it noticed or survived.
+
+| Message | What it means and what to do |
+|---|---|
+| WARNING `inode N: out-of-band change on the backing filesystem (unsupported): ...; adopting the new attributes` | Something changed the backing tree behind dcfs and dcfs read the new state. Find the writer and stop it; to resynchronise everything, see "After an out-of-band change". |
+| WARNING `... its handle now reaches a different object ...; forgetting it (ESTALE)` | The object a cached row names was replaced behind dcfs (an inode number reused). Clients holding it get `ESTALE`. Same cause and remedy as above. |
+| ERROR `refusing to cache NAME under inode N: it is a mount point or subvolume boundary; it is shown as an empty stub directory...` | A filesystem was mounted, or a btrfs subvolume exists, below the source of a running instance. The name is a stub that returns `ENOTSUP` inside. Mount a second instance on the stub, or remove the mount. Once per stub. |
+| ERROR `refusing OP on or inside the boundary stub ...` | A process used a stub (listing or creating inside it). Same remedy. |
+| WARNING `the last run did not shut down cleanly (... a crash or power loss / the daemon died; same boot); recovered N dirty cache entries` | At start: the previous run ended without its clean-shutdown record. dcfs forgot what it had cached about the entries changed since the last sync point; they are re-read as needed. Nothing to do unless it recurs; then find out why the daemon dies (the kernel log, the syslog before the line). |
+| ERROR `could not probe recovered inode N ...` | During that recovery the backing filesystem could not be read for an entry (printed for the first ten). The entry stays dirty and is re-checked on access. Check the backing filesystem's health. |
+| WARNING `forgot N rows of objects removed by mutations the last run's end cut short` | Recovery housekeeping after a crash; informational. |
+| WARNING `periodic sync of the backing filesystems failed, keeping the dirty set: ...` (also `fsync sync ...` and `fsyncdir sync ...`) | `syncfs` of the backing filesystem failed: the filesystem has errors, went read-only or is gone. Nothing is lost in dcfs (the entries stay dirty and cost a larger re-read after a crash). Look at the kernel log; it is retried at the next request past the interval. |
+| WARNING `clean shutdown incomplete, the next start will recover the dirty set: ...` | The last sync at shutdown failed (same causes as the line above). The next start recovers by itself. |
+| ERROR `OP: the backing change happened, but recording it in the cache failed; leaving it unknown: ...` | The change is on the backing filesystem but the cache database could not record it (disk full or I/O error on the cache's disk). The entry is re-read later. Free space or fix the cache's disk. |
+| ERROR lines that are a bare status (`INTERNAL: ...`, `RESOURCE_EXHAUSTED: ...`), logged once by the request that failed | A request failed inside dcfs, such as the cache database or running out of descriptors; the caller got an error. Errno answers like `ENOENT`, `ESTALE` and `EINTR` are not logged. The message carries the cause. |
+| WARNING `could not raise RLIMIT_NOFILE ...` or `holding no descriptors on written files ...` | dcfs could not raise its open-file limit, or the limit is 16,384 or less, so it holds no descriptors on written files. It works, but the re-read of a written file's attributes waits for the next access and reads the disk (see the shared writable `mmap` limitation). Raise the hard open-file limit of the environment that runs `mount`. |
+| WARNING `cache database directory ... is group- or world-accessible` / `... was mode 0644; tightened to 0600` | The cache holds metadata as sensitive as the source. `chmod 700` the directory; the file is fixed by dcfs. |
+| WARNING `a remount of dcfs changes only the dcfs mount (dcfs.ro); ignoring the underlying mount's options ...` | A remount named native options; they were ignored. See [Remounting](#remounting). |
+| WARNING `pid N: supplementary groups unreadable ...; using none` | A request came from a process whose groups dcfs could not read; it was checked without them and may have got `EACCES`. At most once a minute. |
+
+A start that fails prints its reason on the standard error of `mount`, with
+exit status 32 (or the native mount's own, or 1 for a usage mistake). The
+common reasons:
+
+- `Cache database X is in use by another dcfs process`: another instance has
+  that database; two daemons cannot share one.
+- `Cache database X was created for filesystem A, but SOURCE is on B; delete
+  the database to start a cold cache`, and `... for a different source
+  directory ...`: the database belongs to another filesystem or directory
+  (wrong `dcfs.cache_db`, or the source was replaced); delete it only if the
+  new source is the intended one.
+- `dcfs does not yet support filesystems mounted below SOURCE`: unmount them
+  or choose another SOURCE.
+- `... is on a filesystem whose superblock is read-only under a read-write
+  mount`: the filesystem went read-only after an error; unmount, check and
+  mount it again.
+- `dcfs.cache_db is required`.
 
 ## Testing
 
