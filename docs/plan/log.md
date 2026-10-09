@@ -2221,3 +2221,14 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   ext4/xfs/btrfs, one extra syscall, handle-only); (e) rejected as alias-order dependent. Agent
   implementing it on step-13.1 with the experiment kept as a kernel-behaviour guard test;
   fault_freeze_test stays unchanged. Russ informed; may veto.
+- 26.15 reported (lane-5, two commits; the fresh agent was not blocked): standalone reproducers
+  under tools/kernel_bugs/ with manual guest targets proving each (ext4 oops, btrfs WARNING 6 of 6
+  listed directories), the btrfs cause PROVEN: a directory whose inode item was updated only in
+  memory (relatime from a listing) takes btrfs_fill_inode's fast path with index_cnt = -1; when the
+  on-disk read fails, iget_failed's make_bad_inode sets S_IFREG and btrfs_destroy_inode reads
+  index_cnt as csum_bytes (shared storage since d9891ae28b0d, v6.11): a spurious diagnostic, not a
+  data bug; an unanswered syzbot report exists (2024-09, no reproducer), so the draft is a reply.
+  ext4 still present in mainline af32da41b032; no earlier report found (lore returned 403 to the
+  tool; a mirror and web searches used: russ to search lore by hand). Drafts in
+  notes/kernel-bugs-2026-10-09.md. Review passed; one round for the stale pin_inodes comment and
+  the rebase, then merge.
