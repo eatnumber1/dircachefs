@@ -40,6 +40,7 @@
 //dcfs:dir_cache_fs_slope_test_bin
 //dcfs:dir_cache_fs_fault_phase3_before_syscall_test_bin
 //dcfs:dir_cache_fs_fault_skip_mark_unknown_test_bin
+//dcfs:startup_channel_fault_test_bin
 //dcfs:dir_cache_fs_fault_snapshot_after_syncfs_test_bin
 //dcfs:dir_cache_fs_fault_swallow_syscall_error_test_bin
 //dcfs:dir_cache_fs_fault_syscall_before_phase1_test_bin
