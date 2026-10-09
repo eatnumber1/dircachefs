@@ -36,8 +36,8 @@ cached results.
 Critical path: the test `//dcfs:dir_cache_fs_test` (120.7 s), then compiling
 `absl/log/globals.cc` (15.6 s, a cold action), then a 0.7 s link. Test
 execution is the long pole of a warm fast tier; the 1069 fetch events are
-restarts of repository functions (each fetch is retried as its dependencies
-arrive), not 1069 repositories.
+mostly short events of many repositories, not 1069 repositories (the profile
+records a repository function again when it restarts).
 
 ## `@dcfs_llvm` extraction
 
@@ -45,8 +45,8 @@ arrive), not 1069 repositories.
 re-extracted from the archive in the repository cache, no network) took
 1894.7 s of wall time, 31.6 minutes, at load 18 to 37; the tree it writes is
 2.1 GB. The profile's event is named `@@+llvm_distribution+dcfs_llvm`. The first
-fetch in the lane (an empty output base, archive already downloaded) took
-about as long. On a GitHub runner (4 cores, SSD, no neighbours) it will be
+fetch in the lane (an empty output base) ran from 09:37 to about 10:31, under
+load 31 to 37 (the start and end are clock times, not a timed run). On a GitHub runner (4 cores, SSD, no neighbours) it will be
 shorter, but it is the largest single item of a cold job: against it the
 whole fast tier above is 8 minutes.
 
@@ -65,7 +65,8 @@ output base's `external/` (where `+llvm_distribution+dcfs_llvm` lives) is under
 `~/.cache/bazel/_bazel_runner/<hash>`, also not cached. So every job
 (fast, presubmit, coverage, each shard of full, asan and ubsan) downloads
 nothing for LLVM (the archive is in the repository cache) but unpacks it again:
-nine to ten extractions per push.
+about 14 extractions per push (fast, presubmit, coverage, `reproducible`'s two
+builds in two output bases, nine shards, `mutation-changed`).
 
 What caching it would take, not done here (the profile numbers decide):
 
@@ -78,7 +79,7 @@ What caching it would take, not done here (the profile numbers decide):
   a key miss only (as the repository cache is).
 - Cost: the tree is 2.1 GB (the whole contents cache of this lane is much
   larger: 40 GB over all pins and checkouts, 13 GB for one job's set
-  according to the README), against GitHub's 10 GB per repository shared
+  according to the README, which I did not re-measure), against GitHub's 10 GB per repository shared
   with the three per-commit disk caches (up to 4 GB each) and the repository
   cache (a few GB). A 2.1 GB entry (about 1 GB compressed, my estimate, not
   measured) fits only if the per-commit disk caches shrink or are evicted
