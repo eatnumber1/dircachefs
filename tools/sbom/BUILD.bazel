@@ -49,6 +49,7 @@ py_test(
         "alpine_qemu=$(location @alpine_qemu//:resolved.json)",
         "alpine_qemu_img=$(location @alpine_qemu_img//:resolved.json)",
         "alpine_strace=$(location @alpine_strace//:resolved.json)",
+        "alpine_xfstests_tools=$(location @alpine_xfstests_tools//:resolved.json)",
     ],
     data = [
         "debian_sources.tsv",
@@ -68,6 +69,7 @@ py_test(
         "@alpine_qemu//:resolved.json",
         "@alpine_qemu_img//:resolved.json",
         "@alpine_strace//:resolved.json",
+        "@alpine_xfstests_tools//:resolved.json",
     ],
     deps = [":sbom_lib"],
     target_compatible_with = HOST_ONLY_COMPATIBLE,

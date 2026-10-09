@@ -1,7 +1,8 @@
 # BUILD file for @xfstests (see MODULE.bazel's http_archive and
 # third_party/xfstests/README.md): fsstress and fsx, the two programs of
 # xfstests' ltp/ directory, and replay-log (src/log-writes/, step 12.14), as
-# test-only binaries for the QEMU guest. The
+# test-only binaries for the QEMU guest (step 17.1 adds the generic tests'
+# runtime at the end). The
 # autoconf build is not used; config.h is written here for a Linux and glibc
 # host, the only target this project builds for.
 #
@@ -13,6 +14,7 @@
 #     XFS-only ioctls fsstress issues fail on dcfs (it has no ioctl).
 #   - libattr: not needed (fsstress's xattr operations use <sys/xattr.h>).
 
+load("@dircachefs//third_party/xfstests:helpers.bzl", "XFSTESTS_HELPERS")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
 genrule(
@@ -50,6 +52,8 @@ genrule(
 #define HAVE_LINUX_FIEMAP_H 1
 #define HAVE_COPY_FILE_RANGE 1
 #define HAVE_RENAMEAT2 1
+#define HAVE_STRUCT_MOUNT_ATTR 1
+#define HAVE_XFS_XQM_H 1
 #endif
 EOF
 """,
@@ -68,8 +72,10 @@ cc_library(
     testonly = 1,
     hdrs = glob([
         "src/*.h",
+        "src/vfs/*.h",
         "include/*.h",
     ]),
+    textual_hdrs = ["src/iopat.c"],  # included by the preallo_rw_pattern_* programs
     includes = [
         "include",
         "src",
@@ -149,3 +155,127 @@ cc_binary(
     linkstatic = True,
     visibility = ["//visibility:public"],
 )
+
+# ---- Step 17.1: the generic tests' runtime --------------------------------
+#
+# The scripts of check, common/ and tests/generic/, and the helper programs
+# of src/ the generic tests run (the ones that need nothing but libc: the
+# libraries of xfsprogs, libattr, libacl, libuuid, libaio and liburing are
+# not built; third_party/xfstests/README.md, "The runtime", lists the tests
+# each omission turns into "not run"). Statically linked like fsstress, so
+# the guest needs no more of the toolchain's glibc than they do.
+
+# lib/*.c: the "libtest" the Makefiles link into every src/ program.
+cc_library(
+    name = "libtest",
+    testonly = 1,
+    srcs = glob(["lib/*.c"]),
+    copts = _COMMON_COPTS + _NO_SAN,
+    includes = ["include"],
+    deps = [
+        ":config",
+        ":headers",
+        "@dircachefs//third_party/xfstests:xfs_shim",
+    ],
+)
+
+# The src/ programs built from one file (src/Makefile's TARGETS and
+# LINUX_TARGETS) that need no library beyond libc: helpers.bzl has the list
+# and what was left out.
+
+# Headers that the real <xfs/xfs.h> pulls in and our shim does not.
+_HELPER_COPTS = {
+    "punch-alternating": ["-include", "sys/vfs.h"],
+    "unwritten_mmap": ["-include", "errno.h"],
+    "preallo_rw_pattern_reader": ["-include", "stdio.h"],
+    "preallo_rw_pattern_writer": ["-include", "stdio.h"],
+}
+
+[cc_binary(
+    name = "helper_" + name,
+    testonly = 1,
+    srcs = ["src/%s.c" % name],
+    copts = _COMMON_COPTS + _NO_SAN + ["-DHAVE_FALLOCATE"] + _HELPER_COPTS.get(name, []),
+    features = _STATIC,
+    linkopts = ["-lm", "-lpthread", "-lrt"],
+    linkstatic = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":config",
+        ":headers",
+        ":libtest",
+        "@dircachefs//third_party/xfstests:xfs_shim",
+    ],
+) for name in XFSTESTS_HELPERS]
+
+cc_binary(
+    name = "helper_fssum",
+    testonly = 1,
+    srcs = [
+        "src/fssum.c",
+        "src/md5.c",
+        "src/md5.h",
+    ],
+    copts = _COMMON_COPTS + _NO_SAN,
+    features = _STATIC,
+    linkstatic = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":config",
+        ":headers",
+        "@dircachefs//third_party/xfstests:xfs_shim",
+    ],
+)
+
+# Everything the guest needs of the xfstests tree that is not a built
+# program: the check script, common/, the generic tests, and the shell and
+# awk helpers of src/.
+filegroup(
+    name = "scripts",
+    testonly = 1,
+    srcs = ["check"] + glob([
+        "common/*",
+        "tests/generic/*",
+        "src/dmerror",
+        "src/fill2attr",
+        "src/fill2fs",
+        "src/fill2fs_check",
+        "src/scaleread.sh",
+        "src/*.awk",
+        "src/*.py",
+        "src/popdir.pl",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+# src/vfs/: the VFS tester (generic/633 and the other tests of the "idmapped"
+# and "perms" families run its --test-core) and the mount-idmapped tool.
+# libcap is not built (HAVE_LIBCAP is unset); the testers' own tests of
+# capabilities then skip what needs it.
+[cc_binary(
+    name = "helper_vfs_" + name,
+    testonly = 1,
+    srcs = ["src/vfs/%s" % src for src in srcs],
+    copts = _COMMON_COPTS + _NO_SAN + ["-include", "sys/sysmacros.h"],
+    features = _STATIC,
+    linkopts = ["-lpthread"],
+    linkstatic = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":config",
+        ":headers",
+        "@dircachefs//third_party/xfstests:xfs_shim",
+    ],
+) for name, srcs in {
+    "vfstest": [
+        "vfstest.c",
+        "btrfs-idmapped-mounts.c",
+        "idmapped-mounts.c",
+        "utils.c",
+        "tmpfs-idmapped-mounts.c",
+    ],
+    "mount-idmapped": [
+        "mount-idmapped.c",
+        "utils.c",
+    ],
+}.items()]

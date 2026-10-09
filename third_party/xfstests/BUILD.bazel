@@ -1,13 +1,42 @@
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 
-exports_files(["BUILD.xfstests"])
+exports_files([
+    "BUILD.xfstests",
+    "0001-dcfs-guest.patch",
+])
 
 # What we write for xfstests' ltp/: the stand-in for xfsprogs' <xfs/xfs.h>
 # (see the header's comment). The overlay BUILD.xfstests depends on it.
 cc_library(
     name = "xfs_shim",
     testonly = 1,
-    hdrs = ["shim/xfs/xfs.h"],
+    hdrs = [
+        "shim/xfs/xfs.h",
+        "shim/xfs/xqm.h",
+    ],
     includes = ["shim"],
+    visibility = ["//visibility:public"],
+)
+
+# The glibc error messages for the guest's musl programs (shim/glibc_strerror.c
+# says why); an LD_PRELOAD library, freestanding so that no libc is linked.
+# The toolchain still adds -lm ahead of any option that could drop it, so the
+# library has a NEEDED libm.so.6, which the guest's image provides as a link
+# to musl (test/qemu/scripts/mkxfstests_rootfs.py).
+cc_binary(
+    name = "glibc_strerror",
+    testonly = 1,
+    srcs = ["shim/glibc_strerror.c"],
+    copts = [
+        "-ffreestanding",
+        "-fno-stack-protector",
+        "-fPIC",
+    ],
+    features = ["-link_libc"],
+    linkopts = [
+        "-nostdlib",
+        "-Wl,-soname,glibc_strerror.so",
+    ],
+    linkshared = True,
     visibility = ["//visibility:public"],
 )

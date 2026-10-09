@@ -1,0 +1,42 @@
+diff -u -r a/check b/check
+--- a/check
++++ b/check
+@@ -682,7 +682,10 @@
+ # Make the check script unattractive to the OOM killer...
+ OOM_SCORE_ADJ="/proc/self/oom_score_adj"
+ function _adjust_oom_score() {
+-	test -w "${OOM_SCORE_ADJ}" && echo "$1" > "${OOM_SCORE_ADJ}"
++	# dcfs (step 17.1): the guest's bash is musl's, whose echo writes the
++	# number and the newline separately; the kernel parses the newline of the
++	# second write as an empty number and answers EINVAL, which bash reports.
++	test -w "${OOM_SCORE_ADJ}" && printf '%s' "$1" > "${OOM_SCORE_ADJ}"
+ }
+ _adjust_oom_score -500
+ 
+@@ -698,7 +701,7 @@
+ # when systemd tells them to terminate (e.g. programs stuck in D state when
+ # systemd sends SIGKILL), so we use reset-failed to tear down the scope.
+ _run_seq() {
+-	local cmd=(bash -c "test -w ${OOM_SCORE_ADJ} && echo 250 > ${OOM_SCORE_ADJ}; exec ./$seq")
++	local cmd=(bash -c "test -w ${OOM_SCORE_ADJ} && printf 250 > ${OOM_SCORE_ADJ}; exec ./$seq")
+ 	local res
+ 
+ 	if [ -n "${HAVE_SYSTEMD_SCOPES}" ]; then
+diff -u -r a/common/rc b/common/rc
+--- a/common/rc
++++ b/common/rc
+@@ -1763,9 +1763,13 @@
+     # Fix the filesystem type up here so that the callers don't
+     # have to bother with this quirk.
+     #
++    #
++    # dcfs (step 17.1): a FUSE file system mounted with a subtype
++    # (FSTYP=fuse, FUSE_SUBTYP=.dcfs, so mount -t fuse.dcfs) shows up in df as
++    # fuse.dcfs, and init_rc compares that with FSTYP, which is fuse.
+     _df_device $1 | $AWK_PROG '{ print $2 }' | \
+         sed -e 's/nfs4/nfs/' -e 's/fuse.glusterfs/glusterfs/' \
+-            -e 's/fuse.ceph-fuse/ceph-fuse/'
++            -e 's/fuse.ceph-fuse/ceph-fuse/' -e 's/^fuse\.[^.]*$/fuse/'
+ }
+ 
+ # return the FS mount options of a mounted device
