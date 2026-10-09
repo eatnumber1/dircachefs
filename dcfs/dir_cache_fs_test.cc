@@ -2292,7 +2292,12 @@ class UnlinkAfterSyscall : public ProtocolEvents {
       unlinked = syscalls::unlinkat(AT_FDCWD, path_, 0).ok();
     }
   }
+  void NewChildProbed(Context &, events::Ino, std::string_view,
+                      const events::Probe &probe) override {
+    probes.push_back(probe.kind);
+  }
   bool unlinked = false;
+  std::vector<events::Probe::Kind> probes;
 
  private:
   std::string path_;
@@ -2308,6 +2313,8 @@ TEST_F(DirCacheFSTest, CreateWhoseObjectIsGoneRepliesEnoent) {
   observers_->Remove(&remover);
   ASSERT_TRUE(remover.unlinked);
   EXPECT_EQ(error, -ENOENT);
+  EXPECT_THAT(remover.probes, ElementsAre(events::Probe::Kind::kAbsent))
+      << "the model's CreateProbe found nothing";
 }
 
 // A writable create whose phase 1 for the writes (BeginWriting) cannot be
@@ -3242,6 +3249,39 @@ class ScopedVerbosity {
   int saved_;
 };
 
+// A writable open refused for the backing file's flag says which flag, in
+// the failure the request's log shows at -v=2 (the errno alone is replied).
+TEST_F(DirCacheFSTest, RefusedWritableOpenNamesTheBackingFlag) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  auto [open, fh] = Open(f, O_RDWR);
+  ASSERT_EQ(open.error, 0);
+  int flags = 0;
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor raw_fd,
+      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  const int raw = *raw_fd;
+  ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
+  ScopedVerbosity v(2);
+  for (const auto &[flag, said] :
+       {std::pair{FS_IMMUTABLE_FL, "immutable"},
+        std::pair{FS_APPEND_FL, "append-only"}}) {
+    const int changed = flags | flag;
+    ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &changed), IsOk());
+    OutOfBand(f);
+    AllLogCapture capture;
+    EXPECT_EQ(Open(f, O_WRONLY).first.error, -EPERM) << said;
+    EXPECT_GE(capture.Count(absl::LogSeverity::kInfo,
+                            absl::StrCat("the backing file is ", said)),
+              1)
+        << said << "\n" << capture.Dump();
+    ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags), IsOk());
+    OutOfBand(f);
+  }
+  EXPECT_EQ(Release(f, fh).error, 0);
+}
+
 // docs/design.md "Logging": each sync point is one INFO line with the rows
 // it cleared and its duration; none when nothing was dirty.
 TEST_F(ClockTest, ASyncPointIsLoggedAtInfoWithItsRows) {
@@ -3507,6 +3547,16 @@ TEST_F(DirCacheFSTest, NoPassthroughIsAWarningAtInit) {
       << capture.Dump();
 }
 
+// Records the lifetime steps with their argument.
+class LifetimeSteps : public ProtocolEvents {
+ public:
+  void LifetimeChanged(Context &, events::Ino, events::LifetimeStep step,
+                       uint64_t arg, events::LifetimeFn) override {
+    steps.emplace_back(step, arg);
+  }
+  std::vector<std::pair<events::LifetimeStep, uint64_t>> steps;
+};
+
 // Recovery says what it probed: the INFO summary counts the rows probed, the
 // ones gone and the ones that could not be probed.
 TEST_F(DirCacheFSTest, RecoveryLogsItsProbeSummary) {
@@ -3526,6 +3576,38 @@ TEST_F(DirCacheFSTest, RecoveryLogsItsProbeSummary) {
                           "could not be probed"),
             1)
       << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning, "forgot 1 rows"), 1)
+      << capture.Dump();
+}
+
+// A recovered row whose object is gone for good (its handle opens ENOENT) is
+// forgotten by the probe and counted as gone, with the lifetime model's
+// probe (formal/lifetime.tla's ProbeRow) told so.
+TEST_F(DirCacheFSTest, RecoveryCountsARowWhoseObjectIsGone) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  const InodeId dirty[] = {f};
+  ASSERT_THAT(cache::MarkDirty(ctx_, dirty), IsOk());
+  LifetimeSteps steps;
+  observers_->Add(&steps);
+  OpenByHandleFailures() = {ENOENT};
+  AllLogCapture capture;
+  ASSERT_THAT(Restart("boot"), IsOk());
+  observers_->Remove(&steps);
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                          "recovery: probed 1 recovered rows, 1 gone, 0 "
+                          "could not be probed"),
+            1)
+      << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning, "forgot 1 rows"), 1)
+      << capture.Dump();
+  EXPECT_THAT(cache::GetAttr(ctx_, f).status(),
+              StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(steps.steps,
+              Contains(::testing::Pair(events::LifetimeStep::kProbed, 1u)))
+      << "the probe reports the row as gone";
 }
 
 // A row that cannot be probed (here its deletion fails) is an ERROR of its
@@ -3553,6 +3635,8 @@ TEST_F(DirCacheFSTest, RecoveryCountsTheRowsItCouldNotProbe) {
                           "not be probed"),
             1)
       << capture.Dump();
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning, "forgot"), 0)
+      << "no row was forgotten\n" << capture.Dump();
   EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());  // Left for next time.
   ASSERT_THAT(cache::DeleteInode(ctx_, f), IsOk());
 }
@@ -4430,6 +4514,17 @@ TEST_F(DirCacheFSTest, RemovedFileCanBeChanged) {
   std::string fsync_body;
   AppendBytes(fsync_body, fsync_in);
   EXPECT_EQ(Send(FUSE_FSYNC, static_cast<uint64_t>(f), fsync_body).error, 0);
+  // A fallocate has no row to begin a mutation on: it goes through the open's
+  // descriptor, and the object grows.
+  struct fuse_fallocate_in falloc = {};
+  falloc.fh = fh;
+  falloc.length = 4096;
+  std::string falloc_body;
+  AppendBytes(falloc_body, falloc);
+  EXPECT_EQ(Send(FUSE_FALLOCATE, static_cast<uint64_t>(f), falloc_body).error,
+            0);
+  ASSERT_OK_AND_ASSIGN(struct stat grown, syscalls::fstat(held));
+  EXPECT_EQ(grown.st_size, 4096);
   EXPECT_EQ(Release(f, fh).error, 0);
   EXPECT_FALSE(fs_->HasOpenFiles(f));
   // Still answered after the release, until the kernel forgets it.
@@ -4801,7 +4896,14 @@ TEST_F(DirCacheFSTest, BackingInodeNumbersInTheStubRangeAreRefused) {
   FakeInodeNumbers()[InoOf(Path("d/big"))] = kFirstStubNodeid + 5;
   // Listing d probes every name, so the whole listing is refused (and
   // recorded as nothing: neither name is cached absent).
+  AllLogCapture capture;
   EXPECT_EQ(Lookup(d, "big").first.error, -ENOTSUP);
+  EXPECT_GE(capture.Count(
+                absl::LogSeverity::kError,
+                absl::StrCat("Backing inode number ", kFirstStubNodeid + 5,
+                             " of ")),
+            1)
+      << "the ERROR names the number after its label\n" << capture.Dump();
   EXPECT_EQ(Lookup(d, "small").first.error, -ENOTSUP);
   EXPECT_EQ(ErrnoOf(List(d, false).status()), ENOTSUP);
   EXPECT_EQ(Cached(d, "big").first, LookupResult::Kind::kUnknown);
@@ -5992,6 +6094,32 @@ TEST_F(DirCacheFSTest, CopyFileRangeEndsItsMutationBeforeItsRefreshes) {
   EXPECT_EQ(Release(src, in_fh).error, 0);
 }
 
+// A removexattr's mutation ends after its backing call and before its
+// phase-3 refreshes (see CopyFileRangeEndsItsMutationBeforeItsRefreshes).
+TEST_F(DirCacheFSTest, RemovexattrEndsItsMutationBeforeItsRefreshes) {
+  WriteFile(Path("f"));
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
+  ASSERT_EQ(Setxattr(f, "user.k", "v").error, 0);
+  ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
+
+  std::string name = "user.k";
+  name.push_back('\0');
+  // The backing removexattr reopens the inode (a statx or more, inside the
+  // mutation); the last statx is the refresh's.
+  std::vector<size_t> in_flight;
+  std::function<void()> observe = [&] {
+    in_flight.push_back(ctx_.fills.inflight.size());
+    StatxHook() = observe;
+  };
+  StatxHook() = observe;
+  EXPECT_EQ(Send(FUSE_REMOVEXATTR, static_cast<uint64_t>(f), name).error, 0);
+  StatxHook() = {};
+  ASSERT_FALSE(in_flight.empty()) << "the hook did not run";
+  EXPECT_EQ(in_flight.back(), 0u) << "the removexattr's mutation was still in "
+                                     "flight when its phase-3 refresh began";
+}
+
 // Trace validation of a copy_file_range: the files' trace (formal/reval.tla)
 // has its open, write and releases. (A missing End of the copy's mutation is
 // not in any trace: neither model has an event for the end of an attribute
@@ -6040,16 +6168,6 @@ TEST_F(DirCacheFSTest, FallocateEndsItsMutationBeforeItsRefreshes) {
                                "when its phase-3 refresh began";
   EXPECT_EQ(Release(f, fh).error, 0);
 }
-
-// Records the lifetime steps with their argument.
-class LifetimeSteps : public ProtocolEvents {
- public:
-  void LifetimeChanged(Context &, events::Ino, events::LifetimeStep step,
-                       uint64_t arg, events::LifetimeFn) override {
-    steps.emplace_back(step, arg);
-  }
-  std::vector<std::pair<events::LifetimeStep, uint64_t>> steps;
-};
 
 // A RELEASE says whether the open it ends could write (the lifetime model's
 // argument of kReleased): 1 for a writable open, 0 for a read-only one, both

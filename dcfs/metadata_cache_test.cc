@@ -1071,6 +1071,38 @@ TEST_F(MetadataCacheTest, GetAttrRoundTripsEveryField) {
   EXPECT_THAT(GetAttr(ctx_, 999), StatusIs(absl::StatusCode::kNotFound));
 }
 
+// The attributes WithStatx takes from a statx (what a fill does to a cached
+// row): each field from its own, the device number's major and minor in the
+// right order (a device node, whose two halves differ), and what the statx
+// does not carry kept.
+TEST_F(MetadataCacheTest, WithStatxTakesEachAttributeFromItsOwnField) {
+  CachedAttr old;
+  old.st.st_ino = 41;
+  old.backing_ino = 41;
+  const struct statx stx = Stx(77, S_IFBLK | 0640, 4);
+  const CachedAttr attr = WithStatx(old, stx);
+  EXPECT_THAT(attr.st.st_rdev, makedev(8, 21))
+      << "major " << major(attr.st.st_rdev) << ", minor "
+      << minor(attr.st.st_rdev);
+  EXPECT_EQ(attr.st.st_mode, S_IFBLK | 0640u);
+  EXPECT_EQ(attr.st.st_nlink, 7u);
+  EXPECT_EQ(attr.st.st_uid, 1004u);
+  EXPECT_EQ(attr.st.st_gid, 2004u);
+  EXPECT_EQ(static_cast<uint64_t>(attr.st.st_size), stx.stx_size);
+  EXPECT_EQ(static_cast<uint64_t>(attr.st.st_blocks), stx.stx_blocks);
+  EXPECT_EQ(attr.st.st_blksize, 512);
+  EXPECT_THAT(attr.st.st_atim, ::testing::Field(&timespec::tv_sec,
+                                                1'700'000'005));
+  EXPECT_THAT(attr.st.st_mtim, ::testing::Field(&timespec::tv_sec,
+                                                1'700'000'006));
+  EXPECT_THAT(attr.st.st_ctim, ::testing::Field(&timespec::tv_sec,
+                                                1'700'000'007));
+  EXPECT_THAT(attr.btime.tv_sec, -5 - 77);
+  EXPECT_THAT(attr.btime.tv_nsec, 999'999'999);
+  EXPECT_EQ(attr.st.st_ino, 41u) << "the statx does not carry the nodeid";
+  EXPECT_EQ(attr.backing_ino, 41u);
+}
+
 TEST_F(MetadataCacheTest, Symlinks) {
   ASSERT_OK_AND_ASSIGN(UpsertResult l, Make(50, S_IFLNK | 0777));
   EXPECT_THAT(Readlink(ctx_, l.id), StatusIs(absl::StatusCode::kNotFound));

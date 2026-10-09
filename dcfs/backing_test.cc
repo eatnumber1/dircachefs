@@ -626,6 +626,33 @@ TEST_F(BackingTest, InitRootRejectsACacheForAnotherFilesystem) {
   EXPECT_EQ(other_mounts.size(), 0u);
 }
 
+// InitRoot registers the source's mount fd once: a second call for the same
+// filesystem (the database already has the root) is not an error, and the
+// first fd stays registered.
+TEST_F(BackingTest, InitRootTwiceKeepsTheFirstMountFd) {
+  ASSERT_OK_AND_ASSIGN(FileDescriptor again, syscalls::dup(source_fd_));
+  const int again_fd = *again;
+  EXPECT_THAT(InitRoot(ctx_, std::move(again)), IsOk());
+  EXPECT_EQ(mounts_.size(), 1u);
+  EXPECT_THAT(mounts_.Fds(), ElementsAre(source_fd_));
+  EXPECT_NE(again_fd, source_fd_);
+}
+
+// A directory fsync's failure reaches the caller. /proc's directories have
+// no fsync, so fsync(2) on one fails with EINVAL (the reopen, as a
+// directory, succeeds).
+TEST_F(BackingTest, FsyncDirFdReportsTheFsyncsFailure) {
+  EXPECT_THAT(FsyncDirFd(source_fd_, false), IsOk());
+  EXPECT_THAT(FsyncDirFd(source_fd_, true), IsOk());
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor proc,
+      syscalls::openat(AT_FDCWD, "/proc", O_PATH | O_DIRECTORY));
+  absl::Status failed = FsyncDirFd(*proc, false);
+  EXPECT_THAT(failed, Not(IsOk()));
+  EXPECT_EQ(ErrnoOf(failed), EINVAL) << failed;
+  EXPECT_EQ(ErrnoOf(FsyncDirFd(*proc, true)), EINVAL);
+}
+
 // --- Crash safety of writable opens (step 4.6) -------------------------------
 
 TEST_F(BackingTest, RefreshAttrsFromFdMarksValid) {
@@ -1300,6 +1327,18 @@ TEST_F(BackingTest, CallerIdentityThatDoesNotTakeIsRefused) {
   EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("pub/d")).ok());
 }
 
+// Records the names of the backing calls that are announced
+// (ProtocolEvents::BackingCall), for the invariant checks and the fault
+// sweep, which depend on every backing syscall being announced.
+class BackingCallNames final : public ProtocolEvents {
+ public:
+  void BackingCall(Context &, std::string_view what,
+                   absl::SourceLocation) override {
+    names.emplace_back(what);
+  }
+  std::vector<std::string> names;
+};
+
 TEST_F(BackingTest, UnlinkAndRenameHonorTheStickyBit) {
   ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, GetGroups());
   FileDescriptor sticky = MakeParent(Path("sticky"), 01777, 0);
@@ -1308,11 +1347,19 @@ TEST_F(BackingTest, UnlinkAndRenameHonorTheStickyBit) {
   ASSERT_THAT(CreateAt(ctx_, bob, *sticky, "bf", O_WRONLY, 0644), IsOk());
   ASSERT_OK_AND_ASSIGN(InodeId dir, Id("sticky"));
 
+  BackingCallNames calls;
+  ctx_.events = &calls;
   EXPECT_EQ(ErrnoOf(UnlinkAt(ctx_, alice, dir, "bf", 0)), EPERM);
+  EXPECT_THAT(calls.names, Contains("unlinkat"))
+      << "a refused unlink still announces its syscall";
   EXPECT_EQ(ErrnoOf(RenameAt(ctx_, alice, dir, "bf", dir, "stolen", 0)),
             EPERM);
+  EXPECT_THAT(calls.names, Contains("renameat2"));
   EXPECT_THAT(RenameAt(ctx_, bob, dir, "bf", dir, "bf2", 0), IsOk());
+  calls.names.clear();
   EXPECT_THAT(UnlinkAt(ctx_, bob, dir, "bf2", 0), IsOk());
+  EXPECT_THAT(calls.names, Contains("unlinkat"));
+  ctx_.events = &NoProtocolEvents();
   ExpectRootAgain(groups);
 }
 
