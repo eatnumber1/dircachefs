@@ -2180,3 +2180,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   so 23.8's results stand; bisection targets and a `workers` attribute on tlc_test are committed.
   large_test/nolock_test did not finish under load 30-35 (view field constant there; CI confirms).
   Audit G3 closed. Lane-1: 23.11 born-dirty model dispatched to the same protocol agent.
+- 15.6 reported (lane-6, two commits): the systemd guest works and found a real deployment bug,
+  the restart race (systemctl restart of a dcfs mount starts the new daemon while the old one
+  still holds the cache database; a non-nofail line then lands in emergency mode): 15.6b, with
+  "start waits bounded for an exiting holder" recommended over a umount helper. Also: mount(8)
+  resolves UUID= before the helper, so decision 11 (source = spec as written) cannot hold; README
+  corrected. Sent back for the rebase over 26.14/26.14c/7.1c/15.7 (init, run-qemu.sh,
+  qemu_test.bzl, MODULE.bazel, README conflicts expected), the README restart sentence from 15.7
+  corrected, and a table of 15.7's nine unverified systemd statements (asserted / contradicted /
+  unverified).

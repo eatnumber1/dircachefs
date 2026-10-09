@@ -334,6 +334,49 @@ boot, since the microvm has no bootloader) (Debian rootfs booting systemd in the
 (its prerequisite, a root-owned Debian image, was done in Phase 4c:
 Bazel-built e2fsprogs builds the image from the root-owned package tar)
 and its tests. Owner: Sonnet.
+**15.6 status 2026-10-09:** reported (lane-6, two commits), review
+passed, rebasing over 26.14/26.14c/7.1c/15.7 for the merge. As built: Debian
+13 nocloud amd64 20261001-2618 as an `http_file` pinned by Debian's
+published SHA512; booted by the test kernel (6.18; the image's 6.12 lacks
+FS_IOC_GETFSUUID and the microvm has no bootloader) from a qcow2 overlay
+(Alpine's qemu-img, its own repository); `guest/init` installs dcfs and
+switch_roots into systemd, a oneshot unit prints the verdict; `--boots N`
+reboots the same disks; large tier, 256 MiB (768 under ASan), 55-160 s for
+two boots. Covers fstab lines by UUID on ext4/xfs/btrfs, `mount -a`,
+systemd's generated units, remount, exit statuses, journald; no NFS
+backing (no client in the image, no guest network), no `umount.dcfs`
+(none exists). Findings: (1) RESTART RACE, a real deployment bug, see
+15.6b; (2) `mount(8)` hands the helper the resolved device, so a `UUID=`
+line's FUSE source is `/dev/vda`, not the spec as written (plan decision
+11 cannot be honoured; README corrected, test pins it); (3) util-linux
+reads `-t nosuchfs` as "not suchfs". Deviations: `install_dcfs_into` wraps
+dcfs in the sanitizer loader only when `dcfs_sanitizer` is set (nfs_test's
+path changed, still green); no coverage from this guest; microvm sees
+four virtio disks so the test's disks start at vda; Bazel's downloader
+times out over IPv6 for cloud.debian.org on this host (`--distdir` note in
+third_party/debian_cloud/README.md).
+
+**15.6b Restart race (found by 15.6, 2026-10-09).** `systemctl restart
+<mount unit>` fails in most restarts: systemd calls the unit stopped when
+`umount` returns, but the old daemon is still closing the cache database,
+so the new daemon starts with "Cache database ... is in use by another
+dcfs process" (exit 32); for a mount `local-fs.target` requires (any
+fstab line without `nofail`) that sends the machine to emergency mode.
+Kept as `DISABLED_systemd-restart-parent-restarts-child` on a nofail pair
+of units plus a README Limitations entry. Two fixes, not exclusive:
+(a) the start waits, bounded (a few seconds, logged at INFO after the
+first second, ERROR with the holder's pid on giving up), for a cache
+database whose holder is a dcfs process that is exiting, which also
+covers `umount X && mount X` in scripts; (b) a `umount.fuse.dcfs` helper
+(util-linux calls `umount.<type>` for the mountinfo type) that unmounts and
+then waits for the daemon's exit, so "unmounted" means "stopped", which is
+what systemd assumes. Recommendation: (a) now, since it is small and
+general; (b) if 15.6's test shows systemd still orders a dependent start
+before the daemon is gone. Tests first in the systemd guest (the DISABLED_
+check becomes the test), the start-waits path also in mount_dcfs.sh.
+Owner: dcfs-implementer, lane-6 after 15.6 merges. Needs russ only if (b)
+is wanted instead of (a).
+
 **15.7 Docs:** README (fstab with and without systemd, `dcfs.fstype`
 values, `_netdev`, fsck, trees, over-mounting, remount, NFS exports,
 administrator responsibilities, why root, the bind-form submount behavior,
