@@ -2232,3 +2232,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   tool; a mirror and web searches used: russ to search lore by hand). Drafts in
   notes/kernel-bugs-2026-10-09.md. Review passed; one round for the stale pin_inodes comment and
   the rebase, then merge.
+- 26.15 merged (badacf3, three commits). Needs russ: send the two mails after the pre-send checks
+  in the note. Lane-5 free: 12.13 (model mutation tool) dispatched (new implementer); the first
+  sweep waits for 23.11's model to land so it runs against one model, not two.
