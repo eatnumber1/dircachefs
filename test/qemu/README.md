@@ -214,7 +214,7 @@ and `qemu_cc_test` requires an explicit `size` and `timeout` (the macros
 |---|---|---|---|
 | small | `bazel test --config=fast //...` | unit tests, ext4 variant of each e2e matrix test, boot, cache_permissions, lifecycle | about 1 minute |
 | medium | `bazel test --config=presubmit //...` (small + medium) | xfs and btrfs variants, readdir_boundary, release_leak | a few minutes |
-| large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test and mount_dcfs_systemd_test (large), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes |
+| large / enormous | `bazel test //...` (everything except `manual`; CI) | nfs_test and mount_dcfs_systemd_test (large), xfstests' generic tests on three filesystems (large: six shards each, `xfstests_<n>_test_<fstype>`; tag `xfstests`, run by their own CI job: see "xfstests (Phase 17)"), pjdfstest on three filesystems (enormous; about 10 minutes alone, about 18 when two run side by side) | about 36 minutes without xfstests; xfstests adds about 20 minutes per backing file system |
 
 `size` also sets Bazel's resource estimate (small assumes about 20 MB), so
 each QEMU test declares its real needs with tags: `cpu:<vCPUs>` (`-smp`: 1,
@@ -488,6 +488,7 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | unit tests (`qemu_cc_test`) | 22-35 | 52-612 (`dir_cache_fs_test` 612 under ASan, 383 without ReaddirWorkTest, `metadata_cache_test` 224, `backing_test` 187, the rest under 125) | 192 | 384 (`dir_cache_fs_test` 960) |
 | boot, cache_permissions, lifecycle, atime, removed, copy, boundary, credentials, create, crash, handles, power, readonly, rename, setattr, release_leak, nfs, passthrough (60-102 plain) | 52-102 | 145-190 (nfs 169) | 256 | 384 |
 | names, names_random, readdir_boundary, idle_short, idle_long, pjdfstest (3 shards) | 57-75 | 433-570 | 256 | 832 |
+| xfstests (6 shards; step 17.1, 125 tests each; `holetest` and `fsx` in shard 5 hold 460-520 MiB of anonymous memory, `reclaim_scans=0` in the others, 130,000-190,000 in shards 5 and 6 at 768) | 692-703 at 768 (shards 1 and 5; the OOM killer took `holetest` at 512) | not measured | 1024 | 1024 |
 | enospc_backing (step 11.4c; ASan measured at 1536, 2026-10-08) | 72-90 | 286-314 ext4/xfs, 486 btrfs (`reclaim_scans=0`; 384 ran out on btrfs in CI) | 256 | 832 |
 | enospc_cache, fault_shutdown (step 11.4c, the same way) | 69-88 | 284-312 | 256 | 576 |
 | write | 136-153 | 224-248 | 320 | 448 |
@@ -658,6 +659,8 @@ gate is disabled.
 | run-qemu.sh `--boots` (every boot a full run, the first failure stops) and `--systemd-image` (overlay, root partition, Bazel-built qemu-img) | `//test/qemu:run_qemu_verdict_test` |
 | run-qemu.sh disk-spec fourth field (ext4 only) | `//test/qemu:run_qemu_mkfs_test` |
 | require_commands (missing applets in guest) | `//test/qemu:require_commands_test` (sources the real `guest/lib.sh`) |
+| xfstests-expected-failures (an unlisted failure, a listed test that passes or does not run, a test with no result, a run in which fewer than a quarter of the tests ran) and xfstests-lists (reasons, duplicates, unknown tests, a test both listed and excluded) | `//test/qemu:xfstests_gate_test` (sources the real `guest/xfstests_lib.sh`, which `xfstests.sh` calls) |
+| the xfstests runtime has every library its programs need and every program `common/config` makes fatal | `//test/qemu:xfstests_runtime_test` |
 | pjdfstest-suite-sane (tooling health, tail -1 lesson) | `//test/qemu:pjdfstest_suite_sane_test` (sources the real `guest/pjdfstest_lib.sh`, which `pjdfstest.sh` calls) |
 | kernel_config_test (required kernel options) | `//third_party/linux:kernel_config_test` (BuiltinTest, CheckerTest) |
 | busybox_test (required applets present) | `//third_party/alpine:busybox_test_self_check` (runs the real `busybox_test.sh` over a fake busybox) |
@@ -1748,6 +1751,42 @@ boots share it: 420 s each). Run it with
 both boots. Coverage is not collected from this guest (the daemons are not
 started from `guest/init`'s environment).
 
+## xfstests (Phase 17)
+
+Step 17.1: xfstests' generic tests against dcfs on ext4, xfs and btrfs. The
+runtime (bash, GNU userland, `xfs_io`, perl, the helper programs) is a root
+file system image that `guest/init` chroots into, as the NFS test does with
+its Debian image; `third_party/xfstests/README.md` ("The runtime") says what is
+in it, what was left out and which tests that turns into "not run".
+
+- `guest/xfstests.sh` mounts `/dev/vdb` (`TEST_DEV`) and `/dev/vdc`
+  (`SCRATCH_DEV`) through `mount -t fuse.dcfs` (`FSTYP=fuse`,
+  `FUSE_SUBTYP=.dcfs`), runs the tests of group `auto` less
+  `guest/xfstests.excluded`, ten per `check`, and compares the outcome of each
+  with `guest/xfstests.<fstype>.expected_failures`. Both lists have one
+  `generic/NNN <reason>` per line. The run fails on a failure that is not
+  listed, on a listed test that passes or does not run, on a test with no
+  result, and when fewer than a quarter of the tests ran (a runtime that
+  reports everything "not run" must not pass); `xfstests_lib.sh` has the
+  checks and `xfstests_gate_test` their known-bad fixtures.
+- `xfstests_<n>_test_<fstype>` are the shards (six per file system, `large`,
+  `eternal`, 1024 MiB), `xfstests_test_<fstype>` the suites over them. Which
+  tests are in which shard is their position in the list that runs, modulo
+  the number of shards (`XFSTESTS_SHARDS` in `BUILD.bazel` and the wrapper
+  scripts), so a change to the exclusion list moves tests between shards.
+- For working on the suite, the guest reads words from the kernel command line
+  (`cmdline = "..."` of `qemu_test`): `xfstests_run=generic/001,generic/002` runs
+  just those tests (no gate), `xfstests_native=1` runs them on the backing file
+  system without dcfs (what the backing answers: the `xfstests_<n>_native_test_<fstype>`
+  and `xfstests_dev_test_<fstype>` targets, `manual`), `xfstests_timeout=` is
+  the per-test limit (200 s), `xfstests_batch=` the tests per `check` (10),
+  `xfstests_budget=` the seconds after which no new test is started (3000: so
+  that the target's timeout never cuts a run off before its summary).
+- The serial log has a line per test (`xfstests: generic/NNN pass 12s`; a "not
+  run" test says why), the evidence of each failure (the diff against the
+  golden output, the tail of the test's `.full`), a stall report for a test
+  killed at the limit (the processes, the daemon's CPU time and kernel stack:
+  slow or hung), and a summary with the seconds the shard took.
 
 ## NFS test and the Debian rootfs
 

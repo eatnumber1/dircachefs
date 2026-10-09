@@ -7,6 +7,7 @@ load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load(":guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
 load(":qemu_test.bzl", "CONCURRENT_CPUS", "qemu_test", "qemu_test_matrix")
+load("//third_party/xfstests:helpers.bzl", "XFSTESTS_HELPERS", "XFSTESTS_VFS_HELPERS")
 
 # Guest memory classes (step 6.2), in MiB; the measurements behind each are in
 # README.md "Guest memory" (a test with neither mem= nor asan_mem= gets
@@ -1518,4 +1519,143 @@ sh_test(
         "guest/request_lib.sh",
         "guest/strace_lib.sh",
     ],
+)
+
+# Step 17.1: xfstests' generic tests against dcfs. The runtime (bash, GNU
+# coreutils, util-linux's mount, xfs_io and the rest of the tests' tools from
+# Alpine, xfstests' scripts and its helper programs) is far too big for the
+# busybox initramfs, so it is a root file system image, mounted by guest/init
+# and chrooted into (qemu_test's `rootfs`), as the NFS test does with its
+# Debian image. third_party/xfstests/README.md, "The runtime", has the list of
+# what is in it and what was left out.
+py_binary(
+    name = "mkxfstests_rootfs",
+    srcs = ["scripts/mkxfstests_rootfs.py"],
+    main = "scripts/mkxfstests_rootfs.py",
+)
+
+# The per-filesystem lists of tests that guest/xfstests.sh reads, installed in
+# the image beside the tests.
+filegroup(
+    name = "xfstests_lists",
+    srcs = glob([
+        "guest/xfstests.*.expected_failures",
+        "guest/xfstests.excluded",
+    ]),
+)
+
+genrule(
+    name = "xfstests_rootfs",
+    testonly = 1,
+    srcs = [
+        ":xfstests_lists",
+        "@alpine_busybox//:root/bin/busybox.static",
+        "@alpine_xfstests_tools//:root",
+        "@xfstests//:fsstress",
+        "@xfstests//:fsx",
+        "@xfstests//:helper_fssum",
+        "@xfstests//:scripts",
+        "//third_party/xfstests:glibc_strerror",
+    ] + ["@xfstests//:helper_" + name for name in XFSTESTS_HELPERS + XFSTESTS_VFS_HELPERS],
+    outs = ["xfstests-rootfs.ext4"],
+    cmd = "$(location :mkxfstests_rootfs) --out $@ --size 640M " +
+          "--mke2fs $(location @alpine_fstools//:mke2fs) " +
+          "--mke2fs-conf $(location //third_party/e2fsprogs:mke2fs.conf) " +
+          "--busybox $(location @alpine_busybox//:root/bin/busybox.static) " +
+          "--strerror $(location //third_party/xfstests:glibc_strerror) " +
+          "--alpine $(locations @alpine_xfstests_tools//:root) " +
+          "--xfstests $(locations @xfstests//:scripts) " +
+          "--helpers $(locations @xfstests//:fsstress) $(locations @xfstests//:fsx) " +
+          "$(locations @xfstests//:helper_fssum) " +
+          " ".join(["$(locations @xfstests//:helper_%s)" % name for name in XFSTESTS_HELPERS + XFSTESTS_VFS_HELPERS]) +
+          " --list $(locations :xfstests_lists)",
+    tools = [
+        ":mkxfstests_rootfs",
+        "//third_party/e2fsprogs:mke2fs.conf",
+        "@alpine_fstools//:mke2fs",
+        "@alpine_fstools//:root",
+    ],
+)
+
+# xfstests' generic tests against dcfs on each backing file system, in
+# XFSTESTS_SHARDS guests each (guest/xfstests_<n>.sh; the shard of a test is
+# its position in the list of tests that run, modulo the number of shards).
+# Large: CI only. xfstests_dev_test_<fstype> is for working on the suite: edit
+# its cmdline to name the tests to run (no gate); see guest/xfstests.sh.
+XFSTESTS_SHARDS = [1, 2, 3, 4, 5, 6]
+
+[qemu_test(
+    name = "xfstests_%d_test_%s" % (shard, fstype),
+    disks = [("vdb", fstype, "1G"), ("vdc", fstype, "1G")],
+    guest_script = "guest/xfstests_%s.sh" % shard,
+    mem = 1024,
+    rootfs = ":xfstests_rootfs",
+    size = "large",
+    timeout = "eternal",
+) for shard in XFSTESTS_SHARDS for fstype in ["ext4", "xfs", "btrfs"]]
+
+# The same shards on the native file system, without dcfs: what the backing
+# answers, for triage (guest/xfstests.sh, xfstests_native=1). No gate.
+[qemu_test(
+    name = "xfstests_%d_native_test_%s" % (shard, fstype),
+    cmdline = "xfstests_native=1",
+    disks = [("vdb", fstype, "1G"), ("vdc", fstype, "1G")],
+    guest_script = "guest/xfstests_%s.sh" % shard,
+    mem = 1024,
+    rootfs = ":xfstests_rootfs",
+    size = "large",
+    tags = ["manual"],
+    timeout = "eternal",
+) for shard in XFSTESTS_SHARDS for fstype in ["ext4", "xfs", "btrfs"]]
+
+[test_suite(
+    name = "xfstests_test_" + fstype,
+    tests = [":xfstests_%d_test_%s" % (shard, fstype) for shard in XFSTESTS_SHARDS],
+) for fstype in ["ext4", "xfs", "btrfs"]]
+
+[qemu_test(
+    name = "xfstests_dev_test_" + fstype,
+    cmdline = "xfstests_run=generic/001,generic/002 xfstests_timeout=120",
+    disks = [("vdb", fstype, "1G"), ("vdc", fstype, "1G")],
+    guest_script = "guest/xfstests.sh",
+    mem = 1024,
+    rootfs = ":xfstests_rootfs",
+    size = "large",
+    tags = ["manual"],
+    timeout = "eternal",
+) for fstype in ["ext4", "xfs", "btrfs"]]
+
+# Step 17.1: self-check of the xfstests gate (guest/xfstests_lib.sh): the real
+# functions over canned results and lists, each kind of breach rejected.
+sh_test(
+    name = "xfstests_gate_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["xfstests_gate_test.sh"],
+    args = [
+        "$(location guest/lib.sh)",
+        "$(location guest/xfstests_lib.sh)",
+    ],
+    data = [
+        "guest/lib.sh",
+        "guest/xfstests_lib.sh",
+    ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 17.1: every library the xfstests runtime's programs need is in it, and
+# so is every program xfstests cannot start without (the packages are listed
+# by name in MODULE.bazel, not resolved with their dependencies).
+py_test(
+    name = "xfstests_runtime_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["xfstests_runtime_test.py"],
+    args = ["$(location @alpine_xfstests_tools//:resolved.json)"],
+    data = [
+        "@alpine_xfstests_tools//:resolved.json",
+        "@alpine_xfstests_tools//:root",
+    ],
+    main = "xfstests_runtime_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
