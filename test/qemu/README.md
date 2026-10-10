@@ -682,6 +682,7 @@ gate is disabled.
 | the fault-injection harness injects (11.1) | `//test/qemu:fault_selftest_test` (each mode of `guest/fault_lib.sh` on a filesystem over the wrapped disk; with `fault_table` answering `healthy` for every mode, 6 of its checks and the checks of all three failure tests below fail) |
 | a power cut's first boot has a verdict (11.2) | `//test/qemu:run_qemu_verdict_test` (fake QEMUs: no marker, the marker only inside another line, a failed check, an oops on the console, a `KERNEL-OOPS:` or `MEM-OOM:` line (the guest prints the kernel log's failures and OOM-killer lines itself before the marker, from `guest/lib.sh`, whose patterns the test checks are `guest/init`'s), an invariant violation, a QEMU that ended on its own: each fails; QEMU must die of our SIGKILL, status 137) |
 | the kill-mode cut keeps what was synced and loses the rest (11.2) | `//test/qemu:fault_power_kill_test_ext4` and its xfs and btrfs variants (the `before` scenario: a file synced before the cut must survive it and a file written after must not) |
+| the cache database's crash oracle can fail (12.14) | `sqlite_durability_test`'s in-run self-checks: `oracle-refuses-a-commit-kept-after-a-lost-one` (a forged WAL that opens), `oracle-refuses-a-lost-synced-commit`, `log-apply-agrees-with-replay-log`, `some-state-kept-a-later-frame` (the reordering reached SQLite); `sqlite_durability_lib_test` (every write of an epoch, the first included, reaches its crash states) |
 | the ACE checker can fail (11.2) | `fault_ace_a_test`'s `fixtures` kind (a persistence point that was not made, and a name added behind dcfs's back, must each be reported) and `fault_power_test`'s `comparison-detects-*` checks (a name, a mode, a link count) and `snapshot-sees-contents` |
 | the fsstress/fsx test's checks (11.2b: tree digests, fsx's A-OK line and disabled set, fsstress's successes and EIO, the random seed) | `//test/qemu:stress_checks_test` (the real `guest/stress_lib.sh` under the guest's busybox over trees differing in one byte, a mode, a name, a symlink target, an mtime, an xattr or a file type, empty trees, and fsx and fsstress logs that are bad, short, empty, all-failed or EIO; with the success count made to count failures, it fails on the all-failed log) |
 | the noisy run's knob takes effect (26.14e: sysctls, vCPUs, command-line word) | `//test/qemu:kernel_mode_test` (the real `guest/kernel_mode_lib.sh` over canned `/proc` trees: each mode rejects a guest of the other and every single departure), `//test/qemu:run_qemu_verdict_test` (`DCFS_NOISY` to `-smp` and `dcfs_noisy=1`), and the pair `quiet_kernel_test` / `noisy_kernel_test`, each failing under the other mode (the noisy job runs the second first) |
@@ -929,44 +930,6 @@ Step 11.2 added three things:
   fixture: a persistence point that was not made, and a name added behind
   dcfs's back, must each be reported.
 
-Step 12.14 added **`sqlite_durability_test`** (`_ext4`, `_xfs`, `_btrfs`,
-large; the matrix is over the cache filesystem, the backing one is ext4;
-`guest/sqlite_durability.sh`): the model's abstraction of the cache
-database's durability (`formal/README.md`, "Abstractions": a normal commit
-may be lost, an acknowledged synced one may not, the surviving commits are a
-prefix) against what SQLite leaves on a disk that reorders writes, which
-`drop-writes` and a killed QEMU cannot show (neither loses a write the disk
-completed). The cache filesystem sits on dm-log-writes (module
-`dm_log_writes`), whose log, the replay disk and the copy-on-write store of
-`dm_snapshot` are loop devices over sparse tmpfs files: a guest has four
-usable virtio disks (the fifth's interrupt, 8, is the RTC's, and its probe
-fails with a kernel warning), and the coverage run adds one. dcfs first
-creates files until SQLite checkpoints and restarts its WAL, so that every
-later frame overwrites an older one in place; then a script of mutations
-runs, each followed by a STATFS (which orders it), the WAL's commit count,
-the cost counter's synced transactions (`$DCFS_COUNTERS_FILE`: dcfs's
-intent) and a log mark; strace of the daemon (`strace -D`) gives each fsync
-of the WAL and the commit it follows. The crash states are CrashMonkey's on
-the log: every entry before each FLUSH after the start mark; in each epoch
-between two FLUSHes, every prefix of its FUA writes, all of them with a
-subset of its ordinary writes (every subset when they are few, else each
-write lost, each kept and seeded random ones: `dcfs_sd_seed=`,
-`dcfs_sd_budget=`), and a write of several blocks torn; and the whole log.
-Each is replayed onto a snapshot of the replay disk (kept at the epoch's
-FLUSH by xfstests' `replay-log`, `@xfstests//:replay-log`), mounted, and its
-database opened by SQLite and fingerprinted
-(`//test/qemu:crash_states`: `db-fingerprint` checkpoints the recovered
-frames into a copy after `integrity_check`); the fingerprint must be the
-reference state after some commit (the database and its WAL copied at the
-end, the WAL cut after commit k), at or after the last synced commit of
-every operation marked before the epoch's FLUSH. Self-checks: a WAL with a
-commit lost and the next kept (`crash_states wal-skip`) matches no state,
-the state before a synced commit is refused against its bound, and dcfs's
-synced transactions each fsynced the WAL once. The whole log must recover
-the final state, and dcfs started on it serves what the backing filesystem
-holds. `sqlite_durability_short_test` (medium) is the same on ext4 with a
-seven-operation script and a budget of 500 subsets.
-
 The small and medium ones run with the checking build of dcfs
 (`initramfs_checked`): an error path that leaves an invariant broken aborts
 the daemon and the test fails (the large ones run the plain build, except the ACE
@@ -1008,6 +971,66 @@ appended until `ENOSPC`, as root, so ext4's reserved blocks go too).
 
 Both boot the checking build in every variant (ext4 small, xfs and btrfs
 medium) with the default guest memory.
+
+### The cache database's durability (step 12.14)
+
+`sqlite_durability_test` (`_ext4`, `_xfs`, `_btrfs`, large; the matrix is
+over the cache filesystem, the backing one is ext4;
+`guest/sqlite_durability.sh`) checks the model's abstraction of the cache
+database (`formal/README.md`, "Abstractions": a normal commit may be lost,
+an acknowledged synced one may not, the surviving commits are a prefix)
+against what SQLite leaves on a disk that reorders writes, which
+`drop-writes` and a killed QEMU cannot show (neither loses a write the disk
+completed). `sqlite_durability_short_test` (medium) is the same on ext4
+with an eight-operation script and a budget of 500 states. All boot the
+checking build: its cost counter (`$DCFS_COUNTERS_FILE`) is the record of
+dcfs's intent.
+
+- **The disks.** The cache filesystem sits on dm-log-writes
+  (`dm_log_writes`). The log, the replay disk and the copy-on-write store of
+  `dm_snapshot` are loop devices over sparse tmpfs files: a guest has four
+  usable virtio disks (the fifth's interrupt, 8, is the RTC's, and its probe
+  fails with a kernel warning), and the coverage run adds one.
+- **The regime tested.** dcfs first creates files until SQLite checkpoints
+  and restarts its WAL, so that every later frame overwrites an older one in
+  place. Then a script of mutations runs in that one WAL generation, with
+  no checkpoint, restart or growth of the WAL (the test checks it). The
+  growing WAL of a run after a clean shutdown (`FinishRun` truncates it),
+  crashes inside a checkpoint or a restart, and crashes before the first
+  FLUSH after the start mark are not tested.
+- **The record.** After each operation a STATFS through dcfs (which it
+  serves after every request queued before it), the WAL's commit count, the
+  cost counter's synced transactions and a log mark; strace of the daemon
+  (`strace -D`) gives each fsync of the WAL and the commit it follows. The
+  synced transactions of each operation must be its WAL fsyncs.
+- **The crash states** (CrashMonkey's method on the log): every entry
+  before each FLUSH after the start mark; in each epoch between two
+  FLUSHes, every prefix of its FUA writes, all of them with a subset of its
+  ordinary writes (every subset when they are few, else each write lost,
+  each kept and seeded random ones: `dcfs_sd_seed=`, `dcfs_sd_budget=`),
+  and its writes of several 4 KiB blocks torn (the WAL's writeback among
+  them); and the whole log. Each is replayed onto a snapshot of the replay
+  disk (kept at the epoch's FLUSH by xfstests' `replay-log`), mounted, and
+  its database opened by SQLite and fingerprinted
+  (`//test/qemu:crash_states`). Mixtures of an epoch's ordinary writes with
+  only some of its FUA writes are not taken (the log does not order the
+  two). On btrfs every state of an epoch recovers the same database (its
+  log tree commits the WAL with the epoch's FLUSH), so its states amount to
+  the FLUSH prefixes.
+- **The oracle.** The fingerprint must be the reference state after some
+  commit k (the database and its WAL copied at the end, the WAL cut after
+  commit k), k at least the last synced commit of every operation marked
+  before the epoch's FLUSH, and at most what the operations before the
+  next FLUSH can have written. Some state of the script's epochs must hold
+  a WAL frame of the generation past one that did not land, or the
+  reordering never reached SQLite. The whole log must recover the final
+  state, and dcfs started on it serves what the backing filesystem holds.
+- **Self-checks.** In the run: a WAL with a commit lost and the next kept
+  (`crash_states wal-skip`, one that opens) matches no state; the state
+  before a synced commit is refused against it as the bound; our
+  `log-apply` of a whole epoch leaves the disk `replay-log` does. On the
+  host, `sqlite_durability_lib_test` runs `guest/sqlite_durability_lib.sh`'s
+  `epoch_states` over a synthetic log.
 
 ## Syscall traces
 

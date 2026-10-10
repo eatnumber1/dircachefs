@@ -290,8 +290,8 @@ qemu_test_matrix(
 # snapshots' store are loop devices over sparse tmpfs files (a fifth virtio
 # disk's interrupt is the RTC's). The checking build: the cost counter's
 # synced transactions ($DCFS_COUNTERS_FILE) are the test's record of dcfs's
-# intent. Measured 2026-10-09 (host load 13-18): ext4 72 s, xfs 54 s, btrfs
-# 209 s (2026 states); peak guest memory used 103-128 MiB of 384, the log
+# intent. Measured 2026-10-09 (host load 8-10): ext4 83 s, xfs 103 s, btrfs
+# 193 s (1486 states); peak guest memory used 106-127 MiB of 384, the log
 # and the replay disk in tmpfs growing with the script.
 [qemu_test(
     name = "sqlite_durability_test_" + fstype,
@@ -320,8 +320,8 @@ alias(
     actual = ":sqlite_durability_test_ext4",
 )
 
-# The same on ext4 with a short script (seven operations) and a budget of 500
-# write subsets, for the presubmit tier: 30 s, 101 MiB used (2026-10-09).
+# The same on ext4 with a short script (eight operations) and a budget of 500
+# write subsets, for the presubmit tier: 52 s, 104 MiB used (2026-10-09).
 qemu_test(
     name = "sqlite_durability_short_test",
     checked_dcfs = True,
@@ -1348,6 +1348,20 @@ sh_test(
         "guest/lib.sh",
         "guest/pjdfstest_lib.sh",
     ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 12.14: self-check of the crash states sqlite_durability_test replays:
+# guest/sqlite_durability_lib.sh's epoch_states over a synthetic log (every
+# write of the epoch reached, the first ordinary write torn too, a sampled
+# epoch within its share).
+sh_test(
+    name = "sqlite_durability_lib_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["sqlite_durability_lib_test.sh"],
+    args = ["$(location guest/sqlite_durability_lib.sh)"],
+    data = ["guest/sqlite_durability_lib.sh"],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 

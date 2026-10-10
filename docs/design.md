@@ -994,11 +994,16 @@ written, independently. For the database that is the model's abstraction
 (`formal/README.md`, "Abstractions"): a normal commit may be lost, a
 `kSync` commit that returned may not, and the commits that survive are a
 prefix. `sqlite_durability_test` checks it on ext4, xfs and btrfs (step
-12.14): the cache disk under dm-log-writes, every FLUSH prefix of the log
-and FLUSH/FUA-respecting reorderings and torn writes of it replayed and
-recovered by the filesystem and by SQLite, each recovered database the
-state after some commit, never before the last acknowledged `kSync`
-commit (`test/qemu/guest/sqlite_durability.sh`). Without further measures the database could come
+12.14, `test/qemu/guest/sqlite_durability.sh`) for one WAL generation
+after a forced restart, its frames overwriting old ones in place, with no
+checkpoint, restart or WAL growth during it: the cache disk under
+dm-log-writes, every FLUSH prefix of the log after the start, write
+subsets between FLUSHes that keep every FUA write, and torn multi-block
+writes (the WAL's writeback among them) replayed and recovered by the
+filesystem and by SQLite; each recovered database is the state after some
+commit, never before the last acknowledged `kSync` commit. The regime
+after a clean shutdown (an empty WAL that grows) and crashes inside a
+checkpoint are not tested. Without further measures the database could come
 back **behind** the backing filesystem (phase 1 lost, the syscall kept: a
 deleted file still cached as present) or **ahead** of it (phase 3 kept, the
 syscall lost: a created file cached as present, or an unlinked name cached

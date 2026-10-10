@@ -77,14 +77,25 @@
 # crash in the epoch). Marks order nothing against the ordinary writes (the
 # log holds those back until the next FLUSH), which is why only the FLUSHes
 # are used. Several commits can leave the same database (a release record
-# that changes nothing): k is the last of them. A violation fails, naming
-# the state, its write subset and the fingerprint.
+# that changes nothing): k is the last of them. And the first of them must
+# be at most the last commit of the first operation marked after the
+# epoch's end (the operations after it began after the epoch: a later
+# state would be a replay bug). A violation fails, naming the state, its
+# write subset and the fingerprint.
+#
+# Reach: crash_states wal-info counts, in each judged state's WAL, the
+# frames of the current generation past the recovered ones, and those after
+# a frame that did not land. Some state of an epoch that ends before the cut
+# mark must have one of the latter (a later frame kept while an earlier one
+# was lost), or the reordering never reached SQLite.
 #
 # Self-checks of the oracle, before the replay: a WAL with a commit lost and
 # the next one kept (crash_states wal-skip: a state no real power loss
-# leaves) must match no state; the state before the last synced commit,
-# judged against it as the bound, must be refused; the state after it must
-# be accepted.
+# leaves; one whose database opens) must match no state; the state before
+# the last synced commit, judged against it as the bound, must be refused;
+# the state after it must be accepted. During it: our log-apply of one whole
+# epoch must leave the disk replay-log leaves. The crash states themselves
+# are checked on the host (//test/qemu:sqlite_durability_lib_test).
 #
 # The positive case: the whole log recovers exactly the final reference
 # state, and dcfs started on it recovers (StartRun) to what the backing
@@ -94,6 +105,7 @@
 # line per check, and the measurements on SQLITE-DURABILITY lines.
 FAILED=0
 . "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/sqlite_durability_lib.sh"
 
 CS=/bin/crash_states
 REPLAY_LOG=/bin/replay-log
@@ -227,7 +239,11 @@ record() {
 	# STATFS adds no transaction, and dcfs answers it only after every
 	# request queued before it (one thread, requests in order): the
 	# counters then hold the operation's every transaction, and the -wal
-	# its every commit, whatever STATFS's own end writes.
+	# its every commit, whatever STATFS's own end writes. This assumes
+	# dcfs serves one request at a time; under Phase 22's coroutines a
+	# request suspended in a backing syscall would let STATFS overtake it,
+	# and the barrier needs another form (wait for the daemon to have no
+	# request in flight).
 	stat -f "$MNT" >/dev/null
 	r_c1=$(counters)
 	stat -f "$MNT" >/dev/null
@@ -332,17 +348,22 @@ ref_state() {
 	"$CS" wal-truncate "$WORK/ref/dcfs.db-wal" "$1" "$2/dcfs.db-wal"
 }
 
-# oracle FINGERPRINT LOWER: "ok K", K the last commit whose state has the
-# fingerprint, if K >= LOWER; "lost K" if every such K is below LOWER; "none"
-# if no state has it.
+# oracle FINGERPRINT LOWER: "ok K J", K the last and J the first commit
+# whose state has the fingerprint (several commits can leave the same
+# database), if K >= LOWER; "lost K J" if K is below LOWER; "none" if no
+# state has it.
 oracle() {
 	awk -v fp="$1" -v lower="$2" '
-		$2 == fp { found = 1; if ($1 + 0 > best) best = $1 + 0 }
+		$2 == fp {
+			if (!found || $1 + 0 < first) first = $1 + 0
+			if (!found || $1 + 0 > best) best = $1 + 0
+			found = 1
+		}
 		END {
 			if (!found) print "none"
-			else if (best >= lower) print "ok", best
-			else print "lost", best
-		}' best=-1 "$REF_FPS"
+			else if (best >= lower) print "ok", best, first
+			else print "lost", best, first
+		}' "$REF_FPS"
 }
 
 # --- the log --------------------------------------------------------------
@@ -361,12 +382,12 @@ mark_index() { awk -v m="$1" '$4 ~ /MARK/ && $5 == m { print $1; exit }' "$ENTRI
 # 32-byte header was written, which SQLite syncs whatever the synchronous
 # level when it starts a WAL, before the first frame). SQLite writes each
 # frame with pwrite64 at its offset, and a synced commit's fsync follows
-# its commit frame. A line "split <n>" is a syscall strace printed in two
-# halves (two threads at once), which would hide an offset.
+# its commit frame. A line "split <n>" is a syscall on the -wal that strace
+# printed in two halves (two threads at once), which would hide an offset.
 synced_commits() {
 	awk '
 		FNR == NR { end[$1] = $2; n = $1; next }
-		/unfinished|resumed/ { print "split", FNR; next }
+		/dcfs\.db-wal>/ && /unfinished/ { print "split", FNR; next }
 		/dcfs\.db-wal>/ && /^[0-9]+ +pwrite64\(/ {
 			if (match($0, /, [0-9]+\) += [0-9]+$/)) {
 				split(substr($0, RSTART + 2), f, /[^0-9]+/)
@@ -384,13 +405,17 @@ synced_commits() {
 		END { for (i = 1; i <= m; i++) print line[i] }' "$WORK/commits" "$WORK/strace.out"
 }
 
-# bounds INDEX: "<lower> <acknowledged>" for the states at or after the log
-# entry INDEX (a FLUSH). <lower> is the commit every such state must have:
-# the last synced commit of the operations whose marks are logged before
-# INDEX (each acknowledged before its operation's mark, so before any crash
-# at or after INDEX). <acknowledged> is the last commit of those operations.
+# bounds INDEX NEXT: "<lower> <acknowledged> <upper>" for the states of the
+# epoch from the log entry INDEX (a FLUSH) to NEXT (the next FLUSH, or the
+# end). <lower> is the commit every such state must have: the last synced
+# commit of the operations whose marks are logged before INDEX (each
+# acknowledged before its operation's mark, so before any crash at or after
+# INDEX). <acknowledged> is the last commit of those operations. <upper> is
+# the last commit such a state can hold: that of the first operation whose
+# mark is logged after NEXT (the operations after it began after NEXT
+# completed, so wrote nothing of the epoch's), or the last commit.
 bounds() {
-	awk -v at="$1" '
+	awk -v at="$1" -v next_="$2" -v last="$REF_COMMITS" '
 		FILENAME == ARGV[1] { if ($4 ~ /MARK/) mark[$5] = $1; next }
 		FILENAME == ARGV[2] { synced_op[$1] = 1; synced[$1] = $2; next }
 		{ m = $1 == 0 ? "dcfs-up" : "op" $1 }
@@ -398,23 +423,40 @@ bounds() {
 			if ($1 in synced_op && synced[$1] > lo) lo = synced[$1]
 			if ($4 > acked) acked = $4
 		}
-		END { print lo + 0, acked + 0 }' "$ENTRIES" "$WORK/synced" "$OPS"
+		upper == "" && m in mark && mark[m] > next_ { upper = $4 }
+		END { print lo + 0, acked + 0, (upper == "" ? last : upper) }' \
+		"$ENTRIES" "$WORK/synced" "$OPS"
 }
 
 STATES=0
 VIOLATIONS=0
 LOST_ACKED=0
 MIN_MARGIN=""
-# check_state NAME LOWER ACKED [INDEX...]: replays the entries INDEX... onto
-# a snapshot of the replay disk (as it is: every entry before the epoch's
-# FLUSH), recovers it and asks the oracle (LOWER: the bound; ACKED: the last
-# commit of an operation done before the crash, for the count of states that
-# lost one); a violation fails NAME.
+REACH_BEYOND=0
+REACH_GAP=0
+REACH_GAP_SCRIPT=0
+REACH_EXAMPLE=""
+# 1 while the states judged are of an epoch that ends before the cut mark
+# (between two of the script's FLUSHes; an epoch that ends at the unmount's
+# FLUSH holds the unmount's writeback, which the log holds back until then).
+IN_SCRIPT=0
+# check_state NAME LOWER ACKED UPPER [ENTRY...]: replays the entries ENTRY...
+# (crash_states log-apply's arguments) onto a snapshot of the replay disk (as
+# it is: every entry before the epoch's FLUSH), recovers it and asks the
+# oracle; a violation fails NAME. LOWER: the bound; UPPER: the last commit
+# the state can hold (a later one would be a replay that put writes from
+# after the crash on the disk); ACKED: the last commit of an operation done
+# before the crash, for the count of states that lost one. Counts the states
+# whose WAL holds this generation's frames past the recovered ones
+# (REACH_BEYOND), and those of them after a frame that did not land
+# (REACH_GAP: a later frame kept, an earlier one lost).
 check_state() {
 	cs_name=$1
 	cs_lower=$2
 	cs_acked=$3
-	shift 3
+	cs_upper=$4
+	shift 4
+	cs_entries="$*"
 	STATES=$((STATES + 1))
 	"$DMSETUP" create --noudevsync "$SNAP" \
 		--table "0 $SECTORS snapshot $REPLAY_DEV $COW_DEV N 8" || {
@@ -441,103 +483,53 @@ check_state() {
 		fail "$cs_name" "the crash state does not mount: $(cat "$WORK/mount.err"); entries: $*"
 		return
 	fi
+	cs_info=""
+	[ -e "$WORK/st/dcfs.db-wal" ] && cs_info=$("$CS" wal-info "$WORK/st/dcfs.db-wal")
+	cs_beyond=$(echo "$cs_info" | tr ' ' '\n' | sed -n 's/^beyond=//p')
+	cs_gap=$(echo "$cs_info" | tr ' ' '\n' | sed -n 's/^aftergap=//p')
 	cs_fp=$(fingerprint "$WORK/st" 2>"$WORK/fp.err")
 	if [ -z "$cs_fp" ]; then
 		VIOLATIONS=$((VIOLATIONS + 1))
 		fail "$cs_name" "the database does not open as a database: $(cat "$WORK/fp.err"); entries: $*"
 		return
 	fi
-	cs_verdict=$(oracle "$cs_fp" "$cs_lower")
-	echo "$cs_name ${cs_verdict#* }" >>"$WORK/recovered"
+	set -- $(oracle "$cs_fp" "$cs_lower")
+	cs_verdict=$1
+	cs_best=${2:-}
+	cs_min=${3:-}
+	echo "$cs_name ${cs_best:-none}" >>"$WORK/recovered"
+	if [ "${cs_beyond:-0}" -gt 0 ]; then
+		REACH_BEYOND=$((REACH_BEYOND + 1))
+		if [ "${cs_gap:-0}" -gt 0 ]; then
+			REACH_GAP=$((REACH_GAP + 1))
+			if [ "$IN_SCRIPT" = 1 ]; then
+				REACH_GAP_SCRIPT=$((REACH_GAP_SCRIPT + 1))
+				[ -n "$REACH_EXAMPLE" ] ||
+					REACH_EXAMPLE="$cs_name: recovered commit ${cs_best:-none} ($cs_info); entries: $cs_entries"
+			fi
+		fi
+	fi
 	case "$cs_verdict" in
-	ok*)
-		[ "${cs_verdict#ok }" -lt "$cs_acked" ] && LOST_ACKED=$((LOST_ACKED + 1))
-		cs_margin=$((${cs_verdict#ok } - cs_lower))
+	ok)
+		if [ "$cs_min" -gt "$cs_upper" ]; then
+			VIOLATIONS=$((VIOLATIONS + 1))
+			fail "$cs_name" "recovered the state after commit $cs_min (or a later one alike), past the last the crash point allows ($cs_upper): a replay bug; entries: $cs_entries"
+		fi
+		[ "$cs_best" -lt "$cs_acked" ] && LOST_ACKED=$((LOST_ACKED + 1))
+		cs_margin=$((cs_best - cs_lower))
 		if [ -z "$MIN_MARGIN" ] || [ "$cs_margin" -lt "$MIN_MARGIN" ]; then
 			MIN_MARGIN=$cs_margin
 		fi
 		;;
-	lost*)
+	lost)
 		VIOLATIONS=$((VIOLATIONS + 1))
-		fail "$cs_name" "an acknowledged synced commit was lost: recovered the state after commit ${cs_verdict#lost }, the bound is $cs_lower; entries: $*"
+		fail "$cs_name" "an acknowledged synced commit was lost: recovered the state after commit $cs_best, the bound is $cs_lower; entries: $cs_entries"
 		;;
 	*)
 		VIOLATIONS=$((VIOLATIONS + 1))
-		fail "$cs_name" "the recovered database ($cs_fp) is the state after no commit: a commit survived an earlier lost one; entries: $*"
+		fail "$cs_name" "the recovered database ($cs_fp; $cs_info) is the state after no commit: a commit survived an earlier lost one; entries: $cs_entries"
 		;;
 	esac
-}
-
-# epoch_states FROM TO CAP: the write subsets of the epoch [FROM, TO) of the
-# log, one per line ("<kind> <index>..."), and a first line "COV <fua>
-# <ordinary> <subsets> <taken> <exhaustive|sampled>".
-epoch_states() {
-	awk -v from="$1" -v to="$2" -v cap="$3" -v seed="$SEED" -v all="$EXHAUSTIVE" '
-		$1 >= from && $1 < to && $3 > 0 && $4 !~ /MARK/ && $4 !~ /DISCARD/ {
-			if ($4 ~ /FUA/) fua[a++] = $1
-			else { sectors[b] = $3; ord[b++] = $1 }
-		}
-		function emit(line) { if (!(line in seen)) { seen[line] = 1; out[n++] = line } }
-		END {
-			srand(seed + from)
-			allf = ""
-			for (i = 0; i < a; i++) allf = allf " " fua[i]
-			# Every prefix of the FUA writes, no ordinary write.
-			for (p = 1; p <= a; p++) {
-				line = ""
-				for (i = 0; i < p; i++) line = line " " fua[i]
-				emit("fua" line)
-			}
-			# A torn write: all FUA writes, and one ordinary write of more
-			# than one 4 KiB block of which only some blocks landed (its
-			# first, its first half, all but its last, its last, all but its
-			# first), with every other ordinary write or with none.
-			tears = 0
-			for (k = 0; k < b; k++) {
-				nb = int(sectors[k] / 8)
-				if (nb < 2) continue
-				cut[1] = "0-8"; cut[2] = "0-" 8 * int(nb / 2)
-				cut[3] = "0-" 8 * (nb - 1); cut[4] = 8 * (nb - 1) "-" 8 * nb
-				cut[5] = "8-" 8 * nb
-				for (c = 1; c <= 5; c++) {
-					others = ""
-					for (i = 0; i < b; i++) if (i != k) others = others " " ord[i]
-					before = n
-					emit("tear" allf others " " ord[k] ":" cut[c])
-					emit("tearalone" allf " " ord[k] ":" cut[c])
-					tears += n - before
-				}
-			}
-			# All FUA writes, a proper nonempty subset of the ordinary ones
-			# (none: the last FUA prefix; all: the next FLUSH prefix).
-			total = b >= 2 ? 2 ^ b - 2 : 0
-			if (total <= cap || total <= all) {
-				mode = "exhaustive"
-				for (mask = 1; mask < 2 ^ b - 1; mask++) {
-					line = "subset" allf
-					for (i = 0; i < b; i++)
-						if (int(mask / 2 ^ i) % 2) line = line " " ord[i]
-					emit(line)
-				}
-			} else {
-				mode = "sampled"
-				# The share is for subsets: the torn writes come on top.
-				for (k = 0; k < b && n - tears < cap; k++) {
-					line = "lose1" allf
-					for (i = 0; i < b; i++) if (i != k) line = line " " ord[i]
-					emit(line)
-				}
-				for (k = 0; k < b && n - tears < cap; k++) emit("keep1" allf " " ord[k])
-				for (tries = 0; n - tears < cap && tries < 50 * cap; tries++) {
-					line = "random" allf
-					got = 0
-					for (i = 0; i < b; i++) if (rand() < 0.5) { line = line " " ord[i]; got++ }
-					if (got > 0 && got < b) emit(line)
-				}
-			}
-			print "COV", a + 0, b + 0, total, n + 0, mode, tears + 0
-			for (i = 0; i < n; i++) print out[i]
-		}' "$ENTRIES"
 }
 
 # --- setup ----------------------------------------------------------------
@@ -709,30 +701,42 @@ set -- $(tail -n 1 "$WORK/synced")
 SC_OP=$1
 SC_SYNCED=$2
 set -- $NORMAL_OP
-sc_first=$(($3 + 1))
-sc_last=$4
-sc_j=$sc_first
-sc_done=0
-while [ "$sc_j" -lt "$sc_last" ] && [ "$sc_done" = 0 ]; do
+# The commits j to lose (j + 1, kept, a normal commit): those of that
+# operation first, then every other. A forgery whose database fails
+# integrity_check (a table page from one commit, an index page from
+# another) proves nothing about the oracle, so the next j is tried until
+# one opens.
+SC_CANDIDATES=$(awk -v first=$(($3 + 1)) -v last="$4" -v n="$REF_COMMITS" '
+	FNR == NR { if ($2 == "exact") synced[$1] = 1; next }
+	END {
+		for (j = first; j < last; j++) if (!((j + 1) in synced)) print j
+		for (j = 1; j < n; j++)
+			if ((j < first || j >= last) && !((j + 1) in synced)) print j
+	}' "$WORK/fsyncs" /dev/null)
+sc_fp=""
+sc_tried=""
+for sc_j in $SC_CANDIDATES; do
 	rm -rf "$WORK/forged"
 	mkdir -p "$WORK/forged"
 	cp "$WORK/ref/dcfs.db" "$WORK/forged/"
 	if "$CS" wal-skip "$WORK/ref/dcfs.db-wal" "$sc_j" "$WORK/forged/dcfs.db-wal" >"$WORK/skip.out" 2>&1; then
-		sc_done=1
+		sc_fp=$(fingerprint "$WORK/forged" 2>/dev/null)
+		[ -n "$sc_fp" ] || sc_tried="$sc_tried $sc_j(corrupt)"
 	else
-		sc_j=$((sc_j + 1))
+		sc_tried="$sc_tried $sc_j(prefix)"
 	fi
+	[ -n "$sc_fp" ] && break
 done
-if [ "$sc_done" = 1 ]; then
-	sc_fp=$(fingerprint "$WORK/forged")
+if [ -n "$sc_fp" ]; then
 	sc_verdict=$(oracle "$sc_fp" 0)
 	if [ "$sc_verdict" = none ]; then
 		pass oracle-refuses-a-commit-kept-after-a-lost-one
+		echo "SQLITE-DURABILITY forged: commit $sc_j lost, $((sc_j + 1)) kept ($(cat "$WORK/skip.out")); tried before:${sc_tried:- none}"
 	else
 		fail oracle-refuses-a-commit-kept-after-a-lost-one "commit $sc_j lost and $((sc_j + 1)) kept ($(cat "$WORK/skip.out")): the oracle said '$sc_verdict'"
 	fi
 else
-	fail oracle-refuses-a-commit-kept-after-a-lost-one "no commit of operation '$NORMAL_OP' writes a page the next one does not"
+	fail oracle-refuses-a-commit-kept-after-a-lost-one "no forgery opens as a database:$sc_tried"
 fi
 ref_state $((SC_SYNCED - 1)) "$WORK/forged"
 sc_verdict=$(oracle "$(fingerprint "$WORK/forged")" "$SC_SYNCED")
@@ -741,15 +745,12 @@ lost*) pass oracle-refuses-a-lost-synced-commit ;;
 *) fail oracle-refuses-a-lost-synced-commit "the state before synced commit $SC_SYNCED (operation $SC_OP), bound $SC_SYNCED: the oracle said '$sc_verdict'" ;;
 esac
 ref_state "$SC_SYNCED" "$WORK/forged"
-sc_verdict=$(oracle "$(fingerprint "$WORK/forged")" "$SC_SYNCED")
-case "$sc_verdict" in
-ok*) if [ "${sc_verdict#ok }" -ge "$SC_SYNCED" ]; then
+set -- $(oracle "$(fingerprint "$WORK/forged")" "$SC_SYNCED")
+if [ "${1:-}" = ok ] && [ "$2" -ge "$SC_SYNCED" ] && [ "$3" -le "$SC_SYNCED" ]; then
 	pass oracle-accepts-an-allowed-state
 else
-	fail oracle-accepts-an-allowed-state "the state after synced commit $SC_SYNCED: the oracle said '$sc_verdict'"
-fi ;;
-*) fail oracle-accepts-an-allowed-state "the state after synced commit $SC_SYNCED (operation $SC_OP), bound $SC_SYNCED: the oracle said '$sc_verdict'" ;;
-esac
+	fail oracle-accepts-an-allowed-state "the state after synced commit $SC_SYNCED: the oracle said '$*'"
+fi
 
 umount "$CACHE_DIR"
 "$DMSETUP" remove --noudevsync "$LOGW"
@@ -758,7 +759,12 @@ umount "$CACHE_DIR"
 	exit "$FAILED"
 }
 N=$(wc -l <"$ENTRIES")
+# The log's sectors per 4 KiB block, for the torn writes.
+LOG_SECTOR=$("$CS" log-info "$LOG_DEV" | sed 's/.*sectorsize=\([0-9]*\).*/\1/')
+SPB=$((4096 / LOG_SECTOR))
+[ "$SPB" -ge 1 ] || SPB=1
 UP=$(mark_index dcfs-up)
+CUT=$(mark_index cut)
 FLUSHES=$(awk -v up="$UP" '$1 > up && $4 ~ /(^|[|])FLUSH([|]|$)/ { print $1 }' "$ENTRIES")
 NFLUSH=$(echo $FLUSHES | wc -w)
 echo "SQLITE-DURABILITY log: $N entries, start mark at $UP, $NFLUSH FLUSHes after it, $(grep -c FUA "$ENTRIES") FUA writes"
@@ -782,20 +788,24 @@ replay_to() {
 T2=$(cut -d' ' -f1 /proc/uptime)
 EPOCHS=$NFLUSH
 REMAINING=$BUDGET
+CROSS_DONE=0
 replay_to 0 "$(echo $FLUSHES | cut -d' ' -f1)" || fail replay "replay-log to the first FLUSH failed"
 e=0
 set -- $FLUSHES
 for flush in $FLUSHES; do
 	shift
 	next=${1:-$N}
-	set -- $(bounds "$flush") "$@"
+	set -- $(bounds "$flush" "$next") "$@"
 	lower=$1
 	acked=$2
-	shift 2
-	check_state "prefix-$flush" "$lower" "$acked"
+	upper=$3
+	shift 3
+	IN_SCRIPT=0
+	[ "$next" -lt "$CUT" ] && IN_SCRIPT=1
+	check_state "prefix-$flush" "$lower" "$acked" "$upper"
 	cap=$((REMAINING / (EPOCHS - e)))
 	[ "$cap" -lt "$MIN_CAP" ] && cap=$MIN_CAP
-	epoch_states "$flush" "$next" "$cap" >"$WORK/epoch"
+	epoch_states "$ENTRIES" "$flush" "$next" "$cap" "$SEED" "$EXHAUSTIVE" "$SPB" >"$WORK/epoch"
 	read -r _ es_fua es_ord es_total es_taken es_mode es_tears <"$WORK/epoch"
 	echo "SQLITE-DURABILITY epoch $e [$flush, $next): $es_fua FUA, $es_ord ordinary, $es_taken states ($es_tears torn writes, $es_mode of $((es_fua + es_total)) subsets), bound $lower"
 	sed 1d "$WORK/epoch" >"$WORK/epoch.states"
@@ -804,20 +814,58 @@ for flush in $FLUSHES; do
 	while read -r kind idx <&3; do
 		s=$((s + 1))
 		# shellcheck disable=SC2086 # the indices are words
-		check_state "state-$flush-$kind-$s" "$lower" "$acked" $idx
+		check_state "state-$flush-$kind-$s" "$lower" "$acked" "$upper" $idx
 	done 3<"$WORK/epoch.states"
 	REMAINING=$((REMAINING - es_taken))
 	[ "$REMAINING" -lt 0 ] && REMAINING=0
+	# Once, on the first epoch of the script with two ordinary writes or
+	# more: our log-apply of the whole epoch must leave the disk replay-log
+	# leaves (same bytes), or the states judged are not the log's.
+	cross=0
+	if [ "$CROSS_DONE" = 0 ] && [ "$IN_SCRIPT" = 1 ] && [ "$es_ord" -ge 2 ]; then
+		cross=1
+		CROSS_DONE=1
+		"$DMSETUP" create --noudevsync "$SNAP" \
+			--table "0 $SECTORS snapshot $REPLAY_DEV $COW_DEV N 8" &&
+			"$CS" log-apply "$LOG_DEV" "/dev/mapper/$SNAP" $(seq "$flush" $((next - 1))) &&
+			cross_ours=$(md5sum "/dev/mapper/$SNAP" | cut -d' ' -f1)
+		"$DMSETUP" remove --noudevsync "$SNAP"
+	fi
 	replay_to "$flush" "$next" || fail replay "replay-log from $flush to $next failed"
+	if [ "$cross" = 1 ]; then
+		cross_theirs=$(md5sum "$REPLAY_DEV" | cut -d' ' -f1)
+		if [ -n "${cross_ours:-}" ] && [ "$cross_ours" = "$cross_theirs" ]; then
+			pass log-apply-agrees-with-replay-log
+		else
+			fail log-apply-agrees-with-replay-log "epoch [$flush, $next): log-apply ${cross_ours:-failed}, replay-log $cross_theirs"
+		fi
+	fi
 	e=$((e + 1))
 done
-set -- $(bounds "$N")
-check_state full-log "$1" "$2"
+set -- $(bounds "$N" "$N")
+check_state full-log "$1" "$2" "$3"
 T3=$(cut -d' ' -f1 /proc/uptime)
 echo "SQLITE-DURABILITY replay: $STATES states, $VIOLATIONS violations, $LOST_ACKED lost a commit of a completed operation, $(cut -d' ' -f2 "$WORK/recovered" | sort -un | wc -l) distinct recovered states, smallest margin over the bound $MIN_MARGIN commits, $(awk -v a="$T2" -v b="$T3" 'BEGIN { printf "%.1f", b - a }') s"
 echo "SQLITE-DURABILITY recovered (commit: states): $(cut -d' ' -f2 "$WORK/recovered" | sort -n | uniq -c | awk '{ printf "%s:%s ", $2, $1 }')"
+echo "SQLITE-DURABILITY reach: $REACH_BEYOND states with this generation's frames past the recovered ones, $REACH_GAP with one after a frame that did not land, $REACH_GAP_SCRIPT of them in the script's epochs (ending before the cut mark)"
+[ -n "$REACH_EXAMPLE" ] && echo "SQLITE-DURABILITY reach example: $REACH_EXAMPLE"
 if [ "$VIOLATIONS" = 0 ]; then
 	pass crash-states-allowed-by-the-model
+fi
+# What "no commit survives an earlier lost one" needs to mean something: a
+# judged state of the script's epochs (where synced commits are written,
+# not the unmount's writeback) whose WAL kept a later frame of this
+# generation while an earlier one did not land (recovery must stop before
+# it).
+# Not on btrfs: its data is copy-on-write, so a frame's write goes to a new
+# extent that only the log tree's commit, at the epoch's FLUSH, makes part
+# of the file, and every state of an epoch recovers the same database.
+if [ "$CACHE_FSTYPE" = btrfs ]; then
+	skip some-state-kept-a-later-frame "btrfs writes the WAL copy-on-write: no frame of an epoch reaches the file before its FLUSH ($REACH_GAP states held a frame past a gap)"
+elif [ "$REACH_GAP_SCRIPT" -gt 0 ]; then
+	pass some-state-kept-a-later-frame
+else
+	fail some-state-kept-a-later-frame "no judged state of an epoch before the cut mark held a WAL frame past one that did not land ($REACH_BEYOND states held frames past the recovered ones, $REACH_GAP after a gap, all at the unmount): the reordering of the WAL's writes never reached SQLite"
 fi
 if [ "$LOST_ACKED" -gt 0 ]; then
 	pass some-state-lost-a-normal-commit
@@ -834,14 +882,23 @@ else
 	fail full-log-recovers-the-final-state "the whole log recovered the state after commit '$FULL' of $REF_COMMITS"
 fi
 mount -t "$CACHE_FSTYPE" "$REPLAY_DEV" "$CACHE_DIR" || fail restart-mount "mounting the replayed cache failed"
-RECOVERIES=$(logread | grep -c "recovered [1-9][0-9]* dirty")
+# The recovery, read from the database (syslog is asynchronous): the dirty
+# inodes whose attributes are valid before the start, and after it, before
+# any request touches them (RecoverDirty makes them unknown).
+dirty_valid() {
+	"$TESTUTIL" sql "$DB" "SELECT count(*) FROM inodes WHERE attrs_valid = 1 AND id IN (SELECT inode FROM dirty)"
+}
+DIRTY_ROWS=$("$TESTUTIL" sql "$DB" "SELECT count(*) FROM dirty")
+VALID_BEFORE=$(dirty_valid)
 if start_dcfs; then
 	pass restart
-	if [ "$(logread | grep -c "recovered [1-9][0-9]* dirty")" -gt "$RECOVERIES" ]; then
+	VALID_AFTER=$(dirty_valid)
+	if [ "${DIRTY_ROWS:-0}" -ge 1 ] && [ "$VALID_AFTER" = 0 ]; then
 		pass restart-recovers-dirty-rows
 	else
-		fail restart-recovers-dirty-rows "no recovery WARNING naming dirty rows: $(logread | grep -i recover | tail -n 3)"
+		fail restart-recovers-dirty-rows "$DIRTY_ROWS dirty rows; dirty inodes with valid attributes: $VALID_BEFORE before the start, $VALID_AFTER after"
 	fi
+	echo "SQLITE-DURABILITY restart: $DIRTY_ROWS dirty rows, dirty inodes with valid attributes $VALID_BEFORE before the start, $VALID_AFTER after"
 	drop_caches
 	snapshot "$SRC" >"$WORK/backing.snap"
 	snapshot "$MNT" >"$WORK/served.snap" 2>&1

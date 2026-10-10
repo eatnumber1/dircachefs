@@ -12,6 +12,9 @@
  * Subcommands (each exits 0 on success; on failure it says why on stderr
  * and exits 1):
  *
+ *   crash_states log-info <log>
+ *       "entries=<n> sectorsize=<n>": the log's entry count and the sector
+ *       size its entries count in.
  *   crash_states log-list <log>
  *       One line per entry of the log, in log order: "<index> <sector>
  *       <sectors> <flags>[ <mark>]", <flags> the names of the entry's flags
@@ -34,9 +37,13 @@
  *       zeros: the rest stays a hole, which reads as zeros and on tmpfs
  *       takes no memory.
  *   crash_states wal-info <wal>
- *       "frames=<n> commits=<n> pagesize=<n> ckptseq=<n> salt=<hex>-<hex>":
- *       the frames and commits SQLite's recovery accepts (below); all zero
- *       when the header is not valid (SQLite then ignores the file).
+ *       "frames=<n> commits=<n> pagesize=<n> ckptseq=<n> salt=<hex>-<hex>
+ *       beyond=<n> aftergap=<n>": the frames and commits SQLite's recovery
+ *       accepts (below); all zero when the header is not valid (SQLite then
+ *       ignores the file). beyond: the frames past the recovered ones that
+ *       carry the header's salts (written in this WAL generation, but not
+ *       recovered); aftergap: those of them that lie after a frame that
+ *       does not (a later frame that landed while an earlier one did not).
  *   crash_states wal-commits <wal>
  *       One line per accepted commit: "<k> <end offset> <pages>", <k> from
  *       1, <end offset> the byte just past its commit frame, <pages> the
@@ -331,6 +338,18 @@ static void lw_flags(uint64_t flags, char *buf, size_t len)
 		snprintf(buf, len, "NONE");
 }
 
+static int cmd_log_info(const char *path)
+{
+	struct lw_log log;
+
+	if (lw_open(path, &log) != 0)
+		return 1;
+	printf("entries=%llu sectorsize=%llu\n",
+	       (unsigned long long)log.nr_entries,
+	       (unsigned long long)log.sectorsize);
+	return 0;
+}
+
 static int cmd_log_list(const char *path)
 {
 	struct lw_log log;
@@ -558,6 +577,8 @@ struct wal {
 	uint32_t ckptseq;
 	uint32_t salt[2];
 	size_t frames; /* accepted, up to the last commit frame */
+	size_t beyond; /* frames after those with the header's salts */
+	size_t aftergap; /* ... of them after one without */
 	size_t ncommits;
 	struct wal_commit *commits;
 };
@@ -634,6 +655,21 @@ static int wal_read(const char *path, struct wal *w)
 			first = i + 1;
 		}
 	}
+	/* What lies past the recovered frames: this generation's frames that
+	 * recovery did not reach. */
+	for (size_t i = w->frames, gap = 0;
+	     WAL_HEADER + (i + 1) * frame_size(w) <= w->len; i++) {
+		const unsigned char *f = frame_at(w, i);
+
+		if (be32(f) != 0 && be32(f + 8) == w->salt[0] &&
+		    be32(f + 12) == w->salt[1]) {
+			w->beyond++;
+			if (gap)
+				w->aftergap++;
+		} else {
+			gap = 1;
+		}
+	}
 	return 0;
 }
 
@@ -644,8 +680,9 @@ static int cmd_wal_info(const char *path)
 	if (wal_read(path, &w) != 0)
 		return 1;
 	printf("frames=%zu commits=%zu pagesize=%u ckptseq=%u "
-	       "salt=%08x-%08x\n", w.frames, w.ncommits, w.pagesize,
-	       w.ckptseq, w.salt[0], w.salt[1]);
+	       "salt=%08x-%08x beyond=%zu aftergap=%zu\n", w.frames,
+	       w.ncommits, w.pagesize, w.ckptseq, w.salt[0], w.salt[1],
+	       w.beyond, w.aftergap);
 	return 0;
 }
 
@@ -816,6 +853,8 @@ static int cmd_db_fingerprint(const char *path)
 
 int main(int argc, char *argv[])
 {
+	if (argc == 3 && strcmp(argv[1], "log-info") == 0)
+		return cmd_log_info(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "log-list") == 0)
 		return cmd_log_list(argv[2]);
 	if (argc >= 4 && strcmp(argv[1], "log-apply") == 0)
@@ -833,7 +872,8 @@ int main(int argc, char *argv[])
 	if (argc == 3 && strcmp(argv[1], "db-fingerprint") == 0)
 		return cmd_db_fingerprint(argv[2]);
 	fprintf(stderr,
-		"usage: crash_states log-list <log>\n"
+		"usage: crash_states log-info <log>\n"
+		"       crash_states log-list <log>\n"
 		"       crash_states log-apply <log> <device> "
 		"[<index>[:<from>-<to>]...]\n"
 		"       crash_states copy-sparse <src> <dst>\n"

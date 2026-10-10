@@ -202,9 +202,12 @@ on the detail:
   `"ext4"` also reorderings of them. The database half (a normal commit may
   be lost, an acknowledged synced one may not, survivors are a prefix) is
   checked against SQLite by `//test/qemu:sqlite_durability_test` (step
-  12.14: dm-log-writes replays of the cache disk to every FLUSH and to
-  FLUSH/FUA-respecting reorderings, on ext4, xfs and btrfs;
-  `test/qemu/guest/sqlite_durability.sh`).
+  12.14, `test/qemu/guest/sqlite_durability.sh`) in one regime: one WAL
+  generation after a forced restart, frames overwriting old ones in place,
+  no checkpoint, restart or growth of the WAL meanwhile; dm-log-writes
+  replays of the cache disk (ext4, xfs, btrfs) to every FLUSH after the
+  start, write subsets between FLUSHes that keep every FUA write, and torn
+  multi-block writes (the WAL's writeback among them).
 - `clean_shutdown` is modelled but changes nothing: `StartRun` runs
   `RecoverDirty` whatever it says, and `RecoverDirty` with an empty dirty
   set does nothing.

@@ -36,8 +36,17 @@ How each part is checked:
   log; only marks before a FLUSH are used (a mark is logged at once, but
   dm-log-writes holds ordinary writes back until the next FLUSH, so a mark
   orders nothing against them).
-- **The bound.** For a crash state at or after FLUSH f: at least the last
-  synced commit of every operation whose mark is before f.
+- **The bounds.** For a crash state of the epoch from FLUSH f to the next
+  FLUSH g: at least the last synced commit of every operation whose mark is
+  before f; and the first commit with the state's fingerprint at most the
+  last commit of the first operation marked after g (a later state would be
+  a replay bug).
+- **Reach.** `crash_states wal-info` counts, in each judged state's WAL,
+  the current generation's frames past the recovered ones and those after a
+  frame that did not land. On ext4 and xfs some state of an epoch that ends
+  before the cut mark must have one of the latter
+  (`some-state-kept-a-later-frame`); on btrfs the check is skipped
+  (below).
 
 ## Replay coverage
 
@@ -49,9 +58,14 @@ its ordinary ones; all its FUA writes with a subset of its ordinary writes
 budget, else each write lost, each write kept, then seeded random subsets);
 and each ordinary write of more than one 4 KiB block torn at five cuts
 (first block, first half, all but the last block, last block, all but the
-first), with the epoch's other writes and without them. Not explored: an
-epoch's ordinary writes with only some of its FUA writes (the log does not
-order them against each other), and tears finer than 4 KiB.
+first), with the epoch's other writes and without them. Torn writes count
+in the epoch's share (at most half of it), in log order, so the epoch's
+first ordinary write (the WAL's writeback on ext4 and xfs) is torn first.
+Our `log-apply` of one whole epoch must leave the replay disk byte for byte
+as `replay-log` does (`log-apply-agrees-with-replay-log`, md5 of the
+device). Not explored: an epoch's ordinary writes with only some of its FUA
+writes (the log does not order them against each other), and tears finer
+than 4 KiB.
 
 Before the measured part dcfs creates files until SQLite checkpoints and
 restarts the WAL (44 creates in every run), so every later frame overwrites
@@ -61,26 +75,60 @@ restart (the first version of the test), ext4's ordered mode made every
 crash state in an epoch the same: new WAL blocks are invisible until the
 journal commits the file size.
 
-Final run (seed 1, budget 1500; the short variant 500):
+**The first version did not reach the main state** (review of 91172d3):
+`epoch_states` used its counters uninitialised, so the first ordinary
+write's size went under the subscript "" and that write was never torn; on
+ext4 and xfs it is the WAL's writeback in every script epoch, so every
+script epoch recovered exactly two values and no state kept a later frame
+while dropping an earlier one. The run with the reach check and the bug
+still in (ext4):
 
-| Target | Log entries | FLUSHes checked | States | Wall time | Guest peak used |
-|---|---|---|---|---|---|
-| `sqlite_durability_test_ext4` | 617 | 37 | 447 | 71.5 s | 103 MiB |
-| `sqlite_durability_test_xfs` | 328 | 31 | 338 | 54.0 s | 121 MiB |
-| `sqlite_durability_test_btrfs` | 616 | 27 | 2026 | 209.2 s | 128 MiB |
-| `sqlite_durability_short_test` (ext4) | 512 | 18 | 199 | 29.7 s | 101 MiB |
+```text
+SQLITE-DURABILITY reach: 0 states with this generation's frames past the recovered ones, 0 with one after a frame that did not land, 0 of them in the script's epochs (ending before the cut mark)
+TEST some-state-kept-a-later-frame FAIL (no judged state of an epoch before the cut mark held a WAL frame past one that did not land (0 states held frames past the recovered ones, 0 after a gap, all at the unmount): the reordering of the WAL's writes never reached SQLite)
+```
 
-Most epochs were taken exhaustively; the sampled ones were the unmount's
-(ext4: 122 of 1023 subsets plus 20 torn writes; btrfs: 16 of 1048575
-subsets plus 190 torn writes) and one 7-write epoch (102 or 38 of 127). The
-full script makes 204 commits after the restart (494 frames), which leave
-138 distinct databases: several commits change nothing (a release record
-equal to the row), so a lost one is not observable. 13 to 218 states per
-run lost a commit of an operation done before the crash; xfs and ext4 also
-recovered states after the last synced commit (194) but short of the last
-commit (200, 203; 204 is the last): the final operations' normal commits
-surviving as a prefix. The smallest
-margin over the bound was 0 commits on btrfs and 3 on ext4 and xfs.
+and `sqlite_durability_lib_test` (host, synthetic log) on the same code:
+`FAIL: no torn state for 12:0-8: the first ordinary write too must be
+torn`.
+
+Final run (seed 1, budget 1500; the short variant 500), host load 8 to 10:
+
+| Target | Log entries | FLUSHes | States | Distinct recovered | Kept a later frame (script epochs) | Wall time | Peak used |
+|---|---|---|---|---|---|---|---|
+| ext4 | 613 | 35 | 657 | 70 | 50 (48) | 83.3 s | 106 MiB |
+| xfs | 328 | 31 | 565 | 70 | 50 (48) | 103.1 s | 123 MiB |
+| btrfs | 616 | 27 | 1486 | 27 | 0 (skipped) | 193.0 s | 127 MiB |
+| short (ext4) | 513 | 17 | 207 | 20 | 12 (12) | 52.4 s | 104 MiB |
+
+One state that kept a later frame past a lost one (ext4, epoch 0):
+`state-432-tear-10: recovered commit 19 (frames=60 commits=19
+pagesize=4096 ckptseq=1 salt=e75c0828-545315e0 beyond=10 aftergap=10);
+entries: 433 435 436 434:8-96`: every write of the epoch but the first 4
+KiB block of the WAL's writeback (entry 434, 12 blocks) landed; the WAL
+holds 10 frames of the current generation past the recovered end, all
+after the hole, and SQLite recovered commit 19, the last synced one, which
+is a reference state at the bound. With the WAL's writeback torn, ext4 and
+xfs now recover 70 distinct states (each epoch several: 19, 21, 26, 28,
+31, ...: a prefix of the next synced commit's frames), against 26 to 28
+before.
+
+The full script makes 204 commits after the restart (494 frames), which
+leave 138 distinct databases: several commits change nothing (a release
+record equal to the row), so a lost one is not observable. 18 to 58 states
+per run lost a commit of an operation done before the crash; xfs and ext4
+also recovered states after the last synced commit (194) but short of the
+last (200, 203 of 204). The smallest margin over the bound was 0 commits
+on btrfs and 3 on ext4 and xfs. The restart recovered: 15 dirty rows, 13
+dirty inodes with valid attributes before the start and 0 after (read
+from the database; syslog is asynchronous, and the first version's check
+of the recovery WARNING lost that race once on btrfs).
+
+**btrfs.** Every state of an epoch recovers the same database: btrfs
+writes data copy-on-write, so a frame's write goes to a new extent that
+only the log tree's commit, at the epoch's FLUSH, makes part of the file.
+Its 1486 states amount to FLUSH-prefix coverage; the reach check is
+skipped there.
 
 Timing with budget 4000 under the same load: btrfs took 839.5 s (3277
 states, 0.24 s each), too close to `long`'s 900 s, hence 1500. Memory:
@@ -90,12 +138,20 @@ the script); the ASan allowance was not measured (the default, 384).
 
 ## Verdict
 
-The abstraction holds on ext4, xfs and btrfs: 0 violations in every run
-of every target while the test was developed (the table is the last run,
-with the final script). The oracle's self-checks pass and
-were shown to fail first (an oracle that accepted everything: the forged
-"commit 130 lost, 131 kept" WAL, the state before the last synced commit
-and the full-log state all reported wrong).
+The abstraction holds on ext4, xfs and btrfs in the regime tested: 0
+violations in every run of every target. The oracle's self-checks pass
+and fail with an oracle that accepts everything (final script, ext4):
+
+```text
+TEST oracle-refuses-a-commit-kept-after-a-lost-one FAIL (commit 201 lost and 202 kept (lost pages: 12 24 25): the oracle said 'ok -1 -1')
+TEST oracle-refuses-a-lost-synced-commit FAIL (the state before synced commit 194 (operation 16), bound 194: the oracle said 'ok -1 -1')
+TEST oracle-accepts-an-allowed-state FAIL (the state after synced commit 194: the oracle said 'ok -1 -1')
+TEST full-log-recovers-the-final-state FAIL (the whole log recovered the state after commit '-1' of 204)
+```
+
+The forgery must now open as a database (a forgery that fails
+`integrity_check` made the check pass for nothing: the oracle answers
+"none" to an empty fingerprint); the first candidate opened in every run.
 
 Observations, none a finding against the model:
 
@@ -111,8 +167,23 @@ Observations, none a finding against the model:
    the parent is not durably dirty and n when it is; the model's fast path
    (D alone) is coarser, as `formal/README.md` already says.
 
-Gaps left: crash points inside the checkpoint itself and the WAL's restart
-(they are before the start mark), the database's creation, `FinishRun`'s
-TRUNCATE checkpoint and clean-shutdown commit, and the mixed FUA/ordinary
-subsets above. A follow-up could start the log before the warm-up and
-build reference states across one checkpoint.
+Gaps left:
+
+- **The growing-WAL regime.** `FinishRun`'s TRUNCATE checkpoint
+  (`dcfs/sqlite.cc`, `Connection::Checkpoint`) empties the WAL at every
+  clean shutdown, so every run after one starts with an empty WAL that
+  grows: frames are appended, the filesystem allocates, and on ext4 its
+  ordered mode keeps new WAL blocks invisible until the journal commits
+  the file size. Only one WAL generation after a forced restart, frames
+  overwritten in place, is tested; the first version of the test ran the
+  growing regime, but without the tear fix above, so it is not covered.
+- Crash points inside a checkpoint and the WAL's restart, the database's
+  creation, and `FinishRun`'s checkpoint and clean-shutdown commit (all
+  before the start mark or after the cut).
+- Crashes before the first FLUSH after the start mark.
+- An epoch's ordinary writes with only some of its FUA writes; tears finer
+  than 4 KiB.
+- btrfs's within-epoch states (all equal by design, above).
+
+A follow-up could run the script twice (a growing WAL from empty, then
+the overwrite regime) and build reference states across a checkpoint.
