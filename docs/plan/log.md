@@ -2908,3 +2908,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: with the capture gone, `dcfs.fstype` disappears entirely (15.11).
 - russ: no back-compat before shipping; the removed dcfs.fstype is simply unknown, no message or
   test; process.md gains the standing rule.
+- russ: no exception for the cache schema either; migration starts mattering only after shipping;
+  process.md corrected.

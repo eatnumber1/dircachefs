@@ -179,8 +179,12 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   times, 2026-10-10/11: "we've never shipped dcfs", "we haven't shipped. No
   need for back-compat"): a removed option, format or behaviour is simply
   gone, with no shim, deprecation message, migration or test of the old
-  spelling. The cache database schema is the one exception already handled
-  by `migrate.cc`, because russ's own trial databases will exist.
+  spelling. That includes the cache database schema: a schema change before
+  the first deployment bumps the version and starts fresh, no migration
+  (russ, 2026-10-11: "I don't own trial databases. I don't care about
+  migration until we ship ... back-compat is *irrelevant* right now"). The
+  migration machinery (`migrate.cc`) stays in place for the day it matters,
+  unexercised by any pre-ship change.
 - **The order of work is `README.md`'s Queue section** (russ, 2026-10-11),
   not the phase numbers: the spare-disk trial first, then budgets, the
   slowness, the atomicity contract, then the rest by what the trial
