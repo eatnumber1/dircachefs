@@ -432,11 +432,33 @@ mixed_cut_restart() {
 # writes (dropahead) the freeze is done on a healthy disk, which writes what
 # the filesystem holds, and the disk drops writes again once it is frozen and
 # clean, as guest/fault_power.sh's `born` does (a freeze of a btrfs whose
-# writes are dropped turns it read-only).
+# writes are dropped turns it read-only). That only holds while the filesystem
+# wrote nothing in the window: a log write the disk dropped and xfs took for
+# done leaves the healthy freeze's metadata with an LSN ahead of the log, and
+# xfs refuses the mount after the cut ("Metadata has LSN ahead of current LSN",
+# EINVAL; step 26.24). mixed_quiesce_backing keeps xfs from writing its log in
+# the window.
 mixed_freeze_backing() {
 	[ "$DROPPING" -eq 0 ] || fault_mode "$FD_BACK" healthy || fail ace-freeze "fault_mode failed"
 	fd_freeze back || fail ace-freeze "FIFREEZE of the backing filesystem failed"
 	[ "$DROPPING" -eq 0 ] || fault_mode "$FD_BACK" drop-writes || fail ace-freeze "fault_mode failed"
+}
+
+# mixed_quiesce_backing: a freeze and a thaw of the backing filesystem, on the
+# healthy disk, before the sequence's operation: everything the filesystem holds
+# goes to the disk and the filesystem's list of metadata still to write back
+# (xfs's AIL) is empty. After a log write xfs's writeback thread (xfsaild)
+# passes again 50 ms later, and a pass that finds an item the operation has
+# changed forces the log: a log write in the window dropahead opens, which the
+# disk drops (step 26.24: traced, xfsaild/dm-0 forced the log 51 ms after the
+# begin's sync, 0.8 ms after dropahead; it takes a pass between the operation
+# and the freeze, so it shows on a slow host). With the list empty
+# there is no pass to wake, and the window has no log write of xfs's own. What
+# this does not stop: a log write the sequence asks for between the operation
+# and dropahead (a sync event), and xfs's log worker (every 30 s).
+mixed_quiesce_backing() {
+	fd_freeze back || fail ace-quiesce "FIFREEZE of the backing filesystem failed"
+	fd_thaw back || fail ace-quiesce "FITHAW of the backing filesystem failed"
 }
 
 mixed_restart_daemon() {
@@ -583,6 +605,7 @@ mixed_run() {
 	begin
 	ls "$MNT/t/z" >/dev/null
 	: >"$HANDLES"
+	mixed_quiesce_backing
 	"ace_$mr_op" 2>/dev/null
 	for mr_event in "$@"; do
 		"mixed_event_$mr_event"
