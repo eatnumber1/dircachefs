@@ -414,8 +414,46 @@ def namespace_qualifiers(root):
     return problems
 
 
+PROJECT_PREFIX_RE = re.compile(r"\bDcfs[A-Z]")
+# Strings (with escapes), block comments and line comments, replaced by
+# spaces (newlines kept, so line numbers hold). One pass, so a // inside a
+# string is not a comment.
+COMMENT_OR_STRING_RE = re.compile(
+    r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|/\*.*?\*/|//[^\n]*', re.DOTALL)
+
+
+def code_only(text):
+    return COMMENT_OR_STRING_RE.sub(
+        lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
+
+
+def project_prefix_sites(text):
+    """Line numbers of identifiers that begin with `Dcfs` + capital, in code
+    (not comments, not strings)."""
+    return [number for number, line in enumerate(code_only(text).splitlines(), 1)
+            if PROJECT_PREFIX_RE.search(line)]
+
+
+def project_prefix(root):
+    problems = []
+    for dirpath, _, names in os.walk(os.path.join(root, "dcfs")):
+        for name in sorted(names):
+            if not name.endswith((".h", ".cc")):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, name), root)
+            for number in project_prefix_sites(read(root, rel)):
+                problems.append(
+                    "%s:%d: an identifier begins with `Dcfs` (docs/style.md, "
+                    "1.3: a name says what distinguishes the thing and never "
+                    "repeats the namespace; a project-name word is a contrast "
+                    "with something that is not dcfs, and is said in a "
+                    "comment)" % (rel, number))
+    return problems
+
+
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
             guest_sleeps(root) + disabled_checks_listed(root) +
             no_test_only_comments(root) + no_testonly_friends(root) +
-            fixed_arrays(root) + namespace_qualifiers(root))
+            fixed_arrays(root) + namespace_qualifiers(root) +
+            project_prefix(root))

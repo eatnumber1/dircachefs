@@ -418,8 +418,8 @@ std::optional<MountEntry> TopmostMountEntry(std::string_view mountinfo,
                     .fstype = std::string(line->fields[line->dash + 1])};
 }
 
-std::optional<std::string> DcfsMountDevice(std::string_view mountinfo,
-                                           std::string_view mountpoint) {
+std::optional<std::string> MountDeviceOfFuseDcfs(std::string_view mountinfo,
+                                                 std::string_view mountpoint) {
   std::optional<MountEntry> entry = TopmostMountEntry(mountinfo, mountpoint);
   if (!entry.has_value() || entry->fstype != "fuse.dcfs") return std::nullopt;
   return entry->device;

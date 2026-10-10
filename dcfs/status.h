@@ -27,9 +27,9 @@ constexpr inline std::string_view kOriginTypeUrl =
 // (EAGAIN after a retry budget, a cache-disk EIO, a refusal): the request's
 // handler logs it at ERROR, where an errno forwarded from a syscall on the
 // backing filesystem is logged at no level (ProducedByDcfs).
-absl::Status DcfsErrnoToStatus(int error_number, std::string_view message);
+absl::Status ProducedErrnoToStatus(int error_number, std::string_view message);
 // Whether `status` is an error dcfs produced: one with no errno payload (a
-// StatusBuilder error, a SQLite failure), or built by DcfsErrnoToStatus.
+// StatusBuilder error, a SQLite failure), or built by ProducedErrnoToStatus.
 // False for an errno forwarded from a syscall (ErrnoToStatus), which is the
 // backing filesystem's answer.
 bool ProducedByDcfs(const absl::Status &status);

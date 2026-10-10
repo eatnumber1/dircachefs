@@ -115,8 +115,8 @@ absl::StatusOr<std::string> ReadLinkAt(int dirfd, std::string_view path) {
       return result;
     }
     if (bufsize >= PATH_MAX * 4) {
-      return DcfsErrnoToStatus(ENAMETOOLONG,
-                               "readlinkat: target longer than PATH_MAX*4");
+      return ProducedErrnoToStatus(ENAMETOOLONG,
+                                   "readlinkat: target longer than PATH_MAX*4");
     }
     bufsize *= 2;
   }
@@ -171,8 +171,8 @@ absl::StatusOr<std::vector<std::string>> ListXattrOPath(int fd) {
     }
     return SplitXattrList(std::string_view(buf.data(), *nbytes));
   }
-  return DcfsErrnoToStatus(ERANGE,
-                           absl::StrCat("listxattr(", path, "): kept growing"));
+  return ProducedErrnoToStatus(
+      ERANGE, absl::StrCat("listxattr(", path, "): kept growing"));
 }
 
 absl::StatusOr<std::string> GetXattrOPath(int fd, std::string_view name) {
@@ -190,7 +190,7 @@ absl::StatusOr<std::string> GetXattrOPath(int fd, std::string_view name) {
     }
     return std::string(value.data(), *nbytes);
   }
-  return DcfsErrnoToStatus(
+  return ProducedErrnoToStatus(
       ERANGE, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name),
                            "): kept growing"));
 }
@@ -299,14 +299,14 @@ absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   absl::Status status;
   syscalls::setfsgid(caller.gid);
   if (FsGid() != caller.gid) {
-    status = DcfsErrnoToStatus(
+    status = ProducedErrnoToStatus(
         EPERM, absl::StrCat("setfsgid(", caller.gid, ") did not take"));
   }
   if (status.ok()) status = syscalls::setgroups(caller.groups);
   if (status.ok()) {
     syscalls::setfsuid(caller.uid);
     if (FsUid() != caller.uid) {
-      status = DcfsErrnoToStatus(
+      status = ProducedErrnoToStatus(
           EPERM, absl::StrCat("setfsuid(", caller.uid, ") did not take"));
     }
   }
@@ -505,7 +505,7 @@ struct ChildRecord {
 // status, which the request's handler logs at ERROR (docs/style.md 1.7).
 absl::Status RefuseReservedIno(const struct statx &stx, std::string_view what) {
   if (stx.stx_ino < cache::kFirstStubNodeid) return absl::OkStatus();
-  return DcfsErrnoToStatus(
+  return ProducedErrnoToStatus(
       ENOTSUP, absl::StrCat("Backing inode number ", stx.stx_ino, " of ", what,
                             " is at or above 2^63, the range reserved for "
                             "boundary stubs"));
@@ -911,7 +911,7 @@ absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
     return marked;
   }
   if (still != nullptr) {
-    return absl::StatusBuilder(DcfsErrnoToStatus(
+    return absl::StatusBuilder(ProducedErrnoToStatus(
                EIO,
                "open_by_handle_at returned ESTALE for an object its "
                "directory still names (the device cannot read it)"))
@@ -919,7 +919,7 @@ absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
            << " in directory " << still->parent;
   }
   if (unchecked != nullptr) {
-    return absl::StatusBuilder(DcfsErrnoToStatus(
+    return absl::StatusBuilder(ProducedErrnoToStatus(
                EIO,
                "open_by_handle_at returned ESTALE, and the name that "
                "would show whether the object is gone could not be "
@@ -927,7 +927,7 @@ absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
            << "inode " << id << ", " << EscapeBytes(unchecked->name)
            << " in directory " << unchecked->parent << ", " << why;
   }
-  return absl::StatusBuilder(DcfsErrnoToStatus(
+  return absl::StatusBuilder(ProducedErrnoToStatus(
              EIO,
              "open_by_handle_at returned ESTALE, and the object has no "
              "cached name and more unknown names than are asked"))
@@ -965,9 +965,9 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
       // open_by_handle_at needs CAP_DAC_READ_SEARCH; dcfs is required to
       // run as root (see the design doc), so this is a misconfiguration,
       // not a condition to work around.
-      return DcfsErrnoToStatus(EPERM,
-                               "open_by_handle_at: dcfs must run as root "
-                               "(CAP_DAC_READ_SEARCH)");
+      return ProducedErrnoToStatus(EPERM,
+                                   "open_by_handle_at: dcfs must run as root "
+                                   "(CAP_DAC_READ_SEARCH)");
     }
     return fd.status();
   }
@@ -1555,7 +1555,7 @@ absl::StatusOr<cache::LookupResult> WithStub(cache::LookupResult result,
                                              InodeId parent,
                                              std::string_view name) {
   if (result.kind == cache::LookupResult::Kind::kRefused && result.id == 0) {
-    return DcfsErrnoToStatus(
+    return ProducedErrnoToStatus(
         EAGAIN, absl::StrCat("Boundary ", EscapeBytes(name), " in ", parent,
                              ": its stub could not be recorded"));
   }
@@ -2175,7 +2175,7 @@ absl::Status StillWritable(Context &ctx, int fd) {
   }
   if (ctx.source_read_only_at_start) return absl::OkStatus();
   // An errno dcfs chose (its sync point refuses), not the backing's answer.
-  return DcfsErrnoToStatus(
+  return ProducedErrnoToStatus(
       EROFS,
       "Backing filesystem went read-only during the run (after an error, "
       "or a remount of another mount of it), so its syncfs makes nothing "

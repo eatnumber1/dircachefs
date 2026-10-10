@@ -143,11 +143,11 @@ std::pair<size_t, std::string> MaxHeldFds(const DirCacheFS::Options &opts) {
 // asks dcfs, which resolves the name, unknown since phase 1, from the
 // backing filesystem (step 11.4).
 //
-// An errno dcfs chose (DcfsErrnoToStatus): the reply handler logs it at
+// An errno dcfs chose (ProducedErrnoToStatus): the reply handler logs it at
 // ERROR, with `why`, once (docs/style.md 1.7).
 absl::Status CreatedButNotCompleted(InodeId parent, std::string_view name,
                                     const absl::Status &why) {
-  return absl::StatusBuilder(DcfsErrnoToStatus(
+  return absl::StatusBuilder(ProducedErrnoToStatus(
              EEXIST,
              "Could not complete a create that reached the backing "
              "filesystem (replying EEXIST, so that the kernel forgets the "
@@ -1126,7 +1126,7 @@ absl::Status DirCacheFS::RemoveChild(
   std::vector<std::string> names = {std::string(name)};
   for (int attempt = 0; !begun.has_value(); ++attempt) {
     if (attempt == kAttempts) {
-      return DcfsErrnoToStatus(
+      return ProducedErrnoToStatus(
           EAGAIN, absl::StrCat("Removal of ", EscapeBytes(name), " in ", parent,
                                ": it kept changing"));
     }
@@ -1260,7 +1260,7 @@ absl::Status DirCacheFS::Rename(
   std::vector<std::string> newnames = {std::string(newname)};
   for (int attempt = 0; !mutation.has_value(); ++attempt) {
     if (attempt == kAttempts) {
-      return DcfsErrnoToStatus(
+      return ProducedErrnoToStatus(
           EAGAIN, absl::StrCat("Rename of ", EscapeBytes(name), " in ", parent,
                                ": its directories kept changing"));
     }
@@ -2272,7 +2272,7 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
     // may vouch for the listing.
     ABSL_RETURN_IF_ERROR(backing::PopulateDirectory(ctx_, dir).status());
   }
-  return DcfsErrnoToStatus(
+  return ProducedErrnoToStatus(
       EAGAIN,
       absl::StrCat("Directory ", dir, " kept changing while being listed"));
 }

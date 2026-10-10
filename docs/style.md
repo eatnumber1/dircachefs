@@ -191,7 +191,7 @@ regardless, so the qualifier never did anything there. Mechanically:
 `dcfs/*.cc` and `dcfs/*.h` (plan step 25.14; today 38 calls).
 
 **A name says what distinguishes the thing from its siblings, and never
-repeats the namespace.** `DcfsErrnoToStatus` exists beside `ErrnoToStatus`
+repeats the namespace.** `ProducedErrnoToStatus` exists beside `ErrnoToStatus`
 because the two differ in origin: `ErrnoToStatus` forwards a syscall's
 answer, the other builds an errno dcfs itself chose (25.3). "Dcfs" names
 neither; inside `namespace dcfs` it is the namespace said twice. The
@@ -203,7 +203,8 @@ project-name word elsewhere in a name is allowed only as a contrast with
 something that is not dcfs (`ProducedByDcfs`, the `fuse.dcfs` mount type)
 and the comment says what it contrasts with. Mechanically: `repo_shape.py`
 refuses identifiers matching `^Dcfs[A-Z]` in `dcfs/*.h` and `dcfs/*.cc`
-(25.14; today `DcfsErrnoToStatus` and `DcfsMountDevice`).
+(25.14; the two names it was written against, `DcfsErrnoToStatus` and
+`DcfsMountDevice`, are renamed).
 
 ### 1.4 Enums
 

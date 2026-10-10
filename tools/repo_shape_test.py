@@ -31,6 +31,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_no_dcfs_qualifier_inside_dcfs(self):
         self.assertEqual([], repo_shape.namespace_qualifiers(ROOT["root"]))
 
+    def test_no_identifier_begins_with_the_project_name(self):
+        self.assertEqual([], repo_shape.project_prefix(ROOT["root"]))
+
     def test_every_disabled_check_is_in_the_limitations(self):
         self.assertEqual([], repo_shape.disabled_checks_listed(ROOT["root"]))
 

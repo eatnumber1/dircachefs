@@ -2506,7 +2506,7 @@ backing.
 
 A request's failure is logged once, by the FUSE handler that replies: at
 ERROR if dcfs produced the error (a status with no errno, one built by
-`DcfsErrnoToStatus`, one marked as dcfs's own by `MarkProducedByDcfs` (a
+`ProducedErrnoToStatus`, one marked as dcfs's own by `MarkProducedByDcfs` (a
 backing change that could not be recorded), or an errno that describes
 dcfs's own process: `EMFILE`, `ENFILE`, `ENOMEM`, `EBADF`, `EFAULT`), and
 not at all (`--v=2` shows the reply) if the backing filesystem or the

@@ -216,6 +216,27 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
               "namespace dcfs {\n}  // namespace dcfs\n")
         self.assertEqual([], repo_shape.namespace_qualifiers(self.root))
 
+    def test_an_identifier_with_the_dcfs_prefix_is_reported(self):
+        write(self.root, "dcfs/y.h",
+              "namespace dcfs {\nint DcfsFoo();\n}  // namespace dcfs\n")
+        problems = repo_shape.project_prefix(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/y.h:2:", problems[0])
+        self.assertIn("docs/style.md, 1.3", problems[0])
+
+    def test_a_dcfs_word_in_a_comment_or_a_string_is_not_reported(self):
+        write(self.root, "dcfs/z.cc",
+              "// DcfsFoo is named here in a comment\n"
+              "/* and DcfsBar\n   in a block comment */\n"
+              "const char *kType = \"fuse.dcfs\";\n"
+              "const char *kName = \"DcfsFoo\";\n")
+        self.assertEqual([], repo_shape.project_prefix(self.root))
+
+    def test_dcfs_inside_a_longer_name_is_not_reported(self):
+        write(self.root, "dcfs/aa.h",
+              "bool ProducedByDcfs(int);\nint dcfs_helper;\n")
+        self.assertEqual([], repo_shape.project_prefix(self.root))
+
     def test_a_namespace_declaration_and_a_comment_are_not_reported(self):
         write(self.root, "dcfs/v.cc",
               "namespace dcfs::backing {\n"

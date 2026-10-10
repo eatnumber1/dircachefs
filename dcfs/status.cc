@@ -13,7 +13,7 @@ absl::Status ErrnoToStatus(int error_number, std::string_view message) {
   return status;
 }
 
-absl::Status DcfsErrnoToStatus(int error_number, std::string_view message) {
+absl::Status ProducedErrnoToStatus(int error_number, std::string_view message) {
   absl::Status status = ErrnoToStatus(error_number, message);
   status.SetPayload(kOriginTypeUrl, absl::Cord("dcfs"));
   return status;

@@ -82,9 +82,11 @@ std::optional<MountEntry> TopmostMountEntry(std::string_view mountinfo,
 
 // The device number ("major:minor") of the topmost mount at `mountpoint` if it
 // is a fuse.dcfs mount, else nullopt. The daemon holds a lock file named by
-// it for as long as it runs (DaemonLockPath).
-std::optional<std::string> DcfsMountDevice(std::string_view mountinfo,
-                                           std::string_view mountpoint);
+// it for as long as it runs (DaemonLockPath). "FuseDcfs" names the mount type
+// it looks for, fuse.dcfs; any other mount at the path (ext4, another fuse
+// type) gives nullopt, whatever its device.
+std::optional<std::string> MountDeviceOfFuseDcfs(std::string_view mountinfo,
+                                                 std::string_view mountpoint);
 
 // Where the daemon of the mount on `device` ("major:minor") holds its lock:
 // <dir>/<major>_<minor>.lock, <dir> /run/dcfs.

@@ -69,13 +69,13 @@ TEST(ErrnoPayloadTest, OkStatusHasNoPayload) {
 
 // docs/style.md 1.7: the handler that replies logs an error at ERROR only if
 // dcfs produced it. An errno from a syscall is the backing filesystem's
-// answer; a status with no errno, or built by DcfsErrnoToStatus, is dcfs's.
+// answer; a status with no errno, or built by ProducedErrnoToStatus, is dcfs's.
 TEST(ProducedByDcfsTest, OnlyAForwardedErrnoIsNotDcfsOwn) {
   EXPECT_FALSE(ProducedByDcfs(absl::OkStatus()));
   EXPECT_FALSE(ProducedByDcfs(ErrnoToStatus(ENOENT, "openat")));
   EXPECT_TRUE(ProducedByDcfs(InternalErrorBuilder() << "broken"));
   EXPECT_TRUE(ProducedByDcfs(absl::AbortedError("sqlite busy")));
-  EXPECT_TRUE(ProducedByDcfs(DcfsErrnoToStatus(EAGAIN, "kept changing")));
+  EXPECT_TRUE(ProducedByDcfs(ProducedErrnoToStatus(EAGAIN, "kept changing")));
 }
 
 // An errno that describes dcfs's own process (it ran out of descriptors or
@@ -94,8 +94,8 @@ TEST(ProducedByDcfsTest, MarkProducedByDcfsKeepsTheErrno) {
   EXPECT_TRUE(MarkProducedByDcfs(absl::OkStatus()).ok());
 }
 
-TEST(ProducedByDcfsTest, DcfsErrnoToStatusKeepsTheErrno) {
-  absl::Status status = DcfsErrnoToStatus(ENOTSUP, "refused");
+TEST(ProducedByDcfsTest, ProducedErrnoToStatusKeepsTheErrno) {
+  absl::Status status = ProducedErrnoToStatus(ENOTSUP, "refused");
   EXPECT_THAT(GetErrnoFromStatus(status), IsOkAndHolds(ENOTSUP));
   EXPECT_EQ(StatusToErrno(status), ENOTSUP);
   absl::Status with_context = absl::StatusBuilder(status) << "while testing";

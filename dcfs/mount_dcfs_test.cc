@@ -532,16 +532,16 @@ TEST(TopmostMountEntryTest, DeviceAndTypeOfTheTopmostMount) {
   EXPECT_EQ(TopmostMountEntry(kMountinfo, "/nothing"), std::nullopt);
 }
 
-TEST(DcfsMountDeviceTest, TheDeviceOfTheTopmostDcfsMountAtThePath) {
-  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/data"), "0:35");
-  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/with space"), "0:37");
-  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/plain"), std::nullopt);
-  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/"), std::nullopt);
-  EXPECT_EQ(DcfsMountDevice(kMountinfo, "/nothing"), std::nullopt);
+TEST(MountDeviceOfFuseDcfsTest, TheDeviceOfTheTopmostDcfsMountAtThePath) {
+  EXPECT_EQ(MountDeviceOfFuseDcfs(kMountinfo, "/data"), "0:35");
+  EXPECT_EQ(MountDeviceOfFuseDcfs(kMountinfo, "/with space"), "0:37");
+  EXPECT_EQ(MountDeviceOfFuseDcfs(kMountinfo, "/plain"), std::nullopt);
+  EXPECT_EQ(MountDeviceOfFuseDcfs(kMountinfo, "/"), std::nullopt);
+  EXPECT_EQ(MountDeviceOfFuseDcfs(kMountinfo, "/nothing"), std::nullopt);
   constexpr char kStacked[] =
       "40 26 0:35 / /data rw - fuse.dcfs /dev/vdb rw\n"
       "50 26 0:41 / /data rw - fuse.dcfs /dev/vdc rw\n";
-  EXPECT_EQ(DcfsMountDevice(kStacked, "/data"), "0:41");
+  EXPECT_EQ(MountDeviceOfFuseDcfs(kStacked, "/data"), "0:41");
 }
 
 TEST(DaemonLockPathTest, OneFilePerFuseDevice) {

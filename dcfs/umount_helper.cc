@@ -72,7 +72,8 @@ absl::StatusOr<std::string> CanonicalMountpoint(std::string_view mountpoint) {
 absl::StatusOr<DaemonLock> HoldDaemonLock(std::string_view mountinfo,
                                           std::string_view mountpoint,
                                           std::string_view dir) {
-  std::optional<std::string> device = DcfsMountDevice(mountinfo, mountpoint);
+  std::optional<std::string> device =
+      MountDeviceOfFuseDcfs(mountinfo, mountpoint);
   if (!device.has_value()) {
     return InternalErrorBuilder()
            << "The FUSE mount of " << EscapeBytes(mountpoint)

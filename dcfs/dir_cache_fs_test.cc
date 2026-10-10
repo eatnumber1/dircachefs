@@ -3509,7 +3509,7 @@ TEST_F(DirCacheFSTest, ABackingErrnoWhileRecordingACreateIsLoggedAtError) {
       << capture.Dump();
 }
 
-// A DcfsErrnoToStatus status, through the whole request: one ERROR line, at
+// A ProducedErrnoToStatus status, through the whole request: one ERROR line, at
 // the handler (RefuseReservedIno no longer logs itself).
 TEST_F(DirCacheFSTest, ADcfsErrnoStatusIsLoggedOnceAtErrorByTheHandler) {
   WriteFile(Path("f"));
