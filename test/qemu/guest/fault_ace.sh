@@ -165,16 +165,29 @@ begin() {
 }
 
 # The persistence points: the backing filesystem's state at that moment goes to
-# /tmp/durable.snap.
+# /tmp/durable.snap, and from then on the backing filesystem drops every write
+# (as `dropahead` does in the mixed sequences), so that what the sequence does
+# after the point cannot be durable by any means: xfs has no commit interval
+# to lengthen (FD_LONG_COMMIT), and it commits its log at moments of its own
+# (step 26.20: since 23.11 took the WAL fsync out of a create, about one run
+# in four of the xfs test found the operation after the point, or a create
+# with no point at all, on the disk after the cut). The cache is unaffected
+# until the cut.
+drop_backing_writes() {
+	fault_mode "$FD_BACK" drop-writes || fail ace-dropahead "fault_mode failed"
+}
 persist_dcfs() {
 	"$TESTUTIL" fsync "$MNT/t" || fail ace-fsync "fsync of $MNT/t failed"
 	snapshot "$SRC" >/tmp/durable.snap
+	drop_backing_writes
 }
 persist_direct() {
 	"$TESTUTIL" syncfs "$SRC" || fail ace-syncfs "syncfs of $SRC failed"
 	snapshot "$SRC" >/tmp/durable.snap
+	drop_backing_writes
 }
-# A persistence point that is not made (the negative fixture).
+# A persistence point that is not made (the negative fixture): the backing
+# filesystem drops its writes before the operation, so nothing it does is kept.
 persist_none() {
 	snapshot "$SRC" >/tmp/durable.snap
 }
@@ -305,6 +318,7 @@ kind_fixtures() {
 	# A create whose persistence point was not made: the backing filesystem
 	# after the cut does not have it, and the check must say so.
 	begin
+	drop_backing_writes
 	ace_create
 	persist_none
 	ace_fixture_ok=0
