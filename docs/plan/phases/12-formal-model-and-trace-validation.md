@@ -232,6 +232,9 @@ In this order, each with a known-bug variant and trace validation:
   every table or column that mirrors the backing has its row lifecycle
   (creation and deletion) under the crash prefixes in the model, not only
   its contents; 12.13's sweep says whether the invariants about it bite.
+  Also 12.10's (moved from 12.14, 2026-10-09): the harness facility that
+  copies the WAL at each transaction (the `SqliteTransaction` hook) and
+  restores a chosen copy, the crash-point replay tool.
   Approved (russ, 2026-10-09): not a spike. The generated tests are NOT
   checked in: a Bazel target runs TLC (or reads its dumped state graph),
   generates the test cases every build, and a test target runs them; the
@@ -445,6 +448,33 @@ Order after 12.12's audit, which may reorder them with the approved
   targets declared by hand (the matrix macro varies the backing, not the
   cache); `checked_dcfs` large targets; strace added; `replay-log` built
   from the @xfstests pin here. Note: notes/sqlite-durability-2026-10-09.md.
+  Opus review 2026-10-09: the oracle is sound (parsers verified against
+  dm-log-writes.c and real SQLite: `wal-truncate k` recovers exactly k
+  commits on a restarted WAL; 300 randomly damaged WALs agree with
+  SQLite's recovered count; a value-based fingerprint is the right test
+  for `dbOpts`, a set of database values, and can only err towards false
+  alarms), but NOT yet merged: H1 an uninitialised awk counter left the
+  first ordinary write of every epoch untorn, which on ext4 and xfs is
+  always the WAL writeback, so "a later normal commit never survives an
+  earlier lost one" under reordering was never exercised (every script
+  epoch recovered exactly two values; fix, a reach check and a host
+  self-check of `epoch_states`); M1 the forged-WAL self-check passes
+  vacuously when the forgery is corrupt; M2 the "copy the WAL at each
+  transaction" facility was neither built nor reported: MOVED TO 12.10
+  (it is 12.10's crash-point replay tool); M3 the docs overstate (one WAL
+  generation after a forced restart, no checkpoint/restart/growth; btrfs's
+  within-epoch states are all equal by design, so its count is FLUSH-
+  prefix coverage); L1-L9 (an upper bound on k, log-apply vs replay-log,
+  sector size from the log, tears inside the budget, the README paragraph
+  landing inside the 11.2 section). Also: the STATFS barrier relies on the
+  single thread (revisit with Phase 22's coroutines); the test checks
+  SQLite against the abstraction, not which phase 1s dcfs chooses to sync
+  (23.11 should not count it as coverage of that); rerun the large targets
+  after 23.11 merges. For russ: the test shows, between two checkpoints,
+  that every tried power-loss state recovers to the database after some
+  commit and never before the last kSync commit that returned; the
+  reordering half is untested until H1 is fixed; checkpoints, WAL restart
+  and growth, database creation and clean shutdown are outside it.
 - 12.15 Runtime invariant checks derived from the model. The checking
   build's rules (docs/design.md "Runtime invariant checks": tri-state,
   dirty set vs unknown rows, held fds) are hand-written restatements of

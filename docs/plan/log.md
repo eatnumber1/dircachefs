@@ -2453,3 +2453,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   assertion failure); for a StatusOr a `CHECK_OK_AND_ASSIGN` macro in ASSIGN_OR_RETURN's style
   (russ approved adding it); the audit converts setup ASSERTs, the guest scripts get the same
   split, and repo_shape refuses ASSERT_OK_AND_ASSIGN in fixtures.
+- 12.14 review (Opus): oracle sound, parsers verified against the kernel source and real SQLite;
+  not merged yet: an uninitialised awk counter left the first write of every epoch (the WAL
+  writeback on ext4/xfs) untorn, so the reordering half was never exercised; the forged-WAL
+  self-check can pass vacuously; the docs overstate; the WAL-copy facility moves to 12.10. Sent
+  back with a reach check and a host self-check required.
