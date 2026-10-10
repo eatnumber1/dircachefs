@@ -5172,8 +5172,8 @@ TEST_F(DirCacheFSTest, CrashBetweenUnlinkAndPhase3LeavesNoRow) {
   ASSERT_OK_AND_ASSIGN(InodeId kept, Id("kept"));
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
   ASSERT_OK_AND_ASSIGN(const int64_t before, InodeRows(db_));
-  for (auto [name, id] : {std::pair<std::string, InodeId>{"f", f},
-                          std::pair<std::string, InodeId>{"d", d}}) {
+  for (const auto &[name, id] : {std::pair<std::string, InodeId>{"f", f},
+                                 std::pair<std::string, InodeId>{"d", d}}) {
     ASSERT_OK_AND_ASSIGN(
         cache::Mutation phase1,
         cache::BeginRemove(ctx_, kRootInode, name, id, cache::BeginFill(ctx_)));

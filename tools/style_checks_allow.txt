@@ -161,7 +161,6 @@ dcfs/dir_cache_fs_test.cc|TEST_F|cert-err33-c|36
 dcfs/dir_cache_fs_test.cc|TEST_F|concurrency-mt-unsafe|1
 dcfs/dir_cache_fs_test.cc|TEST_F|google-runtime-int|1
 dcfs/dir_cache_fs_test.cc|TEST_F|misc-include-cleaner|6
-dcfs/dir_cache_fs_test.cc|TEST_F|performance-for-range-copy|1
 dcfs/dir_cache_fs_test.cc|TEST_F|readability-inconsistent-ifelse-braces|36
 dcfs/dir_cache_fs_test.cc|TEST_F|readability-isolate-declaration|3
 dcfs/dir_cache_fs_test.cc|TEST_F|readability-math-missing-parentheses|4
