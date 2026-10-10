@@ -625,7 +625,7 @@ int MountHelperMain(int argc, char *argv[]) {
     return 1;
   }
   if (args->version) {
-    std::cout << "mount.dcfs (dcfs " << kVersion << ")" << std::endl;
+    std::cout << "mount.dcfs (dcfs " << kVersion << ")" << '\n';
     return 0;
   }
   absl::StatusOr<HelperOptions> options = SplitHelperOptions(args->options);
@@ -729,7 +729,7 @@ int UmountHelperMain(int argc, char *argv[]) {
     return 1;
   }
   if (args->version) {
-    std::cout << "umount.fuse.dcfs (dcfs " << kVersion << ")" << std::endl;
+    std::cout << "umount.fuse.dcfs (dcfs " << kVersion << ")" << '\n';
     return 0;
   }
   absl::Status done = UmountAndWait(*args);

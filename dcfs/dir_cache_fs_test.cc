@@ -7578,8 +7578,7 @@ TEST(FaultSitesTest, EveryBackingCallSiteFailedOnce) {
     std::cout << "FAULT-SWEEP " << workload << ": " << r.hooks
               << " hooks reached, " << r.calls << " new sites, " << r.iterations
               << " iterations, "
-              << absl::ToInt64Milliseconds(ClockNow() - began) << " ms"
-              << std::endl;
+              << absl::ToInt64Milliseconds(ClockNow() - began) << " ms" << '\n';
     all.hooks += r.hooks;
     all.calls += r.calls;
     all.iterations += r.iterations;
@@ -7591,7 +7590,7 @@ TEST(FaultSitesTest, EveryBackingCallSiteFailedOnce) {
             << all.iterations << " iterations, "
             << absl::ToInt64Milliseconds(ClockNow() - start)
             << " ms; hooks with no wrapped call after them (not failed): "
-            << absl::StrJoin(all.silent, " ") << std::endl;
+            << absl::StrJoin(all.silent, " ") << '\n';
   EXPECT_GT(all.calls, 0);
   EXPECT_THAT(all.findings, ::testing::IsEmpty());
 }
@@ -7680,7 +7679,7 @@ class SlopeRun : public DirCacheFSTest {
     std::cout << "SLOPE " << op << " n=" << n << " steps=" << slope.steps
               << " transactions=" << slope.transactions
               << " durable=" << slope.durable << " backing=" << slope.backing
-              << std::endl;
+              << '\n';
     return slope;
   }
 

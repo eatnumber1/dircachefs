@@ -433,7 +433,7 @@ int FsckMain(std::span<const std::string> words) {
     return kFsckUsage;
   }
   if (args->version) {
-    std::cout << "fsck.dcfs (dcfs " << kVersion << ")" << std::endl;
+    std::cout << "fsck.dcfs (dcfs " << kVersion << ")" << '\n';
     return kFsckOk;
   }
 
@@ -476,7 +476,7 @@ int FsckMain(std::span<const std::string> words) {
     std::cout << EscapeBytes(args->device)
               << ": dcfs.fstype=bind serves a directory: there is no device "
                  "to check"
-              << std::endl;
+              << '\n';
   }
 
   // 2. The cache database.
@@ -488,7 +488,7 @@ int FsckMain(std::span<const std::string> words) {
   const CacheReport cache = CheckCacheDatabase(*split->cache_db, args->mode);
   for (const std::string &line : cache.lines) {
     (cache.status == kFsckOk ? std::cout : std::cerr)
-        << "fsck.dcfs: " << line << std::endl;
+        << "fsck.dcfs: " << line << '\n';
   }
   return CombineFsckStatus(status, cache.status);
 }
