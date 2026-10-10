@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/strip.h"
 #include "dcfs/fd.h"
@@ -35,8 +36,7 @@ bool IsMounted(const std::string &mnt) {
   if (!info.ok()) return false;
   const std::string needle = " " + mnt + " ";
   for (std::string_view line : absl::StrSplit(*info, '\n')) {
-    if (line.find(needle) != std::string_view::npos &&
-        line.find("fuse") != std::string_view::npos) {
+    if (absl::StrContains(line, needle) && absl::StrContains(line, "fuse")) {
       return true;
     }
   }

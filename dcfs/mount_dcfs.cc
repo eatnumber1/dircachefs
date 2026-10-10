@@ -111,7 +111,7 @@ absl::StatusOr<UmountArgs> ParseUmountArgs(std::span<const std::string> args) {
       if (name == "--lazy") parsed.lazy = true;
       if (name == "--namespace") parsed.other_namespace = true;
       parsed.forwarded.push_back(arg);
-      if (arg.find('=') == std::string::npos &&
+      if (!absl::StrContains(arg, '=') &&
           (name == "--namespace" || name == "--types" ||
            name == "--test-opts") &&
           i + 1 < args.size()) {

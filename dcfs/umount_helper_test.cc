@@ -16,6 +16,7 @@
 #include "absl/log/log_sink_registry.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
+#include "absl/strings/match.h"
 #include "dcfs/fd.h"
 #include "dcfs/mount_dcfs.h"
 #include "dcfs/syscalls.h"
@@ -115,8 +116,7 @@ class WaitingSink : public absl::LogSink {
  public:
   explicit WaitingSink(int fd) : fd_(fd) {}
   void Send(const absl::LogEntry &entry) override {
-    if (entry.text_message().find("waiting for it to exit") !=
-        std::string_view::npos) {
+    if (absl::StrContains(entry.text_message(), "waiting for it to exit")) {
       (void)syscalls::write(fd_, "w", 1);
     }
   }

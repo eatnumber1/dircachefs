@@ -20,6 +20,7 @@
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/context.h"
 #include "dcfs/escape.h"
@@ -598,7 +599,7 @@ void TraceRecorder::After(Context &ctx) {
     dirs_[dir].last = db;
     dirs_[dir].last_state = std::move(now);
     covered_.insert(dir);
-    if (db.find("\"refused\"") != std::string::npos) {
+    if (absl::StrContains(db, "\"refused\"")) {
       Cut(ctx, dir, "boundary: a refused boundary");
     } else if (origin == "other") {
       Unexplained(ctx, dir,

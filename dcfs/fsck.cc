@@ -22,6 +22,7 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/ascii.h"
+#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
@@ -161,7 +162,7 @@ absl::StatusOr<std::string> DetectType(const std::string &device) {
 // Its status is the result.
 int CheckBacking(const std::string &type, const std::string &device,
                  const std::vector<std::string> &flags) {
-  if (type.find('/') != std::string::npos) {
+  if (absl::StrContains(type, '/')) {
     LOG(ERROR) << "dcfs.fstype=" << EscapeBytes(type) << " is not a type";
     return kFsckOperational;
   }
