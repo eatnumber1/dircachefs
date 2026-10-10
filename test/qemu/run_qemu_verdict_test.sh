@@ -26,6 +26,8 @@ if [ "${1:-}" = --version ]; then
 fi
 # Step 15.6: the boots (--boots) and the disks (--systemd-image) a run made.
 echo "$*" >>"$(dirname "$0")/../qemu-calls"
+# Step 26.17: a run on a loaded host (the pressure counter moves while it runs).
+[ -f "$(dirname "$0")/../psi.after" ] && cp "$(dirname "$0")/../psi.after" "$(dirname "$0")/../psi"
 cat "$(dirname "$0")/../canned"
 # A guest that goes on running after its last line, as one waiting for the
 # host to cut its power does (the kill-mode cases below).
@@ -394,6 +396,25 @@ kill_run "TEST scenario PASS" marker stay
 [ "$RC" -eq 0 ] || fail "a guest killed at the marker failed: $(cat "$WORK/stdout")"
 grep -q "QEMU killed at" "$WORK/stdout" || fail "no kill message: $(cat "$WORK/stdout")"
 echo "PASS: --kill-on: a clean boot 1, killed at the marker, passes"
+# Step 26.17: boot 1 of a power cut says when the host starved it too (the flag
+# and its tests are in run_qemu_cost_test; here only that this verdict has it):
+# the run lasts 10 s by a fake date and the host's pressure counter moves 4 s.
+mkdir "$WORK/clock"
+cat >"$WORK/clock/date" <<'E_DATE'
+#!/bin/sh
+d=$(dirname "$0")
+n=$(cat "$d/n" 2>/dev/null || echo 0)
+echo $((n + 1)) >"$d/n"
+if [ "$n" = 0 ]; then echo 1000.000000000; else echo 1010.000000000; fi
+E_DATE
+chmod +x "$WORK/clock/date"
+printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=100\n' >"$WORK/psi"
+printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=4000100\n' >"$WORK/psi.after"
+DCFS_PRESSURE_FILE="$WORK/psi" PATH="$WORK/clock:$PATH" kill_run "TEST scenario PASS" marker stay
+rm -f "$WORK/psi.after"
+[ "$RC" -eq 0 ] || fail "a starved boot 1, killed at the marker, failed: $(cat "$WORK/stdout")"
+grep -q "^== RESULT: PASS (killed at the cut) \[load-starved\] ==" "$WORK/stdout" || fail "the verdict of boot 1 does not say load-starved: $(cat "$WORK/stdout")"
+echo "PASS: --kill-on: a boot 1 that lost 40% of its wall time to the host says so"
 kill_run "TEST scenario PASS" none go
 [ "$RC" -ne 0 ] || fail "a boot 1 with no marker passed"
 echo "PASS: --kill-on: no marker fails"

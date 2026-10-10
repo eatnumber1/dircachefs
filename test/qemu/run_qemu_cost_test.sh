@@ -27,6 +27,8 @@ if [ "${1:-}" = --version ]; then
 	echo "fake qemu 0"
 	exit 0
 fi
+# A run on a loaded host: the host's pressure counter moves while the guest runs.
+[ -f "$(dirname "$0")/../psi.after" ] && cp "$(dirname "$0")/../psi.after" "$(dirname "$0")/../psi"
 cat "$(dirname "$0")/../canned"
 exit 0
 E
@@ -230,6 +232,70 @@ DISKS=
 [ "$RC" -ne 0 ] || fail "a COST line of zeros for a guest with disks passed"
 grep -q "== RESULT: FAIL (no I/O counted" "$WORK/stdout" || fail "no FAIL verdict for the uncounted I/O: $(cat "$WORK/stdout")"
 echo "PASS: a guest with disks that counted no I/O at all fails"
+
+# --- the load-starvation flag (the host's CPU pressure over the run's wall time) ---
+#
+# A fake date makes the run last 10 s (its first call is the start, its second
+# the end), and the host's pressure file (DCFS_PRESSURE_FILE: /proc/pressure/cpu,
+# or a container's cgroup's cpu.pressure) says the host had a task waiting for a
+# CPU for the given microseconds while it ran (the fake qemu moves the counter).
+mkdir "$WORK/clock"
+cat >"$WORK/clock/date" <<'E_DATE'
+#!/bin/sh
+d=$(dirname "$0")
+n=$(cat "$d/n" 2>/dev/null || echo 0)
+echo $((n + 1)) >"$d/n"
+if [ "$n" = 0 ]; then echo 1000.000000000; else echo "$((1000 + $(cat "$d/wall"))).000000000"; fi
+E_DATE
+chmod +x "$WORK/clock/date"
+pressure_file() { # TOTAL_US: a /proc/pressure/cpu with that total
+	printf 'some avg10=0.00 avg60=0.00 avg300=0.00 total=%s\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n' "$1"
+}
+# run_loaded BEFORE_US AFTER_US: the run lasted 10 s and the counter moved so.
+run_loaded() {
+	rm -f "$WORK/clock/n"
+	echo 10 >"$WORK/clock/wall"
+	pressure_file "$1" >"$WORK/psi"
+	pressure_file "$2" >"$WORK/psi.after"
+	run //t:unlisted DCFS_PRESSURE_FILE="$WORK/psi" PATH="$WORK/clock:$PATH"
+	rm -f "$WORK/psi.after"
+}
+
+canned "COST cpu_us=1"
+run_loaded 5000000 8000000
+[ "$RC" -eq 0 ] || fail "a starved run failed (the flag is a diagnostic): $(cat "$WORK/stdout")"
+grep -q "run-qemu.sh: time: guest wall 10.0 s, .*host CPU pressure 3.0 s (30% of the wall)" "$WORK/stdout" ||
+	fail "the time line does not say the pressure: $(cat "$WORK/stdout")"
+grep -q "^run-qemu.sh: load-starved: " "$WORK/stdout" || fail "no load-starved line at 30%: $(cat "$WORK/stdout")"
+grep -q "^== RESULT: PASS .*\[load-starved\] ==" "$WORK/stdout" || fail "the verdict does not say load-starved: $(cat "$WORK/stdout")"
+echo "PASS: a run that lost 30% of its wall time to a loaded host says so in the time line and the verdict"
+
+# The threshold is 20%: 19% is not starved, 20% is.
+run_loaded 0 1900000
+grep -q "(19% of the wall)" "$WORK/stdout" || fail "19% not reported: $(cat "$WORK/stdout")"
+if grep -q "load-starved" "$WORK/stdout"; then fail "19% was flagged: $(cat "$WORK/stdout")"; fi
+run_loaded 0 2000000
+grep -q "^== RESULT: PASS .*\[load-starved\] ==" "$WORK/stdout" || fail "20% was not flagged: $(cat "$WORK/stdout")"
+echo "PASS: the flag starts at 20% of the wall time"
+
+# A failing run is tagged too, and so is one that has no MEM line (a guest that
+# was killed by the time limit says nothing about itself).
+printf 'TEST first FAIL (x)\nDCFS-TEST-EXIT=1\n' >"$WORK/canned"
+run_loaded 0 9000000
+[ "$RC" -ne 0 ] || fail "a failing guest passed"
+grep -q "no MEM line" "$WORK/stdout" || fail "the guest without a MEM line was not reported: $(cat "$WORK/stdout")"
+grep -q "^== RESULT: FAIL (see .*) \[load-starved\] ==" "$WORK/stdout" || fail "a starved failing run is not tagged: $(cat "$WORK/stdout")"
+echo "PASS: a failing run, and one with no MEM line, carries the flag too"
+
+# A host without pressure information has no flag and says so.
+canned "COST cpu_us=1"
+rm -f "$WORK/clock/n"
+echo 10 >"$WORK/clock/wall"
+run //t:unlisted DCFS_PRESSURE_FILE="$WORK/no-such-file" PATH="$WORK/clock:$PATH"
+[ "$RC" -eq 0 ] || fail "a host without pressure information failed the run: $(cat "$WORK/stdout")"
+grep -q "host CPU pressure not available" "$WORK/stdout" || fail "no note that the pressure is not available: $(cat "$WORK/stdout")"
+if grep -q "load-starved" "$WORK/stdout"; then fail "a run was flagged without pressure information"; fi
+echo "PASS: without pressure information there is no flag, and the time line says so"
 
 # --- the hang guard (the guest's wall allowance against the budgets) -----------
 #

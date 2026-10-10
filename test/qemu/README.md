@@ -711,6 +711,7 @@ gate is disabled.
 | slopes: every operation class's steps, transactions, WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by a * N + b (26.4b) | `//dcfs:dir_cache_fs_slope_test`'s `SlopeTest.AnExtraCostPerOperationIsCaught` (two more statement steps per create exceed the bound) |
 | FUSE requests per user-level operation (26.4b: `guest/request_budgets.txt`) | `//test/qemu:request_lib_test` (the real `guest/request_lib.sh` delta over canned counter snapshots, and a request count above its budget failing) |
 | the guest's cost accounting (26.17: the CPU of the cgroup the daemon is started in, read in microseconds, and `cost_exec.sh`, which joins it before the exec) | `//test/qemu:cost_report_test` (the real functions of `guest/init` over canned cgroup files: a missing cgroup is an error, not 0; the command runs with its arguments intact and its own pid in `cgroup.procs`; not at all if the cgroup cannot be joined; `lib.sh`'s reader is `init`'s) |
+| the load-starvation flag (26.17: the host's CPU pressure over the run's wall time, 20%) | `//test/qemu:run_qemu_cost_test` (a fake `date` and a pressure file moved by the fake qemu: 30% and 20% flag a run in the time line and the verdict, 19% does not, a failing run and one without a MEM line carry it, a host without the file has none and says so) and `//test/qemu:run_qemu_verdict_test` (the first boot of a power cut carries it) |
 | the wall allowance covers the work the budgets allow (26.17: `cost_wall_allowance`; the refusal before the guest boots) | `//test/qemu:run_qemu_cost_test` (an allowance one second short of the floor is refused with the numbers and the guest is not booted, the floor itself is accepted, flushes count 20 ms each, a target without budgets has no floor) and `//test/qemu:strace_lib_test` (the arithmetic and its rounding) |
 | the disks' I/O is counted (26.17: `cost_disk_counts` and `cost_cgroup_io`, which no budget could notice failing, since a count below its budget passes) | `//test/qemu:boot_test` and `//test/qemu:ram_disks_test` (`cost_selfcheck`: a direct write of 1 MiB must show in the counters of a virtio disk and of a RAM disk and in the cgroup's `io.stat`; with the disks' glob pointing at nothing both fail, saying `disks reads=0 writes=0 ...`), `//test/qemu:cost_report_test` (the sums, the difference of two readings and the cgroup's counts over canned files, other devices left out) and `//test/qemu:run_qemu_cost_test` (a guest with disks that counted no read fails) |
 | a run is held to its CPU and I/O budgets (26.17: `guest/cpu_budgets.txt`, `guest/io_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan and coverage runs are not held) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`) |
@@ -1364,6 +1365,51 @@ two: a lower bound on a latency the test injected, which load only lengthens).
 (124 if it fired, 0 if timers are off) says the same, and the comparison is gone.
 The timings that other scripts print (`cancel_inventory.sh`, `destroy.sh`,
 `stress.sh`, `pjdfstest.sh`) decide nothing.
+
+### Load starvation
+
+`run-qemu.sh` reads the host's CPU pressure (`some` in `/proc/pressure/cpu`, the
+microseconds in which at least one task of the host was runnable and had no CPU;
+a container's cgroup has a `cpu.pressure` of its own, named by
+`$DCFS_PRESSURE_FILE`) before QEMU starts and after it ends, and prints it
+beside the wall time:
+
+    run-qemu.sh: time: guest wall 52.7 s, host CPU 35.8 s (user 35.1, system 0.6), host CPU pressure 20.8 s (39% of the wall)
+    run-qemu.sh: load-starved: the host had a task waiting for a CPU for 20% or more of this run's wall time (...)
+    == RESULT: PASS [load-starved] ==
+
+At 20% or more of the wall time the run is marked `load-starved` in a line of its
+own and in its verdict, pass or fail; it never fails a run by itself, so a
+timeout that has the flag was the host's and one that has not was probably a
+hang. It is there for a guest that was killed by the time limit, which prints
+nothing about itself: a host without pressure information (a kernel without
+`CONFIG_PSI`) has no flag, and the time line says so.
+
+**This is not the comparison the plan names** (wall time against CPU plus I/O
+by a factor), and the measurements are why. Wall time against the CPU the host
+spent on the guest does not separate a loaded host from a test that waits:
+`create_test` runs 1.5 times its host CPU in wall time alone, `request_counts`
+2.4 and `fault_cache` 2.6, the ACE tests 1.1; with eight busy loops beside them
+the same tests read 1.8, 2.2, 2.3 and 1.5. Pressure and the guest's own steal
+time (read for the measurement from `/proc/stat` and not kept: it is not there
+when the guest is killed) both do, on `fault_ace_b_test`:
+
+| beside the guest | wall s | CPU of the daemon | host pressure, % of the wall | steal time the guest saw, % of its wall |
+|---|---|---|---|---|
+| nothing | 21.6 | 3.9 s | 2 | 0.5 |
+| five other guests | 24.7 | 4.9 s | 2.5 | 0.6 to 0.9 |
+| 4 busy loops | 31 | 5.4 s | 11 to 13 | 1.9 |
+| 7 busy loops | 42 to 52 | 5.5 s | 31 to 39 | 13 to 14 |
+| 8 busy loops and a `dsync` writer | 52 to 59 | 3.8 to 4.0 s | 44 to 47 | 35 to 40 (`backing_test`) |
+
+(Each row beside a `dsync` writer too, except the first two; the host was not
+otherwise idle, which is why the same load gives 42 to 52 s. The steal column
+was read in separate runs of the same load.) So 20% sits between a host that is busy (the wall time is 1.5 times longer and
+no timeout is near) and one that is oversubscribed (2.4 times longer and more).
+`run_qemu_cost_test` runs the real script with a fake `date` and a canned
+pressure file: 30% flags a run, 19% does not, 20% does; a failing run and one
+with no `MEM` line carry the flag; no pressure file means no flag;
+`run_qemu_verdict_test` shows the flag on the first boot of a power cut.
 
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 

@@ -62,6 +62,15 @@
 #       whose guest printed no COST line fails, and so does a guest with disks
 #       that counted no I/O at all (it counted nothing).
 #
+#   Load (step 26.17): the host's CPU pressure (the time some task of the host
+#       waited for a CPU, /proc/pressure/cpu, or $DCFS_PRESSURE_FILE: a container's
+#       cgroup has its own cpu.pressure) between the start of QEMU and its end is
+#       printed beside the wall time, and a run that lost 20% or more of its wall
+#       time to it is marked "load-starved" in that line and its verdict (a
+#       diagnostic, never a failure of its own): a timeout or a slow run there is
+#       the host's, and a guest that was killed by the time limit, which says
+#       nothing about itself, can be told from one that hung.
+#
 #   --power-cut SCENARIO[,SCENARIO...] (step 11.2; e2e only): a real power cut
 #       per scenario. Each is two boots over the same disk images: the first
 #       (dcfs_cut=kill dcfs_scenario=<s> dcfs_boot=1 on the kernel command
@@ -877,6 +886,41 @@ OOM_RE='^MEM-OOM:|System is deadlocked on memory|Out of memory and no killable'
 # and after it ends: the time line below reports the difference (`times` is run
 # in this shell and not in a command substitution, whose subshell has no
 # children yet).
+# Step 26.17: the host's load. "some" of /proc/pressure/cpu is the time (in
+# microseconds, cumulative) at least one task of the host was runnable and had no
+# CPU: what a guest's vCPU thread waits in when the host is oversubscribed. In
+# the guest that is steal time, which is not there when the guest is killed by
+# the time limit; this is. A host without pressure stall information (a kernel
+# without CONFIG_PSI, or booted with psi=0) has no file, and no flag.
+LOAD_STARVED_PCT=20
+PRESSURE_FILE=${DCFS_PRESSURE_FILE:-/proc/pressure/cpu}
+pressure_us() {
+	awk '$1 == "some" { sub("total=", "", $5); print $5 }' "$PRESSURE_FILE" 2>/dev/null || true
+}
+# load_report: sets LOAD_NOTE (for the time line) and LOAD_TAG (for the verdict).
+load_report() {
+	LOAD_TAG=""
+	lr_after=$(pressure_us)
+	if [ -z "$PRESSURE_BEFORE" ] || [ -z "$lr_after" ]; then
+		LOAD_NOTE="host CPU pressure not available ($PRESSURE_FILE)"
+		return 0
+	fi
+	LOAD_NOTE=$(awk -v b="$PRESSURE_BEFORE" -v a="$lr_after" -v s="$start" -v e="$end" 'BEGIN {
+		p = (a - b) / 1e6
+		printf "host CPU pressure %.1f s (%.0f%% of the wall)", p, 100 * p / (e - s) }')
+	if awk -v b="$PRESSURE_BEFORE" -v a="$lr_after" -v s="$start" -v e="$end" -v t="$LOAD_STARVED_PCT" 'BEGIN {
+		exit !(100 * (a - b) / 1e6 / (e - s) >= t) }'; then
+		LOAD_TAG=" [load-starved]"
+		echo "run-qemu.sh: load-starved: the host had a task waiting for a CPU for $LOAD_STARVED_PCT% or more of this run's wall time ($LOAD_NOTE): a timeout or a slow run here is the host's load" | tee -a "$LOG"
+	fi
+}
+# result TEXT: the verdict line, with the flag.
+result() {
+	echo "== RESULT: $1$LOAD_TAG =="
+}
+LOAD_NOTE=""
+LOAD_TAG=""
+PRESSURE_BEFORE=$(pressure_us)
 times >"$WORKDIR/times-start"
 start=$(date +%s.%N)
 echo "run-qemu.sh: qemu start $start" >>"$LOG"
@@ -955,6 +999,7 @@ if [ -n "$KILL_ON" ]; then
 	rm -f "$fifo"
 	end=$(date +%s.%N)
 	echo "run-qemu.sh: qemu end $end" >>"$LOG"
+	load_report
 	if [ "$killed" -eq 1 ]; then
 		# Boot 1 has no verdict of its own: held to the failures of any boot
 		# (a check that failed before the cut, the kernel's, dcfs's checking
@@ -963,53 +1008,54 @@ if [ -n "$KILL_ON" ]; then
 		if grep -a -q "^TEST .* FAIL" "$LOG"; then
 			echo "run-qemu.sh: a check failed before the cut; the first:" >&2
 			grep -a -m 1 "^TEST .* FAIL" "$LOG" >&2
-			echo "== RESULT: FAIL (a check failed before the cut; see $LOG) =="
+			result "FAIL (a check failed before the cut; see $LOG)"
 			exit 1
 		fi
 		if grep -a -q -E "$KERNEL_FAIL_RE" "$LOG"; then
 			echo "run-qemu.sh: the guest kernel logged a failure before the cut; the first:" >&2
 			grep -a -m 1 -E "$KERNEL_FAIL_RE" "$LOG" >&2
-			echo "== RESULT: FAIL (kernel failure before the cut; see $LOG) =="
+			result "FAIL (kernel failure before the cut; see $LOG)"
 			exit 1
 		fi
 		if grep -q -a "^DCFS-INVARIANT-VIOLATION " "$LOG"; then
 			echo "run-qemu.sh: dcfs found an invariant violated before the cut; the first:" >&2
 			grep -a -m 1 "^DCFS-INVARIANT-VIOLATION " "$LOG" >&2
-			echo "== RESULT: FAIL (dcfs invariant violated before the cut; see $LOG) =="
+			result "FAIL (dcfs invariant violated before the cut; see $LOG)"
 			exit 1
 		fi
 		if grep -q -a -E "$OOM_RE" "$LOG"; then
 			echo "run-qemu.sh: the guest ran out of memory before the cut" >&2
-			echo "== RESULT: FAIL (guest out of memory before the cut; see $LOG) =="
+			result "FAIL (guest out of memory before the cut; see $LOG)"
 			exit 1
 		fi
 		if [ -e "$WORKDIR/timed-out" ]; then
 			echo "run-qemu.sh: the time limit ($TIMEOUT_SECS s) fired before the cut was read" >&2
-			echo "== RESULT: FAIL (timeout; see $LOG) =="
+			result "FAIL (timeout; see $LOG)"
 			exit 1
 		fi
 		if [ "$cut_ok" -ne 1 ]; then
 			echo "run-qemu.sh: QEMU had ended on its own when its marker was read, so it was not cut" >&2
-			echo "== RESULT: FAIL (QEMU was not killed at the cut; see $LOG) =="
+			result "FAIL (QEMU was not killed at the cut; see $LOG)"
 			exit 1
 		fi
 		if [ "$qemu_status" -ne 137 ]; then
 			echo "run-qemu.sh: QEMU's status was $qemu_status, not 137 (our SIGKILL)" >&2
-			echo "== RESULT: FAIL (QEMU did not die of our kill; see $LOG) =="
+			result "FAIL (QEMU did not die of our kill; see $LOG)"
 			exit 1
 		fi
 		echo "run-qemu.sh: QEMU killed at '$KILL_ON'"
-		echo "== RESULT: PASS (killed at the cut) =="
+		result "PASS (killed at the cut)"
 		exit 0
 	fi
 	echo "run-qemu.sh: the guest ended without printing '$KILL_ON'" >&2
-	echo "== RESULT: FAIL (see $LOG) =="
+	result "FAIL (see $LOG)"
 	exit 1
 fi
 qemu_cmd 2>&1 | tee -a "$LOG" || true
 end=$(date +%s.%N)
 times >"$WORKDIR/times-end"
 echo "run-qemu.sh: qemu end $end" >>"$LOG"
+load_report
 
 # Step 7.2: the profiles the guest wrote to the coverage disk (a tar, see
 # guest/init's dump_profraw) become this test's lcov file in COVERAGE_DIR.
@@ -1045,7 +1091,7 @@ echo
 # shell's own user and system time, then its children's, as XmY.ZZZs.
 echo "run-qemu.sh: time: guest wall $(awk "BEGIN{printf \"%.1f\", $end-$start}") s, host CPU $(awk '
 	function secs(t) { split(t, p, "m"); return p[1] * 60 + p[2] }
-	FNR == 2 { u = secs($1); s = secs($2); if (FILENAME == ARGV[1]) { u0 = u; s0 = s } else { u -= u0; s -= s0; printf "%.1f s (user %.1f, system %.1f)", u + s, u, s } }' "$WORKDIR/times-start" "$WORKDIR/times-end")"
+	FNR == 2 { u = secs($1); s = secs($2); if (FILENAME == ARGV[1]) { u0 = u; s0 = s } else { u -= u0; s -= s0; printf "%.1f s (user %.1f, system %.1f)", u + s, u, s } }' "$WORKDIR/times-start" "$WORKDIR/times-end"), $LOAD_NOTE"
 # Step 26.17: what the run cost, from the guest's COST line (guest/init), held to
 # the budgets of this target (the label Bazel sets in $TEST_TARGET) in
 # --cpu-budgets and --io-budgets: wall time is the host's load as much as the
@@ -1124,7 +1170,7 @@ if grep -q -E "^MEM-OOM:|System is deadlocked on memory|Out of memory and no kil
 	echo "run-qemu.sh: ERROR: the guest ran out of memory (-m $MEM MiB); the lines:" >&2
 	grep -E "^MEM-OOM:|System is deadlocked on memory|Out of memory and no killable" "$LOG" | head -n 10 >&2
 	echo "run-qemu.sh: raise this test's mem= (test/qemu/qemu_test.bzl, README.md)" >&2
-	echo "== RESULT: FAIL (guest out of memory; see $LOG) =="
+	result "FAIL (guest out of memory; see $LOG)"
 	exit 1
 fi
 # Step 6.2: guest/init prints one `MEM ...` line (the guest memory sampler's
@@ -1145,7 +1191,7 @@ if grep -q "Initramfs unpacking failed" "$LOG" || ! grep -q "^MEM total=" "$LOG"
 	else
 		echo "run-qemu.sh: no MEM line in the serial log (guest/init's memory sampler)" >&2
 	fi
-	echo "== RESULT: FAIL (see $LOG) =="
+	result "FAIL (see $LOG)"
 	exit 1
 fi
 # The guest's headroom, from that line: a lot of tests would pass or fail the
@@ -1217,7 +1263,7 @@ if [ -n "$KERNEL_FAIL" ] && grep -q -a -E "$KERNEL_FAIL" "$LOG"; then
 	echo "run-qemu.sh: ERROR: the guest kernel logged a failure (an oops, BUG, WARNING or panic); the first such line:" >&2
 	grep -a -m 1 -E "$KERNEL_FAIL" "$LOG" >&2
 	echo "run-qemu.sh: the lines around it are in $LOG (KERNEL-OOPS: lines are the kernel log's)" >&2
-	echo "== RESULT: FAIL (kernel failure in the guest; see $LOG) =="
+	result "FAIL (kernel failure in the guest; see $LOG)"
 	exit 1
 fi
 # Step 26.2: the testonly checking build of dcfs (the fast and presubmit
@@ -1229,7 +1275,7 @@ fi
 if grep -q -a "^DCFS-INVARIANT-VIOLATION " "$LOG"; then
 	echo "run-qemu.sh: ERROR: dcfs found an invariant violated; the first such line:" >&2
 	grep -a -m 1 "^DCFS-INVARIANT-VIOLATION " "$LOG" >&2
-	echo "== RESULT: FAIL (dcfs invariant violated; see $LOG) =="
+	result "FAIL (dcfs invariant violated; see $LOG)"
 	exit 1
 fi
 # Step 26.17: a run past its CPU budget (or one that has a budget and was not
@@ -1237,23 +1283,23 @@ fi
 if [ -n "$COST_FAIL" ]; then
 	echo "run-qemu.sh: ERROR: $COST_VERDICT:" >&2
 	echo "$COST_FAIL" >&2
-	echo "== RESULT: FAIL ($COST_VERDICT; see $LOG) =="
+	result "FAIL ($COST_VERDICT; see $LOG)"
 	exit 1
 fi
 if [ "$UNIT" -eq 1 ]; then
 	if grep -q "^DCFS-TEST-EXIT=0" "$LOG"; then
-		echo "== RESULT: PASS ($(awk "BEGIN{printf \"%.3f\", $end-$start}")s) =="
+		result "PASS ($(awk "BEGIN{printf \"%.3f\", $end-$start}")s)"
 		exit 0
 	else
-		echo "== RESULT: FAIL (see $LOG) =="
+		result "FAIL (see $LOG)"
 		exit 1
 	fi
 else
 	if grep -q "^ALL-TESTS-PASSED" "$LOG" && ! grep -q "^TEST-FAILED" "$LOG"; then
-		echo "== RESULT: PASS =="
+		result "PASS"
 		exit 0
 	else
-		echo "== RESULT: FAIL (see $LOG) =="
+		result "FAIL (see $LOG)"
 		exit 1
 	fi
 fi

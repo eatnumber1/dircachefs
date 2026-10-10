@@ -78,7 +78,7 @@ echo "PASS: without --ram-disks the disks are drives made on the host"
 # Every run reports its guest's wall time and the CPU time spent on the host
 # while QEMU ran: the pair a test's latency noise shows in. The mkfs before QEMU
 # starts (1.5 s of CPU in the fake) is not in it.
-grep -q '^run-qemu.sh: time: guest wall [0-9.]* s, host CPU [0-9.]* s (user [0-9.]*, system [0-9.]*)$' "$WORK/stdout" ||
+grep -q '^run-qemu.sh: time: guest wall [0-9.]* s, host CPU [0-9.]* s (user [0-9.]*, system [0-9.]*), host CPU pressure' "$WORK/stdout" ||
 	fail "no time line: $(cat "$WORK/stdout")"
 cpu=$(sed -n 's/^run-qemu.sh: time: .*host CPU \([0-9.]*\) s .*/\1/p' "$WORK/stdout")
 awk -v c="$cpu" 'BEGIN { exit !(c < 0.5) }' || fail "host CPU is $cpu s: the mkfs before QEMU is counted ($(cat "$WORK/stdout"))"
