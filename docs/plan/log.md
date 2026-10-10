@@ -2450,5 +2450,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   under test fails (setup, infrastructure), and ASSERT/EXPECT are only for the property under
   test, so "the test failed" and "the infrastructure failed to run the test" stay distinct. Setup
   uses plain CHECK/CHECK_OK (russ: no custom helper, googletest already tells a crash from an
-  assertion failure); the audit converts setup ASSERTs, the guest scripts get the same split, and
-  repo_shape refuses ASSERT_OK_AND_ASSIGN in fixtures.
+  assertion failure); for a StatusOr a `CHECK_OK_AND_ASSIGN` macro in ASSIGN_OR_RETURN's style
+  (russ approved adding it); the audit converts setup ASSERTs, the guest scripts get the same
+  split, and repo_shape refuses ASSERT_OK_AND_ASSIGN in fixtures.

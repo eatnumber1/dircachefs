@@ -304,8 +304,13 @@ understands the difference between 'the process crashed' and
 'ASSERT/EXPECT failed'"); the audit converts setup
 `ASSERT_OK_AND_ASSIGN`/`ASSERT_THAT(..., IsOk())` in fixtures and test
 preambles (the dup of a source fd, a backing mkdir, a database open) to
-CHECKs, leaving ASSERT/EXPECT only on the property under test (25.4's
-EXPECT-over-ASSERT rule stands for those);
+`CHECK_OK`, and for a `StatusOr` a `CHECK_OK_AND_ASSIGN(lhs, expr)` macro
+in the style of `ASSIGN_OR_RETURN` (russ: "use CHECK_OK. I'd also be fine
+with adding a CHECK_AND_ASSIGN macro that allows assignment from StatusOr
+like how ASSIGN_OR_RETURN works"), defined where `ASSIGN_OR_RETURN` lives
+and usable in production code too (it is a crash, so in production only
+with russ's approval like any other), leaving ASSERT/EXPECT only on the
+property under test (25.4's EXPECT-over-ASSERT rule stands for those);
 guest scripts likewise distinguish `fail <check>` (the test failed) from
 an infrastructure abort (today `die`/`exit 2` in lib.sh; the harness's
 verdict rules already treat a missing RESULT line as a harness failure:
