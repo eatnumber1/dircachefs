@@ -1294,6 +1294,7 @@ class DirCacheFSTest : public ::testing::Test {
     std::vector<std::string> words = {"dir_cache_fs_test"};
     words.insert(words.end(), extra.begin(), extra.end());
     std::vector<char *> argv;
+    argv.reserve(words.size());
     for (std::string &w : words) argv.push_back(w.data());
     struct fuse_args args =
         FUSE_ARGS_INIT(static_cast<int>(argv.size()), argv.data());

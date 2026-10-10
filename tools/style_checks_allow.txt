@@ -16,7 +16,6 @@ bench/dcfs_bench.cc|main|cert-err34-c|1
 bench/dm_delay.cc|CreateDelayDevice|cert-err33-c|2
 bench/dm_delay.cc|Init|cert-err33-c|1
 bench/process.cc|<file scope>|modernize-deprecated-headers|1
-bench/process.cc|DcfsProcess::Start|performance-inefficient-vector-operation|1
 bench/process.cc|DcfsProcess::WaitMounted|misc-include-cleaner|1
 bench/process.cc|DropCaches|cert-err33-c|1
 bench/process.cc|IsMounted|abseil-string-find-str-contains|2
@@ -67,7 +66,6 @@ dcfs/backing_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/backing_test.cc|TEST|capturing_mutating_lambda|1
 dcfs/backing_test.cc|TEST_F|bugprone-unchecked-optional-access|2
 dcfs/backing_test.cc|TEST_F|misc-include-cleaner|1
-dcfs/backing_test.cc|TEST_F|performance-inefficient-vector-operation|1
 dcfs/device_id.cc|GetDeviceId|modernize-use-integer-sign-comparison|1
 dcfs/device_id.cc|IoctlAllowingOPath|google-runtime-int|1
 dcfs/device_id_fault_test.cc|<file scope>|google-runtime-int|2
@@ -135,7 +133,6 @@ dcfs/dir_cache_fs_test.cc|ClockNow|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|Measure|performance-avoid-endl|1
 dcfs/dir_cache_fs_test.cc|Measure|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs_test.cc|MutateDuringFills|readability-convert-member-functions-to-static|1
-dcfs/dir_cache_fs_test.cc|NewSession|performance-inefficient-vector-operation|1
 dcfs/dir_cache_fs_test.cc|RemountSource|concurrency-mt-unsafe|1
 dcfs/dir_cache_fs_test.cc|RemountSource|google-runtime-int|1
 dcfs/dir_cache_fs_test.cc|Restart|misc-include-cleaner|1
@@ -411,7 +408,6 @@ dcfs/testonly/trace_recorder_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/testonly/trace_recorder_test.cc|TEST_F|misc-include-cleaner|1
 dcfs/umount_helper.cc|HoldDaemonLock|readability-function-cognitive-complexity|1
 dcfs/umount_helper.cc|UmountAndWait|misc-include-cleaner|2
-dcfs/umount_helper.cc|UmountAndWait|performance-inefficient-vector-operation|1
 dcfs/umount_helper.cc|UmountAndWait|readability-function-cognitive-complexity|1
 dcfs/umount_helper_test.cc|ExpectWaitsForTheHolder|misc-include-cleaner|2
 dcfs/umount_helper_test.cc|LockDir|concurrency-mt-unsafe|1

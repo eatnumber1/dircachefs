@@ -65,6 +65,7 @@ bool DcfsProcess::Start(const std::string &dcfs, const std::string &src,
       dcfs::syscalls::dup2(**log, 2).IgnoreError();
     }
     std::vector<char *> argv;
+    argv.reserve(args.size());
     for (auto &a : args) argv.push_back(a.data());
     argv.push_back(nullptr);
     dcfs::syscalls::execv(dcfs.c_str(), argv.data()).IgnoreError();

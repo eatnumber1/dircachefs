@@ -230,6 +230,7 @@ TEST_F(BackingTest, PopulatedDirectoryIsServedFromTheCache) {
   const std::vector<std::string> names = {"dir", "fifo", "file",
                                           "hl1", "hl2",  "link"};
   std::vector<struct statx> expected;
+  expected.reserve(names.size());
   for (const std::string &name : names) {
     expected.push_back(StatPath(Path(name)));
   }
