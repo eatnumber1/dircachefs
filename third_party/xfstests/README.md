@@ -77,8 +77,9 @@ image (`qemu_test`'s `rootfs`). Every part comes through Bazel:
   xfstests runs for `FSTYP=fuse`, `FUSE_SUBTYP=.dcfs`; a few tests mount with
   `-t fuse`, or with options of their own); `umount` is Alpine's own and runs
   `/sbin/umount.fuse.dcfs` (step 15.6b), which returns when the daemon has
-  exited, so xfstests' remounts of the same device find the cache database
-  free (generic runs are the helper's regression test); and `shim/glibc_strerror.c` preloaded.
+  exited (the guest mounts fusectl, which the helper asks whether the unmount
+  ended the superblock), so xfstests' remounts of the same device find the
+  cache database free (generic runs are the helper's regression test); and `shim/glibc_strerror.c` preloaded.
 
 The guest mounts `/dev/vdb` as `TEST_DEV` and `/dev/vdc` as `SCRATCH_DEV`
 through dcfs (so the backing file system, ext4, xfs or btrfs, is the matrix

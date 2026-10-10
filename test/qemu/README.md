@@ -1841,7 +1841,11 @@ in it, what was left out and which tests that turns into "not run".
   (generic/770 did). The image's `mount` only adds dcfs's options; its
   `umount` is Alpine's, which runs `umount.fuse.dcfs` (step 15.6b): the
   helper returns when the daemon has exited, so a remount finds the cache
-  database free, and xfstests' unmount/mount cycles regression-test it.
+  database free, and xfstests' unmount/mount cycles regression-test it. The
+  helper learns that the unmount ended the superblock from fusectl, so the
+  guest mounts it (`xfstests-fusectl`): without it umount returned at once,
+  and under load generic/464, 524, 610 and 754 found the cache database still
+  locked by the old daemon (step 26.22).
   `check`'s output goes through a pipe that the script reads
   a line at a time with `read -t`: a test that has not finished `LIMIT` (200 s)
   after the previous one did is killed, and its result is "timeout". That

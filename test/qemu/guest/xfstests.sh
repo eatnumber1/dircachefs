@@ -127,6 +127,18 @@ mkdir -p /cache "$TEST_DIR" "$SCRATCH_MNT"
 # durably, and on the image's disk each commit waited for the host.
 mount -t tmpfs -o size=256m tmpfs /cache
 mount -t tmpfs -o size=128m tmpfs /tmp
+mount -t fusectl fusectl /sys/fs/fuse/connections
+# umount.fuse.dcfs waits for the daemon only where fusectl is mounted: it asks
+# fusectl whether the unmount ended the superblock (test/qemu/guest/
+# mount_dcfs.sh). Without it xfstests' umount returns while the daemon is still
+# shutting down, and the next mount of the same device finds the cache
+# database locked: generic/464, 524, 610 and 754 failed that way when the
+# guest's CPUs were busy (step 26.22).
+if grep -q ' - fusectl ' /proc/self/mountinfo; then
+	pass xfstests-fusectl
+else
+	fail xfstests-fusectl "no fusectl mount: umount.fuse.dcfs would not wait for the daemon"
+fi
 syslogd -C256 2>/dev/null
 cat >$XF/local.config <<EOC
 export TEST_DEV=$TEST_DEV
