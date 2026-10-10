@@ -665,3 +665,26 @@ each fixed target):
   cut, restore and comparison are unchanged. 0 of 16 after. Open: which
   xfs path forces the log was not identified (`/proc/fs/xfs/stat` force
   counts did not separate the runs); the fix does not depend on it.
+
+## 26.21 CI triage of run 38025358346 (merged 2026-10-10, ca65a1c)
+
+Two shard failures on 8f528d8, both harness, no dcfs bug (investigator,
+lane-1, one commit):
+- `fault_power_kill_test_ext4` atime check: the snapshot helper read every
+  file with md5sum and assumed the backing snapshot's read made the one
+  relatime update. A power cut's second boot starts its clock from the
+  RTC's whole second and can be behind the ctime of files the first boot
+  made, so relatime moved the atime at every read, including both
+  snapshots' (CI: the served tree read 35 ms after the backing tree). The
+  snapshot now reads with O_NOATIME through testutil (`readnoatime`
+  became `catnoatime`, one mechanism), so no snapshot moves an atime, for
+  all four snapshot users; a self-check puts the clock back and takes two
+  snapshots, which failed first. The natural failure was never reproduced
+  locally (0 of 8 plus three instrumented batches); CI's faster guest
+  reached the snapshot at 0.8 s, which is the inferred margin.
+- `stress_short_test_btrfs` under coverage, `no-reclaim`: the coverage
+  initramfs is 54 MiB against 38 plain (instrumented binaries), the page
+  cache the same 108 MiB of file data in both, so a 216 MiB guest sat at
+  175 MiB cached near kswapd's watermark; 872 pages scanned once in CI,
+  0 of 4 locally. `mem = 320` for stress_short with the measurement in a
+  BUILD comment; lowest MemAvailable then 160 MiB, 8 of 8 clean.

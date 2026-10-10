@@ -2662,3 +2662,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   DFSCQ/Ferrite vocabulary; atomicity as linearizability; Fable review of the mapping design),
   12.18 added (spike: SibylFS's trace checker through Bazel as a second oracle). Both after the
   reset, 12.16 after 25.10's model changes.
+- 26.21 merged (lane-1, rebased → ca65a1c, one commit, gate exit 0, diff read by the
+  orchestrator): both failures of run 38025358346 were harness (snapshot reads moving atimes
+  behind a regressed clock; coverage initramfs growth near the watermark). Push point announced:
+  main after this plan commit. Lane-1 free, its Bazel server left running for the reboot.
