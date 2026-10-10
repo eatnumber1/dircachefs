@@ -767,6 +767,14 @@ qemu_cc_test(
     size = "small",
     timeout = "short",
     srcs = ["fsck_test.cc"],
+    # Step 26.22: fork, waitpid, dup2, flock and unlinkat fail on demand.
+    linkopts = [
+      "-Wl,--wrap=fork",
+      "-Wl,--wrap=waitpid",
+      "-Wl,--wrap=dup2",
+      "-Wl,--wrap=flock",
+      "-Wl,--wrap=unlinkat",
+    ],
     deps = [
       ":fsck",
       ":migrate",
@@ -775,6 +783,7 @@ qemu_cc_test(
       ":syscalls",
       ":syscalls_backing",
       "//dcfs/testonly:assert_ok_and_assign",
+      "//dcfs/testonly:files",
       "@absl//absl/log:check",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",

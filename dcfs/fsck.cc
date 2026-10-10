@@ -254,33 +254,43 @@ Finding Inspect(const std::string &path) {
         "; the next mount will upgrade it to ", kSchemaVersion));
   }
 
-  absl::StatusOr<std::vector<std::string>> missing = FirstRows(
-      db, "SELECT inode FROM dirty WHERE inode NOT IN (SELECT id FROM inodes) "
-          "ORDER BY inode",
-      3);
-  if (!missing.ok()) {
-    return Corrupt(absl::StrCat("dirty set unreadable: ",
-                                missing.status().message()));
+  // One pass over the dirty set: how many rows, and the first few that name
+  // an inode which does not exist.
+  size_t dirty = 0;
+  std::vector<std::string> missing;
+  absl::Status read = [&]() -> absl::Status {
+    ABSL_ASSIGN_OR_RETURN(
+        sqlite3::Statement * stmt,
+        db.Prepared("SELECT inode, inode NOT IN (SELECT id FROM inodes) "
+                    "FROM dirty ORDER BY inode"));
+    return stmt->ForEachRow([&](sqlite3::Statement &row) {
+      ++dirty;
+      if (row.Column<int>(1) != 0 && missing.size() < 3) {
+        missing.push_back(row.Column<std::string>(0));
+      }
+      return absl::OkStatus();
+    });
+  }();
+  if (!read.ok()) {
+    return Corrupt(absl::StrCat("dirty set unreadable: ", read.message()));
   }
-  if (!missing->empty()) {
+  if (!missing.empty()) {
     return Corrupt(absl::StrCat("the dirty set names inodes that do not exist (",
-                                absl::StrJoin(*missing, ", "), ")"));
+                                absl::StrJoin(missing, ", "), ")"));
   }
-  absl::StatusOr<std::vector<std::string>> dirty =
-      FirstRows(db, "SELECT count(*) FROM dirty", 1);
   absl::StatusOr<bool> clean = GetCleanShutdown(db);
-  if (!dirty.ok() || dirty->size() != 1 || !clean.ok()) {
-    return Corrupt("the dirty set or the clean-shutdown flag is unreadable");
+  if (!clean.ok()) {
+    return Corrupt(absl::StrCat("the clean-shutdown flag is unreadable: ",
+                                clean.status().message()));
   }
-  const std::string &count = dirty->front();
-  if (*clean && count != "0") {
+  if (*clean && dirty != 0) {
     return Corrupt(absl::StrCat(
-        "marks a clean shutdown with ", count,
+        "marks a clean shutdown with ", dirty,
         " dirty entries (a clean shutdown has an empty dirty set)"));
   }
-  if (!*clean && count != "0") {
+  if (!*clean && dirty != 0) {
     found.notes.push_back(absl::StrCat(
-        "the last run did not end cleanly: ", count,
+        "the last run did not end cleanly: ", dirty,
         " dirty entries, which the next mount recovers by itself"));
   }
   return found;
