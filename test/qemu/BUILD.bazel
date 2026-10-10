@@ -135,6 +135,21 @@ qemu_test(
     timeout = "moderate",
 )
 
+# Step 26.17: the check that a test's disks are in the guest's RAM when it asks
+# for it (guest/ram_disks.sh): loop devices over tmpfs, formatted in the guest,
+# no virtio disk, and dm-flakey dropping writes over them.
+qemu_test(
+    name = "ram_disks_test",
+    disks = [
+        ("vdb", "ext4", "64M"),
+        ("vdc", "xfs", "320M"),
+    ],
+    guest_script = "guest/ram_disks.sh",
+    modules = ["dm_flakey"],
+    size = "small",
+    timeout = "moderate",
+)
+
 # Step 26.14: the quiet kernel: guest/init's sysctls (no periodic writeback,
 # no cache pressure), one vCPU by default, and that a dirty page waits for a
 # sync -- see guest/quiet_kernel.sh and README.md, "A quiet kernel".
