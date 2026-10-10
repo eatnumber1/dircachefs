@@ -358,6 +358,19 @@ delegated, why the cache is rebuilt not repaired). `dcfs exports` stays
 in 15.5 as before. Owner: dcfs-implementer, after 15.6b merges (same
 wrapper code and systemd test); under the budget throttle, in the first
 of the three lanes to free after that.
+**15.6c The Debian image fetch fails over IPv6 (CI run 38009667624, 2026-10-10).**
+The first push after 15.6 merged failed in the fast job before any test
+ran: Bazel could not fetch `@debian_cloud_image` ("Connect timed out").
+Verified: cloud.debian.org times out over IPv6 and answers over IPv4
+(curl -6 nothing, curl -4 a 302 to a mirror); Bazel's Java downloader
+prefers IPv6; the 15.6 agent saw it locally and worked around it with
+`--distdir`. Fix (dispatched, dcfs-mechanical, lane-5): `startup
+--host_jvm_args=-Djava.net.preferIPv4Stack=true` in .bazelrc (every server,
+local and CI; check nothing we fetch is IPv6-only) and a `urls` list for
+the image (cdimage.debian.org canonical, cloud.debian.org, one stable
+mirror; same integrity). Every job behind fast was skipped on that push:
+the coverage fix and the toolchain cache are still unverified in CI.
+
 **15.8 `allow_other` always on (russ, 2026-10-09).** russ: "Does it ever
 make sense not to pass dcfs.allow_other? If no, should we just always
 pass it internally (and require it not be present in fstab)?" No: FUSE's

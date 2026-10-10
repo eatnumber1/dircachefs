@@ -2486,3 +2486,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-09): allow_other always on, refused in fstab. Recorded as 15.8 (with the reasoning:
   root daemon plus default_permissions makes FUSE's mounter-only default pointless here); README,
   man page, fixtures and guest wrappers drop the option; after 15.6b.
+- CI run 38009667624 (2ee9cc7) FAILED in fast before any test: Bazel could not fetch the Debian
+  cloud image ("Connect timed out"); cloud.debian.org times out over IPv6 from here too and
+  answers over IPv4; Bazel's downloader prefers IPv6. Everything behind fast skipped, so 26.14f
+  and 26.16b are unverified in CI. 15.6c dispatched (mechanical, lane-5): preferIPv4Stack in
+  .bazelrc's startup options and a mirror list for the image. Push again when it merges.
