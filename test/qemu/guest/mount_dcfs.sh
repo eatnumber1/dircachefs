@@ -12,7 +12,7 @@
 # nothing and says why); daemonization (the wrapper returns when dcfs
 # answers FUSE_INIT, a failure after the fork is the wrapper's exit status
 # and message, a daemonized dcfs has no stdio and logs to syslog,
-# dcfs.foreground stays in the foreground); the bind and none forms; a file
+# dcfs.foreground stays in the foreground); the bind form; a file
 # mounted below the source refused; a non-root caller refused with the
 # reason.
 #
@@ -153,7 +153,7 @@ sleep 0.5 # the socket /dev/log appears
 # --- a non-root caller is refused with the reason (decision 12) ---------------
 
 testutil runas 1000 1000 - -- "$MOUNT_DCFS" \
-	-o "dcfs.fstype=none,dcfs.cache_db=$CACHE/nonroot.db" "$SRC" "$MNT" >"$OUT" 2>&1
+	-o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/nonroot.db" "$SRC" "$MNT" >"$OUT" 2>&1
 rc=$?
 if [ "$rc" -eq 1 ] && grep -q 'root' "$OUT" && grep -q 'CAP_SYS_ADMIN' "$OUT" &&
 	nothing_left "$MNT"; then
@@ -359,10 +359,10 @@ fi
 
 # --- remount changes only the dcfs mount (decision 10) -------------------------
 
-# The backing is vdb mounted by us at /src (the none form: the administrator
+# The backing is vdb mounted by us at /src (the bind form: the administrator
 # owns it), dcfs on /mnt.
 mount "$DEV" "$SRC"
-wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/remount.db" "$SRC" "$MNT"
+wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/remount.db" "$SRC" "$MNT"
 only_one_daemon
 if [ "$WRC" -eq 0 ]; then
 	wrapper -o remount,dcfs.ro "$SRC" "$MNT"
@@ -488,10 +488,22 @@ else
 	kill -KILL "$FG" 2>/dev/null
 fi
 
-# --- the bind form: SOURCE captured with a non-recursive bind ------------------
-
 mount "$DEV" "$SRC"
-wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/bind.db" "$SRC" "$MNT"
+
+# A file mounted below SOURCE: the mount fails, naming it (stubs for
+# directory submounts are step 15.4's).
+mount -o bind "$SRC/file_1.txt" "$SRC/file_0.txt"
+wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/nonefile.db" "$SRC" "$MNT"
+if refused && grep -q "$SRC/file_0.txt" "$OUT" && nothing_left "$MNT"; then
+	pass bind-file-below-refused
+else
+	fail bind-file-below-refused "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
+fi
+umount "$SRC/file_0.txt"
+
+# --- the bind form: SOURCE, a directory, opened in place (step 15.9: was none) --
+
+wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/none.db" "$SRC" "$MNT"
 only_one_daemon
 set -- $(mount_type_source "$MNT")
 if [ "$WRC" -eq 0 ] && [ "$(cat "$MNT/file_0.txt" 2>&1)" = "content 0" ] &&
@@ -500,79 +512,44 @@ if [ "$WRC" -eq 0 ] && [ "$(cat "$MNT/file_0.txt" 2>&1)" = "content 0" ] &&
 else
 	fail bind-to-another-path "rc=$WRC type=$1 source=$2 out=$(cat "$OUT")"
 fi
-# No backing mount of its own: $SRC has just its one mount.
+# No backing mount of its own (no clone: the real mount is SOURCE's, in place):
+# $SRC has just its one mount, which dcfs keeps busy.
 [ -n "$DPID" ] && [ "$(mount_count "$SRC")" -eq 1 ] && pass bind-no-extra-mount || fail bind-no-extra-mount "$(grep "$SRC" /proc/self/mountinfo)"
-[ -n "$DPID" ] && unmount_check bind-umount "$MNT"
-
-# Over the same path (over-mount): the original is under dcfs, and comes back.
-wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/bindover.db" "$SRC" "$SRC"
-only_one_daemon
-if [ "$WRC" -eq 0 ] && [ "$(mount_count "$SRC")" -eq 2 ] &&
-	[ "$(cat "$SRC/file_0.txt" 2>&1)" = "content 0" ]; then
-	pass bind-over-mount
+# (By device: busybox's umount takes /src for the FUSE mount's source, which
+# is also spelled /src, and unmounts that.)
+umount "$DEV" 2>"$OUT.busy"
+if [ "$(mount_count "$SRC")" -eq 1 ] && grep -qi 'busy' "$OUT.busy"; then
+	pass bind-keeps-the-real-mount-busy
 else
-	fail bind-over-mount "rc=$WRC mounts=$(grep "$SRC" /proc/self/mountinfo) out=$(cat "$OUT")"
-fi
-if [ -n "$DPID" ]; then
-	unmount_check bind-over-mount-umount "$SRC"
-	[ "$(mount_count "$SRC")" -eq 1 ] && pass bind-over-mount-original-back || fail bind-over-mount-original-back "$(grep "$SRC" /proc/self/mountinfo)"
-fi
-
-# A file mounted below SOURCE: the mount fails, naming it (stubs for
-# directory submounts are step 15.4's).
-mount -o bind "$SRC/file_1.txt" "$SRC/file_0.txt"
-wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/bindfile.db" "$SRC" "$MNT"
-if refused && grep -q "$SRC/file_0.txt" "$OUT" && nothing_left "$MNT"; then
-	pass bind-file-below-refused
-else
-	fail bind-file-below-refused "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
-fi
-wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/nonefile.db" "$SRC" "$MNT"
-if refused && grep -q "$SRC/file_0.txt" "$OUT" && nothing_left "$MNT"; then
-	pass none-file-below-refused
-else
-	fail none-file-below-refused "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
-fi
-umount "$SRC/file_0.txt"
-
-# --- the none form: the live tree, no capture ----------------------------------
-
-wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/none.db" "$SRC" "$MNT"
-only_one_daemon
-set -- $(mount_type_source "$MNT")
-if [ "$WRC" -eq 0 ] && [ "$(cat "$MNT/file_0.txt" 2>&1)" = "content 0" ] &&
-	[ "$1" = "fuse.dcfs" ] && [ "$2" = "$SRC" ]; then
-	pass none-to-another-path
-else
-	fail none-to-another-path "rc=$WRC type=$1 source=$2 out=$(cat "$OUT")"
+	fail bind-keeps-the-real-mount-busy "$(cat "$OUT.busy") mounts=$(mount_count "$SRC")"
 fi
 # The administrator's mount is remounted with its own options, and dcfs sees
 # the filesystem go read-only: writes through dcfs fail with EROFS.
 mount -o remount,ro "$SRC" 2>"$OUT"
 touch "$MNT/after_ro" 2>>"$OUT"
 if grep -q 'Read-only file system' "$OUT"; then
-	pass none-remount-ro-gives-erofs
+	pass bind-remount-ro-gives-erofs
 else
-	fail none-remount-ro-gives-erofs "$(cat "$OUT")"
+	fail bind-remount-ro-gives-erofs "$(cat "$OUT")"
 fi
 mount -o remount,rw "$SRC" 2>/dev/null
-[ -n "$DPID" ] && unmount_check none-umount "$MNT"
+[ -n "$DPID" ] && unmount_check bind-umount "$MNT"
 
-wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/noneover.db" "$SRC" "$SRC"
+wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/noneover.db" "$SRC" "$SRC"
 only_one_daemon
 if [ "$WRC" -eq 0 ] && [ "$(mount_count "$SRC")" -eq 2 ] && [ "$(cat "$SRC/file_2.txt" 2>&1)" = "content 2" ]; then
-	pass none-over-source
+	pass bind-over-source
 else
-	fail none-over-source "rc=$WRC mounts=$(grep "$SRC" /proc/self/mountinfo) out=$(cat "$OUT")"
+	fail bind-over-source "rc=$WRC mounts=$(grep "$SRC" /proc/self/mountinfo) out=$(cat "$OUT")"
 fi
-[ -n "$DPID" ] && unmount_check none-over-source-umount "$SRC"
+[ -n "$DPID" ] && unmount_check bind-over-source-umount "$SRC"
 
 # A source that is not there or not a directory is refused naming it.
-wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/missing.db" /nonexistent "$MNT"
+wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/missing.db" /nonexistent "$MNT"
 if refused && grep -q '/nonexistent' "$OUT" && nothing_left "$MNT"; then
-	pass none-missing-source-refused
+	pass bind-missing-source-refused
 else
-	fail none-missing-source-refused "rc=$WRC out=$(cat "$OUT")"
+	fail bind-missing-source-refused "rc=$WRC out=$(cat "$OUT")"
 fi
 umount "$SRC" 2>/dev/null
 
@@ -580,7 +557,7 @@ umount "$SRC" 2>/dev/null
 
 mount "$DEV" "$SRC"
 mkdir -p /tmp/rel_mnt
-(cd /tmp && "$MOUNT_DCFS" -o "dcfs.fstype=none,dcfs.cache_db=rel.db" ../src rel_mnt) >"$OUT" 2>&1
+(cd /tmp && "$MOUNT_DCFS" -o "dcfs.fstype=bind,dcfs.cache_db=rel.db" ../src rel_mnt) >"$OUT" 2>&1
 WRC=$?
 only_one_daemon
 if [ "$WRC" -eq 0 ] && [ "$(cat /tmp/rel_mnt/file_0.txt 2>&1)" = "content 0" ] && [ -f /tmp/rel.db ]; then
@@ -594,16 +571,24 @@ umount "$SRC" 2>/dev/null
 # --- native options need a native mount (decision 6) ----------------------------
 
 mount "$DEV" "$SRC"
-wrapper -o "ro,dcfs.fstype=none,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
-if [ "$WRC" -eq 1 ] && grep -q 'ro' "$OUT" && grep -q 'dcfs.fstype=none' "$OUT" && nothing_left "$MNT"; then
-	pass none-refuses-native-options
+wrapper -o "ro,dcfs.fstype=bind,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
+if [ "$WRC" -eq 1 ] && grep -q 'ro' "$OUT" && grep -q 'dcfs.fstype=bind' "$OUT" && nothing_left "$MNT"; then
+	pass bind-refuses-native-options
 else
-	fail none-refuses-native-options "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
+	fail bind-refuses-native-options "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
+fi
+# The directory form was called none (step 15.9 renamed it, russ): the old
+# name is an error that says so, not a native type, and nothing is mounted.
+wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/oldname.db" "$SRC" "$MNT"
+if [ "$WRC" -eq 1 ] && grep -q 'renamed dcfs.fstype=bind' "$OUT" && nothing_left "$MNT"; then
+	pass none-is-refused-it-is-bind-now
+else
+	fail none-is-refused-it-is-bind-now "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
 fi
 # allow_other is always on (step 15.8): naming it, either way, is a usage
 # error (exit 1) that says so, and nothing is mounted.
 for allow in dcfs.allow_other dcfs.allow_other=0 allow_other; do
-	wrapper -o "$allow,dcfs.fstype=none,dcfs.cache_db=$CACHE/ao.db" "$SRC" "$MNT"
+	wrapper -o "$allow,dcfs.fstype=bind,dcfs.cache_db=$CACHE/ao.db" "$SRC" "$MNT"
 	if [ "$WRC" -eq 1 ] && grep -q 'always allows other users' "$OUT" && grep -q 'remove it' "$OUT" && nothing_left "$MNT"; then
 		pass "refuses-$allow"
 	else
@@ -611,7 +596,7 @@ for allow in dcfs.allow_other dcfs.allow_other=0 allow_other; do
 	fi
 done
 # A mount does reach other users: a world-readable file reads as nobody.
-wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/ao2.db" "$SRC" "$MNT"
+wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/ao2.db" "$SRC" "$MNT"
 only_one_daemon
 if [ "$WRC" -eq 0 ] && testutil runas 65534 65534 - -- cat "$MNT/file_0.txt" >"$OUT.ao" 2>&1 && [ "$(cat "$OUT.ao")" = "content 0" ]; then
 	pass other-users-reach-the-mount
@@ -620,13 +605,13 @@ else
 fi
 [ -n "$DPID" ] && unmount_check other-users-umount "$MNT"
 # What libmount adds to a helper's options (rw or ro, fstab's nofail, _netdev,
-# ...) is not an error for the none form.
-wrapper -o "rw,nofail,_netdev,noauto,defaults,dcfs.fstype=none,dcfs.cache_db=$CACHE/rm2.db" "$SRC" "$MNT"
+# ...) is not an error for the bind form.
+wrapper -o "rw,nofail,_netdev,noauto,defaults,dcfs.fstype=bind,dcfs.cache_db=$CACHE/rm2.db" "$SRC" "$MNT"
 only_one_daemon
 if [ "$WRC" -eq 0 ]; then
-	pass none-accepts-libmount-options
+	pass bind-accepts-libmount-options
 else
-	fail none-accepts-libmount-options "rc=$WRC out=$(cat "$OUT")"
+	fail bind-accepts-libmount-options "rc=$WRC out=$(cat "$OUT")"
 fi
 # A remount cannot change the underlying mount: a native ro that libmount
 # merged in from fstab is ignored, with a warning naming it, and the dcfs
@@ -639,20 +624,6 @@ else
 fi
 [ -n "$DPID" ] && unmount_check remount-native-umount "$MNT"
 
-# ro with the bind form: the clone is read-only too.
-wrapper -o "ro,dcfs.fstype=bind,dcfs.cache_db=$CACHE/robind.db" "$SRC" "$MNT"
-only_one_daemon
-if [ "$WRC" -eq 0 ]; then
-	touch "$MNT/bind_ro" 2>"$OUT"
-	if grep -q 'Read-only file system' "$OUT"; then
-		pass bind-ro-erofs
-	else
-		fail bind-ro-erofs "touch said: $(cat "$OUT")"
-	fi
-	[ -n "$DPID" ] && unmount_check bind-ro-umount "$MNT"
-else
-	fail bind-ro-erofs "rc=$WRC out=$(cat "$OUT")"
-fi
 umount "$SRC" 2>/dev/null
 
 # --- the helper's other names and its usage ------------------------------------
@@ -1024,16 +995,14 @@ else
 	# A cache that is not a database.
 	garbage_cache() { head -c 8192 /dev/zero | tr '\0' x >"$1"; }
 
-	# none and bind: no device to check; the cache is.
+	# bind: a directory, no device to check; the cache is.
 	rm -f "$CACHE/fs1.db"
-	"$FSCK" -n -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/fs1.db" "$SRC" >"$OUT" 2>&1
+	"$FSCK" -n -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/fs1.db" "$SRC" >"$OUT" 2>&1
 	if [ $? -eq 0 ] && grep -q 'no device to check' "$OUT" && [ ! -e "$CACHE/fs1.db" ]; then
-		pass fsck-none-has-no-device-and-creates-nothing
+		pass fsck-bind-has-no-device-and-creates-nothing
 	else
-		fail fsck-none-has-no-device-and-creates-nothing "rc=$? $(cat "$OUT")"
+		fail fsck-bind-has-no-device-and-creates-nothing "rc=$? $(cat "$OUT")"
 	fi
-	"$FSCK" -a -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/fs1.db" "$SRC" >"$OUT" 2>&1
-	[ $? -eq 0 ] && grep -q 'no device to check' "$OUT" && pass fsck-bind-has-no-device || fail fsck-bind-has-no-device "$(cat "$OUT")"
 
 	# The backing's fsck gets the flags and the device, and its status is
 	# relayed, or'ed with the cache's.
@@ -1088,10 +1057,10 @@ else
 	rm -f "$CACHE/fs3.db"
 
 	# A database a daemon holds is reported, never waited for or touched.
-	wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/fs4.db" "$SRC" "$MNT"
+	wrapper -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/fs4.db" "$SRC" "$MNT"
 	only_one_daemon
 	FSCK_HELD_PID=$DPID
-	"$FSCK" -y -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/fs4.db" "$SRC" >"$OUT" 2>&1
+	"$FSCK" -y -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/fs4.db" "$SRC" >"$OUT" 2>&1
 	rc_h=$?
 	if [ "$rc_h" -eq 8 ] && grep -q 'in use by a running dcfs' "$OUT" && [ -e "$CACHE/fs4.db" ] && [ -d "/proc/$FSCK_HELD_PID" ]; then
 		pass fsck-held-cache-is-reported-not-touched
@@ -1100,7 +1069,7 @@ else
 	fi
 	[ -n "$FSCK_HELD_PID" ] && unmount_check fsck-held-daemon-unmounts "$MNT"
 	# And once unmounted the same database checks clean.
-	"$FSCK" -n -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/fs4.db" "$SRC" >"$OUT" 2>&1
+	"$FSCK" -n -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/fs4.db" "$SRC" >"$OUT" 2>&1
 	[ $? -eq 0 ] && grep -q ': clean' "$OUT" && pass fsck-unmounted-cache-is-clean || fail fsck-unmounted-cache-is-clean "$(cat "$OUT")"
 
 	# Usage and operational errors: 16, and 8 (no fstab line: findmnt is not here).

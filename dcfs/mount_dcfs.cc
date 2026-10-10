@@ -249,12 +249,15 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
     }
     if (name == "fstype") {
       if (!value.has_value() || value->empty()) {
-        return BadOption(option, "needs a value: none, bind or a type");
+        return BadOption(option, "needs a value: bind or a native type");
       }
-      if (*value == "none") {
-        split.backing = HelperOptions::Backing::kNone;
-      } else if (*value == "bind") {
-        split.backing = HelperOptions::Backing::kBind;
+      if (*value == "bind") {
+        split.backing = HelperOptions::Backing::kDirectory;
+      } else if (*value == "none") {
+        return InvalidArgumentErrorBuilder()
+               << "Option " << option
+               << ": the directory form is renamed dcfs.fstype=bind (a native "
+                  "filesystem type, or bind: SOURCE is a directory)";
       } else {
         split.backing = HelperOptions::Backing::kNative;
         split.native_type = std::string(*value);
@@ -297,12 +300,12 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
   if (bare_allow_other.has_value() && !split.remount) {
     return AllowOtherRefused(*bare_allow_other);
   }
-  if (split.backing == HelperOptions::Backing::kNone && !split.remount) {
+  if (split.backing == HelperOptions::Backing::kDirectory && !split.remount) {
     const std::vector<std::string> unhonored = UnhonoredNativeOptions(split);
     if (!unhonored.empty()) {
       return InvalidArgumentErrorBuilder()
              << "Options " << absl::StrJoin(unhonored, ", ")
-             << " are for the underlying mount, which dcfs.fstype=none does "
+             << " are for the underlying mount, which dcfs.fstype=bind does "
                 "not make: remove them, or remount the filesystem yourself "
                 "(dcfs.ro makes the dcfs mount read-only)";
     }
@@ -327,7 +330,7 @@ absl::StatusOr<HelperOptions> SplitHelperOptions(
 
 std::vector<std::string> UnhonoredNativeOptions(const HelperOptions &options) {
   std::vector<std::string> unhonored;
-  if (options.backing != HelperOptions::Backing::kNone && !options.remount) {
+  if (options.backing != HelperOptions::Backing::kDirectory && !options.remount) {
     return unhonored;
   }
   for (const std::string &option : options.native_options) {

@@ -13,7 +13,7 @@ namespace dcfs_bench {
 
 class DcfsProcess {
  public:
-  // Forks and execs `mount.dcfs -o dcfs.fstype=none,dcfs.cache_db=db,... src
+  // Forks and execs `mount.dcfs -o dcfs.fstype=bind,dcfs.cache_db=db,... src
   // mnt` (each flag a dcfs.<flag> option). Does not
   // wait for the mount: see WaitMounted.
   bool Start(

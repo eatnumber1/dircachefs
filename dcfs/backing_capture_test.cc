@@ -28,16 +28,6 @@ TEST(NativeMountCommandTest, TypeAndOptions) {
                           "UUID=aaaa", "/tmp/s"));
 }
 
-TEST(NativeMountCommandTest, BindIgnoresTheTypeAndAddsBindFirst) {
-  EXPECT_THAT(NativeMountCommand({.source = "/srv/raw",
-                                  .native_type = "ext4",
-                                  .bind = true,
-                                  .options = {"ro"}},
-                                 "/tmp/s"),
-              ElementsAre("mount", "-n", "-o", "bind,ro", "/srv/raw",
-                          "/tmp/s"));
-}
-
 TEST(NativeMountCommandTest, SloppyAndVerboseArePassedThrough) {
   EXPECT_THAT(NativeMountCommand({.source = "h:/e",
                                   .native_type = "nfs",
@@ -46,17 +36,6 @@ TEST(NativeMountCommandTest, SloppyAndVerboseArePassedThrough) {
                                  "/tmp/s"),
               ElementsAre("mount", "-n", "-s", "-v", "-t", "nfs", "h:/e",
                           "/tmp/s"));
-}
-
-// The bind's read-only remount keeps the flags the mount already has.
-TEST(MountFlagsFromStatvfsTest, KeepsTheMountsOwnFlags) {
-  EXPECT_EQ(MountFlagsFromStatvfs(0), 0u);
-  EXPECT_EQ(MountFlagsFromStatvfs(ST_NOSUID | ST_NODEV | ST_NOEXEC),
-            static_cast<unsigned long>(MS_NOSUID | MS_NODEV | MS_NOEXEC));
-  EXPECT_EQ(MountFlagsFromStatvfs(ST_NOATIME | ST_NODIRATIME | ST_RDONLY),
-            static_cast<unsigned long>(MS_NOATIME | MS_NODIRATIME |
-                                       MS_RDONLY));
-  EXPECT_EQ(MountFlagsFromStatvfs(ST_RELATIME), 0u);
 }
 
 }  // namespace

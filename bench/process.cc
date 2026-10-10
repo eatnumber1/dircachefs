@@ -47,7 +47,7 @@ bool DcfsProcess::Start(
   mnt_ = mnt;
   // dcfs dispatches on argv[0] (phase 15): it runs as mount.dcfs, in the
   // foreground, with each flag as a dcfs.<flag> mount option.
-  std::string options = "dcfs.fstype=none,dcfs.foreground,dcfs.cache_db=" + db;
+  std::string options = "dcfs.fstype=bind,dcfs.foreground,dcfs.cache_db=" + db;
   for (const std::string &flag : flags) {
     options += ",dcfs." + (flag.starts_with("--") ? flag.substr(2) : flag);
   }

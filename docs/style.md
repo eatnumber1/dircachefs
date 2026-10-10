@@ -431,7 +431,7 @@ each.
   sweep and the trace recorder, both hooked at `backing.cc`, complete.
   `mounts_below` is on it for its two `/proc/self/mountinfo` reads (`openat`,
   `read`: procfs, no backing disk). The mount.dcfs wrapper's modules are on
-  it too: `OpenBacking` (`backing_capture.cc`) opens SOURCE for the `none`
+  it too: `OpenBacking` (`backing_capture.cc`) opens SOURCE for the `bind`
   form and, in `CaptureBacking`, calls `openat(tree, ".")` for a real
   directory descriptor on the root of the filesystem it just captured, both
   once at startup before dcfs serves anything (what `main.cc` did before);

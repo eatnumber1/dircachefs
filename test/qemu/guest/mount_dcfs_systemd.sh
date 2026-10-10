@@ -36,7 +36,7 @@ DEV_XFS=/dev/vdb
 DEV_BTRFS=/dev/vdc
 CACHE=/var/cache/dcfs
 OUT=/tmp/out
-SRC=/srv/live # the none form's directory
+SRC=/srv/live # the bind form's directory
 RAW=/srv/raw  # the bind form's
 MNT=/mnt/m    # for the command-line checks
 MISSING_UUID=0e0e0e0e-dead-4bee-8f00-000000000001
@@ -291,7 +291,7 @@ boot1() {
 	fi
 
 	# --- mount -t dcfs through mount(8) (the helper dispatch) ---
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/m1.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/m1.db" "$SRC" "$MNT"
 	pid=$(only_daemon)
 	set -- $(fs_of "$MNT")
 	if [ "$MRC" -eq 0 ] && [ -n "$pid" ] && [ "$1" = fuse.dcfs ] && [ "$2" = "$SRC" ] &&
@@ -303,7 +303,7 @@ boot1() {
 	# What libmount adds to a helper's options (rw, fstab's nofail and _netdev,
 	# defaults, noauto) is the helper's business, not an error.
 	umount "$MNT" 2>/dev/null
-	mnt -t dcfs -o "rw,nofail,_netdev,defaults,dcfs.fstype=none,dcfs.cache_db=$CACHE/m2.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "rw,nofail,_netdev,defaults,dcfs.fstype=bind,dcfs.cache_db=$CACHE/m2.db" "$SRC" "$MNT"
 	pid=$(only_daemon)
 	if [ "$MRC" -eq 0 ] && [ -n "$pid" ] && [ "$(cat "$MNT/live.txt" 2>&1)" = live ]; then
 		pass mount-passes-libmount-options
@@ -359,7 +359,7 @@ boot1() {
 	# --- exit statuses, as mount(8) reports them ---
 	# A usage error: the wrapper exits 1, with its one ERROR line on the
 	# stderr mount(8) passes through.
-	mnt -t dcfs -o "dcfs.bogus,dcfs.fstype=none,dcfs.cache_db=$CACHE/bogus.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.bogus,dcfs.fstype=bind,dcfs.cache_db=$CACHE/bogus.db" "$SRC" "$MNT"
 	# A start that failed after the fork leaves its daemon exiting for a moment.
 	wait_no_daemons
 	errors=$(grep -c '^E[0-9]' "$OUT")
@@ -378,7 +378,7 @@ boot1() {
 	testutil sqlite-lock "$CACHE/locked.db" 30 >/tmp/lock.fifo 2>&1 &
 	locker=$!
 	read -r locker_says </tmp/lock.fifo
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/locked.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/locked.db" "$SRC" "$MNT"
 	# A start that failed after the fork leaves its daemon exiting for a moment.
 	wait_no_daemons
 	errors=$(grep -c '^E[0-9]' "$OUT")
@@ -414,19 +414,19 @@ boot1() {
 	else
 		fail exit-status-native-missing-device "native rc=$native_rc, rc=$MRC, out=$(cat "$OUT")"
 	fi
-	# A native option the none form cannot honor (ro) is a usage error.
-	mnt -t dcfs -o "ro,dcfs.fstype=none,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
+	# A native option the bind form cannot honor (ro) is a usage error.
+	mnt -t dcfs -o "ro,dcfs.fstype=bind,dcfs.cache_db=$CACHE/noneopts.db" "$SRC" "$MNT"
 	# A start that failed after the fork leaves its daemon exiting for a moment.
 	wait_no_daemons
-	if [ "$MRC" -eq 1 ] && grep -q 'dcfs.fstype=none' "$OUT" && [ -z "$(daemons)" ]; then
-		pass exit-status-none-refuses-ro
+	if [ "$MRC" -eq 1 ] && grep -q 'dcfs.fstype=bind' "$OUT" && [ -z "$(daemons)" ]; then
+		pass exit-status-bind-refuses-ro
 	else
-		fail exit-status-none-refuses-ro "rc=$MRC out=$(cat "$OUT")"
+		fail exit-status-bind-refuses-ro "rc=$MRC out=$(cat "$OUT")"
 	fi
 
 	# --- fstab, mount -a ---
 	# One line of each kind the guest can host: a native ext4 by UUID (the type
-	# autodetected) with a native option, a bind nested under it, the none form
+	# autodetected) with a native option, a bind nested under it, the bind form
 	# with _netdev, an xfs (the type named) and a btrfs (autodetected) by UUID
 	# (the kernel mounts them: the image has no xfsprogs or btrfs-progs), a
 	# nofail mount of a device that is not there, and (noauto) one that fails to
@@ -434,14 +434,18 @@ boot1() {
 	cat >/etc/fstab <<EOF
 UUID=$UUID /data dcfs noatime,dcfs.cache_db=$CACHE/data.db,dcfs.stderrthreshold=0 0 2
 $RAW /data/sub dcfs dcfs.fstype=bind,dcfs.ro,dcfs.cache_db=$CACHE/sub.db,dcfs.stderrthreshold=0 0 0
-$SRC /mnt/live dcfs dcfs.fstype=none,_netdev,x-systemd.requires-mounts-for=$CACHE,dcfs.cache_db=$CACHE/live.db,dcfs.stderrthreshold=0 0 0
+$SRC /mnt/live dcfs dcfs.fstype=bind,_netdev,x-systemd.requires-mounts-for=$CACHE,dcfs.cache_db=$CACHE/live.db,dcfs.stderrthreshold=0 0 0
 UUID=$XFS_UUID /mnt/xfs dcfs dcfs.fstype=xfs,dcfs.cache_db=$CACHE/xfs.db,dcfs.stderrthreshold=0 0 0
 UUID=$BTRFS_UUID /mnt/btrfs dcfs dcfs.cache_db=$CACHE/btrfs.db,dcfs.stderrthreshold=0 0 0
 UUID=$MISSING_UUID /mnt/missing dcfs nofail,x-systemd.device-timeout=10min,dcfs.fstype=ext4,dcfs.cache_db=$CACHE/missing.db 0 0
-$SRC /mnt/fail dcfs noauto,dcfs.fstype=none,dcfs.bogus,dcfs.cache_db=$CACHE/fail.db 0 0
+$SRC /mnt/fail dcfs noauto,dcfs.fstype=bind,dcfs.bogus,dcfs.cache_db=$CACHE/fail.db 0 0
 /srv/rp /rp dcfs noauto,nofail,dcfs.fstype=bind,dcfs.cache_db=$CACHE/rp.db 0 0
 /srv/rc /rp/c dcfs noauto,nofail,dcfs.fstype=bind,dcfs.cache_db=$CACHE/rc.db 0 0
+/srv/ovsrc /srv/ovraw none bind,noauto,nofail 0 0
+/srv/ovraw /srv/ov dcfs noauto,nofail,dcfs.fstype=bind,x-systemd.requires-mounts-for=/srv/ovraw,dcfs.cache_db=$CACHE/ov.db 0 0
 EOF
+	mkdir -p /srv/ovsrc /srv/ovraw /srv/ov
+	echo ov >/srv/ovsrc/ov.txt
 	systemctl daemon-reload
 
 	# --- fsck through fsck(8), as the fstab's sixth field runs it (step 15.5) ---
@@ -477,13 +481,13 @@ EOF
 	rc_c=$?
 	[ "$rc_c" -eq 0 ] || fail fsck-clean-again-status-0 "rc=$rc_c $(cat "$OUT")"
 	[ "$rc_c" -eq 0 ] && pass fsck-clean-again-status-0
-	# A none line has no device: a no-op, status 0, and the cache is checked.
+	# A bind line has no device: a no-op, status 0, and the cache is checked.
 	fsck /mnt/live >"$OUT" 2>&1
 	rc_none=$?
 	if [ "$rc_none" -eq 0 ] && grep -q 'no device to check' "$OUT"; then
-		pass fsck-none-line-is-a-no-op
+		pass fsck-bind-line-is-a-no-op
 	else
-		fail fsck-none-line-is-a-no-op "rc=$rc_none $(cat "$OUT")"
+		fail fsck-bind-line-is-a-no-op "rc=$rc_none $(cat "$OUT")"
 	fi
 	# A native backing's own status passes through, or'ed with the cache's: a
 	# type with no fsck is fsck(8)'s operational error, 8.
@@ -518,9 +522,9 @@ EOF
 	fi
 	set -- $(fs_of /mnt/live)
 	if [ "$1" = fuse.dcfs ] && [ "$2" = "$SRC" ] && [ "$(cat /mnt/live/live.txt 2>&1)" = live ]; then
-		pass fstab-none-served
+		pass fstab-bind-served
 	else
-		fail fstab-none-served "type=$1 source=$2"
+		fail fstab-bind-served "type=$1 source=$2"
 	fi
 	set -- $(fs_of /mnt/xfs)
 	if [ "$1" = fuse.dcfs ] && [ "$2" = "$DEV_XFS" ] && [ "$(cat /mnt/xfs/xfs.txt 2>&1)" = "xfs content" ]; then
@@ -594,9 +598,9 @@ EOF
 	# Restarting one instance without systemd: umount, then mount, at once.
 	# umount(8) runs umount.fuse.dcfs, which returns when the daemon has
 	# exited, so the new daemon finds the cache database free (step 15.6b).
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/again.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/again.db" "$SRC" "$MNT"
 	umount "$MNT"
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/again.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/again.db" "$SRC" "$MNT"
 	if [ "$MRC" -eq 0 ] && [ "$(cat "$MNT/live.txt" 2>&1)" = live ]; then
 		pass umount-then-mount-at-once
 	else
@@ -605,13 +609,13 @@ EOF
 	umount "$MNT"
 	# After a SIGKILL the mount is dead (ENOTCONN) until umount -l, and the
 	# instance then mounts again.
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/kill.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/kill.db" "$SRC" "$MNT"
 	pid=$(only_daemon)
 	kill -KILL "$pid"
 	wait_exit "$pid"
 	dead=$(ls "$MNT" 2>&1)
 	umount -l "$MNT" 2>/dev/null
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/kill.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/kill.db" "$SRC" "$MNT"
 	if echo "$dead" | grep -q 'Transport endpoint is not connected' && [ "$MRC" -eq 0 ] &&
 		[ "$(cat "$MNT/live.txt" 2>&1)" = live ] && [ "$(mount_count "$MNT")" -eq 1 ]; then
 		pass sigkill-umount-l-then-mount
@@ -631,7 +635,7 @@ EOF
 	rm -f /sbin/umount.fuse
 	: >/tmp/helper.log
 	log_helper umount.fuse.dcfs
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/h0.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/h0.db" "$SRC" "$MNT"
 	LIBMOUNT_DEBUG=all umount "$MNT" >/tmp/lm_plain.txt 2>&1
 	plain_ran=$(cat /tmp/helper.log)
 	plain_looked=$(grep -c '/sbin/umount.fuse  *\.\.\. not found' /tmp/lm_plain.txt)
@@ -641,7 +645,7 @@ EOF
 	else
 		fail plain-umount-looks-for-umount-fuse-only "helper log: $plain_ran; $(grep -i 'helper\|umount\.' /tmp/lm_plain.txt | cut -c20- | head -n 10)"
 	fi
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/h1.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/h1.db" "$SRC" "$MNT"
 	umount -c "$MNT" 2>"$OUT"
 	urc=$?
 	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && grep -q "^umount.fuse.dcfs .*$MNT" /tmp/helper.log; then
@@ -652,7 +656,7 @@ EOF
 	rm -f /sbin/umount.fuse.dcfs
 	log_helper umount.fuse
 	: >/tmp/helper.log
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/h2.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/h2.db" "$SRC" "$MNT"
 	umount "$MNT" 2>"$OUT"
 	urc=$?
 	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && grep -q "^umount.fuse .*$MNT" /tmp/helper.log; then
@@ -660,7 +664,7 @@ EOF
 	else
 		fail umount-fuse-is-the-opt-in-fallback "rc=$urc daemons=$(daemons) helper log: $(cat /tmp/helper.log) $(cat "$OUT")"
 	fi
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/h3.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/h3.db" "$SRC" "$MNT"
 	pid=$(only_daemon)
 	: >/tmp/helper.log
 	umount -N 1 "$MNT" 2>"$OUT"
@@ -786,13 +790,65 @@ EOF
 	else
 		fail systemd-failed-start-marks-unit-failed "rc=$frc state=$(systemctl is-active mnt-fail.mount) $(journalctl --no-pager -b -u mnt-fail.mount 2>&1 | tail -n 8)"
 	fi
+	# The native bind recipe (README, "bind, and the native bind recipe"): the
+	# real filesystem at a raw path (here a kernel bind of a directory stands for
+	# its mount unit), dcfs on the consumers' path with the raw path as SOURCE.
+	# The raw mount comes first (the unit orders after the mounts its SOURCE
+	# is under, and x-systemd.requires-mounts-for= says it); both paths work, the
+	# raw one is the same directory and not through dcfs, and dcfs keeps it busy.
+	systemctl start srv-ov.mount 2>"$OUT"
+	ov_rc=$?
+	set -- $(fs_of /srv/ov)
+	ov_type=$1
+	set -- $(fs_of /srv/ovraw)
+	raw_type=$1
+	raw_at=$(systemctl show -p ActiveEnterTimestampMonotonic --value srv-ovraw.mount)
+	ov_at=$(systemctl show -p ActiveEnterTimestampMonotonic --value srv-ov.mount)
+	umount /srv/ovraw 2>"$OUT.busy"
+	if [ "$ov_rc" -eq 0 ] && [ "$ov_type" = fuse.dcfs ] && [ -n "$raw_type" ] && [ "$raw_type" != fuse.dcfs ] &&
+		[ "$(cat /srv/ov/ov.txt 2>&1)" = ov ] && [ "$(cat /srv/ovraw/ov.txt 2>&1)" = ov ] &&
+		[ "${raw_at:-0}" -gt 0 ] && [ "${raw_at:-0}" -le "${ov_at:-0}" ] &&
+		[ "$(mount_count /srv/ovraw)" -eq 1 ] && grep -qi busy "$OUT.busy"; then
+		pass native-bind-recipe-raw-path-then-dcfs-on-the-consumer-path
+	else
+		fail native-bind-recipe-raw-path-then-dcfs-on-the-consumer-path "rc=$ov_rc /srv/ov is '$ov_type', /srv/ovraw '$raw_type', raw up at $raw_at, dcfs at $ov_at: $(cat "$OUT") busy: $(cat "$OUT.busy")"
+	fi
+	systemctl stop srv-ov.mount srv-ovraw.mount 2>/dev/null
+	# The same on one path, by commands: a native bind to a raw path first, then
+	# dcfs over the original, which it opens before mounting and never uses a
+	# path of again. (Not in fstab under systemd: the raw mount's SOURCE is under
+	# the dcfs unit, and the dcfs unit requires the raw one: "Transaction order
+	# is cyclic", measured.)
+	mkdir -p /srv/ovraw2
+	# --make-private: systemd's mounts are shared, so a bind of the original is a
+	# peer of it, and dcfs mounted over the original would propagate to the raw
+	# path too (measured: the raw path then shows fuse.dcfs).
+	mount --bind /srv/ovsrc /srv/ovraw2
+	mount --make-private /srv/ovraw2
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/ov2.db" /srv/ovsrc /srv/ovsrc
+	set -- $(fs_of /srv/ovsrc)
+	over_type=$1
+	set -- $(fs_of /srv/ovraw2)
+	if [ "$MRC" -eq 0 ] && [ "$over_type" = fuse.dcfs ] && [ "$1" != fuse.dcfs ] &&
+		[ "$(cat /srv/ovsrc/ov.txt 2>&1)" = ov ] && [ "$(cat /srv/ovraw2/ov.txt 2>&1)" = ov ]; then
+		pass native-bind-recipe-overmount-the-original-by-commands
+	else
+		fail native-bind-recipe-overmount-the-original-by-commands "rc=$MRC /srv/ovsrc is '$over_type', /srv/ovraw2 '$1': $(cat "$OUT")"
+	fi
+	umount /srv/ovsrc
+	umount /srv/ovraw2
+	if [ "$(mount_count /srv/ovsrc)" -eq 0 ] && [ "$(mount_count /srv/ovraw2)" -eq 0 ] && [ "$(cat /srv/ovsrc/ov.txt 2>&1)" = ov ]; then
+		pass native-bind-recipe-unmounting-dcfs-brings-the-original-back
+	else
+		fail native-bind-recipe-unmounting-dcfs-brings-the-original-back "$(findmnt -R /srv 2>&1)"
+	fi
 	# At the default threshold (WARNING) the INFO narrative stays out of the
 	# journal (the fstab lines above set dcfs.stderrthreshold=0), and with the
 	# threshold set it is there.
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/quiet.db" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/quiet.db" "$SRC" "$MNT"
 	quiet_rc=$MRC
 	umount "$MNT"
-	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/loud.db,dcfs.stderrthreshold=0" "$SRC" "$MNT"
+	mnt -t dcfs -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/loud.db,dcfs.stderrthreshold=0" "$SRC" "$MNT"
 	loud_rc=$MRC
 	umount "$MNT"
 	if [ "$quiet_rc" -eq 0 ] && [ "$loud_rc" -eq 0 ] && journal_has "cache_db=$CACHE/loud.db" -t dcfs &&

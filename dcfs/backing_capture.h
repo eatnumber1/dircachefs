@@ -2,8 +2,8 @@
 #define DCFS_BACKING_CAPTURE_H_
 
 // Opening the backing tree for mount.dcfs (phase 15). OpenBacking owns the
-// three forms of dcfs.fstype: `none` opens SOURCE in the caller's namespace;
-// a native type, or none, and `bind` capture the tree with no per-type code.
+// two forms of dcfs.fstype: `bind` opens SOURCE, a directory, in the caller's
+// namespace; a native type captures the filesystem with no per-type code.
 //
 // The capture: a helper process unshares its mount namespace (so nothing it
 // mounts is visible to anyone else, and everything goes with it if it dies),
@@ -28,9 +28,8 @@ namespace dcfs {
 
 struct CaptureRequest {
   std::string source;  // as written: a device, UUID=..., host:/export, a path
-  // `-t TYPE` for mount(8); empty: it autodetects. Ignored for a bind.
+  // `-t TYPE` for mount(8); empty: it autodetects.
   std::string native_type;
-  bool bind = false;  // `mount -o bind SOURCE`
   // The options for the underlying mount, `dcfs.`-prefixed ones removed.
   std::vector<std::string> options;
   bool sloppy = false;   // -s
@@ -64,22 +63,17 @@ struct OpenedBacking {
   // registered as the source filesystem's mount fd, and open_by_handle_at
   // resolves its mount descriptor as a regular file).
   FileDescriptor root;
-  // What keeps a captured clone alive; invalid for `none`.
+  // What keeps a captured clone alive; invalid for `bind`.
   FileDescriptor tree;
 };
 
 // Opens SOURCE as `options.backing` says and applies the start checks that
 // belong to the form: nothing mounted below SOURCE (until 15.4's stubs) for
-// `none` and `bind`, and no filesystem that went read-only by itself.
-// `args.source` must be absolute for `none` and `bind` (the daemon has no
-// working directory to resolve against).
+// `bind`, and no filesystem that went read-only by itself. `args.source` must
+// be absolute for `bind` (the daemon has no working directory to resolve
+// against).
 [[nodiscard]] absl::StatusOr<OpenedBacking> OpenBacking(
     const HelperArgs &args, const HelperOptions &options);
-
-// The mount(2) flags (MS_NOSUID, ...) that correspond to the f_flag of a
-// statvfs (ST_NOSUID, ...) of the mount: what a remount of it must keep.
-// ST_RDONLY maps to MS_RDONLY; ST_RELATIME has no flag (it is the default).
-unsigned long MountFlagsFromStatvfs(unsigned long f_flag);
 
 }  // namespace dcfs
 

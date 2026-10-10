@@ -143,12 +143,14 @@ TEST(SplitHelperOptionsTest, FstypeValues) {
   };
   EXPECT_THAT(backing({}), IsOkAndHolds(Field(&HelperOptions::backing,
                                               HelperOptions::Backing::kNative)));
-  EXPECT_THAT(backing({"dcfs.fstype=none"}),
-              IsOkAndHolds(Field(&HelperOptions::backing,
-                                 HelperOptions::Backing::kNone)));
+  // Step 15.9 (russ): the directory form is spelled bind, the only spelling:
+  // none (its old name) is an error that says so, not a native type.
   EXPECT_THAT(backing({"dcfs.fstype=bind"}),
               IsOkAndHolds(Field(&HelperOptions::backing,
-                                 HelperOptions::Backing::kBind)));
+                                 HelperOptions::Backing::kDirectory)));
+  EXPECT_THAT(backing({"dcfs.fstype=none"}),
+              StatusIs(absl::StatusCode::kInvalidArgument,
+                       HasSubstr("renamed dcfs.fstype=bind")));
   EXPECT_THAT(backing({"dcfs.fstype=xfs"}),
               IsOkAndHolds(AllOf(
                   Field(&HelperOptions::backing,
@@ -255,31 +257,31 @@ TEST(SplitHelperOptionsTest, CacheDirIsNotYetSupported) {
 // The underlying mount is made by mount(8) from the native options; a type
 // of none makes none, and a remount cannot change it: say so rather than
 // drop `ro` and mount read-write.
-TEST(SplitHelperOptionsTest, NoneRefusesNativeOptionsNamingThem) {
-  EXPECT_THAT(SplitHelperOptions(Strings{"ro", "noatime", "dcfs.fstype=none"}),
+TEST(SplitHelperOptionsTest, BindRefusesNativeOptionsNamingThem) {
+  EXPECT_THAT(SplitHelperOptions(Strings{"ro", "noatime", "dcfs.fstype=bind"}),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        AllOf(HasSubstr("ro"), HasSubstr("noatime"),
-                             HasSubstr("dcfs.fstype=none"))));
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.fstype=none", "dcfs.ro"}),
+                             HasSubstr("dcfs.fstype=bind"))));
+  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.fstype=bind", "dcfs.ro"}),
               IsOkAndHolds(Field(&HelperOptions::read_only, true)));
 }
 
 // libmount hands a helper rw or ro, and what fstab said (nofail, _netdev,
 // noauto, defaults, user options, x-systemd.*): the none form takes those
 // silently, so an fstab line for it and the README's example work.
-TEST(SplitHelperOptionsTest, NoneAcceptsWhatLibmountAdds) {
+TEST(SplitHelperOptionsTest, BindAcceptsWhatLibmountAdds) {
   EXPECT_THAT(
       SplitHelperOptions(Strings{
           "rw", "defaults", "nofail", "_netdev", "noauto", "auto", "user",
           "users", "owner", "group", "nouser", "x-systemd.requires=/mnt/a",
-          "dcfs.fstype=none", "dcfs.cache_db=/c.db"}),
+          "dcfs.fstype=bind", "dcfs.cache_db=/c.db"}),
       IsOkAndHolds(Field(&HelperOptions::backing,
-                         HelperOptions::Backing::kNone)));
+                         HelperOptions::Backing::kDirectory)));
 }
 
-TEST(SplitHelperOptionsTest, NoneStillRefusesOthersByName) {
+TEST(SplitHelperOptionsTest, BindStillRefusesOthersByName) {
   EXPECT_THAT(SplitHelperOptions(Strings{"rw", "ro", "nofail", "noatime",
-                                         "dcfs.fstype=none"}),
+                                         "dcfs.fstype=bind"}),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        AllOf(HasSubstr("ro, noatime"),
                              Not(HasSubstr("nofail")),
@@ -291,7 +293,7 @@ TEST(SplitHelperOptionsTest, NoneStillRefusesOthersByName) {
 // naming UnhonoredNativeOptions).
 TEST(SplitHelperOptionsTest, RemountAcceptsNativeOptions) {
   absl::StatusOr<HelperOptions> options = SplitHelperOptions(
-      Strings{"remount", "ro", "noatime", "nofail", "dcfs.fstype=none"});
+      Strings{"remount", "ro", "noatime", "nofail", "dcfs.fstype=bind"});
   ASSERT_THAT(options, absl_testing::IsOk());
   EXPECT_THAT(UnhonoredNativeOptions(*options), ElementsAre("ro", "noatime"));
 }

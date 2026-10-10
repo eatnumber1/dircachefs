@@ -191,7 +191,7 @@ loop() {
 # $WORK/strace.out until the tracer exits with the daemon.
 STRACE_CAT=""
 start_dcfs() {
-	sd_opts="dcfs.fstype=none,dcfs.cache_db=$DB,dcfs.sync_interval_sec=3600"
+	sd_opts="dcfs.fstype=bind,dcfs.cache_db=$DB,dcfs.sync_interval_sec=3600"
 	if [ "$1" = traced ]; then
 		rm -f "$WORK/strace.fifo"
 		mkfifo "$WORK/strace.fifo"

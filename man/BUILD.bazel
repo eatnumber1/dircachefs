@@ -16,7 +16,7 @@ genrule(
     outs = ["dcfs.8.md"],
     cmd = "$(location //tools/man:extract_sections) $(location //:README.md) " +
           "$(location //dcfs:version.h) Usage Options Flags Example " +
-          "Remounting Logging 'Mounting over the source directory' " +
+          "Remounting Logging 'The bind form and the native bind recipe' " +
           "'Instances, trees and boundaries' 'Running under systemd' " +
           "'Responsibilities of the administrator' 'Exporting over NFS' " +
           "'Shutdown, crashes and restarts' " +

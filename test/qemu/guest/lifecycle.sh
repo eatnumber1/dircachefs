@@ -63,14 +63,14 @@ mount_count() {
 }
 
 # run_dcfs SOURCE DB MOUNTPOINT [--flag[=value]...]: the foreground
-# dcfs.fstype=none form of mount.dcfs (phase 15), each flag a dcfs.<flag>
+# dcfs.fstype=bind form of mount.dcfs (phase 15), each flag a dcfs.<flag>
 # option.
 run_dcfs() {
 	rd_source=$1
 	rd_db=$2
 	rd_mnt=$3
 	shift 3
-	rd_opts="dcfs.fstype=none,dcfs.cache_db=$rd_db,dcfs.foreground"
+	rd_opts="dcfs.fstype=bind,dcfs.cache_db=$rd_db,dcfs.foreground"
 	for rd_flag in "$@"; do
 		rd_opts="$rd_opts,dcfs.${rd_flag#--}"
 	done
@@ -237,7 +237,7 @@ fi
 # otherwise keep the command substitution waiting until the guest's timeout.
 # A failed start exits 32 (fuse_session_new failed); a run cut short by
 # `timeout` exits otherwise, and fails.
-OUT=$(timeout 10 "$MOUNT_DCFS" -o "dcfs.fstype=none,dcfs.cache_db=$DB_FUSEOPT,dcfs.foreground,dcfs.fuse_opt=bogus_option_xyz" "$SRC" "$MNT" 2>&1)
+OUT=$(timeout 10 "$MOUNT_DCFS" -o "dcfs.fstype=bind,dcfs.cache_db=$DB_FUSEOPT,dcfs.foreground,dcfs.fuse_opt=bogus_option_xyz" "$SRC" "$MNT" 2>&1)
 RC=$?
 if [ "$RC" -eq 32 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
 	pass fuse-opt-bad-rejected
@@ -248,7 +248,7 @@ fi
 
 # default_permissions is dcfs's own and required: naming it is a usage
 # error (exit 1, before anything is opened), not passed through twice.
-OUT=$(timeout 10 "$MOUNT_DCFS" -o "dcfs.fstype=none,dcfs.cache_db=$DB_FUSEOPT,dcfs.foreground,dcfs.fuse_opt=suid,dcfs.fuse_opt=default_permissions" "$SRC" "$MNT" 2>&1)
+OUT=$(timeout 10 "$MOUNT_DCFS" -o "dcfs.fstype=bind,dcfs.cache_db=$DB_FUSEOPT,dcfs.foreground,dcfs.fuse_opt=suid,dcfs.fuse_opt=default_permissions" "$SRC" "$MNT" 2>&1)
 RC=$?
 if [ "$RC" -eq 1 ] && [ "$(mount_count "$MNT")" -eq 0 ] &&
 	printf '%s\n' "$OUT" | grep -q "default_permissions is redundant"; then

@@ -140,21 +140,6 @@ absl::StatusOr<FileDescriptor> MountAndClone(const CaptureRequest &request) {
   ABSL_RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, staging_dir, 0700));
   ABSL_RETURN_IF_ERROR(
       RunNativeMount(NativeMountCommand(request, staging_dir), request));
-  // `ro` makes a bind read-only too, whether or not this mount(8) remounts a
-  // bind (busybox's does not; util-linux's does).
-  if (request.bind &&
-      std::find(request.options.begin(), request.options.end(), "ro") !=
-          request.options.end()) {
-    // MS_REMOUNT resets the per-mount flags, so keep the mount's own.
-    ABSL_ASSIGN_OR_RETURN(
-        FileDescriptor bound,
-        syscalls::openat(AT_FDCWD, staging_dir, O_RDONLY | O_DIRECTORY));
-    ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(*bound));
-    ABSL_RETURN_IF_ERROR(syscalls::mount(
-        nullptr, staging_dir, nullptr,
-        MS_REMOUNT | MS_BIND | MS_RDONLY | MountFlagsFromStatvfs(vfs.f_flag),
-        nullptr));
-  }
   // The clone is in no namespace, so dcfs's own mountinfo never lists it: the
   // staging mount, in this namespace, is where a superblock that went
   // read-only by itself shows (step 11.5).
@@ -257,7 +242,6 @@ CaptureRequest RequestFor(const HelperArgs &args,
                           const HelperOptions &options) {
   return {.source = args.source,
           .native_type = options.native_type.value_or(""),
-          .bind = options.backing == HelperOptions::Backing::kBind,
           .options = options.native_options,
           .sloppy = args.sloppy,
           .verbose = args.verbose > 0};
@@ -265,32 +249,13 @@ CaptureRequest RequestFor(const HelperArgs &args,
 
 }  // namespace
 
-unsigned long MountFlagsFromStatvfs(unsigned long f_flag) {
-  struct Mapping {
-    unsigned long st;
-    unsigned long ms;
-  };
-  static constexpr Mapping kMappings[] = {
-      {ST_RDONLY, MS_RDONLY},     {ST_NOSUID, MS_NOSUID},
-      {ST_NODEV, MS_NODEV},       {ST_NOEXEC, MS_NOEXEC},
-      {ST_NOATIME, MS_NOATIME},   {ST_NODIRATIME, MS_NODIRATIME},
-  };
-  unsigned long flags = 0;
-  for (const Mapping &mapping : kMappings) {
-    if ((f_flag & mapping.st) != 0) flags |= mapping.ms;
-  }
-  return flags;
-}
-
 std::vector<std::string> NativeMountCommand(const CaptureRequest &request,
                                             const std::string &staging) {
   std::vector<std::string> command = {"mount", "-n"};
   if (request.sloppy) command.push_back("-s");
   if (request.verbose) command.push_back("-v");
   std::vector<std::string> options;
-  if (request.bind) {
-    options.push_back("bind");
-  } else if (!request.native_type.empty()) {
+  if (!request.native_type.empty()) {
     command.push_back("-t");
     command.push_back(request.native_type);
   }
@@ -337,14 +302,9 @@ absl::StatusOr<CapturedTree> CaptureBacking(const CaptureRequest &request) {
 absl::StatusOr<OpenedBacking> OpenBacking(const HelperArgs &args,
                                           const HelperOptions &options) {
   OpenedBacking opened;
-  if (options.backing != HelperOptions::Backing::kNone) {
-    // A fresh native mount has nothing below it; a bind's non-recursive clone
-    // would drop what is mounted below SOURCE here, silently serving the
-    // covered directory, so it is refused like `none` (15.4: stubs). The
-    // capture checks for a forced read-only superblock in its helper.
-    if (options.backing == HelperOptions::Backing::kBind) {
-      ABSL_RETURN_IF_ERROR(RefuseMountsBelow(args.source));
-    }
+  if (options.backing == HelperOptions::Backing::kNative) {
+    // A fresh native mount has nothing below it. The capture checks for a
+    // forced read-only superblock in its helper.
     ABSL_ASSIGN_OR_RETURN(CapturedTree captured,
                           CaptureBacking(RequestFor(args, options)));
     opened.root = std::move(captured.root);

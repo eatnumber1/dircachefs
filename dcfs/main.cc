@@ -742,7 +742,7 @@ int UmountHelperMain(int argc, char *argv[]) {
 int PlainMain(int argc, char *argv[]) {
   absl::SetProgramUsageMessage(
       "dcfs is started by mount(8) as mount.dcfs: mount -t dcfs -o "
-      "dcfs.fstype=none,dcfs.cache_db=PATH SOURCE MOUNTPOINT (see README)");
+      "dcfs.fstype=bind,dcfs.cache_db=PATH SOURCE MOUNTPOINT (see README)");
   std::vector<char *> args = absl::ParseCommandLine(argc, argv);
   absl::Status usage = UsageError(
       "dcfs mounts through its mount.dcfs name: run mount.dcfs SOURCE "

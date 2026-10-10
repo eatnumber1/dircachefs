@@ -121,8 +121,11 @@ struct HelperOptions {
   // How the backing filesystem is reached (`dcfs.fstype=`).
   enum class Backing {
     kNative,  // mounted in a private namespace, by type or autodetected
-    kBind,    // SOURCE captured with a non-recursive bind
-    kNone,    // SOURCE is a directory in the caller's namespace
+    // `dcfs.fstype=bind`: SOURCE is a directory, opened in place in the
+    // caller's namespace (the mount that holds it stays reachable and is kept
+    // busy; step 15.9 renamed this form from none, and removed the detached
+    // clone that bind used to mean).
+    kDirectory,
   };
   Backing backing = Backing::kNative;
   // `dcfs.fstype=<type>` for kNative; absent: mount(8) autodetects.
@@ -142,17 +145,17 @@ struct HelperOptions {
 };
 
 // InvalidArgument for an unknown `dcfs.` option, a missing or bad value, and
-// for native options the mount cannot honor (dcfs.fstype=none makes no
+// for native options the mount cannot honor (dcfs.fstype=bind makes no
 // underlying mount, a remount does not change it: `ro` there is `dcfs.ro`);
 // Unimplemented for dcfs.cache_dir (step 15.3).
 [[nodiscard]] absl::StatusOr<HelperOptions> SplitHelperOptions(
     std::span<const std::string> options);
 
 // The native options of a mount that makes no native mount of its own (a
-// `dcfs.fstype=none`, or a remount) that dcfs does not honor: all but what
+// `dcfs.fstype=bind`, or a remount) that dcfs does not honor: all but what
 // libmount adds to a helper's options or fstab says for mount(8) itself
 // (rw, defaults, nofail, _netdev, noauto, auto, the user options, x-*).
-// Empty for a native or bind mount, which hands them to mount(8).
+// Empty for a native mount, which hands them to mount(8).
 std::vector<std::string> UnhonoredNativeOptions(const HelperOptions &options);
 
 // The payload that marks a status as a usage mistake or a refusal to run

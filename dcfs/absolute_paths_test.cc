@@ -50,14 +50,11 @@ TEST_F(AbsolutePathsTest, MountpointAndCacheDatabaseBecomeAbsolute) {
   EXPECT_EQ(args.source, "/dev/x");
 }
 
-TEST_F(AbsolutePathsTest, NoneAndBindSourcesAreAlwaysPaths) {
-  for (auto backing :
-       {HelperOptions::Backing::kNone, HelperOptions::Backing::kBind}) {
-    HelperArgs args = {.source = "rel", .mountpoint = "/m"};
-    HelperOptions options = Options(backing);
-    ASSERT_THAT(MakePathsAbsolute(args, options), IsOk());
-    EXPECT_EQ(args.source, real_ + "/rel");
-  }
+TEST_F(AbsolutePathsTest, ABindSourceIsAlwaysAPath) {
+  HelperArgs args = {.source = "rel", .mountpoint = "/m"};
+  HelperOptions options = Options(HelperOptions::Backing::kDirectory);
+  ASSERT_THAT(MakePathsAbsolute(args, options), IsOk());
+  EXPECT_EQ(args.source, real_ + "/rel");
 }
 
 // Specs that are not paths of this directory stay as written: a ZFS dataset,

@@ -102,9 +102,9 @@ TEST(ParseFsckArgsTest, ProgressDescriptorAndUnknownFlagsGoToTheBacking) {
 TEST(ParseFsckArgsTest, OptionsAndVersion) {
   ASSERT_OK_AND_ASSIGN(
       FsckArgs args,
-      ParseFsckArgs(Strings{"-o", "dcfs.fstype=none,dcfs.cache_db=/c.db",
+      ParseFsckArgs(Strings{"-o", "dcfs.fstype=bind,dcfs.cache_db=/c.db",
                             "/srv/x"}));
-  EXPECT_EQ(args.options, "dcfs.fstype=none,dcfs.cache_db=/c.db");
+  EXPECT_EQ(args.options, "dcfs.fstype=bind,dcfs.cache_db=/c.db");
   EXPECT_TRUE(args.backing_flags.empty());  // -o is ours, not the backing's
   ASSERT_OK_AND_ASSIGN(FsckArgs version, ParseFsckArgs(Strings{"-V"}));
   EXPECT_TRUE(version.version);

@@ -11,7 +11,7 @@
 //  1. the backing filesystem: for a native `dcfs.fstype` it runs that type's
 //     fsck on the device with the flags it was given and relays its status
 //     (a passno on a dcfs line means what it means on a plain one); for
-//     `none` and `bind` there is no device, and it says so;
+//     `bind` (a directory) there is no device, and it says so;
 //  2. dcfs's own cache database (CheckCacheDatabase): that no daemon holds
 //     it, SQLite's integrity_check, the schema version, and the dirty set's
 //     sanity. A cache is rebuilt, not repaired: with -a, -p or -y a corrupt

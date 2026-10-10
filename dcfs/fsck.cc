@@ -455,10 +455,9 @@ int FsckMain(std::span<const std::string> words) {
     status = CombineFsckStatus(
         status, CheckBacking(type, args->device, args->backing_flags));
   } else {
-    std::cout << EscapeBytes(args->device) << ": dcfs.fstype="
-              << (split->backing == HelperOptions::Backing::kNone ? "none"
-                                                                  : "bind")
-              << " serves a directory: there is no device to check"
+    std::cout << EscapeBytes(args->device)
+              << ": dcfs.fstype=bind serves a directory: there is no device "
+                 "to check"
               << std::endl;
   }
 

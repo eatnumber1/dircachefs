@@ -303,8 +303,8 @@ After startup the daemon holds no path strings. This is what makes
 mounting dcfs over the directory it caches a supported configuration: once
 the mount covers the path, the path leads back into dcfs.
 
-1. At startup, before mounting, SOURCE (for `dcfs.fstype=none`; the other
-   forms receive the captured tree as a descriptor) and `dcfs.cache_db` are
+1. At startup, before mounting, SOURCE (for `dcfs.fstype=bind`; a native
+   type receives the captured tree as a descriptor) and `dcfs.cache_db` are
    opened by path once. The submount check reads SOURCE's path and
    `/proc/self/mountinfo` in the same window; it is a policy decision that
    identity never depends on. `/proc/sys/kernel/random/boot_id` is read
@@ -375,7 +375,7 @@ So (amendment 12 of the plan):
 
 - At startup, before mounting, `MountsBelow()` (`dcfs/mounts_below.h`)
   reads `/proc/self/mountinfo` and dcfs refuses to start if any mount
-  point lies strictly below SOURCE, naming them (for `none` and `bind`; a
+  point lies strictly below SOURCE, naming them (for `bind`; a
   native capture is a fresh mount with nothing below it). A mount on
   SOURCE itself is fine.
 - A boundary that appears at runtime, which the startup check cannot see
@@ -400,12 +400,12 @@ So (amendment 12 of the plan):
   is on its filesystem. Mount order (parents first) and unmount order
   (children first, `umount -R`) are the administrator's, expressed by fstab
   order or, under systemd, by the path-prefix dependencies of mount units.
-  The `none` and `bind` forms serve a directory of the caller's namespace
-  and so meet real mounts below it: they refuse, as above. The plan's stub
-  records for the submounts present at start of a `bind` instance, the
-  rule that a child whose SOURCE a parent's dcfs covers must use a native
-  type, and the rest of step 15.4 are not built; the only stubs today are
-  the runtime ones.
+  The `bind` form serves a directory of the caller's namespace and so meets
+  real mounts below it: it refuses, as above. The plan's stub records for the
+  submounts present at start (which only the removed clone form needed, step
+  15.9), the rule that a child whose SOURCE a parent's dcfs covers must use a
+  native type, and the rest of step 15.4 are not built; the only stubs today
+  are the runtime ones.
 
 ### Boundary stubs
 
@@ -470,8 +470,8 @@ served.
   name up again. The kernel looks a link's or rename's target name up
   before sending the request, so a link or rename *into* a stub fails at
   that lookup, with `ENOTSUP`.
-- **Not done here** (Phase 15.4): the bind form's recorded mount points,
-  reverting stubs that are no longer boundaries without a relisting, and
+- **Not done here** (Phase 15.4): reverting stubs that are no longer
+  boundaries without a relisting, and
   non-directory boundaries (file mount points).
 
 The machinery for several filesystems is kept rather than deleted: device
@@ -2017,7 +2017,7 @@ WTF-8 form).
 dcfs is mounted by `mount(8)`, from fstab or the command line, the same way
 (plan decision 5, russ 2026-10-04), so the binary is a mount helper. The
 plain `dcfs --source=DIR` command line is gone (decision 8): its job is the
-`dcfs.fstype=none` form, and every test mounts that way. Run as `dcfs`, the
+`dcfs.fstype=bind` form (named none until step 15.9), and every test mounts that way. Run as `dcfs`, the
 binary has only `--help` and `--version`.
 
 **Dispatch.** `main()` looks at the basename of `argv[0]`: `mount.dcfs` and
@@ -2044,9 +2044,9 @@ filesystem the administrator cannot reach afterwards needs both (decision 10).
 `flags_consistency_test` keeps the settable flags and the README's tables
 equal.
 
-For `dcfs.fstype=none` there is no underlying mount to give native options
+For `dcfs.fstype=bind` there is no underlying mount to give native options
 to, so they are refused (exit 1) rather than ignored: a silent `noatime` on
-a `none` line would claim a behavior nothing provides. What libmount adds
+a `bind` line would claim a behavior nothing provides. What libmount adds
 to a helper's options or fstab says for `mount(8)` itself is not native:
 `rw`, `defaults`, `nofail`, `_netdev`, `noauto`, `auto`, the `user` family
 and `x-*` (`UnhonoredNativeOptions`). Without that list the `rw` libmount
@@ -2061,8 +2061,8 @@ start, not a usage mistake), and for a failed native mount its own status
 `absl::Status` rather than codes because the code says what failed and the
 exit status says who is to blame.
 
-**Capturing the backing tree** (`dcfs/backing_capture.{h,cc}`; every form
-but `none`). dcfs reaches the filesystem without mounting it anywhere the
+**Capturing the backing tree** (`dcfs/backing_capture.{h,cc}`; native
+types only). dcfs reaches the filesystem without mounting it anywhere the
 caller can see:
 
 1. A helper process, forked by the daemon, calls `unshare(CLONE_NEWNS)` and
@@ -2071,7 +2071,7 @@ caller can see:
    point. Doing this in the daemon itself would put dcfs, which later mounts
    FUSE and is seen by everyone, in another namespace.
 2. In the namespace it runs `/bin/mount -n [-s] [-v] [-t TYPE] [-o OPTIONS]
-   SOURCE STAGING` (`-o bind` for `bind`), so mount(8) and the
+   SOURCE STAGING`, so mount(8) and the
    type's own helper (`mount.nfs`, `mount.cifs`, sshfs) do tag resolution
    (`UUID=`), type probing, flags and credentials: dcfs has no per-type code
    and no libmount. Its output and exit status are collected (the text up to
@@ -2081,10 +2081,7 @@ caller can see:
    read-only by itself under a read-write mount (the step 11.5 refusal,
    `RefuseIfForcedReadOnly`). It has to be here: the clone of step 4 is in
    no namespace, so the daemon's own mountinfo never lists it and the check
-   could not see it there. For `bind` with `ro`, the clone is also remounted
-   read-only with the mount's own per-mount flags kept (`MS_REMOUNT` resets
-   the ones it is not given), whether or not this mount(8) remounts a bind
-   read-only itself (busybox's does not, util-linux's does).
+   could not see it there.
 4. It clones the mount with `open_tree(OPEN_TREE_CLONE)` (not recursive: a
    submount of SOURCE, if any, stays out) and sends the descriptor to the
    daemon over a socket pair with `SCM_RIGHTS`, then exits. The clone is an
@@ -2114,14 +2111,24 @@ procfs directory exists wherever dcfs can run (the daemon reads
 anyone serves from, and the tmpfs covering it exists only in the helper's
 namespace.
 
-`none` opens SOURCE as a path in the caller's namespace (`openat`, the one
-use of a path) and applies the same start checks: nothing mounted below it
-and no forced-read-only superblock. `bind` captures with a non-recursive
-bind, so a mount below SOURCE would be dropped from the clone and the
-covered directory served in its place; it is therefore refused like `none`
-(`RefuseMountsBelow`, naming the mount points) rather than served wrongly.
+`bind` opens SOURCE as a path in the caller's namespace (`openat`, the one
+use of a path) and applies the start checks: nothing mounted below it
+(`RefuseMountsBelow`, naming the mount points) and no forced-read-only
+superblock.
 
-**Paths** (SOURCE of `none` and `bind`, MOUNTPOINT, `dcfs.cache_db`) are made
+*Why there is no cloned form.* Until step 15.9 `dcfs.fstype=bind` captured SOURCE
+with a non-recursive bind (`mount -o bind`, then `open_tree(OPEN_TREE_CLONE)`),
+and the opened-in-place form was `none`. The clone added only a lifetime
+independent of the original mount (it could be unmounted or moved while dcfs
+kept serving), isolation from later submounts, and `ro` applied at the backing;
+all are reproduced by a native bind mount made first (README, "The bind form
+and the native bind recipe"), for a second code path in the capture helper
+(the bind remount that kept `nosuid` and `nodev`, the spec rules, the
+recorded-mount-points bookkeeping 15.4 planned for it). russ:
+delete it, and give the in-place form the name an fstab reader expects, `bind`;
+`none` is refused, with a message that says it was renamed.
+
+**Paths** (SOURCE of `bind`, MOUNTPOINT, `dcfs.cache_db`) are made
 absolute against the working directory before the fork
 (`MakePathsAbsolute`), since the daemon has none. A native SOURCE is made
 absolute only if it names an existing relative path: ZFS datasets, virtiofs
@@ -2271,7 +2278,7 @@ on-disk formats it serves: it reads them through the kernel. `fsck.ext4`,
 `fsck.xfs` and `fsck.btrfs` do, so for a native `dcfs.fstype` (or the type
 `blkid` finds) the helper runs that checker on the device with the flags it was
 given and relays its status, which makes passno 2 on a dcfs line mean what it
-means on a plain line. `none` and `bind` serve a directory of a filesystem the
+means on a plain line. `bind` serves a directory of a filesystem the
 administrator mounts: there is no device here to check, and the helper says so
 (and systemd would wait for a device unit that never appears, so the README
 says to use passno 0 on those lines).
@@ -2301,7 +2308,7 @@ combines several checkers: 0 ok, 1 corrected, 4 uncorrected, 8 operational,
 **Remount** (decision 10). `mount -o remount` reaches the wrapper through
 `mount.fuse.dcfs` with `remount` among the options. It never touches the
 underlying filesystem, which dcfs cannot reach (it is a clone in no
-namespace) and which the administrator owns for `none`. `RemountDcfs` finds
+namespace) and which the administrator owns for `bind`. `RemountDcfs` finds
 the topmost mount at the mount point in `/proc/self/mountinfo`, requires its
 type to be `fuse.dcfs`, and calls `mount(2)` with `MS_REMOUNT`, the
 per-mount flags it already has (`MS_REMOUNT` resets what it is not given) and
@@ -2320,7 +2327,7 @@ fork):
 
 1. `umask(0)`, logging set up (`WARNING` and above to standard error until
    the syslog sink replaces it), the open-file limit raised.
-2. Open the backing tree (`OpenBacking`: a capture, or a path for `none`)
+2. Open the backing tree (`OpenBacking`: a capture, or a path for `bind`)
    with the start checks of the form: nothing mounted below SOURCE, no
    superblock that went read-only by itself (see "A filesystem that went
    read-only by itself"). After this the daemon holds the tree by
@@ -2677,7 +2684,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | Test | What it proves |
 |---|---|
 | `boot_test` | The guest environment works: dcfs and helpers are present, disks mount. |
-| `mount_dcfs_test` | The `mount.dcfs` wrapper, run as mount(8) runs it, on an ext4 disk: capture by type, by autodetection and by `UUID=` (the FUSE source is the spec as written, no backing mount is left in the caller's namespace, unmount stops dcfs, a SIGKILLed dcfs releases the superblock); the option split (`ro` and `dcfs.ro`, unknown `dcfs.` options and failing native mounts mount nothing and say why, native options refused for `none`, libmount's own accepted); remount changes only the dcfs mount and ignores native options with a warning; daemonization (returns when dcfs serves, stdio on `/dev/null`, session leader, cwd `/`, syslog follows the threshold, a late failure is the exit status 32, `dcfs.foreground` stays and logs to stderr); the `bind` and `none` forms, also over the same path; relative paths; a file mounted below SOURCE refused; non-root refused with the reason; `mount.fuse.dcfs`; `umount.fuse.dcfs` and `umount.fuse` (step 15.6b: unmounts as `umount -i`, waits for the daemon of a dcfs mount whose superblock the unmount ended (fusectl says so), which is made slow to exit with a dm-delay backing device: a mount of the same instance right after it works, a crashed daemon returns at once, one of two bind copies, `umount -r` on a busy mount and a copy in another mount namespace return at once with the daemon alive, the last copy's unmount waits, `-l` detaches without waiting, with fusectl not mounted nothing waits, a busy mount fails with umount's own status, usage errors are 1, a mount that is not dcfs's is just unmounted), and `fsck.dcfs` (step 15.5: the flags and device reach a stand-in checker, its status is relayed and or'ed with the cache's, a garbage cache is reported by `-n` and deleted by `-y`, a held database is reported and left, usage errors). It runs under busybox's `mount`, which runs no `mount.<type>` helpers, so step 15.6 runs the util-linux path. |
+| `mount_dcfs_test` | The `mount.dcfs` wrapper, run as mount(8) runs it, on an ext4 disk: capture by type, by autodetection and by `UUID=` (the FUSE source is the spec as written, no backing mount is left in the caller's namespace, unmount stops dcfs, a SIGKILLed dcfs releases the superblock); the option split (`ro` and `dcfs.ro`, unknown `dcfs.` options and failing native mounts mount nothing and say why, native options refused for `bind`, libmount's own accepted); remount changes only the dcfs mount and ignores native options with a warning; daemonization (returns when dcfs serves, stdio on `/dev/null`, session leader, cwd `/`, syslog follows the threshold, a late failure is the exit status 32, `dcfs.foreground` stays and logs to stderr); the `bind` form (a directory opened in place), also over the same path, and `none`, its old name, refused; relative paths; a file mounted below SOURCE refused; non-root refused with the reason; `mount.fuse.dcfs`; `umount.fuse.dcfs` and `umount.fuse` (step 15.6b: unmounts as `umount -i`, waits for the daemon of a dcfs mount whose superblock the unmount ended (fusectl says so), which is made slow to exit with a dm-delay backing device: a mount of the same instance right after it works, a crashed daemon returns at once, one of two bind copies, `umount -r` on a busy mount and a copy in another mount namespace return at once with the daemon alive, the last copy's unmount waits, `-l` detaches without waiting, with fusectl not mounted nothing waits, a busy mount fails with umount's own status, usage errors are 1, a mount that is not dcfs's is just unmounted), and `fsck.dcfs` (step 15.5: the flags and device reach a stand-in checker, its status is relayed and or'ed with the cache's, a garbage cache is reported by `-n` and deleted by `-y`, a held database is reported and left, usage errors). It runs under busybox's `mount`, which runs no `mount.<type>` helpers, so step 15.6 runs the util-linux path. |
 | `readonly_test` | Read-only operations are served from the cache with backing inode numbers; a warm metadata pass reads zero sectors, also after a restart; startup refuses a mount below `SOURCE`, and a boundary that appears at runtime is refused rather than cached (a stub). |
 | `boundary_test` | A mount (every filesystem) and a btrfs subvolume appearing below the source are stub directories: listed, a directory with the boundary root's mode and owner and an inode number at or above 2^63 (`d_ino` agrees), `ENOTSUP` for everything inside (logged once per stub), `EXDEV` for renaming the stub, nothing reaching either side; the same inode numbers after a restart. |
 | `passthrough_test` | File contents go through passthrough: reads match, move the backing read counter, and cost the daemon almost no CPU for 64 MiB; opens do not leak descriptors; all of it survives a restart. |
