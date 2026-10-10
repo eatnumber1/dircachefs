@@ -2938,3 +2938,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   no lane is running. Next per the Queue: the trial runbook (item 2), the first dispatch when the
   pace allows (meter at 91% this morning; today's spend: six Haiku runs and one Sonnet triage).
   Push point: main at this commit.
+- The trial runbook (Queue item 2) dispatched (implementer, lane-1): a one-page procedure for
+  russ's host, exact commands and expected outputs, the control hour included.
