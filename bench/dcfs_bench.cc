@@ -21,8 +21,10 @@
 #include <benchmark/benchmark.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -30,6 +32,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/status/status.h"

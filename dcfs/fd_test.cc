@@ -3,11 +3,16 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <cstdlib>
+#include <utility>
+
 #include "absl/log/check.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {

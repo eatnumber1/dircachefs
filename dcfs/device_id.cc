@@ -4,7 +4,7 @@
 #include <linux/btrfs.h>
 #include <linux/fs.h>
 #include <linux/magic.h>
-#include <linux/types.h>
+#include <sys/statfs.h>
 #include <sys/vfs.h>
 
 #include <algorithm>
@@ -21,6 +21,7 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
+#include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
 

@@ -2,7 +2,7 @@
 
 #include <fcntl.h>
 #include <linux/dm-ioctl.h>
-#include <linux/fs.h>
+#include <sys/mount.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 
@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 

@@ -6,7 +6,6 @@
 // //dcfs:dir_cache_fs_fault_phase3_before_syscall_test, whose trace
 // validation must reject the trace.
 
-#include <cstdint>
 #include <string_view>
 
 #include "absl/status/statusor.h"

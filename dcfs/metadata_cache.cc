@@ -1,5 +1,6 @@
 #include "dcfs/metadata_cache.h"
 
+#include <linux/stat.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 
@@ -19,11 +20,11 @@
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
-#include "absl/log/log.h"
 #include "absl/random/distributions.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "absl/time/time.h"
 #include "dcfs/context.h"
 #include "dcfs/device_id.h"
 #include "dcfs/escape.h"

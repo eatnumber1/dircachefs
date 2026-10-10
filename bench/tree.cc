@@ -1,11 +1,12 @@
 #include "bench/tree.h"
 
 #include <fcntl.h>
-#include <sys/stat.h>
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"

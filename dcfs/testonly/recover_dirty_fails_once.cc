@@ -12,7 +12,6 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "dcfs/context.h"
-#include "dcfs/metadata_cache.h"
 
 namespace dcfs::testonly {
 

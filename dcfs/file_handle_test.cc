@@ -1,15 +1,15 @@
 #include "dcfs/file_handle.h"
 
 #include <fcntl.h>
+#include <linux/stat.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <cerrno>
-#include <climits>
 #include <cstdint>
 #include <cstdlib>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/hash/hash.h"

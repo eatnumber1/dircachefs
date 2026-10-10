@@ -1,5 +1,7 @@
 #include "dcfs/remount.h"
 
+#include <cerrno>
+
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/status.h"

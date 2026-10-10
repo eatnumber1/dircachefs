@@ -1,5 +1,6 @@
 #include "dcfs/mount_options.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 

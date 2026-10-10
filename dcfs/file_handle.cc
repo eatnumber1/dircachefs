@@ -1,7 +1,7 @@
 #include "dcfs/file_handle.h"
 
 #include <fcntl.h>
-#include <sys/stat.h>
+#include <linux/stat.h>
 
 #include <cstdint>
 #include <optional>
@@ -17,7 +17,6 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
-#include "absl/types/optional.h"
 #include "dcfs/device_id.h"
 #include "dcfs/fd.h"
 #include "dcfs/mount_fds.h"

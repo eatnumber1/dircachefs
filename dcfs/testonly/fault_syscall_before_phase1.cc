@@ -6,12 +6,10 @@
 // dcfs/BUILD.bazel), only into //dcfs:dir_cache_fs_fault_syscall_before_phase1_test,
 // whose trace validation must reject the trace at that syscall.
 
-#include <cstdint>
 #include <string_view>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "dcfs/backing.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
 #include "dcfs/metadata_cache.h"

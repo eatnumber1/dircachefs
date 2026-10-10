@@ -16,6 +16,7 @@
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
+#include "absl/types/source_location.h"
 #include "dcfs/context.h"
 #include "dcfs/escape.h"
 #include "dcfs/metadata_cache.h"
@@ -23,6 +24,7 @@
 #include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
+#include "dcfs/testonly/fake_bookkeeping.h"
 #include "sqlite3.h"
 
 namespace dcfs::testonly {

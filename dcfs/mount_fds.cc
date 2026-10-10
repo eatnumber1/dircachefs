@@ -6,6 +6,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "dcfs/device_id.h"
+#include "dcfs/fd.h"
 #include "dcfs/status.h"
 
 namespace dcfs {

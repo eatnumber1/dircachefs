@@ -1,15 +1,17 @@
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <fcntl.h>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <sys/file.h>
-#include <sys/resource.h>
-#include <sys/stat.h>
 #include <utility>
 #include <vector>
 
@@ -18,20 +20,20 @@
 #include "absl/container/fixed_array.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
-#include "absl/flags/reflection.h"
-#include "absl/flags/usage_config.h"
 #include "absl/flags/usage.h"
+#include "absl/flags/usage_config.h"
 #include "absl/log/globals.h"
+#include "absl/log/initialize.h"
+#include "absl/log/log.h"
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"
-#include "absl/log/initialize.h"
 #include "absl/log/log_sink_registry.h"
-#include "absl/log/log.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/status_builder.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
@@ -39,28 +41,28 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_replace.h"
 #include "absl/strings/string_view.h"
-#include "absl/strings/ascii.h"
 #include "absl/time/time.h"
 #include "dcfs/absolute_paths.h"
 #include "dcfs/backing.h"
 #include "dcfs/backing_capture.h"
 #include "dcfs/context.h"
+#include "dcfs/device_id.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fd.h"
-#include "dcfs/fsck.h"
-#include "dcfs/mount_dcfs.h"
-#include "dcfs/mount_options.h"
-#include "dcfs/remount.h"
 #include "dcfs/file_handle.h"
-#include "dcfs/metadata_cache.h"
+#include "dcfs/fsck.h"
 #include "dcfs/fuse_ops.h"
+#include "dcfs/interrupts.h"
+#include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
+#include "dcfs/mount_dcfs.h"
 #include "dcfs/mount_fds.h"
-#include "dcfs/mounts_below.h"
+#include "dcfs/mount_options.h"
 #include "dcfs/protocol_events.h"
+#include "dcfs/remount.h"
 #include "dcfs/session_loop.h"
-#include "dcfs/startup_channel.h"
 #include "dcfs/sqlite.h"
+#include "dcfs/startup_channel.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
@@ -68,6 +70,7 @@
 #include "dcfs/umount_helper.h"
 #include "dcfs/version.h"
 #include "fuse_lowlevel.h"
+#include "fuse_opt.h"
 
 ABSL_FLAG(
     double, attr_timeout_sec, 3600,

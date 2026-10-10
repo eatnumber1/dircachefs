@@ -4,7 +4,6 @@
 
 #include <fcntl.h>     // O_ACCMODE, O_APPEND
 #include <linux/fs.h>  // FS_IOC_*, FS_*_FL
-#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -30,7 +29,6 @@
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
 #include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
-#include "sqlite3.h"
 
 namespace dcfs::testonly {
 namespace {

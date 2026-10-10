@@ -1,7 +1,6 @@
 #include "dcfs/mount_fds.h"
 
 #include <fcntl.h>
-#include <unistd.h>
 
 #include <cstdint>
 #include <utility>

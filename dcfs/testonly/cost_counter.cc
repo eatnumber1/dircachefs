@@ -1,10 +1,12 @@
 #include "dcfs/testonly/cost_counter.h"
 
-#include <cstdint>
 #include <string>
 #include <string_view>
 
 #include "absl/strings/str_cat.h"
+#include "absl/types/source_location.h"
+#include "dcfs/context.h"
+#include "dcfs/protocol_events.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/invariant_checker.h"
 

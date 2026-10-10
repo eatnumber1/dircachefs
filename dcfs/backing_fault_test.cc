@@ -10,21 +10,19 @@
 // and only deviates when a test has armed FaultState for the specific path
 // it cares about. No production code is touched by any of this.
 
-#include <algorithm>
-#include <cerrno>
-#include <cstring>
 #include <fcntl.h>
+#include <sys/types.h>
+
+#include <cerrno>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
-#include <sys/xattr.h>
-#include <unistd.h>
-#include <utility>
-#include <vector>
 
-#include "absl/status/status_matchers.h"
 #include "absl/status/status.h"
+#include "absl/status/status_matchers.h"
 #include "dcfs/backing.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"

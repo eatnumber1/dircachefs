@@ -1,5 +1,6 @@
 #include "dcfs/syslog_sink.h"
 
+#include <sys/syslog.h>
 #include <syslog.h>
 
 #include "absl/base/log_severity.h"

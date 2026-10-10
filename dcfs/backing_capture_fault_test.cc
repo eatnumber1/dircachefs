@@ -8,7 +8,7 @@
 // `sh -c true`, so nothing is mounted; the staging tmpfs is real.
 
 #include <sys/socket.h>
-#include <unistd.h>
+#include <sys/types.h>
 
 #include <cerrno>
 #include <string>

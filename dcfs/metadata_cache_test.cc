@@ -1,11 +1,13 @@
 #include "dcfs/metadata_cache.h"
 
+#include <linux/stat.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 
 #include <cstdint>
-#include <random>
 #include <optional>
+#include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>

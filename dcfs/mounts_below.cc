@@ -11,13 +11,14 @@
 // interface over parsing a small text file.
 
 #include <fcntl.h>
-#include <sys/stat.h>
+#include <linux/stat.h>
 
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -26,7 +27,6 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
-#include "dcfs/escape.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"

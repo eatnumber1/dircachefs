@@ -1,8 +1,6 @@
 #include "dcfs/mounts_below.h"
 
 #include <fcntl.h>
-#include <sys/mount.h>
-#include <sys/stat.h>
 
 #include <cerrno>
 #include <cstdlib>

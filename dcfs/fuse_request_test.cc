@@ -1,11 +1,15 @@
 #include "dcfs/fuse_request.h"
 
-#include <cerrno>
+#include <fcntl.h>
 #include <sys/stat.h>
+
+#include <cerrno>
+#include <cstddef>
 #include <vector>
 
 #include "absl/status/status.h"
 #include "dcfs/status.h"
+#include "fuse_lowlevel.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {

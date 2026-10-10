@@ -6,13 +6,15 @@
 // its own because of the wrap (BUILD.bazel).
 
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 #include <cerrno>
+#include <cstddef>
 #include <string>
 #include <vector>
 
+#include "absl/base/log_severity.h"
 #include "absl/functional/function_ref.h"
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"

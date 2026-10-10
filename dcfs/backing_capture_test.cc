@@ -1,10 +1,7 @@
 #include "dcfs/backing_capture.h"
 
-#include <sys/mount.h>
-#include <sys/statvfs.h>
 
 #include <string>
-#include <vector>
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"

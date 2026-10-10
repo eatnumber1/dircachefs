@@ -5,11 +5,14 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 
 #include "absl/cleanup/cleanup.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/functional/function_ref.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_builder.h"
@@ -21,6 +24,7 @@
 #include "dcfs/protocol_events.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
+#include "sqlite3.h"
 
 namespace dcfs {
 namespace sqlite3 {

@@ -1,11 +1,13 @@
 #include "dcfs/session_loop.h"
 
 #include <poll.h>
+#include <sys/poll.h>
 
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 
 #include "absl/log/log.h"
 #include "absl/status/statusor.h"

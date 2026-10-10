@@ -1,9 +1,6 @@
 #include "dcfs/device_id.h"
 
 #include <fcntl.h>
-#include <sys/mount.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include <array>
 #include <cerrno>
@@ -18,7 +15,6 @@
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "dcfs/fd.h"
-#include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
