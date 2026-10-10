@@ -2852,3 +2852,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   25.21, 25.22, 25.17, 25.23 part 1 merged; main is the push point. Stopping dispatches for the
   night (estimated spend about 3 points; the meter is read in the morning). Lane-2's agent is
   resumable for the rest of 25.23.
+- russ's morning rulings: (1) tidy stays in --config=fast (A now, C later: trim test files or split
+  dir_cache_fs_test.cc if CI's fast job says so); (2) mount-after-unmount without fusectl: keep and
+  document, mount fusectl in the remounting test guests, keep one no-fusectl test, kernel patch 6
+  removes it later (README, kernel-patches.md, 15.10); (3) blocked-task diagnostics, 26.23; and a
+  new rule: anything goes in unsubmitted code, submitted code obeys (style 1.11, agent
+  definitions). Usage this morning: 91% all-models, 40% Fable; two points a day; one Haiku lane.

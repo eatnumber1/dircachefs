@@ -762,3 +762,35 @@ dump the guest's blocked-task state when the watchdog fires; both
 involve a timer, so they wait for him. Lane-3 has a leftover
 `.scratch/` tree (377 MB, a 0555 directory inside) that the classifier
 would not let the agent remove.
+
+## 26.23 Blocked-task diagnostics in the guests (russ, 2026-10-11; B of the btrfs-hang follow-ups)
+
+From 26.22's finding D (the btrfs shard's hour: block I/O stopped under
+generic/650's CPU hotplug; not reproduced in 60 runs). russ: do B, not
+A as submitted code. (1) When xfstests.sh's watchdog fires, dump the
+blocked tasks' kernel stacks into the serial log (sysrq-w via
+/proc/sysrq-trigger, and /proc/PID/stack for every D-state task) before
+killing the test; the same at the host-side kill if the guest is still
+answering. (2) Turn on the kernel's hung-task detector in the quiet
+guest kernel (hung_task_timeout_secs 120, panic off) so a stall prints
+its stack by itself; check the quiet-kernel idle test still shows no
+spontaneous activity. (3) A failing-first check for (1): a fixture that
+parks a process in D state is hard; a fixture that puts a task in S with
+a known stack and asserts the dump contains it is the test. The agent
+may bound the scratch reset or add any timer while reproducing or
+debugging (style 1.11's working-tree clause), but no such code is
+submitted; generic/650 is not excluded. Owner: dcfs-investigator, after
+the current 25.23 round, within the pace.
+
+## 15.10 fusectl in the guests that remount; one test without it (russ, 2026-10-11)
+
+russ's decision on the mount-after-unmount question: keep the behaviour,
+document it (README, done 2026-10-11), mount fusectl in every test guest
+that unmounts and mounts the same cache in sequence (xfstests done in
+26.22; audit the fault, freeze, recover, power, nfs and lifecycle guests
+and mount it where a remount follows an unmount, in guest/init or the
+script), and keep at least one test that proves dcfs works without
+fusectl (mount_dcfs.sh's no-fusectl case: name it in the README and the
+gates table so it is not removed). The limitation is removed by kernel
+patch 6 (synchronous FUSE_DESTROY), noted in kernel-patches.md. Owner:
+dcfs-mechanical.

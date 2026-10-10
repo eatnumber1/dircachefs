@@ -20,3 +20,5 @@ Shape of a function that does several things (russ, 2026-10-10, `docs/style.md` 
 Before writing string, container, function-object or status code, read the swaps table at the top of `docs/abseil-utilities.md` (the pinned Abseil's utilities); hand-rolling what a header gives is a finding.
 
 Before you report (russ, 2026-10-10: "Make sure coders run clang-tidy before being shut down. Don't want to lose their context!"): run the style checks on your own diff while your context is live: `bazel test --config=fast //tools/...` (repo_shape, banned symbols, raw syscalls, and from step 25.21 the clang-tidy and clang-query checks), and fix every finding in code you touched; never add an allowlist entry for code you wrote. A report that leaves style findings on the diff is not done, and a second agent fixing them later costs the context you already have.
+
+While working, anything goes (russ, 2026-10-11): a sleep, a retry loop, a CHECK or a printf to reproduce, bisect or measure is fine in your working tree. None of it may be in a commit: submitted code obeys the no-timers, no-retry, no-crash rules, and the checks refuse it.

@@ -1189,6 +1189,13 @@ recovery protocol, concurrency, and the test strategy.
   either. A wait that is expected and does not end (a daemon stuck in the
   kernel on a dead backing disk) ends with Ctrl-C, or when systemd's stop
   timeout kills the helper; there is no timeout of dcfs's own.
+  Without `fusectl`, then, a mount of the same cache database started right
+  after an unmount can find the earlier daemon still finishing and fail with
+  "cache database ... is in use by another dcfs process"; run the mount again
+  once it has exited. dcfs works without `fusectl`; it works better with it,
+  and systemd mounts it whenever the fuse module loads. The limitation goes
+  when the kernel can tell the daemon to finish before `umount` returns
+  (`docs/plan/notes/kernel-patches.md`, patch 6).
 - **A mount started while the daemon of an earlier mount with the same device
   number is still shutting down waits for it.** The daemon of a new mount
   takes its lock after the kernel's mount exists, so for that long the mount

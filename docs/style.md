@@ -921,6 +921,15 @@ idle 256 core supercomputer to a 1 core raspberry pi under 40 loadavg."
   removes them). A guest script waits for a process with `wait`, a fifo read, a
   lock (`flock FILE true`) or a pidfd, not a loop of `sleep 0.1`.
 
+**While working, anything goes; what is submitted obeys the rules** (russ,
+2026-10-11: "timers _are_ allowed at all times while working on code.
+_Submitted_ code must avoid them per our current rules, but _unsubmitted_
+code can do arbitrary hacks"). A `sleep` to see whether a race is timing,
+a retry loop to reproduce, a `CHECK` to find a state, a printf: fine in a
+working tree, in a scratch branch, in a measurement. None of it lands:
+the mechanical checks (banned symbols, repo_shape, the matchers) refuse
+them in a commit, and a commit that carries one is a step not done.
+
 ### 1.12 No retry loops
 
 russ, 2026-10-10: "no retry loops. I understand they may sometimes be
