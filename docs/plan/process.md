@@ -160,9 +160,17 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   (mechanical and docs steps merge on the orchestrator's read plus CI);
   rules front-loaded into dispatch prompts so a review is a check, not a
   second design pass; low effort for mechanical work; the protocol-heavy
-  queue sequenced rather than parallel; no new dispatches near 90% of the
-  weekly limit, and russ told. Each lane's `user.bazelrc` caps its tests, e.g.
-  `test --local_test_jobs=2` and `build --local_resources=memory=4096`. Prefer `SendMessage` follow-ups to
+  queue sequenced rather than parallel. Amended 2026-10-10 (russ: "You
+  don't need to avoid the quota limit at all costs. In fact, if you
+  _don't_ use it all it's basically wasted money for credits. Just pace
+  yourself."): the weekly budget is spent, not hoarded, at a pace that
+  lands near 100% at the reset: divide what is left by the days left and
+  run as many lanes as that rate buys (at 16% with six days left, about one
+  busy Sonnet lane); near the end of the week, an unused remainder goes to
+  queued work rather than being left. A red push still gets fixed whatever
+  the pace. Each lane's `user.bazelrc` caps its tests (since 2026-10-10:
+  `--jobs=4`, `--local_test_jobs=4`, 20 GB; the machine has 8 cores and
+  62 GB). Prefer `SendMessage` follow-ups to
   new agents. Shut down agents, background loops and Bazel servers that
   are no longer needed.
 - If a step needs more than about three agent runs to land, pause and tell

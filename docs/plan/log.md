@@ -2670,3 +2670,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   6.8.0-146). Every lane's user.bazelrc now `--jobs=4`, `--local_test_jobs=4`, 20 GB;
   execution.md's ground rule updated. russ pushed 75239c4; CI run 38030966315 watched in the
   background. The freeze holds (weekly 84%); nothing dispatched.
+- russ, 2026-10-10: pace the budget, do not freeze ("if you don't use it all it's basically
+  wasted money"). process.md amended: spend to about 100% at the reset, lanes sized by remaining
+  percent over remaining days (one busy Sonnet lane now). 26.17a dispatched (investigator,
+  lane-1): RAM-backed guest disks for the fault/ACE/freeze/power/recover tests with memory and
+  time measurements; parts 2-5 (three-part budgets, hang guard, load-starvation flag) follow as
+  26.17b.
