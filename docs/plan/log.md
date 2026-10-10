@@ -2975,3 +2975,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   every minute with the dcfs terminal captured; the client agent runs metadata rounds over NFS
   every ~5 minutes for 60 minutes with READ asserted zero per round. Results to the trial note
   when both sides report.
+- 21.1: russ calls the extended trial a success. The one wake during the hour came through the
+  media pool's own NFS export from an unrelated reader on the client machine, not through dcfs
+  (the dcfs mount's counters: READ 0 all run; no backing access in the dcfs log). Recorded in the
+  note, phase 21 and the Queue (item 2 done). The order from here is unchanged: 26.17b (running),
+  then 17.3, then 25.10 and 12.16/12.18; 15.12 added from the trial.

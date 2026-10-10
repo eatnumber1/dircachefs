@@ -104,3 +104,13 @@ one-byte read woke it through passthrough. Client leg over NFS in
 progress from the dev host (an orchestrator subagent, staged so the
 server can spin the disk down between stages). Not yet: the hour-long
 watch, CPU and sync-point cadence, the control hour, the fstab shape.
+
+**21.1 verdict (russ, 2026-10-11): success.** Metadata-only work, local
+and from an NFS client over 175k files, left the disk in standby; one
+data read woke it; an hour of remote rounds produced one wake, traced to
+an unrelated read through the media pool's own export, not through dcfs.
+Findings for the plan: 15.12 (an NFS export that is a bind of the
+mountpoint across a daemon restart), the 524 stub error over NFS (15.4),
+the fd-across-restarts design candidate. Still to do on hardware: the
+cadence numbers, the control hour, the fstab shape, a write test on a
+spare disk, handle survival with a read that must reach the server.

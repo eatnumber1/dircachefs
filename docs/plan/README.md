@@ -54,7 +54,7 @@ phase's file; `log.md` says where things stand.
 | 18 | [Disk quota (EDQUOT)](phases/18-disk-quota-edquot.md) | planned (just before 19) |
 | 19 | [Soak test (manual)](phases/19-soak-test.md) | planned (last automated phase) |
 | 20 | [Statistics](phases/20-statistics.md) | design to be discussed first |
-| 21 | [Real-hardware checks](phases/21-real-hardware-checks.md) (russ, manual) | 21.1 after 11; 21.2 last; runbook written 2026-10-11 (notes/trial-runbook-2026-10-11.md), russ to run it after an HWE kernel boot; first run 2026-10-11 on the production server (russ's agent): standby held under metadata work, a read woke the disk; NFS client leg in progress (notes/trial-2026-10-11.md); client leg done 2026-10-11: 175k files listed over NFS with the disk asleep, one read woke it; the restart-under-NFS finding is 15.12 |
+| 21 | [Real-hardware checks](phases/21-real-hardware-checks.md) (russ, manual) | 21.1 after 11; 21.2 last; runbook written 2026-10-11 (notes/trial-runbook-2026-10-11.md), russ to run it after an HWE kernel boot; first run 2026-10-11 on the production server (russ's agent): standby held under metadata work, a read woke the disk; NFS client leg in progress (notes/trial-2026-10-11.md); client leg done 2026-10-11: 175k files listed over NFS with the disk asleep, one read woke it; the restart-under-NFS finding is 15.12; 21.1 verdict 2026-10-11: success (russ) |
 
 Execution started 2026-10-05 (wave 1).
 
@@ -76,7 +76,9 @@ New phases are frozen. The order from here, and why:
    dispatched before item 2. 26.27 (the
    gate on regions) turned out to be a coverage-pipeline change, not a
    gate tweak, and is parked in item 6.
-2. **21.1, the spare-disk trial** (russ, on real hardware; the procedure in
+2. **21.1, the spare-disk trial: done 2026-10-11, a success** (russ; the
+   write-up is notes/trial-2026-10-11.md; the leftovers are in phase 21).
+   The original text follows for the record. (russ, on real hardware; the procedure in
    phases/21 and its notes for his setup). The orchestrator's part: a
    one-page runbook for russ's machine (the HWE kernel boot, the fstab
    line, the warm-up, the hour of metadata work with `hdparm -C` checks,
