@@ -7,14 +7,17 @@
 // directly, on an in-memory database; the lines are read back from a file
 // in TEST_TMPDIR.
 
-#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
+#include <linux/stat.h>
+#include <sys/types.h>
 
-#include "dcfs/testonly/trace_recorder.h"
+#include <utility>
+
+#include "absl/status/status_macros.h"
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -45,6 +48,7 @@
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "dcfs/testonly/files.h"
+#include "dcfs/testonly/trace_recorder.h"
 #include "fuse_lowlevel.h"  // FUSE_SET_ATTR_*
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"

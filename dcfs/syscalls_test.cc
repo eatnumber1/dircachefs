@@ -2,31 +2,36 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>
-#include <sched.h>
+#include <linux/mount.h>
+#include <linux/stat.h>
 #include <sys/file.h>
-#include <sys/mount.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syslog.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 #include <syslog.h>
-#include <unistd.h>
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <span>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
 namespace dcfs {

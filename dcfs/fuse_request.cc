@@ -1,8 +1,13 @@
 #include "dcfs/fuse_request.h"
 
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#include <optional>
+#include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -12,8 +17,10 @@
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/time/time.h"
+#include "dcfs/credentials.h"
 #include "dcfs/ret_check.h"
 #include "dcfs/status.h"
+#include "fuse_lowlevel.h"
 
 namespace dcfs {
 

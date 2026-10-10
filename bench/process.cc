@@ -2,13 +2,15 @@
 
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/mount.h>
-#include <sys/wait.h>
+#include <sys/types.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <utility>
+#include <ctime>
+#include <string>
+#include <vector>
 
 #include "absl/status/statusor.h"
 #include "absl/strings/str_split.h"

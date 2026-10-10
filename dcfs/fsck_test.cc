@@ -6,9 +6,11 @@
 
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/types.h>
 
-#include <cstdint>
+#include <cerrno>
 #include <cstdlib>
+#include <ctime>
 #include <string>
 #include <vector>
 

@@ -3,20 +3,25 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/file.h>
-#include <sys/wait.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cerrno>
+#include <cstddef>
+#include <cstdlib>
+#include <ctime>
 #include <iostream>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/ascii.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
@@ -30,6 +35,7 @@
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"
 #include "dcfs/version.h"
+#include "sqlite3.h"
 
 namespace dcfs {
 namespace {

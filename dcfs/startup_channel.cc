@@ -2,10 +2,10 @@
 
 #include <fcntl.h>
 #include <sys/socket.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include <cstdlib>
+#include <ctime>
 #include <string>
 #include <utility>
 
@@ -17,7 +17,6 @@
 #include "dcfs/fd.h"
 #include "dcfs/fork_split.h"
 #include "dcfs/mount_dcfs.h"
-#include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"

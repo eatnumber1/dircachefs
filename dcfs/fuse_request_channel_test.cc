@@ -19,12 +19,21 @@
 // writev callback -- deterministic fault injection with no real kernel or
 // mountpoint involved.
 
+#include <sys/types.h>
+#include <sys/uio.h>
+
+#include <cstdint>
+#include <utility>
+
+#include "absl/base/log_severity.h"
+#include "absl/log/log_entry.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "fuse_opt.h"
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/uio.h>
-#include <unistd.h>
 
 #include <cerrno>
 #include <cstring>

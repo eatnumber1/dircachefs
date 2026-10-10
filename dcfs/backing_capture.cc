@@ -1,15 +1,15 @@
 #include "dcfs/backing_capture.h"
 
 #include <fcntl.h>
+#include <linux/mount.h>
 #include <sched.h>
-#include <sys/mount.h>
 #include <sys/socket.h>
-#include <sys/statvfs.h>
-#include <sys/wait.h>
+#include <sys/types.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <utility>

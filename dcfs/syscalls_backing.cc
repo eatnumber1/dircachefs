@@ -1,23 +1,30 @@
 #include "dcfs/syscalls_backing.h"
 
 #include <fcntl.h>
-#include <linux/fs.h>
+#include <linux/stat.h>
 #include <sys/mount.h>
+#include <sys/stat.h>
+#include <sys/statfs.h>
+#include <sys/statvfs.h>
 #include <sys/syscall.h>
+#include <sys/types.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 
 #include <cerrno>
-#include <climits>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <ctime>
+#include <span>
 #include <string_view>
-#include <vector>
 
-#include "absl/status/status_macros.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "dcfs/escape.h"
+#include "dcfs/fd.h"
 #include "dcfs/status.h"
 
 namespace dcfs {

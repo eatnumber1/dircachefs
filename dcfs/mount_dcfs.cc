@@ -1,8 +1,8 @@
 #include "dcfs/mount_dcfs.h"
 
-#include <sys/mount.h>
+#include <sys/mount.h>  // IWYU pragma: keep (MS_* macros)
 
-#include <cstdint>
+#include <cstddef>
 #include <optional>
 #include <span>
 #include <string>
@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/flags/commandlineflag.h"
 #include "absl/flags/reflection.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"

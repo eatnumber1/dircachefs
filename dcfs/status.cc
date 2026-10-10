@@ -2,7 +2,11 @@
 
 #include <cerrno>
 #include <optional>
+#include <string>
+#include <string_view>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
 
 namespace dcfs {

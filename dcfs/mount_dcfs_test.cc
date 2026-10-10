@@ -5,7 +5,7 @@
 // behavior as a program is test/qemu/guest/mount_dcfs.sh.
 #include "dcfs/mount_dcfs.h"
 
-#include <sys/mount.h>
+#include <sys/mount.h>  // IWYU pragma: keep (MS_* macros)
 
 #include <optional>
 #include <string>

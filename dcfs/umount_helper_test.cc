@@ -5,7 +5,8 @@
 
 #include <fcntl.h>
 #include <sys/file.h>
-#include <sys/wait.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 
 #include <cstdlib>
 #include <string>
@@ -16,7 +17,7 @@
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/fd.h"
-#include "dcfs/status.h"
+#include "dcfs/mount_dcfs.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/syscalls_process.h"

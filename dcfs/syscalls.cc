@@ -6,22 +6,29 @@
 #include <sys/file.h>
 #include <sys/fsuid.h>
 #include <sys/mount.h>
+#include <sys/poll.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/syslog.h>
+#include <sys/types.h>
 #include <syslog.h>
 #include <unistd.h>
 
 #include <cerrno>
 #include <cstdlib>
+#include <ctime>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/escape.h"
+#include "dcfs/fd.h"
 #include "dcfs/status.h"
 
 namespace dcfs {

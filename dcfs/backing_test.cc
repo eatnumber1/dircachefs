@@ -2,11 +2,9 @@
 
 #include <fcntl.h>
 #include <linux/magic.h>
-#include <sys/mount.h>
+#include <linux/stat.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
-#include <sys/xattr.h>
-#include <unistd.h>
 
 #include <cerrno>
 #include <cstdint>
@@ -29,12 +27,14 @@
 #include "absl/log/scoped_mock_log.h"
 #include "absl/random/random.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/strip.h"
+#include "absl/types/source_location.h"
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
 #include "dcfs/device_id.h"

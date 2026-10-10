@@ -37,14 +37,14 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>
-#include <sys/ioctl.h>
-#include <sys/mount.h>
+#include <sys/ioctl.h>  // IWYU pragma: keep (FS_IOC_* macros)
+#include <sys/mount.h>  // IWYU pragma: keep (MS_* macros)
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
 #include <sys/uio.h>
-#include <sys/xattr.h>
+#include <sys/xattr.h>  // IWYU pragma: keep (XATTR_* macros)
 #include <unistd.h>
 
 #include <algorithm>

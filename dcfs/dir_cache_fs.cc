@@ -2,8 +2,10 @@
 
 #include <fcntl.h>
 #include <linux/fs.h>  // FS_IOC_*
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
+#include <sys/types.h>
 #include <time.h>
 
 #include <algorithm>
@@ -20,6 +22,9 @@
 #include <vector>
 
 #include "absl/algorithm/container.h"
+#include "absl/base/log_severity.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/functional/function_ref.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -34,6 +39,7 @@
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
 #include "dcfs/escape.h"
+#include "dcfs/fd.h"
 #include "dcfs/fuse_request.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/mount_options.h"

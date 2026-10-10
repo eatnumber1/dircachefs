@@ -2,7 +2,6 @@
 #include <sys/file.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
 #include <cerrno>
 #include <cstdint>

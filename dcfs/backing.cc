@@ -1,5 +1,12 @@
 #include "dcfs/backing.h"
 
+#include <linux/stat.h>
+#include <sys/types.h>
+
+#include <ctime>
+
+#include "dcfs/sqlite.h"
+
 // Needed only for the FUSE_SET_ATTR_* constants SetAttr() dispatches on;
 // nothing here otherwise touches libfuse.
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)

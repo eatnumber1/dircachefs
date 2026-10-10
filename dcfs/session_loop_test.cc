@@ -4,12 +4,14 @@
 // the callback runs once, after the INIT reply was written, and never when
 // the INIT is refused.
 
+#include <sys/types.h>
+#include <sys/uio.h>
+
+#include "absl/status/statusor.h"
+#include "fuse_opt.h"
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
-#include "dcfs/session_loop.h"
-
 #include <fcntl.h>
-#include <sys/uio.h>
 
 #include <bit>
 #include <cerrno>
@@ -22,6 +24,7 @@
 
 #include "absl/status/status_matchers.h"
 #include "dcfs/fd.h"
+#include "dcfs/session_loop.h"
 #include "dcfs/syscalls_backing.h"
 #include "fuse_kernel.h"
 #include "fuse_lowlevel.h"

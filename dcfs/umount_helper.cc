@@ -2,20 +2,21 @@
 
 #include <fcntl.h>
 #include <sys/file.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
+#include <sys/types.h>
 
 #include <cerrno>
+#include <cstddef>
+#include <cstdlib>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "dcfs/escape.h"
 #include "dcfs/fd.h"
