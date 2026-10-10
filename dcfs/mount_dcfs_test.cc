@@ -23,6 +23,7 @@ ABSL_FLAG(double, test_interval_sec, 5, "stands in for a dcfs flag");
 namespace dcfs {
 namespace {
 
+using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
 using ::testing::AllOf;
@@ -205,6 +206,23 @@ TEST(SplitHelperOptionsTest, AllowOtherIsRefusedAsRedundant) {
                                 HasSubstr("remove")));
     EXPECT_EQ(ExitStatusFor(split.status()), 1);
   }
+}
+
+// libmount puts the mount's own allow_other (it is in every dcfs mount's
+// options now) into the options of a remount: that is not a line that names
+// it, and not a native option to warn about.
+TEST(SplitHelperOptionsTest, ARemountMayCarryAllowOther) {
+  absl::StatusOr<HelperOptions> split =
+      SplitHelperOptions(Strings{"remount", "dcfs.ro", "allow_other"});
+  ASSERT_THAT(split, IsOk());
+  EXPECT_TRUE(split->remount);
+  EXPECT_TRUE(split->read_only);
+  EXPECT_THAT(split->native_options, testing::IsEmpty());
+  // The order does not matter.
+  EXPECT_THAT(SplitHelperOptions(Strings{"allow_other", "remount"}), IsOk());
+  // Anywhere else it is still refused.
+  EXPECT_THAT(SplitHelperOptions(Strings{"allow_other", "ro"}),
+              StatusIs(absl::StatusCode::kInvalidArgument));
 }
 
 TEST(SplitHelperOptionsTest, ValuedFlagWithoutValueIsAnError) {

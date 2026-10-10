@@ -223,13 +223,19 @@ absl::StatusOr<HelperArgs> ParseHelperArgsImpl(
 absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
     std::span<const std::string> options) {
   HelperOptions split;
+  std::optional<std::string_view> bare_allow_other;
   for (const std::string &option : options) {
     if (option.empty()) continue;
     if (option == "remount") {
       split.remount = true;
       continue;
     }
-    if (option == "allow_other") return AllowOtherRefused(option);
+    if (option == "allow_other") {
+      // A line that names it is refused; libmount's remount carries the mount's
+      // own, which is neither an error nor an option of the underlying mount.
+      bare_allow_other = option;
+      continue;
+    }
     if (!absl::StartsWith(option, kDcfsPrefix)) {
       split.native_options.push_back(option);
       continue;
@@ -287,6 +293,9 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
       if (!value.has_value()) return BadOption(option, "needs a value");
       split.flags.emplace_back(std::string(name), std::string(*value));
     }
+  }
+  if (bare_allow_other.has_value() && !split.remount) {
+    return AllowOtherRefused(*bare_allow_other);
   }
   if (split.backing == HelperOptions::Backing::kNone && !split.remount) {
     const std::vector<std::string> unhonored = UnhonoredNativeOptions(split);
