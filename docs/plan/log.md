@@ -2836,3 +2836,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   and four stale lines removed. The agent recommends moving the tidy/query actions to presubmit
   (9 min cold on a core-header change, 26 s no-op) with a diff-only or skip-when-absent shape for
   fast; left for russ, placement unchanged. 7.5 marked mostly landed. Lane-4 free.
+- 25.22 dispatched (mechanical, lane-2): the census card (confession, comment-restates-code,
+  repeated-handler, hand-rolled-utility, name-repeats-scope, nested-happy-path, status-carried
+  advisory; break-up over 60 lines), skipping what the tidy allowlist and matchers already hold;
+  output under docs/plan/notes/style-census-2026-10-10/. One lane running; push point for the
+  morning is main (25.21 included, so the CI run shows the style checks' cost).
