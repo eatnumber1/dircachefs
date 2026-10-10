@@ -129,6 +129,33 @@ use it as design guidance rather than firm rules."
   field or return type without a qualifier, as a report-only count until
   plan step 25.16 annotates the tree and turns it into a gate (today 0
   annotations; the report counts them).
+- **No `char *` for strings** (russ, 2026-10-11, on `openlog(const char
+  *ident, ...)` in syscalls.h): "do not use `char*` to refer to strings.
+  For owned strings, use std::string, for unowned strings, use
+  std::string_view ... At all entry points to the program (such as `argv`
+  in main), convert first from `char*` to an approved type, and at all
+  exit points (such as `write`, in syscalls.h) convert back." Owned:
+  `std::string`; unowned: `std::string_view` (in our C++20 build
+  `absl::string_view` is an alias of it, so the `std::` spelling, as 1.2
+  already says); several: `std::span<const std::string_view>` or a vector.
+  Entry points convert at once: `main` turns `argv` into a
+  `std::span<const std::string_view>` (or the vector of strings it
+  already builds) before anything else reads it; a libfuse callback turns
+  its `const char *name` into a `std::string_view` on its first line; a
+  SQLite column read becomes a `string_view`/`string` in `sqlite.cc`.
+  Exit points convert back, and a `string_view` is not NUL-terminated, so
+  the conversion is a copy: `std::string(view).c_str()` (russ: "This
+  should mostly happen (or exclusively) in syscalls.h"); the other exits
+  are the SQLite C API in `sqlite.cc` and `fuse_reply_*` in
+  `fuse_request.cc`/`fuse_ops.cc`. Nothing between an entry and an exit
+  holds a `char *` to a string. (`char *` as a byte buffer handed to
+  `read(2)` is not a string: a `FixedArray<char>`, 1.2.) Mechanically: a
+  clang-query matcher `char_pointer_string` for `char *`/`const char *`
+  parameters, returns, fields and locals; zero allowed outside the
+  boundary files (`syscalls*.cc/.h`, `syscalls_process.*`, `sqlite.cc`,
+  `fuse_ops.cc`, `fuse_request.cc`), whose own entries are allowlisted
+  and only shrink (25.24; 67 sites outside syscalls today, 15 of them in
+  fuse_ops.cc).
 - **Locals are non-const by default** (russ, 2026-10-11, on `const struct
   rlimit limit = *current;`): "no const on local scalars (unless needed).
   Our default is non-const. Sometimes const is needed or useful to code
@@ -824,7 +851,8 @@ each.
 - **A protocol change updates the TLA+ model** in the same change
   (section 6).
 - **Names are bytes**: `std::string`/`string_view`, `char *` only at the
-  syscall and libfuse boundary, `EscapeBytes` when printed, `memcmp` order.
+  syscall, SQLite and libfuse boundaries (1.2, "No `char *` for strings"),
+  `EscapeBytes` when printed, `memcmp` order.
 - **Requests are cancellable** (from phase 22): an operation over about
   100 ms checks for interruption at safe points and has a cancellation
   test.

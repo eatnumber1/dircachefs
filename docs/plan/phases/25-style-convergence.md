@@ -782,3 +782,31 @@ follow-up); the CLOCK_* include-cleaner case is unsettled (the tool
 credits no header at all for CLOCK_MONOTONIC/REALTIME: a
 `syscalls.h` named constant or a deny of that symbol family in the
 check's options is tomorrow's decision).
+
+## 25.24 No `char *` for strings: convert at the boundaries (russ, 2026-10-11; after 25.20, implementer, lane-2)
+
+Style 1.2's bullet. (1) The `char_pointer_string` matcher under 25.21's
+aspect (a `char *`/`const char *` parameter, return type, field or local
+VarDecl; fixtures both ways), with the boundary files' sites allowlisted
+(`dcfs/syscalls.h/.cc`, `syscalls_backing.*`, `syscalls_process.*`,
+`sqlite.cc`, `fuse_ops.cc`, `fuse_request.cc`) and every other file at
+zero after (2). (2) The sweep, by file: `main.cc` (argv →
+`std::span<const std::string_view>` or the existing vector of strings,
+immediately; the `IsDcfsFlagFile`-style predicates take `string_view`),
+`fsck.cc`, `backing_capture.cc`, `umount_helper.cc`, `fuse_request.h`,
+`sqlite.h` (its public surface takes `string_view`; the C API calls in
+`sqlite.cc` copy to a `std::string` when the API needs NUL termination,
+or pass `data()`/`size()` where it takes a length, which SQLite's bind
+and prepare do), `bench/`. Wrapper signatures in `syscalls.h` take
+`std::string_view` (`openlog(std::string_view ident, ...)`,
+`execv(std::string_view path, std::span<const std::string_view> argv)`,
+...) and do the `std::string(view).c_str()` copy inside; where a
+syscall keeps the pointer past the call (`openlog` keeps `ident`;
+`execv`'s argv must be NUL-terminated `char *` arrays) the wrapper owns
+the storage or documents the lifetime. (3) The libfuse boundary:
+`fuse_ops.cc` converts each callback's `const char *name` on its first
+line and passes `string_view` down; `fuse_reply_*` conversions stay in
+`fuse_request.cc`. No behaviour change; the bytes rule (names are
+bytes; embedded NULs cannot occur in names but can in xattr values,
+which are not strings) re-checked at each conversion. Tests follow in a
+second pass.

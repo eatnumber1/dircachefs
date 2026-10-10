@@ -2872,3 +2872,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Style rule (russ, 2026-10-11): locals are non-const by default; const where it says something
   (a reference to others' data, thread-safety, constexpr, a relied-on invariant). Style 1.2; a
   const_local_value matcher and the sweep folded into 25.20 (about 88 production sites).
+- Style rule (russ, 2026-10-11): no `char *` for strings; std::string owned, std::string_view
+  unowned, std::span of views for argv; convert at the program's entry points and back at the
+  exits (syscalls.h mostly; SQLite and libfuse the others) with a NUL-terminated copy. Style 1.2;
+  25.24 queued (a matcher with boundary-only allowlists; 67 sites outside syscalls).
