@@ -845,5 +845,17 @@ rather than the lcov line export; lines stay printed as information; the
 baseline file holds regions and branches, seeded from the first run
 after the change; `docs/coverage.md` and the gate's self-check test
 updated; the 26.14 coverage_diff tooling checked to work on regions.
-After this a reformat cannot move the gate. Mechanical, after 26.26, in
-the in-flight group (a fix to a check we rely on, not new work).
+After this a reformat cannot move the gate.
+Finding (2026-10-11, the mechanical agent stopped without changes,
+rightly): only lcov leaves the guest (run-qemu.sh's cov-lcov.sh converts
+each test's profiles in the guest), and lcov carries no regions; a region
+figure needs one profdata merged across all tests on the host, then
+`llvm-cov export`, since per-test JSON totals would double-count shared
+regions. So this is a pipeline change: per-test profraw or profdata as
+test outputs, `llvm-profdata merge` in .github/ci/coverage.sh, JSON
+export, totals.regions and totals.branches for the gate; lcov kept for
+the per-line reports and coverage_diff. Investigator, not mechanical.
+Until then the lcov gate stays (lines and branches) with the reformat
+case documented in docs/coverage.md: a formatting-only change that moves
+the line figure is re-baselined with the 26.26 alignment check as the
+evidence. Parked in the Queue's item 6 unless russ pulls it forward.

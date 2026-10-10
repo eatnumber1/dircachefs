@@ -73,8 +73,9 @@ New phases are frozen. The order from here, and why:
 
 1. **Finish what is in flight**, nothing new beside it: 25.23's remaining
    clang-tidy sweeps (lane-2, Haiku), the CI triages (26.24 merged; 26.26
-   the post-reformat coverage figure; 26.27 the gate on regions instead of
-   lines), and any red push.
+   the post-reformat coverage figure, merged), and any red push. 26.27 (the
+   gate on regions) turned out to be a coverage-pipeline change, not a
+   gate tweak, and is parked in item 6.
 2. **21.1, the spare-disk trial** (russ, on real hardware; the procedure in
    phases/21 and its notes for his setup). The orchestrator's part: a
    one-page runbook for russ's machine (the HWE kernel boot, the fstab
@@ -106,7 +107,8 @@ New phases are frozen. The order from here, and why:
    (blocked-task diagnostics), 15.10 (fusectl in the remounting guests),
    12.11b/c, 12.15,
    17.2 (setgid), 17.1b/c, 11.7's remainder, 11.3c, 7.3, 7.6b, 7.7,
-   26.14b, 26.25 (the ACE dropahead window on xfs). The kernel patches (notes/kernel-patches.md) go last of all,
+   26.14b, 26.25 (the ACE dropahead window on xfs), 26.27 (merged profdata
+   to the host so the gate can count regions). The kernel patches (notes/kernel-patches.md) go last of all,
    after everything else is done (russ, 2026-10-11: their timelines are so
    long that our order adds nothing); the two kernel bug mails are
    separate and russ's. The style checks
