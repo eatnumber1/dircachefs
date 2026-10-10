@@ -363,6 +363,12 @@ retry_missing() {
 	done </tmp/retry.txt
 }
 
+# Tests that write to the raw scratch device while dcfs does not hold it: the
+# device then holds what they made, not the file system of this run, for every
+# test after them in the batch (generic/740 makes one of every kind). They end
+# their batch, and the next one starts with a new scratch file system.
+SOLO="generic/740"
+
 : >$RESULTS
 cd $XF || exit 1
 t0=$(date +%s)
@@ -378,6 +384,18 @@ while [ "$done_n" -lt "$TOTAL" ]; do
 		break
 	fi
 	set -- $(sed -n "$((done_n + 1)),$((done_n + n))p" $SHARD_LIST)
+	cut=0
+	i=0
+	for id in "$@"; do
+		i=$((i + 1))
+		case " $SOLO " in
+		*" $id "*)
+			cut=$i
+			break
+			;;
+		esac
+	done
+	[ "$cut" -gt 0 ] && set -- $(echo "$@" | cut -d' ' -f1-"$cut")
 	done_n=$((done_n + $#))
 	run_batch "$@"
 	retry_missing

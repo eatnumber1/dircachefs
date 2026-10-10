@@ -316,7 +316,29 @@ fuse | fuse.dcfs | dcfs)
 				set -- "$@" "$a"
 			fi
 		done
-		exec /bin/mount -t fuse.dcfs -o "dcfs.cache_db=/cache/${dev##*/}.db,dcfs.allow_other$fuse_opts" "$@"
+		# A mount right after the unmount of the same device can find it busy:
+		# the daemon has exited and released its lock (umount waited for that),
+		# but the kernel drops the mount namespace it made the backing mount in
+		# a moment later, from a work queue. Nothing announces that, so the mount
+		# is tried again, a few times, when it says the device is busy. Step
+		# 15.6b's helper owns this wait for real. (Not for "database in use": the
+		# lock is what umount waited for, and a second dcfs that is really there,
+		# generic/411, 589 and 732, must fail at once, not after retries.)
+		tries=0
+		while :; do
+			out=$(/bin/mount -t fuse.dcfs -o "dcfs.cache_db=/cache/${dev##*/}.db,dcfs.allow_other$fuse_opts" "$@" 2>&1)
+			rc=$?
+			[ "$rc" -eq 0 ] && break
+			case "$out" in
+			*busy*) ;;
+			*) break ;;
+			esac
+			tries=$((tries + 1))
+			[ "$tries" -ge 25 ] && break
+			sleep 0.2
+		done
+		[ -n "$out" ] && echo "$out" >&2
+		exit "$rc"
 	fi
 	;;
 esac

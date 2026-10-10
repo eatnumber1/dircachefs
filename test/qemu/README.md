@@ -1781,7 +1781,14 @@ in it, what was left out and which tests that turns into "not run".
   logs of a run; read it before listing it, since a reason that says a probe
   broke (`xfs_io ... failed`) is a finding.
 - The scratch device gets a new file system (`mkfs`, whose status is checked)
-  before each batch, and the guest's `/cache` and `/tmp` are tmpfs. The
+  before each batch, and the guest's `/cache` and `/tmp` are tmpfs. A test
+  that writes to the raw scratch device (generic/740 makes a file system of
+  every kind on it) ends its batch (`SOLO` in `xfstests.sh`): what it leaves
+  there would fail every later test of the batch that mounts the device
+  (generic/770 did). The `mount` of the image tries again, a few times, when
+  the device is busy: a mount right after an unmount can meet the backing
+  mount the daemon's namespace still pins (nothing announces that; 15.6b's
+  helper owns the wait). The
   `umount` of the image waits for the daemon with `flock` on its cache database
   (the daemon holds the lock until it exits); it is 15.6's interim recipe and
   goes away when 15.6b's `umount.fuse.dcfs` lands, which xfstests then
