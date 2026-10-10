@@ -289,7 +289,7 @@ dcfs/fuse_request.cc|FuseRequest::ReplyWrite|misc-include-cleaner|1
 dcfs/fuse_request.cc|FuseRequest::ReplyXattrSize|misc-include-cleaner|1
 dcfs/fuse_request.cc|FuseRequest::~FuseRequest|bugprone-exception-escape|1
 dcfs/fuse_request.cc|FuseRequest::~FuseRequest|misc-include-cleaner|1
-dcfs/fuse_request_channel_test.cc|<file scope>|misc-include-cleaner|6
+dcfs/fuse_request_channel_test.cc|<file scope>|misc-include-cleaner|5
 dcfs/fuse_request_channel_test.cc|FakeGetattr|misc-include-cleaner|1
 dcfs/fuse_request_channel_test.cc|FakeReadNeverCalled|misc-include-cleaner|1
 dcfs/fuse_request_channel_test.cc|FakeWritev|misc-include-cleaner|1
@@ -297,7 +297,6 @@ dcfs/fuse_request_channel_test.cc|RunGetattr|bugprone-invalid-enum-default-initi
 dcfs/fuse_request_channel_test.cc|RunGetattr|misc-include-cleaner|3
 dcfs/fuse_request_channel_test.cc|Send|misc-include-cleaner|2
 dcfs/fuse_request_channel_test.cc|TEST|bugprone-unchecked-optional-access|11
-dcfs/fuse_request_channel_test.cc|TEST|misc-include-cleaner|1
 dcfs/main.cc|<file scope>|misc-include-cleaner|1
 dcfs/main.cc|ABSL_FLAG|misc-use-internal-linkage|6
 dcfs/main.cc|MountHelperMain|performance-avoid-endl|1
@@ -441,7 +440,6 @@ dcfs/syscalls_backing.cc|mknodat|misc-include-cleaner|2
 dcfs/syscalls_backing.cc|mount|google-runtime-int|1
 dcfs/syscalls_backing.cc|name_to_handle_at|misc-include-cleaner|2
 dcfs/syscalls_backing.cc|openat|misc-include-cleaner|2
-dcfs/syscalls_backing.cc|read|misc-include-cleaner|1
 dcfs/syscalls_backing.cc|renameat2|misc-include-cleaner|1
 dcfs/syscalls_backing.cc|statx|misc-include-cleaner|2
 dcfs/syscalls_backing.cc|utimensat|misc-include-cleaner|2

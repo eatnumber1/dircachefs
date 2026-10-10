@@ -229,8 +229,9 @@ TEST_F(BackingTest, PopulatedDirectoryIsServedFromTheCache) {
   const std::vector<std::string> names = {"dir", "fifo", "file",
                                           "hl1", "hl2",  "link"};
   std::vector<struct statx> expected;
-  for (const std::string &name : names)
+  for (const std::string &name : names) {
     expected.push_back(StatPath(Path(name)));
+  }
 
   // Lock() (chmod 0) no longer proves the backing filesystem is
   // unreachable: dcfs always runs as root now, and root's CAP_DAC_OVERRIDE

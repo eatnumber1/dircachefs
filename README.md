@@ -148,7 +148,8 @@ The `dcfs(8)` man page is generated from this README: `bazel build
 
 Format changes with `bazel run //tools:format` (the pinned clang-format)
 before sending them; `bazel test --config=fast //tools:format_test` fails on
-an unformatted file.
+an unformatted file. To make `git blame` skip the one-time reformat
+(7.6a), run `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
 
 ## Usage
 
