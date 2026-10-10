@@ -649,3 +649,19 @@ rules (reachable cause, one mechanism, what a name distinguishes) are
 not on the card. Budget note: Haiku's two sweeps this week (25.12,
 25.14) moved the weekly meter imperceptibly; this replaces reviewer
 tokens rather than adding to them.
+
+25.15 merged 2026-10-10 (implementer, five commits; first
+dcfs-style-reviewer pass: seven findings fixed, six questions ruled by
+the orchestrator and russ into style 1.6a): the short status macros
+enabled from //dcfs:status with a guard; SwitchTo as the worked example;
+`syscalls::setfsuid`/`setfsgid` return a Status (sentinel refused with
+EINVAL, read-back, EPERM if it did not take; `fsuid()`/`fsgid()` query
+irregulars; the read-back test restored against the wrapper, failing
+first); ProbeRecoveredRow helper, FallocateFd's explicit End gone,
+RollBack helper, no joined statuses. Ladders kept with reasons:
+FallocateFd's carried status (End before the failure's refresh),
+Transaction's pair (the pragma restore runs whatever the body returned).
+The wrappers' EPERM branch has no test (as root the kernel accepts every
+id but the sentinel). Not done here: the other `if (x.ok()) {` nested
+happy paths (12 remain; `sqlite.cc`'s RunTransaction next to touched
+code), for 25.21's matcher backlog.

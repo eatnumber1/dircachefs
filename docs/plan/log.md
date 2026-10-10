@@ -2813,3 +2813,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: `[[nodiscard]]` on a Status/StatusOr-returning function is redundant (the type is must-use);
   style 1.2 and 1.6 corrected (the guide had it backwards), the 38 sites and a repo_shape rule
   folded into 25.17.
+- 25.15 merged (lane-2 → main; gate exit 0; orchestrator read the wrapper diff): see the phase
+  file. Lane-2 free; next there: 25.17 (mechanical) once 25.21's checks land, so the sweep runs
+  with them.
