@@ -2530,3 +2530,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   fallback) and started `notes/kernel-patches.md`, the list of kernel patches we want: the FUSE
   generation series, the ext4 casefold tune oops, the btrfs destroy_inode warning, fuse_setattr's
   setgid rule, the dcache connected-alias preference, and this one.
+- russ (2026-10-10, 01:30): weekly all-models at 75% (65% two hours earlier), Fable 27%, session
+  65%. FREEZE: no new dispatches until the reset (Friday 2026-10-16 01:00); the three steps in
+  flight (15.5/15.8, 17.1's round, 12.12a) finish; then merges, CI watching and plan upkeep only;
+  no review agents unless a landing step touches crash safety or identity; small agents only for
+  something urgent (a red push, a bug russ hits). Queue resumes Friday: 26.17, 26.18, 11.7, 25.9's
+  audit, 15.3, 12.11b/c, 12.15-12.17, 17.2/17.3/17.1b.
