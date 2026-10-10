@@ -526,16 +526,20 @@ absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
   RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
   ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
-  absl::Cleanup restore_root([&saved]() { RestoreRoot(saved); });
-  // setfsgid is guaranteed to never fail
+  absl::Cleanup restore_root = [&saved] { RestoreRoot(saved); };
+  // setfsuid/setfsgid ignore an id they cannot use, but the kernel never
+  // sends one: an unmapped caller's request fails with EOVERFLOW.
   syscalls::setfsgid(caller.gid);
   RETURN_IF_ERROR(syscalls::setgroups(caller.groups));
-  // setfsuid is guaranteed to never fail
   syscalls::setfsuid(caller.uid);
   std::move(restore_root).Cancel();
   return saved;
 }
 ```
+
+(russ's original had `absl::Cleanup restore_root([&saved]() {...});` and
+a `// ... is guaranteed to never fail` comment on each bare call; the
+form above applies the rulings of 2026-10-10 below.)
 
 What it replaced had an `absl::Status status;` filled by three
 `if (status.ok())` steps, a nested block for the last one, a hand-written
@@ -597,6 +601,40 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
   `if (status.ok())`, is the failure path written by hand and hides which
   call failed; reach for it only when something must happen between the
   failure and the return that a `Cleanup` cannot express, and say what.
+- **Rulings from the first style review (25.15; orchestrator's rulings,
+  2026-10-10, under russ's "use your judgement"; russ may override any):**
+  1. When one function handles the same failure after several calls, the
+     calls move into a helper returning `Status`/`StatusOr` written with
+     `RETURN_IF_ERROR`/`ASSIGN_OR_RETURN`, and the caller handles the
+     failure once. A lambda that captures and changes the caller's
+     locals, or a copied handler, is the sign.
+  2. A type whose destructor does the scope-exit work (`cache::Mutation`
+     ends itself) is the Cleanup: no explicit call before an early
+     return. An explicit call only where the work must happen before
+     later code in the same scope, with a comment saying what must
+     follow it.
+  3. A conditional second step (`if (s.ok()) s = Next();`) becomes a
+     helper written with `RETURN_IF_ERROR`, even for one use: a free
+     function in the `.cc`'s anonymous namespace when the public
+     interface suffices.
+  4. Two statuses that may both fail are combined at the site: the
+     second's failure if only it failed, else the first with
+     `additionally, <what> failed: <second>` appended; never
+     `Status::Update`, which drops the second's text. A shared helper
+     waits for a third site.
+  5. A bare call of a cannot-fail wrapper carries no "cannot fail"
+     comment (1.5 says why). Where such a call silently ignores some
+     inputs, the comment says why those inputs cannot arrive.
+  6. A Cleanup is declared `absl::Cleanup name = [captures] { ... };`
+     (Abseil's documented form, no empty parameter list).
+- **Program output is `absl::PrintF`/`FPrintF`/`SNPrintF`/`StrFormat`,
+  never iostreams and never the C printf family** (orchestrator's ruling,
+  2026-10-10, after russ asked what the 19 sites do: `--version` lines,
+  usage, fsck.dcfs's report routed to stdout or stderr by status, bench's
+  messages and its `snprintf` into dm ioctl structs' fixed `char[]`
+  fields). The output is interface, not logging, so it keeps its bytes and
+  its stream; only the formatting call changes to the type-checked one
+  (`absl::SNPrintF` takes the same buffer and size). Log lines are `LOG`.
 - **Mechanically** (7.5's clang-tidy): `readability-else-after-return`,
   `readability-misleading-indentation`,
   `readability-function-cognitive-complexity` with a low threshold (start

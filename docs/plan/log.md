@@ -2781,3 +2781,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   with golden re-baselines in the same commit.
 - russ: absl::optional_ref<const T> allowed and preferred for an optional read-only argument;
   style 1.2's nullability bullet and 25.16 updated.
+- russ withdrew from answering the six 25.15 style questions ("use your judgement, but you're
+  bringing me too many style questions"): process.md and the style-reviewer definition amended
+  (the orchestrator decides from the guide and writes dated rulings into style.md; russ asked only
+  for recurring, unsettled, materially different choices, one at a time with full context). The
+  six rulings written into 1.6a (helper over lambda; destructor as Cleanup; straighten the
+  conditional second step; combine two statuses inline; one real-fact comment instead of
+  "cannot fail"; the `=` Cleanup form) and the program-output ruling (absl::PrintF family) into
+  1.6a and 25.20; the worked example updated; sent to the 25.15 agent.

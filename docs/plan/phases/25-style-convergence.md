@@ -585,5 +585,8 @@ change where a `'` appears, every golden that holds an escaped name
 (strace goldens, trace fixtures, log-line tests) is re-baselined in the
 same commit with before/after quoted, and the bytes rule (names are
 bytes, escaped whenever printed, style "File names are bytes") is
-re-checked on the call sites. `device_id.cc`'s hex, the `CHECK` family
-(25.9) and the helpers' own `fprintf` output stay excluded pending russ.
+re-checked on the call sites. `device_id.cc`'s hex and the `CHECK` family (25.9) stay excluded. The 19
+program-output sites (six in dcfs/: three `--version`, usage, fsck's
+report; thirteen in bench/) become `absl::FPrintF`/`PrintF`/`SNPrintF`
+with byte-identical output as the test (style 1.6a's program-output
+ruling, 2026-10-10).
