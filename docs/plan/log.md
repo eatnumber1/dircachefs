@@ -2980,3 +2980,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (the dcfs mount's counters: READ 0 all run; no backing access in the dcfs log). Recorded in the
   note, phase 21 and the Queue (item 2 done). The order from here is unchanged: 26.17b (running),
   then 17.3, then 25.10 and 12.16/12.18; 15.12 added from the trial.
+- 21.1 hour-long watch, final: seven rounds, dcfs-mount READ 0 for its whole life (1.58M RPCs),
+  about 175k GETATTRs per round from the client's attribute-cache expiry, all served from the
+  cache with the disk asleep. Table in the trial note. The client leg is finished.
