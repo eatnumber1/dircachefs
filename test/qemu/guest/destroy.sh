@@ -70,12 +70,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# uptime_ms: milliseconds since boot (busybox date has no %N).
-uptime_ms() {
-	read -r up _ </proc/uptime
-	echo "${up%.*}${up#*.}0"
-}
-
 echo "destroy.sh: kernel $(uname -r), ENTRIES=$ENTRIES BOUND_SECS=$BOUND_SECS"
 mount /dev/vdb /src
 mkdir -p /cache /mnt

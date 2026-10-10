@@ -188,4 +188,17 @@ else
 	fail waitline-process-exits "rc=$RC, want 1 (the process exited without the text)"
 fi
 
+# uptime_ms_of reads /proc/uptime's "SECONDS.CC" as decimal: "0.93" must come
+# out as 930, not "0930" (an invalid octal: destroy.sh died with "arithmetic
+# syntax error" when the guest was under a second old at its first reading).
+for pair in 0.00:0 0.05:50 0.08:80 0.93:930 0.50:500 1.05:1050 9.99:9990 19.95:19950; do
+	want=${pair#*:}
+	got=$(uptime_ms_of "${pair%:*}")
+	if [ "$got" = "$want" ]; then
+		pass "uptime-ms-${pair%:*}"
+	else
+		fail "uptime-ms-${pair%:*}" "got '$got', want $want"
+	fi
+done
+
 exit "$FAILED"

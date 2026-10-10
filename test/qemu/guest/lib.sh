@@ -250,6 +250,21 @@ daemon_fd_count() {
 	ls "/proc/${1:-$DAEMON_PID}/fd" 2>/dev/null | wc -l
 }
 
+# uptime_ms_of UPTIME: UPTIME ("SECONDS.CC", as /proc/uptime prints it) in
+# milliseconds, in 10 ms steps (busybox date has no %N).
+uptime_ms_of() {
+	_cs=${1#*.}
+	# A leading zero would make the shell read the hundredths as octal.
+	_cs=${_cs#0}
+	echo "$((${1%.*} * 1000 + ${_cs:-0} * 10))"
+}
+
+# uptime_ms: milliseconds since boot.
+uptime_ms() {
+	read -r up _ </proc/uptime
+	uptime_ms_of "$up"
+}
+
 # justified_sleep SECONDS REASON: the one sleep a guest script may use
 # (tools/repo_shape.py refuses every other: docs/style.md, "No timers"), for a
 # test whose subject is time itself (an interval that has to elapse, a

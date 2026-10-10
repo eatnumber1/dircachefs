@@ -47,12 +47,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# uptime_ms: milliseconds since boot (busybox date has no %N), 10 ms steps.
-uptime_ms() {
-	read -r up _ </proc/uptime
-	echo "${up%.*}${up#*.}0"
-}
-
 # timed NAME CMD...: runs CMD, prints its wall time.
 timed() {
 	name=$1
