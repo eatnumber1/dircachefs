@@ -166,7 +166,7 @@ absl::Status CreatedButNotCompleted(InodeId parent, std::string_view name,
 
 }  // namespace
 
-DirCacheFS::DirCacheFS(Context &ctx, Options opts)
+DirCacheFS::DirCacheFS(Context &ctx, const Options &opts)
     : ctx_(ctx), opts_(opts), last_sync_(ctx.clock->TimeNow()) {
   ctx_.open_for_write = &open_for_write_;
   ctx_.open_files = &open_files_held_;

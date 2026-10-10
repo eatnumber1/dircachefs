@@ -963,7 +963,7 @@ class DirCacheFSTest : public ::testing::Test {
   }
 
   // A BATCH_FORGET of (id, n) pairs (no reply).
-  void BatchForget(std::vector<std::pair<InodeId, uint64_t>> forgets) {
+  void BatchForget(const std::vector<std::pair<InodeId, uint64_t>> &forgets) {
     struct fuse_batch_forget_in in = {};
     in.count = static_cast<uint32_t>(forgets.size());
     std::string body;

@@ -695,7 +695,7 @@ absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,
   if (!cache::CanFill(ctx, snapshot, id)) return absl::OkStatus();
   std::vector<std::string> diffs;
   auto check = [&](unsigned int mask, std::string_view field, bool differs,
-                   std::string from, std::string to) {
+                   const std::string &from, const std::string &to) {
     if ((fresh.stx_mask & mask) != mask || !differs) return;
     diffs.push_back(absl::StrCat(field, " ", from, " -> ", to));
   };

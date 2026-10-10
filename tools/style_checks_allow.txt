@@ -39,7 +39,6 @@ dcfs/backing.cc|OpenNode|misc-no-recursion|1
 dcfs/backing.cc|ParentOf|capturing_mutating_lambda|1
 dcfs/backing.cc|ReconcileAttrs|google-runtime-int|2
 dcfs/backing.cc|ReconcileAttrs|modernize-use-integer-sign-comparison|2
-dcfs/backing.cc|ReconcileAttrs|performance-unnecessary-value-param|2
 dcfs/backing.cc|RecordChild|google-runtime-int|1
 dcfs/backing.cc|RecordChild|modernize-use-integer-sign-comparison|1
 dcfs/backing.cc|RecordChild|readability-function-cognitive-complexity|1
@@ -76,7 +75,6 @@ dcfs/dir_cache_fs.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Access|readability-convert-member-functions-to-static|1
 dcfs/dir_cache_fs.cc|DirCacheFS::CopyFileRange|misc-unused-parameters|2
 dcfs/dir_cache_fs.cc|DirCacheFS::DefaultMaxHeldFds|bugprone-implicit-widening-of-multiplication-result|2
-dcfs/dir_cache_fs.cc|DirCacheFS::DirCacheFS|performance-unnecessary-value-param|1
 dcfs/dir_cache_fs.cc|DirCacheFS::EntryFor|performance-move-const-arg|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Fallocate|misc-unused-parameters|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Flush|misc-unused-parameters|1
@@ -116,7 +114,6 @@ dcfs/dir_cache_fs_test.cc|<file scope>|misc-include-cleaner|2
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-unused-parameters|1
 dcfs/dir_cache_fs_test.cc|BackingAtime|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|BatchForget|bugprone-invalid-enum-default-initialization|1
-dcfs/dir_cache_fs_test.cc|BatchForget|performance-unnecessary-value-param|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|readability-avoid-nested-conditional-operator|1
 dcfs/dir_cache_fs_test.cc|DCFS_BACKSTOP|misc-include-cleaner|7
 dcfs/dir_cache_fs_test.cc|Forget|bugprone-invalid-enum-default-initialization|1
