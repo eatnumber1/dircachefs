@@ -2944,3 +2944,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   listed in phase 21 for russ; a 15.11 note that fsck.dcfs's fstab integration needs a bind-form
   answer once the device form is gone; README gap (no fsck.dcfs install link). No lane running;
   the next dispatch per the Queue is 26.17b after the reset unless a push goes red.
+- russ pushed 9de0e71 (run 38088587563 watched) and said not to wait on the trial: Queue item 3,
+  26.17b (CPU, I/O-count and request budgets; wall as hang guard; load-starvation flag; the 17.3
+  results line), dispatched (investigator, lane-1). One lane running.
