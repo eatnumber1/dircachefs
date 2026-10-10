@@ -2690,3 +2690,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (style 1.3 now says so; 38 sites), and a name never repeats the namespace: the distinguishing
   word is origin, so `DcfsErrnoToStatus` becomes `ProducedErrnoToStatus` (name proposed to russ).
   25.14 queued for lane-2 after 25.12 (both edit repo_shape.py and backing.cc).
+- 25.12 merged (lane-2 → 7c23d43; diff read by the orchestrator): FixedArray at eleven sites, the
+  check with a one-entry allowlist. The agent found the pinned clang-format reflows the untouched
+  tree (no format check exists; 7.6 reformats once). It also reported one Bash command refused by
+  the safety classifier (a read-only check that looked like a removal) and re-ran the same check
+  written with explicit arguments; noted for russ. 25.14 sent to the same agent (SendMessage).
+- CI run 38030966315 (75239c4): fast, presubmit, all asan/ubsan/full shards, mutation-changed,
+  reproducible green; coverage red (lines 95.44 vs baseline 95.97, branches up; plus a cp
+  permission error copying two coverage test logs); the new xfstests job red on xfs
+  (generic/464) and ext4 (generic/464, 524, 610, 754), all green in 17.1's local runs. 26.22
+  dispatched (investigator, lane-3).

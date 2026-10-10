@@ -439,3 +439,13 @@ source device of a `fuse.dcfs` mount in mountinfo: e.g.
 allowlisted with that reason if no name reads better. No behaviour
 change; clang-format; `bazel test --config=fast //...` and
 `//tools/...` green.
+
+25.12 merged 2026-10-10 (7c23d43, mechanical agent, two commits): the
+repo_shape `fixed_arrays` rule with fixtures; eleven sites converted
+(backing.cc six, file_handle.cc two, fuse_request.cc two, main.cc one);
+`GetGroups` keeps its vector return (callers and tests hold one) and
+builds it once from the FixedArray; one allowlist entry remains
+(fuse_request.cc's groups buffer, resized to a second call's count).
+Finding for 7.6: the pinned clang-format (22.1.8) reflows hundreds of
+lines of the untouched tree, so no format check exists today and the
+baseline is not clean; 7.6's one-time reformat is where that lands.
