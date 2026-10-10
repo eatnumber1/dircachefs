@@ -2879,3 +2879,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ named RaiseFileLimit (main.cc) as a function not in the do/handle/do shape; 25.25 queued
   (that function first, then the nested-happy-path, carried-status, break-up and
   cognitive-complexity lists), implementer after 25.24.
+- russ stated the principle behind 1.6a: the region of code needed to understand a region should
+  be as small as possible, no long-distance jumps; written as 1.6a's opening paragraph with each
+  rule tied to the jump it removes.

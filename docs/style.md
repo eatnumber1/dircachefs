@@ -607,6 +607,25 @@ until 2026-10-10; this section is it.)
 
 ### 1.6a Shape of a function that does several things
 
+**The principle behind every rule in this section** (russ, 2026-10-11):
+"the region of code you should have to read to understand that same
+region of code should be as small as possible. If I have to look far
+away to see 'oh, the else branch on this if statement is only reachable
+in the happy path of the thing we did before', that's a long-distance
+jump I have to do to understand the code." Each rule below removes a
+kind of long-distance jump: handling a failure next to the call that
+produced it (not in an `else` three branches down, not in a status
+checked later); undo declared beside the thing it undoes and cancelled
+at the one commit point; a bare call whose signature says it cannot
+fail (no checking elsewhere to find out); a helper when the same
+handling repeats, so the reader learns it once; a kept ladder with its
+reason at the declaration, so the reader need not reconstruct it; and
+1.10a's "no code for the impossible", because a branch that cannot be
+reached makes the reader search for how it could be. clang-tidy's
+cognitive-complexity threshold (nesting-weighted) is the mechanical
+proxy for the same thing. When two shapes both obey the letter of these
+rules, pick the one that keeps the reader's eyes in one place.
+
 russ, 2026-10-10, rewriting `SwitchTo` in `backing.cc`. The shape he
 wants, as the worked example:
 
