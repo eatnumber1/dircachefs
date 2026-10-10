@@ -2428,3 +2428,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (about three lanes after the running rounds land, Opus reviews only for protocol/identity/oracle
   steps, rules front-loaded into prompts, low effort for mechanical work, the protocol queue
   sequenced, stop dispatching near 90%).
+- 23.11 rebased onto main (eba08e4; one conflict in invariant_checker.h, 25.7b's shape kept; fast
+  247 + 2, trace shards, fault_power x3, asan x3, formal small+medium green). Waits on the Fable
+  review.
+- russ (2026-10-09): style rule 25.9, no intentional crashes (no LOG(FATAL)/CHECK/abort in
+  production; RET_CHECK fine; a static Create for fallible construction, per TotW #42; a crash
+  that is really needed goes to russ case by case). Queued with a repo_shape/banned_symbols gate
+  and an audit: a first grep found 25 CHECK-family sites, one abort (today's fork_split.h), one
+  assert and ten exit sites in production code, none in LOG(FATAL).

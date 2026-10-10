@@ -246,6 +246,47 @@ section 8 updated. Fast 233 + 2; asan on dir_cache_fs_test and
 trace_recorder_test green. 23.11's code half will conflict textually in
 invariant_checker.{h,cc} and the checker tests on its rebase.
 
+## 25.9 No intentional crashes (russ, 2026-10-09)
+
+russ: "no intentional crashes. E.g. no use of `LOG(FATAL)` or `CHECK`
+(`RET_CHECK` is ok because it doesn't crash). I understand the necessity
+sometimes, but try hard to avoid it (for instance, another style rule
+that's in an Abseil TOTW somewhere: don't call methods that can fail
+inside constructors, instead add a static Create method). If you
+_really_ feel you need a crash, bring it to me for review and I'll
+consider on a case-by-case basis."
+- docs/style.md: the rule for production code (dcfs/, bench/, tools/*.c
+  shipped binaries): no `LOG(FATAL)`/`LOG(QFATAL)`, `CHECK*`, `QCHECK*`,
+  `DCHECK*`, `abort()`, `assert()`, `std::terminate`, or an `exit()` that
+  stands in for an error return; a failure is a `Status` (`RET_CHECK` for
+  invariants, which returns Internal); fallible construction goes through a
+  static `Create` returning `StatusOr` (TotW #42 "Prefer Factory Functions
+  to Initializer Methods" and the Google style guide's "Doing Work in
+  Constructors"); every remaining crash site is listed in style.md with
+  russ's approval and the reason (why the process cannot continue
+  correctly), nothing else. Test code and `testonly/` may crash (death
+  tests, the checking build's invariant abort are gates).
+- Mechanical enforcement: `tools/banned_symbols.txt` bans `abort`,
+  `__assert_fail` and Abseil's fatal-log internals in the shipped
+  binaries; `tools/repo_shape.py` refuses the macros in production
+  sources outside an allowlist whose entries carry russ's approval date
+  and the reason (known-bad fixture); clang-tidy's equivalent when 7.5
+  lands.
+- Audit (a subagent, dcfs-implementer, low effort for the mechanical part):
+  the first count on 2026-10-09 found in production code 25 `CHECK`
+  family sites (23 `CHECK_*`, 2 `CHECK(`: backing.cc:282 after a
+  credential switch fails to restore root, fuse_request.cc:279 on a double
+  reply), 1 `abort()` (fork_split.h:40, 26.14f's "parent returned"), 1
+  `assert(`, 10 `exit`/`_exit` sites (the wrapper's and daemoniser's
+  legitimate exits among them), 0 LOG(FATAL); tests hold 4 LOG(FATAL) and
+  44 CHECKs, allowed. For each production site: convert (a Status up the
+  stack; a `Create` factory where a constructor does fallible work), or
+  write the case for russ in one paragraph each (what state the process
+  would be in if it continued). Russ decides the list; the allowlist then
+  holds exactly his approvals.
+Owner: dcfs-implementer, after the current rounds land (budget), before
+25.2.
+
 ## 25.8 Abseil's Tips of the Week as design guidance (russ, 2026-10-09)
 
 russ: "we adopt all of https://abseil.io/tips/. It's a 'rule', but not as
