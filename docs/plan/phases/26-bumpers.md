@@ -721,3 +721,44 @@ answered-from-cache lookup was a SKIP; now real PASSes). Not run:
 reviewer's "does a loop device over tmpfs change what the tests prove"
 answer was no: every cut is dm-flakey plus a remount, never device
 durability.
+
+## 26.22 CI triage of run 38030966315 (merged 2026-10-10, 010ba9a)
+
+Investigator, lane-3, three commits. (A) coverage: not the harness
+changes I guessed; dcfs/fsck.cc (15.5, 478 lines) was 291/372 lines
+covered, deterministically, because the systemd mount test that reaches
+findmnt/blkid/fsck(8) is large and the coverage job runs small and
+medium; plus error paths with no test. Fix: fsck_test gains stand-in
+findmnt/blkid/fsck.fakefs programs asserting their arguments, corrupt
+database fixtures (orphan pages, dropped tables and columns, an
+exclusively locked WAL, a symlink), and --wrap fakes of fork/waitpid/
+dup2/flock/unlinkat; one production simplification (Inspect reads the
+dirty set in one pass; the old count and clean conjuncts could not fail
+once earlier queries succeeded, 1.10a). fsck.cc now 380/380 lines,
+184/196 branches; the baseline should land near 96.29/80.83 (the CI run
+decides; baseline file untouched). Also the collect-logs cp failed on
+157 files, not two: `cp --parents` re-protects each directory to the
+read-only source mode after the first file; `--no-preserve=mode`,
+with a test. (B, C) the four xfstests cases all failed at the mount
+after an umount with "cache database is in use by another dcfs
+process": the xfstests guest never mounted fusectl, so
+umount.fuse.dcfs did not wait for the old daemon and the new one lost
+the database flock; the idle 17.1 runs won the race, CI's loaded
+runners lost it (3 of 12 shard runs under load before, 24 of 24 and 12
+of 12 after mounting fusectl in the guest; a guest check fails without
+it). No list entries. Design question for russ: a mount right after a
+plain umount still fails on a machine without fusectl or without
+umount.fuse, because the new daemon takes the database lock before
+HoldDaemonLock's earlier-daemon wait. (D) btrfs shard 5's hour: during
+generic/650 (fsstress with CPU hotplug on a two-vCPU guest) the daemon
+sat in D state inside the backing btrfs's own commit
+(write_all_supers ← btrfs_commit_transaction ← syncfs) waiting for
+block I/O, the watchdog killed the test, and the next batch's mkfs on
+the other disk hung too: the guest's block I/O stopped, not a dcfs
+request. Not reproduced (650 alone 48 of 48; the shard 12 of 12). No
+change, no list entry (excluding 650 would be weakening). Follow-ups
+for russ: bound the scratch reset as the watchdog bounds tests, and
+dump the guest's blocked-task state when the watchdog fires; both
+involve a timer, so they wait for him. Lane-3 has a leftover
+`.scratch/` tree (377 MB, a 0555 directory inside) that the classifier
+would not let the agent remove.

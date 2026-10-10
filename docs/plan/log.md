@@ -2820,3 +2820,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   findings fixed in one round, orchestrator read the format-the-file commit's test). Phase 26
   file has the details and the plan drift. Lane-1 free. Next watch: the coverage CI job with
   RAM disks on the next push.
+- 26.22 merged (lane-3 → 010ba9a, gate exit 0): the coverage drop was fsck.cc's own gaps, not the
+  harness; fusectl in the xfstests guest fixes the umount race; the btrfs shard hang is an open
+  finding (block I/O stopped under CPU hotplug). Two items for russ: the mount-after-umount
+  design question without fusectl, and the timer-shaped follow-ups for the hang. Push point for the
+  morning: main at this commit. Lane-3 free (with a stray .scratch/ for russ to remove).
