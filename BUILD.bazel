@@ -7,6 +7,7 @@ exports_files([
     "MODULE.bazel.lock",
     "osv-scanner.toml",
     ".github/ci/prepare.sh",
+    ".github/ci/collect-logs.sh",  # //tools:collect_logs_test (26.22)
     ".github/ci/commit_subjects.sh",  # //tools:commit_subjects_test (26.13)
     ".github/ci/shard.sh",  # //tools:shard_test (7.4b)
     ".github/ci/test.sh",  # //tools:test_sh_test (17.1)

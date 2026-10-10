@@ -265,6 +265,17 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Self-check of .github/ci/collect-logs.sh (step 26.22) over a tree shaped like
+# bazel-testlogs, whose outputs Bazel leaves read-only.
+sh_test(
+    name = "collect_logs_test",
+    size = "small",
+    srcs = ["collect_logs_test.sh"],
+    args = ["$(location //:.github/ci/collect-logs.sh)"],
+    data = ["//:.github/ci/collect-logs.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
 # Self-check of .github/ci/shard.sh (step 7.4b), which deals the suite's test
 # targets out to the CI shards: a partition, stable, size-balanced.
 sh_test(
