@@ -810,3 +810,27 @@ line and passes `string_view` down; `fuse_reply_*` conversions stay in
 bytes; embedded NULs cannot occur in names but can in xattr values,
 which are not strings) re-checked at each conversion. Tests follow in a
 second pass.
+
+## 25.25 Function-shape sweep of the rest (russ, 2026-10-11; after 25.24, implementer, lane-2)
+
+russ, on `RaiseFileLimit` in dcfs/main.cc: "a good example of a function
+that's not following the 'do stuff; handle errors; do other stuff'
+paradigm." Its shape today: the nr_open read's happy path sits inside an
+`if (value.ok()) { ... } else { log }`; a `const struct rlimit limit`
+copy of `*current` (1.2's non-const default, and the copy is not
+needed); the two setrlimit attempts and their diagnostics are tangled
+across four branches. The shape 1.6a asks for: getrlimit, handle, return;
+`want` from a helper `NrOpenOrHardLimit(const rlimit &)` that reads
+/proc/sys/fs/nr_open, logs once if unreadable and returns the larger of
+nr_open and the hard limit; `setrlimit` to `want`, ok → return;
+`setrlimit` to the hard limit, not ok → log both statuses (logged, not
+joined into one Status) and return; else log that the soft limit went to
+the hard one. Sweep: this function first, then every function the
+`happy_path_nested` matcher and the census list (`nested-happy-path` 6,
+`status-carried` 8, the 12 `if (x.ok()) {` sites 25.15's reviewer counted,
+`sqlite.cc`'s RunTransaction among them), then the 32 `break-up`
+functions and the 22 production cognitive-complexity findings function
+by function, each a commit with the shape it got and why, tests green,
+no behaviour change; a function whose split needs a new seam gets a
+one-line reason and stays. The dcfs-style-reviewer passes over the
+result (questions ruled by the orchestrator).

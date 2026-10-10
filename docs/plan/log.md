@@ -2876,3 +2876,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   unowned, std::span of views for argv; convert at the program's entry points and back at the
   exits (syscalls.h mostly; SQLite and libfuse the others) with a NUL-terminated copy. Style 1.2;
   25.24 queued (a matcher with boundary-only allowlists; 67 sites outside syscalls).
+- russ named RaiseFileLimit (main.cc) as a function not in the do/handle/do shape; 25.25 queued
+  (that function first, then the nested-happy-path, carried-status, break-up and
+  cognitive-complexity lists), implementer after 25.24.
