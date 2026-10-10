@@ -658,7 +658,7 @@ TEST_F(TraceRecorderTest, InterruptedRequestsReplyEintr) {
   EXPECT_THAT(lines, Not(Contains(HasSubstr("\"ev\":\"unexplained\""))));
   std::vector<std::string> evs;
   for (const std::string &line : lines) {
-    const size_t at = line.find("\"ev\":\"");
+    const size_t at = line.find(R"("ev":")");
     evs.push_back(line.substr(at + 6, line.find('"', at + 6) - at - 6));
   }
   EXPECT_THAT(evs,
@@ -979,8 +979,8 @@ TEST_F(TraceRecorderTest, IdentityTraceRecordsRepliesAndForgets) {
   ASSERT_EQ(lines.size(), 4u);
   EXPECT_THAT(lines[0], AllOf(HasSubstr("\"ev\":\"begin\""),
                               HasSubstr("\"st\":{\"row\":true}")));
-  const std::string reply = absl::StrCat(
-      "\"ev\":\"reply\",\"via\":\"lookup\",\"fgen\":\"", gen, "\"");
+  const std::string reply =
+      absl::StrCat(R"("ev":"reply","via":"lookup","fgen":")", gen, "\"");
   EXPECT_THAT(lines[1], AllOf(HasSubstr(reply),
                               HasSubstr("\"st\":{\"row\":true,\"lk\":1}")));
   EXPECT_THAT(lines[2], HasSubstr("\"st\":{\"row\":true,\"lk\":2}"));

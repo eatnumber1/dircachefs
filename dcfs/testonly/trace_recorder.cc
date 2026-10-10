@@ -461,10 +461,10 @@ void TraceRecorder::Emit(Context &ctx, Ino dir, Req *req, std::string_view ev,
   std::string json = absl::StrCat(
       "{\"i\":", ++line_, ",\"c\":", JsonStr(cause_), ",\"ev\":", JsonStr(ev));
   if (req != nullptr) {
-    absl::StrAppend(&json, ",\"p\":\"p", req->slot, "\"");
+    absl::StrAppend(&json, R"(,"p":"p)", req->slot, "\"");
     if (!req->arrived) {
       // The request's first line: its Arrive, if its slot is idle.
-      absl::StrAppend(&json, ",\"req\":{\"k\":", JsonStr(req->kind),
+      absl::StrAppend(&json, R"(,"req":{"k":)", JsonStr(req->kind),
                       ",\"n\":", JsonStr(req->n), ",\"m\":", JsonStr(req->m),
                       "}");
       req->arrived = true;
@@ -511,7 +511,7 @@ void TraceRecorder::Unexplained(Context &ctx, Ino dir, std::string_view why) {
   if (!Traced(dir)) return;
   EndHeld(dir);
   Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                          ",\"ev\":\"unexplained\",\"why\":", JsonStr(why),
+                          R"(,"ev":"unexplained","why":)", JsonStr(why),
                           ",\"db\":", Snapshot(ctx, dir), "}"));
   dirs_[dir].dead = true;
   covered_.insert(dir);
@@ -521,7 +521,7 @@ void TraceRecorder::Cut(Context &ctx, Ino dir, std::string_view why) {
   if (!Traced(dir)) return;
   EndHeld(dir);
   Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                          ",\"ev\":\"cut\",\"why\":", JsonStr(why), "}"));
+                          R"(,"ev":"cut","why":)", JsonStr(why), "}"));
   dirs_[dir].dead = true;
   covered_.insert(dir);
 }
@@ -555,7 +555,7 @@ void TraceRecorder::After(Context &ctx) {
     if (!state.dead && !present.contains(dir)) {
       EndHeld(dir);
       Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                              ",\"ev\":\"gone\"}"));
+                              R"(,"ev":"gone"})"));
       state.dead = true;
     }
   }
@@ -589,10 +589,10 @@ void TraceRecorder::After(Context &ctx) {
     if (Frame *sync = SyncPastSnapshot(); sync != nullptr) {
       Req &req = Open(*sync, dir, "sync");
       req.arrived = true;
-      in_sync = absl::StrCat(",\"sync_p\":\"p", req.slot, "\"");
+      in_sync = absl::StrCat(R"(,"sync_p":"p)", req.slot, "\"");
     }
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"begin\",\"origin\":", JsonStr(origin),
+                            R"(,"ev":"begin","origin":)", JsonStr(origin),
                             marked, in_sync, ",\"db\":", db, "}"));
     dirs_[dir].last = db;
     dirs_[dir].last_state = std::move(now);
@@ -629,7 +629,7 @@ void TraceRecorder::After(Context &ctx) {
     // matches this line, so validation stops here.
     EndHeld(dir);
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"unexplained\",\"db\":", db, "}"));
+                            R"(,"ev":"unexplained","db":)", db, "}"));
     state.dead = true;
   }
   forgotten_.clear();
@@ -895,19 +895,19 @@ void TraceRecorder::LookupDecided(Context &ctx, Ino parent,
         case events::LookupOutcome::kFound: {
           absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx, child);
           CHECK_OK(attr.status());
-          absl::StrAppend(&fields, ",\"out\":\"found\",\"key\":",
+          absl::StrAppend(&fields, R"(,"out":"found","key":)",
                           JsonStr(Key(attr->backing_ino, attr->btime.tv_sec,
                                       attr->btime.tv_nsec)));
           break;
         }
         case events::LookupOutcome::kNegative:
-          absl::StrAppend(&fields, ",\"out\":\"neg\"");
+          absl::StrAppend(&fields, R"(,"out":"neg")");
           break;
         case events::LookupOutcome::kResolve:
-          absl::StrAppend(&fields, ",\"out\":\"resolve\"");
+          absl::StrAppend(&fields, R"(,"out":"resolve")");
           break;
         case events::LookupOutcome::kPopulate:
-          absl::StrAppend(&fields, ",\"out\":\"populate\"");
+          absl::StrAppend(&fields, R"(,"out":"populate")");
           break;
         case events::LookupOutcome::kRefused:
           break;
@@ -1072,15 +1072,14 @@ void TraceRecorder::PopulateRead(Context &ctx, Ino dir,
       state.held.clear();
       state.reading = false;
       if (refused) {
-        Write(dir,
-              absl::StrCat(
-                  "{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                  ",\"ev\":\"cut\",\"why\":\"boundary: a refused boundary\"}"));
+        Write(dir, absl::StrCat(
+                       "{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
+                       R"(,"ev":"cut","why":"boundary: a refused boundary"})"));
         state.dead = true;
       } else {
         Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                                ",\"ev\":\"populate_read\",\"p\":\"p",
-                                state.read_slot, "\",\"listing\":[", list,
+                                R"(,"ev":"populate_read","p":"p)",
+                                state.read_slot, R"(","listing":[)", list,
                                 "],\"db\":", state.read_db, "}"));
         for (const std::string &json : held) Write(dir, json);
       }
@@ -1258,7 +1257,7 @@ void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
                                       : &Open(*rf, dir, m.req_kind, m.n, m.m);
     req->begun = true;
     Emit(ctx, dir, req, "phase1",
-         absl::StrCat(",\"outcome\":\"begun\",\"synced\":", Bool(synced)));
+         absl::StrCat(R"(,"outcome":"begun","synced":)", Bool(synced)));
     MutationLine(dir, /*begun=*/true);
   }
   After(ctx);
@@ -1290,7 +1289,7 @@ void TraceRecorder::MutationAborted(Context &ctx, events::IdsFn ids) {
       }
       continue;
     }
-    Emit(ctx, dir, req, "phase1", ",\"outcome\":\"aborted\"");
+    Emit(ctx, dir, req, "phase1", R"(,"outcome":"aborted")");
   }
   After(ctx);
 }
@@ -1554,10 +1553,10 @@ void TraceRecorder::RunStarting(Context &ctx) {
     const std::string db = Snapshot(ctx, dir);
     if (!*clean) {
       Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                              ",\"ev\":\"crash\",\"db\":", db, "}"));
+                              R"(,"ev":"crash","db":)", db, "}"));
     }
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"restart\",\"db\":", db, "}"));
+                            R"(,"ev":"restart","db":)", db, "}"));
     RunLineWritten(ctx, dir);
   }
   // The nodeids' traces: a new mount holds no nodeid (lifetime.tla's Crash,
@@ -1577,7 +1576,7 @@ void TraceRecorder::Recovered(Context &ctx) {
   }
   for (Ino dir : AllDirs(ctx)) {
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"recover\",\"dirty_keys\":[", keys,
+                            R"(,"ev":"recover","dirty_keys":[)", keys,
                             "],\"db\":", Snapshot(ctx, dir), "}"));
     RunLineWritten(ctx, dir);
   }
@@ -1587,9 +1586,9 @@ void TraceRecorder::Recovered(Context &ctx) {
 void TraceRecorder::RunStarted(Context &ctx) {
   Enter("RunStarted");
   for (Ino dir : AllDirs(ctx)) {
-    Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"start_run\",\"db\":", Snapshot(ctx, dir),
-                            "}"));
+    Write(dir,
+          absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
+                       R"(,"ev":"start_run","db":)", Snapshot(ctx, dir), "}"));
     RunLineWritten(ctx, dir);
   }
   // After the sweep of unnamed rows (lifetime.tla's Restart).
@@ -1606,7 +1605,7 @@ void TraceRecorder::RecoveryDone(Context &ctx) {
   // (dcfs.tla's ProbesDone).
   for (Ino dir : AllDirs(ctx)) {
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"recovery_done\",\"db\":",
+                            R"(,"ev":"recovery_done","db":)",
                             Snapshot(ctx, dir), "}"));
     RunLineWritten(ctx, dir);
   }
@@ -1772,8 +1771,8 @@ void TraceRecorder::Interrupted(Context &ctx) {
         state.held.clear();
         state.reading = false;
         Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                                ",\"ev\":\"interrupt\",\"p\":\"p", req.slot,
-                                "\",\"db\":", state.read_db, "}"));
+                                R"(,"ev":"interrupt","p":"p)", req.slot,
+                                R"(","db":)", state.read_db, "}"));
         for (const std::string &json : held) Write(dir, json);
         // The next line carries its state (the held lines changed it).
         state.last.clear();
@@ -1872,9 +1871,9 @@ std::string TraceRecorder::RowJson(Context &ctx, Ino id) {
   absl::StatusOr<cache::CachedAttr> attr = cache::GetAttr(ctx, id);
   if (!attr.ok()) {
     CHECK(absl::IsNotFound(attr.status())) << attr.status();
-    return "\"row\":false,\"nl0\":false";
+    return R"("row":false,"nl0":false)";
   }
-  return absl::StrCat("\"row\":true,\"nl0\":", Bool(attr->st.st_nlink == 0));
+  return absl::StrCat(R"("row":true,"nl0":)", Bool(attr->st.st_nlink == 0));
 }
 
 void TraceRecorder::LifeLine(Ino id, std::string_view cause,
@@ -1922,7 +1921,7 @@ void TraceRecorder::LifetimeChanged(Context &ctx, Ino id,
     LifeLine(
         id, "LifetimeChanged", "begin",
         absl::StrCat(",\"st\":{", KeptJson(before), ",",
-                     creates ? "\"row\":false,\"nl0\":false" : RowJson(ctx, id),
+                     creates ? R"("row":false,"nl0":false)" : RowJson(ctx, id),
                      "}"));
   }
   std::string ev;
@@ -2007,10 +2006,10 @@ bool TraceRecorder::HasRow(Context &ctx, Ino id) {
 void TraceRecorder::IdentLine(Context &ctx, Ino id, std::string_view cause,
                               std::string_view ev, std::string_view fields,
                               std::string_view more) {
-  WriteLine(
-      absl::StrCat("DCFS-IDENT ", trace_, " ", id, " {\"i\":", ++ident_line_,
-                   ",\"c\":", JsonStr(cause), ",\"ev\":", JsonStr(ev), fields,
-                   ",\"st\":{\"row\":", Bool(HasRow(ctx, id)), more, "}}\n"));
+  WriteLine(absl::StrCat("DCFS-IDENT ", trace_, " ", id,
+                         " {\"i\":", ++ident_line_, ",\"c\":", JsonStr(cause),
+                         ",\"ev\":", JsonStr(ev), fields, R"(,"st":{"row":)",
+                         Bool(HasRow(ctx, id)), more, "}}\n"));
 }
 
 void TraceRecorder::IdentRunLines(Context &ctx, std::string_view cause,
@@ -2064,7 +2063,7 @@ void TraceRecorder::IdentStep(Context &ctx, Ino id, events::LifetimeStep step,
   absl::StatusOr<uint32_t> gen = cache::GetGeneration(ctx, id);
   CHECK(gen.ok() || absl::IsNotFound(gen.status())) << gen.status();
   IdentLine(ctx, id, "LifetimeChanged", "reply",
-            absl::StrCat(",\"via\":", JsonStr(via), ",\"fgen\":\"",
+            absl::StrCat(",\"via\":", JsonStr(via), R"(,"fgen":")",
                          gen.ok() ? absl::StrCat(*gen) : "", "\""),
             lk);
 }
@@ -2075,7 +2074,7 @@ void TraceRecorder::IdentityResolved(Context &ctx, Ino id,
   using Outcome = events::IdentityCheck::Outcome;
   if (check.outcome == Outcome::kStaleHandle) {
     IdentLine(ctx, id, "IdentityResolved", "resolve",
-              ",\"outcome\":\"stale_handle\"");
+              R"(,"outcome":"stale_handle")");
     return;
   }
   const bool row_btime = check.row_btime_sec != 0 || check.row_btime_nsec != 0;
