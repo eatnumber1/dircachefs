@@ -1,0 +1,8 @@
+{"file": "dcfs/backing.cc", "function": "RestoreRoot", "line": 272, "quote": "absl::Status uid = syscalls::setfsuid(0);", "note": "advisory: uid checked at line 275, 2 statements later"}
+{"file": "dcfs/backing_capture.cc", "function": "CaptureBacking", "line": 288, "quote": "absl::StatusOr<FileDescriptor> tree = ReceiveAnswer(*mine);", "note": "advisory: tree checked at line 291, 2 statements later"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "LinkRemoved", "line": 1509, "quote": "absl::StatusOr<struct statx> relinked = backing::RecordRelinked(", "note": "advisory: relinked checked at line 1512, 2 statements later"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Removexattr", "line": 2600, "quote": "absl::Status remove_status =", "note": "advisory: remove_status checked at line 2604, 2 statements later"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Fallocate", "line": 2753, "quote": "absl::Status status = backing::FallocateFd(fd, mode, offset, length);", "note": "advisory: status checked at line 2761, 3 statements later"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "CopyFileRange", "line": 2816, "quote": "absl::StatusOr<size_t> copied = backing::CopyFileRangeFd(", "note": "advisory: copied checked at line 2821, 2 statements later"}
+{"file": "dcfs/sqlite.cc", "function": "Transaction", "line": 385, "quote": "absl::Status status = RunTransaction(body);", "note": "advisory: status checked at line 388, 2 statements later"}
+{"file": "dcfs/sqlite.cc", "function": "RunTransaction", "line": 405, "quote": "absl::Status body_status = body();", "note": "advisory: body_status checked at line 423, 4 statements later"}

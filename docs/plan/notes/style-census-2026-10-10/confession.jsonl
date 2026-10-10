@@ -1,0 +1,1 @@
+{"file": "dcfs/file_handle.cc", "function": "FromDirEntry", "line": 156, "quote": "// `name` (which could never reach this branch, but just in case) from", "note": "comment contains: just in case"}

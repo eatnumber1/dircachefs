@@ -1,0 +1,6 @@
+{"file": "bench/process.cc", "function": "Start", "line": 61, "quote": "if (log.ok()) {", "note": "block of 2 lines, no guard"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Readlink", "line": 1030, "quote": "if (target.ok()) {", "note": "block of 3 lines, no guard"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "LinkRemoved", "line": 1515, "quote": "if (relinked.ok()) {", "note": "block of 2 lines, no guard"}
+{"file": "dcfs/main.cc", "function": "RaiseFileLimit", "line": 262, "quote": "if (second.ok()) {", "note": "block of 3 lines, no guard"}
+{"file": "dcfs/metadata_cache.cc", "function": "AddFilesystem", "line": 1333, "quote": "if (existing.ok()) {", "note": "block of 2 lines, no guard"}
+{"file": "dcfs/sqlite.cc", "function": "RunTransaction", "line": 423, "quote": "if (body_status.ok()) {", "note": "block of 8 lines, no guard"}

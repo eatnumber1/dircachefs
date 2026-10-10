@@ -1,0 +1,32 @@
+{"file": "dcfs/backing.cc", "function": "ReconcileAttrs", "line": 675, "quote": "absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,", "note": "body 71 lines (over 60)"}
+{"file": "dcfs/backing.cc", "function": "StaleOrUnreadable", "line": 847, "quote": "absl::Status StaleOrUnreadable(Context &ctx, InodeId id,", "note": "body 62 lines (over 60)"}
+{"file": "dcfs/backing.cc", "function": "FillHeldAttrs", "line": 991, "quote": "absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,", "note": "body 72 lines (over 60)"}
+{"file": "dcfs/backing.cc", "function": "PopulateDirectory", "line": 1407, "quote": "absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {", "note": "body 113 lines (over 60)"}
+{"file": "dcfs/backing.cc", "function": "LookupOrPopulate", "line": 1543, "quote": "absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,", "note": "body 96 lines (over 60)"}
+{"file": "dcfs/backing.cc", "function": "ParentOf", "line": 1644, "quote": "absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {", "note": "body 61 lines (over 60)"}
+{"file": "dcfs/backing.cc", "function": "RecordNewChild", "line": 1769, "quote": "absl::StatusOr<NewChild> RecordNewChild(Context &ctx,", "note": "body 90 lines (over 60)"}
+{"file": "dcfs/backing.cc", "function": "SetAttrFd", "line": 2441, "quote": "absl::Status SetAttrFd(const Credentials &caller, int fd,", "note": "body 64 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Init", "line": 195, "quote": "absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {", "note": "body 119 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "CreateChild", "line": 648, "quote": "absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(", "note": "body 71 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Setattr", "line": 736, "quote": "absl::Status DirCacheFS::Setattr(", "note": "body 79 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "ReconcileWritten", "line": 879, "quote": "void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {", "note": "body 101 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "RemoveChild", "line": 1105, "quote": "absl::Status DirCacheFS::RemoveChild(", "note": "body 98 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Rename", "line": 1224, "quote": "absl::Status DirCacheFS::Rename(", "note": "body 146 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Link", "line": 1531, "quote": "absl::Status DirCacheFS::Link(", "note": "body 62 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "OpenInode", "line": 1653, "quote": "absl::Status DirCacheFS::OpenInode(", "note": "body 160 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Release", "line": 1966, "quote": "absl::Status DirCacheFS::Release(", "note": "body 160 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Setxattr", "line": 2418, "quote": "absl::Status DirCacheFS::Setxattr(", "note": "body 65 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Create", "line": 2636, "quote": "absl::Status DirCacheFS::Create(", "note": "body 85 lines (over 60)"}
+{"file": "dcfs/dir_cache_fs.cc", "function": "Ioctl", "line": 2854, "quote": "absl::Status DirCacheFS::Ioctl(FuseRequest &req, fuse_ino_t ino,", "note": "body 89 lines (over 60)"}
+{"file": "dcfs/errno.cc", "function": "NameToErrnoTable", "line": 25, "quote": "const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {", "note": "body 247 lines (over 60)"}
+{"file": "dcfs/fsck.cc", "function": "Inspect", "line": 211, "quote": "Finding Inspect(const std::string &path) {", "note": "body 85 lines (over 60)"}
+{"file": "dcfs/fsck.cc", "function": "CheckCacheDatabase", "line": 344, "quote": "CacheReport CheckCacheDatabase(const std::string &path, FsckMode mode) {", "note": "body 74 lines (over 60)"}
+{"file": "dcfs/fsck.cc", "function": "FsckMain", "line": 421, "quote": "int FsckMain(std::span<const std::string> words) {", "note": "body 64 lines (over 60)"}
+{"file": "dcfs/log_open_flags.h", "function": "AbslStringify", "line": 28, "quote": "friend void AbslStringify(Sink &sink, const LogOpenFlags &l) {", "note": "body 66 lines (over 60)"}
+{"file": "dcfs/main.cc", "function": "RunDaemon", "line": 298, "quote": "absl::StatusOr<int> RunDaemon(const MountRequest &request) {", "note": "body 306 lines (over 60)"}
+{"file": "dcfs/metadata_cache.cc", "function": "SetRefused", "line": 946, "quote": "absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,", "note": "body 61 lines (over 60)"}
+{"file": "dcfs/metadata_cache.cc", "function": "ClearDirty", "line": 1806, "quote": "absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,", "note": "body 114 lines (over 60)"}
+{"file": "dcfs/metadata_cache.cc", "function": "RecoverDirty", "line": 1941, "quote": "absl::StatusOr<int64_t> RecoverDirty(Context &ctx) {", "note": "body 69 lines (over 60)"}
+{"file": "dcfs/mount_dcfs.cc", "function": "ParseHelperArgsImpl", "line": 157, "quote": "absl::StatusOr<HelperArgs> ParseHelperArgsImpl(", "note": "body 62 lines (over 60)"}
+{"file": "dcfs/mount_dcfs.cc", "function": "SplitHelperOptionsImpl", "line": 223, "quote": "absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(", "note": "body 89 lines (over 60)"}
+{"file": "dcfs/umount_helper.cc", "function": "UmountAndWait", "line": 125, "quote": "absl::Status UmountAndWait(const UmountArgs &args) {", "note": "body 80 lines (over 60)"}
