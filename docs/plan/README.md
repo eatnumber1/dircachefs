@@ -72,8 +72,9 @@ final hardware check (Phase 21.2).
 New phases are frozen. The order from here, and why:
 
 1. **Finish what is in flight**, nothing new beside it: 25.23's remaining
-   clang-tidy sweeps (lane-2, Haiku), the 26.24 CI triage (lane-1), and
-   any red push.
+   clang-tidy sweeps (lane-2, Haiku), the CI triages (26.24 merged; 26.26
+   the post-reformat coverage figure; 26.27 the gate on regions instead of
+   lines), and any red push.
 2. **21.1, the spare-disk trial** (russ, on real hardware; the procedure in
    phases/21 and its notes for his setup). The orchestrator's part: a
    one-page runbook for russ's machine (the HWE kernel boot, the fstab

@@ -833,3 +833,17 @@ image copy taken at `dropahead` and restored at the cut; and decide what
 model's premise; either the generator never draws it, or the oracle
 treats the sequence as a disk fault rather than a dcfs one). Protocol
 agent (it is the oracle's premise). After the trial.
+
+## 26.27 Coverage gate on regions, not lines (russ, 2026-10-11: "coverage counts lines? It doesn't count C++ statements?")
+
+The gate sums lcov lines, which formatting changes (the 7.6a reformat
+moved the figure 0.22 points with no logic touched). llvm-cov's
+source-based coverage counts regions (statements, expressions,
+conditional arms) and reports them directly. The gate's two gated
+numbers become regions and branches, read from `llvm-cov report`/`export`
+rather than the lcov line export; lines stay printed as information; the
+baseline file holds regions and branches, seeded from the first run
+after the change; `docs/coverage.md` and the gate's self-check test
+updated; the 26.14 coverage_diff tooling checked to work on regions.
+After this a reformat cannot move the gate. Mechanical, after 26.26, in
+the in-flight group (a fix to a check we rely on, not new work).
