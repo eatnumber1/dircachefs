@@ -60,7 +60,7 @@ class NoisyReportTest(unittest.TestCase):
         self.assertIn("| `//a:racy` | flaky | 2 of 3 |", text)
         self.assertIn("| `//a:slow` | timeout | 1 of 3 |", text)
         self.assertNotIn("//a:ok", text)
-        self.assertIn("noisy-logs-asan", text)
+        self.assertIn("`noisy-report-*` artifact, under `logs/asan`", text)
 
     def test_a_damaged_file_is_an_error(self):
         write(self.bep, [event("//a:t", "PASSED"), "{not json"])

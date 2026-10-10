@@ -130,86 +130,133 @@ fault_window() {
 # every object, and after the recovery require that each one opens to the same
 # object or fails ESTALE, never answers for something gone.
 #
-#   identity_take MNT DIR FILE   append a record to FILE for DIR and everything
-#                                under it (paths under the mount MNT): the
-#                                handle (name_to_handle_at, `fhtest handle`)
-#                                and what it opens now (`fhtest stat`: inode
-#                                number and mode)
-#   identity_check MNT SRC FILE  for every record of FILE, open the handle
-#                                again (open_by_handle_at on MNT) and print
-#                                one line per violation (nothing: the oracle
-#                                holds):
-#                                - the same object: the inode number and file
-#                                  type are the recorded ones, and the object
-#                                  has a name under MNT (find -inum) that the
-#                                  backing filesystem has too, at the same
-#                                  path under SRC;
-#                                - or ESTALE (the object may be gone, and the
-#                                  handle must say so);
-#                                - anything else is a violation, ENOENT and EIO
-#                                  included.
+#   identity_take MNT SRC DIR FILE   append a record to FILE for DIR (under the
+#                                    mount MNT) and everything under it: the
+#                                    handle dcfs gives it (name_to_handle_at on
+#                                    the mount: a lookup), what that handle
+#                                    opens now (inode number and mode), and the
+#                                    same two for the backing filesystem's own
+#                                    handle of the same name under SRC
+#   identity_check MNT SRC FILE      open every handle again (open_by_handle_at
+#                                    on MNT and, for the backing handle, on SRC;
+#                                    all the answers are collected before
+#                                    anything else is read) and print one line
+#                                    per violation (nothing: the oracle holds):
+#                                    - the same object: dcfs's answer has the
+#                                      recorded inode number and file type AND
+#                                      the backing handle of the object still
+#                                      opens on the backing filesystem with the
+#                                      recorded inode and type (a handle carries
+#                                      the generation, so a recycled inode
+#                                      number is not the object);
+#                                    - or ESTALE (the object may be gone; a
+#                                      note on standard error, and in
+#                                      FILE.estale, when the backing filesystem
+#                                      still has it);
+#                                    - anything else is a violation, ENOENT and
+#                                      EIO included.
+#                                    FILE.checked counts the handles checked.
 #
-# Event-based: no waits; the file names are plain words (the tests' trees), as
-# the records are lines of space-separated words.
-FHTEST=${FHTEST:-/bin/fhtest}
+# Event-based: no waits. Names are plain words (the tests' trees); the records
+# are lines of space-separated words. The primitives are testutil's handle-save
+# and handle-stat (the names 23.11's fault_power `born` scenario uses).
+IDENT_TMP=${IDENT_TMP:-/tmp/identity}
+
+# identity_save PATH TAG: "TYPE HEX" of PATH's handle, "-" if it has none.
+identity_save() {
+	if "${TESTUTIL:-/bin/testutil}" handle-save "$1" "$IDENT_TMP.$2" >/dev/null; then
+		cat "$IDENT_TMP.$2"
+	else
+		echo "- -"
+	fi
+}
+
+# identity_open DIR TYPE HEX: testutil's answer ("OK SIZE INO MODE", "ERR NAME").
+identity_open() {
+	echo "$2 $3" >"$IDENT_TMP.open"
+	"${TESTUTIL:-/bin/testutil}" handle-stat "$1" "$IDENT_TMP.open"
+}
 
 identity_take() {
 	it_mnt=$1
-	it_dir=$2
-	it_file=$3
-	find "$it_dir" | while IFS= read -r it_path; do
-		it_handle=$("$FHTEST" handle "$it_path") || continue
-		case "$it_handle" in ERR*) continue ;; esac
-		# shellcheck disable=SC2086 # "TYPE LEN HEX"
-		set -- $it_handle
-		it_type=$1
-		it_hex=$3
-		# shellcheck disable=SC2086 # "OK INO MODE PATH", or "ERR NAME"
-		set -- $("$FHTEST" stat "$it_mnt" "$it_type" "$it_hex")
-		case "$1" in
-		OK) echo "$it_path $2 $3 $it_type $it_hex" ;;
-		*) echo "$it_path ? ? $it_type $it_hex" ;;
-		esac
+	it_src=$2
+	it_file=$4
+	find "$3" | while IFS= read -r it_path; do
+		it_m=$(identity_save "$it_path" m)
+		it_b=$(identity_save "$it_src${it_path#"$it_mnt"}" b)
+		# shellcheck disable=SC2086 # "TYPE HEX"
+		set -- $it_m
+		it_mans=$(identity_open "$it_mnt" "$1" "$2")
+		# shellcheck disable=SC2086
+		set -- $it_b
+		it_bans=$(identity_open "$it_src" "$1" "$2")
+		# shellcheck disable=SC2086 # "OK SIZE INO MODE"
+		set -- $it_mans
+		it_mino=${3:-?}
+		it_mmode=${4:-?}
+		# shellcheck disable=SC2086
+		set -- $it_bans
+		echo "$it_path $it_m $it_mino $it_mmode $it_b ${3:-?} ${4:-?}"
 	done >>"$it_file"
 }
+
+# identity_ftype MODE: the file-type bits of an octal MODE.
+identity_ftype() { echo $(((0$1) & 0170000)); }
 
 identity_check() {
 	ic_mnt=$1
 	ic_src=$2
-	sort -u "$3" | while IFS=' ' read -r ic_path ic_ino ic_mode ic_type ic_hex; do
-		ic_now=$("$FHTEST" stat "$ic_mnt" "$ic_type" "$ic_hex")
-		# shellcheck disable=SC2086 # "OK INO MODE PATH", or "ERR NAME"
-		set -- $ic_now
+	ic_file=$3
+	: >"$ic_file.answers"
+	# Every answer first, before anything walks a tree or reads a file.
+	sort -u "$ic_file" | while IFS=' ' read -r ic_path ic_mtype ic_mhex ic_mino ic_mmode ic_btype ic_bhex ic_bino ic_bmode; do
+		ic_ma=$(identity_open "$ic_mnt" "$ic_mtype" "$ic_mhex" | tr ' ' ,)
+		ic_ba=$(identity_open "$ic_src" "$ic_btype" "$ic_bhex" | tr ' ' ,)
+		echo "$ic_path $ic_mino $ic_mmode $ic_bino $ic_bmode ${ic_ma:-none} ${ic_ba:-none}"
+	done >>"$ic_file.answers"
+	wc -l <"$ic_file.answers" >"$ic_file.checked"
+	: >"$ic_file.estale"
+	while IFS=' ' read -r ic_path ic_mino ic_mmode ic_bino ic_bmode ic_ma ic_ba; do
 		ic_rel=${ic_path#"$ic_mnt"/}
+		ic_ma=$(echo "$ic_ma" | tr , ' ')
+		ic_ba=$(echo "$ic_ba" | tr , ' ')
+		# shellcheck disable=SC2086 # "OK SIZE INO MODE", or "ERR NAME"
+		set -- $ic_ma
 		case "${1:-}" in
 		ERR)
-			[ "${2:-}" = ESTALE ] || echo "the handle of $ic_rel failed with ${2:-nothing}, want the same object or ESTALE"
+			if [ "${2:-}" = ESTALE ]; then
+				# shellcheck disable=SC2086
+				set -- $ic_ba
+				if [ "${1:-}" = OK ] && [ "${3:-}" = "$ic_bino" ]; then
+					echo "note: the handle of $ic_rel failed ESTALE although the backing filesystem still has the object" >&2
+					echo "$ic_rel" >>"$ic_file.estale"
+				fi
+			else
+				echo "the handle of $ic_rel failed with ${2:-nothing}, want the same object or ESTALE"
+			fi
 			;;
 		OK)
-			if [ "$ic_ino" != ? ] && [ "${2:-}" != "$ic_ino" ]; then
-				echo "the handle of $ic_rel opened a different object: inode ${2:-}, was $ic_ino"
-			elif [ "$ic_mode" != ? ] && [ $(((0${3:-0}) & 0170000)) != $(((0$ic_mode) & 0170000)) ]; then
-				echo "the handle of $ic_rel opened an object of another type: mode ${3:-}, was $ic_mode"
-			else
-				# What the handle opened must still be somewhere: a name under the
-				# mount with that inode number (the path `fhtest stat` prints is
-				# no help for a file: the kernel names a file's dentry only when
-				# it is connected), and that name must be on the backing
-				# filesystem too.
-				ic_name=$(find "$ic_mnt" -inum "${2:-0}" 2>/dev/null | head -n 1)
-				if [ -z "$ic_name" ]; then
-					echo "the handle of $ic_rel opened inode ${2:-}, which has no name under $ic_mnt (an answer for something gone)"
-				else
-					ic_at=${ic_name#"$ic_mnt"}
-					if [ ! -e "$ic_src$ic_at" ] && [ ! -L "$ic_src$ic_at" ]; then
-						echo "the handle of $ic_rel opened ${ic_name#"$ic_mnt"/}, which the backing filesystem does not have (an answer for something gone)"
-					fi
-				fi
+			ic_got_ino=${3:-}
+			ic_got_mode=${4:-}
+			# shellcheck disable=SC2086
+			set -- $ic_ba
+			ic_bok=${1:-}
+			ic_bgot_ino=${3:-}
+			ic_bgot_mode=${4:-0}
+			if [ "$ic_mino" != '?' ] && [ "$ic_got_ino" != "$ic_mino" ]; then
+				echo "the handle of $ic_rel opened a different object: inode $ic_got_ino, was $ic_mino"
+			elif [ "$ic_mmode" != '?' ] && [ "$(identity_ftype "${ic_got_mode:-0}")" != "$(identity_ftype "$ic_mmode")" ]; then
+				echo "the handle of $ic_rel opened an object of another type: mode $ic_got_mode, was $ic_mmode"
+			elif [ "$ic_bino" = '?' ]; then
+				echo "the handle of $ic_rel opened inode $ic_got_ino, but there is no record of the backing object to compare with"
+			elif [ "$ic_bok" != OK ] || [ "$ic_bgot_ino" != "$ic_bino" ] ||
+				[ "$(identity_ftype "$ic_bgot_mode")" != "$(identity_ftype "$ic_bmode")" ]; then
+				echo "the handle of $ic_rel opened inode $ic_got_ino, but the backing filesystem's own handle of it answers '$ic_ba' (was inode $ic_bino): an answer for something gone"
 			fi
 			;;
 		*)
-			echo "the handle of $ic_rel answered '$ic_now', want the same object or ESTALE"
+			echo "the handle of $ic_rel answered '$ic_ma', want the same object or ESTALE"
 			;;
 		esac
-	done
+	done <"$ic_file.answers"
 }

@@ -129,11 +129,14 @@ fd_thaw() {
 	"$TESTUTIL" fsfreeze "$fd_dir" thaw
 }
 
-# fd_blocked PID [PREFIX]: up to 10 s for the process to be held by a freeze:
-# in uninterruptible sleep (state D) in a syscall whose descriptor names a path
-# under PREFIX (if given), on three looks 0.2 s apart. A single look is not
+# fd_blocked PID [PREFIX]: the process PID (/proc/PID/status and syscall are
+# the main thread's: a request held in another thread is not seen) is held by a
+# freeze: in
+# uninterruptible sleep (state D) in a syscall whose descriptor names a path
+# under PREFIX (if given), on three looks 0.2 s apart (a single look is not
 # enough: a syncfs or an fsync waiting for its I/O is in state D for a few
-# milliseconds too.
+# milliseconds too). The 10 s it gives up after is a guard against a hang, not
+# a wait the test relies on: a held daemon is found within the first looks.
 fd_blocked() {
 	fb_n=0
 	fb_seen=0

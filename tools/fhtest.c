@@ -14,11 +14,6 @@
  *       "OK <n> <data>" or "ERR <errno-name>".
  *   fhtest bumpgen <hexbytes>
  *       Print the handle bytes with fh[2] incremented (doctored handle).
- *   fhtest stat <mount> <type> <hexbytes>
- *       open_by_handle_at() the handle with O_PATH and print
- *       "OK <st_ino> <st_mode in octal> <path of the descriptor>" or
- *       "ERR <errno-name>" (the identity oracle of guest/fault_lib.sh: what
- *       object the handle names now, without reading it).
  *
  * All output is single-line so the guest test script can capture it.
  */
@@ -187,46 +182,6 @@ static int cmd_open(const char *mount, const char *type, const char *hex)
 	return 0;
 }
 
-static int cmd_stat(const char *mount, const char *type, const char *hex)
-{
-	union fh_buf fh;
-	int mount_fd, fd;
-	struct stat st;
-	char link[64], path[4096];
-	ssize_t n;
-
-	fh.h.handle_type = atoi(type);
-	if (parse_hex(hex, &fh))
-		return 1;
-	mount_fd = open(mount, O_RDONLY | O_DIRECTORY);
-	if (mount_fd == -1) {
-		printf("ERR %s\n", errname(errno));
-		return 1;
-	}
-	fd = open_by_handle_at(mount_fd, &fh.h, O_PATH);
-	if (fd == -1) {
-		printf("ERR %s\n", errname(errno));
-		close(mount_fd);
-		return 1;
-	}
-	if (fstat(fd, &st) == -1) {
-		printf("ERR %s\n", errname(errno));
-		close(fd);
-		close(mount_fd);
-		return 1;
-	}
-	snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
-	n = readlink(link, path, sizeof(path) - 1);
-	if (n < 0)
-		n = 0;
-	path[n] = '\0';
-	printf("OK %llu %o %s\n", (unsigned long long) st.st_ino,
-	       (unsigned int) st.st_mode, path);
-	close(fd);
-	close(mount_fd);
-	return 0;
-}
-
 static int cmd_bumpgen(const char *hex)
 {
 	union fh_buf fh;
@@ -257,14 +212,12 @@ int main(int argc, char *argv[])
 		return cmd_gen(argv[2]);
 	if (argc >= 5 && strcmp(argv[1], "open") == 0)
 		return cmd_open(argv[2], argv[3], argv[4]);
-	if (argc >= 5 && strcmp(argv[1], "stat") == 0)
-		return cmd_stat(argv[2], argv[3], argv[4]);
 	if (argc >= 3 && strcmp(argv[1], "bumpgen") == 0)
 		return cmd_bumpgen(argv[2]);
 
 	fprintf(stderr,
 		"usage: fhtest getversion|handle|gen <path>\n"
-		"       fhtest open|stat <mount> <type> <hexbytes>\n"
+		"       fhtest open <mount> <type> <hexbytes>\n"
 		"       fhtest bumpgen <hexbytes>\n");
 	return 2;
 }

@@ -87,6 +87,7 @@ config_setting(
         "//tools/kernel_bugs:guest_files",  # step 26.15: /kernel_bugs/
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + [
+        "guest/fault_ace_mixed.expected_failures",  # step 26.14e
         "guest/request_budgets.txt",
         "guest/syscall_budgets.txt",
     ],
@@ -317,17 +318,23 @@ qemu_test_matrix(
 )
 
 # Step 26.14e: mixed-fault sequences (guest/fault_ace.sh, kind mixed): one
-# operation and three events drawn from {daemon crash, power loss ahead, power
-# loss behind, a failed phase 3, lookup, listing, sync, handle taken}, judged by
-# the path oracle and the identity oracle (fault_lib.sh). The large tier runs a
-# fixed seeded sample (20 sequences per backing filesystem) and the oracles'
-# negative fixtures; the long tail, a bigger sample with the seed the noisy job
-# passes ($DCFS_SEED), is the manual fault_ace_mixed_long_test targets (cmdline
-# dcfs_ace_count; each sequence takes 3-4 s).
+# operation and three events drawn from {daemon crash, a kill held in phase 3,
+# power loss ahead, power loss behind, a failed phase 3, lookup, listing, sync,
+# handle taken, writes dropped from here on}, judged by the path oracle and the
+# identity oracle (fault_lib.sh). The large tier runs an explicit list of 22
+# sequences (the first two are 23.11's: a create whose phase 3 never completed,
+# a lookup that records its row, a power loss that loses the create while the
+# cache keeps the row), not a seeded draw: busybox awk's rand() is not stable
+# across pins, so a draw would change with the busybox pin. The list was drawn
+# once, from seed 2610, with the first two added. The oracles' negative
+# fixtures run first. The long tail, a seeded sample of 120 with the seed the
+# noisy job passes ($DCFS_SEED), is the manual fault_ace_mixed_long_test
+# targets (each sequence takes 5-8 s). Replay a sequence by naming it in
+# dcfs_ace_sequences (op:event:event:event, comma-separated).
 qemu_test_matrix(
     name = "fault_ace_mixed_test",
     checked_dcfs = True,
-    cmdline = "dcfs_ace_kinds=mixedfixtures,mixed dcfs_ace_ops=create,unlink,rename,replace dcfs_ace_seed=1 dcfs_ace_count=20",
+    cmdline = "dcfs_ace_kinds=mixedfixtures,mixed dcfs_ace_sequences=create:dropahead:crash3:lookup,create:dropahead:fail3:lookup,replace:listing:crash3:listing,create:handle:lookup:crash,unlink:crash3:cutahead:crash3,unlink:cutahead:crash:cutbehind,unlink:sync:sync:lookup,create:cutahead:crash:cutbehind,unlink:listing:fail3:crash3,replace:dropahead:cutahead:crash3,unlink:dropahead:dropahead:crash3,unlink:listing:crash3:listing,rename:sync:lookup:listing,replace:sync:cutbehind:crash3,create:handle:crash3:sync,create:cutahead:crash3:listing,unlink:cutbehind:sync:listing,create:lookup:listing:sync,create:sync:crash3:dropahead,rename:dropahead:crash3:dropahead,create:crash3:dropahead:handle,unlink:cutahead:lookup:dropahead",
     disks = [
         ("vdb", "ext4", "320M"),
         ("vdc", "ext4", "64M"),
@@ -352,7 +359,7 @@ qemu_test_matrix(
     size = "large",
     other_size = "large",
     tags = ["manual"],
-    timeout = "eternal",  # 120 sequences, 5-6 s each: the noisy job's long tail
+    timeout = "eternal",  # 120 sequences, 5-8 s each: the noisy job's long tail
 )
 
 # Step 11.6: the backing filesystem frozen (guest/fault_freeze.sh): what blocks

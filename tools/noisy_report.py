@@ -19,8 +19,6 @@ import os
 import shutil
 import sys
 
-BAD = ("FAILED", "TIMEOUT", "INCOMPLETE", "FAILED_TO_BUILD", "NO_STATUS")
-
 
 def load(path):
     """The (label, status, runs, failed runs) of every test summary in the file."""
@@ -73,7 +71,7 @@ def report(name, tests):
         "Each is a finding (a race or a kernel-timing dependence the quiet "
         "default hides), not a failed push: pin the interleaving in a "
         "deterministic test before fixing (AGENTS.md, \"Test first\"). Logs: "
-        "the `noisy-logs-%s` artifact." % name
+        "the job's `noisy-report-*` artifact, under `logs/%s`." % name
     )
     return "\n".join(lines) + "\n"
 

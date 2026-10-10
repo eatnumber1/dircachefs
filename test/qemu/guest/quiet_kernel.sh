@@ -29,7 +29,7 @@ mode_problems=$(kernel_mode_problems quiet)
 if [ -z "$mode_problems" ]; then
 	pass kernel-mode-quiet
 else
-	fail kernel-mode-quiet "$mode_problems"
+	fail kernel-mode-quiet "$(echo "$mode_problems" | tr '\n' '|')"
 fi
 
 if ! mount -t ext4 /dev/vdb /src; then

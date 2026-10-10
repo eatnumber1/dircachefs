@@ -1,0 +1,18 @@
+# Mixed-fault sequences (guest/fault_ace.sh, kind mixed) that fail on code without
+# step 23.11's fix, one per line: the sequence (op and three events,
+# space-separated), a TAB, the reason. Strict: a listed sequence that holds fails
+# the test ("remove it"), so landing 23.11 forces this file to be emptied. All
+# are one bug: a row recorded clean for a create that never completed phase 3,
+# made durable in the cache by a later commit, survives a power cut that loses
+# the create on the backing filesystem; its handle then opens (the identity
+# oracle: "an answer for something gone").
+create dropahead crash3 lookup	23.11: a clean row of a create that never completed phase 3 survives the cut
+create dropahead fail3 lookup	23.11: a clean row of a create that never completed phase 3 survives the cut
+replace listing crash3 listing	23.11: a clean row of a create that never completed phase 3 survives the cut
+unlink crash3 cutahead crash3	23.11: a clean row of a create that never completed phase 3 survives the cut
+unlink dropahead dropahead crash3	23.11: a clean row of a create that never completed phase 3 survives the cut
+unlink listing crash3 listing	23.11: a clean row of a create that never completed phase 3 survives the cut
+create cutahead crash3 listing	23.11: a clean row of a create that never completed phase 3 survives the cut
+create sync crash3 dropahead	23.11: a clean row of a create that never completed phase 3 survives the cut
+rename dropahead crash3 dropahead	23.11: a clean row of a create that never completed phase 3 survives the cut
+create crash3 dropahead handle	23.11: a clean row of a create that never completed phase 3 survives the cut

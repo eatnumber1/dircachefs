@@ -267,6 +267,16 @@
  *       0666 less the umask, like `: >file`). One process instead of a
  *       shell fork per file: guest/readdir_boundary.sh makes 7,500. Prints
  *       "ERR <errno name>" and stops at the first failure.
+ *   testutil handle-save <path> <file>
+ *       name_to_handle_at of <path>, written to <file> ("<type> <hex>").
+ *   testutil handle-stat <dir> <file>
+ *       open_by_handle_at (O_PATH) of the handle in <file>, against the
+ *       mount <dir> is on, then fstat: prints "OK <size> <inode> <mode in
+ *       octal>" or "ERR <errno name>" of whichever failed. guest/fault_lib.sh's
+ *       identity oracle (step 26.14e) and guest/fault_power.sh's "born"
+ *       scenario (step 23.11) reopen saved handles with it. (Same names and
+ *       code as 23.11's; its output is "OK <size>", this adds the inode and the
+ *       mode: whichever lands second adapts.)
  *   testutil btrfs-subvol-create <path>
  *       BTRFS_IOC_SUBVOL_CREATE: creates a btrfs subvolume at <path> (whose
  *       parent directory must already exist on a btrfs filesystem). Step
@@ -2192,6 +2202,67 @@ static const char *kind_dir(char kind)
 	return kind == 'f' ? "f" : kind == 'd' ? "d" : "l";
 }
 
+static int cmd_handle_save(const char *path, const char *file)
+{
+	union fhbuf fh;
+	FILE *out;
+
+	if (get_handle(path, &fh) == -1) {
+		printf("ERR %s\n", strerrorname_np(errno));
+		return 1;
+	}
+	out = fopen(file, "w");
+	if (out == NULL) {
+		printf("ERR %s\n", strerrorname_np(errno));
+		return 1;
+	}
+	fprintf(out, "%d %s\n", fh.h.handle_type,
+		hexs(fh.h.f_handle, fh.h.handle_bytes));
+	fclose(out);
+	return 0;
+}
+
+static int cmd_handle_stat(const char *dir, const char *file)
+{
+	char hex[512];
+	union fhbuf fh;
+	struct stat st;
+	FILE *in = fopen(file, "r");
+	int mfd, fd, type;
+	size_t j;
+
+	if (in == NULL || fscanf(in, "%d %511s", &type, hex) != 2) {
+		printf("ERR bad handle file\n");
+		return 1;
+	}
+	fclose(in);
+	memset(&fh, 0, sizeof(fh));
+	fh.h.handle_type = type;
+	fh.h.handle_bytes = (unsigned) strlen(hex) / 2;
+	for (j = 0; j < fh.h.handle_bytes; j++) {
+		unsigned int v;
+
+		sscanf(hex + 2 * j, "%2x", &v);
+		fh.h.f_handle[j] = (unsigned char) v;
+	}
+	mfd = open(dir, O_RDONLY | O_DIRECTORY);
+	if (mfd == -1) {
+		printf("ERR %s\n", strerrorname_np(errno));
+		return 1;
+	}
+	fd = open_by_handle_at(mfd, &fh.h, O_PATH | O_NOFOLLOW);
+	if (fd == -1 || fstat(fd, &st) == -1) {
+		printf("ERR %s\n", strerrorname_np(errno));
+	} else {
+		printf("OK %lld %llu %o\n", (long long) st.st_size,
+		       (unsigned long long) st.st_ino, (unsigned) st.st_mode);
+	}
+	if (fd != -1)
+		close(fd);
+	close(mfd);
+	return 0;
+}
+
 static int cmd_names_handles_save(const char *root, const char *file)
 {
 	static const char kinds[] = "fdl";
@@ -2933,6 +3004,10 @@ int main(int argc, char *argv[])
 		return cmd_names_create(argv[2]);
 	if (argc >= 3 && argc <= 4 && strcmp(argv[1], "names-verify") == 0)
 		return cmd_names_verify(argv[2], argc == 4);
+	if (argc == 4 && strcmp(argv[1], "handle-save") == 0)
+		return cmd_handle_save(argv[2], argv[3]);
+	if (argc == 4 && strcmp(argv[1], "handle-stat") == 0)
+		return cmd_handle_stat(argv[2], argv[3]);
 	if (argc == 4 && strcmp(argv[1], "names-handles-save") == 0)
 		return cmd_names_handles_save(argv[2], argv[3]);
 	if (argc == 4 && strcmp(argv[1], "names-handles-open") == 0)

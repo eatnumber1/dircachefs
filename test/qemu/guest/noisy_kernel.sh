@@ -21,7 +21,7 @@ mode_problems=$(kernel_mode_problems noisy)
 if [ -z "$mode_problems" ]; then
 	pass kernel-mode-noisy
 else
-	fail kernel-mode-noisy "$mode_problems (is DCFS_NOISY=1 set for this test: bazel test --test_env=DCFS_NOISY=1?)"
+	fail kernel-mode-noisy "$(echo "$mode_problems" | tr '\n' '|') (is DCFS_NOISY=1 set for this test: bazel test --test_env=DCFS_NOISY=1?)"
 fi
 
 exit "$FAILED"

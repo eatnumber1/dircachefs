@@ -98,7 +98,6 @@ LOG=/tmp/dcfs.log
 DAEMON_PID=""
 MOUNTED=0
 BG_PID=""
-FHTEST=/bin/fhtest
 
 # OPS: the operations, each a function ace_<name> on the tree under $MNT/t.
 OPS="create mkdir unlink rename replace link xrename chmod append"
@@ -145,6 +144,9 @@ ace_append() { echo more >>"$MNT/t/a"; }
 ace_rebuild() {
 	rm -rf "$SRC/t"
 	mkdir "$SRC/t" "$SRC/t/e"
+	# The mixed sequences' own directory for the create that makes the cache
+	# durable ahead of the backing filesystem (ACE_Z=1).
+	[ "${ACE_Z:-0}" -eq 0 ] || mkdir "$SRC/t/z"
 	echo aaaa >"$SRC/t/a"
 	echo bbbbbbb >"$SRC/t/b"
 	echo xxxx >"$SRC/t/e/x"
@@ -338,9 +340,12 @@ kind_fixtures() {
 
 # --- mixed-fault sequences (step 26.14e) --------------------------------------
 
-MIXED_EVENTS="crash crash3 cutahead cutbehind fail3 lookup listing sync handle"
+MIXED_EVENTS="crash crash3 cutahead cutbehind fail3 lookup listing sync handle dropahead"
 HANDLES=/tmp/handles.rec
 FILL=$CACHE_DIR/fill
+# Whether the backing filesystem is dropping writes (dropahead), until a cut.
+DROPPING=0
+MIXED_HANDLES=0
 
 # mixed_sequences: the sequences to run, one per line, "op e1 e2 e3".
 mixed_sequences() {
@@ -366,13 +371,35 @@ mixed_sequences() {
 		}'
 }
 
-# mixed_check WHEN: the oracles over the state now (a restart just happened);
-# what they say is added to MIXED_PROBLEMS.
+# mixed_take: the handle of every object (11.7's definition: before every cut
+# and crash), the lookups it makes included.
+mixed_take() { identity_take "$MNT" "$SRC" "$MNT/t" "$HANDLES"; }
+
+# mixed_identity WHEN: the identity oracle over the handles taken so far, what
+# it says added to MIXED_PROBLEMS and the handles it checked to MIXED_HANDLES.
+# It runs before any path oracle: it collects every answer first, so nothing
+# that walks the tree or reads a file can change what a handle answers.
+mixed_identity() {
+	mi_out=$(identity_check "$MNT" "$SRC" "$HANDLES" 2>/dev/null | tr '\n' '|')
+	MIXED_HANDLES=$((MIXED_HANDLES + $(cat "$HANDLES.checked")))
+	[ -z "$mi_out" ] || MIXED_PROBLEMS="$MIXED_PROBLEMS [after $1, identity oracle: $mi_out]"
+}
+
+# mixed_check WHEN: after a restart in the middle of a sequence. The identity
+# oracle, then the path oracle by metadata only (names, types, sizes, modes:
+# fd_snapshot reads no file through dcfs). A read-only OPEN of a file marks its
+# row atime-dirty, a later durable commit takes the mark to the cache disk, and
+# the recovery then probes the row (attrs invalid): a check that md5sums every
+# file would hide the very state a handle taken before is there to find. The
+# content comparison is the final check's.
 mixed_check() {
-	mc_p=$(problems)
-	[ -z "$mc_p" ] || MIXED_PROBLEMS="$MIXED_PROBLEMS [after $1, path oracle: $mc_p]"
-	mc_i=$(identity_check "$MNT" "$SRC" "$HANDLES" | tr '\n' '|')
-	[ -z "$mc_i" ] || MIXED_PROBLEMS="$MIXED_PROBLEMS [after $1, identity oracle: $mc_i]"
+	mixed_identity "$1"
+	mixed_drop
+	fd_snapshot "$SRC" >/tmp/backing.snap
+	fd_snapshot "$MNT" >/tmp/served.snap 2>&1
+	if ! command diff /tmp/served.snap /tmp/backing.snap >/tmp/snap.diff 2>&1; then
+		MIXED_PROBLEMS="$MIXED_PROBLEMS [after $1, path oracle: served (<) and backing (>) differ: $(tr '\n' '|' </tmp/snap.diff)]"
+	fi
 }
 
 # Dropping the kernel's dentries and inodes without `sync` (guest/lib.sh's
@@ -380,35 +407,68 @@ mixed_check() {
 # sequence did not ask for).
 mixed_drop() { echo 3 >/proc/sys/vm/drop_caches; }
 
-mixed_event_crash() {
-	fd_crash
+# mixed_cut_restart: the cut and the restart, with the checks.
+mixed_cut_restart() {
+	cut_and_restart "$MIXED_SEQ"
+	DROPPING=0
+	mixed_check "$1"
+}
+
+# mixed_freeze_backing: FIFREEZE of the backing filesystem. While it drops
+# writes (dropahead) the freeze is done on a healthy disk, which writes what
+# the filesystem holds, and the disk drops writes again once it is frozen and
+# clean, as guest/fault_power.sh's `born` does (a freeze of a btrfs whose
+# writes are dropped turns it read-only).
+mixed_freeze_backing() {
+	[ "$DROPPING" -eq 0 ] || fault_mode "$FD_BACK" healthy || fail ace-freeze "fault_mode failed"
+	fd_freeze back || fail ace-freeze "FIFREEZE of the backing filesystem failed"
+	[ "$DROPPING" -eq 0 ] || fault_mode "$FD_BACK" drop-writes || fail ace-freeze "fault_mode failed"
+}
+
+mixed_restart_daemon() {
 	if ! fd_start "$LOG" --sync_interval_sec=3600; then
-		fail "ace-restart" "$MIXED_SEQ: daemon did not mount within 10s after the crash"
+		fail "ace-restart" "$MIXED_SEQ: daemon did not mount within 10s after $1"
 		exit "$FAILED"
 	fi
 	mixed_drop
+}
+
+mixed_event_crash() {
+	mixed_take
+	fd_crash
+	mixed_restart_daemon "the crash"
 	mixed_check crash
 }
 mixed_event_cutahead() {
-	# A create in the other directory: its phase 1 fsyncs the cache's WAL, which
-	# takes everything the cache recorded so far to the cache disk, while the
-	# backing filesystem's journal has committed nothing (the long commit
-	# interval): the cache ahead of the backing filesystem, as in
-	# guest/fault_power.sh's `ahead`.
-	touch "$MNT/t/e/ahead" 2>/dev/null || true
-	cut_and_restart "$MIXED_SEQ"
-	mixed_check cutahead
+	mixed_take
+	# A create in a directory of its own (z: no other operation makes it
+	# dirty, which would leave nothing for this create's phase 1 to fsync): its
+	# phase 1 fsyncs the cache's WAL, which takes everything the cache recorded
+	# so far to the cache disk, while the backing filesystem has not committed
+	# (the long commit interval, or dropahead): the cache ahead of the backing
+	# filesystem, as in guest/fault_power.sh's `ahead`.
+	touch "$MNT/t/z/ahead" 2>/dev/null || true
+	mixed_cut_restart cutahead
 }
 mixed_event_cutbehind() {
+	mixed_take
 	"$TESTUTIL" syncfs "$SRC" || fail ace-syncfs "syncfs of $SRC failed"
-	cut_and_restart "$MIXED_SEQ"
-	mixed_check cutbehind
+	mixed_cut_restart cutbehind
+}
+# dropahead: the backing filesystem drops every write from here on until the
+# next cut, as in guest/fault_power.sh's `ahead` and `born`: the cache-ahead
+# state is then the same on ext4, xfs and btrfs (xfs's log force would commit
+# the backing between a create and the cut) and no sync in between (the
+# `sync` event, a sync point's syncfs) can make it durable.
+mixed_event_dropahead() {
+	fault_mode "$FD_BACK" drop-writes || fail ace-dropahead "fault_mode failed"
+	DROPPING=1
 }
 mixed_event_sync() { "$TESTUTIL" fsync "$MNT/t" || fail ace-fsync "fsync of $MNT/t failed"; }
 # mixed_lookup_names: a lookup (by name) of every name the sequences use, those
 # that are not there included.
 mixed_lookup_names() {
-	for me_n in t t/a t/b t/n t/m t/l t/r t/e t/e/a t/e/x t/f3 t/c3; do
+	for me_n in t t/a t/b t/n t/m t/l t/r t/e t/z t/e/a t/e/x t/f3 t/c3; do
 		stat "$MNT/$me_n" >/dev/null 2>&1 || true
 	done
 }
@@ -416,7 +476,7 @@ mixed_lookup_names() {
 # handle out), then the handle of everything under t.
 mixed_event_handle() {
 	mixed_lookup_names
-	identity_take "$MNT" "$MNT/t" "$HANDLES"
+	mixed_take
 }
 mixed_event_lookup() {
 	mixed_drop
@@ -433,8 +493,8 @@ mixed_event_listing() {
 # backing filesystem; dcfs replies EEXIST.
 mixed_event_fail3() {
 	ls "$MNT/t" >/dev/null 2>&1
-	fd_freeze back || fail ace-fail3 "FIFREEZE of the backing filesystem failed"
-	touch "$MNT/t/f3" 2>/dev/null &
+	mixed_freeze_backing
+	touch "$MNT/t/f3" 2>/tmp/f3.err &
 	BG_PID=$!
 	if ! fd_blocked "$DAEMON_PID" "$SRC"; then
 		fail ace-fail3 "$MIXED_SEQ: the daemon never blocked on the frozen backing filesystem"
@@ -442,26 +502,42 @@ mixed_event_fail3() {
 	mkdir -p "$FILL"
 	fd_fill "$FILL" >/dev/null
 	fd_thaw back || fail ace-fail3 "FITHAW of the backing filesystem failed"
-	wait "$BG_PID" 2>/dev/null || true
+	wait "$BG_PID"
+	f3_rc=$?
 	BG_PID=""
+	# The create happened and cannot be recorded, so it is replied as EEXIST (as
+	# guest/enospc_cache.sh asserts); another reply is a different fault than
+	# the one this event stands for.
+	if [ "$f3_rc" -eq 0 ] || ! grep -q "File exists" /tmp/f3.err; then
+		fail ace-fail3 "$MIXED_SEQ: the create whose phase 3 failed was replied rc=$f3_rc $(cat /tmp/f3.err)"
+	fi
+	[ -e "$SRC/t/f3" ] || fail ace-fail3 "$MIXED_SEQ: t/f3 is not on the backing filesystem: phase 2 did not run"
 	rm -rf "$FILL"
-	sync
+	# Only the cache filesystem: a global sync would commit the create on the
+	# backing filesystem and close the very window this event opens.
+	"$TESTUTIL" syncfs "$CACHE_DIR" || fail ace-fail3 "syncfs of $CACHE_DIR failed"
 }
 
 # crash3: a create held in phase 3 (the backing filesystem frozen in its
 # syscall, then the cache filesystem frozen and the backing one thawed: the
 # create is on the backing filesystem and the daemon is held before the cache
 # has it) and the daemon killed there; the restart finds the dirty marks and
-# phase 3 never happened. As guest/fault_power.sh's `phase2`, without the cut.
+# phase 3 never happened. As guest/fault_power.sh's `born`, without the cut.
 mixed_event_crash3() {
+	mixed_take
 	ls "$MNT/t" >/dev/null 2>&1
-	fd_freeze back || fail ace-crash3 "FIFREEZE of the backing filesystem failed"
+	mixed_freeze_backing
 	touch "$MNT/t/c3" 2>/dev/null &
 	BG_PID=$!
 	fd_blocked "$DAEMON_PID" "$SRC" || fail ace-crash3 "$MIXED_SEQ: the daemon never blocked on the frozen backing filesystem"
 	fd_freeze cache || fail ace-crash3 "FIFREEZE of the cache filesystem failed"
 	fd_thaw back || fail ace-crash3 "FITHAW of the backing filesystem failed"
 	fd_blocked "$DAEMON_PID" "$CACHE_DIR" || fail ace-crash3 "$MIXED_SEQ: the daemon never blocked in phase 3 on the frozen cache filesystem"
+	if [ -e "$SRC/t/c3" ] && kill -0 "$BG_PID" 2>/dev/null; then
+		:
+	else
+		fail ace-crash3 "$MIXED_SEQ: not held in phase 3: t/c3 on the backing filesystem: $([ -e "$SRC/t/c3" ] && echo yes || echo no); touch running: $(kill -0 "$BG_PID" 2>/dev/null && echo yes || echo no)"
+	fi
 	# Killed first and thawed after: held by the freeze the daemon dies when its
 	# write returns, before phase 3's commit frame.
 	kill -KILL "$DAEMON_PID" 2>/dev/null || true
@@ -469,65 +545,92 @@ mixed_event_crash3() {
 	fd_crash
 	wait "$BG_PID" 2>/dev/null || true
 	BG_PID=""
-	if ! fd_start "$LOG" --sync_interval_sec=3600; then
-		fail "ace-restart" "$MIXED_SEQ: daemon did not mount within 10s after the kill in phase 3"
-		exit "$FAILED"
-	fi
-	mixed_drop
+	mixed_restart_daemon "the kill in phase 3"
 	mixed_check crash3
 }
 
 # tamper (the fixtures only): the handle record says every object had another
 # inode number, as if a handle had opened a different object after recovery.
 mixed_event_tamper() {
-	awk '$2 != "?" { $2 = $2 + 1 } { print }' "$HANDLES" >"$HANDLES.new"
+	awk '$4 != "?" { $4 = $4 + 1 } { print }' "$HANDLES" >"$HANDLES.new"
 	mv "$HANDLES.new" "$HANDLES"
 }
 
 # mixed_run OP EVENT...: MIXED_PROBLEMS says what the oracles reported ("": the
-# sequence held).
+# sequence held), MIXED_HANDLES how many handles were checked.
 mixed_run() {
 	MIXED_SEQ="$*"
 	MIXED_PROBLEMS=""
+	MIXED_HANDLES=0
+	DROPPING=0
 	mr_op=$1
 	shift
+	ACE_Z=1
 	begin
+	ls "$MNT/t/z" >/dev/null
 	: >"$HANDLES"
 	"ace_$mr_op" 2>/dev/null
 	for mr_event in "$@"; do
 		"mixed_event_$mr_event"
 	done
+	# The last event cuts the power, unless it was a restart already: the
+	# sequence is judged after a recovery.
 	case "$mr_event" in
-	crash | crash3 | cutahead | cutbehind) ;;
+	cutahead | cutbehind) ;;
+	crash | crash3) [ "$DROPPING" -eq 0 ] || mixed_event_cutahead ;;
 	*) mixed_event_cutahead ;;
 	esac
+	# The final check: identity first, then the path oracle with the contents.
+	mixed_identity final
+	mr_p=$(problems)
+	[ -z "$mr_p" ] || MIXED_PROBLEMS="$MIXED_PROBLEMS [final path oracle: $mr_p]"
 	fd_crash
+}
+
+# mixed_expected SEQ: the reason SEQ is expected to fail (empty: it is not),
+# from guest/fault_ace_mixed.expected_failures ("SEQ<TAB>REASON" lines).
+mixed_expected() {
+	sed -n "s/^$1	//p" "$(dirname "$0")/fault_ace_mixed.expected_failures" 2>/dev/null | head -n 1
 }
 
 kind_mixed() {
 	mixed_sequences >/tmp/mixed.seq
 	echo "fault_ace.sh: mixed: the sample (seed $(cmdline dcfs_seed)/$(cmdline dcfs_ace_seed), $(wc -l </tmp/mixed.seq) sequences):"
 	cat /tmp/mixed.seq
+	km_handles=0
+	km_checked=0
 	while IFS= read -r km_seq; do
 		# shellcheck disable=SC2086 # one word per event
 		mixed_run $km_seq
 		ACE_N=$((ACE_N + 1))
-		if [ -n "$MIXED_PROBLEMS" ]; then
+		km_handles=$((km_handles + MIXED_HANDLES))
+		[ "$MIXED_HANDLES" -eq 0 ] || km_checked=$((km_checked + 1))
+		km_want=$(mixed_expected "$km_seq")
+		echo "fault_ace.sh: mixed: $km_seq: $MIXED_HANDLES handles checked: ${MIXED_PROBLEMS:-held}"
+		if [ -n "$km_want" ]; then
+			if [ -z "$MIXED_PROBLEMS" ]; then
+				ACE_BAD=$((ACE_BAD + 1))
+				fail ace-mixed "$km_seq is listed as expected to fail ($km_want) and held: remove it from fault_ace_mixed.expected_failures"
+			else
+				echo "fault_ace.sh: mixed: $km_seq failed as expected ($km_want)"
+			fi
+		elif [ -n "$MIXED_PROBLEMS" ]; then
 			ACE_BAD=$((ACE_BAD + 1))
 			fail ace-mixed "$km_seq:$MIXED_PROBLEMS"
 		fi
 	done </tmp/mixed.seq
+	echo "fault_ace.sh: mixed: $km_checked of $ACE_N sequences checked identity, $km_handles handles in all"
 }
 
 # The negative fixtures of the mixed oracles.
 kind_mixedfixtures() {
-	# Untouched, the sequence holds (so the rejection below is the tamper's).
+	# Untouched, the sequence holds (so the rejections below are the injection's).
 	mixed_run create handle cutahead lookup
 	if [ -n "$MIXED_PROBLEMS" ]; then
 		ACE_BAD=$((ACE_BAD + 1))
 		fail ace-mixedfixtures "the untampered fixture sequence was rejected:$MIXED_PROBLEMS"
 	else
-		echo "fault_ace.sh: the fixture sequence holds untampered"
+		echo "fault_ace.sh: the fixture sequence holds untampered ($MIXED_HANDLES handles)"
 	fi
 	# Injected: the same sequence with the handle record tampered with.
 	mixed_run create handle tamper cutahead lookup
@@ -540,7 +643,33 @@ kind_mixedfixtures() {
 		fail ace-mixedfixtures "a tampered handle record was not rejected by the identity oracle:$MIXED_PROBLEMS"
 		;;
 	esac
-	ACE_N=2
+	# The ghost, on the real daemon: a file removed behind dcfs's back while its
+	# directory's listing is cached. dcfs answers the handle from its cache (a
+	# row that says the file exists) and the backing filesystem's own handle of it
+	# is ESTALE: an answer for something gone, which only the identity oracle's
+	# backing handle sees (the path oracle walks names, and the listing is
+	# cached).
+	ACE_Z=1
+	begin
+	: >"$HANDLES"
+	mixed_lookup_names
+	mixed_take
+	if [ -n "$(identity_check "$MNT" "$SRC" "$HANDLES" 2>/dev/null)" ]; then
+		ACE_BAD=$((ACE_BAD + 1))
+		fail ace-mixedfixtures "the untouched ghost fixture was rejected"
+	fi
+	rm "$SRC/t/a"
+	case "$(identity_check "$MNT" "$SRC" "$HANDLES" 2>/dev/null)" in
+	*"t/a opened inode"*"an answer for something gone"*)
+		echo "fault_ace.sh: a file removed behind dcfs's back (a ghost) is rejected"
+		;;
+	*)
+		ACE_BAD=$((ACE_BAD + 1))
+		fail ace-mixedfixtures "a handle that dcfs opens for a file the backing filesystem lost was not rejected: $(identity_check "$MNT" "$SRC" "$HANDLES" 2>&1 | tr '\n' '|')"
+		;;
+	esac
+	fd_crash
+	ACE_N=3
 }
 
 for kind in $KINDS; do

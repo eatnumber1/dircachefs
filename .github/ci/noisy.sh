@@ -32,7 +32,7 @@ done
 mkdir -p noisy-report
 bep="$PWD/noisy-report/$name.bep.json"
 common=(--test_env=DCFS_NOISY=1 --test_tag_filters=-quiet-only
-	--local_test_jobs=2 "--build_event_json_file=$bep")
+	--local_test_jobs=2 --runs_per_test_detects_flakes "--build_event_json_file=$bep")
 # One profile per invocation (test.sh writes DCFS_CI_PROFILE; this job calls it
 # more than once).
 if [ -n "${DCFS_CI_PROFILE:-}" ]; then

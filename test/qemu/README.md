@@ -363,28 +363,62 @@ harness's holds or a fault point), then the fix.
 
 ### Mixed-fault sequences
 
-`guest/fault_ace.sh`'s `mixed` kind draws, from a seed, one operation (of
-`dcfs_ace_ops`) and three events from {`crash`, `crash3`, `cutahead`,
-`cutbehind`, `fail3`, `lookup`, `listing`, `sync`, `handle`} and runs them in
-order, then a power cut unless the third was one (the kind's comment in the
-script says what each does: `crash3` kills the daemon with a create held in
-phase 3, `fail3` fails a create's phase 3 by filling the cache filesystem,
-`cutahead` makes the cache durable ahead of the backing filesystem and cuts,
-`cutbehind` syncs the backing filesystem and cuts). After every restart and
-at the end two oracles judge the state: the path oracle (served == backing)
-and the identity oracle (`guest/fault_lib.sh` `identity_take` and
-`identity_check`, the minimal form of 11.7's: the handle of every object taken
-by `handle` must open, after the recovery, to the same object, with a name on
-the backing filesystem, or fail `ESTALE`; never answer for something gone).
-`fault_ace_mixed_test` (large; 20 sequences per backing filesystem, seed 1)
-runs the oracles' fixtures first (`mixedfixtures`: the same sequence passes
-untouched and is rejected when its handle record is tampered with) and the
-sample; `fault_ace_mixed_long_test_<fs>` (manual; 120 sequences seeded by
-`DCFS_SEED`) is the noisy job's tail. A failing sequence is printed; replay it
-with `dcfs_ace_sequences=op:e1:e2:e3` in the target's `cmdline`.
-`identity_oracle_test` checks the oracle over a fake `fhtest` (an injected
-different object, a ghost, a wrong type, ENOENT, EIO, garbage). 11.7's own
-helper, when it lands, replaces `identity_*` here.
+`guest/fault_ace.sh`'s `mixed` kind runs one operation (of `dcfs_ace_ops`) and
+three events from {`crash`, `crash3`, `cutahead`, `cutbehind`, `fail3`,
+`lookup`, `listing`, `sync`, `handle`, `dropahead`}, then a power cut unless
+the last event was one (the kind's comment in the script says what each does):
+`crash3` kills the daemon with a create held in phase 3, `fail3` fails a
+create's phase 3 by filling the cache filesystem (and asserts the EEXIST
+reply), `dropahead` makes the backing filesystem drop writes from there on (so
+the cache-ahead state is the same on all three filesystems and no sync can
+close it), `cutahead` creates in a directory of its own (its phase 1 makes the
+cache durable ahead of the backing filesystem) and cuts, `cutbehind` syncs the
+backing filesystem and cuts.
+
+Two oracles judge the state, the identity oracle first. The handle of every
+object is taken (`identity_take`, with the lookups it makes) before every
+crash and cut, not only on a `handle` event, together with the backing
+filesystem's own handle of the same name. After every restart and at the end
+`identity_check` opens them all again before anything walks a tree: a handle
+must open to the same object (the same inode number and type in dcfs, and the
+backing handle still opening to the same backing object, which carries the
+generation, so a recycled inode number is not the object) or fail `ESTALE`
+(noted when the backing filesystem still has the object). Then the path
+oracle: after a restart in the middle of a sequence by metadata only (names,
+types, sizes, modes: a read through dcfs marks the row atime-dirty and would
+hide the state a handle is there to find), at the end with contents. The
+`handle-save` and `handle-stat` subcommands of `testutil` are the primitives
+(23.11's names for its `born` scenario).
+
+`fault_ace_mixed_test` (large) runs the oracles' fixtures first
+(`mixedfixtures`: a sequence that passes untouched and is rejected when its
+handle record is tampered with, and a file removed behind the running daemon,
+the ghost, rejected by the backing handle) and then an explicit list of 22
+sequences, the first two being 23.11's (`create dropahead crash3 lookup`,
+`create dropahead fail3 lookup`). An explicit list, because busybox awk's
+`rand()` is not stable across pins; the list was drawn once from seed 2610.
+`fault_ace_mixed_long_test_<fs>` (manual; 120 sequences seeded by `DCFS_SEED`)
+is the noisy job's tail. A failing sequence is printed with its handle count;
+replay it with `dcfs_ace_sequences=op:e1:e2:e3` in the target's `cmdline`.
+
+`guest/fault_ace_mixed.expected_failures` lists the sequences that fail on code
+without 23.11's fix, strictly: a listed sequence that holds fails the test
+(remove it), so landing the fix empties the file. `identity_oracle_test` checks
+the oracle over a fake `testutil` (a different object, a ghost, a recycled
+backing inode, a wrong type, ENOENT, EIO, garbage). 11.7's own helper, when it
+lands, replaces `identity_*` here.
+
+### Reading a first noisy run
+
+A finding of the first weeks is one of three things: a real race (the test
+passes quiet because nothing moved; reproduce it with the harness's holds or a
+fault point, then fix, test first); a test that assumed the quiet kernel
+(writeback of a page it expected to stay dirty, one CPU's ordering): fix the
+test to wait for its event, never weaken it, or tag it `quiet-only` with the
+reason beside the tag; or noise of the runner (a timeout under load: compare
+the quiet run's time, and the profile in the job). A test that fails all three
+runs is probably not a noisy finding at all: check that it passes in the push
+gate first.
 
 ## Guest timeout
 
@@ -651,7 +685,7 @@ gate is disabled.
 | the ACE checker can fail (11.2) | `fault_ace_a_test`'s `fixtures` kind (a persistence point that was not made, and a name added behind dcfs's back, must each be reported) and `fault_power_test`'s `comparison-detects-*` checks (a name, a mode, a link count) and `snapshot-sees-contents` |
 | the fsstress/fsx test's checks (11.2b: tree digests, fsx's A-OK line and disabled set, fsstress's successes and EIO, the random seed) | `//test/qemu:stress_checks_test` (the real `guest/stress_lib.sh` under the guest's busybox over trees differing in one byte, a mode, a name, a symlink target, an mtime, an xattr or a file type, empty trees, and fsx and fsstress logs that are bad, short, empty, all-failed or EIO; with the success count made to count failures, it fails on the all-failed log) |
 | the noisy run's knob takes effect (26.14e: sysctls, vCPUs, command-line word) | `//test/qemu:kernel_mode_test` (the real `guest/kernel_mode_lib.sh` over canned `/proc` trees: each mode rejects a guest of the other and every single departure), `//test/qemu:run_qemu_verdict_test` (`DCFS_NOISY` to `-smp` and `dcfs_noisy=1`), and the pair `quiet_kernel_test` / `noisy_kernel_test`, each failing under the other mode (the noisy job runs the second first) |
-| the identity oracle (26.14e: same object or ESTALE, never something gone) | `//test/qemu:identity_oracle_test` (the real `identity_check` over a fake `fhtest`: a different object, another type, a ghost, no name, ENOENT, EIO, garbage and an empty answer are each rejected; ESTALE and a rename on both sides pass) and `fault_ace_mixed_test`'s `mixedfixtures` kind (a tampered handle record must be rejected by the real oracle) |
+| the identity oracle (26.14e: same object or ESTALE, never something gone) | `//test/qemu:identity_oracle_test` (the real `identity_check` over a fake `testutil`: a different object, another type, a ghost, a recycled backing inode, ENOENT, EIO, garbage and an empty answer are each rejected; ESTALE passes) and `fault_ace_mixed_test`'s `mixedfixtures` kind (a tampered handle record, and a file removed behind the running daemon, must be rejected by the real oracle) |
 | the noisy job's summary lists failed and flaky tests (26.14e) | `//tools:noisy_report_test` (canned build events: failures, flakes and timeouts listed, a clean run said clean, a damaged file an error, only findings' logs copied) |
 | coverage is the same in two runs of one commit (26.14: line and branch status per file, per test) | `//tools:coverage_diff_test` (the real `coverage_diff.py` over canned lcovs: identical pass; a line or branch covered in one run only, or missing, fails naming file and line; counts differ only under `--exact`; per test it names the test that differs) |
 | shipped dependency golden (26.9) | `//tools:shipped_deps_self_check_test` (the real comparison over a golden with a line removed) |
