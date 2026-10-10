@@ -74,7 +74,6 @@ dcfs/dir_cache_fs.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Access|readability-convert-member-functions-to-static|1
 dcfs/dir_cache_fs.cc|DirCacheFS::CopyFileRange|misc-unused-parameters|2
 dcfs/dir_cache_fs.cc|DirCacheFS::DefaultMaxHeldFds|bugprone-implicit-widening-of-multiplication-result|2
-dcfs/dir_cache_fs.cc|DirCacheFS::EntryFor|performance-move-const-arg|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Fallocate|misc-unused-parameters|1
 dcfs/dir_cache_fs.cc|DirCacheFS::Flush|misc-unused-parameters|1
 dcfs/dir_cache_fs.cc|DirCacheFS::FreshAttr|capturing_mutating_lambda|1
@@ -172,9 +171,6 @@ dcfs/escape_test.cc|TEST|readability-isolate-declaration|1
 dcfs/fd.cc|FileDescriptor::~FileDescriptor|bugprone-exception-escape|1
 dcfs/fd_test.cc|OpenTmpdir|concurrency-mt-unsafe|1
 dcfs/fd_test.cc|TEST|bugprone-use-after-move|2
-dcfs/file_handle.cc|FileHandle::FromDirEntry|performance-move-const-arg|1
-dcfs/file_handle.cc|FileHandle::FromFd|performance-move-const-arg|2
-dcfs/file_handle.cc|FileHandle::Parse|performance-move-const-arg|1
 dcfs/file_handle_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/fork_split.h|__attribute__|check_in_production|1
 dcfs/fsck.cc|<file scope>|modernize-deprecated-headers|1
@@ -243,7 +239,6 @@ dcfs/metadata_cache.cc|GetHandle|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|GetXattr|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|IsDirComplete|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|ListDir|modernize-use-integer-sign-comparison|1
-dcfs/metadata_cache.cc|ListDir|performance-move-const-arg|1
 dcfs/metadata_cache.cc|Lookup|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|ParentOf|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|Readlink|capturing_mutating_lambda|1

@@ -470,7 +470,7 @@ absl::Status DirCacheFS::RefuseStub(FuseRequest &req, InodeId id,
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryFor(InodeId id) {
   if (cache::IsStub(id)) return StubEntry(id);
   ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
-  return EntryForAttr(id, std::move(attr));
+  return EntryForAttr(id, attr);
 }
 
 absl::StatusOr<fuse_entry_param> DirCacheFS::EntryForAttr(

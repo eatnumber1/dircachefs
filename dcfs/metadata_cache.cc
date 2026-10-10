@@ -431,7 +431,7 @@ absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
       if (row.Column<bool>(3)) {  // attrs_valid (NULL for a stub: false)
         CachedAttr attr;
         RETURN_IF_ERROR(DecodeAttr(row, 3, attr));
-        entry.attr = std::move(attr);
+        entry.attr = attr;
       }
       batch.push_back(std::move(entry));
       return absl::OkStatus();

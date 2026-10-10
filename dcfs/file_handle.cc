@@ -96,7 +96,7 @@ absl::StatusOr<FileHandle> FileHandle::Parse(std::string_view data) {
   }
 
   FileHandle fh;
-  fh.device = std::move(device);
+  fh.device = device;
   fh.handle_type = static_cast<int32_t>(type);
   std::string_view rest = data.substr(28);
   fh.bytes.assign(rest.begin(), rest.end());
@@ -116,7 +116,7 @@ absl::StatusOr<FileHandle> FileHandle::FromFd(int fd, DeviceId device) {
   ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(fd, "", AT_EMPTY_PATH));
 
   FileHandle fh;
-  fh.device = std::move(device);
+  fh.device = device;
   fh.handle_type = raw.handle_type;
   fh.bytes = std::move(raw.bytes);
   return fh;
@@ -124,7 +124,7 @@ absl::StatusOr<FileHandle> FileHandle::FromFd(int fd, DeviceId device) {
 
 absl::StatusOr<FileHandle> FileHandle::FromFd(int fd) {
   ASSIGN_OR_RETURN(DeviceId device, GetDeviceId(fd));
-  return FromFd(fd, std::move(device));
+  return FromFd(fd, device);
 }
 
 absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
@@ -165,7 +165,7 @@ absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
   }
 
   FileHandle fh;
-  fh.device = std::move(device);
+  fh.device = device;
   fh.handle_type = raw.handle_type;
   fh.bytes = std::move(raw.bytes);
   return fh;
