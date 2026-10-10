@@ -2858,3 +2858,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   removes it later (README, kernel-patches.md, 15.10); (3) blocked-task diagnostics, 26.23; and a
   new rule: anything goes in unsubmitted code, submitted code obeys (style 1.11, agent
   definitions). Usage this morning: 91% all-models, 40% Fable; two points a day; one Haiku lane.
+- russ: the "anything goes unsubmitted" rule is about code shape, not actions (no `rm -rf /`);
+  style 1.11 and the agent definitions say the operating rules hold at all times.

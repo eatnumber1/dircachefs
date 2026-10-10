@@ -929,6 +929,14 @@ a retry loop to reproduce, a `CHECK` to find a state, a printf: fine in a
 working tree, in a scratch branch, in a measurement. None of it lands:
 the mechanical checks (banned symbols, repo_shape, the matchers) refuse
 them in a commit, and a commit that carries one is a step not done.
+"Anything" means any *code shape* in the working tree, not any *action*:
+the operating rules stand at all times (russ, 2026-10-11, "I don't want
+an agent doing like `rm -rf /`"): nothing destructive outside the lane,
+nothing to Docker, no pushing, no working around a permission denial,
+no Bazel without KVM, no edits outside the checkout, no background
+polling loops, and no hack that could escape the guest or the lane (a
+timer in a guest script is fine; a script that deletes host directories
+is not, submitted or not).
 
 ### 1.12 No retry loops
 
