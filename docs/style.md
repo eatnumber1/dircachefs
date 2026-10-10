@@ -525,10 +525,13 @@ wants, as the worked example:
 absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
   RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
+  // setfsuid/setfsgid ignore an id they cannot use; the kernel never sends
+  // one (an unmapped caller's request fails with EOVERFLOW), so this is an
+  // invariant, asserted.
+  RET_CHECK_NE(caller.uid, static_cast<uid_t>(-1)) << "unmapped caller uid";
+  RET_CHECK_NE(caller.gid, static_cast<gid_t>(-1)) << "unmapped caller gid";
   ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
   absl::Cleanup restore_root = [&saved] { RestoreRoot(saved); };
-  // setfsuid/setfsgid ignore an id they cannot use, but the kernel never
-  // sends one: an unmapped caller's request fails with EOVERFLOW.
   syscalls::setfsgid(caller.gid);
   RETURN_IF_ERROR(syscalls::setgroups(caller.groups));
   syscalls::setfsuid(caller.uid);
@@ -617,14 +620,19 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
      helper written with `RETURN_IF_ERROR`, even for one use: a free
      function in the `.cc`'s anonymous namespace when the public
      interface suffices.
-  4. Two statuses that may both fail are combined at the site: the
-     second's failure if only it failed, else the first with
-     `additionally, <what> failed: <second>` appended; never
-     `Status::Update`, which drops the second's text. A shared helper
-     waits for a third site.
+  4. Two statuses that may both fail are never joined (russ,
+     2026-10-10: "If two statuses may fail, it's often ok to just return
+     the first. Usually, the second is a consequence of the first so is
+     less useful anyway. Don't try to join Statuses."). Return the first;
+     the second is returned only when the first succeeded. No
+     "additionally, ... failed" builders, no `Status::Update`.
   5. A bare call of a cannot-fail wrapper carries no "cannot fail"
      comment (1.5 says why). Where such a call silently ignores some
-     inputs, the comment says why those inputs cannot arrive.
+     inputs that a guarantee says cannot arrive, the guarantee is asserted
+     as a guard, not described in a comment (russ, 2026-10-10: "This kind
+     of case deserves a RET_CHECK_NE rather than a comment"):
+     `RET_CHECK_NE(caller.uid, static_cast<uid_t>(-1))` at the top of
+     `SwitchTo`.
   6. A Cleanup is declared `absl::Cleanup name = [captures] { ... };`
      (Abseil's documented form, no empty parameter list).
 - **Program output is `absl::PrintF`/`FPrintF`/`SNPrintF`/`StrFormat`,

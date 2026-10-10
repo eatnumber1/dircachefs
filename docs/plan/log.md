@@ -2789,3 +2789,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   conditional second step; combine two statuses inline; one real-fact comment instead of
   "cannot fail"; the `=` Cleanup form) and the program-output ruling (absl::PrintF family) into
   1.6a and 25.20; the worked example updated; sent to the 25.15 agent.
+- russ amended two rulings: a kernel guarantee a call relies on is asserted with RET_CHECK_NE,
+  not described in a comment (the worked example now guards uid/gid -1); two statuses are never
+  joined, return the first (the second is usually a consequence). Style 1.6a updated; sent to the
+  25.15 agent.
