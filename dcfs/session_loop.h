@@ -23,10 +23,10 @@
 // thread, no wakeup while idle: draining happens only inside a request.
 
 #include <deque>
-#include <functional>
 #include <utility>
 #include <vector>
 
+#include "absl/functional/any_invocable.h"
 #include "dcfs/interrupts.h"
 #include "fuse_lowlevel.h"
 
@@ -47,7 +47,7 @@ class SessionLoop final : public Interrupts {
   // Called once, from Run, after the kernel's FUSE_INIT was answered and the
   // session is still going: dcfs is serving. mount.dcfs's wrapper, waiting
   // for that, is told here (dcfs/startup_channel.h).
-  void SetOnInit(std::function<void()> on_init) {
+  void SetOnInit(absl::AnyInvocable<void()> on_init) {
     on_init_ = std::move(on_init);
   }
 
@@ -61,7 +61,7 @@ class SessionLoop final : public Interrupts {
   void Drain();
 
   struct fuse_session *se_;
-  std::function<void()> on_init_;
+  absl::AnyInvocable<void()> on_init_;
   // The requests being served, innermost last (one at a time in the
   // blocking loop; Begin and End pair like a stack).
   std::vector<fuse_req *> serving_;

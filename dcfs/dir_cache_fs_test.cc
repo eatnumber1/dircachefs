@@ -40,17 +40,16 @@
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/statvfs.h>
-#include <sys/stat.h>
 #include <sys/uio.h>
 #include <sys/xattr.h>
 #include <unistd.h>
 
 #include <algorithm>
-#include <chrono>
-#include <cstdarg>
 #include <cerrno>
+#include <cstdarg>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -72,6 +71,8 @@
 
 #include "absl/base/log_severity.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/functional/any_invocable.h"
+#include "absl/log/check.h"
 #include "absl/log/globals.h"
 #include "absl/log/initialize.h"
 #include "absl/log/log.h"
@@ -97,16 +98,16 @@
 #include "dcfs/migrate.h"
 #include "dcfs/mount_fds.h"
 #include "dcfs/mount_options.h"
-#include "dcfs/sqlite.h"
 #include "dcfs/protocol_events.h"
 #include "dcfs/session_loop.h"
+#include "dcfs/sqlite.h"
 #include "dcfs/status.h"
 #include "dcfs/syscalls.h"
 #include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
+#include "dcfs/testonly/cost_counter.h"
 #include "dcfs/testonly/fake_bookkeeping.h"
 #include "dcfs/testonly/files.h"
-#include "dcfs/testonly/cost_counter.h"
 #include "dcfs/testonly/invariant_checker.h"
 #include "dcfs/testonly/observers.h"
 #include "dcfs/testonly/trace_recorder.h"
@@ -128,20 +129,20 @@ std::deque<int> &OpenByHandleFailures() {
 }
 
 // The hook the next open_by_handle_at runs (once).
-std::function<void()> &OpenByHandleHook() {
-  static auto *hook = new std::function<void()>();
+absl::AnyInvocable<void()> &OpenByHandleHook() {
+  static auto *hook = new absl::AnyInvocable<void()>();
   return *hook;
 }
 
 // The hook the next name_to_handle_at runs (once).
-std::function<void()> &NameToHandleHook() {
-  static auto *hook = new std::function<void()>();
+absl::AnyInvocable<void()> &NameToHandleHook() {
+  static auto *hook = new absl::AnyInvocable<void()>();
   return *hook;
 }
 
 // The hook the next syncfs runs (once).
-std::function<void()> &SyncfsHook() {
-  static auto *hook = new std::function<void()>();
+absl::AnyInvocable<void()> &SyncfsHook() {
+  static auto *hook = new absl::AnyInvocable<void()>();
   return *hook;
 }
 
@@ -159,8 +160,8 @@ bool &StatvfsReadOnly() {
 }
 
 // The hook the next statx runs (once).
-std::function<void()> &StatxHook() {
-  static auto *hook = new std::function<void()>();
+absl::AnyInvocable<void()> &StatxHook() {
+  static auto *hook = new absl::AnyInvocable<void()>();
   return *hook;
 }
 
@@ -331,7 +332,7 @@ int __wrap_open_by_handle_at(int mount_fd, struct file_handle *handle,
                              int flags) {
   dcfs::NoTransactionAt("open_by_handle_at");
   DCFS_INJECT("open_by_handle_at", -1)
-  std::function<void()> hook = std::exchange(dcfs::OpenByHandleHook(), {});
+  absl::AnyInvocable<void()> hook = std::exchange(dcfs::OpenByHandleHook(), {});
   if (hook) hook();
   if (!dcfs::OpenByHandleFailures().empty()) {
     const int err = dcfs::OpenByHandleFailures().front();
@@ -351,7 +352,7 @@ int __wrap_name_to_handle_at(int dirfd, const char *pathname,
                              int flags) {
   dcfs::NoTransactionAt("name_to_handle_at");
   DCFS_INJECT("name_to_handle_at", -1)
-  std::function<void()> hook = std::exchange(dcfs::NameToHandleHook(), {});
+  absl::AnyInvocable<void()> hook = std::exchange(dcfs::NameToHandleHook(), {});
   if (hook) hook();
   if (int err = std::exchange(dcfs::NameToHandleFailure(), 0); err != 0) {
     errno = err;
@@ -364,7 +365,8 @@ int __real_statx(int dirfd, const char *path, int flags, unsigned int mask,
 int __wrap_statx(int dirfd, const char *path, int flags, unsigned int mask,
                  struct statx *buf) {
   dcfs::NoTransactionAt("statx");
-  if (std::function<void()> hook = std::exchange(dcfs::StatxHook(), {}); hook) {
+  if (absl::AnyInvocable<void()> hook = std::exchange(dcfs::StatxHook(), {});
+      hook) {
     hook();
   }
   DCFS_INJECT("statx", -1)
@@ -383,7 +385,7 @@ int __real_syncfs(int fd);
 int __wrap_syncfs(int fd) {
   dcfs::NoTransactionAt("syncfs");
   DCFS_INJECT("syncfs", -1)
-  std::function<void()> hook = std::exchange(dcfs::SyncfsHook(), {});
+  absl::AnyInvocable<void()> hook = std::exchange(dcfs::SyncfsHook(), {});
   if (hook) hook();
   return __real_syncfs(fd);
 }
@@ -702,16 +704,17 @@ class DirCacheFSTest : public ::testing::Test {
   // population: OpenNode, the fill snapshot, then each probe): at the first
   // probe after each open, so after the fill's snapshot. Not inside `fn`
   // itself, and not again until the next open.
-  void MutateDuringFills(int times, std::function<void(int)> fn) {
+  void MutateDuringFills(int times, absl::AnyInvocable<void(int)> fn) {
     struct State {
       int remaining;
       bool opened = false;
       bool busy = false;
-      std::function<void(int)> fn;
+      absl::AnyInvocable<void(int)> fn;
     };
-    auto state = std::make_shared<State>(State{.remaining = times, .fn = fn});
-    auto arm_open = std::make_shared<std::function<void()>>();
-    auto arm_probe = std::make_shared<std::function<void()>>();
+    auto state =
+        std::make_shared<State>(State{.remaining = times, .fn = std::move(fn)});
+    auto arm_open = std::make_shared<absl::AnyInvocable<void()>>();
+    auto arm_probe = std::make_shared<absl::AnyInvocable<void()>>();
     *arm_open = [state, arm_open] {
       if (state->remaining == 0) return;
       OpenByHandleHook() = [state, arm_open] {
@@ -2373,23 +2376,25 @@ TEST_F(DirCacheFSTest, CreateWhoseWritesCannotBeginRepliesEexist) {
 TEST_F(DirCacheFSTest, CreateWhoseRefreshFailsIsRepliedFromTheRow) {
   Start();
   int calls = 0;
-  std::function<void()> count = [&] {
+  auto count = std::make_shared<absl::AnyInvocable<void()>>();
+  *count = [&, count] {
     ++calls;
-    StatxHook() = count;
+    StatxHook() = [count] { (*count)(); };
   };
-  StatxHook() = count;
+  StatxHook() = [count] { (*count)(); };
   ASSERT_EQ(Create(kRootInode, "w1", O_RDWR).reply.error, 0);
   StatxHook() = {};
   ASSERT_GT(calls, 0);
   int seen = 0;
-  std::function<void()> fail_last = [&] {
+  auto fail_last = std::make_shared<absl::AnyInvocable<void()>>();
+  *fail_last = [&, fail_last] {
     if (++seen == calls) {
       StatxFailure() = EIO;
     } else {
-      StatxHook() = fail_last;
+      StatxHook() = [fail_last] { (*fail_last)(); };
     }
   };
-  StatxHook() = fail_last;
+  StatxHook() = [fail_last] { (*fail_last)(); };
   EXPECT_EQ(Create(kRootInode, "w2", O_RDWR).reply.error, 0);
   EXPECT_EQ(seen, calls);
   StatxHook() = {};
@@ -6275,11 +6280,12 @@ TEST_F(DirCacheFSTest, RemovexattrEndsItsMutationBeforeItsRefreshes) {
   // The backing removexattr reopens the inode (a statx or more, inside the
   // mutation); the last statx is the refresh's.
   std::vector<size_t> in_flight;
-  std::function<void()> observe = [&] {
+  auto observe = std::make_shared<absl::AnyInvocable<void()>>();
+  *observe = [&, observe] {
     in_flight.push_back(ctx_.fills.inflight.size());
-    StatxHook() = observe;
+    StatxHook() = [observe] { (*observe)(); };
   };
-  StatxHook() = observe;
+  StatxHook() = [observe] { (*observe)(); };
   EXPECT_EQ(Send(FUSE_REMOVEXATTR, static_cast<uint64_t>(f), name).error, 0);
   StatxHook() = {};
   ASSERT_FALSE(in_flight.empty()) << "the hook did not run";
@@ -6377,11 +6383,12 @@ TEST_F(DirCacheFSTest, SetattrEndsItsMutationBeforeItsRefresh) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   std::vector<size_t> in_flight;
-  std::function<void()> observe = [&] {
+  auto observe = std::make_shared<absl::AnyInvocable<void()>>();
+  *observe = [&, observe] {
     in_flight.push_back(ctx_.fills.inflight.size());
-    StatxHook() = observe;
+    StatxHook() = [observe] { (*observe)(); };
   };
-  StatxHook() = observe;
+  StatxHook() = [observe] { (*observe)(); };
   EXPECT_EQ(Chmod(f, S_IFREG | 0600).error, 0);
   ASSERT_FALSE(in_flight.empty()) << "the hook did not run";
   EXPECT_EQ(in_flight.back(), 0u) << "the setattr's mutation was still in "
@@ -6597,7 +6604,7 @@ class FakeInterrupts final : public Interrupts {
 // Counts the probes (name_to_handle_at) from now on.
 std::shared_ptr<int> CountProbes() {
   auto count = std::make_shared<int>(0);
-  auto arm = std::make_shared<std::function<void()>>();
+  auto arm = std::make_shared<absl::AnyInvocable<void()>>();
   *arm = [count, arm] {
     NameToHandleHook() = [count, arm] {
       ++*count;
@@ -7494,11 +7501,10 @@ struct SweepResult {
 // `done` (a site an earlier workload already failed: bounded by call
 // site, each is failed once), adding it. `breaker` (the self-check) runs
 // after each faulted workload; at most `max_iterations` if not -1.
-SweepResult SweepWorkload(std::string_view workload,
-                          absl::flat_hash_set<std::string> &done,
-                          const std::function<void(FaultIteration &)> &breaker =
-                              {},
-                          int max_iterations = -1) {
+SweepResult SweepWorkload(
+    std::string_view workload, absl::flat_hash_set<std::string> &done,
+    absl::AnyInvocable<void(FaultIteration &)> breaker = {},
+    int max_iterations = -1) {
   SweepResult result;
   FaultSweep &f = Sweep();
   f = FaultSweep();
@@ -7554,20 +7560,27 @@ SweepResult SweepWorkload(std::string_view workload,
   return result;
 }
 
+// The clock, for the sweep's report of its own timing. Read through the
+// wrapper: the raw-syscall rule refuses absl::Now in tests.
+absl::Time ClockNow() {
+  const absl::StatusOr<struct timespec> now =
+      syscalls::clock_gettime(CLOCK_REALTIME);
+  CHECK_OK(now) << "clock_gettime(CLOCK_REALTIME)";
+  return absl::TimeFromTimespec(*now);
+}
+
 TEST(FaultSitesTest, EveryBackingCallSiteFailedOnce) {
-  const auto start = std::chrono::steady_clock::now();
+  const absl::Time start = ClockNow();
   SweepResult all;
   absl::flat_hash_set<std::string> done;
   for (const char *workload : kWorkloads) {
-    const auto began = std::chrono::steady_clock::now();
+    const absl::Time began = ClockNow();
     SweepResult r = SweepWorkload(workload, done);
     std::cout << "FAULT-SWEEP " << workload << ": " << r.hooks
               << " hooks reached, " << r.calls << " new sites, " << r.iterations
               << " iterations, "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(
-                     std::chrono::steady_clock::now() - began)
-                     .count()
-              << " ms" << std::endl;
+              << absl::ToInt64Milliseconds(ClockNow() - began) << " ms"
+              << std::endl;
     all.hooks += r.hooks;
     all.calls += r.calls;
     all.iterations += r.iterations;
@@ -7575,11 +7588,9 @@ TEST(FaultSitesTest, EveryBackingCallSiteFailedOnce) {
     all.findings.insert(all.findings.end(), r.findings.begin(),
                         r.findings.end());
   }
-  std::cout << "FAULT-SWEEP total: " << all.calls
-            << " sites, " << all.iterations << " iterations, "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   std::chrono::steady_clock::now() - start)
-                   .count()
+  std::cout << "FAULT-SWEEP total: " << all.calls << " sites, "
+            << all.iterations << " iterations, "
+            << absl::ToInt64Milliseconds(ClockNow() - start)
             << " ms; hooks with no wrapped call after them (not failed): "
             << absl::StrJoin(all.silent, " ") << std::endl;
   EXPECT_GT(all.calls, 0);
@@ -7625,7 +7636,7 @@ class SlopeRun : public DirCacheFSTest {
   // `extra`, if given, runs after each operation (the self-check's added
   // cost).
   Slope Measure(std::string_view op, int n,
-                const std::function<void(SlopeRun &)> &extra = {}) {
+                absl::AnyInvocable<void(SlopeRun &)> extra = {}) {
     SetUp();
     const bool existing = op != "create" && op != "mkdir";
     if (existing) {

@@ -10,10 +10,10 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <functional>
 #include <string>
 #include <vector>
 
+#include "absl/functional/function_ref.h"
 #include "absl/log/log_entry.h"
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
@@ -66,7 +66,7 @@ struct WrapperRun {
 // forks a daemon running `body` with its reporter, which then exits with
 // `child_exit`. Returns the wrapper's exit status and the ERROR lines it
 // logged.
-WrapperRun RunWrapper(const std::function<void(StartupReporter &)> &body,
+WrapperRun RunWrapper(absl::FunctionRef<void(StartupReporter &)> body,
                       int child_exit = 0) {
   auto channel = syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0);
   EXPECT_TRUE(channel.ok()) << channel.status();

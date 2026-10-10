@@ -86,7 +86,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -96,6 +95,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/functional/any_invocable.h"
 #include "absl/status/status.h"
 #include "absl/types/source_location.h"
 #include "dcfs/context.h"
@@ -168,7 +168,8 @@ class InvariantChecker final : public ProtocolEvents {
   // after its checks (empty: none). With `record` the hooks record a
   // violation (violations()) instead of aborting, so that one iteration's
   // finding does not end the sweep.
-  void ObserveBackingCalls(std::function<void(absl::SourceLocation)> observer) {
+  void ObserveBackingCalls(
+      absl::AnyInvocable<void(absl::SourceLocation)> observer) {
     on_backing_call_ = std::move(observer);
   }
   void RecordViolations(bool record) { recording_ = record; }
@@ -176,7 +177,7 @@ class InvariantChecker final : public ProtocolEvents {
   // bookkeeping that `edit` has changed (a FakeBookkeeping), not the real
   // one; empty: the real one. The edit runs at every hook, so it is
   // idempotent.
-  void TamperBookkeeping(std::function<void(FakeBookkeeping &)> edit) {
+  void TamperBookkeeping(absl::AnyInvocable<void(FakeBookkeeping &)> edit) {
     tamper_ = std::move(edit);
   }
   const std::vector<std::string> &violations() const { return violations_; }
@@ -255,10 +256,10 @@ class InvariantChecker final : public ProtocolEvents {
                                   std::optional<FakeBookkeeping> &storage);
 
   int console_fd_;
-  std::function<void(FakeBookkeeping &)> tamper_;
+  absl::AnyInvocable<void(FakeBookkeeping &)> tamper_;
   ::sqlite3 *db_ = nullptr;
   std::vector<Frame> frames_;
-  std::function<void(absl::SourceLocation)> on_backing_call_;
+  absl::AnyInvocable<void(absl::SourceLocation)> on_backing_call_;
   bool recording_ = false;
   std::vector<std::string> violations_;
   // The TEMP trigger is in place (SeeEveryDirtyDelete).

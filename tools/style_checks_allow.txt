@@ -182,18 +182,14 @@ dcfs/dir_cache_fs_test.cc|BatchForget|performance-unnecessary-value-param|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|modernize-use-designated-initializers|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|readability-avoid-nested-conditional-operator|1
 dcfs/dir_cache_fs_test.cc|Count|iterator_pair_algorithm|1
-dcfs/dir_cache_fs_test.cc|CountProbes|banned_std|1
 dcfs/dir_cache_fs_test.cc|DCFS_BACKSTOP|misc-include-cleaner|8
 dcfs/dir_cache_fs_test.cc|Forget|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|INSTANTIATE_TEST_SUITE_P|modernize-type-traits|1
 dcfs/dir_cache_fs_test.cc|ListAll|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs_test.cc|LiveSession|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|MakeOldFile|bugprone-implicit-widening-of-multiplication-result|2
-dcfs/dir_cache_fs_test.cc|Measure|banned_std|1
 dcfs/dir_cache_fs_test.cc|Measure|performance-avoid-endl|1
 dcfs/dir_cache_fs_test.cc|Measure|readability-function-cognitive-complexity|1
-dcfs/dir_cache_fs_test.cc|MutateDuringFills|banned_std|4
-dcfs/dir_cache_fs_test.cc|MutateDuringFills|performance-unnecessary-value-param|1
 dcfs/dir_cache_fs_test.cc|MutateDuringFills|readability-convert-member-functions-to-static|1
 dcfs/dir_cache_fs_test.cc|NewSession|performance-inefficient-vector-operation|1
 dcfs/dir_cache_fs_test.cc|RemountSource|concurrency-mt-unsafe|1
@@ -211,11 +207,8 @@ dcfs/dir_cache_fs_test.cc|Start|misc-redundant-expression|1
 dcfs/dir_cache_fs_test.cc|StartTrace|cert-err33-c|1
 dcfs/dir_cache_fs_test.cc|SweepAtHook|iterator_pair_algorithm|1
 dcfs/dir_cache_fs_test.cc|SweepAtHook|misc-include-cleaner|1
-dcfs/dir_cache_fs_test.cc|SweepWorkload|banned_std|1
 dcfs/dir_cache_fs_test.cc|SweepWorkload|readability-function-cognitive-complexity|1
-dcfs/dir_cache_fs_test.cc|TEST|banned_std|14
 dcfs/dir_cache_fs_test.cc|TEST|performance-avoid-endl|2
-dcfs/dir_cache_fs_test.cc|TEST_F|banned_std|8
 dcfs/dir_cache_fs_test.cc|TEST_F|bugprone-implicit-widening-of-multiplication-result|2
 dcfs/dir_cache_fs_test.cc|TEST_F|bugprone-misplaced-widening-cast|1
 dcfs/dir_cache_fs_test.cc|TEST_F|bugprone-unchecked-optional-access|7
@@ -236,12 +229,7 @@ dcfs/dir_cache_fs_test.cc|TearDown|concurrency-mt-unsafe|1
 dcfs/dir_cache_fs_test.cc|TestBody|misc-override-with-different-visibility|2
 dcfs/dir_cache_fs_test.cc|WithinBounds|capturing_mutating_lambda|1
 dcfs/dir_cache_fs_test.cc|WithinBounds|readability-math-missing-parentheses|1
-dcfs/dir_cache_fs_test.cc|__wrap_name_to_handle_at|banned_std|1
-dcfs/dir_cache_fs_test.cc|__wrap_open_by_handle_at|banned_std|1
-dcfs/dir_cache_fs_test.cc|__wrap_statx|banned_std|1
-dcfs/dir_cache_fs_test.cc|__wrap_syncfs|banned_std|1
 dcfs/dir_cache_fs_test.cc|class FakeInterrupts final : public Interrupts {|misc-include-cleaner|1
-dcfs/dir_cache_fs_test.cc|void|banned_std|8
 dcfs/errno.cc|ErrnoToErrorName|misc-include-cleaner|2
 dcfs/errno.cc|ErrorNameToErrno|misc-include-cleaner|2
 dcfs/errno.cc|NameToErrnoTable|misc-include-cleaner|82
@@ -453,8 +441,6 @@ dcfs/session_loop.cc|SessionLoop::Drain|google-runtime-int|1
 dcfs/session_loop.cc|SessionLoop::Drain|misc-include-cleaner|1
 dcfs/session_loop.cc|SessionLoop::Run|bugprone-invalid-enum-default-initialization|1
 dcfs/session_loop.cc|SessionLoop::Run|misc-include-cleaner|1
-dcfs/session_loop.h|<file scope>|banned_std|1
-dcfs/session_loop.h|SetOnInit|banned_std|1
 dcfs/session_loop_test.cc|<file scope>|misc-include-cleaner|1
 dcfs/session_loop_test.cc|FakeInit|modernize-use-emplace|1
 dcfs/session_loop_test.cc|FakeRead|misc-include-cleaner|1
@@ -513,7 +499,6 @@ dcfs/startup_channel.cc|AwaitReportAndExit|concurrency-mt-unsafe|2
 dcfs/startup_channel.cc|AwaitReportAndExit|misc-include-cleaner|1
 dcfs/startup_channel.cc|DescribeWaitStatus|misc-include-cleaner|3
 dcfs/startup_channel_fault_test.cc|<file scope>|misc-include-cleaner|2
-dcfs/startup_channel_fault_test.cc|RunWrapper|banned_std|1
 dcfs/startup_channel_fault_test.cc|RunWrapper|misc-include-cleaner|1
 dcfs/startup_channel_fault_test.cc|Send|misc-include-cleaner|1
 dcfs/startup_channel_test.cc|ReadAll|misc-include-cleaner|1
@@ -626,9 +611,6 @@ dcfs/testonly/invariant_checker.cc|InvariantChecker::Seen|bugprone-return-const-
 dcfs/testonly/invariant_checker.cc|InvariantChecker::Seen|misc-include-cleaner|1
 dcfs/testonly/invariant_checker.cc|InvariantChecker::Where|modernize-loop-convert|1
 dcfs/testonly/invariant_checker.cc|NoneDirtyUnlessAny|capturing_mutating_lambda|1
-dcfs/testonly/invariant_checker.h|<file scope>|banned_std|2
-dcfs/testonly/invariant_checker.h|ObserveBackingCalls|banned_std|1
-dcfs/testonly/invariant_checker.h|TamperBookkeeping|banned_std|1
 dcfs/testonly/main_recorder.cc|MainProtocolEvents|concurrency-mt-unsafe|2
 dcfs/testonly/main_recorder.cc|MainProtocolEvents|misc-include-cleaner|1
 dcfs/testonly/observers.h|CheckForgetting|google-readability-braces-around-statements|1
