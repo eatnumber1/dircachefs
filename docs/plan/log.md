@@ -2841,3 +2841,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   advisory; break-up over 60 lines), skipping what the tidy allowlist and matchers already hold;
   output under docs/plan/notes/style-census-2026-10-10/. One lane running; push point for the
   morning is main (25.21 included, so the CI run shows the style checks' cost).
+- 25.22 merged (docs only). Haiku did pattern detectors, not the reading pass the card asked for;
+  recorded as such. 25.23 (tidy auto-fix sweeps by check) queued after 25.17; 25.17 dispatched to
+  the same mechanical agent in lane-2 (one lane running).

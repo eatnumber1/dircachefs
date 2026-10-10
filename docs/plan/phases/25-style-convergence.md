@@ -701,3 +701,39 @@ Cost: 198 actions, 9 min cold at 4 jobs when a core header changes, 26 s
 no-op; placement (fast vs presubmit) is an open question for russ with
 the agent's recommendation to follow. 7.5's remainder: the aspect
 failing the build itself rather than through the test.
+
+25.22 merged 2026-10-10 (e1d0b95, docs only): the census under
+`docs/plan/notes/style-census-2026-10-10/`. Honest status: the Haiku
+agent used pattern detectors over a line-scan enumeration (713
+definitions in 49 production files), not a reading pass, so the
+judgement-shaped card items (comment restates code, repeated handler)
+came back empty and the counts are line matches. Useful anyway:
+break-up 32 functions over 60 body lines; hand-rolled-utility 63 items
+in 30 functions (nine of the top ten in bench/); nested-happy-path 6;
+status-carried 8 (advisory); name-repeats-scope 2; confession 1. Test
+pass not started. Conclusion for the orchestrator: the tier-1 reading
+pass is not something Haiku does on its own; the backlog is ordered from
+25.21's tidy counts plus this list, and the sweeps are the next steps.
+
+## 25.23 clang-tidy auto-fix sweeps, by check (after 25.17; mechanical, lane-2)
+
+A `bazel run //tools:style_fix -- --check=<name>` target (the aspect's
+flags, clang-tidy `--fix` applied in the workspace, like
+`//tools:format` will be) and one commit per check, largest first,
+where clang-tidy's fix is mechanical and the tests prove equivalence:
+misc-include-cleaner (560), modernize-use-designated-initializers (60),
+misc-unused-parameters (44, where the parameter is truly unused: keep
+names in overrides), readability-inconsistent-ifelse-braces (36),
+modernize-raw-string-literal (32), google-readability-braces (24),
+misc-use-internal-linkage (19), performance-noexcept-move-constructor
+(12), modernize-use-emplace (11), performance-avoid-endl (8, superseded
+by 25.20's PrintF change where it overlaps), modernize-loop-convert (7),
+and the under-five checks with fixes. Each commit shrinks
+`tools/style_checks_allow.txt` by exactly its findings; `--config=fast
+//...` green between commits. Not auto-fixed (judgement, separate
+steps): cognitive-complexity 41 plus the census's 32 break-ups (Sonnet,
+function by function, 25.24), google-runtime-int 31 (types are a design
+choice: 25.25 with a reading), bugprone-unchecked-optional-access 30,
+concurrency-mt-unsafe 26 (getenv/strerror: syscalls.h or absl
+equivalents), cert-err33-c 49 (unchecked returns of C calls: each is a
+Status or a deliberate ignore).
