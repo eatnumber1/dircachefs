@@ -1,0 +1,9 @@
+# docs/style.md 1.2: Abseil's container algorithms, not iterator pairs.
+# `std::sort(v.begin(), v.end())` is `absl::c_sort(v)`; the two ends of one
+# object say the same thing twice and can disagree. A call of a std:: function
+# whose first two arguments are begin() and end() (or std::begin/std::end) of
+# the same variable or member. A sub-range (`v.begin() + 2`) is not matched.
+# Matches the call whatever the algorithm: std::vector's constructors are not
+# calls, and an algorithm Abseil does not wrap is reported too (its allowlist
+# line says why).
+match callExpr(callee(functionDecl(isInStdNamespace())), hasArgument(0, ignoringImplicit(anyOf(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("begin"))), on(declRefExpr(to(decl().bind("range"))))), cxxMemberCallExpr(callee(cxxMethodDecl(hasName("begin"))), on(memberExpr(member(decl().bind("range"))))), callExpr(callee(functionDecl(hasName("::std::begin"))), hasArgument(0, ignoringImplicit(declRefExpr(to(decl().bind("range"))))))))), hasArgument(1, ignoringImplicit(anyOf(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("end"))), on(declRefExpr(to(decl(equalsBoundNode("range")))))), cxxMemberCallExpr(callee(cxxMethodDecl(hasName("end"))), on(memberExpr(member(decl(equalsBoundNode("range")))))), callExpr(callee(functionDecl(hasName("::std::end"))), hasArgument(0, ignoringImplicit(declRefExpr(to(decl(equalsBoundNode("range")))))))))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("iterator_pair_algorithm")

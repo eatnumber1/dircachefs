@@ -1,0 +1,82 @@
+# clang-tidy configuration (plan step 25.21; step 7.5's check set, russ,
+# 2026-10-10). //tools:style_checks_test runs the pinned LLVM's clang-tidy
+# with this file over our C++ (dcfs/, bench/, tools/) with the build's own
+# flags, as Bazel actions (tools/style_checks.bzl). A finding is an error;
+# the findings that existed when a check was switched on are listed in
+# tools/style_checks_allow.txt (file, function, check), a list that only
+# shrinks. 7.5's remaining piece is a per-target aspect that fails the build
+# itself; 25.21 lands the aspect with the verdict in the test.
+#
+# Enabled: the groups that enforce the Google style guide (google-*), the
+# Abseil rules of docs/style.md 1.2 (abseil-*), and the correctness and
+# readability groups of step 7.5. Not enabled: cppcoreguidelines-* (not our
+# guide), llvm-*, fuchsia-*, hicpp-*, altera-*, android-*, boost-*, mpi-*,
+# objc-*, openmp-*, zircon-*, linuxkernel-* (other projects' rules), and
+# clang-analyzer-*: the path-sensitive analyzer takes minutes per test file
+# (fsck_test.cc: 120 s of 140 s, dir_cache_fs_test.cc over 20 min), which does
+# not belong in a test of tier small.
+#
+# Denied, each with its reason (tools/style_checks.py checks that every
+# denied check has a line here, `#   check: reason`):
+#   abseil-unchecked-statusor-access: crashes clang-tidy 22.1.8 in its dataflow analysis of absl::StatusOr (statusor_internal.h), in any file that includes it.
+#   modernize-use-trailing-return-type: Google style writes the return type first.
+#   readability-identifier-length: short names (i, fd, n) are idiomatic in small scopes; Google style asks for descriptive names, not a minimum length.
+#   misc-const-correctness: Google style does not require const locals; the check wants every local const.
+#   bugprone-throwing-static-initialization: dcfs uses no exceptions; the findings are gtest's TEST() registrations.
+#   cert-err58-cpp: the same finding as bugprone-throwing-static-initialization.
+#   readability-braces-around-statements: Google style allows a short if or loop body on one line without braces; google-readability-braces-around-statements enforces the Google form.
+#   readability-magic-numbers: syscall flags, errno values, sizes and mode bits are the content of a syscall layer; the check wants a named constant for each.
+#   readability-uppercase-literal-suffix: Google style has no rule on the case of a literal suffix.
+#   misc-non-private-member-variables-in-classes: Google style allows structs with public data and classes with protected data in tests.
+#   modernize-use-auto: Google style allows auto only where it helps the reader; the check wants it wherever a type is spelled twice.
+#   modernize-use-nodiscard: style 1.2 puts [[nodiscard]] on results the caller must handle, not on every const getter.
+#   bugprone-easily-swappable-parameters: no rule of ours; the fix (strong types) is out of proportion for pairs like (fd, flags).
+#   bugprone-reserved-identifier: the link-time fakes (-Wl,--wrap) are named __wrap_open and __real_open by the linker.
+#   cert-dcl37-c: the same finding as bugprone-reserved-identifier.
+#   cert-dcl51-cpp: the same finding as bugprone-reserved-identifier.
+#   readability-named-parameter: Google style allows leaving an unused parameter unnamed.
+#   modernize-use-ranges: style 1.2 uses absl::c_* container algorithms, not std::ranges.
+#   performance-enum-size: no rule of ours; shrinking an enum's underlying type changes layout for no measured gain.
+#   modernize-use-std-format: style 1.2 formats with absl::StrFormat, StrCat and PrintF, not std::format.
+#   modernize-avoid-c-arrays: the arrays are the shapes of kernel and libfuse structures (uuid[16], name[256]) and buffers handed to syscalls; style 1.2 asks for absl::FixedArray only where the size is known when the buffer is made.
+Checks: >
+  -*,
+  google-*,
+  abseil-*,
+  bugprone-*,
+  cert-*,
+  concurrency-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -abseil-unchecked-statusor-access,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -misc-const-correctness,
+  -bugprone-throwing-static-initialization,
+  -cert-err58-cpp,
+  -readability-braces-around-statements,
+  -readability-magic-numbers,
+  -readability-uppercase-literal-suffix,
+  -misc-non-private-member-variables-in-classes,
+  -modernize-use-auto,
+  -modernize-use-nodiscard,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-reserved-identifier,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -readability-named-parameter,
+  -modernize-use-ranges,
+  -performance-enum-size,
+  -modernize-use-std-format,
+  -modernize-avoid-c-arrays
+WarningsAsErrors: '*'
+HeaderFilterRegex: '^(\./)?(dcfs|tools|bench)/'
+CheckOptions:
+  readability-function-cognitive-complexity.Threshold: 15
+  # The complexity of what is written, not of what a macro expands to: an
+  # EXPECT_EQ or a RETURN_IF_ERROR is one line to its reader.
+  readability-function-cognitive-complexity.IgnoreMacros: true
+  readability-implicit-bool-conversion.AllowPointerConditions: true

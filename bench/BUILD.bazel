@@ -1,4 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+load("//tools:style_checks.bzl", "style_findings_here")
 
 # Phase 10: the benchmark suite. One statically linked binary, installed in
 # the QEMU guest initramfs as /bin/dcfs_bench (see //test/qemu:initramfs and
@@ -59,3 +60,5 @@ filegroup(
     srcs = glob(["*.cc", "*.h"]),
     visibility = ["//tools:__pkg__"],
 )
+
+style_findings_here()

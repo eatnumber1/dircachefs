@@ -1,0 +1,10 @@
+# docs/style.md 1.6b: no intentional crashes in production code. A CHECK,
+# QCHECK or DCHECK of any form and LOG(FATAL) all construct an
+# absl::log_internal::LogMessageFatal (or LogMessageQuietlyFatal) and end the
+# process; so do assert and abort. Production code is every file that is not
+# *_test.cc and not under testonly/ (bench/ is production, as in
+# tools/repo_shape.py). A site is reported at the macro's expansion point.
+let notTest unless(isExpansionInFileMatching("_test[.]cc$|(^|/)testonly/"))
+match cxxConstructExpr(hasDeclaration(cxxConstructorDecl(ofClass(hasAnyName("::absl::log_internal::LogMessageFatal", "::absl::log_internal::LogMessageQuietlyFatal")))), notTest, isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("check_in_production")
+match stmt(isExpandedFromMacro("assert"), unless(hasParent(stmt(isExpandedFromMacro("assert")))), notTest, isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("check_in_production")
+match callExpr(callee(functionDecl(hasAnyName("::abort", "::std::abort"))), notTest, isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("check_in_production")

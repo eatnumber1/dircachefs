@@ -1,0 +1,6 @@
+# docs/style.md 1.6a: a Status or StatusOr local is made by the statement
+# that declares it, `absl::Status s = Call();`, not declared and assigned
+# later. REPORT ONLY (tools/style_checks.py REPORT_ONLY): it is a preference
+# (a status assigned in two branches is sometimes clearer), so the test prints
+# the sites and does not fail on them.
+match varDecl(hasLocalStorage(), unless(parmVarDecl()), hasType(cxxRecordDecl(anyOf(hasName("::absl::Status"), hasName("::absl::StatusOr")))), hasInitializer(cxxConstructExpr(argumentCountIs(0), unless(isListInitialization()))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("status_uninitialized")

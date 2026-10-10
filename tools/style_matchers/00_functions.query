@@ -1,0 +1,8 @@
+# The function definitions of our code with their source ranges, bound as
+# "function": tools/style_checks.py uses them to name the function that holds
+# a finding (it keys the allowlist by file, function and check, never by
+# line). Not a style rule. The commands of this directory run in one
+# clang-query session, in file name order: this file sets the output.
+set output diag
+set bind-root false
+match functionDecl(isDefinition(), unless(cxxMethodDecl(ofClass(isLambda()))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("function")

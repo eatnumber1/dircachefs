@@ -6,6 +6,7 @@ load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load("//tools:first_party_objects.bzl", "linked_objects")
+load("//tools:style_checks.bzl", "style_findings_here")
 
 # File-handle test client (name_to_handle_at / open_by_handle_at /
 # FS_IOC_GETVERSION). Used by the QEMU suite (see
@@ -590,3 +591,78 @@ py_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
     deps = [":noisy_report_lib"],
 )
+
+# ---- Step 25.21: zero-token style checks --------------------------------
+
+py_library(
+    name = "style_checks_lib",
+    srcs = ["style_checks.py"],
+    imports = ["."],
+)
+
+# clang-tidy (//:.clang-tidy) and the clang-query matchers
+# (//tools/style_matchers) over the C++ of dcfs/, dcfs/testonly/, bench/ and
+# tools/, with the build's own flags (style_checks.bzl runs the pinned
+# LLVM's tools as Bazel actions, cached per file). Fails on a finding that
+# tools/style_checks_allow.txt does not list, and on a listed one that is gone
+# (the list only shrinks). Report-only rules are printed, never failed. The
+# test itself only reads the outputs, so it is cheap; building them is the
+# cost, once per changed file and its headers.
+py_test(
+    name = "style_checks_test",
+    size = "small",
+    srcs = ["style_checks_test.py"],
+    args = [
+        "allowlist=$(rootpath style_checks_allow.txt)",
+        "tidy_config=$(rootpath //:.clang-tidy)",
+        "$(rootpaths //dcfs:style_findings)",
+        "$(rootpaths //dcfs/testonly:style_findings)",
+        "$(rootpaths //bench:style_findings)",
+        "$(rootpaths :style_findings)",
+    ],
+    data = [
+        "style_checks_allow.txt",
+        "//:.clang-tidy",
+        "//bench:style_findings",
+        "//dcfs:style_findings",
+        "//dcfs/testonly:style_findings",
+        ":style_findings",
+    ],
+    main = "style_checks_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":style_checks_lib"],
+)
+
+# The matchers against their known-bad and known-good fixtures, and
+# .clang-tidy against tidy_bad.cc and tidy_good.cc.
+py_test(
+    name = "style_matchers_test",
+    size = "small",
+    srcs = ["style_matchers_test.py"],
+    args = [
+        "$(rootpaths //tools/style_matchers:matchers)",
+        "$(rootpaths //tools/style_matchers:fixture_sources)",
+        "$(rootpaths //tools/style_matchers:matcher_findings)",
+        "$(rootpaths //tools/style_matchers:tidy_findings)",
+    ],
+    data = [
+        "//tools/style_matchers:fixture_sources",
+        "//tools/style_matchers:matcher_findings",
+        "//tools/style_matchers:matchers",
+        "//tools/style_matchers:tidy_findings",
+    ],
+    main = "style_matchers_test.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":style_checks_lib"],
+)
+
+# Self-check of style_checks.py over canned outputs.
+py_test(
+    name = "style_checks_self_check_test",
+    size = "small",
+    srcs = ["style_checks_self_check_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":style_checks_lib"],
+)
+
+style_findings_here()

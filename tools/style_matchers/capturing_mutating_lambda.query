@@ -1,0 +1,9 @@
+# docs/style.md ruling 1 (no retry loops / one way to carry state): a lambda
+# that captures a variable by reference and assigns to it or increments it
+# changes its caller's state from where the caller cannot see it; return the
+# value, or pass the state as a parameter. Matches a lambda that captures a
+# variable and, in its body, assigns to it (=, +=, ... on a built-in or an
+# overloaded =) or applies ++/-- to it. A `mutable` by-value lambda that
+# changes its own copy matches too (clang-query cannot tell the capture mode);
+# there are none today.
+match lambdaExpr(forEachDescendant(anyOf(binaryOperator(isAssignmentOperator(), hasLHS(ignoringImplicit(declRefExpr(to(varDecl().bind("captured")))))), cxxOperatorCallExpr(isAssignmentOperator(), hasArgument(0, ignoringImplicit(declRefExpr(to(varDecl().bind("captured")))))), unaryOperator(anyOf(hasOperatorName("++"), hasOperatorName("--")), hasUnaryOperand(ignoringImplicit(declRefExpr(to(varDecl().bind("captured")))))))), hasAnyCapture(lambdaCapture(capturesVar(varDecl(equalsBoundNode("captured"))))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("capturing_mutating_lambda")

@@ -1,0 +1,77 @@
+load("@rules_cc//cc:defs.bzl", "cc_library")
+load("//tools:style_checks.bzl", "style_findings")
+
+# The commands of the clang-query matchers (*.query), run in file name order in
+# one clang-query session over every translation unit: //tools:style_checks.bzl.
+filegroup(
+    name = "matchers",
+    srcs = glob(["*.query"]),
+    visibility = ["//visibility:public"],
+)
+
+# The fixtures' sources, for //tools:style_matchers_test.
+filegroup(
+    name = "fixture_sources",
+    srcs = glob(
+        ["**/*.cc"],
+    ),
+    visibility = ["//tools:__pkg__"],
+)
+
+# One known-bad and one known-good input per matcher. A bad file marks each
+# line the matcher must report with `// HIT`; a good file must have no report.
+# //tools:style_matchers_test compares them with what the matchers find.
+cc_library(
+    name = "matcher_fixtures",
+    testonly = 1,
+    srcs = glob(
+        [
+            "*_bad.cc",
+            "*_good.cc",
+            "*_test.cc",
+            "testonly/*.cc",
+        ],
+        exclude = ["tidy_*.cc"],
+    ),
+    deps = [
+        "@absl//absl/algorithm:container",
+        "@absl//absl/base:nullability",
+        "@absl//absl/container:flat_hash_map",
+        "@absl//absl/container:flat_hash_set",
+        "@absl//absl/functional:any_invocable",
+        "@absl//absl/log",
+        "@absl//absl/log:check",
+        "@absl//absl/status",
+        "@absl//absl/status:statusor",
+        "@absl//absl/time",
+    ],
+)
+
+# clang-tidy's known-bad and known-good input, for the configuration. The
+# compiler's own -Wmisleading-indentation (an error in this tree) would refuse
+# tidy_bad.cc, which has the code that readability-misleading-indentation is
+# to find.
+cc_library(
+    name = "tidy_fixtures",
+    testonly = 1,
+    copts = ["-Wno-misleading-indentation"],
+    srcs = [
+        "tidy_bad.cc",
+        "tidy_good.cc",
+    ],
+)
+
+style_findings(
+    name = "matcher_findings",
+    testonly = True,
+    targets = [":matcher_fixtures"],
+    tidy = "no",
+    visibility = ["//tools:__pkg__"],
+)
+
+style_findings(
+    name = "tidy_findings",
+    testonly = True,
+    targets = [":tidy_fixtures"],
+    visibility = ["//tools:__pkg__"],
+)

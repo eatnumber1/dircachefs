@@ -1,0 +1,8 @@
+# docs/style.md 1.2: std::function, std::unordered_map, std::unordered_set and
+# std::chrono are banned everywhere, tests included: absl::AnyInvocable or
+# FunctionRef, absl::flat_hash_map/flat_hash_set, absl::Time/Duration/Now().
+# A use of the type (a TypeLoc: a declaration, a template argument, a cast) or
+# of a name from std::chrono (a function, a constant).
+let bannedDecl namedDecl(anyOf(hasAnyName("::std::function", "::std::unordered_map", "::std::unordered_set", "::std::unordered_multimap", "::std::unordered_multiset"), hasAncestor(namespaceDecl(hasName("::std::chrono")))))
+match typeLoc(loc(qualType(hasDeclaration(bannedDecl))), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("banned_std")
+match declRefExpr(to(bannedDecl), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("banned_std")

@@ -52,6 +52,23 @@ use it as design guidance rather than firm rules."
   (`git config core.hooksPath .githooks`). `tools/*.c` are reformatted,
   not excluded. None of this exists yet (Appendix A, F1-F5); it arrives
   with phase 7's LLVM toolchain (shell: step 7.6, with shellcheck).
+- **Structural style rules are checked by the pinned LLVM's own tools, in a
+  test of tier `small`** (25.21): `//tools:style_checks_test` runs
+  clang-tidy (`.clang-tidy`: the `google-`, `abseil-`, `bugprone-`, `cert-`,
+  `concurrency-`, `misc-`, `modernize-`, `performance-`, `portability-` and
+  `readability-` groups minus a deny-list in which every entry has a reason)
+  and clang-query (one file per rule in `tools/style_matchers/`, each
+  beginning with the style section it enforces, with a known-bad and a
+  known-good fixture that `//tools:style_matchers_test` checks) over `dcfs/`,
+  `bench/` and `tools/` with the build's own flags (`tools/style_checks.bzl`:
+  Bazel actions, cached per file). So `bazel test --config=fast //tools/...`
+  finds a violation in a diff with no one reading it. The findings that
+  existed when a check was switched on are in `tools/style_checks_allow.txt`,
+  keyed by file, function and check (never a line): a new finding fails, a
+  fixed one must be taken off the list, and the list only shrinks.
+  `status_uninitialized` and `pointer_without_nullability` are report-only
+  (printed in the test log). Fix a finding in the code you touch; do not add
+  a line for new code.
 - **Include what you use, enforced**: a target includes only headers of its
   direct deps (`layering_check`) and clang-tidy's `misc-include-cleaner`
   finds missing and unused includes, both with phase 7's clang toolchain
@@ -107,10 +124,11 @@ use it as design guidance rather than firm rules."
   clang's `-Wnullability-completeness` and
   `-Wnullable-to-nonnull-conversion` as errors (7.3's `-Weverything`
   set: they stay off the deny-list), which refuse an unannotated pointer
-  in any file that annotates one; a repo-shape check for a raw `*` or
-  `unique_ptr`/`shared_ptr` without a following qualifier in `dcfs/*.h`
-  catches the rest (plan step 25.16; today 0 annotations, about 30 raw
-  pointers in headers).
+  in any file that annotates one; `pointer_without_nullability.query`
+  (25.21) reports a raw pointer or `unique_ptr`/`shared_ptr` parameter,
+  field or return type without a qualifier, as a report-only count until
+  plan step 25.16 annotates the tree and turns it into a gate (today 0
+  annotations; the report counts them).
 - **Banned: `std::function`, `std::unordered_map`/`std::unordered_set`,
   `std::chrono`** (russ, 2026-10-10: "These classes / functions are
   banned. Abseil's versions are always better."). In their place:
@@ -119,9 +137,9 @@ use it as design guidance rather than firm rules."
   (`node_hash_*` when pointers into the table must stay valid);
   `absl::Time`/`absl::Duration`/`absl::Now()` for time arithmetic (never
   for waiting: 1.11). Everywhere, tests included. Mechanically:
-  `tools/repo_shape.py` refuses the three names in our C++ with no
-  allowlist (25.17); today `std::function` twice in `session_loop.h`,
-  `std::chrono` in one test, no `std::unordered_*`.
+  `tools/style_matchers/banned_std.query` (25.21) reports every use of the
+  three names in `dcfs/`, `bench/` and `tools/`; the sites that existed are
+  in the shrinking `tools/style_checks_allow.txt`.
 - **Reach for Abseil before writing a helper**: `docs/abseil-utilities.md`
   (25.19) catalogues the pinned Abseil (20260817.0) with a swaps table
   (hand-written pattern → utility, each marked with the rule that demands
@@ -141,10 +159,11 @@ use it as design guidance rather than firm rules."
   only where no `absl::c_` form exists (a sub-range on purpose, which the
   comment then names, or an algorithm Abseil does not wrap), and
   `std::begin`/`std::end` only to build such a sub-range. Applies to
-  tests too. Mechanically: `tools/repo_shape.py` refuses `std::<name>(`
-  for the algorithms Abseil wraps, in `dcfs/`, `tools/` C++ and `bench/`,
-  outside an allowlist with reasons that only shrinks (25.17; six sites
-  today).
+  tests too. Mechanically: `tools/style_matchers/iterator_pair_algorithm.query`
+  (25.21) reports a `std::` call whose first two arguments are `begin()` and
+  `end()` (or `std::begin`/`std::end`) of one variable or member, in
+  `dcfs/`, `bench/` and `tools/`; the sites that existed are in the
+  shrinking `tools/style_checks_allow.txt`.
 - **`absl::FixedArray`, not `std::vector`, for a buffer whose size is known
   when it is made** (russ, 2026-10-10). A `std::vector<T> v(n)` that is
   never pushed to or resized says the wrong thing: it advertises growth
@@ -235,8 +254,11 @@ fully (`::dcfs::ErrnoToStatus`, as `status_macros.h` does), and a real
 ambiguity, which is named in a comment at the call. Unqualified lookup
 inside `dcfs` finds `dcfs::ErrnoToStatus` before `absl::ErrnoToStatus`
 regardless, so the qualifier never did anything there. Mechanically:
-`tools/repo_shape.py` refuses `dcfs::` outside `#define` lines in
-`dcfs/*.cc` and `dcfs/*.h` (plan step 25.14; today 38 calls).
+`tools/style_matchers/dcfs_qualified_inside_dcfs.query` (25.21) finds a
+`dcfs::` qualifier with no leading `::` inside `namespace dcfs` in `dcfs/`,
+`bench/` and `tools/`, from the AST (it replaced the regex of
+`tools/repo_shape.py`, which guessed the namespace from brace depth; today
+0 sites).
 
 **A name says what distinguishes the thing from its siblings, and never
 repeats the namespace.** The function now called `ProducedErrnoToStatus`
@@ -522,8 +544,10 @@ until 2026-10-10; this section is it.)
   for the property the test is about.
 - **Mechanically** (25.9): `tools/banned_symbols.txt` bans `abort`,
   `__assert_fail` and Abseil's fatal-log internals in the shipped
-  binaries; `tools/repo_shape.py` refuses the macros in production
-  sources outside the approval allowlist; clang-tidy's equivalent with 7.5.
+  binaries; `tools/style_matchers/check_in_production.query` (25.21)
+  reports a `CHECK`, `QCHECK`, `DCHECK`, `LOG(FATAL)`, `assert` or `abort`
+  in any file that is not `*_test.cc` or under `testonly/`; the sites that
+  existed are in the shrinking `tools/style_checks_allow.txt`.
 
 ### 1.6a Shape of a function that does several things
 
@@ -659,10 +683,16 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
   fields). The output is interface, not logging, so it keeps its bytes and
   its stream; only the formatting call changes to the type-checked one
   (`absl::SNPrintF` takes the same buffer and size). Log lines are `LOG`.
-- **Mechanically** (7.5's clang-tidy): `readability-else-after-return`,
-  `readability-misleading-indentation`,
-  `readability-function-cognitive-complexity` with a low threshold (start
-  at 15, tighten as the tree allows). The accumulator preference is not
+- **Mechanically** (25.21, 1.1): clang-tidy's `readability-else-after-return`
+  (which covers `return`, `break`, `continue` and `throw`),
+  `readability-misleading-indentation` and
+  `readability-function-cognitive-complexity` with `Threshold: 15` (tighten
+  as the tree allows, never loosen without russ; a finding reads "break up
+  this function"; the complexity of a macro's expansion is not counted).
+  `status_uninitialized.query` reports (does not fail on) a `Status` or
+  `StatusOr` local declared without an initializer, and
+  `happy_path_nested.query` an `if (x.ok())` with three or more statements in
+  its block, directly in a function body. The accumulator preference is not
   enforced.
 
 ### 1.7 Logging

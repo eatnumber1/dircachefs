@@ -2,6 +2,7 @@
 # the lock file (//third_party/debian:version_check_test) and the pins the
 # SBOM test reads (//tools/sbom:sbom_test).
 exports_files([
+    ".clang-tidy",  # //tools:style_checks_test (25.21)
     "MODULE.bazel",
     "README.md",
     "MODULE.bazel.lock",

@@ -1,0 +1,7 @@
+# docs/style.md 1.6a: the happy path is the unindented one. An
+# `if (x.ok()) { ... }` that is a statement of the function body, with at
+# least three statements in its block and no else (or an else that only
+# returns), holds the rest of the function: return the error first instead.
+# Heuristic: it also matches an `if (ok)` that is followed by more code
+# (clang-query has no "last statement" narrowing).
+match ifStmt(hasParent(compoundStmt(hasParent(functionDecl()))), hasCondition(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("ok"))))), hasThen(compoundStmt(unless(statementCountIs(0)), unless(statementCountIs(1)), unless(statementCountIs(2)))), anyOf(unless(hasElse(stmt())), hasElse(returnStmt())), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("happy_path_nested")

@@ -1,6 +1,7 @@
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
+load("//tools:style_checks.bzl", "style_findings_here")
 load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
 load("//tools/warnings:flags_test.bzl", "flags_test")
 
@@ -1917,3 +1918,5 @@ flags_test(
     present = ["-Wl,--fatal-warnings"],
     target_under_test = ":status_test_bin",
 )
+
+style_findings_here()

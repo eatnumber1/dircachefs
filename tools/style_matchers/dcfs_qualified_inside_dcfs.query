@@ -1,0 +1,9 @@
+# docs/style.md 1.3: inside namespace dcfs, names of dcfs are not qualified
+# (`ErrnoToStatus(...)`, not `dcfs::ErrnoToStatus(...)`; `syscalls::open`, not
+# `dcfs::syscalls::open`). The exceptions are a macro body, which expands
+# anywhere and so spells `::dcfs::` with the leading `::` (status_macros.h),
+# and a real ambiguity, named in a comment. The AST knows what the regex that
+# stood in for it (tools/repo_shape.py, step 25.14) had to guess: the
+# enclosing namespace, and that `dcfs::` is a qualifier and not text in a
+# string or comment. A qualifier with no leading `::` inside namespace dcfs.
+match nestedNameSpecifierLoc(loc(specifiesNamespace(hasName("::dcfs"))), unless(hasPrefix(nestedNameSpecifierLoc())), hasAncestor(namespaceDecl(hasName("::dcfs"))), hasAncestor(decl(isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")))).bind("dcfs_qualified_inside_dcfs")

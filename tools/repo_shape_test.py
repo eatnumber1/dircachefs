@@ -28,9 +28,6 @@ class RepoShapeTest(unittest.TestCase):
     def test_local_buffers_sized_once_are_fixed_arrays(self):
         self.assertEqual([], repo_shape.fixed_arrays(ROOT["root"]))
 
-    def test_no_dcfs_qualifier_inside_dcfs(self):
-        self.assertEqual([], repo_shape.namespace_qualifiers(ROOT["root"]))
-
     def test_no_identifier_begins_with_the_project_name(self):
         self.assertEqual([], repo_shape.project_prefix(ROOT["root"]))
 

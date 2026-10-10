@@ -3,6 +3,7 @@
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//test/qemu:qemu_cc_test.bzl", "qemu_cc_test")
+load("//tools:style_checks.bzl", "style_findings_here")
 
 package(default_testonly = 1)
 
@@ -327,3 +328,5 @@ cc_library(
         "@absl//absl/status:statusor",
     ],
 )
+
+style_findings_here()

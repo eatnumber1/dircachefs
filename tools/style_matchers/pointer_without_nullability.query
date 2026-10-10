@@ -1,0 +1,13 @@
+# docs/style.md 1.2: every pointer says whether it may be null. A raw pointer
+# or a std::unique_ptr/shared_ptr that is a parameter, a field or a return
+# type must carry absl_nonnull or absl_nullable (clang: _Nonnull/_Nullable).
+# REPORT ONLY until plan step 25.16 annotates the tree (tools/style_checks.py
+# REPORT_ONLY); the count is that step's backlog. An annotation wraps the
+# pointer's TypeLoc in an attributed one, so the pointer is unannotated when
+# its outermost TypeLoc (under cv-qualifiers) is the pointer or the template
+# specialization itself. A pointer hidden behind a typedef is not seen.
+let unannotatedLoc typeLoc(anyOf(pointerTypeLoc(), qualifiedTypeLoc(hasUnqualifiedLoc(pointerTypeLoc())), templateSpecializationTypeLoc()))
+let smartPointer namedDecl(hasAnyName("::std::unique_ptr", "::std::shared_ptr"))
+match parmVarDecl(anyOf(hasType(pointerType()), hasType(hasDeclaration(smartPointer))), hasTypeLoc(unannotatedLoc), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("pointer_without_nullability")
+match fieldDecl(anyOf(hasType(pointerType()), hasType(hasDeclaration(smartPointer))), hasTypeLoc(unannotatedLoc), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("pointer_without_nullability")
+match functionDecl(anyOf(returns(pointerType()), returns(hasDeclaration(smartPointer))), hasReturnTypeLoc(unannotatedLoc), unless(isImplicit()), isExpansionInFileMatching("(^|/)(dcfs|tools|bench)/")).bind("pointer_without_nullability")

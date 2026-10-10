@@ -368,52 +368,6 @@ def fixed_arrays(root):
     return problems
 
 
-QUALIFIER_RE = re.compile(r"\bdcfs::")
-# A namespace is declared by its full name (`namespace dcfs::backing {`):
-# that spelling is not a use of a name inside dcfs.
-NAMESPACE_DECL_RE = re.compile(r"^\s*namespace\s+dcfs::")
-NAMESPACE_OPEN_RE = re.compile(r"^namespace dcfs(::\w+)*\s*\{")
-NAMESPACE_CLOSE_RE = re.compile(r"^\}\s*//\s*namespace dcfs(::\w+)*\s*$")
-
-
-def namespace_qualifier_sites(text):
-    """Line numbers of `dcfs::` in code inside namespace dcfs, outside
-    #define (and its backslash-continued lines), not counting a namespace
-    declaration. Outside it (before the namespace opens, or after it
-    closes: main() and the global-scope tests) the qualifier is needed."""
-    sites = []
-    in_define = False
-    depth = 0
-    for number, line in enumerate(text.splitlines(), 1):
-        if NAMESPACE_OPEN_RE.match(line):
-            depth += 1
-        define = in_define or line.lstrip().startswith("#define")
-        in_define = define and line.rstrip().endswith("\\")
-        code = line.split("//", 1)[0]
-        if (depth > 0 and not define and not NAMESPACE_DECL_RE.match(code) and
-                QUALIFIER_RE.search(code)):
-            sites.append(number)
-        if NAMESPACE_CLOSE_RE.match(line):
-            depth = max(depth - 1, 0)
-    return sites
-
-
-def namespace_qualifiers(root):
-    problems = []
-    for dirpath, _, names in os.walk(os.path.join(root, "dcfs")):
-        for name in sorted(names):
-            if not name.endswith((".h", ".cc")):
-                continue
-            rel = os.path.relpath(os.path.join(dirpath, name), root)
-            for number in namespace_qualifier_sites(read(root, rel)):
-                problems.append(
-                    "%s:%d: `dcfs::` qualifies a name inside namespace dcfs "
-                    "(docs/style.md, 1.3: call it unqualified; a macro body "
-                    "or a real ambiguity, named in a comment, is the "
-                    "exception)" % (rel, number))
-    return problems
-
-
 PROJECT_PREFIX_RE = re.compile(r"\bDcfs[A-Z]")
 # Strings (with escapes), block comments and line comments, replaced by
 # spaces (newlines kept, so line numbers hold). One pass, so a // inside a
@@ -455,5 +409,4 @@ def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
             guest_sleeps(root) + disabled_checks_listed(root) +
             no_test_only_comments(root) + no_testonly_friends(root) +
-            fixed_arrays(root) + namespace_qualifiers(root) +
-            project_prefix(root))
+            fixed_arrays(root) + project_prefix(root))
