@@ -106,6 +106,7 @@
 FAILED=0
 . "$(dirname "$0")/lib.sh"
 . "$(dirname "$0")/sqlite_durability_lib.sh"
+. "$(dirname "$0")/ramdisk_lib.sh"
 
 CS=/bin/crash_states
 REPLAY_LOG=/bin/replay-log
@@ -175,11 +176,6 @@ mkdir -p "$WORK" "$SRC" "$MNT" "$CACHE_DIR" "$REPLAY_MNT" "$LOOPS"
 syslogd -C256
 
 sectors() { cat "/sys/class/block/${1#/dev/}/size"; }
-
-# loop FILE: attaches FILE to a free loop device and prints its name.
-loop() {
-	l_dev=$(losetup -f) && losetup "$l_dev" "$1" && echo "$l_dev"
-}
 
 # --- dcfs -------------------------------------------------------------------
 
@@ -563,9 +559,9 @@ mount -t tmpfs -o size=1g loops "$LOOPS" &&
 	truncate -s 256M "$LOOPS/cow" &&
 	# The replay disk starts as the cache disk is before the log starts.
 	"$CS" copy-sparse "$CACHE_DEV" "$LOOPS/replay" &&
-	LOG_DEV=$(loop "$LOOPS/log") &&
-	REPLAY_DEV=$(loop "$LOOPS/replay") &&
-	COW_DEV=$(loop "$LOOPS/cow") || {
+	LOG_DEV=$(ram_disk_attach "$LOOPS/log") &&
+	REPLAY_DEV=$(ram_disk_attach "$LOOPS/replay") &&
+	COW_DEV=$(ram_disk_attach "$LOOPS/cow") || {
 	fail setup "making the loop devices failed"
 	exit "$FAILED"
 }

@@ -415,6 +415,21 @@ if [ ! -f "$SCRIPT" ]; then
 	exit 1
 fi
 
+# qemu_test's ram_disks (step 26.17): run-qemu.sh --ram-disks attached no disk
+# and named them here instead. Each is made, formatted and given its
+# /dev/<device> node before the script starts, so that the script finds the
+# disks it declared whichever way they were made (guest/ramdisk_lib.sh).
+RAMDISKS=$(sed -n 's/.*\bdcfs_ramdisks=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$RAMDISKS" ]; then
+	. /tests/ramdisk_lib.sh
+	if ! ram_disks_make "$RAMDISKS"; then
+		echo "init: making the RAM disks $RAMDISKS failed"
+		echo "TEST-FAILED"
+		finish
+		exit 1
+	fi
+fi
+
 # Same as the unit-test branch above: under --config=asan/--config=ubsan,
 # //dcfs:main_static (started by guest/<name>.sh's start_daemon) is the
 # ASan/UBSan build too (see dcfs/BUILD.bazel's main_static select()), and

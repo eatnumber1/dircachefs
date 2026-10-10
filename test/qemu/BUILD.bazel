@@ -146,6 +146,7 @@ qemu_test(
     ],
     guest_script = "guest/ram_disks.sh",
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "small",
     timeout = "moderate",
 )
@@ -1153,6 +1154,18 @@ sh_test(
     name = "run_qemu_mkfs_test",
     size = "small",
     srcs = ["run_qemu_mkfs_test.sh"],
+    args = ["$(location scripts/run-qemu.sh)"],
+    data = ["scripts/run-qemu.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 26.17: run-qemu.sh --ram-disks makes no image, runs no mkfs, attaches no
+# drive, passes the specs to the guest and appends the mkfs archive; and
+# refuses what cannot be RAM-backed (fake qemu; no guest).
+sh_test(
+    name = "run_qemu_ram_disks_test",
+    size = "small",
+    srcs = ["run_qemu_ram_disks_test.sh"],
     args = ["$(location scripts/run-qemu.sh)"],
     data = ["scripts/run-qemu.sh"],
     target_compatible_with = HOST_ONLY_COMPATIBLE,

@@ -45,10 +45,11 @@ DMSETUP=${DMSETUP:-/sbin/dmsetup}
 # fault_dev NAME
 fault_dev() { echo "/dev/mapper/$1"; }
 
-# fault_sectors DEV: the size of DEV in 512-byte sectors.
+# fault_sectors DEV: the size of DEV in 512-byte sectors. From the device, not
+# from /sys/class/block/<name>: a RAM disk (qemu_test's ram_disks) is a loop
+# device that /dev/vdb is a second node for, and sysfs knows it as loopN.
 fault_sectors() {
-	fs_dev=${1#/dev/}
-	cat "/sys/class/block/$fs_dev/size"
+	blockdev --getsz "$1"
 }
 
 # fault_table NAME DEV MODE: the dm table text for MODE over DEV.

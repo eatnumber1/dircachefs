@@ -31,6 +31,18 @@
 #       reproduce a kernel bug (casefold_tune_oops_test). See "A kernel
 #       failure" below.
 #
+#   --ram-disks <fstools.cpio.gz> (step 26.17; e2e only): the disk-specs name
+#       disks in the guest's RAM, not image files on the host: no drive is
+#       attached (and no filler: a coverage disk becomes /dev/vda), and the
+#       specs go to the guest as dcfs_ramdisks=<device>:<fstype>:<size>,... on
+#       the kernel command line. guest/init makes each disk a loop device over a
+#       sparse file in a tmpfs, names it /dev/<device> and formats it with the
+#       mkfs tools in the archive (scripts/mkfstools.py), which is appended to
+#       the initramfs. For the tests whose subject is the failure semantics of
+#       device-mapper and the filesystem, not the host disk's latency; not with
+#       --power-cut, --boots (the disks must outlive the guest), --rootfs or
+#       --systemd-image, and the disk-specs carry no mkfs options.
+#
 #   --power-cut SCENARIO[,SCENARIO...] (step 11.2; e2e only): a real power cut
 #       per scenario. Each is two boots over the same disk images: the first
 #       (dcfs_cut=kill dcfs_scenario=<s> dcfs_boot=1 on the kernel command
@@ -145,6 +157,11 @@ CPUS_OVERRIDE=""
 # appended to the initramfs given below (the kernel unpacks concatenated
 # archives into one).
 MODULES=""
+# --ram-disks <cpio.gz> (step 26.17): the disk-specs name disks in the guest's
+# RAM instead of image files on the host: no drive is attached, the guest makes
+# each disk (guest/init) and formats it with the tools in the archive, which is
+# appended to the initramfs like the modules'. See the usage above.
+RAM_DISKS=""
 # --expect-kernel-failure <script>: see the kernel-failure check below.
 EXPECT_KERNEL_FAILURE=""
 # Step 7.2, coverage (only under `bazel coverage`, which sets COVERAGE_DIR;
@@ -191,6 +208,15 @@ case "$BOOTS" in
 '' | *[!0-9]* | 0)
 	echo "run-qemu.sh: --boots takes a number of boots, 1 or more (got '$BOOTS')" >&2
 	exit 1
+	;;
+esac
+case " $* " in
+*" --ram-disks "*)
+	if [ "$BOOTS" -gt 1 ] || [ -n "$CUT_SCENARIOS" ]; then
+		echo "run-qemu.sh: --ram-disks excludes --boots and --power-cut" \
+			"(the disks must outlive the guest)" >&2
+		exit 1
+	fi
 	;;
 esac
 if [ "$BOOTS" -gt 1 ] && [ -n "$CUT_SCENARIOS" ]; then
@@ -313,6 +339,10 @@ while :; do
 		MODULES=$2
 		shift 2
 		;;
+	--ram-disks)
+		RAM_DISKS=$2
+		shift 2
+		;;
 	--expect-kernel-failure)
 		EXPECT_KERNEL_FAILURE=$2
 		shift 2
@@ -423,8 +453,19 @@ fi
 WORKDIR="${TEST_TMPDIR:-$(mktemp -d)}"
 LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/${LOG_NAME:-serial.log}"
 
-if [ -n "$MODULES" ]; then
-	cat "$INITRD" "$MODULES" >"$WORKDIR/initramfs-with-modules.cpio.gz"
+# The disks of --ram-disks are made by guest/init for an e2e guest that runs
+# its script itself: not a unit test (/test/disk0 names a virtio disk), not a
+# Debian root or a systemd image (their disks are attached by letter), and not
+# a boot that reuses the disks of an earlier one.
+if [ -n "$RAM_DISKS" ] &&
+	{ [ "$UNIT" -eq 1 ] || [ -n "$ROOTFS" ] || [ -n "$SYSTEMD_IMAGE" ] || [ -n "$KEEP_DISKS" ]; }; then
+	echo "run-qemu.sh: --ram-disks is for an e2e test with neither --rootfs," \
+		"--systemd-image, --boots nor --power-cut" >&2
+	exit 1
+fi
+
+if [ -n "$MODULES" ] || [ -n "$RAM_DISKS" ]; then
+	cat "$INITRD" ${MODULES:+"$MODULES"} ${RAM_DISKS:+"$RAM_DISKS"} >"$WORKDIR/initramfs-with-modules.cpio.gz"
 	INITRD="$WORKDIR/initramfs-with-modules.cpio.gz"
 fi
 
@@ -459,6 +500,22 @@ for spec in "$@"; do
 	index=$(($(printf '%d' "'$letter") - $(printf '%d' "'a")))
 	echo "$index:$dev:$fstype:$size:$opts" >>"$specs_file"
 done
+
+# --ram-disks: the specs become one kernel command-line word for guest/init
+# (comma-separated <device>:<fstype>:<size>), and no drive is attached for any
+# of them, so no filler either and a coverage disk is the first virtio disk.
+RAMDISKS_APPEND=""
+if [ -n "$RAM_DISKS" ]; then
+	if [ -s "$specs_file" ]; then
+		if awk -F: '$5 != "" { bad = 1 } END { exit !bad }' "$specs_file"; then
+			echo "run-qemu.sh: mkfs options are not supported for --ram-disks disks" >&2
+			exit 1
+		fi
+		RAMDISKS_APPEND=" dcfs_ramdisks=$(awk -F: '{ printf "%s%s:%s:%s", sep, $2, $3, $4; sep = "," }' "$specs_file")"
+		echo "run-qemu.sh: RAM disks: ${RAMDISKS_APPEND# dcfs_ramdisks=} (no image on the host)" >>"$LOG"
+	fi
+	: >"$specs_file"
+fi
 
 max_index=-1
 if [ -s "$specs_file" ]; then
@@ -696,7 +753,7 @@ append="console=ttyS0 reboot=t panic=-1 loglevel=3 rdinit=/init dcfs_accel=$ACCE
 if [ "$UNIT" -eq 0 ]; then
 	append="$append dcfs_test=$DCFS_TEST"
 fi
-append="$append$rootfs_append$sysd_append${EXTRA_APPEND:+ $EXTRA_APPEND}$NOISY_APPEND"
+append="$append$rootfs_append$sysd_append$RAMDISKS_APPEND${EXTRA_APPEND:+ $EXTRA_APPEND}$NOISY_APPEND"
 COVERAGE=0
 if [ -n "$COVDISK_IMG" ]; then
 	COVERAGE=1
