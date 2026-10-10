@@ -175,6 +175,12 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   are no longer needed.
 - If a step needs more than about three agent runs to land, pause and tell
   russ: something is probably wrong with the step.
+- **No backward compatibility until the first deployment** (russ, several
+  times, 2026-10-10/11: "we've never shipped dcfs", "we haven't shipped. No
+  need for back-compat"): a removed option, format or behaviour is simply
+  gone, with no shim, deprecation message, migration or test of the old
+  spelling. The cache database schema is the one exception already handled
+  by `migrate.cc`, because russ's own trial databases will exist.
 - **The order of work is `README.md`'s Queue section** (russ, 2026-10-11),
   not the phase numbers: the spare-disk trial first, then budgets, the
   slowness, the atomicity contract, then the rest by what the trial
