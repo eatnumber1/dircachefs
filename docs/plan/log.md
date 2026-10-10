@@ -2705,3 +2705,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   them; comments as facts at the line; the consumed-Status shape a preference, not a rule, at his
   correction); clang-tidy readability checks named for 7.1; 25.15 queued (SwitchTo and the ten
   accumulators) after 25.14; RestoreRoot's CHECK added to 25.9's list.
+- russ: no "fact beside the call" rule; the wrapper's signature carries it (Status is nodiscard;
+  a call that cannot fail returns its value or nothing). Style 1.6a amended.

@@ -432,11 +432,17 @@ the kernel accepts), and `dcfs::`-qualified names.
   is the one `std::move(x).Cancel()` line. Hand-written undo in an error
   branch (`if (!status.ok()) { RestoreRoot(saved); return status; }`) is
   the shape to refuse.
-- **A call that cannot fail is made bare, with the fact beside it**
-  (rule, from 1.10a). `// setfsgid is guaranteed to never fail` on the
-  line; no result checked, no read-back, no branch. The author states the
-  fact and the reviewer checks it: that is domain knowledge no rule can
-  supply.
+- **The signature says whether a call can fail; nothing else needs to**
+  (russ, 2026-10-10: "If the syscall can fail it returns a Status, and
+  Status cannot be silently ignored (it has `[[nodiscard]]`)"). A
+  `syscalls::` wrapper for a call that can fail returns `absl::Status` or
+  `StatusOr`, which the compiler refuses to drop; one for a call that
+  cannot fail returns its value or nothing (`syscalls::setfsuid` returns
+  the previous uid, `syscalls.h:34`). So a bare call is correct by
+  construction and needs no comment, no result check, no read-back and no
+  branch (1.10a). The one thing to get right is the wrapper's signature
+  (section 1.5): a syscall that can fail must not be wrapped as if it
+  could not.
 - **Comments are facts at the line that needs them** (rule). The header
   says what the function does and the one non-obvious constraint (here:
   fsgid and groups before fsuid, and why); it does not narrate the
