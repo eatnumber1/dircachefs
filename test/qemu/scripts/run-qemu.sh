@@ -453,6 +453,15 @@ fi
 WORKDIR="${TEST_TMPDIR:-$(mktemp -d)}"
 LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/${LOG_NAME:-serial.log}"
 
+# DCFS_RAM_DISKS=0 (bazel test --test_env=DCFS_RAM_DISKS=0; step 26.17): the
+# same test on host disks, to compare the two or to see whether a RAM disk hides
+# something. Like DCFS_MEM and DCFS_NOISY it is in the test action's key, so a
+# result of one kind is never served for the other.
+if [ "${DCFS_RAM_DISKS:-1}" = 0 ] && [ -n "$RAM_DISKS" ]; then
+	echo "run-qemu.sh: DCFS_RAM_DISKS=0: the disks are image files on the host" >&2
+	RAM_DISKS=""
+fi
+
 # The disks of --ram-disks are made by guest/init for an e2e guest that runs
 # its script itself: not a unit test (/test/disk0 names a virtio disk), not a
 # Debian root or a systemd image (their disks are attached by letter), and not

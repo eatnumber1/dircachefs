@@ -92,6 +92,19 @@ grep -q '^run-qemu.sh: RAM disks: vdb:ext4:64M,vdc:xfs:320M' "$WORK/out/serial.l
 	fail "the initramfs is not the base followed by the mkfs archive: '$(cat "$WORK/initrd.seen" 2>&1)'"
 echo "PASS: --ram-disks makes no image, runs no mkfs, attaches no drive, and passes the specs"
 
+# DCFS_RAM_DISKS=0 (bazel test --test_env=DCFS_RAM_DISKS=0) puts the same test
+# back on host disks, to compare the two or to see whether a RAM disk hides
+# something: the option is ignored, the disks are drives made on the host.
+DCFS_RAM_DISKS=0
+export DCFS_RAM_DISKS
+run --ram-disks "$WORK/fstools.cpio.gz" -- vdb:ext4:8M vdc:xfs:8M
+unset DCFS_RAM_DISKS
+grep -q '^-drive$' "$WORK/qemu-args" || fail "DCFS_RAM_DISKS=0 attached no drive"
+grep -q '^mkfs-xfs ' "$WORK/mkfs-calls" || fail "DCFS_RAM_DISKS=0 did not run mkfs.xfs on the host"
+grep -q 'dcfs_ramdisks' "$WORK/qemu-args" && fail "DCFS_RAM_DISKS=0 still names RAM disks"
+[ "$(cat "$WORK/initrd.seen")" = BASE ] || fail "DCFS_RAM_DISKS=0 still appends the mkfs archive"
+echo "PASS: DCFS_RAM_DISKS=0 puts a RAM-disk test back on host disks"
+
 # The modules' archive comes first, then the mkfs one.
 printf 'MODULES' >"$WORK/modules.cpio.gz"
 run --ram-disks "$WORK/fstools.cpio.gz" --modules "$WORK/modules.cpio.gz" -- vdb:ext4:8M
