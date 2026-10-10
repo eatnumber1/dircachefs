@@ -688,3 +688,36 @@ lane-1, one commit):
   175 MiB cached near kswapd's watermark; 872 pages scanned once in CI,
   0 of 4 locally. `mem = 320` for stress_short with the measurement in a
   BUILD comment; lowest MemAvailable then 160 MiB, 8 of 8 clean.
+
+## 26.17a merged 2026-10-10 (3e0c778): RAM-backed guest disks
+
+Part 1 of 26.17 (investigator, ten commits, Opus review plus one fix
+round). `ram_disks = True` on `qemu_test`/`qemu_test_matrix`: the
+guest makes each disk as a sparse file in a capped tmpfs, formats the
+file (not the device: formatting the loop device left ext4's inode tables
+un-zeroed and ext4lazyinit became a spontaneous writer on every mount),
+attaches it as a loop device marked rotational (so btrfs and ext4 keep
+the allocator the virtio disks had), and mknods `/dev/vdN` as a second
+node. The pinned kernel has no brd. On for 13 fault targets (selftest,
+backing, cache, power, shutdown, ace a/b/fs/mixed/mixed_long, freeze,
+recover, recover_btrfs_unpinned); `mem=` set from measured peaks
+(384-576 MiB plain, 512-832 asan; mixed_long's a flagged guess). Plan
+drift, recorded: `fault_power_kill_test` stays on host images (the host
+kills QEMU and a second boot reads the disks; the macro refuses RAM
+disks with power_cut, boots, rootfs, systemd_image, mke2fs options, a
+disk named vda, or no explicit mem); the enospc tests stay on images
+(they fill the disk); `DCFS_RAM_DISKS=0` (validated, like DCFS_SEED)
+runs any converted test on host disks; run-qemu.sh prints a time line
+(guest wall, host CPU around QEMU only) for 26.17 part 4. Measured: the
+I/O-heavy ACE targets 25-30% faster on a quiet host, and under host disk
+load fault_ace_b 72.6 s → 37.6 s; freeze and recover unchanged (their
+waits dominate). One mechanism: sqlite_durability shares the attach
+helpers; `device_sectors` replaces two size helpers; `sectors_read`
+resolves by node and stops loudly when the counters are absent, which
+exposed a silent pass in fault_recover.sh (`DM_NAME` was always empty
+without udev, so every fill_fails pair compared empty and every
+answered-from-cache lookup was a SKIP; now real PASSes). Not run:
+`bazel coverage` with RAM disks (the coverage CI job is the check). The
+reviewer's "does a loop device over tmpfs change what the tests prove"
+answer was no: every cut is dm-flakey plus a remount, never device
+durability.

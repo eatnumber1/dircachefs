@@ -2816,3 +2816,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 25.15 merged (lane-2 → main; gate exit 0; orchestrator read the wrapper diff): see the phase
   file. Lane-2 free; next there: 25.17 (mechanical) once 25.21's checks land, so the sweep runs
   with them.
+- 26.17a merged (lane-1 → 3e0c778, gate exit 0; Opus review's main question answered no, twelve
+  findings fixed in one round, orchestrator read the format-the-file commit's test). Phase 26
+  file has the details and the plan drift. Lane-1 free. Next watch: the coverage CI job with
+  RAM disks on the next push.
