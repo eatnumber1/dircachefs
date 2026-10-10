@@ -2921,3 +2921,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 26.27 dispatched (mechanical, lane-4): the gate on regions and branches, lines reported only;
   baseline seeded from run 38080960615's artifact or a local coverage run. Three Haiku lanes
   briefly (25.23b, 26.26, 26.27); all in the in-flight group.
+- 26.26 merged (lane-1): the 0.22-point drop was the reformat's line accounting, verified by a
+  token-level alignment of every previously covered line across both runs' artifacts (0
+  statements lost; 37 function-entry counts moved to the brace line; fuse_ops' name switch split
+  21 uncovered lines in two); baseline lines 96.04, branches 80.85. The old figure quoted in the
+  dispatch (9157/9509) was the orchestrator's estimate from 26.22, not the artifact's 9058/9409.
+  26.27 replaces the format with regions.
