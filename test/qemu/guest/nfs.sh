@@ -184,6 +184,14 @@ restart_daemon() {
 		# picks up the new mount. This is ordinary NFS server administration
 		# after remounting a re-exported filesystem, not a workaround for
 		# anything dcfs-specific.
+		# The mount appears in the mount table before dcfs serves its
+		# first request (under ASan about 0.7 s earlier). exportfs -f
+		# makes nfsd re-resolve the export at once, and a client request
+		# that lands before the new mount answers got ESTALE (2 of 8
+		# runs under --config=asan, none of 16 with this stat): a stat
+		# blocks until dcfs replies, so the flush happens on a serving
+		# mount.
+		stat "$MNT" >/dev/null 2>&1 || true
 		exportfs -f 2>/dev/null || true
 		return 0
 	fi
