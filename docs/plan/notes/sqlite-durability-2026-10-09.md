@@ -162,10 +162,16 @@ Observations, none a finding against the model:
 2. Each kSync transaction issued exactly one WAL fsync, after its commit
    frame, and no normal one issued any: dcfs's intent and SQLite's
    behaviour agree, and the model's `Commit(new, sync)` is what happens.
-3. A create's writable open is a second synced phase 1 (the new file is not
-   durably dirty), so `creates` of n files make n + 1 synced commits when
-   the parent is not durably dirty and n when it is; the model's fast path
-   (D alone) is coarser, as `formal/README.md` already says.
+3. Before step 23.11 a create's writable open was a second synced phase 1
+   (the new file was not durably dirty), so n creates in a directory not
+   durably dirty made n + 1 synced commits. Since 23.11 (a created row is
+   born dirty) they make one, the parent's phase 1; a directory made by
+   mkdir is born dirty at normal durability but not durably dirty, so its
+   rmdir's phase 1 is still synced. Step 12.14b replaced the test's count of
+   synced operations (at least 3, true only before 23.11) with what it
+   needs: at least one synced and one normal-only operation, and each
+   operation's durability the one dcfs's rules give it
+   (`durability-as-dcfs-rules-say`).
 
 Gaps left:
 

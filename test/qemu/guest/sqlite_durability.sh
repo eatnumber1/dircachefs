@@ -261,12 +261,21 @@ record() {
 }
 
 # op NAME CMD...: runs one operation of the script and records it.
+# op NAME KIND CMD...: runs one operation of the script and records it,
+# with the durability dcfs's rules give it in $WORK/expect: "synced" (a
+# phase 1 naming an inode that is not durably dirty: the first create, mkdir
+# or setattr since the start or a sync point in a directory or of an inode),
+# "normal" (every inode it names durably dirty already: the fast path; a
+# sync point's ClearDirty), or "-" (no commit of dcfs's own, or no rule
+# that fixes it).
 op() {
 	o_name=$1
-	shift
+	o_kind=$2
+	shift 2
 	"$@" >/dev/null 2>"$WORK/op.err" ||
 		fail "op-$o_name" "$* failed: $(cat "$WORK/op.err")"
 	record "$o_name"
+	echo "$OPN $o_kind" >>"$WORK/expect"
 }
 
 creates() {
@@ -291,43 +300,47 @@ cache_flush() {
 
 # The script. Whether a commit is synced is dcfs's to decide (a phase 1 is
 # synced unless every inode it names is durably dirty since the last sync
-# point; a create's writable open is a phase 1 of the new file's); the ops
-# table and the strace say what it decided. Each ends with an unlink of a
-# file both of whose inodes are durably dirty: normal commits only, which
+# point; since step 23.11 a created file is born dirty, so n creates in a
+# directory not yet durably dirty make one synced commit); each op names
+# what the rules give it, and the ops table and the strace say what dcfs
+# decided (durability-as-dcfs-rules-say compares). Each ends with an unlink
+# of a file both of whose inodes are durably dirty: normal commits only, which
 # reach the disk only when the cache is unmounted, and a FLUSH after it
 # (cache_flush), so that some crash states lose a completed operation (and
 # a commit that changed the database: the release records after a create's
 # last synced commit can leave it as it was).
 script_full() {
-	op warm ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5"
-	op create-d1-a creates "$MNT/d1" a
-	op create-d1-b creates "$MNT/d1" b
-	op mkdir-d2-x mkdir "$MNT/d2/x"
-	op create-d3-f1-f4 creates "$MNT/d3" f1 f2 f3 f4
-	op unlink-d1-a rm "$MNT/d1/a"
-	op rename-d1-b-c mv "$MNT/d1/b" "$MNT/d1/c"
-	op wal-writeback "$TESTUTIL" fsync "$DB-wal"
-	op create-d3-g1-g2 creates "$MNT/d3" g1 g2
-	op sync-point "$TESTUTIL" fsync "$MNT/d3/g1"
-	op create-d3-g3 creates "$MNT/d3" g3
-	op write-d4-w write_file "$MNT/d4/w"
-	op chmod-d4-keep chmod 600 "$MNT/d4/keep"
-	op setxattr-d4-keep "$TESTUTIL" setxattr "$MNT/d4/keep" user.k v
-	op rmdir-d2-x rmdir "$MNT/d2/x"
-	op create-d5-t1-t6 creates "$MNT/d5" t1 t2 t3 t4 t5 t6
-	op unlink-d5-t1 rm "$MNT/d5/t1"
-	op cache-flush cache_flush
+	op warm - ls "$MNT/d1" "$MNT/d2" "$MNT/d3" "$MNT/d4" "$MNT/d5"
+	op create-d1-a synced creates "$MNT/d1" a
+	op create-d1-b normal creates "$MNT/d1" b
+	op mkdir-d2-x synced mkdir "$MNT/d2/x"
+	op create-d3-f1-f4 synced creates "$MNT/d3" f1 f2 f3 f4
+	op unlink-d1-a normal rm "$MNT/d1/a"
+	op rename-d1-b-c normal mv "$MNT/d1/b" "$MNT/d1/c"
+	op wal-writeback - "$TESTUTIL" fsync "$DB-wal"
+	op create-d3-g1-g2 normal creates "$MNT/d3" g1 g2
+	op sync-point normal "$TESTUTIL" fsync "$MNT/d3/g1"
+	op create-d3-g3 synced creates "$MNT/d3" g3
+	op write-d4-w synced write_file "$MNT/d4/w"
+	op chmod-d4-keep synced chmod 600 "$MNT/d4/keep"
+	op setxattr-d4-keep normal "$TESTUTIL" setxattr "$MNT/d4/keep" user.k v
+	# x is born dirty by mkdir's phase 3, a normal commit; no phase 1 named
+	# it, so it is not durably dirty and the rmdir's phase 1 is synced.
+	op rmdir-d2-x synced rmdir "$MNT/d2/x"
+	op create-d5-t1-t6 synced creates "$MNT/d5" t1 t2 t3 t4 t5 t6
+	op unlink-d5-t1 normal rm "$MNT/d5/t1"
+	op cache-flush - cache_flush
 }
 
 script_short() {
-	op warm ls "$MNT/d1" "$MNT/d3"
-	op create-d1-a creates "$MNT/d1" a
-	op create-d1-b creates "$MNT/d1" b
-	op unlink-d1-a rm "$MNT/d1/a"
-	op sync-point "$TESTUTIL" fsync "$MNT/d1/b"
-	op create-d3-t1-t3 creates "$MNT/d3" t1 t2 t3
-	op unlink-d3-t1 rm "$MNT/d3/t1"
-	op cache-flush cache_flush
+	op warm - ls "$MNT/d1" "$MNT/d3"
+	op create-d1-a synced creates "$MNT/d1" a
+	op create-d1-b normal creates "$MNT/d1" b
+	op unlink-d1-a normal rm "$MNT/d1/a"
+	op sync-point normal "$TESTUTIL" fsync "$MNT/d1/b"
+	op create-d3-t1-t3 synced creates "$MNT/d3" t1 t2 t3
+	op unlink-d3-t1 normal rm "$MNT/d3/t1"
+	op cache-flush - cache_flush
 }
 
 # --- reference states and the oracle ------------------------------------------
@@ -633,12 +646,27 @@ if [ "$(awk '{ print $7 }' "$OPS" | sort -u | wc -l)" = 1 ] &&
 else
 	fail no-checkpoint "salts $(awk '{ print $7 }' "$OPS" | sort -u | tr '\n' ' '), the database file changed: $(md5sum "$WORK/ref/dcfs.db")"
 fi
-OPS_SYNCED=$(awk '$6 > prev && NR > 1 { n++ } { prev = $6 } END { print n + 0 }' "$OPS")
-OPS_NORMAL=$(awk '$6 == prev && $4 > $3 && NR > 1 { n++ } { prev = $6 } END { print n + 0 }' "$OPS")
-if [ "$OPS_SYNCED" -ge 3 ] && [ "$OPS_NORMAL" -ge 1 ]; then
+# Both durability levels exercised: an operation that made a synced commit
+# and one that made commits, all normal (dcfs's intent, the cost counter).
+# And each is the one dcfs's rules say (op's KIND).
+awk 'FNR == NR { kind[$1] = $2; next }
+	FNR > 1 {
+		got = $6 > prev ? "synced" : ($4 > $3 ? "normal" : "none")
+		print $1, $2, (($1 in kind) ? kind[$1] : "-"), got
+	}
+	{ prev = $6 }' "$WORK/expect" "$OPS" >"$WORK/kinds"
+OPS_SYNCED=$(awk '$4 == "synced"' "$WORK/kinds" | wc -l)
+OPS_NORMAL=$(awk '$4 == "normal"' "$WORK/kinds" | wc -l)
+if [ "$OPS_SYNCED" -ge 1 ] && [ "$OPS_NORMAL" -ge 1 ]; then
 	pass both-durability-levels
 else
 	fail both-durability-levels "$OPS_SYNCED operations made a synced commit and $OPS_NORMAL only normal ones"
+fi
+sd_wrong=$(awk '$3 != "-" && $3 != $4 { printf "%s (%s): %s, not %s; ", $1, $2, $4, $3 }' "$WORK/kinds")
+if [ -z "$sd_wrong" ]; then
+	pass durability-as-dcfs-rules-say
+else
+	fail durability-as-dcfs-rules-say "$sd_wrong"
 fi
 
 : >"$REF_FPS"
