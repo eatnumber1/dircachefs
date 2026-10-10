@@ -36,3 +36,5 @@ failure scenario, and a suggested fix. Separate what you verified from what
 you suspect. Say plainly when you found nothing.
 
 Abseil's Tips of the Week (https://abseil.io/tips/) are design guidance, ranked below `AGENTS.md`, `docs/style.md` and the Google C++ style guide (`docs/style.md`, "Precedence, and the Abseil Tips of the Week"): a finding that rests on a tip cites it (`TotW #NNN`) and is advisory unless it also breaks a rule.
+
+Run the reviewer checklist in `docs/abseil-utilities.md` section 3 on every diff: a hand-rolled utility that the pinned Abseil provides is a finding (cite the swaps-table row).

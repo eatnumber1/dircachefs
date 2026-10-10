@@ -540,3 +540,36 @@ sweep step), and a ten-question reviewer checklist. Reference, not
 essay; states the pin and how to refresh. docs/style.md then points to
 it from 1.2, and the agent definitions tell coders and reviewers to use
 it. Follow-up: the sweep of candidates (25.20, by count and risk).
+
+25.19 merged 2026-10-10 (7c92256): `docs/abseil-utilities.md`, 463 lines,
+read from the pinned headers; about 100 swap rows, per-directory entries
+with dcfs's include counts, a ten-question reviewer checklist, 24 sweep
+candidates with counts. Pin facts: `status_builder.h`, `Overload`,
+`optional_ref`, `linked_hash_map`, `bind_back`, `simulated_clock` exist;
+no `Nonnull<T>` aliases (macros only); no `ASSERT_OK_AND_ASSIGN` (ours).
+Style 1.2 and the agent definitions now point at it. Items for russ:
+`escape.cc` is near `absl::CHexEscape` but Abseil also escapes `'` (keep
+unless ruled); `optional_ref<const T>` as a third option beside a
+reference and `absl_nullable` (no ruling); the 24 `fprintf`/`std::cout`
+sites that are the helpers' own output (usage, `--version`, the fsck
+report) are not log lines (ask before changing).
+
+## 25.20 Sweep of the catalogue's candidates (after 25.17; mechanical, lane-2)
+
+From `docs/abseil-utilities.md` section 4, by count and risk, no
+behaviour change, each family its own commit, tests first where a
+rewrite could change output (StrFormat for printf): string `+` chains
+with a literal (21 prod lines, 4 files; `umount_helper.cc:101` the one in
+the daemon), `std::to_string` (3), `snprintf`/`printf` (8),
+`strtoull`/`atoi` in bench (8), `find() != npos` (4), the `substr`
+prefix test (`mounts_below.cc:103`), the three hand-written splits
+(`SplitXattrList`, `mount_dcfs.cc`, `bench/tree.cc`) where
+`absl::StrSplit` with the right delimiter fits (NUL-separated lists: check
+`ByChar('\0')` on a string_view with embedded NULs keeps the bytes rule),
+`std::function` in `session_loop.h` (2: `absl::AnyInvocable` or
+`FunctionRef` by ownership), `std::map` in bench (1), the two stale alias
+includes (`file_handle.cc:20`, `main.cc:41`), `BytesToHexString` in
+`file_handle.cc` versus `absl::BytesToHexString`. Tests get the same
+treatment in a second pass. `escape.cc`, `device_id.cc`'s hex, the
+`CHECK` family (25.9) and the helpers' own `fprintf` output are excluded
+pending russ.

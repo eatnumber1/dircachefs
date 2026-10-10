@@ -49,3 +49,5 @@ the findings, the questions for russ, then what you checked and found
 clean. The orchestrator relays the questions to russ verbatim and his
 answers are written into `docs/style.md` before the step merges, so write
 each question as if russ reads it cold.
+
+Run the reviewer checklist in `docs/abseil-utilities.md` section 3 on every diff: a hand-rolled utility that the pinned Abseil provides is a finding (cite the swaps-table row).

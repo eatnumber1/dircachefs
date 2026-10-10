@@ -105,6 +105,13 @@ use it as design guidance rather than firm rules."
   `unique_ptr`/`shared_ptr` without a following qualifier in `dcfs/*.h`
   catches the rest (plan step 25.16; today 0 annotations, about 30 raw
   pointers in headers).
+- **Reach for Abseil before writing a helper**: `docs/abseil-utilities.md`
+  (25.19) catalogues the pinned Abseil (20260817.0) with a swaps table
+  (hand-written pattern → utility, each marked with the rule that demands
+  it), a section per directory, the sites in our tree that still hand-roll
+  one, and a ten-question reviewer checklist. Coders read the swaps table
+  before writing string, container, function-object or status code;
+  reviewers run the checklist on every diff.
 - **Abseil's container algorithms, not iterator pairs** (russ, 2026-10-10,
   on `std::copy(in.begin(), in.end(), buf.begin())` in `backing.cc`:
   "There are helper functions in absl/algorithm/container.h that let you
@@ -317,10 +324,13 @@ Never the `ABSL_` form (25.17 sweeps the 837 uses; a repo-shape check
 keeps them out afterwards). The tree defines no propagation macros. Its
 own macros are `RET_CHECK`, `RET_CHECK_EQ/NE/GT/OK` (`dcfs/ret_check.h`, 68
 uses): they return a `kInternal` `StatusBuilder` and take `<<` context. Use
-`RET_CHECK` where a `Status` can be returned; use `CHECK`/`CHECK_NE`
-(`absl/log/check.h`) where it cannot (a libfuse callback, startup) and the
-failure is a programming error or unrecoverable (`fuse_ops.cc:27`,
-`backing.cc:118`). Never `assert`.
+`RET_CHECK` where a `Status` can be returned. Where it cannot (a libfuse
+callback, startup), a crash is still not the answer: the no-intentional-
+crashes rule applies (russ, 2026-10-09; `CHECK`, `LOG(FATAL)`, `abort`
+are out of production code, each existing one needs russ's case-by-case
+approval), so the 23 `CHECK_NE(ptr, nullptr)` in `fuse_ops.cc` and the
+`CHECK` in `RestoreRoot` (`backing.cc`) are on plan step 25.9's list, not
+a pattern to copy. Never `assert`.
 
 **Build a status one of three ways (russ: StatusBuilder, not `StrCat`).**
 

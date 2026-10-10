@@ -2763,3 +2763,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   rows and a negative self-check; the shmem warning; double size parsing; error-path messages;
   the CPU time window. Plan drift to record at merge: power-kill and enospc stay on images, the
   DCFS_RAM_DISKS=0 escape hatch and the time line were added.
+- 25.19 merged (lane-4 → 7c92256, doc only): the Abseil catalogue; style 1.2 points at it, the
+  agent definitions require the swaps table before writing and the checklist on review; style
+  1.6's stale "use CHECK where a Status cannot be returned" replaced by the no-crashes rule
+  (fuse_ops.cc's 23 CHECK_NE and RestoreRoot's CHECK are 25.9's); 25.20 (the candidates sweep)
+  queued after 25.17. Three questions for russ recorded in the phase file (escape.cc vs
+  CHexEscape, optional_ref, the helpers' own fprintf output).
