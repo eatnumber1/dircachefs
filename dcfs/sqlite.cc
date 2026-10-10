@@ -385,13 +385,10 @@ absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body,
   absl::Status status = RunTransaction(body);
   sync_transaction_ = false;
   absl::Status restored = Exec("PRAGMA synchronous=NORMAL");
-  if (!restored.ok()) {
-    if (status.ok()) return restored;
-    return absl::StatusBuilder(status)
-           << "additionally, restoring synchronous=NORMAL failed: "
-           << restored;
-  }
-  return status;
+  if (restored.ok()) return status;
+  if (status.ok()) return restored;
+  return absl::StatusBuilder(status)
+         << "additionally, restoring synchronous=NORMAL failed: " << restored;
 }
 
 absl::Status Connection::RunTransaction(

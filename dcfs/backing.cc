@@ -2236,37 +2236,44 @@ namespace {
 void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
   int64_t forgotten = 0;
   int64_t failed = 0;
+  auto report_failure =
+      [&failed](InodeId id, const absl::Status &status) {
+        ++failed;
+        // The summary below counts them all; a few lines say why.
+        LOG_FIRST_N(ERROR, 10)
+            << "could not probe recovered inode " << id
+            << " (it stays dirty until the next sync point, and an access "
+               "finds it gone): "
+            << status;
+      };
   for (InodeId id : dirty) {
     if (id == cache::kRootInode) continue;
     // Gone already (the sweep, or a cascade from its directory's row).
     absl::StatusOr<cache::CachedAttr> row = cache::GetAttr(ctx, id);
     if (absl::IsNotFound(row.status())) continue;
     absl::StatusOr<std::optional<uint64_t>> nlink = BackingNlink(ctx, id);
-    absl::Status status = row.ok() ? nlink.status() : row.status();
-    bool gone = false;
-    if (row.ok() && nlink.ok() && !nlink->has_value()) {
+    if (!row.ok()) {
+      report_failure(id, row.status());
+      continue;
+    }
+    if (!nlink.ok()) {
+      report_failure(id, nlink.status());
+      continue;
+    }
+    bool gone = !nlink->has_value();
+    if (!gone && **nlink == 0) {
+      if (absl::Status forgot = ForgetStale(ctx, id); !forgot.ok()) {
+        report_failure(id, forgot);
+        continue;
+      }
       gone = true;
-    } else if (row.ok() && nlink.ok() && **nlink == 0) {
-      status = ForgetStale(ctx, id);
-      gone = status.ok();
     }
     if (gone) ++forgotten;
-    if (status.ok()) {
-      // The lifetime model's probe (formal/lifetime.tla's ProbeRow): a new
-      // process keeps nothing for the nodeid.
-      ctx.events->LifetimeChanged(ctx, id, events::LifetimeStep::kProbed,
-                                  gone ? 1 : 0,
-                                  [] { return events::Lifetime{}; });
-    }
-    if (!status.ok()) {
-      ++failed;
-      // The summary below counts them all; a few lines say why.
-      LOG_FIRST_N(ERROR, 10)
-          << "could not probe recovered inode " << id
-          << " (it stays dirty until the next sync point, and an access "
-             "finds it gone): "
-          << status;
-    }
+    // The lifetime model's probe (formal/lifetime.tla's ProbeRow): a new
+    // process keeps nothing for the nodeid.
+    ctx.events->LifetimeChanged(ctx, id, events::LifetimeStep::kProbed,
+                                gone ? 1 : 0,
+                                [] { return events::Lifetime{}; });
   }
   if (!dirty.empty()) {
     LOG(INFO) << "recovery: probed " << dirty.size() << " recovered rows, "

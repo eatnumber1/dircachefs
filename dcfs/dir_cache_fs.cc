@@ -1644,11 +1644,10 @@ absl::Status DirCacheFS::Open(
   const bool shared = backing_files_.contains(id);
   absl::Status status = OpenInode(req, id, fi);
   ctx_.events->FileOpened(ctx_, id, fi.flags, shared, status, SharedFdOf(id));
-  if (status.ok()) {
-    NoteLifetime(id, events::LifetimeStep::kOpened,
-                 (fi.flags & O_ACCMODE) != O_RDONLY ? 1 : 0);
-  }
-  return status;
+  if (!status.ok()) return status;
+  NoteLifetime(id, events::LifetimeStep::kOpened,
+               (fi.flags & O_ACCMODE) != O_RDONLY ? 1 : 0);
+  return absl::OkStatus();
 }
 
 absl::Status DirCacheFS::OpenInode(
