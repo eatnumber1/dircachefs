@@ -549,6 +549,41 @@ the dirty set. Q6: no model change; design.md's clean_shutdown text still
 matches. Sent back 2026-10-09 with items 1-8, 13, 14 required and the
 cheap LOWs.
 
+MERGED 2026-10-10, 461fc6a (six commits). Round 2 and the final round as
+built: both helper names (`umount.fuse.dcfs` default, `umount.fuse`
+opt-in; measured with LIBMOUNT_DEBUG in the guest: `umount -c` and systemd
+run the subtype helper, a plain `umount PATH` takes the statfs shortcut and
+looks only for `umount.fuse`); every option forwarded unread to `umount
+-i`, `-l` and `-N` skip the wait; dispatch before umask/flags/RLIMIT; the
+lock keyed by device number, a blocking LOCK_EX after a non-blocking try
+(INFO once), fstat vs fstatat re-check and reopen if unlinked, fd never
+closed, unlinked after the db lock closes (the unique mount id rejected:
+the daemon cannot statx its own mount before serving it); fusectl's
+connection directory opened before the unmount and the wait taken only
+if its st_nlink is 0 afterwards (bind copies, `umount -r` on a busy
+mount, `unshare -m` copies return at once; the last copy waits; no
+fusectl, no wait; the kernel's `clear_nlink` on removal confirmed in the
+source); the systemd restart checks name the units, read the journal
+since a cursor, count daemons, and `reset-failed` between iterations
+(systemd's start rate limit bit the test); the two waiting unit tests
+prove the wait through a log sink handshake; a reader during FinishRun
+gives Unavailable and the next start is unclean with 0 dirty
+(`FinishRunWithAReaderOpenFailsAtOnceAndEndsUnclean`); bans extended
+(setitimer, pthread_cond_timedwait/clockwait, sem_timedwait/clockwait,
+AbslInternalSleepFor*, Abseil *WithTimeout*/*WithDeadline*); the README
+documents the opt-in, the 90 s stop timeout, Ctrl-C, `-l`, and the one
+path-based wait cycle (a mount covering another instance's cache
+directory or /run/dcfs; keep them out from under dcfs mounts); coverage.md
+lists the helper's uncoverable error paths. Fast 251 + 2, presubmit
+dcfs+qemu 181, the systemd test 2 x 23 s, asan on the wrapper and sqlite
+tests. Follow-ups: the reviewer's items 16-18 and 21 (systemd_run's reboot
+sleep vs tcdrain; repo_shape's per-file reasons and the sleep regex
+missing `sleep .5`/usleep/`timeout N`/`read -t`; a non-dcfs FUSE mount and
+-l/-f/-N through libmount in the test; the hard-coded /bin/umount);
+`testutil sqlite-lock`'s hold timer and `testutil sql`'s 2 s busy timeout
+(test tooling); and 23.11's new `sleep 1` "settle after a thaw" in
+fault_power.sh's born scenario (against the rule; find the event).
+
 **15.7 Docs:** README (fstab with and without systemd, `dcfs.fstype`
 values, `_netdev`, fsck, trees, over-mounting, remount, NFS exports,
 administrator responsibilities, why root, the bind-form submount behavior,

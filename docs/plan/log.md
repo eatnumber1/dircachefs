@@ -2518,3 +2518,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   effect-point properties in MC_nolock, negative trace logs for the guard-decision checks, a TLC
   coverage report with a zero-count gate, a two-name CrashRefines variant, the row-lifecycle rule
   in formal/README.
+- 15.6b MERGED (461fc6a, six commits; clean rebase): the restart race is closed for systemd and
+  `umount -c`, the no-timers rule is enforced by banned symbols, a sleep allowlist and style.md
+  1.11, busy_timeout is gone. Follow-ups listed in the phase file, including 23.11's new
+  `sleep 1` after a thaw in the born scenario. Push point: main after this entry (537a7ef plus
+  15.6b). Lane-6 continues with 15.5 (fsck.dcfs) + 15.8 (allow_other always on), same agent,
+  same wrapper code.
