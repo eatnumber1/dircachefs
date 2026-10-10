@@ -93,7 +93,7 @@ class DirCacheFS : private events::Bookkeeping {
   // `ctx` must outlive this DirCacheFS, which points ctx.open_for_write at
   // its own set of inodes with a writable open outstanding.
   DirCacheFS(Context &ctx, Options opts);
-  ~DirCacheFS();
+  ~DirCacheFS() override;
 
   // The Context it serves from (fuse_ops.cc reaches the protocol events,
   // Context::events, through it).

@@ -116,7 +116,6 @@ dcfs/dir_cache_fs.cc|DirCacheFS::SharedFdOf|readability-avoid-nested-conditional
 dcfs/dir_cache_fs.cc|DirCacheFS::Write|misc-unused-parameters|1
 dcfs/dir_cache_fs.cc|ErrnoName|misc-include-cleaner|1
 dcfs/dir_cache_fs.cc|XattrsChangedBySetattr|readability-implicit-bool-conversion|2
-dcfs/dir_cache_fs.h|<file scope>|modernize-use-override|1
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-include-cleaner|2
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-unused-parameters|1
 dcfs/dir_cache_fs_test.cc|BackingAtime|misc-include-cleaner|1
