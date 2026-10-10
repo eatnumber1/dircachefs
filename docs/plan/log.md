@@ -2676,3 +2676,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   lane-1): RAM-backed guest disks for the fault/ACE/freeze/power/recover tests with memory and
   time measurements; parts 2-5 (three-part budgets, hang guard, load-starvation flag) follow as
   26.17b.
+- Style rule (russ, 2026-10-10): `absl::FixedArray` instead of `std::vector` when the size is
+  known in advance; style 1.2 written with `GetGroups` as the example; 25.12 (sweep plus a
+  repo_shape check) dispatched to a mechanical agent in lane-2. Fable's quota: the support
+  articles say Max has a separate weekly Fable limit and do not say whether Fable also draws on
+  the all-models meter or at what weight; russ offered an empirical before/after reading.

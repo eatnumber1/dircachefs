@@ -82,6 +82,25 @@ use it as design guidance rather than firm rules."
 - **Function names**: `syscalls::` wrappers carry their libc/manpage names
   in lower case (`syscalls::setxattr`); every other function is CamelCase
   (`SetXattr`). The two layers therefore never clash by construction.
+- **`absl::FixedArray`, not `std::vector`, for a buffer whose size is known
+  when it is made** (russ, 2026-10-10). A `std::vector<T> v(n)` that is
+  never pushed to or resized says the wrong thing: it advertises growth
+  that never happens and pays for it (a heap allocation even for a few
+  elements, a capacity field, the push_back surface). `absl::FixedArray<T>
+  v(n)` says "n elements, decided once", keeps small arrays inline
+  (`absl/container/fixed_array.h`; `@absl//absl/container:fixed_array`),
+  and has no `push_back` to misuse. Rule of thumb: the size comes from a
+  syscall's answer, a header field or a count argument, and the array is
+  filled once and read: FixedArray. The size changes after construction,
+  or the container is returned to a caller who expects a vector: vector
+  (an `absl::InlinedVector` where the usual size is small and known).
+  `std::string(n, '\0')` as a byte buffer handed to a syscall is the same
+  smell when the result is not a string: a `FixedArray<char>` or
+  `FixedArray<uint8_t>`. The example that set the rule: `GetGroups`
+  (`backing.cc`, `std::vector<gid_t> groups(n)` for `getgroups(n, ...)`).
+  Mechanically: a repo-shape check refuses `std::vector<T> name(expr);`
+  in `dcfs/*.cc` and `dcfs/*.h` outside an allowlist that only shrinks
+  (plan step 25.12).
 - **ADL hooks** (`AbslStringify`, `AbslHashValue`, `operator<<`, `swap`)
   are hidden friends: defined inside the class they belong to, in that
   class's namespace, never in another namespace or file

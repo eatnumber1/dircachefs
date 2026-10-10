@@ -376,3 +376,21 @@ lists any handler whose answer can depend on dcfs's own bookkeeping racing
 itself. Protocol agent (the model changes), tests first for (2): a reader
 racing a writer sees ERANGE once. No behaviour change for (1) today, since one
 request runs at a time.
+
+## 25.12 `absl::FixedArray` for buffers of known size (russ, 2026-10-10; dispatched)
+
+Style 1.2: a buffer sized once from a syscall's answer, a header field
+or a count, filled once and read, is an `absl::FixedArray`, not a
+`std::vector<T> v(n)` or a `std::string(n, '\0')`. Sweep `dcfs/*.cc`,
+`dcfs/*.h` and `tools/*.cc` (production files; tests where the same
+pattern is a one-line change); the example that set the rule is
+`GetGroups` in `backing.cc:2094`. Where a caller expects a vector
+(`GetGroups` returns `StatusOr<std::vector<gid_t>>`) the return type
+changes too if every caller only reads it, else the FixedArray is the
+buffer and the vector is built from it once. The retry loop in
+`GetGroups` is left as is (25.10 removes it). Mechanically: a
+`tools/repo_shape.py` check refusing `std::vector<T> name(expr);` and
+`std::string name(expr, '\0')` in `dcfs/` production files outside
+`tools/repo_shape_fixed_arrays.txt` (an allowlist with reasons that only
+shrinks, empty if the sweep is complete), with its unit test. Owner:
+dcfs-mechanical.
