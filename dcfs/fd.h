@@ -16,9 +16,9 @@ class FileDescriptor {
   absl::Status Close();
 
   // Moveable, but not copyable. Copying would require dup2
-  FileDescriptor(FileDescriptor &&);
+  FileDescriptor(FileDescriptor &&) noexcept;
   FileDescriptor(const FileDescriptor &) = delete;
-  FileDescriptor &operator=(FileDescriptor &&);
+  FileDescriptor &operator=(FileDescriptor &&) noexcept;
   FileDescriptor &operator=(const FileDescriptor &) = delete;
 
  private:

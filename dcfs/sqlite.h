@@ -187,9 +187,9 @@ class Statement {
 
   sqlite3_stmt *Get() const;
 
-  Statement(Statement &&);
+  Statement(Statement &&) noexcept;
   Statement(const Statement &) = delete;
-  Statement &operator=(Statement &&);
+  Statement &operator=(Statement &&) noexcept;
   Statement &operator=(const Statement &) = delete;
 
  private:
@@ -283,9 +283,9 @@ class Connection {
   // connection didn't itself cache).
   absl::Status Close();
 
-  Connection(Connection &&);
+  Connection(Connection &&) noexcept;
   Connection(const Connection &) = delete;
-  Connection &operator=(Connection &&);
+  Connection &operator=(Connection &&) noexcept;
   Connection &operator=(const Connection &) = delete;
 
  private:

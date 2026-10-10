@@ -121,9 +121,11 @@ absl::StatusOr<int> GetSqliteCodeFromStatus(const absl::Status &status) {
 
 Statement::Statement(sqlite3_stmt &stmt) : stmt_(&stmt) {}
 
-Statement::Statement(Statement &&o) : Statement() { *this = std::move(o); }
+Statement::Statement(Statement &&o) noexcept : Statement() {
+  *this = std::move(o);
+}
 
-Statement &Statement::operator=(Statement &&o) {
+Statement &Statement::operator=(Statement &&o) noexcept {
   using std::swap;
   swap(stmt_, o.stmt_);
   return *this;
@@ -286,9 +288,11 @@ sqlite3_stmt *Statement::Get() const { return stmt_; }
 
 Connection::Connection(::sqlite3 &db) : db_(&db) {}
 
-Connection::Connection(Connection &&o) : Connection() { *this = std::move(o); }
+Connection::Connection(Connection &&o) noexcept : Connection() {
+  *this = std::move(o);
+}
 
-Connection &Connection::operator=(Connection &&o) {
+Connection &Connection::operator=(Connection &&o) noexcept {
   using std::swap;
   swap(db_, o.db_);
   swap(statement_cache_, o.statement_cache_);

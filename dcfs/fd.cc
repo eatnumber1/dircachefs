@@ -39,11 +39,11 @@ absl::Status FileDescriptor::Close() {
   return syscalls::close(std::move(tmp));
 }
 
-FileDescriptor::FileDescriptor(FileDescriptor &&o) : FileDescriptor() {
+FileDescriptor::FileDescriptor(FileDescriptor &&o) noexcept : FileDescriptor() {
   *this = std::move(o);
 }
 
-FileDescriptor &FileDescriptor::operator=(FileDescriptor &&o) {
+FileDescriptor &FileDescriptor::operator=(FileDescriptor &&o) noexcept {
   using std::swap;
   swap(fd_, o.fd_);
   return *this;
