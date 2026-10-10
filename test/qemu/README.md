@@ -445,7 +445,9 @@ MEM total=1018448 min_avail=964728 peak_used=54452 peak_cached=... peak_anon=...
 (all KiB except `samples` and `up`, seconds of guest uptime at the last sample). `peak_used` is the highest `MemTotal - MemAvailable`: what could
 not be reclaimed. `peak_shmem` is tmpfs (`/tmp`, and the initramfs itself:
 about 22 MiB plain, 84 MiB under ASan, whose runtime libraries are copied
-in). `dcfs_hwm` is the kernel's own `VmHWM` of the daemon. The same
+in); `peak_ramdisks` is what the RAM disks' own tmpfs holds (0 without them)
+and `peak_shmem_other` is tmpfs without it, which is what the cap and the
+warning below are about. `dcfs_hwm` is the kernel's own `VmHWM` of the daemon. The same
 `run-qemu.sh` that reads the line prints a summary of it, warns when a guest
 came within 10% of running out (or 40% of `MemTotal` in tmpfs, which is
 capped at half of it), and refuses to pass a run that lacks the line.
@@ -659,6 +661,9 @@ gate is disabled.
 | run-qemu.sh mkfs tool path validation | `//test/qemu:run_qemu_mkfs_test` |
 | run-qemu.sh `--boots` (every boot a full run, the first failure stops) and `--systemd-image` (overlay, root partition, Bazel-built qemu-img) | `//test/qemu:run_qemu_verdict_test` |
 | run-qemu.sh disk-spec fourth field (ext4 only) | `//test/qemu:run_qemu_mkfs_test` |
+| run-qemu.sh `--ram-disks` (26.17: no image, no mkfs, no drive, sizes in bytes on the command line; refused with `--power-cut`, `--boots`, `--rootfs`, `--systemd-image`, `--unit`, mkfs options and a size it cannot read; `DCFS_RAM_DISKS` is 0 or 1), and the time line counting QEMU's CPU, not the mkfs's | `//test/qemu:run_qemu_ram_disks_test` (fake qemu and mkfs) |
+| the memory warning leaves out the RAM disks' tmpfs (26.17) | `//test/qemu:run_qemu_verdict_test` (canned MEM lines with and without `peak_ramdisks`) |
+| a test's disks are RAM disks (26.17: loop device over the capped tmpfs, size, filesystem, rotational, ext4 inode tables marked zeroed and the checked-in profile used, `sectors_read` and `device_sectors` by device) | `//test/qemu:ram_disks_test` in the guest; `//test/qemu:ram_disks_lib_test` runs the real verdicts (`guest/ram_disks_lib.sh`) over canned values, each check failing alone for the value it judges |
 | require_commands (missing applets in guest) | `//test/qemu:require_commands_test` (sources the real `guest/lib.sh`) |
 | xfstests-expected-failures (an unlisted failure, a listed test that passes, does not run or times out, an unlisted timeout, a "not run" test that is not on the notrun list or whose reason changed, a listed "not run" test that runs, a test with no result, a run in which fewer than an eighth of the tests ran) and xfstests-lists (reasons, duplicates, unknown tests, a test in two lists or in a list but not run by the set) | `//test/qemu:xfstests_gate_test` (sources the real `guest/xfstests_lib.sh`, which `xfstests.sh` calls, under the pinned busybox ash and gawk) |
 | the xfstests tag (a target of the shards that lacks it would run in the full and sanitizer jobs too) and the test selection that leaves it out | `//test/qemu:xfstests_tags_test`, `//tools:test_sh_test` |
@@ -985,32 +990,44 @@ The tests above get their failure semantics from device-mapper and
 load: another process's fsyncs). `qemu_test(..., ram_disks = True)` backs the
 test's `disks` with the guest's RAM instead of image files:
 `run-qemu.sh --ram-disks <fstools.cpio.gz>` makes no image, attaches no
-drive and passes `dcfs_ramdisks=vdb:ext4:320M,vdc:ext4:64M` on the kernel
-command line; the archive (`scripts/mkfstools.py`: mke2fs, mkfs.xfs,
+drive and passes `dcfs_ramdisks=vdb:ext4:335544320,vdc:ext4:67108864` on the
+kernel command line (sizes in bytes: `run-qemu.sh` is the one place a "320M"
+is read); the archive (`scripts/mkfstools.py`: mke2fs, mkfs.xfs,
 mkfs.btrfs, their musl loader and libraries, the checked-in `mke2fs.conf`;
 2 MB) is appended to the initramfs. `guest/init` then makes each disk
 (`guest/ramdisk_lib.sh`) before the script starts: a sparse file in a tmpfs
-that can hold no more than the disks together, a loop device over it
-(Alpine's `linux-virt` has no `brd`), the filesystem made by the same tools
-and options as on the host, and `/dev/vdb` as a second node for the loop
-device, so a script names its disks as before (it reads sizes with
-`blockdev`, not `/sys/class/block/vdb`, which is `loopN`). The loop device
-exists when `losetup` returns, so nothing waits. `sqlite_durability`'s log,
-replay and copy-on-write devices are the same thing (`ram_disk_attach`);
-its data disks (vdb, vdc) stay on the host.
+that can hold no more than the disks together, the filesystem made on that
+file (not on the device: as the host makes an image, by the same tools and
+options, so mke2fs sees a file whose discard reads as zeros, marks every
+inode table zeroed, and the kernel starts no `ext4lazyinit` writer at each
+mount), a loop device over it (Alpine's `linux-virt` has no `brd`) that says
+it is rotational as a virtio disk does (btrfs and ext4 choose by it), and
+`/dev/vdb` as a second node for the loop device, so a script names its disks
+as before. Scripts read a disk's size with `device_sectors` and its counters
+with `sectors_read` (`guest/lib.sh`), which go by the node's major and minor
+number, not `/sys/class/block/vdb`, which is `loopN`; `sectors_read` stops the
+script if the device has no counters. The loop device exists when `losetup`
+returns, so nothing waits. `sqlite_durability`'s log, replay and
+copy-on-write devices are made by the same helpers (`ram_disk_tmpfs`,
+`ram_disk_file`, `ram_disk_attach`; the replay disk is a copy of the cache
+disk, so it is not a `ram_disks_make` disk); its data disks (vdb, vdc) stay
+on the host.
 
 Cost: the guest holds its disks. Peak in use at 1024 MiB (an upper bound: it
 falls with the allowance, since the page cache fills what it is given) was
 176-243 MiB on ext4, 193-226 on btrfs and 243-333 on xfs (whose log and AG
 headers are written in full) where the same tests used 75-131 MiB on host
 disks, so the guests have 384-576 MiB (ASan 512-832; `mem=` and `asan_mem=`
-in `BUILD.bazel` carry the measurements). `--test_env=DCFS_RAM_DISKS=0` puts
-a test back on host disks, to compare or to see whether a RAM disk hides
-something. The option is refused with `power_cut` and `boots` (the disks must
-outlive the guest: `fault_power_kill_test` keeps image files, and that is the
-point of it), `rootfs`, `systemd_image` and mke2fs options. Every run prints
-`run-qemu.sh: time: guest wall S s, host CPU C s`, the pair a latency-noisy
-run shows in.
+in `BUILD.bazel` carry the measurements; the macro refuses `ram_disks`
+without an explicit `mem`). `--test_env=DCFS_RAM_DISKS=0` puts a test back on
+host disks, to compare or to see whether a RAM disk hides something (1 is the
+default; anything else is an error). The option is refused with `power_cut`
+and `boots` (the disks must outlive the guest: `fault_power_kill_test` keeps
+image files, and that is the point of it), `rootfs`, `systemd_image`, mke2fs
+options and a disk named `vda` (the coverage disk's name). Every run prints
+`run-qemu.sh: time: guest wall S s, host CPU C s`: the CPU is what QEMU used
+between its start and its end (not the mkfs before it), the pair a
+latency-noisy run shows in.
 
 ### The cache database's durability (step 12.14)
 
