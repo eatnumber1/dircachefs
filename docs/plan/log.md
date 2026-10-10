@@ -2646,3 +2646,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   loops become one call pair. One step (25.10) after the reset: the code, the model's branch, the
   repo_shape check on attempt counters. The one-way review question is in all agent definitions
   (6a41abf).
+- russ sharpened the retry rule: each FUSE operation keeps the backing syscall's contract
+  (ERANGE on races where the backing says so; atomicity where the syscall is atomic, with
+  unbounded internal retry if needed). Style 1.12 has his words; 25.10 now audits every handler
+  against it.

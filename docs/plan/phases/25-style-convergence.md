@@ -367,6 +367,12 @@ request carries the client's buffer size it is passed through once;
 (3) `tools/repo_shape.py` refuses `kAttempts`, `attempt`, `attempts`,
 `retry` and `retries` as identifiers in `dcfs/*.cc` and `dcfs/*.h`
 (comments excepted), with no allowlist unless russ approves a loop.
-Protocol agent (the model changes), tests first for (2): a reader racing
-a writer sees ERANGE once. No behaviour change for (1) today, since one
+The governing principle (russ, 2026-10-10, style 1.12): each FUSE
+operation keeps the contract the backing's syscall gives its caller;
+ERANGE-on-races where the backing says ERANGE, atomicity where the syscall
+is atomic, however many internal retries that takes. The step audits every
+FUSE handler against that question, not only the six loops found, and
+lists any handler whose answer can depend on dcfs's own bookkeeping racing
+itself. Protocol agent (the model changes), tests first for (2): a reader
+racing a writer sees ERANGE once. No behaviour change for (1) today, since one
 request runs at a time.

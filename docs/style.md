@@ -572,6 +572,19 @@ necessary, but if you think one is necessary, come to me."
   loop's comment names it. Without such an argument, use a mutex (wait on
   the other thread's completion) instead. A bounded retry is the worst of
   both: it fails under load exactly where it was meant to help.
+- **Each FUSE operation keeps the backing's contract.** russ, 2026-10-10:
+  "for each fuse operation, I prefer you implement the same contract that
+  the backing fs implements. If it's ERANGE-on-races with the backing store,
+  then ERANGE-on-races for us. If the syscall is supposed to be atomic (like
+  `rename`), then ours _must_ be atomic (even if that means an infinite retry
+  loop internally)." So the question for any race is: what does the syscall
+  promise its caller on a native filesystem? `listxattr`/`getxattr` promise
+  nothing across a concurrent writer and answer ERANGE; dcfs answers ERANGE.
+  `rename`, `unlink`, `readdir` promise atomicity (a listing is a consistent
+  snapshot, a rename either happened or did not); dcfs's own bookkeeping may
+  never turn that into an EAGAIN or a partial answer, so an internal conflict
+  is resolved by waiting or by retrying without bound, never reported. A
+  comment at each such site names the contract it keeps.
 - **Not retry loops:** restarting a syscall the kernel asked to restart
   (`EINTR` when the caller has not cancelled: `umount_helper.cc`'s blocking
   lock); the kernel's own revalidation retry of a failed open; an
