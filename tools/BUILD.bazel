@@ -60,6 +60,58 @@ sh_binary(
     srcs = ["smoke_readonly.sh"],
 )
 
+# ---- Step 7.6a: the C and C++ format, with the pinned clang-format -----------
+
+# `bazel run //tools:format` rewrites every tracked C and C++ file in place;
+# `bazel run //tools:format -- --check` only reports (format.py).
+py_library(
+    name = "format_lib",
+    srcs = ["format.py"],
+    imports = ["."],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_binary(
+    name = "format",
+    srcs = ["format.py"],
+    args = [
+        "--clang-format=$(rootpath @dcfs_llvm//:bin/clang-format)",
+        "--style=$(rootpath //:.clang-format)",
+    ],
+    data = [
+        "//:.clang-format",
+        "@dcfs_llvm//:bin/clang-format",
+    ],
+    main = "format.py",
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":format_lib"],
+)
+
+# Every tracked C and C++ file is formatted. The tree is read through the real
+# path of MODULE.bazel, as repo_shape_test does, because the list is git's
+# (the same as the run's): a filegroup of the packages' sources would miss
+# the subpackages' files. Tagged `external`, never cached.
+py_test(
+    name = "format_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["format_test.py"],
+    args = [
+        "anchor=$(location //:MODULE.bazel)",
+        "clang_format=$(rootpath @dcfs_llvm//:bin/clang-format)",
+        "style=$(rootpath //:.clang-format)",
+    ],
+    data = [
+        "//:.clang-format",
+        "//:MODULE.bazel",
+        "@dcfs_llvm//:bin/clang-format",
+    ],
+    main = "format_test.py",
+    tags = ["external"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":format_lib"],
+)
+
 # ---- Step 26.8: banned symbols in the shipped binary --------------------
 
 BANNED_SYMBOLS_COMPATIBLE = select({

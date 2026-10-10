@@ -1393,7 +1393,7 @@ line length, shellcheck findings, quoting) were not surveyed.
 | N7 | `syscalls::` never `dcfs::syscalls::` or `using` | 0 code sites (1 in a comment: `backing.h:33`); the 188 `syscalls::` uses (98 production) are fine | `grep -rn 'dcfs::syscalls::\|using .*syscalls' dcfs bench` |
 | F1 | `//tools:format_test` (small) in check mode (1.1) (new) | does not exist | `bazel query //tools:format_test` |
 | F2 | Pinned clang-format, buildifier, shfmt, shellcheck | none in `MODULE.bazel`, none on the host (phase 7 LLVM toolchain; shfmt and shellcheck in 7.6) | `grep -n 'clang\|buildifier\|shfmt\|shellcheck' MODULE.bazel` |
-| F3 | `bazel run //tools:format` | `tools/format.sh` is a host script that skips missing tools | `cat tools/format.sh` |
+| F3 | `bazel run //tools:format` | the formatter is the pinned clang-format and `//tools:format_test` fails on an unformatted file (7.6a) | `bazel test --config=fast //tools:format_test` |
 | F4 | `.githooks/pre-commit` (opt-in) | does not exist | `ls .githooks` |
 | F5 | `tools/*.c` reformatted | 2,537 tab-indented lines (`fhtest.c`, `testutil.c`) | `grep -lP '\t' tools/*.c` |
 | F6 | `layering_check` and `misc-include-cleaner` | no `.clang-tidy`, no `layering_check` in `.bazelrc` (phase 7) | `ls .clang-tidy; grep -n layering .bazelrc` |

@@ -146,8 +146,9 @@ The `dcfs(8)` man page is generated from this README: `bazel build
 //man:dcfs.8` produces `bazel-bin/man/dcfs.8`; copy it to
 `/usr/local/share/man/man8/`.
 
-Format changes with `tools/format.sh` (clang-format and buildifier, if
-installed) before sending them.
+Format changes with `bazel run //tools:format` (the pinned clang-format)
+before sending them; `bazel test --config=fast //tools:format_test` fails on
+an unformatted file.
 
 ## Usage
 
