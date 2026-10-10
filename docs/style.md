@@ -537,6 +537,35 @@ idle 256 core supercomputer to a 1 core raspberry pi under 40 loadavg."
   removes them). A guest script waits for a process with `wait`, a fifo read, a
   lock (`flock FILE true`) or a pidfd, not a loop of `sleep 0.1`.
 
+### 1.12 No retry loops
+
+russ, 2026-10-10: "no retry loops. I understand they may sometimes be
+necessary, but if you think one is necessary, come to me."
+
+- **An operation that failed is reported, not tried again.** A retry loop
+  (an attempt counter, "try again on EAGAIN/EINTR/EBUSY/ERANGE", a wrapper
+  that repeats a syscall or a transaction until it succeeds) hides the
+  cause of the failure, turns a bug into a slowdown, and is the no-timers
+  rule (1.11) in another shape: a retry budget is a timer counted in attempts
+  instead of seconds. Prefer waiting on the event that makes a second attempt
+  succeed (a lock, a `wait`, a read with no timeout), reporting the failure
+  with the errno the kernel should see (`EAGAIN` once, `EINTR` once), or a
+  design in which the first attempt cannot fail that way.
+- **A retry loop is added only with russ's approval, case by case.** Say what
+  fails, why it cannot be waited on and what bounds the loop; record the
+  approval in a comment at the loop that names it ("retry loop approved,
+  russ, YYYY-MM-DD: ...") and in `docs/plan/log.md`. The same holds for a
+  loop proposed by a reviewer or an agent: the agent stops and reports, it
+  does not add one.
+- **Not retry loops:** restarting a syscall the kernel asked to restart
+  (`EINTR` when the caller has not cancelled: `umount_helper.cc`'s blocking
+  lock); the kernel's own revalidation retry of a failed open; an
+  application retrying a request dcfs answered `EAGAIN` (that is the client's
+  choice); a test that repeats an operation because repetition is its
+  subject.
+- **Existing loops** are listed in `docs/plan/notes/retry-loops-2026-10-10.md`
+  for russ's ruling; the list only shrinks.
+
 ## 2. Tests
 
 - **Test first.** Write the test, run it on the unchanged code, quote the

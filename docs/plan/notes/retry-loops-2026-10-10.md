@@ -1,0 +1,44 @@
+# Retry loops in the tree (2026-10-10)
+
+russ, 2026-10-10: "no retry loops. I understand they may sometimes be
+necessary, but if you think one is necessary, come to me." Style guide
+section 1.12. This is the inventory at the time the rule was made, for
+russ's ruling on each; the list only shrinks. Found by grepping for
+`retr`, `attempt` and `kAttempts` in `dcfs/` (production files),
+`test/qemu/guest/` and `tools/`.
+
+## Production (daemon)
+
+| # | Site | Loop | Bound | What the event would be | Proposed |
+|---|---|---|---|---|---|
+| 1 | `dcfs/dir_cache_fs.cc:1125` (unlink/rmdir) | resolve the name again when phase 1 finds the parent or child changed since the resolve (`kAborted`) | 3 attempts, then `EAGAIN` "it kept changing" | the overlapping mutation's end (`TODO(coroutines)`); today nothing can run in between, so the loop never iterates | keep until coroutines, with the approval comment; or make it one attempt and `EAGAIN` at once, since today it cannot iterate |
+| 2 | `dcfs/dir_cache_fs.cc:1255` (rename) | the same for both names | 3 attempts, then `EAGAIN` | same | same as 1 |
+| 3 | `dcfs/dir_cache_fs.cc:2239` (readdir listing) | populate the directory again when the completeness check finds it incomplete after a populate | 3 attempts, then `EAGAIN` "kept changing while being listed" | the in-flight mutation's end (`TODO(coroutines)`); the populate is guarded by `cache::CanFill`, so a concurrent mutation makes it a no-op | same as 1 |
+| 4 | `dcfs/backing.cc:160` (`ListXattrOPath`) | size the xattr list, read it, `ERANGE` means it grew in between | 4 attempts, then the `ERANGE` status | none: `listxattr` has no "size and read atomically" form; a writer racing the reader is the only cause | ask: keep (approved comment) or one size-then-read and `ERANGE` as the answer |
+| 5 | `dcfs/fuse_request.cc:175` (`fuse_req_getgroups`) | one re-call at the size the first call reported | exactly one second call, not a loop | none needed: the first call reports the true count | not a retry loop (a two-step read); listed for completeness |
+| 6 | `dcfs/umount_helper.cc:56` (`BlockingLock`) | restart `flock` after `EINTR` when `retry_signals` | unbounded while non-fatal signals arrive | n/a: this is the kernel asking for a restart, section 1.12's first "not a retry loop" | keep |
+
+Items 1-3 share one shape: a model branch (dcfs.tla's "retry or EAGAIN")
+that exists for the coroutine future and cannot be exercised today. If
+russ rules "one attempt, then EAGAIN", the model's retry branch goes too
+(a `formal/` change in the same step) and the `kAttempts` constants and
+loops become straight-line code.
+
+## Guest test scripts and tools
+
+| # | Site | Loop | Note |
+|---|---|---|---|
+| 7 | `test/qemu/guest/xfstests.sh:354` `retry_missing` | re-runs, alone, each test whose `check` batch was interrupted before reaching it, once | not a retry of a failure: a batch interrupted by the watchdog ran nothing for its later tests; they run once each. Rename to avoid the word |
+| 8 | `test/qemu/guest/fault_dcfs_lib.sh:136` | "three looks 0.2 s apart" at a daemon's state | a sleep-and-poll already on `tools/repo_shape_sleeps.txt` (6.5 removes it) |
+| 9 | the `kill -0` / READY-line polls on `tools/repo_shape_sleeps.txt` | sleep-and-poll waits | already listed under the no-timers rule; 6.5 removes them |
+
+Nothing in `tools/` retries. The 17.1 image's mount retry (0.2 s while the
+kernel dropped the old namespace) went before the merge (5ea0719).
+
+## Enforcement
+
+Mechanical enforcement is wanted (russ prefers build-graph gates). What
+is checkable: `tools/repo_shape.py` can refuse `kAttempts`, `attempt`,
+`retries` and `retry` as identifiers in `dcfs/*.cc` and `dcfs/*.h` outside
+an allowlist that only shrinks, the same shape as the sleep list. The
+word in a comment is fine. Queue as 25.10 after russ rules on 1-6.

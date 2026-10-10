@@ -2616,3 +2616,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the rebase dropped the image's umount wrapper (15.6b's helper) and the mount retry, and the
   mount wrapper no longer passes allow_other (15.8 refuses it). Phase 17 file and README row 17
   updated; 17.2, 17.3, 17.1b, 17.1c stay queued behind the freeze. Lane-4 is free.
+- Style rule (russ, 2026-10-10): no retry loops; one that seems necessary goes to russ first.
+  `docs/style.md` 1.12 written; the inventory of existing loops (three `kAttempts` loops in
+  dir_cache_fs.cc for the coroutine future, `ListXattrOPath`'s ERANGE loop, the helper's EINTR
+  restart, which is not one) is `docs/plan/notes/retry-loops-2026-10-10.md` for russ's ruling;
+  enforcement via repo_shape identifiers proposed as 25.10 after the ruling. Weekly all-models
+  usage 84% (Fable 32%): the freeze holds, only the 26.20 triage agent keeps running.
