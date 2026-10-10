@@ -2512,3 +2512,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   states per run on ext4/xfs kept a later WAL frame past a lost one; SQLite recovered the last
   synced commit each time), 0 violations on all three cache filesystems, the regime and gaps stated
   honestly. Lane-2 free. The push point moves to main after this entry (fd9f437 plus 12.14).
+- 12.12a (oracle hygiene) dispatched to lane-1's protocol agent (the third lane under the budget:
+  15.6b's final round and 17.1's fix round are the other two): premises for the properties with no
+  failing variant, five more invariants in Trace.cfg with timing, MC_nolock_small plus the
+  effect-point properties in MC_nolock, negative trace logs for the guard-decision checks, a TLC
+  coverage report with a zero-count gate, a two-name CrashRefines variant, the row-lifecycle rule
+  in formal/README.
