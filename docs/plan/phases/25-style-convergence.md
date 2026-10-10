@@ -467,4 +467,4 @@ the existing tests cover these paths (check `backing_test.cc`'s SwitchTo
 cases still pass and still fail on the old bug they were written for).
 Also: `RestoreRoot`'s `CHECK` is a production crash; it goes on 25.9's
 list for russ, not changed here. Owner: dcfs-implementer (judgement per
-site), medium effort. The clang-tidy checks named in 1.6a land with 7.1.
+site), medium effort. The clang-tidy checks named in 1.6a land with 7.5.
