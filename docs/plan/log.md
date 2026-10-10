@@ -2650,3 +2650,10 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (ERANGE on races where the backing says so; atomicity where the syscall is atomic, with
   unbounded internal retry if needed). Style 1.12 has his words; 25.10 now audits every handler
   against it.
+- CI run 38025358346 (8f528d8): presubmit red on `fault_power_kill_test_ext4` (power cut 'atime':
+  served and backing atimes differ by about 35 ms across the tree) and coverage red on
+  `stress_short_test_btrfs` (`no-reclaim`: 872 pages scanned). 26.21 triage dispatched
+  (investigator, lane-1) under the red-push exception; the other jobs were skipped.
+- russ asked for an external source of the POSIX contract: `notes/posix-contract-sources-2026-10-10.md`
+  (SibylFS as the reference for 12.16, a 12.18 spike on its trace checker, DFSCQ/Ferrite for the
+  crash vocabulary, AtomFS's linearizability for atomicity). Nothing fetched or dispatched.
