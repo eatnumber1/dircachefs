@@ -175,6 +175,15 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   are no longer needed.
 - If a step needs more than about three agent runs to land, pause and tell
   russ: something is probably wrong with the step.
+- **The agent that wrote the code runs the style checks on it** (russ,
+  2026-10-10: "Make sure coders run clang-tidy before being shut down.
+  Don't want to lose their context!"). Every coding agent's last act
+  before its report is `bazel test --config=fast //tools/...` (which holds
+  repo_shape, banned symbols, raw syscalls and, from 25.21, clang-tidy and
+  the clang-query matchers) and fixing what it finds in its own diff;
+  allowlist entries are for pre-existing code only. The orchestrator
+  sends review and CI findings back to the same agent with
+  `SendMessage`, not to a fresh one, for the same reason.
 - **Style review: the orchestrator decides, russ is asked rarely** (russ,
   2026-10-10, after the first batch of six: "Use the style guidance you
   have, and if something's really unclear, I need more context than these
