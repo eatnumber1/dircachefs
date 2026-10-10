@@ -2918,3 +2918,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ asked whether coverage counts lines rather than statements: it does (lcov lines from
   llvm-cov's region data), which is why the reformat moved the gate. 26.27 queued in the in-flight
   group: gate on regions and branches, lines reported only.
+- 26.27 dispatched (mechanical, lane-4): the gate on regions and branches, lines reported only;
+  baseline seeded from run 38080960615's artifact or a local coverage run. Three Haiku lanes
+  briefly (25.23b, 26.26, 26.27); all in the in-flight group.
