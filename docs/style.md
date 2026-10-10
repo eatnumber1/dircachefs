@@ -291,10 +291,14 @@ codes, no `errno` outside the syscall wrappers. `std::optional<T>` means
 A function returning a `Status`, `StatusOr` or owned descriptor carries
 `[[nodiscard]]` (1.2).
 
-**Propagate with Abseil's macros** (`absl/status/status_macros.h`):
-`ABSL_RETURN_IF_ERROR` (260 uses) and `ABSL_ASSIGN_OR_RETURN` (317). The
-unprefixed aliases exist in the pin (`status_macros.h:477`) and have 0
-uses: write the `ABSL_` form. The tree defines no propagation macros. Its
+**Propagate with Abseil's macros, by their short names** (russ,
+2026-10-10): `RETURN_IF_ERROR` and `ASSIGN_OR_RETURN`, which
+`absl/status/status_macros.h` defines as aliases of `ABSL_RETURN_IF_ERROR`
+and `ABSL_ASSIGN_OR_RETURN` when `ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS`
+is set; `//dcfs:status` sets it as a Bazel `defines` so every dependent
+gets it, and `dcfs/status.h` fails the build if it is missing (25.15).
+Never the `ABSL_` form (25.17 sweeps the 837 uses; a repo-shape check
+keeps them out afterwards). The tree defines no propagation macros. Its
 own macros are `RET_CHECK`, `RET_CHECK_EQ/NE/GT/OK` (`dcfs/ret_check.h`, 68
 uses): they return a `kInternal` `StatusBuilder` and take `<<` context. Use
 `RET_CHECK` where a `Status` can be returned; use `CHECK`/`CHECK_NE`
@@ -438,11 +442,11 @@ wants, as the worked example:
 absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
   RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
-  ABSL_ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
+  ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
   absl::Cleanup restore_root([&saved]() { RestoreRoot(saved); });
   // setfsgid is guaranteed to never fail
   syscalls::setfsgid(caller.gid);
-  ABSL_RETURN_IF_ERROR(syscalls::setgroups(caller.groups));
+  RETURN_IF_ERROR(syscalls::setgroups(caller.groups));
   // setfsuid is guaranteed to never fail
   syscalls::setfsuid(caller.uid);
   std::move(restore_root).Cancel();
@@ -485,7 +489,7 @@ the kernel accepts), and `dcfs::`-qualified names.
 - **Prefer a `Status` consumed by the statement that makes it**
   (preference, not a rule; russ: "Sometimes you need to do something in
   between, but prefer other constructs if possible").
-  `ABSL_RETURN_IF_ERROR(f())`, `ABSL_ASSIGN_OR_RETURN`, `RET_CHECK`. A
+  `RETURN_IF_ERROR(f())`, `ASSIGN_OR_RETURN`, `RET_CHECK`. A
   `Status` variable that outlives one statement, and a ladder of
   `if (status.ok())`, is the failure path written by hand and hides which
   call failed; reach for it only when something must happen between the
@@ -650,7 +654,7 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
   - **A table over an if-chain** where a table fits (the `SWAPS` and
     `REPLACEMENTS` dictionaries of `tools/mutation/operators.py`), and one
     object built once over variants (the first rule).
-- `Status` returns with `ABSL_RETURN_IF_ERROR` are the normal shape of error
+- `Status` returns with `RETURN_IF_ERROR` are the normal shape of error
   handling and are not what this rule is about (section 1.6).
 
 ### 1.10a Every branch names its reachable cause; no code for the impossible

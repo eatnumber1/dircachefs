@@ -2718,3 +2718,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 25.14 merged (lane-2 → cf12b7d; subject gate exit 0; orchestrator read the report, diff is
   mechanical): the agent found the 38 count was approximate and that global-scope uses need the
   qualifier, so the check tracks namespace depth. 25.15 dispatched (implementer, lane-2).
+- russ: `RETURN_IF_ERROR` / `ASSIGN_OR_RETURN` throughout. Abseil ships them behind
+  ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS; the running 25.15 agent adds the define on //dcfs:status
+  with a guard in status.h as its first commit and uses the short names in what it touches; the
+  tree-wide sweep (837 uses, 28 files) plus a repo_shape check is 25.17 after it. Style 1.6 and
+  1.6a, the agent definitions and the 25.15 text now say the short names. Nullability rule (25.16)
+  recorded earlier this hour.

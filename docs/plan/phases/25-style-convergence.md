@@ -500,3 +500,19 @@ uses in main.cc and four test files keep their qualifier, rightly); 40
 in-namespace sites dequalified; no ambiguity found; `project_prefix`
 rule; the two renames with docs/design.md updated. No allowlist for
 either rule.
+
+## 25.17 The short status macros everywhere (russ, 2026-10-10; after 25.15, lane-2)
+
+russ: "create macros called `RETURN_IF_ERROR` and `ASSIGN_OR_RETURN` that
+are aliases of `ABSL_RETURN_IF_ERROR` and `ABSL_ASSIGN_OR_RETURN`
+respectively, then use the shorter versions throughout the codebase."
+Abseil ships the aliases behind `ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS`;
+25.15's first commit turns that on from `//dcfs:status` and makes
+`dcfs/status.h` refuse to build without it. This step: mechanical agent
+replaces every `ABSL_RETURN_IF_ERROR(` and `ABSL_ASSIGN_OR_RETURN(` in
+`dcfs/`, `tools/` and `bench/` (837 uses in 28 files at count time) with
+the short name, reformats the touched lines (shorter names re-wrap),
+checks every target that uses them depends on the define (build), and
+adds a repo-shape check refusing the `ABSL_` spelling of the two in our
+C++ (fixture tests; no allowlist). docs/style.md's remaining mentions
+follow. No behaviour change.
