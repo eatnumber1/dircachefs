@@ -62,10 +62,13 @@ and a soak run), and 21.2 passes.
   tree is unaffected (15.4 finishes the stub behaviour), a snapraid sync
   during the trial changes nothing dcfs serves.
 - **First configuration.** The directory form (`dcfs.fstype=bind` since
-  15.9; `none` before it) over a directory of the spare disk, or the
-  production shape (a native bind of the disk to a raw path, then dcfs
-  over the original path with `requires-mounts-for` on the raw one, so
-  consumers keep their paths and snapper/snapraid use the raw path),
+  15.9) over a directory of the spare disk, or the production shape the
+  systemd guest asserts: the disk mounted at a raw path and dcfs on the
+  consumers' path with `dcfs.fstype=bind,x-systemd.requires-mounts-for=<raw>`
+  (snapper and snapraid use the raw path). The other shape, a native bind
+  of the original to a raw path and dcfs over the original, works only by
+  hand with `mount --make-private` on the raw path and cannot be written in
+  fstab (systemd sees a cycle),
   `dcfs.cache_db` on the fast disk, a tree without submounts, the
   README's operations table at hand; collect the daemon's CPU seconds and
   the sync-point cadence against the disk's spin-down (what the design

@@ -2571,3 +2571,29 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   in the script; a subtlety learned: a mkdir'd directory is born dirty but not durably, so its
   rmdir syncs. Short 137 states, large 419/396/1114, 0 violations. PUSH POINT: main after this
   entry (eecb91f plus 12.13b, 12.14b and plan); both CI reds fixed.
+- 15.5 + 15.8 + 15.9 merged (31e795c, five commits): fsck.dcfs (findmnt --fstab, the backing's
+  fsck delegated, cache integrity/schema/lock/dirty checks, rebuild with -y, fsck(8) statuses
+  or'ed; the systemd guest sees systemd-fsck@ finish before the mount), allow_other always on
+  (refused in a line; a remount may carry the mount's own, libmount adds it), the directory form
+  renamed `dcfs.fstype=bind` with `none` refused and the clone capture removed (-44 lines in
+  backing_capture.cc plus tests). Two corrections from the systemd guest to the orchestrator's
+  recipe: an overmount plus a native bind of the original needs `mount --make-private` on the raw
+  path (shared propagation shows fuse.dcfs on it) and cannot be expressed in fstab (a cyclic
+  transaction); the working fstab shape is the disk at the raw path and dcfs on the consumers'
+  path with requires-mounts-for. `enospc_cache_test` is timing-sensitive (`sleep 3` vs a 2 s
+  interval): a 6.5/no-timers follow-up.
+- 12.12a merged (20da809): 20 of 22 unbitten properties have premise tests (BackingAtSyscall and
+  KernelForgotAfterCrash hold by construction), Trace.cfg checks four more invariants (TLC time
+  per shard roughly tripled, within the limit; CleanMeansNoDirty unusable on harness traces, which
+  never run StartRun: G19), MC_nolock_small (343k states, 80 s; R4 bites there), negative logs
+  for the guard-decision checks, TLC coverage reports gated per action, the two-name CrashRefines
+  variant violates on crash_f1, the row-lifecycle rule in formal/README.
+- CI run 38018425705 (f616181): fast, presubmit, COVERAGE (the gate passed: 26.14f verified),
+  reproducible, mutation-changed and 6 of 9 shards green; fast took 7 min against 11 before (the
+  toolchain cache hit). Three shard failures: `fault_ace_fs_test_xfs` ace-dsplit (plain and asan:
+  the backing after the cut differs from the persistence-point snapshot on xfs only),
+  `destroy_test` under asan (`destroy.sh: line 98: arithmetic syntax error`), `nfs_test` under
+  asan (`nfs-handle-read-after-restart` read 10 of 43 bytes through an NFS handle after a
+  restart: a correctness-bug candidate). 26.20 CI triage dispatched (investigator, lane-1) under
+  the freeze's red-push exception: reproduce, bisect among the merges since 9a67552 if needed,
+  fix tests in tests and dcfs bugs with a failing-first harness test.

@@ -419,6 +419,26 @@ raw path); man page, design.md, Limitations updated. 15.4's text loses
 "the bind form's recorded mount points and reverting stale ones". In
 lane-6's current round (same parser and tests), subjects `15.9:`.
 
+**15.5/15.8/15.9 status 2026-10-10:** merged 31e795c (lane-6, five commits;
+41 files). fsck.dcfs as specified (findmnt --fstab as a child, or `-o
+OPTIONS` for a check with no fstab line; the backing's `fsck.<type>` with
+the flags passed through; `bind` has no device; cache: held lock 8,
+integrity_check, schema (newer: 4, never deleted), dirty rows naming
+existing inodes, the clean flag consistent with the dirty set; rebuild
+with -a/-p/-y, report with -n or no flag; statuses or'ed as fsck(8)); 16
+busybox checks against a stand-in `fsck.fakefs`, the systemd guest runs
+real fsck(8) and sees `systemd-fsck@` finish before the mount after a
+reboot. allow_other always on; refused in a line; accepted only with
+`remount` (libmount carries the mount's own). The directory form is
+`dcfs.fstype=bind` (`Backing::kDirectory`), `none` refused with a pointer,
+the clone capture removed; README "The bind form and the native bind
+recipe" with two corrections from the guest: the overmount recipe needs
+`--make-private` on the raw path and cannot be written in fstab (cyclic);
+the fstab shape is the disk at the raw path and dcfs on the consumers'
+path. design.md: why `allow_other` is always on, why fsck delegates and
+rebuilds, why there is no cloned form. Follow-ups: 15.6b's items 16-18
+and 21; `enospc_cache_test`'s `sleep 3` against a 2 s interval.
+
 **15.8 `allow_other` always on (russ, 2026-10-09).** russ: "Does it ever
 make sense not to pass dcfs.allow_other? If no, should we just always
 pass it internally (and require it not be present in fstab)?" No: FUSE's
