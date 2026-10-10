@@ -737,3 +737,16 @@ choice: 25.25 with a reading), bugprone-unchecked-optional-access 30,
 concurrency-mt-unsafe 26 (getenv/strerror: syscalls.h or absl
 equivalents), cert-err33-c 49 (unchecked returns of C calls: each is a
 Status or a deliberate ignore).
+
+25.17 merged 2026-10-10 (4b804dc, mechanical agent, eight commits):
+repo_shape rules `absl_prefixed_status_macros` (835 uses swept to the
+short names) and `nodiscard_on_status` (38 sites); `banned_std` and
+`iterator_pair_algorithm` matcher allowlists emptied (session_loop's
+callback an AnyInvocable, FunctionRef where only called, a plain function
+pointer for the const gtest parameter table, the test stopwatch on
+`syscalls::clock_gettime(CLOCK_MONOTONIC)`; `absl::c_copy/c_sort/
+c_reverse/c_count_if/c_binary_search/c_contains`); deps declared. Rulings
+made here: a captureless callback stored in a const table is a plain
+function pointer; the CLOCK_* include-cleaner finding is a tool conflict
+(include-cleaner credits only <time.h>, deprecated-headers forbids it in
+C++), one allowlist line with the reason, to be settled once in 25.23.

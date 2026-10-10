@@ -368,8 +368,8 @@ returning `Status` or `StatusOr` does not, the type already is (1.2).
 and `ABSL_ASSIGN_OR_RETURN` when `ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS`
 is set; `//dcfs:status` sets it as a Bazel `defines` so every dependent
 gets it, and `dcfs/status.h` fails the build if it is missing (25.15).
-Never the `ABSL_` form (25.17 sweeps the 837 uses; a repo-shape check
-keeps them out afterwards). The tree defines no propagation macros. Its
+Never the `ABSL_` form (25.17 swept the 835 uses on 2026-10-10; the
+repo-shape rule `absl_prefixed_status_macros` keeps them out). The tree defines no propagation macros. Its
 own macros are `RET_CHECK`, `RET_CHECK_EQ/NE/GT/OK` (`dcfs/ret_check.h`, 68
 uses): they return a `kInternal` `StatusBuilder` and take `<<` context. Use
 `RET_CHECK` where a `Status` can be returned. Where it cannot (a libfuse

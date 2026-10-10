@@ -2844,3 +2844,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 25.22 merged (docs only). Haiku did pattern detectors, not the reading pass the card asked for;
   recorded as such. 25.23 (tidy auto-fix sweeps by check) queued after 25.17; 25.17 dispatched to
   the same mechanical agent in lane-2 (one lane running).
+- 25.17 merged (lane-2 → 4b804dc, gate exit 0). Style 1.6's stale sentence fixed. 25.23 (tidy
+  auto-fix sweeps) dispatched to the same agent, bounded to the two largest checks overnight
+  (include-cleaner 560, designated-initializers 60) so the spend stays near the pace; the rest
+  of the list continues in the morning.
