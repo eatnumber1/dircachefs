@@ -12,6 +12,9 @@ What is here:
   TLC finds no error, or, with `expect_violation`, if TLC reports exactly
   that violation (exit status 12 or 13 and the given text). Any other
   outcome fails, a parse error (exit status 150 and up) included.
+  With `coverage` (a committed report of `ACTION COUNT` lines) and
+  `tlc_args = ["-coverage", "1"]`, it also fails if an action the report
+  shows taken is taken by no step in this run (step 12.12a).
 - `tlc_test_runner.sh.tpl`: the test script `tlc_test` fills in.
 - `overrides/tlc2/overrides/TLCOverrides.java` and the `tlc_overrides_jar`
   rule (in `tlc.bzl`; target `:tlc_overrides`): the registry of Java

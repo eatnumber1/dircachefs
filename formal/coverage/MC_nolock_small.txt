@@ -1,0 +1,87 @@
+# TLC's coverage of MC_nolock_small.cfg (step 12.12a): each action of
+# dcfs.tla's Next and the states it generated (the second number of TLC's
+# `distinct:generated`), from //formal:nolock_small_coverage_test's run.
+# That test fails if an action listed here above 0 is no longer taken.
+# Regenerate: copy the test log's "tlc_test: coverage" block here.
+#
+# Taken by no step here, and why:
+#  - AttrChange*, Getattr*, Readdirplus*, SyncClearDirty: their requests
+#    (attrchange, getattr, readdirplus, sync) are not in
+#    NolockGuardRequests (MC_small and MC_nolock take them).
+#  - CrashRecovering, CrashServing, CrashStopping: MaxCrashes = 0.
+#  - AtimeExpiry, FRead, File*, WriteSyscall, WriteReply: F's requests are
+#    not in this configuration.
+#  - Interrupt: Interrupts = FALSE.
+#  - RenameFailed, RenameFailed2, UnlinkFailed: dead in every
+#    configuration (README.md, "Changing the model").
+Arrive 173196
+AtimeExpiry 0
+AttrChangeFill 0
+AttrChangePhase3 0
+AttrChangeStat 0
+AttrChangeSyscall 0
+BeginShutdown 1090
+CrashRecovering 0
+CrashServing 0
+CrashStopping 0
+CreateFailed 7264
+CreateFill 12948
+CreatePhase3 8712
+CreateProbe 8656
+CreateStat 12292
+CreateSyscall 11556
+FRead 0
+FileCreateFailed 0
+FileCreateMark 0
+FileCreatePhase3 0
+FileCreatePhase3Failed 0
+FileCreateProbe 0
+FileCreateSyscall 0
+FileGetattrFill 0
+FileGetattrStat 0
+FileLookupCommit 0
+FileRefreshFill 0
+FileRefreshStat 0
+FileReleaseFill 0
+FileReleaseStat 0
+FileSetEnd 0
+FileSetFill 0
+FileSetStat 0
+FileSetSyscall 0
+GetattrFill 0
+GetattrStat 0
+Init 4
+Interrupt 0
+LookupStep 18768
+PopulateCommit 129814
+PopulateRead 62394
+ProbesDone 246
+ReaddirStep 47348
+ReaddirplusFill 0
+ReaddirplusStat 0
+Recover 407
+RenameFailed 0
+RenameFailed2 0
+RenameFill 8624
+RenamePhase1 8220
+RenamePhase3 5636
+RenameResolveDst 12096
+RenameStat 8240
+RenameSyscall 3288
+ResolveCommit 72236
+ResolveProbe 43236
+Restart 246
+StartRun 407
+StopCkpt 984
+StopClear 984
+StopFlag 513
+StopSync 1090
+SyncClearDirty 0
+UnlinkFailed 0
+UnlinkFill 11448
+UnlinkPhase1 12008
+UnlinkPhase3 7984
+UnlinkStat 11048
+UnlinkSyscall 4964
+WriteReply 0
+WriteSyscall 0

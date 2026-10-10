@@ -1,0 +1,7 @@
+DCFS-TRACE t 2 {"i":2,"c":"BeginAll","ev":"begin","origin":"existing","db":{"dent":[],"complete":false,"epoch":0,"valid":true,"dirty":false,"clean":true,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":3,"c":"ListChecked","ev":"list_check","p":"p1","req":{"k":"readdirplus","n":"","m":""},"complete":false}
+DCFS-TRACE t 2 {"i":4,"c":"PopulateRead","ev":"populate_read","p":"p1","listing":[["a","k:15.1791593605.759000000"],["b","k:16.1791593605.759000000"]],"db":{"dent":[],"complete":false,"epoch":0,"valid":true,"dirty":false,"clean":true,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":5,"c":"PopulateCommitted","ev":"populate_commit","p":"p1","recorded":false,"db":{"dent":[],"complete":false,"epoch":0,"valid":true,"dirty":false,"clean":true,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":6,"c":"ListChecked","ev":"list_check","p":"p1","complete":true}
+DCFS-TRACE t 2 {"i":7,"c":"GetattrBegin","ev":"rdp_attr_check","p":"p1","valid":true}
+DCFS-TRACE t 2 {"i":10,"c":"RequestEnd","ev":"reply","p":"p1","errno":0}

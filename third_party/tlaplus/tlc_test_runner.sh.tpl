@@ -3,6 +3,7 @@
 # specification and checks its outcome against the expected one.
 set -euo pipefail
 
+root="$PWD"
 java="$PWD/@@JAVA@@"
 jar="$PWD/@@JAR@@"
 spec="@@SPEC@@"
@@ -42,6 +43,37 @@ status=0
   >"$log" 2>&1 || status=$?
 cat "$log"
 echo "tlc_test: TLC exited with status $status"
+
+# With a committed coverage report (tlc.bzl's `coverage`): the actions TLC's
+# last coverage block (-coverage) shows, `NAME COUNT` (the states each action
+# generated: `distinct:generated`, the second, which does not depend on the
+# order TLC explores in); each one the report lists above 0 must still be
+# taken.
+coverage_report="@@COVERAGE@@"
+if [[ -n "$coverage_report" ]]; then
+  covered="$work/coverage.txt"
+  awk '/^The coverage statistics/ { delete n; seen = 1 }
+       seen && /^<[A-Za-z_][A-Za-z0-9_]* line [0-9]+.*>: [0-9]+:[0-9]+$/ {
+         name = substr($1, 2)
+         count = $0; sub(/.*:/, "", count)
+         n[name] = count
+       }
+       END { for (a in n) print a, n[a] }' "$log" | sort >"$covered"
+  echo "tlc_test: coverage (action, states generated):"
+  sed 's/^/  /' "$covered"
+  lost=""
+  while read -r action count; do
+    [[ -z "$action" || "$action" == \#* || "$count" == 0 ]] && continue
+    now="$(awk -v a="$action" '$1 == a { print $2 }' "$covered")"
+    if [[ -z "$now" || "$now" == 0 ]]; then
+      lost="$lost $action"
+    fi
+  done <"$root/$coverage_report"
+  if [[ -n "$lost" ]]; then
+    echo "tlc_test: FAIL: actions the committed coverage report has taken are taken by no step now:$lost" >&2
+    exit 1
+  fi
+fi
 
 if [[ -z "$expect" ]]; then
   if [[ "$status" -ne 0 ]] || ! grep -q "Model checking completed. No error has been found." "$log"; then

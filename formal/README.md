@@ -709,7 +709,8 @@ from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 | `MC_recovery.cfg` | `recovery_test` (medium) | 1 name, 1 slot, 2 mutations, 2 crashes (one can come during the recovery of a dirty database: steps 12.6, 12.6b), all request kinds, all invariants and properties | 39,635 | ~20 s |
 | `MC_liveness.cfg` | `liveness_test` (medium) | as small with 1 slot, no VIEW; plus `RecoveryTerminates`. It checks the invariants, the three effect-point properties and `RecoveryTerminates` (TLC reads both of its `PROPERTIES` sections), but not `ReplyObservable`: the reply ghost is off (`RecordReply <- ForgetReply`), since without a VIEW the idle slot's last reply tripled the states (338,790) | 146,504 | ~1-2 min |
 | `MC_large.cfg` | `large_test` (large) | 3 mutations, 2 crashes; `ReplyObservable` | 10,239,570 | ~20 min unloaded (CI 634 s on 2026-10-08 before step 12.6b's daemon crash; 27 min alone at load 11 without `ReplyObservable`, 64 min with it at load 9-12, 2026-10-08) |
-| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
+| `MC_nolock.cfg` | `nolock_test` (large) | as small without the kernel lock; the three effect-point properties (since step 12.12a) and `ReplyObservable` (lookups and listings overlap mutations here) | 8,224,822 | ~6 min unloaded (CI 506 s before step 12.6b's daemon crash, for 6.37M states; 19 min alone at load 11, 2026-10-08) |
+| `MC_nolock_small.cfg` | `nolock_small_test` (medium) | step 12.12a (the audit's G4): as nolock with no crash and only `NolockGuardRequests` (lookups, listings, creates, unlinks, renames), so that `Mutation::Owns`, the phase-1 verification and the fill guards meeting a mutation bite before the large tier (`known_bug_rename_stale_source_nolock_small_test` finds R4 in these bounds); all invariants and the four action properties | 343,294 | ~1.5 min (load 8-14, 2026-10-10); with every kind but readdirplus 1,990,812 (6 min), with sync points added 1,185,567 |
 | `MC_interrupt.cfg` | `interrupt_test` (medium) | as small with `Interrupts`, 1 mutation; plus `GuardsBalanced` | 280,869 | ~1-2 min |
 | `MC_interrupt_muts2.cfg` | `interrupt_muts2_test` (large) | as small with `Interrupts`, no crash (a mutation after an interrupted one); `ReplyObservable` | 892,708 | ~1-2.5 min |
 | `MC_interrupt_nolock.cfg` | `interrupt_nolock_test` (large) | as nolock with `Interrupts`, 1 mutation; `ReplyObservable` | 1,036,982 | ~1.5-4 min |
@@ -717,6 +718,15 @@ from 935,825 to 1,479,307, recovery from 25,861 to 39,635, liveness from
 | `MC_borndirty.cfg`, `_ext4`; `MC_borndirty_nolock.cfg`, `_nolock_ext4`; `MC_borndirty_recovery.cfg` | `borndirty_*_test` (medium) | step 23.11 ([Born-dirty create](#born-dirty-create-step-2311)) | 275,962; 382,710; 89,998; 108,724; 3,054 | 39 s; 2.2 min; 33 s; 46 s; 7 s (by hand, load 14, 2026-10-09) |
 | `MC_crash_ext4.cfg`, `MC_crash_metaprefix.cfg` | `crash_ext4_test`, `crash_metaprefix_test` (medium) | step 12.8: the two weaker backing regimes; 2 names, 1 slot, 3 mutations, 1 crash, lookups, getattrs, creates, unlinks, renames, attribute changes of D and syncs (the litmus configurations have the writes and FSYNCs); all invariants, `CrashRefines`, the effect-point properties and `ReplyObservable` | 356,954 (ext4), 292,044 (metaprefix) | ~3 min, ~1.5 min |
 | `MC_litmus_*.cfg` | `litmus_*_test` (small) | step 12.8: the litmus tests that must hold (`MClitmus.tla`; [the table](#the-backing-filesystems-crash-consistency)); 1 slot, 1-2 names, a fixed program of 2-3 mutations and a sync point, 1 crash; every invariant and property besides | 679-1,475 each | seconds |
+
+`small_coverage_test` and `nolock_small_coverage_test` (large, step
+12.12a) run `MC_small.cfg` and `MC_nolock_small.cfg` with TLC's
+`-coverage` and fail if an action that the committed report in
+`coverage/` shows taken is taken by no step any more (`tlc_test`'s
+`coverage` attribute). The reports list the actions taken by no step and
+why: F's actions, interrupts and crashes where the configuration has
+none, and `RenameFailed`, `RenameFailed2` and `UnlinkFailed`, dead in
+every configuration.
 
 `Interrupts` (Phase 22) is off in the first five: with it, `MC_small.cfg`
 grows to 2,154,085 states (6 min), so the interrupts have configurations
@@ -757,6 +767,40 @@ FALSE in the real configurations.
 | `attr_change_end_skipped` | 8.2's mutation survivors (step 12.11): a deleted `Mutation::End` after an attribute change (`AttrChangeEnd <- AttrChangeEndSkipped`) | `GuardsBalanced` | an attribute change of D: phase 1, its syscall; its end leaves `FillGuards::inflight` raised with no request in flight (its refresh, and every later fill of D, is then refused) |
 | `borndirty_*` | step 23.11 | `CrashSafe` | see [Born-dirty create](#born-dirty-create-step-2311) |
 | `sync_by_file_fsync` | not historical (step 12.8): a sync point after FSYNC whose only barrier is the file's fsync (`SyncBarrier <- FsyncOnly`), under the `"ext4"` regime (`MClitmus.tla`'s implied-directory-fsync program) | `CrashSafe` | create f: phase 1, its syscall, phase 3 (f recorded present); write f; FSYNC of f: its fsync makes f's data durable, not its entry in D (Ferrite's Definition 7), and `ClearDirty` takes D out of the dirty set: a power loss may now lose the create while the database says f is present and recovery has nothing to forget. Under `"seq"` the same configuration finds nothing |
+
+### Premises: every property bites (step 12.12a)
+
+A property that nothing shows can fail may be vacuous or mis-stated (the
+audit's G8). Each `premise_*_test` (small) runs a configuration of a
+module that breaks the property, checking that property alone, and
+expects its violation. Most reuse a known bug or a limitation, whose own
+test checks another property first; four needed a new variant.
+
+| Property | Module | Bites on |
+|---|---|---|
+| `CompleteNeverHides` | dcfs | `tristate_f4_restore_complete` |
+| `CrashRefines` | dcfs | `crash_f1_phase1_not_durable` (two names, two mutations): it is not redundant by construction, as the audit feared it might be in one-name configurations |
+| `DurableSetSound` | dcfs | `borndirty_sync_keeps_durable` (F's clause) |
+| `CleanMeansNoDirty` | dcfs | new `stop_clear_skipped` (the clean shutdown's ClearDirty skipped) |
+| `CacheLearnsAtCommit` | dcfs | `interrupt_undo` |
+| `RecoveryTerminates` | dcfs | new `probes_wait_for_clean` (the start's probe waits, as a stutter, for an empty dirty set; no `VIEW`) |
+| `OpenExact`, `HeldFlagsLegit` | reval | `reval_no_recheck` |
+| `OpenModeExact`, `HeldModeLegit`, `CachedModeCurrent`, `KernelModeCurrent` | reval | `limitations/out_of_band_mode` |
+| `WritesUseAWritableFd` | reval | `reval_no_write_fd` |
+| `NotRetiredWhileReferenced` | lifetime | `lifetime_nonfinal_forget_drops_rec` |
+| `HeldOnlyWhileWritten`, `NothingLeaks` | lifetime | `lifetime_forget_multi_counted_as_one` |
+| `ForgetKnown` | lifetime | new `lifetime_lookup_uncounted` (an entry reply dcfs does not count; no existing bug breaks it) |
+| `RecoveryIdempotent` | lifetime | `lifetime_probe_list_in_memory` |
+| `HandlesResolveToTheirObject`, `GoneIsStale` | ident | `ident_skip_identity_statx` |
+
+The step 23.11 premises (`BornDirty`, `LostRowProbed`, `DirtyBeforeChange`,
+`ClearOnlyAfterSync`, `RecoveryForgetsDirty`, `GuardsBalanced`'s F clause)
+are in [Born-dirty create](#born-dirty-create-step-2311). Still without a
+variant that breaks them, by construction: `BackingAtSyscall` (only the
+syscall actions, `FRead` and F's setattr syscall write `bCur` while
+serving; a variant would have to add a backing write elsewhere) and
+`KernelForgotAfterCrash` (the crash step itself empties the kernel's and
+dcfs's memory). Each is stated for what it documents.
 
 ## Findings
 
@@ -1095,7 +1139,20 @@ the object map). So an unlink whose resolve found nothing must send
 `ENOENT` (`RemoveChild` replies it itself, returning OK), and a lookup
 that answers a negative entry after its resolve or listing read the name
 present is rejected at its reply. `Trace.cfg` also checks
-`ReplyObservable` on every recorded behavior. The
+`ReplyObservable` on every recorded behavior, and (step 12.12a, the
+audit's G11) the model's state invariants `TriState`, `CacheNeverWrong`,
+`CrashSafe` and `DurableSetSound` with `GuardsBalanced`: a trace goes past
+the model-checking bounds (dozens of names, many mutations, several
+crashes in one guest run), so a violation there is a real finding. It
+made each trace's TLC run two to four times longer (the harness's three
+shards: 101, 97 and 184 s of TLC time in all before, 302, 164 and 299 s
+after; the hand logs 57 s before, 213 s after; the longest trace 9 s
+before, 21 s after; one run each at load 8-14, 2026-10-10). Not
+`CleanMeansNoDirty`: the harness's database never has `StartRun`'s
+`clean_shutdown = 0` (DirCacheFSTest starts with `Migrate` and
+`InitRoot`), so every harness trace begins with the flag set and goes on
+to make dirty rows; the flag is decorative in `dcfs.tla` anyway (the
+audit's G19). The
 guest tests also name the root directory's trace (`root`), which must have
 events and reach the end of the run, its last line the run's final event
 (`clean` or `stop_clear`, with no later line of the run but that step's
@@ -1677,9 +1734,21 @@ model in the same change (AGENTS.md). In practice:
   and its held descriptors, row retirement, DESTROY, the start's sweep of
   unnamed rows) updates `lifetime.tla`, with its `LifetimeChanged` events
   and `LifetimeTrace.tla` (see [The lifetime model](#the-lifetime-model)).
+- Every table or column that mirrors the backing filesystem (a row, a
+  dentry, a mark, a completeness flag) has its row lifecycle in the
+  model, not only its contents: where the code creates and deletes it,
+  the model creates and deletes it in the same steps, and those steps'
+  commits are under the crash prefixes (`dbOpts`) like any other write.
+  23.11's ghost row is why: the model had F's attributes but not F's
+  row, so a fill that inserted the row clean before phase 3 was not a
+  state it could reach. 12.13's mutation sweep says whether the
+  invariants about such a row bite.
 - Keep every action reachable: run TLC with `-coverage 1` and check that
   no action reports 0, except these, which report 0 in every
   configuration: `RenameFailed`, `RenameFailed2` and `UnlinkFailed`.
+  `small_coverage_test` and `nolock_small_coverage_test` check it for
+  their configurations against `coverage/`; a new action shows up in
+  their log, and goes into the report when it is regenerated.
   Nothing in the model can remove a name between a rename's or an
   unlink's resolve and its syscall any more: under the kernel lock nothing
   runs there, and without it the phase-1 verification (`R1`, `U1`) refuses

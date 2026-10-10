@@ -32,10 +32,12 @@ def _tlc_test_impl(ctx):
             "@@EXPECT@@": ctx.attr.expect_violation,
             "@@TLC_ARGS@@": " ".join(ctx.attr.tlc_args),
             "@@WORKERS@@": ctx.attr.workers,
+            "@@COVERAGE@@": ctx.file.coverage.short_path if ctx.file.coverage else "",
         },
     )
+    coverage = [ctx.file.coverage] if ctx.file.coverage else []
     runfiles = ctx.runfiles(
-        files = [ctx.file._jar, ctx.file.spec, ctx.file.config] + srcs,
+        files = [ctx.file._jar, ctx.file.spec, ctx.file.config] + srcs + coverage,
         transitive_files = runtime.files,
     )
     return [DefaultInfo(executable = script, runfiles = runfiles)]
@@ -67,6 +69,14 @@ _tlc_test = rule(
         ),
         "tlc_args": attr.string_list(
             doc = "Extra TLC command-line arguments.",
+        ),
+        "coverage": attr.label(
+            allow_single_file = True,
+            doc = "A committed coverage report (lines `ACTION COUNT`, as " +
+                  "TLC's -coverage prints them, `#` comments): pass " +
+                  "`tlc_args = [\"-coverage\", \"1\"]` too. The test " +
+                  "then fails if an action the report lists with a count " +
+                  "above 0 is taken by no step, or is missing, in this run.",
         ),
         "workers": attr.string(
             default = "auto",

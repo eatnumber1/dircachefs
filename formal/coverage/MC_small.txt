@@ -1,0 +1,85 @@
+# TLC's coverage of MC_small.cfg (step 12.12a): each action of dcfs.tla's
+# Next and the states it generated (the second number of TLC's
+# `distinct:generated`), from //formal:small_coverage_test's run. That test
+# fails if an action listed here above 0 is no longer taken. Regenerate:
+# copy the test log's "tlc_test: coverage" block here.
+#
+# Taken by no step here, and why:
+#  - AtimeExpiry, FRead, File* (F's create, lookups, getattrs, releases,
+#    setattrs), WriteSyscall, WriteReply: F's requests are not in this
+#    configuration (MC_atime*, MC_borndirty* take them).
+#  - Interrupt: Interrupts = FALSE here (MC_interrupt* take it).
+#  - RenameFailed, RenameFailed2, UnlinkFailed: dead in every
+#    configuration (README.md, "Changing the model": nothing can remove a
+#    name between the resolve and the syscall in the model).
+Arrive 1690730
+AtimeExpiry 0
+AttrChangeFill 31050
+AttrChangePhase3 18690
+AttrChangeStat 31050
+AttrChangeSyscall 10150
+BeginShutdown 12296
+CrashRecovering 2280
+CrashServing 2793740
+CrashStopping 40278
+CreateFailed 17360
+CreateFill 39088
+CreatePhase3 23944
+CreateProbe 11972
+CreateStat 39088
+CreateSyscall 30480
+FRead 0
+FileCreateFailed 0
+FileCreateMark 0
+FileCreatePhase3 0
+FileCreatePhase3Failed 0
+FileCreateProbe 0
+FileCreateSyscall 0
+FileGetattrFill 0
+FileGetattrStat 0
+FileLookupCommit 0
+FileRefreshFill 0
+FileRefreshStat 0
+FileReleaseFill 0
+FileReleaseStat 0
+FileSetEnd 0
+FileSetFill 0
+FileSetStat 0
+FileSetSyscall 0
+GetattrFill 452474
+GetattrStat 341056
+Init 4
+Interrupt 0
+LookupStep 37720
+PopulateCommit 188828
+PopulateRead 188828
+ProbesDone 1520
+ReaddirStep 98756
+ReaddirplusFill 36644
+ReaddirplusStat 36644
+Recover 7265
+RenameFailed 0
+RenameFailed2 0
+RenameFill 9416
+RenamePhase1 16744
+RenamePhase3 6512
+RenameResolveDst 30936
+RenameStat 9416
+RenameSyscall 3864
+ResolveCommit 74664
+ResolveProbe 74664
+Restart 3755
+StartRun 6618
+StopCkpt 8376
+StopClear 10062
+StopFlag 2021
+StopSync 12296
+SyncClearDirty 374406
+UnlinkFailed 0
+UnlinkFill 17356
+UnlinkPhase1 30936
+UnlinkPhase3 11332
+UnlinkStat 17356
+UnlinkSyscall 6516
+WriteReply 0
+WriteSyscall 0

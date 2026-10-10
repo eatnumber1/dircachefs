@@ -237,6 +237,11 @@ rejected_as_expected=0
 : >"$work/coverage"
 # check_trace FILE NAME MODULE: runs TLC with MODULE.cfg on one trace and
 # counts the outcome.
+# TLC's own run time for one trace, as it prints it ("01s", "01min 05s").
+tlc_time() {
+  sed -n 's/^Finished in \(.*\) at (.*/\1/p' "$1"
+}
+
 check_trace() {
   local f="$1" name="$2" module="$3"
   local events out tlc_status depth bad explained safe_name
@@ -259,6 +264,9 @@ check_trace() {
   if [[ "$tlc_status" -ne 0 || -z "$depth" ]]; then
     errors=$((errors + 1))
     grep -v '^\(Loading\|Parsing\|Semantic\)' "$out" | tail -n 40
+    # The coverage statistics fill those lines: the error itself (a
+    # violated invariant, step 12.12a: Trace.cfg checks the model's) too.
+    grep -E -A3 '^Error: ' "$out" | head -n 20 || true
     echo "trace_validate.sh: ERROR: TLC failed on $name (exit status $tlc_status)"
     return
   fi
@@ -266,7 +274,7 @@ check_trace() {
     >>"$work/coverage"
   if [[ "$depth" -eq $((events + 1)) ]]; then
     valid=$((valid + 1))
-    echo "trace_validate.sh: valid: $name ($events events)"
+    echo "trace_validate.sh: valid: $name ($events events, TLC $(tlc_time "$out"))"
     return
   fi
   # No initial state matches the trace's begin line (TLC still reports a

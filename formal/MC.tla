@@ -21,6 +21,10 @@ AllRequests == AllKinds \ {"attrchange"}
 AllButRename == AllRequests \ {"rename"}
 AllButReaddirplus == AllRequests \ {"readdirplus"}
 AllButRenameAndReaddirplus == AllRequests \ {"rename", "readdirplus"}
+\* MC_nolock_small (step 12.12a): the requests whose guards only bite
+\* without the kernel's lock (lookups and listings that meet a mutation,
+\* Mutation::Owns, the phase-1 verification of an unlink or a rename).
+NolockGuardRequests == {"lookup", "readdir", "create", "unlink", "rename"}
 
 (***************************************************************************)
 (* View: what TLC uses to tell states apart (the VIEW in a .cfg). Two      *)

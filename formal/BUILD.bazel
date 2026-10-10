@@ -30,6 +30,20 @@ tlc_test(
     srcs = ["dcfs.tla"],
 )
 
+# Step 12.12a (the audit's G4): without the kernel's lock, small enough for
+# the medium tier (no crash), so that Mutation::Owns, the phase-1
+# verification and the fill guards of lookups and listings meeting a
+# mutation are checked before the large tier: 343,294 distinct states,
+# about 80 s at load 8 (2026-10-10).
+tlc_test(
+    name = "nolock_small_test",
+    size = "medium",
+    timeout = "long",
+    config = "MC_nolock_small.cfg",
+    spec = "MC.tla",
+    srcs = ["dcfs.tla"],
+)
+
 tlc_test(
     name = "recovery_test",
     size = "medium",
@@ -266,6 +280,17 @@ KNOWN_BUGS = {
     # The audit's G17: a skipped End of F's setattr leaves F's guard raised.
     "file_setattr_end_skipped": "Invariant GuardsBalanced is violated",
 }
+
+# Step 12.12a: R4's finding in MC_nolock_small's bounds (medium).
+tlc_test(
+    name = "known_bug_rename_stale_source_nolock_small_test",
+    size = "medium",
+    timeout = "long",
+    config = "known_bugs/rename_stale_source_nolock_small.cfg",
+    expect_violation = "Invariant CacheNeverWrong is violated",
+    spec = "known_bugs/rename_stale_source.tla",
+    srcs = MODEL,
+)
 
 # rename_stale_source explores 993,559 distinct states before its
 # counterexample (about 80 s on the runner at 80 us per state, 5.5 min at
@@ -749,6 +774,24 @@ TRACE_TESTS = {
     # ... and without its end line (a Mutation::End skipped) rejected at
     # the refresh's statx that follows.
     "attr_change_end_skipped": "\"ev\":\"stat\"",
+    # Step 12.12a (the audit's G10): each guard decision the recorder
+    # reports is compared, not trusted. A fill whose guard allows it but
+    # that says it did not record (FillOK) ...
+    "fill_not_recorded": "\"ev\":\"fill\"",
+    # ... a phase 1 of a directory not durably dirty that says it committed
+    # without a WAL fsync (SyncedOK) ...
+    "phase1_not_synced": "\"ev\":\"phase1\"",
+    # ... an unlink's phase 3 that says Mutation::Owns refused (OwnedOK),
+    # against the valid unlink ...
+    "unlink": None,
+    "unlink_end_not_owned": "\"ev\":\"end\"",
+    # ... a population whose guard allows it but that says it did not
+    # record, against the valid one ...
+    "populate": None,
+    "populate_commit_not_recorded": "\"ev\":\"populate_commit\"",
+    # ... and a lookup that says the cache answered negative for an unknown
+    # name (LookupOutcome; reply_lookup_answer is the valid one).
+    "lookup_outcome_wrong": "\"ev\":\"lookup\"",
 }
 
 [
@@ -1017,5 +1060,152 @@ tla_trace_log_test(
     for workers in [
         "1",
         "4",
+    ]
+]
+
+
+# Step 12.12a (the audit's section 3): the premises of the properties no
+# test showed could fail. Each: a configuration of a module that breaks it
+# (an existing known bug or limitation where one does; else a new variant),
+# checking that property alone, expected to report its violation.
+ORACLE_PREMISES = {
+    "complete_never_hides": (
+        "known_bugs/tristate_f4_restore_complete.tla",
+        MODEL,
+        "Invariant CompleteNeverHides is violated",
+    ),
+    "durable_set_sound": (
+        "known_bugs/borndirty_sync_keeps_durable.tla",
+        MODEL,
+        "Invariant DurableSetSound is violated",
+    ),
+    "cache_learns_at_commit": (
+        "known_bugs/interrupt_undo.tla",
+        MODEL,
+        "Action property CacheLearnsAtCommit is violated",
+    ),
+    "open_exact": (
+        "known_bugs/reval_no_recheck.tla",
+        REVAL,
+        "Invariant OpenExact is violated",
+    ),
+    "held_flags_legit": (
+        "known_bugs/reval_no_recheck.tla",
+        REVAL,
+        "Invariant HeldFlagsLegit is violated",
+    ),
+    "open_mode_exact": (
+        "limitations/reval_out_of_band.tla",
+        REVAL,
+        "Invariant OpenModeExact is violated",
+    ),
+    "held_mode_legit": (
+        "limitations/reval_out_of_band.tla",
+        REVAL,
+        "Invariant HeldModeLegit is violated",
+    ),
+    "cached_mode_current": (
+        "limitations/reval_out_of_band.tla",
+        REVAL,
+        "Invariant CachedModeCurrent is violated",
+    ),
+    "kernel_mode_current": (
+        "limitations/reval_out_of_band.tla",
+        REVAL,
+        "Invariant KernelModeCurrent is violated",
+    ),
+    "writes_use_a_writable_fd": (
+        "known_bugs/reval_no_write_fd.tla",
+        REVAL,
+        "Invariant WritesUseAWritableFd is violated",
+    ),
+    "not_retired_while_referenced": (
+        "known_bugs/lifetime_nonfinal_forget_drops_rec.tla",
+        LIFETIME,
+        "Invariant NotRetiredWhileReferenced is violated",
+    ),
+    "held_only_while_written": (
+        "known_bugs/lifetime_forget_multi_counted_as_one.tla",
+        LIFETIME,
+        "Invariant HeldOnlyWhileWritten is violated",
+    ),
+    "nothing_leaks": (
+        "known_bugs/lifetime_forget_multi_counted_as_one.tla",
+        LIFETIME,
+        "Invariant NothingLeaks is violated",
+    ),
+    "lifetime_recovery_idempotent": (
+        "known_bugs/lifetime_probe_list_in_memory.tla",
+        LIFETIME,
+        "Invariant RecoveryIdempotent is violated",
+    ),
+    "handles_resolve_to_their_object": (
+        "known_bugs/ident_skip_identity_statx.tla",
+        IDENT,
+        "Invariant HandlesResolveToTheirObject is violated",
+    ),
+    "gone_is_stale": (
+        "known_bugs/ident_skip_identity_statx.tla",
+        IDENT,
+        "Invariant GoneIsStale is violated",
+    ),
+    "clean_means_no_dirty": (
+        "known_bugs/stop_clear_skipped.tla",
+        MODEL,
+        "Invariant CleanMeansNoDirty is violated",
+    ),
+    "recovery_terminates": (
+        "known_bugs/probes_wait_for_clean.tla",
+        MODEL,
+        "Temporal properties were violated",
+    ),
+    "forget_known": (
+        "known_bugs/lifetime_lookup_uncounted.tla",
+        LIFETIME,
+        "Invariant ForgetKnown is violated",
+    ),
+    "crash_refines": (
+        "known_bugs/crash_f1_phase1_not_durable.tla",
+        MODEL,
+        "Invariant CrashRefines is violated",
+    ),
+}
+
+[
+    tlc_test(
+        name = "premise_%s_test" % premise,
+        size = "small",
+        timeout = "moderate",
+        config = "known_bugs/premise_%s.cfg" % premise,
+        expect_violation = violation,
+        spec = spec,
+        srcs = srcs,
+    )
+    for premise, (spec, srcs, violation) in ORACLE_PREMISES.items()
+]
+
+
+# Step 12.12a: TLC's coverage of every action (-coverage) in MC_small and
+# MC_nolock_small, against the committed reports in coverage/: an action a
+# report shows taken must stay taken (a zero is dead code or a gap; the
+# reports list the zeros with the reason). Large: coverage slows TLC, and
+# MC_small alone is 12 min at load 13.
+[
+    tlc_test(
+        name = "%s_coverage_test" % name,
+        size = "large",
+        timeout = "eternal",
+        config = "MC_%s.cfg" % name,
+        coverage = "coverage/MC_%s.txt" % name,
+        spec = "MC.tla",
+        srcs = ["dcfs.tla"],
+        tlc_args = [
+            "-coverage",
+            "1",
+        ],
+    )
+    for name in [
+        "small",
+        "nolock_small",
     ]
 ]

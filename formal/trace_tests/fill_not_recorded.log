@@ -1,0 +1,7 @@
+DCFS-TRACE t 2 {"i":1,"c":"BeginAll","ev":"begin","origin":"existing","db":{"dent":[["a","k:15.1791425945.75000000"]],"complete":true,"epoch":0,"valid":true,"dirty":false,"clean":true,"durable":false,"inflight":0}}
+DCFS-TRACE t 2 {"i":2,"c":"MutationBegun","ev":"phase1","p":"p1","req":{"k":"attrchange","n":"","m":""},"outcome":"begun","synced":true,"db":{"dent":[["a","k:15.1791425945.75000000"]],"complete":true,"epoch":0,"valid":false,"dirty":true,"clean":true,"durable":true,"inflight":1}}
+DCFS-TRACE t 2 {"i":3,"c":"MutationSyscall","ev":"syscall","p":"p1","errno":0,"names":[]}
+DCFS-TRACE t 2 {"i":4,"c":"MutationEnded","ev":"end","p":"p1","owned":true,"db":{"dent":[["a","k:15.1791425945.75000000"]],"complete":true,"epoch":0,"valid":false,"dirty":true,"clean":true,"durable":true,"inflight":0}}
+DCFS-TRACE t 2 {"i":5,"c":"AttrsStatted","ev":"stat","p":"p1"}
+DCFS-TRACE t 2 {"i":6,"c":"AttrsFilled","ev":"fill","p":"p1","recorded":false,"db":{"dent":[["a","k:15.1791425945.75000000"]],"complete":true,"epoch":0,"valid":false,"dirty":true,"clean":true,"durable":true,"inflight":0}}
+DCFS-TRACE t 2 {"i":7,"c":"RequestEnd","ev":"reply","p":"p1","errno":0}
