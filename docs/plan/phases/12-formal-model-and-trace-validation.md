@@ -475,6 +475,30 @@ Order after 12.12's audit, which may reorder them with the approved
   commit and never before the last kSync commit that returned; the
   reordering half is untested until H1 is fixed; checkpoints, WAL restart
   and growth, database creation and clean shutdown are outside it.
+  MERGED 2026-10-10, 73ed7e5 (two commits). The second round: the awk
+  counters initialised, so the WAL writeback is torn; `wal-info` prints
+  `beyond=` (this generation's frames past the recovered ones) and
+  `aftergap=` (those after a frame that did not land) and the check
+  `some-state-kept-a-later-frame` requires such a state in an epoch before
+  the cut mark (a whole-run version had passed with the bug still in,
+  because the unmount epoch tears other writes; on btrfs the check is a
+  SKIP with the reason: copy-on-write puts a frame in the file only at
+  the FLUSH, so its states are FLUSH-prefix coverage); `epoch_states` moved
+  to `sqlite_durability_lib.sh` with a host test over a synthetic log
+  (failing first: "no torn state for 12:0-8"); the forged-WAL self-check
+  walks candidates until one opens; an upper bound on the matched commit;
+  `log-apply` cross-checked against `replay-log` on one epoch; the log's
+  sector size from `log-info`; tears inside the budget; the restart check
+  reads the database (syslog is asynchronous); docs state the regime
+  tested and the gaps (growing WAL after a clean shutdown, crashes before
+  the first FLUSH, btrfs's equal within-epoch states). Final run (budget
+  1500, load 8-10): ext4 657 states, 70 distinct recovered, 48 states in
+  script epochs kept a later frame past a lost one; xfs 565 / 70 / 48;
+  btrfs 1486 / 27 / skipped; short 207 / 20 / 12; 0 violations; the
+  bound's margin 0 on btrfs, 3 on ext4/xfs. One state quoted: every write
+  of the epoch landed except the first 4 KiB block of the WAL writeback,
+  the WAL held 10 frames after the hole, SQLite recovered commit 19, the
+  last synced one. Not built: the per-transaction WAL copy (12.10).
 - 12.15 Runtime invariant checks derived from the model. The checking
   build's rules (docs/design.md "Runtime invariant checks": tri-state,
   dirty set vs unknown rows, held fds) are hand-written restatements of

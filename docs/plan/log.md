@@ -2508,3 +2508,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   agent (orchestrator's omission): follow-ups. Final round: rebase over 23.11/26.14e/15.6c,
   regenerate the sleep allowlist, make the two waiting tests prove the wait, rename the restart
   check, the README deadlock note; then merge.
+- 12.14 MERGED (73ed7e5, two commits; clean rebase): the reordering half is now exercised (48
+  states per run on ext4/xfs kept a later WAL frame past a lost one; SQLite recovered the last
+  synced commit each time), 0 violations on all three cache filesystems, the regime and gaps stated
+  honestly. Lane-2 free. The push point moves to main after this entry (fd9f437 plus 12.14).
