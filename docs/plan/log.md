@@ -2962,3 +2962,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   after a dcfs restart under the NFS export every uncached request failed with EIO (knfsd's export
   cache on the dead superblock; the QEMU NFS test flushes with exportfs -f). Stage 5 after the
   flush running. Design candidate recorded: keep the /dev/fuse descriptor across daemon restarts.
+- 21.1 client leg, stages 5 and 6: after exportfs -f a fresh mount still fails with EIO; the
+  capture shows the server answering NFS4ERR_IO on the export's root handle, so it is server-side
+  and the README's "exportfs -f is enough" claim did not hold on the production server. Needs the
+  server's dcfs log and knfsd state (russ). Recorded in the trial note as the open finding.
