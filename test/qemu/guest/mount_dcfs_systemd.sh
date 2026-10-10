@@ -261,7 +261,7 @@ reboot_clean_check() {
 boot1() {
 	# The fixtures: an ext4 on vda (a virtio disk, as a real machine's
 	# data disk) with a directory for the nested mount, a directory for the
-	# none form, one for the bind form.
+	# bind form, one nested under it.
 	restore_helpers
 	mount "$DEV" /mnt/m || fail fixture-mount "cannot mount $DEV"
 	i=0
@@ -790,7 +790,7 @@ EOF
 	else
 		fail systemd-failed-start-marks-unit-failed "rc=$frc state=$(systemctl is-active mnt-fail.mount) $(journalctl --no-pager -b -u mnt-fail.mount 2>&1 | tail -n 8)"
 	fi
-	# The native bind recipe (README, "bind, and the native bind recipe"): the
+	# The native bind recipe (README, "The bind form and the native bind recipe"): the
 	# real filesystem at a raw path (here a kernel bind of a directory stands for
 	# its mount unit), dcfs on the consumers' path with the raw path as SOURCE.
 	# The raw mount comes first (the unit orders after the mounts its SOURCE
