@@ -257,8 +257,7 @@ std::vector<std::string> NativeMountCommand(const CaptureRequest &request,
     command.push_back("-t");
     command.push_back(request.native_type);
   }
-  options.insert(options.end(), request.options.begin(),
-                 request.options.end());
+  options.insert(options.end(), request.options.begin(), request.options.end());
   if (!options.empty()) {
     command.push_back("-o");
     command.push_back(absl::StrJoin(options, ","));

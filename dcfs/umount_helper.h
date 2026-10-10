@@ -11,11 +11,11 @@
 // unmounts and then waits, with no timeout, for the daemon: "unmounted" means
 // "stopped".
 //
-// Which names umount(8) runs is in dcfs/mount_dcfs.h (kUmountFuseDcfsHelperName,
-// kUmountFuseHelperName). The helper runs `umount -i` (no helper: no recursion)
-// as a child with the options it was given, so the unmount, its messages and
-// its status are umount(8)'s whatever the mount, and waits only for a dcfs
-// daemon.
+// Which names umount(8) runs is in dcfs/mount_dcfs.h
+// (kUmountFuseDcfsHelperName, kUmountFuseHelperName). The helper runs `umount
+// -i` (no helper: no recursion) as a child with the options it was given, so
+// the unmount, its messages and its status are umount(8)'s whatever the mount,
+// and waits only for a dcfs daemon.
 //
 // How the helper finds the daemon: the daemon holds an exclusive flock(2) on a
 // lock file named by the device number of its FUSE mount

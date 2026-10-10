@@ -302,10 +302,10 @@ int InjectedFault(const char *call) {
 }  // namespace dcfs
 
 // A wrap fails with the sweep's errno when it says so (step 26.6).
-#define DCFS_INJECT(call, failed)                               \
+#define DCFS_INJECT(call, failed)                                \
   if (int injected = dcfs::InjectedFault(call); injected != 0) { \
-    errno = injected;                                           \
-    return failed;                                              \
+    errno = injected;                                            \
+    return failed;                                               \
   }
 
 extern "C" {
@@ -406,8 +406,7 @@ DCFS_BACKSTOP(int, renameat2,
 DCFS_BACKSTOP(int, mkdirat, (int d, const char *p, mode_t m), (d, p, m))
 DCFS_BACKSTOP(int, mknodat, (int d, const char *p, mode_t m, dev_t r),
               (d, p, m, r))
-DCFS_BACKSTOP(int, symlinkat, (const char *t, int d, const char *p),
-              (t, d, p))
+DCFS_BACKSTOP(int, symlinkat, (const char *t, int d, const char *p), (t, d, p))
 DCFS_BACKSTOP(int, linkat,
               (int od, const char *op, int nd, const char *np, int f),
               (od, op, nd, np, f))
@@ -430,14 +429,13 @@ DCFS_BACKSTOP(int, fsetxattr,
 DCFS_BACKSTOP(int, fremovexattr, (int d, const char *n), (d, n))
 DCFS_BACKSTOP(ssize_t, getxattr,
               (const char *p, const char *n, void *v, size_t s), (p, n, v, s))
-DCFS_BACKSTOP(ssize_t, listxattr, (const char *p, char *l, size_t s),
-              (p, l, s))
+DCFS_BACKSTOP(ssize_t, listxattr, (const char *p, char *l, size_t s), (p, l, s))
 DCFS_BACKSTOP(int, setxattr,
               (const char *p, const char *n, const void *v, size_t s, int f),
               (p, n, v, s, f))
 DCFS_BACKSTOP(int, removexattr, (const char *p, const char *n), (p, n))
-DCFS_BACKSTOP(int, fstatat64,
-              (int d, const char *p, struct stat64 *b, int f), (d, p, b, f))
+DCFS_BACKSTOP(int, fstatat64, (int d, const char *p, struct stat64 *b, int f),
+              (d, p, b, f))
 DCFS_BACKSTOP(int, fstatfs64, (int d, struct statfs64 *b), (d, b))
 int __real_fstatvfs64(int d, struct statvfs64 *b);
 int __wrap_fstatvfs64(int d, struct statvfs64 *b) {
@@ -473,19 +471,18 @@ int __wrap_openat64(int dirfd, const char *path, int flags, ...) {
 namespace dcfs {
 namespace {
 
-
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
+using cache::InodeId;
+using cache::kRootInode;
+using cache::LookupResult;
 using ::testing::AllOf;
 using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::Not;
 using ::testing::UnorderedElementsAre;
-using cache::InodeId;
-using cache::kRootInode;
-using cache::LookupResult;
 
 MATCHER_P(IsLookup, kind, "") { return arg.kind == kind; }
 
@@ -499,9 +496,9 @@ void AppendBytes(std::string &out, const T &value) {
 }
 
 void WriteFile(const std::string &path) {
-  ASSERT_THAT(syscalls::openat(AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC,
-                               0644),
-              IsOk())
+  ASSERT_THAT(
+      syscalls::openat(AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC, 0644),
+      IsOk())
       << path;  // the descriptor closes at once
 }
 
@@ -545,8 +542,8 @@ class DirCacheFSTest : public ::testing::Test {
   // Starts the filesystem over the source tree built so far: a fresh
   // cache, a DirCacheFS, and a libfuse session that has seen FUSE_INIT.
   void Start() {
-    ASSERT_OK_AND_ASSIGN(
-        db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
+    ASSERT_OK_AND_ASSIGN(db_,
+                         sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
     // Every request (and backing syscall) checks the invariants
     // (dcfs/testonly/invariant_checker.h); a violation aborts the test.
     checker_ = std::make_unique<testonly::InvariantChecker>();
@@ -684,8 +681,7 @@ class DirCacheFSTest : public ::testing::Test {
         ::testing::UnitTest::GetInstance()->current_test_info();
     std::fflush(stdout);
     recorder_ = std::make_unique<testonly::TraceRecorder>(
-        STDOUT_FILENO,
-        absl::StrCat(info->test_suite_name(), ".", info->name()),
+        STDOUT_FILENO, absl::StrCat(info->test_suite_name(), ".", info->name()),
         /*files=*/!identities_only, /*lifetimes=*/!identities_only,
         /*identities=*/true, /*directories=*/!identities_only);
     observers_->Add(recorder_.get());
@@ -817,7 +813,7 @@ class DirCacheFSTest : public ::testing::Test {
     std::string body;
     AppendBytes(body, in);
     Reply reply = Send(FUSE_OPEN, static_cast<uint64_t>(id), body);
-    struct fuse_open_out out {};
+    struct fuse_open_out out{};
     if (reply.error != 0 || reply.payload.size() < sizeof(out)) {
       return {reply, 0};
     }
@@ -840,10 +836,10 @@ class DirCacheFSTest : public ::testing::Test {
     AppendBytes(body, in);
     body.append(name);
     body.push_back('\0');
-    Created created{.reply = Send(FUSE_CREATE, static_cast<uint64_t>(parent),
-                                  body)};
-    struct fuse_entry_out entry {};
-    struct fuse_open_out open {};
+    Created created{.reply =
+                        Send(FUSE_CREATE, static_cast<uint64_t>(parent), body)};
+    struct fuse_entry_out entry{};
+    struct fuse_open_out open{};
     if (created.reply.error != 0 ||
         created.reply.payload.size() < sizeof(entry) + sizeof(open)) {
       return created;
@@ -881,7 +877,7 @@ class DirCacheFSTest : public ::testing::Test {
     body.append(name);
     body.push_back('\0');
     Reply reply = Send(FUSE_MKDIR, static_cast<uint64_t>(parent), body);
-    struct fuse_entry_out entry {};
+    struct fuse_entry_out entry{};
     if (reply.error != 0 || reply.payload.size() < sizeof(entry)) {
       return {reply, 0};
     }
@@ -925,7 +921,7 @@ class DirCacheFSTest : public ::testing::Test {
     std::string body(name);
     body.push_back('\0');
     Reply reply = Send(FUSE_LOOKUP, static_cast<uint64_t>(parent), body);
-    struct fuse_entry_out entry {};
+    struct fuse_entry_out entry{};
     if (reply.error == 0 && reply.payload.size() >= sizeof(entry)) {
       std::memcpy(&entry, reply.payload.data(), sizeof(entry));
     }
@@ -938,7 +934,7 @@ class DirCacheFSTest : public ::testing::Test {
     std::string body;
     AppendBytes(body, in);
     Reply reply = Send(FUSE_GETATTR, static_cast<uint64_t>(id), body);
-    struct fuse_attr_out out {};
+    struct fuse_attr_out out{};
     if (reply.error == 0 && reply.payload.size() >= sizeof(out)) {
       std::memcpy(&out, reply.payload.data(), sizeof(out));
     }
@@ -1004,8 +1000,8 @@ class DirCacheFSTest : public ::testing::Test {
     body.push_back('\0');
     Created created{
         .reply = Send(FUSE_TMPFILE, static_cast<uint64_t>(parent), body)};
-    struct fuse_entry_out entry {};
-    struct fuse_open_out open {};
+    struct fuse_entry_out entry{};
+    struct fuse_open_out open{};
     if (created.reply.error != 0 ||
         created.reply.payload.size() < sizeof(entry) + sizeof(open)) {
       return created;
@@ -1032,7 +1028,7 @@ class DirCacheFSTest : public ::testing::Test {
     AppendBytes(body, arg);
     Reply reply = Send(FUSE_COPY_FILE_RANGE, static_cast<uint64_t>(in), body);
     if (reply.error != 0) return reply.error;
-    struct fuse_write_out written {};
+    struct fuse_write_out written{};
     if (reply.payload.size() < sizeof(written)) return -EIO;
     std::memcpy(&written, reply.payload.data(), sizeof(written));
     return written.size;
@@ -1065,7 +1061,7 @@ class DirCacheFSTest : public ::testing::Test {
                                                     InodeId newparent,
                                                     std::string_view newname) {
     Reply reply = Link(id, newparent, newname);
-    struct fuse_entry_out entry {};
+    struct fuse_entry_out entry{};
     if (reply.error == 0 && reply.payload.size() >= sizeof(entry)) {
       std::memcpy(&entry, reply.payload.data(), sizeof(entry));
     }
@@ -1118,8 +1114,7 @@ class DirCacheFSTest : public ::testing::Test {
   // boundary below the source. Unmounted at TearDown.
   void MountBelow(std::string_view rel) {
     const std::string path = Path(rel);
-    ASSERT_THAT(syscalls::mount("tmpfs", path, "tmpfs", 0, "mode=0751"),
-                IsOk())
+    ASSERT_THAT(syscalls::mount("tmpfs", path, "tmpfs", 0, "mode=0751"), IsOk())
         << path;
     mounts_below_.push_back(path);
   }
@@ -1162,7 +1157,7 @@ class DirCacheFSTest : public ::testing::Test {
     while (pos < p.size()) {
       const size_t dirent_at =
           plus ? pos + offsetof(struct fuse_direntplus, dirent) : pos;
-      struct fuse_dirent d {};
+      struct fuse_dirent d{};
       if (dirent_at + FUSE_NAME_OFFSET > p.size()) break;
       std::memcpy(&d, p.data() + dirent_at, FUSE_NAME_OFFSET);
       names.emplace_back(p.substr(dirent_at + FUSE_NAME_OFFSET, d.namelen));
@@ -1231,7 +1226,7 @@ class DirCacheFSTest : public ::testing::Test {
     for (int i = 0; i < count; ++i) {
       out.append(static_cast<const char *>(iov[i].iov_base), iov[i].iov_len);
     }
-    struct fuse_out_header hdr {};
+    struct fuse_out_header hdr{};
     if (out.size() < sizeof(hdr)) {
       ADD_FAILURE() << "short reply";
       errno = EINVAL;
@@ -1451,9 +1446,9 @@ TEST_F(DirCacheFSTest, ReaddirplusIsNotServedWhileAMutationIsInFlight) {
   WriteFile(Path("b"));
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId a, Id("a"));
-  ASSERT_OK_AND_ASSIGN(cache::Mutation unlink,
-                       cache::BeginRemove(ctx_, kRootInode, "a", a,
-                                          cache::BeginFill(ctx_)));
+  ASSERT_OK_AND_ASSIGN(
+      cache::Mutation unlink,
+      cache::BeginRemove(ctx_, kRootInode, "a", a, cache::BeginFill(ctx_)));
   EXPECT_EQ(ErrnoOf(List(kRootInode, true).status()), EAGAIN);
   EXPECT_EQ(ErrnoOf(List(kRootInode, false).status()), EAGAIN);
   unlink.End();
@@ -1480,9 +1475,9 @@ class RenameStaleSourceTest : public DirCacheFSTest {
     ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("d"), 0755), IsOk());
     WriteFile(Path("d/a"));
     if (second_link) {
-      ASSERT_THAT(
-          syscalls::linkat(AT_FDCWD, Path("d/a"), AT_FDCWD, Path("d/link_a"), 0),
-          IsOk());
+      ASSERT_THAT(syscalls::linkat(AT_FDCWD, Path("d/a"), AT_FDCWD,
+                                   Path("d/link_a"), 0),
+                  IsOk());
     }
     WriteFile(Path("d/c"));
     ino_a_ = InoOf(Path("d/a"));
@@ -1611,10 +1606,9 @@ TEST_F(DirCacheFSTest, ReleaseEndsTheWritesForAFillThatBeganBefore) {
 
   // A fill begins and reads f's attributes; then a write, and the RELEASE.
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
-  ASSERT_OK_AND_ASSIGN(
-      struct statx stale,
-      syscalls::statx(AT_FDCWD, Path("f"), AT_SYMLINK_NOFOLLOW,
-                      STATX_BASIC_STATS | STATX_BTIME));
+  ASSERT_OK_AND_ASSIGN(struct statx stale,
+                       syscalls::statx(AT_FDCWD, Path("f"), AT_SYMLINK_NOFOLLOW,
+                                       STATX_BASIC_STATS | STATX_BTIME));
   AppendToFile(Path("f"), "late");
   ASSERT_EQ(Release(f, fh).error, 0);
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr fresh, cache::GetAttr(ctx_, f));
@@ -1970,8 +1964,8 @@ TEST_F(DirCacheFSTest, TraceScenarioMkdirDuringListing) {
 
 // A mkdir in a directory whose listing is complete. Phase 1 marks the new
 // name unknown, and the trace shows it. Trace validation's fault-injection
-// test (//dcfs:trace_fault_skip_mark_unknown_test) runs this test alone in a build
-// whose phase 1 skips that write (testonly/skip_mark_unknown.cc), and
+// test (//dcfs:trace_fault_skip_mark_unknown_test) runs this test alone in a
+// build whose phase 1 skips that write (testonly/skip_mark_unknown.cc), and
 // requires validation to reject its trace at that phase 1.
 TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
   WriteFile(Path("a"));
@@ -1983,7 +1977,6 @@ TEST_F(DirCacheFSTest, CreateMarksItsNameUnknown) {
   EXPECT_EQ(Mkdir(kRootInode, "new").first.error, 0);
   EXPECT_EQ(Cached(kRootInode, "new").first, LookupResult::Kind::kFound);
 }
-
 
 // --- copy_file_range, ioctls, O_TMPFILE (step 23.4) -----------------------
 
@@ -2000,9 +1993,8 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnImmutableFileIsRefused) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   int flags = 0;
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor raw_fd,
-      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor raw_fd,
+                       syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
   const int raw = *raw_fd;
   ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int immutable = flags | FS_IMMUTABLE_FL;
@@ -2065,9 +2057,8 @@ TEST_F(DirCacheFSTest, WritableOpenOfAnAppendOnlyFileNeedsOAppend) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   int flags = 0;
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor raw_fd,
-      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor raw_fd,
+                       syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
   const int raw = *raw_fd;
   ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int append_only = flags | FS_APPEND_FL;
@@ -2134,7 +2125,7 @@ TEST_F(DirCacheFSTest, RefusedAndFsxattrFlagChangesMatchTheRevalModel) {
   ASSERT_EQ(open.error, 0);
   Reply getx = Ioctl(f, FS_IOC_FSGETXATTR, "", sizeof(struct fsxattr));
   ASSERT_EQ(getx.error, 0);
-  struct fsxattr fsx {};
+  struct fsxattr fsx{};
   std::memcpy(&fsx, getx.payload.data() + sizeof(struct fuse_ioctl_out),
               sizeof(fsx));
   auto as_bytes = [](const struct fsxattr &v) {
@@ -2251,9 +2242,9 @@ TEST_F(DirCacheFSTest, CreateThatCannotBeRecordedRepliesEexist) {
   EXPECT_EQ(Create(kRootInode, "new", O_RDWR).reply.error, -EEXIST);
   EXPECT_EQ(Mkdir(kRootInode, "newdir").first.error, -EEXIST);
   EXPECT_EQ(Send(FUSE_MKNOD, kRootInode, MknodBody("fifo")).error, -EEXIST);
-  EXPECT_EQ(Send(FUSE_SYMLINK, kRootInode, NameBody("link") + NameBody("t"))
-                .error,
-            -EEXIST);
+  EXPECT_EQ(
+      Send(FUSE_SYMLINK, kRootInode, NameBody("link") + NameBody("t")).error,
+      -EEXIST);
   ASSERT_THAT(db_.Exec("DROP TRIGGER no_insert"), IsOk());
   for (const char *name : {"new", "newdir", "fifo", "link"}) {
     EXPECT_THAT(syscalls::fstatat(AT_FDCWD, Path(name), AT_SYMLINK_NOFOLLOW),
@@ -2294,8 +2285,8 @@ TEST_F(DirCacheFSTest, CreateThatCannotBeRecordedEndsItsTraceFailed) {
   std::vector<std::string> root;
   for (std::string_view line :
        absl::StrSplit(ReadWholeFile(path), '\n', absl::SkipEmpty())) {
-    if (absl::StartsWith(line, absl::StrCat("DCFS-TRACE selfcheck ",
-                                            kRootInode, " "))) {
+    if (absl::StartsWith(
+            line, absl::StrCat("DCFS-TRACE selfcheck ", kRootInode, " "))) {
       root.emplace_back(line);
     }
   }
@@ -2408,13 +2399,13 @@ TEST_F(DirCacheFSTest, CreateWhoseRefreshFailsIsRepliedFromTheRow) {
 
 // A getattr of `id` whose cached attributes are unknown: the request that
 // reopens it by handle (FreshAttr) and, failing, refreshes nothing.
-#define EXPECT_KEPT_UNKNOWN(id, dir, name)                                  \
-  do {                                                                      \
-    absl::StatusOr<cache::CachedAttr> kept = cache::GetAttr(ctx_, id);      \
-    EXPECT_THAT(kept, IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, \
-                                                  false)));                 \
-    EXPECT_THAT(cache::Lookup(ctx_, dir, name),                             \
-                IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));        \
+#define EXPECT_KEPT_UNKNOWN(id, dir, name)                                     \
+  do {                                                                         \
+    absl::StatusOr<cache::CachedAttr> kept = cache::GetAttr(ctx_, id);         \
+    EXPECT_THAT(                                                               \
+        kept, IsOkAndHolds(testing::Field(&cache::CachedAttr::valid, false))); \
+    EXPECT_THAT(cache::Lookup(ctx_, dir, name),                                \
+                IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));           \
   } while (false)
 
 TEST_F(DirCacheFSTest, EstaleWithTheNameStillThereRepliesEio) {
@@ -2553,7 +2544,8 @@ TEST_F(DirCacheFSTest, EstaleWithTooManyUnknownNamesRepliesEio) {
   for (int i = 0; i < 17; ++i) {
     ASSERT_THAT(db_.Exec(absl::StrCat(
                     "INSERT INTO dentries (parent, name, state) VALUES (1, "
-                    "CAST('u", i, "' AS BLOB), 'unknown')")),
+                    "CAST('u",
+                    i, "' AS BLOB), 'unknown')")),
                 IsOk());
   }
   OpenByHandleFailures() = {ESTALE};
@@ -2634,9 +2626,8 @@ TEST_F(DirCacheFSTest, CopyFileRangeCopiesOnTheBackingFiles) {
   // attributes right: here a destination whose shared backing fd is
   // read-only (the file was immutable when it was opened).
   int flags = 0;
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor raw_fd,
-      syscalls::openat(AT_FDCWD, Path("dst"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor raw_fd,
+                       syscalls::openat(AT_FDCWD, Path("dst"), O_RDONLY));
   const int raw = *raw_fd;
   ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int immutable = flags | FS_IMMUTABLE_FL;
@@ -2658,9 +2649,8 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
   ASSERT_OK_AND_ASSIGN(InodeId d, Id("d"));
   int flags = 0;
   {
-    ASSERT_OK_AND_ASSIGN(
-        FileDescriptor raw_fd,
-        syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+    ASSERT_OK_AND_ASSIGN(FileDescriptor raw_fd,
+                         syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
     const int raw = *raw_fd;
     ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   }
@@ -2682,8 +2672,7 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
   EXPECT_THAT(Dirty(), Contains(f));
   ASSERT_OK_AND_ASSIGN(cache::CachedAttr attr, cache::GetAttr(ctx_, f));
   EXPECT_TRUE(attr.valid);
-  ASSERT_OK_AND_ASSIGN(struct stat st,
-                       syscalls::fstatat(AT_FDCWD, Path("f")));
+  ASSERT_OK_AND_ASSIGN(struct stat st, syscalls::fstatat(AT_FDCWD, Path("f")));
   EXPECT_EQ(attr.st.st_ctim.tv_sec, st.st_ctim.tv_sec);
   EXPECT_EQ(attr.st.st_ctim.tv_nsec, st.st_ctim.tv_nsec);
   // A directory's (FUSE_IOCTL_DIR), and the generation.
@@ -2697,8 +2686,7 @@ TEST_F(DirCacheFSTest, IoctlForwardsItsAllowlist) {
   EXPECT_EQ(gen, attr.backing_gen);
   // Not forwarded: ENOTTY; a set the backing filesystem refuses: its errno.
   EXPECT_EQ(Ioctl(f, FS_IOC_GETFSLABEL, "", FSLABEL_MAX).error, -ENOTTY);
-  EXPECT_EQ(Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int), FUSE_IOCTL_COMPAT)
-                .error,
+  EXPECT_EQ(Ioctl(f, FS_IOC_GETFLAGS, "", sizeof(int), FUSE_IOCTL_COMPAT).error,
             -ENOTTY);
   const int bogus = -1;
   std::string bad(reinterpret_cast<const char *>(&bogus), sizeof(bogus));
@@ -3118,7 +3106,7 @@ class ReaddirWorkTest : public DirCacheFSTest {
       while (pos < p.size()) {
         const size_t at =
             plus ? pos + offsetof(struct fuse_direntplus, dirent) : pos;
-        struct fuse_dirent d {};
+        struct fuse_dirent d{};
         std::memcpy(&d, p.data() + at, FUSE_NAME_OFFSET);
         std::string name = p.substr(at + FUSE_NAME_OFFSET, d.namelen);
         if (name != "." && name != "..") names.push_back(std::move(name));
@@ -3255,8 +3243,7 @@ class AllLogCapture : public absl::LogSink {
   AllLogCapture() { absl::AddLogSink(this); }
   ~AllLogCapture() override { absl::RemoveLogSink(this); }
   void Send(const absl::LogEntry &entry) override {
-    lines.emplace_back(entry.log_severity(),
-                       std::string(entry.text_message()));
+    lines.emplace_back(entry.log_severity(), std::string(entry.text_message()));
   }
   // How many lines at `min` or above contain `text` (all if empty).
   int Count(absl::LogSeverity min, std::string_view text = "") const {
@@ -3267,8 +3254,8 @@ class AllLogCapture : public absl::LogSink {
   std::string Dump() const {
     std::string out;
     for (const auto &line : lines) {
-      absl::StrAppend(&out, absl::LogSeverityName(line.first), " ",
-                      line.second, "\n");
+      absl::StrAppend(&out, absl::LogSeverityName(line.first), " ", line.second,
+                      "\n");
     }
     return out;
   }
@@ -3295,15 +3282,13 @@ TEST_F(DirCacheFSTest, RefusedWritableOpenNamesTheBackingFlag) {
   auto [open, fh] = Open(f, O_RDWR);
   ASSERT_EQ(open.error, 0);
   int flags = 0;
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor raw_fd,
-      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor raw_fd,
+                       syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
   const int raw = *raw_fd;
   ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   ScopedVerbosity v(2);
-  for (const auto &[flag, said] :
-       {std::pair{FS_IMMUTABLE_FL, "immutable"},
-        std::pair{FS_APPEND_FL, "append-only"}}) {
+  for (const auto &[flag, said] : {std::pair{FS_IMMUTABLE_FL, "immutable"},
+                                   std::pair{FS_APPEND_FL, "append-only"}}) {
     const int changed = flags | flag;
     ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &changed), IsOk());
     OutOfBand(f);
@@ -3312,7 +3297,8 @@ TEST_F(DirCacheFSTest, RefusedWritableOpenNamesTheBackingFlag) {
     EXPECT_GE(capture.Count(absl::LogSeverity::kInfo,
                             absl::StrCat("the backing file is ", said)),
               1)
-        << said << "\n" << capture.Dump();
+        << said << "\n"
+        << capture.Dump();
     ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_SETFLAGS, &flags), IsOk());
     OutOfBand(f);
   }
@@ -3334,18 +3320,21 @@ TEST_F(ClockTest, ASyncPointIsLoggedAtInfoWithItsRows) {
   AllLogCapture capture;
   Tick();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 0)
-      << "before the interval has elapsed\n" << capture.Dump();
+      << "before the interval has elapsed\n"
+      << capture.Dump();
   clock_.AdvanceTime(absl::Seconds(6));
   Tick();
   ASSERT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 1)
       << capture.Dump();
-  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point: cleared "
-                                                     "1 of 1 dirty rows in "),
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
+                          "sync point: cleared "
+                          "1 of 1 dirty rows in "),
             1)
       << capture.Dump();
   Tick();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sync point"), 1)
-      << "nothing dirty, no sync point\n" << capture.Dump();
+      << "nothing dirty, no sync point\n"
+      << capture.Dump();
 }
 
 // An fsync's sync point is not announced at INFO (one per call), only at
@@ -3391,15 +3380,18 @@ TEST_F(ClockTest, TheFirstBackingAccessAfterAnIdlePeriodIsLoggedAtInfo) {
   };
   reach_backing();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "idle"), 0)
-      << "the first access of the run\n" << capture.Dump();
+      << "the first access of the run\n"
+      << capture.Dump();
   clock_.AdvanceTime(absl::Seconds(30));
   reach_backing();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "idle"), 0)
-      << "a short pause\n" << capture.Dump();
+      << "a short pause\n"
+      << capture.Dump();
   clock_.AdvanceTime(absl::Seconds(90));
   EXPECT_EQ(Getattr(f).first.error, 0);  // from the cache: attributes valid
   EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "idle"), 0)
-      << "a request that did not reach the backing\n" << capture.Dump();
+      << "a request that did not reach the backing\n"
+      << capture.Dump();
   reach_backing();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
                           "first backing access after 1m30s idle"),
@@ -3417,7 +3409,8 @@ TEST_F(DirCacheFSTest, VerboseLevelsShowRequestsAndTheirReplies) {
     auto [lookup, entry] = Lookup(kRootInode, "f");
     ASSERT_EQ(lookup.error, 0);
     EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "Lookup(ino="), 0)
-        << "--v=0\n" << capture.Dump();
+        << "--v=0\n"
+        << capture.Dump();
   }
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, f), IsOk());
@@ -3425,17 +3418,19 @@ TEST_F(DirCacheFSTest, VerboseLevelsShowRequestsAndTheirReplies) {
     ScopedVerbosity v(1);
     AllLogCapture capture;
     ASSERT_EQ(Getattr(f).first.error, 0);
-    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
-                            absl::StrCat("Getattr(ino=", f,
-                                         ") reached the backing: ")),
+    EXPECT_EQ(capture.Count(
+                  absl::LogSeverity::kInfo,
+                  absl::StrCat("Getattr(ino=", f, ") reached the backing: ")),
               1)
-        << "--v=1\n" << capture.Dump();
+        << "--v=1\n"
+        << capture.Dump();
     EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, ") -> "), 0)
-        << "--v=1 shows no replies\n" << capture.Dump();
+        << "--v=1 shows no replies\n"
+        << capture.Dump();
     ASSERT_EQ(Getattr(f).first.error, 0);  // cached now
-    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "reached the backing"),
-              1)
-        << "a cached request is not shown at --v=1\n" << capture.Dump();
+    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "reached the backing"), 1)
+        << "a cached request is not shown at --v=1\n"
+        << capture.Dump();
   }
   {
     ScopedVerbosity v(2);
@@ -3444,15 +3439,16 @@ TEST_F(DirCacheFSTest, VerboseLevelsShowRequestsAndTheirReplies) {
     EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
                             absl::StrCat("Getattr(ino=", f, ") -> OK")),
               1)
-        << "--v=2\n" << capture.Dump();
+        << "--v=2\n"
+        << capture.Dump();
     EXPECT_EQ(Getattr(9999).first.error, -ESTALE);
     EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "Getattr(ino=9999) -> "),
               1)
         << capture.Dump();
-    EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo,
-                            "Getattr(ino=9999) -> OK"),
-              0)
-        << "a failed reply shows its status\n" << capture.Dump();
+    EXPECT_EQ(
+        capture.Count(absl::LogSeverity::kInfo, "Getattr(ino=9999) -> OK"), 0)
+        << "a failed reply shows its status\n"
+        << capture.Dump();
   }
 }
 
@@ -3477,8 +3473,7 @@ TEST_F(DirCacheFSTest, AnErrorDcfsProducedIsLoggedOnceAtError) {
                           "backing filesystem"),
             1)
       << capture.Dump();
-  EXPECT_EQ(capture.Count(absl::LogSeverity::kError, "for d in directory 1"),
-            1)
+  EXPECT_EQ(capture.Count(absl::LogSeverity::kError, "for d in directory 1"), 1)
       << capture.Dump();
 }
 
@@ -3505,9 +3500,9 @@ TEST_F(DirCacheFSTest, ABackingErrnoWhileRecordingACreateIsLoggedAtError) {
   auto [reply, id] = Mkdir(kRootInode, "d");
   EXPECT_NE(reply.error, 0) << capture.Dump();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning), 1) << capture.Dump();
-  EXPECT_EQ(capture.Count(absl::LogSeverity::kError,
-                          "while probing the new child"),
-            1)
+  EXPECT_EQ(
+      capture.Count(absl::LogSeverity::kError, "while probing the new child"),
+      1)
       << capture.Dump();
 }
 
@@ -3562,7 +3557,8 @@ TEST_F(DirCacheFSTest, VerbosityThreeShowsSqlAndSteps) {
     AllLogCapture capture;
     ASSERT_EQ(Getattr(f).first.error, 0);
     EXPECT_EQ(capture.Count(absl::LogSeverity::kInfo, "sqlite3_step"), 0)
-        << "--v=0\n" << capture.Dump();
+        << "--v=0\n"
+        << capture.Dump();
   }
   ScopedVerbosity v(3);
   AllLogCapture capture;
@@ -3673,7 +3669,8 @@ TEST_F(DirCacheFSTest, RecoveryCountsTheRowsItCouldNotProbe) {
             1)
       << capture.Dump();
   EXPECT_EQ(capture.Count(absl::LogSeverity::kWarning, "forgot"), 0)
-      << "no row was forgotten\n" << capture.Dump();
+      << "no row was forgotten\n"
+      << capture.Dump();
   EXPECT_THAT(cache::GetAttr(ctx_, f), IsOk());  // Left for next time.
   ASSERT_THAT(cache::DeleteInode(ctx_, f), IsOk());
 }
@@ -3942,9 +3939,8 @@ TEST_F(DirCacheFSTest, RemovedFileCopyAndIoctl) {
   auto [lookup, entry] = Lookup(kRootInode, "f");
   ASSERT_EQ(lookup.error, 0);
   const InodeId f = static_cast<InodeId>(entry.nodeid);
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor held_fd,
-      syscalls::openat(AT_FDCWD, Path("f"), O_PATH));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor held_fd,
+                       syscalls::openat(AT_FDCWD, Path("f"), O_PATH));
   const int held = *held_fd;
   ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
 
@@ -3978,9 +3974,8 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
   ASSERT_OK_AND_ASSIGN(InodeId src, Id("src"));
   StartTrace();  // and the files' (formal/reval.tla)
   int flags = 0;
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor raw_fd,
-      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor raw_fd,
+                       syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
   const int raw = *raw_fd;
   ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int immutable = flags | FS_IMMUTABLE_FL;
@@ -4002,8 +3997,8 @@ TEST_F(DirCacheFSTest, WritableOpenAfterChattrMinusIWritesThroughItsFd) {
   auto [in, in_fh] = Open(src, O_RDONLY);
   ASSERT_EQ(in.error, 0);
   EXPECT_EQ(CopyFileRange(src, in_fh, f, rw_fh, 3), 3);
-  for (auto [id, fh] : {std::pair{f, rw_fh}, std::pair{f, ro_fh},
-                        std::pair{src, in_fh}}) {
+  for (auto [id, fh] :
+       {std::pair{f, rw_fh}, std::pair{f, ro_fh}, std::pair{src, in_fh}}) {
     EXPECT_EQ(Release(id, fh).error, 0);
   }
 }
@@ -4016,7 +4011,6 @@ int OpenFdCount() {
   // The listing's own descriptor is among them, as in the iterator's.
   return fds.ok() ? static_cast<int>(fds->size()) : 0;
 }
-
 
 // Writable opens sharing a read-only backing descriptor (review L-a): the
 // write fd is kept from the first, and replaced only by one without
@@ -4254,8 +4248,8 @@ TEST_F(DirCacheFSTest, HeldDescriptorsStopAtTheCap) {
   }
   for (InodeId id : readers) {
     auto [open, fh] = Open(id, O_RDONLY);
-    EXPECT_EQ(open.error, 0) << "open of reader " << id << " with "
-                             << kWritten << " files written";
+    EXPECT_EQ(open.error, 0)
+        << "open of reader " << id << " with " << kWritten << " files written";
     if (fh != 0) opened.emplace_back(id, fh);
   }
   for (auto [id, fh] : opened) EXPECT_EQ(Release(id, fh).error, 0);
@@ -4264,7 +4258,8 @@ TEST_F(DirCacheFSTest, HeldDescriptorsStopAtTheCap) {
   // Within the cap: held, so its FORGET re-reads through it.
   ASSERT_EQ(Fsyncdir(kRootInode).error, 0);
   Forget(written[0], 1);
-  ASSERT_OK_AND_ASSIGN(cache::CachedAttr held, cache::GetAttr(ctx_, written[0]));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr held,
+                       cache::GetAttr(ctx_, written[0]));
   EXPECT_TRUE(held.valid);
   EXPECT_THAT(Dirty(), Not(Contains(written[0])));
   // Beyond it: the phase 1 alone.
@@ -4279,7 +4274,8 @@ TEST_F(DirCacheFSTest, HeldDescriptorsStopAtTheCap) {
   ASSERT_EQ(Release(later, fh).error, 0);
   AppendToFile(Path("later"), "stored");
   Forget(later, 1);
-  ASSERT_OK_AND_ASSIGN(cache::CachedAttr refreshed, cache::GetAttr(ctx_, later));
+  ASSERT_OK_AND_ASSIGN(cache::CachedAttr refreshed,
+                       cache::GetAttr(ctx_, later));
   EXPECT_TRUE(refreshed.valid);
   EXPECT_EQ(refreshed.st.st_size, 6);
 }
@@ -4331,8 +4327,7 @@ TEST_F(DirCacheFSTest, NoHeldDescriptorsIsAWarningAtStartup) {
     ASSERT_EQ(open.error, 0);
     ASSERT_EQ(Release(f, fh).error, 0);
   }
-  EXPECT_EQ(said("hold a descriptor"), 0)
-      << absl::StrJoin(capture.lines, "\n");
+  EXPECT_EQ(said("hold a descriptor"), 0) << absl::StrJoin(capture.lines, "\n");
 }
 
 // A held descriptor is closed at the file's last FORGET, when dcfs removes
@@ -4493,9 +4488,8 @@ TEST_F(DirCacheFSTest, RemovedFileCanBeChanged) {
   const InodeId f = static_cast<InodeId>(entry.nodeid);
   // Keep the object alive as the kernel's reference would (the record
   // holds its own descriptor; this one lets the test look at the object).
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor held_fd,
-      syscalls::openat(AT_FDCWD, Path("f"), O_PATH));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor held_fd,
+                       syscalls::openat(AT_FDCWD, Path("f"), O_PATH));
   const int held = *held_fd;
   ASSERT_EQ(Unlink(kRootInode, "f").error, 0);
   ASSERT_THAT(cache::GetAttr(ctx_, f).status(),
@@ -4519,7 +4513,7 @@ TEST_F(DirCacheFSTest, RemovedFileCanBeChanged) {
   EXPECT_EQ(attr.size, 2u);
   Reply value = Getxattr(f, "user.k");
   ASSERT_EQ(value.error, 0);
-  struct fuse_getxattr_out size {};
+  struct fuse_getxattr_out size{};
   ASSERT_GE(value.payload.size(), sizeof(size));
   std::memcpy(&size, value.payload.data(), sizeof(size));
   EXPECT_EQ(size.size, 1u);
@@ -4629,25 +4623,25 @@ TEST_F(DirCacheFSTest, LinkOfARemovedObjectAnswersAsTheBacking) {
   rmdir_body.push_back('\0');
   ASSERT_EQ(Send(FUSE_RMDIR, kRootInode, rmdir_body).error, 0);
 
-  const int f_backing = ErrnoOf(
-      syscalls::linkat(*f_fd, "", *root_fd, "f-back", AT_EMPTY_PATH));
+  const int f_backing =
+      ErrnoOf(syscalls::linkat(*f_fd, "", *root_fd, "f-back", AT_EMPTY_PATH));
   EXPECT_EQ(f_backing, ENOENT) << "the backing filesystem's answer";
-  EXPECT_EQ(Link(static_cast<InodeId>(entry_f.nodeid), kRootInode, "f-link")
-                .error,
-            -f_backing)
+  EXPECT_EQ(
+      Link(static_cast<InodeId>(entry_f.nodeid), kRootInode, "f-link").error,
+      -f_backing)
       << "an unlinked file";
-  const int d_backing = ErrnoOf(
-      syscalls::linkat(*d_fd, "", *root_fd, "d-back", AT_EMPTY_PATH));
+  const int d_backing =
+      ErrnoOf(syscalls::linkat(*d_fd, "", *root_fd, "d-back", AT_EMPTY_PATH));
   EXPECT_EQ(d_backing, EPERM) << "the backing filesystem's answer";
-  EXPECT_EQ(Link(static_cast<InodeId>(entry_d.nodeid), kRootInode, "d-link")
-                .error,
-            -d_backing)
+  EXPECT_EQ(
+      Link(static_cast<InodeId>(entry_d.nodeid), kRootInode, "d-link").error,
+      -d_backing)
       << "a removed directory";
   // Neither name appeared, and the cache says so after the failed links.
-  EXPECT_EQ(ErrnoOf(syscalls::fstatat(AT_FDCWD, Path("f-link"),
-                                     AT_SYMLINK_NOFOLLOW)
-                        .status()),
-            ENOENT);
+  EXPECT_EQ(
+      ErrnoOf(syscalls::fstatat(AT_FDCWD, Path("f-link"), AT_SYMLINK_NOFOLLOW)
+                  .status()),
+      ENOENT);
   EXPECT_EQ(Lookup(kRootInode, "f-link").second.nodeid, 0u)
       << "a negative entry (nodeid 0)";
   EXPECT_EQ(Lookup(kRootInode, "d-link").second.nodeid, 0u)
@@ -4665,17 +4659,16 @@ TEST_F(DirCacheFSTest, LinkOfARemovedObjectAnswersAsTheBacking) {
 TEST_F(DirCacheFSTest, LinkOfAClosedTmpfileGivesItsNodeidAName) {
   Start();
   // The backing filesystem's own answer, for the same sequence.
-  ASSERT_OK_AND_ASSIGN(FileDescriptor ref,
-                       syscalls::openat(AT_FDCWD, Path(""),
-                                        O_TMPFILE | O_RDWR, 0644));
-  ASSERT_OK_AND_ASSIGN(FileDescriptor ref_path,
-                       syscalls::openat(AT_FDCWD,
-                                        absl::StrCat("/proc/self/fd/", *ref),
-                                        O_PATH));
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor ref,
+      syscalls::openat(AT_FDCWD, Path(""), O_TMPFILE | O_RDWR, 0644));
+  ASSERT_OK_AND_ASSIGN(
+      FileDescriptor ref_path,
+      syscalls::openat(AT_FDCWD, absl::StrCat("/proc/self/fd/", *ref), O_PATH));
   ref = FileDescriptor();
-  EXPECT_THAT(syscalls::linkat(*ref_path, "", AT_FDCWD, Path("ref"),
-                               AT_EMPTY_PATH),
-              IsOk())
+  EXPECT_THAT(
+      syscalls::linkat(*ref_path, "", AT_FDCWD, Path("ref"), AT_EMPTY_PATH),
+      IsOk())
       << "the backing filesystem links it";
 
   Created tmp = Tmpfile(kRootInode, O_RDWR);
@@ -4804,11 +4797,10 @@ TEST_F(DirCacheFSTest, EveryOperationOnAStubIsRefused) {
   EXPECT_EQ(ErrnoOf(List(stub, false).status()), ENOTSUP);
   EXPECT_EQ(ErrnoOf(List(stub, true).status()), ENOTSUP);
   EXPECT_EQ(Fsyncdir(stub).error, -ENOTSUP);
-  EXPECT_EQ(Send(FUSE_REMOVEXATTR, static_cast<uint64_t>(stub), name("user.x"))
-                .error,
-            -ENOTSUP);
-  EXPECT_EQ(Ioctl(stub, FS_IOC_GETFLAGS, "", sizeof(int), FUSE_IOCTL_DIR)
-                .error,
+  EXPECT_EQ(
+      Send(FUSE_REMOVEXATTR, static_cast<uint64_t>(stub), name("user.x")).error,
+      -ENOTSUP);
+  EXPECT_EQ(Ioctl(stub, FS_IOC_GETFLAGS, "", sizeof(int), FUSE_IOCTL_DIR).error,
             -ENOTTY);
   EXPECT_EQ(Tmpfile(stub, O_RDWR).reply.error, -ENOTSUP);
   // Its reads are answered.
@@ -4853,9 +4845,9 @@ TEST_F(DirCacheFSTest, BoundaryStubIsRecordedWithItsDentry) {
   ASSERT_GE(first_entry.nodeid, kFirstStubNodeid);
 
   // Forgotten and probed again: the same stub, refreshed in place.
-  ASSERT_THAT(cache::MarkUnknown(ctx_, kRootInode,
-                                 std::vector<std::string>{"mp"}),
-              IsOk());
+  ASSERT_THAT(
+      cache::MarkUnknown(ctx_, kRootInode, std::vector<std::string>{"mp"}),
+      IsOk());
   ASSERT_EQ(Cached(kRootInode, "mp").first, LookupResult::Kind::kUnknown);
   auto [second, second_entry] = Lookup(kRootInode, "mp");
   ASSERT_EQ(second.error, 0);
@@ -4934,12 +4926,12 @@ TEST_F(DirCacheFSTest, BackingInodeNumbersInTheStubRangeAreRefused) {
   // recorded as nothing: neither name is cached absent).
   AllLogCapture capture;
   EXPECT_EQ(Lookup(d, "big").first.error, -ENOTSUP);
-  EXPECT_GE(capture.Count(
-                absl::LogSeverity::kError,
-                absl::StrCat("Backing inode number ", kFirstStubNodeid + 5,
-                             " of ")),
+  EXPECT_GE(capture.Count(absl::LogSeverity::kError,
+                          absl::StrCat("Backing inode number ",
+                                       kFirstStubNodeid + 5, " of ")),
             1)
-      << "the ERROR names the number after its label\n" << capture.Dump();
+      << "the ERROR names the number after its label\n"
+      << capture.Dump();
   EXPECT_EQ(Lookup(d, "small").first.error, -ENOTSUP);
   EXPECT_EQ(ErrnoOf(List(d, false).status()), ENOTSUP);
   EXPECT_EQ(Cached(d, "big").first, LookupResult::Kind::kUnknown);
@@ -5248,7 +5240,7 @@ TEST_F(DirCacheFSTest, ARowAFillInsertsAfterACrashBeforePhase3IsBornDirty) {
                          cache::BeginCreate(ctx_, kRootInode, "f"));
     phase1.End();  // In memory only: the database keeps phase 1 alone.
   }
-  WriteFile(Path("f"));  // The create's syscall.
+  WriteFile(Path("f"));                  // The create's syscall.
   ASSERT_THAT(Restart("boot"), IsOk());  // A daemon crash: the same boot.
   // From here ctx_ stands for the restarted process's memory (as in
   // CrashDuringRecoveryRecoversAgain): nothing is durably dirty in it.
@@ -5496,7 +5488,8 @@ TEST_F(DirCacheFSDeathTest, TransactionOpenAtABackingSyscall) {
         Getattr(f);
       },
       "invariant violated: no-transaction-at-backing-call: a transaction is "
-      "open.*open_by_handle_at.*" + InRequest("GETATTR", f));
+      "open.*open_by_handle_at.*" +
+          InRequest("GETATTR", f));
 }
 
 TEST_F(DirCacheFSDeathTest, StatementMidStepAtABackingSyscall) {
@@ -5529,7 +5522,8 @@ TEST_F(DirCacheFSDeathTest, TransactionOpenAtARequestEnd) {
         Getattr(kRootInode);
       },
       "invariant violated: no-transaction-at-request-end: a transaction is "
-      "open.*" + InRequest("GETATTR", kRootInode));
+      "open.*" +
+          InRequest("GETATTR", kRootInode));
 }
 
 // The dirty-set bug phase 1's fast path could hide: an inode taken for
@@ -5744,8 +5738,8 @@ TEST_F(DirCacheFSDeathTest, ForgetOfMoreLookupsThanCounted) {
   const InodeId f = static_cast<InodeId>(entry.nodeid);
   EXPECT_DEATH(Forget(f, 2),
                absl::StrCat("invariant violated: lookup-count: FORGET of 2 "
-                            "lookups of nodeid ", f, ", but 1 counted.*",
-                            InRequest("FORGET", f)));
+                            "lookups of nodeid ",
+                            f, ", but 1 counted.*", InRequest("FORGET", f)));
 }
 
 // The same nodeid twice in one BATCH_FORGET counts as one FORGET of both.
@@ -5755,10 +5749,11 @@ TEST_F(DirCacheFSDeathTest, BatchForgetOfMoreLookupsThanCounted) {
   auto [lookup, entry] = Lookup(kRootInode, "f");
   ASSERT_EQ(lookup.error, 0);
   const InodeId f = static_cast<InodeId>(entry.nodeid);
-  EXPECT_DEATH(BatchForget({{f, 1}, {f, 1}}),
-               absl::StrCat("invariant violated: lookup-count: FORGET of 2 "
-                            "lookups of nodeid ", f, ", but 1 counted.*",
-                            InRequest("BATCH_FORGET", f)));
+  EXPECT_DEATH(
+      BatchForget({{f, 1}, {f, 1}}),
+      absl::StrCat("invariant violated: lookup-count: FORGET of 2 "
+                   "lookups of nodeid ",
+                   f, ", but 1 counted.*", InRequest("BATCH_FORGET", f)));
 }
 
 TEST_F(DirCacheFSDeathTest, ZeroLookupCountKept) {
@@ -6085,8 +6080,7 @@ TEST_F(DirCacheFSTest, StubOfAnUnknownDentryIsLegal) {
   WriteFile(Path("f"));
   Start();
   ASSERT_EQ(Lookup(kRootInode, "f").first.error, 0);
-  ASSERT_THAT(db_.Exec(absl::StrCat(kInsertStub, "u", kInsertStubEnd)),
-              IsOk());
+  ASSERT_THAT(db_.Exec(absl::StrCat(kInsertStub, "u", kInsertStubEnd)), IsOk());
   ASSERT_THAT(db_.Exec("INSERT INTO dentries (parent, name, state) "
                        "VALUES (1, CAST('u' AS BLOB), 'unknown')"),
               IsOk());
@@ -6439,7 +6433,7 @@ TEST_F(DirCacheFSTest, OpenRepliesWithTheGrantedBackingIdAndReleaseClosesIt) {
   Start();
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   auto backing_id_of = [](const Reply &reply) {
-    struct fuse_open_out out {};
+    struct fuse_open_out out{};
     EXPECT_GE(reply.payload.size(), sizeof(out));
     std::memcpy(&out, reply.payload.data(), sizeof(out));
     return out.backing_id;
@@ -6479,8 +6473,9 @@ TEST_F(DirCacheFSTest, ReleaseReportsAFailedPassthroughClose) {
     WarningCapture capture;
     EXPECT_EQ(Release(f, fh).error, 0);
     if (fails) {
-      EXPECT_THAT(capture.lines, ElementsAre(HasSubstr("Release: closing "
-                                                       "passthrough backing id")));
+      EXPECT_THAT(capture.lines,
+                  ElementsAre(HasSubstr("Release: closing "
+                                        "passthrough backing id")));
     } else {
       EXPECT_THAT(capture.lines, testing::IsEmpty())
           << absl::StrJoin(capture.lines, "\n");
@@ -6498,9 +6493,8 @@ TEST_F(DirCacheFSTest, FailedOpensGiveBackThePassthroughIdOnlyWhenTheyOwnIt) {
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   Passthrough().enabled = true;
   int flags = 0;
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor raw_fd,
-      syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor raw_fd,
+                       syscalls::openat(AT_FDCWD, Path("f"), O_RDONLY));
   const int raw = *raw_fd;
   ASSERT_THAT(syscalls::ioctl(raw, FS_IOC_GETFLAGS, &flags), IsOk());
   const int immutable = flags | FS_IMMUTABLE_FL;
@@ -6838,9 +6832,8 @@ TEST_F(DirCacheFSTest, InitWithoutDontMaskIsRefused) {
     EXPECT_EQ(loop.Run(), -EPROTO);
   }
   fuse_session_destroy(se);
-  EXPECT_THAT(capture.lines,
-              Contains(AllOf(HasSubstr("FAILED_PRECONDITION"),
-                             HasSubstr("FUSE_CAP_DONT_MASK"))))
+  EXPECT_THAT(capture.lines, Contains(AllOf(HasSubstr("FAILED_PRECONDITION"),
+                                            HasSubstr("FUSE_CAP_DONT_MASK"))))
       << absl::StrJoin(capture.lines, "\n");
 }
 
@@ -6981,8 +6974,7 @@ TEST_F(DirCacheFSTest, DrainedRequestIsServedAfterTheInterruptedOne) {
   NameToHandleHook() = [&] {
     QueueInterrupt(readdir);
     first = QueueRequest(FUSE_GETATTR, kRootInode, getattr_body);
-    second = QueueRequest(FUSE_GETATTR, static_cast<uint64_t>(d),
-                          getattr_body);
+    second = QueueRequest(FUSE_GETATTR, static_cast<uint64_t>(d), getattr_body);
   };
   EXPECT_EQ(ErrnoOf(List(d, false).status()), EINTR);
   // The interrupt and the first GETATTR were read; the second was not.
@@ -7004,13 +6996,14 @@ struct CheckpointCase {
   std::string name;
   // Sends the request (handles opened before are in `fh`); its reply.
   Reply (*send)(DirCacheFSTest &, InodeId f, uint64_t fh, uint64_t fh2);
-  bool needs_open = false;  // f open O_RDWR (fh), g O_RDWR (fh2)
+  bool needs_open = false;    // f open O_RDWR (fh), g O_RDWR (fh2)
   bool attrs_unknown = true;  // f's attributes unknown and f dirty after
 };
 
 class CheckpointTest : public DirCacheFSTest,
                        public ::testing::WithParamInterface<CheckpointCase> {
  public:
+  using DirCacheFSTest::Chmod;
   using DirCacheFSTest::CopyFileRange;
   using DirCacheFSTest::Fsyncdir;
   using DirCacheFSTest::Ioctl;
@@ -7019,7 +7012,6 @@ class CheckpointTest : public DirCacheFSTest,
   using DirCacheFSTest::Rename;
   using DirCacheFSTest::Send;
   using DirCacheFSTest::Setxattr;
-  using DirCacheFSTest::Chmod;
 };
 
 std::string FuseBody(const auto &in, std::string_view tail = "") {
@@ -7030,87 +7022,99 @@ std::string FuseBody(const auto &in, std::string_view tail = "") {
 
 const CheckpointCase kCheckpointCases[] = {
     {.name = "rename",
-     .send = [](DirCacheFSTest &t, InodeId, uint64_t, uint64_t) {
-       return static_cast<CheckpointTest &>(t).Rename(kRootInode, "f",
-                                                      kRootInode, "h");
-     },
+     .send =
+         [](DirCacheFSTest &t, InodeId, uint64_t, uint64_t) {
+           return static_cast<CheckpointTest &>(t).Rename(kRootInode, "f",
+                                                          kRootInode, "h");
+         },
      .attrs_unknown = false},
     {.name = "link",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
-       return static_cast<CheckpointTest &>(t).Link(f, kRootInode, "l");
-     }},
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+           return static_cast<CheckpointTest &>(t).Link(f, kRootInode, "l");
+         }},
     {.name = "setattr",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
-       return static_cast<CheckpointTest &>(t).Chmod(f, S_IFREG | 0600);
-     }},
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+           return static_cast<CheckpointTest &>(t).Chmod(f, S_IFREG | 0600);
+         }},
     {.name = "setxattr",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
-       return static_cast<CheckpointTest &>(t).Setxattr(f, "user.new", "v");
-     }},
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+           return static_cast<CheckpointTest &>(t).Setxattr(f, "user.new", "v");
+         }},
     {.name = "removexattr",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
-       std::string name = "user.old";
-       name.push_back('\0');
-       return static_cast<CheckpointTest &>(t).Send(
-           FUSE_REMOVEXATTR, static_cast<uint64_t>(f), name);
-     }},
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+           std::string name = "user.old";
+           name.push_back('\0');
+           return static_cast<CheckpointTest &>(t).Send(
+               FUSE_REMOVEXATTR, static_cast<uint64_t>(f), name);
+         }},
     {.name = "write",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
-       struct fuse_write_in in = {};
-       in.fh = fh;
-       in.size = 1;
-       return static_cast<CheckpointTest &>(t).Send(
-           FUSE_WRITE, static_cast<uint64_t>(f), FuseBody(in, "x"));
-     },
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
+           struct fuse_write_in in = {};
+           in.fh = fh;
+           in.size = 1;
+           return static_cast<CheckpointTest &>(t).Send(
+               FUSE_WRITE, static_cast<uint64_t>(f), FuseBody(in, "x"));
+         },
      .needs_open = true},
     {.name = "fallocate",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
-       struct fuse_fallocate_in in = {};
-       in.fh = fh;
-       in.length = 1 << 20;
-       return static_cast<CheckpointTest &>(t).Send(
-           FUSE_FALLOCATE, static_cast<uint64_t>(f), FuseBody(in));
-     },
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
+           struct fuse_fallocate_in in = {};
+           in.fh = fh;
+           in.length = 1 << 20;
+           return static_cast<CheckpointTest &>(t).Send(
+               FUSE_FALLOCATE, static_cast<uint64_t>(f), FuseBody(in));
+         },
      .needs_open = true},
     {.name = "copy_file_range",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t fh2) {
-       struct fuse_copy_file_range_in in = {};
-       in.fh_in = fh2;
-       in.nodeid_out = static_cast<uint64_t>(f);
-       in.fh_out = fh;
-       in.len = 5;
-       in.off_out = 5;
-       return static_cast<CheckpointTest &>(t).Send(
-           FUSE_COPY_FILE_RANGE, static_cast<uint64_t>(f), FuseBody(in));
-     },
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t fh2) {
+           struct fuse_copy_file_range_in in = {};
+           in.fh_in = fh2;
+           in.nodeid_out = static_cast<uint64_t>(f);
+           in.fh_out = fh;
+           in.len = 5;
+           in.off_out = 5;
+           return static_cast<CheckpointTest &>(t).Send(
+               FUSE_COPY_FILE_RANGE, static_cast<uint64_t>(f), FuseBody(in));
+         },
      .needs_open = true},
     {.name = "ioctl",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
-       const int flags = FS_NODUMP_FL;
-       return static_cast<CheckpointTest &>(t).Ioctl(
-           f, FS_IOC_SETFLAGS,
-           std::string_view(reinterpret_cast<const char *>(&flags),
-                            sizeof(flags)),
-           0);
-     },
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
+           const int flags = FS_NODUMP_FL;
+           return static_cast<CheckpointTest &>(t).Ioctl(
+               f, FS_IOC_SETFLAGS,
+               std::string_view(reinterpret_cast<const char *>(&flags),
+                                sizeof(flags)),
+               0);
+         },
      .needs_open = true},
     {.name = "cold_open",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
-       return static_cast<CheckpointTest &>(t).Open(f, O_RDWR).first;
-     },
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t, uint64_t) {
+           return static_cast<CheckpointTest &>(t).Open(f, O_RDWR).first;
+         },
      .attrs_unknown = false},
     {.name = "fsync",
-     .send = [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
-       struct fuse_fsync_in in = {};
-       in.fh = fh;
-       return static_cast<CheckpointTest &>(t).Send(
-           FUSE_FSYNC, static_cast<uint64_t>(f), FuseBody(in));
-     },
+     .send =
+         [](DirCacheFSTest &t, InodeId f, uint64_t fh, uint64_t) {
+           struct fuse_fsync_in in = {};
+           in.fh = fh;
+           return static_cast<CheckpointTest &>(t).Send(
+               FUSE_FSYNC, static_cast<uint64_t>(f), FuseBody(in));
+         },
      .needs_open = true},
     {.name = "fsyncdir",
-     .send = [](DirCacheFSTest &t, InodeId, uint64_t, uint64_t) {
-       return static_cast<CheckpointTest &>(t).Fsyncdir(kRootInode);
-     },
+     .send =
+         [](DirCacheFSTest &t, InodeId, uint64_t, uint64_t) {
+           return static_cast<CheckpointTest &>(t).Fsyncdir(kRootInode);
+         },
      .attrs_unknown = false},
 };
 
@@ -7230,13 +7234,13 @@ class FaultIteration : public DirCacheFSTest {
     WriteFile(Path("d/g1"));
     WriteFile(Path("d/g2"));
     const std::string value = "v";
-    ASSERT_THAT(syscalls::setxattr(Path("f1"), "user.k",
-                                   std::span<const uint8_t>(
-                                       reinterpret_cast<const uint8_t *>(
-                                           value.data()),
-                                       value.size()),
-                                   0),
-                IsOk());
+    ASSERT_THAT(
+        syscalls::setxattr(
+            Path("f1"), "user.k",
+            std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t *>(value.data()), value.size()),
+            0),
+        IsOk());
     ASSERT_THAT(syscalls::symlinkat("f1", AT_FDCWD, Path("s")), IsOk());
   }
 
@@ -7443,9 +7447,9 @@ class FaultIteration : public DirCacheFSTest {
         syscalls::openat(AT_FDCWD, source_, O_RDONLY | O_DIRECTORY);
     absl::Status started =
         !source.ok() ? source.status()
-                     : SetCleanShutdown(db_, false).ok()
-                           ? backing::Startup(ctx, *std::move(source), "boot")
-                           : absl::InternalError("SetCleanShutdown");
+        : SetCleanShutdown(db_, false).ok()
+            ? backing::Startup(ctx, *std::move(source), "boot")
+            : absl::InternalError("SetCleanShutdown");
     if (!started.ok()) {
       found.push_back(absl::StrCat("recovery failed: ", started.ToString()));
     } else if (absl::Status s = checker_->CheckAll(ctx, nullptr); !s.ok()) {
@@ -7461,9 +7465,7 @@ class FaultIteration : public DirCacheFSTest {
 };
 
 // `err`'s name, for a finding.
-std::string ErrnoName(int err) {
-  return ErrnoToErrorName(err);
-}
+std::string ErrnoName(int err) { return ErrnoToErrorName(err); }
 
 // The errnos to fail `call` with: EIO, and those the code branches on for
 // it (backing.cc, dir_cache_fs.cc, device_id.cc): ENOENT (a probe's
@@ -7482,12 +7484,12 @@ std::vector<int> ErrnosFor(std::string_view call) {
 }
 
 constexpr const char *kWorkloads[] = {
-    "lookup", "create", "write",   "unlink",       "rename", "mkdir",
+    "lookup", "create",  "write", "unlink",  "rename",       "mkdir",
     "rmdir",  "setattr", "xattr", "readdir", "open-release", "forget"};
 
 struct SweepResult {
-  int hooks = 0;      // hook locations reached
-  int calls = 0;      // new sites failed
+  int hooks = 0;  // hook locations reached
+  int calls = 0;  // new sites failed
   int iterations = 0;
   std::vector<std::string> silent;  // hooks with no wrapped call after them
   std::vector<std::string> findings;
@@ -7541,8 +7543,8 @@ SweepResult SweepWorkload(
       const std::string fired = f.fired;
       f = FaultSweep();  // Nothing fails during the checks and recovery.
       if (breaker) breaker(it);
-      const std::string what = absl::StrCat(workload, ": ", key,
-                                            " failed with ", ErrnoName(err));
+      const std::string what =
+          absl::StrCat(workload, ": ", key, " failed with ", ErrnoName(err));
       if (fired.empty()) {
         result.findings.push_back(absl::StrCat(what, ": never reached"));
       }
@@ -7605,12 +7607,13 @@ TEST(FaultSitesTest, SweepReportsABrokenInvariant) {
       },
       /*max_iterations=*/3);
   ASSERT_GT(r.iterations, 0);
-  EXPECT_THAT(r.findings,
-              Contains(::testing::HasSubstr(
-                  "dirty-set: Context::dirty.any is false")));
+  EXPECT_THAT(
+      r.findings,
+      Contains(::testing::HasSubstr("dirty-set: Context::dirty.any is false")));
 }
 
-// --- Slopes (step 26.4b) -------------------------------------------------------
+// --- Slopes (step 26.4b)
+// -------------------------------------------------------
 //
 // Every operation class, N times in one directory at N = 100 and 1000: the
 // SQLite steps, transactions, durable transactions (each a WAL fsync:
@@ -7655,9 +7658,8 @@ class SlopeRun : public DirCacheFSTest {
       } else if (op == "unlink") {
         EXPECT_EQ(Unlink(kRootInode, name).error, 0) << name;
       } else if (op == "rename") {
-        EXPECT_EQ(Rename(kRootInode, name, kRootInode, absl::StrCat("r", i))
-                      .error,
-                  0)
+        EXPECT_EQ(
+            Rename(kRootInode, name, kRootInode, absl::StrCat("r", i)).error, 0)
             << name;
       } else if (op == "cold-lookup") {
         EXPECT_EQ(Lookup(kRootInode, name).first.error, 0) << name;
@@ -7802,8 +7804,8 @@ TEST(SlopeTest, EveryOperationClassIsBoundedByANPlusB) {
 // regression's cost) is caught.
 TEST(SlopeTest, AnExtraCostPerOperationIsCaught) {
   SlopeRun run;
-  const Slope s = run.Measure("create", 100,
-                              [](SlopeRun &r) { r.ExtraStep(); });
+  const Slope s =
+      run.Measure("create", 100, [](SlopeRun &r) { r.ExtraStep(); });
   bool within = true;
   EXPECT_NONFATAL_FAILURE(within = WithinBounds(kSlopeBounds[0], 100, s),
                           "create n=100: steps 8103 > 79 * n + 3");
@@ -7819,7 +7821,7 @@ TEST_F(DirCacheFSTest, ReadWithoutPassthroughReadsTheBackingFile) {
   ASSERT_OK_AND_ASSIGN(InodeId f, Id("f"));
   auto [open, fh] = Open(f, O_RDONLY);
   ASSERT_EQ(open.error, 0);
-  struct fuse_open_out out {};
+  struct fuse_open_out out{};
   ASSERT_GE(open.payload.size(), sizeof(out));
   std::memcpy(&out, open.payload.data(), sizeof(out));
   EXPECT_EQ(out.backing_id, 0);

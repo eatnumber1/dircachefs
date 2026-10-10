@@ -5,7 +5,6 @@
 #include <sys/types.h>
 
 #include <cstdint>
-
 #include <string>
 #include <vector>
 
@@ -16,9 +15,9 @@ class DcfsProcess {
   // Forks and execs `mount.dcfs -o dcfs.fstype=bind,dcfs.cache_db=db,... src
   // mnt` (each flag a dcfs.<flag> option). Does not
   // wait for the mount: see WaitMounted.
-  bool Start(
-      const std::string &dcfs, const std::string &src, const std::string &db,
-      const std::string &mnt, const std::vector<std::string> &flags);
+  bool Start(const std::string &dcfs, const std::string &src,
+             const std::string &db, const std::string &mnt,
+             const std::vector<std::string> &flags);
   // Waits up to `seconds` for `mnt` to appear in /proc/self/mountinfo (and
   // the daemon to still be alive).
   bool WaitMounted(int seconds);

@@ -61,7 +61,8 @@ TEST_F(MountsBelowTest, ReportsATmpfsMountedBelowTheSource) {
   ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt"), "tmpfs", 0, nullptr),
               IsOk());
   mounted_ = true;
-  EXPECT_THAT(MountsBelow(source_), IsOkAndHolds(UnorderedElementsAre(Path("mnt"))));
+  EXPECT_THAT(MountsBelow(source_),
+              IsOkAndHolds(UnorderedElementsAre(Path("mnt"))));
 }
 
 // A mount ON the source itself (root_fs === --source, e.g. dcfs pointed
@@ -240,8 +241,8 @@ TEST_F(MountsBelowTest, ForcedReadOnlyReadsTheMountOfADescriptor) {
   ASSERT_THAT(syscalls::mount("tmpfs", Path("mnt"), "tmpfs", 0, nullptr),
               IsOk());
   mounted_ = true;
-  ASSERT_THAT(syscalls::mount(Path("mnt").c_str(), Path("plain"), nullptr, MS_BIND,
-                              nullptr),
+  ASSERT_THAT(syscalls::mount(Path("mnt").c_str(), Path("plain"), nullptr,
+                              MS_BIND, nullptr),
               IsOk());
   ASSERT_OK_AND_ASSIGN(
       FileDescriptor bind,

@@ -1,17 +1,18 @@
 #include "dcfs/syscalls_backing.h"
 
+#include <fcntl.h>
+#include <linux/fs.h>
+#include <sys/mount.h>
+#include <sys/syscall.h>
+#include <sys/xattr.h>
+#include <unistd.h>
+
 #include <cerrno>
 #include <climits>
 #include <cstdint>
 #include <cstring>
-#include <fcntl.h>
 #include <string_view>
-#include <sys/mount.h>
-#include <sys/syscall.h>
-#include <unistd.h>
 #include <vector>
-#include <sys/xattr.h>
-#include <linux/fs.h>
 
 #include "absl/status/status_macros.h"
 #include "absl/strings/str_cat.h"
@@ -22,12 +23,13 @@
 namespace dcfs {
 namespace syscalls {
 
-absl::StatusOr<FileDescriptor> openat(
-    int dirfd, std::string_view pathname, int flags, mode_t mode) {
-  int fd = ::openat(
-      dirfd, std::string(pathname).c_str(), flags | O_CLOEXEC, mode);
+absl::StatusOr<FileDescriptor> openat(int dirfd, std::string_view pathname,
+                                      int flags, mode_t mode) {
+  int fd =
+      ::openat(dirfd, std::string(pathname).c_str(), flags | O_CLOEXEC, mode);
   if (fd == -1) {
-    return ErrnoToStatus(errno, absl::StrFormat("openat(%d, %s)", dirfd, EscapeBytes(pathname)));
+    return ErrnoToStatus(
+        errno, absl::StrFormat("openat(%d, %s)", dirfd, EscapeBytes(pathname)));
   }
   return FileDescriptor(fd);
 }
@@ -54,8 +56,8 @@ absl::StatusOr<struct stat> fstat(int fd) {
   return buf;
 }
 
-absl::StatusOr<struct stat> fstatat(
-    int dirfd, std::string_view pathname, int flags) {
+absl::StatusOr<struct stat> fstatat(int dirfd, std::string_view pathname,
+                                    int flags) {
   std::string pathname_str(pathname);
   struct stat buf;
   int ret = ::fstatat(dirfd, pathname_str.c_str(), &buf, flags);
@@ -63,27 +65,25 @@ absl::StatusOr<struct stat> fstatat(
   return buf;
 }
 
-absl::Status name_to_handle_at(
-    int dirfd, std::string_view pathname, file_handle &handle,
-    int &mount_id, int flags) {
-  int rc = ::name_to_handle_at(
-      dirfd, std::string(pathname).c_str(), &handle, &mount_id, flags);
+absl::Status name_to_handle_at(int dirfd, std::string_view pathname,
+                               file_handle &handle, int &mount_id, int flags) {
+  int rc = ::name_to_handle_at(dirfd, std::string(pathname).c_str(), &handle,
+                               &mount_id, flags);
   if (rc != 0) {
-    return ErrnoToStatus(
-        errno, absl::StrFormat("name_to_handle_at(%d, %s)", dirfd,
-                        EscapeBytes(pathname)));
+    return ErrnoToStatus(errno, absl::StrFormat("name_to_handle_at(%d, %s)",
+                                                dirfd, EscapeBytes(pathname)));
   }
   return absl::OkStatus();
 }
 
-absl::StatusOr<FileDescriptor> open_by_handle_at(
-    int mount_fd, const file_handle &handle, int flags) {
-  int fd = ::open_by_handle_at(
-      mount_fd, const_cast<file_handle *>(&handle), flags | O_CLOEXEC);
+absl::StatusOr<FileDescriptor> open_by_handle_at(int mount_fd,
+                                                 const file_handle &handle,
+                                                 int flags) {
+  int fd = ::open_by_handle_at(mount_fd, const_cast<file_handle *>(&handle),
+                               flags | O_CLOEXEC);
   if (fd == -1) return ErrnoToStatus(errno, "open_by_handle_at");
   return FileDescriptor(fd);
 }
-
 
 absl::StatusOr<ssize_t> getdents64(int fd, void *dirp, size_t count) {
   ssize_t nb = ::syscall(SYS_getdents64, fd, dirp, count);
@@ -98,7 +98,7 @@ absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence) {
 }
 
 absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
-                                    unsigned int mask) {
+                                   unsigned int mask) {
   std::string path_str(path);
   struct statx buf;
   int ret = ::statx(dirfd, path_str.c_str(), flags, mask, &buf);
@@ -223,8 +223,8 @@ absl::Status linkat(int olddirfd, std::string_view oldpath, int newdirfd,
                     std::string_view newpath, int flags) {
   std::string oldpath_str(oldpath);
   std::string newpath_str(newpath);
-  if (::linkat(olddirfd, oldpath_str.c_str(), newdirfd,
-               newpath_str.c_str(), flags) == -1) {
+  if (::linkat(olddirfd, oldpath_str.c_str(), newdirfd, newpath_str.c_str(),
+               flags) == -1) {
     return ErrnoToStatus(errno, "linkat");
   }
   return absl::OkStatus();
@@ -242,8 +242,8 @@ absl::Status renameat2(int olddirfd, std::string_view oldpath, int newdirfd,
                        std::string_view newpath, unsigned int flags) {
   std::string oldpath_str(oldpath);
   std::string newpath_str(newpath);
-  if (::renameat2(olddirfd, oldpath_str.c_str(), newdirfd,
-                  newpath_str.c_str(), flags) == -1) {
+  if (::renameat2(olddirfd, oldpath_str.c_str(), newdirfd, newpath_str.c_str(),
+                  flags) == -1) {
     return ErrnoToStatus(errno, "renameat2");
   }
   return absl::OkStatus();
@@ -269,8 +269,7 @@ absl::Status symlinkat(std::string_view target, int newdirfd,
                        std::string_view linkpath) {
   std::string target_str(target);
   std::string linkpath_str(linkpath);
-  if (::symlinkat(target_str.c_str(), newdirfd,
-                  linkpath_str.c_str()) == -1) {
+  if (::symlinkat(target_str.c_str(), newdirfd, linkpath_str.c_str()) == -1) {
     return ErrnoToStatus(errno, "symlinkat");
   }
   return absl::OkStatus();

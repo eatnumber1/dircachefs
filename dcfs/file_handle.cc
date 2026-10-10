@@ -128,7 +128,7 @@ absl::StatusOr<FileHandle> FileHandle::FromFd(int fd) {
 }
 
 absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
-                                                     std::string_view name) {
+                                                    std::string_view name) {
   ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(dirfd, name, 0));
 
   // Only a directory can be a mount point (or, for Btrfs, a sub-volume
@@ -172,7 +172,7 @@ absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
 }
 
 absl::StatusOr<FileDescriptor> FileHandle::Open(const MountFds &mounts,
-                                                 int flags) const {
+                                                int flags) const {
   ASSIGN_OR_RETURN(int mount_fd, mounts.Get(device));
 
   absl::FixedArray<uint8_t> buf(sizeof(struct file_handle) + bytes.size());

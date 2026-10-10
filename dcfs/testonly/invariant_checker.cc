@@ -140,7 +140,8 @@ absl::Status InFlightAreDirty(Context &ctx) {
 // row (step 23.8).
 absl::Status NoneDirtyUnlessAny(Context &ctx) {
   for (const auto &[flag, atime_only, what] :
-       {std::tuple{ctx.dirty.any, 0, "any is false but the dirty table has rows"},
+       {std::tuple{ctx.dirty.any, 0,
+                   "any is false but the dirty table has rows"},
         std::tuple{ctx.dirty.atime, 1,
                    "atime is false but the dirty table has atime-only rows"}}) {
     if (flag) continue;
@@ -334,7 +335,8 @@ const events::Bookkeeping &InvariantChecker::Seen(
   return *storage;
 }
 
-void InvariantChecker::CheckRequestBegin(Context &ctx, const events::Bookkeeping &fs,
+void InvariantChecker::CheckRequestBegin(Context &ctx,
+                                         const events::Bookkeeping &fs,
                                          const events::Request &request) {
   Attach(ctx);
   Frame frame{.op = request.op, .nodeid = static_cast<uint64_t>(request.ino)};
@@ -343,7 +345,8 @@ void InvariantChecker::CheckRequestBegin(Context &ctx, const events::Bookkeeping
   frames_.push_back(std::move(frame));
 }
 
-void InvariantChecker::CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,
+void InvariantChecker::CheckRequestEnd(Context &ctx,
+                                       const events::Bookkeeping &fs,
                                        const events::Request &request) {
   Attach(ctx);
   std::optional<FakeBookkeeping> tampered;
@@ -351,7 +354,8 @@ void InvariantChecker::CheckRequestEnd(Context &ctx, const events::Bookkeeping &
   frames_.pop_back();
 }
 
-void InvariantChecker::CheckForgetting(Context &ctx, const events::Bookkeeping &fs,
+void InvariantChecker::CheckForgetting(Context &ctx,
+                                       const events::Bookkeeping &fs,
                                        uint64_t ino, uint64_t nlookup) {
   Attach(ctx);
   const InodeId id = static_cast<InodeId>(ino);
@@ -417,7 +421,8 @@ void InvariantChecker::ForgetReleasedStaleOpens(const Context &ctx) {
   });
 }
 
-void InvariantChecker::CheckDestroyed(Context &ctx, const events::Bookkeeping &fs) {
+void InvariantChecker::CheckDestroyed(Context &ctx,
+                                      const events::Bookkeeping &fs) {
   Attach(ctx);
   frames_.push_back(Frame{.label = "DESTROY"});
   std::optional<FakeBookkeeping> tampered;
@@ -451,7 +456,8 @@ absl::Status InvariantChecker::CheckBackingCall(Context &ctx) {
   return InFlightAreDirty(ctx);
 }
 
-absl::Status InvariantChecker::CheckChanged(Context &ctx, const events::Bookkeeping *fs,
+absl::Status InvariantChecker::CheckChanged(Context &ctx,
+                                            const events::Bookkeeping *fs,
                                             std::span<const InodeId> ids) {
   RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
   RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
@@ -501,7 +507,8 @@ absl::Status InvariantChecker::CheckChanged(Context &ctx, const events::Bookkeep
   return absl::OkStatus();
 }
 
-absl::Status InvariantChecker::CheckAll(Context &ctx, const events::Bookkeeping *fs) {
+absl::Status InvariantChecker::CheckAll(Context &ctx,
+                                        const events::Bookkeeping *fs) {
   return CheckEverything(ctx, fs, /*destroyed=*/false);
 }
 
@@ -584,14 +591,15 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
   return absl::OkStatus();
 }
 
-absl::Status InvariantChecker::CheckInode(Context &ctx, const events::Bookkeeping *fs,
+absl::Status InvariantChecker::CheckInode(Context &ctx,
+                                          const events::Bookkeeping *fs,
                                           InodeId id, bool row_changed) {
   // A row's own columns can only have broken their rules when it changed
   // (the update hook saw it, or the full check reads it); what else needs
   // the row is being open for writing.
   bool exists = false;
-  const bool open = ctx.open_files != nullptr &&
-                    ctx.open_files->contains(id) && !stale_opens_.contains(id);
+  const bool open = ctx.open_files != nullptr && ctx.open_files->contains(id) &&
+                    !stale_opens_.contains(id);
   if (row_changed || OpenForWrite(ctx, id) || open) {
     ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
@@ -771,7 +779,8 @@ absl::Status InvariantChecker::CheckBookkeeping(
   }
   if (interest == nullptr || fs.WrittenEntries() <= kRecountLimit) {
     size_t holding = 0;
-    fs.ForEachWritten([&](events::Ino, bool holds) { holding += holds ? 1 : 0; });
+    fs.ForEachWritten(
+        [&](events::Ino, bool holds) { holding += holds ? 1 : 0; });
     if (holding != held) {
       return Violation(kHeldFds, "held_fds_ is ", held, " but ", holding,
                        " entries of written_ hold a descriptor");
@@ -814,8 +823,7 @@ absl::Status InvariantChecker::CheckBookkeeping(
                          " is open for writing but not in written_");
       }));
   auto check_shared = [&](InodeId id) -> absl::Status {
-    std::optional<events::Bookkeeping::SharedFile> shared =
-        fs.SharedFileOf(id);
+    std::optional<events::Bookkeeping::SharedFile> shared = fs.SharedFileOf(id);
     if (!shared.has_value()) return absl::OkStatus();
     if (shared->refs <= 0 || shared->writable_refs < 0 ||
         shared->writable_refs > shared->refs) {
@@ -831,9 +839,10 @@ absl::Status InvariantChecker::CheckBookkeeping(
   };
   if (interest == nullptr) {
     absl::Status found;
-    fs.ForEachSharedFile([&](InodeId id, const events::Bookkeeping::SharedFile &) {
-      if (found.ok()) found = check_shared(id);
-    });
+    fs.ForEachSharedFile(
+        [&](InodeId id, const events::Bookkeeping::SharedFile &) {
+          if (found.ok()) found = check_shared(id);
+        });
     RETURN_IF_ERROR(found);
   } else {
     for (InodeId id : *interest) RETURN_IF_ERROR(check_shared(id));
@@ -841,7 +850,8 @@ absl::Status InvariantChecker::CheckBookkeeping(
   return absl::OkStatus();
 }
 
-absl::Status InvariantChecker::CheckRemoved(const events::Bookkeeping &fs, InodeId id) {
+absl::Status InvariantChecker::CheckRemoved(const events::Bookkeeping &fs,
+                                            InodeId id) {
   if (fs.Lookups(id).value_or(0) == 0) {
     return Violation(kRemovedRecord, "nodeid ", static_cast<uint64_t>(id),
                      " has a removed record but the kernel holds no lookup "

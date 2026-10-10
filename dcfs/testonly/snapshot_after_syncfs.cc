@@ -17,11 +17,11 @@
 namespace dcfs::testonly {
 
 // The wrapped function (external linkage: the linker resolves this name).
-absl::StatusOr<cache::SyncSnapshot> RealBeginSync(Context &ctx)
-    asm("__real__ZN4dcfs5cache9BeginSyncERNS_7ContextE");
+absl::StatusOr<cache::SyncSnapshot> RealBeginSync(Context &ctx) asm(
+    "__real__ZN4dcfs5cache9BeginSyncERNS_7ContextE");
 
-absl::StatusOr<cache::SyncSnapshot> WrapBeginSync(Context &ctx)
-    asm("__wrap__ZN4dcfs5cache9BeginSyncERNS_7ContextE");
+absl::StatusOr<cache::SyncSnapshot> WrapBeginSync(Context &ctx) asm(
+    "__wrap__ZN4dcfs5cache9BeginSyncERNS_7ContextE");
 absl::StatusOr<cache::SyncSnapshot> WrapBeginSync(Context &ctx) {
   // The syncfs calls, moved above the snapshot with their event. (The
   // calls SyncBacking still makes afterwards find nothing more to write.)

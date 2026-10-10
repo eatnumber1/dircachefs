@@ -153,11 +153,11 @@ absl::Status UmountAndWait(const UmountArgs &args) {
           lock = *std::move(opened);
         }
         size_t colon = entry->device.find(':');
-        if (absl::StatusOr<FileDescriptor> opened = syscalls::openat(
-                AT_FDCWD,
-                absl::StrCat(kFuseConnections, "/",
-                             entry->device.substr(colon + 1)),
-                O_PATH | O_DIRECTORY);
+        if (absl::StatusOr<FileDescriptor> opened =
+                syscalls::openat(AT_FDCWD,
+                                 absl::StrCat(kFuseConnections, "/",
+                                              entry->device.substr(colon + 1)),
+                                 O_PATH | O_DIRECTORY);
             opened.ok()) {
           connection = *std::move(opened);
         }

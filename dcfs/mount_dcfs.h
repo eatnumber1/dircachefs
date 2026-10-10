@@ -45,7 +45,8 @@ bool IsMountHelperName(std::string_view name);
 // Both are dcfs's binary dispatching on argv[0]; for a mount that is not dcfs's
 // (only possible as umount.fuse) the helper runs `umount -i` (no helper) and
 // nothing more.
-inline constexpr std::string_view kUmountFuseDcfsHelperName = "umount.fuse.dcfs";
+inline constexpr std::string_view kUmountFuseDcfsHelperName =
+    "umount.fuse.dcfs";
 inline constexpr std::string_view kUmountFuseHelperName = "umount.fuse";
 bool IsUmountHelperName(std::string_view name);
 
@@ -98,11 +99,11 @@ std::string DaemonLockPath(std::string_view device,
 struct HelperArgs {
   std::string source;
   std::string mountpoint;
-  bool sloppy = false;   // -s
-  bool fake = false;     // -f: validate, mount nothing
-  bool no_mtab = false;  // -n
-  int verbose = 0;       // -v, once per use
-  bool version = false;  // -V
+  bool sloppy = false;                         // -s
+  bool fake = false;                           // -f: validate, mount nothing
+  bool no_mtab = false;                        // -n
+  int verbose = 0;                             // -v, once per use
+  bool version = false;                        // -V
   std::optional<std::string> mount_namespace;  // -N
   // Every -o, split at commas, in order.
   std::vector<std::string> options;

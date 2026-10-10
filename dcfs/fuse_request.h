@@ -48,14 +48,12 @@ struct FuseDirEntryPlus {
 // `req` is passed through to fuse_add_direntry() unused (libfuse ignores it
 // there) and may be null, which is what makes this function testable
 // without a live request.
-size_t AppendDirEntries(
-    fuse_req_t req, char *buf, size_t bufsize,
-    std::span<const FuseDirEntry> entries);
+size_t AppendDirEntries(fuse_req_t req, char *buf, size_t bufsize,
+                        std::span<const FuseDirEntry> entries);
 
 // As AppendDirEntries, but for readdirplus via fuse_add_direntry_plus().
-size_t AppendDirEntriesPlus(
-    fuse_req_t req, char *buf, size_t bufsize,
-    std::span<const FuseDirEntryPlus> entries);
+size_t AppendDirEntriesPlus(fuse_req_t req, char *buf, size_t bufsize,
+                            std::span<const FuseDirEntryPlus> entries);
 
 // A FuseRequest is a wrapper around fuse_req_t that RAII owns replying to the
 // request: exactly one Reply* method must be called before it is destroyed,
@@ -88,22 +86,21 @@ class FuseRequest {
   absl::StatusOr<Credentials> Caller() const;
 
   // Fills in a fuse_entry_param from `attr` and replies with it.
-  absl::Status ReplyEntry(
-      fuse_ino_t nodeid, uint64_t generation, const struct stat &attr,
-      absl::Duration attr_timeout, absl::Duration entry_timeout);
+  absl::Status ReplyEntry(fuse_ino_t nodeid, uint64_t generation,
+                          const struct stat &attr, absl::Duration attr_timeout,
+                          absl::Duration entry_timeout);
 
   // A negative lookup reply (ino 0): lets the kernel cache the fact that
   // the looked-up name does not exist for `entry_timeout`.
   absl::Status ReplyNegativeEntry(absl::Duration entry_timeout);
 
-  absl::Status ReplyAttr(
-      const struct stat &attr, absl::Duration attr_timeout);
+  absl::Status ReplyAttr(const struct stat &attr, absl::Duration attr_timeout);
 
   absl::Status ReplyReadlink(std::string_view target);
 
   absl::Status ReplyOpen(const fuse_file_info &fi);
-  absl::Status ReplyCreate(
-      const fuse_entry_param &entry, const fuse_file_info &fi);
+  absl::Status ReplyCreate(const fuse_entry_param &entry,
+                           const fuse_file_info &fi);
   absl::Status ReplyWrite(size_t count);
   // An ioctl's result: `result` (0) and its output buffer.
   absl::Status ReplyIoctl(int result, std::string_view buf);
@@ -130,8 +127,8 @@ class FuseRequest {
   absl::Status ReplyStatfs(const struct statvfs &stbuf);
 
   absl::Status ReplyDirs(std::span<FuseDirEntry> entries, size_t maxsize);
-  absl::Status ReplyDirsPlus(
-      std::span<FuseDirEntryPlus> entries, size_t maxsize);
+  absl::Status ReplyDirsPlus(std::span<FuseDirEntryPlus> entries,
+                             size_t maxsize);
 
   // A "successful failure" response, e.g. ENOENT, where we succeeded in
   // performing an operation that correctly produces an error code.

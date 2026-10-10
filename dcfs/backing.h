@@ -62,7 +62,7 @@ using cache::InodeId;
 struct NewChild {
   InodeId id = 0;
   uint32_t fuse_gen = 0;
-  struct statx stx {};
+  struct statx stx{};
 };
 
 // Probes the source root `source_fd` (any fd on the source directory,
@@ -200,8 +200,7 @@ absl::StatusOr<std::string> IoctlFd(int fd, unsigned int cmd,
 // permission on it.
 absl::StatusOr<FileDescriptor> TmpfileAt(Context &ctx,
                                          const Credentials &caller,
-                                         int parent_fd, int flags,
-                                         mode_t mode);
+                                         int parent_fd, int flags, mode_t mode);
 
 // Records the unnamed file `fd` (from TmpfileAt in `parent`) as a row
 // (DirCacheFS::Tmpfile): probed as RecordNewChild probes a new child
@@ -233,8 +232,8 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
 // followed by cache::ReplaceXattrs, as a fill: see cache::CanFill). Called
 // when the cached set is unknown (ListXattrs returned nullopt). Returns
 // what it read, for the caller to answer from.
-absl::StatusOr<std::vector<std::pair<std::string, std::string>>>
-RefreshXattrs(Context &ctx, InodeId id);
+absl::StatusOr<std::vector<std::pair<std::string, std::string>>> RefreshXattrs(
+    Context &ctx, InodeId id);
 
 // Reads xattr `name` of `id` from the backing filesystem and records it in
 // the cache as present or absent (cache::SetXattr/RemoveXattr), resolving
@@ -485,8 +484,7 @@ absl::Status RenameAt(Context &ctx, const Credentials &caller, InodeId parent,
 // it open. In that case the row has ALREADY been invalidated (by OpenNode
 // for ESTALE, here for ENOENT), so the caller must not touch it again.
 // Does not update the cache otherwise.
-absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
-                                                     InodeId id);
+absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx, InodeId id);
 
 // --- Removed objects the kernel still references --------------------------
 //
@@ -565,7 +563,7 @@ absl::Status SyncBacking(Context &ctx, bool announce = true);
 // dirty, after an unclean shutdown (none otherwise): Startup probes them
 // once the mount fds exist.
 absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
-                                               std::string_view boot_id);
+                                              std::string_view boot_id);
 
 // The whole start, after Migrate(), in the one order main.cc and the tests
 // use: StartRun, InitRoot(source_fd), StartupPurge, then the probe of the

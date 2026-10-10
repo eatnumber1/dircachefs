@@ -55,9 +55,9 @@ TEST(AppendDirEntriesTest, StopsBeforeAnEntryThatDoesNotFit) {
       {.name = ".", .stbuf = MakeStat(1, S_IFDIR), .off = 1},
       {.name = "..", .stbuf = MakeStat(1, S_IFDIR), .off = 2},
   };
-  size_t first_size = fuse_add_direntry(
-      nullptr, nullptr, 0, entries[0].name.c_str(), &entries[0].stbuf,
-      entries[0].off);
+  size_t first_size =
+      fuse_add_direntry(nullptr, nullptr, 0, entries[0].name.c_str(),
+                        &entries[0].stbuf, entries[0].off);
 
   // Room for exactly the first entry, and nothing more.
   std::vector<char> buf(first_size);
@@ -79,13 +79,12 @@ TEST(AppendDirEntriesPlusTest, FitsEverythingWhenBufferIsLargeEnough) {
   };
   size_t total = 0;
   for (const FuseDirEntryPlus &e : entries) {
-    total += fuse_add_direntry_plus(
-        nullptr, nullptr, 0, e.name.c_str(), &e.entry, e.off);
+    total += fuse_add_direntry_plus(nullptr, nullptr, 0, e.name.c_str(),
+                                    &e.entry, e.off);
   }
 
   std::vector<char> buf(total);
-  size_t used =
-      AppendDirEntriesPlus(nullptr, buf.data(), buf.size(), entries);
+  size_t used = AppendDirEntriesPlus(nullptr, buf.data(), buf.size(), entries);
   EXPECT_EQ(used, total);
 }
 
@@ -94,13 +93,12 @@ TEST(AppendDirEntriesPlusTest, StopsBeforeAnEntryThatDoesNotFit) {
       {.name = ".", .entry = MakeEntryParam(1, S_IFDIR), .off = 1},
       {.name = "foo", .entry = MakeEntryParam(2, S_IFREG), .off = 2},
   };
-  size_t first_size = fuse_add_direntry_plus(
-      nullptr, nullptr, 0, entries[0].name.c_str(), &entries[0].entry,
-      entries[0].off);
+  size_t first_size =
+      fuse_add_direntry_plus(nullptr, nullptr, 0, entries[0].name.c_str(),
+                             &entries[0].entry, entries[0].off);
 
   std::vector<char> buf(first_size);
-  size_t used =
-      AppendDirEntriesPlus(nullptr, buf.data(), buf.size(), entries);
+  size_t used = AppendDirEntriesPlus(nullptr, buf.data(), buf.size(), entries);
   EXPECT_EQ(used, first_size);
 }
 

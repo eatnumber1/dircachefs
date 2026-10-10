@@ -1,13 +1,12 @@
-#include "dcfs/status.h"
-
 #include <cstring>
 
 #include "absl/base/no_destructor.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status_builder.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/strip.h"
-#include "absl/strings/numbers.h"
-#include "absl/container/flat_hash_map.h"
+#include "dcfs/status.h"
 
 namespace dcfs {
 
@@ -25,250 +24,250 @@ namespace {
 const absl::flat_hash_map<std::string, int> &NameToErrnoTable() {
   static const absl::NoDestructor<absl::flat_hash_map<std::string, int>>
       kNamesToErrors(absl::flat_hash_map<std::string, int>{
-      {"OK", 0},
+          {"OK", 0},
 #define E(n) {#n, n}
-      E(EINVAL),
-      E(ENAMETOOLONG),
-      E(E2BIG),
-      E(EDESTADDRREQ),
-      E(EDOM),
-      E(EFAULT),
-      E(EILSEQ),
-      E(ENOPROTOOPT),
-      E(ENOSTR),
-      E(ENOTSOCK),
-      E(ENOTTY),
-      E(EPROTOTYPE),
-      E(ESPIPE),
-      E(ETIMEDOUT),
-      E(ETIME),
-      E(ENODEV),
-      E(ENOENT),
-      E(ELOOP),
+          E(EINVAL),
+          E(ENAMETOOLONG),
+          E(E2BIG),
+          E(EDESTADDRREQ),
+          E(EDOM),
+          E(EFAULT),
+          E(EILSEQ),
+          E(ENOPROTOOPT),
+          E(ENOSTR),
+          E(ENOTSOCK),
+          E(ENOTTY),
+          E(EPROTOTYPE),
+          E(ESPIPE),
+          E(ETIMEDOUT),
+          E(ETIME),
+          E(ENODEV),
+          E(ENOENT),
+          E(ELOOP),
 #ifdef ENOMEDIUM
-      E(ENOMEDIUM),
+          E(ENOMEDIUM),
 #endif
-      E(ENXIO),
-      E(ESRCH),
-      E(EEXIST),
-      E(EADDRNOTAVAIL),
-      E(EALREADY),
+          E(ENXIO),
+          E(ESRCH),
+          E(EEXIST),
+          E(EADDRNOTAVAIL),
+          E(EALREADY),
 #ifdef ENOTUNIQ
-      E(ENOTUNIQ),
+          E(ENOTUNIQ),
 #endif
-      E(EPERM),
-      E(EACCES),
+          E(EPERM),
+          E(EACCES),
 #ifdef ENOKEY
-      E(ENOKEY),
+          E(ENOKEY),
 #endif
-      E(EROFS),
-      E(ENOTEMPTY),
-      E(EISDIR),
-      E(ENOTDIR),
-      E(EADDRINUSE),
-      E(EBADF),
+          E(EROFS),
+          E(ENOTEMPTY),
+          E(EISDIR),
+          E(ENOTDIR),
+          E(EADDRINUSE),
+          E(EBADF),
 #ifdef EBADFD
-      E(EBADFD),
+          E(EBADFD),
 #endif
-      E(EBUSY),
-      E(ECHILD),
-      E(EISCONN),
+          E(EBUSY),
+          E(ECHILD),
+          E(EISCONN),
 #ifdef EISNAM
-      E(EISNAM),
+          E(EISNAM),
 #endif
 #ifdef ENOTBLK
-      E(ENOTBLK),
+          E(ENOTBLK),
 #endif
-      E(ENOTCONN),
-      E(EPIPE),
+          E(ENOTCONN),
+          E(EPIPE),
 #ifdef ESHUTDOWN
-      E(ESHUTDOWN),
+          E(ESHUTDOWN),
 #endif
-      E(ETXTBSY),
+          E(ETXTBSY),
 #ifdef EUNATCH
-      E(EUNATCH),
+          E(EUNATCH),
 #endif
-      E(ENOSPC),
+          E(ENOSPC),
 #ifdef EDQUOT
-      E(EDQUOT),
+          E(EDQUOT),
 #endif
-      E(EMFILE),
-      E(EMLINK),
-      E(ENFILE),
-      E(ENOBUFS),
-      E(ENODATA),
-      E(ENOMEM),
-      E(ENOSR),
+          E(EMFILE),
+          E(EMLINK),
+          E(ENFILE),
+          E(ENOBUFS),
+          E(ENODATA),
+          E(ENOMEM),
+          E(ENOSR),
 #ifdef EUSERS
-      E(EUSERS),
+          E(EUSERS),
 #endif
 #ifdef ECHRNG
-      E(ECHRNG),
+          E(ECHRNG),
 #endif
-      E(EFBIG),
-      E(EOVERFLOW),
-      E(ERANGE),
+          E(EFBIG),
+          E(EOVERFLOW),
+          E(ERANGE),
 #ifdef ENOPKG
-      E(ENOPKG),
+          E(ENOPKG),
 #endif
-      E(ENOSYS),
-      E(ENOTSUP),
-      // On Linux, ENOTSUP and EOPNOTSUPP are the same numeric value, and
-      // strerrorname_np() picks EOPNOTSUPP as the canonical name for it, so
-      // both names must round-trip back to that value.
-      E(EOPNOTSUPP),
-      E(EAFNOSUPPORT),
+          E(ENOSYS),
+          E(ENOTSUP),
+          // On Linux, ENOTSUP and EOPNOTSUPP are the same numeric value, and
+          // strerrorname_np() picks EOPNOTSUPP as the canonical name for it, so
+          // both names must round-trip back to that value.
+          E(EOPNOTSUPP),
+          E(EAFNOSUPPORT),
 #ifdef EPFNOSUPPORT
-      E(EPFNOSUPPORT),
+          E(EPFNOSUPPORT),
 #endif
-      E(EPROTONOSUPPORT),
+          E(EPROTONOSUPPORT),
 #ifdef ESOCKTNOSUPPORT
-      E(ESOCKTNOSUPPORT),
+          E(ESOCKTNOSUPPORT),
 #endif
-      E(EXDEV),
-      E(EAGAIN),
+          E(EXDEV),
+          E(EAGAIN),
 #ifdef ECOMM
-      E(ECOMM),
+          E(ECOMM),
 #endif
-      E(ECONNREFUSED),
-      E(ECONNABORTED),
-      E(ECONNRESET),
-      E(EINTR),
+          E(ECONNREFUSED),
+          E(ECONNABORTED),
+          E(ECONNRESET),
+          E(EINTR),
 #ifdef EHOSTDOWN
-      E(EHOSTDOWN),
+          E(EHOSTDOWN),
 #endif
-      E(EHOSTUNREACH),
-      E(ENETDOWN),
-      E(ENETRESET),
-      E(ENETUNREACH),
-      E(ENOLCK),
-      E(ENOLINK),
+          E(EHOSTUNREACH),
+          E(ENETDOWN),
+          E(ENETRESET),
+          E(ENETUNREACH),
+          E(ENOLCK),
+          E(ENOLINK),
 #ifdef ENONET
-      E(ENONET),
+          E(ENONET),
 #endif
-      E(EDEADLK),
+          E(EDEADLK),
 #ifdef ESTALE
-      E(ESTALE),
+          E(ESTALE),
 #endif
-      E(ECANCELED),
-      // The entries below were found missing by dcfs/status_test.cc's
-      // exhaustive round trip over every errno value the C library names
-      // (1..134): every one of these is a name strerrorname_np() produces
-      // as the canonical name for some errno on this platform, so
-      // ErrorNameToErrno() must be able to parse it back.
-      E(EIO),
-      E(ENOEXEC),
-      E(EIDRM),
-      E(EMSGSIZE),
-      E(EPROTO),
-      E(EMULTIHOP),
-      E(EBADMSG),
-      E(ENOMSG),
-      E(EINPROGRESS),
-      E(EREMOTE),
-      E(ERESTART),
-      E(ESTRPIPE),
-      E(ETOOMANYREFS),
-      E(EOWNERDEAD),
-      E(ENOTRECOVERABLE),
+          E(ECANCELED),
+          // The entries below were found missing by dcfs/status_test.cc's
+          // exhaustive round trip over every errno value the C library names
+          // (1..134): every one of these is a name strerrorname_np() produces
+          // as the canonical name for some errno on this platform, so
+          // ErrorNameToErrno() must be able to parse it back.
+          E(EIO),
+          E(ENOEXEC),
+          E(EIDRM),
+          E(EMSGSIZE),
+          E(EPROTO),
+          E(EMULTIHOP),
+          E(EBADMSG),
+          E(ENOMSG),
+          E(EINPROGRESS),
+          E(EREMOTE),
+          E(ERESTART),
+          E(ESTRPIPE),
+          E(ETOOMANYREFS),
+          E(EOWNERDEAD),
+          E(ENOTRECOVERABLE),
 #ifdef EADV
-      E(EADV),
+          E(EADV),
 #endif
 #ifdef EBADE
-      E(EBADE),
+          E(EBADE),
 #endif
 #ifdef EBADR
-      E(EBADR),
+          E(EBADR),
 #endif
 #ifdef EBADRQC
-      E(EBADRQC),
+          E(EBADRQC),
 #endif
 #ifdef EBADSLT
-      E(EBADSLT),
+          E(EBADSLT),
 #endif
 #ifdef EBFONT
-      E(EBFONT),
+          E(EBFONT),
 #endif
 #ifdef EDOTDOT
-      E(EDOTDOT),
+          E(EDOTDOT),
 #endif
 #ifdef EHWPOISON
-      E(EHWPOISON),
+          E(EHWPOISON),
 #endif
 #ifdef EKEYEXPIRED
-      E(EKEYEXPIRED),
+          E(EKEYEXPIRED),
 #endif
 #ifdef EKEYREJECTED
-      E(EKEYREJECTED),
+          E(EKEYREJECTED),
 #endif
 #ifdef EKEYREVOKED
-      E(EKEYREVOKED),
+          E(EKEYREVOKED),
 #endif
 #ifdef EL2HLT
-      E(EL2HLT),
+          E(EL2HLT),
 #endif
 #ifdef EL2NSYNC
-      E(EL2NSYNC),
+          E(EL2NSYNC),
 #endif
 #ifdef EL3HLT
-      E(EL3HLT),
+          E(EL3HLT),
 #endif
 #ifdef EL3RST
-      E(EL3RST),
+          E(EL3RST),
 #endif
 #ifdef ELIBACC
-      E(ELIBACC),
+          E(ELIBACC),
 #endif
 #ifdef ELIBBAD
-      E(ELIBBAD),
+          E(ELIBBAD),
 #endif
 #ifdef ELIBEXEC
-      E(ELIBEXEC),
+          E(ELIBEXEC),
 #endif
 #ifdef ELIBMAX
-      E(ELIBMAX),
+          E(ELIBMAX),
 #endif
 #ifdef ELIBSCN
-      E(ELIBSCN),
+          E(ELIBSCN),
 #endif
 #ifdef ELNRNG
-      E(ELNRNG),
+          E(ELNRNG),
 #endif
 #ifdef EMEDIUMTYPE
-      E(EMEDIUMTYPE),
+          E(EMEDIUMTYPE),
 #endif
 #ifdef ENAVAIL
-      E(ENAVAIL),
+          E(ENAVAIL),
 #endif
 #ifdef ENOANO
-      E(ENOANO),
+          E(ENOANO),
 #endif
 #ifdef ENOCSI
-      E(ENOCSI),
+          E(ENOCSI),
 #endif
 #ifdef ENOTNAM
-      E(ENOTNAM),
+          E(ENOTNAM),
 #endif
 #ifdef EREMCHG
-      E(EREMCHG),
+          E(EREMCHG),
 #endif
 #ifdef EREMOTEIO
-      E(EREMOTEIO),
+          E(EREMOTEIO),
 #endif
 #ifdef ERFKILL
-      E(ERFKILL),
+          E(ERFKILL),
 #endif
 #ifdef ESRMNT
-      E(ESRMNT),
+          E(ESRMNT),
 #endif
 #ifdef EUCLEAN
-      E(EUCLEAN),
+          E(EUCLEAN),
 #endif
 #ifdef EXFULL
-      E(EXFULL),
+          E(EXFULL),
 #endif
 #undef E
-  });
+      });
   return *kNamesToErrors;
 }
 

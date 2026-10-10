@@ -2,13 +2,13 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <sched.h>
 #include <sys/file.h>
 #include <sys/fsuid.h>
-#include <sys/stat.h>
-#include <sched.h>
 #include <sys/mount.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <syslog.h>
 #include <unistd.h>
@@ -124,8 +124,8 @@ absl::StatusOr<std::string> realpath(std::string_view path) {
   const std::string path_str(path);
   char *resolved = ::realpath(path_str.c_str(), nullptr);
   if (resolved == nullptr) {
-    return ErrnoToStatus(
-        errno, absl::StrCat("realpath(", EscapeBytes(path), ")"));
+    return ErrnoToStatus(errno,
+                         absl::StrCat("realpath(", EscapeBytes(path), ")"));
   }
   std::string result(resolved);
   ::free(resolved);
@@ -133,7 +133,7 @@ absl::StatusOr<std::string> realpath(std::string_view path) {
 }
 
 absl::StatusOr<struct timespec> clock_gettime(clockid_t clock) {
-  struct timespec now {};
+  struct timespec now{};
   if (::clock_gettime(clock, &now) == -1) {
     return ErrnoToStatus(errno, absl::StrCat("clock_gettime(", clock, ")"));
   }
@@ -141,7 +141,7 @@ absl::StatusOr<struct timespec> clock_gettime(clockid_t clock) {
 }
 
 absl::StatusOr<struct rlimit> getrlimit(int resource) {
-  struct rlimit limit {};
+  struct rlimit limit{};
   if (::getrlimit(static_cast<__rlimit_resource_t>(resource), &limit) == -1) {
     return ErrnoToStatus(errno, absl::StrCat("getrlimit(", resource, ")"));
   }
@@ -180,8 +180,7 @@ absl::StatusOr<pid_t> setsid() {
 absl::Status chdir(std::string_view path) {
   const std::string path_str(path);
   if (::chdir(path_str.c_str()) == -1) {
-    return ErrnoToStatus(errno,
-                         absl::StrCat("chdir(", EscapeBytes(path), ")"));
+    return ErrnoToStatus(errno, absl::StrCat("chdir(", EscapeBytes(path), ")"));
   }
   return absl::OkStatus();
 }

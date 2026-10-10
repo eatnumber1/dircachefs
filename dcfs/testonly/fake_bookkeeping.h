@@ -63,9 +63,7 @@ struct FakeBookkeeping final : events::Bookkeeping {
       absl::FunctionRef<void(events::Ino, uint64_t)> each) const override {
     for (const auto &[id, count] : lookups) each(id, count);
   }
-  bool IsWritten(events::Ino id) const override {
-    return written.contains(id);
-  }
+  bool IsWritten(events::Ino id) const override { return written.contains(id); }
   size_t WrittenEntries() const override { return written.size(); }
   void ForEachWritten(
       absl::FunctionRef<void(events::Ino, bool)> each) const override {

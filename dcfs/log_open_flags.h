@@ -26,7 +26,7 @@ class LogOpenFlags {
 
   template <typename Sink>
   friend void AbslStringify(Sink &sink, const LogOpenFlags &l) {
-    static const absl::flat_hash_map<int, const std::string> kFlagsToNames {
+    static const absl::flat_hash_map<int, const std::string> kFlagsToNames{
 #define F(n) {n, #n}
 #ifdef O_ACCMODE
         F(O_ACCMODE),

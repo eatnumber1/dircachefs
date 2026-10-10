@@ -115,8 +115,8 @@ void WalkDir(int dir_fd, uint64_t &walked) {
     if (st.ok() && S_ISDIR(st->st_mode)) subdirs.emplace_back(name);
   });
   for (const std::string &name : subdirs) {
-    absl::StatusOr<FileDescriptor> sub = syscalls::openat(
-        dir_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    absl::StatusOr<FileDescriptor> sub =
+        syscalls::openat(dir_fd, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
     if (sub.ok()) WalkDir(**sub, walked);
   }
 }
@@ -131,9 +131,8 @@ uint64_t Walk(const std::string &root) {
   return walked;
 }
 
-bool StartDcfs(
-    const std::string &name, const std::string &src,
-    const std::vector<std::string> &flags, bool fresh_db = true) {
+bool StartDcfs(const std::string &name, const std::string &src,
+               const std::vector<std::string> &flags, bool fresh_db = true) {
   auto d = std::make_unique<DcfsProcess>();
   std::string mnt = cfg.mnt_dir + "/" + name;
   std::string db = cfg.cache_dir + "/" + name + ".db";
@@ -222,8 +221,7 @@ void BM_OpenClose(benchmark::State &state, const Target *t) {
 
 void BM_SmallRead(benchmark::State &state, const Target *t) {
   Cycle(state, *t, [](const std::string &p) {
-    absl::StatusOr<FileDescriptor> fd =
-        syscalls::openat(AT_FDCWD, p, O_RDONLY);
+    absl::StatusOr<FileDescriptor> fd = syscalls::openat(AT_FDCWD, p, O_RDONLY);
     if (!fd.ok()) return false;
     char buf[4096];
     absl::StatusOr<size_t> r = syscalls::pread(**fd, buf, sizeof buf, 0);
@@ -303,10 +301,9 @@ void BM_Recovery(benchmark::State &state) {
   for (auto _ : state) {
     state.PauseTiming();
     DcfsProcess p;
-    bool ok = p.Start(
-                  cfg.dcfs, cfg.src, db, mnt,
-                  {"--sync_interval_sec=100000"}) &&
-              p.WaitMounted(120);
+    bool ok =
+        p.Start(cfg.dcfs, cfg.src, db, mnt, {"--sync_interval_sec=100000"}) &&
+        p.WaitMounted(120);
     if (ok) {
       std::string dir = mnt + "/recovery" + std::to_string(round++);
       ok = syscalls::mkdirat(AT_FDCWD, dir, 0755).ok();
@@ -319,8 +316,8 @@ void BM_Recovery(benchmark::State &state) {
     p.Crash();
     state.ResumeTiming();
     DcfsProcess q;
-    ok = ok && q.Start(cfg.dcfs, cfg.src, db, mnt, {}) &&
-         q.WaitMounted(300) && syscalls::fstatat(AT_FDCWD, mnt).ok();
+    ok = ok && q.Start(cfg.dcfs, cfg.src, db, mnt, {}) && q.WaitMounted(300) &&
+         syscalls::fstatat(AT_FDCWD, mnt).ok();
     state.PauseTiming();
     q.Stop();
     state.ResumeTiming();
@@ -417,17 +414,28 @@ void ParseOwnFlags(int *argc, char **argv) {
   int out = 1;
   for (int i = 1; i < *argc; ++i) {
     std::string v;
-    if (TakeFlag(argv[i], "dcfs", &v)) cfg.dcfs = v;
-    else if (TakeFlag(argv[i], "src", &v)) cfg.src = v;
-    else if (TakeFlag(argv[i], "slow_src", &v)) cfg.slow_src = v;
-    else if (TakeFlag(argv[i], "mnt_dir", &v)) cfg.mnt_dir = v;
-    else if (TakeFlag(argv[i], "cache_dir", &v)) cfg.cache_dir = v;
-    else if (TakeFlag(argv[i], "entries", &v)) cfg.entries = strtoull(v.c_str(), nullptr, 10);
-    else if (TakeFlag(argv[i], "slow_entries", &v)) cfg.slow_entries = strtoull(v.c_str(), nullptr, 10);
-    else if (TakeFlag(argv[i], "big", &v)) cfg.big = strtoull(v.c_str(), nullptr, 10);
-    else if (TakeFlag(argv[i], "dirty", &v)) cfg.dirty = strtoull(v.c_str(), nullptr, 10);
-    else if (TakeFlag(argv[i], "smoke", &v)) cfg.smoke = true;
-    else argv[out++] = argv[i];
+    if (TakeFlag(argv[i], "dcfs", &v))
+      cfg.dcfs = v;
+    else if (TakeFlag(argv[i], "src", &v))
+      cfg.src = v;
+    else if (TakeFlag(argv[i], "slow_src", &v))
+      cfg.slow_src = v;
+    else if (TakeFlag(argv[i], "mnt_dir", &v))
+      cfg.mnt_dir = v;
+    else if (TakeFlag(argv[i], "cache_dir", &v))
+      cfg.cache_dir = v;
+    else if (TakeFlag(argv[i], "entries", &v))
+      cfg.entries = strtoull(v.c_str(), nullptr, 10);
+    else if (TakeFlag(argv[i], "slow_entries", &v))
+      cfg.slow_entries = strtoull(v.c_str(), nullptr, 10);
+    else if (TakeFlag(argv[i], "big", &v))
+      cfg.big = strtoull(v.c_str(), nullptr, 10);
+    else if (TakeFlag(argv[i], "dirty", &v))
+      cfg.dirty = strtoull(v.c_str(), nullptr, 10);
+    else if (TakeFlag(argv[i], "smoke", &v))
+      cfg.smoke = true;
+    else
+      argv[out++] = argv[i];
   }
   *argc = out;
 }
@@ -438,12 +446,13 @@ void ParseOwnFlags(int *argc, char **argv) {
 int main(int argc, char **argv) {
   if (argc == 5 && strcmp(argv[1], "mktree") == 0) {
     return dcfs_bench::MakeTree(argv[2], strtoull(argv[3], nullptr, 10),
-                    strtoull(argv[4], nullptr, 10))
+                                strtoull(argv[4], nullptr, 10))
                ? 0
                : 1;
   }
   if (argc == 5 && strcmp(argv[1], "dm-delay") == 0) {
-    std::string node = dcfs_bench::CreateDelayDevice(argv[2], argv[3], atoi(argv[4]));
+    std::string node =
+        dcfs_bench::CreateDelayDevice(argv[2], argv[3], atoi(argv[4]));
     if (node.empty()) return 1;
     printf("%s\n", node.c_str());
     return 0;

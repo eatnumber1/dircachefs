@@ -230,8 +230,8 @@ class Observers final : public ProtocolEvents {
                        const events::Request &request) override {
     for (ProtocolEvents *o : observers_) o->CheckRequestEnd(ctx, fs, request);
   }
-  void CheckForgetting(Context &ctx, const events::Bookkeeping &fs, uint64_t ino,
-                       uint64_t nlookup) override {
+  void CheckForgetting(Context &ctx, const events::Bookkeeping &fs,
+                       uint64_t ino, uint64_t nlookup) override {
     for (ProtocolEvents *o : observers_)
       o->CheckForgetting(ctx, fs, ino, nlookup);
   }

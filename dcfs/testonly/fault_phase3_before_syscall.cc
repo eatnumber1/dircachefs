@@ -20,16 +20,15 @@ using cache::Mutation;
 
 // The wrapped functions (external linkage: the linker resolves these names).
 
-absl::StatusOr<Mutation> RealBeginRemove(Context &ctx, InodeId parent,
-                                         std::string_view name, InodeId child,
-                                         FillSnapshot resolved)
-    asm("__real__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
+absl::StatusOr<Mutation>
+RealBeginRemove(Context &ctx, InodeId parent, std::string_view name, InodeId child, FillSnapshot resolved) asm(
+    "__real__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_"
+    "viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
 
-
-absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
-                                         std::string_view name, InodeId child,
-                                         FillSnapshot resolved)
-    asm("__wrap__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
+absl::StatusOr<Mutation>
+WrapBeginRemove(Context &ctx, InodeId parent, std::string_view name, InodeId child, FillSnapshot resolved) asm(
+    "__wrap__ZN4dcfs5cache11BeginRemoveERNS_7ContextElNSt3__117basic_string_"
+    "viewIcNS3_11char_traitsIcEEEElNS0_12FillSnapshotE");
 absl::StatusOr<Mutation> WrapBeginRemove(Context &ctx, InodeId parent,
                                          std::string_view name, InodeId child,
                                          FillSnapshot resolved) {

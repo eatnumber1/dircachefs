@@ -42,8 +42,7 @@ bool MkdirP(int rootfd, const std::string &rel) {
     if (!cur.empty()) {
       absl::Status made = dcfs::syscalls::mkdirat(rootfd, cur, 0755);
       if (!made.ok() && dcfs::StatusToErrno(made) != EEXIST) {
-        fprintf(stderr, "mkdir %s: %s\n", cur.c_str(),
-                made.ToString().c_str());
+        fprintf(stderr, "mkdir %s: %s\n", cur.c_str(), made.ToString().c_str());
         return false;
       }
     }
@@ -53,8 +52,8 @@ bool MkdirP(int rootfd, const std::string &rel) {
 }
 
 bool WriteFile(int rootfd, const std::string &rel) {
-  absl::StatusOr<dcfs::FileDescriptor> fd = dcfs::syscalls::openat(
-      rootfd, rel, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  absl::StatusOr<dcfs::FileDescriptor> fd =
+      dcfs::syscalls::openat(rootfd, rel, O_WRONLY | O_CREAT | O_TRUNC, 0644);
   if (!fd.ok()) {
     fprintf(stderr, "create %s: %s\n", rel.c_str(),
             fd.status().ToString().c_str());

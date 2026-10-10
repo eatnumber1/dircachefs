@@ -23,17 +23,17 @@ namespace dcfs {
 namespace {
 
 using ::absl_testing::IsOk;
-using ::testing::Not;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
+using ::testing::Not;
 
 // Views the bytes of `s` as a blob for Statement::Bind() -- see the
 // AsBlob() comment in migrate.cc. Several schema columns exercised directly
 // by these tests (dentries.name, xattrs.name/value, symlinks.target) are
 // BLOB in a STRICT table and reject a bound TEXT value outright.
 std::span<const uint8_t> Blob(std::string_view s) {
-  return std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(s.data()), s.size());
+  return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(s.data()),
+                                  s.size());
 }
 
 DeviceId TestDeviceId(uint8_t fill) {
@@ -52,7 +52,7 @@ RootIdentity TestRoot() {
 }
 
 absl::StatusOr<int64_t> CountRows(sqlite3::Connection &db,
-                                   std::string_view from_where) {
+                                  std::string_view from_where) {
   ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       db.Prepared(absl::StrCat("SELECT COUNT(*) FROM ", from_where)));
@@ -66,8 +66,8 @@ absl::StatusOr<int64_t> CountRows(sqlite3::Connection &db,
 class MigrateTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ASSERT_OK_AND_ASSIGN(
-        db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
+    ASSERT_OK_AND_ASSIGN(db_,
+                         sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
   }
 
   sqlite3::Connection db_;
@@ -85,7 +85,7 @@ TEST_F(MigrateTest, FreshDatabaseMigratesAndSeedsRoot) {
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * stmt,
       db_.Prepared("SELECT fuse_gen, backing_ino, backing_gen, attrs_valid "
-                    "FROM inodes WHERE id = 1"));
+                   "FROM inodes WHERE id = 1"));
   ASSERT_THAT(stmt->Step(), IsOkAndHolds(true));
   EXPECT_EQ(stmt->Column<int64_t>(0), 0);
   EXPECT_EQ(stmt->Column<uint64_t>(1), root.backing_ino);
@@ -126,8 +126,9 @@ TEST_F(MigrateTest, V2DatabaseGainsTheReaddirIndexes) {
                              "UPDATE cache_state SET schema_version = 2;"),
               IsOk());
   ASSERT_THAT(GetSchemaVersion(db_), IsOkAndHolds(2));
-  ASSERT_THAT(CountRows(db_, "sqlite_master WHERE name IN "
-                             "('dentries_present', 'dentries_unknown')"),
+  ASSERT_THAT(CountRows(db_,
+                        "sqlite_master WHERE name IN "
+                        "('dentries_present', 'dentries_unknown')"),
               IsOkAndHolds(0));
   ASSERT_THAT(db_.Exec("INSERT INTO dentries (parent, name, state, inode) "
                        "VALUES (1, x'61', 'absent', NULL)"),
@@ -135,8 +136,9 @@ TEST_F(MigrateTest, V2DatabaseGainsTheReaddirIndexes) {
 
   ASSERT_THAT(Migrate(db_, root), IsOk());
   EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
-  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'index' AND name IN "
-                             "('dentries_present', 'dentries_unknown')"),
+  EXPECT_THAT(CountRows(db_,
+                        "sqlite_master WHERE type = 'index' AND name IN "
+                        "('dentries_present', 'dentries_unknown')"),
               IsOkAndHolds(2));
   EXPECT_THAT(CountRows(db_, "dentries"), IsOkAndHolds(1));
   // Opening it again is a no-op.
@@ -162,15 +164,18 @@ TEST_F(MigrateTest, V3DatabaseGainsStubsAndForgetsItsRefusals) {
 
   ASSERT_THAT(Migrate(db_, root), IsOk());
   EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
-  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name IN ('stubs', "
-                             "'dentries_refused', 'dentries_unrefused', "
-                             "'dentries_refused_deleted')"),
+  EXPECT_THAT(CountRows(db_,
+                        "sqlite_master WHERE name IN ('stubs', "
+                        "'dentries_refused', 'dentries_unrefused', "
+                        "'dentries_refused_deleted')"),
               IsOkAndHolds(4));
-  EXPECT_THAT(CountRows(db_, "dentries WHERE name = x'6d70' AND "
-                             "state = 'unknown'"),
+  EXPECT_THAT(CountRows(db_,
+                        "dentries WHERE name = x'6d70' AND "
+                        "state = 'unknown'"),
               IsOkAndHolds(1));
-  EXPECT_THAT(CountRows(db_, "dentries WHERE name = x'61' AND "
-                             "state = 'absent'"),
+  EXPECT_THAT(CountRows(db_,
+                        "dentries WHERE name = x'61' AND "
+                        "state = 'absent'"),
               IsOkAndHolds(1));
 }
 
@@ -183,12 +188,13 @@ TEST_F(MigrateTest, StubsGoWithTheirRefusals) {
   auto add = [&](std::string_view name_hex, int64_t id) {
     ASSERT_THAT(db_.Exec(absl::StrCat(
                     "INSERT INTO dentries (parent, name, state, inode) "
-                    "VALUES (1, x'", name_hex, "', 'refused', NULL)")),
+                    "VALUES (1, x'",
+                    name_hex, "', 'refused', NULL)")),
                 IsOk());
-    ASSERT_THAT(db_.Exec(absl::StrCat(
-                    "INSERT INTO stubs VALUES (", id, ", 1, x'", name_hex,
-                    "', 7, 16877, 2, 0, 0, 0, 0, 0, 4096, "
-                    "0, 0, 0, 0, 0, 0, 0, 0)")),
+    ASSERT_THAT(db_.Exec(absl::StrCat("INSERT INTO stubs VALUES (", id,
+                                      ", 1, x'", name_hex,
+                                      "', 7, 16877, 2, 0, 0, 0, 0, 0, 4096, "
+                                      "0, 0, 0, 0, 0, 0, 0, 0)")),
                 IsOk());
   };
   add("61", -9223372036854775807 - 1);
@@ -253,11 +259,13 @@ TEST_F(MigrateTest, V4DatabaseGainsTheStubHighWaterMark) {
 
   ASSERT_THAT(Migrate(db_, root), IsOk());
   EXPECT_THAT(GetSchemaVersion(db_), IsOkAndHolds(kSchemaVersion));
-  EXPECT_THAT(CountRows(db_, "cache_state WHERE "
-                             "last_stub_id = -9223372036854775806"),
+  EXPECT_THAT(CountRows(db_,
+                        "cache_state WHERE "
+                        "last_stub_id = -9223372036854775806"),
               IsOkAndHolds(1));
-  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'index' AND "
-                             "name = 'inodes_unlinked'"),
+  EXPECT_THAT(CountRows(db_,
+                        "sqlite_master WHERE type = 'index' AND "
+                        "name = 'inodes_unlinked'"),
               IsOkAndHolds(1));
   ASSERT_THAT(db_.Exec("UPDATE dentries SET state = 'unknown'"), IsOk());
   EXPECT_THAT(CountRows(db_, "stubs"), IsOkAndHolds(1));
@@ -378,8 +386,8 @@ TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * insert,
       db_.Prepared("INSERT INTO inodes "
-                    "(id, device_id, backing_ino, backing_gen, fuse_gen) "
-                    "VALUES (7, ?, 70, 0, 12345)"));
+                   "(id, device_id, backing_ino, backing_gen, fuse_gen) "
+                   "VALUES (7, ?, 70, 0, 12345)"));
   ASSERT_THAT(insert->Bind(1, Blob(device_bytes)), IsOk());
   ASSERT_THAT(insert->ExecuteOnce(), IsOk());
   ASSERT_OK_AND_ASSIGN(
@@ -403,8 +411,9 @@ TEST_F(MigrateTest, UpgradesV1ToCurrentKeepingRows) {
   EXPECT_THAT(GetSourceDeviceId(db_), IsOkAndHolds(root.device_id));
   EXPECT_THAT(CountRows(db_, "dirty"), IsOkAndHolds(0));
   // A v1 xattr row is a present one.
-  EXPECT_THAT(CountRows(db_, "xattrs WHERE inode = 7 AND state = 'present' "
-                             "AND value = CAST('v' AS BLOB)"),
+  EXPECT_THAT(CountRows(db_,
+                        "xattrs WHERE inode = 7 AND state = 'present' "
+                        "AND value = CAST('v' AS BLOB)"),
               IsOkAndHolds(1));
 
   // And the upgraded database is now current: migrating again is a no-op.
@@ -422,8 +431,9 @@ TEST_F(MigrateTest, OlderThanV1FailsPrecondition) {
   EXPECT_THAT(Migrate(db_, root),
               StatusIs(absl::StatusCode::kFailedPrecondition));
   // The failed upgrade rolled back: nothing changed.
-  EXPECT_THAT(CountRows(db_, "meta WHERE key = 'schema_version' AND "
-                             "value = '0'"),
+  EXPECT_THAT(CountRows(db_,
+                        "meta WHERE key = 'schema_version' AND "
+                        "value = '0'"),
               IsOkAndHolds(1));
   EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'cache_state'"),
               IsOkAndHolds(0));
@@ -468,7 +478,7 @@ TEST_F(MigrateTest, DeletingInodeLeavesDentryUnknown) {
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * dentry_stmt,
       db_.Prepared("INSERT INTO dentries (parent, name, state, inode) "
-                    "VALUES (1, ?, 'present', 2)"));
+                   "VALUES (1, ?, 'present', 2)"));
   ASSERT_THAT(dentry_stmt->Bind(1, Blob("child")), IsOk());
   ASSERT_THAT(dentry_stmt->ExecuteOnce(), IsOk());
 
@@ -512,24 +522,21 @@ TEST_F(MigrateTest, DeletingFilesystemCascadesButRootSurvives) {
 
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * dir_stmt,
-      db_.Prepared(
-          "INSERT INTO directories (inode, children_complete) "
-          "VALUES (2, 0)"));
+      db_.Prepared("INSERT INTO directories (inode, children_complete) "
+                   "VALUES (2, 0)"));
   ASSERT_THAT(dir_stmt->ExecuteOnce(), IsOk());
 
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * dentry_stmt,
-      db_.Prepared(
-          "INSERT INTO dentries (parent, name, state, inode) "
-          "VALUES (1, ?, 'present', 2)"));
+      db_.Prepared("INSERT INTO dentries (parent, name, state, inode) "
+                   "VALUES (1, ?, 'present', 2)"));
   ASSERT_THAT(dentry_stmt->Bind(1, Blob("mnt")), IsOk());
   ASSERT_THAT(dentry_stmt->ExecuteOnce(), IsOk());
 
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * xattr_stmt,
-      db_.Prepared(
-          "INSERT INTO xattrs (inode, name, state, value) "
-          "VALUES (2, ?, 'present', ?)"));
+      db_.Prepared("INSERT INTO xattrs (inode, name, state, value) "
+                   "VALUES (2, ?, 'present', ?)"));
   ASSERT_THAT(xattr_stmt->Bind(1, Blob("user.foo")), IsOk());
   ASSERT_THAT(xattr_stmt->Bind(2, Blob("bar")), IsOk());
   ASSERT_THAT(xattr_stmt->ExecuteOnce(), IsOk());
@@ -572,17 +579,15 @@ TEST_F(MigrateTest, DentriesHaveAUsableRowid) {
 
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * insert_a,
-      db_.Prepared(
-          "INSERT INTO dentries (parent, name, state, inode) "
-          "VALUES (1, ?, 'absent', NULL)"));
+      db_.Prepared("INSERT INTO dentries (parent, name, state, inode) "
+                   "VALUES (1, ?, 'absent', NULL)"));
   ASSERT_THAT(insert_a->Bind(1, Blob("a")), IsOk());
   ASSERT_THAT(insert_a->ExecuteOnce(), IsOk());
 
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * insert_b,
-      db_.Prepared(
-          "INSERT INTO dentries (parent, name, state, inode) "
-          "VALUES (1, ?, 'absent', NULL)"));
+      db_.Prepared("INSERT INTO dentries (parent, name, state, inode) "
+                   "VALUES (1, ?, 'absent', NULL)"));
   ASSERT_THAT(insert_b->Bind(1, Blob("b")), IsOk());
   ASSERT_THAT(insert_b->ExecuteOnce(), IsOk());
 
@@ -591,14 +596,13 @@ TEST_F(MigrateTest, DentriesHaveAUsableRowid) {
       db_.Prepared("SELECT rowid FROM dentries ORDER BY rowid"));
   std::vector<int64_t> rowids;
   ASSERT_THAT(select->ForEachRow([&](sqlite3::Statement &s) -> absl::Status {
-                rowids.push_back(s.Column<int64_t>(0));
-                return absl::OkStatus();
-              }),
+    rowids.push_back(s.Column<int64_t>(0));
+    return absl::OkStatus();
+  }),
               IsOk());
   ASSERT_EQ(rowids.size(), 2u);
   EXPECT_LT(rowids[0], rowids[1]);
 }
-
 
 // Regression test for the typed cache_state table replacing the untyped
 // key/value meta table, both in a fresh cache and after the v1 -> v2
@@ -607,8 +611,9 @@ TEST_F(MigrateTest, DentriesHaveAUsableRowid) {
 TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
   RootIdentity root = TestRoot();
   ASSERT_THAT(Migrate(db_, root), IsOk());
-  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'table' AND "
-                             "name = 'cache_state'"),
+  EXPECT_THAT(CountRows(db_,
+                        "sqlite_master WHERE type = 'table' AND "
+                        "name = 'cache_state'"),
               IsOkAndHolds(1));
   EXPECT_THAT(CountRows(db_, "sqlite_master WHERE name = 'meta'"),
               IsOkAndHolds(0));
@@ -617,24 +622,25 @@ TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
   // dentries.refused column (amendment 12, step 4.8; dropped here since
   // this starts from a fresh, current-schema database, which already has
   // it).
-  ASSERT_THAT(db_.ExecScript(
-                  "DROP TABLE IF EXISTS dirty; "
-                  "DROP TABLE IF EXISTS cache_state; "
-                  "DROP TABLE IF EXISTS meta; "
-                  "DROP TRIGGER inodes_delete_unknowns; "
-                  "CREATE TABLE dentries_v1 (parent INTEGER NOT NULL REFERENCES "
-                  "inodes (id) ON DELETE CASCADE, name BLOB NOT NULL, inode INTEGER "
-                  "NULL REFERENCES inodes (id) ON DELETE SET NULL, "
-                  "PRIMARY KEY (parent, name)) STRICT; "
-                  "INSERT INTO dentries_v1 SELECT parent, name, inode FROM dentries; "
-                  "DROP TABLE dentries; "
-                  "ALTER TABLE dentries_v1 RENAME TO dentries; "
-                  "CREATE INDEX dentries_inode ON dentries (inode); "
-                  "ALTER TABLE directories DROP COLUMN epoch; "
-                  "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
-                  "INSERT INTO meta VALUES ('schema_version', '1'), "
-                  "('gen_counter', '12345');"),
-              IsOk());
+  ASSERT_THAT(
+      db_.ExecScript(
+          "DROP TABLE IF EXISTS dirty; "
+          "DROP TABLE IF EXISTS cache_state; "
+          "DROP TABLE IF EXISTS meta; "
+          "DROP TRIGGER inodes_delete_unknowns; "
+          "CREATE TABLE dentries_v1 (parent INTEGER NOT NULL REFERENCES "
+          "inodes (id) ON DELETE CASCADE, name BLOB NOT NULL, inode INTEGER "
+          "NULL REFERENCES inodes (id) ON DELETE SET NULL, "
+          "PRIMARY KEY (parent, name)) STRICT; "
+          "INSERT INTO dentries_v1 SELECT parent, name, inode FROM dentries; "
+          "DROP TABLE dentries; "
+          "ALTER TABLE dentries_v1 RENAME TO dentries; "
+          "CREATE INDEX dentries_inode ON dentries (inode); "
+          "ALTER TABLE directories DROP COLUMN epoch; "
+          "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
+          "INSERT INTO meta VALUES ('schema_version', '1'), "
+          "('gen_counter', '12345');"),
+      IsOk());
   std::string device_bytes = root.device_id.Serialize();
   ASSERT_OK_AND_ASSIGN(
       sqlite3::Statement * insert,
@@ -659,8 +665,9 @@ TEST_F(MigrateTest, CacheStateIsTypedAndMetaIsGone) {
 
   // The upgraded dentries table has the readdir indexes a fresh one has
   // (Phase 6.2: schema.sql, "dentries_present").
-  EXPECT_THAT(CountRows(db_, "sqlite_master WHERE type = 'index' AND name IN "
-                             "('dentries_present', 'dentries_unknown')"),
+  EXPECT_THAT(CountRows(db_,
+                        "sqlite_master WHERE type = 'index' AND name IN "
+                        "('dentries_present', 'dentries_unknown')"),
               IsOkAndHolds(2));
 }
 

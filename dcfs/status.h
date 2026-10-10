@@ -19,7 +19,8 @@
 
 namespace dcfs {
 
-constexpr inline std::string_view kErrnoTypeUrl = "rus.har.mn/dcfs/status/errno";
+constexpr inline std::string_view kErrnoTypeUrl =
+    "rus.har.mn/dcfs/status/errno";
 
 // All syscall/libc failures in dcfs/ must be turned into a Status via this
 // function (dcfs::ErrnoToStatus), never via absl::ErrnoToStatus directly:

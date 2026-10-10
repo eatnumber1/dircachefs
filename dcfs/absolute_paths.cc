@@ -23,10 +23,9 @@ absl::Status MakePathsAbsolute(HelperArgs &args, HelperOptions &options) {
   if (options.cache_db.has_value()) {
     options.cache_db = absolute(*options.cache_db);
   }
-  const bool is_path =
-      options.backing != HelperOptions::Backing::kNative ||
-      (!args.source.empty() && args.source[0] != '/' &&
-       syscalls::fstatat(AT_FDCWD, args.source).ok());
+  const bool is_path = options.backing != HelperOptions::Backing::kNative ||
+                       (!args.source.empty() && args.source[0] != '/' &&
+                        syscalls::fstatat(AT_FDCWD, args.source).ok());
   if (is_path) args.source = absolute(args.source);
   return absl::OkStatus();
 }

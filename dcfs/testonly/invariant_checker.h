@@ -134,8 +134,8 @@ class InvariantChecker final : public ProtocolEvents {
                          const events::Request &request) override;
   void CheckRequestEnd(Context &ctx, const events::Bookkeeping &fs,
                        const events::Request &request) override;
-  void CheckForgetting(Context &ctx, const events::Bookkeeping &fs, uint64_t ino,
-                       uint64_t nlookup) override;
+  void CheckForgetting(Context &ctx, const events::Bookkeeping &fs,
+                       uint64_t ino, uint64_t nlookup) override;
   void CheckRunStarting(Context &ctx) override;
   void CheckRunStarted(Context &ctx) override;
   void CheckDestroyed(Context &ctx, const events::Bookkeeping &fs) override;
@@ -198,8 +198,8 @@ class InvariantChecker final : public ProtocolEvents {
 
   // The per-inode checks of `id`: its row's columns if `row_changed`, and
   // what being open for writing or durably dirty requires.
-  absl::Status CheckInode(Context &ctx, const events::Bookkeeping *fs, InodeId id,
-                          bool row_changed);
+  absl::Status CheckInode(Context &ctx, const events::Bookkeeping *fs,
+                          InodeId id, bool row_changed);
   // The checks of an inodes row's own columns: `row` is (id, attrs_valid,
   // fuse_gen, nlink, whether an attribute column is NULL).
   absl::Status CheckInodeRow(const Context &ctx, const events::Bookkeeping *fs,
@@ -218,7 +218,8 @@ class InvariantChecker final : public ProtocolEvents {
                                bool destroyed);
   // DirCacheFS's bookkeeping: for the inodes in `interest` (and the
   // recounts below kRecountLimit), or everything if it is null.
-  absl::Status CheckBookkeeping(const Context &ctx, const events::Bookkeeping &fs,
+  absl::Status CheckBookkeeping(const Context &ctx,
+                                const events::Bookkeeping &fs,
                                 const absl::flat_hash_set<InodeId> *interest,
                                 bool destroyed);
   // removed-record, for the removed record of `id`.

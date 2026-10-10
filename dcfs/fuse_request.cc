@@ -17,9 +17,8 @@
 
 namespace dcfs {
 
-size_t AppendDirEntries(
-    fuse_req_t req, char *buf, size_t bufsize,
-    std::span<const FuseDirEntry> entries) {
+size_t AppendDirEntries(fuse_req_t req, char *buf, size_t bufsize,
+                        std::span<const FuseDirEntry> entries) {
   size_t used = 0;
   for (const FuseDirEntry &entry : entries) {
     size_t remaining = bufsize - used;
@@ -27,18 +26,17 @@ size_t AppendDirEntries(
     // writing it if that exceeds `remaining` (it checks buf == nullptr ||
     // needed > bufsize internally), so a single call both measures and
     // writes each entry.
-    size_t needed = fuse_add_direntry(
-        req, buf == nullptr ? nullptr : buf + used, remaining,
-        entry.name.c_str(), &entry.stbuf, entry.off);
+    size_t needed =
+        fuse_add_direntry(req, buf == nullptr ? nullptr : buf + used, remaining,
+                          entry.name.c_str(), &entry.stbuf, entry.off);
     if (needed > remaining) break;
     used += needed;
   }
   return used;
 }
 
-size_t AppendDirEntriesPlus(
-    fuse_req_t req, char *buf, size_t bufsize,
-    std::span<const FuseDirEntryPlus> entries) {
+size_t AppendDirEntriesPlus(fuse_req_t req, char *buf, size_t bufsize,
+                            std::span<const FuseDirEntryPlus> entries) {
   size_t used = 0;
   for (const FuseDirEntryPlus &entry : entries) {
     size_t remaining = bufsize - used;
@@ -73,9 +71,10 @@ absl::Status FuseRequest::ReplyEntryParam(const fuse_entry_param &param) {
   return st;
 }
 
-absl::Status FuseRequest::ReplyEntry(
-    fuse_ino_t nodeid, uint64_t generation, const struct stat &attr,
-    absl::Duration attr_timeout, absl::Duration entry_timeout) {
+absl::Status FuseRequest::ReplyEntry(fuse_ino_t nodeid, uint64_t generation,
+                                     const struct stat &attr,
+                                     absl::Duration attr_timeout,
+                                     absl::Duration entry_timeout) {
   fuse_entry_param param{
       .ino = nodeid,
       .generation = generation,
@@ -93,8 +92,8 @@ absl::Status FuseRequest::ReplyNegativeEntry(absl::Duration entry_timeout) {
   return ReplyEntryParam(param);
 }
 
-absl::Status FuseRequest::ReplyAttr(
-    const struct stat &attr, absl::Duration attr_timeout) {
+absl::Status FuseRequest::ReplyAttr(const struct stat &attr,
+                                    absl::Duration attr_timeout) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st = ProducedErrnoToStatus(
       -fuse_reply_attr(*req_, &attr, absl::ToDoubleSeconds(attr_timeout)),
@@ -122,8 +121,8 @@ absl::Status FuseRequest::ReplyOpen(const fuse_file_info &fi) {
   return st;
 }
 
-absl::Status FuseRequest::ReplyCreate(
-    const fuse_entry_param &entry, const fuse_file_info &fi) {
+absl::Status FuseRequest::ReplyCreate(const fuse_entry_param &entry,
+                                      const fuse_file_info &fi) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::Status st = ProducedErrnoToStatus(
       -fuse_reply_create(*req_, &entry, &fi), "fuse_reply_create");
@@ -244,16 +243,16 @@ absl::Status FuseRequest::ReplyXattrSize(size_t size) {
   return st;
 }
 
-absl::Status FuseRequest::ReplyDirs(
-    std::span<FuseDirEntry> entries, size_t maxsize) {
+absl::Status FuseRequest::ReplyDirs(std::span<FuseDirEntry> entries,
+                                    size_t maxsize) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::FixedArray<char> buf(maxsize);
   size_t used = AppendDirEntries(*req_, buf.data(), buf.size(), entries);
   return ReplyBuf(std::string_view(buf.data(), used));
 }
 
-absl::Status FuseRequest::ReplyDirsPlus(
-    std::span<FuseDirEntryPlus> entries, size_t maxsize) {
+absl::Status FuseRequest::ReplyDirsPlus(std::span<FuseDirEntryPlus> entries,
+                                        size_t maxsize) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
   absl::FixedArray<char> buf(maxsize);
   size_t used = AppendDirEntriesPlus(*req_, buf.data(), buf.size(), entries);

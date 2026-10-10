@@ -250,9 +250,8 @@ TraceRecorder::Req *TraceRecorder::RequestReq(Ino dir) {
   return it == rf->reqs.end() ? nullptr : &it->second;
 }
 
-TraceRecorder::Req &TraceRecorder::Open(Frame &frame, Ino dir,
-                                        std::string kind, std::string n,
-                                        std::string m) {
+TraceRecorder::Req &TraceRecorder::Open(Frame &frame, Ino dir, std::string kind,
+                                        std::string n, std::string m) {
   std::set<int> &slots = dirs_[dir].slots;
   int slot = 1;
   while (slots.contains(slot)) ++slot;
@@ -287,8 +286,9 @@ void TraceRecorder::Close(
                     "a listing's reads ended without their line, and its "
                     "request replied OK");
       } else {
-        Cut(ctx, dir, absl::StrCat("failed: a listing failed half-way: ",
-                                   status.ToString()));
+        Cut(ctx, dir,
+            absl::StrCat("failed: a listing failed half-way: ",
+                         status.ToString()));
       }
     }
     if (!req.pending.empty()) {
@@ -297,8 +297,8 @@ void TraceRecorder::Close(
         Unexplained(ctx, dir,
                     absl::StrCat(req.pending, ", and its request replied OK"));
       } else {
-        Cut(ctx, dir, absl::StrCat("failed: ", req.pending, ": ",
-                                   status.ToString()));
+        Cut(ctx, dir,
+            absl::StrCat("failed: ", req.pending, ": ", status.ToString()));
       }
     } else if (Traced(dir) && req.arrived) {
       // An interrupted request's EINTR is the model's (its interrupt line
@@ -317,9 +317,9 @@ void TraceRecorder::Close(
         const int err = frame.sent_errno.value_or(ErrnoOf(status));
         Emit(ctx, dir, &req, "reply",
              absl::StrCat(",\"errno\":", err,
-                          req.answer.empty() ? ""
-                                             : absl::StrCat(",\"ans\":",
-                                                            req.answer)));
+                          req.answer.empty()
+                              ? ""
+                              : absl::StrCat(",\"ans\":", req.answer)));
       } else if (why.starts_with("unexplained: ")) {
         Unexplained(ctx, dir, why.substr(13));
       } else {
@@ -376,12 +376,11 @@ TraceRecorder::State TraceRecorder::SnapshotState(Context &ctx, Ino dir) {
     CHECK_OK((*stmt)->ForEachRow([&](sqlite3::Statement &row) {
       std::string name = row.Column<std::string>(0);
       const std::string state = row.Column<std::string>(1);
-      out.dent.emplace_back(
-          std::move(name),
-          state == "present" ? Key(row.Column<uint64_t>(2),
-                                   row.Column<int64_t>(3),
-                                   row.Column<int64_t>(4))
-                             : state);
+      out.dent.emplace_back(std::move(name), state == "present"
+                                                 ? Key(row.Column<uint64_t>(2),
+                                                       row.Column<int64_t>(3),
+                                                       row.Column<int64_t>(4))
+                                                 : state);
       return absl::OkStatus();
     }));
   }
@@ -427,8 +426,7 @@ TraceRecorder::State TraceRecorder::SnapshotState(Context &ctx, Ino dir) {
       ",\"complete\":", Bool(complete), ",\"epoch\":", epoch,
       ",\"valid\":", Bool(valid), ",\"dirty\":", Bool(dirty),
       ",\"clean\":", Bool(*clean),
-      ",\"durable\":", Bool(ctx.dirty.durable.contains(dir)),
-      ",\"inflight\":",
+      ",\"durable\":", Bool(ctx.dirty.durable.contains(dir)), ",\"inflight\":",
       inflight == ctx.fills.inflight.end() ? 0 : inflight->second);
   return out;
 }
@@ -460,9 +458,8 @@ void TraceRecorder::WriteLine(const std::string &line) {
 void TraceRecorder::Emit(Context &ctx, Ino dir, Req *req, std::string_view ev,
                          std::string_view fields) {
   if (!Traced(dir)) return;
-  std::string json =
-      absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                   ",\"ev\":", JsonStr(ev));
+  std::string json = absl::StrCat(
+      "{\"i\":", ++line_, ",\"c\":", JsonStr(cause_), ",\"ev\":", JsonStr(ev));
   if (req != nullptr) {
     absl::StrAppend(&json, ",\"p\":\"p", req->slot, "\"");
     if (!req->arrived) {
@@ -595,17 +592,17 @@ void TraceRecorder::After(Context &ctx) {
       in_sync = absl::StrCat(",\"sync_p\":\"p", req.slot, "\"");
     }
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"begin\",\"origin\":",
-                            JsonStr(origin), marked, in_sync, ",\"db\":", db,
-                            "}"));
+                            ",\"ev\":\"begin\",\"origin\":", JsonStr(origin),
+                            marked, in_sync, ",\"db\":", db, "}"));
     dirs_[dir].last = db;
     dirs_[dir].last_state = std::move(now);
     covered_.insert(dir);
     if (db.find("\"refused\"") != std::string::npos) {
       Cut(ctx, dir, "boundary: a refused boundary");
     } else if (origin == "other") {
-      Unexplained(ctx, dir, "a directory row appeared at a step that does "
-                            "not create one");
+      Unexplained(ctx, dir,
+                  "a directory row appeared at a step that does "
+                  "not create one");
     }
   }
   for (auto &[dir, state] : dirs_) {
@@ -618,13 +615,13 @@ void TraceRecorder::After(Context &ctx) {
     if (auto it = forgotten_.find(dir); it != forgotten_.end()) {
       State expected = state.last_state;
       for (auto &[name, value] : expected.dent) {
-        if (it->second.contains(name) &&
-            value.starts_with("k:")) {
+        if (it->second.contains(name) && value.starts_with("k:")) {
           value = "unknown";
         }
       }
       if (expected.Json() == db) {
-        Cut(ctx, dir, "invalidated: a forgotten inode's dentries became unknown");
+        Cut(ctx, dir,
+            "invalidated: a forgotten inode's dentries became unknown");
         continue;
       }
     }
@@ -690,8 +687,7 @@ void TraceRecorder::RequestEnd(Context &ctx, const absl::Status &status) {
          err == EAGAIN)) {
       return "";
     }
-    if ((req.kind == "readdir" || req.kind == "readdirplus") &&
-        err == EAGAIN) {
+    if ((req.kind == "readdir" || req.kind == "readdirplus") && err == EAGAIN) {
       return "";
     }
     return absl::StrCat("failed: the request failed: ", status.ToString());
@@ -935,7 +931,8 @@ void TraceRecorder::ResolveProbed(Context &ctx, Ino parent,
                                   const events::Probe &probe) {
   Enter("ResolveProbed");
   if (probe.kind == events::Probe::Kind::kPresent) {
-    Resolved(ctx, parent, name, Key(probe.ino, probe.btime_sec, probe.btime_nsec));
+    Resolved(ctx, parent, name,
+             Key(probe.ino, probe.btime_sec, probe.btime_nsec));
   }
   if (Traced(parent)) {
     Req *req = Find(parent);
@@ -944,9 +941,9 @@ void TraceRecorder::ResolveProbed(Context &ctx, Ino parent,
     } else if (probe.kind == events::Probe::Kind::kRefused) {
       Cut(ctx, parent, "boundary: a refused boundary");
     } else {
-      Emit(ctx, parent, req, "probe",
-           absl::StrCat(",\"n\":", Name(name), ",\"what\":",
-                        ProbeValue(probe)));
+      Emit(
+          ctx, parent, req, "probe",
+          absl::StrCat(",\"n\":", Name(name), ",\"what\":", ProbeValue(probe)));
     }
   }
   After(ctx);
@@ -1075,13 +1072,13 @@ void TraceRecorder::PopulateRead(Context &ctx, Ino dir,
       state.held.clear();
       state.reading = false;
       if (refused) {
-        Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":",
-                                JsonStr(cause_),
-                                ",\"ev\":\"cut\",\"why\":\"boundary: a refused boundary\"}"));
+        Write(dir,
+              absl::StrCat(
+                  "{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
+                  ",\"ev\":\"cut\",\"why\":\"boundary: a refused boundary\"}"));
         state.dead = true;
       } else {
-        Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":",
-                                JsonStr(cause_),
+        Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                                 ",\"ev\":\"populate_read\",\"p\":\"p",
                                 state.read_slot, "\",\"listing\":[", list,
                                 "],\"db\":", state.read_db, "}"));
@@ -1093,8 +1090,8 @@ void TraceRecorder::PopulateRead(Context &ctx, Ino dir,
   After(ctx);
 }
 
-void TraceRecorder::PopulateCommitted(Context &ctx, Ino dir,
-                                      uint64_t snapshot, bool recorded) {
+void TraceRecorder::PopulateCommitted(Context &ctx, Ino dir, uint64_t snapshot,
+                                      bool recorded) {
   Enter("PopulateCommitted");
   if (Traced(dir)) {
     Req *req = Find(dir);
@@ -1119,8 +1116,8 @@ void TraceRecorder::ListChecked(Context &ctx, Ino dir, bool complete) {
     const Mapping m = rf != nullptr ? Map(*rf, dir) : Mapping{};
     if (m.kind == Mapping::Kind::kRequest &&
         (m.req_kind == "readdir" || m.req_kind == "readdirplus")) {
-      Req &req = rf->reqs.contains(dir) ? rf->reqs[dir]
-                                        : Open(*rf, dir, m.req_kind);
+      Req &req =
+          rf->reqs.contains(dir) ? rf->reqs[dir] : Open(*rf, dir, m.req_kind);
       Emit(ctx, dir, &req, "list_check",
            absl::StrCat(",\"complete\":", Bool(complete)));
       if (complete && req.kind == "readdir") req.terminal = true;
@@ -1183,8 +1180,7 @@ void TraceRecorder::ParentRecorded(Context &ctx, Ino dir, Ino parent,
   Enter("ParentRecorded");
   auto mark = parent_marks_.find(dir);
   if (Traced(parent)) {
-    Fill(ctx, parent, mark == parent_marks_.end() ? -1 : mark->second,
-         filled);
+    Fill(ctx, parent, mark == parent_marks_.end() ? -1 : mark->second, filled);
   }
   if (mark != parent_marks_.end()) parent_marks_.erase(mark);
   After(ctx);
@@ -1258,9 +1254,8 @@ void TraceRecorder::MutationBegun(Context &ctx, events::IdsFn ids,
     // Any other phase 1 is the request's line, for the model to judge: a
     // second phase 1 in one create, one in a request that is no mutation,
     // or an unlink's or rename's before its resolve all are rejected.
-    Req *req = rf->reqs.contains(dir)
-                   ? &rf->reqs[dir]
-                   : &Open(*rf, dir, m.req_kind, m.n, m.m);
+    Req *req = rf->reqs.contains(dir) ? &rf->reqs[dir]
+                                      : &Open(*rf, dir, m.req_kind, m.n, m.m);
     req->begun = true;
     Emit(ctx, dir, req, "phase1",
          absl::StrCat(",\"outcome\":\"begun\",\"synced\":", Bool(synced)));
@@ -1320,7 +1315,8 @@ void TraceRecorder::MutationSyscallStarting(Context &ctx) {
     for (Ino dir : MutatedDirs(*rf)) {
       auto it = rf->reqs.find(dir);
       if (it == rf->reqs.end() || !it->second.begun) {
-        Unexplained(ctx, dir, "a mutation's syscall started before its phase 1");
+        Unexplained(ctx, dir,
+                    "a mutation's syscall started before its phase 1");
       }
     }
   }
@@ -1338,9 +1334,8 @@ void TraceRecorder::MutationSyscall(Context &ctx, const absl::Status &status) {
     // it rejects the line.
     for (Ino dir : MutatedDirs(*rf)) {
       const Mapping m = Map(*rf, dir);
-      Req &req = rf->reqs.contains(dir)
-                     ? rf->reqs[dir]
-                     : Open(*rf, dir, m.req_kind, m.n, m.m);
+      Req &req = rf->reqs.contains(dir) ? rf->reqs[dir]
+                                        : Open(*rf, dir, m.req_kind, m.n, m.m);
       const bool modelled =
           err == 0 || (IsCreate(req.kind) && err == EEXIST) ||
           ((req.kind == "unlink" || req.kind == "rename") && err == ENOENT);
@@ -1348,9 +1343,10 @@ void TraceRecorder::MutationSyscall(Context &ctx, const absl::Status &status) {
         // Whether the request then failed (the model's requests always
         // finish: a cut) or replied OK regardless (unexplained), its
         // RequestEnd says.
-        Defer(dir, req, absl::StrCat("a syscall error the model does not "
-                                     "have: ",
-                                     status.ToString()));
+        Defer(dir, req,
+              absl::StrCat("a syscall error the model does not "
+                           "have: ",
+                           status.ToString()));
         continue;
       }
       req.syscall_seen = true;
@@ -1376,9 +1372,9 @@ void TraceRecorder::NewChildProbed(Context &ctx, Ino parent,
       Unexplained(ctx, parent, "a create's probe outside its request");
     } else {
       req->probe_absent = probe.kind == events::Probe::Kind::kAbsent;
-      Emit(ctx, parent, req, "probe",
-           absl::StrCat(",\"n\":", Name(name), ",\"what\":",
-                        ProbeValue(probe)));
+      Emit(
+          ctx, parent, req, "probe",
+          absl::StrCat(",\"n\":", Name(name), ",\"what\":", ProbeValue(probe)));
     }
   }
   After(ctx);
@@ -1419,8 +1415,7 @@ void TraceRecorder::MutationEnded(Context &ctx, events::IdsFn ids) {
       MutationLine(dir, /*begun=*/false);
       continue;
     }
-    Emit(ctx, dir, &req, "end",
-         absl::StrCat(",\"owned\":", Bool(req.owned)));
+    Emit(ctx, dir, &req, "end", absl::StrCat(",\"owned\":", Bool(req.owned)));
     MutationLine(dir, /*begun=*/false);
     if (req.syscall_ok && !req.probe_absent) req.expects_refresh = true;
   }
@@ -1442,16 +1437,14 @@ void TraceRecorder::NameResolved(Context &ctx, Ino parent,
   After(ctx);
 }
 
-void TraceRecorder::Reresolve(Context &ctx, Ino parent,
-                              std::string_view name) {
+void TraceRecorder::Reresolve(Context &ctx, Ino parent, std::string_view name) {
   Enter("Reresolve");
   if (Traced(parent)) {
     Req *req = RequestReq(parent);
     if (req == nullptr || !IsMutation(req->kind)) {
       Unexplained(ctx, parent, "a re-resolve outside its mutation");
     } else {
-      Emit(ctx, parent, req, "reresolve",
-           absl::StrCat(",\"n\":", Name(name)));
+      Emit(ctx, parent, req, "reresolve", absl::StrCat(",\"n\":", Name(name)));
     }
   }
   After(ctx);
@@ -1595,8 +1588,8 @@ void TraceRecorder::RunStarted(Context &ctx) {
   Enter("RunStarted");
   for (Ino dir : AllDirs(ctx)) {
     Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
-                            ",\"ev\":\"start_run\",\"db\":",
-                            Snapshot(ctx, dir), "}"));
+                            ",\"ev\":\"start_run\",\"db\":", Snapshot(ctx, dir),
+                            "}"));
     RunLineWritten(ctx, dir);
   }
   // After the sweep of unnamed rows (lifetime.tla's Restart).
@@ -1707,8 +1700,8 @@ bool TraceRecorder::FileTraced(Ino id) const {
 
 void TraceRecorder::FileLine(Ino id, std::string_view ev,
                              std::string_view fields) {
-  WriteLine(absl::StrCat("DCFS-REVAL ", trace_, " ", id, " {\"i\":",
-                         ++file_line_, ",\"c\":", JsonStr(cause_),
+  WriteLine(absl::StrCat("DCFS-REVAL ", trace_, " ", id,
+                         " {\"i\":", ++file_line_, ",\"c\":", JsonStr(cause_),
                          ",\"ev\":", JsonStr(ev), fields, "}\n"));
 }
 
@@ -1778,8 +1771,7 @@ void TraceRecorder::Interrupted(Context &ctx) {
         std::vector<std::string> held = std::move(state.held);
         state.held.clear();
         state.reading = false;
-        Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":",
-                                JsonStr(cause_),
+        Write(dir, absl::StrCat("{\"i\":", ++line_, ",\"c\":", JsonStr(cause_),
                                 ",\"ev\":\"interrupt\",\"p\":\"p", req.slot,
                                 "\",\"db\":", state.read_db, "}"));
         for (const std::string &json : held) Write(dir, json);
@@ -1810,11 +1802,12 @@ void TraceRecorder::FileRequestEnd(const Frame &request, int err) {
   switch (request.op) {
     case events::Op::kIoctl:
       if (request.flags == FS_IOC_SETFLAGS) {
-        FileLine(id, "setflags",
-                 absl::StrCat(errno_field, ",\"imm\":",
-                              Bool((request.ioctl_arg & FS_IMMUTABLE_FL) != 0),
-                              ",\"app\":",
-                              Bool((request.ioctl_arg & FS_APPEND_FL) != 0)));
+        FileLine(
+            id, "setflags",
+            absl::StrCat(
+                errno_field,
+                ",\"imm\":", Bool((request.ioctl_arg & FS_IMMUTABLE_FL) != 0),
+                ",\"app\":", Bool((request.ioctl_arg & FS_APPEND_FL) != 0)));
       } else if (request.flags == FS_IOC_FSSETXATTR) {
         // Its xflags can set the immutable and append-only flags too; the
         // values are left free.
@@ -1827,8 +1820,8 @@ void TraceRecorder::FileRequestEnd(const Frame &request, int err) {
       // A change of the mode or owner: what the kernel's permission check
       // reads (the model's "mode", left free: the trace does not know the
       // caller).
-      if ((request.flags & (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_UID |
-                            FUSE_SET_ATTR_GID)) != 0) {
+      if ((request.flags &
+           (FUSE_SET_ATTR_MODE | FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID)) != 0) {
         FileLine(id, "chmod", errno_field);
       }
       break;
@@ -1886,8 +1879,8 @@ std::string TraceRecorder::RowJson(Context &ctx, Ino id) {
 
 void TraceRecorder::LifeLine(Ino id, std::string_view cause,
                              std::string_view ev, std::string_view fields) {
-  WriteLine(absl::StrCat("DCFS-LIFE ", trace_, " ", id, " {\"i\":",
-                         ++life_line_, ",\"c\":", JsonStr(cause),
+  WriteLine(absl::StrCat("DCFS-LIFE ", trace_, " ", id,
+                         " {\"i\":", ++life_line_, ",\"c\":", JsonStr(cause),
                          ",\"ev\":", JsonStr(ev), fields, "}\n"));
 }
 
@@ -1926,11 +1919,11 @@ void TraceRecorder::LifetimeChanged(Context &ctx, Ino id,
       before = kept;
       before.lookups = 0;
     }
-    LifeLine(id, "LifetimeChanged", "begin",
-             absl::StrCat(",\"st\":{", KeptJson(before), ",",
-                          creates ? "\"row\":false,\"nl0\":false"
-                                  : RowJson(ctx, id),
-                          "}"));
+    LifeLine(
+        id, "LifetimeChanged", "begin",
+        absl::StrCat(",\"st\":{", KeptJson(before), ",",
+                     creates ? "\"row\":false,\"nl0\":false" : RowJson(ctx, id),
+                     "}"));
   }
   std::string ev;
   std::string fields;
@@ -2014,10 +2007,10 @@ bool TraceRecorder::HasRow(Context &ctx, Ino id) {
 void TraceRecorder::IdentLine(Context &ctx, Ino id, std::string_view cause,
                               std::string_view ev, std::string_view fields,
                               std::string_view more) {
-  WriteLine(absl::StrCat("DCFS-IDENT ", trace_, " ", id, " {\"i\":",
-                         ++ident_line_, ",\"c\":", JsonStr(cause),
-                         ",\"ev\":", JsonStr(ev), fields, ",\"st\":{\"row\":",
-                         Bool(HasRow(ctx, id)), more, "}}\n"));
+  WriteLine(
+      absl::StrCat("DCFS-IDENT ", trace_, " ", id, " {\"i\":", ++ident_line_,
+                   ",\"c\":", JsonStr(cause), ",\"ev\":", JsonStr(ev), fields,
+                   ",\"st\":{\"row\":", Bool(HasRow(ctx, id)), more, "}}\n"));
 }
 
 void TraceRecorder::IdentRunLines(Context &ctx, std::string_view cause,
@@ -2040,8 +2033,8 @@ void TraceRecorder::IdentStep(Context &ctx, Ino id, events::LifetimeStep step,
     // had none).
     if (!reply || kept.lookups != 1) return;
     idents_.insert(id);
-    WriteLine(absl::StrCat("DCFS-IDENT ", trace_, " ", id, " {\"i\":",
-                           ++ident_line_,
+    WriteLine(absl::StrCat("DCFS-IDENT ", trace_, " ", id,
+                           " {\"i\":", ++ident_line_,
                            ",\"c\":\"LifetimeChanged\",\"ev\":\"begin\","
                            "\"st\":{\"row\":",
                            Bool(!creates && HasRow(ctx, id)), "}}\n"));
@@ -2096,13 +2089,11 @@ void TraceRecorder::IdentityResolved(Context &ctx, Ino id,
       absl::StrCat(
           ",\"outcome\":",
           JsonStr(check.outcome == Outcome::kServed ? "served" : "mismatch"),
-          ",\"ino\":",
-          JsonStr(Compare(true, check.found_ino == check.row_ino)),
+          ",\"ino\":", JsonStr(Compare(true, check.found_ino == check.row_ino)),
           ",\"gen\":",
           JsonStr(Compare(check.row_gen != 0 && check.found_gen != 0,
                           check.found_gen == check.row_gen)),
-          ",\"bt\":",
-          JsonStr(Compare(row_btime && found_btime, same_btime))));
+          ",\"bt\":", JsonStr(Compare(row_btime && found_btime, same_btime))));
 }
 
 }  // namespace dcfs::testonly

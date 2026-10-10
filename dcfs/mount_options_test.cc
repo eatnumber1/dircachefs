@@ -21,10 +21,10 @@ using ::testing::Optional;
 
 // Step 15.8: both are always there, in this order, whatever else is named.
 TEST(MountOptionsTest, DefaultPermissionsAndAllowOtherComeFirst) {
-  EXPECT_THAT(BuildMountOptions({}),
-              IsOkAndHolds(Field(&MountOptions::options,
-                                 ElementsAre("default_permissions",
-                                             "allow_other"))));
+  EXPECT_THAT(
+      BuildMountOptions({}),
+      IsOkAndHolds(Field(&MountOptions::options,
+                         ElementsAre("default_permissions", "allow_other"))));
 }
 
 TEST(MountOptionsTest, FuseOptFollows) {
@@ -63,10 +63,10 @@ TEST(MountOptionsTest, FuseOptNamingAllowOtherIsRedundant) {
 }
 
 TEST(MountOptionsTest, HasDefaultPermissions) {
-  EXPECT_TRUE(HasDefaultPermissions(std::vector<std::string>{
-      "default_permissions"}));
-  EXPECT_TRUE(HasDefaultPermissions(std::vector<std::string>{
-      "allow_other,default_permissions"}));
+  EXPECT_TRUE(
+      HasDefaultPermissions(std::vector<std::string>{"default_permissions"}));
+  EXPECT_TRUE(HasDefaultPermissions(
+      std::vector<std::string>{"allow_other,default_permissions"}));
   EXPECT_FALSE(HasDefaultPermissions(std::vector<std::string>{}));
   EXPECT_FALSE(HasDefaultPermissions(std::vector<std::string>{
       "allow_other", "default_permissions_not", "xdefault_permissions"}));

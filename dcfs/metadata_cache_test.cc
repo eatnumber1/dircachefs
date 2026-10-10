@@ -67,7 +67,7 @@ FileHandle Handle(const DeviceId &device, std::string_view bytes,
 // A fabricated statx with a distinct value in every field Upsert/UpdateAttr
 // store, derived from `ino` and `seed` so tests can tell versions apart.
 struct statx Stx(uint64_t ino, mode_t mode, int64_t seed = 0) {
-  struct statx stx {};
+  struct statx stx{};
   stx.stx_mask = STATX_BASIC_STATS | STATX_BTIME;
   stx.stx_ino = ino;
   stx.stx_mode = mode;
@@ -140,8 +140,8 @@ MATCHER_P(IsFoundAs, id, "") {
 class MetadataCacheTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ASSERT_OK_AND_ASSIGN(
-        db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
+    ASSERT_OK_AND_ASSIGN(db_,
+                         sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
     ASSERT_THAT(Migrate(db_, RootIdentity{.device_id = kSource,
                                           .fstype = 0xEF53,
                                           .backing_ino = kRootIno,
@@ -180,10 +180,12 @@ class MetadataCacheTest : public ::testing::Test {
   absl::Status FillDirectory(InodeId dir, int count, InodeId child) {
     return db_.ExecScript(absl::StrCat(
         "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n "
-        "WHERE i < ", count - 1, ") "
+        "WHERE i < ",
+        count - 1,
+        ") "
         "INSERT INTO dentries (parent, name, state, inode) "
-        "SELECT ", dir, ", CAST('e' || i AS BLOB), 'present', ", child,
-        " FROM n"));
+        "SELECT ",
+        dir, ", CAST('e' || i AS BLOB), 'present', ", child, " FROM n"));
   }
 
   sqlite3::Connection db_;
@@ -228,10 +230,9 @@ TEST_F(MetadataCacheTest, DifferentHandleOrBirthTimeIsANewObject) {
 
   // Same (device, ino, gen 0), different handle bytes (the backing
   // filesystem encodes its own generation there).
-  ASSERT_OK_AND_ASSIGN(
-      UpsertResult by_handle,
-      UpsertInode(ctx_, Handle(kSource, "h30-reborn"), Stx(30, S_IFLNK | 0777),
-                  0));
+  ASSERT_OK_AND_ASSIGN(UpsertResult by_handle,
+                       UpsertInode(ctx_, Handle(kSource, "h30-reborn"),
+                                   Stx(30, S_IFLNK | 0777), 0));
   EXPECT_TRUE(by_handle.created);
   EXPECT_NE(by_handle.id, old.id);
   EXPECT_NE(by_handle.fuse_gen, old.fuse_gen);
@@ -293,8 +294,7 @@ TEST_F(MetadataCacheTest, HardLinksShareOneRow) {
 
   EXPECT_THAT(Lookup(ctx_, a, "one"), IsOkAndHolds(IsFoundAs(file.id)));
   EXPECT_THAT(Lookup(ctx_, b, "two"), IsOkAndHolds(IsFoundAs(file.id)));
-  EXPECT_THAT(CountRows(db_, "inodes WHERE backing_ino = 30"),
-              IsOkAndHolds(1));
+  EXPECT_THAT(CountRows(db_, "inodes WHERE backing_ino = 30"), IsOkAndHolds(1));
 }
 
 TEST_F(MetadataCacheTest, NegativeEntries) {
@@ -492,8 +492,7 @@ TEST_F(MetadataCacheTest, PurgeFilesystem) {
               IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
   EXPECT_THAT(IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
   for (InodeId id : {mnt, f2.id, sub, f3.id}) {
-    EXPECT_THAT(GetAttr(ctx_, id), StatusIs(absl::StatusCode::kNotFound))
-        << id;
+    EXPECT_THAT(GetAttr(ctx_, id), StatusIs(absl::StatusCode::kNotFound)) << id;
   }
   EXPECT_THAT(GetFilesystem(ctx_, kSecond),
               StatusIs(absl::StatusCode::kNotFound));
@@ -549,8 +548,7 @@ TEST_F(MetadataCacheTest, MarkUnknownIsPhaseOne) {
                 IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)))
         << name;
   }
-  EXPECT_THAT(Lookup(ctx_, kRootInode, "stays"),
-              IsOkAndHolds(IsFoundAs(g.id)));
+  EXPECT_THAT(Lookup(ctx_, kRootInode, "stays"), IsOkAndHolds(IsFoundAs(g.id)));
   EXPECT_THAT(IsDirComplete(ctx_, kRootInode), IsOkAndHolds(false));
   EXPECT_THAT(GetAttr(ctx_, f.id), IsOk());
   EXPECT_THAT(GetAttr(ctx_, g.id), IsOk());
@@ -598,12 +596,12 @@ TEST_F(MetadataCacheTest, ListDirPagesWithCursor) {
   EXPECT_THAT(ListNames(ctx_, kRootInode), ElementsAre("one", "two", "three"));
 
   // Callback errors propagate.
-  EXPECT_THAT(ListDir(ctx_, kRootInode, 0,
-                      [](std::string_view, InodeId,
-                         int64_t) -> absl::StatusOr<bool> {
-                        return absl::AbortedError("stop");
-                      }),
-              StatusIs(absl::StatusCode::kAborted));
+  EXPECT_THAT(
+      ListDir(ctx_, kRootInode, 0,
+              [](std::string_view, InodeId, int64_t) -> absl::StatusOr<bool> {
+                return absl::AbortedError("stop");
+              }),
+      StatusIs(absl::StatusCode::kAborted));
 }
 
 TEST_F(MetadataCacheTest, ListDirSpansBatchesAndAllowsWritesInCallback) {
@@ -614,19 +612,19 @@ TEST_F(MetadataCacheTest, ListDirSpansBatchesAndAllowsWritesInCallback) {
                 IsOk());
   }
   int count = 0;
-  ASSERT_THAT(ListDir(ctx_, kRootInode, 0,
-                      [&](std::string_view name, InodeId,
-                          int64_t) -> absl::StatusOr<bool> {
-                        EXPECT_EQ(name, absl::StrCat("e", count));
-                        ++count;
-                        // Reads and writes from inside the callback.
-                        RETURN_IF_ERROR(
-                            Lookup(ctx_, kRootInode, name).status());
-                        RETURN_IF_ERROR(SetNegative(
-                            ctx_, kRootInode, absl::StrCat("neg", count)));
-                        return true;
-                      }),
-              IsOk());
+  ASSERT_THAT(
+      ListDir(
+          ctx_, kRootInode, 0,
+          [&](std::string_view name, InodeId, int64_t) -> absl::StatusOr<bool> {
+            EXPECT_EQ(name, absl::StrCat("e", count));
+            ++count;
+            // Reads and writes from inside the callback.
+            RETURN_IF_ERROR(Lookup(ctx_, kRootInode, name).status());
+            RETURN_IF_ERROR(
+                SetNegative(ctx_, kRootInode, absl::StrCat("neg", count)));
+            return true;
+          }),
+      IsOk());
   EXPECT_EQ(count, kEntries);
 }
 
@@ -648,10 +646,11 @@ TEST_F(MetadataCacheTest, ListDirPageCostDoesNotGrowWithTheDirectory) {
   // near the end, stopping after the first entry delivered.
   auto first_page_cost = [&](InodeId dir, int64_t cursor) {
     return CountVmInstructions(db_, [&] {
-      EXPECT_THAT(ListDir(ctx_, dir, cursor,
-                          [](std::string_view, InodeId,
-                             int64_t) -> absl::StatusOr<bool> { return false; }),
-                  IsOk());
+      EXPECT_THAT(
+          ListDir(ctx_, dir, cursor,
+                  [](std::string_view, InodeId,
+                     int64_t) -> absl::StatusOr<bool> { return false; }),
+          IsOk());
     });
   };
   int64_t small_cost = first_page_cost(small, 0);
@@ -732,9 +731,8 @@ TEST_F(MetadataCacheTest, ListDirOrderSurvivesStateChanges) {
   ASSERT_THAT(MarkUnknown(ctx_, kRootInode, std::vector<std::string>{"c"}),
               IsOk());
   ASSERT_THAT(SetNegative(ctx_, kRootInode, "d"), IsOk());
-  ASSERT_OK_AND_ASSIGN(InodeId stub,
-                       SetRefused(ctx_, kRootInode, "e",
-                                  Stx(31, S_IFDIR | 0755)));
+  ASSERT_OK_AND_ASSIGN(
+      InodeId stub, SetRefused(ctx_, kRootInode, "e", Stx(31, S_IFDIR | 0755)));
   EXPECT_TRUE(IsStub(stub));
   EXPECT_THAT(ListNames(ctx_, kRootInode), ElementsAre("a", "b", "e"));
   std::vector<std::string> rest;
@@ -769,10 +767,10 @@ TEST_F(MetadataCacheTest, ListDirOrderSurvivesStateChanges) {
 // attributes), and drops it with the refusal, however that goes.
 TEST_F(MetadataCacheTest, StubsLiveWithTheirRefusals) {
   ASSERT_OK_AND_ASSIGN(InodeId dir, MakeDir(kRootInode, "dir", 40));
-  ASSERT_OK_AND_ASSIGN(InodeId mp, SetRefused(ctx_, dir, "mp",
-                                              Stx(2, S_IFDIR | 0751, 1)));
-  ASSERT_OK_AND_ASSIGN(InodeId sv, SetRefused(ctx_, dir, "sv",
-                                              Stx(256, S_IFDIR | 0700, 2)));
+  ASSERT_OK_AND_ASSIGN(InodeId mp,
+                       SetRefused(ctx_, dir, "mp", Stx(2, S_IFDIR | 0751, 1)));
+  ASSERT_OK_AND_ASSIGN(
+      InodeId sv, SetRefused(ctx_, dir, "sv", Stx(256, S_IFDIR | 0700, 2)));
   EXPECT_EQ(mp, kFirstStubId);
   EXPECT_EQ(sv, kFirstStubId + 1);
   EXPECT_EQ(static_cast<uint64_t>(mp), kFirstStubNodeid);
@@ -785,10 +783,10 @@ TEST_F(MetadataCacheTest, StubsLiveWithTheirRefusals) {
   EXPECT_EQ(row.attr.st.st_ino, kFirstStubNodeid);
   EXPECT_EQ(row.attr.st.st_mode, S_IFDIR | 0751u);
   EXPECT_EQ(row.attr.st.st_uid, 1001u);
-  EXPECT_THAT(Lookup(ctx_, dir, "mp"),
-              IsOkAndHolds(::testing::AllOf(
-                  IsLookup(LookupResult::Kind::kRefused),
-                  ::testing::Field(&LookupResult::id, mp))));
+  EXPECT_THAT(
+      Lookup(ctx_, dir, "mp"),
+      IsOkAndHolds(::testing::AllOf(IsLookup(LookupResult::Kind::kRefused),
+                                    ::testing::Field(&LookupResult::id, mp))));
 
   // Refused again: the same stub, attributes refreshed.
   ASSERT_THAT(SetRefused(ctx_, dir, "mp", Stx(2, S_IFDIR | 0755, 3)),
@@ -822,8 +820,8 @@ TEST_F(MetadataCacheTest, StubsLiveWithTheirRefusals) {
   // A stub's nodeid is never handed out again (formal/lifetime.tla's
   // NodeidStable): the next one is past every stub's so far, whichever
   // boundary it is for.
-  ASSERT_OK_AND_ASSIGN(InodeId again_id, SetRefused(ctx_, dir, "mp",
-                                                    Stx(2, S_IFDIR | 0751)));
+  ASSERT_OK_AND_ASSIGN(InodeId again_id,
+                       SetRefused(ctx_, dir, "mp", Stx(2, S_IFDIR | 0751)));
   EXPECT_EQ(again_id, kFirstStubId + 2);
   // And it goes with its directory.
   ASSERT_THAT(InvalidateInode(ctx_, dir), IsOk());
@@ -833,8 +831,8 @@ TEST_F(MetadataCacheTest, StubsLiveWithTheirRefusals) {
 // Recovery forgets a dirty directory's dentries, stubs included.
 TEST_F(MetadataCacheTest, RecoveryForgetsStubs) {
   ASSERT_OK_AND_ASSIGN(InodeId dir, MakeDir(kRootInode, "dir", 40));
-  ASSERT_OK_AND_ASSIGN(InodeId mp, SetRefused(ctx_, dir, "mp",
-                                              Stx(2, S_IFDIR | 0751)));
+  ASSERT_OK_AND_ASSIGN(InodeId mp,
+                       SetRefused(ctx_, dir, "mp", Stx(2, S_IFDIR | 0751)));
   const InodeId ids[] = {dir};
   ASSERT_THAT(MarkDirty(ctx_, ids), IsOk());
   ASSERT_THAT(RecoverDirty(ctx_), IsOkAndHolds(1));
@@ -847,8 +845,8 @@ TEST_F(MetadataCacheTest, RecoveryForgetsStubs) {
 TEST_F(MetadataCacheTest, TouchAtimeFollowsTheMountsRule) {
   // Stx's times: atime ...001.111, mtime ...002.222, ctime ...003.333.
   struct statx stx = Stx(50, S_IFREG | 0644);
-  ASSERT_OK_AND_ASSIGN(UpsertResult r, UpsertInode(ctx_, Handle(kSource, "h50"),
-                                                   stx, 0));
+  ASSERT_OK_AND_ASSIGN(UpsertResult r,
+                       UpsertInode(ctx_, Handle(kSource, "h50"), stx, 0));
   auto atime = [&]() -> int64_t {
     absl::StatusOr<CachedAttr> attr = GetAttr(ctx_, r.id);
     EXPECT_THAT(attr, IsOk());
@@ -946,8 +944,8 @@ TEST_F(MetadataCacheTest, ForgetUnnamedRowsSearchesTheUnlinkedIndex) {
     return absl::OkStatus();
   }),
               IsOk());
-  EXPECT_THAT(details, ::testing::Contains(::testing::HasSubstr(
-                           "USING INDEX inodes_unlinked")))
+  EXPECT_THAT(details, ::testing::Contains(
+                           ::testing::HasSubstr("USING INDEX inodes_unlinked")))
       << ::testing::PrintToString(details);
 }
 
@@ -967,7 +965,8 @@ TEST_F(MetadataCacheTest, BeginAttrChangesSkipsAVanishedRow) {
     ASSERT_OK_AND_ASSIGN(CachedAttr attr, GetAttr(ctx_, id));
     EXPECT_FALSE(attr.valid) << id;
   }
-  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(::testing::IsSupersetOf({a.id, b.id})));
+  EXPECT_THAT(ListDirty(ctx_),
+              IsOkAndHolds(::testing::IsSupersetOf({a.id, b.id})));
 }
 
 TEST_F(MetadataCacheTest, FuseGenerations) {
@@ -1092,12 +1091,12 @@ TEST_F(MetadataCacheTest, WithStatxTakesEachAttributeFromItsOwnField) {
   EXPECT_EQ(static_cast<uint64_t>(attr.st.st_size), stx.stx_size);
   EXPECT_EQ(static_cast<uint64_t>(attr.st.st_blocks), stx.stx_blocks);
   EXPECT_EQ(attr.st.st_blksize, 512);
-  EXPECT_THAT(attr.st.st_atim, ::testing::Field(&timespec::tv_sec,
-                                                1'700'000'005));
-  EXPECT_THAT(attr.st.st_mtim, ::testing::Field(&timespec::tv_sec,
-                                                1'700'000'006));
-  EXPECT_THAT(attr.st.st_ctim, ::testing::Field(&timespec::tv_sec,
-                                                1'700'000'007));
+  EXPECT_THAT(attr.st.st_atim,
+              ::testing::Field(&timespec::tv_sec, 1'700'000'005));
+  EXPECT_THAT(attr.st.st_mtim,
+              ::testing::Field(&timespec::tv_sec, 1'700'000'006));
+  EXPECT_THAT(attr.st.st_ctim,
+              ::testing::Field(&timespec::tv_sec, 1'700'000'007));
   EXPECT_THAT(attr.btime.tv_sec, -5 - 77);
   EXPECT_THAT(attr.btime.tv_nsec, 999'999'999);
   EXPECT_EQ(attr.st.st_ino, 41u) << "the statx does not carry the nodeid";
@@ -1153,8 +1152,8 @@ TEST_F(MetadataCacheTest, XattrGetSetIndividualValue) {
 TEST_F(MetadataCacheTest, XattrReplaceMakesSetComplete) {
   ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(70));
   std::string binary("\x00\xff", 2);
-  std::vector<std::pair<std::string, std::string>> all = {
-      {"user.b", "2"}, {"user.c", binary}};
+  std::vector<std::pair<std::string, std::string>> all = {{"user.b", "2"},
+                                                          {"user.c", binary}};
   ASSERT_THAT(ReplaceXattrs(ctx_, r.id, all), IsOk());
   EXPECT_THAT(ListXattrs(ctx_, r.id),
               IsOkAndHolds(Optional(ElementsAre("user.b", "user.c"))));
@@ -1167,8 +1166,8 @@ TEST_F(MetadataCacheTest, XattrReplaceMakesSetComplete) {
 TEST_F(MetadataCacheTest, XattrSetAndRemoveKeepSetComplete) {
   ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(70));
   std::string binary("\x00\xff", 2);
-  std::vector<std::pair<std::string, std::string>> all = {
-      {"user.b", "2"}, {"user.c", binary}};
+  std::vector<std::pair<std::string, std::string>> all = {{"user.b", "2"},
+                                                          {"user.c", binary}};
   ASSERT_THAT(ReplaceXattrs(ctx_, r.id, all), IsOk());
 
   ASSERT_THAT(SetXattr(ctx_, r.id, "user.b", "22"), IsOk());
@@ -1229,9 +1228,9 @@ TEST_F(MetadataCacheTest, XattrStatesArePerName) {
               StatusIs(absl::StatusCode::kNotFound));
   // Phase 3: present. The set is complete again with no refresh.
   ASSERT_THAT(SetXattr(ctx_, r.id, "user.new", "3"), IsOk());
-  EXPECT_THAT(ListXattrs(ctx_, r.id),
-              IsOkAndHolds(Optional(ElementsAre("user.a", "user.b",
-                                                "user.new"))));
+  EXPECT_THAT(
+      ListXattrs(ctx_, r.id),
+      IsOkAndHolds(Optional(ElementsAre("user.a", "user.b", "user.new"))));
 
   // Phase 1 of removexattr(user.a), a present name: unknown, then absent.
   ASSERT_THAT(BeginXattrChange(ctx_, r.id, "user.a"), IsOk());
@@ -1301,12 +1300,14 @@ TEST_F(MetadataCacheTest, WriteRollsBackWithCallersTransaction) {
 
 TEST_F(MetadataCacheTest, EnsureDirectoryKeepsExistingCompleteness) {
   ASSERT_OK_AND_ASSIGN(UpsertResult dir, Make(20, S_IFDIR | 0755));
-  EXPECT_THAT(CountRows(db_, absl::StrCat("directories WHERE inode = ", dir.id)),
-              IsOkAndHolds(0));
+  EXPECT_THAT(
+      CountRows(db_, absl::StrCat("directories WHERE inode = ", dir.id)),
+      IsOkAndHolds(0));
   ASSERT_THAT(EnsureDirectory(ctx_, dir.id), IsOk());
   EXPECT_THAT(IsDirComplete(ctx_, dir.id), IsOkAndHolds(false));
-  EXPECT_THAT(CountRows(db_, absl::StrCat("directories WHERE inode = ", dir.id)),
-              IsOkAndHolds(1));
+  EXPECT_THAT(
+      CountRows(db_, absl::StrCat("directories WHERE inode = ", dir.id)),
+      IsOkAndHolds(1));
 
   ASSERT_THAT(MarkDirComplete(ctx_, dir.id, true), IsOk());
   ASSERT_THAT(EnsureDirectory(ctx_, dir.id), IsOk());
@@ -1346,7 +1347,8 @@ TEST_F(MetadataCacheTest, PruneDentriesNotIn) {
               IsOkAndHolds(0));
 }
 
-// --- The durable dirty set ----------------------------------------------------
+// --- The durable dirty set
+// ----------------------------------------------------
 
 absl::StatusOr<int> Synchronous(sqlite3::Connection &db) {
   ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
@@ -1369,10 +1371,11 @@ TEST_F(MetadataCacheTest, BeginMutationIsDurableUntilIdsAreKnownDirty) {
 
   const InodeId both[] = {f.id, g.id};
   absl::StatusOr<int> level;
-  ASSERT_THAT(BeginMutation(ctx_, both, [&] {
-                level = Synchronous(db_);
-                return MarkAttrsUnknown(ctx_, f.id);
-              }),
+  ASSERT_THAT(BeginMutation(ctx_, both,
+                            [&] {
+                              level = Synchronous(db_);
+                              return MarkAttrsUnknown(ctx_, f.id);
+                            }),
               IsOk());
   // Committed with synchronous=FULL (a WAL fsync), in the same transaction
   // as the body.
@@ -1385,20 +1388,22 @@ TEST_F(MetadataCacheTest, BeginMutationIsDurableUntilIdsAreKnownDirty) {
 
   // Everything already durably dirty: no fsync needed.
   const InodeId just_g[] = {g.id};
-  ASSERT_THAT(BeginMutation(ctx_, just_g, [&] {
-                level = Synchronous(db_);
-                return absl::OkStatus();
-              }),
+  ASSERT_THAT(BeginMutation(ctx_, just_g,
+                            [&] {
+                              level = Synchronous(db_);
+                              return absl::OkStatus();
+                            }),
               IsOk());
   EXPECT_THAT(level, IsOkAndHolds(kSynchronousNormal));
 
   // One new id is enough to need it again.
   ASSERT_OK_AND_ASSIGN(UpsertResult h, Make(32));
   const InodeId g_and_h[] = {g.id, h.id};
-  ASSERT_THAT(BeginMutation(ctx_, g_and_h, [&] {
-                level = Synchronous(db_);
-                return absl::OkStatus();
-              }),
+  ASSERT_THAT(BeginMutation(ctx_, g_and_h,
+                            [&] {
+                              level = Synchronous(db_);
+                              return absl::OkStatus();
+                            }),
               IsOk());
   EXPECT_THAT(level, IsOkAndHolds(kSynchronousFull));
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id, g.id, h.id)));
@@ -1406,9 +1411,9 @@ TEST_F(MetadataCacheTest, BeginMutationIsDurableUntilIdsAreKnownDirty) {
   // A failing body records nothing.
   ASSERT_OK_AND_ASSIGN(UpsertResult i, Make(33));
   const InodeId just_i[] = {i.id};
-  EXPECT_THAT(BeginMutation(ctx_, just_i,
-                            [] { return absl::InternalError("no"); }),
-              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(
+      BeginMutation(ctx_, just_i, [] { return absl::InternalError("no"); }),
+      StatusIs(absl::StatusCode::kInternal));
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(f.id, g.id, h.id)));
   EXPECT_FALSE(ctx_.dirty.durable.contains(i.id));
 
@@ -1471,9 +1476,8 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
 
   // Rename of a/f over b/g.
   ASSERT_THAT(reset(), IsOk());
-  ASSERT_THAT(
-      BeginRename(ctx_, a, "f", b, "g", f.id, g.id, BeginFill(ctx_)),
-      IsOk());
+  ASSERT_THAT(BeginRename(ctx_, a, "f", b, "g", f.id, g.id, BeginFill(ctx_)),
+              IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, b, f.id, g.id)));
   EXPECT_THAT(Lookup(ctx_, a, "f"),
               IsOkAndHolds(IsLookup(LookupResult::Kind::kUnknown)));
@@ -1482,8 +1486,9 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   for (InodeId id : {a, b, f.id, g.id}) EXPECT_FALSE(valid(id)) << id;
   // And without a destination.
   ASSERT_THAT(reset(), IsOk());
-  ASSERT_THAT(BeginRename(ctx_, a, "x", a, "y", f.id, std::nullopt,
-                          BeginFill(ctx_)), IsOk());
+  ASSERT_THAT(
+      BeginRename(ctx_, a, "x", a, "y", f.id, std::nullopt, BeginFill(ctx_)),
+      IsOk());
   EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(a, f.id)));
   ASSERT_THAT(LinkDentry(ctx_, a, "f", f.id), IsOk());
   ASSERT_THAT(LinkDentry(ctx_, b, "g", g.id), IsOk());
@@ -1666,9 +1671,8 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsWhatChangedDuringTheSync) {
     ASSERT_OK_AND_ASSIGN(UpsertResult r, Make(ino));
     ids.push_back(r.id);
   }
-  const InodeId done = ids[0], across = ids[1], ended = ids[2],
-                again = ids[3], late = ids[4], added = ids[5],
-                kept = ids[6];
+  const InodeId done = ids[0], across = ids[1], ended = ids[2], again = ids[3],
+                late = ids[4], added = ids[5], kept = ids[6];
   ASSERT_THAT(SyncClear(), IsOk());
 
   // Before the sync point: `done` was mutated (and finished); `across` and
@@ -1697,9 +1701,8 @@ TEST_F(MetadataCacheTest, ClearDirtyKeepsWhatChangedDuringTheSync) {
   ASSERT_THAT(ClearDirty(ctx_, synced, keep, &cleared), IsOk());
   EXPECT_EQ(cleared, 1) << "the slow path counts the rows it deleted";
   // Only `done` was covered by the syncfs.
-  EXPECT_THAT(ListDirty(ctx_),
-              IsOkAndHolds(ElementsAre(across, ended, again, late, added,
-                                       kept)));
+  EXPECT_THAT(ListDirty(ctx_), IsOkAndHolds(ElementsAre(across, ended, again,
+                                                        late, added, kept)));
   EXPECT_TRUE(ctx_.dirty.any);
   EXPECT_TRUE(ctx_.dirty.durable.empty());
 
@@ -2015,7 +2018,8 @@ TEST_F(MetadataCacheTest, FillAfterACompletedMutationDoesNotOverwrite) {
   EXPECT_TRUE(attr.valid);
   EXPECT_EQ(attr.st.st_mode, S_IFREG | 0600);
   // Nor the xattrs, symlink target, or a single xattr.
-  const std::vector<std::pair<std::string, std::string>> old = {{"user.a", "1"}};
+  const std::vector<std::pair<std::string, std::string>> old = {
+      {"user.a", "1"}};
   EXPECT_THAT(FillXattrs(ctx_, fill, f.id, old), IsOkAndHolds(false));
   EXPECT_THAT(FillXattr(ctx_, fill, f.id, "user.a", "1"), IsOkAndHolds(false));
   EXPECT_THAT(FillSymlink(ctx_, fill, f.id, "t"), IsOkAndHolds(false));
@@ -2024,7 +2028,8 @@ TEST_F(MetadataCacheTest, FillAfterACompletedMutationDoesNotOverwrite) {
 
 TEST_F(MetadataCacheTest, FillDuringAMutationDoesNotCache) {
   ASSERT_OK_AND_ASSIGN(UpsertResult f, Make(31));
-  ASSERT_OK_AND_ASSIGN(Mutation setxattr, BeginXattrChange(ctx_, f.id, "user.k"));
+  ASSERT_OK_AND_ASSIGN(Mutation setxattr,
+                       BeginXattrChange(ctx_, f.id, "user.k"));
   // A fill that starts and commits while the mutation is in flight.
   FillSnapshot during = BeginFill(ctx_);
   EXPECT_THAT(FillXattr(ctx_, during, f.id, "user.k", "old"),
@@ -2167,9 +2172,8 @@ TEST_F(MetadataCacheTest, ListDirCursorSurvivesRenameOverAndFailedRemove) {
   ASSERT_THAT(list_after(cursor), ElementsAre("e", "c"));
 
   // rename(d/a, d/b) over the existing b: phase 1, then phase 3.
-  ASSERT_THAT(
-      BeginRename(ctx_, d, "a", d, "b", a.id, b.id, BeginFill(ctx_)),
-      IsOk());
+  ASSERT_THAT(BeginRename(ctx_, d, "a", d, "b", a.id, b.id, BeginFill(ctx_)),
+              IsOk());
   ASSERT_THAT(LinkDentry(ctx_, d, "b", a.id), IsOk());
   ASSERT_THAT(SetNegative(ctx_, d, "a"), IsOk());
   EXPECT_THAT(list_after(cursor), ElementsAre("e", "c"));
@@ -2187,8 +2191,10 @@ TEST_F(MetadataCacheTest, ListDirCursorSurvivesRenameOverAndFailedRemove) {
 // object cached with its real one must not split it into a new row (and
 // ESTALE the old nodeid). The handle bytes still tell objects apart.
 TEST_F(MetadataCacheTest, UnknownGenerationDoesNotSplitAnInode) {
-  ASSERT_OK_AND_ASSIGN(UpsertResult first, Make(40, S_IFREG | 0644, kSource, 7));
-  ASSERT_OK_AND_ASSIGN(UpsertResult again, Make(40, S_IFREG | 0644, kSource, 0));
+  ASSERT_OK_AND_ASSIGN(UpsertResult first,
+                       Make(40, S_IFREG | 0644, kSource, 7));
+  ASSERT_OK_AND_ASSIGN(UpsertResult again,
+                       Make(40, S_IFREG | 0644, kSource, 0));
   EXPECT_FALSE(again.created);
   EXPECT_EQ(again.id, first.id);
   EXPECT_THAT(GetAttr(ctx_, first.id), IsOk());

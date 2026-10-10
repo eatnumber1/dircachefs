@@ -1,17 +1,13 @@
 // The backing-reaching wrappers of dcfs::syscalls: every syscall that takes
 // a backing fd, file handle or name (docs/style.md 1.8), plus mount and
 // umount2 (staging, remount, bench). Only backing.cc, its lower layers,
-// startup and the tests may depend on //dcfs:syscalls_backing: //tools:syscalls_backing_users_test
-// compares the dependents with a golden list. The process-local wrappers are
-// in syscalls.h.
+// startup and the tests may depend on //dcfs:syscalls_backing:
+// //tools:syscalls_backing_users_test compares the dependents with a golden
+// list. The process-local wrappers are in syscalls.h.
 #ifndef DCFS_SYSCALLS_BACKING_H_
 #define DCFS_SYSCALLS_BACKING_H_
 
-#include <cerrno>
-#include <cstddef>
 #include <fcntl.h>
-#include <span>
-#include <string_view>
 #include <sys/ioctl.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -19,6 +15,11 @@
 #include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstddef>
+#include <span>
+#include <string_view>
 #include <utility>
 
 #include "absl/status/status.h"
@@ -30,34 +31,34 @@ namespace dcfs {
 namespace syscalls {
 
 // O_CLOEXEC is unconditionally added.
-absl::StatusOr<FileDescriptor> openat(
-    int dirfd, std::string_view pathname, int flags = 0,
-    mode_t mode = 0);
+absl::StatusOr<FileDescriptor> openat(int dirfd, std::string_view pathname,
+                                      int flags = 0, mode_t mode = 0);
 
 absl::StatusOr<size_t> read(int fd, void *buf, size_t count);
 
 absl::StatusOr<struct statvfs> fstatvfs(int fd);
 absl::StatusOr<struct stat> fstat(int fd);
-absl::StatusOr<struct stat> fstatat(
-    int dirfd, std::string_view pathname, int flags = 0);
+absl::StatusOr<struct stat> fstatat(int dirfd, std::string_view pathname,
+                                    int flags = 0);
 
-absl::Status name_to_handle_at(
-    int dirfd, std::string_view pathname, file_handle &handle,
-    int &mount_id, int flags = 0);
+absl::Status name_to_handle_at(int dirfd, std::string_view pathname,
+                               file_handle &handle, int &mount_id,
+                               int flags = 0);
 
 // O_CLOEXEC is unconditionally added.
-absl::StatusOr<FileDescriptor> open_by_handle_at(
-    int mount_fd, const file_handle &handle, int flags = 0);
+absl::StatusOr<FileDescriptor> open_by_handle_at(int mount_fd,
+                                                 const file_handle &handle,
+                                                 int flags = 0);
 
-absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&... args);
+absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&...args);
 
 // Definition from https://man7.org/linux/man-pages/man2/getdents.2.html
 struct linux_dirent64 {
-  ino64_t d_ino;  // 64-bit inode number
-  off64_t d_off;  // Not an offset; see getdents()
+  ino64_t d_ino;            // 64-bit inode number
+  off64_t d_off;            // Not an offset; see getdents()
   unsigned short d_reclen;  // Size of this dirent
-  unsigned char d_type;  // File type
-  char d_name[];  // Filename (null-terminated)
+  unsigned char d_type;     // File type
+  char d_name[];            // Filename (null-terminated)
 };
 
 absl::StatusOr<ssize_t> getdents64(int fd, void *dirp, size_t count);
@@ -66,7 +67,7 @@ absl::StatusOr<off_t> lseek(int fd, off_t offset, int whence);
 
 // New fd-based wrappers for file operations
 absl::StatusOr<struct statx> statx(int dirfd, std::string_view path, int flags,
-                                    unsigned int mask);
+                                   unsigned int mask);
 absl::StatusOr<struct statfs> fstatfs(int fd);
 // readlinkat(2): one call; returns how many bytes it wrote to `buf`. A
 // result equal to `size` may be truncated (backing.cc grows the buffer).
@@ -90,8 +91,7 @@ absl::StatusOr<size_t> listxattr(std::string_view path, char *list,
 absl::Status setxattr(std::string_view path, std::string_view name,
                       std::span<const uint8_t> value, int flags);
 absl::Status removexattr(std::string_view path, std::string_view name);
-absl::Status fchmodat(int dirfd, std::string_view path, mode_t mode,
-                      int flags);
+absl::Status fchmodat(int dirfd, std::string_view path, mode_t mode, int flags);
 absl::Status utimensat(int dirfd, std::string_view path,
                        const struct timespec times[2], int flags);
 
@@ -136,7 +136,7 @@ absl::Status umount2(std::string_view target, int flags);
 
 namespace syscalls {
 
-absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&... args) {
+absl::StatusOr<int> ioctl(int fd, unsigned long request, auto &&...args) {
   int rc = ::ioctl(fd, request, std::forward<decltype(args)>(args)...);
   if (rc == -1) return ErrnoToStatus(errno, "ioctl");
   return rc;

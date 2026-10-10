@@ -49,8 +49,8 @@ absl::StatusOr<DeviceId> DeviceId::Parse(std::string_view data) {
 
   uint64_t subvol_id = 0;
   for (int i = 0; i < 8; ++i) {
-    subvol_id |=
-        static_cast<uint64_t>(static_cast<uint8_t>(data[16 + i])) << (8 * i);
+    subvol_id |= static_cast<uint64_t>(static_cast<uint8_t>(data[16 + i]))
+                 << (8 * i);
   }
   id.subvol_id = subvol_id;
   return id;

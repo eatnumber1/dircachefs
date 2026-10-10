@@ -73,9 +73,9 @@ struct CachedAttr {
   bool valid = false;
   // st_ino is the backing inode number and st_dev is 0 (the FUSE layer does
   // not report it); every other field comes from the row.
-  struct stat st {};
+  struct stat st{};
   // struct stat has no birth time, so it is reported separately.
-  struct timespec btime {};
+  struct timespec btime{};
   uint32_t fuse_gen = 0;
   DeviceId device;
   uint64_t backing_ino = 0;
@@ -215,8 +215,8 @@ absl::StatusOr<std::string> Readlink(Context &ctx, InodeId id);
 // The names of all of `id`'s present xattrs, sorted; nullopt if the set is
 // not complete or any name in it is unknown (a listing must not omit a
 // name that may exist). NotFound if there is no row for `id`.
-absl::StatusOr<std::optional<std::vector<std::string>>> ListXattrs(
-    Context &ctx, InodeId id);
+absl::StatusOr<std::optional<std::vector<std::string>>> ListXattrs(Context &ctx,
+                                                                   InodeId id);
 
 // The value of xattr `name` if present; NotFound if absent; nullopt if
 // unknown (see above). Also NotFound if there is no row for `id`.
@@ -271,8 +271,7 @@ absl::StatusOr<FilesystemRow> GetFilesystem(Context &ctx,
 // created with a fresh fuse_gen drawn from ctx.rng (uniformly random, never
 // 0). handle.device must already be
 // registered via AddFilesystem(). Not for the root; see UpsertRoot().
-absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
-                                         const FileHandle &handle,
+absl::StatusOr<UpsertResult> UpsertInode(Context &ctx, const FileHandle &handle,
                                          const struct statx &stx,
                                          uint64_t backing_gen);
 
@@ -336,7 +335,6 @@ absl::Status MarkDirComplete(Context &ctx, InodeId dir, bool complete);
 // `dir`'s completeness epoch (directories.epoch): bumped by every write
 // that clears its children_complete. 0 if it has no directories row.
 absl::StatusOr<int64_t> DirEpoch(Context &ctx, InodeId dir);
-
 
 // Gives directory `dir` a directories row (children_complete 0) if it has
 // none; an existing row, and so its completeness, is left alone. Used when
@@ -442,9 +440,9 @@ absl::Status ForgetXattr(Context &ctx, InodeId id, std::string_view name);
 absl::Status MarkXattrsUnknown(Context &ctx, InodeId id);
 
 // Invalidates `id` (see the identity model above): deletes the row; every
-// dentry pointing at it becomes unknown. Cascades remove its directories/symlinks/xattrs rows, its child dentries,
-// and any filesystem mounted inside it. `id` must not be the root.
-// NotFound if no row.
+// dentry pointing at it becomes unknown. Cascades remove its
+// directories/symlinks/xattrs rows, its child dentries, and any filesystem
+// mounted inside it. `id` must not be the root. NotFound if no row.
 absl::Status InvalidateInode(Context &ctx, InodeId id);
 
 // Removes `id` once its backing object is gone (nlink reached 0). The cache
@@ -625,8 +623,7 @@ absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent,
                                      FillSnapshot resolved);
 // Link of src as (newparent, newname): marks `newname` unknown, and the
 // attributes of newparent and src unknown. Dirty: newparent, src.
-absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src,
-                                   InodeId newparent,
+absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src, InodeId newparent,
                                    std::string_view newname);
 // Setattr, a writable open (DirCacheFS::BeginWriting), fallback Write and
 // Fallocate of `id`: marks its attributes unknown, and ForgetXattr()s each
@@ -776,8 +773,8 @@ absl::StatusOr<int64_t> ForgetUnnamedRows(Context &ctx);
 
 // Registers a filesystem. AlreadyExists if `device` is already registered;
 // NotFound if `parent` is given but has no row.
-absl::Status AddFilesystem(Context &ctx, const DeviceId &device,
-                           int64_t fstype, std::optional<InodeId> parent,
+absl::Status AddFilesystem(Context &ctx, const DeviceId &device, int64_t fstype,
+                           std::optional<InodeId> parent,
                            std::optional<std::string> boundary_name);
 
 // Forgets everything cached about filesystem `device`: its row, and by

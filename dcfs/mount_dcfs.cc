@@ -50,8 +50,7 @@ absl::Status AllowOtherRefused(std::string_view option) {
 }
 
 absl::Status BadOption(std::string_view option, std::string_view why) {
-  return InvalidArgumentErrorBuilder()
-         << "Option " << option << " " << why;
+  return InvalidArgumentErrorBuilder() << "Option " << option << " " << why;
 }
 
 // A boolean option's value: bare is true.
@@ -95,8 +94,7 @@ bool IsUmountHelperName(std::string_view name) {
   return name == kUmountFuseDcfsHelperName || name == kUmountFuseHelperName;
 }
 
-absl::StatusOr<UmountArgs> ParseUmountArgs(
-    std::span<const std::string> args) {
+absl::StatusOr<UmountArgs> ParseUmountArgs(std::span<const std::string> args) {
   UmountArgs parsed;
   std::vector<std::string> positionals;
   for (size_t i = 0; i < args.size(); ++i) {
@@ -174,11 +172,21 @@ absl::StatusOr<HelperArgs> ParseHelperArgsImpl(
     for (size_t j = 1; j < arg.size(); ++j) {
       const char flag = arg[j];
       switch (flag) {
-        case 's': parsed.sloppy = true; break;
-        case 'f': parsed.fake = true; break;
-        case 'n': parsed.no_mtab = true; break;
-        case 'v': ++parsed.verbose; break;
-        case 'V': parsed.version = true; break;
+        case 's':
+          parsed.sloppy = true;
+          break;
+        case 'f':
+          parsed.fake = true;
+          break;
+        case 'n':
+          parsed.no_mtab = true;
+          break;
+        case 'v':
+          ++parsed.verbose;
+          break;
+        case 'V':
+          parsed.version = true;
+          break;
         case 'o':
         case 'N':
         case 't': {
@@ -329,7 +337,8 @@ absl::StatusOr<HelperOptions> SplitHelperOptions(
 
 std::vector<std::string> UnhonoredNativeOptions(const HelperOptions &options) {
   std::vector<std::string> unhonored;
-  if (options.backing != HelperOptions::Backing::kDirectory && !options.remount) {
+  if (options.backing != HelperOptions::Backing::kDirectory &&
+      !options.remount) {
     return unhonored;
   }
   for (const std::string &option : options.native_options) {
@@ -366,12 +375,14 @@ absl::Status ApplyFlagOption(const std::string &name,
 
 absl::Status NativeMountError(int exit_status, std::string_view message) {
   absl::Status status = FailedPreconditionErrorBuilder() << message;
-  status.SetPayload(kMountExitStatusTypeUrl, absl::Cord(absl::StrCat(exit_status)));
+  status.SetPayload(kMountExitStatusTypeUrl,
+                    absl::Cord(absl::StrCat(exit_status)));
   return status;
 }
 
 int ExitStatusFor(const absl::Status &status) {
-  if (std::optional<absl::Cord> payload = status.GetPayload(kMountExitStatusTypeUrl);
+  if (std::optional<absl::Cord> payload =
+          status.GetPayload(kMountExitStatusTypeUrl);
       payload.has_value()) {
     int exit_status = 0;
     if (absl::SimpleAtoi(std::string(*payload), &exit_status) &&

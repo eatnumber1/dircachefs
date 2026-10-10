@@ -25,7 +25,7 @@ uint32_t OpcodeOf(const struct fuse_buf &buf) {
       buf.size < sizeof(struct fuse_in_header)) {
     return 0;
   }
-  struct fuse_in_header hdr {};
+  struct fuse_in_header hdr{};
   std::memcpy(&hdr, buf.mem, sizeof(hdr));
   return hdr.opcode;
 }

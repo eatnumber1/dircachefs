@@ -1,5 +1,8 @@
 #include "dcfs/fuse_ops.h"
 
+#include <linux/fs.h>  // FS_IOC_SETFLAGS
+#include <sys/stat.h>
+
 #include <bit>
 #include <cstddef>
 #include <cstdint>
@@ -7,8 +10,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <linux/fs.h>  // FS_IOC_SETFLAGS
-#include <sys/stat.h>
 
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -38,43 +39,80 @@ events::Ino Ino(fuse_ino_t ino) { return static_cast<events::Ino>(ino); }
 
 std::string_view OpName(events::Op op) {
   switch (op) {
-    case events::Op::kOther: return "Other";
-    case events::Op::kLookup: return "Lookup";
-    case events::Op::kGetattr: return "Getattr";
-    case events::Op::kSetattr: return "Setattr";
-    case events::Op::kReadlink: return "Readlink";
-    case events::Op::kMknod: return "Mknod";
-    case events::Op::kMkdir: return "Mkdir";
-    case events::Op::kUnlink: return "Unlink";
-    case events::Op::kRmdir: return "Rmdir";
-    case events::Op::kSymlink: return "Symlink";
-    case events::Op::kRename: return "Rename";
-    case events::Op::kLink: return "Link";
-    case events::Op::kOpen: return "Open";
-    case events::Op::kRead: return "Read";
-    case events::Op::kWrite: return "Write";
-    case events::Op::kFlush: return "Flush";
-    case events::Op::kRelease: return "Release";
-    case events::Op::kFsync: return "Fsync";
-    case events::Op::kOpendir: return "Opendir";
-    case events::Op::kReaddir: return "Readdir";
-    case events::Op::kReaddirplus: return "Readdirplus";
-    case events::Op::kReleasedir: return "Releasedir";
-    case events::Op::kFsyncdir: return "Fsyncdir";
-    case events::Op::kStatfs: return "Statfs";
-    case events::Op::kSetxattr: return "Setxattr";
-    case events::Op::kGetxattr: return "Getxattr";
-    case events::Op::kListxattr: return "Listxattr";
-    case events::Op::kRemovexattr: return "Removexattr";
-    case events::Op::kAccess: return "Access";
-    case events::Op::kCreate: return "Create";
-    case events::Op::kFallocate: return "Fallocate";
-    case events::Op::kCopyFileRange: return "CopyFileRange";
-    case events::Op::kIoctl: return "Ioctl";
-    case events::Op::kTmpfile: return "Tmpfile";
-    case events::Op::kLinkTmpfile: return "LinkTmpfile";
-    case events::Op::kForget: return "Forget";
-    case events::Op::kBatchForget: return "BatchForget";
+    case events::Op::kOther:
+      return "Other";
+    case events::Op::kLookup:
+      return "Lookup";
+    case events::Op::kGetattr:
+      return "Getattr";
+    case events::Op::kSetattr:
+      return "Setattr";
+    case events::Op::kReadlink:
+      return "Readlink";
+    case events::Op::kMknod:
+      return "Mknod";
+    case events::Op::kMkdir:
+      return "Mkdir";
+    case events::Op::kUnlink:
+      return "Unlink";
+    case events::Op::kRmdir:
+      return "Rmdir";
+    case events::Op::kSymlink:
+      return "Symlink";
+    case events::Op::kRename:
+      return "Rename";
+    case events::Op::kLink:
+      return "Link";
+    case events::Op::kOpen:
+      return "Open";
+    case events::Op::kRead:
+      return "Read";
+    case events::Op::kWrite:
+      return "Write";
+    case events::Op::kFlush:
+      return "Flush";
+    case events::Op::kRelease:
+      return "Release";
+    case events::Op::kFsync:
+      return "Fsync";
+    case events::Op::kOpendir:
+      return "Opendir";
+    case events::Op::kReaddir:
+      return "Readdir";
+    case events::Op::kReaddirplus:
+      return "Readdirplus";
+    case events::Op::kReleasedir:
+      return "Releasedir";
+    case events::Op::kFsyncdir:
+      return "Fsyncdir";
+    case events::Op::kStatfs:
+      return "Statfs";
+    case events::Op::kSetxattr:
+      return "Setxattr";
+    case events::Op::kGetxattr:
+      return "Getxattr";
+    case events::Op::kListxattr:
+      return "Listxattr";
+    case events::Op::kRemovexattr:
+      return "Removexattr";
+    case events::Op::kAccess:
+      return "Access";
+    case events::Op::kCreate:
+      return "Create";
+    case events::Op::kFallocate:
+      return "Fallocate";
+    case events::Op::kCopyFileRange:
+      return "CopyFileRange";
+    case events::Op::kIoctl:
+      return "Ioctl";
+    case events::Op::kTmpfile:
+      return "Tmpfile";
+    case events::Op::kLinkTmpfile:
+      return "LinkTmpfile";
+    case events::Op::kForget:
+      return "Forget";
+    case events::Op::kBatchForget:
+      return "BatchForget";
   }
   return "Other";
 }
@@ -82,8 +120,7 @@ std::string_view OpName(events::Op op) {
 // `Lookup(ino=1, name="a")`: the request as `--v=1` and `--v=2` show it. A
 // name is bytes: escaped.
 std::string DescribeRequest(const events::Request &request) {
-  std::string out =
-      absl::StrCat(OpName(request.op), "(ino=", request.ino);
+  std::string out = absl::StrCat(OpName(request.op), "(ino=", request.ino);
   if (!request.name.empty()) {
     absl::StrAppend(&out, ", name=\"", EscapeBytes(request.name), "\"");
   }
@@ -105,8 +142,8 @@ void LogRequest(DirCacheFS &fs, const events::Request &request,
     fs.NoteBackingAccess(fs.context().first_backing_call,
                          fs.context().first_backing_at);
     // VLOG evaluates its operands only when enabled.
-    VLOG(1) << DescribeRequest(request) << " reached the backing: "
-            << backing_calls << " calls, the first "
+    VLOG(1) << DescribeRequest(request)
+            << " reached the backing: " << backing_calls << " calls, the first "
             << fs.context().first_backing_call;
   }
   VLOG(2) << DescribeRequest(request) << " -> "
@@ -167,8 +204,7 @@ void Destroy(void *userdata) {
   auto *fs = static_cast<DirCacheFS *>(userdata);
   absl::Status s = fs->Destroy();
   LOG_IF(ERROR, !s.ok()) << s;
-  fs->context().events->CheckDestroyed(fs->context(),
-                                              fs->bookkeeping());
+  fs->context().events->CheckDestroyed(fs->context(), fs->bookkeeping());
 }
 
 void Lookup(fuse_req_t req, fuse_ino_t parent, const char *name) {
@@ -196,27 +232,25 @@ void ForgetMulti(fuse_req_t req, size_t count, fuse_forget_data *forgets) {
   FuseRequest fr(req);
   DirCacheFS &fs = GetFS(req);
   Context &ctx = fs.context();
-  const events::Request request{
-      .op = events::Op::kBatchForget,
-      .ino = count > 0 ? Ino(forgets[0].ino) : 0};
+  const events::Request request{.op = events::Op::kBatchForget,
+                                .ino = count > 0 ? Ino(forgets[0].ino) : 0};
   ctx.events->CheckRequestBegin(ctx, fs.bookkeeping(), request);
   for (size_t i = 0; i < count; ++i) {
-    ctx.events->CheckForgetting(ctx, fs.bookkeeping(), forgets[i].ino, forgets[i].nlookup);
+    ctx.events->CheckForgetting(ctx, fs.bookkeeping(), forgets[i].ino,
+                                forgets[i].nlookup);
   }
   fs.ForgetMulti(fr, std::span<const fuse_forget_data>(forgets, count));
   ctx.events->CheckRequestEnd(ctx, fs.bookkeeping(), request);
 }
 
 void Getattr(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
-  Serve(req, {.op = events::Op::kGetattr, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) {
-          return fs.Getattr(fr, ino, fi);
-        });
+  Serve(
+      req, {.op = events::Op::kGetattr, .ino = Ino(ino)},
+      [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Getattr(fr, ino, fi); });
 }
 
-void Setattr(
-    fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set,
-    fuse_file_info *fi) {
+void Setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set,
+             fuse_file_info *fi) {
   Serve(req,
         {.op = events::Op::kSetattr,
          .ino = Ino(ino),
@@ -231,9 +265,8 @@ void Readlink(fuse_req_t req, fuse_ino_t ino) {
         [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Readlink(fr, ino); });
 }
 
-void Mknod(
-    fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode,
-    dev_t rdev) {
+void Mknod(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode,
+           dev_t rdev) {
   Serve(req, {.op = events::Op::kMknod, .ino = Ino(parent), .name = name},
         [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Mknod(fr, parent, name, mode, rdev);
@@ -261,17 +294,16 @@ void Rmdir(fuse_req_t req, fuse_ino_t parent, const char *name) {
         });
 }
 
-void Symlink(
-    fuse_req_t req, const char *link, fuse_ino_t parent, const char *name) {
+void Symlink(fuse_req_t req, const char *link, fuse_ino_t parent,
+             const char *name) {
   Serve(req, {.op = events::Op::kSymlink, .ino = Ino(parent), .name = name},
         [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Symlink(fr, link, parent, name);
         });
 }
 
-void Rename(
-    fuse_req_t req, fuse_ino_t parent, const char *name,
-    fuse_ino_t newparent, const char *newname, unsigned int flags) {
+void Rename(fuse_req_t req, fuse_ino_t parent, const char *name,
+            fuse_ino_t newparent, const char *newname, unsigned int flags) {
   Serve(req,
         {.op = events::Op::kRename,
          .ino = Ino(parent),
@@ -284,9 +316,8 @@ void Rename(
         });
 }
 
-void Link(
-    fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent,
-    const char *newname) {
+void Link(fuse_req_t req, fuse_ino_t ino, fuse_ino_t newparent,
+          const char *newname) {
   // The link of an unnamed O_TMPFILE file is, to the new parent, a create
   // (the protocol events' kLinkTmpfile).
   const DirCacheFS *fs = static_cast<DirCacheFS *>(fuse_req_userdata(req));
@@ -308,9 +339,8 @@ void Open(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Open(fr, ino, *fi); });
 }
 
-void Read(
-    fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
-    fuse_file_info *fi) {
+void Read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
+          fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
   Serve(req, {.op = events::Op::kRead, .ino = Ino(ino)},
         [&](DirCacheFS &fs, FuseRequest &fr) {
@@ -318,9 +348,8 @@ void Read(
         });
 }
 
-void Write(
-    fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off,
-    fuse_file_info *fi) {
+void Write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size,
+           off_t off, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
   Serve(req, {.op = events::Op::kWrite, .ino = Ino(ino)},
         [&](DirCacheFS &fs, FuseRequest &fr) {
@@ -330,8 +359,9 @@ void Write(
 
 void Flush(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
-  Serve(req, {.op = events::Op::kFlush, .ino = Ino(ino)},
-        [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Flush(fr, ino, *fi); });
+  Serve(
+      req, {.op = events::Op::kFlush, .ino = Ino(ino)},
+      [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Flush(fr, ino, *fi); });
 }
 
 void Release(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
@@ -358,9 +388,8 @@ void Opendir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         });
 }
 
-void Readdir(
-    fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
-    fuse_file_info *fi) {
+void Readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
+             fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
   Serve(req, {.op = events::Op::kReaddir, .ino = Ino(ino), .offset = off},
         [&](DirCacheFS &fs, FuseRequest &fr) {
@@ -368,9 +397,8 @@ void Readdir(
         });
 }
 
-void Readdirplus(
-    fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
-    fuse_file_info *fi) {
+void Readdirplus(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
+                 fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
   Serve(req, {.op = events::Op::kReaddirplus, .ino = Ino(ino), .offset = off},
         [&](DirCacheFS &fs, FuseRequest &fr) {
@@ -386,8 +414,8 @@ void Releasedir(fuse_req_t req, fuse_ino_t ino, fuse_file_info *fi) {
         });
 }
 
-void Fsyncdir(
-    fuse_req_t req, fuse_ino_t ino, int datasync, fuse_file_info *fi) {
+void Fsyncdir(fuse_req_t req, fuse_ino_t ino, int datasync,
+              fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
   Serve(req, {.op = events::Op::kFsyncdir, .ino = Ino(ino)},
         [&](DirCacheFS &fs, FuseRequest &fr) {
@@ -400,9 +428,8 @@ void Statfs(fuse_req_t req, fuse_ino_t ino) {
         [&](DirCacheFS &fs, FuseRequest &fr) { return fs.Statfs(fr, ino); });
 }
 
-void Setxattr(
-    fuse_req_t req, fuse_ino_t ino, const char *name, const char *value,
-    size_t size, int flags) {
+void Setxattr(fuse_req_t req, fuse_ino_t ino, const char *name,
+              const char *value, size_t size, int flags) {
   Serve(req, {.op = events::Op::kSetxattr, .ino = Ino(ino)},
         [&](DirCacheFS &fs, FuseRequest &fr) {
           return fs.Setxattr(fr, ino, name, std::string_view(value, size),
@@ -438,9 +465,8 @@ void Access(fuse_req_t req, fuse_ino_t ino, int mask) {
         });
 }
 
-void Create(
-    fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode,
-    fuse_file_info *fi) {
+void Create(fuse_req_t req, fuse_ino_t parent, const char *name, mode_t mode,
+            fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
   Serve(req, {.op = events::Op::kCreate, .ino = Ino(parent), .name = name},
         [&](DirCacheFS &fs, FuseRequest &fr) {
@@ -448,9 +474,8 @@ void Create(
         });
 }
 
-void Fallocate(
-    fuse_req_t req, fuse_ino_t ino, int mode, off_t offset, off_t length,
-    fuse_file_info *fi) {
+void Fallocate(fuse_req_t req, fuse_ino_t ino, int mode, off_t offset,
+               off_t length, fuse_file_info *fi) {
   CHECK_NE(fi, nullptr);
   Serve(req, {.op = events::Op::kFallocate, .ino = Ino(ino)},
         [&](DirCacheFS &fs, FuseRequest &fr) {
@@ -465,8 +490,8 @@ void CopyFileRange(fuse_req_t req, fuse_ino_t ino_in, off_t off_in,
   CHECK_NE(fi_out, nullptr);
   Serve(req, {.op = events::Op::kCopyFileRange, .ino = Ino(ino_out)},
         [&](DirCacheFS &fs, FuseRequest &fr) {
-          return fs.CopyFileRange(fr, ino_in, off_in, *fi_in, ino_out,
-                                  off_out, *fi_out, len, flags);
+          return fs.CopyFileRange(fr, ino_in, off_in, *fi_in, ino_out, off_out,
+                                  *fi_out, len, flags);
         });
 }
 

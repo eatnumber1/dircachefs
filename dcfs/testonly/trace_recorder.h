@@ -127,21 +127,18 @@ class TraceRecorder final : public ProtocolEvents {
                    std::string_view name) override;
   void LookupEnd(Context &ctx, const absl::Status &status) override;
   void LookupAnswered(Context &ctx, events::Ino parent, std::string_view name,
-                      events::LookupOutcome answer,
-                      events::Ino child) override;
+                      events::LookupOutcome answer, events::Ino child) override;
   void RefreshBegin(Context &ctx, events::Ino id) override;
   void RefreshEnd(Context &ctx, const absl::Status &status) override;
   void SyncBegin(Context &ctx) override;
   void SyncEnd(Context &ctx, const absl::Status &status) override;
 
   void LookupDecided(Context &ctx, events::Ino parent, std::string_view name,
-                     events::LookupOutcome outcome,
-                     events::Ino child) override;
+                     events::LookupOutcome outcome, events::Ino child) override;
   void ResolveProbed(Context &ctx, events::Ino parent, std::string_view name,
                      const events::Probe &probe) override;
-  void ResolveCommitted(Context &ctx, events::Ino parent,
-                        std::string_view name, uint64_t snapshot,
-                        bool recorded) override;
+  void ResolveCommitted(Context &ctx, events::Ino parent, std::string_view name,
+                        uint64_t snapshot, bool recorded) override;
   void ChildRowRecorded(Context &ctx, events::Ino dir, events::Ino child,
                         bool filled, bool created) override;
   void PopulateStarted(Context &ctx, events::Ino dir) override;
@@ -197,9 +194,8 @@ class TraceRecorder final : public ProtocolEvents {
 
   void Interrupted(Context &ctx) override;
 
-  void LifetimeChanged(Context &ctx, events::Ino id,
-                       events::LifetimeStep step, uint64_t arg,
-                       events::LifetimeFn after) override;
+  void LifetimeChanged(Context &ctx, events::Ino id, events::LifetimeStep step,
+                       uint64_t arg, events::LifetimeFn after) override;
   void Destroyed(Context &ctx) override;
   void IdentityResolved(Context &ctx, events::Ino id,
                         const events::IdentityCheck &check) override;
@@ -215,17 +211,17 @@ class TraceRecorder final : public ProtocolEvents {
   // One request slot of one directory's trace.
   struct Req {
     int slot = 0;
-    std::string kind;  // a request kind of the model (AllKinds)
-    std::string n, m;  // its names (escaped), if any
-    bool arrived = false;   // its first line (the model's Arrive) is out
-    bool terminal = false;  // the model's request has replied
+    std::string kind;              // a request kind of the model (AllKinds)
+    std::string n, m;              // its names (escaped), if any
+    bool arrived = false;          // its first line (the model's Arrive) is out
+    bool terminal = false;         // the model's request has replied
     bool expects_refresh = false;  // a refresh of the directory is its own
     bool begun = false;            // a mutation's phase 1 committed
     bool syscall_seen = false;     // ... its phase-2 syscall returned
     bool syscall_ok = false;
-    bool probe_absent = false;     // a create's probe found nothing
-    bool owned = false;            // Mutation::Owns at its End
-    bool interrupted = false;      // a checkpoint found it interrupted
+    bool probe_absent = false;  // a create's probe found nothing
+    bool owned = false;         // Mutation::Owns at its End
+    bool interrupted = false;   // a checkpoint found it interrupted
     // A lookup's: what LookupOrPopulate answered (JSON: "neg", "refused" or
     // the object's key), for its reply line.
     std::string answer;
@@ -285,9 +281,9 @@ class TraceRecorder final : public ProtocolEvents {
   };
 
   struct Dir {
-    std::string last;  // the state in its last line
-    State last_state;  // the same, as a State
-    bool dead = false;  // cut, unexplained or gone: no more lines
+    std::string last;     // the state in its last line
+    State last_state;     // the same, as a State
+    bool dead = false;    // cut, unexplained or gone: no more lines
     std::set<int> slots;  // held by open requests
     // A population between PopulateStarted and PopulateRead: its line goes
     // where it started (the model's PopulateRead), so the lines written
@@ -451,8 +447,7 @@ class TraceRecorder final : public ProtocolEvents {
                 std::string_view fields = "");
   // The lines of the run's steps (crash, restart, start, destroy) for every
   // nodeid trace, each with the row as the database has it.
-  void LifeRunLines(Context &ctx, std::string_view cause,
-                    std::string_view ev);
+  void LifeRunLines(Context &ctx, std::string_view cause, std::string_view ev);
   // `"row":..,"nl0":..`: whether `id` has a row, and whether its nlink
   // column is 0.
   static std::string RowJson(Context &ctx, Ino id);
@@ -472,8 +467,7 @@ class TraceRecorder final : public ProtocolEvents {
                  const events::Lifetime &kept);
   // The lines of the run's steps (crash, restart, start, destroy) for
   // every identity trace.
-  void IdentRunLines(Context &ctx, std::string_view cause,
-                     std::string_view ev);
+  void IdentRunLines(Context &ctx, std::string_view cause, std::string_view ev);
   // Whether `id` has a row in inodes.
   static bool HasRow(Context &ctx, Ino id);
 };

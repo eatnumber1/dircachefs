@@ -77,7 +77,6 @@ int __wrap_unlinkat(int dirfd, const char *path, int flags) {
 }
 }
 
-
 namespace dcfs {
 namespace {
 
@@ -103,9 +102,9 @@ TEST(CombineFsckStatusTest, BitsAreOred) {
   EXPECT_EQ(CombineFsckStatus(kFsckOk, kFsckOk), 0);
   EXPECT_EQ(CombineFsckStatus(kFsckOk, kFsckCorrected), 1);
   EXPECT_EQ(CombineFsckStatus(kFsckCorrected, kFsckUncorrected), 5);
-  EXPECT_EQ(CombineFsckStatus(kFsckUncorrected | kFsckOperational,
-                              kFsckCorrected),
-            13);
+  EXPECT_EQ(
+      CombineFsckStatus(kFsckUncorrected | kFsckOperational, kFsckCorrected),
+      13);
   EXPECT_EQ(CombineFsckStatus(kFsckCancelled, kFsckUsage), 48);
   EXPECT_EQ(kFsckCorrected, 1);
   EXPECT_EQ(kFsckReboot, 2);
@@ -142,9 +141,8 @@ TEST(ParseFsckArgsTest, ModeFlagsAndPassThrough) {
 }
 
 TEST(ParseFsckArgsTest, ProgressDescriptorAndUnknownFlagsGoToTheBacking) {
-  ASSERT_OK_AND_ASSIGN(
-      FsckArgs args,
-      ParseFsckArgs(Strings{"-a", "-C3", "-T", "/dev/vda"}));
+  ASSERT_OK_AND_ASSIGN(FsckArgs args,
+                       ParseFsckArgs(Strings{"-a", "-C3", "-T", "/dev/vda"}));
   EXPECT_EQ(args.backing_flags, (Strings{"-a", "-C3", "-T"}));
   EXPECT_EQ(args.device, "/dev/vda");
 }
@@ -152,8 +150,8 @@ TEST(ParseFsckArgsTest, ProgressDescriptorAndUnknownFlagsGoToTheBacking) {
 TEST(ParseFsckArgsTest, OptionsAndVersion) {
   ASSERT_OK_AND_ASSIGN(
       FsckArgs args,
-      ParseFsckArgs(Strings{"-o", "dcfs.fstype=bind,dcfs.cache_db=/c.db",
-                            "/srv/x"}));
+      ParseFsckArgs(
+          Strings{"-o", "dcfs.fstype=bind,dcfs.cache_db=/c.db", "/srv/x"}));
   EXPECT_EQ(args.options, "dcfs.fstype=bind,dcfs.cache_db=/c.db");
   EXPECT_TRUE(args.backing_flags.empty());  // -o is ours, not the backing's
   ASSERT_OK_AND_ASSIGN(FsckArgs version, ParseFsckArgs(Strings{"-V"}));
@@ -161,17 +159,16 @@ TEST(ParseFsckArgsTest, OptionsAndVersion) {
 }
 
 TEST(ParseFsckArgsTest, UsageErrors) {
-  EXPECT_THAT(ParseFsckArgs(Strings{}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("device")));
+  EXPECT_THAT(
+      ParseFsckArgs(Strings{}),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("device")));
   EXPECT_THAT(ParseFsckArgs(Strings{"-a"}),
               StatusIs(absl::StatusCode::kInvalidArgument));
-  EXPECT_THAT(ParseFsckArgs(Strings{"/dev/a", "/dev/b"}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("one device")));
+  EXPECT_THAT(
+      ParseFsckArgs(Strings{"/dev/a", "/dev/b"}),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("one device")));
   EXPECT_THAT(ParseFsckArgs(Strings{"/dev/a", "-o"}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("-o")));
+              StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("-o")));
 }
 
 // --- the cache database ------------------------------------------------------
@@ -253,16 +250,15 @@ TEST(CheckCacheDatabaseTest, NotADatabaseIsReportedThenRebuilt) {
   EXPECT_FALSE(Exists(path));
 }
 
-// The pages after the first (the tables') overwritten: integrity_check (or the first read of the
-// page) says so.
+// The pages after the first (the tables') overwritten: integrity_check (or the
+// first read of the page) says so.
 TEST(CheckCacheDatabaseTest, AFailedIntegrityCheckIsReportedThenRebuilt) {
   const std::string path = MakeCache("fsck_corrupt.db");
   {
     ASSERT_OK_AND_ASSIGN(FileDescriptor fd,
                          syscalls::openat(AT_FDCWD, path, O_RDWR));
     const std::string junk(16384, '\xff');
-    ASSERT_THAT(syscalls::pwrite(*fd, junk.data(), junk.size(), 4096),
-                IsOk());
+    ASSERT_THAT(syscalls::pwrite(*fd, junk.data(), junk.size(), 4096), IsOk());
   }
   CacheReport report = CheckCacheDatabase(path, FsckMode::kReport);
   EXPECT_EQ(report.status, kFsckUncorrected) << Joined(report);
@@ -287,8 +283,8 @@ TEST(CheckCacheDatabaseTest, ADatabaseADaemonHoldsIsReportedNotWaitedFor) {
 }
 
 TEST(CheckCacheDatabaseTest, ADirtyRowForAMissingInodeIsCorrupt) {
-  const std::string path =
-      MakeCache("fsck_dirty_missing.db", "INSERT INTO dirty (inode) VALUES (9999);");
+  const std::string path = MakeCache(
+      "fsck_dirty_missing.db", "INSERT INTO dirty (inode) VALUES (9999);");
   CacheReport report = CheckCacheDatabase(path, FsckMode::kReport);
   EXPECT_EQ(report.status, kFsckUncorrected) << Joined(report);
   EXPECT_THAT(Joined(report), HasSubstr("9999"));
@@ -299,10 +295,10 @@ TEST(CheckCacheDatabaseTest, ADirtyRowForAMissingInodeIsCorrupt) {
 
 // FinishRun marks a clean shutdown only with an empty dirty set.
 TEST(CheckCacheDatabaseTest, CleanShutdownWithADirtySetIsInconsistent) {
-  const std::string path = MakeCache(
-      "fsck_clean_dirty.db",
-      "INSERT INTO dirty (inode) VALUES (1);"
-      "UPDATE cache_state SET clean_shutdown = 1;");
+  const std::string path =
+      MakeCache("fsck_clean_dirty.db",
+                "INSERT INTO dirty (inode) VALUES (1);"
+                "UPDATE cache_state SET clean_shutdown = 1;");
   CacheReport report = CheckCacheDatabase(path, FsckMode::kReport);
   EXPECT_EQ(report.status, kFsckUncorrected) << Joined(report);
   EXPECT_THAT(Joined(report), HasSubstr("clean shutdown"));
@@ -314,10 +310,10 @@ TEST(CheckCacheDatabaseTest, CleanShutdownWithADirtySetIsInconsistent) {
 // What a crash leaves: unclean, with rows for inodes that exist. The next
 // start recovers it by itself, so it is not an error.
 TEST(CheckCacheDatabaseTest, ACrashedRunsDirtySetIsRecoverable) {
-  const std::string path = MakeCache(
-      "fsck_crashed.db",
-      "INSERT INTO dirty (inode) VALUES (1);"
-      "UPDATE cache_state SET clean_shutdown = 0;");
+  const std::string path =
+      MakeCache("fsck_crashed.db",
+                "INSERT INTO dirty (inode) VALUES (1);"
+                "UPDATE cache_state SET clean_shutdown = 0;");
   CacheReport report = CheckCacheDatabase(path, FsckMode::kRepair);
   EXPECT_EQ(report.status, kFsckOk) << Joined(report);
   EXPECT_THAT(Joined(report), HasSubstr("recovers"));
@@ -326,9 +322,8 @@ TEST(CheckCacheDatabaseTest, ACrashedRunsDirtySetIsRecoverable) {
 
 TEST(CheckCacheDatabaseTest, ANewerSchemaIsNeverDeleted) {
   const std::string path = MakeCache(
-      "fsck_newer.db",
-      absl::StrCat("UPDATE cache_state SET schema_version = ",
-                   kSchemaVersion + 1, ";"));
+      "fsck_newer.db", absl::StrCat("UPDATE cache_state SET schema_version = ",
+                                    kSchemaVersion + 1, ";"));
   for (FsckMode mode : {FsckMode::kReport, FsckMode::kRepair}) {
     CacheReport report = CheckCacheDatabase(path, mode);
     EXPECT_EQ(report.status, kFsckUncorrected) << Joined(report);
@@ -338,8 +333,8 @@ TEST(CheckCacheDatabaseTest, ANewerSchemaIsNeverDeleted) {
 }
 
 TEST(CheckCacheDatabaseTest, AnOlderSchemaIsUpgradedAtTheNextMount) {
-  const std::string path = MakeCache(
-      "fsck_older.db", "UPDATE cache_state SET schema_version = 5;");
+  const std::string path =
+      MakeCache("fsck_older.db", "UPDATE cache_state SET schema_version = 5;");
   CacheReport report = CheckCacheDatabase(path, FsckMode::kRepair);
   EXPECT_EQ(report.status, kFsckOk) << Joined(report);
   EXPECT_THAT(Joined(report), HasSubstr("upgrade"));
@@ -440,14 +435,15 @@ TEST(CheckCacheDatabaseTest, ALinkIsNotFollowed) {
   }
 }
 
-// --- fsck.dcfs as a process: the programs it runs ------------------------------
+// --- fsck.dcfs as a process: the programs it runs
+// ------------------------------
 //
 // FsckMain runs findmnt, blkid and the backing's fsck by the paths fsck(8)
 // would find them at. The guest has none of them, so each test puts a script
 // there (and takes it away).
 
-// Programs a test puts at the paths fsck.dcfs runs them from (findmnt, blkid and
-// the backing's fsck, which it finds by fixed paths), and takes away again
+// Programs a test puts at the paths fsck.dcfs runs them from (findmnt, blkid
+// and the backing's fsck, which it finds by fixed paths), and takes away again
 // when the object goes. The test guest has none of them.
 class StandInPrograms {
  public:
@@ -469,8 +465,8 @@ class StandInPrograms {
       CHECK(StatusToErrno(made) == EEXIST) << made;
     }
     installed_.push_back(path);
-    absl::StatusOr<FileDescriptor> fd = syscalls::openat(
-        AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+    absl::StatusOr<FileDescriptor> fd =
+        syscalls::openat(AT_FDCWD, path, O_WRONLY | O_CREAT | O_TRUNC, mode);
     CHECK_OK(fd.status());
     CHECK_OK(syscalls::fchmod(**fd, mode));
     CHECK_OK(syscalls::write(**fd, text.data(), text.size()).status());
@@ -480,14 +476,13 @@ class StandInPrograms {
   // `body`.
   void InstallScript(const std::string &path, const std::string &log,
                      std::string_view body) {
-    Install(path, "#!/bin/sh\necho \"$*\" >" + log + "\n" + std::string(body) +
-                      "\n");
+    Install(path,
+            "#!/bin/sh\necho \"$*\" >" + log + "\n" + std::string(body) + "\n");
   }
 
  private:
   std::vector<std::string> installed_;
 };
-
 
 class FsckMainTest : public ::testing::Test {
  protected:
@@ -511,8 +506,8 @@ TEST_F(FsckMainTest, TheFstabLineSuppliesTheOptions) {
   const std::string findmnt_log = TestFile("findmnt.args");
   const std::string fsck_log = TestFile("fsck.fakefs.args");
   programs_.InstallScript("/bin/findmnt", findmnt_log,
-                   absl::StrCat("echo dcfs.fstype=fakefs,dcfs.cache_db=", db,
-                                "\necho dcfs.fstype=otherfs"));
+                          absl::StrCat("echo dcfs.fstype=fakefs,dcfs.cache_db=",
+                                       db, "\necho dcfs.fstype=otherfs"));
   programs_.InstallScript("/sbin/fsck.fakefs", fsck_log, "exit 0");
   EXPECT_EQ(Run({"-n", "/dev/fstabdev"}), kFsckOk);
   EXPECT_EQ(Contents(findmnt_log),
@@ -530,8 +525,7 @@ TEST_F(FsckMainTest, NoFstabLineIsOperational) {
 }
 
 TEST_F(FsckMainTest, OptionsThatDoNotSplitAreOperational) {
-  EXPECT_EQ(Run({"-o", "dcfs.nosuchoption=1", "/dev/fake"}),
-            kFsckOperational);
+  EXPECT_EQ(Run({"-o", "dcfs.nosuchoption=1", "/dev/fake"}), kFsckOperational);
 }
 
 TEST_F(FsckMainTest, ATypeNotSetIsFoundWithBlkid) {
@@ -539,9 +533,8 @@ TEST_F(FsckMainTest, ATypeNotSetIsFoundWithBlkid) {
   const std::string blkid_log = TestFile("blkid.args");
   programs_.InstallScript("/sbin/blkid", blkid_log, "echo fakefs");
   programs_.InstallScript("/sbin/fsck.fakefs", TestFile("fsck.fakefs.args"),
-                   "exit 4");
-  EXPECT_EQ(Run({"-n", "-o", absl::StrCat("dcfs.cache_db=", db),
-                 "/dev/fake"}),
+                          "exit 4");
+  EXPECT_EQ(Run({"-n", "-o", absl::StrCat("dcfs.cache_db=", db), "/dev/fake"}),
             kFsckUncorrected);
   EXPECT_EQ(Contents(blkid_log), "-o value -s TYPE /dev/fake\n");
 }
@@ -569,26 +562,27 @@ TEST_F(FsckMainTest, ATypeThatIsAPathIsNotRun) {
 
 TEST_F(FsckMainTest, ACheckerThatCannotBeRunIsOperational) {
   programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nexit 0\n", 0644);
-  EXPECT_EQ(Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db",
-                 "/dev/fake"}),
-            kFsckOperational);
+  EXPECT_EQ(
+      Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db", "/dev/fake"}),
+      kFsckOperational);
 }
 
 TEST_F(FsckMainTest, ACheckerStoppedByCtrlCIsCancelled) {
   programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nkill -INT $$\n");
-  EXPECT_EQ(Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db",
-                 "/dev/fake"}),
-            kFsckCancelled);
+  EXPECT_EQ(
+      Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db", "/dev/fake"}),
+      kFsckCancelled);
 }
 
 TEST_F(FsckMainTest, ACheckerKilledBySomethingElseIsOperational) {
   programs_.Install("/sbin/fsck.fakefs", "#!/bin/sh\nkill -KILL $$\n");
-  EXPECT_EQ(Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db",
-                 "/dev/fake"}),
-            kFsckOperational);
+  EXPECT_EQ(
+      Run({"-o", "dcfs.fstype=fakefs,dcfs.cache_db=/nowhere.db", "/dev/fake"}),
+      kFsckOperational);
 }
 
-// --- fork, waitpid, dup2, flock and unlink answering with an error ----------------
+// --- fork, waitpid, dup2, flock and unlink answering with an error
+// ----------------
 //
 // What no real run makes on demand: a Linux that has run out of processes
 // (RLIMIT_NPROC), a lock manager that refuses (flock on NFS: ENOLCK), a cache

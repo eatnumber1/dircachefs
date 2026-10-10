@@ -32,7 +32,8 @@ std::string ReadAll(int fd) {
 }
 
 TEST(StartupReporterTest, ReadyIsReportedOnceAndClosesTheChannel) {
-  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   StartupReporter reporter(std::move(pair.first));
   EXPECT_TRUE(reporter.pending());
   reporter.Ready();
@@ -43,7 +44,8 @@ TEST(StartupReporterTest, ReadyIsReportedOnceAndClosesTheChannel) {
 }
 
 TEST(StartupReporterTest, FailureCarriesTheMessageAndExitStatus) {
-  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   StartupReporter reporter(std::move(pair.first));
   reporter.Fail(NativeMountError(32, "mount: wrong fs type"));
   EXPECT_FALSE(reporter.pending());
@@ -62,7 +64,8 @@ TEST(StartupReporterTest, AnInertReporterReportsNothing) {
 }
 
 TEST(StartupReporterTest, AWrapperThatIsGoneIsNotFatal) {
-  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   StartupReporter reporter(std::move(pair.first));
   ASSERT_THAT(pair.second.Close(), absl_testing::IsOk());
   reporter.Ready();  // EPIPE, not SIGPIPE

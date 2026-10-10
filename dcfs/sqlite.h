@@ -83,8 +83,8 @@ class Statement {
   // `sql`; trailing text after it is an error. Most callers should go
   // through Connection::Prepared() instead, which caches and resets
   // statements for reuse rather than preparing a fresh one every time.
-  static absl::StatusOr<Statement> Prepare(
-      Connection &db, std::string_view sql, unsigned int flags = 0);
+  static absl::StatusOr<Statement> Prepare(Connection &db, std::string_view sql,
+                                           unsigned int flags = 0);
 
   // The return status from Reset indicates whether or not the previous
   // evaluation of this prepared statement completed successfully.
@@ -311,8 +311,7 @@ class Connection {
   ::sqlite3 *db_ = nullptr;
   // Owns every Statement handed out by Prepared(). unique_ptr so that
   // pointers returned by Prepared() stay valid across map rehashes.
-  absl::flat_hash_map<std::string, std::unique_ptr<Statement>>
-      statement_cache_;
+  absl::flat_hash_map<std::string, std::unique_ptr<Statement>> statement_cache_;
   // Number of Transaction() calls currently nested (0 = no transaction
   // open). Only Transaction() touches this.
   int savepoint_depth_ = 0;

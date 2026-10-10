@@ -77,10 +77,10 @@ void StartupReporter::Ready() {
 
 void StartupReporter::Fail(const absl::Status &status) {
   if (!pending()) return;
-  const std::string bytes = EncodeStartupReport(
-      {.ready = false,
-       .exit_status = ExitStatusFor(status),
-       .message = status.ToString()});
+  const std::string bytes =
+      EncodeStartupReport({.ready = false,
+                           .exit_status = ExitStatusFor(status),
+                           .message = status.ToString()});
   syscalls::send(*channel_, bytes.data(), bytes.size(), MSG_NOSIGNAL)
       .status()
       .IgnoreError();
@@ -101,9 +101,8 @@ namespace {
     // Died without a word: say how.
     int wait_status = 0;
     if (syscalls::waitpid(child, &wait_status, 0).ok()) {
-      report.message =
-          absl::StrCat(report.message, " (", DescribeWaitStatus(wait_status),
-                       ")");
+      report.message = absl::StrCat(report.message, " (",
+                                    DescribeWaitStatus(wait_status), ")");
     }
   }
   LOG(ERROR) << report.message;
@@ -130,9 +129,7 @@ absl::StatusOr<StartupReporter> ForkDaemon() {
   ASSIGN_OR_RETURN(auto channel, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   auto &[parent_end, child_end] = channel;
   return ForkSplit(
-      [&] {
-        return BecomeDaemon(std::move(parent_end), std::move(child_end));
-      },
+      [&] { return BecomeDaemon(std::move(parent_end), std::move(child_end)); },
       [&](pid_t child) {
         child_end.Close().IgnoreError();
         AwaitReportAndExit(std::move(parent_end), child);

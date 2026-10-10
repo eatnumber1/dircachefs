@@ -101,7 +101,8 @@ absl::StatusOr<int> RunProgram(const std::string &path,
     absl::StatusOr<pid_t> reaped = syscalls::waitpid(child, &wait_status, 0);
     if (reaped.ok()) break;
     if (StatusToErrno(reaped.status()) != EINTR) {
-      return absl::StatusBuilder(reaped.status()) << "while waiting for " << path;
+      return absl::StatusBuilder(reaped.status())
+             << "while waiting for " << path;
     }
   }
   if (WIFEXITED(wait_status)) return WEXITSTATUS(wait_status);
@@ -112,11 +113,11 @@ absl::StatusOr<int> RunProgram(const std::string &path,
 // them (comma-separated).
 absl::StatusOr<std::string> FstabOptions(const std::string &device) {
   std::string out;
-  absl::StatusOr<int> ran = RunProgram(
-      kFindmntProgram, "findmnt",
-      {"--fstab", "--noheadings", "--raw", "--output", "OPTIONS", "--source",
-       device},
-      &out);
+  absl::StatusOr<int> ran =
+      RunProgram(kFindmntProgram, "findmnt",
+                 {"--fstab", "--noheadings", "--raw", "--output", "OPTIONS",
+                  "--source", device},
+                 &out);
   if (!ran.ok()) return ran.status();
   const std::string first(absl::StripAsciiWhitespace(
       std::string_view(out).substr(0, out.find('\n'))));
@@ -144,9 +145,8 @@ absl::StatusOr<std::string> DetectType(const std::string &device) {
       RunProgram(blkid, "blkid", {"-o", "value", "-s", "TYPE", device}, &out));
   const std::string type(absl::StripAsciiWhitespace(out));
   if (ran != 0 || type.empty()) {
-    return NotFoundErrorBuilder()
-           << "blkid finds no filesystem type on " << EscapeBytes(device)
-           << "; set dcfs.fstype";
+    return NotFoundErrorBuilder() << "blkid finds no filesystem type on "
+                                  << EscapeBytes(device) << "; set dcfs.fstype";
   }
   return type;
 }
@@ -183,8 +183,8 @@ int CheckBacking(const std::string &type, const std::string &device,
 // What looking at an open cache database found.
 struct Finding {
   enum class Kind { kOk, kCorrupt, kNewer, kBusy } kind = Kind::kOk;
-  std::string detail;               // for kCorrupt, kNewer and kBusy
-  std::vector<std::string> notes;   // for kOk: things worth saying
+  std::string detail;              // for kCorrupt, kNewer and kBusy
+  std::vector<std::string> notes;  // for kOk: things worth saying
 };
 
 // The first few rows of a query's first column.
@@ -213,19 +213,20 @@ Finding Inspect(const std::string &path) {
           .Open();
   if (!opened.ok()) {
     if (absl::IsUnavailable(opened.status())) {
-      return Finding{.kind = Finding::Kind::kBusy,
-                     .detail = absl::StrCat("is locked: ",
-                                            opened.status().message())};
+      return Finding{
+          .kind = Finding::Kind::kBusy,
+          .detail = absl::StrCat("is locked: ", opened.status().message())};
     }
-    return Corrupt(absl::StrCat("cannot be opened: ", opened.status().message()));
+    return Corrupt(
+        absl::StrCat("cannot be opened: ", opened.status().message()));
   }
   sqlite3::Connection &db = *opened;
 
   absl::StatusOr<std::vector<std::string>> integrity =
       FirstRows(db, "PRAGMA integrity_check", 3);
   if (!integrity.ok()) {
-    return Corrupt(absl::StrCat("integrity_check failed: ",
-                                integrity.status().message()));
+    return Corrupt(
+        absl::StrCat("integrity_check failed: ", integrity.status().message()));
   }
   if (integrity->size() != 1 || integrity->front() != "ok") {
     return Corrupt(absl::StrCat("integrity_check found: ",
@@ -248,9 +249,9 @@ Finding Inspect(const std::string &path) {
                                "delete the file to start cold")};
   }
   if (*version < kSchemaVersion) {
-    found.notes.push_back(absl::StrCat(
-        "the cache database has schema version ", *version,
-        "; the next mount will upgrade it to ", kSchemaVersion));
+    found.notes.push_back(
+        absl::StrCat("the cache database has schema version ", *version,
+                     "; the next mount will upgrade it to ", kSchemaVersion));
   }
 
   // One pass over the dirty set: how many rows, and the first few that name
@@ -274,8 +275,9 @@ Finding Inspect(const std::string &path) {
     return Corrupt(absl::StrCat("dirty set unreadable: ", read.message()));
   }
   if (!missing.empty()) {
-    return Corrupt(absl::StrCat("the dirty set names inodes that do not exist (",
-                                absl::StrJoin(missing, ", "), ")"));
+    return Corrupt(
+        absl::StrCat("the dirty set names inodes that do not exist (",
+                     absl::StrJoin(missing, ", "), ")"));
   }
   absl::StatusOr<bool> clean = GetCleanShutdown(db);
   if (!clean.ok()) {
@@ -335,8 +337,7 @@ absl::StatusOr<FsckArgs> ParseFsckArgs(std::span<const std::string> args) {
     return InvalidArgumentErrorBuilder() << "a device to check is needed";
   }
   // fsck(8) never changes what -n told it not to.
-  parsed.mode =
-      repair && !report_only ? FsckMode::kRepair : FsckMode::kReport;
+  parsed.mode = repair && !report_only ? FsckMode::kRepair : FsckMode::kReport;
   return parsed;
 }
 
@@ -347,13 +348,14 @@ CacheReport CheckCacheDatabase(const std::string &path, FsckMode mode) {
       syscalls::openat(AT_FDCWD, path, O_RDWR | O_NOFOLLOW);
   if (!opened.ok()) {
     if (StatusToErrno(opened.status()) == ENOENT) {
-      report.lines.push_back(absl::StrCat(
-          "no cache database at ", shown, ": the next mount starts cold"));
+      report.lines.push_back(absl::StrCat("no cache database at ", shown,
+                                          ": the next mount starts cold"));
       return report;
     }
     report.status = kFsckOperational;
     report.lines.push_back(absl::StrCat("cannot open the cache database ",
-                                        shown, ": ", opened.status().message()));
+                                        shown, ": ",
+                                        opened.status().message()));
     return report;
   }
   // The daemon's own lock (dcfs/main.cc): held while one runs. Reported, never
@@ -411,9 +413,9 @@ CacheReport CheckCacheDatabase(const std::string &path, FsckMode mode) {
     }
   }
   report.status = kFsckCorrected;
-  report.lines.push_back(absl::StrCat(
-      "the cache database ", shown, " was corrupt (", found.detail,
-      "); deleted: the next mount starts cold"));
+  report.lines.push_back(
+      absl::StrCat("the cache database ", shown, " was corrupt (", found.detail,
+                   "); deleted: the next mount starts cold"));
   return report;
 }
 
@@ -478,8 +480,8 @@ int FsckMain(std::span<const std::string> words) {
   }
   const CacheReport cache = CheckCacheDatabase(*split->cache_db, args->mode);
   for (const std::string &line : cache.lines) {
-    (cache.status == kFsckOk ? std::cout : std::cerr) << "fsck.dcfs: " << line
-                                                       << std::endl;
+    (cache.status == kFsckOk ? std::cout : std::cerr)
+        << "fsck.dcfs: " << line << std::endl;
   }
   return CombineFsckStatus(status, cache.status);
 }

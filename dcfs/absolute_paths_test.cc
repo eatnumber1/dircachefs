@@ -22,8 +22,8 @@ class AbsolutePathsTest : public ::testing::Test {
  protected:
   void SetUp() override {
     ASSERT_OK_AND_ASSIGN(
-        dir_, syscalls::mkdtemp(
-                  std::string(std::getenv("TEST_TMPDIR")) + "/paths.XXXXXX"));
+        dir_, syscalls::mkdtemp(std::string(std::getenv("TEST_TMPDIR")) +
+                                "/paths.XXXXXX"));
     ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, dir_ + "/rel", 0700), IsOk());
     ASSERT_THAT(syscalls::chdir(dir_), IsOk());
     ASSERT_OK_AND_ASSIGN(real_, syscalls::realpath(dir_));

@@ -16,11 +16,11 @@
 namespace dcfs::testonly {
 
 // The wrapped function (external linkage: the linker resolves this name).
-absl::StatusOr<int64_t> RealRecoverDirty(Context &ctx)
-    asm("__real__ZN4dcfs5cache12RecoverDirtyERNS_7ContextE");
+absl::StatusOr<int64_t> RealRecoverDirty(Context &ctx) asm(
+    "__real__ZN4dcfs5cache12RecoverDirtyERNS_7ContextE");
 
-absl::StatusOr<int64_t> WrapRecoverDirty(Context &ctx)
-    asm("__wrap__ZN4dcfs5cache12RecoverDirtyERNS_7ContextE");
+absl::StatusOr<int64_t> WrapRecoverDirty(Context &ctx) asm(
+    "__wrap__ZN4dcfs5cache12RecoverDirtyERNS_7ContextE");
 absl::StatusOr<int64_t> WrapRecoverDirty(Context &ctx) {
   static bool crashed = false;
   if (!crashed) {

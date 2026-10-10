@@ -43,32 +43,32 @@ using Strings = std::vector<std::string>;
 TEST(ParseHelperArgsTest, SourceMountpointAndOptions) {
   EXPECT_THAT(
       ParseHelperArgs(Strings{"/dev/sdb1", "/data", "-o", "noatime,ro"}),
-      IsOkAndHolds(AllOf(
-          Field(&HelperArgs::source, "/dev/sdb1"),
-          Field(&HelperArgs::mountpoint, "/data"),
-          Field(&HelperArgs::options, ElementsAre("noatime", "ro")))));
+      IsOkAndHolds(
+          AllOf(Field(&HelperArgs::source, "/dev/sdb1"),
+                Field(&HelperArgs::mountpoint, "/data"),
+                Field(&HelperArgs::options, ElementsAre("noatime", "ro")))));
 }
 
 TEST(ParseHelperArgsTest, OptionsMayComeBeforeThePositionals) {
-  EXPECT_THAT(ParseHelperArgs(Strings{"-o", "ro", "UUID=aaaa", "/data"}),
-              IsOkAndHolds(AllOf(Field(&HelperArgs::source, "UUID=aaaa"),
-                                 Field(&HelperArgs::mountpoint, "/data"),
-                                 Field(&HelperArgs::options,
-                                       ElementsAre("ro")))));
+  EXPECT_THAT(
+      ParseHelperArgs(Strings{"-o", "ro", "UUID=aaaa", "/data"}),
+      IsOkAndHolds(AllOf(Field(&HelperArgs::source, "UUID=aaaa"),
+                         Field(&HelperArgs::mountpoint, "/data"),
+                         Field(&HelperArgs::options, ElementsAre("ro")))));
 }
 
 TEST(ParseHelperArgsTest, RepeatedOptionsAccumulateInOrder) {
-  EXPECT_THAT(ParseHelperArgs(Strings{"s", "m", "-o", "a,b", "-o", "c"}),
-              IsOkAndHolds(Field(&HelperArgs::options,
-                                 ElementsAre("a", "b", "c"))));
+  EXPECT_THAT(
+      ParseHelperArgs(Strings{"s", "m", "-o", "a,b", "-o", "c"}),
+      IsOkAndHolds(Field(&HelperArgs::options, ElementsAre("a", "b", "c"))));
 }
 
 TEST(ParseHelperArgsTest, SingleLetterFlagsMayBeGrouped) {
-  EXPECT_THAT(ParseHelperArgs(Strings{"s", "m", "-sfnv"}),
-              IsOkAndHolds(AllOf(Field(&HelperArgs::sloppy, true),
-                                 Field(&HelperArgs::fake, true),
-                                 Field(&HelperArgs::no_mtab, true),
-                                 Field(&HelperArgs::verbose, 1))));
+  EXPECT_THAT(
+      ParseHelperArgs(Strings{"s", "m", "-sfnv"}),
+      IsOkAndHolds(AllOf(
+          Field(&HelperArgs::sloppy, true), Field(&HelperArgs::fake, true),
+          Field(&HelperArgs::no_mtab, true), Field(&HelperArgs::verbose, 1))));
   EXPECT_THAT(ParseHelperArgs(Strings{"s", "m", "-v", "-v"}),
               IsOkAndHolds(Field(&HelperArgs::verbose, 2)));
 }
@@ -80,9 +80,9 @@ TEST(ParseHelperArgsTest, NamespaceTakesAnArgument) {
 }
 
 TEST(ParseHelperArgsTest, AttachedOptionArgument) {
-  EXPECT_THAT(ParseHelperArgs(Strings{"s", "m", "-oro,sync"}),
-              IsOkAndHolds(Field(&HelperArgs::options,
-                                 ElementsAre("ro", "sync"))));
+  EXPECT_THAT(
+      ParseHelperArgs(Strings{"s", "m", "-oro,sync"}),
+      IsOkAndHolds(Field(&HelperArgs::options, ElementsAre("ro", "sync"))));
 }
 
 TEST(ParseHelperArgsTest, VersionNeedsNoPositionals) {
@@ -91,12 +91,12 @@ TEST(ParseHelperArgsTest, VersionNeedsNoPositionals) {
 }
 
 TEST(ParseHelperArgsTest, MissingMountpointIsAUsageError) {
-  EXPECT_THAT(ParseHelperArgs(Strings{"/dev/sdb1"}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("MOUNTPOINT")));
-  EXPECT_THAT(ParseHelperArgs(Strings{}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("SOURCE")));
+  EXPECT_THAT(
+      ParseHelperArgs(Strings{"/dev/sdb1"}),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("MOUNTPOINT")));
+  EXPECT_THAT(
+      ParseHelperArgs(Strings{}),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("SOURCE")));
 }
 
 TEST(ParseHelperArgsTest, ExtraPositionalIsAUsageError) {
@@ -116,33 +116,33 @@ TEST(ParseHelperArgsTest, UnknownFlagAndMissingArgumentAreUsageErrors) {
 // --- the option split (decision 6) -----------------------------------------
 
 TEST(SplitHelperOptionsTest, PrefixedOptionsGoToDcfsTheRestStayNative) {
-  EXPECT_THAT(
-      SplitHelperOptions(Strings{"noatime", "dcfs.fstype=ext4", "ro",
-                                 "dcfs.foreground", "subvol=vol"}),
-      IsOkAndHolds(AllOf(
-          Field(&HelperOptions::native_options,
-                ElementsAre("noatime", "ro", "subvol=vol")),
-          Field(&HelperOptions::foreground, true),
-          Field(&HelperOptions::native_type, Optional(Eq("ext4"))))));
+  EXPECT_THAT(SplitHelperOptions(Strings{"noatime", "dcfs.fstype=ext4", "ro",
+                                         "dcfs.foreground", "subvol=vol"}),
+              IsOkAndHolds(AllOf(
+                  Field(&HelperOptions::native_options,
+                        ElementsAre("noatime", "ro", "subvol=vol")),
+                  Field(&HelperOptions::foreground, true),
+                  Field(&HelperOptions::native_type, Optional(Eq("ext4"))))));
 }
 
 TEST(SplitHelperOptionsTest, RoIsTheUnderlyingMountsAndDcfsRoIsDcfs) {
   EXPECT_THAT(SplitHelperOptions(Strings{"ro"}),
-              IsOkAndHolds(AllOf(Field(&HelperOptions::read_only, false),
-                                 Field(&HelperOptions::native_options,
-                                       ElementsAre("ro")))));
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.ro"}),
-              IsOkAndHolds(AllOf(Field(&HelperOptions::read_only, true),
-                                 Field(&HelperOptions::native_options,
-                                       IsEmpty()))));
+              IsOkAndHolds(AllOf(
+                  Field(&HelperOptions::read_only, false),
+                  Field(&HelperOptions::native_options, ElementsAre("ro")))));
+  EXPECT_THAT(
+      SplitHelperOptions(Strings{"dcfs.ro"}),
+      IsOkAndHolds(AllOf(Field(&HelperOptions::read_only, true),
+                         Field(&HelperOptions::native_options, IsEmpty()))));
 }
 
 TEST(SplitHelperOptionsTest, FstypeValues) {
   auto backing = [](const Strings &options) {
     return SplitHelperOptions(options);
   };
-  EXPECT_THAT(backing({}), IsOkAndHolds(Field(&HelperOptions::backing,
-                                              HelperOptions::Backing::kNative)));
+  EXPECT_THAT(backing({}),
+              IsOkAndHolds(Field(&HelperOptions::backing,
+                                 HelperOptions::Backing::kNative)));
   // Step 15.9 (russ): the directory form is spelled bind, the only spelling:
   // none (its old name) is an error that says so, not a native type.
   EXPECT_THAT(backing({"dcfs.fstype=bind"}),
@@ -151,47 +151,45 @@ TEST(SplitHelperOptionsTest, FstypeValues) {
   EXPECT_THAT(backing({"dcfs.fstype=none"}),
               StatusIs(absl::StatusCode::kInvalidArgument,
                        HasSubstr("renamed dcfs.fstype=bind")));
-  EXPECT_THAT(backing({"dcfs.fstype=xfs"}),
-              IsOkAndHolds(AllOf(
-                  Field(&HelperOptions::backing,
-                        HelperOptions::Backing::kNative),
-                  Field(&HelperOptions::native_type, Optional(Eq("xfs"))))));
+  EXPECT_THAT(
+      backing({"dcfs.fstype=xfs"}),
+      IsOkAndHolds(
+          AllOf(Field(&HelperOptions::backing, HelperOptions::Backing::kNative),
+                Field(&HelperOptions::native_type, Optional(Eq("xfs"))))));
   EXPECT_THAT(backing({"dcfs.fstype=fuse.sshfs"}),
               IsOkAndHolds(Field(&HelperOptions::native_type,
                                  Optional(Eq("fuse.sshfs")))));
   // Absent: mount(8) autodetects the native type.
-  EXPECT_THAT(backing({}), IsOkAndHolds(Field(&HelperOptions::native_type,
-                                              std::nullopt)));
+  EXPECT_THAT(backing({}),
+              IsOkAndHolds(Field(&HelperOptions::native_type, std::nullopt)));
 }
 
 TEST(SplitHelperOptionsTest, EmptyFstypeIsAnError) {
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.fstype="}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("dcfs.fstype")));
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.fstype"}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("dcfs.fstype")));
+  EXPECT_THAT(
+      SplitHelperOptions(Strings{"dcfs.fstype="}),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("dcfs.fstype")));
+  EXPECT_THAT(
+      SplitHelperOptions(Strings{"dcfs.fstype"}),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("dcfs.fstype")));
 }
 
 TEST(SplitHelperOptionsTest, UnknownDcfsOptionNamesItself) {
-  EXPECT_THAT(SplitHelperOptions(Strings{"noatime", "dcfs.bogus"}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("dcfs.bogus")));
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.bogus=1"}),
-              StatusIs(absl::StatusCode::kInvalidArgument,
-                       HasSubstr("dcfs.bogus")));
+  EXPECT_THAT(
+      SplitHelperOptions(Strings{"noatime", "dcfs.bogus"}),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("dcfs.bogus")));
+  EXPECT_THAT(
+      SplitHelperOptions(Strings{"dcfs.bogus=1"}),
+      StatusIs(absl::StatusCode::kInvalidArgument, HasSubstr("dcfs.bogus")));
 }
 
 TEST(SplitHelperOptionsTest, FlagsKeepTheirValuesInOrder) {
-  EXPECT_THAT(
-      SplitHelperOptions(Strings{"dcfs.sync_interval_sec=2",
-                                 "dcfs.attr_timeout_sec=0.5",
-                                 "dcfs.stderrthreshold=0"}),
-      IsOkAndHolds(Field(
-          &HelperOptions::flags,
-          ElementsAre(Pair("sync_interval_sec", "2"),
-                      Pair("attr_timeout_sec", "0.5"),
-                      Pair("stderrthreshold", "0")))));
+  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.sync_interval_sec=2",
+                                         "dcfs.attr_timeout_sec=0.5",
+                                         "dcfs.stderrthreshold=0"}),
+              IsOkAndHolds(Field(&HelperOptions::flags,
+                                 ElementsAre(Pair("sync_interval_sec", "2"),
+                                             Pair("attr_timeout_sec", "0.5"),
+                                             Pair("stderrthreshold", "0")))));
 }
 
 // Step 15.8: dcfs always mounts with allow_other (the kernel enforces the mode
@@ -249,9 +247,9 @@ TEST(SplitHelperOptionsTest, CacheDb) {
 // Step 15.3 owns the cache path derived from the instance identity; until
 // then dcfs.cache_dir is refused rather than silently ignored.
 TEST(SplitHelperOptionsTest, CacheDirIsNotYetSupported) {
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.cache_dir=/var/cache/dcfs"}),
-              StatusIs(absl::StatusCode::kUnimplemented,
-                       HasSubstr("dcfs.cache_dir")));
+  EXPECT_THAT(
+      SplitHelperOptions(Strings{"dcfs.cache_dir=/var/cache/dcfs"}),
+      StatusIs(absl::StatusCode::kUnimplemented, HasSubstr("dcfs.cache_dir")));
 }
 
 // The underlying mount is made by mount(8) from the native options; a type
@@ -271,20 +269,19 @@ TEST(SplitHelperOptionsTest, BindRefusesNativeOptionsNamingThem) {
 // silently, so an fstab line for it and the README's example work.
 TEST(SplitHelperOptionsTest, BindAcceptsWhatLibmountAdds) {
   EXPECT_THAT(
-      SplitHelperOptions(Strings{
-          "rw", "defaults", "nofail", "_netdev", "noauto", "auto", "user",
-          "users", "owner", "group", "nouser", "x-systemd.requires=/mnt/a",
-          "dcfs.fstype=bind", "dcfs.cache_db=/c.db"}),
-      IsOkAndHolds(Field(&HelperOptions::backing,
-                         HelperOptions::Backing::kDirectory)));
+      SplitHelperOptions(Strings{"rw", "defaults", "nofail", "_netdev",
+                                 "noauto", "auto", "user", "users", "owner",
+                                 "group", "nouser", "x-systemd.requires=/mnt/a",
+                                 "dcfs.fstype=bind", "dcfs.cache_db=/c.db"}),
+      IsOkAndHolds(
+          Field(&HelperOptions::backing, HelperOptions::Backing::kDirectory)));
 }
 
 TEST(SplitHelperOptionsTest, BindStillRefusesOthersByName) {
-  EXPECT_THAT(SplitHelperOptions(Strings{"rw", "ro", "nofail", "noatime",
-                                         "dcfs.fstype=bind"}),
+  EXPECT_THAT(SplitHelperOptions(
+                  Strings{"rw", "ro", "nofail", "noatime", "dcfs.fstype=bind"}),
               StatusIs(absl::StatusCode::kInvalidArgument,
-                       AllOf(HasSubstr("ro, noatime"),
-                             Not(HasSubstr("nofail")),
+                       AllOf(HasSubstr("ro, noatime"), Not(HasSubstr("nofail")),
                              Not(HasSubstr("rw")))));
 }
 
@@ -307,10 +304,9 @@ TEST(UnhonoredNativeOptionsTest, ANativeMountHonorsEverything) {
 
 TEST(SplitHelperOptionsTest, RemountIsRecognizedAndNotPassedOn) {
   EXPECT_THAT(SplitHelperOptions(Strings{"remount", "dcfs.ro", "noatime"}),
-              IsOkAndHolds(AllOf(
-                  Field(&HelperOptions::remount, true),
-                  Field(&HelperOptions::native_options,
-                        ElementsAre("noatime")))));
+              IsOkAndHolds(AllOf(Field(&HelperOptions::remount, true),
+                                 Field(&HelperOptions::native_options,
+                                       ElementsAre("noatime")))));
 }
 
 // --- exit statuses and the startup report ----------------------------------
@@ -320,8 +316,7 @@ TEST(SplitHelperOptionsTest, RemountIsRecognizedAndNotPassedOn) {
 TEST(ExitStatusTest, UsageAndPermissionRefusalsExitOne) {
   EXPECT_EQ(ExitStatusFor(MarkUsageError(absl::InvalidArgumentError("x"))), 1);
   EXPECT_EQ(ExitStatusFor(MarkUsageError(absl::PermissionDeniedError("x"))), 1);
-  EXPECT_EQ(ExitStatusFor(ParseHelperArgs(Strings{"only-source"}).status()),
-            1);
+  EXPECT_EQ(ExitStatusFor(ParseHelperArgs(Strings{"only-source"}).status()), 1);
   EXPECT_EQ(ExitStatusFor(SplitHelperOptions(Strings{"dcfs.bogus"}).status()),
             1);
   EXPECT_EQ(ExitStatusFor(ApplyFlagOption("test_interval_sec", "soon")), 1);
@@ -431,8 +426,7 @@ TEST(MountHelperNameTest, BothNamesMountHasIt) {
 // The flag options are Abseil flags of the binary (a stand-in is defined
 // here: the real ones are main.cc's).
 TEST(ApplyFlagOptionTest, SetsAKnownFlagAndRefusesABadValue) {
-  EXPECT_THAT(ApplyFlagOption("test_interval_sec", "7"),
-              absl_testing::IsOk());
+  EXPECT_THAT(ApplyFlagOption("test_interval_sec", "7"), absl_testing::IsOk());
   EXPECT_EQ(absl::GetFlag(FLAGS_test_interval_sec), 7);
   EXPECT_THAT(ApplyFlagOption("test_interval_sec", "soon"),
               StatusIs(absl::StatusCode::kInvalidArgument,
@@ -442,8 +436,7 @@ TEST(ApplyFlagOptionTest, SetsAKnownFlagAndRefusesABadValue) {
 
 TEST(ApplyFlagOptionTest, AnUnknownFlagIsAnInternalError) {
   EXPECT_THAT(ApplyFlagOption("no_such_flag", "1"),
-              StatusIs(absl::StatusCode::kInternal,
-                       HasSubstr("no_such_flag")));
+              StatusIs(absl::StatusCode::kInternal, HasSubstr("no_such_flag")));
 }
 
 TEST(ParseHelperArgsTest, SubtypeFlagTakesAnArgumentAndIsIgnored) {
@@ -469,33 +462,30 @@ TEST(ParseUmountArgsTest, TheTargetAndWhatTheInnerUmountGets) {
                                  Field(&UmountArgs::forwarded, IsEmpty()))));
   // Everything but the target goes on, in order, arguments with their option.
   EXPECT_THAT(
-      ParseUmountArgs(Strings{"-n", "/data", "-f", "-t", "fuse.dcfs", "-c",
-                              "-Ofoo", "-q"}),
-      IsOkAndHolds(
-          AllOf(Field(&UmountArgs::target, "/data"),
-                Field(&UmountArgs::forwarded,
-                      ElementsAre("-n", "-f", "-t", "fuse.dcfs", "-c", "-Ofoo",
-                                  "-q")))));
+      ParseUmountArgs(
+          Strings{"-n", "/data", "-f", "-t", "fuse.dcfs", "-c", "-Ofoo", "-q"}),
+      IsOkAndHolds(AllOf(Field(&UmountArgs::target, "/data"),
+                         Field(&UmountArgs::forwarded,
+                               ElementsAre("-n", "-f", "-t", "fuse.dcfs", "-c",
+                                           "-Ofoo", "-q")))));
 }
 
 TEST(ParseUmountArgsTest, LazyAndNamespaceChangeWhatTheHelperDoes) {
-  EXPECT_THAT(ParseUmountArgs(Strings{"-lf", "/data"}),
-              IsOkAndHolds(AllOf(Field(&UmountArgs::lazy, true),
-                                 Field(&UmountArgs::forwarded,
-                                       ElementsAre("-lf")))));
+  EXPECT_THAT(
+      ParseUmountArgs(Strings{"-lf", "/data"}),
+      IsOkAndHolds(AllOf(Field(&UmountArgs::lazy, true),
+                         Field(&UmountArgs::forwarded, ElementsAre("-lf")))));
   EXPECT_THAT(ParseUmountArgs(Strings{"--lazy", "/data"}),
               IsOkAndHolds(Field(&UmountArgs::lazy, true)));
   EXPECT_THAT(ParseUmountArgs(Strings{"-N", "/proc/1/ns/mnt", "/data"}),
-              IsOkAndHolds(AllOf(
-                  Field(&UmountArgs::other_namespace, true),
-                  Field(&UmountArgs::target, "/data"),
-                  Field(&UmountArgs::forwarded,
-                        ElementsAre("-N", "/proc/1/ns/mnt")))));
+              IsOkAndHolds(AllOf(Field(&UmountArgs::other_namespace, true),
+                                 Field(&UmountArgs::target, "/data"),
+                                 Field(&UmountArgs::forwarded,
+                                       ElementsAre("-N", "/proc/1/ns/mnt")))));
   EXPECT_THAT(ParseUmountArgs(Strings{"--namespace", "123", "/data"}),
-              IsOkAndHolds(AllOf(
-                  Field(&UmountArgs::other_namespace, true),
-                  Field(&UmountArgs::forwarded,
-                        ElementsAre("--namespace", "123")))));
+              IsOkAndHolds(AllOf(Field(&UmountArgs::other_namespace, true),
+                                 Field(&UmountArgs::forwarded,
+                                       ElementsAre("--namespace", "123")))));
   EXPECT_THAT(ParseUmountArgs(Strings{"--namespace=123", "/data"}),
               IsOkAndHolds(Field(&UmountArgs::other_namespace, true)));
   // Long options with an argument in the next word keep it with them.
@@ -503,9 +493,9 @@ TEST(ParseUmountArgsTest, LazyAndNamespaceChangeWhatTheHelperDoes) {
               IsOkAndHolds(AllOf(Field(&UmountArgs::target, "/data"),
                                  Field(&UmountArgs::forwarded,
                                        ElementsAre("--types", "fuse.dcfs")))));
-  EXPECT_THAT(ParseUmountArgs(Strings{"--force", "/data"}),
-              IsOkAndHolds(Field(&UmountArgs::forwarded,
-                                 ElementsAre("--force"))));
+  EXPECT_THAT(
+      ParseUmountArgs(Strings{"--force", "/data"}),
+      IsOkAndHolds(Field(&UmountArgs::forwarded, ElementsAre("--force"))));
 }
 
 TEST(ParseUmountArgsTest, VersionNeedsNoTarget) {

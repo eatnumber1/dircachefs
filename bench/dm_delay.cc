@@ -47,8 +47,8 @@ absl::StatusOr<FileDescriptor> OpenControl() {
     if (fields.size() != 2 || !absl::SimpleAtoi(fields[0], &minor)) continue;
     if (fields[1] == "device-mapper") {
       syscalls::mkdirat(AT_FDCWD, "/dev/mapper", 0755).IgnoreError();
-      absl::Status made = syscalls::mknodat(
-          AT_FDCWD, "/dev/mapper/control", S_IFCHR | 0600, makedev(10, minor));
+      absl::Status made = syscalls::mknodat(AT_FDCWD, "/dev/mapper/control",
+                                            S_IFCHR | 0600, makedev(10, minor));
       if (!made.ok()) return made;
       return syscalls::openat(AT_FDCWD, "/dev/mapper/control", O_RDWR);
     }
@@ -66,9 +66,7 @@ void Init(dm_ioctl *io, size_t size, const std::string &name) {
   snprintf(io->name, sizeof io->name, "%s", name.c_str());
 }
 
-bool Exists(const char *path) {
-  return syscalls::fstatat(AT_FDCWD, path).ok();
-}
+bool Exists(const char *path) { return syscalls::fstatat(AT_FDCWD, path).ok(); }
 
 // Reports a failed step on stderr; true when `rc` is ok.
 template <typename T>
@@ -81,8 +79,8 @@ bool Check(const absl::StatusOr<T> &rc, const char *what) {
 
 }  // namespace
 
-std::string CreateDelayDevice(
-    const std::string &name, const std::string &device, int delay_ms) {
+std::string CreateDelayDevice(const std::string &name,
+                              const std::string &device, int delay_ms) {
   uint64_t bytes = 0;
   {
     absl::StatusOr<FileDescriptor> dev =

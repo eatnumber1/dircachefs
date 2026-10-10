@@ -15,8 +15,7 @@ FileDescriptor::FileDescriptor(int fd) : fd_(fd) {}
 FileDescriptor::~FileDescriptor() {
   if (fd_ == -1) return;
   // Note that a failure to close is not recoverable. We must leak the fd.
-  if (absl::Status st = syscalls::close(std::move(*this));
-      !st.ok()) {
+  if (absl::Status st = syscalls::close(std::move(*this)); !st.ok()) {
     LOG(ERROR) << st;
   }
 }

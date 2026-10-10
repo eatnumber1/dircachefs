@@ -48,13 +48,13 @@ int Twice() {
 
 // The same job with ForkSplit: only the child returns.
 int Split() {
-  absl::StatusOr<int> child = dcfs::ForkSplit(
-      [] { return Child(); },
-      [](pid_t pid) {
-        int wait_status = 0;
-        waitpid(pid, &wait_status, 0);
-        std::exit(WIFEXITED(wait_status) ? Parent() : 1);
-      });
+  absl::StatusOr<int> child =
+      dcfs::ForkSplit([] { return Child(); },
+                      [](pid_t pid) {
+                        int wait_status = 0;
+                        waitpid(pid, &wait_status, 0);
+                        std::exit(WIFEXITED(wait_status) ? Parent() : 1);
+                      });
   return child.ok() ? *child : 1;
 }
 

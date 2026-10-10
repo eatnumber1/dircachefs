@@ -30,9 +30,9 @@ namespace dcfs {
 // functions that each run once per call. Returns the fork's error in the
 // parent when the fork fails.
 template <typename Child, typename Parent>
-__attribute__((no_profile_instrument_function))
-absl::StatusOr<std::invoke_result_t<Child>> ForkSplit(Child child,
-                                                      Parent parent) {
+__attribute__((
+    no_profile_instrument_function)) absl::StatusOr<std::invoke_result_t<Child>>
+ForkSplit(Child child, Parent parent) {
   absl::StatusOr<pid_t> pid = syscalls::fork();
   if (!pid.ok()) return pid.status();
   if (*pid == 0) return child();

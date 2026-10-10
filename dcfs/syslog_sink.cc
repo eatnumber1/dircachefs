@@ -21,8 +21,7 @@ bool SyslogSink::Wants(absl::LogSeverityAtLeast threshold,
 
 void SyslogSink::Send(const absl::LogEntry &entry) {
   if (!Wants(threshold_, entry.log_severity())) return;
-  syscalls::syslog(SyslogPriority(entry.log_severity()),
-                   entry.text_message());
+  syscalls::syslog(SyslogPriority(entry.log_severity()), entry.text_message());
 }
 
 int SyslogPriority(absl::LogSeverity severity) {

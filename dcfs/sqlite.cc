@@ -138,16 +138,16 @@ Statement::~Statement() {
   sqlite3_finalize(stmt_);
 }
 
-absl::StatusOr<Statement> Statement::Prepare(
-    Connection &db, std::string_view sql, unsigned int flags) {
+absl::StatusOr<Statement> Statement::Prepare(Connection &db,
+                                             std::string_view sql,
+                                             unsigned int flags) {
   sqlite3_stmt *stmt = nullptr;
   const char *tail = nullptr;
   int rc = sqlite3_prepare_v3(
-      db.Get(), sql.data(), static_cast<int>(sql.size()), flags, &stmt,
-      &tail);
+      db.Get(), sql.data(), static_cast<int>(sql.size()), flags, &stmt, &tail);
   if (rc != SQLITE_OK) {
     return absl::StatusBuilder(db.LastErrorStatus())
-        << "while preparing SQL: " << sql;
+           << "while preparing SQL: " << sql;
   }
   RET_CHECK_NE(stmt, nullptr);
   if (tail != sql.data() + sql.size()) {
@@ -199,9 +199,8 @@ absl::Status Statement::Bind(int index, std::string_view value) {
   // never-dereferenced (length 0) pointer to bind an empty string instead.
   static constexpr char kEmpty = '\0';
   const char *ptr = value.empty() ? &kEmpty : value.data();
-  return StatusFromRc(
-      sqlite3_bind_text64(
-        stmt_, index, ptr, value.size(), SQLITE_TRANSIENT, SQLITE_UTF8));
+  return StatusFromRc(sqlite3_bind_text64(stmt_, index, ptr, value.size(),
+                                          SQLITE_TRANSIENT, SQLITE_UTF8));
 }
 
 absl::Status Statement::Bind(int index, std::span<const uint8_t> value) {
@@ -339,9 +338,8 @@ absl::Status Connection::Exec(std::string_view sql) {
 
 absl::Status Connection::ExecScript(std::string_view sql) {
   char *errmsg = nullptr;
-  int rc = sqlite3_exec(
-      db_, std::string(sql).c_str(), /*callback=*/nullptr, /*arg=*/nullptr,
-      &errmsg);
+  int rc = sqlite3_exec(db_, std::string(sql).c_str(), /*callback=*/nullptr,
+                        /*arg=*/nullptr, &errmsg);
   absl::Cleanup free_errmsg = [&errmsg] {
     if (errmsg != nullptr) sqlite3_free(errmsg);
   };
@@ -351,7 +349,7 @@ absl::Status Connection::ExecScript(std::string_view sql) {
   // LastErrorStatus() below) -- included too since it sometimes has more
   // context (e.g. which statement in the script failed).
   return absl::StatusBuilder(LastErrorStatus())
-      << "sqlite3_exec: " << (errmsg != nullptr ? errmsg : "(no message)");
+         << "sqlite3_exec: " << (errmsg != nullptr ? errmsg : "(no message)");
 }
 
 absl::StatusOr<Statement *> Connection::Prepared(std::string_view sql) {
@@ -425,9 +423,9 @@ absl::Status Connection::RunTransaction(
   --savepoint_depth_;
 
   if (body_status.ok()) {
-    absl::Status commit_status = Exec(
-        depth == 0 ? std::string("COMMIT")
-                   : absl::StrCat("RELEASE SAVEPOINT sp_", depth));
+    absl::Status commit_status =
+        Exec(depth == 0 ? std::string("COMMIT")
+                        : absl::StrCat("RELEASE SAVEPOINT sp_", depth));
     if (commit_status.ok()) return absl::OkStatus();
     // A failing COMMIT/RELEASE (e.g. SQLITE_BUSY racing a reader) leaves the
     // transaction/savepoint open; unwind it so this connection doesn't stay
@@ -452,8 +450,8 @@ absl::Status RollBack(Connection &db, int depth) {
 
 }  // namespace
 
-absl::Status Connection::UnwindFailedTransaction(
-    int depth, absl::Status status) {
+absl::Status Connection::UnwindFailedTransaction(int depth,
+                                                 absl::Status status) {
   if (absl::Status rolled_back = RollBack(*this, depth); !rolled_back.ok()) {
     LOG(WARNING) << "rolling back a failed transaction failed: " << rolled_back;
   }
@@ -523,9 +521,9 @@ absl::Status ApplyOpenPragmas(Connection &conn) {
 
 absl::StatusOr<Connection> ConnectionFactory::Open() const {
   ::sqlite3 *db = nullptr;
-  int rc = sqlite3_open_v2(
-      path.c_str(), &db, flags | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_EXRESCODE,
-      vfs_name.empty() ? nullptr : vfs_name.c_str());
+  int rc = sqlite3_open_v2(path.c_str(), &db,
+                           flags | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_EXRESCODE,
+                           vfs_name.empty() ? nullptr : vfs_name.c_str());
   if (db == nullptr) {
     // sqlite3_open_v2 failed before it could even allocate a handle (e.g.
     // OOM) -- there's no db handle left to pull a detailed errmsg from.

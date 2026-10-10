@@ -1,6 +1,5 @@
 #include "dcfs/backing_capture.h"
 
-
 #include <string>
 
 #include "gmock/gmock.h"
@@ -26,13 +25,13 @@ TEST(NativeMountCommandTest, TypeAndOptions) {
 }
 
 TEST(NativeMountCommandTest, SloppyAndVerboseArePassedThrough) {
-  EXPECT_THAT(NativeMountCommand({.source = "h:/e",
-                                  .native_type = "nfs",
-                                  .sloppy = true,
-                                  .verbose = true},
-                                 "/tmp/s"),
-              ElementsAre("mount", "-n", "-s", "-v", "-t", "nfs", "h:/e",
-                          "/tmp/s"));
+  EXPECT_THAT(
+      NativeMountCommand({.source = "h:/e",
+                          .native_type = "nfs",
+                          .sloppy = true,
+                          .verbose = true},
+                         "/tmp/s"),
+      ElementsAre("mount", "-n", "-s", "-v", "-t", "nfs", "h:/e", "/tmp/s"));
 }
 
 }  // namespace

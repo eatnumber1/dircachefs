@@ -50,10 +50,9 @@ struct IsScopedEnum<T, true>
 template <typename T>
 inline constexpr bool kIsScopedEnum = IsScopedEnum<T>::value;
 
-template <typename T,
-          typename = std::enable_if_t<
-              !std::is_same_v<std::decay_t<T>, std::nullptr_t> &&
-              !kIsScopedEnum<T>>>
+template <typename T, typename = std::enable_if_t<
+                          !std::is_same_v<std::decay_t<T>, std::nullptr_t> &&
+                          !kIsScopedEnum<T>>>
 const T &RetCheckStreamable(const T &value) {
   return value;
 }
@@ -85,13 +84,13 @@ RetCheckOperands(Lhs, Rhs) -> RetCheckOperands<Lhs, Rhs>;
 // caller).
 template <typename Lhs, typename Rhs>
 absl::StatusBuilder RetCheckFailOp(
-    std::string_view lhs_str, std::string_view op_str,
-    std::string_view rhs_str, const Lhs &lhs_value, const Rhs &rhs_value,
+    std::string_view lhs_str, std::string_view op_str, std::string_view rhs_str,
+    const Lhs &lhs_value, const Rhs &rhs_value,
     absl::SourceLocation loc = absl::SourceLocation::current()) {
   return InternalErrorBuilder(loc)
-      << "RET_CHECK failure: " << lhs_str << " " << op_str << " " << rhs_str
-      << " (" << RetCheckStreamable(lhs_value) << " vs "
-      << RetCheckStreamable(rhs_value) << ")";
+         << "RET_CHECK failure: " << lhs_str << " " << op_str << " " << rhs_str
+         << " (" << RetCheckStreamable(lhs_value) << " vs "
+         << RetCheckStreamable(rhs_value) << ")";
 }
 
 // Builds the kInternal StatusBuilder for a failed RET_CHECK_OK(status_expr),
@@ -100,7 +99,7 @@ inline absl::StatusBuilder RetCheckFailStatus(
     std::string_view expr_str, const absl::Status &status,
     absl::SourceLocation loc = absl::SourceLocation::current()) {
   return InternalErrorBuilder(loc)
-      << "RET_CHECK_OK failure: " << expr_str << " is not OK: " << status;
+         << "RET_CHECK_OK failure: " << expr_str << " is not OK: " << status;
 }
 
 }  // namespace internal
@@ -109,26 +108,26 @@ inline absl::StatusBuilder RetCheckFailStatus(
 // Suppresses "dangling else" warnings/ambiguity, following the same idiom
 // absl's status macros use.
 #define DCFS_RET_CHECK_ELSE_BLOCKER_ \
-  switch (0)                        \
-  case 0:                           \
+  switch (0)                         \
+  case 0:                            \
   default:  // NOLINT
 
-#define RET_CHECK(expr)                                                    \
-  DCFS_RET_CHECK_ELSE_BLOCKER_                                              \
-  if (ABSL_PREDICT_TRUE(expr)) {                                            \
-  } else /* NOLINT */                                                       \
+#define RET_CHECK(expr)          \
+  DCFS_RET_CHECK_ELSE_BLOCKER_   \
+  if (ABSL_PREDICT_TRUE(expr)) { \
+  } else /* NOLINT */            \
     return ::dcfs::internal::RetCheckFail(#expr)
 
-#define DCFS_RET_CHECK_OP_(unique, op, lhs, rhs)                            \
-  DCFS_RET_CHECK_ELSE_BLOCKER_                                               \
-  if (auto dcfs_rc_ops_##unique =                                          \
-          ::dcfs::internal::RetCheckOperands{(lhs), (rhs)};                \
-      ABSL_PREDICT_TRUE(dcfs_rc_ops_##unique.lhs_value                     \
-                             op dcfs_rc_ops_##unique.rhs_value)) {          \
-  } else /* NOLINT */                                                      \
-    return ::dcfs::internal::RetCheckFailOp(                              \
-        #lhs, #op, #rhs, dcfs_rc_ops_##unique.lhs_value,                   \
-        dcfs_rc_ops_##unique.rhs_value)
+#define DCFS_RET_CHECK_OP_(unique, op, lhs, rhs)                               \
+  DCFS_RET_CHECK_ELSE_BLOCKER_                                                 \
+  if (auto dcfs_rc_ops_##unique =                                              \
+          ::dcfs::internal::RetCheckOperands{(lhs), (rhs)};                    \
+      ABSL_PREDICT_TRUE(                                                       \
+          dcfs_rc_ops_##unique.lhs_value op dcfs_rc_ops_##unique.rhs_value)) { \
+  } else /* NOLINT */                                                          \
+    return ::dcfs::internal::RetCheckFailOp(#lhs, #op, #rhs,                   \
+                                            dcfs_rc_ops_##unique.lhs_value,    \
+                                            dcfs_rc_ops_##unique.rhs_value)
 
 #define RET_CHECK_EQ(lhs, rhs) DCFS_RET_CHECK_OP_(eq, ==, lhs, rhs)
 #define RET_CHECK_NE(lhs, rhs) DCFS_RET_CHECK_OP_(ne, !=, lhs, rhs)
@@ -137,12 +136,11 @@ inline absl::StatusBuilder RetCheckFailStatus(
 #define RET_CHECK_GE(lhs, rhs) DCFS_RET_CHECK_OP_(ge, >=, lhs, rhs)
 #define RET_CHECK_LE(lhs, rhs) DCFS_RET_CHECK_OP_(le, <=, lhs, rhs)
 
-#define RET_CHECK_OK(status_expr)                                          \
-  DCFS_RET_CHECK_ELSE_BLOCKER_                                              \
-  if (absl::Status dcfs_rc_status_ = (status_expr);                        \
-      ABSL_PREDICT_TRUE(dcfs_rc_status_.ok())) {                           \
-  } else /* NOLINT */                                                      \
-    return ::dcfs::internal::RetCheckFailStatus(                          \
-        #status_expr, dcfs_rc_status_)
+#define RET_CHECK_OK(status_expr)                   \
+  DCFS_RET_CHECK_ELSE_BLOCKER_                      \
+  if (absl::Status dcfs_rc_status_ = (status_expr); \
+      ABSL_PREDICT_TRUE(dcfs_rc_status_.ok())) {    \
+  } else /* NOLINT */                               \
+    return ::dcfs::internal::RetCheckFailStatus(#status_expr, dcfs_rc_status_)
 
 #endif  // DCFS_RET_CHECK_H_

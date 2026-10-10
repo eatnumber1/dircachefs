@@ -104,20 +104,20 @@ TEST(ProducedByDcfsTest, ProducedErrnoToStatusKeepsTheErrno) {
 
 // The builder is made on the line of the macro call, so its recorded source
 // location must be that line.
-#define EXPECT_HELPER(helper, expected_code)                              \
-  do {                                                                    \
-    absl::StatusBuilder builder = helper();                               \
-    EXPECT_EQ(builder.source_location().line(), __LINE__);                \
-    EXPECT_NE(std::string(builder.source_location().file_name())          \
-                  .find("status_test.cc"),                                \
-              std::string::npos);                                         \
-    absl::Status status = std::move(builder) << "went wrong: " << 42;     \
-    EXPECT_EQ(status.code(), expected_code);                              \
-    EXPECT_EQ(status.message(), "went wrong: 42");                        \
-    /* The Status itself records the call site, not only the builder. */  \
-    ASSERT_FALSE(status.GetSourceLocations().empty());                    \
-    EXPECT_EQ(status.GetSourceLocations().front().line(), __LINE__);      \
-    EXPECT_FALSE(status.GetPayload(kErrnoTypeUrl).has_value());           \
+#define EXPECT_HELPER(helper, expected_code)                             \
+  do {                                                                   \
+    absl::StatusBuilder builder = helper();                              \
+    EXPECT_EQ(builder.source_location().line(), __LINE__);               \
+    EXPECT_NE(std::string(builder.source_location().file_name())         \
+                  .find("status_test.cc"),                               \
+              std::string::npos);                                        \
+    absl::Status status = std::move(builder) << "went wrong: " << 42;    \
+    EXPECT_EQ(status.code(), expected_code);                             \
+    EXPECT_EQ(status.message(), "went wrong: 42");                       \
+    /* The Status itself records the call site, not only the builder. */ \
+    ASSERT_FALSE(status.GetSourceLocations().empty());                   \
+    EXPECT_EQ(status.GetSourceLocations().front().line(), __LINE__);     \
+    EXPECT_FALSE(status.GetPayload(kErrnoTypeUrl).has_value());          \
   } while (0)
 
 TEST(ErrorBuilderTest, EachHelperHasItsCodeMessageAndCallerLine) {
@@ -150,8 +150,8 @@ TEST(ErrnoPayloadTest, MissingPayloadIsNotFound) {
 
 TEST(ErrnoPayloadTest, SurvivesStatusBuilderAnnotation) {
   absl::Status original = ErrnoToStatus(ENOENT, "open");
-  absl::Status annotated =
-      absl::StatusBuilder(original) << " while doing something";
+  absl::Status annotated = absl::StatusBuilder(original)
+                           << " while doing something";
   EXPECT_THAT(GetErrnoFromStatus(annotated), IsOkAndHolds(ENOENT));
 }
 
@@ -179,7 +179,8 @@ TEST(StatusToErrnoTest, PrefersPayloadOverCodeTable) {
   EXPECT_EQ(StatusToErrno(with_payload), EACCES);
 
   // With the payload stripped, the same code falls back to the code table.
-  absl::Status code_only(with_payload.code(), std::string(with_payload.message()));
+  absl::Status code_only(with_payload.code(),
+                         std::string(with_payload.message()));
   EXPECT_EQ(StatusToErrno(code_only), EPERM);
 }
 

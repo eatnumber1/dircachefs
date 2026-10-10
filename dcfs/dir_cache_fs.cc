@@ -307,9 +307,8 @@ absl::Status DirCacheFS::Init(struct fuse_conn_info &conn) {
   // A kernel without passthrough is a missing capability with a fallback.
   LOG(LEVEL(passthrough ? absl::LogSeverity::kInfo
                         : absl::LogSeverity::kWarning))
-      << "FUSE kernel protocol " << conn.proto_major << "."
-      << conn.proto_minor << "; FUSE_CAP_PASSTHROUGH "
-      << (passthrough ? "granted" : "NOT granted")
+      << "FUSE kernel protocol " << conn.proto_major << "." << conn.proto_minor
+      << "; FUSE_CAP_PASSTHROUGH " << (passthrough ? "granted" : "NOT granted")
       << "; FUSE_CAP_POSIX_ACL and FUSE_CAP_DONT_MASK requested"
       << "; FUSE_CAP_ATOMIC_O_TRUNC, FUSE_CAP_OVER_IO_URING and "
          "FUSE_CAP_SPLICE_READ intentionally not requested";
@@ -376,8 +375,7 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
   return attr;
 }
 
-absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttrOrRemoved(
-    InodeId id) {
+absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttrOrRemoved(InodeId id) {
   auto it = removed_.find(id);
   if (it == removed_.end()) return RequireAttr(id);
   BackingCall("StatFd");
@@ -413,8 +411,8 @@ std::optional<FileDescriptor> DirCacheFS::HoldForRemoval(InodeId id) {
 
 absl::Status DirCacheFS::RetireRemoved(InodeId id,
                                        std::optional<FileDescriptor> held) {
-  RET_CHECK(!HasOpenFiles(id)) << "retiring inode " << id
-                               << " with an open file";
+  RET_CHECK(!HasOpenFiles(id))
+      << "retiring inode " << id << " with an open file";
   // An unnamed file that was never linked goes this way too.
   tmpfiles_.erase(id);
   // Its held descriptor would keep the unlinked file's space allocated
@@ -426,8 +424,7 @@ absl::Status DirCacheFS::RetireRemoved(InodeId id,
   // A row that was already gone (invalidated meanwhile) leaves nothing to
   // answer from.
   if (held.has_value() && row.ok() && lookups_.contains(id)) {
-    removed_.insert_or_assign(id,
-                              Removed{.row = *row, .fd = *std::move(held)});
+    removed_.insert_or_assign(id, Removed{.row = *row, .fd = *std::move(held)});
   }
   return absl::OkStatus();
 }
@@ -457,8 +454,7 @@ absl::Status DirCacheFS::RefuseStub(FuseRequest &req, InodeId id,
     LOG(ERROR) << "refusing " << op << " on or inside the boundary stub "
                << (stub.ok() ? EscapeBytes(stub->name) : "(gone)")
                << " (nodeid " << static_cast<uint64_t>(id) << ", in directory "
-               << (stub.ok() ? stub->parent : 0) << ") with "
-               << ErrnoName(err)
+               << (stub.ok() ? stub->parent : 0) << ") with " << ErrnoName(err)
                << ": a mount point or subvolume boundary, which one dcfs "
                   "does not cross (see README); logged once per stub";
   }
@@ -541,8 +537,9 @@ absl::StatusOr<fuse_entry_param> DirCacheFS::EntryAfterPhase2(
   return fallback;
 }
 
-absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
-    InodeId id, cache::CachedAttr attr, bool reply) {
+absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(InodeId id,
+                                                        cache::CachedAttr attr,
+                                                        bool reply) {
   // Model: a getattr's first step (GAFrom), served or refreshed. Every
   // caller read `attr` from the cache with no syscall since.
   events::Scope scope(*ctx_.events, ctx_, &ProtocolEvents::GetattrBegin,
@@ -558,13 +555,13 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::FreshAttr(
     if (std::optional<int> held = reply ? OpenFdOf(id) : std::nullopt;
         held.has_value() && !open_for_write_.contains(id) &&
         !removed_.contains(id)) {
-      struct statx stx {};
+      struct statx stx{};
       RETURN_IF_ERROR(backing::FillHeldAttrs(ctx_, id, *held, &stx));
       ASSIGN_OR_RETURN(attr, RequireAttr(id));
       return cache::WithStatx(attr, stx);
     }
     if (attr.valid) return attr;
-    struct statx stx {};
+    struct statx stx{};
     RETURN_IF_ERROR(RefreshAttrsOf(id, &stx));
     // The row itself (fuse_gen, identity) may have changed meanwhile, e.g.
     // an invalidation by the open's identity check: re-read it.
@@ -594,15 +591,15 @@ void DirCacheFS::EndWriting(InodeId id) {
 }
 
 void DirCacheFS::ResolveSideEffectXattrs(
-    InodeId id, std::span<const std::string_view> names,
-    std::optional<int> fd, std::string_view op) {
+    InodeId id, std::span<const std::string_view> names, std::optional<int> fd,
+    std::string_view op) {
   for (std::string_view name : names) {
     absl::Status status = backing::RefreshXattr(ctx_, id, name, fd).status();
     // NotFound: the row is gone (invalidated meanwhile); nothing to record.
     if (!status.ok() && !absl::IsNotFound(status)) {
       LOG(ERROR) << op << ": could not read xattr " << EscapeBytes(name)
-                 << " of inode " << id << " back, leaving it unknown: "
-                 << status;
+                 << " of inode " << id
+                 << " back, leaving it unknown: " << status;
     }
   }
 }
@@ -611,9 +608,8 @@ bool DirCacheFS::SyncDue(absl::Time now) const {
   // A mutation's row; or atime-only rows (step 23.8) once older than the
   // kernel's dirtytime expiry, by which it writes access times back anyway:
   // before that a syncfs would force the write-back lazytime defers.
-  return ctx_.dirty.any ||
-         (ctx_.dirty.atime &&
-          now - ctx_.dirty.atime_since >= ctx_.dirty.atime_expiry);
+  return ctx_.dirty.any || (ctx_.dirty.atime && now - ctx_.dirty.atime_since >=
+                                                    ctx_.dirty.atime_expiry);
 }
 
 void DirCacheFS::MaybeSyncBacking() {
@@ -723,20 +719,20 @@ absl::StatusOr<backing::NewChild> DirCacheFS::CreateChild(
   return child;
 }
 
-absl::Status DirCacheFS::Getattr(
-    FuseRequest &req, fuse_ino_t ino, fuse_file_info *fi) {
+absl::Status DirCacheFS::Getattr(FuseRequest &req, fuse_ino_t ino,
+                                 fuse_file_info *fi) {
   if (InodeId id = static_cast<InodeId>(ino); removed_.contains(id)) {
     ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttrOrRemoved(id));
     return req.ReplyAttr(attr.st, AttrTimeoutFor(id));
   }
   ASSIGN_OR_RETURN(fuse_entry_param entry, EntryFor(static_cast<InodeId>(ino)));
-  return req.ReplyAttr(
-      entry.attr, AttrTimeoutFor(static_cast<InodeId>(entry.ino)));
+  return req.ReplyAttr(entry.attr,
+                       AttrTimeoutFor(static_cast<InodeId>(entry.ino)));
 }
 
-absl::Status DirCacheFS::Setattr(
-    FuseRequest &req, fuse_ino_t ino, struct stat *attr, int to_set,
-    fuse_file_info *fi) {
+absl::Status DirCacheFS::Setattr(FuseRequest &req, fuse_ino_t ino,
+                                 struct stat *attr, int to_set,
+                                 fuse_file_info *fi) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "setattr");
   if (auto it = removed_.find(id); it != removed_.end()) {
@@ -783,8 +779,7 @@ absl::Status DirCacheFS::Setattr(
 
   // Phase 2: the syscall(s) themselves.
   ctx_.events->MutationSyscallStarting(ctx_);
-  absl::Status set_status =
-      backing::SetAttr(ctx_, caller, id, *attr, to_set);
+  absl::Status set_status = backing::SetAttr(ctx_, caller, id, *attr, to_set);
   // Model: AttrChangeSyscall.
   ctx_.events->MutationSyscall(ctx_, set_status);
   // Phase 3 is refreshes only, which run as ordinary fills.
@@ -795,7 +790,8 @@ absl::Status DirCacheFS::Setattr(
     // failure here must never shadow `set_status`, which is what actually
     // gets reported below.
     // (A side-effect xattr stays unknown, for its next reader.)
-    NoteBestEffort("refresh after a failed set", backing::RefreshAttrs(ctx_, id));
+    NoteBestEffort("refresh after a failed set",
+                   backing::RefreshAttrs(ctx_, id));
     return set_status;
   }
 
@@ -809,16 +805,16 @@ absl::Status DirCacheFS::Setattr(
   if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_ATIME_NOW)) {
     LogPhase3Failure("Setattr", cache::DropAtimeStamp(ctx_, id));
   }
-  struct statx stx {};
+  struct statx stx{};
   LogPhase3Failure("Setattr", backing::RefreshAttrs(ctx_, id, &stx));
   ResolveSideEffectXattrs(id, side_effects, OpenFdOf(id), "Setattr");
   ASSIGN_OR_RETURN(fuse_entry_param entry, EntryAfterPhase2(id, stx));
-  return req.ReplyAttr(
-      entry.attr, AttrTimeoutFor(static_cast<InodeId>(entry.ino)));
+  return req.ReplyAttr(entry.attr,
+                       AttrTimeoutFor(static_cast<InodeId>(entry.ino)));
 }
 
-absl::Status DirCacheFS::Lookup(
-    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name) {
+absl::Status DirCacheFS::Lookup(FuseRequest &req, fuse_ino_t parent_ino,
+                                std::string_view name) {
   InodeId parent = static_cast<InodeId>(parent_ino);
 
   if (name == ".") {
@@ -863,8 +859,8 @@ bool DropLookups(absl::flat_hash_map<InodeId, uint64_t> &lookups, InodeId id,
     // handed out `id` was not counted. A removed record for it may then
     // go too early (its last references get ESTALE), never too late.
     LOG(ERROR) << "FORGET of " << n << " lookups of nodeid " << id
-               << ", but only "
-               << (it == lookups.end() ? 0 : it->second) << " counted";
+               << ", but only " << (it == lookups.end() ? 0 : it->second)
+               << " counted";
     if (it != lookups.end()) lookups.erase(it);
     return true;
   }
@@ -904,8 +900,8 @@ void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
       // link).
       if (!absl::IsNotFound(cached.status())) {
         LOG(ERROR) << "could not read the cached attributes of written "
-                   << "inode " << id << " to reconcile them: "
-                   << cached.status();
+                   << "inode " << id
+                   << " to reconcile them: " << cached.status();
       }
       continue;
     }
@@ -919,8 +915,7 @@ void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
         fresh = *stx;
       } else {
         LOG(WARNING) << "could not re-read the attributes of written inode "
-                     << id << " through its held descriptor: "
-                     << stx.status();
+                     << id << " through its held descriptor: " << stx.status();
       }
     }
     // Its last link went behind dcfs's back since its last close (dcfs's
@@ -944,9 +939,8 @@ void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
         continue;
       }
     }
-    changed.push_back(Changed{.id = id,
-                              .held = std::move(held),
-                              .fresh = fresh.has_value()});
+    changed.push_back(
+        Changed{.id = id, .held = std::move(held), .fresh = fresh.has_value()});
   }
   if (changed.empty()) return;
   // Phase 1, as for a setattr: the attributes unknown and the inodes
@@ -963,8 +957,8 @@ void DirCacheFS::ReconcileWritten(std::span<const InodeId> ids) {
   if (!mutation.ok()) {
     LOG(ERROR) << "could not begin reconciling the attributes of "
                << changed.size() << " written inode(s) (the first "
-               << changed.front().id << "), leaving them as they are: "
-               << mutation.status();
+               << changed.front().id
+               << "), leaving them as they are: " << mutation.status();
     return;
   }
   mutation->End();
@@ -997,8 +991,8 @@ void DirCacheFS::Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup) {
   req.ReplyNone();
 }
 
-void DirCacheFS::ForgetMulti(
-    FuseRequest &req, std::span<const fuse_forget_data> forgets) {
+void DirCacheFS::ForgetMulti(FuseRequest &req,
+                             std::span<const fuse_forget_data> forgets) {
   // The batch's written files are reconciled together: one phase 1 for
   // all that need one (see ReconcileWritten).
   std::vector<InodeId> forgotten;
@@ -1038,8 +1032,7 @@ absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
   // caller racing a stale nodeid) before reading the backing filesystem.
   ASSIGN_OR_RETURN(cache::CachedAttr attr, RequireAttr(id));
   ASSIGN_OR_RETURN(attr, FreshAttr(id, attr));
-  RET_CHECK(S_ISLNK(attr.st.st_mode))
-      << "Readlink on non-symlink inode " << id;
+  RET_CHECK(S_ISLNK(attr.st.st_mode)) << "Readlink on non-symlink inode " << id;
 
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx_);
   ASSIGN_OR_RETURN(std::string real_target, backing::ReadSymlink(ctx_, id));
@@ -1047,9 +1040,8 @@ absl::Status DirCacheFS::Readlink(FuseRequest &req, fuse_ino_t ino) {
   return req.ReplyReadlink(real_target);
 }
 
-absl::Status DirCacheFS::Mknod(
-    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
-    mode_t mode, dev_t rdev) {
+absl::Status DirCacheFS::Mknod(FuseRequest &req, fuse_ino_t parent_ino,
+                               std::string_view name, mode_t mode, dev_t rdev) {
   InodeId parent = static_cast<InodeId>(parent_ino);
   if (cache::IsStub(parent)) return RefuseStub(req, parent, "mknod");
   ASSIGN_OR_RETURN(Credentials caller, req.Caller());
@@ -1063,9 +1055,8 @@ absl::Status DirCacheFS::Mknod(
   return ReplyEntry(req, entry);
 }
 
-absl::Status DirCacheFS::Mkdir(
-    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
-    mode_t mode) {
+absl::Status DirCacheFS::Mkdir(FuseRequest &req, fuse_ino_t parent_ino,
+                               std::string_view name, mode_t mode) {
   InodeId parent = static_cast<InodeId>(parent_ino);
   if (cache::IsStub(parent)) return RefuseStub(req, parent, "mkdir");
   ASSIGN_OR_RETURN(Credentials caller, req.Caller());
@@ -1087,20 +1078,20 @@ absl::Status DirCacheFS::Mkdir(
 // those names behind the kernel's back, so there is nothing left for dcfs
 // to invalidate in the kernel.
 
-absl::Status DirCacheFS::Unlink(
-    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name) {
+absl::Status DirCacheFS::Unlink(FuseRequest &req, fuse_ino_t parent_ino,
+                                std::string_view name) {
   return RemoveChild(req, static_cast<InodeId>(parent_ino), name,
                      /*is_dir=*/false);
 }
 
-absl::Status DirCacheFS::Rmdir(
-    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name) {
+absl::Status DirCacheFS::Rmdir(FuseRequest &req, fuse_ino_t parent_ino,
+                               std::string_view name) {
   return RemoveChild(req, static_cast<InodeId>(parent_ino), name,
                      /*is_dir=*/true);
 }
 
-absl::Status DirCacheFS::RemoveChild(
-    FuseRequest &req, InodeId parent, std::string_view name, bool is_dir) {
+absl::Status DirCacheFS::RemoveChild(FuseRequest &req, InodeId parent,
+                                     std::string_view name, bool is_dir) {
   if (cache::IsStub(parent)) {
     return RefuseStub(req, parent, is_dir ? "rmdir" : "unlink");
   }
@@ -1131,8 +1122,7 @@ absl::Status DirCacheFS::RemoveChild(
     ASSIGN_OR_RETURN(child, backing::LookupOrPopulate(ctx_, parent, name));
     // Model: UnlinkPhase1's ENOENT branch, if not found.
     ctx_.events->NameResolved(
-        ctx_, parent, name,
-        child.kind != cache::LookupResult::Kind::kNegative);
+        ctx_, parent, name, child.kind != cache::LookupResult::Kind::kNegative);
     if (child.kind == cache::LookupResult::Kind::kNegative) {
       return req.ReplyErrno(ENOENT);
     }
@@ -1168,8 +1158,8 @@ absl::Status DirCacheFS::RemoveChild(
   // error is returned as is, after a best-effort re-resolve (see
   // ReresolveAfterFailure).
   ctx_.events->MutationSyscallStarting(ctx_);
-  absl::Status unlinked = backing::UnlinkAt(ctx_, caller, parent, name,
-                                            is_dir ? AT_REMOVEDIR : 0);
+  absl::Status unlinked =
+      backing::UnlinkAt(ctx_, caller, parent, name, is_dir ? AT_REMOVEDIR : 0);
   // Model: UnlinkSyscall.
   ctx_.events->MutationSyscall(ctx_, unlinked);
   if (!unlinked.ok()) {
@@ -1201,9 +1191,8 @@ absl::Status DirCacheFS::RemoveChild(
   return req.ReplyErrno(0);
 }
 
-absl::Status DirCacheFS::Symlink(
-    FuseRequest &req, std::string_view link, fuse_ino_t parent_ino,
-    std::string_view name) {
+absl::Status DirCacheFS::Symlink(FuseRequest &req, std::string_view link,
+                                 fuse_ino_t parent_ino, std::string_view name) {
   InodeId parent = static_cast<InodeId>(parent_ino);
   if (cache::IsStub(parent)) return RefuseStub(req, parent, "symlink");
   ASSIGN_OR_RETURN(Credentials caller, req.Caller());
@@ -1217,9 +1206,9 @@ absl::Status DirCacheFS::Symlink(
   return ReplyEntry(req, entry);
 }
 
-absl::Status DirCacheFS::Rename(
-    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
-    fuse_ino_t newparent_ino, std::string_view newname, unsigned int flags) {
+absl::Status DirCacheFS::Rename(FuseRequest &req, fuse_ino_t parent_ino,
+                                std::string_view name, fuse_ino_t newparent_ino,
+                                std::string_view newname, unsigned int flags) {
   InodeId parent = static_cast<InodeId>(parent_ino);
   InodeId newparent = static_cast<InodeId>(newparent_ino);
   // RENAME_WHITEOUT (overlayfs's) and anything unknown are not supported.
@@ -1320,8 +1309,8 @@ absl::Status DirCacheFS::Rename(
   // for RENAME_NOREPLACE, ...) the error is returned unchanged, after a
   // best-effort re-resolve (see ReresolveAfterFailure).
   ctx_.events->MutationSyscallStarting(ctx_);
-  absl::Status renamed = backing::RenameAt(ctx_, caller, parent, name,
-                                           newparent, newname, flags);
+  absl::Status renamed =
+      backing::RenameAt(ctx_, caller, parent, name, newparent, newname, flags);
   // Model: RenameSyscall.
   ctx_.events->MutationSyscall(ctx_, renamed);
   if (!renamed.ok()) {
@@ -1366,10 +1355,11 @@ absl::Status DirCacheFS::Rename(
   return req.ReplyErrno(0);
 }
 
-void DirCacheFS::RefreshAfterRename(
-    InodeId parent, InodeId newparent, cache::LookupResult src,
-    cache::LookupResult dst, bool dst_exists, bool same_inode,
-    bool exchange, std::optional<FileDescriptor> held_dst) {
+void DirCacheFS::RefreshAfterRename(InodeId parent, InodeId newparent,
+                                    cache::LookupResult src,
+                                    cache::LookupResult dst, bool dst_exists,
+                                    bool same_inode, bool exchange,
+                                    std::optional<FileDescriptor> held_dst) {
   // These need syscalls: both parents' mtime (and nlink, when a directory
   // moved between them), and the ctime of every inode the rename touched.
   LogPhase3Failure("Rename", backing::RefreshAttrs(ctx_, parent));
@@ -1515,16 +1505,15 @@ absl::Status DirCacheFS::LinkRemoved(FuseRequest &req, InodeId src,
   entry.ino = static_cast<fuse_ino_t>(src);
   entry.generation = row.fuse_gen;
   entry.attr = relinked.ok() ? cache::WithStatx(row, *relinked).st : row.st;
-  entry.attr_timeout = relinked.ok()
-                           ? absl::ToDoubleSeconds(AttrTimeoutFor(src))
-                           : 0;
+  entry.attr_timeout =
+      relinked.ok() ? absl::ToDoubleSeconds(AttrTimeoutFor(src)) : 0;
   entry.entry_timeout = absl::ToDoubleSeconds(opts_.entry_timeout);
   return ReplyEntry(req, entry);
 }
 
-absl::Status DirCacheFS::Link(
-    FuseRequest &req, fuse_ino_t ino, fuse_ino_t newparent_ino,
-    std::string_view newname) {
+absl::Status DirCacheFS::Link(FuseRequest &req, fuse_ino_t ino,
+                              fuse_ino_t newparent_ino,
+                              std::string_view newname) {
   InodeId src = static_cast<InodeId>(ino);
   InodeId newparent = static_cast<InodeId>(newparent_ino);
   // A stub, or into one: across the boundary (the kernel links no
@@ -1576,8 +1565,8 @@ absl::Status DirCacheFS::Link(
   // (audit-races F7). An unnamed file (Tmpfile) has its first name now.
   tmpfiles_.erase(src);
   LogPhase3Failure(
-      "Link", backing::RecordNewLink(ctx_, mutation, src, newparent, newname)
-                  .status());
+      "Link",
+      backing::RecordNewLink(ctx_, mutation, src, newparent, newname).status());
   mutation.End();
   // Adding a dentry changed newparent's own mtime/ctime (and, on some
   // filesystems, its on-disk size); no fd on it is already open here (only
@@ -1629,8 +1618,8 @@ absl::StatusOr<DirCacheFS::BackingFile> DirCacheFS::MakeBackingFile(
       .fd = *std::move(fd), .backing_id = backing_id, .writable = writable};
 }
 
-absl::Status DirCacheFS::Open(
-    FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+absl::Status DirCacheFS::Open(FuseRequest &req, fuse_ino_t ino,
+                              fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "open");
   // The revalidation model's OpenF (formal/reval.tla): how the open ended,
@@ -1644,8 +1633,8 @@ absl::Status DirCacheFS::Open(
   return absl::OkStatus();
 }
 
-absl::Status DirCacheFS::OpenInode(
-    FuseRequest &req, InodeId id, fuse_file_info &fi) {
+absl::Status DirCacheFS::OpenInode(FuseRequest &req, InodeId id,
+                                   fuse_file_info &fi) {
   // RequireAttr(), not cache::GetAttr(): the kernel's generic open path
   // (do_file_open_root, fs/namei.c) automatically retries a failed open
   // once with LOOKUP_REVAL after -ESTALE, and that second FUSE OPEN hits
@@ -1741,8 +1730,8 @@ absl::Status DirCacheFS::OpenInode(
   } else if (writable && !shared_file.writable) {
     // Through /proc/self/fd of the shared fd: the same object, and the
     // backing filesystem's own open-time checks (may_open).
-    const int check_flags = (fi.flags & (O_ACCMODE | O_APPEND)) | O_CLOEXEC |
-                            O_NOCTTY | O_NONBLOCK;
+    const int check_flags =
+        (fi.flags & (O_ACCMODE | O_APPEND)) | O_CLOEXEC | O_NOCTTY | O_NONBLOCK;
     BackingCall("ReopenFd");
     absl::StatusOr<FileDescriptor> allowed =
         backing::ReopenFd(*shared_file.fd, check_flags);
@@ -1764,9 +1753,8 @@ absl::Status DirCacheFS::OpenInode(
     // appending one. (A file that is append-only allows only O_APPEND
     // descriptors: then every one appends, as the backing file would.)
     const bool appends = (fi.flags & O_APPEND) != 0;
-    if (!shared_file.writable &&
-        (!shared_file.write_fd.has_value() ||
-         (shared_file.write_fd_appends && !appends))) {
+    if (!shared_file.writable && (!shared_file.write_fd.has_value() ||
+                                  (shared_file.write_fd_appends && !appends))) {
       shared_file.write_fd = *std::move(allowed);
       shared_file.write_fd_appends = appends;
     }
@@ -1808,9 +1796,8 @@ absl::Status DirCacheFS::OpenInode(
   return req.ReplyOpen(fi);
 }
 
-absl::Status DirCacheFS::Read(
-    FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
-    fuse_file_info &fi) {
+absl::Status DirCacheFS::Read(FuseRequest &req, fuse_ino_t ino, size_t size,
+                              off_t off, fuse_file_info &fi) {
   // The fallback path: only reached when Open() did not get passthrough
   // for this inode (or, per fuse_passthrough_open()'s contract, in the
   // unlikely case the kernel sends READ anyway despite passthrough).
@@ -1825,9 +1812,9 @@ absl::Status DirCacheFS::Read(
   return req.ReplyBuf(buf);
 }
 
-absl::Status DirCacheFS::Write(
-    FuseRequest &req, fuse_ino_t ino, std::span<const char> buf, off_t off,
-    fuse_file_info &fi) {
+absl::Status DirCacheFS::Write(FuseRequest &req, fuse_ino_t ino,
+                               std::span<const char> buf, off_t off,
+                               fuse_file_info &fi) {
   // The fallback path: with passthrough granted, writes go straight from
   // the kernel to the shared backing fd and WRITE is never sent for this
   // inode; only reached when Open() did not get passthrough for it.
@@ -1923,8 +1910,8 @@ void DirCacheFS::StampAtime(InodeId id) {
   }
 }
 
-absl::Status DirCacheFS::Flush(
-    FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+absl::Status DirCacheFS::Flush(FuseRequest &req, fuse_ino_t ino,
+                               fuse_file_info &fi) {
   auto it = open_files_.find(fi.fh);
   RET_CHECK(it != open_files_.end()) << "Flush on unknown handle " << fi.fh;
   if (!it->second.writable) {
@@ -1956,8 +1943,8 @@ absl::Status DirCacheFS::Flush(
   return req.ReplyErrno(0);
 }
 
-absl::Status DirCacheFS::Release(
-    FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+absl::Status DirCacheFS::Release(FuseRequest &req, fuse_ino_t ino,
+                                 fuse_file_info &fi) {
   // The kernel ignores RELEASE errors, so nothing below may skip any of
   // this open's bookkeeping: the open-file entry is always dropped, the
   // refcounts always decremented, and on the last reference the
@@ -2012,7 +1999,7 @@ absl::Status DirCacheFS::Release(
   // not. After the last release no read can come (the kernel sends it once
   // nothing holds the file), so this record is the truth until the next
   // open.
-  struct statx released {};
+  struct statx released{};
   if (!writable) {
     RecordHeldAttrs(id, *backing_file.fd, "Release", &released);
   }
@@ -2038,15 +2025,14 @@ absl::Status DirCacheFS::Release(
     // The held fill just read it.
     delete_row = released.stx_nlink == 0;
   } else if (attr.ok() && !attr->valid) {
-    struct statx stx {};
+    struct statx stx{};
     absl::Status refreshed =
         backing::RefreshAttrsFromFd(ctx_, id, *backing_file.fd, &stx);
     if (refreshed.ok()) {
       delete_row = stx.stx_nlink == 0;
     } else {
       LOG(WARNING) << "Release: could not refresh the attributes of inode "
-                   << id << " from its open fd, keeping its row: "
-                   << refreshed;
+                   << id << " from its open fd, keeping its row: " << refreshed;
     }
   }
   if (!attr.ok() && !absl::IsNotFound(attr.status())) {
@@ -2077,9 +2063,9 @@ absl::Status DirCacheFS::Release(
   // none, and its FORGET is the phase 1 alone. One held since an earlier
   // close is the same object (it pins it) and stays: no reopen, and none
   // lost to EMFILE.
-  if (auto written = written_.find(id);
-      written != written_.end() && !delete_row &&
-      !written->second.has_value()) {
+  if (auto written = written_.find(id); written != written_.end() &&
+                                        !delete_row &&
+                                        !written->second.has_value()) {
     if (held_fds_ >= max_held_fds_) {
       // At cap 0 the constructor said so already.
       if (!held_cap_logged_ && max_held_fds_ > 0) {
@@ -2120,8 +2106,8 @@ absl::Status DirCacheFS::Release(
   return req.ReplyErrno(0);
 }
 
-absl::Status DirCacheFS::Fsync(
-    FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi) {
+absl::Status DirCacheFS::Fsync(FuseRequest &req, fuse_ino_t ino, int datasync,
+                               fuse_file_info &fi) {
   auto it = open_files_.find(fi.fh);
   RET_CHECK(it != open_files_.end()) << "Fsync on unknown handle " << fi.fh;
   InodeId id = it->second.ino;
@@ -2150,8 +2136,8 @@ absl::Status DirCacheFS::Fsync(
   return req.ReplyErrno(0);
 }
 
-absl::Status DirCacheFS::Opendir(
-    FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+absl::Status DirCacheFS::Opendir(FuseRequest &req, fuse_ino_t ino,
+                                 fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
   // Listing a stub is looking inside the boundary.
   if (cache::IsStub(id)) return RefuseStub(req, id, "opendir");
@@ -2178,9 +2164,7 @@ struct stat DotStat(const cache::CachedAttr &attr) {
 
 // The ListDir cursor a readdir offset resumes from: offsets 0 and 1 are
 // reserved for "." and ".."; real entries start at offset 2 (cursor 0).
-int64_t CursorFromOffset(off_t off) {
-  return off >= 2 ? off - 2 : 0;
-}
+int64_t CursorFromOffset(off_t off) { return off >= 2 ? off - 2 : 0; }
 
 // The buffer space a readdir entry named `name` would need, per
 // fuse_add_direntry(): passing a null buffer (and so bufsize 0, which is
@@ -2193,15 +2177,15 @@ int64_t CursorFromOffset(off_t off) {
 // the directory on every single readdir call, quadratic in directory size.
 size_t DirEntrySize(std::string_view name) {
   struct stat dummy = {};
-  return fuse_add_direntry(
-      nullptr, nullptr, 0, std::string(name).c_str(), &dummy, 0);
+  return fuse_add_direntry(nullptr, nullptr, 0, std::string(name).c_str(),
+                           &dummy, 0);
 }
 
 // As DirEntrySize, for a readdirplus entry via fuse_add_direntry_plus().
 size_t DirEntryPlusSize(std::string_view name) {
   fuse_entry_param dummy{};
-  return fuse_add_direntry_plus(
-      nullptr, nullptr, 0, std::string(name).c_str(), &dummy, 0);
+  return fuse_add_direntry_plus(nullptr, nullptr, 0, std::string(name).c_str(),
+                                &dummy, 0);
 }
 
 }  // namespace
@@ -2247,12 +2231,13 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
             // the cursor this entry's offset encodes.
             const size_t size = entry_size(name);
             if (used + size > budget) return false;
-            listed.push_back({.name = std::string(name),
-                              .child = child,
-                              .next_cursor = next_cursor,
-                              .attr = attr != nullptr
-                                          ? std::optional<cache::CachedAttr>(*attr)
-                                          : std::nullopt});
+            listed.push_back(
+                {.name = std::string(name),
+                 .child = child,
+                 .next_cursor = next_cursor,
+                 .attr = attr != nullptr
+                             ? std::optional<cache::CachedAttr>(*attr)
+                             : std::nullopt});
             used += size;
             return true;
           },
@@ -2269,9 +2254,8 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
       absl::StrCat("Directory ", dir, " kept changing while being listed"));
 }
 
-absl::Status DirCacheFS::Readdir(
-    FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
-    fuse_file_info &fi) {
+absl::Status DirCacheFS::Readdir(FuseRequest &req, fuse_ino_t ino, size_t size,
+                                 off_t off, fuse_file_info &fi) {
   InodeId dir = static_cast<InodeId>(ino);
   if (cache::IsStub(dir)) return RefuseStub(req, dir, "readdir");
   size_t used = 0;
@@ -2313,9 +2297,9 @@ absl::Status DirCacheFS::Readdir(
   return req.ReplyDirs(entries, size);
 }
 
-absl::Status DirCacheFS::Readdirplus(
-    FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
-    fuse_file_info &fi) {
+absl::Status DirCacheFS::Readdirplus(FuseRequest &req, fuse_ino_t ino,
+                                     size_t size, off_t off,
+                                     fuse_file_info &fi) {
   InodeId dir = static_cast<InodeId>(ino);
   if (cache::IsStub(dir)) return RefuseStub(req, dir, "readdirplus");
   size_t used = 0;
@@ -2365,13 +2349,13 @@ absl::Status DirCacheFS::Readdirplus(
   return absl::OkStatus();
 }
 
-absl::Status DirCacheFS::Releasedir(
-    FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi) {
+absl::Status DirCacheFS::Releasedir(FuseRequest &req, fuse_ino_t ino,
+                                    fuse_file_info &fi) {
   return req.ReplyErrno(0);
 }
 
-absl::Status DirCacheFS::Fsyncdir(
-    FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi) {
+absl::Status DirCacheFS::Fsyncdir(FuseRequest &req, fuse_ino_t ino,
+                                  int datasync, fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "fsyncdir");
   if (auto it = removed_.find(id); it != removed_.end()) {
@@ -2406,9 +2390,9 @@ absl::Status DirCacheFS::Statfs(FuseRequest &req, fuse_ino_t ino) {
   return req.ReplyStatfs(st);
 }
 
-absl::Status DirCacheFS::Setxattr(
-    FuseRequest &req, fuse_ino_t ino, std::string_view name,
-    std::string_view value, int flags) {
+absl::Status DirCacheFS::Setxattr(FuseRequest &req, fuse_ino_t ino,
+                                  std::string_view name, std::string_view value,
+                                  int flags) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "setxattr");
   if (auto it = removed_.find(id); it != removed_.end()) {
@@ -2461,8 +2445,8 @@ absl::Status DirCacheFS::Setxattr(
   // Also left unknown if another mutation of `id` overlapped this one.
   if (!stored->ok()) {
     LOG(ERROR) << "Setxattr: could not read xattr " << EscapeBytes(name)
-               << " of inode " << id << " back, leaving it unknown: "
-               << stored->status();
+               << " of inode " << id
+               << " back, leaving it unknown: " << stored->status();
   } else if (!mutation.Owns(id)) {
     VLOG(1) << "Setxattr: inode " << id << " changed concurrently, leaving "
             << EscapeBytes(name) << " unknown";
@@ -2476,8 +2460,8 @@ absl::Status DirCacheFS::Setxattr(
   return req.ReplyErrno(0);
 }
 
-absl::Status DirCacheFS::Getxattr(
-    FuseRequest &req, fuse_ino_t ino, std::string_view name, size_t size) {
+absl::Status DirCacheFS::Getxattr(FuseRequest &req, fuse_ino_t ino,
+                                  std::string_view name, size_t size) {
   InodeId id = static_cast<InodeId>(ino);
   // Establishes the row exists (ESTALE via RequireAttr() if not) before
   // treating a NotFound from cache::GetXattr() below as "no such xattr"
@@ -2516,8 +2500,8 @@ absl::Status DirCacheFS::Getxattr(
   return req.ReplyBuf(**value);
 }
 
-absl::Status DirCacheFS::Listxattr(
-    FuseRequest &req, fuse_ino_t ino, size_t size) {
+absl::Status DirCacheFS::Listxattr(FuseRequest &req, fuse_ino_t ino,
+                                   size_t size) {
   InodeId id = static_cast<InodeId>(ino);
   // See Getxattr(): establishes the row exists (ESTALE via RequireAttr()
   // if not) before relying on cache::ListXattrs()'s own NotFound, which
@@ -2556,8 +2540,8 @@ absl::Status DirCacheFS::Listxattr(
   return req.ReplyBuf(buf);
 }
 
-absl::Status DirCacheFS::Removexattr(
-    FuseRequest &req, fuse_ino_t ino, std::string_view name) {
+absl::Status DirCacheFS::Removexattr(FuseRequest &req, fuse_ino_t ino,
+                                     std::string_view name) {
   InodeId id = static_cast<InodeId>(ino);
   if (cache::IsStub(id)) return RefuseStub(req, id, "removexattr");
   if (auto it = removed_.find(id); it != removed_.end()) {
@@ -2621,9 +2605,9 @@ absl::Status DirCacheFS::Access(FuseRequest &req, fuse_ino_t ino, int mask) {
   return req.ReplyErrno(EACCES);
 }
 
-absl::Status DirCacheFS::Create(
-    FuseRequest &req, fuse_ino_t parent_ino, std::string_view name,
-    mode_t mode, fuse_file_info &fi) {
+absl::Status DirCacheFS::Create(FuseRequest &req, fuse_ino_t parent_ino,
+                                std::string_view name, mode_t mode,
+                                fuse_file_info &fi) {
   InodeId parent = static_cast<InodeId>(parent_ino);
   if (cache::IsStub(parent)) return RefuseStub(req, parent, "create");
 
@@ -2651,16 +2635,15 @@ absl::Status DirCacheFS::Create(
   // the gap emptied that set.
   bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
   ASSIGN_OR_RETURN(Credentials caller, req.Caller());
-  ASSIGN_OR_RETURN(
-      backing::NewChild child,
-      CreateChild(
-          parent, name,
-          [&](int parent_fd) -> absl::Status {
-            return backing::CreateAt(ctx_, caller, parent_fd, name, fi.flags,
-                                     mode)
-                .status();
-          },
-          writable));
+  ASSIGN_OR_RETURN(backing::NewChild child,
+                   CreateChild(
+                       parent, name,
+                       [&](int parent_fd) -> absl::Status {
+                         return backing::CreateAt(ctx_, caller, parent_fd, name,
+                                                  fi.flags, mode)
+                             .status();
+                       },
+                       writable));
   absl::StatusOr<BackingFile> made = MakeBackingFile(child.id, req);
   if (!made.ok()) return CreatedButNotCompleted(parent, name, made.status());
   BackingFile backing_file = *std::move(made);
@@ -2711,9 +2694,9 @@ absl::Status DirCacheFS::Create(
   return absl::OkStatus();
 }
 
-absl::Status DirCacheFS::Fallocate(
-    FuseRequest &req, fuse_ino_t ino, int mode, off_t offset, off_t length,
-    fuse_file_info &fi) {
+absl::Status DirCacheFS::Fallocate(FuseRequest &req, fuse_ino_t ino, int mode,
+                                   off_t offset, off_t length,
+                                   fuse_file_info &fi) {
   InodeId id = static_cast<InodeId>(ino);
   auto backing_it = backing_files_.find(id);
   RET_CHECK(backing_it != backing_files_.end())
@@ -2799,9 +2782,9 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
   // ranges of one file, ...); the kernel falls back to copying the data
   // itself for EOPNOTSUPP and EXDEV.
   BackingCall("CopyFileRangeFd");
-  absl::StatusOr<size_t> copied = backing::CopyFileRangeFd(
-      *in_backing->second.fd, off_in, out_fd, off_out, len,
-      static_cast<unsigned int>(flags));
+  absl::StatusOr<size_t> copied =
+      backing::CopyFileRangeFd(*in_backing->second.fd, off_in, out_fd, off_out,
+                               len, static_cast<unsigned int>(flags));
   if (mutation.has_value()) mutation->End();
   if (removed) {
     RETURN_IF_ERROR(copied.status());
@@ -2814,8 +2797,7 @@ absl::Status DirCacheFS::CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
   }
   // Phase 3: refreshes, as fills. Failures are logged, never replied.
   RecordWrittenAttrs(out, out_fd, "CopyFileRange");
-  ResolveSideEffectXattrs(out, kXattrsChangedByWrite, out_fd,
-                          "CopyFileRange");
+  ResolveSideEffectXattrs(out, kXattrsChangedByWrite, out_fd, "CopyFileRange");
   return req.ReplyWrite(*copied);
 }
 
@@ -2948,11 +2930,12 @@ absl::Status DirCacheFS::Tmpfile(FuseRequest &req, fuse_ino_t parent_ino,
   // brand new inode cannot have another): registered once, as Create's.
   ASSIGN_OR_RETURN(int backing_id, req.PassthroughOpen(*fd));
   const bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
-  backing_files_.emplace(child.id, BackingFile{.fd = std::move(fd),
-                                               .backing_id = backing_id,
-                                               .writable = true,
-                                               .writable_refs = writable ? 1 : 0,
-                                               .refs = 1});
+  backing_files_.emplace(child.id,
+                         BackingFile{.fd = std::move(fd),
+                                     .backing_id = backing_id,
+                                     .writable = true,
+                                     .writable_refs = writable ? 1 : 0,
+                                     .refs = 1});
   open_files_held_.insert(child.id);
   tmpfiles_.insert(child.id);
   auto undo = [&] {
@@ -3077,7 +3060,8 @@ std::optional<events::Bookkeeping::SharedFile> DirCacheFS::SharedFileOf(
 }
 
 void DirCacheFS::ForEachSharedFile(
-    absl::FunctionRef<void(events::Ino, const events::Bookkeeping::SharedFile &)>
+    absl::FunctionRef<void(events::Ino,
+                           const events::Bookkeeping::SharedFile &)>
         each) const {
   for (const auto &[id, file] : backing_files_) {
     each(id, events::Bookkeeping::SharedFile{

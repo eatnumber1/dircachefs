@@ -118,9 +118,8 @@ TEST(ForkDaemonTest, AFailureIsPrintedAndItsStatusReturned) {
 TEST(ForkDaemonTest, ADaemonThatDiesSilentlyIsReportedWithHow) {
   const WrapperRun run = RunWrapper([](StartupReporter &) {}, /*child_exit=*/7);
   EXPECT_EQ(run.exit_status, 32);
-  EXPECT_THAT(run.errors,
-              ElementsAre(AllOf(HasSubstr("before it was ready"),
-                                HasSubstr("exit status 7"))));
+  EXPECT_THAT(run.errors, ElementsAre(AllOf(HasSubstr("before it was ready"),
+                                            HasSubstr("exit status 7"))));
 }
 
 TEST(ForkDaemonTest, ADaemonThatCannotDetachReportsWhy) {

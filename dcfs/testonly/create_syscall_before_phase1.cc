@@ -17,15 +17,15 @@
 namespace dcfs::testonly {
 
 // The wrapped function (external linkage: the linker resolves this name).
-absl::StatusOr<cache::Mutation> RealBeginCreate(Context &ctx,
-                                                cache::InodeId parent,
-                                                std::string_view name)
-    asm("__real__ZN4dcfs5cache11BeginCreateERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEE");
+absl::StatusOr<cache::Mutation>
+RealBeginCreate(Context &ctx, cache::InodeId parent, std::string_view name) asm(
+    "__real__ZN4dcfs5cache11BeginCreateERNS_7ContextElNSt3__117basic_string_"
+    "viewIcNS3_11char_traitsIcEEEE");
 
-absl::StatusOr<cache::Mutation> WrapBeginCreate(Context &ctx,
-                                                cache::InodeId parent,
-                                                std::string_view name)
-    asm("__wrap__ZN4dcfs5cache11BeginCreateERNS_7ContextElNSt3__117basic_string_viewIcNS3_11char_traitsIcEEEE");
+absl::StatusOr<cache::Mutation>
+WrapBeginCreate(Context &ctx, cache::InodeId parent, std::string_view name) asm(
+    "__wrap__ZN4dcfs5cache11BeginCreateERNS_7ContextElNSt3__117basic_string_"
+    "viewIcNS3_11char_traitsIcEEEE");
 absl::StatusOr<cache::Mutation> WrapBeginCreate(Context &ctx,
                                                 cache::InodeId parent,
                                                 std::string_view name) {

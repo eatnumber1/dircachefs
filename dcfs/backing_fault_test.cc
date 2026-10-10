@@ -88,14 +88,12 @@ ssize_t __wrap_getxattr(const char *path, const char *name, void *value,
   // re-query that follows a real ERANGE must see the real, already-grown
   // size.
   if (!st.grown && value == nullptr && size == 0 && path != nullptr &&
-      st.getxattr_path == path && name != nullptr &&
-      st.getxattr_name == name) {
+      st.getxattr_path == path && name != nullptr && st.getxattr_name == name) {
     st.grown = true;
     EXPECT_THAT(dcfs::syscalls::setxattr(
                     path, name,
                     std::span<const uint8_t>(
-                        reinterpret_cast<const uint8_t *>(
-                            st.grow_value.data()),
+                        reinterpret_cast<const uint8_t *>(st.grow_value.data()),
                         st.grow_value.size()),
                     0),
                 ::absl_testing::IsOk())
@@ -111,13 +109,13 @@ ssize_t __wrap_listxattr(const char *path, char *list, size_t size) {
       st.listxattr_path == path) {
     st.grown = true;
     const std::string value = "v";
-    EXPECT_THAT(dcfs::syscalls::setxattr(
-                    path, st.grow_new_name,
-                    std::span<const uint8_t>(
-                        reinterpret_cast<const uint8_t *>(value.data()),
-                        value.size()),
-                    0),
-                ::absl_testing::IsOk())
+    EXPECT_THAT(
+        dcfs::syscalls::setxattr(
+            path, st.grow_new_name,
+            std::span<const uint8_t>(
+                reinterpret_cast<const uint8_t *>(value.data()), value.size()),
+            0),
+        ::absl_testing::IsOk())
         << "test setup: setxattr to grow the list failed";
   }
   return rc;
@@ -150,16 +148,12 @@ class BackingFaultTest : public ::testing::Test {
     const char *tmpdir = std::getenv("TEST_TMPDIR");
     ASSERT_NE(tmpdir, nullptr);
     ASSERT_OK_AND_ASSIGN(
-        tmpdir_fd_,
-        syscalls::openat(AT_FDCWD, tmpdir, O_PATH | O_DIRECTORY));
-    ASSERT_OK_AND_ASSIGN(
-        file_fd_, syscalls::openat(*tmpdir_fd_, "test_file",
-                                   O_CREAT | O_RDWR, 0600));
+        tmpdir_fd_, syscalls::openat(AT_FDCWD, tmpdir, O_PATH | O_DIRECTORY));
+    ASSERT_OK_AND_ASSIGN(file_fd_, syscalls::openat(*tmpdir_fd_, "test_file",
+                                                    O_CREAT | O_RDWR, 0600));
   }
 
-  void TearDown() override {
-    GetFaultState() = FaultState();
-  }
+  void TearDown() override { GetFaultState() = FaultState(); }
 
   std::string ProcPath() const {
     return "/proc/self/fd/" + std::to_string(*file_fd_);
@@ -187,8 +181,7 @@ class BackingFaultTest : public ::testing::Test {
 TEST_F(BackingFaultTest, XattrValueRetriesOnErangeFromReadNotQuery) {
   const std::string small_value = "x";
   const std::string grown_value(256, 'y');
-  if (absl::Status set = SetXattr("user.dcfs_erange", small_value);
-      !set.ok()) {
+  if (absl::Status set = SetXattr("user.dcfs_erange", small_value); !set.ok()) {
     GTEST_SKIP() << "user xattrs unsupported here: " << set;
   }
   FaultState &st = GetFaultState();

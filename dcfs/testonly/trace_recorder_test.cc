@@ -54,13 +54,13 @@ namespace {
 
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
+using cache::InodeId;
 using ::testing::AllOf;
 using ::testing::Contains;
 using ::testing::HasSubstr;
 using ::testing::IsEmpty;
-using ::testing::SizeIs;
 using ::testing::Not;
-using cache::InodeId;
+using ::testing::SizeIs;
 
 DeviceId Source() {
   DeviceId id;
@@ -69,7 +69,7 @@ DeviceId Source() {
 }
 
 struct statx Stx(uint64_t ino, mode_t mode) {
-  struct statx stx {};
+  struct statx stx{};
   stx.stx_mask = STATX_BASIC_STATS | STATX_BTIME;
   stx.stx_ino = ino;
   stx.stx_mode = mode;
@@ -81,25 +81,23 @@ struct statx Stx(uint64_t ino, mode_t mode) {
 class TraceRecorderTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ASSERT_OK_AND_ASSIGN(
-        db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
+    ASSERT_OK_AND_ASSIGN(db_,
+                         sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
     ASSERT_THAT(Migrate(db_, RootIdentity{.device_id = Source(),
                                           .fstype = 0xEF53,
                                           .backing_ino = 2}),
                 IsOk());
     const char *tmpdir = std::getenv("TEST_TMPDIR");
     ASSERT_NE(tmpdir, nullptr);
-    path_ = absl::StrCat(tmpdir, "/trace_", ::testing::UnitTest::GetInstance()
-                                                ->current_test_info()
-                                                ->name());
+    path_ = absl::StrCat(
+        tmpdir, "/trace_",
+        ::testing::UnitTest::GetInstance()->current_test_info()->name());
     ASSERT_OK_AND_ASSIGN(
-        fd_, syscalls::openat(AT_FDCWD, path_,
-                              O_WRONLY | O_CREAT | O_TRUNC, 0600));
+        fd_,
+        syscalls::openat(AT_FDCWD, path_, O_WRONLY | O_CREAT | O_TRUNC, 0600));
   }
 
-  void TearDown() override {
-    ctx_.events = &NoProtocolEvents();
-  }
+  void TearDown() override { ctx_.events = &NoProtocolEvents(); }
 
   // A row for a backing object, with a handle derived from `ino`.
   absl::StatusOr<InodeId> Make(uint64_t ino, mode_t mode) {
@@ -129,8 +127,8 @@ class TraceRecorderTest : public ::testing::Test {
   // `identities`, nodeids' identity traces.
   void StartTrace(bool files = false, bool lifetimes = false,
                   bool identities = false, bool directories = true) {
-    recorder_ = std::make_unique<TraceRecorder>(
-        *fd_, "test", files, lifetimes, identities, directories);
+    recorder_ = std::make_unique<TraceRecorder>(*fd_, "test", files, lifetimes,
+                                                identities, directories);
     ctx_.events = recorder_.get();
     recorder_->BeginAll(ctx_);
   }
@@ -299,8 +297,9 @@ TEST_F(TraceRecorderTest, ChildRowFilledAgainstTheGuardIsUnexplained) {
                               /*created=*/false);
   recorder_->PopulateCommitted(ctx_, cache::kRootInode, snapshot.seq,
                                /*recorded=*/false);
-  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
-                                       HasSubstr("since the fill's snapshot"))));
+  EXPECT_THAT(Lines(d),
+              Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                             HasSubstr("since the fill's snapshot"))));
 }
 
 // The guard check uses the recorder's own record of d's mutations since
@@ -328,8 +327,9 @@ TEST_F(TraceRecorderTest, ChildRowFilledWithALateSnapshotIsUnexplained) {
                               /*created=*/false);
   recorder_->PopulateCommitted(ctx_, cache::kRootInode, late.seq,
                                /*recorded=*/false);
-  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
-                                       HasSubstr("since the fill's snapshot"))));
+  EXPECT_THAT(Lines(d),
+              Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                             HasSubstr("since the fill's snapshot"))));
 }
 
 // A fill whose snapshot event the recorder never saw has nothing to be
@@ -375,8 +375,9 @@ TEST_F(TraceRecorderTest, ParentRowFilledIsCheckedFromParentLookupStarted) {
   }
   snapshot = cache::BeginFill(ctx_).seq;  // Late, as in the test above.
   recorder_->ParentRecorded(ctx_, e, d, snapshot, /*filled=*/true);
-  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
-                                       HasSubstr("since the fill's snapshot"))));
+  EXPECT_THAT(Lines(d),
+              Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                             HasSubstr("since the fill's snapshot"))));
 }
 
 // A mutation of the directory in flight at the fill (its phase 1 before the
@@ -393,8 +394,9 @@ TEST_F(TraceRecorderTest, ParentRowFilledOverAMutationInFlightIsUnexplained) {
   const uint64_t snapshot = cache::BeginFill(ctx_).seq;
   recorder_->ParentLookupStarted(ctx_, e);
   recorder_->ParentRecorded(ctx_, e, d, snapshot, /*filled=*/true);
-  EXPECT_THAT(Lines(d), Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
-                                       HasSubstr("since the fill's snapshot"))));
+  EXPECT_THAT(Lines(d),
+              Contains(AllOf(HasSubstr("\"ev\":\"unexplained\""),
+                             HasSubstr("since the fill's snapshot"))));
   ctx_.events->MutationSyscallStarting(ctx_);
   ctx_.events->MutationSyscall(ctx_, absl::OkStatus());
   mutation.End();
@@ -439,10 +441,9 @@ TEST_F(TraceRecorderTest, DirectoryNamedByAnUnresolvedRequestIsUnexplained) {
     events::RequestScope request(
         *ctx_.events, ctx_,
         {.op = events::Op::kRmdir, .ino = cache::kRootInode, .name = "x"});
-    ASSERT_OK_AND_ASSIGN(
-        cache::Mutation mutation,
-        cache::BeginRemove(ctx_, cache::kRootInode, "x", d,
-                           cache::BeginFill(ctx_)));
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginRemove(ctx_, cache::kRootInode, "x", d,
+                                            cache::BeginFill(ctx_)));
     request.Finish(absl::InternalError("stop here")).IgnoreError();
   }
   EXPECT_THAT(Lines(d), Contains(HasSubstr("\"ev\":\"unexplained\"")));
@@ -463,10 +464,9 @@ TEST_F(TraceRecorderTest, DirectoryNamedByTheRequestsResolveIsCut) {
       ctx_.events->LookupDecided(ctx_, cache::kRootInode, "d",
                                  events::LookupOutcome::kFound, d);
     }
-    ASSERT_OK_AND_ASSIGN(
-        cache::Mutation mutation,
-        cache::BeginRemove(ctx_, cache::kRootInode, "d", d,
-                           cache::BeginFill(ctx_)));
+    ASSERT_OK_AND_ASSIGN(cache::Mutation mutation,
+                         cache::BeginRemove(ctx_, cache::kRootInode, "d", d,
+                                            cache::BeginFill(ctx_)));
     request.Finish(absl::InternalError("stop here")).IgnoreError();
   }
   EXPECT_THAT(Lines(d), Contains(HasSubstr("dir-itself: ")));
@@ -525,8 +525,8 @@ events::SharedFd ReadWrite(int refs, int writable_refs) {
 // and nothing is unless the recorder was made with `files`.
 TEST_F(TraceRecorderTest, FileTraceBeginsAtAnOpenWithoutASharedFd) {
   StartTrace(/*files=*/false);
-  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false,
-                        absl::OkStatus(), ReadWrite(1, 1));
+  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false, absl::OkStatus(),
+                        ReadWrite(1, 1));
   EXPECT_THAT(FileLines(kFile), IsEmpty());
 
   StartTrace(/*files=*/true);
@@ -543,23 +543,21 @@ TEST_F(TraceRecorderTest, FileTraceBeginsAtAnOpenWithoutASharedFd) {
   const std::vector<std::string> lines = FileLines(kOther);
   ASSERT_EQ(lines.size(), 4u);
   EXPECT_THAT(lines[0], HasSubstr("\"ev\":\"begin\""));
-  EXPECT_THAT(lines[1],
-              AllOf(HasSubstr("\"ev\":\"open\",\"mode\":\"wa\""),
-                    HasSubstr("\"shared\":false,\"errno\":0"),
-                    HasSubstr("{\"sfd\":\"rw\",\"wfd\":\"none\","
-                              "\"refs\":1,\"wrefs\":1}")));
+  EXPECT_THAT(lines[1], AllOf(HasSubstr("\"ev\":\"open\",\"mode\":\"wa\""),
+                              HasSubstr("\"shared\":false,\"errno\":0"),
+                              HasSubstr("{\"sfd\":\"rw\",\"wfd\":\"none\","
+                                        "\"refs\":1,\"wrefs\":1}")));
   EXPECT_THAT(lines[2], HasSubstr("\"ev\":\"oob\""));
-  EXPECT_THAT(lines[3],
-              AllOf(HasSubstr("\"ev\":\"release\",\"writable\":true"),
-                    HasSubstr("\"sfd\":\"none\"")));
+  EXPECT_THAT(lines[3], AllOf(HasSubstr("\"ev\":\"release\",\"writable\":true"),
+                              HasSubstr("\"sfd\":\"none\"")));
 }
 
 // An open refused for the backing file's flags (EPERM) is the model's; any
 // other failure is not, and ends the file's trace.
 TEST_F(TraceRecorderTest, FileOpenFailingOtherwiseThanEpermIsCut) {
   StartTrace(/*files=*/true);
-  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false,
-                        absl::OkStatus(), ReadWrite(1, 1));
+  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false, absl::OkStatus(),
+                        ReadWrite(1, 1));
   recorder_->FileOpened(ctx_, kFile, O_WRONLY, /*shared=*/true,
                         ErrnoToStatus(EPERM, "immutable"), ReadWrite(1, 1));
   EXPECT_THAT(FileLines(kFile),
@@ -580,33 +578,28 @@ TEST_F(TraceRecorderTest, FileOpenFailingOtherwiseThanEpermIsCut) {
 // model's; another error ends the trace).
 TEST_F(TraceRecorderTest, FileRequestsBecomeLinesOfItsTrace) {
   StartTrace(/*files=*/true);
-  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false,
-                        absl::OkStatus(), ReadWrite(1, 1));
+  recorder_->FileOpened(ctx_, kFile, O_RDWR, /*shared=*/false, absl::OkStatus(),
+                        ReadWrite(1, 1));
   FileRequest({.op = events::Op::kIoctl,
                .ino = kFile,
                .flags = FS_IOC_SETFLAGS,
                .ioctl_arg = FS_IMMUTABLE_FL},
               absl::OkStatus());
-  FileRequest({.op = events::Op::kIoctl,
-               .ino = kFile,
-               .flags = FS_IOC_FSSETXATTR},
-              ErrnoToStatus(EPERM, "x"));
-  FileRequest({.op = events::Op::kIoctl,
-               .ino = kFile,
-               .flags = FS_IOC_GETFLAGS},
-              absl::OkStatus());
-  FileRequest({.op = events::Op::kIoctl,
-               .ino = kFile,
-               .flags = FS_IOC_GETVERSION},
-              absl::OkStatus());
-  FileRequest({.op = events::Op::kSetattr,
-               .ino = kFile,
-               .flags = FUSE_SET_ATTR_SIZE},
-              absl::OkStatus());
-  FileRequest({.op = events::Op::kSetattr,
-               .ino = kFile,
-               .flags = FUSE_SET_ATTR_UID},
-              ErrnoToStatus(EPERM, "x"));
+  FileRequest(
+      {.op = events::Op::kIoctl, .ino = kFile, .flags = FS_IOC_FSSETXATTR},
+      ErrnoToStatus(EPERM, "x"));
+  FileRequest(
+      {.op = events::Op::kIoctl, .ino = kFile, .flags = FS_IOC_GETFLAGS},
+      absl::OkStatus());
+  FileRequest(
+      {.op = events::Op::kIoctl, .ino = kFile, .flags = FS_IOC_GETVERSION},
+      absl::OkStatus());
+  FileRequest(
+      {.op = events::Op::kSetattr, .ino = kFile, .flags = FUSE_SET_ATTR_SIZE},
+      absl::OkStatus());
+  FileRequest(
+      {.op = events::Op::kSetattr, .ino = kFile, .flags = FUSE_SET_ATTR_UID},
+      ErrnoToStatus(EPERM, "x"));
   FileRequest({.op = events::Op::kFallocate, .ino = kFile},
               ErrnoToStatus(EBADF, "x"));
   FileRequest({.op = events::Op::kWrite, .ino = kFile}, absl::OkStatus());
@@ -664,9 +657,9 @@ TEST_F(TraceRecorderTest, InterruptedRequestsReplyEintr) {
     const size_t at = line.find("\"ev\":\"");
     evs.push_back(line.substr(at + 6, line.find('"', at + 6) - at - 6));
   }
-  EXPECT_THAT(evs, ::testing::ElementsAre("begin", "lookup", "interrupt",
-                                          "reply", "phase1", "interrupt",
-                                          "reply"));
+  EXPECT_THAT(evs,
+              ::testing::ElementsAre("begin", "lookup", "interrupt", "reply",
+                                     "phase1", "interrupt", "reply"));
   // The mkdir's interrupt line is written after its End: no mutation in
   // flight.
   EXPECT_THAT(lines[5], HasSubstr("\"inflight\":0"));
@@ -704,21 +697,21 @@ TEST_F(TraceRecorderTest, ReplyLineCarriesTheErrnoSent) {
       events::Scope lookup(*ctx_.events, ctx_, &ProtocolEvents::LookupBegin,
                            &ProtocolEvents::LookupEnd, d,
                            std::string_view("x"));
-      ctx_.events->LookupDecided(ctx_, d, "x",
-                                 events::LookupOutcome::kNegative, 0);
+      ctx_.events->LookupDecided(ctx_, d, "x", events::LookupOutcome::kNegative,
+                                 0);
       ctx_.events->LookupAnswered(ctx_, d, "x",
                                   events::LookupOutcome::kNegative, 0);
     }
     ctx_.events->NameResolved(ctx_, d, "x", false);
     ctx_.events->Replied(ctx_, ENOENT);
   }
-  EXPECT_THAT(Lines(d), Contains(HasSubstr(
-                            "\"ev\":\"reply\",\"p\":\"p1\",\"errno\":2")));
+  EXPECT_THAT(Lines(d),
+              Contains(HasSubstr("\"ev\":\"reply\",\"p\":\"p1\",\"errno\":2")));
   // A handler that returns OK without replying (~FuseRequest then sends
   // ECOMM, which no model request replies): unexplained, not a reply.
   {
-    events::RequestScope request(
-        *ctx_.events, ctx_, {.op = events::Op::kGetattr, .ino = d});
+    events::RequestScope request(*ctx_.events, ctx_,
+                                 {.op = events::Op::kGetattr, .ino = d});
     events::Scope getattr(*ctx_.events, ctx_, &ProtocolEvents::GetattrBegin,
                           &ProtocolEvents::GetattrEnd, d, true);
     ctx_.events->Replied(ctx_, events::kNotReplied);
@@ -815,14 +808,12 @@ TEST_F(TraceRecorderTest, RecoveryDoneIsALineOfEveryDirectory) {
 // --- Nodeids' lifetime traces (formal/lifetime.tla) ----------------------
 
 // What DirCacheFS reports it keeps for a nodeid after a step.
-events::Lifetime Kept(uint64_t lookups, int refs = 0,
-                      events::Lifetime::Written written =
-                          events::Lifetime::Written::kNo,
-                      bool removed = false) {
-  return {.lookups = lookups,
-          .removed = removed,
-          .written = written,
-          .refs = refs};
+events::Lifetime Kept(
+    uint64_t lookups, int refs = 0,
+    events::Lifetime::Written written = events::Lifetime::Written::kNo,
+    bool removed = false) {
+  return {
+      .lookups = lookups, .removed = removed, .written = written, .refs = refs};
 }
 
 void Step(TraceRecorder &recorder, Context &ctx, InodeId id,
@@ -856,25 +847,21 @@ TEST_F(TraceRecorderTest, LifetimeTraceBeginsAtTheFirstCountedLookup) {
   Step(*recorder_, ctx_, g, events::LifetimeStep::kForgot, 1, Kept(0));
   const std::vector<std::string> lines = LifeLines(g);
   ASSERT_EQ(lines.size(), 5u);
-  EXPECT_THAT(lines[0],
-              AllOf(HasSubstr("\"ev\":\"begin\""),
-                    HasSubstr("\"st\":{\"lk\":0,\"rec\":false,"
-                              "\"wr\":\"no\",\"refs\":0,\"row\":true,"
-                              "\"nl0\":false}")));
-  EXPECT_THAT(lines[1],
-              AllOf(HasSubstr("\"ev\":\"lookup\",\"via\":\"lookup\""),
-                    HasSubstr("\"st\":{\"lk\":1,\"rec\":false,"
-                              "\"wr\":\"no\",\"refs\":0,\"row\":true,"
-                              "\"nl0\":false}")));
+  EXPECT_THAT(lines[0], AllOf(HasSubstr("\"ev\":\"begin\""),
+                              HasSubstr("\"st\":{\"lk\":0,\"rec\":false,"
+                                        "\"wr\":\"no\",\"refs\":0,\"row\":true,"
+                                        "\"nl0\":false}")));
+  EXPECT_THAT(lines[1], AllOf(HasSubstr("\"ev\":\"lookup\",\"via\":\"lookup\""),
+                              HasSubstr("\"st\":{\"lk\":1,\"rec\":false,"
+                                        "\"wr\":\"no\",\"refs\":0,\"row\":true,"
+                                        "\"nl0\":false}")));
   EXPECT_THAT(lines[2], AllOf(HasSubstr("\"ev\":\"open\",\"w\":true"),
                               HasSubstr("\"wr\":\"nofd\",\"refs\":1")));
-  EXPECT_THAT(lines[3],
-              AllOf(HasSubstr("\"ev\":\"release\",\"w\":true"),
-                    HasSubstr("\"wr\":\"held\",\"refs\":0")));
-  EXPECT_THAT(lines[4],
-              AllOf(HasSubstr("\"ev\":\"forget\",\"n\":1,"
-                              "\"batch\":false"),
-                    HasSubstr("\"lk\":0,")));
+  EXPECT_THAT(lines[3], AllOf(HasSubstr("\"ev\":\"release\",\"w\":true"),
+                              HasSubstr("\"wr\":\"held\",\"refs\":0")));
+  EXPECT_THAT(lines[4], AllOf(HasSubstr("\"ev\":\"forget\",\"n\":1,"
+                                        "\"batch\":false"),
+                              HasSubstr("\"lk\":0,")));
 }
 
 // A CREATE or TMPFILE begins its nodeid's trace before the row it made
@@ -902,14 +889,14 @@ TEST_F(TraceRecorderTest, LifetimeLookupSaysWhichRequestHandedItOut) {
   ASSERT_OK_AND_ASSIGN(InodeId f, Make(63, S_IFREG | 0644));
   StartTrace(/*files=*/false, /*lifetimes=*/true);
   {
-    events::RequestScope scope(*ctx_.events, ctx_,
-                               {.op = events::Op::kLookup, .ino = f,
-                                .name = "."});
+    events::RequestScope scope(
+        *ctx_.events, ctx_, {.op = events::Op::kLookup, .ino = f, .name = "."});
     Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(1));
   }
   {
     events::RequestScope scope(*ctx_.events, ctx_,
-                               {.op = events::Op::kLinkTmpfile, .ino = f,
+                               {.op = events::Op::kLinkTmpfile,
+                                .ino = f,
                                 .newparent = cache::kRootInode,
                                 .newname = "n"});
     Step(*recorder_, ctx_, f, events::LifetimeStep::kLookup, 0, Kept(2));
@@ -949,10 +936,9 @@ TEST_F(TraceRecorderTest, LifetimeRemovalBatchDestroyAndRestartLines) {
   ASSERT_EQ(lines.size(), 9u);
   EXPECT_THAT(lines[8], AllOf(HasSubstr("\"ev\":\"probe\",\"gone\":true"),
                               HasSubstr("\"lk\":0,")));
-  EXPECT_THAT(lines[3],
-              AllOf(HasSubstr("\"ev\":\"removed\",\"held\":true"),
-                    HasSubstr("\"lk\":2,\"rec\":true,"),
-                    HasSubstr("\"row\":false,")));
+  EXPECT_THAT(lines[3], AllOf(HasSubstr("\"ev\":\"removed\",\"held\":true"),
+                              HasSubstr("\"lk\":2,\"rec\":true,"),
+                              HasSubstr("\"row\":false,")));
   EXPECT_THAT(lines[4], HasSubstr("\"ev\":\"forget\",\"n\":1,"
                                   "\"batch\":true"));
   EXPECT_THAT(lines[5], AllOf(HasSubstr("\"ev\":\"destroy\""),
@@ -1009,26 +995,40 @@ TEST_F(TraceRecorderTest, IdentityTraceRecordsResolutionsAndRowsGoing) {
   recorder_->IdentityResolved(
       ctx_, f,
       {.outcome = events::IdentityCheck::Outcome::kServed,
-       .row_ino = 71, .row_gen = 0, .row_btime_sec = 1071,
-       .row_btime_nsec = 7, .found_ino = 71, .found_gen = 0,
-       .found_btime_known = true, .found_btime_sec = 1071,
+       .row_ino = 71,
+       .row_gen = 0,
+       .row_btime_sec = 1071,
+       .row_btime_nsec = 7,
+       .found_ino = 71,
+       .found_gen = 0,
+       .found_btime_known = true,
+       .found_btime_sec = 1071,
        .found_btime_nsec = 7});
   recorder_->IdentityResolved(
       ctx_, f,
       {.outcome = events::IdentityCheck::Outcome::kMismatch,
-       .row_ino = 71, .row_gen = 5, .row_btime_sec = 1071,
-       .row_btime_nsec = 7, .found_ino = 71, .found_gen = 6,
-       .found_btime_known = true, .found_btime_sec = 1071,
+       .row_ino = 71,
+       .row_gen = 5,
+       .row_btime_sec = 1071,
+       .row_btime_nsec = 7,
+       .found_ino = 71,
+       .found_gen = 6,
+       .found_btime_known = true,
+       .found_btime_sec = 1071,
        .found_btime_nsec = 8});
   recorder_->IdentityResolved(
       ctx_, f,
       {.outcome = events::IdentityCheck::Outcome::kMismatch,
-       .row_ino = 71, .row_gen = 5, .row_btime_sec = 1071,
-       .row_btime_nsec = 7, .found_ino = 72, .found_gen = 0,
+       .row_ino = 71,
+       .row_gen = 5,
+       .row_btime_sec = 1071,
+       .row_btime_nsec = 7,
+       .found_ino = 72,
+       .found_gen = 0,
        .found_btime_known = false});
   recorder_->IdentityResolved(
-      ctx_, f, {.outcome = events::IdentityCheck::Outcome::kStaleHandle,
-                .row_ino = 71});
+      ctx_, f,
+      {.outcome = events::IdentityCheck::Outcome::kStaleHandle, .row_ino = 71});
   ASSERT_THAT(cache::DeleteInode(ctx_, f), IsOk());
   recorder_->Destroyed(ctx_);
   ASSERT_THAT(SetCleanShutdown(db_, false), IsOk());
@@ -1036,16 +1036,13 @@ TEST_F(TraceRecorderTest, IdentityTraceRecordsResolutionsAndRowsGoing) {
   recorder_->RunStarted(ctx_);
   const std::vector<std::string> lines = IdentLines(f);
   ASSERT_EQ(lines.size(), 10u);
-  EXPECT_THAT(lines[2],
-              HasSubstr("\"ev\":\"resolve\",\"outcome\":\"served\","
-                        "\"ino\":\"same\",\"gen\":\"unknown\","
-                        "\"bt\":\"same\",\"st\":{\"row\":true}"));
-  EXPECT_THAT(lines[3],
-              HasSubstr("\"outcome\":\"mismatch\",\"ino\":\"same\","
-                        "\"gen\":\"other\",\"bt\":\"other\""));
-  EXPECT_THAT(lines[4],
-              HasSubstr("\"outcome\":\"mismatch\",\"ino\":\"other\","
-                        "\"gen\":\"unknown\",\"bt\":\"unknown\""));
+  EXPECT_THAT(lines[2], HasSubstr("\"ev\":\"resolve\",\"outcome\":\"served\","
+                                  "\"ino\":\"same\",\"gen\":\"unknown\","
+                                  "\"bt\":\"same\",\"st\":{\"row\":true}"));
+  EXPECT_THAT(lines[3], HasSubstr("\"outcome\":\"mismatch\",\"ino\":\"same\","
+                                  "\"gen\":\"other\",\"bt\":\"other\""));
+  EXPECT_THAT(lines[4], HasSubstr("\"outcome\":\"mismatch\",\"ino\":\"other\","
+                                  "\"gen\":\"unknown\",\"bt\":\"unknown\""));
   EXPECT_THAT(lines[5], HasSubstr("\"outcome\":\"stale_handle\","));
   EXPECT_THAT(lines[6], AllOf(HasSubstr("\"ev\":\"gone\""),
                               HasSubstr("\"st\":{\"row\":false}")));

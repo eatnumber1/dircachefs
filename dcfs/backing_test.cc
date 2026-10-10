@@ -56,20 +56,19 @@
 namespace dcfs::backing {
 namespace {
 
-
 using ::absl_testing::IsOk;
 using ::absl_testing::IsOkAndHolds;
 using ::absl_testing::StatusIs;
-using ::testing::_;
-using ::testing::AnyNumber;
-using ::testing::Contains;
-using ::testing::HasSubstr;
-using ::testing::ElementsAre;
-using ::testing::Not;
-using ::testing::Optional;
 using cache::InodeId;
 using cache::kRootInode;
 using cache::LookupResult;
+using ::testing::_;
+using ::testing::AnyNumber;
+using ::testing::Contains;
+using ::testing::ElementsAre;
+using ::testing::HasSubstr;
+using ::testing::Not;
+using ::testing::Optional;
 
 MATCHER_P(IsLookup, kind, "") { return arg.kind == kind; }
 
@@ -95,8 +94,8 @@ absl::Status SetUserXattr(const std::string &path, std::string_view name,
                           std::string_view value) {
   return syscalls::setxattr(
       path, name,
-      std::span<const uint8_t>(
-          reinterpret_cast<const uint8_t *>(value.data()), value.size()),
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(value.data()),
+                               value.size()),
       0);
 }
 
@@ -121,16 +120,16 @@ class BackingTest : public ::testing::Test {
     ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("dir"), 0755), IsOk());
     WriteFile(Path("dir/inner"), "inner");
     ASSERT_THAT(syscalls::symlinkat("file", AT_FDCWD, Path("link")), IsOk());
-    ASSERT_THAT(
-        syscalls::mknodat(AT_FDCWD, Path("fifo"), S_IFIFO | 0644, 0), IsOk());
+    ASSERT_THAT(syscalls::mknodat(AT_FDCWD, Path("fifo"), S_IFIFO | 0644, 0),
+                IsOk());
     WriteFile(Path("hl1"), "linked");
     ASSERT_THAT(
         syscalls::linkat(AT_FDCWD, Path("hl1"), AT_FDCWD, Path("hl2"), 0),
         IsOk());
     xattrs_supported_ = SetUserXattr(Path("file"), "user.test", "value").ok();
 
-    ASSERT_OK_AND_ASSIGN(
-        db_, sqlite3::ConnectionFactory{.path = DbPath()}.Open());
+    ASSERT_OK_AND_ASSIGN(db_,
+                         sqlite3::ConnectionFactory{.path = DbPath()}.Open());
     // A real (non-O_PATH) fd: InitRoot registers it as the source
     // filesystem's mount fd, and open_by_handle_at's mount fd argument
     // rejects O_PATH (fs/fhandle.c get_path_from_fd()).
@@ -230,7 +229,8 @@ TEST_F(BackingTest, PopulatedDirectoryIsServedFromTheCache) {
   const std::vector<std::string> names = {"dir", "fifo", "file",
                                           "hl1", "hl2",  "link"};
   std::vector<struct statx> expected;
-  for (const std::string &name : names) expected.push_back(StatPath(Path(name)));
+  for (const std::string &name : names)
+    expected.push_back(StatPath(Path(name)));
 
   // Lock() (chmod 0) no longer proves the backing filesystem is
   // unreachable: dcfs always runs as root now, and root's CAP_DAC_OVERRIDE
@@ -261,7 +261,8 @@ TEST_F(BackingTest, PopulatedDirectoryIsServedFromTheCache) {
       EXPECT_EQ(attr.btime.tv_nsec, stx.stx_btime.tv_nsec);
     }
     EXPECT_EQ(attr.device, *GetDeviceId(source_fd_));
-    EXPECT_THAT(cache::ListXattrs(ctx_, id), IsOkAndHolds(Optional(testing::_)));
+    EXPECT_THAT(cache::ListXattrs(ctx_, id),
+                IsOkAndHolds(Optional(testing::_)));
   }
 
   ASSERT_OK_AND_ASSIGN(InodeId hl1, Id("hl1"));
@@ -445,9 +446,8 @@ TEST_F(BackingTest, BackingReadsByInode) {
 }
 
 TEST_F(BackingTest, ReadGeneration) {
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor file,
-      syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor file,
+                       syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
   ASSERT_OK_AND_ASSIGN(
       FileDescriptor link,
       syscalls::openat(AT_FDCWD, Path("link"), O_PATH | O_NOFOLLOW));
@@ -494,7 +494,7 @@ absl::StatusOr<FakeMount> AddFakeMount(Context &ctx, std::string_view name) {
   const DeviceId device = OtherDevice();
   RETURN_IF_ERROR(
       cache::AddFilesystem(ctx, device, 0x1234, kRootInode, std::string(name)));
-  struct statx stx {};
+  struct statx stx{};
   stx.stx_mode = S_IFDIR | 0755;
   stx.stx_ino = 2;
   FileHandle handle{.device = device, .handle_type = 1, .bytes = {1, 2, 3}};
@@ -518,8 +518,7 @@ void ExpectFakeMountPurged(Context &ctx, MountFds &mounts,
                            const FakeMount &mount, std::string_view name) {
   EXPECT_THAT(cache::GetFilesystem(ctx, OtherDevice()),
               StatusIs(absl::StatusCode::kNotFound));
-  EXPECT_THAT(mounts.Get(OtherDevice()),
-              StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(mounts.Get(OtherDevice()), StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(cache::GetAttr(ctx, mount.root),
               StatusIs(absl::StatusCode::kNotFound));
   EXPECT_THAT(cache::GetAttr(ctx, mount.child),
@@ -535,9 +534,8 @@ void ExpectFakeMountPurged(Context &ctx, MountFds &mounts,
 }
 
 TEST_F(BackingTest, ReopenFdReopensAnOPathDescriptorForReal) {
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor path,
-      syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor path,
+                       syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
 
   ASSERT_OK_AND_ASSIGN(FileDescriptor reopened, ReopenFd(*path, O_RDWR));
   ASSERT_OK_AND_ASSIGN(struct stat original, syscalls::fstat(*path));
@@ -549,26 +547,25 @@ TEST_F(BackingTest, ReopenFdReopensAnOPathDescriptorForReal) {
   // What the reopening is for: xattr calls reject O_PATH descriptors.
   if (!xattrs_supported_) GTEST_SKIP() << "no user xattrs here";
   const std::string value = "test";
-  EXPECT_THAT(syscalls::fsetxattr(
-                  *reopened, "user.dcfs_reopen",
-                  std::span<const uint8_t>(
-                      reinterpret_cast<const uint8_t *>(value.data()),
-                      value.size()),
-                  0),
-              IsOk());
+  EXPECT_THAT(
+      syscalls::fsetxattr(
+          *reopened, "user.dcfs_reopen",
+          std::span<const uint8_t>(
+              reinterpret_cast<const uint8_t *>(value.data()), value.size()),
+          0),
+      IsOk());
 }
 
 // ReadXattrsFd goes through /proc/self/fd, so an O_PATH descriptor on a
 // symlink reads the symlink's own xattrs, not its target's.
 TEST_F(BackingTest, ReadXattrsFdReadsTheObjectNotTheSymlinkTarget) {
   if (!xattrs_supported_) GTEST_SKIP() << "no user xattrs here";
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor file,
-      syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor file,
+                       syscalls::openat(AT_FDCWD, Path("file"), O_PATH));
   ASSERT_OK_AND_ASSIGN(auto file_xattrs, ReadXattrsFd(*file));
-  EXPECT_THAT(file_xattrs, ::testing::Contains(
-                               std::make_pair(std::string("user.test"),
-                                              std::string("value"))));
+  EXPECT_THAT(file_xattrs,
+              ::testing::Contains(std::make_pair(std::string("user.test"),
+                                                 std::string("value"))));
 
   ASSERT_OK_AND_ASSIGN(
       FileDescriptor link,
@@ -606,17 +603,15 @@ TEST_F(BackingTest, StartupPurgeForgetsAFilesystemWhoseMountPointIsGone) {
   ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("mnt"), 0755), IsOk());
   ASSERT_THAT(PopulateDirectory(ctx_, kRootInode), IsOk());
   ASSERT_OK_AND_ASSIGN(FakeMount mount, AddFakeMount(ctx_, "mnt"));
-  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("mnt"), AT_REMOVEDIR),
-              IsOk());
+  ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("mnt"), AT_REMOVEDIR), IsOk());
 
   ASSERT_THAT(StartupPurge(ctx_), IsOk());
   ExpectFakeMountPurged(ctx_, mounts_, mount, "mnt");
 }
 
 TEST_F(BackingTest, InitRootRejectsACacheForAnotherFilesystem) {
-  ASSERT_OK_AND_ASSIGN(
-      sqlite3::Connection other_db,
-      sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
+  ASSERT_OK_AND_ASSIGN(sqlite3::Connection other_db,
+                       sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
   ASSERT_THAT(Migrate(other_db, RootIdentity{.device_id = OtherDevice(),
                                              .fstype = 0x1234,
                                              .backing_ino = 2,
@@ -663,9 +658,8 @@ TEST_F(BackingTest, RefreshAttrsFromFdMarksValid) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   ASSERT_THAT(cache::MarkAttrsUnknown(ctx_, file), IsOk());
   WriteFile(Path("file"), "longer contents");
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor owned,
-      syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor owned,
+                       syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
   const int fd = *owned;
 
   ASSERT_THAT(RefreshAttrsFromFd(ctx_, file, fd), IsOk());
@@ -678,9 +672,8 @@ TEST_F(BackingTest, AttrsOfAFileOpenForWriteStayUnknown) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
   absl::flat_hash_set<int64_t> open_for_write = {file};
   ctx_.open_for_write = &open_for_write;
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor owned,
-      syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor owned,
+                       syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
   const int fd = *owned;
   WriteFile(Path("file"), "longer contents");
 
@@ -710,9 +703,8 @@ TEST_F(BackingTest, AttrsOfAFileOpenForWriteStayUnknown) {
 // leave nlink 0 cached as current.
 TEST_F(BackingTest, AttrsWithNoLinksLeftStayUnknown) {
   ASSERT_OK_AND_ASSIGN(InodeId file, Id("file"));
-  ASSERT_OK_AND_ASSIGN(
-      FileDescriptor owned,
-      syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
+  ASSERT_OK_AND_ASSIGN(FileDescriptor owned,
+                       syscalls::openat(AT_FDCWD, Path("file"), O_RDONLY));
   const int fd = *owned;
   ASSERT_THAT(syscalls::unlinkat(AT_FDCWD, Path("file"), 0), IsOk());
 
@@ -739,8 +731,8 @@ class OutOfBandLog {
   explicit OutOfBandLog(int times)
       : log_(absl::MockLogDefault::kIgnoreUnexpected) {
     EXPECT_CALL(log_, Log(_, _, _)).Times(AnyNumber());
-    EXPECT_CALL(log_, Log(absl::LogSeverity::kWarning, _,
-                          HasSubstr("out-of-band")))
+    EXPECT_CALL(log_,
+                Log(absl::LogSeverity::kWarning, _, HasSubstr("out-of-band")))
         .Times(times);
     log_.StartCapturingLogs();
   }
@@ -852,9 +844,9 @@ TEST_F(BackingTest, RepopulationDetectsAnOutOfBandChangeOnce) {
     ASSERT_THAT(OpenNode(ctx_, file, O_RDONLY), IsOk());
   }
   EXPECT_THAT(cache::GetAttr(ctx_, file),
-              IsOkAndHolds(testing::Field(&cache::CachedAttr::st,
-                                          testing::Field(&stat::st_mode,
-                                                         S_IFREG | 0600))));
+              IsOkAndHolds(testing::Field(
+                  &cache::CachedAttr::st,
+                  testing::Field(&stat::st_mode, S_IFREG | 0600))));
 }
 
 TEST_F(BackingTest, UnchangedNodesReportNothing) {
@@ -887,8 +879,9 @@ TEST_F(BackingTest, SyncBackingClearsTheDirtySetExceptOpenWriters) {
   ASSERT_THAT(cache::BeginAttrChange(ctx_, file), IsOk());
   ASSERT_THAT(cache::BeginCreate(ctx_, kRootInode, "new"), IsOk());
   ASSERT_THAT(cache::BeginAttrChange(ctx_, hl1), IsOk());
-  ASSERT_THAT(cache::ListDirty(ctx_),
-              IsOkAndHolds(testing::UnorderedElementsAre(file, kRootInode, hl1)));
+  ASSERT_THAT(
+      cache::ListDirty(ctx_),
+      IsOkAndHolds(testing::UnorderedElementsAre(file, kRootInode, hl1)));
 
   // hl1 still has a writable open: the kernel may keep writing to it after
   // the sync, so it stays dirty.
@@ -928,21 +921,21 @@ TEST_F(BackingTest, SyncPointKeepsAMutationInFlightDirty) {
   EXPECT_TRUE(ctx_.dirty.any);
 
   // Phase 2 and phase 3.
-  absl::StatusOr<FileDescriptor> parent = OpenNode(
-      ctx_, kRootInode, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  absl::StatusOr<FileDescriptor> parent =
+      OpenNode(ctx_, kRootInode, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   ASSERT_THAT(parent, IsOk());
   const Credentials root{.uid = 0, .gid = 0, .groups = {}};
   ASSERT_THAT(MkdirAt(ctx_, root, **parent, "new", 0755), IsOk());
-  ASSERT_OK_AND_ASSIGN(NewChild child, RecordNewChild(ctx_, mutation,
-                                                      kRootInode, **parent,
-                                                      "new"));
+  ASSERT_OK_AND_ASSIGN(
+      NewChild child,
+      RecordNewChild(ctx_, mutation, kRootInode, **parent, "new"));
   mutation.End();
   EXPECT_THAT(cache::Lookup(ctx_, kRootInode, "new"),
               IsOkAndHolds(IsLookup(LookupResult::Kind::kFound)));
   // Still dirty, the new child too: no syncfs since the mkdir.
-  EXPECT_THAT(cache::ListDirty(ctx_),
-              IsOkAndHolds(testing::UnorderedElementsAre(kRootInode,
-                                                         child.id)));
+  EXPECT_THAT(
+      cache::ListDirty(ctx_),
+      IsOkAndHolds(testing::UnorderedElementsAre(kRootInode, child.id)));
 
   // The next sync point covers the mkdir: now both may go.
   ASSERT_THAT(SyncBacking(ctx_), IsOk());
@@ -984,7 +977,7 @@ TEST_F(BackingTest, StartRunRecoversTheDirtySetAfterAnUncleanShutdown) {
     EXPECT_CALL(log, Log(_, _, _)).Times(AnyNumber());
     EXPECT_CALL(log, Log(absl::LogSeverity::kWarning, _,
                          testing::AllOf(HasSubstr("recovered 2 dirty"),
-                               HasSubstr("machine rebooted"))));
+                                        HasSubstr("machine rebooted"))));
     log.StartCapturingLogs();
     ASSERT_THAT(StartRun(ctx_, "boot-2"), IsOk());
   }
@@ -1020,11 +1013,11 @@ TEST_F(BackingTest, TheLifecycleIsLoggedAtInfo) {
   EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, _,
                        HasSubstr("recovery: the last run ended")))
       .Times(1);
-  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, _,
-                       HasSubstr("sync point: cleared ")))
+  EXPECT_CALL(
+      log, Log(absl::LogSeverity::kInfo, _, HasSubstr("sync point: cleared ")))
       .Times(1);
-  EXPECT_CALL(log, Log(absl::LogSeverity::kInfo, _,
-                       HasSubstr("shutdown: clean")))
+  EXPECT_CALL(log,
+              Log(absl::LogSeverity::kInfo, _, HasSubstr("shutdown: clean")))
       .Times(1);
   log.StartCapturingLogs();
   ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
@@ -1077,9 +1070,8 @@ class FileDbBackingTest : public BackingTest {
 // says why), and the next start recovers with nothing dirty to re-read.
 TEST_F(FileDbBackingTest, FinishRunWithAReaderOpenFailsAtOnceAndEndsUnclean) {
   ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
-  ASSERT_OK_AND_ASSIGN(
-      sqlite3::Connection reader,
-      sqlite3::ConnectionFactory{.path = DbPath()}.Open());
+  ASSERT_OK_AND_ASSIGN(sqlite3::Connection reader,
+                       sqlite3::ConnectionFactory{.path = DbPath()}.Open());
   ASSERT_THAT(reader.Exec("BEGIN"), IsOk());
   ASSERT_THAT(reader.Exec("SELECT count(*) FROM sqlite_master"), IsOk());
 
@@ -1112,9 +1104,8 @@ class BoundaryTest : public BackingTest {
   void SetUp() override {
     BackingTest::SetUp();
     ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("boundary"), 0755), IsOk());
-    ASSERT_THAT(
-        syscalls::mount("tmpfs", Path("boundary"), "tmpfs", 0, nullptr),
-        IsOk());
+    ASSERT_THAT(syscalls::mount("tmpfs", Path("boundary"), "tmpfs", 0, nullptr),
+                IsOk());
     mounted_ = true;
   }
 
@@ -1133,10 +1124,11 @@ class BoundaryTest : public BackingTest {
 // pattern).
 class RefusalLog {
  public:
-  explicit RefusalLog(int times) : log_(absl::MockLogDefault::kIgnoreUnexpected) {
+  explicit RefusalLog(int times)
+      : log_(absl::MockLogDefault::kIgnoreUnexpected) {
     EXPECT_CALL(log_, Log(_, _, _)).Times(AnyNumber());
-    EXPECT_CALL(log_, Log(absl::LogSeverity::kError, _,
-                          HasSubstr("refusing to cache")))
+    EXPECT_CALL(
+        log_, Log(absl::LogSeverity::kError, _, HasSubstr("refusing to cache")))
         .Times(times);
     log_.StartCapturingLogs();
   }
@@ -1207,8 +1199,8 @@ TEST_F(BoundaryTest, BoundaryRefusalPersistsAcrossRestart) {
   // readable from the cache alone -- never from process memory, since a
   // dentry cached negative in a complete directory would otherwise report
   // ENOENT for something that still exists on the backing filesystem.
-  ASSERT_OK_AND_ASSIGN(LookupResult before, cache::Lookup(ctx_, kRootInode,
-                                                         "boundary"));
+  ASSERT_OK_AND_ASSIGN(LookupResult before,
+                       cache::Lookup(ctx_, kRootInode, "boundary"));
   Context restarted{.db = db_, .mounts = mounts_, .rng = bitgen_};
   absl::StatusOr<LookupResult> after =
       LookupOrPopulate(restarted, kRootInode, "boundary");
@@ -1278,7 +1270,6 @@ TEST_F(BackingTest, ParentOfAnUnknownDentryIsResolvedFromTheBacking) {
   EXPECT_THAT(ParentOf(ctx_, sub), IsOkAndHolds(parent));
 }
 
-
 // --- Taking on the caller's identity (step 4.7) ------------------------------
 
 // A parent directory for the credential tests: `mode`, owned by root and
@@ -1325,9 +1316,9 @@ TEST_F(BackingTest, CallerGetsNoFilesystemCapabilities) {
   FileDescriptor parent = MakeParent(Path("rootonly"), 0755, 0);
   const Credentials alice{.uid = 1000, .gid = 1000, .groups = {}};
   EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, alice, *parent, "d", 0755)), EACCES);
-  EXPECT_EQ(ErrnoOf(CreateAt(ctx_, alice, *parent, "f", O_WRONLY, 0644)
-                        .status()),
-            EACCES);
+  EXPECT_EQ(
+      ErrnoOf(CreateAt(ctx_, alice, *parent, "f", O_WRONLY, 0644).status()),
+      EACCES);
   ExpectRootAgain(groups);
   // ... and root is root again: the same mkdir now succeeds.
   const Credentials root{.uid = 0, .gid = 0, .groups = {}};
@@ -1396,8 +1387,7 @@ TEST_F(BackingTest, UnlinkAndRenameHonorTheStickyBit) {
   EXPECT_EQ(ErrnoOf(UnlinkAt(ctx_, alice, dir, "bf", 0)), EPERM);
   EXPECT_THAT(calls.names, Contains("unlinkat"))
       << "a refused unlink still announces its syscall";
-  EXPECT_EQ(ErrnoOf(RenameAt(ctx_, alice, dir, "bf", dir, "stolen", 0)),
-            EPERM);
+  EXPECT_EQ(ErrnoOf(RenameAt(ctx_, alice, dir, "bf", dir, "stolen", 0)), EPERM);
   EXPECT_THAT(calls.names, Contains("renameat2"));
   EXPECT_THAT(RenameAt(ctx_, bob, dir, "bf", dir, "bf2", 0), IsOk());
   calls.names.clear();

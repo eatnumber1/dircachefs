@@ -41,9 +41,9 @@ bool IsMounted(const std::string &mnt) {
   return false;
 }
 
-bool DcfsProcess::Start(
-    const std::string &dcfs, const std::string &src, const std::string &db,
-    const std::string &mnt, const std::vector<std::string> &flags) {
+bool DcfsProcess::Start(const std::string &dcfs, const std::string &src,
+                        const std::string &db, const std::string &mnt,
+                        const std::vector<std::string> &flags) {
   mnt_ = mnt;
   // dcfs dispatches on argv[0] (phase 15): it runs as mount.dcfs, in the
   // foreground, with each flag as a dcfs.<flag> mount option.

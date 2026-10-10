@@ -1,6 +1,6 @@
-// Step 15.6b: the lock the daemon holds for umount.fuse.dcfs to wait on. Waiting
-// for a real daemon, and what the helper does around a real unmount, are
-// test/qemu/guest/mount_dcfs.sh and the systemd guest: they take a mount.
+// Step 15.6b: the lock the daemon holds for umount.fuse.dcfs to wait on.
+// Waiting for a real daemon, and what the helper does around a real unmount,
+// are test/qemu/guest/mount_dcfs.sh and the systemd guest: they take a mount.
 #include "dcfs/umount_helper.h"
 
 #include <fcntl.h>
@@ -65,8 +65,7 @@ TEST(HoldDaemonLockTest, AMountThatIsNotThereIsAnInternalError) {
 TEST(HoldDaemonLockTest, ADirectoryThatCannotBeMadeOrUsedIsAnError) {
   // No parent for the one level it makes.
   EXPECT_THAT(HoldDaemonLock(Info(93), "/m", LockDir("no/such/parent/dir")),
-              StatusIs(absl::StatusCode::kNotFound,
-                       HasSubstr("creating")));
+              StatusIs(absl::StatusCode::kNotFound, HasSubstr("creating")));
   // A file where the directory should be: the lock file cannot be opened in it.
   const std::string file = LockDir("hold_is_a_file");
   absl::StatusOr<FileDescriptor> made =
@@ -82,9 +81,9 @@ TEST(RemoveDaemonLockFileTest, ARemovalThatFailsOnlyWarns) {
   RemoveDaemonLockFile({.path = "/proc"});
 }
 
-// A child that holds the lock of device 0:`minor` in `dir`, says so on `to_parent`,
-// waits for a byte on `from_parent`, then (`unlink_it`) removes the file as a
-// daemon does, and exits.
+// A child that holds the lock of device 0:`minor` in `dir`, says so on
+// `to_parent`, waits for a byte on `from_parent`, then (`unlink_it`) removes
+// the file as a daemon does, and exits.
 pid_t ForkHolder(const std::string &dir, int minor, bool unlink_it,
                  int to_parent, int from_parent) {
   absl::StatusOr<pid_t> child = syscalls::fork();
@@ -135,8 +134,8 @@ void ExpectWaitsForTheHolder(int minor, bool holder_unlinks) {
   auto &[holder_parent, holder_child] = *holder_pipe;
   auto &[waiter_parent, waiter_child] = *waiter_pipe;
   // The holder holds the lock before the waiter starts.
-  const pid_t holder = ForkHolder(dir, minor, holder_unlinks, *holder_child,
-                                  *holder_child);
+  const pid_t holder =
+      ForkHolder(dir, minor, holder_unlinks, *holder_child, *holder_child);
   ASSERT_GT(holder, 0);
   char byte = 0;
   ASSERT_THAT(syscalls::read(*holder_parent, &byte, 1), IsOk());
@@ -148,9 +147,8 @@ void ExpectWaitsForTheHolder(int minor, bool holder_unlinks) {
     absl::AddLogSink(&sink);
     absl::StatusOr<DaemonLock> lock = HoldDaemonLock(Info(minor), "/m", dir);
     // The file it holds is the one at the path, whatever the holder did.
-    char answer = lock.ok() && syscalls::fstatat(AT_FDCWD, lock->path).ok()
-                      ? 'k'
-                      : 'e';
+    char answer =
+        lock.ok() && syscalls::fstatat(AT_FDCWD, lock->path).ok() ? 'k' : 'e';
     (void)syscalls::write(*waiter_child, &answer, 1);
     syscalls::_exit(0);
   }

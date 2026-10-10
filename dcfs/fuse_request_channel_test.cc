@@ -21,15 +21,16 @@
 
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
-#include <cerrno>
-#include <cstring>
 #include <fcntl.h>
-#include <optional>
-#include <string>
-#include <vector>
 #include <sys/stat.h>
 #include <sys/uio.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <optional>
+#include <string>
+#include <vector>
 
 #include "absl/log/log_sink.h"
 #include "absl/log/log_sink_registry.h"
@@ -106,8 +107,7 @@ ssize_t FakeWritev(int, struct iovec *iov, int count, void *userdata) {
 // `dcfs::ErrnoToStatus(-fuse_reply_X(...), ...)` pattern this commit
 // covers.
 void FakeGetattr(fuse_req_t req, fuse_ino_t, struct fuse_file_info *) {
-  auto *channel =
-      static_cast<FakeChannel *>(fuse_req_userdata(req));
+  auto *channel = static_cast<FakeChannel *>(fuse_req_userdata(req));
   FuseRequest fr(req);
   if (channel->read_caller) channel->caller = fr.Caller();
   if (channel->reply_attr_then_fail) {
@@ -257,9 +257,9 @@ TEST(FuseRequestChannelTest, CallerHasTheGroupsOfTheRequestsPid) {
   // The guest's root, on the main thread, whose /proc entry
   // (/proc/<pid>/task/<pid>) is the one libfuse reads.
   std::vector<gid_t> before(64);
-  ASSERT_OK_AND_ASSIGN(int n,
-                       syscalls::getgroups(static_cast<int>(before.size()),
-                                           before.data()));
+  ASSERT_OK_AND_ASSIGN(
+      int n,
+      syscalls::getgroups(static_cast<int>(before.size()), before.data()));
   before.resize(static_cast<size_t>(n));
   const gid_t mine[] = {4242, 4343};
   ASSERT_THAT(syscalls::setgroups(mine), IsOk());
@@ -299,9 +299,8 @@ TEST(FuseRequestChannelTest, CallerOfPidZeroHasNoGroupsAndIsWarnedAbout) {
   EXPECT_EQ((*channel.caller)->uid, 1000u);
   EXPECT_EQ((*channel.caller)->gid, 2000u);
   EXPECT_THAT((*channel.caller)->groups, testing::IsEmpty());
-  EXPECT_THAT(capture.lines,
-              testing::ElementsAre(testing::HasSubstr(
-                  "pid 0: supplementary groups unreadable")))
+  EXPECT_THAT(capture.lines, testing::ElementsAre(testing::HasSubstr(
+                                 "pid 0: supplementary groups unreadable")))
       << absl::StrJoin(capture.lines, "\n");
 }
 
@@ -325,8 +324,8 @@ TEST(FuseRequestChannelTest, AFailedSuccessReplyIsLoggedOnceAtError) {
   channel.reply_attr_then_fail = true;
   ErrorCapture capture;
   RunGetattr(channel);
-  EXPECT_THAT(capture.lines, testing::ElementsAre(testing::HasSubstr(
-                                 "fuse_reply_attr")))
+  EXPECT_THAT(capture.lines,
+              testing::ElementsAre(testing::HasSubstr("fuse_reply_attr")))
       << absl::StrJoin(capture.lines, "\n");
 }
 

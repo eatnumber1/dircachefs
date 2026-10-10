@@ -34,8 +34,8 @@ ProtocolEvents &MainProtocolEvents() {
     const int fd = std::move(*opened).Release();
     const char *id = std::getenv("DCFS_TRACE_ID");
     return new testonly::Observers(
-        {new testonly::TraceRecorder(
-             fd, id != nullptr && *id != '\0' ? id : "e2e"),
+        {new testonly::TraceRecorder(fd,
+                                     id != nullptr && *id != '\0' ? id : "e2e"),
          &testonly::CheckingObservers()});
   }();
   return *observers;

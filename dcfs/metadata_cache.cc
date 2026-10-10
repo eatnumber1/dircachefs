@@ -116,10 +116,10 @@ absl::Status MarkIncomplete(Context &ctx, InodeId dir) {
 // The attribute columns, in the order BindAttrs() binds them. A macro
 // (rather than a constant) so it can be spliced into SQL string literals,
 // which keeps each statement's text a compile-time constant.
-#define DCFS_ATTR_VALUES                                                   \
-  "mode = ?, nlink = ?, uid = ?, gid = ?, rdev = ?, "                      \
-  "size = ?, blocks = ?, blksize = ?, atime_s = ?, atime_ns = ?, "         \
-  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, "    \
+#define DCFS_ATTR_VALUES                                                \
+  "mode = ?, nlink = ?, uid = ?, gid = ?, rdev = ?, "                   \
+  "size = ?, blocks = ?, blksize = ?, atime_s = ?, atime_ns = ?, "      \
+  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, " \
   "btime_ns = ?"
 // An inode row's: DCFS_ATTR_VALUES, except that (step 23.8) a directory's
 // or a symlink's cached access time is kept when it is the later one: the
@@ -130,24 +130,26 @@ absl::Status MarkIncomplete(Context &ctx, InodeId dir) {
 // update); the named parameters take the positions DCFS_ATTR_VALUES's ?s
 // had (a ? is numbered one past the largest number before it), so BindAttrs
 // binds them unchanged.
-#define DCFS_KEEP_STAMP                                                      \
-  "(mode & 61440) IN (16384, 40960) AND (mode & 61440) = (:mode & 61440) "   \
+#define DCFS_KEEP_STAMP                                                    \
+  "(mode & 61440) IN (16384, 40960) AND (mode & 61440) = (:mode & 61440) " \
   "AND (atime_s > :atime_s OR (atime_s = :atime_s AND atime_ns > :atime_ns))"
-#define DCFS_ATTR_ASSIGNMENTS                                                \
-  "attrs_valid = 1, "                                                        \
-  "mode = :mode, nlink = ?, uid = ?, gid = ?, rdev = ?, "                    \
-  "size = ?, blocks = ?, blksize = ?, "                                      \
-  "atime_s = CASE WHEN " DCFS_KEEP_STAMP " THEN atime_s ELSE :atime_s END, " \
-  "atime_ns = CASE WHEN " DCFS_KEEP_STAMP " THEN atime_ns ELSE :atime_ns "  \
-  "END, "                                                                    \
-  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, "      \
+#define DCFS_ATTR_ASSIGNMENTS                                           \
+  "attrs_valid = 1, "                                                   \
+  "mode = :mode, nlink = ?, uid = ?, gid = ?, rdev = ?, "               \
+  "size = ?, blocks = ?, blksize = ?, "                                 \
+  "atime_s = CASE WHEN " DCFS_KEEP_STAMP                                \
+  " THEN atime_s ELSE :atime_s END, "                                   \
+  "atime_ns = CASE WHEN " DCFS_KEEP_STAMP                               \
+  " THEN atime_ns ELSE :atime_ns "                                      \
+  "END, "                                                               \
+  "mtime_s = ?, mtime_ns = ?, ctime_s = ?, ctime_ns = ?, btime_s = ?, " \
   "btime_ns = ?"
-#define DCFS_ATTR_COLUMNS                                                  \
+#define DCFS_ATTR_COLUMNS                                                   \
   "mode, nlink, uid, gid, rdev, size, blocks, blksize, atime_s, atime_ns, " \
   "mtime_s, mtime_ns, ctime_s, ctime_ns, btime_s, btime_ns"
 // One NULL for each DCFS_ATTR_COLUMNS column (the stub half of ListDir's
 // union has no inode row; a different count fails to prepare).
-#define DCFS_ATTR_NULLS \
+#define DCFS_ATTR_NULLS                                                      \
   "NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, " \
   "NULL, NULL, NULL, NULL"
 #define DCFS_ATTR_PLACEHOLDERS "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
@@ -225,9 +227,8 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
         } else if (state == "refused") {
           // schema.sql: a refused dentry always has its stub.
           std::optional<int64_t> stub = row.Column<std::optional<int64_t>>(2);
-          RET_CHECK(stub.has_value())
-              << "refused dentry " << EscapeBytes(name) << " of " << parent
-              << " has no stub";
+          RET_CHECK(stub.has_value()) << "refused dentry " << EscapeBytes(name)
+                                      << " of " << parent << " has no stub";
           result = {LookupResult::Kind::kRefused, *stub};
         } else {
           RET_CHECK_EQ(state, "unknown") << "bad dentries.state";
@@ -381,9 +382,10 @@ absl::StatusOr<uint32_t> GetGeneration(Context &ctx, InodeId id) {
 
 absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
                      ListDirCallback cb) {
-  return ListDir(ctx, dir, cursor,
-                 [&](std::string_view name, InodeId child, int64_t next_cursor,
-                     const CachedAttr *) { return cb(name, child, next_cursor); });
+  return ListDir(
+      ctx, dir, cursor,
+      [&](std::string_view name, InodeId child, int64_t next_cursor,
+          const CachedAttr *) { return cb(name, child, next_cursor); });
 }
 
 absl::Status ListDir(Context &ctx, InodeId dir, int64_t cursor,
@@ -513,8 +515,8 @@ absl::StatusOr<std::optional<bool>> XattrsComplete(Context &ctx, InodeId id) {
 
 }  // namespace
 
-absl::StatusOr<std::optional<std::vector<std::string>>> ListXattrs(
-    Context &ctx, InodeId id) {
+absl::StatusOr<std::optional<std::vector<std::string>>> ListXattrs(Context &ctx,
+                                                                   InodeId id) {
   ASSIGN_OR_RETURN(std::optional<bool> complete, XattrsComplete(ctx, id));
   if (!complete.has_value()) return NoInode(id);
   if (!*complete) return std::nullopt;
@@ -721,12 +723,9 @@ struct MatchingRows {
   std::vector<InodeId> stale;
 };
 
-absl::StatusOr<MatchingRows> FindMatchingRows(Context &ctx,
-                                              const std::string &device,
-                                              uint64_t ino,
-                                              const FileHandle &handle,
-                                              uint64_t backing_gen,
-                                              const struct statx &stx) {
+absl::StatusOr<MatchingRows> FindMatchingRows(
+    Context &ctx, const std::string &device, uint64_t ino,
+    const FileHandle &handle, uint64_t backing_gen, const struct statx &stx) {
   ASSIGN_OR_RETURN(
       Statement * find,
       Query(ctx,
@@ -744,8 +743,8 @@ absl::StatusOr<MatchingRows> FindMatchingRows(Context &ctx,
     // read it), not a value, on either side: as VerifyBackingIdentity,
     // it does not tell objects apart by itself -- the handle below does.
     const uint64_t stored_gen = row.Column<uint64_t>(2);
-    bool same = stored_gen == backing_gen || stored_gen == 0 ||
-                backing_gen == 0;
+    bool same =
+        stored_gen == backing_gen || stored_gen == 0 || backing_gen == 0;
     if (same && !row.ColumnIsNull(4)) {
       same = row.Column<int>(3) == handle.handle_type &&
              row.Column<std::vector<uint8_t>>(4) == handle.bytes;
@@ -794,8 +793,8 @@ absl::StatusOr<UpsertResult> InsertNewRow(Context &ctx,
                                           const FileHandle &handle,
                                           const struct statx &stx) {
   // Random, never 0 (the root's): see schema.sql's identity model.
-  const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed,
-                                          ctx.rng, uint32_t{1}, UINT32_MAX);
+  const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed, ctx.rng,
+                                          uint32_t{1}, UINT32_MAX);
   ASSIGN_OR_RETURN(
       Statement * insert,
       ctx.db.Prepared("INSERT INTO inodes (device_id, backing_ino, "
@@ -808,9 +807,8 @@ absl::StatusOr<UpsertResult> InsertNewRow(Context &ctx,
   RETURN_IF_ERROR(BindHandle(*insert, 5, handle));
   RETURN_IF_ERROR(BindAttrs(*insert, 7, stx));
   RETURN_IF_ERROR(insert->ExecuteOnce());
-  return UpsertResult{.id = ctx.db.LastInsertRowId(),
-                      .fuse_gen = fuse_gen,
-                      .created = true};
+  return UpsertResult{
+      .id = ctx.db.LastInsertRowId(), .fuse_gen = fuse_gen, .created = true};
 }
 
 }  // namespace
@@ -834,8 +832,7 @@ absl::Status ReinstateInode(Context &ctx, InodeId id, uint32_t fuse_gen,
   return insert->ExecuteOnce();
 }
 
-absl::StatusOr<UpsertResult> UpsertInode(Context &ctx,
-                                         const FileHandle &handle,
+absl::StatusOr<UpsertResult> UpsertInode(Context &ctx, const FileHandle &handle,
                                          const struct statx &stx,
                                          uint64_t backing_gen) {
   const std::string device = handle.device.Serialize();
@@ -1000,8 +997,8 @@ absl::StatusOr<InodeId> SetRefused(Context &ctx, InodeId parent,
         Execute(ctx, "UPDATE cache_state SET last_stub_id = ? WHERE id = 1",
                 stub)
             .status());
-    const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed,
-                                            ctx.rng, uint32_t{1}, UINT32_MAX);
+    const uint32_t fuse_gen = absl::Uniform(absl::IntervalClosedClosed, ctx.rng,
+                                            uint32_t{1}, UINT32_MAX);
     ASSIGN_OR_RETURN(
         Statement * insert,
         ctx.db.Prepared(
@@ -1176,7 +1173,7 @@ absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
             "ctime_s, ctime_ns FROM inodes WHERE id = ?",
             id));
   bool valid = false;
-  struct timespec atime {}, mtime {}, ctime {};
+  struct timespec atime{}, mtime{}, ctime{};
   ASSIGN_OR_RETURN(bool found, ReadOne(*stmt, [&](Statement &row) {
                      valid = row.Column<bool>(0);
                      atime = {row.Column<int64_t>(1), row.Column<int64_t>(2)};
@@ -1192,9 +1189,9 @@ absl::StatusOr<bool> TouchAtime(Context &ctx, InodeId id,
     return a.tv_sec < b.tv_sec ||
            (a.tv_sec == b.tv_sec && a.tv_nsec <= b.tv_nsec);
   };
-  const bool update =
-      ctx.atime == AtimePolicy::kStrict || not_after(atime, mtime) ||
-      not_after(atime, ctime) || now.tv_sec - atime.tv_sec >= 24 * 60 * 60;
+  const bool update = ctx.atime == AtimePolicy::kStrict ||
+                      not_after(atime, mtime) || not_after(atime, ctime) ||
+                      now.tv_sec - atime.tv_sec >= 24 * 60 * 60;
   if (!update) return false;
   // The write only if the row still holds what was read (nothing runs in
   // between today; under coroutines nothing suspends between these SQLite
@@ -1322,8 +1319,8 @@ absl::Status DeleteInode(Context &ctx, InodeId id) {
   return InvalidateInode(ctx, id);
 }
 
-absl::Status AddFilesystem(Context &ctx, const DeviceId &device,
-                           int64_t fstype, std::optional<InodeId> parent,
+absl::Status AddFilesystem(Context &ctx, const DeviceId &device, int64_t fstype,
+                           std::optional<InodeId> parent,
                            std::optional<std::string> boundary_name) {
   return ctx.db.Transaction([&]() -> absl::Status {
     absl::StatusOr<FilesystemRow> existing = GetFilesystem(ctx, device);
@@ -1412,9 +1409,8 @@ absl::Status MarkAtimeDirty(Context &ctx, InodeId id, GuardTouch touch) {
   // its end anyway, and its phase 3 must still see that it Owns `id`,
   // unless the caller is a held fill that could not record (see the
   // declaration).
-  if (touch == GuardTouch::kAlways ||
-      (touch == GuardTouch::kUnlessInFlight &&
-       !ctx.fills.inflight.contains(id))) {
+  if (touch == GuardTouch::kAlways || (touch == GuardTouch::kUnlessInFlight &&
+                                       !ctx.fills.inflight.contains(id))) {
     Touch(ctx.fills, id);
   }
   return absl::OkStatus();
@@ -1572,9 +1568,9 @@ absl::Status InsertDirty(Context &ctx, std::span<const InodeId> ids) {
 
 }  // namespace
 
-absl::StatusOr<Mutation> BeginMutation(
-    Context &ctx, std::span<const InodeId> ids,
-    absl::FunctionRef<absl::Status()> body) {
+absl::StatusOr<Mutation> BeginMutation(Context &ctx,
+                                       std::span<const InodeId> ids,
+                                       absl::FunctionRef<absl::Status()> body) {
   bool known = true;
   for (InodeId id : ids) known = known && ctx.dirty.durable.contains(id);
   auto each_id = [&](absl::FunctionRef<void(InodeId)> each) {
@@ -1602,7 +1598,8 @@ absl::StatusOr<Mutation> BeginMutation(
   return mutation;
 }
 
-absl::StatusOr<Mutation> BeginCreate(Context &ctx, InodeId parent, std::string_view name) {
+absl::StatusOr<Mutation> BeginCreate(Context &ctx, InodeId parent,
+                                     std::string_view name) {
   const std::string names[] = {std::string(name)};
   const InodeId ids[] = {parent};
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
@@ -1637,10 +1634,11 @@ absl::StatusOr<Mutation> BeginRemove(Context &ctx, InodeId parent,
   });
 }
 
-absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent, std::string_view name,
-                         InodeId newparent, std::string_view newname,
-                         InodeId src, std::optional<InodeId> dst,
-                         FillSnapshot resolved) {
+absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent,
+                                     std::string_view name, InodeId newparent,
+                                     std::string_view newname, InodeId src,
+                                     std::optional<InodeId> dst,
+                                     FillSnapshot resolved) {
   const std::string names[] = {std::string(name)};
   const std::string newnames[] = {std::string(newname)};
   std::vector<InodeId> ids = {parent, newparent, src};
@@ -1669,7 +1667,7 @@ absl::StatusOr<Mutation> BeginRename(Context &ctx, InodeId parent, std::string_v
 }
 
 absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src, InodeId newparent,
-                       std::string_view newname) {
+                                   std::string_view newname) {
   const std::string names[] = {std::string(newname)};
   const InodeId ids[] = {newparent, src};
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
@@ -1679,8 +1677,8 @@ absl::StatusOr<Mutation> BeginLink(Context &ctx, InodeId src, InodeId newparent,
   });
 }
 
-absl::StatusOr<Mutation> BeginAttrChange(Context &ctx, InodeId id,
-                             std::span<const std::string_view> xattrs) {
+absl::StatusOr<Mutation> BeginAttrChange(
+    Context &ctx, InodeId id, std::span<const std::string_view> xattrs) {
   const InodeId ids[] = {id};
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
     for (std::string_view name : xattrs) {
@@ -1707,7 +1705,7 @@ absl::StatusOr<Mutation> BeginAttrChanges(Context &ctx,
 }
 
 absl::StatusOr<Mutation> BeginXattrChange(Context &ctx, InodeId id,
-                              std::string_view name) {
+                                          std::string_view name) {
   const InodeId ids[] = {id};
   return BeginMutation(ctx, ids, [&]() -> absl::Status {
     RETURN_IF_ERROR(ForgetXattr(ctx, id, name));
@@ -1766,8 +1764,7 @@ absl::StatusOr<SyncSnapshot> BeginSync(Context &ctx) {
                                    ctx.open_for_write->end());
   }
   if (ctx.open_files != nullptr) {
-    snapshot.open_files.assign(ctx.open_files->begin(),
-                               ctx.open_files->end());
+    snapshot.open_files.assign(ctx.open_files->begin(), ctx.open_files->end());
   }
   snapshot.inserts = ctx.dirty.inserts;
   return snapshot;

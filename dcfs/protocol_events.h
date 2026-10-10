@@ -135,8 +135,8 @@ struct Probe {
 // or a release left it. For the revalidation model (formal/reval.tla).
 struct SharedFd {
   enum class WriteFd { kNone, kPlain, kAppend };
-  bool held = false;      // some open of the file is outstanding
-  bool writable = false;  // the shared descriptor was opened O_RDWR
+  bool held = false;                  // some open of the file is outstanding
+  bool writable = false;              // the shared descriptor was opened O_RDWR
   WriteFd write_fd = WriteFd::kNone;  // the write fd beside a read-only one
   int refs = 0;                       // the outstanding opens
   int writable_refs = 0;              // ... that may write
@@ -146,11 +146,11 @@ struct SharedFd {
 // lifetime model (formal/lifetime.tla).
 struct Lifetime {
   enum class Written { kNo, kNoFd, kHeld };
-  uint64_t lookups = 0;   // the kernel's lookups dcfs counted (lookups_)
-  bool removed = false;   // a removed record answers for it (removed_)
+  uint64_t lookups = 0;  // the kernel's lookups dcfs counted (lookups_)
+  bool removed = false;  // a removed record answers for it (removed_)
   Written written = Written::kNo;  // written_: no entry, one without or
                                    // with a held descriptor
-  int refs = 0;           // its open files (BackingFile::refs)
+  int refs = 0;                    // its open files (BackingFile::refs)
 };
 using LifetimeFn = absl::FunctionRef<Lifetime()>;
 
@@ -216,10 +216,10 @@ enum class LifetimeStep {
   kReleased,  // a RELEASE of an open of it ended (arg: 1 if it could write)
   kForgot,    // a FORGET of it (arg: its nlookup)
   kForgotInBatch,  // an entry of a FORGET_MULTI (arg: its nlookup)
-  kRemoved,   // phase 3 of an unlink, rmdir or rename that removed one of
-              // its names ended (arg: 1 if HoldForRemoval held it)
-  kProbed,    // a start probed its recovered row by handle
-              // (backing::Startup; arg: 1 if the row went)
+  kRemoved,        // phase 3 of an unlink, rmdir or rename that removed one of
+                   // its names ended (arg: 1 if HoldForRemoval held it)
+  kProbed,         // a start probed its recovered row by handle
+                   // (backing::Startup; arg: 1 if the row went)
 };
 
 // What OpenNode found when it reopened a row's handle, for the identity
@@ -263,8 +263,7 @@ enum class LookupOutcome {
 using ListingFn = absl::FunctionRef<void(
     absl::FunctionRef<void(std::string_view name, const Probe &probe)> each)>;
 // Calls `each(id)` for a set of inode ids.
-using IdsFn =
-    absl::FunctionRef<void(absl::FunctionRef<void(Ino id)> each)>;
+using IdsFn = absl::FunctionRef<void(absl::FunctionRef<void(Ino id)> each)>;
 
 }  // namespace events
 
@@ -312,8 +311,8 @@ class ProtocolEvents {
   // request's reply carries (ReplyObservable, step 12.7b).
   virtual void LookupAnswered(Context &ctx, events::Ino parent,
                               std::string_view name,
-                              events::LookupOutcome answer,
-                              events::Ino child) {}
+                              events::LookupOutcome answer, events::Ino child) {
+  }
 
   // backing::RefreshAttrs/RefreshAttrsFromFd of `id`, from its fill
   // snapshot (taken right after this call) to its end. Model: the statx and
@@ -336,8 +335,8 @@ class ProtocolEvents {
   // PopulateRead next. `child` is the cached row for kFound.
   virtual void LookupDecided(Context &ctx, events::Ino parent,
                              std::string_view name,
-                             events::LookupOutcome outcome,
-                             events::Ino child) {}
+                             events::LookupOutcome outcome, events::Ino child) {
+  }
 
   // ResolveName's probe of `name` read what it holds (ProbeChild, right
   // after its openat and statx: the read; the identity cannot change after
@@ -401,9 +400,8 @@ class ProtocolEvents {
   // filesystem, its attributes as current iff `filled` (the code's own
   // decision). `snapshot` is its fill snapshot. Model: a whole getattr
   // fill of that directory.
-  virtual void ParentRecorded(Context &ctx, events::Ino dir,
-                              events::Ino parent, uint64_t snapshot,
-                              bool filled) {}
+  virtual void ParentRecorded(Context &ctx, events::Ino dir, events::Ino parent,
+                              uint64_t snapshot, bool filled) {}
 
   // backing::InitRoot recorded the root's identity and attributes (fresh,
   // at startup). Model: a whole getattr fill of the root.
@@ -476,8 +474,8 @@ class ProtocolEvents {
   // (OK: the open was granted; Open refuses with EPERM where the backing
   // file's flags do). `shared`: a shared backing fd existed when it began;
   // `after`: the shared backing fd now. Model: OpenF.
-  virtual void FileOpened(Context &ctx, events::Ino id, int flags,
-                          bool shared, const absl::Status &status,
+  virtual void FileOpened(Context &ctx, events::Ino id, int flags, bool shared,
+                          const absl::Status &status,
                           const events::SharedFd &after) {}
   // DirCacheFS::Release of an open of `id` (one that may write iff
   // `writable`) ended; `after`: the shared backing fd now. Model: ReleaseF.

@@ -105,9 +105,9 @@ int RunLoop(Script &script, bool set_callback = true) {
   absl::StatusOr<FileDescriptor> dummy =
       syscalls::openat(AT_FDCWD, "/dev/null", O_RDWR);
   EXPECT_THAT(dummy, absl_testing::IsOk());
-  EXPECT_EQ(fuse_session_custom_io(se, &io, sizeof(io),
-                                   std::move(*dummy).Release()),
-            0);
+  EXPECT_EQ(
+      fuse_session_custom_io(se, &io, sizeof(io), std::move(*dummy).Release()),
+      0);
   int rc;
   {
     SessionLoop loop(se);

@@ -46,9 +46,8 @@ class SyscallsTest : public ::testing::Test {
     tmpdir_fd_ = *tmpdir_;
 
     // Create a test file
-    ASSERT_OK_AND_ASSIGN(
-        file_, syscalls::openat(tmpdir_fd_, "test_file", O_CREAT | O_RDWR,
-                                0600));
+    ASSERT_OK_AND_ASSIGN(file_, syscalls::openat(tmpdir_fd_, "test_file",
+                                                 O_CREAT | O_RDWR, 0600));
     file_fd_ = *file_;
   }
 
@@ -77,8 +76,7 @@ TEST_F(SyscallsTest, WriteAndReadRoundTrip) {
 
 TEST_F(SyscallsTest, PwriteAndPreadRoundTrip) {
   const std::string data = "test data";
-  auto written_result =
-      syscalls::pwrite(file_fd_, data.data(), data.size(), 0);
+  auto written_result = syscalls::pwrite(file_fd_, data.data(), data.size(), 0);
   ASSERT_THAT(written_result, IsOk());
   EXPECT_EQ(*written_result, data.size());
 
@@ -165,8 +163,9 @@ TEST_F(SyscallsTest, LinkatRaisesStNlink) {
   auto st_before = syscalls::fstat(file_fd_);
   ASSERT_THAT(st_before, IsOk());
 
-  EXPECT_THAT(syscalls::linkat(tmpdir_fd_, "test_file", tmpdir_fd_, "test_link2", 0),
-              IsOk());
+  EXPECT_THAT(
+      syscalls::linkat(tmpdir_fd_, "test_file", tmpdir_fd_, "test_link2", 0),
+      IsOk());
 
   auto st_after = syscalls::fstat(file_fd_);
   ASSERT_THAT(st_after, IsOk());
@@ -174,12 +173,12 @@ TEST_F(SyscallsTest, LinkatRaisesStNlink) {
 }
 
 TEST_F(SyscallsTest, Renameat2WithRenameNoreplace) {
-  ASSERT_THAT(syscalls::openat(tmpdir_fd_, "test_file2", O_CREAT | O_RDWR,
-                               0600),
-              IsOk());  // the descriptor closes at once
+  ASSERT_THAT(
+      syscalls::openat(tmpdir_fd_, "test_file2", O_CREAT | O_RDWR, 0600),
+      IsOk());  // the descriptor closes at once
 
-  absl::Status status = syscalls::renameat2(
-      tmpdir_fd_, "test_file", tmpdir_fd_, "test_file2", RENAME_NOREPLACE);
+  absl::Status status = syscalls::renameat2(tmpdir_fd_, "test_file", tmpdir_fd_,
+                                            "test_file2", RENAME_NOREPLACE);
   EXPECT_FALSE(status.ok());
   auto errno_val = GetErrnoFromStatus(status);
   EXPECT_TRUE(errno_val.ok());
@@ -196,15 +195,13 @@ TEST_F(SyscallsTest, Renameat2WithZeroFlags) {
   EXPECT_THAT(
       syscalls::fstatat(tmpdir_fd_, "test_file_renamed", AT_SYMLINK_NOFOLLOW),
       IsOk());
-  EXPECT_THAT(
-      syscalls::fstatat(tmpdir_fd_, "test_file", AT_SYMLINK_NOFOLLOW),
-      StatusIs(absl::StatusCode::kNotFound));
+  EXPECT_THAT(syscalls::fstatat(tmpdir_fd_, "test_file", AT_SYMLINK_NOFOLLOW),
+              StatusIs(absl::StatusCode::kNotFound));
 }
 
 TEST_F(SyscallsTest, UnlinkatRemovesFile) {
-  ASSERT_THAT(
-      syscalls::fstatat(tmpdir_fd_, "test_file", AT_SYMLINK_NOFOLLOW),
-      IsOk());
+  ASSERT_THAT(syscalls::fstatat(tmpdir_fd_, "test_file", AT_SYMLINK_NOFOLLOW),
+              IsOk());
 
   EXPECT_THAT(syscalls::unlinkat(tmpdir_fd_, "test_file", 0), IsOk());
 
@@ -237,8 +234,7 @@ TEST_F(SyscallsTest, FsetxattrFgetxattrFremovexattr) {
       0);
   if (!set_status.ok()) {
     auto errno_val = GetErrnoFromStatus(set_status);
-    if (errno_val.ok() &&
-        (*errno_val == ENOTSUP || *errno_val == EOPNOTSUPP)) {
+    if (errno_val.ok() && (*errno_val == ENOTSUP || *errno_val == EOPNOTSUPP)) {
       GTEST_SKIP() << "Extended attributes not supported on this filesystem";
     }
   }
@@ -274,8 +270,7 @@ TEST_F(SyscallsTest, FlistxattrReturnsTheNulSeparatedList) {
       0);
   if (!set_status.ok()) {
     auto errno_val = GetErrnoFromStatus(set_status);
-    if (errno_val.ok() &&
-        (*errno_val == ENOTSUP || *errno_val == EOPNOTSUPP)) {
+    if (errno_val.ok() && (*errno_val == ENOTSUP || *errno_val == EOPNOTSUPP)) {
       GTEST_SKIP() << "Extended attributes not supported on this filesystem";
     }
   }
@@ -333,9 +328,8 @@ TEST_F(SyscallsTest, Getdents64ListsCreatedNames) {
 }
 
 TEST_F(SyscallsTest, StatxAndFstat) {
-  auto stx_result =
-      syscalls::statx(tmpdir_fd_, "test_file", AT_SYMLINK_NOFOLLOW,
-                      STATX_BASIC_STATS);
+  auto stx_result = syscalls::statx(tmpdir_fd_, "test_file",
+                                    AT_SYMLINK_NOFOLLOW, STATX_BASIC_STATS);
   ASSERT_THAT(stx_result, IsOk());
   EXPECT_NE(stx_result->stx_ino, 0);
 
@@ -396,9 +390,9 @@ TEST_F(SyscallsTest, NameToHandleAtRoundTrip) {
   // kernel's non-raw fd class (fs/fhandle.c get_path_from_fd()), which
   // rejects O_PATH descriptors with EBADF -- tmpdir_fd_ is O_PATH (see
   // SetUp), so a separate real fd is needed here.
-  auto real_tmpdir_fd = syscalls::openat(
-      AT_FDCWD, "/proc/self/fd/" + std::to_string(tmpdir_fd_),
-      O_RDONLY | O_DIRECTORY);
+  auto real_tmpdir_fd =
+      syscalls::openat(AT_FDCWD, "/proc/self/fd/" + std::to_string(tmpdir_fd_),
+                       O_RDONLY | O_DIRECTORY);
   ASSERT_THAT(real_tmpdir_fd, IsOk());
   auto reopened_fd =
       syscalls::open_by_handle_at(**real_tmpdir_fd, *handle, O_RDONLY);
@@ -535,11 +529,11 @@ TEST_F(SyscallsTest, RlimitFlockClockSleepAndPid) {
 
 TEST_F(SyscallsTest, MountAndUmountReportTheirErrors) {
   // Nothing is mounted on the test file, which is not a directory.
-  auto not_mounted = syscalls::umount2("/proc/self/fd/" +
-                                           std::to_string(file_fd_), 0);
+  auto not_mounted =
+      syscalls::umount2("/proc/self/fd/" + std::to_string(file_fd_), 0);
   EXPECT_FALSE(not_mounted.ok());
-  EXPECT_FALSE(syscalls::mount("tmpfs", "/no/such/dir", "tmpfs", 0, nullptr)
-                   .ok());
+  EXPECT_FALSE(
+      syscalls::mount("tmpfs", "/no/such/dir", "tmpfs", 0, nullptr).ok());
 }
 
 TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {
@@ -581,11 +575,12 @@ TEST(SyscallsCredentialsTest, TheQuerySentinelIsNotAnId) {
 // --- The mount.dcfs wrapper's calls (phase 15) ----------------------------
 
 TEST(SyscallsWrapperTest, SocketpairCarriesBytesBothWays) {
-  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   const std::string_view hello = "hello";
-  EXPECT_THAT(syscalls::send(*pair.first, hello.data(), hello.size(),
-                             MSG_NOSIGNAL),
-              IsOkAndHolds(hello.size()));
+  EXPECT_THAT(
+      syscalls::send(*pair.first, hello.data(), hello.size(), MSG_NOSIGNAL),
+      IsOkAndHolds(hello.size()));
   char buf[16];
   struct iovec iov = {.iov_base = buf, .iov_len = sizeof(buf)};
   struct msghdr message = {};
@@ -596,7 +591,8 @@ TEST(SyscallsWrapperTest, SocketpairCarriesBytesBothWays) {
 }
 
 TEST(SyscallsWrapperTest, SendmsgPassesADescriptorThatIsCloseOnExec) {
-  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   ASSERT_OK_AND_ASSIGN(FileDescriptor root,
                        syscalls::openat(AT_FDCWD, "/", O_RDONLY | O_DIRECTORY));
   char byte = 'x';
@@ -634,7 +630,8 @@ TEST(SyscallsWrapperTest, SendmsgPassesADescriptorThatIsCloseOnExec) {
 }
 
 TEST(SyscallsWrapperTest, SendOnAClosedPeerIsAStatusNotASignal) {
-  ASSERT_OK_AND_ASSIGN(auto pair, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSERT_OK_AND_ASSIGN(auto pair,
+                       syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   ASSERT_THAT(pair.second.Close(), IsOk());
   EXPECT_EQ(
       StatusToErrno(syscalls::send(*pair.first, "x", 1, MSG_NOSIGNAL).status()),

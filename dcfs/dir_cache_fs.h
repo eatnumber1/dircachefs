@@ -103,74 +103,63 @@ class DirCacheFS : private events::Bookkeeping {
   absl::Status Destroy();
 
   absl::Status Getattr(FuseRequest &req, fuse_ino_t ino, fuse_file_info *fi);
-  absl::Status Setattr(
-      FuseRequest &req, fuse_ino_t ino, struct stat *attr, int to_set,
-      fuse_file_info *fi);
+  absl::Status Setattr(FuseRequest &req, fuse_ino_t ino, struct stat *attr,
+                       int to_set, fuse_file_info *fi);
 
-  absl::Status Lookup(
-      FuseRequest &req, fuse_ino_t parent_ino, std::string_view name);
+  absl::Status Lookup(FuseRequest &req, fuse_ino_t parent_ino,
+                      std::string_view name);
   // Drop `nlookup` of the kernel's lookups of `ino` (see lookups_). Inode
   // rows persist across restarts (that is what keeps NFS handles valid) and
   // are not touched; only a removed object's in-memory record (removed_)
   // goes with its last lookup.
   void Forget(FuseRequest &req, fuse_ino_t ino, uint64_t nlookup);
-  void ForgetMulti(
-      FuseRequest &req, std::span<const fuse_forget_data> forgets);
+  void ForgetMulti(FuseRequest &req, std::span<const fuse_forget_data> forgets);
 
   absl::Status Readlink(FuseRequest &req, fuse_ino_t ino);
-  absl::Status Mknod(
-      FuseRequest &req, fuse_ino_t parent, std::string_view name,
-      mode_t mode, dev_t rdev);
-  absl::Status Mkdir(
-      FuseRequest &req, fuse_ino_t parent, std::string_view name,
-      mode_t mode);
-  absl::Status Unlink(
-      FuseRequest &req, fuse_ino_t parent, std::string_view name);
-  absl::Status Rmdir(
-      FuseRequest &req, fuse_ino_t parent, std::string_view name);
-  absl::Status Symlink(
-      FuseRequest &req, std::string_view link, fuse_ino_t parent,
-      std::string_view name);
-  absl::Status Rename(
-      FuseRequest &req, fuse_ino_t parent, std::string_view name,
-      fuse_ino_t newparent, std::string_view newname, unsigned int flags);
-  absl::Status Link(
-      FuseRequest &req, fuse_ino_t ino, fuse_ino_t newparent,
-      std::string_view newname);
+  absl::Status Mknod(FuseRequest &req, fuse_ino_t parent, std::string_view name,
+                     mode_t mode, dev_t rdev);
+  absl::Status Mkdir(FuseRequest &req, fuse_ino_t parent, std::string_view name,
+                     mode_t mode);
+  absl::Status Unlink(FuseRequest &req, fuse_ino_t parent,
+                      std::string_view name);
+  absl::Status Rmdir(FuseRequest &req, fuse_ino_t parent,
+                     std::string_view name);
+  absl::Status Symlink(FuseRequest &req, std::string_view link,
+                       fuse_ino_t parent, std::string_view name);
+  absl::Status Rename(FuseRequest &req, fuse_ino_t parent,
+                      std::string_view name, fuse_ino_t newparent,
+                      std::string_view newname, unsigned int flags);
+  absl::Status Link(FuseRequest &req, fuse_ino_t ino, fuse_ino_t newparent,
+                    std::string_view newname);
 
   absl::Status Open(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi);
-  absl::Status Read(
-      FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
-      fuse_file_info &fi);
-  absl::Status Write(
-      FuseRequest &req, fuse_ino_t ino, std::span<const char> buf, off_t off,
-      fuse_file_info &fi);
+  absl::Status Read(FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
+                    fuse_file_info &fi);
+  absl::Status Write(FuseRequest &req, fuse_ino_t ino,
+                     std::span<const char> buf, off_t off, fuse_file_info &fi);
   absl::Status Flush(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi);
   absl::Status Release(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi);
-  absl::Status Fsync(
-      FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi);
+  absl::Status Fsync(FuseRequest &req, fuse_ino_t ino, int datasync,
+                     fuse_file_info &fi);
 
   absl::Status Opendir(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi);
-  absl::Status Readdir(
-      FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
-      fuse_file_info &fi);
-  absl::Status Readdirplus(
-      FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
-      fuse_file_info &fi);
+  absl::Status Readdir(FuseRequest &req, fuse_ino_t ino, size_t size, off_t off,
+                       fuse_file_info &fi);
+  absl::Status Readdirplus(FuseRequest &req, fuse_ino_t ino, size_t size,
+                           off_t off, fuse_file_info &fi);
   absl::Status Releasedir(FuseRequest &req, fuse_ino_t ino, fuse_file_info &fi);
-  absl::Status Fsyncdir(
-      FuseRequest &req, fuse_ino_t ino, int datasync, fuse_file_info &fi);
+  absl::Status Fsyncdir(FuseRequest &req, fuse_ino_t ino, int datasync,
+                        fuse_file_info &fi);
 
   absl::Status Statfs(FuseRequest &req, fuse_ino_t ino);
 
-  absl::Status Setxattr(
-      FuseRequest &req, fuse_ino_t ino, std::string_view name,
-      std::string_view value, int flags);
-  absl::Status Getxattr(
-      FuseRequest &req, fuse_ino_t ino, std::string_view name, size_t size);
+  absl::Status Setxattr(FuseRequest &req, fuse_ino_t ino, std::string_view name,
+                        std::string_view value, int flags);
+  absl::Status Getxattr(FuseRequest &req, fuse_ino_t ino, std::string_view name,
+                        size_t size);
   absl::Status Listxattr(FuseRequest &req, fuse_ino_t ino, size_t size);
-  absl::Status Removexattr(
-      FuseRequest &req, fuse_ino_t ino, std::string_view name);
+  absl::Status Removexattr(FuseRequest &req, fuse_ino_t ino,
+                           std::string_view name);
 
   // The mount is started with -o default_permissions (Init() refuses it
   // otherwise), so the kernel checks permissions itself against the cached
@@ -178,22 +167,20 @@ class DirCacheFS : private events::Bookkeeping {
   // anyway is denied (EACCES) and logged at ERROR: fail closed.
   absl::Status Access(FuseRequest &req, fuse_ino_t ino, int mask);
 
-  absl::Status Create(
-      FuseRequest &req, fuse_ino_t parent, std::string_view name,
-      mode_t mode, fuse_file_info &fi);
+  absl::Status Create(FuseRequest &req, fuse_ino_t parent,
+                      std::string_view name, mode_t mode, fuse_file_info &fi);
 
-  absl::Status Fallocate(
-      FuseRequest &req, fuse_ino_t ino, int mode, off_t offset, off_t length,
-      fuse_file_info &fi);
+  absl::Status Fallocate(FuseRequest &req, fuse_ino_t ino, int mode,
+                         off_t offset, off_t length, fuse_file_info &fi);
 
   // Step 23.4. copy_file_range(2) between two open files: the backing
   // filesystem's own copy on their shared backing fds (on btrfs and xfs, a
   // reflink where it can), with the destination's write-through
   // bookkeeping (as a fallback Write: phase 1, the copy, refreshes).
-  absl::Status CopyFileRange(FuseRequest &req, fuse_ino_t ino_in,
-                             off_t off_in, fuse_file_info &fi_in,
-                             fuse_ino_t ino_out, off_t off_out,
-                             fuse_file_info &fi_out, size_t len, int flags);
+  absl::Status CopyFileRange(FuseRequest &req, fuse_ino_t ino_in, off_t off_in,
+                             fuse_file_info &fi_in, fuse_ino_t ino_out,
+                             off_t off_out, fuse_file_info &fi_out, size_t len,
+                             int flags);
 
   // Step 23.4. The ioctls forwarded to the backing file, an allowlist (see
   // dir_cache_fs.cc): FS_IOC_GETFLAGS/SETFLAGS and FS_IOC_FSGETXATTR/
@@ -261,16 +248,14 @@ class DirCacheFS : private events::Bookkeeping {
     return written_.contains(id);
   }
   size_t WrittenEntries() const override { return written_.size(); }
-  void ForEachWritten(absl::FunctionRef<void(events::Ino, bool)> each)
-      const override;
+  void ForEachWritten(
+      absl::FunctionRef<void(events::Ino, bool)> each) const override;
   size_t HeldFdCount() const override { return held_fds_; }
   size_t HeldFdLimit() const override { return max_held_fds_; }
   bool IsOpenForWrite(events::Ino id) const override {
     return open_for_write_.contains(id);
   }
-  size_t OpenForWriteEntries() const override {
-    return open_for_write_.size();
-  }
+  size_t OpenForWriteEntries() const override { return open_for_write_.size(); }
   void ForEachOpenForWrite(
       absl::FunctionRef<void(events::Ino)> each) const override;
   const void *OpenForWriteSet() const override { return &open_for_write_; }
@@ -278,12 +263,12 @@ class DirCacheFS : private events::Bookkeeping {
     return removed_.contains(id);
   }
   size_t RemovedEntries() const override { return removed_.size(); }
-  void ForEachRemoved(
-      absl::FunctionRef<void(events::Ino)> each) const override;
+  void ForEachRemoved(absl::FunctionRef<void(events::Ino)> each) const override;
   std::optional<events::Bookkeeping::SharedFile> SharedFileOf(
       events::Ino id) const override;
   void ForEachSharedFile(
-      absl::FunctionRef<void(events::Ino, const events::Bookkeeping::SharedFile &)>
+      absl::FunctionRef<void(events::Ino,
+                             const events::Bookkeeping::SharedFile &)>
           each) const override;
 
   // The runtime invariant checks' hook (ProtocolEvents::BackingCall), called
@@ -523,16 +508,16 @@ class DirCacheFS : private events::Bookkeeping {
 
   // Unlink (is_dir false) / Rmdir (true) of (parent, name): the shared
   // phase-1/2/3 wiring, including the removed child's row lifetime.
-  absl::Status RemoveChild(
-      FuseRequest &req, InodeId parent, std::string_view name, bool is_dir);
+  absl::Status RemoveChild(FuseRequest &req, InodeId parent,
+                           std::string_view name, bool is_dir);
 
   // After a failed phase 2 (the backing syscall) of Unlink/Rmdir/Rename:
   // re-resolves `names` in `parent` (LookupOrPopulate) so that the state
   // phase 1 made unknown is known again. Errors are ignored, except an
   // interrupt (EINTR, dcfs/checkpoint.h), which stops it and is returned:
   // the request replies it.
-  absl::Status ReresolveAfterFailure(
-      InodeId parent, std::span<const std::string> names);
+  absl::Status ReresolveAfterFailure(InodeId parent,
+                                     std::span<const std::string> names);
 
   // cache::DeleteInode(id), treating an already-missing row as success.
   // For an object known to be gone from the backing filesystem.
@@ -557,10 +542,10 @@ class DirCacheFS : private events::Bookkeeping {
   // F7): the rename has already happened, so these are best-effort cache
   // refreshes, not something the FUSE reply still depends on.
   // `held_dst` is HoldForRemoval's descriptor on a replaced dst.
-  void RefreshAfterRename(
-      InodeId parent, InodeId newparent, cache::LookupResult src,
-      cache::LookupResult dst, bool dst_exists, bool same_inode,
-      bool exchange, std::optional<FileDescriptor> held_dst);
+  void RefreshAfterRename(InodeId parent, InodeId newparent,
+                          cache::LookupResult src, cache::LookupResult dst,
+                          bool dst_exists, bool same_inode, bool exchange,
+                          std::optional<FileDescriptor> held_dst);
 
   // Step 23.9: LINK of removed object `src` (its record holds a
   // descriptor) as (newparent, newname): the backing filesystem's answer;

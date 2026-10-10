@@ -60,12 +60,14 @@ TEST(ConnectionTest, FileBackedReportsWalAndForeignKeys) {
   std::string path = TestTmpFile("wal_check.sqlite");
   ASSERT_OK_AND_ASSIGN(Connection conn, ConnectionFactory{.path = path}.Open());
 
-  ASSERT_OK_AND_ASSIGN(Statement * mode_stmt, conn.Prepared("PRAGMA journal_mode"));
+  ASSERT_OK_AND_ASSIGN(Statement * mode_stmt,
+                       conn.Prepared("PRAGMA journal_mode"));
   ASSERT_THAT(mode_stmt->Step(), IsOkAndHolds(true));
   EXPECT_EQ(mode_stmt->Column<std::string>(0), "wal");
   ASSERT_THAT(mode_stmt->Step(), IsOkAndHolds(false));
 
-  ASSERT_OK_AND_ASSIGN(Statement * fk_stmt, conn.Prepared("PRAGMA foreign_keys"));
+  ASSERT_OK_AND_ASSIGN(Statement * fk_stmt,
+                       conn.Prepared("PRAGMA foreign_keys"));
   ASSERT_THAT(fk_stmt->Step(), IsOkAndHolds(true));
   EXPECT_EQ(fk_stmt->Column<int>(0), 1);
   ASSERT_THAT(fk_stmt->Step(), IsOkAndHolds(false));
@@ -158,21 +160,19 @@ class StatementTest : public ::testing::Test {
  protected:
   void SetUp() override {
     ASSERT_OK_AND_ASSIGN(conn_, OpenMemory());
-    ASSERT_THAT(
-        conn_.Exec(
-          "CREATE TABLE t ("
-          "  id INTEGER PRIMARY KEY,"
-          "  i64 INTEGER,"
-          "  i32 INTEGER,"
-          "  u64 INTEGER,"
-          "  dbl REAL,"
-          "  boolean INTEGER,"
-          "  text TEXT,"
-          "  blob BLOB,"
-          "  opt_text TEXT,"
-          "  opt_blob BLOB"
-          ")"),
-        IsOk());
+    ASSERT_THAT(conn_.Exec("CREATE TABLE t ("
+                           "  id INTEGER PRIMARY KEY,"
+                           "  i64 INTEGER,"
+                           "  i32 INTEGER,"
+                           "  u64 INTEGER,"
+                           "  dbl REAL,"
+                           "  boolean INTEGER,"
+                           "  text TEXT,"
+                           "  blob BLOB,"
+                           "  opt_text TEXT,"
+                           "  opt_blob BLOB"
+                           ")"),
+                IsOk());
   }
 
   Connection conn_;
@@ -182,9 +182,9 @@ TEST_F(StatementTest, BindAndColumnRoundTripEveryOverload) {
   ASSERT_OK_AND_ASSIGN(
       Statement * insert,
       conn_.Prepared(
-        "INSERT INTO t "
-        "(id, i64, i32, u64, dbl, boolean, text, blob, opt_text, opt_blob) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
+          "INSERT INTO t "
+          "(id, i64, i32, u64, dbl, boolean, text, blob, opt_text, opt_blob) "
+          "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"));
 
   constexpr uint64_t kHighBit = uint64_t{1} << 63;
   const std::vector<uint8_t> kBlobBytes = {0xDE, 0xAD, 0xBE, 0xEF};
@@ -196,10 +196,9 @@ TEST_F(StatementTest, BindAndColumnRoundTripEveryOverload) {
   ASSERT_THAT(insert->Bind(5, 3.5), IsOk());
   ASSERT_THAT(insert->Bind(6, true), IsOk());
   ASSERT_THAT(insert->Bind(7, std::string_view("hello")), IsOk());
-  ASSERT_THAT(
-      insert->Bind(8, std::span<const uint8_t>(kBlobBytes)), IsOk());
-  ASSERT_THAT(
-      insert->Bind(9, std::optional<std::string_view>("present")), IsOk());
+  ASSERT_THAT(insert->Bind(8, std::span<const uint8_t>(kBlobBytes)), IsOk());
+  ASSERT_THAT(insert->Bind(9, std::optional<std::string_view>("present")),
+              IsOk());
   ASSERT_THAT(
       insert->Bind(10, std::optional<std::span<const uint8_t>>(std::nullopt)),
       IsOk());
@@ -211,8 +210,8 @@ TEST_F(StatementTest, BindAndColumnRoundTripEveryOverload) {
   ASSERT_OK_AND_ASSIGN(
       Statement * select,
       conn_.Prepared(
-        "SELECT id, i64, i32, u64, dbl, boolean, text, blob, opt_text, "
-        "opt_blob FROM t WHERE id = ?"));
+          "SELECT id, i64, i32, u64, dbl, boolean, text, blob, opt_text, "
+          "opt_blob FROM t WHERE id = ?"));
   ASSERT_THAT(select->Bind(1, int64_t{42}), IsOk());
   ASSERT_THAT(select->Step(), IsOkAndHolds(true));
 
@@ -224,7 +223,8 @@ TEST_F(StatementTest, BindAndColumnRoundTripEveryOverload) {
   EXPECT_EQ(select->Column<bool>(5), true);
   EXPECT_EQ(select->Column<std::string>(6), "hello");
   EXPECT_EQ(select->Column<std::string_view>(6), "hello");
-  EXPECT_THAT(select->Column<std::vector<uint8_t>>(7), ElementsAre(0xDE, 0xAD, 0xBE, 0xEF));
+  EXPECT_THAT(select->Column<std::vector<uint8_t>>(7),
+              ElementsAre(0xDE, 0xAD, 0xBE, 0xEF));
 
   EXPECT_FALSE(select->ColumnIsNull(6));
   EXPECT_TRUE(select->ColumnIsNull(9));
@@ -260,8 +260,7 @@ TEST_F(StatementTest, ZeroLengthBlobIsNotNull) {
 }
 
 TEST_F(StatementTest, PreparedReturnsSameCachedStatementResetAndUnbound) {
-  ASSERT_OK_AND_ASSIGN(
-      Statement * first, conn_.Prepared("SELECT ? AS x"));
+  ASSERT_OK_AND_ASSIGN(Statement * first, conn_.Prepared("SELECT ? AS x"));
   sqlite3_stmt *raw_first = first->Get();
   ASSERT_THAT(first->Bind(1, int64_t{99}), IsOk());
   ASSERT_THAT(first->Step(), IsOkAndHolds(true));
@@ -269,8 +268,7 @@ TEST_F(StatementTest, PreparedReturnsSameCachedStatementResetAndUnbound) {
 
   // Re-requesting the same SQL text returns the same underlying statement,
   // reset and with bindings cleared.
-  ASSERT_OK_AND_ASSIGN(
-      Statement * second, conn_.Prepared("SELECT ? AS x"));
+  ASSERT_OK_AND_ASSIGN(Statement * second, conn_.Prepared("SELECT ? AS x"));
   EXPECT_EQ(second->Get(), raw_first);
 
   // Unbound parameter reads back as NULL now.
@@ -282,8 +280,8 @@ TEST_F(StatementTest, PreparedReturnsSameCachedStatementResetAndUnbound) {
 TEST_F(StatementTest, ForEachRowVisitsAllRowsInOrderAndStopsOnError) {
   ASSERT_THAT(conn_.Exec("INSERT INTO t (id) VALUES (1), (2), (3)"), IsOk());
 
-  ASSERT_OK_AND_ASSIGN(
-      Statement * select, conn_.Prepared("SELECT id FROM t ORDER BY id"));
+  ASSERT_OK_AND_ASSIGN(Statement * select,
+                       conn_.Prepared("SELECT id FROM t ORDER BY id"));
   std::vector<int64_t> seen;
   absl::Status st = select->ForEachRow([&](Statement &s) -> absl::Status {
     seen.push_back(s.Column<int64_t>(0));
@@ -292,22 +290,23 @@ TEST_F(StatementTest, ForEachRowVisitsAllRowsInOrderAndStopsOnError) {
   ASSERT_THAT(st, IsOk());
   EXPECT_THAT(seen, ElementsAre(1, 2, 3));
 
-  ASSERT_OK_AND_ASSIGN(
-      Statement * select2, conn_.Prepared("SELECT id FROM t ORDER BY id"));
+  ASSERT_OK_AND_ASSIGN(Statement * select2,
+                       conn_.Prepared("SELECT id FROM t ORDER BY id"));
   std::vector<int64_t> seen2;
-  absl::Status stop_status = select2->ForEachRow([&](Statement &s) -> absl::Status {
-    seen2.push_back(s.Column<int64_t>(0));
-    if (seen2.size() == 2) return absl::InternalError("stop here");
-    return absl::OkStatus();
-  });
+  absl::Status stop_status =
+      select2->ForEachRow([&](Statement &s) -> absl::Status {
+        seen2.push_back(s.Column<int64_t>(0));
+        if (seen2.size() == 2) return absl::InternalError("stop here");
+        return absl::OkStatus();
+      });
   EXPECT_THAT(stop_status, StatusIs(absl::StatusCode::kInternal));
   EXPECT_THAT(seen2, ElementsAre(1, 2));
 }
 
 TEST_F(StatementTest, UniqueViolationMapsToAlreadyExists) {
   ASSERT_THAT(conn_.Exec("INSERT INTO t (id) VALUES (1)"), IsOk());
-  ASSERT_OK_AND_ASSIGN(
-      Statement * insert, conn_.Prepared("INSERT INTO t (id) VALUES (1)"));
+  ASSERT_OK_AND_ASSIGN(Statement * insert,
+                       conn_.Prepared("INSERT INTO t (id) VALUES (1)"));
   absl::StatusOr<bool> result = insert->Step();
   ASSERT_FALSE(result.ok());
   EXPECT_EQ(result.status().code(), absl::StatusCode::kAlreadyExists);
@@ -322,10 +321,10 @@ TEST_F(StatementTest, UniqueViolationMapsToAlreadyExists) {
 // StatusToErrno does not answer EAGAIN, which tells a caller to retry what
 // will not succeed.
 TEST(StorageErrorTest, EveryIoErrorCodeIsEio) {
-  for (int code : {SQLITE_IOERR, SQLITE_IOERR_READ, SQLITE_IOERR_SHORT_READ,
-                   SQLITE_IOERR_WRITE, SQLITE_IOERR_FSYNC, SQLITE_IOERR_DIR_FSYNC,
-                   SQLITE_IOERR_TRUNCATE, SQLITE_IOERR_NOMEM,
-                   SQLITE_IOERR_DELETE}) {
+  for (int code :
+       {SQLITE_IOERR, SQLITE_IOERR_READ, SQLITE_IOERR_SHORT_READ,
+        SQLITE_IOERR_WRITE, SQLITE_IOERR_FSYNC, SQLITE_IOERR_DIR_FSYNC,
+        SQLITE_IOERR_TRUNCATE, SQLITE_IOERR_NOMEM, SQLITE_IOERR_DELETE}) {
     absl::Status status = Sqlite3ErrorCodeToStatus(code);
     EXPECT_EQ(StatusToErrno(status), EIO) << sqlite3_errstr(code);
     EXPECT_EQ(status.code(), absl::StatusCode::kUnavailable);
@@ -360,11 +359,9 @@ TEST(StorageErrorTest, OtherCodesAreUnchanged) {
 TEST(ExecScriptTest, RunsMultipleStatementsAndSkipsCommentSemicolons) {
   ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
 
-  ASSERT_THAT(
-      conn.ExecScript(
-        "-- comment; with semicolon\n"
-        "CREATE TABLE a(x); INSERT INTO a VALUES(1);"),
-      IsOk());
+  ASSERT_THAT(conn.ExecScript("-- comment; with semicolon\n"
+                              "CREATE TABLE a(x); INSERT INTO a VALUES(1);"),
+              IsOk());
 
   ASSERT_OK_AND_ASSIGN(Statement * select, conn.Prepared("SELECT x FROM a"));
   ASSERT_THAT(select->Step(), IsOkAndHolds(true));
@@ -511,12 +508,11 @@ TEST(DurabilityTest, SyncTransactionRunsWithSynchronousFull) {
   EXPECT_THAT(plain, IsOkAndHolds(1));
 
   // NORMAL is restored after a failed kSync transaction too.
-  EXPECT_THAT(conn.Transaction(
-                  [&]() -> absl::Status {
-                    return absl::InternalError("body failed");
-                  },
-                  Durability::kSync),
-              StatusIs(absl::StatusCode::kInternal));
+  EXPECT_THAT(
+      conn.Transaction(
+          [&]() -> absl::Status { return absl::InternalError("body failed"); },
+          Durability::kSync),
+      StatusIs(absl::StatusCode::kInternal));
   EXPECT_FALSE(conn.InTransaction());
   EXPECT_THAT(Synchronous(conn), IsOkAndHolds(1));
 }
@@ -525,8 +521,8 @@ TEST(DurabilityTest, SyncInsideNormalTransactionIsRejected) {
   ASSERT_OK_AND_ASSIGN(Connection conn, OpenMemory());
   absl::Status inner;
   ASSERT_THAT(conn.Transaction([&]() -> absl::Status {
-    inner = conn.Transaction([] { return absl::OkStatus(); },
-                             Durability::kSync);
+    inner =
+        conn.Transaction([] { return absl::OkStatus(); }, Durability::kSync);
     return absl::OkStatus();
   }),
               IsOk());
@@ -540,8 +536,8 @@ TEST(DurabilityTest, SyncInsideNormalTransactionIsRejected) {
 // Transaction() that writes a row; A's BEGIN IMMEDIATE succeeds (RESERVED is
 // compatible with B's SHARED), but its COMMIT needs an EXCLUSIVE lock, which
 // B's SHARED lock blocks -- the connections have no busy timeout, so that
-// COMMIT fails with SQLITE_BUSY immediately. WAL mode's readers don't block a writer's commit,
-// so this needs the older rollback-journal mode instead.
+// COMMIT fails with SQLITE_BUSY immediately. WAL mode's readers don't block a
+// writer's commit, so this needs the older rollback-journal mode instead.
 TEST(TransactionUnwindTest, FailedCommitUnwindsAndConnectionStaysUsable) {
   std::string path = TestTmpFile("commit_busy.sqlite");
 
@@ -564,8 +560,8 @@ TEST(TransactionUnwindTest, FailedCommitUnwindsAndConnectionStaysUsable) {
   EXPECT_FALSE(a.InTransaction());
 
   // The failed COMMIT must have rolled back id=2 along with everything else.
-  ASSERT_OK_AND_ASSIGN(
-      Statement * count_stmt, a.Prepared("SELECT COUNT(*) FROM t"));
+  ASSERT_OK_AND_ASSIGN(Statement * count_stmt,
+                       a.Prepared("SELECT COUNT(*) FROM t"));
   ASSERT_THAT(count_stmt->Step(), IsOkAndHolds(true));
   EXPECT_EQ(count_stmt->Column<int64_t>(0), 1);
   ASSERT_THAT(count_stmt->Reset(), IsOk());

@@ -72,18 +72,15 @@
 #include "fuse_lowlevel.h"
 #include "fuse_opt.h"
 
-ABSL_FLAG(
-    double, attr_timeout_sec, 3600,
-    "How long the kernel may cache an inode's attributes.");
-ABSL_FLAG(
-    double, entry_timeout_sec, 3600,
-    "How long the kernel may cache a directory entry (lookup result).");
-ABSL_FLAG(
-    double, sync_interval_sec, 5,
-    "While mutations have left cache entries dirty (see README \"Crash "
-    "robustness\"), the first request after this many seconds since the "
-    "last sync point syncfs()es the backing filesystems and marks them "
-    "clean. Bounds how much is re-read after a power loss or crash.");
+ABSL_FLAG(double, attr_timeout_sec, 3600,
+          "How long the kernel may cache an inode's attributes.");
+ABSL_FLAG(double, entry_timeout_sec, 3600,
+          "How long the kernel may cache a directory entry (lookup result).");
+ABSL_FLAG(double, sync_interval_sec, 5,
+          "While mutations have left cache entries dirty (see README \"Crash "
+          "robustness\"), the first request after this many seconds since the "
+          "last sync point syncfs()es the backing filesystems and marks them "
+          "clean. Bounds how much is re-read after a power loss or crash.");
 
 namespace dcfs {
 namespace {
@@ -147,8 +144,8 @@ absl::Status CheckNoMoreAccessThanRoot(const std::string &path,
   return FailedPreconditionErrorBuilder()
          << path << " grants more access than the backing root directory ("
          << reason << "): " << path << " is mode "
-         << absl::StrFormat("0%o", m & 07777) << " uid " << st.st_uid
-         << " gid " << st.st_gid << "; the backing root is mode "
+         << absl::StrFormat("0%o", m & 07777) << " uid " << st.st_uid << " gid "
+         << st.st_gid << "; the backing root is mode "
          << absl::StrFormat("0%o", rm & 07777) << " uid " << root.st_uid
          << " gid " << root.st_gid;
 }
@@ -311,8 +308,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   absl::StatusOr<MountOptions> mount_opts =
       BuildMountOptions(options.fuse_options);
   if (!mount_opts.ok()) return MarkUsageError(mount_opts.status());
-  LOG(INFO) << "dcfs " << kVersion
-            << " starting: source=" << args.spec
+  LOG(INFO) << "dcfs " << kVersion << " starting: source=" << args.spec
             << " cache_db=" << cache_db << " mountpoint=" << mountpoint
             << " mount_options=" << absl::StrJoin(mount_opts->options, ",")
             << " attr_timeout_sec=" << absl::GetFlag(FLAGS_attr_timeout_sec)
@@ -453,11 +449,10 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
     }
     ASSIGN_OR_RETURN(FileHandle handle,
                      FileHandle::FromFd(*source_fd, root.device_id));
-    const bool same =
-        stored_root.backing_ino == root.backing_ino &&
-        (stored_root.backing_gen == 0 || root.backing_gen == 0 ||
-         stored_root.backing_gen == root.backing_gen) &&
-        (!stored_handle.ok() || *stored_handle == handle);
+    const bool same = stored_root.backing_ino == root.backing_ino &&
+                      (stored_root.backing_gen == 0 || root.backing_gen == 0 ||
+                       stored_root.backing_gen == root.backing_gen) &&
+                      (!stored_handle.ok() || *stored_handle == handle);
     if (!same) {
       return FailedPreconditionErrorBuilder()
              << "Cache database " << cache_db
@@ -486,10 +481,11 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   DirCacheFS fs(ctx, opts);
   // What the kernel shows for the mount (mountinfo, df, findmnt): the spec
   // as written, with the type fuse.dcfs. libfuse's own escape for a comma.
-  std::string fsname = absl::StrCat("fsname=", absl::StrReplaceAll(
-      args.spec, {{"\\", "\\\\"}, {",", "\\,"}}));
+  std::string fsname = absl::StrCat(
+      "fsname=",
+      absl::StrReplaceAll(args.spec, {{"\\", "\\\\"}, {",", "\\,"}}));
   std::vector<std::string> fuse_option_list = {
-      "-o", absl::StrJoin(opts.mount_options, ","), "-o", fsname, "-o",
+      "-o",          absl::StrJoin(opts.mount_options, ","), "-o", fsname, "-o",
       "subtype=dcfs"};
   if (options.read_only) {
     fuse_option_list.push_back("-o");
@@ -502,8 +498,8 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   fuse_arg_ptrs.reserve(fuse_arg_strings.size());
   for (std::string &arg : fuse_arg_strings) fuse_arg_ptrs.push_back(arg.data());
 
-  struct fuse_args fuse_args =
-      FUSE_ARGS_INIT(static_cast<int>(fuse_arg_ptrs.size()), fuse_arg_ptrs.data());
+  struct fuse_args fuse_args = FUSE_ARGS_INIT(
+      static_cast<int>(fuse_arg_ptrs.size()), fuse_arg_ptrs.data());
   absl::Cleanup cleanup_fuse_args = [&fuse_args]() {
     fuse_opt_free_args(&fuse_args);
   };
@@ -609,12 +605,14 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
 // 12): each of these needs a privilege no user has.
 absl::Status RequireRoot(std::string_view program) {
   if (syscalls::getuid() == 0) return absl::OkStatus();
-  return MarkUsageError(PermissionDeniedErrorBuilder()
-         << program << " must run as root (fstab's user option does not "
-            "work): FUSE passthrough, the private mount namespace and "
-            "open_tree need CAP_SYS_ADMIN, open_by_handle_at needs "
-            "CAP_DAC_READ_SEARCH, and acting with each caller's credentials "
-            "needs setfsuid, setfsgid and setgroups");
+  return MarkUsageError(
+      PermissionDeniedErrorBuilder()
+      << program
+      << " must run as root (fstab's user option does not "
+         "work): FUSE passthrough, the private mount namespace and "
+         "open_tree need CAP_SYS_ADMIN, open_by_handle_at needs "
+         "CAP_DAC_READ_SEARCH, and acting with each caller's credentials "
+         "needs setfsuid, setfsgid and setgroups");
 }
 
 // The wrapper: `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] [-o OPTIONS]`.
@@ -652,7 +650,8 @@ int MountHelperMain(int argc, char *argv[]) {
   if (checked.ok() && !options->remount) {
     // A mount point that is not a directory (a file mount point is refused,
     // decision 9).
-    absl::StatusOr<struct stat> st = syscalls::fstatat(AT_FDCWD, args->mountpoint);
+    absl::StatusOr<struct stat> st =
+        syscalls::fstatat(AT_FDCWD, args->mountpoint);
     if (!st.ok()) {
       checked = absl::StatusBuilder(st.status())
                 << "MOUNTPOINT " << args->mountpoint;

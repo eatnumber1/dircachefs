@@ -32,8 +32,9 @@ std::optional<uint64_t> MountIdFromStatx(const struct statx &stx);
 // backing object; Open() reopens it via open_by_handle_at(2).
 struct FileHandle {
   DeviceId device;
-  int handle_type = 0;          // struct file_handle::handle_type
-  std::vector<uint8_t> bytes;   // struct file_handle::f_handle, handle_bytes long
+  int handle_type = 0;  // struct file_handle::handle_type
+  std::vector<uint8_t>
+      bytes;  // struct file_handle::f_handle, handle_bytes long
 
   friend bool operator==(const FileHandle &, const FileHandle &) = default;
 
@@ -88,7 +89,7 @@ struct FileHandle {
   // must be a directory) to call GetDeviceId on it when the mount ids
   // actually differ.
   static absl::StatusOr<FileHandle> FromDirEntry(int dirfd,
-                                                  std::string_view name);
+                                                 std::string_view name);
 
   // Reopens the object this handle refers to: looks up a real (non-O_PATH)
   // fd for `device` in `mounts` and calls open_by_handle_at(2) with
