@@ -2446,3 +2446,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   rows not being durable, a handle-length check, the born scenario pinned against vacuity, comment
   trims, a sentence on every phase 1 of a born-dirty row taking the fast path). The reviewer's
   statement for russ is in the phase file. Sent back; merge next.
+- russ (2026-10-09): exception to 25.9 and its inverse: test code may crash when something not
+  under test fails (setup, infrastructure), and ASSERT/EXPECT are only for the property under
+  test, so "the test failed" and "the infrastructure failed to run the test" stay distinct. 25.9
+  gains a testonly `Require`/`REQUIRE_OK_AND_ASSIGN` helper (LOG(FATAL) with an "infrastructure
+  failure" prefix), the conversion of setup ASSERTs in the audit, the guest-script equivalent, and
+  a repo_shape check against ASSERT_OK_AND_ASSIGN in fixtures.
