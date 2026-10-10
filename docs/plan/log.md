@@ -2423,3 +2423,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   budgets in three deterministic parts, wall time only as the hang guard, a load-starvation flag,
   17.3 attributing by CPU and I/O counts); after the 15.6b/17.1/6.5 rounds merge; Gantt at
   dispatch.
+- russ (2026-10-09) shared the plan usage: session 26%, weekly all-models 65% (resets Friday 1:00
+  AM, a week out), weekly Fable 19%. Tokens bind again: process.md's budget paragraph amended
+  (about three lanes after the running rounds land, Opus reviews only for protocol/identity/oracle
+  steps, rules front-loaded into prompts, low effort for mechanical work, the protocol queue
+  sequenced, stop dispatching near 90%).

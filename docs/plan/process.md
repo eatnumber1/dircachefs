@@ -153,7 +153,15 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
 - At most two building agents (Bazel builds or QEMU tests) plus two
   non-building agents (reviews, docs, drafting) at a time: the dev
   machine (4 CPUs, 11 GB of RAM) is the limit, not tokens (Claude Max
-  since 2026-10-05). Each lane's `user.bazelrc` caps its tests, e.g.
+  since 2026-10-05). Amended 2026-10-09 after six lanes ran for a day:
+  russ's weekly all-models limit was 65% used with the reset a week out,
+  so tokens bind again. From then: about three lanes once the running fix
+  rounds land; Opus reviews only for protocol, identity and oracle steps
+  (mechanical and docs steps merge on the orchestrator's read plus CI);
+  rules front-loaded into dispatch prompts so a review is a check, not a
+  second design pass; low effort for mechanical work; the protocol-heavy
+  queue sequenced rather than parallel; no new dispatches near 90% of the
+  weekly limit, and russ told. Each lane's `user.bazelrc` caps its tests, e.g.
   `test --local_test_jobs=2` and `build --local_resources=memory=4096`. Prefer `SendMessage` follow-ups to
   new agents. Shut down agents, background loops and Bazel servers that
   are no longer needed.
