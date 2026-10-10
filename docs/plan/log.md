@@ -2735,3 +2735,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   table row. First use: 25.15 when it reports.
 - russ: the orchestrator may answer style questions when it has an opinion; the question still
   goes to him with the answer beside it. process.md amended.
+- Usage snapshot (russ, 2026-10-10 midday): weekly all-models 86% (84% this morning), Fable 35%
+  (32%), reset Friday 2026-10-16 01:00. The 2-point all-models rise covered 25.12, 25.14, 26.21,
+  26.17a and part of 26.22 (about 1.1M subagent tokens) plus the Fable session; Fable's 3-point
+  rise cost at most 2 all-models points, so the Fable meter is the finer-grained one and Fable
+  draws on all-models at under one point per Fable point. Pace: 14 points over 5.5 days is about
+  2.5 a day; after 26.22, 25.15 and the 26.17a review land, one lane at a time.
