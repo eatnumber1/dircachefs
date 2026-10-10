@@ -358,6 +358,26 @@ delegated, why the cache is rebuilt not repaired). `dcfs exports` stays
 in 15.5 as before. Owner: dcfs-implementer, after 15.6b merges (same
 wrapper code and systemd test); under the budget throttle, in the first
 of the three lanes to free after that.
+**15.6d Kernel: synchronous `FUSE_DESTROY` for plain mounts (russ, 2026-10-10).**
+russ asked whether FUSE gives the daemon a callback that blocks the
+unmount. It does only for `fuseblk` and virtiofs (the connection's
+`destroy` flag): for a plain `fuse` mount `umount` tears the connection
+down and the daemon learns of it from ENODEV on `/dev/fuse`, after the
+fact. That is why 15.6b's helper and lock exist. The patch: an INIT
+opt-in that makes the kernel send `FUSE_DESTROY` synchronously at unmount
+and wait for the reply (a few lines around `fuse_fill_super_common`'s
+`destroy` flag and `fuse_send_destroy`), so a daemon that completes its
+shutdown in the DESTROY reply makes `umount` return after it has
+finished; the aborted-connection path must keep `umount` from hanging on
+a daemon that died mid-shutdown, as it does for fuseblk today. `fuseblk`
+itself is not an option (the kernel opens the device exclusively). Steps:
+(1) draft the patch with a test in the FUSE generation suite's style
+(russ sends; beside the generation series); (2) when a kernel ships it,
+dcfs negotiates the flag, finishes FinishRun inside the DESTROY handler,
+and the helper and lock become the fallback for older kernels, detected
+at INIT. Listed in `notes/kernel-patches.md` (#6). Owner: dcfs-protocol
+for the draft, much later for (2).
+
 **15.6c The Debian image fetch fails over IPv6 (CI run 38009667624, 2026-10-10).**
 The first push after 15.6 merged failed in the fast job before any test
 ran: Bazel could not fetch `@debian_cloud_image` ("Connect timed out").

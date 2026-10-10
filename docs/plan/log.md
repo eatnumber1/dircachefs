@@ -2524,3 +2524,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `sleep 1` after a thaw in the born scenario. Push point: main after this entry (537a7ef plus
   15.6b). Lane-6 continues with 15.5 (fsck.dcfs) + 15.8 (allow_other always on), same agent,
   same wrapper code.
+- russ (2026-10-10) asked whether FUSE blocks the unmount on a daemon callback: only fuseblk and
+  virtiofs get a synchronous FUSE_DESTROY; plain fuse mounts learn after the fact, hence the
+  15.6b helper. Recorded 15.6d (an INIT opt-in for synchronous DESTROY; the helper becomes the
+  fallback) and started `notes/kernel-patches.md`, the list of kernel patches we want: the FUSE
+  generation series, the ext4 casefold tune oops, the btrfs destroy_inode warning, fuse_setattr's
+  setgid rule, the dcache connected-alias preference, and this one.
