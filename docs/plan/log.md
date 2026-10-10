@@ -2848,3 +2848,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   auto-fix sweeps) dispatched to the same agent, bounded to the two largest checks overnight
   (include-cleaner 560, designated-initializers 60) so the spend stays near the pace; the rest
   of the list continues in the morning.
+- 25.23 part 1 merged (lane-2 → 4608f4f, gate exit 0). Overnight tally: 25.15, 26.17a, 26.22,
+  25.21, 25.22, 25.17, 25.23 part 1 merged; main is the push point. Stopping dispatches for the
+  night (estimated spend about 3 points; the meter is read in the morning). Lane-2's agent is
+  resumable for the rest of 25.23.

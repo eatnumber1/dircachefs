@@ -750,3 +750,21 @@ made here: a captureless callback stored in a const table is a plain
 function pointer; the CLOCK_* include-cleaner finding is a tool conflict
 (include-cleaner credits only <time.h>, deprecated-headers forbids it in
 C++), one allowlist line with the reason, to be settled once in 25.23.
+
+25.23 part 1 merged 2026-10-10 (4608f4f, mechanical agent, three
+commits): `bazel run //tools:style_fix -- --check=<name> <files>` runs
+one clang-tidy check with `--fix` under the aspect's own flags (a
+`.flags.txt` output per source from the aspect, one flag source) and
+clang-formats the changed lines; misc-include-cleaner 570 → 393 findings
+(46 files fixed, 21 reverted whole because the tool removed a header it
+does not credit for a macro (sys/mount.h MS_*, sys/xattr.h XATTR_*,
+sys/ioctl.h), picked glibc-internal or kernel headers (bits/*,
+asm-generic/*), or added a deprecated C header; those 21 are the hand
+work); modernize-use-designated-initializers 60 → 0. Gaps: the fixer
+has unit tests of its arithmetic but no end-to-end fixture test (a
+py_test sandbox cannot reach the execution root and sysroot; a
+`sh_test` with the real toolchain, or a `bazel run`-driven check, is the
+follow-up); the CLOCK_* include-cleaner case is unsettled (the tool
+credits no header at all for CLOCK_MONOTONIC/REALTIME: a
+`syscalls.h` named constant or a deny of that symbol family in the
+check's options is tomorrow's decision).
