@@ -86,6 +86,22 @@ are then the same on every machine and in CI.
   review agents, spot-checked by russ), precision/recall per rule. A rule
   at >= 98% precision may gate; below that advisory or dropped. After
   7.5b, so the matchers show what is left for a model.
+- 7.6a C++ reformat to Google's rules, now (russ, 2026-10-11: "When we do
+  a codebase-wide reformat, I want Google's format rules to apply. Also
+  when are we doing that?"; dispatched the same morning, mechanical,
+  lane-2, while no lane holds an unmerged code branch): `.clang-format`
+  becomes `BasedOnStyle: Google` alone (the `PointerAlignment: Right` and
+  `DerivePointerAlignment: false` overrides go); `bazel run //tools:format`
+  runs the pinned clang-format over the tracked C/C++ files;
+  `//tools:format_test` (`small`, in `--config=fast`) runs it in
+  `--dry-run -Werror` mode; one reformat commit over the whole tree, its
+  hash in `.git-blame-ignore-revs`; the style-check allowlist's keys carry
+  no line numbers, so they survive, but the counts of line-sensitive
+  checks may move and the test tells. Also 7.6a: `tools/*.c` tabs and the
+  long lines the old 7.6 text lists, as far as clang-format settles them.
+- 7.6b (after the reset): buildifier, shfmt (`-i 2 -ci -bn`) and
+  shellcheck pinned and added to `//tools:format` and `format_test`, the
+  shell and BUILD reformat in one commit each, the pre-commit hook.
 - 7.6 Formatting enforced (russ, 2026-10-07; `docs/style.md`): the pinned
   LLVM's clang-format and a pinned buildifier (BCR or `http_file`) behind
   `bazel run //tools:format` (replaces `tools/format.sh`'s "if installed"),

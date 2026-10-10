@@ -2860,3 +2860,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   definitions). Usage this morning: 91% all-models, 40% Fable; two points a day; one Haiku lane.
 - russ: the "anything goes unsubmitted" rule is about code shape, not actions (no `rm -rf /`);
   style 1.11 and the agent definitions say the operating rules hold at all times.
+- russ: the codebase-wide reformat uses Google's rules; asked when. Now is the quiet window (every
+  code branch is merged), so 7.6a dispatched (mechanical, lane-2): .clang-format pure Google,
+  //tools:format and format_test, one reformat commit in .git-blame-ignore-revs; 7.6b (buildifier,
+  shfmt, shellcheck pins) after the reset. Style 1.1 updated.

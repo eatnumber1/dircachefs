@@ -40,18 +40,17 @@ use it as design guidance rather than firm rules."
 
 ### 1.1 Enforced mechanically
 
-- **Formatting is enforced, not requested.** clang-format (Google style,
-  `.clang-format`: `IndentWidth: 2`, `ColumnLimit: 80`, `PointerAlignment:
-  Right`) for C and C++, buildifier for Bazel files, shfmt for shell (4).
-  All are pinned through Bazel. `//tools:format_test` (tier `small`) runs
-  them in check mode (`clang-format --dry-run -Werror`, `buildifier
-  -mode=check`, `shfmt -d`) over the tracked files, so `bazel test
-  --config=fast //...` and CI fail on an unformatted file. `bazel run
-  //tools:format` reformats (it replaces
-  `tools/format.sh`). An opt-in `.githooks/pre-commit` runs the check
-  (`git config core.hooksPath .githooks`). `tools/*.c` are reformatted,
-  not excluded. None of this exists yet (Appendix A, F1-F5); it arrives
-  with phase 7's LLVM toolchain (shell: step 7.6, with shellcheck).
+- **Formatting is enforced, not requested, and it is Google's.** `.clang-format`
+  is `BasedOnStyle: Google` and nothing else (russ, 2026-10-11: "When we do
+  a codebase-wide reformat, I want Google's format rules to apply"); the
+  earlier `PointerAlignment: Right` override goes with the reformat (7.6a),
+  so pointers read `int* p` as Google writes them. The pinned LLVM's
+  clang-format runs behind `bazel run //tools:format` and a `small`
+  `//tools:format_test` checks every tracked C/C++ file in `--dry-run
+  -Werror` mode; buildifier for Bazel files and shfmt/shellcheck for shell
+  (Google shell style) follow in 7.6b with their pins. The one-time
+  reformat is one commit, listed in `.git-blame-ignore-revs`, made when no
+  lane holds an unmerged code branch, since it touches most lines.
 - **Structural style rules are checked by the pinned LLVM's own tools, in a
   test of tier `small`** (25.21): `//tools:style_checks_test` runs
   clang-tidy (`.clang-tidy`: the `google-`, `abseil-`, `bugprone-`, `cert-`,
