@@ -2793,3 +2793,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   not described in a comment (the worked example now guards uid/gid -1); two statuses are never
   joined, return the first (the second is usually a consequence). Style 1.6a updated; sent to the
   25.15 agent.
+- russ: since an unmapped id is possible under idmapped mounts, the check moves into syscalls.h
+  and setfsuid/setfsgid return a Status (sentinel refused with EINVAL, read-back, EPERM if it did
+  not take; fsuid()/fsgid() query irregulars). The deleted read-back test comes back against the
+  wrapper. Style 1.5, 1.6a and the worked example updated; sent to the 25.15 agent.

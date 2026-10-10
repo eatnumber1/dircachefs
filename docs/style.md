@@ -266,10 +266,11 @@ whether a call can fail** (russ, 2026-10-10: "for the most part all
 syscalls will return a Status indicating failure (that's _why_ we have
 syscalls.h)"): a wrapper returns `Status`/`StatusOr` unless the manpage
 says the call cannot fail, in which case it returns the value or nothing
-(`setfsuid`, `setfsgid`, `umask`, `syscalls.h:34-40`), and the
-special cases where failure comes back inside the result (a struct with a
-per-item error, a partial count) are decoded by the wrapper into a
-`StatusOr` or documented at the wrapper. Callers never need to know which
+(`umask`), and the special cases where failure comes back inside the
+result (a struct with a per-item error, a partial count, or `setfsuid`'s
+silent refusal that only a read-back with the -1 sentinel detects, which
+the wrapper does and returns as a `Status`, 25.15) are decoded by the
+wrapper into a `Status`/`StatusOr` or documented at the wrapper. Callers never need to know which
 is which: `Status` is `[[nodiscard]]`, so a call that can fail cannot be
 dropped, and a bare call compiles only for one that cannot (1.6a). Anything else is a helper in `backing.cc` built on the plain
 wrappers: the `/proc/self/fd/N` trick is a backing helper calling
@@ -525,20 +526,26 @@ wants, as the worked example:
 absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
   RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
-  // setfsuid/setfsgid ignore an id they cannot use; the kernel never sends
-  // one (an unmapped caller's request fails with EOVERFLOW), so this is an
-  // invariant, asserted.
-  RET_CHECK_NE(caller.uid, static_cast<uid_t>(-1)) << "unmapped caller uid";
-  RET_CHECK_NE(caller.gid, static_cast<gid_t>(-1)) << "unmapped caller gid";
   ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
   absl::Cleanup restore_root = [&saved] { RestoreRoot(saved); };
-  syscalls::setfsgid(caller.gid);
+  RETURN_IF_ERROR(syscalls::setfsgid(caller.gid));
   RETURN_IF_ERROR(syscalls::setgroups(caller.groups));
-  syscalls::setfsuid(caller.uid);
+  RETURN_IF_ERROR(syscalls::setfsuid(caller.uid));
   std::move(restore_root).Cancel();
   return saved;
 }
 ```
+
+Why `setfsuid` returns a `Status` here when the syscall reports no error:
+russ, 2026-10-10, once the reviewer showed an unmapped id is possible
+under idmapped mounts: "Ok, so it's possible then. In that case, do the
+check in syscalls.h and make the setfsgid/setfsuid functions return a
+Status." The wrapper refuses the query sentinel (-1) with EINVAL, calls
+the syscall, reads the id back with the sentinel form, which setfsuid(2)
+documents as the only way to detect failure, and returns EPERM if it did
+not take. That is 1.5's "failure comes back inside the result, decoded by
+the wrapper" case, and the caller is back to the general form with no
+guard and no comment.
 
 (russ's original had `absl::Cleanup restore_root([&saved]() {...});` and
 a `// ... is guaranteed to never fail` comment on each bare call; the
@@ -628,11 +635,12 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
      "additionally, ... failed" builders, no `Status::Update`.
   5. A bare call of a cannot-fail wrapper carries no "cannot fail"
      comment (1.5 says why). Where such a call silently ignores some
-     inputs that a guarantee says cannot arrive, the guarantee is asserted
-     as a guard, not described in a comment (russ, 2026-10-10: "This kind
-     of case deserves a RET_CHECK_NE rather than a comment"):
-     `RET_CHECK_NE(caller.uid, static_cast<uid_t>(-1))` at the top of
-     `SwitchTo`.
+     inputs, the first question is whether the input can arrive at all;
+     if a configuration we may adopt makes it possible, the wrapper
+     checks and returns a `Status` (russ, 2026-10-10: `setfsuid`,
+     `setfsgid`); if it is a true invariant, it is asserted as a guard
+     (`RET_CHECK_NE`), never described in a comment (russ: "This kind of
+     case deserves a RET_CHECK_NE rather than a comment").
   6. A Cleanup is declared `absl::Cleanup name = [captures] { ... };`
      (Abseil's documented form, no empty parameter list).
 - **Program output is `absl::PrintF`/`FPrintF`/`SNPrintF`/`StrFormat`,
