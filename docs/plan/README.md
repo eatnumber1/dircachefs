@@ -67,6 +67,48 @@ crash, power-loss and failure tests pass. Deployment on a server with
 precious data waits for every phase, including the soak test, and the
 final hardware check (Phase 21.2).
 
+## Queue (russ, 2026-10-11: "I agree with you. Change the schedule.")
+
+New phases are frozen. The order from here, and why:
+
+1. **Finish what is in flight**, nothing new beside it: 25.23's remaining
+   clang-tidy sweeps (lane-2, Haiku), the 26.24 CI triage (lane-1), and
+   any red push.
+2. **21.1, the spare-disk trial** (russ, on real hardware; the procedure in
+   phases/21 and its notes for his setup). The orchestrator's part: a
+   one-page runbook for russ's machine (the HWE kernel boot, the fstab
+   line, the warm-up, the hour of metadata work with `hdparm -C` checks,
+   what to capture: the daemon's CPU seconds, the sync-point cadence
+   against the spin-down, the NFS clients' behaviour) as the first
+   dispatch once (1) lands. Everything below is ordered by what this
+   teaches; a spin-up during metadata-only work reorders it again.
+3. **26.17b, deterministic budgets** (CPU seconds, I/O counts by kind,
+   request and syscall counts; wall time as the hang guard only; the
+   load-starvation flag), so every number quoted afterwards is hard.
+4. **17.3, the slowness** (metadata-heavy xfstests at 20-50x the backing;
+   one run inside an SQLite fsync): attribute by daemon CPU and fsync
+   counts against the native run, then say whether it is tuning (sync
+   cadence, SQLite settings) or design (one request at a time, a
+   transaction per operation). It may change the daemon's structure, so
+   it comes before more features.
+5. **25.10 and 12.16 (with 12.18), the atomicity contract**: the three
+   bounded retries out with a liveness property in the model; the ideal
+   spec as SibylFS's semantics restricted to our operations; the checker
+   spike. Before coroutines reopen the races the current design makes
+   impossible by construction.
+6. **Then, by what the trial teaches.** Parked until then, in no order:
+   the style backlog (25.9 audit, 25.11, 25.13, 25.16, 25.20, 25.24,
+   25.25), 26.18 (e2e oracles in C++), 26.23 (blocked-task diagnostics),
+   15.10 (fusectl in the remounting guests), 12.11b/c, 12.15, 12.17,
+   17.2 (setgid), 17.1b/c, 11.7's remainder, 11.3c, 7.3, 7.6b, 7.7,
+   26.14b, the kernel bug mails and patches (russ). The style checks
+   keep every new line to the rules meanwhile; the backlog shrinks as
+   code is touched for other reasons, not as a campaign.
+
+Budget: the weekly meter is at 91% on 2026-10-11 with the reset on
+Friday 2026-10-16 01:00; one Haiku lane until then, Sonnet for a red
+push; the queue above starts in earnest after the reset.
+
 ## Open decisions
 
 - **Statistics design** (Phase 20).

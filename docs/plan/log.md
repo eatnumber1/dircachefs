@@ -2894,3 +2894,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (remounting after the cut failed)`, first run of the RAM-disk fault tests under ubsan in CI;
   26.24 triage dispatched. Coverage gate: lines 96.27, branches 80.85 (baseline 95.97/79.68): the
   bump to 96.26/80.85 goes with 26.24. fast job 17 min with the style checks cold.
+- russ agreed with the orchestrator's assessment and changed the schedule: README.md gains a Queue
+  section (finish in-flight; the spare-disk trial with a runbook for russ's machine; 26.17b
+  budgets; 17.3 slowness; 25.10 + 12.16/12.18 atomicity; then by what the trial teaches, the
+  style backlog and the rest parked). New phases frozen; process.md points at the Queue.

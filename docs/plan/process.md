@@ -175,6 +175,10 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   are no longer needed.
 - If a step needs more than about three agent runs to land, pause and tell
   russ: something is probably wrong with the step.
+- **The order of work is `README.md`'s Queue section** (russ, 2026-10-11),
+  not the phase numbers: the spare-disk trial first, then budgets, the
+  slowness, the atomicity contract, then the rest by what the trial
+  teaches. New phases are frozen; a new idea goes into the parked list.
 - **The agent that wrote the code runs the style checks on it** (russ,
   2026-10-10: "Make sure coders run clang-tidy before being shut down.
   Don't want to lose their context!"). Every coding agent's last act
