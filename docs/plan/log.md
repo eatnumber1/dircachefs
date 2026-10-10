@@ -2700,3 +2700,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   permission error copying two coverage test logs); the new xfstests job red on xfs
   (generic/464) and ext4 (generic/464, 524, 610, 754), all green in 17.1's local runs. 26.22
   dispatched (investigator, lane-3).
+- russ rewrote SwitchTo and asked for style amendments: style 1.6a written (guards first then a
+  straight line; undo as a cancellable Cleanup; bare calls that cannot fail with the fact beside
+  them; comments as facts at the line; the consumed-Status shape a preference, not a rule, at his
+  correction); clang-tidy readability checks named for 7.1; 25.15 queued (SwitchTo and the ten
+  accumulators) after 25.14; RestoreRoot's CHECK added to 25.9's list.

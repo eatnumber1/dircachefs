@@ -317,6 +317,9 @@ verdict rules already treat a missing RESULT line as a harness failure:
 say so in test/qemu/README). Mechanical: repo_shape refuses
 `ASSERT_OK_AND_ASSIGN` inside `SetUp()`/fixture constructors of `*_test.cc`
 (known-bad fixture); the rest is review.
+- Added 2026-10-10: `RestoreRoot` (`backing.cc`) ends in a `CHECK` that the
+  thread's credentials are back to root; a production crash for russ's
+  ruling (the comment argues carrying on as the wrong user is worse).
 
 ## 25.8 Abseil's Tips of the Week as design guidance (russ, 2026-10-09)
 
@@ -449,3 +452,19 @@ builds it once from the FixedArray; one allowlist entry remains
 Finding for 7.6: the pinned clang-format (22.1.8) reflows hundreds of
 lines of the untouched tree, so no format check exists today and the
 baseline is not clean; 7.6's one-time reformat is where that lands.
+
+## 25.15 Function shape: guards, straight line, cancellable undo (russ, 2026-10-10; after 25.14, lane-2)
+
+Style 1.6a. Rewrite `SwitchTo` exactly as the worked example (the
+read-back checks go: the cause they guarded is unreachable from a FUSE
+request, say so in the commit), then the other `absl::Status status;`
+accumulators in `dcfs/*.cc` (ten `if (status.ok())` ladders today) where
+the preferred shape fits; where something must happen between the
+failure and the return that a `Cleanup` cannot express, leave the ladder
+and add the one-line reason. Hand-written undo in error branches becomes
+a `Cleanup` with `Cancel()` at the commit point. No behaviour change;
+the existing tests cover these paths (check `backing_test.cc`'s SwitchTo
+cases still pass and still fail on the old bug they were written for).
+Also: `RestoreRoot`'s `CHECK` is a production crash; it goes on 25.9's
+list for russ, not changed here. Owner: dcfs-implementer (judgement per
+site), medium effort. The clang-tidy checks named in 1.6a land with 7.1.

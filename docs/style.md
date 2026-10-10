@@ -394,6 +394,67 @@ repeating itself, because each added piece says something new.
 
 **Return a failed status or log it, never both** (1.7).
 
+### 1.6a Shape of a function that does several things
+
+russ, 2026-10-10, rewriting `SwitchTo` in `backing.cc`. The shape he
+wants, as the worked example:
+
+```c++
+absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
+  RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
+  RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
+  ABSL_ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
+  absl::Cleanup restore_root([&saved]() { RestoreRoot(saved); });
+  // setfsgid is guaranteed to never fail
+  syscalls::setfsgid(caller.gid);
+  ABSL_RETURN_IF_ERROR(syscalls::setgroups(caller.groups));
+  // setfsuid is guaranteed to never fail
+  syscalls::setfsuid(caller.uid);
+  std::move(restore_root).Cancel();
+  return saved;
+}
+```
+
+What it replaced had an `absl::Status status;` filled by three
+`if (status.ok())` steps, a nested block for the last one, a hand-written
+`RestoreRoot` in the error branch, read-back checks for a case no FUSE
+request can produce (an unmapped id arrives as the overflow uid, which
+the kernel accepts), and `dcfs::`-qualified names.
+
+- **Guards first, then one straight line** (rule). Preconditions and
+  invariants are `RET_CHECK`s at the top. After them the body reads top to
+  bottom as the sequence of effects, with no nesting for sequencing and no
+  `else` after a `return`. A happy path that is indented is failure
+  handling written inline: unwrite it.
+- **Undo is an `absl::Cleanup` declared right after the thing it undoes,
+  and success cancels it** (rule). Each early return then undoes exactly
+  what happened before it with no code of its own, and the commit point
+  is the one `std::move(x).Cancel()` line. Hand-written undo in an error
+  branch (`if (!status.ok()) { RestoreRoot(saved); return status; }`) is
+  the shape to refuse.
+- **A call that cannot fail is made bare, with the fact beside it**
+  (rule, from 1.10a). `// setfsgid is guaranteed to never fail` on the
+  line; no result checked, no read-back, no branch. The author states the
+  fact and the reviewer checks it: that is domain knowledge no rule can
+  supply.
+- **Comments are facts at the line that needs them** (rule). The header
+  says what the function does and the one non-obvious constraint (here:
+  fsgid and groups before fsuid, and why); it does not narrate the
+  statements.
+- **Prefer a `Status` consumed by the statement that makes it**
+  (preference, not a rule; russ: "Sometimes you need to do something in
+  between, but prefer other constructs if possible").
+  `ABSL_RETURN_IF_ERROR(f())`, `ABSL_ASSIGN_OR_RETURN`, `RET_CHECK`. A
+  `Status` variable that outlives one statement, and a ladder of
+  `if (status.ok())`, is the failure path written by hand and hides which
+  call failed; reach for it only when something must happen between the
+  failure and the return that a `Cleanup` cannot express, and say what.
+- **Mechanically** (7.1's clang-tidy): `readability-else-after-return`,
+  `readability-misleading-indentation`,
+  `readability-function-cognitive-complexity` with a low threshold (start
+  at 15, tighten as the tree allows). The accumulator preference is not
+  enforced.
+
 ### 1.7 Logging
 
 Abseil logging, `absl/log/log.h` and `absl/log/check.h`, with Abseil's own
