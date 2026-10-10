@@ -7,12 +7,13 @@ merge); this file orders the steps.
 
 ## Ground rules
 
-- **Lanes.** Tokens are not the limit (Claude Max). russ accepts swapping
-  on the dev machine (4 CPUs, 11 GB; 2026-10-06), so run as many lanes as
-  have non-conflicting work: today up to four building lanes with
-  per-lane caps in `user.bazelrc` (`--jobs=2`, one test at a time for
-  the extra lanes) plus non-building lanes (reviews, the TLA+ model,
-  docs). Watch for guest-test timeouts caused by contention; if they
+- **Lanes.** The dev machine has 8 cores and 62 GB since the reboot of
+  2026-10-10 (4 CPUs, 11 GB before). Tokens are the limit now
+  (`process.md`, budget paragraph: about three lanes), not the machine:
+  every lane's `user.bazelrc` caps it at `--jobs=4`, `--local_test_jobs=4`
+  and 20 GB of build memory, which three lanes share comfortably; raise
+  the caps before the lane count. Non-building lanes (reviews, the TLA+
+  model, docs) cost nothing here. Watch for guest-test timeouts caused by contention; if they
   appear, pause the newest lane rather than raise timeouts. Phases may
   start out of the listed order when they depend on nothing in flight.
   Where a third building lane would help, it is marked "(lane 3 if the

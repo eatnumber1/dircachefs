@@ -2666,3 +2666,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   orchestrator): both failures of run 38025358346 were harness (snapshot reads moving atimes
   behind a regressed clock; coverage initramfs growth near the watermark). Push point announced:
   main after this plan commit. Lane-1 free, its Bazel server left running for the reboot.
+- Machine rebooted 2026-10-10 with 8 cores and 62 GB (was 4 CPUs, 11 GB; kernel still
+  6.8.0-146). Every lane's user.bazelrc now `--jobs=4`, `--local_test_jobs=4`, 20 GB;
+  execution.md's ground rule updated. russ pushed 75239c4; CI run 38030966315 watched in the
+  background. The freeze holds (weekly 84%); nothing dispatched.
