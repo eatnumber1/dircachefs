@@ -2547,3 +2547,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   same strictness as allow_other, two lines if wanted); the capture helper keeps only the
   native-type branch; tests converted or deleted with the reasons; README's section becomes
   "`none`, and the native bind recipe"; 15.4 loses the bind bookkeeping.
+- russ (2026-10-10): "Kernel bind mounts aren't detached clones, and we've never shipped dcfs."
+  The refusal rationale was wrong; `bind` becomes an alias of `none`, documented as a synonym,
+  with one behaves-as-none test. Lane-6 told; the rest of 15.9 stands.
+- russ (2026-10-10): "maybe we rename none to bind and drop the name 'none' entirely." Done that
+  way: the directory form is `dcfs.fstype=bind`, `none` is an unknown value; lane-6 told to rename
+  across code, tests, docs and guest wrappers and report the grep.

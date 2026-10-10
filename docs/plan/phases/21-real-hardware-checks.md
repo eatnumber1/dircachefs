@@ -61,8 +61,12 @@ and a soak run), and 21.2 passes.
   To verify in the trial: `.snapshots` appears as a stub, the rest of the
   tree is unaffected (15.4 finishes the stub behaviour), a snapraid sync
   during the trial changes nothing dcfs serves.
-- **First configuration.** The `none` form over a directory of the spare
-  disk, `dcfs.cache_db` on the fast disk, a tree without submounts, the
+- **First configuration.** The directory form (`dcfs.fstype=bind` since
+  15.9; `none` before it) over a directory of the spare disk, or the
+  production shape (a native bind of the disk to a raw path, then dcfs
+  over the original path with `requires-mounts-for` on the raw one, so
+  consumers keep their paths and snapper/snapraid use the raw path),
+  `dcfs.cache_db` on the fast disk, a tree without submounts, the
   README's operations table at hand; collect the daemon's CPU seconds and
   the sync-point cadence against the disk's spin-down (what the design
   promises and no test measures on real hardware); expect a slow first

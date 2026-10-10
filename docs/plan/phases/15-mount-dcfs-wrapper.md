@@ -399,12 +399,17 @@ entry in the mount table, backing-side read-only) is reproducible with
 one standard fstab line or is of no use to us, at the cost of a second
 capture code path (`mount --bind`, the bind-specific ro remount keeping
 nosuid/nodev/noexec, the bind spec rules), its tests and docs, and 15.4's
-planned bookkeeping of recorded bind mount points. So: the option is
-refused as a usage error with a one-line pointer to the recipe (no alias
-to `none`: an alias would silently give the pinned-mount semantics to
-someone who asked for a detached clone, and nothing has deployed yet;
-russ asked "maybe make fstype=bind an alias for none?", two lines if he
-wants it after all); the capture helper keeps only the native-type
+planned bookkeeping of recorded bind mount points. Final form (russ,
+2026-10-10, in three steps: first "delete it", then "maybe make
+fstype=bind an alias for none" after the orchestrator's refusal rationale
+fell: "Kernel bind mounts aren't detached clones, and we've never shipped
+dcfs", then "maybe we rename none to bind and drop the name 'none'
+entirely"): the directory form is spelled `dcfs.fstype=bind` ("SOURCE is
+a directory, opened in place": the former `none` semantics, the real
+mount pinned and busy) and `none` is gone, an unknown value with the
+generic error; renamed across code, tests (`none-*` checks become
+`bind-*`, converted never weakened), README, man, design.md, the guest
+wrappers; a grep for the old spelling reported; the capture helper keeps only the native-type
 branch; tests converted to `none` where they tested shared behaviour and
 deleted where bind-only; README's section becomes "`none`, and the native
 bind recipe" (a native bind of the disk to a raw path first, then dcfs
