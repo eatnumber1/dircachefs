@@ -168,7 +168,11 @@ http_file(
     name = "debian_cloud_image",
     downloaded_file_path = "debian-13-nocloud-amd64.qcow2",
     integrity = "sha512-RW8kT2a9+tRb6ME3hjDv+sDqKmfoJsmcKA7bikC3R7c6pnBX+jkTCqzVPfgqZiaD4GI4Zn/R8Vu9pYHAI4PrRg==",
-    urls = ["https://cloud.debian.org/images/cloud/trixie/20261001-2618/debian-13-nocloud-amd64-20261001-2618.qcow2"],
+    urls = [
+        "https://cloud.debian.org/images/cloud/trixie/20261001-2618/debian-13-nocloud-amd64-20261001-2618.qcow2",
+        "https://saimei.ftp.acc.umu.se/images/cloud/trixie/20261001-2618/debian-13-nocloud-amd64-20261001-2618.qcow2",
+        "https://cdimage.debian.org/images/cloud/trixie/20261001-2618/debian-13-nocloud-amd64-20261001-2618.qcow2",
+    ],
 )
 
 # Phase 5.3: Python for tools/sbom/ (the SBOM generator and its test), a
