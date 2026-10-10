@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/fixed_array.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
@@ -41,7 +42,7 @@ struct RawHandle {
 // mount id.
 absl::StatusOr<RawHandle> NameToHandle(int dirfd, std::string_view pathname,
                                        int flags) {
-  std::vector<uint8_t> buf(sizeof(struct file_handle) + MAX_HANDLE_SZ);
+  absl::FixedArray<uint8_t> buf(sizeof(struct file_handle) + MAX_HANDLE_SZ);
   auto *handle = reinterpret_cast<struct file_handle *>(buf.data());
   handle->handle_bytes = MAX_HANDLE_SZ;
 
@@ -176,7 +177,7 @@ absl::StatusOr<FileDescriptor> FileHandle::Open(const MountFds &mounts,
                                                  int flags) const {
   ABSL_ASSIGN_OR_RETURN(int mount_fd, mounts.Get(device));
 
-  std::vector<uint8_t> buf(sizeof(struct file_handle) + bytes.size());
+  absl::FixedArray<uint8_t> buf(sizeof(struct file_handle) + bytes.size());
   auto *handle = reinterpret_cast<struct file_handle *>(buf.data());
   handle->handle_bytes = static_cast<unsigned int>(bytes.size());
   handle->handle_type = handle_type;

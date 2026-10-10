@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/fixed_array.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -248,7 +249,7 @@ absl::Status FuseRequest::ReplyXattrSize(size_t size) {
 absl::Status FuseRequest::ReplyDirs(
     std::span<FuseDirEntry> entries, size_t maxsize) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
-  std::vector<char> buf(maxsize);
+  absl::FixedArray<char> buf(maxsize);
   size_t used = AppendDirEntries(*req_, buf.data(), buf.size(), entries);
   return ReplyBuf(std::string_view(buf.data(), used));
 }
@@ -256,7 +257,7 @@ absl::Status FuseRequest::ReplyDirs(
 absl::Status FuseRequest::ReplyDirsPlus(
     std::span<FuseDirEntryPlus> entries, size_t maxsize) {
   RET_CHECK(req_.has_value()) << "FuseRequest already replied";
-  std::vector<char> buf(maxsize);
+  absl::FixedArray<char> buf(maxsize);
   size_t used = AppendDirEntriesPlus(*req_, buf.data(), buf.size(), entries);
   return ReplyBuf(std::string_view(buf.data(), used));
 }

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "absl/cleanup/cleanup.h"
+#include "absl/container/fixed_array.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
 #include "absl/log/check.h"
@@ -161,15 +162,14 @@ absl::StatusOr<std::vector<std::string>> ListXattrOPath(int fd) {
   for (int attempt = 0; attempt < 4; ++attempt) {
     ABSL_ASSIGN_OR_RETURN(size_t size, syscalls::listxattr(path, nullptr, 0));
     if (size == 0) return std::vector<std::string>();
-    std::string buf(size, '\0');
+    absl::FixedArray<char> buf(size);
     absl::StatusOr<size_t> nbytes =
         syscalls::listxattr(path, buf.data(), buf.size());
     if (!nbytes.ok()) {
       if (ErrnoOf(nbytes.status()) == ERANGE) continue;
       return nbytes.status();
     }
-    buf.resize(*nbytes);
-    return SplitXattrList(buf);
+    return SplitXattrList(std::string_view(buf.data(), *nbytes));
   }
   return dcfs::DcfsErrnoToStatus(
       ERANGE, absl::StrCat("listxattr(", path, "): kept growing"));
@@ -181,15 +181,14 @@ absl::StatusOr<std::string> GetXattrOPath(int fd, std::string_view name) {
     ABSL_ASSIGN_OR_RETURN(size_t size,
                           syscalls::getxattr(path, name, nullptr, 0));
     if (size == 0) return std::string();
-    std::string value(size, '\0');
+    absl::FixedArray<char> value(size);
     absl::StatusOr<size_t> nbytes =
         syscalls::getxattr(path, name, value.data(), value.size());
     if (!nbytes.ok()) {
       if (ErrnoOf(nbytes.status()) == ERANGE) continue;
       return nbytes.status();
     }
-    value.resize(*nbytes);
-    return value;
+    return std::string(value.data(), *nbytes);
   }
   return dcfs::DcfsErrnoToStatus(
       ERANGE, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name),
@@ -468,7 +467,7 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> XattrsOf(
 absl::StatusOr<std::vector<std::string>> ReadDirNames(int dir_fd) {
   // uint64_t elements keep the buffer 8-byte aligned, which the kernel's
   // linux_dirent64 records (and so the casts below) rely on.
-  std::vector<uint64_t> buf(kDirentBufferBytes / sizeof(uint64_t));
+  absl::FixedArray<uint64_t> buf(kDirentBufferBytes / sizeof(uint64_t));
   std::vector<std::string> names;
   while (true) {
     ABSL_ASSIGN_OR_RETURN(
@@ -1087,7 +1086,7 @@ absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
 }
 
 absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
-  std::string buf(size, '\0');
+  absl::FixedArray<char> buf(size);
   size_t total = 0;
   while (total < size) {
     ABSL_ASSIGN_OR_RETURN(
@@ -1096,8 +1095,7 @@ absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
     if (n == 0) break;  // EOF short of `size`.
     total += n;
   }
-  buf.resize(total);
-  return buf;
+  return std::string(buf.data(), total);
 }
 
 absl::StatusOr<size_t> WriteFile(int fd, std::span<const char> buf,
@@ -1128,12 +1126,11 @@ absl::StatusOr<std::string> IoctlFd(int fd, unsigned int cmd,
   // Large enough for every forwarded command's argument (struct fsxattr is
   // the largest, 28 bytes); the backing filesystem reads and writes at most
   // that much, whatever sizes the request claims.
-  std::string buf(std::max<size_t>({in.size(), out_size, 64}), '\0');
+  absl::FixedArray<char> buf(std::max<size_t>({in.size(), out_size, 64}));
   std::copy(in.begin(), in.end(), buf.begin());
   ABSL_RETURN_IF_ERROR(
       syscalls::ioctl(fd, static_cast<int>(cmd), buf.data()).status());
-  buf.resize(out_size);
-  return buf;
+  return std::string(buf.data(), out_size);
 }
 
 absl::Status FsyncFd(int fd, bool datasync) {
@@ -2091,14 +2088,13 @@ absl::StatusOr<FileDescriptor> ReopenFd(int fd, int flags) {
 absl::StatusOr<std::vector<gid_t>> GetGroups() {
   while (true) {
     ABSL_ASSIGN_OR_RETURN(int n, syscalls::getgroups(0, nullptr));
-    std::vector<gid_t> groups(n);
+    absl::FixedArray<gid_t> groups(n);
     absl::StatusOr<int> got = syscalls::getgroups(n, groups.data());
     // The list grew in between (another thread cannot change ours, but be
     // exact anyway): ask again.
     if (!got.ok() && ErrnoOf(got.status()) == EINVAL) continue;
     ABSL_RETURN_IF_ERROR(got.status());
-    groups.resize(*got);
-    return groups;
+    return std::vector<gid_t>(groups.begin(), groups.begin() + *got);
   }
 }
 

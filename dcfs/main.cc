@@ -15,6 +15,7 @@
 
 #include "absl/base/log_severity.h"
 #include "absl/cleanup/cleanup.h"
+#include "absl/container/fixed_array.h"
 #include "absl/flags/flag.h"
 #include "absl/flags/parse.h"
 #include "absl/flags/reflection.h"
@@ -97,10 +98,11 @@ absl::Status UsageError(std::string_view message) {
 absl::StatusOr<std::string> ReadProcValue(const char *path) {
   ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
                         syscalls::openat(AT_FDCWD, path, O_RDONLY));
-  std::string buf(64, '\0');
-  ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::pread(*fd, buf.data(), buf.size(), 0));
-  buf.resize(n);
-  return std::string(absl::StripAsciiWhitespace(buf));
+  absl::FixedArray<char> buf(64);
+  ABSL_ASSIGN_OR_RETURN(size_t n,
+                        syscalls::pread(*fd, buf.data(), buf.size(), 0));
+  return std::string(
+      absl::StripAsciiWhitespace(std::string_view(buf.data(), n)));
 }
 
 // The kernel's random per-boot UUID, so StartRun can tell a machine crash
