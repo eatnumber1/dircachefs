@@ -85,7 +85,12 @@ else
 	exit "$FAILED"
 fi
 
+# The mount is there before the daemon serves it (it takes its lock on the
+# device, one more descriptor, in between): a request, answered only once the
+# loop runs, makes the count the steady state.
+ls "$MNT" >/dev/null
 before_open=$(daemon_fd_count)
+ls -l "/proc/$DAEMON_PID/fd" >/tmp/fds.before 2>&1
 
 # Open leak-test for writing and hold it open (no close, so no FLUSH/RELEASE
 # yet): this allocates the BackingFile (fd + passthrough registration) this
@@ -136,17 +141,21 @@ HOLD_PID=""
 # lock (killed: the transaction it holds is rolled back, as its COMMIT of
 # nothing would have left it) and give the daemon a moment to finish
 # processing FLUSH/RELEASE.
-"$TESTUTIL" waitline "$LOG" "Release: could not refresh the attributes" "$DAEMON_PID" || true
+# The last failure of the Release, the one that keeps the row and leaves the
+# descriptor to be torn down (the Release's earlier ones, "leaving them
+# unknown", come within a millisecond of each other now that nothing waits for
+# the lock, and the lock must outlive this one).
+"$TESTUTIL" waitline "$LOG" "from its open fd, keeping its row" "$DAEMON_PID" || true
 kill "$LOCK_PID" 2>/dev/null || true
 wait "$LOCK_PID" 2>/dev/null || true
 LOCK_PID=""
 sleep 2
 
-if grep -q "Release: could not refresh the attributes" "$LOG"; then
+if grep -q "Release: could not refresh the attributes.*keeping its row" "$LOG"; then
 	pass release-refresh-failed-as-forced
 else
 	fail release-refresh-failed-as-forced \
-		"no 'Release: could not refresh the attributes' warning in $LOG -- the fault injection did not land"
+		"no 'Release: could not refresh the attributes ... keeping its row' warning in $LOG -- the fault injection did not land"
 fi
 
 # Since step 23.6 dcfs keeps one O_PATH descriptor on a written file from
@@ -160,7 +169,8 @@ after_release=$(daemon_fd_count)
 if [ "$after_release" -eq "$before_open" ]; then
 	pass no-fd-leak
 else
-	fail no-fd-leak "fd count before-open=$before_open after-release=$after_release (leaked $((after_release - before_open)) fd(s))"
+	ls -l "/proc/$DAEMON_PID/fd" >/tmp/fds.after 2>&1
+	fail no-fd-leak "fd count before-open=$before_open after-release=$after_release (leaked $((after_release - before_open)) fd(s)); before: $(sed 's/.*[0-9] //' /tmp/fds.before | tr '\n' ' ') after: $(sed 's/.*[0-9] //' /tmp/fds.after | tr '\n' ' ')"
 fi
 
 # The daemon must still be alive and functional: the attributes are left
