@@ -527,6 +527,11 @@ repo_shape rule refuses the `std::` spelling of the algorithms Abseil
 wraps (the list from the header's `c_*` names) outside
 `tools/repo_shape_std_algorithms.txt` (`path count | reason`, only
 shrinks: a deliberate sub-range is the one reason), with fixtures.
+And (russ, 2026-10-10, style 1.2's nodiscard bullet): the 38
+`[[nodiscard]]` before `absl::Status`/`StatusOr` return types go (the
+type is must-use already); a repo_shape rule refuses the attribute, or
+`ABSL_MUST_USE_RESULT`, directly before those two types, no allowlist;
+`[[nodiscard]]` on `FileDescriptor` and report-struct returns stays.
 And (russ, 2026-10-10, style 1.2's banned bullet): `std::function`,
 `std::unordered_map`, `std::unordered_set`, `std::chrono` are refused
 outright by repo_shape in all our C++ (no allowlist), and the existing

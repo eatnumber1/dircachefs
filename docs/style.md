@@ -180,11 +180,19 @@ use it as design guidance rather than firm rules."
   comment's dash is ` -- ` (219 uses).
 - **No exceptions** (0 `throw`/`catch`); a status dropped on purpose is
   `.IgnoreError()` (15).
-- **`[[nodiscard]]` is permitted (russ), and expected on a function whose
-  return value is the result the caller must handle**: a `Status`, a
-  `StatusOr`, a `FileDescriptor` (an owned descriptor dropped is a leak or
-  a lost error). A `Status` is must-use already; the attribute adds the same
-  check to the functions of a type that is not (see 1.6).
+- **`[[nodiscard]]` goes on a function whose return type is not already
+  must-use, and never on one that returns `Status` or `StatusOr`** (russ,
+  2026-10-10, on `[[nodiscard]] absl::StatusOr<FsckArgs> ParseFsckArgs`:
+  "StatusOr already is marked [[nodiscard]], so putting it on the return
+  type of the method is redundant"). `absl::Status` and `StatusOr` carry
+  `ABSL_MUST_USE_RESULT` on the type, so every function returning them is
+  checked already; the attribute on such a function says nothing and is
+  removed (25.17: 38 sites). It stays, and is expected, where the type
+  itself is not must-use and dropping the value is a bug: an owned
+  `FileDescriptor` (a leak or a lost error), a report struct the caller
+  must act on (`CheckCacheDatabase`). Mechanically: `repo_shape.py`
+  refuses `[[nodiscard]]` (and `ABSL_MUST_USE_RESULT`) immediately before
+  `absl::Status` or `absl::StatusOr` in our C++ (25.17).
 - **Integers**: `int64_t` row ids (`using InodeId = int64_t;`,
   `metadata_cache.h:56`), `uint64_t` node ids, generations and backing
   inode numbers, `size_t` sizes, `off_t` offsets, `int` for descriptors,
@@ -329,8 +337,8 @@ calls are `unlink` and `unlinkat`).
 codes, no `errno` outside the syscall wrappers. `std::optional<T>` means
 "absent is normal"; `StatusOr<std::optional<T>>` when it can also fail.
 
-A function returning a `Status`, `StatusOr` or owned descriptor carries
-`[[nodiscard]]` (1.2).
+A function returning an owned descriptor carries `[[nodiscard]]`; one
+returning `Status` or `StatusOr` does not, the type already is (1.2).
 
 **Propagate with Abseil's macros, by their short names** (russ,
 2026-10-10): `RETURN_IF_ERROR` and `ASSIGN_OR_RETURN`, which

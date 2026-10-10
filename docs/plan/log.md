@@ -2810,3 +2810,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: turn on every clang-tidy check that fits or enforces a rule we have (google-*, abseil-*,
   7.5's groups) with a reasoned deny-list; 25.21 widened accordingly (it lands 7.5's check set),
   agent told mid-run.
+- russ: `[[nodiscard]]` on a Status/StatusOr-returning function is redundant (the type is must-use);
+  style 1.2 and 1.6 corrected (the guide had it backwards), the 38 sites and a repo_shape rule
+  folded into 25.17.
