@@ -22,8 +22,13 @@ class FlagsTest(unittest.TestCase):
         with open(sys.argv[3]) as f:
             wrapper = f.read()
         options = set(re.findall(r'name == "(\w+)"', wrapper))
-        settable = set(re.findall(r'\{"(\w+)", (?:true|false)\}', wrapper))
+        block = re.search(r"kSettableFlags\[\] = \{(.*?)\};", wrapper, re.S)
+        self.assertTrue(block, "no kSettableFlags in mount_dcfs.cc")
+        settable = set(re.findall(r'"(\w+)"', block.group(1)))
         options |= settable
+        # allow_other is refused, not an option (README "allow_other is
+        # always on", step 15.8).
+        options.discard("allow_other")
         # An ABSL_FLAG the wrapper cannot set as dcfs.<flag> is unreachable.
         self.assertEqual(code - settable, set(),
                          "ABSL_FLAG in main.cc, not settable in mount_dcfs.cc")

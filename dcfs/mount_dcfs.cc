@@ -30,18 +30,24 @@ namespace {
 
 constexpr std::string_view kDcfsPrefix = "dcfs.";
 
-// The Abseil flags a mount can set as `dcfs.<name>[=value]`: dcfs's own and
-// the logging ones. `boolean` ones may be bare.
-struct SettableFlag {
-  std::string_view name;
-  bool boolean;
+// The Abseil flags a mount can set as `dcfs.<name>=value`: dcfs's own and the
+// logging ones.
+constexpr std::string_view kSettableFlags[] = {
+    "attr_timeout_sec", "entry_timeout_sec", "sync_interval_sec",
+    "stderrthreshold",  "minloglevel",       "v",
+    "vmodule",
 };
-constexpr SettableFlag kSettableFlags[] = {
-    {"attr_timeout_sec", false}, {"entry_timeout_sec", false},
-    {"sync_interval_sec", false}, {"allow_other", true},
-    {"stderrthreshold", false},  {"minloglevel", false},
-    {"v", false},                {"vmodule", false},
-};
+
+// Step 15.8: allow_other is always passed to the kernel, with
+// default_permissions (which makes the kernel enforce the mode bits), so a
+// line that names it is out of date.
+absl::Status AllowOtherRefused(std::string_view option) {
+  return InvalidArgumentErrorBuilder()
+         << "Option " << option
+         << ": dcfs always allows other users (default_permissions makes the "
+            "kernel enforce the mode bits), so the option does nothing: "
+            "remove it";
+}
 
 absl::Status BadOption(std::string_view option, std::string_view why) {
   return InvalidArgumentErrorBuilder()
@@ -223,6 +229,7 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
       split.remount = true;
       continue;
     }
+    if (option == "allow_other") return AllowOtherRefused(option);
     if (!absl::StartsWith(option, kDcfsPrefix)) {
       split.native_options.push_back(option);
       continue;
@@ -266,23 +273,18 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
       }
       split.fuse_options.emplace_back(*value);
     } else {
-      const SettableFlag *flag = nullptr;
-      for (const SettableFlag &candidate : kSettableFlags) {
-        if (candidate.name == name) flag = &candidate;
-      }
-      if (flag == nullptr) {
+      if (name == "allow_other") return AllowOtherRefused(option);
+      if (std::find(std::begin(kSettableFlags), std::end(kSettableFlags),
+                    name) == std::end(kSettableFlags)) {
         return InvalidArgumentErrorBuilder()
                << "Unknown option " << option << " (dcfs options are "
                << "dcfs.fstype, dcfs.ro, dcfs.foreground, dcfs.cache_db, "
                   "dcfs.fuse_opt, dcfs.attr_timeout_sec, "
                   "dcfs.entry_timeout_sec, dcfs.sync_interval_sec, "
-                  "dcfs.allow_other, dcfs.stderrthreshold, dcfs.minloglevel, "
-                  "dcfs.v and dcfs.vmodule)";
+                  "dcfs.stderrthreshold, dcfs.minloglevel, dcfs.v and "
+                  "dcfs.vmodule)";
       }
-      if (!value.has_value()) {
-        if (!flag->boolean) return BadOption(option, "needs a value");
-        value = "true";
-      }
+      if (!value.has_value()) return BadOption(option, "needs a value");
       split.flags.emplace_back(std::string(name), std::string(*value));
     }
   }

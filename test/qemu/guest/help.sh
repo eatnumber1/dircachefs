@@ -12,7 +12,7 @@ out=$("$DCFS" --help 2>&1)
 
 # The flags dcfs/main.cc defines (the mount options dcfs.<flag>; the rest of
 # the options are the wrapper's, README "Usage").
-for f in attr_timeout_sec entry_timeout_sec sync_interval_sec allow_other; do
+for f in attr_timeout_sec entry_timeout_sec sync_interval_sec; do
 	if echo "$out" | grep -q -- "--$f"; then
 		pass "help-lists-$f"
 	else

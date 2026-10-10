@@ -191,13 +191,20 @@ TEST(SplitHelperOptionsTest, FlagsKeepTheirValuesInOrder) {
                       Pair("stderrthreshold", "0")))));
 }
 
-TEST(SplitHelperOptionsTest, BooleanFlagsMayBeBare) {
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.allow_other"}),
-              IsOkAndHolds(Field(&HelperOptions::flags,
-                                 ElementsAre(Pair("allow_other", "true")))));
-  EXPECT_THAT(SplitHelperOptions(Strings{"dcfs.allow_other=0"}),
-              IsOkAndHolds(Field(&HelperOptions::flags,
-                                 ElementsAre(Pair("allow_other", "0")))));
+// Step 15.8: dcfs always mounts with allow_other (the kernel enforces the mode
+// bits with default_permissions, so the option only lets other users reach the
+// mount). Naming it is refused, as a usage error, so stale lines are noticed.
+TEST(SplitHelperOptionsTest, AllowOtherIsRefusedAsRedundant) {
+  for (const char *option : {"dcfs.allow_other", "dcfs.allow_other=0",
+                             "dcfs.allow_other=1", "allow_other"}) {
+    SCOPED_TRACE(option);
+    absl::StatusOr<HelperOptions> split = SplitHelperOptions(Strings{option});
+    EXPECT_THAT(split, StatusIs(absl::StatusCode::kInvalidArgument,
+                                HasSubstr("always allows other users")));
+    EXPECT_THAT(split, StatusIs(absl::StatusCode::kInvalidArgument,
+                                HasSubstr("remove")));
+    EXPECT_EQ(ExitStatusFor(split.status()), 1);
+  }
 }
 
 TEST(SplitHelperOptionsTest, ValuedFlagWithoutValueIsAnError) {

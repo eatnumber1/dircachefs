@@ -600,6 +600,25 @@ if [ "$WRC" -eq 1 ] && grep -q 'ro' "$OUT" && grep -q 'dcfs.fstype=none' "$OUT" 
 else
 	fail none-refuses-native-options "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
 fi
+# allow_other is always on (step 15.8): naming it, either way, is a usage
+# error (exit 1) that says so, and nothing is mounted.
+for allow in dcfs.allow_other dcfs.allow_other=0 allow_other; do
+	wrapper -o "$allow,dcfs.fstype=none,dcfs.cache_db=$CACHE/ao.db" "$SRC" "$MNT"
+	if [ "$WRC" -eq 1 ] && grep -q 'always allows other users' "$OUT" && grep -q 'remove it' "$OUT" && nothing_left "$MNT"; then
+		pass "refuses-$allow"
+	else
+		fail "refuses-$allow" "rc=$WRC out=$(cat "$OUT") left=$(daemons)"
+	fi
+done
+# A mount does reach other users: a world-readable file reads as nobody.
+wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/ao2.db" "$SRC" "$MNT"
+only_one_daemon
+if [ "$WRC" -eq 0 ] && testutil runas 65534 65534 - -- cat "$MNT/file_0.txt" >"$OUT.ao" 2>&1 && [ "$(cat "$OUT.ao")" = "content 0" ]; then
+	pass other-users-reach-the-mount
+else
+	fail other-users-reach-the-mount "rc=$WRC: $(cat "$OUT") $(cat "$OUT.ao" 2>&1)"
+fi
+[ -n "$DPID" ] && unmount_check other-users-umount "$MNT"
 # What libmount adds to a helper's options (rw or ro, fstab's nofail, _netdev,
 # ...) is not an error for the none form.
 wrapper -o "rw,nofail,_netdev,noauto,defaults,dcfs.fstype=none,dcfs.cache_db=$CACHE/rm2.db" "$SRC" "$MNT"

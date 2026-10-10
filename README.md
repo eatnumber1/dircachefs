@@ -198,7 +198,18 @@ administrator's own.
 | `dcfs.cache_dir` | (not yet) | Refused for now: a directory of cache databases named after the instance identity arrives with plan step 15.3; name the database with `dcfs.cache_db`. |
 | `dcfs.ro` | off | Mount dcfs read-only. `mount -o remount,dcfs.ro` toggles it, and `-o remount` alone makes it read-write again, without touching the underlying mount. |
 | `dcfs.foreground` | off | Stay in the foreground (debugging, tests). |
-| `dcfs.fuse_opt` | (empty) | An extra mount option passed to libfuse, e.g. `dcfs.fuse_opt=max_read=65536`; give the option once per libfuse option. `default_permissions` is always added, and required: dcfs makes no permission checks of its own and relies on the kernel's, from the attributes it caches (docs/design.md, "Caller credentials"), so naming it here is an error. |
+| `dcfs.fuse_opt` | (empty) | An extra mount option passed to libfuse, e.g. `dcfs.fuse_opt=max_read=65536`; give the option once per libfuse option. `default_permissions` is always added, and required: dcfs makes no permission checks of its own and relies on the kernel's, from the attributes it caches (docs/design.md, "Caller credentials"), so naming it here is an error. `allow_other` is always added too (see below), and naming it is an error as well. |
+
+**`allow_other` is always on** (step 15.8). dcfs passes `allow_other` and
+`default_permissions` to the kernel itself. FUSE's default, that only the
+mounter reaches the mount, guards against an unprivileged daemon serving
+fabricated data to other users; dcfs runs as root and the kernel enforces the
+mode bits of every access (`default_permissions`), so the option only decides
+whether users other than root, and nfsd, can reach the mount at all, and a
+root-only mount is a root-only mode on the directory. `dcfs.allow_other`, and
+a bare `allow_other` in a dcfs line, are refused with exit status 1 and a
+message saying so: a line that still names it is out of date, and the error
+makes you notice.
 
 The FUSE mount's source, as `mount`, `df` and `findmnt` show it, is SOURCE as
 `mount.dcfs` receives it, and its type is `fuse.dcfs`. That is SOURCE as
@@ -214,7 +225,6 @@ flag is set as the option `dcfs.<flag>`, e.g. `dcfs.sync_interval_sec=2`.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `dcfs.allow_other` | `false` | Mount with `-o allow_other`, so users other than root can use the mount. Needed for almost any real deployment, and for NFS export. |
 | `dcfs.attr_timeout_sec` | `3600` | How long the kernel may cache an inode's attributes. Long by design, since dcfs has exclusive access. While a file is open for writing, its attributes are always returned with a timeout of 0. |
 | `dcfs.entry_timeout_sec` | `3600` | How long the kernel may cache a lookup result, including a negative one. |
 | `dcfs.sync_interval_sec` | `5` | While mutations have left dirty cache entries, the first request this many seconds after the last sync point runs a new one (`syncfs` of the backing filesystem, then the dirty set is cleared). Bounds how much is re-read after a power loss. |
@@ -242,7 +252,7 @@ tree must work through the mount.
 
 ```
 sudo mkdir -p /var/lib/dcfs /mnt/media
-sudo mount -t dcfs -o dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/media.db,dcfs.allow_other \
+sudo mount -t dcfs -o dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/media.db \
     /srv/media /mnt/media
 ```
 
@@ -270,7 +280,7 @@ reconfigure the daemon, so it keeps the mount's `nosuid`, `nodev`, `noexec`,
   line into the ones you gave. What mount(8) itself consumes (`rw`,
   `defaults`, `nofail`, `_netdev`, `noauto`, `auto`, the `user` family and
   `x-*` options) is not reported.
-- The other `dcfs.` options (`dcfs.allow_other`, `dcfs.cache_db`, the
+- The other `dcfs.` options (`dcfs.cache_db`, the
   timeouts) are checked and ignored without a message: to change them,
   unmount and mount again.
 - A mount point that is not a dcfs mount is refused with an error and left
@@ -312,7 +322,7 @@ Mounting dcfs on the directory it caches is supported, with `none` and with
 `bind`:
 
 ```
-sudo mount -t dcfs -o dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/media.db,dcfs.allow_other \
+sudo mount -t dcfs -o dcfs.fstype=none,dcfs.cache_db=/var/lib/dcfs/media.db \
     /srv/media /srv/media
 ```
 
@@ -379,8 +389,8 @@ and `umount` ends it.
 
 ```text
 # SOURCE        MOUNTPOINT  TYPE  OPTIONS                                    DUMP PASS
-UUID=aaaa-aaaa  /data       dcfs  noatime,dcfs.cache_db=/var/lib/dcfs/data.db,dcfs.allow_other                   0 0
-UUID=bbbb-bbbb  /data/sub   dcfs  dcfs.fstype=xfs,dcfs.cache_db=/var/lib/dcfs/sub.db,dcfs.allow_other            0 0
+UUID=aaaa-aaaa  /data       dcfs  noatime,dcfs.cache_db=/var/lib/dcfs/data.db                                         0 0
+UUID=bbbb-bbbb  /data/sub   dcfs  dcfs.fstype=xfs,dcfs.cache_db=/var/lib/dcfs/sub.db                                 0 0
 UUID=cccc-cccc  /data/vol   dcfs  dcfs.fstype=btrfs,subvol=vol,dcfs.cache_db=/var/lib/dcfs/vol.db                0 0
 nas:/export     /srv/nas    dcfs  dcfs.fstype=nfs,vers=4.2,_netdev,nofail,dcfs.cache_db=/var/lib/dcfs/nas.db     0 0
 /srv/raw        /cache/raw  dcfs  dcfs.fstype=bind,dcfs.ro,dcfs.cache_db=/var/lib/dcfs/raw.db                    0 0
@@ -476,8 +486,8 @@ dcfs trusts what it has cached, so the setup has to keep it true.
 
 ### Exporting over NFS
 
-nfsd needs `dcfs.allow_other`, and a FUSE filesystem needs an explicit `fsid=`
-in its export; each exported dcfs mount needs its own. An `/etc/exports`
+nfsd can reach the mount (dcfs always mounts with `allow_other`), and a FUSE
+filesystem needs an explicit `fsid=` in its export; each exported dcfs mount needs its own. An `/etc/exports`
 line:
 
 ```

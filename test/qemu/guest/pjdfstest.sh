@@ -176,7 +176,7 @@ mkdir -p /etc
 [ -s /etc/group ] || printf '%s\n' 'root:x:0:' 'nobody:x:65534:' >/etc/group
 
 mkdir -p /cache /mnt
-if start_daemon "$LOG" --allow_other; then
+if start_daemon "$LOG"; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"

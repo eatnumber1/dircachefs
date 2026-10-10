@@ -32,7 +32,8 @@ def readme(flags, options=('fstype',)):
 def wrapper_cc(options, settable=None):
     settable = options if settable is None else settable
     return (''.join(f'  if (name == "{o}") {{}}\n' for o in options) +
-            ''.join(f'  {{"{o}", false}},\n' for o in settable))
+            'constexpr std::string_view kSettableFlags[] = {\n' +
+            ''.join(f'  "{o}",\n' for o in settable) + '};\n')
 
 
 def run_gate(code_flags, readme_flags, wrapper_options=('fstype',),

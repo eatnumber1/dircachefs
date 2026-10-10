@@ -149,8 +149,7 @@ fi
 
 # --- helpers ---------------------------------------------------------------
 #
-# nfs.sh always mounts dcfs with --allow_other (nfsd needs it), so every
-# start_daemon call below passes it explicitly.
+# dcfs always mounts with allow_other (step 15.8), which nfsd needs.
 
 # SIGTERM's the running daemon, waits for it, force-umounts if libfuse's own
 # signal handler didn't already unmount, then starts a fresh daemon against
@@ -174,7 +173,7 @@ restart_daemon() {
 		pass "$1-unmount"
 		MOUNTED=0
 	fi
-	if start_daemon "$2" --allow_other; then
+	if start_daemon "$2"; then
 		pass "$1-mount"
 		# nfsd's own export cache (distinct from anything dcfs does) can
 		# hold a reference tied to the *old* /mnt vfsmount/dentry; without
@@ -279,7 +278,7 @@ src_content_md5=$1
 # --- mount dcfs -------------------------------------------------------------
 
 mkdir -p /cache /mnt
-if start_daemon "$LOG1" --allow_other; then
+if start_daemon "$LOG1"; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"
@@ -543,7 +542,7 @@ fi
 
 rm -f "$DB" "$DB-wal" "$DB-shm" "$DB-journal"
 
-if start_daemon "$LOG3" --allow_other; then
+if start_daemon "$LOG3"; then
 	pass db-wipe-mount
 	# exportfs -f (see restart_daemon's comment) plus a full nfsd bounce:
 	# nfsd keeps its own server-side cache of recently-opened files

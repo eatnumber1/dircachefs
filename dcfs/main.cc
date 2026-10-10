@@ -79,11 +79,6 @@ ABSL_FLAG(
     "robustness\"), the first request after this many seconds since the "
     "last sync point syncfs()es the backing filesystems and marks them "
     "clean. Bounds how much is re-read after a power loss or crash.");
-ABSL_FLAG(
-    bool, allow_other, false,
-    "Pass -o allow_other to the FUSE mount, letting users other than the "
-    "one running dcfs access the mountpoint. (A mount option: "
-    "dcfs.allow_other.)");
 
 namespace dcfs {
 namespace {
@@ -309,7 +304,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   const std::string cache_db = *options.cache_db;
   const char *mountpoint = args.mountpoint.c_str();
   absl::StatusOr<MountOptions> mount_opts =
-      BuildMountOptions(absl::GetFlag(FLAGS_allow_other), options.fuse_options);
+      BuildMountOptions(options.fuse_options);
   if (!mount_opts.ok()) return MarkUsageError(mount_opts.status());
   LOG(INFO) << "dcfs " << kVersion
             << " starting: source=" << args.spec
@@ -479,7 +474,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
       .entry_timeout = absl::Seconds(absl::GetFlag(FLAGS_entry_timeout_sec)),
       .max_read = mount_opts->max_read,
       .sync_interval = absl::Seconds(absl::GetFlag(FLAGS_sync_interval_sec)),
-      // default_permissions (and allow_other, if requested) ahead of
+      // default_permissions and allow_other ahead of
       // --fuse_opt's; Init() checks the first is there.
       .mount_options = mount_opts->options,
   };

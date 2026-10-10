@@ -6,7 +6,7 @@ import unittest
 # Flags whose default the page must state, with the README's spelling.
 DEFAULTS = {
     "attr_timeout_sec": "3600", "entry_timeout_sec": "3600",
-    "sync_interval_sec": "5", "allow_other": "false", "ro": "off",
+    "sync_interval_sec": "5", "ro": "off",
     "foreground": "off",
 }
 
@@ -15,7 +15,7 @@ DEFAULTS = {
 # keeps this list and the README honest).
 FLAGS = [
     "attr_timeout_sec", "entry_timeout_sec", "sync_interval_sec",
-    "allow_other", "fstype", "cache_db", "ro", "foreground", "fuse_opt",
+    "fstype", "cache_db", "ro", "foreground", "fuse_opt",
 ]
 SECTIONS = [
     "NAME", "SYNOPSIS", "OPTIONS", "FLAGS", "EXAMPLE",

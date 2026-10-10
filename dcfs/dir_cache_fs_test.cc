@@ -1207,7 +1207,7 @@ class DirCacheFSTest : public ::testing::Test {
   DirCacheFS::Options options_{
       .sync_interval = absl::Hours(24),
       .max_held_fds = 64,
-      .mount_options = BuildMountOptions(false, {}).value().options};
+      .mount_options = BuildMountOptions({}).value().options};
   std::unique_ptr<DirCacheFS> fs_;
   // The bookkeeping the checker checks (null before Start).
   const events::Bookkeeping *Book() const {

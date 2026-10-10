@@ -11,18 +11,34 @@
 #include "dcfs/status.h"
 
 namespace dcfs {
+namespace {
+
+// Whether `element` (comma-separated options) names `option`.
+bool HasOption(std::string_view element, std::string_view option) {
+  for (std::string_view opt : absl::StrSplit(element, ',')) {
+    if (opt == option) return true;
+  }
+  return false;
+}
+
+}  // namespace
 
 absl::StatusOr<MountOptions> BuildMountOptions(
-    bool allow_other, std::span<const std::string> fuse_opt) {
+    std::span<const std::string> fuse_opt) {
   MountOptions built;
   built.options.emplace_back(kDefaultPermissions);
-  if (allow_other) built.options.emplace_back("allow_other");
+  built.options.emplace_back(kAllowOther);
   for (const std::string &opt : fuse_opt) {
     if (HasDefaultPermissions(std::span<const std::string>(&opt, 1))) {
       return InvalidArgumentErrorBuilder()
              << "dcfs.fuse_opt=" << opt
              << ": default_permissions is redundant, dcfs always mounts "
                 "with it";
+    }
+    if (HasOption(opt, kAllowOther)) {
+      return InvalidArgumentErrorBuilder()
+             << "dcfs.fuse_opt=" << opt
+             << ": allow_other is redundant, dcfs always mounts with it";
     }
     built.options.push_back(opt);
     // See DirCacheFS::Options::max_read: DirCacheFS::Init() needs this
@@ -38,9 +54,7 @@ absl::StatusOr<MountOptions> BuildMountOptions(
 
 bool HasDefaultPermissions(std::span<const std::string> options) {
   for (const std::string &element : options) {
-    for (std::string_view opt : absl::StrSplit(element, ',')) {
-      if (opt == kDefaultPermissions) return true;
-    }
+    if (HasOption(element, kDefaultPermissions)) return true;
   }
   return false;
 }

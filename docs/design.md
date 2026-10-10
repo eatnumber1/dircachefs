@@ -2240,6 +2240,22 @@ ends the wrapper, not the daemon (detached), which finishes starting when the
 earlier daemon exits, or can be ended with SIGTERM (the lock wait returns on the signal and the start
 fails; no test lands a signal there, docs/coverage.md). `umount -l` of the mount point cancels it too.
 
+**Why `allow_other` is always on** (step 15.8; russ, 2026-10-09). FUSE's
+default, that only the user who mounted can reach the mount, exists because an
+unprivileged daemon could otherwise serve fabricated data to other users (a
+setuid binary, a config file) who never agreed to trust it. dcfs is root and
+mounts with `default_permissions`, so the kernel itself enforces the mode bits
+and owners of every access from the attributes dcfs reports, which come from
+the backing filesystem: the daemon cannot make other users read anything the
+backing filesystem would refuse them. Left off, the option would
+add nothing but a limit on who can reach the mount, and a root-only mount is a root-only mode on the
+directory (`chmod 700`), which the administrator can set where it is wanted.
+Making it an option meant every real deployment (any non-root user, nfsd) had
+to remember it. So dcfs always passes it, and a `dcfs.allow_other` or bare
+`allow_other` in a dcfs line is refused with exit status 1: strictly, so that
+a stale line is noticed rather than silently meaning something different from
+what it says.
+
 **Remount** (decision 10). `mount -o remount` reaches the wrapper through
 `mount.fuse.dcfs` with `remount` among the options. It never touches the
 underlying filesystem, which dcfs cannot reach (it is a clone in no
@@ -2315,8 +2331,9 @@ fork):
     by databases built before submounts were refused). The plan said this
     would go with `--source`; it stays until the cache path and instance
     identity (step 15.3) decide what a database may be reused for.
-12. Mount FUSE with `default_permissions`, plus `allow_other` if requested,
-    plus `dcfs.fuse_opt`, `fsname`, `subtype=dcfs` and `ro` if `dcfs.ro`;
+12. Mount FUSE with `default_permissions` and `allow_other` (always: "Why
+    `allow_other` is always on"), plus `dcfs.fuse_opt`, `fsname`,
+    `subtype=dcfs` and `ro` if `dcfs.ro`;
     install libfuse's signal handlers; run the session loop. `Init` requests
     export support, readdirplus, symlink caching and passthrough; requires
     POSIX ACLs and `FUSE_CAP_DONT_MASK` (refusing the mount without them);

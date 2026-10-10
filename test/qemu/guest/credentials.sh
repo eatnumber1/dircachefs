@@ -23,8 +23,8 @@
 # daemon itself is back to root afterwards (its own creates are owned by
 # root, and its /proc status shows fsuid/fsgid 0 and its original groups).
 #
-# Mounted with --allow_other so users other than root can reach it at all;
-# dcfs always mounts with default_permissions.
+# dcfs always mounts with allow_other (step 15.8), so users other than root
+# can reach it, and with default_permissions.
 #
 # Run as /tests/credentials.sh by guest/init when booted with
 # dcfs_test=credentials.sh; prints one "TEST ... PASS/FAIL" line per check
@@ -128,7 +128,7 @@ chmod 0666 /src/pub/root666
 sync
 
 mkdir -p /cache /mnt
-if start_daemon "$LOG" --allow_other; then
+if start_daemon "$LOG"; then
 	pass mount
 else
 	fail mount "daemon did not mount within 10s"
