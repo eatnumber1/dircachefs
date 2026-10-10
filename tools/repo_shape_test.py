@@ -28,6 +28,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_local_buffers_sized_once_are_fixed_arrays(self):
         self.assertEqual([], repo_shape.fixed_arrays(ROOT["root"]))
 
+    def test_status_macros_are_the_short_names(self):
+        self.assertEqual([], repo_shape.absl_prefixed_status_macros(ROOT["root"]))
+
     def test_no_identifier_begins_with_the_project_name(self):
         self.assertEqual([], repo_shape.project_prefix(ROOT["root"]))
 

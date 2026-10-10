@@ -405,8 +405,59 @@ def project_prefix(root):
     return problems
 
 
+ABSL_MACRO_RE = re.compile(r"\bABSL_(RETURN_IF_ERROR|ASSIGN_OR_RETURN)\(")
+ABSL_MACROS_LIST = ("tools", "repo_shape_absl_macros.txt")
+
+
+def absl_macro_sites(text):
+    """Line numbers of the long Status macros in code (not comments)."""
+    return [number for number, line in enumerate(code_only(text).splitlines(), 1)
+            if ABSL_MACRO_RE.search(line)]
+
+
+def absl_macro_files(root):
+    """Every .h and .cc under dcfs/, bench/ and tools/ (fixtures included)."""
+    for top in ("dcfs", "bench", "tools"):
+        for dirpath, _, names in os.walk(os.path.join(root, top)):
+            for name in sorted(names):
+                if name.endswith((".h", ".cc")):
+                    yield os.path.relpath(os.path.join(dirpath, name), root)
+
+
+def known_absl_macros(root):
+    """{path: (count, reason)} from tools/repo_shape_absl_macros.txt."""
+    known = {}
+    for line in read(root, *ABSL_MACROS_LIST).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        head, _, reason = line.partition("|")
+        path, count = head.split()
+        known[path] = (int(count), reason.strip())
+    return known
+
+
+def absl_prefixed_status_macros(root):
+    """The long ABSL_ Status macros are refused (docs/style.md, 1.6): the
+    short names come from //dcfs:status. A file's count must equal the list's
+    count, and the list only shrinks."""
+    known = known_absl_macros(root)
+    problems = []
+    for path in absl_macro_files(root):
+        count = len(absl_macro_sites(read(root, path)))
+        allowed = known.get(path, (0, ""))[0]
+        if count != allowed:
+            problems.append(
+                "%s has %d ABSL_RETURN_IF_ERROR / ABSL_ASSIGN_OR_RETURN use(s), "
+                "%d listed in tools/repo_shape_absl_macros.txt: use the short "
+                "RETURN_IF_ERROR / ASSIGN_OR_RETURN (docs/style.md, 1.6); a "
+                "listed count must equal the file's" % (path, count, allowed))
+    return problems
+
+
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
             guest_sleeps(root) + disabled_checks_listed(root) +
             no_test_only_comments(root) + no_testonly_friends(root) +
-            fixed_arrays(root) + project_prefix(root))
+            fixed_arrays(root) + project_prefix(root) +
+            absl_prefixed_status_macros(root))

@@ -37,6 +37,7 @@ def good_tree(root):
           "# known\ndcfs/known.cc 1 | a fixture reason\n")
     write(root, "dcfs/known.cc",
           "void f(int n) {\n  std::vector<int> v(n);\n}\n")
+    write(root, "tools/repo_shape_absl_macros.txt", "# known\n")
     write(root, "test/qemu/guest/init")
     write(root, "test/qemu/guest/a.sh",
           '. "$(dirname "$0")/helper.sh"\ndisabled kernel-bug "why" check\n')
@@ -70,6 +71,23 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         problems = repo_shape.third_party_readmes(self.root)
         self.assertEqual(1, len(problems), problems)
         self.assertIn("third_party/pin/", problems[0])
+
+    def test_long_status_macro_is_reported_and_comments_are_not(self):
+        write(self.root, "bench/new.cc",
+              "// ABSL_RETURN_IF_ERROR(x) is named in a comment only.\n"
+              "absl::Status f() {\n  ABSL_RETURN_IF_ERROR(g());\n}\n")
+        problems = repo_shape.absl_prefixed_status_macros(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("bench/new.cc has 1", problems[0])
+
+    def test_listed_status_macro_count_must_match(self):
+        write(self.root, "tools/repo_shape_absl_macros.txt",
+              "dcfs/known.cc 2 | a fixture reason\n")
+        write(self.root, "dcfs/known.cc",
+              "void f() {\n  ABSL_ASSIGN_OR_RETURN(int x, g());\n}\n")
+        problems = repo_shape.absl_prefixed_status_macros(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/known.cc has 1", problems[0])
 
     def test_unreferenced_script_is_reported(self):
         write(self.root, "test/qemu/guest/orphan.sh")
