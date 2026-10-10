@@ -194,8 +194,10 @@ else
 	# libmount runs mount.<type> with the type of the mountinfo line
 	# (fuse.dcfs) for a remount.
 	ln -sf ../bin/dcfs "$ROOT/sbin/mount.fuse.dcfs"
-	# Step 15.6b: umount(8) runs umount.fuse (the type minus its subtype) to
-	# unmount a FUSE mount; for a dcfs mount it waits for the daemon.
+	# Step 15.6b: umount(8) runs umount.fuse.dcfs for a dcfs mount (and
+	# umount.fuse, for every FUSE mount, where the administrator installs it:
+	# both here, for the test of each).
+	ln -sf ../bin/dcfs "$ROOT/sbin/umount.fuse.dcfs"
 	ln -sf ../bin/dcfs "$ROOT/sbin/umount.fuse"
 	cp "$FHTEST" "$ROOT/bin/fhtest"
 	cp "$TESTUTIL" "$ROOT/bin/testutil"

@@ -31,41 +31,66 @@ inline constexpr std::string_view kMountFuseHelperName = "mount.fuse.dcfs";
 // Whether `name` (argv[0] without its directory) is one of the helper names.
 bool IsMountHelperName(std::string_view name);
 
-// umount(8) runs `umount.fuse` for a mount of type fuse.dcfs (or any FUSE
-// subtype: libmount drops the subtype when it looks for an unmount helper,
-// measured with LIBMOUNT_DEBUG on util-linux 2.41: it tries /sbin/umount.fuse,
-// never umount.fuse.dcfs or umount.dcfs). dcfs's binary is that helper where
-// the administrator installs it under that name (plan step 15.6b); for a
-// mount that is not dcfs's it runs `umount -i` (no helper) and nothing more.
-inline constexpr std::string_view kUmountHelperName = "umount.fuse";
+// umount(8) runs `umount.<type>` for a FUSE mount (step 15.6b). Which type
+// string it looks for depends on how it found the mount (libmount's
+// mnt_context_prepare_helper): the mountinfo line's, fuse.dcfs, first, then
+// that with the subtype stripped, fuse; but when it shortcuts through statfs
+// (root unmounting an absolute directory without -c, -f, -l, -r or -d, and no
+// utab entry) there is no subtype and it looks for umount.fuse alone. systemd
+// runs `umount <where> -c`, which takes the mountinfo way. So:
+//  - umount.fuse.dcfs is the default helper: it runs for dcfs mounts only, and
+//    covers systemd's stops (restart, reboot) and `umount -c`;
+//  - umount.fuse is opt-in: it runs for EVERY FUSE filesystem, and adds plain
+//    interactive root `umount /path`.
+// Both are dcfs's binary dispatching on argv[0]; for a mount that is not dcfs's
+// (only possible as umount.fuse) the helper runs `umount -i` (no helper) and
+// nothing more.
+inline constexpr std::string_view kUmountFuseDcfsHelperName = "umount.fuse.dcfs";
+inline constexpr std::string_view kUmountFuseHelperName = "umount.fuse";
 bool IsUmountHelperName(std::string_view name);
 
-// `umount.fuse TARGET [-nlfrvi] [-t type]`, as umount(8) runs it (-V
-// alone prints the version).
+// `umount.fuse.dcfs TARGET [OPTIONS]`, as umount(8) runs it (-V alone prints
+// the version). Every option except the ones below goes on to the `umount -i`
+// the helper runs, unread (-n, -f, -r, -v, -c, -t type, ...).
 struct UmountArgs {
   std::string target;
-  bool lazy = false;     // -l: detach now, do not wait for the daemon
-  bool force = false;    // -f: aborts the FUSE connection
-  bool no_mtab = false;  // -n
-  bool read_only = false;  // -r: remount read-only if the unmount fails
-  bool verbose = false;  // -v
+  bool lazy = false;  // -l, --lazy: detach now, do not wait for the daemon
+  // -N ns, --namespace ns: the mount is in another mount namespace, whose
+  // mountinfo and /sys this process does not see: unmounted by `umount -i`
+  // (which does the setns), not waited for.
+  bool other_namespace = false;
   bool version = false;  // -V
+  // The options in the order given, with their arguments, for `umount -i`.
+  std::vector<std::string> forwarded;
 };
 
-// InvalidArgument (a usage error: exit status 1) names the mistake.
+// InvalidArgument (a usage error: exit status 1) names the mistake: no mount
+// point, or more than one.
 [[nodiscard]] absl::StatusOr<UmountArgs> ParseUmountArgs(
     std::span<const std::string> args);
 
-// The device number ("major:minor", mountinfo's third field) of the topmost
-// fuse.dcfs mount at `mountpoint`, in the text of /proc/self/mountinfo;
-// nullopt if there is none. The daemon holds a lock file named by it for as
-// long as it runs (DaemonLockPath).
+// What mountinfo says of the topmost mount at a path.
+struct MountEntry {
+  std::string device;  // "major:minor", the third field
+  std::string fstype;  // the type after the "-": fuse.dcfs, ext4, ...
+};
+
+// The topmost mount at `mountpoint` in the text of /proc/self/mountinfo
+// (octal escapes decoded), or nullopt if nothing is mounted there.
+std::optional<MountEntry> TopmostMountEntry(std::string_view mountinfo,
+                                            std::string_view mountpoint);
+
+// The device number ("major:minor") of the topmost mount at `mountpoint` if it
+// is a fuse.dcfs mount, else nullopt. The daemon holds a lock file named by
+// it for as long as it runs (DaemonLockPath).
 std::optional<std::string> DcfsMountDevice(std::string_view mountinfo,
                                            std::string_view mountpoint);
 
-// Where the daemon of the mount on `device` ("major:minor") holds its
-// lock: /run/dcfs/<major>_<minor>.lock.
-std::string DaemonLockPath(std::string_view device);
+// Where the daemon of the mount on `device` ("major:minor") holds its lock:
+// <dir>/<major>_<minor>.lock, <dir> /run/dcfs.
+inline constexpr std::string_view kDaemonLockDir = "/run/dcfs";
+std::string DaemonLockPath(std::string_view device,
+                           std::string_view dir = kDaemonLockDir);
 
 // `mount.dcfs SOURCE MOUNTPOINT [-sfnv] [-N ns] [-o OPTIONS]`, as mount(8)
 // runs it (-V alone prints the version).

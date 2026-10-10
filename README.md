@@ -112,18 +112,31 @@ install on another machine:
 sudo install -m 0755 bazel-bin/dcfs/main_static /usr/local/bin/dcfs
 sudo ln -s /usr/local/bin/dcfs /sbin/mount.dcfs    # mount -t dcfs runs this
 sudo ln -s /usr/local/bin/dcfs /sbin/mount.fuse.dcfs    # and this, on a remount
-sudo ln -s /usr/local/bin/dcfs /sbin/umount.fuse         # umount runs this: it waits for the daemon
+sudo ln -s /usr/local/bin/dcfs /sbin/umount.fuse.dcfs   # systemd's unmounts run this: it waits for the daemon
+sudo ln -s /usr/local/bin/dcfs /sbin/umount.fuse    # optional: a plain `umount PATH` waits too (below)
 ```
 
-`umount(8)` runs `umount.fuse` (it drops the subtype: never `umount.fuse.dcfs`)
-for every FUSE mount, dcfs's or not. dcfs's binary installed under that name
-unmounts as `umount -i` would (same flags, same messages, same exit status)
-and, for a dcfs mount, then waits until its daemon has exited: "unmounted"
-means "stopped", which `systemctl restart`, `umount X && mount X` and a
-reboot depend on. For a mount that is not dcfs's it does nothing more. If the
-machine has a `umount.fuse` of its own, do not install this one; dcfs works
-without it, except that an unmount returns while the daemon is still
-finishing (see [Limitations](#limitations)).
+The kernel does not wait for the daemon of a plain FUSE mount, so `umount`
+would return while the daemon is still syncing the backing filesystem and
+closing its cache database. The unmount helper makes "unmounted" mean
+"stopped", which `systemctl restart`, `umount X && mount X` and a reboot
+depend on: dcfs's binary installed under the helper's name runs
+`umount -i` (same flags, same messages, same exit status) and, for a dcfs
+mount whose last mount that unmount removed, then waits, with no timeout,
+until the daemon has exited. For a mount that is not dcfs's it does nothing
+more.
+
+`umount(8)` looks for `umount.<type>`, and which type it uses depends on how
+it found the mount. When the mount is looked up in `/proc/self/mountinfo`
+(`umount -c`, which systemd runs, or a path that is in `/etc/fstab`) the type is
+`fuse.dcfs` and it runs `umount.fuse.dcfs`, which only dcfs's mounts use. A
+plain `umount PATH` asks `statfs(2)`, which has no subtype, so it looks for
+`umount.fuse`, which would run for every FUSE mount on the machine, dcfs's or
+not (it behaves as `umount -i` for the others, and nothing more). That is why
+`umount.fuse` is the administrator's choice: install it for plain `umount` to
+wait; if the machine has a `umount.fuse` of its own, do not, and dcfs works
+without it (systemd's stops wait; see [Limitations](#limitations) for what
+does not).
 
 `bazel build //...` works without the test kernel: until it is built, the
 kernel is a placeholder that makes any test fail fast with a pointer to
@@ -409,8 +422,8 @@ boot without, and `noauto` to one that should not mount at boot.
 **Without systemd**, `mount -a` (from the init scripts, or by hand) mounts
 the lines in file order, so put parents before the children mounted inside
 them. Restart one instance with `umount /data/sub && mount /data/sub`
-(`umount` returns when the daemon has exited, if `umount.fuse` is installed,
-see [Building](#building)); unmount a tree with `umount -R /data`.
+(`umount` returns when the daemon has exited, if `umount.fuse` is installed;
+`umount -c /data/sub` always does, see [Building](#building)); unmount a tree with `umount -R /data`.
 
 **With systemd**, `systemd-fstab-generator` turns each line into a mount
 unit at boot and at `systemctl daemon-reload`; `systemd-escape -p
@@ -424,7 +437,7 @@ mount point: a `none` or `bind` SOURCE that is itself a mount, and a cache
 database on another filesystem, need `x-systemd.requires-mounts-for=` on the
 line (for example `x-systemd.requires-mounts-for=/var/lib/dcfs`).
 Restart one instance with `systemctl restart data-sub.mount`: systemd calls
-a mount unit stopped when `umount` returns, and `umount.fuse` returns when
+a mount unit stopped when `umount` returns, and `umount.fuse.dcfs` returns when
 the daemon has exited, so the start finds the cache database free.
 
 A mount that fails prints its message on the standard error of whatever ran
@@ -573,7 +586,8 @@ sudo umount -R /data
 sudo mount -a      # or per instance, parents first
 ```
 
-`/sbin/mount.dcfs`, `/sbin/mount.fuse.dcfs` and `/sbin/umount.fuse` are symbolic links to the
+`/sbin/mount.dcfs`, `/sbin/mount.fuse.dcfs`, `/sbin/umount.fuse.dcfs` (and
+`/sbin/umount.fuse`, if you chose it) are symbolic links to the
 binary (see [Building](#building)) and need no change. Unmounting shuts the
 daemon down cleanly (see "Shutdown, crashes and restarts"), so the cache is
 kept; a new version upgrades the database's schema at its first start, and
@@ -598,6 +612,7 @@ dcfs itself failed at; warnings are what it noticed or survived.
 | ERROR `could not probe recovered inode N ...` | During that recovery the backing filesystem could not be read for an entry (printed for the first ten). The entry stays dirty and is re-checked on access. Check the backing filesystem's health. |
 | WARNING `forgot N rows of objects removed by mutations the last run's end cut short` | Recovery housekeeping after a crash; informational. |
 | WARNING `periodic sync of the backing filesystems failed, keeping the dirty set: ...` (also `fsync sync ...` and `fsyncdir sync ...`) | `syncfs` of the backing filesystem failed: the filesystem has errors, went read-only or is gone. Nothing is lost in dcfs (the entries stay dirty and cost a larger re-read after a crash). Look at the kernel log; it is retried at the next request past the interval. |
+| INFO `The daemon of an earlier mount (device M:N) is still shutting down (/run/dcfs/M_N.lock is locked); waiting for it to exit` | A mount got the device number an earlier mount had, and that mount's daemon is still finishing (syncing, closing its database). The new daemon waits for it, with no timeout, and goes on; the mount point is not served until then. Ctrl-C ends `mount`, not the daemon: `kill` it to cancel. See [Limitations](#limitations). |
 | WARNING `clean shutdown incomplete, the next start will recover the dirty set: ...` | The last sync at shutdown failed (same causes as the line above). The next start recovers by itself. |
 | ERROR `OP: the backing change happened, but recording it in the cache failed; leaving it unknown: ...` | The change is on the backing filesystem but the cache database could not record it (disk full or I/O error on the cache's disk). The entry is re-read later. Free space or fix the cache's disk. |
 | ERROR lines that are a bare status (`INTERNAL: ...`, `RESOURCE_EXHAUSTED: ...`), logged once by the request that failed | A request failed inside dcfs, such as the cache database or running out of descriptors; the caller got an error. Errno answers like `ENOENT`, `ESTALE` and `EINTR` are not logged. The message carries the cause. |
@@ -611,7 +626,9 @@ exit status 32 (or the native mount's own, or 1 for a usage mistake). The
 common reasons:
 
 - `Cache database X is in use by another dcfs process`: another instance has
-  that database; two daemons cannot share one.
+  that database; two daemons cannot share one. After an unmount that did not
+  wait for its daemon (see [Limitations](#limitations)) it is the old daemon,
+  still finishing.
 - `Cache database X was created for filesystem A, but SOURCE is on B; delete
   the database to start a cold cache`, and `... for a different source
   directory ...`: the database belongs to another filesystem or directory
@@ -1024,20 +1041,39 @@ recovery protocol, concurrency, and the test strategy.
 
 ## Limitations
 
-- **An unmount that does not go through `umount.fuse` does not wait for the
-  daemon.** The kernel does not wait for the daemon of a plain FUSE mount
+- **An unmount that does not go through the unmount helper does not wait for
+  the daemon.** The kernel does not wait for the daemon of a plain FUSE mount
   (it sends FUSE_DESTROY and waits for the answer only for `fuseblk` and
-  virtiofs), so `umount -i`, `fusermount -u`, a program calling `umount2`,
-  `umount -l` (a lazy unmount does not wait by design) and an installation
-  without the `umount.fuse` link return while the daemon is still syncing the
-  backing filesystem and closing the cache database, for up to a few seconds.
-  A `mount` of the same instance in that moment fails with `Cache database ...
-  is in use by another dcfs process` (exit status 32), and for a mount that
-  `local-fs.target` requires (any fstab line without `nofail`) a failed start
-  at boot or restart sends systemd to emergency mode. Wait until the daemon
-  has let go of its database (`flock <the cache database> true` blocks until
-  then; Ctrl-C ends the wait) before mounting. `umount.fuse` removes the
-  race for the unmounts that use it (`umount`, systemd's mount units).
+  virtiofs), so `umount -i`, `fusermount -u`, a program calling `umount2`, a
+  plain `umount PATH` without the optional `umount.fuse` link (see
+  [Building](#building)), and an installation without any link return while
+  the daemon is still syncing the backing filesystem and closing the cache
+  database, for up to a few seconds. A `mount` of the same instance in that
+  moment fails with `Cache database ... is in use by another dcfs process`
+  (exit status 32), and for a mount that `local-fs.target` requires (any fstab
+  line without `nofail`) a failed start at boot or restart sends systemd to
+  emergency mode. Wait until the daemon has let go of its database
+  (`flock <the cache database> true` blocks until then; Ctrl-C ends the wait)
+  before mounting. `umount.fuse.dcfs` removes the race for the unmounts that
+  use it (systemd's mount units, `umount -c`, and plain `umount` with the
+  `umount.fuse` link).
+- **The helper does not wait when it cannot know the daemon is stopping.**
+  `umount -l` detaches at once as it promises (the daemon exits when the last
+  user lets go, which may be never for a busy mount); an unmount that leaves
+  the filesystem mounted elsewhere (a bind mount or a copy in another mount
+  namespace, `umount -r` on a busy mount) did not stop the daemon, so there is
+  nothing to wait for; and `umount -N` (another namespace) and a machine
+  where `fusectl` (`/sys/fs/fuse/connections`) is not mounted do not wait
+  either. A wait that is expected and does not end (a daemon stuck in the
+  kernel on a dead backing disk) ends with Ctrl-C, or when systemd's stop
+  timeout kills the helper; there is no timeout of dcfs's own.
+- **A mount started while the daemon of an earlier mount with the same device
+  number is still shutting down waits for it.** The daemon of a new mount
+  takes its lock after the kernel's mount exists, so for that long the mount
+  point is mounted and not yet served: requests block, and `mount` does not
+  return. Ctrl-C ends the `mount` command and leaves the daemon waiting (it
+  finishes starting when the earlier daemon exits; `kill` it, or `umount -l`
+  the mount point, to cancel).
 - **File names are bytes, but only the logs show them escaped.** dcfs
   treats names, symlink targets and xattr names as unmodified bytes (any
   byte but NUL, and `/` in a name; no normalization, no case folding, no

@@ -24,7 +24,7 @@
 # run-qemu.sh) gives the guest no platform shutdown mechanism for the
 # poweroff syscall to use.
 
-/bin/busybox mkdir -p /proc /sys /dev /tmp /src /cache /mnt
+/bin/busybox mkdir -p /proc /sys /dev /tmp /run /src /cache /mnt
 /bin/busybox mount -t proc proc /proc
 /bin/busybox mount -t sysfs sysfs /sys
 /bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
@@ -491,9 +491,9 @@ EOF
 			chmod +x "$root/usr/local/bin/$bin"
 		done
 		# Step 15.2: dcfs dispatches on argv[0] (mount.dcfs; step 15.6b:
-		# umount.fuse too), which the generic loop above
+		# umount.fuse.dcfs and umount.fuse too), which the generic loop above
 		# would lose.
-		for helper in mount.dcfs umount.fuse; do
+		for helper in mount.dcfs umount.fuse.dcfs umount.fuse; do
 			cat >$root/usr/local/bin/$helper <<EOF
 #!/bin/sh
 exec $loader --argv0 $helper --library-path /opt/dcfs-libs /usr/local/bin/dcfs.real "\$@"
@@ -501,15 +501,17 @@ EOF
 			chmod +x $root/usr/local/bin/$helper
 		done
 	else
-		for helper in mount.dcfs umount.fuse; do
+		for helper in mount.dcfs umount.fuse.dcfs umount.fuse; do
 			ln -sf dcfs $root/usr/local/bin/$helper
 		done
 	fi
 	ln -sf /usr/local/bin/mount.dcfs $root/sbin/mount.dcfs
 	ln -sf /usr/local/bin/mount.dcfs $root/sbin/mount.fuse.dcfs
-	# Step 15.6b: the helper umount(8) runs for a FUSE mount (it looks for
-	# umount.fuse, whatever the subtype).
-	ln -sf /usr/local/bin/umount.fuse $root/sbin/umount.fuse
+	# Step 15.6b: the helper umount(8) runs for a dcfs mount, systemd's stops
+	# included (dcfs/mount_dcfs.h). umount.fuse, which runs for every FUSE
+	# mount, is the administrator's choice: it is in /usr/local/bin for a test
+	# that links it, and not in /sbin.
+	ln -sf /usr/local/bin/umount.fuse.dcfs $root/sbin/umount.fuse.dcfs
 }
 
 # qemu_test's systemd_image= attribute (step 15.6): run-qemu.sh attaches an

@@ -3,7 +3,38 @@
 `AGENTS.md` says new code arrives fully covered and that the gaps that cannot
 be covered are listed here with a reason. `test/qemu/README.md` ("Coverage")
 describes how the guests' profiles become the report and `dcfs/coverage_baseline.txt`
-holds the gated numbers. No uncoverable gap is listed yet.
+holds the gated numbers. The gaps that cannot be covered are listed below,
+each with its reason.
+
+## Gaps that cannot be covered
+
+Lines that no test reaches, and why none can (step 15.6b; measured as the
+union of `//test/qemu:mount_dcfs_test` and the two unit tests of the helper
+under `bazel coverage`).
+
+- **`dcfs/umount_helper.cc`, `BlockingLock`'s `EINTR` handling** (the retry
+  with `retry_signals`, and the error for a signal when it is off): it needs a
+  signal to land while the process is blocked in `flock(2)`. A test can know
+  the process has not yet reached the call, or that it has returned, but there
+  is no event for "blocked in it": the only way to land the signal there is a
+  delay, and the project does not wait on timers (`docs/style.md`, "No
+  timers").
+- **`HoldDaemonLock`, a `flock` failure other than `EWOULDBLOCK`, and an
+  `fstatat` failure other than `ENOENT` on the lock's path** (a lock the
+  kernel refuses, a path that changes under the daemon): the first needs
+  `ENOLCK` or `EBADF` from a valid descriptor, the second a directory that is
+  swapped for a file between the `openat` and the `fstatat`. Neither has a
+  syscall fault fake in the tests (`--wrap` fakes exist for the backing
+  syscalls, not for `flock`/`fstatat` of the helper's own files), and the swap
+  has no event to key on. Both return the error with the path in it; nothing
+  else runs after them.
+- **`UmountAndWait`, a `waitpid` failure other than `EINTR`**: the child is
+  ours and is never reaped by anything else, so `ECHILD` cannot happen; a
+  failure would be an invalid argument of our own call.
+- **A fork whose child never returns**: `UmountAndWait` forks `umount` and its
+  child execs or exits, so the profile artifact of `docs/coverage.md`'s
+  "returns twice" entry cannot occur; like `backing_capture.cc`'s forks, the
+  parent-leg branch of `child == 0` may read 0 although it ran.
 
 ## Known coverage artifacts
 

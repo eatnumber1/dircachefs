@@ -652,18 +652,19 @@ else
 	fail usage-exits-one "$(cat "$OUT")"
 fi
 
-# --- umount.fuse (step 15.6b) ---------------------------------------------------
+# --- umount.fuse.dcfs and umount.fuse (step 15.6b) ------------------------------
 
-# The helper umount(8) runs to unmount a FUSE mount (libmount looks for
-# umount.fuse, not umount.fuse.dcfs): it runs `umount -i`, and for a dcfs mount
-# then waits (no timeout) for the daemon to exit, so that "unmounted" means
-# "stopped". This guest's umount is busybox's, which has no -i: /bin/umount is
-# made a script that drops it. A
-# daemon is made slow to exit with a backing device whose writes take
-# SLOW_WRITE_MS once the test says so: a write through dcfs leaves dirty pages
-# on the backing filesystem, and the daemon's last act, the syncfs of the
-# backing filesystem, then takes seconds after the unmount has returned.
-UMOUNT_HELPER=/sbin/umount.fuse
+# The helpers umount(8) runs to unmount a dcfs mount (dcfs/mount_dcfs.h has
+# which name when): each runs `umount -i` with the options it was given and,
+# for a dcfs mount whose superblock this unmount ended, then waits (no timeout)
+# for the daemon to exit, so that "unmounted" means "stopped". The kernel says
+# whether the superblock ended in fusectl, which this guest mounts below. This
+# guest's umount is busybox's, which has no -i: /bin/umount is made a script
+# that drops it. A daemon is made slow to exit with a backing device whose
+# writes take SLOW_WRITE_MS once the test says so: a write through dcfs leaves
+# dirty pages on the backing filesystem, and the daemon's last act, the syncfs
+# of the backing filesystem, then takes seconds after the unmount has returned.
+UMOUNT_HELPER=/sbin/umount.fuse.dcfs
 rm -f /bin/umount
 cat >/bin/umount <<'EOF_UMOUNT'
 #!/bin/sh
@@ -676,6 +677,8 @@ exec /bin/busybox umount $args
 EOF_UMOUNT
 chmod +x /bin/umount
 SLOW_WRITE_MS=2000
+FUSECTL=/sys/fs/fuse/connections
+mount -t fusectl fusectl "$FUSECTL"
 
 # slow_writes MS: the writes of the "slow" device take MS milliseconds from now
 # on (0: none).
@@ -701,17 +704,28 @@ wait_daemon_exit() {
 	flock "/run/dcfs/$(echo "$1" | tr : _).lock" true
 }
 
-if [ ! -x "$UMOUNT_HELPER" ]; then
-	fail umount-helper-installed "$UMOUNT_HELPER is not an executable"
-else
-	"$UMOUNT_HELPER" -V >"$OUT" 2>&1
-	vrc=$?
-	if [ "$vrc" -eq 0 ] && grep -q '^umount.fuse (dcfs ' "$OUT"; then
-		pass umount-helper-name
+# daemon_finished DEVICE: the daemon of the mount that had DEVICE has done its
+# last act, the removal of its lock file (dcfs/umount_helper.h), so what the
+# helper waited for is over: the lock itself is released when the process
+# closes its files a moment before it becomes a zombie, which a check of the
+# process would race with.
+daemon_finished() {
+	[ ! -e "/run/dcfs/$(echo "$1" | tr : _).lock" ]
+}
+
+for helper in umount.fuse.dcfs umount.fuse; do
+	if [ ! -x "/sbin/$helper" ]; then
+		fail "$helper-installed" "/sbin/$helper is not an executable"
 	else
-		fail umount-helper-name "$(cat "$OUT")"
+		"/sbin/$helper" -V >"$OUT" 2>&1
+		vrc=$?
+		if [ "$vrc" -eq 0 ] && grep -q '^umount.fuse.dcfs (dcfs ' "$OUT"; then
+			pass "$helper-name"
+		else
+			fail "$helper-name" "$(cat "$OUT")"
+		fi
 	fi
-fi
+done
 
 if ! fault_wrap slow "$DEV"; then
 	fail umount-helper-fixture "cannot wrap $DEV in a dm device"
@@ -736,20 +750,23 @@ else
 	wait_daemon_exit "$FIXTURE_DEV"
 	slow_writes 0
 
-	# The helper waits for the daemon, so a mount of the same instance right
-	# after it finds the cache database free.
+	# The helper waits for the daemon: it is gone when the helper returns, so
+	# a mount of the same instance right after it finds the cache database
+	# free.
 	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/slow2.db" "$SLOW" "$MNT"
 	only_one_daemon
+	WAIT_PID=$DPID
+	WAIT_DEV=$(mount_device "$MNT")
 	echo dirty >"$MNT/umount_dirty"
 	slow_writes "$SLOW_WRITE_MS"
 	started=$(uptime_ms)
 	"$UMOUNT_HELPER" "$MNT" >"$OUT" 2>&1
 	hrc=$?
 	elapsed=$(($(uptime_ms) - started))
-	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ] && [ "$elapsed" -ge 1000 ]; then
+	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ] && [ "$elapsed" -ge 1000 ] && daemon_finished "$WAIT_DEV"; then
 		pass umount-helper-waits-for-the-daemon
 	else
-		fail umount-helper-waits-for-the-daemon "rc=$hrc, took $elapsed ms, mounts=$(mount_count "$MNT"): $(cat "$OUT")"
+		fail umount-helper-waits-for-the-daemon "rc=$hrc, took $elapsed ms, mounts=$(mount_count "$MNT"), daemon $WAIT_PID ($WAIT_DEV): $(cat "$OUT")"
 	fi
 	slow_writes 0
 	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/slow2.db" "$SLOW" "$MNT"
@@ -758,14 +775,32 @@ else
 	else
 		fail umount-helper-then-mount-at-once "rc=$WRC: $(cat "$OUT")"
 	fi
-	"$UMOUNT_HELPER" "$MNT" 2>/dev/null
+
+	# Through a symbolic link to the mount point (the helper resolves it only
+	# when nothing is mounted at the path as given), and by the other name.
+	ln -sf "$MNT" /tmp/mnt_link
+	echo dirty2 >"$MNT/umount_dirty2"
+	only_one_daemon
+	LINK_PID=$DPID
+	LINK_DEV=$(mount_device "$MNT")
+	slow_writes "$SLOW_WRITE_MS"
+	/sbin/umount.fuse /tmp/mnt_link >"$OUT" 2>&1
+	hrc=$?
+	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ] && daemon_finished "$LINK_DEV"; then
+		pass umount-helper-through-a-symlink-as-umount-fuse
+	else
+		fail umount-helper-through-a-symlink-as-umount-fuse "rc=$hrc mounts=$(mount_count "$MNT") daemon $LINK_PID ($LINK_DEV): $(cat "$OUT")"
+	fi
+	slow_writes 0
 
 	# A crashed daemon: nothing to wait for, and the dead mount unmounts.
 	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/slow3.db" "$SLOW" "$MNT"
 	only_one_daemon
+	CRASH_DEV=$(mount_device "$MNT")
 	kill -KILL "$DPID"
 	"$UMOUNT_HELPER" "$MNT" >"$OUT" 2>&1
 	hrc=$?
+	wait_daemon_exit "$CRASH_DEV"
 	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
 		pass umount-helper-daemon-already-gone
 	else
@@ -778,9 +813,69 @@ else
 		fail umount-helper-crashed-instance-mounts-again "rc=$WRC: $(cat "$OUT")"
 	fi
 
+	# An unmount that does not end the superblock does not wait: the daemon
+	# serves the mount still. A bind mount of it, then `-r` on a busy mount,
+	# then a copy in another mount namespace. (A helper that waited for the
+	# daemon here would wait for something the unmount did not do; the test
+	# would hang until its own timeout.)
+	only_one_daemon
+	KEEP_PID=$DPID
+	KEEP_DEV=$(mount_device "$MNT")
+	echo keep >"$MNT/keep.txt"
+	mkdir -p /tmp/bindcopy
+	mount --bind "$MNT" /tmp/bindcopy
+	"$UMOUNT_HELPER" "$MNT" >"$OUT" 2>&1
+	hrc=$?
+	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ] && [ -d "/proc/$KEEP_PID" ] &&
+		[ "$(cat /tmp/bindcopy/keep.txt 2>&1)" = keep ]; then
+		pass umount-helper-bind-copy-keeps-the-daemon
+	else
+		fail umount-helper-bind-copy-keeps-the-daemon "rc=$hrc mounts=$(mount_count "$MNT"): $(cat "$OUT")"
+	fi
+	# The last copy ends it: now it waits, and the daemon is gone. The
+	# connection's directory in fusectl is what tells the helper: there while
+	# a copy is mounted, removed with the superblock.
+	conn_before=no
+	[ -d "$FUSECTL/${KEEP_DEV#*:}" ] && conn_before=yes
+	slow_writes "$SLOW_WRITE_MS"
+	echo more >/tmp/bindcopy/more.txt
+	started=$(uptime_ms)
+	"$UMOUNT_HELPER" /tmp/bindcopy >"$OUT" 2>&1
+	hrc=$?
+	elapsed=$(($(uptime_ms) - started))
+	conn_after=yes
+	[ -d "$FUSECTL/${KEEP_DEV#*:}" ] || conn_after=no
+	if [ "$hrc" -eq 0 ] && daemon_finished "$KEEP_DEV" && [ "$conn_before" = yes ] && [ "$conn_after" = no ] && [ "$elapsed" -ge 1000 ]; then
+		pass umount-helper-last-copy-waits
+	else
+		fail umount-helper-last-copy-waits "rc=$hrc daemon $KEEP_PID ($KEEP_DEV) fusectl entry before=$conn_before after=$conn_after, took $elapsed ms: $(cat "$OUT")"
+	fi
+	slow_writes 0
+
+	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/slow6.db" "$SLOW" "$MNT"
+	only_one_daemon
+	NS_PID=$DPID
+	NS_DEV=$(mount_device "$MNT")
+	rm -f /tmp/ns.fifo /tmp/ns_in.fifo
+	mkfifo /tmp/ns.fifo /tmp/ns_in.fifo
+	unshare -m sh -c 'echo in >/tmp/ns_in.fifo; exec cat /tmp/ns.fifo >/dev/null' &
+	read -r ns_says </tmp/ns_in.fifo
+	exec 8>/tmp/ns.fifo
+	"$UMOUNT_HELPER" "$MNT" >"$OUT" 2>&1
+	hrc=$?
+	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ] && [ -d "/proc/$NS_PID" ]; then
+		pass umount-helper-copy-in-another-namespace-keeps-the-daemon
+	else
+		fail umount-helper-copy-in-another-namespace-keeps-the-daemon "rc=$hrc mounts=$(mount_count "$MNT") daemon $NS_PID: $(cat "$OUT")"
+	fi
+	exec 8>&-
+	wait_daemon_exit "$NS_DEV" # the namespace ends with its last process
+
 	# A busy mount: -l detaches now and does not wait (the daemon exits when
-	# the last user lets go); without -l the unmount fails with umount's
-	# status 32 and nothing changes.
+	# the last user lets go); without -l the unmount fails with umount's own
+	# status and nothing changes; -r (remount read-only if busy) is an unmount
+	# that ended nothing.
+	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/slow5.db" "$SLOW" "$MNT"
 	only_one_daemon
 	BUSY_PID=$DPID
 	BUSY_DEV=$(mount_device "$MNT")
@@ -798,6 +893,13 @@ else
 	else
 		fail umount-helper-busy-fails-with-umounts-status "umount rc=$native_rc, helper rc=$hrc mounts=$(mount_count "$MNT"): $(cat "$OUT")"
 	fi
+	"$UMOUNT_HELPER" -r "$MNT" >"$OUT" 2>&1
+	hrc=$?
+	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 1 ] && [ -d "/proc/$BUSY_PID" ]; then
+		pass umount-helper-r-on-a-busy-mount-returns-with-the-daemon-alive
+	else
+		fail umount-helper-r-on-a-busy-mount-returns-with-the-daemon-alive "rc=$hrc mounts=$(mount_count "$MNT"): $(cat "$OUT")"
+	fi
 	"$UMOUNT_HELPER" -l "$MNT" >"$OUT" 2>&1
 	hrc=$?
 	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ] && [ -d "/proc/$BUSY_PID" ]; then
@@ -806,12 +908,10 @@ else
 		fail umount-helper-lazy-detaches-and-does-not-wait "rc=$hrc mounts=$(mount_count "$MNT") daemon=$([ -d "/proc/$BUSY_PID" ] && echo alive || echo gone): $(cat "$OUT")"
 	fi
 	exec 9>&-
+	# The daemon exits once the last user is gone (one that never did would
+	# hang here until the test's own timeout).
 	wait_daemon_exit "$BUSY_DEV"
-	if [ "$(mount_count "$MNT")" -eq 0 ]; then
-		pass umount-helper-lazy-daemon-exits-when-released
-	else
-		fail umount-helper-lazy-daemon-exits-when-released "mounts=$(mount_count "$MNT")"
-	fi
+	pass umount-helper-lazy-daemon-exits-when-released
 
 	# -f aborts the connection: an idle mount unmounts and the daemon goes.
 	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/slow4.db" "$SLOW" "$MNT"
@@ -823,22 +923,44 @@ else
 		fail umount-helper-force "rc=$hrc: $(cat "$OUT")"
 	fi
 
+	# Without fusectl the helper cannot tell whether the unmount ended the
+	# superblock, and does not wait: the daemon is still syncing when it
+	# returns.
+	umount "$FUSECTL"
+	wrapper -o "dcfs.fstype=ext4,dcfs.cache_db=$CACHE/slow7.db" "$SLOW" "$MNT"
+	only_one_daemon
+	NOCTL_PID=$DPID
+	NOCTL_DEV=$(mount_device "$MNT")
+	echo dirty3 >"$MNT/umount_dirty3"
+	slow_writes "$SLOW_WRITE_MS"
+	"$UMOUNT_HELPER" "$MNT" >"$OUT" 2>&1
+	hrc=$?
+	if [ "$hrc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ] && [ -d "/proc/$NOCTL_PID" ]; then
+		pass umount-helper-without-fusectl-does-not-wait
+	else
+		fail umount-helper-without-fusectl-does-not-wait "rc=$hrc daemon $NOCTL_PID: $(cat "$OUT")"
+	fi
+	wait_daemon_exit "$NOCTL_DEV"
+	slow_writes 0
+	mount -t fusectl fusectl "$FUSECTL"
+
 	# A usage mistake is 1; a mount that is not dcfs's is simply unmounted
-	# (umount -i), with umount's status.
+	# (umount -i), with umount's status; options the helper does not know go to
+	# umount.
 	"$UMOUNT_HELPER" >"$OUT" 2>&1
 	rc_none=$?
-	"$UMOUNT_HELPER" -x "$MNT" >"$OUT.2" 2>&1
-	rc_bad=$?
+	"$UMOUNT_HELPER" -f >"$OUT.2" 2>&1
+	rc_flags=$?
 	"$UMOUNT_HELPER" "$MNT" /tmp >"$OUT.3" 2>&1
 	rc_two=$?
-	if [ "$rc_none" -eq 1 ] && [ "$rc_bad" -eq 1 ] && [ "$rc_two" -eq 1 ] && grep -q 'usage: umount.fuse' "$OUT"; then
+	if [ "$rc_none" -eq 1 ] && [ "$rc_flags" -eq 1 ] && [ "$rc_two" -eq 1 ] && grep -q 'usage: umount.fuse.dcfs' "$OUT"; then
 		pass umount-helper-usage-errors-exit-1
 	else
-		fail umount-helper-usage-errors-exit-1 "none=$rc_none bad=$rc_bad two=$rc_two: $(cat "$OUT")"
+		fail umount-helper-usage-errors-exit-1 "none=$rc_none flags=$rc_flags two=$rc_two: $(cat "$OUT")"
 	fi
 	mkdir -p /tmp/tm
 	mount -t tmpfs tmpfs /tmp/tm
-	"$UMOUNT_HELPER" /tmp/tm >"$OUT" 2>&1
+	/sbin/umount.fuse -n /tmp/tm >"$OUT" 2>&1
 	rc_plain=$?
 	if [ "$rc_plain" -eq 0 ] && [ "$(mount_count /tmp/tm)" -eq 0 ]; then
 		pass umount-helper-unmounts-what-is-not-dcfs

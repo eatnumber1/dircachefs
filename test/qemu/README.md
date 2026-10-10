@@ -1631,11 +1631,16 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   `nofail`, `_netdev`, `defaults` are not errors; `mount -o remount,dcfs.ro`
   and `remount,rw` reach the wrapper by the type `fuse.dcfs`
   (`mount.fuse.dcfs`) and toggle only the dcfs mount; a native option in a
-  remount is ignored with the wrapper's WARNING on mount's stderr; `umount`
-  runs `umount.fuse` (libmount's helper for every FUSE subtype, step 15.6b),
-  which unmounts as `umount -i` and waits for the daemon, so `umount X &&
-  mount X`, `systemctl restart` of a mount (also of `/data`, which
-  `local-fs.target` requires) and a reboot work;
+  remount is ignored with the wrapper's WARNING on mount's stderr; which
+  unmount helper libmount runs (step 15.6b): `umount -c` and systemd's stops
+  run `umount.fuse.dcfs`, a plain `umount PATH` looks for `umount.fuse` alone
+  (the check reads libmount's debug output), `umount.fuse` is the fallback when
+  `umount.fuse.dcfs` is not installed, and `umount -N 1` unmounts; the helper
+  unmounts as `umount -i` and waits for the daemon (the boot-1 checks run with
+  the opt-in `umount.fuse` linked as well), so `umount X && mount X`,
+  `systemctl restart rp.mount rp-c.mount` (both named, so its status is the
+  jobs' and the journal since a cursor must show no failure; also `/data`,
+  which `local-fs.target` requires) and a reboot work;
 - the README's recipes with util-linux: `mount /data` takes its fstab line's
   options, `mount -o remount,dcfs.ro /data` has libmount merge the line's
   options into the helper's (the native `noatime` is ignored with the
@@ -1670,7 +1675,7 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
 - after the reboot: the fstab mounts were made by systemd at boot, the
   parent before the child; the previous boot's daemons each logged a clean
   shutdown and this boot's starts all found it clean (the reboot stops each
-  mount unit through `umount.fuse`, which returns when the daemon has exited,
+  mount unit through `umount.fuse.dcfs`, which returns when the daemon has exited,
   so systemd's last SIGTERM finds nothing left to kill); a warm tree reads
   nothing from
   the backing disk (`sectors_read`); a `nofail` mount of a missing device did
@@ -1694,14 +1699,30 @@ What the real `mount(8)` path showed that the busybox guest could not:
   process` (exit 32) in most restarts, a mount `local-fs.target` requires sent
   the machine to `emergency.target`, and a reboot left a daemon "unclean" in
   about half the runs. Step 15.6 kept those checks disabled; step 15.6b made
-  them real with `umount.fuse` (below).
-- libmount looks for `umount.fuse`, not `umount.fuse.dcfs` or `umount.dcfs`:
-  `LIBMOUNT_DEBUG=all umount /mnt/m` on util-linux 2.41 logs `mountinfo
-  unnecessary [type=fuse]` and tries `/sbin/umount.fuse`,
-  `/sbin/fs.d/umount.fuse`, `/sbin/fs/umount.fuse`. dcfs's binary is installed
-  under that name (`install_dcfs_into`, `mkinitramfs.sh`); for a FUSE mount
-  that is not dcfs's it runs `umount -i`, and busybox's umount has no `-i`:
+  them real with `umount.fuse.dcfs` (below).
+- which helper libmount runs depends on how it finds the mount
+  (`LIBMOUNT_DEBUG=all` on util-linux 2.41). `umount -c` (what systemd runs)
+  looks the mount up in mountinfo and runs `/sbin/umount.fuse.dcfs`; a plain
+  `umount /mnt/m` logs `lookup by statfs` and `mountinfo unnecessary
+  [type=fuse]` and tries `/sbin/umount.fuse`, `/sbin/fs.d/umount.fuse`,
+  `/sbin/fs/umount.fuse`: with only `umount.fuse.dcfs` installed it runs no
+  helper, and the unmount-then-mount-at-once checks fail with `Cache database
+  ... is in use` (exit 32), (measured 2026-10-09); the boot-1 checks link `umount.fuse` for that reason. dcfs's binary is installed under both names
+  (`install_dcfs_into`, `mkinitramfs.sh`; `umount.fuse` only in
+  `/usr/local/bin`, linked into `/sbin` by the test); for a FUSE mount that is
+  not dcfs's it runs `umount -i`, and busybox's umount has no `-i`:
   `mount_dcfs.sh` makes `/bin/umount` a script that drops it.
+- the busybox guest (`mount_dcfs_test`) checks the helper itself on a backing
+  device whose writes are slow (dm-delay), so the daemon is still syncing when
+  `umount` returns without it: the helper returns only after the daemon has
+  done its last act (removed its lock file; the process is a zombie a moment
+  later, so the check is the file), a crashed daemon is not waited for, a
+  symbolic link to the mount point works, unmounting one of two bind copies,
+  `umount -r` on a busy mount and a copy in another mount namespace return at
+  once with the daemon alive, the last copy's unmount waits (and fusectl's
+  entry for the connection is there before it and gone after it), `-l` does
+  not wait, a busy mount fails with umount's own status, and with fusectl not
+  mounted the helper does not wait.
 - `mount -t nosuchfs` is `-t no` + `suchfs` to util-linux (the `no` prefix
   negates a type list); the test uses `bogusfs`.
 

@@ -538,7 +538,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
     return InternalErrorBuilder()
            << "fuse_session_mount(" << mountpoint << ") failed";
   }
-  // The lock umount.fuse waits on, held until this process exits
+  // The lock the umount helper waits on, held until this process exits
   // (dcfs/umount_helper.h).
   absl::StatusOr<DaemonLock> daemon_lock = [&]() -> absl::StatusOr<DaemonLock> {
     ABSL_ASSIGN_OR_RETURN(std::string mountinfo, ReadMountinfo());
@@ -583,7 +583,13 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   if (!close_status.ok()) {
     LOG(ERROR) << "closing cache database: " << close_status;
   }
-  // Last: the lock is still held, and goes with the process.
+  // The cache database's own lock first, then the helper's lock file: a daemon
+  // that starts on a fresh file the moment this one is gone must not find the
+  // database still locked. The helper's lock stays held until the process
+  // exits.
+  if (absl::Status unlocked = db_lock.Close(); !unlocked.ok()) {
+    LOG(ERROR) << "closing the cache database's lock: " << unlocked;
+  }
   RemoveDaemonLockFile(*daemon_lock);
 
   // SessionLoop::Run() returns 0 when the kernel connection was closed
@@ -713,19 +719,20 @@ int MountHelperMain(int argc, char *argv[]) {
   return ExitStatusFor(ran.status());
 }
 
-// umount.fuse: `umount.fuse TARGET [-nlfrvi] [-t type]`, as umount(8) runs it
-// for a FUSE mount. Unmounts (umount -i) and waits for the daemon of a dcfs
-// mount. Returns umount(8)'s exit status, or 1 for a usage mistake.
+// umount.fuse.dcfs and umount.fuse: `umount.fuse.dcfs TARGET [OPTIONS]`, as
+// umount(8) runs it. Unmounts (umount -i, with the options) and waits for the
+// daemon of a dcfs mount (dcfs/umount_helper.h). Returns umount(8)'s exit
+// status, or 1 for a usage mistake.
 int UmountHelperMain(int argc, char *argv[]) {
   const std::vector<std::string> words(argv + 1, argv + argc);
   absl::StatusOr<UmountArgs> args = ParseUmountArgs(words);
   if (!args.ok()) {
     LOG(ERROR) << args.status()
-               << "; usage: umount.fuse MOUNTPOINT [-nlfrvi] [-t type]";
+               << "; usage: umount.fuse.dcfs MOUNTPOINT [OPTIONS]";
     return 1;
   }
   if (args->version) {
-    std::cout << "umount.fuse (dcfs " << kVersion << ")" << std::endl;
+    std::cout << "umount.fuse.dcfs (dcfs " << kVersion << ")" << std::endl;
     return 0;
   }
   absl::Status done = UmountAndWait(*args);
@@ -749,6 +756,20 @@ int PlainMain(int argc, char *argv[]) {
 }
 
 int Main(int argc, char *argv[]) {
+  // argv[0] dispatch (decision 5): mount(8) runs mount.dcfs, umount(8)
+  // umount.fuse.dcfs (or umount.fuse, for every FUSE mount: dcfs/mount_dcfs.h).
+  const std::string_view program = argc > 0 ? argv[0] : "";
+  const size_t slash = program.rfind('/');
+  const std::string_view name =
+      slash == std::string_view::npos ? program : program.substr(slash + 1);
+  // The umount helpers first, before any process setup: they run for other
+  // users and other filesystems' unmounts (as umount.fuse), whose child
+  // `umount -i` must see the umask it was run with, and a user who unmounts
+  // their sshfs must not get a dcfs warning about a file limit.
+  if (IsUmountHelperName(name)) {
+    absl::InitializeLog();
+    return UmountHelperMain(argc, argv);
+  }
   // The backing create(2)-family syscalls (backing.h's MkdirAt/MknodAt/
   // CreateAt) run with the caller's umask, switched to around each one
   // (AsCaller; the kernel sends it with the request, see
@@ -766,13 +787,7 @@ int Main(int argc, char *argv[]) {
   absl::SetStderrThreshold(absl::LogSeverityAtLeast::kWarning);
   absl::InitializeLog();
   RaiseFileLimit();
-  // argv[0] dispatch (decision 5): mount(8) runs mount.dcfs.
-  const std::string_view program = argc > 0 ? argv[0] : "";
-  const size_t slash = program.rfind('/');
-  const std::string_view name =
-      slash == std::string_view::npos ? program : program.substr(slash + 1);
   if (IsMountHelperName(name)) return MountHelperMain(argc, argv);
-  if (IsUmountHelperName(name)) return UmountHelperMain(argc, argv);
   return PlainMain(argc, argv);
 }
 

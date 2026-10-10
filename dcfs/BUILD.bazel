@@ -737,7 +737,9 @@ qemu_cc_test(
     srcs = ["umount_helper_test.cc"],
     deps = [
       ":status",
+      ":syscalls",
       ":syscalls_backing",
+      ":syscalls_process",
       ":umount_helper",
       "@absl//absl/status",
       "@absl//absl/status:status_matchers",

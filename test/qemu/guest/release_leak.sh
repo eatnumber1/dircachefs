@@ -15,9 +15,10 @@
 # dcfs's cache database, let alone lock it, so //tools:testutil grows a
 # "sqlite-lock" subcommand that opens dcfs's own cache_db file directly via
 # libsqlite3 and holds the single WAL writer lock (BEGIN IMMEDIATE) for
-# longer than dcfs's own busy_timeout (5000ms, see sqlite.cc) -- forcing
-# dcfs's own attribute-refresh write transaction to fail with a genuine
-# SQLITE_BUSY.
+# while the daemon closes the file -- forcing dcfs's own attribute-refresh
+# write transaction to fail with a genuine SQLITE_BUSY. dcfs sets no busy
+# timeout (step 15.6b: a lock that is not free is an immediate error, sqlite.cc),
+# so each write transaction that finds the lock held fails at once.
 #
 # The observable proof of no leak: the number of open fds in the daemon's
 # own /proc/<pid>/fd returns to its pre-open baseline after the forced
@@ -106,17 +107,15 @@ else
 fi
 
 # Take dcfs's own cache database's single WAL writer lock from outside the
-# daemon, for longer than its busy_timeout (5000ms): dcfs's own subsequent
-# write transactions each retry for up to 5s before giving up, and
-# RecordWrittenAttrs makes up to two of them back to back on a failure (the
-# attribute refresh, then -- since that failed -- MarkAttrsUnknown), so one
-# RecordWrittenAttrs call can itself take up to 10s to fail completely.
-# Flush's own RecordWrittenAttrs runs first (up to 10s), then Release's own
-# (up to 10s) -- for Release's refresh, the one 2a4f672 fixed, to be the
-# one that actually fails (not just Flush's), the lock must outlive both
-# back-to-back windows, ~20s worst case; 30s leaves ample margin. The lock is
-# let go as soon as the Release's failure is in the daemon's log (below), the
-# event the long hold is for, instead of after the whole 30s.
+# daemon, across the close of the file: dcfs's own write transactions fail at
+# once while it is held (no busy timeout), and RecordWrittenAttrs makes up to
+# two of them back to back on a failure (the attribute refresh, then -- since
+# that failed -- MarkAttrsUnknown). Flush's own RecordWrittenAttrs runs first,
+# then Release's -- for Release's refresh, the one 2a4f672 fixed, to be the one
+# that actually fails (not just Flush's), the lock must be held across both,
+# which it is from READY until sqlite-lock exits. The lock is let go as soon as
+# the Release's failure is in the daemon's log (below), the event the hold is
+# for; the 30 s only bounds a lock the test never lets go of.
 "$TESTUTIL" sqlite-lock "$DB" 30 >/tmp/sqlite-lock.out 2>&1 &
 LOCK_PID=$!
 "$TESTUTIL" waitline /tmp/sqlite-lock.out READY "$LOCK_PID" || true

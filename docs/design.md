@@ -2153,16 +2153,22 @@ the runs). Finishing the run inside the answer to FUSE_DESTROY would not
 help (the kernel sends none), and a start that waits would need a timer or a
 guess about which holder is exiting.
 
-So "unmounted" is made to mean "stopped" by a mount helper. umount(8) runs
-`umount.<type>` with the type of the mountinfo line minus its subtype
-(libmount, measured with `LIBMOUNT_DEBUG=all` on util-linux 2.41: it tries
-`/sbin/umount.fuse`, `fs.d/umount.fuse`, `fs/umount.fuse`, never
-`umount.fuse.dcfs`), so the helper is `umount.fuse`, the same binary
-dispatching on argv[0], which the administrator installs (README, "Building").
-It runs `umount -i` (no helper: no recursion) with the flags it was given, as a
-child, so the unmount, its messages and its exit status are umount(8)'s, for
-every FUSE mount; for a dcfs mount, unless the unmount was lazy, it then waits
-for the daemon.
+So "unmounted" is made to mean "stopped" by a mount helper, dcfs's binary
+dispatching on argv[0]. Which name umount(8) runs depends on how it found the
+mount (libmount, measured with `LIBMOUNT_DEBUG=all` on util-linux 2.41 in the
+systemd guest, `mount_dcfs_systemd_test`): looked up in `/proc/self/mountinfo`
+(`umount -c`, which is what systemd runs, or a path it finds there) the type is
+`fuse.dcfs` and it runs `umount.fuse.dcfs`; a plain `umount PATH` takes the type
+from `statfs(2)` ("mountinfo unnecessary [type=fuse]"), which has no subtype,
+and looks for `umount.fuse` alone. So `umount.fuse.dcfs` is the default helper:
+it runs for dcfs's mounts only, and systemd's stops use it. `umount.fuse` is
+opt-in, because it runs for every FUSE filesystem on the machine (it then
+behaves as `umount -i`, and nothing more), and an administrator who has one of
+their own must keep it. The helper runs `umount -i` (no helper: no recursion)
+with every option it was given, forwarded unread (a usage error only for no
+target, more than one, or an option missing its argument), as a child, so the
+unmount, its messages and its exit status are umount(8)'s; then, for a dcfs
+mount whose superblock that unmount ended, it waits for the daemon.
 
 How it finds the daemon: **a lock, not a pid.** After `fuse_session_mount` the
 daemon takes an exclusive `flock` on `/run/dcfs/<major>_<minor>.lock`, named by
@@ -2170,24 +2176,69 @@ the device number of its FUSE mount (it finds its own line in
 `/proc/self/mountinfo` by the canonical mount point, resolved before the mount
 exists: afterwards a path lookup would ask the daemon, which is not serving
 yet), never closes the descriptor, and removes the file as the last thing it
-does (while it still holds the lock). The helper opens the file before the
-unmount (so it waits for this daemon, never for a later one that gets the same
-device number: the file it holds is gone from the directory) and, after
-`umount` succeeded, takes a shared lock: a blocking `flock`, granted when the
-daemon exits. The kernel drops the lock however the process dies, so a daemon
-that crashed (or was killed) leaves nothing to wait for and the helper returns
-at once; there is no pid that could be reused; the wait is one system call
-that a signal ends (Ctrl-C, or systemd killing the helper). No timer, no poll
-(docs/style.md, "No timers"). A pidfd would need a pid, and a pid file is
+does, after closing the cache database and its lock. The helper opens the file
+before the unmount (so it waits for this daemon, never for a later one that gets
+the same device number: the file it holds is gone from the directory) and,
+after `umount` succeeded, takes a shared lock: a blocking `flock`, granted when
+the daemon exits. The kernel drops the lock however the process dies, so a
+daemon that crashed (or was killed) leaves nothing to wait for and the helper
+returns at once; there is no pid that could be reused; the wait is one system
+call that a signal ends (Ctrl-C, or systemd killing the helper). No timer, no
+poll (docs/style.md, "No timers"). A pidfd would need a pid, and a pid file is
 stale after a crash.
+
+**Which lock key** (decision for step 15.6b round 2). The device number can be
+reused: anonymous device numbers are freed during the unmount, so a mount made
+right after may get the same one while the old daemon is still exiting. The
+daemon therefore takes the lock by *blocking* `LOCK_EX` (it first tries without
+blocking and logs one INFO line, "still shutting down", only if it must wait),
+and then compares `fstat` of the descriptor with `fstatat` of the path: the
+holder unlinks the file before it exits, so a waiter that was granted the lock
+of an unlinked file opens the path again (and a path that is not there is
+created). A signal ends the daemon's wait with an error. The alternative, keying
+the file by the mount's *unique* mount id (`STATX_MNT_ID_UNIQUE`, which is never
+reused), was rejected: the daemon cannot `statx` its own mount point before it
+serves it (the call asks the daemon), and the id the mountinfo line of a mount
+that is about to be made carries is the old, reusable one; the unique id comes
+from `listmount`/`statmount`, a second lookup of the mount that this design avoids.
+The device number plus the blocking lock and the identity check is
+correct without either.
+
+**Did this unmount end the superblock?** A bind mount of the filesystem, an
+rbind, a copy in another mount namespace and `umount -r` on a busy mount all
+make `umount` succeed without stopping the daemon: the superblock lives, so a
+helper that waited would wait for something the unmount did not do (until the
+last copy goes, which may be never). The kernel says which: while the FUSE
+connection lives, `/sys/fs/fuse/connections/<minor>` (fusectl) exists, and
+`fuse_ctl_remove_conn` removes it in `fuse_conn_destroy`, during the unmount
+that drops the last reference. The helper opens that directory (`O_PATH`) before
+the unmount, as it opens the lock file, and afterwards waits only if `fstat`
+says it has no links left. If fusectl is not mounted it cannot tell, and does
+not wait (the old race, documented). This was measured in the busybox guest
+(`mount_dcfs_test`, with fusectl mounted, a backing device that delays its
+writes so that the daemon is slow to exit): unmounting one of two copies (a
+bind mount) returns at once with the daemon alive; the entry exists before the
+unmount of the last copy and is gone after it, and that unmount waits until the
+daemon has finished; the copy in another mount namespace and `umount -r` on a
+busy mount return at once with the daemon alive; and with fusectl not mounted
+the helper returns while the daemon is still syncing.
 
 `umount -l` (lazy) does not wait: it detaches at once as it promises, and the
 daemon exits when the last user of the mount lets go, which may be never for a
-busy mount. systemd's mount units unmount with plain `umount`, so the stop
-path waits. An unmount that does not go through the helper (`umount -i`,
-`fusermount -u`, a program calling `umount2`, a machine without the link) has
-the old race, and a daemon that finds the lock held says so
-("is still shutting down") instead of starting.
+busy mount. `umount -N ns` unmounts in another mount namespace, where this
+process's mountinfo and the lock directory are not those of the mount: it is
+forwarded and does not wait. An unmount that does not go through the helper
+(`umount -i`, `fusermount -u`, a program calling `umount2`, a plain
+`umount PATH` without the `umount.fuse` link) has the old race.
+
+**Timeouts and cancellation.** Neither side has a timer. The helper's wait ends
+with a signal (Ctrl-C; systemd's stop timeout kills it). The daemon that must
+wait for an earlier daemon of the same device number has already made the
+kernel's mount, so the mount point is mounted and not served for that long;
+`mount(8)` has no timeout and the wrapper waits for the daemon's start; Ctrl-C
+ends the wrapper, not the daemon (detached), which finishes starting when the
+earlier daemon exits, or can be ended with SIGTERM (the lock wait returns on the signal and the start
+fails; no test lands a signal there, docs/coverage.md). `umount -l` of the mount point cancels it too.
 
 **Remount** (decision 10). `mount -o remount` reaches the wrapper through
 `mount.fuse.dcfs` with `remount` among the options. It never touches the
@@ -2567,7 +2618,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | Test | What it proves |
 |---|---|
 | `boot_test` | The guest environment works: dcfs and helpers are present, disks mount. |
-| `mount_dcfs_test` | The `mount.dcfs` wrapper, run as mount(8) runs it, on an ext4 disk: capture by type, by autodetection and by `UUID=` (the FUSE source is the spec as written, no backing mount is left in the caller's namespace, unmount stops dcfs, a SIGKILLed dcfs releases the superblock); the option split (`ro` and `dcfs.ro`, unknown `dcfs.` options and failing native mounts mount nothing and say why, native options refused for `none`, libmount's own accepted); remount changes only the dcfs mount and ignores native options with a warning; daemonization (returns when dcfs serves, stdio on `/dev/null`, session leader, cwd `/`, syslog follows the threshold, a late failure is the exit status 32, `dcfs.foreground` stays and logs to stderr); the `bind` and `none` forms, also over the same path; relative paths; a file mounted below SOURCE refused; non-root refused with the reason; `mount.fuse.dcfs`; `umount.fuse` (step 15.6b: unmounts as `umount -i`, waits for the daemon of a dcfs mount, which is made slow to exit with a dm-delay backing device: a mount of the same instance right after it works, a crashed daemon returns at once, `-l` detaches without waiting, a busy mount fails with umount's own status, usage errors are 1, a mount that is not dcfs's is just unmounted). It runs under busybox's `mount`, which runs no `mount.<type>` helpers, so step 15.6 runs the util-linux path. |
+| `mount_dcfs_test` | The `mount.dcfs` wrapper, run as mount(8) runs it, on an ext4 disk: capture by type, by autodetection and by `UUID=` (the FUSE source is the spec as written, no backing mount is left in the caller's namespace, unmount stops dcfs, a SIGKILLed dcfs releases the superblock); the option split (`ro` and `dcfs.ro`, unknown `dcfs.` options and failing native mounts mount nothing and say why, native options refused for `none`, libmount's own accepted); remount changes only the dcfs mount and ignores native options with a warning; daemonization (returns when dcfs serves, stdio on `/dev/null`, session leader, cwd `/`, syslog follows the threshold, a late failure is the exit status 32, `dcfs.foreground` stays and logs to stderr); the `bind` and `none` forms, also over the same path; relative paths; a file mounted below SOURCE refused; non-root refused with the reason; `mount.fuse.dcfs`; `umount.fuse.dcfs` and `umount.fuse` (step 15.6b: unmounts as `umount -i`, waits for the daemon of a dcfs mount whose superblock the unmount ended (fusectl says so), which is made slow to exit with a dm-delay backing device: a mount of the same instance right after it works, a crashed daemon returns at once, one of two bind copies, `umount -r` on a busy mount and a copy in another mount namespace return at once with the daemon alive, the last copy's unmount waits, `-l` detaches without waiting, with fusectl not mounted nothing waits, a busy mount fails with umount's own status, usage errors are 1, a mount that is not dcfs's is just unmounted). It runs under busybox's `mount`, which runs no `mount.<type>` helpers, so step 15.6 runs the util-linux path. |
 | `readonly_test` | Read-only operations are served from the cache with backing inode numbers; a warm metadata pass reads zero sectors, also after a restart; startup refuses a mount below `SOURCE`, and a boundary that appears at runtime is refused rather than cached (a stub). |
 | `boundary_test` | A mount (every filesystem) and a btrfs subvolume appearing below the source are stub directories: listed, a directory with the boundary root's mode and owner and an inode number at or above 2^63 (`d_ino` agrees), `ENOTSUP` for everything inside (logged once per stub), `EXDEV` for renaming the stub, nothing reaching either side; the same inode numbers after a restart. |
 | `passthrough_test` | File contents go through passthrough: reads match, move the backing read counter, and cost the daemon almost no CPU for 64 MiB; opens do not leak descriptors; all of it survives a restart. |
@@ -2589,7 +2640,7 @@ database. "Zero sectors" below means the backing device's read counter in
 | `removed_test` | A removed working directory (`stat` reports `nlink` 0, `open(".")` works, listing it fails `ENOENT`) and an `O_PATH` descriptor on an unlinked file behave as on the backing filesystem instead of failing `ESTALE`, also when their rows and attributes were cached, including changing them (truncate, chmod, chown, utimes, xattrs, fsync, through an open descriptor, an `O_PATH` descriptor's magic link or a removed working directory), reopening an unlinked file through `/proc/self/fd`, and linking a removed file or directory back (the backing filesystem's `ENOENT` and `EPERM`) and a closed, unnamed `O_TMPFILE` file (linked, under its own inode); no `FORGET` exceeds dcfs's lookup count after a tree walk and dropping the kernel's caches. |
 | `readdir_boundary_test` | A directory too large for one READDIR or READDIRPLUS reply lists every entry exactly once across several replies, and in time linear in its size (the daemon's CPU ticks for 6000 entries against 1500, at most 8x). |
 | `names_test`, `names_random_test` | File names are bytes: about 60 names, one per hazard class (format delimiters, control and high-bit bytes, invalid UTF-8, the overlong "fake slash", NFC/NFD and other look-alike sets in the spirit of xfstests generic/453 and generic/454, path-walk specials, ordering and prefixes, 255-byte names), go through create, mkdir, symlink (including a 4095-byte target; 1023 on xfs), link, xattrs with NUL-containing values, a rename chain, handles, listing and removal, both created directly on the backing filesystem (dcfs populates from it) and created through dcfs, and are compared with the backing filesystem byte for byte; after a restart the same checks pass, the handles taken before it still open and a metadata pass reads zero sectors. Errors for `.`, `..` and 256-byte names match the backing filesystem's, a directory chain deeper than `PATH_MAX` works by descriptors and handles, and a newline in a logged name cannot forge a log line. The random test makes 1,000 seeded names of random bytes, half through dcfs and half on the backing filesystem, and compares the trees. |
-| `mount_dcfs_systemd_test` | The wrapper through util-linux's `mount(8)`, fstab and systemd in a released Debian cloud image booted with systemd as PID 1, two boots (`test/qemu/README.md`, "The systemd guest"): `mount -t dcfs`, libmount's options, remount by `mount.fuse.dcfs`, the exit statuses `mount` returns, fstab lines of each kind by `mount -a` and by the generated mount units, the daemon's log in the journal under its unit, fstab mounts at boot after a reboot with the cache warm and the previous daemons shut down cleanly, a `nofail` mount of a missing device not holding the boot. `systemctl restart` of a mount (also of one `local-fs.target` requires) and the reboot's clean shutdown of every daemon work through `umount.fuse` (step 15.6b). |
+| `mount_dcfs_systemd_test` | The wrapper through util-linux's `mount(8)`, fstab and systemd in a released Debian cloud image booted with systemd as PID 1, two boots (`test/qemu/README.md`, "The systemd guest"): `mount -t dcfs`, libmount's options, remount by `mount.fuse.dcfs`, the exit statuses `mount` returns, fstab lines of each kind by `mount -a` and by the generated mount units, the daemon's log in the journal under its unit, fstab mounts at boot after a reboot with the cache warm and the previous daemons shut down cleanly, a `nofail` mount of a missing device not holding the boot. `systemctl restart` of a mount (also of one `local-fs.target` requires) and the reboot's clean shutdown of every daemon work through `umount.fuse.dcfs`, which systemd's `umount -c` runs; which helper libmount runs for `umount -c`, plain `umount`, the `umount.fuse` fallback and `-N` is pinned too (step 15.6b). |
 | `nfs_test` | dcfs re-exported over loopback NFSv4 from a Debian chroot: listings match, a metadata pass over NFS reads zero sectors, contents match, a file held open over NFS survives a dcfs restart (after `exportfs -f`), writes over NFS land, and a wiped database gives `ESTALE` for an old handle without touching the backing file; nothing behind a boundary is reachable even with `crossmnt` (the stub is listed). |
 | `pjdfstest_test` | POSIX conformance, as above. |
 

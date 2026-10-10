@@ -149,9 +149,9 @@
  *       of its own needed), prints "READY", sleeps <hold-seconds>, then
  *       COMMITs (a no-op transaction) and exits. Used by release_leak.sh
  *       to force a real SQLITE_BUSY out of dcfs's own attribute-refresh
- *       write transaction (busy_timeout=5000 in sqlite.cc, so holding the
- *       lock longer than that guarantees dcfs's own retries are
- *       exhausted) -- fault injection no shell builtin or busybox applet
+ *       write transaction (dcfs sets no busy timeout, step 15.6b, so a write
+ *       transaction that finds the lock held fails at once with SQLITE_BUSY)
+ *       -- fault injection no shell builtin or busybox applet
  *       can do, exactly like writehold above.
  *   testutil runas <uid> <gid> <groups> -- <cmd> [args...]
  *       Drops to <uid>/<gid> with supplementary groups <groups> (a

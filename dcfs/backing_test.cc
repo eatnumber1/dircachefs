@@ -130,7 +130,7 @@ class BackingTest : public ::testing::Test {
     xattrs_supported_ = SetUserXattr(Path("file"), "user.test", "value").ok();
 
     ASSERT_OK_AND_ASSIGN(
-        db_, sqlite3::ConnectionFactory{.path = ":memory:"}.Open());
+        db_, sqlite3::ConnectionFactory{.path = DbPath()}.Open());
     // A real (non-O_PATH) fd: InitRoot registers it as the source
     // filesystem's mount fd, and open_by_handle_at's mount fd argument
     // rejects O_PATH (fs/fhandle.c get_path_from_fd()).
@@ -152,6 +152,10 @@ class BackingTest : public ::testing::Test {
   std::string Path(std::string_view rel) const {
     return absl::StrCat(source_, "/", rel);
   }
+
+  // The cache database: in memory, unless a test needs a file (a second
+  // connection, a WAL checkpoint).
+  virtual std::string DbPath() const { return ":memory:"; }
 
   // Removes all permissions from everything in the source tree (children
   // before their directories, the source itself last), so that any backing
@@ -1055,6 +1059,45 @@ TEST_F(BackingTest, FinishRunMarksACleanShutdown) {
     log.StartCapturingLogs();
     ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
   }
+}
+
+// The cache database as a file in WAL mode, for what an in-memory one cannot
+// show: another connection and the checkpoint.
+class FileDbBackingTest : public BackingTest {
+ protected:
+  std::string DbPath() const override {
+    return absl::StrCat(std::getenv("TEST_TMPDIR"), "/finish_run.sqlite");
+  }
+};
+
+// dcfs sets no busy timeout (step 15.6b, "no timers"): the TRUNCATE checkpoint
+// of FinishRun, with a reader (an administrator's sqlite3 session, `testutil
+// sql`) holding a snapshot, fails at once with Unavailable instead of waiting
+// for it. The run then does not end clean (the flag stays unset, the shutdown
+// says why), and the next start recovers with nothing dirty to re-read.
+TEST_F(FileDbBackingTest, FinishRunWithAReaderOpenFailsAtOnceAndEndsUnclean) {
+  ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
+  ASSERT_OK_AND_ASSIGN(
+      sqlite3::Connection reader,
+      sqlite3::ConnectionFactory{.path = DbPath()}.Open());
+  ASSERT_THAT(reader.Exec("BEGIN"), IsOk());
+  ASSERT_THAT(reader.Exec("SELECT count(*) FROM sqlite_master"), IsOk());
+
+  EXPECT_THAT(FinishRun(ctx_), StatusIs(absl::StatusCode::kUnavailable));
+  EXPECT_THAT(GetCleanShutdown(db_), IsOkAndHolds(false));
+
+  ASSERT_THAT(reader.Exec("ROLLBACK"), IsOk());
+  {
+    absl::ScopedMockLog log(absl::MockLogDefault::kIgnoreUnexpected);
+    EXPECT_CALL(log, Log(_, _, _)).Times(AnyNumber());
+    EXPECT_CALL(log, Log(absl::LogSeverity::kWarning, _,
+                         HasSubstr("did not shut down cleanly (the daemon "
+                                   "died; same boot); recovered 0 dirty")))
+        .Times(1);
+    log.StartCapturingLogs();
+    ASSERT_THAT(StartRun(ctx_, "boot-1"), IsOk());
+  }
+  EXPECT_THAT(cache::ListDirty(ctx_), IsOkAndHolds(testing::IsEmpty()));
 }
 
 // --- Runtime boundary refusal (amendment 12) --------------------------------

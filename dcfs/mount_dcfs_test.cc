@@ -424,33 +424,61 @@ TEST(ParseHelperArgsTest, SubtypeFlagTakesAnArgumentAndIsIgnored) {
               IsOkAndHolds(Field(&HelperArgs::source, "s")));
 }
 
-// Step 15.6b: umount.fuse.dcfs, the helper umount(8) runs for a mount whose
-// mountinfo type is fuse.dcfs.
-TEST(UmountHelperNameTest, TheNameLibmountLooksFor) {
+// Step 15.6b: umount.fuse.dcfs and umount.fuse, the helpers umount(8) runs.
+TEST(UmountHelperNameTest, BothNamesLibmountMayLookFor) {
+  EXPECT_TRUE(IsUmountHelperName("umount.fuse.dcfs"));
   EXPECT_TRUE(IsUmountHelperName("umount.fuse"));
-  EXPECT_FALSE(IsUmountHelperName("umount.fuse.dcfs"));
   EXPECT_FALSE(IsUmountHelperName("umount.dcfs"));
   EXPECT_FALSE(IsUmountHelperName("mount.dcfs"));
   EXPECT_FALSE(IsUmountHelperName("umount"));
   EXPECT_FALSE(IsUmountHelperName(""));
 }
 
-TEST(ParseUmountArgsTest, TheTargetAndTheFlagsUmountPasses) {
+TEST(ParseUmountArgsTest, TheTargetAndWhatTheInnerUmountGets) {
   EXPECT_THAT(ParseUmountArgs(Strings{"/data"}),
               IsOkAndHolds(AllOf(Field(&UmountArgs::target, "/data"),
                                  Field(&UmountArgs::lazy, false),
-                                 Field(&UmountArgs::force, false))));
-  absl::StatusOr<UmountArgs> all =
-      ParseUmountArgs(Strings{"-n", "-l", "-f", "-r", "-v", "/data"});
-  ASSERT_THAT(all, absl_testing::IsOk());
-  EXPECT_TRUE(all->lazy);
-  EXPECT_TRUE(all->force);
-  EXPECT_EQ(all->target, "/data");
+                                 Field(&UmountArgs::other_namespace, false),
+                                 Field(&UmountArgs::forwarded, IsEmpty()))));
+  // Everything but the target goes on, in order, arguments with their option.
+  EXPECT_THAT(
+      ParseUmountArgs(Strings{"-n", "/data", "-f", "-t", "fuse.dcfs", "-c",
+                              "-Ofoo", "-q"}),
+      IsOkAndHolds(
+          AllOf(Field(&UmountArgs::target, "/data"),
+                Field(&UmountArgs::forwarded,
+                      ElementsAre("-n", "-f", "-t", "fuse.dcfs", "-c", "-Ofoo",
+                                  "-q")))));
+}
+
+TEST(ParseUmountArgsTest, LazyAndNamespaceChangeWhatTheHelperDoes) {
   EXPECT_THAT(ParseUmountArgs(Strings{"-lf", "/data"}),
               IsOkAndHolds(AllOf(Field(&UmountArgs::lazy, true),
-                                 Field(&UmountArgs::force, true))));
-  EXPECT_THAT(ParseUmountArgs(Strings{"/data", "-t", "fuse.dcfs", "-i"}),
-              IsOkAndHolds(Field(&UmountArgs::target, "/data")));
+                                 Field(&UmountArgs::forwarded,
+                                       ElementsAre("-lf")))));
+  EXPECT_THAT(ParseUmountArgs(Strings{"--lazy", "/data"}),
+              IsOkAndHolds(Field(&UmountArgs::lazy, true)));
+  EXPECT_THAT(ParseUmountArgs(Strings{"-N", "/proc/1/ns/mnt", "/data"}),
+              IsOkAndHolds(AllOf(
+                  Field(&UmountArgs::other_namespace, true),
+                  Field(&UmountArgs::target, "/data"),
+                  Field(&UmountArgs::forwarded,
+                        ElementsAre("-N", "/proc/1/ns/mnt")))));
+  EXPECT_THAT(ParseUmountArgs(Strings{"--namespace", "123", "/data"}),
+              IsOkAndHolds(AllOf(
+                  Field(&UmountArgs::other_namespace, true),
+                  Field(&UmountArgs::forwarded,
+                        ElementsAre("--namespace", "123")))));
+  EXPECT_THAT(ParseUmountArgs(Strings{"--namespace=123", "/data"}),
+              IsOkAndHolds(Field(&UmountArgs::other_namespace, true)));
+  // Long options with an argument in the next word keep it with them.
+  EXPECT_THAT(ParseUmountArgs(Strings{"--types", "fuse.dcfs", "/data"}),
+              IsOkAndHolds(AllOf(Field(&UmountArgs::target, "/data"),
+                                 Field(&UmountArgs::forwarded,
+                                       ElementsAre("--types", "fuse.dcfs")))));
+  EXPECT_THAT(ParseUmountArgs(Strings{"--force", "/data"}),
+              IsOkAndHolds(Field(&UmountArgs::forwarded,
+                                 ElementsAre("--force"))));
 }
 
 TEST(ParseUmountArgsTest, VersionNeedsNoTarget) {
@@ -459,12 +487,22 @@ TEST(ParseUmountArgsTest, VersionNeedsNoTarget) {
 }
 
 TEST(ParseUmountArgsTest, MistakesAreUsageErrors) {
-  for (const Strings &bad : {Strings{}, Strings{"-x", "/data"},
-                             Strings{"/data", "/other"}, Strings{"-t"}}) {
+  for (const Strings &bad :
+       {Strings{}, Strings{"-f"}, Strings{"/data", "/other"}, Strings{"-t"},
+        Strings{"/data", "-N"}}) {
     absl::StatusOr<UmountArgs> parsed = ParseUmountArgs(bad);
     ASSERT_FALSE(parsed.ok()) << bad.size();
     EXPECT_EQ(ExitStatusFor(parsed.status()), 1);
   }
+}
+
+TEST(TopmostMountEntryTest, DeviceAndTypeOfTheTopmostMount) {
+  EXPECT_THAT(TopmostMountEntry(kMountinfo, "/plain"),
+              Optional(AllOf(Field(&MountEntry::device, "0:36"),
+                             Field(&MountEntry::fstype, "fuse.sshfs"))));
+  EXPECT_THAT(TopmostMountEntry(kMountinfo, "/"),
+              Optional(Field(&MountEntry::fstype, "ext4")));
+  EXPECT_EQ(TopmostMountEntry(kMountinfo, "/nothing"), std::nullopt);
 }
 
 TEST(DcfsMountDeviceTest, TheDeviceOfTheTopmostDcfsMountAtThePath) {
@@ -481,6 +519,7 @@ TEST(DcfsMountDeviceTest, TheDeviceOfTheTopmostDcfsMountAtThePath) {
 
 TEST(DaemonLockPathTest, OneFilePerFuseDevice) {
   EXPECT_EQ(DaemonLockPath("0:35"), "/run/dcfs/0_35.lock");
+  EXPECT_EQ(DaemonLockPath("0:35", "/tmp/x"), "/tmp/x/0_35.lock");
 }
 
 }  // namespace

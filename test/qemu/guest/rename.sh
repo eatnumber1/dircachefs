@@ -528,9 +528,9 @@ fi
 # --- phase3-failure-still-succeeds (audit-races F7) --------------------------
 #
 # Once the backing rename has happened, a failure of dcfs's own bookkeeping
-# afterwards (here: its cache database is locked by someone else for longer
-# than its busy timeout) must not be reported as the rename failing: the
-# caller would believe nothing happened, and the kernel would keep the old
+# afterwards (here: its cache database is locked by someone else, and dcfs
+# waits for no lock: the write fails at once) must not be reported as the
+# rename failing: the caller would believe nothing happened, and the kernel would keep the old
 # names. /src is frozen so that the rename sits inside its backing syscall
 # (phase 1 already committed) while the database lock is taken.
 echo p3 >"$MNT/p3_a"

@@ -86,7 +86,7 @@ bool IsMountHelperName(std::string_view name) {
 }
 
 bool IsUmountHelperName(std::string_view name) {
-  return name == kUmountHelperName;
+  return name == kUmountFuseDcfsHelperName || name == kUmountFuseHelperName;
 }
 
 absl::StatusOr<UmountArgs> ParseUmountArgs(
@@ -99,29 +99,40 @@ absl::StatusOr<UmountArgs> ParseUmountArgs(
       positionals.push_back(arg);
       continue;
     }
+    if (arg[1] == '-') {
+      // A long option: forwarded, with its argument if it takes one (attached
+      // by `=` or as the next word).
+      std::string_view name = std::string_view(arg).substr(0, arg.find('='));
+      if (name == "--lazy") parsed.lazy = true;
+      if (name == "--namespace") parsed.other_namespace = true;
+      parsed.forwarded.push_back(arg);
+      if (arg.find('=') == std::string::npos &&
+          (name == "--namespace" || name == "--types" ||
+           name == "--test-opts") &&
+          i + 1 < args.size()) {
+        parsed.forwarded.push_back(args[++i]);
+      }
+      continue;
+    }
+    // A bundle of short options (-lf), ended by one that takes an argument,
+    // given attached (-tfuse.dcfs) or as the next word. -V is ours; -l and -N
+    // change what the helper does; the rest are the unmount's own.
+    parsed.forwarded.push_back(arg);
     for (size_t j = 1; j < arg.size(); ++j) {
-      switch (arg[j]) {
-        case 'l': parsed.lazy = true; break;
-        case 'f': parsed.force = true; break;
-        case 'V': parsed.version = true; break;
-        // -i is umount(8)'s own (no helper), which the helper always adds.
-        case 'n': parsed.no_mtab = true; break;
-        case 'r': parsed.read_only = true; break;
-        case 'v': parsed.verbose = true; break;
-        case 'i': break;
-        case 't':
-          // The type, attached (-tfuse.dcfs) or as the next word.
-          if (j + 1 == arg.size()) {
-            if (++i == args.size()) {
-              return MarkUsageError(InvalidArgumentErrorBuilder()
-                                    << "Option -t needs an argument");
-            }
+      const char flag = arg[j];
+      if (flag == 'V') parsed.version = true;
+      if (flag == 'l') parsed.lazy = true;
+      if (flag == 'N') parsed.other_namespace = true;
+      if (flag == 't' || flag == 'N' || flag == 'O') {
+        if (j + 1 == arg.size()) {
+          if (i + 1 == args.size()) {
+            return MarkUsageError(InvalidArgumentErrorBuilder()
+                                  << "Option -" << flag
+                                  << " needs an argument");
           }
-          j = arg.size();
-          break;
-        default:
-          return MarkUsageError(InvalidArgumentErrorBuilder()
-                                << "Unknown option -" << arg[j]);
+          parsed.forwarded.push_back(args[++i]);
+        }
+        break;
       }
     }
   }
@@ -385,17 +396,23 @@ StartupReport DecodeStartupReport(std::string_view bytes) {
           .message = "dcfs sent an unintelligible startup report"};
 }
 
-std::optional<std::string> DcfsMountDevice(std::string_view mountinfo,
-                                           std::string_view mountpoint) {
+std::optional<MountEntry> TopmostMountEntry(std::string_view mountinfo,
+                                            std::string_view mountpoint) {
   std::optional<MountinfoLine> line = TopmostMountAt(mountinfo, mountpoint);
-  if (!line.has_value() || line->fields[line->dash + 1] != "fuse.dcfs") {
-    return std::nullopt;
-  }
-  return std::string(line->fields[2]);
+  if (!line.has_value()) return std::nullopt;
+  return MountEntry{.device = std::string(line->fields[2]),
+                    .fstype = std::string(line->fields[line->dash + 1])};
 }
 
-std::string DaemonLockPath(std::string_view device) {
-  return absl::StrCat("/run/dcfs/", absl::StrReplaceAll(device, {{":", "_"}}),
+std::optional<std::string> DcfsMountDevice(std::string_view mountinfo,
+                                           std::string_view mountpoint) {
+  std::optional<MountEntry> entry = TopmostMountEntry(mountinfo, mountpoint);
+  if (!entry.has_value() || entry->fstype != "fuse.dcfs") return std::nullopt;
+  return entry->device;
+}
+
+std::string DaemonLockPath(std::string_view device, std::string_view dir) {
+  return absl::StrCat(dir, "/", absl::StrReplaceAll(device, {{":", "_"}}),
                       ".lock");
 }
 

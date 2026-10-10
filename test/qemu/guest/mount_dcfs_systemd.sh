@@ -99,6 +99,43 @@ mnt() {
 	MRC=$?
 }
 
+# log_helper NAME: makes /sbin/NAME a script that records its arguments in
+# /tmp/helper.log and runs the real one, to see which helper util-linux ran
+# (restore_helpers puts the installed state back).
+log_helper() {
+	rm -f "/sbin/$1"
+	cat >"/sbin/$1" <<EOF_LOG
+#!/bin/sh
+echo "$1 \$*" >>/tmp/helper.log
+exec /usr/local/bin/$1 "\$@"
+EOF_LOG
+	chmod +x "/sbin/$1"
+}
+
+# restore_helpers: the state boot 1's checks run in: umount.fuse.dcfs, the
+# link guest/init installs, and umount.fuse, the opt-in (README.md, "Unmount")
+# that makes a plain `umount PATH` wait for the daemon too: libmount looks for
+# umount.fuse alone on that path (see the helper checks below), and the
+# checks that unmount and then mount the same instance at once need it.
+restore_helpers() {
+	rm -f /sbin/umount.fuse /sbin/umount.fuse.dcfs
+	ln -s /usr/local/bin/umount.fuse.dcfs /sbin/umount.fuse.dcfs
+	ln -s /usr/local/bin/umount.fuse /sbin/umount.fuse
+}
+
+# cursor: the journal's cursor now; journal_failures_since CURSOR prints the
+# lines of dcfs and of the mount units since then that say a start or a stop
+# went wrong (the flock "in use" of the restart race in particular).
+cursor() {
+	journalctl --sync 2>/dev/null
+	journalctl --no-pager -n 0 --show-cursor 2>/dev/null | sed -n 's/^-- cursor: //p'
+}
+journal_failures_since() {
+	journalctl --sync 2>/dev/null
+	journalctl --no-pager -o cat --after-cursor "$1" 2>/dev/null |
+		grep -i -e 'in use' -e 'Failed to mount' -e 'Failed with result' -e 'ERROR' || true
+}
+
 # cleanup_mount MOUNTPOINT: unmounts whatever a failed check left there.
 cleanup_mount() {
 	umount "$1" 2>/dev/null || umount -l "$1" 2>/dev/null || true
@@ -165,24 +202,25 @@ fi
 mkdir -p -m 0700 "$CACHE"
 mkdir -p "$SRC" "$RAW" "$MNT" /data /mnt/live /mnt/missing /mnt/fail /mnt/xfs /mnt/btrfs /tmp/other
 
-# restart_check: systemctl restart rp.mount, three times: both units are
-# active again with new daemons, and the child's tree is served. Prints why
-# not on failure.
+# restart_check: systemctl restart rp.mount rp-c.mount, three times (both
+# named, so systemctl waits for both jobs and its status is theirs: a restart
+# whose start failed fails here, not in a later `systemctl start`): both units
+# are active again with new daemons, the child's tree is served, and the
+# journal shows no failure. Prints why not on failure.
 restart_check() {
 	rc_n=0
 	while [ "$rc_n" -lt 3 ]; do
 		rc_n=$((rc_n + 1))
 		rc_before=$(daemons | sort | tr '\n' ' ')
-		if ! systemctl restart rp.mount 2>/tmp/restart.err; then
-			echo "restart $rc_n failed: $(cat /tmp/restart.err); rp.mount is $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount); $(journalctl --no-pager -b -u rp.mount -o cat | grep -m 1 'in use')"
+		rc_cursor=$(cursor)
+		if ! systemctl restart rp.mount rp-c.mount 2>/tmp/restart.err; then
+			echo "restart $rc_n failed: $(cat /tmp/restart.err); rp.mount is $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount); $(journal_failures_since "$rc_cursor")"
 			return 1
 		fi
-		# The restart returns when rp.mount's job is done; the child's
-		# restart is a job of the same transaction: start waits for it.
-		systemctl start rp-c.mount 2>/dev/null
+		rc_failures=$(journal_failures_since "$rc_cursor")
 		if [ "$(systemctl is-active rp.mount)" != active ] || [ "$(systemctl is-active rp-c.mount)" != active ] ||
-			[ "$(cat /rp/c/rc.txt 2>&1)" != rc ] || [ "$(daemons | sort | tr '\n' ' ')" = "$rc_before" ]; then
-			echo "restart $rc_n left rp.mount $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount), rp/c: $(cat /rp/c/rc.txt 2>&1); daemons $rc_before -> $(daemons | sort | tr '\n' ' ')"
+			[ "$(cat /rp/c/rc.txt 2>&1)" != rc ] || [ "$(daemons | sort | tr '\n' ' ')" = "$rc_before" ] || [ -n "$rc_failures" ]; then
+			echo "restart $rc_n left rp.mount $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount), rp/c: $(cat /rp/c/rc.txt 2>&1); daemons $rc_before -> $(daemons | sort | tr '\n' ' '); journal: $rc_failures"
 			return 1
 		fi
 	done
@@ -205,6 +243,7 @@ boot1() {
 	# The fixtures: an ext4 on vda (a virtio disk, as a real machine's
 	# data disk) with a directory for the nested mount, a directory for the
 	# none form, one for the bind form.
+	restore_helpers
 	mount "$DEV" /mnt/m || fail fixture-mount "cannot mount $DEV"
 	i=0
 	while [ "$i" -lt 5 ]; do
@@ -289,7 +328,8 @@ boot1() {
 	# --- umount ---
 	umount "$MNT" 2>"$OUT"
 	urc=$?
-	if [ "$urc" -eq 0 ] && wait_exit "$pid" && [ "$(mount_count "$MNT")" -eq 0 ]; then
+	# At once: umount.fuse.dcfs returned when the daemon had exited.
+	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
 		pass umount-stops-dcfs
 	else
 		fail umount-stops-dcfs "umount rc=$urc daemon $pid: $(cat "$OUT") $(fs_of "$MNT")"
@@ -513,6 +553,59 @@ EOF
 	fi
 	umount "$MNT"
 
+	# --- which helper util-linux runs (dcfs/mount_dcfs.h) ---
+	# libmount runs umount.<type>. `umount -c` (what systemd runs) takes the
+	# type from mountinfo, fuse.dcfs, and runs umount.fuse.dcfs; a plain
+	# `umount PATH` takes it from statfs, which has no subtype, and looks for
+	# umount.fuse alone (README.md, "Unmount"). The daemon is gone when the
+	# helper returns. With umount.fuse.dcfs not installed, umount.fuse is what
+	# runs for either; and `umount -N` (a mount namespace) is passed to the
+	# helper, which does not wait: the unmount happens, nothing hangs.
+	rm -f /sbin/umount.fuse
+	: >/tmp/helper.log
+	log_helper umount.fuse.dcfs
+	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/h0.db" "$SRC" "$MNT"
+	LIBMOUNT_DEBUG=all umount "$MNT" >/tmp/lm_plain.txt 2>&1
+	plain_ran=$(cat /tmp/helper.log)
+	plain_looked=$(grep -c '/sbin/umount.fuse  *\.\.\. not found' /tmp/lm_plain.txt)
+	wait_no_daemons
+	if [ -z "$plain_ran" ] && [ "$plain_looked" -ge 1 ]; then
+		pass plain-umount-looks-for-umount-fuse-only
+	else
+		fail plain-umount-looks-for-umount-fuse-only "helper log: $plain_ran; $(grep -i 'helper\|umount\.' /tmp/lm_plain.txt | cut -c20- | head -n 10)"
+	fi
+	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/h1.db" "$SRC" "$MNT"
+	umount -c "$MNT" 2>"$OUT"
+	urc=$?
+	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && grep -q "^umount.fuse.dcfs .*$MNT" /tmp/helper.log; then
+		pass umount-c-runs-umount-fuse-dcfs
+	else
+		fail umount-c-runs-umount-fuse-dcfs "rc=$urc daemons=$(daemons) helper log: $(cat /tmp/helper.log) $(cat "$OUT")"
+	fi
+	rm -f /sbin/umount.fuse.dcfs
+	log_helper umount.fuse
+	: >/tmp/helper.log
+	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/h2.db" "$SRC" "$MNT"
+	umount "$MNT" 2>"$OUT"
+	urc=$?
+	if [ "$urc" -eq 0 ] && [ -z "$(daemons)" ] && grep -q "^umount.fuse .*$MNT" /tmp/helper.log; then
+		pass umount-fuse-is-the-opt-in-fallback
+	else
+		fail umount-fuse-is-the-opt-in-fallback "rc=$urc daemons=$(daemons) helper log: $(cat /tmp/helper.log) $(cat "$OUT")"
+	fi
+	mnt -t dcfs -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/h3.db" "$SRC" "$MNT"
+	pid=$(only_daemon)
+	: >/tmp/helper.log
+	umount -N 1 "$MNT" 2>"$OUT"
+	urc=$?
+	wait_exit "$pid"
+	if [ "$urc" -eq 0 ] && [ "$(mount_count "$MNT")" -eq 0 ]; then
+		pass umount-N-is-passed-on-and-unmounts
+	else
+		fail umount-N-is-passed-on-and-unmounts "rc=$urc mounts=$(mount_count "$MNT") helper log: $(cat /tmp/helper.log) $(cat "$OUT")"
+	fi
+	restore_helpers
+
 	# --- systemd's mount units, generated from the same fstab ---
 	systemctl start data.mount data-sub.mount mnt-live.mount mnt-xfs.mount mnt-btrfs.mount 2>"$OUT"
 	src=$?
@@ -563,6 +656,9 @@ EOF
 	fi
 	# Stopping the child leaves the parent; stopping the parent stops what is
 	# under it.
+	# systemd stops a mount with `umount WHERE -c`, which runs umount.fuse.dcfs.
+	: >/tmp/helper.log
+	log_helper umount.fuse.dcfs
 	systemctl stop data-sub.mount
 	if [ "$(systemctl is-active data-sub.mount)" != active ] && [ "$(systemctl is-active data.mount)" = active ] &&
 		[ "$(cat /data/file_1.txt 2>&1)" = "content 1" ]; then
@@ -570,6 +666,12 @@ EOF
 	else
 		fail systemd-stop-child-leaves-parent "$(systemctl is-active data-sub.mount data.mount)"
 	fi
+	if grep -q '^umount.fuse.dcfs /data/sub' /tmp/helper.log; then
+		pass systemd-stop-runs-umount-fuse-dcfs
+	else
+		fail systemd-stop-runs-umount-fuse-dcfs "helper log: $(cat /tmp/helper.log)"
+	fi
+	restore_helpers
 	systemctl start data-sub.mount
 	both_up=0
 	[ "$(systemctl is-active data.mount)" = active ] && [ "$(systemctl is-active data-sub.mount)" = active ] && both_up=1
@@ -595,9 +697,8 @@ EOF
 		fail systemd-restart-parent-restarts-child "$restart_why"
 	fi
 	systemctl stop rp-c.mount rp.mount 2>/dev/null
-	systemctl restart data.mount 2>"$OUT"
+	systemctl restart data.mount data-sub.mount 2>"$OUT"
 	rrc=$?
-	systemctl start data-sub.mount 2>/dev/null # waits for the child's restart
 	if [ "$rrc" -eq 0 ] && [ "$(systemctl is-active data.mount)" = active ] &&
 		[ "$(systemctl is-active data-sub.mount)" = active ] && [ "$(cat /data/sub/raw.txt 2>&1)" = raw ]; then
 		pass systemd-restart-required-mount

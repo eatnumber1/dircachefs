@@ -65,6 +65,14 @@ ban _ZN4dcfs8syscalls9nanosleep* | no timers: wait on the event (the syscalls::n
 ban alarm | no timers: wait on the event
 ban timer_create | no timers: wait on the event
 ban timerfd_create | no timers: wait on the event
+ban setitimer | no timers: wait on the event
+ban pthread_cond_timedwait | no timers: wait on the event
+ban pthread_cond_clockwait | no timers: wait on the event
+ban sem_timedwait | no timers: wait on the event
+ban sem_clockwait | no timers: wait on the event
+ban AbslInternalSleepFor* | no timers: wait on the event (absl::SleepFor)
+ban _ZN4absl*WithTimeout* | no timers: wait on the event (absl::Mutex and absl::CondVar waits with a timeout)
+ban _ZN4absl*WithDeadline* | no timers: wait on the event (absl::Mutex and absl::CondVar waits with a deadline)
 ban sqlite3_busy_timeout | no timers: a lock that is not free is an immediate, clear error (one daemon owns a cache database)
 ban sqlite3_busy_handler | no timers: a lock that is not free is an immediate, clear error (one daemon owns a cache database)
 
@@ -93,15 +101,21 @@ ban __snprintf_chk | Abseil only
 allow dcfs/_objs/syscalls/* realpath | the syscalls::realpath wrapper itself; its callers are gated by the wrapper's own ban
 allow dcfs/_objs/absolute_paths/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper makes SOURCE, MOUNTPOINT and the cache database absolute before it detaches (it has no working directory after)
 allow dcfs/_objs/remount/* _ZN4dcfs8syscalls8realpath* | startup only: the wrapper's remount canonicalizes MOUNTPOINT once before acting on it
-allow dcfs/_objs/syscalls_process/* execv | the mount.dcfs wrapper's capture helper runs mount(8) (step 15.2); nothing else execs
+allow dcfs/_objs/syscalls_process/* execv | the capture helper of the mount.dcfs wrapper runs mount(8) (step 15.2), and the umount.fuse.dcfs helper runs `umount -i` (step 15.6b): the callers are the wrapper and helper entry points, never the daemon; nothing else execs
 allow dcfs/_objs/umount_helper/* _ZN4dcfs8syscalls8realpath* | startup only: the daemon canonicalizes MOUNTPOINT once, before the mount, to find its mountinfo line (CanonicalMountpoint); the umount.fuse helper resolves its target once, as the mountinfo line of a mount it was not given a canonical path for
 allow dcfs/_objs/mounts_below/* _ZN4dcfs8syscalls8realpath* | startup only: mounts_below.cc canonicalizes --source once, from main.cc (MountsBelow), before the mount
 
 # Abseil: formatting and diagnostics internals.
 allow abseil-cpp+/* clock_gettime | Abseil's own clock, mutex timeouts and sysinfo
 allow abseil-cpp+/* _ZN4absl12lts_202608173NowEv | Abseil's own logging timestamps, Mutex and sampling
-allow abseil-cpp+/absl/base/_objs/base/sysinfo* nanosleep | Abseil's own SleepFor of its sysinfo (the spin-lock back-off of a contended absl::Mutex: dcfs is single-threaded, so nothing contends, and a contended mutex cannot signal); dcfs calls none
-allow abseil-cpp+/absl/time/_objs/time/clock* nanosleep | absl::SleepFor itself; dcfs never calls it (this rule)
+allow abseil-cpp+/absl/base/_objs/base/sysinfo* nanosleep | Abseil's own MeasureTscFrequencyWithSleep, which calibrates the CPU's cycle counter against the clock once (GetNominalCPUFrequency, for absl::base_internal::CycleClock, which Abseil's Mutex and logging timestamps use): a measurement, not a wait for anything; dcfs calls none
+allow abseil-cpp+/absl/time/_objs/time/clock* nanosleep | absl::SleepFor itself (AbslInternalSleepFor); dcfs never calls it (the ban above)
+allow abseil-cpp+/absl/synchronization/_objs/synchronization/* pthread_cond_timedwait | Abseil's own Mutex/CondVar waiters (absl::Mutex, absl::CondVar, absl::Notification) implement their timed waits with it; dcfs, single-threaded, calls none (the WithTimeout and WithDeadline bans)
+allow abseil-cpp+/absl/synchronization/_objs/synchronization/* pthread_cond_clockwait | same: Abseil's Mutex/CondVar waiters
+allow abseil-cpp+/absl/synchronization/_objs/synchronization/* sem_timedwait | same: Abseil's Mutex/CondVar waiters
+allow abseil-cpp+/absl/synchronization/_objs/synchronization/* sem_clockwait | same: Abseil's Mutex/CondVar waiters
+allow abseil-cpp+/absl/synchronization/_objs/synchronization/* AbslInternalSleepFor* | Abseil's Mutex spin-lock back-off (a contended absl::Mutex cannot signal); dcfs is single-threaded, so nothing contends
+allow abseil-cpp+/absl/time/_objs/clock_interface/* AbslInternalSleepFor* | absl::Clock::SleepFor of the real clock; dcfs never calls it (the ban above)
 allow abseil-cpp+/* snprintf | Abseil's own number, float, stack-trace and Mutex-debug formatting
 allow abseil-cpp+/* strerror_r | absl::base_internal::StrError
 allow abseil-cpp+/absl/strings/_objs/str_format_internal/parser* fprintf | the `#if defined(__clang__)` debug dump in str_format/constexpr_parser.h (clang only)
@@ -119,6 +133,7 @@ allow sqlite3+/* pthread_create | SQLite's optional sorter worker threads, off b
 # API) and its mount fallbacks.
 allow libfuse+/* clock_gettime | libfuse's cache timeouts of the high-level API and log timestamps
 allow libfuse+/* gettimeofday | libfuse's log timestamps
+allow libfuse+/_objs/libfuse/fuse.* pthread_cond_timedwait | fuse_prune_nodes' wait of the high-level API's node cache and the high-level API's multi-threaded loop: dcfs uses the low-level session API and never starts them
 allow libfuse+/_objs/libfuse/fuse.* sleep | fuse_prune_nodes of the high-level API's node cache (a background pruning thread's sleep(1)): dcfs uses the low-level session API and never starts it
 allow libfuse+/* iconv_open | the iconv fuse module of the high-level API, not used (goes with the io_uring decision)
 allow libfuse+/* dlopen | fuse_module loading of the high-level API, not used
@@ -140,6 +155,7 @@ allow <runtime> _ZN4dcfs8syscalls13clock_gettimeEi | the wrapper is linked with 
 allow dcfs/_objs/syscalls/* clock_gettime | the syscalls::clock_gettime wrapper itself, for the tests
 allow <runtime> _ZN4dcfs8syscalls9nanosleepERK8timespec | the syscalls::nanosleep wrapper is linked with syscalls.o for the tests and the benchmarks; nothing in the daemon calls it (a caller is a violation)
 allow dcfs/_objs/syscalls/* nanosleep | the syscalls::nanosleep wrapper itself, for the tests and the benchmarks
+allow <runtime> _ZN4absl*WithDeadline* | Abseil's Mutex::AwaitWithDeadline and LockSlowWithDeadline, and the real Clock's AwaitWithDeadline, linked in with absl::Mutex and absl::Clock; dcfs calls none (a caller is a violation)
 allow <runtime> clock_nanosleep | glibc's own nanosleep, which the allowed users above reach
 allow <runtime> sqlite3_busy_timeout | defined by the SQLite amalgamation (PRAGMA busy_timeout is built on it); dcfs sets none, and a reference from our code is a violation
 allow <runtime> sqlite3_busy_handler | defined by the SQLite amalgamation (sqlite3_busy_timeout is built on it); dcfs sets none, and a reference from our code is a violation
