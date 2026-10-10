@@ -5,11 +5,11 @@
 # (alloc, fault, godown, t_open_tmpfiles and unwritten_sync, which use XFS
 # ioctls our shim does not declare; xfsctl, bstat, bulkstat_*, stale_handle,
 # attr-list-by-handle-cursor-test, t_immutable's libacl and libhandle,
-# test-nextquota, loggen, xfsfind), those
-# that need libuuid (fake-dump-rootino, uuid_ioctl), libaio (t_mmap_dio),
-# liburing (uring_read_fault, btrfs_encoded_*), OpenSSL (fscrypt-crypt-util),
-# gdbm (dbtest), libbtrfsutil (t_snapshot_deleted_subvolume,
-# t_btrfs_received_uuid_ioctl) and the idmapped-mount tester (src/vfs/).
+# test-nextquota, loggen, xfsfind), those that need libuuid (fake-dump-rootino,
+# uuid_ioctl), libaio (t_mmap_dio), liburing (uring_read_fault,
+# btrfs_encoded_*), OpenSSL (fscrypt-crypt-util), gdbm (dbtest) and
+# libbtrfsutil (t_snapshot_deleted_subvolume, t_btrfs_received_uuid_ioctl).
+# src/vfs/ is built too (XFSTESTS_VFS_HELPERS below), without libcap.
 XFSTESTS_HELPERS = [
     "af_unix", "allocstale", "append_reader", "append_writer",
     "attr_replace_test", "checkpoint_journal", "chprojid_fail", "cloner",
@@ -34,7 +34,7 @@ XFSTESTS_HELPERS = [
     "t_futimens", "t_get_file_time", "t_getcwd", "t_holes", "t_mmap_collision",
     "t_mmap_cow_memory_failure", "t_mmap_cow_race", "t_mmap_fallocate",
     "t_mmap_stale_pmd", "t_mmap_write_ro", "t_mmap_writev",
-    "t_mmap_writev_overlap", "t_mtab", "t_ofd_locks", 
+    "t_mmap_writev_overlap", "t_mtab", "t_ofd_locks",
     "t_readdir_1", "t_readdir_2", "t_readdir_3", "t_reflink_read_race",
     "t_rename_overwrite", "t_stripealign", "t_truncate_cmtime", "testx",
     "trunc", "truncate", "truncfile", "unlink-fsync", "unwritten_mmap",

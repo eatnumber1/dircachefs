@@ -30,15 +30,16 @@ What is here:
   and bash reports on the test's stderr).
 - `shim/glibc_strerror.c`: an `LD_PRELOAD` library giving the guest's musl
   programs glibc's error messages (`strerror`, `strerror_r`, `perror`) for the
-  eleven errors on which the two differ. xfstests matches the glibc text ("Operation not supported" decides
-  whether `_require_xfs_io_command` says "not run"; golden outputs contain
-  "Disk quota exceeded" and the like), and without it a test that glibc
-  systems skip fails here.
+  eleven errors on which the two differ. xfstests matches the glibc text
+  ("Operation not supported" decides whether `_require_xfs_io_command` says
+  "not run"; golden outputs contain "Disk quota exceeded" and the like), and
+  without it a test that glibc systems skip fails here.
 
 - `BUILD.xfstests`: the Bazel overlay for `@xfstests`. The autoconf build is
-  not used; `config.h` is written by hand for Linux and glibc. Only
-  `ltp/fsstress.c` and `ltp/fsx.c` are built, statically linked (dynamically
-  under a sanitizer, like pjdfstest), both `testonly`.
+  not used; `config.h` is written by hand for Linux and glibc. `ltp/fsstress.c`
+  and `ltp/fsx.c`, and (step 17.1) the helper programs of `src/` and `src/vfs/`
+  the generic tests run (`helpers.bzl`), are built, statically linked
+  (dynamically under a sanitizer, like pjdfstest), all `testonly`.
 - `shim/xfs/xfs.h` and `shim/xfs/xqm.h` (`//third_party/xfstests:xfs_shim`):
   our own stand-ins for xfsprogs' `<xfs/xfs.h>`, which `fsstress.c` and
   `fsx.c` need for the XFS ioctl structures, `xfsctl()` and `getopt_long`, and
@@ -74,10 +75,11 @@ image (`qemu_test`'s `rootfs`). Every part comes through Bazel:
   (named after the device), `dcfs.allow_other`, and `dcfs.fuse_opt=suid` and
   `=dev` unless the test asks for `nosuid` (`mount -t fuse.dcfs` is what
   xfstests runs for `FSTYP=fuse`, `FUSE_SUBTYP=.dcfs`; a few tests mount with
-  `-t fuse`, or with options of their own); a `umount` that waits for the dcfs
-  daemons of the unmounted file systems to exit (the daemon holds its cache
-  database until then, and xfstests mounts the device again at once); and
-  `shim/glibc_strerror.c` preloaded.
+  `-t fuse`, or with options of their own); a `umount` that waits, with
+  `flock` on the cache database, for the daemon of the unmounted file system
+  to exit (the daemon holds the lock until then, and xfstests mounts the
+  device again at once; 15.6's interim recipe, gone when 15.6b's
+  `umount.fuse.dcfs` lands); and `shim/glibc_strerror.c` preloaded.
 
 The guest mounts `/dev/vdb` as `TEST_DEV` and `/dev/vdc` as `SCRATCH_DEV`
 through dcfs (so the backing file system, ext4, xfs or btrfs, is the matrix
@@ -86,14 +88,19 @@ database durably; on the image's disk each commit waited for the host), and
 makes a new file system on the scratch device before each batch of tests (for
 `FSTYP=fuse` xfstests only deletes the scratch files). `check` costs several
 seconds of CPU before its first test in this guest, as much as most "not run"
-tests take, so it is given ten tests at a time; the script watches its output
-and kills the test that has run for 200 s. The tests are those of group
-`auto` less `test/qemu/guest/xfstests.excluded`, in six shards by position
-(`guest/xfstests_<n>.sh`).
+tests take, so it is given ten tests at a time; the script reads its output a
+line at a time and kills the test that has not finished 200 s after the
+previous one did. The tests are those of group `auto` less
+`test/qemu/guest/xfstests.excluded`, `xfstests.<fstype>.excluded` and the slow
+tests (`xfstests.slow`, `xfstests.<fstype>.slow`: step 17.3), in six shards by
+position (`guest/xfstests_<n>.sh`); each shard's outcomes are held to
+`xfstests.<fstype>.expected_failures` and `xfstests.<fstype>.notrun`
+(test/qemu/README.md, "xfstests (Phase 17)"). The shards are incompatible with
+the sanitizer configurations (the same section says why).
 
 ## What is left out, and the tests it turns into "not run"
 
-The first column is how many of the 737 tests that run were "not run" for the
+The first column is how many of the 738 tests that run were "not run" for the
 reason, on the xfs run (the other backing file systems differ by a few). Most
 are xfstests' own checks that the file system does not support something
 (reflinks and dedupe: FUSE cannot forward the ioctls; fiemap; fcollapse and
@@ -155,12 +162,27 @@ Declared in `MODULE.bazel` (`http_archive` `xfstests`).
 3. In this file's "Pin" section, set the tag, the tag's commit id
    (`git ls-remote` above, the `^{}` line), the URL, both forms of the hash
    and the date.
-4. Build with `bazel build @xfstests//:fsstress @xfstests//:fsx
-   @xfstests//:replay-log`; a new tag
-   may need more `HAVE_*` in `BUILD.xfstests`'s `config.h` or more
-   declarations in the shim header.
-5. Run `//test/qemu:stress_short_test_ext4` and the large tier; the set of
-   features fsx disables (`guest/stress.sh`) may change with the new tools.
-   Run `//test/qemu:sqlite_durability_test` too (replay-log's options).
-6. Update the version in `tools/sbom/pins.json` only if its extraction rule
+4. Re-make `0001-dcfs-guest.patch`: apply it to the new tree (`patch -p1`),
+   fix the hunks that no longer apply (each says why it exists), and check
+   whether upstream fixed what a hunk works around (`_fs_type` for fuse
+   subtypes, `check`'s OOM score writes).
+5. Build with `bazel build @xfstests//:all` (it includes `:replay-log`); a new tag may need more `HAVE_*`
+   in `BUILD.xfstests`'s `config.h`, more declarations in the shim headers,
+   and new programs in `src/Makefile` (compare its TARGETS and LINUX_TARGETS
+   with `helpers.bzl`: add the ones that need nothing beyond libc, say in the
+   README's table what the others cost).
+6. Run `//test/qemu:stress_short_test_ext4` (the set of features fsx disables
+   in `guest/stress.sh` may change), `//test/qemu:sqlite_durability_test`
+   (replay-log's options) and the three xfstests suites
+   (`xfstests_test_ext4`, `_xfs`, `_btrfs`). New tests change what runs: the
+   gate then reports each test that is new in the group list as an unlisted
+   failure or "not run"; list them with their reasons in
+   `test/qemu/guest/xfstests.<fstype>.expected_failures` and `.notrun`
+   (`test/qemu/scripts/xfstests-notrun.sh` writes the latter from the serial
+   logs), move tests that now take most of the limit to `xfstests.slow`,
+   delete entries for tests that left the group, and run again. The shards are
+   dealt by position, so adding or removing tests moves every later test to
+   another shard: re-check the per-shard times (the summary line of each
+   serial log) against the job's limit.
+7. Update the version in `tools/sbom/pins.json` only if its extraction rule
    needs it (it reads `strip_prefix`).

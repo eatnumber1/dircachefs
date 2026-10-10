@@ -25,11 +25,10 @@ diff -u -r a/check b/check
 diff -u -r a/common/rc b/common/rc
 --- a/common/rc
 +++ b/common/rc
-@@ -1763,9 +1763,13 @@
+@@ -1763,9 +1763,12 @@
      # Fix the filesystem type up here so that the callers don't
      # have to bother with this quirk.
      #
-+    #
 +    # dcfs (step 17.1): a FUSE file system mounted with a subtype
 +    # (FSTYP=fuse, FUSE_SUBTYP=.dcfs, so mount -t fuse.dcfs) shows up in df as
 +    # fuse.dcfs, and init_rc compares that with FSTYP, which is fuse.

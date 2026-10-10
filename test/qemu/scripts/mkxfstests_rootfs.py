@@ -21,7 +21,7 @@ Debian image (qemu_test's `rootfs`). Contents:
                      tests expect (fsgqa, 123456-fsgqa, fsgqa2), mtab
   /usr/local/bin/mount, umount
                      mount that gives every FUSE mount its dcfs options, and
-                     umount that waits for the dcfs daemons to exit
+                     umount that waits for the daemon's flock on its cache to go
   /usr/lib/glibc_strerror.so
                      LD_PRELOAD library: glibc's error messages for musl programs
   /mnt/test, /mnt/scratch, /cache, /tmp, /proc, /sys, /dev
@@ -219,29 +219,42 @@ UMOUNT_WRAPPER = """#!/bin/sh
 # Installed by mkxfstests_rootfs.py (step 17.1), ahead of /bin/umount in PATH.
 #
 # umount of a dcfs mount returns when the kernel has unmounted it, while the
-# daemon is still shutting down (it holds the cache database until it exits),
-# and xfstests mounts the same device again at once ("our local mount
-# routine", _scratch_cycle_mount): the new daemon then finds the database in
-# use and the mount fails. Wait for the daemons of the unmounted file systems
-# to exit, so that umount returns when the cache is free as well.
+# daemon is still shutting down: it holds an exclusive flock on its cache
+# database (README.md: only one dcfs may use a database) until it exits, and
+# xfstests mounts the same device again at once ("our local mount routine",
+# _scratch_cycle_mount), so the new daemon finds the database in use and the
+# mount fails. This waits for the lock to be free, which is the daemon's exit
+# (an event, not a timer: `flock FILE true` returns when it holds the lock).
+# It finds the database from the mount (the device's name, as the mount
+# wrapper names it) before it unmounts. This is 15.6's interim recipe: the
+# wrapper goes away when step 15.6b's umount.fuse.dcfs waits for the daemon,
+# and xfstests then regression-tests that helper. A lazy unmount (-l) does not
+# wait: the daemon exits only when the last user of the mount is gone.
+lazy=0
+db=""
+for arg in "$@"; do
+	case "$arg" in
+	-l | --lazy | -lf | -fl) lazy=1 ;;
+	-*) ;;
+	*)
+		target=$(readlink -f "$arg")
+		src=$(awk -v t="$target" '$3 == "fuse.dcfs" && ($2 == t || $1 == t) { print $1 }' /proc/mounts | tail -n 1)
+		[ -n "$src" ] && db=/cache/${src##*/}.db
+		;;
+	esac
+done
 /bin/umount "$@"
 rc=$?
-i=0
-while [ "$i" -lt 100 ]; do
-	daemons=0
-	for comm in /proc/[0-9]*/comm; do
-		name=$({ read -r n <"$comm"; echo "$n"; } 2>/dev/null)
-		case "$name" in
-		dcfs*) daemons=$((daemons + 1)) ;;
-		esac
-	done
-	mounts=$(grep -c ' fuse\\.dcfs ' /proc/mounts)
-	[ "$daemons" -le "$mounts" ] && break
-	sleep 0.1
-	i=$((i + 1))
-done
+# Only when that was the last mount of the device: a bind mount of a file of
+# the file system (generic/306) or a second mount point leaves the daemon
+# serving, and the lock is held for as long.
+if [ "$rc" -eq 0 ] && [ "$lazy" -eq 0 ] && [ -n "$db" ] && [ -e "$db" ] &&
+	! awk -v s="$src" '$3 == "fuse.dcfs" && $1 == s { found = 1 } END { exit !found }' /proc/mounts; then
+	flock "$db" true
+fi
 exit "$rc"
 """
+
 
 
 MOUNT_WRAPPER = """#!/bin/sh
@@ -257,6 +270,10 @@ MOUNT_WRAPPER = """#!/bin/sh
 # this adds all of them (the last two unless the test asks for nosuid), the
 # database named after the device, and calls the
 # helper that serves every FUSE mount of this guest.
+# The glibc error messages (guest/xfstests.sh preloads them for the tests'
+# tools) are not for the mount helper: the daemon is a glibc program that
+# needs none, and the preloaded library is only for the musl tools.
+unset LD_PRELOAD
 type=""
 prev=""
 fuse_opts=",dcfs.fuse_opt=suid,dcfs.fuse_opt=dev"

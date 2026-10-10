@@ -31,7 +31,14 @@ cc_binary(
         "-ffreestanding",
         "-fno-stack-protector",
         "-fPIC",
-    ],
+    ] + select({
+        # Never instrumented: the preloaded library has no sanitizer runtime to
+        # call (the xfstests tests are not built for the sanitizer configurations
+        # at all, test/qemu/README.md, but //... builds this).
+        "//test/qemu:asan_build": ["-fno-sanitize=address"],
+        "//test/qemu:ubsan_build": ["-fno-sanitize=undefined"],
+        "//conditions:default": [],
+    }),
     features = ["-link_libc"],
     linkopts = [
         "-nostdlib",
