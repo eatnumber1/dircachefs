@@ -2597,3 +2597,18 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   restart: a correctness-bug candidate). 26.20 CI triage dispatched (investigator, lane-1) under
   the freeze's red-push exception: reproduce, bisect among the merges since 9a67552 if needed,
   fix tests in tests and dcfs bugs with a failing-first harness test.
+- 17.1 review round done (lane-4, 733c486 on 66bff51): per-backing notrun lists (about 572 entries
+  each) and the gate failing on unlisted or changed notruns and listed timeouts, which at once
+  caught generic/770 failing where it should not run (generic/740 mkfs'd the raw scratch device
+  earlier in the same batch; raw-device tests now end their batch); the umount wrapper waits on
+  the daemon's flock, the watchdog is a blocking `read -t` on a pipe; two justified timers remain
+  (a 0.2 s mount retry while the kernel drops the old namespace; `timeout 1 logread -f`); all 63
+  xfstests targets incompatible under asan/ubsan (the shim's `__asan_report_load1` relocation
+  failure measured); the gate test runs under the pinned busybox and gawk (25 fixtures); mkfs
+  status checked; six exclusions left, the 40 slow tests in an `xfstests_slow` set (eight manual
+  shards, 1500 s limit, lists empty until 17.3); a dedicated `xfstests` CI job (one runner per
+  backing, 25-45 min of tests estimated, 70-90 with a cold build), test.sh's default selection
+  excludes the xfstests and manual tags with a unit test; daemon CPU ticks per test in the results.
+  18 of 18 shards green at the tip. Sent for a rebase over 15.6b/15.8/15.9 (its mount wrapper adds
+  the now-refused allow_other; the sleep allowlist; the bind rename), then merge without further
+  review.
