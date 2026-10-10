@@ -21,9 +21,10 @@
 #       (step 11.1) do dmsetup's, "alpine_dmsetup/root/". xfstests' fsstress,
 #       fsx and replay-log and //test/qemu:crash_states go to /bin.
 #
-#   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <test-binary> \
-#       <disk0-device-or-'-'> <args> [name:path...]
-#       Per-test initramfs for qemu_cc_test: busybox, guest/init, the test
+#   mkinitramfs.sh --unit <out.cpio.gz> <busybox> <init> <cost-lib> \
+#       <test-binary> <disk0-device-or-'-'> <args> [name:path...]
+#       Per-test initramfs for qemu_cc_test: busybox, guest/init, guest/
+#       cost_lib.sh (at /tests/, where init sources it), the test
 #       binary at /test/run, /test/disk0 (the device name, e.g. "vdb", iff
 #       a disks= entry was given), /test/args (<args> verbatim, guest/init
 #       word-splits it), and each `name:path` data file copied to
@@ -125,10 +126,11 @@ if [ "$OUT_ARG" = "--unit" ]; then
 	OUT=$1
 	BUSYBOX=$2
 	INIT=$3
-	TESTBIN=$4
-	DISK0=$5
-	ARGS=$6
-	shift 6
+	COSTLIB=$4
+	TESTBIN=$5
+	DISK0=$6
+	ARGS=$7
+	shift 7
 else
 	MODE=e2e
 	OUT=$1
@@ -156,11 +158,12 @@ ROOT="$WORK/root"
 
 if [ "$MODE" = "unit" ]; then
 	mkdir -p "$ROOT/bin" "$ROOT/test/data" "$ROOT/proc" "$ROOT/sys" \
-		"$ROOT/dev" "$ROOT/tmp"
+		"$ROOT/dev" "$ROOT/tmp" "$ROOT/tests"
 
 	cp "$BUSYBOX" "$ROOT/bin/busybox"
 	ln -sf busybox "$ROOT/bin/sh"
 	cp "$INIT" "$ROOT/init"
+	cp "$COSTLIB" "$ROOT/tests/cost_lib.sh"
 
 	cp "$TESTBIN" "$ROOT/test/run"
 	copy_deps "$ROOT/test/run"
@@ -291,7 +294,7 @@ else
 			cp "$f" "$ROOT/pjdfstest/$(basename "$f")"
 			;;
 		*.sh) cp "$f" "$ROOT/tests/$(basename "$f")" ;;
-		*/syscall_budgets.txt | */request_budgets.txt | */cpu_budgets.txt | */fault_ace_mixed.expected_failures)
+		*/syscall_budgets.txt | */request_budgets.txt | */fault_ace_mixed.expected_failures)
 			cp "$f" "$ROOT/tests/$(basename "$f")"
 			;;
 		esac

@@ -29,8 +29,10 @@ ASAN_CANCEL_MEM = 1216
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
 # and any other package with unit tests) to build each test's own initramfs.
 exports_files([
+    "guest/cost_lib.sh",
     "guest/cpu_budgets.txt",
     "guest/init",
+    "guest/io_budgets.txt",
     "guest/strace_lib.sh",
     "scripts/mkinitramfs.sh",
     "scripts/run-qemu.sh",
@@ -95,7 +97,6 @@ config_setting(
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + [
         "guest/fault_ace_mixed.expected_failures",  # step 26.14e
-        "guest/cpu_budgets.txt",
         "guest/request_budgets.txt",
         "guest/syscall_budgets.txt",
     ],
@@ -207,16 +208,16 @@ sh_test(
     srcs = ["cost_report_test.sh"],
     args = [
         "$(location guest/init)",
-        "$(location guest/lib.sh)",
+        "$(location guest/cost_lib.sh)",
     ],
     data = [
+        "guest/cost_lib.sh",
         "guest/init",
-        "guest/lib.sh",
     ],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
-# Step 26.17: run-qemu.sh holds a run to its CPU budget (fake qemu, canned
+# Step 26.17: run-qemu.sh holds a run to its CPU and I/O budgets (fake qemu, canned
 # serial logs, the real budget comparison).
 sh_test(
     name = "run_qemu_cost_test",
@@ -227,9 +228,11 @@ sh_test(
         "$(location scripts/run-qemu.sh)",
         "$(location guest/strace_lib.sh)",
         "$(location guest/cpu_budgets.txt)",
+        "$(location guest/io_budgets.txt)",
     ],
     data = [
         "guest/cpu_budgets.txt",
+        "guest/io_budgets.txt",
         "guest/strace_lib.sh",
         "scripts/run-qemu.sh",
     ],

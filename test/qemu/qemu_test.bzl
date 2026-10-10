@@ -78,16 +78,19 @@ def mem_args_for(mem, asan_mem):
 
 # Step 26.17: what run-qemu.sh holds a run to (README.md, "Budgets in three
 # parts"): the budget comparison it shares with the guest scripts, and the CPU
-# budgets. Every qemu_test and qemu_cc_test gets them.
+# and I/O budgets. Every qemu_test and qemu_cc_test gets them.
 BUDGET_DATA = [
     "//test/qemu:guest/strace_lib.sh",
     "//test/qemu:guest/cpu_budgets.txt",
+    "//test/qemu:guest/io_budgets.txt",
 ]
 BUDGET_ARGS = [
     "--budget-lib",
     "$(location //test/qemu:guest/strace_lib.sh)",
     "--cpu-budgets",
     "$(location //test/qemu:guest/cpu_budgets.txt)",
+    "--io-budgets",
+    "$(location //test/qemu:guest/io_budgets.txt)",
 ]
 
 def sanitizer_args():

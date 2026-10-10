@@ -5,12 +5,13 @@
 # the tolerance. A fake qemu prints canned serial logs (nothing here needs root
 # or a kernel); the real guest/strace_lib.sh compares.
 #
-# Usage: run_qemu_cost_test.sh <run-qemu.sh> <strace_lib.sh> <cpu_budgets.txt>
+# Usage: run_qemu_cost_test.sh <run-qemu.sh> <strace_lib.sh> <cpu_budgets.txt> <io_budgets.txt>
 set -eu
 
 RUN_QEMU=$1
 BUDGET_LIB=$2
 REAL_CPU_BUDGETS=$3
+REAL_IO_BUDGETS=$4
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
@@ -42,6 +43,16 @@ cat >"$WORK/cpu_budgets.txt" <<'EOT'
 # a comment
 //t:x cpu_us 400000
 //t:zero cpu_us 0
+//t:both cpu_us 400000
+EOT
+
+cat >"$WORK/io_budgets.txt" <<'EOT'
+# a comment
+//t:io reads 50
+//t:io flushes 30   # observed 27..28
+//t:io dcfs_write_bytes 0
+//t:both reads 50
+//t:y reads 5
 EOT
 
 # canned COST-LINE: a guest that passed, with the COST line given ("" for none).
@@ -65,8 +76,8 @@ run() {
 		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
 		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
 		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
-		--budget-lib "$BUDGET_LIB" --cpu-budgets "$WORK/cpu_budgets.txt" \
-		"$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
+		--budget-lib "$BUDGET_LIB" --cpu-budgets "$WORK/cpu_budgets.txt" --io-budgets "$WORK/io_budgets.txt" \
+		"$WORK/kernel" "$WORK/initrd" ${DISKS:-} >"$WORK/stdout" 2>&1 || RC=$?
 }
 
 canned "COST cpu_us=400000"
@@ -84,7 +95,7 @@ echo "PASS: a run at the budget plus the 100% tolerance passes"
 canned "COST cpu_us=800001"
 run //t:x
 [ "$RC" -ne 0 ] || fail "a run past budget plus tolerance passed: $(cat "$WORK/stdout")"
-grep -q "== RESULT: FAIL (over its CPU budget" "$WORK/stdout" || fail "no FAIL verdict naming the budget: $(cat "$WORK/stdout")"
+grep -q "== RESULT: FAIL (over its cost budget" "$WORK/stdout" || fail "no FAIL verdict naming the budget: $(cat "$WORK/stdout")"
 grep -q "//t:x cpu_us: count rose from 400000 to 800001, past the 100% tolerance" "$WORK/stdout" ||
 	fail "the failure does not name the counts: $(cat "$WORK/stdout")"
 echo "PASS: a run past its budget plus the tolerance fails, naming both numbers"
@@ -99,7 +110,7 @@ echo "PASS: a zero budget allows no CPU"
 canned "COST cpu_us=99000000"
 run //t:unlisted
 [ "$RC" -eq 0 ] || fail "a target without a budget failed: $(cat "$WORK/stdout")"
-grep -q "run-qemu.sh: cost: dcfs CPU 99.000 s (no budget for //t:unlisted" "$WORK/stdout" ||
+grep -q "run-qemu.sh: cost: dcfs CPU 99.000 s (no line for //t:unlisted in cpu_budgets.txt)" "$WORK/stdout" ||
 	fail "no note that the target has no budget: $(cat "$WORK/stdout")"
 echo "PASS: a target without a budget line is reported, not gated"
 
@@ -126,10 +137,10 @@ echo "PASS: a COST line without the budgeted count fails"
 canned "COST cpu_us=9999999"
 run //t:x DCFS_NOISY=1
 [ "$RC" -eq 0 ] || fail "a noisy run was held to the budget: $(cat "$WORK/stdout")"
-grep -q "not held to the budget: noisy kernel)" "$WORK/stdout" || fail "no reason for the noisy run: $(cat "$WORK/stdout")"
+grep -q "not held to the budgets: noisy kernel)" "$WORK/stdout" || fail "no reason for the noisy run: $(cat "$WORK/stdout")"
 run //t:x DCFS_FORCE_TCG=1
 [ "$RC" -eq 0 ] || fail "a TCG run was held to the budget: $(cat "$WORK/stdout")"
-grep -q "not held to the budget: TCG)" "$WORK/stdout" || fail "no reason for the TCG run: $(cat "$WORK/stdout")"
+grep -q "not held to the budgets: TCG)" "$WORK/stdout" || fail "no reason for the TCG run: $(cat "$WORK/stdout")"
 # run_flagged WORD: the run with WORD on the kernel command line.
 run_flagged() {
 	RC=0
@@ -137,16 +148,88 @@ run_flagged() {
 		sh "$RUN_QEMU" --unit --qemu "$WORK/bin/qemu" --qboot "$WORK/qboot.rom" \
 		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
 		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
-		--budget-lib "$BUDGET_LIB" --cpu-budgets "$WORK/cpu_budgets.txt" \
+		--budget-lib "$BUDGET_LIB" --cpu-budgets "$WORK/cpu_budgets.txt" --io-budgets "$WORK/io_budgets.txt" \
 		--cmdline "$1" "$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
 }
 for flagged in "dcfs_sanitizer=asan:asan build" "dcfs_sanitizer=ubsan:ubsan build" "dcfs_cov=/dev/vdz:coverage build"; do
 	run_flagged "${flagged%%:*}"
 	[ "$RC" -eq 0 ] || fail "a run with ${flagged%%:*} was held to the budget: $(cat "$WORK/stdout")"
-	grep -q "not held to the budget: ${flagged#*:})" "$WORK/stdout" ||
+	grep -q "not held to the budgets: ${flagged#*:})" "$WORK/stdout" ||
 		fail "no reason for ${flagged%%:*}: $(cat "$WORK/stdout")"
 done
 echo "PASS: noisy, TCG and sanitizer runs report their CPU and are not held to the budget"
+
+# --- I/O (guest/io_budgets.txt: counts, no tolerance) -------------------------
+
+IO_OK="reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=3 dcfs_writes=1 dcfs_read_bytes=4096 dcfs_write_bytes=0"
+canned "COST cpu_us=400000 $IO_OK"
+run //t:io
+[ "$RC" -eq 0 ] || fail "a run at its I/O budgets failed: $(cat "$WORK/stdout")"
+grep -q "run-qemu.sh: cost: disk I/O 50 reads, 7 writes, 400 sectors read, 900 sectors written, 30 flushes; dcfs caused 3 reads (4096 bytes), 1 writes (0 bytes) (within the budgets in io_budgets.txt)" "$WORK/stdout" ||
+	fail "the cost line does not say the I/O and the budget: $(cat "$WORK/stdout")"
+echo "PASS: a run at its I/O budgets passes, and says what it did"
+
+# One over, in each kind that has a budget: fails, naming both numbers; the
+# budget is not a tolerance.
+for over in reads:51 flushes:31 dcfs_write_bytes:1; do
+	canned "COST cpu_us=400000 $(echo "$IO_OK" | sed "s/${over%%:*}=[0-9]*/${over%%:*}=${over#*:}/")"
+	run //t:io
+	[ "$RC" -ne 0 ] || fail "${over%%:*} one past its budget passed: $(cat "$WORK/stdout")"
+	grep -q "== RESULT: FAIL (over its cost budget" "$WORK/stdout" || fail "no FAIL verdict for ${over%%:*}: $(cat "$WORK/stdout")"
+	grep -q "^//t:io ${over%%:*}: count rose from [0-9]* to ${over#*:}; raising a budget is a deliberate edit of io_budgets.txt whose commit says why" "$WORK/stdout" ||
+		fail "the failure for ${over%%:*} does not name the counts: $(cat "$WORK/stdout")"
+done
+echo "PASS: an I/O count one past its budget fails, naming both numbers, with no tolerance"
+
+# A count with no line in the file is not held (writes has none here).
+canned "COST cpu_us=400000 $(echo "$IO_OK" | sed 's/writes=7/writes=7000/')"
+run //t:io
+[ "$RC" -eq 0 ] || fail "an I/O count without a budget line failed: $(cat "$WORK/stdout")"
+echo "PASS: only the kinds that have a line are held"
+
+# The CPU and the I/O are held separately, and both are reported.
+canned "COST cpu_us=800001 $(echo "$IO_OK" | sed 's/reads=50/reads=51/')"
+run //t:both
+[ "$RC" -ne 0 ] || fail "CPU and I/O both over passed"
+grep -q "^//t:both cpu_us: count rose" "$WORK/stdout" && grep -q "^//t:both reads: count rose" "$WORK/stdout" ||
+	fail "both failures are not reported: $(cat "$WORK/stdout")"
+echo "PASS: CPU and I/O over their budgets are both reported"
+
+# A COST line without the I/O counts fails a target with an I/O budget.
+canned "COST cpu_us=400000"
+run //t:io
+[ "$RC" -ne 0 ] || fail "a COST line without I/O counts passed an I/O budget"
+grep -q "//t:io reads: no such count" "$WORK/stdout" || fail "no message for the missing I/O counts: $(cat "$WORK/stdout")"
+echo "PASS: a COST line without the budgeted I/O counts fails"
+
+# A target with a CPU budget and none for I/O (and the reverse) is held by the
+# one it has; one with neither is reported.
+canned "COST cpu_us=400000 reads=999999"
+run //t:zero
+[ "$RC" -ne 0 ] || fail "//t:zero (a CPU budget of 0, none for I/O) passed 400000 CPU"
+canned "COST cpu_us=99999999 reads=5"
+run //t:y
+[ "$RC" -eq 0 ] || fail "a target with only an I/O budget was held to CPU: $(cat "$WORK/stdout")"
+grep -q "no line for //t:y in cpu_budgets.txt" "$WORK/stdout" || fail "no note that //t:y has no CPU budget: $(cat "$WORK/stdout")"
+echo "PASS: a target is held by the budget files that have a line for it"
+
+# The same runs that are not held to the CPU budgets are not held to the I/O
+# ones (noisy writeback changes the I/Os, TCG and the sanitizers their timing).
+canned "COST cpu_us=1 reads=99999"
+run //t:io DCFS_NOISY=1
+[ "$RC" -eq 0 ] || fail "a noisy run was held to the I/O budget: $(cat "$WORK/stdout")"
+grep -q "disk I/O .*not held to the budgets: noisy kernel" "$WORK/stdout" || fail "no reason for the noisy run's I/O: $(cat "$WORK/stdout")"
+echo "PASS: runs that are not held to the CPU budgets are not held to the I/O budgets"
+
+# A guest with disks that counted no read at all did not count: mounting a
+# disk reads it.
+canned "COST cpu_us=1 reads=0 writes=0 sectors_read=0 sectors_written=0 flushes=0"
+DISKS=vdb:ext4:64M
+run //t:unlisted
+DISKS=
+[ "$RC" -ne 0 ] || fail "a COST line of zeros for a guest with disks passed"
+grep -q "== RESULT: FAIL (no I/O counted" "$WORK/stdout" || fail "no FAIL verdict for the uncounted I/O: $(cat "$WORK/stdout")"
+echo "PASS: a guest with disks that counted no I/O at all fails"
 
 # The checked-in budgets: every line is OP KIND MAX with a number, the kind a
 # COST field, and no target twice (a second line would be ignored by the awk
@@ -154,8 +237,17 @@ echo "PASS: noisy, TCG and sanitizer runs report their CPU and are not held to t
 awk '
 	/^#/ || /^$/ { next }
 	NF != 3 || $3 !~ /^[0-9]+$/ { print FILENAME ":" FNR ": not OP KIND MAX: " $0; bad = 1 }
+	$2 != "cpu_us" { print FILENAME ":" FNR ": " $2 " is not cpu_us"; bad = 1 }
 	($1 SUBSEP $2) in seen { print FILENAME ":" FNR ": " $1 " " $2 " twice"; bad = 1 }
 	{ seen[$1 SUBSEP $2] = 1 }
 	END { exit bad }' "$REAL_CPU_BUDGETS" || fail "cpu_budgets.txt is malformed"
 echo "PASS: the checked-in CPU budgets are well formed"
+awk '
+	/^#/ || /^$/ { next }
+	NF < 3 || $3 !~ /^[0-9]+$/ { print FILENAME ":" FNR ": not OP KIND MAX: " $0; bad = 1 }
+	$2 !~ /^(reads|writes|sectors_read|sectors_written|flushes|dcfs_reads|dcfs_writes|dcfs_read_bytes|dcfs_write_bytes)$/ { print FILENAME ":" FNR ": " $2 " is not a COST field"; bad = 1 }
+	($1 SUBSEP $2) in seen { print FILENAME ":" FNR ": " $1 " " $2 " twice"; bad = 1 }
+	{ seen[$1 SUBSEP $2] = 1 }
+	END { exit bad }' "$REAL_IO_BUDGETS" || fail "io_budgets.txt is malformed"
+echo "PASS: the checked-in I/O budgets are well formed"
 echo "PASS: all checks passed"

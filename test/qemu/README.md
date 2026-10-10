@@ -711,7 +711,8 @@ gate is disabled.
 | slopes: every operation class's steps, transactions, WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by a * N + b (26.4b) | `//dcfs:dir_cache_fs_slope_test`'s `SlopeTest.AnExtraCostPerOperationIsCaught` (two more statement steps per create exceed the bound) |
 | FUSE requests per user-level operation (26.4b: `guest/request_budgets.txt`) | `//test/qemu:request_lib_test` (the real `guest/request_lib.sh` delta over canned counter snapshots, and a request count above its budget failing) |
 | the guest's cost accounting (26.17: the CPU of the cgroup the daemon is started in, read in microseconds, and `cost_exec.sh`, which joins it before the exec) | `//test/qemu:cost_report_test` (the real functions of `guest/init` over canned cgroup files: a missing cgroup is an error, not 0; the command runs with its arguments intact and its own pid in `cgroup.procs`; not at all if the cgroup cannot be joined; `lib.sh`'s reader is `init`'s) |
-| a run is held to its CPU budget (26.17: `guest/cpu_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan and coverage runs are not held) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`); the per-operation CPU checks of `request_counts_test` fail with `cpu_budgets.txt` missing or lacking a line, as they did while writing them |
+| the disks' I/O is counted (26.17: `cost_disk_counts` and `cost_cgroup_io`, which no budget could notice failing, since a count below its budget passes) | `//test/qemu:boot_test` and `//test/qemu:ram_disks_test` (`cost_selfcheck`: a direct write of 1 MiB must show in the counters of a virtio disk and of a RAM disk and in the cgroup's `io.stat`; with the disks' glob pointing at nothing both fail, saying `disks reads=0 writes=0 ...`), `//test/qemu:cost_report_test` (the sums, the difference of two readings and the cgroup's counts over canned files, other devices left out) and `//test/qemu:run_qemu_cost_test` (a guest with disks that counted no read fails) |
+| a run is held to its CPU and I/O budgets (26.17: `guest/cpu_budgets.txt`, `guest/io_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan and coverage runs are not held) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
@@ -1188,14 +1189,11 @@ daemon that was killed, unmounted and started again, which `/proc/<pid>/stat`
 `init` prints it at the end as `COST cpu_us=N` beside the `MEM` line, and
 `run-qemu.sh` prints it (`run-qemu.sh: cost: dcfs CPU 0.136 s (budget 0.136 s,
 tolerance 100%)`) and fails the run if it is more than the budget plus the
-tolerance. A guest script reads the same counter with `cost_cpu_us`
-(`guest/lib.sh`) around an operation: `request_counts.sh` holds the CPU of its
-four operations to `cpu_budgets.txt` too. A test whose daemon is not started by
-`start_daemon`, or that a guest under systemd runs, counts 0 and has no budget.
+tolerance. A test whose daemon is not started by `start_daemon`, or that a guest
+under systemd runs, counts 0 and has no budget.
 
 `guest/cpu_budgets.txt` has the format of the other budget files (`OP cpu_us
-MAX`; OP is a Bazel label for a whole test, an operation's name for an
-operation inside one) and is compared by the same function
+MAX`, OP a Bazel label) and is compared by the same function
 (`strace_budget_compare`, which gained a tolerance). A target with no line is
 reported, not held, so a test gets a budget when someone measures it; the file's
 first lines are the eleven tests measured for this step (a bulk baseline of the
@@ -1241,10 +1239,80 @@ tests of under 150 ms use less CPU under load than quiet, which is unexplained
 and errs on the side of a budget that holds). The largest factor
 seen was 1.74, so the tolerance is 100%: a budget holds under load, and it
 catches the daemon spending twice what it did. Anything finer is the job of the
-counts (requests, syscalls, statement steps), which have no tolerance. If a
+counts (requests, syscalls, statement steps), which have no tolerance.
+
+There are no CPU budgets for the operations inside a test. I tried them for the
+four of `request_counts_test` (`ls -l` of 100 entries, `find` over a tree, `stat`
+of a path 10 deep, `cat`), whose daemon CPU is read from the same cgroup around
+each, exact to the microsecond; over 8 quiet runs they took 4.4 to 11.5 ms
+(median 4.8), 15 to 23 (17), 1.5 to 2.2 (1.6) and 0.8 to 1.3 (0.9), a spike of
+up to 2.4 times the median, and with the host overloaded some read 0 to 5
+microseconds (the guest takes the time its vCPU did not run out of the time a
+task ran, and a short interval comes out empty). A gate of a doubling failed on
+a loaded host on its first try. Operations of milliseconds are measured by
+their counts, which `request_budgets.txt` has. If a
 tighter CPU gate is ever wanted, the way is to scale each reading by a
 calibration the guest measures itself (a fixed loop timed before and after),
 not to narrow the tolerance.
+
+### I/O of the disks
+
+The same `COST` line carries the I/O of the test's disks, summed over the virtio
+disks (the coverage disk apart) and the loop devices that are the RAM disks
+(`guest/cost_lib.sh`): `reads`, `writes`, `sectors_read`, `sectors_written` and
+`flushes` (the flush requests, FLUSH/FUA: what an `fsync` costs the device) from
+`/sys/block/<disk>/stat`, between the start of the test (after the RAM disks
+are made) and a `sync` after its end; and what the processes that run dcfs's code
+caused on them, `dcfs_reads`, `dcfs_writes`, `dcfs_read_bytes` and
+`dcfs_write_bytes`, from the `io.stat` of the same cgroup. That is
+`/proc/<pid>/io`'s `read_bytes` and `write_bytes` for a daemon that may have been
+killed and started again, which `/proc/<pid>/io` (gone with the process) cannot
+say; its `syscr` and `syscw` are not counted, since `strace_op`'s counts of the
+daemon's syscalls (`syscall_budgets.txt`) are the budgets for those. The fsync
+counts of the traced operations stay there too (`sync`).
+
+`guest/io_budgets.txt` has the same format as the others and no tolerance: the
+counts that are exact are held exactly, and each budget is the highest count
+seen plus the spread seen, so those that move are not flaky. They are pinned
+per kernel like the strace goldens: a bump of the kernel may re-baseline them in
+its own commit, with before and after; nothing else may. A count below its
+budget passes, so a counter that read nothing would pass everything:
+`run-qemu.sh` fails a guest with disks that counted no read, and
+`cost_selfcheck` (`boot_test` on a virtio disk, `ram_disks_test` on a RAM disk)
+fails if a direct write of 1 MiB does not show in the disks' counters and the
+cgroup's.
+
+Measured over 8 quiet runs, 4 with five other guests beside the test and 3 with
+7 or 8 busy loops and a `dsync` writer (the ext4 targets, 1 vCPU):
+
+| test | runs (quiet/six guests/busy loops) | counts that never varied | what moved (of the 9 counts) | highest rise under load over the quiet maximum |
+|---|---|---|---|---|
+| `//dcfs:backing_test` | 8/4/3 | 5 | flushes 11%, writes 6%, sectors written 4% | `dcfs_writes` +2% |
+| `//test/qemu:create_test_ext4` | 8/4/3 | 6 | `dcfs_writes` 1 to 2, flushes 4% | none |
+| `//test/qemu:request_counts_test` | 8/4/3 | 8 | writes 9% | none |
+| `//test/qemu:write_test_ext4` | 8/4/3 | 4 | `dcfs_writes` 2 to 3, `dcfs_reads` 3% | none |
+| `//test/qemu:fault_backing_test_ext4` | 8/4/3 | 0 | `dcfs_write_bytes` 14%, `dcfs_writes` 12%, flushes 10% | writes +2% |
+| `//test/qemu:fault_cache_test_ext4` | 8/4/3 | 0 | `dcfs_writes` 16%, flushes 15%, sectors written 14% | writes +2% |
+| `//test/qemu:fault_ace_a_test` | 8/4/2 | 3 | `dcfs_writes` 1.3%, flushes 0.8% | none |
+| `//test/qemu:fault_ace_b_test` | 8/4/3 | 3 | flushes 2.3%, `dcfs_writes` 1.2% | flushes +0.2% |
+| `//test/qemu:fault_ace_mixed_test_ext4` | 8/4/3 | 0 | flushes 2.4%, `dcfs_writes` 1.8% | `dcfs_reads` +0.3% |
+| `//test/qemu:readdir_boundary_test` | 8/4/3 | 2 | writes 62 to 115, flushes 27 to 39, `dcfs_writes` 764 to 1034 | writes +85% |
+
+The counts that move are the write side, and the movement is the timing of
+writeback: how requests merge, which journal commit or `syncfs` a write lands
+before. Nothing here varies with the page cache, which would move the reads:
+the disks' reads are exact in four of the ten tests and within 1% in five (the
+tenth, `readdir_boundary_test`, 6%), and the daemon's reads are exact in most
+and at most one I/O apart in the rest (the tests drop the caches at defined
+points, `drop_caches_quiesced`). A write count rises with the
+host's load only for a test that runs long with ext4 on a host disk:
+`readdir_boundary_test` runs 19 s alone and up to 40 s beside other work, and
+ext4 commits its journal every 5 s and the daemon syncs every 5 s
+(`--sync_interval_sec`) for as long as it runs, so its write-side counts grow
+with its wall time. They are left out of `io_budgets.txt`, with the reason there;
+its reads are budgeted. The ACE tests, which unmount and sync constantly on RAM
+disks, did not move more than 2.4% while their wall time went from 20 s to
+52 s.
 
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 

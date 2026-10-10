@@ -380,35 +380,16 @@ finish() {
 	reboot -f
 }
 
-# What a test costs (step 26.17): budgets in counts and CPU time, not wall time,
-# which is the host's load as much as the test's. The CPU of the processes that
-# run dcfs's code (the daemon of an e2e test, the test binary of a unit test) is
-# read from a cgroup they are started in (cost_exec.sh), which the kernel adds
-# every thread of every process to, exited ones included: a daemon that was
-# unmounted and started again, or killed, still counts, and /proc/<pid>/stat
-# could not say so (it is gone with the process, and ticks are 10 ms). Exact to
-# the microsecond. cost_report prints it as the `COST` line run-qemu.sh reads
-# beside the `MEM` line; guest/lib.sh's start_daemon starts the daemon with
-# $COST_EXEC. A guest that systemd starts (guest/systemd_run.sh) has neither
-# the variable nor the line: its tests have no budgets.
+# What a test costs (step 26.17): guest/cost_lib.sh, which has the reasons. The
+# daemon and a unit test's binary are started in a cgroup (cost_exec.sh), and
+# cost_report prints the COST line before the verdict.
 COST_CGROUP=/sys/fs/cgroup/dcfs
 COST_EXEC=/tests/cost_exec.sh
 export COST_CGROUP COST_EXEC
 
-# cost_cpu_us: the CPU time, in microseconds, of everything that has run in the
-# cgroup so far (awk fails on the missing file if there is no cgroup). The same
-# function as guest/lib.sh's, which scripts call, and that init cannot source.
-cost_cpu_us() {
-	awk '/^usage_usec / { print $2 }' "$COST_CGROUP/cpu.stat"
-}
-
-# cost_report: the COST line.
-cost_report() {
-	echo "COST cpu_us=$(cost_cpu_us)"
-}
-
 mkdir -p /sys/fs/cgroup /tests
-if ! mount -t cgroup2 none /sys/fs/cgroup || ! mkdir "$COST_CGROUP"; then
+. /tests/cost_lib.sh
+if ! mount -t cgroup2 none /sys/fs/cgroup || ! echo +io >/sys/fs/cgroup/cgroup.subtree_control || ! mkdir "$COST_CGROUP"; then
 	echo "init: could not make the cgroup $COST_CGROUP that the cost of the test is read from"
 	echo "TEST-FAILED"
 	finish
@@ -456,6 +437,7 @@ if [ -f /test/run ]; then
 
 	# No -e here or below: the test binary reports failures itself via its
 	# exit status, and word-splitting $(cat /test/args) is deliberate.
+	COST_DISKS_BEFORE=$(cost_disk_counts)
 	$COST_EXEC /test/run $(cat /test/args 2>/dev/null)
 	rc=$?
 	cost_report
@@ -497,6 +479,10 @@ if [ -n "$RAMDISKS" ]; then
 		exit 1
 	fi
 fi
+
+# The disks' counters when the test starts: its RAM disks are made, so the
+# tools that made them are not its I/O.
+COST_DISKS_BEFORE=$(cost_disk_counts)
 
 # Same as the unit-test branch above: under --config=asan/--config=ubsan,
 # //dcfs:main_static (started by guest/<name>.sh's start_daemon) is the

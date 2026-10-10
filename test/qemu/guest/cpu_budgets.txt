@@ -4,17 +4,15 @@
 # OP cpu_us MAX, compared by guest/strace_lib.sh's strace_budget_compare with
 # the tolerance COST_CPU_TOLERANCE_PCT there (100%: a doubling;
 # test/qemu/README.md, "Budgets in three parts", has the measurements behind
-# it). Two kinds of OP:
-#
-#   //package:target   a whole test: run-qemu.sh holds the guest's COST line to
-#                      it. The daemon of an e2e test started by start_daemon
-#                      (guest/lib.sh), or the binary of a unit test. Not held
-#                      for a sanitizer, coverage, TCG or noisy-kernel run
-#                      (strace_lib.sh, budget_unheld_reason), and a target with
-#                      no line here is reported, not held.
-#   an operation       an operation inside a test, from the cgroup's CPU time
-#                      around it (guest/request_counts.sh: the names are
-#                      request_budgets.txt's).
+# it). OP is a Bazel label, a whole test: run-qemu.sh holds the guest's COST
+# line to it. The CPU is the daemon's of an e2e test started by start_daemon
+# (guest/lib.sh), or the binary of a unit test. Not held for a sanitizer,
+# coverage, TCG or noisy-kernel run (strace_lib.sh, budget_unheld_reason), and a
+# target with no line here is reported, not held. There are no budgets for an
+# operation inside a test (ls -l, stat, cat in request_counts_test: 1 to 20 ms
+# of CPU): a single interrupt or a cache miss storm is as large as the
+# measurement, and the CPU time of a quiet run varied up to 2.4 times between
+# runs (README, "Budgets in three parts").
 #
 # Every budget started at the median of 8 quiet runs (rounded up to a
 # millisecond; the spread is in the README), on the machine that wrote it.
@@ -41,12 +39,3 @@
 //test/qemu:fault_ace_a_test cpu_us 7909000
 //test/qemu:fault_ace_b_test cpu_us 3906000
 //test/qemu:fault_ace_mixed_test_ext4 cpu_us 4674000
-
-# Operations of request_counts_test, on a cold kernel cache and a warm dcfs
-# cache. ls -l of 100 entries and find over a tree are the sums of their
-# READDIRPLUS replies; stat of a path 10 deep is ten LOOKUPs; cat is a LOOKUP
-# and an OPEN.
-ls-l-100 cpu_us 4300
-find-tree cpu_us 15100
-stat-deep-10 cpu_us 1440
-cat cpu_us 770

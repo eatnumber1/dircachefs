@@ -132,6 +132,7 @@ def qemu_cc_test(
         srcs = [
             "@alpine_busybox//:root/bin/busybox.static",
             "//test/qemu:guest/init",
+            "//test/qemu:guest/cost_lib.sh",
             ":" + bin_name,
         ] + data,
         outs = [initramfs_out],
@@ -142,6 +143,7 @@ def qemu_cc_test(
             "$@",
             "$(location @alpine_busybox//:root/bin/busybox.static)",
             "$(location //test/qemu:guest/init)",
+            "$(location //test/qemu:guest/cost_lib.sh)",
             "$(location :" + bin_name + ")",
             disk0,
             "'" + " ".join(args) + "'",

@@ -6,8 +6,7 @@
 # warm dcfs cache, counted by the checking daemon's cost counter
 # (request_lib.sh) and held to guest/request_budgets.txt: a count above its
 # budget fails, naming both numbers; raising a budget is a deliberate edit
-# whose commit says why. Each operation's daemon CPU time (the cgroup's, exact)
-# is held to guest/cpu_budgets.txt too.
+# whose commit says why.
 #
 # Run as /tests/request_counts.sh by guest/init when booted with
 # dcfs_test=request_counts.sh.
@@ -17,8 +16,6 @@ FAILED=0
 . "$(dirname "$0")/request_lib.sh"
 
 BUDGETS="$(dirname "$0")/request_budgets.txt"
-CPU_BUDGETS="$(dirname "$0")/cpu_budgets.txt"
-CPU_UNHELD=$(budget_unheld_reason "$(cat /proc/cmdline)")
 DCFS=/bin/dcfs
 SRC=/src
 DB=/cache/requests.db
@@ -87,26 +84,15 @@ request_op() {
 	shift
 	drop_caches_quiesced
 	cp "$DCFS_COUNTERS_FILE" "$DIR/$ro_name.before"
-	ro_cpu=$(cost_cpu_us)
 	"$@" >/dev/null 2>&1 || fail "$ro_name-runs" "$* failed"
 	quiesce_daemon "$DAEMON_PID"
 	cp "$DCFS_COUNTERS_FILE" "$DIR/$ro_name.after"
-	echo "cpu_us $(($(cost_cpu_us) - ro_cpu))" >"$DIR/$ro_name.cpu"
 	request_delta "$DIR/$ro_name.before" "$DIR/$ro_name.after" >"$DIR/$ro_name.counts"
 	echo "  requests $ro_name: $(tr '\n' ' ' <"$DIR/$ro_name.counts")"
 	if out=$(strace_budget_compare "$BUDGETS" "$DIR/$ro_name.counts" "$ro_name" request_budgets.txt); then
 		pass "budget-$ro_name"
 	else
 		fail "budget-$ro_name" "$out"
-	fi
-	# The daemon's CPU time for the operation, held to cpu_budgets.txt with the
-	# tolerance (strace_lib.sh) unless this boot is not the plain one on KVM.
-	if [ -n "$CPU_UNHELD" ]; then
-		echo "  cpu $ro_name: $(cat "$DIR/$ro_name.cpu") (not held to the budget: $CPU_UNHELD)"
-	elif out=$(strace_budget_compare "$CPU_BUDGETS" "$DIR/$ro_name.cpu" "$ro_name" cpu_budgets.txt "$COST_CPU_TOLERANCE_PCT"); then
-		pass "cpu-budget-$ro_name"
-	else
-		fail "cpu-budget-$ro_name" "$out"
 	fi
 }
 

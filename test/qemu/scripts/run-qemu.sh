@@ -47,17 +47,20 @@
 #       environment (bazel test --test_env=DCFS_RAM_DISKS=0; 1 is the default,
 #       anything else an error) ignores the option: the same test on image files.
 #
-#   --budget-lib <strace_lib.sh> --cpu-budgets <cpu_budgets.txt> (step 26.17):
-#       the guest prints one `COST cpu_us=N` line (guest/init's cost_report: the
-#       CPU time of the daemon, or of a unit test's binary, exact), and the run
-#       fails if N is past the budget of this target ($TEST_TARGET's line in
-#       the file) plus the tolerance. The comparison is the lib's
-#       strace_budget_compare, as the syscall and request budgets' is. Held to
-#       the budget only in a plain build on KVM with the quiet kernel (a
-#       sanitizer, coverage, TCG or the noisy kernel spend CPU differently);
-#       otherwise the line is printed and says so. A target with no budget line
-#       is reported, not held; a budgeted one whose guest printed no COST line
-#       fails.
+#   --budget-lib <strace_lib.sh> --cpu-budgets <cpu_budgets.txt> --io-budgets
+#       <io_budgets.txt> (step 26.17): the guest prints one COST line (guest/
+#       init's cost_report): the CPU time of the processes that run dcfs's code,
+#       exact (cpu_us), the I/O of its disks (reads, writes, sectors, flushes)
+#       and what dcfs itself caused (dcfs_reads, ...). The run fails if a count
+#       is past the budget of this target ($TEST_TARGET's lines in the files;
+#       the CPU time with a tolerance, the I/O counts without), by the lib's
+#       strace_budget_compare, as the syscall and request budgets are
+#       compared. Held to the budgets only in a plain build on KVM with the
+#       quiet kernel (a sanitizer, coverage, TCG or the noisy kernel spend CPU
+#       and cause I/O differently); otherwise the line is printed and says so.
+#       A target with no line in a file is reported, not held; a budgeted one
+#       whose guest printed no COST line fails, and so does a guest with disks
+#       that counted no I/O at all (it counted nothing).
 #
 #   --power-cut SCENARIO[,SCENARIO...] (step 11.2; e2e only): a real power cut
 #       per scenario. Each is two boots over the same disk images: the first
@@ -178,10 +181,11 @@ MODULES=""
 # each disk (guest/init) and formats it with the tools in the archive, which is
 # appended to the initramfs like the modules'. See the usage above.
 RAM_DISKS=""
-# --budget-lib / --cpu-budgets (step 26.17): see the usage above, and the cost
-# check below.
+# --budget-lib / --cpu-budgets / --io-budgets (step 26.17): see the usage above,
+# and the cost check below.
 BUDGET_LIB=""
 CPU_BUDGETS=""
+IO_BUDGETS=""
 # --expect-kernel-failure <script>: see the kernel-failure check below.
 EXPECT_KERNEL_FAILURE=""
 # Step 7.2, coverage (only under `bazel coverage`, which sets COVERAGE_DIR;
@@ -371,6 +375,10 @@ while :; do
 		CPU_BUDGETS=$2
 		shift 2
 		;;
+	--io-budgets)
+		IO_BUDGETS=$2
+		shift 2
+		;;
 	--expect-kernel-failure)
 		EXPECT_KERNEL_FAILURE=$2
 		shift 2
@@ -527,6 +535,7 @@ fi
 # --- lay out the disks in letter order, one -drive/-device pair per index -
 specs_file="$WORKDIR/disk-specs"
 : >"$specs_file"
+DISK_SPECS=$#
 for spec in "$@"; do
 	dev=${spec%%:*}
 	rest=${spec#*:}
@@ -1023,38 +1032,73 @@ echo "run-qemu.sh: time: guest wall $(awk "BEGIN{printf \"%.1f\", $end-$start}")
 	function secs(t) { split(t, p, "m"); return p[1] * 60 + p[2] }
 	FNR == 2 { u = secs($1); s = secs($2); if (FILENAME == ARGV[1]) { u0 = u; s0 = s } else { u -= u0; s -= s0; printf "%.1f s (user %.1f, system %.1f)", u + s, u, s } }' "$WORKDIR/times-start" "$WORKDIR/times-end")"
 # Step 26.17: what the run cost, from the guest's COST line (guest/init), held to
-# the budget of this target (the label Bazel sets in $TEST_TARGET) in
-# --cpu-budgets: wall time is the host's load as much as the test's, and CPU time
-# is not (the tolerance is in guest/strace_lib.sh, with the measurements). A
-# reason the run is not held to the budget is printed with the number: the
-# budgets are the plain build's on KVM with the quiet kernel.
+# the budgets of this target (the label Bazel sets in $TEST_TARGET) in
+# --cpu-budgets and --io-budgets: wall time is the host's load as much as the
+# test's, and the counts are not (guest/strace_lib.sh and test/qemu/README.md
+# have the tolerance of the CPU time, with the measurements). A reason the run is
+# not held to the budgets is printed with the numbers: they are the plain
+# build's on KVM with the quiet kernel.
 COST_LINE=$(grep -a '^COST ' "$LOG" | tail -n 1)
 COST_FAIL=""
 COST_VERDICT=""
 printf '%s\n' "$COST_LINE" | awk '{ for (i = 2; i <= NF; i++) { split($i, kv, "="); print kv[1], kv[2] } }' >"$WORKDIR/cost-counts"
-COST_CPU_US=$(awk '$1 == "cpu_us" { print $2 }' "$WORKDIR/cost-counts")
-COST_NOTE=""
-if [ -n "$CPU_BUDGETS" ]; then
-	. "$BUDGET_LIB"
-	COST_TARGET=${TEST_TARGET:-}
-	COST_BUDGET=$(awk -v t="$COST_TARGET" '$1 == t && $2 == "cpu_us" { print $3 }' "$CPU_BUDGETS")
-	COST_REASON=$(budget_unheld_reason "$append")
-	if [ -z "$COST_BUDGET" ]; then
-		COST_NOTE="no budget for ${COST_TARGET:-this run (no TEST_TARGET)} in $(basename "$CPU_BUDGETS")"
+cost_count() { awk -v k="$1" '$1 == k { found = 1; print $2 } END { if (!found) print "?" }' "$WORKDIR/cost-counts"; }
+cost_secs() { awk "BEGIN{printf \"%.3f\", $1/1000000}"; }
+
+# cost_hold BUDGETS TOLERANCE: the COST line against the lines of this target in
+# BUDGETS; sets COST_NOTE to what to say beside the numbers, and adds a failure
+# to COST_FAIL.
+cost_hold() {
+	COST_HELD=0
+	ch_name=$(basename "$1")
+	if ! grep -q "^$COST_TARGET " "$1"; then
+		COST_NOTE="no line for ${COST_TARGET:-this run (no TEST_TARGET)} in $ch_name"
 	elif [ -n "$COST_REASON" ]; then
-		COST_NOTE="budget $(awk "BEGIN{printf \"%.3f\", $COST_BUDGET/1000000}") s; not held to the budget: $COST_REASON"
+		COST_NOTE="not held to the budgets: $COST_REASON"
+	elif [ -z "$COST_LINE" ]; then
+		COST_NOTE="no COST line"
+		COST_VERDICT="no COST line"
+		COST_FAIL="no COST line in the serial log (guest/init's cost_report): $COST_TARGET has budgets in $ch_name, and nothing was measured"
+	elif ch_out=$(strace_budget_compare "$1" "$WORKDIR/cost-counts" "$COST_TARGET" "$ch_name" "$2"); then
+		COST_NOTE="within the budgets in $ch_name"
+		COST_HELD=1
 	else
-		COST_NOTE="budget $(awk "BEGIN{printf \"%.3f\", $COST_BUDGET/1000000}") s, tolerance $COST_CPU_TOLERANCE_PCT%"
-		if [ -z "$COST_LINE" ]; then
-			COST_VERDICT="no COST line"
-			COST_FAIL="no COST line in the serial log (guest/init's cost_report): $COST_TARGET has a CPU budget, and nothing was measured"
-		elif ! COST_FAIL=$(strace_budget_compare "$CPU_BUDGETS" "$WORKDIR/cost-counts" "$COST_TARGET" "$(basename "$CPU_BUDGETS")" "$COST_CPU_TOLERANCE_PCT"); then
-			COST_VERDICT="over its CPU budget"
-		fi
+		COST_NOTE="past the budgets in $ch_name"
+		COST_HELD=1
+		COST_VERDICT="over its cost budget"
+		COST_FAIL="${COST_FAIL:+$COST_FAIL
+}$ch_out"
+	fi
+}
+
+COST_TARGET=${TEST_TARGET:-}
+COST_REASON=""
+if [ -n "$CPU_BUDGETS$IO_BUDGETS" ]; then
+	. "$BUDGET_LIB"
+	COST_REASON=$(budget_unheld_reason "$append")
+fi
+if [ -n "$CPU_BUDGETS" ]; then
+	cost_hold "$CPU_BUDGETS" "$COST_CPU_TOLERANCE_PCT"
+	if [ "$COST_HELD" = 1 ]; then
+		COST_NOTE="budget $(cost_secs "$(awk -v t="$COST_TARGET" '$1 == t && $2 == "cpu_us" { print $3 }' "$CPU_BUDGETS")") s, tolerance $COST_CPU_TOLERANCE_PCT%"
+	fi
+	if [ -n "$COST_LINE" ]; then
+		echo "run-qemu.sh: cost: dcfs CPU $(cost_secs "$(cost_count cpu_us)") s ($COST_NOTE)"
 	fi
 fi
-if [ -n "$COST_CPU_US" ]; then
-	echo "run-qemu.sh: cost: dcfs CPU $(awk "BEGIN{printf \"%.3f\", $COST_CPU_US/1000000}") s${COST_NOTE:+ ($COST_NOTE)}"
+if [ -n "$IO_BUDGETS" ]; then
+	cost_hold "$IO_BUDGETS" 0
+fi
+if [ -n "$IO_BUDGETS" ] && [ "$(cost_count reads)" != "?" ]; then
+	echo "run-qemu.sh: cost: disk I/O $(cost_count reads) reads, $(cost_count writes) writes, $(cost_count sectors_read) sectors read, $(cost_count sectors_written) sectors written, $(cost_count flushes) flushes; dcfs caused $(cost_count dcfs_reads) reads ($(cost_count dcfs_read_bytes) bytes), $(cost_count dcfs_writes) writes ($(cost_count dcfs_write_bytes) bytes) ($COST_NOTE)"
+fi
+# A guest with disks that counted no read: mounting a disk reads it, so the
+# counters read nothing (a count below its budget always passes, and zero is
+# below every budget).
+if [ "$DISK_SPECS" -gt 0 ] && [ -n "$COST_LINE" ] && [ "$(cost_count reads)" = 0 ]; then
+	COST_VERDICT="no I/O counted"
+	COST_FAIL="${COST_FAIL:+$COST_FAIL
+}the guest has $DISK_SPECS disk(s) and counted no read on them (guest/cost_lib.sh): the I/O counts are not measuring"
 fi
 # Step 6.2: a guest that ran out of memory says so, whatever else failed: the
 # OOM killer's lines (guest/init's mem_report prints them as MEM-OOM:) or a
@@ -1176,7 +1220,8 @@ fi
 # Step 26.17: a run past its CPU budget (or one that has a budget and was not
 # measured) fails whatever the test's own checks said.
 if [ -n "$COST_FAIL" ]; then
-	echo "run-qemu.sh: ERROR: $COST_FAIL" >&2
+	echo "run-qemu.sh: ERROR: $COST_VERDICT:" >&2
+	echo "$COST_FAIL" >&2
 	echo "== RESULT: FAIL ($COST_VERDICT; see $LOG) =="
 	exit 1
 fi

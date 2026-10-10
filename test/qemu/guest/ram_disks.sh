@@ -15,6 +15,7 @@ FAILED=0
 . "$(dirname "$0")/fault_lib.sh"
 . "$(dirname "$0")/fault_dcfs_lib.sh"
 . "$(dirname "$0")/ram_disks_lib.sh"
+. "$(dirname "$0")/cost_lib.sh"
 
 MNT=/mnt/ram
 NAME=ramdisk
@@ -120,5 +121,18 @@ case "$sr_out" in
 *"no block statistics for nonesuch"*) pass sectors-read-missing ;;
 *) fail sectors-read-missing "no message for a device with no counter: '$sr_out'" ;;
 esac
+
+# The cost accounting (guest/cost_lib.sh) sees a write to a RAM disk, where the
+# disk's counters are the loop device's: vdc, the xfs one, which the device-mapper
+# checks above left alone.
+if mount /dev/vdc "$MNT"; then
+	if out=$(cost_selfcheck "$MNT" "$(cat "$(block_sysfs vdc)/dev")"); then
+		pass cost-accounting-ram-disk
+	else
+		fail cost-accounting-ram-disk "$out"
+	fi
+else
+	fail cost-accounting-ram-disk "cannot mount /dev/vdc"
+fi
 
 exit "$FAILED"

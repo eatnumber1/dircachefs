@@ -11,6 +11,7 @@
 # turns that into the final ALL-TESTS-PASSED / TEST-FAILED verdict.
 FAILED=0
 . "$(dirname "$0")/lib.sh"
+. "$(dirname "$0")/cost_lib.sh"
 
 KVER=$(uname -r)
 echo "boot.sh: kernel $KVER"
@@ -127,6 +128,12 @@ if mount -t ext4 /dev/vdb /src; then
 		pass vdb-block-size
 	else
 		fail vdb-block-size "expected 4096-byte blocks, got $BS"
+	fi
+	# The cost accounting (guest/cost_lib.sh) sees a write to a virtio disk.
+	if out=$(cost_selfcheck /src "$(cat "$(block_sysfs vdb)/dev")"); then
+		pass cost-accounting-virtio-disk
+	else
+		fail cost-accounting-virtio-disk "$out"
 	fi
 	umount /src
 else

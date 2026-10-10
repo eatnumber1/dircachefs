@@ -45,6 +45,7 @@ fi
 
 # Inputs: a non-ELF "binary" (nothing to copy), an init, a guest script.
 : >"$WORK/init"
+: >"$WORK/cost_lib.sh"
 printf '#!/bin/sh\n' >"$WORK/testbin"
 printf '#!/bin/sh\n' >"$WORK/names.sh"
 
@@ -73,7 +74,7 @@ run_unit() { # <busybox> <out>
 	rm -f "$WORK/busybox"
 	cp "$1" "$WORK/busybox" || return 1
 	(cd "$WORK" && rm -f rel.cpio.gz && PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit \
-		rel.cpio.gz ./busybox "$WORK/init" "$WORK/testbin" - "" && mv rel.cpio.gz "$2")
+		rel.cpio.gz ./busybox "$WORK/init" "$WORK/cost_lib.sh" "$WORK/testbin" - "" && mv rel.cpio.gz "$2")
 }
 
 run_e2e() { # <busybox> <out>
@@ -87,7 +88,7 @@ run_e2e() { # <busybox> <out>
 # --- no host cpio needed ----------------------------------------------------
 run_unit "$BUSYBOX" "$WORK/unit.cpio.gz" >"$WORK/unit.out" 2>&1 ||
 	fail "--unit with the real busybox and no host cpio: $(cat "$WORK/unit.out")"
-for n in init bin/busybox test/run test/args; do want "$WORK/unit.cpio.gz" "$n"; done
+for n in init bin/busybox test/run test/args tests/cost_lib.sh; do want "$WORK/unit.cpio.gz" "$n"; done
 echo "PASS: --unit initramfs built without a host cpio"
 
 run_e2e "$BUSYBOX" "$WORK/e2e.cpio.gz" >"$WORK/e2e.out" 2>&1 ||
@@ -108,7 +109,7 @@ echo "PASS: a failing cpio fails the script and leaves no initramfs"
 # --- a dynamic binary's libraries come from the sysroot ----------------------
 rm -f "$WORK/dyn.cpio.gz"
 (cd "$WORK" && cp "$BUSYBOX" busybox && PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit \
-	dyn.cpio.gz ./busybox "$WORK/init" "$DYNAMIC" - "") >"$WORK/dyn.out" 2>&1 ||
+	dyn.cpio.gz ./busybox "$WORK/init" "$WORK/cost_lib.sh" "$DYNAMIC" - "") >"$WORK/dyn.out" 2>&1 ||
 	fail "--unit with a dynamic binary: $(cat "$WORK/dyn.out")"
 want "$WORK/dyn.cpio.gz" lib/x86_64-linux-gnu/libc.so.6
 want "$WORK/dyn.cpio.gz" lib64/ld-linux-x86-64.so.2
@@ -127,7 +128,7 @@ rm -f "$WORK/bre.cpio.gz"
 rc=0
 (cd "$WORK" && cp "$BUSYBOX" busybox && DCFS_READELF="$WORK/bad-readelf" \
 	PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit bre.cpio.gz ./busybox \
-	"$WORK/init" "$DYNAMIC" - "") >"$WORK/bre.out" 2>&1 || rc=$?
+	"$WORK/init" "$WORK/cost_lib.sh" "$DYNAMIC" - "") >"$WORK/bre.out" 2>&1 || rc=$?
 [ "$rc" -ne 0 ] || fail "a failing readelf passed: $(cat "$WORK/bre.out")"
 grep -q "readelf" "$WORK/bre.out" || fail "the failure does not name readelf: $(cat "$WORK/bre.out")"
 [ ! -s "$WORK/bre.cpio.gz" ] || fail "an initramfs was left behind after readelf failed"
@@ -143,7 +144,7 @@ rm -f "$WORK/thin.cpio.gz"
 rc=0
 (cd "$WORK" && cp "$BUSYBOX" busybox && DCFS_SYSROOT="$WORK/thin" \
 	PATH="$WORK/tools" "$SH" "$MKINITRAMFS" --unit thin.cpio.gz ./busybox \
-	"$WORK/init" "$DYNAMIC" - "") >"$WORK/thin.out" 2>&1 || rc=$?
+	"$WORK/init" "$WORK/cost_lib.sh" "$DYNAMIC" - "") >"$WORK/thin.out" 2>&1 || rc=$?
 [ "$rc" -ne 0 ] || fail "a missing library passed: $(cat "$WORK/thin.out")"
 grep -q "needs libm.so.6, not in the sysroot" "$WORK/thin.out" ||
 	fail "the failure does not say what is missing: $(cat "$WORK/thin.out")"
