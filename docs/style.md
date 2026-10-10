@@ -105,6 +105,22 @@ use it as design guidance rather than firm rules."
   `unique_ptr`/`shared_ptr` without a following qualifier in `dcfs/*.h`
   catches the rest (plan step 25.16; today 0 annotations, about 30 raw
   pointers in headers).
+- **Abseil's container algorithms, not iterator pairs** (russ, 2026-10-10,
+  on `std::copy(in.begin(), in.end(), buf.begin())` in `backing.cc`:
+  "There are helper functions in absl/algorithm/container.h that let you
+  do e.g. `absl::c_copy(in, buf.begin());`. Use those instead of functions
+  like std::copy."). `absl::c_copy`, `absl::c_sort`, `absl::c_find`,
+  `absl::c_any_of`, `absl::c_count`, `absl::c_equal` and the rest of
+  `absl/algorithm/container.h` (`@absl//absl/algorithm:container`) take
+  the range; `std::copy(x.begin(), x.end(), ...)` says the same thing
+  twice and lets the two ends disagree. A `std::` algorithm is written
+  only where no `absl::c_` form exists (a sub-range on purpose, which the
+  comment then names, or an algorithm Abseil does not wrap), and
+  `std::begin`/`std::end` only to build such a sub-range. Applies to
+  tests too. Mechanically: `tools/repo_shape.py` refuses `std::<name>(`
+  for the algorithms Abseil wraps, in `dcfs/`, `tools/` C++ and `bench/`,
+  outside an allowlist with reasons that only shrinks (25.17; six sites
+  today).
 - **`absl::FixedArray`, not `std::vector`, for a buffer whose size is known
   when it is made** (russ, 2026-10-10). A `std::vector<T> v(n)` that is
   never pushed to or resized says the wrong thing: it advertises growth

@@ -2741,3 +2741,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   rise cost at most 2 all-models points, so the Fable meter is the finer-grained one and Fable
   draws on all-models at under one point per Fable point. Pace: 14 points over 5.5 days is about
   2.5 a day; after 26.22, 25.15 and the 26.17a review land, one lane at a time.
+- Style rule (russ, 2026-10-10): Abseil's container algorithms (`absl::c_copy` etc.), never
+  iterator-pair `std::` algorithms over a whole container; style 1.2 written; the sweep and a
+  repo_shape rule folded into 25.17 (six sites).

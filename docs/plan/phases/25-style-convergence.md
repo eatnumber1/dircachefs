@@ -516,3 +516,12 @@ checks every target that uses them depends on the define (build), and
 adds a repo-shape check refusing the `ABSL_` spelling of the two in our
 C++ (fixture tests; no allowlist). docs/style.md's remaining mentions
 follow. No behaviour change.
+Also in this step (russ, 2026-10-10, style 1.2's algorithms bullet):
+every `std::<algorithm>(first, last, ...)` whose range is a whole
+container becomes the `absl::c_` form from `absl/algorithm/container.h`
+(`std::copy` 3, `std::sort` 3, `std::end` 4 today, in dcfs/, tools/ and
+bench/, tests included; dep `@absl//absl/algorithm:container`), and a
+repo_shape rule refuses the `std::` spelling of the algorithms Abseil
+wraps (the list from the header's `c_*` names) outside
+`tools/repo_shape_std_algorithms.txt` (`path count | reason`, only
+shrinks: a deliberate sub-range is the one reason), with fixtures.
