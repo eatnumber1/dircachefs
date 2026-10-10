@@ -147,7 +147,7 @@ same_atime noatime-flag-served flag
 
 # O_NOATIME: the read leaves it too.
 before=$(atime "$SRC/onoatime")
-"$TESTUTIL" readnoatime "$MNT/onoatime"
+"$TESTUTIL" catnoatime "$MNT/onoatime" >/dev/null
 expect_eq o-noatime-backing "$before" "$(atime "$SRC/onoatime")"
 same_atime o-noatime-served onoatime
 

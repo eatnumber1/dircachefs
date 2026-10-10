@@ -220,8 +220,8 @@ problems() {
 	if ! command diff /tmp/served.snap /tmp/backing.snap >/tmp/snap.diff 2>&1; then
 		echo "served (<) and backing (>) differ: $(tr '\n' '|' </tmp/snap.diff)"
 	fi
-	# Without access times: the persistence point's own snapshot read the
-	# files, and the cut may have lost those reads' access times.
+	# Without access times: the backing filesystem writes them back lazily,
+	# and the cut may have lost any a read since the persistence point moved.
 	[ -n "${1:-}" ] && snapshot "$SRC" >/tmp/backing-durable.snap
 	if [ -n "${1:-}" ] && ! command diff "$1" /tmp/backing-durable.snap >/tmp/durable.diff 2>&1; then
 		echo "the backing filesystem after the cut (>) is not what it was at the persistence point (<): $(tr '\n' '|' </tmp/durable.diff)"

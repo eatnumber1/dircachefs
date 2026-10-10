@@ -838,6 +838,15 @@ qemu_test_matrix(
     cpus = CONCURRENT_CPUS,  # two vCPUs: concurrency is the point (qemu_test.bzl)
     disks = [("vdb", "ext4", "512M")],
     guest_script = "guest/stress_short.sh",
+    # Step 26.21: the run's page cache (the same ~108 MiB of file data at any
+    # allowance: peak_cached stays 175 MiB under coverage at 320) and the
+    # initramfs in tmpfs (38 MiB plain, 54 under `bazel coverage`, whose
+    # instrumented binaries are larger: peak_shmem 48 and 67 MiB) left a
+    # coverage guest of 216 MiB with the cache at 175 MiB (plain: 157) at the
+    # peak, close enough to kswapd's watermark that one CI run on btrfs had
+    # it scan 872 pages (the other two filesystems and four local runs had
+    # none). At 320 MiB the coverage runs' lowest MemAvailable is 160 MiB.
+    mem = 320,
     asan_mem = ASAN_BIG_DCFS_MEM,
     size = "medium",
     other_size = "medium",

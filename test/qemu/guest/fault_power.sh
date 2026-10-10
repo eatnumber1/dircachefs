@@ -682,5 +682,26 @@ else
 	fail snapshot-sees-contents "two files of one size and mode with other contents snapshot alike"
 fi
 
+# And a snapshot with access times is the same twice over, whatever the clock
+# says. A power cut's second boot starts its clock from the RTC's whole second
+# (the first boot's did too), and so can read a time before the ctime of files
+# the first boot made: relatime then finds every atime not after the ctime
+# and moves it at every read, the snapshot's own included. (CI, step 26.21:
+# every file's atime in the served tree 35 ms after the backing tree's.) The
+# file is made first, then the clock is put back past its ctime and, after the
+# two snapshots, forward again.
+mkdir /tmp/snap-c
+echo c >/tmp/snap-c/f
+clock_now=$(date +%s)
+date -s "@$((clock_now - 5))" >/dev/null
+snapshot /tmp/snap-c atime >/tmp/snap-c1.snap
+snapshot /tmp/snap-c atime >/tmp/snap-c2.snap
+date -s "@$(($(date +%s) + 5))" >/dev/null
+if command diff /tmp/snap-c1.snap /tmp/snap-c2.snap >/tmp/snap-c.diff 2>&1; then
+	pass snapshot-stable-behind-clock
+else
+	fail snapshot-stable-behind-clock "two snapshots of an unchanged tree differ: $(tr '\n' '|' </tmp/snap-c.diff)"
+fi
+
 require_no_reclaim no-reclaim
 exit "$FAILED"

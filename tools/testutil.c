@@ -70,9 +70,9 @@
  *       before printing "MAPPED": the store then comes after the last close
  *       (on dcfs, after the last RELEASE), through a mapping that holds only
  *       the backing file (step 23.1).
- *   testutil readnoatime <path>
- *       open(2)s <path> O_RDONLY | O_NOATIME, reads it to the end and closes
- *       it (busybox cannot ask for O_NOATIME).
+ *   testutil catnoatime <path>
+ *       open(2)s <path> O_RDONLY | O_NOATIME, copies it to standard output
+ *       and closes it (busybox cannot ask for O_NOATIME).
  *   testutil mmapread <path>
  *       open(2)s <path> O_RDONLY, maps its first page MAP_PRIVATE, close(2)s
  *       the descriptor, reads one byte through the mapping and unmaps it: a
@@ -562,7 +562,7 @@ static int cmd_mmapwrite(const char *path, const char *delay_str,
 		pause();
 }
 
-static int cmd_readnoatime(const char *path)
+static int cmd_catnoatime(const char *path)
 {
 	char buf[4096];
 	ssize_t n;
@@ -572,8 +572,20 @@ static int cmd_readnoatime(const char *path)
 		print_err(errno);
 		return 1;
 	}
-	while ((n = read(fd, buf, sizeof(buf))) > 0)
-		;
+	while ((n = read(fd, buf, sizeof(buf))) > 0) {
+		ssize_t done = 0;
+
+		while (done < n) {
+			ssize_t w = write(STDOUT_FILENO, buf + done,
+					  (size_t)(n - done));
+
+			if (w == -1) {
+				print_err(errno);
+				return 1;
+			}
+			done += w;
+		}
+	}
 	if (n == -1) {
 		print_err(errno);
 		return 1;
@@ -2927,8 +2939,8 @@ int main(int argc, char *argv[])
 		return cmd_mmapwrite(argv[2], argv[3], 0);
 	if (argc == 4 && strcmp(argv[1], "mmapwrite-closed") == 0)
 		return cmd_mmapwrite(argv[2], argv[3], 1);
-	if (argc == 3 && strcmp(argv[1], "readnoatime") == 0)
-		return cmd_readnoatime(argv[2]);
+	if (argc == 3 && strcmp(argv[1], "catnoatime") == 0)
+		return cmd_catnoatime(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "mmapread") == 0)
 		return cmd_mmapread(argv[2]);
 	if (argc == 3 && strcmp(argv[1], "heldstat") == 0)

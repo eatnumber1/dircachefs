@@ -79,21 +79,24 @@ dmesg_kernel_failures() {
 # except a directory's or a symlink's: dcfs serves files' from the backing
 # filesystem, and stamps directories' and symlinks' in its own database only
 # (README "Limitations"), so those are the only two left out of "served
-# equals backing". The access time is read after the file's md5sum, so that
-# it is the one that read gave: the snapshot of the backing tree, taken
-# first, makes the relatime update, and the served tree's read of the same
-# file then changes nothing. (The other columns come first, before any read:
-# a read through dcfs reopens the file and so re-reads its attributes, which
-# would hide an out-of-band change the comparison's self-checks make.) Not
-# for a snapshot compared across a power cut: its own reads move access times
-# the cut may then lose.
+# equals backing". The files are read with O_NOATIME (testutil catnoatime,
+# which busybox cannot do), so that the snapshot moves no access time: not
+# the backing tree's, not the served tree's through dcfs (which passes the
+# flag to the backing file), and so the two snapshots, and a snapshot taken
+# after a power cut and the one before it, compare whatever the clock or
+# relatime does. (Reads that moved atimes made the comparison depend on the
+# guest clock: a second boot's clock can be behind the ctime of files the
+# first boot made, and relatime then moves the atime at every read, step
+# 26.21.) The other columns come first, before any read: a read through dcfs
+# reopens the file and so re-reads its attributes, which would hide an
+# out-of-band change the comparison's self-checks make.
 snapshot() {
 	(cd "$1" && find . -path ./lost+found -prune -o -print | sort |
 		while IFS= read -r sn_p; do
 			sn_line=$(stat -c '%n %F %s %a %h' "$sn_p" 2>&1) || sn_line="$sn_p stat failed: $sn_line"
 			sn_md5=""
 			if [ -f "$sn_p" ] && [ ! -L "$sn_p" ]; then
-				sn_md5=" $(md5sum "$sn_p" 2>&1 | cut -d' ' -f1)"
+				sn_md5=" $("${TESTUTIL:-/bin/testutil}" catnoatime "$sn_p" 2>&1 | md5sum | cut -d' ' -f1)"
 			fi
 			if [ "$2" = atime ] && [ ! -L "$sn_p" ] && [ ! -d "$sn_p" ]; then
 				sn_line="$sn_line atime=$(stat -c %x "$sn_p" 2>&1)"
