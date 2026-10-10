@@ -326,7 +326,7 @@ own macros are `RET_CHECK`, `RET_CHECK_EQ/NE/GT/OK` (`dcfs/ret_check.h`, 68
 uses): they return a `kInternal` `StatusBuilder` and take `<<` context. Use
 `RET_CHECK` where a `Status` can be returned. Where it cannot (a libfuse
 callback, startup), a crash is still not the answer: the no-intentional-
-crashes rule applies (russ, 2026-10-09; `CHECK`, `LOG(FATAL)`, `abort`
+crashes rule applies (1.6b; `CHECK`, `LOG(FATAL)`, `abort`
 are out of production code, each existing one needs russ's case-by-case
 approval), so the 23 `CHECK_NE(ptr, nullptr)` in `fuse_ops.cc` and the
 `CHECK` in `RestoreRoot` (`backing.cc`) are on plan step 25.9's list, not
@@ -458,6 +458,46 @@ the file contents at offset 4096`. The text recurses readably without
 repeating itself, because each added piece says something new.
 
 **Return a failed status or log it, never both** (1.7).
+
+### 1.6b No intentional crashes
+
+russ, 2026-10-09: "no intentional crashes. E.g. no use of `LOG(FATAL)` or
+`CHECK` (`RET_CHECK` is ok because it doesn't crash). I understand the
+necessity sometimes, but try hard to avoid it (for instance, another
+style rule that's in an Abseil TOTW somewhere: don't call methods that
+can fail inside constructors, instead add a static Create method). If
+you _really_ feel you need a crash, bring it to me for review and I'll
+consider on a case-by-case basis." (The rule lived only in plan step 25.9
+until 2026-10-10; this section is it.)
+
+- **Production code** (`dcfs/`, `bench/`, the shipped `tools/*.c`) has no
+  `LOG(FATAL)`/`LOG(QFATAL)`, `CHECK*`, `QCHECK*`, `DCHECK*`, `abort()`,
+  `assert()`, `std::terminate`, or an `exit()` standing in for an error
+  return. A failure is a `Status`; an invariant is a `RET_CHECK`, which
+  returns `kInternal`. Fallible construction is a static `Create`
+  returning `StatusOr` (TotW #42, and the Google style guide's "Doing Work
+  in Constructors").
+- **Every remaining crash site is one russ approved**, listed in the
+  repo-shape allowlist with his approval date and the reason the process
+  could not continue correctly; nothing else. Today's sites (the 23
+  `CHECK_NE(ptr, nullptr)` in `fuse_ops.cc`, `RestoreRoot`'s `CHECK` in
+  `backing.cc`, `fuse_request.cc`'s double-reply `CHECK`, `fork_split.h`'s
+  `abort()`, one `assert`) await his ruling in 25.9.
+- **Tests may crash on what is not under test, and must not ASSERT it**
+  (russ, 2026-10-09): "crashes are permitted in tests when invariants
+  fail that aren't under test ... The inverse applies too. Don't
+  ASSERT/EXPECT properties that aren't under test ... there's a clear
+  distinction between 'the test failed' and 'the infrastructure failed to
+  run the test'." Setup that is not under test uses Abseil's plain
+  `CHECK`/`CHECK_OK` and, for a `StatusOr`, `CHECK_OK_AND_ASSIGN(lhs,
+  expr)` in the style of `ASSIGN_OR_RETURN` (russ: no custom helper
+  beyond that macro; "googletest understands the difference between 'the
+  process crashed' and 'ASSERT/EXPECT failed'"). `ASSERT_*`/`EXPECT_*` are
+  for the property the test is about.
+- **Mechanically** (25.9): `tools/banned_symbols.txt` bans `abort`,
+  `__assert_fail` and Abseil's fatal-log internals in the shipped
+  binaries; `tools/repo_shape.py` refuses the macros in production
+  sources outside the approval allowlist; clang-tidy's equivalent with 7.5.
 
 ### 1.6a Shape of a function that does several things
 

@@ -2769,3 +2769,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (fuse_ops.cc's 23 CHECK_NE and RestoreRoot's CHECK are 25.9's); 25.20 (the candidates sweep)
   queued after 25.17. Three questions for russ recorded in the phase file (escape.cc vs
   CHexEscape, optional_ref, the helpers' own fprintf output).
+- The no-intentional-crashes rule existed only in plan step 25.9, not in docs/style.md (the
+  catalogue agent noticed 1.6 still allowed CHECK): written as style 1.6b from russ's words, with
+  the tests exception and the mechanical plan.
