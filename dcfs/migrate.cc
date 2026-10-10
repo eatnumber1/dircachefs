@@ -27,8 +27,7 @@ namespace {
 // TEXT value outright rather than coercing it, so these must go through
 // the span<uint8_t> Bind() overload rather than the string_view one.
 std::span<const uint8_t> AsBlob(const std::string &s) {
-  return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(s.data()),
-                                  s.size());
+  return {reinterpret_cast<const uint8_t *>(s.data()), s.size()};
 }
 
 absl::StatusOr<bool> TableExists(sqlite3::Connection &db,

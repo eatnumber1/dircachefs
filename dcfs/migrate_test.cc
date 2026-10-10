@@ -32,8 +32,7 @@ using ::testing::Not;
 // by these tests (dentries.name, xattrs.name/value, symlinks.target) are
 // BLOB in a STRICT table and reject a bound TEXT value outright.
 std::span<const uint8_t> Blob(std::string_view s) {
-  return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(s.data()),
-                                  s.size());
+  return {reinterpret_cast<const uint8_t *>(s.data()), s.size()};
 }
 
 DeviceId TestDeviceId(uint8_t fill) {

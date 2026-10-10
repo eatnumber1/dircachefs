@@ -49,8 +49,7 @@ constexpr int64_t kListDirBatch = 64;
 // bound TEXT value outright, so byte strings must go through the
 // span<uint8_t> Bind() overload rather than the string_view one.
 std::span<const uint8_t> Blob(std::string_view s) {
-  return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(s.data()),
-                                  s.size());
+  return {reinterpret_cast<const uint8_t *>(s.data()), s.size()};
 }
 
 // Returns ctx.db's cached statement for `sql` with `args` bound to its

@@ -228,7 +228,6 @@ dcfs/main.cc|MountHelperMain|readability-function-cognitive-complexity|1
 dcfs/main.cc|RunDaemon|readability-function-cognitive-complexity|1
 dcfs/main.cc|UmountHelperMain|performance-avoid-endl|1
 dcfs/main.cc|main|bugprone-exception-escape|1
-dcfs/metadata_cache.cc|Blob|modernize-return-braced-init-list|1
 dcfs/metadata_cache.cc|ChildrenComplete|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|ClearDirty|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|DecodeAttr|misc-use-internal-linkage|1
@@ -261,8 +260,6 @@ dcfs/metadata_cache_test.cc|<file scope>|misc-unused-using-decls|2
 dcfs/metadata_cache_test.cc|TEST_F|capturing_mutating_lambda|10
 dcfs/metadata_cache_test.cc|TEST_F|modernize-use-emplace|1
 dcfs/metadata_cache_test.cc|TEST_F|readability-isolate-declaration|1
-dcfs/migrate.cc|AsBlob|modernize-return-braced-init-list|1
-dcfs/migrate_test.cc|Blob|modernize-return-braced-init-list|1
 dcfs/mount_dcfs.cc|ParseHelperArgsImpl|readability-function-cognitive-complexity|1
 dcfs/mount_dcfs.cc|ParseUmountArgs|abseil-string-find-str-contains|1
 dcfs/mount_dcfs.cc|ParseUmountArgs|readability-function-cognitive-complexity|1
@@ -293,7 +290,6 @@ dcfs/sqlite.cc|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/sqlite.cc|Connection::RunTransaction|happy_path_nested|1
 dcfs/sqlite.cc|Connection::~Connection|bugprone-exception-escape|1
 dcfs/sqlite.cc|Statement::Bind|performance-no-int-to-ptr|2
-dcfs/sqlite.cc|Statement::ExpandedSql|modernize-return-braced-init-list|2
 dcfs/sqlite.cc|Statement::Step|readability-avoid-nested-conditional-operator|1
 dcfs/sqlite.h|Statement::BindAll|capturing_mutating_lambda|1
 dcfs/sqlite_test.cc|<file scope>|modernize-concat-nested-namespaces|1

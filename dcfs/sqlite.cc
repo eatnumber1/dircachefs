@@ -277,9 +277,9 @@ std::string_view Statement::Sql() const {
 
 std::string Statement::ExpandedSql() const {
   char *sql = sqlite3_expanded_sql(stmt_);
-  if (sql == nullptr) return std::string();
+  if (sql == nullptr) return {};
   absl::Cleanup free_sql([sql] { sqlite3_free(sql); });
-  return std::string(sql);
+  return {sql};
 }
 
 sqlite3_stmt *Statement::Get() const { return stmt_; }
