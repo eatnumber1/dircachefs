@@ -17,6 +17,8 @@ russ's ruling on each; the list only shrinks. Found by grepping for
 | 4 | `dcfs/backing.cc:160` (`ListXattrOPath`) | size the xattr list, read it, `ERANGE` means it grew in between | 4 attempts, then the `ERANGE` status | none: `listxattr` has no "size and read atomically" form; a writer racing the reader is the only cause | ask: keep (approved comment) or one size-then-read and `ERANGE` as the answer |
 | 5 | `dcfs/fuse_request.cc:175` (`fuse_req_getgroups`) | one re-call at the size the first call reported | exactly one second call, not a loop | none needed: the first call reports the true count | not a retry loop (a two-step read); listed for completeness |
 | 6 | `dcfs/umount_helper.cc:56` (`BlockingLock`) | restart `flock` after `EINTR` when `retry_signals` | unbounded while non-fatal signals arrive | n/a: this is the kernel asking for a restart, section 1.12's first "not a retry loop" | keep |
+| 6a | `dcfs/backing.cc:2092` (`GetGroups`) | `getgroups(0)` for the count, then `getgroups(n)`; `EINVAL` (the list grew) asks again | unbounded `while (true)` | none; the comment itself says another thread cannot change our list, so the loop cannot iterate | one count-then-read, `EINVAL` reported (found 2026-10-10 after the inventory above) |
+| 6b | `dcfs/backing.cc:178` (`GetXattrOPath`) | size the value, read it, `ERANGE` means it grew | same shape as 4 | same as 4 | same ruling as 4 |
 
 Items 1-3 share one shape: a model branch (dcfs.tla's "retry or EAGAIN")
 that exists for the coroutine future and cannot be exercised today. If

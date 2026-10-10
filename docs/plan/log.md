@@ -2630,3 +2630,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (drop-writes after the persistence point); no retry loops or timers. Phase 26 file has the
   details. Push point announced to russ: main at the plan commit after 9fd3ff2. Lane-1 free;
   its Bazel server shut down.
+- russ asked whether backing.cc's xattr write path duplicates the /proc reopen: it does (the
+  path form works for every type); queued as 25.11 after the reset. Two more retry loops added to
+  the inventory (GetGroups' EINVAL loop, GetXattrOPath's ERANGE loop). russ pushed 8f528d8; CI
+  run 38025358346 watched in the background.

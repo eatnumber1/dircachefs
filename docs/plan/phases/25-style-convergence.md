@@ -333,3 +333,22 @@ definitions in .claude/agents/ (implementer, protocol, reviewer) name the
 tips as guidance in their instructions. No vendoring of the tips. Owner:
 dcfs-implementer, together with 25.7.
 
+
+## 25.11 Xattr writes: one path form for every file type (russ's question, 2026-10-10; queued after the quota reset)
+
+`backing::ApplyXattrOpOn` does a statx for the type and, for a regular
+file or directory without an open fd, reopens the object through
+`/proc/self/fd/<fd>` for `fsetxattr`/`fremovexattr`, while every other
+type takes `setxattr`/`removexattr` on the same `/proc/self/fd/<fd>`
+path. The magic link resolves to the same object either way, and the
+path form already serves reads of every type (`XattrsOf`, `XattrOf`),
+so the reopen branch buys nothing and costs an `open(2)` of the file.
+Step: drop the type check and the reopen; apply the path form whenever
+no open fd was given (or always: `ProcFdPath` works on the open fd too,
+which leaves one lambda per operation and no `ApplyReal`). Keep
+`AsCaller` around the syscall; note why the path form works under it
+(only fsuid/fsgid/groups switch, the capabilities stay, so the magic
+link's ptrace access check passes). Tests: an unprivileged `setfattr`
+on a regular file, a directory, a symlink and a FIFO through dcfs, each
+read back through the backing, before and after. No behaviour change
+intended; the trace model is untouched.
