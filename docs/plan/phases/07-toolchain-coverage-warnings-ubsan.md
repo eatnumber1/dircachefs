@@ -56,6 +56,11 @@ are then the same on every machine and in CI.
   `WarningsAsErrors: '*'`. Our code only, not `third_party/` or external
   repositories. CI runs it on every push; findings that are real bugs get
   a test first. It runs on the host (no root or kernel needed).
+  `readability-*` is already in the set; style 1.6a (russ, 2026-10-10)
+  names three that must not land on the deny-list and one option:
+  `readability-else-after-return`, `readability-misleading-indentation`,
+  `readability-function-cognitive-complexity` with `Threshold: 15` to
+  start (tightened as the tree allows, never loosened without russ).
 - 7.5b Our own style rules as AST matchers (russ's idea, 2026-10-07): the
   mechanical rules of `docs/style.md` that a regex cannot enforce (no
   `absl::XError(StrCat(...))`, the `syscalls::` call form and no raw libc

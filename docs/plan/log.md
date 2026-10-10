@@ -2710,5 +2710,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: the knowledge of which syscalls can fail lives once, in syscalls.h's return types
   (partial-failure structs are the special case, decoded at the wrapper). Style 1.5 says so.
 - russ agreed to the rest of the 1.6a recommendations; the function-shape text added to all agent
-  definitions and the reviewer's checklist. 7.1's clang-tidy set gains readability-else-after-return,
+  definitions and the reviewer's checklist. 7.5's clang-tidy set gains readability-else-after-return,
   readability-misleading-indentation and readability-function-cognitive-complexity (threshold 15).

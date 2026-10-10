@@ -465,7 +465,7 @@ the kernel accepts), and `dcfs::`-qualified names.
   `if (status.ok())`, is the failure path written by hand and hides which
   call failed; reach for it only when something must happen between the
   failure and the return that a `Cleanup` cannot express, and say what.
-- **Mechanically** (7.1's clang-tidy): `readability-else-after-return`,
+- **Mechanically** (7.5's clang-tidy): `readability-else-after-return`,
   `readability-misleading-indentation`,
   `readability-function-cognitive-complexity` with a low threshold (start
   at 15, tighten as the tree allows). The accumulator preference is not
