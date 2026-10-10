@@ -644,8 +644,8 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
   6. A Cleanup is declared `absl::Cleanup name = [captures] { ... };`
      (Abseil's documented form, no empty parameter list).
 - **Program output is `absl::PrintF`/`FPrintF`/`SNPrintF`/`StrFormat`,
-  never iostreams and never the C printf family** (orchestrator's ruling,
-  2026-10-10, after russ asked what the 19 sites do: `--version` lines,
+  never iostreams and never the C printf family** (russ, 2026-10-10: "I
+  agree", after asking what the 19 sites do: `--version` lines,
   usage, fsck.dcfs's report routed to stdout or stderr by status, bench's
   messages and its `snprintf` into dm ioctl structs' fixed `char[]`
   fields). The output is interface, not logging, so it keeps its bytes and

@@ -2797,3 +2797,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   and setfsuid/setfsgid return a Status (sentinel refused with EINVAL, read-back, EPERM if it did
   not take; fsuid()/fsgid() query irregulars). The deleted read-back test comes back against the
   wrapper. Style 1.5, 1.6a and the worked example updated; sent to the 25.15 agent.
+- russ agreed the program-output rule (absl::PrintF family, never iostreams or C printf; LOG for
+  log lines); the 1.6a entry now carries his agreement; 25.20 does the 19 sites.
