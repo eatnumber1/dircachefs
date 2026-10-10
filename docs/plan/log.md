@@ -2561,3 +2561,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   12.13b in lane-5). The full/asan/ubsan shards were skipped, so the toolchain cache and the
   coverage gate remain unverified. Both fixes are small agents under the freeze's "red push"
   exception.
+- 12.13b merged (15c9c13): the fake bazel's `#!` line was the hermetic interpreter's sandbox path,
+  over the kernel's 127-byte limit for interpreter lines, hence ENOEXEC on the runner and not in
+  the lane; now a two-line /bin/sh wrapper under TEST_TMPDIR, and `cleanup` tolerates a failing
+  `clean --expunge`. 12.14b (the durability count) is the remaining red before the next push.
