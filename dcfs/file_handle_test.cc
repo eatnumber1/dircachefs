@@ -180,7 +180,7 @@ TEST(MountIdFromStatxTest, PrefersTheUniqueIdThenThePlainOneThenNothing) {
 
 TEST(FileHandleValueTest, EqualityAndHashing) {
   FileHandle a = MakeArbitraryHandle();
-  FileHandle b = a;
+  const FileHandle &b = a;
   EXPECT_EQ(a, b);
   EXPECT_EQ(absl::HashOf(a), absl::HashOf(b));
 

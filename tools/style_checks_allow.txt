@@ -185,7 +185,6 @@ dcfs/file_handle.cc|FileHandle::FromDirEntry|performance-move-const-arg|1
 dcfs/file_handle.cc|FileHandle::FromFd|performance-move-const-arg|2
 dcfs/file_handle.cc|FileHandle::Parse|performance-move-const-arg|1
 dcfs/file_handle_test.cc|SetUp|concurrency-mt-unsafe|1
-dcfs/file_handle_test.cc|TEST|performance-unnecessary-copy-initialization|1
 dcfs/fork_split.h|__attribute__|check_in_production|1
 dcfs/fsck.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/fsck.cc|CheckBacking|abseil-string-find-str-contains|1
