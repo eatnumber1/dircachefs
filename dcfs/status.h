@@ -6,8 +6,16 @@
 
 #include "absl/status/status.h"
 #include "absl/status/status_builder.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/types/source_location.h"
+
+// RETURN_IF_ERROR and ASSIGN_OR_RETURN are Abseil's own aliases of the
+// ABSL_ macros, enabled on purpose (russ, 2026-10-10) by the define the
+// //dcfs:status target exports.
+#ifndef RETURN_IF_ERROR
+#error "dcfs/status.h needs ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS (the //dcfs:status define)"
+#endif
 
 namespace dcfs {
 

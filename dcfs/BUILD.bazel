@@ -164,6 +164,7 @@ qemu_cc_test(
 cc_library(
     name = "status",
     visibility = ["//dcfs/testonly:__pkg__"],
+    defines = ["ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS"],
     hdrs = ["status.h"],
     srcs = [
       "status.cc",
@@ -174,6 +175,7 @@ cc_library(
       "@absl//absl/container:flat_hash_map",
       "@absl//absl/status",
       "@absl//absl/status:status_builder",
+      "@absl//absl/status:status_macros",
       "@absl//absl/status:statusor",
       "@absl//absl/strings",
       "@absl//absl/strings:cord",
