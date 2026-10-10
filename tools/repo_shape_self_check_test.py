@@ -174,6 +174,55 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
     def test_good_tree_has_no_testonly_friends(self):
         self.assertEqual([], repo_shape.no_testonly_friends(self.root))
 
+    def test_a_qualified_name_inside_dcfs_is_reported(self):
+        write(self.root, "dcfs/r.cc",
+              "namespace dcfs {\nabsl::Status f() {\n"
+              "  return dcfs::ErrnoToStatus(1, \"x\");\n}\n"
+              "}  // namespace dcfs\n")
+        problems = repo_shape.namespace_qualifiers(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/r.cc:3:", problems[0])
+        self.assertIn("docs/style.md, 1.3", problems[0])
+
+    def test_a_qualifier_in_a_define_is_not_reported(self):
+        write(self.root, "dcfs/s.h",
+              "namespace dcfs {\n#define E(x) ::dcfs::ErrnoToStatus(x)\n"
+              "}  // namespace dcfs\n")
+        self.assertEqual([], repo_shape.namespace_qualifiers(self.root))
+
+    def test_a_qualifier_in_a_continued_define_is_not_reported(self):
+        write(self.root, "dcfs/u.h",
+              "namespace dcfs {\n#define E(x)                 \\\n"
+              "  ::dcfs::ErrnoToStatus(x)\n}  // namespace dcfs\n")
+        self.assertEqual([], repo_shape.namespace_qualifiers(self.root))
+
+    def test_a_qualifier_in_testonly_is_reported(self):
+        write(self.root, "dcfs/testonly/t.cc",
+              "namespace dcfs {\nvoid f() {\n  dcfs::Foo();\n}\n"
+              "}  // namespace dcfs\n")
+        problems = repo_shape.namespace_qualifiers(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/testonly/t.cc:3:", problems[0])
+
+    def test_a_qualifier_after_the_namespace_closes_is_not_reported(self):
+        write(self.root, "dcfs/w.cc",
+              "namespace dcfs {\n}  // namespace dcfs\n\n"
+              "int main() { return dcfs::Main(); }\n")
+        self.assertEqual([], repo_shape.namespace_qualifiers(self.root))
+
+    def test_a_qualifier_before_the_namespace_opens_is_not_reported(self):
+        write(self.root, "dcfs/x.cc",
+              "int main() { return dcfs::Main(); }\n"
+              "namespace dcfs {\n}  // namespace dcfs\n")
+        self.assertEqual([], repo_shape.namespace_qualifiers(self.root))
+
+    def test_a_namespace_declaration_and_a_comment_are_not_reported(self):
+        write(self.root, "dcfs/v.cc",
+              "namespace dcfs::backing {\n"
+              "}  // namespace dcfs::backing\n"
+              "// dcfs::ErrnoToStatus is named here in a comment\n")
+        self.assertEqual([], repo_shape.namespace_qualifiers(self.root))
+
     def test_a_vector_sized_once_is_reported(self):
         write(self.root, "dcfs/m.cc",
               "void f(int n) {\n  std::vector<int> v(n);\n}\n")

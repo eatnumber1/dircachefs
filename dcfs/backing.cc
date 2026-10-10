@@ -115,8 +115,8 @@ absl::StatusOr<std::string> ReadLinkAt(int dirfd, std::string_view path) {
       return result;
     }
     if (bufsize >= PATH_MAX * 4) {
-      return dcfs::DcfsErrnoToStatus(
-          ENAMETOOLONG, "readlinkat: target longer than PATH_MAX*4");
+      return DcfsErrnoToStatus(ENAMETOOLONG,
+                               "readlinkat: target longer than PATH_MAX*4");
     }
     bufsize *= 2;
   }
@@ -171,8 +171,8 @@ absl::StatusOr<std::vector<std::string>> ListXattrOPath(int fd) {
     }
     return SplitXattrList(std::string_view(buf.data(), *nbytes));
   }
-  return dcfs::DcfsErrnoToStatus(
-      ERANGE, absl::StrCat("listxattr(", path, "): kept growing"));
+  return DcfsErrnoToStatus(ERANGE,
+                           absl::StrCat("listxattr(", path, "): kept growing"));
 }
 
 absl::StatusOr<std::string> GetXattrOPath(int fd, std::string_view name) {
@@ -190,7 +190,7 @@ absl::StatusOr<std::string> GetXattrOPath(int fd, std::string_view name) {
     }
     return std::string(value.data(), *nbytes);
   }
-  return dcfs::DcfsErrnoToStatus(
+  return DcfsErrnoToStatus(
       ERANGE, absl::StrCat("getxattr(", path, ", ", EscapeBytes(name),
                            "): kept growing"));
 }
@@ -299,14 +299,14 @@ absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   absl::Status status;
   syscalls::setfsgid(caller.gid);
   if (FsGid() != caller.gid) {
-    status = dcfs::DcfsErrnoToStatus(
+    status = DcfsErrnoToStatus(
         EPERM, absl::StrCat("setfsgid(", caller.gid, ") did not take"));
   }
   if (status.ok()) status = syscalls::setgroups(caller.groups);
   if (status.ok()) {
     syscalls::setfsuid(caller.uid);
     if (FsUid() != caller.uid) {
-      status = dcfs::DcfsErrnoToStatus(
+      status = DcfsErrnoToStatus(
           EPERM, absl::StrCat("setfsuid(", caller.uid, ") did not take"));
     }
   }
@@ -505,7 +505,7 @@ struct ChildRecord {
 // status, which the request's handler logs at ERROR (docs/style.md 1.7).
 absl::Status RefuseReservedIno(const struct statx &stx, std::string_view what) {
   if (stx.stx_ino < cache::kFirstStubNodeid) return absl::OkStatus();
-  return dcfs::DcfsErrnoToStatus(
+  return DcfsErrnoToStatus(
       ENOTSUP, absl::StrCat("Backing inode number ", stx.stx_ino, " of ", what,
                             " is at or above 2^63, the range reserved for "
                             "boundary stubs"));
@@ -624,7 +624,7 @@ absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
   ABSL_ASSIGN_OR_RETURN(probe.stx,
                         syscalls::statx(source_fd, "", AT_EMPTY_PATH, kAttrMask));
   if (!S_ISDIR(probe.stx.stx_mode)) {
-    return dcfs::ErrnoToStatus(ENOTDIR, "The source is not a directory");
+    return ErrnoToStatus(ENOTDIR, "The source is not a directory");
   }
   ABSL_RETURN_IF_ERROR(RefuseReservedIno(probe.stx, "the source directory"));
   probe.identity.backing_ino = probe.stx.stx_ino;
@@ -831,9 +831,9 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
                  << FormatTime(stx.stx_btime.tv_sec, stx.stx_btime.tv_nsec)
                  << "); forgetting it (ESTALE)";
     ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
-    return dcfs::ErrnoToStatus(
-        ESTALE, absl::StrCat("Inode ", id,
-                             " was replaced on the backing filesystem"));
+    return ErrnoToStatus(
+        ESTALE,
+        absl::StrCat("Inode ", id, " was replaced on the backing filesystem"));
   }
   ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, id, attr, stx));
   return fd;
@@ -911,23 +911,26 @@ absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
     return marked;
   }
   if (still != nullptr) {
-    return absl::StatusBuilder(dcfs::DcfsErrnoToStatus(
-               EIO, "open_by_handle_at returned ESTALE for an object its "
-                    "directory still names (the device cannot read it)"))
+    return absl::StatusBuilder(DcfsErrnoToStatus(
+               EIO,
+               "open_by_handle_at returned ESTALE for an object its "
+               "directory still names (the device cannot read it)"))
            << "inode " << id << ", " << EscapeBytes(still->name)
            << " in directory " << still->parent;
   }
   if (unchecked != nullptr) {
-    return absl::StatusBuilder(dcfs::DcfsErrnoToStatus(
-               EIO, "open_by_handle_at returned ESTALE, and the name that "
-                    "would show whether the object is gone could not be "
-                    "checked"))
+    return absl::StatusBuilder(DcfsErrnoToStatus(
+               EIO,
+               "open_by_handle_at returned ESTALE, and the name that "
+               "would show whether the object is gone could not be "
+               "checked"))
            << "inode " << id << ", " << EscapeBytes(unchecked->name)
            << " in directory " << unchecked->parent << ", " << why;
   }
-  return absl::StatusBuilder(dcfs::DcfsErrnoToStatus(
-             EIO, "open_by_handle_at returned ESTALE, and the object has no "
-                  "cached name and more unknown names than are asked"))
+  return absl::StatusBuilder(DcfsErrnoToStatus(
+             EIO,
+             "open_by_handle_at returned ESTALE, and the object has no "
+             "cached name and more unknown names than are asked"))
          << "inode " << id;
 }
 
@@ -962,9 +965,9 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
       // open_by_handle_at needs CAP_DAC_READ_SEARCH; dcfs is required to
       // run as root (see the design doc), so this is a misconfiguration,
       // not a condition to work around.
-      return dcfs::DcfsErrnoToStatus(
-          EPERM, "open_by_handle_at: dcfs must run as root "
-                 "(CAP_DAC_READ_SEARCH)");
+      return DcfsErrnoToStatus(EPERM,
+                               "open_by_handle_at: dcfs must run as root "
+                               "(CAP_DAC_READ_SEARCH)");
     }
     return fd.status();
   }
@@ -1552,7 +1555,7 @@ absl::StatusOr<cache::LookupResult> WithStub(cache::LookupResult result,
                                              InodeId parent,
                                              std::string_view name) {
   if (result.kind == cache::LookupResult::Kind::kRefused && result.id == 0) {
-    return dcfs::DcfsErrnoToStatus(
+    return DcfsErrnoToStatus(
         EAGAIN, absl::StrCat("Boundary ", EscapeBytes(name), " in ", parent,
                              ": its stub could not be recorded"));
   }
@@ -1577,10 +1580,10 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   // fast path, which never touches the backing filesystem at all once a
   // directory is known complete.
   if (name.size() > NAME_MAX) {
-    return dcfs::ErrnoToStatus(ENAMETOOLONG, absl::StrCat("Path component of ", name.size(),
-                                              " bytes is too long: ",
-                                              EscapeBytes(name.substr(0, 32)),
-                                              "..."));
+    return ErrnoToStatus(
+        ENAMETOOLONG,
+        absl::StrCat("Path component of ", name.size(), " bytes is too long: ",
+                     EscapeBytes(name.substr(0, 32)), "..."));
   }
   events::Scope scope(*ctx.events, ctx, &ProtocolEvents::LookupBegin,
                       &ProtocolEvents::LookupEnd, parent, name);
@@ -2172,7 +2175,7 @@ absl::Status StillWritable(Context &ctx, int fd) {
   }
   if (ctx.source_read_only_at_start) return absl::OkStatus();
   // An errno dcfs chose (its sync point refuses), not the backing's answer.
-  return dcfs::DcfsErrnoToStatus(
+  return DcfsErrnoToStatus(
       EROFS,
       "Backing filesystem went read-only during the run (after an error, "
       "or a remount of another mount of it), so its syncfs makes nothing "
@@ -2403,7 +2406,7 @@ namespace {
 // or chown by a non-owner (fuse_setattr), which the caller could not make.
 absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
   if (S_ISLNK(type)) {
-    return dcfs::ErrnoToStatus(EOPNOTSUPP, "chmod on a symlink");
+    return ErrnoToStatus(EOPNOTSUPP, "chmod on a symlink");
   }
   if (S_ISREG(type) || S_ISDIR(type)) {
     ABSL_ASSIGN_OR_RETURN(
@@ -2421,11 +2424,11 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
 absl::Status ApplySize(const Credentials &caller, int opath_fd, mode_t type,
                        off_t size) {
   if (S_ISDIR(type)) {
-    return dcfs::ErrnoToStatus(EISDIR, "truncate on a directory");
+    return ErrnoToStatus(EISDIR, "truncate on a directory");
   }
   if (!S_ISREG(type)) {
-    return dcfs::ErrnoToStatus(
-        EINVAL, "truncate on a non-regular, non-directory file");
+    return ErrnoToStatus(EINVAL,
+                         "truncate on a non-regular, non-directory file");
   }
   ABSL_ASSIGN_OR_RETURN(
       FileDescriptor fd, ReopenFd(opath_fd, O_WRONLY | O_CLOEXEC));

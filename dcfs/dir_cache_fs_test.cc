@@ -1151,7 +1151,7 @@ class DirCacheFSTest : public ::testing::Test {
     Reply reply = Send(plus ? FUSE_READDIRPLUS : FUSE_READDIR,
                        static_cast<uint64_t>(dir), body);
     if (reply.error != 0) {
-      return dcfs::ErrnoToStatus(-reply.error, "readdir reply");
+      return ErrnoToStatus(-reply.error, "readdir reply");
     }
     std::vector<std::string> names;
     const std::string &p = reply.payload;

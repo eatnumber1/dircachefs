@@ -147,7 +147,7 @@ std::pair<size_t, std::string> MaxHeldFds(const DirCacheFS::Options &opts) {
 // ERROR, with `why`, once (docs/style.md 1.7).
 absl::Status CreatedButNotCompleted(InodeId parent, std::string_view name,
                                     const absl::Status &why) {
-  return absl::StatusBuilder(dcfs::DcfsErrnoToStatus(
+  return absl::StatusBuilder(DcfsErrnoToStatus(
              EEXIST,
              "Could not complete a create that reached the backing "
              "filesystem (replying EEXIST, so that the kernel forgets the "
@@ -354,9 +354,8 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
     // every op that would change it refuses it before getting here.
     absl::StatusOr<cache::StubRow> stub = cache::GetStub(ctx_, id);
     if (!stub.ok() && absl::IsNotFound(stub.status())) {
-      return dcfs::ErrnoToStatus(
-          ESTALE, absl::StrCat("No boundary stub for nodeid ",
-                               static_cast<uint64_t>(id)));
+      return ErrnoToStatus(ESTALE, absl::StrCat("No boundary stub for nodeid ",
+                                                static_cast<uint64_t>(id)));
     }
     if (!stub.ok()) return stub.status();
     return stub->attr;
@@ -370,8 +369,7 @@ absl::StatusOr<cache::CachedAttr> DirCacheFS::RequireAttr(InodeId id) {
     // retry after the first FUSE OPEN on a stale nodeid already replied
     // ESTALE and dropped the row -- a stale nodeid the kernel is about to
     // forget anyway): that is what ESTALE means to the kernel, not ENOENT.
-    return dcfs::ErrnoToStatus(
-        ESTALE, absl::StrCat("No cached row for nodeid ", id));
+    return ErrnoToStatus(ESTALE, absl::StrCat("No cached row for nodeid ", id));
   }
   return attr;
 }
@@ -1128,9 +1126,9 @@ absl::Status DirCacheFS::RemoveChild(
   std::vector<std::string> names = {std::string(name)};
   for (int attempt = 0; !begun.has_value(); ++attempt) {
     if (attempt == kAttempts) {
-      return dcfs::DcfsErrnoToStatus(
-          EAGAIN, absl::StrCat("Removal of ", EscapeBytes(name), " in ",
-                               parent, ": it kept changing"));
+      return DcfsErrnoToStatus(
+          EAGAIN, absl::StrCat("Removal of ", EscapeBytes(name), " in ", parent,
+                               ": it kept changing"));
     }
     const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
     ABSL_ASSIGN_OR_RETURN(child, backing::LookupOrPopulate(ctx_, parent, name));
@@ -1262,9 +1260,9 @@ absl::Status DirCacheFS::Rename(
   std::vector<std::string> newnames = {std::string(newname)};
   for (int attempt = 0; !mutation.has_value(); ++attempt) {
     if (attempt == kAttempts) {
-      return dcfs::DcfsErrnoToStatus(
-          EAGAIN, absl::StrCat("Rename of ", EscapeBytes(name), " in ",
-                               parent, ": its directories kept changing"));
+      return DcfsErrnoToStatus(
+          EAGAIN, absl::StrCat("Rename of ", EscapeBytes(name), " in ", parent,
+                               ": its directories kept changing"));
     }
     const cache::FillSnapshot resolved = cache::BeginFill(ctx_);
     ABSL_ASSIGN_OR_RETURN(src, backing::LookupOrPopulate(ctx_, parent, name));
@@ -1735,13 +1733,13 @@ absl::Status DirCacheFS::OpenInode(
       std::memcpy(&flags, got->data(), std::min(got->size(), sizeof(flags)));
       if ((flags & FS_IMMUTABLE_FL) ||
           ((flags & FS_APPEND_FL) && !(fi.flags & O_APPEND))) {
-        return dcfs::ErrnoToStatus(
-            EPERM, absl::StrCat("Writable open of inode ", id,
-                                ": the backing file is ",
-                                (flags & FS_IMMUTABLE_FL) ? "immutable"
-                                                          : "append-only"));
+        return ErrnoToStatus(
+            EPERM,
+            absl::StrCat(
+                "Writable open of inode ", id, ": the backing file is ",
+                (flags & FS_IMMUTABLE_FL) ? "immutable" : "append-only"));
       }
-    } else if (int err = dcfs::StatusToErrno(got.status());
+    } else if (int err = StatusToErrno(got.status());
                err != ENOTTY && err != EOPNOTSUPP && err != EINVAL) {
       // (A filesystem without these flags answers ENOTTY or EOPNOTSUPP:
       // nothing can refuse the open there.)
@@ -2274,9 +2272,9 @@ absl::StatusOr<std::vector<DirCacheFS::Listed>> DirCacheFS::ListCached(
     // may vouch for the listing.
     ABSL_RETURN_IF_ERROR(backing::PopulateDirectory(ctx_, dir).status());
   }
-  return dcfs::DcfsErrnoToStatus(
-      EAGAIN, absl::StrCat("Directory ", dir,
-                           " kept changing while being listed"));
+  return DcfsErrnoToStatus(
+      EAGAIN,
+      absl::StrCat("Directory ", dir, " kept changing while being listed"));
 }
 
 absl::Status DirCacheFS::Readdir(
