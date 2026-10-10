@@ -32,3 +32,38 @@ for 21.1.
 **Deployment rule (russ):** dcfs goes on the server with precious data
 only after all phases are done, all tests pass (including the slow tier
 and a soak run), and 21.2 passes.
+
+## 21.1 notes for russ's setup (2026-10-10)
+
+- **Kernel floor.** The dev host runs 6.8.0-146-generic; dcfs needs 6.9
+  (FS_IOC_GETFSUUID, FUSE passthrough). Boot an HWE kernel (6.11 or 6.14
+  on 24.04) before the trial; 6.13+ only matters if the connectable-handle
+  path (13.5) ever returns.
+- **snapraid-btrfs** (snapper snapshots of each data disk, snapraid run
+  against the snapshot paths). Through dcfs a snapshot is a subvolume and
+  so a boundary stub (contents ENOTSUP), so snapraid keeps running against
+  the backing btrfs directly, outside dcfs. It coexists if: (1) nothing
+  writes to the served tree behind dcfs: snapper writes only inside
+  `.snapshots`, a subvolume dcfs does not cache, fine; snapraid's `content`
+  file must not live inside the served directory if snapraid writes it
+  natively (put it outside the served directory or on the parity disk, or
+  write it through the mount); (2) native reads are fine except atime
+  (dcfs caches file atimes from held fds and directory atimes cache-only,
+  so a native read's relatime update is not seen): `noatime` on the backing
+  or indifference; (3) no native restores or `fix` into the served tree
+  while mounted. dcfs does not make snapraid's scans cheaper (they read the
+  snapshot on the backing); its benefit is for the live tree's readers
+  while the disks sleep. A dcfs instance per snapshot
+  (`dcfs.fstype=btrfs,subvol=`) is cold every time (new identity).
+  To verify in the trial: `.snapshots` appears as a stub, the rest of the
+  tree is unaffected (15.4 finishes the stub behaviour), a snapraid sync
+  during the trial changes nothing dcfs serves.
+- **First configuration.** The `none` form over a directory of the spare
+  disk, `dcfs.cache_db` on the fast disk, a tree without submounts, the
+  README's operations table at hand; collect the daemon's CPU seconds and
+  the sync-point cadence against the disk's spin-down (what the design
+  promises and no test measures on real hardware); expect a slow first
+  cold listing of a big tree (17.3 measures why).
+- **Worth having first:** 15.5 (`fsck.dcfs`, for the sixth field) and 15.8
+  (`allow_other` on by default), both in flight; 17.2's setgid fix is
+  minor for a trial.
