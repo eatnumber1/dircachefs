@@ -181,6 +181,12 @@ dcfs/dir_cache_fs_test.cc|INSTANTIATE_TEST_SUITE_P|modernize-type-traits|1
 dcfs/dir_cache_fs_test.cc|ListAll|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs_test.cc|LiveSession|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|MakeOldFile|bugprone-implicit-widening-of-multiplication-result|2
+# ClockNow reads CLOCK_MONOTONIC. misc-include-cleaner's stdlib map credits only
+# <time.h> for the POSIX CLOCK_* macros, and modernize-deprecated-headers forbids
+# <time.h> in C++; the identical CLOCK_REALTIME site (SetTimes) is already listed.
+# A tool conflict, not a style defect: 25.23's include-cleaner sweep settles the
+# CLOCK_* case once (a mapping pragma or a syscalls.h constant), not per site.
+dcfs/dir_cache_fs_test.cc|ClockNow|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|Measure|performance-avoid-endl|1
 dcfs/dir_cache_fs_test.cc|Measure|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs_test.cc|MutateDuringFills|readability-convert-member-functions-to-static|1
