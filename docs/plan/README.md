@@ -54,7 +54,7 @@ phase's file; `log.md` says where things stand.
 | 18 | [Disk quota (EDQUOT)](phases/18-disk-quota-edquot.md) | planned (just before 19) |
 | 19 | [Soak test (manual)](phases/19-soak-test.md) | planned (last automated phase) |
 | 20 | [Statistics](phases/20-statistics.md) | design to be discussed first |
-| 21 | [Real-hardware checks](phases/21-real-hardware-checks.md) (russ, manual) | 21.1 after 11; 21.2 last; runbook written 2026-10-11 (notes/trial-runbook-2026-10-11.md), russ to run it after an HWE kernel boot; first run 2026-10-11 on the production server (russ's agent): standby held under metadata work, a read woke the disk; NFS client leg in progress (notes/trial-2026-10-11.md) |
+| 21 | [Real-hardware checks](phases/21-real-hardware-checks.md) (russ, manual) | 21.1 after 11; 21.2 last; runbook written 2026-10-11 (notes/trial-runbook-2026-10-11.md), russ to run it after an HWE kernel boot; first run 2026-10-11 on the production server (russ's agent): standby held under metadata work, a read woke the disk; NFS client leg in progress (notes/trial-2026-10-11.md); client leg done 2026-10-11: 175k files listed over NFS with the disk asleep, one read woke it; the restart-under-NFS finding is 15.12 |
 
 Execution started 2026-10-05 (wave 1).
 
@@ -107,7 +107,9 @@ New phases are frozen. The order from here, and why:
    (blocked-task diagnostics), 15.10 (fusectl in the remounting guests),
    12.11b/c, 12.15,
    17.2 (setgid), 17.1b/c, 11.7's remainder, 11.3c, 7.3, 7.6b, 7.7,
-   26.14b, 26.25 (the ACE dropahead window on xfs), 26.27 (merged profdata
+   26.14b, 15.12 (NFS export across a daemon restart: README, the QEMU
+   test's bind shape, the runbook order; from the trial), 26.25 (the ACE
+   dropahead window on xfs), 26.27 (merged profdata
    to the host so the gate can count regions). The kernel patches (notes/kernel-patches.md) go last of all,
    after everything else is done (russ, 2026-10-11: their timelines are so
    long that our order adds nothing); the two kernel bug mails are

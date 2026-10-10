@@ -735,3 +735,23 @@ fsck.dcfs's fstab integration (15.5) either learns to run for a bind line
 (a cache-database check with no device: the unit would need a path, not
 a device) or fsck.dcfs becomes a manual tool only; decide in 15.11. Also
 a README gap: the install section lists no `/sbin/fsck.dcfs` link.
+
+## 15.12 NFS export of a dcfs mount across a daemon restart (from the trial, 2026-10-11)
+
+The first real-hardware run exported a bind mount of the dcfs mountpoint;
+after a daemon restart the bind kept the dead FUSE superblock and knfsd
+served EIO, and `exportfs -f` could not fix it (notes/trial-2026-10-11.md,
+stages 4-7). (1) README: the NFS section's claim ("after restarting, run
+`exportfs -f`") holds only when the export path is the dcfs mountpoint
+itself; for a bind of the mountpoint, the restart order is unexport,
+unmount the bind, stop dcfs, start, re-bind, re-export, flush; recommend
+exporting the mountpoint directly. (2) test/qemu/guest/nfs.sh: add the
+bind-export shape (export a bind of the mountpoint; restart dcfs with the
+wrong order and assert the client sees EIO; with the right order and
+assert it works), so the README's two claims are both tested. (3) The
+runbook's warm-restart step says the order. (4) A held-descriptor test
+whose post-restart read must reach the server (a file larger than the
+client's read-ahead), to show handle survival on real hardware next run.
+Mechanical for (1) and (3), implementer for (2) and (4). Design candidate
+beside it (not this step): keep the `/dev/fuse` descriptor across daemon
+restarts so the superblock never dies (notes/trial-2026-10-11.md).

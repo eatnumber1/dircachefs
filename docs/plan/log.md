@@ -2966,3 +2966,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   capture shows the server answering NFS4ERR_IO on the export's root handle, so it is server-side
   and the README's "exportfs -f is enough" claim did not hold on the production server. Needs the
   server's dcfs log and knfsd state (russ). Recorded in the trial note as the open finding.
+- 21.1 client leg finished (stage 7 all green after the server remade the export bind). The
+  first run's findings are in notes/trial-2026-10-11.md; 15.12 queued (README correction, the
+  QEMU NFS test's bind-export shape, the runbook's restart order, a real held-descriptor test).
+  The trial's remaining parts (the hour-long watch with CPU and sync-point cadence, the control
+  hour, the fstab shape) wait for russ's next session on the server.
