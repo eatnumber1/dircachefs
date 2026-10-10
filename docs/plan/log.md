@@ -2958,3 +2958,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   production server and its NFS client. Stage 3 (one read) sent.
 - CI run 38088587563 (9de0e71): fully green, the first since the reformat (coverage on the
   re-baselined figure, the ubsan ACE mitigation holding, xfstests on all three backings).
+- 21.1 client leg, stages 3 and 4: one read woke the disk (10.6 s spin-up wait, one READ RPC);
+  after a dcfs restart under the NFS export every uncached request failed with EIO (knfsd's export
+  cache on the dead superblock; the QEMU NFS test flushes with exportfs -f). Stage 5 after the
+  flush running. Design candidate recorded: keep the /dev/fuse descriptor across daemon restarts.
