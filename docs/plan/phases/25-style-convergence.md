@@ -352,3 +352,21 @@ link's ptrace access check passes). Tests: an unprivileged `setfattr`
 on a regular file, a directory, a symlink and a FIFO through dcfs, each
 read back through the backing, before and after. No behaviour change
 intended; the trace model is untouched.
+
+## 25.10 Retry loops out of the daemon (russ's rulings, 2026-10-10; queued after the quota reset)
+
+Per `docs/style.md` 1.12 and `docs/plan/notes/retry-loops-2026-10-10.md`:
+(1) unlink, rename and readdir lose `kAttempts` and the EAGAIN fallback
+and retry without bound; the model's retry-or-EAGAIN branch becomes retry
+only and gains a liveness property (every begun unlink/rename/readdir
+eventually begins its mutation or serves its listing) that TLC checks
+under the fairness the code provides; the loop comments name it;
+(2) `ListXattrOPath`, `GetXattrOPath` and `GetGroups` size once, read
+once, and report ERANGE/EINVAL as the backing would; where a FUSE
+request carries the client's buffer size it is passed through once;
+(3) `tools/repo_shape.py` refuses `kAttempts`, `attempt`, `attempts`,
+`retry` and `retries` as identifiers in `dcfs/*.cc` and `dcfs/*.h`
+(comments excepted), with no allowlist unless russ approves a loop.
+Protocol agent (the model changes), tests first for (2): a reader racing
+a writer sees ERANGE once. No behaviour change for (1) today, since one
+request runs at a time.
