@@ -238,9 +238,9 @@ absl::StatusOr<LookupResult> Lookup(Context &ctx, InodeId parent,
   if (found) return result;
   // No row: the listing's completeness decides.
   ASSIGN_OR_RETURN(bool complete, ChildrenComplete(ctx, parent));
-  return LookupResult{complete ? LookupResult::Kind::kNegative
-                               : LookupResult::Kind::kUnknown,
-                      0};
+  return LookupResult{.kind = complete ? LookupResult::Kind::kNegative
+                                       : LookupResult::Kind::kUnknown,
+                      .id = 0};
 }
 
 // Decodes attrs_valid, fuse_gen, device_id, backing_ino, backing_gen and
@@ -266,10 +266,14 @@ absl::Status DecodeAttr(Statement &row, int base, CachedAttr &attr) {
   st.st_size = row.Column<int64_t>(c + 5);
   st.st_blocks = row.Column<int64_t>(c + 6);
   st.st_blksize = row.Column<int64_t>(c + 7);
-  st.st_atim = {row.Column<int64_t>(c + 8), row.Column<int64_t>(c + 9)};
-  st.st_mtim = {row.Column<int64_t>(c + 10), row.Column<int64_t>(c + 11)};
-  st.st_ctim = {row.Column<int64_t>(c + 12), row.Column<int64_t>(c + 13)};
-  attr.btime = {row.Column<int64_t>(c + 14), row.Column<int64_t>(c + 15)};
+  st.st_atim = {.tv_sec = row.Column<int64_t>(c + 8),
+                .tv_nsec = row.Column<int64_t>(c + 9)};
+  st.st_mtim = {.tv_sec = row.Column<int64_t>(c + 10),
+                .tv_nsec = row.Column<int64_t>(c + 11)};
+  st.st_ctim = {.tv_sec = row.Column<int64_t>(c + 12),
+                .tv_nsec = row.Column<int64_t>(c + 13)};
+  attr.btime = {.tv_sec = row.Column<int64_t>(c + 14),
+                .tv_nsec = row.Column<int64_t>(c + 15)};
   return absl::OkStatus();
 }
 
@@ -337,10 +341,14 @@ CachedAttr WithStatx(CachedAttr attr, const struct statx &stx) {
   st.st_size = static_cast<off_t>(stx.stx_size);
   st.st_blocks = static_cast<blkcnt_t>(stx.stx_blocks);
   st.st_blksize = static_cast<blksize_t>(stx.stx_blksize);
-  st.st_atim = {stx.stx_atime.tv_sec, stx.stx_atime.tv_nsec};
-  st.st_mtim = {stx.stx_mtime.tv_sec, stx.stx_mtime.tv_nsec};
-  st.st_ctim = {stx.stx_ctime.tv_sec, stx.stx_ctime.tv_nsec};
-  attr.btime = {stx.stx_btime.tv_sec, stx.stx_btime.tv_nsec};
+  st.st_atim = {.tv_sec = stx.stx_atime.tv_sec,
+                .tv_nsec = stx.stx_atime.tv_nsec};
+  st.st_mtim = {.tv_sec = stx.stx_mtime.tv_sec,
+                .tv_nsec = stx.stx_mtime.tv_nsec};
+  st.st_ctim = {.tv_sec = stx.stx_ctime.tv_sec,
+                .tv_nsec = stx.stx_ctime.tv_nsec};
+  attr.btime = {.tv_sec = stx.stx_btime.tv_sec,
+                .tv_nsec = stx.stx_btime.tv_nsec};
   return attr;
 }
 

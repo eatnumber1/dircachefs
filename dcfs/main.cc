@@ -404,7 +404,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
                    sqlite3::ConnectionFactory{.path = cache_db}.Open());
   MountFds mounts;
   absl::BitGen bitgen;
-  Context ctx{db, mounts, bitgen};
+  Context ctx{.db = db, .mounts = mounts, .rng = bitgen};
   // Observes nothing, except in the testonly checking and recording builds
   // (see dcfs/protocol_events.h).
   Observe(ctx, &MainProtocolEvents());

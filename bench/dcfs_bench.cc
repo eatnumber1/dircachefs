@@ -158,15 +158,18 @@ bool Setup() {
     std::string prefix, src;
     uint64_t entries;
   };
-  std::vector<Backing> backings = {{"", cfg.src, cfg.entries}};
+  std::vector<Backing> backings = {
+      {.prefix = "", .src = cfg.src, .entries = cfg.entries}};
   if (!cfg.slow_src.empty()) {
-    backings.push_back({"slow_", cfg.slow_src, cfg.slow_entries});
+    backings.push_back(
+        {.prefix = "slow_", .src = cfg.slow_src, .entries = cfg.slow_entries});
   }
   for (const auto &b : backings) {
     uint64_t big = std::min(cfg.big, b.entries);
     if (!MakeTree(b.src, b.entries, big)) return false;
     syscalls::sync();
-    targets.push_back({b.prefix + "backing", b.src, b.entries});
+    targets.push_back(
+        {.name = b.prefix + "backing", .root = b.src, .entries = b.entries});
     for (const char *kind : {"dcfs", "dcfs0"}) {
       std::string name = b.prefix + kind;
       std::vector<std::string> flags;
@@ -176,7 +179,7 @@ bool Setup() {
       if (!StartDcfs(name, b.src, flags)) return false;
       std::string mnt = cfg.mnt_dir + "/" + name;
       Walk(mnt);  // warm: dcfs's database now has every entry.
-      targets.push_back({name, mnt, b.entries});
+      targets.push_back({.name = name, .root = mnt, .entries = b.entries});
     }
   }
   return true;
@@ -365,9 +368,11 @@ void Register() {
     int full_iterations;  // 0: let google/benchmark choose
   };
   const Case cases[] = {
-      {"Stat", BM_Stat, 0},         {"OpenClose", BM_OpenClose, 0},
-      {"SmallRead", BM_SmallRead, 0}, {"Lookup", BM_Lookup, 200},
-      {"Readdir", BM_Readdir, 20},
+      {.name = "Stat", .fn = BM_Stat, .full_iterations = 0},
+      {.name = "OpenClose", .fn = BM_OpenClose, .full_iterations = 0},
+      {.name = "SmallRead", .fn = BM_SmallRead, .full_iterations = 0},
+      {.name = "Lookup", .fn = BM_Lookup, .full_iterations = 200},
+      {.name = "Readdir", .fn = BM_Readdir, .full_iterations = 20},
   };
   for (const Case &c : cases) {
     for (const Target &t : targets) {

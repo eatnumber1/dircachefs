@@ -199,22 +199,22 @@ TEST(StatusToErrnoTest, CodeTableHasAnErrnoForEveryCode) {
     absl::StatusCode code;
     int want;
   } kCases[] = {
-      {absl::StatusCode::kCancelled, ECANCELED},
-      {absl::StatusCode::kUnknown, EPROTO},
-      {absl::StatusCode::kInvalidArgument, EINVAL},
-      {absl::StatusCode::kDeadlineExceeded, ETIMEDOUT},
-      {absl::StatusCode::kNotFound, ENOENT},
-      {absl::StatusCode::kAlreadyExists, EEXIST},
-      {absl::StatusCode::kPermissionDenied, EPERM},
-      {absl::StatusCode::kResourceExhausted, ENOSPC},
-      {absl::StatusCode::kFailedPrecondition, EBUSY},
-      {absl::StatusCode::kAborted, EDEADLK},
-      {absl::StatusCode::kOutOfRange, ERANGE},
-      {absl::StatusCode::kUnimplemented, ENOSYS},
-      {absl::StatusCode::kInternal, ELIBBAD},
-      {absl::StatusCode::kUnavailable, EAGAIN},
-      {absl::StatusCode::kDataLoss, ENOTRECOVERABLE},
-      {absl::StatusCode::kUnauthenticated, EPERM},
+      {.code = absl::StatusCode::kCancelled, .want = ECANCELED},
+      {.code = absl::StatusCode::kUnknown, .want = EPROTO},
+      {.code = absl::StatusCode::kInvalidArgument, .want = EINVAL},
+      {.code = absl::StatusCode::kDeadlineExceeded, .want = ETIMEDOUT},
+      {.code = absl::StatusCode::kNotFound, .want = ENOENT},
+      {.code = absl::StatusCode::kAlreadyExists, .want = EEXIST},
+      {.code = absl::StatusCode::kPermissionDenied, .want = EPERM},
+      {.code = absl::StatusCode::kResourceExhausted, .want = ENOSPC},
+      {.code = absl::StatusCode::kFailedPrecondition, .want = EBUSY},
+      {.code = absl::StatusCode::kAborted, .want = EDEADLK},
+      {.code = absl::StatusCode::kOutOfRange, .want = ERANGE},
+      {.code = absl::StatusCode::kUnimplemented, .want = ENOSYS},
+      {.code = absl::StatusCode::kInternal, .want = ELIBBAD},
+      {.code = absl::StatusCode::kUnavailable, .want = EAGAIN},
+      {.code = absl::StatusCode::kDataLoss, .want = ENOTRECOVERABLE},
+      {.code = absl::StatusCode::kUnauthenticated, .want = EPERM},
   };
   for (const auto &[code, want] : kCases) {
     EXPECT_EQ(StatusToErrno(absl::Status(code, "x")), want)

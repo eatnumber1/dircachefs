@@ -469,7 +469,8 @@ TEST_F(SyscallsTest, FchmodatAndUtimensatOnAProcFdPath) {
   ASSERT_THAT(st, IsOk());
   EXPECT_EQ(st->st_mode & 07777, 0640u);
 
-  const struct timespec times[2] = {{1000, 0}, {2000, 0}};
+  const struct timespec times[2] = {{.tv_sec = 1000, .tv_nsec = 0},
+                                    {.tv_sec = 2000, .tv_nsec = 0}};
   ASSERT_THAT(syscalls::utimensat(AT_FDCWD, path, times, 0), IsOk());
   st = syscalls::fstat(file_fd_);
   ASSERT_THAT(st, IsOk());

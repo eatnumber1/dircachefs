@@ -647,7 +647,7 @@ class DirCacheFSTest : public ::testing::Test {
   // recorder, if one is on, records the new one too.
   absl::Status Restart(std::string_view boot_id) {
     MountFds mounts;
-    Context ctx{db_, mounts, bitgen_};
+    Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
     // The new process is checked too (step 26.2), and recorded.
     ctx.events = ctx_.events;
     ASSIGN_OR_RETURN(FileDescriptor source,
@@ -1200,7 +1200,7 @@ class DirCacheFSTest : public ::testing::Test {
   sqlite3::Connection db_;
   MountFds mounts_;
   absl::BitGen bitgen_{std::seed_seq{4, 10}};
-  Context ctx_{db_, mounts_, bitgen_};
+  Context ctx_{.db = db_, .mounts = mounts_, .rng = bitgen_};
   // What Start() makes the DirCacheFS with (a test may change it first).
   // No periodic sync point in the middle of a test; held descriptors
   // (written_) up to a fixed cap, not the default derived from the test
@@ -6768,7 +6768,7 @@ TEST_F(DirCacheFSTest, RefusedInitEndsTheLoopWithEproto) {
   Start();
   // Its own Context: a DirCacheFS points its Context at its own state.
   MountFds mounts;
-  Context ctx{db_, mounts, bitgen_};
+  Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
   DirCacheFS other(ctx, options_);
   struct fuse_session *se = NewSession(&other, {"-o", "max_read=4096"});
   ASSERT_NE(se, nullptr);
@@ -6786,7 +6786,7 @@ TEST_F(DirCacheFSTest, RefusedInitEndsTheLoopWithEproto) {
 TEST_F(DirCacheFSTest, MountWithoutDefaultPermissionsIsRefused) {
   Start();
   MountFds mounts;
-  Context ctx{db_, mounts, bitgen_};
+  Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
   DirCacheFS::Options options = options_;
   options.mount_options = {"allow_other", "suid"};
   DirCacheFS other(ctx, options);
@@ -6809,7 +6809,7 @@ TEST_F(DirCacheFSTest, MountWithoutDefaultPermissionsIsRefused) {
 TEST_F(DirCacheFSTest, DefaultOptionsAreRefused) {
   Start();
   MountFds mounts;
-  Context ctx{db_, mounts, bitgen_};
+  Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
   DirCacheFS other(ctx, DirCacheFS::Options{});
   struct fuse_session *se = NewSession(&other, {});
   ASSERT_NE(se, nullptr);
@@ -6827,7 +6827,7 @@ TEST_F(DirCacheFSTest, DefaultOptionsAreRefused) {
 TEST_F(DirCacheFSTest, InitWithoutDontMaskIsRefused) {
   Start();
   MountFds mounts;
-  Context ctx{db_, mounts, bitgen_};
+  Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
   DirCacheFS other(ctx, options_);
   struct fuse_session *se = NewSession(&other, {});
   ASSERT_NE(se, nullptr);
@@ -7437,7 +7437,7 @@ class FaultIteration : public DirCacheFSTest {
       found.push_back(absl::StrCat("after the workload: ", s.message()));
     }
     MountFds mounts;
-    Context ctx{db_, mounts, bitgen_};
+    Context ctx{.db = db_, .mounts = mounts, .rng = bitgen_};
     ctx.events = observers_.get();
     absl::StatusOr<FileDescriptor> source =
         syscalls::openat(AT_FDCWD, source_, O_RDONLY | O_DIRECTORY);
@@ -7715,12 +7715,60 @@ struct SlopeBound {
   int64_t backing_a, backing_b;
 };
 constexpr SlopeBound kSlopeBounds[] = {
-    {"create", 79, 3, 7, 0, 0, 1, 14, 64},
-    {"mkdir", 48, 3, 3, 0, 0, 1, 8, 0},
-    {"unlink", 38, 0, 4, 0, 1, 0, 8, 0},
-    {"rename", 59, 0, 4, 0, 1, 0, 9, 0},
-    {"cold-lookup", 20, 17, 0, 1, 0, 0, 5, 2},
-    {"setattr", 35, 0, 3, 0, 1, 0, 13, 0},
+    {.op = "create",
+     .steps_a = 79,
+     .steps_b = 3,
+     .transactions_a = 7,
+     .transactions_b = 0,
+     .durable_a = 0,
+     .durable_b = 1,
+     .backing_a = 14,
+     .backing_b = 64},
+    {.op = "mkdir",
+     .steps_a = 48,
+     .steps_b = 3,
+     .transactions_a = 3,
+     .transactions_b = 0,
+     .durable_a = 0,
+     .durable_b = 1,
+     .backing_a = 8,
+     .backing_b = 0},
+    {.op = "unlink",
+     .steps_a = 38,
+     .steps_b = 0,
+     .transactions_a = 4,
+     .transactions_b = 0,
+     .durable_a = 1,
+     .durable_b = 0,
+     .backing_a = 8,
+     .backing_b = 0},
+    {.op = "rename",
+     .steps_a = 59,
+     .steps_b = 0,
+     .transactions_a = 4,
+     .transactions_b = 0,
+     .durable_a = 1,
+     .durable_b = 0,
+     .backing_a = 9,
+     .backing_b = 0},
+    {.op = "cold-lookup",
+     .steps_a = 20,
+     .steps_b = 17,
+     .transactions_a = 0,
+     .transactions_b = 1,
+     .durable_a = 0,
+     .durable_b = 0,
+     .backing_a = 5,
+     .backing_b = 2},
+    {.op = "setattr",
+     .steps_a = 35,
+     .steps_b = 0,
+     .transactions_a = 3,
+     .transactions_b = 0,
+     .durable_a = 1,
+     .durable_b = 0,
+     .backing_a = 13,
+     .backing_b = 0},
 };
 
 // Whether `s`, `bound.op` at N = `n`, is within its bounds (each count

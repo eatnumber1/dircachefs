@@ -183,7 +183,7 @@ class TraceRecorderTest : public ::testing::Test {
   sqlite3::Connection db_;
   MountFds mounts_;
   absl::BitGen bitgen_;
-  Context ctx_{db_, mounts_, bitgen_};
+  Context ctx_{.db = db_, .mounts = mounts_, .rng = bitgen_};
   std::unique_ptr<TraceRecorder> recorder_;
   std::string path_;
   FileDescriptor fd_;

@@ -2830,9 +2830,11 @@ struct ForwardedIoctl {
   bool changes;
 };
 constexpr ForwardedIoctl kForwardedIoctls[] = {
-    {FS_IOC_GETFLAGS, false},   {FS_IOC_SETFLAGS, true},
-    {FS_IOC_FSGETXATTR, false}, {FS_IOC_FSSETXATTR, true},
-    {FS_IOC_GETVERSION, false},
+    {.cmd = FS_IOC_GETFLAGS, .changes = false},
+    {.cmd = FS_IOC_SETFLAGS, .changes = true},
+    {.cmd = FS_IOC_FSGETXATTR, .changes = false},
+    {.cmd = FS_IOC_FSSETXATTR, .changes = true},
+    {.cmd = FS_IOC_GETVERSION, .changes = false},
 };
 
 }  // namespace

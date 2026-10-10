@@ -190,7 +190,7 @@ class MetadataCacheTest : public ::testing::Test {
   MountFds mounts_;
   // Fixed seed: generations are random, but tests should be reproducible.
   absl::BitGen bitgen_{std::seed_seq{4, 10}};
-  Context ctx_{db_, mounts_, bitgen_};
+  Context ctx_{.db = db_, .mounts = mounts_, .rng = bitgen_};
 };
 
 TEST_F(MetadataCacheTest, UpsertCreatesThenUpdatesSameIdentity) {

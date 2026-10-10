@@ -209,7 +209,7 @@ class BackingTest : public ::testing::Test {
   MountFds mounts_;
   // Fixed seed: generations are random, but tests should be reproducible.
   absl::BitGen bitgen_{std::seed_seq{4, 10}};
-  Context ctx_{db_, mounts_, bitgen_};
+  Context ctx_{.db = db_, .mounts = mounts_, .rng = bitgen_};
 };
 
 std::vector<std::string> ListNames(Context &ctx, InodeId dir) {
@@ -623,7 +623,7 @@ TEST_F(BackingTest, InitRootRejectsACacheForAnotherFilesystem) {
                                              .backing_gen = 0}),
               IsOk());
   MountFds other_mounts;
-  Context other{other_db, other_mounts, bitgen_};
+  Context other{.db = other_db, .mounts = other_mounts, .rng = bitgen_};
   ASSERT_OK_AND_ASSIGN(FileDescriptor fd, syscalls::dup(source_fd_));
   EXPECT_THAT(InitRoot(other, std::move(fd)),
               StatusIs(absl::StatusCode::kFailedPrecondition));
@@ -1209,7 +1209,7 @@ TEST_F(BoundaryTest, BoundaryRefusalPersistsAcrossRestart) {
   // ENOENT for something that still exists on the backing filesystem.
   ASSERT_OK_AND_ASSIGN(LookupResult before, cache::Lookup(ctx_, kRootInode,
                                                          "boundary"));
-  Context restarted{db_, mounts_, bitgen_};
+  Context restarted{.db = db_, .mounts = mounts_, .rng = bitgen_};
   absl::StatusOr<LookupResult> after =
       LookupOrPopulate(restarted, kRootInode, "boundary");
   ASSERT_THAT(after, IsOkAndHolds(IsLookup(LookupResult::Kind::kRefused)));

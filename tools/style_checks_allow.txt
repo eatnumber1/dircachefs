@@ -9,9 +9,7 @@ bench/dcfs_bench.cc|BM_Readdir|capturing_mutating_lambda|1
 bench/dcfs_bench.cc|Cycle|readability-isolate-declaration|1
 bench/dcfs_bench.cc|Cycle|readability-redundant-string-cstr|1
 bench/dcfs_bench.cc|ParseOwnFlags|google-readability-braces-around-statements|11
-bench/dcfs_bench.cc|Register|modernize-use-designated-initializers|5
 bench/dcfs_bench.cc|Register|readability-redundant-string-cstr|1
-bench/dcfs_bench.cc|Setup|modernize-use-designated-initializers|4
 bench/dcfs_bench.cc|StartDcfs|cert-err33-c|1
 bench/dcfs_bench.cc|WalkDir|capturing_mutating_lambda|1
 bench/dcfs_bench.cc|WalkDir|misc-no-recursion|1
@@ -80,7 +78,6 @@ dcfs/backing_capture.cc|RunNativeMount|misc-include-cleaner|5
 dcfs/backing_capture_fault_test.cc|Request|readability-convert-member-functions-to-static|1
 dcfs/backing_fault_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/backing_test.cc|<file scope>|misc-include-cleaner|3
-dcfs/backing_test.cc|<file scope>|modernize-use-designated-initializers|1
 dcfs/backing_test.cc|AddFakeMount|misc-include-cleaner|2
 dcfs/backing_test.cc|BackingCall|misc-include-cleaner|1
 dcfs/backing_test.cc|DbPath|concurrency-mt-unsafe|1
@@ -89,7 +86,6 @@ dcfs/backing_test.cc|StatPath|misc-include-cleaner|3
 dcfs/backing_test.cc|TEST|capturing_mutating_lambda|1
 dcfs/backing_test.cc|TEST_F|bugprone-unchecked-optional-access|2
 dcfs/backing_test.cc|TEST_F|misc-include-cleaner|1
-dcfs/backing_test.cc|TEST_F|modernize-use-designated-initializers|2
 dcfs/backing_test.cc|TEST_F|performance-inefficient-vector-operation|1
 dcfs/backing_test.cc|Unlock|modernize-loop-convert|1
 dcfs/device_id.cc|GetDeviceId|modernize-use-integer-sign-comparison|1
@@ -99,7 +95,6 @@ dcfs/device_id_fault_test.cc|TEST_F|concurrency-mt-unsafe|1
 dcfs/device_id_fault_test.cc|__wrap_ioctl|google-runtime-int|1
 dcfs/device_id_test.cc|TEST|concurrency-mt-unsafe|3
 dcfs/dir_cache_fs.cc|<file scope>|modernize-deprecated-headers|1
-dcfs/dir_cache_fs.cc|<file scope>|modernize-use-designated-initializers|5
 dcfs/dir_cache_fs.cc|DirCacheFS::Access|readability-convert-member-functions-to-static|1
 dcfs/dir_cache_fs.cc|DirCacheFS::CopyFileRange|misc-unused-parameters|2
 dcfs/dir_cache_fs.cc|DirCacheFS::CreateChild|misc-include-cleaner|1
@@ -151,11 +146,9 @@ dcfs/dir_cache_fs.cc|XattrsChangedBySetattr|readability-implicit-bool-conversion
 dcfs/dir_cache_fs.h|<file scope>|modernize-use-override|1
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-include-cleaner|5
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-unused-parameters|1
-dcfs/dir_cache_fs_test.cc|<file scope>|modernize-use-designated-initializers|7
 dcfs/dir_cache_fs_test.cc|BackingAtime|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|BatchForget|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|BatchForget|performance-unnecessary-value-param|1
-dcfs/dir_cache_fs_test.cc|CheckAndRecover|modernize-use-designated-initializers|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|readability-avoid-nested-conditional-operator|1
 dcfs/dir_cache_fs_test.cc|DCFS_BACKSTOP|misc-include-cleaner|7
 dcfs/dir_cache_fs_test.cc|Forget|bugprone-invalid-enum-default-initialization|1
@@ -176,7 +169,6 @@ dcfs/dir_cache_fs_test.cc|NewSession|performance-inefficient-vector-operation|1
 dcfs/dir_cache_fs_test.cc|RemountSource|concurrency-mt-unsafe|1
 dcfs/dir_cache_fs_test.cc|RemountSource|google-runtime-int|1
 dcfs/dir_cache_fs_test.cc|Restart|misc-include-cleaner|1
-dcfs/dir_cache_fs_test.cc|Restart|modernize-use-designated-initializers|1
 dcfs/dir_cache_fs_test.cc|Run|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs_test.cc|RunRenames|bugprone-unchecked-optional-access|1
 dcfs/dir_cache_fs_test.cc|RunRenames|capturing_mutating_lambda|1
@@ -197,7 +189,6 @@ dcfs/dir_cache_fs_test.cc|TEST_F|cert-err33-c|36
 dcfs/dir_cache_fs_test.cc|TEST_F|concurrency-mt-unsafe|1
 dcfs/dir_cache_fs_test.cc|TEST_F|google-runtime-int|1
 dcfs/dir_cache_fs_test.cc|TEST_F|misc-include-cleaner|6
-dcfs/dir_cache_fs_test.cc|TEST_F|modernize-use-designated-initializers|4
 dcfs/dir_cache_fs_test.cc|TEST_F|performance-for-range-copy|1
 dcfs/dir_cache_fs_test.cc|TEST_F|readability-inconsistent-ifelse-braces|36
 dcfs/dir_cache_fs_test.cc|TEST_F|readability-isolate-declaration|3
@@ -311,7 +302,6 @@ dcfs/main.cc|<file scope>|misc-include-cleaner|1
 dcfs/main.cc|ABSL_FLAG|misc-use-internal-linkage|6
 dcfs/main.cc|MountHelperMain|performance-avoid-endl|1
 dcfs/main.cc|MountHelperMain|readability-function-cognitive-complexity|1
-dcfs/main.cc|RunDaemon|modernize-use-designated-initializers|1
 dcfs/main.cc|RunDaemon|modernize-use-emplace|2
 dcfs/main.cc|RunDaemon|readability-function-cognitive-complexity|1
 dcfs/main.cc|UmountHelperMain|performance-avoid-endl|1
@@ -320,7 +310,6 @@ dcfs/metadata_cache.cc|Blob|modernize-return-braced-init-list|1
 dcfs/metadata_cache.cc|ChildrenComplete|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|ClearDirty|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|DecodeAttr|misc-use-internal-linkage|1
-dcfs/metadata_cache.cc|DecodeAttr|modernize-use-designated-initializers|4
 dcfs/metadata_cache.cc|DirEpoch|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|FillAttr|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|FillSymlink|capturing_mutating_lambda|1
@@ -337,7 +326,6 @@ dcfs/metadata_cache.cc|IsDirComplete|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|ListDir|modernize-use-integer-sign-comparison|1
 dcfs/metadata_cache.cc|ListDir|performance-move-const-arg|1
 dcfs/metadata_cache.cc|Lookup|capturing_mutating_lambda|1
-dcfs/metadata_cache.cc|Lookup|modernize-use-designated-initializers|1
 dcfs/metadata_cache.cc|ParentOf|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|Readlink|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|RecoverDirty|capturing_mutating_lambda|2
@@ -346,10 +334,8 @@ dcfs/metadata_cache.cc|TouchAtime|bugprone-implicit-widening-of-multiplication-r
 dcfs/metadata_cache.cc|TouchAtime|capturing_mutating_lambda|2
 dcfs/metadata_cache.cc|TouchAtime|readability-isolate-declaration|1
 dcfs/metadata_cache.cc|UpsertInode|capturing_mutating_lambda|1
-dcfs/metadata_cache.cc|WithStatx|modernize-use-designated-initializers|4
 dcfs/metadata_cache.cc|XattrsComplete|capturing_mutating_lambda|1
 dcfs/metadata_cache_test.cc|<file scope>|misc-unused-using-decls|2
-dcfs/metadata_cache_test.cc|<file scope>|modernize-use-designated-initializers|1
 dcfs/metadata_cache_test.cc|TEST_F|capturing_mutating_lambda|10
 dcfs/metadata_cache_test.cc|TEST_F|modernize-use-emplace|1
 dcfs/metadata_cache_test.cc|TEST_F|readability-isolate-declaration|1
@@ -415,7 +401,6 @@ dcfs/status.cc|ErrnoToStatus|misc-include-cleaner|3
 dcfs/status.cc|ProducedByDcfs|misc-include-cleaner|2
 dcfs/status.cc|StatusCodeToErrno|misc-include-cleaner|2
 dcfs/status_test.cc|TEST|misc-include-cleaner|2
-dcfs/status_test.cc|TEST|modernize-use-designated-initializers|16
 dcfs/syscalls.cc|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/syscalls.cc|clock_gettime|misc-include-cleaner|2
 dcfs/syscalls.cc|close|misc-include-cleaner|2
@@ -472,7 +457,6 @@ dcfs/syscalls_test.cc|<file scope>|misc-include-cleaner|4
 dcfs/syscalls_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/syscalls_test.cc|TEST|misc-include-cleaner|9
 dcfs/syscalls_test.cc|TEST_F|misc-include-cleaner|13
-dcfs/syscalls_test.cc|TEST_F|modernize-use-designated-initializers|2
 dcfs/syscalls_test.cc|TEST_F|modernize-use-emplace|1
 dcfs/syscalls_test.cc|TEST_F|readability-math-missing-parentheses|1
 dcfs/testonly/assert_ok_and_assign.h|<file scope>|bugprone-macro-parentheses|2
@@ -581,7 +565,6 @@ dcfs/testonly/trace_recorder.cc|TraceRecorder::Unexplained|modernize-raw-string-
 dcfs/testonly/trace_recorder.cc|TraceRecorder::WriteLine|readability-make-member-function-const|1
 dcfs/testonly/trace_recorder.h|<file scope>|readability-inconsistent-declaration-parameter-name|1
 dcfs/testonly/trace_recorder_test.cc|<file scope>|misc-include-cleaner|1
-dcfs/testonly/trace_recorder_test.cc|<file scope>|modernize-use-designated-initializers|1
 dcfs/testonly/trace_recorder_test.cc|FileRequest|misc-include-cleaner|1
 dcfs/testonly/trace_recorder_test.cc|Make|misc-include-cleaner|1
 dcfs/testonly/trace_recorder_test.cc|MakeDir|misc-include-cleaner|1
