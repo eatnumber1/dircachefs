@@ -2499,3 +2499,12 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   succeeded through Bazel (cloud.debian.org still timed out in that run and the mirror served it,
   so the mirrors are the fix that matters). PUSH POINT: main after this entry; since 2ee9cc7 it
   carries 26.14e, 23.11 and 15.6c. Lane-5 free. Three lanes from here (budget).
+- 15.6b round 2 re-review (Opus): MERGE. Both names installed (umount.fuse.dcfs default, umount.fuse
+  opt-in, measured with LIBMOUNT_DEBUG in the guest), fusectl's nlink decides the wait, blocking
+  LOCK_EX with the unlink-while-locked re-check (ABA-free: the open fd pins the inode), no
+  daemon-to-daemon deadlock (one path-based cycle noted for the README: a mount covering another
+  instance's cache dir or /run/dcfs; Ctrl-C or systemd's timeout breaks it), -l/-N skip the wait,
+  the systemd restart check cannot hide a failed child. Items 16-18 and 21 were never sent to the
+  agent (orchestrator's omission): follow-ups. Final round: rebase over 23.11/26.14e/15.6c,
+  regenerate the sleep allowlist, make the two waiting tests prove the wait, rename the restart
+  check, the README deadlock note; then merge.
