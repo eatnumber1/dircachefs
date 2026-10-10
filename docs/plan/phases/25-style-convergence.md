@@ -607,6 +607,14 @@ program-output sites (six in dcfs/: three `--version`, usage, fsck's
 report; thirteen in bench/) become `absl::FPrintF`/`PrintF`/`SNPrintF`
 with byte-identical output as the test (style 1.6a's program-output
 ruling, 2026-10-10).
+Also (russ, 2026-10-11, TotW #103, style 1.2's flags bullet):
+`IsDcfsFlagFile` in dcfs/main.cc matches every file under a `dcfs/`
+directory for Abseil's `--help`; all three flags already live in
+dcfs/main.cc, so the predicate becomes "ends with `dcfs/main.cc`", its
+stale comment ("our flags live in dcfs/*.cc") goes, and a repo_shape
+rule refuses `ABSL_FLAG(` / `absl::GetFlag(` outside main files (no
+allowlist; fixtures). A test that `--help` lists the three flags under
+the installed name, if none exists.
 
 ## 25.21 Zero-token style checks: clang-query matchers and clang-tidy readability now (russ, 2026-10-10, "Do it"; dispatched, lane-4)
 

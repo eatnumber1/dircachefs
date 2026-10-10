@@ -2866,3 +2866,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   shfmt, shellcheck pins) after the reset. Style 1.1 updated.
 - russ: keep PointerAlignment: Right in the reformat; the 7.6a agent, style 1.1 and the phase text
   corrected.
+- russ (TotW #103): flags live only in main.cc; IsDcfsFlagFile's directory match is overly broad
+  (and its comment stale: the three flags are all in main.cc already). Style 1.2 bullet; the fix
+  and a repo_shape rule folded into 25.20.

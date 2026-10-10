@@ -129,6 +129,17 @@ use it as design guidance rather than firm rules."
   field or return type without a qualifier, as a report-only count until
   plan step 25.16 annotates the tree and turns it into a gate (today 0
   annotations; the report counts them).
+- **Flags are defined only in a program's main file** (TotW #103 "Flags Are
+  Globals"; russ, 2026-10-11, on `IsDcfsFlagFile` claiming every file
+  under `dcfs/`: "per https://abseil.io/tips/103 flags should only live in
+  main.cc anyway. So this is overly broad."). `ABSL_FLAG` appears in
+  `dcfs/main.cc` (and a tool's or bench's own main file), nowhere else;
+  code reads configuration through parameters and structs built in
+  `main`, never `absl::GetFlag` in a library. The usage-config predicate
+  that tells Abseil's `--help` which files hold flags names exactly the
+  main file, not a directory. Mechanically: `repo_shape.py` refuses
+  `ABSL_FLAG(` and `absl::GetFlag(` outside files named `main.cc` (or the
+  binary's own `<name>.cc`), no allowlist (25.20).
 - **Banned: `std::function`, `std::unordered_map`/`std::unordered_set`,
   `std::chrono`** (russ, 2026-10-10: "These classes / functions are
   banned. Abseil's versions are always better."). In their place:
