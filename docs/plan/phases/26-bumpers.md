@@ -637,3 +637,31 @@ Cost: nothing (profile +352 B). Left: `backing_capture.cc`'s two forks and
 `bench/process.cc` under-count the parent leg of their `child == 0`
 branch (never negative); a follow-up can use the same primitive.
 
+
+## 26.20 CI triage of run 38018425705 (merged 2026-10-10, 9fd3ff2)
+
+Three shard failures on f616181, all test or harness bugs, no dcfs bug
+(investigator, lane-1, three commits, fast suite green, 16-run soaks of
+each fixed target):
+- `destroy_test` under asan: `uptime_ms` built milliseconds as a string
+  (`0.93` became `0930`, invalid octal under busybox arithmetic) and the
+  asan daemon read it while the guest was under a second old. Now one
+  `uptime_ms` in `lib.sh`, decimal arithmetic, five fixed-value cases in
+  `boot.sh` that failed first.
+- `nfs_test` under asan: not a stale cached size. The held descriptor's
+  read got ESTALE because `restart_daemon` ran `exportfs -f` as soon as
+  the mount appeared in the table, before the asan daemon served its
+  first request (0.7 s later); the restarted daemon never saw the file.
+  A `stat` of the mount, which blocks until dcfs replies, precedes the
+  flush (an event, not a timer). 4 of 16 runs failed before, 0 of 16 after.
+- `fault_ace_fs_test_xfs` ace-dsplit (plain and asan): since 23.11 took
+  the WAL fsync out of a create, xfs sometimes committed its log on its
+  own between the persistence point and the cut, so the operation after
+  the point (or a create with no point) was on the disk: the fixture's
+  premise, not a dcfs property, failed. Bisect: 0 of 8 at 5dcec18, 3 of
+  12 at 61f6a02. After each persistence point the backing now drops its
+  writes (dm-flakey `drop-writes`, as the mixed sequences' `dropahead`
+  already does), and the negative fixture drops before its create. The
+  cut, restore and comparison are unchanged. 0 of 16 after. Open: which
+  xfs path forces the log was not identified (`/proc/fs/xfs/stat` force
+  counts did not separate the runs); the fix does not depend on it.

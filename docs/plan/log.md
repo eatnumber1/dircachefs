@@ -2622,3 +2622,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   restart, which is not one) is `docs/plan/notes/retry-loops-2026-10-10.md` for russ's ruling;
   enforcement via repo_shape identifiers proposed as 25.10 after the ruling. Weekly all-models
   usage 84% (Fable 32%): the freeze holds, only the 26.20 triage agent keeps running.
+- 26.20 merged (lane-1, rebased onto 17456d9 → 9fd3ff2, three commits, subject gate exit 0,
+  diff read by the orchestrator): all three shard failures of run 38018425705 were test bugs
+  (uptime_ms octal, exportfs -f racing the asan daemon's readiness, xfs log commits between a
+  persistence point and the cut since 23.11). No dcfs bug; the suspected stale-size read was
+  ESTALE from nfsd. Fixes wait on events (a blocking stat) or remove the timing dependence
+  (drop-writes after the persistence point); no retry loops or timers. Phase 26 file has the
+  details. Push point announced to russ: main at the plan commit after 9fd3ff2. Lane-1 free;
+  its Bazel server shut down.
