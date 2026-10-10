@@ -8,7 +8,6 @@
 bench/dcfs_bench.cc|BM_Readdir|capturing_mutating_lambda|1
 bench/dcfs_bench.cc|Cycle|readability-isolate-declaration|1
 bench/dcfs_bench.cc|Cycle|readability-redundant-string-cstr|1
-bench/dcfs_bench.cc|ParseOwnFlags|google-readability-braces-around-statements|11
 bench/dcfs_bench.cc|Register|readability-redundant-string-cstr|1
 bench/dcfs_bench.cc|StartDcfs|cert-err33-c|1
 bench/dcfs_bench.cc|WalkDir|capturing_mutating_lambda|1
@@ -394,19 +393,6 @@ dcfs/testonly/invariant_checker.cc|InvariantChecker::Seen|bugprone-return-const-
 dcfs/testonly/invariant_checker.cc|InvariantChecker::Where|modernize-loop-convert|1
 dcfs/testonly/invariant_checker.cc|NoneDirtyUnlessAny|capturing_mutating_lambda|1
 dcfs/testonly/main_recorder.cc|MainProtocolEvents|concurrency-mt-unsafe|2
-dcfs/testonly/observers.h|CheckForgetting|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|ChildRowRecorded|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|FileOpened|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|FileReleased|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|LifetimeChanged|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|LookupAnswered|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|LookupDecided|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|NameResolved|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|NewChildProbed|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|ParentRecorded|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|PopulateCommitted|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|ResolveCommitted|google-readability-braces-around-statements|1
-dcfs/testonly/observers.h|ResolveProbed|google-readability-braces-around-statements|1
 dcfs/testonly/probe_fails_once.cc|<file scope>|misc-use-internal-linkage|1
 dcfs/testonly/recover_dirty_fails_once.cc|<file scope>|misc-use-internal-linkage|1
 dcfs/testonly/snapshot_after_syncfs.cc|<file scope>|misc-use-internal-linkage|1

@@ -414,28 +414,29 @@ void ParseOwnFlags(int *argc, char **argv) {
   int out = 1;
   for (int i = 1; i < *argc; ++i) {
     std::string v;
-    if (TakeFlag(argv[i], "dcfs", &v))
+    if (TakeFlag(argv[i], "dcfs", &v)) {
       cfg.dcfs = v;
-    else if (TakeFlag(argv[i], "src", &v))
+    } else if (TakeFlag(argv[i], "src", &v)) {
       cfg.src = v;
-    else if (TakeFlag(argv[i], "slow_src", &v))
+    } else if (TakeFlag(argv[i], "slow_src", &v)) {
       cfg.slow_src = v;
-    else if (TakeFlag(argv[i], "mnt_dir", &v))
+    } else if (TakeFlag(argv[i], "mnt_dir", &v)) {
       cfg.mnt_dir = v;
-    else if (TakeFlag(argv[i], "cache_dir", &v))
+    } else if (TakeFlag(argv[i], "cache_dir", &v)) {
       cfg.cache_dir = v;
-    else if (TakeFlag(argv[i], "entries", &v))
+    } else if (TakeFlag(argv[i], "entries", &v)) {
       cfg.entries = strtoull(v.c_str(), nullptr, 10);
-    else if (TakeFlag(argv[i], "slow_entries", &v))
+    } else if (TakeFlag(argv[i], "slow_entries", &v)) {
       cfg.slow_entries = strtoull(v.c_str(), nullptr, 10);
-    else if (TakeFlag(argv[i], "big", &v))
+    } else if (TakeFlag(argv[i], "big", &v)) {
       cfg.big = strtoull(v.c_str(), nullptr, 10);
-    else if (TakeFlag(argv[i], "dirty", &v))
+    } else if (TakeFlag(argv[i], "dirty", &v)) {
       cfg.dirty = strtoull(v.c_str(), nullptr, 10);
-    else if (TakeFlag(argv[i], "smoke", &v))
+    } else if (TakeFlag(argv[i], "smoke", &v)) {
       cfg.smoke = true;
-    else
+    } else {
       argv[out++] = argv[i];
+    }
   }
   *argc = out;
 }

@@ -53,8 +53,9 @@ class Observers final : public ProtocolEvents {
   void LookupAnswered(Context &ctx, events::Ino parent, std::string_view name,
                       events::LookupOutcome answer,
                       events::Ino child) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->LookupAnswered(ctx, parent, name, answer, child);
+    }
   }
   void RefreshBegin(Context &ctx, events::Ino id) override {
     for (ProtocolEvents *o : observers_) o->RefreshBegin(ctx, id);
@@ -71,23 +72,27 @@ class Observers final : public ProtocolEvents {
   void LookupDecided(Context &ctx, events::Ino parent, std::string_view name,
                      events::LookupOutcome outcome,
                      events::Ino child) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->LookupDecided(ctx, parent, name, outcome, child);
+    }
   }
   void ResolveProbed(Context &ctx, events::Ino parent, std::string_view name,
                      const events::Probe &probe) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->ResolveProbed(ctx, parent, name, probe);
+    }
   }
   void ResolveCommitted(Context &ctx, events::Ino parent, std::string_view name,
                         uint64_t snapshot, bool recorded) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->ResolveCommitted(ctx, parent, name, snapshot, recorded);
+    }
   }
   void ChildRowRecorded(Context &ctx, events::Ino dir, events::Ino child,
                         bool filled, bool created) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->ChildRowRecorded(ctx, dir, child, filled, created);
+    }
   }
   void PopulateStarted(Context &ctx, events::Ino dir) override {
     for (ProtocolEvents *o : observers_) o->PopulateStarted(ctx, dir);
@@ -98,8 +103,9 @@ class Observers final : public ProtocolEvents {
   }
   void PopulateCommitted(Context &ctx, events::Ino dir, uint64_t snapshot,
                          bool recorded) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->PopulateCommitted(ctx, dir, snapshot, recorded);
+    }
   }
   void ListChecked(Context &ctx, events::Ino dir, bool complete) override {
     for (ProtocolEvents *o : observers_) o->ListChecked(ctx, dir, complete);
@@ -115,8 +121,9 @@ class Observers final : public ProtocolEvents {
   }
   void ParentRecorded(Context &ctx, events::Ino dir, events::Ino parent,
                       uint64_t snapshot, bool filled) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->ParentRecorded(ctx, dir, parent, snapshot, filled);
+    }
   }
   void RootRecorded(Context &ctx) override {
     for (ProtocolEvents *o : observers_) o->RootRecorded(ctx);
@@ -135,8 +142,9 @@ class Observers final : public ProtocolEvents {
   }
   void NewChildProbed(Context &ctx, events::Ino parent, std::string_view name,
                       const events::Probe &probe) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->NewChildProbed(ctx, parent, name, probe);
+    }
   }
   void MutationEnding(Context &ctx, events::IdsFn ids,
                       absl::FunctionRef<bool(events::Ino)> owns) override {
@@ -147,8 +155,9 @@ class Observers final : public ProtocolEvents {
   }
   void NameResolved(Context &ctx, events::Ino parent, std::string_view name,
                     bool found) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->NameResolved(ctx, parent, name, found);
+    }
   }
   void Reresolve(Context &ctx, events::Ino parent,
                  std::string_view name) override {
@@ -160,18 +169,21 @@ class Observers final : public ProtocolEvents {
   void FileOpened(Context &ctx, events::Ino id, int flags, bool shared,
                   const absl::Status &status,
                   const events::SharedFd &after) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->FileOpened(ctx, id, flags, shared, status, after);
+    }
   }
   void FileReleased(Context &ctx, events::Ino id, bool writable,
                     const events::SharedFd &after) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->FileReleased(ctx, id, writable, after);
+    }
   }
   void LifetimeChanged(Context &ctx, events::Ino id, events::LifetimeStep step,
                        uint64_t arg, events::LifetimeFn after) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->LifetimeChanged(ctx, id, step, arg, after);
+    }
   }
   void Destroyed(Context &ctx) override {
     for (ProtocolEvents *o : observers_) o->Destroyed(ctx);
@@ -232,8 +244,9 @@ class Observers final : public ProtocolEvents {
   }
   void CheckForgetting(Context &ctx, const events::Bookkeeping &fs,
                        uint64_t ino, uint64_t nlookup) override {
-    for (ProtocolEvents *o : observers_)
+    for (ProtocolEvents *o : observers_) {
       o->CheckForgetting(ctx, fs, ino, nlookup);
+    }
   }
   void CheckRunStarting(Context &ctx) override {
     for (ProtocolEvents *o : observers_) o->CheckRunStarting(ctx);
