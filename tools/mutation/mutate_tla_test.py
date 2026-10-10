@@ -275,11 +275,17 @@ class RunEndToEndTest(Repo):
 
     def setUp(self):
         super().setUp()
-        self.bazel = os.path.join(self.dir, "fakebazel.py")
-        with open(self.bazel, "w") as f:
-            f.write(FAKE_BAZEL.format(python=sys.executable,
-                                      java=os.path.abspath(ARGS["java"]),
+        # A `#!` line is limited to about 127 bytes and the interpreter's
+        # path in a Bazel sandbox is longer (ENOEXEC): the script that is
+        # executed is a short `/bin/sh` wrapper around the Python one.
+        script = os.path.join(self.dir, "fakebazel.py")
+        with open(script, "w") as f:
+            f.write(FAKE_BAZEL.format(java=os.path.abspath(ARGS["java"]),
                                       jar=os.path.abspath(ARGS["jar"])))
+        self.bazel = os.path.join(self.dir, "fakebazel")
+        with open(self.bazel, "w") as f:
+            f.write('#!/bin/sh\nexec "%s" "%s" "$@"\n' % (
+                sys.executable, script))
         os.chmod(self.bazel, os.stat(self.bazel).st_mode | stat.S_IXUSR)
 
     def pick(self, ms, function, op, before=None):
@@ -361,8 +367,7 @@ class RunEndToEndTest(Repo):
         self.assertIn("time budget spent", err)
 
 
-FAKE_BAZEL = r'''#!{python}
-"""A fake bazel: `test` runs the real TLC on formal/tiny.tla in the current
+FAKE_BAZEL = r'''"""A fake bazel: `test` runs the real TLC on formal/tiny.tla in the current
 directory the way a tlc_test does (no error expected), printing what Bazel
 prints for a failed test; shutdown and clean do nothing."""
 import os, re, subprocess, sys, tempfile

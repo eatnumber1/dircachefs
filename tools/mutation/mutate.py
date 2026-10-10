@@ -835,8 +835,11 @@ def rmtree_force(path):
 def cleanup(args, src, startup, scratch):
     """Expunge the scratch tree's Bazel output base and remove the tree."""
     if os.path.isdir(src):
-        subprocess.run([args.bazel] + startup + ["clean", "--expunge"],
-                       cwd=src, capture_output=True)
+        try:
+            subprocess.run([args.bazel] + startup + ["clean", "--expunge"],
+                           cwd=src, capture_output=True)
+        except OSError as e:  # no bazel to run: still remove the tree
+            print("clean --expunge failed: %s" % e, file=sys.stderr)
     rmtree_force(scratch)
 
 
