@@ -2469,3 +2469,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   for command glue; port the two oracles and the ACE mixed test as the pattern; measure before
   porting the rest); and googletest's structured output (`--gtest_output=xml|json`) copied out of
   the guest and merged into test.xml so breakdowns aggregate per check across both kinds.
+- 26.14e merged (628af12, four commits; clean rebase over 6.5; fast 236 + 2; the three mixed
+  targets green with their ten expected failures). The noisy job runs weekly from here; its first
+  real run sizes the 300-minute limit. Lane-5 idle by the budget throttle.

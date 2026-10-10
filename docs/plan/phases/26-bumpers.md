@@ -439,7 +439,10 @@ surviving object noted and counted; fhtest.c restored, `handle-save`/
 `handle-stat` in testutil (prints inode and mode too; 23.11 adapts);
 cutahead's own directory t/z; noisy_report's artifact name and
 `--runs_per_test_detects_flakes`; the L items except the wchan check.
-Merge after a rebase over 6.5.
+Merged 2026-10-10, 628af12 (four commits; clean rebase over 6.5; fast 236
++ 2, the three mixed targets with their ten expected failures, the
+kernel-mode pair both ways, the host tests). The ten entries in
+`fault_ace_mixed.expected_failures` are 23.11's to empty.
 
 26.14 made the default guests deterministic (writeback off, one vCPU),
 which also removed the noise that shakes out races: timer-driven writeback
