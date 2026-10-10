@@ -2912,3 +2912,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   process.md corrected.
 - russ: the migration machinery stays tested (migrate_test.cc against synthetic old schemas) even
   though pre-ship schema changes write no migration; process.md says so.
+- 26.24 merged (lane-1 → 67652b7, gate exit 0): an xfs harness race, mitigated; the lasting fix and
+  the dropahead-then-sync premise parked as 26.25; the dmesg-on-mount-failure diagnostic added to
+  26.23's list. Push point: main at this commit (the two red jobs of the morning run are fixed).

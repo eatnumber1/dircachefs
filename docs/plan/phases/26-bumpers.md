@@ -794,3 +794,42 @@ fusectl (mount_dcfs.sh's no-fusectl case: name it in the README and the
 gates table so it is not removed). The limitation is removed by kernel
 patch 6 (synchronous FUSE_DESTROY), noted in kernel-patches.md. Owner:
 dcfs-mechanical.
+
+## 26.24 CI triage of run 38069307659 (merged 2026-10-11, 67652b7)
+
+`ubsan (1)`: `fault_ace_mixed_test_xfs` failed the remount after the cut
+in 7.7 s. Not memory (ubsan got the 640 MiB asan allowance; no OOM), not
+the RAM disks (a deterministic variant fails on host disks too), not
+dcfs: a harness race specific to xfs. xfsaild passes about every 50 ms
+and forces the log for an item the operation changed; with `dropahead`
+the disk drops that log write while xfs counts it done; the healthy
+freeze window that follows then writes metadata stamped with the dropped
+record's LSN, and after the cut xfs refuses the mount ("Metadata has LSN
+ahead of current LSN", EINVAL). A real power cut cannot leave that state,
+so the harness was constructing an impossible disk. Mitigation merged:
+`mixed_quiesce_backing` (a healthy freeze and thaw before the operation)
+empties xfs's AIL so xfsaild has nothing to force in the window;
+measured with temporary ftrace in the working tree: 10-11 of 12 runs
+failed before, 0 of 12 after; 16 of 16 under a 4x oversubscribed host
+(1 of 16 failed before). Not a full cure (parked, oracle soundness,
+26.25): a `sync` event before `dropahead` or xfs's 30 s log worker can
+still put a log write in the window; the lasting fix for xfs is an image
+copy at `dropahead` restored at the cut instead of drop_writes plus a
+healthy freeze (freezing on the dropping disk was tried and fails:
+drop_caches evicts clean buffers that never reached disk). Also observed,
+not fixed (26.25): "dropahead then sync" sequences fail the identity
+oracle on ext4 and btrfs with ESTALE, because the dropping disk
+acknowledges fsync without keeping it (a disk that lies about fsync, so
+not a dcfs bug; the manual long test can draw them). Diagnosability
+(26.23): a dmesg tail when `fd_mount_backing` fails would have named the
+cause in CI, whose serial log had no kernel lines. Coverage baseline
+bumped to 96.26 / 80.85 as the gate printed.
+
+## 26.25 The ACE harness's dropahead window on xfs (parked; oracle soundness)
+
+From 26.24: for xfs, replace drop_writes plus a healthy freeze with an
+image copy taken at `dropahead` and restored at the cut; and decide what
+"dropahead then sync" means (a disk that lies about fsync is outside the
+model's premise; either the generator never draws it, or the oracle
+treats the sequence as a disk fault rather than a dcfs one). Protocol
+agent (it is the oracle's premise). After the trial.
