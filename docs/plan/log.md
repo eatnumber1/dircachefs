@@ -2803,3 +2803,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Twelve points for about 5.3 days: 2.3 a day. The three running agents finish; then one lane,
   mechanical (Haiku) steps first (25.17, then 25.16's warnings commit), and no Opus review unless
   a step touches protocol, identity or an oracle.
+- russ asked for low-token ways to fix style: tier 0 (clang-tidy readability and clang-query AST
+  matchers under Bazel, zero tokens after landing), tier 1 (a Haiku census with a detectable-
+  pattern card, function by function, "break it up" over a size threshold), tier 2 (judgement on
+  findings only). "Do it": 25.21 dispatched (investigator, lane-4), 25.22 queued behind it.

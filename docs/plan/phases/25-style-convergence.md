@@ -590,3 +590,48 @@ program-output sites (six in dcfs/: three `--version`, usage, fsck's
 report; thirteen in bench/) become `absl::FPrintF`/`PrintF`/`SNPrintF`
 with byte-identical output as the test (style 1.6a's program-output
 ruling, 2026-10-10).
+
+## 25.21 Zero-token style checks: clang-query matchers and clang-tidy readability now (russ, 2026-10-10, "Do it"; dispatched, lane-4)
+
+The pinned LLVM ships `clang-query`, `clang-tidy` and `run-clang-tidy`.
+A host-side Bazel test runs, over our C++ with the real compile flags
+(a compilation database from the Bazel action graph, or the aspect 7.5
+plans; whichever is smaller to land now), (1) clang-tidy with
+`readability-else-after-return`, `readability-misleading-indentation`,
+`readability-function-cognitive-complexity` (Threshold 15; a finding
+reads "break up this function"), and (2) one AST-matcher file per style
+rule that is structural: a `Status`/`StatusOr` local declared without an
+initializer (1.6a, report-only: preference); an `if` ending in `return`
+followed by `else`; a happy path nested in `if (x.ok())`; a `std::`
+algorithm whose range arguments are `x.begin()`/`x.end()` of one object
+(1.2); a lambda capturing by reference and assigning to the capture
+(ruling 1); a pointer-typed parameter, member or return with no
+`absl_nonnull`/`absl_nullable` (1.2; report-only until 25.16 lands);
+`CHECK`-family calls in production targets (1.6b); `std::function`,
+`std::chrono`, `std::unordered_map/set` (1.2); `dcfs::` qualification
+inside `namespace dcfs` (1.3; replaces the regex when the matcher is
+exact). Each matcher has a known-bad fixture and a shrinking allowlist
+(the existing `tools/repo_shape_*.txt` shape); the first run's counts
+per rule are the backlog for 25.22's census to skip. Zero marginal
+tokens afterwards. Owner: dcfs-investigator (the hermetic wiring is the
+work); the matcher files are small and reviewed by the orchestrator.
+
+## 25.22 Style census by a low-cost model, function by function (russ, 2026-10-10; after 25.21)
+
+A Haiku mechanical agent walks every function in `dcfs/*.cc`, `dcfs/*.h`,
+`tools/*.cc`, `bench/` (tests in a second pass) with a fixed card of
+yes/no items written as detectable patterns with a quoted line each
+(confession phrases; a comment that restates the statement under it;
+the same three-statement handler repeated in one function; a hand-rolled
+utility from `docs/abseil-utilities.md`'s swaps table; a name beginning
+with the namespace or project word; program output through iostreams or
+the printf family), skipping what 25.21's matchers already report. A
+function over 60 lines or over the complexity threshold gets the single
+finding "break it up" and no further items. Output: one JSON findings
+file per rule with counts and sites, committed under
+`docs/plan/notes/style-census-<date>/`, which becomes the ordered
+backlog: each rule a check-first-then-sweep step by count. Judgement
+rules (reachable cause, one mechanism, what a name distinguishes) are
+not on the card. Budget note: Haiku's two sweeps this week (25.12,
+25.14) moved the weekly meter imperceptibly; this replaces reviewer
+tokens rather than adding to them.
