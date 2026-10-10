@@ -71,6 +71,13 @@ grep -q '^mkfs-xfs ' "$WORK/mkfs-calls" || fail "the plain boot did not run mkfs
 grep -q 'dcfs_ramdisks' "$WORK/qemu-args" && fail "the plain boot names RAM disks"
 echo "PASS: without --ram-disks the disks are drives made on the host"
 
+# Every run reports its guest's wall time and the CPU time spent on the host
+# (QEMU, and whatever formatted the images): the pair a test's latency noise
+# shows in.
+grep -q '^run-qemu.sh: time: guest wall [0-9.]* s, host CPU [0-9.]* s (user [0-9.]*, system [0-9.]*)$' "$WORK/stdout" ||
+	fail "no time line: $(cat "$WORK/stdout")"
+echo "PASS: the run reports its wall and CPU time"
+
 # With it: nothing on the host.
 run --ram-disks "$WORK/fstools.cpio.gz" -- vdb:ext4:64M vdc:xfs:320M
 [ ! -e "$WORK/mkfs-calls" ] || fail "a mkfs ran on the host: $(cat "$WORK/mkfs-calls")"

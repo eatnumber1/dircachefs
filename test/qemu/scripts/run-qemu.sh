@@ -945,6 +945,17 @@ if [ "$COVERAGE" -eq 1 ]; then
 fi
 
 echo
+# Step 26.17: the run's wall time (QEMU's start to its end) beside the CPU the
+# host spent on it (the shell's children: QEMU, whatever formatted the images,
+# the profile tools), so that a slow run can be told from a starved one by the
+# gap, and a test's time can be compared across harness changes by what it
+# cost. `times` prints the shell's own user and system time, then its
+# children's, as XmY.ZZZs; it is run in this shell and not in a command
+# substitution, whose subshell has no children yet.
+times >"$WORKDIR/times"
+echo "run-qemu.sh: time: guest wall $(awk "BEGIN{printf \"%.1f\", $end-$start}") s, host CPU $(awk '
+	function secs(t) { split(t, p, "m"); return p[1] * 60 + p[2] }
+	NR == 2 { u = secs($1); s = secs($2); printf "%.1f s (user %.1f, system %.1f)", u + s, u, s }' "$WORKDIR/times")"
 # Step 6.2: a guest that ran out of memory says so, whatever else failed: the
 # OOM killer's lines (guest/init's mem_report prints them as MEM-OOM:) or a
 # panic from having nothing left to kill. The fix is a bigger `mem=` on the
