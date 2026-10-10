@@ -183,8 +183,13 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   the first deployment bumps the version and starts fresh, no migration
   (russ, 2026-10-11: "I don't own trial databases. I don't care about
   migration until we ship ... back-compat is *irrelevant* right now"). The
-  migration machinery (`migrate.cc`) stays in place for the day it matters,
-  unexercised by any pre-ship change.
+  migration machinery (`migrate.cc`) stays in place for the day it matters
+  and stays tested (russ: "The migration machinery should still be
+  tested though"): `migrate_test.cc` (18 cases today) keeps exercising it
+  against synthetic older-schema databases built by the test, and keeps
+  passing under the coverage gate; what pre-ship schema changes skip is
+  writing a migration for the real previous version, not the tests of the
+  mechanism.
 - **The order of work is `README.md`'s Queue section** (russ, 2026-10-11),
   not the phase numbers: the spare-disk trial first, then budgets, the
   slowness, the atomicity contract, then the rest by what the trial

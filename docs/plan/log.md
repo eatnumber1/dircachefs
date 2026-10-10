@@ -2910,3 +2910,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   test; process.md gains the standing rule.
 - russ: no exception for the cache schema either; migration starts mattering only after shipping;
   process.md corrected.
+- russ: the migration machinery stays tested (migrate_test.cc against synthetic old schemas) even
+  though pre-ship schema changes write no migration; process.md says so.
