@@ -378,6 +378,19 @@ alpine_package(
     ],
 )
 
+# gawk on the host, for the xfstests gate's self-check (//test/qemu:xfstests_gate_test):
+# the guest's `awk` is Alpine's gawk, and the check runs the gate's functions
+# under it. A repository of its own because a repository with `tools` gets an
+# empty etc/ld-musl-x86_64.path (third_party/alpine/alpine.bzl), which would
+# make the loader of the xfstests guest's image find none of its libraries.
+alpine_package(
+    name = "alpine_gawk",
+    closure = True,
+    index = "@alpine_index//:index.json",
+    packages = ["gawk"],
+    tools = {"gawk": "usr/bin/gawk"},
+)
+
 # Step 7.1: the pinned, hermetic C/C++ toolchain (every build, host and
 # exec configurations alike): toolchains_llvm configures LLVM's own release
 # (clang, lld, libc++ linked statically, compiler-rt). Step 7.1b: the release,

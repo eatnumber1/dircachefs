@@ -1,0 +1,2 @@
+# The outcomes of the slow set on xfs (17.3 writes this list from the first runs of
+# xfstests_slow_<n>_test_xfs): "generic/NNN <reason>".

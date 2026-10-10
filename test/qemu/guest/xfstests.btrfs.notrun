@@ -1,0 +1,576 @@
+# The tests that are "not run" through dcfs on btrfs, with the reason xfstests gives
+# (guest/xfstests_lib.sh: xfstests_reason): "generic/NNN <reason>". Generated from a run by
+# test/qemu/scripts/xfstests-notrun.sh; the gate fails on a "not run" test that is not here,
+# on one whose reason changed and on one here that now runs.
+generic/009 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/010 /xfstests/src/dbtest not built
+generic/012 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/015 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/016 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/017 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/018 defragmentation not supported for fstype "fuse"
+generic/021 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/022 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/026 fuse does not define maximum ACL count
+generic/027 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/031 xfs_io fcollapse failed (old kernel/wrong fs?)
+generic/032 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/034 dmsetup utility required, skipped this test
+generic/036 /xfstests/src/aio-dio-regress/aio-dio-fcntl-race not built
+generic/038 This test requires at least NGB free on /mnt/scratch to run
+generic/039 dmsetup utility required, skipped this test
+generic/040 dmsetup utility required, skipped this test
+generic/041 dmsetup utility required, skipped this test
+generic/042 src/godown executable not found
+generic/043 src/godown executable not found
+generic/044 src/godown executable not found
+generic/045 src/godown executable not found
+generic/046 src/godown executable not found
+generic/047 src/godown executable not found
+generic/048 src/godown executable not found
+generic/049 src/godown executable not found
+generic/050 src/godown executable not found
+generic/051 src/godown executable not found
+generic/052 src/godown executable not found
+generic/054 src/godown executable not found
+generic/055 src/godown executable not found
+generic/056 dmsetup utility required, skipped this test
+generic/057 dmsetup utility required, skipped this test
+generic/058 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/059 dmsetup utility required, skipped this test
+generic/060 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/061 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/063 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/064 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/065 dmsetup utility required, skipped this test
+generic/066 dmsetup utility required, skipped this test
+generic/067 This test requires loopback device support
+generic/068 fuse does not support freezing
+generic/072 xfs_io fcollapse failed (old kernel/wrong fs?)
+generic/073 dmsetup utility required, skipped this test
+generic/077 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/078 kernel doesn't support renameatN syscall
+generic/079 /xfstests/src/t_immutable not built
+generic/081 dmsetup utility required, skipped this test
+generic/082 Quota user tools not installed
+generic/083 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/085 dmsetup utility required, skipped this test
+generic/090 dmsetup utility required, skipped this test
+generic/092 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/094 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/095 kernel does not support asynchronous I/O
+generic/096 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/101 dmsetup utility required, skipped this test
+generic/102 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/104 dmsetup utility required, skipped this test
+generic/106 dmsetup utility required, skipped this test
+generic/107 dmsetup utility required, skipped this test
+generic/108 scsi_debug module not found
+generic/110 Reflink not supported by test filesystem type: fuse
+generic/111 Reflink not supported by test filesystem type: fuse
+generic/112 kernel does not support asynchronous I/O
+generic/113 kernel does not support asynchronous I/O
+generic/114 /xfstests/src/aio-dio-regress/aio-dio-eof-race not built
+generic/115 Reflink not supported by test filesystem type: fuse
+generic/116 Reflink not supported by test filesystem type: fuse
+generic/118 Reflink not supported by test filesystem type: fuse
+generic/119 Reflink not supported by test filesystem type: fuse
+generic/121 Dedupe not supported by test filesystem type: fuse
+generic/122 Dedupe not supported by test filesystem type: fuse
+generic/134 Reflink not supported by test filesystem type: fuse
+generic/136 Dedupe not supported by test filesystem type: fuse
+generic/137 Reflink not supported by test filesystem type: fuse
+generic/138 Reflink not supported by test filesystem type: fuse
+generic/139 Reflink not supported by test filesystem type: fuse
+generic/140 Reflink not supported by test filesystem type: fuse
+generic/142 Reflink not supported by test filesystem type: fuse
+generic/143 Reflink not supported by test filesystem type: fuse
+generic/144 Reflink not supported by test filesystem type: fuse
+generic/145 Reflink not supported by test filesystem type: fuse
+generic/146 Reflink not supported by test filesystem type: fuse
+generic/147 Reflink not supported by test filesystem type: fuse
+generic/148 Reflink not supported by test filesystem type: fuse
+generic/149 Reflink not supported by test filesystem type: fuse
+generic/150 Reflink not supported by test filesystem type: fuse
+generic/151 Reflink not supported by test filesystem type: fuse
+generic/152 Reflink not supported by test filesystem type: fuse
+generic/153 Reflink not supported by test filesystem type: fuse
+generic/154 Reflink not supported by test filesystem type: fuse
+generic/155 Reflink not supported by test filesystem type: fuse
+generic/156 Reflink not supported by test filesystem type: fuse
+generic/157 Reflink not supported by test filesystem type: fuse
+generic/158 Dedupe not supported by test filesystem type: fuse
+generic/159 Reflink not supported by test filesystem type: fuse
+generic/160 Dedupe not supported by test filesystem type: fuse
+generic/161 Reflink not supported by scratch filesystem type: fuse
+generic/162 Dedupe not supported by scratch filesystem type: fuse
+generic/163 Dedupe not supported by scratch filesystem type: fuse
+generic/164 Reflink not supported by scratch filesystem type: fuse
+generic/165 Reflink not supported by scratch filesystem type: fuse
+generic/166 Reflink not supported by scratch filesystem type: fuse
+generic/167 Reflink not supported by scratch filesystem type: fuse
+generic/168 Reflink not supported by scratch filesystem type: fuse
+generic/170 Reflink not supported by scratch filesystem type: fuse
+generic/171 Reflink not supported by scratch filesystem type: fuse
+generic/172 Reflink not supported by scratch filesystem type: fuse
+generic/173 Reflink not supported by scratch filesystem type: fuse
+generic/174 Reflink not supported by scratch filesystem type: fuse
+generic/175 Reflink not supported by scratch filesystem type: fuse
+generic/176 Reflink not supported by scratch filesystem type: fuse
+generic/177 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/178 Reflink not supported by test filesystem type: fuse
+generic/179 Reflink not supported by test filesystem type: fuse
+generic/180 Reflink not supported by test filesystem type: fuse
+generic/181 Reflink not supported by test filesystem type: fuse
+generic/182 Dedupe not supported by test filesystem type: fuse
+generic/183 Reflink not supported by scratch filesystem type: fuse
+generic/185 Reflink not supported by scratch filesystem type: fuse
+generic/186 Reflink not supported by scratch filesystem type: fuse
+generic/187 Reflink not supported by scratch filesystem type: fuse
+generic/188 Reflink not supported by scratch filesystem type: fuse
+generic/189 Reflink not supported by scratch filesystem type: fuse
+generic/190 Reflink not supported by scratch filesystem type: fuse
+generic/191 Reflink not supported by scratch filesystem type: fuse
+generic/194 Reflink not supported by scratch filesystem type: fuse
+generic/195 Reflink not supported by scratch filesystem type: fuse
+generic/196 Reflink not supported by scratch filesystem type: fuse
+generic/197 Reflink not supported by scratch filesystem type: fuse
+generic/198 /xfstests/src/aio-dio-regress/aiodio_sparseN not built
+generic/199 Reflink not supported by scratch filesystem type: fuse
+generic/200 Reflink not supported by scratch filesystem type: fuse
+generic/201 Reflink not supported by scratch filesystem type: fuse
+generic/202 Reflink not supported by scratch filesystem type: fuse
+generic/203 Reflink not supported by scratch filesystem type: fuse
+generic/204 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/205 Reflink not supported by scratch filesystem type: fuse
+generic/206 Reflink not supported by scratch filesystem type: fuse
+generic/207 /xfstests/src/aio-dio-regress/aio-dio-extend-stat not built
+generic/208 /xfstests/src/aio-dio-regress/aio-dio-invalidate-failure not built
+generic/209 /xfstests/src/aio-dio-regress/aio-dio-invalidate-readahead not built
+generic/210 /xfstests/src/aio-dio-regress/aio-dio-subblock-eof-read not built
+generic/211 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/212 /xfstests/src/aio-dio-regress/aio-io-setup-with-nonwritable-context-pointer not built
+generic/213 Test device is too small (N KiB)
+generic/216 Reflink not supported by scratch filesystem type: fuse
+generic/217 Reflink not supported by scratch filesystem type: fuse
+generic/218 Reflink not supported by scratch filesystem type: fuse
+generic/219 Quota user tools not installed
+generic/220 Reflink not supported by scratch filesystem type: fuse
+generic/222 Reflink not supported by scratch filesystem type: fuse
+generic/223 can't mkfs fuse with geometry
+generic/224 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/225 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/226 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/227 Reflink not supported by scratch filesystem type: fuse
+generic/229 Reflink not supported by scratch filesystem type: fuse
+generic/230 Quota user tools not installed
+generic/231 Quota user tools not installed
+generic/232 Quota user tools not installed
+generic/233 Quota user tools not installed
+generic/234 Quota user tools not installed
+generic/235 Quota user tools not installed
+generic/238 Reflink not supported by scratch filesystem type: fuse
+generic/239 /xfstests/src/aio-dio-regress/aio-dio-hole-filling-race not built
+generic/240 /xfstests/src/aio-dio-regress/aiodio_sparseN not built
+generic/241 dbench not found
+generic/242 Reflink not supported by scratch filesystem type: fuse
+generic/243 Reflink not supported by scratch filesystem type: fuse
+generic/244 Quota user tools not installed
+generic/250 dmsetup utility required, skipped this test
+generic/251 FITRIM not supported on /mnt/scratch
+generic/252 dmsetup utility required, skipped this test
+generic/253 Reflink not supported by scratch filesystem type: fuse
+generic/254 Reflink not supported by scratch filesystem type: fuse
+generic/255 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/256 Scratch device too small
+generic/259 Reflink not supported by scratch filesystem type: fuse
+generic/260 FITRIM not supported on /mnt/scratch
+generic/261 Reflink not supported by scratch filesystem type: fuse
+generic/262 Reflink not supported by scratch filesystem type: fuse
+generic/264 Reflink not supported by scratch filesystem type: fuse
+generic/265 Reflink not supported by scratch filesystem type: fuse
+generic/266 Reflink not supported by scratch filesystem type: fuse
+generic/267 Reflink not supported by scratch filesystem type: fuse
+generic/268 Reflink not supported by scratch filesystem type: fuse
+generic/269 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/270 Quota user tools not installed
+generic/271 Reflink not supported by scratch filesystem type: fuse
+generic/272 Reflink not supported by scratch filesystem type: fuse
+generic/273 Scratch device too small
+generic/274 Scratch device too small
+generic/275 Scratch device too small
+generic/276 Reflink not supported by scratch filesystem type: fuse
+generic/278 Reflink not supported by scratch filesystem type: fuse
+generic/279 Reflink not supported by scratch filesystem type: fuse
+generic/280 Quota user tools not installed
+generic/281 Reflink not supported by scratch filesystem type: fuse
+generic/282 Reflink not supported by scratch filesystem type: fuse
+generic/283 Reflink not supported by scratch filesystem type: fuse
+generic/284 Reflink not supported by scratch filesystem type: fuse
+generic/287 Reflink not supported by scratch filesystem type: fuse
+generic/288 FITRIM not supported on /mnt/scratch
+generic/289 Reflink not supported by scratch filesystem type: fuse
+generic/290 Reflink not supported by scratch filesystem type: fuse
+generic/291 Reflink not supported by scratch filesystem type: fuse
+generic/292 Reflink not supported by scratch filesystem type: fuse
+generic/293 Reflink not supported by scratch filesystem type: fuse
+generic/295 Reflink not supported by scratch filesystem type: fuse
+generic/296 Reflink not supported by scratch filesystem type: fuse
+generic/297 Reflink not supported by scratch filesystem type: fuse
+generic/298 Reflink not supported by scratch filesystem type: fuse
+generic/299 kernel does not support asynchronous I/O
+generic/300 kernel does not support asynchronous I/O
+generic/301 Reflink not supported by scratch filesystem type: fuse
+generic/302 Reflink not supported by scratch filesystem type: fuse
+generic/303 Reflink not supported by test filesystem type: fuse
+generic/304 Dedupe not supported by test filesystem type: fuse
+generic/305 Reflink not supported by scratch filesystem type: fuse
+generic/311 dmsetup utility required, skipped this test
+generic/312 Scratch device too small
+generic/316 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/317 userns not supported by this kernel
+generic/318 userns not supported by this kernel
+generic/320 Scratch device too small
+generic/321 dmsetup utility required, skipped this test
+generic/322 dmsetup utility required, skipped this test
+generic/323 /xfstests/src/aio-dio-regress/aio-last-ref-held-by-io not built
+generic/324 defragmentation not supported for fstype "fuse"
+generic/325 dmsetup utility required, skipped this test
+generic/326 Reflink not supported by scratch filesystem type: fuse
+generic/327 Reflink not supported by scratch filesystem type: fuse
+generic/328 Reflink not supported by scratch filesystem type: fuse
+generic/329 Reflink not supported by scratch filesystem type: fuse
+generic/330 Reflink not supported by scratch filesystem type: fuse
+generic/331 Reflink not supported by scratch filesystem type: fuse
+generic/332 Reflink not supported by scratch filesystem type: fuse
+generic/333 Reflink not supported by scratch filesystem type: fuse
+generic/334 Reflink not supported by scratch filesystem type: fuse
+generic/335 dmsetup utility required, skipped this test
+generic/336 dmsetup utility required, skipped this test
+generic/338 dmsetup utility required, skipped this test
+generic/341 dmsetup utility required, skipped this test
+generic/342 dmsetup utility required, skipped this test
+generic/343 dmsetup utility required, skipped this test
+generic/347 dmsetup utility required, skipped this test
+generic/348 dmsetup utility required, skipped this test
+generic/352 Reflink not supported by scratch filesystem type: fuse
+generic/353 Reflink not supported by scratch filesystem type: fuse
+generic/356 swapfiles are not supported
+generic/357 swapfiles are not supported
+generic/358 Reflink not supported by scratch filesystem type: fuse
+generic/359 Reflink not supported by scratch filesystem type: fuse
+generic/361 This test requires loopback device support
+generic/365 xfs_io fsmap support is missing
+generic/366 kernel does not support asynchronous I/O
+generic/368 filesystem doesn't support -o inlinecrypt
+generic/369 filesystem doesn't support -o inlinecrypt
+generic/370 swapfiles are not supported
+generic/371 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/372 Reflink not supported by scratch filesystem type: fuse
+generic/373 Reflink not supported by scratch filesystem type: fuse
+generic/374 Dedupe not supported by scratch filesystem type: fuse
+generic/376 dmsetup utility required, skipped this test
+generic/379 Quota user tools not installed
+generic/380 Quota user tools not installed
+generic/381 Quota user tools not installed
+generic/382 Quota user tools not installed
+generic/383 Quota user tools not installed
+generic/384 Quota user tools not installed
+generic/385 Quota user tools not installed
+generic/386 Quota user tools not installed
+generic/387 Reflink not supported by scratch filesystem type: fuse
+generic/388 src/godown executable not found
+generic/390 fuse does not support freezing
+generic/392 src/godown executable not found
+generic/395 No encryption support for fuse
+generic/396 No encryption support for fuse
+generic/397 No encryption support for fuse
+generic/398 No encryption support for fuse
+generic/399 No encryption support for fuse
+generic/400 Quota user tools not installed
+generic/402 filesystem fuse timestamp bounds are unknown
+generic/404 xfs_io finsert failed (old kernel/wrong fs?)
+generic/405 dmsetup utility required, skipped this test
+generic/407 Reflink not supported by test filesystem type: fuse
+generic/408 Dedupe not supported by test filesystem type: fuse
+generic/413 mount /dev/vdc with dax failed
+generic/414 Reflink not supported by scratch filesystem type: fuse
+generic/415 Reflink not supported by scratch filesystem type: fuse
+generic/416 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/417 src/godown executable not found
+generic/419 No encryption support for fuse
+generic/421 No encryption support for fuse
+generic/425 xfs_io fiemap -a failed (old kernel/wrong fs?)
+generic/427 /xfstests/src/aio-dio-regress/aio-dio-eof-race not built
+generic/429 No encryption support for fuse
+generic/435 No encryption support for fuse
+generic/440 No encryption support for fuse
+generic/441 dmsetup utility required, skipped this test
+generic/447 Reflink not supported by scratch filesystem type: fuse
+generic/449 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/451 /xfstests/src/aio-dio-regress/aio-dio-cycle-write not built
+generic/453 fuse does not allow unrestricted byte streams for names
+generic/454 fuse does not allow unrestricted byte streams for names
+generic/455 This test requires a valid $LOGWRITES_DEV
+generic/456 dmsetup utility required, skipped this test
+generic/457 Reflink not supported by scratch filesystem type: fuse
+generic/458 Reflink not supported by scratch filesystem type: fuse
+generic/459 dmsetup utility required, skipped this test
+generic/460 This test requires at least NGB free on /mnt/scratch to run
+generic/461 src/godown executable not found
+generic/462 mount /dev/vdc with dax failed
+generic/463 Reflink not supported by test filesystem type: fuse
+generic/465 /xfstests/src/aio-dio-regress/aio-dio-append-write-read-race not built
+generic/466 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/468 src/godown executable not found
+generic/470 This test requires a valid $LOGWRITES_DEV
+generic/472 swapfiles are not supported
+generic/474 src/godown executable not found
+generic/475 dmsetup utility required, skipped this test
+generic/479 dmsetup utility required, skipped this test
+generic/480 dmsetup utility required, skipped this test
+generic/481 dmsetup utility required, skipped this test
+generic/482 This test requires a valid $LOGWRITES_DEV
+generic/483 dmsetup utility required, skipped this test
+generic/484 dmsetup utility required, skipped this test
+generic/485 xfs_io finsert failed (old kernel/wrong fs?)
+generic/487 This test requires a valid $SCRATCH_LOGDEV
+generic/488 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/489 dmsetup utility required, skipped this test
+generic/491 fuse does not support freezing
+generic/492 xfs_io label failed (old kernel/wrong fs?)
+generic/493 swapfiles are not supported
+generic/494 swapfiles are not supported
+generic/495 swapfiles are not supported
+generic/496 swapfiles are not supported
+generic/497 swapfiles are not supported
+generic/498 dmsetup utility required, skipped this test
+generic/499 xfs_io fcollapse failed (old kernel/wrong fs?)
+generic/500 dmsetup utility required, skipped this test
+generic/501 Reflink not supported by scratch filesystem type: fuse
+generic/502 dmsetup utility required, skipped this test
+generic/503 xfs_io fcollapse failed (old kernel/wrong fs?)
+generic/505 src/godown executable not found
+generic/506 Quota user tools not installed
+generic/507 src/godown executable not found
+generic/508 src/godown executable not found
+generic/509 dmsetup utility required, skipped this test
+generic/510 dmsetup utility required, skipped this test
+generic/511 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/512 dmsetup utility required, skipped this test
+generic/513 Reflink not supported by scratch filesystem type: fuse
+generic/514 Reflink not supported by scratch filesystem type: fuse
+generic/515 Reflink not supported by scratch filesystem type: fuse
+generic/516 Dedupe not supported by test filesystem type: fuse
+generic/517 Dedupe not supported by scratch filesystem type: fuse
+generic/518 Reflink not supported by scratch filesystem type: fuse
+generic/520 dmsetup utility required, skipped this test
+generic/526 dmsetup utility required, skipped this test
+generic/527 dmsetup utility required, skipped this test
+generic/528 inode creation time not supported by this filesystem
+generic/530 src/godown executable not found
+generic/531 /xfstests/src/t_open_tmpfiles not built
+generic/534 dmsetup utility required, skipped this test
+generic/535 dmsetup utility required, skipped this test
+generic/536 src/godown executable not found
+generic/537 FSTRIM not supported
+generic/538 /xfstests/src/aio-dio-regress/aio-dio-write-verify not built
+generic/540 Reflink not supported by scratch filesystem type: fuse
+generic/541 Reflink not supported by scratch filesystem type: fuse
+generic/542 Reflink not supported by scratch filesystem type: fuse
+generic/543 Reflink not supported by scratch filesystem type: fuse
+generic/544 Reflink not supported by scratch filesystem type: fuse
+generic/546 Reflink not supported by scratch filesystem type: fuse
+generic/547 dmsetup utility required, skipped this test
+generic/548 No encryption support for fuse
+generic/549 No encryption support for fuse
+generic/550 No encryption support for fuse
+generic/551 /xfstests/src/aio-dio-regress/aio-dio-write-verify not built
+generic/552 dmsetup utility required, skipped this test
+generic/554 swapfiles are not supported
+generic/556 fuse does not support casefold feature
+generic/557 dmsetup utility required, skipped this test
+generic/558 fuse does not have a fixed number of inodes available
+generic/559 duperemove utility required, skipped this test
+generic/560 duperemove utility required, skipped this test
+generic/561 duperemove utility required, skipped this test
+generic/562 Reflink not supported by scratch filesystem type: fuse
+generic/563 Test requires cgroupN enabled
+generic/564 This test requires loopback device support
+generic/566 Quota user tools not installed
+generic/569 swapfiles are not supported
+generic/572 fsverity utility required, skipped this test
+generic/573 fsverity utility required, skipped this test
+generic/574 fsverity utility required, skipped this test
+generic/575 fsverity utility required, skipped this test
+generic/576 fsverity utility required, skipped this test
+generic/577 fsverity utility required, skipped this test
+generic/578 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/579 fsverity utility required, skipped this test
+generic/580 No encryption support for fuse
+generic/581 No encryption support for fuse
+generic/582 No encryption support for fuse
+generic/583 No encryption support for fuse
+generic/584 No encryption support for fuse
+generic/585 kernel doesn't support renameatN syscall
+generic/586 /xfstests/src/aio-dio-regress/aio-dio-append-write-fallocate-race not built
+generic/587 Quota user tools not installed
+generic/588 Reflink not supported by scratch filesystem type: fuse
+generic/590 This test requires at least NGB free on /mnt/scratch to run
+generic/592 No encryption support for fuse
+generic/593 No encryption support for fuse
+generic/594 setquota doesn't support project quota (-P)
+generic/595 No encryption support for fuse
+generic/596 accton utility required, skipped this test
+generic/599 src/godown executable not found
+generic/600 Quota user tools not installed
+generic/601 Quota user tools not installed
+generic/602 No encryption support for fuse
+generic/603 setquota doesn't support project quota (-P)
+generic/605 mount /dev/vdc with dax=always failed
+generic/606 mount /dev/vdc with dax=always failed
+generic/607 xfs_io chattr +x failed (old kernel/wrong fs?)
+generic/608 mount /dev/vdc with dax=always failed
+generic/612 Reflink not supported by test filesystem type: fuse
+generic/613 No encryption support for fuse
+generic/614 test requires delayed allocation buffered writes
+generic/616 kernel does not support IO_URING
+generic/617 kernel does not support IO_URING
+generic/619 Filesystem fuse not supported in _scratch_mkfs_sized
+generic/620 scratch device size too small, N < N
+generic/621 No encryption support for fuse
+generic/622 src/godown executable not found
+generic/623 xfs_io shutdown failed (old kernel/wrong fs?)
+generic/624 fsverity utility required, skipped this test
+generic/625 fsverity utility required, skipped this test
+generic/626 kernel doesn't support renameatN syscall
+generic/627 kernel does not support asynchronous I/O
+generic/628 Reflink not supported by scratch filesystem type: fuse
+generic/629 dmsetup utility required, skipped this test
+generic/630 Dedupe not supported by scratch filesystem type: fuse
+generic/631 this test requires overlay support
+generic/635 src/godown executable not found
+generic/636 swapfiles are not supported
+generic/640 dmsetup utility required, skipped this test
+generic/641 swapfiles are not supported
+generic/643 swapfiles are not supported
+generic/644 idmapped mounts not support by fuse
+generic/645 idmapped mounts not support by fuse
+generic/646 src/godown executable not found
+generic/648 Reflink not supported by scratch filesystem type: fuse
+generic/649 Reflink not supported by test filesystem type: fuse
+generic/651 Reflink not supported by scratch filesystem type: fuse
+generic/652 Reflink not supported by scratch filesystem type: fuse
+generic/653 Reflink not supported by scratch filesystem type: fuse
+generic/654 Reflink not supported by scratch filesystem type: fuse
+generic/655 Reflink not supported by scratch filesystem type: fuse
+generic/656 idmapped mounts not support by fuse
+generic/657 Reflink not supported by scratch filesystem type: fuse
+generic/658 Reflink not supported by scratch filesystem type: fuse
+generic/659 Reflink not supported by scratch filesystem type: fuse
+generic/660 Reflink not supported by scratch filesystem type: fuse
+generic/661 Reflink not supported by scratch filesystem type: fuse
+generic/662 Reflink not supported by scratch filesystem type: fuse
+generic/663 Reflink not supported by scratch filesystem type: fuse
+generic/664 Reflink not supported by scratch filesystem type: fuse
+generic/665 Reflink not supported by scratch filesystem type: fuse
+generic/666 Reflink not supported by scratch filesystem type: fuse
+generic/667 Reflink not supported by scratch filesystem type: fuse
+generic/668 Reflink not supported by scratch filesystem type: fuse
+generic/669 Reflink not supported by scratch filesystem type: fuse
+generic/670 Reflink not supported by scratch filesystem type: fuse
+generic/671 Reflink not supported by scratch filesystem type: fuse
+generic/672 Reflink not supported by scratch filesystem type: fuse
+generic/673 Reflink not supported by scratch filesystem type: fuse
+generic/674 Dedupe not supported by scratch filesystem type: fuse
+generic/675 Reflink not supported by scratch filesystem type: fuse
+generic/677 dmsetup utility required, skipped this test
+generic/678 kernel does not support IO_URING
+generic/679 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/681 Quota user tools not installed
+generic/682 Quota user tools not installed
+generic/686 xfs_io finsert failed (old kernel/wrong fs?)
+generic/687 xfs_io fcollapse failed (old kernel/wrong fs?)
+generic/689 idmapped mounts not support by fuse
+generic/690 dmsetup utility required, skipped this test
+generic/691 Quota user tools not installed
+generic/692 fsverity utility required, skipped this test
+generic/693 No encryption support for fuse
+generic/694 This test requires at least NGB free on /mnt/test to run
+generic/695 dmsetup utility required, skipped this test
+generic/698 idmapped mounts not support by fuse
+generic/699 this test requires overlay support
+generic/700 kernel doesn't support renameatN syscall
+generic/701 This test requires at least NGB free on /mnt/test to run
+generic/702 Reflink not supported by scratch filesystem type: fuse
+generic/703 kernel does not support IO_URING
+generic/704 scsi_debug module not found
+generic/705 src/godown executable not found
+generic/709 xfs_io exchangerange not supported on fuse
+generic/710 xfs_io exchangerange not supported on fuse
+generic/711 xfs_io swapext not supported on fuse
+generic/712 xfs_io exchangerange not supported on fuse
+generic/713 xfs_io exchangerange -s Nk -l Nk not supported on fuse
+generic/714 xfs_io exchangerange not supported on fuse
+generic/715 xfs_io exchangerange -s Nk -l Nk not supported on fuse
+generic/716 xfs_io exchangerange not supported on fuse
+generic/717 xfs_io exchangerange not supported on fuse
+generic/718 xfs_io exchangerange not supported on fuse
+generic/719 xfs_io exchangerange not supported on fuse
+generic/720 xfs_io exchangerange not supported on fuse
+generic/721 xfs_io startupdate not supported on fuse
+generic/722 xfs_io exchangerange not supported on fuse
+generic/723 xfs_io exchangerange not supported on fuse
+generic/724 xfs_io exchangerange not supported on fuse
+generic/725 xfs_io exchangerange not supported on fuse
+generic/726 xfs_io exchangerange not supported on fuse
+generic/727 xfs_io exchangerange not supported on fuse
+generic/730 scsi_debug module not found
+generic/731 scsi_debug module not found
+generic/733 Reflink not supported by scratch filesystem type: fuse
+generic/734 Reflink not supported by test filesystem type: fuse
+generic/735 xfs_io finsert failed (old kernel/wrong fs?)
+generic/737 src/godown executable not found
+generic/738 fuse does not support freezing
+generic/739 No encryption support for fuse
+generic/741 dmsetup utility required, skipped this test
+generic/742 xfs_io fiemap failed (old kernel/wrong fs?)
+generic/743 dmsetup utility required, skipped this test
+generic/744 fuse does not support duplicate fsid
+generic/745 dmsetup utility required, skipped this test
+generic/746 This test requires loopback device support
+generic/747 Scratch device too small
+generic/751 Cannot find debugfs on /sys/kernel/debug
+generic/752 xfs_io exchangerange not supported on fuse
+generic/753 dmsetup utility required, skipped this test
+generic/757 aio-dio utilities required
+generic/762 Quota user tools not installed
+generic/764 dmsetup utility required, skipped this test
+generic/765 write atomic not supported by this block device
+generic/766 src/godown executable not found
+generic/767 scsi_debug module not found
+generic/768 multi-block atomic writes not supported by this filesystem
+generic/769 multi-block atomic writes not supported by this filesystem
+generic/770 multi-block atomic writes not supported by this filesystem
+generic/771 dmsetup utility required, skipped this test
+generic/772 file_getattr not supported for regular files on fuse
+generic/773 write atomic not supported by this block device
+generic/774 multi-block atomic writes not supported by this filesystem
+generic/775 multi-block atomic writes not supported by this filesystem
+generic/776 write atomic not supported by this block device
+generic/778 multi-block atomic writes not supported by this filesystem
+generic/779 dmsetup utility required, skipped this test
+generic/781 scratch device too small, N < N
+generic/782 dmsetup utility required, skipped this test
+generic/783 this test requires overlay support
+generic/784 dmsetup utility required, skipped this test
+generic/785 dmsetup utility required, skipped this test
+generic/786 Require fcntl setdeleg support
+generic/787 Require fcntl setdeleg support
+generic/788 fsverity utility required, skipped this test
+generic/789 dmsetup utility required, skipped this test
+generic/790 dmsetup utility required, skipped this test
+generic/791 dmsetup utility required, skipped this test
+generic/792 dmsetup utility required, skipped this test
+generic/793 scratch device too small, N < N
+generic/794 src/godown executable not found

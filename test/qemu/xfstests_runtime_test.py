@@ -53,8 +53,9 @@ def needed(path):
     return names
 
 
-def main(argv):
-    root = os.path.join(os.path.dirname(os.path.realpath(argv[1])), 'root')
+def problems_of(root, required=REQUIRED):
+    """What is wrong with the tree at `root`: dangling links, libraries no file
+    of the tree provides, required programs that are missing."""
     present = set()
     elves = []
     for directory, _, files in os.walk(root):
@@ -70,13 +71,49 @@ def main(argv):
             if lib not in present:
                 problems.append('%s needs %s, which is not in the tree' %
                                 (os.path.relpath(path, root), lib))
-    for rel in REQUIRED:
+    for rel in required:
         if not os.path.exists(os.path.join(root, rel)):
             problems.append('missing: ' + rel)
+    return problems, len(elves)
+
+
+def self_check(root):
+    """The check must see what is wrong with trees made to be wrong: bash
+    without readline, and a tree without the program it is asked for."""
+    import shutil
+    import tempfile
+    bad = []
+    with tempfile.TemporaryDirectory() as work:
+        tree = os.path.join(work, 'tree')
+        for rel in ('bin/bash', 'lib/ld-musl-x86_64.so.1'):
+            os.makedirs(os.path.dirname(os.path.join(tree, rel)), exist_ok=True)
+            shutil.copy(os.path.realpath(os.path.join(root, rel)),
+                        os.path.join(tree, rel))
+        found, _ = problems_of(tree, required=['bin/bash', 'usr/sbin/nothere'])
+        if not any('bin/bash needs libreadline' in p for p in found):
+            bad.append('a bash without its readline passed: %r' % found)
+        if 'missing: usr/sbin/nothere' not in found:
+            bad.append('a missing required program passed: %r' % found)
+        # Putting the library back makes that complaint go away.
+        lib = os.path.join(tree, 'usr/lib/libreadline.so.8')
+        os.makedirs(os.path.dirname(lib), exist_ok=True)
+        shutil.copy(os.path.realpath(os.path.join(root, 'usr/lib/libreadline.so.8')), lib)
+        found, _ = problems_of(tree, required=['bin/bash'])
+        if any('bin/bash needs libreadline' in p for p in found):
+            bad.append('the readline library is in the tree and still missing: %r' % found)
+    return bad
+
+
+def main(argv):
+    root = os.path.join(os.path.dirname(os.path.realpath(argv[1])), 'root')
+    problems, n = problems_of(root)
     resolved = json.load(open(argv[1]))
-    print('%d packages, %d files' % (len(resolved['packages']), len(elves)))
+    print('%d packages, %d files' % (len(resolved['packages']), n))
     for problem in problems:
         print('FAIL:', problem)
+    for problem in self_check(root):
+        print('FAIL (self-check):', problem)
+        problems.append(problem)
     return 1 if problems else 0
 
 

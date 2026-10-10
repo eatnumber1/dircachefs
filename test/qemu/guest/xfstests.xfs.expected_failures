@@ -1,10 +1,10 @@
-# Tests that fail through dcfs on an xfs backing file system, each with the reason
-# (guest/xfstests.sh, xfstests_lib.sh): one "generic/NNN <reason>" per line. The run fails
-# on a failure that is not listed and on a listed test that passes. Reasons that name
-# README.md point at the sentence that documents the behavior; "dcfs bug" is a finding
-# for the step 17.1 report, to be fixed with a test first. Tests that do not finish in
-# time, or fail on the native file system too, are in xfstests.excluded.
-
+# Tests that fail through dcfs on xfs, each with the reason: one "generic/NNN <reason>"
+# per line (guest/xfstests.sh, xfstests_lib.sh). The run fails on a failure that is not listed,
+# on a listed test that passes, does not run or times out. Reasons that name README.md point
+# at the sentence that documents the behavior; "dcfs bug" is a finding for plan step 17.2
+# (run FallocateFd, WriteFile and CopyFileRangeFd as the caller), fixed with a test first.
+# Tests that take most of the limit or more are in xfstests.slow, tests that cannot run in
+# this guest in xfstests.excluded; the tests that are "not run" are in xfstests.xfs.notrun.
 generic/003 `mount -o remount,ro` is ignored by dcfs (a remount changes only the dcfs mount: dcfs.ro), so the read-only file system the test makes is still writable and its directory access time changes (README.md, limitations: remount,ro and statx attributes)
 generic/062 lists the trusted.* attributes of the scratch root, where xfs 7.0 itself keeps trusted.xfs:autofsck; xfstests filters it only for FSTYP=xfs
 generic/080 the mtime and ctime of a file written through a shared mmap are stale after close() (README.md: writes through a shared writable mmap after the last close() are seen late)
@@ -15,7 +15,7 @@ generic/306 `mount -o remount,ro` is ignored by dcfs (dcfs.ro is the way to make
 generic/411 the test mounts the scratch device several times at once; dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database
 generic/424 statx(2) does not report the append, immutable, nodump and compressed attributes that chattr set: FUSE has no way to carry them (README.md, limitations: remount,ro and statx attributes)
 generic/589 the test mounts the scratch device several times at once; dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database
-generic/683 dcfs bug: after falloc by an unprivileged user the setgid bit stays on a file without group execute (mode 2666) where the backing file system clears it (666); the suid bit is cleared. 684, 685 and 687 are the same for fpunch, fzero and fcollapse
+generic/683 dcfs bug: after falloc by an unprivileged user the setgid bit stays on a file without group execute (mode 2666) where the backing file system clears it (666); the suid bit is cleared. 684 and 685 are the same for fpunch and fzero (FUSE refuses COLLAPSE_RANGE, so 687 is "not run")
 generic/684 dcfs bug: as generic/683, for fpunch
 generic/685 dcfs bug: as generic/683, for fzero
 generic/732 the test mounts the scratch device twice (two mount points); dcfs refuses a second daemon on one cache database ("in use by another dcfs process"), README.md, limitations: a second dcfs needs its own cache database

@@ -1,0 +1,2 @@
+# Tests of the generic group that guest/xfstests.sh does not run on btrfs only,
+# each with the reason ("generic/NNN <reason>"); xfstests.excluded has the rest.

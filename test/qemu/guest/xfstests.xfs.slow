@@ -1,0 +1,3 @@
+# Slow tests (17.3) of xfs only: "generic/NNN <reason>"; see xfstests.slow.
+generic/344 17.3: timed out through dcfs at 200 s on xfs only (fine on ext4 and btrfs)
+generic/761 17.3: timed out through dcfs at 200 s on xfs only (about 200 s on ext4)

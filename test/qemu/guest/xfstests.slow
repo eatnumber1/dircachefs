@@ -1,0 +1,47 @@
+# The slow tests (17.3): tests that take most of the 200 s limit or more through
+# dcfs, kept out of the normal set so that a shard fits its job, and run with a
+# limit of 1500 s by the weekly set (xfstests_slow_<n>.sh; lists
+# xfstests.slow.<fstype>.*). Their native times are in the reasons. Whether the
+# slowness is dcfs's or the host's load is plan step 17.3's to find out (the
+# results line of each test carries the daemon's CPU time for it). This file is
+# the global set; xfstests.<fstype>.slow has the tests slow on one backing only.
+generic/001 17.3: takes 135 s through dcfs on ext4 (50 s natively), too close to the 200 s limit to be reliable
+generic/006 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 4 s)
+generic/007 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 7 s)
+generic/011 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 6 s)
+generic/013 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 26 s)
+generic/069 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 37 s)
+generic/070 17.3: takes 150 s through dcfs on ext4 (11 s natively), too close to the 200 s limit to be reliable
+generic/074 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 101 s)
+generic/075 17.3: takes 154 s through dcfs on ext4 (75 s natively), too close to the 200 s limit to be reliable
+generic/089 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 110 s)
+generic/091 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 67 s)
+generic/100 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 156 s)
+generic/109 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 10 s)
+generic/127 17.3: timed out at 200 s on the native file system too (203 s), so no dcfs verdict is possible in this guest
+generic/129 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 12 s)
+generic/132 17.3: timed out at 200 s on the native file system too (203 s), so no dcfs verdict is possible in this guest
+generic/133 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 140 s)
+generic/263 17.3: takes 174 s through dcfs on ext4 (56 s natively), too close to the 200 s limit to be reliable
+generic/286 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 8 s)
+generic/310 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 168 s)
+generic/339 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 33 s)
+generic/346 17.3: takes about 200 s through dcfs (80 s on the first ext4 run): too close to the limit to be reliable
+generic/363 17.3: timed out at 200 s on the native file system too (205 s), so no dcfs verdict is possible in this guest
+generic/409 17.3: mounts the scratch device repeatedly (see generic/411 in the expected-failure lists) and takes about 200 s through dcfs
+generic/410 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 95 s)
+generic/418 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 110 s)
+generic/426 17.3: takes 201 s through dcfs on ext4 (6 s natively), too close to the 200 s limit to be reliable
+generic/438 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 11 s)
+generic/471 17.3: takes 126 s through dcfs on ext4 (8 s natively), too close to the 200 s limit to be reliable
+generic/476 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 160 s)
+generic/615 17.3: takes 149 s through dcfs on ext4 (183 s natively), too close to the 200 s limit to be reliable
+generic/642 17.3: timed out through dcfs at 200 s on every backing file system (fsx with random operations)
+generic/676 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 10 s)
+generic/707 17.3: timed out at 200 s on the native file system too (205 s), so no dcfs verdict is possible in this guest
+generic/736 17.3: timed out through dcfs at 200 s on ext4 (pass natively: 4 s)
+generic/748 17.3: timed out through dcfs at 200 s on every backing file system (5000 rounds of fallocate, setxattr and direct writes) and natively too
+generic/750 17.3: timed out through dcfs at 200 s on every backing file system (fsx with random operations)
+generic/756 17.3: takes 144 s through dcfs on ext4 (2 s natively), too close to the 200 s limit to be reliable
+generic/759 17.3: timed out through dcfs at 200 s on every backing file system (fsx 10000 operations)
+generic/760 17.3: timed out through dcfs at 200 s on every backing file system (fsx 10000 operations)
