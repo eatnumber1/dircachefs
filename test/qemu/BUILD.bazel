@@ -1349,6 +1349,54 @@ py_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Step 26.17: the mkfs part of the initramfs of a test whose disks are in the
+# guest's RAM (qemu_test's `ram_disks`): the Alpine mkfs tools and their
+# libraries, formatted with in the guest (scripts/mkfstools.py).
+py_library(
+    name = "mkfstools",
+    srcs = ["scripts/mkfstools.py"],
+    imports = ["scripts"],
+    deps = [":mkmodules"],
+)
+
+py_binary(
+    name = "mkfstools_bin",
+    srcs = ["scripts/mkfstools.py"],
+    main = "scripts/mkfstools.py",
+    deps = [":mkmodules"],
+)
+
+py_test(
+    name = "mkfstools_test",
+    size = "small",
+    srcs = ["scripts/mkfstools_test.py"],
+    main = "scripts/mkfstools_test.py",
+    deps = [":mkfstools"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+genrule(
+    name = "fstools_cpio",
+    testonly = 1,
+    srcs = [
+        "//third_party/e2fsprogs:mke2fs.conf",
+        "@alpine_fstools//:root",
+    ],
+    outs = ["fstools.cpio.gz"],
+    cmd = " ".join([
+        "$(location :mkfstools_bin)",
+        # The package's root directory is two levels above sbin/mke2fs.
+        "--root \"$$(dirname \"$$(dirname \"$(location @alpine_fstools//:root/sbin/mke2fs)\")\")\"",
+        "--mke2fs-conf $(location //third_party/e2fsprogs:mke2fs.conf)",
+        "--out $@",
+    ]),
+    tools = [
+        ":mkfstools_bin",
+        "@alpine_fstools//:root/sbin/mke2fs",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 # Step 26.1: self-check of the require_commands gate: sources the real
 # guest/lib.sh and calls the real function with a missing name.
 sh_test(

@@ -156,7 +156,7 @@ def find_tree(root):
     return ModuleTree(os.path.join(base, releases[0]))
 
 
-def _newc(entries):
+def newc(entries):
     """Returns a newc cpio archive of (path, mode, data) entries."""
     out = bytearray()
 
@@ -198,7 +198,7 @@ def build(root, requested):
     mkdir('etc')
     listing = ''.join(f'{d}\n' for d in destinations).encode()
     entries.append(('etc/dcfs-modules', 0o100644, listing))
-    return gzip.compress(_newc(entries), compresslevel=1, mtime=0)
+    return gzip.compress(newc(entries), compresslevel=1, mtime=0)
 
 
 def main(argv):
