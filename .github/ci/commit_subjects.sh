@@ -2,7 +2,7 @@
 # Plan step 26.13: every commit subject on a CI push range starts with the
 # plan step it belongs to (`N.M:` or `N:`, optionally with a letter suffix, a
 # `-N.M` / `/N.M` second step and a parenthesized note) or one of the
-# prefixes `plan:`, `style:`, `warnings:`, `notes:`, `audits:`, `agents:`,
+# prefixes `plan:`, `style:`, `process:`, `warnings:`, `notes:`, `audits:`, `agents:`,
 # `R<n>:` and `R<n>.<m>:` (docs/style.md, "Docs and commits"). Co-Authored-By
 # lines are trailers, not subjects.
 #
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 readonly STEP='[0-9]+(\.[0-9]+[a-z]?)?([-/][0-9]+(\.[0-9]+[a-z]?)?)*( \([^)]*\))?'
-readonly PREFIX='(plan|style|warnings|notes|audits|agents|R[0-9]+(\.[0-9]+)?)'
+readonly PREFIX='(plan|style|process|warnings|notes|audits|agents|R[0-9]+(\.[0-9]+)?)'
 readonly PATTERN="^(${STEP}|${PREFIX}): ."
 
 # One `HASH<TAB>SUBJECT` per line (HASH is `-` where the input has none).
@@ -43,7 +43,7 @@ main() {
   while IFS=$'\t' read -r hash subject; do
     if [[ ! "${subject}" =~ ${PATTERN} ]]; then
       echo "commit ${hash}: subject does not start with a plan step (N.M:) or one of" \
-        "plan:, style:, warnings:, notes:, audits:, agents:, R<n>.<m>: -> ${subject}" >&2
+        "plan:, style:, process:, warnings:, notes:, audits:, agents:, R<n>.<m>: -> ${subject}" >&2
       bad=1
     fi
   done < <(subjects "$1")

@@ -2888,3 +2888,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 7.6a merged (lane-2 → 033618e, gate exit 0). The rebase at merge renamed the reformat commit,
   so .git-blame-ignore-revs is re-pointed here (a7a3e71). Lane-2 free. Project view given to
   russ this morning: the plan's order should put the spare-disk trial first.
+- CI run 38069307659 (017de4a): green everywhere but two jobs. `subjects` rejected two of the
+  orchestrator's own commits (`process:` was not an allowed prefix; added to the gate, which now
+  passes over the pushed range). `ubsan (1)`: fault_ace_mixed_test_xfs `ace-restore FAIL
+  (remounting after the cut failed)`, first run of the RAM-disk fault tests under ubsan in CI;
+  26.24 triage dispatched. Coverage gate: lines 96.27, branches 80.85 (baseline 95.97/79.68): the
+  bump to 96.26/80.85 goes with 26.24. fast job 17 min with the style checks cold.
