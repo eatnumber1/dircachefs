@@ -33,6 +33,7 @@ MAIN_DEPS = [
     ":sqlite",
     ":startup_channel",
     ":umount_helper",
+    ":fsck",
     ":status",
     ":syscalls",
     ":syscalls_backing",
@@ -677,6 +678,30 @@ cc_library(
     ],
 )
 
+# Step 15.5: fsck.dcfs, and the checks of the cache database it runs.
+cc_library(
+    name = "fsck",
+    srcs = ["fsck.cc"],
+    hdrs = ["fsck.h"],
+    deps = [
+      ":escape",
+      ":migrate",
+      ":mount_dcfs",
+      ":sqlite",
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      ":syscalls_process",
+      ":version",
+      "@absl//absl/log",
+      "@absl//absl/status",
+      "@absl//absl/status:status_macros",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@sqlite//:sqlite3",
+    ],
+)
+
 # Step 15.2: the log sink of a daemonized dcfs.
 cc_library(
     name = "syslog_sink",
@@ -727,6 +752,29 @@ qemu_cc_test(
       ":syslog_sink",
       "@absl//absl/base:log_severity",
       "@googletest//:gtest_main",
+    ],
+)
+
+qemu_cc_test(
+    name = "fsck_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["fsck_test.cc"],
+    deps = [
+      ":fsck",
+      ":migrate",
+      ":sqlite",
+      ":status",
+      ":syscalls",
+      ":syscalls_backing",
+      "//dcfs/testonly:assert_ok_and_assign",
+      "@absl//absl/log:check",
+      "@absl//absl/status",
+      "@absl//absl/status:status_matchers",
+      "@absl//absl/status:statusor",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
+      "@sqlite//:sqlite3",
     ],
 )
 

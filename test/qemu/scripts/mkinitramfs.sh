@@ -199,6 +199,8 @@ else
 	# both here, for the test of each).
 	ln -sf ../bin/dcfs "$ROOT/sbin/umount.fuse.dcfs"
 	ln -sf ../bin/dcfs "$ROOT/sbin/umount.fuse"
+	# Step 15.5: fsck.dcfs, which fsck(8) runs for a line with a passno.
+	ln -sf ../bin/dcfs "$ROOT/sbin/fsck.dcfs"
 	cp "$FHTEST" "$ROOT/bin/fhtest"
 	cp "$TESTUTIL" "$ROOT/bin/testutil"
 	ln -sf busybox "$ROOT/bin/sh"

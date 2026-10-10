@@ -41,7 +41,7 @@ RAW=/srv/raw  # the bind form's
 MNT=/mnt/m    # for the command-line checks
 MISSING_UUID=0e0e0e0e-dead-4bee-8f00-000000000001
 
-require_commands blkid findmnt journalctl pgrep python3 systemctl systemd-escape umount mount awk
+require_commands blkid findmnt fsck journalctl pgrep python3 systemctl systemd-escape umount mount awk
 
 # --- helpers -------------------------------------------------------------
 
@@ -432,7 +432,7 @@ boot1() {
 	# nofail mount of a device that is not there, and (noauto) one that fails to
 	# start.
 	cat >/etc/fstab <<EOF
-UUID=$UUID /data dcfs noatime,dcfs.cache_db=$CACHE/data.db,dcfs.stderrthreshold=0 0 0
+UUID=$UUID /data dcfs noatime,dcfs.cache_db=$CACHE/data.db,dcfs.stderrthreshold=0 0 2
 $RAW /data/sub dcfs dcfs.fstype=bind,dcfs.ro,dcfs.cache_db=$CACHE/sub.db,dcfs.stderrthreshold=0 0 0
 $SRC /mnt/live dcfs dcfs.fstype=none,_netdev,x-systemd.requires-mounts-for=$CACHE,dcfs.cache_db=$CACHE/live.db,dcfs.stderrthreshold=0 0 0
 UUID=$XFS_UUID /mnt/xfs dcfs dcfs.fstype=xfs,dcfs.cache_db=$CACHE/xfs.db,dcfs.stderrthreshold=0 0 0
@@ -443,6 +443,54 @@ $SRC /mnt/fail dcfs noauto,dcfs.fstype=none,dcfs.bogus,dcfs.cache_db=$CACHE/fail
 /srv/rc /rp/c dcfs noauto,nofail,dcfs.fstype=bind,dcfs.cache_db=$CACHE/rc.db 0 0
 EOF
 	systemctl daemon-reload
+
+	# --- fsck through fsck(8), as the fstab's sixth field runs it (step 15.5) ---
+	# `fsck /data` runs fsck.dcfs on the device (found by the fstab line: its
+	# type, dcfs, names the checker), which finds the line's options through
+	# findmnt, runs fsck.ext4 on the device (blkid says the type) and checks the
+	# cache database. The statuses are fsck(8)'s. Flags after -- go to the
+	# checker (-p: e2fsck without a mode flag wants a terminal).
+	rm -f "$CACHE/data.db"
+	fsck /data -- -p >"$OUT" 2>&1
+	rc_f=$?
+	if [ "$rc_f" -eq 0 ] && grep -q 'no cache database' "$OUT"; then
+		pass fsck-fstab-line-checks-backing-and-cache
+	else
+		fail fsck-fstab-line-checks-backing-and-cache "rc=$rc_f $(cat "$OUT")"
+	fi
+	head -c 8192 /dev/zero | tr '\0' x >"$CACHE/data.db"
+	fsck /data -- -n >"$OUT" 2>&1
+	rc_n=$?
+	if [ "$rc_n" -eq 4 ] && grep -q 'is corrupt' "$OUT" && [ -e "$CACHE/data.db" ]; then
+		pass fsck-n-reports-a-corrupt-cache-status-4
+	else
+		fail fsck-n-reports-a-corrupt-cache-status-4 "rc=$rc_n $(cat "$OUT")"
+	fi
+	fsck /data -- -y >"$OUT" 2>&1
+	rc_y=$?
+	if [ "$rc_y" -eq 1 ] && grep -q 'starts cold' "$OUT" && [ ! -e "$CACHE/data.db" ]; then
+		pass fsck-y-rebuilds-a-corrupt-cache-status-1
+	else
+		fail fsck-y-rebuilds-a-corrupt-cache-status-1 "rc=$rc_y $(cat "$OUT")"
+	fi
+	fsck /data -- -n >"$OUT" 2>&1
+	rc_c=$?
+	[ "$rc_c" -eq 0 ] || fail fsck-clean-again-status-0 "rc=$rc_c $(cat "$OUT")"
+	[ "$rc_c" -eq 0 ] && pass fsck-clean-again-status-0
+	# A none line has no device: a no-op, status 0, and the cache is checked.
+	fsck /mnt/live >"$OUT" 2>&1
+	rc_none=$?
+	if [ "$rc_none" -eq 0 ] && grep -q 'no device to check' "$OUT"; then
+		pass fsck-none-line-is-a-no-op
+	else
+		fail fsck-none-line-is-a-no-op "rc=$rc_none $(cat "$OUT")"
+	fi
+	# A native backing's own status passes through, or'ed with the cache's: a
+	# type with no fsck is fsck(8)'s operational error, 8.
+	/sbin/fsck.dcfs -n -o "dcfs.fstype=nosuchfs,dcfs.cache_db=$CACHE/none.db" /dev/vdz >"$OUT" 2>&1
+	rc_miss=$?
+	[ "$rc_miss" -eq 8 ] && pass fsck-missing-checker-status-8 || fail fsck-missing-checker-status-8 "rc=$rc_miss $(cat "$OUT")"
+
 	mnt -a -t dcfs
 	mount_a_rc=$MRC
 	if [ "$MRC" -eq 0 ] && [ "$(findmnt -rn -t fuse.dcfs | wc -l)" -eq 5 ]; then
@@ -804,6 +852,19 @@ boot2() {
 		pass reboot-parent-mounted-before-child
 	else
 		fail reboot-parent-mounted-before-child "data.mount at $parent_at, data-sub.mount at $child_at"
+	fi
+	# The passno-2 line (/data) was checked at boot, before its mount: systemd's
+	# fsck unit for the device ran fsck.dcfs (its output, the cache check's line,
+	# is in the journal under that unit) and finished before data.mount became
+	# active (step 15.5).
+	fsck_unit=$(systemd-escape -p --template=systemd-fsck@.service "/dev/disk/by-uuid/$(blkid -s UUID -o value "$DEV")")
+	fsck_done=$(systemctl show -p ExecMainExitTimestampMonotonic --value "$fsck_unit")
+	mount_at=$(systemctl show -p ActiveEnterTimestampMonotonic --value data.mount)
+	if journal_has "fsck.dcfs: cache database $CACHE/data.db: clean" -u "$fsck_unit" &&
+		[ "${fsck_done:-0}" -gt 0 ] && [ "${fsck_done:-0}" -le "${mount_at:-0}" ]; then
+		pass reboot-passno-2-line-checked-before-its-mount
+	else
+		fail reboot-passno-2-line-checked-before-its-mount "$fsck_unit finished at $fsck_done, data.mount active at $mount_at: $(journalctl --no-pager -b -u "$fsck_unit" -o cat 2>&1 | tail -n 8)"
 	fi
 	# The reboot stopped every daemon of the previous boot cleanly: each
 	# logged "shutdown: clean" and this boot's starts all found it clean. The

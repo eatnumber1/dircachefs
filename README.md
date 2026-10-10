@@ -389,8 +389,8 @@ and `umount` ends it.
 
 ```text
 # SOURCE        MOUNTPOINT  TYPE  OPTIONS                                    DUMP PASS
-UUID=aaaa-aaaa  /data       dcfs  noatime,dcfs.cache_db=/var/lib/dcfs/data.db                                         0 0
-UUID=bbbb-bbbb  /data/sub   dcfs  dcfs.fstype=xfs,dcfs.cache_db=/var/lib/dcfs/sub.db                                 0 0
+UUID=aaaa-aaaa  /data       dcfs  noatime,dcfs.cache_db=/var/lib/dcfs/data.db                                         0 2
+UUID=bbbb-bbbb  /data/sub   dcfs  dcfs.fstype=xfs,dcfs.cache_db=/var/lib/dcfs/sub.db                                 0 2
 UUID=cccc-cccc  /data/vol   dcfs  dcfs.fstype=btrfs,subvol=vol,dcfs.cache_db=/var/lib/dcfs/vol.db                0 0
 nas:/export     /srv/nas    dcfs  dcfs.fstype=nfs,vers=4.2,_netdev,nofail,dcfs.cache_db=/var/lib/dcfs/nas.db     0 0
 /srv/raw        /cache/raw  dcfs  dcfs.fstype=bind,dcfs.ro,dcfs.cache_db=/var/lib/dcfs/raw.db                    0 0
@@ -417,9 +417,12 @@ nas:/export     /srv/nas    dcfs  dcfs.fstype=nfs,vers=4.2,_netdev,nofail,dcfs.c
   accepted on every form, `none` included, since mount(8) adds or reads them
   itself; any other native option on a `none` line is an error, because dcfs
   makes no underlying mount to give it to.
-- **The sixth field** (the fsck pass) is `0`: dcfs provides no `fsck.dcfs`,
-  so nothing checks the filesystem at boot. To check the filesystem under a
-  dcfs mount, run `fsck` on its device while it is unmounted.
+- **The sixth field** (the fsck pass) works as on any line: `2` on a line
+  whose backing is a device (`UUID=...`) makes `fsck -A` and systemd's
+  `systemd-fsck@.service` run `fsck.dcfs` on it before the mount, `0` skips
+  the check. Use `0` on `none`, `bind` and network lines: there is no device
+  to check, and systemd would wait for one. See
+  [Checking a dcfs filesystem](#checking-a-dcfs-filesystem).
 - **A line is a mount**: `mount /data`, `umount /data`, `mount -a` and
   `umount -R /data` work as for any fstab entry, and `mount /data` takes
   the line's options. Write absolute paths in the line.
@@ -545,6 +548,52 @@ dcfs also refuses a database that was built for a different filesystem or
 a different source directory; delete it to start with a cold cache.
 
 ## Operations
+
+### Checking a dcfs filesystem
+
+`fsck.dcfs` is what `fsck(8)` and systemd's `systemd-fsck@.service` run for a
+`dcfs` fstab line with a non-zero sixth field, before the mount (install it
+like the other helpers, [Building](#building)). It checks two things and
+combines their results as `fsck(8)` combines the results of several
+checkers:
+
+1. **The backing filesystem**, if it has a device. With a native
+   `dcfs.fstype` (or none, in which case `blkid` names the type) it runs that
+   type's `fsck.<type>` on the device with the flags it was given (`-a`, `-p`,
+   `-n`, `-y`, `-f`, `-C`) and passes its exit status on. dcfs does not check
+   the filesystem itself: `e2fsck`, `xfs_repair` and `btrfs check` know their
+   formats, and a passno on a dcfs line means what it means on a plain one.
+   For `none` and `bind` there is no device: it says so and goes on.
+2. **The cache database**: that no daemon holds it (reported, never waited
+   for), SQLite's `integrity_check`, the schema version, and the dirty set
+   (every dirty row names an inode that exists, and a clean-shutdown flag
+   goes with an empty dirty set). A dirty set left by a crash is not an error:
+   the next mount recovers it. A cache that is corrupt, or that cannot be
+   opened, is **rebuilt, not repaired**: with `-a`, `-p` or `-y` the file (with
+   its `-wal` and `-shm`) is deleted and one line on the standard error says
+   that the next mount starts cold; with `-n`, or with no mode flag, it is only
+   reported. A cache a newer dcfs wrote is not corrupt and never deleted. No
+   cache file is nothing to check.
+
+The exit status is `fsck(8)`'s: 0 no errors, 1 errors corrected (the cache was
+rebuilt), 4 errors left uncorrected, 8 operational error (a database a daemon
+holds, no `fsck.<type>`, no fstab line, no `dcfs.cache_db`), 16 usage, 32
+cancelled; several are added together (a backing that exits 4 and a cache
+rebuilt exit 5).
+
+By hand, with the filesystem unmounted:
+
+```bash
+sudo fsck /data                  # the line in /etc/fstab, interactively where the type asks
+sudo fsck /data -- -n            # report only: nothing is changed
+sudo fsck /data -- -y            # repair; a corrupt cache is deleted
+sudo fsck.dcfs -n -o dcfs.fstype=ext4,dcfs.cache_db=/var/lib/dcfs/data.db /dev/vdb
+```
+
+`fsck.dcfs` finds the line's `dcfs.` options through `findmnt --fstab` (from
+util-linux), looking for the device `fsck` gives it; `-o OPTIONS` gives them
+instead, for a device with no fstab line. A running instance holds its
+database: unmount it first (`-n` still only reports that, status 8).
 
 ### Wiping the cache of one instance
 

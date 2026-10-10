@@ -493,7 +493,7 @@ EOF
 		# Step 15.2: dcfs dispatches on argv[0] (mount.dcfs; step 15.6b:
 		# umount.fuse.dcfs and umount.fuse too), which the generic loop above
 		# would lose.
-		for helper in mount.dcfs umount.fuse.dcfs umount.fuse; do
+		for helper in mount.dcfs umount.fuse.dcfs umount.fuse fsck.dcfs; do
 			cat >$root/usr/local/bin/$helper <<EOF
 #!/bin/sh
 exec $loader --argv0 $helper --library-path /opt/dcfs-libs /usr/local/bin/dcfs.real "\$@"
@@ -501,7 +501,7 @@ EOF
 			chmod +x $root/usr/local/bin/$helper
 		done
 	else
-		for helper in mount.dcfs umount.fuse.dcfs umount.fuse; do
+		for helper in mount.dcfs umount.fuse.dcfs umount.fuse fsck.dcfs; do
 			ln -sf dcfs $root/usr/local/bin/$helper
 		done
 	fi
@@ -512,6 +512,8 @@ EOF
 	# mount, is the administrator's choice: it is in /usr/local/bin for a test
 	# that links it, and not in /sbin.
 	ln -sf /usr/local/bin/umount.fuse.dcfs $root/sbin/umount.fuse.dcfs
+	# Step 15.5: fsck(8) and systemd-fsck run fsck.dcfs for a line with a passno.
+	ln -sf /usr/local/bin/fsck.dcfs $root/sbin/fsck.dcfs
 }
 
 # qemu_test's systemd_image= attribute (step 15.6): run-qemu.sh attaches an

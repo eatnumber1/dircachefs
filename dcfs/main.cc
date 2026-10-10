@@ -46,6 +46,7 @@
 #include "dcfs/context.h"
 #include "dcfs/dir_cache_fs.h"
 #include "dcfs/fd.h"
+#include "dcfs/fsck.h"
 #include "dcfs/mount_dcfs.h"
 #include "dcfs/mount_options.h"
 #include "dcfs/remount.h"
@@ -764,6 +765,12 @@ int Main(int argc, char *argv[]) {
   if (IsUmountHelperName(name)) {
     absl::InitializeLog();
     return UmountHelperMain(argc, argv);
+  }
+  // fsck.dcfs, run by fsck(8) and systemd-fsck before a mount (step 15.5):
+  // the same, a helper that takes no part in the daemon's setup.
+  if (IsFsckHelperName(name)) {
+    absl::InitializeLog();
+    return FsckMain(std::vector<std::string>(argv + 1, argv + argc));
   }
   // The backing create(2)-family syscalls (backing.h's MkdirAt/MknodAt/
   // CreateAt) run with the caller's umask, switched to around each one

@@ -996,5 +996,135 @@ else
 	fault_unwrap slow
 fi
 
+# --- fsck.dcfs (step 15.5) -------------------------------------------------------
+#
+# fsck(8) and systemd-fsck run `fsck.dcfs FLAGS DEVICE` for a line with a
+# passno. It finds its line's options through findmnt (util-linux: the systemd
+# guest covers that), or takes them with -o, which is what this guest does: no
+# findmnt here. The backing's fsck is a stand-in script of type `fakefs` that
+# records what it was given and exits with the status in /tmp/fake.status.
+FSCK=/sbin/fsck.dcfs
+cat >/sbin/fsck.fakefs <<'EOF_FAKE'
+#!/bin/sh
+echo "$*" >/tmp/fake.args
+exit "$(cat /tmp/fake.status)"
+EOF_FAKE
+chmod +x /sbin/fsck.fakefs
+
+if [ ! -x "$FSCK" ]; then
+	fail fsck-installed "$FSCK is not an executable"
+else
+	"$FSCK" -V >"$OUT" 2>&1
+	if [ $? -eq 0 ] && grep -q '^fsck.dcfs (dcfs ' "$OUT"; then
+		pass fsck-version
+	else
+		fail fsck-version "$(cat "$OUT")"
+	fi
+
+	# A cache that is not a database.
+	garbage_cache() { head -c 8192 /dev/zero | tr '\0' x >"$1"; }
+
+	# none and bind: no device to check; the cache is.
+	rm -f "$CACHE/fs1.db"
+	"$FSCK" -n -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/fs1.db" "$SRC" >"$OUT" 2>&1
+	if [ $? -eq 0 ] && grep -q 'no device to check' "$OUT" && [ ! -e "$CACHE/fs1.db" ]; then
+		pass fsck-none-has-no-device-and-creates-nothing
+	else
+		fail fsck-none-has-no-device-and-creates-nothing "rc=$? $(cat "$OUT")"
+	fi
+	"$FSCK" -a -o "dcfs.fstype=bind,dcfs.cache_db=$CACHE/fs1.db" "$SRC" >"$OUT" 2>&1
+	[ $? -eq 0 ] && grep -q 'no device to check' "$OUT" && pass fsck-bind-has-no-device || fail fsck-bind-has-no-device "$(cat "$OUT")"
+
+	# The backing's fsck gets the flags and the device, and its status is
+	# relayed, or'ed with the cache's.
+	rm -f "$CACHE/fs2.db"
+	echo 0 >/tmp/fake.status
+	"$FSCK" -a -f -C3 -o "dcfs.fstype=fakefs,dcfs.cache_db=$CACHE/fs2.db" /dev/fake >"$OUT" 2>&1
+	rc_ok=$?
+	if [ "$rc_ok" -eq 0 ] && [ "$(cat /tmp/fake.args)" = "-a -f -C3 /dev/fake" ]; then
+		pass fsck-backing-gets-flags-and-device
+	else
+		fail fsck-backing-gets-flags-and-device "rc=$rc_ok args='$(cat /tmp/fake.args)' $(cat "$OUT")"
+	fi
+	all_ok=1
+	for want in 1 4 8 12; do
+		echo "$want" >/tmp/fake.status
+		"$FSCK" -n -o "dcfs.fstype=fakefs,dcfs.cache_db=$CACHE/fs2.db" /dev/fake >"$OUT" 2>&1
+		[ $? -eq "$want" ] || { all_ok=0; echo "backing $want relayed as $?" >>"$OUT.why"; }
+	done
+	if [ "$all_ok" -eq 1 ]; then
+		pass fsck-relays-the-backings-status
+	else
+		fail fsck-relays-the-backings-status "$(cat "$OUT.why")"
+	fi
+
+	# The cache: -n reports (4), -y rebuilds (1), and the two statuses combine.
+	echo 0 >/tmp/fake.status
+	garbage_cache "$CACHE/fs3.db"
+	"$FSCK" -n -o "dcfs.fstype=fakefs,dcfs.cache_db=$CACHE/fs3.db" /dev/fake >"$OUT" 2>&1
+	rc_n=$?
+	if [ "$rc_n" -eq 4 ] && grep -q 'is corrupt' "$OUT" && [ -e "$CACHE/fs3.db" ]; then
+		pass fsck-n-reports-a-corrupt-cache
+	else
+		fail fsck-n-reports-a-corrupt-cache "rc=$rc_n $(cat "$OUT")"
+	fi
+	"$FSCK" -y -o "dcfs.fstype=fakefs,dcfs.cache_db=$CACHE/fs3.db" /dev/fake >"$OUT" 2>&1
+	rc_y=$?
+	if [ "$rc_y" -eq 1 ] && grep -q 'starts cold' "$OUT" && [ ! -e "$CACHE/fs3.db" ]; then
+		pass fsck-y-rebuilds-a-corrupt-cache
+	else
+		fail fsck-y-rebuilds-a-corrupt-cache "rc=$rc_y $(cat "$OUT")"
+	fi
+	garbage_cache "$CACHE/fs3.db"
+	echo 4 >/tmp/fake.status
+	"$FSCK" -p -o "dcfs.fstype=fakefs,dcfs.cache_db=$CACHE/fs3.db" /dev/fake >"$OUT" 2>&1
+	rc_c=$?
+	[ "$rc_c" -eq 5 ] && pass fsck-combines-backing-4-and-cache-1 || fail fsck-combines-backing-4-and-cache-1 "rc=$rc_c $(cat "$OUT")"
+	garbage_cache "$CACHE/fs3.db"
+	echo 8 >/tmp/fake.status
+	"$FSCK" -n -o "dcfs.fstype=fakefs,dcfs.cache_db=$CACHE/fs3.db" /dev/fake >"$OUT" 2>&1
+	rc_c=$?
+	[ "$rc_c" -eq 12 ] && pass fsck-combines-backing-8-and-cache-4 || fail fsck-combines-backing-8-and-cache-4 "rc=$rc_c $(cat "$OUT")"
+	rm -f "$CACHE/fs3.db"
+
+	# A database a daemon holds is reported, never waited for or touched.
+	wrapper -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/fs4.db" "$SRC" "$MNT"
+	only_one_daemon
+	FSCK_HELD_PID=$DPID
+	"$FSCK" -y -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/fs4.db" "$SRC" >"$OUT" 2>&1
+	rc_h=$?
+	if [ "$rc_h" -eq 8 ] && grep -q 'in use by a running dcfs' "$OUT" && [ -e "$CACHE/fs4.db" ] && [ -d "/proc/$FSCK_HELD_PID" ]; then
+		pass fsck-held-cache-is-reported-not-touched
+	else
+		fail fsck-held-cache-is-reported-not-touched "rc=$rc_h $(cat "$OUT")"
+	fi
+	[ -n "$FSCK_HELD_PID" ] && unmount_check fsck-held-daemon-unmounts "$MNT"
+	# And once unmounted the same database checks clean.
+	"$FSCK" -n -o "dcfs.fstype=none,dcfs.cache_db=$CACHE/fs4.db" "$SRC" >"$OUT" 2>&1
+	[ $? -eq 0 ] && grep -q ': clean' "$OUT" && pass fsck-unmounted-cache-is-clean || fail fsck-unmounted-cache-is-clean "$(cat "$OUT")"
+
+	# Usage and operational errors: 16, and 8 (no fstab line: findmnt is not here).
+	"$FSCK" >"$OUT" 2>&1
+	rc_u1=$?
+	"$FSCK" /dev/a /dev/b >"$OUT" 2>&1
+	rc_u2=$?
+	"$FSCK" -o >"$OUT" 2>&1
+	rc_u3=$?
+	if [ "$rc_u1" -eq 16 ] && [ "$rc_u2" -eq 16 ] && [ "$rc_u3" -eq 16 ] && grep -q 'usage: fsck.dcfs' "$OUT"; then
+		pass fsck-usage-errors-are-16
+	else
+		fail fsck-usage-errors-are-16 "$rc_u1 $rc_u2 $rc_u3: $(cat "$OUT")"
+	fi
+	"$FSCK" -n /dev/nowhere >"$OUT" 2>&1
+	rc_o=$?
+	[ "$rc_o" -eq 8 ] && grep -q 'fstab' "$OUT" && pass fsck-no-fstab-line-is-8 || fail fsck-no-fstab-line-is-8 "rc=$rc_o $(cat "$OUT")"
+	"$FSCK" -n -o "dcfs.fstype=fakefs" /dev/fake >"$OUT" 2>&1
+	rc_o=$?
+	[ "$rc_o" -eq 8 ] && grep -q 'dcfs.cache_db' "$OUT" && pass fsck-no-cache-db-is-8 || fail fsck-no-cache-db-is-8 "rc=$rc_o $(cat "$OUT")"
+	"$FSCK" -n -o "dcfs.fstype=nosuchfs,dcfs.cache_db=$CACHE/fs5.db" /dev/fake >"$OUT" 2>&1
+	rc_o=$?
+	[ "$rc_o" -eq 8 ] && grep -q 'fsck.nosuchfs not found' "$OUT" && pass fsck-missing-checker-is-8 || fail fsck-missing-checker-is-8 "rc=$rc_o $(cat "$OUT")"
+fi
+
 require_no_reclaim no-reclaim
 exit "$FAILED"

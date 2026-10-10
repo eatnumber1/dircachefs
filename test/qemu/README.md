@@ -1668,6 +1668,13 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   requires its parent; stopping the child leaves the parent and stopping the
   parent stops the child; a start that fails marks the unit failed with
   dcfs's message in the journal;
+- fsck (step 15.5): `fsck /data` (fstab passno 2) runs `fsck.dcfs`, which
+  finds the line through `findmnt --fstab`, runs `fsck.ext4` (type by `blkid`)
+  and checks the cache; `fsck /data -- -n` reports a corrupt cache (status 4),
+  `-- -y` deletes it (status 1), a `none` line has no device (status 0), a
+  type with no checker is 8; and after the reboot systemd's
+  `systemd-fsck@...` unit for the passno-2 line ran `fsck.dcfs` (its line is
+  in the journal) and finished before `data.mount` became active;
 - the journal: the daemon's syslog lines are attributed to its mount unit
   (`journalctl -u data.mount`, `_SYSTEMD_UNIT=`) at the threshold the
   options set (`dcfs.stderrthreshold=0` shows the INFO narrative; the
@@ -1681,6 +1688,12 @@ disabled console login and the `nofail` boot, do not depend on the wrapper):
   the backing disk (`sectors_read`); a `nofail` mount of a missing device did
   not hold the boot (the script began while that mount's start job was still
   waiting, with its device timeout set to ten minutes).
+
+`mount_dcfs_test` (busybox, no findmnt) runs `fsck.dcfs -o OPTIONS` against a
+stand-in `fsck.fakefs` that records its arguments and exits with a chosen
+status: the flags and device reach it, its status is relayed and or'ed with the
+cache's (1, 4, 5, 8, 12), a garbage cache is reported by `-n` and deleted by
+`-y`, a database a daemon holds is reported (8) and left, usage errors are 16.
 
 What the real `mount(8)` path showed that the busybox guest could not:
 

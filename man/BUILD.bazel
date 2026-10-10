@@ -20,6 +20,7 @@ genrule(
           "'Instances, trees and boundaries' 'Running under systemd' " +
           "'Responsibilities of the administrator' 'Exporting over NFS' " +
           "'Shutdown, crashes and restarts' " +
+          "'Checking a dcfs filesystem' " +
           "'Wiping the cache of one instance' " +
           "'After an out-of-band change' 'Upgrading dcfs' " +
           "'What the log messages mean' Limitations > $@",
