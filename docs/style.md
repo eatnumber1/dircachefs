@@ -689,6 +689,29 @@ fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
   `else`, no `if (ok) { next thing }` nesting, and no `status` carried
   across statements to be checked later. A happy path that is indented
   is failure handling written in the wrong place: move it.
+- **The message about a failure is written where the failure is found,
+  even when the function carries on** (russ, 2026-10-11, on
+  `RaiseFileLimit`'s `if (second.ok()) { LOG(WARNING) ... } else { LOG ...
+  }`: "why are we logging a warning if the status we just checked is ok?
+  I had to read further up in the function to understand. You should be
+  doing the logging of the warning in the if statement above it which
+  currently is just `if (first.ok()) return;` as since it's the error
+  handling line following the setrlimit call, it's logically 'attached'
+  to it."). The handling of a failure, a return or a log line or a
+  fallback, sits in the `if` right after the call; a later branch never
+  explains an earlier failure. So: `setrlimit(want)`; `if (!ok) { LOG the
+  nr_open refusal; fall through to the hard-limit attempt }`;
+  `setrlimit(hard)`; `if (!ok) { LOG that too; return; }`.
+- **Blank lines separate the things a function does; error handling is
+  part of its thing** (russ, 2026-10-11): "use empty lines between
+  different 'things' that the function does (not error handling, that's
+  part of the 'thing'). If you have a hard time teasing out the things the
+  function does into logical blocks, you've maybe got them too coupled
+  together like in RaiseFileLimit today." A block is a call and its
+  handling; the next block starts after a blank line; a block with no
+  name that could be written above it as a one-line comment is a sign the
+  function's things are tangled, and a function whose blocks are many is
+  a function to split along those blank lines.
 - **Undo is an `absl::Cleanup` declared right after the thing it undoes,
   and success cancels it** (rule). Each early return then undoes exactly
   what happened before it with no code of its own, and the commit point

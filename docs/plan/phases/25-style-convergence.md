@@ -822,10 +822,11 @@ needed); the two setrlimit attempts and their diagnostics are tangled
 across four branches. The shape 1.6a asks for: getrlimit, handle, return;
 `want` from a helper `NrOpenOrHardLimit(const rlimit &)` that reads
 /proc/sys/fs/nr_open, logs once if unreadable and returns the larger of
-nr_open and the hard limit; `setrlimit` to `want`, ok → return;
-`setrlimit` to the hard limit, not ok → log both statuses (logged, not
-joined into one Status) and return; else log that the soft limit went to
-the hard one. Sweep: this function first, then every function the
+nr_open and the hard limit; `setrlimit` to `want`; if not ok, log the nr_open
+refusal right there and fall through; `setrlimit` to the hard limit; if
+not ok, log that and return; blank lines between the four things (russ,
+2026-10-11: the message lives where the failure is found; blank lines
+separate the things, error handling is part of its thing). Sweep: this function first, then every function the
 `happy_path_nested` matcher and the census list (`nested-happy-path` 6,
 `status-carried` 8, the 12 `if (x.ok()) {` sites 25.15's reviewer counted,
 `sqlite.cc`'s RunTransaction among them), then the 32 `break-up`

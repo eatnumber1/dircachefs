@@ -2882,3 +2882,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ stated the principle behind 1.6a: the region of code needed to understand a region should
   be as small as possible, no long-distance jumps; written as 1.6a's opening paragraph with each
   rule tied to the jump it removes.
+- russ, two more 1.6a rules from RaiseFileLimit: a failure's message is written where the failure
+  is found (not in a later branch that reads oddly on its own), and blank lines separate the
+  things a function does, with error handling part of its thing; 25.25's target shape updated.
