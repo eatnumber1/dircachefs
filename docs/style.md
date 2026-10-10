@@ -105,6 +105,17 @@ use it as design guidance rather than firm rules."
   `unique_ptr`/`shared_ptr` without a following qualifier in `dcfs/*.h`
   catches the rest (plan step 25.16; today 0 annotations, about 30 raw
   pointers in headers).
+- **Banned: `std::function`, `std::unordered_map`/`std::unordered_set`,
+  `std::chrono`** (russ, 2026-10-10: "These classes / functions are
+  banned. Abseil's versions are always better."). In their place:
+  `absl::AnyInvocable` (owning) or `absl::FunctionRef` (a parameter that
+  is only called); `absl::flat_hash_map`/`flat_hash_set`
+  (`node_hash_*` when pointers into the table must stay valid);
+  `absl::Time`/`absl::Duration`/`absl::Now()` for time arithmetic (never
+  for waiting: 1.11). Everywhere, tests included. Mechanically:
+  `tools/repo_shape.py` refuses the three names in our C++ with no
+  allowlist (25.17); today `std::function` twice in `session_loop.h`,
+  `std::chrono` in one test, no `std::unordered_*`.
 - **Reach for Abseil before writing a helper**: `docs/abseil-utilities.md`
   (25.19) catalogues the pinned Abseil (20260817.0) with a swaps table
   (hand-written pattern → utility, each marked with the rule that demands

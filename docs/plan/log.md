@@ -2772,3 +2772,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - The no-intentional-crashes rule existed only in plan step 25.9, not in docs/style.md (the
   catalogue agent noticed 1.6 still allowed CHECK): written as style 1.6b from russ's words, with
   the tests exception and the mechanical plan.
+- russ: `std::function`, `std::unordered_map`/`set`, `std::chrono` banned ("Abseil's versions are
+  always better"); style 1.2; the bans and their three existing uses folded into 25.17.
