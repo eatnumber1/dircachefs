@@ -615,6 +615,12 @@ stale comment ("our flags live in dcfs/*.cc") goes, and a repo_shape
 rule refuses `ABSL_FLAG(` / `absl::GetFlag(` outside main files (no
 allowlist; fixtures). A test that `--help` lists the three flags under
 the installed name, if none exists.
+Also (russ, 2026-10-11, style 1.2's locals bullet): the `const_local_value`
+matcher under tools/style_matchers/ (a const-qualified local VarDecl of
+non-reference, non-pointer type, not constexpr, not static; fixtures
+both ways) with today's sites allowlisted; then the sweep drops `const`
+from locals where nothing relies on it (a value a later line relies on
+keeps it with a word why), about 88 production sites.
 
 ## 25.21 Zero-token style checks: clang-query matchers and clang-tidy readability now (russ, 2026-10-10, "Do it"; dispatched, lane-4)
 

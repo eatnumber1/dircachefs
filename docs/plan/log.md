@@ -2869,3 +2869,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (TotW #103): flags live only in main.cc; IsDcfsFlagFile's directory match is overly broad
   (and its comment stale: the three flags are all in main.cc already). Style 1.2 bullet; the fix
   and a repo_shape rule folded into 25.20.
+- Style rule (russ, 2026-10-11): locals are non-const by default; const where it says something
+  (a reference to others' data, thread-safety, constexpr, a relied-on invariant). Style 1.2; a
+  const_local_value matcher and the sweep folded into 25.20 (about 88 production sites).

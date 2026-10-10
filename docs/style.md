@@ -129,6 +129,24 @@ use it as design guidance rather than firm rules."
   field or return type without a qualifier, as a report-only count until
   plan step 25.16 annotates the tree and turns it into a gate (today 0
   annotations; the report counts them).
+- **Locals are non-const by default** (russ, 2026-10-11, on `const struct
+  rlimit limit = *current;`): "no const on local scalars (unless needed).
+  Our default is non-const. Sometimes const is needed or useful to code
+  readers (for instance to improve thread-safety, or when creating a
+  reference to someone else's pointer, etc.), but our _default_ is
+  non-const." So a local value (`int n = ...`, `struct rlimit limit =
+  ...`, `std::string path = ...`) is written without `const`; `const` on a
+  local says something and the reader should find what: a reference or
+  pointer to data owned elsewhere that must not be written through
+  (`const Credentials &caller`, `const char *absl_nullable name`), a value
+  shared between threads, a `constexpr` constant, or a value whose
+  immutability a later line relies on (then say so). `misc-const-
+  correctness` stays denied in `.clang-tidy` for the same reason: it
+  wants the opposite default. Mechanically: a clang-query matcher
+  `const_local_value` (a const-qualified local of non-reference,
+  non-pointer type, excluding `constexpr` and `static`) under 25.21's
+  aspect, with today's sites allowlisted and shrinking (25.20; about 88
+  in production).
 - **Flags are defined only in a program's main file** (TotW #103 "Flags Are
   Globals"; russ, 2026-10-11, on `IsDcfsFlagFile` claiming every file
   under `dcfs/`: "per https://abseil.io/tips/103 flags should only live in
