@@ -2934,3 +2934,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   ~/Sources/dircachefs-lanes/ (the agent also reported seven `bazel-profile-*` directories there,
   but none exist; the classifier refused the agent's rm so the empty directory stays), plus
   lane-3's `.scratch/`.
+- 25.23 part 2 merged (lane-2 → b49c64f, 18 commits, gate exit 0). The in-flight group is done;
+  no lane is running. Next per the Queue: the trial runbook (item 2), the first dispatch when the
+  pace allows (meter at 91% this morning; today's spend: six Haiku runs and one Sonnet triage).
+  Push point: main at this commit.

@@ -835,3 +835,25 @@ by function, each a commit with the shape it got and why, tests green,
 no behaviour change; a function whose split needs a new seam gets a
 one-line reason and stays. The dcfs-style-reviewer passes over the
 result (questions ruled by the orchestrator).
+
+25.23 part 2 merged 2026-10-11 (b49c64f, 18 commits, mechanical agent):
+include-cleaner by hand on 27 files (IWYU keep pragmas on the macro
+headers, bits/* and asm-generic/* replaced by the public headers,
+deprecated C headers to their C++ forms): 390 → 88 findings; then the
+auto-fixable checks one commit each: raw-string-literal 32 → 0,
+braces-around-statements 24 → 0, noexcept-move-constructor 12 → 0,
+use-emplace 11 → 1, loop-convert 7 → 0, and twelve smaller checks
+(override, starts-ends-with, for-range-copy, redundant-string-cstr,
+inefficient-vector-operation, unnecessary-value-param,
+return-braced-init-list, string-find-str-contains, move-const-arg,
+concat-nested-namespaces, avoid-endl, unnecessary-copy-initialization).
+Left as found, with reasons: inconsistent-ifelse-braces (all 36 inside
+gtest macro expansions, where fix-its do not apply); use-internal-linkage
+(its fix is `static`, which trips use-anonymous-namespace; the right fix
+is an anonymous namespace: judgement, 25.25's list); CLOCK_* (clang 22's
+include-cleaner maps no header to the POSIX clock ids; two allowlist
+lines with the reason, a tool gap); six checks whose fix changed nothing
+or created another finding. Remaining for the judgement steps:
+unused-parameters 44, cert-err33-c 49, google-runtime-int 31,
+unchecked-optional-access 30, concurrency-mt-unsafe 26,
+cognitive-complexity 41 (25.25), use-internal-linkage 19.
