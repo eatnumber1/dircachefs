@@ -23,7 +23,14 @@
 #   --sizes=a,b      only tests of these sizes (default: all); the `full`
 #                    job's shards take large and enormous, small and medium
 #                    having run in `presubmit`.
-# Both are consumed here; every other argument goes to Bazel.
+#   --tag=NAME       only the tests tagged NAME (default: every test except the
+#                    ones tagged `xfstests`, which have a job of their own,
+#                    step 17.1: eighteen shards of 11 to 21 minutes would
+#                    double the full, asan and ubsan jobs); --tag also takes
+#                    --shard and --sizes;
+#   --print-queries  print the cquery expression of each size (no Bazel run),
+#                    for //tools:test_sh_test.
+# These are consumed here; every other argument goes to Bazel.
 #
 # Profile (step 26.16): with DCFS_CI_PROFILE set (the workflow does, one file
 # per job and shard), `bazel test` writes its JSON trace profile there
@@ -33,6 +40,8 @@
 set -euo pipefail
 
 shard=""
+tag=""
+print_queries=0
 list=0
 sizes="small,medium,large,enormous"
 bazel_args=()
@@ -42,6 +51,8 @@ for arg in "$@"; do
 	--shard=*) shard="${arg#--shard=}" ;;
 	--sizes=*) sizes="${arg#--sizes=}" ;;
 	--list) list=1 ;;
+	--tag=*) tag="${arg#--tag=}" ;;
+	--print-queries) print_queries=1 ;;
 	*)
 		bazel_args+=("$arg")
 		# cquery takes the build options (--config=asan, ...) but not
@@ -51,18 +62,46 @@ for arg in "$@"; do
 	esac
 done
 
+# The xfstests shards need KVM: under TCG one takes hours (the generic tests
+# are file system work for the guest's own CPU) and a backing file system's six
+# would not fit a job. Say so in the log, and test nothing.
+case "$tag" in
+xfstests*)
+	if [ "$list" != 1 ] && [ "$print_queries" != 1 ] && [ "${DCFS_CI_KVM:-0}" != 1 ]; then
+		echo "test.sh: no KVM on this runner: the xfstests shards (--tag=$tag) are not run" >&2
+		exit 0
+	fi
+	;;
+esac
+
 excluded=()
 if [ "${DCFS_CI_KVM:-0}" != 1 ]; then
 	excluded+=(//test/qemu:pjdfstest_test_xfs //test/qemu:pjdfstest_test_btrfs)
 fi
 
+# The cquery expression of the tests of size $1 this invocation may run. Tests
+# tagged `manual` run only when asked for by name (step 11.2b:
+# stress_random_test_*): `bazel test //...` skips them, and so must this. With
+# --tag only the tests with that tag; without, none tagged `xfstests` (they
+# are the `xfstests` job's, step 17.1).
+query() {
+	if [ -n "$tag" ]; then
+		echo "attr(size, '^$1\$', attr(tags, '$tag', tests(//...))) except attr(tags, 'manual', tests(//...))"
+	else
+		echo "attr(size, '^$1\$', tests(//...)) except attr(tags, 'manual|xfstests', tests(//...))"
+	fi
+}
+
+if [ "$print_queries" = 1 ]; then
+	for size in ${sizes//,/ }; do query "$size"; done
+	exit 0
+fi
+
 # The `SIZE LABEL` lines of the tests this shard may run, before sharding.
-# Tests tagged `manual` run only when asked for by name (step 11.2b:
-# stress_random_test_*): `bazel test //...` skips them, and so must this.
 suite_tests() {
 	local size
 	for size in ${sizes//,/ }; do
-		bazel cquery "${config_args[@]}" "attr(size, '^${size}\$', tests(//...)) except attr(tags, 'manual', tests(//...))" \
+		bazel cquery "${config_args[@]}" "$(query "$size")" \
 			--output=starlark \
 			--starlark:expr="'' if 'IncompatiblePlatformProvider' in str(providers(target)) else str(target.label)" |
 			awk -v size="$size" 'NF { sub(/^@@/, "", $1); print size, $1 }'
@@ -75,6 +114,9 @@ without() {
 }
 
 targets=(//...)
+if [ -n "$tag" ] && [ -z "$shard" ]; then
+	shard=0/1 # a tag selects test targets, which only the shard path lists
+fi
 if [ -n "$shard" ]; then
 	mapfile -t targets < <(suite_tests | without "${excluded[@]}" | ./.github/ci/shard.sh "${shard%/*}" "${shard#*/}")
 	echo "test.sh: shard $shard of sizes $sizes: ${#targets[@]} test targets" >&2

@@ -1,7 +1,9 @@
 # CI: the whole test suite, in three jobs of increasing size (the tiers of
 # test/qemu/README.md) and two sanitizer suites (`asan`, `ubsan`) that run in
 # parallel with the last tier, `full`; those three jobs are matrices of three
-# shards each (.github/ci/test.sh --shard=I/3). Every dcfs test, unit tests included,
+# shards each (.github/ci/test.sh --shard=I/3). The xfstests generic tests
+# (step 17.1) are a job of their own, `xfstests`, one runner per backing file
+# system, and are left out of those three. Every dcfs test, unit tests included,
 # boots the project's own kernel under QEMU as root; KVM is used when the runner has
 # it (public repositories' standard Linux runners do) and TCG otherwise
 # (.github/ci/prepare.sh, .github/ci/test.sh). Bazel builds everything the
@@ -631,6 +633,92 @@ jobs:
             ${{ env.DCFS_BAZEL_EXTERNAL }}/+llvm_distribution+dcfs_llvm
             ${{ env.DCFS_BAZEL_EXTERNAL }}/@+llvm_distribution+dcfs_llvm.marker
           key: ${{ steps.llvmcache.outputs.cache-primary-key }}
+      - name: Save Bazel caches
+        if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+  xfstests:
+    # Step 17.1: xfstests' generic tests against dcfs, one runner per backing
+    # file system (.github/ci/test.sh --tag=xfstests-<fstype>): the six shards
+    # of a file system (`enormous`, two vCPUs and 1 GiB each) two at a time on
+    # the runner's four vCPUs. Their own job because eighteen shards of 11 to
+    # 21 minutes would roughly double `full` (test.sh leaves the tag out of its
+    # partition, and of `asan` and `ubsan`, where the shards are incompatible
+    # anyway: test/qemu/README.md, "xfstests (Phase 17)"). Without KVM the job
+    # tests nothing (test.sh says so).
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        backing: [ext4, xfs, btrfs]
+    # Limit = 1.6x the upper estimate (2026-10-09: the cold part is fetch 24 min + build 20 min = 45 min; a file system's six shards took 11 to 21 minutes each, 4.5 hours of guest time in all, measured with six guests at once on a 4-core host at load average 9-19, so 2 guests at a time on a runner that has nothing else should take 8 to 15 minutes each: 3 rounds, 25 to 45 minutes, 70 to 90 minutes with the cold part and 63 + 45 = 110 minutes if the contention were what was measured; no `cold` run has measured it on a runner)
+    timeout-minutes: 180
+    env:
+      # Step 26.16: where Bazel writes its profile (test.sh, coverage.sh,
+      # tools/reproducible_build.sh); the steps below summarize and upload it.
+      DCFS_CI_PROFILE: ${{ github.workspace }}/ci-profile/xfstests-${{ matrix.backing }}.json.gz
+    needs: presubmit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare the runner (KVM, Bazelisk, user.bazelrc)
+        run: ./.github/ci/prepare.sh
+      - name: Restore the repository cache
+        id: repocache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: bazel-repo-${{ hashFiles('MODULE.bazel.lock') }}
+          restore-keys: |
+            bazel-repo-
+      - name: Restore Bazel caches
+        id: cache
+        if: ${{ inputs.cold != true }}
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/bazel-disk-cache
+            ~/.cache/bazelisk
+          key: bazel-xfstests-${{ matrix.backing }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-${{ github.sha }}
+          restore-keys: |
+            bazel-xfstests-${{ matrix.backing }}-${{ hashFiles('MODULE.bazel', 'MODULE.bazel.lock', '.bazelversion') }}-
+            bazel-xfstests-${{ matrix.backing }}-
+            bazel-xfstests-
+            bazel-full-
+            bazel-
+      - name: Test (${{ matrix.backing }})
+        run: ./.github/ci/test.sh --tag=xfstests-${{ matrix.backing }}
+      - name: Report the accelerator
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/accelerator.sh
+      - name: Where the time went (job summary)
+        if: ${{ !cancelled() }}
+        run: ./.github/ci/profile.sh
+      - name: Upload the Bazel profile
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bazel-profile-xfstests-${{ matrix.backing }}
+          path: ci-profile
+          if-no-files-found: ignore
+      - name: Upload test logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-logs-xfstests-${{ matrix.backing }}
+          path: ci-test-logs
+          if-no-files-found: ignore
+      - name: Save the repository cache
+        if: ${{ !cancelled() && inputs.cold != true && steps.repocache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/bazel-repo-cache
+          key: ${{ steps.repocache.outputs.cache-primary-key }}
       - name: Save Bazel caches
         if: ${{ !cancelled() && inputs.cold != true && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

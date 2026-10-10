@@ -7,6 +7,7 @@ load("//formal:trace.bzl", "tla_trace_test")
 load("//test/qemu:host_only.bzl", "HOST_ONLY_COMPATIBLE")
 load(":guest_libs.bzl", "GUEST_LIBS_ENV", "GUEST_LIBS_TOOLS")
 load(":qemu_test.bzl", "CONCURRENT_CPUS", "qemu_test", "qemu_test_matrix")
+load(":xfstests.bzl", "xfstests_test")
 load("//third_party/xfstests:helpers.bzl", "XFSTESTS_HELPERS", "XFSTESTS_VFS_HELPERS")
 
 # Guest memory classes (step 6.2), in MiB; the measurements behind each are in
@@ -1540,7 +1541,11 @@ filegroup(
     name = "xfstests_lists",
     srcs = glob([
         "guest/xfstests.*.expected_failures",
+        "guest/xfstests.*.notrun",
+        "guest/xfstests.*.excluded",
+        "guest/xfstests.*.slow",
         "guest/xfstests.excluded",
+        "guest/xfstests.slow",
     ]),
 )
 
@@ -1584,28 +1589,38 @@ genrule(
 # its cmdline to name the tests to run (no gate); see guest/xfstests.sh.
 XFSTESTS_SHARDS = [1, 2, 3, 4, 5, 6]
 
-[qemu_test(
+# The slow tests (guest/xfstests.slow, step 17.3 owns them): the same gate with
+# a limit of 1500 s each, in shards of about four tests (guest/xfstests_slow_<n>.sh),
+# for the weekly run: `manual`, so that `bazel test //...` does not run them,
+# until the lists of their outcomes (xfstests.slow.<fstype>.*) exist.
+XFSTESTS_SLOW_SHARDS = [1, 2, 3, 4, 5, 6, 7, 8]
+
+# xfstests.bzl: every xfstests target is made by xfstests_test, which gives it
+# the tags `xfstests` and `xfstests-<fstype>` (the `xfstests` job of the
+# workflow runs them, `test.sh --tag=xfstests-<fstype>`; test.sh leaves them
+# out of the full, asan and ubsan shards), two vCPUs and the incompatibility
+# with the sanitizer configurations.
+[xfstests_test(
     name = "xfstests_%d_test_%s" % (shard, fstype),
-    disks = [("vdb", fstype, "1G"), ("vdc", fstype, "1G")],
+    fstype = fstype,
     guest_script = "guest/xfstests_%s.sh" % shard,
-    mem = 1024,
-    rootfs = ":xfstests_rootfs",
-    size = "large",
-    timeout = "eternal",
 ) for shard in XFSTESTS_SHARDS for fstype in ["ext4", "xfs", "btrfs"]]
+
+[xfstests_test(
+    name = "xfstests_slow_%d_test_%s" % (shard, fstype),
+    fstype = fstype,
+    guest_script = "guest/xfstests_slow_%s.sh" % shard,
+    tags = ["manual", "xfstests-slow"],
+) for shard in XFSTESTS_SLOW_SHARDS for fstype in ["ext4", "xfs", "btrfs"]]
 
 # The same shards on the native file system, without dcfs: what the backing
 # answers, for triage (guest/xfstests.sh, xfstests_native=1). No gate.
-[qemu_test(
+[xfstests_test(
     name = "xfstests_%d_native_test_%s" % (shard, fstype),
     cmdline = "xfstests_native=1",
-    disks = [("vdb", fstype, "1G"), ("vdc", fstype, "1G")],
+    fstype = fstype,
     guest_script = "guest/xfstests_%s.sh" % shard,
-    mem = 1024,
-    rootfs = ":xfstests_rootfs",
-    size = "large",
     tags = ["manual"],
-    timeout = "eternal",
 ) for shard in XFSTESTS_SHARDS for fstype in ["ext4", "xfs", "btrfs"]]
 
 [test_suite(
@@ -1613,33 +1628,53 @@ XFSTESTS_SHARDS = [1, 2, 3, 4, 5, 6]
     tests = [":xfstests_%d_test_%s" % (shard, fstype) for shard in XFSTESTS_SHARDS],
 ) for fstype in ["ext4", "xfs", "btrfs"]]
 
-[qemu_test(
+[test_suite(
+    name = "xfstests_slow_test_" + fstype,
+    tags = ["manual"],
+    tests = [":xfstests_slow_%d_test_%s" % (shard, fstype) for shard in XFSTESTS_SLOW_SHARDS],
+) for fstype in ["ext4", "xfs", "btrfs"]]
+
+[xfstests_test(
     name = "xfstests_dev_test_" + fstype,
     cmdline = "xfstests_run=generic/001,generic/002 xfstests_timeout=120",
-    disks = [("vdb", fstype, "1G"), ("vdc", fstype, "1G")],
+    fstype = fstype,
     guest_script = "guest/xfstests.sh",
-    mem = 1024,
-    rootfs = ":xfstests_rootfs",
-    size = "large",
     tags = ["manual"],
-    timeout = "eternal",
 ) for fstype in ["ext4", "xfs", "btrfs"]]
+
+# Step 17.1: every xfstests target is made by xfstests_test (xfstests.bzl), which
+# gives it the `xfstests` tag that .github/ci/test.sh leaves out of the full, asan
+# and ubsan shards (//tools:test_sh_test checks that selection). The test reads
+# this file: no qemu_test of an xfstests guest script may bypass the macro.
+sh_test(
+    name = "xfstests_tags_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["xfstests_tags_test.sh"],
+    args = ["$(location BUILD.bazel)"],
+    data = ["BUILD.bazel"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
 
 # Step 17.1: self-check of the xfstests gate (guest/xfstests_lib.sh): the real
 # functions over canned results and lists, each kind of breach rejected.
 sh_test(
     name = "xfstests_gate_test",
     size = "small",
-    timeout = "short",
     srcs = ["xfstests_gate_test.sh"],
     args = [
         "$(location guest/lib.sh)",
         "$(location guest/xfstests_lib.sh)",
+        "$(location @alpine_busybox//:root/bin/busybox.static)",
+        "$(location @alpine_gawk//:gawk)",
     ],
     data = [
         "guest/lib.sh",
         "guest/xfstests_lib.sh",
+        "@alpine_busybox//:root/bin/busybox.static",
+        "@alpine_gawk//:gawk",
     ],
+    timeout = "short",
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 

@@ -276,6 +276,18 @@ sh_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Self-check of the test selection of .github/ci/test.sh (step 17.1): without
+# --tag the tests tagged xfstests (the `xfstests` job's) and manual are left
+# out of every size, with --tag only the tagged ones are selected.
+sh_test(
+    name = "test_sh_test",
+    size = "small",
+    srcs = ["test_sh_test.sh"],
+    args = ["$(location //:.github/ci/test.sh)"],
+    data = ["//:.github/ci/test.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
 # Every syscall goes through dcfs/syscalls.h (docs/style.md 1.5): no raw libc
 # call outside dcfs/syscalls.cc in any C++ file. The finder's own unit tests
 # are one target; the scan of the tree (dcfs/, dcfs/testonly/, bench/) fails

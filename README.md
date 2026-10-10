@@ -915,11 +915,16 @@ the two sanitizer suites:
 | `reproducible` | two builds of the shipped outputs in two output bases are byte-identical | `fast` |
 | `mutation-changed` | mutation testing of the protocol functions the push touched (at most 30 mutants); fails on a survivor | `fast` |
 | `full` | the large and enormous tests (pjdfstest on all three filesystems), in 3 shards | `presubmit` |
+| `xfstests` | xfstests' generic tests against dcfs (`.github/ci/test.sh --tag=xfstests-<fstype>`), one runner per backing file system (3 runners); not in `full`, `asan` or `ubsan` | `presubmit` |
 | `asan` | `bazel test --config=asan` over every tier, in 3 shards | `presubmit` |
 | `ubsan` | `bazel test --config=ubsan` over every tier, in 3 shards | `presubmit` |
 | `noisy` | weekly (and `workflow_dispatch` with `noisy`): the suite with the quiet kernel's sysctls at the kernel's defaults and two vCPUs per guest, small and medium tests three times each, plus the mixed-fault sequences' long tail; failures are findings in the job summary, not a red run (`test/qemu/README.md`, "A noisy run") | |
 
-`full`, `asan` and `ubsan` run in parallel, nine runners in all, each with its
+`full`, `asan` and `ubsan` run in parallel, nine runners in all (and the three
+of `xfstests`, whose six shards per file system, 11 to 21 minutes each on the
+loaded development host, would roughly double them: `test.sh` leaves the tag
+`xfstests` out of their partitions, and the shards are incompatible with the
+sanitizers; test/qemu/README.md, "xfstests (Phase 17)"), each with its
 own cache key and a time limit (180 minutes; `asan` 240), so no suite's length bounds the others.
 A shard is a deterministic partition of the suite's test targets
 (`.github/ci/test.sh --shard=I/N`, dealt out by `.github/ci/shard.sh` over
@@ -977,8 +982,8 @@ than another shard; neither is done until a `cold` run measures the shards.
 - **Where the time goes.** Every job that runs Bazel at length writes its JSON
   trace profile (`--profile`) and uploads it, success or failure, as the
   `bazel-profile-<job>[-<shard>]` artifact: `fast`, `presubmit`, `coverage`,
-  `osv` (its fetch), `reproducible` (one profile per build) and each shard of
-  `full`, `asan` and `ubsan`. The test jobs add Bazel's compact execution log
+  `osv` (its fetch), `reproducible` (one profile per build), each shard of
+  `full`, `asan` and `ubsan` and each backing file system of `xfstests`. The test jobs add Bazel's compact execution log
   (`<job>.execlog.zst`; 0.9 MB for a warm fast-tier run, not measured cold).
   `mutation-changed` and the weekly mutation run start a Bazel per mutant and
   write none. `tools/ci_profile.py` (`bazel run //tools:ci_profile --

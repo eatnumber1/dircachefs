@@ -93,7 +93,7 @@ def resolve_mem(mem, asan_mem, default, asan_default):
         fail("asan_mem (%d) is smaller than mem (%d)" % (asan_mem, mem))
     return mem, asan_mem
 
-def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False, tags = [], cpus = E2E_CPUS, systemd_image = None, boots = 1):
+def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootfs = None, mem = None, asan_mem = None, modules = [], kernel_failure = None, plain_dcfs = False, power_cut = [], cmdline = "", checked_dcfs = False, tags = [], cpus = E2E_CPUS, systemd_image = None, boots = 1, target_compatible_with = []):
     """Declares a QEMU end-to-end test.
 
     Args:
@@ -115,6 +115,9 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
             /tests in, and chroots into it to run guest_script with GNU
             userspace and nfs-utils available. See guest/init's
             dcfs_rootfs= branch and third_party/debian/README.md.
+        target_compatible_with: sh_test's, for a test that cannot run in some
+            build configurations (step 17.1: the xfstests shards are
+            incompatible with --config=asan and --config=ubsan).
         cpus: the guest's vCPUs (run-qemu.sh --cpus; step 26.14), also the
             basis of the Bazel `cpu:` tag. Default E2E_CPUS (1); pass
             CONCURRENT_CPUS for a test whose point is concurrency (stress,
@@ -269,6 +272,7 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         ] + resource_tags + tags,
         size = size,
         timeout = timeout,
+        target_compatible_with = target_compatible_with,
     )
 
 # Step 5.2: dcfs's own README/plan promise ext4, xfs and btrfs, but every
