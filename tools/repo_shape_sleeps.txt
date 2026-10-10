@@ -6,11 +6,10 @@
 # of plan step 6.5 removes them. FORMAT: path count | reason
 
 test/qemu/guest/atime.sh 1 | lets a second pass so access times can differ (time is the subject)
+test/qemu/guest/boot.sh 2 | `sleep 1000 &` twice: a background process that exists to be a process the test kills or inspects (it waits for nothing)
 test/qemu/guest/cancel.sh 1 | settles after starting a background find so it is in flight (the event is its first backing request)
-test/qemu/guest/cancel_inventory.sh 2 | polls a state in the loop; lets RELEASE requests arrive (the event is the daemon having served them)
-test/qemu/guest/copy.sh 2 | a settle so the next change lands in a later second than a cached ctime (time is the subject); a poll for a helper's READY line (a fifo read is the event)
-test/qemu/guest/crash.sh 1 | polls a holder process for exit
-test/qemu/guest/destroy.sh 1 | polls a helper process for exit (wait, or a pidfd)
+test/qemu/guest/cancel_inventory.sh 1 | lets RELEASE requests arrive (the event is the daemon having served them)
+test/qemu/guest/copy.sh 1 | a settle so the next change lands in a later second than a cached ctime (time is the subject)
 test/qemu/guest/enospc_cache.sh 1 | lets a sync point run (the sync interval is time)
 test/qemu/guest/fault_backing.sh 1 | settle after a sync so the backing journal aborts before the check (the event is the abort: dm-flakey cannot signal it)
 test/qemu/guest/fault_cache.sh 1 | lets a sync point run (the sync interval is time)
@@ -20,17 +19,17 @@ test/qemu/guest/fault_power.sh 3 | `exec sleep 600` keeps the guest alive until 
 test/qemu/guest/fault_recover.sh 5 | sleep_until for a timed fault window (11.3c replaces it), polls for READY lines, a `sleep 100000` that holds a directory busy, a settle
 test/qemu/guest/fault_selftest.sh 2 | a settle after a trigger, sleep_until_uptime for the fault window (11.3c)
 test/qemu/guest/fault_shutdown.sh 5 | polls the daemon and a background job for exit (kill -0 loops); waits for sync-interval seconds to pass (time is the subject)
-test/qemu/guest/idle.sh 4 | waits out the sync interval before an idle window (time is the subject); polls a helper's READY line; the idle window itself
+test/qemu/guest/idle.sh 3 | waits out the sync interval before an idle window (time is the subject); polls a helper's READY line; the idle window itself
 test/qemu/guest/init 6 | the memory sampler's cadence (0.1 s between samples is its definition), waits for the sampler's first line, for instrumented processes to exit and /cov to stop changing, for the console to drain before reboot -f
-test/qemu/guest/lib.sh 2 | quiesce_daemon polls the daemon's wakeup counter until it is quiet (no event: the kernel's FORGET queue is not observable); a polling wait loop
+test/qemu/guest/lib.sh 1 | quiesce_daemon polls the daemon's wakeup counter until it is quiet (no event: the kernel's FORGET queue is not observable); a polling wait loop
 test/qemu/guest/lifecycle.sh 1 | polls for the mount to appear
 test/qemu/guest/memory.sh 3 | settles after drop_caches so RSS is read after the FORGETs are served (same event gap as quiesce_daemon)
 test/qemu/guest/mount_dcfs.sh 6 | polls for a pid's exit, for no daemons left, for the ext4 sysfs directory to go and for the mount to appear (events exist for each: a pidfd, the lock, a netlink uevent, a blocking read); waits for syslogd's socket
 test/qemu/guest/nfs.sh 5 | settles after starting rpc.idmapd and rpc.mountd (the events are their listening sockets); a polling loop; `timeout 1 sleep 5` is the test of timeout itself
-test/qemu/guest/power.sh 2 | polls a process; lets the kernel's attribute cache expire (time)
+test/qemu/guest/power.sh 1 | lets the kernel's attribute cache expire (time)
 test/qemu/guest/quiet_kernel.sh 1 | ten seconds of idle to show that nothing happens by itself (time is the subject)
-test/qemu/guest/release_leak.sh 3 | polls helper processes for exit; lets RELEASEs arrive
-test/qemu/guest/rename.sh 2 | settles after backgrounding a rename; polls for a READY line
+test/qemu/guest/release_leak.sh 1 | lets RELEASEs arrive after the sqlite-lock exits (the event is the daemon having served them)
+test/qemu/guest/rename.sh 1 | settles after backgrounding a rename (the event is the rename blocking in its backing syscall)
 test/qemu/guest/setattr.sh 2 | lets a second pass so timestamps differ (time is the subject)
 test/qemu/guest/strace_lib.sh 1 | polls /proc for the tracer's pid to appear (no event; ptrace attach is synchronous: wait on the strace process's own readiness line)
-test/qemu/guest/write.sh 5 | polls for a file and for helper MAPPED/STORED lines (a fifo read is the event)
+test/qemu/guest/write.sh 1 | polls for a file (a fifo read is the event)
