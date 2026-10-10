@@ -2542,3 +2542,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   lifetime, submount isolation and backing-side ro. A README section "none or bind" folded into
   lane-6's 15.8 round, and the agent asked whether anything (15.4's recorded bind mount points)
   needs `bind` at all; dropping it is a candidate simplification for russ.
+- russ (2026-10-10): "Delete it." 15.9 recorded and folded into lane-6's round: `dcfs.fstype=bind`
+  refused with a pointer to the native-bind recipe (no alias; russ floated one, declined for the
+  same strictness as allow_other, two lines if wanted); the capture helper keeps only the
+  native-type branch; tests converted or deleted with the reasons; README's section becomes
+  "`none`, and the native bind recipe"; 15.4 loses the bind bookkeeping.

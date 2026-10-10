@@ -322,8 +322,9 @@ and `StartupPurge`; switch `guest/lib.sh` and every QEMU test to
 (namespaces, root, failure paths).
 **15.3 Instance identity, cache path, fsid; mount source = spec.** Owner:
 Sonnet.
-**15.4 Stubs** (after Phase 14 (Identity from the backing filesystem)): stubs, ENOTSUP/EXDEV, the bind form's
-recorded mount points and reverting stale ones, non-directory boundaries.
+**15.4 Stubs** (after Phase 14 (Identity from the backing filesystem)): stubs, ENOTSUP/EXDEV,
+non-directory boundaries. (The bind form's recorded mount points and
+reverting stale ones were dropped with the bind form, 15.9, 2026-10-10.)
 Owner: Opus.
 **15.5 `fsck.dcfs` and `dcfs exports`.** Owner: Sonnet.
 Refined (russ, 2026-10-09: "add support for the sixth field of fstab, so
@@ -390,6 +391,28 @@ local and CI; check nothing we fetch is IPv6-only) and a `urls` list for
 the image (cdimage.debian.org canonical, cloud.debian.org, one stable
 mirror; same integrity). Every job behind fast was skipped on that push:
 the coverage fix and the toolchain cache are still unverified in CI.
+
+**15.9 Delete the `bind` form (russ, 2026-10-10: "Delete it.").** What
+`dcfs.fstype=bind` added over a native bind mount plus `none` (a
+detached clone in no namespace: isolation from mount propagation, no
+entry in the mount table, backing-side read-only) is reproducible with
+one standard fstab line or is of no use to us, at the cost of a second
+capture code path (`mount --bind`, the bind-specific ro remount keeping
+nosuid/nodev/noexec, the bind spec rules), its tests and docs, and 15.4's
+planned bookkeeping of recorded bind mount points. So: the option is
+refused as a usage error with a one-line pointer to the recipe (no alias
+to `none`: an alias would silently give the pinned-mount semantics to
+someone who asked for a detached clone, and nothing has deployed yet;
+russ asked "maybe make fstype=bind an alias for none?", two lines if he
+wants it after all); the capture helper keeps only the native-type
+branch; tests converted to `none` where they tested shared behaviour and
+deleted where bind-only; README's section becomes "`none`, and the native
+bind recipe" (a native bind of the disk to a raw path first, then dcfs
+over the original path with `requires-mounts-for` on the raw one, which
+keeps consumers' paths unchanged while snapshot and parity tools use the
+raw path); man page, design.md, Limitations updated. 15.4's text loses
+"the bind form's recorded mount points and reverting stale ones". In
+lane-6's current round (same parser and tests), subjects `15.9:`.
 
 **15.8 `allow_other` always on (russ, 2026-10-09).** russ: "Does it ever
 make sense not to pass dcfs.allow_other? If no, should we just always
