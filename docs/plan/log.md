@@ -2612,3 +2612,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   18 of 18 shards green at the tip. Sent for a rebase over 15.6b/15.8/15.9 (its mount wrapper adds
   the now-refused allow_other; the sleep allowlist; the bind rename), then merge without further
   review.
+- 17.1 merged (lane-4, rebased tip 51859d9 → main 5ea0719, eight commits, subject gate exit 0):
+  the rebase dropped the image's umount wrapper (15.6b's helper) and the mount retry, and the
+  mount wrapper no longer passes allow_other (15.8 refuses it). Phase 17 file and README row 17
+  updated; 17.2, 17.3, 17.1b, 17.1c stay queued behind the freeze. Lane-4 is free.
