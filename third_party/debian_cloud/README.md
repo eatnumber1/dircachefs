@@ -82,8 +82,6 @@ fill; `DefaultTimeoutStopSec=15s`. dcfs, `testutil` and `fhtest` are copied to
 5. A new Debian release (14) changes more than the date: its util-linux and
    systemd are what the test then covers; read the log of the first run.
 
-On a host whose IPv6 is unreachable, Bazel's Java downloader can time out
-connecting to `cloud.debian.org` (curl falls back to IPv4, Java does not):
-download the file with curl into a directory and pass
-`--distdir=<directory>`, or start Bazel with
-`--host_jvm_args=-Djava.net.preferIPv4Stack=true`.
+IPv6 connectivity issues are handled by the `.bazelrc` startup option
+`-Djava.net.preferIPv4Stack=true` (step 15.6c), which makes Bazel's Java
+downloader prefer IPv4 for all network requests.
