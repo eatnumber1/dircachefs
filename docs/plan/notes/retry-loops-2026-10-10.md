@@ -31,10 +31,13 @@ gets a liveness property (every begun unlink/rename/readdir eventually
 begins its mutation or serves its listing, under weak fairness of the
 other requests' steps) and the retry-or-EAGAIN branch becomes retry only.
 Today the loops cannot iterate at all (one request at a time), so the code
-change is small; the model change is the substance. Items 4 and 6b are
-contention with another *process* (an xattr writer), where no model can
-show progress: ruling still open (unbounded, with starvation possible under
-an adversarial writer, or one size-then-read and ERANGE as the answer).
+change is small; the model change is the substance. Items 4 and 6b (russ, 2026-10-10: "Do whatever the underlying filesystem
+does in this case"): a filesystem asked for a list or value into a buffer
+that became too small answers ERANGE and leaves the retry to the program.
+So one size-then-read, and ERANGE as the answer; where a client's own
+buffer size is at hand (FUSE GETXATTR/LISTXATTR with a size), pass that
+size through once and let the client see what the backing would have
+answered. The cache fill (XattrsOf) sizes once and reports ERANGE.
 Item 6a cannot iterate (the comment says so): one call pair, EINVAL
 reported, which is not a retry.
 

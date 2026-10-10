@@ -2640,3 +2640,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   for his ruling. The duplicate-mechanism question (backing xattr reopen) gets a standing review
   question in the agent prompts; the reopen allowlist idea was withdrawn (a reopen is not wrong on
   its face, so a reason column would have read true).
+- russ on the xattr sizing loops: do what the backing filesystem does (ERANGE, the program
+  retries). Inventory updated; all production retry loops now have rulings: unlink/rename/readdir
+  become unbounded optimistic retries with a model liveness property, the xattr and getgroups
+  loops become one call pair. One step (25.10) after the reset: the code, the model's branch, the
+  repo_shape check on attempt counters. The one-way review question is in all agent definitions
+  (6a41abf).
