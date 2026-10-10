@@ -2779,3 +2779,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the idmapped-mounts condition as the example of naming what the guarantee depends on.
 - russ: switch escape.cc to absl::CHexEscape (the extra single-quote escape accepted); in 25.20
   with golden re-baselines in the same commit.
+- russ: absl::optional_ref<const T> allowed and preferred for an optional read-only argument;
+  style 1.2's nullability bullet and 25.16 updated.

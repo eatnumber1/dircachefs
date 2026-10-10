@@ -96,7 +96,13 @@ use it as design guidance rather than firm rules."
   go (a member that is reseated, an optional-out parameter that is
   present, an owning `unique_ptr`), and then `absl_nonnull`. A pointer
   that may be null is `absl_nullable`, and the reader expects a null
-  check before every dereference of it. `absl_nullability_unknown` is
+  check before every dereference of it. For an optional, non-owning,
+  read-only argument, `absl::optional_ref<const T>`
+  (`absl/types/optional_ref.h`) is allowed and preferred over
+  `const T* absl_nullable` (russ, 2026-10-10: "Allow it"): it cannot be
+  dereferenced without a check and says "optional" in the type. (A
+  `std::optional<T>` parameter copies; `optional_ref` does not.)
+  `absl_nullability_unknown` is
   not used: it is the annotation that says nobody decided. Mechanically:
   clang's `-Wnullability-completeness` and
   `-Wnullable-to-nonnull-conversion` as errors (7.3's `-Weverything`

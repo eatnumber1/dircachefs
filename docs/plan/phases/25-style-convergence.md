@@ -478,7 +478,9 @@ scopes warnings to our code; if 7.3 has not landed, the two flags on our
 `copts` now), which pass trivially while no file annotates anything;
 (2) `dcfs/*.h` first, one header at a time: each parameter or member
 that is never null becomes a reference where a reference can go, else
-`absl_nonnull`; each that may be null becomes `absl_nullable`, and its
+`absl_nonnull`; an optional, non-owning, read-only argument becomes
+`absl::optional_ref<const T>` (russ, 2026-10-10); each other that may be
+null becomes `absl_nullable`, and its
 dereferences are checked to sit behind a null test; `unique_ptr` and
 `shared_ptr` members and returns get the qualifier too; the first
 annotation in a file turns the completeness warning on for that file,
