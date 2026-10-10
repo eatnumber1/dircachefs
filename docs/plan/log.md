@@ -2940,3 +2940,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   Push point: main at this commit.
 - The trial runbook (Queue item 2) dispatched (implementer, lane-1): a one-page procedure for
   russ's host, exact commands and expected outputs, the control hour included.
+- The trial runbook merged (lane-1): notes/trial-runbook-2026-10-11.md; the writer's guesses
+  listed in phase 21 for russ; a 15.11 note that fsck.dcfs's fstab integration needs a bind-form
+  answer once the device form is gone; README gap (no fsck.dcfs install link). No lane running;
+  the next dispatch per the Queue is 26.17b after the reset unless a push goes red.

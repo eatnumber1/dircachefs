@@ -54,7 +54,7 @@ phase's file; `log.md` says where things stand.
 | 18 | [Disk quota (EDQUOT)](phases/18-disk-quota-edquot.md) | planned (just before 19) |
 | 19 | [Soak test (manual)](phases/19-soak-test.md) | planned (last automated phase) |
 | 20 | [Statistics](phases/20-statistics.md) | design to be discussed first |
-| 21 | [Real-hardware checks](phases/21-real-hardware-checks.md) (russ, manual) | 21.1 after 11; 21.2 last |
+| 21 | [Real-hardware checks](phases/21-real-hardware-checks.md) (russ, manual) | 21.1 after 11; 21.2 last; runbook written 2026-10-11 (notes/trial-runbook-2026-10-11.md), russ to run it after an HWE kernel boot |
 
 Execution started 2026-10-05 (wave 1).
 

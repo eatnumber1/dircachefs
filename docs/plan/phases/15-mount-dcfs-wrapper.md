@@ -728,3 +728,10 @@ option is simply unknown afterwards, as any other unknown `dcfs.*` option
 is (russ: "we haven't shipped. No need for back-compat"), so no special
 message and no test for it; the systemd guest's fstab lines, the
 README, 21.1's notes and this phase's option table lose it.
+Note for 15.11 (2026-10-11, from the runbook): with the native-type form
+gone, every dcfs fstab line is a bind line, and the README says passno
+`0` on bind lines because systemd-fsck@ wants a block device. So
+fsck.dcfs's fstab integration (15.5) either learns to run for a bind line
+(a cache-database check with no device: the unit would need a path, not
+a device) or fsck.dcfs becomes a manual tool only; decide in 15.11. Also
+a README gap: the install section lists no `/sbin/fsck.dcfs` link.

@@ -77,3 +77,21 @@ and a soak run), and 21.2 passes.
 - **Worth having first:** 15.5 (`fsck.dcfs`, for the sixth field) and 15.8
   (`allow_other` on by default), both in flight; 17.2's setgid fix is
   minor for a trial.
+
+## 21.1 runbook (2026-10-11)
+
+`docs/plan/notes/trial-runbook-2026-10-11.md` (348 lines, written from
+the README and the sources, no step of it executed): kernel, build and
+install, the disk and the two fstab lines, warm-up, spin-down and the
+watcher one-liner, the hour of metadata work, a read, the warm restart,
+the optional control hour, what to send back, a known-limits box. The
+writer's guesses, for russ to check as he goes: passno `0` on the dcfs
+(bind) line and `2` on the raw ext4 line, per the README (fsck.dcfs runs
+through fstab only for device-backed lines; see the 15.11 note below);
+the install has no target, so `install` and `ln` commands, with an
+`/sbin/fsck.dcfs` link the README's install section omits (README gap);
+the row-count query on `inodes`/`dentries` is the writer's; the daemon's
+process name is found with `ps ... | grep '[d]cfs'`; the `updatedb`
+flags are from memory; stopping smartd and the locate timers and waiting
+for ext4lazyinit are the writer's additions; `hdparm`/`smartctl` output
+text from memory.
