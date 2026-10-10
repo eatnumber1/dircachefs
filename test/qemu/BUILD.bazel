@@ -222,7 +222,10 @@ qemu_test(
     name = "fault_selftest_test",
     disks = [("vdb", "ext4", "64M")],
     guest_script = "guest/fault_selftest.sh",
+    asan_mem = 512,  # ASan with RAM disks: peak 306 MiB
+    mem = 384,  # RAM disks (step 26.17): peak 176 MiB
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "small",
     timeout = "moderate",
 )
@@ -235,7 +238,10 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_backing.sh",
+    asan_mem = 768,  # ASan with RAM disks: peak 363 (ext4) to 459 (xfs) MiB; btrfs not run
+    mem = 576,  # RAM disks (step 26.17): peak 211-333 MiB (xfs the most)
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "small",
     other_size = "medium",
     timeout = "moderate",
@@ -249,7 +255,10 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_cache.sh",
+    asan_mem = 640,  # ASan with RAM disks: peak 380 MiB (xfs; ext4 and btrfs not run)
+    mem = 448,  # RAM disks (step 26.17): peak 176-243 MiB (xfs the most)
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "small",
     other_size = "medium",
     timeout = "moderate",
@@ -264,7 +273,10 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_power.sh",
+    asan_mem = 704,  # ASan with RAM disks: peak 397 MiB (xfs; ext4 and btrfs not run)
+    mem = 448,  # RAM disks (step 26.17): peak 198-254 MiB (xfs the most)
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "small",
     other_size = "medium",
     timeout = "moderate",
@@ -375,7 +387,10 @@ qemu_test(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_ace.sh",
+    asan_mem = 576,  # ASan with RAM disks: peak 338 MiB
+    mem = 384,  # RAM disks (step 26.17): peak 177 MiB
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "large",
     timeout = "eternal",  # 182 sequences, 3-4 s each
 )
@@ -389,7 +404,10 @@ qemu_test(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_ace.sh",
+    asan_mem = 576,  # ASan with RAM disks: peak 339 MiB
+    mem = 384,  # RAM disks (step 26.17): peak 179 MiB
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "large",
     timeout = "long",  # 90 sequences
 )
@@ -410,7 +428,10 @@ qemu_test_matrix(
         "btrfs",
     ],
     guest_script = "guest/fault_ace.sh",
+    asan_mem = 640,  # ASan with RAM disks: peak 384 MiB (xfs)
+    mem = 448,  # RAM disks (step 26.17): peak 194-246 MiB (xfs the most)
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "large",
     other_size = "large",
     timeout = "long",
@@ -439,7 +460,10 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_ace.sh",
+    asan_mem = 640,  # ASan with RAM disks: peak 389 MiB (xfs; ext4 and btrfs not run)
+    mem = 448,  # RAM disks (step 26.17): peak 194-252 MiB (xfs the most)
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "large",
     other_size = "large",
     timeout = "long",
@@ -454,7 +478,10 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_ace.sh",
+    asan_mem = 704,  # not measured (manual): the mixed test's 640 plus a step
+    mem = 512,  # RAM disks (step 26.17): not measured (manual); the mixed test's 448 plus a step for the longer run
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "large",
     other_size = "large",
     tags = ["manual"],
@@ -471,7 +498,10 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_freeze.sh",
+    asan_mem = 704,  # ASan with RAM disks: peak 410 MiB (xfs; ext4 and btrfs not run)
+    mem = 448,  # RAM disks (step 26.17): peak 191-248 MiB (xfs the most)
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "medium",  # about 40 s: more than the fast tier should carry
     other_size = "large",
     timeout = "moderate",
@@ -488,7 +518,10 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_recover.sh",
+    asan_mem = 832,  # ASan with RAM disks: peak 423 (ext4) to 507 (xfs) MiB; btrfs not run
+    mem = 576,  # RAM disks (step 26.17): peak 225-333 MiB (xfs the most)
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "medium",
     other_size = "large",
     timeout = "moderate",
@@ -508,7 +541,10 @@ qemu_test(
     ],
     guest_script = "guest/fault_recover.sh",
     kernel_failure = "expected",
+    asan_mem = 640,  # ASan with RAM disks: peak 381 MiB
+    mem = 384,  # RAM disks (step 26.17): peak 225 MiB
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "large",
     timeout = "moderate",
 )
@@ -524,8 +560,10 @@ qemu_test_matrix(
         ("vdc", "ext4", "64M"),
     ],
     guest_script = "guest/fault_shutdown.sh",
-    asan_mem = 576,  # step 11.4c: ASan peak 299-312 MiB
+    asan_mem = 704,  # ASan with RAM disks: peak 409 MiB (xfs; ext4 and btrfs not run); step 11.4c: 299-312 on host disks
+    mem = 448,  # RAM disks (step 26.17): peak 188-251 MiB (xfs the most)
     modules = ["dm_flakey"],
+    ram_disks = True,
     size = "small",
     other_size = "medium",
     timeout = "moderate",
