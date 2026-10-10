@@ -599,8 +599,17 @@ A host-side Bazel test runs, over our C++ with the real compile flags
 plans; whichever is smaller to land now), (1) clang-tidy with
 `readability-else-after-return`, `readability-misleading-indentation`,
 `readability-function-cognitive-complexity` (Threshold 15; a finding
-reads "break up this function"), and (2) one AST-matcher file per style
-rule that is structural: a `Status`/`StatusOr` local declared without an
+reads "break up this function"); widened the same day (russ: "there's a
+lot more clang-tidy checks that enforce style guide rules we already have
+... Let's turn on all the existing checks that make sense in our codebase
+or that enforce rules we have") to 7.5's full set plus `google-*` (the
+Google style guide is ours) and `abseil-*` (the Abseil rules of 1.2 and
+the catalogue), `WarningsAsErrors: '*'`, a deny-list with a reason per
+entry (trailing return types, identifier length, cppcoreguidelines not
+enabled, ...), the first run's findings in the shrinking allowlist and
+their counts per check as the sweep backlog; this lands 7.5's check set,
+leaving 7.5 the aspect if the compilation-database route is taken; and
+(2) one AST-matcher file per style rule that is structural: a `Status`/`StatusOr` local declared without an
 initializer (1.6a, report-only: preference); an `if` ending in `return`
 followed by `else`; a happy path nested in `if (x.ok())`; a `std::`
 algorithm whose range arguments are `x.begin()`/`x.end()` of one object

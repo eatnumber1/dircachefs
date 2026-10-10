@@ -2807,3 +2807,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   matchers under Bazel, zero tokens after landing), tier 1 (a Haiku census with a detectable-
   pattern card, function by function, "break it up" over a size threshold), tier 2 (judgement on
   findings only). "Do it": 25.21 dispatched (investigator, lane-4), 25.22 queued behind it.
+- russ: turn on every clang-tidy check that fits or enforces a rule we have (google-*, abseil-*,
+  7.5's groups) with a reasoned deny-list; 25.21 widened accordingly (it lands 7.5's check set),
+  agent told mid-run.
