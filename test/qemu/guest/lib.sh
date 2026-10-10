@@ -160,12 +160,42 @@ backing_fstype() {
 	esac
 }
 
-# sectors_read DEV: the "sectors read" counter from /sys/block/DEV/stat, to
-# confirm a re-read was served from dcfs's own cache rather than the disk.
+# block_sysfs DEV: the sysfs directory of the block device DEV, a path or a name
+# under /dev (vdb), found from the node's major and minor number, not its name:
+# a RAM disk (qemu_test's ram_disks) is a loop device that /dev/vdb is a second
+# node for, which sysfs knows as loopN, and a device-mapper device is a node
+# under /dev/mapper (no udev makes a symlink to dm-N here). Fails if there is
+# none.
+block_sysfs() {
+	case "$1" in
+	/*) bs_node=$1 ;;
+	*) bs_node=/dev/$1 ;;
+	esac
+	bs_mm=$(printf '%d:%d' "0x$(stat -L -c %t "$bs_node")" "0x$(stat -L -c %T "$bs_node")") &&
+		[ -d "/sys/dev/block/$bs_mm" ] && echo "/sys/dev/block/$bs_mm"
+}
+
+# device_sectors DEV: the size of the block device DEV in 512-byte sectors (by
+# the device, for the same reason as block_sysfs).
+device_sectors() {
+	blockdev --getsz "$1"
+}
+
+# sectors_read DEV: the "sectors read" counter of DEV (a name under /dev, vdb,
+# or a path, /dev/mapper/NAME), to confirm a re-read was served from dcfs's own cache rather than the disk.
+# A device with no counter would make "before" and "after" the same empty
+# string and every "nothing was read" comparison pass, so that stops the
+# script (SIGTERM to the shell the command substitution runs in), saying why:
+# the same words as a failed check, which run-qemu.sh looks for.
 sectors_read() {
-	read -r line <"/sys/block/$1/stat"
-	set -- $line
-	echo "$3"
+	if sr_dir=$(block_sysfs "$1") && read -r line <"$sr_dir/stat"; then
+		set -- $line
+		echo "$3"
+	else
+		echo "TEST sectors-read-$(basename "$1") FAIL (no block statistics for ${1:-an empty name}: a comparison of two empty counters would pass)" >&2
+		kill -TERM "$$"
+		return 1
+	fi
 }
 
 drop_caches() {

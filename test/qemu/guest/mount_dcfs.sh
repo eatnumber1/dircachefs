@@ -673,7 +673,7 @@ mount -t fusectl fusectl "$FUSECTL"
 # slow_writes MS: the writes of the "slow" device take MS milliseconds from now
 # on (0: none).
 slow_writes() {
-	sw_sectors=$(fault_sectors "$DEV")
+	sw_sectors=$(device_sectors "$DEV")
 	"$DMSETUP" suspend --nolockfs --noudevsync slow &&
 		"$DMSETUP" load slow --table "0 $sw_sectors delay $DEV 0 0 $DEV 0 $1" &&
 		"$DMSETUP" resume --noudevsync slow

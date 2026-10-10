@@ -145,6 +145,8 @@ qemu_test(
         ("vdc", "xfs", "320M"),
     ],
     guest_script = "guest/ram_disks.sh",
+    asan_mem = 576,  # ASan: peak 322 MiB at 1024; at 384 the guest could not make its disks
+    mem = 384,  # RAM disks (step 26.17): peak 165 MiB at 256 (min available 51)
     modules = ["dm_flakey"],
     ram_disks = True,
     size = "small",
@@ -1206,6 +1208,18 @@ sh_test(
     srcs = ["run_qemu_ram_disks_test.sh"],
     args = ["$(location scripts/run-qemu.sh)"],
     data = ["scripts/run-qemu.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 26.17: self-check of ram_disks_test's verdicts: the real
+# guest/ram_disks_lib.sh over canned values, good and one bad at a time.
+sh_test(
+    name = "ram_disks_lib_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["ram_disks_lib_test.sh"],
+    args = ["$(location guest/ram_disks_lib.sh)"],
+    data = ["guest/ram_disks_lib.sh"],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 

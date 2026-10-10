@@ -13,6 +13,7 @@ FAILED=0
 . "$(dirname "$0")/lib.sh"
 . "$(dirname "$0")/fault_lib.sh"
 . "$(dirname "$0")/fault_dcfs_lib.sh"
+. "$(dirname "$0")/ram_disks_lib.sh"
 
 MNT=/mnt/ram
 NAME=ramdisk
@@ -26,9 +27,9 @@ echo "ram_disks.sh: kernel $(uname -r)"
 require_commands blockdev readlink stat umount
 mkdir -p "$MNT"
 
-# check_ram_disk DEV FSTYPE BYTES: DEV is a block device whose kernel name is a
-# loop device, attached to a file on a tmpfs, of the size and filesystem the
-# target declared.
+# check_ram_disk DEV FSTYPE BYTES: reads from the guest what ram_disk_judge
+# (guest/ram_disks_lib.sh) judges, for the block device DEV the target declared
+# with that filesystem and size, and turns its lines into checks.
 check_ram_disk() {
 	crd_dev=$1
 	crd_name=${crd_dev#/dev/}
@@ -37,32 +38,30 @@ check_ram_disk() {
 		return
 	fi
 	pass "$crd_name-present"
-	crd_majmin=$(printf '%d:%d' "0x$(stat -L -c %t "$crd_dev")" "0x$(stat -L -c %T "$crd_dev")")
-	crd_kernel=$(basename "$(readlink -f "/sys/dev/block/$crd_majmin")")
-	case "$crd_kernel" in
-	loop*) pass "$crd_name-is-loop" ;;
-	*) fail "$crd_name-is-loop" "$crd_dev is the kernel's $crd_kernel, not a loop device" ;;
-	esac
-	crd_file=$(cat "/sys/block/$crd_kernel/loop/backing_file" 2>/dev/null)
-	# tmpfs's statfs magic, 0x01021994.
-	if [ -n "$crd_file" ] && [ "$(stat -f -c %t "$crd_file")" = 1021994 ]; then
-		pass "$crd_name-backed-by-tmpfs"
-	else
-		fail "$crd_name-backed-by-tmpfs" "backing file '$crd_file' is not on a tmpfs (statfs type $(stat -f -c %t "$crd_file" 2>&1))"
+	crd_sys=$(block_sysfs "$crd_name")
+	crd_kernel=$(basename "$(readlink -f "$crd_sys")")
+	crd_file=$(cat "$crd_sys/loop/backing_file" 2>/dev/null)
+	crd_magic=$(stat -f -c %t "$crd_file" 2>/dev/null)
+	crd_itable=-
+	crd_logbs=-
+	if [ "$2" = ext4 ]; then
+		# Read before anything mounts the disk. Group 0's descriptor is in block 1
+		# (4096-byte blocks), bg_flags at +0x12; s_log_block_size is at +0x18 of the
+		# superblock, which starts at byte 1024.
+		crd_itable=$(($(dd if="$crd_dev" bs=1 skip=$((4096 + 18)) count=1 2>/dev/null | od -An -tu1)))
+		crd_logbs=$(($(dd if="$crd_dev" bs=1 skip=$((1024 + 24)) count=1 2>/dev/null | od -An -tu1)))
 	fi
-	crd_size=$(blockdev --getsize64 "$crd_dev")
-	if [ "$crd_size" = "$3" ]; then
-		pass "$crd_name-size"
-	else
-		fail "$crd_name-size" "$crd_size bytes, declared $3"
-	fi
-	crd_want=$2
-	crd_fs=$(fd_fstype "$crd_dev")
-	if [ "$crd_fs" = "$crd_want" ]; then
-		pass "$crd_name-filesystem"
-	else
-		fail "$crd_name-filesystem" "formatted as $crd_fs, declared $crd_want"
-	fi
+	# Through a file, not a pipe: fail sets FAILED, which a pipe's subshell loses.
+	ram_disk_judge "$crd_kernel" "$crd_file" "$crd_magic" "$(blockdev --getsize64 "$crd_dev")" "$3" \
+		"$(fd_fstype "$crd_dev")" "$2" "$crd_itable" "$crd_logbs" \
+		"$(cat "$crd_sys/queue/rotational" 2>/dev/null)" >/tmp/judged
+	while read -r crd_check crd_why; do
+		if [ "$crd_why" = ok ]; then
+			pass "$crd_name-$crd_check"
+		else
+			fail "$crd_name-$crd_check" "$crd_why"
+		fi
+	done </tmp/judged
 }
 
 check_ram_disk /dev/vdb ext4 $((64 * 1024 * 1024))
@@ -98,5 +97,27 @@ if fault_wrap "$NAME" /dev/vdb && mount "$(fault_dev "$NAME")" "$MNT"; then
 else
 	fail dm-mount "wrapping /dev/vdb or mounting it failed"
 fi
+
+# lib.sh's size and counter helpers read the device, not the name sysfs does not
+# have for it: the size is the declared one, and sectors_read gives the number of
+# sectors read through the RAM disk (and, if a device had none, stops the
+# script instead of letting two empty counters compare equal).
+if [ "$(device_sectors /dev/vdb)" = $((64 * 1024 * 2)) ]; then
+	pass device-sectors
+else
+	fail device-sectors "$(device_sectors /dev/vdb) sectors for a 64 MiB disk"
+fi
+case "$(sectors_read vdb)" in
+'' | *[!0-9]*) fail sectors-read "sectors_read vdb gave '$(sectors_read vdb)', not a number" ;;
+*) pass sectors-read ;;
+esac
+# In a shell of its own, as its failure stops the shell it runs in; the FAIL
+# line it prints is kept out of this log, where it would fail the run.
+sr_out=$(sh -c '. "$1"; x=$(sectors_read nonesuch); echo survived' sh "$(dirname "$0")/lib.sh" 2>&1)
+case "$sr_out" in
+*survived*) fail sectors-read-missing "the script went on after sectors_read of a device with no counter: $sr_out" ;;
+*"no block statistics for nonesuch"*) pass sectors-read-missing ;;
+*) fail sectors-read-missing "no message for a device with no counter: '$sr_out'" ;;
+esac
 
 exit "$FAILED"

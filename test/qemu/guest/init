@@ -157,6 +157,10 @@ export DCFS_SANITIZER
 #   peak_cached/peak_anon/peak_shmem/peak_slab
 #                the highest Cached, AnonPages, Shmem (tmpfs: /tmp and the
 #                like) and Slab, each on its own (they peak at different times)
+#   peak_ramdisks/peak_shmem_other
+#                the highest KiB in use on /ramdisks, the tmpfs of the RAM
+#                disks of a test with `ram_disks` (0 when it has none), and the
+#                highest Shmem less that: the tmpfs the 50% cap applies to
 #   dcfs_hwm     highest VmHWM of any process named dcfs* or mount.dcfs (the kernel's own
 #                peak, so exact), 0 when none ran
 #   top          the process (name:pid) with the highest VmHWM, and that VmHWM
@@ -198,6 +202,20 @@ BEGIN {
 		if (m["AnonPages:"] > panon) panon = m["AnonPages:"]
 		if (m["Shmem:"] > pshmem) pshmem = m["Shmem:"]
 		if (m["Slab:"] > pslab) pslab = m["Slab:"]
+		# The RAM disks' tmpfs (-v ramdisks=1), KiB in use, which Shmem
+		# counts: peak_shmem_other is the rest, what run-qemu.sh holds
+		# against tmpfs's cap of half of MemTotal.
+		ram = 0
+		if (ramdisks) {
+			dfc = "df -k /ramdisks 2>/dev/null"
+			while ((dfc | getline l) > 0) {
+				split(l, f, " ")
+				if (f[6] == "/ramdisks") ram = f[3]
+			}
+			close(dfc)
+		}
+		if (ram > pram) pram = ram
+		if (m["Shmem:"] - ram > pother) pother = m["Shmem:"] - ram
 		cmd = "cat /proc/[0-9]*/status 2>/dev/null"
 		while ((cmd | getline l) > 0) {
 			split(l, f, " ")
@@ -210,7 +228,7 @@ BEGIN {
 		}
 		close(cmd)
 		n++
-		printf "MEM total=%d min_avail=%d peak_used=%d peak_cached=%d peak_anon=%d peak_shmem=%d peak_slab=%d dcfs_hwm=%d top=%s:%d samples=%d up=%s\n", total, minav, pused, pcached, panon, pshmem, pslab, dcfs, topname, top, n, u[1] > out
+		printf "MEM total=%d min_avail=%d peak_used=%d peak_cached=%d peak_anon=%d peak_shmem=%d peak_ramdisks=%d peak_shmem_other=%d peak_slab=%d dcfs_hwm=%d top=%s:%d samples=%d up=%s\n", total, minav, pused, pcached, panon, pshmem, pram, pother, pslab, dcfs, topname, top, n, u[1] > out
 		close(out)
 		# Once, after the first sample, if asked (-v announce=1): a line on
 		# stdout, for a reader that wants to know the file has a sample
@@ -227,7 +245,11 @@ BEGIN {
 	}
 }
 EOF_SAMPLER
-	awk -v out="$MEMSTAT" -f /dev/memsampler.awk &
+	ramdisks=0
+	case " $(cat /proc/cmdline) " in
+	*" dcfs_ramdisks="*) ramdisks=1 ;;
+	esac
+	awk -v out="$MEMSTAT" -v ramdisks="$ramdisks" -f /dev/memsampler.awk &
 	MEM_SAMPLER_PID=$!
 }
 

@@ -175,8 +175,6 @@ require_commands flock losetup mkfifo pidof strace syslogd logread
 mkdir -p "$WORK" "$SRC" "$MNT" "$CACHE_DIR" "$REPLAY_MNT" "$LOOPS"
 syslogd -C256
 
-sectors() { cat "/sys/class/block/${1#/dev/}/size"; }
-
 # --- dcfs -------------------------------------------------------------------
 
 # start_dcfs [traced]: mount.dcfs daemonized: it returns once dcfs has
@@ -553,10 +551,10 @@ for d in d0 d1 d2 d3 d4 d5; do
 done
 sync
 
-SECTORS=$(sectors "$CACHE_DEV")
-mount -t tmpfs -o size=1g loops "$LOOPS" &&
-	truncate -s 256M "$LOOPS/log" &&
-	truncate -s 256M "$LOOPS/cow" &&
+SECTORS=$(device_sectors "$CACHE_DEV")
+ram_disk_tmpfs "$LOOPS" $((1024 * 1024 * 1024)) &&
+	ram_disk_file "$LOOPS/log" $((256 * 1024 * 1024)) &&
+	ram_disk_file "$LOOPS/cow" $((256 * 1024 * 1024)) &&
 	# The replay disk starts as the cache disk is before the log starts.
 	"$CS" copy-sparse "$CACHE_DEV" "$LOOPS/replay" &&
 	LOG_DEV=$(ram_disk_attach "$LOOPS/log") &&
@@ -565,8 +563,8 @@ mount -t tmpfs -o size=1g loops "$LOOPS" &&
 	fail setup "making the loop devices failed"
 	exit "$FAILED"
 }
-if [ "$(sectors "$REPLAY_DEV")" != "$SECTORS" ]; then
-	fail setup "the replay disk ($(sectors "$REPLAY_DEV") sectors) is not the cache disk's size ($SECTORS)"
+if [ "$(device_sectors "$REPLAY_DEV")" != "$SECTORS" ]; then
+	fail setup "the replay disk ($(device_sectors "$REPLAY_DEV") sectors) is not the cache disk's size ($SECTORS)"
 	exit "$FAILED"
 fi
 "$DMSETUP" create --noudevsync "$LOGW" \

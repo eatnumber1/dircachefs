@@ -45,18 +45,11 @@ DMSETUP=${DMSETUP:-/sbin/dmsetup}
 # fault_dev NAME
 fault_dev() { echo "/dev/mapper/$1"; }
 
-# fault_sectors DEV: the size of DEV in 512-byte sectors. From the device, not
-# from /sys/class/block/<name>: a RAM disk (qemu_test's ram_disks) is a loop
-# device that /dev/vdb is a second node for, and sysfs knows it as loopN.
-fault_sectors() {
-	blockdev --getsz "$1"
-}
-
 # fault_table NAME DEV MODE: the dm table text for MODE over DEV.
 fault_table() {
 	ft_name=$1
 	ft_dev=$2
-	ft_sectors=$(fault_sectors "$ft_dev") || return 1
+	ft_sectors=$(device_sectors "$ft_dev") || return 1
 	case "$3" in
 	healthy) echo "0 $ft_sectors linear $ft_dev 0" ;;
 	error-writes) echo "0 $ft_sectors flakey $ft_dev 0 0 1 1 error_writes" ;;
@@ -111,7 +104,7 @@ fault_unwrap() {
 # fault_window NAME UP DOWN
 fault_window() {
 	fwn_dev=$(fault_underlying "$1") || return 1
-	fwn_sectors=$(fault_sectors "$fwn_dev") || return 1
+	fwn_sectors=$(device_sectors "$fwn_dev") || return 1
 	fwn_table="0 $fwn_sectors flakey $fwn_dev 0 $2 $3 1 error_reads"
 	"$DMSETUP" suspend --nolockfs --noudevsync "$1" || return 1
 	if "$DMSETUP" load "$1" --table "$fwn_table"; then

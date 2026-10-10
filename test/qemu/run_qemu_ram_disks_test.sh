@@ -35,6 +35,9 @@ for t in mke2fs mkfs-xfs mkfs-btrfs; do
 	cat >"$WORK/bin/$t" <<E
 #!/bin/sh
 echo "$t \$*" >>"$WORK/mkfs-calls"
+# mkfs.xfs burns about 1.5 s of CPU, which is before QEMU starts and so not the
+# run's cost (the time line below).
+[ "$t" = mkfs-xfs ] && timeout 1.5 sh -c 'while :; do :; done'
 exit 0
 E
 done
@@ -72,11 +75,13 @@ grep -q 'dcfs_ramdisks' "$WORK/qemu-args" && fail "the plain boot names RAM disk
 echo "PASS: without --ram-disks the disks are drives made on the host"
 
 # Every run reports its guest's wall time and the CPU time spent on the host
-# (QEMU, and whatever formatted the images): the pair a test's latency noise
-# shows in.
+# while QEMU ran: the pair a test's latency noise shows in. The mkfs before QEMU
+# starts (1.5 s of CPU in the fake) is not in it.
 grep -q '^run-qemu.sh: time: guest wall [0-9.]* s, host CPU [0-9.]* s (user [0-9.]*, system [0-9.]*)$' "$WORK/stdout" ||
 	fail "no time line: $(cat "$WORK/stdout")"
-echo "PASS: the run reports its wall and CPU time"
+cpu=$(sed -n 's/^run-qemu.sh: time: .*host CPU \([0-9.]*\) s .*/\1/p' "$WORK/stdout")
+awk -v c="$cpu" 'BEGIN { exit !(c < 0.5) }' || fail "host CPU is $cpu s: the mkfs before QEMU is counted ($(cat "$WORK/stdout"))"
+echo "PASS: the run reports its wall time and the CPU QEMU used, not the mkfs's"
 
 # With it: nothing on the host.
 run --ram-disks "$WORK/fstools.cpio.gz" -- vdb:ext4:64M vdc:xfs:320M
@@ -84,9 +89,9 @@ run --ram-disks "$WORK/fstools.cpio.gz" -- vdb:ext4:64M vdc:xfs:320M
 grep -q -e '-drive' -e 'virtio-blk' "$WORK/qemu-args" && fail "a drive was attached: $(cat "$WORK/qemu-args")"
 grep -q '\.img' "$WORK/qemu-args" && fail "an image is named"
 ls "$WORK/t"/*.img >/dev/null 2>&1 && fail "an image was made in the test's directory"
-grep -q 'dcfs_ramdisks=vdb:ext4:64M,vdc:xfs:320M' "$WORK/qemu-args" ||
-	fail "the kernel command line does not carry the specs: $(cat "$WORK/qemu-args")"
-grep -q '^run-qemu.sh: RAM disks: vdb:ext4:64M,vdc:xfs:320M' "$WORK/out/serial.log" ||
+grep -q 'dcfs_ramdisks=vdb:ext4:67108864,vdc:xfs:335544320' "$WORK/qemu-args" ||
+	fail "the kernel command line does not carry the specs, in bytes: $(cat "$WORK/qemu-args")"
+grep -q '^run-qemu.sh: RAM disks: vdb:ext4:67108864,vdc:xfs:335544320' "$WORK/out/serial.log" ||
 	fail "serial.log does not record the RAM disks"
 [ "$(cat "$WORK/initrd.seen")" = BASEFSTOOLS ] ||
 	fail "the initramfs is not the base followed by the mkfs archive: '$(cat "$WORK/initrd.seen" 2>&1)'"
@@ -123,8 +128,18 @@ refused() { # <expected words> <options...> -- <disk-spec...>
 }
 refused "excludes --boots and --power-cut" --ram-disks "$WORK/fstools.cpio.gz" --power-cut before -- vdb:ext4:8M
 refused "excludes --boots and --power-cut" --ram-disks "$WORK/fstools.cpio.gz" --boots 2 -- vdb:ext4:8M
-refused "neither --rootfs" --ram-disks "$WORK/fstools.cpio.gz" --rootfs "$WORK/kernel" -- vdb:ext4:8M
-refused "neither --rootfs" --ram-disks "$WORK/fstools.cpio.gz" --systemd-image "$WORK/kernel" --qemu-img "$WORK/kernel" -- vdb:ext4:8M
-refused "no mkfs options\|mkfs options are not supported" --ram-disks "$WORK/fstools.cpio.gz" -- "vdb:ext4:8M:-O casefold"
-echo "PASS: --ram-disks is refused with power cuts, boots, a root image and mkfs options"
+refused "neither --rootfs nor --systemd-image" --ram-disks "$WORK/fstools.cpio.gz" --rootfs "$WORK/kernel" -- vdb:ext4:8M
+refused "neither --rootfs nor --systemd-image" --ram-disks "$WORK/fstools.cpio.gz" --systemd-image "$WORK/kernel" --qemu-img "$WORK/kernel" -- vdb:ext4:8M
+refused "neither --rootfs nor --systemd-image" --ram-disks "$WORK/fstools.cpio.gz" --unit -- vdb:ext4:8M
+refused "mkfs options are not supported" --ram-disks "$WORK/fstools.cpio.gz" -- "vdb:ext4:8M:-O casefold"
+refused 'is not a size' --ram-disks "$WORK/fstools.cpio.gz" -- vdb:ext4:8T
+refused 'is not a size' --ram-disks "$WORK/fstools.cpio.gz" -- vdb:ext4:0
+echo "PASS: --ram-disks is refused with power cuts, boots, a root image, a unit test, mkfs options and a size it cannot read"
+
+# DCFS_RAM_DISKS is 0 or 1, as DCFS_SEED is a number: anything else is an error.
+DCFS_RAM_DISKS=off
+export DCFS_RAM_DISKS
+refused "DCFS_RAM_DISKS='off' is not 0 or 1" --ram-disks "$WORK/fstools.cpio.gz" -- vdb:ext4:8M
+unset DCFS_RAM_DISKS
+echo "PASS: DCFS_RAM_DISKS other than 0 or 1 is refused"
 echo "PASS: all checks passed"

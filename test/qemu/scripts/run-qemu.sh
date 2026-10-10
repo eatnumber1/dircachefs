@@ -34,14 +34,17 @@
 #   --ram-disks <fstools.cpio.gz> (step 26.17; e2e only): the disk-specs name
 #       disks in the guest's RAM, not image files on the host: no drive is
 #       attached (and no filler: a coverage disk becomes /dev/vda), and the
-#       specs go to the guest as dcfs_ramdisks=<device>:<fstype>:<size>,... on
-#       the kernel command line. guest/init makes each disk a loop device over a
-#       sparse file in a tmpfs, names it /dev/<device> and formats it with the
-#       mkfs tools in the archive (scripts/mkfstools.py), which is appended to
-#       the initramfs. For the tests whose subject is the failure semantics of
-#       device-mapper and the filesystem, not the host disk's latency; not with
-#       --power-cut, --boots (the disks must outlive the guest), --rootfs or
-#       --systemd-image, and the disk-specs carry no mkfs options.
+#       specs go to the guest as dcfs_ramdisks=<device>:<fstype>:<bytes>,... on
+#       the kernel command line (the sizes read here, once). guest/init makes
+#       each disk: a sparse file in a tmpfs, formatted with the mkfs tools in
+#       the archive (scripts/mkfstools.py, appended to the initramfs) as the
+#       host formats an image, then a loop device over it, named /dev/<device>.
+#       For the tests whose subject is the failure semantics of device-mapper
+#       and the filesystem, not the host disk's latency; not with --power-cut,
+#       --boots (the disks must outlive the guest), --rootfs or --systemd-image,
+#       and the disk-specs carry no mkfs options. DCFS_RAM_DISKS=0 in the
+#       environment (bazel test --test_env=DCFS_RAM_DISKS=0; 1 is the default,
+#       anything else an error) ignores the option: the same test on image files.
 #
 #   --power-cut SCENARIO[,SCENARIO...] (step 11.2; e2e only): a real power cut
 #       per scenario. Each is two boots over the same disk images: the first
@@ -456,20 +459,30 @@ LOG="${TEST_UNDECLARED_OUTPUTS_DIR:-$WORKDIR}/${LOG_NAME:-serial.log}"
 # DCFS_RAM_DISKS=0 (bazel test --test_env=DCFS_RAM_DISKS=0; step 26.17): the
 # same test on host disks, to compare the two or to see whether a RAM disk hides
 # something. Like DCFS_MEM and DCFS_NOISY it is in the test action's key, so a
-# result of one kind is never served for the other.
-if [ "${DCFS_RAM_DISKS:-1}" = 0 ] && [ -n "$RAM_DISKS" ]; then
-	echo "run-qemu.sh: DCFS_RAM_DISKS=0: the disks are image files on the host" >&2
-	RAM_DISKS=""
-fi
+# result of one kind is never served for the other. Any other value is an
+# error, as DCFS_SEED's is.
+case "${DCFS_RAM_DISKS:-1}" in
+0)
+	if [ -n "$RAM_DISKS" ]; then
+		echo "run-qemu.sh: DCFS_RAM_DISKS=0: the disks are image files on the host" >&2
+		RAM_DISKS=""
+	fi
+	;;
+1) ;;
+*)
+	echo "run-qemu.sh: DCFS_RAM_DISKS='$DCFS_RAM_DISKS' is not 0 or 1" >&2
+	exit 1
+	;;
+esac
 
 # The disks of --ram-disks are made by guest/init for an e2e guest that runs
-# its script itself: not a unit test (/test/disk0 names a virtio disk), not a
-# Debian root or a systemd image (their disks are attached by letter), and not
-# a boot that reuses the disks of an earlier one.
+# its script itself: not a unit test (/test/disk0 names a virtio disk), and not
+# a Debian root or a systemd image (their disks are attached by letter). (Not
+# with --boots or --power-cut either, which the check before the options are
+# read refuses: their later boots read the disks of the first.)
 if [ -n "$RAM_DISKS" ] &&
-	{ [ "$UNIT" -eq 1 ] || [ -n "$ROOTFS" ] || [ -n "$SYSTEMD_IMAGE" ] || [ -n "$KEEP_DISKS" ]; }; then
-	echo "run-qemu.sh: --ram-disks is for an e2e test with neither --rootfs," \
-		"--systemd-image, --boots nor --power-cut" >&2
+	{ [ "$UNIT" -eq 1 ] || [ -n "$ROOTFS" ] || [ -n "$SYSTEMD_IMAGE" ]; }; then
+	echo "run-qemu.sh: --ram-disks is for an e2e test with neither --rootfs nor --systemd-image" >&2
 	exit 1
 fi
 
@@ -520,8 +533,23 @@ if [ -n "$RAM_DISKS" ]; then
 			echo "run-qemu.sh: mkfs options are not supported for --ram-disks disks" >&2
 			exit 1
 		fi
-		RAMDISKS_APPEND=" dcfs_ramdisks=$(awk -F: '{ printf "%s%s:%s:%s", sep, $2, $3, $4; sep = "," }' "$specs_file")"
-		echo "run-qemu.sh: RAM disks: ${RAMDISKS_APPEND# dcfs_ramdisks=} (no image on the host)" >>"$LOG"
+		# The sizes go in bytes: this is the one place a size ("320M") is read
+		# for them (the guest parses nothing and hands truncate what it gets).
+		ram_specs=$(awk -F: '
+			{
+				n = $4; unit = 1
+				if (n ~ /[KMG]$/) {
+					u = substr(n, length(n)); n = substr(n, 1, length(n) - 1)
+					unit = (u == "K") ? 1024 : (u == "M") ? 1048576 : 1073741824
+				}
+				if (n !~ /^[0-9]+$/ || n == 0) {
+					print "run-qemu.sh: --ram-disks: \"" $4 "\" is not a size (a number with an optional K, M or G)" > "/dev/stderr"
+					exit 1
+				}
+				printf "%s%s:%s:%.0f", sep, $2, $3, n * unit; sep = ","
+			}' "$specs_file") || exit 1
+		RAMDISKS_APPEND=" dcfs_ramdisks=$ram_specs"
+		echo "run-qemu.sh: RAM disks: $ram_specs (bytes; no image on the host)" >>"$LOG"
 	fi
 	: >"$specs_file"
 fi
@@ -796,6 +824,11 @@ esac
 # that is killed at its marker (below) is held to the same ones.
 KERNEL_FAIL_RE='^KERNEL-OOPS:|(^|[] ])(BUG:|Oops[: ]|kernel BUG at|WARNING: CPU:|Call Trace:|Kernel panic)'
 OOM_RE='^MEM-OOM:|System is deadlocked on memory|Out of memory and no killable'
+# The shell's children's CPU time before QEMU starts (host mkfs and the like)
+# and after it ends: the time line below reports the difference (`times` is run
+# in this shell and not in a command substitution, whose subshell has no
+# children yet).
+times >"$WORKDIR/times-start"
 start=$(date +%s.%N)
 echo "run-qemu.sh: qemu start $start" >>"$LOG"
 # QEMU_WRAP, in kill mode, is a script that records its own pid and execs
@@ -926,6 +959,7 @@ if [ -n "$KILL_ON" ]; then
 fi
 qemu_cmd 2>&1 | tee -a "$LOG" || true
 end=$(date +%s.%N)
+times >"$WORKDIR/times-end"
 echo "run-qemu.sh: qemu end $end" >>"$LOG"
 
 # Step 7.2: the profiles the guest wrote to the coverage disk (a tar, see
@@ -955,16 +989,14 @@ fi
 
 echo
 # Step 26.17: the run's wall time (QEMU's start to its end) beside the CPU the
-# host spent on it (the shell's children: QEMU, whatever formatted the images,
-# the profile tools), so that a slow run can be told from a starved one by the
-# gap, and a test's time can be compared across harness changes by what it
-# cost. `times` prints the shell's own user and system time, then its
-# children's, as XmY.ZZZs; it is run in this shell and not in a command
-# substitution, whose subshell has no children yet.
-times >"$WORKDIR/times"
+# host spent on it (the shell's children between those two moments: QEMU, and
+# the vCPU threads in it; not the mkfs before it or the profile tools after), so
+# that a slow run can be told from a starved one by the gap, and a test's time
+# can be compared across harness changes by what it cost. `times` prints the
+# shell's own user and system time, then its children's, as XmY.ZZZs.
 echo "run-qemu.sh: time: guest wall $(awk "BEGIN{printf \"%.1f\", $end-$start}") s, host CPU $(awk '
 	function secs(t) { split(t, p, "m"); return p[1] * 60 + p[2] }
-	NR == 2 { u = secs($1); s = secs($2); printf "%.1f s (user %.1f, system %.1f)", u + s, u, s }' "$WORKDIR/times")"
+	FNR == 2 { u = secs($1); s = secs($2); if (FILENAME == ARGV[1]) { u0 = u; s0 = s } else { u -= u0; s -= s0; printf "%.1f s (user %.1f, system %.1f)", u + s, u, s } }' "$WORKDIR/times-start" "$WORKDIR/times-end")"
 # Step 6.2: a guest that ran out of memory says so, whatever else failed: the
 # OOM killer's lines (guest/init's mem_report prints them as MEM-OOM:) or a
 # panic from having nothing left to kill. The fix is a bigger `mem=` on the
@@ -1004,13 +1036,17 @@ fi
 # when it fails anyway the lack of memory is the first suspect (ENOMEM and
 # ENOSPC on tmpfs leave no OOM-killer line to find). tmpfs, /tmp here, is
 # capped at half of MemTotal, so 40% of MemTotal in Shmem (the initramfs
-# counts too) is as close to that cap as 10% is to running out.
+# counts too) is as close to that cap as 10% is to running out. A RAM disk's
+# tmpfs (step 26.17) has a cap of its own, the disks' size, and is no part of
+# it: the guest's sampler subtracts it (peak_shmem_other, which is peak_shmem
+# in a guest without RAM disks, and in a line from an older sampler).
 HEADROOM_LOW=0
 eval "$(grep -a "^MEM total=" "$LOG" | tail -n 1 | awk '{
 	for (i = 2; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] }
+	shmem = ("peak_shmem_other" in v) ? v["peak_shmem_other"] : v["peak_shmem"]
 	printf "MEM_TOTAL_MIB=%d MEM_MIN_AVAIL_MIB=%d MEM_PEAK_USED_MIB=%d HEADROOM_LOW=%d\n",
 		v["total"] / 1024, v["min_avail"] / 1024, v["peak_used"] / 1024,
-		(v["min_avail"] * 10 < v["total"] || v["peak_shmem"] * 5 > v["total"] * 2)
+		(v["min_avail"] * 10 < v["total"] || shmem * 5 > v["total"] * 2)
 	printf "RECLAIM_SCANS=%d\n", v["reclaim_scans"]
 }')"
 echo "run-qemu.sh: guest memory: -m $MEM, MemTotal $MEM_TOTAL_MIB MiB, peak in use $MEM_PEAK_USED_MIB MiB, lowest MemAvailable $MEM_MIN_AVAIL_MIB MiB"

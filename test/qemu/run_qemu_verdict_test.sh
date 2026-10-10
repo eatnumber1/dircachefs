@@ -148,6 +148,32 @@ grep -q "WARNING: the guest reclaimed memory (1234 pages scanned)" "$WORK/stdout
 	fail "no reclaim warning: $(cat "$WORK/stdout")"
 echo "PASS: reclaim_scans > 0 produces the WARNING"
 
+# Step 26.17: the warning that tmpfs (Shmem) is near its cap leaves out what
+# the RAM disks hold (their own tmpfs, capped at the disks' size, which the
+# sampler reports as peak_ramdisks and subtracts into peak_shmem_other): 50% of
+# MemTotal in Shmem warns, the same with 40% of it in RAM disks does not.
+for fields in "peak_shmem=500000" "peak_shmem=500000 peak_ramdisks=400000 peak_shmem_other=100000"; do
+	{
+		echo "TEST first PASS"
+		echo "MEM total=1000000 min_avail=800000 peak_used=100000 $fields"
+		echo "DCFS-TEST-EXIT=0"
+	} >"$WORK/canned"
+	run
+	[ "$RC" -eq 0 ] || fail "a run with a lot of tmpfs failed (it only warns): $(cat "$WORK/stdout")"
+	case "$fields" in
+	*peak_ramdisks*)
+		if grep -q "the guest came within 10%" "$WORK/stdout"; then
+			fail "a warning for tmpfs that is the RAM disks ($fields): $(cat "$WORK/stdout")"
+		fi
+		;;
+	*)
+		grep -q "the guest came within 10%" "$WORK/stdout" ||
+			fail "no warning for tmpfs at 50% of MemTotal ($fields): $(cat "$WORK/stdout")"
+		;;
+	esac
+done
+echo "PASS: tmpfs near its cap warns, and the RAM disks' tmpfs is not counted"
+
 # The guest's QEMU timeout (e2e mode) follows Bazel's TEST_TIMEOUT less 60 s
 # for teardown and log collection (half of it when that is less than 60 s); 1800 s when it is unset (a manual run); an
 # explicit TIMEOUT wins over both. The fake qemu ignores it: the line

@@ -209,6 +209,14 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
         fail("qemu_test(%s): ram_disks excludes power_cut, boots, rootfs and systemd_image (the disks are in the guest's RAM)" % name)
     if ram_disks and [d for d in disks if len(d) > 3]:
         fail("qemu_test(%s): ram_disks disks carry no mkfs options" % name)
+    # The guest holds its disks: the 256 MiB default has no room for them, and
+    # a test that forgot to size it would run with a warning every time.
+    if ram_disks and mem == None:
+        fail("qemu_test(%s): ram_disks needs an explicit mem (the guest holds its disks; size it from the MEM line, README.md \"Guest memory\")" % name)
+    # The profile disk of `bazel coverage` is /dev/vda when no virtio disk is
+    # attached, so a RAM disk of that name would collide with it.
+    if ram_disks and [d for d in disks if d[0] == "vda"]:
+        fail("qemu_test(%s): a ram_disks disk cannot be named vda (the coverage disk's name)" % name)
     ram_disks_data = ["//test/qemu:fstools_cpio"] if ram_disks else []
     ram_disks_args = ["--ram-disks", "$(location //test/qemu:fstools_cpio)"] if ram_disks else []
     systemd_data = [systemd_image, "@alpine_qemu_img//:qemu_img"] if systemd_image else []

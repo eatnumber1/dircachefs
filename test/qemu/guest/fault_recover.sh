@@ -239,10 +239,10 @@ may_succeed() {
 fill_fails() {
 	ff_name=$1
 	FILL_OK=0
-	ff_before=$(sectors_read "$DM_NAME")
+	ff_before=$(sectors_read "$(fault_dev "$FD_BACK")")
 	ff_out=$(timeout 30 sh -c "$2" 2>&1)
 	ff_rc=$?
-	ff_after=$(sectors_read "$DM_NAME")
+	ff_after=$(sectors_read "$(fault_dev "$FD_BACK")")
 	if [ "$ff_rc" -ne 0 ]; then
 		FILL_ERRORS=$((FILL_ERRORS + 1))
 		error_cell "$ff_name" "$ff_rc" "$ff_out"
@@ -679,7 +679,6 @@ main() {
 		fail setup "wrapping or mounting the disks failed"
 		exit "$FAILED"
 	}
-	DM_NAME=$(basename "$(readlink "/dev/mapper/$FD_BACK")")
 	# Thousands of files first, so that what a mode's tree needs lies in
 	# metadata that is not already in a page the filesystem reads whole (a
 	# small btrfs tree is one leaf): the trees are made after the padding.
