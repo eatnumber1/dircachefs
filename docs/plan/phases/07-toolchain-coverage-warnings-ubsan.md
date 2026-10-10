@@ -90,8 +90,9 @@ are then the same on every machine and in CI.
   a codebase-wide reformat, I want Google's format rules to apply. Also
   when are we doing that?"; dispatched the same morning, mechanical,
   lane-2, while no lane holds an unmerged code branch): `.clang-format`
-  becomes `BasedOnStyle: Google` alone (the `PointerAlignment: Right` and
-  `DerivePointerAlignment: false` overrides go); `bazel run //tools:format`
+  becomes `BasedOnStyle: Google` plus `PointerAlignment: Right` and
+  `DerivePointerAlignment: false` (russ kept the pointer alignment; the
+  IndentWidth and ColumnLimit lines go, being Google's defaults); `bazel run //tools:format`
   runs the pinned clang-format over the tracked C/C++ files;
   `//tools:format_test` (`small`, in `--config=fast`) runs it in
   `--dry-run -Werror` mode; one reformat commit over the whole tree, its

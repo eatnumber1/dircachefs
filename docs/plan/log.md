@@ -2864,3 +2864,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   code branch is merged), so 7.6a dispatched (mechanical, lane-2): .clang-format pure Google,
   //tools:format and format_test, one reformat commit in .git-blame-ignore-revs; 7.6b (buildifier,
   shfmt, shellcheck pins) after the reset. Style 1.1 updated.
+- russ: keep PointerAlignment: Right in the reformat; the 7.6a agent, style 1.1 and the phase text
+  corrected.

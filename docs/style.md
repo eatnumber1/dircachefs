@@ -40,11 +40,12 @@ use it as design guidance rather than firm rules."
 
 ### 1.1 Enforced mechanically
 
-- **Formatting is enforced, not requested, and it is Google's.** `.clang-format`
-  is `BasedOnStyle: Google` and nothing else (russ, 2026-10-11: "When we do
-  a codebase-wide reformat, I want Google's format rules to apply"); the
-  earlier `PointerAlignment: Right` override goes with the reformat (7.6a),
-  so pointers read `int* p` as Google writes them. The pinned LLVM's
+- **Formatting is enforced, not requested, and it is Google's, with one
+  kept deviation.** `.clang-format` is `BasedOnStyle: Google` plus
+  `PointerAlignment: Right` (with `DerivePointerAlignment: false`, which it
+  needs) and nothing else (russ, 2026-10-11: "When we do a codebase-wide
+  reformat, I want Google's format rules to apply", then "keep the
+  PointerAlignment: Right"); so pointers stay `int *p`. The pinned LLVM's
   clang-format runs behind `bazel run //tools:format` and a `small`
   `//tools:format_test` checks every tracked C/C++ file in `--dry-run
   -Werror` mode; buildifier for Bazel files and shfmt/shellcheck for shell
