@@ -298,14 +298,14 @@ above should not be an ASSERT (using the googletest ASSERT which
 attributes it to a test failure). The way to think about this is that
 there's a clear distinction between 'the test failed' and 'the
 infrastructure failed to run the test'." So, in the same step: style.md's
-tests section says it in those words; a testonly helper for setup that is
-not under test (e.g. `Require(status)` / `REQUIRE_OK_AND_ASSIGN`, which
-LOG(FATAL)s with an "infrastructure failure:" prefix and the status, so
-the output is unmistakable and no googletest failure is recorded); the
-audit also converts setup `ASSERT_OK_AND_ASSIGN`/`ASSERT_THAT(..., IsOk())`
-in fixtures and test preambles (the dup of a source fd, a backing mkdir,
-a database open) to the helper, leaving ASSERT/EXPECT only on the
-property under test (25.4's EXPECT-over-ASSERT rule stands for those);
+tests section says it in those words; setup that is not under test uses
+Abseil's plain `CHECK`/`CHECK_OK` (russ: no custom helper, "googletest
+understands the difference between 'the process crashed' and
+'ASSERT/EXPECT failed'"); the audit converts setup
+`ASSERT_OK_AND_ASSIGN`/`ASSERT_THAT(..., IsOk())` in fixtures and test
+preambles (the dup of a source fd, a backing mkdir, a database open) to
+CHECKs, leaving ASSERT/EXPECT only on the property under test (25.4's
+EXPECT-over-ASSERT rule stands for those);
 guest scripts likewise distinguish `fail <check>` (the test failed) from
 an infrastructure abort (today `die`/`exit 2` in lib.sh; the harness's
 verdict rules already treat a missing RESULT line as a harness failure:
