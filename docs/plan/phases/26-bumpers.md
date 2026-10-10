@@ -499,6 +499,41 @@ dcfs-implementer for the budget files; after the current fix rounds
 (15.6b, 17.1, 6.5) merge, since all three touch the same guest harness
 files. The Gantt is updated when it is dispatched.
 
+## 26.18 End-to-end tests: assertions and oracles in C++ (russ, 2026-10-09, approved; start after the weekly quota resets, Friday 2026-10-16)
+
+Premise: the unit tests are already googletest C++ binaries run in the
+guests; the shell layer is the end-to-end scripts (mount through the
+kernel, dmsetup, power cuts, systemd). This week's findings against shell
+there: every poll that had to become an event (no poll()/inotify/pidfd in
+shell; 6.5 fixed it by adding them to testutil in C); the identity
+oracle's weakness and 12.14's awk variable bug (typed comparisons and
+matchers in C++); busybox ash, musl getopt, awk's rand() across pins, an
+unquoted `?` glob; and russ's crash-versus-assertion rule (25.9), which
+C++ gives for free. Shell stays right for command glue (the systemd guest,
+xfstests, pjdfstest, the wrapper tests).
+1. A guest-side e2e library in `testonly/`: process spawning (from
+   bench/process.cc), mount/unmount, dm targets, fsfreeze, power cut, the
+   event waits, and the oracles (tree digest, identity by handle, dirty-set
+   reads through `testutil sql`), reporting through googletest.
+2. Port the two oracles and one fault scenario (the ACE mixed test) as the
+   pattern; measure time and lines against the shell version.
+3. Rule (style.md tests section): new end-to-end tests with comparisons,
+   parsing or waits are C++; shell only for command glue with
+   succeeded-or-not checks; lib.sh helpers migrate into the library as
+   they are touched, as 6.5 did.
+4. Decide on porting the rest from the measurement, not up front.
+5. Structured results (russ): googletest writes a machine-readable report
+   (`--gtest_output=xml:<path>` or `json:<path>`; Bazel already consumes
+   the XML as `test.xml`): the harness passes the flag into the guest,
+   copies the file out with the serial log, and the host side merges it
+   into the test's `test.xml` so Bazel, the CI summary tools and 26.17's
+   budgets see one check per testcase with its own time; the shell
+   scenarios' `TEST x PASS/FAIL` lines get the same treatment (run-qemu.sh
+   turns them into testcases) so breakdowns aggregate across both kinds.
+Owner: dcfs-implementer for the library and the structured output,
+dcfs-protocol for the oracles' port; after 26.17; not before the quota
+reset.
+
 ## 26.16 Where CI time goes (2026-10-09)
 
 No cold-run profile exists: `notes/build-speed-2026-10-07.md` predates the

@@ -2463,3 +2463,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   listing and the final cut (the bug's reach is wider than the model's two paths); listed as
   expected failures with reason 23.11, strictly. Review passed on the evidence; merging after a
   rebase over 6.5, ahead of 23.11, which then empties the list (lane-1 told).
+- Pushed: 2ee9cc7, CI run 38009667624 being watched.
+- russ (2026-10-09): 26.18 approved, "but after our weekly quota resets" (Friday 2026-10-16): the
+  end-to-end layer's assertions and oracles move to C++ (a guest-side gtest library; shell stays
+  for command glue; port the two oracles and the ACE mixed test as the pattern; measure before
+  porting the rest); and googletest's structured output (`--gtest_output=xml|json`) copied out of
+  the guest and merged into test.xml so breakdowns aggregate per check across both kinds.
