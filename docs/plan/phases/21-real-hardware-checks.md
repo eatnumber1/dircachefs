@@ -45,9 +45,12 @@ and a soak run), and 21.2 passes.
   the backing btrfs directly, outside dcfs. It coexists if: (1) nothing
   writes to the served tree behind dcfs: snapper writes only inside
   `.snapshots`, a subvolume dcfs does not cache, fine; snapraid's `content`
-  file must not live inside the served directory if snapraid writes it
-  natively (put it outside the served directory or on the parity disk, or
-  write it through the mount); (2) native reads are fine except atime
+  file must not be cached by dcfs if snapraid writes it natively; russ's
+  layout puts it on its own subvolume
+  (`/mnt/<disk>-data/snapraid-ignore/snapraid.content`), which is a
+  boundary stub to dcfs, so the native writes are invisible to the cache
+  and the rule holds as is (the stub cannot be entered through the mount,
+  which nothing needs); (2) native reads are fine except atime
   (dcfs caches file atimes from held fds and directory atimes cache-only,
   so a native read's relatime update is not seen): `noatime` on the backing
   or indifference; (3) no native restores or `fix` into the served tree
