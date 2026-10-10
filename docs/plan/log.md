@@ -2657,3 +2657,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ asked for an external source of the POSIX contract: `notes/posix-contract-sources-2026-10-10.md`
   (SibylFS as the reference for 12.16, a 12.18 spike on its trace checker, DFSCQ/Ferrite for the
   crash vocabulary, AtomFS's linearizability for atomicity). Nothing fetched or dispatched.
+- russ approved the POSIX-contract proposal: 12.16 refined (SibylFS semantics restricted to
+  our operations, cited to Lem definitions; EAGAIN never an ideal outcome; crash contract ours in
+  DFSCQ/Ferrite vocabulary; atomicity as linearizability; Fable review of the mapping design),
+  12.18 added (spike: SibylFS's trace checker through Bazel as a second oracle). Both after the
+  reset, 12.16 after 25.10's model changes.

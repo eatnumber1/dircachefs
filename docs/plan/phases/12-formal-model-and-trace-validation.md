@@ -517,6 +517,37 @@ Order after 12.12's audit, which may reorder them with the approved
   than a set of invariants. Where the mapping needs a limitation (atime
   lag, close-to-open), the limitation is a named weakening in the ideal
   spec, as `formal/limitations/` does today. Owner: dcfs-protocol.
+  Refined (russ, 2026-10-10, "Yes I agree"; `notes/posix-contract-sources-2026-10-10.md`):
+  the ideal spec is **SibylFS's semantics restricted to dcfs's operation
+  set**, translated into TLA+ by hand, each action's allowed outcomes
+  cited to the Lem definition that gives them (and the SibylFS per-fs
+  flag where ext4/btrfs/xfs deviate: a deviation of the backing is one
+  dcfs inherits, by the contract rule of `docs/style.md` 1.12). EAGAIN is
+  not an outcome the ideal spec offers for any operation (EINTR is, for a
+  cancelled request). The crash contract is not SibylFS's (it has none):
+  12.8's regimes stay ours, described in DFSCQ's metadata-prefix and
+  Ferrite's crash-consistency vocabulary. Atomicity is stated as
+  linearizability (AtomFS's spec notion): each dcfs operation takes
+  effect at one instant between its call and its reply, which the
+  refinement mapping must exhibit; this is the property 25.10's
+  unbounded retries and the coroutine design keep. First task of the
+  step: fetch SibylFS (pin it under `third_party/sibylfs/` as a reading
+  reference with a README; check its licence), list the Lem definitions
+  for our operations, and state the ideal spec's module interface before
+  writing actions. Owner: dcfs-protocol; Fable review of the mapping's
+  design is warranted (the one place judgement, not labour, is the
+  bottleneck).
+- 12.18 SibylFS's trace checker as a second oracle (spike; russ,
+  2026-10-10). Can the SibylFS checker (OCaml) be built hermetically
+  through Bazel (an OCaml toolchain pinned like every other tool, or a
+  prebuilt binary pinned by hash if the project offers one) and run on a
+  trace of dcfs's FUSE replies converted to its syscall-trace format? If
+  yes: a test runs one workload through dcfs and the same on the backing,
+  checks both traces, and fails if dcfs's trace is rejected where the
+  backing's is accepted (an oracle independent of our model, beside
+  12.11). If the toolchain is too heavy or the checker will not build, the
+  spike reports why and SibylFS stays the reading reference of 12.16.
+  Time-box: one investigator session. Owner: dcfs-investigator.
 - 12.17 The wrapper handoff modelled. `mount.dcfs`'s capture (the helper's
   private namespace, the staging tmpfs, open_tree, the socketpair), the
   fork and daemonisation, readiness after INIT and the exit statuses form
