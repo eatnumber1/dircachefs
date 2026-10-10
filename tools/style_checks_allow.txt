@@ -167,7 +167,6 @@ dcfs/dir_cache_fs.cc|ErrnoName|misc-include-cleaner|1
 dcfs/dir_cache_fs.cc|MaxHeldFds|misc-include-cleaner|1
 dcfs/dir_cache_fs.cc|XattrsChangedBySetattr|readability-implicit-bool-conversion|2
 dcfs/dir_cache_fs.h|<file scope>|modernize-use-override|1
-dcfs/dir_cache_fs_test.cc|<file scope>|banned_std|1
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-include-cleaner|5
 dcfs/dir_cache_fs_test.cc|<file scope>|misc-unused-parameters|1
 dcfs/dir_cache_fs_test.cc|<file scope>|modernize-use-designated-initializers|7
@@ -176,7 +175,7 @@ dcfs/dir_cache_fs_test.cc|BatchForget|bugprone-invalid-enum-default-initializati
 dcfs/dir_cache_fs_test.cc|BatchForget|performance-unnecessary-value-param|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|modernize-use-designated-initializers|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|readability-avoid-nested-conditional-operator|1
-dcfs/dir_cache_fs_test.cc|DCFS_BACKSTOP|misc-include-cleaner|8
+dcfs/dir_cache_fs_test.cc|DCFS_BACKSTOP|misc-include-cleaner|7
 dcfs/dir_cache_fs_test.cc|Forget|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|INSTANTIATE_TEST_SUITE_P|modernize-type-traits|1
 dcfs/dir_cache_fs_test.cc|ListAll|readability-function-cognitive-complexity|1

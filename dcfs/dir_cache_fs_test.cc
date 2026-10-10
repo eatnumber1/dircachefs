@@ -55,8 +55,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <deque>
-#include <functional>
 #include <iostream>
 #include <iterator>
 #include <map>
@@ -7003,9 +7003,7 @@ TEST_F(DirCacheFSTest, DrainedRequestIsServedAfterTheInterruptedOne) {
 struct CheckpointCase {
   std::string name;
   // Sends the request (handles opened before are in `fh`); its reply.
-  std::function<Reply(DirCacheFSTest &, InodeId f, uint64_t fh,
-                      uint64_t fh2)>
-      send;
+  Reply (*send)(DirCacheFSTest &, InodeId f, uint64_t fh, uint64_t fh2);
   bool needs_open = false;  // f open O_RDWR (fh), g O_RDWR (fh2)
   bool attrs_unknown = true;  // f's attributes unknown and f dirty after
 };
@@ -7562,8 +7560,8 @@ SweepResult SweepWorkload(
 // wrapper: the raw-syscall rule refuses absl::Now in tests.
 absl::Time ClockNow() {
   const absl::StatusOr<struct timespec> now =
-      syscalls::clock_gettime(CLOCK_REALTIME);
-  CHECK_OK(now) << "clock_gettime(CLOCK_REALTIME)";
+      syscalls::clock_gettime(CLOCK_MONOTONIC);
+  CHECK_OK(now) << "clock_gettime(CLOCK_MONOTONIC)";
   return absl::TimeFromTimespec(*now);
 }
 

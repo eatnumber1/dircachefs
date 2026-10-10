@@ -29,6 +29,7 @@ cc_library(
     deps = [
         "//dcfs:syscalls",
         "//dcfs:syscalls_backing",
+        "@absl//absl/algorithm:container",
         "@absl//absl/status:status_macros",
         "@absl//absl/status:statusor",
     ],
