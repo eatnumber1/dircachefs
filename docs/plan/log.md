@@ -2831,3 +2831,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   the 9-minute cold tidy cost stays in --config=fast. 25.16 and 25.17 amended: the matchers now
   carry the nullability, banned-names and iterator-pair gates, so those steps empty allowlists
   rather than add repo_shape rules.
+- 25.21 merged (lane-4 → 66e0848, two commits, gate exit 0): the style checks are live in
+  --config=fast under //tools; 16 findings from 25.15/26.22 allowlisted as pre-existing at landing
+  and four stale lines removed. The agent recommends moving the tidy/query actions to presubmit
+  (9 min cold on a core-header change, 26 s no-op) with a diff-only or skip-when-absent shape for
+  fast; left for russ, placement unchanged. 7.5 marked mostly landed. Lane-4 free.

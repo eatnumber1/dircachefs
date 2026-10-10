@@ -56,6 +56,11 @@ are then the same on every machine and in CI.
   `WarningsAsErrors: '*'`. Our code only, not `third_party/` or external
   repositories. CI runs it on every push; findings that are real bugs get
   a test first. It runs on the host (no root or kernel needed).
+  Landed early by 25.21 (2026-10-10, 66e0848): the aspect, the check set
+  (minus clang-analyzer-*, too slow: a large-tier target later), the
+  deny-list and the shrinking allowlist. Left for 7.5: the aspect failing
+  the build itself rather than through the verdict test, and the analyzer
+  target.
   `readability-*` is already in the set; style 1.6a (russ, 2026-10-10)
   names three that must not land on the deny-list and one option:
   `readability-else-after-return`, `readability-misleading-indentation`,
