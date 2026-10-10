@@ -2472,3 +2472,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 26.14e merged (628af12, four commits; clean rebase over 6.5; fast 236 + 2; the three mixed
   targets green with their ten expected failures). The noisy job runs weekly from here; its first
   real run sizes the 300-minute limit. Lane-5 idle by the budget throttle.
+- russ (2026-10-09): support fstab's sixth field (fsck via fstab for a dcfs line). Recorded as the
+  refinement of 15.5: an `fsck.dcfs` helper that finds its fstab line through util-linux,
+  delegates the backing's fsck with the flags passed through, checks the cache database
+  (integrity, schema, lock, dirty-set sanity; rebuild with -y, report with -n), fsck(8) exit
+  statuses, no waits on a held database; README examples get passno 2; the systemd guest asserts
+  the boot-time check. After 15.6b merges.

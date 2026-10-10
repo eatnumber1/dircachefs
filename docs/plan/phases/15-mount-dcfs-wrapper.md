@@ -326,6 +326,38 @@ Sonnet.
 recorded mount points and reverting stale ones, non-directory boundaries.
 Owner: Opus.
 **15.5 `fsck.dcfs` and `dcfs exports`.** Owner: Sonnet.
+Refined (russ, 2026-10-09: "add support for the sixth field of fstab, so
+you can do fsck via fstab on a filesystem that's set up via dcfs").
+`fsck -A` and systemd's `systemd-fsck@<dev>.service` run `fsck.<type>
+<device> <flags>` before mounting a line whose passno is non-zero, so
+dcfs installs `fsck.dcfs` by the argv[0] dispatch like the other helpers.
+It receives only the device and fsck's flags, so it finds its fstab line
+(and the `dcfs.` options) through util-linux (`findmnt --fstab`, as a
+child like `/bin/mount` in the capture), then: (1) for a native
+`dcfs.fstype`, runs that type's fsck on the device with the flags passed
+through (`-a`, `-p`, `-n`, `-y`, `-f`, `-C`) and relays its exit status,
+so passno 2 on a dcfs line means what it means on a plain line; for
+`none` and `bind` there is no device to check: say so, exit 0; (2) checks
+dcfs's own cache database: SQLite `integrity_check`, the schema version,
+that no daemon holds it, the dirty set's sanity (dirty rows name existing
+inodes; a clean-shutdown flag consistent with an empty dirty set); with
+`-y`/`-a`/`-p` a corrupt or unreadable cache is rebuilt (it is a cache:
+deleting it costs a cold start, say so on stderr), with `-n` only
+reported; exit statuses per fsck(8) (0, 1 corrected, 4 uncorrected, 8
+operational error, 16 usage, 32 cancelled), combined with the backing
+fsck's as fsck(8) combines them. No timers (russ's rule): a held database
+is reported, not waited for, unless the caller asked to wait. README's
+fstab examples get a real passno (2) where the backing is a device, the
+15.7 sentence about pass 0 goes, and the systemd guest asserts: a
+passno-2 line is checked at boot before its mount (journal shows
+`systemd-fsck@` running `fsck.dcfs`, then the mount unit), a corrupt
+cache is reported with `-n` and rebuilt with `-y`, a `none` line's fsck is
+a no-op, exit statuses as fsck(8) reports them; mount_dcfs.sh covers the
+busybox path. Design decisions in design.md (why the backing's fsck is
+delegated, why the cache is rebuilt not repaired). `dcfs exports` stays
+in 15.5 as before. Owner: dcfs-implementer, after 15.6b merges (same
+wrapper code and systemd test); under the budget throttle, in the first
+of the three lanes to free after that.
 **15.6 systemd guest** (russ, 2026-10-07: a RELEASED cloud image fetched by
 its published checksum, not an image we build: Debian 13's nocloud image
 (kernel 6.12, has FUSE passthrough) or Ubuntu 26.04's if a newer kernel is
