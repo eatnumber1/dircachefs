@@ -493,3 +493,10 @@ get the qualifier on our side of it. No behaviour change; a nullable
 pointer found dereferenced without a check is reported, not silently
 fixed (it is a bug with a test first). About 30 raw pointers in headers
 today, 2 smart pointers.
+
+25.14 merged 2026-10-10 (cf12b7d, mechanical agent, two commits): the
+`namespace_qualifiers` rule is scoped by namespace depth (global-scope
+uses in main.cc and four test files keep their qualifier, rightly); 40
+in-namespace sites dequalified; no ambiguity found; `project_prefix`
+rule; the two renames with docs/design.md updated. No allowlist for
+either rule.

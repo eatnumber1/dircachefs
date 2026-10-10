@@ -191,10 +191,11 @@ regardless, so the qualifier never did anything there. Mechanically:
 `dcfs/*.cc` and `dcfs/*.h` (plan step 25.14; today 38 calls).
 
 **A name says what distinguishes the thing from its siblings, and never
-repeats the namespace.** `ProducedErrnoToStatus` exists beside `ErrnoToStatus`
+repeats the namespace.** The function now called `ProducedErrnoToStatus`
+was `DcfsErrnoToStatus` until 25.14. It exists beside `ErrnoToStatus`
 because the two differ in origin: `ErrnoToStatus` forwards a syscall's
-answer, the other builds an errno dcfs itself chose (25.3). "Dcfs" names
-neither; inside `namespace dcfs` it is the namespace said twice. The
+answer, the other builds an errno dcfs itself chose (25.3). "Dcfs" named
+neither; inside `namespace dcfs` it was the namespace said twice. The
 distinguishing word goes in the name: `ProducedErrnoToStatus` beside
 `ErrnoToStatus` (matching the predicate `ProducedByDcfs`, where "Dcfs"
 is the contrast with the backing filesystem, not a prefix). Rule: an

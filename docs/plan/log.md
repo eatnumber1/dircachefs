@@ -2715,3 +2715,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Style rule (russ, 2026-10-10): every pointer, raw or smart, is `absl_nonnull` or
   `absl_nullable`; a never-null pointer is preferably a reference. Style 1.2 written; 25.16 queued
   (warnings first, then headers one at a time, then a repo_shape check) after 25.15 in lane-2.
+- 25.14 merged (lane-2 → cf12b7d; subject gate exit 0; orchestrator read the report, diff is
+  mechanical): the agent found the 38 count was approximate and that global-scope uses need the
+  qualifier, so the check tracks namespace depth. 25.15 dispatched (implementer, lane-2).
