@@ -25,6 +25,11 @@ error path), name the input or event that reaches it; a branch you cannot
 reach is a finding, whatever its comment says, and a comment that confesses
 ("cannot happen", "just in case", "be exact anyway") is one on its own
 (`docs/style.md` 1.10a).
+For every function the diff adds or reshapes, ask whether it could be
+guards, then a straight line, with undo as cancellable Cleanups
+(`docs/style.md` 1.6a); an `if (status.ok())` ladder without a stated
+reason, hand-written undo in an error branch, or a nested happy path is a
+finding.
 
 Report findings ranked by severity, each with file:line, the concrete
 failure scenario, and a suggested fix. Separate what you verified from what
