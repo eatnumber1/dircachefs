@@ -2900,12 +2900,15 @@ kernel does not wait for a plain `fuse` daemon at unmount), the fusectl
 dependence of that helper, the mount wrapper's capture of a native mount
 in a private namespace, the handle work that connectable handles would
 make unnecessary. russ: this was always the intent, the timeline is just
-long. The rule: when a corner exists only because we are a FUSE daemon,
-the remedies in order are a kernel or libfuse patch
-(`docs/plan/notes/kernel-patches.md`), then a documented limitation, then
-wrapper code; never wrapper code first. Every such mechanism carries a
-comment at its top naming the patch that retires it, takes no new
-features, and is deleted when the production kernel has the patch. The
+long. The rule (russ, 2026-10-11, corrected the same day): a corner that
+exists only because we are a FUSE daemon gets its workaround first, in
+wrapper code or as a documented limitation, because the kernel's
+timelines are so long that filing the patch last in our own order adds
+no time to when it lands; the patch (`docs/plan/notes/kernel-patches.md`)
+is sent after everything else is done, and the workaround is written to
+be deleted: a comment at its top naming the patch that retires it, no new
+features once the patch is sent, deletion when the production kernel has
+it. The
 synchronous `FUSE_DESTROY` opt-in (patch 6) retires the most at once: the
 umount helper, the lock files, the fusectl dependence and the
 mount-after-unmount limitation.

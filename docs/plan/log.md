@@ -2903,3 +2903,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   native-type namespace capture is deleted after a good trial on the bind form (15.11; 12.17 goes
   with it); over-mounting stays, since the bind form provides it without capture; the trial gets a
   short no-dcfs control (his fileserver is RAM-starved, so dcfs is needed; the control quantifies).
+- russ corrected the FUSE-only rule: workaround first, kernel patch after everything else (the
+  kernel's timelines dwarf ours, so our order adds no time); design.md and the Queue amended.

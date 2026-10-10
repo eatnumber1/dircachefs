@@ -105,7 +105,10 @@ New phases are frozen. The order from here, and why:
    (blocked-task diagnostics), 15.10 (fusectl in the remounting guests),
    12.11b/c, 12.15,
    17.2 (setgid), 17.1b/c, 11.7's remainder, 11.3c, 7.3, 7.6b, 7.7,
-   26.14b, the kernel bug mails and patches (russ). The style checks
+   26.14b. The kernel patches (notes/kernel-patches.md) go last of all,
+   after everything else is done (russ, 2026-10-11: their timelines are so
+   long that our order adds nothing); the two kernel bug mails are
+   separate and russ's. The style checks
    keep every new line to the rules meanwhile; the backlog shrinks as
    code is touched for other reasons, not as a campaign.
 
