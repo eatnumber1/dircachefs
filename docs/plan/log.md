@@ -2478,3 +2478,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (integrity, schema, lock, dirty-set sanity; rebuild with -y, report with -n), fsck(8) exit
   statuses, no waits on a held database; README examples get passno 2; the systemd guest asserts
   the boot-time check. After 15.6b merges.
+- 23.11 review fixes done (lane-1, 4281fb0 on 2ee9cc7): the ParentOf harness test under the
+  recorder (failing first with the mark removed; shard c validates the real `parent` begin line),
+  the Create comment, the formal README sentence, the advisories, `born` in the kill-mode list
+  (green on three backings). Final round sent: rebase over 26.14e, empty its ten expected
+  failures, run the mixed targets.
+- russ (2026-10-09): allow_other always on, refused in fstab. Recorded as 15.8 (with the reasoning:
+  root daemon plus default_permissions makes FUSE's mounter-only default pointless here); README,
+  man page, fixtures and guest wrappers drop the option; after 15.6b.

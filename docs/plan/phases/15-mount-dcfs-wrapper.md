@@ -358,6 +358,24 @@ delegated, why the cache is rebuilt not repaired). `dcfs exports` stays
 in 15.5 as before. Owner: dcfs-implementer, after 15.6b merges (same
 wrapper code and systemd test); under the budget throttle, in the first
 of the three lanes to free after that.
+**15.8 `allow_other` always on (russ, 2026-10-09).** russ: "Does it ever
+make sense not to pass dcfs.allow_other? If no, should we just always
+pass it internally (and require it not be present in fstab)?" No: FUSE's
+mounter-only default guards against an unprivileged daemon serving
+fabricated data to other users; dcfs runs as root and requires
+`default_permissions`, so the kernel enforces the mode bits on every
+access, and `allow_other` only lets non-root users and nfsd reach the
+mount at all. A root-only mount is a root-only mode on the directory.
+So: dcfs passes `allow_other` and `default_permissions` to the kernel
+itself, always; `dcfs.allow_other` and a bare `allow_other` in a dcfs
+line are REFUSED (exit 1, usage) with a message that dcfs always allows
+other users and the option should be removed (strict, so stale lines are
+noticed); README examples, man page, design.md and every test fixture and
+guest wrapper (15.6's fstab lines, 17.1's mount wrapper, nfs.sh) drop the
+option; a test that the option is refused, failing first; mount.dcfs's
+non-root refusal unchanged. Owner: dcfs-implementer, together with 15.5
+or in the lane that frees after 15.6b merges (same option parser).
+
 **15.6 systemd guest** (russ, 2026-10-07: a RELEASED cloud image fetched by
 its published checksum, not an image we build: Debian 13's nocloud image
 (kernel 6.12, has FUSE passthrough) or Ubuntu 26.04's if a newer kernel is
