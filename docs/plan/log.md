@@ -2825,3 +2825,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   finding (block I/O stopped under CPU hotplug). Two items for russ: the mount-after-umount
   design question without fusectl, and the timer-shaped follow-ups for the hang. Push point for the
   morning: main at this commit. Lane-3 free (with a stray .scratch/ for russ to remove).
+- 25.21 reported (lane-4): the clang-tidy aspect with the full check set and nine matchers, 1354
+  allowlisted findings as the backlog (counts in the phase file); rebased onto main and sent back
+  for a rerun because 25.15 and 26.22 landed after its allowlist was taken. Open for russ: whether
+  the 9-minute cold tidy cost stays in --config=fast. 25.16 and 25.17 amended: the matchers now
+  carry the nullability, banned-names and iterator-pair gates, so those steps empty allowlists
+  rather than add repo_shape rules.

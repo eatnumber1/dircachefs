@@ -502,6 +502,11 @@ uses in main.cc and four test files keep their qualifier, rightly); 40
 in-namespace sites dequalified; no ambiguity found; `project_prefix`
 rule; the two renames with docs/design.md updated. No allowlist for
 either rule.
+Amended 2026-10-10 after 25.21: the gate is the `pointer_without_nullability`
+clang-query matcher (report-only today, 430 sites: 197 production, 233
+test), switched to enforced at the end of this step; no repo_shape check.
+A pointer behind a typedef is not seen by the matcher: the sweep greps for
+those by hand.
 
 ## 25.17 The short status macros everywhere (russ, 2026-10-10; after 25.15, lane-2)
 
@@ -538,6 +543,13 @@ outright by repo_shape in all our C++ (no allowlist), and the existing
 uses go: `session_loop.h`'s two `std::function` (AnyInvocable or
 FunctionRef by ownership: say which and why), the one test's
 `std::chrono` (absl::Time/Duration).
+Amended 2026-10-10 after 25.21: the repo_shape rules this step planned
+for `std::function`/`std::chrono`/`std::unordered_*` (`banned_std`, 49
+sites: 2 production, 47 test) and for iterator-pair algorithms
+(`iterator_pair_algorithm`, 18 sites) exist as clang-query matchers with
+allowlists; this step empties those allowlists instead of adding rules.
+The `ABSL_` macro spelling and the `[[nodiscard]]`-before-Status rules
+stay repo_shape (text patterns).
 
 ## 25.19 Abseil utilities catalogue (russ, 2026-10-10; dispatched, lane-4)
 
@@ -665,3 +677,27 @@ The wrappers' EPERM branch has no test (as root the kernel accepts every
 id but the sentinel). Not done here: the other `if (x.ok()) {` nested
 happy paths (12 remain; `sqlite.cc`'s RunTransaction next to touched
 code), for 25.21's matcher backlog.
+
+25.21 reported 2026-10-10 (lane-4, one commit; merge pending a rerun on
+the rebased tip): an aspect (`tools/style_checks.bzl`) runs the pinned
+clang-tidy and clang-query as sandboxed, cached actions per cc target
+with the real flags; `//tools:style_checks_test` compares the outputs
+with `tools/style_checks_allow.txt` (keys file|function|check|count,
+719 keys, 1354 findings), `style_matchers_test` checks each matcher's
+known-bad/good fixtures, a self-check test. `.clang-tidy`: 7.5's groups
+plus google-* and abseil-*, minus clang-analyzer-* (120 of 140 s on
+fsck_test.cc, over 20 min on dir_cache_fs_test.cc: a separate large
+target later) and a 21-entry deny-list with reasons
+(abseil-unchecked-statusor-access segfaults clang-tidy 22.1.8). Top
+counts: misc-include-cleaner 560, designated-initializers 60,
+cert-err33-c 49, unused-parameters 44, cognitive-complexity 41 (22
+production), google-runtime-int 31, implicit-bool-conversion 26,
+concurrency-mt-unsafe 26. else-after-return and misleading-indentation:
+zero. Matchers enforced: capturing_mutating_lambda 89, banned_std 49,
+check_in_production 26, iterator_pair_algorithm 18, happy_path_nested 1,
+dcfs_qualified_inside_dcfs 0 (replaces the repo_shape regex, deleted);
+report-only: pointer_without_nullability 430, status_uninitialized 18.
+Cost: 198 actions, 9 min cold at 4 jobs when a core header changes, 26 s
+no-op; placement (fast vs presubmit) is an open question for russ with
+the agent's recommendation to follow. 7.5's remainder: the aspect
+failing the build itself rather than through the test.
