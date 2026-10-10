@@ -415,6 +415,32 @@ kill); the job cannot go red except by its own breakage; `-quiet-only` is
 last-wins if anything else sets `--test_tag_filters`. Sent back
 2026-10-09.
 
+Second round 2026-10-09: the generator reaches the state. Mid-sequence
+checks are metadata-only (identity oracle first, then `fd_snapshot` after
+`mixed_drop`; md5 only at the end); `fail3` syncs the cache only; a
+`dropahead` event (backing drop-writes until the next cut, re-applied
+after a freeze as `born` does); handles taken before every crash and cut
+(22 of 22 sequences checked identity, 411 handles, 10-30 each); the large
+tier is an explicit list of 22 sequences drawn once from seed 2610. On
+unfixed code TEN of the 22 fail, identically on ext4, xfs and btrfs, each
+with the ghost ("the handle of t/c3 opened inode 20, but the backing
+filesystem's own handle of it answers ESTALE: an answer for something
+gone"): the two pinned ones and eight that need only crash3/fail3, a
+listing and the final cut (`replace listing crash3 listing`, `unlink
+listing crash3 listing`, ...), so the bug's reach on main is wider than
+the model's two paths; listed in `fault_ace_mixed.expected_failures` with
+reason 23.11, strictly (a listed sequence that holds fails), so 23.11's
+merge must empty the file. Also: the real-ghost fixture (rm behind the
+daemon; the old `tamper` edited the wrong field and rejected nothing, now
+fixed); preconditions asserted; the oracle compares the recorded inode and
+type AND requires the backing handle taken at the same time to still open
+to the same object, answers collected before any read, ESTALE for a
+surviving object noted and counted; fhtest.c restored, `handle-save`/
+`handle-stat` in testutil (prints inode and mode too; 23.11 adapts);
+cutahead's own directory t/z; noisy_report's artifact name and
+`--runs_per_test_detects_flakes`; the L items except the wchan check.
+Merge after a rebase over 6.5.
+
 26.14 made the default guests deterministic (writeback off, one vCPU),
 which also removed the noise that shakes out races: timer-driven writeback
 landing mid-operation, real parallelism between the daemon's threads and

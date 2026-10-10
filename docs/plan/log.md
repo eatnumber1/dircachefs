@@ -2458,3 +2458,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   writeback on ext4/xfs) untorn, so the reordering half was never exercised; the forged-WAL
   self-check can pass vacuously; the docs overstate; the WAL-copy facility moves to 12.10. Sent
   back with a reach check and a host self-check required.
+- 26.14e second round: the generator reaches the state; 10 of 22 pinned sequences fail on main
+  with the ghost, identically on ext4/xfs/btrfs, eight of them needing only crash3/fail3, a
+  listing and the final cut (the bug's reach is wider than the model's two paths); listed as
+  expected failures with reason 23.11, strictly. Review passed on the evidence; merging after a
+  rebase over 6.5, ahead of 23.11, which then empties the list (lane-1 told).
