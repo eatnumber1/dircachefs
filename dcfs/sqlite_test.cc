@@ -24,8 +24,7 @@
 #include "gtest/gtest.h"
 #include "sqlite3.h"
 
-namespace dcfs {
-namespace sqlite3 {
+namespace dcfs::sqlite3 {
 namespace {
 
 using ::absl_testing::IsOk;
@@ -576,5 +575,4 @@ TEST(TransactionUnwindTest, FailedCommitUnwindsAndConnectionStaysUsable) {
 }
 
 }  // namespace
-}  // namespace sqlite3
-}  // namespace dcfs
+}  // namespace dcfs::sqlite3

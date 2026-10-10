@@ -12,8 +12,7 @@
 #include "absl/strings/str_cat.h"
 #include "dcfs/status.h"
 
-namespace dcfs {
-namespace syscalls {
+namespace dcfs::syscalls {
 
 absl::StatusOr<pid_t> fork() {
   pid_t pid = ::fork();
@@ -53,5 +52,4 @@ absl::Status pause() {
 
 void _exit(int status) { ::_exit(status); }
 
-}  // namespace syscalls
-}  // namespace dcfs
+}  // namespace dcfs::syscalls

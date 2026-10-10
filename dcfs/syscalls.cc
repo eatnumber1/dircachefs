@@ -31,8 +31,7 @@
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 
-namespace dcfs {
-namespace syscalls {
+namespace dcfs::syscalls {
 
 absl::Status close(FileDescriptor fd) {
   // Failure of close is not recoverable... we must leak the fd.
@@ -255,6 +254,4 @@ void syslog(int priority, std::string_view message) {
   ::syslog(priority, "%s", message_str.c_str());
 }
 
-}  // namespace syscalls
-
-}  // namespace dcfs
+}  // namespace dcfs::syscalls

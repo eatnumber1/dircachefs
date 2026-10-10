@@ -24,8 +24,7 @@
 //
 // On success, the macros are no-ops (control falls through).
 
-namespace dcfs {
-namespace internal {
+namespace dcfs::internal {
 
 // Builds the kInternal StatusBuilder for a failed RET_CHECK(expr).
 inline absl::StatusBuilder RetCheckFail(
@@ -102,8 +101,7 @@ inline absl::StatusBuilder RetCheckFailStatus(
          << "RET_CHECK_OK failure: " << expr_str << " is not OK: " << status;
 }
 
-}  // namespace internal
-}  // namespace dcfs
+}  // namespace dcfs::internal
 
 // Suppresses "dangling else" warnings/ambiguity, following the same idiom
 // absl's status macros use.

@@ -267,7 +267,6 @@ dcfs/mounts_below.cc|HasRo|readability-use-anyofallof|1
 dcfs/mounts_below.cc|UnescapeMountinfoPath|readability-math-missing-parentheses|2
 dcfs/mounts_below_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/remount.cc|RemountDcfs|google-runtime-int|1
-dcfs/ret_check.h|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/ret_check.h|<file scope>|modernize-use-constraints|2
 dcfs/ret_check.h|RetCheckStreamable|bugprone-return-const-ref-from-parameter|1
 dcfs/ret_check_test.cc|CheckOkPropagatesFailure|performance-unnecessary-copy-initialization|1
@@ -278,13 +277,11 @@ dcfs/session_loop_test.cc|<file scope>|misc-include-cleaner|1
 dcfs/session_loop_test.cc|FakeWritev|misc-include-cleaner|1
 dcfs/session_loop_test.cc|TEST|readability-implicit-bool-conversion|1
 dcfs/smoke_test.cc|TEST|misc-use-internal-linkage|1
-dcfs/sqlite.cc|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/sqlite.cc|Connection::RunTransaction|happy_path_nested|1
 dcfs/sqlite.cc|Connection::~Connection|bugprone-exception-escape|1
 dcfs/sqlite.cc|Statement::Bind|performance-no-int-to-ptr|2
 dcfs/sqlite.cc|Statement::Step|readability-avoid-nested-conditional-operator|1
 dcfs/sqlite.h|Statement::BindAll|capturing_mutating_lambda|1
-dcfs/sqlite_test.cc|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/sqlite_test.cc|TEST|capturing_mutating_lambda|4
 dcfs/sqlite_test.cc|TEST|misc-include-cleaner|1
 dcfs/sqlite_test.cc|TEST_F|bugprone-unchecked-optional-access|1
@@ -294,7 +291,6 @@ dcfs/startup_channel.cc|AwaitReportAndExit|misc-include-cleaner|1
 dcfs/startup_channel.cc|DescribeWaitStatus|misc-include-cleaner|3
 dcfs/status.cc|StatusCodeToErrno|misc-include-cleaner|1
 dcfs/status_test.cc|TEST|misc-include-cleaner|2
-dcfs/syscalls.cc|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/syscalls.cc|clock_gettime|misc-include-cleaner|2
 dcfs/syscalls.cc|close_range|bugprone-narrowing-conversions|1
 dcfs/syscalls.cc|mkdtemp|misc-include-cleaner|1
@@ -305,15 +301,11 @@ dcfs/syscalls.cc|realpath|misc-include-cleaner|1
 dcfs/syscalls.cc|setfsgid|modernize-use-integer-sign-comparison|1
 dcfs/syscalls.cc|setfsuid|modernize-use-integer-sign-comparison|1
 dcfs/syscalls.h|<file scope>|google-runtime-int|2
-dcfs/syscalls.h|<file scope>|modernize-concat-nested-namespaces|1
-dcfs/syscalls_backing.cc|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/syscalls_backing.cc|mount|google-runtime-int|1
 dcfs/syscalls_backing.cc|renameat2|misc-include-cleaner|1
 dcfs/syscalls_backing.h|<file scope>|google-runtime-int|3
 dcfs/syscalls_backing.h|ioctl|google-runtime-int|1
-dcfs/syscalls_process.cc|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/syscalls_process.cc|<file scope>|modernize-deprecated-headers|1
-dcfs/syscalls_process.h|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/syscalls_process_test.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/syscalls_process_test.cc|TEST|misc-include-cleaner|5
 dcfs/syscalls_test.cc|<file scope>|misc-include-cleaner|1

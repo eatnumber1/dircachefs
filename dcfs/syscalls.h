@@ -15,8 +15,7 @@
 #include "absl/status/statusor.h"
 #include "dcfs/fd.h"
 
-namespace dcfs {
-namespace syscalls {
+namespace dcfs::syscalls {
 
 absl::Status close(FileDescriptor fd);
 
@@ -116,8 +115,6 @@ absl::StatusOr<size_t> send(int fd, const void *buf, size_t count, int flags);
 void openlog(const char *ident, int option, int facility);
 void syslog(int priority, std::string_view message);
 
-}  // namespace syscalls
-
-}  // namespace dcfs
+}  // namespace dcfs::syscalls
 
 #endif  // DCFS_SYSCALLS_H_

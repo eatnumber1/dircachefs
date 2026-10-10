@@ -6,8 +6,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 
-namespace dcfs {
-namespace syscalls {
+namespace dcfs::syscalls {
 
 // Process control, for the benchmark driver (bench/) and the mount.dcfs
 // wrapper, which forks the daemon and runs mount(8) in its capture helper
@@ -23,7 +22,6 @@ absl::Status dup2(int oldfd, int newfd);
 absl::Status pause();  // returns (EINTR) once a signal handler ran
 [[noreturn]] void _exit(int status);
 
-}  // namespace syscalls
-}  // namespace dcfs
+}  // namespace dcfs::syscalls
 
 #endif  // DCFS_SYSCALLS_PROCESS_H_

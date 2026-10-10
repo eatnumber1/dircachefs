@@ -27,8 +27,7 @@
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
 
-namespace dcfs {
-namespace syscalls {
+namespace dcfs::syscalls {
 
 absl::StatusOr<FileDescriptor> openat(int dirfd, std::string_view pathname,
                                       int flags, mode_t mode) {
@@ -394,6 +393,4 @@ absl::Status umount2(std::string_view target, int flags) {
   return absl::OkStatus();
 }
 
-}  // namespace syscalls
-
-}  // namespace dcfs
+}  // namespace dcfs::syscalls
