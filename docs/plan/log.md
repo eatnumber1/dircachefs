@@ -2553,3 +2553,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ (2026-10-10): "maybe we rename none to bind and drop the name 'none' entirely." Done that
   way: the directory form is `dcfs.fstype=bind`, `none` is an unknown value; lane-6 told to rename
   across code, tests, docs and guest wrappers and report the grep.
+- CI run 38013240343 (eecb91f): fast, subjects, osv, reproducible, mutation-changed green (the
+  Debian image fetch fix worked); presubmit and coverage FAILED on the same two new medium tests:
+  `sqlite_durability_short_test` (`both-durability-levels`: 2 synced / 5 normal, an expectation
+  written before 23.11 removed the create's fsync; 12.14b in lane-2) and `mutate_tla_e2e_test`
+  (`Exec format error` executing the fake bazel it writes to a temp file: no interpreter line;
+  12.13b in lane-5). The full/asan/ubsan shards were skipped, so the toolchain cache and the
+  coverage gate remain unverified. Both fixes are small agents under the freeze's "red push"
+  exception.
