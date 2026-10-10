@@ -183,8 +183,9 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   `dcfs-style-reviewer` pass before merge. Its report separates findings
   (violations of written rules) from numbered questions for russ (what the
   guide does not settle). The orchestrator relays the questions to russ
-  verbatim, in one batch per step, and does not answer them itself, even
-  when it has an opinion; russ's answers are written into `docs/style.md`
+  verbatim, in one batch per step, with its own answer beside each where
+  it has an opinion (russ, 2026-10-10: "you can answer when you have an
+  opinion"; russ confirms, overrides or leaves it); russ's answers are written into `docs/style.md`
   (his words, dated) in the same commit that records the merge, and the
   agent that built the step applies them before the merge if they change
   the diff. Questions nobody can answer in the step's lifetime are left in

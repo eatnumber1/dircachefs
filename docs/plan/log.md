@@ -2733,3 +2733,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   sentence either answer would add); process.md: every phase-25 step gets that pass, questions
   relayed verbatim in one batch per step, answers written into style.md at the merge; CLAUDE.md
   table row. First use: 25.15 when it reports.
+- russ: the orchestrator may answer style questions when it has an opinion; the question still
+  goes to him with the answer beside it. process.md amended.
