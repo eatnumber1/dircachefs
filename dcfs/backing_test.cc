@@ -8,22 +8,22 @@
 #include <sys/xattr.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cerrno>
 #include <cstdint>
-#include <random>
 #include <cstdio>
-#include <thread>
-#include <span>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <optional>
+#include <random>
+#include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/base/log_severity.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/scoped_mock_log.h"
@@ -163,7 +163,7 @@ class BackingTest : public ::testing::Test {
   void Lock() {
     ASSERT_OK_AND_ASSIGN(std::vector<std::string> paths,
                          testonly::ListTree(source_));
-    std::reverse(paths.begin(), paths.end());
+    absl::c_reverse(paths);
     paths.push_back(source_);
     for (const std::string &path : paths) {
       ASSERT_OK_AND_ASSIGN(
@@ -220,7 +220,7 @@ std::vector<std::string> ListNames(Context &ctx, InodeId dir) {
                                return true;
                              }),
               IsOk());
-  std::sort(names.begin(), names.end());
+  absl::c_sort(names);
   return names;
 }
 
@@ -1439,8 +1439,8 @@ TEST(BackingCredentialsTest, SetgroupsIsPerThread) {
   }).join();
   EXPECT_EQ(in_thread, (std::vector<gid_t>{4242, 4243}));
   std::vector<gid_t> sorted_original = *original;
-  std::sort(sorted_original.begin(), sorted_original.end());
-  std::sort(in_main_meanwhile.begin(), in_main_meanwhile.end());
+  absl::c_sort(sorted_original);
+  absl::c_sort(in_main_meanwhile);
   EXPECT_EQ(in_main_meanwhile, sorted_original);
   EXPECT_THAT(GetGroups(), absl_testing::IsOkAndHolds(*original));
 }

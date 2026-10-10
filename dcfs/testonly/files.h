@@ -2,7 +2,6 @@
 #define DCFS_TESTONLY_FILES_H_
 
 #include <fcntl.h>
-
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -10,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "dcfs/fd.h"
@@ -51,7 +51,7 @@ inline absl::StatusOr<std::vector<std::string>> ListDirectory(
       if (name != "." && name != "..") names.emplace_back(name);
     }
   }
-  std::sort(names.begin(), names.end());
+  absl::c_sort(names);
   return names;
 }
 

@@ -1,21 +1,19 @@
 #include "dcfs/syscalls.h"
-#include "dcfs/syscalls_backing.h"
 
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <sched.h>
-#include <sys/mount.h>
-#include <sys/socket.h>
 #include <sys/file.h>
+#include <sys/mount.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <syslog.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cerrno>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <span>
 #include <string>
@@ -23,9 +21,11 @@
 #include <thread>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/fd.h"
 #include "dcfs/status.h"
+#include "dcfs/syscalls_backing.h"
 #include "dcfs/testonly/assert_ok_and_assign.h"
 #include "gtest/gtest.h"
 
@@ -328,8 +328,8 @@ TEST_F(SyscallsTest, Getdents64ListsCreatedNames) {
     pos += entry->d_reclen;
   }
 
-  EXPECT_TRUE(std::find(names.begin(), names.end(), "file1") != names.end());
-  EXPECT_TRUE(std::find(names.begin(), names.end(), "file2") != names.end());
+  EXPECT_TRUE(absl::c_contains(names, "file1"));
+  EXPECT_TRUE(absl::c_contains(names, "file2"));
 }
 
 TEST_F(SyscallsTest, StatxAndFstat) {

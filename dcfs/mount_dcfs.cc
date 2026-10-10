@@ -2,7 +2,6 @@
 
 #include <sys/mount.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -11,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/flags/reflection.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -18,9 +18,9 @@
 #include "absl/strings/cord.h"
 #include "absl/strings/match.h"
 #include "absl/strings/numbers.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_replace.h"
-#include "absl/strings/str_cat.h"
 #include "absl/strings/str_split.h"
 #include "dcfs/mounts_below.h"
 #include "dcfs/status.h"
@@ -283,8 +283,7 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
       split.fuse_options.emplace_back(*value);
     } else {
       if (name == "allow_other") return AllowOtherRefused(option);
-      if (std::find(std::begin(kSettableFlags), std::end(kSettableFlags),
-                    name) == std::end(kSettableFlags)) {
+      if (!absl::c_contains(kSettableFlags, name)) {
         return InvalidArgumentErrorBuilder()
                << "Unknown option " << option << " (dcfs options are "
                << "dcfs.fstype, dcfs.ro, dcfs.foreground, dcfs.cache_db, "
@@ -337,9 +336,7 @@ std::vector<std::string> UnhonoredNativeOptions(const HelperOptions &options) {
     static constexpr std::string_view kMountOwn[] = {
         "rw",   "defaults", "nofail", "_netdev", "noauto", "auto",
         "user", "users",    "owner",  "group",   "nouser"};
-    if (absl::StartsWith(option, "x-") ||
-        std::find(std::begin(kMountOwn), std::end(kMountOwn), option) !=
-            std::end(kMountOwn)) {
+    if (absl::StartsWith(option, "x-") || absl::c_contains(kMountOwn, option)) {
       continue;
     }
     unhonored.push_back(option);

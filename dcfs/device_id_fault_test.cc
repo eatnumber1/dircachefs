@@ -14,7 +14,6 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 
-#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdarg>
@@ -25,6 +24,7 @@
 #include <optional>
 #include <string>
 
+#include "absl/algorithm/container.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "absl/status/statusor.h"
@@ -94,12 +94,12 @@ int __wrap_ioctl(int fd, unsigned long request, ...) {
   if (request == FS_IOC_GETFSUUID && faults.getfsuuid_len.has_value()) {
     auto *out = static_cast<struct fsuuid2 *>(arg);
     out->len = *faults.getfsuuid_len;
-    std::copy(dcfs::kFakeUuid.begin(), dcfs::kFakeUuid.end(), out->uuid);
+    absl::c_copy(dcfs::kFakeUuid, out->uuid);
     return 0;
   }
   if (request == BTRFS_IOC_FS_INFO && faults.btrfs_treeid.has_value()) {
     auto *out = static_cast<struct btrfs_ioctl_fs_info_args *>(arg);
-    std::copy(dcfs::kFakeUuid.begin(), dcfs::kFakeUuid.end(), out->fsid);
+    absl::c_copy(dcfs::kFakeUuid, out->fsid);
     return 0;
   }
   if (request == BTRFS_IOC_GET_SUBVOL_INFO && faults.btrfs_treeid.has_value()) {

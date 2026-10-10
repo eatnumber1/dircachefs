@@ -5,7 +5,7 @@
 #define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 18)
 
 #include <fcntl.h>
-#include <linux/fs.h>  // FS_IOC_GETVERSION
+#include <linux/fs.h>      // FS_IOC_GETVERSION
 #include <linux/limits.h>  // NAME_MAX (255, the generic Linux VFS cap)
 #include <sys/stat.h>
 #include <sys/statfs.h>
@@ -17,12 +17,13 @@
 #include <cstdint>
 #include <optional>
 #include <span>
-#include <type_traits>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/fixed_array.h"
 #include "absl/container/flat_hash_set.h"
@@ -41,8 +42,8 @@
 #include "dcfs/context.h"
 #include "dcfs/credentials.h"
 #include "dcfs/device_id.h"
-#include "dcfs/fd.h"
 #include "dcfs/escape.h"
+#include "dcfs/fd.h"
 #include "dcfs/file_handle.h"
 #include "dcfs/metadata_cache.h"
 #include "dcfs/migrate.h"
@@ -1100,7 +1101,7 @@ absl::StatusOr<std::string> IoctlFd(int fd, unsigned int cmd,
   // the largest, 28 bytes); the backing filesystem reads and writes at most
   // that much, whatever sizes the request claims.
   absl::FixedArray<char> buf(std::max<size_t>({in.size(), out_size, 64}));
-  std::copy(in.begin(), in.end(), buf.begin());
+  absl::c_copy(in, buf.begin());
   RETURN_IF_ERROR(
       syscalls::ioctl(fd, static_cast<int>(cmd), buf.data()).status());
   return std::string(buf.data(), out_size);

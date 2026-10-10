@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/function_ref.h"
@@ -1847,14 +1848,11 @@ absl::Status ClearDirty(Context &ctx, const SyncSnapshot &synced,
       absl::flat_hash_set<InodeId> put_back = kept;
       put_back.insert(kept_open.begin(), kept_open.end());
       for (InodeId id : put_back) {
-        if (!std::binary_search(synced.dirty.begin(), synced.dirty.end(),
-                                id)) {
+        if (!absl::c_binary_search(synced.dirty, id)) {
           continue;
         }
         const int64_t atime_only =
-            !kept.contains(id) ||
-                    std::binary_search(synced.atime_only.begin(),
-                                       synced.atime_only.end(), id)
+            !kept.contains(id) || absl::c_binary_search(synced.atime_only, id)
                 ? 1
                 : 0;
         RETURN_IF_ERROR(

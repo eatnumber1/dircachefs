@@ -1,6 +1,10 @@
 #include "dcfs/device_id.h"
 
 #include <fcntl.h>
+#include <linux/btrfs.h>
+#include <linux/fs.h>
+#include <linux/magic.h>
+#include <linux/types.h>
 #include <sys/vfs.h>
 
 #include <algorithm>
@@ -10,11 +14,7 @@
 #include <string>
 #include <string_view>
 
-#include <linux/btrfs.h>
-#include <linux/fs.h>
-#include <linux/magic.h>
-#include <linux/types.h>
-
+#include "absl/algorithm/container.h"
 #include "absl/status/status.h"
 #include "absl/status/status_builder.h"
 #include "absl/status/status_macros.h"
@@ -153,8 +153,7 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
     RETURN_IF_ERROR(IoctlAllowingOPath(fd, BTRFS_IOC_FS_INFO, &fs_info))
         << "BTRFS_IOC_FS_INFO";
     static_assert(sizeof(fs_info.fsid) == 16);
-    std::copy(std::begin(fs_info.fsid), std::end(fs_info.fsid),
-              id.uuid.begin());
+    absl::c_copy(fs_info.fsid, id.uuid.begin());
 
     struct btrfs_ioctl_get_subvol_info_args args;
     std::memset(&args, 0, sizeof(args));
@@ -184,7 +183,7 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
            << static_cast<int>(fsuuid.len);
   }
 
-  std::copy(std::begin(fsuuid.uuid), std::end(fsuuid.uuid), id.uuid.begin());
+  absl::c_copy(fsuuid.uuid, id.uuid.begin());
   return id;
 }
 

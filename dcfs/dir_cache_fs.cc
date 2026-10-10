@@ -1,23 +1,25 @@
 #include "dcfs/dir_cache_fs.h"
 
+#include <fcntl.h>
+#include <linux/fs.h>  // FS_IOC_*
+#include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <time.h>
+
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>  // RENAME_NOREPLACE, RENAME_EXCHANGE
 #include <cstring>
-#include <fcntl.h>
-#include <linux/fs.h>  // FS_IOC_*
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/stat.h>
-#include <sys/statvfs.h>
-#include <time.h>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
@@ -2531,7 +2533,7 @@ absl::Status DirCacheFS::Listxattr(
                      backing::ReadXattrsFd(*it->second.fd));
     names.emplace();
     for (auto &[name, value] : xattrs) names->push_back(std::move(name));
-    std::sort(names->begin(), names->end());
+    absl::c_sort(*names);
   } else {
     ASSIGN_OR_RETURN(names, cache::ListXattrs(ctx_, id));
   }
@@ -2542,7 +2544,7 @@ absl::Status DirCacheFS::Listxattr(
                      backing::RefreshXattrs(ctx_, id));
     names.emplace();
     for (auto &[name, value] : xattrs) names->push_back(std::move(name));
-    std::sort(names->begin(), names->end());
+    absl::c_sort(*names);
   }
   std::string buf;
   for (const std::string &name : *names) {

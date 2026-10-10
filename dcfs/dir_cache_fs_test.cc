@@ -69,6 +69,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/base/log_severity.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/functional/any_invocable.h"
@@ -264,8 +265,7 @@ void SweepAtHook(absl::SourceLocation where) {
   FaultSweep &f = Sweep();
   f.at = absl::StrCat(where.file_name(), ":", where.line());
   f.seen.clear();
-  if (f.recording &&
-      std::find(f.hooks.begin(), f.hooks.end(), f.at) == f.hooks.end()) {
+  if (f.recording && !absl::c_contains(f.hooks, f.at)) {
     f.hooks.push_back(f.at);
   }
 }
@@ -3260,10 +3260,9 @@ class AllLogCapture : public absl::LogSink {
   }
   // How many lines at `min` or above contain `text` (all if empty).
   int Count(absl::LogSeverity min, std::string_view text = "") const {
-    return static_cast<int>(std::count_if(
-        lines.begin(), lines.end(), [&](const auto &line) {
-          return line.first >= min && absl::StrContains(line.second, text);
-        }));
+    return static_cast<int>(absl::c_count_if(lines, [&](const auto &line) {
+      return line.first >= min && absl::StrContains(line.second, text);
+    }));
   }
   std::string Dump() const {
     std::string out;
@@ -4318,10 +4317,9 @@ TEST_F(DirCacheFSTest, NoHeldDescriptorsIsAWarningAtStartup) {
   WarningCapture capture;
   Start();
   auto said = [&](std::string_view text) {
-    return std::count_if(capture.lines.begin(), capture.lines.end(),
-                         [&](const std::string &line) {
-                           return absl::StrContains(line, text);
-                         });
+    return absl::c_count_if(capture.lines, [&](const std::string &line) {
+      return absl::StrContains(line, text);
+    });
   };
   EXPECT_EQ(said("no descriptors on written files"), 1)
       << absl::StrJoin(capture.lines, "\n");

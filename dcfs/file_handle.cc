@@ -3,7 +3,6 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -11,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/algorithm/container.h"
 #include "absl/container/fixed_array.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -180,7 +180,8 @@ absl::StatusOr<FileDescriptor> FileHandle::Open(const MountFds &mounts,
   auto *handle = reinterpret_cast<struct file_handle *>(buf.data());
   handle->handle_bytes = static_cast<unsigned int>(bytes.size());
   handle->handle_type = handle_type;
-  std::copy(bytes.begin(), bytes.end(), handle->f_handle);
+  // f_handle is a zero-length array: the copy runs into the buffer past it.
+  absl::c_copy(bytes, static_cast<uint8_t *>(handle->f_handle));
 
   return syscalls::open_by_handle_at(mount_fd, *handle, flags);
 }

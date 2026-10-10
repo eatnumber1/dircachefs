@@ -54,7 +54,6 @@ dcfs/backing.cc|FillHeldAttrs|capturing_mutating_lambda|1
 dcfs/backing.cc|FutimensOPath|misc-include-cleaner|1
 dcfs/backing.cc|InitRoot|readability-avoid-nested-conditional-operator|1
 dcfs/backing.cc|InitRoot|readability-implicit-bool-conversion|2
-dcfs/backing.cc|IoctlFd|iterator_pair_algorithm|1
 dcfs/backing.cc|LookupOrPopulate|readability-avoid-nested-conditional-operator|1
 dcfs/backing.cc|LookupOrPopulate|readability-function-cognitive-complexity|1
 dcfs/backing.cc|OpenNode|misc-no-recursion|1
@@ -98,12 +97,9 @@ dcfs/backing_test.cc|<file scope>|modernize-use-designated-initializers|1
 dcfs/backing_test.cc|AddFakeMount|misc-include-cleaner|2
 dcfs/backing_test.cc|BackingCall|misc-include-cleaner|1
 dcfs/backing_test.cc|DbPath|concurrency-mt-unsafe|1
-dcfs/backing_test.cc|ListNames|iterator_pair_algorithm|1
-dcfs/backing_test.cc|Lock|iterator_pair_algorithm|1
 dcfs/backing_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/backing_test.cc|StatPath|misc-include-cleaner|3
 dcfs/backing_test.cc|TEST|capturing_mutating_lambda|1
-dcfs/backing_test.cc|TEST|iterator_pair_algorithm|2
 dcfs/backing_test.cc|TEST_F|bugprone-unchecked-optional-access|2
 dcfs/backing_test.cc|TEST_F|misc-include-cleaner|1
 dcfs/backing_test.cc|TEST_F|modernize-use-designated-initializers|2
@@ -118,7 +114,6 @@ dcfs/device_id_fault_test.cc|<file scope>|google-runtime-int|2
 dcfs/device_id_fault_test.cc|<file scope>|misc-include-cleaner|1
 dcfs/device_id_fault_test.cc|TEST_F|concurrency-mt-unsafe|1
 dcfs/device_id_fault_test.cc|__wrap_ioctl|google-runtime-int|1
-dcfs/device_id_fault_test.cc|__wrap_ioctl|iterator_pair_algorithm|2
 dcfs/device_id_test.cc|<file scope>|misc-include-cleaner|4
 dcfs/device_id_test.cc|TEST|concurrency-mt-unsafe|3
 dcfs/dir_cache_fs.cc|<file scope>|modernize-deprecated-headers|1
@@ -181,7 +176,6 @@ dcfs/dir_cache_fs_test.cc|BatchForget|bugprone-invalid-enum-default-initializati
 dcfs/dir_cache_fs_test.cc|BatchForget|performance-unnecessary-value-param|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|modernize-use-designated-initializers|1
 dcfs/dir_cache_fs_test.cc|CheckAndRecover|readability-avoid-nested-conditional-operator|1
-dcfs/dir_cache_fs_test.cc|Count|iterator_pair_algorithm|1
 dcfs/dir_cache_fs_test.cc|DCFS_BACKSTOP|misc-include-cleaner|8
 dcfs/dir_cache_fs_test.cc|Forget|bugprone-invalid-enum-default-initialization|1
 dcfs/dir_cache_fs_test.cc|INSTANTIATE_TEST_SUITE_P|modernize-type-traits|1
@@ -205,7 +199,6 @@ dcfs/dir_cache_fs_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/dir_cache_fs_test.cc|Start|misc-include-cleaner|4
 dcfs/dir_cache_fs_test.cc|Start|misc-redundant-expression|1
 dcfs/dir_cache_fs_test.cc|StartTrace|cert-err33-c|1
-dcfs/dir_cache_fs_test.cc|SweepAtHook|iterator_pair_algorithm|1
 dcfs/dir_cache_fs_test.cc|SweepAtHook|misc-include-cleaner|1
 dcfs/dir_cache_fs_test.cc|SweepWorkload|readability-function-cognitive-complexity|1
 dcfs/dir_cache_fs_test.cc|TEST|performance-avoid-endl|2
@@ -216,7 +209,6 @@ dcfs/dir_cache_fs_test.cc|TEST_F|capturing_mutating_lambda|19
 dcfs/dir_cache_fs_test.cc|TEST_F|cert-err33-c|36
 dcfs/dir_cache_fs_test.cc|TEST_F|concurrency-mt-unsafe|1
 dcfs/dir_cache_fs_test.cc|TEST_F|google-runtime-int|1
-dcfs/dir_cache_fs_test.cc|TEST_F|iterator_pair_algorithm|1
 dcfs/dir_cache_fs_test.cc|TEST_F|misc-include-cleaner|6
 dcfs/dir_cache_fs_test.cc|TEST_F|modernize-use-designated-initializers|4
 dcfs/dir_cache_fs_test.cc|TEST_F|performance-for-range-copy|1
@@ -255,7 +247,6 @@ dcfs/file_handle.cc|<file scope>|misc-include-cleaner|2
 dcfs/file_handle.cc|FileHandle::FromDirEntry|misc-include-cleaner|1
 dcfs/file_handle.cc|FileHandle::FromDirEntry|performance-move-const-arg|1
 dcfs/file_handle.cc|FileHandle::FromFd|performance-move-const-arg|2
-dcfs/file_handle.cc|FileHandle::Open|iterator_pair_algorithm|1
 dcfs/file_handle.cc|FileHandle::Parse|performance-move-const-arg|1
 dcfs/file_handle.cc|MountIdFromStatx|misc-include-cleaner|3
 dcfs/file_handle_test.cc|<file scope>|misc-include-cleaner|2
@@ -361,7 +352,6 @@ dcfs/metadata_cache.cc|BindAttrs|misc-include-cleaner|1
 dcfs/metadata_cache.cc|Blob|modernize-return-braced-init-list|1
 dcfs/metadata_cache.cc|ChildrenComplete|capturing_mutating_lambda|1
 dcfs/metadata_cache.cc|ClearDirty|capturing_mutating_lambda|1
-dcfs/metadata_cache.cc|ClearDirty|iterator_pair_algorithm|2
 dcfs/metadata_cache.cc|DecodeAttr|misc-use-internal-linkage|1
 dcfs/metadata_cache.cc|DecodeAttr|modernize-use-designated-initializers|4
 dcfs/metadata_cache.cc|DirEpoch|capturing_mutating_lambda|1
@@ -408,9 +398,7 @@ dcfs/mount_dcfs.cc|ParseHelperArgsImpl|readability-function-cognitive-complexity
 dcfs/mount_dcfs.cc|ParseUmountArgs|abseil-string-find-str-contains|1
 dcfs/mount_dcfs.cc|ParseUmountArgs|readability-function-cognitive-complexity|1
 dcfs/mount_dcfs.cc|RemountFlags|google-runtime-int|2
-dcfs/mount_dcfs.cc|SplitHelperOptionsImpl|iterator_pair_algorithm|1
 dcfs/mount_dcfs.cc|SplitHelperOptionsImpl|readability-function-cognitive-complexity|1
-dcfs/mount_dcfs.cc|UnhonoredNativeOptions|iterator_pair_algorithm|1
 dcfs/mount_dcfs.h|<file scope>|google-runtime-int|1
 dcfs/mount_dcfs_test.cc|<file scope>|misc-include-cleaner|1
 dcfs/mount_dcfs_test.cc|ABSL_FLAG|misc-use-internal-linkage|2
@@ -563,7 +551,6 @@ dcfs/syscalls_process_test.cc|TEST|misc-include-cleaner|12
 dcfs/syscalls_test.cc|<file scope>|misc-include-cleaner|4
 dcfs/syscalls_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/syscalls_test.cc|TEST|misc-include-cleaner|9
-dcfs/syscalls_test.cc|TEST_F|iterator_pair_algorithm|2
 dcfs/syscalls_test.cc|TEST_F|misc-include-cleaner|13
 dcfs/syscalls_test.cc|TEST_F|modernize-use-designated-initializers|2
 dcfs/syscalls_test.cc|TEST_F|modernize-use-emplace|1
@@ -587,7 +574,6 @@ dcfs/testonly/fault_phase3_before_syscall.cc|<file scope>|misc-use-internal-link
 dcfs/testonly/fault_syscall_before_phase1.cc|<file scope>|misc-include-cleaner|2
 dcfs/testonly/fault_syscall_before_phase1.cc|<file scope>|misc-use-internal-linkage|2
 dcfs/testonly/fault_syscall_before_phase1.cc|WrapUnlinkAt|misc-unused-parameters|5
-dcfs/testonly/files.h|ListDirectory|iterator_pair_algorithm|1
 dcfs/testonly/files.h|ListTree|misc-no-recursion|1
 dcfs/testonly/files.h|RemoveAll|modernize-loop-convert|1
 dcfs/testonly/invariant_checker.cc|HasDirtyRow|capturing_mutating_lambda|1
