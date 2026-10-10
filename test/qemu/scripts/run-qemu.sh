@@ -781,6 +781,21 @@ else
 fi
 echo "run-qemu.sh: guest timeout $TIMEOUT_SECS s (TEST_TIMEOUT ${TEST_TIMEOUT:-unset}, TIMEOUT ${TIMEOUT:-unset})"
 
+# Step 26.17: wall time is the hang guard, and must be long enough for the work
+# the budgets of this target allow (guest/strace_lib.sh, cost_wall_allowance),
+# or a test whose budgets were raised would time out for being allowed what it
+# was allowed. Refused before the guest boots; a target with no budgets has no
+# floor.
+if [ -n "$CPU_BUDGETS$IO_BUDGETS" ] && [ -n "${TEST_TARGET:-}" ]; then
+	. "$BUDGET_LIB"
+	WALL_NEEDED=$(cost_wall_allowance "${CPU_BUDGETS:-/dev/null}" "${IO_BUDGETS:-/dev/null}" "$TEST_TARGET")
+	if [ "$WALL_NEEDED" -gt "$TIMEOUT_SECS" ]; then
+		echo "run-qemu.sh: ERROR: the guest's wall allowance, $TIMEOUT_SECS s, is shorter than the $WALL_NEEDED s that $TEST_TARGET's budgets need ($COST_WALL_FACTOR x (the CPU budget and its tolerance + each read and write at $COST_IO_LATENCY_MS ms + each flush at $COST_FLUSH_LATENCY_MS ms)); the guest gets Bazel's timeout less 60 s: raise the target's timeout (short 60 s, moderate 300 s, long 900 s, eternal 3600 s)" >&2
+		echo "== RESULT: FAIL (timeout shorter than the budgets need) =="
+		exit 1
+	fi
+fi
+
 # Defaults, the smallest class's allowance (step 6.2: measured peak
 # MemTotal-MemAvailable of 35 MiB for the unit tests and 102 MiB for the
 # lightest e2e tests, plain build; see test/qemu/README.md "Guest memory").

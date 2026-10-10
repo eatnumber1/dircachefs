@@ -711,6 +711,7 @@ gate is disabled.
 | slopes: every operation class's steps, transactions, WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by a * N + b (26.4b) | `//dcfs:dir_cache_fs_slope_test`'s `SlopeTest.AnExtraCostPerOperationIsCaught` (two more statement steps per create exceed the bound) |
 | FUSE requests per user-level operation (26.4b: `guest/request_budgets.txt`) | `//test/qemu:request_lib_test` (the real `guest/request_lib.sh` delta over canned counter snapshots, and a request count above its budget failing) |
 | the guest's cost accounting (26.17: the CPU of the cgroup the daemon is started in, read in microseconds, and `cost_exec.sh`, which joins it before the exec) | `//test/qemu:cost_report_test` (the real functions of `guest/init` over canned cgroup files: a missing cgroup is an error, not 0; the command runs with its arguments intact and its own pid in `cgroup.procs`; not at all if the cgroup cannot be joined; `lib.sh`'s reader is `init`'s) |
+| the wall allowance covers the work the budgets allow (26.17: `cost_wall_allowance`; the refusal before the guest boots) | `//test/qemu:run_qemu_cost_test` (an allowance one second short of the floor is refused with the numbers and the guest is not booted, the floor itself is accepted, flushes count 20 ms each, a target without budgets has no floor) and `//test/qemu:strace_lib_test` (the arithmetic and its rounding) |
 | the disks' I/O is counted (26.17: `cost_disk_counts` and `cost_cgroup_io`, which no budget could notice failing, since a count below its budget passes) | `//test/qemu:boot_test` and `//test/qemu:ram_disks_test` (`cost_selfcheck`: a direct write of 1 MiB must show in the counters of a virtio disk and of a RAM disk and in the cgroup's `io.stat`; with the disks' glob pointing at nothing both fail, saying `disks reads=0 writes=0 ...`), `//test/qemu:cost_report_test` (the sums, the difference of two readings and the cgroup's counts over canned files, other devices left out) and `//test/qemu:run_qemu_cost_test` (a guest with disks that counted no read fails) |
 | a run is held to its CPU and I/O budgets (26.17: `guest/cpu_budgets.txt`, `guest/io_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan and coverage runs are not held) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
@@ -1313,6 +1314,56 @@ with its wall time. They are left out of `io_budgets.txt`, with the reason there
 its reads are budgeted. The ACE tests, which unmount and sync constantly on RAM
 disks, did not move more than 2.4% while their wall time went from 20 s to
 52 s.
+
+### Wall time: the hang guard
+
+Wall time is the one thing a test's budgets do not hold, and it stays as the
+guard against a hang: Bazel's `timeout` of the target, of which the guest gets
+all but 60 s (`run-qemu.sh`, "Guest timeout"). It must be long enough for the
+work the budgets of the target allow on a slow, shared host, and
+`run-qemu.sh` refuses to boot a guest whose allowance is shorter:
+
+    allowance >= 3 x (CPU budget x (1 + tolerance) + (reads + writes) x 2 ms + flushes x 20 ms)
+
+rounded up to whole seconds (`cost_wall_allowance`, `guest/strace_lib.sh`, where
+the numbers are). 2 ms is a busy disk's average request and 20 ms a flush on one
+that is also writing for someone else, both pessimistic for the RAM disks; the
+factor 3 is the most that wall time stretched against CPU time in the
+measurements above (2.6 times for `fault_ace_b_test` with eight busy loops
+beside it). A target with no budget lines has no floor. This is a refusal when
+the test starts, not when the target is loaded: a Starlark macro cannot read the
+budget files, and the timeouts are Bazel's four classes anyway. The floors of
+the measured tests, against the guest's allowance with their current timeouts:
+
+| test | floor | timeout (the guest gets) |
+|---|---|---|
+| `//dcfs:backing_test` | 7 s | short (60 s, never less) |
+| `//test/qemu:create_test_ext4` | 3 s | moderate (240 s) |
+| `//test/qemu:request_counts_test` | 4 s | moderate (240 s) |
+| `//test/qemu:write_test_ext4` | 12 s | moderate (240 s) |
+| `//test/qemu:fault_backing_test_ext4` | 12 s | moderate (240 s) |
+| `//test/qemu:fault_cache_test_ext4` | 13 s | moderate (240 s) |
+| `//test/qemu:readdir_boundary_test` | 83 s | moderate (240 s) |
+| `//test/qemu:fault_ace_mixed_test_ext4` | 162 s | long (840 s) |
+| `//test/qemu:fault_ace_b_test` | 355 s | long (840 s) |
+| `//test/qemu:fault_ace_a_test` | 694 s | eternal (3540 s) |
+
+None is refused; none was changed. `fault_ace_a_test` takes 35 s and waits an
+hour to call a hang, which `long` (840 s) would still cover with 150 s to spare;
+that is a separate decision.
+
+No correctness check of a test compares wall time, with these exceptions, each
+of which is the subject of its test or cannot fail from load: `cancel.sh`
+(`within`: an interrupted request must reply within `BOUND_MS` of the signal;
+the test is about promptness, and a count of the backing calls the daemon makes
+after the signal would say the same without the clock, which is a change to the
+cancellation tests, not made here), and `mount_dcfs.sh` (the unmount helper
+took at least a second with the backing disk's writes delayed by `dm-delay` for
+two: a lower bound on a latency the test injected, which load only lengthens).
+`nfs.sh` compared the time a `timeout 1 sleep 5` took with 3 s; its status
+(124 if it fired, 0 if timers are off) says the same, and the comparison is gone.
+The timings that other scripts print (`cancel_inventory.sh`, `destroy.sh`,
+`stress.sh`, `pjdfstest.sh`) decide nothing.
 
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 

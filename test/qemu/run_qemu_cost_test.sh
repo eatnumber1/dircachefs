@@ -231,6 +231,30 @@ DISKS=
 grep -q "== RESULT: FAIL (no I/O counted" "$WORK/stdout" || fail "no FAIL verdict for the uncounted I/O: $(cat "$WORK/stdout")"
 echo "PASS: a guest with disks that counted no I/O at all fails"
 
+# --- the hang guard (the guest's wall allowance against the budgets) -----------
+#
+# //t:both has a CPU budget of 0.4 s (0.8 s with the tolerance) and 50 reads: 3 x
+# (0.8 s + 50 x 2 ms) = 2.7 s, rounded up to 3 s.
+canned "COST cpu_us=400000 $IO_OK"
+run //t:both TIMEOUT=3
+[ "$RC" -eq 0 ] || fail "a wall allowance of 3 s was refused for a budget that needs 3: $(cat "$WORK/stdout")"
+run //t:both TIMEOUT=2
+[ "$RC" -ne 0 ] || fail "a wall allowance of 2 s was accepted for a budget that needs 3"
+grep -q "== RESULT: FAIL (timeout shorter than the budgets need" "$WORK/stdout" || fail "no FAIL verdict for the short timeout: $(cat "$WORK/stdout")"
+grep -q "wall allowance, 2 s, is shorter than the 3 s that //t:both's budgets need" "$WORK/stdout" ||
+	fail "the refusal does not name the allowance and what is needed: $(cat "$WORK/stdout")"
+if grep -q "guest memory" "$WORK/stdout"; then fail "the guest was booted although its timeout was refused"; fi
+echo "PASS: a wall allowance shorter than 3 x (CPU budget + tolerance + I/Os x 2 ms + flushes x 20 ms) is refused before the guest boots"
+
+# The flush term (30 flushes x 20 ms), and a target without budgets.
+run //t:io TIMEOUT=2
+[ "$RC" -ne 0 ] || fail "a wall allowance of 2 s was accepted for 30 flushes and 50 reads (3 x 0.7 s = 2.1 s, 3 s)"
+run //t:io TIMEOUT=3
+[ "$RC" -eq 0 ] || fail "a wall allowance of 3 s was refused for 30 flushes and 50 reads: $(cat "$WORK/stdout")"
+run //t:unlisted TIMEOUT=1
+[ "$RC" -eq 0 ] || fail "a target without budgets was refused a short timeout: $(cat "$WORK/stdout")"
+echo "PASS: flushes count 20 ms each, and a target without budgets has no floor"
+
 # The checked-in budgets: every line is OP KIND MAX with a number, the kind a
 # COST field, and no target twice (a second line would be ignored by the awk
 # that reads the first match last).

@@ -331,6 +331,30 @@ strace_budget_compare() {
 # (test/qemu/README.md, "Budgets in three parts", has the measurements).
 COST_CPU_TOLERANCE_PCT=100
 
+# Wall time is left as the hang guard: a test's `timeout` (and the allowance
+# run-qemu.sh gives the guest from it) must be long enough for the work its
+# budgets allow, on a host that is slow and shared. The allowance a target
+# needs is COST_WALL_FACTOR times the CPU its budget allows (with the tolerance)
+# plus every read and write its I/O budgets allow at COST_IO_LATENCY_MS plus
+# every flush at COST_FLUSH_LATENCY_MS: 2 ms is a busy disk's average request, 20
+# ms a flush on one that is also writing for someone else; the factor is the
+# most wall time stretched against CPU time in the measurements (2.6 times for
+# fault_ace_b_test with 8 busy loops beside it), rounded up to 3.
+COST_IO_LATENCY_MS=2
+COST_FLUSH_LATENCY_MS=20
+COST_WALL_FACTOR=3
+
+# cost_wall_allowance CPU_BUDGETS IO_BUDGETS TARGET: that many whole seconds
+# (rounded up; 0 for a target with no budget lines).
+cost_wall_allowance() {
+	awk -v t="$3" -v tol="$COST_CPU_TOLERANCE_PCT" -v io="$COST_IO_LATENCY_MS" -v fl="$COST_FLUSH_LATENCY_MS" -v factor="$COST_WALL_FACTOR" '
+		$1 != t { next }
+		$2 == "cpu_us" { ms += $3 / 1000 * (100 + tol) / 100 }
+		$2 == "reads" || $2 == "writes" { ms += $3 * io }
+		$2 == "flushes" { ms += $3 * fl }
+		END { s = ms * factor / 1000; printf "%d\n", (s == int(s)) ? s : int(s) + 1 }' "$1" "$2"
+}
+
 # budget_unheld_reason CMDLINE: why a run with this kernel command line is not
 # held to the CPU budgets (empty if it is). The budgets are for the plain build
 # on KVM and the quiet kernel; the others spend CPU differently (a sanitizer or

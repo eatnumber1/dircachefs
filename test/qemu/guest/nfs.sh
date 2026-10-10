@@ -137,15 +137,15 @@ echo "nfs.sh: kernel $(uname -r)"
 # GNU timeout, which needs timer_create/alarm; with CONFIG_POSIX_TIMERS off
 # (an EXPERT-gated symbol tinyconfig turns off) it never fires and a hung
 # mount waits for the harness limit instead of failing after 10 s. GNU
-# timeout exits 124 when it kills its command.
-t0=$(date +%s)
+# timeout exits 124 when it kills its command. Without timers the sleep runs its
+# five seconds and exits 0, so the status says whether it fired; how long it took
+# is the host's load (step 26.17: no correctness check compares wall time).
 timeout 1 sleep 5
 rc=$?
-t1=$(date +%s)
-if [ "$rc" -eq 124 ] && [ $((t1 - t0)) -le 3 ]; then
+if [ "$rc" -eq 124 ]; then
 	pass timers-timeout-fires
 else
-	fail timers-timeout-fires "timeout 1 sleep 5: rc=$rc after $((t1 - t0))s (want 124 within 3s)"
+	fail timers-timeout-fires "timeout 1 sleep 5: rc=$rc (want 124: the timeout fired)"
 fi
 
 # --- helpers ---------------------------------------------------------------

@@ -159,6 +159,25 @@ strace_budget_compare "${WORK}/tbudgets" "${WORK}/tcounts" cpu cost.txt 0 >/dev/
   fail "a tolerance of 0 allowed a count above its budget"
 echo "PASS: a tolerance allows that percentage above the budget and no more"
 
+# The wall allowance a target's budgets need: 3 x (the CPU budget with its
+# tolerance + reads and writes at 2 ms + flushes at 20 ms), in whole seconds,
+# rounded up; 0 for a target without budgets or with budgets of no work.
+printf 'a cpu_us 1000000\nb cpu_us 100000\nz cpu_us 0\n' >"${WORK}/ac"
+printf 'a reads 100\na writes 50\na flushes 10\na sectors_read 99999999\nb flushes 1\nc reads 5\n' >"${WORK}/ai"
+# a: 1 s + 1 s tolerance + 150 x 2 ms + 10 x 20 ms = 2.5 s -> x 3 = 7.5 -> 8
+[[ "$(cost_wall_allowance "${WORK}/ac" "${WORK}/ai" a)" == 8 ]] || fail "allowance of a: $(cost_wall_allowance "${WORK}/ac" "${WORK}/ai" a)"
+# b: 0.2 s + 0.02 s = 0.22 s -> 0.66 -> 1
+[[ "$(cost_wall_allowance "${WORK}/ac" "${WORK}/ai" b)" == 1 ]] || fail "allowance of b: $(cost_wall_allowance "${WORK}/ac" "${WORK}/ai" b)"
+# c has I/O and no CPU line; z has a CPU budget of zero and nothing else (no work: 0); d has nothing.
+[[ "$(cost_wall_allowance "${WORK}/ac" "${WORK}/ai" c)" == 1 ]] || fail "allowance of c: $(cost_wall_allowance "${WORK}/ac" "${WORK}/ai" c)"
+[[ "$(cost_wall_allowance "${WORK}/ac" "${WORK}/ai" z)" == 0 ]] || fail "allowance of z"
+[[ "$(cost_wall_allowance "${WORK}/ac" "${WORK}/ai" d)" == 0 ]] || fail "allowance of d"
+# An exact number of seconds is not rounded up past itself: 1 s of CPU at a
+# tolerance of 100% is 2 s, x 3 = 6.
+printf 'e cpu_us 1000000\n' >"${WORK}/ae"
+[[ "$(cost_wall_allowance "${WORK}/ae" /dev/null e)" == 6 ]] || fail "allowance of e: $(cost_wall_allowance "${WORK}/ae" /dev/null e)"
+echo "PASS: the wall allowance is 3 x (CPU with its tolerance + I/Os x 2 ms + flushes x 20 ms), rounded up"
+
 # The CPU budgets are for one kind of run (the plain build on KVM, quiet kernel):
 # every other kind of boot line gives its reason, and that run is not held.
 [[ -z "$(budget_unheld_reason "console=ttyS0 dcfs_accel=kvm dcfs_test=write.sh")" ]] ||
