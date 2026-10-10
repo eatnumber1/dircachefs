@@ -2905,3 +2905,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   short no-dcfs control (his fileserver is RAM-starved, so dcfs is needed; the control quantifies).
 - russ corrected the FUSE-only rule: workaround first, kernel patch after everything else (the
   kernel's timelines dwarf ours, so our order adds no time); design.md and the Queue amended.
+- russ: with the capture gone, `dcfs.fstype` disappears entirely (15.11).

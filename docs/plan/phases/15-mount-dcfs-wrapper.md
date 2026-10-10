@@ -722,7 +722,9 @@ backing_capture.cc and its tests, the capture's README and design text,
 the systemd-guest cases for the native form, 12.17 (the wrapper handoff
 model, which modelled exactly this). Stays: the bind form, daemonisation
 with readiness after INIT, the syslog sink, the umount helper (its own
-expiry is kernel patch 6), fsck.dcfs. `dcfs.fstype` then takes only
-`bind`, or the option goes entirely if `bind` is the only value (russ to
-say). A test that a native type is refused with a message pointing at
-the bind form.
+expiry is kernel patch 6), fsck.dcfs. `dcfs.fstype` disappears (russ, 2026-10-11:
+"Disappears."): SOURCE is always a directory opened in place; a
+`dcfs.fstype=` option of any value is refused with a message saying the
+option is gone and that the backing is mounted by fstab at its own path
+(the README's production shape); the systemd guest's fstab lines, the
+README, 21.1's notes and this phase's option table lose it.
