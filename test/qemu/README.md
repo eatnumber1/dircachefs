@@ -490,7 +490,8 @@ ext4/xfs/btrfs variants) and the allowances (`mem=` plain, `asan_mem=` for
 | names, names_random, readdir_boundary, idle_short, idle_long, pjdfstest (3 shards) | 57-75 | 433-570 | 256 | 832 |
 | xfstests (6 shards per file system; step 17.1, 122-123 tests each; `holetest` and `fsx` in shards 3 and 5 hold 460-520 MiB of anonymous memory) | 716-739 at 1024 (min available 231 MiB, no OOM kill; the guest's MemTotal is 971 MiB; at 512 the OOM killer took `holetest`, at 768 min available fell to 33 MiB); `reclaim_scans` is nonzero in shards 3, 5 and 6 (xfstests drops the caches itself and the tests write more than the guest holds), which does not matter here: no check counts held inodes or FORGETs | not run (incompatible with `--config=asan` and `--config=ubsan`) | 1024 | - |
 | enospc_backing (step 11.4c; ASan measured at 1536, 2026-10-08) | 72-90 | 286-314 ext4/xfs, 486 btrfs (`reclaim_scans=0`; 384 ran out on btrfs in CI) | 256 | 832 |
-| enospc_cache, fault_shutdown (step 11.4c, the same way) | 69-88 | 284-312 | 256 | 576 |
+| enospc_cache (step 11.4c, the same way) | 69-88 | 284-312 | 256 | 576 |
+| fault_* and ACE tests on RAM disks (step 26.17; plain measured at 1024, ASan at 2048; see "RAM disks") | 176-333 (ext4 176-243, btrfs 193-226, xfs 243-333) | 306-519 | 384-576 | 512-832 |
 | write | 136-153 | 224-248 | 320 | 448 |
 | memory (sized by `reclaim_scans=0`, see above) | 104-270 at 576 | 354-478 at 768 | 704 | 832 |
 | mount_dcfs_systemd (a Debian cloud image booted by systemd, 5 daemons, step 15.6) | 61-81 | 368-457 | 256 | 768 |
@@ -962,7 +963,7 @@ freeze.
 | `fault_shutdown_test` | per flavour: unsynced completed mutations (create and data, mkdir, rename, setxattr) and a create held in phase 1 when the backing filesystem crashes; a create held in phase 2; a crash while idle, then a start without a remount; a daemon crash and a restart (which re-reads the directory) before the crash; a crash with dirty rows, then a start without a remount; the backing disk's writes failing until the filesystem goes read-only by itself (btrfs's transaction abort, ext4's `emergency_ro`; xfs shuts down), with sync points every second | the held create, new mutations and reads of contents fail; nothing is served that was not served before; the clean shutdown keeps the dirty set (each restart recovers rows); a start without a remount (refused on xfs, whose open of `--source` fails, and over a filesystem that went read-only by itself) serves nothing new, and a create through it fails; no sync point over a filesystem that went read-only clears the dirty set (the bug step 11.5's review found: btrfs's second sync point did, and the lost directory was served after the remount); after the remount everything served matches the backing filesystem, `nologflush` lost the unsynced create and `default`/`logflush` kept it, and the change the restart after a daemon crash re-read is not served once the crash lost it (12.6's dirty rows kept until a sync point; the pre-12.6 code failed this) |
 
 `fault_shutdown_test` boots the checking build in all three variants (ext4
-small, xfs and btrfs medium) with the default guest memory.
+small, xfs and btrfs medium) on RAM disks (below), 448 MiB.
 
 Out of space (step 11.4): `fd_fill DIR` (`guest/fault_dcfs_lib.sh`) takes
 every free block of the filesystem DIR is on (fallocate, then blocks
@@ -974,7 +975,42 @@ appended until `ENOSPC`, as root, so ext4's reserved blocks go too).
 | `enospc_cache_test` (ext4, small) | the cache database's filesystem full: before a create (phase 1), while a create and then a rename are held in phase 2 (phase 3), before a periodic sync point | the create fails with `ENOSPC` and never reaches the backing filesystem; the held create is replied as done or `EEXIST` and the kernel never answers "no such file" for it (the bug this step fixed), the held rename is replied as done; reads fail with `ENOSPC` or answer right; the failed sync point keeps the dirty set; after space is freed and a restart, everything served matches the backing filesystem |
 
 Both boot the checking build in every variant (ext4 small, xfs and btrfs
-medium) with the default guest memory.
+medium) with the default guest memory, on image files: they fill their disks
+on purpose, and a full 320 MiB disk would be 320 MiB of RAM.
+
+### RAM disks (step 26.17)
+
+The tests above get their failure semantics from device-mapper and
+`fsfreeze`, not from the host's disk, which only adds its latency (and its
+load: another process's fsyncs). `qemu_test(..., ram_disks = True)` backs the
+test's `disks` with the guest's RAM instead of image files:
+`run-qemu.sh --ram-disks <fstools.cpio.gz>` makes no image, attaches no
+drive and passes `dcfs_ramdisks=vdb:ext4:320M,vdc:ext4:64M` on the kernel
+command line; the archive (`scripts/mkfstools.py`: mke2fs, mkfs.xfs,
+mkfs.btrfs, their musl loader and libraries, the checked-in `mke2fs.conf`;
+2 MB) is appended to the initramfs. `guest/init` then makes each disk
+(`guest/ramdisk_lib.sh`) before the script starts: a sparse file in a tmpfs
+that can hold no more than the disks together, a loop device over it
+(Alpine's `linux-virt` has no `brd`), the filesystem made by the same tools
+and options as on the host, and `/dev/vdb` as a second node for the loop
+device, so a script names its disks as before (it reads sizes with
+`blockdev`, not `/sys/class/block/vdb`, which is `loopN`). The loop device
+exists when `losetup` returns, so nothing waits. `sqlite_durability`'s log,
+replay and copy-on-write devices are the same thing (`ram_disk_attach`);
+its data disks (vdb, vdc) stay on the host.
+
+Cost: the guest holds its disks. Peak in use at 1024 MiB (an upper bound: it
+falls with the allowance, since the page cache fills what it is given) was
+176-243 MiB on ext4, 193-226 on btrfs and 243-333 on xfs (whose log and AG
+headers are written in full) where the same tests used 75-131 MiB on host
+disks, so the guests have 384-576 MiB (ASan 512-832; `mem=` and `asan_mem=`
+in `BUILD.bazel` carry the measurements). `--test_env=DCFS_RAM_DISKS=0` puts
+a test back on host disks, to compare or to see whether a RAM disk hides
+something. The option is refused with `power_cut` and `boots` (the disks must
+outlive the guest: `fault_power_kill_test` keeps image files, and that is the
+point of it), `rootfs`, `systemd_image` and mke2fs options. Every run prints
+`run-qemu.sh: time: guest wall S s, host CPU C s`, the pair a latency-noisy
+run shows in.
 
 ### The cache database's durability (step 12.14)
 
