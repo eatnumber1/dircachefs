@@ -100,6 +100,18 @@ are then the same on every machine and in CI.
   no line numbers, so they survive, but the counts of line-sensitive
   checks may move and the test tells. Also 7.6a: `tools/*.c` tabs and the
   long lines the old 7.6 text lists, as far as clang-format settles them.
+- 7.6a merged 2026-10-11 (033618e; the reformat commit is a7a3e71, named
+  in `.git-blame-ignore-revs`, which the rebase at merge required
+  re-pointing): `bazel run //tools:format` and `//tools:format_test`
+  (small, 3 s) with the pinned clang-format; 87 of 154 files reformatted
+  (5183 insertions, 5458 deletions; biggest tools/testutil.c and
+  test/qemu/crash_states.c); raw strings byte-identical, tokens unchanged
+  but whitespace, comment reflow, split string literals and Google's
+  using-declaration order; one new braces finding fixed in place; three
+  allowlist counts moved. Debt for 7.6b: `format_test` is tagged
+  `external` and reads the workspace through the MODULE symlink (as
+  repo_shape_test does) because git's file list spans ten packages; a
+  per-package filegroup aggregate would make it hermetic and cacheable.
 - 7.6b (after the reset): buildifier, shfmt (`-i 2 -ci -bn`) and
   shellcheck pinned and added to `//tools:format` and `format_test`, the
   shell and BUILD reformat in one commit each, the pre-commit hook.

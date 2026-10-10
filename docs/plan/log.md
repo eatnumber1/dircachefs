@@ -2885,3 +2885,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ, two more 1.6a rules from RaiseFileLimit: a failure's message is written where the failure
   is found (not in a later branch that reads oddly on its own), and blank lines separate the
   things a function does, with error handling part of its thing; 25.25's target shape updated.
+- 7.6a merged (lane-2 → 033618e, gate exit 0). The rebase at merge renamed the reformat commit,
+  so .git-blame-ignore-revs is re-pointed here (a7a3e71). Lane-2 free. Project view given to
+  russ this morning: the plan's order should put the spare-disk trial first.
