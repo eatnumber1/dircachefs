@@ -2536,3 +2536,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   no review agents unless a landing step touches crash safety or identity; small agents only for
   something urgent (a red push, a bug russ hits). Queue resumes Friday: 26.17, 26.18, 11.7, 25.9's
   audit, 15.3, 12.11b/c, 12.15-12.17, 17.2/17.3/17.1b.
+- russ (2026-10-10): the fstab for production (two lines per data disk: the raw btrfs mount and a
+  `none` dcfs mount over it, requires-mounts-for, nofail, passno 0 until 15.5, allow_other until
+  15.8) and the none-vs-bind question: `none` for directories; `bind` adds only a detached
+  lifetime, submount isolation and backing-side ro. A README section "none or bind" folded into
+  lane-6's 15.8 round, and the agent asked whether anything (15.4's recorded bind mount points)
+  needs `bind` at all; dropping it is a candidate simplification for russ.
