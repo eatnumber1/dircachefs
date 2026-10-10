@@ -59,8 +59,6 @@ dcfs/backing.cc|LookupOrPopulate|readability-avoid-nested-conditional-operator|1
 dcfs/backing.cc|LookupOrPopulate|readability-function-cognitive-complexity|1
 dcfs/backing.cc|OpenNode|misc-no-recursion|1
 dcfs/backing.cc|ParentOf|capturing_mutating_lambda|1
-dcfs/backing.cc|ProbeRecoveredRows|bugprone-unchecked-optional-access|1
-dcfs/backing.cc|ProbeRecoveredRows|readability-function-cognitive-complexity|1
 dcfs/backing.cc|ReadDirNames|misc-include-cleaner|1
 dcfs/backing.cc|ReconcileAttrs|google-runtime-int|2
 dcfs/backing.cc|ReconcileAttrs|misc-include-cleaner|8
@@ -289,6 +287,7 @@ dcfs/fsck.cc|FsckMain|performance-avoid-endl|3
 dcfs/fsck.cc|FsckMain|readability-function-cognitive-complexity|1
 dcfs/fsck.cc|FstabOptions|misc-include-cleaner|1
 dcfs/fsck.cc|FstabOptions|performance-no-automatic-move|1
+dcfs/fsck.cc|Inspect|capturing_mutating_lambda|2
 dcfs/fsck.cc|Inspect|misc-include-cleaner|1
 dcfs/fsck.cc|Inspect|readability-function-cognitive-complexity|1
 dcfs/fsck.cc|ParseFsckArgs|misc-include-cleaner|1
@@ -297,6 +296,9 @@ dcfs/fsck.cc|ReadAll|misc-include-cleaner|1
 dcfs/fsck.cc|RunProgram|misc-include-cleaner|6
 dcfs/fsck_test.cc|<file scope>|misc-include-cleaner|2
 dcfs/fsck_test.cc|<file scope>|misc-unused-using-decls|3
+dcfs/fsck_test.cc|Fails|misc-include-cleaner|1
+dcfs/fsck_test.cc|Install|misc-include-cleaner|2
+dcfs/fsck_test.cc|TEST_F|misc-include-cleaner|6
 dcfs/fsck_test.cc|TestFile|concurrency-mt-unsafe|1
 dcfs/fuse_ops.cc|<file scope>|misc-include-cleaner|1
 dcfs/fuse_ops.cc|CopyFileRange|check_in_production|2
@@ -524,6 +526,8 @@ dcfs/syscalls.cc|<file scope>|modernize-concat-nested-namespaces|1
 dcfs/syscalls.cc|clock_gettime|misc-include-cleaner|2
 dcfs/syscalls.cc|close|misc-include-cleaner|2
 dcfs/syscalls.cc|close_range|bugprone-narrowing-conversions|1
+dcfs/syscalls.cc|fsgid|misc-include-cleaner|1
+dcfs/syscalls.cc|fsuid|misc-include-cleaner|1
 dcfs/syscalls.cc|getpid|misc-include-cleaner|1
 dcfs/syscalls.cc|mkdtemp|misc-include-cleaner|1
 dcfs/syscalls.cc|mkstemp|misc-include-cleaner|1
@@ -533,8 +537,8 @@ dcfs/syscalls.cc|poll|google-runtime-int|3
 dcfs/syscalls.cc|poll|misc-include-cleaner|2
 dcfs/syscalls.cc|realpath|misc-include-cleaner|1
 dcfs/syscalls.cc|sendmsg|misc-include-cleaner|1
-dcfs/syscalls.cc|setfsgid|misc-include-cleaner|1
-dcfs/syscalls.cc|setfsuid|misc-include-cleaner|1
+dcfs/syscalls.cc|setfsgid|modernize-use-integer-sign-comparison|1
+dcfs/syscalls.cc|setfsuid|modernize-use-integer-sign-comparison|1
 dcfs/syscalls.cc|setgroups|misc-include-cleaner|1
 dcfs/syscalls.cc|socketpair|misc-include-cleaner|2
 dcfs/syscalls.cc|syslog|misc-include-cleaner|1
@@ -573,7 +577,7 @@ dcfs/syscalls_process_test.cc|<file scope>|modernize-deprecated-headers|1
 dcfs/syscalls_process_test.cc|TEST|misc-include-cleaner|12
 dcfs/syscalls_test.cc|<file scope>|misc-include-cleaner|4
 dcfs/syscalls_test.cc|SetUp|concurrency-mt-unsafe|1
-dcfs/syscalls_test.cc|TEST|misc-include-cleaner|8
+dcfs/syscalls_test.cc|TEST|misc-include-cleaner|9
 dcfs/syscalls_test.cc|TEST_F|iterator_pair_algorithm|2
 dcfs/syscalls_test.cc|TEST_F|misc-include-cleaner|13
 dcfs/syscalls_test.cc|TEST_F|modernize-use-designated-initializers|2
