@@ -2777,3 +2777,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ generalised the SwitchTo reasoning: it is fine to rely on guaranteed invariants of the
   system or code called (Linux's stable syscall API among them); style 1.10a has a bullet, with
   the idmapped-mounts condition as the example of naming what the guarantee depends on.
+- russ: switch escape.cc to absl::CHexEscape (the extra single-quote escape accepted); in 25.20
+  with golden re-baselines in the same commit.

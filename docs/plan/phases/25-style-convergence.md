@@ -576,6 +576,12 @@ prefix test (`mounts_below.cc:103`), the three hand-written splits
 `FunctionRef` by ownership), `std::map` in bench (1), the two stale alias
 includes (`file_handle.cc:20`, `main.cc:41`), `BytesToHexString` in
 `file_handle.cc` versus `absl::BytesToHexString`. Tests get the same
-treatment in a second pass. `escape.cc`, `device_id.cc`'s hex, the
-`CHECK` family (25.9) and the helpers' own `fprintf` output are excluded
-pending russ.
+treatment in a second pass. Also (russ, 2026-10-10: "Switch"):
+`dcfs/escape.cc` is replaced by `absl::CHexEscape` (Abseil also escapes
+the single quote; accepted); test first: the escape tests' expectations
+change where a `'` appears, every golden that holds an escaped name
+(strace goldens, trace fixtures, log-line tests) is re-baselined in the
+same commit with before/after quoted, and the bytes rule (names are
+bytes, escaped whenever printed, style "File names are bytes") is
+re-checked on the call sites. `device_id.cc`'s hex, the `CHECK` family
+(25.9) and the helpers' own `fprintf` output stay excluded pending russ.
