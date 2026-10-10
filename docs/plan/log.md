@@ -2930,6 +2930,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 26.27 stopped by its agent, rightly: only lcov leaves the guest and lcov has no regions; a region
   gate needs merged profdata on the host (a pipeline change, investigator-sized). Parked in item 6;
   the lcov gate stays, with the 26.26 alignment check as the documented evidence for a
-  formatting-only re-baseline. Stray files for russ to remove: seven `bazel-profile-*` directories
-  and `scratch-4-26-27` under ~/Sources/dircachefs-lanes/ (a gh run download landed outside the
-  lane; the classifier refused the agent's rm), plus lane-3's `.scratch/`.
+  formatting-only re-baseline. Stray files for russ to remove: an empty `scratch-4-26-27` under
+  ~/Sources/dircachefs-lanes/ (the agent also reported seven `bazel-profile-*` directories there,
+  but none exist; the classifier refused the agent's rm so the empty directory stays), plus
+  lane-3's `.scratch/`.
