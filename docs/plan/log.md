@@ -2565,3 +2565,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   over the kernel's 127-byte limit for interpreter lines, hence ENOEXEC on the runner and not in
   the lane; now a two-line /bin/sh wrapper under TEST_TMPDIR, and `cleanup` tolerates a failing
   `clean --expunge`. 12.14b (the durability count) is the remaining red before the next push.
+- 12.14b merged (e133eca): the short test's count became two checks, "both durability levels
+  present" and "each operation's durability matches dcfs's rules" (synced: a phase 1 naming an
+  inode not durably dirty; normal: all inodes already durably dirty), per-operation expectations
+  in the script; a subtlety learned: a mkdir'd directory is born dirty but not durably, so its
+  rmdir syncs. Short 137 states, large 419/396/1114, 0 violations. PUSH POINT: main after this
+  entry (eecb91f plus 12.13b, 12.14b and plan); both CI reds fixed.
