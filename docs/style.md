@@ -557,6 +557,21 @@ necessary, but if you think one is necessary, come to me."
   russ, YYYY-MM-DD: ...") and in `docs/plan/log.md`. The same holds for a
   loop proposed by a reviewer or an agent: the agent stops and reports, it
   does not add one.
+- **Contention between our own threads is a mutex or unbounded optimistic
+  retry, never a bounded one.** russ, 2026-10-10: "We'll either use mutexes
+  or infinitely retry (e.g. optimistic locking with rollback). As a general
+  pattern, optimistic locking with rollback is allowed, but it must be
+  unbounded in retries and we have to be certain that another thread is
+  making progress (e.g. via the TLA+ model) to unblock the retrying thread."
+  So: a loop that re-reads, re-validates and tries again has no attempt
+  counter and no EAGAIN fallback; it ends when it succeeds. What makes that
+  safe is a progress argument: the thread whose change invalidated ours
+  finishes in a bounded number of its own steps, so our next attempt sees a
+  settled state. That argument is a liveness property of the model
+  (`formal/`), checked by TLC with the fairness the code provides, and the
+  loop's comment names it. Without such an argument, use a mutex (wait on
+  the other thread's completion) instead. A bounded retry is the worst of
+  both: it fails under load exactly where it was meant to help.
 - **Not retry loops:** restarting a syscall the kernel asked to restart
   (`EINTR` when the caller has not cancelled: `umount_helper.cc`'s blocking
   lock); the kernel's own revalidation retry of a failed open; an

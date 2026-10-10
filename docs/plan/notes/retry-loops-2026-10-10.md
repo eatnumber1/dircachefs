@@ -20,6 +20,24 @@ russ's ruling on each; the list only shrinks. Found by grepping for
 | 6a | `dcfs/backing.cc:2092` (`GetGroups`) | `getgroups(0)` for the count, then `getgroups(n)`; `EINVAL` (the list grew) asks again | unbounded `while (true)` | none; the comment itself says another thread cannot change our list, so the loop cannot iterate | one count-then-read, `EINVAL` reported (found 2026-10-10 after the inventory above) |
 | 6b | `dcfs/backing.cc:178` (`GetXattrOPath`) | size the value, read it, `ERANGE` means it grew | same shape as 4 | same as 4 | same ruling as 4 |
 
+russ, 2026-10-10, on items 1-3: no bounded retries and no EAGAIN fallback;
+contention between our own threads is a mutex or an unbounded optimistic
+retry with a progress argument checked in the model (style guide 1.12).
+Items 1-3 therefore lose `kAttempts` and the EAGAIN return. The progress
+argument: what invalidates a resolve is another mutation's phase 1 or 3
+(or a fill), each of which completes in a bounded number of steps without
+waiting on the retrying request, so a retry sees a settled state; the model
+gets a liveness property (every begun unlink/rename/readdir eventually
+begins its mutation or serves its listing, under weak fairness of the
+other requests' steps) and the retry-or-EAGAIN branch becomes retry only.
+Today the loops cannot iterate at all (one request at a time), so the code
+change is small; the model change is the substance. Items 4 and 6b are
+contention with another *process* (an xattr writer), where no model can
+show progress: ruling still open (unbounded, with starvation possible under
+an adversarial writer, or one size-then-read and ERANGE as the answer).
+Item 6a cannot iterate (the comment says so): one call pair, EINVAL
+reported, which is not a retry.
+
 Items 1-3 share one shape: a model branch (dcfs.tla's "retry or EAGAIN")
 that exists for the coroutine future and cannot be exercised today. If
 russ rules "one attempt, then EAGAIN", the model's retry branch goes too

@@ -2634,3 +2634,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   path form works for every type); queued as 25.11 after the reset. Two more retry loops added to
   the inventory (GetGroups' EINVAL loop, GetXattrOPath's ERANGE loop). russ pushed 8f528d8; CI
   run 38025358346 watched in the background.
+- russ ruled on the retry inventory's own-thread loops (unlink/rename/readdir): no bounded
+  retries, no EAGAIN fallback; a mutex or an unbounded optimistic retry whose progress the TLA+
+  model shows. Style 1.12 amended with his words; the cross-process xattr sizing loops stay open
+  for his ruling. The duplicate-mechanism question (backing xattr reopen) gets a standing review
+  question in the agent prompts; the reopen allowlist idea was withdrawn (a reopen is not wrong on
+  its face, so a reason column would have read true).
