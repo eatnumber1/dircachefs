@@ -2744,3 +2744,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - Style rule (russ, 2026-10-10): Abseil's container algorithms (`absl::c_copy` etc.), never
   iterator-pair `std::` algorithms over a whole container; style 1.2 written; the sweep and a
   repo_shape rule folded into 25.17 (six sites).
+- russ asked for a catalogue of Abseil's utilities for coders and reviewers: 25.19 dispatched
+  (investigator, lane-4, non-building; reads the pinned headers, writes docs/abseil-utilities.md
+  with a swaps table, per-directory entries, dcfs's hand-rolled candidates and a reviewer
+  checklist). Four agents now running (25.15, 26.22, the 26.17a review, 25.19); the pace drops
+  to one lane after they land.

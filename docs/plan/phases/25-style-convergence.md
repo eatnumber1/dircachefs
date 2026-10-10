@@ -525,3 +525,18 @@ repo_shape rule refuses the `std::` spelling of the algorithms Abseil
 wraps (the list from the header's `c_*` names) outside
 `tools/repo_shape_std_algorithms.txt` (`path count | reason`, only
 shrinks: a deliberate sub-range is the one reason), with fixtures.
+
+## 25.19 Abseil utilities catalogue (russ, 2026-10-10; dispatched, lane-4)
+
+russ: "send a researcher to look across the Abseil codebase to see what
+kind of utilities there are, and make a summary for coders and reviewers
+to refer to." Investigator reads the pinned Abseil (20260817.0) from the
+output base and writes `docs/abseil-utilities.md`: a swaps table
+(hand-written or `std::` pattern → Abseil utility, each marked with the
+style rule that already demands it), a section per `absl/<dir>` with the
+headers that matter and their entry points, what dcfs already uses, the
+sites that hand-roll a utility instead (counts, as candidates for a
+sweep step), and a ten-question reviewer checklist. Reference, not
+essay; states the pin and how to refresh. docs/style.md then points to
+it from 1.2, and the agent definitions tell coders and reviewers to use
+it. Follow-up: the sweep of candidates (25.20, by count and risk).
