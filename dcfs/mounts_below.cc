@@ -100,7 +100,7 @@ std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
     std::string mount_point = UnescapeMountinfoPath(fields[4]);
     if (mount_point == source) continue;  // A mount ON the source: fine.
     if (mount_point.size() > prefix.size() &&
-        std::string_view(mount_point).substr(0, prefix.size()) == prefix) {
+        std::string_view(mount_point).starts_with(prefix)) {
       below.push_back(std::move(mount_point));
     }
   }

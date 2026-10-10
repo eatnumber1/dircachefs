@@ -285,7 +285,6 @@ dcfs/mount_dcfs_test.cc|TEST|google-runtime-int|2
 dcfs/mount_options.cc|HasDefaultPermissions|readability-use-anyofallof|1
 dcfs/mount_options.cc|HasOption|readability-use-anyofallof|1
 dcfs/mounts_below.cc|HasRo|readability-use-anyofallof|1
-dcfs/mounts_below.cc|MountPointsBelow|modernize-use-starts-ends-with|1
 dcfs/mounts_below.cc|UnescapeMountinfoPath|readability-math-missing-parentheses|2
 dcfs/mounts_below_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/remount.cc|RemountDcfs|google-runtime-int|1
