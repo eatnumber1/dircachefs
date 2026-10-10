@@ -665,4 +665,40 @@ py_test(
     deps = [":style_checks_lib"],
 )
 
+py_library(
+    name = "style_fix_lib",
+    srcs = ["style_fix.py"],
+    imports = ["."],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# `bazel run //tools:style_fix -- --check=<clang-tidy check> <files>`: one
+# check's fixes over the given workspace files, with the build's own flags
+# (the style aspect's flags files, from the style_findings targets it depends
+# on) and the pinned clang-tidy and clang-format, then clang-format over the
+# changed lines. See style_fix.py.
+py_binary(
+    name = "style_fix",
+    testonly = True,
+    srcs = ["style_fix.py"],
+    main = "style_fix.py",
+    data = [
+        ":style_findings",
+        "//bench:style_findings",
+        "//dcfs:style_findings",
+        "//dcfs/testonly:style_findings",
+        "@dcfs_llvm//:bin/clang-format",
+        "@dcfs_llvm//:bin/clang-tidy",
+    ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+py_test(
+    name = "style_fix_test",
+    size = "small",
+    srcs = ["style_fix_test.py"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+    deps = [":style_fix_lib"],
+)
+
 style_findings_here()

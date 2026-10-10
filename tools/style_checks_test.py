@@ -39,6 +39,9 @@ def main():
             ARGS[key] = value
         elif arg.endswith((".tidy.txt", ".query.txt")):
             ARGS["outputs"].append(arg)
+        elif arg.endswith(".flags.txt"):
+            # The compile flags of each file, for tools/style_fix.py (25.23).
+            continue
         else:
             rest.append(arg)
     unittest.main(argv=rest)

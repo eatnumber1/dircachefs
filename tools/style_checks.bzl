@@ -113,6 +113,11 @@ def _aspect_impl(target, ctx):
             progress_message = "clang-query %s" % source.short_path,
         )
         outputs.append(query)
+        # The flags, one per line, for tools/style_fix.py: the same list the
+        # two actions above take, so a fix runs under the build's own flags.
+        flags_file = ctx.actions.declare_file(stem + ".flags.txt")
+        ctx.actions.write(flags_file, "\n".join(flags_of_source) + "\n")
+        outputs.append(flags_file)
         if ctx.attr.tidy == "yes":
             tidy = ctx.actions.declare_file(stem + ".tidy.txt")
 
