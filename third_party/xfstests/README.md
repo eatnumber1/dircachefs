@@ -72,14 +72,13 @@ image (`qemu_test`'s `rootfs`). Every part comes through Bazel:
   (`helpers.bzl` lists them);
 - busybox (for the applets no Alpine package supplies, `sh` among them), a
   `mount` that gives every FUSE mount of the guest its `dcfs.cache_db`
-  (named after the device), `dcfs.allow_other`, and `dcfs.fuse_opt=suid` and
+  (named after the device), and `dcfs.fuse_opt=suid` and
   `=dev` unless the test asks for `nosuid` (`mount -t fuse.dcfs` is what
   xfstests runs for `FSTYP=fuse`, `FUSE_SUBTYP=.dcfs`; a few tests mount with
-  `-t fuse`, or with options of their own); a `umount` that waits, with
-  `flock` on the cache database, for the daemon of the unmounted file system
-  to exit (the daemon holds the lock until then, and xfstests mounts the
-  device again at once; 15.6's interim recipe, gone when 15.6b's
-  `umount.fuse.dcfs` lands); and `shim/glibc_strerror.c` preloaded.
+  `-t fuse`, or with options of their own); `umount` is Alpine's own and runs
+  `/sbin/umount.fuse.dcfs` (step 15.6b), which returns when the daemon has
+  exited, so xfstests' remounts of the same device find the cache database
+  free (generic runs are the helper's regression test); and `shim/glibc_strerror.c` preloaded.
 
 The guest mounts `/dev/vdb` as `TEST_DEV` and `/dev/vdc` as `SCRATCH_DEV`
 through dcfs (so the backing file system, ext4, xfs or btrfs, is the matrix

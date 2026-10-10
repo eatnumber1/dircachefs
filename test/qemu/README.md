@@ -1785,14 +1785,11 @@ in it, what was left out and which tests that turns into "not run".
   that writes to the raw scratch device (generic/740 makes a file system of
   every kind on it) ends its batch (`SOLO` in `xfstests.sh`): what it leaves
   there would fail every later test of the batch that mounts the device
-  (generic/770 did). The `mount` of the image tries again, a few times, when
-  the device is busy: a mount right after an unmount can meet the backing
-  mount the daemon's namespace still pins (nothing announces that; 15.6b's
-  helper owns the wait). The
-  `umount` of the image waits for the daemon with `flock` on its cache database
-  (the daemon holds the lock until it exits); it is 15.6's interim recipe and
-  goes away when 15.6b's `umount.fuse.dcfs` lands, which xfstests then
-  regression-tests. `check`'s output goes through a pipe that the script reads
+  (generic/770 did). The image's `mount` only adds dcfs's options; its
+  `umount` is Alpine's, which runs `umount.fuse.dcfs` (step 15.6b): the
+  helper returns when the daemon has exited, so a remount finds the cache
+  database free, and xfstests' unmount/mount cycles regression-test it.
+  `check`'s output goes through a pipe that the script reads
   a line at a time with `read -t`: a test that has not finished `LIMIT` (200 s)
   after the previous one did is killed, and its result is "timeout". That
   limit is the run's only timer (a hung test cannot announce its end).

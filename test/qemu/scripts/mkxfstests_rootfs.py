@@ -19,9 +19,9 @@ Debian image (qemu_test's `rootfs`). Contents:
                      per-filesystem lists of tests (--list)
   /etc               passwd and group with root, nobody and the users the
                      tests expect (fsgqa, 123456-fsgqa, fsgqa2), mtab
-  /usr/local/bin/mount, umount
-                     mount that gives every FUSE mount its dcfs options, and
-                     umount that waits for the daemon's flock on its cache to go
+  /usr/local/bin/mount
+                     mount that gives every FUSE mount its dcfs options (umount
+                     needs no wrapper: it runs umount.fuse.dcfs, step 15.6b)
   /usr/lib/glibc_strerror.so
                      LD_PRELOAD library: glibc's error messages for musl programs
   /mnt/test, /mnt/scratch, /cache, /tmp, /proc, /sys, /dev
@@ -215,48 +215,6 @@ def stage_etc(root):
     _symlink(root, 'etc/mtab', '/proc/self/mounts')
 
 
-UMOUNT_WRAPPER = """#!/bin/sh
-# Installed by mkxfstests_rootfs.py (step 17.1), ahead of /bin/umount in PATH.
-#
-# umount of a dcfs mount returns when the kernel has unmounted it, while the
-# daemon is still shutting down: it holds an exclusive flock on its cache
-# database (README.md: only one dcfs may use a database) until it exits, and
-# xfstests mounts the same device again at once ("our local mount routine",
-# _scratch_cycle_mount), so the new daemon finds the database in use and the
-# mount fails. This waits for the lock to be free, which is the daemon's exit
-# (an event, not a timer: `flock FILE true` returns when it holds the lock).
-# It finds the database from the mount (the device's name, as the mount
-# wrapper names it) before it unmounts. This is 15.6's interim recipe: the
-# wrapper goes away when step 15.6b's umount.fuse.dcfs waits for the daemon,
-# and xfstests then regression-tests that helper. A lazy unmount (-l) does not
-# wait: the daemon exits only when the last user of the mount is gone.
-lazy=0
-db=""
-for arg in "$@"; do
-	case "$arg" in
-	-l | --lazy | -lf | -fl) lazy=1 ;;
-	-*) ;;
-	*)
-		target=$(readlink -f "$arg")
-		src=$(awk -v t="$target" '$3 == "fuse.dcfs" && ($2 == t || $1 == t) { print $1 }' /proc/mounts | tail -n 1)
-		[ -n "$src" ] && db=/cache/${src##*/}.db
-		;;
-	esac
-done
-/bin/umount "$@"
-rc=$?
-# Only when that was the last mount of the device: a bind mount of a file of
-# the file system (generic/306) or a second mount point leaves the daemon
-# serving, and the lock is held for as long.
-if [ "$rc" -eq 0 ] && [ "$lazy" -eq 0 ] && [ -n "$db" ] && [ -e "$db" ] &&
-	! awk -v s="$src" '$3 == "fuse.dcfs" && $1 == s { found = 1 } END { exit !found }' /proc/mounts; then
-	flock "$db" true
-fi
-exit "$rc"
-"""
-
-
-
 MOUNT_WRAPPER = """#!/bin/sh
 # Installed by mkxfstests_rootfs.py (step 17.1), ahead of /bin/mount in PATH.
 #
@@ -264,9 +222,8 @@ MOUNT_WRAPPER = """#!/bin/sh
 # (FSTYP=fuse, FUSE_SUBTYP=.dcfs), and a few tests mount it with the plain type
 # of FSTYP (`mount -t fuse DEV DIR`, which has no helper) or with options of
 # their own. dcfs needs a cache database for every mount (dcfs.cache_db, until
-# plan step 15.3's default) and the tests run as other users (dcfs.allow_other)
-# and make device nodes and setuid files, which libfuse mounts refuse by
-# default (README.md: nosuid,nodev unless dcfs.fuse_opt=suid and =dev), so
+# plan step 15.3's default) and the tests make device nodes and setuid
+# files, which libfuse mounts refuse by default (README.md: nosuid,nodev unless dcfs.fuse_opt=suid and =dev), so
 # this adds all of them (the last two unless the test asks for nosuid), the
 # database named after the device, and calls the
 # helper that serves every FUSE mount of this guest.
@@ -316,29 +273,9 @@ fuse | fuse.dcfs | dcfs)
 				set -- "$@" "$a"
 			fi
 		done
-		# A mount right after the unmount of the same device can find it busy:
-		# the daemon has exited and released its lock (umount waited for that),
-		# but the kernel drops the mount namespace it made the backing mount in
-		# a moment later, from a work queue. Nothing announces that, so the mount
-		# is tried again, a few times, when it says the device is busy. Step
-		# 15.6b's helper owns this wait for real. (Not for "database in use": the
-		# lock is what umount waited for, and a second dcfs that is really there,
-		# generic/411, 589 and 732, must fail at once, not after retries.)
-		tries=0
-		while :; do
-			out=$(/bin/mount -t fuse.dcfs -o "dcfs.cache_db=/cache/${dev##*/}.db,dcfs.allow_other$fuse_opts" "$@" 2>&1)
-			rc=$?
-			[ "$rc" -eq 0 ] && break
-			case "$out" in
-			*busy*) ;;
-			*) break ;;
-			esac
-			tries=$((tries + 1))
-			[ "$tries" -ge 25 ] && break
-			sleep 0.2
-		done
-		[ -n "$out" ] && echo "$out" >&2
-		exit "$rc"
+		# No retry and no wait for the previous daemon: umount(8) runs
+		# umount.fuse.dcfs (step 15.6b), which returns when the daemon has exited.
+		exec /bin/mount -t fuse.dcfs -o "dcfs.cache_db=/cache/${dev##*/}.db$fuse_opts" "$@"
 	fi
 	;;
 esac
@@ -347,7 +284,7 @@ exec /bin/mount "$@"
 
 
 def stage_wrappers(root):
-    for name, text in (('umount', UMOUNT_WRAPPER), ('mount', MOUNT_WRAPPER)):
+    for name, text in (('mount', MOUNT_WRAPPER),):
         dest = os.path.join(root, 'usr/local/bin', name)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, 'w') as f:
