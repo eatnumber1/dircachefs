@@ -2947,3 +2947,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ pushed 9de0e71 (run 38088587563 watched) and said not to wait on the trial: Queue item 3,
   26.17b (CPU, I/O-count and request budgets; wall as hang guard; load-starvation flag; the 17.3
   results line), dispatched (investigator, lane-1). One lane running.
+- 21.1 first run: russ's agent on his production server reports the disk stayed in standby under
+  metadata-only work through dcfs and woke on a one-byte read; the dcfs mount is exported over NFS
+  to the dev host, where an investigator runs the client leg in stages (mount; metadata with the
+  disk down; one read; warm restart). Scrubbed write-up in notes/trial-2026-10-11.md (hosts,
+  addresses, disk labels and ids omitted: the repository is public).

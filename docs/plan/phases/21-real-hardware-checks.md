@@ -95,3 +95,12 @@ process name is found with `ps ... | grep '[d]cfs'`; the `updatedb`
 flags are from memory; stopping smartd and the locate timers and waiting
 for ext4lazyinit are the writer's additions; `hdparm`/`smartctl` output
 text from memory.
+
+## 21.1 first run, 2026-10-11 (notes/trial-2026-10-11.md)
+
+Server side done by russ's own agent on the production file server, from
+the minimal runbook: metadata-only work kept the disk in standby; a
+one-byte read woke it through passthrough. Client leg over NFS in
+progress from the dev host (an orchestrator subagent, staged so the
+server can spin the disk down between stages). Not yet: the hour-long
+watch, CPU and sync-point cadence, the control hour, the fstab shape.
