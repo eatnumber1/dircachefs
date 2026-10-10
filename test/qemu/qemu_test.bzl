@@ -76,6 +76,20 @@ def mem_args_for(mem, asan_mem):
         "//conditions:default": ["--mem", str(mem)],
     })
 
+# Step 26.17: what run-qemu.sh holds a run to (README.md, "Budgets in three
+# parts"): the budget comparison it shares with the guest scripts, and the CPU
+# budgets. Every qemu_test and qemu_cc_test gets them.
+BUDGET_DATA = [
+    "//test/qemu:guest/strace_lib.sh",
+    "//test/qemu:guest/cpu_budgets.txt",
+]
+BUDGET_ARGS = [
+    "--budget-lib",
+    "$(location //test/qemu:guest/strace_lib.sh)",
+    "--cpu-budgets",
+    "$(location //test/qemu:guest/cpu_budgets.txt)",
+]
+
 def sanitizer_args():
     """run-qemu.sh --cmdline dcfs_sanitizer=<asan|ubsan> (a select()); guest/init exports it as DCFS_SANITIZER."""
     return select({
@@ -284,11 +298,11 @@ def qemu_test(name, guest_script, size = None, timeout = None, disks = [], rootf
     sh_test(
         name = name,
         srcs = ["scripts/run-qemu.sh"],
-        data = kernel_data + qemu_data + [
+        data = kernel_data + qemu_data + BUDGET_DATA + [
             initramfs,
             guest_script,
         ] + rootfs_data + systemd_data + ram_disks_data + coverage_data(cov_objects),
-        args = qemu_args + ["--cpus", str(cpus)] + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + boots_args + rootfs_args + systemd_args + ram_disks_args + mem_args + sanitizer_args() + kernel_args + [
+        args = qemu_args + BUDGET_ARGS + ["--cpus", str(cpus)] + coverage_args(cov_objects) + kernel_failure_args + power_cut_args + boots_args + rootfs_args + systemd_args + ram_disks_args + mem_args + sanitizer_args() + kernel_args + [
             "$(location " + initramfs + ")",
             guest_script_basename,
         ] + disk_args,

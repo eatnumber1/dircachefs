@@ -710,6 +710,8 @@ gate is disabled.
 | fault sweep: every backing call site a short workload reaches, failed once (26.6) | `//dcfs:dir_cache_fs_fault_sites_test`'s `FaultSitesTest.SweepReportsABrokenInvariant` (an iteration that breaks an invariant is reported, naming the site it failed) |
 | slopes: every operation class's steps, transactions, WAL fsyncs and backing syscalls at N = 100 and 1000 bounded by a * N + b (26.4b) | `//dcfs:dir_cache_fs_slope_test`'s `SlopeTest.AnExtraCostPerOperationIsCaught` (two more statement steps per create exceed the bound) |
 | FUSE requests per user-level operation (26.4b: `guest/request_budgets.txt`) | `//test/qemu:request_lib_test` (the real `guest/request_lib.sh` delta over canned counter snapshots, and a request count above its budget failing) |
+| the guest's cost accounting (26.17: the CPU of the cgroup the daemon is started in, read in microseconds, and `cost_exec.sh`, which joins it before the exec) | `//test/qemu:cost_report_test` (the real functions of `guest/init` over canned cgroup files: a missing cgroup is an error, not 0; the command runs with its arguments intact and its own pid in `cgroup.procs`; not at all if the cgroup cannot be joined; `lib.sh`'s reader is `init`'s) |
+| a run is held to its CPU budget (26.17: `guest/cpu_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan and coverage runs are not held) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`); the per-operation CPU checks of `request_counts_test` fail with `cpu_budgets.txt` missing or lacking a line, as they did while writing them |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
 A gate without a self-check is a review finding: the review checklist asks
@@ -1163,6 +1165,86 @@ cold kernel cache and a warm dcfs cache. `//test/qemu:request_counts_test`
 counts them with the checking daemon's cost counter (`$DCFS_COUNTERS_FILE`,
 `guest/request_lib.sh`) and compares them as the syscall budgets are
 compared. The budgets started at the observed counts.
+
+## Budgets in three parts (step 26.17)
+
+A test's wall time is the host's load as much as the test's: the same test took
+19 s alone and up to 52 s with eight busy loops beside it. So a test is held to
+what it costs, not to how long it took: the CPU time of the processes that run
+dcfs's code (this section), the I/O operations it causes and the counts that
+already had budgets; wall time is left as the hang guard, and a run that lost a
+large share of its wall time to other guests says so.
+
+### CPU time of dcfs
+
+`guest/init` makes a cgroup (`/sys/fs/cgroup/dcfs`, cgroup v2) before the test
+starts, and `start_daemon` (`guest/lib.sh`) starts the daemon with
+`$COST_EXEC` (`/tests/cost_exec.sh`, which `init` writes: it puts its own pid in
+`cgroup.procs` and `exec`s the command, so `$!` is still the daemon's pid). A
+unit test's binary is started the same way. The kernel adds every thread of every
+process in a cgroup to its `cpu.stat`, exited ones too, so the total survives a
+daemon that was killed, unmounted and started again, which `/proc/<pid>/stat`
+(gone with the process, in 10 ms ticks) could not give. `usage_usec` is exact:
+`init` prints it at the end as `COST cpu_us=N` beside the `MEM` line, and
+`run-qemu.sh` prints it (`run-qemu.sh: cost: dcfs CPU 0.136 s (budget 0.136 s,
+tolerance 100%)`) and fails the run if it is more than the budget plus the
+tolerance. A guest script reads the same counter with `cost_cpu_us`
+(`guest/lib.sh`) around an operation: `request_counts.sh` holds the CPU of its
+four operations to `cpu_budgets.txt` too. A test whose daemon is not started by
+`start_daemon`, or that a guest under systemd runs, counts 0 and has no budget.
+
+`guest/cpu_budgets.txt` has the format of the other budget files (`OP cpu_us
+MAX`; OP is a Bazel label for a whole test, an operation's name for an
+operation inside one) and is compared by the same function
+(`strace_budget_compare`, which gained a tolerance). A target with no line is
+reported, not held, so a test gets a budget when someone measures it; the file's
+first lines are the eleven tests measured for this step (a bulk baseline of the
+other targets is a run of the suite with `--test_output=all` and a copy of their
+`cost:` lines). The budgets are for the plain build on KVM with the quiet
+kernel: a sanitizer, coverage, TCG and the noisy kernel spend CPU differently,
+so those runs print the number and say why they are not held
+(`budget_unheld_reason`).
+
+**The tolerance is 100% (a doubling), and the data are why.** CPU time of the
+daemon is exact and nearly constant on an idle host, but it is not the same
+under load: with other guests running, the hyperthreads of one core slow each
+other, and the same work takes more CPU time. Measured on the 4-core, 8-thread
+Xeon D-2123IT this was written on (8 quiet runs; then 11 runs with the six
+other tests of this table running beside it, one Bazel invocation with six test
+jobs; then 3 to 10 runs with 7 or 8 busy loops and a process writing with
+`dsync` beside the guest, the load average at 9 to 16):
+
+| test | quiet CPU ms (min / median / max) | quiet wall s | six guests: CPU factor (range), wall factor | busy loops: CPU factor (range), wall factor |
+|---|---|---|---|---|
+| `//dcfs:backing_test` (unit) | 475 / 508 / 534 | 2.5 | 1.28 (1.25-1.35), 1.24 | 1.43 (1.10-1.74), 2.38 |
+| `//dcfs:metadata_cache_test` (unit) | 465 / 473 / 487 | 2.0 | 1.28 (1.27-1.41), 1.25 | 1.51 (1.05-1.63), 2.20 |
+| `//test/qemu:create_test_ext4` | 54 / 57 / 60 | 2.0 | 1.23 (1.07-1.43), 1.10 | 0.56 (0.36-0.70), 2.05 |
+| `//test/qemu:request_counts_test` | 129 / 136 / 142 | 4.0 | 1.13 (1.02-1.39), 1.06 | 0.98 (0.53-1.38), 1.67 |
+| `//test/qemu:write_test_ext4` | 125 / 136 / 161 | 8.7 | 1.12 (1.08-1.26), 1.06 | 0.58 (0.51-0.77), 1.82 |
+| `//test/qemu:fault_backing_test_ext4` | 50 / 53 / 58 | 3.1 | 1.07 (0.96-1.25), 1.06 | 0.85 (0.69-1.22), 1.71 |
+| `//test/qemu:fault_cache_test_ext4` | 78 / 81 / 88 | 4.6 | 1.15 (1.13-1.44), 1.02 | 0.76 (0.59-0.80), 1.45 |
+| `//test/qemu:readdir_boundary_test` | 13397 / 13624 / 13954 | 18.9 | 1.28 (1.16-1.29), 1.30 | 1.22 (1.19-1.26), 2.13 |
+| `//test/qemu:fault_ace_b_test` (ACE) | 3839 / 3906 / 3950 | 20.1 | 1.26 (1.25-1.30), 1.24 | 1.36 (0.97-1.43), 2.15 |
+| `//test/qemu:fault_ace_a_test` (ACE) | 7833 / 7909 / 7979 | 35.2 | 1.26 (1.24-1.27), 1.25 | - |
+| `//test/qemu:fault_ace_mixed_test_ext4` (ACE) | 4603 / 4674 / 4689 | 38.8 | - | - |
+
+On a quiet host the spread is 2% to 5% (a maximum deviation from the median of
+1% to 3%) for tests of seconds, and 9% to 18% for the tests of 50 to 140 ms, so
+"deterministic to a few percent" holds for the first and not the second. Under
+load it does not hold at all, for CPU time or for wall time: both stretch
+together by a quarter to two fifths when other guests are running (the six-guest
+column, where no guest was starved: the steal time the guests saw was under
+1% of their wall time), and when the host is oversubscribed the wall time of a test doubles (the
+last column: 1.45 to 2.4 times) while its CPU time stays within a factor of 0.4
+to 1.7 of the quiet value (a CPU-bound unit test is the worst case; the five
+tests of under 150 ms use less CPU under load than quiet, which is unexplained
+and errs on the side of a budget that holds). The largest factor
+seen was 1.74, so the tolerance is 100%: a budget holds under load, and it
+catches the daemon spending twice what it did. Anything finer is the job of the
+counts (requests, syscalls, statement steps), which have no tolerance. If a
+tighter CPU gate is ever wanted, the way is to scale each reading by a
+calibration the guest measures itself (a fixed loop timed before and after),
+not to narrow the tolerance.
 
 ## `qemu_cc_test`: dcfs's replacement for `cc_test`
 

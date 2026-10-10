@@ -140,6 +140,36 @@ strace_budget_compare "${WORK}/budgets" "${WORK}/counts" nobudget >/dev/null &&
   fail "an operation without a budget passed"
 echo "PASS: budgets fail above, pass at or below"
 
+# A tolerance (step 26.17: CPU time is not an exact count) is a percentage of
+# the budget added to it: a count within it passes, one past it fails and the
+# message names it. Integer arithmetic only (busybox awk has no surprises, but
+# 10 * 1.15 is not 11.5 in a double); a tolerance of 0 is the exact comparison.
+printf 'cpu cpu_us 1000\ncpu io_ops 10\n' >"${WORK}/tbudgets"
+printf 'cpu_us 1150\nio_ops 10\n' >"${WORK}/tcounts"
+strace_budget_compare "${WORK}/tbudgets" "${WORK}/tcounts" cpu cost.txt 15 ||
+  fail "a count at budget plus tolerance was refused"
+printf 'cpu_us 1151\nio_ops 10\n' >"${WORK}/tcounts"
+out=$(strace_budget_compare "${WORK}/tbudgets" "${WORK}/tcounts" cpu cost.txt 15) &&
+  fail "a count past budget plus tolerance passed"
+[[ "${out}" == "cpu cpu_us: count rose from 1000 to 1151, past the 15% tolerance; raising a budget is a deliberate edit of cost.txt whose commit says why" ]] ||
+  fail "tolerance message: '${out}'"
+strace_budget_compare "${WORK}/tbudgets" "${WORK}/tcounts" cpu cost.txt 16 ||
+  fail "a count within a wider tolerance was refused"
+strace_budget_compare "${WORK}/tbudgets" "${WORK}/tcounts" cpu cost.txt 0 >/dev/null &&
+  fail "a tolerance of 0 allowed a count above its budget"
+echo "PASS: a tolerance allows that percentage above the budget and no more"
+
+# The CPU budgets are for one kind of run (the plain build on KVM, quiet kernel):
+# every other kind of boot line gives its reason, and that run is not held.
+[[ -z "$(budget_unheld_reason "console=ttyS0 dcfs_accel=kvm dcfs_test=write.sh")" ]] ||
+  fail "a plain KVM run has a reason not to be held to the budgets"
+for flagged in "dcfs_accel=tcg:TCG" "dcfs_accel=kvm dcfs_noisy=1:noisy kernel" "dcfs_accel=kvm dcfs_sanitizer=asan:asan build" \
+  "dcfs_accel=kvm dcfs_sanitizer=ubsan:ubsan build" "dcfs_accel=kvm dcfs_cov=/dev/vdb:coverage build"; do
+  got=$(budget_unheld_reason "console=ttyS0 ${flagged%%:*} dcfs_test=write.sh")
+  [[ "${got}" == "${flagged#*:}" ]] || fail "reason for '${flagged%%:*}': '${got}', want '${flagged#*:}'"
+done
+echo "PASS: a run is held to the CPU budgets only if it is a plain KVM run on the quiet kernel"
+
 # (guest/lib.sh's fail, sourced above, replaced this file's own.)
 die() {
   echo "FAIL: $*" >&2

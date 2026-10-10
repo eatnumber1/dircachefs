@@ -283,13 +283,15 @@ strace_golden() {
 # sql_stmts, sql_txns). A count above its budget fails; below it passes
 # (lowering a budget is an edit too, but nothing fails for an improvement).
 
-# strace_budget_compare BUDGETS COUNTS OP [NAME]: 0 when every budgeted count
-# of OP in the COUNTS file is within its budget; else prints one line per
-# violation and returns 1. An OP with no budget line, or a budgeted kind the
-# counts lack, is a violation. NAME is the budgets file's name in the message
-# (syscall_budgets.txt by default).
+# strace_budget_compare BUDGETS COUNTS OP [NAME [TOLERANCE]]: 0 when every
+# budgeted count of OP in the COUNTS file is within its budget; else prints one
+# line per violation and returns 1. An OP with no budget line, or a budgeted
+# kind the counts lack, is a violation. NAME is the budgets file's name in the
+# message (syscall_budgets.txt by default). TOLERANCE (step 26.17; 0 by
+# default, an exact count) is the percentage of a budget a count may exceed it
+# by: CPU time is deterministic to a few percent, not exact.
 strace_budget_compare() {
-	awk -v op="$3" -v file="${4:-syscall_budgets.txt}" '
+	awk -v op="$3" -v file="${4:-syscall_budgets.txt}" -v tol="${5:-0}" '
 	FNR == NR {
 		if ($1 == op && $1 !~ /^#/) { want[$2] = $3; n++ }
 		next
@@ -305,13 +307,44 @@ strace_budget_compare() {
 			if (!(k in got)) {
 				print op " " k ": no such count in this trace"
 				bad = 1
-			} else if (got[k] + 0 > want[k] + 0) {
-				print op " " k ": count rose from " want[k] " to " got[k] "; raising a budget is a deliberate edit of " file " whose commit says why"
+			} else if (got[k] * 100 > want[k] * (100 + tol)) {
+				past = (tol > 0) ? ", past the " tol "% tolerance" : ""
+				print op " " k ": count rose from " want[k] " to " got[k] past "; raising a budget is a deliberate edit of " file " whose commit says why"
 				bad = 1
 			}
 		}
 		exit bad
 	}' "$1" "$2"
+}
+
+# --- CPU budgets (step 26.17) --------------------------------------------------
+#
+# guest/cpu_budgets.txt has the same format (OP cpu_us MAX) for a whole test
+# (OP its Bazel label: run-qemu.sh holds the guest's COST line to it) and for
+# an operation inside one (request_counts.sh, from the cgroup's CPU time around
+# it). CPU time is not a count: on a quiet host the same test's daemon CPU
+# varies by 2% (a test of seconds) to 18% (50 ms), but when other guests share
+# the host's cores (the hyperthreads of the same core slow each other down)
+# the same work takes up to 1.7 times the CPU: wall time and CPU time
+# stretch together, and only the counts (which have no tolerance) hold. So the
+# tolerance is that of a catch-all for the work no count sees, a doubling
+# (test/qemu/README.md, "Budgets in three parts", has the measurements).
+COST_CPU_TOLERANCE_PCT=100
+
+# budget_unheld_reason CMDLINE: why a run with this kernel command line is not
+# held to the CPU budgets (empty if it is). The budgets are for the plain build
+# on KVM and the quiet kernel; the others spend CPU differently (a sanitizer or
+# the coverage counters, TCG's emulation, the noisy run's spontaneous
+# writeback). run-qemu.sh passes the line it boots with, a guest script its
+# /proc/cmdline.
+budget_unheld_reason() {
+	case " $1 " in
+	*" dcfs_accel=tcg "*) echo "TCG" ;;
+	*" dcfs_noisy=1 "*) echo "noisy kernel" ;;
+	*" dcfs_sanitizer=asan "*) echo "asan build" ;;
+	*" dcfs_sanitizer=ubsan "*) echo "ubsan build" ;;
+	*" dcfs_cov="*) echo "coverage build" ;;
+	esac
 }
 
 # strace_budget CHECK NAME: the budget check of NAME's counts, reported as

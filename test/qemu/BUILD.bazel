@@ -29,7 +29,9 @@ ASAN_CANCEL_MEM = 1216
 # Referenced cross-package by qemu_cc_test.bzl (loaded from dcfs/BUILD.bazel
 # and any other package with unit tests) to build each test's own initramfs.
 exports_files([
+    "guest/cpu_budgets.txt",
     "guest/init",
+    "guest/strace_lib.sh",
     "scripts/mkinitramfs.sh",
     "scripts/run-qemu.sh",
     "scripts/cov-lcov.sh",
@@ -93,6 +95,7 @@ config_setting(
         "guest/init",
     ] + glob(["guest/*.sh"]) + glob(["guest/pjdfstest.*_failures"]) + [
         "guest/fault_ace_mixed.expected_failures",  # step 26.14e
+        "guest/cpu_budgets.txt",
         "guest/request_budgets.txt",
         "guest/syscall_budgets.txt",
     ],
@@ -192,6 +195,44 @@ sh_test(
     srcs = ["kernel_mode_test.sh"],
     args = ["$(location guest/kernel_mode_lib.sh)"],
     data = ["guest/kernel_mode_lib.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 26.17: the guest's cost accounting (guest/init: the CPU of the cgroup the
+# daemon runs in, and the program that puts it there) over canned cgroup files.
+sh_test(
+    name = "cost_report_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["cost_report_test.sh"],
+    args = [
+        "$(location guest/init)",
+        "$(location guest/lib.sh)",
+    ],
+    data = [
+        "guest/init",
+        "guest/lib.sh",
+    ],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 26.17: run-qemu.sh holds a run to its CPU budget (fake qemu, canned
+# serial logs, the real budget comparison).
+sh_test(
+    name = "run_qemu_cost_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["run_qemu_cost_test.sh"],
+    args = [
+        "$(location scripts/run-qemu.sh)",
+        "$(location guest/strace_lib.sh)",
+        "$(location guest/cpu_budgets.txt)",
+    ],
+    data = [
+        "guest/cpu_budgets.txt",
+        "guest/strace_lib.sh",
+        "scripts/run-qemu.sh",
+    ],
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 

@@ -271,6 +271,15 @@ cpu_ticks() {
 	awk '{print $14 + $15}' "/proc/$1/stat"
 }
 
+# cost_cpu_us: the CPU time, in microseconds, of every process started with
+# $COST_EXEC so far, exited ones included (guest/init, "What a test costs"): the
+# difference between two readings is what the daemon spent between them, exactly,
+# where cpu_ticks above counts 10 ms ticks of one live process. The same
+# function as guest/init's (cost_report_test checks they are one).
+cost_cpu_us() {
+	awk '/^usage_usec / { print $2 }' "$COST_CGROUP/cpu.stat"
+}
+
 # daemon_wakeups PID: sets WAKEUPS to the voluntary context switches of the
 # (single-threaded) daemon so far -- one per FUSE request it blocks waiting
 # for (see the write-large-passthrough comment in write.sh).
@@ -357,7 +366,9 @@ dcfs_options() {
 start_daemon() {
 	log=$1
 	shift
-	"${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options "$@")" "$SRC" "$MNT" >"$log" 2>&1 &
+	# $COST_EXEC (guest/init) starts it in the cgroup its CPU time is counted in,
+	# and is empty in a guest that systemd starts (nothing counts there).
+	${COST_EXEC:-} "${MOUNT_DCFS:-/sbin/mount.dcfs}" -o "$(dcfs_options "$@")" "$SRC" "$MNT" >"$log" 2>&1 &
 	DAEMON_PID=$!
 	MOUNTED=0
 	if "${TESTUTIL:-/bin/testutil}" waitmount "$MNT" present "$DAEMON_PID"; then

@@ -1,0 +1,52 @@
+# CPU budgets (step 26.17): the CPU time, in microseconds, that the processes
+# running dcfs's code may spend, as the cgroup they are started in counts it
+# (guest/init, "What a test costs": exact, exited processes included). Format:
+# OP cpu_us MAX, compared by guest/strace_lib.sh's strace_budget_compare with
+# the tolerance COST_CPU_TOLERANCE_PCT there (100%: a doubling;
+# test/qemu/README.md, "Budgets in three parts", has the measurements behind
+# it). Two kinds of OP:
+#
+#   //package:target   a whole test: run-qemu.sh holds the guest's COST line to
+#                      it. The daemon of an e2e test started by start_daemon
+#                      (guest/lib.sh), or the binary of a unit test. Not held
+#                      for a sanitizer, coverage, TCG or noisy-kernel run
+#                      (strace_lib.sh, budget_unheld_reason), and a target with
+#                      no line here is reported, not held.
+#   an operation       an operation inside a test, from the cgroup's CPU time
+#                      around it (guest/request_counts.sh: the names are
+#                      request_budgets.txt's).
+#
+# Every budget started at the median of 8 quiet runs (rounded up to a
+# millisecond; the spread is in the README), on the machine that wrote it.
+# Raising one is a deliberate edit whose commit says why; lowering one after an
+# improvement is welcome. Unlike the counts in the other budget files, CPU time
+# is not a function of the code alone, so a bump of the kernel or the toolchain
+# may need these re-measured (say so in its commit, with before and after).
+
+# Unit tests: the test binary.
+//dcfs:backing_test cpu_us 509000
+//dcfs:metadata_cache_test cpu_us 474000
+
+# Harness tests.
+//test/qemu:create_test_ext4 cpu_us 58000
+//test/qemu:request_counts_test cpu_us 136000
+//test/qemu:readdir_boundary_test cpu_us 13624000
+//test/qemu:write_test_ext4 cpu_us 137000
+
+# Fault tests.
+//test/qemu:fault_backing_test_ext4 cpu_us 53000
+//test/qemu:fault_cache_test_ext4 cpu_us 81000
+
+# ACE tests.
+//test/qemu:fault_ace_a_test cpu_us 7909000
+//test/qemu:fault_ace_b_test cpu_us 3906000
+//test/qemu:fault_ace_mixed_test_ext4 cpu_us 4674000
+
+# Operations of request_counts_test, on a cold kernel cache and a warm dcfs
+# cache. ls -l of 100 entries and find over a tree are the sums of their
+# READDIRPLUS replies; stat of a path 10 deep is ten LOOKUPs; cat is a LOOKUP
+# and an OPEN.
+ls-l-100 cpu_us 4300
+find-tree cpu_us 15100
+stat-deep-10 cpu_us 1440
+cat cpu_us 770

@@ -291,7 +291,7 @@ else
 			cp "$f" "$ROOT/pjdfstest/$(basename "$f")"
 			;;
 		*.sh) cp "$f" "$ROOT/tests/$(basename "$f")" ;;
-		*/syscall_budgets.txt | */request_budgets.txt | */fault_ace_mixed.expected_failures)
+		*/syscall_budgets.txt | */request_budgets.txt | */cpu_budgets.txt | */fault_ace_mixed.expected_failures)
 			cp "$f" "$ROOT/tests/$(basename "$f")"
 			;;
 		esac
