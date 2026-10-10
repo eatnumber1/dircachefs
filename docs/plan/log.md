@@ -2971,3 +2971,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   QEMU NFS test's bind-export shape, the runbook's restart order, a real held-descriptor test).
   The trial's remaining parts (the hour-long watch with CPU and sync-point cadence, the control
   hour, the fstab shape) wait for russ's next session on the server.
+- 21.1 hour-long watch started (russ away): the server's agent logs standby state and daemon CPU
+  every minute with the dcfs terminal captured; the client agent runs metadata rounds over NFS
+  every ~5 minutes for 60 minutes with READ asserted zero per round. Results to the trial note
+  when both sides report.
