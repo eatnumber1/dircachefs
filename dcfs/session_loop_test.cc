@@ -61,13 +61,13 @@ ssize_t FakeWritev(int, struct iovec *iov, int count, void *userdata) {
   auto *script = static_cast<Script *>(userdata);
   ssize_t total = 0;
   for (int i = 0; i < count; ++i) total += static_cast<ssize_t>(iov[i].iov_len);
-  script->events.push_back("write");
+  script->events.emplace_back("write");
   return total;
 }
 
 void FakeInit(void *userdata, struct fuse_conn_info *conn) {
   auto *script = static_cast<Script *>(userdata);
-  script->events.push_back("init");
+  script->events.emplace_back("init");
   // The way fuse_ops.cc's Init refuses: a wanted flag libfuse did not offer.
   if (script->refuse_init) {
     conn->want_ext |= std::bit_floor(~conn->capable_ext);
@@ -115,7 +115,7 @@ int RunLoop(Script &script, bool set_callback = true) {
   {
     SessionLoop loop(se);
     if (set_callback) {
-      loop.SetOnInit([&script] { script.events.push_back("on_init"); });
+      loop.SetOnInit([&script] { script.events.emplace_back("on_init"); });
     }
     rc = loop.Run();
   }

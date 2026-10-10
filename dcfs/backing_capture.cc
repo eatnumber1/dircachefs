@@ -250,16 +250,16 @@ CaptureRequest RequestFor(const HelperArgs &args,
 std::vector<std::string> NativeMountCommand(const CaptureRequest &request,
                                             const std::string &staging) {
   std::vector<std::string> command = {"mount", "-n"};
-  if (request.sloppy) command.push_back("-s");
-  if (request.verbose) command.push_back("-v");
+  if (request.sloppy) command.emplace_back("-s");
+  if (request.verbose) command.emplace_back("-v");
   std::vector<std::string> options;
   if (!request.native_type.empty()) {
-    command.push_back("-t");
+    command.emplace_back("-t");
     command.push_back(request.native_type);
   }
   options.insert(options.end(), request.options.begin(), request.options.end());
   if (!options.empty()) {
-    command.push_back("-o");
+    command.emplace_back("-o");
     command.push_back(absl::StrJoin(options, ","));
   }
   command.push_back(request.source);

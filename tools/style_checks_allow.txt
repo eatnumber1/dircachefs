@@ -61,7 +61,6 @@ dcfs/backing.cc|VerifyBackingIdentity|modernize-use-integer-sign-comparison|1
 dcfs/backing.cc|XattrOf|misc-redundant-expression|1
 dcfs/backing_capture.cc|<file scope>|misc-include-cleaner|1
 dcfs/backing_capture.cc|AnswerAndExit|misc-include-cleaner|2
-dcfs/backing_capture.cc|NativeMountCommand|modernize-use-emplace|4
 dcfs/backing_capture.cc|RunNativeMount|misc-include-cleaner|4
 dcfs/backing_capture_fault_test.cc|Request|readability-convert-member-functions-to-static|1
 dcfs/backing_fault_test.cc|SetUp|concurrency-mt-unsafe|1
@@ -238,7 +237,6 @@ dcfs/fuse_request_channel_test.cc|TEST|bugprone-unchecked-optional-access|11
 dcfs/main.cc|ABSL_FLAG|misc-use-internal-linkage|6
 dcfs/main.cc|MountHelperMain|performance-avoid-endl|1
 dcfs/main.cc|MountHelperMain|readability-function-cognitive-complexity|1
-dcfs/main.cc|RunDaemon|modernize-use-emplace|2
 dcfs/main.cc|RunDaemon|readability-function-cognitive-complexity|1
 dcfs/main.cc|UmountHelperMain|performance-avoid-endl|1
 dcfs/main.cc|main|bugprone-exception-escape|1
@@ -301,10 +299,7 @@ dcfs/session_loop.cc|SessionLoop::Drain|bugprone-invalid-enum-default-initializa
 dcfs/session_loop.cc|SessionLoop::Drain|google-runtime-int|1
 dcfs/session_loop.cc|SessionLoop::Run|bugprone-invalid-enum-default-initialization|1
 dcfs/session_loop_test.cc|<file scope>|misc-include-cleaner|1
-dcfs/session_loop_test.cc|FakeInit|modernize-use-emplace|1
 dcfs/session_loop_test.cc|FakeWritev|misc-include-cleaner|1
-dcfs/session_loop_test.cc|FakeWritev|modernize-use-emplace|1
-dcfs/session_loop_test.cc|RunLoop|modernize-use-emplace|1
 dcfs/session_loop_test.cc|TEST|readability-implicit-bool-conversion|1
 dcfs/smoke_test.cc|TEST|misc-use-internal-linkage|1
 dcfs/sqlite.cc|<file scope>|modernize-concat-nested-namespaces|1
@@ -350,7 +345,6 @@ dcfs/syscalls_test.cc|<file scope>|misc-include-cleaner|1
 dcfs/syscalls_test.cc|SetUp|concurrency-mt-unsafe|1
 dcfs/syscalls_test.cc|TEST|misc-include-cleaner|2
 dcfs/syscalls_test.cc|TEST_F|misc-include-cleaner|2
-dcfs/syscalls_test.cc|TEST_F|modernize-use-emplace|1
 dcfs/syscalls_test.cc|TEST_F|readability-math-missing-parentheses|1
 dcfs/testonly/assert_ok_and_assign.h|<file scope>|bugprone-macro-parentheses|2
 dcfs/testonly/assert_ok_and_assign.h|<file scope>|misc-include-cleaner|2

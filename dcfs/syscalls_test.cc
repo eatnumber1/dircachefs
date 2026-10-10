@@ -324,7 +324,7 @@ TEST_F(SyscallsTest, Getdents64ListsCreatedNames) {
   for (int64_t pos = 0; pos < *nbytes_result;) {
     const auto *entry = reinterpret_cast<const syscalls::linux_dirent64 *>(
         dir_buf.data() + pos);
-    names.push_back(std::string(entry->d_name));
+    names.emplace_back(entry->d_name);
     pos += entry->d_reclen;
   }
 

@@ -487,8 +487,8 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
       "-o",          absl::StrJoin(opts.mount_options, ","), "-o", fsname, "-o",
       "subtype=dcfs"};
   if (options.read_only) {
-    fuse_option_list.push_back("-o");
-    fuse_option_list.push_back("ro");
+    fuse_option_list.emplace_back("-o");
+    fuse_option_list.emplace_back("ro");
   }
   std::vector<std::string> fuse_arg_strings = {std::string(kMountHelperName)};
   fuse_arg_strings.insert(fuse_arg_strings.end(), fuse_option_list.begin(),
