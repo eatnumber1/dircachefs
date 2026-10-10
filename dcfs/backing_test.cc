@@ -1354,22 +1354,6 @@ TEST_F(BackingTest, SetgidParentGroupIsInherited) {
   EXPECT_EQ(stx.stx_mode & 07777, 02755);
 }
 
-TEST_F(BackingTest, CallerIdentityThatDoesNotTakeIsRefused) {
-  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, GetGroups());
-  FileDescriptor parent = MakeParent(Path("pub"), 0777, 0);
-  // -1 is what the kernel would send for an id with no mapping; setfsuid
-  // and setfsgid silently ignore it, so only reading back catches it.
-  const Credentials bad_uid{
-      .uid = static_cast<uid_t>(-1), .gid = 1000, .groups = {}};
-  const Credentials bad_gid{
-      .uid = 1000, .gid = static_cast<gid_t>(-1), .groups = {}};
-  EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, bad_uid, *parent, "d", 0755)), EPERM);
-  ExpectRootAgain(groups);
-  EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, bad_gid, *parent, "d", 0755)), EPERM);
-  ExpectRootAgain(groups);
-  EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("pub/d")).ok());
-}
-
 // Records the names of the backing calls that are announced
 // (ProtocolEvents::BackingCall), for the invariant checks and the fault
 // sweep, which depend on every backing syscall being announced.

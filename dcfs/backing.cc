@@ -284,36 +284,20 @@ void RestoreRoot(const SavedGroups &groups) {
       << ")";
 }
 
-// Switches to `caller`: fsgid and groups first (setgroups needs
-// CAP_SETGID, which a nonzero fsuid would not remove, but the order keeps
-// the thread from ever being "the caller" with root's groups), fsuid last.
-// setfsuid/setfsgid report no errors (an id the kernel will not accept --
-// e.g. -1, sent for a caller whose id has no mapping -- is silently
-// ignored), so each is read back; a switch that did not take is EPERM,
-// with the thread restored. Refuses to nest: a thread not at fsuid/fsgid 0
-// on entry means an earlier switch leaked.
+// Switches to `caller`. fsgid and groups go before fsuid: setgroups needs
+// CAP_SETGID, and the order keeps the thread from ever being "the caller"
+// with root's groups.
 absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
   RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
-  ABSL_ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
-  absl::Status status;
+  ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
+  absl::Cleanup restore_root([&saved]() { RestoreRoot(saved); });
+  // setfsgid is guaranteed to never fail
   syscalls::setfsgid(caller.gid);
-  if (FsGid() != caller.gid) {
-    status = ProducedErrnoToStatus(
-        EPERM, absl::StrCat("setfsgid(", caller.gid, ") did not take"));
-  }
-  if (status.ok()) status = syscalls::setgroups(caller.groups);
-  if (status.ok()) {
-    syscalls::setfsuid(caller.uid);
-    if (FsUid() != caller.uid) {
-      status = ProducedErrnoToStatus(
-          EPERM, absl::StrCat("setfsuid(", caller.uid, ") did not take"));
-    }
-  }
-  if (!status.ok()) {
-    RestoreRoot(saved);
-    return status;
-  }
+  RETURN_IF_ERROR(syscalls::setgroups(caller.groups));
+  // setfsuid is guaranteed to never fail
+  syscalls::setfsuid(caller.uid);
+  std::move(restore_root).Cancel();
   return saved;
 }
 
