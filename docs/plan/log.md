@@ -2707,3 +2707,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   accumulators) after 25.14; RestoreRoot's CHECK added to 25.9's list.
 - russ: no "fact beside the call" rule; the wrapper's signature carries it (Status is nodiscard;
   a call that cannot fail returns its value or nothing). Style 1.6a amended.
+- russ: the knowledge of which syscalls can fail lives once, in syscalls.h's return types
+  (partial-failure structs are the special case, decoded at the wrapper). Style 1.5 says so.

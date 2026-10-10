@@ -196,7 +196,17 @@ One thin wrapper per documented Linux syscall or libc call, named for its
 manpage in lower case (`man 2 openat`, `man 3 ...`; `syscalls::setxattr`),
 returning `absl::Status` or `StatusOr` through `dcfs::ErrnoToStatus`. One
 call, no composition (no retry loops, no decoding into containers, no
-policy). Anything else is a helper in `backing.cc` built on the plain
+policy). **The wrapper's return type is the one place that records
+whether a call can fail** (russ, 2026-10-10: "for the most part all
+syscalls will return a Status indicating failure (that's _why_ we have
+syscalls.h)"): a wrapper returns `Status`/`StatusOr` unless the manpage
+says the call cannot fail, in which case it returns the value or nothing
+(`setfsuid`, `setfsgid`, `umask`, `syscalls.h:34-40`), and the
+special cases where failure comes back inside the result (a struct with a
+per-item error, a partial count) are decoded by the wrapper into a
+`StatusOr` or documented at the wrapper. Callers never need to know which
+is which: `Status` is `[[nodiscard]]`, so a call that can fail cannot be
+dropped, and a bare call compiles only for one that cannot (1.6a). Anything else is a helper in `backing.cc` built on the plain
 wrappers: the `/proc/self/fd/N` trick is a backing helper calling
 `syscalls::getxattr(path, ...)`. A wrapper that is thin but has a
 non-manpage name is renamed to its manpage name, with a comment on any
