@@ -46,6 +46,7 @@ dirname dmesg echo fallocate false find free grep head id insmod ip kill ln ls
 md5sum mdev mkdir mkfifo mknod more mount mountpoint mv printf pwd
 readlink reboot rm rmdir sed sh sleep sort stat sync tail test timeout
 touch tr true truncate umount uname uniq wc which
+blockdev df env losetup od
 "
 
 actual_applets=$("$BB" --list)
