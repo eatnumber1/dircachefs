@@ -2724,3 +2724,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   tree-wide sweep (837 uses, 28 files) plus a repo_shape check is 25.17 after it. Style 1.6 and
   1.6a, the agent definitions and the 25.15 text now say the short names. Nullability rule (25.16)
   recorded earlier this hour.
+- russ stated the general form: do the thing; if it broke, handle and return; do the next thing;
+  RETURN_IF_ERROR/ASSIGN_OR_RETURN when no special handling. Style 1.6a's first bullet is now his
+  words; agent definitions updated.

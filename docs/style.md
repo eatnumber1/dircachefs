@@ -460,11 +460,29 @@ What it replaced had an `absl::Status status;` filled by three
 request can produce (an unmapped id arrives as the overflow uid, which
 the kernel accepts), and `dcfs::`-qualified names.
 
-- **Guards first, then one straight line** (rule). Preconditions and
-  invariants are `RET_CHECK`s at the top. After them the body reads top to
-  bottom as the sequence of effects, with no nesting for sequencing and no
-  `else` after a `return`. A happy path that is indented is failure
-  handling written inline: unwrite it.
+- **Do the thing; if it broke, handle and return; do the next thing**
+  (rule). russ, 2026-10-10: "The general form for code should be:
+
+  ```c++
+  do thing;
+  if (thing broke) {
+    handle error
+    return error code;
+  }
+  do next thing;
+  ```
+
+  So the happy path is the unindented one. Then, if you don't need
+  special logic for handling the error, you can get rid of the `if` using
+  RETURN_IF_ERROR or ASSIGN_OR_RETURN. But the 'do thing, handle error,
+  do next thing' pattern is the pattern to follow." Preconditions and
+  invariants are `RET_CHECK`s at the top, which are the same shape with
+  the handling folded in. After them the body reads top to bottom as the
+  sequence of effects; every failure is handled right after the call that
+  can produce it, in an `if` that ends with a `return`, so there is no
+  `else`, no `if (ok) { next thing }` nesting, and no `status` carried
+  across statements to be checked later. A happy path that is indented
+  is failure handling written in the wrong place: move it.
 - **Undo is an `absl::Cleanup` declared right after the thing it undoes,
   and success cancels it** (rule). Each early return then undoes exactly
   what happened before it with no code of its own, and the commit point
