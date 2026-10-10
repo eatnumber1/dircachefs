@@ -2727,3 +2727,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ stated the general form: do the thing; if it broke, handle and return; do the next thing;
   RETURN_IF_ERROR/ASSIGN_OR_RETURN when no special handling. Style 1.6a's first bullet is now his
   words; agent definitions updated.
+- russ: style reviewers get more access to ask him questions, since style is subjective and his
+  answers train them. New agent type `dcfs-style-reviewer` (Opus high; findings vs numbered
+  questions for russ, each with the code, the alternatives as code, a lean, and the style.md
+  sentence either answer would add); process.md: every phase-25 step gets that pass, questions
+  relayed verbatim in one batch per step, answers written into style.md at the merge; CLAUDE.md
+  table row. First use: 25.15 when it reports.

@@ -19,6 +19,7 @@ does not pass a `model` override, so the type's model and effort apply.
 | `dcfs-investigator` | Sonnet | high | measurement and investigation (emulation speed, hermetic kernel/QEMU/busybox builds, puzzling failures) |
 | `dcfs-protocol` | Opus | high | the write-through protocol, dirty set and recovery, identity, crash and failure handling, mount namespaces, the TLA+ model |
 | `dcfs-reviewer` | Opus | xhigh | read-only review of hard steps and of the plan |
+| `dcfs-style-reviewer` | Opus | high | read-only style review against `docs/style.md`; asks russ where the guide is silent or ambiguous (russ, 2026-10-10: style is subjective, so the reviewers are trained by his answers) |
 
 **The orchestrator oversees; it does not do the work** (russ, 2026-10-06).
 It decides what to do, dispatches subagents, reviews their work, merges,

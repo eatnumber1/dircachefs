@@ -175,6 +175,22 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   are no longer needed.
 - If a step needs more than about three agent runs to land, pause and tell
   russ: something is probably wrong with the step.
+- **Style review and russ's answers** (russ, 2026-10-10: "give the code
+  style reviewers more access to asking me questions than most. Since
+  style is subjective, I want to make sure we train the style reviewers
+  correctly"). Every step in phase 25 (style convergence), and any step
+  whose diff is mostly shape rather than behaviour, gets a
+  `dcfs-style-reviewer` pass before merge. Its report separates findings
+  (violations of written rules) from numbered questions for russ (what the
+  guide does not settle). The orchestrator relays the questions to russ
+  verbatim, in one batch per step, and does not answer them itself, even
+  when it has an opinion; russ's answers are written into `docs/style.md`
+  (his words, dated) in the same commit that records the merge, and the
+  agent that built the step applies them before the merge if they change
+  the diff. Questions nobody can answer in the step's lifetime are left in
+  `docs/style.md` as "open (russ, date)" so the next reviewer asks again
+  rather than guessing. A style reviewer that decides a subjective point
+  itself is a reviewer to re-prompt.
 
 ## russ's machine
 
