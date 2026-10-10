@@ -158,7 +158,7 @@ TEST(ErrnoPayloadTest, SurvivesStatusBuilderAnnotation) {
 TEST(ErrnoPayloadTest, SurvivesAbslReturnIfErrorAnnotation) {
   absl::Status original = ErrnoToStatus(ENOENT, "open");
   auto wrapper = [&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(original) << "while doing something";
+    RETURN_IF_ERROR(original) << "while doing something";
     return absl::OkStatus();
   };
   absl::Status wrapped = wrapper();

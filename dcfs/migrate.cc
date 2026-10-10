@@ -33,13 +33,12 @@ std::span<const uint8_t> AsBlob(const std::string &s) {
 
 absl::StatusOr<bool> TableExists(sqlite3::Connection &db,
                                  std::string_view name) {
-  ABSL_ASSIGN_OR_RETURN(
-      sqlite3::Statement * stmt,
-      db.Prepared("SELECT 1 FROM sqlite_master "
-                  "WHERE type = 'table' AND name = ?"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, name));
-  ABSL_ASSIGN_OR_RETURN(bool exists, stmt->Step());
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                   db.Prepared("SELECT 1 FROM sqlite_master "
+                               "WHERE type = 'table' AND name = ?"));
+  RETURN_IF_ERROR(stmt->Bind(1, name));
+  ASSIGN_OR_RETURN(bool exists, stmt->Step());
+  RETURN_IF_ERROR(stmt->Reset());
   return exists;
 }
 
@@ -47,29 +46,29 @@ absl::StatusOr<bool> TableExists(sqlite3::Connection &db,
 template <typename T, typename Read>
 absl::StatusOr<T> ReadCacheState(sqlite3::Connection &db, std::string_view sql,
                                  Read read_row) {
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(sql));
-  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(sql));
+  ASSIGN_OR_RETURN(bool has_row, stmt->Step());
   if (!has_row) {
-    ABSL_RETURN_IF_ERROR(stmt->Reset());
+    RETURN_IF_ERROR(stmt->Reset());
     return FailedPreconditionErrorBuilder()
            << "Corrupt cache: the cache_state row is missing";
   }
   T value = read_row(*stmt);
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  RETURN_IF_ERROR(stmt->Reset());
   return value;
 }
 
 // The schema version of an existing database: cache_state's, or 1 for a
 // v1 database (which kept it in its key/value `meta` table instead).
 absl::StatusOr<int> ExistingSchemaVersion(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(bool has_state, TableExists(db, "cache_state"));
+  ASSIGN_OR_RETURN(bool has_state, TableExists(db, "cache_state"));
   if (has_state) return GetSchemaVersion(db);
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       db.Prepared("SELECT value FROM meta WHERE key = 'schema_version'"));
-  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  ASSIGN_OR_RETURN(bool has_row, stmt->Step());
   std::string value = has_row ? stmt->Column<std::string>(0) : "";
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  RETURN_IF_ERROR(stmt->Reset());
   int version = 0;
   if (!absl::SimpleAtoi(value, &version)) {
     return FailedPreconditionErrorBuilder()
@@ -80,52 +79,50 @@ absl::StatusOr<int> ExistingSchemaVersion(sqlite3::Connection &db) {
 }
 
 absl::StatusOr<bool> RootInodeExists(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                         db.Prepared("SELECT 1 FROM inodes WHERE id = 1"));
-  ABSL_ASSIGN_OR_RETURN(bool exists, stmt->Step());
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                   db.Prepared("SELECT 1 FROM inodes WHERE id = 1"));
+  ASSIGN_OR_RETURN(bool exists, stmt->Step());
+  RETURN_IF_ERROR(stmt->Reset());
   return exists;
 }
 
 absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
-  ABSL_RETURN_IF_ERROR(db.ExecScript(kSchemaSql));
+  RETURN_IF_ERROR(db.ExecScript(kSchemaSql));
 
   std::string device_id_bytes = root.device_id.Serialize();
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * state_stmt,
       db.Prepared("INSERT INTO cache_state "
                   "(id, schema_version, source_device_id, clean_shutdown, "
                   " boot_id) VALUES (1, ?, ?, 1, NULL)"));
-  ABSL_RETURN_IF_ERROR(state_stmt->Bind(1, kSchemaVersion));
-  ABSL_RETURN_IF_ERROR(state_stmt->Bind(2, AsBlob(device_id_bytes)));
-  ABSL_RETURN_IF_ERROR(state_stmt->ExecuteOnce());
+  RETURN_IF_ERROR(state_stmt->Bind(1, kSchemaVersion));
+  RETURN_IF_ERROR(state_stmt->Bind(2, AsBlob(device_id_bytes)));
+  RETURN_IF_ERROR(state_stmt->ExecuteOnce());
 
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * fs_stmt,
       db.Prepared("INSERT INTO filesystems "
-                   "(device_id, fstype, parent_inode, boundary_name) "
-                   "VALUES (?, ?, NULL, NULL)"));
-  ABSL_RETURN_IF_ERROR(fs_stmt->Bind(1, AsBlob(device_id_bytes)));
-  ABSL_RETURN_IF_ERROR(fs_stmt->Bind(2, root.fstype));
-  ABSL_RETURN_IF_ERROR(fs_stmt->ExecuteOnce());
+                  "(device_id, fstype, parent_inode, boundary_name) "
+                  "VALUES (?, ?, NULL, NULL)"));
+  RETURN_IF_ERROR(fs_stmt->Bind(1, AsBlob(device_id_bytes)));
+  RETURN_IF_ERROR(fs_stmt->Bind(2, root.fstype));
+  RETURN_IF_ERROR(fs_stmt->ExecuteOnce());
 
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * inode_stmt,
-      db.Prepared(
-          "INSERT INTO inodes "
-          "(id, device_id, backing_ino, backing_gen, fuse_gen, "
-          " attrs_valid) "
-          "VALUES (1, ?, ?, ?, 0, 0)"));
-  ABSL_RETURN_IF_ERROR(inode_stmt->Bind(1, AsBlob(device_id_bytes)));
-  ABSL_RETURN_IF_ERROR(inode_stmt->Bind(2, root.backing_ino));
-  ABSL_RETURN_IF_ERROR(inode_stmt->Bind(3, root.backing_gen));
-  ABSL_RETURN_IF_ERROR(inode_stmt->ExecuteOnce());
+      db.Prepared("INSERT INTO inodes "
+                  "(id, device_id, backing_ino, backing_gen, fuse_gen, "
+                  " attrs_valid) "
+                  "VALUES (1, ?, ?, ?, 0, 0)"));
+  RETURN_IF_ERROR(inode_stmt->Bind(1, AsBlob(device_id_bytes)));
+  RETURN_IF_ERROR(inode_stmt->Bind(2, root.backing_ino));
+  RETURN_IF_ERROR(inode_stmt->Bind(3, root.backing_gen));
+  RETURN_IF_ERROR(inode_stmt->ExecuteOnce());
 
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * dir_stmt,
-      db.Prepared(
-          "INSERT INTO directories (inode, children_complete) "
-          "VALUES (1, 0)"));
+      db.Prepared("INSERT INTO directories (inode, children_complete) "
+                  "VALUES (1, 0)"));
   return dir_stmt->ExecuteOnce();
 }
 
@@ -149,7 +146,7 @@ absl::Status CreateSchema(sqlite3::Connection &db, const RootIdentity &root) {
 //    'present'. (SQLite cannot add a table CHECK in place: rebuild.)
 absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
   // As in schema.sql.
-  ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
+  RETURN_IF_ERROR(db.ExecScript(R"sql(
     CREATE TABLE cache_state (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       schema_version INTEGER NOT NULL,
@@ -197,7 +194,7 @@ absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
     DROP TABLE xattrs;
     ALTER TABLE xattrs_v2 RENAME TO xattrs;
   )sql"));
-  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
   RET_CHECK_EQ(version, 2) << "v1 meta.source_device_id is missing";
   return absl::OkStatus();
 }
@@ -206,12 +203,12 @@ absl::Status MigrateV1ToV2(sqlite3::Connection &db) {
 // queries (cache::ListDir, cache::IsDirComplete) cost a page instead of a
 // whole directory; see schema.sql. No row changes.
 absl::Status MigrateV2ToV3(sqlite3::Connection &db) {
-  ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
+  RETURN_IF_ERROR(db.ExecScript(R"sql(
     CREATE INDEX dentries_present ON dentries (parent) WHERE state = 'present';
     CREATE INDEX dentries_unknown ON dentries (parent) WHERE state = 'unknown';
     UPDATE cache_state SET schema_version = 3 WHERE id = 1;
   )sql"));
-  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
   RET_CHECK_EQ(version, 3);
   return absl::OkStatus();
 }
@@ -223,7 +220,7 @@ absl::Status MigrateV2ToV3(sqlite3::Connection &db) {
 // again and records their stubs. IF NOT EXISTS: the step undoes only what it
 // adds, so it is safe over a database that already has part of it.
 absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
-  ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
+  RETURN_IF_ERROR(db.ExecScript(R"sql(
     CREATE INDEX IF NOT EXISTS dentries_refused ON dentries (parent)
         WHERE state = 'refused';
     CREATE TABLE IF NOT EXISTS stubs (
@@ -261,7 +258,7 @@ absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
     UPDATE dentries SET state = 'unknown' WHERE state = 'refused';
     UPDATE cache_state SET schema_version = 4 WHERE id = 1;
   )sql"));
-  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
   RET_CHECK_EQ(version, 4);
   return absl::OkStatus();
 }
@@ -273,17 +270,16 @@ absl::Status MigrateV3ToV4(sqlite3::Connection &db) {
 // start). The column only if missing: a database that already
 // has it keeps it.
 absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(
-      sqlite3::Statement * column,
-      db.Prepared("SELECT 1 FROM pragma_table_info('cache_state') "
-                  "WHERE name = 'last_stub_id'"));
-  ABSL_ASSIGN_OR_RETURN(bool has_column, column->Step());
-  ABSL_RETURN_IF_ERROR(column->Reset());
+  ASSIGN_OR_RETURN(sqlite3::Statement * column,
+                   db.Prepared("SELECT 1 FROM pragma_table_info('cache_state') "
+                               "WHERE name = 'last_stub_id'"));
+  ASSIGN_OR_RETURN(bool has_column, column->Step());
+  RETURN_IF_ERROR(column->Reset());
   if (!has_column) {
-    ABSL_RETURN_IF_ERROR(db.Exec(
+    RETURN_IF_ERROR(db.Exec(
         "ALTER TABLE cache_state ADD COLUMN last_stub_id INTEGER NULL"));
   }
-  ABSL_RETURN_IF_ERROR(db.ExecScript(R"sql(
+  RETURN_IF_ERROR(db.ExecScript(R"sql(
     UPDATE cache_state SET last_stub_id = (SELECT MAX(id) FROM stubs)
         WHERE id = 1;
     CREATE INDEX IF NOT EXISTS inodes_unlinked ON inodes (id)
@@ -301,7 +297,7 @@ absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
     END;
     UPDATE cache_state SET schema_version = 5 WHERE id = 1;
   )sql"));
-  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
   RET_CHECK_EQ(version, 5);
   return absl::OkStatus();
 }
@@ -310,20 +306,19 @@ absl::Status MigrateV4ToV5(sqlite3::Connection &db) {
 // there is (each stands for a mutation). The column only if missing, as
 // above.
 absl::Status MigrateV5ToV6(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(
-      sqlite3::Statement * column,
-      db.Prepared("SELECT 1 FROM pragma_table_info('dirty') "
-                  "WHERE name = 'atime_only'"));
-  ABSL_ASSIGN_OR_RETURN(bool has_column, column->Step());
-  ABSL_RETURN_IF_ERROR(column->Reset());
+  ASSIGN_OR_RETURN(sqlite3::Statement * column,
+                   db.Prepared("SELECT 1 FROM pragma_table_info('dirty') "
+                               "WHERE name = 'atime_only'"));
+  ASSIGN_OR_RETURN(bool has_column, column->Step());
+  RETURN_IF_ERROR(column->Reset());
   if (!has_column) {
-    ABSL_RETURN_IF_ERROR(
+    RETURN_IF_ERROR(
         db.Exec("ALTER TABLE dirty ADD COLUMN atime_only INTEGER NOT NULL "
                 "DEFAULT 0 CHECK (atime_only IN (0, 1))"));
   }
-  ABSL_RETURN_IF_ERROR(
+  RETURN_IF_ERROR(
       db.Exec("UPDATE cache_state SET schema_version = 6 WHERE id = 1"));
-  ABSL_ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
+  ASSIGN_OR_RETURN(int version, GetSchemaVersion(db));
   RET_CHECK_EQ(version, 6);
   return absl::OkStatus();
 }
@@ -332,30 +327,30 @@ absl::Status MigrateV5ToV6(sqlite3::Connection &db) {
 // in one transaction. A version newer than this build's is refused.
 absl::Status UpgradeSchema(sqlite3::Connection &db) {
   return db.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(int version, ExistingSchemaVersion(db));
+    ASSIGN_OR_RETURN(int version, ExistingSchemaVersion(db));
     if (version < 1 || version > kSchemaVersion) {
       return FailedPreconditionErrorBuilder()
              << "dcfs cache schema version mismatch: found " << version
              << ", this build understands 1 through " << kSchemaVersion;
     }
     if (version == 1) {
-      ABSL_RETURN_IF_ERROR(MigrateV1ToV2(db));
+      RETURN_IF_ERROR(MigrateV1ToV2(db));
       version = 2;
     }
     if (version == 2) {
-      ABSL_RETURN_IF_ERROR(MigrateV2ToV3(db));
+      RETURN_IF_ERROR(MigrateV2ToV3(db));
       version = 3;
     }
     if (version == 3) {
-      ABSL_RETURN_IF_ERROR(MigrateV3ToV4(db));
+      RETURN_IF_ERROR(MigrateV3ToV4(db));
       version = 4;
     }
     if (version == 4) {
-      ABSL_RETURN_IF_ERROR(MigrateV4ToV5(db));
+      RETURN_IF_ERROR(MigrateV4ToV5(db));
       version = 5;
     }
     if (version == 5) {
-      ABSL_RETURN_IF_ERROR(MigrateV5ToV6(db));
+      RETURN_IF_ERROR(MigrateV5ToV6(db));
       version = 6;
     }
     RET_CHECK_EQ(version, kSchemaVersion);
@@ -364,9 +359,9 @@ absl::Status UpgradeSchema(sqlite3::Connection &db) {
 }
 
 absl::Status ValidateExistingSchema(sqlite3::Connection &db) {
-  ABSL_RETURN_IF_ERROR(UpgradeSchema(db));
+  RETURN_IF_ERROR(UpgradeSchema(db));
 
-  ABSL_ASSIGN_OR_RETURN(bool root_exists, RootInodeExists(db));
+  ASSIGN_OR_RETURN(bool root_exists, RootInodeExists(db));
   if (!root_exists) {
     return FailedPreconditionErrorBuilder()
            << "Corrupt cache: root inode (id 1) is missing";
@@ -378,8 +373,8 @@ absl::Status ValidateExistingSchema(sqlite3::Connection &db) {
 }  // namespace
 
 absl::Status Migrate(sqlite3::Connection &db, const RootIdentity &root) {
-  ABSL_ASSIGN_OR_RETURN(bool has_state, TableExists(db, "cache_state"));
-  ABSL_ASSIGN_OR_RETURN(bool has_v1_meta, TableExists(db, "meta"));
+  ASSIGN_OR_RETURN(bool has_state, TableExists(db, "cache_state"));
+  ASSIGN_OR_RETURN(bool has_v1_meta, TableExists(db, "meta"));
   if (!has_state && !has_v1_meta) {
     return db.Transaction(
         [&]() -> absl::Status { return CreateSchema(db, root); });
@@ -394,7 +389,7 @@ absl::StatusOr<int> GetSchemaVersion(sqlite3::Connection &db) {
 }
 
 absl::StatusOr<DeviceId> GetSourceDeviceId(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       std::string bytes,
       ReadCacheState<std::string>(
           db, "SELECT source_device_id FROM cache_state WHERE id = 1",
@@ -412,11 +407,11 @@ absl::StatusOr<bool> GetCleanShutdown(sqlite3::Connection &db) {
 }
 
 absl::Status SetCleanShutdown(sqlite3::Connection &db, bool clean) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       db.Prepared("UPDATE cache_state SET clean_shutdown = ? WHERE id = 1"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, clean));
-  ABSL_RETURN_IF_ERROR(stmt->ExecuteOnce());
+  RETURN_IF_ERROR(stmt->Bind(1, clean));
+  RETURN_IF_ERROR(stmt->ExecuteOnce());
   RET_CHECK_EQ(db.Changes(), 1) << "the cache_state row is missing";
   return absl::OkStatus();
 }
@@ -430,11 +425,11 @@ absl::StatusOr<std::optional<std::string>> GetBootId(sqlite3::Connection &db) {
 }
 
 absl::Status SetBootId(sqlite3::Connection &db, std::string_view boot_id) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       db.Prepared("UPDATE cache_state SET boot_id = ? WHERE id = 1"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, boot_id));
-  ABSL_RETURN_IF_ERROR(stmt->ExecuteOnce());
+  RETURN_IF_ERROR(stmt->Bind(1, boot_id));
+  RETURN_IF_ERROR(stmt->ExecuteOnce());
   RET_CHECK_EQ(db.Changes(), 1) << "the cache_state row is missing";
   return absl::OkStatus();
 }

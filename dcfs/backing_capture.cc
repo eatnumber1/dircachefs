@@ -74,10 +74,9 @@ std::string ReadText(int fd) {
 // Returns OK, or a NativeMountError with mount's own status and text.
 absl::Status RunNativeMount(const std::vector<std::string> &command,
                             const CaptureRequest &request) {
-  ABSL_ASSIGN_OR_RETURN(auto output,
-                        syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSIGN_OR_RETURN(auto output, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   auto &[read_end, write_end] = output;
-  ABSL_ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
+  ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
   if (child == 0) {
     // dup2 clears close-on-exec on the new descriptors; the original
     // socket ends close at exec.
@@ -97,7 +96,7 @@ absl::Status RunNativeMount(const std::vector<std::string> &command,
   write_end.Close().IgnoreError();
   const std::string text = ReadText(*read_end);
   int wait_status = 0;
-  ABSL_RETURN_IF_ERROR(syscalls::waitpid(child, &wait_status, 0).status())
+  RETURN_IF_ERROR(syscalls::waitpid(child, &wait_status, 0).status())
       << "while waiting for " << kMountProgram;
   if (WIFEXITED(wait_status) && WEXITSTATUS(wait_status) == 0) {
     return absl::OkStatus();
@@ -121,9 +120,9 @@ absl::Status RunNativeMount(const std::vector<std::string> &command,
 // staging directory, the native mount on it, the 11.5 check, then the
 // detached clone of the mount.
 absl::StatusOr<FileDescriptor> MountAndClone(const CaptureRequest &request) {
-  ABSL_RETURN_IF_ERROR(syscalls::unshare(CLONE_NEWNS));
+  RETURN_IF_ERROR(syscalls::unshare(CLONE_NEWNS));
   // Nothing mounted here may propagate out.
-  ABSL_RETURN_IF_ERROR(
+  RETURN_IF_ERROR(
       syscalls::mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr));
   if (!syscalls::fstatat(AT_FDCWD, request.staging_root).ok()) {
     return FailedPreconditionErrorBuilder()
@@ -133,21 +132,20 @@ absl::StatusOr<FileDescriptor> MountAndClone(const CaptureRequest &request) {
   }
   const std::string staging_dir =
       absl::StrCat(request.staging_root, "/", kStagingName);
-  ABSL_RETURN_IF_ERROR(syscalls::mount("dcfs-staging", request.staging_root,
-                                       "tmpfs",
-                                       MS_NOSUID | MS_NODEV | MS_NOEXEC,
-                                       "mode=0700"));
-  ABSL_RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, staging_dir, 0700));
-  ABSL_RETURN_IF_ERROR(
+  RETURN_IF_ERROR(syscalls::mount("dcfs-staging", request.staging_root, "tmpfs",
+                                  MS_NOSUID | MS_NODEV | MS_NOEXEC,
+                                  "mode=0700"));
+  RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, staging_dir, 0700));
+  RETURN_IF_ERROR(
       RunNativeMount(NativeMountCommand(request, staging_dir), request));
   // The clone is in no namespace, so dcfs's own mountinfo never lists it: the
   // staging mount, in this namespace, is where a superblock that went
   // read-only by itself shows (step 11.5).
   {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         FileDescriptor staged,
         syscalls::openat(AT_FDCWD, staging_dir, O_RDONLY | O_DIRECTORY));
-    ABSL_RETURN_IF_ERROR(RefuseIfForcedReadOnly(*staged, request.source));
+    RETURN_IF_ERROR(RefuseIfForcedReadOnly(*staged, request.source));
   }
   return syscalls::open_tree(AT_FDCWD, staging_dir,
                              OPEN_TREE_CLONE | OPEN_TREE_CLOEXEC);
@@ -202,7 +200,7 @@ absl::StatusOr<FileDescriptor> ReceiveAnswer(int channel) {
   message.msg_iovlen = 1;
   message.msg_control = control;
   message.msg_controllen = sizeof(control);
-  ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::recvmsg(channel, message, 0));
+  ASSIGN_OR_RETURN(size_t n, syscalls::recvmsg(channel, message, 0));
   if (n == 0) {
     return InternalErrorBuilder()
            << "The mount helper exited without an answer";
@@ -271,10 +269,9 @@ std::vector<std::string> NativeMountCommand(const CaptureRequest &request,
 }
 
 absl::StatusOr<CapturedTree> CaptureBacking(const CaptureRequest &request) {
-  ABSL_ASSIGN_OR_RETURN(auto channel,
-                        syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSIGN_OR_RETURN(auto channel, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   auto &[helper_end, mine] = channel;
-  ABSL_ASSIGN_OR_RETURN(pid_t helper, syscalls::fork());
+  ASSIGN_OR_RETURN(pid_t helper, syscalls::fork());
   if (helper == 0) {
     // The helper needs its end of the channel and nothing else the daemon
     // holds (the startup channel to the waiting wrapper, say): a copy of it
@@ -288,10 +285,10 @@ absl::StatusOr<CapturedTree> CaptureBacking(const CaptureRequest &request) {
   absl::StatusOr<FileDescriptor> tree = ReceiveAnswer(*mine);
   int wait_status = 0;
   syscalls::waitpid(helper, &wait_status, 0).status().IgnoreError();
-  ABSL_RETURN_IF_ERROR(tree.status());
+  RETURN_IF_ERROR(tree.status());
   // A real directory descriptor on the clone's root: open_by_handle_at's
   // mount descriptor is resolved as a regular file, which rejects O_PATH.
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       FileDescriptor root,
       syscalls::openat(**tree, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC),
       _ << "while opening the captured filesystem of "
@@ -305,8 +302,8 @@ absl::StatusOr<OpenedBacking> OpenBacking(const HelperArgs &args,
   if (options.backing == HelperOptions::Backing::kNative) {
     // A fresh native mount has nothing below it. The capture checks for a
     // forced read-only superblock in its helper.
-    ABSL_ASSIGN_OR_RETURN(CapturedTree captured,
-                          CaptureBacking(RequestFor(args, options)));
+    ASSIGN_OR_RETURN(CapturedTree captured,
+                     CaptureBacking(RequestFor(args, options)));
     opened.root = std::move(captured.root);
     opened.tree = std::move(captured.tree);
     return opened;
@@ -317,8 +314,8 @@ absl::StatusOr<OpenedBacking> OpenBacking(const HelperArgs &args,
     return absl::StatusBuilder(root.status()) << "SOURCE " << args.source;
   }
   opened.root = *std::move(root);
-  ABSL_RETURN_IF_ERROR(RefuseMountsBelow(args.source));
-  ABSL_RETURN_IF_ERROR(RefuseIfForcedReadOnly(*opened.root, args.source));
+  RETURN_IF_ERROR(RefuseMountsBelow(args.source));
+  RETURN_IF_ERROR(RefuseIfForcedReadOnly(*opened.root, args.source));
   return opened;
 }
 

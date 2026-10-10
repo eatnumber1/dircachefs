@@ -109,8 +109,7 @@ TEST(DeviceIdTest, FstypeNameUnknown) {
 // Opens `path` O_PATH and returns the DeviceId GetDeviceId() computes for
 // it, or the failing status (including from open() itself).
 absl::StatusOr<DeviceId> GetDeviceIdForPath(const char *path) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
-                        syscalls::openat(AT_FDCWD, path, O_PATH));
+  ASSIGN_OR_RETURN(FileDescriptor fd, syscalls::openat(AT_FDCWD, path, O_PATH));
   return GetDeviceId(*fd);
 }
 

@@ -648,9 +648,9 @@ class DirCacheFSTest : public ::testing::Test {
     Context ctx{db_, mounts, bitgen_};
     // The new process is checked too (step 26.2), and recorded.
     ctx.events = ctx_.events;
-    ABSL_ASSIGN_OR_RETURN(FileDescriptor source,
-                          syscalls::openat(AT_FDCWD, source_,
-                                           O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    ASSIGN_OR_RETURN(FileDescriptor source,
+                     syscalls::openat(AT_FDCWD, source_,
+                                      O_RDONLY | O_DIRECTORY | O_CLOEXEC));
     absl::Status started = backing::Startup(ctx, std::move(source), boot_id);
     // From here on ctx_ is the dead process's memory, which no longer
     // describes the database the new process recovered (its durable set,
@@ -2581,17 +2581,15 @@ TEST_F(DirCacheFSTest, TmpfileUndoForgetsItsRow) {
   NameToHandleHook() = [] { StatxFailure() = EIO; };
   Created tmp = Tmpfile(kRootInode, O_RDWR);
   EXPECT_EQ(tmp.reply.error, -EIO);
-  ASSERT_OK_AND_ASSIGN(int64_t rows,
-                       [&]() -> absl::StatusOr<int64_t> {
-                         ABSL_ASSIGN_OR_RETURN(
-                             sqlite3::Statement * stmt,
-                             db_.Prepared("SELECT COUNT(*) FROM inodes"));
-                         ABSL_ASSIGN_OR_RETURN(bool row, stmt->Step());
-                         if (!row) return absl::InternalError("no row");
-                         int64_t n = stmt->Column<int64_t>(0);
-                         ABSL_RETURN_IF_ERROR(stmt->Reset());
-                         return n;
-                       }());
+  ASSERT_OK_AND_ASSIGN(int64_t rows, [&]() -> absl::StatusOr<int64_t> {
+    ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                     db_.Prepared("SELECT COUNT(*) FROM inodes"));
+    ASSIGN_OR_RETURN(bool row, stmt->Step());
+    if (!row) return absl::InternalError("no row");
+    int64_t n = stmt->Column<int64_t>(0);
+    RETURN_IF_ERROR(stmt->Reset());
+    return n;
+  }());
   EXPECT_EQ(rows, 1);  // The root only.
 }
 
@@ -5151,12 +5149,12 @@ TEST_F(DirCacheFSTest, DestroyLetsGoOfEveryNodeid) {
 
 // The number of rows in `inodes`.
 absl::StatusOr<int64_t> InodeRows(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                        db.Prepared("SELECT COUNT(*) FROM inodes"));
-  ABSL_ASSIGN_OR_RETURN(bool row, stmt->Step());
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                   db.Prepared("SELECT COUNT(*) FROM inodes"));
+  ASSIGN_OR_RETURN(bool row, stmt->Step());
   if (!row) return absl::InternalError("no row");
   const int64_t n = stmt->Column<int64_t>(0);
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  RETURN_IF_ERROR(stmt->Reset());
   return n;
 }
 

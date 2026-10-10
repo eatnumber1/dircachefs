@@ -101,7 +101,7 @@ absl::StatusOr<std::string> ReadLinkAt(int dirfd, std::string_view path) {
   size_t bufsize = 256;
   while (true) {
     result.resize(bufsize);
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         size_t nbytes,
         syscalls::readlinkat(dirfd, path, result.data(), result.size()));
     if (nbytes < bufsize) {
@@ -120,8 +120,7 @@ absl::StatusOr<std::string> ReadLinkAt(int dirfd, std::string_view path) {
 // refers to.
 absl::StatusOr<uint32_t> GetInodeGeneration(int fd) {
   uint32_t generation = 0;
-  ABSL_RETURN_IF_ERROR(
-      syscalls::ioctl(fd, FS_IOC_GETVERSION, &generation).status());
+  RETURN_IF_ERROR(syscalls::ioctl(fd, FS_IOC_GETVERSION, &generation).status());
   return generation;
 }
 
@@ -154,7 +153,7 @@ absl::StatusOr<std::vector<std::string>> ListXattrOPath(int fd) {
   // The list can grow between sizing and reading it; ERANGE then means
   // "size again", which a few retries make overwhelmingly likely to settle.
   for (int attempt = 0; attempt < 4; ++attempt) {
-    ABSL_ASSIGN_OR_RETURN(size_t size, syscalls::listxattr(path, nullptr, 0));
+    ASSIGN_OR_RETURN(size_t size, syscalls::listxattr(path, nullptr, 0));
     if (size == 0) return std::vector<std::string>();
     absl::FixedArray<char> buf(size);
     absl::StatusOr<size_t> nbytes =
@@ -172,8 +171,7 @@ absl::StatusOr<std::vector<std::string>> ListXattrOPath(int fd) {
 absl::StatusOr<std::string> GetXattrOPath(int fd, std::string_view name) {
   const std::string path = ProcFdPath(fd);
   for (int attempt = 0; attempt < 4; ++attempt) {
-    ABSL_ASSIGN_OR_RETURN(size_t size,
-                          syscalls::getxattr(path, name, nullptr, 0));
+    ASSIGN_OR_RETURN(size_t size, syscalls::getxattr(path, name, nullptr, 0));
     if (size == 0) return std::string();
     absl::FixedArray<char> value(size);
     absl::StatusOr<size_t> nbytes =
@@ -298,7 +296,7 @@ absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
 // `caller`, and switches back to root afterwards, whatever `op` returned.
 template <typename Op>
 std::invoke_result_t<Op> AsCaller(const Credentials &caller, Op &&op) {
-  ABSL_ASSIGN_OR_RETURN(SavedGroups saved, SwitchTo(caller));
+  ASSIGN_OR_RETURN(SavedGroups saved, SwitchTo(caller));
   const mode_t saved_umask = syscalls::umask(caller.umask & 0777);
   absl::Cleanup restore = [&saved, saved_umask] {
     syscalls::umask(saved_umask);
@@ -336,8 +334,8 @@ bool IsBoundary(const struct statx &parent, const struct statx &child) {
 // pins the object it cannot have been replaced, so there is nothing to
 // verify.
 absl::StatusOr<FileDescriptor> OpenRoot(Context &ctx, int flags) {
-  ABSL_ASSIGN_OR_RETURN(DeviceId source, GetSourceDeviceId(ctx.db));
-  ABSL_ASSIGN_OR_RETURN(int mount_fd, ctx.mounts.Get(source));
+  ASSIGN_OR_RETURN(DeviceId source, GetSourceDeviceId(ctx.db));
+  ASSIGN_OR_RETURN(int mount_fd, ctx.mounts.Get(source));
   BackingCall(ctx, "openat");
   return syscalls::openat(mount_fd, ".", flags);
 }
@@ -372,9 +370,9 @@ bool OpenForWrite(const Context &ctx, InodeId id) {
 // cache::CanFill, a mutation's Owns), in the same transaction.
 absl::Status WriteAttrs(Context &ctx, InodeId id, const struct statx &stx) {
   return ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::UpdateAttr(ctx, id, stx));
+    RETURN_IF_ERROR(cache::UpdateAttr(ctx, id, stx));
     if (OpenForWrite(ctx, id) || stx.stx_nlink == 0) {
-      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
+      RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
     }
     return absl::OkStatus();
   });
@@ -385,7 +383,7 @@ absl::Status WriteAttrs(Context &ctx, InodeId id, const struct statx &stx) {
 absl::Status FillAttrs(Context &ctx, cache::FillSnapshot snapshot, InodeId id,
                        const struct statx &stx) {
   bool recorded = false;
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     if (!cache::CanFill(ctx, snapshot, id)) {
       VLOG(1) << "inode " << id
               << ": not caching attributes read concurrently with a "
@@ -446,9 +444,9 @@ absl::StatusOr<std::vector<std::string>> ReadDirNames(int dir_fd) {
   absl::FixedArray<uint64_t> buf(kDirentBufferBytes / sizeof(uint64_t));
   std::vector<std::string> names;
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(
-        ssize_t nbytes,
-        syscalls::getdents64(dir_fd, buf.data(), buf.size() * sizeof(uint64_t)));
+    ASSIGN_OR_RETURN(ssize_t nbytes,
+                     syscalls::getdents64(dir_fd, buf.data(),
+                                          buf.size() * sizeof(uint64_t)));
     if (nbytes == 0) return names;
     const char *base = reinterpret_cast<const char *>(buf.data());
     for (ssize_t offset = 0; offset < nbytes;) {
@@ -497,17 +495,17 @@ absl::Status RefuseReservedIno(const struct statx &stx, std::string_view what) {
 absl::StatusOr<ChildRecord> ProbeObject(int fd, std::string_view name,
                                         const DeviceId &device,
                                         const struct statx &stx) {
-  ABSL_RETURN_IF_ERROR(RefuseReservedIno(
+  RETURN_IF_ERROR(RefuseReservedIno(
       stx, absl::StrCat("the object named ", EscapeBytes(name))));
   ChildRecord record;
   record.name = std::string(name);
   record.stx = stx;
-  ABSL_ASSIGN_OR_RETURN(record.handle, FileHandle::FromFd(fd, device));
-  ABSL_ASSIGN_OR_RETURN(record.backing_gen, ReadGeneration(fd, stx.stx_mode));
+  ASSIGN_OR_RETURN(record.handle, FileHandle::FromFd(fd, device));
+  ASSIGN_OR_RETURN(record.backing_gen, ReadGeneration(fd, stx.stx_mode));
   if (S_ISLNK(stx.stx_mode)) {
-    ABSL_ASSIGN_OR_RETURN(record.symlink_target, ReadLinkAt(fd, ""));
+    ASSIGN_OR_RETURN(record.symlink_target, ReadLinkAt(fd, ""));
   }
-  ABSL_ASSIGN_OR_RETURN(record.xattrs, XattrsOf(fd));
+  ASSIGN_OR_RETURN(record.xattrs, XattrsOf(fd));
   return record;
 }
 
@@ -570,9 +568,8 @@ absl::StatusOr<std::optional<ChildRecord>> ProbeChild(
     }
     return child.status();
   }
-  ABSL_ASSIGN_OR_RETURN(struct statx stx,
-                        syscalls::statx(**child, "", AT_EMPTY_PATH,
-                                        kAttrMask | kMountIdMask));
+  ASSIGN_OR_RETURN(struct statx stx, syscalls::statx(**child, "", AT_EMPTY_PATH,
+                                                     kAttrMask | kMountIdMask));
 
   if (IsBoundary(dir_stx, stx)) {
     refused = stx;
@@ -594,32 +591,32 @@ absl::StatusOr<RootProbe> Probe(Context &ctx, int source_fd) {
   RootProbe probe;
   // No database access below: one check covers every call.
   BackingCall(ctx, "GetDeviceId, fstatfs, statx, ReadGeneration");
-  ABSL_ASSIGN_OR_RETURN(probe.identity.device_id, GetDeviceId(source_fd));
-  ABSL_ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(source_fd));
+  ASSIGN_OR_RETURN(probe.identity.device_id, GetDeviceId(source_fd));
+  ASSIGN_OR_RETURN(struct statfs sfs, syscalls::fstatfs(source_fd));
   probe.identity.fstype = static_cast<int64_t>(sfs.f_type);
-  ABSL_ASSIGN_OR_RETURN(probe.stx,
-                        syscalls::statx(source_fd, "", AT_EMPTY_PATH, kAttrMask));
+  ASSIGN_OR_RETURN(probe.stx,
+                   syscalls::statx(source_fd, "", AT_EMPTY_PATH, kAttrMask));
   if (!S_ISDIR(probe.stx.stx_mode)) {
     return ErrnoToStatus(ENOTDIR, "The source is not a directory");
   }
-  ABSL_RETURN_IF_ERROR(RefuseReservedIno(probe.stx, "the source directory"));
+  RETURN_IF_ERROR(RefuseReservedIno(probe.stx, "the source directory"));
   probe.identity.backing_ino = probe.stx.stx_ino;
-  ABSL_ASSIGN_OR_RETURN(probe.identity.backing_gen,
-                        ReadGeneration(source_fd, probe.stx.stx_mode));
+  ASSIGN_OR_RETURN(probe.identity.backing_gen,
+                   ReadGeneration(source_fd, probe.stx.stx_mode));
   return probe;
 }
 
 }  // namespace
 
 absl::StatusOr<RootIdentity> ProbeRoot(Context &ctx, int source_fd) {
-  ABSL_ASSIGN_OR_RETURN(RootProbe probe, Probe(ctx, source_fd));
+  ASSIGN_OR_RETURN(RootProbe probe, Probe(ctx, source_fd));
   return probe.identity;
 }
 
 absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
-  ABSL_ASSIGN_OR_RETURN(RootProbe probe, Probe(ctx, *source_fd));
+  ASSIGN_OR_RETURN(RootProbe probe, Probe(ctx, *source_fd));
   const DeviceId &device = probe.identity.device_id;
-  ABSL_ASSIGN_OR_RETURN(DeviceId stored, GetSourceDeviceId(ctx.db));
+  ASSIGN_OR_RETURN(DeviceId stored, GetSourceDeviceId(ctx.db));
   if (stored != device) {
     return FailedPreconditionErrorBuilder()
            << "Cache database belongs to a different filesystem ("
@@ -627,18 +624,17 @@ absl::Status InitRoot(Context &ctx, FileDescriptor source_fd) {
            << ")";
   }
   BackingCall(ctx, "FileHandle::FromFd");
-  ABSL_ASSIGN_OR_RETURN(FileHandle handle,
-                        FileHandle::FromFd(*source_fd, device));
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::UpsertRoot(ctx, handle, probe.stx,
-                                           probe.identity.backing_gen));
+  ASSIGN_OR_RETURN(FileHandle handle, FileHandle::FromFd(*source_fd, device));
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    RETURN_IF_ERROR(
+        cache::UpsertRoot(ctx, handle, probe.stx, probe.identity.backing_gen));
     return cache::EnsureDirectory(ctx, cache::kRootInode);
   }));
   // Model: a whole getattr fill of the root (nothing is in flight yet).
   ctx.events->RootRecorded(ctx);
   // The access-time rule reads mirror (step 23.3): the source mount's.
   BackingCall(ctx, "fstatvfs");
-  ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(*source_fd));
+  ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(*source_fd));
   ctx.atime = (vfs.f_flag & ST_NOATIME)    ? AtimePolicy::kNever
               : (vfs.f_flag & ST_RELATIME) ? AtimePolicy::kRelative
                                            : AtimePolicy::kStrict;
@@ -733,13 +729,13 @@ absl::Status ReconcileAttrs(Context &ctx, cache::FillSnapshot snapshot,
                << (ctime_differs ? ", rereading its xattrs" : "");
   // The fresh statx is already in hand, so reacting costs no I/O: adopt it,
   // and mark unknown whatever else the change may have touched unseen.
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(WriteAttrs(ctx, id, fresh));
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    RETURN_IF_ERROR(WriteAttrs(ctx, id, fresh));
     if (relist) {
-      ABSL_RETURN_IF_ERROR(cache::ForgetNegativeDentries(ctx, id));
+      RETURN_IF_ERROR(cache::ForgetNegativeDentries(ctx, id));
     }
     if (ctime_differs) {
-      ABSL_RETURN_IF_ERROR(cache::MarkXattrsUnknown(ctx, id));
+      RETURN_IF_ERROR(cache::MarkXattrsUnknown(ctx, id));
     }
     return absl::OkStatus();
   }));
@@ -759,13 +755,13 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
     Context &ctx, cache::FillSnapshot snapshot, InodeId id,
     const cache::CachedAttr &attr, FileDescriptor fd) {
   BackingCall(ctx, "statx");
-  ABSL_ASSIGN_OR_RETURN(struct statx stx,
-                        syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask));
+  ASSIGN_OR_RETURN(struct statx stx,
+                   syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask));
   bool same = stx.stx_ino == attr.backing_ino;
   uint64_t gen = 0;
   if (same && attr.backing_gen != 0) {
     BackingCall(ctx, "ReadGeneration");
-    ABSL_ASSIGN_OR_RETURN(gen, ReadGeneration(*fd, stx.stx_mode));
+    ASSIGN_OR_RETURN(gen, ReadGeneration(*fd, stx.stx_mode));
     // 0 means the generation cannot be read right now, not that it changed.
     same = gen == 0 || gen == attr.backing_gen;
   }
@@ -806,12 +802,12 @@ absl::StatusOr<FileDescriptor> VerifyBackingIdentity(
                  << FormatTime(attr.btime.tv_sec, attr.btime.tv_nsec) << " -> "
                  << FormatTime(stx.stx_btime.tv_sec, stx.stx_btime.tv_nsec)
                  << "); forgetting it (ESTALE)";
-    ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
+    RETURN_IF_ERROR(ForgetStale(ctx, id));
     return ErrnoToStatus(
         ESTALE,
         absl::StrCat("Inode ", id, " was replaced on the backing filesystem"));
   }
-  ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, id, attr, stx));
+  RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, id, attr, stx));
   return fd;
 }
 
@@ -846,8 +842,8 @@ constexpr size_t kUnknownNamesToAsk = 16;
 
 absl::Status StaleOrUnreadable(Context &ctx, InodeId id,
                                const FileHandle &handle) {
-  ABSL_ASSIGN_OR_RETURN(cache::NamesToAsk ask,
-                        cache::NamesToAskAbout(ctx, id, kUnknownNamesToAsk));
+  ASSIGN_OR_RETURN(cache::NamesToAsk ask,
+                   cache::NamesToAskAbout(ctx, id, kUnknownNamesToAsk));
   if (ask.names.empty() && !ask.more) return absl::OkStatus();
   // The first name that still holds the object, or that could not be
   // checked (with why).
@@ -916,8 +912,8 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
   if (id == cache::kRootInode) return OpenRoot(ctx, flags);
   // ReconcileAttrs compares `attr` with a statx taken after the open's I/O.
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
-  ABSL_ASSIGN_OR_RETURN(FileHandle handle, cache::GetHandle(ctx, id));
+  ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
+  ASSIGN_OR_RETURN(FileHandle handle, cache::GetHandle(ctx, id));
 
   BackingCall(ctx, "open_by_handle_at");
   absl::StatusOr<FileDescriptor> fd = handle.Open(ctx.mounts, flags);
@@ -925,7 +921,7 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
     if (ErrnoOf(fd.status()) == ESTALE) {
       // xfs and btrfs answer ESTALE also for an inode the device cannot
       // read (step 11.3b): only a positive absence forgets the row.
-      ABSL_RETURN_IF_ERROR(StaleOrUnreadable(ctx, id, handle));
+      RETURN_IF_ERROR(StaleOrUnreadable(ctx, id, handle));
       // Model: as in VerifyBackingIdentity (nothing was reached).
       ctx.events->IdentityResolved(
           ctx, id,
@@ -934,7 +930,7 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
            .row_gen = attr.backing_gen,
            .row_btime_sec = attr.btime.tv_sec,
            .row_btime_nsec = attr.btime.tv_nsec});
-      ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
+      RETURN_IF_ERROR(ForgetStale(ctx, id));
       return fd.status();
     }
     if (ErrnoOf(fd.status()) == EPERM) {
@@ -951,8 +947,7 @@ absl::StatusOr<FileDescriptor> OpenNode(Context &ctx, InodeId id, int flags) {
 }
 
 absl::StatusOr<struct statx> StatNode(Context &ctx, InodeId id) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
-                        OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   BackingCall(ctx, "statx");
   return syscalls::statx(*fd, "", AT_EMPTY_PATH, kAttrMask);
 }
@@ -963,7 +958,7 @@ absl::Status RefreshAttrs(Context &ctx, InodeId id, struct statx *fetched) {
   // The frame's result is its End's status.
   return scope.Finish([&]() -> absl::Status {
     const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
-    ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, id));
+    ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, id));
     // Model: the refresh's statx (GA_stat, ..., R_stat).
     ctx.events->AttrsStatted(ctx, id);
     if (fetched != nullptr) *fetched = stx;
@@ -979,8 +974,8 @@ absl::Status RefreshAttrsFromFd(Context &ctx, InodeId id, int fd,
   return scope.Finish([&]() -> absl::Status {
     const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
     BackingCall(ctx, "statx");
-    ABSL_ASSIGN_OR_RETURN(
-        struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
+    ASSIGN_OR_RETURN(struct statx stx,
+                     syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
     // Model: as in RefreshAttrs.
     ctx.events->AttrsStatted(ctx, id);
     if (fetched != nullptr) *fetched = stx;
@@ -1008,10 +1003,10 @@ absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
       // What the reads since the last record gave is unknown now: so are
       // the attributes, and the row stays dirty (atime only) so that a
       // record of them by another path waits for a sync point.
-      ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+      RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
         absl::Status unknown = cache::MarkAttrsUnknown(ctx, id);
         if (absl::IsNotFound(unknown)) return absl::OkStatus();
-        ABSL_RETURN_IF_ERROR(unknown);
+        RETURN_IF_ERROR(unknown);
         return cache::MarkAtimeDirty(ctx, id, cache::GuardTouch::kAlways);
       }));
       return stx.status();
@@ -1027,7 +1022,7 @@ absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
       ctx.events->AttrsFilled(ctx, id, false);
       return absl::OkStatus();
     }
-    ABSL_RETURN_IF_ERROR(row.status());
+    RETURN_IF_ERROR(row.status());
     const bool open_for_write = OpenForWrite(ctx, id);
     if (row->valid && !open_for_write && stx->stx_nlink != 0 &&
         cache::SameAttrs(*row, *stx)) {
@@ -1038,7 +1033,7 @@ absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
     absl::Status committed = ctx.db.Transaction([&]() -> absl::Status {
       if (cache::CanFill(ctx, snapshot, id)) {
         recorded = true;
-        ABSL_RETURN_IF_ERROR(WriteAttrs(ctx, id, *stx));
+        RETURN_IF_ERROR(WriteAttrs(ctx, id, *stx));
         return cache::MarkAtimeDirty(ctx, id);
       }
       // A mutation of `id` began or ended since the snapshot, or is in
@@ -1047,7 +1042,7 @@ absl::Status FillHeldAttrs(Context &ctx, InodeId id, int fd,
       VLOG(1) << "inode " << id
               << ": not caching attributes read through a held descriptor "
                  "concurrently with a mutation of it";
-      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
+      RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, id));
       return cache::MarkAtimeDirty(ctx, id, cache::GuardTouch::kAlways);
     });
     if (!committed.ok()) {
@@ -1068,9 +1063,8 @@ absl::StatusOr<std::string> ReadFile(int fd, size_t size, off_t offset) {
   absl::FixedArray<char> buf(size);
   size_t total = 0;
   while (total < size) {
-    ABSL_ASSIGN_OR_RETURN(
-        size_t n,
-        syscalls::pread(fd, buf.data() + total, size - total, offset + total));
+    ASSIGN_OR_RETURN(size_t n, syscalls::pread(fd, buf.data() + total,
+                                               size - total, offset + total));
     if (n == 0) break;  // EOF short of `size`.
     total += n;
   }
@@ -1081,7 +1075,7 @@ absl::StatusOr<size_t> WriteFile(int fd, std::span<const char> buf,
                                  off_t offset) {
   size_t total = 0;
   while (total < buf.size()) {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         size_t n, syscalls::pwrite(fd, buf.data() + total, buf.size() - total,
                                    offset + total));
     if (n == 0) break;  // Should not happen for a regular file.
@@ -1107,7 +1101,7 @@ absl::StatusOr<std::string> IoctlFd(int fd, unsigned int cmd,
   // that much, whatever sizes the request claims.
   absl::FixedArray<char> buf(std::max<size_t>({in.size(), out_size, 64}));
   std::copy(in.begin(), in.end(), buf.begin());
-  ABSL_RETURN_IF_ERROR(
+  RETURN_IF_ERROR(
       syscalls::ioctl(fd, static_cast<int>(cmd), buf.data()).status());
   return std::string(buf.data(), out_size);
 }
@@ -1117,15 +1111,14 @@ absl::Status FsyncFd(int fd, bool datasync) {
 }
 
 absl::Status FsyncDir(Context &ctx, InodeId id, bool datasync) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
-                        OpenNode(ctx, id, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor fd,
+                   OpenNode(ctx, id, O_RDONLY | O_DIRECTORY));
   BackingCall(ctx, "FsyncFd");
   return FsyncFd(*fd, datasync);
 }
 
 absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
-                        OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   // An empty path makes readlinkat read the O_PATH symlink fd itself.
   BackingCall(ctx, "readlinkat");
   return ReadLinkAt(*fd, "");
@@ -1133,8 +1126,7 @@ absl::StatusOr<std::string> ReadSymlink(Context &ctx, InodeId id) {
 
 absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
     Context &ctx, InodeId id) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
-                        OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   BackingCall(ctx, "XattrsOf");
   return XattrsOf(*fd);
 }
@@ -1142,11 +1134,9 @@ absl::StatusOr<std::vector<std::pair<std::string, std::string>>> ReadXattrs(
 absl::StatusOr<std::vector<std::pair<std::string, std::string>>>
 RefreshXattrs(Context &ctx, InodeId id) {
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
-  ABSL_ASSIGN_OR_RETURN(
-      (std::vector<std::pair<std::string, std::string>> xattrs),
-      ReadXattrs(ctx, id));
-  ABSL_ASSIGN_OR_RETURN(bool filled,
-                        cache::FillXattrs(ctx, snapshot, id, xattrs));
+  ASSIGN_OR_RETURN((std::vector<std::pair<std::string, std::string>> xattrs),
+                   ReadXattrs(ctx, id));
+  ASSIGN_OR_RETURN(bool filled, cache::FillXattrs(ctx, snapshot, id, xattrs));
   if (!filled) {
     VLOG(1) << "inode " << id
             << ": not caching xattrs read concurrently with a mutation of it";
@@ -1180,13 +1170,12 @@ absl::StatusOr<std::optional<std::string>> RefreshXattr(
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   std::optional<FileDescriptor> opened;
   if (!open_fd.has_value()) {
-    ABSL_ASSIGN_OR_RETURN(opened, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+    ASSIGN_OR_RETURN(opened, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
     open_fd = **opened;
   }
   BackingCall(ctx, "XattrOf");
-  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> value,
-                        XattrOf(*open_fd, name));
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(std::optional<std::string> value, XattrOf(*open_fd, name));
+  ASSIGN_OR_RETURN(
       bool filled,
       cache::FillXattr(ctx, snapshot, id, name,
                        value.has_value()
@@ -1218,20 +1207,19 @@ absl::Status ApplyXattrOpOn(int opath_fd, std::optional<int> open_fd,
                             std::string_view name, ApplyReal apply_real,
                             ApplyOpath apply_opath,
                             XattrReadBack *read_back = nullptr) {
-  ABSL_ASSIGN_OR_RETURN(
-      struct statx stx, syscalls::statx(opath_fd, "", AT_EMPTY_PATH, STATX_MODE));
+  ASSIGN_OR_RETURN(struct statx stx,
+                   syscalls::statx(opath_fd, "", AT_EMPTY_PATH, STATX_MODE));
   mode_t type = stx.stx_mode & S_IFMT;
   if (S_ISREG(type) || S_ISDIR(type)) {
     if (open_fd.has_value()) {
-      ABSL_RETURN_IF_ERROR(apply_real(*open_fd));
+      RETURN_IF_ERROR(apply_real(*open_fd));
     } else {
-      ABSL_ASSIGN_OR_RETURN(
-          FileDescriptor fd,
-          ReopenFd(opath_fd, O_RDONLY | O_CLOEXEC));
-      ABSL_RETURN_IF_ERROR(apply_real(*fd));
+      ASSIGN_OR_RETURN(FileDescriptor fd,
+                       ReopenFd(opath_fd, O_RDONLY | O_CLOEXEC));
+      RETURN_IF_ERROR(apply_real(*fd));
     }
   } else {
-    ABSL_RETURN_IF_ERROR(apply_opath(opath_fd));
+    RETURN_IF_ERROR(apply_opath(opath_fd));
   }
   if (read_back != nullptr) *read_back = XattrOf(opath_fd, name);
   return absl::OkStatus();
@@ -1242,8 +1230,8 @@ absl::Status ApplyXattrOp(Context &ctx, InodeId id, std::optional<int> open_fd,
                           std::string_view name, ApplyReal apply_real,
                           ApplyOpath apply_opath,
                           XattrReadBack *read_back = nullptr) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor opath_fd,
-                        OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  ASSIGN_OR_RETURN(FileDescriptor opath_fd,
+                   OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   BackingCall(ctx, "ApplyXattrOpOn");
   return ApplyXattrOpOn(*opath_fd, open_fd, name, apply_real, apply_opath,
                         read_back);
@@ -1288,8 +1276,8 @@ absl::StatusOr<XattrReadBack> SetXattr(Context &ctx, const Credentials &caller,
   XattrReadBack read_back = std::nullopt;
   auto [apply_real, apply_opath] =
       SetXattrOps(caller, name, value_bytes, flags);
-  ABSL_RETURN_IF_ERROR(ApplyXattrOp(ctx, id, open_fd, name, apply_real,
-                                    apply_opath, &read_back));
+  RETURN_IF_ERROR(ApplyXattrOp(ctx, id, open_fd, name, apply_real, apply_opath,
+                               &read_back));
   return read_back;
 }
 
@@ -1316,8 +1304,8 @@ absl::Status RemoveXattrFd(const Credentials &caller, int fd,
 }
 
 absl::StatusOr<struct statvfs> StatFilesystem(Context &ctx, InodeId id) {
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
-  ABSL_ASSIGN_OR_RETURN(int mount_fd, ctx.mounts.Get(attr.device));
+  ASSIGN_OR_RETURN(cache::CachedAttr attr, cache::GetAttr(ctx, id));
+  ASSIGN_OR_RETURN(int mount_fd, ctx.mounts.Get(attr.device));
   BackingCall(ctx, "fstatvfs");
   return syscalls::fstatvfs(mount_fd);
 }
@@ -1347,22 +1335,22 @@ absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
   // row is already cached (under this name, and still the same object):
   // see ReconcileAttrs. A row adopted fresh by OpenNode just before
   // (e.g. `dir` itself) already matches, so nothing is logged twice.
-  ABSL_ASSIGN_OR_RETURN(cache::LookupResult cached_dentry,
-                        cache::Lookup(ctx, dir, child.name));
+  ASSIGN_OR_RETURN(cache::LookupResult cached_dentry,
+                   cache::Lookup(ctx, dir, child.name));
   if (cached_dentry.kind == cache::LookupResult::Kind::kFound) {
-    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr cached,
-                          cache::GetAttr(ctx, cached_dentry.id));
+    ASSIGN_OR_RETURN(cache::CachedAttr cached,
+                     cache::GetAttr(ctx, cached_dentry.id));
     if (cached.device == child.handle.device &&
         cached.backing_ino == child.stx.stx_ino &&
         cached.backing_gen == child.backing_gen &&
         (cached.btime.tv_sec == child.stx.stx_btime.tv_sec &&
          cached.btime.tv_nsec ==
              static_cast<long>(child.stx.stx_btime.tv_nsec))) {
-      ABSL_RETURN_IF_ERROR(ReconcileAttrs(ctx, snapshot, cached_dentry.id,
-                                          cached, child.stx));
+      RETURN_IF_ERROR(
+          ReconcileAttrs(ctx, snapshot, cached_dentry.id, cached, child.stx));
     }
   }
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       cache::UpsertResult row,
       cache::UpsertInode(ctx, child.handle, child.stx, child.backing_gen));
   const bool child_ok = cache::CanFill(ctx, snapshot, row.id);
@@ -1371,33 +1359,32 @@ absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
   // may have changed since the probe.
   const bool filled = child_ok && !OpenForWrite(ctx, row.id);
   if (!filled) {
-    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+    RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
   }
   if (row.created) {
     if (!dir_marked.has_value()) {
-      ABSL_ASSIGN_OR_RETURN(dir_marked, cache::HasMutationMark(ctx, dir));
+      ASSIGN_OR_RETURN(dir_marked, cache::HasMutationMark(ctx, dir));
     }
     if (*dir_marked) {
       // Model: FillMarks (the fill's commit, FLCommit).
       const InodeId born[] = {row.id};
-      ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, born));
+      RETURN_IF_ERROR(cache::MarkDirty(ctx, born));
     }
   }
   // Model: a whole getattr fill of the child (its line once the caller's
   // transaction committed).
   ctx.events->ChildRowRecorded(ctx, dir, row.id, filled, row.created);
   if (S_ISDIR(child.stx.stx_mode)) {
-    ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
+    RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
   }
   if (dir_ok) {
-    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, dir, child.name, row.id));
+    RETURN_IF_ERROR(cache::LinkDentry(ctx, dir, child.name, row.id));
   }
   if (child_ok) {
     if (child.symlink_target.has_value()) {
-      ABSL_RETURN_IF_ERROR(
-          cache::SetSymlink(ctx, row.id, *child.symlink_target));
+      RETURN_IF_ERROR(cache::SetSymlink(ctx, row.id, *child.symlink_target));
     }
-    ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, child.xattrs));
+    RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, child.xattrs));
   }
   return row.id;
 }
@@ -1406,22 +1393,21 @@ absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
 
 absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // Phase A: all the I/O, no transaction.
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
-                        OpenNode(ctx, dir, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor dir_fd,
+                   OpenNode(ctx, dir, O_RDONLY | O_DIRECTORY));
   // Taken after OpenNode, whose own ReconcileAttrs may legitimately clear
   // `dir`'s completeness first, and before the listing's I/O.
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
-  ABSL_ASSIGN_OR_RETURN(int64_t dir_epoch, cache::DirEpoch(ctx, dir));
+  ASSIGN_OR_RETURN(int64_t dir_epoch, cache::DirEpoch(ctx, dir));
   // Model: PopulateRead takes place here (the snapshot and the epoch; the
   // reads below return what the directory holds now: PopulateRead).
   ctx.events->PopulateStarted(ctx, dir);
   BackingCall(ctx, "statx");
-  ABSL_ASSIGN_OR_RETURN(
-      struct statx dir_stx,
-      syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
+  ASSIGN_OR_RETURN(struct statx dir_stx,
+                   syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
+  ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
   BackingCall(ctx, "getdents64");
-  ABSL_ASSIGN_OR_RETURN(std::vector<std::string> names, ReadDirNames(*dir_fd));
+  ASSIGN_OR_RETURN(std::vector<std::string> names, ReadDirNames(*dir_fd));
 
   // A child left out of `children` below is either a vanished dirent
   // (raced ENOENT), dropped entirely, or a refused mount/subvolume boundary
@@ -1439,15 +1425,14 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
     // an interrupted population stops here and records nothing.
     constexpr size_t kProbesPerCheckpoint = 16;
     if (i % kProbesPerCheckpoint == 0) {
-      ABSL_RETURN_IF_ERROR(Checkpoint(ctx, "a directory's probes"));
+      RETURN_IF_ERROR(Checkpoint(ctx, "a directory's probes"));
     }
     const std::string &name = names[i];
     std::optional<struct statx> refused;
     BackingCall(ctx, "ProbeChild");
-    ABSL_ASSIGN_OR_RETURN(
-        std::optional<ChildRecord> child,
-        ProbeChild(*dir_fd, dir_stx, dir_attr.device, dir, name, refused,
-                   [](const events::Probe &) {}));
+    ASSIGN_OR_RETURN(std::optional<ChildRecord> child,
+                     ProbeChild(*dir_fd, dir_stx, dir_attr.device, dir, name,
+                                refused, [](const events::Probe &) {}));
     if (child.has_value()) {
       children.push_back(*std::move(child));
     } else if (refused.has_value()) {
@@ -1479,16 +1464,16 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
   // what the caller's reply needs; attributes that may be stale are left
   // unknown).
   Populated result;
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(int64_t epoch_now, cache::DirEpoch(ctx, dir));
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ASSIGN_OR_RETURN(int64_t epoch_now, cache::DirEpoch(ctx, dir));
     const bool dir_ok =
         cache::CanFill(ctx, snapshot, dir) && epoch_now == dir_epoch;
     std::optional<bool> dir_marked;  // Read by the first insert, if any.
     std::vector<std::string> seen;
     seen.reserve(children.size() + refused_names.size());
     for (const ChildRecord &child : children) {
-      ABSL_ASSIGN_OR_RETURN(InodeId id, RecordChild(ctx, snapshot, dir, child,
-                                                    dir_ok, dir_marked));
+      ASSIGN_OR_RETURN(InodeId id, RecordChild(ctx, snapshot, dir, child,
+                                               dir_ok, dir_marked));
       result.entries[child.name] = cache::LookupResult{
           .kind = cache::LookupResult::Kind::kFound, .id = id};
       seen.push_back(child.name);
@@ -1498,7 +1483,7 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
       // be recorded has none (id 0: see LookupOrPopulate).
       InodeId stub = 0;
       if (dir_ok) {
-        ABSL_ASSIGN_OR_RETURN(stub, cache::SetRefused(ctx, dir, name, root));
+        ASSIGN_OR_RETURN(stub, cache::SetRefused(ctx, dir, name, root));
       }
       result.entries[name] = cache::LookupResult{
           .kind = cache::LookupResult::Kind::kRefused, .id = stub};
@@ -1510,8 +1495,8 @@ absl::StatusOr<Populated> PopulateDirectory(Context &ctx, InodeId dir) {
                  "of it";
       return absl::OkStatus();
     }
-    ABSL_RETURN_IF_ERROR(cache::PruneDentriesNotIn(ctx, dir, seen));
-    ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx, dir, true));
+    RETURN_IF_ERROR(cache::PruneDentriesNotIn(ctx, dir, seen));
+    RETURN_IF_ERROR(cache::MarkDirComplete(ctx, dir, true));
     result.cached = true;
     return absl::OkStatus();
   }));
@@ -1566,8 +1551,8 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
   // The frame's result is its End's status.
   absl::StatusOr<cache::LookupResult> answer =
       [&]() -> absl::StatusOr<cache::LookupResult> {
-    ABSL_ASSIGN_OR_RETURN(cache::LookupResult result,
-                          cache::Lookup(ctx, parent, name));
+    ASSIGN_OR_RETURN(cache::LookupResult result,
+                     cache::Lookup(ctx, parent, name));
     // `name` is a persisted refusal (see ProbeChild/cache::SetRefused): it
     // exists on the backing filesystem but dcfs will not cache across it, so
     // this must never be reported as absent -- it is its stub, straight from
@@ -1592,7 +1577,7 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
     // An unknown name in a complete listing (e.g. left by a mutation's phase
     // 1, or an invalidation): everything else is known, so resolve just it
     // (audit F7) rather than relisting the directory.
-    ABSL_ASSIGN_OR_RETURN(bool listed, cache::ChildrenComplete(ctx, parent));
+    ASSIGN_OR_RETURN(bool listed, cache::ChildrenComplete(ctx, parent));
     // Model: LookupStep (or the request's Arrive) going to the backing
     // filesystem; no syscall since the cache read.
     ctx.events->LookupDecided(ctx, parent, name,
@@ -1601,14 +1586,14 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
                               0);
     // Before the probe or the population's I/O (formal/dcfs.tla's
     // Interrupt at RN_probe, PD_read).
-    ABSL_RETURN_IF_ERROR(Checkpoint(
-        ctx, listed ? "resolving a name" : "listing a directory"));
+    RETURN_IF_ERROR(
+        Checkpoint(ctx, listed ? "resolving a name" : "listing a directory"));
     if (listed) {
-      ABSL_ASSIGN_OR_RETURN(result, ResolveName(ctx, parent, name));
+      ASSIGN_OR_RETURN(result, ResolveName(ctx, parent, name));
       return WithStub(result, parent, name);
     }
 
-    ABSL_ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
+    ASSIGN_OR_RETURN(Populated populated, PopulateDirectory(ctx, parent));
     if (!populated.cached) {
       // Not recorded (a concurrent mutation of `parent`): answer from the
       // listing itself, caching nothing about `name`.
@@ -1619,7 +1604,7 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
       }
       return WithStub(it->second, parent, name);
     }
-    ABSL_ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
+    ASSIGN_OR_RETURN(result, cache::Lookup(ctx, parent, name));
     // A recorded listing names every child, and makes every other name
     // absent.
     RET_CHECK_NE(result.kind, cache::LookupResult::Kind::kUnknown)
@@ -1642,48 +1627,47 @@ absl::StatusOr<cache::LookupResult> LookupOrPopulate(Context &ctx,
 }
 
 absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
-  ABSL_ASSIGN_OR_RETURN(std::optional<InodeId> cached,
-                        cache::ParentOf(ctx, dir));
+  ASSIGN_OR_RETURN(std::optional<InodeId> cached, cache::ParentOf(ctx, dir));
   if (cached.has_value()) return *cached;
 
   // `dir`'s own dentry is unknown (audit F6): ask the backing filesystem.
   // A fill of the parent's row, as PopulateDirectory records a child.
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   ctx.events->ParentLookupStarted(ctx, dir);
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
-                        OpenNode(ctx, dir, O_PATH | O_DIRECTORY));
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
+  ASSIGN_OR_RETURN(FileDescriptor dir_fd,
+                   OpenNode(ctx, dir, O_PATH | O_DIRECTORY));
+  ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, dir));
   // No database access until the GetAttr below.
   BackingCall(ctx, "openat, statx");
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor up_fd,
-                        syscalls::openat(*dir_fd, "..", O_PATH | O_DIRECTORY));
-  ABSL_ASSIGN_OR_RETURN(struct statx stx,
-                        syscalls::statx(*up_fd, "", AT_EMPTY_PATH, kAttrMask));
-  ABSL_RETURN_IF_ERROR(RefuseReservedIno(
-      stx, absl::StrCat("the parent of directory ", dir)));
+  ASSIGN_OR_RETURN(FileDescriptor up_fd,
+                   syscalls::openat(*dir_fd, "..", O_PATH | O_DIRECTORY));
+  ASSIGN_OR_RETURN(struct statx stx,
+                   syscalls::statx(*up_fd, "", AT_EMPTY_PATH, kAttrMask));
+  RETURN_IF_ERROR(
+      RefuseReservedIno(stx, absl::StrCat("the parent of directory ", dir)));
   // Submounts are refused, so ".." is on `dir`'s filesystem; `dir` is not
   // the root, so ".." is at most the root.
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr root_attr,
-                        cache::GetAttr(ctx, cache::kRootInode));
+  ASSIGN_OR_RETURN(cache::CachedAttr root_attr,
+                   cache::GetAttr(ctx, cache::kRootInode));
   if (root_attr.device == dir_attr.device &&
       root_attr.backing_ino == stx.stx_ino) {
     return cache::kRootInode;
   }
   BackingCall(ctx, "FileHandle::FromFd, ReadGeneration");
-  ABSL_ASSIGN_OR_RETURN(FileHandle handle,
-                        FileHandle::FromFd(*up_fd, dir_attr.device));
-  ABSL_ASSIGN_OR_RETURN(uint64_t gen, ReadGeneration(*up_fd, stx.stx_mode));
+  ASSIGN_OR_RETURN(FileHandle handle,
+                   FileHandle::FromFd(*up_fd, dir_attr.device));
+  ASSIGN_OR_RETURN(uint64_t gen, ReadGeneration(*up_fd, stx.stx_mode));
   VLOG(1) << "directory " << dir
           << ": dentry unknown, resolved its parent from the backing "
              "filesystem";
   InodeId parent = 0;
   bool filled = false;
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(cache::UpsertResult row,
-                          cache::UpsertInode(ctx, handle, stx, gen));
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ASSIGN_OR_RETURN(cache::UpsertResult row,
+                     cache::UpsertInode(ctx, handle, stx, gen));
     filled = cache::CanFill(ctx, snapshot, row.id) && !OpenForWrite(ctx, row.id);
     if (!filled) {
-      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+      RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
     }
     // Step 23.11: a row inserted here is born dirty, whatever the
     // grandparent's mark (which this cannot see). Through dcfs it cannot be
@@ -1694,9 +1678,9 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
     // (docs/design.md, "Born-dirty create").
     if (row.created) {
       const InodeId born[] = {row.id};
-      ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, born));
+      RETURN_IF_ERROR(cache::MarkDirty(ctx, born));
     }
-    ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
+    RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
     parent = row.id;
     return absl::OkStatus();
   }));
@@ -1711,47 +1695,43 @@ absl::StatusOr<cache::LookupResult> ResolveName(Context &ctx, InodeId parent,
   // it (openat O_PATH, statx, handle, generation, symlink target, xattrs),
   // and record it as present, absent (ENOENT) or refused (a boundary), as
   // a fill (cache::CanFill).
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor dir_fd,
-                        OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor dir_fd,
+                   OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   BackingCall(ctx, "statx");
-  ABSL_ASSIGN_OR_RETURN(
-      struct statx dir_stx,
-      syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr dir_attr,
-                        cache::GetAttr(ctx, parent));
+  ASSIGN_OR_RETURN(struct statx dir_stx,
+                   syscalls::statx(*dir_fd, "", AT_EMPTY_PATH, kMountIdMask));
+  ASSIGN_OR_RETURN(cache::CachedAttr dir_attr, cache::GetAttr(ctx, parent));
   std::optional<struct statx> refused;
   BackingCall(ctx, "ProbeChild");
-  ABSL_ASSIGN_OR_RETURN(
-      std::optional<ChildRecord> child,
-      ProbeChild(*dir_fd, dir_stx, dir_attr.device, parent, name, refused,
-                 [&](const events::Probe &probe) {
-                   // Model: ResolveProbe.
-                   ctx.events->ResolveProbed(ctx, parent, name, probe);
-                 }));
+  ASSIGN_OR_RETURN(std::optional<ChildRecord> child,
+                   ProbeChild(*dir_fd, dir_stx, dir_attr.device, parent, name,
+                              refused, [&](const events::Probe &probe) {
+                                // Model: ResolveProbe.
+                                ctx.events->ResolveProbed(ctx, parent, name,
+                                                          probe);
+                              }));
   VLOG(1) << "resolving " << EscapeBytes(name) << " in directory " << parent;
 
   cache::LookupResult result;
   bool recorded = false;
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     const bool dir_ok = cache::CanFill(ctx, snapshot, parent);
     recorded = dir_ok;
     if (child.has_value()) {
       std::optional<bool> parent_marked;
-      ABSL_ASSIGN_OR_RETURN(InodeId id,
-                            RecordChild(ctx, snapshot, parent, *child, dir_ok,
-                                        parent_marked));
+      ASSIGN_OR_RETURN(InodeId id, RecordChild(ctx, snapshot, parent, *child,
+                                               dir_ok, parent_marked));
       result = {cache::LookupResult::Kind::kFound, id};
     } else if (refused.has_value()) {
       InodeId stub = 0;  // None unless recorded (see LookupOrPopulate).
       if (dir_ok) {
-        ABSL_ASSIGN_OR_RETURN(stub,
-                              cache::SetRefused(ctx, parent, name, *refused));
+        ASSIGN_OR_RETURN(stub, cache::SetRefused(ctx, parent, name, *refused));
       }
       result = {cache::LookupResult::Kind::kRefused, stub};
     } else {
       if (dir_ok) {
-        ABSL_RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
+        RETURN_IF_ERROR(cache::SetNegative(ctx, parent, name));
       }
       result = {cache::LookupResult::Kind::kNegative, 0};
     }
@@ -1787,7 +1767,7 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
     }
     return child_fd.status();
   }
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       struct statx stx,
       syscalls::statx(**child_fd, "", AT_EMPTY_PATH, kAttrMask | kMountIdMask));
   // The statx saw the object: from here on a failure is one to record an
@@ -1795,16 +1775,16 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
   if (probed != nullptr) *probed = true;
   // Model: CreateProbe (the read; the identity cannot change after it).
   ctx.events->NewChildProbed(ctx, parent, name, ProbeOf(stx));
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr, cache::GetAttr(ctx, parent));
+  ASSIGN_OR_RETURN(cache::CachedAttr parent_attr, cache::GetAttr(ctx, parent));
   BackingCall(ctx, "ProbeObject");
-  ABSL_ASSIGN_OR_RETURN(
-      ChildRecord record, ProbeObject(**child_fd, name, parent_attr.device, stx));
+  ASSIGN_OR_RETURN(ChildRecord record,
+                   ProbeObject(**child_fd, name, parent_attr.device, stx));
 
   // Phase B: one transaction, no syscalls.
   NewChild result;
   bool created = false;
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ASSIGN_OR_RETURN(
         cache::UpsertResult row,
         cache::UpsertInode(ctx, record.handle, record.stx, record.backing_gen));
     created = row.created;
@@ -1813,7 +1793,7 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
     // mutation's own phase-3 write.
     const bool child_ok = cache::CanFill(ctx, snapshot, row.id);
     if (S_ISDIR(record.stx.stx_mode)) {
-      ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
+      RETURN_IF_ERROR(cache::EnsureDirectory(ctx, row.id));
     }
     if (S_ISDIR(record.stx.stx_mode) && child_ok) {
       // Unlike EnsureDirectory's usual caller (PopulateDirectory,
@@ -1822,17 +1802,16 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
       // same op: nothing has had a chance to put anything in it yet, so it
       // is already known to have zero children -- no separate populate is
       // needed before a listing of it can be served from the cache.
-      ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx, row.id, true));
+      RETURN_IF_ERROR(cache::MarkDirComplete(ctx, row.id, true));
     }
     if (mutation.Owns(parent)) {
-      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, parent, name, row.id));
+      RETURN_IF_ERROR(cache::LinkDentry(ctx, parent, name, row.id));
     }
     if (child_ok) {
       if (record.symlink_target.has_value()) {
-        ABSL_RETURN_IF_ERROR(
-            cache::SetSymlink(ctx, row.id, *record.symlink_target));
+        RETURN_IF_ERROR(cache::SetSymlink(ctx, row.id, *record.symlink_target));
       }
-      ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
+      RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
     }
     // The new row is dirty too: if a power loss keeps this transaction but
     // the backing filesystem loses the create, recovery must not serve its
@@ -1840,9 +1819,9 @@ absl::StatusOr<NewChild> RecordNewChild(Context &ctx,
     // 1; this insert cannot outlive the row, being in the same
     // transaction.)
     const InodeId new_id[] = {row.id};
-    ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, new_id));
+    RETURN_IF_ERROR(cache::MarkDirty(ctx, new_id));
     if (open_for_write || OpenForWrite(ctx, row.id) || !child_ok) {
-      ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+      RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
     }
     result = NewChild{.id = row.id, .fuse_gen = row.fuse_gen, .stx = record.stx};
     return absl::OkStatus();
@@ -1908,26 +1887,25 @@ absl::StatusOr<FileDescriptor> TmpfileAt(Context &ctx,
 absl::StatusOr<NewChild> RecordTmpfile(Context &ctx, InodeId parent, int fd) {
   const cache::FillSnapshot snapshot = cache::BeginFill(ctx);
   BackingCall(ctx, "statx");
-  ABSL_ASSIGN_OR_RETURN(struct statx stx,
-                        syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr,
-                        cache::GetAttr(ctx, parent));
+  ASSIGN_OR_RETURN(struct statx stx,
+                   syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
+  ASSIGN_OR_RETURN(cache::CachedAttr parent_attr, cache::GetAttr(ctx, parent));
   BackingCall(ctx, "ProbeObject");
-  ABSL_ASSIGN_OR_RETURN(ChildRecord record,
-                        ProbeObject(fd, "", parent_attr.device, stx));
+  ASSIGN_OR_RETURN(ChildRecord record,
+                   ProbeObject(fd, "", parent_attr.device, stx));
   NewChild result;
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    ASSIGN_OR_RETURN(
         cache::UpsertResult row,
         cache::UpsertInode(ctx, record.handle, record.stx, record.backing_gen));
     if (cache::CanFill(ctx, snapshot, row.id)) {
-      ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
+      RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, row.id, record.xattrs));
     }
     // Dirty as a created row is (RecordNewChild): a power loss that keeps
     // this transaction and loses the file must not serve its attributes.
     const InodeId ids[] = {row.id};
-    ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, ids));
-    ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
+    RETURN_IF_ERROR(cache::MarkDirty(ctx, ids));
+    RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
     result = NewChild{.id = row.id, .fuse_gen = row.fuse_gen, .stx = record.stx};
     return absl::OkStatus();
   }));
@@ -1936,20 +1914,18 @@ absl::StatusOr<NewChild> RecordTmpfile(Context &ctx, InodeId parent, int fd) {
 
 absl::Status LinkFd(Context &ctx, int fd, InodeId newparent,
                     std::string_view newname) {
-  ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor newparent_fd,
-      OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor newparent_fd,
+                   OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
   BackingCall(ctx, "linkat");
   return syscalls::linkat(fd, "", *newparent_fd, newname, AT_EMPTY_PATH);
 }
 
 absl::Status LinkAt(Context &ctx, InodeId src, InodeId newparent,
                     std::string_view newname) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor src_fd,
-                        OpenNode(ctx, src, O_PATH | O_NOFOLLOW));
-  ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor newparent_fd,
-      OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor src_fd,
+                   OpenNode(ctx, src, O_PATH | O_NOFOLLOW));
+  ASSIGN_OR_RETURN(FileDescriptor newparent_fd,
+                   OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
   BackingCall(ctx, "linkat");
   return syscalls::linkat(*src_fd, "", *newparent_fd, newname, AT_EMPTY_PATH);
 }
@@ -1960,19 +1936,19 @@ absl::StatusOr<struct statx> RecordRelinked(Context &ctx,
                                             int fd, InodeId newparent,
                                             std::string_view newname) {
   BackingCall(ctx, "statx");
-  ABSL_ASSIGN_OR_RETURN(struct statx stx,
-                        syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
-  ABSL_ASSIGN_OR_RETURN(cache::CachedAttr parent_attr,
-                        cache::GetAttr(ctx, newparent));
+  ASSIGN_OR_RETURN(struct statx stx,
+                   syscalls::statx(fd, "", AT_EMPTY_PATH, kAttrMask));
+  ASSIGN_OR_RETURN(cache::CachedAttr parent_attr,
+                   cache::GetAttr(ctx, newparent));
   BackingCall(ctx, "ProbeObject");
-  ABSL_ASSIGN_OR_RETURN(ChildRecord record,
-                        ProbeObject(fd, "", parent_attr.device, stx));
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(cache::ReinstateInode(
-        ctx, id, fuse_gen, record.handle, record.stx, record.backing_gen));
-    ABSL_RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, id, record.xattrs));
+  ASSIGN_OR_RETURN(ChildRecord record,
+                   ProbeObject(fd, "", parent_attr.device, stx));
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+    RETURN_IF_ERROR(cache::ReinstateInode(ctx, id, fuse_gen, record.handle,
+                                          record.stx, record.backing_gen));
+    RETURN_IF_ERROR(cache::ReplaceXattrs(ctx, id, record.xattrs));
     if (mutation.Owns(newparent)) {
-      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, id));
+      RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, id));
     }
     // Dirty as a created row is (RecordNewChild): a power loss that keeps
     // this transaction and loses the link must not serve the row.
@@ -1986,10 +1962,10 @@ absl::StatusOr<struct statx> RecordNewLink(Context &ctx,
                                            const cache::Mutation &mutation,
                                            InodeId src, InodeId newparent,
                                            std::string_view newname) {
-  ABSL_ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, src));
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
+  ASSIGN_OR_RETURN(struct statx stx, StatNode(ctx, src));
+  RETURN_IF_ERROR(ctx.db.Transaction([&]() -> absl::Status {
     if (mutation.Owns(newparent)) {
-      ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, src));
+      RETURN_IF_ERROR(cache::LinkDentry(ctx, newparent, newname, src));
     }
     if (mutation.Owns(src)) return WriteAttrs(ctx, src, stx);
     return absl::OkStatus();
@@ -1999,8 +1975,8 @@ absl::StatusOr<struct statx> RecordNewLink(Context &ctx,
 
 absl::Status UnlinkAt(Context &ctx, const Credentials &caller, InodeId parent,
                       std::string_view name, int flags) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor parent_fd,
-                        OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor parent_fd,
+                   OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
   BackingCall(ctx, "unlinkat");
   return AsCaller(caller,
                   [&] { return syscalls::unlinkat(*parent_fd, name, flags); });
@@ -2009,10 +1985,10 @@ absl::Status UnlinkAt(Context &ctx, const Credentials &caller, InodeId parent,
 absl::Status RenameAt(Context &ctx, const Credentials &caller, InodeId parent,
                       std::string_view name, InodeId newparent,
                       std::string_view newname, unsigned flags) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor parent_fd,
-                        OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor newparent_fd,
-                        OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor parent_fd,
+                   OpenNode(ctx, parent, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor newparent_fd,
+                   OpenNode(ctx, newparent, O_RDONLY | O_DIRECTORY));
   BackingCall(ctx, "renameat2");
   return AsCaller(caller, [&] {
     return syscalls::renameat2(*parent_fd, name, *newparent_fd, newname, flags);
@@ -2029,14 +2005,14 @@ absl::StatusOr<std::optional<uint64_t>> BackingNlink(Context &ctx,
     // caller the same "already gone" contract either way.
     if (err == ESTALE) return std::nullopt;
     if (err == ENOENT) {
-      ABSL_RETURN_IF_ERROR(ForgetStale(ctx, id));
+      RETURN_IF_ERROR(ForgetStale(ctx, id));
       return std::nullopt;
     }
     return fd.status();
   }
   BackingCall(ctx, "statx");
-  ABSL_ASSIGN_OR_RETURN(struct statx stx,
-                        syscalls::statx(**fd, "", AT_EMPTY_PATH, STATX_NLINK));
+  ASSIGN_OR_RETURN(struct statx stx,
+                   syscalls::statx(**fd, "", AT_EMPTY_PATH, STATX_NLINK));
   return static_cast<uint64_t>(stx.stx_nlink);
 }
 
@@ -2066,21 +2042,20 @@ absl::StatusOr<FileDescriptor> ReopenFd(int fd, int flags) {
 
 absl::StatusOr<std::vector<gid_t>> GetGroups() {
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(int n, syscalls::getgroups(0, nullptr));
+    ASSIGN_OR_RETURN(int n, syscalls::getgroups(0, nullptr));
     absl::FixedArray<gid_t> groups(n);
     absl::StatusOr<int> got = syscalls::getgroups(n, groups.data());
     // The list grew in between (another thread cannot change ours, but be
     // exact anyway): ask again.
     if (!got.ok() && ErrnoOf(got.status()) == EINVAL) continue;
-    ABSL_RETURN_IF_ERROR(got.status());
+    RETURN_IF_ERROR(got.status());
     return std::vector<gid_t>(groups.begin(), groups.begin() + *got);
   }
 }
 
 absl::Status FsyncDirFd(int fd, bool datasync) {
-  ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor dir,
-      ReopenFd(fd, O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+  ASSIGN_OR_RETURN(FileDescriptor dir,
+                   ReopenFd(fd, O_RDONLY | O_DIRECTORY | O_CLOEXEC));
   return FsyncFd(*dir, datasync);
 }
 
@@ -2106,8 +2081,8 @@ absl::Status StartupPurge(Context &ctx) {
   bool purged = true;
   while (purged) {
     purged = false;
-    ABSL_ASSIGN_OR_RETURN(std::vector<cache::FilesystemRow> filesystems,
-                          cache::ListFilesystems(ctx));
+    ASSIGN_OR_RETURN(std::vector<cache::FilesystemRow> filesystems,
+                     cache::ListFilesystems(ctx));
     for (const cache::FilesystemRow &fs : filesystems) {
       if (!fs.parent_inode.has_value()) continue;  // The source.
       LOG(INFO) << "forgetting filesystem " << fs.device.ToString() << " ("
@@ -2144,7 +2119,7 @@ namespace {
 // finds it writable (step 11.5b).
 absl::Status StillWritable(Context &ctx, int fd) {
   BackingCall(ctx, "fstatvfs");
-  ABSL_ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(fd));
+  ASSIGN_OR_RETURN(struct statvfs vfs, syscalls::fstatvfs(fd));
   if ((vfs.f_flag & ST_RDONLY) == 0) {
     ctx.source_read_only_at_start = false;
     return absl::OkStatus();
@@ -2169,14 +2144,14 @@ absl::Status SyncBacking(Context &ctx, bool announce) {
     // Taken before the first syncfs: whatever is dirty now, is not mutated
     // again before ClearDirty and is not open for writing at either end is
     // covered by the syncfs calls below (see cache::BeginSync).
-    ABSL_ASSIGN_OR_RETURN(cache::SyncSnapshot synced, cache::BeginSync(ctx));
+    ASSIGN_OR_RETURN(cache::SyncSnapshot synced, cache::BeginSync(ctx));
     // Model: the sync request's first step (S1From), or StopSync.
     ctx.events->SyncSnapshotTaken(ctx);
     ctx.events->SyncfsStarting(ctx);
     for (int fd : ctx.mounts.Fds()) {
       BackingCall(ctx, "syncfs");
-      ABSL_RETURN_IF_ERROR(syscalls::syncfs(fd));
-      ABSL_RETURN_IF_ERROR(StillWritable(ctx, fd));
+      RETURN_IF_ERROR(syscalls::syncfs(fd));
+      RETURN_IF_ERROR(StillWritable(ctx, fd));
     }
     ctx.events->SyncfsDone(ctx);
     // Open for writing now. (Open at all now, step 23.8: ClearDirty reads
@@ -2186,7 +2161,7 @@ absl::Status SyncBacking(Context &ctx, bool announce) {
       keep.assign(ctx.open_for_write->begin(), ctx.open_for_write->end());
     }
     int64_t cleared = 0;
-    ABSL_RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep, &cleared));
+    RETURN_IF_ERROR(cache::ClearDirty(ctx, synced, keep, &cleared));
     // Model: SyncClearDirty, or StopClear.
     ctx.events->SyncCleared(ctx);
     LOG_IF(INFO, announce)
@@ -2281,15 +2256,14 @@ absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
                                                std::string_view boot_id) {
   // Model: Crash (after an unclean shutdown) and Restart.
   ctx.events->RunStarting(ctx);
-  ABSL_ASSIGN_OR_RETURN(bool clean, GetCleanShutdown(ctx.db));
-  ABSL_ASSIGN_OR_RETURN(std::optional<std::string> last_boot_id,
-                        GetBootId(ctx.db));
+  ASSIGN_OR_RETURN(bool clean, GetCleanShutdown(ctx.db));
+  ASSIGN_OR_RETURN(std::optional<std::string> last_boot_id, GetBootId(ctx.db));
   const bool unclean = !clean;
   // The rows ProbeRecoveredRows probes (RecoverDirty keeps them dirty): not
   // the atime-only ones (step 23.8), whose names RecoverDirty keeps.
-  ABSL_ASSIGN_OR_RETURN(std::vector<InodeId> dirty,
-                        cache::ListDirty(ctx, /*mutations_only=*/true));
-  ABSL_ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
+  ASSIGN_OR_RETURN(std::vector<InodeId> dirty,
+                   cache::ListDirty(ctx, /*mutations_only=*/true));
+  ASSIGN_OR_RETURN(int64_t recovered, cache::RecoverDirty(ctx));
   // Model: Recover.
   ctx.events->Recovered(ctx);
   // Rows whose last release never came (review L5): see
@@ -2322,9 +2296,9 @@ absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
                  << " dirty cache entries (their cached state will be "
                     "re-read from the backing filesystem)";
   }
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
+  RETURN_IF_ERROR(ctx.db.Transaction(
       [&]() -> absl::Status {
-        ABSL_RETURN_IF_ERROR(SetCleanShutdown(ctx.db, false));
+        RETURN_IF_ERROR(SetCleanShutdown(ctx.db, false));
         return SetBootId(ctx.db, boot_id);
       },
       sqlite3::Durability::kSync));
@@ -2338,10 +2312,9 @@ absl::StatusOr<std::vector<InodeId>> StartRun(Context &ctx,
 
 absl::Status Startup(Context &ctx, FileDescriptor source_fd,
                      std::string_view boot_id) {
-  ABSL_ASSIGN_OR_RETURN(std::vector<InodeId> recovered,
-                        StartRun(ctx, boot_id));
-  ABSL_RETURN_IF_ERROR(InitRoot(ctx, std::move(source_fd)));
-  ABSL_RETURN_IF_ERROR(StartupPurge(ctx));
+  ASSIGN_OR_RETURN(std::vector<InodeId> recovered, StartRun(ctx, boot_id));
+  RETURN_IF_ERROR(InitRoot(ctx, std::move(source_fd)));
+  RETURN_IF_ERROR(StartupPurge(ctx));
   ProbeRecoveredRows(ctx, recovered);
   // After the probe: the start-up's full check sees the state the first
   // request will (the probe deletes rows a crash left).
@@ -2352,8 +2325,8 @@ absl::Status Startup(Context &ctx, FileDescriptor source_fd,
 absl::Status FinishRun(Context &ctx) {
   // Model: BeginShutdown; the sync point below is StopSync and StopClear.
   ctx.events->ShutdownBegin(ctx);
-  ABSL_RETURN_IF_ERROR(SyncBacking(ctx));
-  ABSL_RETURN_IF_ERROR(ctx.db.Checkpoint());
+  RETURN_IF_ERROR(SyncBacking(ctx));
+  RETURN_IF_ERROR(ctx.db.Checkpoint());
   // Model: StopCkpt.
   ctx.events->Checkpointed(ctx);
   if (ctx.dirty.any || ctx.dirty.atime) {
@@ -2361,9 +2334,9 @@ absl::Status FinishRun(Context &ctx) {
            << "Dirty cache entries remain (a file is still open); leaving "
               "the clean-shutdown flag unset";
   }
-  ABSL_RETURN_IF_ERROR(ctx.db.Transaction(
-      [&] { return SetCleanShutdown(ctx.db, true); },
-      sqlite3::Durability::kSync));
+  RETURN_IF_ERROR(
+      ctx.db.Transaction([&] { return SetCleanShutdown(ctx.db, true); },
+                         sqlite3::Durability::kSync));
   // Model: StopFlag.
   ctx.events->CleanShutdownRecorded(ctx);
   LOG(INFO) << "shutdown: clean (the dirty set is empty and the "
@@ -2387,10 +2360,9 @@ absl::Status ApplyMode(int opath_fd, mode_t type, mode_t mode) {
     return ErrnoToStatus(EOPNOTSUPP, "chmod on a symlink");
   }
   if (S_ISREG(type) || S_ISDIR(type)) {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         FileDescriptor fd,
-        ReopenFd(
-            opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
+        ReopenFd(opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
     return syscalls::fchmod(*fd, mode);
   }
   return FchmodOPath(opath_fd, mode);
@@ -2408,8 +2380,7 @@ absl::Status ApplySize(const Credentials &caller, int opath_fd, mode_t type,
     return ErrnoToStatus(EINVAL,
                          "truncate on a non-regular, non-directory file");
   }
-  ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor fd, ReopenFd(opath_fd, O_WRONLY | O_CLOEXEC));
+  ASSIGN_OR_RETURN(FileDescriptor fd, ReopenFd(opath_fd, O_WRONLY | O_CLOEXEC));
   return AsCaller(caller, [&] { return syscalls::ftruncate(*fd, size); });
 }
 
@@ -2419,10 +2390,9 @@ absl::Status ApplySize(const Credentials &caller, int opath_fd, mode_t type,
 absl::Status ApplyTimes(const Credentials &caller, int opath_fd, mode_t type,
                         const struct timespec times[2]) {
   if (S_ISREG(type) || S_ISDIR(type)) {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         FileDescriptor fd,
-        ReopenFd(
-            opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
+        ReopenFd(opath_fd, O_RDONLY | O_NONBLOCK | O_NOCTTY | O_CLOEXEC));
     return AsCaller(caller, [&] { return syscalls::futimens(*fd, times); });
   }
   return AsCaller(caller,
@@ -2433,7 +2403,7 @@ absl::Status ApplyTimes(const Credentials &caller, int opath_fd, mode_t type,
 
 absl::Status SetAttr(Context &ctx, const Credentials &caller, InodeId id,
                      const struct stat &attr, int to_set) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
+  ASSIGN_OR_RETURN(FileDescriptor fd, OpenNode(ctx, id, O_PATH | O_NOFOLLOW));
   BackingCall(ctx, "SetAttrFd");
   return SetAttrFd(caller, *fd, attr, to_set);
 }
@@ -2443,12 +2413,12 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
   // Every call below works on any descriptor, O_PATH or not: the reopens go
   // through /proc/self/fd, fchownat and the *OPath helpers take an empty
   // path.
-  ABSL_ASSIGN_OR_RETURN(
-      struct statx stx, syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MODE));
+  ASSIGN_OR_RETURN(struct statx stx,
+                   syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MODE));
   mode_t type = stx.stx_mode & S_IFMT;
 
   if (to_set & FUSE_SET_ATTR_SIZE) {
-    ABSL_RETURN_IF_ERROR(ApplySize(caller, fd, type, attr.st_size));
+    RETURN_IF_ERROR(ApplySize(caller, fd, type, attr.st_size));
   }
 
   if (to_set & (FUSE_SET_ATTR_UID | FUSE_SET_ATTR_GID)) {
@@ -2457,13 +2427,13 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
     gid_t gid = (to_set & FUSE_SET_ATTR_GID) ? attr.st_gid
                                              : static_cast<gid_t>(-1);
     // fchownat works on an O_PATH fd via AT_EMPTY_PATH with an empty path.
-    ABSL_RETURN_IF_ERROR(AsCaller(caller, [&] {
+    RETURN_IF_ERROR(AsCaller(caller, [&] {
       return syscalls::fchownat(fd, "", uid, gid, AT_EMPTY_PATH);
     }));
   }
 
   if (to_set & FUSE_SET_ATTR_MODE) {
-    ABSL_RETURN_IF_ERROR(ApplyMode(fd, type, attr.st_mode));
+    RETURN_IF_ERROR(ApplyMode(fd, type, attr.st_mode));
   } else if ((to_set & (FUSE_SET_ATTR_KILL_SUID | FUSE_SET_ATTR_KILL_SGID)) &&
              !S_ISLNK(type)) {
     // KILL_SUID/KILL_SGID sent without MODE: the kernel wants the
@@ -2473,7 +2443,7 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
     mode_t current_mode = stx.stx_mode & 07777;
     if (to_set & FUSE_SET_ATTR_KILL_SUID) current_mode &= ~S_ISUID;
     if (to_set & FUSE_SET_ATTR_KILL_SGID) current_mode &= ~S_ISGID;
-    ABSL_RETURN_IF_ERROR(ApplyMode(fd, type, current_mode));
+    RETURN_IF_ERROR(ApplyMode(fd, type, current_mode));
   }
 
   if (to_set & (FUSE_SET_ATTR_ATIME | FUSE_SET_ATTR_MTIME |
@@ -2492,13 +2462,13 @@ absl::Status SetAttrFd(const Credentials &caller, int fd,
     } else if (to_set & FUSE_SET_ATTR_MTIME) {
       times[1] = attr.st_mtim;
     }
-    ABSL_RETURN_IF_ERROR(ApplyTimes(caller, fd, type, times));
+    RETURN_IF_ERROR(ApplyTimes(caller, fd, type, times));
   }
 
   // Nothing to set but (perhaps) ctime: a chown(path, -1, -1) (see
   // SetAttr's declaration comment). The ctime value is never used.
   if ((to_set & ~FUSE_SET_ATTR_CTIME) == 0) {
-    ABSL_RETURN_IF_ERROR(AsCaller(caller, [&] {
+    RETURN_IF_ERROR(AsCaller(caller, [&] {
       return syscalls::fchownat(fd, "", static_cast<uid_t>(-1),
                                 static_cast<gid_t>(-1), AT_EMPTY_PATH);
     }));

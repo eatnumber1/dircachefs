@@ -104,24 +104,23 @@ class TraceRecorderTest : public ::testing::Test {
   // A row for a backing object, with a handle derived from `ino`.
   absl::StatusOr<InodeId> Make(uint64_t ino, mode_t mode) {
     std::string bytes = absl::StrCat("h", ino);
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         cache::UpsertResult row,
-        cache::UpsertInode(
-            ctx_,
-            FileHandle{.device = Source(),
-                       .handle_type = 1,
-                       .bytes = std::vector<uint8_t>(bytes.begin(),
-                                                     bytes.end())},
-            Stx(ino, mode), 0));
+        cache::UpsertInode(ctx_,
+                           FileHandle{.device = Source(),
+                                      .handle_type = 1,
+                                      .bytes = std::vector<uint8_t>(
+                                          bytes.begin(), bytes.end())},
+                           Stx(ino, mode), 0));
     return row.id;
   }
 
   // A directory row linked as (parent, name), listing incomplete.
   absl::StatusOr<InodeId> MakeDir(InodeId parent, std::string_view name,
                                   uint64_t ino) {
-    ABSL_ASSIGN_OR_RETURN(InodeId id, Make(ino, S_IFDIR | 0755));
-    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx_, parent, name, id));
-    ABSL_RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, id, false));
+    ASSIGN_OR_RETURN(InodeId id, Make(ino, S_IFDIR | 0755));
+    RETURN_IF_ERROR(cache::LinkDentry(ctx_, parent, name, id));
+    RETURN_IF_ERROR(cache::MarkDirComplete(ctx_, id, false));
     return id;
   }
 
@@ -224,8 +223,8 @@ TEST_F(TraceRecorderTest, ForgottenInodeInATransactionHidesNothing) {
 
   ASSERT_THAT(ctx_.db.Transaction([&]() -> absl::Status {
     // Writes no event explains, one in each directory.
-    ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx_, d2, "x", g));
-    ABSL_RETURN_IF_ERROR(cache::InvalidateInode(ctx_, f));
+    RETURN_IF_ERROR(cache::LinkDentry(ctx_, d2, "x", g));
+    RETURN_IF_ERROR(cache::InvalidateInode(ctx_, f));
     return cache::LinkDentry(ctx_, d1, "y", g);
   }),
               IsOk());

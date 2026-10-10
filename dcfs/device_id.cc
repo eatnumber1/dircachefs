@@ -108,7 +108,7 @@ namespace {
 
 // Returns the statfs(2) f_type of the filesystem containing `fd`.
 absl::StatusOr<int64_t> GetFsType(int fd) {
-  ABSL_ASSIGN_OR_RETURN(struct statfs sf, syscalls::fstatfs(fd));
+  ASSIGN_OR_RETURN(struct statfs sf, syscalls::fstatfs(fd));
   return static_cast<int64_t>(sf.f_type);
 }
 
@@ -125,10 +125,9 @@ absl::Status IoctlAllowingOPath(int fd, unsigned long request, void *arg) {
   if (StatusToErrno(rc.status()) != EBADF) return rc.status();
 
   std::string proc_path = absl::StrCat("/proc/self/fd/", fd);
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       FileDescriptor reopened,
-      syscalls::openat(AT_FDCWD, proc_path,
-                       O_RDONLY | O_NONBLOCK | O_NOCTTY));
+      syscalls::openat(AT_FDCWD, proc_path, O_RDONLY | O_NONBLOCK | O_NOCTTY));
   return syscalls::ioctl(*reopened, request, arg).status();
 }
 
@@ -136,7 +135,7 @@ absl::Status IoctlAllowingOPath(int fd, unsigned long request, void *arg) {
 
 absl::StatusOr<DeviceId> GetDeviceId(int fd) {
   int64_t f_type;
-  ABSL_ASSIGN_OR_RETURN(f_type, GetFsType(fd));
+  ASSIGN_OR_RETURN(f_type, GetFsType(fd));
 
   // Step 5.2 finding: btrfs does not support FS_IOC_GETFSUUID at all, on
   // any kernel version -- unlike ext4 and xfs (fs/ext4/super.c,
@@ -151,7 +150,7 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
   if (f_type == BTRFS_SUPER_MAGIC) {
     struct btrfs_ioctl_fs_info_args fs_info;
     std::memset(&fs_info, 0, sizeof(fs_info));
-    ABSL_RETURN_IF_ERROR(IoctlAllowingOPath(fd, BTRFS_IOC_FS_INFO, &fs_info))
+    RETURN_IF_ERROR(IoctlAllowingOPath(fd, BTRFS_IOC_FS_INFO, &fs_info))
         << "BTRFS_IOC_FS_INFO";
     static_assert(sizeof(fs_info.fsid) == 16);
     std::copy(std::begin(fs_info.fsid), std::end(fs_info.fsid),
@@ -159,8 +158,7 @@ absl::StatusOr<DeviceId> GetDeviceId(int fd) {
 
     struct btrfs_ioctl_get_subvol_info_args args;
     std::memset(&args, 0, sizeof(args));
-    ABSL_RETURN_IF_ERROR(
-        IoctlAllowingOPath(fd, BTRFS_IOC_GET_SUBVOL_INFO, &args))
+    RETURN_IF_ERROR(IoctlAllowingOPath(fd, BTRFS_IOC_GET_SUBVOL_INFO, &args))
         << "BTRFS_IOC_GET_SUBVOL_INFO";
     id.subvol_id = args.treeid;
     return id;

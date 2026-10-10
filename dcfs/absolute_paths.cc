@@ -14,7 +14,7 @@
 namespace dcfs {
 
 absl::Status MakePathsAbsolute(HelperArgs &args, HelperOptions &options) {
-  ABSL_ASSIGN_OR_RETURN(std::string cwd, syscalls::realpath("."));
+  ASSIGN_OR_RETURN(std::string cwd, syscalls::realpath("."));
   auto absolute = [&cwd](const std::string &path) {
     if (path.empty() || path[0] == '/') return path;
     return cwd == "/" ? absl::StrCat("/", path) : absl::StrCat(cwd, "/", path);

@@ -75,10 +75,9 @@ absl::StatusOr<int> RunProgram(const std::string &path,
                                std::string *captured) {
   std::pair<FileDescriptor, FileDescriptor> pipe;
   if (captured != nullptr) {
-    ABSL_ASSIGN_OR_RETURN(pipe,
-                          syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+    ASSIGN_OR_RETURN(pipe, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   }
-  ABSL_ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
+  ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
   if (child == 0) {
     if (captured != nullptr &&
         !syscalls::dup2(*pipe.second, STDOUT_FILENO).ok()) {
@@ -140,7 +139,7 @@ absl::StatusOr<std::string> DetectType(const std::string &device) {
            << EscapeBytes(device);
   }
   std::string out;
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       int ran,
       RunProgram(blkid, "blkid", {"-o", "value", "-s", "TYPE", device}, &out));
   const std::string type(absl::StripAsciiWhitespace(out));
@@ -192,9 +191,9 @@ struct Finding {
 absl::StatusOr<std::vector<std::string>> FirstRows(sqlite3::Connection &db,
                                                    std::string_view sql,
                                                    size_t most) {
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(sql));
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt, db.Prepared(sql));
   std::vector<std::string> rows;
-  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
+  RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
     if (rows.size() < most) rows.push_back(row.Column<std::string>(0));
     return absl::OkStatus();
   }));
@@ -259,7 +258,7 @@ Finding Inspect(const std::string &path) {
   size_t dirty = 0;
   std::vector<std::string> missing;
   absl::Status read = [&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         db.Prepared("SELECT inode, inode NOT IN (SELECT id FROM inodes) "
                     "FROM dirty ORDER BY inode"));

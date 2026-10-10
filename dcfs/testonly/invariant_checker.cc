@@ -63,12 +63,12 @@ absl::Status Violation(std::string_view invariant, const Args &...what) {
 }
 
 absl::StatusOr<bool> HasDirtyRow(Context &ctx, InodeId id) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT 1 FROM dirty WHERE inode = ?"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, id));
+  RETURN_IF_ERROR(stmt->Bind(1, id));
   bool found = false;
-  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
+  RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
     found = true;
     return absl::OkStatus();
   }));
@@ -77,14 +77,13 @@ absl::StatusOr<bool> HasDirtyRow(Context &ctx, InodeId id) {
 
 // Whether `id` has a mutation's dirty row (not atime-only).
 absl::StatusOr<bool> HasMutationRow(Context &ctx, InodeId id) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
-      ctx.db.Prepared(DCFS_CHECKER_SQL
-                      "SELECT 1 FROM dirty "
-                      "WHERE inode = ? AND atime_only = 0"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, id));
+      ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT 1 FROM dirty "
+                                       "WHERE inode = ? AND atime_only = 0"));
+  RETURN_IF_ERROR(stmt->Bind(1, id));
   bool found = false;
-  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
+  RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
     found = true;
     return absl::OkStatus();
   }));
@@ -94,9 +93,9 @@ absl::StatusOr<bool> HasMutationRow(Context &ctx, InodeId id) {
 // dirty-set (step 23.11): a row a fill inserted under a directory with a
 // mutation's mark was born dirty.
 absl::Status FillBornDirty(Context &ctx, InodeId dir, InodeId child) {
-  ABSL_ASSIGN_OR_RETURN(bool dir_marked, HasMutationRow(ctx, dir));
+  ASSIGN_OR_RETURN(bool dir_marked, HasMutationRow(ctx, dir));
   if (!dir_marked) return absl::OkStatus();
-  ABSL_ASSIGN_OR_RETURN(bool child_marked, HasMutationRow(ctx, child));
+  ASSIGN_OR_RETURN(bool child_marked, HasMutationRow(ctx, child));
   if (!child_marked) {
     return Violation(kDirtySet, "inode ", child,
                      " was inserted by a fill of directory ", dir,
@@ -125,7 +124,7 @@ absl::Status NoTransaction(Context &ctx, std::string_view invariant) {
 // dirty-set: every inode with a mutation in flight has its dirty row.
 absl::Status InFlightAreDirty(Context &ctx) {
   for (const auto &[id, count] : ctx.fills.inflight) {
-    ABSL_ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
+    ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
     if (!dirty) {
       return Violation(kDirtySet, "inode ", id,
                        " has a mutation in flight but no dirty row");
@@ -143,13 +142,13 @@ absl::Status NoneDirtyUnlessAny(Context &ctx) {
         std::tuple{ctx.dirty.atime, 1,
                    "atime is false but the dirty table has atime-only rows"}}) {
     if (flag) continue;
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(DCFS_CHECKER_SQL
                         "SELECT 1 FROM dirty WHERE atime_only = ? LIMIT 1"));
-    ABSL_RETURN_IF_ERROR(stmt->Bind(1, atime_only));
+    RETURN_IF_ERROR(stmt->Bind(1, atime_only));
     bool found = false;
-    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
+    RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
       found = true;
       return absl::OkStatus();
     }));
@@ -426,18 +425,17 @@ void InvariantChecker::CheckDestroyed(Context &ctx, const events::Bookkeeping &f
 
 absl::Status InvariantChecker::SeeEveryDirtyDelete(Context &ctx) {
   if (no_truncate_) return absl::OkStatus();
-  ABSL_ASSIGN_OR_RETURN(
-      sqlite3::Statement * stmt,
-      ctx.db.Prepared(DCFS_CHECKER_SQL
-                      "SELECT 1 FROM sqlite_master "
-                      "WHERE type = 'table' AND name = 'dirty'"));
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                   ctx.db.Prepared(DCFS_CHECKER_SQL
+                                   "SELECT 1 FROM sqlite_master "
+                                   "WHERE type = 'table' AND name = 'dirty'"));
   bool exists = false;
-  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
+  RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &) {
     exists = true;
     return absl::OkStatus();
   }));
   if (!exists) return absl::OkStatus();  // Before Migrate.
-  ABSL_RETURN_IF_ERROR(ctx.db.Exec(
+  RETURN_IF_ERROR(ctx.db.Exec(
       DCFS_CHECKER_SQL
       "CREATE TEMP TRIGGER IF NOT EXISTS dcfs_invariant_checks_no_truncate "
       "AFTER DELETE ON main.dirty BEGIN SELECT 1; END"));
@@ -446,15 +444,15 @@ absl::Status InvariantChecker::SeeEveryDirtyDelete(Context &ctx) {
 }
 
 absl::Status InvariantChecker::CheckBackingCall(Context &ctx) {
-  ABSL_RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtBackingCall));
-  ABSL_RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
+  RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtBackingCall));
+  RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
   return InFlightAreDirty(ctx);
 }
 
 absl::Status InvariantChecker::CheckChanged(Context &ctx, const events::Bookkeeping *fs,
                                             std::span<const InodeId> ids) {
-  ABSL_RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
-  ABSL_RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
+  RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
+  RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
   // Taken (and forgotten) first: the checker's own queries only read, but
   // a violation must not leave rows behind for the next check either.
   absl::flat_hash_set<int64_t> inodes = std::exchange(inodes_, {});
@@ -466,8 +464,8 @@ absl::Status InvariantChecker::CheckChanged(Context &ctx, const events::Bookkeep
   absl::flat_hash_set<int64_t> symlinks = std::exchange(symlinks_, {});
 
   ForgetReleasedStaleOpens(ctx);
-  ABSL_RETURN_IF_ERROR(InFlightAreDirty(ctx));
-  ABSL_RETURN_IF_ERROR(NoneDirtyUnlessAny(ctx));
+  RETURN_IF_ERROR(InFlightAreDirty(ctx));
+  RETURN_IF_ERROR(NoneDirtyUnlessAny(ctx));
 
   // The inodes to look at: those the request named, and every inode whose
   // rows (its own, a dentry in it or naming it, its xattrs, directory,
@@ -478,26 +476,25 @@ absl::Status InvariantChecker::CheckChanged(Context &ctx, const events::Bookkeep
     for (int64_t id : *rows) interest.insert(id);
   }
   for (int64_t rowid : dentries) {
-    ABSL_RETURN_IF_ERROR(CheckDentry(ctx, rowid, interest));
+    RETURN_IF_ERROR(CheckDentry(ctx, rowid, interest));
   }
-  for (int64_t id : stubs) ABSL_RETURN_IF_ERROR(CheckStub(ctx, id));
+  for (int64_t id : stubs) RETURN_IF_ERROR(CheckStub(ctx, id));
   for (int64_t rowid : xattrs) {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT inode FROM xattrs "
                                          "WHERE rowid = ?"));
-    ABSL_RETURN_IF_ERROR(stmt->Bind(1, rowid));
-    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
+    RETURN_IF_ERROR(stmt->Bind(1, rowid));
+    RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       interest.insert(row.Column<int64_t>(0));
       return absl::OkStatus();
     }));
   }
   for (InodeId id : interest) {
-    ABSL_RETURN_IF_ERROR(CheckInode(ctx, fs, id, inodes.contains(id)));
+    RETURN_IF_ERROR(CheckInode(ctx, fs, id, inodes.contains(id)));
   }
   if (fs != nullptr) {
-    ABSL_RETURN_IF_ERROR(
-        CheckBookkeeping(ctx, *fs, &interest, /*destroyed=*/false));
+    RETURN_IF_ERROR(CheckBookkeeping(ctx, *fs, &interest, /*destroyed=*/false));
   }
   return absl::OkStatus();
 }
@@ -509,8 +506,8 @@ absl::Status InvariantChecker::CheckAll(Context &ctx, const events::Bookkeeping 
 absl::Status InvariantChecker::CheckEverything(Context &ctx,
                                                const events::Bookkeeping *fs,
                                                bool destroyed) {
-  ABSL_RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
-  ABSL_RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
+  RETURN_IF_ERROR(NoTransaction(ctx, kNoTransactionAtRequestEnd));
+  RETURN_IF_ERROR(SeeEveryDirtyDelete(ctx));
   inodes_.clear();
   dentries_.clear();
   stubs_.clear();
@@ -519,28 +516,28 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
   directories_.clear();
   symlinks_.clear();
   ForgetReleasedStaleOpens(ctx);
-  ABSL_RETURN_IF_ERROR(InFlightAreDirty(ctx));
-  ABSL_RETURN_IF_ERROR(NoneDirtyUnlessAny(ctx));
+  RETURN_IF_ERROR(InFlightAreDirty(ctx));
+  RETURN_IF_ERROR(NoneDirtyUnlessAny(ctx));
 
   // Every inode row's own columns.
   {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
             DCFS_CHECKER_SQL
             "SELECT id, attrs_valid, fuse_gen, nlink, " DCFS_ATTR_MISSING
             " FROM inodes"));
     absl::Status found;
-    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
+    RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       if (found.ok()) found = CheckInodeRow(ctx, fs, row);
       return absl::OkStatus();
     }));
-    ABSL_RETURN_IF_ERROR(found);
+    RETURN_IF_ERROR(found);
   }
   // Every dentry that is refused without a stub, or present or absent
   // with one; every stub whose dentry is not refused or unknown.
   {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
             DCFS_CHECKER_SQL
@@ -550,25 +547,24 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
             "EXISTS (SELECT 1 FROM stubs AS s WHERE s.parent = d.parent AND "
             "s.name = d.name))"));
     std::vector<int64_t> rowids;
-    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
+    RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       rowids.push_back(row.Column<int64_t>(0));
       return absl::OkStatus();
     }));
     absl::flat_hash_set<InodeId> unused;
     for (int64_t rowid : rowids) {
-      ABSL_RETURN_IF_ERROR(CheckDentry(ctx, rowid, unused));
+      RETURN_IF_ERROR(CheckDentry(ctx, rowid, unused));
     }
   }
   {
-    ABSL_ASSIGN_OR_RETURN(
-        sqlite3::Statement * stmt,
-        ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT id FROM stubs"));
+    ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                     ctx.db.Prepared(DCFS_CHECKER_SQL "SELECT id FROM stubs"));
     std::vector<int64_t> ids;
-    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
+    RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       ids.push_back(row.Column<int64_t>(0));
       return absl::OkStatus();
     }));
-    for (int64_t id : ids) ABSL_RETURN_IF_ERROR(CheckStub(ctx, id));
+    for (int64_t id : ids) RETURN_IF_ERROR(CheckStub(ctx, id));
   }
   // Every inode with in-memory state about it.
   absl::flat_hash_set<InodeId> interest;
@@ -578,10 +574,10 @@ absl::Status InvariantChecker::CheckEverything(Context &ctx,
   }
   // (Every row's columns were checked above.)
   for (InodeId id : interest) {
-    ABSL_RETURN_IF_ERROR(CheckInode(ctx, fs, id, /*row_changed=*/false));
+    RETURN_IF_ERROR(CheckInode(ctx, fs, id, /*row_changed=*/false));
   }
   if (fs != nullptr) {
-    ABSL_RETURN_IF_ERROR(CheckBookkeeping(ctx, *fs, nullptr, destroyed));
+    RETURN_IF_ERROR(CheckBookkeeping(ctx, *fs, nullptr, destroyed));
   }
   return absl::OkStatus();
 }
@@ -595,24 +591,24 @@ absl::Status InvariantChecker::CheckInode(Context &ctx, const events::Bookkeepin
   const bool open = ctx.open_files != nullptr &&
                     ctx.open_files->contains(id) && !stale_opens_.contains(id);
   if (row_changed || OpenForWrite(ctx, id) || open) {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         sqlite3::Statement * stmt,
         ctx.db.Prepared(
             DCFS_CHECKER_SQL
             "SELECT id, attrs_valid, fuse_gen, nlink, " DCFS_ATTR_MISSING
             " FROM inodes WHERE id = ?"));
-    ABSL_RETURN_IF_ERROR(stmt->Bind(1, id));
+    RETURN_IF_ERROR(stmt->Bind(1, id));
     absl::Status found;
-    ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
+    RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
       exists = true;
       found = CheckInodeRow(ctx, fs, row);
       return absl::OkStatus();
     }));
-    ABSL_RETURN_IF_ERROR(found);
+    RETURN_IF_ERROR(found);
   }
   const bool removed = fs != nullptr && fs->IsRemoved(id);
   if (exists && !removed && OpenForWrite(ctx, id)) {
-    ABSL_ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
+    ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
     if (!dirty) {
       return Violation(kWritableOpen, "inode ", id,
                        " is open for writing but has no dirty row");
@@ -623,14 +619,14 @@ absl::Status InvariantChecker::CheckInode(Context &ctx, const events::Bookkeepin
   // dirty from its cold open (or creation) until a sync point after its
   // last release.
   if (exists && !removed && open) {
-    ABSL_ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
+    ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
     if (!dirty) {
       return Violation(kOpenFile, "inode ", id,
                        " has an open backing file but no dirty row");
     }
   }
   if (ctx.dirty.durable.contains(id)) {
-    ABSL_ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
+    ASSIGN_OR_RETURN(bool dirty, HasDirtyRow(ctx, id));
     if (!dirty) {
       return Violation(kDirtySet, "inode ", id,
                        " is in Context::dirty.durable but has no dirty row");
@@ -672,16 +668,16 @@ absl::Status InvariantChecker::CheckInodeRow(const Context &ctx,
 
 absl::Status InvariantChecker::CheckDentry(
     Context &ctx, int64_t rowid, absl::flat_hash_set<InodeId> &interest) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       ctx.db.Prepared(DCFS_CHECKER_SQL
                       "SELECT d.parent, d.name, d.state, d.inode, EXISTS "
                       "(SELECT 1 FROM stubs AS s WHERE s.parent = d.parent "
                       "AND s.name = d.name) FROM dentries AS d "
                       "WHERE d.rowid = ?"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, rowid));
+  RETURN_IF_ERROR(stmt->Bind(1, rowid));
   absl::Status found;
-  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
+  RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
     const InodeId parent = row.Column<int64_t>(0);
     const std::string name = row.Column<std::string>(1);
     const std::string state = row.Column<std::string>(2);
@@ -705,15 +701,15 @@ absl::Status InvariantChecker::CheckDentry(
 }
 
 absl::Status InvariantChecker::CheckStub(Context &ctx, int64_t id) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       ctx.db.Prepared(DCFS_CHECKER_SQL
                       "SELECT s.parent, s.name, d.state FROM stubs AS s "
                       "LEFT JOIN dentries AS d ON d.parent = s.parent AND "
                       "d.name = s.name WHERE s.id = ?"));
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, id));
+  RETURN_IF_ERROR(stmt->Bind(1, id));
   absl::Status found;
-  ABSL_RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
+  RETURN_IF_ERROR(stmt->ForEachRow([&](sqlite3::Statement &row) {
     const std::optional<std::string> state =
         row.Column<std::optional<std::string>>(2);
     if (state != "refused" && state != "unknown") {
@@ -746,14 +742,14 @@ absl::Status InvariantChecker::CheckBookkeeping(
     }
     for (InodeId id : *interest) {
       if (contains(id)) {
-        ABSL_RETURN_IF_ERROR(each(id));
+        RETURN_IF_ERROR(each(id));
       }
     }
     return absl::OkStatus();
   };
 
   // lookup-count: a count of 0 is erased (DropLookups), never kept.
-  ABSL_RETURN_IF_ERROR(for_each_id(
+  RETURN_IF_ERROR(for_each_id(
       fs.LookupEntries(), 0,
       [&](auto each) {
         fs.ForEachLookup([&](events::Ino id, uint64_t) { each(id); });
@@ -786,11 +782,11 @@ absl::Status InvariantChecker::CheckBookkeeping(
     fs.ForEachRemoved([&](InodeId id) {
       if (found.ok()) found = CheckRemoved(fs, id);
     });
-    ABSL_RETURN_IF_ERROR(found);
+    RETURN_IF_ERROR(found);
   } else {
     for (InodeId id : *interest) {
       if (fs.IsRemoved(id)) {
-        ABSL_RETURN_IF_ERROR(CheckRemoved(fs, id));
+        RETURN_IF_ERROR(CheckRemoved(fs, id));
       }
     }
   }
@@ -800,9 +796,11 @@ absl::Status InvariantChecker::CheckBookkeeping(
     return Violation(kWritableOpen,
                      "Context::open_for_write is not DirCacheFS's set");
   }
-  ABSL_RETURN_IF_ERROR(for_each_id(
+  RETURN_IF_ERROR(for_each_id(
       fs.OpenForWriteEntries(), kRecountLimit,
-      [&](auto each) { fs.ForEachOpenForWrite([&](events::Ino id) { each(id); }); },
+      [&](auto each) {
+        fs.ForEachOpenForWrite([&](events::Ino id) { each(id); });
+      },
       [&](InodeId id) { return fs.IsOpenForWrite(id); },
       [&](InodeId id) {
         // DirCacheFS::Destroy reconciles and empties written_ (no FORGET
@@ -834,9 +832,9 @@ absl::Status InvariantChecker::CheckBookkeeping(
     fs.ForEachSharedFile([&](InodeId id, const events::Bookkeeping::SharedFile &) {
       if (found.ok()) found = check_shared(id);
     });
-    ABSL_RETURN_IF_ERROR(found);
+    RETURN_IF_ERROR(found);
   } else {
-    for (InodeId id : *interest) ABSL_RETURN_IF_ERROR(check_shared(id));
+    for (InodeId id : *interest) RETURN_IF_ERROR(check_shared(id));
   }
   return absl::OkStatus();
 }

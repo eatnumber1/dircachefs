@@ -386,11 +386,12 @@ class TransactionTest : public ::testing::Test {
   }
 
   absl::StatusOr<int64_t> RowCount() {
-    ABSL_ASSIGN_OR_RETURN(Statement * stmt, conn_.Prepared("SELECT COUNT(*) FROM t"));
-    ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+    ASSIGN_OR_RETURN(Statement * stmt,
+                     conn_.Prepared("SELECT COUNT(*) FROM t"));
+    ASSIGN_OR_RETURN(bool has_row, stmt->Step());
     RET_CHECK(has_row);
     int64_t count = stmt->Column<int64_t>(0);
-    ABSL_RETURN_IF_ERROR(stmt->Reset());
+    RETURN_IF_ERROR(stmt->Reset());
     return count;
   }
 
@@ -422,7 +423,7 @@ TEST_F(TransactionTest, CommitsOnOk) {
 
 TEST_F(TransactionTest, RollsBackOnErrorAndReturnsIt) {
   absl::Status st = conn_.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(conn_.Exec("INSERT INTO t (id) VALUES (1)"));
+    RETURN_IF_ERROR(conn_.Exec("INSERT INTO t (id) VALUES (1)"));
     return absl::InternalError("body failed");
   });
   EXPECT_THAT(st, StatusIs(absl::StatusCode::kInternal));
@@ -432,10 +433,10 @@ TEST_F(TransactionTest, RollsBackOnErrorAndReturnsIt) {
 
 TEST_F(TransactionTest, NestedInnerFailsOuterCommits) {
   absl::Status st = conn_.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(conn_.Exec("INSERT INTO t (id) VALUES (1)"));
+    RETURN_IF_ERROR(conn_.Exec("INSERT INTO t (id) VALUES (1)"));
 
     absl::Status inner = conn_.Transaction([&]() -> absl::Status {
-      ABSL_RETURN_IF_ERROR(conn_.Exec("INSERT INTO t (id) VALUES (2)"));
+      RETURN_IF_ERROR(conn_.Exec("INSERT INTO t (id) VALUES (2)"));
       return absl::InternalError("inner failed");
     });
     EXPECT_THAT(inner, StatusIs(absl::StatusCode::kInternal));
@@ -463,11 +464,11 @@ TEST_F(TransactionTest, NestedInnerSucceedsOuterFails) {
 }
 
 absl::StatusOr<int> Synchronous(Connection &conn) {
-  ABSL_ASSIGN_OR_RETURN(Statement * stmt, conn.Prepared("PRAGMA synchronous"));
-  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  ASSIGN_OR_RETURN(Statement * stmt, conn.Prepared("PRAGMA synchronous"));
+  ASSIGN_OR_RETURN(bool has_row, stmt->Step());
   RET_CHECK(has_row);
   int level = stmt->Column<int>(0);
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  RETURN_IF_ERROR(stmt->Reset());
   return level;
 }
 
@@ -485,8 +486,7 @@ TEST(DurabilityTest, SyncTransactionRunsWithSynchronousFull) {
   ASSERT_THAT(conn.Transaction(
                   [&]() -> absl::Status {
                     inside = Synchronous(conn);
-                    ABSL_RETURN_IF_ERROR(
-                        conn.Exec("INSERT INTO t (id) VALUES (1)"));
+                    RETURN_IF_ERROR(conn.Exec("INSERT INTO t (id) VALUES (1)"));
                     // A nested kSync inside a kSync transaction just nests.
                     return conn.Transaction(
                         [&]() -> absl::Status {

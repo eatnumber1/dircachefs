@@ -251,15 +251,15 @@ absl::Status Statement::ForEachRow(
     absl::FunctionRef<absl::Status(Statement &)> fn) {
   absl::Cleanup reset_when_done = [this] { Reset().IgnoreError(); };
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(bool has_row, Step());
+    ASSIGN_OR_RETURN(bool has_row, Step());
     if (!has_row) return absl::OkStatus();
-    ABSL_RETURN_IF_ERROR(fn(*this));
+    RETURN_IF_ERROR(fn(*this));
   }
 }
 
 absl::Status Statement::ExecuteOnce() {
   absl::Cleanup reset_when_done = [this] { Reset().IgnoreError(); };
-  ABSL_ASSIGN_OR_RETURN(bool has_row, Step());
+  ASSIGN_OR_RETURN(bool has_row, Step());
   RET_CHECK(!has_row)
       << "ExecuteOnce: statement produced a row (expected none): " << Sql();
   return absl::OkStatus();
@@ -329,7 +329,7 @@ absl::Status Connection::Checkpoint() {
 }
 
 absl::Status Connection::Exec(std::string_view sql) {
-  ABSL_ASSIGN_OR_RETURN(Statement * stmt, Prepared(sql));
+  ASSIGN_OR_RETURN(Statement * stmt, Prepared(sql));
   return stmt->ForEachRow([](Statement &) { return absl::OkStatus(); });
 }
 
@@ -353,12 +353,12 @@ absl::Status Connection::ExecScript(std::string_view sql) {
 absl::StatusOr<Statement *> Connection::Prepared(std::string_view sql) {
   if (auto it = statement_cache_.find(sql); it != statement_cache_.end()) {
     Statement &stmt = *it->second;
-    ABSL_RETURN_IF_ERROR(stmt.Reset());
-    ABSL_RETURN_IF_ERROR(stmt.ClearBindings());
+    RETURN_IF_ERROR(stmt.Reset());
+    RETURN_IF_ERROR(stmt.ClearBindings());
     return &stmt;
   }
 
-  ABSL_ASSIGN_OR_RETURN(Statement new_stmt, Statement::Prepare(*this, sql));
+  ASSIGN_OR_RETURN(Statement new_stmt, Statement::Prepare(*this, sql));
   auto owned = std::make_unique<Statement>(std::move(new_stmt));
   Statement *raw = owned.get();
   auto [it, inserted] =
@@ -380,7 +380,7 @@ absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body,
   }
   // The safety level can only change outside a transaction (sqlite3.c:
   // "Safety level may not be changed inside a transaction").
-  ABSL_RETURN_IF_ERROR(Exec("PRAGMA synchronous=FULL"));
+  RETURN_IF_ERROR(Exec("PRAGMA synchronous=FULL"));
   sync_transaction_ = true;
   absl::Status status = RunTransaction(body);
   sync_transaction_ = false;
@@ -396,9 +396,9 @@ absl::Status Connection::RunTransaction(
     if (ProtocolEvents *observer = ObserverOf(db_)) {
       observer->SqliteTransaction(sync_transaction_);
     }
-    ABSL_RETURN_IF_ERROR(Exec("BEGIN IMMEDIATE"));
+    RETURN_IF_ERROR(Exec("BEGIN IMMEDIATE"));
   } else {
-    ABSL_RETURN_IF_ERROR(Exec(absl::StrCat("SAVEPOINT sp_", depth)));
+    RETURN_IF_ERROR(Exec(absl::StrCat("SAVEPOINT sp_", depth)));
   }
   ++savepoint_depth_;
 
@@ -485,9 +485,9 @@ absl::Status ApplyOpenPragmas(Connection &conn) {
   // durable (audit crash F9).
   std::string journal_mode;
   {
-    ABSL_ASSIGN_OR_RETURN(Statement mode,
-                          Statement::Prepare(conn, "PRAGMA journal_mode=WAL"));
-    ABSL_ASSIGN_OR_RETURN(bool has_row, mode.Step());
+    ASSIGN_OR_RETURN(Statement mode,
+                     Statement::Prepare(conn, "PRAGMA journal_mode=WAL"));
+    ASSIGN_OR_RETURN(bool has_row, mode.Step());
     RET_CHECK(has_row) << "PRAGMA journal_mode=WAL returned no row";
     journal_mode = mode.Column<std::string>(0);
   }
@@ -504,14 +504,14 @@ absl::Status ApplyOpenPragmas(Connection &conn) {
               "shared memory";
   }
 
-  ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA synchronous=NORMAL"));
-  ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA foreign_keys=ON"));
+  RETURN_IF_ERROR(conn.Exec("PRAGMA synchronous=NORMAL"));
+  RETURN_IF_ERROR(conn.Exec("PRAGMA foreign_keys=ON"));
   // No busy_timeout (SQLite's default is none): one daemon owns a cache
   // database (the flock main.cc takes), so a lock that is not free is a
   // reader that overlaps the shutdown checkpoint or a bug, and either gets an
   // immediate, clear error, not a retry that waits out a timer (style guide,
   // "no timers"). No busy handler is set anywhere else.
-  ABSL_RETURN_IF_ERROR(conn.Exec("PRAGMA temp_store=MEMORY"));
+  RETURN_IF_ERROR(conn.Exec("PRAGMA temp_store=MEMORY"));
   return absl::OkStatus();
 }
 
@@ -534,7 +534,7 @@ absl::StatusOr<Connection> ConnectionFactory::Open() const {
   Connection conn(*db);
   if (rc != SQLITE_OK) return conn.LastErrorStatus();
 
-  ABSL_RETURN_IF_ERROR(ApplyOpenPragmas(conn));
+  RETURN_IF_ERROR(ApplyOpenPragmas(conn));
   return conn;
 }
 

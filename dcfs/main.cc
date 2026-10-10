@@ -96,11 +96,10 @@ absl::Status UsageError(std::string_view message) {
 // surrounding whitespace. Read by path: startup is the one time dcfs uses
 // paths.
 absl::StatusOr<std::string> ReadProcValue(const char *path) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
-                        syscalls::openat(AT_FDCWD, path, O_RDONLY));
+  ASSIGN_OR_RETURN(FileDescriptor fd,
+                   syscalls::openat(AT_FDCWD, path, O_RDONLY));
   absl::FixedArray<char> buf(64);
-  ABSL_ASSIGN_OR_RETURN(size_t n,
-                        syscalls::pread(*fd, buf.data(), buf.size(), 0));
+  ASSIGN_OR_RETURN(size_t n, syscalls::pread(*fd, buf.data(), buf.size(), 0));
   return std::string(
       absl::StripAsciiWhitespace(std::string_view(buf.data(), n)));
 }
@@ -195,13 +194,13 @@ absl::StatusOr<FileDescriptor> OpenHardenedCacheFile(
     return opened.status();
   }
   FileDescriptor result = *std::move(opened);
-  ABSL_ASSIGN_OR_RETURN(struct stat st, syscalls::fstat(*result));
+  ASSIGN_OR_RETURN(struct stat st, syscalls::fstat(*result));
   if (!S_ISREG(st.st_mode)) {
     return FailedPreconditionErrorBuilder() << path << " is not a regular file";
   }
-  ABSL_RETURN_IF_ERROR(CheckNoMoreAccessThanRoot(path, st, backing_root));
+  RETURN_IF_ERROR(CheckNoMoreAccessThanRoot(path, st, backing_root));
   if ((st.st_mode & 07777) != 0600) {
-    ABSL_RETURN_IF_ERROR(syscalls::fchmod(*result, 0600));
+    RETURN_IF_ERROR(syscalls::fchmod(*result, 0600));
     LOG(WARNING) << path << " was mode "
                  << absl::StrFormat("0%o", st.st_mode & 07777)
                  << "; tightened to 0600 (it holds cache data as sensitive "
@@ -322,9 +321,9 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   // never through a path again, which is what makes mounting dcfs back over
   // SOURCE itself (a supported configuration) safe. `backing.tree` keeps a
   // captured clone alive.
-  ABSL_ASSIGN_OR_RETURN(OpenedBacking backing_tree, OpenBacking(args, options));
+  ASSIGN_OR_RETURN(OpenedBacking backing_tree, OpenBacking(args, options));
   FileDescriptor source_fd = std::move(backing_tree.root);
-  ABSL_ASSIGN_OR_RETURN(struct stat backing_root, syscalls::fstat(*source_fd));
+  ASSIGN_OR_RETURN(struct stat backing_root, syscalls::fstat(*source_fd));
 
   // The cache database holds metadata as sensitive as the backing tree's --
   // every cached name, attribute, xattr and symlink target, including those
@@ -344,7 +343,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
           return absl::StatusBuilder(st.status())
                  << "cache database directory " << parent;
         }
-        ABSL_RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, parent, 0700))
+        RETURN_IF_ERROR(syscalls::mkdirat(AT_FDCWD, parent, 0700))
             << "creating cache database directory " << parent;
       } else if ((st->st_mode & (S_IRWXG | S_IRWXO)) != 0) {
         LOG(WARNING) << "cache database directory " << parent
@@ -370,8 +369,8 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   // one (a symlink, or a file some other user owns).
   FileDescriptor db_lock;
   {
-    ABSL_ASSIGN_OR_RETURN(db_lock,
-                          OpenHardenedCacheFile(cache_db, /*create=*/true, backing_root));
+    ASSIGN_OR_RETURN(db_lock, OpenHardenedCacheFile(cache_db, /*create=*/true,
+                                                    backing_root));
     if (absl::Status locked = syscalls::flock(*db_lock, LOCK_EX | LOCK_NB);
         !locked.ok()) {
       if (StatusToErrno(locked) == EWOULDBLOCK) {
@@ -391,16 +390,15 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   // as the main file, checked here -- before ConnectionFactory::Open()
   // below gives SQLite a chance to open it instead.
   for (const char *suffix : {"-wal", "-shm"}) {
-    ABSL_ASSIGN_OR_RETURN(
-        FileDescriptor companion,
-        OpenHardenedCacheFile(absl::StrCat(cache_db, suffix),
-                               /*create=*/false, backing_root));
+    ASSIGN_OR_RETURN(FileDescriptor companion,
+                     OpenHardenedCacheFile(absl::StrCat(cache_db, suffix),
+                                           /*create=*/false, backing_root));
     // Nothing more to do with it than the check (and the possible fchmod)
     // OpenHardenedCacheFile just did: SQLite opens the real thing itself.
   }
 
-  ABSL_ASSIGN_OR_RETURN(
-      sqlite3::Connection db, sqlite3::ConnectionFactory{.path = cache_db}.Open());
+  ASSIGN_OR_RETURN(sqlite3::Connection db,
+                   sqlite3::ConnectionFactory{.path = cache_db}.Open());
   MountFds mounts;
   absl::BitGen bitgen;
   Context ctx{db, mounts, bitgen};
@@ -422,13 +420,13 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
                  << absl::FormatDuration(ctx.dirty.atime_expiry);
   }
 
-  ABSL_ASSIGN_OR_RETURN(RootIdentity root, backing::ProbeRoot(ctx, *source_fd));
-  ABSL_RETURN_IF_ERROR(Migrate(db, root));
+  ASSIGN_OR_RETURN(RootIdentity root, backing::ProbeRoot(ctx, *source_fd));
+  RETURN_IF_ERROR(Migrate(db, root));
   // backing::InitRoot() also refuses a cache database built for a different
   // filesystem, but can't be given a --cache_db path or an actionable
   // suggestion to put in its error (it only sees fds, not flags); do that
   // check here instead, before InitRoot, so the message names both.
-  ABSL_ASSIGN_OR_RETURN(DeviceId stored_device, GetSourceDeviceId(db));
+  ASSIGN_OR_RETURN(DeviceId stored_device, GetSourceDeviceId(db));
   if (stored_device != root.device_id) {
     return FailedPreconditionErrorBuilder()
            << "Cache database " << cache_db << " was created for filesystem "
@@ -443,15 +441,15 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   // reusing it would serve the old directory's cached tree -- whose handles
   // still decode on this filesystem -- under the new one.
   {
-    ABSL_ASSIGN_OR_RETURN(cache::CachedAttr stored_root,
-                          cache::GetAttr(ctx, cache::kRootInode));
+    ASSIGN_OR_RETURN(cache::CachedAttr stored_root,
+                     cache::GetAttr(ctx, cache::kRootInode));
     absl::StatusOr<FileHandle> stored_handle =
         cache::GetHandle(ctx, cache::kRootInode);
     if (!stored_handle.ok() && !absl::IsNotFound(stored_handle.status())) {
       return stored_handle.status();
     }
-    ABSL_ASSIGN_OR_RETURN(FileHandle handle,
-                          FileHandle::FromFd(*source_fd, root.device_id));
+    ASSIGN_OR_RETURN(FileHandle handle,
+                     FileHandle::FromFd(*source_fd, root.device_id));
     const bool same =
         stored_root.backing_ino == root.backing_ino &&
         (stored_root.backing_gen == 0 || root.backing_gen == 0 ||
@@ -469,8 +467,8 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   }
   // Before anything reads the cache: after an unclean shutdown, forget
   // whatever the dirty set says a power loss may have made wrong.
-  ABSL_ASSIGN_OR_RETURN(std::string boot_id, ReadBootId());
-  ABSL_RETURN_IF_ERROR(backing::Startup(ctx, std::move(source_fd), boot_id));
+  ASSIGN_OR_RETURN(std::string boot_id, ReadBootId());
+  RETURN_IF_ERROR(backing::Startup(ctx, std::move(source_fd), boot_id));
 
   DirCacheFS::Options opts{
       .attr_timeout = absl::Seconds(absl::GetFlag(FLAGS_attr_timeout_sec)),
@@ -539,7 +537,7 @@ absl::StatusOr<int> RunDaemon(const MountRequest &request) {
   // The lock the umount helper waits on, held until this process exits
   // (dcfs/umount_helper.h).
   absl::StatusOr<DaemonLock> daemon_lock = [&]() -> absl::StatusOr<DaemonLock> {
-    ABSL_ASSIGN_OR_RETURN(std::string mountinfo, ReadMountinfo());
+    ASSIGN_OR_RETURN(std::string mountinfo, ReadMountinfo());
     return HoldDaemonLock(mountinfo, *canonical);
   }();
   if (!daemon_lock.ok()) {

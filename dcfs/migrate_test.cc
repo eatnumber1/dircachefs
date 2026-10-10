@@ -53,13 +53,13 @@ RootIdentity TestRoot() {
 
 absl::StatusOr<int64_t> CountRows(sqlite3::Connection &db,
                                    std::string_view from_where) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       db.Prepared(absl::StrCat("SELECT COUNT(*) FROM ", from_where)));
-  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  ASSIGN_OR_RETURN(bool has_row, stmt->Step());
   RET_CHECK(has_row);
   int64_t count = stmt->Column<int64_t>(0);
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  RETURN_IF_ERROR(stmt->Reset());
   return count;
 }
 
@@ -344,7 +344,7 @@ TEST_F(MigrateTest, MissingCacheStateRowIsCorrupt) {
 // `refused` column (amendment 12, step 4.8) -- dropped here since this
 // starts from a fresh (current-schema) database, which already has it.
 absl::Status DowngradeToV1(sqlite3::Connection &db, const DeviceId &device) {
-  ABSL_RETURN_IF_ERROR(db.ExecScript(
+  RETURN_IF_ERROR(db.ExecScript(
       "DROP TRIGGER inodes_delete_unknowns; "
       "CREATE TABLE dentries_v1 (parent INTEGER NOT NULL REFERENCES "
       "inodes (id) ON DELETE CASCADE, name BLOB NOT NULL, inode INTEGER "
@@ -362,11 +362,11 @@ absl::Status DowngradeToV1(sqlite3::Connection &db, const DeviceId &device) {
       "CREATE TABLE meta (key TEXT PRIMARY KEY, value ANY) STRICT; "
       "INSERT INTO meta VALUES ('schema_version', '1'), "
       "('gen_counter', '12345');"));
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       db.Prepared("INSERT INTO meta VALUES ('source_device_id', ?)"));
   std::string bytes = device.Serialize();
-  ABSL_RETURN_IF_ERROR(stmt->Bind(1, std::string_view(bytes)));
+  RETURN_IF_ERROR(stmt->Bind(1, std::string_view(bytes)));
   return stmt->ExecuteOnce();
 }
 

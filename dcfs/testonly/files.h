@@ -20,12 +20,12 @@ namespace dcfs::testonly {
 // The whole contents of the file at `path`, read through the syscalls::
 // wrappers (for /proc files and small test files).
 inline absl::StatusOr<std::string> ReadFileToString(std::string_view path) {
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor fd,
-                        syscalls::openat(AT_FDCWD, path, O_RDONLY));
+  ASSIGN_OR_RETURN(FileDescriptor fd,
+                   syscalls::openat(AT_FDCWD, path, O_RDONLY));
   std::string contents;
   char buf[4096];
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::read(*fd, buf, sizeof(buf)));
+    ASSIGN_OR_RETURN(size_t n, syscalls::read(*fd, buf, sizeof(buf)));
     if (n == 0) return contents;
     contents.append(buf, n);
   }
@@ -35,14 +35,13 @@ inline absl::StatusOr<std::string> ReadFileToString(std::string_view path) {
 // with getdents64.
 inline absl::StatusOr<std::vector<std::string>> ListDirectory(
     std::string_view path) {
-  ABSL_ASSIGN_OR_RETURN(
-      FileDescriptor dir,
-      syscalls::openat(AT_FDCWD, path, O_RDONLY | O_DIRECTORY));
+  ASSIGN_OR_RETURN(FileDescriptor dir,
+                   syscalls::openat(AT_FDCWD, path, O_RDONLY | O_DIRECTORY));
   std::vector<std::string> names;
   std::vector<char> buf(32768);
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(
-        ssize_t n, syscalls::getdents64(*dir, buf.data(), buf.size()));
+    ASSIGN_OR_RETURN(ssize_t n,
+                     syscalls::getdents64(*dir, buf.data(), buf.size()));
     if (n == 0) break;
     for (ssize_t pos = 0; pos < n;) {
       const auto *entry =
@@ -60,16 +59,15 @@ inline absl::StatusOr<std::vector<std::string>> ListDirectory(
 // directory before its contents.
 inline absl::StatusOr<std::vector<std::string>> ListTree(
     std::string_view path) {
-  ABSL_ASSIGN_OR_RETURN(std::vector<std::string> names, ListDirectory(path));
+  ASSIGN_OR_RETURN(std::vector<std::string> names, ListDirectory(path));
   std::vector<std::string> all;
   for (const std::string &name : names) {
     const std::string child = std::string(path) + "/" + name;
     all.push_back(child);
-    ABSL_ASSIGN_OR_RETURN(
-        struct stat st,
-        syscalls::fstatat(AT_FDCWD, child, AT_SYMLINK_NOFOLLOW));
+    ASSIGN_OR_RETURN(struct stat st,
+                     syscalls::fstatat(AT_FDCWD, child, AT_SYMLINK_NOFOLLOW));
     if (S_ISDIR(st.st_mode)) {
-      ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below, ListTree(child));
+      ASSIGN_OR_RETURN(std::vector<std::string> below, ListTree(child));
       all.insert(all.end(), below.begin(), below.end());
     }
   }
@@ -93,7 +91,7 @@ inline void RemoveAll(std::string_view path) {
 
 // The size in bytes of the file at `path`.
 inline absl::StatusOr<off_t> FileSize(std::string_view path) {
-  ABSL_ASSIGN_OR_RETURN(struct stat st, syscalls::fstatat(AT_FDCWD, path));
+  ASSIGN_OR_RETURN(struct stat st, syscalls::fstatat(AT_FDCWD, path));
   return st.st_size;
 }
 

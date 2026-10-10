@@ -47,7 +47,7 @@ absl::StatusOr<RawHandle> NameToHandle(int dirfd, std::string_view pathname,
   handle->handle_bytes = MAX_HANDLE_SZ;
 
   int mount_id = 0;
-  ABSL_RETURN_IF_ERROR(
+  RETURN_IF_ERROR(
       syscalls::name_to_handle_at(dirfd, pathname, *handle, mount_id, flags));
 
   RawHandle raw;
@@ -88,7 +88,7 @@ absl::StatusOr<FileHandle> FileHandle::Parse(std::string_view data) {
            << data.size() << " bytes";
   }
 
-  ABSL_ASSIGN_OR_RETURN(DeviceId device, DeviceId::Parse(data.substr(0, 24)));
+  ASSIGN_OR_RETURN(DeviceId device, DeviceId::Parse(data.substr(0, 24)));
 
   uint32_t type = 0;
   for (int i = 0; i < 4; ++i) {
@@ -114,7 +114,7 @@ std::string FileHandle::ToString() const {
 }
 
 absl::StatusOr<FileHandle> FileHandle::FromFd(int fd, DeviceId device) {
-  ABSL_ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(fd, "", AT_EMPTY_PATH));
+  ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(fd, "", AT_EMPTY_PATH));
 
   FileHandle fh;
   fh.device = std::move(device);
@@ -124,26 +124,25 @@ absl::StatusOr<FileHandle> FileHandle::FromFd(int fd, DeviceId device) {
 }
 
 absl::StatusOr<FileHandle> FileHandle::FromFd(int fd) {
-  ABSL_ASSIGN_OR_RETURN(DeviceId device, GetDeviceId(fd));
+  ASSIGN_OR_RETURN(DeviceId device, GetDeviceId(fd));
   return FromFd(fd, std::move(device));
 }
 
 absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
                                                      std::string_view name) {
-  ABSL_ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(dirfd, name, 0));
+  ASSIGN_OR_RETURN(RawHandle raw, NameToHandle(dirfd, name, 0));
 
   // Only a directory can be a mount point (or, for Btrfs, a sub-volume
   // boundary), so if `name` isn't one, it necessarily shares dirfd's
   // filesystem. Check cheaply via statx's mount id before ever opening
   // `name` itself.
   unsigned int want_mnt_id = STATX_MNT_ID_UNIQUE | STATX_MNT_ID;
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       struct statx entry_stx,
       syscalls::statx(dirfd, name, AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC,
-                       STATX_TYPE | want_mnt_id));
-  ABSL_ASSIGN_OR_RETURN(
-      struct statx dir_stx,
-      syscalls::statx(dirfd, "", AT_EMPTY_PATH, want_mnt_id));
+                      STATX_TYPE | want_mnt_id));
+  ASSIGN_OR_RETURN(struct statx dir_stx,
+                   syscalls::statx(dirfd, "", AT_EMPTY_PATH, want_mnt_id));
 
   std::optional<uint64_t> entry_mnt_id = MountIdFromStatx(entry_stx);
   std::optional<uint64_t> dir_mnt_id = MountIdFromStatx(dir_stx);
@@ -155,15 +154,15 @@ absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
     // safe to require via O_DIRECTORY. O_NOFOLLOW keeps a symlink named
     // `name` (which could never reach this branch, but just in case) from
     // being followed.
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         FileDescriptor entry_fd,
         syscalls::openat(dirfd, name, O_PATH | O_DIRECTORY | O_NOFOLLOW));
-    ABSL_ASSIGN_OR_RETURN(device, GetDeviceId(*entry_fd));
+    ASSIGN_OR_RETURN(device, GetDeviceId(*entry_fd));
   } else {
     // Same filesystem as dirfd (or the kernel didn't report a mount id at
     // all, in which case assuming "same filesystem" is the best available
     // answer).
-    ABSL_ASSIGN_OR_RETURN(device, GetDeviceId(dirfd));
+    ASSIGN_OR_RETURN(device, GetDeviceId(dirfd));
   }
 
   FileHandle fh;
@@ -175,7 +174,7 @@ absl::StatusOr<FileHandle> FileHandle::FromDirEntry(int dirfd,
 
 absl::StatusOr<FileDescriptor> FileHandle::Open(const MountFds &mounts,
                                                  int flags) const {
-  ABSL_ASSIGN_OR_RETURN(int mount_fd, mounts.Get(device));
+  ASSIGN_OR_RETURN(int mount_fd, mounts.Get(device));
 
   absl::FixedArray<uint8_t> buf(sizeof(struct file_handle) + bytes.size());
   auto *handle = reinterpret_cast<struct file_handle *>(buf.data());

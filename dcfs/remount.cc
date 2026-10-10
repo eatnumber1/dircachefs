@@ -19,14 +19,13 @@
 namespace dcfs {
 
 absl::StatusOr<std::string> ReadMountinfo() {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       FileDescriptor mountinfo,
       syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
   std::string contents;
   char buf[65536];
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(size_t n,
-                          syscalls::read(*mountinfo, buf, sizeof(buf)));
+    ASSIGN_OR_RETURN(size_t n, syscalls::read(*mountinfo, buf, sizeof(buf)));
     if (n == 0) break;
     contents.append(buf, n);
   }
@@ -34,8 +33,8 @@ absl::StatusOr<std::string> ReadMountinfo() {
 }
 
 absl::Status RemountDcfs(std::string_view mountpoint, bool read_only) {
-  ABSL_ASSIGN_OR_RETURN(std::string canonical, syscalls::realpath(mountpoint));
-  ABSL_ASSIGN_OR_RETURN(std::string contents, ReadMountinfo());
+  ASSIGN_OR_RETURN(std::string canonical, syscalls::realpath(mountpoint));
+  ASSIGN_OR_RETURN(std::string contents, ReadMountinfo());
   std::optional<unsigned long> flags =
       RemountFlags(contents, canonical, read_only);
   if (!flags.has_value()) {

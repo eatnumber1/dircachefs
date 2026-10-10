@@ -79,11 +79,11 @@ absl::StatusOr<DaemonLock> HoldDaemonLock(std::string_view mountinfo,
            << "The FUSE mount of " << EscapeBytes(mountpoint)
            << " is not in /proc/self/mountinfo";
   }
-  ABSL_RETURN_IF_ERROR(MakeLockDir(dir));
+  RETURN_IF_ERROR(MakeLockDir(dir));
   DaemonLock lock{.path = DaemonLockPath(*device, dir)};
   bool announced = false;
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(
+    ASSIGN_OR_RETURN(
         FileDescriptor fd,
         syscalls::openat(AT_FDCWD, lock.path, O_RDWR | O_CREAT, 0600));
     if (absl::Status locked = syscalls::flock(*fd, LOCK_EX | LOCK_NB);
@@ -97,12 +97,12 @@ absl::StatusOr<DaemonLock> HoldDaemonLock(std::string_view mountinfo,
                   << " is locked); waiting for it to exit";
         announced = true;
       }
-      ABSL_RETURN_IF_ERROR(BlockingLock(*fd, LOCK_EX, /*retry_signals=*/false,
-                                        "waiting for the lock " + lock.path));
+      RETURN_IF_ERROR(BlockingLock(*fd, LOCK_EX, /*retry_signals=*/false,
+                                   "waiting for the lock " + lock.path));
     }
     // The holder removes the file before it exits: the file this lock is on
     // may no longer be the one at the path.
-    ABSL_ASSIGN_OR_RETURN(struct stat held, syscalls::fstat(*fd));
+    ASSIGN_OR_RETURN(struct stat held, syscalls::fstat(*fd));
     absl::StatusOr<struct stat> named = syscalls::fstatat(AT_FDCWD, lock.path);
     if (named.ok() && SameFile(held, *named)) {
       // Never closed: the kernel releases the lock when this process exits.
@@ -168,7 +168,7 @@ absl::Status UmountAndWait(const UmountArgs &args) {
   std::vector<std::string> command = {"umount", "-i"};
   command.insert(command.end(), args.forwarded.begin(), args.forwarded.end());
   command.push_back(args.target);
-  ABSL_ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
+  ASSIGN_OR_RETURN(pid_t child, syscalls::fork());
   if (child == 0) {
     std::vector<char *> argv;
     for (const std::string &arg : command) {
@@ -196,7 +196,7 @@ absl::Status UmountAndWait(const UmountArgs &args) {
   // Did this unmount end the superblock? Its fusectl directory is gone (no
   // links) if so: a bind mount, an rbind, a copy in another namespace or `-r`
   // on a busy mount leave it, and the daemon serving it.
-  ABSL_ASSIGN_OR_RETURN(struct stat dir, syscalls::fstat(**connection));
+  ASSIGN_OR_RETURN(struct stat dir, syscalls::fstat(**connection));
   if (dir.st_nlink != 0) return absl::OkStatus();
   // Blocks until the daemon exits (its exclusive lock goes with it). A signal
   // ends the wait: Ctrl-C, or systemd killing the helper; one that is not

@@ -492,25 +492,25 @@ struct FakeMount {
 
 absl::StatusOr<FakeMount> AddFakeMount(Context &ctx, std::string_view name) {
   const DeviceId device = OtherDevice();
-  ABSL_RETURN_IF_ERROR(cache::AddFilesystem(ctx, device, 0x1234, kRootInode,
-                                            std::string(name)));
+  RETURN_IF_ERROR(
+      cache::AddFilesystem(ctx, device, 0x1234, kRootInode, std::string(name)));
   struct statx stx {};
   stx.stx_mode = S_IFDIR | 0755;
   stx.stx_ino = 2;
   FileHandle handle{.device = device, .handle_type = 1, .bytes = {1, 2, 3}};
   FakeMount mount;
-  ABSL_ASSIGN_OR_RETURN(cache::UpsertResult root,
-                        cache::UpsertInode(ctx, handle, stx, 0));
+  ASSIGN_OR_RETURN(cache::UpsertResult root,
+                   cache::UpsertInode(ctx, handle, stx, 0));
   mount.root = root.id;
-  ABSL_RETURN_IF_ERROR(cache::EnsureDirectory(ctx, mount.root));
-  ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, kRootInode, name, mount.root));
+  RETURN_IF_ERROR(cache::EnsureDirectory(ctx, mount.root));
+  RETURN_IF_ERROR(cache::LinkDentry(ctx, kRootInode, name, mount.root));
   stx.stx_mode = S_IFREG | 0644;
   stx.stx_ino = 3;
   handle.bytes = {4, 5, 6};
-  ABSL_ASSIGN_OR_RETURN(cache::UpsertResult child,
-                        cache::UpsertInode(ctx, handle, stx, 0));
+  ASSIGN_OR_RETURN(cache::UpsertResult child,
+                   cache::UpsertInode(ctx, handle, stx, 0));
   mount.child = child.id;
-  ABSL_RETURN_IF_ERROR(cache::LinkDentry(ctx, mount.root, "child", child.id));
+  RETURN_IF_ERROR(cache::LinkDentry(ctx, mount.root, "child", child.id));
   return mount;
 }
 

@@ -39,7 +39,7 @@ absl::StatusOr<std::string> ReadReport(int fd) {
   std::string bytes;
   char buf[4096];
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buf, sizeof(buf)));
+    ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buf, sizeof(buf)));
     if (n == 0) return bytes;
     bytes.append(buf, n);
   }
@@ -50,12 +50,12 @@ absl::StatusOr<std::string> ReadReport(int fd) {
 // /dev/null (a daemon that kept the wrapper's pipes open would keep
 // whatever waits for the wrapper's output waiting too).
 absl::Status DetachDaemon() {
-  ABSL_RETURN_IF_ERROR(syscalls::setsid().status());
-  ABSL_RETURN_IF_ERROR(syscalls::chdir("/"));
-  ABSL_ASSIGN_OR_RETURN(FileDescriptor null,
-                        syscalls::openat(AT_FDCWD, "/dev/null", O_RDWR));
+  RETURN_IF_ERROR(syscalls::setsid().status());
+  RETURN_IF_ERROR(syscalls::chdir("/"));
+  ASSIGN_OR_RETURN(FileDescriptor null,
+                   syscalls::openat(AT_FDCWD, "/dev/null", O_RDWR));
   for (int fd : {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO}) {
-    ABSL_RETURN_IF_ERROR(syscalls::dup2(*null, fd));
+    RETURN_IF_ERROR(syscalls::dup2(*null, fd));
   }
   return absl::OkStatus();
 }
@@ -127,8 +127,7 @@ StartupReporter BecomeDaemon(FileDescriptor parent_end,
 }  // namespace
 
 absl::StatusOr<StartupReporter> ForkDaemon() {
-  ABSL_ASSIGN_OR_RETURN(
-      auto channel, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
+  ASSIGN_OR_RETURN(auto channel, syscalls::socketpair(AF_UNIX, SOCK_STREAM, 0));
   auto &[parent_end, child_end] = channel;
   return ForkSplit(
       [&] {

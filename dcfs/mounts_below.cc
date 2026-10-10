@@ -48,7 +48,7 @@ absl::StatusOr<std::string> ReadAll(int fd) {
   std::string contents;
   char buf[65536];
   while (true) {
-    ABSL_ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buf, sizeof(buf)));
+    ASSIGN_OR_RETURN(size_t n, syscalls::read(fd, buf, sizeof(buf)));
     if (n == 0) return contents;
     contents.append(buf, n);
   }
@@ -109,11 +109,11 @@ std::vector<std::string> MountPointsBelow(std::string_view mountinfo,
 
 absl::StatusOr<std::vector<std::string>> MountsBelow(
     std::string_view source_path) {
-  ABSL_ASSIGN_OR_RETURN(std::string source, Canonicalize(source_path));
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(std::string source, Canonicalize(source_path));
+  ASSIGN_OR_RETURN(
       FileDescriptor mountinfo,
       syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
-  ABSL_ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
+  ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
   return MountPointsBelow(contents, source);
 }
 
@@ -151,19 +151,18 @@ bool ForcedReadOnlyIn(std::string_view mountinfo, uint64_t mount_id) {
 }
 
 absl::StatusOr<bool> ForcedReadOnly(int fd) {
-  ABSL_ASSIGN_OR_RETURN(struct statx stx,
-                        syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MNT_ID));
+  ASSIGN_OR_RETURN(struct statx stx,
+                   syscalls::statx(fd, "", AT_EMPTY_PATH, STATX_MNT_ID));
   if ((stx.stx_mask & STATX_MNT_ID) == 0) return false;
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       FileDescriptor mountinfo,
       syscalls::openat(AT_FDCWD, "/proc/self/mountinfo", O_RDONLY));
-  ABSL_ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
+  ASSIGN_OR_RETURN(std::string contents, ReadAll(*mountinfo));
   return ForcedReadOnlyIn(contents, stx.stx_mnt_id);
 }
 
 absl::Status RefuseMountsBelow(std::string_view source_path) {
-  ABSL_ASSIGN_OR_RETURN(std::vector<std::string> below,
-                        MountsBelow(source_path));
+  ASSIGN_OR_RETURN(std::vector<std::string> below, MountsBelow(source_path));
   if (below.empty()) return absl::OkStatus();
   return FailedPreconditionErrorBuilder()
          << "dcfs does not yet support filesystems mounted below SOURCE: "
@@ -173,7 +172,7 @@ absl::Status RefuseMountsBelow(std::string_view source_path) {
 }
 
 absl::Status RefuseIfForcedReadOnly(int fd, std::string_view source) {
-  ABSL_ASSIGN_OR_RETURN(bool forced_read_only, ForcedReadOnly(fd));
+  ASSIGN_OR_RETURN(bool forced_read_only, ForcedReadOnly(fd));
   if (!forced_read_only) return absl::OkStatus();
   return FailedPreconditionErrorBuilder()
          << "SOURCE " << source

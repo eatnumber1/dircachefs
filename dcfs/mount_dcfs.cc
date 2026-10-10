@@ -263,9 +263,9 @@ absl::StatusOr<HelperOptions> SplitHelperOptionsImpl(
         split.native_type = std::string(*value);
       }
     } else if (name == "ro") {
-      ABSL_ASSIGN_OR_RETURN(split.read_only, ParseBoolOption(option, value));
+      ASSIGN_OR_RETURN(split.read_only, ParseBoolOption(option, value));
     } else if (name == "foreground") {
-      ABSL_ASSIGN_OR_RETURN(split.foreground, ParseBoolOption(option, value));
+      ASSIGN_OR_RETURN(split.foreground, ParseBoolOption(option, value));
     } else if (name == "cache_db") {
       if (!value.has_value() || value->empty()) {
         return BadOption(option, "needs a path");

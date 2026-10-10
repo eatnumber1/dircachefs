@@ -1,30 +1,5 @@
-# The long Status macros that still await the sweep to the short names (step
-# 25.17; docs/style.md, 1.6). tools/repo_shape.py refuses ABSL_RETURN_IF_ERROR
-# and ABSL_ASSIGN_OR_RETURN elsewhere. A count here must equal the file's, and
-# the list only shrinks (an empty list is the goal). FORMAT: path count | reason
-dcfs/absolute_paths.cc 1 | sweep 25.17
-dcfs/backing.cc 192 | sweep 25.17
-dcfs/backing_capture.cc 18 | sweep 25.17
-dcfs/backing_test.cc 6 | sweep 25.17
-dcfs/device_id.cc 5 | sweep 25.17
-dcfs/device_id_test.cc 1 | sweep 25.17
-dcfs/dir_cache_fs.cc 148 | sweep 25.17
-dcfs/dir_cache_fs_test.cc 7 | sweep 25.17
-dcfs/file_handle.cc 11 | sweep 25.17
-dcfs/fsck.cc 6 | sweep 25.17
-dcfs/main.cc 19 | sweep 25.17
-dcfs/metadata_cache.cc 200 | sweep 25.17
-dcfs/metadata_cache_test.cc 19 | sweep 25.17
-dcfs/migrate.cc 65 | sweep 25.17
-dcfs/migrate_test.cc 6 | sweep 25.17
-dcfs/mount_dcfs.cc 2 | sweep 25.17
-dcfs/mounts_below.cc 9 | sweep 25.17
-dcfs/remount.cc 4 | sweep 25.17
-dcfs/sqlite.cc 16 | sweep 25.17
-dcfs/sqlite_test.cc 10 | sweep 25.17
-dcfs/startup_channel.cc 6 | sweep 25.17
-dcfs/status_test.cc 1 | sweep 25.17
-dcfs/umount_helper.cc 6 | sweep 25.17
-dcfs/testonly/files.h 8 | sweep 25.17
-dcfs/testonly/invariant_checker.cc 63 | sweep 25.17
-dcfs/testonly/trace_recorder_test.cc 6 | sweep 25.17
+# The long Status macros, ABSL_RETURN_IF_ERROR and ABSL_ASSIGN_OR_RETURN, are
+# refused everywhere in dcfs/, bench/ and tools/ (step 25.17; docs/style.md,
+# 1.6), and this list is empty: nothing is left to sweep. FORMAT: path count |
+# reason. A count here must equal the file's, and the list only grows if russ
+# rules a case in (it has never been needed).

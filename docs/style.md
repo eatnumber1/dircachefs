@@ -407,7 +407,7 @@ a pattern to copy. Never `assert`.
    in production code. A code with no helper uses
    `absl::StatusBuilder(absl::StatusCode::kX)` directly.
 3. Context on a status from elsewhere: `absl::StatusBuilder(status) <<
-   "..."` or `ABSL_RETURN_IF_ERROR(expr) << "..."` (tested,
+   "..."` or `RETURN_IF_ERROR(expr) << "..."` (tested,
    `status_test.cc`; used in `main.cc` and `device_id.cc`).
 
 **StatusBuilder keeps the errno payload.** Verified three ways. The header:
@@ -471,7 +471,7 @@ added`, so each function adds only what the reader above it cannot know.
    later starts in lower case (`while opening the backing file`) and does
    not begin with `;` or a space.
 5. **Not every function needs to add context**: a bare
-   `ABSL_RETURN_IF_ERROR(Foo())` is right when the callee's message
+   `RETURN_IF_ERROR(Foo())` is right when the callee's message
    already says it. Do not add a line that repeats the callee's.
 
 A syscall failure names the call and the arguments that identify the
@@ -491,8 +491,8 @@ absl::StatusOr<std::string> Open(std::string_view path) {
 }
 absl::StatusOr<std::string> ReadAtOffset(const BackingFile &file,
                                          off_t offset) {
-  ABSL_RETURN_IF_ERROR(Seek(file, offset)) << "while seeking the file";
-  ABSL_ASSIGN_OR_RETURN(
+  RETURN_IF_ERROR(Seek(file, offset)) << "while seeking the file";
+  ASSIGN_OR_RETURN(
       std::string contents, ReadContents(file),
       // `offset` is named because it was not passed to ReadContents
       _ << "while reading the file contents at offset " << offset);

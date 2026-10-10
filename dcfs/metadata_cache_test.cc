@@ -89,13 +89,13 @@ struct statx Stx(uint64_t ino, mode_t mode, int64_t seed = 0) {
 
 absl::StatusOr<int64_t> CountRows(sqlite3::Connection &db,
                                   std::string_view from_where) {
-  ABSL_ASSIGN_OR_RETURN(
+  ASSIGN_OR_RETURN(
       sqlite3::Statement * stmt,
       db.Prepared(absl::StrCat("SELECT COUNT(*) FROM ", from_where)));
-  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  ASSIGN_OR_RETURN(bool has_row, stmt->Step());
   RET_CHECK(has_row);
   int64_t count = stmt->Column<int64_t>(0);
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  RETURN_IF_ERROR(stmt->Reset());
   return count;
 }
 
@@ -159,16 +159,16 @@ class MetadataCacheTest : public ::testing::Test {
   absl::StatusOr<InodeId> MakeDir(InodeId parent, std::string_view name,
                                   uint64_t ino,
                                   const DeviceId &device = kSource) {
-    ABSL_ASSIGN_OR_RETURN(UpsertResult r, Make(ino, S_IFDIR | 0755, device));
-    ABSL_RETURN_IF_ERROR(LinkDentry(ctx_, parent, name, r.id));
-    ABSL_RETURN_IF_ERROR(MarkDirComplete(ctx_, r.id, false));
+    ASSIGN_OR_RETURN(UpsertResult r, Make(ino, S_IFDIR | 0755, device));
+    RETURN_IF_ERROR(LinkDentry(ctx_, parent, name, r.id));
+    RETURN_IF_ERROR(MarkDirComplete(ctx_, r.id, false));
     return r.id;
   }
 
   // A whole sync point's worth of clearing, with nothing running between
   // its two halves (as backing::SyncBacking minus the syncfs).
   absl::Status SyncClear(std::span<const InodeId> keep = {}) {
-    ABSL_ASSIGN_OR_RETURN(SyncSnapshot synced, BeginSync(ctx_));
+    ASSIGN_OR_RETURN(SyncSnapshot synced, BeginSync(ctx_));
     return ClearDirty(ctx_, synced, keep);
   }
 
@@ -618,11 +618,10 @@ TEST_F(MetadataCacheTest, ListDirSpansBatchesAndAllowsWritesInCallback) {
                         EXPECT_EQ(name, absl::StrCat("e", count));
                         ++count;
                         // Reads and writes from inside the callback.
-                        ABSL_RETURN_IF_ERROR(
+                        RETURN_IF_ERROR(
                             Lookup(ctx_, kRootInode, name).status());
-                        ABSL_RETURN_IF_ERROR(
-                            SetNegative(ctx_, kRootInode,
-                                        absl::StrCat("neg", count)));
+                        RETURN_IF_ERROR(SetNegative(
+                            ctx_, kRootInode, absl::StrCat("neg", count)));
                         return true;
                       }),
               IsOk());
@@ -990,7 +989,7 @@ TEST_F(MetadataCacheTest, FuseGenerations) {
 TEST_F(MetadataCacheTest, ReusedIdAfterRollbackGetsNewGeneration) {
   UpsertResult before;
   absl::Status rolled_back = db_.Transaction([&]() -> absl::Status {
-    ABSL_ASSIGN_OR_RETURN(before, Make(100));
+    ASSIGN_OR_RETURN(before, Make(100));
     return absl::AbortedError("simulated loss of the tail of the WAL");
   });
   ASSERT_THAT(rolled_back, StatusIs(absl::StatusCode::kAborted));
@@ -1273,8 +1272,8 @@ TEST_F(MetadataCacheTest, XattrAbsentIsKnownWhileTheSetIsIncomplete) {
 
 TEST_F(MetadataCacheTest, WriteRollsBackWithCallersTransaction) {
   absl::Status status = db_.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(Make(80).status());
-    ABSL_RETURN_IF_ERROR(SetNegative(ctx_, kRootInode, "n"));
+    RETURN_IF_ERROR(Make(80).status());
+    RETURN_IF_ERROR(SetNegative(ctx_, kRootInode, "n"));
     return absl::AbortedError("caller gives up");
   });
   EXPECT_THAT(status, StatusIs(absl::StatusCode::kAborted));
@@ -1285,7 +1284,7 @@ TEST_F(MetadataCacheTest, WriteRollsBackWithCallersTransaction) {
 
   // And a failing nested write unwinds only itself.
   status = db_.Transaction([&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(SetNegative(ctx_, kRootInode, "kept"));
+    RETURN_IF_ERROR(SetNegative(ctx_, kRootInode, "kept"));
     EXPECT_THAT(PurgeFilesystem(ctx_, kSource),
                 StatusIs(absl::StatusCode::kInternal));
     EXPECT_THAT(UpsertRoot(ctx_, Handle(kThird, "x"), Stx(2, S_IFDIR), 0),
@@ -1348,12 +1347,12 @@ TEST_F(MetadataCacheTest, PruneDentriesNotIn) {
 // --- The durable dirty set ----------------------------------------------------
 
 absl::StatusOr<int> Synchronous(sqlite3::Connection &db) {
-  ABSL_ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
-                        db.Prepared("PRAGMA synchronous"));
-  ABSL_ASSIGN_OR_RETURN(bool has_row, stmt->Step());
+  ASSIGN_OR_RETURN(sqlite3::Statement * stmt,
+                   db.Prepared("PRAGMA synchronous"));
+  ASSIGN_OR_RETURN(bool has_row, stmt->Step());
   RET_CHECK(has_row);
   int level = stmt->Column<int>(0);
-  ABSL_RETURN_IF_ERROR(stmt->Reset());
+  RETURN_IF_ERROR(stmt->Reset());
   return level;
 }
 
@@ -1434,12 +1433,12 @@ TEST_F(MetadataCacheTest, EveryMutationKindDirtiesWhatItChanges) {
   ASSERT_THAT(MarkDirComplete(ctx_, b, true), IsOk());
 
   auto reset = [&]() -> absl::Status {
-    ABSL_RETURN_IF_ERROR(SyncClear());
+    RETURN_IF_ERROR(SyncClear());
     for (auto [id, ino] : {std::pair{a, 20}, std::pair{b, 21},
                            std::pair{f.id, 30}, std::pair{g.id, 31}}) {
-      ABSL_RETURN_IF_ERROR(UpdateAttr(ctx_, id, Stx(ino, S_IFREG)));
+      RETURN_IF_ERROR(UpdateAttr(ctx_, id, Stx(ino, S_IFREG)));
     }
-    ABSL_RETURN_IF_ERROR(MarkDirComplete(ctx_, a, true));
+    RETURN_IF_ERROR(MarkDirComplete(ctx_, a, true));
     return MarkDirComplete(ctx_, b, true);
   };
   auto valid = [&](InodeId id) {
