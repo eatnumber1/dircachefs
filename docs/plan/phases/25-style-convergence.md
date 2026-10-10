@@ -394,3 +394,29 @@ buffer and the vector is built from it once. The retry loop in
 `tools/repo_shape_fixed_arrays.txt` (an allowlist with reasons that only
 shrinks, empty if the sweep is complete), with its unit test. Owner:
 dcfs-mechanical.
+
+## 25.13 No code for the impossible: survivors block, confessions refused (russ, 2026-10-10, "I agree")
+
+Style 1.10a. Two mechanical checks and one backlog:
+1. **Surviving mutants fail the per-push job.** `mutation-changed`
+   (.github/workflows/ci.yml, tools/mutation/mutate.py `changed`) exits
+   non-zero when a C++ mutant of the touched functions survives the small
+   tier and trace validation (today: a summary line). Resolution is a
+   test, a deletion, or an `equivalent.txt` entry with a reason; the
+   job's summary says so next to each survivor. The TLA+ half (12.13)
+   stays advisory for now (its survivors are design findings). First run:
+   triage the backlog the last weekly `mutation-survivors` artifact lists
+   for the files the next pushes touch; a push that touches a function
+   with an old survivor pays for it then, which is the intended pressure.
+   Owner: dcfs-investigator for the job, the orchestrator files survivors.
+2. **Confession phrases refused.** `tools/repo_shape.py` refuses, in
+   comments of `dcfs/*.cc`, `dcfs/*.h` and `tools/*.cc` production files,
+   the phrases of style 1.10a ("cannot happen", "can't happen", "shouldn't
+   happen", "just in case", "be exact anyway", "defensive", "paranoia",
+   "for safety"; case-insensitive, word-bounded), outside
+   `tools/repo_shape_confessions.txt` (`path count | reason`, only
+   shrinks). Unit-test fixtures as the sleep check has. The first run's
+   hits are the backlog: each is deleted, turned into a RET_CHECK that
+   names the invariant, or listed with a reason. Owner: dcfs-mechanical,
+   after 25.12 (same file, same lane).
+3. The agent definitions carry the reachability question (done 2026-10-10).

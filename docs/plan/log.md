@@ -2681,3 +2681,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   repo_shape check) dispatched to a mechanical agent in lane-2. Fable's quota: the support
   articles say Max has a separate weekly Fable limit and do not say whether Fable also draws on
   the all-models meter or at what weight; russ offered an empirical before/after reading.
+- russ on GetGroups' unreachable retry: unnecessary code is a comprehension cost; ideas agreed
+  ("I agree"): style 1.10a (every branch names its reachable cause; confession phrases are
+  defects; surviving mutants block the merge), 25.13 queued (mutation-changed fails on C++
+  survivors; a repo_shape check on confession phrases with a shrinking allowlist), and the
+  reachability question added to all agent definitions.

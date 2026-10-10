@@ -524,6 +524,43 @@ more: about one line in four (3,706 of 15,580), saying why, not what.
 - `Status` returns with `ABSL_RETURN_IF_ERROR` are the normal shape of error
   handling and are not what this rule is about (section 1.6).
 
+### 1.10a Every branch names its reachable cause; no code for the impossible
+
+russ, 2026-10-10, on `GetGroups`'s "another thread cannot change ours, but
+be exact anyway" retry: "The loop in this method is obviously wrong and the
+comment even says so ... it's unnecessary code, and writing unnecessary
+code causes unnecessary cognitive overhead in comprehension of the code."
+
+- **A branch exists for an input or event the author can name.** Every
+  `if`, `else`, `continue`, early return and error path handles a case
+  that some concrete input, syscall answer or concurrent event reaches, and
+  where that is not obvious the comment says which. Code for a case that
+  cannot happen is not defensive; it is false documentation that every
+  reader must disprove for themselves. Delete it. If the impossibility is
+  an invariant worth asserting, assert it: a `RET_CHECK` that names the
+  invariant reports a violation as the bug it is, instead of handling it
+  as if it were expected (section 1.6; never a crash, docs/style.md
+  "No intentional crashes").
+- **A confession in a comment marks a defect.** "Cannot happen", "can't
+  happen", "shouldn't happen", "just in case", "be exact anyway",
+  "defensive", "paranoia", "for safety" next to a branch mean the author
+  knew the branch was unreachable and wrote it anyway. Mechanically:
+  `tools/repo_shape.py` refuses those phrases in comments of production
+  files (`dcfs/*.cc`, `dcfs/*.h`, `tools/*.cc`) outside an allowlist that
+  only shrinks (plan step 25.13).
+- **A surviving mutant is unnecessary code or a missing test, and either
+  blocks the merge.** The per-push mutation job (`mutation-changed`,
+  26.5b/26.5d) deletes and flips the code a push touches; a mutant that no
+  test kills is, from 25.13 on, a failure of that job, not a summary line.
+  It is resolved by a test that kills it, by deleting the code, or by an
+  entry in `tools/mutation/equivalent.txt` with a reason (the existing
+  mechanism for mutants that change no behaviour). An unreachable branch
+  is exactly a mutant that survives forever, so this is the check that
+  finds what nobody noticed.
+- **Reviewers ask the reachability question.** For every branch in a diff,
+  name the input that reaches it; a branch the reviewer cannot reach is a
+  finding, whatever the comment says.
+
 ### 1.11 No timers
 
 russ, 2026-10-09, on the restart race: "I don't like timers in our code.
