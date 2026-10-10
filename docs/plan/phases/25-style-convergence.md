@@ -420,3 +420,22 @@ Style 1.10a. Two mechanical checks and one backlog:
    names the invariant, or listed with a reason. Owner: dcfs-mechanical,
    after 25.12 (same file, same lane).
 3. The agent definitions carry the reachability question (done 2026-10-10).
+
+## 25.14 No `dcfs::` inside dcfs; no `Dcfs` prefix (russ, 2026-10-10; after 25.12, lane-2)
+
+Style 1.3's two new paragraphs. Mechanical agent, two commits, check
+first each time: (1) `tools/repo_shape.py` refuses `dcfs::` outside
+`#define` lines in `dcfs/*.cc` and `dcfs/*.h` (tests included: they are
+in `namespace dcfs` too), with fixtures; then the 38 call sites lose the
+qualifier (`dcfs::DcfsErrnoToStatus` 27, `dcfs::ErrnoToStatus` 10,
+`dcfs::StatusToErrno` 1; `syscalls_backing.h:141` among them). (2)
+`repo_shape.py` refuses identifiers matching `^Dcfs[A-Z]` in `dcfs/*.h`
+and `dcfs/*.cc`; `DcfsErrnoToStatus` becomes `ProducedErrnoToStatus`
+(russ to confirm the name; the agent uses it unless told otherwise) with
+`status.h`'s comments and `docs/style.md` 1.6's mentions updated;
+`DcfsMountDevice` (`mount_dcfs.h:86`) is renamed to say what it is (the
+source device of a `fuse.dcfs` mount in mountinfo: e.g.
+`MountDeviceOfFuseDcfs`, with the contrast named in its comment) or
+allowlisted with that reason if no name reads better. No behaviour
+change; clang-format; `bazel test --config=fast //...` and
+`//tools/...` green.

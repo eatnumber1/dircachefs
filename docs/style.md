@@ -155,6 +155,33 @@ and `backing` (`ParentOf`, `SetXattr`, `RemoveXattr`) get distinguishing
 names (e.g. `BackingSetXattr`). A wrapper class is allowed only if the
 clashes turn out to be more than those three and renaming reads worse.
 
+**Inside `namespace dcfs`, names of `dcfs` are not qualified** (russ,
+2026-10-10, on `dcfs::DcfsErrnoToStatus(...)` in `backing.cc`: "We're
+already inside the dcfs namespace, so unless ambiguous, you should not
+name it"). `ErrnoToStatus(errno, "...")`, not `dcfs::ErrnoToStatus(...)`.
+The two exceptions: a macro body, which expands anywhere and so qualifies
+fully (`::dcfs::ErrnoToStatus`, as `status_macros.h` does), and a real
+ambiguity, which is named in a comment at the call. Unqualified lookup
+inside `dcfs` finds `dcfs::ErrnoToStatus` before `absl::ErrnoToStatus`
+regardless, so the qualifier never did anything there. Mechanically:
+`tools/repo_shape.py` refuses `dcfs::` outside `#define` lines in
+`dcfs/*.cc` and `dcfs/*.h` (plan step 25.14; today 38 calls).
+
+**A name says what distinguishes the thing from its siblings, and never
+repeats the namespace.** `DcfsErrnoToStatus` exists beside `ErrnoToStatus`
+because the two differ in origin: `ErrnoToStatus` forwards a syscall's
+answer, the other builds an errno dcfs itself chose (25.3). "Dcfs" names
+neither; inside `namespace dcfs` it is the namespace said twice. The
+distinguishing word goes in the name: `ProducedErrnoToStatus` beside
+`ErrnoToStatus` (matching the predicate `ProducedByDcfs`, where "Dcfs"
+is the contrast with the backing filesystem, not a prefix). Rule: an
+identifier in `dcfs/` production code does not begin with `Dcfs`; a
+project-name word elsewhere in a name is allowed only as a contrast with
+something that is not dcfs (`ProducedByDcfs`, the `fuse.dcfs` mount type)
+and the comment says what it contrasts with. Mechanically: `repo_shape.py`
+refuses identifiers matching `^Dcfs[A-Z]` in `dcfs/*.h` and `dcfs/*.cc`
+(25.14; today `DcfsErrnoToStatus` and `DcfsMountDevice`).
+
 ### 1.4 Enums
 
 `enum class`, nested inside the type it belongs to when it belongs to one

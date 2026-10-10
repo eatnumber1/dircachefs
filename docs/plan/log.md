@@ -2686,3 +2686,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   defects; surviving mutants block the merge), 25.13 queued (mutation-changed fails on C++
   survivors; a repo_shape check on confession phrases with a shrinking allowlist), and the
   reachability question added to all agent definitions.
+- russ on `dcfs::DcfsErrnoToStatus` in backing.cc: inside namespace dcfs names are not qualified
+  (style 1.3 now says so; 38 sites), and a name never repeats the namespace: the distinguishing
+  word is origin, so `DcfsErrnoToStatus` becomes `ProducedErrnoToStatus` (name proposed to russ).
+  25.14 queued for lane-2 after 25.12 (both edit repo_shape.py and backing.cc).
