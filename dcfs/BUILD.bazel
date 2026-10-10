@@ -164,6 +164,9 @@ qemu_cc_test(
 cc_library(
     name = "status",
     visibility = ["//dcfs/testonly:__pkg__"],
+    # Abseil's unprefixed RETURN_IF_ERROR / ASSIGN_OR_RETURN for every
+    # dependent (style 1.6, russ 2026-10-10); dcfs/status.h refuses to build
+    # without it.
     defines = ["ABSL_DEFINE_UNQUALIFIED_STATUS_MACROS"],
     hdrs = ["status.h"],
     srcs = [

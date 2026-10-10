@@ -284,9 +284,9 @@ void RestoreRoot(const SavedGroups &groups) {
       << ")";
 }
 
-// Switches to `caller`. fsgid and groups go before fsuid: setgroups needs
-// CAP_SETGID, and the order keeps the thread from ever being "the caller"
-// with root's groups.
+// Switches to `caller`. fsgid and groups go before fsuid so the thread is
+// never "the caller" with root's groups (setgroups would work after
+// setfsuid too: a nonzero fsuid does not drop CAP_SETGID).
 absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
   RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
   RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
