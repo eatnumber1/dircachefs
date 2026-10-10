@@ -10,6 +10,9 @@
 #include <cstdlib>
 #include <string>
 
+#include "absl/log/log_entry.h"
+#include "absl/log/log_sink.h"
+#include "absl/log/log_sink_registry.h"
 #include "absl/status/status.h"
 #include "absl/status/status_matchers.h"
 #include "dcfs/fd.h"
@@ -105,6 +108,23 @@ pid_t ForkHolder(const std::string &dir, int minor, bool unlink_it,
 // The daemon of a mount whose device an earlier daemon still holds waits for
 // it (it is exiting: a live mount holds its device number): the answer is a
 // lock, not a refusal.
+// Says on `fd` ('w') when the daemon logs that it is waiting for the holder:
+// the line is logged after the non-blocking attempt found the lock held and
+// just before the blocking one, so it is the event for "has reached the wait".
+class WaitingSink : public absl::LogSink {
+ public:
+  explicit WaitingSink(int fd) : fd_(fd) {}
+  void Send(const absl::LogEntry &entry) override {
+    if (entry.text_message().find("waiting for it to exit") !=
+        std::string_view::npos) {
+      (void)syscalls::write(fd_, "w", 1);
+    }
+  }
+
+ private:
+  int fd_;
+};
+
 void ExpectWaitsForTheHolder(int minor, bool holder_unlinks) {
   const std::string dir = LockDir("wait" + std::to_string(minor));
   (void)syscalls::mkdirat(AT_FDCWD, dir, 0700);
@@ -124,6 +144,8 @@ void ExpectWaitsForTheHolder(int minor, bool holder_unlinks) {
   absl::StatusOr<pid_t> waiter = syscalls::fork();
   ASSERT_THAT(waiter, IsOk());
   if (*waiter == 0) {
+    WaitingSink sink(*waiter_child);
+    absl::AddLogSink(&sink);
     absl::StatusOr<DaemonLock> lock = HoldDaemonLock(Info(minor), "/m", dir);
     // The file it holds is the one at the path, whatever the holder did.
     char answer = lock.ok() && syscalls::fstatat(AT_FDCWD, lock->path).ok()
@@ -132,7 +154,11 @@ void ExpectWaitsForTheHolder(int minor, bool holder_unlinks) {
     (void)syscalls::write(*waiter_child, &answer, 1);
     syscalls::_exit(0);
   }
-  // The holder lets go (exits); only then can the waiter have the lock.
+  // The holder lets go only once the waiter has said it is waiting (it
+  // would otherwise pass if the holder exited first, without the wait), and
+  // exiting is what lets the waiter have the lock.
+  ASSERT_THAT(syscalls::read(*waiter_parent, &byte, 1), IsOk());
+  ASSERT_EQ(byte, 'w');
   byte = 'r';
   ASSERT_THAT(syscalls::write(*holder_parent, &byte, 1), IsOk());
   int status = 0;

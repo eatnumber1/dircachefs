@@ -202,25 +202,40 @@ fi
 mkdir -p -m 0700 "$CACHE"
 mkdir -p "$SRC" "$RAW" "$MNT" /data /mnt/live /mnt/missing /mnt/fail /mnt/xfs /mnt/btrfs /tmp/other
 
-# restart_check: systemctl restart rp.mount rp-c.mount, three times (both
-# named, so systemctl waits for both jobs and its status is theirs: a restart
-# whose start failed fails here, not in a later `systemctl start`): both units
-# are active again with new daemons, the child's tree is served, and the
-# journal shows no failure. Prints why not on failure.
+# restart_check MODE: systemctl restart of rp.mount, three times. MODE both
+# names rp-c.mount too, so systemctl waits for both jobs and its status is
+# theirs; MODE parent names only rp.mount (the child's restart is propagated by
+# systemd: Requires=), and then `systemctl start rp-c.mount` waits for that
+# job. That start could start a child whose restart failed and so hide the
+# failure, so the journal since a cursor must show no failure line (the unit
+# the start would have started again leaves one: the helper's "in use", mount's
+# "Failed to mount"), and both daemons must have changed. Prints why not.
 restart_check() {
+	rc_mode=$1
 	rc_n=0
 	while [ "$rc_n" -lt 3 ]; do
 		rc_n=$((rc_n + 1))
 		rc_before=$(daemons | sort | tr '\n' ' ')
 		rc_cursor=$(cursor)
-		if ! systemctl restart rp.mount rp-c.mount 2>/tmp/restart.err; then
-			echo "restart $rc_n failed: $(cat /tmp/restart.err); rp.mount is $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount); $(journal_failures_since "$rc_cursor")"
+		if [ "$rc_mode" = both ]; then
+			systemctl restart rp.mount rp-c.mount 2>/tmp/restart.err
+		else
+			systemctl restart rp.mount 2>/tmp/restart.err && systemctl start rp-c.mount 2>>/tmp/restart.err
+		fi
+		rc_status=$?
+		rc_failures=$(journal_failures_since "$rc_cursor")
+		if [ "$rc_status" -ne 0 ]; then
+			echo "restart ($rc_mode) $rc_n failed: $(cat /tmp/restart.err); rp.mount is $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount); $rc_failures"
 			return 1
 		fi
-		rc_failures=$(journal_failures_since "$rc_cursor")
+		rc_after=$(daemons | sort | tr '\n' ' ')
+		rc_new=0
+		for rc_pid in $rc_after; do
+			case " $rc_before " in *" $rc_pid "*) ;; *) rc_new=$((rc_new + 1)) ;; esac
+		done
 		if [ "$(systemctl is-active rp.mount)" != active ] || [ "$(systemctl is-active rp-c.mount)" != active ] ||
-			[ "$(cat /rp/c/rc.txt 2>&1)" != rc ] || [ "$(daemons | sort | tr '\n' ' ')" = "$rc_before" ] || [ -n "$rc_failures" ]; then
-			echo "restart $rc_n left rp.mount $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount), rp/c: $(cat /rp/c/rc.txt 2>&1); daemons $rc_before -> $(daemons | sort | tr '\n' ' '); journal: $rc_failures"
+			[ "$(cat /rp/c/rc.txt 2>&1)" != rc ] || [ "$rc_new" -ne 2 ] || [ -n "$rc_failures" ]; then
+			echo "restart ($rc_mode) $rc_n left rp.mount $(systemctl is-active rp.mount), rp-c.mount $(systemctl is-active rp-c.mount), rp/c: $(cat /rp/c/rc.txt 2>&1); daemons $rc_before -> $rc_after ($rc_new new); journal: $rc_failures"
 			return 1
 		fi
 	done
@@ -691,10 +706,15 @@ EOF
 	mkdir -p /srv/rp/c /srv/rc /rp
 	echo rc >/srv/rc/rc.txt
 	systemctl start rp-c.mount
-	if restart_why=$(restart_check); then
+	if restart_why=$(restart_check parent); then
 		pass systemd-restart-parent-restarts-child
 	else
 		fail systemd-restart-parent-restarts-child "$restart_why"
+	fi
+	if restart_why=$(restart_check both); then
+		pass systemd-restart-two-named-units
+	else
+		fail systemd-restart-two-named-units "$restart_why"
 	fi
 	systemctl stop rp-c.mount rp.mount 2>/dev/null
 	systemctl restart data.mount data-sub.mount 2>"$OUT"

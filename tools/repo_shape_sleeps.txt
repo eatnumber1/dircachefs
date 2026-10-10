@@ -15,7 +15,7 @@ test/qemu/guest/fault_backing.sh 1 | settle after a sync so the backing journal 
 test/qemu/guest/fault_cache.sh 1 | lets a sync point run (the sync interval is time)
 test/qemu/guest/fault_dcfs_lib.sh 1 | polls /proc/PID/status for the daemon to block in D state (no event for a blocked syscall)
 test/qemu/guest/fault_freeze.sh 7 | polls processes for exit, a settle after an open, lets a sync point run, waits SIGTERM out (time and kill -0 loops)
-test/qemu/guest/fault_power.sh 3 | `exec sleep 600` keeps the guest alive until the host cuts the power (the host's kill is the event); settles after a thaw; lets a sync point run (time)
+test/qemu/guest/fault_power.sh 4 | `exec sleep 600` keeps the guest alive until the host cuts the power (the host's kill is the event); settles after a thaw (two sites: 23.11's held create and born-dirty create); lets a sync point run (time)
 test/qemu/guest/fault_recover.sh 5 | sleep_until for a timed fault window (11.3c replaces it), polls for READY lines, a `sleep 100000` that holds a directory busy, a settle
 test/qemu/guest/fault_selftest.sh 2 | a settle after a trigger, sleep_until_uptime for the fault window (11.3c)
 test/qemu/guest/fault_shutdown.sh 5 | polls the daemon and a background job for exit (kill -0 loops); waits for sync-interval seconds to pass (time is the subject)

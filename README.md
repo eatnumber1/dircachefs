@@ -1073,7 +1073,12 @@ recovery protocol, concurrency, and the test strategy.
   point is mounted and not yet served: requests block, and `mount` does not
   return. Ctrl-C ends the `mount` command and leaves the daemon waiting (it
   finishes starting when the earlier daemon exits; `kill` it, or `umount -l`
-  the mount point, to cancel).
+  the mount point, to cancel). If the new mount point covers something the
+  earlier daemon needs to finish (another instance's cache directory, or
+  `/run/dcfs`, where its lock file is), the two wait for each other: the new
+  daemon for the old one's exit, the old one for a path the unserved mount
+  hides. Ctrl-C, or systemd's start timeout, breaks it. Keep cache databases
+  and `/run/dcfs` out from under dcfs mount points.
 - **File names are bytes, but only the logs show them escaped.** dcfs
   treats names, symlink targets and xattr names as unmodified bytes (any
   byte but NUL, and `/` in a name; no normalization, no case folding, no
