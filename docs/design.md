@@ -831,8 +831,12 @@ durable since phase 1). Such a row therefore counts as durably dirty
 writable create, `O_CREAT` with writes) needs no WAL fsync of its own: a
 burst of N writable creates in one directory costs one WAL fsync, not
 N + 1 (the slope test's create bound). The row stops being dirty as any row
-does, at a sync point that covered it. Two rules come with it, both found
-by the model (`formal/README.md`, "Born-dirty create"):
+does, at a sync point that covered it. Not only `BeginWriting`: every
+phase 1 within the interval that names only durably dirty rows takes the
+fast path, so an unlink, a rename or a setattr of the new object, or a
+create inside a new directory, commits without a WAL fsync too, sound by
+the same argument. Two rules come with it, both found by the model
+(`formal/README.md`, "Born-dirty create"):
 
 - Only a row that phase 3's own transaction inserted is born dirty in that
   sense (`UpsertResult::created`; the model's `BornHere`). A lookup or a
@@ -867,10 +871,11 @@ by the model (`formal/README.md`, "Born-dirty create"):
   fill inserts a row); step 26.4b measures it as "create, then a cold
   listing of a 100k directory, then a crash". Only a mutation's mark
   counts (an atime-only row says nothing about creates). A row a fill
-  inserts is not durably dirty (its mark commits at normal durability,
-  and nothing makes it durable before a writable open's phase 1, which
-  therefore still syncs): the case is rare, and the model has no such
-  rule. The two rules the audit proposed (record a child's attributes
+  inserts is not counted as durably dirty, although the argument for a
+  phase-3-born row would hold for it too (its mark is in the commit that
+  inserts it): a conservative choice, since the case is rare and the
+  model has no such rule; a writable open's phase 1 on it still syncs.
+  The two rules the audit proposed (record a child's attributes
   only when the parent's fill is allowed; mark the row only when it is
   refused) both miss the daemon-crash and failed-phase-3 cases.
 - `ParentOf`, the other fill that inserts a row (a directory's parent,
@@ -879,7 +884,11 @@ by the model (`formal/README.md`, "Born-dirty create"):
   such row can be of a create that is not durable yet (a directory is
   created in, or renamed into, a directory by its nodeid, so that one's
   row exists first); an out-of-band move into a directory whose create's
-  phase 3 never ran can, and the mark is cheap next to the exposure.
+  phase 3 never ran can, and the mark is cheap next to the exposure. Not
+  measured yet: on this read path the mark can make a sync point run that
+  nothing else needed; a narrower rule (mark only under a marked
+  grandparent) costs an `openat` and a `statx` more, and waits for a
+  measurement that shows the sync points matter.
 - Every insert into the dirty table counts in `Context::dirty.inserts`, so
   that a sync point's fast path (`ClearDirty`, which deletes the whole
   table when nothing moved since `BeginSync`) keeps a mark that a fill or

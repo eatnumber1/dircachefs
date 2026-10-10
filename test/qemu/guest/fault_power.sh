@@ -504,6 +504,14 @@ setup_born() {
 		fail born-killed-restart "daemon did not mount within 10s"
 		exit "$FAILED"
 	fi
+	# Phase 3 never ran: no row names d9/b yet, so the stat's fill is what
+	# records it (else the scenario would pass without a fill).
+	bn_rows=$("$TESTUTIL" sql "$DB" "SELECT count(*) FROM dentries WHERE name = CAST('b' AS BLOB) AND state = 'present'")
+	if [ "$bn_rows" = 0 ]; then
+		pass born-no-row-yet
+	else
+		fail born-no-row-yet "$bn_rows present dentries named b after the restart"
+	fi
 	stat "$MNT/d9/b" >/dev/null || fail born-stat "d9/b is not served after the restart"
 	# Kept on the cache disk, synced before the cut: a kill-mode cut is a
 	# new boot.

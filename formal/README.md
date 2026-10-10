@@ -256,8 +256,15 @@ on the detail:
 - Failed cache writes are not modelled: every `Commit` succeeds. A create
   whose syscall succeeded but whose new row cannot be recorded replies
   `EEXIST` (`CreatedButNotCompleted`, step 11.4), which the model's create
-  never does after a successful syscall; trace validation ends such a
-  trace ("failed").
+  of a name in D never does after a successful syscall; trace validation
+  ends such a trace ("failed"). F's create does (step 23.11:
+  `FileCreatePhase3Failed`, gated by `Phase3CanFail`, which the born-dirty
+  configurations turn on: path B of [Born-dirty
+  create](#born-dirty-create-step-2311)). D's own create still has no
+  failed-phase-3 step, which is benign: that state is the one a daemon
+  crash between the syscall and phase 3 leaves, less recovery, and the
+  born-dirty configurations, the only ones with `Phase3CanFail`, send no
+  requests to D.
 - A `syncfs` that succeeds without making anything durable is outside the
   model, whose sync makes the backing filesystem's current state the only
   one a crash may leave. A filesystem that went read-only by itself after

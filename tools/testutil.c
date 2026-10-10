@@ -2234,6 +2234,11 @@ static int cmd_handle_stat(const char *dir, const char *file)
 		return 1;
 	}
 	fclose(in);
+	/* fhbuf holds 128 handle bytes. */
+	if (strlen(hex) > 2 * 128 || strlen(hex) % 2 != 0) {
+		printf("ERR bad handle file\n");
+		return 1;
+	}
 	memset(&fh, 0, sizeof(fh));
 	fh.h.handle_type = type;
 	fh.h.handle_bytes = (unsigned) strlen(hex) / 2;

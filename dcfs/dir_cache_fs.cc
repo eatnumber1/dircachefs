@@ -2658,8 +2658,12 @@ absl::Status DirCacheFS::Create(
   // before the reply. RecordNewChild's MarkDirty is not enough: no fill
   // guard sees it, so a sync point while this create waits on a syscall
   // after it (the parent's refresh, MakeBackingFile) may clear the row, and
-  // the writes after the reply would have none. BeginWriting's durable
-  // phase 1 makes the row dirty again, and lasts until the last release.
+  // the writes after the reply would have none. BeginWriting's phase 1
+  // makes the row dirty again, and lasts until the last release. Since step
+  // 23.11 that phase 1 commits at normal durability while the row is still
+  // in ctx.dirty.durable (RecordNewChild put it there: born dirty in the
+  // same commit as the row), and with a WAL fsync only if a sync point in
+  // the gap emptied that set.
   bool writable = (fi.flags & O_ACCMODE) != O_RDONLY;
   ABSL_ASSIGN_OR_RETURN(Credentials caller, req.Caller());
   ABSL_ASSIGN_OR_RETURN(

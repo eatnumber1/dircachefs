@@ -1414,6 +1414,32 @@ TEST_F(DirCacheFSTest, ReaddirListsWhatWasCompleteWhenChecked) {
   unlink.reset();
 }
 
+// Step 23.11: a row ParentOf inserts is born dirty (backing::ParentOf; it
+// cannot see the grandparent's mark). Here a's row goes (b's dentry with
+// it; b's row stays, unnamed), so b's listing resolves ".." from the
+// backing filesystem and inserts a's row again. Traced (after the
+// invalidation): the recorder's begin line of a's new row is a "parent"
+// one, which Trace.tla's OriginOK requires dirty.
+TEST_F(DirCacheFSTest, ARowParentOfInsertsIsBornDirty) {
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("a"), 0755), IsOk());
+  ASSERT_THAT(syscalls::mkdirat(AT_FDCWD, Path("a/b"), 0755), IsOk());
+  Start();
+  ASSERT_OK_AND_ASSIGN(InodeId a, Id("a"));
+  ASSERT_OK_AND_ASSIGN(InodeId b, Id("b", a));
+  ASSERT_THAT(cache::InvalidateInode(ctx_, a), IsOk());
+  ASSERT_THAT(Dirty(), ::testing::IsEmpty());
+  // Traced from here: the invalidation is no model step (the root's trace
+  // would end at an "invalidated" cut), and the traces begin in the state
+  // it left.
+  StartTrace();
+
+  ASSERT_THAT(List(b, /*plus=*/false), IsOkAndHolds(Contains("..")));
+  ASSERT_OK_AND_ASSIGN(InodeId new_a, Id("a"));
+  EXPECT_NE(new_a, a);
+  EXPECT_THAT(cache::ListDirty(ctx_, /*mutations_only=*/true),
+              IsOkAndHolds(Contains(new_a)));
+}
+
 // The other side: while a mutation of the directory is in flight, its
 // listing cannot be recorded, so it is never served; after a few attempts
 // the request fails with EAGAIN (TODO(coroutines): wait instead).

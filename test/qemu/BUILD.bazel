@@ -254,6 +254,7 @@ qemu_test_matrix(
         "frozen_unlink",
         "frozen_rename",
         "atime",
+        "born",
     ],
     size = "medium",
     other_size = "large",

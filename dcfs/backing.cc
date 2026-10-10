@@ -1354,21 +1354,15 @@ namespace {
 // cache::CanFill; otherwise its attributes are left unknown), and links it
 // into `dir` if `dir_ok`. Returns the child's row.
 //
-// Born dirty (step 23.11, the fill rule; formal/README.md, "Born-dirty
+// Born dirty (step 23.11, the fill rule; docs/design.md, "Born-dirty
 // create"): a row this inserts while `dir` has a mutation's mark gets its
-// own mark, in the same transaction. The object may be one a create made
-// whose phase 3 never recorded it (the daemon died between the syscall and
-// phase 3, or phase 3 failed and replied EEXIST: CreatedButNotCompleted),
-// and that create is durable only once a sync point covered it, which is
-// what clears `dir`'s mark (the create's phase 1 made it durable before the
-// syscall, and a start keeps it). A clean row of an object a power loss
-// then takes would be served by nodeid (an NFS handle, a saved file
-// handle) with the attributes of an object that is gone; a dirty one is
-// probed away by the next start. `dir_marked` is whether `dir` has that
-// mark, read once per transaction (the first time a row is inserted) and
-// left in the caller's std::optional for the next child: the mark cannot
-// change inside the transaction. Only an insert is marked: a row that was
-// already there was recorded before, and keeps whatever mark it has.
+// own mark, in the same transaction. The object may be a create's whose
+// phase 3 never recorded it (a daemon crash, or CreatedButNotCompleted),
+// not durable until a sync point covers it, which is also what clears
+// `dir`'s mark; clean, its row would serve a lost object by nodeid after a
+// power loss. `dir_marked` caches `dir`'s mark for the transaction (read at
+// the first insert; it cannot change inside it). A row already there keeps
+// whatever mark it has.
 absl::StatusOr<InodeId> RecordChild(Context &ctx, cache::FillSnapshot snapshot,
                                     InodeId dir, const ChildRecord &child,
                                     bool dir_ok,
@@ -1715,18 +1709,13 @@ absl::StatusOr<InodeId> ParentOf(Context &ctx, InodeId dir) {
     if (!filled) {
       ABSL_RETURN_IF_ERROR(cache::MarkAttrsUnknown(ctx, row.id));
     }
-    // Step 23.11: a row inserted here is born dirty, whatever its parent's
-    // mark (which this does not know: RecordChild's rule needs the
-    // grandparent). Through dcfs a directory whose create is not yet
-    // durable cannot get here: `dir` is in it, so `dir` was created in it
-    // or moved into it, and either needs its row first (a mkdir or rename
-    // names it by nodeid), and the only fill that inserts a row in a
-    // directory is RecordChild, which marks it. What is left is an
-    // out-of-band move of `dir` into a directory dcfs created whose phase 3
-    // never recorded it (path A or B of formal/README.md's "Born-dirty
-    // create"): rare, and the mark costs one dirty row and the next sync
-    // point, against a clean row of a directory a power loss may take,
-    // served by nodeid.
+    // Step 23.11: a row inserted here is born dirty, whatever the
+    // grandparent's mark (which this cannot see). Through dcfs it cannot be
+    // a directory whose create is not yet durable: `dir` got into it by
+    // that directory's nodeid, so its row came first (from phase 3 or
+    // RecordChild, which mark it). An out-of-band move of `dir` into one
+    // whose phase 3 never ran is what is left: rare, and the mark is cheap
+    // (docs/design.md, "Born-dirty create").
     if (row.created) {
       const InodeId born[] = {row.id};
       ABSL_RETURN_IF_ERROR(cache::MarkDirty(ctx, born));
