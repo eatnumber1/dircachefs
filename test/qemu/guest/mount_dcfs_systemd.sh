@@ -216,6 +216,10 @@ restart_check() {
 	while [ "$rc_n" -lt 3 ]; do
 		rc_n=$((rc_n + 1))
 		rc_before=$(daemons | sort | tr '\n' ' ')
+		# systemd's start rate limit (five starts in ten seconds, per unit)
+		# counts these restarts: reset it, not wait for it (a failed restart is
+		# still failed: the units are active here).
+		systemctl reset-failed rp.mount rp-c.mount 2>/dev/null
 		rc_cursor=$(cursor)
 		if [ "$rc_mode" = both ]; then
 			systemctl restart rp.mount rp-c.mount 2>/tmp/restart.err
