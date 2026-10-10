@@ -468,3 +468,28 @@ cases still pass and still fail on the old bug they were written for).
 Also: `RestoreRoot`'s `CHECK` is a production crash; it goes on 25.9's
 list for russ, not changed here. Owner: dcfs-implementer (judgement per
 site), medium effort. The clang-tidy checks named in 1.6a land with 7.5.
+
+## 25.16 Nullability on every pointer; references where never null (russ, 2026-10-10; after 25.15, lane-2)
+
+Style 1.2's nullability bullet. Implementer, in this order, each a
+commit: (1) the warnings: `-Wnullability-completeness` and
+`-Wnullable-to-nonnull-conversion` as errors for our targets (how 7.3
+scopes warnings to our code; if 7.3 has not landed, the two flags on our
+`copts` now), which pass trivially while no file annotates anything;
+(2) `dcfs/*.h` first, one header at a time: each parameter or member
+that is never null becomes a reference where a reference can go, else
+`absl_nonnull`; each that may be null becomes `absl_nullable`, and its
+dereferences are checked to sit behind a null test; `unique_ptr` and
+`shared_ptr` members and returns get the qualifier too; the first
+annotation in a file turns the completeness warning on for that file,
+so each header's `.cc` and tests follow in the same commit; (3) the
+`.cc` files' internal pointers; (4) the repo-shape check for a raw `*`
+or a `unique_ptr`/`shared_ptr` without a following `absl_nonnull` /
+`absl_nullable` in `dcfs/*.h` (declarations only; `*` in expressions is
+not a pointer declarator: the check may be approximate and allowlist
+what it cannot parse, with reasons). The libfuse callbacks and
+`fuse_req_t`-style C types keep their C signatures at the boundary and
+get the qualifier on our side of it. No behaviour change; a nullable
+pointer found dereferenced without a check is reported, not silently
+fixed (it is a bug with a test first). About 30 raw pointers in headers
+today, 2 smart pointers.

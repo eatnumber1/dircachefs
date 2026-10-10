@@ -82,6 +82,29 @@ use it as design guidance rather than firm rules."
 - **Function names**: `syscalls::` wrappers carry their libc/manpage names
   in lower case (`syscalls::setxattr`); every other function is CamelCase
   (`SetXattr`). The two layers therefore never clash by construction.
+- **Every pointer says whether it may be null; a pointer that may not be
+  null is usually a reference** (russ, 2026-10-10: "all pointers need
+  either `absl_nullable` or `absl_nonnull`, including both raw pointers
+  and smart pointers (e.g. `unique_ptr`). If you have a non-nullable
+  pointer, prefer a reference instead."). `absl/base/nullability.h`
+  (Abseil 20260817, pinned): the qualifier follows the pointer type,
+  `Backing* absl_nonnull b`, `const char* absl_nullable name`,
+  `std::unique_ptr<Connection> absl_nonnull db`,
+  `absl::StatusOr<Foo* absl_nonnull>`. Order of preference for a
+  parameter or member that is never null: a reference (`Backing &b`,
+  `const Credentials &caller`); a pointer only where a reference cannot
+  go (a member that is reseated, an optional-out parameter that is
+  present, an owning `unique_ptr`), and then `absl_nonnull`. A pointer
+  that may be null is `absl_nullable`, and the reader expects a null
+  check before every dereference of it. `absl_nullability_unknown` is
+  not used: it is the annotation that says nobody decided. Mechanically:
+  clang's `-Wnullability-completeness` and
+  `-Wnullable-to-nonnull-conversion` as errors (7.3's `-Weverything`
+  set: they stay off the deny-list), which refuse an unannotated pointer
+  in any file that annotates one; a repo-shape check for a raw `*` or
+  `unique_ptr`/`shared_ptr` without a following qualifier in `dcfs/*.h`
+  catches the rest (plan step 25.16; today 0 annotations, about 30 raw
+  pointers in headers).
 - **`absl::FixedArray`, not `std::vector`, for a buffer whose size is known
   when it is made** (russ, 2026-10-10). A `std::vector<T> v(n)` that is
   never pushed to or resized says the wrong thing: it advertises growth
