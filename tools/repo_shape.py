@@ -17,6 +17,10 @@ Each function takes the root of a source tree and returns a list of problems
   refused, removed ones must be taken off);
 - disabled_checks_listed: every `disabled NAME ...` check of the guest
   scripts is named in README.md's Limitations section;
+- fixed_arrays: a local buffer sized once (`std::vector<T> v(n);`,
+  `std::string s(n, '\0');`) in dcfs/*.h, dcfs/*.cc and tools/*.cc is an
+  absl::FixedArray (docs/style.md, 1.2), except the known ones counted per
+  file in tools/repo_shape_fixed_arrays.txt, a list that only shrinks;
 - no_test_only_comments: no production source (dcfs/ and bench/, not
   *_test.cc and not testonly/) has a comment that gives tests as the reason
   for code, or a ForTest / _for_test name (docs/style.md, "No test-only
@@ -282,7 +286,90 @@ def no_testonly_friends(root):
     return problems
 
 
+FIXED_ARRAYS_LIST = ("tools", "repo_shape_fixed_arrays.txt")
+# `std::vector<T> name(expr);` (one argument: a comma outside brackets
+# refuses it, so iterator pairs do not match) and `std::string name(expr,
+# '\0');`. Both are a local buffer sized once (docs/style.md, 1.2).
+VECTOR_SIZED_RE = re.compile(r"std::vector<.+>\s+\w+\((.*)\);")
+STRING_FILLED_RE = re.compile(r"std::string\s+\w+\(.*,\s*'\\0'\);")
+
+
+def has_top_level_comma(args):
+    depth = 0
+    for ch in args:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            return True
+    return False
+
+
+def fixed_array_sites(text):
+    """Line numbers of the local buffers sized once in a C++ source."""
+    sites = []
+    for number, line in enumerate(text.splitlines(), 1):
+        code = line.split("//", 1)[0]
+        # A local is indented; a declaration at namespace scope is not one.
+        if not code.startswith((" ", "\t")):
+            continue
+        vector = VECTOR_SIZED_RE.search(code)
+        if ((vector and not has_top_level_comma(vector.group(1))) or
+                STRING_FILLED_RE.search(code)):
+            sites.append(number)
+    return sites
+
+
+def fixed_array_files(root):
+    """dcfs/*.h, dcfs/*.cc and tools/*.cc, not *_test.cc (testonly/ is a
+    subdirectory and is not listed)."""
+    for top, exts in (("dcfs", (".h", ".cc")), ("tools", (".cc",))):
+        for name in sorted(os.listdir(os.path.join(root, top))):
+            if (name.endswith(exts) and not name.endswith("_test.cc") and
+                    os.path.isfile(os.path.join(root, top, name))):
+                yield "%s/%s" % (top, name)
+
+
+def known_fixed_arrays(root):
+    """{path: (count, reason)} from tools/repo_shape_fixed_arrays.txt."""
+    known = {}
+    for line in read(root, *FIXED_ARRAYS_LIST).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        head, _, reason = line.partition("|")
+        path, count = head.split()
+        known[path] = (int(count), reason.strip())
+    return known
+
+
+def fixed_arrays(root):
+    known = known_fixed_arrays(root)
+    problems = []
+    actual = {}
+    for path in fixed_array_files(root):
+        count = len(fixed_array_sites(read(root, path)))
+        if count:
+            actual[path] = count
+    for path, count in actual.items():
+        allowed = known.get(path, (0, ""))[0]
+        if count > allowed:
+            problems.append(
+                "%s has %d local buffer(s) sized once, %d known: make it an "
+                "absl::FixedArray (docs/style.md, 1.2: a buffer whose size "
+                "is known when it is made)" % (path, count, allowed))
+    for path, (count, _) in known.items():
+        if actual.get(path, 0) != count:
+            problems.append(
+                "tools/repo_shape_fixed_arrays.txt lists %d buffer(s) for "
+                "%s, which has %d: set the count to the file's (the list "
+                "only shrinks)" % (count, path, actual.get(path, 0)))
+    return problems
+
+
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
             guest_sleeps(root) + disabled_checks_listed(root) +
-            no_test_only_comments(root) + no_testonly_friends(root))
+            no_test_only_comments(root) + no_testonly_friends(root) +
+            fixed_arrays(root))

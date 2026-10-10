@@ -33,6 +33,10 @@ def good_tree(root):
     write(root, "tools/repo_shape_sleeps.txt",
           "# known\ntest/qemu/guest/legacy.sh 2 | polls a pid\n")
     write(root, "test/qemu/guest/legacy.sh", "sleep 1\n\tsleep 0.1\n")
+    write(root, "tools/repo_shape_fixed_arrays.txt",
+          "# known\ndcfs/known.cc 1 | a fixture reason\n")
+    write(root, "dcfs/known.cc",
+          "void f(int n) {\n  std::vector<int> v(n);\n}\n")
     write(root, "test/qemu/guest/init")
     write(root, "test/qemu/guest/a.sh",
           '. "$(dirname "$0")/helper.sh"\ndisabled kernel-bug "why" check\n')
@@ -169,6 +173,64 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
 
     def test_good_tree_has_no_testonly_friends(self):
         self.assertEqual([], repo_shape.no_testonly_friends(self.root))
+
+    def test_a_vector_sized_once_is_reported(self):
+        write(self.root, "dcfs/m.cc",
+              "void f(int n) {\n  std::vector<int> v(n);\n}\n")
+        problems = repo_shape.fixed_arrays(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/m.cc has 1 local buffer", problems[0])
+        self.assertIn("absl::FixedArray", problems[0])
+
+    def test_a_string_filled_once_is_reported(self):
+        write(self.root, "tools/n.cc",
+              "void f(int n) {\n  std::string s(n, '\\0');\n}\n")
+        problems = repo_shape.fixed_arrays(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("tools/n.cc has 1 local buffer", problems[0])
+
+    def test_iterator_pairs_and_brace_inits_are_not_reported(self):
+        write(self.root, "dcfs/o.cc",
+              "void f(const std::vector<int>& a) {\n"
+              "  std::vector<int> v(a.begin(), a.end());\n"
+              "  std::vector<int> w{a.size()};\n"
+              "  std::vector<int> x = a;\n"
+              "  std::string s(3, 'x');\n"
+              "}\n")
+        self.assertEqual([], repo_shape.fixed_arrays(self.root))
+
+    def test_a_test_or_testonly_file_is_not_scanned(self):
+        write(self.root, "dcfs/p_test.cc",
+              "void f(int n) {\n  std::vector<int> v(n);\n}\n")
+        write(self.root, "dcfs/testonly/q.cc",
+              "void f(int n) {\n  std::vector<int> v(n);\n}\n")
+        self.assertEqual([], repo_shape.fixed_arrays(self.root))
+
+    def test_an_allowlisted_count_is_accepted(self):
+        write(self.root, "dcfs/known.cc",
+              "void f(int n) {\n  std::vector<int> v(n);\n}\n"
+              "void g(int n) {\n  std::string s(n, '\\0');\n}\n")
+        write(self.root, "tools/repo_shape_fixed_arrays.txt",
+              "dcfs/known.cc 2 | a fixture reason\n")
+        self.assertEqual([], repo_shape.fixed_arrays(self.root))
+
+    def test_an_allowlisted_file_with_a_wrong_count_is_reported(self):
+        write(self.root, "tools/repo_shape_fixed_arrays.txt",
+              "dcfs/known.cc 2 | a fixture reason\n")
+        problems = repo_shape.fixed_arrays(self.root)
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("the list only shrinks", problems[0])
+        write(self.root, "dcfs/known.cc",
+              "void f(int n) {\n  std::vector<int> v(n);\n"
+              "  std::vector<int> w(n);\n  std::vector<int> x(n);\n}\n")
+        write(self.root, "tools/repo_shape_fixed_arrays.txt",
+              "dcfs/known.cc 1 | a fixture reason\n")
+        problems = repo_shape.fixed_arrays(self.root)
+        self.assertEqual(2, len(problems), problems)
+        self.assertIn("dcfs/known.cc has 3 local buffer(s) sized once, "
+                      "1 known", problems[0])
+        self.assertIn("lists 1 buffer(s) for dcfs/known.cc, which has 3",
+                      problems[1])
 
 
 if __name__ == "__main__":

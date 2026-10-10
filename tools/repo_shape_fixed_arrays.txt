@@ -1,0 +1,10 @@
+# Local buffers sized once that are still std::vector / std::string and must
+# become absl::FixedArray (step 25.12; docs/style.md, 1.2). tools/repo_shape.py
+# refuses a new one; a count here must equal the file's, and the list only
+# shrinks (an empty list is the goal). FORMAT: path count | reason
+
+dcfs/backing.cc 6 | xattr, getdents, read and getgroups buffers sized from a syscall's answer; converted by the 25.12 sweep (commit 2)
+dcfs/file_handle.cc 2 | file_handle buffers sized from a header field; converted by the 25.12 sweep (commit 2)
+dcfs/fuse_request.cc 3 | groups and read buffers; converted by the 25.12 sweep (commit 2)
+dcfs/main.cc 1 | a buffer of a fixed size; converted by the 25.12 sweep (commit 2)
+
