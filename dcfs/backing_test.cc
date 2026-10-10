@@ -14,6 +14,7 @@
 #include <ctime>
 #include <optional>
 #include <random>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -175,8 +176,8 @@ class BackingTest : public ::testing::Test {
   }
 
   void Unlock() {
-    for (auto it = locked_.rbegin(); it != locked_.rend(); ++it) {
-      syscalls::fchmodat(AT_FDCWD, it->first, it->second, 0).IgnoreError();
+    for (auto &it : std::views::reverse(locked_)) {
+      syscalls::fchmodat(AT_FDCWD, it.first, it.second, 0).IgnoreError();
     }
     locked_.clear();
   }

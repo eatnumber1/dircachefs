@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <map>
+#include <ranges>
 #include <set>
 #include <string>
 #include <string_view>
@@ -215,29 +216,29 @@ TraceRecorder::Mapping TraceRecorder::Map(const Frame &r, Ino dir) {
 }
 
 TraceRecorder::Frame *TraceRecorder::InnermostRequest() {
-  for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
-    if (it->kind == Frame::Kind::kRequest) return &*it;
+  for (auto &frame : std::views::reverse(frames_)) {
+    if (frame.kind == Frame::Kind::kRequest) return &frame;
   }
   return nullptr;
 }
 
 TraceRecorder::Req *TraceRecorder::Find(Ino dir, Frame **owner) {
-  for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
-    auto found = it->reqs.find(dir);
-    if (found != it->reqs.end()) {
-      if (owner != nullptr) *owner = &*it;
+  for (auto &frame : std::views::reverse(frames_)) {
+    auto found = frame.reqs.find(dir);
+    if (found != frame.reqs.end()) {
+      if (owner != nullptr) *owner = &frame;
       return &found->second;
     }
-    if (it->kind == Frame::Kind::kRequest) break;
+    if (frame.kind == Frame::Kind::kRequest) break;
   }
   return nullptr;
 }
 
 TraceRecorder::Frame *TraceRecorder::SyncPastSnapshot() {
   if (shutdown_) return nullptr;
-  for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
-    if (it->kind == Frame::Kind::kSync) {
-      return it->snapshot_at >= 0 ? &*it : nullptr;
+  for (auto &frame : std::views::reverse(frames_)) {
+    if (frame.kind == Frame::Kind::kSync) {
+      return frame.snapshot_at >= 0 ? &frame : nullptr;
     }
   }
   return nullptr;
@@ -1758,8 +1759,8 @@ void TraceRecorder::Interrupted(Context &ctx) {
   Enter("Interrupted");
   // Every directory request the innermost FUSE request (and the frames
   // inside it) is: the model's Interrupt of each.
-  for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
-    for (auto &[dir, req] : it->reqs) {
+  for (auto &frame : std::views::reverse(frames_)) {
+    for (auto &[dir, req] : frame.reqs) {
       if (!Traced(dir) || !req.arrived || req.interrupted) continue;
       req.interrupted = true;
       Dir &state = dirs_[dir];
@@ -1784,7 +1785,7 @@ void TraceRecorder::Interrupted(Context &ctx) {
         Emit(ctx, dir, &req, "interrupt");
       }
     }
-    if (it->kind == Frame::Kind::kRequest) break;
+    if (frame.kind == Frame::Kind::kRequest) break;
   }
   After(ctx);
 }

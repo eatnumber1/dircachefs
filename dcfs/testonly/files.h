@@ -5,6 +5,7 @@
 #include <sys/stat.h>
 
 #include <algorithm>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -78,11 +79,11 @@ inline absl::StatusOr<std::vector<std::string>> ListTree(
 inline void RemoveAll(std::string_view path) {
   absl::StatusOr<std::vector<std::string>> tree = ListTree(path);
   if (tree.ok()) {
-    for (auto it = tree->rbegin(); it != tree->rend(); ++it) {
+    for (auto &it : std::views::reverse(*tree)) {
       absl::StatusOr<struct stat> st =
-          syscalls::fstatat(AT_FDCWD, *it, AT_SYMLINK_NOFOLLOW);
+          syscalls::fstatat(AT_FDCWD, it, AT_SYMLINK_NOFOLLOW);
       const int flags = st.ok() && S_ISDIR(st->st_mode) ? AT_REMOVEDIR : 0;
-      syscalls::unlinkat(AT_FDCWD, *it, flags).IgnoreError();
+      syscalls::unlinkat(AT_FDCWD, it, flags).IgnoreError();
     }
   }
   syscalls::unlinkat(AT_FDCWD, path, AT_REMOVEDIR).IgnoreError();

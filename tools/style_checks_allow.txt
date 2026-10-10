@@ -70,7 +70,6 @@ dcfs/backing_test.cc|TEST|capturing_mutating_lambda|1
 dcfs/backing_test.cc|TEST_F|bugprone-unchecked-optional-access|2
 dcfs/backing_test.cc|TEST_F|misc-include-cleaner|1
 dcfs/backing_test.cc|TEST_F|performance-inefficient-vector-operation|1
-dcfs/backing_test.cc|Unlock|modernize-loop-convert|1
 dcfs/device_id.cc|GetDeviceId|modernize-use-integer-sign-comparison|1
 dcfs/device_id.cc|IoctlAllowingOPath|google-runtime-int|1
 dcfs/device_id_fault_test.cc|<file scope>|google-runtime-int|2
@@ -358,7 +357,6 @@ dcfs/testonly/fault_phase3_before_syscall.cc|<file scope>|misc-use-internal-link
 dcfs/testonly/fault_syscall_before_phase1.cc|<file scope>|misc-use-internal-linkage|2
 dcfs/testonly/fault_syscall_before_phase1.cc|WrapUnlinkAt|misc-unused-parameters|5
 dcfs/testonly/files.h|ListTree|misc-no-recursion|1
-dcfs/testonly/files.h|RemoveAll|modernize-loop-convert|1
 dcfs/testonly/invariant_checker.cc|HasDirtyRow|capturing_mutating_lambda|1
 dcfs/testonly/invariant_checker.cc|HasMutationRow|capturing_mutating_lambda|1
 dcfs/testonly/invariant_checker.cc|InvariantChecker::CheckBookkeeping|capturing_mutating_lambda|4
@@ -376,7 +374,6 @@ dcfs/testonly/invariant_checker.cc|InvariantChecker::CheckStub|readability-conve
 dcfs/testonly/invariant_checker.cc|InvariantChecker::OnUpdate|misc-unused-parameters|1
 dcfs/testonly/invariant_checker.cc|InvariantChecker::SeeEveryDirtyDelete|capturing_mutating_lambda|1
 dcfs/testonly/invariant_checker.cc|InvariantChecker::Seen|bugprone-return-const-ref-from-parameter|1
-dcfs/testonly/invariant_checker.cc|InvariantChecker::Where|modernize-loop-convert|1
 dcfs/testonly/invariant_checker.cc|NoneDirtyUnlessAny|capturing_mutating_lambda|1
 dcfs/testonly/main_recorder.cc|MainProtocolEvents|concurrency-mt-unsafe|2
 dcfs/testonly/probe_fails_once.cc|<file scope>|misc-use-internal-linkage|1
@@ -391,12 +388,9 @@ dcfs/testonly/trace_recorder.cc|TraceRecorder::AllDirs|readability-convert-membe
 dcfs/testonly/trace_recorder.cc|TraceRecorder::ChildRowRecorded|misc-unused-parameters|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::Close|readability-function-cognitive-complexity|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::Cut|misc-unused-parameters|1
-dcfs/testonly/trace_recorder.cc|TraceRecorder::Find|modernize-loop-convert|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::GetattrBegin|readability-function-cognitive-complexity|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::IdentStep|readability-avoid-nested-conditional-operator|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::IdentStep|readability-function-cognitive-complexity|1
-dcfs/testonly/trace_recorder.cc|TraceRecorder::InnermostRequest|modernize-loop-convert|1
-dcfs/testonly/trace_recorder.cc|TraceRecorder::Interrupted|modernize-loop-convert|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::Interrupted|readability-function-cognitive-complexity|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::KeyOf|readability-convert-member-functions-to-static|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::LifetimeChanged|readability-function-cognitive-complexity|1
@@ -417,7 +411,6 @@ dcfs/testonly/trace_recorder.cc|TraceRecorder::ResolveCommitted|misc-unused-para
 dcfs/testonly/trace_recorder.cc|TraceRecorder::Resolved|misc-unused-parameters|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::SnapshotState|capturing_mutating_lambda|3
 dcfs/testonly/trace_recorder.cc|TraceRecorder::SnapshotState|readability-convert-member-functions-to-static|1
-dcfs/testonly/trace_recorder.cc|TraceRecorder::SyncPastSnapshot|modernize-loop-convert|1
 dcfs/testonly/trace_recorder.cc|TraceRecorder::WriteLine|readability-make-member-function-const|1
 dcfs/testonly/trace_recorder.h|<file scope>|readability-inconsistent-declaration-parameter-name|1
 dcfs/testonly/trace_recorder_test.cc|SetUp|concurrency-mt-unsafe|1

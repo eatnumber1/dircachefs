@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -284,13 +285,13 @@ void InvariantChecker::OnUpdate(void *self, int op, const char *db,
 std::string InvariantChecker::Where() const {
   if (frames_.empty()) return "outside any request";
   std::string where;
-  for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
+  for (const auto &frame : std::views::reverse(frames_)) {
     absl::StrAppend(&where, where.empty() ? "in " : ", inside ");
-    if (!it->label.empty()) {
-      absl::StrAppend(&where, it->label);
+    if (!frame.label.empty()) {
+      absl::StrAppend(&where, frame.label);
     } else {
-      absl::StrAppend(&where, "request ", OpName(it->op), " nodeid ",
-                      it->nodeid);
+      absl::StrAppend(&where, "request ", OpName(frame.op), " nodeid ",
+                      frame.nodeid);
     }
   }
   return where;
