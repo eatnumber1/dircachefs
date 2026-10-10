@@ -2436,3 +2436,13 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   that is really needed goes to russ case by case). Queued with a repo_shape/banned_symbols gate
   and an audit: a first grep found 25 CHECK-family sites, one abort (today's fork_split.h), one
   assert and ten exit sites in production code, none in LOG(FATAL).
+- 6.5 merged (6bf6bdb, twelve commits): the two polls are events (`testutil waitmount` on a
+  pollable /proc/self/mounts, `waitline` on inotify, both unbounded, with a pidfd so a daemon that
+  exits first fails fast); fast 233 + 2, presubmit qemu 126, nfs/ace/pjdfstest green. 15.6b told:
+  its sleep allowlist is trimmed against this tree on its rebase.
+- 23.11 code-half review (Fable): no crash-safety or protocol defect; merge after three small
+  fixes (an untested ParentOf branch needs a harness test under the recorder; a stale Create
+  comment; a stale formal/README sentence) plus cheap advisories (design.md's reason for fill-born
+  rows not being durable, a handle-length check, the born scenario pinned against vacuity, comment
+  trims, a sentence on every phase 1 of a born-dirty row taking the fast path). The reviewer's
+  statement for russ is in the phase file. Sent back; merge next.

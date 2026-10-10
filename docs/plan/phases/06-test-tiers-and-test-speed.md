@@ -124,8 +124,21 @@ change, each change its own commit):
   a protocol change).
 Owner: dcfs-investigator, in the first lane that frees.
 
-Status 2026-10-09: reported (lane-3, eight commits; note
-`notes/test-speed-scrub-2026-10-08.md`); one round before merge. The host
+Status 2026-10-09: merged 6bf6bdb (lane-3, twelve commits; note
+`notes/test-speed-scrub-2026-10-08.md`). The second round made the two
+polls events: `testutil waitmount <mp> present|absent [pid]` (reads
+/proc/self/mounts, then poll()s it for POLLPRI|POLLERR; with a pid it also
+watches a pidfd and returns 1 if the process exits first) and `testutil
+waitline <file> <text> [pid]` (an inotify watch on the directory installed
+before the first read), both unbounded; start_daemon, power.sh's copy and
+cancel_inventory's start_timed use waitmount (the `mount` check 0.11 s to
+0.02 s, fault_ace_b 45.8 s to 24.8 s on a quiet host, 41 start checks
+7.10 s to 4.63 s of guest time); `wait_for_line` removed, seven scripts use
+waitline, the 40 s and 300 s caps gone. A hang now shows as the guest or
+Bazel timeout, not a 10 s message. Waits left for 15.6b's allowlist: the
+by-design ones, `quiesce_daemon`, and polls in write.sh, fault_freeze,
+fault_recover, strace_lib, fault_dcfs_lib, mount_dcfs.sh. First-round
+report, for the record: the host
 was never quiet (load 10-35), so tier walls are bounds, not pairs: fast
 1,699 s baseline to 791 s at load 11 (host-only tests also 56% down on
 the same code, so the tier effect is inside the noise); from the guests'

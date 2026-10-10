@@ -654,3 +654,40 @@ asan x3, formal small+medium 162 pass. One edited test
 (`DurableDirtyRowTruncatedAway` accepts inode 1 or the mkdir'd row, which
 is durable too; still requires the violation): the review judges it.
 
+Fable review 2026-10-09 (the first Fable subagent): MERGE after three
+small fixes; no crash-safety or protocol defect found in rule 1, rule 2,
+ParentOf, G15, the checker rule or the trace changes. For russ, the
+reviewer's statement: "A file or directory dcfs creates is now recorded
+dirty in the very commit that creates its row, so after any crash the
+cache has either no row for it or a dirty row the next start re-checks
+against the backing filesystem; and a row that a lookup or listing inserts
+under a directory with an unsynced change is recorded dirty too, which
+closes the one way a power loss could leave a clean, valid row of a file
+it had lost (reachable only by NFS/handle lookups, never by path). It
+costs one dirty row, and one probe at a crash's start, per child first
+recorded in a directory changed since the last sync point, and saves one
+WAL fsync per writable create (100 creates in a directory: 101 fsyncs
+before, 1 now) and, by the same mechanism, per later mutation of any new
+object before the next sync point." Required: F1 the new ParentOf mark is
+executed by no test (a harness test under the recorder); F2 a stale
+comment in Create about BeginWriting's durable phase 1; F3 formal/README's
+"failed cache writes are not modelled" sentence. Advisory: F4 design.md's
+reason for fill-born rows not being durable (state it as a conservative
+choice); F5 ParentOf's unconditional mark on a pure read path can trigger
+a sync point (rare; a narrower rule costs an openat+statx; defer until
+measured); F6 a handle-length check in `handle-stat`; F7 pin the `born`
+scenario against vacuity and add it to the kill-mode list; F8 trim two
+block comments; F9 note that every phase 1 naming a born-dirty row in the
+interval takes the fast path, sound by the same argument. Verified by the
+reviewer: the WAL prefix argument for every crash state of the writable
+create under all regimes; I4 (ClearDirty never runs inside a fill's
+transaction); the `atime_only = 0` filter is moot for directories (only
+files enter the held set); the checker rule mirrors rule 2 exactly; the
+two-sided OriginOK is exact for new rows (AUTOINCREMENT, no foreign key,
+so a dangling mark is never adopted); A1's EEXIST comes from
+CreatedButNotCompleted; `handle-stat` with O_PATH drives LOOKUP(".") by
+nodeid, the exposure's exact path; the budget deltas match the code; the
+edited death-test regex is a correct generalisation; the model's
+BornHere/FillMarks/FSetSync/ProbesDone correspond to the code's
+created/HasMutationMark/durable/ProbeRecoveredRows.
+
