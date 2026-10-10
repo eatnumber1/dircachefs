@@ -691,3 +691,19 @@ edited death-test regex is a correct generalisation; the model's
 BornHere/FillMarks/FSetSync/ProbesDone correspond to the code's
 created/HasMutationMark/durable/ProbeRecoveredRows.
 
+MERGED 2026-10-10, 421b2aa (nine commits: four model, tests, code, the
+trace and btrfs fixes, the review fixes, the emptied expected failures).
+The review fixes: `ARowParentOfInsertsIsBornDirty` (failing first with
+the mark removed; trace shard c validates the real `parent` begin line;
+the trace starts after the invalidation because harness traces refuse
+cuts), the Create comment, the formal README sentence, F4-F9, `born` in
+the kill-mode list (green on three backings). Proof: with the fix, all
+ten mixed-fault sequences 26.14e listed as failing on main hold on ext4,
+xfs and btrfs ("22 sequences, every one held", 411 handles checked), and
+`fault_ace_mixed.expected_failures` is empty. Final tree: fast 250 + 2,
+trace shards, fault_power ext4 with all seven `born-*` checks, asan on
+dir_cache_fs_test, subject gate. Follow-ups recorded elsewhere: F5 (a
+narrower ParentOf rule after 26.4b measures), 26.4b's create slope on
+the new cost, 12.14's large targets rerun on this tree, the
+`enospc_cache_test` flake (busybox ls dropping a READDIR ENOSPC).
+

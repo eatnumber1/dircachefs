@@ -2491,3 +2491,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   answers over IPv4; Bazel's downloader prefers IPv6. Everything behind fast skipped, so 26.14f
   and 26.16b are unverified in CI. 15.6c dispatched (mechanical, lane-5): preferIPv4Stack in
   .bazelrc's startup options and a mirror list for the image. Push again when it merges.
+- 23.11 MERGED (421b2aa, nine commits): born-dirty create and the ghost-row fix; the ten
+  mixed-fault sequences that failed on main hold on all three backings, the expected-failures
+  file is empty; fast 250 + 2. Lane-1 free.
+- 15.6c merged (ddadd31): cloud.debian.org first (immediate 302), the UMU mirror, cdimage last;
+  `startup --host_jvm_args=-Djava.net.preferIPv4Stack=true`; `bazel fetch --force` of the image
+  succeeded through Bazel (cloud.debian.org still timed out in that run and the mirror served it,
+  so the mirrors are the fix that matters). PUSH POINT: main after this entry; since 2ee9cc7 it
+  carries 26.14e, 23.11 and 15.6c. Lane-5 free. Three lanes from here (budget).
