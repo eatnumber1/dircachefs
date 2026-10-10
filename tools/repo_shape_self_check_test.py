@@ -89,6 +89,16 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         self.assertEqual(1, len(problems), problems)
         self.assertIn("dcfs/known.cc has 1", problems[0])
 
+    def test_nodiscard_on_a_status_is_reported_and_on_a_descriptor_is_not(self):
+        write(self.root, "dcfs/nd.h",
+              "[[nodiscard]] absl::Status Close(int fd);\n"
+              "[[nodiscard]] absl::StatusOr<int> Open();\n"
+              "[[nodiscard]] FileDescriptor Own();\n")
+        problems = repo_shape.nodiscard_on_status(self.root)
+        self.assertEqual(2, len(problems), problems)
+        self.assertIn("dcfs/nd.h:1", problems[0])
+        self.assertIn("dcfs/nd.h:2", problems[1])
+
     def test_unreferenced_script_is_reported(self):
         write(self.root, "test/qemu/guest/orphan.sh")
         problems = repo_shape.guest_scripts_used(self.root)

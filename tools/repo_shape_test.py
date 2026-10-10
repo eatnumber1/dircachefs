@@ -31,6 +31,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_status_macros_are_the_short_names(self):
         self.assertEqual([], repo_shape.absl_prefixed_status_macros(ROOT["root"]))
 
+    def test_no_nodiscard_on_a_status_return(self):
+        self.assertEqual([], repo_shape.nodiscard_on_status(ROOT["root"]))
+
     def test_no_identifier_begins_with_the_project_name(self):
         self.assertEqual([], repo_shape.project_prefix(ROOT["root"]))
 

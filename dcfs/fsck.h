@@ -67,8 +67,7 @@ struct FsckArgs {
 
 // InvalidArgument (a usage error: kFsckUsage) for no device, more than one,
 // or -o without its argument.
-[[nodiscard]] absl::StatusOr<FsckArgs> ParseFsckArgs(
-    std::span<const std::string> args);
+absl::StatusOr<FsckArgs> ParseFsckArgs(std::span<const std::string> args);
 
 // What CheckCacheDatabase found.
 struct CacheReport {

@@ -455,9 +455,29 @@ def absl_prefixed_status_macros(root):
     return problems
 
 
+NODISCARD_STATUS_RE = re.compile(
+    r"(\[\[nodiscard\]\]|ABSL_MUST_USE_RESULT)\s+absl::Status(Or<|\s)")
+
+
+def nodiscard_on_status(root):
+    """`[[nodiscard]]` before absl::Status or StatusOr is refused: both types
+    are must-use already (docs/style.md, 1.2; 25.17). A function returning an
+    owned descriptor keeps its attribute: that type is not must-use."""
+    problems = []
+    for path in absl_macro_files(root):
+        lines = code_only(read(root, path)).splitlines()
+        for number, line in enumerate(lines, 1):
+            if NODISCARD_STATUS_RE.search(line):
+                problems.append(
+                    "%s:%d: [[nodiscard]] on a function returning absl::Status "
+                    "or StatusOr is redundant (docs/style.md, 1.2: the type "
+                    "is already must-use); remove it" % (path, number))
+    return problems
+
+
 def all_problems(root):
     return (third_party_readmes(root) + guest_scripts_used(root) +
             guest_sleeps(root) + disabled_checks_listed(root) +
             no_test_only_comments(root) + no_testonly_friends(root) +
             fixed_arrays(root) + project_prefix(root) +
-            absl_prefixed_status_macros(root))
+            absl_prefixed_status_macros(root) + nodiscard_on_status(root))

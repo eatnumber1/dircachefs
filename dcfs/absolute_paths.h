@@ -14,8 +14,7 @@ namespace dcfs {
 // something that exists relative to the working directory (a ZFS dataset
 // `pool/fs`, a virtiofs or 9p tag, `tmpfs`, UUID=..., host:/export are not
 // paths of it). `args.spec`, SOURCE as written (decision 11), is untouched.
-[[nodiscard]] absl::Status MakePathsAbsolute(HelperArgs &args,
-                                             HelperOptions &options);
+absl::Status MakePathsAbsolute(HelperArgs &args, HelperOptions &options);
 
 }  // namespace dcfs
 

@@ -66,8 +66,7 @@ struct UmountArgs {
 
 // InvalidArgument (a usage error: exit status 1) names the mistake: no mount
 // point, or more than one.
-[[nodiscard]] absl::StatusOr<UmountArgs> ParseUmountArgs(
-    std::span<const std::string> args);
+absl::StatusOr<UmountArgs> ParseUmountArgs(std::span<const std::string> args);
 
 // What mountinfo says of the topmost mount at a path.
 struct MountEntry {
@@ -114,8 +113,7 @@ struct HelperArgs {
 
 // Parses the arguments after argv[0]. InvalidArgument names the mistake (a
 // usage error: MarkUsageError).
-[[nodiscard]] absl::StatusOr<HelperArgs> ParseHelperArgs(
-    std::span<const std::string> args);
+absl::StatusOr<HelperArgs> ParseHelperArgs(std::span<const std::string> args);
 
 // The options of a mount, split. Everything not prefixed `dcfs.` is for the
 // underlying mount, verbatim, in order.
@@ -150,7 +148,7 @@ struct HelperOptions {
 // for native options the mount cannot honor (dcfs.fstype=bind makes no
 // underlying mount, a remount does not change it: `ro` there is `dcfs.ro`);
 // Unimplemented for dcfs.cache_dir (step 15.3).
-[[nodiscard]] absl::StatusOr<HelperOptions> SplitHelperOptions(
+absl::StatusOr<HelperOptions> SplitHelperOptions(
     std::span<const std::string> options);
 
 // The native options of a mount that makes no native mount of its own (a
@@ -175,8 +173,7 @@ inline constexpr std::string_view kMountExitStatusTypeUrl =
 // The status of a failed native mount(8) that keeps its exit status, which
 // the wrapper then exits with (FailedPrecondition, `message` is mount's own
 // text).
-[[nodiscard]] absl::Status NativeMountError(int exit_status,
-                                            std::string_view message);
+absl::Status NativeMountError(int exit_status, std::string_view message);
 
 // The wrapper's exit status, in mount(8)'s terms (it returns a helper's
 // verbatim, and 1 is "incorrect invocation or permissions"): 1 for a status
@@ -188,8 +185,7 @@ int ExitStatusFor(const absl::Status &status);
 // Sets the Abseil flag `name` (one of the dcfs.<flag> options) from `value`.
 // InvalidArgument for a value the flag does not parse, Internal for a name
 // that is no flag.
-[[nodiscard]] absl::Status ApplyFlagOption(const std::string &name,
-                                            const std::string &value);
+absl::Status ApplyFlagOption(const std::string &name, const std::string &value);
 
 // What the daemon tells the wrapper over the startup channel: "ready" once
 // it answers FUSE_INIT, or the failure's exit status and message.

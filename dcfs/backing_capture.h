@@ -51,8 +51,7 @@ struct CapturedTree {
 
 // The failure of the native mount carries its mount(8) exit status
 // (NativeMountError) and its own error text.
-[[nodiscard]] absl::StatusOr<CapturedTree> CaptureBacking(
-    const CaptureRequest &request);
+absl::StatusOr<CapturedTree> CaptureBacking(const CaptureRequest &request);
 
 // The argv of the mount(8) run on `staging`.
 std::vector<std::string> NativeMountCommand(const CaptureRequest &request,
@@ -72,8 +71,8 @@ struct OpenedBacking {
 // `bind`, and no filesystem that went read-only by itself. `args.source` must
 // be absolute for `bind` (the daemon has no working directory to resolve
 // against).
-[[nodiscard]] absl::StatusOr<OpenedBacking> OpenBacking(
-    const HelperArgs &args, const HelperOptions &options);
+absl::StatusOr<OpenedBacking> OpenBacking(const HelperArgs &args,
+                                          const HelperOptions &options);
 
 }  // namespace dcfs
 

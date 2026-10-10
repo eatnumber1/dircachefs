@@ -41,7 +41,7 @@ class StartupReporter {
 // the report and never returns (one process returns through the callers, see
 // fork_split.h). A failure to fork or to make the channel is returned, in the
 // one process there is.
-[[nodiscard]] absl::StatusOr<StartupReporter> ForkDaemon();
+absl::StatusOr<StartupReporter> ForkDaemon();
 
 }  // namespace dcfs
 

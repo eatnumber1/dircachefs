@@ -58,8 +58,7 @@ struct DaemonLock {
 // The daemon's side. `mountpoint` as /proc/self/mountinfo will name it
 // (symbolic links resolved), to be taken BEFORE the FUSE mount exists:
 // afterwards the daemon, which is the one that would answer, cannot look at it.
-[[nodiscard]] absl::StatusOr<std::string> CanonicalMountpoint(
-    std::string_view mountpoint);
+absl::StatusOr<std::string> CanonicalMountpoint(std::string_view mountpoint);
 
 // After the FUSE mount of `mountpoint` exists (and before the loop serves it),
 // takes the lock for its device, named by mountinfo's line for it, in `dir`
@@ -80,7 +79,7 @@ struct DaemonLock {
 // keying the lock by the 64-bit unique mount id (statx STATX_MNT_ID_UNIQUE,
 // never reused): the daemon cannot statx its own mount before it serves it,
 // and getting the id from mountinfo's old one needs listmount and statmount.
-[[nodiscard]] absl::StatusOr<DaemonLock> HoldDaemonLock(
+absl::StatusOr<DaemonLock> HoldDaemonLock(
     std::string_view mountinfo, std::string_view mountpoint,
     std::string_view dir = kDaemonLockDir);
 
@@ -100,7 +99,7 @@ void RemoveDaemonLockFile(const DaemonLock &lock);
 //
 // Returns umount(8)'s exit status in the status's payload when it failed
 // (ExitStatusFor), with no message: umount printed it.
-[[nodiscard]] absl::Status UmountAndWait(const UmountArgs &args);
+absl::Status UmountAndWait(const UmountArgs &args);
 
 }  // namespace dcfs
 
