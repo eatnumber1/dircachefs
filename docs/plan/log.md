@@ -2952,3 +2952,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   to the dev host, where an investigator runs the client leg in stages (mount; metadata with the
   disk down; one read; warm restart). Scrubbed write-up in notes/trial-2026-10-11.md (hosts,
   addresses, disk labels and ids omitted: the repository is public).
+- 21.1 client leg, stage 2: the whole tree listed and stat'ed over NFS (174,869 files, 193k RPCs,
+  READ 0) with the server's monitor showing the disk in standby throughout (russ: "The disk has
+  been asleep the whole time"). That is the project's claim, demonstrated end to end on the
+  production server and its NFS client. Stage 3 (one read) sent.
