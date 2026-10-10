@@ -2799,3 +2799,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   wrapper. Style 1.5, 1.6a and the worked example updated; sent to the 25.15 agent.
 - russ agreed the program-output rule (absl::PrintF family, never iostreams or C printf; LOG for
   log lines); the 1.6a entry now carries his agreement; 25.20 does the 19 sites.
+- Usage snapshot (russ, 2026-10-10 afternoon): all-models 88% (86% at midday), Fable 37% (35%).
+  Twelve points for about 5.3 days: 2.3 a day. The three running agents finish; then one lane,
+  mechanical (Haiku) steps first (25.17, then 25.16's warnings commit), and no Opus review unless
+  a step touches protocol, identity or an oracle.
