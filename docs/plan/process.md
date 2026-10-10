@@ -175,26 +175,24 @@ ASan (and later UBSan) suites are slow, so they are not part of a step's
   are no longer needed.
 - If a step needs more than about three agent runs to land, pause and tell
   russ: something is probably wrong with the step.
-- **Style review and russ's answers** (russ, 2026-10-10: "give the code
-  style reviewers more access to asking me questions than most. Since
-  style is subjective, I want to make sure we train the style reviewers
-  correctly"). Every step in phase 25 (style convergence), and any step
+- **Style review: the orchestrator decides, russ is asked rarely** (russ,
+  2026-10-10, after the first batch of six: "Use the style guidance you
+  have, and if something's really unclear, I need more context than these
+  questions are giving me. Use your judgement, but you're bringing me too
+  many style questions at the moment"). Every phase-25 step, and any step
   whose diff is mostly shape rather than behaviour, gets a
   `dcfs-style-reviewer` pass before merge. Its report separates findings
-  (violations of written rules) from numbered questions for russ (what the
-  guide does not settle). The orchestrator relays the questions to russ
-  verbatim, in one batch per step, with its own answer beside each where
-  it has an opinion (russ, 2026-10-10: "you can answer when you have an
-  opinion"; russ confirms, overrides or leaves it); russ's answers are written into `docs/style.md`
-  (his words, dated) in the same commit that records the merge, and the
-  agent that built the step applies them before the merge if they change
-  the diff. Questions nobody can answer in the step's lifetime are left in
-  `docs/style.md` as "open (russ, date)" so the next reviewer asks again
-  rather than guessing. A style reviewer that decides a subjective point
-  itself is a reviewer to re-prompt.
-
-## russ's machine
-
+  (violations of written rules) from numbered questions. The orchestrator
+  answers the questions itself from `docs/style.md`, the catalogue and
+  the rulings russ has already given, writes each answer into
+  `docs/style.md` as a dated sentence (marked "orchestrator's ruling"
+  rather than russ's words), and has the building agent apply it. A
+  question goes to russ only when the guide and his prior rulings cannot
+  settle it, it will recur, and the two answers lead to materially
+  different code; then it goes with full context (the whole function,
+  both versions as code, what each costs, where else the choice shows
+  up), one at a time, not in batches. russ reads the dated rulings in
+  `docs/style.md` at his leisure and overrides any he disagrees with.
 - Since 7.1b (2026-10-08) the first Bazel command in an output base
   extracts `@dcfs_llvm` (a streaming extract of the 11.6 GB LLVM release
   to 1.9 GB): 4 CPU minutes, 10-15 minutes of wall on a loaded host. An
