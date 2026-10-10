@@ -554,18 +554,27 @@ TEST_F(SyscallsTest, DupIsCloexecAndSameFile) {
   EXPECT_EQ(a->st_ino, b->st_ino);
 }
 
-TEST(SyscallsCredentialsTest, SetfsuidReturnsPreviousAndReadsBack) {
-  constexpr uid_t kRead = static_cast<uid_t>(-1);  // changes nothing
-  ASSERT_EQ(syscalls::setfsuid(kRead), 0u);
-  EXPECT_EQ(syscalls::setfsuid(1000), 0u);
-  EXPECT_EQ(syscalls::setfsuid(kRead), 1000u);
-  EXPECT_EQ(syscalls::setfsuid(0), 1000u);
-  EXPECT_EQ(syscalls::setfsuid(kRead), 0u);
-  ASSERT_EQ(syscalls::setfsgid(kRead), 0u);
-  EXPECT_EQ(syscalls::setfsgid(1000), 0u);
-  EXPECT_EQ(syscalls::setfsgid(kRead), 1000u);
-  EXPECT_EQ(syscalls::setfsgid(0), 1000u);
-  EXPECT_EQ(syscalls::setfsgid(kRead), 0u);
+TEST(SyscallsCredentialsTest, SetfsuidSetsAndFsuidReadsBack) {
+  ASSERT_EQ(syscalls::fsuid(), 0u);
+  EXPECT_THAT(syscalls::setfsuid(1000), IsOk());
+  EXPECT_EQ(syscalls::fsuid(), 1000u);
+  EXPECT_THAT(syscalls::setfsuid(0), IsOk());
+  EXPECT_EQ(syscalls::fsuid(), 0u);
+}
+
+TEST(SyscallsCredentialsTest, SetfsgidSetsAndFsgidReadsBack) {
+  ASSERT_EQ(syscalls::fsgid(), 0u);
+  EXPECT_THAT(syscalls::setfsgid(1000), IsOk());
+  EXPECT_EQ(syscalls::fsgid(), 1000u);
+  EXPECT_THAT(syscalls::setfsgid(0), IsOk());
+  EXPECT_EQ(syscalls::fsgid(), 0u);
+}
+
+TEST(SyscallsCredentialsTest, TheQuerySentinelIsNotAnId) {
+  EXPECT_EQ(StatusToErrno(syscalls::setfsuid(static_cast<uid_t>(-1))), EINVAL);
+  EXPECT_EQ(StatusToErrno(syscalls::setfsgid(static_cast<gid_t>(-1))), EINVAL);
+  EXPECT_EQ(syscalls::fsuid(), 0u);
+  EXPECT_EQ(syscalls::fsgid(), 0u);
 }
 
 // --- The mount.dcfs wrapper's calls (phase 15) ----------------------------

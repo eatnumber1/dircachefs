@@ -1296,8 +1296,8 @@ FileDescriptor MakeParent(const std::string &path, mode_t mode, gid_t gid) {
 // The thread is root again after every switch: fsuid/fsgid 0 and the
 // supplementary groups it started with.
 void ExpectRootAgain(const std::vector<gid_t> &groups) {
-  EXPECT_EQ(syscalls::setfsuid(static_cast<uid_t>(-1)), 0u);
-  EXPECT_EQ(syscalls::setfsgid(static_cast<gid_t>(-1)), 0u);
+  EXPECT_EQ(syscalls::fsuid(), 0u);
+  EXPECT_EQ(syscalls::fsgid(), 0u);
   EXPECT_THAT(GetGroups(), IsOkAndHolds(groups));
 }
 
@@ -1352,6 +1352,23 @@ TEST_F(BackingTest, SetgidParentGroupIsInherited) {
   EXPECT_EQ(stx.stx_uid, 1000u);
   EXPECT_EQ(stx.stx_gid, 2000u);
   EXPECT_EQ(stx.stx_mode & 07777, 02755);
+}
+
+TEST_F(BackingTest, CallerIdentityThatDoesNotTakeIsRefused) {
+  ASSERT_OK_AND_ASSIGN(std::vector<gid_t> groups, GetGroups());
+  FileDescriptor parent = MakeParent(Path("pub"), 0777, 0);
+  // -1 is what a request would carry for an id with no mapping; it is the
+  // query form of setfsuid/setfsgid, not an id, so the wrapper refuses it
+  // (EINVAL) before the kernel silently ignores it.
+  const Credentials bad_uid{
+      .uid = static_cast<uid_t>(-1), .gid = 1000, .groups = {}};
+  const Credentials bad_gid{
+      .uid = 1000, .gid = static_cast<gid_t>(-1), .groups = {}};
+  EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, bad_uid, *parent, "d", 0755)), EINVAL);
+  ExpectRootAgain(groups);
+  EXPECT_EQ(ErrnoOf(MkdirAt(ctx_, bad_gid, *parent, "d", 0755)), EINVAL);
+  ExpectRootAgain(groups);
+  EXPECT_FALSE(syscalls::fstatat(AT_FDCWD, Path("pub/d")).ok());
 }
 
 // Records the names of the backing calls that are announced

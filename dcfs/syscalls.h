@@ -25,14 +25,19 @@ namespace syscalls {
 
 // --- Per-thread filesystem credentials (see backing.cc's AsCaller) ---------
 //
-// setfsuid(2)/setfsgid(2): set the calling thread's filesystem uid/gid and
-// return the PREVIOUS value. They report no error: an unacceptable id is
-// silently ignored (the previous value is returned either way), so a caller
-// must read the value back to know whether a switch took effect -- passing
-// an invalid id such as -1 changes nothing and returns the current value
-// (backing.cc reads the current ids that way).
-uid_t setfsuid(uid_t uid);
-gid_t setfsgid(gid_t gid);
+// setfsuid(2)/setfsgid(2): set the calling thread's filesystem uid/gid.
+// The system calls report no error: an id the kernel does not accept is
+// silently ignored, and the manpage's only check is to read the value back.
+// So each wrapper makes two calls (a failure comes back inside the result,
+// decoded here: 1.5): EINVAL for (uid_t)-1, which is the query form and not
+// an id; EPERM "did not take" when the id read back differs.
+absl::Status setfsuid(uid_t uid);
+absl::Status setfsgid(gid_t gid);
+
+// The calling thread's filesystem uid/gid: the manpage idiom, setfsuid(-1)
+// changes nothing and returns the current value. Cannot fail.
+uid_t fsuid();
+gid_t fsgid();
 
 // umask(2): sets the process's file mode creation mask and returns the
 // previous one. Cannot fail. Process-wide (the fs_struct is shared by every

@@ -2743,11 +2743,7 @@ absl::Status DirCacheFS::Fallocate(
   }
   // A checkpoint before the backing syscall (dcfs/checkpoint.h; formal/
   // dcfs.tla's Interrupt): interrupted, phase 1's unknown records stay.
-  if (absl::Status interrupted = Checkpoint(ctx_, "a fallocate");
-      !interrupted.ok()) {
-    if (mutation.has_value()) mutation->End();
-    return interrupted;
-  }
+  RETURN_IF_ERROR(Checkpoint(ctx_, "a fallocate"));
 
   // Phase 2. The shared fd is O_RDONLY only when this inode could not be
   // opened O_RDWR (see MakeBackingFile); fallocate on it then fails EBADF,
@@ -2755,7 +2751,8 @@ absl::Status DirCacheFS::Fallocate(
   // read-only fd -- no special-casing needed here.
   BackingCall("FallocateFd");
   absl::Status status = backing::FallocateFd(fd, mode, offset, length);
-  // Phase 3 is refreshes only, which run as ordinary fills.
+  // Phase 3 is refreshes only, which run as ordinary fills: after End(), the
+  // failure's refresh included (hence status is carried across it).
   if (mutation.has_value()) mutation->End();
   if (removed) {
     ABSL_RETURN_IF_ERROR(status);

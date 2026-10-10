@@ -94,12 +94,6 @@ std::string ProcFdPath(int fd) {
   return absl::StrFormat("/proc/self/fd/%d", fd);
 }
 
-// The calling thread's filesystem uid/gid. setfsuid(2)/setfsgid(2) return
-// the previous value and report no error, and passing an invalid id such
-// as -1 changes nothing, so that reads the current value.
-uid_t FsUid() { return syscalls::setfsuid(static_cast<uid_t>(-1)); }
-gid_t FsGid() { return syscalls::setfsgid(static_cast<gid_t>(-1)); }
-
 // readlinkat(2) into a buffer that doubles until the target fits (at most
 // PATH_MAX*4: a longer target is ENAMETOOLONG, not silently truncated).
 absl::StatusOr<std::string> ReadLinkAt(int dirfd, std::string_view path) {
@@ -275,28 +269,26 @@ using SavedGroups = std::vector<gid_t>;
 // would perform every later backing operation as the wrong user, so that
 // is fatal.
 void RestoreRoot(const SavedGroups &groups) {
-  syscalls::setfsuid(0);
+  absl::Status uid = syscalls::setfsuid(0);
   absl::Status status = syscalls::setgroups(groups);
-  syscalls::setfsgid(0);
-  CHECK(status.ok() && FsUid() == 0 && FsGid() == 0)
-      << "cannot restore root filesystem credentials: " << status
-      << " (fsuid " << FsUid() << ", fsgid " << FsGid()
-      << ")";
+  absl::Status gid = syscalls::setfsgid(0);
+  CHECK(uid.ok() && status.ok() && gid.ok())
+      << "cannot restore root filesystem credentials: setfsuid " << uid
+      << ", setgroups " << status << ", setfsgid " << gid << " (fsuid "
+      << syscalls::fsuid() << ", fsgid " << syscalls::fsgid() << ")";
 }
 
 // Switches to `caller`. fsgid and groups go before fsuid so the thread is
 // never "the caller" with root's groups (setgroups would work after
 // setfsuid too: a nonzero fsuid does not drop CAP_SETGID).
 absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
-  RET_CHECK_EQ(FsUid(), 0u) << "credential switch already active";
-  RET_CHECK_EQ(FsGid(), 0u) << "credential switch already active";
+  RET_CHECK_EQ(syscalls::fsuid(), 0u) << "credential switch already active";
+  RET_CHECK_EQ(syscalls::fsgid(), 0u) << "credential switch already active";
   ASSIGN_OR_RETURN(SavedGroups saved, GetGroups());
-  absl::Cleanup restore_root([&saved]() { RestoreRoot(saved); });
-  // setfsgid is guaranteed to never fail
-  syscalls::setfsgid(caller.gid);
+  absl::Cleanup restore_root = [&saved] { RestoreRoot(saved); };
+  RETURN_IF_ERROR(syscalls::setfsgid(caller.gid));
   RETURN_IF_ERROR(syscalls::setgroups(caller.groups));
-  // setfsuid is guaranteed to never fail
-  syscalls::setfsuid(caller.uid);
+  RETURN_IF_ERROR(syscalls::setfsuid(caller.uid));
   std::move(restore_root).Cancel();
   return saved;
 }
@@ -2211,6 +2203,16 @@ absl::Status SyncBacking(Context &ctx, bool announce) {
 
 namespace {
 
+// Probes the row of one recovered inode: whether its object is gone (its
+// backing nlink is 0 or it has no handle), forgetting the row if it is.
+absl::StatusOr<bool> ProbeRecoveredRow(Context &ctx, InodeId id) {
+  ASSIGN_OR_RETURN(std::optional<uint64_t> nlink, BackingNlink(ctx, id));
+  if (!nlink.has_value()) return true;
+  if (*nlink > 0) return false;
+  RETURN_IF_ERROR(ForgetStale(ctx, id));
+  return true;
+}
+
 // At a start after an unclean shutdown: the rows that were dirty (a
 // mutation's phase 1, or a write, since the last sync point) may stand for
 // objects their mutation removed, if the crash fell between its backing
@@ -2236,43 +2238,28 @@ namespace {
 void ProbeRecoveredRows(Context &ctx, std::span<const InodeId> dirty) {
   int64_t forgotten = 0;
   int64_t failed = 0;
-  auto report_failure =
-      [&failed](InodeId id, const absl::Status &status) {
-        ++failed;
-        // The summary below counts them all; a few lines say why.
-        LOG_FIRST_N(ERROR, 10)
-            << "could not probe recovered inode " << id
-            << " (it stays dirty until the next sync point, and an access "
-               "finds it gone): "
-            << status;
-      };
   for (InodeId id : dirty) {
     if (id == cache::kRootInode) continue;
     // Gone already (the sweep, or a cascade from its directory's row).
     absl::StatusOr<cache::CachedAttr> row = cache::GetAttr(ctx, id);
     if (absl::IsNotFound(row.status())) continue;
-    absl::StatusOr<std::optional<uint64_t>> nlink = BackingNlink(ctx, id);
-    if (!row.ok()) {
-      report_failure(id, row.status());
+    absl::StatusOr<bool> gone = row.ok() ? ProbeRecoveredRow(ctx, id)
+                                         : absl::StatusOr<bool>(row.status());
+    if (!gone.ok()) {
+      ++failed;
+      // The summary below counts them all; a few lines say why.
+      LOG_FIRST_N(ERROR, 10)
+          << "could not probe recovered inode " << id
+          << " (it stays dirty until the next sync point, and an access "
+             "finds it gone): "
+          << gone.status();
       continue;
     }
-    if (!nlink.ok()) {
-      report_failure(id, nlink.status());
-      continue;
-    }
-    bool gone = !nlink->has_value();
-    if (!gone && **nlink == 0) {
-      if (absl::Status forgot = ForgetStale(ctx, id); !forgot.ok()) {
-        report_failure(id, forgot);
-        continue;
-      }
-      gone = true;
-    }
-    if (gone) ++forgotten;
+    if (*gone) ++forgotten;
     // The lifetime model's probe (formal/lifetime.tla's ProbeRow): a new
     // process keeps nothing for the nodeid.
     ctx.events->LifetimeChanged(ctx, id, events::LifetimeStep::kProbed,
-                                gone ? 1 : 0,
+                                *gone ? 1 : 0,
                                 [] { return events::Lifetime{}; });
   }
   if (!dirty.empty()) {

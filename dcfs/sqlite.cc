@@ -385,10 +385,8 @@ absl::Status Connection::Transaction(absl::FunctionRef<absl::Status()> body,
   absl::Status status = RunTransaction(body);
   sync_transaction_ = false;
   absl::Status restored = Exec("PRAGMA synchronous=NORMAL");
-  if (restored.ok()) return status;
-  if (status.ok()) return restored;
-  return absl::StatusBuilder(status)
-         << "additionally, restoring synchronous=NORMAL failed: " << restored;
+  if (!status.ok()) return status;
+  return restored;
 }
 
 absl::Status Connection::RunTransaction(
@@ -436,21 +434,24 @@ absl::Status Connection::RunTransaction(
   return UnwindFailedTransaction(depth, std::move(body_status));
 }
 
+namespace {
+
+// Undoes the transaction (depth 0) or savepoint (deeper) a failure left open.
+absl::Status RollBack(Connection &db, int depth) {
+  if (depth == 0) return db.Exec("ROLLBACK");
+  RETURN_IF_ERROR(db.Exec(absl::StrCat("ROLLBACK TO SAVEPOINT sp_", depth)));
+  // ROLLBACK TO leaves the savepoint on the stack (so further statements
+  // can retry within it); we always treat a failed Transaction() as fully
+  // unwound, so also release it.
+  return db.Exec(absl::StrCat("RELEASE SAVEPOINT sp_", depth));
+}
+
+}  // namespace
+
 absl::Status Connection::UnwindFailedTransaction(
     int depth, absl::Status status) {
-  absl::Status rollback_status = Exec(
-      depth == 0 ? std::string("ROLLBACK")
-                 : absl::StrCat("ROLLBACK TO SAVEPOINT sp_", depth));
-  if (depth != 0 && rollback_status.ok()) {
-    // ROLLBACK TO leaves the savepoint on the stack (so further statements
-    // can retry within it); we always treat a failed Transaction() as fully
-    // unwound, so also release it.
-    rollback_status = Exec(absl::StrCat("RELEASE SAVEPOINT sp_", depth));
-  }
-  if (!rollback_status.ok()) {
-    return absl::StatusBuilder(status)
-        << "additionally, rolling back the transaction failed: "
-        << rollback_status;
+  if (absl::Status rolled_back = RollBack(*this, depth); !rolled_back.ok()) {
+    LOG(WARNING) << "rolling back a failed transaction failed: " << rolled_back;
   }
   return status;
 }

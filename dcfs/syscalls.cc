@@ -41,9 +41,33 @@ absl::StatusOr<FileDescriptor> dup(int fd) {
   return FileDescriptor(new_fd);
 }
 
-uid_t setfsuid(uid_t uid) { return static_cast<uid_t>(::setfsuid(uid)); }
+uid_t fsuid() { return static_cast<uid_t>(::setfsuid(static_cast<uid_t>(-1))); }
 
-gid_t setfsgid(gid_t gid) { return static_cast<gid_t>(::setfsgid(gid)); }
+gid_t fsgid() { return static_cast<gid_t>(::setfsgid(static_cast<gid_t>(-1))); }
+
+absl::Status setfsuid(uid_t uid) {
+  if (uid == static_cast<uid_t>(-1)) {
+    return ProducedErrnoToStatus(EINVAL, "setfsuid(-1) is not an id");
+  }
+  ::setfsuid(uid);
+  if (fsuid() != uid) {
+    return ProducedErrnoToStatus(
+        EPERM, absl::StrCat("setfsuid(", uid, ") did not take"));
+  }
+  return absl::OkStatus();
+}
+
+absl::Status setfsgid(gid_t gid) {
+  if (gid == static_cast<gid_t>(-1)) {
+    return ProducedErrnoToStatus(EINVAL, "setfsgid(-1) is not an id");
+  }
+  ::setfsgid(gid);
+  if (fsgid() != gid) {
+    return ProducedErrnoToStatus(
+        EPERM, absl::StrCat("setfsgid(", gid, ") did not take"));
+  }
+  return absl::OkStatus();
+}
 
 mode_t umask(mode_t mask) { return ::umask(mask); }
 
