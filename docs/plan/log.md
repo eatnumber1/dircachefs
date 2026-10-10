@@ -2749,3 +2749,17 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   with a swaps table, per-directory entries, dcfs's hand-rolled candidates and a reviewer
   checklist). Four agents now running (25.15, 26.22, the 26.17a review, 25.19); the pace drops
   to one lane after they land.
+- 25.15 reported (lane-2, tip f85978d, three commits, all gates green): the short-macro define on
+  //dcfs:status with a guard in status.h; SwitchTo as russ's example, the read-back test deleted
+  (the kernel fails unmapped ids with EOVERFLOW before sending; style 1.6a's wrong sentence fixed
+  here); three carried-status ladders rewritten; two kept with reasons (UnwindFailedTransaction,
+  FallocateFd). First dcfs-style-reviewer run dispatched on it; merge waits for russ's answers.
+- 26.17a review (Opus): a loop device over tmpfs changes what no converted test proves (every cut
+  is dm-flakey plus a remount). Findings sent back for one fix round: format the file before
+  losetup (formatting the loop device leaves ext4 groups un-zeroed, so ext4lazyinit becomes a
+  spontaneous writer on every mount, undoing 26.14 for RAM disks); ram_disks_test lacks mem= and
+  the macro should refuse ram_disks without one; rotational differs (btrfs ssd mode silently on);
+  sectors_read's silent-pass trap; one size helper; a duplicate refusal; busybox applets; gates
+  rows and a negative self-check; the shmem warning; double size parsing; error-path messages;
+  the CPU time window. Plan drift to record at merge: power-kill and enospc stay on images, the
+  DCFS_RAM_DISKS=0 escape hatch and the time line were added.

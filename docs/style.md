@@ -473,8 +473,10 @@ absl::StatusOr<SavedGroups> SwitchTo(const Credentials &caller) {
 What it replaced had an `absl::Status status;` filled by three
 `if (status.ok())` steps, a nested block for the last one, a hand-written
 `RestoreRoot` in the error branch, read-back checks for a case no FUSE
-request can produce (an unmapped id arrives as the overflow uid, which
-the kernel accepts), and `dcfs::`-qualified names.
+request can produce (the kernel never sends a request whose uid or gid
+is unmapped in the connection's user namespace: `fuse_simple_request`
+fails the caller with EOVERFLOW first, fs/fuse/dev.c), and
+`dcfs::`-qualified names.
 
 - **Do the thing; if it broke, handle and return; do the next thing**
   (rule). russ, 2026-10-10: "The general form for code should be:
