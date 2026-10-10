@@ -79,7 +79,9 @@ New phases are frozen. The order from here, and why:
    one-page runbook for russ's machine (the HWE kernel boot, the fstab
    line, the warm-up, the hour of metadata work with `hdparm -C` checks,
    what to capture: the daemon's CPU seconds, the sync-point cadence
-   against the spin-down, the NFS clients' behaviour) as the first
+   against the spin-down, the NFS clients' behaviour; and a short control
+   hour without dcfs, the kernel's own caches warmed and pinned, to
+   quantify what dcfs buys on a RAM-starved server) as the first
    dispatch once (1) lands. Everything below is ordered by what this
    teaches; a spin-up during metadata-only work reorders it again.
 3. **26.17b, deterministic budgets** (CPU seconds, I/O counts by kind,
@@ -97,9 +99,11 @@ New phases are frozen. The order from here, and why:
    spike. Before coroutines reopen the races the current design makes
    impossible by construction.
 6. **Then, by what the trial teaches.** Parked until then, in no order:
-   the style backlog (25.9 audit, 25.11, 25.13, 25.16, 25.20, 25.24,
-   25.25), 26.18 (e2e oracles in C++), 26.23 (blocked-task diagnostics),
-   15.10 (fusectl in the remounting guests), 12.11b/c, 12.15, 12.17,
+   15.11 (delete the native-type capture; 12.17 goes with it) once the
+   trial has run on the bind form; the style backlog (25.9 audit, 25.11,
+   25.13, 25.16, 25.20, 25.24, 25.25), 26.18 (e2e oracles in C++), 26.23
+   (blocked-task diagnostics), 15.10 (fusectl in the remounting guests),
+   12.11b/c, 12.15,
    17.2 (setgid), 17.1b/c, 11.7's remainder, 11.3c, 7.3, 7.6b, 7.7,
    26.14b, the kernel bug mails and patches (russ). The style checks
    keep every new line to the rules meanwhile; the backlog shrinks as

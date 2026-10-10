@@ -548,7 +548,8 @@ Order after 12.12's audit, which may reorder them with the approved
   12.11). If the toolchain is too heavy or the checker will not build, the
   spike reports why and SibylFS stays the reading reference of 12.16.
   Time-box: one investigator session. Owner: dcfs-investigator.
-- 12.17 The wrapper handoff modelled. `mount.dcfs`'s capture (the helper's
+- 12.17 The wrapper handoff modelled (contingent, 2026-10-11: 15.11 deletes
+  the capture after a good trial, and this model with it; do not start). `mount.dcfs`'s capture (the helper's
   private namespace, the staging tmpfs, open_tree, the socketpair), the
   fork and daemonisation, readiness after INIT and the exit statuses form
   a state machine with crash points (helper dies before or after sending

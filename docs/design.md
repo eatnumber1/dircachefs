@@ -2891,3 +2891,31 @@ it handed out (only `LOOKUP(".")` has the kernel compare). Each reopen
 reports its outcome (`IdentityResolved`), and nodeids' identity traces
 from the forged-request harness are validated against it
 (`formal/README.md`, "The identity model").
+
+## FUSE-only machinery is a fallback with an expiry (russ, 2026-10-11)
+
+Some of what dcfs ships exists only because it is a FUSE daemon standing
+in for a filesystem: the umount helper and its per-mount lock files (the
+kernel does not wait for a plain `fuse` daemon at unmount), the fusectl
+dependence of that helper, the mount wrapper's capture of a native mount
+in a private namespace, the handle work that connectable handles would
+make unnecessary. russ: this was always the intent, the timeline is just
+long. The rule: when a corner exists only because we are a FUSE daemon,
+the remedies in order are a kernel or libfuse patch
+(`docs/plan/notes/kernel-patches.md`), then a documented limitation, then
+wrapper code; never wrapper code first. Every such mechanism carries a
+comment at its top naming the patch that retires it, takes no new
+features, and is deleted when the production kernel has the patch. The
+synchronous `FUSE_DESTROY` opt-in (patch 6) retires the most at once: the
+umount helper, the lock files, the fusectl dependence and the
+mount-after-unmount limitation.
+
+Over-mounting is not FUSE-only machinery and stays: in the `bind` form
+dcfs opens SOURCE with `O_PATH` before mounting and never uses a path
+again, so `mount -t dcfs ... /srv/media /srv/media` hides the backing
+under dcfs with no namespace capture at all, which is also the hygiene
+property russ values (nothing reaches the backing except through the
+daemon's descriptor). What the native-type capture adds is only that dcfs
+mounts the block device itself; production uses the bind form with the
+disk mounted by fstab at a raw path, so the capture is scheduled for
+deletion once the spare-disk trial has run on that shape (plan 15.11).

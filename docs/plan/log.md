@@ -2898,3 +2898,8 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   section (finish in-flight; the spare-disk trial with a runbook for russ's machine; 26.17b
   budgets; 17.3 slowness; 25.10 + 12.16/12.18 atomicity; then by what the trial teaches, the
   style backlog and the rest parked). New phases frozen; process.md points at the Queue.
+- russ on the surface area: the FUSE-only-machinery rule adopted (design.md: kernel patch, then a
+  documented limitation, then wrapper code; each mechanism names the patch that retires it); the
+  native-type namespace capture is deleted after a good trial on the bind form (15.11; 12.17 goes
+  with it); over-mounting stays, since the bind form provides it without capture; the trial gets a
+  short no-dcfs control (his fileserver is RAM-starved, so dcfs is needed; the control quantifies).

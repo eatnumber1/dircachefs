@@ -710,3 +710,19 @@ without a syslog sink instead of `LOG_PERROR`; `StartupPurge` stays
 until 15.3 decides the cache path. 15.6's util-linux guest is where the
 helper protocol gets its real test.
 
+
+## 15.11 Delete the native-type capture (russ, 2026-10-11; after a good spare-disk trial on the bind form)
+
+russ: "Let's delete the namespace capture assuming the trial goes well."
+Over-mount support is unaffected (the bind form opens SOURCE before the
+mount; README "dcfs over the original"), so the hygiene property of a
+hidden backing stays. Goes: `dcfs.fstype=<native type>`, the private
+mount namespace, open_tree, the staging tmpfs, the socketpair handoff,
+backing_capture.cc and its tests, the capture's README and design text,
+the systemd-guest cases for the native form, 12.17 (the wrapper handoff
+model, which modelled exactly this). Stays: the bind form, daemonisation
+with readiness after INIT, the syslog sink, the umount helper (its own
+expiry is kernel patch 6), fsck.dcfs. `dcfs.fstype` then takes only
+`bind`, or the option goes entirely if `bind` is the only value (russ to
+say). A test that a native type is refused with a message pointing at
+the bind form.
