@@ -2956,3 +2956,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   READ 0) with the server's monitor showing the disk in standby throughout (russ: "The disk has
   been asleep the whole time"). That is the project's claim, demonstrated end to end on the
   production server and its NFS client. Stage 3 (one read) sent.
+- CI run 38088587563 (9de0e71): fully green, the first since the reformat (coverage on the
+  re-baselined figure, the ubsan ACE mitigation holding, xfstests on all three backings).
