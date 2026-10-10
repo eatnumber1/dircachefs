@@ -7,8 +7,6 @@
 # add a line for new code; fix the code.
 bench/dcfs_bench.cc|BM_Readdir|capturing_mutating_lambda|1
 bench/dcfs_bench.cc|Cycle|readability-isolate-declaration|1
-bench/dcfs_bench.cc|Cycle|readability-redundant-string-cstr|1
-bench/dcfs_bench.cc|Register|readability-redundant-string-cstr|1
 bench/dcfs_bench.cc|StartDcfs|cert-err33-c|1
 bench/dcfs_bench.cc|WalkDir|capturing_mutating_lambda|1
 bench/dcfs_bench.cc|WalkDir|misc-no-recursion|1

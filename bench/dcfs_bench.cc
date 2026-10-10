@@ -195,7 +195,7 @@ void Cycle(benchmark::State &state, const Target &t, Op op) {
   for (auto _ : state) {
     std::string path = t.root + "/" + EntryPath((i * stride) % n);
     if (!op(path)) {
-      state.SkipWithError(("operation failed on " + path).c_str());
+      state.SkipWithError("operation failed on " + path);
       return;
     }
     ++i;
@@ -373,8 +373,8 @@ void Register() {
   };
   for (const Case &c : cases) {
     for (const Target &t : targets) {
-      auto *b = benchmark::RegisterBenchmark(
-          (std::string(c.name) + "/" + t.name).c_str(), c.fn, &t);
+      auto *b = benchmark::RegisterBenchmark(std::string(c.name) + "/" + t.name,
+                                             c.fn, &t);
       b->Unit(benchmark::kMicrosecond);
       if (cfg.smoke) {
         b->Iterations(1);
