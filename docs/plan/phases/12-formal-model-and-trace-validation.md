@@ -538,16 +538,16 @@ Order after 12.12's audit, which may reorder them with the approved
   design is warranted (the one place judgement, not labour, is the
   bottleneck).
 - 12.18 SibylFS's trace checker as a second oracle (spike; russ,
-  2026-10-10). Can the SibylFS checker (OCaml) be built hermetically
-  through Bazel (an OCaml toolchain pinned like every other tool, or a
-  prebuilt binary pinned by hash if the project offers one) and run on a
-  trace of dcfs's FUSE replies converted to its syscall-trace format? If
-  yes: a test runs one workload through dcfs and the same on the backing,
-  checks both traces, and fails if dcfs's trace is rejected where the
-  backing's is accepted (an oracle independent of our model, beside
-  12.11). If the toolchain is too heavy or the checker will not build, the
-  spike reports why and SibylFS stays the reading reference of 12.16.
-  Time-box: one investigator session. Owner: dcfs-investigator.
+  2026-10-10). Done 2026-10-11, merged 2ebc325. Report in `docs/plan/notes/sibylfs-checker-12.18.md`.
+  Findings: source compilation is intractable under Bazel (ancient Lem/OCaml 4.02);
+  prebuilt x86_64 binaries (2015-08-20 release) run against glibc and can be pinned,
+  but are frozen snapshots. Fundamental impedance mismatch: FUSE requests with nodeids/64-bit fh
+  do not map mechanically to sequential per-process path/fd traces; VFS caches elide FUSE calls;
+  SibylFS's internal abstraction mandates synthetic metadata (st_dev=2049, st_ino=0..N, st_size=9999)
+  and rejects real Linux ext4 traces without lossy normalization; no xattr, fallocate, or crash
+  consistency modeling. Recommendation: discard SibylFS trace checker as an oracle; retain
+  SibylFS strictly as a reading reference for 12.16's TLA+ refinement.
+
 - 12.17 The wrapper handoff modelled (contingent, 2026-10-11: 15.11 deletes
   the capture after a good trial, and this model with it; do not start). `mount.dcfs`'s capture (the helper's
   private namespace, the staging tmpfs, open_tree, the socketpair), the
