@@ -143,19 +143,23 @@ asks for a node ID generated in a dcfs version that's no longer
 compatible." The kernel's FUSE export operations put dcfs's nodeid and
 generation into every NFS file handle; those handles live on clients
 across server reboots and dcfs upgrades, and knfsd asks dcfs about them
-without a LOOKUP first. Today: nodeid is the cache row id, the generation
-is the backing inode's generation (0 where the filesystem has none), and
-after a cache wipe a fresh random generation makes an old handle resolve
-to a different file with probability 2^-32 (README "Generations"). That
-is detection by luck, and it says nothing about a nodeid whose meaning a
-later dcfs version changed.
-1. **A database epoch in the nodeid.** Reserve the high bits of the 64-bit
-   nodeid (16 bits of epoch, 48 bits of row id is ample) for a per-database
-   epoch stored in `cache_state`, drawn at database creation and bumped by
-   any migration or wipe that reassigns or reinterprets row ids. A handle
-   from another epoch then fails the nodeid lookup deterministically:
-   ESTALE, never a different file, probability zero. The root nodeid
-   (FUSE_ROOT_ID = 1) is the one fixed point and is handled as such.
+without a LOOKUP first. Today (14.3): the nodeid is the backing inode
+number and the generation the backing inode's generation (0 where the
+filesystem has none; stubs take nodeids above a high-water mark), so a
+handle already survives a cache wipe and a reboot by construction, and
+what remains undetected is (a) a generation-0 filesystem recycling an
+inode number, (b) a stub nodeid reassigned after a wipe, and (c) a dcfs
+version that changes what either field means.
+1. **An epoch that makes the past unresolvable.** The fields are the
+   kernel's: 64-bit nodeid, 32-bit generation. Where to carry a
+   per-database epoch (stored in `cache_state`, bumped by a wipe or by a
+   migration that reinterprets either field) is a measurement first:
+   ext4 inode numbers are 32-bit, xfs and btrfs use up to 64, so the
+   nodeid's high bits are free only where the backing says so; the
+   generation's bits are the alternative for generation-0 filesystems and
+   stubs. The requirement is the fixed point: a handle minted under
+   another epoch answers ESTALE deterministically, never another object.
+   The root nodeid (FUSE_ROOT_ID = 1) is the one constant.
 2. **The rule, from the first release**: the meaning of (nodeid,
    generation) is a public interface. A change to it bumps the epoch; a
    handle from an unknown epoch is ESTALE; the README's NFS section says
