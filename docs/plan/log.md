@@ -3014,3 +3014,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   commit WIP and stop; 26.28's small round finishes; no dispatch until Friday 2026-10-16 01:00.
   The pace rule failed today because three Sonnet-class agents and a long interactive trial ran
   at once; the Queue's "one lane" was not kept. Lesson recorded in process.md.
+- 26.28 merged (lane-4 → 5f0268c; three parsers' fixtures real, the OSV JSON shape and flag
+  unverified until the first CI run). Orchestrator added `continue-on-error: true` to every badge
+  and badge-upload step so a badge can never make CI red (the OSV JSON step's flag is the risk).
+  Push point: main at this commit. Waiting for 26.17b's and 7.8's WIP reports; then idle to Friday.

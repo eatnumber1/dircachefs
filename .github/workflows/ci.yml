@@ -358,6 +358,7 @@ jobs:
       - name: Test
         run: ./.github/ci/coverage.sh --config=presubmit
       - name: Badge (coverage, step 26.28)
+        continue-on-error: true  # a badge never fails CI (step 26.28)
         if: ${{ !cancelled() && hashFiles('ci-coverage/gate.txt') != '' }}
         run: |
           mkdir -p badges
@@ -366,6 +367,7 @@ jobs:
             --baseline "$PWD/dcfs/coverage_baseline.txt" \
             --out "$PWD/badges/coverage.json"
       - name: Upload the coverage badge
+        continue-on-error: true  # a badge never fails CI (step 26.28)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -448,6 +450,7 @@ jobs:
           set -o pipefail
           bazel run //tools:reproducible_build 2>&1 | tee "$RUNNER_TEMP/reproducible.log"
       - name: Badge (reproducible, step 26.28)
+        continue-on-error: true  # a badge never fails CI (step 26.28)
         if: ${{ !cancelled() }}
         run: |
           mkdir -p badges
@@ -455,6 +458,7 @@ jobs:
             --input "$RUNNER_TEMP/reproducible.log" \
             --out "$PWD/badges/reproducible.json"
       - name: Upload the reproducible badge
+        continue-on-error: true  # a badge never fails CI (step 26.28)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -634,6 +638,7 @@ jobs:
       - name: Test (shard ${{ matrix.shard }} of 3)
         run: ./.github/ci/test.sh --sizes=large,enormous --shard=${{ matrix.shard }}/3
       - name: Badge (TLC states, step 26.28; shard 0 holds //formal:large_test)
+        continue-on-error: true  # a badge never fails CI (step 26.28)
         # The test's log is the only place TLC's summary is printed (a passing
         # test's output is not in the job log). test.sh --shard deals the sorted
         # large and enormous targets out by index; //formal:large_test is index
@@ -645,6 +650,7 @@ jobs:
             --input "$PWD/bazel-testlogs/formal/large_test/test.log" \
             --out "$PWD/badges/tlc.json"
       - name: Upload the TLC badge
+        continue-on-error: true  # a badge never fails CI (step 26.28)
         if: ${{ !cancelled() && matrix.shard == 0 }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -1110,6 +1116,7 @@ jobs:
             -L
             osv/shipped-debs.cdx.json
       - name: Badge (OSV, step 26.28)
+        continue-on-error: true  # a badge never fails CI (step 26.28)
         if: ${{ !cancelled() }}
         run: |
           mkdir -p badges
@@ -1119,6 +1126,7 @@ jobs:
             --config "$PWD/osv-scanner.toml" \
             --out "$PWD/badges/osv.json"
       - name: Upload the OSV badge
+        continue-on-error: true  # a badge never fails CI (step 26.28)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
