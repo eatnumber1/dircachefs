@@ -281,6 +281,7 @@ by its own timer (`hdparm -S` if you set one) or with `hdparm -y $D`, check
 
 ## 8. Unmount and remount (warm restart)
 
+When exporting `/srv/trial` directly over NFS:
 ```
 umount /srv/trial                        # expect: no output, exit 0; returns once the daemon has exited
 findmnt /srv/trial                       # expect: nothing
@@ -291,6 +292,17 @@ exportfs -f                              # only if exporting
 mount /srv/trial
 ps -eo pid,comm,args | grep '[d]cfs'     # the new daemon; set P=<its pid>
 journalctl -t dcfs -n 20 --no-pager      # expect recovery: the last run ended cleanly
+```
+
+If exporting a bind mount of the dcfs mountpoint (e.g. `/srv/trial` bind-mounted to `/export/trial`), the bind mount must be unmounted before dcfs stops and remade after, or knfsd retains the dead FUSE superblock and serves EIO (15.12):
+```
+exportfs -u <client>:/export/trial       # unexport the bind mount
+umount /export/trial                     # unmount the bind mount before stopping dcfs
+umount /srv/trial                        # stop dcfs
+mount /srv/trial                         # start dcfs
+mount --bind /srv/trial /export/trial    # remount the bind mount onto the new dcfs instance
+exportfs -ra                             # re-export
+exportfs -f                              # flush export cache
 ```
 
 The disk must still be in standby if nothing read it. Repeat a short
