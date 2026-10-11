@@ -2994,3 +2994,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   recorded as part of 14.9.
 - russ: the stub-identity derivation is an investigation with a prototype first, not a design
   decision; he is not convinced it is a good idea or that it works. 14.9's text says so.
+- russ: a network filesystem as the backing stays a supported use case for an administrator who
+  can guarantee exclusive access; only his own NFS clients are out. The future-work note corrected.

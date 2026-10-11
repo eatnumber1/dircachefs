@@ -131,14 +131,17 @@ push; the queue above starts in earnest after the reset.
 
 ## Future work (not scheduled)
 
-- **dcfs on NFS clients, in front of an NFS mount: rejected** (russ,
-  2026-10-11, proposed and withdrawn in the same breath: "I can't
-  guarantee exclusive access"). The write-through protocol requires that
-  nothing changes the backing behind dcfs; a shared NFS mount violates
-  that by definition. The server-side instance already answers the
-  clients' attribute traffic from its cache (the trial's 175k GETATTRs
-  per round with the disk asleep), and the kernel's NFS client cache does
-  the rest locally.
+- **dcfs in front of a network filesystem (NFS, SMB, ...): a supported
+  use case for an administrator who can guarantee exclusive access, not
+  for russ's own clients** (russ, 2026-10-11). He considered it for his
+  NFS clients and withdrew because he cannot guarantee that nothing else
+  writes behind dcfs there, which the write-through protocol requires;
+  the server-side instance already answers those clients' attribute
+  traffic from its cache. For an administrator who can guarantee it, a
+  network backing stays supported (the wrapper's `_netdev`/network-type
+  handling, the README's text on network backings, and the identity work
+  for filesystems without stable handles are the places it lives), and
+  nothing in the plan may remove it.
 
 - **More backing filesystems.** Phase 14 (Identity from the backing filesystem) supports ext4, xfs and btrfs
   handles. Extending it:
