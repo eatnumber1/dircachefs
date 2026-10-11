@@ -431,6 +431,47 @@ calls are `unlink` and `unlinkat`).
 
 ### 1.6 Errors
 
+**Error handling on one page** (distilled 2026-10-11 from the week's rulings;
+each line points at the rule that carries it):
+1. A `Status` is a message to the caller, who may inspect it and decide; that
+   is its purpose. So anything the caller must not be able to override is
+   not conveyed as a `Status`: the subsystem whose state is poisoned records
+   it, begins the orderly shutdown and refuses at its own door (1.6b). Status
+   for the recoverable, state for the irrecoverable; never a crash.
+2. A failure is handled where it is found, and its message is written
+   there; the next thing starts after a blank line (1.6a). Undo is an
+   `absl::Cleanup` beside the thing it undoes, cancelled at the commit point.
+3. Two failures are never joined: return the first; the second is reported
+   only when the first succeeded (1.6a, ruling 4).
+4. No code handles a failure that cannot happen (1.10a). A failure that a
+   configuration we may adopt makes possible is handled once, by the wrapper
+   that owns the knowledge, which then returns a `Status` (1.5: `setfsuid`).
+5. The errno a client sees is the backing's contract (1.12): dcfs forwards
+   what the backing answered (`ErrnoToStatus`, logged at no level) and marks
+   what it decided itself (`ProducedErrnoToStatus`, logged at ERROR); it
+   never invents an errno for its own convenience, and atomicity promised by
+   the syscall is kept however many internal retries that costs.
+6. Every error path is tested as a happy path is (`AGENTS.md`, coverage;
+   the `-Wl,--wrap` fakes), and a test asserts only what is under test:
+   infrastructure failures in a test crash it (`CHECK_OK`), they are not
+   test failures (1.6b).
+7. The wrapper's signature says whether a call can fail (1.5): a `Status`
+   return that the compiler will not let anyone drop, or no `Status` at all.
+
+**Decision, no `Backing` class (the orchestrator, 2026-10-11, at russ's
+request).** The backing layer stays free functions over `Context &` (the
+2026-10-07 ruling that `backing` folds into `dcfs`). Reasons: the
+poisoning needs one flag at the one door that already exists
+(`syscalls_backing`, enforced by the build graph), not an object to carry
+it; the testing seams exist (the `-Wl,--wrap` fault fakes and the
+`ProtocolEvents` observer), and a virtual `Backing` would be a second
+mechanism for the same thing; and the hot path gains nothing from
+dispatch through an instance. Revisit when coroutines put per-request
+state into the backing layer, or when a second backing kind (a network
+filesystem reached differently) needs a different implementation behind
+the same calls: those are the conditions under which an injected object
+earns its place.
+
 **`absl::Status`/`StatusOr<T>` are the only error channel**: no error
 codes, no `errno` outside the syscall wrappers. `std::optional<T>` means
 "absent is normal"; `StatusOr<std::optional<T>>` when it can also fail.

@@ -3219,3 +3219,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   15.13, the cache database root-owned 0600 always, the permission-set comparison dropped. Style
   1.6b gains the poisoned-subsystem pattern in his words. Design question open: the backing door
   as an injected class.
+- russ asked the regular orchestrator to decide on a `Backing` class: decided no (style 1.6: the
+  door exists, the seams exist, the 2026-10-07 flattening ruling stands; revisit at coroutines or a
+  second backing kind). Style 1.6 now opens with "Error handling on one page", seven rules
+  distilled from the week's rulings with pointers to where each lives.
