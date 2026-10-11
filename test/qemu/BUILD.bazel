@@ -1859,6 +1859,14 @@ XFSTESTS_SLOW_SHARDS = [1, 2, 3, 4, 5, 6, 7, 8]
     tags = ["manual"],
 ) for fstype in ["ext4", "xfs", "btrfs"]]
 
+[xfstests_test(
+    name = "xfstests_dev_native_test_" + fstype,
+    cmdline = "xfstests_run=generic/001,generic/002 xfstests_timeout=120 xfstests_native=1",
+    fstype = fstype,
+    guest_script = "guest/xfstests.sh",
+    tags = ["manual"],
+) for fstype in ["ext4", "xfs", "btrfs"]]
+
 # Step 17.1: every xfstests target is made by xfstests_test (xfstests.bzl), which
 # gives it the `xfstests` tag that .github/ci/test.sh leaves out of the full, asan
 # and ubsan shards (//tools:test_sh_test checks that selection). The test reads
