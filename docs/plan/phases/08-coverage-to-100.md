@@ -168,3 +168,17 @@ statx runs with no fill in flight), `RemovedFileCanBeChanged` extended
 with fallocate of an unlinked open file. `CreateChild:633` is the
 checkpoint-refusal path, already in `equivalent.txt`; nothing added.
 
+## 8.5 Recover deficit in fuse_ops.cc (2026-10-11)
+
+The 7.6a Google-rules reformat split 21 single-line `case ...: return ...;`
+statements in `OpName` (`dcfs/fuse_ops.cc`) into two lines, doubling the
+uncovered line count for unexercised FUSE opcodes and dropping line coverage
+by 0.22% below the committed baseline. Per russ's binding rule ("You must not
+lower the coverage baseline. That's why it exists. Only ever increase it"):
+- `OpName` and `DescribeRequest` declared in `dcfs/fuse_ops.h` under `namespace dcfs`.
+- Implemented unit tests in `dcfs/fuse_ops_test.cc` covering all 38 `events::Op`
+  enum values, out-of-range fallback values, request formatting with and without
+  names/newparents, and byte escaping across control characters and arbitrary byte sequences.
+- Registered `qemu_cc_test` target `:fuse_ops_test`.
+- Coverage rose from 96.04% lines / 80.85% branches to 96.50% lines / 81.25% branches.
+- Baseline raised to `lines 96.50`, `branches 81.24`.

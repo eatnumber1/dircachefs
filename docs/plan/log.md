@@ -3068,3 +3068,4 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   genrules fixed with cost_lib.sh). Fast (299 pass), presubmit (444 pass), and tools
   (38 pass) suites green. Lane-1 free. Push point: main at this commit.
 - russ: "You must not lower the coverage baseline. That's why it exists. Only ever increase it." (2026-10-11). Baseline restored to 96.26; step 8.5 queued to close the 21-line deficit.
+- 8.5 merged 7d2270c (lane-1): recovered the 21-line deficit in dcfs/fuse_ops.cc; OpName and DescribeRequest moved to namespace dcfs and covered by new fuse_ops_test across all 38 events::Op enum values, fallback, request formatting, and byte escaping; line coverage rose from 96.04% to 96.50% (branches 81.25%); coverage baseline raised to lines 96.50 / branches 81.24. Push point: main at this commit.
