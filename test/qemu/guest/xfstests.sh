@@ -40,6 +40,7 @@
 FAILED=0
 . "$(dirname "$0")/lib.sh"
 . "$(dirname "$0")/xfstests_lib.sh"
+. "$(dirname "$0")/cost_lib.sh"
 
 XF=/xfstests
 LISTS=$XF/dcfs
@@ -147,6 +148,22 @@ export TEST_DIR=$TEST_DIR
 export SCRATCH_DEV=$SCRATCH_DEV
 export SCRATCH_MNT=$SCRATCH_MNT
 EOC
+if [ "$NATIVE" != 1 ]; then
+	# The daemon of each mount joins the cgroup its CPU time is counted in
+	# (guest/cost_lib.sh), as start_daemon's do: mount(8) runs
+	# mount.fuse.dcfs, which this puts in the cgroup and then becomes what it
+	# was, dcfs under the name it was called by (what dcfs dispatches on). The
+	# daemon is a child of that process and stays in the cgroup; the CPU of a
+	# test is then the difference of two readings, and a daemon that exits
+	# between them (every unmount) still counts, which the ticks of the live
+	# daemons (the first results lines of 17.3) did not.
+	mv /sbin/mount.fuse.dcfs /sbin/mount.fuse.dcfs.real
+	cat >/sbin/mount.fuse.dcfs <<'EOW'
+#!/bin/bash
+echo $$ >"${COST_CGROUP:?}/cgroup.procs" && exec -a "$0" /sbin/mount.fuse.dcfs.real "$@"
+EOW
+	chmod +x /sbin/mount.fuse.dcfs
+fi
 if [ "$NATIVE" = 1 ]; then
 	echo "export FSTYP=$FSTYPE" >>$XF/local.config
 	# The native file systems are made by xfstests (mkfs of $FSTYP).
@@ -201,19 +218,6 @@ echo "xfstests.sh: $SET set, shard ${XFSTESTS_SHARD:-}/${XFSTESTS_SHARDS:-}: $TO
 # killed one as failed; the result here is "timeout"). LIMIT is the one timer
 # of the run: a deadline for a test that cannot announce its own end, not a
 # wait for something that can be announced.
-
-# dcfs_ticks: the CPU time (clock ticks) of the dcfs daemons now, so that the
-# difference between two tests' ends is what dcfs spent on the test (a daemon
-# that exits between them makes the difference too small, never negative: the
-# number is for telling dcfs's cost from the host's load, step 17.3).
-dcfs_ticks() {
-	dt_sum=0
-	for dt_pid in $(pidof dcfs.real dcfs mount.dcfs 2>/dev/null); do
-		set -- $(cut -d' ' -f14,15 "/proc/$dt_pid/stat" 2>/dev/null)
-		dt_sum=$((dt_sum + ${1:-0} + ${2:-0}))
-	done
-	echo "$dt_sum"
-}
 
 # running_test: the number of the generic test that is running, if one is.
 running_test() {
@@ -296,7 +300,8 @@ run_batch() {
 	rb_pid=$!
 	exec 3</tmp/check.fifo
 	rb_prev=$(date +%s)
-	rb_cpu=$(dcfs_ticks)
+	rb_cpu=$(cost_cpu_us)
+	rb_io=$(cost_disk_counts)
 	while :; do
 		rb_read_at=$(date +%s)
 		if read -r -t "$LIMIT" rb_line <&3; then
@@ -307,12 +312,12 @@ run_batch() {
 			case "$rb_line" in
 			generic/[0-9]*)
 				rb_now=$(date +%s)
-				rb_ticks=$(dcfs_ticks)
-				rb_dcpu=$((rb_ticks - rb_cpu))
-				[ "$rb_dcpu" -lt 0 ] && rb_dcpu=0
-				echo "${rb_line%% *} $((rb_now - rb_prev)) $rb_dcpu" >>/tmp/durations
+				rb_cpu_now=$(cost_cpu_us)
+				rb_io_now=$(cost_disk_counts)
+				echo "${rb_line%% *} $((rb_now - rb_prev)) $((rb_cpu_now - rb_cpu)) $(cost_disk_delta "$rb_io" "$rb_io_now")" >>/tmp/durations
 				rb_prev=$rb_now
-				rb_cpu=$rb_ticks
+				rb_cpu=$rb_cpu_now
+				rb_io=$rb_io_now
 				;;
 			esac
 		else
@@ -340,7 +345,14 @@ run_batch() {
 	for rb_id in "$@"; do
 		rb_seq=${rb_id#generic/}
 		rb_secs=$(awk -v id="$rb_id" '$1 == id { print $2 }' /tmp/durations | tail -n 1)
-		rb_dcpu=$(awk -v id="$rb_id" '$1 == id { print $3 }' /tmp/durations | tail -n 1)
+		# What the test cost between the previous test's end and its own (the
+		# last line for it, if check ran it twice): the CPU of the dcfs
+		# processes and the I/O of the disks, in the words
+		# test/qemu/scripts/xfstests_costs.py reads; a test with no line (killed
+		# before check printed its result) cost nothing we saw.
+		rb_cost=$(awk -v id="$rb_id" 'BEGIN { line = "dcfs-cpu=0.000s reads=0 writes=0 sectors_read=0 sectors_written=0 flushes=0" }
+			$1 == id { line = sprintf("dcfs-cpu=%.3fs", $3 / 1000000); for (i = 4; i <= NF; i++) line = line " " $i }
+			END { print line }' /tmp/durations)
 		rb_reason=""
 		if grep -qx "$rb_id" /tmp/killed; then
 			rb_status=timeout
@@ -356,7 +368,7 @@ run_batch() {
 			continue
 		fi
 		echo "$rb_id $rb_status ${rb_secs:-0} $rb_reason" >>$RESULTS
-		echo "xfstests: $rb_id $rb_status ${rb_secs:-0}s dcfs-cpu=${rb_dcpu:-0}ticks${rb_reason:+: $rb_reason}"
+		echo "xfstests: $rb_id $rb_status ${rb_secs:-0}s $rb_cost${rb_reason:+: $rb_reason}"
 		if [ "$rb_status" = fail ] || [ "$rb_status" = timeout ]; then
 			report_failure "$rb_id"
 		fi

@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side self-check of the guest's cost accounting (step 26.17): the real
 # guest/cost_lib.sh functions that read what a test cost (the CPU of the
 # processes that ran dcfs's code, from the cgroup they were put in; the I/O of

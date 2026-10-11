@@ -59,8 +59,8 @@
 #       quiet kernel (a sanitizer, coverage, TCG or the noisy kernel spend CPU
 #       and cause I/O differently); otherwise the line is printed and says so.
 #       A target with no line in a file is reported, not held; a budgeted one
-#       whose guest printed no COST line fails, and so does a guest with disks
-#       that counted no I/O at all (it counted nothing).
+#       whose guest printed no COST line fails, and so does one with a budget
+#       for reads that counted no read (it counted nothing).
 #
 #   Load (step 26.17): the host's CPU pressure (the time some task of the host
 #       waited for a CPU, /proc/pressure/cpu, or $DCFS_PRESSURE_FILE: a container's
@@ -544,7 +544,6 @@ fi
 # --- lay out the disks in letter order, one -drive/-device pair per index -
 specs_file="$WORKDIR/disk-specs"
 : >"$specs_file"
-DISK_SPECS=$#
 for spec in "$@"; do
 	dev=${spec%%:*}
 	rest=${spec#*:}
@@ -921,6 +920,24 @@ result() {
 LOAD_NOTE=""
 LOAD_TAG=""
 PRESSURE_BEFORE=$(pressure_us)
+# Step 26.17: pin QEMU to non-SMT cores (one logical CPU per physical core from
+# /sys/devices/system/cpu/cpu*/topology/thread_siblings_list, e.g. 0,2,4,6) to
+# eliminate SMT sibling contention / noise. DCFS_PIN_NON_SMT=0 disables.
+QEMU_TASKSET=""
+CPU_SYSFS=${DCFS_CPU_SYSFS:-/sys/devices/system/cpu}
+if [ "${DCFS_PIN_NON_SMT:-1}" != "0" ] && command -v taskset >/dev/null 2>&1 && [ -d "$CPU_SYSFS" ]; then
+	NON_SMT_CPUS=$(
+		for f in "$CPU_SYSFS"/cpu[0-9]*/topology/thread_siblings_list; do
+			[ -f "$f" ] || continue
+			sed -e 's/[,-].*//' "$f"
+		done 2>/dev/null | sort -n -u | paste -sd, -
+	)
+	if [ -n "$NON_SMT_CPUS" ]; then
+		QEMU_TASKSET="taskset -c $NON_SMT_CPUS"
+		echo "run-qemu.sh: CPU affinity: pinned to non-SMT cores ($NON_SMT_CPUS)" >>"$LOG"
+	fi
+fi
+[ -n "$QEMU_TASKSET" ] || echo "run-qemu.sh: CPU affinity: unpinned" >>"$LOG"
 times >"$WORKDIR/times-start"
 start=$(date +%s.%N)
 echo "run-qemu.sh: qemu start $start" >>"$LOG"
@@ -931,7 +948,7 @@ echo "run-qemu.sh: qemu start $start" >>"$LOG"
 # status).
 qemu_cmd() {
 	# shellcheck disable=SC2086 # drive_args is a deliberately unquoted list of flags, the others a word or nothing
-	$QEMU_TIMEOUT $QEMU_WRAP "$QEMU_BIN" \
+	$QEMU_TIMEOUT $QEMU_WRAP $QEMU_TASKSET "$QEMU_BIN" \
 		-M microvm,x-option-roms=off,pit=$LEGACY_TIMERS,pic=$LEGACY_TIMERS,rtc=on,isa-serial=on,acpi=off \
 		-bios "$QBOOT" \
 		-nodefaults -no-user-config -nographic -no-reboot \
@@ -1099,7 +1116,7 @@ echo "run-qemu.sh: time: guest wall $(awk "BEGIN{printf \"%.1f\", $end-$start}")
 # have the tolerance of the CPU time, with the measurements). A reason the run is
 # not held to the budgets is printed with the numbers: they are the plain
 # build's on KVM with the quiet kernel.
-COST_LINE=$(grep -a '^COST ' "$LOG" | tail -n 1)
+COST_LINE=$(grep -a '^COST ' "$LOG" | tail -n 1 | tr -d '\r')
 COST_FAIL=""
 COST_VERDICT=""
 printf '%s\n' "$COST_LINE" | awk '{ for (i = 2; i <= NF; i++) { split($i, kv, "="); print kv[1], kv[2] } }' >"$WORKDIR/cost-counts"
@@ -1153,13 +1170,14 @@ fi
 if [ -n "$IO_BUDGETS" ] && [ "$(cost_count reads)" != "?" ]; then
 	echo "run-qemu.sh: cost: disk I/O $(cost_count reads) reads, $(cost_count writes) writes, $(cost_count sectors_read) sectors read, $(cost_count sectors_written) sectors written, $(cost_count flushes) flushes; dcfs caused $(cost_count dcfs_reads) reads ($(cost_count dcfs_read_bytes) bytes), $(cost_count dcfs_writes) writes ($(cost_count dcfs_write_bytes) bytes) ($COST_NOTE)"
 fi
-# A guest with disks that counted no read: mounting a disk reads it, so the
-# counters read nothing (a count below its budget always passes, and zero is
-# below every budget).
-if [ "$DISK_SPECS" -gt 0 ] && [ -n "$COST_LINE" ] && [ "$(cost_count reads)" = 0 ]; then
+# A target whose budget says it reads (mounting a disk reads it) and whose guest
+# counted no read: the counters read nothing, and a count below its budget always
+# passes, zero below every budget.
+if [ -n "$IO_BUDGETS" ] && [ -n "$COST_LINE" ] && [ "$(cost_count reads)" = 0 ] &&
+	[ "$(awk -v t="$COST_TARGET" '$1 == t && $2 == "reads" { print $3 + 0 }' "$IO_BUDGETS")" -gt 0 ]; then
 	COST_VERDICT="no I/O counted"
 	COST_FAIL="${COST_FAIL:+$COST_FAIL
-}the guest has $DISK_SPECS disk(s) and counted no read on them (guest/cost_lib.sh): the I/O counts are not measuring"
+}$COST_TARGET reads (its budget in $(basename "$IO_BUDGETS") is more than 0) and the guest counted no read (guest/cost_lib.sh): the I/O counts are not measuring"
 fi
 # Step 6.2: a guest that ran out of memory says so, whatever else failed: the
 # OOM killer's lines (guest/init's mem_report prints them as MEM-OOM:) or a

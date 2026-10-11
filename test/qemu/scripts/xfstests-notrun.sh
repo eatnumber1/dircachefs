@@ -12,6 +12,6 @@
 # that stops being a test of dcfs, and a reason that says a probe broke (xfs_io
 # ... failed, O_DIRECT, fallocate, xattr) deserves a look before it is listed.
 cat "$@" |
-	sed -n 's|^xfstests: \(generic/[0-9]*\) notrun [0-9]*s dcfs-cpu=[0-9]*ticks: \(.*\)$|\1 \2|p; s|^xfstests: \(generic/[0-9]*\) notrun [0-9]*s: \(.*\)$|\1 \2|p' |
+	sed -n 's|^xfstests: \(generic/[0-9]*\) notrun [0-9]*s dcfs-cpu=[0-9.]*s reads=[0-9]* writes=[0-9]* sectors_read=[0-9]* sectors_written=[0-9]* flushes=[0-9]*: \(.*\)$|\1 \2|p' |
 	awk '{ id = $1; $1 = ""; r = substr($0, 2); gsub(/[ \t]+/, " ", r); gsub(/[0-9]+/, "N", r); print id, substr(r, 1, 100) }' |
 	LC_ALL=C sort -u

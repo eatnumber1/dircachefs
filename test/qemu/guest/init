@@ -481,7 +481,9 @@ if [ -n "$RAMDISKS" ]; then
 fi
 
 # The disks' counters when the test starts: its RAM disks are made, so the
-# tools that made them are not its I/O.
+# tools that made them are not its I/O. The disk of a Debian root file system
+# (below) is not one of its disks: it is read for the programs the test runs.
+ROOTFS=$(sed -n 's/.*\bdcfs_rootfs=\([^ ]*\).*/\1/p' /proc/cmdline)
 COST_DISKS_BEFORE=$(cost_disk_counts)
 
 # Same as the unit-test branch above: under --config=asan/--config=ubsan,
@@ -645,7 +647,6 @@ fi
 # (loopback) is brought up in the initramfs's own network namespace before
 # the chroot, since it's process/namespace, not filesystem, state, and
 # chroot(2) doesn't touch it.
-ROOTFS=$(sed -n 's/.*\bdcfs_rootfs=\([^ ]*\).*/\1/p' /proc/cmdline)
 if [ -n "$ROOTFS" ]; then
 	mkdir -p /newroot
 	if ! mount -t ext4 "$ROOTFS" /newroot; then

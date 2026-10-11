@@ -19,9 +19,9 @@
 #       (strace_op's counts of the daemon's syscalls are the budgets for those).
 #
 # A count that is below its budget passes, so a count that is not measured
-# passes everything: run-qemu.sh fails a guest with disks that counted no read,
-# and guest/cost_lib.sh's cost_selfcheck (boot_test, ram_disks_test) fails if a
-# write of 1 MiB does not show.
+# passes everything: run-qemu.sh fails a target with a budget for reads of more
+# than 0 whose guest counted no read, and guest/cost_lib.sh's cost_selfcheck
+# (boot_test, ram_disks_test) fails if a write of 1 MiB does not show.
 #
 # Pinned per kernel, like the strace goldens (guest/syscall_traces.sh): these
 # are the counts of the pinned Alpine linux-virt, 6.18 of branch v3.24, on ext4,
@@ -148,3 +148,14 @@
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_writes 636   # observed 614..625
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_read_bytes 17993728   # observed 17969152..17981440
 //test/qemu:fault_ace_mixed_test_ext4 dcfs_write_bytes 15790080   # observed 15732736..15761408
+
+# //test/qemu:xfstests_1_test_ext4 (3 runs)
+//test/qemu:xfstests_1_test_ext4 reads 18105   # observed 18051..18078
+//test/qemu:xfstests_1_test_ext4 writes 21437   # observed 19577..20507
+//test/qemu:xfstests_1_test_ext4 sectors_read 1286513   # observed 1256849..1271681
+//test/qemu:xfstests_1_test_ext4 sectors_written 4665040   # observed 4519600..4592320
+//test/qemu:xfstests_1_test_ext4 flushes 8950   # observed 8466..8708
+//test/qemu:xfstests_1_test_ext4 dcfs_reads 17609   # observed 17535..17572
+//test/qemu:xfstests_1_test_ext4 dcfs_writes 11906   # observed 11242..11574
+//test/qemu:xfstests_1_test_ext4 dcfs_read_bytes 160780288   # observed 159240192..160010240
+//test/qemu:xfstests_1_test_ext4 dcfs_write_bytes 48300032   # observed 41615360..44957696

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT
 # shellcheck shell=sh
 # What a test costs (step 26.17): budgets in counts and CPU time, not wall time,
 # which is the host's load as much as the test's. Sourced by guest/init, which
@@ -25,9 +26,10 @@ cost_cpu_us() {
 }
 
 # cost_disks: the sysfs directories of the disks of the test: the virtio disks
-# (all but the coverage disk, which the profiles are written to after the test)
-# and the loop devices, which are the RAM disks (a loop device that is not
-# attached counts nothing). Device-mapper devices are not here: they sit on
+# (all but the coverage disk, which the profiles are written to after the test,
+# and the disk of a Debian root file system, which is read for the programs the
+# test runs: $COV and $ROOTFS, guest/init's) and the loop devices, which are the
+# RAM disks (a loop device that is not attached counts nothing). Device-mapper devices are not here: they sit on
 # these, and their I/O is these disks' I/O.
 cost_disks() {
 	for cd_dir in /sys/block/vd* /sys/block/loop*; do
@@ -35,6 +37,7 @@ cost_disks() {
 		# disks): the pattern is left as it is.
 		[ -e "$cd_dir/stat" ] || continue
 		[ "/dev/${cd_dir##*/}" = "${COV:-}" ] && continue
+		[ "/dev/${cd_dir##*/}" = "${ROOTFS:-}" ] && continue
 		echo "$cd_dir"
 	done
 }

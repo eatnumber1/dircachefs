@@ -1252,6 +1252,7 @@ TRACE_GROUP_FILTERS = {
         srcs = [
             "@alpine_busybox//:root/bin/busybox.static",
             "//test/qemu:guest/init",
+            "//test/qemu:guest/cost_lib.sh",
             ":dir_cache_fs_test_bin",
         ],
         outs = ["dir_cache_fs_trace_%s.cpio.gz" % group],
@@ -1262,6 +1263,7 @@ TRACE_GROUP_FILTERS = {
             "$@",
             "$(location @alpine_busybox//:root/bin/busybox.static)",
             "$(location //test/qemu:guest/init)",
+            "$(location //test/qemu:guest/cost_lib.sh)",
             "$(location :dir_cache_fs_test_bin)",
             "vdb",
             "'--gtest_filter=%s'" % filt,

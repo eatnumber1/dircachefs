@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: MIT
 # Host-side test of run-qemu.sh's cost verdict (step 26.17): the guest's COST
 # line (guest/init's cost_report) is held to the budgets of the target under
 # test, and the run fails when the daemon's CPU time is past its budget plus
@@ -79,7 +80,7 @@ run() {
 		--mke2fs "$WORK/bin/mke2fs" --mke2fs-conf "$WORK/mke2fs.conf" \
 		--mkfs-xfs "$WORK/bin/mkfs-xfs" --mkfs-btrfs "$WORK/bin/mkfs-btrfs" \
 		--budget-lib "$BUDGET_LIB" --cpu-budgets "$WORK/cpu_budgets.txt" --io-budgets "$WORK/io_budgets.txt" \
-		"$WORK/kernel" "$WORK/initrd" ${DISKS:-} >"$WORK/stdout" 2>&1 || RC=$?
+		"$WORK/kernel" "$WORK/initrd" >"$WORK/stdout" 2>&1 || RC=$?
 }
 
 canned "COST cpu_us=400000"
@@ -161,6 +162,20 @@ for flagged in "dcfs_sanitizer=asan:asan build" "dcfs_sanitizer=ubsan:ubsan buil
 done
 echo "PASS: noisy, TCG and sanitizer runs report their CPU and are not held to the budget"
 
+# The console ends its lines with a carriage return: the last count of the COST
+# line has one in the serial log, and must not be printed or compared with it.
+{
+	echo "TEST first PASS"
+	printf 'COST cpu_us=400000 %s\r\n' "reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=3 dcfs_writes=1 dcfs_read_bytes=4096 dcfs_write_bytes=0"
+	echo "MEM total=268435456 min_avail=200000000 peak_used=50000000 peak_shmem=1000000"
+	echo "DCFS-TEST-EXIT=0"
+} >"$WORK/canned"
+run //t:both
+[ "$RC" -eq 0 ] || fail "a COST line that ends with a carriage return failed: $(cat "$WORK/stdout")"
+if grep '^run-qemu.sh: cost:' "$WORK/stdout" | grep -q "$(printf '\r')"; then fail "the carriage return reached the cost line: $(grep '^run-qemu.sh: cost:' "$WORK/stdout" | cat -A)"; fi
+grep -q "(0 bytes) (within the budgets in io_budgets.txt)" "$WORK/stdout" || fail "the last count of the line is not read: $(cat "$WORK/stdout")"
+echo "PASS: the carriage return the console adds to the COST line is dropped"
+
 # --- I/O (guest/io_budgets.txt: counts, no tolerance) -------------------------
 
 IO_OK="reads=50 writes=7 sectors_read=400 sectors_written=900 flushes=30 dcfs_reads=3 dcfs_writes=1 dcfs_read_bytes=4096 dcfs_write_bytes=0"
@@ -223,15 +238,16 @@ run //t:io DCFS_NOISY=1
 grep -q "disk I/O .*not held to the budgets: noisy kernel" "$WORK/stdout" || fail "no reason for the noisy run's I/O: $(cat "$WORK/stdout")"
 echo "PASS: runs that are not held to the CPU budgets are not held to the I/O budgets"
 
-# A guest with disks that counted no read at all did not count: mounting a
-# disk reads it.
+# A target whose budget says it reads, and whose guest counted no read, did not
+# count (mounting a disk reads it); one with no such budget may have no read (a
+# test that declares a disk and never touches it).
 canned "COST cpu_us=1 reads=0 writes=0 sectors_read=0 sectors_written=0 flushes=0"
-DISKS=vdb:ext4:64M
-run //t:unlisted
-DISKS=
-[ "$RC" -ne 0 ] || fail "a COST line of zeros for a guest with disks passed"
+run //t:io
+[ "$RC" -ne 0 ] || fail "a COST line of zeros for a target that reads passed"
 grep -q "== RESULT: FAIL (no I/O counted" "$WORK/stdout" || fail "no FAIL verdict for the uncounted I/O: $(cat "$WORK/stdout")"
-echo "PASS: a guest with disks that counted no I/O at all fails"
+run //t:unlisted
+[ "$RC" -eq 0 ] || fail "a COST line of zeros for a target that has no I/O budget failed: $(cat "$WORK/stdout")"
+echo "PASS: a target with a budget for reads whose guest counted none fails"
 
 # --- the load-starvation flag (the host's CPU pressure over the run's wall time) ---
 #
@@ -320,6 +336,38 @@ run //t:io TIMEOUT=3
 run //t:unlisted TIMEOUT=1
 [ "$RC" -eq 0 ] || fail "a target without budgets was refused a short timeout: $(cat "$WORK/stdout")"
 echo "PASS: flushes count 20 ms each, and a target without budgets has no floor"
+
+# --- CPU affinity (non-SMT pinning) -------------------------------------------
+#
+# A host with sysfs and taskset pins QEMU to one logical CPU per physical core.
+canned "COST cpu_us=400000"
+run //t:x
+[ "$RC" -eq 0 ] || fail "a pinned run failed: $(cat "$WORK/stdout")"
+if command -v taskset >/dev/null 2>&1 && [ -d /sys/devices/system/cpu ]; then
+	grep -q "run-qemu.sh: CPU affinity: pinned to non-SMT cores" "$WORK/out/serial.log" ||
+		fail "affinity not logged as pinned: $(cat "$WORK/out/serial.log")"
+fi
+
+# DCFS_PIN_NON_SMT=0 disables pinning.
+run //t:x DCFS_PIN_NON_SMT=0
+[ "$RC" -eq 0 ] || fail "an unpinned run failed: $(cat "$WORK/stdout")"
+grep -q "run-qemu.sh: CPU affinity: unpinned" "$WORK/out/serial.log" ||
+	fail "affinity not logged as unpinned with DCFS_PIN_NON_SMT=0: $(cat "$WORK/out/serial.log")"
+
+# Synthetic sysfs parsing: thread siblings 0-1 and 2-3 yield 0,2.
+mkdir -p "$WORK/fake_cpu/cpu0/topology" "$WORK/fake_cpu/cpu1/topology" \
+	"$WORK/fake_cpu/cpu2/topology" "$WORK/fake_cpu/cpu3/topology"
+printf "0-1\n" >"$WORK/fake_cpu/cpu0/topology/thread_siblings_list"
+printf "0-1\n" >"$WORK/fake_cpu/cpu1/topology/thread_siblings_list"
+printf "2-3\n" >"$WORK/fake_cpu/cpu2/topology/thread_siblings_list"
+printf "2-3\n" >"$WORK/fake_cpu/cpu3/topology/thread_siblings_list"
+run //t:x DCFS_CPU_SYSFS="$WORK/fake_cpu"
+[ "$RC" -eq 0 ] || fail "a synthetic sysfs run failed: $(cat "$WORK/stdout")"
+if command -v taskset >/dev/null 2>&1; then
+	grep -q "run-qemu.sh: CPU affinity: pinned to non-SMT cores (0,2)" "$WORK/out/serial.log" ||
+		fail "synthetic affinity not logged as pinned to 0,2: $(cat "$WORK/out/serial.log")"
+fi
+echo "PASS: non-SMT pinning is applied and DCFS_PIN_NON_SMT=0 disables it"
 
 # The checked-in budgets: every line is OP KIND MAX with a number, the kind a
 # COST field, and no target twice (a second line would be ignored by the awk

@@ -1459,6 +1459,41 @@ py_test(
     target_compatible_with = HOST_ONLY_COMPATIBLE,
 )
 
+# Step 26.17: the per-test cost lines of an xfstests shard (guest/xfstests.sh:
+# wall time, the daemon's CPU, the disks' I/O) of a dcfs run and of a native run
+# side by side, so that 17.3 can say where the slow tests spend their time.
+py_library(
+    name = "xfstests_costs",
+    srcs = ["scripts/xfstests_costs.py"],
+    imports = ["scripts"],
+)
+
+py_binary(
+    name = "xfstests_costs_bin",
+    srcs = ["scripts/xfstests_costs.py"],
+    main = "scripts/xfstests_costs.py",
+)
+
+py_test(
+    name = "xfstests_costs_test",
+    size = "small",
+    srcs = ["scripts/xfstests_costs_test.py"],
+    main = "scripts/xfstests_costs_test.py",
+    deps = [":xfstests_costs"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
+# Step 26.17: scripts/xfstests-notrun.sh reads the results line in its new form.
+sh_test(
+    name = "xfstests_notrun_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["xfstests_notrun_test.sh"],
+    args = ["$(location scripts/xfstests-notrun.sh)"],
+    data = ["scripts/xfstests-notrun.sh"],
+    target_compatible_with = HOST_ONLY_COMPATIBLE,
+)
+
 # Step 26.17: the mkfs part of the initramfs of a test whose disks are in the
 # guest's RAM (qemu_test's `ram_disks`): the Alpine mkfs tools and their
 # libraries, formatted with in the guest (scripts/mkfstools.py).

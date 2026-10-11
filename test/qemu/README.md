@@ -204,6 +204,16 @@ kernel timestamp) that scales with host CPU scheduling latency, which was
 poor while multiple sibling agents' builds were running. Re-measure on a
 quiet host if you need a clean number.
 
+### Non-SMT core pinning (step 26.17)
+
+To eliminate variance and noise from SMT (hyperthreading) sibling contention,
+`run-qemu.sh` detects physical cores (one logical CPU per physical core from
+`/sys/devices/system/cpu/cpu*/topology/thread_siblings_list`, e.g. `0,2,4,6`) and
+pins QEMU with `taskset -c <cpulist>` when `taskset` and sysfs are present.
+The environment variable `DCFS_PIN_NON_SMT=0` provides an escape hatch that
+disables pinning. The serial log records whether the VM was pinned or unpinned
+(`run-qemu.sh: CPU affinity: pinned to non-SMT cores (...)` or `unpinned`).
+
 ## Test tiers
 
 A test's Bazel `size` is its tier; every `qemu_test`, `qemu_test_matrix`
@@ -713,7 +723,8 @@ gate is disabled.
 | the guest's cost accounting (26.17: the CPU of the cgroup the daemon is started in, read in microseconds, and `cost_exec.sh`, which joins it before the exec) | `//test/qemu:cost_report_test` (the real functions of `guest/init` over canned cgroup files: a missing cgroup is an error, not 0; the command runs with its arguments intact and its own pid in `cgroup.procs`; not at all if the cgroup cannot be joined; `lib.sh`'s reader is `init`'s) |
 | the load-starvation flag (26.17: the host's CPU pressure over the run's wall time, 20%) | `//test/qemu:run_qemu_cost_test` (a fake `date` and a pressure file moved by the fake qemu: 30% and 20% flag a run in the time line and the verdict, 19% does not, a failing run and one without a MEM line carry it, a host without the file has none and says so) and `//test/qemu:run_qemu_verdict_test` (the first boot of a power cut carries it) |
 | the wall allowance covers the work the budgets allow (26.17: `cost_wall_allowance`; the refusal before the guest boots) | `//test/qemu:run_qemu_cost_test` (an allowance one second short of the floor is refused with the numbers and the guest is not booted, the floor itself is accepted, flushes count 20 ms each, a target without budgets has no floor) and `//test/qemu:strace_lib_test` (the arithmetic and its rounding) |
-| the disks' I/O is counted (26.17: `cost_disk_counts` and `cost_cgroup_io`, which no budget could notice failing, since a count below its budget passes) | `//test/qemu:boot_test` and `//test/qemu:ram_disks_test` (`cost_selfcheck`: a direct write of 1 MiB must show in the counters of a virtio disk and of a RAM disk and in the cgroup's `io.stat`; with the disks' glob pointing at nothing both fail, saying `disks reads=0 writes=0 ...`), `//test/qemu:cost_report_test` (the sums, the difference of two readings and the cgroup's counts over canned files, other devices left out) and `//test/qemu:run_qemu_cost_test` (a guest with disks that counted no read fails) |
+| the xfstests cost lines (26.17: the daemon's CPU and the disks' I/O per test; the comparison with the native run; the notrun list read from them) | `//test/qemu:xfstests_costs_test` (canned dcfs and native logs: the numbers of a line, the order, extra time and how much of it is CPU, a test native did not run, a log from before the lines refused; the command line) and `//test/qemu:xfstests_notrun_test` (a log of the new form gives the list, the old form gives nothing); the guest script itself is run by the `xfstests` job, and by `xfstests_dev_test_<fstype>` (`manual`) |
+| the disks' I/O is counted (26.17: `cost_disk_counts` and `cost_cgroup_io`, which no budget could notice failing, since a count below its budget passes) | `//test/qemu:boot_test` and `//test/qemu:ram_disks_test` (`cost_selfcheck`: a direct write of 1 MiB must show in the counters of a virtio disk and of a RAM disk and in the cgroup's `io.stat`; with the disks' glob pointing at nothing both fail, saying `disks reads=0 writes=0 ...`), `//test/qemu:cost_report_test` (the sums, the difference of two readings and the cgroup's counts over canned files, other devices left out) and `//test/qemu:run_qemu_cost_test` (a target with a budget for reads whose guest counted none fails) |
 | a run is held to its CPU and I/O budgets (26.17: `guest/cpu_budgets.txt`, `guest/io_budgets.txt`, the tolerance, the runs that are not held, a budgeted target with no COST line) | `//test/qemu:run_qemu_cost_test` (fake qemu and canned serial logs through the real `run-qemu.sh` and the real comparison: at the budget and at budget plus tolerance pass, one microsecond past fails, a zero budget allows nothing, a target with no line is reported, a COST line lacking the count and a missing COST line fail a budgeted target, and noisy, TCG, ASan, UBSan and coverage runs are not held) and `//test/qemu:strace_lib_test` (the tolerance arithmetic and `budget_unheld_reason`) |
 | `check_cold` / `quiesce_daemon` (guest helper, not a gate of its own) | a helper whose gate, `quiesce_daemon`'s wait, is exercised by `//test/qemu:release_leak_test` and the `written-forgotten` check of idle (`guest/idle.sh`): both fail if the daemon is not quiesced |
 
@@ -1172,7 +1183,8 @@ compared. The budgets started at the observed counts.
 ## Budgets in three parts (step 26.17)
 
 A test's wall time is the host's load as much as the test's: the same test took
-19 s alone and up to 52 s with eight busy loops beside it. So a test is held to
+20 s alone and up to 59 s with eight busy loops beside it, and an xfstests shard
+132 s alone and 577 s. So a test is held to
 what it costs, not to how long it took: the CPU time of the processes that run
 dcfs's code (this section), the I/O operations it causes and the counts that
 already had budgets; wall time is left as the hang guard, and a run that lost a
@@ -1193,6 +1205,12 @@ daemon that was killed, unmounted and started again, which `/proc/<pid>/stat`
 tolerance 100%)`) and fails the run if it is more than the budget plus the
 tolerance. A test whose daemon is not started by `start_daemon`, or that a guest
 under systemd runs, counts 0 and has no budget.
+
+xfstests puts its daemons in the same cgroup (`guest/xfstests.sh` makes
+`mount.fuse.dcfs` a script that joins it and then is dcfs under the name it was
+called by), so each test's results line has the daemon's CPU, exact, where the
+ticks of the live daemons that 17.3's first lines had lost a daemon that exited
+before the next reading; there is one mechanism for the CPU of dcfs.
 
 `guest/cpu_budgets.txt` has the format of the other budget files (`OP cpu_us
 MAX`, OP a Bazel label) and is compared by the same function
@@ -1279,8 +1297,8 @@ seen plus the spread seen, so those that move are not flaky. They are pinned
 per kernel like the strace goldens: a bump of the kernel may re-baseline them in
 its own commit, with before and after; nothing else may. A count below its
 budget passes, so a counter that read nothing would pass everything:
-`run-qemu.sh` fails a guest with disks that counted no read, and
-`cost_selfcheck` (`boot_test` on a virtio disk, `ram_disks_test` on a RAM disk)
+`run-qemu.sh` fails a target whose budget for `reads` is more than 0 if its guest
+counted none, and `cost_selfcheck` (`boot_test` on a virtio disk, `ram_disks_test` on a RAM disk)
 fails if a direct write of 1 MiB does not show in the disks' counters and the
 cgroup's.
 
@@ -1348,6 +1366,7 @@ the measured tests, against the guest's allowance with their current timeouts:
 | `//test/qemu:fault_ace_mixed_test_ext4` | 162 s | long (840 s) |
 | `//test/qemu:fault_ace_b_test` | 355 s | long (840 s) |
 | `//test/qemu:fault_ace_a_test` | 694 s | eternal (3540 s) |
+| `//test/qemu:xfstests_1_test_ext4` | 900 s | eternal (3540 s) |
 
 None is refused; none was changed. `fault_ace_a_test` takes 35 s and waits an
 hour to call a hang, which `long` (840 s) would still cover with 150 s to spare;
@@ -2111,9 +2130,15 @@ in it, what was left out and which tests that turns into "not run".
   per file system, a limit of 1500 s each, `manual`, tag `xfstests-slow`) is
   meant for the weekly run, with the same gate and its own lists
   (`xfstests.slow.<fstype>.expected_failures` and `.notrun`, empty until step
-  17.3 writes them from the first runs). Each test's results line carries the
-  daemon's CPU ticks for it (`dcfs-cpu=`), so that 17.3 can tell dcfs's cost
-  from the host's load.
+  17.3 writes them from the first runs). Each test's results line carries what
+  the test cost (step 26.17, "Budgets in three parts"): the daemon's CPU time
+  (`dcfs-cpu=`) and the disks' I/O, so that 17.3 can tell dcfs's cost from the
+  host's load and see where the slow tests spend it: `scripts/xfstests_costs.py`
+  (`bazel run //test/qemu:xfstests_costs_bin -- DCFS_LOG NATIVE_LOG`) puts the
+  lines of a shard and of the same shard run natively (`xfstests_native=1`) side
+  by side, the tests dcfs slows most first, with the seconds it added, how many of
+  them the daemon spent computing, and the writes and flushes (fsyncs, at the
+  device) it added.
 - **CI**: the shards are not in the `full`, `asan` and `ubsan` partitions
   (`.github/ci/test.sh` leaves out the tag; `//tools:test_sh_test` and
   `//test/qemu:xfstests_tags_test` check it). The `xfstests` job of
@@ -2136,7 +2161,10 @@ in it, what was left out and which tests that turns into "not run".
   `xfstests_budget=` the run's own time (3400 s: no batch is started that
   could not finish before the guest's timeout).
 - The serial log has a line per test (`xfstests: generic/NNN pass 12s
-  dcfs-cpu=40ticks`; a "not run" test says why), the evidence of each failure
+  dcfs-cpu=2.500s reads=10 writes=40 sectors_read=80 sectors_written=900
+  flushes=30`: the wall time since the previous test's end, the CPU of the
+  daemons in that time, exact, and the I/O of `vdb` and `vdc`; a "not run" test
+  says why), the evidence of each failure
   (the diff against the golden output, the tail of the test's `.full`), a stall
   report for a test killed at the limit (the processes, the daemon's CPU time
   and kernel stack: slow or hung), the last lines dcfs logged when the run

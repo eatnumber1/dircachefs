@@ -39,3 +39,6 @@
 //test/qemu:fault_ace_a_test cpu_us 7909000
 //test/qemu:fault_ace_b_test cpu_us 3906000
 //test/qemu:fault_ace_mixed_test_ext4 cpu_us 4674000
+
+# xfstests shards.
+//test/qemu:xfstests_1_test_ext4 cpu_us 20809000
