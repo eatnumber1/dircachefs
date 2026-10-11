@@ -3093,3 +3093,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   arguably unlocked by the trial, 17.2 and 12.18 are parked items. Not reviewed for lack of
   credits: the 17.3 note's measurements, 26.17b's five commits beyond the log's claim of green
   suites, the 25.9 audit's remedies. Nothing changed by this review.
+- On finding (1) above: OpName and DescribeRequest have production callers (fuse_ops.cc's VLOG(1)
+  and VLOG(2) request log from 25.3, every request described with its op name), so they are
+  production code, not a test seam; the idiomatic home per style 1.2's ADL rule is
+  `AbslStringify` hidden friends on `events::Op` and `events::Request` in protocol_events.h (then
+  `LOG << request` works and the test covers them through StrCat), and the fuse_ops.h declarations
+  go. Recommendation for the temporary orchestrator; russ to confirm.
