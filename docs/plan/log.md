@@ -3035,3 +3035,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   xfstests shard's budgets; re-check the README. Open for russ: the 100% CPU tolerance; whether
   cancel.sh's latency bounds become backing-call counts. No lane running; idle until Friday
   2026-10-16 01:00.
+- russ: spend what is left on a Haiku lane. 7.8 part 4 dispatched (mechanical, lane-2): the SPDX
+  licence gate in repo_shape with its allowlist and provenance list, then headers on every file.
