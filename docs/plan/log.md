@@ -3040,3 +3040,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: minimize shell, new tools in C++ (no ban). Style's shell section says so; 26.18 widened to
   be the vehicle for converting the 113 guest scripts and the host sh_tests, by area, with the
   shell deleted in the same commit. No dispatch (budget).
+- 7.8 part 4 merged (lane-2 → 12087cf): the `spdx_licenses` repo_shape gate (allowlist of accepted
+  licences, provenance list; 11 fixtures; 481 files failed first), SPDX MIT headers on all 481
+  covered files, three rows in third_party_files.txt (TLCOverrides.java MIT, the xfstests patch
+  GPL-2.0-or-later test-only, the pjdfstest patch BSD-2-Clause test-only). A scratchpad file named
+  enum.py from the 25.22 census agent shadowed Python's stdlib for anything run from there;
+  renamed. Push point: main at this commit. Idle until Friday except a red push.
