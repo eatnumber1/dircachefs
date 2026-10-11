@@ -3000,3 +3000,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   licences from the pinned archives, obligations of the static binary (LGPL libfuse and glibc),
   copied-code provenance, docs/licenses.md, a THIRD_PARTY_NOTICES target with a test, SPDX
   headers and REUSE. Two lanes running (26.17b, 7.8).
+- README: the two workflow badges (CI, Mutation testing) and three static ones (kernel 6.9+,
+  C++20, MIT) above the first section; the man page extracts named sections, so none reach
+  dcfs(8) (built and checked: zero badge lines).

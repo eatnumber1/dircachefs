@@ -1,5 +1,11 @@
 # dcfs: directory cache filesystem
 
+[![CI](https://github.com/eatnumber1/dircachefs/actions/workflows/ci.yml/badge.svg)](https://github.com/eatnumber1/dircachefs/actions/workflows/ci.yml)
+[![Mutation testing](https://github.com/eatnumber1/dircachefs/actions/workflows/mutation.yml/badge.svg)](https://github.com/eatnumber1/dircachefs/actions/workflows/mutation.yml)
+![Kernel 6.9+](https://img.shields.io/badge/kernel-6.9%2B-informational)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-informational)
+[![MIT](https://img.shields.io/badge/license-MIT-informational)](LICENSE)
+
 dcfs is a FUSE filesystem that mirrors one backing directory tree and
 answers every metadata operation from a persistent SQLite cache, so that
 the disks holding the tree only have to spin up when someone reads or
