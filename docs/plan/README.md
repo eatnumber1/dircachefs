@@ -109,8 +109,10 @@ New phases are frozen. The order from here, and why:
    (blocked-task diagnostics), 15.10 (fusectl in the remounting guests),
    12.11b/c, 12.15,
    17.2 (setgid), 17.1b/c, 11.7's remainder, 11.3c, 7.3, 7.6b, 7.7,
-   26.14b, 15.12 (NFS export across a daemon restart: README, the QEMU
-   test's bind shape, the runbook order; from the trial), 26.25 (the ACE
+   26.14b, 15.12 (NFS export across a server reboot and a daemon restart:
+   README, the QEMU reboot and bind shapes, the runbook order; from the
+   trial), 14.9 (a database epoch in the nodeid, the handle corpus test:
+   the NFS handle as a compatibility surface; before the first release), 26.25 (the ACE
    dropahead window on xfs), 26.27 (merged profdata
    to the host so the gate can count regions). The kernel patches (notes/kernel-patches.md) go last of all,
    after everything else is done (russ, 2026-10-11: their timelines are so

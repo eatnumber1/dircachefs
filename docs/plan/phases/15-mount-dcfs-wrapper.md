@@ -745,8 +745,10 @@ stages 4-7). (1) README: the NFS section's claim ("after restarting, run
 `exportfs -f`") holds only when the export path is the dcfs mountpoint
 itself; for a bind of the mountpoint, the restart order is unexport,
 unmount the bind, stop dcfs, start, re-bind, re-export, flush; recommend
-exporting the mountpoint directly. (2) test/qemu/guest/nfs.sh: add the
-bind-export shape (export a bind of the mountpoint; restart dcfs with the
+exporting the mountpoint directly. (2) test/qemu/guest/nfs.sh and the systemd guest: the primary case is a
+server reboot (russ, 2026-10-11) with the dcfs mount and its export
+restored by fstab and a client's handles and an open file surviving it;
+then add the bind-export shape (export a bind of the mountpoint; restart dcfs with the
 wrong order and assert the client sees EIO; with the right order and
 assert it works), so the README's two claims are both tested. (3) The
 runbook's warm-restart step says the order. (4) A held-descriptor test

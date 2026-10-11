@@ -2983,3 +2983,9 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - 21.1 hour-long watch, final: seven rounds, dcfs-mount READ 0 for its whole life (1.58M RPCs),
   about 175k GETATTRs per round from the client's attribute-cache expiry, all served from the
   cache with the disk asleep. Table in the trial note. The client leg is finished.
+- russ on compatibility: keeping /dev/fuse open across upgrades would add a second compatibility
+  surface (in-process state between versions) and does nothing for the case that matters, a
+  server reboot; demoted. NFS handles carry dcfs's nodeid and generation and already need robust
+  detection of a nodeid from an incompatible past: 14.9 queued (a database epoch in the nodeid's
+  high bits, ESTALE deterministically; the (nodeid, generation) meaning a public interface from
+  release one; a handle corpus test per release); 15.12's primary test shape is the server reboot.
