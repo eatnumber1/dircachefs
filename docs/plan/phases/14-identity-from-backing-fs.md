@@ -212,3 +212,21 @@ deleted and recreated under the same name is a new object. To settle in
 14.9 together with the epoch (the stub range is the high bit the epoch
 cannot have; the generation carries it for stubs as for generation-0
 files). Cost: a schema change to `stubs` (no migration before release).
+russ, same day: "When you start investigating replacing the stub files,
+do more in-depth investigation, and maybe a little prototyping. I'm not
+convinced yet that this is a good idea, nor that it will work." So this
+is an investigation with a prototype before it is a design: in a guest,
+measure what `getdents` actually returns as `d_ino` for a covered
+directory on ext4, xfs and btrfs (and for a bind mount, an overmount of
+the same directory, an autofs point, an NFS submount); what
+`BTRFS_IOC_GET_SUBVOL_INFO` returns for a subvolume reached through
+dcfs's O_PATH descriptors and whether the id is stable across snapshot,
+rename and send/receive; how a stub's nodeid behaves across a cache
+wipe, a reboot and a dcfs upgrade in the identity model (12.5) with the
+derivation substituted; whether the generation-0 rules give the ESTALE
+semantics the NFS handle needs; and the per-probe cost if the covered
+directory's handle is wanted (a private mount namespace, measured). A
+small prototype on a branch (the derivation in `cache::SetRefused`, the
+existing stub tests, the identity oracle after a crash) and a written
+comparison with the counter before any decision; the decision is
+russ's.

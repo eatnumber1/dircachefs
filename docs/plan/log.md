@@ -2992,3 +2992,5 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ asked why stubs do not take the backing's inode and generation: they can (covered d_ino for
   a mount from the parent's getdents; the subvolume id for btrfs), stable without the counter;
   recorded as part of 14.9.
+- russ: the stub-identity derivation is an investigation with a prototype first, not a design
+  decision; he is not convinced it is a good idea or that it works. 14.9's text says so.
