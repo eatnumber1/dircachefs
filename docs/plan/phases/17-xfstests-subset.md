@@ -71,7 +71,7 @@ directory, rechecked after a cold cache; then 683-685 leave the lists.
 Owner: dcfs-implementer (Opus review of the credentials change), after
 17.1 merges and 23.11's code half lands (backing.cc).
 
-## 17.3 Performance finding (from 17.1)
+## 17.3 Performance finding (done 2026-10-11, 1f499bc)
 
 29 metadata-heavy tests run 20-50x slower through dcfs (4-37 s natively,
 200 s or more through dcfs), the daemon CPU-bound in the stall reports,
@@ -81,6 +81,14 @@ a remeasure on a quiet host with the daemon's CPU seconds per test
 (17.1's results line), then the `xfstests_slow` set's numbers after
 23.11; the tmpfs cache understates production on an SSD (WAL fsync cost):
 say so in the note. Owner: dcfs-investigator.
+Status 2026-10-11: done, merged 1f499bc. Full report in `notes/slowness-17.3.md`.
+Measured side-by-side with `xfstests_costs.py`: daemon CPU accounts for 80-98%
+of extra latency (single-threaded CPU bound at 100% of a core). Waiting/IO accounts
+for only 2-20%; extra disk flushes are negligible (-4 to +21). Conclusion: the
+slowness is an architectural design bottleneck (single-threaded FUSE event loop,
+per-op SQLite transactions, 3-phase write-through protocol), not parameter tuning.
+`test/qemu/guest/xfstests.slow` notes updated; `xfstests_dev_native_test_<fstype>`
+added in `test/qemu/BUILD.bazel`.
 
 ## 17.1b A glibc rootfs for xfstests (from the review; after 17.1, not instead)
 
