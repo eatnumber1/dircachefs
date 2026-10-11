@@ -3099,3 +3099,24 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `AbslStringify` hidden friends on `events::Op` and `events::Request` in protocol_events.h (then
   `LOG << request` works and the test covers them through StrCat), and the fuse_ops.h declarations
   go. Recommendation for the temporary orchestrator; russ to confirm.
+- Review of notes/slowness-17.3.md by the regular orchestrator (2026-10-11 night). Sound: the
+  side-by-side costs through 26.17b's line; the attribution of 80-98% of the added time to daemon
+  CPU (not I/O: flushes +0 to +21, so 23.11 did its job); 17.1's 20-50x explained as host load
+  (loadavg 14-30 on 4 cores) on top of a real 15-76x. Not sound yet: the conclusion
+  "architectural, tuning cannot bridge the gap" rests on no profile. The note names SQLite,
+  credential switches and bookkeeping as the CPU consumers without measuring any of them, and
+  "~312 µs of CPU per operation" is far above what a few prepared-statement SQLite updates cost
+  (tens of µs), which means something unmeasured dominates. Candidates the step should have
+  tested, in order: (a) the guests run Bazel fastbuild binaries (nothing in .bazelrc sets -c opt
+  for tests), i.e. an unoptimized daemon, which alone can be a large multiple: remeasure two tests
+  with `--compilation_mode=opt`; (b) a profile inside the guest (perf if the Alpine image can
+  carry it, else gprof or sampling from the host's perf on the QEMU thread; or SQLite's
+  sqlite3_stmt_status VM-step counts per request) splitting SQLite, dcfs bookkeeping, syscalls
+  and the events observer; (c) the batching experiment the brief asked for (N operations per
+  transaction, on a branch); (d) generic/736's per-rename whole-directory invalidation
+  (MarkDirectoryIncomplete per rename, then repopulation): an algorithmic cost, a protocol
+  question, not a tuning one. The three "architectural causes" are plausible and untested. The
+  slow-set recommendation is fine, and 26.17b's hang-guard formula now covers the loaded-runner
+  case. 17.4 (the profiling spike) is the right next step: it must do (a) first, since every
+  other number depends on it, then (b), (c), (d), and say what fraction of the 15-76x survives an
+  optimized build before any design change is proposed.
