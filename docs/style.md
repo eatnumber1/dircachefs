@@ -1219,6 +1219,26 @@ necessary, but if you think one is necessary, come to me."
 
 ## 4. Shell
 
+**Minimize shell; new tools are C++** (russ, 2026-10-11: "We've got
+quite a few tools written in shell. I'd prefer they be in C++ since we
+don't have good style or tooling built around shell code. You don't have
+to ban shell, but let's minimize its use."). Today the tree holds about
+26,000 lines of shell against 11,000 of Python, most of it the QEMU
+guest test scripts (113 files under test/qemu) and the host-side
+`sh_test`s. The rule: a new tool, test or check is written in C++ (a
+`cc_binary`/`cc_test`, with the style checks, clang-tidy, the matchers
+and coverage that shell will never have); shell is for what must be
+shell (the guest's `init` before anything else exists, a CI job's
+thin wrapper that invokes Bazel, a one-line `genrule` command) and is
+kept to the minimum that does that. Existing shell is converted as it is
+touched, and in bulk by 26.18 (the guest tests as googletest binaries
+with structured output) and its host-side counterpart for the
+`sh_test`s. Python remains for build-graph tooling that reads and writes
+text (repo_shape, sbom, the style checks' comparison), where C++ would
+add more than it checks; russ's preference between Python and C++ there
+is still C++ where a tool grows past a page.
+
+
 Google's shell guide applies: bash, 2-space indent (no tabs), 80 columns,
 `[[ ]]`, `local`, `lower_snake` functions, `UPPER_SNAKE` constants, a file
 header comment, `$(...)`, quoted expansions, and a `main` function in a

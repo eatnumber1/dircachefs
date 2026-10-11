@@ -536,6 +536,17 @@ xfstests, pjdfstest, the wrapper tests).
 Owner: dcfs-implementer for the library and the structured output,
 dcfs-protocol for the oracles' port; after 26.17; not before the quota
 reset.
+Widened (russ, 2026-10-11, "let's minimize [shell's] use"): 26.18 is
+the vehicle for converting the test guests' shell (113 scripts, most of
+the tree's 26k shell lines) to C++ test binaries, and gains a host-side
+counterpart: the `sh_test`s under tools/ and test/qemu (the toolchain,
+run-qemu and gate self-checks) become `cc_test`s or, where they only
+compare text, `py_test`s; `.github/ci/*.sh` stay as thin Bazel wrappers;
+`test/qemu/guest/init` stays shell up to the point where a C++ binary
+can run. Each conversion is a separate step by area, test-equivalence
+shown (the same checks, the same failures on the same known-bad
+fixtures), and the shell file deleted in the same commit.
+
 
 ## 26.16 Where CI time goes (2026-10-09)
 
