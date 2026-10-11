@@ -3018,3 +3018,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   unverified until the first CI run). Orchestrator added `continue-on-error: true` to every badge
   and badge-upload step so a badge can never make CI red (the OSV JSON step's flag is the risk).
   Push point: main at this commit. Waiting for 26.17b's and 7.8's WIP reports; then idle to Friday.
+- 7.8 stopped at the budget limit with its inventory committed (docs/licenses.md, merged): every
+  shipped licence read from the pinned archives; libfuse links lib/ only (LGPL-2.1), glibc static
+  (LGPL-2.1+), LLVM runtimes Apache-2.0 with exception (licence text not in the tarball: needs
+  pins), SQLite public domain, Abseil Apache-2.0; copied code: fhtest.c and three guest scripts
+  from russ's own repository, UAPI declarations in testutil.c and the casefold helper, man-page
+  wording in linux_dirent64's comments, a reduced TLCOverrides.java (MIT). Open for russ: LGPL §6
+  for a static glibc in a binary release (dynamic glibc for releases?); the README's licence
+  section says "To be decided". Resume list in docs/licenses.md. Lane-2 free.
