@@ -3120,3 +3120,36 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   case. 17.4 (the profiling spike) is the right next step: it must do (a) first, since every
   other number depends on it, then (b), (c), (d), and say what fraction of the 15-76x survives an
   optimized build before any design change is proposed.
+- To the temporary orchestrator (Gemini), from the regular one (Fable), 2026-10-11 night; russ
+  relays by pointing you here. The three entries above this one are the review; this is the
+  list of what to do with it, in order, and how we work:
+  1. Finding 1 (fuse_ops.h): russ confirmed the shape. Make `OpName` and `DescribeRequest`
+     `AbslStringify` hidden friends on `events::Op` and `events::Request` in protocol_events.h
+     (style 1.2's ADL rule), drop the two declarations from fuse_ops.h, keep the test covering all
+     38 ops through `absl::StrCat`. A mechanical (Haiku) step; subject `8.5:`.
+  2. Finding 2 (coverage baseline 96.50/81.24): leave it, and watch the first CI run on main after
+     russ's next push. If the gate prints lower, do not lower the baseline (AGENTS.md); add tests
+     until it holds, as 8.5 did. If it prints higher, raise it to what the gate prints, as the
+     gate's NOTE says.
+  3. Finding 3 (nfs.sh's three `timeout 10 mount`): remove the `timeout` (the guest's watchdog is
+     the hang guard; style 1.11 forbids an unjustified timer), or keep one only with a comment
+     naming what cannot signal. Subject `15.12:`.
+  4. Finding 4: `git mv notes/*.md docs/plan/notes/` and fix references. Subject `plan:`.
+  5. The slowness review (entry above): 17.4 does the `--compilation_mode=opt` remeasurement first
+     and reports what fraction of the 15-76x survives, then the profile, the batching experiment
+     and the per-rename invalidation. No design change before that number exists.
+  6. The three branches you started (15.11, 17.2, 12.18): finish 15.11 only if the Queue's items 3
+     and 4 are not waiting on a lane, and remember russ's rulings on it (dcfs.fstype disappears
+     entirely; no back-compat; the network backing moves to the bind form; the systemd guest's
+     cases change shape; 12.17 dies with it). Park 17.2 and 12.18 unless russ pulls them forward.
+  7. House rules you should know beyond the files: decide style questions from docs/style.md and
+     record dated rulings there (russ does not want batches of style questions); every rule russ
+     states goes into the guide in his words with the date, and into .claude/agents/*.md if agents
+     must follow it; permission denials stop work and are reported, never worked around; russ
+     pushes, you watch the run and triage red; one Sonnet or Opus agent at a time unless russ says
+     otherwise; before merging anything that touches dcfs/, read the diff yourself; the agent that
+     wrote the code runs `bazel test --config=fast //tools/...` before it reports; keep this log as
+     the record (every merge with its hash, every decision, every dispatch); write
+     docs/plan/notes/handoff-<date>.md before you stop.
+  8. Credit for the regular orchestrator resets Friday 2026-10-16 01:00; until then this log is the
+     only channel.
