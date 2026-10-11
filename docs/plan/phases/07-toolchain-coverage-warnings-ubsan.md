@@ -191,3 +191,38 @@ both hook backing.cc; `syscalls.h` is the process-local set anyone may
 call; `syscalls_process.h` exists so bench/ and the tools get wrappers
 without dcfs's libraries.
 
+
+- 7.8 Licence audit and notices (russ, 2026-10-11: "Are we ok on
+  licensing? We've been reusing a lot of third-party code... Maybe we need
+  an audit."; dispatched the same day, investigator, lane-2). dcfs is MIT.
+  The shipped binary is static and links Abseil (Apache-2.0), SQLite
+  (public domain), libfuse's library (LGPL-2.1), glibc from the sysroot
+  (LGPL-2.1 with exceptions), LLVM's libc++/compiler-rt/libunwind
+  (Apache-2.0 with LLVM exception), maybe liburing (LGPL-2.1 or MIT);
+  tests and tools use GPL things that are not shipped (the kernel,
+  busybox, e2fsprogs, xfstests, pandoc). (1) From `tools/sbom/pins.json`'s
+  shipped, build_only and testonly sets and MODULE.bazel: every component's
+  licence as found in its pinned archive (not from memory), its role
+  (shipped, build tool, test only), and the obligation it creates for a
+  distributed static binary: notice and licence text to accompany (Apache,
+  BSD, MIT), source or relinkable objects (LGPL: dcfs's own source under
+  MIT plus the pinned, reproducible build satisfies it; say exactly how an
+  end user relinks), nothing (public domain). (2) Copied code: every file
+  or hunk that came from elsewhere (`tools/fhtest.c` from russ's own
+  fuse-generation-qemu repository; the xfstests and busybox patches under
+  third_party/, which are patches to GPL code shipped only in tests;
+  anything an agent pasted: grep for "copied from", "adapted from",
+  "based on", kernel-documentation text, and compare the syscall-wrapper
+  layouts such as `linux_dirent64` against their manpage source), with
+  provenance and licence stated at the top of each. (3) `docs/licenses.md`
+  with the table, and a Bazel target that assembles `THIRD_PARTY_NOTICES`
+  from the pinned archives' licence files for the shipped set (checked by
+  a test that every shipped pin contributes exactly one), and the
+  CycloneDX SBOM gains a licence field per component with the sbom test
+  checking it is set. (4) SPDX `SPDX-License-Identifier: MIT` headers on
+  our source files and REUSE compliance (reuse.software's `reuse lint`
+  through Bazel if pinnable, else our own check), which also gives a
+  README badge. (5) The README's licence section says what ships, under
+  what, and where the notices are. Findings that need russ (a licence we
+  cannot satisfy, a copied hunk with no provenance) are reported, not
+  resolved.

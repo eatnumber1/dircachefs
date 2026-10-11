@@ -2996,3 +2996,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   decision; he is not convinced it is a good idea or that it works. 14.9's text says so.
 - russ: a network filesystem as the backing stays a supported use case for an administrator who
   can guarantee exclusive access; only his own NFS clients are out. The future-work note corrected.
+- russ asked whether we are fine on licensing: 7.8 queued and dispatched (investigator, lane-2):
+  licences from the pinned archives, obligations of the static binary (LGPL libfuse and glibc),
+  copied-code provenance, docs/licenses.md, a THIRD_PARTY_NOTICES target with a test, SPDX
+  headers and REUSE. Two lanes running (26.17b, 7.8).
