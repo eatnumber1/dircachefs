@@ -3211,3 +3211,11 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   `parent` in the parent, which must exit and never return; the abort guards that contract. The
   fix that removes the abort: `parent` returns the exit status and ForkSplit `_exit`s with it, so
   "parent returned" cannot occur.
+- russ on 25.9: agrees with the poisoned flag plus fuse_session_exit for RestoreRoot (and had
+  reached the same idea: a self-poisoning wrapper for all filesystem interaction), agrees on
+  ForkSplit and the fuse_ops deletions; asks whether the no-crash rule is enforced mechanically:
+  the clang-query matcher check_in_production is (23 sites allowlisted), the shipped-binary half
+  (banned_symbols: abort, __assert_fail, fatal-log internals) is missing and lands with 25.9. New:
+  15.13, the cache database root-owned 0600 always, the permission-set comparison dropped. Style
+  1.6b gains the poisoned-subsystem pattern in his words. Design question open: the backing door
+  as an injected class.

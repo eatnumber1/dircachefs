@@ -875,3 +875,33 @@ or created another finding. Remaining for the judgement steps:
 unused-parameters 44, cert-err33-c 49, google-runtime-int 31,
 unchecked-optional-access 30, concurrency-mt-unsafe 26,
 cognitive-complexity 41 (25.25), use-internal-linkage 19.
+
+25.9 rulings (russ, 2026-10-11) and the step as it now stands, for the
+temporary orchestrator: (1) RestoreRoot: no crash; on a failed restore it
+sets a process-wide poisoned flag and calls fuse_session_exit, and the
+syscalls_backing door refuses every later backing syscall with a Status
+(style 1.6b's poisoned-subsystem pattern); test with the setgroups fault
+fake: the daemon ends orderly, no backing syscall follows. (2) ForkSplit:
+`parent` returns the exit status and ForkSplit `_exit`s with it; the abort
+goes. (3) fuse_ops: the impossible null checks deleted; cannot-refuse-INIT
+logs ERROR and exits the session. (4) The audit's other conversions as
+written (ReplyNone to RET_CHECK; the exit sites that are ordinary child
+exits stay, they are not error returns in disguise; BecomeDaemon returns
+StatusOr). (5) Mechanical enforcement: the clang-query matcher
+`check_in_production` already exists (23 sites allowlisted, enforced); its
+allowlist empties with this step; `tools/banned_symbols.txt` gains `abort`,
+`__assert_fail` and Abseil's fatal-log internals for the shipped binaries
+(it has none of them today). Protocol agent; test first. Design question
+left open by russ: the backing door as an injected class.
+
+## 15.13 The cache database is root-owned 0600, always (russ, 2026-10-11)
+
+russ: "today the cache database is not _guaranteed_ to be owned by root
+... Just make it owned by root and drop the complicated logic." main.cc's
+rule that the cache file's permission set may grant no more access than
+the backing's (the comparison and its error naming both sets, lines
+~119-182) goes: the daemon creates the database 0600 as root, refuses an
+existing file that is not owned by root or not 0600 (no fix-up, no
+WARNING path: the administrator fixes it), and the README's section on
+cache permissions says that one rule. Tests: the permission-comparison
+tests become the two refusals. No back-compat. Mechanical.

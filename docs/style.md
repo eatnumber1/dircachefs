@@ -618,6 +618,22 @@ until 2026-10-10; this section is it.)
   beyond that macro; "googletest understands the difference between 'the
   process crashed' and 'ASSERT/EXPECT failed'"). `ASSERT_*`/`EXPECT_*` are
   for the property the test is about.
+- **Poisoned global state is a subsystem that refuses at its door, not a
+  crash** (russ, 2026-10-11, on RestoreRoot: a `Status` "means we maybe need
+  a style guide exception for the times when global state is poisoned and
+  it's now a disaster to proceed ... That's an option! Make all filesystem
+  interaction go through a wrapper that can poison itself. Then we don't
+  have to crash outright and can just make the 'fs interaction' subsystem
+  be broken."). A failure a caller must not be able to ignore is not
+  conveyed in a `Status` the caller inspects; the subsystem whose state is
+  poisoned records that itself, begins the orderly shutdown
+  (`fuse_session_exit`), and every entry point of that subsystem refuses
+  from then on. For the backing filesystem that door exists already: every
+  backing syscall passes through `backing.cc`'s syscalls_backing layer,
+  which the build graph enforces; a credential switch that cannot be undone
+  poisons it there. Whether that door becomes an injected object (a
+  `Backing` class, with a fake for tests, which the fakes-not-mocks rule
+  favours) is a design question russ left open.
 - **Mechanically** (25.9): `tools/banned_symbols.txt` bans `abort`,
   `__assert_fail` and Abseil's fatal-log internals in the shipped
   binaries; `tools/style_matchers/check_in_production.query` (25.21)
