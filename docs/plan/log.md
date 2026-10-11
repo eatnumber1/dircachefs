@@ -3003,3 +3003,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - README: the two workflow badges (CI, Mutation testing) and three static ones (kernel 6.9+,
   C++20, MIT) above the first section; the man page extracts named sections, so none reach
   dcfs(8) (built and checked: zero badge lines).
+- russ: "Do it" on the badges: the five free ones added to the README (7742cae), 26.28 queued and
+  dispatched (mechanical, lane-4): endpoint badges from CI-written JSON on a `badges` branch
+  (CI's one permitted push). Three lanes briefly (26.17b, 7.8, 26.28).

@@ -859,3 +859,24 @@ Until then the lcov gate stays (lines and branches) with the reformat
 case documented in docs/coverage.md: a formatting-only change that moves
 the line figure is re-baselined with the 26.26 alignment check as the
 evidence. Parked in the Queue's item 6 unless russ pulls it forward.
+
+## 26.28 README badges from our own numbers (russ, 2026-10-11: "Do it"; dispatched, mechanical, lane-4)
+
+The two workflow badges and three static ones are in the README
+(7742cae; the man page extracts named sections, so none reach it). This
+step: shields.io endpoint badges fed by JSON files that CI writes to a
+`badges` branch of this repository (russ approved CI pushing to that
+branch; nothing else in the project pushes): coverage (lines and
+branches from the gate's line; regions when 26.27 lands), reproducible
+(bit-identical or not, from the reproducible job), OSV (known
+vulnerabilities and ignores with their expiry, from the osv job),
+mutation score (killed of total, from the weekly job's merged report),
+and TLC (states explored and violations from the weekly large
+model-checking run). Each job writes its JSON as a step; one final job
+per workflow commits the changed files to `badges` with the workflow's
+token (`contents: write` on that job only, least privilege elsewhere),
+skipping the commit when nothing changed; the README references
+`https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/<owner>/<repo>/badges/<name>.json`.
+A test for the JSON writers (fixtures of each job's output line, the
+shields endpoint schema: schemaVersion 1, label, message, color). No
+badge for a number we do not already compute.
