@@ -46,6 +46,9 @@ class RepoShapeTest(unittest.TestCase):
     def test_no_production_class_befriends_a_testonly_class(self):
         self.assertEqual([], repo_shape.no_testonly_friends(ROOT["root"]))
 
+    def test_every_source_file_has_an_spdx_licence(self):
+        self.assertEqual([], repo_shape.spdx_licenses(ROOT["root"]))
+
 
 def main():
     rest = []

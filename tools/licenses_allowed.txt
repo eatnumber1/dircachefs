@@ -1,0 +1,12 @@
+# SPDX licence ids that a source file's header may name (docs/licenses.md,
+# step 7.8; tools/repo_shape.py, spdx_licenses). Format: id | reason.
+MIT | ours
+Apache-2.0 | copied permissive code, listed in third_party_files.txt
+BSD-2-Clause | copied permissive code, listed in third_party_files.txt
+BSD-3-Clause | copied permissive code, listed in third_party_files.txt
+ISC | copied permissive code, listed in third_party_files.txt
+0BSD | copied permissive code, listed in third_party_files.txt
+blessing | copied permissive code, listed in third_party_files.txt
+GPL-2.0-only | test-only patches to GPL code, listed with role test-only
+GPL-2.0-or-later | test-only patches to GPL code, listed with role test-only
+LGPL-2.1-only | test-only patches to GPL code, listed with role test-only

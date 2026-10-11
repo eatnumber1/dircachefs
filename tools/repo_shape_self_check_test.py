@@ -281,6 +281,93 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
         self.assertIn("lists 1 buffer(s) for dcfs/known.cc, which has 3",
                       problems[1])
 
+    def spdx_problems(self, files, third_party=()):
+        """Runs spdx_licenses over fixture files (the keys are the tracked
+        list) with the fixture licence tables."""
+        write(self.root, "tools/licenses_allowed.txt",
+              "# id | reason\n"
+              "MIT | ours\n"
+              "BSD-3-Clause | copied permissive code, listed in "
+              "third_party_files.txt\n"
+              "GPL-2.0-only | test-only patches to GPL code, listed with role "
+              "test-only\n")
+        write(self.root, "tools/third_party_files.txt",
+              "# path | licence | role | provenance\n" + "".join(third_party))
+        for path, text in files.items():
+            write(self.root, path, text)
+        return repo_shape.spdx_licenses(self.root, tracked=sorted(files))
+
+    def test_spdx_file_without_a_header_is_reported(self):
+        problems = self.spdx_problems({"dcfs/x.cc": "int x;\n"})
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/x.cc has no SPDX-License-Identifier", problems[0])
+
+    def test_spdx_mit_header_passes(self):
+        self.assertEqual([], self.spdx_problems(
+            {"dcfs/x.cc": "// SPDX-License-Identifier: MIT\nint x;\n"}))
+
+    def test_spdx_header_is_on_line_two_after_a_shebang(self):
+        problems = self.spdx_problems({
+            "tools/x.sh": "#!/bin/sh\n# SPDX-License-Identifier: MIT\n",
+            "tools/z.sh": "#!/bin/sh\n# no licence\n# SPDX-License-Identifier: "
+                          "MIT\n",
+        })
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("tools/z.sh has no SPDX-License-Identifier", problems[0])
+
+    def test_spdx_listed_bsd_passes(self):
+        self.assertEqual([], self.spdx_problems(
+            {"dcfs/b.cc": "// SPDX-License-Identifier: BSD-3-Clause\n"},
+            third_party=["dcfs/b.cc | BSD-3-Clause | shipped | copied from x\n"]))
+
+    def test_spdx_unlisted_bsd_is_reported(self):
+        problems = self.spdx_problems(
+            {"dcfs/b.cc": "// SPDX-License-Identifier: BSD-3-Clause\n"})
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/b.cc is BSD-3-Clause but is not listed",
+                      problems[0])
+
+    def test_spdx_listing_must_name_the_header_licence(self):
+        problems = self.spdx_problems(
+            {"dcfs/b.cc": "// SPDX-License-Identifier: BSD-3-Clause\n"},
+            third_party=["dcfs/b.cc | ISC | shipped | copied from x\n"])
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("dcfs/b.cc is BSD-3-Clause, listed as ISC", problems[0])
+
+    def test_spdx_gpl_listed_test_only_passes(self):
+        self.assertEqual([], self.spdx_problems(
+            {"tools/g.c": "/* SPDX-License-Identifier: GPL-2.0-only */\n"},
+            third_party=["tools/g.c | GPL-2.0-only | test-only | a patch\n"]))
+
+    def test_spdx_gpl_listed_as_shipped_is_reported(self):
+        problems = self.spdx_problems(
+            {"tools/g.c": "/* SPDX-License-Identifier: GPL-2.0-only */\n"},
+            third_party=["tools/g.c | GPL-2.0-only | shipped | a patch\n"])
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("GPL-2.0-only and must have role test-only", problems[0])
+
+    def test_spdx_licence_not_in_the_allowed_list_is_reported(self):
+        problems = self.spdx_problems(
+            {"dcfs/a.cc": "// SPDX-License-Identifier: AGPL-3.0-only\n"},
+            third_party=["dcfs/a.cc | AGPL-3.0-only | test-only | x\n"])
+        self.assertEqual(1, len(problems), problems)
+        self.assertIn("under AGPL-3.0-only, which tools/licenses_allowed.txt does not allow", problems[0])
+
+    def test_spdx_checks_only_the_covered_files(self):
+        problems = self.spdx_problems({
+            "docs/x.md": "no header\n",
+            "tools/style_matchers/bad.cc": "no header\n",
+            "tools/mutation/fixture.cc": "no header\n",
+            "dcfs/testdata/y.cc": "no header\n",
+            "BUILD": "no header\n",
+            "test/qemu/guest/init": "no header\n",
+            "tools/z.py": "no header\n",
+        })
+        self.assertEqual(3, len(problems), problems)
+        self.assertIn("BUILD has no", problems[0])
+        self.assertIn("test/qemu/guest/init has no", problems[1])
+        self.assertIn("tools/z.py has no", problems[2])
+
 
 if __name__ == "__main__":
     unittest.main()

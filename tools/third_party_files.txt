@@ -1,0 +1,3 @@
+# Files we wrote whose SPDX licence is not MIT (docs/licenses.md, step 7.8;
+# tools/repo_shape.py, spdx_licenses). Format: path | licence | role | provenance.
+# A GPL or LGPL licence only with role test-only.

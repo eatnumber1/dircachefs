@@ -31,6 +31,7 @@ Each function takes the root of a source tree and returns a list of problems
 
 import os
 import re
+import subprocess
 
 NOT_TESTS = frozenset({
     "lib.sh", "pjdfstest_lib.sh", "init", "systemd_install.sh",
@@ -472,6 +473,92 @@ def nodiscard_on_status(root):
                     "%s:%d: [[nodiscard]] on a function returning absl::Status "
                     "or StatusOr is redundant (docs/style.md, 1.2: the type "
                     "is already must-use); remove it" % (path, number))
+    return problems
+
+
+SPDX_EXTENSIONS = (".cc", ".h", ".c", ".py", ".sh", ".bzl", ".bazel", ".tla",
+                   ".java", ".tpl", ".sql", ".yml", ".yaml")
+SPDX_NAMES = frozenset({"BUILD", "BUILD.bazel", "MODULE.bazel", ".bazelrc",
+                        ".clang-format", ".clang-tidy"})
+SPDX_PATHS = frozenset({"test/qemu/guest/init"})
+# Sample and known-bad inputs of the checks, not code of ours.
+SPDX_FIXTURES = re.compile(
+    r"(^|/)[^/]*(testdata|fixtures)[^/]*/|^tools/style_matchers/"
+    r"|^tools/mutation/fixture")
+SPDX_ID_RE = re.compile(r"SPDX-License-Identifier:\s*(\S+)")
+SPDX_ALLOWED_LIST = ("tools", "licenses_allowed.txt")
+THIRD_PARTY_LIST = ("tools", "third_party_files.txt")
+COPYLEFT = ("GPL-", "LGPL-")
+
+
+def spdx_wanted(path):
+    """The files that carry an SPDX header (docs/licenses.md, step 7.8)."""
+    if SPDX_FIXTURES.search(path):
+        return False
+    return (path.endswith(SPDX_EXTENSIONS) or
+            os.path.basename(path) in SPDX_NAMES or path in SPDX_PATHS)
+
+
+def spdx_header(text):
+    """The licence id on line 1 (line 2 after a shebang), or None."""
+    lines = text.splitlines()
+    if lines and lines[0].startswith("#!"):
+        lines = lines[1:]
+    match = SPDX_ID_RE.search(lines[0]) if lines else None
+    return match.group(1) if match else None
+
+
+def table_rows(root, parts):
+    """The rows of a `a | b | ...` table; `#` lines and blanks are skipped."""
+    rows = []
+    for line in read(root, *parts).splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            rows.append([field.strip() for field in line.split("|")])
+    return rows
+
+
+def spdx_licenses(root, tracked=None):
+    """Every file we wrote has an SPDX header whose licence is allowed, and
+    a licence other than MIT is listed in tools/third_party_files.txt with
+    the same licence; a GPL or LGPL one only with role test-only. `tracked`
+    is git's list (`git ls-files`) unless given."""
+    if tracked is None:
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=root, capture_output=True, text=True,
+            check=True).stdout.splitlines()
+    allowed = {row[0] for row in table_rows(root, SPDX_ALLOWED_LIST)}
+    listed = {row[0]: (row[1], row[2])
+              for row in table_rows(root, THIRD_PARTY_LIST)}
+    problems = []
+    for path in sorted(p for p in tracked if spdx_wanted(p)):
+        licence = spdx_header(read(root, path))
+        if licence is None:
+            problems.append(
+                "%s has no SPDX-License-Identifier on line 1 (line 2 after a "
+                "shebang): docs/licenses.md, step 7.8" % path)
+            continue
+        if licence not in allowed:
+            problems.append(
+                "%s is under %s, which tools/licenses_allowed.txt does not "
+                "allow" % (path, licence))
+            continue
+        if licence == "MIT":
+            continue
+        if path not in listed:
+            problems.append(
+                "%s is %s but is not listed in tools/third_party_files.txt" %
+                (path, licence))
+            continue
+        listed_licence, role = listed[path]
+        if listed_licence != licence:
+            problems.append(
+                "%s is %s, listed as %s in tools/third_party_files.txt" %
+                (path, licence, listed_licence))
+        elif licence.startswith(COPYLEFT) and role != "test-only":
+            problems.append(
+                "%s is %s and must have role test-only in "
+                "tools/third_party_files.txt" % (path, licence))
     return problems
 
 
