@@ -319,7 +319,8 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
     def test_spdx_listed_bsd_passes(self):
         self.assertEqual([], self.spdx_problems(
             {"dcfs/b.cc": "// SPDX-License-Identifier: BSD-3-Clause\n"},
-            third_party=["dcfs/b.cc | BSD-3-Clause | shipped | copied from x\n"]))
+            third_party=[
+                "dcfs/b.cc | BSD-3-Clause | shipped | copied from x\n"]))
 
     def test_spdx_unlisted_bsd_is_reported(self):
         problems = self.spdx_problems(
@@ -352,7 +353,8 @@ class RepoShapeSelfCheckTest(unittest.TestCase):
             {"dcfs/a.cc": "// SPDX-License-Identifier: AGPL-3.0-only\n"},
             third_party=["dcfs/a.cc | AGPL-3.0-only | test-only | x\n"])
         self.assertEqual(1, len(problems), problems)
-        self.assertIn("under AGPL-3.0-only, which tools/licenses_allowed.txt does not allow", problems[0])
+        self.assertIn("under AGPL-3.0-only, which "
+                      "tools/licenses_allowed.txt does not allow", problems[0])
 
     def test_spdx_checks_only_the_covered_files(self):
         problems = self.spdx_problems({
