@@ -3054,4 +3054,7 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: "Let's configure the QEMU machine to pin to non-SMT cores, to avoid that noise." (2026-10-11).
   Added to 26.17b: run-qemu.sh detects one CPU per physical core via sysfs thread_siblings_list and
   launches QEMU under taskset, with a DCFS_PIN_NON_SMT=0 escape hatch and self-check.
+- russ: "Note: you no longer need to do `sg kvm` anywhere anymore." (2026-10-11). Removed `sg kvm`
+  wrapper requirement from AGENTS.md, CLAUDE.md, docs/plan/process.md, and all agent definitions,
+  now that the login session has the kvm group directly (18f1943).
 
