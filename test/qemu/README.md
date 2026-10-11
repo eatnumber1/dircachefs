@@ -29,9 +29,8 @@ wrappers the repository rule writes (`@alpine_qemu//:qemu_system_x86_64`,
   `/etc/mke2fs.conf`.
 - `/dev/kvm`, writable by you (optional: without it tests run
   under TCG). Put yourself in the `kvm` group
-  (`sudo usermod -aG kvm "$USER"`, then re-login), or on a shell that
-  predates the group change taking effect, wrap the `bazel test` /
-  `run-qemu.sh` invocation in `sg kvm -c '...'`. Without a writable
+  (`sudo usermod -aG kvm "$USER"`, then re-login; a Bazel server started
+  before that needs `bazel shutdown`). Without a writable
   `/dev/kvm` (or with `DCFS_FORCE_TCG=1`), QEMU falls back to TCG
   (software emulation), which works but is slower (Phase 5.1 measured
   2-9x, with an 8.6 s boot) -- see `TIMEOUT` below.

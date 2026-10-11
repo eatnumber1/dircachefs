@@ -3223,3 +3223,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   door exists, the seams exist, the 2026-10-07 flattening ruling stands; revisit at coroutines or a
   second backing kind). Style 1.6 now opens with "Error handling on one page", seven rules
   distilled from the week's rulings with pointers to where each lives.
+- russ: `sg kvm` and `sg qemu` are gone for good. The last command-form mentions removed from the
+  agent definitions, README's test commands and kvm paragraph, and test/qemu/README; the "no longer
+  needed" sentences in AGENTS.md, CLAUDE.md and process.md stay as the record.

@@ -820,21 +820,20 @@ boot), so `bazel test //...` is dominated by compilation, not booting.
 
 ### The `kvm` group and the Bazel server
 
-Until you log in again after joining the `kvm` group, run tests under
-`sg kvm -c '...'`. Bazel keeps a long-lived server process, and the tests'
-QEMU processes inherit that server's groups, not your shell's. If the
-server was first started without the `kvm` group, `sg kvm -c 'bazel test
-...'` is not enough: run `bazel shutdown` first so that the next invocation
-starts a server that has the group.
+The tests' QEMU processes need `/dev/kvm`, and they inherit the groups of
+Bazel's long-lived server, not of your shell. Join the `kvm` group and log
+in again before the first `bazel test`; if a server was started without the
+group, run `bazel shutdown` so that the next invocation starts one that has
+it.
 
 ### Running tests
 
 ```
-sg kvm -c 'bazel test //...'                         # everything
-sg kvm -c 'bazel test //dcfs:metadata_cache_test'    # one unit test
-sg kvm -c 'bazel test //test/qemu:write_test --test_output=streamed'
-sg kvm -c 'bazel test --config=asan //dcfs:all'      # under ASan
-sg kvm -c 'bazel test --config=ubsan //dcfs:all'     # under UBSan
+bazel test //...                                     # everything
+bazel test //dcfs:metadata_cache_test                # one unit test
+bazel test //test/qemu:write_test --test_output=streamed
+bazel test --config=asan //dcfs:all                  # under ASan
+bazel test --config=ubsan //dcfs:all                 # under UBSan
 ```
 
 `--test_output=streamed` shows a guest's console as it runs. Afterwards,
