@@ -43,12 +43,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 #include "absl/functional/function_ref.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/types/source_location.h"
+#include "dcfs/escape.h"
 
 namespace dcfs {
 
@@ -106,6 +109,124 @@ enum class Op {
   kBatchForget,
 };
 
+template <typename Sink>
+void AbslStringify(Sink &sink, Op op) {
+  switch (op) {
+    case Op::kOther:
+      sink.Append("Other");
+      return;
+    case Op::kLookup:
+      sink.Append("Lookup");
+      return;
+    case Op::kGetattr:
+      sink.Append("Getattr");
+      return;
+    case Op::kSetattr:
+      sink.Append("Setattr");
+      return;
+    case Op::kReadlink:
+      sink.Append("Readlink");
+      return;
+    case Op::kMknod:
+      sink.Append("Mknod");
+      return;
+    case Op::kMkdir:
+      sink.Append("Mkdir");
+      return;
+    case Op::kUnlink:
+      sink.Append("Unlink");
+      return;
+    case Op::kRmdir:
+      sink.Append("Rmdir");
+      return;
+    case Op::kSymlink:
+      sink.Append("Symlink");
+      return;
+    case Op::kRename:
+      sink.Append("Rename");
+      return;
+    case Op::kLink:
+      sink.Append("Link");
+      return;
+    case Op::kOpen:
+      sink.Append("Open");
+      return;
+    case Op::kRead:
+      sink.Append("Read");
+      return;
+    case Op::kWrite:
+      sink.Append("Write");
+      return;
+    case Op::kFlush:
+      sink.Append("Flush");
+      return;
+    case Op::kRelease:
+      sink.Append("Release");
+      return;
+    case Op::kFsync:
+      sink.Append("Fsync");
+      return;
+    case Op::kOpendir:
+      sink.Append("Opendir");
+      return;
+    case Op::kReaddir:
+      sink.Append("Readdir");
+      return;
+    case Op::kReaddirplus:
+      sink.Append("Readdirplus");
+      return;
+    case Op::kReleasedir:
+      sink.Append("Releasedir");
+      return;
+    case Op::kFsyncdir:
+      sink.Append("Fsyncdir");
+      return;
+    case Op::kStatfs:
+      sink.Append("Statfs");
+      return;
+    case Op::kSetxattr:
+      sink.Append("Setxattr");
+      return;
+    case Op::kGetxattr:
+      sink.Append("Getxattr");
+      return;
+    case Op::kListxattr:
+      sink.Append("Listxattr");
+      return;
+    case Op::kRemovexattr:
+      sink.Append("Removexattr");
+      return;
+    case Op::kAccess:
+      sink.Append("Access");
+      return;
+    case Op::kCreate:
+      sink.Append("Create");
+      return;
+    case Op::kFallocate:
+      sink.Append("Fallocate");
+      return;
+    case Op::kCopyFileRange:
+      sink.Append("CopyFileRange");
+      return;
+    case Op::kIoctl:
+      sink.Append("Ioctl");
+      return;
+    case Op::kTmpfile:
+      sink.Append("Tmpfile");
+      return;
+    case Op::kLinkTmpfile:
+      sink.Append("LinkTmpfile");
+      return;
+    case Op::kForget:
+      sink.Append("Forget");
+      return;
+    case Op::kBatchForget:
+      sink.Append("BatchForget");
+      return;
+  }
+  sink.Append("Other");
+}
+
 // A request as it arrived: `ino` is the inode it names (the parent for a
 // namespace operation), `name` its name argument; `newparent`/`newname`
 // for a rename or link (for a link, `ino` is the source). The views are
@@ -119,6 +240,20 @@ struct Request {
   unsigned int flags = 0;  // rename flags; an ioctl's command; setattr's to_set
   int64_t offset = 0;      // readdir offset
   int ioctl_arg = 0;       // an FS_IOC_SETFLAGS's flags (FUSE sends an int)
+
+  template <typename Sink>
+  friend void AbslStringify(Sink &sink, const Request &request) {
+    std::string out = absl::StrCat(request.op, "(ino=", request.ino);
+    if (!request.name.empty()) {
+      absl::StrAppend(&out, ", name=\"", EscapeBytes(request.name), "\"");
+    }
+    if (!request.newname.empty()) {
+      absl::StrAppend(&out, ", newparent=", request.newparent, ", newname=\"",
+                      EscapeBytes(request.newname), "\"");
+    }
+    absl::StrAppend(&out, ")");
+    sink.Append(out);
+  }
 };
 
 // What a probe of a name read: the object it holds (by its backing inode

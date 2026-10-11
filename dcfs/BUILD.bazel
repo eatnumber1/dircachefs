@@ -77,9 +77,11 @@ cc_library(
     visibility = ["//dcfs/testonly:__pkg__"],
     hdrs = ["protocol_events.h"],
     deps = [
+      ":escape",
       "@absl//absl/functional:function_ref",
       "@absl//absl/status",
       "@absl//absl/status:statusor",
+      "@absl//absl/strings",
       "@absl//absl/types:source_location",
     ],
 )
@@ -473,6 +475,7 @@ qemu_cc_test(
       ":protocol_events",
       "@absl//absl/strings",
       "@googletest//:gtest_main",
+      "@libfuse//:libfuse",
     ],
 )
 
