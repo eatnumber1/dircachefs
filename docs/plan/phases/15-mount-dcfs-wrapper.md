@@ -728,6 +728,16 @@ option is simply unknown afterwards, as any other unknown `dcfs.*` option
 is (russ: "we haven't shipped. No need for back-compat"), so no special
 message and no test for it; the systemd guest's fstab lines, the
 README, 21.1's notes and this phase's option table lose it.
+Note for 15.11 (russ, 2026-10-11): a network filesystem as the backing
+stays a supported use case for an administrator who can guarantee
+exclusive access. Today the README's example reaches it through the
+capture (`dcfs.fstype=nfs,vers=4.2,_netdev`); after the capture goes,
+the same case is the bind form over an NFS mount that fstab makes at a
+raw path (`nas:/export /srv/raw/nas nfs vers=4.2,_netdev,nofail`), with
+`_netdev` and `x-systemd.requires-mounts-for=/srv/raw/nas` on the dcfs
+line. 15.11 rewrites that README example and the `_netdev` paragraph
+accordingly and keeps the systemd guest's network-backing test in the
+new shape; the use case is not removed.
 Note for 15.11 (2026-10-11, from the runbook): with the native-type form
 gone, every dcfs fstab line is a bind line, and the README says passno
 `0` on bind lines because systemd-fsck@ wants a block device. So
