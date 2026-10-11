@@ -566,8 +566,11 @@ line:
 /mnt/media  192.168.1.0/24(rw,fsid=1,no_subtree_check)
 ```
 
-NFS clients keep their handles across dcfs restarts. After restarting an
-instance (unmounting and mounting it again), though, run
+Exporting the dcfs mountpoint directly is recommended.
+
+NFS clients keep their handles across dcfs restarts. When the export path
+is the dcfs mountpoint itself, restarting an instance (unmounting and mounting
+it again) only requires flushing the export cache afterwards:
 
 ```
 sudo exportfs -f
@@ -576,6 +579,19 @@ sudo exportfs -f
 nfsd's export cache holds a reference to the old mount and answers `EIO`
 until it is flushed. This is ordinary NFS administration for any
 filesystem that is unmounted and remounted under an export.
+
+If you instead export a bind mount of the dcfs mountpoint, `exportfs -f`
+alone is not enough: the bind mount keeps the dead FUSE superblock alive,
+and knfsd serves `EIO` until the bind mount is remade on the new superblock.
+The restart order for a bind-mounted export must be:
+
+1. Unexport the bind directory (`sudo exportfs -u <client>:<bind-path>`).
+2. Unmount the bind mount (`sudo umount <bind-path>`).
+3. Stop dcfs (`sudo umount <dcfs-mount>`).
+4. Start dcfs (`sudo mount <dcfs-mount>`).
+5. Remount the bind mount (`sudo mount --bind <dcfs-mount> <bind-path>`).
+6. Re-export the directory (`sudo exportfs -r` or `sudo exportfs -a`).
+7. Flush the export cache (`sudo exportfs -f`).
 
 If the cache database is deleted, handles held by NFS clients become stale
 (`ESTALE`); they never resolve to a different file.

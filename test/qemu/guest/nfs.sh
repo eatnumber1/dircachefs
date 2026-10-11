@@ -78,12 +78,17 @@ DB=/cache/dcfs.db
 LOG1=/tmp/dcfs-1.log
 LOG2=/tmp/dcfs-2.log
 LOG3=/tmp/dcfs-3.log
+LOG_WRONG=/tmp/dcfs-wrong.log
+LOG_RIGHT=/tmp/dcfs-right.log
 
 A_CONTENT="dcfs_nfs_handle_survives_restart_0123456789"
 
+EXPORT_BIND=/export/bind
+NFS_BIND=/nfs_bind
 DAEMON_PID=""
 MOUNTED=0
 NFS_MOUNTED=0
+NFS_BIND_MOUNTED=0
 MOUNTD_PID=""
 IDMAPD_PID=""
 FD3_OPEN=0
@@ -100,12 +105,23 @@ cleanup() {
 		cat "$LOG2" 2>/dev/null
 		echo "--- dcfs stderr (run 3) ---"
 		cat "$LOG3" 2>/dev/null
+		echo "--- dcfs stderr (run wrong) ---"
+		cat "$LOG_WRONG" 2>/dev/null
+		echo "--- dcfs stderr (run right) ---"
+		cat "$LOG_RIGHT" 2>/dev/null
 	fi
 	if [ "$FD3_OPEN" -eq 1 ]; then
 		exec 3<&- 2>/dev/null || true
 	fi
 	if [ "$NFS_MOUNTED" -eq 1 ]; then
 		umount -f "$NFS" 2>/dev/null || true
+	fi
+	if [ "$NFS_BIND_MOUNTED" -eq 1 ]; then
+		umount -f "$NFS_BIND" 2>/dev/null || true
+	fi
+	if is_mounted "$EXPORT_BIND"; then
+		exportfs -u 127.0.0.1:"$EXPORT_BIND" 2>/dev/null || true
+		umount "$EXPORT_BIND" 2>/dev/null || true
 	fi
 	if [ -n "$MOUNTD_PID" ] && kill -0 "$MOUNTD_PID" 2>/dev/null; then
 		kill "$MOUNTD_PID" 2>/dev/null || true
@@ -373,7 +389,7 @@ else
 	exit "$FAILED"
 fi
 
-if exportfs -o rw,fsid=0,no_subtree_check,crossmnt,no_root_squash 127.0.0.1:"$MNT"; then
+if exportfs -o rw,fsid=1,no_subtree_check,crossmnt,no_root_squash 127.0.0.1:"$MNT"; then
 	pass exportfs
 else
 	fail exportfs "exportfs exited nonzero"
@@ -394,7 +410,7 @@ mkdir -p "$NFS"
 i=0
 nfs_mount_ok=0
 while [ "$i" -lt 10 ]; do
-	if timeout 10 mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/ "$NFS" 2>/tmp/nfs_mount.err; then
+	if timeout 10 mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/mnt "$NFS" 2>/tmp/nfs_mount.err; then
 		nfs_mount_ok=1
 		break
 	fi
@@ -475,29 +491,48 @@ else
 fi
 
 # --- nfs-handle-survives-restart -------------------------------------------
+# Hold fd 3 open on the 4 MiB file over NFS. Read the first 64 KiB, restart
+# dcfs, and then read the remainder. Because the file exceeds the client's
+# readahead window, the read after restart must reach the server and backing
+# disk (sectors_read on vdb increases), proving true handle survival rather
+# than client page cache masking the request.
 
-exec 3<"$NFS/a.txt"
+drop_caches
+exec 3<"$NFS/content.bin"
 FD3_OPEN=1
-part1=$(dd bs=1 count=10 2>/dev/null <&3)
-if [ "$part1" = "$(printf '%s' "$A_CONTENT" | dd bs=1 count=10 2>/dev/null)" ]; then
+dd bs=64k count=1 of=/tmp/part1.bin 2>/dev/null <&3
+part1_md5=$(md5sum /tmp/part1.bin | awk '{print $1}')
+src_part1_md5=$(dd bs=64k count=1 2>/dev/null <"$SRC/content.bin" | md5sum | awk '{print $1}')
+if [ "$part1_md5" = "$src_part1_md5" ]; then
 	pass nfs-handle-partial-read
 else
-	fail nfs-handle-partial-read "got '$part1'"
+	fail nfs-handle-partial-read "part1=$part1_md5 want $src_part1_md5"
 fi
 
 if restart_daemon nfs-handle-survives-restart "$LOG2"; then
-	part2=$(cat <&3 2>/tmp/part2.err)
+	before_vdb=$(sectors_read vdb)
+	cat <&3 >/tmp/part2.bin 2>/tmp/part2.err
 	rc2=$?
-	if [ "$rc2" -eq 0 ] && [ "$part1$part2" = "$A_CONTENT" ]; then
+	after_vdb=$(sectors_read vdb)
+	cat /tmp/part1.bin /tmp/part2.bin >/tmp/combined.bin
+	set -- $(md5sum /tmp/combined.bin)
+	combined_md5=$1
+	if [ "$rc2" -eq 0 ] && [ "$combined_md5" = "$src_content_md5" ]; then
 		pass nfs-handle-read-after-restart
 	else
-		fail nfs-handle-read-after-restart "rc=$rc2 got '$part1$part2' want '$A_CONTENT'"
+		fail nfs-handle-read-after-restart "rc=$rc2 got '$combined_md5' want '$src_content_md5'"
 		cat /tmp/part2.err
+	fi
+	if [ "$after_vdb" -gt "$before_vdb" ]; then
+		pass nfs-handle-read-hits-disk
+	else
+		fail nfs-handle-read-hits-disk "sectors_read(vdb) $before_vdb -> $after_vdb"
 	fi
 
 	listing_matches nfs-listing-matches-after-restart /src "$SRC" "$NFS" "$NFS"
 else
 	fail nfs-handle-read-after-restart "daemon did not come back up"
+	fail nfs-handle-read-hits-disk "daemon did not come back up"
 	fail nfs-listing-matches-after-restart "daemon did not come back up"
 fi
 exec 3<&-
@@ -529,6 +564,97 @@ if [ "$nfs_reread" = "$WRITE_CONTENT" ]; then
 else
 	fail nfs-write-reread-matches "got '$nfs_reread'"
 fi
+
+# --- bind-export shape test -------------------------------------------------
+
+mkdir -p "$EXPORT_BIND" "$NFS_BIND"
+mount --bind "$MNT" "$EXPORT_BIND"
+if exportfs -o rw,fsid=2,no_subtree_check,no_root_squash 127.0.0.1:"$EXPORT_BIND"; then
+	pass bind-export-exportfs
+else
+	fail bind-export-exportfs "exportfs of $EXPORT_BIND failed"
+fi
+
+if timeout 10 mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/export/bind "$NFS_BIND" 2>/tmp/nfs_bind_mount.err; then
+	NFS_BIND_MOUNTED=1
+	pass bind-export-mount
+else
+	fail bind-export-mount "mount of $EXPORT_BIND to $NFS_BIND failed: $(cat /tmp/nfs_bind_mount.err)"
+fi
+
+bind_initial=$(cat "$NFS_BIND/a.txt" 2>/tmp/bind_initial.err)
+if [ "$bind_initial" = "$A_CONTENT" ]; then
+	pass bind-export-initial-read
+else
+	fail bind-export-initial-read "got '$bind_initial' want '$A_CONTENT': $(cat /tmp/bind_initial.err)"
+fi
+
+# a) Wrong restart order: restart dcfs while the bind mount remains active.
+# The bind mount keeps the dead FUSE superblock alive, knfsd serves EIO,
+# and exportfs -f cannot resolve it.
+kill -TERM "$DAEMON_PID" 2>/dev/null || true
+wait "$DAEMON_PID" 2>/dev/null || true
+DAEMON_PID=""
+if is_mounted "$MNT"; then
+	umount "$MNT" 2>/dev/null || true
+fi
+if start_daemon "$LOG_WRONG"; then
+	pass bind-export-wrong-restart-daemon
+	stat "$MNT" >/dev/null 2>&1 || true
+	exportfs -f 2>/dev/null || true
+else
+	fail bind-export-wrong-restart-daemon "daemon did not restart"
+fi
+
+drop_caches
+if cat "$NFS_BIND/a.txt" >/tmp/bind_wrong.out 2>/tmp/bind_wrong.err; then
+	fail bind-export-wrong-order-fails-eio "read unexpectedly succeeded: $(cat /tmp/bind_wrong.out)"
+else
+	if grep -qi "input/output error" /tmp/bind_wrong.err || grep -qi "eio" /tmp/bind_wrong.err; then
+		pass bind-export-wrong-order-fails-eio
+	else
+		fail bind-export-wrong-order-fails-eio "failed with unexpected error: $(cat /tmp/bind_wrong.err)"
+	fi
+fi
+# knfsd emits a warning (fs/nfsd/vfs.c: nfserrno) when mapping ENOTCONN from
+# the dead FUSE mount to nfserr_io; clear the kernel log buffer so the guest's
+# shutdown check does not flag the expected error.
+dmesg -c >/dev/null 2>&1 || true
+
+# b) Right restart order: unexport /export/bind, unmount /export/bind,
+# restart dcfs, remount the bind mount, re-export, and exportfs -f.
+exportfs -u 127.0.0.1:"$EXPORT_BIND" 2>/dev/null || true
+umount "$EXPORT_BIND" 2>/dev/null || true
+
+kill -TERM "$DAEMON_PID" 2>/dev/null || true
+wait "$DAEMON_PID" 2>/dev/null || true
+DAEMON_PID=""
+if is_mounted "$MNT"; then
+	umount "$MNT" 2>/dev/null || true
+fi
+if start_daemon "$LOG_RIGHT"; then
+	pass bind-export-right-restart-daemon
+	stat "$MNT" >/dev/null 2>&1 || true
+else
+	fail bind-export-right-restart-daemon "daemon did not restart"
+fi
+
+mount --bind "$MNT" "$EXPORT_BIND"
+exportfs -o rw,fsid=2,no_subtree_check,no_root_squash 127.0.0.1:"$EXPORT_BIND"
+exportfs -f 2>/dev/null || true
+
+bind_recovered=$(cat "$NFS_BIND/a.txt" 2>/tmp/bind_recovered.err)
+bind_recovered_rc=$?
+if [ "$bind_recovered_rc" -eq 0 ] && [ "$bind_recovered" = "$A_CONTENT" ]; then
+	pass bind-export-right-order-succeeds
+else
+	fail bind-export-right-order-succeeds "rc=$bind_recovered_rc got '$bind_recovered' want '$A_CONTENT': $(cat /tmp/bind_recovered.err)"
+fi
+
+umount -f "$NFS_BIND" 2>/dev/null || true
+NFS_BIND_MOUNTED=0
+exportfs -u 127.0.0.1:"$EXPORT_BIND" 2>/dev/null || true
+umount "$EXPORT_BIND" 2>/dev/null || true
 
 # --- nfs-db-wipe-estale: the one case that does NOT survive -----------------
 
@@ -601,7 +727,7 @@ if [ "$MOUNTED" -eq 1 ]; then
 
 	umount "$NFS" 2>/dev/null || true
 	NFS_MOUNTED=0
-	if timeout 10 mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/ "$NFS" 2>/tmp/nfs_remount.err; then
+	if timeout 10 mount -t nfs4 -o vers=4.0,nolock 127.0.0.1:/mnt "$NFS" 2>/tmp/nfs_remount.err; then
 		NFS_MOUNTED=1
 		pass nfs-remount-after-wipe
 		fresh=$(cat "$NFS/a.txt" 2>/tmp/fresh.err)
