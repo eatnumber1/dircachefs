@@ -3,6 +3,7 @@
 
 #include <linux/fs.h>  // FS_IOC_SETFLAGS
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include <bit>
 #include <cstddef>
@@ -24,19 +25,6 @@
 #include "fuse_lowlevel.h"
 
 namespace dcfs {
-namespace {
-
-// Every request handler goes through this, so it is also where the
-// periodic sync point runs: at the start of a request, never in the middle
-// of one (see DirCacheFS::MaybeSyncBacking).
-DirCacheFS &GetFS(fuse_req_t req) {
-  auto *fs = static_cast<DirCacheFS *>(fuse_req_userdata(req));
-  CHECK_NE(fs, nullptr);
-  fs->MaybeSyncBacking();
-  return *fs;
-}
-
-events::Ino Ino(fuse_ino_t ino) { return static_cast<events::Ino>(ino); }
 
 std::string_view OpName(events::Op op) {
   switch (op) {
@@ -132,6 +120,20 @@ std::string DescribeRequest(const events::Request &request) {
   absl::StrAppend(&out, ")");
   return out;
 }
+
+namespace {
+
+// Every request handler goes through this, so it is also where the
+// periodic sync point runs: at the start of a request, never in the middle
+// of one (see DirCacheFS::MaybeSyncBacking).
+DirCacheFS &GetFS(fuse_req_t req) {
+  auto *fs = static_cast<DirCacheFS *>(fuse_req_userdata(req));
+  CHECK_NE(fs, nullptr);
+  fs->MaybeSyncBacking();
+  return *fs;
+}
+
+events::Ino Ino(fuse_ino_t ino) { return static_cast<events::Ino>(ino); }
 
 // The request's log lines after its handler ran, before the reply (the
 // failure line, if any, is FuseRequest::ReplyFailureAndLogIfNotOk's).

@@ -463,6 +463,19 @@ cc_library(
     ],
 )
 
+qemu_cc_test(
+    name = "fuse_ops_test",
+    size = "small",
+    timeout = "short",
+    srcs = ["fuse_ops_test.cc"],
+    deps = [
+      ":fuse_ops",
+      ":protocol_events",
+      "@absl//absl/strings",
+      "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "device_id",
     visibility = ["//dcfs/testonly:__pkg__"],
