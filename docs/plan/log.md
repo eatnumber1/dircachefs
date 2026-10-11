@@ -3006,3 +3006,6 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
 - russ: "Do it" on the badges: the five free ones added to the README (7742cae), 26.28 queued and
   dispatched (mechanical, lane-4): endpoint badges from CI-written JSON on a `badges` branch
   (CI's one permitted push). Three lanes briefly (26.17b, 7.8, 26.28).
+- russ: the licence-header check must catch a bad licence, not only a missing header; 7.8's
+  SPDX rule becomes a gate with an allowlist of accepted licences (no GPL/LGPL identifiers) and a
+  provenance list for non-MIT files; the agent told. Push point: main at this commit.
