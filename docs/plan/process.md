@@ -103,10 +103,10 @@ process (its waves and file ownership table) is in `history.md`.
 
 ## Running tests
 
-- Run Bazel with `/dev/kvm` access: `sg kvm -c 'bazel test //...'` when
-  the login session predates joining the `kvm` group. A Bazel server
-  started without KVM silently falls back to emulation: `bazel shutdown`
-  first when switching.
+- Run Bazel with access to `/dev/kvm`. The login session has the `kvm` group
+  directly, so `sg kvm` is no longer needed anywhere (russ, 2026-10-11). A
+  Bazel server started without KVM silently falls back to emulation:
+  `bazel shutdown` first when switching.
 - Never pipe Bazel through `tail`/`head` in an `&&` chain.
 - Until Phase 6 lands: `bazel test //...` runs everything, about 30
   minutes for the full ext4/xfs/btrfs matrix; `bazel test //dcfs:...` or

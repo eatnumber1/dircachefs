@@ -46,11 +46,10 @@ up one row (implementer to protocol, mechanical to implementer).
   (`docs/plan/process.md`). Do not use the agent tool's `isolation:
   "worktree"`: it resolved to the home-directory dotfiles repository on
   this machine and triggered ssh prompts.
-- Every Bazel command in a lane or worktree, including `bazel help`,
-  `info`, `query` and `cquery`, goes through `sg kvm -c '...'`: any of
-  them starts that checkout's server, and a server started without the
-  `kvm` group makes every later test fall back to slow emulation
-  (2026-10-05: a stray `bazel help` cost a full-suite run).
+- Run Bazel with access to `/dev/kvm`. The login session has the `kvm` group
+  directly, so `sg kvm` is no longer needed anywhere (russ, 2026-10-11). A server
+  started without KVM access makes every later test fall back to slow
+  emulation: run `bazel shutdown` first when switching.
 - Never leave a background polling loop (`while pgrep -f ...; do sleep`,
   `until grep -q MARKER log; do sleep`): the pattern matches the loop's
   own command line, or the marker never arrives once the run it waits for

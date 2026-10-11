@@ -35,8 +35,8 @@ Rules marked "(from phase N)" take effect when that plan phase lands.
 
 ## Running Bazel
 
-- Run Bazel with access to `/dev/kvm`, e.g. `sg kvm -c 'bazel test
-  //...'` if your login session predates joining the `kvm` group. A
+- Run Bazel with access to `/dev/kvm`. The login session has the `kvm` group
+  directly, so `sg kvm` is no longer needed anywhere (russ, 2026-10-11). A
   Bazel server started without KVM access makes every guest fall back to
   slow emulation: run `bazel shutdown` first when switching.
 - **Everything goes through Bazel.** Every build step, tool, image and
