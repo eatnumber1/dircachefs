@@ -3175,3 +3175,20 @@ Started 2026-09-27 in a session scratchpad; moved into the repository on
   (`DCFS_PIN_NON_SMT=1` from the measurement scripts and the cost-reporting CI jobs; the default
   path never pins); update run-qemu.sh's header, test/qemu/README.md and the self-check. Subject
   `26.17:`. Mechanical.
+- 25.9, the crashes the audit asks russ to allow (three), with the regular orchestrator's
+  recommendation, 2026-10-11 night; russ rules only on exceptions:
+  (a) RestoreRoot's CHECK when root credentials cannot be restored after a per-request switch.
+  Recommend NO exception: RestoreRoot returns a Status; AsCaller propagates it; the request handler
+  treats it as the daemon poisoned and begins the orderly shutdown (fuse_session_exit, the same
+  path as SIGTERM: in-flight requests answered EIO, no new ones served, the process ends through
+  main). Same safety (no later request runs as the wrong user), no crash, and testable with the
+  setgroups fault fake. (b) ForkSplit's abort when the parent callback returns. Recommend NO
+  exception: change the contract so it cannot be violated: the parent callback returns the exit
+  status and ForkSplit itself _exits with it (the child path returns as today), so "parent
+  returned" is not a reachable state (1.10a) rather than a guarded one. (c) fuse_ops GetFS/Init:
+  null userdata is impossible by construction (libfuse hands back the pointer we registered):
+  delete the check (1.10a); "cannot refuse INIT" (no capability flag to withhold) logs ERROR and
+  exits the session through the same orderly path as (a). So: zero crash sites remain; if russ
+  agrees, the temporary orchestrator applies the audit's conversions plus these three as one
+  protocol-agent step (credentials and daemon lifecycle are protocol territory), test first, and
+  the repo_shape crash rule lands with an empty allowlist.
